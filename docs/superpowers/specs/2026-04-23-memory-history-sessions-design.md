@@ -75,6 +75,7 @@ func (s *Store) SearchHistory(query string, limit int) ([]HistoryResult, error)
 func (s *Store) MemoryStore(key, value string) error
 func (s *Store) MemorySearch(query string, limit int) ([]MemoryEntry, error)
 // MemoryEntry: {Key string, Value string, UpdatedAt time.Time}
+func (s *Store) MemoryDelete(key string) error
 ```
 
 ---
@@ -98,6 +99,7 @@ Three tools exposed to the LLM:
 |------|------|---------|
 | `memory_store` | `key`, `value` | confirmation |
 | `memory_search` | `query` | top-5 entries by BM25 rank |
+| `memory_remove` | `key` | confirmation |
 | `history_search` | `query` | top-5 turns with session metadata (started_at, role) |
 
 Tools are registered alongside `bash` in `loop.go`. Tool execution calls `store` methods directly.
