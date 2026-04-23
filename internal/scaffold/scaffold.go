@@ -7,17 +7,20 @@ import (
 	"path/filepath"
 
 	"github.com/weatherjean/shell3/internal/config"
+	"github.com/weatherjean/shell3/internal/store"
 	"gopkg.in/yaml.v3"
 )
 
 const defaultGitignore = `memory.db
 history.md
+shell3.db
 `
 
 func buildConfig(provider, model string) string {
 	return fmt.Sprintf(`# shell3 project configuration
 model: %s
 provider: %s
+store_db: .shell3/shell3.db
 memory_db: .shell3/memory.db
 history_md: .shell3/history.md
 hooks:
@@ -84,6 +87,14 @@ func initShell3Dir(projectDir, provider, model string) error {
 		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 			return fmt.Errorf("scaffold: write %s: %w", path, err)
 		}
+	}
+	dbPath := filepath.Join(shell3Dir, "shell3.db")
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		st, err := store.Open(dbPath)
+		if err != nil {
+			return fmt.Errorf("scaffold: create store: %w", err)
+		}
+		st.Close()
 	}
 	return nil
 }

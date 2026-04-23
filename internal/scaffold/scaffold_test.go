@@ -3,6 +3,7 @@ package scaffold_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/scaffold"
@@ -57,5 +58,36 @@ func TestInit_FailsWithoutCredentials(t *testing.T) {
 
 	if err := scaffold.InitProject(dir, homeDir); err == nil {
 		t.Error("expected error when no credentials exist")
+	}
+}
+
+func TestInit_CreatesShell3DB(t *testing.T) {
+	dir := t.TempDir()
+	homeDir := t.TempDir()
+	writeTestCredentials(t, homeDir)
+
+	if err := scaffold.InitProject(dir, homeDir); err != nil {
+		t.Fatal(err)
+	}
+
+	dbPath := filepath.Join(dir, ".shell3", "shell3.db")
+	if _, err := os.Stat(dbPath); err != nil {
+		t.Errorf("expected .shell3/shell3.db to exist: %v", err)
+	}
+}
+
+func TestInit_GitignoreContainsShell3DB(t *testing.T) {
+	dir := t.TempDir()
+	homeDir := t.TempDir()
+	writeTestCredentials(t, homeDir)
+
+	scaffold.InitProject(dir, homeDir)
+
+	data, err := os.ReadFile(filepath.Join(dir, ".shell3", ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "shell3.db") {
+		t.Error("expected .gitignore to contain shell3.db")
 	}
 }
