@@ -12,22 +12,20 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
 // ANSI color helpers.
 const (
 	colorReset  = "\033[0m"
-	colorCyan   = "\033[36m"
 	colorBlue   = "\033[34m"
 	colorYellow = "\033[33m"
 	colorRed    = "\033[31m"
 	colorDim    = "\033[2m"
 	colorBold   = "\033[1m"
 )
-
-const promptDivider = colorCyan + "——————————" + colorReset
-const agentDivider = colorBlue + "——————————" + colorReset
 
 // bashTool is the single tool shell3 code exposes to the model.
 var bashTool = llm.ToolDefinition{
@@ -89,8 +87,12 @@ type LLMClient interface {
 
 // Config holds everything Run needs.
 type Config struct {
-	LLM     LLMClient
-	WorkDir string
+	LLM          LLMClient
+	WorkDir      string
+	Provider     string
+	Model        string
+	Models       []string       // full list from config; Models[0] == Model at start
+	ModelSwitcher func(string)  // called when /model changes the active model
 }
 
 // Run starts the interactive coding loop. Exits on ctrl+c at the prompt or io.EOF.
@@ -99,8 +101,16 @@ func Run(ctx context.Context, cfg Config) error {
 		{Role: llm.RoleSystem, Content: CodeSystemPrompt},
 	}
 
-	fmt.Println(colorBold + "shell3 code" + colorReset + colorDim + " — type your request, ctrl+c to exit" + colorReset)
-	fmt.Println()
+	fmt.Println(colorYellow + colorBold + "shell3 code" + colorReset)
+	if cfg.Provider != "" {
+		fmt.Printf(colorDim+"provider: %s"+colorReset+"\n", cfg.Provider)
+	}
+	if cfg.Model != "" {
+		fmt.Printf(colorDim+"model:    %s"+colorReset+"\n", cfg.Model)
+	}
+	fmt.Println(colorDim + "type / for commands, ctrl+c to exit" + colorReset)
+
+	var lastUsage llm.Usage
 
 	for {
 		input, err := ReadInput()
@@ -112,21 +122,19 @@ func Run(ctx context.Context, cfg Config) error {
 			return err
 		}
 
-		fmt.Println(promptDivider)
-		fmt.Println()
+		if handled := handleSlashCommand(input, &cfg, &messages, &lastUsage); handled {
+			continue
+		}
 
 		messages = append(messages, llm.Message{Role: llm.RoleUser, Content: input})
-		messages = runTurn(ctx, cfg, messages)
-
-		fmt.Println()
-		fmt.Println(agentDivider)
+		messages = runTurn(ctx, cfg, messages, &lastUsage)
 		fmt.Println()
 	}
 }
 
 // runTurn runs one user→assistant exchange using the tool_calls API.
 // Returns updated message slice. ctrl+c cancels the turn.
-func runTurn(ctx context.Context, cfg Config, messages []llm.Message) []llm.Message {
+func runTurn(ctx context.Context, cfg Config, messages []llm.Message, lastUsage *llm.Usage) []llm.Message {
 	turnCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -142,7 +150,10 @@ func runTurn(ctx context.Context, cfg Config, messages []llm.Message) []llm.Mess
 	}()
 
 	for {
-		text, toolCalls, cancelled, err := streamTurn(turnCtx, cfg.LLM, messages)
+		text, toolCalls, u, cancelled, err := streamTurn(turnCtx, cfg.LLM, messages)
+		if u != nil {
+			*lastUsage = *u
+		}
 		if cancelled {
 			fmt.Println(colorDim + "\n[cancelled]" + colorReset)
 			return messages
@@ -188,14 +199,14 @@ func runTurn(ctx context.Context, cfg Config, messages []llm.Message) []llm.Mess
 	}
 }
 
-// streamTurn streams one LLM response, collecting text and tool calls.
-func streamTurn(ctx context.Context, client LLMClient, messages []llm.Message) (text string, toolCalls []llm.ToolCall, cancelled bool, err error) {
+// streamTurn streams one LLM response, collecting text, tool calls, and usage.
+func streamTurn(ctx context.Context, client LLMClient, messages []llm.Message) (text string, toolCalls []llm.ToolCall, usage *llm.Usage, cancelled bool, err error) {
 	var sb strings.Builder
 	labelPrinted := false
 	streamErr := client.Stream(ctx, messages, []llm.ToolDefinition{bashTool}, func(ev llm.StreamEvent) {
 		if ev.TextDelta != "" {
 			if !labelPrinted {
-				fmt.Print(colorBlue + "shell3:" + colorReset + "\n")
+				fmt.Print("\n" + colorBlue + "shell3:" + colorReset + "\n")
 				labelPrinted = true
 			}
 			fmt.Print(ev.TextDelta)
@@ -204,14 +215,132 @@ func streamTurn(ctx context.Context, client LLMClient, messages []llm.Message) (
 		if ev.ToolCall != nil {
 			toolCalls = append(toolCalls, *ev.ToolCall)
 		}
+		if ev.Usage != nil {
+			usage = ev.Usage
+		}
 	})
 	if ctx.Err() != nil {
-		return sb.String(), toolCalls, true, nil
+		return sb.String(), toolCalls, usage, true, nil
 	}
-	return sb.String(), toolCalls, false, streamErr
+	return sb.String(), toolCalls, usage, false, streamErr
 }
 
 // parseCommand extracts the "command" field from the bash tool's JSON args.
+var slashCommands = []struct {
+	name string
+	desc string
+}{
+	{"/clear", "reset conversation context"},
+	{"/model", "switch active model"},
+	{"/usage", "show token usage from last turn"},
+	{"/help", "list available commands"},
+	{"/list", "list available commands"},
+}
+
+// handleSlashCommand processes /commands. Returns true if the input was handled.
+func handleSlashCommand(input string, cfg *Config, messages *[]llm.Message, lastUsage *llm.Usage) bool {
+	if !strings.HasPrefix(input, "/") {
+		return false
+	}
+	cmd := strings.TrimSpace(strings.ToLower(input))
+
+	if cmd == "/" {
+		cmd = pickSlashCommand()
+		if cmd == "" {
+			return true
+		}
+	}
+
+	switch cmd {
+	case "/clear":
+		*messages = []llm.Message{{Role: llm.RoleSystem, Content: CodeSystemPrompt}}
+		fmt.Print("\033[2J\033[H")
+		fmt.Println(colorDim + "context cleared" + colorReset)
+	case "/model":
+		if len(cfg.Models) <= 1 {
+			fmt.Println(colorDim + "only one model configured" + colorReset)
+			break
+		}
+		chosen := pickModel(cfg.Models, cfg.Model)
+		if chosen != "" && chosen != cfg.Model {
+			cfg.Model = chosen
+			if cfg.ModelSwitcher != nil {
+				cfg.ModelSwitcher(chosen)
+			}
+			fmt.Printf(colorDim+"model: %s"+colorReset+"\n", chosen)
+		}
+	case "/usage":
+		if lastUsage.TotalTokens == 0 {
+			fmt.Println(colorDim + "no usage data yet" + colorReset)
+		} else {
+			fmt.Printf(colorBold+"token usage"+colorReset+" (last turn)\n")
+			fmt.Printf("  prompt:     %d\n", lastUsage.PromptTokens)
+			fmt.Printf("  completion: %d\n", lastUsage.CompletionTokens)
+			fmt.Printf("  total:      %d\n", lastUsage.TotalTokens)
+		}
+	case "/help", "/list":
+		fmt.Println(colorBold + "commands:" + colorReset)
+		for _, c := range slashCommands {
+			fmt.Printf("  "+colorBlue+"%s"+colorReset+"  %s\n", c.name, c.desc)
+		}
+	default:
+		fmt.Printf(colorRed+"unknown command: %s  (type / to browse commands)"+colorReset+"\n", input)
+	}
+	return true
+}
+
+func pickModel(models []string, current string) string {
+	var picked string
+	options := make([]huh.Option[string], len(models))
+	for i, m := range models {
+		label := m
+		if m == current {
+			label += " (active)"
+		}
+		options[i] = huh.NewOption(label, m)
+	}
+	theme := huh.ThemeCharm()
+	cyan := lipgloss.Color("6")
+	theme.Focused.Title = theme.Focused.Title.Foreground(cyan)
+	theme.Blurred.Title = theme.Blurred.Title.Foreground(cyan)
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("model").
+				Options(options...).
+				Value(&picked),
+		),
+	).WithTheme(theme)
+	if err := form.Run(); err != nil {
+		return ""
+	}
+	return picked
+}
+
+func pickSlashCommand() string {
+	var picked string
+	options := make([]huh.Option[string], len(slashCommands))
+	for i, c := range slashCommands {
+		options[i] = huh.NewOption(c.name+"  "+c.desc, c.name)
+	}
+	theme := huh.ThemeCharm()
+	cyan := lipgloss.Color("6")
+	theme.Focused.Title = theme.Focused.Title.Foreground(cyan)
+	theme.Blurred.Title = theme.Blurred.Title.Foreground(cyan)
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("command").
+				Options(options...).
+				Value(&picked),
+		),
+	).WithTheme(theme)
+	if err := form.Run(); err != nil {
+		return ""
+	}
+	return picked
+}
+
 func parseCommand(rawArgs string) string {
 	var args struct {
 		Command string `json:"command"`

@@ -17,7 +17,8 @@ func newInitCommand() *cobra.Command {
 				return fmt.Errorf("git init not yet supported — coming soon")
 			}
 			cwd, _ := os.Getwd()
-			return scaffold.InitProject(cwd)
+			homeDir, _ := os.UserHomeDir()
+			return scaffold.InitProject(cwd, homeDir)
 		},
 	}
 }

@@ -8,9 +8,24 @@ import (
 	"github.com/weatherjean/shell3/internal/scaffold"
 )
 
+func writeTestCredentials(t *testing.T, homeDir string) {
+	t.Helper()
+	shell3Dir := filepath.Join(homeDir, ".shell3")
+	if err := os.MkdirAll(shell3Dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	creds := "providers:\n  test-provider:\n    api_key: key\n    base_url: http://localhost\n    default_model: test-model\n"
+	if err := os.WriteFile(filepath.Join(shell3Dir, "credentials.yaml"), []byte(creds), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestInit_CreatesShell3Dir(t *testing.T) {
 	dir := t.TempDir()
-	if err := scaffold.InitProject(dir); err != nil {
+	homeDir := t.TempDir()
+	writeTestCredentials(t, homeDir)
+
+	if err := scaffold.InitProject(dir, homeDir); err != nil {
 		t.Fatal(err)
 	}
 
@@ -27,8 +42,20 @@ func TestInit_CreatesShell3Dir(t *testing.T) {
 
 func TestInit_AlreadyExists(t *testing.T) {
 	dir := t.TempDir()
-	scaffold.InitProject(dir)
-	if err := scaffold.InitProject(dir); err != nil {
+	homeDir := t.TempDir()
+	writeTestCredentials(t, homeDir)
+
+	scaffold.InitProject(dir, homeDir)
+	if err := scaffold.InitProject(dir, homeDir); err != nil {
 		t.Errorf("re-init should be safe: %v", err)
+	}
+}
+
+func TestInit_FailsWithoutCredentials(t *testing.T) {
+	dir := t.TempDir()
+	homeDir := t.TempDir()
+
+	if err := scaffold.InitProject(dir, homeDir); err == nil {
+		t.Error("expected error when no credentials exist")
 	}
 }

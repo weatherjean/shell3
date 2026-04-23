@@ -6,32 +6,25 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/weatherjean/shell3/internal/config"
 	"gopkg.in/yaml.v3"
 )
-
-const defaultConfig = `# shell3 project configuration
-model: llama3.2
-provider: ollama
-memory_db: .shell3/memory.db
-history_md: .shell3/history.md
-hooks:
-  on_tool_call: ""
-  on_context_build: ""
-`
-
-const codeConfig = `# shell3 code agent configuration
-model: llama3.2
-provider: ollama
-memory_db: .shell3/memory.db
-history_md: .shell3/history.md
-hooks:
-  on_tool_call: ""
-  on_context_build: ""
-`
 
 const defaultGitignore = `memory.db
 history.md
 `
+
+func buildConfig(provider, model string) string {
+	return fmt.Sprintf(`# shell3 project configuration
+model: %s
+provider: %s
+memory_db: .shell3/memory.db
+history_md: .shell3/history.md
+hooks:
+  on_tool_call: ""
+  on_context_build: ""
+`, model, provider)
+}
 
 // checkExisting returns true and prints a status message if .shell3/config.yaml already exists.
 func checkExisting(shell3Dir string) (exists bool) {
@@ -65,8 +58,7 @@ func checkExisting(shell3Dir string) (exists bool) {
 	return true
 }
 
-// InitCodeProject scaffolds a .shell3/ directory tuned for shell3 code.
-func InitCodeProject(projectDir string) error {
+func initShell3Dir(projectDir, provider, model string) error {
 	shell3Dir := filepath.Join(projectDir, ".shell3")
 	if checkExisting(shell3Dir) {
 		return nil
@@ -81,9 +73,8 @@ func InitCodeProject(projectDir string) error {
 			return fmt.Errorf("scaffold: mkdir %s: %w", d, err)
 		}
 	}
-
 	files := map[string]string{
-		filepath.Join(shell3Dir, "config.yaml"): codeConfig,
+		filepath.Join(shell3Dir, "config.yaml"): buildConfig(provider, model),
 		filepath.Join(shell3Dir, ".gitignore"):  defaultGitignore,
 	}
 	for path, content := range files {
@@ -94,43 +85,80 @@ func InitCodeProject(projectDir string) error {
 			return fmt.Errorf("scaffold: write %s: %w", path, err)
 		}
 	}
-
-	fmt.Printf("Initialized .shell3/ (code agent) in %s\n", projectDir)
-	fmt.Println("Next: run `shell3 auth` to configure your LLM credentials.")
 	return nil
 }
 
-// InitProject scaffolds a .shell3/ directory under projectDir with sane defaults.
-func InitProject(projectDir string) error {
-	shell3Dir := filepath.Join(projectDir, ".shell3")
-	if checkExisting(shell3Dir) {
-		return nil
+// InitProject scaffolds a .shell3/ directory under projectDir.
+// Requires credentials to exist in homeDir — run `shell3 auth` first.
+func InitProject(projectDir, homeDir string) error {
+	provider, model, err := firstProviderModel(homeDir)
+	if err != nil {
+		return err
 	}
-	dirs := []string{
-		shell3Dir,
-		filepath.Join(shell3Dir, "skills"),
-		filepath.Join(shell3Dir, "hooks"),
+	if err := initShell3Dir(projectDir, provider, model); err != nil {
+		return err
 	}
-	for _, d := range dirs {
-		if err := os.MkdirAll(d, 0755); err != nil {
-			return fmt.Errorf("scaffold: mkdir %s: %w", d, err)
-		}
-	}
-
-	files := map[string]string{
-		filepath.Join(shell3Dir, "config.yaml"): defaultConfig,
-		filepath.Join(shell3Dir, ".gitignore"):  defaultGitignore,
-	}
-	for path, content := range files {
-		if _, err := os.Stat(path); err == nil {
-			continue
-		}
-		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-			return fmt.Errorf("scaffold: write %s: %w", path, err)
-		}
-	}
-
 	fmt.Printf("Initialized .shell3/ in %s\n", projectDir)
-	fmt.Println("Next: run `shell3 auth` to configure your LLM credentials.")
+	fmt.Printf("  provider: %s\n  model:    %s\n", provider, model)
 	return nil
+}
+
+// InitCodeProject scaffolds a .shell3/ directory tuned for shell3 code.
+// Requires credentials to exist in homeDir — run `shell3 auth` first.
+func InitCodeProject(projectDir, homeDir string) error {
+	provider, model, err := firstProviderModel(homeDir)
+	if err != nil {
+		return err
+	}
+	if err := initShell3Dir(projectDir, provider, model); err != nil {
+		return err
+	}
+	fmt.Printf("Initialized .shell3/ (code agent) in %s\n", projectDir)
+	fmt.Printf("  provider: %s\n  model:    %s\n", provider, model)
+	return nil
+}
+
+// firstProviderModel loads credentials and returns the first provider name and first model.
+func firstProviderModel(homeDir string) (provider, model string, err error) {
+	creds, err := config.LoadCredentials(homeDir)
+	if err != nil {
+		return "", "", fmt.Errorf("run `shell3 auth` before `shell3 init`: %w", err)
+	}
+	name, provCreds, ok := creds.First()
+	if !ok {
+		return "", "", fmt.Errorf("no providers configured — run: shell3 auth")
+	}
+	// Use first model from comma-sep list.
+	m := provCreds.DefaultModel
+	for _, part := range splitComma(m) {
+		if part != "" {
+			m = part
+			break
+		}
+	}
+	return name, m, nil
+}
+
+func splitComma(s string) []string {
+	var out []string
+	start := 0
+	for i := 0; i <= len(s); i++ {
+		if i == len(s) || s[i] == ',' {
+			if p := trim(s[start:i]); p != "" {
+				out = append(out, p)
+			}
+			start = i + 1
+		}
+	}
+	return out
+}
+
+func trim(s string) string {
+	for len(s) > 0 && (s[0] == ' ' || s[0] == '\t') {
+		s = s[1:]
+	}
+	for len(s) > 0 && (s[len(s)-1] == ' ' || s[len(s)-1] == '\t') {
+		s = s[:len(s)-1]
+	}
+	return s
 }

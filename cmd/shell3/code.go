@@ -37,7 +37,8 @@ func newCodeCommand() *cobra.Command {
 
 func runCodeInit() error {
 	cwd, _ := os.Getwd()
-	if err := scaffold.InitCodeProject(cwd); err != nil {
+	homeDir, _ := os.UserHomeDir()
+	if err := scaffold.InitCodeProject(cwd, homeDir); err != nil {
 		return err
 	}
 	fmt.Println()
@@ -71,42 +72,96 @@ func runCodeLoop(cmd *cobra.Command, modelFlag, baseURLFlag, apiKeyFlag string) 
 
 	// Flags-only mode: bypass all config.
 	if baseURLFlag != "" && apiKeyFlag != "" && modelFlag != "" {
-		client := llm.NewClient(baseURLFlag, apiKeyFlag, modelFlag)
-		return codeagent.Run(cmd.Context(), codeagent.Config{LLM: client, WorkDir: cwd})
+		models := parseModels(modelFlag)
+		client := llm.NewClient(baseURLFlag, apiKeyFlag, models[0])
+		return codeagent.Run(cmd.Context(), codeagent.Config{
+			LLM:           client,
+			WorkDir:       cwd,
+			Model:         models[0],
+			Models:        models,
+			ModelSwitcher: client.SetModel,
+		})
 	}
+
+	// Load project config for preferred provider/model (optional — no error if missing).
+	projCfg, _ := config.LoadProject(cwd)
 
 	creds, err := config.LoadCredentials(homeDir)
 	if err != nil {
 		return err
 	}
 
-	// Resolve provider credentials interactively if needed.
-	provCreds, err := resolveProvider(creds, baseURLFlag, apiKeyFlag)
+	// Resolve provider: flag > project config > interactive picker.
+	provName, provCreds, err := resolveProviderWithHint(creds, baseURLFlag, apiKeyFlag, projectProvider(projCfg))
 	if err != nil {
 		return err
 	}
 
-	model := modelFlag
-	if model == "" {
-		model = provCreds.DefaultModel
-	}
-	if model == "" {
-		model = promptModel()
+	// Available models pool always comes from credentials (comma-sep default_model).
+	models := parseModels(provCreds.DefaultModel)
+	if len(models) == 0 || (len(models) == 1 && models[0] == "") {
+		models = []string{promptModel()}
 	}
 
-	client := llm.NewClient(provCreds.BaseURL, provCreds.APIKey, model)
-	return codeagent.Run(cmd.Context(), codeagent.Config{LLM: client, WorkDir: cwd})
+	// Starting model: flag > project config > first in pool.
+	startModel := modelFlag
+	if startModel == "" && projCfg != nil {
+		startModel = projCfg.Model
+	}
+	if startModel == "" {
+		startModel = models[0]
+	}
+
+	client := llm.NewClient(provCreds.BaseURL, provCreds.APIKey, startModel)
+	return codeagent.Run(cmd.Context(), codeagent.Config{
+		LLM:           client,
+		WorkDir:       cwd,
+		Provider:      provName,
+		Model:         startModel,
+		Models:        models,
+		ModelSwitcher: client.SetModel,
+	})
 }
 
-// resolveProvider picks provider credentials. Uses flags if given, otherwise
-// shows saved providers and lets the user pick (enter = first).
-func resolveProvider(creds *config.Credentials, baseURLFlag, apiKeyFlag string) (config.ProviderCredentials, error) {
+// parseModels splits a comma-separated model string into a trimmed slice.
+// Always returns at least one non-empty entry.
+func parseModels(s string) []string {
+	parts := strings.Split(s, ",")
+	var models []string
+	for _, p := range parts {
+		if m := strings.TrimSpace(p); m != "" {
+			models = append(models, m)
+		}
+	}
+	if len(models) == 0 {
+		return []string{s}
+	}
+	return models
+}
+
+// projectProvider returns the provider name from project config, or "" if none.
+func projectProvider(cfg *config.ProjectConfig) string {
+	if cfg == nil {
+		return ""
+	}
+	return cfg.Provider
+}
+
+// resolveProviderWithHint picks provider credentials using an optional hint from project config.
+func resolveProviderWithHint(creds *config.Credentials, baseURLFlag, apiKeyFlag, hint string) (string, config.ProviderCredentials, error) {
 	if baseURLFlag != "" && apiKeyFlag != "" {
-		return config.ProviderCredentials{BaseURL: baseURLFlag, APIKey: apiKeyFlag}, nil
+		return "", config.ProviderCredentials{BaseURL: baseURLFlag, APIKey: apiKeyFlag}, nil
 	}
 
 	if len(creds.Providers) == 0 {
-		return config.ProviderCredentials{}, fmt.Errorf("no providers configured — run: shell3 auth")
+		return "", config.ProviderCredentials{}, fmt.Errorf("no providers configured — run: shell3 auth")
+	}
+
+	// Project config hint — use it directly if it matches a known provider.
+	if hint != "" {
+		if p, ok := creds.Providers[hint]; ok {
+			return hint, p, nil
+		}
 	}
 
 	// Sort for stable display.
@@ -117,14 +172,12 @@ func resolveProvider(creds *config.Credentials, baseURLFlag, apiKeyFlag string) 
 	sort.Strings(names)
 
 	if len(names) == 1 {
-		p := creds.Providers[names[0]]
-		fmt.Printf("Using provider: %s (%s)\n", names[0], p.BaseURL)
-		return p, nil
+		return names[0], creds.Providers[names[0]], nil
 	}
 
 	// Multiple providers — let user pick.
 	chosen := pickProvider(names)
-	return creds.Providers[chosen], nil
+	return chosen, creds.Providers[chosen], nil
 }
 
 // pickProvider shows a numbered list and returns the chosen name. Enter = first.

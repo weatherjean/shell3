@@ -34,9 +34,17 @@ type ToolCall struct {
 	RawArgs string
 }
 
+// Usage holds token counts for a completed turn.
+type Usage struct {
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+}
+
 // StreamEvent is one event from the LLM stream.
 type StreamEvent struct {
 	TextDelta string
 	ToolCall  *ToolCall
+	Usage     *Usage
 	Done      bool
 }

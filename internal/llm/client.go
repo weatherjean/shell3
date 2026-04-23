@@ -24,12 +24,18 @@ func NewClient(baseURL, apiKey, model string) *Client {
 	}
 }
 
+// SetModel swaps the active model for subsequent requests.
+func (c *Client) SetModel(model string) {
+	c.model = model
+}
+
 // Stream sends msgs to the LLM and calls onEvent for each token, tool call, and completion.
 func (c *Client) Stream(ctx context.Context, msgs []Message, tools []ToolDefinition, onEvent func(StreamEvent)) error {
 	req := openai.ChatCompletionRequest{
-		Model:    c.model,
-		Messages: toOpenAI(msgs),
-		Stream:   true,
+		Model:         c.model,
+		Messages:      toOpenAI(msgs),
+		Stream:        true,
+		StreamOptions: &openai.StreamOptions{IncludeUsage: true},
 	}
 	if len(tools) > 0 {
 		req.Tools = toOpenAITools(tools)
@@ -51,6 +57,14 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, tools []ToolDefinit
 		if err != nil {
 			return fmt.Errorf("llm: recv: %w", err)
 		}
+		if chunk.Usage != nil {
+			onEvent(StreamEvent{Usage: &Usage{
+				PromptTokens:     chunk.Usage.PromptTokens,
+				CompletionTokens: chunk.Usage.CompletionTokens,
+				TotalTokens:      chunk.Usage.TotalTokens,
+			}})
+		}
+
 		if len(chunk.Choices) == 0 {
 			continue
 		}

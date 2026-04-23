@@ -14,4 +14,10 @@ Edit:   sd 'old' 'new' file or sed -i 's/old/new/g' file
 Test:   go test ./...
 
 Read before writing. Minimal changes. Test after every change.
+
+shell3 config files you can read and edit:
+  ~/.shell3/credentials.yaml   — provider API keys, base URLs, default models (comma-sep for multiple: "gpt-4o,gpt-4o-mini")
+  .shell3/config.yaml          — project-level model, provider, hooks
+
+Run "shell3 docs" to print full documentation including all config fields and examples.
 `

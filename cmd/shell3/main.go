@@ -20,6 +20,7 @@ func main() {
 	root.AddCommand(newInitCommand())
 	root.AddCommand(newAuthCommand())
 	root.AddCommand(newCodeCommand())
+	root.AddCommand(newDocsCommand())
 	root.AddCommand(newDestroyCommand())
 
 	if err := root.Execute(); err != nil {
