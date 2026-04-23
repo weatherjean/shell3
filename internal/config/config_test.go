@@ -42,3 +42,37 @@ func TestLoadProjectConfig_Missing(t *testing.T) {
 		t.Fatal("expected error for missing config")
 	}
 }
+
+func TestLoadCredentials(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, ".shell3"), 0755)
+
+	yaml := `
+providers:
+  ollama:
+    base_url: http://localhost:11434/v1
+  openai:
+    api_key: sk-test123
+    base_url: https://api.openai.com/v1
+`
+	os.WriteFile(filepath.Join(dir, ".shell3", "credentials.yaml"), []byte(yaml), 0644)
+
+	creds, err := config.LoadCredentials(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, ok := creds.Providers["openai"]
+	if !ok {
+		t.Fatal("expected openai provider")
+	}
+	if p.APIKey != "sk-test123" {
+		t.Errorf("got api_key %q", p.APIKey)
+	}
+}
+
+func TestLoadCredentials_Missing(t *testing.T) {
+	_, err := config.LoadCredentials(t.TempDir())
+	if err == nil {
+		t.Fatal("expected error for missing credentials")
+	}
+}
