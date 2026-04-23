@@ -23,11 +23,12 @@ type Hooks struct {
 
 // ProjectConfig is loaded from .shell3/config.yaml in the project directory.
 type ProjectConfig struct {
-	Model    string `yaml:"model"`
-	Provider string `yaml:"provider"`
-	MemoryDB string `yaml:"memory_db"`
-	HistoryMD          string `yaml:"history_md"`
-	Hooks              Hooks  `yaml:"hooks"`
+	Model     string `yaml:"model"`
+	Provider  string `yaml:"provider"`
+	StoreDB   string `yaml:"store_db"`
+	MemoryDB  string `yaml:"memory_db"`
+	HistoryMD string `yaml:"history_md"`
+	Hooks     Hooks  `yaml:"hooks"`
 }
 
 // LoadProject reads .shell3/config.yaml from projectDir.

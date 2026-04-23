@@ -17,6 +17,7 @@ func TestLoadProjectConfig(t *testing.T) {
 model: llama3.2
 provider: ollama
 default_personality: coder
+store_db: .shell3/shell3.db
 memory_db: .shell3/memory.db
 history_md: .shell3/history.md
 hooks:
@@ -33,6 +34,9 @@ hooks:
 	}
 	if cfg.Hooks.OnToolCall != ".shell3/hooks/guard.sh" {
 		t.Errorf("got hook %q", cfg.Hooks.OnToolCall)
+	}
+	if cfg.StoreDB != ".shell3/shell3.db" {
+		t.Errorf("got store_db %q, want .shell3/shell3.db", cfg.StoreDB)
 	}
 }
 
