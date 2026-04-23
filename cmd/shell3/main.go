@@ -19,6 +19,7 @@ func main() {
 
 	root.AddCommand(newInitCommand())
 	root.AddCommand(newAuthCommand())
+	root.AddCommand(newCodeCommand())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
