@@ -5,16 +5,25 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/weatherjean/shell3/internal/memory"
+	"github.com/weatherjean/shell3/internal/store"
 	"github.com/weatherjean/shell3/internal/tools"
 )
 
-func TestMemorySearchTool(t *testing.T) {
-	db, _ := memory.Open(filepath.Join(t.TempDir(), "m.db"))
-	defer db.Close()
-	db.Store("jwt", "use JWT with 1h expiry")
+func openTestStore(t *testing.T) *store.Store {
+	t.Helper()
+	st, err := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	return st
+}
 
-	tool := tools.NewMemorySearchTool(db)
+func TestMemorySearchTool(t *testing.T) {
+	st := openTestStore(t)
+	st.MemoryStore("jwt", "use JWT with 1h expiry")
+
+	tool := tools.NewMemorySearchTool(st)
 	result, err := tool.Execute(context.Background(), map[string]any{"query": "JWT"})
 	if err != nil {
 		t.Fatal(err)
@@ -25,10 +34,9 @@ func TestMemorySearchTool(t *testing.T) {
 }
 
 func TestMemoryStoreTool(t *testing.T) {
-	db, _ := memory.Open(filepath.Join(t.TempDir(), "m.db"))
-	defer db.Close()
+	st := openTestStore(t)
 
-	tool := tools.NewMemoryStoreTool(db)
+	tool := tools.NewMemoryStoreTool(st)
 	_, err := tool.Execute(context.Background(), map[string]any{
 		"key":   "auth",
 		"value": "JWT tokens",
@@ -37,8 +45,40 @@ func TestMemoryStoreTool(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	results, _ := db.Search("JWT")
+	results, _ := st.MemorySearch("JWT", 5)
 	if len(results) == 0 {
 		t.Error("expected stored entry to be searchable")
+	}
+}
+
+func TestMemoryRemoveTool(t *testing.T) {
+	st := openTestStore(t)
+	st.MemoryStore("temp-key", "temp value")
+
+	tool := tools.NewMemoryRemoveTool(st)
+	_, err := tool.Execute(context.Background(), map[string]any{"key": "temp-key"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	results, _ := st.MemorySearch("temp value", 5)
+	if len(results) != 0 {
+		t.Errorf("expected 0 results after remove, got %d", len(results))
+	}
+}
+
+func TestHistorySearchTool(t *testing.T) {
+	st := openTestStore(t)
+	sessionID, _ := st.StartSession()
+	st.AppendHistory(sessionID, "user", "how do I set up JWT authentication")
+	st.AppendHistory(sessionID, "assistant", "use the jwt-go library")
+
+	tool := tools.NewHistorySearchTool(st)
+	result, err := tool.Execute(context.Background(), map[string]any{"query": "JWT authentication"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == "" || result == "No history found." {
+		t.Error("expected non-empty history result")
 	}
 }
