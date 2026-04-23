@@ -12,6 +12,14 @@ func main() {
 		Use:   "shell3",
 		Short: "Minimal Unix-composable coding agent",
 	}
+
+	runCmd := newRunCommand()
+	root.RunE = runCmd.RunE
+	root.Flags().AddFlagSet(runCmd.Flags())
+
+	root.AddCommand(newInitCommand())
+	root.AddCommand(newAuthCommand())
+
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
