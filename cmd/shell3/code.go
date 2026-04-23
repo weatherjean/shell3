@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/weatherjean/shell3/internal/config"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/scaffold"
+	"github.com/weatherjean/shell3/internal/store"
 )
 
 func newCodeCommand() *cobra.Command {
@@ -76,6 +78,7 @@ func runCodeLoop(cmd *cobra.Command, modelFlag, baseURLFlag, apiKeyFlag string) 
 		client := llm.NewClient(baseURLFlag, apiKeyFlag, models[0])
 		return codeagent.Run(cmd.Context(), codeagent.Config{
 			LLM:           client,
+			Store:         nil,
 			WorkDir:       cwd,
 			Model:         models[0],
 			Models:        models,
@@ -112,9 +115,21 @@ func runCodeLoop(cmd *cobra.Command, modelFlag, baseURLFlag, apiKeyFlag string) 
 		startModel = models[0]
 	}
 
+	// Open store (best-effort — code agent works without it).
+	var st *store.Store
+	storeDBPath := filepath.Join(cwd, ".shell3", "shell3.db")
+	if projCfg != nil && projCfg.StoreDB != "" {
+		storeDBPath = filepath.Join(cwd, projCfg.StoreDB)
+	}
+	if s, err := store.Open(storeDBPath); err == nil {
+		st = s
+		defer st.Close()
+	}
+
 	client := llm.NewClient(provCreds.BaseURL, provCreds.APIKey, startModel)
 	return codeagent.Run(cmd.Context(), codeagent.Config{
 		LLM:           client,
+		Store:         st,
 		WorkDir:       cwd,
 		Provider:      provName,
 		Model:         startModel,

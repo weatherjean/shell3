@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/store"
 )
 
 // ANSI color helpers.
@@ -40,6 +41,54 @@ var bashTool = llm.ToolDefinition{
 			},
 		},
 		"required": []string{"command"},
+	},
+}
+
+var storeToolDefs = []llm.ToolDefinition{
+	{
+		Name:        "memory_store",
+		Description: "Store a key-value entry in project memory for future reference.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"key":   map[string]any{"type": "string", "description": "Short unique key"},
+				"value": map[string]any{"type": "string", "description": "Content to remember"},
+			},
+			"required": []string{"key", "value"},
+		},
+	},
+	{
+		Name:        "memory_search",
+		Description: "Search project memory for relevant past decisions, notes, or context.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query": map[string]any{"type": "string", "description": "Search query"},
+			},
+			"required": []string{"query"},
+		},
+	},
+	{
+		Name:        "memory_remove",
+		Description: "Remove a key-value entry from project memory.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"key": map[string]any{"type": "string", "description": "Key to remove"},
+			},
+			"required": []string{"key"},
+		},
+	},
+	{
+		Name:        "history_search",
+		Description: "Search past conversation history for relevant context.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query": map[string]any{"type": "string", "description": "Search query"},
+			},
+			"required": []string{"query"},
+		},
 	},
 }
 
@@ -87,11 +136,12 @@ type LLMClient interface {
 
 // Config holds everything Run needs.
 type Config struct {
-	LLM          LLMClient
-	WorkDir      string
-	Provider     string
-	Model        string
-	Models       []string       // full list from config; Models[0] == Model at start
+	LLM           LLMClient
+	Store         *store.Store
+	WorkDir       string
+	Provider      string
+	Model         string
+	Models        []string      // full list from config; Models[0] == Model at start
 	ModelSwitcher func(string)  // called when /model changes the active model
 }
 
@@ -99,6 +149,21 @@ type Config struct {
 func Run(ctx context.Context, cfg Config) error {
 	messages := []llm.Message{
 		{Role: llm.RoleSystem, Content: CodeSystemPrompt},
+	}
+
+	var sessionID int64
+	if cfg.Store != nil {
+		var err error
+		sessionID, err = cfg.Store.StartSession()
+		if err != nil {
+			return fmt.Errorf("code: start session: %w", err)
+		}
+		defer cfg.Store.EndSession(sessionID)
+	}
+
+	activeTools := []llm.ToolDefinition{bashTool}
+	if cfg.Store != nil {
+		activeTools = append(activeTools, storeToolDefs...)
 	}
 
 	fmt.Println(colorYellow + colorBold + "shell3 code" + colorReset)
@@ -126,15 +191,25 @@ func Run(ctx context.Context, cfg Config) error {
 			continue
 		}
 
+		prevLen := len(messages)
 		messages = append(messages, llm.Message{Role: llm.RoleUser, Content: input})
-		messages = runTurn(ctx, cfg, messages, &lastUsage)
+		messages = runTurn(ctx, cfg, messages, activeTools, &lastUsage)
+
+		if cfg.Store != nil {
+			for _, m := range messages[prevLen:] {
+				if m.Role == llm.RoleUser || m.Role == llm.RoleAssistant {
+					cfg.Store.AppendHistory(sessionID, string(m.Role), m.Content)
+				}
+			}
+		}
+
 		fmt.Println()
 	}
 }
 
 // runTurn runs one user→assistant exchange using the tool_calls API.
 // Returns updated message slice. ctrl+c cancels the turn.
-func runTurn(ctx context.Context, cfg Config, messages []llm.Message, lastUsage *llm.Usage) []llm.Message {
+func runTurn(ctx context.Context, cfg Config, messages []llm.Message, activeTools []llm.ToolDefinition, lastUsage *llm.Usage) []llm.Message {
 	turnCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -150,7 +225,7 @@ func runTurn(ctx context.Context, cfg Config, messages []llm.Message, lastUsage 
 	}()
 
 	for {
-		text, toolCalls, u, cancelled, err := streamTurn(turnCtx, cfg.LLM, messages)
+		text, toolCalls, u, cancelled, err := streamTurn(turnCtx, cfg.LLM, messages, activeTools)
 		if u != nil {
 			*lastUsage = *u
 		}
@@ -183,11 +258,15 @@ func runTurn(ctx context.Context, cfg Config, messages []llm.Message, lastUsage 
 				return messages
 			}
 
-			command := parseCommand(tc.RawArgs)
-			fmt.Printf(colorYellow+"$ %s"+colorReset+"\n", command)
-
-			out := ExecuteBlock(turnCtx, command, cfg.WorkDir)
-			fmt.Print(out)
+			var out string
+			if tc.Name == "bash" {
+				command := parseCommand(tc.RawArgs)
+				fmt.Printf(colorYellow+"$ %s"+colorReset+"\n", command)
+				out = ExecuteBlock(turnCtx, command, cfg.WorkDir)
+				fmt.Print(out)
+			} else {
+				out = dispatchStoreTool(tc.Name, tc.RawArgs, cfg.Store)
+			}
 
 			messages = append(messages, llm.Message{
 				Role:       llm.RoleTool,
@@ -200,10 +279,10 @@ func runTurn(ctx context.Context, cfg Config, messages []llm.Message, lastUsage 
 }
 
 // streamTurn streams one LLM response, collecting text, tool calls, and usage.
-func streamTurn(ctx context.Context, client LLMClient, messages []llm.Message) (text string, toolCalls []llm.ToolCall, usage *llm.Usage, cancelled bool, err error) {
+func streamTurn(ctx context.Context, client LLMClient, messages []llm.Message, tools []llm.ToolDefinition) (text string, toolCalls []llm.ToolCall, usage *llm.Usage, cancelled bool, err error) {
 	var sb strings.Builder
 	labelPrinted := false
-	streamErr := client.Stream(ctx, messages, []llm.ToolDefinition{bashTool}, func(ev llm.StreamEvent) {
+	streamErr := client.Stream(ctx, messages, tools, func(ev llm.StreamEvent) {
 		if ev.TextDelta != "" {
 			if !labelPrinted {
 				fmt.Print("\n" + colorBlue + "shell3:" + colorReset + "\n")
@@ -225,7 +304,6 @@ func streamTurn(ctx context.Context, client LLMClient, messages []llm.Message) (
 	return sb.String(), toolCalls, usage, false, streamErr
 }
 
-// parseCommand extracts the "command" field from the bash tool's JSON args.
 var slashCommands = []struct {
 	name string
 	desc string
@@ -349,4 +427,59 @@ func parseCommand(rawArgs string) string {
 		return rawArgs
 	}
 	return args.Command
+}
+
+func dispatchStoreTool(name, rawArgs string, st *store.Store) string {
+	if st == nil {
+		return fmt.Sprintf("error: store not available for tool %s", name)
+	}
+	var args map[string]any
+	json.Unmarshal([]byte(rawArgs), &args)
+
+	switch name {
+	case "memory_store":
+		key, _ := args["key"].(string)
+		value, _ := args["value"].(string)
+		if err := st.MemoryStore(key, value); err != nil {
+			return fmt.Sprintf("error: %v", err)
+		}
+		return fmt.Sprintf("Stored: %s", key)
+	case "memory_search":
+		q, _ := args["query"].(string)
+		results, err := st.MemorySearch(q, 5)
+		if err != nil {
+			return fmt.Sprintf("error: %v", err)
+		}
+		if len(results) == 0 {
+			return "No memories found."
+		}
+		var sb strings.Builder
+		for _, r := range results {
+			fmt.Fprintf(&sb, "[%s]: %s\n", r.Key, r.Value)
+		}
+		return sb.String()
+	case "memory_remove":
+		key, _ := args["key"].(string)
+		if err := st.MemoryDelete(key); err != nil {
+			return fmt.Sprintf("error: %v", err)
+		}
+		return fmt.Sprintf("Removed: %s", key)
+	case "history_search":
+		q, _ := args["query"].(string)
+		results, err := st.SearchHistory(q, 5)
+		if err != nil {
+			return fmt.Sprintf("error: %v", err)
+		}
+		if len(results) == 0 {
+			return "No history found."
+		}
+		var sb strings.Builder
+		for _, r := range results {
+			fmt.Fprintf(&sb, "[%s | %s | session %d]: %s\n",
+				r.SessionStartedAt.Format("2006-01-02"), r.Role, r.SessionID, r.Content)
+		}
+		return sb.String()
+	default:
+		return fmt.Sprintf("unknown tool: %s", name)
+	}
 }
