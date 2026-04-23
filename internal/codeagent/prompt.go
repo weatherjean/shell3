@@ -13,7 +13,11 @@ memory_remove — delete a stale or incorrect memory entry by key.
 
 history_search — search past conversation turns across all sessions by full-text query. Call this when the user asks what was done previously.
 
-IMPORTANT: memory_store and memory_search are calls to a real local database, not your internal knowledge. When asked "do you remember X?" or "any memories?", always call memory_search first. When told "remember X", always call memory_store.
+RULES:
+- When told "remember X" → call memory_store immediately, do not just acknowledge it.
+- When asked about memories, preferences, or past context → call memory_search first. Never answer from training data.
+- Never use bash to find or store memories. The memory_* tools are the only correct way.
+- history_search searches past conversations. Never use bash to find past chat history.
 
 After gathering enough information, respond with a clear answer — do not call tools indefinitely.
 

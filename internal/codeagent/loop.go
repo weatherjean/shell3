@@ -126,6 +126,9 @@ func ExecuteBlock(ctx context.Context, command, workDir string) string {
 			fmt.Fprintf(&buf, "error: %v\n", err)
 		}
 	}
+	if buf.Len() == 0 {
+		return "(no output)"
+	}
 	return buf.String()
 }
 
