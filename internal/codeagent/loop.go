@@ -19,6 +19,7 @@ import (
 const (
 	colorReset  = "\033[0m"
 	colorCyan   = "\033[36m"
+	colorBlue   = "\033[34m"
 	colorYellow = "\033[33m"
 	colorRed    = "\033[31m"
 	colorDim    = "\033[2m"
@@ -26,7 +27,7 @@ const (
 )
 
 const promptDivider = colorCyan + "——————————" + colorReset
-const agentDivider = colorYellow + "——————————" + colorReset
+const agentDivider = colorBlue + "——————————" + colorReset
 
 // bashTool is the single tool shell3 code exposes to the model.
 var bashTool = llm.ToolDefinition{
@@ -190,8 +191,13 @@ func runTurn(ctx context.Context, cfg Config, messages []llm.Message) []llm.Mess
 // streamTurn streams one LLM response, collecting text and tool calls.
 func streamTurn(ctx context.Context, client LLMClient, messages []llm.Message) (text string, toolCalls []llm.ToolCall, cancelled bool, err error) {
 	var sb strings.Builder
+	labelPrinted := false
 	streamErr := client.Stream(ctx, messages, []llm.ToolDefinition{bashTool}, func(ev llm.StreamEvent) {
 		if ev.TextDelta != "" {
+			if !labelPrinted {
+				fmt.Print(colorBlue + "shell3:" + colorReset + "\n")
+				labelPrinted = true
+			}
 			fmt.Print(ev.TextDelta)
 			sb.WriteString(ev.TextDelta)
 		}
