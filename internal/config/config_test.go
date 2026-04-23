@@ -1,0 +1,44 @@
+package config_test
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/weatherjean/shell3/internal/config"
+)
+
+func TestLoadProjectConfig(t *testing.T) {
+	dir := t.TempDir()
+	shell3Dir := filepath.Join(dir, ".shell3")
+	os.MkdirAll(shell3Dir, 0755)
+
+	yaml := `
+model: llama3.2
+provider: ollama
+default_personality: coder
+memory_db: .shell3/memory.db
+history_md: .shell3/history.md
+hooks:
+  on_tool_call: ".shell3/hooks/guard.sh"
+`
+	os.WriteFile(filepath.Join(shell3Dir, "config.yaml"), []byte(yaml), 0644)
+
+	cfg, err := config.LoadProject(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Model != "llama3.2" {
+		t.Errorf("got model %q, want llama3.2", cfg.Model)
+	}
+	if cfg.Hooks.OnToolCall != ".shell3/hooks/guard.sh" {
+		t.Errorf("got hook %q", cfg.Hooks.OnToolCall)
+	}
+}
+
+func TestLoadProjectConfig_Missing(t *testing.T) {
+	_, err := config.LoadProject(t.TempDir())
+	if err == nil {
+		t.Fatal("expected error for missing config")
+	}
+}
