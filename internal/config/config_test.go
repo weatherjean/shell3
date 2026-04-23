@@ -76,3 +76,23 @@ func TestLoadCredentials_Missing(t *testing.T) {
 		t.Fatal("expected error for missing credentials")
 	}
 }
+
+func TestValidate_OK(t *testing.T) {
+	cfg := &config.ProjectConfig{Model: "llama3.2", Provider: "ollama"}
+	creds := &config.Credentials{
+		Providers: map[string]config.ProviderCredentials{
+			"ollama": {BaseURL: "http://localhost:11434/v1"},
+		},
+	}
+	if err := config.Validate(cfg, creds); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_MissingProvider(t *testing.T) {
+	cfg := &config.ProjectConfig{Model: "llama3.2", Provider: "openai"}
+	creds := &config.Credentials{Providers: map[string]config.ProviderCredentials{}}
+	if err := config.Validate(cfg, creds); err == nil {
+		t.Error("expected error for missing provider credentials")
+	}
+}
