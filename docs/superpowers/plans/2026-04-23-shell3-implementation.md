@@ -10,52 +10,66 @@
 
 ---
 
+## Code Standards (open source — enforce strictly)
+
+- **Godoc on every exported symbol.** Format: `// FunctionName does X.` Single line unless genuinely complex.
+- **No body comments** except for non-obvious constraints (e.g. FTS5 has no native upsert, context timeout quirks). If you're tempted to write `// build tools` or `// load history`, extract a function instead.
+- **Large functions = wrong.** If a function body exceeds ~40 lines, split it. `runAgent()` in the CLI wiring task must be broken up.
+- **Idiomatic Go error wrapping.** Always `fmt.Errorf("package: context: %w", err)`.
+- **No `//nolint` comments** — fix the underlying issue instead.
+- **Package names**: single lowercase word, no underscores. `tools`, `hooks`, `memory`, `skills`, `history`, `output`, `llm`, `config`, `agent`.
+- **Unexported helpers** get no godoc. Exported types/funcs/methods always do.
+- **`internal/commands/`** is misleading — rename: move `InitProject` to `internal/scaffold/`, keep credential writing in `internal/config/` as `config.WriteCredentials()`.
+
+---
+
 ## File Map
 
 ```
 cmd/shell3/
-  main.go                      # entry point, cobra root command
+  main.go                      # entry point + cobra wiring only
+  run.go                       # runAgent() broken into focused helpers
+  init.go                      # newInitCommand()
+  auth.go                      # newAuthCommand()
 
 internal/
   config/
-    config.go                  # ProjectConfig struct + Load()
-    credentials.go             # Credentials struct + Load()
-    validate.go                # ValidateProjectConfig(), ValidateCredentials()
+    config.go                  # ProjectConfig, LoadProject()
+    credentials.go             # Credentials, LoadCredentials(), WriteCredentials()
+    validate.go                # Validate()
 
   output/
     types.go                   # Event, EventType constants
-    emitter.go                 # Emitter interface, PlainEmitter, JSONLEmitter, OutEmitter
+    emitter.go                 # Emitter interface, PlainEmitter, JSONLEmitter, EmitterFunc
 
   llm/
-    client.go                  # Client struct wrapping go-openai, Stream()
-    types.go                   # Message, Role, ToolDefinition, ToolCall
+    client.go                  # Client, NewClient(), Stream()
+    types.go                   # Message, Role, ToolDefinition, ToolCall, StreamEvent
 
   tools/
     tool.go                    # Tool interface
-    bash.go                    # BashTool — executes shell commands
+    bash.go                    # BashTool
     memory.go                  # MemorySearchTool, MemoryStoreTool
 
   memory/
-    memory.go                  # DB struct, Open(), Search(), Store(), Close()
+    memory.go                  # DB, Open(), Search(), Store(), Close()
 
   hooks/
-    hooks.go                   # Runner struct, Call(), TransformContext()
-    types.go                   # HookInput, HookOutput, HookAction constants
+    hooks.go                   # Runner, all On*() methods
+    types.go                   # Config, hookInput, hookOutput
 
   history/
-    history.go                 # Load(), Append(), Save() — markdown format
+    history.go                 # Load(), Save()
 
   skills/
-    skills.go                  # LoadAll() — reads .shell3/skills/, injects into prompt
+    skills.go                  # Skill, LoadAll(), BuildSection()
+
+  scaffold/
+    scaffold.go                # InitProject() — creates .shell3/ structure
 
   agent/
-    agent.go                   # Run() — core loop
-    session.go                 # Session struct — in-memory message list
-
-  commands/
-    run.go                     # `shell3` / `shell3 run` command
-    init.go                    # `shell3 init [git-url]` command
-    auth.go                    # `shell3 auth` command
+    agent.go                   # Config, RunTurn()
+    session.go                 # Session
 ```
 
 ---
