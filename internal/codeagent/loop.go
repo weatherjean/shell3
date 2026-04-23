@@ -90,6 +90,16 @@ var storeToolDefs = []llm.ToolDefinition{
 			"required": []string{"query"},
 		},
 	},
+	{
+		Name:        "memory_list",
+		Description: "List all stored memory entries.",
+		Parameters:  map[string]any{"type": "object", "properties": map[string]any{}},
+	},
+	{
+		Name:        "history_latest",
+		Description: "Return the most recent conversation turns across all sessions.",
+		Parameters:  map[string]any{"type": "object", "properties": map[string]any{}},
+	},
 }
 
 // ExtractBashBlocks extracts the contents of all ```bash ... ``` blocks from text.
@@ -480,6 +490,33 @@ func dispatchStoreTool(name, rawArgs string, st *store.Store) string {
 	case "history_search":
 		q, _ := args["query"].(string)
 		results, err := st.SearchHistory(q, 5)
+		if err != nil {
+			return fmt.Sprintf("error: %v", err)
+		}
+		if len(results) == 0 {
+			return "No history found."
+		}
+		var sb strings.Builder
+		for _, r := range results {
+			fmt.Fprintf(&sb, "[%s | %s | session %d]: %s\n",
+				r.SessionStartedAt.Format("2006-01-02"), r.Role, r.SessionID, r.Content)
+		}
+		return sb.String()
+	case "memory_list":
+		results, err := st.MemoryList(50)
+		if err != nil {
+			return fmt.Sprintf("error: %v", err)
+		}
+		if len(results) == 0 {
+			return "No memories stored."
+		}
+		var sb strings.Builder
+		for _, r := range results {
+			fmt.Fprintf(&sb, "[%s]: %s\n", r.Key, r.Value)
+		}
+		return sb.String()
+	case "history_latest":
+		results, err := st.HistoryLatest(20)
 		if err != nil {
 			return fmt.Sprintf("error: %v", err)
 		}

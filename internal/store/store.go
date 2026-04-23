@@ -110,6 +110,31 @@ func (s *Store) MemoryDelete(key string) error {
 	return nil
 }
 
+// MemoryList returns all memory entries ordered by updated_at desc.
+func (s *Store) MemoryList(limit int) ([]MemoryEntry, error) {
+	rows, err := s.db.Query(`
+		SELECT key, value, updated_at FROM memories
+		ORDER BY updated_at DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: memory list: %w", err)
+	}
+	defer rows.Close()
+
+	var results []MemoryEntry
+	for rows.Next() {
+		var e MemoryEntry
+		var updatedAt string
+		if err := rows.Scan(&e.Key, &e.Value, &updatedAt); err != nil {
+			return nil, fmt.Errorf("store: memory list scan: %w", err)
+		}
+		e.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+		results = append(results, e)
+	}
+	return results, rows.Err()
+}
+
 // StartSession inserts a new session row and returns its id.
 func (s *Store) StartSession() (int64, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -149,6 +174,38 @@ type HistoryResult struct {
 	Content          string
 	CreatedAt        time.Time
 	SessionStartedAt time.Time
+}
+
+// HistoryLatest returns the most recent history turns ordered by created_at desc.
+func (s *Store) HistoryLatest(limit int) ([]HistoryResult, error) {
+	rows, err := s.db.Query(`
+		SELECT h.session_id, h.role, h.content, h.created_at, s.started_at
+		FROM (
+			SELECT session_id, role, content, created_at
+			FROM history
+			ORDER BY created_at DESC
+			LIMIT ?
+		) h
+		JOIN sessions s ON CAST(h.session_id AS INTEGER) = s.id
+		ORDER BY h.created_at ASC
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: history latest: %w", err)
+	}
+	defer rows.Close()
+
+	var results []HistoryResult
+	for rows.Next() {
+		var r HistoryResult
+		var createdAt, sessionStartedAt string
+		if err := rows.Scan(&r.SessionID, &r.Role, &r.Content, &createdAt, &sessionStartedAt); err != nil {
+			return nil, fmt.Errorf("store: history latest scan: %w", err)
+		}
+		r.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		r.SessionStartedAt, _ = time.Parse(time.RFC3339, sessionStartedAt)
+		results = append(results, r)
+	}
+	return results, rows.Err()
 }
 
 // SearchHistory runs an FTS5 search on history content and returns up to limit results.

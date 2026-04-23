@@ -151,8 +151,10 @@ func buildTools(cwd string, f *runFlags, storeDB string) (*store.Store, []tools.
 	}
 	ts = append(ts,
 		tools.NewMemoryStoreTool(st),
+		tools.NewMemoryListTool(st),
 		tools.NewMemorySearchTool(st),
 		tools.NewMemoryRemoveTool(st),
+		tools.NewHistoryLatestTool(st),
 		tools.NewHistorySearchTool(st),
 	)
 	return st, ts, nil

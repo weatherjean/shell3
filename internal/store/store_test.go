@@ -66,6 +66,39 @@ func TestStore_MemoryDelete(t *testing.T) {
 	}
 }
 
+func TestStore_MemoryList(t *testing.T) {
+	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
+	defer st.Close()
+
+	st.MemoryStore("key-a", "value a")
+	st.MemoryStore("key-b", "value b")
+
+	results, err := st.MemoryList(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+}
+
+func TestStore_HistoryLatest(t *testing.T) {
+	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
+	defer st.Close()
+
+	sessionID, _ := st.StartSession()
+	st.AppendHistory(sessionID, "user", "first message")
+	st.AppendHistory(sessionID, "assistant", "first reply")
+
+	results, err := st.HistoryLatest(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+}
+
 func TestStore_SessionLifecycle(t *testing.T) {
 	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
 	defer st.Close()

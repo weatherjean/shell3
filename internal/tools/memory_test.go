@@ -67,6 +67,36 @@ func TestMemoryRemoveTool(t *testing.T) {
 	}
 }
 
+func TestMemoryListTool(t *testing.T) {
+	st := openTestStore(t)
+	st.MemoryStore("k1", "v1")
+	st.MemoryStore("k2", "v2")
+
+	tool := tools.NewMemoryListTool(st)
+	result, err := tool.Execute(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == "" || result == "No memories stored." {
+		t.Error("expected non-empty list")
+	}
+}
+
+func TestHistoryLatestTool(t *testing.T) {
+	st := openTestStore(t)
+	sessionID, _ := st.StartSession()
+	st.AppendHistory(sessionID, "user", "hello")
+
+	tool := tools.NewHistoryLatestTool(st)
+	result, err := tool.Execute(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == "" || result == "No history found." {
+		t.Error("expected non-empty history")
+	}
+}
+
 func TestHistorySearchTool(t *testing.T) {
 	st := openTestStore(t)
 	sessionID, _ := st.StartSession()

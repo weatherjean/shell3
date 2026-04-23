@@ -100,6 +100,69 @@ func (t *MemoryRemoveTool) Execute(_ context.Context, params map[string]any) (st
 	return fmt.Sprintf("Removed: %s", key), nil
 }
 
+// MemoryListTool lists all stored memory entries.
+type MemoryListTool struct{ db *store.Store }
+
+func NewMemoryListTool(db *store.Store) *MemoryListTool { return &MemoryListTool{db} }
+
+func (t *MemoryListTool) Definition() llm.ToolDefinition {
+	return llm.ToolDefinition{
+		Name:        "memory_list",
+		Description: "List all stored memory entries.",
+		Parameters: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		},
+	}
+}
+
+func (t *MemoryListTool) Execute(_ context.Context, _ map[string]any) (string, error) {
+	results, err := t.db.MemoryList(50)
+	if err != nil {
+		return "", fmt.Errorf("memory_list: %w", err)
+	}
+	if len(results) == 0 {
+		return "No memories stored.", nil
+	}
+	var sb strings.Builder
+	for _, r := range results {
+		fmt.Fprintf(&sb, "[%s]: %s\n", r.Key, r.Value)
+	}
+	return sb.String(), nil
+}
+
+// HistoryLatestTool returns the most recent conversation turns.
+type HistoryLatestTool struct{ db *store.Store }
+
+func NewHistoryLatestTool(db *store.Store) *HistoryLatestTool { return &HistoryLatestTool{db} }
+
+func (t *HistoryLatestTool) Definition() llm.ToolDefinition {
+	return llm.ToolDefinition{
+		Name:        "history_latest",
+		Description: "Return the most recent conversation turns across all sessions.",
+		Parameters: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		},
+	}
+}
+
+func (t *HistoryLatestTool) Execute(_ context.Context, _ map[string]any) (string, error) {
+	results, err := t.db.HistoryLatest(20)
+	if err != nil {
+		return "", fmt.Errorf("history_latest: %w", err)
+	}
+	if len(results) == 0 {
+		return "No history found.", nil
+	}
+	var sb strings.Builder
+	for _, r := range results {
+		fmt.Fprintf(&sb, "[%s | %s | session %d]: %s\n",
+			r.SessionStartedAt.Format("2006-01-02"), r.Role, r.SessionID, r.Content)
+	}
+	return sb.String(), nil
+}
+
 // HistorySearchTool searches past conversation history by full-text query.
 type HistorySearchTool struct{ db *store.Store }
 
