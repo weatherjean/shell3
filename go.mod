@@ -3,6 +3,7 @@ module github.com/weatherjean/shell3
 go 1.25.6
 
 require (
+	github.com/sashabaranov/go-openai v1.41.2
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1
 )
