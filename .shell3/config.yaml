@@ -1,9 +1,0 @@
-# shell3 code agent configuration
-model: kimi-k2.6:cloud
-provider: ollama cloud
-default_personality: code
-memory_db: .shell3/memory.db
-history_md: .shell3/history.md
-hooks:
-  on_tool_call: ""
-  on_context_build: ""
