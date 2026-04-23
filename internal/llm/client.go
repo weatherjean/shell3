@@ -85,12 +85,23 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, tools []ToolDefinit
 func toOpenAI(msgs []Message) []openai.ChatCompletionMessage {
 	out := make([]openai.ChatCompletionMessage, len(msgs))
 	for i, m := range msgs {
-		out[i] = openai.ChatCompletionMessage{
+		msg := openai.ChatCompletionMessage{
 			Role:       string(m.Role),
 			Content:    m.Content,
 			ToolCallID: m.ToolCallID,
 			Name:       m.Name,
 		}
+		for _, tc := range m.ToolCalls {
+			msg.ToolCalls = append(msg.ToolCalls, openai.ToolCall{
+				ID:   tc.ID,
+				Type: openai.ToolTypeFunction,
+				Function: openai.FunctionCall{
+					Name:      tc.Name,
+					Arguments: tc.RawArgs,
+				},
+			})
+		}
+		out[i] = msg
 	}
 	return out
 }

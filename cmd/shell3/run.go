@@ -20,8 +20,6 @@ import (
 )
 
 type runFlags struct {
-	personality string
-	configPath  string
 	model       string
 	baseURL     string
 	apiKey      string
@@ -48,8 +46,6 @@ func newRunCommand() *cobra.Command {
 }
 
 func bindRunFlags(cmd *cobra.Command, f *runFlags) {
-	cmd.Flags().StringVar(&f.personality, "personality", "", "Named personality")
-	cmd.Flags().StringVar(&f.configPath, "config", "", "Personality YAML file path")
 	cmd.Flags().StringVar(&f.model, "model", "", "Model override")
 	cmd.Flags().StringVar(&f.baseURL, "base-url", "", "LLM base URL override")
 	cmd.Flags().StringVar(&f.apiKey, "api-key", "", "API key override")

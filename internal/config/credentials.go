@@ -8,10 +8,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ProviderCredentials holds API key and base URL for one LLM provider.
+// ProviderCredentials holds API key, base URL, and default model for one LLM provider.
 type ProviderCredentials struct {
-	APIKey  string `yaml:"api_key"`
-	BaseURL string `yaml:"base_url"`
+	APIKey       string `yaml:"api_key"`
+	BaseURL      string `yaml:"base_url"`
+	DefaultModel string `yaml:"default_model,omitempty"`
 }
 
 // Credentials holds provider credentials loaded from ~/.shell3/credentials.yaml.
@@ -37,7 +38,7 @@ func LoadCredentials(homeDir string) (*Credentials, error) {
 }
 
 // WriteCredentials upserts provider credentials into homeDir/.shell3/credentials.yaml.
-func WriteCredentials(homeDir, provider, apiKey, baseURL string) error {
+func WriteCredentials(homeDir, provider, apiKey, baseURL, model string) error {
 	shell3Dir := filepath.Join(homeDir, ".shell3")
 	if err := os.MkdirAll(shell3Dir, 0700); err != nil {
 		return fmt.Errorf("config: mkdir %s: %w", shell3Dir, err)
@@ -52,7 +53,7 @@ func WriteCredentials(homeDir, provider, apiKey, baseURL string) error {
 		creds.Providers = map[string]ProviderCredentials{}
 	}
 
-	creds.Providers[provider] = ProviderCredentials{APIKey: apiKey, BaseURL: baseURL}
+	creds.Providers[provider] = ProviderCredentials{APIKey: apiKey, BaseURL: baseURL, DefaultModel: model}
 
 	data, err := yaml.Marshal(creds)
 	if err != nil {
@@ -71,4 +72,13 @@ func (c *Credentials) Get(provider string) (ProviderCredentials, error) {
 		return ProviderCredentials{}, fmt.Errorf("config: no credentials for provider %q — run: shell3 auth", provider)
 	}
 	return p, nil
+}
+
+// First returns the first provider credentials found, along with its name.
+// Useful when no project config specifies a provider.
+func (c *Credentials) First() (name string, creds ProviderCredentials, ok bool) {
+	for name, creds := range c.Providers {
+		return name, creds, true
+	}
+	return "", ProviderCredentials{}, false
 }

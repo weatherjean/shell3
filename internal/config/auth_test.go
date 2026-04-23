@@ -10,7 +10,7 @@ import (
 
 func TestWriteCredentials(t *testing.T) {
 	dir := t.TempDir()
-	err := config.WriteCredentials(dir, "ollama", "", "http://localhost:11434/v1")
+	err := config.WriteCredentials(dir, "ollama", "", "http://localhost:11434/v1", "llama3.2")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -37,10 +37,7 @@ func TestFormatInstallPrompt_NothingMissing(t *testing.T) {
 	deps := []codeagent.DepStatus{
 		{Name: "git", Command: "git", Found: true, Required: true},
 	}
-	prompt := codeagent.FormatInstallPrompt(deps, "macos")
-	if strings.Contains(prompt, "brew install") {
-		t.Error("no install commands expected when nothing missing")
-	}
+	prompt := codeagent.FormatInstallPrompt(deps)
 	if !strings.Contains(prompt, "All") {
 		t.Errorf("expected 'All' message, got: %q", prompt)
 	}
@@ -51,11 +48,11 @@ func TestFormatInstallPrompt_Missing(t *testing.T) {
 		{Name: "ripgrep", Command: "rg", Found: false, Required: false},
 		{Name: "gum", Command: "gum", Found: false, Required: false},
 	}
-	prompt := codeagent.FormatInstallPrompt(deps, "macos")
-	if !strings.Contains(prompt, "brew install") {
-		t.Errorf("expected brew install command, got: %q", prompt)
-	}
+	prompt := codeagent.FormatInstallPrompt(deps)
 	if !strings.Contains(prompt, "ripgrep") {
 		t.Error("expected ripgrep in prompt")
+	}
+	if !strings.Contains(prompt, "brew") {
+		t.Errorf("expected brew hint, got: %q", prompt)
 	}
 }
