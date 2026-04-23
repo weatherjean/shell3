@@ -190,7 +190,7 @@ func Run(ctx context.Context, cfg Config) error {
 			return err
 		}
 
-		if handled := handleSlashCommand(input, &cfg, &messages, &lastUsage); handled {
+		if handled := handleSlashCommand(input, &cfg, &messages, &lastUsage, activeTools); handled {
 			continue
 		}
 
@@ -314,12 +314,13 @@ var slashCommands = []struct {
 	{"/clear", "reset conversation context"},
 	{"/model", "switch active model"},
 	{"/usage", "show token usage from last turn"},
+	{"/prompt", "dump system prompt and active tools"},
 	{"/help", "list available commands"},
 	{"/list", "list available commands"},
 }
 
 // handleSlashCommand processes /commands. Returns true if the input was handled.
-func handleSlashCommand(input string, cfg *Config, messages *[]llm.Message, lastUsage *llm.Usage) bool {
+func handleSlashCommand(input string, cfg *Config, messages *[]llm.Message, lastUsage *llm.Usage, activeTools []llm.ToolDefinition) bool {
 	if !strings.HasPrefix(input, "/") {
 		return false
 	}
@@ -358,6 +359,13 @@ func handleSlashCommand(input string, cfg *Config, messages *[]llm.Message, last
 			fmt.Printf("  prompt:     %d\n", lastUsage.PromptTokens)
 			fmt.Printf("  completion: %d\n", lastUsage.CompletionTokens)
 			fmt.Printf("  total:      %d\n", lastUsage.TotalTokens)
+		}
+	case "/prompt":
+		fmt.Println(colorBold + "system prompt:" + colorReset)
+		fmt.Println(colorDim + CodeSystemPrompt + colorReset)
+		fmt.Println(colorBold + "active tools:" + colorReset)
+		for _, t := range activeTools {
+			fmt.Printf("  "+colorBlue+"%s"+colorReset+"  %s\n", t.Name, t.Description)
 		}
 	case "/help", "/list":
 		fmt.Println(colorBold + "commands:" + colorReset)
