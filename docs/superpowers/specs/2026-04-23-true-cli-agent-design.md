@@ -22,6 +22,8 @@ Inspired by pi-mono but radically simpler: where pi embeds UI, adapters, and ext
 - Searchable long-term memory via SQLite FTS5
 - Personalities = named YAML configs (system prompt + tools + skills)
 - Skills = markdown files injected into system prompt (compatible with pi/Claude Code format)
+- Per-project config in `.shell3/` — credentials only stored globally in `~/.shell3/`
+- `agent init` scaffolds project; `agent auth` sets up credentials
 
 ---
 
@@ -82,7 +84,7 @@ agent "fix bug" --model llama3.2 --base-url http://localhost:11434/v1
 | `--config PATH` | Load personality from YAML file |
 | `--model MODEL` | Override model (e.g. `gpt-4o`, `llama3.2`) |
 | `--base-url URL` | OpenAI-compatible endpoint base URL |
-| `--api-key KEY` | API key (or set `AGENT_API_KEY` env var) |
+| `--api-key KEY` | Override API key for this run (bypasses ~/.shell3/credentials.yaml) |
 | `--memory-db PATH` | SQLite memory database path |
 | `--history-md PATH` | Markdown session history path |
 | `--stream` | Emit JSONL events instead of buffered plain text |
@@ -329,45 +331,106 @@ Loaded from (in order, later overrides earlier):
 
 ---
 
-## Configuration Files
+## Configuration & Project Scoping
+
+### Global (`~/.shell3/`) — credentials only
 
 ```
-~/.agent/config.yaml          # global defaults
-~/.agent/personalities/       # named personalities
-~/.agent/skills/              # global skills
-./.agent/config.yaml          # project overrides
-./.agent/skills/              # project skills
+~/.shell3/credentials.yaml    # API keys per provider. Never committed to git.
 ```
-
-Project config merges with global — project values win on conflict.
 
 ```yaml
-# .agent/config.yaml
-model: llama3.2
-base_url: http://localhost:11434/v1
-api_key: ""
-default_personality: coder
-hooks:
-  on_tool_call: "./scripts/guard.sh"
-  on_context_build: "./scripts/inject-memory.sh"
+# ~/.shell3/credentials.yaml
+providers:
+  openai:
+    api_key: sk-...
+  ollama:
+    base_url: http://localhost:11434/v1
+  z_ai:
+    api_key: zai-...
+    base_url: https://api.z.ai/v1
 ```
+
+Nothing else lives globally. Model choice, hooks, skills, personalities — all per-project.
+
+### Per-project (`.shell3/`) — everything else
+
+```
+.shell3/
+  config.yaml         # model, hooks, default personality, memory/history paths
+  personalities/      # named personalities for this project
+  skills/             # project-specific skills
+  prompts/            # prompt templates
+```
+
+```yaml
+# .shell3/config.yaml
+model: llama3.2
+provider: ollama
+default_personality: coder
+memory_db: .shell3/memory.db
+history_md: .shell3/history.md
+hooks:
+  on_tool_call: ".shell3/hooks/guard.sh"
+  on_context_build: ".shell3/hooks/inject.sh"
+```
+
+`.shell3/memory.db` and `.shell3/history.md` are gitignored by default. Config files can be committed for team sharing.
+
+### Init Commands
+
+```bash
+agent init                        # scaffold .shell3/ with sane defaults in current dir
+agent init https://github.com/org/agent-config  # pull shared team config from git repo
+agent auth                        # set up ~/.shell3/credentials.yaml interactively
+```
+
+`agent init` creates:
+```
+.shell3/
+  config.yaml           # sane defaults, user fills in model/provider
+  personalities/
+    coder.yaml          # default coder personality
+  skills/               # empty, ready for project skills
+  .gitignore            # ignores memory.db, history.md
+```
+
+`agent init <git-url>` clones the repo into `.shell3/` (or merges if `.shell3/` exists). Enables shared team configs — commit your personalities, skills, hooks to a repo and teammates run `agent init <url>`.
+
+### Startup Validation
+
+On every run, agent checks in order:
+
+1. `.shell3/config.yaml` exists → proceed
+2. Missing → exit with:
+   ```
+   No .shell3/ config found. Run: agent init
+   ```
+3. Credentials for configured provider exist in `~/.shell3/credentials.yaml` → proceed
+4. Missing → exit with:
+   ```
+   No credentials for provider "ollama". Run: agent auth
+   ```
+
+This means: many different agent setups on one machine, one per project directory. Global state is only credentials.
 
 ---
 
 ## Go Package Structure
 
 ```
-cmd/agent/          # main binary
+cmd/agent/          # main binary (agent run, agent init, agent auth)
 internal/
   agent/            # core loop (LLM call, tool dispatch, hook dispatch)
   tools/            # bash, memory_search, memory_store
   memory/           # SQLite FTS5 wrapper
   history/          # markdown session read/write
   hooks/            # hook runner (spawn process, pipe JSON)
-  config/           # YAML config + personality loading
+  config/           # .shell3/ project config + ~/.shell3/ credentials loading
   skills/           # markdown skill loader
   output/           # event emitter (plain text vs JSONL)
   llm/              # OpenAI-compatible client (sashabaranov/go-openai)
+  init/             # agent init scaffolding + git repo pull
 ```
 
 ---
