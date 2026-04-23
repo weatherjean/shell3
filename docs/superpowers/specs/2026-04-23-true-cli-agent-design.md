@@ -526,6 +526,24 @@ The adapter owns nothing — no SDK, no wiring, just reads JSONL and does what i
 
 ---
 
+## TUI (Future)
+
+TUI is a later layer — nothing in v1 changes. Same hooks, same JSONL stream, different hook implementations.
+
+TUI registers a socket via env var (`SHELL3_TUI_SOCKET`). Hook scripts check for it:
+
+```bash
+if [ -n "$SHELL3_TUI_SOCKET" ]; then
+  echo "$input" | nc -U "$SHELL3_TUI_SOCKET"  # TUI handles, responds back
+else
+  read answer </dev/tty  # headless fallback
+fi
+```
+
+TUI consumes `--stream --out tui`. Hook approval dialogs, tool result rendering, thinking blocks — all TUI's problem, not agent's.
+
+---
+
 ## Non-Goals (v1)
 
 - Multi-session server mode
@@ -533,3 +551,4 @@ The adapter owns nothing — no SDK, no wiring, just reads JSONL and does what i
 - Context compaction (memory_store handles long-term recall instead)
 - Streaming tool results (tool output emitted as complete result)
 - Parallel tool execution (sequential only, simpler)
+- TUI (hooks + JSONL stream are the foundation; TUI builds on top)
