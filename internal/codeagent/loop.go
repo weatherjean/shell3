@@ -268,7 +268,9 @@ func runTurn(ctx context.Context, cfg Config, messages []llm.Message, activeTool
 				out = ExecuteBlock(turnCtx, command, cfg.WorkDir)
 				fmt.Print(out)
 			} else {
+				fmt.Printf(colorYellow+"→ %s(%s)"+colorReset+"\n", tc.Name, tc.RawArgs)
 				out = dispatchStoreTool(tc.Name, tc.RawArgs, cfg.Store)
+				fmt.Println(colorDim + out + colorReset)
 			}
 
 			messages = append(messages, llm.Message{
