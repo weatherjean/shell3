@@ -189,6 +189,7 @@ func Run(ctx context.Context, cfg Config) error {
 	fmt.Println(colorDim + "type / for commands, ctrl+c to exit" + colorReset)
 
 	var lastUsage llm.Usage
+	truncate := true
 
 	for {
 		input, err := ReadInput()
@@ -200,18 +201,22 @@ func Run(ctx context.Context, cfg Config) error {
 			return err
 		}
 
-		if handled := handleSlashCommand(input, &cfg, &messages, &lastUsage, activeTools); handled {
+		if handled := handleSlashCommand(input, &cfg, &messages, &lastUsage, activeTools, &truncate); handled {
 			continue
 		}
 
 		prevLen := len(messages)
 		messages = append(messages, llm.Message{Role: llm.RoleUser, Content: input})
-		messages = runTurn(ctx, cfg, messages, activeTools, &lastUsage)
+		messages = runTurn(ctx, cfg, messages, activeTools, &lastUsage, truncate)
 
 		if cfg.Store != nil {
 			for _, m := range messages[prevLen:] {
-				if m.Role == llm.RoleUser || m.Role == llm.RoleAssistant {
+				switch m.Role {
+				case llm.RoleUser, llm.RoleAssistant:
 					cfg.Store.AppendHistory(sessionID, string(m.Role), m.Content)
+					for _, tc := range m.ToolCalls {
+						cfg.Store.AppendHistory(sessionID, "tool", toolCallSummary(tc))
+					}
 				}
 			}
 		}
@@ -222,7 +227,7 @@ func Run(ctx context.Context, cfg Config) error {
 
 // runTurn runs one user→assistant exchange using the tool_calls API.
 // Returns updated message slice. ctrl+c cancels the turn.
-func runTurn(ctx context.Context, cfg Config, messages []llm.Message, activeTools []llm.ToolDefinition, lastUsage *llm.Usage) []llm.Message {
+func runTurn(ctx context.Context, cfg Config, messages []llm.Message, activeTools []llm.ToolDefinition, lastUsage *llm.Usage, truncate bool) []llm.Message {
 	turnCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -248,6 +253,7 @@ func runTurn(ctx context.Context, cfg Config, messages []llm.Message, activeTool
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, colorRed+"\nerror: %v\n"+colorReset, err)
+			fmt.Fprintf(os.Stderr, colorDim+"hint: use /prune to remove the last turn and retry\n"+colorReset)
 			return messages
 		}
 
@@ -273,7 +279,11 @@ func runTurn(ctx context.Context, cfg Config, messages []llm.Message, activeTool
 				command := parseCommand(tc.RawArgs)
 				fmt.Printf(colorYellow+"$ %s"+colorReset+"\n", command)
 				out = ExecuteBlock(turnCtx, command, cfg.WorkDir)
-				fmt.Print(out)
+				if truncate {
+					fmt.Print(truncateOutput(out))
+				} else {
+					fmt.Print(out)
+				}
 			} else {
 				fmt.Printf(colorYellow+"→ %s(%s)"+colorReset+"\n", tc.Name, tc.RawArgs)
 				out = dispatchStoreTool(tc.Name, tc.RawArgs, cfg.Store)
@@ -321,15 +331,17 @@ var slashCommands = []struct {
 	desc string
 }{
 	{"/clear", "reset conversation context"},
+	{"/prune", "remove last turn from context"},
 	{"/model", "switch active model"},
 	{"/usage", "show token usage from last turn"},
 	{"/prompt", "dump system prompt and active tools"},
+	{"/truncate", "toggle truncated bash output (default: on)"},
 	{"/help", "list available commands"},
 	{"/list", "list available commands"},
 }
 
 // handleSlashCommand processes /commands. Returns true if the input was handled.
-func handleSlashCommand(input string, cfg *Config, messages *[]llm.Message, lastUsage *llm.Usage, activeTools []llm.ToolDefinition) bool {
+func handleSlashCommand(input string, cfg *Config, messages *[]llm.Message, lastUsage *llm.Usage, activeTools []llm.ToolDefinition, truncate *bool) bool {
 	if !strings.HasPrefix(input, "/") {
 		return false
 	}
@@ -347,6 +359,14 @@ func handleSlashCommand(input string, cfg *Config, messages *[]llm.Message, last
 		*messages = []llm.Message{{Role: llm.RoleSystem, Content: CodeSystemPrompt}}
 		fmt.Print("\033[2J\033[H")
 		fmt.Println(colorDim + "context cleared" + colorReset)
+	case "/prune":
+		pruned := pruneLastTurn(*messages)
+		if len(pruned) == len(*messages) {
+			fmt.Println(colorDim + "nothing to prune" + colorReset)
+		} else {
+			*messages = pruned
+			fmt.Println(colorDim + "last turn removed from context" + colorReset)
+		}
 	case "/model":
 		if len(cfg.Models) <= 1 {
 			fmt.Println(colorDim + "only one model configured" + colorReset)
@@ -376,6 +396,13 @@ func handleSlashCommand(input string, cfg *Config, messages *[]llm.Message, last
 		for _, t := range activeTools {
 			fmt.Printf("  "+colorBlue+"%s"+colorReset+"  %s\n", t.Name, t.Description)
 		}
+	case "/truncate":
+		*truncate = !*truncate
+		state := "on"
+		if !*truncate {
+			state = "off"
+		}
+		fmt.Printf(colorDim+"truncate: %s"+colorReset+"\n", state)
 	case "/help", "/list":
 		fmt.Println(colorBold + "commands:" + colorReset)
 		for _, c := range slashCommands {
@@ -447,6 +474,17 @@ func parseCommand(rawArgs string) string {
 		return rawArgs
 	}
 	return args.Command
+}
+
+// pruneLastTurn removes the last user message and everything that follows it
+// (assistant reply, tool results) from the message slice.
+func pruneLastTurn(messages []llm.Message) []llm.Message {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == llm.RoleUser {
+			return messages[:i]
+		}
+	}
+	return messages
 }
 
 func dispatchStoreTool(name, rawArgs string, st *store.Store) string {
@@ -529,4 +567,37 @@ func dispatchStoreTool(name, rawArgs string, st *store.Store) string {
 	default:
 		return fmt.Sprintf("unknown tool: %s", name)
 	}
+}
+
+// truncateOutput caps output at 10 lines or 1000 chars, whichever comes first.
+func truncateOutput(s string) string {
+	const maxLines = 10
+	const maxBytes = 1000
+	if len(s) > maxBytes {
+		return s[:maxBytes] + fmt.Sprintf("\n"+colorDim+"… (+%d bytes)"+colorReset+"\n", len(s)-maxBytes)
+	}
+	lines := strings.SplitN(s, "\n", maxLines+2)
+	if len(lines) > maxLines+1 {
+		total := strings.Count(s, "\n") + 1
+		return strings.Join(lines[:maxLines], "\n") + fmt.Sprintf("\n"+colorDim+"… (+%d lines)"+colorReset+"\n", total-maxLines)
+	}
+	return s
+}
+
+// toolCallSummary returns a compact 1-line summary of a tool call for history.
+func toolCallSummary(tc llm.ToolCall) string {
+	const maxLen = 80
+	if tc.Name == "bash" {
+		cmd := parseCommand(tc.RawArgs)
+		line := strings.SplitN(cmd, "\n", 2)[0]
+		if len(line) > maxLen {
+			line = line[:maxLen] + "…"
+		}
+		return "bash: $ " + line
+	}
+	args := tc.RawArgs
+	if len(args) > maxLen {
+		args = args[:maxLen] + "…"
+	}
+	return tc.Name + "(" + args + ")"
 }
