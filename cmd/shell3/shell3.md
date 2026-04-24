@@ -24,7 +24,7 @@ shell3 auth
 Prompts for: provider name, API key, base URL, default model.
 
 ### shell3 code
-Interactive coding assistant. Has one tool: `bash`.
+Interactive coding assistant with persistent memory and history.
 
 ```
 shell3 code
@@ -33,15 +33,30 @@ shell3 code --model "gpt-4o,gpt-4o-mini"   # multiple models, switch with /model
 shell3 code --base-url http://localhost:11434/v1 --api-key "" --model llama3.2
 ```
 
+**Tools available to the model:**
+
+| Tool             | What it does                                      |
+|------------------|---------------------------------------------------|
+| `bash`           | Execute shell commands in the project directory   |
+| `memory_store`   | Persist a key-value fact across sessions          |
+| `memory_list`    | List all stored memories                          |
+| `memory_search`  | Full-text search memories                         |
+| `memory_remove`  | Delete a memory entry by key                      |
+| `history_latest` | Return the most recent conversation turns         |
+| `history_search` | Full-text search past conversation turns          |
+
+Memory and history are stored in `.shell3/shell3.db` (SQLite, gitignored).
+
 **Slash commands inside a session:**
 
-| Command  | Action                              |
-|----------|-------------------------------------|
-| `/`      | browse and pick a command           |
-| `/model` | switch active model (if >1 configured) |
-| `/clear` | reset conversation context          |
-| `/usage` | show token usage from last turn     |
-| `/help`  | list available commands             |
+| Command   | Action                                        |
+|-----------|-----------------------------------------------|
+| `/`       | browse and pick a command                     |
+| `/model`  | switch active model (if >1 configured)        |
+| `/clear`  | reset conversation context                    |
+| `/usage`  | show token usage from last turn               |
+| `/prompt` | dump system prompt and active tools           |
+| `/help`   | list available commands                       |
 
 ### shell3 run
 One-shot agent run (non-interactive). Reads task from stdin or `--task`.
@@ -76,9 +91,7 @@ Created by `shell3 init` in the project directory.
 ```yaml
 model: llama3.2          # preferred starting model for this project (single value)
 provider: ollama         # preferred provider (must match a key in credentials.yaml)
-default_personality: code
-memory_db: .shell3/memory.db
-history_md: .shell3/history.md
+store_db: .shell3/shell3.db   # SQLite DB for memory and history (gitignored)
 hooks:
   on_session_start: ""
   on_session_end: ""
