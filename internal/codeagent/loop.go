@@ -251,11 +251,6 @@ func runTurn(ctx context.Context, cfg Config, messages []llm.Message, activeTool
 			return messages
 		}
 
-		// Record the assistant message with any tool calls it made.
-		// Some APIs reject null content on tool-call messages — use a space to satisfy omitempty.
-		if text == "" && len(toolCalls) > 0 {
-			text = " "
-		}
 		assistantMsg := llm.Message{Role: llm.RoleAssistant, Content: text}
 		assistantMsg.ToolCalls = toolCalls
 		messages = append(messages, assistantMsg)
