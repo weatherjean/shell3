@@ -89,7 +89,9 @@ func RunTurn(ctx context.Context, cfg Config, sess *Session, userInput string) e
 	}
 
 	fullText := responseText.String()
-	sess.Append(llm.Message{Role: llm.RoleAssistant, Content: fullText})
+	if fullText != "" || len(pendingToolCalls) > 0 {
+		sess.Append(llm.Message{Role: llm.RoleAssistant, Content: fullText})
+	}
 	cfg.Emitter.Emit(output.Event{Type: output.EventDone, Text: fullText})
 	cfg.Hooks.OnTurnEnd(ctx, fullText)
 

@@ -251,9 +251,11 @@ func runTurn(ctx context.Context, cfg Config, messages []llm.Message, activeTool
 			return messages
 		}
 
-		assistantMsg := llm.Message{Role: llm.RoleAssistant, Content: text}
-		assistantMsg.ToolCalls = toolCalls
-		messages = append(messages, assistantMsg)
+		if text != "" || len(toolCalls) > 0 {
+			assistantMsg := llm.Message{Role: llm.RoleAssistant, Content: text}
+			assistantMsg.ToolCalls = toolCalls
+			messages = append(messages, assistantMsg)
+		}
 
 		if len(toolCalls) == 0 {
 			return messages
