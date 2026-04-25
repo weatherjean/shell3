@@ -36,7 +36,9 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 	defer close(ch)
 	defer func() {
 		if r := recover(); r != nil {
-			ch <- tui.TurnErrMsg{Err: fmt.Errorf("panic: %v", r)}
+			err := fmt.Errorf("panic: %v", r)
+			cfg.Hooks.OnError(ctx, err)
+			ch <- tui.TurnErrMsg{Err: err}
 		}
 	}()
 
@@ -57,6 +59,7 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 	for {
 		text, toolCalls, usage, err := streamOnce(ctx, cfg.LLM, allMsgs, cfg.Personality.Tools, ch)
 		if err != nil {
+			cfg.Hooks.OnError(ctx, err)
 			ch <- tui.TurnErrMsg{Err: err}
 			return
 		}

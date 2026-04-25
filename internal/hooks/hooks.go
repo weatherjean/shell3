@@ -74,12 +74,48 @@ func (r *Runner) callHookTTY(ctx context.Context, cmd string, input hookInput) {
 	_ = c.Run()
 }
 
+// callHookTTYBlocking releases the TUI, runs the hook, captures stdout for JSON
+// parsing, and restores the TUI before returning. Use for blocking hooks that
+// need interactive terminal access (e.g. prompting the user for confirmation).
+func (r *Runner) callHookTTYBlocking(ctx context.Context, cmd string, input hookInput) (hookOutput, error) {
+	ctx, cancel := context.WithTimeout(ctx, hookTimeout)
+	defer cancel()
+
+	if r.releaser != nil {
+		_ = r.releaser.Release()
+		defer r.releaser.Restore()
+	}
+
+	data, _ := json.Marshal(input)
+	parts := strings.Fields(cmd)
+	c := exec.CommandContext(ctx, parts[0], parts[1:]...)
+	c.Stdin = bytes.NewReader(data)
+	c.Stderr = os.Stderr
+
+	var stdout bytes.Buffer
+	c.Stdout = &stdout
+
+	if err := c.Run(); err != nil {
+		return hookOutput{}, fmt.Errorf("hooks: %q failed: %w", cmd, err)
+	}
+
+	if stdout.Len() == 0 {
+		return hookOutput{Action: "allow"}, nil
+	}
+
+	var out hookOutput
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		return hookOutput{}, fmt.Errorf("hooks: %q bad JSON output: %w", cmd, err)
+	}
+	return out, nil
+}
+
 // OnToolCall returns true if the tool call is allowed by the hook.
 func (r *Runner) OnToolCall(ctx context.Context, tool string, params map[string]any) (bool, error) {
 	if r.cfg.OnToolCall == "" {
 		return true, nil
 	}
-	out, err := r.callHook(ctx, r.cfg.OnToolCall, hookInput{
+	out, err := r.callHookTTYBlocking(ctx, r.cfg.OnToolCall, hookInput{
 		Hook: "on_tool_call", Tool: tool, Params: params,
 	})
 	if err != nil {
@@ -151,6 +187,16 @@ func (r *Runner) OnToolResult(ctx context.Context, tool, result string) {
 			Hook:   "on_tool_result",
 			Tool:   tool,
 			Params: map[string]any{"result": result},
+		})
+	}
+}
+
+// OnError fires the on_error hook. Errors are non-fatal.
+func (r *Runner) OnError(ctx context.Context, err error) {
+	if r.cfg.OnError != "" {
+		r.callHookTTY(ctx, r.cfg.OnError, hookInput{
+			Hook:   "on_error",
+			Params: map[string]any{"error": err.Error()},
 		})
 	}
 }
