@@ -30,7 +30,8 @@ type Model struct {
 	statusMsg  string
 	modeLabel  string
 	tokenCount int
-	llmBuf     *strings.Builder // in-flight LLM text shown in View() while streaming
+	llmBuf           *strings.Builder // in-flight LLM text, streamed through glamour in View()
+	lastBusyViewLines int              // height of the busy View() on the last render, used for finalizeTurn padding
 	ready      bool
 	width      int
 	height     int // kept for dialog height calculation
@@ -43,6 +44,7 @@ type Model struct {
 	lastCtrlCTime int64
 
 	pendingStreamNext tea.Cmd
+	handingOffTTY     bool // suppresses spinner/input in View() during TTY exec
 
 	spinner spinner.Model
 }
@@ -89,7 +91,15 @@ func New(appName, statusMsg, modeLabel string, submitFn func(string) tea.Cmd) Mo
 func (m *Model) finalizeTurn(usage llm.Usage) tea.Cmd {
 	var cmds []tea.Cmd
 	if m.llmBuf.Len() > 0 {
-		cmds = append(cmds, tea.Println(indentContent(renderMarkdown(m.llmBuf.String(), m.width-2))))
+		rendered := indentContent(renderMarkdown(m.llmBuf.String(), m.width-2))
+		// Pad so the new View() (input+status = 4 lines) ends up at terminal bottom.
+		// After tea.Println, new View starts at: old_view_top + renderedLines.
+		// We want: renderedLines >= lastBusyViewLines - 4.
+		renderedLines := strings.Count(rendered, "\n") + 1
+		if pad := m.lastBusyViewLines - renderedLines - 4; pad > 0 {
+			rendered += strings.Repeat("\n", pad)
+		}
+		cmds = append(cmds, tea.Println(rendered))
 		m.llmBuf.Reset()
 	}
 	m.streaming = false
@@ -103,10 +113,10 @@ func (m *Model) finalizeTurn(usage llm.Usage) tea.Cmd {
 
 func (m *Model) abortTurn(reason string) tea.Cmd {
 	var cmds []tea.Cmd
-	if content := strings.TrimRight(m.llmBuf.String(), "\n"); content != "" {
-		cmds = append(cmds, tea.Println(content))
+	if m.llmBuf.Len() > 0 {
+		cmds = append(cmds, tea.Println(" "+m.llmBuf.String()))
+		m.llmBuf.Reset()
 	}
-	m.llmBuf.Reset()
 	m.streaming = false
 	m.busy = false
 	m.cancelFn = nil
@@ -138,6 +148,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cancelFn = msg.Cancel
 
 	case resumeStreamMsg:
+		m.handingOffTTY = false
 		if m.pendingStreamNext != nil {
 			cmds = append(cmds, m.pendingStreamNext)
 			m.pendingStreamNext = nil
@@ -180,10 +191,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if strings.Contains(errMsg, "context canceled") {
 				cmds = append(cmds, m.abortTurn("cancelled"))
 			} else {
-				if content := strings.TrimRight(m.llmBuf.String(), "\n"); content != "" {
-					cmds = append(cmds, tea.Println(content))
+				if m.llmBuf.Len() > 0 {
+					cmds = append(cmds, tea.Println(indentContent(renderMarkdown(m.llmBuf.String(), m.width-2))))
+					m.llmBuf.Reset()
 				}
-				m.llmBuf.Reset()
 				m.streaming = false
 				m.busy = false
 				m.cancelFn = nil
@@ -191,7 +202,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case AppendMsg:
-			// Commit in-flight LLM text before tool output so ordering is preserved.
+			// Flush in-flight LLM text before tool output so ordering is preserved.
 			if m.llmBuf.Len() > 0 {
 				cmds = append(cmds, tea.Println(indentContent(renderMarkdown(m.llmBuf.String(), m.width-2))))
 				m.llmBuf.Reset()
@@ -203,6 +214,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case TTYExecMsg:
 			m.pendingStreamNext = msg.next
+			m.handingOffTTY = true
 			c := exec.Command("bash", "-c", v.Cmd)
 			if v.WorkDir != "" {
 				c.Dir = v.WorkDir
@@ -313,7 +325,7 @@ func (m Model) View() tea.View {
 	var v tea.View
 	v.AltScreen = false
 
-	if !m.ready {
+	if !m.ready || m.handingOffTTY {
 		v.Content = ""
 		return v
 	}
@@ -323,32 +335,35 @@ func (m Model) View() tea.View {
 		w = 80
 	}
 
-	var parts []string
-	streamLines := 0
-
-	if m.llmBuf.Len() > 0 {
-		streamContent := indentContent(renderMarkdown(m.llmBuf.String(), w-2))
-		parts = append(parts, streamContent)
-		streamLines = strings.Count(streamContent, "\n") + 1
-	}
-
-	thinkingLine := m.renderThinkingLine(w)
-	if thinkingLine != "" {
-		parts = append(parts, thinkingLine)
+	if m.busy {
+		hintKey := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
+		thinkingLine := " " + m.spinner.View() + dimStyle.Render(" thinking") + "  " + hintKey.Render("ctrl+c") + dimStyle.Render(" cancel")
+		if m.llmBuf.Len() > 0 {
+			streamContent := indentContent(renderMarkdown(m.llmBuf.String(), w-2))
+			maxLines := m.height - 2
+			if maxLines < 1 {
+				maxLines = 1
+			}
+			lines := strings.Split(streamContent, "\n")
+			if len(lines) > maxLines {
+				lines = lines[len(lines)-maxLines:]
+			}
+			v.Content = strings.Join(lines, "\n") + "\n" + thinkingLine
+		} else {
+			v.Content = thinkingLine
+		}
+		m.lastBusyViewLines = strings.Count(v.Content, "\n") + 1
+		return v
 	}
 
 	inputBox := m.renderInputBox(w)
 	statusBar := m.renderStatusBar(w)
-	parts = append(parts, inputBox, statusBar)
 
-	v.Content = strings.Join(parts, "\n")
+	v.Content = inputBox + "\n" + statusBar
 
 	if cur := m.input.Cursor(); cur != nil {
 		cur.X += 1 // border left
-		cur.Y += streamLines + 1 // stream lines + border-top
-		if m.busy {
-			cur.Y += 1 // thinking line
-		}
+		cur.Y += 1  // border-top
 		v.Cursor = cur
 	}
 
@@ -365,13 +380,6 @@ func (m *Model) updateInputSize() {
 	m.inputLines = newLines
 }
 
-func (m Model) renderThinkingLine(_ int) string {
-	if m.busy {
-		return " " + m.spinner.View() + dimStyle.Render(" thinking")
-	}
-	return ""
-}
-
 func (m Model) renderInputBox(w int) string {
 	style := inputBorderIdle
 	if m.busy {
@@ -384,10 +392,8 @@ func (m Model) renderInputBox(w int) string {
 }
 
 func (m Model) renderStatusBar(w int) string {
-	barStyle := statusBarNormal
 	appStyle := statusBarAppName
 	if m.busy {
-		barStyle = statusBarStreaming
 		appStyle = statusBarAppNameStreaming
 	}
 
@@ -414,14 +420,19 @@ func (m Model) renderStatusBar(w int) string {
 		midBudget = 0
 	}
 
-	statusText := " " + m.statusMsg + " "
-	if m.tokenCount > 0 {
-		statusText += fmt.Sprintf("│ ctx: %d ", m.tokenCount)
+	var mid string
+	if m.busy {
+		mid = statusBarNormal.Render(" ") + m.spinner.View() + statusBarNormal.Render(" thinking ")
+	} else {
+		statusText := " " + m.statusMsg + " "
+		if m.tokenCount > 0 {
+			statusText += fmt.Sprintf("│ ctx: %d ", m.tokenCount)
+		}
+		if len(statusText) > midBudget {
+			statusText = statusText[:midBudget]
+		}
+		mid = statusBarNormal.Render(statusText)
 	}
-	if len(statusText) > midBudget {
-		statusText = statusText[:midBudget]
-	}
-	mid := barStyle.Render(statusText)
 	midW := lipgloss.Width(mid)
 
 	padW := midBudget - midW
@@ -429,7 +440,7 @@ func (m Model) renderStatusBar(w int) string {
 		padW = 0
 	}
 
-	return left + mid + barStyle.Render(strings.Repeat(" ", padW)) + right
+	return left + mid + statusBarNormal.Render(strings.Repeat(" ", padW)) + right
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -491,7 +502,7 @@ func renderMarkdown(text string, width int) string {
 	if err != nil {
 		return text
 	}
-	return strings.Trim(out, "\n")
+	return strings.TrimRight(out, " \t\n")
 }
 
 // execCmd wraps *exec.Cmd to implement tea.ExecCommand for TTY handoff.

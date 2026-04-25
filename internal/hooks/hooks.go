@@ -13,7 +13,8 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
-const hookTimeout = 5 * time.Second
+const hookTimeout = 20 * time.Second
+const hookTTYTimeout = 5 * time.Minute
 
 // Runner dispatches lifecycle hooks as shell subprocesses.
 type Runner struct {
@@ -59,7 +60,7 @@ func (r *Runner) callHook(ctx context.Context, cmd string, input hookInput) (hoo
 // parsing, and restores the TUI. Use for blocking hooks that need interactive
 // terminal access (e.g. prompting the user for confirmation).
 func (r *Runner) callHookTTYBlocking(ctx context.Context, cmd string, input hookInput) (hookOutput, error) {
-	ctx, cancel := context.WithTimeout(ctx, hookTimeout)
+	ctx, cancel := context.WithTimeout(ctx, hookTTYTimeout)
 	defer cancel()
 
 	if r.releaser != nil {
@@ -93,7 +94,7 @@ func (r *Runner) callHookTTYBlocking(ctx context.Context, cmd string, input hook
 
 // callHookTTY runs a fire-and-forget hook with the real terminal (stdio inherited).
 func (r *Runner) callHookTTY(ctx context.Context, cmd string, input hookInput) {
-	ctx, cancel := context.WithTimeout(ctx, hookTimeout)
+	ctx, cancel := context.WithTimeout(ctx, hookTTYTimeout)
 	defer cancel()
 
 	data, _ := json.Marshal(input)

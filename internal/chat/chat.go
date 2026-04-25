@@ -39,7 +39,16 @@ type Config struct {
 // programReleaser implements hooks.TTYReleaser backed by a tea.Program.
 type programReleaser struct{ p *tea.Program }
 
-func (r *programReleaser) Release() error { return r.p.ReleaseTerminal() }
+func (r *programReleaser) Release() error {
+	if err := r.p.ReleaseTerminal(); err != nil {
+		return err
+	}
+	// Erase the sticky TUI (input box + status bar) from the screen so the
+	// hook output doesn't appear over it.
+	fmt.Print("\033[1A\033[0J")
+	return nil
+}
+
 func (r *programReleaser) Restore() error { return r.p.RestoreTerminal() }
 
 // RunInteractive starts the BubbleTea TUI and blocks until the user quits.
