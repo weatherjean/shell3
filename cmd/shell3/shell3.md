@@ -93,14 +93,64 @@ model: llama3.2          # preferred starting model for this project (single val
 provider: ollama         # preferred provider (must match a key in credentials.yaml)
 store_db: .shell3/shell3.db   # SQLite DB for memory and history (gitignored)
 hooks:
-  on_session_start: ""
-  on_session_end: ""
-  on_turn_start: ""
-  on_turn_end: ""
-  on_tool_call: ""
-  on_tool_result: ""
-  on_context_build: ""
-  on_error: ""
+  on_session_start: ""  # fired once at session start (fire-and-forget)
+  on_session_end: ""    # fired once at session end (fire-and-forget)
+  on_turn_start: ""     # fired before each LLM turn (fire-and-forget)
+  on_turn_end: ""       # fired after each LLM turn, params.response set (fire-and-forget)
+  on_tool_call: ""      # fired before each tool call, can block with action:block (blocking)
+  on_tool_result: ""    # fired after each tool call, params.result set (fire-and-forget)
+  on_context_build: ""  # fired before LLM call, can rewrite messages array (blocking)
+  on_error: ""          # fired on LLM errors and panics, params.error set (fire-and-forget)
+```
+
+Each hook value is either a plain string (command) or a mapping with `needs_tty`:
+
+```yaml
+hooks:
+  # plain string — no TTY, output discarded for fire-and-forget hooks
+  on_turn_end: "bash .shell3/hooks/log.sh"
+
+  # mapping — set needs_tty: true to release the TUI before running
+  on_tool_call:
+    command: "bash .shell3/hooks/confirm.sh"
+    needs_tty: true
+```
+
+**`needs_tty: true`** releases the TUI so the hook can read from the terminal (prompts, fzf, etc.). Without it, hooks run silently in the background — no TUI flash.
+
+**Hook protocol:** shell3 writes JSON to the hook's stdin and reads JSON from stdout.
+
+Stdin:
+```json
+{"hook": "on_tool_call", "tool": "bash", "params": {"command": "rm foo"}}
+```
+
+Stdout (blocking hooks only — `on_tool_call`, `on_context_build`):
+```json
+{"action": "allow"}
+{"action": "block", "reason": "Denied by user"}
+```
+
+For `on_context_build`, return `{"messages": [...]}` to rewrite the message list sent to the LLM.
+
+**Example — confirm before bash:**
+```bash
+#!/usr/bin/env bash
+# .shell3/hooks/confirm-bash.sh
+INPUT=$(cat)
+TOOL=$(echo "$INPUT" | jq -r '.tool')
+[[ "$TOOL" != "bash" ]] && echo '{"action":"allow"}' && exit 0
+CMD=$(echo "$INPUT" | jq -r '.params.command // empty')
+echo "Run: $CMD" >/dev/tty
+read -r -p "Allow? [y/N] " ans </dev/tty
+[[ "$ans" =~ ^[Yy]$ ]] && echo '{"action":"allow"}' || echo '{"action":"block","reason":"User denied"}'
+```
+
+```yaml
+hooks:
+  on_tool_call:
+    command: "bash .shell3/hooks/confirm-bash.sh"
+    needs_tty: true
 ```
 
 ### Global credentials — `~/.shell3/credentials.yaml`

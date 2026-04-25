@@ -32,8 +32,8 @@ hooks:
 	if cfg.Model != "llama3.2" {
 		t.Errorf("got model %q, want llama3.2", cfg.Model)
 	}
-	if cfg.Hooks.OnToolCall != ".shell3/hooks/guard.sh" {
-		t.Errorf("got hook %q", cfg.Hooks.OnToolCall)
+	if cfg.Hooks.OnToolCall.Command != ".shell3/hooks/guard.sh" {
+		t.Errorf("got hook %q", cfg.Hooks.OnToolCall.Command)
 	}
 	if cfg.StoreDB != ".shell3/shell3.db" {
 		t.Errorf("got store_db %q, want .shell3/shell3.db", cfg.StoreDB)

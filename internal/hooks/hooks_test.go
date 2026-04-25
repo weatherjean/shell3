@@ -15,7 +15,7 @@ func TestHookAllow(t *testing.T) {
 	script := filepath.Join(dir, "hook.sh")
 	os.WriteFile(script, []byte("#!/bin/bash\necho '{\"action\":\"allow\"}'"), 0755)
 
-	r := hooks.NewRunner(hooks.Config{OnToolCall: script})
+	r := hooks.NewRunner(hooks.Config{OnToolCall: hooks.HookEntry{Command: script}})
 	allowed, err := r.OnToolCall(context.Background(), "bash", map[string]any{"command": "ls"})
 	if err != nil || !allowed {
 		t.Errorf("expected allow, got allowed=%v err=%v", allowed, err)
@@ -27,7 +27,7 @@ func TestHookBlock(t *testing.T) {
 	script := filepath.Join(dir, "hook.sh")
 	os.WriteFile(script, []byte("#!/bin/bash\necho '{\"action\":\"block\",\"reason\":\"not allowed\"}'"), 0755)
 
-	r := hooks.NewRunner(hooks.Config{OnToolCall: script})
+	r := hooks.NewRunner(hooks.Config{OnToolCall: hooks.HookEntry{Command: script}})
 	allowed, err := r.OnToolCall(context.Background(), "bash", map[string]any{"command": "rm -rf /"})
 	if err == nil || allowed {
 		t.Errorf("expected block, got allowed=%v err=%v", allowed, err)
@@ -41,7 +41,7 @@ func TestContextBuildHook(t *testing.T) {
 cat | python3 -c "import sys,json; d=json.load(sys.stdin); d['messages']=d['messages'][-1:]; print(json.dumps(d))"
 `), 0755)
 
-	r := hooks.NewRunner(hooks.Config{OnContextBuild: script})
+	r := hooks.NewRunner(hooks.Config{OnContextBuild: hooks.HookEntry{Command: script}})
 	msgs := []llm.Message{
 		{Role: llm.RoleUser, Content: "first"},
 		{Role: llm.RoleUser, Content: "second"},

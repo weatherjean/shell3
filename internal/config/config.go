@@ -6,20 +6,12 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/weatherjean/shell3/internal/hooks"
 	"gopkg.in/yaml.v3"
 )
 
-// Hooks holds shell command paths for each lifecycle hook.
-type Hooks struct {
-	OnSessionStart string `yaml:"on_session_start"`
-	OnSessionEnd   string `yaml:"on_session_end"`
-	OnTurnStart    string `yaml:"on_turn_start"`
-	OnTurnEnd      string `yaml:"on_turn_end"`
-	OnToolCall     string `yaml:"on_tool_call"`
-	OnToolResult   string `yaml:"on_tool_result"`
-	OnContextBuild string `yaml:"on_context_build"`
-	OnError        string `yaml:"on_error"`
-}
+// Hooks is an alias for hooks.Config so the two packages share one definition.
+type Hooks = hooks.Config
 
 // ProjectConfig is loaded from .shell3/config.yaml in the project directory.
 type ProjectConfig struct {

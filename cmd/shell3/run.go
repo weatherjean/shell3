@@ -80,7 +80,7 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	}
 	pers := personality.Build(pType, loadedSkills, st != nil, f.noBash)
 
-	hookRunner := hooks.NewRunner(hooks.Config(projCfg.Hooks))
+	hookRunner := hooks.NewRunner(projCfg.Hooks)
 
 	statusLine := fmt.Sprintf("%s │ %s", provName, model)
 

@@ -26,7 +26,7 @@ func TestCallHookTTYReleasesAndRestores(t *testing.T) {
 	}
 
 	rel := &fakeReleaser{}
-	r := hooks.NewRunner(hooks.Config{OnSessionStart: script})
+	r := hooks.NewRunner(hooks.Config{OnSessionStart: hooks.HookEntry{Command: script, NeedsTTY: true}})
 	r.SetReleaser(rel)
 
 	r.OnSessionStart(context.Background())
@@ -47,6 +47,6 @@ func TestNoReleaserSkipsRelease(t *testing.T) {
 	}
 
 	// No releaser set — should not panic, hook should still run.
-	r := hooks.NewRunner(hooks.Config{OnSessionStart: script})
+	r := hooks.NewRunner(hooks.Config{OnSessionStart: hooks.HookEntry{Command: script, NeedsTTY: true}})
 	r.OnSessionStart(context.Background()) // must not panic
 }

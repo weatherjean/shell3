@@ -6,5 +6,7 @@ store_db: .shell3/shell3.db
 memory_db: .shell3/memory.db
 history_md: .shell3/history.md
 hooks:
-  on_tool_call: "bash .shell3/hooks/confirm-bash.sh"
+  on_tool_call:
+    command: "bash .shell3/hooks/confirm-bash.sh"
+    needs_tty: true
   on_context_build: ""
