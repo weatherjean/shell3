@@ -1,0 +1,4 @@
+hooks:
+  on_tool_call:
+    command: "bash .shell3/hooks/confirm-bash.sh"
+    needs_tty: true

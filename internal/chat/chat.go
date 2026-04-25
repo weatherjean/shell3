@@ -6,13 +6,14 @@ import (
 	"os"
 	"strings"
 
+	"io"
+
 	tea "charm.land/bubbletea/v2"
 	"github.com/weatherjean/shell3/internal/hooks"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/store"
 	"github.com/weatherjean/shell3/internal/tui"
-	"github.com/weatherjean/shell3/internal/tui/dialog"
 )
 
 // LLMClient is the streaming LLM interface.
@@ -85,9 +86,13 @@ func RunInteractive(ctx context.Context, cfg Config) error {
 		if strings.HasPrefix(cmd, "/model") {
 			name := strings.TrimSpace(input[6:])
 			if name == "" {
-				return func() tea.Msg {
-					return tui.OpenDialogMsg{Dialog: dialog.NewModelPicker(cfg.Models, switchModel)}
-				}
+				sel := newModelSelect(cfg.Models)
+				return tea.Exec(sel, func(err error) tea.Msg {
+					if err != nil || sel.chosen == "" {
+						return nil
+					}
+					return tui.RunCmd{Cmd: switchModel(sel.chosen)}
+				})
 			}
 			return switchModel(name)
 		}
@@ -107,11 +112,10 @@ func RunInteractive(ctx context.Context, cfg Config) error {
 				if lastUsage.TotalTokens == 0 {
 					return dim("[no usage data yet]")
 				}
-				content := fmt.Sprintf(
-					"prompt:     %d\ncompletion: %d\ntotal:      %d",
+				return tui.AppendMsg(fmt.Sprintf(
+					"prompt:     %d\ncompletion: %d\ntotal:      %d\n",
 					lastUsage.PromptTokens, lastUsage.CompletionTokens, lastUsage.TotalTokens,
-				)
-				return tui.OpenDialogMsg{Dialog: dialog.NewCommandOutput("/usage", content)}
+				))
 			case "/prompt":
 				var sb strings.Builder
 				fmt.Fprintf(&sb, ansiBold+"system prompt:"+ansiReset+"\n%s\n\n", cfg.Personality.SystemPrompt)
@@ -119,7 +123,7 @@ func RunInteractive(ctx context.Context, cfg Config) error {
 				for _, t := range cfg.Personality.Tools {
 					fmt.Fprintf(&sb, "  %-16s %s\n", t.Name, t.Description)
 				}
-				return tui.OpenDialogMsg{Dialog: dialog.NewCommandOutput("/prompt", sb.String())}
+				return tui.AppendMsg(sb.String())
 			case "/truncate":
 				cfg.Truncate = !cfg.Truncate
 				state := "off"
@@ -130,7 +134,7 @@ func RunInteractive(ctx context.Context, cfg Config) error {
 			case "/exit", "/quit":
 				return tea.Quit()
 			case "/help", "/list", "/", "/h":
-				return tui.OpenDialogMsg{Dialog: dialog.NewCommandOutput("/help", slashHelp())}
+				return tui.AppendMsg(slashHelp())
 			default:
 				return dim(fmt.Sprintf("[unknown command: %s  (type /help to list commands)]", input))
 			}
@@ -198,6 +202,66 @@ func RunOnce(ctx context.Context, cfg Config, input string) error {
 		}
 	}
 	return nil
+}
+
+// modelSelect is a minimal tea.ExecCommand that runs an inline arrow-key model picker.
+type modelSelect struct {
+	models []string
+	cursor int
+	chosen string
+	stdin  io.Reader
+	stdout io.Writer
+}
+
+func newModelSelect(models []string) *modelSelect { return &modelSelect{models: models} }
+
+func (s *modelSelect) SetStdin(r io.Reader)  { s.stdin = r }
+func (s *modelSelect) SetStdout(w io.Writer) { s.stdout = w }
+func (s *modelSelect) SetStderr(_ io.Writer) {}
+
+func (s *modelSelect) Run() error {
+	p := tea.NewProgram(s, tea.WithInput(s.stdin), tea.WithOutput(s.stdout))
+	_, err := p.Run()
+	return err
+}
+
+func (s *modelSelect) Init() tea.Cmd { return nil }
+
+func (s *modelSelect) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		switch msg.Code {
+		case tea.KeyUp, 'k':
+			if s.cursor > 0 {
+				s.cursor--
+			}
+		case tea.KeyDown, 'j':
+			if s.cursor < len(s.models)-1 {
+				s.cursor++
+			}
+		case tea.KeyEnter:
+			if len(s.models) > 0 {
+				s.chosen = s.models[s.cursor]
+			}
+			return s, tea.Quit
+		case tea.KeyEsc, 'q':
+			return s, tea.Quit
+		}
+	}
+	return s, nil
+}
+
+func (s *modelSelect) View() tea.View {
+	var sb strings.Builder
+	sb.WriteString("select model  ↑/↓ k/j  enter  esc to cancel\n\n")
+	for i, m := range s.models {
+		if i == s.cursor {
+			sb.WriteString(" > " + m + "\n")
+		} else {
+			sb.WriteString("   " + m + "\n")
+		}
+	}
+	return tea.View{Content: sb.String()}
 }
 
 func slashHelp() string {

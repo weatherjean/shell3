@@ -9,71 +9,44 @@ import (
 
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
-	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
 	"charm.land/glamour/v2/styles"
 	"charm.land/lipgloss/v2"
 	"github.com/weatherjean/shell3/internal/llm"
-	"github.com/weatherjean/shell3/internal/tui/dialog"
 )
 
 func nanoNow() int64 { return time.Now().UnixNano() }
 
 // Model is the root BubbleTea model for shell3.
 //
-// Layout (top to bottom):
-//
-//	viewport  fills the remaining space
-//	hints     1 line: contextual key hints
-//	╭──────╮  border + dynamic textarea
-//	│ > _  │
-//	╰──────╯
-//	status    1 line: nvim-style status bar (app name, model, tokens)
-//
-// Content layers inside the viewport:
-//
-//	history  completed rendered turns (immutable while streaming)
-//	nonLLM   current turn's non-LLM parts (labels, tool output)
-//	llmBuf   current turn's LLM text — rendered with glamour on TurnDoneMsg
+// Inline rendering — no alt screen, no viewport.
+// Completed content is printed to terminal scrollback via tea.Println.
+// View() renders only the sticky bottom: streaming preview + thinking + input + status.
 type Model struct {
-	viewport   viewport.Model
 	input      textarea.Model
-	inputLines int // current textarea height in lines (drives viewport resize)
+	inputLines int
 	appName    string
-	statusMsg  string // provider · model · personality  (updated via StatusMsg)
-	modeLabel  string // "c", "a", or "cst" — set once at startup
-	tokenCount int    // updated after each turn
-	history    string
-	nonLLM     *strings.Builder
-	llmBuf     *strings.Builder
+	statusMsg  string
+	modeLabel  string
+	tokenCount int
+	llmBuf     *strings.Builder // in-flight LLM text shown in View() while streaming
 	ready      bool
 	width      int
-	height     int
-	// busy blocks input from the moment the user submits until the turn
-	// fully completes (TurnDoneMsg / TurnErrMsg / shellDoneMsg). This closes
-	// the gap where m.streaming is false before the first ChunkMsg arrives.
-	busy      bool
-	streaming bool // true once the first ChunkMsg is received
-	cancelFn  func()
-	submitFn  func(string) tea.Cmd
+	height     int // kept for dialog height calculation
+	busy       bool
+	streaming  bool
+	cancelFn   func()
+	submitFn   func(string) tea.Cmd
 
-	lastEscTime   int64 // UnixNano of most recent Esc keypress (double-esc to clear)
-	lastCtrlCTime int64 // UnixNano of most recent Ctrl+C when idle (double ctrl+c to quit)
+	lastEscTime   int64
+	lastCtrlCTime int64
 
-	// pendingStreamNext holds the next ReadCh command while a TTYExecMsg is
-	// being serviced. The model resumes the stream on resumeStreamMsg.
 	pendingStreamNext tea.Cmd
 
 	spinner spinner.Model
-	overlay *dialog.Overlay
 }
 
-// New returns an initialized Model.
-// appName is displayed on the left of the header.
-// statusMsg is displayed in the middle (provider, model).
-// modeLabel is one of "c" (code), "a" (agent), "cst" (custom).
-// submitFn is called when the user submits a message.
 func New(appName, statusMsg, modeLabel string, submitFn func(string) tea.Cmd) Model {
 	ta := textarea.New()
 	ta.Prompt = ""
@@ -82,14 +55,13 @@ func New(appName, statusMsg, modeLabel string, submitFn func(string) tea.Cmd) Mo
 	ta.DynamicHeight = true
 	ta.MinHeight = 1
 	ta.MaxHeight = 12
-	ta.SetWidth(80) // updated on first WindowSizeMsg
+	ta.SetWidth(80)
 
-	// Normalize focused/blurred appearance — no highlights, no dim text.
 	s := ta.Styles()
 	plain := lipgloss.NewStyle()
 	s.Focused.CursorLine = plain
 	s.Blurred.CursorLine = plain
-	s.Blurred.Text = plain // prevent dim-gray text when input briefly blurs
+	s.Blurred.Text = plain
 	ta.SetStyles(s)
 
 	ta.SetVirtualCursor(false)
@@ -107,64 +79,39 @@ func New(appName, statusMsg, modeLabel string, submitFn func(string) tea.Cmd) Mo
 		statusMsg:  statusMsg,
 		modeLabel:  modeLabel,
 		submitFn:   submitFn,
-		nonLLM:     new(strings.Builder),
 		llmBuf:     new(strings.Builder),
 		spinner:    sp,
-		overlay:    dialog.NewOverlay(),
 	}
 }
 
-// ── viewport content helpers ──────────────────────────────────────────────────
+// ── turn lifecycle ────────────────────────────────────────────────────────────
 
-func (m *Model) viewContent() string {
-	if m.history == "" && m.nonLLM.Len() == 0 && m.llmBuf.Len() == 0 {
-		return renderWelcome(m.width)
-	}
-	return m.history + m.nonLLM.String() + indentContent(wrapToWidth(m.llmBuf.String(), m.width-2))
-}
-
-func (m *Model) refreshViewport() {
-	if m.ready {
-		m.viewport.SetContent(m.viewContent())
-		m.viewport.GotoBottom()
-	}
-}
-
-func (m *Model) finalizeTurn(usage llm.Usage) {
-	if !m.busy {
-		return
-	}
-	// Flush any remaining LLM text (final call had no trailing tool output).
+func (m *Model) finalizeTurn(usage llm.Usage) tea.Cmd {
+	var cmds []tea.Cmd
 	if m.llmBuf.Len() > 0 {
-		m.nonLLM.WriteString(indentContent(renderMarkdown(m.llmBuf.String(), m.width-2)) + "\n")
+		cmds = append(cmds, tea.Println(indentContent(renderMarkdown(m.llmBuf.String(), m.width-2))))
 		m.llmBuf.Reset()
 	}
-	m.history += m.nonLLM.String()
-	m.nonLLM.Reset()
 	m.streaming = false
 	m.busy = false
 	m.cancelFn = nil
 	if usage.TotalTokens > 0 {
 		m.tokenCount = usage.TotalTokens
 	}
-	m.refreshViewport()
+	return tea.Batch(cmds...)
 }
 
-func (m *Model) abortTurn(reason string) {
-	if !m.busy {
-		return
+func (m *Model) abortTurn(reason string) tea.Cmd {
+	var cmds []tea.Cmd
+	if content := strings.TrimRight(m.llmBuf.String(), "\n"); content != "" {
+		cmds = append(cmds, tea.Println(content))
 	}
-	content := strings.TrimRight(m.nonLLM.String()+m.llmBuf.String(), "\n")
-	if content != "" {
-		m.history += content + "\n"
-	}
-	m.history += dimStyle.Render("["+reason+"]") + "\n"
-	m.nonLLM.Reset()
 	m.llmBuf.Reset()
 	m.streaming = false
 	m.busy = false
 	m.cancelFn = nil
-	m.refreshViewport()
+	cmds = append(cmds, tea.Println(dimStyle.Render("["+reason+"]")))
+	return tea.Batch(cmds...)
 }
 
 // ── BubbleTea interface ───────────────────────────────────────────────────────
@@ -180,23 +127,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		// Border takes 2 columns (left │ + right │).
 		m.input.SetWidth(m.width - 2)
-		vpHeight := m.calcViewportHeight()
 		if !m.ready {
-			m.viewport = viewport.New(viewport.WithWidth(m.width), viewport.WithHeight(vpHeight))
-			m.viewport.SetContent(m.viewContent())
+			cmds = append(cmds, tea.Println(renderWelcome(m.width)))
 			m.ready = true
-		} else {
-			m.viewport.SetWidth(m.width)
-			m.viewport.SetHeight(vpHeight)
 		}
+		m.updateInputSize()
 
 	case SetCancelMsg:
 		m.cancelFn = msg.Cancel
 
 	case resumeStreamMsg:
-		// TTY exec completed; resume draining the stream channel.
 		if m.pendingStreamNext != nil {
 			cmds = append(cmds, m.pendingStreamNext)
 			m.pendingStreamNext = nil
@@ -204,21 +145,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case shellDoneMsg:
 		if msg.errMsg != "" {
-			m.nonLLM.WriteString(msg.errMsg)
-			m.refreshViewport()
+			cmds = append(cmds, tea.Println(msg.errMsg))
 		}
 		m.busy = false
 		m.streaming = false
 		cmds = append(cmds, m.input.Focus())
 
-	// AppendMsg / StatusMsg may arrive directly from slash commands (not via
-	// the stream channel), so handle them at the top level too.
-	case OpenDialogMsg:
-		m.overlay.Open(msg.Dialog)
+	case RunCmd:
+		if msg.Cmd != nil {
+			cmds = append(cmds, msg.Cmd)
+		}
 
 	case AppendMsg:
-		m.nonLLM.WriteString(indentContent(wrapToWidth(string(msg), m.width-2)))
-		m.refreshViewport()
+		cmds = append(cmds, tea.Println(indentContent(wrapToWidth(string(msg), m.width-2))))
 
 	case StatusMsg:
 		m.statusMsg = string(msg)
@@ -229,45 +168,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch v := inner.(type) {
 		case ChunkMsg:
 			m.llmBuf.WriteString(string(v))
-			m.streaming = true // busy was set on submit; streaming set on first chunk
-			m.refreshViewport()
+			m.streaming = true
 
 		case TurnDoneMsg:
 			turnDone = true
-			m.finalizeTurn(v.Usage)
+			cmds = append(cmds, m.finalizeTurn(v.Usage))
 
 		case TurnErrMsg:
 			turnDone = true
 			errMsg := v.Err.Error()
 			if strings.Contains(errMsg, "context canceled") {
-				m.abortTurn("cancelled")
+				cmds = append(cmds, m.abortTurn("cancelled"))
 			} else {
-				m.history += m.nonLLM.String() + m.llmBuf.String()
-				m.history += "\n" + errorStyle.Render("[error: "+errMsg+"]") + "\n"
-				m.nonLLM.Reset()
+				if content := strings.TrimRight(m.llmBuf.String(), "\n"); content != "" {
+					cmds = append(cmds, tea.Println(content))
+				}
 				m.llmBuf.Reset()
 				m.streaming = false
 				m.busy = false
 				m.cancelFn = nil
-				m.refreshViewport()
+				cmds = append(cmds, tea.Println(errorStyle.Render("[error: "+errMsg+"]")))
 			}
 
 		case AppendMsg:
-			// Commit any in-flight LLM text before appending non-LLM content,
-			// so tool output follows the text that preceded it in the stream.
+			// Commit in-flight LLM text before tool output so ordering is preserved.
 			if m.llmBuf.Len() > 0 {
-				m.nonLLM.WriteString(indentContent(renderMarkdown(m.llmBuf.String(), m.width-2)) + "\n")
+				cmds = append(cmds, tea.Println(indentContent(renderMarkdown(m.llmBuf.String(), m.width-2))))
 				m.llmBuf.Reset()
 			}
-			m.nonLLM.WriteString(indentContent(wrapToWidth(string(v), m.width-2)))
-			m.refreshViewport()
+			cmds = append(cmds, tea.Println(indentContent(wrapToWidth(string(v), m.width-2))))
 
 		case StatusMsg:
 			m.statusMsg = string(v)
 
 		case TTYExecMsg:
-			// Suspend TUI and hand terminal to the requested command.
-			// The stream goroutine is blocked on v.ReplyC; we resume on completion.
 			m.pendingStreamNext = msg.next
 			c := exec.Command("bash", "-c", v.Cmd)
 			if v.WorkDir != "" {
@@ -296,27 +230,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyPressMsg:
-		// Overlay consumes key events when a dialog is open.
-		if m.overlay.HasDialogs() {
-			if action := m.overlay.Update(msg); action != nil {
-				switch a := action.(type) {
-				case dialog.ActionClose:
-					m.overlay.CloseFront()
-				case dialog.ActionCmd:
-					m.overlay.CloseFront()
-					if a.Cmd != nil {
-						cmds = append(cmds, a.Cmd)
-					}
-				}
-			}
-			return m, tea.Batch(cmds...)
-		}
-
 		switch {
 		case msg.Code == 'c' && msg.Mod&tea.ModCtrl != 0:
 			if m.busy && m.cancelFn != nil {
 				m.cancelFn()
-				m.abortTurn("cancelled")
+				cmds = append(cmds, m.abortTurn("cancelled"))
 			} else if !m.busy {
 				const doubleCtrlCNs = 500_000_000
 				now := nanoNow()
@@ -336,12 +254,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.lastEscTime = now
 			}
 
-		// shift+enter or alt+enter: insert newline into textarea
 		case msg.Code == tea.KeyEnter && (msg.Mod&tea.ModShift != 0 || msg.Mod&tea.ModAlt != 0) && !m.busy:
 			m.input.InsertString("\n")
 			m.updateInputSize()
 
-		// plain enter: submit
 		case msg.Code == tea.KeyEnter && msg.Mod == 0 && !m.busy:
 			input := strings.TrimSpace(m.input.Value())
 			if input != "" {
@@ -353,26 +269,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					c := exec.Command("bash", "-c", input[1:])
 					cmds = append(cmds, tea.Exec(newExecCmd(c), func(err error) tea.Msg {
 						if err != nil {
-							return shellDoneMsg{errMsg: "\n" + errorStyle.Render("[exit: "+err.Error()+"]") + "\n"}
+							return shellDoneMsg{errMsg: errorStyle.Render("[exit: "+err.Error()+"]")}
 						}
 						return shellDoneMsg{}
 					}))
 				} else {
-					// slash commands (/help etc.) are instant — don't set busy
 					if !strings.HasPrefix(input, "/") {
 						m.busy = true
 						m.input.Blur()
 					}
-					// flush pending slash-command output before anchoring "you:" in history
-					if m.nonLLM.Len() > 0 {
-						m.history += m.nonLLM.String()
-						m.nonLLM.Reset()
-					}
 					userMsg := indentContent(renderMarkdown(input, m.width-2))
 					sep := separatorStyle.Render(strings.Repeat("─", m.width))
 					topSep := userLabelStyle.Render(">") + " " + separatorStyle.Render(strings.Repeat("─", m.width-2))
-					m.history += topSep + "\n" + userMsg + "\n" + sep + "\n"
-					m.refreshViewport()
+					cmds = append(cmds, tea.Println(topSep+"\n"+userMsg+"\n"+sep))
 					cmds = append(cmds, m.submitFn(input))
 				}
 			}
@@ -387,26 +296,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Re-focus input when no longer busy (e.g. after a slash command response).
 	if !m.busy && !m.input.Focused() {
 		cmds = append(cmds, m.input.Focus())
 	}
 
-	// Always tick the spinner so it stays alive.
 	var spCmd tea.Cmd
 	m.spinner, spCmd = m.spinner.Update(msg)
 	cmds = append(cmds, spCmd)
-
-	if m.ready {
-		switch msg.(type) {
-		case tea.KeyPressMsg, tea.PasteMsg, tea.PasteStartMsg, tea.PasteEndMsg:
-			// block keyboard/paste events from leaking into viewport scroll
-		default:
-			var vpCmd tea.Cmd
-			m.viewport, vpCmd = m.viewport.Update(msg)
-			cmds = append(cmds, vpCmd)
-		}
-	}
 
 	return m, tea.Batch(cmds...)
 }
@@ -415,82 +311,63 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) View() tea.View {
 	var v tea.View
-	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion
+	v.AltScreen = false
 
 	if !m.ready {
-		v.Content = "initializing…"
+		v.Content = ""
 		return v
 	}
+
 	w := m.width
 	if w == 0 {
 		w = 80
 	}
 
-	inputBox := m.renderInputBox(w)
-	statusBar := m.renderStatusBar(w)
+	var parts []string
+	streamLines := 0
 
-	if m.overlay.HasDialogs() {
-		// Modal is active: dialog fills the viewport area, input is hidden.
-		dialogH := m.height - 1 // reserve 1 line for status bar
-		v.Content = m.overlay.View(w, dialogH) + "\n" + statusBar
-		return v
+	if m.llmBuf.Len() > 0 {
+		streamContent := indentContent(renderMarkdown(m.llmBuf.String(), w-2))
+		parts = append(parts, streamContent)
+		streamLines = strings.Count(streamContent, "\n") + 1
 	}
 
-	vp := m.viewport.View()
 	thinkingLine := m.renderThinkingLine(w)
-	v.Content = vp + "\n" +
-		thinkingLine + "\n" +
-		inputBox + "\n" +
-		statusBar
+	if thinkingLine != "" {
+		parts = append(parts, thinkingLine)
+	}
 
-	// Position the real terminal cursor inside the input box.
-	// Layout rows: viewport + thinking(1) + border-top(1) + content.
+	inputBox := m.renderInputBox(w)
+	statusBar := m.renderStatusBar(w)
+	parts = append(parts, inputBox, statusBar)
+
+	v.Content = strings.Join(parts, "\n")
+
 	if cur := m.input.Cursor(); cur != nil {
-		cur.X += 1                            // border left
-		cur.Y += m.viewport.Height() + 2     // viewport rows + thinking + border-top
+		cur.X += 1 // border left
+		cur.Y += streamLines + 1 // stream lines + border-top
+		if m.busy {
+			cur.Y += 1 // thinking line
+		}
 		v.Cursor = cur
 	}
 
 	return v
 }
 
-// calcViewportHeight returns how many lines the viewport may occupy.
-func (m Model) calcViewportHeight() int {
-	h := m.height - m.inputLines - 4 // border-top(1) + border-bottom(1) + status(1) + thinking(1)
-	if h < 1 {
-		h = 1
-	}
-	return h
-}
+// ── Sub-renders ───────────────────────────────────────────────────────────────
 
-// updateInputSize syncs inputLines with the textarea's current height and
-// resizes the viewport accordingly.
 func (m *Model) updateInputSize() {
 	newLines := m.input.Height()
 	if newLines < 1 {
 		newLines = 1
 	}
-	if newLines == m.inputLines && m.ready {
-		return
-	}
 	m.inputLines = newLines
-	if m.ready {
-		vpH := m.height - m.inputLines - 4
-		if vpH < 1 {
-			vpH = 1
-		}
-		m.viewport.SetHeight(vpH)
-	}
-	m.refreshViewport()
 }
-
-// ── Sub-renders ───────────────────────────────────────────────────────────────
 
 func (m Model) renderThinkingLine(_ int) string {
 	if m.busy {
-		label := dimStyle.Render(" thinking")
-		return " " + m.spinner.View() + label
+		return " " + m.spinner.View() + dimStyle.Render(" thinking")
 	}
 	return ""
 }
@@ -506,7 +383,6 @@ func (m Model) renderInputBox(w int) string {
 	return style.Width(w).Render(m.input.View())
 }
 
-// renderStatusBar renders the nvim/tmux-style full-width status bar at the bottom.
 func (m Model) renderStatusBar(w int) string {
 	barStyle := statusBarNormal
 	appStyle := statusBarAppName
@@ -515,13 +391,9 @@ func (m Model) renderStatusBar(w int) string {
 		appStyle = statusBarAppNameStreaming
 	}
 
-	// Left: app name badge.
 	left := appStyle.Render(" shell3 ")
-
-	// Mode badge (far right) — persona name in red.
 	modeBadge := modeBadgeCustom.Render(" " + m.modeLabel + " ")
 
-	// Hints + mode badge.
 	var right string
 	if m.busy {
 		right = statusBarHintStyle.Render("  ") +
@@ -537,18 +409,15 @@ func (m Model) renderStatusBar(w int) string {
 
 	leftW := lipgloss.Width(left)
 	rightW := lipgloss.Width(right)
-	// Budget available for the middle section — never let it overflow.
 	midBudget := w - leftW - rightW
 	if midBudget < 0 {
 		midBudget = 0
 	}
 
-	// Build middle: provider/model + optional ctx token count, truncated to budget.
 	statusText := " " + m.statusMsg + " "
 	if m.tokenCount > 0 {
 		statusText += fmt.Sprintf("│ ctx: %d ", m.tokenCount)
 	}
-	// Truncate if needed so status bar never wraps.
 	if len(statusText) > midBudget {
 		statusText = statusText[:midBudget]
 	}
@@ -565,7 +434,6 @@ func (m Model) renderStatusBar(w int) string {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// indentContent adds one space of left margin to each non-empty line.
 func indentContent(s string) string {
 	lines := strings.Split(s, "\n")
 	for i, l := range lines {
@@ -576,8 +444,6 @@ func indentContent(s string) string {
 	return strings.Join(lines, "\n")
 }
 
-// wrapToWidth soft-wraps lines in s that exceed width display columns.
-// ANSI escape codes are accounted for via lipgloss.Width.
 func wrapToWidth(s string, width int) string {
 	if width <= 0 {
 		return s
@@ -586,7 +452,6 @@ func wrapToWidth(s string, width int) string {
 	var out []string
 	for _, line := range lines {
 		for lipgloss.Width(line) > width {
-			// Binary-search for the byte position where display width hits the limit.
 			lo, hi := 0, len(line)
 			for lo < hi {
 				mid := (lo + hi + 1) / 2
@@ -612,7 +477,7 @@ func renderMarkdown(text string, width int) string {
 		width = 100
 	}
 	style := styles.DarkStyleConfig
-	style.Document.Color = nil // inherit terminal default so color codes don't bleed across viewport lines
+	style.Document.Color = nil
 	zero := uint(0)
 	style.Document.Margin = &zero
 	r, err := glamour.NewTermRenderer(

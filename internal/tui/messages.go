@@ -3,7 +3,6 @@ package tui
 import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/weatherjean/shell3/internal/llm"
-	"github.com/weatherjean/shell3/internal/tui/dialog"
 )
 
 // ChunkMsg carries one streaming text delta from the LLM.
@@ -42,9 +41,9 @@ type resumeStreamMsg struct{}
 // It unlocks the input and optionally appends an error message.
 type shellDoneMsg struct{ errMsg string }
 
-// OpenDialogMsg requests the TUI to open a dialog. Slash commands return this
-// instead of AppendMsg when their output should live in a modal.
-type OpenDialogMsg struct{ Dialog dialog.Dialog }
+// RunCmd wraps a tea.Cmd so it can be delivered as a tea.Msg and re-dispatched.
+// Used when a sub-program (e.g. huh form via tea.Exec) needs to fire a Cmd on completion.
+type RunCmd struct{ Cmd tea.Cmd }
 
 // streamMsg wraps a content message with a command to read the next item from the stream.
 type streamMsg struct {
