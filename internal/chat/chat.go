@@ -9,7 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/weatherjean/shell3/internal/hooks"
 	"github.com/weatherjean/shell3/internal/llm"
-	"github.com/weatherjean/shell3/internal/personality"
+	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/store"
 	"github.com/weatherjean/shell3/internal/tui"
 	"github.com/weatherjean/shell3/internal/tui/dialog"
@@ -25,7 +25,7 @@ type Config struct {
 	LLM           LLMClient
 	Hooks         *hooks.Runner
 	Store         *store.Store
-	Personality   personality.Personality
+	Personality   persona.Persona
 	WorkDir       string
 	StatusLine    string
 	ModeLabel     string       // "c", "a", or "cst" — displayed as mode badge

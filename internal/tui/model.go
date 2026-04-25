@@ -120,7 +120,7 @@ func (m *Model) viewContent() string {
 	if m.history == "" && m.nonLLM.Len() == 0 && m.llmBuf.Len() == 0 {
 		return renderWelcome(m.width)
 	}
-	return m.history + m.nonLLM.String() + wrapToWidth(m.llmBuf.String(), m.width)
+	return m.history + m.nonLLM.String() + indentContent(wrapToWidth(m.llmBuf.String(), m.width-2))
 }
 
 func (m *Model) refreshViewport() {
@@ -136,7 +136,7 @@ func (m *Model) finalizeTurn(usage llm.Usage) {
 	}
 	// Flush any remaining LLM text (final call had no trailing tool output).
 	if m.llmBuf.Len() > 0 {
-		m.nonLLM.WriteString(renderMarkdown(m.llmBuf.String(), m.width))
+		m.nonLLM.WriteString(indentContent(renderMarkdown(m.llmBuf.String(), m.width-2)) + "\n")
 		m.llmBuf.Reset()
 	}
 	m.history += m.nonLLM.String()
@@ -217,7 +217,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.overlay.Open(msg.Dialog)
 
 	case AppendMsg:
-		m.nonLLM.WriteString(wrapToWidth(string(msg), m.width))
+		m.nonLLM.WriteString(indentContent(wrapToWidth(string(msg), m.width-2)))
 		m.refreshViewport()
 
 	case StatusMsg:
@@ -256,10 +256,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Commit any in-flight LLM text before appending non-LLM content,
 			// so tool output follows the text that preceded it in the stream.
 			if m.llmBuf.Len() > 0 {
-				m.nonLLM.WriteString(renderMarkdown(m.llmBuf.String(), m.width))
+				m.nonLLM.WriteString(indentContent(renderMarkdown(m.llmBuf.String(), m.width-2)) + "\n")
 				m.llmBuf.Reset()
 			}
-			m.nonLLM.WriteString(wrapToWidth(string(v), m.width))
+			m.nonLLM.WriteString(indentContent(wrapToWidth(string(v), m.width-2)))
 			m.refreshViewport()
 
 		case StatusMsg:
@@ -368,9 +368,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.history += m.nonLLM.String()
 						m.nonLLM.Reset()
 					}
-					userMsg := strings.TrimRight(renderMarkdown(input, m.width), "\n")
+					userMsg := indentContent(renderMarkdown(input, m.width-2))
 					sep := separatorStyle.Render(strings.Repeat("─", m.width))
-					m.history += sep + "\n" + userLabelStyle.Render("you:") + " " + userMsg + "\n" + sep + "\n"
+					topSep := userLabelStyle.Render(">") + " " + separatorStyle.Render(strings.Repeat("─", m.width-2))
+					m.history += topSep + "\n" + userMsg + "\n" + sep + "\n"
 					m.refreshViewport()
 					cmds = append(cmds, m.submitFn(input))
 				}
@@ -517,16 +518,8 @@ func (m Model) renderStatusBar(w int) string {
 	// Left: app name badge.
 	left := appStyle.Render(" shell3 ")
 
-	// Mode badge (far right).
-	var modeBadge string
-	switch m.modeLabel {
-	case "c":
-		modeBadge = modeBadgeCode.Render(" c ")
-	case "a":
-		modeBadge = modeBadgeAgent.Render(" a ")
-	default:
-		modeBadge = modeBadgeCustom.Render(" cst ")
-	}
+	// Mode badge (far right) — persona name in red.
+	modeBadge := modeBadgeCustom.Render(" " + m.modeLabel + " ")
 
 	// Hints + mode badge.
 	var right string
@@ -572,6 +565,17 @@ func (m Model) renderStatusBar(w int) string {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+// indentContent adds one space of left margin to each non-empty line.
+func indentContent(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		if l != "" {
+			lines[i] = " " + l
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 // wrapToWidth soft-wraps lines in s that exceed width display columns.
 // ANSI escape codes are accounted for via lipgloss.Width.
 func wrapToWidth(s string, width int) string {
@@ -609,6 +613,8 @@ func renderMarkdown(text string, width int) string {
 	}
 	style := styles.DarkStyleConfig
 	style.Document.Color = nil // inherit terminal default so color codes don't bleed across viewport lines
+	zero := uint(0)
+	style.Document.Margin = &zero
 	r, err := glamour.NewTermRenderer(
 		glamour.WithStyles(style),
 		glamour.WithWordWrap(width-2),
@@ -620,7 +626,7 @@ func renderMarkdown(text string, width int) string {
 	if err != nil {
 		return text
 	}
-	return out
+	return strings.Trim(out, "\n")
 }
 
 // execCmd wraps *exec.Cmd to implement tea.ExecCommand for TTY handoff.

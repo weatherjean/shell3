@@ -30,11 +30,6 @@ func TestInit_CreatesShell3Dir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	configPath := filepath.Join(dir, ".shell3", "config.yaml")
-	if _, err := os.Stat(configPath); err != nil {
-		t.Errorf("expected .shell3/config.yaml to exist: %v", err)
-	}
-
 	gitignorePath := filepath.Join(dir, ".shell3", ".gitignore")
 	if _, err := os.Stat(gitignorePath); err != nil {
 		t.Errorf("expected .shell3/.gitignore to exist: %v", err)
@@ -73,6 +68,45 @@ func TestInit_CreatesShell3DB(t *testing.T) {
 	dbPath := filepath.Join(dir, ".shell3", "shell3.db")
 	if _, err := os.Stat(dbPath); err != nil {
 		t.Errorf("expected .shell3/shell3.db to exist: %v", err)
+	}
+}
+
+func TestInit_CreatesPersonaFile(t *testing.T) {
+	dir := t.TempDir()
+	homeDir := t.TempDir()
+	writeTestCredentials(t, homeDir)
+
+	if err := scaffold.InitProject(dir, homeDir); err != nil {
+		t.Fatal(err)
+	}
+
+	personaPath := filepath.Join(dir, ".shell3", "personas", "base.md")
+	data, err := os.ReadFile(personaPath)
+	if err != nil {
+		t.Fatalf("expected .shell3/personas/base.md to exist: %v", err)
+	}
+	if !strings.Contains(string(data), "{{.") {
+		t.Error("base.md has no template injection tags")
+	}
+}
+
+func TestInit_PersonaHasNullDefaults(t *testing.T) {
+	dir := t.TempDir()
+	homeDir := t.TempDir()
+	writeTestCredentials(t, homeDir)
+
+	if err := scaffold.InitProject(dir, homeDir); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, ".shell3", "personas", "base.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"model: ~", "provider: ~", "db: ~"} {
+		if !strings.Contains(string(data), field) {
+			t.Errorf("base.md missing null default %q", field)
+		}
 	}
 }
 

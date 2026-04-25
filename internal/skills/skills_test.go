@@ -47,14 +47,23 @@ func TestLoadSkillsSkipsNoFrontmatter(t *testing.T) {
 
 func TestBuildSystemPromptSection(t *testing.T) {
 	s := []skills.Skill{{Name: "git", Description: "git stuff", Path: "/proj/.shell3/skills/git.md"}}
-	prompt := skills.BuildSection(s)
-	if !strings.Contains(prompt, "# Skills") {
-		t.Error("expected # Skills header")
+	out := skills.BuildSection(s)
+	if strings.Contains(out, "# Skills") {
+		t.Error("BuildSection must not include # Skills header — belongs in persona template")
 	}
-	if !strings.Contains(prompt, "/proj/.shell3/skills/git.md") {
-		t.Error("expected file path in prompt")
+	if !strings.Contains(out, "## git") {
+		t.Error("expected ## git entry")
 	}
-	if strings.Contains(prompt, "always squash") {
-		t.Error("skill body must not appear in prompt")
+	if !strings.Contains(out, "/proj/.shell3/skills/git.md") {
+		t.Error("expected file path")
+	}
+	if strings.Contains(out, "always squash") {
+		t.Error("skill body must not appear")
+	}
+}
+
+func TestBuildSection_EmptyReturnsEmpty(t *testing.T) {
+	if got := skills.BuildSection(nil); got != "" {
+		t.Errorf("expected empty string, got %q", got)
 	}
 }

@@ -7,18 +7,20 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/config"
 	"github.com/weatherjean/shell3/internal/hooks"
 	"github.com/weatherjean/shell3/internal/llm"
-	"github.com/weatherjean/shell3/internal/personality"
+	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/skills"
 	"github.com/weatherjean/shell3/internal/store"
 )
 
 type runFlags struct {
+	persona  string
 	model    string
 	baseURL  string
 	apiKey   string
@@ -35,6 +37,7 @@ func newRunCommand() *cobra.Command {
 			return runChat(cmd.Context(), f, strings.Join(args, " "))
 		},
 	}
+	cmd.Flags().StringVar(&f.persona, "persona", "base", "Persona to load from .shell3/personas/")
 	cmd.Flags().StringVar(&f.model, "model", "", "Model override")
 	cmd.Flags().StringVar(&f.baseURL, "base-url", "", "LLM base URL override")
 	cmd.Flags().StringVar(&f.apiKey, "api-key", "", "API key override")
@@ -53,20 +56,30 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		return fmt.Errorf("get home directory: %w", err)
 	}
 
-	projCfg, err := config.LoadProject(cwd)
+	personasDir := filepath.Join(cwd, ".shell3/personas")
+	personaName := f.persona
+
+	pCfg, err := persona.ParseConfig(personasDir, personaName)
 	if err != nil {
 		return err
 	}
+	if err := persona.Validate(pCfg, personaName); err != nil {
+		return err
+	}
+
 	creds, err := config.LoadCredentials(homeDir)
 	if err != nil {
 		return err
 	}
 
-	model, baseURL, apiKey, provName := resolveConnection(projCfg, creds, f)
+	model, baseURL, apiKey, provName := resolveConnection(pCfg.Provider, pCfg.Model, creds, f)
+
+	noBash := pCfg.NoBash || f.noBash
+	noMemory := pCfg.NoMemory || f.noMemory
 
 	var st *store.Store
-	storeDBPath := filepath.Join(cwd, coalesce(projCfg.StoreDB, ".shell3/shell3.db"))
-	if !f.noMemory {
+	storeDBPath := filepath.Join(cwd, coalesce(pCfg.DB, ".shell3/shell3.db"))
+	if !noMemory {
 		if s, err := store.Open(storeDBPath); err == nil {
 			st = s
 			defer st.Close()
@@ -74,25 +87,24 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	}
 
 	loadedSkills, _ := skills.LoadAll([]string{filepath.Join(cwd, ".shell3/skills")})
-	pType := personality.TypeCode
-	if projCfg.Personality == "agent" {
-		pType = personality.TypeAgent
+	personaData := persona.TemplateData{
+		Skills: skills.BuildSection(loadedSkills),
+		Time:   time.Now().Format("Mon Jan 2 2006, 15:04 MST"),
+		CWD:    cwd,
+		Model:  model,
 	}
-	pers := personality.Build(pType, loadedSkills, st != nil, f.noBash)
+	pers, err := persona.Load(personasDir, personaName, personaData, st != nil, noBash)
+	if err != nil {
+		return err
+	}
 
-	hookRunner := hooks.NewRunner(projCfg.Hooks)
+	hookRunner := hooks.NewRunner(pCfg.HooksConfig())
 
 	statusLine := fmt.Sprintf("%s │ %s", provName, model)
 
-	modeLabel := "c"
-	switch pType {
-	case personality.TypeAgent:
-		modeLabel = "a"
-	}
-
 	// Parse model pool from credentials for /model command.
 	var models []string
-	if provCreds, err := creds.Get(projCfg.Provider); err == nil {
+	if provCreds, err := creds.Get(provName); err == nil {
 		for _, m := range strings.Split(provCreds.DefaultModel, ",") {
 			if m := strings.TrimSpace(m); m != "" {
 				models = append(models, m)
@@ -111,7 +123,7 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		Personality:   pers,
 		WorkDir:       cwd,
 		StatusLine:    statusLine,
-		ModeLabel:     modeLabel,
+		ModeLabel:     pCfg.Name,
 		Models:        models,
 		ModelSwitcher: client.SetModel,
 		Docs:          docsContent,
@@ -123,20 +135,15 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	return chat.RunInteractive(ctx, cfg)
 }
 
-func resolveConnection(projCfg *config.ProjectConfig, creds *config.Credentials, f *runFlags) (model, baseURL, apiKey, provName string) {
+func resolveConnection(providerHint, modelHint string, creds *config.Credentials, f *runFlags) (model, baseURL, apiKey, provName string) {
 	if f.baseURL != "" && f.apiKey != "" {
-		return coalesce(f.model, projCfg.Model, "llama3.2"), f.baseURL, f.apiKey, ""
-	}
-
-	hint := ""
-	if projCfg != nil {
-		hint = projCfg.Provider
+		return coalesce(f.model, modelHint, "llama3.2"), f.baseURL, f.apiKey, ""
 	}
 
 	var provCreds config.ProviderCredentials
-	if hint != "" {
-		if p, ok := creds.Providers[hint]; ok {
-			provName = hint
+	if providerHint != "" {
+		if p, ok := creds.Providers[providerHint]; ok {
+			provName = providerHint
 			provCreds = p
 		}
 	}
@@ -162,7 +169,7 @@ func resolveConnection(projCfg *config.ProjectConfig, creds *config.Credentials,
 		apiKey = provCreds.APIKey
 	}
 
-	model = projCfg.Model
+	model = modelHint
 	if f.model != "" {
 		model = f.model
 	}

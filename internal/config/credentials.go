@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"gopkg.in/yaml.v3"
 )
@@ -74,11 +75,16 @@ func (c *Credentials) Get(provider string) (ProviderCredentials, error) {
 	return p, nil
 }
 
-// First returns the first provider credentials found, along with its name.
-// Useful when no project config specifies a provider.
-func (c *Credentials) First() (name string, creds ProviderCredentials, ok bool) {
-	for name, creds := range c.Providers {
-		return name, creds, true
+// First returns the alphabetically first provider and its credentials.
+func (c *Credentials) First() (string, ProviderCredentials, bool) {
+	if len(c.Providers) == 0 {
+		return "", ProviderCredentials{}, false
 	}
-	return "", ProviderCredentials{}, false
+	names := make([]string, 0, len(c.Providers))
+	for n := range c.Providers {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	name := names[0]
+	return name, c.Providers[name], true
 }

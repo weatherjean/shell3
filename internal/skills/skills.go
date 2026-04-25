@@ -74,16 +74,14 @@ func parse(content string) Skill {
 	return s
 }
 
-// BuildSection formats skills into a # Skills section for the system prompt.
-// Only skills with a name (i.e. valid frontmatter) are included.
-// Full skill body is NOT injected — model reads the file on demand via bash.
+// BuildSection formats loaded skills as a list for {{.Skills}} injection.
+// Returns name, description, and file path per skill — no header or preamble.
+// The persona template is responsible for the # Skills heading and instruction text.
 func BuildSection(ss []Skill) string {
 	if len(ss) == 0 {
 		return ""
 	}
 	var sb strings.Builder
-	sb.WriteString("\n# Skills\n\n")
-	sb.WriteString("Skills are instruction files. When a skill applies to your task, read its file using bash and follow the instructions inside.\n\n")
 	for _, s := range ss {
 		fmt.Fprintf(&sb, "## %s\n", s.Name)
 		if s.Description != "" {
@@ -91,5 +89,5 @@ func BuildSection(ss []Skill) string {
 		}
 		fmt.Fprintf(&sb, "File: %s\n\n", s.Path)
 	}
-	return sb.String()
+	return strings.TrimRight(sb.String(), "\n")
 }

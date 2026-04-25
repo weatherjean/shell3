@@ -8,57 +8,10 @@ import (
 	"github.com/weatherjean/shell3/internal/config"
 )
 
-func TestLoadProjectConfig(t *testing.T) {
-	dir := t.TempDir()
-	shell3Dir := filepath.Join(dir, ".shell3")
-	os.MkdirAll(shell3Dir, 0755)
-
-	yaml := `
-model: llama3.2
-provider: ollama
-default_personality: coder
-store_db: .shell3/shell3.db
-memory_db: .shell3/memory.db
-history_md: .shell3/history.md
-hooks:
-  on_tool_call: ".shell3/hooks/guard.sh"
-`
-	os.WriteFile(filepath.Join(shell3Dir, "config.yaml"), []byte(yaml), 0644)
-
-	cfg, err := config.LoadProject(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Model != "llama3.2" {
-		t.Errorf("got model %q, want llama3.2", cfg.Model)
-	}
-	if cfg.Hooks.OnToolCall.Command != ".shell3/hooks/guard.sh" {
-		t.Errorf("got hook %q", cfg.Hooks.OnToolCall.Command)
-	}
-	if cfg.StoreDB != ".shell3/shell3.db" {
-		t.Errorf("got store_db %q, want .shell3/shell3.db", cfg.StoreDB)
-	}
-}
-
-func TestLoadProjectConfig_Missing(t *testing.T) {
-	_, err := config.LoadProject(t.TempDir())
-	if err == nil {
-		t.Fatal("expected error for missing config")
-	}
-}
-
 func TestLoadCredentials(t *testing.T) {
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, ".shell3"), 0755)
-
-	yaml := `
-providers:
-  ollama:
-    base_url: http://localhost:11434/v1
-  openai:
-    api_key: sk-test123
-    base_url: https://api.openai.com/v1
-`
+	yaml := "providers:\n  openai:\n    api_key: sk-test123\n    base_url: https://api.openai.com/v1\n"
 	os.WriteFile(filepath.Join(dir, ".shell3", "credentials.yaml"), []byte(yaml), 0644)
 
 	creds, err := config.LoadCredentials(dir)
@@ -75,28 +28,44 @@ providers:
 }
 
 func TestLoadCredentials_Missing(t *testing.T) {
-	_, err := config.LoadCredentials(t.TempDir())
-	if err == nil {
+	if _, err := config.LoadCredentials(t.TempDir()); err == nil {
 		t.Fatal("expected error for missing credentials")
 	}
 }
 
-func TestValidate_OK(t *testing.T) {
-	cfg := &config.ProjectConfig{Model: "llama3.2", Provider: "ollama"}
+func TestCredentials_First_AlphabeticalOrder(t *testing.T) {
 	creds := &config.Credentials{
 		Providers: map[string]config.ProviderCredentials{
-			"ollama": {BaseURL: "http://localhost:11434/v1"},
+			"z-provider": {BaseURL: "http://z"},
+			"a-provider": {BaseURL: "http://a"},
 		},
 	}
-	if err := config.Validate(cfg, creds); err != nil {
-		t.Errorf("unexpected error: %v", err)
+	name, p, ok := creds.First()
+	if !ok {
+		t.Fatal("expected a provider")
+	}
+	if name != "a-provider" {
+		t.Errorf("got %q, want a-provider", name)
+	}
+	if p.BaseURL != "http://a" {
+		t.Errorf("got base_url %q", p.BaseURL)
 	}
 }
 
-func TestValidate_MissingProvider(t *testing.T) {
-	cfg := &config.ProjectConfig{Model: "llama3.2", Provider: "openai"}
+func TestCredentials_Get(t *testing.T) {
+	creds := &config.Credentials{Providers: map[string]config.ProviderCredentials{"openai": {APIKey: "sk-abc"}}}
+	p, err := creds.Get("openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.APIKey != "sk-abc" {
+		t.Errorf("got api_key %q", p.APIKey)
+	}
+}
+
+func TestCredentials_Get_Missing(t *testing.T) {
 	creds := &config.Credentials{Providers: map[string]config.ProviderCredentials{}}
-	if err := config.Validate(cfg, creds); err == nil {
-		t.Error("expected error for missing provider credentials")
+	if _, err := creds.Get("ghost"); err == nil {
+		t.Error("expected error for missing provider")
 	}
 }

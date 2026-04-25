@@ -2,15 +2,12 @@
 package scaffold
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/weatherjean/shell3/internal/config"
 	"github.com/weatherjean/shell3/internal/store"
-	"gopkg.in/yaml.v3"
 )
 
 const defaultGitignore = `# shell3 runtime files — do not commit
@@ -19,92 +16,95 @@ memory.db
 history.md
 `
 
-func buildConfig(provider, model, personality string) string {
-	return fmt.Sprintf(`# shell3 project configuration
-model: %s
-provider: %s
-personality: %s
-store_db: .shell3/shell3.db
-memory_db: .shell3/memory.db
-history_md: .shell3/history.md
-hooks:
-  on_session_start: ""
-  on_session_end: ""
-  on_turn_start: ""
-  on_turn_end: ""
-  on_tool_call: ""
-  on_tool_result: ""
-  on_context_build: ""
-  on_error: ""
-`, model, provider, personality)
-}
+const codePersonaTemplate = `---
+name: code
+description: Agentic coding assistant with bash and memory tools
+model: ~
+provider: ~
+db: ~
+no_bash: false
+no_memory: false
+on_session_start: ~
+on_session_end: ~
+on_turn_start: ~
+on_turn_end: ~
+on_tool_call: ~
+on_tool_result: ~
+on_context_build: ~
+on_error: ~
+---
+You are shell3 — an agentic coding assistant running in the user's terminal.
 
-// pickPersonality prompts the user to choose a personality. Returns "code" or "agent".
-func pickPersonality() string {
-	fmt.Println("Select personality:")
-	fmt.Println("  1. code  — coding assistant with bash and memory tools")
-	fmt.Println("  2. agent — general agent with bash, memory, and skills")
-	fmt.Print("> ")
-	scanner := bufio.NewScanner(os.Stdin)
-	if scanner.Scan() {
-		switch strings.TrimSpace(scanner.Text()) {
-		case "2", "agent":
-			return "agent"
-		}
-	}
-	return "code"
-}
+Today is {{.Time}}. Working directory: {{.CWD}}. Model: {{.Model}}.
 
-// checkExisting returns true and prints a status message if .shell3/config.yaml already exists.
-func checkExisting(shell3Dir string) (exists bool) {
-	cfgPath := filepath.Join(shell3Dir, "config.yaml")
-	data, err := os.ReadFile(cfgPath)
+## Tools
+
+bash — execute shell commands to read files, search code, run tests, and make changes.
+
+memory_store   — persist a key-value fact. Call when the user says "remember X" or you learn something worth keeping.
+memory_list    — list all stored memories. Call when asked "what do you remember?".
+memory_search  — full-text search memories by query term.
+memory_remove  — delete a memory entry by key.
+
+history_latest — return the most recent conversation turns. Call when asked about recent or past activity.
+history_search — full-text search past conversation turns.
+
+RULES:
+- When told "remember X" → call memory_store immediately.
+- When asked about memories or past context → call memory_search first. Never answer from training data.
+- Never use bash to find or store memories.
+- history_search searches past conversations. Never use bash to find past chat history.
+- After gathering enough information, respond clearly — do not call tools indefinitely.
+
+## bash tips
+
+File reading — check size first:
+  ls -la path/           # directory
+  wc -l file.go          # single file: under 150: cat; 150-500: sed -n; over 500: rg
+Search: rg 'pattern' path
+Find:   fd 'pattern' or find . -name '*.go'
+Edit:   sd 'old' 'new' file or sed -i 's/old/new/g' file
+Test:   go test ./...
+
+Read before writing. Minimal changes. Test after every change.
+{{- if .Skills}}
+
+# Skills
+
+Skills are instruction files. When a skill applies to your task, read its file using bash and follow the instructions inside.
+
+{{.Skills}}
+{{- end}}`
+
+// checkCredentials verifies that at least one provider is configured in homeDir.
+func checkCredentials(homeDir string) error {
+	creds, err := config.LoadCredentials(homeDir)
 	if err != nil {
-		return false
+		return fmt.Errorf("run `shell3 auth` before `shell3 init`: %w", err)
 	}
-
-	fmt.Printf("Configuration already exists: %s\n", cfgPath)
-
-	var cfg map[string]any
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		fmt.Printf("  ✗ config.yaml is invalid YAML: %v\n", err)
-		return true
+	if _, _, ok := creds.First(); !ok {
+		return fmt.Errorf("no providers configured — run: shell3 auth")
 	}
-
-	required := []string{"model", "provider"}
-	ok := true
-	for _, key := range required {
-		if v, exists := cfg[key]; !exists || v == "" {
-			fmt.Printf("  ✗ missing required field: %s\n", key)
-			ok = false
-		}
-	}
-	if ok {
-		fmt.Printf("  ✓ model:    %v\n", cfg["model"])
-		fmt.Printf("  ✓ provider: %v\n", cfg["provider"])
-	}
-	fmt.Println("  Run `shell3 destroy` to reset and re-init.")
-	return true
+	return nil
 }
 
-func initShell3Dir(projectDir, provider, model, personality string) error {
+func initShell3Dir(projectDir string) error {
 	shell3Dir := filepath.Join(projectDir, ".shell3")
-	if checkExisting(shell3Dir) {
-		return nil
-	}
 	dirs := []string{
 		shell3Dir,
 		filepath.Join(shell3Dir, "skills"),
 		filepath.Join(shell3Dir, "hooks"),
+		filepath.Join(shell3Dir, "personas"),
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0755); err != nil {
 			return fmt.Errorf("scaffold: mkdir %s: %w", d, err)
 		}
 	}
+
 	files := map[string]string{
-		filepath.Join(shell3Dir, "config.yaml"): buildConfig(provider, model, personality),
-		filepath.Join(shell3Dir, ".gitignore"):  defaultGitignore,
+		filepath.Join(shell3Dir, ".gitignore"):           defaultGitignore,
+		filepath.Join(shell3Dir, "personas", "base.md"): codePersonaTemplate,
 	}
 	for path, content := range files {
 		if _, err := os.Stat(path); err == nil {
@@ -114,6 +114,7 @@ func initShell3Dir(projectDir, provider, model, personality string) error {
 			return fmt.Errorf("scaffold: write %s: %w", path, err)
 		}
 	}
+
 	dbPath := filepath.Join(shell3Dir, "shell3.db")
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 		st, err := store.Open(dbPath)
@@ -128,60 +129,12 @@ func initShell3Dir(projectDir, provider, model, personality string) error {
 // InitProject scaffolds a .shell3/ directory under projectDir.
 // Requires credentials to exist in homeDir — run `shell3 auth` first.
 func InitProject(projectDir, homeDir string) error {
-	provider, model, err := firstProviderModel(homeDir)
-	if err != nil {
+	if err := checkCredentials(homeDir); err != nil {
 		return err
 	}
-	personality := pickPersonality()
-	if err := initShell3Dir(projectDir, provider, model, personality); err != nil {
+	if err := initShell3Dir(projectDir); err != nil {
 		return err
 	}
 	fmt.Printf("Initialized .shell3/ in %s\n", projectDir)
-	fmt.Printf("  provider:    %s\n  model:       %s\n  personality: %s\n", provider, model, personality)
 	return nil
-}
-
-// firstProviderModel loads credentials and returns the first provider name and first model.
-func firstProviderModel(homeDir string) (provider, model string, err error) {
-	creds, err := config.LoadCredentials(homeDir)
-	if err != nil {
-		return "", "", fmt.Errorf("run `shell3 auth` before `shell3 init`: %w", err)
-	}
-	name, provCreds, ok := creds.First()
-	if !ok {
-		return "", "", fmt.Errorf("no providers configured — run: shell3 auth")
-	}
-	// Use first model from comma-sep list.
-	m := provCreds.DefaultModel
-	for _, part := range splitComma(m) {
-		if part != "" {
-			m = part
-			break
-		}
-	}
-	return name, m, nil
-}
-
-func splitComma(s string) []string {
-	var out []string
-	start := 0
-	for i := 0; i <= len(s); i++ {
-		if i == len(s) || s[i] == ',' {
-			if p := trim(s[start:i]); p != "" {
-				out = append(out, p)
-			}
-			start = i + 1
-		}
-	}
-	return out
-}
-
-func trim(s string) string {
-	for len(s) > 0 && (s[0] == ' ' || s[0] == '\t') {
-		s = s[1:]
-	}
-	for len(s) > 0 && (s[len(s)-1] == ' ' || s[len(s)-1] == '\t') {
-		s = s[:len(s)-1]
-	}
-	return s
 }
