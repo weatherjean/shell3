@@ -51,7 +51,7 @@ func Build(t Type, loadedSkills []skills.Skill, hasStore, noBash bool) Personali
 
 var docsTool = ToolDef{
 	Name:        "shell3_docs",
-	Description: "Return shell3's own documentation: commands, config format, slash commands, keyboard shortcuts, and project structure. Call when asked what shell3 is or what it can do.",
+	Description: "Return shell3's own documentation: commands, config format, slash commands, keyboard shortcuts, project structure, and skills. Call when asked what shell3 is, what it can do, or how to create a skill.",
 	Parameters:  map[string]any{"type": "object", "properties": map[string]any{}},
 }
 

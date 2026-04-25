@@ -143,6 +143,74 @@ provider: ollama cloud
 
 ---
 
+## Skills
+
+Skills are persistent instruction sets injected into the system prompt at session start. Use them to encode workflows, conventions, or domain rules that should apply across sessions.
+
+### How skills work
+
+- Stored as `.md` files in `.shell3/skills/`
+- At startup, skill name, description, and file path are injected into the system prompt under `# Skills`
+- Full content is **not** eagerly loaded — model reads the file via `bash` when the skill applies to the task
+- Take effect on next session start (restart required after adding/editing)
+- Skills **without** valid frontmatter are silently ignored
+
+### Skill format
+
+Frontmatter is **required**. Skills without it are not loaded.
+
+```markdown
+---
+name: skill-name
+description: one-line summary of what this skill does
+---
+
+# Instructions
+
+Write instructions here. Be direct and specific.
+Rules, workflows, constraints, decision trees — whatever the agent should follow.
+
+Use headings, bullet points, code blocks as needed.
+```
+
+### Creating a skill
+
+To add a skill, write a `.md` file to `.shell3/skills/`:
+
+```bash
+# Example: create a git-workflow skill
+cat > .shell3/skills/git-workflow.md << 'EOF'
+---
+name: git-workflow
+description: Git conventions for this project
+---
+
+Always run tests before committing.
+Use conventional commits: feat/fix/chore/docs/refactor.
+Never force-push to main.
+EOF
+```
+
+Then restart the session — the skill will be active.
+
+### When to use skills vs memory
+
+| Use skill | Use memory |
+|-----------|------------|
+| Rules that always apply | Facts discovered during session |
+| Workflows to follow | Project-specific one-off context |
+| Conventions for this project | Lookup values (keys, IDs, paths) |
+| Instructions for the agent | Information for the agent to recall |
+
+### Skill tips
+
+- Keep each skill focused on one concern
+- Skills stack — multiple files in `.shell3/skills/` all load
+- Order is filesystem order (alphabetical by filename)
+- Name the file after the skill: `git-workflow.md`, `testing.md`, `api-conventions.md`
+
+---
+
 ## Providers
 
 Any OpenAI-compatible endpoint works. Common setups:
