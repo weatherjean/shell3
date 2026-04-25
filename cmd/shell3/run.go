@@ -82,7 +82,13 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 
 	hookRunner := hooks.NewRunner(hooks.Config(projCfg.Hooks))
 
-	statusLine := fmt.Sprintf("%s │ %s │ %s", provName, model, string(pType))
+	statusLine := fmt.Sprintf("%s │ %s", provName, model)
+
+	modeLabel := "c"
+	switch pType {
+	case personality.TypeAgent:
+		modeLabel = "a"
+	}
 
 	// Parse model pool from credentials for /model command.
 	var models []string
@@ -105,8 +111,10 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		Personality:   pers,
 		WorkDir:       cwd,
 		StatusLine:    statusLine,
+		ModeLabel:     modeLabel,
 		Models:        models,
 		ModelSwitcher: client.SetModel,
+		Docs:          docsContent,
 	}
 
 	if initialInput != "" {

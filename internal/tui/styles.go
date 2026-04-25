@@ -67,6 +67,29 @@ var (
 				Foreground(colorGreen).
 				Bold(true)
 
+	// Separator rendered after a user message
+	separatorStyle = lipgloss.NewStyle().
+			Foreground(colorBorder)
+
+	// Mode badge styles (far-right status bar)
+	modeBadgeCode = lipgloss.NewStyle().
+			Background(lipgloss.Color("#1D4ED8")).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Bold(true).
+			Padding(0, 1)
+
+	modeBadgeAgent = lipgloss.NewStyle().
+			Background(lipgloss.Color("#15803D")).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Bold(true).
+			Padding(0, 1)
+
+	modeBadgeCustom = lipgloss.NewStyle().
+			Background(lipgloss.Color("#B91C1C")).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Bold(true).
+			Padding(0, 1)
+
 	// Inline content
 	errorStyle = lipgloss.NewStyle().
 			Foreground(colorRed)

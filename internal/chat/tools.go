@@ -117,15 +117,24 @@ func dispatchStore(name, rawArgs string, st *store.Store) string {
 }
 
 func truncateOutput(s string) string {
-	const maxLines = 50
-	const maxBytes = 5000
-	if len(s) > maxBytes {
-		return s[:maxBytes] + fmt.Sprintf("\n… (+%d bytes)\n", len(s)-maxBytes)
-	}
-	lines := strings.SplitN(s, "\n", maxLines+2)
-	if len(lines) > maxLines+1 {
-		total := strings.Count(s, "\n") + 1
-		return strings.Join(lines[:maxLines], "\n") + fmt.Sprintf("\n… (+%d lines)\n", total-maxLines)
+	const maxLines = 10
+	const maxBytes = 1000
+
+	lines := strings.Split(s, "\n")
+	// Walk lines, stopping at whichever limit hits first.
+	var kept []string
+	used := 0
+	for i, l := range lines {
+		if i >= maxLines {
+			remaining := strings.Join(lines[i:], "\n")
+			return strings.Join(kept, "\n") + fmt.Sprintf("\n… (+%d lines)\n", strings.Count(remaining, "\n")+1)
+		}
+		if used+len(l)+1 > maxBytes {
+			leftover := len(s) - used
+			return strings.Join(kept, "\n") + fmt.Sprintf("\n… (+%d bytes)\n", leftover)
+		}
+		kept = append(kept, l)
+		used += len(l) + 1 // +1 for newline
 	}
 	return s
 }

@@ -38,6 +38,7 @@ func Build(t Type, loadedSkills []skills.Skill, hasStore, noBash bool) Personali
 	prompt := base + skills.BuildSection(loadedSkills)
 
 	var tools []ToolDef
+	tools = append(tools, docsTool)
 	if !noBash {
 		tools = append(tools, bashTool, shellInteractiveTool)
 	}
@@ -46,6 +47,12 @@ func Build(t Type, loadedSkills []skills.Skill, hasStore, noBash bool) Personali
 	}
 
 	return Personality{SystemPrompt: prompt, Tools: tools}
+}
+
+var docsTool = ToolDef{
+	Name:        "shell3_docs",
+	Description: "Return shell3's own documentation: commands, config format, slash commands, keyboard shortcuts, and project structure. Call when asked what shell3 is or what it can do.",
+	Parameters:  map[string]any{"type": "object", "properties": map[string]any{}},
 }
 
 // shellInteractiveTool runs a command with a real terminal (TTY handoff).

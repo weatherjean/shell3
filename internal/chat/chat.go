@@ -12,6 +12,7 @@ import (
 	"github.com/weatherjean/shell3/internal/personality"
 	"github.com/weatherjean/shell3/internal/store"
 	"github.com/weatherjean/shell3/internal/tui"
+	"github.com/weatherjean/shell3/internal/tui/dialog"
 )
 
 // LLMClient is the streaming LLM interface.
@@ -27,9 +28,11 @@ type Config struct {
 	Personality   personality.Personality
 	WorkDir       string
 	StatusLine    string
+	ModeLabel     string       // "c", "a", or "cst" — displayed as mode badge
 	Models        []string     // available models (from credentials)
 	ModelSwitcher func(string) // called on /model switch
 	Truncate      bool         // when true, show full bash output; default false = truncated
+	Docs          string       // embedded shell3 documentation, served by shell3_docs tool
 }
 
 // programReleaser implements hooks.TTYReleaser backed by a tea.Program.
@@ -54,69 +57,82 @@ func RunInteractive(ctx context.Context, cfg Config) error {
 
 	var lastUsage llm.Usage
 
+	switchModel := func(chosen string) tea.Cmd {
+		if cfg.ModelSwitcher != nil {
+			cfg.ModelSwitcher(chosen)
+		}
+		parts := strings.SplitN(cfg.StatusLine, " │ ", 2)
+		provider := ""
+		if len(parts) > 0 {
+			provider = parts[0]
+		}
+		cfg.StatusLine = provider + " │ " + chosen
+		newStatus := cfg.StatusLine
+		return tea.Batch(
+			func() tea.Msg { return tui.AppendMsg(ansiDim + fmt.Sprintf("[model: %s]", chosen) + ansiReset + "\n") },
+			func() tea.Msg { return tui.StatusMsg(newStatus) },
+		)
+	}
+
+	dim := func(s string) tui.AppendMsg {
+		return tui.AppendMsg(ansiDim + s + ansiReset + "\n")
+	}
+
 	handleSlash := func(input string) tea.Cmd {
 		cmd := strings.TrimSpace(strings.ToLower(input))
+		// /model must be handled outside the func() tea.Msg wrapper so we can
+		// return tea.Batch (multiple messages) or OpenDialogMsg directly.
+		if strings.HasPrefix(cmd, "/model") {
+			name := strings.TrimSpace(input[6:])
+			if name == "" {
+				return func() tea.Msg {
+					return tui.OpenDialogMsg{Dialog: dialog.NewModelPicker(cfg.Models, switchModel)}
+				}
+			}
+			return switchModel(name)
+		}
 		return func() tea.Msg {
 			switch cmd {
 			case "/clear":
 				sess.messages = nil
-				return tui.AppendMsg(ansiDim + "\n[context cleared]\n" + ansiReset)
+				return dim("[context cleared]")
 			case "/prune":
 				pruned := pruneLastTurn(sess.messages)
 				if len(pruned) == len(sess.messages) {
-					return tui.AppendMsg(ansiDim + "\n[nothing to prune]\n" + ansiReset)
+					return dim("[nothing to prune]")
 				}
 				sess.messages = pruned
-				return tui.AppendMsg(ansiDim + "\n[last turn removed from context]\n" + ansiReset)
+				return dim("[last turn removed from context]")
 			case "/usage":
 				if lastUsage.TotalTokens == 0 {
-					return tui.AppendMsg(ansiDim + "\n[no usage data yet]\n" + ansiReset)
+					return dim("[no usage data yet]")
 				}
-				return tui.AppendMsg(fmt.Sprintf(
-					"\n"+ansiBold+"token usage"+ansiReset+" (last turn)\n"+
-						ansiDim+"  prompt:     %d\n  completion: %d\n  total:      %d\n"+ansiReset,
+				content := fmt.Sprintf(
+					"prompt:     %d\ncompletion: %d\ntotal:      %d",
 					lastUsage.PromptTokens, lastUsage.CompletionTokens, lastUsage.TotalTokens,
-				))
+				)
+				return tui.OpenDialogMsg{Dialog: dialog.NewCommandOutput("/usage", content)}
 			case "/prompt":
 				var sb strings.Builder
-				fmt.Fprintf(&sb, "\n"+ansiBold+"system prompt:"+ansiReset+"\n")
-				fmt.Fprintf(&sb, ansiDim+"%s"+ansiReset+"\n", cfg.Personality.SystemPrompt)
+				fmt.Fprintf(&sb, ansiBold+"system prompt:"+ansiReset+"\n%s\n\n", cfg.Personality.SystemPrompt)
 				fmt.Fprintf(&sb, ansiBold+"active tools:"+ansiReset+"\n")
 				for _, t := range cfg.Personality.Tools {
-					fmt.Fprintf(&sb, "  %s  %s\n", t.Name, t.Description)
+					fmt.Fprintf(&sb, "  %-16s %s\n", t.Name, t.Description)
 				}
-				return tui.AppendMsg(sb.String())
+				return tui.OpenDialogMsg{Dialog: dialog.NewCommandOutput("/prompt", sb.String())}
 			case "/truncate":
 				cfg.Truncate = !cfg.Truncate
 				state := "off"
 				if cfg.Truncate {
 					state = "on"
 				}
-				return tui.AppendMsg(fmt.Sprintf(ansiDim+"\n[full output: %s]\n"+ansiReset, state))
+				return dim(fmt.Sprintf("[full output: %s]", state))
 			case "/exit", "/quit":
-				return func() tea.Msg { return tea.Quit() }
-			case "/help", "/list", "/":
-				return tui.AppendMsg(slashHelp())
+				return tea.Quit()
+			case "/help", "/list", "/", "/h":
+				return tui.OpenDialogMsg{Dialog: dialog.NewCommandOutput("/help", slashHelp())}
 			default:
-				// /model <name>
-				if strings.HasPrefix(cmd, "/model") {
-					name := strings.TrimSpace(input[6:])
-					if name == "" {
-						var sb strings.Builder
-						fmt.Fprintf(&sb, "\n"+ansiBold+"available models:"+ansiReset+"\n")
-						for _, m := range cfg.Models {
-							fmt.Fprintf(&sb, "  %s\n", m)
-						}
-						return tui.AppendMsg(sb.String())
-					}
-					if cfg.ModelSwitcher != nil {
-						cfg.ModelSwitcher(name)
-					}
-					return tui.AppendMsg(fmt.Sprintf(ansiDim+"\n[model: %s]\n"+ansiReset, name))
-				}
-				return tui.AppendMsg(fmt.Sprintf(
-					ansiDim+"\nunknown command: %s  (type /help to list commands)\n"+ansiReset, input,
-				))
+				return dim(fmt.Sprintf("[unknown command: %s  (type /help to list commands)]", input))
 			}
 		}
 	}
@@ -126,22 +142,30 @@ func RunInteractive(ctx context.Context, cfg Config) error {
 			return handleSlash(input)
 		}
 		ch := make(chan tea.Msg, 256)
+		out := make(chan tea.Msg, 256)
 		prevLen := len(sess.messages)
 		turnCtx, cancel := context.WithCancel(ctx)
 		go func() {
 			defer cancel()
 			runTurn(turnCtx, cfg, sess, input, ch)
-			// Capture usage from the turn for /usage command.
-			// (Usage is also delivered via TurnDoneMsg to the model.)
 			saveHistory(cfg, sess, sessionID, prevLen)
+		}()
+		go func() {
+			for msg := range ch {
+				if done, ok := msg.(tui.TurnDoneMsg); ok {
+					lastUsage = done.Usage
+				}
+				out <- msg
+			}
+			close(out)
 		}()
 		return tea.Batch(
 			func() tea.Msg { return tui.SetCancelMsg{Cancel: cancel} },
-			tui.ReadCh(ch),
+			tui.ReadCh(out),
 		)
 	}
 
-	model := tui.New("shell3", cfg.StatusLine, submitFn)
+	model := tui.New("shell3", cfg.StatusLine, cfg.ModeLabel, submitFn)
 
 	rel := &programReleaser{}
 	prog := tea.NewProgram(model)
