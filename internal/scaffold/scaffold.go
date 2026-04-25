@@ -2,9 +2,11 @@
 package scaffold
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/weatherjean/shell3/internal/config"
 	"github.com/weatherjean/shell3/internal/store"
@@ -16,17 +18,34 @@ history.md
 shell3.db
 `
 
-func buildConfig(provider, model string) string {
+func buildConfig(provider, model, personality string) string {
 	return fmt.Sprintf(`# shell3 project configuration
 model: %s
 provider: %s
+personality: %s
 store_db: .shell3/shell3.db
 memory_db: .shell3/memory.db
 history_md: .shell3/history.md
 hooks:
   on_tool_call: ""
   on_context_build: ""
-`, model, provider)
+`, model, provider, personality)
+}
+
+// pickPersonality prompts the user to choose a personality. Returns "code" or "agent".
+func pickPersonality() string {
+	fmt.Println("Select personality:")
+	fmt.Println("  1. code  — coding assistant with bash and memory tools")
+	fmt.Println("  2. agent — general agent with bash, memory, and skills")
+	fmt.Print("> ")
+	scanner := bufio.NewScanner(os.Stdin)
+	if scanner.Scan() {
+		switch strings.TrimSpace(scanner.Text()) {
+		case "2", "agent":
+			return "agent"
+		}
+	}
+	return "code"
 }
 
 // checkExisting returns true and prints a status message if .shell3/config.yaml already exists.
@@ -61,7 +80,7 @@ func checkExisting(shell3Dir string) (exists bool) {
 	return true
 }
 
-func initShell3Dir(projectDir, provider, model string) error {
+func initShell3Dir(projectDir, provider, model, personality string) error {
 	shell3Dir := filepath.Join(projectDir, ".shell3")
 	if checkExisting(shell3Dir) {
 		return nil
@@ -77,7 +96,7 @@ func initShell3Dir(projectDir, provider, model string) error {
 		}
 	}
 	files := map[string]string{
-		filepath.Join(shell3Dir, "config.yaml"): buildConfig(provider, model),
+		filepath.Join(shell3Dir, "config.yaml"): buildConfig(provider, model, personality),
 		filepath.Join(shell3Dir, ".gitignore"):  defaultGitignore,
 	}
 	for path, content := range files {
@@ -106,26 +125,12 @@ func InitProject(projectDir, homeDir string) error {
 	if err != nil {
 		return err
 	}
-	if err := initShell3Dir(projectDir, provider, model); err != nil {
+	personality := pickPersonality()
+	if err := initShell3Dir(projectDir, provider, model, personality); err != nil {
 		return err
 	}
 	fmt.Printf("Initialized .shell3/ in %s\n", projectDir)
-	fmt.Printf("  provider: %s\n  model:    %s\n", provider, model)
-	return nil
-}
-
-// InitCodeProject scaffolds a .shell3/ directory tuned for shell3 code.
-// Requires credentials to exist in homeDir — run `shell3 auth` first.
-func InitCodeProject(projectDir, homeDir string) error {
-	provider, model, err := firstProviderModel(homeDir)
-	if err != nil {
-		return err
-	}
-	if err := initShell3Dir(projectDir, provider, model); err != nil {
-		return err
-	}
-	fmt.Printf("Initialized .shell3/ (code agent) in %s\n", projectDir)
-	fmt.Printf("  provider: %s\n  model:    %s\n", provider, model)
+	fmt.Printf("  provider:    %s\n  model:       %s\n  personality: %s\n", provider, model, personality)
 	return nil
 }
 

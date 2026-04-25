@@ -26,3 +26,9 @@ type hookOutput struct {
 	Params   map[string]any `json:"params,omitempty"`
 	Messages any            `json:"messages,omitempty"`
 }
+
+// TTYReleaser suspends and resumes the TUI so subprocess hooks can use the real terminal.
+type TTYReleaser interface {
+	Release() error
+	Restore() error
+}

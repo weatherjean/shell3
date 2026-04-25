@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -15,10 +16,16 @@ import (
 const hookTimeout = 5 * time.Second
 
 // Runner dispatches lifecycle hooks as shell subprocesses.
-type Runner struct{ cfg Config }
+type Runner struct {
+	cfg      Config
+	releaser TTYReleaser
+}
 
 // NewRunner returns a Runner with the given hook configuration.
-func NewRunner(cfg Config) *Runner { return &Runner{cfg} }
+func NewRunner(cfg Config) *Runner { return &Runner{cfg: cfg} }
+
+// SetReleaser sets the TTYReleaser used by fire-and-forget hooks.
+func (r *Runner) SetReleaser(rel TTYReleaser) { r.releaser = rel }
 
 func (r *Runner) callHook(ctx context.Context, cmd string, input hookInput) (hookOutput, error) {
 	ctx, cancel := context.WithTimeout(ctx, hookTimeout)
@@ -45,6 +52,26 @@ func (r *Runner) callHook(ctx context.Context, cmd string, input hookInput) (hoo
 		return hookOutput{}, fmt.Errorf("hooks: %q bad JSON output: %w", cmd, err)
 	}
 	return out, nil
+}
+
+// callHookTTY runs a fire-and-forget hook with the real terminal (stdio inherited).
+// If no releaser is set, the hook runs without TTY release.
+func (r *Runner) callHookTTY(ctx context.Context, cmd string, input hookInput) {
+	ctx, cancel := context.WithTimeout(ctx, hookTimeout)
+	defer cancel()
+
+	data, _ := json.Marshal(input)
+	parts := strings.Fields(cmd)
+	c := exec.CommandContext(ctx, parts[0], parts[1:]...)
+	c.Stdin = bytes.NewReader(data)
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+
+	if r.releaser != nil {
+		_ = r.releaser.Release()
+		defer r.releaser.Restore()
+	}
+	_ = c.Run()
 }
 
 // OnToolCall returns true if the tool call is allowed by the hook.
@@ -86,31 +113,31 @@ func (r *Runner) OnContextBuild(ctx context.Context, msgs []llm.Message) ([]llm.
 	return result, nil
 }
 
-// OnSessionStart fires the on_session_start hook. Errors are logged but non-fatal.
+// OnSessionStart fires the on_session_start hook. Errors are non-fatal.
 func (r *Runner) OnSessionStart(ctx context.Context) {
 	if r.cfg.OnSessionStart != "" {
-		_, _ = r.callHook(ctx, r.cfg.OnSessionStart, hookInput{Hook: "on_session_start"})
+		r.callHookTTY(ctx, r.cfg.OnSessionStart, hookInput{Hook: "on_session_start"})
 	}
 }
 
-// OnSessionEnd fires the on_session_end hook. Errors are logged but non-fatal.
+// OnSessionEnd fires the on_session_end hook. Errors are non-fatal.
 func (r *Runner) OnSessionEnd(ctx context.Context) {
 	if r.cfg.OnSessionEnd != "" {
-		_, _ = r.callHook(ctx, r.cfg.OnSessionEnd, hookInput{Hook: "on_session_end"})
+		r.callHookTTY(ctx, r.cfg.OnSessionEnd, hookInput{Hook: "on_session_end"})
 	}
 }
 
-// OnTurnStart fires the on_turn_start hook. Errors are logged but non-fatal.
+// OnTurnStart fires the on_turn_start hook. Errors are non-fatal.
 func (r *Runner) OnTurnStart(ctx context.Context) {
 	if r.cfg.OnTurnStart != "" {
-		_, _ = r.callHook(ctx, r.cfg.OnTurnStart, hookInput{Hook: "on_turn_start"})
+		r.callHookTTY(ctx, r.cfg.OnTurnStart, hookInput{Hook: "on_turn_start"})
 	}
 }
 
 // OnTurnEnd fires the on_turn_end hook with the assistant response. Errors are non-fatal.
 func (r *Runner) OnTurnEnd(ctx context.Context, response string) {
 	if r.cfg.OnTurnEnd != "" {
-		_, _ = r.callHook(ctx, r.cfg.OnTurnEnd, hookInput{
+		r.callHookTTY(ctx, r.cfg.OnTurnEnd, hookInput{
 			Hook:   "on_turn_end",
 			Params: map[string]any{"response": response},
 		})
@@ -120,7 +147,7 @@ func (r *Runner) OnTurnEnd(ctx context.Context, response string) {
 // OnToolResult fires the on_tool_result hook. Errors are non-fatal.
 func (r *Runner) OnToolResult(ctx context.Context, tool, result string) {
 	if r.cfg.OnToolResult != "" {
-		_, _ = r.callHook(ctx, r.cfg.OnToolResult, hookInput{
+		r.callHookTTY(ctx, r.cfg.OnToolResult, hookInput{
 			Hook:   "on_tool_result",
 			Tool:   tool,
 			Params: map[string]any{"result": result},
