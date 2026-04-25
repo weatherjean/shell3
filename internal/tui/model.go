@@ -397,9 +397,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, spCmd)
 
 	if m.ready {
-		var vpCmd tea.Cmd
-		m.viewport, vpCmd = m.viewport.Update(msg)
-		cmds = append(cmds, vpCmd)
+		switch msg.(type) {
+		case tea.KeyPressMsg, tea.PasteMsg, tea.PasteStartMsg, tea.PasteEndMsg:
+			// block keyboard/paste events from leaking into viewport scroll
+		default:
+			var vpCmd tea.Cmd
+			m.viewport, vpCmd = m.viewport.Update(msg)
+			cmds = append(cmds, vpCmd)
+		}
 	}
 
 	return m, tea.Batch(cmds...)
@@ -410,6 +415,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) View() tea.View {
 	var v tea.View
 	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
 
 	if !m.ready {
 		v.Content = "initializing…"

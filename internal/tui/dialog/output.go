@@ -6,6 +6,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // OutputID is the stable identifier for the command-output dialog.
@@ -13,9 +14,11 @@ const OutputID = "command-output"
 
 // CommandOutput displays the output of a slash command in a scrollable modal.
 type CommandOutput struct {
-	title  string
-	lines  []string
-	offset int
+	title        string
+	lines        []string // raw content lines (may be longer than display width)
+	offset       int
+	displayLines []string // lines pre-wrapped to cachedWidth; rebuilt when width changes
+	cachedWidth  int
 }
 
 // NewCommandOutput creates a dialog showing title + content.
@@ -86,8 +89,18 @@ func (c *CommandOutput) View(width, height int) string {
 		bodyH = 1
 	}
 
+	// rebuild display lines when width changes so each entry is exactly one terminal row
+	if innerW != c.cachedWidth {
+		c.displayLines = c.displayLines[:0]
+		for _, l := range c.lines {
+			wrapped := strings.Split(ansi.Hardwrap(l, innerW, true), "\n")
+			c.displayLines = append(c.displayLines, wrapped...)
+		}
+		c.cachedWidth = innerW
+	}
+
 	// clamp scroll offset
-	maxOffset := len(c.lines) - bodyH
+	maxOffset := len(c.displayLines) - bodyH
 	if maxOffset < 0 {
 		maxOffset = 0
 	}
@@ -99,10 +112,10 @@ func (c *CommandOutput) View(width, height int) string {
 	}
 
 	end := c.offset + bodyH
-	if end > len(c.lines) {
-		end = len(c.lines)
+	if end > len(c.displayLines) {
+		end = len(c.displayLines)
 	}
-	visible := c.lines[c.offset:end]
+	visible := c.displayLines[c.offset:end]
 
 	bodyLines := make([]string, bodyH)
 	for i := range bodyLines {
@@ -112,7 +125,7 @@ func (c *CommandOutput) View(width, height int) string {
 	}
 
 	scrollIndicator := ""
-	if len(c.lines) > bodyH {
+	if len(c.displayLines) > bodyH {
 		scrollIndicator = lipgloss.NewStyle().Foreground(colorMuted).Render(
 			" · " + strings.Repeat("─", 0) +
 				lipgloss.NewStyle().Foreground(colorAccent).Render("↑/↓"),
