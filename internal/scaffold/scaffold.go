@@ -14,7 +14,6 @@ import (
 )
 
 const defaultGitignore = `# shell3 runtime files — do not commit
-config.yaml
 shell3.db
 memory.db
 history.md
