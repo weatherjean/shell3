@@ -13,9 +13,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const defaultGitignore = `memory.db
-history.md
+const defaultGitignore = `# shell3 runtime files — do not commit
+config.yaml
 shell3.db
+memory.db
+history.md
 `
 
 func buildConfig(provider, model, personality string) string {
