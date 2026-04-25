@@ -8,15 +8,17 @@ import (
 
 var (
 	welcomeTitleStyle = lipgloss.NewStyle().
-		Foreground(colorPrimary).
-		Bold(true)
+				Foreground(colorPrimary).
+				Bold(true)
 
 	welcomeSubStyle = lipgloss.NewStyle().
-		Foreground(colorFgDim)
+			Foreground(colorFgDim)
 
 	welcomeDimStyle = lipgloss.NewStyle().
-		Foreground(colorMuted)
+			Foreground(colorMuted)
 )
+
+const asciiLogo = "       /\\\n      {.-}\n     ;_.-'\\\n    {    _.}_\n     \\.-' /  `\n      \\  |    /\n       \\ |  ,/\n        \\|_/"
 
 // renderWelcome returns the landing screen shown before the first message.
 func renderWelcome(width int) string {
@@ -24,7 +26,10 @@ func renderWelcome(width int) string {
 		width = 80
 	}
 
-	title := welcomeTitleStyle.Render("◆ shell3")
+	logo := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).Render(asciiLogo)
+	phonetic := welcomeDimStyle.Render("/'ʃɛli/")
+	title := welcomeTitleStyle.Render("◆ shell3") + "  " + phonetic
+
 	sub := welcomeSubStyle.Render("AI-powered shell assistant")
 
 	hints := []string{
@@ -34,6 +39,8 @@ func renderWelcome(width int) string {
 	}
 
 	var b strings.Builder
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Width(width).Align(lipgloss.Center).Render(logo))
 	b.WriteString("\n")
 	b.WriteString(lipgloss.NewStyle().Width(width).Align(lipgloss.Left).PaddingLeft(2).Render(title))
 	b.WriteString("\n")

@@ -120,7 +120,7 @@ func (m *Model) viewContent() string {
 	if m.history == "" && m.nonLLM.Len() == 0 && m.llmBuf.Len() == 0 {
 		return renderWelcome(m.width)
 	}
-	return m.history + m.nonLLM.String() + m.llmBuf.String()
+	return m.history + m.nonLLM.String() + wrapToWidth(m.llmBuf.String(), m.width)
 }
 
 func (m *Model) refreshViewport() {
