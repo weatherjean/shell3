@@ -139,7 +139,7 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 				if cfg.Truncate {
 					display = out
 				}
-				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(display, "\n")) + "\n"}
+				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(display, "\n")) + "\n\n"}
 			} else if tc.Name == "shell_interactive" {
 				command := parseBashCommand(tc.RawArgs)
 				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Yellow+patchtui.Bold+"#%s $ %s"+patchtui.Reset+" (interactive)\n", tc.ID, command)}
@@ -147,31 +147,31 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 				ch <- patchapp.TTYExecEvent{Cmd: command, WorkDir: cfg.WorkDir, ReplyC: replyC}
 				out = <-replyC
 			} else if tc.Name == "prune_tool_result" {
-				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Green+patchtui.Bold+"#%s → %s(%s)"+patchtui.Reset+"\n", tc.ID, tc.Name, tc.RawArgs)}
+				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.MutedGreen+patchtui.Bold+"#%s → %s(%s)"+patchtui.Reset+"\n", tc.ID, tc.Name, tc.RawArgs)}
 				out = handlePruneToolResult(tc.RawArgs, allMsgs, sess.messages)
-				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(out, "\n")) + "\n"}
+				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(out, "\n")) + "\n\n"}
 			} else if tc.Name == "shell3_docs" {
-				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Green+patchtui.Bold+"#%s → shell3_docs"+patchtui.Reset+"\n", tc.ID)}
+				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.MutedGreen+patchtui.Bold+"#%s → shell3_docs"+patchtui.Reset+"\n", tc.ID)}
 				out = cfg.Docs
 				if out == "" {
 					out = "Documentation not available."
 				}
 			} else if userTool, ok := cfg.UserTools[tc.Name]; ok {
-				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Green+patchtui.Bold+"#%s → %s(%s)"+patchtui.Reset+"\n", tc.ID, tc.Name, tc.RawArgs)}
+				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.MutedGreen+patchtui.Bold+"#%s → %s(%s)"+patchtui.Reset+"\n", tc.ID, tc.Name, tc.RawArgs)}
 				out = dispatchUserTool(ctx, userTool, tc.RawArgs, cfg.Secrets, cfg.WorkDir)
 				display := truncateOutput(out)
 				if cfg.Truncate {
 					display = out
 				}
-				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(display, "\n")) + "\n"}
+				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(display, "\n")) + "\n\n"}
 			} else {
-				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Green+patchtui.Bold+"#%s → %s(%s)"+patchtui.Reset+"\n", tc.ID, tc.Name, tc.RawArgs)}
+				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.MutedGreen+patchtui.Bold+"#%s → %s(%s)"+patchtui.Reset+"\n", tc.ID, tc.Name, tc.RawArgs)}
 				out = dispatchStore(tc.Name, tc.RawArgs, cfg.Store)
 				display := truncateOutput(out)
 				if cfg.Truncate {
 					display = out
 				}
-				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(display, "\n")) + "\n"}
+				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(display, "\n")) + "\n\n"}
 			}
 
 			cfg.Hooks.OnToolResult(ctx, tc.Name, out)

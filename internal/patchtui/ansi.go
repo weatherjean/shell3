@@ -28,6 +28,10 @@ const (
 	White   = "\033[37m"
 )
 
+// MutedGreen is a desaturated sage-ish green for tool-call headers. Less
+// loud than the bright ANSI green so tool output blocks don't dominate.
+var MutedGreen = FgRGB(120, 170, 120)
+
 // FgRGB returns the SGR sequence to set the foreground to a 24-bit RGB color.
 func FgRGB(r, g, b int) string { return fmt.Sprintf("\033[38;2;%d;%d;%dm", r, g, b) }
 

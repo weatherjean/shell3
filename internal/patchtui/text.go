@@ -3,11 +3,15 @@ package patchtui
 import "strings"
 
 // SplitLines splits text on '\n' and returns the resulting lines, dropping
-// a trailing empty element if text ends with '\n'. Returns nil for the
-// empty string. Useful for converting accumulated stream output into the
-// []string slices that [Renderer.Print] expects.
+// at most one trailing '\n' so a final newline acts as a line terminator
+// rather than producing a spurious empty line. Multiple trailing newlines
+// are preserved as blank lines so callers can intentionally emit spacing.
+// Returns nil for the empty string.
 func SplitLines(text string) []string {
-	text = strings.TrimRight(text, "\n")
+	if text == "" {
+		return nil
+	}
+	text = strings.TrimSuffix(text, "\n")
 	if text == "" {
 		return nil
 	}
