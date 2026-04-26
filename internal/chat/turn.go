@@ -7,14 +7,8 @@ import (
 	"strings"
 
 	"github.com/weatherjean/shell3/internal/llm"
-	"github.com/weatherjean/shell3/internal/tui"
-)
-
-const (
-	ansiBold   = "\033[1m"
-	ansiYellow = "\033[33m"
-	ansiDim    = "\033[2m"
-	ansiReset  = "\033[0m"
+	"github.com/weatherjean/shell3/internal/patchtui"
+	"github.com/weatherjean/shell3/internal/patchapp"
 )
 
 // dimLines wraps each non-empty line with dim+reset so the style is
@@ -23,21 +17,21 @@ func dimLines(s string) string {
 	lines := strings.Split(s, "\n")
 	for i, l := range lines {
 		if l != "" {
-			lines[i] = ansiDim + l + ansiReset
+			lines[i] = patchtui.Dim + l + patchtui.Reset
 		}
 	}
 	return strings.Join(lines, "\n")
 }
 
-// runTurn executes one user→assistant exchange, sending tui events to ch.
+// runTurn executes one user→assistant exchange, sending events to ch.
 // The goroutine closes ch when done.
-func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch chan<- tui.Event) {
+func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch chan<- patchapp.Event) {
 	defer close(ch)
 	defer func() {
 		if r := recover(); r != nil {
 			err := fmt.Errorf("panic: %v", r)
 			cfg.Hooks.OnError(ctx, err)
-			ch <- tui.TurnErrEvent{Err: err}
+			ch <- patchapp.TurnErrEvent{Err: err}
 		}
 	}()
 
@@ -59,7 +53,7 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 		text, toolCalls, usage, err := streamOnce(ctx, cfg.LLM, allMsgs, cfg.Personality.Tools, ch)
 		if err != nil {
 			cfg.Hooks.OnError(ctx, err)
-			ch <- tui.TurnErrEvent{Err: err}
+			ch <- patchapp.TurnErrEvent{Err: err}
 			return
 		}
 
@@ -71,7 +65,7 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 		}
 
 		if len(toolCalls) == 0 {
-			ch <- tui.TurnDoneEvent{Usage: usage}
+			ch <- patchapp.TurnDoneEvent{Usage: usage}
 			return
 		}
 
@@ -87,33 +81,33 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 				out = fmt.Sprintf("Tool call blocked: %v", hookErr)
 			} else if tc.Name == "bash" {
 				command := parseBashCommand(tc.RawArgs)
-				ch <- tui.AppendEvent{Text: fmt.Sprintf(ansiYellow+ansiBold+"$ %s"+ansiReset+"\n", command)}
+				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Yellow+patchtui.Bold+"$ %s"+patchtui.Reset+"\n", command)}
 				out = executeBash(ctx, command, cfg.WorkDir)
 				display := truncateOutput(out)
 				if cfg.Truncate {
 					display = out
 				}
-				ch <- tui.AppendEvent{Text: dimLines(strings.TrimRight(display, "\n")) + "\n"}
+				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(display, "\n")) + "\n"}
 			} else if tc.Name == "shell_interactive" {
 				command := parseBashCommand(tc.RawArgs)
-				ch <- tui.AppendEvent{Text: fmt.Sprintf(ansiYellow+ansiBold+"$ %s"+ansiReset+" (interactive)\n", command)}
+				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Yellow+patchtui.Bold+"$ %s"+patchtui.Reset+" (interactive)\n", command)}
 				replyC := make(chan string, 1)
-				ch <- tui.TTYExecEvent{Cmd: command, WorkDir: cfg.WorkDir, ReplyC: replyC}
+				ch <- patchapp.TTYExecEvent{Cmd: command, WorkDir: cfg.WorkDir, ReplyC: replyC}
 				out = <-replyC
 			} else if tc.Name == "shell3_docs" {
-				ch <- tui.AppendEvent{Text: ansiBold + "→ shell3_docs" + ansiReset + "\n"}
+				ch <- patchapp.AppendEvent{Text: patchtui.Bold + "→ shell3_docs" + patchtui.Reset + "\n"}
 				out = cfg.Docs
 				if out == "" {
 					out = "Documentation not available."
 				}
 			} else {
-				ch <- tui.AppendEvent{Text: fmt.Sprintf(ansiBold+"→ %s(%s)"+ansiReset+"\n", tc.Name, tc.RawArgs)}
+				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Bold+"→ %s(%s)"+patchtui.Reset+"\n", tc.Name, tc.RawArgs)}
 				out = dispatchStore(tc.Name, tc.RawArgs, cfg.Store)
 				display := truncateOutput(out)
 				if cfg.Truncate {
 					display = out
 				}
-				ch <- tui.AppendEvent{Text: dimLines(strings.TrimRight(display, "\n")) + "\n"}
+				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(display, "\n")) + "\n"}
 			}
 
 			cfg.Hooks.OnToolResult(ctx, tc.Name, out)
@@ -131,12 +125,12 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 
 // streamOnce calls the LLM once, collecting text/tool-calls/usage and
 // emitting ChunkEvents on ch.
-func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools []llm.ToolDefinition, ch chan<- tui.Event) (text string, toolCalls []llm.ToolCall, usage llm.Usage, err error) {
+func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools []llm.ToolDefinition, ch chan<- patchapp.Event) (text string, toolCalls []llm.ToolCall, usage llm.Usage, err error) {
 	var sb strings.Builder
 	streamErr := client.Stream(ctx, msgs, tools, func(ev llm.StreamEvent) {
 		if ev.TextDelta != "" {
 			sb.WriteString(ev.TextDelta)
-			ch <- tui.ChunkEvent{Text: ev.TextDelta}
+			ch <- patchapp.ChunkEvent{Text: ev.TextDelta}
 		}
 		if ev.ToolCall != nil {
 			toolCalls = append(toolCalls, *ev.ToolCall)

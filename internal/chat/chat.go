@@ -13,7 +13,7 @@ import (
 	"github.com/weatherjean/shell3/internal/patchtui"
 	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/store"
-	"github.com/weatherjean/shell3/internal/tui"
+	"github.com/weatherjean/shell3/internal/patchapp"
 )
 
 // LLMClient is the streaming LLM interface.
@@ -36,28 +36,6 @@ type Config struct {
 	Docs          string
 }
 
-// appReleaser implements hooks.TTYReleaser by delegating to App.WithReleasedTerminal.
-// Hooks call Release() before running and Restore() after; we handle both
-// by calling WithReleasedTerminal with a wait-channel pattern.
-type appReleaser struct {
-	app  *tui.App
-	done chan struct{}
-}
-
-func (r *appReleaser) Release() error {
-	r.done = make(chan struct{})
-	go r.app.WithReleasedTerminal(func() { <-r.done })
-	return nil
-}
-
-func (r *appReleaser) Restore() error {
-	if r.done != nil {
-		close(r.done)
-		r.done = nil
-	}
-	return nil
-}
-
 // RunInteractive runs the TUI chat loop. Blocks until the user quits.
 func RunInteractive(ctx context.Context, cfg Config) error {
 	sess := &session{}
@@ -72,22 +50,21 @@ func RunInteractive(ctx context.Context, cfg Config) error {
 		defer cfg.Store.EndSession(sessionID)
 	}
 
-	app := tui.New(cfg.ModeLabel, cfg.StatusLine)
+	app := patchapp.New(cfg.ModeLabel, cfg.StatusLine)
 
-	cfg.Hooks.SetReleaser(&appReleaser{app: app})
+	cfg.Hooks.SetReleaser(app)
 	cfg.Hooks.OnSessionStart(ctx)
 	defer cfg.Hooks.OnSessionEnd(ctx)
 
 	var lastUsage llm.Usage
 
+	registerSlashCommands(app, &cfg, sess, &lastUsage)
+
 	app.SetSubmit(func(input string) {
-		trimmed := strings.TrimSpace(input)
-		if strings.HasPrefix(trimmed, "/") {
-			handleSlash(input, &cfg, sess, app, &lastUsage)
-			return
-		}
-		// Launch turn goroutine.
-		ch := make(chan tui.Event, 256)
+		// Launch turn goroutine. Slash commands are dispatched by patchapp
+		// before this callback fires, so anything reaching here is real
+		// chat input.
+		ch := make(chan patchapp.Event, 256)
 		turnCtx, cancel := context.WithCancel(ctx)
 		app.SetBusy(true, cancel)
 
@@ -106,7 +83,7 @@ func RunInteractive(ctx context.Context, cfg Config) error {
 // drainTurn consumes events from a turn goroutine, updating App state.
 // Streaming text accumulates into a buffer; on TurnDone the buffer is
 // committed to scrollback and the App returns to idle.
-func drainTurn(ch <-chan tui.Event, app *tui.App, lastUsage *llm.Usage, cfg *Config) {
+func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Usage, cfg *Config) {
 	var streamBuf strings.Builder
 	flushPreview := func() {
 		text := streamBuf.String()
@@ -120,11 +97,11 @@ func drainTurn(ch <-chan tui.Event, app *tui.App, lastUsage *llm.Usage, cfg *Con
 
 	for ev := range ch {
 		switch v := ev.(type) {
-		case tui.ChunkEvent:
+		case patchapp.ChunkEvent:
 			streamBuf.WriteString(v.Text)
 			flushPreview()
 
-		case tui.AppendEvent:
+		case patchapp.AppendEvent:
 			// Tool output. Commit any pending stream text first so order is preserved.
 			if streamBuf.Len() > 0 {
 				app.SetStreamPreview(nil)
@@ -132,9 +109,9 @@ func drainTurn(ch <-chan tui.Event, app *tui.App, lastUsage *llm.Usage, cfg *Con
 				app.Print(patchmd.Render(streamBuf.String(), w-2))
 				streamBuf.Reset()
 			}
-			app.Print(splitLines(v.Text))
+			app.Print(patchtui.SplitLines(v.Text))
 
-		case tui.TurnDoneEvent:
+		case patchapp.TurnDoneEvent:
 			if streamBuf.Len() > 0 {
 				app.SetStreamPreview(nil)
 				w, _ := patchtui.Size()
@@ -147,21 +124,21 @@ func drainTurn(ch <-chan tui.Event, app *tui.App, lastUsage *llm.Usage, cfg *Con
 			}
 			app.SetBusy(false, nil)
 
-		case tui.TurnErrEvent:
+		case patchapp.TurnErrEvent:
 			if streamBuf.Len() > 0 {
 				app.SetStreamPreview(nil)
-				app.Print(splitLines(streamBuf.String()))
+				app.Print(patchtui.SplitLines(streamBuf.String()))
 				streamBuf.Reset()
 			}
 			msg := v.Err.Error()
 			if strings.Contains(msg, "context canceled") {
-				app.PrintLine(ansiDim + "[cancelled]" + ansiReset)
+				app.PrintLine(patchtui.Dim + "[cancelled]" + patchtui.Reset)
 			} else {
-				app.PrintLine("\033[31m[error: " + msg + "]\033[0m")
+				app.PrintLine(patchtui.Red + "[error: " + msg + "]" + patchtui.Reset)
 			}
 			app.SetBusy(false, nil)
 
-		case tui.TTYExecEvent:
+		case patchapp.TTYExecEvent:
 			// Run the command with full TTY access. The turn goroutine
 			// blocks on ReplyC; we deliver the result after the command exits.
 			result := "(completed)"
@@ -182,108 +159,120 @@ func drainTurn(ch <-chan tui.Event, app *tui.App, lastUsage *llm.Usage, cfg *Con
 	}
 }
 
-// splitLines splits text on '\n', trimming the final empty element if the
-// input ends with '\n'.
-func splitLines(text string) []string {
-	text = strings.TrimRight(text, "\n")
-	if text == "" {
-		return nil
-	}
-	return strings.Split(text, "\n")
+// slashTarget abstracts the side of patchapp.App used by slash command
+// handlers. This is what RegisterSlash needs from us; concrete *App
+// satisfies it. We don't reuse appView so the registration site can be
+// tested without dragging in event-drain machinery.
+type slashTarget interface {
+	Print(lines []string)
+	PrintLine(line string)
+	SetStatus(msg string)
+	RegisterSlash(cmd patchapp.SlashCommand)
+	Quit()
 }
 
-// handleSlash handles /commands. Output goes directly to App.Print.
-func handleSlash(input string, cfg *Config, sess *session, app *tui.App, lastUsage *llm.Usage) {
-	dim := func(s string) { app.PrintLine(ansiDim + s + ansiReset) }
-	defer app.Refresh() // redraw the live frame after slash output
-	cmd := strings.TrimSpace(strings.ToLower(input))
+// registerSlashCommands wires up the slash registry. Closures capture cfg,
+// sess, and lastUsage so handlers can read and mutate session state.
+func registerSlashCommands(app slashTarget, cfg *Config, sess *session, lastUsage *llm.Usage) {
+	dim := func(s string) { app.PrintLine(patchtui.Dim + s + patchtui.Reset) }
 
-	if strings.HasPrefix(cmd, "/model") {
-		name := strings.TrimSpace(input[6:])
-		if name == "" {
-			dim("[/model usage: /model <name>]")
-			return
-		}
-		if cfg.ModelSwitcher != nil {
-			cfg.ModelSwitcher(name)
-		}
-		parts := strings.SplitN(cfg.StatusLine, " │ ", 2)
-		provider := ""
-		if len(parts) > 0 {
-			provider = parts[0]
-		}
-		cfg.StatusLine = provider + " │ " + name
-		app.SetStatus(cfg.StatusLine)
-		dim(fmt.Sprintf("[model: %s]", name))
-		return
-	}
-
-	switch cmd {
-	case "/clear":
-		sess.messages = nil
-		dim("[context cleared]")
-	case "/prune":
-		pruned := pruneLastTurn(sess.messages)
-		if len(pruned) == len(sess.messages) {
-			dim("[nothing to prune]")
-			return
-		}
-		sess.messages = pruned
-		dim("[last turn removed from context]")
-	case "/usage":
-		if lastUsage.TotalTokens == 0 {
-			dim("[no usage data yet]")
-			return
-		}
-		app.Print([]string{
-			fmt.Sprintf("prompt:     %d", lastUsage.PromptTokens),
-			fmt.Sprintf("completion: %d", lastUsage.CompletionTokens),
-			fmt.Sprintf("total:      %d", lastUsage.TotalTokens),
-		})
-	case "/prompt":
-		var lines []string
-		lines = append(lines, ansiBold+"system prompt:"+ansiReset)
-		for _, l := range strings.Split(cfg.Personality.SystemPrompt, "\n") {
-			lines = append(lines, l)
-		}
-		lines = append(lines, "", ansiBold+"active tools:"+ansiReset)
-		for _, t := range cfg.Personality.Tools {
-			lines = append(lines, fmt.Sprintf("  %-16s %s", t.Name, t.Description))
-		}
-		app.Print(lines)
-	case "/truncate":
-		cfg.Truncate = !cfg.Truncate
-		state := "off"
-		if cfg.Truncate {
-			state = "on"
-		}
-		dim(fmt.Sprintf("[full output: %s]", state))
-	case "/exit", "/quit":
-		os.Exit(0)
-	case "/help", "/list", "/", "/h":
-		lines := strings.Split(slashHelp(), "\n")
-		lines = append(lines, "", "", "", "", "")
-		app.Print(lines)
-	default:
-		dim(fmt.Sprintf("[unknown command: %s  (type /help to list commands)]", input))
-	}
+	app.RegisterSlash(patchapp.SlashCommand{
+		Name: "clear", Help: "reset conversation context",
+		Handler: func(string) {
+			sess.messages = nil
+			dim("[context cleared]")
+		},
+	})
+	app.RegisterSlash(patchapp.SlashCommand{
+		Name: "prune", Help: "remove last turn from context",
+		Handler: func(string) {
+			pruned := pruneLastTurn(sess.messages)
+			if len(pruned) == len(sess.messages) {
+				dim("[nothing to prune]")
+				return
+			}
+			sess.messages = pruned
+			dim("[last turn removed from context]")
+		},
+	})
+	app.RegisterSlash(patchapp.SlashCommand{
+		Name: "model", Help: "switch model: /model <name>",
+		Handler: func(args string) {
+			if args == "" {
+				dim("[/model usage: /model <name>]")
+				return
+			}
+			if cfg.ModelSwitcher != nil {
+				cfg.ModelSwitcher(args)
+			}
+			parts := strings.SplitN(cfg.StatusLine, " │ ", 2)
+			provider := ""
+			if len(parts) > 0 {
+				provider = parts[0]
+			}
+			cfg.StatusLine = provider + " │ " + args
+			app.SetStatus(cfg.StatusLine)
+			dim(fmt.Sprintf("[model: %s]", args))
+		},
+	})
+	app.RegisterSlash(patchapp.SlashCommand{
+		Name: "usage", Help: "show token usage from last turn",
+		Handler: func(string) {
+			if lastUsage.TotalTokens == 0 {
+				dim("[no usage data yet]")
+				return
+			}
+			app.Print([]string{
+				fmt.Sprintf("prompt:     %d", lastUsage.PromptTokens),
+				fmt.Sprintf("completion: %d", lastUsage.CompletionTokens),
+				fmt.Sprintf("total:      %d", lastUsage.TotalTokens),
+			})
+		},
+	})
+	app.RegisterSlash(patchapp.SlashCommand{
+		Name: "prompt", Help: "dump system prompt and active tools",
+		Handler: func(string) {
+			lines := []string{patchtui.Bold + "system prompt:" + patchtui.Reset}
+			lines = append(lines, strings.Split(cfg.Personality.SystemPrompt, "\n")...)
+			lines = append(lines, "", patchtui.Bold+"active tools:"+patchtui.Reset)
+			for _, t := range cfg.Personality.Tools {
+				lines = append(lines, fmt.Sprintf("  %-16s %s", t.Name, t.Description))
+			}
+			app.Print(lines)
+		},
+	})
+	app.RegisterSlash(patchapp.SlashCommand{
+		Name: "truncate", Help: "toggle truncated bash output",
+		Handler: func(string) {
+			cfg.Truncate = !cfg.Truncate
+			state := "off"
+			if cfg.Truncate {
+				state = "on"
+			}
+			dim(fmt.Sprintf("[full output: %s]", state))
+		},
+	})
+	app.RegisterSlash(patchapp.SlashCommand{
+		Name: "exit", Aliases: []string{"quit"}, Help: "quit shell3",
+		Handler: func(string) { app.Quit() },
+	})
 }
 
 // RunOnce executes a single turn and prints output to stdout. No TUI.
 func RunOnce(ctx context.Context, cfg Config, input string) error {
 	sess := &session{}
-	ch := make(chan tui.Event, 256)
+	ch := make(chan patchapp.Event, 256)
 	go runTurn(ctx, cfg, sess, input, ch)
 
 	for ev := range ch {
 		switch v := ev.(type) {
-		case tui.ChunkEvent:
+		case patchapp.ChunkEvent:
 			fmt.Print(v.Text)
-		case tui.AppendEvent:
+		case patchapp.AppendEvent:
 			fmt.Print(v.Text)
-		case tui.TurnErrEvent:
+		case patchapp.TurnErrEvent:
 			fmt.Fprintln(os.Stderr, "error:", v.Err)
-		case tui.TurnDoneEvent:
+		case patchapp.TurnDoneEvent:
 			fmt.Println()
 		}
 	}
@@ -301,7 +290,7 @@ func pruneLastTurn(messages []llm.Message) []llm.Message {
 }
 
 func slashHelp() string {
-	return "\n" + ansiBold + "slash commands:" + ansiReset + "\n" +
+	return "\n" + patchtui.Bold + "slash commands:" + patchtui.Reset + "\n" +
 		"  /clear     reset conversation context\n" +
 		"  /prune     remove last turn from context\n" +
 		"  /model     /model <name> to switch\n" +
@@ -310,12 +299,12 @@ func slashHelp() string {
 		"  /truncate  toggle truncated bash output\n" +
 		"  /exit      quit shell3\n" +
 		"  /help      show this help\n" +
-		"\n" + ansiBold + "keyboard shortcuts:" + ansiReset + "\n" +
+		"\n" + patchtui.Bold + "keyboard shortcuts:" + patchtui.Reset + "\n" +
 		"  enter          send message\n" +
 		"  alt+enter      newline in message\n" +
 		"  esc            clear input\n" +
 		"  ctrl+c         cancel active response\n" +
 		"  ctrl+c ctrl+c  quit (when idle)\n" +
-		"\n" + ansiBold + "shell passthrough:" + ansiReset + "\n" +
+		"\n" + patchtui.Bold + "shell passthrough:" + patchtui.Reset + "\n" +
 		"  !<cmd>     run shell command with full terminal\n"
 }

@@ -64,8 +64,8 @@ func (r *Runner) callHookTTYBlocking(ctx context.Context, cmd string, input hook
 	defer cancel()
 
 	if r.releaser != nil {
-		_ = r.releaser.Release()
-		defer r.releaser.Restore()
+		_ = r.releaser.Pause()
+		defer r.releaser.Resume()
 	}
 
 	data, _ := json.Marshal(input)
@@ -105,8 +105,8 @@ func (r *Runner) callHookTTY(ctx context.Context, cmd string, input hookInput) {
 	c.Stderr = os.Stderr
 
 	if r.releaser != nil {
-		_ = r.releaser.Release()
-		defer r.releaser.Restore()
+		_ = r.releaser.Pause()
+		defer r.releaser.Resume()
 	}
 	_ = c.Run()
 }

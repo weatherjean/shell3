@@ -1,4 +1,6 @@
-package tui
+package patchapp
+
+import "github.com/weatherjean/shell3/internal/patchtui"
 
 // buildFrame composes the live render frame: streaming preview (capped to
 // terminal height), input box (multi-line, wrapped, with cursor marker),
@@ -51,7 +53,7 @@ func wrapToWidth(lines []string, width int) []string {
 	}
 	var out []string
 	for _, line := range lines {
-		if visibleLen(line) <= width {
+		if patchtui.VisibleLen(line) <= width {
 			out = append(out, line)
 			continue
 		}
@@ -70,7 +72,7 @@ func wrapToWidth(lines []string, width int) []string {
 				inEsc = true
 				continue
 			}
-			rw := runeWidth(r)
+			rw := patchtui.RuneWidth(r)
 			// If this rune wouldn't fit, flush current first (without it).
 			// This keeps trailing ANSI sequences (zero-width) attached to
 			// the line they belong to instead of starting the next line.

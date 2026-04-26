@@ -1,4 +1,4 @@
-package tui
+package patchapp
 
 import "github.com/weatherjean/shell3/internal/llm"
 

@@ -1,8 +1,10 @@
-package tui
+package patchapp
 
 import (
 	"strings"
 	"testing"
+
+	"github.com/weatherjean/shell3/internal/patchtui"
 )
 
 func TestWrapToWidth(t *testing.T) {
@@ -59,9 +61,9 @@ func TestWrapToWidth(t *testing.T) {
 			}
 			// Invariant: every output line's visible width must be <= width.
 			for _, l := range got {
-				if visibleLen(l) > c.width {
+				if patchtui.VisibleLen(l) > c.width {
 					t.Errorf("output line %q has visible width %d > %d",
-						l, visibleLen(l), c.width)
+						l, patchtui.VisibleLen(l), c.width)
 				}
 			}
 		})
@@ -78,9 +80,9 @@ func TestWrapToWidthNoSoftWrap(t *testing.T) {
 	for _, w := range []int{20, 40, 80, 120} {
 		got := wrapToWidth([]string{long}, w)
 		for i, l := range got {
-			if visibleLen(l) > w {
+			if patchtui.VisibleLen(l) > w {
 				t.Fatalf("width=%d line %d visible=%d (>%d): %q",
-					w, i, visibleLen(l), w, l)
+					w, i, patchtui.VisibleLen(l), w, l)
 			}
 		}
 	}

@@ -16,9 +16,18 @@ import (
 // ToolDef is an alias so callers don't import llm directly.
 type ToolDef = llm.ToolDefinition
 
-// PersonaConfig holds all configuration parsed from a persona file's frontmatter.
-// Hook fields are top-level for visibility. All fields are optional — null (yaml: ~)
-// means "use runtime default". Hooks default to ~ (disabled).
+// PersonaConfig holds all configuration parsed from a persona file's
+// frontmatter. All fields are optional — null (yaml: ~) means "use
+// runtime default".
+//
+// Lifecycle hooks live in the embedded [hooks.Config], which is YAML-
+// flattened so its fields appear at the top level of the persona file:
+//
+//	on_tool_call: ~                               # disabled
+//	on_tool_call: ".shell3/hooks/guard.sh"        # string shorthand
+//	on_tool_call:                                 # mapping form
+//	  command: ".shell3/hooks/guard.sh"
+//	  needs_tty: true
 type PersonaConfig struct {
 	Name        string `yaml:"name"`
 	Description string `yaml:"description"`
@@ -27,34 +36,8 @@ type PersonaConfig struct {
 	DB          string `yaml:"db"`
 	NoBash      bool   `yaml:"no_bash"`
 	NoMemory    bool   `yaml:"no_memory"`
-	// Lifecycle hooks. Three equivalent forms:
-	//   on_tool_call: ~                               # disabled
-	//   on_tool_call: ".shell3/hooks/guard.sh"        # string shorthand
-	//   on_tool_call:                                 # mapping form
-	//     command: ".shell3/hooks/guard.sh"
-	//     needs_tty: true
-	OnSessionStart hooks.HookEntry `yaml:"on_session_start"`
-	OnSessionEnd   hooks.HookEntry `yaml:"on_session_end"`
-	OnTurnStart    hooks.HookEntry `yaml:"on_turn_start"`
-	OnTurnEnd      hooks.HookEntry `yaml:"on_turn_end"`
-	OnToolCall     hooks.HookEntry `yaml:"on_tool_call"`
-	OnToolResult   hooks.HookEntry `yaml:"on_tool_result"`
-	OnContextBuild hooks.HookEntry `yaml:"on_context_build"`
-	OnError        hooks.HookEntry `yaml:"on_error"`
-}
 
-// HooksConfig converts the flat persona hook fields into a hooks.Config.
-func (c PersonaConfig) HooksConfig() hooks.Config {
-	return hooks.Config{
-		OnSessionStart: c.OnSessionStart,
-		OnSessionEnd:   c.OnSessionEnd,
-		OnTurnStart:    c.OnTurnStart,
-		OnTurnEnd:      c.OnTurnEnd,
-		OnToolCall:     c.OnToolCall,
-		OnToolResult:   c.OnToolResult,
-		OnContextBuild: c.OnContextBuild,
-		OnError:        c.OnError,
-	}
+	hooks.Config `yaml:",inline"`
 }
 
 // TemplateData holds values injected into persona template bodies.

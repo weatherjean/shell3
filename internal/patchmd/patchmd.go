@@ -42,6 +42,7 @@ var (
 	codeRe       = regexp.MustCompile("`([^`\n]+?)`")
 	linkRe       = regexp.MustCompile(`\[([^\]\n]+)\]\(([^)\n]+)\)`)
 	listRe       = regexp.MustCompile(`^(\s*)([-*]|\d+\.)\s+(.*)$`)
+	codeTokenRe  = regexp.MustCompile("\\d+")
 )
 
 // Render converts markdown text to a slice of ANSI-styled lines.
@@ -117,15 +118,32 @@ func Render(text string, width int) []string {
 	return out
 }
 
+// codeToken is a placeholder character (U+E000, BMP private use area) used
+// to stash inline-code spans during inline rendering. Without this, the
+// ANSI escape that styles a code span (e.g. "\033[38;2;...m") contains a
+// literal '[' that linkRe treats as the start of "[label](url)", which
+// causes it to swallow the escape, the code span, and any link that
+// follows. The byte is unlikely to appear in user input; if it does, it
+// is treated as ordinary text and escapes the inline renderer unchanged.
+const codeToken = ''
+
 // applyInline applies inline formatting to a single line.
-// Order matters: longer markers (***) before shorter (**, *), and code is
-// done first so its contents aren't further processed.
+//
+// Code spans are extracted to placeholder tokens FIRST, then inline
+// formatters run over the placeholder-only text, then code spans are
+// re-inserted with their styling. This isolation prevents the '['/'\033['
+// collision between regex-based link parsing and ANSI-escaped code spans.
 func applyInline(s string) string {
-	// Inline code first — its contents must not be re-styled.
+	// Stash code-span contents as placeholders so subsequent regexes
+	// don't see escape sequences containing '['. We keep order via a
+	// counter; the placeholder is "<token><index><token>".
+	var stash []string
 	s = codeRe.ReplaceAllStringFunc(s, func(m string) string {
-		inner := m[1 : len(m)-1]
-		return colYellow + "`" + inner + "`" + ansiReset
+		idx := len(stash)
+		stash = append(stash, m[1:len(m)-1]) // inner, no backticks
+		return fmt.Sprintf("%c%d%c", codeToken, idx, codeToken)
 	})
+
 	// Bold italic ***text***.
 	s = boldItalicRe.ReplaceAllStringFunc(s, func(m string) string {
 		inner := m[3 : len(m)-3]
@@ -151,6 +169,24 @@ func applyInline(s string) string {
 		sub := linkRe.FindStringSubmatch(m)
 		return "\033[4m" + colCyan + sub[1] + ansiReset
 	})
+
+	// Expand code-span placeholders.
+	if len(stash) > 0 {
+		s = codeTokenRe.ReplaceAllStringFunc(s, func(m string) string {
+			// Strip the surrounding tokens to get the index digits.
+			idx := 0
+			for _, r := range m {
+				if r == codeToken {
+					continue
+				}
+				idx = idx*10 + int(r-'0')
+			}
+			if idx < 0 || idx >= len(stash) {
+				return m
+			}
+			return colYellow + "`" + stash[idx] + "`" + ansiReset
+		})
+	}
 	return s
 }
 

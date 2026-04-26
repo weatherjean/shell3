@@ -9,16 +9,16 @@ import (
 	"github.com/weatherjean/shell3/internal/hooks"
 )
 
-// fakeReleaser tracks release/restore calls.
+// fakeReleaser tracks pause/resume calls.
 type fakeReleaser struct {
-	released int
-	restored int
+	paused  int
+	resumed int
 }
 
-func (f *fakeReleaser) Release() error { f.released++; return nil }
-func (f *fakeReleaser) Restore() error { f.restored++; return nil }
+func (f *fakeReleaser) Pause() error  { f.paused++; return nil }
+func (f *fakeReleaser) Resume() error { f.resumed++; return nil }
 
-func TestCallHookTTYReleasesAndRestores(t *testing.T) {
+func TestCallHookTTYPausesAndResumes(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "hook.sh")
 	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
@@ -31,15 +31,15 @@ func TestCallHookTTYReleasesAndRestores(t *testing.T) {
 
 	r.OnSessionStart(context.Background())
 
-	if rel.released != 1 {
-		t.Errorf("Release called %d times, want 1", rel.released)
+	if rel.paused != 1 {
+		t.Errorf("Pause called %d times, want 1", rel.paused)
 	}
-	if rel.restored != 1 {
-		t.Errorf("Restore called %d times, want 1", rel.restored)
+	if rel.resumed != 1 {
+		t.Errorf("Resume called %d times, want 1", rel.resumed)
 	}
 }
 
-func TestNoReleaserSkipsRelease(t *testing.T) {
+func TestNoReleaserSkipsPause(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "hook.sh")
 	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {

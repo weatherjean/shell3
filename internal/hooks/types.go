@@ -52,8 +52,11 @@ type hookOutput struct {
 	Messages any            `json:"messages,omitempty"`
 }
 
-// TTYReleaser suspends and resumes the TUI so subprocess hooks can use the real terminal.
+// TTYReleaser suspends and resumes the host TUI so subprocess hooks can
+// use the real terminal. Pause must restore cooked mode and clear the
+// live frame; Resume must re-enter raw mode and repaint. Implemented by
+// patchapp.App.
 type TTYReleaser interface {
-	Release() error
-	Restore() error
+	Pause() error
+	Resume() error
 }

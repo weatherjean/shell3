@@ -1,6 +1,10 @@
-package tui
+package patchapp
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/weatherjean/shell3/internal/patchtui"
+)
 
 const asciiLogo = "       /\\\n      {.-}\n     ;_.-'\\\n    {    _.}_\n     \\.-' /  `,\n      \\  |    /\n       \\ |  ,/\n        \\|_/"
 
@@ -11,16 +15,16 @@ func renderWelcome(width int) []string {
 	if width < 40 {
 		width = 40
 	}
-	yellow := fgRGB(rPrimary, gPrimary, bPrimary)
-	dim := fgRGB(rMuted, gMuted, bMuted)
-	sub := fgRGB(rFgDim, gFgDim, bFgDim)
+	yellow := patchtui.FgRGB(rPrimary, gPrimary, bPrimary)
+	dim := patchtui.FgRGB(rMuted, gMuted, bMuted)
+	sub := patchtui.FgRGB(rFgDim, gFgDim, bFgDim)
 
 	// Center the whole logo as a block (preserve internal alignment).
 	logoLines := strings.Split(asciiLogo, "\n")
 	maxW := 0
 	for _, l := range logoLines {
-		if visibleLen(l) > maxW {
-			maxW = visibleLen(l)
+		if patchtui.VisibleLen(l) > maxW {
+			maxW = patchtui.VisibleLen(l)
 		}
 	}
 	leftPad := (width - maxW) / 2

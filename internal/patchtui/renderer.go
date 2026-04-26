@@ -34,9 +34,11 @@
 //	    "── status ──",
 //	})
 //
-// patchtui does not handle keyboard input, terminal mode switching, or
-// styling. Callers wire those up themselves (typically with golang.org/x/term
-// for raw mode and ANSI escape sequences for colors).
+// patchtui does not handle keyboard input or terminal mode switching;
+// callers wire those up themselves (typically with golang.org/x/term for
+// raw mode). For convenience, base SGR primitives — [Reset], [Bold], named
+// colors, and [FgRGB]/[BgRGB] — are exported in ansi.go so callers do not
+// have to redefine the common escape sequences.
 package patchtui
 
 import (

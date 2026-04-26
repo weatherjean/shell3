@@ -98,7 +98,7 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		return err
 	}
 
-	hookRunner := hooks.NewRunner(pCfg.HooksConfig())
+	hookRunner := hooks.NewRunner(pCfg.Config)
 
 	statusLine := fmt.Sprintf("%s │ %s", provName, model)
 

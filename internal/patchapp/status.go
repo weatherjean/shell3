@@ -1,29 +1,31 @@
-package tui
+package patchapp
 
 import (
 	"fmt"
 	"strings"
+
+	"github.com/weatherjean/shell3/internal/patchtui"
 )
 
 // renderStatusBar returns the bottom status bar line, padded to terminal width.
 // When busy, the spinner + "thinking" label replaces the model/usage info and
 // the right hint becomes "ctrl+c cancel".
 func renderStatusBar(width int, st statusInfo) string {
-	yellow := fgRGB(rPrimary, gPrimary, bPrimary)
-	black := fgRGB(0, 0, 0)
-	white := fgRGB(255, 255, 255)
-	gray4 := fgRGB(rFgDim, gFgDim, bFgDim)
-	gray7 := bgRGB(rSubtle, gSubtle, bSubtle)
-	dark := bgRGB(rDark, gDark, bDark)
-	redBg := bgRGB(rRedBadge, gRedBadge, bRedBadge)
-	greenBg := bgRGB(22, 101, 52) // gray-700 swap when streaming
+	yellow := patchtui.FgRGB(rPrimary, gPrimary, bPrimary)
+	black := patchtui.FgRGB(0, 0, 0)
+	white := patchtui.FgRGB(255, 255, 255)
+	gray4 := patchtui.FgRGB(rFgDim, gFgDim, bFgDim)
+	gray7 := patchtui.BgRGB(rSubtle, gSubtle, bSubtle)
+	dark := patchtui.BgRGB(rDark, gDark, bDark)
+	redBg := patchtui.BgRGB(rRedBadge, gRedBadge, bRedBadge)
+	greenBg := patchtui.BgRGB(22, 101, 52) // gray-700 swap when streaming
 
 	// Pick the bar's main background based on state.
 	var barBg, badgeBg, badgeFg string
 	switch {
 	case st.ctrlCHint:
 		barBg = redBg
-		badgeBg = bgRGB(rPrimary, gPrimary, bPrimary)
+		badgeBg = patchtui.BgRGB(rPrimary, gPrimary, bPrimary)
 		badgeFg = black
 	case st.busy:
 		barBg = greenBg
@@ -31,7 +33,7 @@ func renderStatusBar(width int, st statusInfo) string {
 		badgeFg = white
 	default:
 		barBg = gray7
-		badgeBg = bgRGB(rPrimary, gPrimary, bPrimary)
+		badgeBg = patchtui.BgRGB(rPrimary, gPrimary, bPrimary)
 		badgeFg = black
 	}
 
@@ -64,7 +66,7 @@ func renderStatusBar(width int, st statusInfo) string {
 			styled(" help  ", gray4, dark, false) + mode
 	}
 
-	pad := width - visibleLen(left) - visibleLen(mid) - visibleLen(right)
+	pad := width - patchtui.VisibleLen(left) - patchtui.VisibleLen(mid) - patchtui.VisibleLen(right)
 	if pad < 0 {
 		pad = 0
 	}

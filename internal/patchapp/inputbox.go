@@ -1,4 +1,4 @@
-package tui
+package patchapp
 
 import (
 	"strings"
@@ -20,9 +20,9 @@ func spinnerGlyph() string {
 // alt+enter get a "  " indent. Each line has a subtle dark background that
 // extends to the right edge so the input reads as a chat bubble.
 func renderInputBox(input []rune, cursor, width int, showCursor bool) []string {
-	userBg := bgRGB(rUserBg, gUserBg, bUserBg)
-	userFg := fgRGB(rUserFg, gUserFg, bUserFg)
-	yellow := fgRGB(rPrimary, gPrimary, bPrimary)
+	userBg := patchtui.BgRGB(rUserBg, gUserBg, bUserBg)
+	userFg := patchtui.FgRGB(rUserFg, gUserFg, bUserFg)
+	yellow := patchtui.FgRGB(rPrimary, gPrimary, bPrimary)
 
 	prefixW := 2
 	contW := 2
@@ -31,7 +31,7 @@ func renderInputBox(input []rune, cursor, width int, showCursor bool) []string {
 	makeLine := func(isFirst bool, content string, contentVisible int) string {
 		var prefix string
 		if isFirst {
-			prefix = userBg + yellow + ansiBold + "> " + ansiReset + userBg + userFg
+			prefix = userBg + yellow + patchtui.Bold + "> " + patchtui.Reset + userBg + userFg
 		} else {
 			prefix = userBg + userFg + "  "
 		}
@@ -39,7 +39,7 @@ func renderInputBox(input []rune, cursor, width int, showCursor bool) []string {
 		if pad < 0 {
 			pad = 0
 		}
-		return prefix + content + strings.Repeat(" ", pad) + ansiReset
+		return prefix + content + strings.Repeat(" ", pad) + patchtui.Reset
 	}
 
 	// Split input on '\n' into logical lines.
@@ -112,7 +112,7 @@ func renderInputBox(input []rune, cursor, width int, showCursor bool) []string {
 
 	if !cursorFound && len(lines) > 0 {
 		cursorRow = len(lines) - 1
-		cursorCol = visibleLen(lines[len(lines)-1])
+		cursorCol = patchtui.VisibleLen(lines[len(lines)-1])
 	}
 
 	if showCursor && len(lines) > 0 {
