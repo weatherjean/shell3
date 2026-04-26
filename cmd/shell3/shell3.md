@@ -35,17 +35,18 @@ shell3 code --base-url http://localhost:11434/v1 --api-key "" --model llama3.2
 
 **Tools available to the model:**
 
-| Tool             | What it does                                      |
-|------------------|---------------------------------------------------|
-| `bash`           | Execute shell commands in the project directory   |
-| `memory_store`   | Persist a key-value fact across sessions          |
-| `memory_list`    | List all stored memories                          |
-| `memory_search`  | Full-text search memories                         |
-| `memory_remove`  | Delete a memory entry by key                      |
-| `history_latest` | Return the most recent conversation turns         |
-| `history_search` | Full-text search past conversation turns          |
+| Tool                | What it does                                                          |
+|---------------------|-----------------------------------------------------------------------|
+| `bash`              | Execute non-interactive shell commands in the project directory       |
+| `shell_interactive` | Run a command that needs a TTY (vim, less, REPL); TUI yields and resumes |
+| `memory_upsert`     | Insert/update/delete a memory entry; empty value deletes; `core=true` injects into every session prompt |
+| `memory_query`      | List newest-first or full-text search; `core_only=true` restricts to core memories |
+| `history_query`     | Search past conversations or fetch one chunk (25 turns) of one session by `session_id` + `chunk`; walk via `prev_session_id` / `next_session_id` |
+| `shell3_docs`       | Return this documentation (commands, config, slash commands, skills)  |
 
-Memory and history are stored in `.shell3/shell3.db` (SQLite, gitignored).
+User-defined tools (see below) appear after the built-ins. Memory and history are stored in `.shell3/shell3.db` (SQLite, gitignored).
+
+**Core memories.** Set `core=true` on `memory_upsert` to mark a fact important enough to be rendered into the system prompt at every session start (via the persona's `{{.CoreMemories}}` template variable). Use sparingly — every core memory inflates context.
 
 ### User-Defined Tools
 
@@ -91,14 +92,17 @@ after: ""                    # optional; bash -c hook, stdin = command output
 
 **Slash commands inside a session:**
 
-| Command   | Action                                        |
-|-----------|-----------------------------------------------|
-| `/`       | browse and pick a command                     |
-| `/model`  | switch active model (if >1 configured)        |
-| `/clear`  | reset conversation context                    |
-| `/usage`  | show token usage from last turn               |
-| `/prompt` | dump system prompt and active tools           |
-| `/help`   | list available commands                       |
+| Command     | Action                                                          |
+|-------------|-----------------------------------------------------------------|
+| `/`         | browse and pick a command                                       |
+| `/model`    | switch model: `/model <name>`, or no arg → picker (≥2 models)   |
+| `/clear`    | reset conversation context                                      |
+| `/prune`    | remove last turn from context                                   |
+| `/usage`    | show token usage from last turn                                 |
+| `/prompt`   | dump system prompt and active tools                             |
+| `/truncate` | toggle truncated bash output                                    |
+| `/exit`     | quit shell3 (alias: `/quit`)                                    |
+| `/help`     | list available commands                                         |
 
 ### shell3 run
 One-shot agent run (non-interactive). Reads task from stdin or `--task`.
