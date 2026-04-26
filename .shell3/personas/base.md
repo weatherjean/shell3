@@ -1,8 +1,8 @@
 ---
 name: code
 description: Agentic coding assistant with bash and memory tools
-model: kimi-k2.6:cloud
-provider: ~
+model: kimi-k2.6
+provider: opencode-go
 db: ~
 no_bash: false
 no_memory: false

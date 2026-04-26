@@ -7,11 +7,18 @@ shell3 is a minimal, Unix-composable coding agent. It runs LLM-powered sessions 
 ## Commands
 
 ### shell3 init
-Scaffold `.shell3/config.yaml` in the current directory.
+Scaffold `.shell3/` in the current directory. Requires `~/.shell3/credentials.yaml` to exist first (run `shell3 auth`).
+
+Creates:
+- `.shell3/personas/base.md` — default persona with frontmatter config (model, provider, db, hooks, etc.)
+- `.shell3/tools/brave_search.yaml` — disabled example user-defined tool
+- `.shell3/.env.example` — template for `.shell3/.env` (secrets)
+- `.shell3/.gitignore` — ignores db, .env
+- `.shell3/shell3.db` — SQLite store (memory + history)
+- empty `.shell3/skills/` and `.shell3/hooks/` dirs
 
 ```
 shell3 init
-shell3 code --init   # also checks tool dependencies
 ```
 
 ### shell3 auth
@@ -23,15 +30,21 @@ shell3 auth
 
 Prompts for: provider name, API key, base URL, default model.
 
-### shell3 code
-Interactive coding assistant with persistent memory and history.
+### shell3 (root command)
+The root command runs the interactive chat agent. With a positional argument it runs once non-interactively and prints the response to stdout.
 
 ```
-shell3 code
-shell3 code --model gpt-4o
-shell3 code --model "gpt-4o,gpt-4o-mini"   # multiple models, switch with /model
-shell3 code --base-url http://localhost:11434/v1 --api-key "" --model llama3.2
+shell3                                           # interactive TUI
+shell3 "summarise TODO.md"                       # one-shot, prints to stdout
+shell3 --model gpt-4o
+shell3 --model "gpt-4o,gpt-4o-mini"              # /model switches between them
+shell3 --base-url http://localhost:11434/v1 --api-key "" --model llama3.2
+shell3 --persona base                            # pick a persona from .shell3/personas/
+shell3 --no-bash                                 # disable bash + shell_interactive tools
+shell3 --no-memory-tools                        # disable memory/history tools and store
 ```
+
+Flags: `--persona`, `--model`, `--base-url`, `--api-key`, `--no-bash`, `--no-memory-tools`.
 
 **Tools available to the model:**
 
@@ -43,6 +56,7 @@ shell3 code --base-url http://localhost:11434/v1 --api-key "" --model llama3.2
 | `memory_query`      | List newest-first or full-text search; `core_only=true` restricts to core memories |
 | `history_query`     | Search past conversations or fetch one chunk (25 turns) of one session by `session_id` + `chunk`; walk via `prev_session_id` / `next_session_id` |
 | `shell3_docs`       | Return this documentation (commands, config, slash commands, skills)  |
+| `prune_tool_result` | Replace a prior successful tool result with a stub to free context; gated to ≥500 bytes and non-error output |
 
 User-defined tools (see below) appear after the built-ins. Memory and history are stored in `.shell3/shell3.db` (SQLite, gitignored).
 
@@ -104,14 +118,6 @@ after: ""                    # optional; bash -c hook, stdin = command output
 | `/exit`     | quit shell3 (alias: `/quit`)                                    |
 | `/help`     | list available commands                                         |
 
-### shell3 run
-One-shot agent run (non-interactive). Reads task from stdin or `--task`.
-
-```
-shell3 run --task "summarise TODO.md"
-echo "fix lint errors" | shell3 run
-```
-
 ### shell3 docs
 Print this documentation.
 
@@ -130,37 +136,47 @@ shell3 destroy
 
 ## Configuration
 
-### Project config — `.shell3/config.yaml`
+### Persona config — `.shell3/personas/<name>.md`
 
-Created by `shell3 init` in the project directory.
+There is no `.shell3/config.yaml`. All per-project configuration — model, provider, store path, tool gating, hooks — lives in the YAML frontmatter of the active persona file. The default persona is `base.md`; switch with `--persona <name>`.
 
-```yaml
-model: llama3.2          # preferred starting model for this project (single value)
-provider: ollama         # preferred provider (must match a key in credentials.yaml)
-store_db: .shell3/shell3.db   # SQLite DB for memory and history (gitignored)
-hooks:
-  on_session_start: ""  # fired once at session start (fire-and-forget)
-  on_session_end: ""    # fired once at session end (fire-and-forget)
-  on_turn_start: ""     # fired before each LLM turn (fire-and-forget)
-  on_turn_end: ""       # fired after each LLM turn, params.response set (fire-and-forget)
-  on_tool_call: ""      # fired before each tool call, can block with action:block (blocking)
-  on_tool_result: ""    # fired after each tool call, params.result set (fire-and-forget)
-  on_context_build: ""  # fired before LLM call, can rewrite messages array (blocking)
-  on_error: ""          # fired on LLM errors and panics, params.error set (fire-and-forget)
+```markdown
+---
+name: code                       # persona name (defaults to filename)
+description: short summary       # shown in pickers
+model: kimi-k2.6                 # starting model (or ~ to use credential default)
+provider: opencode-go            # provider key from credentials.yaml (or ~ for alphabetically-first)
+db: .shell3/shell3.db            # SQLite path for memory + history (or ~ for default)
+no_bash: false                   # disable bash + shell_interactive tools
+no_memory: false                 # disable memory/history tools and store
+
+# Hooks — string for plain command, or mapping with needs_tty.
+on_session_start: ~              # fire-and-forget at session start
+on_session_end: ~                # fire-and-forget at session end
+on_turn_start: ~                 # fire-and-forget before each LLM turn
+on_turn_end: ~                   # fire-and-forget after each LLM turn (params.response)
+on_tool_call: ~                  # blocking before each tool call (can return action:block)
+on_tool_result: ~                # fire-and-forget after each tool call (params.result)
+on_context_build: ~              # blocking before LLM call (can rewrite messages)
+on_error: ~                      # fire-and-forget on LLM errors and panics
+---
+The body of the persona file is a Go template rendered into the system prompt.
+Available template variables: {{.Time}}, {{.CWD}}, {{.Model}}, {{.Skills}}, {{.CoreMemories}}.
 ```
 
 Each hook value is either a plain string (command) or a mapping with `needs_tty`:
 
 ```yaml
-hooks:
-  # plain string — no TTY, output discarded for fire-and-forget hooks
-  on_turn_end: "bash .shell3/hooks/log.sh"
+# plain string — no TTY, output discarded for fire-and-forget hooks
+on_turn_end: "bash .shell3/hooks/log.sh"
 
-  # mapping — set needs_tty: true to release the TUI before running
-  on_tool_call:
-    command: "bash .shell3/hooks/confirm.sh"
-    needs_tty: true
+# mapping — set needs_tty: true to release the TUI before running
+on_tool_call:
+  command: "bash .shell3/hooks/confirm.sh"
+  needs_tty: true
 ```
+
+**Provider resolution.** If the persona's `provider` is `~`, shell3 picks the alphabetically-first provider from `~/.shell3/credentials.yaml`. Set it explicitly to avoid surprises when multiple providers are configured. CLI flags (`--model`, `--base-url`, `--api-key`) override frontmatter.
 
 **`needs_tty: true`** releases the TUI so the hook can read from the terminal (prompts, fzf, etc.). Without it, hooks run silently in the background — no TUI flash.
 
@@ -217,7 +233,7 @@ providers:
 
 ## Multiple models
 
-Available models are defined globally in `~/.shell3/credentials.yaml` as a comma-separated `default_model`. The session starts on the first model (or the project's preferred model if set in `.shell3/config.yaml`). Use `/model` inside a session to switch.
+Available models are defined globally in `~/.shell3/credentials.yaml` as a comma-separated `default_model`. The session starts on the first model in that list, unless the active persona's frontmatter sets a `model`. Use `/model` inside a session to switch.
 
 ```yaml
 # ~/.shell3/credentials.yaml
@@ -226,15 +242,17 @@ providers:
     default_model: "kimi-k2.6:cloud,glm-5.1:cloud,llama3.2"
 ```
 
-```yaml
-# .shell3/config.yaml — preferred starting model for this project
+```markdown
+---
+# .shell3/personas/base.md — preferred starting model + provider for this project
 model: glm-5.1:cloud
 provider: ollama cloud
+---
 ```
 
 `--model` flag overrides both:
 ```
-./shell3 code --model "gpt-4o,gpt-4o-mini"
+./shell3 --model "gpt-4o,gpt-4o-mini"
 ```
 
 ---

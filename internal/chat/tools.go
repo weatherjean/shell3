@@ -9,9 +9,96 @@ import (
 	"strings"
 	"time"
 
+	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/store"
 	"github.com/weatherjean/shell3/internal/usertools"
 )
+
+// minPruneBytes gates prune_tool_result: small results aren't worth pruning.
+const minPruneBytes = 500
+
+// handlePruneToolResult replaces the content of a prior tool message
+// (identified by tool_call_id) with a short stub. Mutates both slices in place.
+// Refuses small results and results that look like errors.
+func handlePruneToolResult(rawArgs string, slices ...[]llm.Message) string {
+	var args struct {
+		ToolCallID string `json:"tool_call_id"`
+		Reason     string `json:"reason"`
+	}
+	if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
+		return fmt.Sprintf("error: bad arguments: %v", err)
+	}
+	if args.ToolCallID == "" {
+		return "error: tool_call_id required"
+	}
+	if args.Reason == "" {
+		return "error: reason required"
+	}
+
+	// Find the target in any provided slice. All slices should hold the
+	// same message at the same logical position; checking the first that
+	// has it is sufficient for gating decisions.
+	var target *llm.Message
+	var name string
+	for _, msgs := range slices {
+		for i := range msgs {
+			if msgs[i].Role == llm.RoleTool && msgs[i].ToolCallID == args.ToolCallID {
+				target = &msgs[i]
+				name = msgs[i].Name
+				break
+			}
+		}
+		if target != nil {
+			break
+		}
+	}
+	if target == nil {
+		return fmt.Sprintf("error: no tool result with id %q in conversation", args.ToolCallID)
+	}
+
+	content := target.Content
+	if len(content) < minPruneBytes {
+		return fmt.Sprintf("error: result is %d bytes; below %d-byte prune threshold", len(content), minPruneBytes)
+	}
+	if looksLikeError(content) {
+		return "error: refusing to prune a result that looks like a tool error"
+	}
+
+	stub := fmt.Sprintf("[pruned: %s — original was %d bytes]", args.Reason, len(content))
+
+	// Mutate every slice that holds a message with this id.
+	count := 0
+	for _, msgs := range slices {
+		for i := range msgs {
+			if msgs[i].Role == llm.RoleTool && msgs[i].ToolCallID == args.ToolCallID {
+				msgs[i].Content = stub
+				count++
+			}
+		}
+	}
+	if count == 0 {
+		return "error: failed to update message content"
+	}
+	return fmt.Sprintf("Pruned result of %s (id=%s): freed %d bytes", name, args.ToolCallID, len(content)-len(stub))
+}
+
+func looksLikeError(s string) bool {
+	t := strings.TrimSpace(s)
+	// Skip the synthetic [tool_call_id=...] header line if present so the
+	// real payload's first line is what we inspect.
+	if strings.HasPrefix(t, "[tool_call_id=") {
+		if nl := strings.IndexByte(t, '\n'); nl >= 0 {
+			t = strings.TrimSpace(t[nl+1:])
+		} else {
+			return false
+		}
+	}
+	if t == "" {
+		return false
+	}
+	low := strings.ToLower(t)
+	return strings.HasPrefix(low, "error:") || strings.HasPrefix(low, "error ")
+}
 
 func dispatchUserTool(ctx context.Context, tool usertools.Tool, rawArgs string, secrets map[string]string, workDir string) string {
 	out, err := usertools.Run(ctx, tool, rawArgs, secrets, workDir)

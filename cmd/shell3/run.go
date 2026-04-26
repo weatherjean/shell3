@@ -164,20 +164,42 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 
 	statusLine := fmt.Sprintf("%s │ %s", provName, model)
 
-	// Parse model pool from credentials for /model command.
-	var models []string
-	if provCreds, err := creds.Get(provName); err == nil {
-		for _, m := range strings.Split(provCreds.DefaultModel, ",") {
+	// Aggregate models across every configured provider for /model picker.
+	var models []chat.ModelChoice
+	provNames := make([]string, 0, len(creds.Providers))
+	for n := range creds.Providers {
+		provNames = append(provNames, n)
+	}
+	sort.Strings(provNames)
+	for _, n := range provNames {
+		pc := creds.Providers[n]
+		for _, m := range strings.Split(pc.DefaultModel, ",") {
 			if m := strings.TrimSpace(m); m != "" {
-				models = append(models, m)
+				models = append(models, chat.ModelChoice{Provider: n, Model: m})
 			}
 		}
 	}
 	if len(models) == 0 {
-		models = []string{model}
+		models = []chat.ModelChoice{{Provider: provName, Model: model}}
 	}
 
 	client := llm.NewClient(baseURL, apiKey, model)
+	modelSwitcher := func(provider, modelName string) (chat.LLMClient, error) {
+		if provider == "" || provider == provName {
+			client.SetModel(modelName)
+			model = modelName
+			return nil, nil
+		}
+		pc, err := creds.Get(provider)
+		if err != nil {
+			return nil, err
+		}
+		newClient := llm.NewClient(pc.BaseURL, pc.APIKey, modelName)
+		client = newClient
+		provName = provider
+		model = modelName
+		return newClient, nil
+	}
 	cfg := chat.Config{
 		LLM:           client,
 		Hooks:         hookRunner,
@@ -187,7 +209,7 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		StatusLine:    statusLine,
 		ModeLabel:     pCfg.Name,
 		Models:        models,
-		ModelSwitcher: client.SetModel,
+		ModelSwitcher: modelSwitcher,
 		Docs:          docsContent,
 		UserTools:     userToolMap,
 		Secrets:       secrets,

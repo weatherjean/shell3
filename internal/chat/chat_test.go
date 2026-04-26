@@ -376,17 +376,20 @@ func TestSlash_PruneRemovesTurn(t *testing.T) {
 func TestSlash_ModelSwitches(t *testing.T) {
 	app, cfg, _, _ := register()
 	switched := ""
-	cfg.ModelSwitcher = func(name string) { switched = name }
+	cfg.ModelSwitcher = func(provider, name string) (LLMClient, error) {
+		switched = provider + "/" + name
+		return nil, nil
+	}
 
 	app.call(t, "model", "claude-y")
 
-	if switched != "claude-y" {
-		t.Errorf("ModelSwitcher got %q, want claude-y", switched)
+	if switched != "/claude-y" && !strings.HasSuffix(switched, "/claude-y") {
+		t.Errorf("ModelSwitcher got %q, want suffix /claude-y", switched)
 	}
 	if !strings.Contains(cfg.StatusLine, "claude-y") {
 		t.Errorf("status line not updated: %q", cfg.StatusLine)
 	}
-	if !containsAll(app.snapshot(), "SetStatus(", "[model: claude-y]") {
+	if !containsAll(app.snapshot(), "SetStatus(", "[model: ") {
 		t.Errorf("missing status update: %v", app.snapshot())
 	}
 }
@@ -447,6 +450,64 @@ func TestSlash_TruncateToggles(t *testing.T) {
 	app.call(t, "truncate", "")
 	if cfg.Truncate {
 		t.Errorf("truncate not toggled off")
+	}
+}
+
+// ── handlePruneToolResult ──────────────────────────────────────────────────────
+
+func mkToolMsg(id, name, content string) llm.Message {
+	return llm.Message{Role: llm.RoleTool, ToolCallID: id, Name: name, Content: content}
+}
+
+func TestPruneToolResult_Success(t *testing.T) {
+	big := strings.Repeat("x", 600)
+	a := []llm.Message{mkToolMsg("tc1", "bash", big)}
+	b := []llm.Message{mkToolMsg("tc1", "bash", big)}
+
+	out := handlePruneToolResult(`{"tool_call_id":"tc1","reason":"not needed"}`, a, b)
+	if !strings.HasPrefix(out, "Pruned") {
+		t.Fatalf("want success, got %q", out)
+	}
+	if !strings.Contains(a[0].Content, "[pruned:") || !strings.Contains(b[0].Content, "[pruned:") {
+		t.Fatalf("content not updated in both slices: a=%q b=%q", a[0].Content, b[0].Content)
+	}
+}
+
+func TestPruneToolResult_TooSmall(t *testing.T) {
+	a := []llm.Message{mkToolMsg("tc1", "bash", "tiny output")}
+	out := handlePruneToolResult(`{"tool_call_id":"tc1","reason":"x"}`, a)
+	if !strings.Contains(out, "below") {
+		t.Fatalf("expected size-gate refusal, got %q", out)
+	}
+	if !strings.Contains(a[0].Content, "tiny output") {
+		t.Fatalf("content unexpectedly modified: %q", a[0].Content)
+	}
+}
+
+func TestPruneToolResult_RefusesError(t *testing.T) {
+	body := "error: " + strings.Repeat("y", 600)
+	a := []llm.Message{mkToolMsg("tc1", "bash", body)}
+	out := handlePruneToolResult(`{"tool_call_id":"tc1","reason":"x"}`, a)
+	if !strings.Contains(out, "error") || !strings.Contains(out, "refusing") {
+		t.Fatalf("expected error-gate refusal, got %q", out)
+	}
+	if a[0].Content != body {
+		t.Fatalf("content unexpectedly modified")
+	}
+}
+
+func TestPruneToolResult_MissingID(t *testing.T) {
+	a := []llm.Message{mkToolMsg("tc1", "bash", strings.Repeat("z", 600))}
+	out := handlePruneToolResult(`{"tool_call_id":"missing","reason":"x"}`, a)
+	if !strings.Contains(out, "no tool result") {
+		t.Fatalf("expected not-found error, got %q", out)
+	}
+}
+
+func TestPruneToolResult_BadArgs(t *testing.T) {
+	out := handlePruneToolResult(`{"reason":"x"}`)
+	if !strings.Contains(out, "tool_call_id required") {
+		t.Fatalf("expected required-arg error, got %q", out)
 	}
 }
 

@@ -17,6 +17,12 @@ import (
 	"github.com/weatherjean/shell3/internal/usertools"
 )
 
+// ModelChoice pairs a provider name with one of its models.
+type ModelChoice struct {
+	Provider string
+	Model    string
+}
+
 // LLMClient is the streaming LLM interface.
 type LLMClient interface {
 	Stream(ctx context.Context, msgs []llm.Message, tools []llm.ToolDefinition, onEvent func(llm.StreamEvent)) error
@@ -31,8 +37,8 @@ type Config struct {
 	WorkDir       string
 	StatusLine    string
 	ModeLabel     string
-	Models        []string
-	ModelSwitcher func(string)
+	Models        []ModelChoice
+	ModelSwitcher func(provider, model string) (LLMClient, error)
 	Truncate      bool
 	Docs          string
 	UserTools     map[string]usertools.Tool
@@ -200,31 +206,44 @@ func registerSlashCommands(app slashTarget, cfg *Config, sess *session, lastUsag
 		},
 	})
 	app.RegisterSlash(patchapp.SlashCommand{
-		Name: "model", Help: "switch model: /model [name] (no arg → picker)",
+		Name: "model", Help: "switch model: /model [provider/model] (no arg → picker)",
 		Handler: func(args string) {
-			name := strings.TrimSpace(args)
-			if name == "" {
+			curProv, curModel := splitStatus(cfg.StatusLine)
+			arg := strings.TrimSpace(args)
+			var choice ModelChoice
+			if arg == "" {
 				if len(cfg.Models) < 2 {
-					dim("[/model usage: /model <name>]")
+					dim("[/model usage: /model <provider/model>]")
 					return
 				}
-				picked, ok := pickModel(app, cfg.Models, currentModel(cfg.StatusLine))
+				picked, ok := pickModel(app, cfg.Models, curProv, curModel)
 				if !ok {
 					return
 				}
-				name = picked
+				choice = picked
+			} else {
+				resolved, ok := resolveModelArg(cfg.Models, arg, curProv)
+				if !ok {
+					dim(fmt.Sprintf("[unknown model: %s]", arg))
+					return
+				}
+				choice = resolved
 			}
-			if cfg.ModelSwitcher != nil {
-				cfg.ModelSwitcher(name)
+			if cfg.ModelSwitcher == nil {
+				dim("[no model switcher configured]")
+				return
 			}
-			parts := strings.SplitN(cfg.StatusLine, " │ ", 2)
-			provider := ""
-			if len(parts) > 0 {
-				provider = parts[0]
+			newClient, err := cfg.ModelSwitcher(choice.Provider, choice.Model)
+			if err != nil {
+				dim(fmt.Sprintf("[model switch failed: %v]", err))
+				return
 			}
-			cfg.StatusLine = provider + " │ " + name
+			if newClient != nil {
+				cfg.LLM = newClient
+			}
+			cfg.StatusLine = choice.Provider + " │ " + choice.Model
 			app.SetStatus(cfg.StatusLine)
-			dim(fmt.Sprintf("[model: %s]", name))
+			dim(fmt.Sprintf("[model: %s/%s]", choice.Provider, choice.Model))
 		},
 	})
 	app.RegisterSlash(patchapp.SlashCommand{

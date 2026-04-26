@@ -120,7 +120,7 @@ func Load(personasDir, name string, data TemplateData, hasStore, noBash bool, us
 	}
 
 	var tools []ToolDef
-	tools = append(tools, docsTool)
+	tools = append(tools, docsTool, pruneToolResultTool)
 	if !noBash {
 		tools = append(tools, bashTool, shellInteractiveTool)
 	}
@@ -153,6 +153,24 @@ var docsTool = ToolDef{
 	Name:        "shell3_docs",
 	Description: "Return shell3's own documentation: commands, config format, slash commands, keyboard shortcuts, project structure, and skills. Call when asked what shell3 is, what it can do, or how to create a skill.",
 	Parameters:  map[string]any{"type": "object", "properties": map[string]any{}},
+}
+
+var pruneToolResultTool = ToolDef{
+	Name: "prune_tool_result",
+	Description: "Replace a previous tool result in the conversation with a short stub to free context. " +
+		"Use only when a successful tool call produced output that is now irrelevant to the remaining task " +
+		"(e.g. you grepped a large file but only one line mattered, or you read a config you no longer need). " +
+		"The tool call itself is preserved; only the result content is shortened. " +
+		"Will refuse to prune small results (< 500 bytes) or results that look like errors. " +
+		"Every tool result begins with a `[tool_call_id=<id>]` header line — copy that id into tool_call_id.",
+	Parameters: map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"tool_call_id": map[string]any{"type": "string", "description": "ID of the tool call whose result should be pruned"},
+			"reason":       map[string]any{"type": "string", "description": "One-line note on why the result is no longer needed"},
+		},
+		"required": []string{"tool_call_id", "reason"},
+	},
 }
 
 var shellInteractiveTool = ToolDef{

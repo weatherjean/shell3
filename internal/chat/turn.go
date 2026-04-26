@@ -4,12 +4,48 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/weatherjean/shell3/internal/llm"
-	"github.com/weatherjean/shell3/internal/patchtui"
 	"github.com/weatherjean/shell3/internal/patchapp"
+	"github.com/weatherjean/shell3/internal/patchtui"
 )
+
+// trafficSource is implemented by LLM clients that can expose the last
+// raw HTTP request/response they handled. Used to dump provider errors
+// with full upstream context.
+type trafficSource interface {
+	LastTraffic() (req, res []byte)
+}
+
+// dumpStreamError writes the failing turn's messages and the last raw
+// HTTP traffic to .shell3/last_error.json under cfg.WorkDir. Best-effort —
+// any IO error is silently ignored.
+func dumpStreamError(cfg Config, msgs []llm.Message, streamErr error) {
+	if cfg.WorkDir == "" {
+		return
+	}
+	var reqBody, resBody []byte
+	if ts, ok := cfg.LLM.(trafficSource); ok {
+		reqBody, resBody = ts.LastTraffic()
+	}
+	rec := map[string]any{
+		"timestamp":     time.Now().Format(time.RFC3339),
+		"error":         streamErr.Error(),
+		"messages":     msgs,
+		"request_body":  string(reqBody),
+		"response_body": string(resBody),
+	}
+	data, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
+		return
+	}
+	path := filepath.Join(cfg.WorkDir, ".shell3", "last_error.json")
+	_ = os.WriteFile(path, data, 0644)
+}
 
 // dimLines wraps each non-empty line with dim+reset so the style is
 // self-contained per line and doesn't bleed across slice boundaries.
@@ -50,15 +86,20 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 	allMsgs = append(allMsgs, msgs...)
 
 	for {
-		text, toolCalls, usage, err := streamOnce(ctx, cfg.LLM, allMsgs, cfg.Personality.Tools, ch)
+		text, reasoning, toolCalls, usage, err := streamOnce(ctx, cfg.LLM, allMsgs, cfg.Personality.Tools, ch)
 		if err != nil {
+			dumpStreamError(cfg, allMsgs, err)
 			cfg.Hooks.OnError(ctx, err)
 			ch <- patchapp.TurnErrEvent{Err: err}
 			return
 		}
 
 		if text != "" || len(toolCalls) > 0 {
-			assistantMsg := llm.Message{Role: llm.RoleAssistant, Content: text}
+			assistantMsg := llm.Message{
+				Role:             llm.RoleAssistant,
+				Content:          text,
+				ReasoningContent: reasoning,
+			}
 			assistantMsg.ToolCalls = toolCalls
 			allMsgs = append(allMsgs, assistantMsg)
 			sess.append(assistantMsg)
@@ -94,14 +135,18 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 				replyC := make(chan string, 1)
 				ch <- patchapp.TTYExecEvent{Cmd: command, WorkDir: cfg.WorkDir, ReplyC: replyC}
 				out = <-replyC
+			} else if tc.Name == "prune_tool_result" {
+				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Green+patchtui.Bold+"→ %s(%s)"+patchtui.Reset+"\n", tc.Name, tc.RawArgs)}
+				out = handlePruneToolResult(tc.RawArgs, allMsgs, sess.messages)
+				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(out, "\n")) + "\n"}
 			} else if tc.Name == "shell3_docs" {
-				ch <- patchapp.AppendEvent{Text: patchtui.Bold + "→ shell3_docs" + patchtui.Reset + "\n"}
+				ch <- patchapp.AppendEvent{Text: patchtui.Green + patchtui.Bold + "→ shell3_docs" + patchtui.Reset + "\n"}
 				out = cfg.Docs
 				if out == "" {
 					out = "Documentation not available."
 				}
 			} else if userTool, ok := cfg.UserTools[tc.Name]; ok {
-				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Bold+"→ %s(%s)"+patchtui.Reset+"\n", tc.Name, tc.RawArgs)}
+				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Green+patchtui.Bold+"→ %s(%s)"+patchtui.Reset+"\n", tc.Name, tc.RawArgs)}
 				out = dispatchUserTool(ctx, userTool, tc.RawArgs, cfg.Secrets, cfg.WorkDir)
 				display := truncateOutput(out)
 				if cfg.Truncate {
@@ -109,7 +154,7 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 				}
 				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(display, "\n")) + "\n"}
 			} else {
-				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Bold+"→ %s(%s)"+patchtui.Reset+"\n", tc.Name, tc.RawArgs)}
+				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Green+patchtui.Bold+"→ %s(%s)"+patchtui.Reset+"\n", tc.Name, tc.RawArgs)}
 				out = dispatchStore(tc.Name, tc.RawArgs, cfg.Store)
 				display := truncateOutput(out)
 				if cfg.Truncate {
@@ -119,9 +164,13 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 			}
 
 			cfg.Hooks.OnToolResult(ctx, tc.Name, out)
+			// Prepend the tool_call_id so the model has a stable handle it
+			// can pass to prune_tool_result. Without this the id only lives
+			// in structured metadata, which the model cannot reliably echo.
+			content := fmt.Sprintf("[tool_call_id=%s]\n%s", tc.ID, out)
 			toolMsg := llm.Message{
 				Role:       llm.RoleTool,
-				Content:    out,
+				Content:    content,
 				ToolCallID: tc.ID,
 				Name:       tc.Name,
 			}
@@ -131,14 +180,17 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 	}
 }
 
-// streamOnce calls the LLM once, collecting text/tool-calls/usage and
-// emitting ChunkEvents on ch.
-func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools []llm.ToolDefinition, ch chan<- patchapp.Event) (text string, toolCalls []llm.ToolCall, usage llm.Usage, err error) {
-	var sb strings.Builder
+// streamOnce calls the LLM once, collecting text/reasoning/tool-calls/usage
+// and emitting ChunkEvents on ch.
+func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools []llm.ToolDefinition, ch chan<- patchapp.Event) (text, reasoning string, toolCalls []llm.ToolCall, usage llm.Usage, err error) {
+	var sb, rb strings.Builder
 	streamErr := client.Stream(ctx, msgs, tools, func(ev llm.StreamEvent) {
 		if ev.TextDelta != "" {
 			sb.WriteString(ev.TextDelta)
 			ch <- patchapp.ChunkEvent{Text: ev.TextDelta}
+		}
+		if ev.ReasoningDelta != "" {
+			rb.WriteString(ev.ReasoningDelta)
 		}
 		if ev.ToolCall != nil {
 			toolCalls = append(toolCalls, *ev.ToolCall)
@@ -148,9 +200,9 @@ func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools
 		}
 	})
 	if ctx.Err() != nil {
-		return sb.String(), toolCalls, usage, fmt.Errorf("context canceled")
+		return sb.String(), rb.String(), toolCalls, usage, fmt.Errorf("context canceled")
 	}
-	return sb.String(), toolCalls, usage, streamErr
+	return sb.String(), rb.String(), toolCalls, usage, streamErr
 }
 
 func parseRawArgs(raw string) map[string]any {
