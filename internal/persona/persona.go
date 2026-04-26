@@ -239,7 +239,7 @@ var storeTools = []ToolDef{
 		Name: "history_query",
 		Description: "Query past conversation history. " +
 			"With a query: full-text search across all sessions; each hit includes session_id and chunk so you can fetch surrounding context. " +
-			"Without a query: fetch one chunk of one session — defaults to the most recent COMPLETED session (not the current one), chunk 0. " +
+			"Without a query: fetch one chunk of one session — defaults to the most recent COMPLETED session (not the current one), chunk 1. " +
 			"Use next_session_id / prev_session_id from a get response to walk the chain. " +
 			"Use chunk + total_chunks to page within a long session (25 turns per chunk).",
 		Parameters: map[string]any{
@@ -247,7 +247,7 @@ var storeTools = []ToolDef{
 			"properties": map[string]any{
 				"query":      map[string]any{"type": "string", "description": "Optional FTS query"},
 				"session_id": map[string]any{"type": "integer", "description": "Session id to fetch (get mode); 0 or omit for latest completed"},
-				"chunk":      map[string]any{"type": "integer", "description": "Chunk index within session, 0-based (get mode)"},
+				"chunk":      map[string]any{"type": "integer", "description": "Chunk index within session, 1-based (get mode); omit or 0 for first chunk"},
 				"limit":      map[string]any{"type": "integer", "description": "Max search hits (search mode, default 20)"},
 			},
 		},

@@ -226,13 +226,17 @@ func handleHistoryQuery(rawArgs string, st *store.Store) string {
 		fmt.Fprintf(&sb, "search hits: %d\n", res.TotalHits)
 		for _, h := range res.Hits {
 			fmt.Fprintf(&sb, "[session %d chunk %d | %s | %s] %s\n",
-				h.SessionID, h.Chunk,
+				h.SessionID, h.Chunk+1,
 				h.CreatedAt.Format("2006-01-02 15:04"), h.Role, h.Content)
 		}
 		return sb.String()
 	}
 
-	res, err := st.HistoryGet(args.SessionID, args.Chunk)
+	chunk := args.Chunk
+	if chunk > 0 {
+		chunk--
+	}
+	res, err := st.HistoryGet(args.SessionID, chunk)
 	if err != nil {
 		return fmt.Sprintf("error: %v", err)
 	}
@@ -241,7 +245,7 @@ func handleHistoryQuery(rawArgs string, st *store.Store) string {
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "session %d, chunk %d/%d (started %s)",
-		res.SessionID, res.Chunk, res.TotalChunks,
+		res.SessionID, res.Chunk+1, res.TotalChunks,
 		res.SessionStartedAt.Format("2006-01-02 15:04"))
 	if res.PrevSessionID != 0 {
 		fmt.Fprintf(&sb, " | prev=%d", res.PrevSessionID)

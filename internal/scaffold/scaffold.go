@@ -84,7 +84,7 @@ bash — execute shell commands to read files, search code, run tests, and make 
 
 memory_upsert  — store, update, or delete a memory by key. Empty value deletes. Pass core=true to inject the memory into every future session prompt; omit core to preserve.
 memory_query   — list or search memories. Omit query to list newest-first. Set core_only=true to filter.
-history_query  — read past conversations. With a query: full-text search returning hits with session_id+chunk locators. Without: fetch one 25-turn chunk of one session (defaults to the latest COMPLETED session, chunk 0); response carries prev_session_id / next_session_id / total_chunks for navigation.
+history_query  — read past conversations. With a query: full-text search returning hits with session_id+chunk locators. Without: fetch one 25-turn chunk of one session (defaults to the latest COMPLETED session, chunk 1); response carries prev_session_id / next_session_id / total_chunks for navigation.
 
 RULES:
 - When told "remember X" → call memory_upsert immediately. Mark it core=true if it should persist across every session.
