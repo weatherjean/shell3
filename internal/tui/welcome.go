@@ -1,54 +1,47 @@
 package tui
 
-import (
-	"strings"
+import "strings"
 
-	"charm.land/lipgloss/v2"
-)
+const asciiLogo = "       /\\\n      {.-}\n     ;_.-'\\\n    {    _.}_\n     \\.-' /  `,\n      \\  |    /\n       \\ |  ,/\n        \\|_/"
 
-var (
-	welcomeTitleStyle = lipgloss.NewStyle().
-				Foreground(colorPrimary).
-				Bold(true)
-
-	welcomeSubStyle = lipgloss.NewStyle().
-			Foreground(colorFgDim)
-
-	welcomeDimStyle = lipgloss.NewStyle().
-			Foreground(colorMuted)
-)
-
-const asciiLogo = "       /\\\n      {.-}\n     ;_.-'\\\n    {    _.}_\n     \\.-' /  `\n      \\  |    /\n       \\ |  ,/\n        \\|_/"
-
-// renderWelcome returns the landing screen shown before the first message.
-func renderWelcome(width int) string {
-	if width <= 0 {
-		width = 80
+// renderWelcome returns the welcome lines printed once on session start.
+// Pass the lines to Renderer.Print so they live in scrollback, never
+// re-rendered.
+func renderWelcome(width int) []string {
+	if width < 40 {
+		width = 40
 	}
+	yellow := fgRGB(rPrimary, gPrimary, bPrimary)
+	dim := fgRGB(rMuted, gMuted, bMuted)
+	sub := fgRGB(rFgDim, gFgDim, bFgDim)
 
-	logo := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).Render(asciiLogo)
-	phonetic := welcomeDimStyle.Render("/'ʃɛli/")
-	title := welcomeTitleStyle.Render("◆ shell3") + "  " + phonetic
-
-	sub := welcomeSubStyle.Render("AI-powered shell assistant")
-
-	hints := []string{
-		"  " + welcomeDimStyle.Render("type a message") + "  start a conversation",
-		"  " + welcomeDimStyle.Render("! <cmd>") + "  run a shell command with a real terminal",
-		"  " + welcomeDimStyle.Render("/help") + "  list slash commands",
+	// Center the whole logo as a block (preserve internal alignment).
+	logoLines := strings.Split(asciiLogo, "\n")
+	maxW := 0
+	for _, l := range logoLines {
+		if visibleLen(l) > maxW {
+			maxW = visibleLen(l)
+		}
 	}
-
-	var b strings.Builder
-	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Width(width).Align(lipgloss.Center).Render(logo))
-	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Width(width).Align(lipgloss.Left).PaddingLeft(2).Render(title))
-	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Width(width).PaddingLeft(2).Render(sub))
-	b.WriteString("\n\n")
-	for _, h := range hints {
-		b.WriteString(lipgloss.NewStyle().PaddingLeft(2).Render(h))
-		b.WriteString("\n")
+	leftPad := (width - maxW) / 2
+	if leftPad < 0 {
+		leftPad = 0
 	}
-	return b.String()
+	pad := strings.Repeat(" ", leftPad)
+
+	var out []string
+	out = append(out, "")
+	for _, l := range logoLines {
+		out = append(out, pad+styled(l, yellow, "", true))
+	}
+	out = append(out, "")
+	out = append(out, "  "+styled("◆ shell3", yellow, "", true)+"  "+styled("/'ʃɛli/", dim, "", false))
+	out = append(out, "  "+styled("AI-powered shell assistant", sub, "", false))
+	out = append(out, "")
+	out = append(out, "  "+styled("type a message", dim, "", false)+"  start a conversation")
+	out = append(out, "  "+styled("! <cmd>", dim, "", false)+"  run a shell command with a real terminal")
+	out = append(out, "  "+styled("/help", dim, "", false)+"  list slash commands")
+	out = append(out, "", "", "", "", "")
+	return out
 }
+

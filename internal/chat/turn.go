@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/tui"
 )
@@ -19,7 +18,7 @@ const (
 )
 
 // dimLines wraps each non-empty line with dim+reset so the style is
-// self-contained per line and doesn't bleed across viewport slice boundaries.
+// self-contained per line and doesn't bleed across slice boundaries.
 func dimLines(s string) string {
 	lines := strings.Split(s, "\n")
 	for i, l := range lines {
@@ -30,15 +29,15 @@ func dimLines(s string) string {
 	return strings.Join(lines, "\n")
 }
 
-// runTurn executes one user→assistant exchange, sending tui messages to ch.
+// runTurn executes one user→assistant exchange, sending tui events to ch.
 // The goroutine closes ch when done.
-func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch chan<- tea.Msg) {
+func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch chan<- tui.Event) {
 	defer close(ch)
 	defer func() {
 		if r := recover(); r != nil {
 			err := fmt.Errorf("panic: %v", r)
 			cfg.Hooks.OnError(ctx, err)
-			ch <- tui.TurnErrMsg{Err: err}
+			ch <- tui.TurnErrEvent{Err: err}
 		}
 	}()
 
@@ -60,7 +59,7 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 		text, toolCalls, usage, err := streamOnce(ctx, cfg.LLM, allMsgs, cfg.Personality.Tools, ch)
 		if err != nil {
 			cfg.Hooks.OnError(ctx, err)
-			ch <- tui.TurnErrMsg{Err: err}
+			ch <- tui.TurnErrEvent{Err: err}
 			return
 		}
 
@@ -72,7 +71,7 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 		}
 
 		if len(toolCalls) == 0 {
-			ch <- tui.TurnDoneMsg{Usage: usage}
+			ch <- tui.TurnDoneEvent{Usage: usage}
 			return
 		}
 
@@ -88,29 +87,33 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 				out = fmt.Sprintf("Tool call blocked: %v", hookErr)
 			} else if tc.Name == "bash" {
 				command := parseBashCommand(tc.RawArgs)
-				ch <- tui.AppendMsg(fmt.Sprintf(ansiYellow+ansiBold+"$ %s"+ansiReset+"\n", command))
+				ch <- tui.AppendEvent{Text: fmt.Sprintf(ansiYellow+ansiBold+"$ %s"+ansiReset+"\n", command)}
 				out = executeBash(ctx, command, cfg.WorkDir)
 				display := truncateOutput(out)
 				if cfg.Truncate {
 					display = out
 				}
-				ch <- tui.AppendMsg(dimLines(strings.TrimRight(display, "\n")) + "\n")
+				ch <- tui.AppendEvent{Text: dimLines(strings.TrimRight(display, "\n")) + "\n"}
 			} else if tc.Name == "shell_interactive" {
 				command := parseBashCommand(tc.RawArgs)
-				ch <- tui.AppendMsg(fmt.Sprintf(ansiYellow+ansiBold+"$ %s"+ansiReset+" (interactive)\n", command))
+				ch <- tui.AppendEvent{Text: fmt.Sprintf(ansiYellow+ansiBold+"$ %s"+ansiReset+" (interactive)\n", command)}
 				replyC := make(chan string, 1)
-				ch <- tui.TTYExecMsg{Cmd: command, WorkDir: cfg.WorkDir, ReplyC: replyC}
-				out = <-replyC // blocks until the TUI finishes TTY handoff
+				ch <- tui.TTYExecEvent{Cmd: command, WorkDir: cfg.WorkDir, ReplyC: replyC}
+				out = <-replyC
 			} else if tc.Name == "shell3_docs" {
-				ch <- tui.AppendMsg(fmt.Sprintf(ansiBold+"→ shell3_docs"+ansiReset+"\n"))
+				ch <- tui.AppendEvent{Text: ansiBold + "→ shell3_docs" + ansiReset + "\n"}
 				out = cfg.Docs
 				if out == "" {
 					out = "Documentation not available."
 				}
 			} else {
-				ch <- tui.AppendMsg(fmt.Sprintf(ansiBold+"→ %s(%s)"+ansiReset+"\n", tc.Name, tc.RawArgs))
+				ch <- tui.AppendEvent{Text: fmt.Sprintf(ansiBold+"→ %s(%s)"+ansiReset+"\n", tc.Name, tc.RawArgs)}
 				out = dispatchStore(tc.Name, tc.RawArgs, cfg.Store)
-				ch <- tui.AppendMsg(dimLines(strings.TrimRight(out, "\n")) + "\n")
+				display := truncateOutput(out)
+				if cfg.Truncate {
+					display = out
+				}
+				ch <- tui.AppendEvent{Text: dimLines(strings.TrimRight(display, "\n")) + "\n"}
 			}
 
 			cfg.Hooks.OnToolResult(ctx, tc.Name, out)
@@ -126,14 +129,14 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 	}
 }
 
-// streamOnce calls the LLM once, collecting text, tool calls, and usage while sending chunks to ch.
-func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools []llm.ToolDefinition, ch chan<- tea.Msg) (text string, toolCalls []llm.ToolCall, usage llm.Usage, err error) {
+// streamOnce calls the LLM once, collecting text/tool-calls/usage and
+// emitting ChunkEvents on ch.
+func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools []llm.ToolDefinition, ch chan<- tui.Event) (text string, toolCalls []llm.ToolCall, usage llm.Usage, err error) {
 	var sb strings.Builder
-
 	streamErr := client.Stream(ctx, msgs, tools, func(ev llm.StreamEvent) {
 		if ev.TextDelta != "" {
 			sb.WriteString(ev.TextDelta)
-			ch <- tui.ChunkMsg(ev.TextDelta)
+			ch <- tui.ChunkEvent{Text: ev.TextDelta}
 		}
 		if ev.ToolCall != nil {
 			toolCalls = append(toolCalls, *ev.ToolCall)
@@ -142,7 +145,6 @@ func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools
 			usage = *ev.Usage
 		}
 	})
-
 	if ctx.Err() != nil {
 		return sb.String(), toolCalls, usage, fmt.Errorf("context canceled")
 	}

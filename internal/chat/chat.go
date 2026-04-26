@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
-	"io"
-
-	tea "charm.land/bubbletea/v2"
 	"github.com/weatherjean/shell3/internal/hooks"
 	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/patchmd"
+	"github.com/weatherjean/shell3/internal/patchtui"
 	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/store"
 	"github.com/weatherjean/shell3/internal/tui"
@@ -29,29 +29,36 @@ type Config struct {
 	Personality   persona.Persona
 	WorkDir       string
 	StatusLine    string
-	ModeLabel     string       // "c", "a", or "cst" — displayed as mode badge
-	Models        []string     // available models (from credentials)
-	ModelSwitcher func(string) // called on /model switch
-	Truncate      bool         // when true, show full bash output; default false = truncated
-	Docs          string       // embedded shell3 documentation, served by shell3_docs tool
+	ModeLabel     string
+	Models        []string
+	ModelSwitcher func(string)
+	Truncate      bool
+	Docs          string
 }
 
-// programReleaser implements hooks.TTYReleaser backed by a tea.Program.
-type programReleaser struct{ p *tea.Program }
+// appReleaser implements hooks.TTYReleaser by delegating to App.WithReleasedTerminal.
+// Hooks call Release() before running and Restore() after; we handle both
+// by calling WithReleasedTerminal with a wait-channel pattern.
+type appReleaser struct {
+	app  *tui.App
+	done chan struct{}
+}
 
-func (r *programReleaser) Release() error {
-	if err := r.p.ReleaseTerminal(); err != nil {
-		return err
-	}
-	// Erase the sticky TUI (input box + status bar) from the screen so the
-	// hook output doesn't appear over it.
-	fmt.Print("\033[1A\033[0J")
+func (r *appReleaser) Release() error {
+	r.done = make(chan struct{})
+	go r.app.WithReleasedTerminal(func() { <-r.done })
 	return nil
 }
 
-func (r *programReleaser) Restore() error { return r.p.RestoreTerminal() }
+func (r *appReleaser) Restore() error {
+	if r.done != nil {
+		close(r.done)
+		r.done = nil
+	}
+	return nil
+}
 
-// RunInteractive starts the BubbleTea TUI and blocks until the user quits.
+// RunInteractive runs the TUI chat loop. Blocks until the user quits.
 func RunInteractive(ctx context.Context, cfg Config) error {
 	sess := &session{}
 
@@ -65,236 +72,225 @@ func RunInteractive(ctx context.Context, cfg Config) error {
 		defer cfg.Store.EndSession(sessionID)
 	}
 
+	app := tui.New(cfg.ModeLabel, cfg.StatusLine)
+
+	cfg.Hooks.SetReleaser(&appReleaser{app: app})
+	cfg.Hooks.OnSessionStart(ctx)
+	defer cfg.Hooks.OnSessionEnd(ctx)
+
 	var lastUsage llm.Usage
 
-	switchModel := func(chosen string) tea.Cmd {
+	app.SetSubmit(func(input string) {
+		trimmed := strings.TrimSpace(input)
+		if strings.HasPrefix(trimmed, "/") {
+			handleSlash(input, &cfg, sess, app, &lastUsage)
+			return
+		}
+		// Launch turn goroutine.
+		ch := make(chan tui.Event, 256)
+		turnCtx, cancel := context.WithCancel(ctx)
+		app.SetBusy(true, cancel)
+
+		prevLen := len(sess.messages)
+		go func() {
+			defer cancel()
+			runTurn(turnCtx, cfg, sess, input, ch)
+			saveHistory(cfg, sess, sessionID, prevLen)
+		}()
+		go drainTurn(ch, app, &lastUsage, &cfg)
+	})
+
+	return app.Run(ctx)
+}
+
+// drainTurn consumes events from a turn goroutine, updating App state.
+// Streaming text accumulates into a buffer; on TurnDone the buffer is
+// committed to scrollback and the App returns to idle.
+func drainTurn(ch <-chan tui.Event, app *tui.App, lastUsage *llm.Usage, cfg *Config) {
+	var streamBuf strings.Builder
+	flushPreview := func() {
+		text := streamBuf.String()
+		if text == "" {
+			app.SetStreamPreview(nil)
+			return
+		}
+		w, _ := patchtui.Size()
+		app.SetStreamPreview(patchmd.Render(text, w-2))
+	}
+
+	for ev := range ch {
+		switch v := ev.(type) {
+		case tui.ChunkEvent:
+			streamBuf.WriteString(v.Text)
+			flushPreview()
+
+		case tui.AppendEvent:
+			// Tool output. Commit any pending stream text first so order is preserved.
+			if streamBuf.Len() > 0 {
+				app.SetStreamPreview(nil)
+				w, _ := patchtui.Size()
+				app.Print(patchmd.Render(streamBuf.String(), w-2))
+				streamBuf.Reset()
+			}
+			app.Print(splitLines(v.Text))
+
+		case tui.TurnDoneEvent:
+			if streamBuf.Len() > 0 {
+				app.SetStreamPreview(nil)
+				w, _ := patchtui.Size()
+				app.Print(patchmd.Render(streamBuf.String(), w-2))
+				streamBuf.Reset()
+			}
+			*lastUsage = v.Usage
+			if v.Usage.TotalTokens > 0 {
+				app.SetTokens(v.Usage.TotalTokens)
+			}
+			app.SetBusy(false, nil)
+
+		case tui.TurnErrEvent:
+			if streamBuf.Len() > 0 {
+				app.SetStreamPreview(nil)
+				app.Print(splitLines(streamBuf.String()))
+				streamBuf.Reset()
+			}
+			msg := v.Err.Error()
+			if strings.Contains(msg, "context canceled") {
+				app.PrintLine(ansiDim + "[cancelled]" + ansiReset)
+			} else {
+				app.PrintLine("\033[31m[error: " + msg + "]\033[0m")
+			}
+			app.SetBusy(false, nil)
+
+		case tui.TTYExecEvent:
+			// Run the command with full TTY access. The turn goroutine
+			// blocks on ReplyC; we deliver the result after the command exits.
+			result := "(completed)"
+			app.WithReleasedTerminal(func() {
+				c := exec.Command("bash", "-c", v.Cmd)
+				if v.WorkDir != "" {
+					c.Dir = v.WorkDir
+				}
+				c.Stdin = os.Stdin
+				c.Stdout = os.Stdout
+				c.Stderr = os.Stderr
+				if err := c.Run(); err != nil {
+					result = "error: " + err.Error()
+				}
+			})
+			v.ReplyC <- result
+		}
+	}
+}
+
+// splitLines splits text on '\n', trimming the final empty element if the
+// input ends with '\n'.
+func splitLines(text string) []string {
+	text = strings.TrimRight(text, "\n")
+	if text == "" {
+		return nil
+	}
+	return strings.Split(text, "\n")
+}
+
+// handleSlash handles /commands. Output goes directly to App.Print.
+func handleSlash(input string, cfg *Config, sess *session, app *tui.App, lastUsage *llm.Usage) {
+	dim := func(s string) { app.PrintLine(ansiDim + s + ansiReset) }
+	defer app.Refresh() // redraw the live frame after slash output
+	cmd := strings.TrimSpace(strings.ToLower(input))
+
+	if strings.HasPrefix(cmd, "/model") {
+		name := strings.TrimSpace(input[6:])
+		if name == "" {
+			dim("[/model usage: /model <name>]")
+			return
+		}
 		if cfg.ModelSwitcher != nil {
-			cfg.ModelSwitcher(chosen)
+			cfg.ModelSwitcher(name)
 		}
 		parts := strings.SplitN(cfg.StatusLine, " │ ", 2)
 		provider := ""
 		if len(parts) > 0 {
 			provider = parts[0]
 		}
-		cfg.StatusLine = provider + " │ " + chosen
-		newStatus := cfg.StatusLine
-		return tea.Batch(
-			func() tea.Msg { return tui.AppendMsg(ansiDim + fmt.Sprintf("[model: %s]", chosen) + ansiReset + "\n") },
-			func() tea.Msg { return tui.StatusMsg(newStatus) },
-		)
+		cfg.StatusLine = provider + " │ " + name
+		app.SetStatus(cfg.StatusLine)
+		dim(fmt.Sprintf("[model: %s]", name))
+		return
 	}
 
-	dim := func(s string) tui.AppendMsg {
-		return tui.AppendMsg(ansiDim + s + ansiReset + "\n")
-	}
-
-	handleSlash := func(input string) tea.Cmd {
-		cmd := strings.TrimSpace(strings.ToLower(input))
-		// /model must be handled outside the func() tea.Msg wrapper so we can
-		// return tea.Batch (multiple messages) or OpenDialogMsg directly.
-		if strings.HasPrefix(cmd, "/model") {
-			name := strings.TrimSpace(input[6:])
-			if name == "" {
-				sel := newModelSelect(cfg.Models)
-				return tea.Exec(sel, func(err error) tea.Msg {
-					if err != nil || sel.chosen == "" {
-						return nil
-					}
-					return tui.RunCmd{Cmd: switchModel(sel.chosen)}
-				})
-			}
-			return switchModel(name)
+	switch cmd {
+	case "/clear":
+		sess.messages = nil
+		dim("[context cleared]")
+	case "/prune":
+		pruned := pruneLastTurn(sess.messages)
+		if len(pruned) == len(sess.messages) {
+			dim("[nothing to prune]")
+			return
 		}
-		return func() tea.Msg {
-			switch cmd {
-			case "/clear":
-				sess.messages = nil
-				return dim("[context cleared]")
-			case "/prune":
-				pruned := pruneLastTurn(sess.messages)
-				if len(pruned) == len(sess.messages) {
-					return dim("[nothing to prune]")
-				}
-				sess.messages = pruned
-				return dim("[last turn removed from context]")
-			case "/usage":
-				if lastUsage.TotalTokens == 0 {
-					return dim("[no usage data yet]")
-				}
-				return tui.AppendMsg(fmt.Sprintf(
-					"prompt:     %d\ncompletion: %d\ntotal:      %d\n",
-					lastUsage.PromptTokens, lastUsage.CompletionTokens, lastUsage.TotalTokens,
-				))
-			case "/prompt":
-				var sb strings.Builder
-				fmt.Fprintf(&sb, ansiBold+"system prompt:"+ansiReset+"\n%s\n\n", cfg.Personality.SystemPrompt)
-				fmt.Fprintf(&sb, ansiBold+"active tools:"+ansiReset+"\n")
-				for _, t := range cfg.Personality.Tools {
-					fmt.Fprintf(&sb, "  %-16s %s\n", t.Name, t.Description)
-				}
-				return tui.AppendMsg(sb.String())
-			case "/truncate":
-				cfg.Truncate = !cfg.Truncate
-				state := "off"
-				if cfg.Truncate {
-					state = "on"
-				}
-				return dim(fmt.Sprintf("[full output: %s]", state))
-			case "/exit", "/quit":
-				return tea.Quit()
-			case "/help", "/list", "/", "/h":
-				return tui.AppendMsg(slashHelp())
-			default:
-				return dim(fmt.Sprintf("[unknown command: %s  (type /help to list commands)]", input))
-			}
+		sess.messages = pruned
+		dim("[last turn removed from context]")
+	case "/usage":
+		if lastUsage.TotalTokens == 0 {
+			dim("[no usage data yet]")
+			return
 		}
-	}
-
-	submitFn := func(input string) tea.Cmd {
-		if strings.HasPrefix(input, "/") {
-			return handleSlash(input)
+		app.Print([]string{
+			fmt.Sprintf("prompt:     %d", lastUsage.PromptTokens),
+			fmt.Sprintf("completion: %d", lastUsage.CompletionTokens),
+			fmt.Sprintf("total:      %d", lastUsage.TotalTokens),
+		})
+	case "/prompt":
+		var lines []string
+		lines = append(lines, ansiBold+"system prompt:"+ansiReset)
+		for _, l := range strings.Split(cfg.Personality.SystemPrompt, "\n") {
+			lines = append(lines, l)
 		}
-		ch := make(chan tea.Msg, 256)
-		out := make(chan tea.Msg, 256)
-		prevLen := len(sess.messages)
-		turnCtx, cancel := context.WithCancel(ctx)
-		go func() {
-			defer cancel()
-			runTurn(turnCtx, cfg, sess, input, ch)
-			saveHistory(cfg, sess, sessionID, prevLen)
-		}()
-		go func() {
-			for msg := range ch {
-				if done, ok := msg.(tui.TurnDoneMsg); ok {
-					lastUsage = done.Usage
-				}
-				out <- msg
-			}
-			close(out)
-		}()
-		return tea.Batch(
-			func() tea.Msg { return tui.SetCancelMsg{Cancel: cancel} },
-			tui.ReadCh(out),
-		)
+		lines = append(lines, "", ansiBold+"active tools:"+ansiReset)
+		for _, t := range cfg.Personality.Tools {
+			lines = append(lines, fmt.Sprintf("  %-16s %s", t.Name, t.Description))
+		}
+		app.Print(lines)
+	case "/truncate":
+		cfg.Truncate = !cfg.Truncate
+		state := "off"
+		if cfg.Truncate {
+			state = "on"
+		}
+		dim(fmt.Sprintf("[full output: %s]", state))
+	case "/exit", "/quit":
+		os.Exit(0)
+	case "/help", "/list", "/", "/h":
+		lines := strings.Split(slashHelp(), "\n")
+		lines = append(lines, "", "", "", "", "")
+		app.Print(lines)
+	default:
+		dim(fmt.Sprintf("[unknown command: %s  (type /help to list commands)]", input))
 	}
-
-	model := tui.New("shell3", cfg.StatusLine, cfg.ModeLabel, submitFn)
-
-	rel := &programReleaser{}
-	prog := tea.NewProgram(model)
-	rel.p = prog
-	cfg.Hooks.SetReleaser(rel)
-
-	cfg.Hooks.OnSessionStart(ctx)
-	defer cfg.Hooks.OnSessionEnd(ctx)
-
-	_, err := prog.Run()
-	return err
 }
 
 // RunOnce executes a single turn and prints output to stdout. No TUI.
 func RunOnce(ctx context.Context, cfg Config, input string) error {
 	sess := &session{}
-	ch := make(chan tea.Msg, 256)
+	ch := make(chan tui.Event, 256)
 	go runTurn(ctx, cfg, sess, input, ch)
 
-	for msg := range ch {
-		switch v := msg.(type) {
-		case tui.ChunkMsg:
-			fmt.Print(string(v))
-		case tui.AppendMsg:
-			fmt.Print(string(v))
-		case tui.TurnErrMsg:
+	for ev := range ch {
+		switch v := ev.(type) {
+		case tui.ChunkEvent:
+			fmt.Print(v.Text)
+		case tui.AppendEvent:
+			fmt.Print(v.Text)
+		case tui.TurnErrEvent:
 			fmt.Fprintln(os.Stderr, "error:", v.Err)
-		case tui.TurnDoneMsg:
+		case tui.TurnDoneEvent:
 			fmt.Println()
 		}
 	}
 	return nil
 }
 
-// modelSelect is a minimal tea.ExecCommand that runs an inline arrow-key model picker.
-type modelSelect struct {
-	models []string
-	cursor int
-	chosen string
-	stdin  io.Reader
-	stdout io.Writer
-}
-
-func newModelSelect(models []string) *modelSelect { return &modelSelect{models: models} }
-
-func (s *modelSelect) SetStdin(r io.Reader)  { s.stdin = r }
-func (s *modelSelect) SetStdout(w io.Writer) { s.stdout = w }
-func (s *modelSelect) SetStderr(_ io.Writer) {}
-
-func (s *modelSelect) Run() error {
-	p := tea.NewProgram(s, tea.WithInput(s.stdin), tea.WithOutput(s.stdout))
-	_, err := p.Run()
-	return err
-}
-
-func (s *modelSelect) Init() tea.Cmd { return nil }
-
-func (s *modelSelect) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
-		switch msg.Code {
-		case tea.KeyUp, 'k':
-			if s.cursor > 0 {
-				s.cursor--
-			}
-		case tea.KeyDown, 'j':
-			if s.cursor < len(s.models)-1 {
-				s.cursor++
-			}
-		case tea.KeyEnter:
-			if len(s.models) > 0 {
-				s.chosen = s.models[s.cursor]
-			}
-			return s, tea.Quit
-		case tea.KeyEsc, 'q':
-			return s, tea.Quit
-		}
-	}
-	return s, nil
-}
-
-func (s *modelSelect) View() tea.View {
-	var sb strings.Builder
-	sb.WriteString("select model  ↑/↓ k/j  enter  esc to cancel\n\n")
-	for i, m := range s.models {
-		if i == s.cursor {
-			sb.WriteString(" > " + m + "\n")
-		} else {
-			sb.WriteString("   " + m + "\n")
-		}
-	}
-	return tea.View{Content: sb.String()}
-}
-
-func slashHelp() string {
-	return "\n" + ansiBold + "slash commands:" + ansiReset + "\n" +
-		"  /clear     reset conversation context\n" +
-		"  /prune     remove last turn from context\n" +
-		"  /model     list models or /model <name> to switch\n" +
-		"  /usage     show token usage from last turn\n" +
-		"  /prompt    dump system prompt and active tools\n" +
-		"  /truncate  toggle truncated bash output\n" +
-		"  /exit      quit shell3\n" +
-		"  /help      show this help\n" +
-		"\n" + ansiBold + "keyboard shortcuts:" + ansiReset + "\n" +
-		"  enter          send message\n" +
-		"  shift+enter    new line in message\n" +
-		"  alt+enter      new line in message\n" +
-		"  esc esc        clear input\n" +
-		"  ctrl+c         cancel active response (when busy)\n" +
-		"  ctrl+c ctrl+c  quit shell3 (when idle)\n" +
-		"\n" + ansiBold + "shell passthrough:" + ansiReset + "\n" +
-		"  !<cmd>     run shell command with full terminal\n"
-}
-
-// pruneLastTurn removes the last user message and everything that follows it.
+// pruneLastTurn removes the last user message and everything after it.
 func pruneLastTurn(messages []llm.Message) []llm.Message {
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role == llm.RoleUser {
@@ -302,4 +298,24 @@ func pruneLastTurn(messages []llm.Message) []llm.Message {
 		}
 	}
 	return messages
+}
+
+func slashHelp() string {
+	return "\n" + ansiBold + "slash commands:" + ansiReset + "\n" +
+		"  /clear     reset conversation context\n" +
+		"  /prune     remove last turn from context\n" +
+		"  /model     /model <name> to switch\n" +
+		"  /usage     show token usage from last turn\n" +
+		"  /prompt    dump system prompt and active tools\n" +
+		"  /truncate  toggle truncated bash output\n" +
+		"  /exit      quit shell3\n" +
+		"  /help      show this help\n" +
+		"\n" + ansiBold + "keyboard shortcuts:" + ansiReset + "\n" +
+		"  enter          send message\n" +
+		"  alt+enter      newline in message\n" +
+		"  esc            clear input\n" +
+		"  ctrl+c         cancel active response\n" +
+		"  ctrl+c ctrl+c  quit (when idle)\n" +
+		"\n" + ansiBold + "shell passthrough:" + ansiReset + "\n" +
+		"  !<cmd>     run shell command with full terminal\n"
 }
