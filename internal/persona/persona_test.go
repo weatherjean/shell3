@@ -3,9 +3,11 @@ package persona_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/persona"
+	"github.com/weatherjean/shell3/internal/store"
 )
 
 func writePersona(t *testing.T, dir, name, content string) {
@@ -109,7 +111,7 @@ func TestLoad_StoreToolsIncludedWhenHasStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"memory_store", "memory_list", "memory_search", "memory_remove", "history_latest", "history_search"} {
+	for _, name := range []string{"memory_upsert", "memory_query", "history_query"} {
 		if !hasToolNamed(p.Tools, name) {
 			t.Errorf("hasStore=true but tool %q missing", name)
 		}
@@ -124,7 +126,7 @@ func TestLoad_StoreToolsAbsentWithoutStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"memory_store", "history_latest"} {
+	for _, name := range []string{"memory_upsert", "history_query"} {
 		if hasToolNamed(p.Tools, name) {
 			t.Errorf("hasStore=false but tool %q present", name)
 		}
@@ -286,4 +288,36 @@ func hasToolNamed(tools []persona.ToolDef, name string) bool {
 		}
 	}
 	return false
+}
+
+func TestLoad_CoreMemoriesRendered(t *testing.T) {
+	dir := t.TempDir()
+	body := `---
+name: t
+---
+Persona body.
+{{- if .CoreMemories}}
+
+## Core memories
+
+{{range .CoreMemories}}- {{.Key}}: {{.Value}}
+{{end}}
+{{- end}}`
+	writePersona(t, dir, "t", body)
+
+	p, err := persona.Load(dir, "t", persona.TemplateData{
+		CoreMemories: []store.MemoryEntry{
+			{Key: "stack", Value: "Go + SQLite"},
+			{Key: "style", Value: "terse"},
+		},
+	}, false, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(p.SystemPrompt, "## Core memories") {
+		t.Fatalf("expected core memories section, got:\n%s", p.SystemPrompt)
+	}
+	if !strings.Contains(p.SystemPrompt, "- stack: Go + SQLite") {
+		t.Fatalf("expected memory line, got:\n%s", p.SystemPrompt)
+	}
 }

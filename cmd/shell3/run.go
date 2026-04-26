@@ -129,11 +129,31 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		userToolMap[ut.Name] = ut
 	}
 
+	var coreMemories []store.MemoryEntry
+	if st != nil {
+		mems, err := st.MemoryQuery("", true, 0)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "warning: load core memories:", err)
+		} else {
+			coreMemories = mems
+			var bytes int
+			for _, m := range mems {
+				bytes += len(m.Key) + len(m.Value) + 4
+			}
+			if bytes > 2048 {
+				fmt.Fprintf(os.Stderr,
+					"warning: core memories total %d bytes (>2KB), consider demoting some\n",
+					bytes)
+			}
+		}
+	}
+
 	personaData := persona.TemplateData{
-		Skills: skills.BuildSection(loadedSkills),
-		Time:   time.Now().Format("Mon Jan 2 2006, 15:04 MST"),
-		CWD:    cwd,
-		Model:  model,
+		Skills:       skills.BuildSection(loadedSkills),
+		Time:         time.Now().Format("Mon Jan 2 2006, 15:04 MST"),
+		CWD:          cwd,
+		Model:        model,
+		CoreMemories: coreMemories,
 	}
 	pers, err := persona.Load(personasDir, personaName, personaData, st != nil, noBash, userToolDefs)
 	if err != nil {

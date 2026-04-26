@@ -10,6 +10,7 @@ import (
 
 	"github.com/weatherjean/shell3/internal/hooks"
 	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/store"
 	"gopkg.in/yaml.v3"
 )
 
@@ -42,10 +43,11 @@ type PersonaConfig struct {
 
 // TemplateData holds values injected into persona template bodies.
 type TemplateData struct {
-	Skills string // output of skills.BuildSection
-	Time   string // formatted current time
-	CWD    string // working directory
-	Model  string // active model name
+	Skills       string              // output of skills.BuildSection
+	Time         string              // formatted current time
+	CWD          string              // working directory
+	Model        string              // active model name
+	CoreMemories []store.MemoryEntry // memories with core=true; rendered into prompt
 }
 
 // Persona holds a rendered persona ready for use in a chat session.
@@ -185,58 +187,51 @@ var bashTool = ToolDef{
 
 var storeTools = []ToolDef{
 	{
-		Name:        "memory_store",
-		Description: "Store a key-value entry in project memory for future reference.",
+		Name: "memory_upsert",
+		Description: "Insert, update, or delete a project memory entry. " +
+			"Pass an empty value to delete. " +
+			"Pass core=true to mark a fact important enough to be injected into every session prompt; " +
+			"omit core when updating to preserve its current setting.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"key":   map[string]any{"type": "string", "description": "Short unique key"},
-				"value": map[string]any{"type": "string", "description": "Content to remember"},
+				"value": map[string]any{"type": "string", "description": "Content to remember; empty string deletes the entry"},
+				"core":  map[string]any{"type": "boolean", "description": "If true, memory is injected into the system prompt every session. Omit to preserve existing value."},
 			},
 			"required": []string{"key", "value"},
 		},
 	},
 	{
-		Name:        "memory_list",
-		Description: "List all stored memory entries.",
-		Parameters:  map[string]any{"type": "object", "properties": map[string]any{}},
-	},
-	{
-		Name:        "memory_search",
-		Description: "Search project memory for relevant past decisions, notes, or context.",
+		Name: "memory_query",
+		Description: "Query project memory. " +
+			"Omit query to list newest-first. " +
+			"Provide query for full-text search ranked by relevance. " +
+			"Set core_only=true to restrict to core memories.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"query": map[string]any{"type": "string", "description": "Search query"},
+				"query":     map[string]any{"type": "string", "description": "Optional FTS query; omit to list all"},
+				"core_only": map[string]any{"type": "boolean", "description": "Only return core memories"},
+				"limit":     map[string]any{"type": "integer", "description": "Maximum results (default 50)"},
 			},
-			"required": []string{"query"},
 		},
 	},
 	{
-		Name:        "memory_remove",
-		Description: "Remove a key-value entry from project memory.",
+		Name: "history_query",
+		Description: "Query past conversation history. " +
+			"With a query: full-text search across all sessions; each hit includes session_id and chunk so you can fetch surrounding context. " +
+			"Without a query: fetch one chunk of one session — defaults to the most recent COMPLETED session (not the current one), chunk 0. " +
+			"Use next_session_id / prev_session_id from a get response to walk the chain. " +
+			"Use chunk + total_chunks to page within a long session (25 turns per chunk).",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"key": map[string]any{"type": "string", "description": "Key to remove"},
+				"query":      map[string]any{"type": "string", "description": "Optional FTS query"},
+				"session_id": map[string]any{"type": "integer", "description": "Session id to fetch (get mode); 0 or omit for latest completed"},
+				"chunk":      map[string]any{"type": "integer", "description": "Chunk index within session, 0-based (get mode)"},
+				"limit":      map[string]any{"type": "integer", "description": "Max search hits (search mode, default 20)"},
 			},
-			"required": []string{"key"},
-		},
-	},
-	{
-		Name:        "history_latest",
-		Description: "Return the most recent conversation turns. Call when asked about recent or past activity.",
-		Parameters:  map[string]any{"type": "object", "properties": map[string]any{}},
-	},
-	{
-		Name:        "history_search",
-		Description: "Full-text search past conversation turns by query term.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"query": map[string]any{"type": "string", "description": "Search query"},
-			},
-			"required": []string{"query"},
 		},
 	},
 }

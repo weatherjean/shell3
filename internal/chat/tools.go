@@ -50,82 +50,119 @@ func dispatchStore(name, rawArgs string, st *store.Store) string {
 	if st == nil {
 		return fmt.Sprintf("error: store not available for tool %s", name)
 	}
-	var args map[string]any
-	json.Unmarshal([]byte(rawArgs), &args)
 
 	switch name {
-	case "memory_store":
-		key, _ := args["key"].(string)
-		value, _ := args["value"].(string)
-		if err := st.MemoryStore(key, value); err != nil {
-			return fmt.Sprintf("error: %v", err)
-		}
-		return "Stored: " + key
-	case "memory_list":
-		results, err := st.MemoryList(50)
-		if err != nil {
-			return fmt.Sprintf("error: %v", err)
-		}
-		if len(results) == 0 {
-			return "No memories stored."
-		}
-		var sb strings.Builder
-		for _, r := range results {
-			fmt.Fprintf(&sb, "[%s]: %s\n", r.Key, r.Value)
-		}
-		return sb.String()
-	case "memory_search":
-		q, _ := args["query"].(string)
-		results, err := st.MemorySearch(q, 5)
-		if err != nil {
-			return fmt.Sprintf("error: %v", err)
-		}
-		if len(results) == 0 {
-			return "No memories found."
-		}
-		var sb strings.Builder
-		for _, r := range results {
-			fmt.Fprintf(&sb, "[%s]: %s\n", r.Key, r.Value)
-		}
-		return sb.String()
-	case "memory_remove":
-		key, _ := args["key"].(string)
-		if err := st.MemoryDelete(key); err != nil {
-			return fmt.Sprintf("error: %v", err)
-		}
-		return "Removed: " + key
-	case "history_latest":
-		results, err := st.HistoryLatest(20)
-		if err != nil {
-			return fmt.Sprintf("error: %v", err)
-		}
-		if len(results) == 0 {
-			return "No history found."
-		}
-		var sb strings.Builder
-		for _, r := range results {
-			fmt.Fprintf(&sb, "[%s | %s | session %d]: %s\n",
-				r.SessionStartedAt.Format("2006-01-02"), r.Role, r.SessionID, r.Content)
-		}
-		return sb.String()
-	case "history_search":
-		q, _ := args["query"].(string)
-		results, err := st.SearchHistory(q, 5)
-		if err != nil {
-			return fmt.Sprintf("error: %v", err)
-		}
-		if len(results) == 0 {
-			return "No history found."
-		}
-		var sb strings.Builder
-		for _, r := range results {
-			fmt.Fprintf(&sb, "[%s | %s | session %d]: %s\n",
-				r.SessionStartedAt.Format("2006-01-02"), r.Role, r.SessionID, r.Content)
-		}
-		return sb.String()
+	case "memory_upsert":
+		return handleMemoryUpsert(rawArgs, st)
+	case "memory_query":
+		return handleMemoryQuery(rawArgs, st)
+	case "history_query":
+		return handleHistoryQuery(rawArgs, st)
 	default:
 		return fmt.Sprintf("unknown tool: %s", name)
 	}
+}
+
+func handleMemoryUpsert(rawArgs string, st *store.Store) string {
+	var args struct {
+		Key   string `json:"key"`
+		Value string `json:"value"`
+		Core  *bool  `json:"core"`
+	}
+	if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
+		return fmt.Sprintf("error: bad arguments: %v", err)
+	}
+	if args.Key == "" {
+		return "error: key required"
+	}
+	if err := st.MemoryUpsert(args.Key, args.Value, args.Core); err != nil {
+		return fmt.Sprintf("error: %v", err)
+	}
+	if args.Value == "" {
+		return "Removed: " + args.Key
+	}
+	if args.Core != nil && *args.Core {
+		return "Stored (core): " + args.Key
+	}
+	return "Stored: " + args.Key
+}
+
+func handleMemoryQuery(rawArgs string, st *store.Store) string {
+	var args struct {
+		Query    string `json:"query"`
+		CoreOnly bool   `json:"core_only"`
+		Limit    int    `json:"limit"`
+	}
+	json.Unmarshal([]byte(rawArgs), &args)
+
+	results, err := st.MemoryQuery(args.Query, args.CoreOnly, args.Limit)
+	if err != nil {
+		return fmt.Sprintf("error: %v", err)
+	}
+	if len(results) == 0 {
+		return "No memories found."
+	}
+	var sb strings.Builder
+	for _, r := range results {
+		marker := ""
+		if r.Core {
+			marker = " (core)"
+		}
+		fmt.Fprintf(&sb, "[%s%s]: %s\n", r.Key, marker, r.Value)
+	}
+	return sb.String()
+}
+
+func handleHistoryQuery(rawArgs string, st *store.Store) string {
+	var args struct {
+		Query     string `json:"query"`
+		SessionID int64  `json:"session_id"`
+		Chunk     int    `json:"chunk"`
+		Limit     int    `json:"limit"`
+	}
+	json.Unmarshal([]byte(rawArgs), &args)
+
+	if args.Query != "" {
+		res, err := st.HistorySearch(args.Query, args.Limit)
+		if err != nil {
+			return fmt.Sprintf("error: %v", err)
+		}
+		if res.TotalHits == 0 {
+			return "No history found."
+		}
+		var sb strings.Builder
+		fmt.Fprintf(&sb, "search hits: %d\n", res.TotalHits)
+		for _, h := range res.Hits {
+			fmt.Fprintf(&sb, "[session %d chunk %d | %s | %s] %s\n",
+				h.SessionID, h.Chunk,
+				h.CreatedAt.Format("2006-01-02 15:04"), h.Role, h.Content)
+		}
+		return sb.String()
+	}
+
+	res, err := st.HistoryGet(args.SessionID, args.Chunk)
+	if err != nil {
+		return fmt.Sprintf("error: %v", err)
+	}
+	if res.SessionID == 0 && len(res.Turns) == 0 {
+		return "No history found."
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "session %d, chunk %d/%d (started %s)",
+		res.SessionID, res.Chunk, res.TotalChunks,
+		res.SessionStartedAt.Format("2006-01-02 15:04"))
+	if res.PrevSessionID != 0 {
+		fmt.Fprintf(&sb, " | prev=%d", res.PrevSessionID)
+	}
+	if res.NextSessionID != 0 {
+		fmt.Fprintf(&sb, " | next=%d", res.NextSessionID)
+	}
+	sb.WriteByte('\n')
+	for _, t := range res.Turns {
+		fmt.Fprintf(&sb, "[%s | %s] %s\n",
+			t.CreatedAt.Format("2006-01-02 15:04"), t.Role, t.Content)
+	}
+	return sb.String()
 }
 
 func truncateOutput(s string) string {
