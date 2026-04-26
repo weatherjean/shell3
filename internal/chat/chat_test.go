@@ -286,7 +286,8 @@ func (f *fakeSlashApp) Print(lines []string) {
 }
 func (f *fakeSlashApp) PrintLine(line string) { f.record(fmt.Sprintf("PrintLine(%q)", line)) }
 func (f *fakeSlashApp) SetStatus(msg string)  { f.record(fmt.Sprintf("SetStatus(%q)", msg)) }
-func (f *fakeSlashApp) Quit() { f.record("Quit") }
+func (f *fakeSlashApp) Quit()                          { f.record("Quit") }
+func (f *fakeSlashApp) WithReleasedTerminal(fn func()) { fn() }
 func (f *fakeSlashApp) RegisterSlash(cmd patchapp.SlashCommand) {
 	if f.handlers == nil {
 		f.handlers = make(map[string]patchapp.SlashHandler)

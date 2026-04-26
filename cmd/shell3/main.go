@@ -21,6 +21,7 @@ func main() {
 	root.AddCommand(newAuthCommand())
 	root.AddCommand(newDocsCommand())
 	root.AddCommand(newDestroyCommand())
+	root.AddCommand(newWidgetCommand())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

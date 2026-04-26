@@ -9,11 +9,11 @@ import (
 
 	"github.com/weatherjean/shell3/internal/hooks"
 	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/patchapp"
 	"github.com/weatherjean/shell3/internal/patchmd"
 	"github.com/weatherjean/shell3/internal/patchtui"
 	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/store"
-	"github.com/weatherjean/shell3/internal/patchapp"
 )
 
 // LLMClient is the streaming LLM interface.
@@ -168,6 +168,7 @@ type slashTarget interface {
 	PrintLine(line string)
 	SetStatus(msg string)
 	RegisterSlash(cmd patchapp.SlashCommand)
+	WithReleasedTerminal(fn func())
 	Quit()
 }
 
@@ -196,23 +197,31 @@ func registerSlashCommands(app slashTarget, cfg *Config, sess *session, lastUsag
 		},
 	})
 	app.RegisterSlash(patchapp.SlashCommand{
-		Name: "model", Help: "switch model: /model <name>",
+		Name: "model", Help: "switch model: /model [name] (no arg → picker)",
 		Handler: func(args string) {
-			if args == "" {
-				dim("[/model usage: /model <name>]")
-				return
+			name := strings.TrimSpace(args)
+			if name == "" {
+				if len(cfg.Models) < 2 {
+					dim("[/model usage: /model <name>]")
+					return
+				}
+				picked, ok := pickModel(app, cfg.Models, currentModel(cfg.StatusLine))
+				if !ok {
+					return
+				}
+				name = picked
 			}
 			if cfg.ModelSwitcher != nil {
-				cfg.ModelSwitcher(args)
+				cfg.ModelSwitcher(name)
 			}
 			parts := strings.SplitN(cfg.StatusLine, " │ ", 2)
 			provider := ""
 			if len(parts) > 0 {
 				provider = parts[0]
 			}
-			cfg.StatusLine = provider + " │ " + args
+			cfg.StatusLine = provider + " │ " + name
 			app.SetStatus(cfg.StatusLine)
-			dim(fmt.Sprintf("[model: %s]", args))
+			dim(fmt.Sprintf("[model: %s]", name))
 		},
 	})
 	app.RegisterSlash(patchapp.SlashCommand{

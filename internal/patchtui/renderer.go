@@ -43,6 +43,7 @@ package patchtui
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -72,12 +73,30 @@ type Renderer struct {
 	width     int
 	height    int
 	inited    bool
+	out       io.Writer // destination; nil means os.Stdout
 }
 
 // New returns a new Renderer. The first call to [Renderer.Render] or
 // [Renderer.Print] writes from the current cursor position; subsequent
 // calls update the frame in place.
 func New() *Renderer { return &Renderer{} }
+
+// SetOutput redirects renderer output to w. By default the renderer writes
+// to os.Stdout. Pass nil to restore the default. Safe to call between
+// renders; do not call concurrently with Render/Print.
+func (r *Renderer) SetOutput(w io.Writer) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.out = w
+}
+
+// writer returns the current output destination.
+func (r *Renderer) writer() io.Writer {
+	if r.out != nil {
+		return r.out
+	}
+	return os.Stdout
+}
 
 // winsize mirrors the kernel struct used by the TIOCGWINSZ ioctl.
 type winsize struct {
@@ -147,7 +166,7 @@ func (r *Renderer) Render(lines []string) {
 	}
 
 	buf.WriteString("\x1b[?2026l\x1b[?25h") // end sync + show cursor
-	os.Stdout.WriteString(buf.String())     //nolint:errcheck
+	io.WriteString(r.writer(), buf.String()) //nolint:errcheck
 
 	r.prev = clone(lines)
 	r.width = width
@@ -187,7 +206,7 @@ func (r *Renderer) Print(lines []string) {
 	}
 
 	buf.WriteString("\x1b[?2026l")
-	os.Stdout.WriteString(buf.String()) //nolint:errcheck
+	io.WriteString(r.writer(), buf.String()) //nolint:errcheck
 
 	// Reset state so the next Render starts a fresh frame at the new cursor.
 	// Set width/height to current so the first subsequent Render does not
@@ -198,6 +217,27 @@ func (r *Renderer) Print(lines []string) {
 	r.cursorRow = 0
 	r.width = w
 	r.height = h
+}
+
+// Erase wipes the currently-rendered frame from the terminal and parks the
+// cursor at row 0 of where the frame began. Use Erase to dismiss a live
+// widget without leaving its lines in scrollback. After Erase, the renderer
+// is reset; the next [Renderer.Render] starts a fresh frame at the cursor.
+func (r *Renderer) Erase() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.inited {
+		return
+	}
+	var buf strings.Builder
+	buf.WriteString("\x1b[?2026h")
+	r.moveCursorTo(&buf, 0)
+	buf.WriteString("\r\x1b[0J")
+	buf.WriteString("\x1b[?2026l")
+	io.WriteString(r.writer(), buf.String()) //nolint:errcheck
+	r.prev = nil
+	r.inited = false
+	r.cursorRow = 0
 }
 
 // Reset clears the renderer's internal state. The next call to
