@@ -94,6 +94,17 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 			return
 		}
 
+		// Replace provider-emitted tool-call ids with sequential session-scoped
+		// decimal ids ("1", "2", ...). Provider-native ids like "web_fetch:0"
+		// get truncated by models when echoed back, breaking id-based tool
+		// result addressing (e.g. prune_tool_result). A bare integer has no
+		// separator to chop at. Provider just pairs ids by string match
+		// between assistant.tool_calls[i].id and tool.tool_call_id, so the
+		// rewrite is transparent on the wire.
+		for i := range toolCalls {
+			toolCalls[i].ID = sess.allocToolCallID()
+		}
+
 		if text != "" || len(toolCalls) > 0 {
 			assistantMsg := llm.Message{
 				Role:             llm.RoleAssistant,
