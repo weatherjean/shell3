@@ -100,6 +100,14 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 				if out == "" {
 					out = "Documentation not available."
 				}
+			} else if userTool, ok := cfg.UserTools[tc.Name]; ok {
+				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Bold+"→ %s(%s)"+patchtui.Reset+"\n", tc.Name, tc.RawArgs)}
+				out = dispatchUserTool(ctx, userTool, tc.RawArgs, cfg.Secrets, cfg.WorkDir)
+				display := truncateOutput(out)
+				if cfg.Truncate {
+					display = out
+				}
+				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(display, "\n")) + "\n"}
 			} else {
 				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Bold+"→ %s(%s)"+patchtui.Reset+"\n", tc.Name, tc.RawArgs)}
 				out = dispatchStore(tc.Name, tc.RawArgs, cfg.Store)

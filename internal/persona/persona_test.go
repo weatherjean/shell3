@@ -32,7 +32,7 @@ func TestLoad_RendersTemplate(t *testing.T) {
 	writePersona(t, dir, "base", simplePersona)
 
 	data := persona.TemplateData{Time: "noon", CWD: "/tmp", Model: "llama3"}
-	p, err := persona.Load(dir, "base", data, false, false)
+	p, err := persona.Load(dir, "base", data, false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestLoad_SkillsInjected(t *testing.T) {
 	writePersona(t, dir, "base", simplePersona)
 
 	data := persona.TemplateData{Skills: "## MySkill\nDoes things.\n"}
-	p, err := persona.Load(dir, "base", data, false, false)
+	p, err := persona.Load(dir, "base", data, false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestLoad_SkillsAbsentWhenEmpty(t *testing.T) {
 	dir := t.TempDir()
 	writePersona(t, dir, "base", simplePersona)
 
-	p, err := persona.Load(dir, "base", persona.TemplateData{}, false, false)
+	p, err := persona.Load(dir, "base", persona.TemplateData{}, false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestLoad_HasBashTool(t *testing.T) {
 	dir := t.TempDir()
 	writePersona(t, dir, "base", simplePersona)
 
-	p, err := persona.Load(dir, "base", persona.TemplateData{}, false, false)
+	p, err := persona.Load(dir, "base", persona.TemplateData{}, false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestLoad_NoBashDropsBashTools(t *testing.T) {
 	dir := t.TempDir()
 	writePersona(t, dir, "base", simplePersona)
 
-	p, err := persona.Load(dir, "base", persona.TemplateData{}, false, true)
+	p, err := persona.Load(dir, "base", persona.TemplateData{}, false, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestLoad_StoreToolsIncludedWhenHasStore(t *testing.T) {
 	dir := t.TempDir()
 	writePersona(t, dir, "base", simplePersona)
 
-	p, err := persona.Load(dir, "base", persona.TemplateData{}, true, false)
+	p, err := persona.Load(dir, "base", persona.TemplateData{}, true, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestLoad_StoreToolsAbsentWithoutStore(t *testing.T) {
 	dir := t.TempDir()
 	writePersona(t, dir, "base", simplePersona)
 
-	p, err := persona.Load(dir, "base", persona.TemplateData{}, false, false)
+	p, err := persona.Load(dir, "base", persona.TemplateData{}, false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestLoad_StoreToolsAbsentWithoutStore(t *testing.T) {
 }
 
 func TestLoad_MissingFileReturnsError(t *testing.T) {
-	_, err := persona.Load(t.TempDir(), "nonexistent", persona.TemplateData{}, false, false)
+	_, err := persona.Load(t.TempDir(), "nonexistent", persona.TemplateData{}, false, false, nil)
 	if err == nil {
 		t.Error("expected error for missing persona file")
 	}
@@ -141,7 +141,7 @@ func TestLoad_MissingFileReturnsError(t *testing.T) {
 func TestLoad_InvalidTemplateReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	writePersona(t, dir, "bad", "---\nname: bad\n---\n{{.Unclosed")
-	_, err := persona.Load(dir, "bad", persona.TemplateData{}, false, false)
+	_, err := persona.Load(dir, "bad", persona.TemplateData{}, false, false, nil)
 	if err == nil {
 		t.Error("expected error for invalid template")
 	}
@@ -151,7 +151,7 @@ func TestLoad_NameSet(t *testing.T) {
 	dir := t.TempDir()
 	writePersona(t, dir, "base", simplePersona)
 
-	p, err := persona.Load(dir, "base", persona.TemplateData{}, false, false)
+	p, err := persona.Load(dir, "base", persona.TemplateData{}, false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestLoad_ConfigEmbedded(t *testing.T) {
 	dir := t.TempDir()
 	writePersona(t, dir, "base", fullPersona)
 
-	p, err := persona.Load(dir, "base", persona.TemplateData{Time: "now"}, false, false)
+	p, err := persona.Load(dir, "base", persona.TemplateData{Time: "now"}, false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +250,7 @@ func TestLoad_NameFromFrontmatter(t *testing.T) {
 	dir := t.TempDir()
 	writePersona(t, dir, "base", fullPersona)
 
-	p, err := persona.Load(dir, "base", persona.TemplateData{}, false, false)
+	p, err := persona.Load(dir, "base", persona.TemplateData{}, false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

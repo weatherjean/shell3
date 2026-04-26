@@ -14,6 +14,7 @@ import (
 	"github.com/weatherjean/shell3/internal/patchtui"
 	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/store"
+	"github.com/weatherjean/shell3/internal/usertools"
 )
 
 // LLMClient is the streaming LLM interface.
@@ -34,6 +35,8 @@ type Config struct {
 	ModelSwitcher func(string)
 	Truncate      bool
 	Docs          string
+	UserTools     map[string]usertools.Tool
+	Secrets       map[string]string
 }
 
 // RunInteractive runs the TUI chat loop. Blocks until the user quits.

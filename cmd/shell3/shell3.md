@@ -47,6 +47,48 @@ shell3 code --base-url http://localhost:11434/v1 --api-key "" --model llama3.2
 
 Memory and history are stored in `.shell3/shell3.db` (SQLite, gitignored).
 
+### User-Defined Tools
+
+Drop YAML files into `.shell3/tools/` (project) or `~/.shell3/tools/` (global). Project tools override global ones on name collision. Tools are loaded and merged into the model's tool list at startup.
+
+```yaml
+name: brave_search           # required, [a-z][a-z0-9_]*, must not shadow built-ins
+description: Web search…     # required, shown to the model
+enabled: false               # required; tools default off
+secrets: [BRAVE_API_KEY]     # optional; loaded from .shell3/.env or OS env
+parameters:                  # required; JSON Schema (type must be object)
+  type: object
+  properties:
+    query: {type: string, description: Search query}
+  required: [query]
+command: |                   # required; bash -c
+  curl -sG https://api.example.com/search \
+    -H "Authorization: Bearer $BRAVE_API_KEY" \
+    --data-urlencode "q=$QUERY"
+timeout: 15s                 # optional; default 30s
+cwd: ""                      # optional; default = project workdir
+before: ""                   # optional; bash -c hook, stdin = args JSON
+after: ""                    # optional; bash -c hook, stdin = command output
+```
+
+**How args reach your command:**
+- Each scalar arg → upper-cased env var (`query` → `$QUERY`, `count` → `$COUNT`).
+- The full args object is in `$ARGS_JSON` for `jq` consumers.
+- Complex values (arrays, objects) are JSON-encoded into their env var.
+- Args whose uppercased name collides with a declared secret are dropped (the secret wins).
+
+**Secrets:** Put `KEY=value` lines in `.shell3/.env` (file mode must be 0600 — `chmod 600 .shell3/.env`). Only the secrets listed in a tool's `secrets:` field are exposed to that tool. Secret values are scrubbed from tool output and replaced with `***REDACTED***` before reaching the model. Secrets shorter than 4 characters are skipped (too likely to corrupt unrelated output).
+
+**Hooks (per-tool, optional):**
+- `before` — receives args JSON on stdin. Non-zero exit blocks the call (stderr becomes the block reason). Stdout, if valid JSON, replaces the args. Hooks do **not** receive declared secrets in env.
+- `after` — receives command output on stdin. Stdout replaces the output on success; on failure the original output is kept and a `[after-hook failed: …]` sentinel is appended. Final output is redacted regardless of hook outcome.
+- Order at runtime: `on_tool_call` (persona) → tool `before` → command → tool `after` → secret redaction → `on_tool_result` (persona).
+- Each hook gets its own timeout budget equal to the full `tool.Timeout`.
+
+**Validation at startup:** Invalid tools are skipped with a warning to stderr. Reasons include: missing required field, name shadowing a built-in (`bash`, `shell_interactive`, `memory_*`, `history_*`, `shell3_docs`), invalid name format, declared secret missing from environment, `parameters.type` not `object`.
+
+**Example:** `shell3 init` drops a disabled `.shell3/tools/brave_search.yaml`. Add `BRAVE_API_KEY=…` to `.shell3/.env`, set `enabled: true`, restart.
+
 **Slash commands inside a session:**
 
 | Command   | Action                                        |

@@ -86,7 +86,9 @@ func Validate(_ PersonaConfig, _ string) error {
 
 // Load reads <personasDir>/<name>.md, parses frontmatter, renders the body
 // as a Go template with data, and assembles the tool list.
-func Load(personasDir, name string, data TemplateData, hasStore, noBash bool) (Persona, error) {
+//
+// userTools are merged after built-ins in the returned Persona.Tools.
+func Load(personasDir, name string, data TemplateData, hasStore, noBash bool, userTools []ToolDef) (Persona, error) {
 	path := filepath.Join(personasDir, name+".md")
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -123,6 +125,7 @@ func Load(personasDir, name string, data TemplateData, hasStore, noBash bool) (P
 	if hasStore {
 		tools = append(tools, storeTools...)
 	}
+	tools = append(tools, userTools...)
 
 	return Persona{
 		Config:       cfg,

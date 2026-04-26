@@ -17,6 +17,7 @@ import (
 	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/skills"
 	"github.com/weatherjean/shell3/internal/store"
+	"github.com/weatherjean/shell3/internal/usertools"
 )
 
 type runFlags struct {
@@ -87,13 +88,54 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	}
 
 	loadedSkills, _ := skills.LoadAll([]string{filepath.Join(cwd, ".shell3/skills")})
+
+	envPath := filepath.Join(cwd, ".shell3", ".env")
+	dotEnv, dotEnvErr := usertools.LoadDotEnv(envPath)
+	if dotEnvErr != nil {
+		fmt.Fprintln(os.Stderr, "warning:", dotEnvErr)
+	}
+	secrets := map[string]string{}
+	for k, v := range dotEnv {
+		secrets[k] = v
+	}
+	for _, kv := range os.Environ() {
+		eq := strings.IndexByte(kv, '=')
+		if eq < 0 {
+			continue
+		}
+		secrets[kv[:eq]] = kv[eq+1:]
+	}
+	available := map[string]struct{}{}
+	for k := range secrets {
+		available[k] = struct{}{}
+	}
+
+	toolsDirs := []string{
+		filepath.Join(homeDir, ".shell3", "tools"),
+		filepath.Join(cwd, ".shell3", "tools"),
+	}
+	loadedTools, toolWarnings, _ := usertools.LoadAll(toolsDirs, available)
+	for _, w := range toolWarnings {
+		fmt.Fprintln(os.Stderr, "user-tool warning:", w)
+	}
+	userToolDefs := make([]llm.ToolDefinition, 0, len(loadedTools))
+	userToolMap := make(map[string]usertools.Tool, len(loadedTools))
+	for _, ut := range loadedTools {
+		userToolDefs = append(userToolDefs, llm.ToolDefinition{
+			Name:        ut.Name,
+			Description: ut.Description,
+			Parameters:  ut.Parameters,
+		})
+		userToolMap[ut.Name] = ut
+	}
+
 	personaData := persona.TemplateData{
 		Skills: skills.BuildSection(loadedSkills),
 		Time:   time.Now().Format("Mon Jan 2 2006, 15:04 MST"),
 		CWD:    cwd,
 		Model:  model,
 	}
-	pers, err := persona.Load(personasDir, personaName, personaData, st != nil, noBash)
+	pers, err := persona.Load(personasDir, personaName, personaData, st != nil, noBash, userToolDefs)
 	if err != nil {
 		return err
 	}
@@ -127,6 +169,8 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		Models:        models,
 		ModelSwitcher: client.SetModel,
 		Docs:          docsContent,
+		UserTools:     userToolMap,
+		Secrets:       secrets,
 	}
 
 	if initialInput != "" {

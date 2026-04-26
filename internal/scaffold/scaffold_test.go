@@ -125,3 +125,37 @@ func TestInit_GitignoreContainsShell3DB(t *testing.T) {
 		t.Error("expected .gitignore to contain shell3.db")
 	}
 }
+
+func TestInit_CreatesToolsDirAndExample(t *testing.T) {
+	dir := t.TempDir()
+	homeDir := t.TempDir()
+	writeTestCredentials(t, homeDir)
+	if err := scaffold.InitProject(dir, homeDir); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{
+		".shell3/tools",
+		".shell3/tools/brave_search.yaml",
+		".shell3/.env.example",
+	} {
+		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
+			t.Errorf("expected %s: %v", p, err)
+		}
+	}
+}
+
+func TestInit_GitignoreContainsDotEnv(t *testing.T) {
+	dir := t.TempDir()
+	homeDir := t.TempDir()
+	writeTestCredentials(t, homeDir)
+	if err := scaffold.InitProject(dir, homeDir); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, ".shell3", ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), ".env") {
+		t.Errorf("gitignore missing .env line:\n%s", data)
+	}
+}

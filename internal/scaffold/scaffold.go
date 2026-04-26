@@ -14,6 +14,39 @@ const defaultGitignore = `# shell3 runtime files — do not commit
 shell3.db
 memory.db
 history.md
+.env
+`
+
+const braveSearchTool = `name: brave_search
+description: Web search via the Brave Search API. Returns top results as JSON. Set enabled to true after putting BRAVE_API_KEY in .shell3/.env.
+enabled: false
+secrets:
+  - BRAVE_API_KEY
+parameters:
+  type: object
+  properties:
+    query:
+      type: string
+      description: Search query
+    count:
+      type: integer
+      description: Result count (1-20)
+      default: 5
+  required: [query]
+command: |
+  curl -sG https://api.search.brave.com/res/v1/web/search \
+    -H "X-Subscription-Token: $BRAVE_API_KEY" \
+    -H "Accept: application/json" \
+    --data-urlencode "q=$QUERY" \
+    --data-urlencode "count=${COUNT:-5}"
+timeout: 15s
+`
+
+const envExample = `# Copy this to .shell3/.env and fill in real values.
+# .shell3/.env is gitignored. Do not commit secrets.
+# Tighten file mode after copying: chmod 600 .shell3/.env
+#
+# BRAVE_API_KEY=your-key-here   # for tools/brave_search.yaml
 `
 
 const codePersonaTemplate = `---
@@ -95,6 +128,7 @@ func initShell3Dir(projectDir string) error {
 		filepath.Join(shell3Dir, "skills"),
 		filepath.Join(shell3Dir, "hooks"),
 		filepath.Join(shell3Dir, "personas"),
+		filepath.Join(shell3Dir, "tools"),
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0755); err != nil {
@@ -103,8 +137,10 @@ func initShell3Dir(projectDir string) error {
 	}
 
 	files := map[string]string{
-		filepath.Join(shell3Dir, ".gitignore"):           defaultGitignore,
-		filepath.Join(shell3Dir, "personas", "base.md"): codePersonaTemplate,
+		filepath.Join(shell3Dir, ".gitignore"):                defaultGitignore,
+		filepath.Join(shell3Dir, ".env.example"):              envExample,
+		filepath.Join(shell3Dir, "personas", "base.md"):       codePersonaTemplate,
+		filepath.Join(shell3Dir, "tools", "brave_search.yaml"): braveSearchTool,
 	}
 	for path, content := range files {
 		if _, err := os.Stat(path); err == nil {

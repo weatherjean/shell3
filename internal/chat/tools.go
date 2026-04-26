@@ -10,7 +10,19 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/store"
+	"github.com/weatherjean/shell3/internal/usertools"
 )
+
+func dispatchUserTool(ctx context.Context, tool usertools.Tool, rawArgs string, secrets map[string]string, workDir string) string {
+	out, err := usertools.Run(ctx, tool, rawArgs, secrets, workDir)
+	if err != nil {
+		if out != "" {
+			return out + "\nerror: " + err.Error()
+		}
+		return "error: " + err.Error()
+	}
+	return out
+}
 
 const bashTimeout = 30 * time.Second
 
