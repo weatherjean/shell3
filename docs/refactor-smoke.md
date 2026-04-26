@@ -31,9 +31,11 @@ make build
 
 - [ ] `/help` (and `/h`, `/list`, `/`) prints the full command list.
 - [ ] `/clear` — context cleared, dim confirmation line.
-- [ ] `/prune` with no prior turn → `[nothing to prune]`.
-- [ ] `/prune` after a turn → `[last turn removed from context]`,
+- [ ] `/rollback` with no prior turn → `[nothing to roll back]`.
+- [ ] `/rollback` after a turn → `[last turn removed from context]`,
       next message starts fresh.
+- [ ] `/prune` with no arg → usage hint.
+- [ ] `/prune <id>` after a tool call → stub replaces result with `pruned by user`.
 - [ ] `/usage` before any turn → `[no usage data yet]`.
 - [ ] `/usage` after a turn → 3-line breakdown printed.
 - [ ] `/prompt` dumps system prompt + active tools.

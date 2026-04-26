@@ -34,15 +34,21 @@ func handlePruneToolResult(rawArgs string, slices ...[]llm.Message) string {
 	if args.Reason == "" {
 		return "error: reason required"
 	}
+	stem := fmt.Sprintf("pruned: %s", args.Reason)
+	return pruneToolResultByID(args.ToolCallID, stem, slices...)
+}
 
-	// Find the target in any provided slice. All slices should hold the
-	// same message at the same logical position; checking the first that
-	// has it is sufficient for gating decisions.
+// pruneToolResultByID is the shared core: locates the tool message by id,
+// gates on size/error, replaces content with a stub `[<stem> — original was N bytes]`,
+// and mutates every provided slice that holds the message. Returns a
+// human-readable status string suitable for both the model tool and the
+// user-facing slash command.
+func pruneToolResultByID(toolCallID, stem string, slices ...[]llm.Message) string {
 	var target *llm.Message
 	var name string
 	for _, msgs := range slices {
 		for i := range msgs {
-			if msgs[i].Role == llm.RoleTool && msgs[i].ToolCallID == args.ToolCallID {
+			if msgs[i].Role == llm.RoleTool && msgs[i].ToolCallID == toolCallID {
 				target = &msgs[i]
 				name = msgs[i].Name
 				break
@@ -53,7 +59,7 @@ func handlePruneToolResult(rawArgs string, slices ...[]llm.Message) string {
 		}
 	}
 	if target == nil {
-		return fmt.Sprintf("error: no tool result with id %q in conversation", args.ToolCallID)
+		return fmt.Sprintf("error: no tool result with id %q in conversation", toolCallID)
 	}
 
 	content := target.Content
@@ -64,13 +70,12 @@ func handlePruneToolResult(rawArgs string, slices ...[]llm.Message) string {
 		return "error: refusing to prune a result that looks like a tool error"
 	}
 
-	stub := fmt.Sprintf("[pruned: %s — original was %d bytes]", args.Reason, len(content))
+	stub := fmt.Sprintf("[%s — original was %d bytes]", stem, len(content))
 
-	// Mutate every slice that holds a message with this id.
 	count := 0
 	for _, msgs := range slices {
 		for i := range msgs {
-			if msgs[i].Role == llm.RoleTool && msgs[i].ToolCallID == args.ToolCallID {
+			if msgs[i].Role == llm.RoleTool && msgs[i].ToolCallID == toolCallID {
 				msgs[i].Content = stub
 				count++
 			}
@@ -79,7 +84,7 @@ func handlePruneToolResult(rawArgs string, slices ...[]llm.Message) string {
 	if count == 0 {
 		return "error: failed to update message content"
 	}
-	return fmt.Sprintf("Pruned result of %s (id=%s): freed %d bytes", name, args.ToolCallID, len(content)-len(stub))
+	return fmt.Sprintf("Pruned result of %s (id=%s): freed %d bytes", name, toolCallID, len(content)-len(stub))
 }
 
 func looksLikeError(s string) bool {

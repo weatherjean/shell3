@@ -111,7 +111,8 @@ after: ""                    # optional; bash -c hook, stdin = command output
 | `/`         | browse and pick a command                                       |
 | `/model`    | switch model: `/model <name>`, or no arg → picker (≥2 models)   |
 | `/clear`    | reset conversation context                                      |
-| `/prune`    | remove last turn from context                                   |
+| `/rollback` | remove last turn from context                                   |
+| `/prune`    | `/prune <id>` — replace tool result `<id>` with a stub          |
 | `/usage`    | show token usage from last turn                                 |
 | `/prompt`   | dump system prompt and active tools                             |
 | `/truncate` | toggle truncated bash output                                    |

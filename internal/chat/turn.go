@@ -133,7 +133,7 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 				out = fmt.Sprintf("Tool call blocked: %v", hookErr)
 			} else if tc.Name == "bash" {
 				command := parseBashCommand(tc.RawArgs)
-				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Yellow+patchtui.Bold+"$ %s"+patchtui.Reset+"\n", command)}
+				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Yellow+patchtui.Bold+"#%s $ %s"+patchtui.Reset+"\n", tc.ID, command)}
 				out = executeBash(ctx, command, cfg.WorkDir)
 				display := truncateOutput(out)
 				if cfg.Truncate {
@@ -142,22 +142,22 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(display, "\n")) + "\n"}
 			} else if tc.Name == "shell_interactive" {
 				command := parseBashCommand(tc.RawArgs)
-				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Yellow+patchtui.Bold+"$ %s"+patchtui.Reset+" (interactive)\n", command)}
+				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Yellow+patchtui.Bold+"#%s $ %s"+patchtui.Reset+" (interactive)\n", tc.ID, command)}
 				replyC := make(chan string, 1)
 				ch <- patchapp.TTYExecEvent{Cmd: command, WorkDir: cfg.WorkDir, ReplyC: replyC}
 				out = <-replyC
 			} else if tc.Name == "prune_tool_result" {
-				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Green+patchtui.Bold+"→ %s(%s)"+patchtui.Reset+"\n", tc.Name, tc.RawArgs)}
+				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Green+patchtui.Bold+"#%s → %s(%s)"+patchtui.Reset+"\n", tc.ID, tc.Name, tc.RawArgs)}
 				out = handlePruneToolResult(tc.RawArgs, allMsgs, sess.messages)
 				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(out, "\n")) + "\n"}
 			} else if tc.Name == "shell3_docs" {
-				ch <- patchapp.AppendEvent{Text: patchtui.Green + patchtui.Bold + "→ shell3_docs" + patchtui.Reset + "\n"}
+				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Green+patchtui.Bold+"#%s → shell3_docs"+patchtui.Reset+"\n", tc.ID)}
 				out = cfg.Docs
 				if out == "" {
 					out = "Documentation not available."
 				}
 			} else if userTool, ok := cfg.UserTools[tc.Name]; ok {
-				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Green+patchtui.Bold+"→ %s(%s)"+patchtui.Reset+"\n", tc.Name, tc.RawArgs)}
+				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Green+patchtui.Bold+"#%s → %s(%s)"+patchtui.Reset+"\n", tc.ID, tc.Name, tc.RawArgs)}
 				out = dispatchUserTool(ctx, userTool, tc.RawArgs, cfg.Secrets, cfg.WorkDir)
 				display := truncateOutput(out)
 				if cfg.Truncate {
@@ -165,7 +165,7 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 				}
 				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(display, "\n")) + "\n"}
 			} else {
-				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Green+patchtui.Bold+"→ %s(%s)"+patchtui.Reset+"\n", tc.Name, tc.RawArgs)}
+				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Green+patchtui.Bold+"#%s → %s(%s)"+patchtui.Reset+"\n", tc.ID, tc.Name, tc.RawArgs)}
 				out = dispatchStore(tc.Name, tc.RawArgs, cfg.Store)
 				display := truncateOutput(out)
 				if cfg.Truncate {

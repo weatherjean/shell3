@@ -332,7 +332,7 @@ func register() (*fakeSlashApp, *Config, *session, *llm.Usage) {
 
 func TestSlash_RegistersExpectedCommands(t *testing.T) {
 	app, _, _, _ := register()
-	want := []string{"clear", "prune", "model", "usage", "prompt", "truncate", "exit", "quit"}
+	want := []string{"clear", "rollback", "prune", "model", "usage", "prompt", "truncate", "exit", "quit"}
 	for _, name := range want {
 		if _, ok := app.handlers[name]; !ok {
 			t.Errorf("missing handler: /%s", name)
@@ -353,23 +353,41 @@ func TestSlash_Clear(t *testing.T) {
 	}
 }
 
-func TestSlash_PruneEmpty(t *testing.T) {
+func TestSlash_RollbackEmpty(t *testing.T) {
 	app, _, _, _ := register()
-	app.call(t, "prune", "")
-	if !containsAll(app.snapshot(), "[nothing to prune]") {
-		t.Errorf("want nothing-to-prune: %v", app.snapshot())
+	app.call(t, "rollback", "")
+	if !containsAll(app.snapshot(), "[nothing to roll back]") {
+		t.Errorf("want nothing-to-roll-back: %v", app.snapshot())
 	}
 }
 
-func TestSlash_PruneRemovesTurn(t *testing.T) {
+func TestSlash_RollbackRemovesTurn(t *testing.T) {
 	app, _, sess, _ := register()
 	sess.messages = []llm.Message{
 		{Role: llm.RoleUser, Content: "q"},
 		{Role: llm.RoleAssistant, Content: "r"},
 	}
-	app.call(t, "prune", "")
+	app.call(t, "rollback", "")
 	if len(sess.messages) != 0 {
-		t.Errorf("expected pruned, got %d msgs", len(sess.messages))
+		t.Errorf("expected rolled back, got %d msgs", len(sess.messages))
+	}
+}
+
+func TestSlash_PruneNoArg(t *testing.T) {
+	app, _, _, _ := register()
+	app.call(t, "prune", "")
+	if !containsAll(app.snapshot(), "/prune usage") {
+		t.Errorf("want usage hint: %v", app.snapshot())
+	}
+}
+
+func TestSlash_PruneByID(t *testing.T) {
+	app, _, sess, _ := register()
+	big := strings.Repeat("x", 600)
+	sess.messages = []llm.Message{mkToolMsg("3", "bash", big)}
+	app.call(t, "prune", "3")
+	if !strings.Contains(sess.messages[0].Content, "[pruned by user") {
+		t.Errorf("expected stub, got %q", sess.messages[0].Content)
 	}
 }
 

@@ -194,15 +194,27 @@ func registerSlashCommands(app slashTarget, cfg *Config, sess *session, lastUsag
 		},
 	})
 	app.RegisterSlash(patchapp.SlashCommand{
-		Name: "prune", Help: "remove last turn from context",
+		Name: "rollback", Help: "remove last turn from context",
 		Handler: func(string) {
 			pruned := pruneLastTurn(sess.messages)
 			if len(pruned) == len(sess.messages) {
-				dim("[nothing to prune]")
+				dim("[nothing to roll back]")
 				return
 			}
 			sess.messages = pruned
 			dim("[last turn removed from context]")
+		},
+	})
+	app.RegisterSlash(patchapp.SlashCommand{
+		Name: "prune", Help: "/prune <id> — replace tool result <id> with a stub",
+		Handler: func(args string) {
+			id := strings.TrimSpace(args)
+			if id == "" {
+				dim("[/prune usage: /prune <tool_call_id>]")
+				return
+			}
+			out := pruneToolResultByID(id, "pruned by user", sess.messages)
+			dim("[" + out + "]")
 		},
 	})
 	app.RegisterSlash(patchapp.SlashCommand{
@@ -323,7 +335,8 @@ func pruneLastTurn(messages []llm.Message) []llm.Message {
 func slashHelp() string {
 	return "\n" + patchtui.Bold + "slash commands:" + patchtui.Reset + "\n" +
 		"  /clear     reset conversation context\n" +
-		"  /prune     remove last turn from context\n" +
+		"  /rollback  remove last turn from context\n" +
+		"  /prune     /prune <id> — replace tool result <id> with a stub\n" +
 		"  /model     /model <name> to switch\n" +
 		"  /usage     show token usage from last turn\n" +
 		"  /prompt    dump system prompt and active tools\n" +
