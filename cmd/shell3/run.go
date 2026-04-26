@@ -179,26 +179,88 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 			}
 		}
 	}
+	// Append models from any self-registered providers (e.g. OAuth-based)
+	// whose entries do not live in credentials.yaml. Skip duplicates of
+	// providers already configured as API-key providers.
+	seen := map[string]bool{}
+	for _, n := range provNames {
+		seen[n] = true
+	}
+	regNames := llm.Registered()
+	sort.Strings(regNames)
+	for _, n := range regNames {
+		if seen[n] {
+			continue
+		}
+		p, ok := llm.Get(n)
+		if !ok {
+			continue
+		}
+		for _, m := range p.Models() {
+			models = append(models, chat.ModelChoice{Provider: n, Model: m})
+		}
+	}
 	if len(models) == 0 {
 		models = []chat.ModelChoice{{Provider: provName, Model: model}}
 	}
 
-	client := llm.NewClient(baseURL, apiKey, model)
-	modelSwitcher := func(provider, modelName string) (chat.LLMClient, error) {
-		if provider == "" || provider == provName {
-			client.SetModel(modelName)
-			model = modelName
-			return nil, nil
+	// buildClient picks a Streamer for the given (provider, model). Uses the
+	// llm registry first (OAuth-style providers), then falls back to the
+	// OpenAI-compatible client backed by credentials.yaml.
+	buildClient := func(p, m string) (chat.LLMClient, error) {
+		if reg, ok := llm.Get(p); ok {
+			s, err := reg.NewClient(ctx, m)
+			if err != nil {
+				return nil, err
+			}
+			return s, nil
 		}
-		pc, err := creds.Get(provider)
+		pc, err := creds.Get(p)
 		if err != nil {
 			return nil, err
 		}
-		newClient := llm.NewClient(pc.BaseURL, pc.APIKey, modelName)
-		client = newClient
+		return llm.NewClient(pc.BaseURL, pc.APIKey, m), nil
+	}
+
+	var client chat.LLMClient
+	var openaiClient *llm.Client // non-nil only for credentials.yaml-backed providers
+	if _, ok := llm.Get(provName); ok {
+		s, err := buildClient(provName, model)
+		if err != nil {
+			return err
+		}
+		client = s
+	} else {
+		openaiClient = llm.NewClient(baseURL, apiKey, model)
+		client = openaiClient
+	}
+
+	modelSwitcher := func(provider, modelName string) (chat.LLMClient, error) {
+		if provider == "" || provider == provName {
+			// Same provider: cheap path for credentials.yaml-backed clients
+			// is to mutate the model in place. Registry-backed clients
+			// rebuild — model is captured at construction time.
+			if openaiClient != nil {
+				openaiClient.SetModel(modelName)
+				model = modelName
+				return nil, nil
+			}
+		}
+		s, err := buildClient(provider, modelName)
+		if err != nil {
+			return nil, err
+		}
+		// Track the active concrete client for in-place SetModel only when
+		// the new client is the OpenAI-compatible one.
+		if oc, ok := s.(*llm.Client); ok {
+			openaiClient = oc
+		} else {
+			openaiClient = nil
+		}
+		client = s
 		provName = provider
 		model = modelName
-		return newClient, nil
+		return s, nil
 	}
 	cfg := chat.Config{
 		LLM:           client,
@@ -231,6 +293,17 @@ func resolveConnection(providerHint, modelHint string, creds *config.Credentials
 		if p, ok := creds.Providers[providerHint]; ok {
 			provName = providerHint
 			provCreds = p
+		} else if _, ok := llm.Get(providerHint); ok {
+			// Self-registered provider (OAuth-based). It owns its own auth
+			// and has no credentials.yaml entry; surface its model verbatim
+			// and leave baseURL/apiKey empty so the caller routes through
+			// the registry.
+			provName = providerHint
+			model = modelHint
+			if f.model != "" {
+				model = f.model
+			}
+			return model, "", "", provName
 		}
 	}
 
