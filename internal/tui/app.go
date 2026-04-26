@@ -339,6 +339,29 @@ func (a *App) processInput(data []byte) (exit bool) {
 				a.render()
 			}
 			a.mu.Unlock()
+		case keyUp:
+			a.mu.Lock()
+			if !a.busy {
+				w, _ := patchtui.Size()
+				row, col := inputCursorPos(a.input, a.cursor, w)
+				if row > 0 {
+					a.cursor = inputOffsetForRowCol(a.input, w, row-1, col)
+					a.render()
+				}
+			}
+			a.mu.Unlock()
+		case keyDown:
+			a.mu.Lock()
+			if !a.busy {
+				w, _ := patchtui.Size()
+				row, col := inputCursorPos(a.input, a.cursor, w)
+				newCursor := inputOffsetForRowCol(a.input, w, row+1, col)
+				if newCursor != a.cursor {
+					a.cursor = newCursor
+					a.render()
+				}
+			}
+			a.mu.Unlock()
 		case keyHome:
 			a.mu.Lock()
 			if !a.busy {

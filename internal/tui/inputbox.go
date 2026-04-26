@@ -121,6 +121,104 @@ func renderInputBox(input []rune, cursor, width int, showCursor bool) []string {
 	return lines
 }
 
+// inputCursorPos computes the wrapped (row, col) for cursor offset.
+// Mirrors the layout logic in renderInputBox.
+func inputCursorPos(input []rune, cursor, width int) (row, col int) {
+	prefixW, contW := 2, 2
+	rawLines := splitRunes(input, '\n')
+	inputPos := 0
+	for li, l := range rawLines {
+		availW := width - contW
+		if li == 0 {
+			availW = width - prefixW
+		}
+		if availW < 1 {
+			availW = 1
+		}
+		if len(l) == 0 {
+			if cursor == inputPos {
+				if li == 0 {
+					return row, prefixW
+				}
+				return row, contW
+			}
+			row++
+			inputPos++
+			continue
+		}
+		for chunkStart := 0; chunkStart < len(l); chunkStart += availW {
+			chunkEnd := chunkStart + availW
+			if chunkEnd > len(l) {
+				chunkEnd = len(l)
+			}
+			isLast := chunkEnd == len(l)
+			min := inputPos + chunkStart
+			max := inputPos + chunkEnd
+			if cursor >= min && (cursor < max || (isLast && cursor == max)) {
+				rel := cursor - min
+				pw := contW
+				if li == 0 && chunkStart == 0 {
+					pw = prefixW
+				}
+				return row, pw + rel
+			}
+			row++
+		}
+		inputPos += len(l) + 1
+	}
+	return row, 0
+}
+
+// inputOffsetForRowCol is the inverse: maps a target wrapped (row, col) to
+// a cursor offset in the input buffer. Clamps to the end of the row if the
+// target column is past the row's content.
+func inputOffsetForRowCol(input []rune, width, targetRow, targetCol int) int {
+	prefixW, contW := 2, 2
+	rawLines := splitRunes(input, '\n')
+	inputPos := 0
+	row := 0
+	for li, l := range rawLines {
+		availW := width - contW
+		if li == 0 {
+			availW = width - prefixW
+		}
+		if availW < 1 {
+			availW = 1
+		}
+		if len(l) == 0 {
+			if row == targetRow {
+				return inputPos
+			}
+			row++
+			inputPos++
+			continue
+		}
+		for chunkStart := 0; chunkStart < len(l); chunkStart += availW {
+			chunkEnd := chunkStart + availW
+			if chunkEnd > len(l) {
+				chunkEnd = len(l)
+			}
+			if row == targetRow {
+				pw := contW
+				if li == 0 && chunkStart == 0 {
+					pw = prefixW
+				}
+				rel := targetCol - pw
+				if rel < 0 {
+					rel = 0
+				}
+				if rel > chunkEnd-chunkStart {
+					rel = chunkEnd - chunkStart
+				}
+				return inputPos + chunkStart + rel
+			}
+			row++
+		}
+		inputPos += len(l) + 1
+	}
+	return len(input)
+}
+
 // splitRunes splits a rune slice on sep, returning sub-slices excluding
 // the separator. Always returns at least one element.
 func splitRunes(rs []rune, sep rune) [][]rune {

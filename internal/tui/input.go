@@ -24,6 +24,8 @@ const (
 	keyEscape
 	keyLeft
 	keyRight
+	keyUp
+	keyDown
 	keyHome
 	keyEnd
 	keyCtrlC
@@ -81,6 +83,10 @@ func parseInput(data []byte) (parsedKey, int) {
 		// CSI: ESC [ ...
 		if len(data) >= 3 && data[1] == '[' {
 			switch data[2] {
+			case 'A':
+				return parsedKey{kind: keyUp}, 3
+			case 'B':
+				return parsedKey{kind: keyDown}, 3
 			case 'C':
 				return parsedKey{kind: keyRight}, 3
 			case 'D':
@@ -89,9 +95,6 @@ func parseInput(data []byte) (parsedKey, int) {
 				return parsedKey{kind: keyHome}, 3
 			case 'F':
 				return parsedKey{kind: keyEnd}, 3
-			case 'A', 'B':
-				// Up/down ignored; consume the sequence.
-				return parsedKey{kind: keyNone}, 3
 			}
 			// \x1b[N~ forms (Home/End/Delete on some terminals).
 			for j := 3; j < len(data) && j < 8; j++ {
