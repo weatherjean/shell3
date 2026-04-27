@@ -22,9 +22,8 @@ import (
 
 type runFlags struct {
 	persona  string
+	provider string
 	model    string
-	baseURL  string
-	apiKey   string
 	noBash   bool
 	noMemory bool
 }
@@ -39,9 +38,8 @@ func newRunCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&f.persona, "persona", "base", "Persona to load from .shell3/personas/")
+	cmd.Flags().StringVar(&f.provider, "provider", "", "Configured instance name or single-instance adapter (e.g. codex). Run 'shell3 auth list' to see options.")
 	cmd.Flags().StringVar(&f.model, "model", "", "Model override")
-	cmd.Flags().StringVar(&f.baseURL, "base-url", "", "LLM base URL override")
-	cmd.Flags().StringVar(&f.apiKey, "api-key", "", "API key override")
 	cmd.Flags().BoolVar(&f.noBash, "no-bash", false, "Disable bash tool")
 	cmd.Flags().BoolVar(&f.noMemory, "no-memory-tools", false, "Disable memory and history tools")
 	return cmd
@@ -76,7 +74,8 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		return err
 	}
 
-	adapterName, instance, model := resolveConnection(pCfg.Provider, pCfg.Model, credStore, f)
+	providerHint := coalesce(f.provider, pCfg.Provider)
+	adapterName, instance, model := resolveConnection(providerHint, pCfg.Model, credStore, f)
 	if adapterName == "" {
 		return fmt.Errorf("no adapter configured — run: shell3 auth")
 	}
@@ -268,21 +267,10 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 // resolveConnection picks the (adapter, instance, model) tuple for this run.
 //
 // Resolution order:
-//  1. --base-url + --api-key flags create an ephemeral "_cli" instance.
-//  2. persona.Provider, if set, may name an existing instance OR a single-
-//     instance adapter (e.g. "codex").
-//  3. Fall back to the alphabetically first configured instance.
+//  1. providerHint (from --provider flag or persona.Provider): may name an
+//     existing instance OR a single-instance adapter (e.g. "codex").
+//  2. Fall back to the alphabetically first configured instance.
 func resolveConnection(providerHint, modelHint string, credStore *config.CredStore, f *runFlags) (adapter, instance, model string) {
-	if f.baseURL != "" && f.apiKey != "" {
-		ephemeral := "_cli"
-		_ = credStore.Set(ephemeral, "openai", map[string]string{
-			"base_url":      f.baseURL,
-			"api_key":       f.apiKey,
-			"default_model": coalesce(f.model, modelHint, "llama3.2"),
-		})
-		return "openai", ephemeral, coalesce(f.model, modelHint, "llama3.2")
-	}
-
 	if providerHint != "" {
 		if a, _, ok := credStore.Get(providerHint); ok {
 			adapter = a
