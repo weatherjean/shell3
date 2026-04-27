@@ -278,43 +278,66 @@ var storeTools = []ToolDef{
 		},
 	},
 	{
-		Name: "memory_query",
-		Description: "Query project memory. " +
-			"Omit query to list newest-first. " +
-			"Provide query for full-text search ranked by relevance. " +
-			"Set core_only=true to restrict to core memories.",
+		Name: "memory_list",
+		Description: "List project memory entries newest-first. No search — for that, use memory_search. " +
+			"Set core_only=true to restrict to memories marked core=true.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"query":     map[string]any{"type": "string", "description": "Optional FTS query; omit to list all"},
 				"core_only": map[string]any{"type": "boolean", "description": "Only return core memories"},
 				"limit":     map[string]any{"type": "integer", "description": "Maximum results (default 50)"},
 			},
 		},
 	},
 	{
-		Name: "history_query",
-		Description: "Read past conversation history. Two distinct modes — pick one:\n\n" +
-			"BROWSE MODE (omit `query`): walk completed sessions one chunk at a time, like scrolling back through a log.\n" +
-			"  • Default call `{}` → most-recent COMPLETED session, chunk 1 (oldest 25 turns of that session). NOT the current session.\n" +
-			"  • Response includes `session_id`, `chunk`, `total_chunks`, `prev_session_id`, `next_session_id`.\n" +
-			"  • To read the rest of the same session: re-call with same `session_id` and `chunk: 2`, then 3, etc., until `chunk == total_chunks`.\n" +
-			"  • To jump to the session before this one: re-call with `session_id: <prev_session_id>` (and `chunk: 1` to start at its top).\n" +
-			"  • Walking back through every prior session is just: keep following `prev_session_id` until it is 0.\n" +
-			"  • Use this when the user says \"last time\", \"yesterday\", \"the previous session\", \"scroll back\", \"what did we just do\".\n\n" +
-			"SEARCH MODE (provide `query`): full-text search across ALL sessions, ranked by relevance. Use plain keywords; " +
-			"punctuation and FTS operators are stripped automatically — do not write boolean syntax.\n" +
-			"  • Each hit includes its `session_id` and `chunk`; re-call BROWSE MODE on those to read surrounding context.\n" +
-			"  • Use this when the user references a topic (\"the auth thing we built\", \"that bug with the reasoning items\").\n\n" +
-			"Chunks are 25 turns each. Never invent keywords — when unsure which mode applies, BROWSE first and skim.",
+		Name: "memory_search",
+		Description: "Full-text search project memories. Pass `terms` as an array of single concepts — ONE concept per array element, NOT a sentence. " +
+			"Default match=any (OR): a memory matches if it contains ANY of the terms. Use match=all (AND) only to narrow when `any` returns too much. " +
+			"Examples: terms=[\"JWT\"] → memories mentioning JWT. terms=[\"JWT\",\"kafka\"] match=any → memories about JWT OR kafka. " +
+			"Punctuation inside a term is taken literally (no FTS operators needed). Multi-word elements are matched as a phrase.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"query":      map[string]any{"type": "string", "description": "Plain keywords for SEARCH MODE; omit for BROWSE MODE. Punctuation is sanitized — no FTS operators needed."},
-				"session_id": map[string]any{"type": "integer", "description": "BROWSE MODE: which session to read. Omit or 0 = most-recent completed. Use `prev_session_id` from a previous response to walk backwards."},
-				"chunk":      map[string]any{"type": "integer", "description": "BROWSE MODE: 1-based chunk within the session (25 turns each). Omit or 0 = chunk 1. Page forward with chunk: 2, 3, ... up to total_chunks."},
-				"limit":      map[string]any{"type": "integer", "description": "SEARCH MODE only: max hits to return (default 20)."},
+				"terms":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "One concept per element. Each becomes a quoted FTS5 phrase."},
+				"match":     map[string]any{"type": "string", "enum": []string{"any", "all"}, "description": "any = OR (default, broad recall); all = AND (narrow)."},
+				"core_only": map[string]any{"type": "boolean", "description": "Only search core memories"},
+				"limit":     map[string]any{"type": "integer", "description": "Maximum results (default 50)"},
 			},
+			"required": []string{"terms"},
+		},
+	},
+	{
+		Name: "history_get",
+		Description: "Read past conversations by walking sessions and chunks. No search — for that, use history_search.\n\n" +
+			"Default call `{}` → most-recent COMPLETED session, chunk 1 (oldest 25 turns). NOT the current in-progress session.\n" +
+			"Response includes session_id, chunk, total_chunks, prev_session_id, next_session_id.\n" +
+			"To page within the same session: re-call with same session_id and chunk:2, then 3, etc., up to total_chunks.\n" +
+			"To jump to the previous session: re-call with session_id:<prev_session_id> and chunk:1.\n" +
+			"Walking back through every prior session: keep following prev_session_id until it is 0.\n" +
+			"Use this when the user says \"last time\", \"yesterday\", \"the previous session\", \"scroll back\".",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"session_id": map[string]any{"type": "integer", "description": "Which session to read. Omit or 0 = most-recent completed. Use prev_session_id from a previous response to walk backwards."},
+				"chunk":      map[string]any{"type": "integer", "description": "1-based chunk within the session (25 turns each). Omit or 0 = chunk 1."},
+			},
+		},
+	},
+	{
+		Name: "history_search",
+		Description: "Full-text search past conversations. Pass `terms` as an array of single concepts — ONE concept per array element, NOT a sentence. " +
+			"Default match=any (OR): a turn matches if it contains ANY of the terms. Use match=all (AND) only to narrow. " +
+			"Each hit includes session_id and chunk so you can call history_get on those for surrounding context. " +
+			"Examples: terms=[\"cobra\"] → turns mentioning cobra. terms=[\"cobra\",\"lipgloss\"] match=any → turns about cobra OR lipgloss. " +
+			"Punctuation inside a term is taken literally. Multi-word elements are matched as a phrase.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"terms": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "One concept per element. Each becomes a quoted FTS5 phrase."},
+				"match": map[string]any{"type": "string", "enum": []string{"any", "all"}, "description": "any = OR (default, broad recall); all = AND (narrow)."},
+				"limit": map[string]any{"type": "integer", "description": "Max search hits (default 20)"},
+			},
+			"required": []string{"terms"},
 		},
 	},
 }

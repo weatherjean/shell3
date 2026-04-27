@@ -84,8 +84,10 @@ Flags: `--persona`, `--model`, `--base-url`, `--api-key`, `--no-bash`, `--no-mem
 | `bash`              | Execute non-interactive shell commands in the project directory       |
 | `shell_interactive` | Run a command that needs a TTY (vim, less, REPL); TUI yields and resumes |
 | `memory_upsert`     | Insert/update/delete a memory entry; empty value deletes; `core=true` injects into every session prompt |
-| `memory_query`      | List newest-first or full-text search; `core_only=true` restricts to core memories |
-| `history_query`     | Search past conversations or fetch one chunk (25 turns) of one session by `session_id` + `chunk`; walk via `prev_session_id` / `next_session_id` |
+| `memory_list`       | List memories newest-first; `core_only=true` restricts to core memories |
+| `memory_search`     | Full-text search memories; `terms[]` (one concept per element) + `match=any\|all` (default any) |
+| `history_get`       | Fetch one chunk (25 turns) of one session by `session_id` + `chunk`; walk via `prev_session_id` / `next_session_id` |
+| `history_search`    | Full-text search past conversations; same `terms[]` + `match` shape as `memory_search`; hits include `session_id`/`chunk` for follow-up `history_get` |
 | `shell3_docs`       | Return this documentation (commands, config, slash commands, skills)  |
 | `prune_tool_result` | Replace a prior successful tool result with a stub to free context; gated to ≥500 bytes and non-error output |
 

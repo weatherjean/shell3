@@ -267,3 +267,52 @@ func TestStore_MemoryQuery_PunctuationSafe(t *testing.T) {
 		t.Fatal("expected at least one hit for sanitized memory query")
 	}
 }
+
+func TestStore_HistorySearchExpr_OrAnd(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	sid, _ := st.StartSession()
+	st.AppendHistory(sid, "user", "cobra cli colorful")
+	st.AppendHistory(sid, "assistant", "termenv handles ansi colors")
+	st.EndSession(sid)
+
+	exprAny := store.BuildFTSExpr([]string{"cobra", "termenv"}, false)
+	r, err := st.HistorySearchExpr(exprAny, 10)
+	if err != nil {
+		t.Fatalf("OR search: %v", err)
+	}
+	if r.TotalHits < 2 {
+		t.Fatalf("OR should match both turns, got %d", r.TotalHits)
+	}
+
+	exprAll := store.BuildFTSExpr([]string{"cobra", "termenv"}, true)
+	r2, err := st.HistorySearchExpr(exprAll, 10)
+	if err != nil {
+		t.Fatalf("AND search: %v", err)
+	}
+	if r2.TotalHits != 0 {
+		t.Fatalf("AND should match zero turns, got %d", r2.TotalHits)
+	}
+}
+
+func TestStore_MemorySearchExpr_Or(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	st.MemoryUpsert("a", "JWT auth", boolPtr(false))
+	st.MemoryUpsert("b", "kafka pipeline", boolPtr(false))
+
+	expr := store.BuildFTSExpr([]string{"JWT", "kafka"}, false)
+	res, err := st.MemorySearchExpr(expr, false, 5)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(res) != 2 {
+		t.Fatalf("OR should return 2 memories, got %d", len(res))
+	}
+}

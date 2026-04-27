@@ -201,33 +201,41 @@ func (s *Store) MemoryQuery(query string, coreOnly bool, limit int) ([]MemoryEnt
 			LIMIT ?
 		`, limit)
 	case query != "" && !coreOnly:
-		clean := sanitizeFTSQuery(query)
-		if clean == "" {
-			return nil, nil
-		}
-		rows, err = s.db.Query(`
-			SELECT key, value, core, updated_at FROM memories
-			WHERE memories MATCH ?
-			ORDER BY rank
-			LIMIT ?
-		`, clean, limit)
+		return s.MemorySearchExpr(sanitizeFTSQuery(query), false, limit)
 	default: // query != "" && coreOnly
-		clean := sanitizeFTSQuery(query)
-		if clean == "" {
-			return nil, nil
-		}
-		rows, err = s.db.Query(`
-			SELECT key, value, core, updated_at FROM memories
-			WHERE memories MATCH ? AND core = 1
-			ORDER BY rank
-			LIMIT ?
-		`, clean, limit)
+		return s.MemorySearchExpr(sanitizeFTSQuery(query), true, limit)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: memory query: %w", err)
 	}
 	defer rows.Close()
+	return scanMemoryRows(rows)
+}
 
+// MemorySearchExpr runs an FTS5 search over memories using a pre-built
+// MATCH expression (typically from BuildFTSExpr). Empty expr short-circuits
+// to a clean empty result.
+func (s *Store) MemorySearchExpr(expr string, coreOnly bool, limit int) ([]MemoryEntry, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if expr == "" {
+		return nil, nil
+	}
+	q := `SELECT key, value, core, updated_at FROM memories WHERE memories MATCH ?`
+	if coreOnly {
+		q += ` AND core = 1`
+	}
+	q += ` ORDER BY rank LIMIT ?`
+	rows, err := s.db.Query(q, expr, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: memory search: %w", err)
+	}
+	defer rows.Close()
+	return scanMemoryRows(rows)
+}
+
+func scanMemoryRows(rows *sql.Rows) ([]MemoryEntry, error) {
 	var results []MemoryEntry
 	for rows.Next() {
 		var e MemoryEntry
@@ -407,14 +415,23 @@ func (s *Store) HistoryGet(sessionID int64, chunk int) (HistoryGetResult, error)
 	return res, nil
 }
 
-// HistorySearch runs an FTS5 search over history content and returns
-// matching turns with their session_id and chunk index for follow-up fetch.
+// HistorySearch runs an FTS5 search over history content using a free-form
+// query string. The query is auto-sanitized via sanitizeFTSQuery (each
+// whitespace-separated token becomes a quoted phrase joined implicitly with
+// AND). For explicit OR/AND control over a list of terms, build the
+// expression with BuildFTSExpr and call HistorySearchExpr.
 func (s *Store) HistorySearch(query string, limit int) (HistorySearchResult, error) {
+	return s.HistorySearchExpr(sanitizeFTSQuery(query), limit)
+}
+
+// HistorySearchExpr runs an FTS5 search over history content using a
+// pre-built MATCH expression (typically from BuildFTSExpr). Empty expr
+// short-circuits to an empty result.
+func (s *Store) HistorySearchExpr(expr string, limit int) (HistorySearchResult, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	clean := sanitizeFTSQuery(query)
-	if clean == "" {
+	if expr == "" {
 		return HistorySearchResult{}, nil
 	}
 
@@ -424,7 +441,7 @@ func (s *Store) HistorySearch(query string, limit int) (HistorySearchResult, err
 		WHERE history MATCH ?
 		ORDER BY rank
 		LIMIT ?
-	`, clean, limit)
+	`, expr, limit)
 	if err != nil {
 		return HistorySearchResult{}, fmt.Errorf("store: history search: %w", err)
 	}

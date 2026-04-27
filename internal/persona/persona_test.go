@@ -126,7 +126,7 @@ func TestLoad_StoreToolsIncludedWhenHasStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"memory_upsert", "memory_query", "history_query"} {
+	for _, name := range []string{"memory_upsert", "memory_list", "memory_search", "history_get", "history_search"} {
 		if !hasToolNamed(p.Tools, name) {
 			t.Errorf("hasStore=true but tool %q missing", name)
 		}
@@ -141,7 +141,7 @@ func TestLoad_StoreToolsAbsentWithoutStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"memory_upsert", "history_query"} {
+	for _, name := range []string{"memory_upsert", "history_get", "history_search"} {
 		if hasToolNamed(p.Tools, name) {
 			t.Errorf("hasStore=false but tool %q present", name)
 		}

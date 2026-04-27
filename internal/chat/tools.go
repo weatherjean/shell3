@@ -146,10 +146,14 @@ func dispatchStore(name, rawArgs string, st *store.Store) string {
 	switch name {
 	case "memory_upsert":
 		return handleMemoryUpsert(rawArgs, st)
-	case "memory_query":
-		return handleMemoryQuery(rawArgs, st)
-	case "history_query":
-		return handleHistoryQuery(rawArgs, st)
+	case "memory_list":
+		return handleMemoryList(rawArgs, st)
+	case "memory_search":
+		return handleMemorySearch(rawArgs, st)
+	case "history_get":
+		return handleHistoryGet(rawArgs, st)
+	case "history_search":
+		return handleHistorySearch(rawArgs, st)
 	default:
 		return fmt.Sprintf("unknown tool: %s", name)
 	}
@@ -179,18 +183,44 @@ func handleMemoryUpsert(rawArgs string, st *store.Store) string {
 	return "Stored: " + args.Key
 }
 
-func handleMemoryQuery(rawArgs string, st *store.Store) string {
+func handleMemoryList(rawArgs string, st *store.Store) string {
 	var args struct {
-		Query    string `json:"query"`
-		CoreOnly bool   `json:"core_only"`
-		Limit    int    `json:"limit"`
+		CoreOnly bool `json:"core_only"`
+		Limit    int  `json:"limit"`
 	}
 	json.Unmarshal([]byte(rawArgs), &args)
-
-	results, err := st.MemoryQuery(args.Query, args.CoreOnly, args.Limit)
+	results, err := st.MemoryQuery("", args.CoreOnly, args.Limit)
 	if err != nil {
 		return fmt.Sprintf("error: %v", err)
 	}
+	return renderMemories(results)
+}
+
+func handleMemorySearch(rawArgs string, st *store.Store) string {
+	var args struct {
+		Terms    []string `json:"terms"`
+		Match    string   `json:"match"`
+		CoreOnly bool     `json:"core_only"`
+		Limit    int      `json:"limit"`
+	}
+	if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
+		return fmt.Sprintf("error: bad arguments: %v", err)
+	}
+	if len(args.Terms) == 0 {
+		return "error: terms[] required (one concept per element)"
+	}
+	expr := store.BuildFTSExpr(args.Terms, args.Match == "all")
+	if expr == "" {
+		return "No memories found."
+	}
+	results, err := st.MemorySearchExpr(expr, args.CoreOnly, args.Limit)
+	if err != nil {
+		return fmt.Sprintf("error: %v", err)
+	}
+	return renderMemories(results)
+}
+
+func renderMemories(results []store.MemoryEntry) string {
 	if len(results) == 0 {
 		return "No memories found."
 	}
@@ -205,33 +235,12 @@ func handleMemoryQuery(rawArgs string, st *store.Store) string {
 	return sb.String()
 }
 
-func handleHistoryQuery(rawArgs string, st *store.Store) string {
+func handleHistoryGet(rawArgs string, st *store.Store) string {
 	var args struct {
-		Query     string `json:"query"`
-		SessionID int64  `json:"session_id"`
-		Chunk     int    `json:"chunk"`
-		Limit     int    `json:"limit"`
+		SessionID int64 `json:"session_id"`
+		Chunk     int   `json:"chunk"`
 	}
 	json.Unmarshal([]byte(rawArgs), &args)
-
-	if args.Query != "" {
-		res, err := st.HistorySearch(args.Query, args.Limit)
-		if err != nil {
-			return fmt.Sprintf("error: %v", err)
-		}
-		if res.TotalHits == 0 {
-			return "No history found."
-		}
-		var sb strings.Builder
-		fmt.Fprintf(&sb, "search hits: %d\n", res.TotalHits)
-		for _, h := range res.Hits {
-			fmt.Fprintf(&sb, "[session %d chunk %d | %s | %s] %s\n",
-				h.SessionID, h.Chunk+1,
-				h.CreatedAt.Format("2006-01-02 15:04"), h.Role, h.Content)
-		}
-		return sb.String()
-	}
-
 	chunk := args.Chunk
 	if chunk > 0 {
 		chunk--
@@ -257,6 +266,39 @@ func handleHistoryQuery(rawArgs string, st *store.Store) string {
 	for _, t := range res.Turns {
 		fmt.Fprintf(&sb, "[%s | %s] %s\n",
 			t.CreatedAt.Format("2006-01-02 15:04"), t.Role, t.Content)
+	}
+	return sb.String()
+}
+
+func handleHistorySearch(rawArgs string, st *store.Store) string {
+	var args struct {
+		Terms []string `json:"terms"`
+		Match string   `json:"match"`
+		Limit int      `json:"limit"`
+	}
+	if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
+		return fmt.Sprintf("error: bad arguments: %v", err)
+	}
+	if len(args.Terms) == 0 {
+		return "error: terms[] required (one concept per element)"
+	}
+	expr := store.BuildFTSExpr(args.Terms, args.Match == "all")
+	if expr == "" {
+		return "No history found."
+	}
+	res, err := st.HistorySearchExpr(expr, args.Limit)
+	if err != nil {
+		return fmt.Sprintf("error: %v", err)
+	}
+	if res.TotalHits == 0 {
+		return "No history found."
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "search hits: %d\n", res.TotalHits)
+	for _, h := range res.Hits {
+		fmt.Fprintf(&sb, "[session %d chunk %d | %s | %s] %s\n",
+			h.SessionID, h.Chunk+1,
+			h.CreatedAt.Format("2006-01-02 15:04"), h.Role, h.Content)
 	}
 	return sb.String()
 }
