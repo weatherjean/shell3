@@ -28,7 +28,7 @@ func dumpStreamError(cfg Config, msgs []llm.Message, streamErr error) {
 	rec := map[string]any{
 		"timestamp":     time.Now().Format(time.RFC3339),
 		"error":         streamErr.Error(),
-		"messages":     msgs,
+		"messages":      msgs,
 		"request_body":  string(reqBody),
 		"response_body": string(resBody),
 	}
@@ -50,6 +50,31 @@ func dimLines(s string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func isMemoryHistoryTool(name string) bool {
+	switch name {
+	case "memory_upsert", "memory_list", "memory_search", "history_get", "history_search":
+		return true
+	default:
+		return false
+	}
+}
+
+func toolCallHeader(id, name, args string, isUserTool bool) string {
+	color := patchtui.MutedGreen
+	if name == "prune_tool_result" {
+		color = patchtui.Pink
+	} else if isUserTool {
+		color = patchtui.Violet
+	} else if isMemoryHistoryTool(name) {
+		color = patchtui.Blue
+	}
+
+	if args == "" {
+		return fmt.Sprintf("%s%s#%s → %s%s", color, patchtui.Bold, id, name, patchtui.Reset)
+	}
+	return fmt.Sprintf("%s%s#%s → %s(%s)%s", color, patchtui.Bold, id, name, args, patchtui.Reset)
 }
 
 // runTurn executes one user→assistant exchange, sending events to ch.
@@ -141,21 +166,21 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 				ch <- patchapp.TTYExecEvent{Cmd: command, WorkDir: cfg.WorkDir, ReplyC: replyC}
 				out = <-replyC
 			} else if tc.Name == "prune_tool_result" {
-				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.MutedGreen+patchtui.Bold+"#%s → %s(%s)"+patchtui.Reset+"\n", tc.ID, tc.Name, tc.RawArgs)}
+				ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, tc.Name, tc.RawArgs, false) + "\n"}
 				out = handlePruneToolResult(tc.RawArgs, allMsgs, sess.messages)
 				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(out, "\n")) + "\n\n"}
 			} else if tc.Name == "edit_file" || tc.Name == "write_file" {
-				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.MutedGreen+patchtui.Bold+"#%s → %s(%s)"+patchtui.Reset+"\n", tc.ID, tc.Name, summarizeEditArgs(tc.RawArgs))}
+				ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, tc.Name, summarizeEditArgs(tc.RawArgs), false) + "\n"}
 				out = handleEditTool(tc.Name, tc.RawArgs, cfg.WorkDir)
 				ch <- patchapp.AppendEvent{Text: colorizeEditOutput(strings.TrimRight(out, "\n")) + "\n\n"}
 			} else if tc.Name == "shell3_docs" {
-				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.MutedGreen+patchtui.Bold+"#%s → shell3_docs"+patchtui.Reset+"\n", tc.ID)}
+				ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, "shell3_docs", "", false) + "\n"}
 				out = cfg.Docs
 				if out == "" {
 					out = "Documentation not available."
 				}
 			} else if userTool, ok := cfg.UserTools[tc.Name]; ok {
-				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.MutedGreen+patchtui.Bold+"#%s → %s(%s)"+patchtui.Reset+"\n", tc.ID, tc.Name, tc.RawArgs)}
+				ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, tc.Name, tc.RawArgs, true) + "\n"}
 				out = dispatchUserTool(ctx, userTool, tc.RawArgs, cfg.Secrets, cfg.WorkDir)
 				display := truncateOutput(out)
 				if cfg.Truncate {
@@ -163,7 +188,7 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 				}
 				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(display, "\n")) + "\n\n"}
 			} else {
-				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.MutedGreen+patchtui.Bold+"#%s → %s(%s)"+patchtui.Reset+"\n", tc.ID, tc.Name, tc.RawArgs)}
+				ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, tc.Name, tc.RawArgs, false) + "\n"}
 				out = dispatchStore(tc.Name, tc.RawArgs, cfg.Store)
 				display := truncateOutput(out)
 				if cfg.Truncate {

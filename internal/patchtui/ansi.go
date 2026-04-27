@@ -32,6 +32,12 @@ const (
 // loud than the bright ANSI green so tool output blocks don't dominate.
 var MutedGreen = FgRGB(120, 170, 120)
 
+// Violet is used for user-defined tool-call headers.
+var Violet = FgRGB(139, 92, 246)
+
+// Pink is used for prune_tool_result headers.
+var Pink = FgRGB(236, 72, 153)
+
 // FgRGB returns the SGR sequence to set the foreground to a 24-bit RGB color.
 func FgRGB(r, g, b int) string { return fmt.Sprintf("\033[38;2;%d;%d;%dm", r, g, b) }
 
