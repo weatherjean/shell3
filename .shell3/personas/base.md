@@ -6,6 +6,11 @@ provider: codex
 db: ~
 no_bash: false
 no_memory: false
+parameters:
+  reasoning_effort: medium
+  reasoning_summary: auto
+  verbosity: medium
+  parallel_tool_calls: true
 on_session_start: ~
 on_session_end: ~
 on_turn_start: ~

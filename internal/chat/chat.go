@@ -43,6 +43,7 @@ type Config struct {
 	Docs          string
 	UserTools     map[string]usertools.Tool
 	Secrets       map[string]string
+	Params        llm.RequestParams
 }
 
 // RunInteractive runs the TUI chat loop. Blocks until the user quits.
@@ -252,6 +253,9 @@ func registerSlashCommands(app slashTarget, cfg *Config, sess *session, lastUsag
 			}
 			if newClient != nil {
 				cfg.LLM = newClient
+				if setter, ok := newClient.(llm.ParamSetter); ok {
+					setter.SetParams(cfg.Params)
+				}
 			}
 			cfg.StatusLine = choice.Provider + " │ " + choice.Model
 			app.SetStatus(cfg.StatusLine)
@@ -296,9 +300,90 @@ func registerSlashCommands(app slashTarget, cfg *Config, sess *session, lastUsag
 		},
 	})
 	app.RegisterSlash(patchapp.SlashCommand{
+		Name: "parameters",
+		Help: "/parameters [name value] — list or set tunable params (reasoning_effort, verbosity, ...)",
+		Handler: func(args string) {
+			describer, _ := cfg.LLM.(llm.ParamDescriber)
+			setter, _ := cfg.LLM.(llm.ParamSetter)
+
+			args = strings.TrimSpace(args)
+			if args == "" {
+				if describer == nil {
+					dim("[current provider exposes no parameters]")
+					return
+				}
+				lines := []string{patchtui.Bold + "parameters:" + patchtui.Reset}
+				for _, s := range describer.ParamSpecs() {
+					cur := currentParamValue(cfg.Params, s.Name)
+					enum := ""
+					if len(s.Enum) > 0 {
+						enum = " [" + strings.Join(s.Enum, "|") + "]"
+					}
+					lines = append(lines, fmt.Sprintf("  %-22s %s%s  (default %s)", s.Name, cur, enum, s.Default))
+				}
+				app.Print(lines)
+				return
+			}
+			parts := strings.Fields(args)
+			if len(parts) != 2 {
+				dim("[usage: /parameters <name> <value>]")
+				return
+			}
+			name, value := parts[0], parts[1]
+			if describer != nil {
+				var spec *llm.ParamSpec
+				for _, s := range describer.ParamSpecs() {
+					if s.Name == name {
+						s := s
+						spec = &s
+						break
+					}
+				}
+				if spec == nil {
+					dim(fmt.Sprintf("[unknown parameter %q for this provider]", name))
+					return
+				}
+				if err := spec.Validate(value); err != nil {
+					dim(fmt.Sprintf("[%v]", err))
+					return
+				}
+			}
+			if err := cfg.Params.SetByName(name, value); err != nil {
+				dim(fmt.Sprintf("[%v]", err))
+				return
+			}
+			if setter != nil {
+				setter.SetParams(cfg.Params)
+			}
+			dim(fmt.Sprintf("[%s = %s]", name, value))
+		},
+	})
+	app.RegisterSlash(patchapp.SlashCommand{
 		Name: "exit", Aliases: []string{"quit"}, Help: "quit shell3",
 		Handler: func(string) { app.Quit() },
 	})
+}
+
+func currentParamValue(p llm.RequestParams, name string) string {
+	switch name {
+	case "reasoning_effort":
+		return p.ReasoningEffort
+	case "reasoning_summary":
+		return p.ReasoningSummary
+	case "verbosity":
+		return p.Verbosity
+	case "parallel_tool_calls":
+		if p.ParallelToolCalls == nil {
+			return ""
+		}
+		return fmt.Sprintf("%t", *p.ParallelToolCalls)
+	case "temperature":
+		if p.Temperature == nil {
+			return ""
+		}
+		return fmt.Sprintf("%g", *p.Temperature)
+	}
+	return ""
 }
 
 // RunOnce executes a single turn and prints output to stdout. No TUI.
@@ -341,6 +426,7 @@ func slashHelp() string {
 		"  /usage     show token usage from last turn\n" +
 		"  /prompt    dump system prompt and active tools\n" +
 		"  /truncate  toggle truncated bash output\n" +
+		"  /parameters list/set tunable params (e.g. reasoning_effort, verbosity)\n" +
 		"  /exit      quit shell3\n" +
 		"  /help      show this help\n" +
 		"\n" + patchtui.Bold + "keyboard shortcuts:" + patchtui.Reset + "\n" +

@@ -24,6 +24,7 @@ type client struct {
 
 	mu     sync.Mutex
 	tokens *Tokens
+	params llm.RequestParams
 }
 
 // newClient builds a client backed by the unified CredStore.
@@ -37,7 +38,26 @@ func newClient(store *config.CredStore, model string) (*client, error) {
 		store:     store,
 		sessionID: uuid.NewString(),
 		tokens:    t,
+		params:    llm.RequestParams{ReasoningEffort: "medium", ReasoningSummary: "auto", Verbosity: "medium"},
 	}, nil
+}
+
+// SetParams replaces the active parameter set used for subsequent requests.
+func (c *client) SetParams(p llm.RequestParams) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.params = c.params.Merge(p)
+}
+
+// ParamSpecs returns the parameter surface the codex adapter understands.
+func (c *client) ParamSpecs() []llm.ParamSpec {
+	return []llm.ParamSpec{
+		{Name: "reasoning_effort", Enum: []string{"none", "minimal", "low", "medium", "high", "xhigh"}, Default: "medium"},
+		{Name: "reasoning_summary", Enum: []string{"auto", "concise", "detailed", "off"}, Default: "auto"},
+		{Name: "verbosity", Enum: []string{"low", "medium", "high"}, Default: "medium"},
+		{Name: "parallel_tool_calls", Enum: []string{"true", "false"}, Default: "true"},
+		{Name: "temperature", Default: ""},
+	}
 }
 
 // SetModel swaps the active model for subsequent requests.
@@ -51,7 +71,10 @@ func (c *client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 		return err
 	}
 
-	body, err := buildRequest(c.model, msgs, tools)
+	c.mu.Lock()
+	params := c.params
+	c.mu.Unlock()
+	body, err := buildRequest(c.model, c.sessionID, params, msgs, tools)
 	if err != nil {
 		return err
 	}

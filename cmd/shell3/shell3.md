@@ -147,6 +147,7 @@ after: ""                    # optional; bash -c hook, stdin = command output
 | `/usage`    | show token usage from last turn                                 |
 | `/prompt`   | dump system prompt and active tools                             |
 | `/truncate` | toggle truncated bash output                                    |
+| `/parameters` | list current LLM params; `/parameters <name> <value>` to set  |
 | `/exit`     | quit shell3 (alias: `/quit`)                                    |
 | `/help`     | list available commands                                         |
 
@@ -181,6 +182,15 @@ provider: opencode-go            # provider key from credentials.yaml (or ~ for 
 db: .shell3/shell3.db            # SQLite path for memory + history (or ~ for default)
 no_bash: false                   # disable bash + shell_interactive tools
 no_memory: false                 # disable memory/history tools and store
+
+# LLM request parameters — adapter clamps unknown values; defaults are
+# medium across the board so codex models execute eagerly.
+parameters:
+  reasoning_effort: medium       # none|minimal|low|medium|high|xhigh
+  reasoning_summary: auto        # auto|concise|detailed|off
+  verbosity: medium              # low|medium|high
+  parallel_tool_calls: true
+  temperature: ~                 # ~ to leave provider default
 
 # Hooks — string for plain command, or mapping with needs_tty.
 on_session_start: ~              # fire-and-forget at session start

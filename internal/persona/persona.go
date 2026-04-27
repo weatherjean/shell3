@@ -38,7 +38,30 @@ type PersonaConfig struct {
 	NoBash      bool   `yaml:"no_bash"`
 	NoMemory    bool   `yaml:"no_memory"`
 
+	Parameters PersonaParams `yaml:"parameters"`
+
 	hooks.Config `yaml:",inline"`
+}
+
+// PersonaParams is the YAML shape of the `parameters:` frontmatter block.
+// Pointers distinguish "absent" from "explicitly false/zero".
+type PersonaParams struct {
+	ReasoningEffort   string   `yaml:"reasoning_effort"`
+	ReasoningSummary  string   `yaml:"reasoning_summary"`
+	Verbosity         string   `yaml:"verbosity"`
+	ParallelToolCalls *bool    `yaml:"parallel_tool_calls"`
+	Temperature       *float64 `yaml:"temperature"`
+}
+
+// ToRequestParams maps the YAML block onto the adapter-facing struct.
+func (pp PersonaParams) ToRequestParams() llm.RequestParams {
+	return llm.RequestParams{
+		ReasoningEffort:   pp.ReasoningEffort,
+		ReasoningSummary:  pp.ReasoningSummary,
+		Verbosity:         pp.Verbosity,
+		ParallelToolCalls: pp.ParallelToolCalls,
+		Temperature:       pp.Temperature,
+	}
 }
 
 // TemplateData holds values injected into persona template bodies.
@@ -56,6 +79,7 @@ type Persona struct {
 	Name         string // convenience alias for Config.Name
 	SystemPrompt string
 	Tools        []ToolDef
+	Parameters   llm.RequestParams
 }
 
 // ParseConfig reads only the frontmatter of <personasDir>/<name>.md.
@@ -134,6 +158,7 @@ func Load(personasDir, name string, data TemplateData, hasStore, noBash bool, us
 		Name:         cfg.Name,
 		SystemPrompt: buf.String(),
 		Tools:        tools,
+		Parameters:   cfg.Parameters.ToRequestParams(),
 	}, nil
 }
 

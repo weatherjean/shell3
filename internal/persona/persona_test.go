@@ -336,3 +336,34 @@ Persona body.
 		t.Fatalf("expected memory line, got:\n%s", p.SystemPrompt)
 	}
 }
+
+func TestParseConfigParameters(t *testing.T) {
+	dir := t.TempDir()
+	body := `---
+name: x
+parameters:
+  reasoning_effort: high
+  verbosity: low
+  parallel_tool_calls: true
+  temperature: 0.4
+---
+hello
+`
+	writePersona(t, dir, "x", body)
+	cfg, err := persona.ParseConfig(dir, "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Parameters.ReasoningEffort != "high" {
+		t.Fatalf("effort: %+v", cfg.Parameters)
+	}
+	if cfg.Parameters.Verbosity != "low" {
+		t.Fatalf("verbosity: %+v", cfg.Parameters)
+	}
+	if cfg.Parameters.ParallelToolCalls == nil || !*cfg.Parameters.ParallelToolCalls {
+		t.Fatalf("parallel: %+v", cfg.Parameters)
+	}
+	if cfg.Parameters.Temperature == nil || *cfg.Parameters.Temperature != 0.4 {
+		t.Fatalf("temp: %+v", cfg.Parameters)
+	}
+}

@@ -225,6 +225,9 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	if err != nil {
 		return err
 	}
+	if setter, ok := streamer.(llm.ParamSetter); ok {
+		setter.SetParams(pers.Parameters)
+	}
 	var client chat.LLMClient = streamer
 
 	modelSwitcher := func(newInstance, newModel string) (chat.LLMClient, error) {
@@ -257,6 +260,7 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		Docs:          docsContent,
 		UserTools:     userToolMap,
 		Secrets:       secretsMap,
+		Params:        pers.Parameters,
 	}
 
 	if initialInput != "" {

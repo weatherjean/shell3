@@ -79,7 +79,7 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 	allMsgs = append(allMsgs, msgs...)
 
 	for {
-		text, reasoning, toolCalls, usage, err := streamOnce(ctx, cfg.LLM, allMsgs, cfg.Personality.Tools, ch)
+		text, reasoning, providerReasoning, toolCalls, usage, err := streamOnce(ctx, cfg.LLM, allMsgs, cfg.Personality.Tools, ch)
 		if err != nil {
 			dumpStreamError(cfg, allMsgs, err)
 			cfg.Hooks.OnError(ctx, err)
@@ -98,11 +98,12 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 			toolCalls[i].ID = sess.allocToolCallID()
 		}
 
-		if text != "" || len(toolCalls) > 0 {
+		if text != "" || len(toolCalls) > 0 || len(providerReasoning) > 0 {
 			assistantMsg := llm.Message{
-				Role:             llm.RoleAssistant,
-				Content:          text,
-				ReasoningContent: reasoning,
+				Role:              llm.RoleAssistant,
+				Content:           text,
+				ReasoningContent:  reasoning,
+				ProviderReasoning: providerReasoning,
 			}
 			assistantMsg.ToolCalls = toolCalls
 			allMsgs = append(allMsgs, assistantMsg)
@@ -190,7 +191,7 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 
 // streamOnce calls the LLM once, collecting text/reasoning/tool-calls/usage
 // and emitting ChunkEvents on ch.
-func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools []llm.ToolDefinition, ch chan<- patchapp.Event) (text, reasoning string, toolCalls []llm.ToolCall, usage llm.Usage, err error) {
+func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools []llm.ToolDefinition, ch chan<- patchapp.Event) (text, reasoning string, providerReasoning []byte, toolCalls []llm.ToolCall, usage llm.Usage, err error) {
 	var sb, rb strings.Builder
 	streamErr := client.Stream(ctx, msgs, tools, func(ev llm.StreamEvent) {
 		if ev.TextDelta != "" {
@@ -200,6 +201,9 @@ func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools
 		if ev.ReasoningDelta != "" {
 			rb.WriteString(ev.ReasoningDelta)
 		}
+		if len(ev.ProviderReasoning) > 0 {
+			providerReasoning = ev.ProviderReasoning
+		}
 		if ev.ToolCall != nil {
 			toolCalls = append(toolCalls, *ev.ToolCall)
 		}
@@ -208,9 +212,9 @@ func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools
 		}
 	})
 	if ctx.Err() != nil {
-		return sb.String(), rb.String(), toolCalls, usage, fmt.Errorf("context canceled")
+		return sb.String(), rb.String(), providerReasoning, toolCalls, usage, fmt.Errorf("context canceled")
 	}
-	return sb.String(), rb.String(), toolCalls, usage, streamErr
+	return sb.String(), rb.String(), providerReasoning, toolCalls, usage, streamErr
 }
 
 func parseRawArgs(raw string) map[string]any {

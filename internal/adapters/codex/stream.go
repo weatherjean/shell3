@@ -32,6 +32,12 @@ func parseStream(r io.Reader, onEvent func(llm.StreamEvent)) error {
 	}
 	tools := map[string]*pending{}
 
+	// Reasoning items the server emits as `output_item` (type "reasoning").
+	// Captured verbatim and flushed as a single ProviderReasoning blob on
+	// response.completed so the chat layer can attach it to the assistant
+	// message and round-trip on the next turn.
+	var reasoningItems []json.RawMessage
+
 	emitTool := func(p *pending) {
 		id := p.CallID
 		if id == "" {
@@ -135,6 +141,17 @@ func parseStream(r io.Reader, onEvent func(llm.StreamEvent)) error {
 			if len(env.Item) == 0 {
 				continue
 			}
+			var head struct {
+				Type string `json:"type"`
+			}
+			if err := json.Unmarshal(env.Item, &head); err != nil {
+				continue
+			}
+			if head.Type == "reasoning" {
+				// Capture the entire item verbatim for round-trip.
+				reasoningItems = append(reasoningItems, append(json.RawMessage(nil), env.Item...))
+				continue
+			}
 			var it struct {
 				ID        string `json:"id"`
 				Type      string `json:"type"`
@@ -173,6 +190,11 @@ func parseStream(r io.Reader, onEvent func(llm.StreamEvent)) error {
 			delete(tools, key)
 
 		case "response.completed":
+			if len(reasoningItems) > 0 {
+				if blob, err := json.Marshal(reasoningItems); err == nil {
+					onEvent(llm.StreamEvent{ProviderReasoning: blob})
+				}
+			}
 			u := env.Response.Usage
 			if u.TotalTokens > 0 || u.InputTokens > 0 || u.OutputTokens > 0 {
 				onEvent(llm.StreamEvent{Usage: &llm.Usage{

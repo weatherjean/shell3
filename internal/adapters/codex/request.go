@@ -1,17 +1,35 @@
 package codex
 
 import (
+	"encoding/json"
+
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
 // responsesRequest is the JSON body shape posted to the Codex Responses API.
 type responsesRequest struct {
-	Model        string          `json:"model"`
-	Instructions string          `json:"instructions,omitempty"`
-	Input        []any           `json:"input"`
-	Tools        []responsesTool `json:"tools,omitempty"`
-	Stream       bool            `json:"stream"`
-	Store        bool            `json:"store"`
+	Model             string          `json:"model"`
+	Instructions      string          `json:"instructions,omitempty"`
+	Input             []any           `json:"input"`
+	Tools             []responsesTool `json:"tools,omitempty"`
+	ToolChoice        string          `json:"tool_choice,omitempty"`
+	ParallelToolCalls *bool           `json:"parallel_tool_calls,omitempty"`
+	Stream            bool            `json:"stream"`
+	Store             bool            `json:"store"`
+	Reasoning         *reasoningOpts  `json:"reasoning,omitempty"`
+	Text              *textOpts       `json:"text,omitempty"`
+	Temperature       *float64        `json:"temperature,omitempty"`
+	Include           []string        `json:"include,omitempty"`
+	PromptCacheKey    string          `json:"prompt_cache_key,omitempty"`
+}
+
+type reasoningOpts struct {
+	Effort  string `json:"effort,omitempty"`
+	Summary string `json:"summary,omitempty"`
+}
+
+type textOpts struct {
+	Verbosity string `json:"verbosity,omitempty"`
 }
 
 // responsesTool is the function-tool descriptor accepted by the Responses API.
@@ -60,14 +78,35 @@ type inputFunctionCallOutput struct {
 //     dedicated field for it; sending system as a regular item works but is
 //     non-canonical).
 //   - User messages → input_text parts.
-//   - Assistant messages with tool_calls → function_call items (one per call).
-//     Plain assistant text becomes an output_text message.
+//   - Assistant messages with tool_calls → function_call items (one per call),
+//     preceded by any provider-supplied reasoning items echoed verbatim from
+//     the previous response (required for medium+ reasoning effort to retain
+//     plan continuity across tool turns).
+//   - Plain assistant text becomes an output_text message.
 //   - Tool results → function_call_output items, keyed by tool_call_id.
-func buildRequest(model string, msgs []llm.Message, tools []llm.ToolDefinition) (*responsesRequest, error) {
+func buildRequest(model, sessionID string, params llm.RequestParams, msgs []llm.Message, tools []llm.ToolDefinition) (*responsesRequest, error) {
 	req := &responsesRequest{
-		Model:  model,
-		Stream: true,
-		Store:  false,
+		Model:          model,
+		Stream:         true,
+		Store:          false,
+		ToolChoice:     "auto",
+		Include:        []string{"reasoning.encrypted_content"},
+		PromptCacheKey: sessionID,
+	}
+	if params.ReasoningEffort != "" {
+		req.Reasoning = &reasoningOpts{
+			Effort:  params.ReasoningEffort,
+			Summary: defaultStr(params.ReasoningSummary, "auto"),
+		}
+	}
+	if params.Verbosity != "" {
+		req.Text = &textOpts{Verbosity: params.Verbosity}
+	}
+	if params.ParallelToolCalls != nil {
+		req.ParallelToolCalls = params.ParallelToolCalls
+	}
+	if params.Temperature != nil {
+		req.Temperature = params.Temperature
 	}
 
 	for _, m := range msgs {
@@ -87,6 +126,16 @@ func buildRequest(model string, msgs []llm.Message, tools []llm.ToolDefinition) 
 				Content: []messagePart{{Type: "input_text", Text: m.Content}},
 			})
 		case llm.RoleAssistant:
+			// Splice provider reasoning items first — they must precede the
+			// function_calls they justify, otherwise the API rejects the turn.
+			if len(m.ProviderReasoning) > 0 {
+				var items []json.RawMessage
+				if err := json.Unmarshal(m.ProviderReasoning, &items); err == nil {
+					for _, it := range items {
+						req.Input = append(req.Input, json.RawMessage(it))
+					}
+				}
+			}
 			if m.Content != "" {
 				req.Input = append(req.Input, inputMessage{
 					Type:    "message",
@@ -121,4 +170,11 @@ func buildRequest(model string, msgs []llm.Message, tools []llm.ToolDefinition) 
 	}
 
 	return req, nil
+}
+
+func defaultStr(s, fallback string) string {
+	if s == "" {
+		return fallback
+	}
+	return s
 }

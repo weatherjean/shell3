@@ -129,9 +129,10 @@ func (cc composedCloser) Close() error {
 
 // Client is an OpenAI-compatible streaming LLM client.
 type Client struct {
-	oc    *openaiapi.Client
-	model string
-	tap   *bodyTap
+	oc     *openaiapi.Client
+	model  string
+	tap    *bodyTap
+	params llm.RequestParams
 }
 
 // NewClient creates a Client targeting baseURL with the given apiKey and model.
@@ -141,9 +142,23 @@ func NewClient(baseURL, apiKey, model string) *Client {
 	tap := &bodyTap{rt: http.DefaultTransport}
 	cfg.HTTPClient = &http.Client{Transport: tap}
 	return &Client{
-		oc:    openaiapi.NewClientWithConfig(cfg),
-		model: model,
-		tap:   tap,
+		oc:     openaiapi.NewClientWithConfig(cfg),
+		model:  model,
+		tap:    tap,
+		params: llm.RequestParams{ReasoningEffort: "medium", Verbosity: "medium"},
+	}
+}
+
+// SetParams replaces the active parameter set used for subsequent requests.
+func (c *Client) SetParams(p llm.RequestParams) { c.params = c.params.Merge(p) }
+
+// ParamSpecs returns the parameter surface the openai adapter understands.
+func (c *Client) ParamSpecs() []llm.ParamSpec {
+	return []llm.ParamSpec{
+		{Name: "reasoning_effort", Enum: []string{"minimal", "low", "medium", "high"}, Default: "medium"},
+		{Name: "verbosity", Enum: []string{"low", "medium", "high"}, Default: "medium"},
+		{Name: "parallel_tool_calls", Enum: []string{"true", "false"}, Default: "true"},
+		{Name: "temperature", Default: ""},
 	}
 }
 
@@ -189,6 +204,18 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 	}
 	if len(tools) > 0 {
 		req.Tools = toOpenAITools(tools)
+	}
+	if c.params.ReasoningEffort != "" {
+		req.ReasoningEffort = c.params.ReasoningEffort
+	}
+	if c.params.Verbosity != "" {
+		req.Verbosity = c.params.Verbosity
+	}
+	if c.params.Temperature != nil {
+		req.Temperature = float32(*c.params.Temperature)
+	}
+	if c.params.ParallelToolCalls != nil {
+		req.ParallelToolCalls = *c.params.ParallelToolCalls
 	}
 
 	stream, err := c.oc.CreateChatCompletionStream(ctx, req)
