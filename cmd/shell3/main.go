@@ -23,6 +23,7 @@ func main() {
 
 	runCmd := newRunCommand()
 	root.RunE = runCmd.RunE
+	root.Args = cobra.ArbitraryArgs
 	root.Flags().AddFlagSet(runCmd.Flags())
 
 	// Print brand header on every subcommand and on --help output. The

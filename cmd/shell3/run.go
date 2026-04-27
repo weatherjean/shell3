@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
+
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/config"
 	"github.com/weatherjean/shell3/internal/hooks"
@@ -35,7 +38,15 @@ func newRunCommand() *cobra.Command {
 		Use:   "shell3 [message]",
 		Short: "Run the shell3 chat agent",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runChat(cmd.Context(), f, strings.Join(args, " "))
+			input := strings.TrimSpace(strings.Join(args, " "))
+			if input == "" && !term.IsTerminal(int(os.Stdin.Fd())) {
+				b, err := io.ReadAll(os.Stdin)
+				if err != nil {
+					return fmt.Errorf("read stdin: %w", err)
+				}
+				input = strings.TrimSpace(string(b))
+			}
+			return runChat(cmd.Context(), f, input)
 		},
 	}
 	cmd.Flags().StringVar(&f.persona, "persona", "base", "Persona to load from .shell3/personas/")
