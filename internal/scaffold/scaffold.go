@@ -113,14 +113,18 @@ Skills are instruction files. When a skill applies to your task, read its file u
 {{.Skills}}
 {{- end}}`
 
-// checkCredentials verifies that at least one provider is configured in homeDir.
+// checkCredentials verifies that at least one adapter instance is
+// configured in homeDir.
 func checkCredentials(homeDir string) error {
-	creds, err := config.LoadCredentials(homeDir)
+	if err := config.Migrate(homeDir); err != nil {
+		return fmt.Errorf("migrate credentials: %w", err)
+	}
+	store, err := config.LoadCredStore(homeDir)
 	if err != nil {
 		return fmt.Errorf("run `shell3 auth` before `shell3 init`: %w", err)
 	}
-	if _, _, ok := creds.First(); !ok {
-		return fmt.Errorf("no providers configured — run: shell3 auth")
+	if len(store.List()) == 0 {
+		return fmt.Errorf("no adapter instances configured — run: shell3 auth")
 	}
 	return nil
 }

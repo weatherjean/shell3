@@ -22,13 +22,44 @@ shell3 init
 ```
 
 ### shell3 auth
-Store provider credentials in `~/.shell3/credentials.yaml`.
+Configure adapter credentials. With no flags, presents an adapter menu and prompts for any required fields. Credentials are stored at `~/.shell3/credentials.shell3` (XOR-obfuscated YAML).
 
 ```
-shell3 auth
+shell3 auth                                          # interactive: pick adapter, configure instance
+shell3 auth --provider=openai                        # configure an OpenAI-compatible instance
+shell3 auth --provider=openai --instance=ollama-local
+shell3 auth --provider=codex                         # OAuth browser flow (single-instance)
+
+shell3 auth list                                     # list configured instances + their models
+shell3 auth remove <instance>                        # delete one instance
+shell3 auth models <instance>                        # show current default_model CSV
+shell3 auth models <instance> "a,b,c"                # replace default_model CSV
+shell3 auth models <instance> ""                     # clear; adapter built-in list applies
 ```
 
-Prompts for: provider name, API key, base URL, default model.
+**Concepts:**
+- **Adapter** — code path for talking to a backend (`openai`, `codex`).
+- **Instance** — one user-configured set of credentials for an adapter. The OpenAI-compatible adapter supports many instances (e.g. `ollama-local`, `openrouter-prod`, `openai-prod`). Codex is single-instance (always named `codex`).
+- **default_model** — comma-separated list of models the persona's `/model` picker cycles through. First entry is the default.
+
+**Editing models without re-authenticating.** `shell3 auth models <instance>` prints the current CSV. `shell3 auth models <instance> "<csv>"` replaces it. Pass an empty string (`""`) to clear and fall back to the adapter's built-in list (codex only — openai has no built-in list). Works for every adapter.
+
+**Removing an instance.** `shell3 auth remove <instance>` deletes the instance from `credentials.shell3`. To start over completely: `rm ~/.shell3/credentials.shell3`.
+
+**Storage format.** The credential file is wrapped with a fixed XOR + base64 layer behind a magic header. **This is obfuscation, not encryption.** It defends against accidental disclosure to LLM tools that walk your home directory and read files verbatim. Anyone with shell access (or this source tree) can reverse it trivially. Store actual high-value secrets in your OS keyring or a dedicated secret manager.
+
+If `~/.shell3/credentials.yaml` or `~/.shell3/codex_tokens.json` exists from an older shell3, the first run automatically migrates them into `credentials.shell3` and renames `credentials.yaml` to `credentials.yaml.bak`.
+
+### Adapters
+
+shell3 ships with two adapters; new adapters live under `internal/adapters/<name>` and self-register via `init()`:
+
+| Adapter  | Instance count | Auth                                | Models                                                  |
+|----------|----------------|-------------------------------------|---------------------------------------------------------|
+| `openai` | many           | base URL + API key + default model  | per-instance `default_model` CSV                        |
+| `codex`  | one            | OAuth (ChatGPT subscription)        | per-instance `default_model` CSV; falls back to builtin |
+
+Pass an instance name via the persona's `provider:` field, or pick at runtime with `--persona`. For single-instance adapters, instance name equals the adapter name.
 
 ### shell3 (root command)
 The root command runs the interactive chat agent. With a positional argument it runs once non-interactively and prints the response to stdout.

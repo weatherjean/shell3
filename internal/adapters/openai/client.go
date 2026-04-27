@@ -1,4 +1,4 @@
-package llm
+package openai
 
 import (
 	"bufio"
@@ -11,7 +11,9 @@ import (
 	"strings"
 	"sync"
 
-	openai "github.com/sashabaranov/go-openai"
+	openaiapi "github.com/sashabaranov/go-openai"
+
+	"github.com/weatherjean/shell3/internal/llm"
 )
 
 // bodyTap is an http.RoundTripper that records the last request body and
@@ -127,19 +129,19 @@ func (cc composedCloser) Close() error {
 
 // Client is an OpenAI-compatible streaming LLM client.
 type Client struct {
-	oc    *openai.Client
+	oc    *openaiapi.Client
 	model string
 	tap   *bodyTap
 }
 
 // NewClient creates a Client targeting baseURL with the given apiKey and model.
 func NewClient(baseURL, apiKey, model string) *Client {
-	cfg := openai.DefaultConfig(apiKey)
+	cfg := openaiapi.DefaultConfig(apiKey)
 	cfg.BaseURL = baseURL
 	tap := &bodyTap{rt: http.DefaultTransport}
 	cfg.HTTPClient = &http.Client{Transport: tap}
 	return &Client{
-		oc:    openai.NewClientWithConfig(cfg),
+		oc:    openaiapi.NewClientWithConfig(cfg),
 		model: model,
 		tap:   tap,
 	}
@@ -172,12 +174,12 @@ func (c *Client) SetModel(model string) {
 }
 
 // Stream sends msgs to the LLM and calls onEvent for each token, tool call, and completion.
-func (c *Client) Stream(ctx context.Context, msgs []Message, tools []ToolDefinition, onEvent func(StreamEvent)) error {
-	req := openai.ChatCompletionRequest{
+func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.ToolDefinition, onEvent func(llm.StreamEvent)) error {
+	req := openaiapi.ChatCompletionRequest{
 		Model:         c.model,
 		Messages:      toOpenAI(msgs),
 		Stream:        true,
-		StreamOptions: &openai.StreamOptions{IncludeUsage: true},
+		StreamOptions: &openaiapi.StreamOptions{IncludeUsage: true},
 		// Disable provider-side "thinking" by default. Moonshot/kimi rejects
 		// follow-up turns when assistant tool-call messages lack a
 		// reasoning_content field — and proxies often strip reasoning from
@@ -195,7 +197,7 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, tools []ToolDefinit
 	}
 	defer stream.Close() // safe to call twice; we close explicitly below to flush the tee
 
-	toolCalls := map[int]*ToolCall{}
+	toolCalls := map[int]*llm.ToolCall{}
 
 	for {
 		chunk, err := stream.Recv()
@@ -206,7 +208,7 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, tools []ToolDefinit
 			return fmt.Errorf("llm: recv: %w", err)
 		}
 		if chunk.Usage != nil {
-			onEvent(StreamEvent{Usage: &Usage{
+			onEvent(llm.StreamEvent{Usage: &llm.Usage{
 				PromptTokens:     chunk.Usage.PromptTokens,
 				CompletionTokens: chunk.Usage.CompletionTokens,
 				TotalTokens:      chunk.Usage.TotalTokens,
@@ -219,10 +221,10 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, tools []ToolDefinit
 		delta := chunk.Choices[0].Delta
 
 		if delta.Content != "" {
-			onEvent(StreamEvent{TextDelta: delta.Content})
+			onEvent(llm.StreamEvent{TextDelta: delta.Content})
 		}
 		if delta.ReasoningContent != "" {
-			onEvent(StreamEvent{ReasoningDelta: delta.ReasoningContent})
+			onEvent(llm.StreamEvent{ReasoningDelta: delta.ReasoningContent})
 		}
 
 		for _, tc := range delta.ToolCalls {
@@ -231,7 +233,7 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, tools []ToolDefinit
 			}
 			idx := *tc.Index
 			if toolCalls[idx] == nil {
-				toolCalls[idx] = &ToolCall{ID: tc.ID, Name: tc.Function.Name}
+				toolCalls[idx] = &llm.ToolCall{ID: tc.ID, Name: tc.Function.Name}
 			}
 			toolCalls[idx].RawArgs += tc.Function.Arguments
 		}
@@ -256,7 +258,7 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, tools []ToolDefinit
 				tc.ID = fmt.Sprintf("%s_%d", tc.ID, i)
 			}
 			seen[tc.ID]++
-			onEvent(StreamEvent{ToolCall: tc})
+			onEvent(llm.StreamEvent{ToolCall: tc})
 		}
 	}
 
@@ -266,11 +268,11 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, tools []ToolDefinit
 	stream.Close()
 	if c.tap != nil {
 		if r := c.tap.WaitReasoning(ctx); r != "" {
-			onEvent(StreamEvent{ReasoningDelta: r})
+			onEvent(llm.StreamEvent{ReasoningDelta: r})
 		}
 	}
 
-	onEvent(StreamEvent{Done: true})
+	onEvent(llm.StreamEvent{Done: true})
 	return nil
 }
 
@@ -293,10 +295,10 @@ func (b *bodyTap) WaitReasoning(ctx context.Context) string {
 	return b.reasoning
 }
 
-func toOpenAI(msgs []Message) []openai.ChatCompletionMessage {
-	out := make([]openai.ChatCompletionMessage, len(msgs))
+func toOpenAI(msgs []llm.Message) []openaiapi.ChatCompletionMessage {
+	out := make([]openaiapi.ChatCompletionMessage, len(msgs))
 	for i, m := range msgs {
-		msg := openai.ChatCompletionMessage{
+		msg := openaiapi.ChatCompletionMessage{
 			Role:             string(m.Role),
 			Content:          m.Content,
 			ToolCallID:       m.ToolCallID,
@@ -304,10 +306,10 @@ func toOpenAI(msgs []Message) []openai.ChatCompletionMessage {
 			ReasoningContent: m.ReasoningContent,
 		}
 		for _, tc := range m.ToolCalls {
-			msg.ToolCalls = append(msg.ToolCalls, openai.ToolCall{
+			msg.ToolCalls = append(msg.ToolCalls, openaiapi.ToolCall{
 				ID:   tc.ID,
-				Type: openai.ToolTypeFunction,
-				Function: openai.FunctionCall{
+				Type: openaiapi.ToolTypeFunction,
+				Function: openaiapi.FunctionCall{
 					Name:      tc.Name,
 					Arguments: tc.RawArgs,
 				},
@@ -318,12 +320,12 @@ func toOpenAI(msgs []Message) []openai.ChatCompletionMessage {
 	return out
 }
 
-func toOpenAITools(tools []ToolDefinition) []openai.Tool {
-	out := make([]openai.Tool, len(tools))
+func toOpenAITools(tools []llm.ToolDefinition) []openaiapi.Tool {
+	out := make([]openaiapi.Tool, len(tools))
 	for i, t := range tools {
-		out[i] = openai.Tool{
-			Type: openai.ToolTypeFunction,
-			Function: &openai.FunctionDefinition{
+		out[i] = openaiapi.Tool{
+			Type: openaiapi.ToolTypeFunction,
+			Function: &openaiapi.FunctionDefinition{
 				Name:        t.Name,
 				Description: t.Description,
 				Parameters:  t.Parameters,

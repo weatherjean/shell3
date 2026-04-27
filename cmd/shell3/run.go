@@ -68,12 +68,22 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		return err
 	}
 
-	creds, err := config.LoadCredentials(homeDir)
+	if err := config.Migrate(homeDir); err != nil {
+		return fmt.Errorf("migrate credentials: %w", err)
+	}
+	credStore, err := config.LoadCredStore(homeDir)
 	if err != nil {
 		return err
 	}
 
-	model, baseURL, apiKey, provName := resolveConnection(pCfg.Provider, pCfg.Model, creds, f)
+	adapterName, instance, model := resolveConnection(pCfg.Provider, pCfg.Model, credStore, f)
+	if adapterName == "" {
+		return fmt.Errorf("no adapter configured — run: shell3 auth")
+	}
+	prov, ok := llm.Get(adapterName)
+	if !ok {
+		return fmt.Errorf("unknown adapter %q (registered: %v)", adapterName, llm.Registered())
+	}
 
 	noBash := pCfg.NoBash || f.noBash
 	noMemory := pCfg.NoMemory || f.noMemory
@@ -162,105 +172,77 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 
 	hookRunner := hooks.NewRunner(pCfg.Config)
 
-	statusLine := fmt.Sprintf("%s │ %s", provName, model)
+	statusLine := fmt.Sprintf("%s │ %s", instance, model)
 
-	// Aggregate models across every configured provider for /model picker.
+	// Aggregate models across every configured instance + single-instance
+	// adapters that have no row in the store yet.
 	var models []chat.ModelChoice
-	provNames := make([]string, 0, len(creds.Providers))
-	for n := range creds.Providers {
-		provNames = append(provNames, n)
-	}
-	sort.Strings(provNames)
-	for _, n := range provNames {
-		pc := creds.Providers[n]
-		for _, m := range strings.Split(pc.DefaultModel, ",") {
-			if m := strings.TrimSpace(m); m != "" {
-				models = append(models, chat.ModelChoice{Provider: n, Model: m})
-			}
-		}
-	}
-	// Append models from any self-registered providers (e.g. OAuth-based)
-	// whose entries do not live in credentials.yaml. Skip duplicates of
-	// providers already configured as API-key providers.
-	seen := map[string]bool{}
-	for _, n := range provNames {
-		seen[n] = true
-	}
-	regNames := llm.Registered()
-	sort.Strings(regNames)
-	for _, n := range regNames {
-		if seen[n] {
-			continue
-		}
-		p, ok := llm.Get(n)
+	for _, meta := range credStore.List() {
+		p, ok := llm.Get(meta.Adapter)
 		if !ok {
 			continue
 		}
-		for _, m := range p.Models() {
-			models = append(models, chat.ModelChoice{Provider: n, Model: m})
+		for _, m := range p.Models(credStore, meta.Instance) {
+			models = append(models, chat.ModelChoice{Provider: meta.Instance, Model: m})
+		}
+	}
+	regNames := llm.Registered()
+	sort.Strings(regNames)
+	for _, name := range regNames {
+		p, _ := llm.Get(name)
+		if !p.SingleInstance() {
+			continue
+		}
+		if _, _, ok := credStore.Get(name); ok {
+			continue
+		}
+		for _, m := range p.Models(credStore, name) {
+			models = append(models, chat.ModelChoice{Provider: name, Model: m})
 		}
 	}
 	if len(models) == 0 {
-		models = []chat.ModelChoice{{Provider: provName, Model: model}}
+		models = []chat.ModelChoice{{Provider: instance, Model: model}}
 	}
 
-	// buildClient picks a Streamer for the given (provider, model). Uses the
-	// llm registry first (OAuth-style providers), then falls back to the
-	// OpenAI-compatible client backed by credentials.yaml.
-	buildClient := func(p, m string) (chat.LLMClient, error) {
-		if reg, ok := llm.Get(p); ok {
-			s, err := reg.NewClient(ctx, m)
-			if err != nil {
-				return nil, err
-			}
-			return s, nil
+	buildClient := func(inst, m string) (chat.LLMClient, error) {
+		adapter := ""
+		if a, _, ok := credStore.Get(inst); ok {
+			adapter = a
+		} else if _, ok := llm.Get(inst); ok {
+			adapter = inst
 		}
-		pc, err := creds.Get(p)
-		if err != nil {
-			return nil, err
+		if adapter == "" {
+			return nil, fmt.Errorf("unknown adapter for instance %q", inst)
 		}
-		return llm.NewClient(pc.BaseURL, pc.APIKey, m), nil
+		p, ok := llm.Get(adapter)
+		if !ok {
+			return nil, fmt.Errorf("unknown adapter %q", adapter)
+		}
+		return p.NewClient(ctx, credStore, inst, m)
 	}
 
-	var client chat.LLMClient
-	var openaiClient *llm.Client // non-nil only for credentials.yaml-backed providers
-	if _, ok := llm.Get(provName); ok {
-		s, err := buildClient(provName, model)
-		if err != nil {
-			return err
-		}
-		client = s
-	} else {
-		openaiClient = llm.NewClient(baseURL, apiKey, model)
-		client = openaiClient
+	streamer, err := prov.NewClient(ctx, credStore, instance, model)
+	if err != nil {
+		return err
 	}
+	var client chat.LLMClient = streamer
 
-	modelSwitcher := func(provider, modelName string) (chat.LLMClient, error) {
-		if provider == "" || provider == provName {
-			// Same provider: cheap path for credentials.yaml-backed clients
-			// is to mutate the model in place. Registry-backed clients
-			// rebuild — model is captured at construction time.
-			if openaiClient != nil {
-				openaiClient.SetModel(modelName)
-				model = modelName
+	modelSwitcher := func(newInstance, newModel string) (chat.LLMClient, error) {
+		if newInstance == "" || newInstance == instance {
+			if ms, ok := client.(llm.ModelSetter); ok {
+				ms.SetModel(newModel)
+				model = newModel
 				return nil, nil
 			}
 		}
-		s, err := buildClient(provider, modelName)
+		next, err := buildClient(newInstance, newModel)
 		if err != nil {
 			return nil, err
 		}
-		// Track the active concrete client for in-place SetModel only when
-		// the new client is the OpenAI-compatible one.
-		if oc, ok := s.(*llm.Client); ok {
-			openaiClient = oc
-		} else {
-			openaiClient = nil
-		}
-		client = s
-		provName = provider
-		model = modelName
-		return s, nil
+		client = next
+		instance = newInstance
+		model = newModel
+		return next, nil
 	}
 	cfg := chat.Config{
 		LLM:           client,
@@ -283,60 +265,48 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	return chat.RunInteractive(ctx, cfg)
 }
 
-func resolveConnection(providerHint, modelHint string, creds *config.Credentials, f *runFlags) (model, baseURL, apiKey, provName string) {
+// resolveConnection picks the (adapter, instance, model) tuple for this run.
+//
+// Resolution order:
+//  1. --base-url + --api-key flags create an ephemeral "_cli" instance.
+//  2. persona.Provider, if set, may name an existing instance OR a single-
+//     instance adapter (e.g. "codex").
+//  3. Fall back to the alphabetically first configured instance.
+func resolveConnection(providerHint, modelHint string, credStore *config.CredStore, f *runFlags) (adapter, instance, model string) {
 	if f.baseURL != "" && f.apiKey != "" {
-		return coalesce(f.model, modelHint, "llama3.2"), f.baseURL, f.apiKey, ""
+		ephemeral := "_cli"
+		_ = credStore.Set(ephemeral, "openai", map[string]string{
+			"base_url":      f.baseURL,
+			"api_key":       f.apiKey,
+			"default_model": coalesce(f.model, modelHint, "llama3.2"),
+		})
+		return "openai", ephemeral, coalesce(f.model, modelHint, "llama3.2")
 	}
 
-	var provCreds config.ProviderCredentials
 	if providerHint != "" {
-		if p, ok := creds.Providers[providerHint]; ok {
-			provName = providerHint
-			provCreds = p
+		if a, _, ok := credStore.Get(providerHint); ok {
+			adapter = a
+			instance = providerHint
 		} else if _, ok := llm.Get(providerHint); ok {
-			// Self-registered provider (OAuth-based). It owns its own auth
-			// and has no credentials.yaml entry; surface its model verbatim
-			// and leave baseURL/apiKey empty so the caller routes through
-			// the registry.
-			provName = providerHint
-			model = modelHint
-			if f.model != "" {
-				model = f.model
-			}
-			return model, "", "", provName
+			adapter = providerHint
+			instance = providerHint
 		}
 	}
 
-	if provName == "" && len(creds.Providers) > 0 {
-		names := make([]string, 0, len(creds.Providers))
-		for n := range creds.Providers {
-			names = append(names, n)
+	if adapter == "" {
+		list := credStore.List()
+		if len(list) > 0 {
+			adapter = list[0].Adapter
+			instance = list[0].Instance
 		}
-		sort.Strings(names)
-		provName = names[0]
-		provCreds = creds.Providers[provName]
 	}
 
-	if f.baseURL != "" {
-		baseURL = f.baseURL
-	} else {
-		baseURL = provCreds.BaseURL
-	}
-	if f.apiKey != "" {
-		apiKey = f.apiKey
-	} else {
-		apiKey = provCreds.APIKey
-	}
-
-	model = modelHint
-	if f.model != "" {
-		model = f.model
-	}
-	if model == "" {
-		for _, part := range strings.Split(provCreds.DefaultModel, ",") {
-			if m := strings.TrimSpace(part); m != "" {
-				model = m
-				break
+	model = coalesce(f.model, modelHint)
+	if model == "" && adapter != "" {
+		if p, ok := llm.Get(adapter); ok {
+			ms := p.Models(credStore, instance)
+			if len(ms) > 0 {
+				model = ms[0]
 			}
 		}
 	}

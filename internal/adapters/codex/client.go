@@ -12,30 +12,29 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/weatherjean/shell3/internal/config"
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
-// client is the codex.provider's Streamer implementation. It posts to the
-// Codex Responses API and translates SSE events into llm.StreamEvent.
+// client is the codex.provider's Streamer implementation.
 type client struct {
 	model     string
-	homeDir   string
+	store     *config.CredStore
 	sessionID string
 
 	mu     sync.Mutex
 	tokens *Tokens
 }
 
-// newClient builds a client. The caller (provider.NewClient) supplies a
-// resolved home dir so tests can swap it.
-func newClient(homeDir, model string) (*client, error) {
-	t, err := LoadTokens(homeDir)
+// newClient builds a client backed by the unified CredStore.
+func newClient(store *config.CredStore, model string) (*client, error) {
+	t, err := LoadTokens(store)
 	if err != nil {
 		return nil, err
 	}
 	return &client{
 		model:     model,
-		homeDir:   homeDir,
+		store:     store,
 		sessionID: uuid.NewString(),
 		tokens:    t,
 	}, nil
@@ -158,7 +157,7 @@ func (c *client) ensureFreshToken(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("codex: refresh: %w", err)
 	}
-	if err := SaveTokens(c.homeDir, next); err != nil {
+	if err := SaveTokens(c.store, next); err != nil {
 		return err
 	}
 	c.tokens = next
@@ -176,7 +175,7 @@ func (c *client) forceRefresh(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := SaveTokens(c.homeDir, next); err != nil {
+	if err := SaveTokens(c.store, next); err != nil {
 		return err
 	}
 	c.tokens = next

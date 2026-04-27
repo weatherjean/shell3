@@ -14,13 +14,6 @@ import (
 	"github.com/weatherjean/shell3/internal/patchtui"
 )
 
-// trafficSource is implemented by LLM clients that can expose the last
-// raw HTTP request/response they handled. Used to dump provider errors
-// with full upstream context.
-type trafficSource interface {
-	LastTraffic() (req, res []byte)
-}
-
 // dumpStreamError writes the failing turn's messages and the last raw
 // HTTP traffic to .shell3/last_error.json under cfg.WorkDir. Best-effort —
 // any IO error is silently ignored.
@@ -29,7 +22,7 @@ func dumpStreamError(cfg Config, msgs []llm.Message, streamErr error) {
 		return
 	}
 	var reqBody, resBody []byte
-	if ts, ok := cfg.LLM.(trafficSource); ok {
+	if ts, ok := cfg.LLM.(llm.TrafficInspector); ok {
 		reqBody, resBody = ts.LastTraffic()
 	}
 	rec := map[string]any{

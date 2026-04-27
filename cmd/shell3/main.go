@@ -6,9 +6,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	// Self-registering OAuth providers. Each package's init() calls
-	// llm.Register; the main app dispatches generically via llm.Get.
-	_ "github.com/weatherjean/shell3/internal/providers/codex" // codex-compat: ChatGPT subscription auth
+	// Self-registering adapters. Each package's init() calls llm.Register;
+	// the main app dispatches generically via llm.Get.
+	_ "github.com/weatherjean/shell3/internal/adapters/codex"  // codex: ChatGPT subscription auth
+	_ "github.com/weatherjean/shell3/internal/adapters/openai" // openai-compatible: Ollama, OpenAI, OpenRouter, etc.
 )
 
 func main() {

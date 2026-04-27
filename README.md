@@ -30,6 +30,8 @@ shell3 docs
 
 Or read the source: [cmd/shell3/shell3.md](cmd/shell3/shell3.md)
 
+Credentials are stored obfuscated (not encrypted) at `~/.shell3/credentials.shell3` — see `shell3 docs` for details and the threat model.
+
 - [Design specs](docs/superpowers/specs/)
 - [Implementation plans](docs/superpowers/plans/)
 

@@ -16,6 +16,8 @@ import (
 	"runtime"
 	"sync"
 	"time"
+
+	"github.com/weatherjean/shell3/internal/config"
 )
 
 // originator returns the value sent in the OAuth `originator` parameter and
@@ -92,10 +94,8 @@ func authorizeURL(state, challenge string) string {
 //  1. Open a local HTTP listener on 127.0.0.1:1455
 //  2. Print + open the browser to the authorize URL
 //  3. Wait for the redirect, validate state, exchange the code
-//  4. Save the resulting tokens to ~/.shell3/codex_tokens.json
-//
-// Returns the saved tokens on success.
-func runBrowserFlow(ctx context.Context, homeDir string, w io.Writer) (*Tokens, error) {
+//  4. Persist the resulting tokens via the unified CredStore.
+func runBrowserFlow(ctx context.Context, store *config.CredStore, w io.Writer) (*Tokens, error) {
 	verifier, challenge, err := pkcePair()
 	if err != nil {
 		return nil, err
@@ -199,10 +199,10 @@ func runBrowserFlow(ctx context.Context, homeDir string, w io.Writer) (*Tokens, 
 		if r.err != nil {
 			return nil, r.err
 		}
-		if err := SaveTokens(homeDir, r.tokens); err != nil {
+		if err := SaveTokens(store, r.tokens); err != nil {
 			return nil, err
 		}
-		fmt.Fprintf(w, "\nSigned in. Tokens saved to %s\n", tokensPath(homeDir))
+		fmt.Fprintln(w, "\nSigned in. Tokens stored in unified credentials.")
 		fmt.Fprintf(w, "Account: %s\n", r.tokens.AccountID)
 		return r.tokens, nil
 	}
@@ -333,12 +333,3 @@ func (m *multiListener) Close() error {
 
 func (m *multiListener) Addr() net.Addr { return m.a.Addr() }
 
-// homeDir resolves the user's home directory or returns an error.
-// Mirrors os.UserHomeDir but kept local so callers don't need to import os.
-func homeDir() (string, error) {
-	h, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("codex: resolve home dir: %w", err)
-	}
-	return h, nil
-}

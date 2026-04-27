@@ -5,28 +5,42 @@ import (
 	"fmt"
 	"io"
 	"sync"
+
+	"github.com/weatherjean/shell3/internal/config"
 )
 
 // Streamer is the streaming surface every LLM client exposes.
-// *Client (the OpenAI-compatible client) satisfies this.
 type Streamer interface {
 	Stream(ctx context.Context, msgs []Message, tools []ToolDefinition, onEvent func(StreamEvent)) error
 }
 
-// Provider is a self-registering model backend that owns its own auth flow.
-// API-key providers do not implement this — they go through the existing
-// credentials.yaml + NewClient(baseURL, apiKey, model) path.
+// ModelSetter is implemented by Streamers that can swap their target
+// model in place.
+type ModelSetter interface {
+	SetModel(model string)
+}
+
+// TrafficInspector is implemented by Streamers that buffer the last raw
+// HTTP request/response they handled.
+type TrafficInspector interface {
+	LastTraffic() (req, res []byte)
+}
+
+// ReasoningInspector is implemented by Streamers that side-channel
+// "reasoning" text out of band of the standard delta stream.
+type ReasoningInspector interface {
+	LastReasoning() string
+}
+
+// Provider is a self-registering LLM backend. Each adapter package
+// (internal/adapters/<name>) owns one Provider impl, registers it via
+// Register from init(), and is wired in via blank import.
 type Provider interface {
-	// Auth runs the provider's interactive authentication (e.g. OAuth) and
-	// persists any tokens it needs. Called by `shell3 auth --provider=<name>`.
-	Auth(ctx context.Context, w io.Writer) error
-
-	// NewClient constructs a ready-to-use Streamer for the given model.
-	// Implementations should refresh stored credentials lazily as needed.
-	NewClient(ctx context.Context, model string) (Streamer, error)
-
-	// Models lists the model identifiers this provider exposes.
-	Models() []string
+	Name() string
+	SingleInstance() bool
+	Auth(ctx context.Context, w io.Writer, store *config.CredStore, instance string) error
+	NewClient(ctx context.Context, store *config.CredStore, instance, model string) (Streamer, error)
+	Models(store *config.CredStore, instance string) []string
 }
 
 var (
@@ -34,8 +48,7 @@ var (
 	registry   = map[string]Provider{}
 )
 
-// Register adds a Provider under name. Intended for use from package init().
-// Panics on duplicate registration to surface wiring mistakes loudly.
+// Register adds a Provider under name. Panics on duplicate registration.
 func Register(name string, p Provider) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
@@ -45,7 +58,7 @@ func Register(name string, p Provider) {
 	registry[name] = p
 }
 
-// Get returns the Provider registered under name, or false if none.
+// Get returns the Provider registered under name.
 func Get(name string) (Provider, bool) {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
