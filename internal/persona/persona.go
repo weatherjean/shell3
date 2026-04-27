@@ -176,18 +176,15 @@ func extractParts(content string) (frontmatter, body string) {
 
 var docsTool = ToolDef{
 	Name:        "shell3_docs",
-	Description: "Return shell3's own documentation: commands, config format, slash commands, keyboard shortcuts, project structure, and skills. Call when asked what shell3 is, what it can do, or how to create a skill.",
+	Description: "Return shell3's own documentation. Use when asked what shell3 is or how to configure commands, personas, tools, skills, hooks, providers, secrets, or storage.",
 	Parameters:  map[string]any{"type": "object", "properties": map[string]any{}},
 }
 
 var pruneToolResultTool = ToolDef{
 	Name: "prune_tool_result",
-	Description: "Replace a previous tool result in the conversation with a short stub to free context. " +
-		"Use only when a successful tool call produced output that is now irrelevant to the remaining task " +
-		"(e.g. you grepped a large file but only one line mattered, or you read a config you no longer need). " +
-		"The tool call itself is preserved; only the result content is shortened. " +
-		"Will refuse to prune small results (< 500 bytes) or results that look like errors. " +
-		"Every tool result begins with a `[tool_call_id=<id>]` header line — copy that id into tool_call_id.",
+	Description: "Replace a previous successful, large, no-longer-needed tool result with a short stub to free context. " +
+		"Do not prune errors, small results, or output you may need again. " +
+		"Copy the id from the result's `[tool_call_id=<id>]` header into tool_call_id.",
 	Parameters: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -291,10 +288,8 @@ var storeTools = []ToolDef{
 	},
 	{
 		Name: "memory_search",
-		Description: "Full-text search project memories. Pass `terms` as an array of single concepts — ONE concept per array element, NOT a sentence. " +
-			"Default match=any (OR): a memory matches if it contains ANY of the terms. Use match=all (AND) only to narrow when `any` returns too much. " +
-			"Examples: terms=[\"JWT\"] → memories mentioning JWT. terms=[\"JWT\",\"kafka\"] match=any → memories about JWT OR kafka. " +
-			"Punctuation inside a term is taken literally (no FTS operators needed). Multi-word elements are matched as a phrase.",
+		Description: "Full-text search project memories. Use `terms` as focused concepts, one per array element; do not pass whole sentences. " +
+			"Default match=any; use match=all only to narrow. Multi-word terms match as phrases.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -308,13 +303,8 @@ var storeTools = []ToolDef{
 	},
 	{
 		Name: "history_get",
-		Description: "Read past conversations by walking sessions and chunks. No search — for that, use history_search.\n\n" +
-			"Default call `{}` → most-recent COMPLETED session, chunk 1 (oldest 25 turns). NOT the current in-progress session.\n" +
-			"Response includes session_id, chunk, total_chunks, prev_session_id, next_session_id.\n" +
-			"To page within the same session: re-call with same session_id and chunk:2, then 3, etc., up to total_chunks.\n" +
-			"To jump to the previous session: re-call with session_id:<prev_session_id> and chunk:1.\n" +
-			"Walking back through every prior session: keep following prev_session_id until it is 0.\n" +
-			"Use this when the user says \"last time\", \"yesterday\", \"the previous session\", \"scroll back\".",
+		Description: "Read one chunk of a completed past session. Omit args for the most recent completed session, chunk 1. " +
+			"Use returned total_chunks to page and prev_session_id/next_session_id to walk sessions. Use for references like \"last time\" or \"earlier\".",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -325,11 +315,8 @@ var storeTools = []ToolDef{
 	},
 	{
 		Name: "history_search",
-		Description: "Full-text search past conversations. Pass `terms` as an array of single concepts — ONE concept per array element, NOT a sentence. " +
-			"Default match=any (OR): a turn matches if it contains ANY of the terms. Use match=all (AND) only to narrow. " +
-			"Each hit includes session_id and chunk so you can call history_get on those for surrounding context. " +
-			"Examples: terms=[\"cobra\"] → turns mentioning cobra. terms=[\"cobra\",\"lipgloss\"] match=any → turns about cobra OR lipgloss. " +
-			"Punctuation inside a term is taken literally. Multi-word elements are matched as a phrase.",
+		Description: "Full-text search past conversations. Use `terms` as focused concepts, one per array element; do not pass whole sentences. " +
+			"Default match=any; use match=all only to narrow. Hits include session_id and chunk for follow-up history_get.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

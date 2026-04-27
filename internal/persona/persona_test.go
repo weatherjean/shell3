@@ -337,6 +337,33 @@ Persona body.
 	}
 }
 
+func TestLoad_TemplateDataIsNotReparsed(t *testing.T) {
+	dir := t.TempDir()
+	body := `---
+name: t
+---
+CWD={{.CWD}}
+{{- range .CoreMemories}}
+MEM={{.Key}}: {{.Value}}
+{{- end}}`
+	writePersona(t, dir, "t", body)
+
+	p, err := persona.Load(dir, "t", persona.TemplateData{
+		CWD: "{{.Model}}",
+		CoreMemories: []store.MemoryEntry{
+			{Key: "inject", Value: "{{.CWD}} {{range .CoreMemories}}oops{{end}}"},
+		},
+	}, false, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"CWD={{.Model}}", "MEM=inject: {{.CWD}} {{range .CoreMemories}}oops{{end}}"} {
+		if !strings.Contains(p.SystemPrompt, want) {
+			t.Fatalf("expected template-like data to remain literal %q; got:\n%s", want, p.SystemPrompt)
+		}
+	}
+}
+
 func TestParseConfigParameters(t *testing.T) {
 	dir := t.TempDir()
 	body := `---
