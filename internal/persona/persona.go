@@ -122,7 +122,7 @@ func Load(personasDir, name string, data TemplateData, hasStore, noBash bool, us
 	var tools []ToolDef
 	tools = append(tools, docsTool, pruneToolResultTool)
 	if !noBash {
-		tools = append(tools, bashTool, shellInteractiveTool)
+		tools = append(tools, bashTool, shellInteractiveTool, editFileTool, writeFileTool)
 	}
 	if hasStore {
 		tools = append(tools, storeTools...)
@@ -200,6 +200,38 @@ var bashTool = ToolDef{
 			},
 		},
 		"required": []string{"command"},
+	},
+}
+
+var editFileTool = ToolDef{
+	Name: "edit_file",
+	Description: "Edit a file by exact string replacement. Provide old_string (must match exactly) and new_string. " +
+		"To create a new file, pass an empty old_string. To delete a chunk, pass an empty new_string. " +
+		"By default old_string must be unique in the file; set replace_all=true to replace every occurrence. " +
+		"Falls back to fuzzy line-trim/whitespace/indentation/escape matching if exact match fails. " +
+		"Prefer this over `bash` heredoc for code edits — it is atomic, diffs cleanly, and refuses ambiguous matches.",
+	Parameters: map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"file_path":   map[string]any{"type": "string", "description": "Path to the file (absolute or relative to project root)"},
+			"old_string":  map[string]any{"type": "string", "description": "Exact text to replace; empty to create a new file"},
+			"new_string":  map[string]any{"type": "string", "description": "Replacement text; empty to delete the matched chunk"},
+			"replace_all": map[string]any{"type": "boolean", "description": "Replace every occurrence (default false)"},
+		},
+		"required": []string{"file_path", "old_string", "new_string"},
+	},
+}
+
+var writeFileTool = ToolDef{
+	Name:        "write_file",
+	Description: "Overwrite a file with the given content. Creates parent directories as needed. Prefer edit_file for partial changes; only use write_file when replacing the whole file or creating one from scratch.",
+	Parameters: map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"file_path": map[string]any{"type": "string", "description": "Path to the file (absolute or relative to project root)"},
+			"content":   map[string]any{"type": "string", "description": "Full file content to write"},
+		},
+		"required": []string{"file_path", "content"},
 	},
 }
 

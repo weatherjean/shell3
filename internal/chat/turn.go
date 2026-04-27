@@ -143,6 +143,10 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.MutedGreen+patchtui.Bold+"#%s → %s(%s)"+patchtui.Reset+"\n", tc.ID, tc.Name, tc.RawArgs)}
 				out = handlePruneToolResult(tc.RawArgs, allMsgs, sess.messages)
 				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(out, "\n")) + "\n\n"}
+			} else if tc.Name == "edit_file" || tc.Name == "write_file" {
+				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.MutedGreen+patchtui.Bold+"#%s → %s(%s)"+patchtui.Reset+"\n", tc.ID, tc.Name, summarizeEditArgs(tc.RawArgs))}
+				out = handleEditTool(tc.Name, tc.RawArgs, cfg.WorkDir)
+				ch <- patchapp.AppendEvent{Text: colorizeEditOutput(strings.TrimRight(out, "\n")) + "\n\n"}
 			} else if tc.Name == "shell3_docs" {
 				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.MutedGreen+patchtui.Bold+"#%s → shell3_docs"+patchtui.Reset+"\n", tc.ID)}
 				out = cfg.Docs
