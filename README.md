@@ -35,6 +35,10 @@ Credentials are stored obfuscated (not encrypted) at `~/.shell3/credentials.shel
 - [Design specs](docs/superpowers/specs/)
 - [Implementation plans](docs/superpowers/plans/)
 
+## Removing a project's shell3 data
+
+`rm -rf .shell3` from the project root. There is no `shell3 destroy` command.
+
 ## Credits
 
 Shell ASCII art by [jgs (Joan G. Stark)](https://asciiart.website/).

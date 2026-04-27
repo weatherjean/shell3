@@ -136,7 +136,6 @@ func TestInit_CreatesToolsDirAndExample(t *testing.T) {
 	for _, p := range []string{
 		".shell3/tools",
 		".shell3/tools/brave_search.yaml",
-		".shell3/.env.example",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
 			t.Errorf("expected %s: %v", p, err)
@@ -144,7 +143,7 @@ func TestInit_CreatesToolsDirAndExample(t *testing.T) {
 	}
 }
 
-func TestInit_GitignoreContainsDotEnv(t *testing.T) {
+func TestInit_GitignoreContainsSecretsShell3(t *testing.T) {
 	dir := t.TempDir()
 	homeDir := t.TempDir()
 	writeTestCredentials(t, homeDir)
@@ -155,7 +154,7 @@ func TestInit_GitignoreContainsDotEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), ".env") {
-		t.Errorf("gitignore missing .env line:\n%s", data)
+	if !strings.Contains(string(data), "secrets.shell3") {
+		t.Errorf("gitignore missing secrets.shell3 line:\n%s", data)
 	}
 }

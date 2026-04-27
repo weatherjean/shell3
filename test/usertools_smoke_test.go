@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/weatherjean/shell3/internal/secrets"
 	"github.com/weatherjean/shell3/internal/usertools"
 )
 
@@ -29,15 +30,14 @@ command: 'echo "hello $WHO"'
 	if err := os.WriteFile(filepath.Join(toolsDir, "greet.yaml"), []byte(yaml), 0644); err != nil {
 		t.Fatal(err)
 	}
-	envPath := filepath.Join(dir, ".shell3", ".env")
-	if err := os.WriteFile(envPath, []byte("IGNORED=v\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	envMap, err := usertools.LoadDotEnv(envPath)
+	secStore, err := secrets.Load(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := secStore.Set("IGNORED", "v"); err != nil {
+		t.Fatal(err)
+	}
+	envMap := secStore.All()
 	avail := map[string]struct{}{}
 	for k := range envMap {
 		avail[k] = struct{}{}

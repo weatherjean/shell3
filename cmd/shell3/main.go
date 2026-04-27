@@ -49,8 +49,8 @@ func main() {
 
 	root.AddCommand(newInitCommand())
 	root.AddCommand(newAuthCommand())
+	root.AddCommand(newSecretsCommand())
 	root.AddCommand(newDocsCommand())
-	root.AddCommand(newDestroyCommand())
 	root.AddCommand(newWidgetCommand())
 
 	if err := root.Execute(); err != nil {

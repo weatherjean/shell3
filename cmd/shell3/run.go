@@ -15,6 +15,7 @@ import (
 	"github.com/weatherjean/shell3/internal/hooks"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/persona"
+	"github.com/weatherjean/shell3/internal/secrets"
 	"github.com/weatherjean/shell3/internal/skills"
 	"github.com/weatherjean/shell3/internal/store"
 	"github.com/weatherjean/shell3/internal/usertools"
@@ -98,24 +99,13 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 
 	loadedSkills, _ := skills.LoadAll([]string{filepath.Join(cwd, ".shell3/skills")})
 
-	envPath := filepath.Join(cwd, ".shell3", ".env")
-	dotEnv, dotEnvErr := usertools.LoadDotEnv(envPath)
-	if dotEnvErr != nil {
-		fmt.Fprintln(os.Stderr, "warning:", dotEnvErr)
+	secStore, err := secrets.Load(cwd)
+	if err != nil {
+		return fmt.Errorf("load secrets: %w", err)
 	}
-	secrets := map[string]string{}
-	for k, v := range dotEnv {
-		secrets[k] = v
-	}
-	for _, kv := range os.Environ() {
-		eq := strings.IndexByte(kv, '=')
-		if eq < 0 {
-			continue
-		}
-		secrets[kv[:eq]] = kv[eq+1:]
-	}
+	secretsMap := secStore.All()
 	available := map[string]struct{}{}
-	for k := range secrets {
+	for k := range secretsMap {
 		available[k] = struct{}{}
 	}
 
@@ -255,7 +245,7 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		ModelSwitcher: modelSwitcher,
 		Docs:          docsContent,
 		UserTools:     userToolMap,
-		Secrets:       secrets,
+		Secrets:       secretsMap,
 	}
 
 	if initialInput != "" {

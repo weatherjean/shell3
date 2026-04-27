@@ -48,8 +48,8 @@ var reservedNames = map[string]struct{}{
 
 // LoadAll walks each dir in order and returns enabled, validated tools.
 // Later dirs override earlier ones on name collision (project beats global).
-// availableSecrets is the set of keys present in .env+OS env; tools that
-// declare missing secrets are disabled with a warning.
+// availableSecrets is the set of keys present in the project secrets
+// store; tools that declare missing secrets are disabled with a warning.
 func LoadAll(dirs []string, availableSecrets map[string]struct{}) (tools []Tool, warnings []string, err error) {
 	byName := map[string]Tool{}
 	for _, dir := range dirs {
@@ -121,7 +121,7 @@ func Validate(s Spec, availableSecrets map[string]struct{}) error {
 	}
 	for _, sec := range s.Secrets {
 		if _, ok := availableSecrets[sec]; !ok {
-			return fmt.Errorf("secret %q: not set in .shell3/.env or environment", sec)
+			return fmt.Errorf("secret %q: not set; run `shell3 secrets set --key %s --secret VALUE`", sec, sec)
 		}
 	}
 	return nil
