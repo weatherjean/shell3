@@ -126,7 +126,7 @@ func (a *App) tickerLoop(ctx context.Context) {
 			needsRender = true
 		}
 		if needsRender {
-			a.render()
+			a.renderStatusOnly()
 		}
 		a.mu.Unlock()
 	}

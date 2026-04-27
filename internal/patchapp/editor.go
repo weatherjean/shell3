@@ -221,7 +221,7 @@ func (a *App) handleEnter() {
 	lines := []string{""}
 	lines = append(lines, renderUserMessage(line, w)...)
 	lines = append(lines, "")
-	a.r.Print(lines)
+	a.Print(lines)
 
 	if strings.HasPrefix(trimmed, "!") {
 		a.runShell(strings.TrimSpace(trimmed[1:]))

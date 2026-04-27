@@ -103,8 +103,13 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 	allMsgs = append(allMsgs, llm.Message{Role: llm.RoleSystem, Content: cfg.Personality.SystemPrompt})
 	allMsgs = append(allMsgs, msgs...)
 
+	var totalUsage llm.Usage
 	for {
 		text, reasoning, providerReasoning, toolCalls, usage, err := streamOnce(ctx, cfg.LLM, allMsgs, cfg.Personality.Tools, ch)
+		if usage.TotalTokens > 0 || usage.PromptTokens > 0 || usage.CompletionTokens > 0 {
+			totalUsage = addUsage(totalUsage, usage)
+			ch <- patchapp.UsageEvent{Usage: totalUsage}
+		}
 		if err != nil {
 			dumpStreamError(cfg, allMsgs, err)
 			cfg.Hooks.OnError(ctx, err)
@@ -136,7 +141,7 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 		}
 
 		if len(toolCalls) == 0 {
-			ch <- patchapp.TurnDoneEvent{Usage: usage}
+			ch <- patchapp.TurnDoneEvent{Usage: totalUsage}
 			return
 		}
 
@@ -240,6 +245,16 @@ func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools
 		return sb.String(), rb.String(), providerReasoning, toolCalls, usage, fmt.Errorf("context canceled")
 	}
 	return sb.String(), rb.String(), providerReasoning, toolCalls, usage, streamErr
+}
+
+// addUsage accumulates token usage across the multiple LLM requests that can
+// make up one agent turn when tools are involved.
+func addUsage(a, b llm.Usage) llm.Usage {
+	return llm.Usage{
+		PromptTokens:     a.PromptTokens + b.PromptTokens,
+		CompletionTokens: a.CompletionTokens + b.CompletionTokens,
+		TotalTokens:      a.TotalTokens + b.TotalTokens,
+	}
 }
 
 func parseRawArgs(raw string) map[string]any {

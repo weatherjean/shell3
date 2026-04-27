@@ -14,6 +14,11 @@ type ChunkEvent struct{ Text string }
 // scrollback in the order it arrives.
 type AppendEvent struct{ Text string }
 
+// UsageEvent carries token usage for an intermediate LLM request inside a
+// multi-step turn. Providers generally emit usage at the end of each streamed
+// request, so this lets the footer refresh before a long tool chain finishes.
+type UsageEvent struct{ Usage llm.Usage }
+
 // TurnDoneEvent signals the current LLM turn completed successfully.
 type TurnDoneEvent struct{ Usage llm.Usage }
 
@@ -31,6 +36,7 @@ type TTYExecEvent struct {
 
 func (ChunkEvent) event()    {}
 func (AppendEvent) event()   {}
+func (UsageEvent) event()    {}
 func (TurnDoneEvent) event() {}
 func (TurnErrEvent) event()  {}
 func (TTYExecEvent) event()  {}

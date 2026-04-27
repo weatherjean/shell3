@@ -99,3 +99,34 @@ func equalStrings(a, b []string) bool {
 	}
 	return true
 }
+
+func TestBusySetTokensDefersUntilContentRender(t *testing.T) {
+	var out strings.Builder
+	app := New("test", "provider/model")
+	app.r.SetOutput(&out)
+
+	app.SetBusy(true, nil)
+	out.Reset()
+
+	app.SetTokens(42)
+	if got := out.String(); got != "" {
+		t.Fatalf("busy SetTokens should not render immediately, got %q", got)
+	}
+
+	app.mu.Lock()
+	app.renderStatusOnly()
+	app.mu.Unlock()
+	if strings.Contains(out.String(), "42 toks") {
+		t.Fatalf("status-only render should not apply pending token update: %q", out.String())
+	}
+	out.Reset()
+
+	app.Print([]string{"committed"})
+	got := out.String()
+	if !strings.Contains(got, "committed\r\n") || !strings.Contains(got, "42 toks") {
+		t.Fatalf("content render should commit output and apply pending tokens: %q", got)
+	}
+	if strings.Count(got, "\x1b[?2026h") != 1 || strings.Count(got, "\x1b[?2026l") != 1 {
+		t.Fatalf("content render should be one synchronized update: %q", got)
+	}
+}

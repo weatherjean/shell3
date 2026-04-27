@@ -25,3 +25,21 @@ func TestRendererWritesValidUTF8(t *testing.T) {
 		}
 	}
 }
+
+func TestRendererPrintAndRenderWritesOneSynchronizedUpdate(t *testing.T) {
+	r := New()
+	var out bytes.Buffer
+	r.SetOutput(&out)
+
+	r.Render([]string{"old frame"})
+	out.Reset()
+	r.PrintAndRender([]string{"committed"}, []string{"new frame" + CursorMarker})
+
+	got := out.String()
+	if strings.Count(got, "\x1b[?2026h") != 1 || strings.Count(got, "\x1b[?2026l") != 1 {
+		t.Fatalf("PrintAndRender should use one synchronized update: %q", got)
+	}
+	if !strings.Contains(got, "committed\r\n") || !strings.Contains(got, "new frame") {
+		t.Fatalf("PrintAndRender missing committed/frame output: %q", got)
+	}
+}

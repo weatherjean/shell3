@@ -57,6 +57,12 @@ type App struct {
 	// Status bar info.
 	status statusInfo
 
+	// Tokens received while the app is busy are low-priority UI state. They are
+	// applied by the next content/input render instead of triggering a
+	// status-only repaint, which avoids footer flicker during tool chains.
+	pendingTokens    int
+	pendingTokensSet bool
+
 	// Busy/streaming.
 	busy         bool
 	streamCancel context.CancelFunc
@@ -111,29 +117,65 @@ func (a *App) Quit() {
 	}
 }
 
+// applyPendingTokensLocked promotes a deferred busy-state token update into
+// the status data used by the next non-status-only render. Caller must hold
+// a.mu.
+func (a *App) applyPendingTokensLocked() {
+	if !a.pendingTokensSet {
+		return
+	}
+	a.status.tokens = a.pendingTokens
+	a.pendingTokensSet = false
+}
+
+// liveFrameLocked builds the current live frame. Caller must hold a.mu.
+func (a *App) liveFrameLocked() []string {
+	w, h := patchtui.Size()
+	return buildFrame(w, h, frameState{
+		streamLines: a.streamLines,
+		input:       a.input,
+		cursor:      a.cursor,
+		busy:        a.busy,
+		status:      a.status,
+	})
+}
+
 // render rebuilds the frame and asks the renderer to paint it. Caller
 // must hold a.mu. Skipped while paused (during shell exec).
 func (a *App) render() {
 	if a.paused {
 		return
 	}
-	w, h := patchtui.Size()
-	a.r.Render(buildFrame(w, h, frameState{
-		streamLines: a.streamLines,
-		input:       a.input,
-		cursor:      a.cursor,
-		busy:        a.busy,
-		status:      a.status,
-	}))
+	a.applyPendingTokensLocked()
+	a.r.Render(a.liveFrameLocked())
+}
+
+// renderStatusOnly redraws without applying deferred token updates. It is
+// used by the spinner/ctrl+c ticker so low-priority token usage can piggyback
+// on the next content/input render instead of causing status-only flashes.
+func (a *App) renderStatusOnly() {
+	if a.paused {
+		return
+	}
+	a.r.Render(a.liveFrameLocked())
 }
 
 // ── public state mutators (goroutine-safe) ────────────────────────────────────
 
 // Print commits lines to scrollback above the live frame. Goroutine-safe.
-func (a *App) Print(lines []string) { a.r.Print(lines) }
+func (a *App) Print(lines []string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.paused {
+		a.r.Print(lines)
+		return
+	}
+	a.applyPendingTokensLocked()
+	a.r.PrintAndRender(lines, a.liveFrameLocked())
+}
 
 // PrintLine is shorthand for a single committed line.
-func (a *App) PrintLine(line string) { a.r.Print([]string{line}) }
+func (a *App) PrintLine(line string) { a.Print([]string{line}) }
 
 // Refresh redraws the live frame at its current state. Use after a series
 // of [App.Print] calls when no other state change will trigger a render.
@@ -163,9 +205,18 @@ func (a *App) SetStatus(msg string) {
 // SetTokens updates the token counter shown in the status bar.
 func (a *App) SetTokens(n int) {
 	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.status.tokens == n && (!a.pendingTokensSet || a.pendingTokens == n) {
+		return
+	}
+	if a.busy {
+		a.pendingTokens = n
+		a.pendingTokensSet = true
+		return
+	}
+	a.pendingTokensSet = false
 	a.status.tokens = n
 	a.render()
-	a.mu.Unlock()
 }
 
 // SetBusy marks the app as streaming/thinking. Pass cancel to wire ctrl+c

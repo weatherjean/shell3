@@ -165,7 +165,7 @@ func (r *Renderer) Render(lines []string) {
 		}
 	}
 
-	buf.WriteString("\x1b[?2026l\x1b[?25h") // end sync + show cursor
+	buf.WriteString("\x1b[?2026l\x1b[?25h")  // end sync + show cursor
 	io.WriteString(r.writer(), buf.String()) //nolint:errcheck
 
 	r.prev = clone(lines)
@@ -217,6 +217,73 @@ func (r *Renderer) Print(lines []string) {
 	r.cursorRow = 0
 	r.width = w
 	r.height = h
+}
+
+// PrintAndRender commits lines to scrollback and redraws the live frame in a
+// single synchronized terminal update. It is useful for inline TUIs that keep
+// a status/input frame below streaming output: the live frame is erased, the
+// committed lines are written, and the replacement frame is painted before the
+// terminal is allowed to display an intermediate state.
+func (r *Renderer) PrintAndRender(lines, frame []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	width, height := Size()
+
+	// Extract cursor marker from the replacement frame.
+	markerRow, markerCol := -1, -1
+	clean := make([]string, len(frame))
+	for i, line := range frame {
+		if idx := strings.Index(line, CursorMarker); idx >= 0 {
+			markerRow = i
+			markerCol = visibleWidth(line[:idx])
+			line = line[:idx] + line[idx+len(CursorMarker):]
+		}
+		clean[i] = line
+	}
+	frame = clean
+
+	var buf strings.Builder
+	buf.WriteString("\x1b[?25l\x1b[?2026h")
+
+	// Erase the current rendered frame so it doesn't appear above the
+	// committed lines.
+	if r.inited && len(r.prev) > 0 {
+		r.moveCursorTo(&buf, 0)
+		buf.WriteString("\r\x1b[0J")
+	} else {
+		buf.WriteString("\r")
+	}
+
+	for _, line := range lines {
+		buf.WriteString(line)
+		buf.WriteString("\r\n")
+	}
+
+	// The frame now starts at the cursor's current row after the committed
+	// lines. Treat it as a fresh render, matching Print followed by Render,
+	// but without exposing the erased-frame gap to the terminal.
+	r.prev = nil
+	r.inited = false
+	r.cursorRow = 0
+	r.width = width
+	r.height = height
+	r.fullRender(&buf, frame, false)
+
+	if markerRow >= 0 && markerRow <= len(frame)-1 {
+		r.moveCursorTo(&buf, markerRow)
+		if markerCol > 0 {
+			fmt.Fprintf(&buf, "\x1b[%dC", markerCol)
+		}
+	}
+
+	buf.WriteString("\x1b[?2026l\x1b[?25h")
+	io.WriteString(r.writer(), buf.String()) //nolint:errcheck
+
+	r.prev = clone(frame)
+	r.width = width
+	r.height = height
+	r.inited = true
 }
 
 // Erase wipes the currently-rendered frame from the terminal and parks the

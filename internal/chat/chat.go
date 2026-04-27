@@ -104,6 +104,15 @@ func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Us
 		w, _ := patchtui.Size()
 		app.SetStreamPreview(patchmd.Render(text, w-2))
 	}
+	publishUsage := func(u llm.Usage) {
+		if u == *lastUsage {
+			return
+		}
+		*lastUsage = u
+		if u.TotalTokens > 0 {
+			app.SetTokens(u.TotalTokens)
+		}
+	}
 
 	for ev := range ch {
 		switch v := ev.(type) {
@@ -121,6 +130,9 @@ func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Us
 			}
 			app.Print(patchtui.SplitLines(v.Text))
 
+		case patchapp.UsageEvent:
+			publishUsage(v.Usage)
+
 		case patchapp.TurnDoneEvent:
 			if streamBuf.Len() > 0 {
 				app.SetStreamPreview(nil)
@@ -128,10 +140,7 @@ func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Us
 				app.Print(patchmd.Render(streamBuf.String(), w-2))
 				streamBuf.Reset()
 			}
-			*lastUsage = v.Usage
-			if v.Usage.TotalTokens > 0 {
-				app.SetTokens(v.Usage.TotalTokens)
-			}
+			publishUsage(v.Usage)
 			app.SetBusy(false, nil)
 
 		case patchapp.TurnErrEvent:

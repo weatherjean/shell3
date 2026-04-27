@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/llm"
-	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/patchapp"
+	"github.com/weatherjean/shell3/internal/persona"
 )
 
 // fakeApp records calls to the appView interface for assertion.
@@ -49,9 +49,11 @@ func (f *fakeApp) SetBusy(busy bool, cancel context.CancelFunc) {
 	f.cancel = cancel
 	f.mu.Unlock()
 }
-func (f *fakeApp) SetStatus(msg string)            { f.record(fmt.Sprintf("SetStatus(%q)", msg)) }
-func (f *fakeApp) SetStreamPreview(lines []string) { f.record(fmt.Sprintf("SetStreamPreview(%d)", len(lines))) }
-func (f *fakeApp) SetTokens(n int)                 { f.record(fmt.Sprintf("SetTokens(%d)", n)) }
+func (f *fakeApp) SetStatus(msg string) { f.record(fmt.Sprintf("SetStatus(%q)", msg)) }
+func (f *fakeApp) SetStreamPreview(lines []string) {
+	f.record(fmt.Sprintf("SetStreamPreview(%d)", len(lines)))
+}
+func (f *fakeApp) SetTokens(n int) { f.record(fmt.Sprintf("SetTokens(%d)", n)) }
 func (f *fakeApp) WithReleasedTerminal(fn func()) {
 	f.record("WithReleasedTerminal:start")
 	f.mu.Lock()
@@ -113,6 +115,27 @@ func TestDrainTurn_ChunkOnly_StreamsAndCommits(t *testing.T) {
 		"SetBusy(false)",
 	) {
 		t.Fatalf("unexpected call sequence:\n%s", strings.Join(calls, "\n"))
+	}
+}
+
+func TestDrainTurn_UsageEventUpdatesTokensBeforeDone(t *testing.T) {
+	calls, usage := runDrain(t, []patchapp.Event{
+		patchapp.UsageEvent{Usage: llm.Usage{PromptTokens: 3, CompletionTokens: 4, TotalTokens: 7}},
+		patchapp.AppendEvent{Text: "tool output\n"},
+		patchapp.UsageEvent{Usage: llm.Usage{PromptTokens: 13, CompletionTokens: 9, TotalTokens: 22}},
+		patchapp.TurnDoneEvent{Usage: llm.Usage{PromptTokens: 13, CompletionTokens: 9, TotalTokens: 22}},
+	})
+
+	if !containsAll(calls,
+		"SetTokens(7)",
+		"Print(",
+		"SetTokens(22)",
+		"SetBusy(false)",
+	) {
+		t.Fatalf("usage event ordering wrong:\n%s", strings.Join(calls, "\n"))
+	}
+	if usage.TotalTokens != 22 || usage.PromptTokens != 13 || usage.CompletionTokens != 9 {
+		t.Fatalf("unexpected usage: %+v", usage)
 	}
 }
 
@@ -284,8 +307,8 @@ func (f *fakeSlashApp) snapshot() []string {
 func (f *fakeSlashApp) Print(lines []string) {
 	f.record(fmt.Sprintf("Print(%d:%q)", len(lines), strings.Join(lines, "|")))
 }
-func (f *fakeSlashApp) PrintLine(line string) { f.record(fmt.Sprintf("PrintLine(%q)", line)) }
-func (f *fakeSlashApp) SetStatus(msg string)  { f.record(fmt.Sprintf("SetStatus(%q)", msg)) }
+func (f *fakeSlashApp) PrintLine(line string)          { f.record(fmt.Sprintf("PrintLine(%q)", line)) }
+func (f *fakeSlashApp) SetStatus(msg string)           { f.record(fmt.Sprintf("SetStatus(%q)", msg)) }
 func (f *fakeSlashApp) Quit()                          { f.record("Quit") }
 func (f *fakeSlashApp) WithReleasedTerminal(fn func()) { fn() }
 func (f *fakeSlashApp) RegisterSlash(cmd patchapp.SlashCommand) {
