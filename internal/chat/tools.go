@@ -304,8 +304,8 @@ func handleHistorySearch(rawArgs string, st *store.Store) string {
 }
 
 func truncateOutput(s string) string {
-	const maxLines = 10
-	const maxBytes = 1000
+	const maxLines = 3
+	const maxBytes = 300
 
 	lines := strings.Split(s, "\n")
 	// Walk lines, stopping at whichever limit hits first.
