@@ -1,6 +1,9 @@
 package patchapp
 
-import "bytes"
+import (
+	"bytes"
+	"unicode/utf8"
+)
 
 // Bracketed paste mode escape sequences. Enabling this asks the terminal
 // to wrap pasted content in start/end markers so we can distinguish it
@@ -52,12 +55,19 @@ func parseInput(data []byte) (parsedKey, int) {
 		return parsedKey{kind: keyNone}, 0
 	}
 
-	// Bracketed paste boundaries.
+	// Bracketed paste boundaries. If a read ends mid-sequence, ask the caller
+	// to retain the partial bytes for the next read.
 	if bytes.HasPrefix(data, []byte(pasteStart)) {
 		return parsedKey{kind: keyPasteStart}, len(pasteStart)
 	}
+	if len(data) > 1 && bytes.HasPrefix([]byte(pasteStart), data) {
+		return parsedKey{kind: keyNone}, 0
+	}
 	if bytes.HasPrefix(data, []byte(pasteEnd)) {
 		return parsedKey{kind: keyPasteEnd}, len(pasteEnd)
+	}
+	if len(data) > 1 && bytes.HasPrefix([]byte(pasteEnd), data) {
+		return parsedKey{kind: keyNone}, 0
 	}
 
 	b := data[0]
@@ -118,6 +128,20 @@ func parseInput(data []byte) (parsedKey, int) {
 	// Printable ASCII.
 	if b >= 32 && b < 127 {
 		return parsedKey{kind: keyChar, r: rune(b)}, 1
+	}
+
+	// Printable UTF-8. Keep the TUI input buffer as runes, not raw bytes;
+	// otherwise pasted punctuation is re-encoded as mojibake when echoed or
+	// submitted (for example, the UTF-8 bytes for an em dash become Latin-1-
+	// style replacement text).
+	if b >= utf8.RuneSelf {
+		if !utf8.FullRune(data) {
+			return parsedKey{kind: keyNone}, 0
+		}
+		r, size := utf8.DecodeRune(data)
+		if r != utf8.RuneError || size > 1 {
+			return parsedKey{kind: keyChar, r: r}, size
+		}
 	}
 
 	return parsedKey{kind: keyNone}, 1

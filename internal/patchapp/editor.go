@@ -1,10 +1,12 @@
 package patchapp
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/weatherjean/shell3/internal/patchtui"
 )
@@ -12,8 +14,19 @@ import (
 // processInput consumes a chunk of bytes from stdin, dispatching parsed
 // keys to handlers. Returns true if the app should exit (double ctrl+c).
 func (a *App) processInput(data []byte) (exit bool) {
+	if len(a.inputPending) > 0 {
+		merged := make([]byte, 0, len(a.inputPending)+len(data))
+		merged = append(merged, a.inputPending...)
+		merged = append(merged, data...)
+		data = merged
+		a.inputPending = a.inputPending[:0]
+	}
+
 	for i := 0; i < len(data); {
-		// Inside a paste — accumulate raw bytes until paste end.
+		// Inside a paste, accumulate decoded runes until paste end. The
+		// terminal sends the paste body as UTF-8 bytes; treating each byte as
+		// a rune corrupts non-ASCII punctuation when the input is echoed or
+		// submitted.
 		if a.pasting {
 			if i+len(pasteEnd) <= len(data) && string(data[i:i+len(pasteEnd)]) == pasteEnd {
 				a.pasting = false
@@ -29,20 +42,34 @@ func (a *App) processInput(data []byte) (exit bool) {
 				i += len(pasteEnd)
 				continue
 			}
-			r := rune(data[i])
+			if bytes.HasPrefix([]byte(pasteEnd), data[i:]) {
+				a.inputPending = append(a.inputPending, data[i:]...)
+				break
+			}
+
+			if !utf8.FullRune(data[i:]) {
+				a.inputPending = append(a.inputPending, data[i:]...)
+				break
+			}
+			r, size := utf8.DecodeRune(data[i:])
+			if r == utf8.RuneError && size == 1 {
+				i++
+				continue
+			}
 			if r == '\r' {
 				r = '\n'
 			}
 			if r == '\n' || r >= 32 {
 				a.pasteBuf = append(a.pasteBuf, r)
 			}
-			i++
+			i += size
 			continue
 		}
 
 		k, used := parseInput(data[i:])
 		if used == 0 {
-			used = 1
+			a.inputPending = append(a.inputPending, data[i:]...)
+			break
 		}
 		i += used
 

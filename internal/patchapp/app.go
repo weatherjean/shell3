@@ -65,6 +65,9 @@ type App struct {
 	lastCtrlC time.Time
 	exitFlag  bool
 
+	// Incomplete UTF-8/control-sequence bytes carried between terminal reads.
+	inputPending []byte
+
 	// Bracketed paste state.
 	pasting  bool
 	pasteBuf []rune
