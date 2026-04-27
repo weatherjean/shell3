@@ -37,7 +37,7 @@ func main() {
 		patchapp.PrintHeader(os.Stdout)
 	}
 	root.PersistentPreRun = func(cmd *cobra.Command, args []string) {
-		if cmd == root {
+		if !shouldPrintHeaderInPreRun(root, cmd) {
 			return
 		}
 		maybeHeader()
@@ -58,4 +58,17 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func shouldPrintHeaderInPreRun(root, cmd *cobra.Command) bool {
+	if cmd == nil || cmd == root {
+		return false
+	}
+	if cmd.Name() == "help" {
+		return false
+	}
+	if f := cmd.Flags().Lookup("help"); f != nil && f.Changed {
+		return false
+	}
+	return true
 }
