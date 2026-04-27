@@ -257,7 +257,7 @@ func registerSlashCommands(app slashTarget, cfg *Config, sess *session, lastUsag
 					setter.SetParams(cfg.Params)
 				}
 			}
-			cfg.StatusLine = choice.Provider + " │ " + choice.Model
+			cfg.StatusLine = formatStatus(choice.Provider, choice.Model, cfg.Params.ReasoningEffort)
 			app.SetStatus(cfg.StatusLine)
 			dim(fmt.Sprintf("[model: %s/%s]", choice.Provider, choice.Model))
 		},
@@ -354,6 +354,13 @@ func registerSlashCommands(app slashTarget, cfg *Config, sess *session, lastUsag
 			}
 			if setter != nil {
 				setter.SetParams(cfg.Params)
+			}
+			if name == "reasoning_effort" {
+				prov, model := splitStatus(cfg.StatusLine)
+				if prov != "" && model != "" {
+					cfg.StatusLine = formatStatus(prov, model, cfg.Params.ReasoningEffort)
+					app.SetStatus(cfg.StatusLine)
+				}
 			}
 			dim(fmt.Sprintf("[%s = %s]", name, value))
 		},

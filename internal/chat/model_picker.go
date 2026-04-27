@@ -71,13 +71,24 @@ func pickModel(app terminalReleaser, models []ModelChoice, curProvider, curModel
 }
 
 // splitStatus extracts (provider, model) from a status line shaped as
-// "<provider> │ <model>". Returns ("", "") if no separator is found.
+// "<provider> │ <model>" or "<provider> │ <model> │ <effort>". Returns
+// ("", "") if no separator is found.
 func splitStatus(statusLine string) (string, string) {
-	parts := strings.SplitN(statusLine, " │ ", 2)
+	parts := strings.SplitN(statusLine, " │ ", 3)
 	if len(parts) < 2 {
 		return "", ""
 	}
 	return parts[0], parts[1]
+}
+
+// formatStatus builds a status line "<provider> │ <model>" with " │ <effort>"
+// appended when effort is non-empty.
+func formatStatus(provider, model, effort string) string {
+	out := provider + " │ " + model
+	if effort != "" {
+		out += " │ " + effort
+	}
+	return out
 }
 
 // resolveModelArg parses /model arg as either "provider/model" or bare "model".

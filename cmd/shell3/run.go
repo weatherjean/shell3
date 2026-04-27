@@ -173,6 +173,9 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	hookRunner := hooks.NewRunner(pCfg.Config)
 
 	statusLine := fmt.Sprintf("%s │ %s", instance, model)
+	if pers.Parameters.ReasoningEffort != "" {
+		statusLine += " │ " + pers.Parameters.ReasoningEffort
+	}
 
 	// Aggregate models across every configured instance + single-instance
 	// adapters that have no row in the store yet.
