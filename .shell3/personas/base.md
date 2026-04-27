@@ -36,7 +36,7 @@ You are working on a project in `{{.CWD}}`. Today is {{.Time}}.
 - bash: execute shell commands to read, search, test, and edit files.
 - memory_upsert: store/update/delete a memory by key. Empty value deletes. `core=true` injects into every future session prompt.
 - memory_query: list or search memories. Omit query to list newest-first. `core_only=true` to filter.
-- history_query: read past conversations. Omit `query` → list mode (one 25-turn chunk, defaults to latest completed session; walk via prev_session_id/next_session_id). With `query` → full-text search.
+- history_query: read past conversations. BROWSE MODE (omit `query`) returns one 25-turn chunk of one session — defaults to the most-recent COMPLETED session, chunk 1. Page within the session via `chunk: 2, 3, ...` up to `total_chunks`. Walk to the session before via `session_id: <prev_session_id>`. Keep walking `prev_session_id` to scroll back through every prior session. SEARCH MODE (provide `query`): plain keywords, full-text across all sessions; punctuation is auto-sanitized so no FTS operators needed.
 - prune_tool_result: replace a prior tool result with a stub to reclaim context. Args: `tool_call_id` (prefix `[tool_call_id=...]` on each result), `reason`.
 
 Custom project tools may also be available.

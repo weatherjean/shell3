@@ -294,18 +294,26 @@ var storeTools = []ToolDef{
 	},
 	{
 		Name: "history_query",
-		Description: "Query past conversation history. " +
-			"With a query: full-text search across all sessions; each hit includes session_id and chunk so you can fetch surrounding context. " +
-			"Without a query: fetch one chunk of one session — defaults to the most recent COMPLETED session (not the current one), chunk 1. " +
-			"Use next_session_id / prev_session_id from a get response to walk the chain. " +
-			"Use chunk + total_chunks to page within a long session (25 turns per chunk).",
+		Description: "Read past conversation history. Two distinct modes — pick one:\n\n" +
+			"BROWSE MODE (omit `query`): walk completed sessions one chunk at a time, like scrolling back through a log.\n" +
+			"  • Default call `{}` → most-recent COMPLETED session, chunk 1 (oldest 25 turns of that session). NOT the current session.\n" +
+			"  • Response includes `session_id`, `chunk`, `total_chunks`, `prev_session_id`, `next_session_id`.\n" +
+			"  • To read the rest of the same session: re-call with same `session_id` and `chunk: 2`, then 3, etc., until `chunk == total_chunks`.\n" +
+			"  • To jump to the session before this one: re-call with `session_id: <prev_session_id>` (and `chunk: 1` to start at its top).\n" +
+			"  • Walking back through every prior session is just: keep following `prev_session_id` until it is 0.\n" +
+			"  • Use this when the user says \"last time\", \"yesterday\", \"the previous session\", \"scroll back\", \"what did we just do\".\n\n" +
+			"SEARCH MODE (provide `query`): full-text search across ALL sessions, ranked by relevance. Use plain keywords; " +
+			"punctuation and FTS operators are stripped automatically — do not write boolean syntax.\n" +
+			"  • Each hit includes its `session_id` and `chunk`; re-call BROWSE MODE on those to read surrounding context.\n" +
+			"  • Use this when the user references a topic (\"the auth thing we built\", \"that bug with the reasoning items\").\n\n" +
+			"Chunks are 25 turns each. Never invent keywords — when unsure which mode applies, BROWSE first and skim.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"query":      map[string]any{"type": "string", "description": "Optional FTS query"},
-				"session_id": map[string]any{"type": "integer", "description": "Session id to fetch (get mode); 0 or omit for latest completed"},
-				"chunk":      map[string]any{"type": "integer", "description": "Chunk index within session, 1-based (get mode); omit or 0 for first chunk"},
-				"limit":      map[string]any{"type": "integer", "description": "Max search hits (search mode, default 20)"},
+				"query":      map[string]any{"type": "string", "description": "Plain keywords for SEARCH MODE; omit for BROWSE MODE. Punctuation is sanitized — no FTS operators needed."},
+				"session_id": map[string]any{"type": "integer", "description": "BROWSE MODE: which session to read. Omit or 0 = most-recent completed. Use `prev_session_id` from a previous response to walk backwards."},
+				"chunk":      map[string]any{"type": "integer", "description": "BROWSE MODE: 1-based chunk within the session (25 turns each). Omit or 0 = chunk 1. Page forward with chunk: 2, 3, ... up to total_chunks."},
+				"limit":      map[string]any{"type": "integer", "description": "SEARCH MODE only: max hits to return (default 20)."},
 			},
 		},
 	},

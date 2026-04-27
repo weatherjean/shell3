@@ -229,3 +229,41 @@ func TestStore_HistorySearch_ReturnsLocator(t *testing.T) {
 		t.Errorf("chunk: got %d want 1 (turn at index 30, ChunkSize=25)", hit.Chunk)
 	}
 }
+
+
+func TestStore_HistorySearch_PunctuationSafe(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	sid, _ := st.StartSession()
+	st.AppendHistory(sid, "user", "make cobra cli colorful")
+	st.AppendHistory(sid, "assistant", "use lipgloss for styling")
+	st.EndSession(sid)
+
+	res, err := st.HistorySearch("cobra colorful cli ?", 10)
+	if err != nil {
+		t.Fatalf("search with `?` should not error: %v", err)
+	}
+	if len(res.Hits) == 0 {
+		t.Fatal("expected at least one hit for sanitized query")
+	}
+}
+
+func TestStore_MemoryQuery_PunctuationSafe(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	st.MemoryUpsert("k", "JWT auth token spec", boolPtr(false))
+
+	res, err := st.MemoryQuery("JWT?", false, 5)
+	if err != nil {
+		t.Fatalf("query with `?` should not error: %v", err)
+	}
+	if len(res) == 0 {
+		t.Fatal("expected at least one hit for sanitized memory query")
+	}
+}

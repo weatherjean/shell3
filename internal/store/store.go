@@ -201,19 +201,27 @@ func (s *Store) MemoryQuery(query string, coreOnly bool, limit int) ([]MemoryEnt
 			LIMIT ?
 		`, limit)
 	case query != "" && !coreOnly:
+		clean := sanitizeFTSQuery(query)
+		if clean == "" {
+			return nil, nil
+		}
 		rows, err = s.db.Query(`
 			SELECT key, value, core, updated_at FROM memories
 			WHERE memories MATCH ?
 			ORDER BY rank
 			LIMIT ?
-		`, query, limit)
+		`, clean, limit)
 	default: // query != "" && coreOnly
+		clean := sanitizeFTSQuery(query)
+		if clean == "" {
+			return nil, nil
+		}
 		rows, err = s.db.Query(`
 			SELECT key, value, core, updated_at FROM memories
 			WHERE memories MATCH ? AND core = 1
 			ORDER BY rank
 			LIMIT ?
-		`, query, limit)
+		`, clean, limit)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: memory query: %w", err)
@@ -405,6 +413,10 @@ func (s *Store) HistorySearch(query string, limit int) (HistorySearchResult, err
 	if limit <= 0 {
 		limit = 20
 	}
+	clean := sanitizeFTSQuery(query)
+	if clean == "" {
+		return HistorySearchResult{}, nil
+	}
 
 	rows, err := s.db.Query(`
 		SELECT rowid, CAST(session_id AS INTEGER), role, content, created_at
@@ -412,7 +424,7 @@ func (s *Store) HistorySearch(query string, limit int) (HistorySearchResult, err
 		WHERE history MATCH ?
 		ORDER BY rank
 		LIMIT ?
-	`, query, limit)
+	`, clean, limit)
 	if err != nil {
 		return HistorySearchResult{}, fmt.Errorf("store: history search: %w", err)
 	}
