@@ -219,7 +219,11 @@ func (a *App) handleEnter() {
 	// Slash commands echo too so the output has visible context.
 	// One blank line above and below for breathing room.
 	w, _ := patchtui.Size()
-	lines := renderUserMessage(line, w)
+	bubble := renderUserMessage(line, w)
+	lines := make([]string, 0, len(bubble)+2)
+	lines = append(lines, "")
+	lines = append(lines, bubble...)
+	lines = append(lines, "")
 	a.Print(lines)
 
 	if strings.HasPrefix(trimmed, "!") {
