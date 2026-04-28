@@ -11,10 +11,27 @@ const (
 	RoleTool      Role = "tool"
 )
 
+// ContentPartType identifies the kind of content in a ContentPart.
+type ContentPartType string
+
+const (
+	ContentPartTypeText     ContentPartType = "text"
+	ContentPartTypeImageURL ContentPartType = "image_url" // data URI or HTTPS URL
+)
+
+// ContentPart is one element of a multimodal user message.
+type ContentPart struct {
+	Type     ContentPartType
+	Text     string
+	ImageURL string // data URI ("data:image/jpeg;base64,...") or HTTPS URL
+}
+
 // Message is one turn in a conversation.
 type Message struct {
 	Role       Role       `json:"role"`
 	Content    string     `json:"content"`
+	// ContentParts replaces Content for multimodal messages (vision).
+	ContentParts []ContentPart `json:"content_parts,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	Name       string     `json:"name,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`

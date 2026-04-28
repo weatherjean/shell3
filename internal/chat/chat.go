@@ -68,23 +68,24 @@ func RunInteractive(ctx context.Context, cfg Config) error {
 
 	var lastUsage llm.Usage
 
-	registerSlashCommands(app, &cfg, sess, &lastUsage)
-
-	app.SetSubmit(func(input string) {
-		// Launch turn goroutine. Slash commands are dispatched by patchapp
-		// before this callback fires, so anything reaching here is real
-		// chat input.
+	// launchTurn starts a turn goroutine for userMsg and wires drain.
+	launchTurn := func(userMsg llm.Message) {
 		ch := make(chan patchapp.Event, 256)
 		turnCtx, cancel := context.WithCancel(ctx)
 		app.SetBusy(true, cancel)
-
 		prevLen := len(sess.messages)
 		go func() {
 			defer cancel()
-			runTurn(turnCtx, cfg, sess, input, ch)
+			runTurn(turnCtx, cfg, sess, userMsg, ch)
 			saveHistory(cfg, sess, sessionID, prevLen)
 		}()
 		go drainTurn(ch, app, &lastUsage, &cfg)
+	}
+
+	registerSlashCommands(app, &cfg, sess, &lastUsage, launchTurn)
+
+	app.SetSubmit(func(input string) {
+		launchTurn(llm.Message{Role: llm.RoleUser, Content: input})
 	})
 
 	return app.Run(ctx)
@@ -193,7 +194,7 @@ type slashTarget interface {
 
 // registerSlashCommands wires up the slash registry. Closures capture cfg,
 // sess, and lastUsage so handlers can read and mutate session state.
-func registerSlashCommands(app slashTarget, cfg *Config, sess *session, lastUsage *llm.Usage) {
+func registerSlashCommands(app slashTarget, cfg *Config, sess *session, lastUsage *llm.Usage, launchTurn func(llm.Message)) {
 	dim := func(s string) { app.PrintLine(patchtui.Dim + s + patchtui.Reset) }
 
 	app.RegisterSlash(patchapp.SlashCommand{
@@ -378,6 +379,17 @@ func registerSlashCommands(app slashTarget, cfg *Config, sess *session, lastUsag
 		Name: "exit", Aliases: []string{"quit"}, Help: "quit shell3",
 		Handler: func(string) { app.Quit() },
 	})
+	app.RegisterSlash(patchapp.SlashCommand{
+		Name: "image", Help: "/image <path> [prompt] — attach image to next turn",
+		Handler: func(args string) {
+			msg, err := buildImageMessage(args, cfg.WorkDir)
+			if err != nil {
+				dim(fmt.Sprintf("[image: %v]", err))
+				return
+			}
+			launchTurn(msg)
+		},
+	})
 }
 
 func currentParamValue(p llm.RequestParams, name string) string {
@@ -406,7 +418,7 @@ func currentParamValue(p llm.RequestParams, name string) string {
 func RunOnce(ctx context.Context, cfg Config, input string) error {
 	sess := &session{}
 	ch := make(chan patchapp.Event, 256)
-	go runTurn(ctx, cfg, sess, input, ch)
+	go runTurn(ctx, cfg, sess, llm.Message{Role: llm.RoleUser, Content: input}, ch)
 
 	for ev := range ch {
 		switch v := ev.(type) {

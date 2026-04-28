@@ -79,7 +79,7 @@ func toolCallHeader(id, name, args string, isUserTool bool) string {
 
 // runTurn executes one user→assistant exchange, sending events to ch.
 // The goroutine closes ch when done.
-func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch chan<- patchapp.Event) {
+func runTurn(ctx context.Context, cfg Config, sess *session, userMsg llm.Message, ch chan<- patchapp.Event) {
 	defer close(ch)
 	defer func() {
 		if r := recover(); r != nil {
@@ -92,7 +92,7 @@ func runTurn(ctx context.Context, cfg Config, sess *session, input string, ch ch
 	cfg.Hooks.OnTurnStart(ctx)
 	defer func() { cfg.Hooks.OnTurnEnd(ctx, "") }()
 
-	sess.append(llm.Message{Role: llm.RoleUser, Content: input})
+	sess.append(userMsg)
 
 	msgs, err := cfg.Hooks.OnContextBuild(ctx, sess.messages)
 	if err != nil {

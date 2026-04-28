@@ -149,9 +149,18 @@ after: ""                    # optional; bash -c hook, stdin = command output
 | `/usage`    | show token usage from last turn                                 |
 | `/prompt`   | dump system prompt and active tools                             |
 | `/truncate` | toggle truncated bash output                                    |
+| `/image`    | attach an image to the next turn: `/image "<path>" [prompt]`    |
 | `/parameters` | list current LLM params; `/parameters <name> <value>` to set  |
 | `/exit`     | quit shell3 (alias: `/quit`)                                    |
 | `/help`     | list available commands                                         |
+
+**Image support.** `/image` resizes the image to 1000 px on the longest side, converts to JPEG, and sends it as a multimodal turn. Requires a vision-capable model. Supported formats: jpg, png, gif, webp. Quote paths that contain spaces:
+
+```
+/image "/tmp/Screenshot 2026-04-28 at 12.43.18.png" what is broken in this UI?
+/image /tmp/shot.png describe the error
+/image /tmp/chart.png                   # default prompt: "Describe this image."
+```
 
 ### shell3 docs
 Print this documentation.

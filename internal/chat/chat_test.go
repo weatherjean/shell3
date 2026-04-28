@@ -349,13 +349,13 @@ func register() (*fakeSlashApp, *Config, *session, *llm.Usage) {
 	}
 	sess := &session{}
 	usage := &llm.Usage{}
-	registerSlashCommands(app, cfg, sess, usage)
+	registerSlashCommands(app, cfg, sess, usage, func(llm.Message) {})
 	return app, cfg, sess, usage
 }
 
 func TestSlash_RegistersExpectedCommands(t *testing.T) {
 	app, _, _, _ := register()
-	want := []string{"clear", "rollback", "prune", "model", "usage", "prompt", "truncate", "exit", "quit"}
+	want := []string{"clear", "rollback", "prune", "model", "usage", "prompt", "truncate", "exit", "quit", "image"}
 	for _, name := range want {
 		if _, ok := app.handlers[name]; !ok {
 			t.Errorf("missing handler: /%s", name)

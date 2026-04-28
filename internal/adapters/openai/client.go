@@ -332,6 +332,28 @@ func toOpenAI(msgs []llm.Message) []openaiapi.ChatCompletionMessage {
 			Name:             m.Name,
 			ReasoningContent: m.ReasoningContent,
 		}
+		if len(m.ContentParts) > 0 {
+			msg.Content = "" // must not set both Content and MultiContent
+			var parts []openaiapi.ChatMessagePart
+			for _, p := range m.ContentParts {
+				switch p.Type {
+				case llm.ContentPartTypeText:
+					parts = append(parts, openaiapi.ChatMessagePart{
+						Type: openaiapi.ChatMessagePartTypeText,
+						Text: p.Text,
+					})
+				case llm.ContentPartTypeImageURL:
+					parts = append(parts, openaiapi.ChatMessagePart{
+						Type: openaiapi.ChatMessagePartTypeImageURL,
+						ImageURL: &openaiapi.ChatMessageImageURL{
+							URL:    p.ImageURL,
+							Detail: openaiapi.ImageURLDetailAuto,
+						},
+					})
+				}
+			}
+			msg.MultiContent = parts
+		}
 		for _, tc := range m.ToolCalls {
 			msg.ToolCalls = append(msg.ToolCalls, openaiapi.ToolCall{
 				ID:   tc.ID,

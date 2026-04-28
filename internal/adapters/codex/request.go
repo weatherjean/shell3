@@ -48,10 +48,12 @@ type inputMessage struct {
 }
 
 // messagePart is a single content fragment inside an input/output message.
-// Text-only is enough for v1; image / file parts can be added later.
+// For text: Type="input_text", Text set.
+// For images: Type="input_image", ImageURL set to a data URI or HTTPS URL.
 type messagePart struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	ImageURL string `json:"image_url,omitempty"`
 }
 
 // inputFunctionCall represents an assistant-issued tool invocation that the
@@ -120,10 +122,23 @@ func buildRequest(model, sessionID string, params llm.RequestParams, msgs []llm.
 				req.Instructions += "\n\n" + m.Content
 			}
 		case llm.RoleUser:
+			var parts []messagePart
+			if len(m.ContentParts) > 0 {
+				for _, p := range m.ContentParts {
+					switch p.Type {
+					case llm.ContentPartTypeText:
+						parts = append(parts, messagePart{Type: "input_text", Text: p.Text})
+					case llm.ContentPartTypeImageURL:
+						parts = append(parts, messagePart{Type: "input_image", ImageURL: p.ImageURL})
+					}
+				}
+			} else {
+				parts = []messagePart{{Type: "input_text", Text: m.Content}}
+			}
 			req.Input = append(req.Input, inputMessage{
 				Type:    "message",
 				Role:    "user",
-				Content: []messagePart{{Type: "input_text", Text: m.Content}},
+				Content: parts,
 			})
 		case llm.RoleAssistant:
 			// Splice provider reasoning items first — they must precede the
