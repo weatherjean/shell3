@@ -19,6 +19,29 @@ func styled(text, fg, bg string, bold bool) string {
 	return b.String()
 }
 
+func renderUserBubbleLine(isFirst bool, content string, contentVisible, width int) string {
+	userBg := patchtui.BgRGB(rUserBg, gUserBg, bUserBg)
+	userFg := patchtui.FgRGB(rUserFg, gUserFg, bUserFg)
+	yellow := patchtui.FgRGB(rPrimary, gPrimary, bPrimary)
+
+	var prefix string
+	if isFirst {
+		prefix = userBg + yellow + patchtui.Bold + "> " + patchtui.Reset + userBg + userFg
+	} else {
+		prefix = userBg + userFg + "  "
+	}
+
+	contentW := width - 2
+	if contentW < 1 {
+		contentW = 1
+	}
+	pad := contentW - contentVisible
+	if pad < 0 {
+		pad = 0
+	}
+	return prefix + content + strings.Repeat(" ", pad) + patchtui.Reset
+}
+
 // Color palette — true-color RGB values used throughout the UI.
 const (
 	rPrimary = 234 // yellow #EAB308

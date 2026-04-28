@@ -19,6 +19,14 @@ func TestRuneWidth(t *testing.T) {
 		{"cjk han", '日', 2},
 		{"hangul syllable", '한', 2},
 		{"fullwidth digit", '５', 2},
+		// Zero-width: must not inflate padding calculations.
+		{"zwj", '‍', 0},
+		{"variation selector 16", '️', 0},
+		{"variation selector 15", '︎', 0},
+		{"zero width space", '​', 0},
+		// Emoji outside the 0x1F000 block.
+		{"sparkles U+2728", '✨', 2},
+		{"check mark button U+2705", '✅', 2},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -43,6 +51,12 @@ func TestVisibleLen(t *testing.T) {
 		{"emoji with text", "Hi 👋", 5},
 		{"cjk", "日本", 4},
 		{"mixed", "Hello 🚀 world", 14},
+		// Grapheme clusters: the whole sequence is 2 columns, not the rune sum.
+		{"zwj sequence woman+laptop", "👩‍💻", 2},
+		{"variation selector emoji", "🖥️", 2},
+		// Emoji outside 0x1F000 block.
+		{"sparkles", "✨", 2},
+		{"check mark button", "✅", 2},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/rivo/uniseg"
 	"github.com/weatherjean/shell3/internal/patchtui"
 )
 
@@ -218,9 +219,7 @@ func (a *App) handleEnter() {
 	// Slash commands echo too so the output has visible context.
 	// One blank line above and below for breathing room.
 	w, _ := patchtui.Size()
-	lines := []string{""}
-	lines = append(lines, renderUserMessage(line, w)...)
-	lines = append(lines, "")
+	lines := renderUserMessage(line, w)
 	a.Print(lines)
 
 	if strings.HasPrefix(trimmed, "!") {
@@ -257,24 +256,25 @@ func (a *App) runShell(cmd string) {
 // renderUserMessage returns the chat-bubble lines for the user message
 // committed to scrollback on submit.
 func renderUserMessage(text string, width int) []string {
-	userBg := patchtui.BgRGB(rUserBg, gUserBg, bUserBg)
-	userFg := patchtui.FgRGB(rUserFg, gUserFg, bUserFg)
-	yellow := patchtui.FgRGB(rPrimary, gPrimary, bPrimary)
+	contentW := width - 2
+	if contentW < 1 {
+		contentW = 1
+	}
 
-	lines := strings.Split(text, "\n")
+	rawLines := strings.Split(text, "\n")
 	var out []string
-	for i, l := range lines {
-		var prefix string
-		if i == 0 {
-			prefix = userBg + yellow + patchtui.Bold + "> " + patchtui.Reset + userBg + userFg
-		} else {
-			prefix = userBg + userFg + "  "
+	for i, raw := range rawLines {
+		rs := []rune(raw)
+		if len(rs) == 0 {
+			out = append(out, renderUserBubbleLine(i == 0, "", 0, width))
+			continue
 		}
-		pad := width - 2 - patchtui.VisibleLen(l)
-		if pad < 0 {
-			pad = 0
+		chunks := splitRuneChunksByWidth(rs, contentW)
+		for j, ch := range chunks {
+			chunk := rs[ch.start:ch.end]
+			s := string(chunk)
+			out = append(out, renderUserBubbleLine(i == 0 && j == 0, s, uniseg.StringWidth(s), width))
 		}
-		out = append(out, prefix+l+strings.Repeat(" ", pad)+patchtui.Reset)
 	}
 	return out
 }

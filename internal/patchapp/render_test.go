@@ -21,10 +21,10 @@ func TestWrapToWidth(t *testing.T) {
 			want:  []string{"hello"},
 		},
 		{
-			name:  "splits ascii",
+			name:  "splits on word boundary",
 			in:    []string{"hello world"},
 			width: 5,
-			want:  []string{"hello", " worl", "d"},
+			want:  []string{"hello", "world"},
 		},
 		{
 			name:  "preserves multiple input lines",
@@ -48,7 +48,7 @@ func TestWrapToWidth(t *testing.T) {
 			name:  "ansi escape passes through",
 			in:    []string{"\033[31mhello\033[0m world"},
 			width: 5,
-			want:  []string{"\033[31mhello\033[0m", " worl", "d"},
+			want:  []string{"\033[31mhello\033[0m", "world"},
 		},
 	}
 
@@ -67,6 +67,56 @@ func TestWrapToWidth(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestWrapToWidth_ListHangingIndent(t *testing.T) {
+	got := wrapToWidth([]string{"• But some committed output paths likely still rely on terminal wrapping"}, 24)
+	want := []string{
+		"• But some committed",
+		"  output paths likely",
+		"  still rely on terminal",
+		"  wrapping",
+	}
+	if !equalStrings(got, want) {
+		t.Fatalf("wrapToWidth list hang:\n  got:  %q\n  want: %q", got, want)
+	}
+}
+
+func TestWrapToWidth_TableAndFenceUseHardWrap(t *testing.T) {
+	lines := []string{
+		"| col1 | col2 | col3 |",
+		"```",
+		"this is a long code-ish line that should still be width-bounded",
+		"```",
+	}
+	got := wrapToWidth(lines, 12)
+	for i, l := range got {
+		if patchtui.VisibleLen(l) > 12 {
+			t.Fatalf("line %d visible=%d > 12: %q", i, patchtui.VisibleLen(l), l)
+		}
+	}
+}
+
+func TestWrapCommittedLines_UsesConservativeWrap(t *testing.T) {
+	got := wrapCommittedLines([]string{"• But some committed output paths likely still rely on terminal wrapping"}, 24)
+	want := []string{
+		"• But some committed",
+		"  output paths likely",
+		"  still rely on terminal",
+		"  wrapping",
+	}
+	if !equalStrings(got, want) {
+		t.Fatalf("wrapCommittedLines:\n  got:  %q\n  want: %q", got, want)
+	}
+}
+
+func TestWrapCommittedLines_PreservesStyledLines(t *testing.T) {
+	styled := "\033[40m\033[38;2;200;200;200m  hello world\033[0m"
+	got := wrapCommittedLines([]string{styled}, 8)
+	want := []string{styled}
+	if !equalStrings(got, want) {
+		t.Fatalf("wrapCommittedLines styled:\n  got:  %q\n  want: %q", got, want)
 	}
 }
 

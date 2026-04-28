@@ -166,12 +166,14 @@ func (a *App) renderStatusOnly() {
 func (a *App) Print(lines []string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	w, _ := patchtui.Size()
+	wrapped := wrapCommittedLines(lines, w)
 	if a.paused {
-		a.r.Print(lines)
+		a.r.Print(wrapped)
 		return
 	}
 	a.applyPendingTokensLocked()
-	a.r.PrintAndRender(lines, a.liveFrameLocked())
+	a.r.PrintAndRender(wrapped, a.liveFrameLocked())
 }
 
 // PrintLine is shorthand for a single committed line.

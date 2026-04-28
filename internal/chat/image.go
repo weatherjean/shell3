@@ -41,6 +41,7 @@ func buildImageMessage(args, workDir string) (llm.Message, error) {
 		if !ok {
 			return llm.Message{}, fmt.Errorf("unterminated quote in path")
 		}
+		path = strings.ReplaceAll(path, `\ `, " ") // unescape shell-escaped spaces inside quotes
 		prompt = strings.TrimSpace(prompt)
 	} else {
 		path, prompt, _ = strings.Cut(args, " ")

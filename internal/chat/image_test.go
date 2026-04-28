@@ -97,6 +97,18 @@ func TestBuildImageMessage_QuotedPathWithSpaces(t *testing.T) {
 	}
 }
 
+func TestBuildImageMessage_QuotedPathBackslashEscapedSpaces(t *testing.T) {
+	tmp := t.TempDir()
+	imgPath := filepath.Join(tmp, "Screenshot 2026-04-28 at 13.24.39.png")
+	writePNG(t, imgPath)
+
+	escaped := strings.ReplaceAll(imgPath, " ", `\ `)
+	_, err := buildImageMessage(`"`+escaped+`" not much changed`, "")
+	if err != nil {
+		t.Fatalf("quoted path with backslash-escaped spaces failed: %v", err)
+	}
+}
+
 func TestBuildImageMessage_DefaultPrompt(t *testing.T) {
 	tmp := t.TempDir()
 	imgPath := filepath.Join(tmp, "shot.png")

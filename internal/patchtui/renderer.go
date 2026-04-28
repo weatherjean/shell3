@@ -415,27 +415,10 @@ func (r *Renderer) moveCursorTo(buf *strings.Builder, row int) {
 	r.cursorRow = row
 }
 
-// visibleWidth returns the number of visible columns occupied by s,
-// skipping ANSI escape sequences. It is intentionally simple: it handles
-// SGR sequences (color and text style) but not OSC, APC, or DCS sequences.
-// For typical ANSI-coloured output this is sufficient.
+// visibleWidth returns the number of visible columns occupied by s.
+// Delegates to VisibleLen for correct grapheme-cluster and wide-char handling.
 func visibleWidth(s string) int {
-	n := 0
-	inEsc := false
-	for _, c := range s {
-		if inEsc {
-			if c == 'm' {
-				inEsc = false
-			}
-			continue
-		}
-		if c == '\033' {
-			inEsc = true
-			continue
-		}
-		n++
-	}
-	return n
+	return VisibleLen(s)
 }
 
 // clone returns a shallow copy of s.
