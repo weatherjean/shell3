@@ -204,6 +204,15 @@ func (a *App) SetStatus(msg string) {
 	a.mu.Unlock()
 }
 
+// SetContextWindow sets the model's context window size used to compute
+// the token percentage shown in the status bar. Pass 0 to hide the percentage.
+func (a *App) SetContextWindow(n int) {
+	a.mu.Lock()
+	a.status.contextWindow = n
+	a.render()
+	a.mu.Unlock()
+}
+
 // SetTokens updates the token counter shown in the status bar.
 func (a *App) SetTokens(n int) {
 	a.mu.Lock()

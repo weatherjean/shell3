@@ -45,12 +45,12 @@ func renderStatusBar(width int, st statusInfo) string {
 	case st.ctrlCHint:
 		mid = styled(" press ctrl+c again to exit ", white, redBg, true)
 	case st.busy:
-		text := fmt.Sprintf(" %s  thinking  %d toks ", spinnerGlyph(), st.tokens)
+		text := fmt.Sprintf(" %s  thinking  %s ", spinnerGlyph(), formatTokens(st.tokens, st.contextWindow))
 		mid = styled(text, white, greenBg, false)
 	default:
 		text := " " + st.statusMsg + " "
 		if st.tokens > 0 {
-			text += fmt.Sprintf("│ %d toks ", st.tokens)
+			text += fmt.Sprintf("│ %s ", formatTokens(st.tokens, st.contextWindow))
 		}
 		mid = styled(text, gray4, gray7, false)
 	}
@@ -75,9 +75,26 @@ func renderStatusBar(width int, st statusInfo) string {
 
 // statusInfo carries everything renderStatusBar needs.
 type statusInfo struct {
-	mode      string // mode badge text (persona name)
-	statusMsg string // model/provider line when idle
-	tokens    int
-	busy      bool
-	ctrlCHint bool
+	mode          string // mode badge text (persona name)
+	statusMsg     string // model/provider line when idle
+	tokens        int
+	contextWindow int // model context window size; 0 = unknown (no % shown)
+	busy          bool
+	ctrlCHint     bool
+}
+
+// formatTokens returns "23% t:123k" (>=100k) or "23% t:1234" with context window,
+// else "t:123k" / "t:1234" without.
+func formatTokens(tokens, contextWindow int) string {
+	var count string
+	if tokens >= 100_000 {
+		count = fmt.Sprintf("t:%dk", tokens/1000)
+	} else {
+		count = fmt.Sprintf("t:%d", tokens)
+	}
+	if contextWindow > 0 && tokens > 0 {
+		pct := (tokens * 100) / contextWindow
+		return fmt.Sprintf("%d%% %s", pct, count)
+	}
+	return count
 }

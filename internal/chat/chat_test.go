@@ -53,7 +53,8 @@ func (f *fakeApp) SetStatus(msg string) { f.record(fmt.Sprintf("SetStatus(%q)", 
 func (f *fakeApp) SetStreamPreview(lines []string) {
 	f.record(fmt.Sprintf("SetStreamPreview(%d)", len(lines)))
 }
-func (f *fakeApp) SetTokens(n int) { f.record(fmt.Sprintf("SetTokens(%d)", n)) }
+func (f *fakeApp) SetTokens(n int)        { f.record(fmt.Sprintf("SetTokens(%d)", n)) }
+func (f *fakeApp) SetContextWindow(n int) { f.record(fmt.Sprintf("SetContextWindow(%d)", n)) }
 func (f *fakeApp) WithReleasedTerminal(fn func()) {
 	f.record("WithReleasedTerminal:start")
 	f.mu.Lock()
@@ -309,6 +310,7 @@ func (f *fakeSlashApp) Print(lines []string) {
 }
 func (f *fakeSlashApp) PrintLine(line string)          { f.record(fmt.Sprintf("PrintLine(%q)", line)) }
 func (f *fakeSlashApp) SetStatus(msg string)           { f.record(fmt.Sprintf("SetStatus(%q)", msg)) }
+func (f *fakeSlashApp) SetContextWindow(n int)         { f.record(fmt.Sprintf("SetContextWindow(%d)", n)) }
 func (f *fakeSlashApp) Quit()                          { f.record("Quit") }
 func (f *fakeSlashApp) WithReleasedTerminal(fn func()) { fn() }
 func (f *fakeSlashApp) RegisterSlash(cmd patchapp.SlashCommand) {
