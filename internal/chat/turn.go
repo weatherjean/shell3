@@ -249,11 +249,15 @@ func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools
 
 // addUsage accumulates token usage across the multiple LLM requests that can
 // make up one agent turn when tools are involved.
+// Each round re-sends the full context, so prompt tokens are not additive —
+// only the latest round's prompt count is meaningful. Completion tokens are
+// genuinely additive across rounds.
 func addUsage(a, b llm.Usage) llm.Usage {
+	completion := a.CompletionTokens + b.CompletionTokens
 	return llm.Usage{
-		PromptTokens:     a.PromptTokens + b.PromptTokens,
-		CompletionTokens: a.CompletionTokens + b.CompletionTokens,
-		TotalTokens:      a.TotalTokens + b.TotalTokens,
+		PromptTokens:     b.PromptTokens,
+		CompletionTokens: completion,
+		TotalTokens:      b.PromptTokens + completion,
 	}
 }
 
