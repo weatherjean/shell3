@@ -14,7 +14,8 @@ const defaultGitignore = `# shell3 runtime files — do not commit
 shell3.db
 memory.db
 history.md
-last_error.json
+last_*.json
+last_*.jsonl
 secrets.shell3
 `
 
