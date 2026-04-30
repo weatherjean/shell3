@@ -74,7 +74,7 @@ func Render(text string, width int) []string {
 		}
 
 		if inCode {
-			out = append(out, "  "+highlightCode(line, codeLang))
+			out = append(out, "  "+highlightCode(strings.ReplaceAll(line, "\t", "    "), codeLang))
 			continue
 		}
 

@@ -61,7 +61,6 @@ func RunInteractive(ctx context.Context, cfg Config) error {
 	}
 
 	app := patchapp.New(cfg.ModeLabel, cfg.StatusLine)
-
 	cfg.Hooks.SetReleaser(app)
 	cfg.Hooks.OnSessionStart(ctx)
 	defer cfg.Hooks.OnSessionEnd(ctx)

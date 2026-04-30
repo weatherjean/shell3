@@ -11,10 +11,16 @@ fi
 CMD=$(echo "$INPUT" | jq -r '.params.command // empty')
 echo "" >/dev/tty
 echo "🔧 bash: $CMD" >/dev/tty
-read -r -p "Allow? [y/N] " ans </dev/tty
+read -r -p "Allow? [Y/n] " ans </dev/tty
 
-if [[ "$ans" =~ ^[Yy]$ ]]; then
-  echo '{"action":"allow"}'
-else
-  echo '{"action":"block","reason":"User denied bash command"}'
-fi
+case "$ans" in
+  ""|[Yy])
+    echo '{"action":"allow"}'
+    ;;
+  [Nn])
+    echo '{"action":"block","reason":"User denied bash command"}'
+    ;;
+  *)
+    echo '{"action":"block","reason":"Invalid response; expected y, n, or Enter"}'
+    ;;
+esac

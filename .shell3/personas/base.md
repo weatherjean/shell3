@@ -15,7 +15,7 @@ on_session_start: ~
 on_session_end: ~
 on_turn_start: ~
 on_turn_end: ~
-on_tool_call: ~
+on_tool_call:
 on_tool_result: ~
 on_context_build: ~
 on_error: ~

@@ -25,9 +25,10 @@ func (a *App) Pause() error {
 	a.mu.Lock()
 	oldState := a.oldTermState
 	a.paused = true
+	a.r.Erase() // move to frame row 0 before erasing, not just current cursor row
 	a.mu.Unlock()
 
-	fmt.Print("\r\x1b[0J\x1b[?25h" + pasteOff)
+	fmt.Print("\x1b[?25h" + pasteOff)
 	term.Restore(int(os.Stdin.Fd()), oldState) //nolint:errcheck
 	return nil
 }
