@@ -132,17 +132,41 @@ func (a *App) tickerLoop(ctx context.Context) {
 	}
 }
 
-// winchLoop redraws the frame on terminal resize.
+// winchLoop redraws the frame on terminal resize. On the first signal in a
+// burst the live frame is erased immediately so stale bar widths don't linger;
+// the re-render is debounced 500ms so rapid drag-resize signals collapse into
+// one paint.
 func (a *App) winchLoop(ctx context.Context, winch <-chan os.Signal) {
+	var t *time.Timer
+	var pending <-chan time.Time
+	resizing := false
+
 	for {
 		select {
 		case <-ctx.Done():
+			if t != nil {
+				t.Stop()
+			}
 			return
 		case <-winch:
+			if !resizing {
+				resizing = true
+				a.mu.Lock()
+				a.r.Erase()
+				a.mu.Unlock()
+			}
+			if t != nil {
+				t.Stop()
+			}
+			t = time.NewTimer(500 * time.Millisecond)
+			pending = t.C
+		case <-pending:
+			pending = nil
+			resizing = false
+			a.mu.Lock()
+			a.r.Reset()
+			a.render()
+			a.mu.Unlock()
 		}
-		a.mu.Lock()
-		a.r.Reset()
-		a.render()
-		a.mu.Unlock()
 	}
 }

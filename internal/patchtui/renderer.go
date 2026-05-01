@@ -311,12 +311,15 @@ func (r *Renderer) Erase() {
 // [Renderer.Render] will be treated as a first render at the current
 // cursor position. Call Reset after operations that disturb the terminal
 // out-of-band (resize, releasing the terminal to a child process, etc.).
+// The current terminal size is sampled so the next Render does not treat
+// the resize as a size change and clear the screen.
 func (r *Renderer) Reset() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.prev = nil
 	r.inited = false
 	r.cursorRow = 0
+	r.width, r.height = Size()
 }
 
 // fullRender writes the entire frame from scratch. On a size change the
