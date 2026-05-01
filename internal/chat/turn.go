@@ -103,12 +103,20 @@ func runTurn(ctx context.Context, cfg Config, sess *session, userMsg llm.Message
 	allMsgs = append(allMsgs, llm.Message{Role: llm.RoleSystem, Content: cfg.Personality.SystemPrompt})
 	allMsgs = append(allMsgs, msgs...)
 
+	if reminder := sess.reminders.check(cfg.StatusLine, sess.lastPromptTokens); reminder != "" {
+		allMsgs = injectReminder(allMsgs, reminder)
+		ch <- patchapp.AppendEvent{Text: patchtui.Dim + reminder + patchtui.Reset + "\n\n"}
+	}
+
 	var totalUsage llm.Usage
 	for {
 		text, reasoning, providerReasoning, toolCalls, usage, err := streamOnce(ctx, cfg.LLM, allMsgs, cfg.Personality.Tools, ch)
 		if usage.TotalTokens > 0 || usage.PromptTokens > 0 || usage.CompletionTokens > 0 {
 			totalUsage = addUsage(totalUsage, usage)
 			ch <- patchapp.UsageEvent{Usage: totalUsage}
+		}
+		if usage.PromptTokens > 0 {
+			sess.lastPromptTokens = usage.PromptTokens
 		}
 		if err != nil {
 			dumpStreamError(cfg, allMsgs, err)
@@ -216,6 +224,16 @@ func runTurn(ctx context.Context, cfg Config, sess *session, userMsg llm.Message
 			allMsgs = append(allMsgs, toolMsg)
 			sess.append(toolMsg)
 		}
+
+		// After all tool results are appended, check if a reminder is due
+		// before the next LLM round. Inject into the last tool message in
+		// allMsgs only — sess.messages stays clean.
+		// Count bytes across all of allMsgs (including pruned replacements)
+		// so prune is automatically reflected without any delta tracking.
+		if reminder := sess.reminders.check(cfg.StatusLine, estimatePromptTokens(allMsgs)); reminder != "" {
+			allMsgs[len(allMsgs)-1].Content += "\n\n" + reminder
+			ch <- patchapp.AppendEvent{Text: patchtui.Dim + reminder + patchtui.Reset + "\n\n"}
+		}
 	}
 }
 
@@ -245,6 +263,20 @@ func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools
 		return sb.String(), rb.String(), providerReasoning, toolCalls, usage, fmt.Errorf("context canceled")
 	}
 	return sb.String(), rb.String(), providerReasoning, toolCalls, usage, streamErr
+}
+
+// estimatePromptTokens approximates the token count for a message slice by
+// summing content byte lengths and dividing by 4. allMsgs reflects pruning
+// in-place, so this automatically accounts for freed context.
+func estimatePromptTokens(msgs []llm.Message) int {
+	var total int
+	for _, m := range msgs {
+		total += len(m.Content)
+		for _, tc := range m.ToolCalls {
+			total += len(tc.RawArgs)
+		}
+	}
+	return total / 4
 }
 
 // addUsage accumulates token usage across the multiple LLM requests that can
