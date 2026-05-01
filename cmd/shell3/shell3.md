@@ -4,25 +4,136 @@ shell3 is a minimal, Unix-composable coding agent. It runs LLM-powered sessions 
 
 ---
 
+## Config layout
+
+shell3 uses a two-tier directory structure.
+
+**Global** (`~/.shell3/`) — shared across all projects:
+```
+~/.shell3/
+├── credentials.shell3   # adapter credentials (XOR-obfuscated)
+├── secrets.shell3       # user secrets / API keys (XOR-obfuscated)
+├── personas/            # global personas (e.g. base.md)
+├── tools/               # global user-defined tools
+├── skills/              # global skills
+├── hooks/               # global hook scripts
+└── projects/
+    └── <uuid>/          # per-project state
+        ├── shell3.db    # SQLite (memory + history)
+        └── meta.json    # project metadata
+```
+
+**Project** (`.shell3/` in your repo) — overrides and local additions:
+```
+.shell3/
+├── .ref             # UUID pointer to ~/.shell3/projects/<uuid>/ (gitignored)
+├── personas/        # project-local personas (override global by name)
+├── tools/           # project-local tools (override global by name)
+├── skills/          # project-local skills
+├── hooks/           # project-local hook scripts
+└── last_error.json  # last LLM error (gitignored)
+```
+
+`.ref` is auto-generated on first run and gitignored. Never commit it.
+
+Project tools and personas override global ones when names collide.
+
+### Moving global config to a new machine
+
+`~/.shell3/` is a plain directory — you can turn it into a git repo and sync your personas, tools, skills, and hooks across machines:
+
+```bash
+cd ~/.shell3
+git init
+# credentials.shell3 and secrets.shell3 are sensitive — keep them out
+echo -e "credentials.shell3\nsecrets.shell3\nprojects/" > .gitignore
+git add .
+git commit -m "init global shell3 config"
+git remote add origin <your-repo>
+git push -u origin main
+```
+
+On the new machine:
+
+```bash
+# If ~/.shell3/ already exists (shell3 was run once), remove it first
+rm -rf ~/.shell3
+git clone <your-repo> ~/.shell3
+shell3   # bootstraps credentials fresh; personas/tools/skills arrive from git
+```
+
+`projects/` (SQLite DBs, session history) is machine-local and excluded. Credentials and secrets must be set up fresh on each machine via `shell3 auth` and `shell3 secrets set`.
+
+---
+
 ## Commands
 
-### shell3 init
-Scaffold `.shell3/` in the current directory. Requires `~/.shell3/credentials.yaml` to exist first (run `shell3 auth`).
+### shell3 (root command)
 
-Creates:
-- `.shell3/personas/base.md` — default persona with frontmatter config (model, provider, db, hooks, etc.)
-- `.shell3/tools/brave_search.yaml` — disabled example user-defined tool
-- `.shell3/.env.example` — template for `.shell3/.env` (secrets)
-- `.shell3/.gitignore` — ignores db, .env
-- `.shell3/shell3.db` — SQLite store (memory + history)
-- empty `.shell3/skills/` and `.shell3/hooks/` dirs
+The root command runs the interactive chat agent. With a positional argument it runs once non-interactively.
+
+On first run in a directory, shell3 auto-bootstraps: creates `.shell3/`, writes a `.ref` UUID, and writes default personas and tools if absent.
 
 ```
-shell3 init
+shell3                                           # interactive TUI
+shell3 "summarise TODO.md"                       # one-shot, prints to stdout
+shell3 --model gpt-4o
+shell3 --persona code                            # pick a persona from .shell3/personas/ or ~/.shell3/personas/
+shell3 --no-bash                                 # disable bash + shell_interactive tools
+shell3 --no-memory-tools                         # disable memory/history tools and store
+```
+
+Flags: `--persona`, `--provider`, `--model`, `--no-bash`, `--no-memory-tools`.
+
+**Tools available to the model:**
+
+| Tool                | What it does                                                          |
+|---------------------|-----------------------------------------------------------------------|
+| `bash`              | Execute non-interactive shell commands in the project directory       |
+| `shell_interactive` | Run a command that needs a TTY (vim, less, REPL); TUI yields and resumes |
+| `edit_file`         | Edit a file by exact string replacement; atomic, diffs cleanly        |
+| `write_file`        | Overwrite or create a file with given content                         |
+| `memory_upsert`     | Insert/update/delete a memory entry; empty value deletes; `core=true` injects into every session prompt |
+| `memory_list`       | List memories newest-first; `core_only=true` restricts to core memories |
+| `memory_search`     | Full-text search memories; `terms[]` (one concept per element) + `match=any\|all` (default any) |
+| `history_get`       | Fetch one chunk (25 turns) of one session by `session_id` + `chunk`; walk via `prev_session_id` / `next_session_id` |
+| `history_search`    | Full-text search past conversations; same `terms[]` + `match` shape as `memory_search`; hits include `session_id`/`chunk` for follow-up `history_get` |
+| `shell3_docs`       | Return this documentation (commands, config, slash commands, skills)  |
+| `prune_tool_result` | Replace a prior successful tool result with a stub to free context; gated to ≥500 bytes and non-error output |
+
+User-defined tools appear after the built-ins. Memory and history are stored per-project in `~/.shell3/projects/<uuid>/shell3.db`.
+
+**Core memories.** Set `core=true` on `memory_upsert` to mark a fact important enough to be rendered into the system prompt at every session start (via the persona's `{{.CoreMemories}}` template variable). Use sparingly — every core memory inflates context.
+
+**Slash commands inside a session:**
+
+| Command     | Action                                                          |
+|-------------|-----------------------------------------------------------------|
+| `/`         | browse and pick a command                                       |
+| `/model`    | switch model: `/model <name>`, or no arg → picker (≥2 models)   |
+| `/clear`    | reset conversation context                                      |
+| `/rollback` | remove last turn from context                                   |
+| `/prune`    | `/prune <id>` — replace tool result `<id>` with a stub          |
+| `/usage`    | show token usage from last turn                                 |
+| `/prompt`   | dump system prompt and active tools                             |
+| `/truncate` | toggle truncated bash output                                    |
+| `/image`    | attach an image to the next turn: `/image "<path>" [prompt]`    |
+| `/parameters` | list current LLM params; `/parameters <name> <value>` to set  |
+| `/info`     | show session details: persona, project ref, skills, tools, hooks |
+| `/exit`     | quit shell3 (alias: `/quit`)                                    |
+| `/help`     | list available commands                                         |
+
+**Image support.** `/image` resizes the image to 1000 px on the longest side, converts to JPEG, and sends it as a multimodal turn. Requires a vision-capable model. Supported formats: jpg, png, gif, webp. Quote paths that contain spaces:
+
+```
+/image "/tmp/Screenshot 2026-04-28 at 12.43.18.png" what is broken in this UI?
+/image /tmp/shot.png describe the error
+/image /tmp/chart.png                   # default prompt: "Describe this image."
 ```
 
 ### shell3 auth
-Configure adapter credentials. With no flags, presents an adapter menu and prompts for any required fields. Credentials are stored at `~/.shell3/credentials.shell3` (XOR-obfuscated YAML).
+
+Configure adapter credentials. With no flags, presents an adapter menu and prompts for any required fields. Credentials are stored at `~/.shell3/credentials.shell3` (XOR-obfuscated).
 
 ```
 shell3 auth                                          # interactive: pick adapter, configure instance
@@ -42,13 +153,9 @@ shell3 auth models <instance> ""                     # clear; adapter built-in l
 - **Instance** — one user-configured set of credentials for an adapter. The OpenAI-compatible adapter supports many instances (e.g. `ollama-local`, `openrouter-prod`, `openai-prod`). Codex is single-instance (always named `codex`).
 - **default_model** — comma-separated list of models the persona's `/model` picker cycles through. First entry is the default.
 
-**Editing models without re-authenticating.** `shell3 auth models <instance>` prints the current CSV. `shell3 auth models <instance> "<csv>"` replaces it. Pass an empty string (`""`) to clear and fall back to the adapter's built-in list (codex only — openai has no built-in list). Works for every adapter.
-
-**Removing an instance.** `shell3 auth remove <instance>` deletes the instance from `credentials.shell3`. To start over completely: `rm ~/.shell3/credentials.shell3`.
-
 **Storage format.** The credential file is wrapped with a fixed XOR + base64 layer behind a magic header. **This is obfuscation, not encryption.** It defends against accidental disclosure to LLM tools that walk your home directory and read files verbatim. Anyone with shell access (or this source tree) can reverse it trivially. Store actual high-value secrets in your OS keyring or a dedicated secret manager.
 
-If `~/.shell3/credentials.yaml` or `~/.shell3/codex_tokens.json` exists from an older shell3, the first run automatically migrates them into `credentials.shell3` and renames `credentials.yaml` to `credentials.yaml.bak`.
+If `~/.shell3/credentials.yaml` or `~/.shell3/codex_tokens.json` exists from an older shell3, the first run automatically migrates them into `credentials.shell3` and renames the old file to `*.bak`.
 
 ### Adapters
 
@@ -59,51 +166,139 @@ shell3 ships with two adapters; new adapters live under `internal/adapters/<name
 | `openai` | many           | base URL + API key + default model  | per-instance `default_model` CSV                        |
 | `codex`  | one            | OAuth (ChatGPT subscription)        | per-instance `default_model` CSV; falls back to builtin |
 
-Pass an instance name via the persona's `provider:` field, or pick at runtime with `--persona`. For single-instance adapters, instance name equals the adapter name.
+Pass an instance name via the persona's `provider:` field, or override at runtime with `--provider`. For single-instance adapters, instance name equals the adapter name.
 
-### shell3 (root command)
-The root command runs the interactive chat agent. With a positional argument it runs once non-interactively and prints the response to stdout.
+### shell3 secrets
+
+Manage global secrets (API keys for user-defined tools). Secrets are stored at `~/.shell3/secrets.shell3` (XOR-obfuscated), shared across all projects.
 
 ```
-shell3                                           # interactive TUI
-shell3 "summarise TODO.md"                       # one-shot, prints to stdout
-shell3 --model gpt-4o
-shell3 --model "gpt-4o,gpt-4o-mini"              # /model switches between them
-shell3 --base-url http://localhost:11434/v1 --api-key "" --model llama3.2
-shell3 --persona base                            # pick a persona from .shell3/personas/
-shell3 --no-bash                                 # disable bash + shell_interactive tools
-shell3 --no-memory-tools                        # disable memory/history tools and store
+shell3 secrets set --key BRAVE_API_KEY --secret sk-...
+shell3 secrets list
+shell3 secrets remove --key BRAVE_API_KEY
 ```
 
-Flags: `--persona`, `--model`, `--base-url`, `--api-key`, `--no-bash`, `--no-memory-tools`.
+### shell3 doctor
 
-**Tools available to the model:**
+Validate setup. Checks global dirs, credentials, secrets store, project `.ref`, meta.json, and default persona. Exit 0 when all checks pass.
 
-| Tool                | What it does                                                          |
-|---------------------|-----------------------------------------------------------------------|
-| `bash`              | Execute non-interactive shell commands in the project directory       |
-| `shell_interactive` | Run a command that needs a TTY (vim, less, REPL); TUI yields and resumes |
-| `memory_upsert`     | Insert/update/delete a memory entry; empty value deletes; `core=true` injects into every session prompt |
-| `memory_list`       | List memories newest-first; `core_only=true` restricts to core memories |
-| `memory_search`     | Full-text search memories; `terms[]` (one concept per element) + `match=any\|all` (default any) |
-| `history_get`       | Fetch one chunk (25 turns) of one session by `session_id` + `chunk`; walk via `prev_session_id` / `next_session_id` |
-| `history_search`    | Full-text search past conversations; same `terms[]` + `match` shape as `memory_search`; hits include `session_id`/`chunk` for follow-up `history_get` |
-| `shell3_docs`       | Return this documentation (commands, config, slash commands, skills)  |
-| `prune_tool_result` | Replace a prior successful tool result with a stub to free context; gated to ≥500 bytes and non-error output |
+```
+shell3 doctor
+```
 
-User-defined tools (see below) appear after the built-ins. Memory and history are stored in `.shell3/shell3.db` (SQLite, gitignored).
+### shell3 docs
 
-**Core memories.** Set `core=true` on `memory_upsert` to mark a fact important enough to be rendered into the system prompt at every session start (via the persona's `{{.CoreMemories}}` template variable). Use sparingly — every core memory inflates context.
+Print this documentation.
 
-### User-Defined Tools
+```
+shell3 docs
+```
 
-Drop YAML files into `.shell3/tools/` (project) or `~/.shell3/tools/` (global). Project tools override global ones on name collision. Tools are loaded and merged into the model's tool list at startup.
+---
+
+## Configuration
+
+### Persona config — `~/.shell3/personas/<name>.md` or `.shell3/personas/<name>.md`
+
+All per-project configuration — model, provider, store path, tool gating, hooks — lives in the YAML frontmatter of the active persona file. The default persona is `base.md`; switch with `--persona <name>`.
+
+Global personas (`~/.shell3/personas/`) apply everywhere. Project personas (`.shell3/personas/`) override global ones by filename. On first run, a default `base.md` is written to `~/.shell3/personas/` if absent.
+
+```markdown
+---
+name: base                       # persona name (defaults to filename)
+description: short summary       # shown in pickers
+model: ~                         # starting model (~ = credential default)
+provider: ~                      # provider instance name (~ = alphabetically-first)
+db: ~                            # SQLite path override (~ = ~/.shell3/projects/<uuid>/shell3.db)
+no_bash: false                   # disable bash + shell_interactive tools
+no_memory: false                 # disable memory/history tools and store
+
+# LLM request parameters
+parameters:
+  reasoning_effort: medium       # none|minimal|low|medium|high|xhigh
+  reasoning_summary: auto        # auto|concise|detailed|off
+  verbosity: medium              # low|medium|high
+  parallel_tool_calls: true
+  temperature: ~                 # ~ to leave provider default
+
+# Hooks — string for plain command, or mapping with needs_tty.
+on_session_start: ~              # fire-and-forget at session start
+on_session_end: ~                # fire-and-forget at session end
+on_turn_start: ~                 # fire-and-forget before each LLM turn
+on_turn_end: ~                   # fire-and-forget after each LLM turn (params.response)
+on_tool_call: ~                  # blocking before each tool call (can return action:block)
+on_tool_result: ~                # fire-and-forget after each tool call (params.result)
+on_context_build: ~              # blocking before LLM call (can rewrite messages)
+on_error: ~                      # fire-and-forget on LLM errors and panics
+---
+The body is a Go template rendered into the system prompt.
+Available variables: `{{.Time}}`, `{{.CWD}}`, `{{.Model}}`, `{{.Skills}}`, `{{.CoreMemories}}`, `{{.UserTools}}`.
+```
+
+Each hook value is either a plain string (command) or a mapping with `needs_tty`:
+
+```yaml
+# plain string — no TTY, output discarded for fire-and-forget hooks
+on_turn_end: "bash .shell3/hooks/log.sh"
+
+# mapping — set needs_tty: true to release the TUI before running
+on_tool_call:
+  command: "bash .shell3/hooks/confirm.sh"
+  needs_tty: true
+```
+
+**Provider resolution.** If the persona's `provider` is `~`, shell3 picks the first provider from `~/.shell3/credentials.shell3`. Set it explicitly to avoid surprises when multiple providers are configured.
+
+**`needs_tty: true`** releases the TUI so the hook can read from the terminal (prompts, fzf, etc.). Without it, hooks run silently in the background — no TUI flash.
+
+**Hook command quoting.** The command string is split on whitespace — quoted arguments with spaces are not supported. Use a script path instead of inline shell: `bash .shell3/hooks/my-hook.sh` rather than `bash -c "echo hello world"`.
+
+**Hook protocol:** shell3 writes JSON to the hook's stdin and reads JSON from stdout.
+
+Stdin:
+```json
+{"hook": "on_tool_call", "tool": "bash", "params": {"command": "rm foo"}}
+```
+
+Stdout (blocking hooks only — `on_tool_call`, `on_context_build`):
+```json
+{"action": "allow"}
+{"action": "block", "reason": "Denied by user"}
+```
+
+For `on_context_build`, return `{"messages": [...]}` to rewrite the message list sent to the LLM.
+
+**Example — confirm before bash:**
+```bash
+#!/usr/bin/env bash
+# ~/.shell3/hooks/confirm-bash.sh
+INPUT=$(cat)
+TOOL=$(echo "$INPUT" | jq -r '.tool')
+[[ "$TOOL" != "bash" ]] && echo '{"action":"allow"}' && exit 0
+CMD=$(echo "$INPUT" | jq -r '.params.command // empty')
+echo "Run: $CMD" >/dev/tty
+read -r -p "Allow? [y/N] " ans </dev/tty
+[[ "$ans" =~ ^[Yy]$ ]] && echo '{"action":"allow"}' || echo '{"action":"block","reason":"User denied"}'
+```
+
+```yaml
+on_tool_call:
+  command: "bash ~/.shell3/hooks/confirm-bash.sh"
+  needs_tty: true
+```
+
+---
+
+## User-Defined Tools
+
+Drop YAML files into `~/.shell3/tools/` (global) or `.shell3/tools/` (project). Project tools override global ones on name collision. Tools are loaded at startup.
 
 ```yaml
 name: brave_search           # required, [a-z][a-z0-9_]*, must not shadow built-ins
 description: Web search…     # required, shown to the model
 enabled: false               # required; tools default off
-secrets: [BRAVE_API_KEY]     # optional; loaded from .shell3/.env or OS env
+secrets: [BRAVE_API_KEY]     # optional; keys from ~/.shell3/secrets.shell3
 parameters:                  # required; JSON Schema (type must be object)
   type: object
   properties:
@@ -125,7 +320,7 @@ after: ""                    # optional; bash -c hook, stdin = command output
 - Complex values (arrays, objects) are JSON-encoded into their env var.
 - Args whose uppercased name collides with a declared secret are dropped (the secret wins).
 
-**Secrets:** Put `KEY=value` lines in `.shell3/.env` (file mode must be 0600 — `chmod 600 .shell3/.env`). Only the secrets listed in a tool's `secrets:` field are exposed to that tool. Secret values are scrubbed from tool output and replaced with `***REDACTED***` before reaching the model. Secrets shorter than 4 characters are skipped (too likely to corrupt unrelated output).
+**Secrets:** Run `shell3 secrets set --key KEY --secret value`. Only the secrets listed in a tool's `secrets:` field are exposed to that tool. Secret values are scrubbed from tool output and replaced with `***REDACTED***` before reaching the model.
 
 **Hooks (per-tool, optional):**
 - `before` — receives args JSON on stdin. Non-zero exit blocks the call (stderr becomes the block reason). Stdout, if valid JSON, replaces the args. Hooks do **not** receive declared secrets in env.
@@ -133,180 +328,9 @@ after: ""                    # optional; bash -c hook, stdin = command output
 - Order at runtime: `on_tool_call` (persona) → tool `before` → command → tool `after` → secret redaction → `on_tool_result` (persona).
 - Each hook gets its own timeout budget equal to the full `tool.Timeout`.
 
-**Validation at startup:** Invalid tools are skipped with a warning to stderr. Reasons include: missing required field, name shadowing a built-in (`bash`, `shell_interactive`, `memory_*`, `history_*`, `shell3_docs`), invalid name format, declared secret missing from environment, `parameters.type` not `object`.
+**Validation at startup:** Invalid tools are skipped with a warning to stderr. Reasons include: missing required field, name shadowing a built-in, invalid name format, declared secret missing from secrets store, `parameters.type` not `object`.
 
-**Example:** `shell3 init` drops a disabled `.shell3/tools/brave_search.yaml`. Add `BRAVE_API_KEY=…` to `.shell3/.env`, set `enabled: true`, restart.
-
-**Slash commands inside a session:**
-
-| Command     | Action                                                          |
-|-------------|-----------------------------------------------------------------|
-| `/`         | browse and pick a command                                       |
-| `/model`    | switch model: `/model <name>`, or no arg → picker (≥2 models)   |
-| `/clear`    | reset conversation context                                      |
-| `/rollback` | remove last turn from context                                   |
-| `/prune`    | `/prune <id>` — replace tool result `<id>` with a stub          |
-| `/usage`    | show token usage from last turn                                 |
-| `/prompt`   | dump system prompt and active tools                             |
-| `/truncate` | toggle truncated bash output                                    |
-| `/image`    | attach an image to the next turn: `/image "<path>" [prompt]`    |
-| `/parameters` | list current LLM params; `/parameters <name> <value>` to set  |
-| `/exit`     | quit shell3 (alias: `/quit`)                                    |
-| `/help`     | list available commands                                         |
-
-**Image support.** `/image` resizes the image to 1000 px on the longest side, converts to JPEG, and sends it as a multimodal turn. Requires a vision-capable model. Supported formats: jpg, png, gif, webp. Quote paths that contain spaces:
-
-```
-/image "/tmp/Screenshot 2026-04-28 at 12.43.18.png" what is broken in this UI?
-/image /tmp/shot.png describe the error
-/image /tmp/chart.png                   # default prompt: "Describe this image."
-```
-
-### shell3 docs
-Print this documentation.
-
-```
-shell3 docs
-```
-
-### shell3 destroy
-Remove `.shell3/` from the current directory.
-
-```
-shell3 destroy
-```
-
----
-
-## Configuration
-
-### Persona config — `.shell3/personas/<name>.md`
-
-There is no `.shell3/config.yaml`. All per-project configuration — model, provider, store path, tool gating, hooks — lives in the YAML frontmatter of the active persona file. The default persona is `base.md`; switch with `--persona <name>`.
-
-```markdown
----
-name: code                       # persona name (defaults to filename)
-description: short summary       # shown in pickers
-model: kimi-k2.6                 # starting model (or ~ to use credential default)
-provider: opencode-go            # provider key from credentials.yaml (or ~ for alphabetically-first)
-db: .shell3/shell3.db            # SQLite path for memory + history (or ~ for default)
-no_bash: false                   # disable bash + shell_interactive tools
-no_memory: false                 # disable memory/history tools and store
-
-# LLM request parameters — adapter clamps unknown values; defaults are
-# medium across the board so codex models execute eagerly.
-parameters:
-  reasoning_effort: medium       # none|minimal|low|medium|high|xhigh
-  reasoning_summary: auto        # auto|concise|detailed|off
-  verbosity: medium              # low|medium|high
-  parallel_tool_calls: true
-  temperature: ~                 # ~ to leave provider default
-
-# Hooks — string for plain command, or mapping with needs_tty.
-on_session_start: ~              # fire-and-forget at session start
-on_session_end: ~                # fire-and-forget at session end
-on_turn_start: ~                 # fire-and-forget before each LLM turn
-on_turn_end: ~                   # fire-and-forget after each LLM turn (params.response)
-on_tool_call: ~                  # blocking before each tool call (can return action:block)
-on_tool_result: ~                # fire-and-forget after each tool call (params.result)
-on_context_build: ~              # blocking before LLM call (can rewrite messages)
-on_error: ~                      # fire-and-forget on LLM errors and panics
----
-The body of the persona file is a Go template rendered into the system prompt.
-Available template variables: {{.Time}}, {{.CWD}}, {{.Model}}, {{.Skills}}, {{.CoreMemories}}.
-```
-
-Each hook value is either a plain string (command) or a mapping with `needs_tty`:
-
-```yaml
-# plain string — no TTY, output discarded for fire-and-forget hooks
-on_turn_end: "bash .shell3/hooks/log.sh"
-
-# mapping — set needs_tty: true to release the TUI before running
-on_tool_call:
-  command: "bash .shell3/hooks/confirm.sh"
-  needs_tty: true
-```
-
-**Provider resolution.** If the persona's `provider` is `~`, shell3 picks the alphabetically-first provider from `~/.shell3/credentials.yaml`. Set it explicitly to avoid surprises when multiple providers are configured. CLI flags (`--model`, `--base-url`, `--api-key`) override frontmatter.
-
-**`needs_tty: true`** releases the TUI so the hook can read from the terminal (prompts, fzf, etc.). Without it, hooks run silently in the background — no TUI flash.
-
-**Hook protocol:** shell3 writes JSON to the hook's stdin and reads JSON from stdout.
-
-Stdin:
-```json
-{"hook": "on_tool_call", "tool": "bash", "params": {"command": "rm foo"}}
-```
-
-Stdout (blocking hooks only — `on_tool_call`, `on_context_build`):
-```json
-{"action": "allow"}
-{"action": "block", "reason": "Denied by user"}
-```
-
-For `on_context_build`, return `{"messages": [...]}` to rewrite the message list sent to the LLM.
-
-**Example — confirm before bash:**
-```bash
-#!/usr/bin/env bash
-# .shell3/hooks/confirm-bash.sh
-INPUT=$(cat)
-TOOL=$(echo "$INPUT" | jq -r '.tool')
-[[ "$TOOL" != "bash" ]] && echo '{"action":"allow"}' && exit 0
-CMD=$(echo "$INPUT" | jq -r '.params.command // empty')
-echo "Run: $CMD" >/dev/tty
-read -r -p "Allow? [y/N] " ans </dev/tty
-[[ "$ans" =~ ^[Yy]$ ]] && echo '{"action":"allow"}' || echo '{"action":"block","reason":"User denied"}'
-```
-
-```yaml
-hooks:
-  on_tool_call:
-    command: "bash .shell3/hooks/confirm-bash.sh"
-    needs_tty: true
-```
-
-### Global credentials — `~/.shell3/credentials.yaml`
-
-```yaml
-providers:
-  ollama:
-    api_key: ""
-    base_url: "http://localhost:11434/v1"
-    default_model: "llama3.2"
-  openai:
-    api_key: "sk-..."
-    base_url: "https://api.openai.com/v1"
-    default_model: "gpt-4o,gpt-4o-mini,o1-preview"  # comma-sep = switchable via /model
-```
-
----
-
-## Multiple models
-
-Available models are defined globally in `~/.shell3/credentials.yaml` as a comma-separated `default_model`. The session starts on the first model in that list, unless the active persona's frontmatter sets a `model`. Use `/model` inside a session to switch.
-
-```yaml
-# ~/.shell3/credentials.yaml
-providers:
-  ollama cloud:
-    default_model: "kimi-k2.6:cloud,glm-5.1:cloud,llama3.2"
-```
-
-```markdown
----
-# .shell3/personas/base.md — preferred starting model + provider for this project
-model: glm-5.1:cloud
-provider: ollama cloud
----
-```
-
-`--model` flag overrides both:
-```
-./shell3 --model "gpt-4o,gpt-4o-mini"
-```
+**Getting started:** On first run, a disabled `brave_search.yaml` is written to `.shell3/tools/`. Run `shell3 secrets set --key BRAVE_API_KEY --secret <token>`, set `enabled: true`, restart.
 
 ---
 
@@ -316,7 +340,7 @@ Skills are persistent instruction sets injected into the system prompt at sessio
 
 ### How skills work
 
-- Stored as `.md` files in `.shell3/skills/`
+- Stored as `.md` files in `~/.shell3/skills/` (global) or `.shell3/skills/` (project)
 - At startup, skill name, description, and file path are injected into the system prompt under `# Skills`
 - Full content is **not** eagerly loaded — model reads the file via `bash` when the skill applies to the task
 - Take effect on next session start (restart required after adding/editing)
@@ -336,17 +360,12 @@ description: one-line summary of what this skill does
 
 Write instructions here. Be direct and specific.
 Rules, workflows, constraints, decision trees — whatever the agent should follow.
-
-Use headings, bullet points, code blocks as needed.
 ```
 
 ### Creating a skill
 
-To add a skill, write a `.md` file to `.shell3/skills/`:
-
 ```bash
-# Example: create a git-workflow skill
-cat > .shell3/skills/git-workflow.md << 'EOF'
+cat > ~/.shell3/skills/git-workflow.md << 'EOF'
 ---
 name: git-workflow
 description: Git conventions for this project
@@ -358,7 +377,7 @@ Never force-push to main.
 EOF
 ```
 
-Then restart the session — the skill will be active.
+Then restart the session.
 
 ### When to use skills vs memory
 
@@ -369,12 +388,24 @@ Then restart the session — the skill will be active.
 | Conventions for this project | Lookup values (keys, IDs, paths) |
 | Instructions for the agent | Information for the agent to recall |
 
-### Skill tips
+---
 
-- Keep each skill focused on one concern
-- Skills stack — multiple files in `.shell3/skills/` all load
-- Order is filesystem order (alphabetical by filename)
-- Name the file after the skill: `git-workflow.md`, `testing.md`, `api-conventions.md`
+## Multiple models
+
+Available models are defined per-instance in `~/.shell3/credentials.shell3` as a comma-separated `default_model`. The session starts on the first model in that list, unless the active persona's frontmatter sets a `model`. Use `/model` inside a session to switch.
+
+```markdown
+---
+# ~/.shell3/personas/base.md — preferred starting model + provider for all projects
+model: gpt-5.3-codex
+provider: codex
+---
+```
+
+`--model` flag overrides frontmatter:
+```
+shell3 --model "gpt-4o,gpt-4o-mini"
+```
 
 ---
 

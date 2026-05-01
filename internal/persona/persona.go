@@ -38,6 +38,12 @@ type PersonaConfig struct {
 	NoBash      bool   `yaml:"no_bash"`
 	NoMemory    bool   `yaml:"no_memory"`
 
+	// Skills and Tools are optional allowlists. Empty means load everything
+	// available. When non-empty, only items whose names appear in the list
+	// are loaded for this persona.
+	Skills []string `yaml:"skills,omitempty"`
+	Tools  []string `yaml:"tools,omitempty"`
+
 	Parameters PersonaParams `yaml:"parameters"`
 
 	hooks.Config `yaml:",inline"`
@@ -71,6 +77,7 @@ type TemplateData struct {
 	CWD          string              // working directory
 	Model        string              // active model name
 	CoreMemories []store.MemoryEntry // memories with core=true; rendered into prompt
+	UserTools    []ToolDef           // user-defined tools loaded for this session
 }
 
 // Persona holds a rendered persona ready for use in a chat session.
@@ -82,65 +89,49 @@ type Persona struct {
 	Parameters   llm.RequestParams
 }
 
-// ParseConfig reads only the frontmatter of <personasDir>/<name>.md.
-// Cheap — call before Load to resolve model/provider/hooks/db.
-func ParseConfig(personasDir, name string) (PersonaConfig, error) {
-	path := filepath.Join(personasDir, name+".md")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return PersonaConfig{}, fmt.Errorf("persona %q not found in %s — run: shell3 init", name, personasDir)
+// ParseConfig searches dirs in order for <name>.md, parses frontmatter, and
+// returns both the config and the raw template body. First dir that has the
+// file wins (project dir before global dir). Pass both to Load to avoid
+// reading the file a second time.
+func ParseConfig(dirs []string, name string) (PersonaConfig, string, error) {
+	for _, dir := range dirs {
+		if dir == "" {
+			continue
 		}
-		return PersonaConfig{}, fmt.Errorf("persona: read %s: %w", path, err)
+		path := filepath.Join(dir, name+".md")
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return PersonaConfig{}, "", fmt.Errorf("persona: read %s: %w", path, err)
+		}
+		fm, body := extractParts(string(raw))
+		var cfg PersonaConfig
+		if err := yaml.Unmarshal([]byte(fm), &cfg); err != nil {
+			return PersonaConfig{}, "", fmt.Errorf("persona: parse frontmatter %s: %w", name, err)
+		}
+		if cfg.Name == "" {
+			cfg.Name = name
+		}
+		return cfg, body, nil
 	}
-	fm, _ := extractParts(string(raw))
-	var cfg PersonaConfig
-	if err := yaml.Unmarshal([]byte(fm), &cfg); err != nil {
-		return PersonaConfig{}, fmt.Errorf("persona: parse frontmatter %s: %w", name, err)
-	}
-	if cfg.Name == "" {
-		cfg.Name = name
-	}
-	return cfg, nil
+	return PersonaConfig{}, "", fmt.Errorf("persona %q not found — check .shell3/personas/ or ~/.shell3/personas/", name)
 }
 
-// Validate checks persona config for problems. All fields are optional — model,
-// provider, and db all have runtime fallbacks. Reserved for future required fields.
-func Validate(_ PersonaConfig, _ string) error {
-	return nil
-}
-
-// Load reads <personasDir>/<name>.md, parses frontmatter, renders the body
-// as a Go template with data, and assembles the tool list.
+// Load renders a persona given a pre-parsed config and template body.
+// Obtain cfg and body from ParseConfig to avoid reading the file twice.
 //
 // userTools are merged after built-ins in the returned Persona.Tools.
-func Load(personasDir, name string, data TemplateData, hasStore, noBash bool, userTools []ToolDef) (Persona, error) {
-	path := filepath.Join(personasDir, name+".md")
-	raw, err := os.ReadFile(path)
+func Load(cfg PersonaConfig, body string, data TemplateData, hasStore, noBash bool, userTools []ToolDef) (Persona, error) {
+	tmpl, err := template.New(cfg.Name).Parse(body)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return Persona{}, fmt.Errorf("persona %q not found in %s — run: shell3 init", name, personasDir)
-		}
-		return Persona{}, fmt.Errorf("persona: read %s: %w", path, err)
-	}
-
-	fm, body := extractParts(string(raw))
-	var cfg PersonaConfig
-	if err := yaml.Unmarshal([]byte(fm), &cfg); err != nil {
-		return Persona{}, fmt.Errorf("persona: parse frontmatter %s: %w", name, err)
-	}
-	if cfg.Name == "" {
-		cfg.Name = name
-	}
-
-	tmpl, err := template.New(name).Parse(body)
-	if err != nil {
-		return Persona{}, fmt.Errorf("persona: parse template %s: %w", name, err)
+		return Persona{}, fmt.Errorf("persona: parse template %s: %w", cfg.Name, err)
 	}
 
 	var buf strings.Builder
 	if err := tmpl.Execute(&buf, data); err != nil {
-		return Persona{}, fmt.Errorf("persona: render %s: %w", name, err)
+		return Persona{}, fmt.Errorf("persona: render %s: %w", cfg.Name, err)
 	}
 
 	var tools []ToolDef
@@ -160,6 +151,18 @@ func Load(personasDir, name string, data TemplateData, hasStore, noBash bool, us
 		Tools:        tools,
 		Parameters:   cfg.Parameters.ToRequestParams(),
 	}, nil
+}
+
+// BuiltinToolNames returns the names of all built-in tools. Used by usertools
+// to prevent name collisions.
+func BuiltinToolNames() map[string]struct{} {
+	all := append([]ToolDef{docsTool, pruneToolResultTool, bashTool, shellInteractiveTool,
+		editFileTool, writeFileTool}, storeTools...)
+	names := make(map[string]struct{}, len(all))
+	for _, t := range all {
+		names[t.Name] = struct{}{}
+	}
+	return names
 }
 
 // extractParts splits a persona file into (frontmatter YAML, template body).

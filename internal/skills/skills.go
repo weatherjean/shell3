@@ -16,9 +16,12 @@ type Skill struct {
 	Path        string // absolute path to the source file
 }
 
-// LoadAll loads all .md skill files from the given directories.
+// LoadAll loads all .md skill files from dirs in order. Later dirs override
+// earlier ones when names collide, so project-local skills (listed last)
+// override global skills of the same name.
 func LoadAll(dirs []string) ([]Skill, error) {
-	var result []Skill
+	byName := make(map[string]Skill)
+	var order []string // preserve insertion order for stable output
 	for _, dir := range dirs {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -41,8 +44,15 @@ func LoadAll(dirs []string) ([]Skill, error) {
 				continue // frontmatter required; skip skills without it
 			}
 			s.Path = path
-			result = append(result, s)
+			if _, exists := byName[s.Name]; !exists {
+				order = append(order, s.Name)
+			}
+			byName[s.Name] = s
 		}
+	}
+	result := make([]Skill, 0, len(order))
+	for _, name := range order {
+		result = append(result, byName[name])
 	}
 	return result, nil
 }

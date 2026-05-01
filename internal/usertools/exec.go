@@ -37,7 +37,6 @@ func Run(ctx context.Context, tool Tool, rawArgs string, secrets map[string]stri
 	if tool.Before != "" {
 		newArgs, blockErr := runHook(ctx, tool.Before, effectiveCwd(tool, defaultCwd), rawArgs, timeout)
 		if blockErr != nil {
-			// %w is safe here: hooks do not receive declared secrets in env, so the wrapped error cannot leak them.
 			return "", fmt.Errorf("usertools: %s: before hook: %w", tool.Name, blockErr)
 		}
 		if trimmed := strings.TrimSpace(newArgs); trimmed != "" {
@@ -163,14 +162,6 @@ func buildEnv(args map[string]any, rawArgs string, declaredSecrets []string, ava
 // runHook runs a before/after shell command with stdin piped in. Returns
 // stdout. Non-zero exit returns an error whose message is the hook's
 // stderr (or the run error if stderr was empty).
-//
-// Hooks inherit the shell3 process environment. Declared tool.Secrets are
-// intentionally NOT injected into hooks — hooks are not the place to mint
-// authenticated requests; that is the tool command's job.
-//
-// Each hook gets its own timeout budget equal to the full tool.Timeout. A
-// tool with both before and after hooks plus a slow command can therefore
-// take up to 3 * tool.Timeout in the worst case.
 func runHook(ctx context.Context, command, cwd, stdin string, timeout time.Duration) (string, error) {
 	hCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

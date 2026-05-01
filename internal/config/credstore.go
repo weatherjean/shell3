@@ -1,25 +1,21 @@
 package config
 
 import (
-	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"sync"
 
-	"gopkg.in/yaml.v3"
+	"github.com/weatherjean/shell3/internal/obfile"
+	"github.com/weatherjean/shell3/internal/paths"
 )
 
-// instanceRecord is the on-disk shape of a single credential instance.
 type instanceRecord struct {
 	Adapter string            `yaml:"adapter"`
 	Fields  map[string]string `yaml:"fields"`
 }
 
-// credsFile is the on-disk root object inside the obfuscated body.
+// credsFile is the on-disk root object.
 type credsFile struct {
-	Version   int                       `yaml:"version"`
 	Instances map[string]instanceRecord `yaml:"instances"`
 }
 
@@ -29,13 +25,12 @@ type InstanceMeta struct {
 	Adapter  string
 }
 
-// CredStore is the unified credential store backed by
-// ~/.shell3/credentials.shell3. Instances are keyed by user-chosen name
-// (e.g. "ollama-local", "codex"); each record carries its adapter name
-// and a flat string-keyed bag of fields. The on-disk file is XOR-
-// obfuscated (see obfuscate.go) and never written in plaintext.
+// CredStore is the unified credential store backed by ~/.shell3/credentials.shell3.
+// Instances are keyed by user-chosen name; each record carries its adapter name
+// and a flat string-keyed bag of fields. The on-disk file is XOR-obfuscated
+// and never written in plaintext.
 type CredStore struct {
-	homeDir string
+	path string
 
 	mu   sync.Mutex
 	data credsFile
@@ -45,33 +40,16 @@ type CredStore struct {
 // returns an empty store ready for Set/Save.
 func LoadCredStore(homeDir string) (*CredStore, error) {
 	c := &CredStore{
-		homeDir: homeDir,
-		data:    credsFile{Version: 1, Instances: map[string]instanceRecord{}},
+		path: paths.NewGlobal(homeDir).Credentials,
+		data: credsFile{Instances: map[string]instanceRecord{}},
 	}
-	path := credsPath(homeDir)
-	blob, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return c, nil
-		}
-		return nil, fmt.Errorf("config: read %s: %w", path, err)
-	}
-	plaintext, err := Unwrap(blob)
-	if err != nil {
-		return nil, fmt.Errorf("config: unwrap %s: %w", path, err)
-	}
-	if err := yaml.Unmarshal(plaintext, &c.data); err != nil {
-		return nil, fmt.Errorf("config: parse credentials: %w", err)
+	if err := obfile.Read(c.path, &c.data); err != nil {
+		return nil, fmt.Errorf("config: load credentials: %w", err)
 	}
 	if c.data.Instances == nil {
 		c.data.Instances = map[string]instanceRecord{}
 	}
 	return c, nil
-}
-
-// credsPath returns the canonical on-disk path.
-func credsPath(homeDir string) string {
-	return filepath.Join(homeDir, ".shell3", "credentials.shell3")
 }
 
 // Set writes (or overwrites) one instance and persists immediately.
@@ -101,8 +79,7 @@ func (c *CredStore) Get(instance string) (adapter string, fields map[string]stri
 	return rec.Adapter, out, true
 }
 
-// Update applies fn to a snapshot of the instance's fields and persists
-// the result.
+// Update applies fn to a snapshot of the instance's fields and persists.
 func (c *CredStore) Update(instance string, fn func(fields map[string]string) error) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -126,9 +103,6 @@ func (c *CredStore) Update(instance string, fn func(fields map[string]string) er
 func (c *CredStore) Delete(instance string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if _, ok := c.data.Instances[instance]; !ok {
-		return nil
-	}
 	delete(c.data.Instances, instance)
 	return c.saveLocked()
 }
@@ -145,28 +119,6 @@ func (c *CredStore) List() []InstanceMeta {
 	return out
 }
 
-// HomeDir returns the home directory the store was loaded against.
-func (c *CredStore) HomeDir() string { return c.homeDir }
-
-// saveLocked marshals data, wraps with the obfuscation layer, and writes
-// atomically. Caller must hold c.mu.
 func (c *CredStore) saveLocked() error {
-	dir := filepath.Join(c.homeDir, ".shell3")
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return fmt.Errorf("config: mkdir %s: %w", dir, err)
-	}
-	plaintext, err := yaml.Marshal(c.data)
-	if err != nil {
-		return fmt.Errorf("config: marshal credentials: %w", err)
-	}
-	wrapped := Wrap(plaintext)
-	path := credsPath(c.homeDir)
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, wrapped, 0600); err != nil {
-		return fmt.Errorf("config: write tmp: %w", err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return fmt.Errorf("config: rename tmp: %w", err)
-	}
-	return nil
+	return obfile.Write(c.path, c.data)
 }

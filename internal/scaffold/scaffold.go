@@ -1,57 +1,24 @@
-// Package scaffold creates the .shell3/ project directory structure.
+// Package scaffold writes default configuration files for new shell3 projects.
 package scaffold
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
-
-	"github.com/weatherjean/shell3/internal/config"
-	"github.com/weatherjean/shell3/internal/store"
 )
 
-const defaultGitignore = `# shell3 runtime files — do not commit
-shell3.db
-memory.db
-history.md
-last_*.json
-last_*.jsonl
-secrets.shell3
-`
-
-const braveSearchTool = `name: brave_search
-description: Web search via the Brave Search API. Returns top results as JSON. Set enabled to true after running 'shell3 secrets set --key BRAVE_API_KEY --secret <token>'.
-enabled: false
-secrets:
-  - BRAVE_API_KEY
-parameters:
-  type: object
-  properties:
-    query:
-      type: string
-      description: Search query
-    count:
-      type: integer
-      description: Result count (1-20)
-      default: 5
-  required: [query]
-command: |
-  curl -sG https://api.search.brave.com/res/v1/web/search \
-    -H "X-Subscription-Token: $BRAVE_API_KEY" \
-    -H "Accept: application/json" \
-    --data-urlencode "q=$QUERY" \
-    --data-urlencode "count=${COUNT:-5}"
-timeout: 15s
-`
+// DefaultPersonaName is the persona loaded when no --persona flag is given.
+const DefaultPersonaName = "base"
 
 const codePersonaTemplate = `---
-name: code
+name: base
 description: Agentic coding assistant with bash and memory tools
 model: ~
 provider: ~
 db: ~
 no_bash: false
 no_memory: false
+# skills: [skill-name]   # allowlist; empty = load all from .shell3/skills/
+# tools: [tool-name]     # allowlist; empty = load all from .shell3/tools/
 parameters:
   reasoning_effort: medium
   reasoning_summary: auto
@@ -97,8 +64,13 @@ Today: {{.Time}}
 - ` + "`" + `shell3_docs` + "`" + `: read shell3 docs when asked about configuring or extending shell3.
 - ` + "`" + `prune_tool_result` + "`" + `: replace large, no-longer-needed successful tool outputs with stubs to free context.
 
-Custom project tools may also be available.
+{{- if .UserTools}}
 
+## Custom tools
+
+{{range .UserTools}}- ` + "`" + `{{.Name}}` + "`" + `: {{.Description}}
+{{end}}
+{{- end}}
 ## Memory and history
 
 - Start non-trivial tasks by searching memory/history with 1-2 focused terms.
@@ -128,71 +100,44 @@ Skills are instruction files. When a skill applies, read its file with ` + "`" +
 {{- end}}
 `
 
-// checkCredentials verifies that at least one adapter instance is
-// configured in homeDir.
-func checkCredentials(homeDir string) error {
-	if err := config.Migrate(homeDir); err != nil {
-		return fmt.Errorf("migrate credentials: %w", err)
-	}
-	store, err := config.LoadCredStore(homeDir)
-	if err != nil {
-		return fmt.Errorf("run `shell3 auth` before `shell3 init`: %w", err)
-	}
-	if len(store.List()) == 0 {
-		return fmt.Errorf("no adapter instances configured — run: shell3 auth")
-	}
-	return nil
-}
+const braveSearchTool = `name: brave_search
+description: Web search via the Brave Search API. Returns top results as JSON. Set enabled to true after running 'shell3 secrets set --key BRAVE_API_KEY --secret <token>'.
+enabled: false
+secrets:
+  - BRAVE_API_KEY
+parameters:
+  type: object
+  properties:
+    query:
+      type: string
+      description: Search query
+    count:
+      type: integer
+      description: Result count (1-20)
+      default: 5
+  required: [query]
+command: |
+  curl -sG https://api.search.brave.com/res/v1/web/search \
+    -H "X-Subscription-Token: $BRAVE_API_KEY" \
+    -H "Accept: application/json" \
+    --data-urlencode "q=$QUERY" \
+    --data-urlencode "count=${COUNT:-5}"
+timeout: 15s
+`
 
-func initShell3Dir(projectDir string) error {
-	shell3Dir := filepath.Join(projectDir, ".shell3")
-	dirs := []string{
-		shell3Dir,
-		filepath.Join(shell3Dir, "skills"),
-		filepath.Join(shell3Dir, "hooks"),
-		filepath.Join(shell3Dir, "personas"),
-		filepath.Join(shell3Dir, "tools"),
-	}
-	for _, d := range dirs {
-		if err := os.MkdirAll(d, 0755); err != nil {
-			return fmt.Errorf("scaffold: mkdir %s: %w", d, err)
-		}
-	}
-
-	files := map[string]string{
-		filepath.Join(shell3Dir, ".gitignore"):                 defaultGitignore,
-		filepath.Join(shell3Dir, "personas", "base.md"):        codePersonaTemplate,
-		filepath.Join(shell3Dir, "tools", "brave_search.yaml"): braveSearchTool,
-	}
-	for path, content := range files {
-		if _, err := os.Stat(path); err == nil {
-			continue
-		}
-		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-			return fmt.Errorf("scaffold: write %s: %w", path, err)
-		}
-	}
-
-	dbPath := filepath.Join(shell3Dir, "shell3.db")
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		st, err := store.Open(dbPath)
-		if err != nil {
-			return fmt.Errorf("scaffold: create store: %w", err)
-		}
-		st.Close()
-	}
-	return nil
-}
-
-// InitProject scaffolds a .shell3/ directory under projectDir.
-// Requires credentials to exist in homeDir — run `shell3 auth` first.
-func InitProject(projectDir, homeDir string) error {
-	if err := checkCredentials(homeDir); err != nil {
+// WriteDefaults writes the default persona and example tool if they don't
+// exist. Safe to call on every run — skips files that are already present.
+func WriteDefaults(personasDir, toolsDir string) error {
+	personaPath := filepath.Join(personasDir, DefaultPersonaName+".md")
+	if err := writeIfAbsent(personaPath, codePersonaTemplate); err != nil {
 		return err
 	}
-	if err := initShell3Dir(projectDir); err != nil {
-		return err
+	return writeIfAbsent(filepath.Join(toolsDir, "brave_search.yaml"), braveSearchTool)
+}
+
+func writeIfAbsent(path, content string) error {
+	if _, err := os.Stat(path); err == nil {
+		return nil
 	}
-	fmt.Printf("Initialized .shell3/ in %s\n", projectDir)
-	return nil
+	return os.WriteFile(path, []byte(content), 0644)
 }

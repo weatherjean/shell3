@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/weatherjean/shell3/internal/persona"
 )
 
 // Spec is the on-disk YAML format for a user tool.
@@ -33,18 +35,8 @@ type Tool struct {
 	Path string
 }
 
-// reservedNames are built-in tool names that user tools cannot shadow.
-var reservedNames = map[string]struct{}{
-	"bash":              {},
-	"shell_interactive": {},
-	"shell3_docs":       {},
-	"memory_store":      {},
-	"memory_list":       {},
-	"memory_search":     {},
-	"memory_remove":     {},
-	"history_latest":    {},
-	"history_search":    {},
-}
+// reservedNames is derived from the actual built-in tool registry.
+var reservedNames = persona.BuiltinToolNames()
 
 // LoadAll walks each dir in order and returns enabled, validated tools.
 // Later dirs override earlier ones on name collision (project beats global).

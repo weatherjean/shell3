@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/weatherjean/shell3/internal/llm"
@@ -20,6 +21,7 @@ const hookTTYTimeout = 5 * time.Minute
 type Runner struct {
 	cfg      Config
 	releaser TTYReleaser
+	wg       sync.WaitGroup // tracks in-flight background (non-TTY) hooks
 }
 
 // NewRunner returns a Runner with the given hook configuration.
@@ -28,42 +30,24 @@ func NewRunner(cfg Config) *Runner { return &Runner{cfg: cfg} }
 // SetReleaser sets the TTYReleaser used by hooks that need terminal access.
 func (r *Runner) SetReleaser(rel TTYReleaser) { r.releaser = rel }
 
-// callHook runs a blocking hook, captures stdout for JSON parsing. No TTY release.
-func (r *Runner) callHook(ctx context.Context, cmd string, input hookInput) (hookOutput, error) {
-	ctx, cancel := context.WithTimeout(ctx, hookTimeout)
+type dispatchMode int
+
+const (
+	modeBlocking      dispatchMode = iota // wait, capture stdout, no TTY
+	modeTTYBlocking                       // wait, capture stdout, release TTY
+	modeFireForgetTTY                     // no wait, inherit stdio, release TTY
+	modeFireForgetSilent                  // no wait, discard output
+)
+
+func (r *Runner) dispatch(ctx context.Context, cmd string, input hookInput, mode dispatchMode) (hookOutput, error) {
+	timeout := hookTimeout
+	if mode == modeTTYBlocking || mode == modeFireForgetTTY {
+		timeout = hookTTYTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	data, _ := json.Marshal(input)
-	parts := strings.Fields(cmd)
-	c := exec.CommandContext(ctx, parts[0], parts[1:]...)
-	c.Stdin = bytes.NewReader(data)
-
-	var stdout bytes.Buffer
-	c.Stdout = &stdout
-
-	if err := c.Run(); err != nil {
-		return hookOutput{}, fmt.Errorf("hooks: %q failed: %w", cmd, err)
-	}
-
-	if stdout.Len() == 0 {
-		return hookOutput{Action: "allow"}, nil
-	}
-
-	var out hookOutput
-	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
-		return hookOutput{}, fmt.Errorf("hooks: %q bad JSON output: %w", cmd, err)
-	}
-	return out, nil
-}
-
-// callHookTTYBlocking releases the TUI, runs the hook, captures stdout for JSON
-// parsing, and restores the TUI. Use for blocking hooks that need interactive
-// terminal access (e.g. prompting the user for confirmation).
-func (r *Runner) callHookTTYBlocking(ctx context.Context, cmd string, input hookInput) (hookOutput, error) {
-	ctx, cancel := context.WithTimeout(ctx, hookTTYTimeout)
-	defer cancel()
-
-	if r.releaser != nil {
+	if (mode == modeTTYBlocking || mode == modeFireForgetTTY) && r.releaser != nil {
 		_ = r.releaser.Pause()
 		defer r.releaser.Resume()
 	}
@@ -72,19 +56,30 @@ func (r *Runner) callHookTTYBlocking(ctx context.Context, cmd string, input hook
 	parts := strings.Fields(cmd)
 	c := exec.CommandContext(ctx, parts[0], parts[1:]...)
 	c.Stdin = bytes.NewReader(data)
-	c.Stderr = os.Stderr
 
 	var stdout bytes.Buffer
-	c.Stdout = &stdout
+	switch mode {
+	case modeBlocking, modeTTYBlocking:
+		c.Stdout = &stdout
+		c.Stderr = os.Stderr
+	case modeFireForgetTTY:
+		c.Stdout = os.Stdout
+		c.Stderr = os.Stderr
+	}
 
 	if err := c.Run(); err != nil {
+		if mode == modeFireForgetTTY || mode == modeFireForgetSilent {
+			return hookOutput{}, nil
+		}
 		return hookOutput{}, fmt.Errorf("hooks: %q failed: %w", cmd, err)
 	}
 
+	if mode == modeFireForgetTTY || mode == modeFireForgetSilent {
+		return hookOutput{}, nil
+	}
 	if stdout.Len() == 0 {
 		return hookOutput{Action: "allow"}, nil
 	}
-
 	var out hookOutput
 	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
 		return hookOutput{}, fmt.Errorf("hooks: %q bad JSON output: %w", cmd, err)
@@ -92,55 +87,31 @@ func (r *Runner) callHookTTYBlocking(ctx context.Context, cmd string, input hook
 	return out, nil
 }
 
-// callHookTTY runs a fire-and-forget hook with the real terminal (stdio inherited).
-func (r *Runner) callHookTTY(ctx context.Context, cmd string, input hookInput) {
-	ctx, cancel := context.WithTimeout(ctx, hookTTYTimeout)
-	defer cancel()
-
-	data, _ := json.Marshal(input)
-	parts := strings.Fields(cmd)
-	c := exec.CommandContext(ctx, parts[0], parts[1:]...)
-	c.Stdin = bytes.NewReader(data)
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
-
-	if r.releaser != nil {
-		_ = r.releaser.Pause()
-		defer r.releaser.Resume()
-	}
-	_ = c.Run()
-}
-
-// callHookSilent runs a fire-and-forget hook without releasing the TUI.
-// Output is discarded. Use for background hooks like logging that don't need
-// terminal access (avoids TUI flash).
-func (r *Runner) callHookSilent(ctx context.Context, cmd string, input hookInput) {
-	ctx, cancel := context.WithTimeout(ctx, hookTimeout)
-	defer cancel()
-
-	data, _ := json.Marshal(input)
-	parts := strings.Fields(cmd)
-	c := exec.CommandContext(ctx, parts[0], parts[1:]...)
-	c.Stdin = bytes.NewReader(data)
-	_ = c.Run()
-}
-
-// dispatchBlocking picks the right blocking call variant based on NeedsTTY.
 func (r *Runner) dispatchBlocking(ctx context.Context, entry HookEntry, input hookInput) (hookOutput, error) {
+	mode := modeBlocking
 	if entry.NeedsTTY {
-		return r.callHookTTYBlocking(ctx, entry.Command, input)
+		mode = modeTTYBlocking
 	}
-	return r.callHook(ctx, entry.Command, input)
+	return r.dispatch(ctx, entry.Command, input, mode)
 }
 
-// dispatchFireAndForget picks the right fire-and-forget call variant based on NeedsTTY.
 func (r *Runner) dispatchFireAndForget(ctx context.Context, entry HookEntry, input hookInput) {
 	if entry.NeedsTTY {
-		r.callHookTTY(ctx, entry.Command, input)
-	} else {
-		r.callHookSilent(ctx, entry.Command, input)
+		// TTY hooks must run synchronously: they need to pause/resume the TUI
+		// and own the terminal for their duration.
+		r.dispatch(ctx, entry.Command, input, modeFireForgetTTY) //nolint:errcheck
+		return
 	}
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		r.dispatch(ctx, entry.Command, input, modeFireForgetSilent) //nolint:errcheck
+	}()
 }
+
+// Wait blocks until all in-flight background fire-and-forget hooks finish.
+// Call after OnSessionEnd to ensure no hooks are orphaned on teardown.
+func (r *Runner) Wait() { r.wg.Wait() }
 
 // OnToolCall returns true if the tool call is allowed by the hook.
 func (r *Runner) OnToolCall(ctx context.Context, tool string, params map[string]any) (bool, error) {

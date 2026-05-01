@@ -13,12 +13,12 @@ import (
 func newSecretsCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "secrets",
-		Short: "Manage project tool secrets",
-		Long: `Manage project tool secrets.
+		Short: "Manage global tool secrets",
+		Long: `Manage global tool secrets.
 
-Secrets live in the obfuscated store at .shell3/secrets.shell3 (project-
-scoped). They are exposed only to user tools that declare the matching
-name in their tool YAML's "secrets:" field.
+Secrets live in the obfuscated store at ~/.shell3/secrets.shell3 (global).
+They are exposed only to user tools that declare the matching name in their
+tool YAML's "secrets:" field.
 
 Operations:
   shell3 secrets set --key NAME --secret VALUE   write or overwrite one secret
@@ -43,11 +43,11 @@ func newSecretsSetCommand() *cobra.Command {
 			if secret == "" {
 				return fmt.Errorf("--secret is required")
 			}
-			cwd, err := os.Getwd()
+			homeDir, err := os.UserHomeDir()
 			if err != nil {
 				return err
 			}
-			s, err := secrets.Load(cwd)
+			s, err := secrets.Load(homeDir)
 			if err != nil {
 				return err
 			}
@@ -68,11 +68,11 @@ func newSecretsListCommand() *cobra.Command {
 		Use:   "list",
 		Short: "List configured secret names (values masked)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cwd, err := os.Getwd()
+			homeDir, err := os.UserHomeDir()
 			if err != nil {
 				return err
 			}
-			s, err := secrets.Load(cwd)
+			s, err := secrets.Load(homeDir)
 			if err != nil {
 				return err
 			}
@@ -90,11 +90,11 @@ func newSecretsRemoveCommand() *cobra.Command {
 			if key == "" {
 				return fmt.Errorf("--key is required")
 			}
-			cwd, err := os.Getwd()
+			homeDir, err := os.UserHomeDir()
 			if err != nil {
 				return err
 			}
-			s, err := secrets.Load(cwd)
+			s, err := secrets.Load(homeDir)
 			if err != nil {
 				return err
 			}

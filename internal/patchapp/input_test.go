@@ -34,7 +34,7 @@ func TestParseInput_EscapeStillWorks(t *testing.T) {
 }
 
 func TestProcessInput_BracketedPastePreservesUTF8(t *testing.T) {
-	app := New("test", "")
+	app := New("test", "", WelcomeInfo{})
 	app.r.SetOutput(discardWriter{})
 
 	app.processInput([]byte(pasteStart + "— ’ → ➜ 👋\rline" + pasteEnd))
@@ -46,7 +46,7 @@ func TestProcessInput_BracketedPastePreservesUTF8(t *testing.T) {
 }
 
 func TestProcessInput_SplitUTF8AndPasteEnd(t *testing.T) {
-	app := New("test", "")
+	app := New("test", "", WelcomeInfo{})
 	app.r.SetOutput(discardWriter{})
 
 	body := []byte(pasteStart + "—" + pasteEnd)

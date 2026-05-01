@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 
 	"github.com/weatherjean/shell3/internal/hooks"
@@ -38,6 +39,9 @@ type Config struct {
 	WorkDir       string
 	StatusLine    string
 	ModeLabel     string
+	ProjectRef    string   // project UUID from .ref
+	ActiveSkills  []string // skill names active for this persona
+	ActiveTools   []string // user tool names active for this persona
 	Models        []ModelChoice
 	ModelSwitcher func(provider, model string) (LLMClient, error)
 	Truncate      bool
@@ -61,13 +65,21 @@ func RunInteractive(ctx context.Context, cfg Config) error {
 		defer cfg.Store.EndSession(sessionID)
 	}
 
-	app := patchapp.New(cfg.ModeLabel, cfg.StatusLine)
+	app := patchapp.New(cfg.ModeLabel, cfg.StatusLine, patchapp.WelcomeInfo{
+		Persona:      cfg.ModeLabel,
+		ProjectRef:   cfg.ProjectRef,
+		ActiveSkills: cfg.ActiveSkills,
+		ActiveTools:  cfg.ActiveTools,
+	})
 	if _, initModel := splitStatus(cfg.StatusLine); initModel != "" {
 		app.SetContextWindow(models.ContextWindow(initModel))
 	}
 	cfg.Hooks.SetReleaser(app)
 	cfg.Hooks.OnSessionStart(ctx)
-	defer cfg.Hooks.OnSessionEnd(ctx)
+	defer func() {
+		cfg.Hooks.OnSessionEnd(ctx)
+		cfg.Hooks.Wait() // drain background fire-and-forget hooks before teardown
+	}()
 
 	var lastUsage llm.Usage
 
@@ -381,6 +393,51 @@ func registerSlashCommands(app slashTarget, cfg *Config, sess *session, lastUsag
 		},
 	})
 	app.RegisterSlash(patchapp.SlashCommand{
+		Name: "info", Help: "show session details: persona, project, skills, tools, hooks",
+		Handler: func(string) {
+			lines := []string{""}
+			add := func(label, value string) {
+				if value != "" {
+					lines = append(lines, patchtui.Bold+label+patchtui.Reset)
+					lines = append(lines, "    "+value)
+				}
+			}
+			add("persona", cfg.ModeLabel)
+			add("project", cfg.ProjectRef)
+			if len(cfg.ActiveSkills) > 0 {
+				lines = append(lines, patchtui.Bold+"skills"+patchtui.Reset)
+				lines = append(lines, "    "+strings.Join(cfg.ActiveSkills, ", "))
+			}
+			if len(cfg.Personality.Tools) > 0 {
+				lines = append(lines, patchtui.Bold+"tools"+patchtui.Reset)
+				lines = append(lines, "    "+strings.Join(toolNames(cfg.Personality.Tools), ", "))
+			}
+			hcfg := cfg.Personality.Config.Config
+			var activeHooks []string
+			for name, entry := range map[string]string{
+				"on_session_start": hcfg.OnSessionStart.Command,
+				"on_session_end":   hcfg.OnSessionEnd.Command,
+				"on_turn_start":    hcfg.OnTurnStart.Command,
+				"on_turn_end":      hcfg.OnTurnEnd.Command,
+				"on_tool_call":     hcfg.OnToolCall.Command,
+				"on_tool_result":   hcfg.OnToolResult.Command,
+				"on_context_build": hcfg.OnContextBuild.Command,
+				"on_error":         hcfg.OnError.Command,
+			} {
+				if entry != "" {
+					activeHooks = append(activeHooks, name)
+				}
+			}
+			if len(activeHooks) > 0 {
+				sort.Strings(activeHooks)
+				lines = append(lines, patchtui.Bold+"hooks"+patchtui.Reset)
+				lines = append(lines, "    "+strings.Join(activeHooks, ", "))
+			}
+			lines = append(lines, "")
+			app.Print(lines)
+		},
+	})
+	app.RegisterSlash(patchapp.SlashCommand{
 		Name: "exit", Aliases: []string{"quit"}, Help: "quit shell3",
 		Handler: func(string) { app.Quit() },
 	})
@@ -395,6 +452,14 @@ func registerSlashCommands(app slashTarget, cfg *Config, sess *session, lastUsag
 			launchTurn(msg)
 		},
 	})
+}
+
+func toolNames(tools []llm.ToolDefinition) []string {
+	names := make([]string, len(tools))
+	for i, t := range tools {
+		names[i] = t.Name
+	}
+	return names
 }
 
 func currentParamValue(p llm.RequestParams, name string) string {

@@ -6,12 +6,48 @@ import (
 	"github.com/weatherjean/shell3/internal/patchtui"
 )
 
+// labelBlock renders a label line followed by a word-wrapped value line,
+// indented by indent spaces. Returns 2+ lines.
+func labelBlock(styledLabel, value string, indent, width int) []string {
+	out := []string{"  " + styledLabel}
+	if value == "" {
+		return out
+	}
+	avail := width - indent
+	if avail < 10 {
+		return append(out, strings.Repeat(" ", indent)+value)
+	}
+	words := strings.Fields(value)
+	cont := strings.Repeat(" ", indent)
+	line := cont + words[0]
+	lineLen := indent + len(words[0])
+	for _, w := range words[1:] {
+		if lineLen+1+len(w) <= width {
+			line += " " + w
+			lineLen += 1 + len(w)
+		} else {
+			out = append(out, line)
+			line = cont + w
+			lineLen = indent + len(w)
+		}
+	}
+	return append(out, line)
+}
+
 const asciiLogo = "       /\\\n      {.-}\n     ;_.-'\\\n    {    _.}_\n     \\.-' /  `,\n      \\  |    /\n       \\ |  ,/\n        \\|_/"
+
+// WelcomeInfo holds session metadata rendered in the welcome card.
+type WelcomeInfo struct {
+	Persona      string   // persona name
+	ProjectRef   string   // project UUID
+	ActiveSkills []string // skill names active for this persona
+	ActiveTools  []string // user tool names active for this persona
+}
 
 // renderWelcome returns the welcome lines printed once on session start.
 // Pass the lines to Renderer.Print so they live in scrollback, never
 // re-rendered.
-func renderWelcome(width int) []string {
+func renderWelcome(width int, info WelcomeInfo) []string {
 	if width < 40 {
 		width = 40
 	}
@@ -42,9 +78,16 @@ func renderWelcome(width int) []string {
 	out = append(out, "  "+styled("◆ shell3", yellow, "", true)+"  "+styled("/'ʃɛli/", dim, "", false))
 	out = append(out, "  "+styled("AI-powered shell assistant", sub, "", false))
 	out = append(out, "")
-	out = append(out, "  "+styled("type a message", dim, "", false)+"  start a conversation")
-	out = append(out, "  "+styled("! <cmd>", dim, "", false)+"  run a shell command with a real terminal")
-	out = append(out, "  "+styled("/help", dim, "", false)+"  list slash commands")
+
+	const infoIndent = 4
+	if info.Persona != "" {
+		out = append(out, labelBlock(styled("persona", yellow, "", false), info.Persona, infoIndent, width)...)
+	}
+	if info.ProjectRef != "" {
+		out = append(out, labelBlock(styled("project", yellow, "", false), info.ProjectRef, infoIndent, width)...)
+	}
+	out = append(out, "")
+	out = append(out, labelBlock(styled("/help", yellow, "", false), "list slash commands  ·  /info for session details", infoIndent, width)...)
 	out = append(out, "", "", "", "", "")
 	return out
 }

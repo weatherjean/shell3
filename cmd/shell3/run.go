@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -13,11 +12,14 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/weatherjean/shell3/internal/bootstrap"
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/config"
 	"github.com/weatherjean/shell3/internal/hooks"
 	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/persona"
+	"github.com/weatherjean/shell3/internal/scaffold"
 	"github.com/weatherjean/shell3/internal/secrets"
 	"github.com/weatherjean/shell3/internal/skills"
 	"github.com/weatherjean/shell3/internal/store"
@@ -49,7 +51,7 @@ func newRunCommand() *cobra.Command {
 			return runChat(cmd.Context(), f, input)
 		},
 	}
-	cmd.Flags().StringVar(&f.persona, "persona", "base", "Persona to load from .shell3/personas/")
+	cmd.Flags().StringVar(&f.persona, "persona", scaffold.DefaultPersonaName, "Persona to load from .shell3/personas/")
 	cmd.Flags().StringVar(&f.provider, "provider", "", "Configured instance name or single-instance adapter (e.g. codex). Run 'shell3 auth list' to see options.")
 	cmd.Flags().StringVar(&f.model, "model", "", "Model override")
 	cmd.Flags().BoolVar(&f.noBash, "no-bash", false, "Disable bash tool")
@@ -67,14 +69,21 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		return fmt.Errorf("get home directory: %w", err)
 	}
 
-	personasDir := filepath.Join(cwd, ".shell3/personas")
-	personaName := f.persona
+	g := paths.NewGlobal(homeDir)
+	l := paths.NewLocal(cwd)
 
-	pCfg, err := persona.ParseConfig(personasDir, personaName)
+	if err := bootstrap.EnsureGlobal(g); err != nil {
+		return err
+	}
+	uuid, err := bootstrap.EnsureProject(l, g, cwd)
 	if err != nil {
 		return err
 	}
-	if err := persona.Validate(pCfg, personaName); err != nil {
+	proj := paths.NewProject(g, uuid)
+
+	personaName := f.persona
+	pCfg, personaBody, err := persona.ParseConfig([]string{l.Personas, g.Personas}, personaName)
+	if err != nil {
 		return err
 	}
 
@@ -99,18 +108,29 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	noBash := pCfg.NoBash || f.noBash
 	noMemory := pCfg.NoMemory || f.noMemory
 
+	// DB path: use persona override if set, otherwise project UUID dir.
+	storeDBPath := proj.DB
+	if pCfg.DB != "" {
+		storeDBPath = pCfg.DB
+	}
+
 	var st *store.Store
-	storeDBPath := filepath.Join(cwd, coalesce(pCfg.DB, ".shell3/shell3.db"))
 	if !noMemory {
 		if s, err := store.Open(storeDBPath); err == nil {
 			st = s
 			defer st.Close()
+		} else {
+			fmt.Fprintln(os.Stderr, "warning: open store:", err)
 		}
 	}
 
-	loadedSkills, _ := skills.LoadAll([]string{filepath.Join(cwd, ".shell3/skills")})
+	allSkills, err := skills.LoadAll([]string{g.Skills, l.Skills})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "warning: load skills:", err)
+	}
+	loadedSkills := filterSkills(allSkills, pCfg.Skills)
 
-	secStore, err := secrets.Load(cwd)
+	secStore, err := secrets.Load(homeDir)
 	if err != nil {
 		return fmt.Errorf("load secrets: %w", err)
 	}
@@ -120,14 +140,12 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		available[k] = struct{}{}
 	}
 
-	toolsDirs := []string{
-		filepath.Join(homeDir, ".shell3", "tools"),
-		filepath.Join(cwd, ".shell3", "tools"),
-	}
-	loadedTools, toolWarnings, _ := usertools.LoadAll(toolsDirs, available)
+	toolsDirs := []string{g.Tools, l.Tools}
+	allTools, toolWarnings, _ := usertools.LoadAll(toolsDirs, available)
 	for _, w := range toolWarnings {
 		fmt.Fprintln(os.Stderr, "user-tool warning:", w)
 	}
+	loadedTools := filterTools(allTools, pCfg.Tools)
 	userToolDefs := make([]llm.ToolDefinition, 0, len(loadedTools))
 	userToolMap := make(map[string]usertools.Tool, len(loadedTools))
 	for _, ut := range loadedTools {
@@ -164,8 +182,9 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		CWD:          cwd,
 		Model:        model,
 		CoreMemories: coreMemories,
+		UserTools:    userToolDefs,
 	}
-	pers, err := persona.Load(personasDir, personaName, personaData, st != nil, noBash, userToolDefs)
+	pers, err := persona.Load(pCfg, personaBody, personaData, st != nil, noBash, userToolDefs)
 	if err != nil {
 		return err
 	}
@@ -177,8 +196,6 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		statusLine += " │ " + pers.Parameters.ReasoningEffort
 	}
 
-	// Aggregate models across every configured instance + single-instance
-	// adapters that have no row in the store yet.
 	var models []chat.ModelChoice
 	for _, meta := range credStore.List() {
 		p, ok := llm.Get(meta.Adapter)
@@ -250,6 +267,15 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		model = newModel
 		return next, nil
 	}
+	skillNames := make([]string, 0, len(loadedSkills))
+	for _, s := range loadedSkills {
+		skillNames = append(skillNames, s.Name)
+	}
+	toolNames := make([]string, 0, len(pers.Tools))
+	for _, t := range pers.Tools {
+		toolNames = append(toolNames, t.Name)
+	}
+
 	cfg := chat.Config{
 		LLM:           client,
 		Hooks:         hookRunner,
@@ -258,6 +284,9 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		WorkDir:       cwd,
 		StatusLine:    statusLine,
 		ModeLabel:     pCfg.Name,
+		ProjectRef:    uuid,
+		ActiveSkills:  skillNames,
+		ActiveTools:   toolNames,
 		Models:        models,
 		ModelSwitcher: modelSwitcher,
 		Docs:          docsContent,
@@ -273,11 +302,6 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 }
 
 // resolveConnection picks the (adapter, instance, model) tuple for this run.
-//
-// Resolution order:
-//  1. providerHint (from --provider flag or persona.Provider): may name an
-//     existing instance OR a single-instance adapter (e.g. "codex").
-//  2. Fall back to the alphabetically first configured instance.
 func resolveConnection(providerHint, modelHint string, credStore *config.CredStore, f *runFlags) (adapter, instance, model string) {
 	if providerHint != "" {
 		if a, _, ok := credStore.Get(providerHint); ok {
@@ -290,10 +314,12 @@ func resolveConnection(providerHint, modelHint string, credStore *config.CredSto
 	}
 
 	if adapter == "" {
-		list := credStore.List()
-		if len(list) > 0 {
-			adapter = list[0].Adapter
-			instance = list[0].Instance
+		for _, m := range credStore.List() {
+			if m.Instance != "" {
+				adapter = m.Adapter
+				instance = m.Instance
+				break
+			}
 		}
 	}
 
@@ -319,4 +345,42 @@ func coalesce(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// filterSkills returns all skills when allowlist is empty, otherwise only
+// those whose name appears in the allowlist.
+func filterSkills(all []skills.Skill, allowlist []string) []skills.Skill {
+	if len(allowlist) == 0 {
+		return all
+	}
+	set := make(map[string]struct{}, len(allowlist))
+	for _, n := range allowlist {
+		set[n] = struct{}{}
+	}
+	var out []skills.Skill
+	for _, s := range all {
+		if _, ok := set[s.Name]; ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// filterTools returns all tools when allowlist is empty, otherwise only
+// those whose name appears in the allowlist.
+func filterTools(all []usertools.Tool, allowlist []string) []usertools.Tool {
+	if len(allowlist) == 0 {
+		return all
+	}
+	set := make(map[string]struct{}, len(allowlist))
+	for _, n := range allowlist {
+		set[n] = struct{}{}
+	}
+	var out []usertools.Tool
+	for _, t := range all {
+		if _, ok := set[t.Name]; ok {
+			out = append(out, t)
+		}
+	}
+	return out
 }

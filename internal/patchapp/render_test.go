@@ -152,7 +152,7 @@ func equalStrings(a, b []string) bool {
 
 func TestBusySetTokensDefersUntilContentRender(t *testing.T) {
 	var out strings.Builder
-	app := New("test", "provider/model")
+	app := New("test", "provider/model", WelcomeInfo{})
 	app.r.SetOutput(&out)
 
 	app.SetBusy(true, nil)

@@ -1,0 +1,70 @@
+package paths
+
+import "path/filepath"
+
+// Global holds all paths under ~/.shell3/ (user-scoped, never in repo).
+type Global struct {
+	Root        string // ~/.shell3/
+	Credentials string // ~/.shell3/credentials.shell3
+	Secrets     string // ~/.shell3/secrets.shell3
+	Skills      string // ~/.shell3/skills/
+	Tools       string // ~/.shell3/tools/
+	Hooks       string // ~/.shell3/hooks/
+	Personas    string // ~/.shell3/personas/
+	Projects    string // ~/.shell3/projects/
+}
+
+// Project holds paths for one project's personal state keyed by UUID.
+type Project struct {
+	Dir  string // ~/.shell3/projects/<uuid>/
+	DB   string // ~/.shell3/projects/<uuid>/shell3.db
+	Meta string // ~/.shell3/projects/<uuid>/meta.json
+}
+
+// Local holds paths under ./.shell3/ (project-scoped, committed to repo).
+type Local struct {
+	Root     string // ./.shell3/
+	Ref      string // ./.shell3/.ref  (gitignored)
+	Skills   string // ./.shell3/skills/
+	Tools    string // ./.shell3/tools/
+	Hooks    string // ./.shell3/hooks/
+	Personas string // ./.shell3/personas/
+}
+
+// NewGlobal returns a Global path set rooted at homeDir/.shell3/.
+func NewGlobal(homeDir string) Global {
+	root := filepath.Join(homeDir, ".shell3")
+	return Global{
+		Root:        root,
+		Credentials: filepath.Join(root, "credentials.shell3"),
+		Secrets:     filepath.Join(root, "secrets.shell3"),
+		Skills:      filepath.Join(root, "skills"),
+		Tools:       filepath.Join(root, "tools"),
+		Hooks:       filepath.Join(root, "hooks"),
+		Personas:    filepath.Join(root, "personas"),
+		Projects:    filepath.Join(root, "projects"),
+	}
+}
+
+// NewProject returns the Project path set for the given UUID under g.Projects.
+func NewProject(g Global, uuid string) Project {
+	dir := filepath.Join(g.Projects, uuid)
+	return Project{
+		Dir:  dir,
+		DB:   filepath.Join(dir, "shell3.db"),
+		Meta: filepath.Join(dir, "meta.json"),
+	}
+}
+
+// NewLocal returns a Local path set rooted at cwd/.shell3/.
+func NewLocal(cwd string) Local {
+	root := filepath.Join(cwd, ".shell3")
+	return Local{
+		Root:     root,
+		Ref:      filepath.Join(root, ".ref"),
+		Skills:   filepath.Join(root, "skills"),
+		Tools:    filepath.Join(root, "tools"),
+		Hooks:    filepath.Join(root, "hooks"),
+		Personas: filepath.Join(root, "personas"),
+	}
+}

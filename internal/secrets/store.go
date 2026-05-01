@@ -1,66 +1,41 @@
-// Package secrets manages project-scoped tool secrets stored under
-// <projectDir>/.shell3/secrets.shell3. The on-disk file is wrapped with
-// the same XOR obfuscation as the credential store; this defends
-// against accidental disclosure (e.g. an LLM tool reading the file
-// verbatim), not against a determined attacker.
+// Package secrets manages global user secrets stored at ~/.shell3/secrets.shell3.
+// Secrets are exposed to user tools that declare the matching key in their
+// tool YAML's "secrets:" field. The on-disk file is XOR-obfuscated (see
+// internal/obfuscate) — this defends against accidental disclosure (e.g. an
+// LLM tool reading the file verbatim), not against a determined attacker.
 package secrets
 
 import (
-	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"sync"
 
-	"gopkg.in/yaml.v3"
-
-	"github.com/weatherjean/shell3/internal/config"
+	"github.com/weatherjean/shell3/internal/obfile"
+	"github.com/weatherjean/shell3/internal/paths"
 )
 
 type secretsFile struct {
-	Version int               `yaml:"version"`
 	Secrets map[string]string `yaml:"secrets"`
 }
 
-// Store is the project secrets store. Keys are environment-variable
-// style names; values are raw secret strings.
+// Store is the global secrets store. Keys are environment-variable style names.
 type Store struct {
-	projectDir string
+	path string
 
 	mu   sync.Mutex
 	data secretsFile
 }
 
-// Load reads <projectDir>/.shell3/secrets.shell3 if present. The
-// .shell3/ directory must exist (project must be inited); otherwise
-// Load returns an error directing the user to run `shell3 init`.
-func Load(projectDir string) (*Store, error) {
-	shell3Dir := filepath.Join(projectDir, ".shell3")
-	if _, err := os.Stat(shell3Dir); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("secrets: no .shell3/ in %s — run `shell3 init`", projectDir)
-		}
-		return nil, fmt.Errorf("secrets: stat %s: %w", shell3Dir, err)
-	}
-
+// Load reads ~/.shell3/secrets.shell3. Returns an empty store if the file does
+// not exist — first-use auto-creates on next Set.
+func Load(homeDir string) (*Store, error) {
+	g := paths.NewGlobal(homeDir)
 	s := &Store{
-		projectDir: projectDir,
-		data:       secretsFile{Version: 1, Secrets: map[string]string{}},
+		path: g.Secrets,
+		data: secretsFile{Secrets: map[string]string{}},
 	}
-	blob, err := os.ReadFile(secretsPath(projectDir))
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return s, nil
-		}
-		return nil, fmt.Errorf("secrets: read: %w", err)
-	}
-	plain, err := config.Unwrap(blob)
-	if err != nil {
-		return nil, fmt.Errorf("secrets: unwrap: %w", err)
-	}
-	if err := yaml.Unmarshal(plain, &s.data); err != nil {
-		return nil, fmt.Errorf("secrets: parse: %w", err)
+	if err := obfile.Read(s.path, &s.data); err != nil {
+		return nil, fmt.Errorf("secrets: load: %w", err)
 	}
 	if s.data.Secrets == nil {
 		s.data.Secrets = map[string]string{}
@@ -68,12 +43,7 @@ func Load(projectDir string) (*Store, error) {
 	return s, nil
 }
 
-func secretsPath(projectDir string) string {
-	return filepath.Join(projectDir, ".shell3", "secrets.shell3")
-}
-
-// List returns secret names sorted alphabetically. Values are never
-// returned by this method.
+// List returns secret names sorted alphabetically. Values are never returned.
 func (s *Store) List() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -85,8 +55,8 @@ func (s *Store) List() []string {
 	return out
 }
 
-// All returns a copy of every key/value pair. Used at runtime to seed
-// tool secret availability.
+// All returns a copy of every key/value pair. Used at runtime to seed tool
+// secret availability.
 func (s *Store) All() map[string]string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -110,37 +80,13 @@ func (s *Store) Set(key, value string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.data.Secrets[key] = value
-	return s.saveLocked()
+	return obfile.Write(s.path, s.data)
 }
 
 // Remove deletes a secret. No-op if absent.
 func (s *Store) Remove(key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.data.Secrets[key]; !ok {
-		return nil
-	}
 	delete(s.data.Secrets, key)
-	return s.saveLocked()
-}
-
-func (s *Store) saveLocked() error {
-	dir := filepath.Join(s.projectDir, ".shell3")
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return fmt.Errorf("secrets: mkdir: %w", err)
-	}
-	plain, err := yaml.Marshal(s.data)
-	if err != nil {
-		return fmt.Errorf("secrets: marshal: %w", err)
-	}
-	wrapped := config.Wrap(plain)
-	path := secretsPath(s.projectDir)
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, wrapped, 0600); err != nil {
-		return fmt.Errorf("secrets: write tmp: %w", err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return fmt.Errorf("secrets: rename: %w", err)
-	}
-	return nil
+	return obfile.Write(s.path, s.data)
 }

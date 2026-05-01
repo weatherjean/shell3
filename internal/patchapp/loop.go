@@ -39,7 +39,7 @@ func (a *App) Run(ctx context.Context) error {
 	fmt.Print(pasteOn)
 
 	w, _ := patchtui.Size()
-	a.r.Print(renderWelcome(w))
+	a.r.Print(renderWelcome(w, a.welcome))
 	a.render()
 
 	// Resize handling.

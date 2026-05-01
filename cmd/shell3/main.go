@@ -48,8 +48,8 @@ func main() {
 		defaultHelp(cmd, args)
 	})
 
-	root.AddCommand(newInitCommand())
 	root.AddCommand(newAuthCommand())
+	root.AddCommand(newDoctorCommand())
 	root.AddCommand(newSecretsCommand())
 	root.AddCommand(newDocsCommand())
 	root.AddCommand(newWidgetCommand())

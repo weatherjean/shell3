@@ -37,7 +37,14 @@ Credentials are stored obfuscated (not encrypted) at `~/.shell3/credentials.shel
 
 ## Removing a project's shell3 data
 
-`rm -rf .shell3` from the project root. There is no `shell3 destroy` command.
+```bash
+# Remove project-local config
+rm -rf .shell3
+
+# Remove project state from global (find UUID first)
+cat .shell3/.ref   # prints the UUID
+rm -rf ~/.shell3/projects/<uuid>
+```
 
 ## Credits
 

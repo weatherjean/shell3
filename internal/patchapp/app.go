@@ -88,16 +88,21 @@ type App struct {
 	// Slash command registry. Keyed by lowercased name and each alias;
 	// multiple keys may point to the same SlashCommand value.
 	slash map[string]*SlashCommand
+
+	// Welcome card data printed once on session start.
+	welcome WelcomeInfo
 }
 
-// New returns a new App with the given mode label and initial status text.
-func New(mode, statusMsg string) *App {
+// New returns a new App with the given mode label, initial status text, and
+// welcome info rendered once on session start.
+func New(mode, statusMsg string, welcome WelcomeInfo) *App {
 	return &App{
 		r: patchtui.New(),
 		status: statusInfo{
 			mode:      mode,
 			statusMsg: statusMsg,
 		},
+		welcome: welcome,
 	}
 }
 

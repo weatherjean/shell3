@@ -20,6 +20,20 @@ func writePersona(t *testing.T, dir, name, content string) {
 	}
 }
 
+// loadForTest wraps ParseConfig+Load for test convenience.
+func loadForTest(t *testing.T, dir, name string, data persona.TemplateData, hasStore, noBash bool, userTools []persona.ToolDef) persona.Persona {
+	t.Helper()
+	cfg, body, err := persona.ParseConfig([]string{dir}, name)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	p, err := persona.Load(cfg, body, data, hasStore, noBash, userTools)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	return p
+}
+
 const simplePersona = `---
 name: base
 description: Test persona
@@ -34,10 +48,7 @@ func TestLoad_RendersTemplate(t *testing.T) {
 	writePersona(t, dir, "base", simplePersona)
 
 	data := persona.TemplateData{Time: "noon", CWD: "/tmp", Model: "llama3"}
-	p, err := persona.Load(dir, "base", data, false, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	p := loadForTest(t, dir, "base", data, false, false, nil)
 	if p.SystemPrompt == "" {
 		t.Fatal("empty system prompt")
 	}
@@ -53,10 +64,7 @@ func TestLoad_SkillsInjected(t *testing.T) {
 	writePersona(t, dir, "base", simplePersona)
 
 	data := persona.TemplateData{Skills: "## MySkill\nDoes things.\n"}
-	p, err := persona.Load(dir, "base", data, false, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	p := loadForTest(t, dir, "base", data, false, false, nil)
 	if !contains(p.SystemPrompt, "MySkill") {
 		t.Errorf("skills not injected; got:\n%s", p.SystemPrompt)
 	}
@@ -66,10 +74,7 @@ func TestLoad_SkillsAbsentWhenEmpty(t *testing.T) {
 	dir := t.TempDir()
 	writePersona(t, dir, "base", simplePersona)
 
-	p, err := persona.Load(dir, "base", persona.TemplateData{}, false, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	p := loadForTest(t, dir, "base", persona.TemplateData{}, false, false, nil)
 	if contains(p.SystemPrompt, "{{") {
 		t.Errorf("unrendered template tags in output:\n%s", p.SystemPrompt)
 	}
@@ -79,10 +84,7 @@ func TestLoad_HasBashTool(t *testing.T) {
 	dir := t.TempDir()
 	writePersona(t, dir, "base", simplePersona)
 
-	p, err := persona.Load(dir, "base", persona.TemplateData{}, false, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	p := loadForTest(t, dir, "base", persona.TemplateData{}, false, false, nil)
 	if !hasToolNamed(p.Tools, "bash") {
 		t.Errorf("missing bash tool; tools: %v", toolNames(p.Tools))
 	}
@@ -92,10 +94,7 @@ func TestLoad_NoBashDropsBashTools(t *testing.T) {
 	dir := t.TempDir()
 	writePersona(t, dir, "base", simplePersona)
 
-	p, err := persona.Load(dir, "base", persona.TemplateData{}, false, true, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	p := loadForTest(t, dir, "base", persona.TemplateData{}, false, true, nil)
 	for _, name := range []string{"bash", "shell_interactive", "edit_file", "write_file"} {
 		if hasToolNamed(p.Tools, name) {
 			t.Errorf("noBash=true but tool %q present", name)
@@ -107,10 +106,7 @@ func TestLoad_EditToolsPresentByDefault(t *testing.T) {
 	dir := t.TempDir()
 	writePersona(t, dir, "base", simplePersona)
 
-	p, err := persona.Load(dir, "base", persona.TemplateData{}, false, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	p := loadForTest(t, dir, "base", persona.TemplateData{}, false, false, nil)
 	for _, name := range []string{"edit_file", "write_file"} {
 		if !hasToolNamed(p.Tools, name) {
 			t.Errorf("missing %q tool; tools: %v", name, toolNames(p.Tools))
@@ -122,10 +118,7 @@ func TestLoad_StoreToolsIncludedWhenHasStore(t *testing.T) {
 	dir := t.TempDir()
 	writePersona(t, dir, "base", simplePersona)
 
-	p, err := persona.Load(dir, "base", persona.TemplateData{}, true, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	p := loadForTest(t, dir, "base", persona.TemplateData{}, true, false, nil)
 	for _, name := range []string{"memory_upsert", "memory_list", "memory_search", "history_get", "history_search"} {
 		if !hasToolNamed(p.Tools, name) {
 			t.Errorf("hasStore=true but tool %q missing", name)
@@ -137,10 +130,7 @@ func TestLoad_StoreToolsAbsentWithoutStore(t *testing.T) {
 	dir := t.TempDir()
 	writePersona(t, dir, "base", simplePersona)
 
-	p, err := persona.Load(dir, "base", persona.TemplateData{}, false, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	p := loadForTest(t, dir, "base", persona.TemplateData{}, false, false, nil)
 	for _, name := range []string{"memory_upsert", "history_get", "history_search"} {
 		if hasToolNamed(p.Tools, name) {
 			t.Errorf("hasStore=false but tool %q present", name)
@@ -149,7 +139,7 @@ func TestLoad_StoreToolsAbsentWithoutStore(t *testing.T) {
 }
 
 func TestLoad_MissingFileReturnsError(t *testing.T) {
-	_, err := persona.Load(t.TempDir(), "nonexistent", persona.TemplateData{}, false, false, nil)
+	_, _, err := persona.ParseConfig([]string{t.TempDir()}, "nonexistent")
 	if err == nil {
 		t.Error("expected error for missing persona file")
 	}
@@ -158,7 +148,11 @@ func TestLoad_MissingFileReturnsError(t *testing.T) {
 func TestLoad_InvalidTemplateReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	writePersona(t, dir, "bad", "---\nname: bad\n---\n{{.Unclosed")
-	_, err := persona.Load(dir, "bad", persona.TemplateData{}, false, false, nil)
+	cfg, body, err := persona.ParseConfig([]string{dir}, "bad")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = persona.Load(cfg, body, persona.TemplateData{}, false, false, nil)
 	if err == nil {
 		t.Error("expected error for invalid template")
 	}
@@ -168,10 +162,7 @@ func TestLoad_NameSet(t *testing.T) {
 	dir := t.TempDir()
 	writePersona(t, dir, "base", simplePersona)
 
-	p, err := persona.Load(dir, "base", persona.TemplateData{}, false, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	p := loadForTest(t, dir, "base", persona.TemplateData{}, false, false, nil)
 	if p.Name != "base" {
 		t.Errorf("got name %q, want base", p.Name)
 	}
@@ -203,7 +194,7 @@ func TestParseConfig_ReadsFields(t *testing.T) {
 	dir := t.TempDir()
 	writePersona(t, dir, "base", fullPersona)
 
-	cfg, err := persona.ParseConfig(dir, "base")
+	cfg, _, err := persona.ParseConfig([]string{dir}, "base")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,33 +222,18 @@ func TestParseConfig_ReadsFields(t *testing.T) {
 }
 
 func TestParseConfig_MissingFileReturnsError(t *testing.T) {
-	_, err := persona.ParseConfig(t.TempDir(), "nonexistent")
+	_, _, err := persona.ParseConfig([]string{t.TempDir()}, "nonexistent")
 	if err == nil {
 		t.Error("expected error for missing file")
 	}
 }
 
-func TestValidate_AlwaysPassesWhenParseable(t *testing.T) {
-	cfg := persona.PersonaConfig{Name: "code"}
-	if err := persona.Validate(cfg, "base"); err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-}
-
-func TestValidate_EmptyPersonaStillOK(t *testing.T) {
-	if err := persona.Validate(persona.PersonaConfig{}, "base"); err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-}
 
 func TestLoad_ConfigEmbedded(t *testing.T) {
 	dir := t.TempDir()
 	writePersona(t, dir, "base", fullPersona)
 
-	p, err := persona.Load(dir, "base", persona.TemplateData{Time: "now"}, false, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	p := loadForTest(t, dir, "base", persona.TemplateData{Time: "now"}, false, false, nil)
 	if p.Config.OnToolCall.Command != ".shell3/hooks/guard.sh" {
 		t.Errorf("expected hook, got %q", p.Config.OnToolCall.Command)
 	}
@@ -267,10 +243,7 @@ func TestLoad_NameFromFrontmatter(t *testing.T) {
 	dir := t.TempDir()
 	writePersona(t, dir, "base", fullPersona)
 
-	p, err := persona.Load(dir, "base", persona.TemplateData{}, false, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	p := loadForTest(t, dir, "base", persona.TemplateData{}, false, false, nil)
 	if p.Name != "code" {
 		t.Errorf("got name %q, want code (from frontmatter)", p.Name)
 	}
@@ -320,15 +293,12 @@ Persona body.
 {{- end}}`
 	writePersona(t, dir, "t", body)
 
-	p, err := persona.Load(dir, "t", persona.TemplateData{
+	p := loadForTest(t, dir, "t", persona.TemplateData{
 		CoreMemories: []store.MemoryEntry{
 			{Key: "stack", Value: "Go + SQLite"},
 			{Key: "style", Value: "terse"},
 		},
 	}, false, true, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if !strings.Contains(p.SystemPrompt, "## Core memories") {
 		t.Fatalf("expected core memories section, got:\n%s", p.SystemPrompt)
 	}
@@ -348,15 +318,12 @@ MEM={{.Key}}: {{.Value}}
 {{- end}}`
 	writePersona(t, dir, "t", body)
 
-	p, err := persona.Load(dir, "t", persona.TemplateData{
+	p := loadForTest(t, dir, "t", persona.TemplateData{
 		CWD: "{{.Model}}",
 		CoreMemories: []store.MemoryEntry{
 			{Key: "inject", Value: "{{.CWD}} {{range .CoreMemories}}oops{{end}}"},
 		},
 	}, false, true, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
 	for _, want := range []string{"CWD={{.Model}}", "MEM=inject: {{.CWD}} {{range .CoreMemories}}oops{{end}}"} {
 		if !strings.Contains(p.SystemPrompt, want) {
 			t.Fatalf("expected template-like data to remain literal %q; got:\n%s", want, p.SystemPrompt)
@@ -377,7 +344,7 @@ parameters:
 hello
 `
 	writePersona(t, dir, "x", body)
-	cfg, err := persona.ParseConfig(dir, "x")
+	cfg, _, err := persona.ParseConfig([]string{dir}, "x")
 	if err != nil {
 		t.Fatal(err)
 	}

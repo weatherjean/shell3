@@ -1,7 +1,5 @@
-# shell3 runtime files — do not commit
+.ref
+secrets.shell3
 shell3.db
-memory.db
-history.md
 last_*.json
 last_*.jsonl
-secrets.shell3
