@@ -51,6 +51,18 @@ type App struct {
 	input  []rune
 	cursor int
 
+	// Message history for up-arrow recall. history[0] is oldest.
+	// historyDraft always mirrors live input (updated on every keystroke);
+	// Escape clears input but leaves historyDraft intact so it can be
+	// recovered. historyInDraft is true when the user has pressed Up and is
+	// viewing the saved draft (one step before entering the history list).
+	// historyIdx > 0 means the user is viewing a history entry (1 = most
+	// recent); historyIdx is 0 in both live and in-draft modes.
+	history       []string
+	historyIdx    int
+	historyDraft  []rune
+	historyInDraft bool
+
 	// Live streaming preview shown above the input box during a turn.
 	streamLines []string
 

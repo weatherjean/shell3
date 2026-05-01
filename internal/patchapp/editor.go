@@ -36,6 +36,7 @@ func (a *App) processInput(data []byte) (exit bool) {
 					for _, r := range a.pasteBuf {
 						a.insertChar(r)
 					}
+					a.syncDraftLocked()
 					a.render()
 				}
 				a.mu.Unlock()
@@ -88,14 +89,24 @@ func (a *App) processInput(data []byte) (exit bool) {
 			a.mu.Lock()
 			if !a.busy {
 				a.insertChar('\n')
+				a.syncDraftLocked()
 				a.render()
 			}
 			a.mu.Unlock()
 		case keyEscape:
 			a.mu.Lock()
 			if !a.busy {
-				a.input = a.input[:0]
-				a.cursor = 0
+				if a.historyIdx > 0 || a.historyInDraft {
+					// Restore live input from draft; exit history navigation.
+					a.input = append([]rune(nil), a.historyDraft...)
+					a.cursor = len(a.input)
+					a.historyIdx = 0
+					a.historyInDraft = false
+				} else {
+					// Clear input but leave draft intact so up-arrow can recover it.
+					a.input = a.input[:0]
+					a.cursor = 0
+				}
 				a.render()
 			}
 			a.mu.Unlock()
@@ -104,6 +115,7 @@ func (a *App) processInput(data []byte) (exit bool) {
 			if !a.busy && a.cursor > 0 {
 				a.input = append(a.input[:a.cursor-1], a.input[a.cursor:]...)
 				a.cursor--
+				a.syncDraftLocked()
 				a.render()
 			}
 			a.mu.Unlock()
@@ -128,6 +140,9 @@ func (a *App) processInput(data []byte) (exit bool) {
 				row, col := inputCursorPos(a.input, a.cursor, w)
 				if row > 0 {
 					a.cursor = inputOffsetForRowCol(a.input, w, row-1, col)
+					a.render()
+				} else if a.cursor == 0 || a.historyIdx > 0 || a.historyInDraft {
+					a.historyStepBackLocked()
 					a.render()
 				}
 			}
@@ -162,6 +177,7 @@ func (a *App) processInput(data []byte) (exit bool) {
 			a.mu.Lock()
 			if !a.busy {
 				a.insertChar(k.r)
+				a.syncDraftLocked()
 				a.render()
 			}
 			a.mu.Unlock()
@@ -174,6 +190,53 @@ func (a *App) processInput(data []byte) (exit bool) {
 func (a *App) insertChar(r rune) {
 	a.input = append(a.input[:a.cursor], append([]rune{r}, a.input[a.cursor:]...)...)
 	a.cursor++
+}
+
+// syncDraftLocked copies current input into historyDraft. Only called when
+// the user is in live mode (not navigating history). Caller must hold a.mu.
+func (a *App) syncDraftLocked() {
+	if a.historyIdx == 0 && !a.historyInDraft {
+		a.historyDraft = append(a.historyDraft[:0], a.input...)
+	}
+}
+
+// historyStepBackLocked advances one step back through draft→history.
+// Caller must hold a.mu.
+func (a *App) historyStepBackLocked() {
+	if a.historyIdx == 0 && !a.historyInDraft {
+		// Check if draft differs from current input (e.g. after Escape cleared it).
+		draftStr := string(a.historyDraft)
+		inputStr := string(a.input)
+		if draftStr != inputStr && len(a.historyDraft) > 0 {
+			a.historyInDraft = true
+			a.input = append([]rune(nil), a.historyDraft...)
+			a.cursor = len(a.input)
+			return
+		}
+		// Draft same as input: jump straight into history list.
+		if len(a.history) > 0 {
+			a.historyIdx = 1
+			a.input = []rune(a.history[len(a.history)-1])
+			a.cursor = len(a.input)
+		}
+		return
+	}
+	if a.historyInDraft {
+		// Was showing draft; step into history.
+		a.historyInDraft = false
+		if len(a.history) > 0 {
+			a.historyIdx = 1
+			a.input = []rune(a.history[len(a.history)-1])
+			a.cursor = len(a.input)
+		}
+		return
+	}
+	// Already in history list; go further back.
+	if a.historyIdx < len(a.history) {
+		a.historyIdx++
+		a.input = []rune(a.history[len(a.history)-a.historyIdx])
+		a.cursor = len(a.input)
+	}
 }
 
 // handleCtrlC: cancel running turn, or if idle, prime a double-tap to exit.
@@ -214,6 +277,13 @@ func (a *App) handleEnter() {
 	if trimmed == "" {
 		return
 	}
+
+	a.mu.Lock()
+	a.history = append(a.history, line)
+	a.historyIdx = 0
+	a.historyInDraft = false
+	a.historyDraft = a.historyDraft[:0]
+	a.mu.Unlock()
 
 	// Echo the user message to scrollback as a styled chat bubble.
 	// Slash commands echo too so the output has visible context.
