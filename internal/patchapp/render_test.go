@@ -111,12 +111,26 @@ func TestWrapCommittedLines_UsesConservativeWrap(t *testing.T) {
 	}
 }
 
-func TestWrapCommittedLines_PreservesStyledLines(t *testing.T) {
-	styled := "\033[40m\033[38;2;200;200;200m  hello world\033[0m"
+func TestWrapCommittedLines_WrapsStyledAssistantLines(t *testing.T) {
+	styled := "hello \033[1mbrave new\033[0m world"
+	got := wrapCommittedLines([]string{styled}, 12)
+	want := []string{"hello \033[1mbrave", "new\033[0m world"}
+	if !equalStrings(got, want) {
+		t.Fatalf("wrapCommittedLines styled assistant line:\n  got:  %q\n  want: %q", got, want)
+	}
+	for _, l := range got {
+		if patchtui.VisibleLen(l) > 12 {
+			t.Fatalf("wrapped styled line visible width %d > 12: %q", patchtui.VisibleLen(l), l)
+		}
+	}
+}
+
+func TestWrapCommittedLines_LeavesAlreadyBoundedUserBubble(t *testing.T) {
+	styled := renderUserBubbleLine(true, "hello", 5, 8)
 	got := wrapCommittedLines([]string{styled}, 8)
 	want := []string{styled}
 	if !equalStrings(got, want) {
-		t.Fatalf("wrapCommittedLines styled:\n  got:  %q\n  want: %q", got, want)
+		t.Fatalf("wrapCommittedLines user bubble:\n  got:  %q\n  want: %q", got, want)
 	}
 }
 

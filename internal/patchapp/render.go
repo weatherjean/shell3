@@ -193,13 +193,6 @@ func wrapCommittedLines(lines []string, width int) []string {
 	}
 	out := make([]string, 0, len(lines))
 	for _, line := range lines {
-		// Pre-styled lines (e.g. user bubbles with ANSI bg/fg) are already
-		// width-bounded by their renderer. Re-wrapping can split style/prefix
-		// sequences and corrupt layout, so pass them through untouched.
-		if strings.Contains(line, "\x1b[") {
-			out = append(out, line)
-			continue
-		}
 		out = append(out, wrapToWidth([]string{line}, width)...)
 	}
 	return out
