@@ -38,7 +38,7 @@ shell3 uses a two-tier directory structure.
 
 Project tools and personas override global ones when names collide.
 
-The repository includes copyable example configurations under `examples/`:
+The repository includes copyable example configurations under `examples/`. The canonical default bootstrap files shipped to new users live under `internal/scaffold/defaults/` and are written only when the target file is absent.
 
 - `examples/tools/` — user-defined tools such as Brave Search and page fetching
 - `examples/skills/` — reusable workflow skills, including web search guidance
@@ -78,7 +78,7 @@ shell3   # bootstraps credentials fresh; personas/tools/skills arrive from git
 
 The root command runs the interactive chat agent. With a positional argument it runs once non-interactively.
 
-On first run in a directory, shell3 auto-bootstraps: creates `.shell3/`, writes a `.ref` UUID, and writes default personas and tools if absent.
+On first run in a directory, shell3 auto-bootstraps: creates `.shell3/`, writes a `.ref` UUID, and writes default global personas, tools, skills, and hooks if absent.
 
 ```
 shell3                                           # interactive TUI
@@ -337,7 +337,7 @@ after: ""                    # optional; bash -c hook, stdin = command output
 
 **Validation at startup:** Invalid tools are skipped with a warning to stderr. Reasons include: missing required field, name shadowing a built-in, invalid name format, declared secret missing from secrets store, `parameters.type` not `object`.
 
-**Getting started:** On first run, a disabled `brave_search.yaml` is written to `.shell3/tools/`. Run `shell3 secrets set --key BRAVE_API_KEY --secret <token>`, set `enabled: true`, restart. See `examples/tools/` for fuller copyable tool configs, including a Brave Search tool with concise search and LLM Context modes.
+**Getting started:** On first run, a disabled `brave_search.yaml` and an enabled `web_fetch.yaml` are written to `~/.shell3/tools/` if absent. Run `shell3 secrets set --key BRAVE_API_KEY --secret <token>`, set `enabled: true` in `brave_search.yaml`, and restart to use Brave Search. See `examples/tools/` for fuller copyable tool configs, including a Brave Search tool with concise search and LLM Context modes.
 
 ---
 

@@ -21,7 +21,7 @@ func EnsureGlobal(g paths.Global) error {
 			return fmt.Errorf("bootstrap: mkdir %s: %w", dir, err)
 		}
 	}
-	if err := scaffold.WriteDefaults(g.Personas, g.Tools); err != nil {
+	if err := scaffold.WriteDefaults(g.Personas, g.Tools, g.Skills, g.Hooks); err != nil {
 		return fmt.Errorf("bootstrap: write global defaults: %w", err)
 	}
 	return nil

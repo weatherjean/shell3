@@ -71,11 +71,11 @@ func LoadAll(dirs []string, availableSecrets map[string]struct{}) (tools []Tool,
 				warnings = append(warnings, fmt.Sprintf("%s: parse: %v", path, uErr))
 				continue
 			}
-			if vErr := Validate(s, availableSecrets); vErr != nil {
-				warnings = append(warnings, fmt.Sprintf("%s: %v", path, vErr))
+			if !s.Enabled {
 				continue
 			}
-			if !s.Enabled {
+			if vErr := Validate(s, availableSecrets); vErr != nil {
+				warnings = append(warnings, fmt.Sprintf("%s: %v", path, vErr))
 				continue
 			}
 			byName[s.Name] = Tool{Spec: s, Path: path}

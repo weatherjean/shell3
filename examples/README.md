@@ -4,6 +4,8 @@ This directory contains copyable examples for shell3 configuration.
 
 These files are examples, not automatically loaded from this directory. To use one, copy it into your shell3 config directory, usually `~/.shell3/`, or into a project's `.shell3/` directory when you want project-local behavior.
 
+The default bootstrap package that new users receive lives in `internal/scaffold/defaults/`. This `examples/` directory is for readable, copyable reference configs and may include the same files or variants.
+
 ## Tools
 
 Example tools live in [`tools/`](tools/).

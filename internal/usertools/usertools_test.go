@@ -99,6 +99,29 @@ command: 'echo'
 	}
 }
 
+func TestLoadAll_SkipsDisabledBeforeSecretValidation(t *testing.T) {
+	dir := t.TempDir()
+	yaml := `name: off_tool
+description: d
+enabled: false
+secrets: [MISSING_KEY]
+parameters: {type: object, properties: {}}
+command: 'echo'
+`
+	os.WriteFile(filepath.Join(dir, "off.yaml"), []byte(yaml), 0644)
+
+	tools, warnings, err := LoadAll([]string{dir}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tools) != 0 {
+		t.Fatalf("expected 0 tools, got %d", len(tools))
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("expected disabled tool to produce no warnings, got %v", warnings)
+	}
+}
+
 func TestLoadAll_ProjectOverridesGlobal(t *testing.T) {
 	global := t.TempDir()
 	project := t.TempDir()
