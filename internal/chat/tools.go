@@ -332,10 +332,11 @@ func truncateOutput(s string) string {
 // in place; the full compact args are saved to history before the session rolls.
 func handleCompactHistory(rawArgs string, cfg Config, sess *session, allMsgs []llm.Message) (out string, newAllMsgs []llm.Message) {
 	var args struct {
-		Summary              string   `json:"summary"`
-		ImportantFiles       []string `json:"important_files"`
-		ImportantReferences  []string `json:"important_references"`
-		NextSteps            []string `json:"next_steps"`
+		Summary             string   `json:"summary"`
+		ImportantFiles      []string `json:"important_files"`
+		ImportantReferences []string `json:"important_references"`
+		Skills              []string `json:"skills"`
+		NextSteps           []string `json:"next_steps"`
 	}
 	if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
 		return fmt.Sprintf("error: bad arguments: %v", err), allMsgs
@@ -385,6 +386,13 @@ func handleCompactHistory(rawArgs string, cfg Config, sess *session, allMsgs []l
 			fmt.Fprintf(&b, "- %s\n", r)
 		}
 		b.WriteString("</important-references>")
+	}
+	if len(args.Skills) > 0 {
+		b.WriteString("\n\n<skills-to-reread>\n")
+		for _, s := range args.Skills {
+			fmt.Fprintf(&b, "- %s\n", s)
+		}
+		b.WriteString("</skills-to-reread>")
 	}
 	if len(args.NextSteps) > 0 {
 		b.WriteString("\n\n<next-steps>\n")

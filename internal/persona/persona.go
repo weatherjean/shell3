@@ -204,6 +204,7 @@ var compactHistoryTool = ToolDef{
 		"ALWAYS follow the rules in the system prompt for when and how to offer compaction. " +
 		"Write a thorough summary: decisions made, code written, errors encountered, outcomes reached. " +
 		"List files created or modified. List references worth keeping (sessions, commits, URLs). " +
+		"List skills the continuation should re-read, especially active workflow skills. " +
 		"Include next steps only if there is confirmed remaining work.",
 	Parameters: map[string]any{
 		"type": "object",
@@ -221,6 +222,11 @@ var compactHistoryTool = ToolDef{
 				"type":        "array",
 				"items":       map[string]any{"type": "string"},
 				"description": "External references worth preserving: session IDs, commit hashes, URLs, ticket numbers.",
+			},
+			"skills": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "Skill names or file paths the continuation should re-read before resuming work.",
 			},
 			"next_steps": map[string]any{
 				"type":        "array",

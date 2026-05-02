@@ -114,6 +114,28 @@ func TestLoad_EditToolsPresentByDefault(t *testing.T) {
 	}
 }
 
+func TestLoad_CompactHistoryToolIncludesSkillsField(t *testing.T) {
+	dir := t.TempDir()
+	writePersona(t, dir, "base", simplePersona)
+
+	p := loadForTest(t, dir, "base", persona.TemplateData{}, false, false, nil)
+	tool, ok := findToolNamed(p.Tools, "compact_history")
+	if !ok {
+		t.Fatalf("missing compact_history tool; tools: %v", toolNames(p.Tools))
+	}
+	properties, ok := tool.Parameters["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("compact_history properties missing or malformed: %#v", tool.Parameters)
+	}
+	skills, ok := properties["skills"].(map[string]any)
+	if !ok {
+		t.Fatalf("compact_history skills field missing or malformed: %#v", properties["skills"])
+	}
+	if skills["type"] != "array" {
+		t.Fatalf("compact_history skills field type = %#v, want array", skills["type"])
+	}
+}
+
 func TestLoad_StoreToolsIncludedWhenHasStore(t *testing.T) {
 	dir := t.TempDir()
 	writePersona(t, dir, "base", simplePersona)
@@ -228,7 +250,6 @@ func TestParseConfig_MissingFileReturnsError(t *testing.T) {
 	}
 }
 
-
 func TestLoad_ConfigEmbedded(t *testing.T) {
 	dir := t.TempDir()
 	writePersona(t, dir, "base", fullPersona)
@@ -269,13 +290,18 @@ func toolNames(tools []persona.ToolDef) []string {
 	return out
 }
 
-func hasToolNamed(tools []persona.ToolDef, name string) bool {
+func findToolNamed(tools []persona.ToolDef, name string) (persona.ToolDef, bool) {
 	for _, t := range tools {
 		if t.Name == name {
-			return true
+			return t, true
 		}
 	}
-	return false
+	return persona.ToolDef{}, false
+}
+
+func hasToolNamed(tools []persona.ToolDef, name string) bool {
+	_, ok := findToolNamed(tools, name)
+	return ok
 }
 
 func TestLoad_CoreMemoriesRendered(t *testing.T) {
