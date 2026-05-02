@@ -474,7 +474,7 @@ func TestSlash_PromptDumps(t *testing.T) {
 	app.call(t, "prompt", "")
 	hasPrint := false
 	for _, c := range app.snapshot() {
-		if strings.HasPrefix(c, "Print(") && strings.Contains(c, "system prompt:") {
+		if strings.HasPrefix(c, "Print(") && strings.Contains(c, "System prompt") {
 			hasPrint = true
 		}
 	}

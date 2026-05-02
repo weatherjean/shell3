@@ -97,25 +97,32 @@ func (a *App) printAutoHelp() {
 	}
 	sort.Strings(names)
 
-	lines := []string{"", patchtui.Bold + "slash commands:" + patchtui.Reset}
+	lines := []string{
+		"",
+		patchtui.Yellow + patchtui.Bold + "Slash commands" + patchtui.Reset,
+		patchtui.Dim + "Run a command by typing it at the prompt." + patchtui.Reset,
+		"",
+	}
 	for _, n := range names {
 		c := seen[n]
-		display := "/" + c.Name
+		cmdCol := fmt.Sprintf("  %-24s", "/"+c.Name)
 		if len(c.Aliases) > 0 {
-			display += " (/" + strings.Join(c.Aliases, ", /") + ")"
+			plainDisplay := "/" + c.Name + " (/" + strings.Join(c.Aliases, ", /") + ")"
+			cmdCol = fmt.Sprintf("  %-24s", plainDisplay)
 		}
-		lines = append(lines, fmt.Sprintf("  %-22s %s", display, c.Help))
+		lines = append(lines, patchtui.Cyan+patchtui.Bold+cmdCol+patchtui.Reset+"  "+patchtui.Dim+c.Help+patchtui.Reset)
 	}
 	lines = append(lines, "",
-		patchtui.Bold+"keyboard shortcuts:"+patchtui.Reset,
-		"  enter          send message",
-		"  alt+enter      newline in message",
-		"  esc            clear input",
-		"  ctrl+c         cancel active response",
-		"  ctrl+c ctrl+c  quit (when idle)",
+		patchtui.Yellow+patchtui.Bold+"Keyboard shortcuts"+patchtui.Reset,
+		patchtui.Cyan+patchtui.Bold+"  enter          "+patchtui.Reset+patchtui.Dim+"send message"+patchtui.Reset,
+		patchtui.Cyan+patchtui.Bold+"  alt+enter      "+patchtui.Reset+patchtui.Dim+"newline in message"+patchtui.Reset,
+		patchtui.Cyan+patchtui.Bold+"  esc            "+patchtui.Reset+patchtui.Dim+"clear input"+patchtui.Reset,
+		patchtui.Cyan+patchtui.Bold+"  ctrl+c         "+patchtui.Reset+patchtui.Dim+"cancel active response"+patchtui.Reset,
+		patchtui.Cyan+patchtui.Bold+"  ctrl+c ctrl+c  "+patchtui.Reset+patchtui.Dim+"quit (when idle)"+patchtui.Reset,
 		"",
-		patchtui.Bold+"shell passthrough:"+patchtui.Reset,
-		"  !<cmd>     run shell command with full terminal",
+		patchtui.Yellow+patchtui.Bold+"Shell passthrough"+patchtui.Reset,
+		patchtui.Cyan+patchtui.Bold+"  !<cmd>         "+patchtui.Reset+patchtui.Dim+"run shell command with full terminal"+patchtui.Reset,
+		"",
 	)
 	a.Print(lines)
 }

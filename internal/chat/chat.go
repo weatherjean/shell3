@@ -332,12 +332,35 @@ func registerSlashCommands(app slashTarget, cfg *Config, sess *session, lastUsag
 	app.RegisterSlash(patchapp.SlashCommand{
 		Name: "prompt", Help: "dump system prompt and active tools",
 		Handler: func(string) {
-			lines := []string{patchtui.Bold + "system prompt:" + patchtui.Reset}
-			lines = append(lines, strings.Split(cfg.Personality.SystemPrompt, "\n")...)
-			lines = append(lines, "", patchtui.Bold+"active tools:"+patchtui.Reset)
-			for _, t := range cfg.Personality.Tools {
-				lines = append(lines, fmt.Sprintf("  %-16s %s", t.Name, t.Description))
+			w, _ := patchtui.Size()
+			if w < 20 {
+				w = 80
 			}
+
+			lines := []string{
+				"",
+				patchtui.Yellow + patchtui.Bold + "System prompt" + patchtui.Reset,
+				patchtui.Dim + strings.Repeat("─", min(40, max(0, w-2))) + patchtui.Reset,
+			}
+			prompt := strings.TrimSpace(cfg.Personality.SystemPrompt)
+			if prompt == "" {
+				lines = append(lines, patchtui.Dim+"(empty)"+patchtui.Reset)
+			} else {
+				lines = append(lines, patchmd.Render(prompt, w-2)...)
+			}
+
+			lines = append(lines, "", patchtui.Cyan+patchtui.Bold+"Active tools"+patchtui.Reset)
+			if len(cfg.Personality.Tools) == 0 {
+				lines = append(lines, "  "+patchtui.Dim+"(none)"+patchtui.Reset)
+			} else {
+				for _, t := range cfg.Personality.Tools {
+					lines = append(lines,
+						"  "+patchtui.Green+patchtui.Bold+t.Name+patchtui.Reset,
+						"    "+patchtui.Dim+t.Description+patchtui.Reset,
+					)
+				}
+			}
+			lines = append(lines, "")
 			app.Print(lines)
 		},
 	})
