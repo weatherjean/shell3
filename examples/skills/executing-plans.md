@@ -20,7 +20,8 @@ Then:
 1. If uncommitted changes exist, determine whether they are from this session and related to the current task.
 2. If changes may be unrelated or user-owned, stop and ask what to do: keep mixed state, commit, stash, discard, or move to another branch.
 3. Do not discard, overwrite, stage, or commit user work without explicit approval.
-4. If the tree is clean or the user approves the state, create/switch to a dedicated feature branch before implementation when the work may be committed.
+4. Always request or create/switch to a dedicated feature branch before implementation for any work that could be committed.
+5. If changes already exist on `main`, stop and ask whether to move them to a feature branch before committing. Do not commit directly to `main` unless the user explicitly says to commit directly to `main`.
 
 Branch naming: use a short descriptive branch name such as `feat/help-rendering` or `chore/update-skills`.
 
