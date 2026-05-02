@@ -166,3 +166,58 @@ func TestWriteFileOverwrites(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestUnifiedDiffShowsThreeContextLinesAroundSingleEdit(t *testing.T) {
+	oldContent := numberedLines(15)
+	newContent := strings.Replace(oldContent, "line-08\n", "LINE-08\n", 1)
+
+	diff := UnifiedDiff(oldContent, newContent, 3)
+	want := strings.Join([]string{
+		" line-05",
+		" line-06",
+		" line-07",
+		"-line-08",
+		"+LINE-08",
+		" line-09",
+		" line-10",
+		" line-11",
+	}, "\n")
+	if !strings.Contains(diff, want) {
+		t.Fatalf("diff missing 3-line edit window:\n%s", diff)
+	}
+	for _, hidden := range []string{" line-04", " line-12"} {
+		if strings.Contains(diff, hidden) {
+			t.Fatalf("diff included context outside 3-line window %q:\n%s", hidden, diff)
+		}
+	}
+}
+
+func TestUnifiedDiffShowsAllDistantHunks(t *testing.T) {
+	oldContent := numberedLines(30)
+	newContent := strings.Replace(oldContent, "line-08\n", "LINE-08\n", 1)
+	newContent = strings.Replace(newContent, "line-25\n", "LINE-25\n", 1)
+
+	diff := UnifiedDiff(oldContent, newContent, 3)
+	if !strings.Contains(diff, "-line-08") || !strings.Contains(diff, "+LINE-08") {
+		t.Fatalf("diff missing first hunk:\n%s", diff)
+	}
+	if !strings.Contains(diff, "-line-25") || !strings.Contains(diff, "+LINE-25") {
+		t.Fatalf("diff missing second hunk:\n%s", diff)
+	}
+	if count := strings.Count(diff, "@@"); count != 4 { // two hunk headers, each with opening and closing @@
+		t.Fatalf("got %d @@ markers, want 4 for two hunks:\n%s", count, diff)
+	}
+	for _, hidden := range []string{" line-12", " line-21"} {
+		if strings.Contains(diff, hidden) {
+			t.Fatalf("diff included unchanged gap line %q:\n%s", hidden, diff)
+		}
+	}
+}
+
+func numberedLines(n int) string {
+	var sb strings.Builder
+	for i := 1; i <= n; i++ {
+		fmt.Fprintf(&sb, "line-%02d\n", i)
+	}
+	return sb.String()
+}

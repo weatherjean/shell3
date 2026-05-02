@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/aymanbagabas/go-udiff"
 )
 
 // Result reports what an edit/write produced so callers can render stats.
@@ -218,79 +220,28 @@ func splitLines(s string) []string {
 	return lines
 }
 
-// UnifiedDiff returns a small unified-style preview (max maxLines body lines).
-// Not a full unified diff — just a quick visual for tool output. For files
-// large enough that DP would blow lcsBudget, returns a stat-only placeholder
-// rather than allocating a giant matrix.
-func UnifiedDiff(oldContent, newContent string, maxLines int) string {
-	a := splitLines(oldContent)
-	b := splitLines(newContent)
-	m, n := len(a), len(b)
-	if m*n > lcsBudget {
-		return fmt.Sprintf("  (diff omitted — file too large: %d × %d lines)", m, n)
+// UnifiedDiff returns a unified diff preview with the requested number of
+// unchanged context lines around every changed hunk. Unlike the chat-level
+// generic tool-output truncation, this intentionally includes every hunk so
+// distant edits do not disappear from the user's view.
+func UnifiedDiff(oldContent, newContent string, contextLines int) string {
+	oldNormalized := normalizeDiffInput(oldContent)
+	newNormalized := normalizeDiffInput(newContent)
+	diff, err := udiff.ToUnified("old", "new", oldNormalized, udiff.Lines(oldNormalized, newNormalized), contextLines)
+	if err != nil {
+		return ""
 	}
-	dp := make([][]int, m+1)
-	for i := range dp {
-		dp[i] = make([]int, n+1)
-	}
-	for i := 1; i <= m; i++ {
-		for j := 1; j <= n; j++ {
-			if a[i-1] == b[j-1] {
-				dp[i][j] = dp[i-1][j-1] + 1
-			} else {
-				dp[i][j] = max(dp[i-1][j], dp[i][j-1])
-			}
-		}
-	}
-	var ops []string
-	i, j := m, n
-	for i > 0 && j > 0 {
-		switch {
-		case a[i-1] == b[j-1]:
-			ops = append([]string{"  " + a[i-1]}, ops...)
-			i--
-			j--
-		case dp[i-1][j] >= dp[i][j-1]:
-			ops = append([]string{"- " + a[i-1]}, ops...)
-			i--
-		default:
-			ops = append([]string{"+ " + b[j-1]}, ops...)
-			j--
-		}
-	}
-	for i > 0 {
-		ops = append([]string{"- " + a[i-1]}, ops...)
-		i--
-	}
-	for j > 0 {
-		ops = append([]string{"+ " + b[j-1]}, ops...)
-		j--
-	}
-	// Trim to first maxLines that include changes plus 1 line of context each side.
-	body := compactDiff(ops, maxLines)
-	return strings.Join(body, "\n")
+	return stripDiffFileHeaders(strings.TrimRight(diff, "\n"))
 }
 
-func compactDiff(ops []string, maxLines int) []string {
-	if maxLines <= 0 || len(ops) <= maxLines {
-		return ops
+func normalizeDiffInput(s string) string {
+	return strings.ReplaceAll(s, "\r\n", "\n")
+}
+
+func stripDiffFileHeaders(diff string) string {
+	lines := strings.Split(diff, "\n")
+	if len(lines) >= 2 && strings.HasPrefix(lines[0], "--- ") && strings.HasPrefix(lines[1], "+++ ") {
+		lines = lines[2:]
 	}
-	// Find the first change and emit a window around it.
-	first := -1
-	for i, op := range ops {
-		if strings.HasPrefix(op, "+ ") || strings.HasPrefix(op, "- ") {
-			first = i
-			break
-		}
-	}
-	if first == -1 {
-		return ops[:maxLines]
-	}
-	start := max(0, first-1)
-	end := min(len(ops), start+maxLines)
-	out := append([]string{}, ops[start:end]...)
-	if end < len(ops) {
-		out = append(out, fmt.Sprintf("  … (%d more lines)", len(ops)-end))
-	}
-	return out
+	return strings.Join(lines, "\n")
 }
