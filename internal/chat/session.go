@@ -17,7 +17,8 @@ type session struct {
 	// models and break tool_call_id-based addressing (e.g. prune_tool_result).
 	nextToolCallID   int
 	reminders        reminderTracker
-	lastPromptTokens int // accurate token count from most recent streamOnce response
+	lastPromptTokens int   // accurate token count from most recent streamOnce response
+	id               int64 // store session id; 0 if no store configured
 }
 
 func (s *session) append(m llm.Message) {

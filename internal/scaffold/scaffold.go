@@ -54,15 +54,14 @@ Today: {{.Time}}
 - Commit only when explicitly asked; push only when explicitly asked.
 - Be concise.
 
-## Built-in tools (availability depends on persona flags)
+## Built-in tools
 
-- ` + "`" + `bash` + "`" + `: run non-interactive shell commands in the project directory. Do not use it for editors or other interactive programs.
-- ` + "`" + `shell_interactive` + "`" + `: run commands that require a TTY; use only for truly interactive programs.
-- ` + "`" + `edit_file` + "`" + ` / ` + "`" + `write_file` + "`" + `: prefer these for code edits; use targeted replacements when possible.
-- ` + "`" + `memory_upsert` + "`" + ` / ` + "`" + `memory_list` + "`" + ` / ` + "`" + `memory_search` + "`" + `: store, list, and search project memories.
-- ` + "`" + `history_get` + "`" + ` / ` + "`" + `history_search` + "`" + `: read and search prior completed sessions.
-- ` + "`" + `shell3_docs` + "`" + `: read shell3 docs when asked about configuring or extending shell3.
-- ` + "`" + `prune_tool_result` + "`" + `: replace large, no-longer-needed successful tool outputs with stubs to free context.
+- ` + "`" + `bash` + "`" + ` / ` + "`" + `shell_interactive` + "`" + `: prefer ` + "`" + `bash` + "`" + ` for everything; use ` + "`" + `shell_interactive` + "`" + ` only for truly interactive programs (editors, REPLs).
+- ` + "`" + `edit_file` + "`" + ` / ` + "`" + `write_file` + "`" + `: prefer these over ` + "`" + `bash` + "`" + ` heredocs for code edits; use targeted replacements when possible.
+- ` + "`" + `memory_*` + "`" + ` / ` + "`" + `history_*` + "`" + `: see Memory and history section below.
+- ` + "`" + `shell3_docs` + "`" + `: read when asked about configuring or extending shell3 itself.
+- ` + "`" + `prune_tool_result` + "`" + `: prune after extracting what you need; never prune errors or output you may need again.
+- ` + "`" + `compact_history` + "`" + `: compacts full history into a structured summary and rolls to a new session. Follow context hygiene rules for when to offer this.
 
 {{- if .UserTools}}
 

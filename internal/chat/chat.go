@@ -55,14 +55,16 @@ type Config struct {
 func RunInteractive(ctx context.Context, cfg Config) error {
 	sess := &session{}
 
-	var sessionID int64
 	if cfg.Store != nil {
-		var err error
-		sessionID, err = cfg.Store.StartSession()
+		sessionID, err := cfg.Store.StartSession()
 		if err != nil {
 			return fmt.Errorf("chat: start session: %w", err)
 		}
-		defer cfg.Store.EndSession(sessionID)
+		sess.id = sessionID
+		// End whichever session is current when the loop exits. compact_history
+		// may roll sess.id to a new session mid-conversation, so read sess.id
+		// at defer time rather than capturing the initial sessionID.
+		defer func() { cfg.Store.EndSession(sess.id) }()
 	}
 
 	app := patchapp.New(cfg.ModeLabel, cfg.StatusLine, patchapp.WelcomeInfo{
@@ -92,7 +94,7 @@ func RunInteractive(ctx context.Context, cfg Config) error {
 		go func() {
 			defer cancel()
 			runTurn(turnCtx, cfg, sess, userMsg, ch)
-			saveHistory(cfg, sess, sessionID, prevLen)
+			saveHistory(cfg, sess, sess.id, prevLen)
 		}()
 		go drainTurn(ch, app, &lastUsage, &cfg)
 	}

@@ -135,7 +135,7 @@ func Load(cfg PersonaConfig, body string, data TemplateData, hasStore, noBash bo
 	}
 
 	var tools []ToolDef
-	tools = append(tools, docsTool, pruneToolResultTool)
+	tools = append(tools, docsTool, pruneToolResultTool, compactHistoryTool)
 	if !noBash {
 		tools = append(tools, bashTool, shellInteractiveTool, editFileTool, writeFileTool)
 	}
@@ -156,7 +156,7 @@ func Load(cfg PersonaConfig, body string, data TemplateData, hasStore, noBash bo
 // BuiltinToolNames returns the names of all built-in tools. Used by usertools
 // to prevent name collisions.
 func BuiltinToolNames() map[string]struct{} {
-	all := append([]ToolDef{docsTool, pruneToolResultTool, bashTool, shellInteractiveTool,
+	all := append([]ToolDef{docsTool, pruneToolResultTool, compactHistoryTool, bashTool, shellInteractiveTool,
 		editFileTool, writeFileTool}, storeTools...)
 	names := make(map[string]struct{}, len(all))
 	for _, t := range all {
@@ -195,6 +195,40 @@ var pruneToolResultTool = ToolDef{
 			"reason":       map[string]any{"type": "string", "description": "One-line note on why the result is no longer needed"},
 		},
 		"required": []string{"tool_call_id", "reason"},
+	},
+}
+
+var compactHistoryTool = ToolDef{
+	Name: "compact_history",
+	Description: "Compact the conversation history into a structured summary to free context. " +
+		"ALWAYS follow the rules in the system prompt for when and how to offer compaction. " +
+		"Write a thorough summary: decisions made, code written, errors encountered, outcomes reached. " +
+		"List files created or modified. List references worth keeping (sessions, commits, URLs). " +
+		"Include next steps only if there is confirmed remaining work.",
+	Parameters: map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"summary": map[string]any{
+				"type":        "string",
+				"description": "Narrative summary of the conversation: what was done, decisions made, errors encountered, outcomes reached.",
+			},
+			"important_files": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "File paths created or modified that may need to be re-read after compaction.",
+			},
+			"important_references": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "External references worth preserving: session IDs, commit hashes, URLs, ticket numbers.",
+			},
+			"next_steps": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "Remaining work items confirmed by the user. Omit if work is complete.",
+			},
+		},
+		"required": []string{"summary"},
 	},
 }
 

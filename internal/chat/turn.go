@@ -178,6 +178,10 @@ func runTurn(ctx context.Context, cfg Config, sess *session, userMsg llm.Message
 				replyC := make(chan string, 1)
 				ch <- patchapp.TTYExecEvent{Cmd: command, WorkDir: cfg.WorkDir, ReplyC: replyC}
 				out = <-replyC
+			} else if tc.Name == "compact_history" {
+				ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, tc.Name, "", false) + "\n"}
+				out, allMsgs = handleCompactHistory(tc.RawArgs, cfg, sess, allMsgs)
+				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(out, "\n")) + "\n\n"}
 			} else if tc.Name == "prune_tool_result" {
 				ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, tc.Name, tc.RawArgs, false) + "\n"}
 				out = handlePruneToolResult(tc.RawArgs, allMsgs, sess.messages)
@@ -302,6 +306,11 @@ func parseRawArgs(raw string) map[string]any {
 // saveHistory persists new messages to the store after a turn.
 func saveHistory(cfg Config, sess *session, sessionID int64, from int) {
 	if cfg.Store == nil {
+		return
+	}
+	if from > len(sess.messages) {
+		// compact_history rebuilt sess.messages from scratch; nothing new to save
+		// (compact handler already wrote the summary to history directly).
 		return
 	}
 	for _, m := range sess.messages[from:] {
