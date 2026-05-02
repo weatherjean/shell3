@@ -294,6 +294,46 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		Secrets:       secretsMap,
 		Params:        pers.Parameters,
 	}
+	cfg.Reloader = func() (persona.Persona, map[string]usertools.Tool, error) {
+		newPCfg, newBody, err := persona.ParseConfig([]string{l.Personas, g.Personas}, personaName)
+		if err != nil {
+			return persona.Persona{}, nil, err
+		}
+		newAllSkills, _ := skills.LoadAll([]string{g.Skills, l.Skills})
+		newLoadedSkills := filterSkills(newAllSkills, newPCfg.Skills)
+
+		newAllTools, _, _ := usertools.LoadAll(toolsDirs, available)
+		newLoadedTools := filterTools(newAllTools, newPCfg.Tools)
+		newUserToolDefs := make([]llm.ToolDefinition, 0, len(newLoadedTools))
+		newUserToolMap := make(map[string]usertools.Tool, len(newLoadedTools))
+		for _, ut := range newLoadedTools {
+			newUserToolDefs = append(newUserToolDefs, llm.ToolDefinition{
+				Name:        ut.Name,
+				Description: ut.Description,
+				Parameters:  ut.Parameters,
+			})
+			newUserToolMap[ut.Name] = ut
+		}
+
+		var newCoreMems []store.MemoryEntry
+		if st != nil {
+			newCoreMems, _ = st.MemoryQuery("", true, 0)
+		}
+
+		newData := persona.TemplateData{
+			Skills:       skills.BuildSection(newLoadedSkills),
+			Time:         time.Now().Format("Mon Jan 2 2006, 15:04 MST"),
+			CWD:          cwd,
+			Model:        model,
+			CoreMemories: newCoreMems,
+			UserTools:    newUserToolDefs,
+		}
+		newPers, err := persona.Load(newPCfg, newBody, newData, st != nil, noBash, newUserToolDefs)
+		if err != nil {
+			return persona.Persona{}, nil, err
+		}
+		return newPers, newUserToolMap, nil
+	}
 
 	if initialInput != "" {
 		return chat.RunOnce(ctx, cfg, initialInput)

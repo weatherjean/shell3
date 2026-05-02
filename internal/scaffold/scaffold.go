@@ -43,6 +43,10 @@ Today: {{.Time}}
 
 {{range .CoreMemories}}- {{.Key}}: {{.Value}}
 {{end}}
+{{- else}}
+
+**No core memories for this project.** At the start of this session, greet the user and say something like: "I have no core memories of this codebase yet — I'd suggest we start by building some. Want me to do a deep review of the project so I can work more autonomously?" Ask once — do not repeat the offer.
+If the user confirms, perform the deep review and then create core memories for software-project essentials (project scope/context, canonical build/test/validation commands, key architecture entrypoints, and active constraints/TODOs).
 {{- end}}
 
 ## Default workflow

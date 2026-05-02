@@ -44,6 +44,7 @@ type Config struct {
 	ActiveTools   []string // user tool names active for this persona
 	Models        []ModelChoice
 	ModelSwitcher func(provider, model string) (LLMClient, error)
+	Reloader      func() (persona.Persona, map[string]usertools.Tool, error)
 	Truncate      bool
 	Docs          string
 	UserTools     map[string]usertools.Tool
@@ -215,9 +216,32 @@ type slashTarget interface {
 func registerSlashCommands(app slashTarget, cfg *Config, sess *session, lastUsage *llm.Usage, launchTurn func(llm.Message)) {
 	dim := func(s string) { app.PrintLine(patchtui.Dim + s + patchtui.Reset) }
 
+	doReload := func() bool {
+		if cfg.Reloader == nil {
+			return true
+		}
+		newPers, newToolMap, err := cfg.Reloader()
+		if err != nil {
+			dim(fmt.Sprintf("[reload failed: %v]", err))
+			return false
+		}
+		cfg.Personality = newPers
+		cfg.UserTools = newToolMap
+		return true
+	}
+
 	app.RegisterSlash(patchapp.SlashCommand{
-		Name: "clear", Help: "reset conversation context",
+		Name: "reload", Help: "rebuild system prompt from disk (memories, skills, tools)",
 		Handler: func(string) {
+			if doReload() {
+				dim("[reloaded: memories, skills, and tools refreshed]")
+			}
+		},
+	})
+	app.RegisterSlash(patchapp.SlashCommand{
+		Name: "clear", Help: "reset conversation context and reload system prompt",
+		Handler: func(string) {
+			doReload()
 			sess.messages = nil
 			dim("[context cleared]")
 		},
@@ -519,7 +543,8 @@ func pruneLastTurn(messages []llm.Message) []llm.Message {
 
 func slashHelp() string {
 	return "\n" + patchtui.Bold + "slash commands:" + patchtui.Reset + "\n" +
-		"  /clear     reset conversation context\n" +
+		"  /reload    rebuild system prompt (memories, skills, tools) without clearing context\n" +
+		"  /clear     reset conversation context and reload system prompt\n" +
 		"  /rollback  remove last turn from context\n" +
 		"  /prune     /prune <id> — replace tool result <id> with a stub\n" +
 		"  /model     /model <name> to switch\n" +

@@ -182,6 +182,7 @@ func runTurn(ctx context.Context, cfg Config, sess *session, userMsg llm.Message
 				ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, tc.Name, "", false) + "\n"}
 				out, allMsgs = handleCompactHistory(tc.RawArgs, cfg, sess, allMsgs)
 				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(out, "\n")) + "\n\n"}
+				ch <- patchapp.AppendEvent{Text: patchtui.Dim + "tip: run /reload to pick up any new memories or skills" + patchtui.Reset + "\n\n"}
 			} else if tc.Name == "prune_tool_result" {
 				ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, tc.Name, tc.RawArgs, false) + "\n"}
 				out = handlePruneToolResult(tc.RawArgs, allMsgs, sess.messages)
