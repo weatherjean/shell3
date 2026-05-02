@@ -38,6 +38,12 @@ shell3 uses a two-tier directory structure.
 
 Project tools and personas override global ones when names collide.
 
+The repository includes copyable example configurations under `examples/`:
+
+- `examples/tools/` — user-defined tools such as Brave Search and page fetching
+- `examples/skills/` — reusable workflow skills, including web search guidance
+- `examples/hooks/` — hook scripts such as terminal confirmation before `bash`
+
 ### Moving global config to a new machine
 
 `~/.shell3/` is a plain directory — you can turn it into a git repo and sync your personas, tools, skills, and hooks across machines:
@@ -331,7 +337,7 @@ after: ""                    # optional; bash -c hook, stdin = command output
 
 **Validation at startup:** Invalid tools are skipped with a warning to stderr. Reasons include: missing required field, name shadowing a built-in, invalid name format, declared secret missing from secrets store, `parameters.type` not `object`.
 
-**Getting started:** On first run, a disabled `brave_search.yaml` is written to `.shell3/tools/`. Run `shell3 secrets set --key BRAVE_API_KEY --secret <token>`, set `enabled: true`, restart.
+**Getting started:** On first run, a disabled `brave_search.yaml` is written to `.shell3/tools/`. Run `shell3 secrets set --key BRAVE_API_KEY --secret <token>`, set `enabled: true`, restart. See `examples/tools/` for fuller copyable tool configs, including a Brave Search tool with concise search and LLM Context modes.
 
 ---
 
@@ -379,6 +385,8 @@ EOF
 ```
 
 Then restart the session.
+
+See `examples/skills/` for copyable skill files, including `web-search.md` for low-limit Brave Search / LLM Context usage.
 
 ### When to use skills vs memory
 
