@@ -49,7 +49,7 @@ func (r *Runner) dispatch(ctx context.Context, cmd string, input hookInput, mode
 
 	if (mode == modeTTYBlocking || mode == modeFireForgetTTY) && r.releaser != nil {
 		_ = r.releaser.Pause()
-		defer r.releaser.Resume()
+		defer func() { _ = r.releaser.Resume() }()
 	}
 
 	data, _ := json.Marshal(input)

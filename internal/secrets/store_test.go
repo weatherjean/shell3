@@ -62,8 +62,9 @@ func TestSet_FileIsWrapped(t *testing.T) {
 func TestRemove(t *testing.T) {
 	home := t.TempDir()
 	s, _ := secrets.Load(home)
-	s.Set("A", "1")
-	s.Set("B", "2")
+	_ = s.Set("A", "1")
+	_ = s.Set("B", "2")
+
 	if err := s.Remove("A"); err != nil {
 		t.Fatal(err)
 	}
@@ -78,9 +79,9 @@ func TestRemove(t *testing.T) {
 func TestList_Sorted(t *testing.T) {
 	home := t.TempDir()
 	s, _ := secrets.Load(home)
-	s.Set("ZED", "z")
-	s.Set("ALPHA", "a")
-	s.Set("MID", "m")
+	_ = s.Set("ZED", "z")
+	_ = s.Set("ALPHA", "a")
+	_ = s.Set("MID", "m")
 	got := s.List()
 	want := []string{"ALPHA", "MID", "ZED"}
 	if !reflect.DeepEqual(got, want) {

@@ -307,7 +307,7 @@ func addUsage(a, b llm.Usage) llm.Usage {
 
 func parseRawArgs(raw string) map[string]any {
 	var out map[string]any
-	json.Unmarshal([]byte(raw), &out)
+	_ = json.Unmarshal([]byte(raw), &out)
 	return out
 }
 
@@ -324,9 +324,9 @@ func saveHistory(cfg Config, sess *session, sessionID int64, from int) {
 	for _, m := range sess.messages[from:] {
 		switch m.Role {
 		case llm.RoleUser, llm.RoleAssistant:
-			cfg.Store.AppendHistory(sessionID, string(m.Role), m.Content)
+			_ = cfg.Store.AppendHistory(sessionID, string(m.Role), m.Content)
 			for _, tc := range m.ToolCalls {
-				cfg.Store.AppendHistory(sessionID, "tool", toolCallSummary(tc))
+				_ = cfg.Store.AppendHistory(sessionID, "tool", toolCallSummary(tc))
 			}
 		}
 	}

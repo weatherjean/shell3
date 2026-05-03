@@ -151,10 +151,10 @@ func loadStoreForAuth() (*config.CredStore, error) {
 func runAuthList(store *config.CredStore, out io.Writer) error {
 	list := store.List()
 	if len(list) == 0 {
-		fmt.Fprintln(out, "No instances configured. Run: shell3 auth")
+		_, _ = fmt.Fprintln(out, "No instances configured. Run: shell3 auth")
 		return nil
 	}
-	fmt.Fprintf(out, "%-24s  %-12s  %s\n", "INSTANCE", "ADAPTER", "MODELS")
+	_, _ = fmt.Fprintf(out, "%-24s  %-12s  %s\n", "INSTANCE", "ADAPTER", "MODELS")
 	for _, m := range list {
 		_, fields, _ := store.Get(m.Instance)
 		models := fields["default_model"]
@@ -163,7 +163,7 @@ func runAuthList(store *config.CredStore, out io.Writer) error {
 				models = strings.Join(p.Models(store, m.Instance), ",")
 			}
 		}
-		fmt.Fprintf(out, "%-24s  %-12s  %s\n", m.Instance, m.Adapter, models)
+		_, _ = fmt.Fprintf(out, "%-24s  %-12s  %s\n", m.Instance, m.Adapter, models)
 	}
 	return nil
 }
@@ -175,7 +175,7 @@ func runAuthRemove(store *config.CredStore, instance string, out io.Writer) erro
 	if err := store.Delete(instance); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "Removed instance %q.\n", instance)
+	_, _ = fmt.Fprintf(out, "Removed instance %q.\n", instance)
 	return nil
 }
 
@@ -186,9 +186,9 @@ func runAuthModelsShow(store *config.CredStore, instance string, out io.Writer) 
 	}
 	current := fields["default_model"]
 	if current == "" {
-		fmt.Fprintf(out, "%s: (none stored; adapter built-in list applies)\n", instance)
+		_, _ = fmt.Fprintf(out, "%s: (none stored; adapter built-in list applies)\n", instance)
 	} else {
-		fmt.Fprintf(out, "%s: %s\n", instance, current)
+		_, _ = fmt.Fprintf(out, "%s: %s\n", instance, current)
 	}
 	return nil
 }
@@ -205,9 +205,9 @@ func runAuthModelsSet(store *config.CredStore, instance, csv string, out io.Writ
 		return err
 	}
 	if csv == "" {
-		fmt.Fprintf(out, "Cleared models for %q. Adapter built-in list will apply.\n", instance)
+		_, _ = fmt.Fprintf(out, "Cleared models for %q. Adapter built-in list will apply.\n", instance)
 	} else {
-		fmt.Fprintf(out, "Set models for %q: %s\n", instance, csv)
+		_, _ = fmt.Fprintf(out, "Set models for %q: %s\n", instance, csv)
 	}
 	return nil
 }
@@ -218,16 +218,16 @@ func pickAdapter(in io.Reader, out io.Writer) string {
 	if len(names) == 0 {
 		return ""
 	}
-	fmt.Fprintln(out, "Available adapters:")
+	_, _ = fmt.Fprintln(out, "Available adapters:")
 	for i, n := range names {
 		p, _ := llm.Get(n)
 		marker := ""
 		if p.SingleInstance() {
 			marker = " (single-instance)"
 		}
-		fmt.Fprintf(out, "  %d) %s%s\n", i+1, n, marker)
+		_, _ = fmt.Fprintf(out, "  %d) %s%s\n", i+1, n, marker)
 	}
-	fmt.Fprint(out, "Pick an adapter [1]: ")
+	_, _ = fmt.Fprint(out, "Pick an adapter [1]: ")
 	s := bufio.NewScanner(in)
 	if !s.Scan() {
 		return ""
@@ -245,7 +245,7 @@ func pickAdapter(in io.Reader, out io.Writer) string {
 }
 
 func promptInstance(in io.Reader, out io.Writer, defaultName string) string {
-	fmt.Fprintf(out, "Instance name [%s]: ", defaultName)
+	_, _ = fmt.Fprintf(out, "Instance name [%s] (for your later reference): ", defaultName)
 	s := bufio.NewScanner(in)
 	if !s.Scan() {
 		return defaultName

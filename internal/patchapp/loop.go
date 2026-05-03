@@ -33,8 +33,8 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	a.pauseWakeR = pr
 	a.pauseWakeW = pw
-	defer pr.Close()
-	defer pw.Close()
+	defer func() { _ = pr.Close() }()
+	defer func() { _ = pw.Close() }()
 
 	fmt.Print(pasteOn)
 

@@ -43,7 +43,7 @@ func TestCredStore_SetGetList(t *testing.T) {
 func TestCredStore_Update(t *testing.T) {
 	home := t.TempDir()
 	store, _ := LoadCredStore(home)
-	store.Set("codex", "codex", map[string]string{
+	_ = store.Set("codex", "codex", map[string]string{
 		"access_token":  "old",
 		"refresh_token": "rt",
 	})
@@ -63,8 +63,8 @@ func TestCredStore_Update(t *testing.T) {
 func TestCredStore_Delete(t *testing.T) {
 	home := t.TempDir()
 	store, _ := LoadCredStore(home)
-	store.Set("a", "openai", map[string]string{"api_key": "x"})
-	store.Set("b", "openai", map[string]string{"api_key": "y"})
+	_ = store.Set("a", "openai", map[string]string{"api_key": "x"})
+	_ = store.Set("b", "openai", map[string]string{"api_key": "y"})
 	if err := store.Delete("a"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestCredStore_Delete(t *testing.T) {
 func TestCredStore_FilePathAndPerm(t *testing.T) {
 	home := t.TempDir()
 	store, _ := LoadCredStore(home)
-	store.Set("openai", "openai", map[string]string{"api_key": "k"})
+	_ = store.Set("openai", "openai", map[string]string{"api_key": "k"})
 	path := filepath.Join(home, ".shell3", "credentials.shell3")
 	info, err := os.Stat(path)
 	if err != nil {

@@ -188,7 +188,7 @@ func handleMemoryList(rawArgs string, st *store.Store) string {
 		CoreOnly bool `json:"core_only"`
 		Limit    int  `json:"limit"`
 	}
-	json.Unmarshal([]byte(rawArgs), &args)
+	_ = json.Unmarshal([]byte(rawArgs), &args)
 	results, err := st.MemoryQuery("", args.CoreOnly, args.Limit)
 	if err != nil {
 		return fmt.Sprintf("error: %v", err)
@@ -240,7 +240,7 @@ func handleHistoryGet(rawArgs string, st *store.Store) string {
 		SessionID int64 `json:"session_id"`
 		Chunk     int   `json:"chunk"`
 	}
-	json.Unmarshal([]byte(rawArgs), &args)
+	_ = json.Unmarshal([]byte(rawArgs), &args)
 	chunk := args.Chunk
 	if chunk > 0 {
 		chunk--
@@ -354,15 +354,15 @@ func handleCompactHistory(rawArgs string, cfg Config, sess *session, allMsgs []l
 		for _, m := range sess.messages {
 			switch m.Role {
 			case llm.RoleUser, llm.RoleAssistant:
-				cfg.Store.AppendHistory(prevSessionID, string(m.Role), m.Content)
+				_ = cfg.Store.AppendHistory(prevSessionID, string(m.Role), m.Content)
 				for _, tc := range m.ToolCalls {
-					cfg.Store.AppendHistory(prevSessionID, "tool", toolCallSummary(tc))
+					_ = cfg.Store.AppendHistory(prevSessionID, "tool", toolCallSummary(tc))
 				}
 			}
 		}
 		// Save the compact call itself as the final entry in the outgoing session.
-		cfg.Store.AppendHistory(prevSessionID, "tool", "compact_history: "+rawArgs)
-		cfg.Store.EndSession(prevSessionID)
+		_ = cfg.Store.AppendHistory(prevSessionID, "tool", "compact_history: "+rawArgs)
+		_ = cfg.Store.EndSession(prevSessionID)
 		newID, err := cfg.Store.StartSession()
 		if err == nil {
 			sess.id = newID

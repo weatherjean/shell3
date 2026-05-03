@@ -118,7 +118,7 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	if !noMemory {
 		if s, err := store.Open(storeDBPath); err == nil {
 			st = s
-			defer st.Close()
+			defer func() { _ = st.Close() }()
 		} else {
 			fmt.Fprintln(os.Stderr, "warning: open store:", err)
 		}

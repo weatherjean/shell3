@@ -43,18 +43,18 @@ func runDoctor(homeDir, cwd string, out io.Writer) int {
 	failures := 0
 	fail := func() { failures++ }
 
-	fmt.Fprintln(out, "Global")
+	_, _ = fmt.Fprintln(out, "Global")
 	checkGlobalDoctor(out, homeDir, g, fail)
 
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Project")
+	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, "Project")
 	checkProjectDoctor(out, l, g, cwd, fail)
 
 	if failures > 0 {
-		fmt.Fprintf(out, "\n%d check(s) failed.\n", failures)
+		_, _ = fmt.Fprintf(out, "\n%d check(s) failed.\n", failures)
 		return 1
 	}
-	fmt.Fprintln(out, "\nAll checks passed.")
+	_, _ = fmt.Fprintln(out, "\nAll checks passed.")
 	return 0
 }
 
@@ -114,9 +114,9 @@ func checkProjectDoctor(out io.Writer, l paths.Local, g paths.Global, cwd string
 
 func doctorCheck(out io.Writer, fail func(), ok bool, msg string) {
 	if ok {
-		fmt.Fprintf(out, "  ✓ %s\n", msg)
+		_, _ = fmt.Fprintf(out, "  ✓ %s\n", msg)
 	} else {
-		fmt.Fprintf(out, "  ✗ %s\n", msg)
+		_, _ = fmt.Fprintf(out, "  ✗ %s\n", msg)
 		fail()
 	}
 }

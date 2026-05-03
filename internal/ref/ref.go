@@ -114,7 +114,7 @@ func writeMeta(p paths.Project, m Meta) error {
 	if err := os.WriteFile(tmp, b, 0600); err != nil {
 		return fmt.Errorf("ref: write meta tmp: %w", err)
 	}
-	defer os.Remove(tmp) // no-op if rename succeeded
+	defer func() { _ = os.Remove(tmp) }() // no-op if rename succeeded
 	if err := os.Rename(tmp, p.Meta); err != nil {
 		return fmt.Errorf("ref: rename meta: %w", err)
 	}

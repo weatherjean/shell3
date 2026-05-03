@@ -14,7 +14,7 @@ func setup(t *testing.T) (homeDir, cwd string, g paths.Global, l paths.Local) {
 	tmp := t.TempDir()
 	homeDir = filepath.Join(tmp, "home")
 	cwd = filepath.Join(tmp, "project")
-	os.MkdirAll(filepath.Join(cwd, ".shell3"), 0755)
+	_ = os.MkdirAll(filepath.Join(cwd, ".shell3"), 0755)
 	g = paths.NewGlobal(homeDir)
 	l = paths.NewLocal(cwd)
 	return
@@ -84,7 +84,7 @@ func TestInitIdempotent(t *testing.T) {
 func TestFindByCWD(t *testing.T) {
 	_, cwd, g, l := setup(t)
 	// Need projects dir to exist for Init to work
-	os.MkdirAll(g.Projects, 0700)
+	_ = os.MkdirAll(g.Projects, 0700)
 	uuid, err := ref.Init(l, g, cwd)
 	if err != nil {
 		t.Fatalf("Init: %v", err)

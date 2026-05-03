@@ -183,14 +183,14 @@ func runBrowserFlow(ctx context.Context, store *config.CredStore, w io.Writer) (
 	}()
 
 	authURL := authorizeURL(state, challenge)
-	fmt.Fprintln(w, "Sign in with ChatGPT.")
-	fmt.Fprintln(w, "Opening browser. If it does not open, paste this URL:")
-	fmt.Fprintln(w, "  "+authURL)
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "Sign in with ChatGPT.")
+	_, _ = fmt.Fprintln(w, "Opening browser. If it does not open, paste this URL:")
+	_, _ = fmt.Fprintln(w, "  "+authURL)
+	_, _ = fmt.Fprintln(w)
 	if err := openBrowser(authURL); err != nil {
-		fmt.Fprintf(w, "(could not auto-open browser: %v)\n", err)
+		_, _ = fmt.Fprintf(w, "(could not auto-open browser: %v)\n", err)
 	}
-	fmt.Fprintln(w, "Waiting for callback…")
+	_, _ = fmt.Fprintln(w, "Waiting for callback…")
 
 	select {
 	case <-ctx.Done():
@@ -202,8 +202,8 @@ func runBrowserFlow(ctx context.Context, store *config.CredStore, w io.Writer) (
 		if err := SaveTokens(store, r.tokens); err != nil {
 			return nil, err
 		}
-		fmt.Fprintln(w, "\nSigned in. Tokens stored in unified credentials.")
-		fmt.Fprintf(w, "Account: %s\n", r.tokens.AccountID)
+		_, _ = fmt.Fprintln(w, "\nSigned in. Tokens stored in unified credentials.")
+		_, _ = fmt.Fprintf(w, "Account: %s\n", r.tokens.AccountID)
 		return r.tokens, nil
 	}
 }

@@ -42,7 +42,7 @@ var (
 	codeRe       = regexp.MustCompile("`([^`\n]+?)`")
 	linkRe       = regexp.MustCompile(`\[([^\]\n]+)\]\(([^)\n]+)\)`)
 	listRe       = regexp.MustCompile(`^(\s*)([-*]|\d+\.)\s+(.*)$`)
-	codeTokenRe  = regexp.MustCompile("\\d+")
+	codeTokenRe  = regexp.MustCompile("\\d+") //nolint:staticcheck
 )
 
 // Render converts markdown text to a slice of ANSI-styled lines.

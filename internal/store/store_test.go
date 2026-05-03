@@ -15,12 +15,12 @@ func TestStore_Open(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 }
 
 func TestStore_MemoryUpsert_InsertAndUpdate(t *testing.T) {
 	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	if err := st.MemoryUpsert("k", "v1", nil); err != nil {
 		t.Fatal(err)
@@ -36,9 +36,9 @@ func TestStore_MemoryUpsert_InsertAndUpdate(t *testing.T) {
 
 func TestStore_MemoryUpsert_EmptyValueDeletes(t *testing.T) {
 	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
-	st.MemoryUpsert("k", "v", nil)
+	_ = st.MemoryUpsert("k", "v", nil)
 	if err := st.MemoryUpsert("k", "", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -50,10 +50,10 @@ func TestStore_MemoryUpsert_EmptyValueDeletes(t *testing.T) {
 
 func TestStore_MemoryUpsert_CorePreservedOnUpdate(t *testing.T) {
 	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
-	st.MemoryUpsert("k", "v1", boolPtr(true))
-	st.MemoryUpsert("k", "v2", nil) // core omitted
+	_ = st.MemoryUpsert("k", "v1", boolPtr(true))
+	_ = st.MemoryUpsert("k", "v2", nil) // core omitted
 	results, _ := st.MemoryQuery("", false, 10)
 	if len(results) != 1 || !results[0].Core {
 		t.Fatalf("expected core preserved on update, got %+v", results)
@@ -62,10 +62,10 @@ func TestStore_MemoryUpsert_CorePreservedOnUpdate(t *testing.T) {
 
 func TestStore_MemoryUpsert_CoreExplicitDemote(t *testing.T) {
 	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
-	st.MemoryUpsert("k", "v1", boolPtr(true))
-	st.MemoryUpsert("k", "v2", boolPtr(false))
+	_ = st.MemoryUpsert("k", "v1", boolPtr(true))
+	_ = st.MemoryUpsert("k", "v2", boolPtr(false))
 	results, _ := st.MemoryQuery("", false, 10)
 	if len(results) != 1 || results[0].Core {
 		t.Fatalf("expected core=false after explicit demote, got %+v", results)
@@ -74,10 +74,10 @@ func TestStore_MemoryUpsert_CoreExplicitDemote(t *testing.T) {
 
 func TestStore_MemoryQuery_Search(t *testing.T) {
 	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
-	st.MemoryUpsert("auth", "use JWT 1h expiry", nil)
-	st.MemoryUpsert("deploy", "run migrations first", nil)
+	_ = st.MemoryUpsert("auth", "use JWT 1h expiry", nil)
+	_ = st.MemoryUpsert("deploy", "run migrations first", nil)
 
 	results, err := st.MemoryQuery("JWT", false, 5)
 	if err != nil {
@@ -90,10 +90,10 @@ func TestStore_MemoryQuery_Search(t *testing.T) {
 
 func TestStore_MemoryQuery_CoreOnly(t *testing.T) {
 	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
-	st.MemoryUpsert("c1", "core fact", boolPtr(true))
-	st.MemoryUpsert("n1", "regular fact", nil)
+	_ = st.MemoryUpsert("c1", "core fact", boolPtr(true))
+	_ = st.MemoryUpsert("n1", "regular fact", nil)
 
 	results, _ := st.MemoryQuery("", true, 10)
 	if len(results) != 1 || results[0].Key != "c1" {
@@ -103,11 +103,11 @@ func TestStore_MemoryQuery_CoreOnly(t *testing.T) {
 
 func TestStore_MemoryQuery_ListNewestFirst(t *testing.T) {
 	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
-	st.MemoryUpsert("a", "1", nil)
-	st.MemoryUpsert("b", "2", nil)
-	st.MemoryUpsert("c", "3", nil)
+	_ = st.MemoryUpsert("a", "1", nil)
+	_ = st.MemoryUpsert("b", "2", nil)
+	_ = st.MemoryUpsert("c", "3", nil)
 
 	results, _ := st.MemoryQuery("", false, 10)
 	if len(results) != 3 || results[0].Key != "c" {
@@ -117,7 +117,7 @@ func TestStore_MemoryQuery_ListNewestFirst(t *testing.T) {
 
 func TestStore_SessionLifecycle(t *testing.T) {
 	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	id, err := st.StartSession()
 	if err != nil {
@@ -133,14 +133,14 @@ func TestStore_SessionLifecycle(t *testing.T) {
 
 func TestStore_HistoryGet_DefaultsToLatestCompleted(t *testing.T) {
 	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	s1, _ := st.StartSession()
-	st.AppendHistory(s1, "user", "old")
-	st.EndSession(s1)
+	_ = st.AppendHistory(s1, "user", "old")
+	_ = st.EndSession(s1)
 
 	s2, _ := st.StartSession()
-	st.AppendHistory(s2, "user", "current") // not ended
+	_ = st.AppendHistory(s2, "user", "current") // not ended
 
 	res, err := st.HistoryGet(0, 0)
 	if err != nil {
@@ -159,13 +159,13 @@ func TestStore_HistoryGet_DefaultsToLatestCompleted(t *testing.T) {
 
 func TestStore_HistoryGet_Chunking(t *testing.T) {
 	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	id, _ := st.StartSession()
 	for i := 0; i < 60; i++ {
-		st.AppendHistory(id, "user", fmt.Sprintf("turn-%d", i))
+		_ = st.AppendHistory(id, "user", fmt.Sprintf("turn-%d", i))
 	}
-	st.EndSession(id)
+	_ = st.EndSession(id)
 
 	r0, _ := st.HistoryGet(id, 0)
 	r1, _ := st.HistoryGet(id, 1)
@@ -184,17 +184,17 @@ func TestStore_HistoryGet_Chunking(t *testing.T) {
 
 func TestStore_HistoryGet_PrevNext(t *testing.T) {
 	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	a, _ := st.StartSession()
-	st.AppendHistory(a, "u", "a")
-	st.EndSession(a)
+	_ = st.AppendHistory(a, "u", "a")
+	_ = st.EndSession(a)
 	b, _ := st.StartSession()
-	st.AppendHistory(b, "u", "b")
-	st.EndSession(b)
+	_ = st.AppendHistory(b, "u", "b")
+	_ = st.EndSession(b)
 	c, _ := st.StartSession()
-	st.AppendHistory(c, "u", "c")
-	st.EndSession(c)
+	_ = st.AppendHistory(c, "u", "c")
+	_ = st.EndSession(c)
 
 	res, _ := st.HistoryGet(b, 0)
 	if res.PrevSessionID != a || res.NextSessionID != c {
@@ -205,14 +205,14 @@ func TestStore_HistoryGet_PrevNext(t *testing.T) {
 
 func TestStore_HistorySearch_ReturnsLocator(t *testing.T) {
 	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	id, _ := st.StartSession()
 	for i := 0; i < 30; i++ {
-		st.AppendHistory(id, "user", fmt.Sprintf("plain turn %d", i))
+		_ = st.AppendHistory(id, "user", fmt.Sprintf("plain turn %d", i))
 	}
-	st.AppendHistory(id, "assistant", "JWT_EXPIRY=3600")
-	st.EndSession(id)
+	_ = st.AppendHistory(id, "assistant", "JWT_EXPIRY=3600")
+	_ = st.EndSession(id)
 
 	res, err := st.HistorySearch("JWT_EXPIRY", 5)
 	if err != nil {
@@ -236,11 +236,11 @@ func TestStore_HistorySearch_PunctuationSafe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	sid, _ := st.StartSession()
-	st.AppendHistory(sid, "user", "make cobra cli colorful")
-	st.AppendHistory(sid, "assistant", "use lipgloss for styling")
-	st.EndSession(sid)
+	_ = st.AppendHistory(sid, "user", "make cobra cli colorful")
+	_ = st.AppendHistory(sid, "assistant", "use lipgloss for styling")
+	_ = st.EndSession(sid)
 
 	res, err := st.HistorySearch("cobra colorful cli ?", 10)
 	if err != nil {
@@ -256,8 +256,8 @@ func TestStore_MemoryQuery_PunctuationSafe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
-	st.MemoryUpsert("k", "JWT auth token spec", boolPtr(false))
+	defer func() { _ = st.Close() }()
+	_ = st.MemoryUpsert("k", "JWT auth token spec", boolPtr(false))
 
 	res, err := st.MemoryQuery("JWT?", false, 5)
 	if err != nil {
@@ -273,11 +273,11 @@ func TestStore_HistorySearchExpr_OrAnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	sid, _ := st.StartSession()
-	st.AppendHistory(sid, "user", "cobra cli colorful")
-	st.AppendHistory(sid, "assistant", "termenv handles ansi colors")
-	st.EndSession(sid)
+	_ = st.AppendHistory(sid, "user", "cobra cli colorful")
+	_ = st.AppendHistory(sid, "assistant", "termenv handles ansi colors")
+	_ = st.EndSession(sid)
 
 	exprAny := store.BuildFTSExpr([]string{"cobra", "termenv"}, false)
 	r, err := st.HistorySearchExpr(exprAny, 10)
@@ -303,9 +303,9 @@ func TestStore_MemorySearchExpr_Or(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
-	st.MemoryUpsert("a", "JWT auth", boolPtr(false))
-	st.MemoryUpsert("b", "kafka pipeline", boolPtr(false))
+	defer func() { _ = st.Close() }()
+	_ = st.MemoryUpsert("a", "JWT auth", boolPtr(false))
+	_ = st.MemoryUpsert("b", "kafka pipeline", boolPtr(false))
 
 	expr := store.BuildFTSExpr([]string{"JWT", "kafka"}, false)
 	res, err := st.MemorySearchExpr(expr, false, 5)

@@ -46,7 +46,7 @@ func Write(path string, v any) error {
 	if err := os.WriteFile(tmp, wrapped, 0600); err != nil {
 		return fmt.Errorf("obfile: write tmp: %w", err)
 	}
-	defer os.Remove(tmp) // no-op if rename succeeded
+	defer func() { _ = os.Remove(tmp) }() // no-op if rename succeeded
 	if err := os.Rename(tmp, path); err != nil {
 		return fmt.Errorf("obfile: rename: %w", err)
 	}

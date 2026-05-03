@@ -34,13 +34,13 @@ command: 'echo "hi $WHO"'
 	if len(tools) != 1 {
 		t.Fatalf("want 1 tool, got %d", len(tools))
 	}
-	if tools[0].Spec.Name != "hello" {
-		t.Errorf("name: got %q", tools[0].Spec.Name)
+	if tools[0].Name != "hello" {
+		t.Errorf("name: got %q", tools[0].Name)
 	}
-	if tools[0].Spec.Command != `echo "hi $WHO"` {
-		t.Errorf("command: got %q", tools[0].Spec.Command)
+	if tools[0].Command != `echo "hi $WHO"` {
+		t.Errorf("command: got %q", tools[0].Command)
 	}
-	if !tools[0].Spec.Enabled {
+	if !tools[0].Enabled {
 		t.Error("expected enabled")
 	}
 }
@@ -88,7 +88,7 @@ enabled: false
 parameters: {type: object, properties: {}}
 command: 'echo'
 `
-	os.WriteFile(filepath.Join(dir, "off.yaml"), []byte(yaml), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "off.yaml"), []byte(yaml), 0644)
 
 	tools, _, err := LoadAll([]string{dir}, nil)
 	if err != nil {
@@ -108,7 +108,7 @@ secrets: [MISSING_KEY]
 parameters: {type: object, properties: {}}
 command: 'echo'
 `
-	os.WriteFile(filepath.Join(dir, "off.yaml"), []byte(yaml), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "off.yaml"), []byte(yaml), 0644)
 
 	tools, warnings, err := LoadAll([]string{dir}, nil)
 	if err != nil {
@@ -137,8 +137,8 @@ enabled: true
 parameters: {type: object, properties: {}}
 command: 'echo project'
 `
-	os.WriteFile(filepath.Join(global, "hello.yaml"), []byte(g), 0644)
-	os.WriteFile(filepath.Join(project, "hello.yaml"), []byte(p), 0644)
+	_ = os.WriteFile(filepath.Join(global, "hello.yaml"), []byte(g), 0644)
+	_ = os.WriteFile(filepath.Join(project, "hello.yaml"), []byte(p), 0644)
 
 	tools, _, err := LoadAll([]string{global, project}, nil)
 	if err != nil {
@@ -157,7 +157,7 @@ enabled: true
 parameters: {type: object, properties: {}}
 command: 'echo'
 `
-	os.WriteFile(filepath.Join(dir, "bad.yaml"), []byte(bad), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "bad.yaml"), []byte(bad), 0644)
 
 	tools, warnings, err := LoadAll([]string{dir}, nil)
 	if err != nil {

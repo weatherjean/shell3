@@ -48,10 +48,6 @@ const (
 	gPrimary = 179
 	bPrimary = 8
 
-	rRed = 239 // red #EF4444
-	gRed = 68
-	bRed = 68
-
 	rFgDim = 156 // gray-400 #9CA3AF
 	gFgDim = 163
 	bFgDim = 175

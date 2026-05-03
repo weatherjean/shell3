@@ -26,7 +26,7 @@ func TestEditFileCreatesNewFile(t *testing.T) {
 func TestEditFileOverwritesWhenExists(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.txt")
-	os.WriteFile(path, []byte("x"), 0o644)
+	_ = os.WriteFile(path, []byte("x"), 0o644)
 	res, err := EditFile(dir, "f.txt", "", "y", false)
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +50,7 @@ func TestEditFileMissingFile(t *testing.T) {
 func TestEditFileReplaces(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.txt")
-	os.WriteFile(path, []byte("hello world\n"), 0o644)
+	_ = os.WriteFile(path, []byte("hello world\n"), 0o644)
 	if _, err := EditFile(dir, "f.txt", "world", "Go", false); err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestEditFileReplaces(t *testing.T) {
 func TestEditFilePreservesCRLF(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.txt")
-	os.WriteFile(path, []byte("line1\r\nline2\r\n"), 0o644)
+	_ = os.WriteFile(path, []byte("line1\r\nline2\r\n"), 0o644)
 	// model emits LF — our code should coerce to file's CRLF.
 	if _, err := EditFile(dir, "f.txt", "line2", "LINE2", false); err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func TestEditFilePreservesCRLF(t *testing.T) {
 func TestEditFileReplaceAll(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.txt")
-	os.WriteFile(path, []byte("foo foo foo"), 0o644)
+	_ = os.WriteFile(path, []byte("foo foo foo"), 0o644)
 	if _, err := EditFile(dir, "f.txt", "foo", "bar", true); err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestEditFileReplaceAll(t *testing.T) {
 func TestEditFileAmbiguousFails(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.txt")
-	os.WriteFile(path, []byte("foo\nfoo\n"), 0o644)
+	_ = os.WriteFile(path, []byte("foo\nfoo\n"), 0o644)
 	if _, err := EditFile(dir, "f.txt", "foo", "bar", false); err == nil {
 		t.Fatal("expected ambiguous match error")
 	}
@@ -102,7 +102,7 @@ func TestEditFileAmbiguousFails(t *testing.T) {
 func TestEditFilePreservesFileMode(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.sh")
-	os.WriteFile(path, []byte("echo hi\n"), 0o755)
+	_ = os.WriteFile(path, []byte("echo hi\n"), 0o755)
 	if _, err := EditFile(dir, "f.sh", "hi", "bye", false); err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestEditFileLFFallbackOnCRLFFile(t *testing.T) {
 	path := filepath.Join(dir, "f.txt")
 	// File on disk uses CRLF.
 	original := "line1\r\nline2\r\nline3\r\n"
-	os.WriteFile(path, []byte(original), 0o644)
+	_ = os.WriteFile(path, []byte(original), 0o644)
 
 	// Multi-line search written by model with LF only — primary Replace
 	// against the unmodified content would fail because the source is CRLF.
@@ -165,7 +165,7 @@ func TestWriteFileCreatesDirs(t *testing.T) {
 
 func TestWriteFileOverwrites(t *testing.T) {
 	dir := t.TempDir()
-	EditFile(dir, "f.txt", "", "old", false)
+	_, _ = EditFile(dir, "f.txt", "", "old", false)
 	if _, err := EditFile(dir, "f.txt", "", "new", false); err != nil {
 		t.Fatal(err)
 	}

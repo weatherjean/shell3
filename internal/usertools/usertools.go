@@ -120,7 +120,7 @@ func Validate(s Spec, availableSecrets map[string]struct{}) error {
 }
 
 func validName(s string) bool {
-	if s == "" || !(s[0] >= 'a' && s[0] <= 'z') {
+	if s == "" || s[0] < 'a' || s[0] > 'z' {
 		return false
 	}
 	for _, r := range s {

@@ -172,7 +172,7 @@ func postToken(ctx context.Context, form url.Values) (*Tokens, error) {
 	if err != nil {
 		return nil, fmt.Errorf("codex: token request: %w", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 
 	body, _ := io.ReadAll(res.Body)
 	if res.StatusCode < 200 || res.StatusCode >= 300 {

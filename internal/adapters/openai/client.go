@@ -70,7 +70,7 @@ func (b *bodyTap) RoundTrip(req *http.Request) (*http.Response, error) {
 // "reasoning" delta field. Stops when the stream ends or any read error fires.
 // Closes b.done when finished so callers can wait for the result.
 func (b *bodyTap) scanReasoning(r io.ReadCloser, done chan struct{}) {
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	defer close(done)
 	var sb strings.Builder
 	scanner := bufio.NewScanner(r)
@@ -222,7 +222,7 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 	if err != nil {
 		return fmt.Errorf("llm: stream: %w", err)
 	}
-	defer stream.Close() // safe to call twice; we close explicitly below to flush the tee
+	defer func() { _ = stream.Close() }() // safe to call twice; we close explicitly below to flush the tee
 
 	toolCalls := map[int]*llm.ToolCall{}
 
@@ -292,7 +292,7 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 	// Side-band reasoning capture: close the stream so the body finishes
 	// being read (which lets the tee pipe close), then wait for the
 	// scanner goroutine to publish accumulated "reasoning" text.
-	stream.Close()
+	_ = stream.Close()
 	if c.tap != nil {
 		if r := c.tap.WaitReasoning(ctx); r != "" {
 			onEvent(llm.StreamEvent{ReasoningDelta: r})

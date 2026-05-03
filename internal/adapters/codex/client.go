@@ -99,7 +99,7 @@ func (c *client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 			return err
 		}
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(res.Body, 4*1024))

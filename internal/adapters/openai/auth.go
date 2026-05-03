@@ -23,9 +23,9 @@ func (p *provider) Auth(_ context.Context, w io.Writer, store *config.CredStore,
 	}
 	scanner := bufio.NewScanner(in)
 
-	fmt.Fprintln(w, "Configure an OpenAI-compatible LLM provider.")
-	fmt.Fprintln(w, "Works with Ollama, OpenAI, Anthropic (via proxy), Together, OpenRouter, etc.")
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "Configure an OpenAI-compatible LLM provider.")
+	_, _ = fmt.Fprintln(w, "Works with Ollama, OpenAI, Anthropic (via proxy), Together, OpenRouter, etc.")
+	_, _ = fmt.Fprintln(w)
 
 	baseURL := promptLine(scanner, w, "Base URL (e.g. http://localhost:11434/v1 or https://api.openai.com/v1): ")
 	apiKey := promptLine(scanner, w, "API key (leave empty if not required): ")
@@ -38,12 +38,12 @@ func (p *provider) Auth(_ context.Context, w io.Writer, store *config.CredStore,
 	}); err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "\nInstance %q saved.\n", instance)
+	_, _ = fmt.Fprintf(w, "\nInstance %q saved.\n", instance)
 	return nil
 }
 
 func promptLine(s *bufio.Scanner, w io.Writer, q string) string {
-	fmt.Fprint(w, q)
+	_, _ = fmt.Fprint(w, q)
 	if s.Scan() {
 		return strings.TrimSpace(s.Text())
 	}

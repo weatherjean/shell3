@@ -12,7 +12,7 @@ import (
 func TestLoadSkills(t *testing.T) {
 	dir := t.TempDir()
 	content := "---\nname: git-workflow\ndescription: Git conventions\n---\nAlways squash before merging."
-	os.WriteFile(filepath.Join(dir, "git-workflow.md"), []byte(content), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "git-workflow.md"), []byte(content), 0644)
 
 	loaded, err := skills.LoadAll([]string{dir})
 	if err != nil {
@@ -34,7 +34,7 @@ func TestLoadSkills(t *testing.T) {
 
 func TestLoadSkillsSkipsNoFrontmatter(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "no-fm.md"), []byte("just body, no frontmatter"), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "no-fm.md"), []byte("just body, no frontmatter"), 0644)
 
 	loaded, err := skills.LoadAll([]string{dir})
 	if err != nil {

@@ -30,7 +30,7 @@ func openTTY() (*tty, error) {
 	}
 	state, err := term.MakeRaw(int(f.Fd()))
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, err
 	}
 	return &tty{f: f, oldState: state}, nil
@@ -46,9 +46,6 @@ func (t *tty) Close() {
 	}
 	_ = t.f.Close()
 }
-
-// Write paints to the tty.
-func (t *tty) Write(p []byte) (int, error) { return t.f.Write(p) }
 
 // readKey reads one key event. If timeout > 0 and elapses with no key,
 // it returns (parsedKey{kind:keyTimeout}, nil). On EOF it returns

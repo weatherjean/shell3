@@ -13,8 +13,8 @@ func TestWriteDefaults_CreatesPersona(t *testing.T) {
 	dir := t.TempDir()
 	personasDir := filepath.Join(dir, "personas")
 	toolsDir := filepath.Join(dir, "tools")
-	os.MkdirAll(personasDir, 0755)
-	os.MkdirAll(toolsDir, 0755)
+	_ = os.MkdirAll(personasDir, 0755)
+	_ = os.MkdirAll(toolsDir, 0755)
 
 	if err := scaffold.WriteDefaults(personasDir, toolsDir, filepath.Join(dir, "skills"), filepath.Join(dir, "hooks")); err != nil {
 		t.Fatalf("WriteDefaults: %v", err)
@@ -37,8 +37,8 @@ func TestWriteDefaults_CreatesExampleTool(t *testing.T) {
 	dir := t.TempDir()
 	personasDir := filepath.Join(dir, "personas")
 	toolsDir := filepath.Join(dir, "tools")
-	os.MkdirAll(personasDir, 0755)
-	os.MkdirAll(toolsDir, 0755)
+	_ = os.MkdirAll(personasDir, 0755)
+	_ = os.MkdirAll(toolsDir, 0755)
 
 	if err := scaffold.WriteDefaults(personasDir, toolsDir, filepath.Join(dir, "skills"), filepath.Join(dir, "hooks")); err != nil {
 		t.Fatalf("WriteDefaults: %v", err)
@@ -88,14 +88,14 @@ func TestWriteDefaults_Idempotent(t *testing.T) {
 	dir := t.TempDir()
 	personasDir := filepath.Join(dir, "personas")
 	toolsDir := filepath.Join(dir, "tools")
-	os.MkdirAll(personasDir, 0755)
-	os.MkdirAll(toolsDir, 0755)
+	_ = os.MkdirAll(personasDir, 0755)
+	_ = os.MkdirAll(toolsDir, 0755)
 
-	scaffold.WriteDefaults(personasDir, toolsDir, filepath.Join(dir, "skills"), filepath.Join(dir, "hooks"))
+	_ = scaffold.WriteDefaults(personasDir, toolsDir, filepath.Join(dir, "skills"), filepath.Join(dir, "hooks"))
 
 	// Modify the persona file.
 	personaPath := filepath.Join(personasDir, scaffold.DefaultPersonaName+".md")
-	os.WriteFile(personaPath, []byte("custom content"), 0644)
+	_ = os.WriteFile(personaPath, []byte("custom content"), 0644)
 
 	if err := scaffold.WriteDefaults(personasDir, toolsDir, filepath.Join(dir, "skills"), filepath.Join(dir, "hooks")); err != nil {
 		t.Fatalf("second WriteDefaults: %v", err)
@@ -112,10 +112,10 @@ func TestWriteDefaults_PersonaHasNullModelDefaults(t *testing.T) {
 	dir := t.TempDir()
 	personasDir := filepath.Join(dir, "personas")
 	toolsDir := filepath.Join(dir, "tools")
-	os.MkdirAll(personasDir, 0755)
-	os.MkdirAll(toolsDir, 0755)
+	_ = os.MkdirAll(personasDir, 0755)
+	_ = os.MkdirAll(toolsDir, 0755)
 
-	scaffold.WriteDefaults(personasDir, toolsDir, filepath.Join(dir, "skills"), filepath.Join(dir, "hooks"))
+	_ = scaffold.WriteDefaults(personasDir, toolsDir, filepath.Join(dir, "skills"), filepath.Join(dir, "hooks"))
 
 	data, _ := os.ReadFile(filepath.Join(personasDir, scaffold.DefaultPersonaName+".md"))
 	for _, field := range []string{"model: ~", "provider: ~", "db: ~"} {

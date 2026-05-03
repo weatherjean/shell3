@@ -25,7 +25,7 @@ func Confirm(spec ConfirmSpec) (Result, error) {
 	yes := spec.Default == "yes"
 
 	render := func() {
-		yesBtn, noBtn := "  yes  ", "  no  "
+		var yesBtn, noBtn string
 		if yes {
 			yesBtn = boldP("[ yes ]")
 			noBtn = "  " + dim("no") + "  "

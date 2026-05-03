@@ -54,7 +54,7 @@ func newSecretsSetCommand() *cobra.Command {
 			if err := s.Set(key, secret); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Set %s\n", key)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Set %s\n", key)
 			return nil
 		},
 	}
@@ -101,7 +101,7 @@ func newSecretsRemoveCommand() *cobra.Command {
 			if err := s.Remove(key); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Removed %s\n", key)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Removed %s\n", key)
 			return nil
 		},
 	}
@@ -112,13 +112,13 @@ func newSecretsRemoveCommand() *cobra.Command {
 func runSecretsList(s *secrets.Store, out io.Writer) error {
 	names := s.List()
 	if len(names) == 0 {
-		fmt.Fprintln(out, "No secrets configured. Run: shell3 secrets set --key NAME --secret VALUE")
+		_, _ = fmt.Fprintln(out, "No secrets configured. Run: shell3 secrets set --key NAME --secret VALUE")
 		return nil
 	}
 	all := s.All()
-	fmt.Fprintf(out, "%-32s  %s\n", "NAME", "VALUE")
+	_, _ = fmt.Fprintf(out, "%-32s  %s\n", "NAME", "VALUE")
 	for _, name := range names {
-		fmt.Fprintf(out, "%-32s  %s\n", name, maskSecret(all[name]))
+		_, _ = fmt.Fprintf(out, "%-32s  %s\n", name, maskSecret(all[name]))
 	}
 	return nil
 }

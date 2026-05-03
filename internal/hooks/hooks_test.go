@@ -13,7 +13,7 @@ import (
 func TestHookAllow(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "hook.sh")
-	os.WriteFile(script, []byte("#!/bin/bash\necho '{\"action\":\"allow\"}'"), 0755)
+	_ = os.WriteFile(script,[]byte("#!/bin/bash\necho '{\"action\":\"allow\"}'"), 0755)
 
 	r := hooks.NewRunner(hooks.Config{OnToolCall: hooks.HookEntry{Command: script}})
 	allowed, err := r.OnToolCall(context.Background(), "bash", map[string]any{"command": "ls"})
@@ -25,7 +25,7 @@ func TestHookAllow(t *testing.T) {
 func TestHookBlock(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "hook.sh")
-	os.WriteFile(script, []byte("#!/bin/bash\necho '{\"action\":\"block\",\"reason\":\"not allowed\"}'"), 0755)
+	_ = os.WriteFile(script,[]byte("#!/bin/bash\necho '{\"action\":\"block\",\"reason\":\"not allowed\"}'"), 0755)
 
 	r := hooks.NewRunner(hooks.Config{OnToolCall: hooks.HookEntry{Command: script}})
 	allowed, err := r.OnToolCall(context.Background(), "bash", map[string]any{"command": "rm -rf /"})
@@ -37,7 +37,7 @@ func TestHookBlock(t *testing.T) {
 func TestContextBuildHook(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "hook.sh")
-	os.WriteFile(script, []byte(`#!/bin/bash
+	_ = os.WriteFile(script,[]byte(`#!/bin/bash
 cat | python3 -c "import sys,json; d=json.load(sys.stdin); d['messages']=d['messages'][-1:]; print(json.dumps(d))"
 `), 0755)
 

@@ -65,7 +65,7 @@ func RunInteractive(ctx context.Context, cfg Config) error {
 		// End whichever session is current when the loop exits. compact_history
 		// may roll sess.id to a new session mid-conversation, so read sess.id
 		// at defer time rather than capturing the initial sessionID.
-		defer func() { cfg.Store.EndSession(sess.id) }()
+		defer func() { _ = cfg.Store.EndSession(sess.id) }()
 	}
 
 	app := patchapp.New(cfg.ModeLabel, cfg.StatusLine, patchapp.WelcomeInfo{
@@ -562,27 +562,4 @@ func pruneLastTurn(messages []llm.Message) []llm.Message {
 		}
 	}
 	return messages
-}
-
-func slashHelp() string {
-	return "\n" + patchtui.Bold + "slash commands:" + patchtui.Reset + "\n" +
-		"  /reload    rebuild system prompt (memories, skills, tools) without clearing context\n" +
-		"  /clear     reset conversation context and reload system prompt\n" +
-		"  /rollback  remove last turn from context\n" +
-		"  /prune     /prune <id> — replace tool result <id> with a stub\n" +
-		"  /model     /model <name> to switch\n" +
-		"  /usage     show token usage from last turn\n" +
-		"  /prompt    dump system prompt and active tools\n" +
-		"  /truncate  toggle truncated bash output\n" +
-		"  /parameters list/set tunable params (e.g. reasoning_effort, verbosity)\n" +
-		"  /exit      quit shell3\n" +
-		"  /help      show this help\n" +
-		"\n" + patchtui.Bold + "keyboard shortcuts:" + patchtui.Reset + "\n" +
-		"  enter          send message\n" +
-		"  alt+enter      newline in message\n" +
-		"  esc            cancel active response / clear input\n" +
-		"  ctrl+c         cancel active response\n" +
-		"  ctrl+c ctrl+c  quit (when idle)\n" +
-		"\n" + patchtui.Bold + "shell passthrough:" + patchtui.Reset + "\n" +
-		"  !<cmd>     run shell command with full terminal\n"
 }

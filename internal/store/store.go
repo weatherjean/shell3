@@ -22,7 +22,7 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
 	}
 	if err := migrate(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	return &Store{db: db}, nil
@@ -71,14 +71,14 @@ func migrateMemoriesAddCore(db *sql.DB) error {
 		var notnull, pk int
 		var dflt sql.NullString
 		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return fmt.Errorf("store: scan table_info: %w", err)
 		}
 		if name == "core" {
 			hasCore = true
 		}
 	}
-	rows.Close()
+	_ = rows.Close()
 	if hasCore {
 		return nil
 	}
@@ -87,7 +87,7 @@ func migrateMemoriesAddCore(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("store: migrate memories: begin: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	migration := []string{
 		`CREATE VIRTUAL TABLE memories_new USING fts5(
@@ -208,7 +208,7 @@ func (s *Store) MemoryQuery(query string, coreOnly bool, limit int) ([]MemoryEnt
 	if err != nil {
 		return nil, fmt.Errorf("store: memory query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanMemoryRows(rows)
 }
 
@@ -231,7 +231,7 @@ func (s *Store) MemorySearchExpr(expr string, coreOnly bool, limit int) ([]Memor
 	if err != nil {
 		return nil, fmt.Errorf("store: memory search: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanMemoryRows(rows)
 }
 
@@ -370,7 +370,7 @@ func (s *Store) HistoryGet(sessionID int64, chunk int) (HistoryGetResult, error)
 	if err != nil {
 		return HistoryGetResult{}, fmt.Errorf("store: history get: turns: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var turns []HistoryTurn
 	for rows.Next() {
@@ -445,7 +445,7 @@ func (s *Store) HistorySearchExpr(expr string, limit int) (HistorySearchResult, 
 	if err != nil {
 		return HistorySearchResult{}, fmt.Errorf("store: history search: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type hitWithRowid struct {
 		rowid int64

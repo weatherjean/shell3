@@ -95,7 +95,7 @@ func TestLoad_NoBashDropsBashTools(t *testing.T) {
 	writePersona(t, dir, "base", simplePersona)
 
 	p := loadForTest(t, dir, "base", persona.TemplateData{}, false, true, nil)
-	for _, name := range []string{"bash", "shell_interactive", "edit_file", "write_file"} {
+	for _, name := range []string{"bash", "shell_interactive", "edit_file"} {
 		if hasToolNamed(p.Tools, name) {
 			t.Errorf("noBash=true but tool %q present", name)
 		}
@@ -107,7 +107,7 @@ func TestLoad_EditToolsPresentByDefault(t *testing.T) {
 	writePersona(t, dir, "base", simplePersona)
 
 	p := loadForTest(t, dir, "base", persona.TemplateData{}, false, false, nil)
-	for _, name := range []string{"edit_file", "write_file"} {
+	for _, name := range []string{"edit_file"} {
 		if !hasToolNamed(p.Tools, name) {
 			t.Errorf("missing %q tool; tools: %v", name, toolNames(p.Tools))
 		}

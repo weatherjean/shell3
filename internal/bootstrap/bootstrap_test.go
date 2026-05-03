@@ -132,12 +132,12 @@ func TestEnsureProject(t *testing.T) {
 	tmp := t.TempDir()
 	home := filepath.Join(tmp, "home")
 	cwd := filepath.Join(tmp, "project")
-	os.MkdirAll(cwd, 0755)
+	_ = os.MkdirAll(cwd, 0755)
 
 	g := paths.NewGlobal(home)
 	l := paths.NewLocal(cwd)
 
-	bootstrap.EnsureGlobal(g)
+	_ = bootstrap.EnsureGlobal(g)
 	id, err := bootstrap.EnsureProject(l, g, cwd)
 	if err != nil {
 		t.Fatalf("EnsureProject: %v", err)
@@ -167,10 +167,10 @@ func TestEnsureProjectIdempotent(t *testing.T) {
 	tmp := t.TempDir()
 	home := filepath.Join(tmp, "home")
 	cwd := filepath.Join(tmp, "project")
-	os.MkdirAll(cwd, 0755)
+	_ = os.MkdirAll(cwd, 0755)
 	g := paths.NewGlobal(home)
 	l := paths.NewLocal(cwd)
-	bootstrap.EnsureGlobal(g)
+	_ = bootstrap.EnsureGlobal(g)
 
 	id1, err := bootstrap.EnsureProject(l, g, cwd)
 	if err != nil {
@@ -189,16 +189,16 @@ func TestEnsureGitignoreAppends(t *testing.T) {
 	tmp := t.TempDir()
 	home := filepath.Join(tmp, "home")
 	cwd := filepath.Join(tmp, "project")
-	os.MkdirAll(cwd, 0755)
+	_ = os.MkdirAll(cwd, 0755)
 	g := paths.NewGlobal(home)
 	l := paths.NewLocal(cwd)
-	bootstrap.EnsureGlobal(g)
+	_ = bootstrap.EnsureGlobal(g)
 
 	// Pre-existing gitignore
-	os.MkdirAll(l.Root, 0755)
-	os.WriteFile(filepath.Join(l.Root, ".gitignore"), []byte("shell3.db\nsecrets.shell3\n"), 0644)
+	_ = os.MkdirAll(l.Root, 0755)
+	_ = os.WriteFile(filepath.Join(l.Root, ".gitignore"), []byte("shell3.db\nsecrets.shell3\n"), 0644)
 
-	bootstrap.EnsureProject(l, g, cwd)
+	_, _ = bootstrap.EnsureProject(l, g, cwd)
 
 	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
 	content := string(gi)

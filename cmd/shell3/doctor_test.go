@@ -15,11 +15,11 @@ func TestDoctorAllGreen(t *testing.T) {
 
 	g := paths.NewGlobal(home)
 	l := paths.NewLocal(cwd)
-	bootstrap.EnsureGlobal(g)
-	bootstrap.EnsureProject(l, g, cwd)
+	_ = bootstrap.EnsureGlobal(g)
+	_, _ = bootstrap.EnsureProject(l, g, cwd)
 
 	cs, _ := config.LoadCredStore(home)
-	cs.Set("test", "openai", map[string]string{"api_key": "sk-test"})
+	_ = cs.Set("test", "openai", map[string]string{"api_key": "sk-test"})
 
 	var out bytes.Buffer
 	code := runDoctor(home, cwd, &out)
@@ -37,8 +37,8 @@ func TestDoctorMissingCredentials(t *testing.T) {
 
 	g := paths.NewGlobal(home)
 	l := paths.NewLocal(cwd)
-	bootstrap.EnsureGlobal(g)
-	bootstrap.EnsureProject(l, g, cwd)
+	_ = bootstrap.EnsureGlobal(g)
+	_, _ = bootstrap.EnsureProject(l, g, cwd)
 
 	var out bytes.Buffer
 	code := runDoctor(home, cwd, &out)
@@ -55,7 +55,7 @@ func TestDoctorMissingRef(t *testing.T) {
 	cwd := t.TempDir()
 
 	g := paths.NewGlobal(home)
-	bootstrap.EnsureGlobal(g)
+	_ = bootstrap.EnsureGlobal(g)
 	// No project bootstrap — no .ref file
 
 	var out bytes.Buffer
