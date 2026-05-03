@@ -21,7 +21,7 @@ type Result struct {
 }
 
 // EditFile applies a str-replace edit to filePath. If oldString is empty the
-// file is created (errors if it already exists). If newString is empty the
+// file is created or overwritten with newString. If newString is empty the
 // match is deleted. Line endings are preserved: if the original file is CRLF,
 // the replacement is also written CRLF.
 //
@@ -33,8 +33,15 @@ func EditFile(workDir, filePath, oldString, newString string, replaceAll bool) (
 	abs := resolvePath(workDir, filePath)
 
 	if oldString == "" {
-		if _, err := os.Stat(abs); err == nil {
-			return Result{}, fmt.Errorf("file already exists: %s (pass non-empty old_string to edit, or use write_file to overwrite)", abs)
+		var oldContent string
+		created := true
+		if info, err := os.Stat(abs); err == nil {
+			if info.IsDir() {
+				return Result{}, fmt.Errorf("path is a directory: %s", abs)
+			}
+			raw, _ := os.ReadFile(abs)
+			oldContent = string(raw)
+			created = false
 		} else if !os.IsNotExist(err) {
 			return Result{}, fmt.Errorf("stat %s: %w", abs, err)
 		}
@@ -44,8 +51,8 @@ func EditFile(workDir, filePath, oldString, newString string, replaceAll bool) (
 		if err := os.WriteFile(abs, []byte(newString), 0o644); err != nil {
 			return Result{}, err
 		}
-		add, del := lineStats("", newString)
-		return Result{Path: abs, NewContent: newString, Created: true, Additions: add, Deletions: del}, nil
+		add, del := lineStats(oldContent, newString)
+		return Result{Path: abs, OldContent: oldContent, NewContent: newString, Created: created, Additions: add, Deletions: del}, nil
 	}
 
 	info, err := os.Stat(abs)
@@ -91,34 +98,6 @@ func EditFile(workDir, filePath, oldString, newString string, replaceAll bool) (
 	return Result{Path: abs, OldContent: original, NewContent: updated, Additions: add, Deletions: del}, nil
 }
 
-// WriteFile writes content to filePath, creating parent directories. Overwrites.
-func WriteFile(workDir, filePath, content string) (Result, error) {
-	if filePath == "" {
-		return Result{}, errors.New("file_path is required")
-	}
-	abs := resolvePath(workDir, filePath)
-	created := false
-	var oldContent string
-	if info, err := os.Stat(abs); err == nil {
-		if info.IsDir() {
-			return Result{}, fmt.Errorf("path is a directory: %s", abs)
-		}
-		raw, _ := os.ReadFile(abs)
-		oldContent = string(raw)
-	} else if os.IsNotExist(err) {
-		created = true
-	} else {
-		return Result{}, err
-	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		return Result{}, err
-	}
-	if err := os.WriteFile(abs, []byte(content), 0o644); err != nil {
-		return Result{}, err
-	}
-	add, del := lineStats(oldContent, content)
-	return Result{Path: abs, OldContent: oldContent, NewContent: content, Created: created, Additions: add, Deletions: del}, nil
-}
 
 func resolvePath(workDir, p string) string {
 	if filepath.IsAbs(p) {

@@ -45,12 +45,12 @@ func TestFormatEditResultShowsFiveLineCreatedPreview(t *testing.T) {
 }
 
 func TestFormatWriteResultShowsShortCreatedPreviewWithoutOmission(t *testing.T) {
-	got := formatWriteResult(edittool.Result{
+	got := formatEditResult(edittool.Result{
 		Path:       "/tmp/new.txt",
 		NewContent: "alpha\nbeta\n",
 		Created:    true,
 		Additions:  2,
-	})
+	}, true)
 
 	for _, want := range []string{
 		"Created /tmp/new.txt (+2 -0, 0→11 bytes)",

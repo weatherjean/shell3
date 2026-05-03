@@ -137,7 +137,7 @@ func Load(cfg PersonaConfig, body string, data TemplateData, hasStore, noBash bo
 	var tools []ToolDef
 	tools = append(tools, docsTool, pruneToolResultTool, compactHistoryTool)
 	if !noBash {
-		tools = append(tools, bashTool, shellInteractiveTool, editFileTool, writeFileTool)
+		tools = append(tools, bashTool, shellInteractiveTool, editFileTool)
 	}
 	if hasStore {
 		tools = append(tools, storeTools...)
@@ -157,7 +157,7 @@ func Load(cfg PersonaConfig, body string, data TemplateData, hasStore, noBash bo
 // to prevent name collisions.
 func BuiltinToolNames() map[string]struct{} {
 	all := append([]ToolDef{docsTool, pruneToolResultTool, compactHistoryTool, bashTool, shellInteractiveTool,
-		editFileTool, writeFileTool}, storeTools...)
+		editFileTool}, storeTools...)
 	names := make(map[string]struct{}, len(all))
 	for _, t := range all {
 		names[t.Name] = struct{}{}
@@ -270,8 +270,9 @@ var bashTool = ToolDef{
 
 var editFileTool = ToolDef{
 	Name: "edit_file",
-	Description: "Edit a file by exact string replacement. Provide old_string (must match exactly) and new_string. " +
-		"To create a new file, pass an empty old_string. To delete a chunk, pass an empty new_string. " +
+	Description: "Edit a file by exact string replacement, or write/overwrite it entirely when old_string is empty. " +
+		"To create or overwrite a file pass an empty old_string and the full content as new_string. " +
+		"To delete a chunk, pass an empty new_string. " +
 		"By default old_string must be unique in the file; set replace_all=true to replace every occurrence. " +
 		"Falls back to fuzzy line-trim/whitespace/indentation/escape matching if exact match fails. " +
 		"Prefer this over `bash` heredoc for code edits — it is atomic, diffs cleanly, and refuses ambiguous matches.",
@@ -279,7 +280,7 @@ var editFileTool = ToolDef{
 		"type": "object",
 		"properties": map[string]any{
 			"file_path":   map[string]any{"type": "string", "description": "Path to the file (absolute or relative to project root)"},
-			"old_string":  map[string]any{"type": "string", "description": "Exact text to replace; empty to create a new file"},
+			"old_string":  map[string]any{"type": "string", "description": "Exact text to replace; empty to create or overwrite the file"},
 			"new_string":  map[string]any{"type": "string", "description": "Replacement text; empty to delete the matched chunk"},
 			"replace_all": map[string]any{"type": "boolean", "description": "Replace every occurrence (default false)"},
 		},
@@ -287,18 +288,6 @@ var editFileTool = ToolDef{
 	},
 }
 
-var writeFileTool = ToolDef{
-	Name:        "write_file",
-	Description: "Overwrite a file with the given content. Creates parent directories as needed. Prefer edit_file for partial changes; only use write_file when replacing the whole file or creating one from scratch.",
-	Parameters: map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"file_path": map[string]any{"type": "string", "description": "Path to the file (absolute or relative to project root)"},
-			"content":   map[string]any{"type": "string", "description": "Full file content to write"},
-		},
-		"required": []string{"file_path", "content"},
-	},
-}
 
 var storeTools = []ToolDef{
 	{

@@ -580,7 +580,7 @@ func slashHelp() string {
 		"\n" + patchtui.Bold + "keyboard shortcuts:" + patchtui.Reset + "\n" +
 		"  enter          send message\n" +
 		"  alt+enter      newline in message\n" +
-		"  esc            clear input\n" +
+		"  esc            cancel active response / clear input\n" +
 		"  ctrl+c         cancel active response\n" +
 		"  ctrl+c ctrl+c  quit (when idle)\n" +
 		"\n" + patchtui.Bold + "shell passthrough:" + patchtui.Reset + "\n" +

@@ -95,7 +95,11 @@ func (a *App) processInput(data []byte) (exit bool) {
 			a.mu.Unlock()
 		case keyEscape:
 			a.mu.Lock()
-			if !a.busy {
+			if a.busy && a.streamCancel != nil {
+				a.streamCancel()
+				a.lastCtrlC = time.Time{}
+				a.status.ctrlCHint = false
+			} else if !a.busy {
 				if a.historyIdx > 0 || a.historyInDraft {
 					// Restore live input from draft; exit history navigation.
 					a.input = append([]rune(nil), a.historyDraft...)

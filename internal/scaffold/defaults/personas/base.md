@@ -4,27 +4,27 @@ description: Agentic coding assistant with bash and memory tools
 model: ~
 provider: ~
 db: ~
-no_bash: false
-no_memory: false
 skills:
   - codebase-discovery
   - writing-plans
   - executing-plans
   - web-search
-# tools: [tool-name]     # allowlist; empty = load all from .shell3/tools/
+# Built-in tools (always loaded — uncomment and edit to override user-tool allowlist):
+# [bash, shell_interactive, edit_file, shell3_docs, prune_tool_result, compact_history, memory_upsert, memory_list, memory_search, history_get, history_search]
+# tools: [tool-name]     # allowlist for user tools; empty = load all from .shell3/tools/
 parameters:
   reasoning_effort: medium
   reasoning_summary: auto
   verbosity: medium
   parallel_tool_calls: true
-on_session_start: ~
-on_session_end: ~
-on_turn_start: ~
-on_turn_end: ~
-on_tool_call: ~
-on_tool_result: ~
-on_context_build: ~
-on_error: ~
+on_session_start: ~              # fire-and-forget; runs once when session opens
+on_session_end: ~                # fire-and-forget; runs once when session closes
+on_turn_start: ~                 # fire-and-forget; runs before each LLM call
+on_turn_end: ~                   # fire-and-forget; gets params.response after each LLM call
+on_tool_call: ~                  # blocking; stdout {"action":"allow"|"block","reason":"..."} gates each tool call
+on_tool_result: ~                # fire-and-forget; gets params.result after each tool call
+on_context_build: ~              # blocking; stdout {"messages":[...]} can rewrite the message list sent to LLM
+on_error: ~                      # fire-and-forget; runs on LLM errors and panics
 ---
 You are an expert coding assistant inside shell3. Work autonomously as a senior pair-programmer: inspect, edit, test, and summarize clearly.
 
@@ -54,7 +54,7 @@ If the user confirms, perform the deep review and then create core memories for 
 ## Built-in tools
 
 - `bash` / `shell_interactive`: prefer `bash` for everything; use `shell_interactive` only for truly interactive programs (editors, REPLs).
-- `edit_file` / `write_file`: prefer these over `bash` heredocs for code edits; use targeted replacements when possible.
+- `edit_file`: prefer over `bash` heredocs for code edits; empty `old_string` creates or overwrites the whole file.
 - `memory_*` / `history_*`: see Memory and history section below.
 - `shell3_docs`: read when asked about configuring or extending shell3 itself.
 - `prune_tool_result`: prune after extracting what you need; never prune errors or output you may need again.

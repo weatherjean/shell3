@@ -15,46 +15,31 @@ const (
 )
 
 func handleEditTool(name, rawArgs, workDir string) string {
-	switch name {
-	case "edit_file":
-		var args struct {
-			FilePath   string `json:"file_path"`
-			OldString  string `json:"old_string"`
-			NewString  string `json:"new_string"`
-			ReplaceAll bool   `json:"replace_all"`
-		}
-		if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
-			return fmt.Sprintf("error: bad arguments: %v", err)
-		}
-		res, err := edittool.EditFile(workDir, args.FilePath, args.OldString, args.NewString, args.ReplaceAll)
-		if err != nil {
-			return fmt.Sprintf("error: %s", err.Error())
-		}
-		return formatEditResult(res, args.OldString == "")
-	case "write_file":
-		var args struct {
-			FilePath string `json:"file_path"`
-			Content  string `json:"content"`
-		}
-		if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
-			return fmt.Sprintf("error: bad arguments: %v", err)
-		}
-		res, err := edittool.WriteFile(workDir, args.FilePath, args.Content)
-		if err != nil {
-			return fmt.Sprintf("error: %s", err.Error())
-		}
-		return formatWriteResult(res)
+	var args struct {
+		FilePath   string `json:"file_path"`
+		OldString  string `json:"old_string"`
+		NewString  string `json:"new_string"`
+		ReplaceAll bool   `json:"replace_all"`
 	}
-	return fmt.Sprintf("error: unknown edit tool %q", name)
+	if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
+		return fmt.Sprintf("error: bad arguments: %v", err)
+	}
+	res, err := edittool.EditFile(workDir, args.FilePath, args.OldString, args.NewString, args.ReplaceAll)
+	if err != nil {
+		return fmt.Sprintf("error: %s", err.Error())
+	}
+	return formatEditResult(res, args.OldString == "")
 }
 
-func formatEditResult(r edittool.Result, created bool) string {
+func formatEditResult(r edittool.Result, fullWrite bool) string {
 	verb := "Edited"
-	if created {
+	if fullWrite && r.Created {
 		verb = "Created"
+	} else if fullWrite {
+		verb = "Overwrote"
 	}
 	header := fmt.Sprintf("%s %s (+%d -%d, %d→%d bytes)", verb, r.Path, r.Additions, r.Deletions, len(r.OldContent), len(r.NewContent))
-	if created {
+	if fullWrite && r.Created {
 		preview := formatCreatedFilePreview(r.NewContent, createdFilePreviewLines)
 		if preview == "" {
 			return header
@@ -71,28 +56,6 @@ func formatEditResult(r edittool.Result, created bool) string {
 	return header + "\n" + diff
 }
 
-func formatWriteResult(r edittool.Result) string {
-	verb := "Wrote"
-	if r.Created {
-		verb = "Created"
-	}
-	header := fmt.Sprintf("%s %s (+%d -%d, %d→%d bytes)", verb, r.Path, r.Additions, r.Deletions, len(r.OldContent), len(r.NewContent))
-	if r.Created {
-		preview := formatCreatedFilePreview(r.NewContent, createdFilePreviewLines)
-		if preview == "" {
-			return header
-		}
-		return header + "\n" + preview
-	}
-	if r.Additions == 0 && r.Deletions == 0 {
-		return header
-	}
-	diff := edittool.UnifiedDiff(r.OldContent, r.NewContent, editDiffContextLines)
-	if strings.TrimSpace(diff) == "" {
-		return header
-	}
-	return header + "\n" + diff
-}
 
 func formatCreatedFilePreview(content string, maxLines int) string {
 	if content == "" || maxLines <= 0 {

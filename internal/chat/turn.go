@@ -187,7 +187,7 @@ func runTurn(ctx context.Context, cfg Config, sess *session, userMsg llm.Message
 				ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, tc.Name, tc.RawArgs, false) + "\n"}
 				out = handlePruneToolResult(tc.RawArgs, allMsgs, sess.messages)
 				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(out, "\n")) + "\n\n"}
-			} else if tc.Name == "edit_file" || tc.Name == "write_file" {
+			} else if tc.Name == "edit_file" {
 				ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, tc.Name, summarizeEditArgs(tc.RawArgs), false) + "\n"}
 				out = handleEditTool(tc.Name, tc.RawArgs, cfg.WorkDir)
 				ch <- patchapp.AppendEvent{Text: colorizeEditOutput(strings.TrimRight(out, "\n")) + "\n\n"}
@@ -230,6 +230,10 @@ func runTurn(ctx context.Context, cfg Config, sess *session, userMsg llm.Message
 			sess.append(toolMsg)
 		}
 
+		if ctx.Err() != nil {
+			return
+		}
+
 		// After all tool results are appended, check if a reminder is due
 		// before the next LLM round. Inject into the last tool message in
 		// allMsgs only — sess.messages stays clean.
@@ -245,6 +249,9 @@ func runTurn(ctx context.Context, cfg Config, sess *session, userMsg llm.Message
 // streamOnce calls the LLM once, collecting text/reasoning/tool-calls/usage
 // and emitting ChunkEvents on ch.
 func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools []llm.ToolDefinition, ch chan<- patchapp.Event) (text, reasoning string, providerReasoning []byte, toolCalls []llm.ToolCall, usage llm.Usage, err error) {
+	if ctx.Err() != nil {
+		return "", "", nil, nil, llm.Usage{}, fmt.Errorf("context canceled")
+	}
 	var sb, rb strings.Builder
 	streamErr := client.Stream(ctx, msgs, tools, func(ev llm.StreamEvent) {
 		if ev.TextDelta != "" {

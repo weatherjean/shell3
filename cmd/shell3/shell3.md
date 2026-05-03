@@ -97,8 +97,7 @@ Flags: `--persona`, `--provider`, `--model`, `--no-bash`, `--no-memory-tools`.
 |---------------------|-----------------------------------------------------------------------|
 | `bash`              | Execute non-interactive shell commands in the project directory       |
 | `shell_interactive` | Run a command that needs a TTY (vim, less, REPL); TUI yields and resumes |
-| `edit_file`         | Edit a file by exact string replacement; atomic, diffs cleanly        |
-| `write_file`        | Overwrite or create a file with given content                         |
+| `edit_file`         | Edit by exact string replacement; empty `old_string` creates or overwrites; atomic, diffs cleanly |
 | `memory_upsert`     | Insert/update/delete a memory entry; empty value deletes; `core=true` injects into every session prompt |
 | `memory_list`       | List memories newest-first; `core_only=true` restricts to core memories |
 | `memory_search`     | Full-text search memories; `terms[]` (one concept per element) + `match=any\|all` (default any) |
@@ -218,8 +217,11 @@ description: short summary       # shown in pickers
 model: ~                         # starting model (~ = credential default)
 provider: ~                      # provider instance name (~ = alphabetically-first)
 db: ~                            # SQLite path override (~ = ~/.shell3/projects/<uuid>/shell3.db)
-no_bash: false                   # disable bash + shell_interactive tools
-no_memory: false                 # disable memory/history tools and store
+
+# skills: [skill-name]           # allowlist; empty = load all from .shell3/skills/
+# Built-in tools (always loaded — uncomment and edit to override user-tool allowlist):
+# [bash, shell_interactive, edit_file, shell3_docs, prune_tool_result, compact_history, memory_upsert, memory_list, memory_search, history_get, history_search]
+# tools: [tool-name]             # allowlist for user tools; empty = load all from .shell3/tools/
 
 # LLM request parameters
 parameters:
@@ -230,14 +232,14 @@ parameters:
   temperature: ~                 # ~ to leave provider default
 
 # Hooks — string for plain command, or mapping with needs_tty.
-on_session_start: ~              # fire-and-forget at session start
-on_session_end: ~                # fire-and-forget at session end
-on_turn_start: ~                 # fire-and-forget before each LLM turn
-on_turn_end: ~                   # fire-and-forget after each LLM turn (params.response)
-on_tool_call: ~                  # blocking before each tool call (can return action:block)
-on_tool_result: ~                # fire-and-forget after each tool call (params.result)
-on_context_build: ~              # blocking before LLM call (can rewrite messages)
-on_error: ~                      # fire-and-forget on LLM errors and panics
+on_session_start: ~              # fire-and-forget; runs once when session opens
+on_session_end: ~                # fire-and-forget; runs once when session closes
+on_turn_start: ~                 # fire-and-forget; runs before each LLM call
+on_turn_end: ~                   # fire-and-forget; gets params.response after each LLM call
+on_tool_call: ~                  # blocking; stdout {"action":"allow"|"block","reason":"..."} gates each tool call
+on_tool_result: ~                # fire-and-forget; gets params.result after each tool call
+on_context_build: ~              # blocking; stdout {"messages":[...]} can rewrite the message list sent to LLM
+on_error: ~                      # fire-and-forget; runs on LLM errors and panics
 ---
 The body is a Go template rendered into the system prompt.
 Available variables: `{{.Time}}`, `{{.CWD}}`, `{{.Model}}`, `{{.Skills}}`, `{{.CoreMemories}}`, `{{.UserTools}}`.

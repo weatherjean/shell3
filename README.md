@@ -13,11 +13,14 @@ AI-powered shell assistant.
         \|_/
 ```
 
-## Install
+## Getting started
+
+Works with any **OpenAI-compatible API endpoint** (OpenAI, Ollama, Groq, LM Studio, OpenRouter, …) and **Codex** (ChatGPT subscription via OAuth).
 
 ```sh
 make build
-./shell3
+shell3 auth        # configure your provider
+shell3             # start a session
 ```
 
 ## Docs
@@ -32,9 +35,6 @@ Or read the source: [cmd/shell3/shell3.md](cmd/shell3/shell3.md)
 
 Credentials are stored obfuscated (not encrypted) at `~/.shell3/credentials.shell3` — see `shell3 docs` for details and the threat model.
 
-- [Design specs](docs/superpowers/specs/)
-- [Implementation plans](docs/superpowers/plans/)
-
 ## Removing a project's shell3 data
 
 ```bash
@@ -48,4 +48,4 @@ rm -rf ~/.shell3/projects/<uuid>
 
 ## Credits
 
-Shell ASCII art by [jgs (Joan G. Stark)](https://asciiart.website/).
+Shell ASCII art by jgs (Joan G. Stark).

@@ -23,12 +23,20 @@ func TestEditFileCreatesNewFile(t *testing.T) {
 	}
 }
 
-func TestEditFileRefusesCreateWhenExists(t *testing.T) {
+func TestEditFileOverwritesWhenExists(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.txt")
 	os.WriteFile(path, []byte("x"), 0o644)
-	if _, err := EditFile(dir, "f.txt", "", "y", false); err == nil {
-		t.Fatal("expected error")
+	res, err := EditFile(dir, "f.txt", "", "y", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Created {
+		t.Fatal("expected Created=false for overwrite")
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "y" {
+		t.Fatalf("got %q, want %q", got, "y")
 	}
 }
 
@@ -143,7 +151,7 @@ func TestLineStatsApproxFallback(t *testing.T) {
 
 func TestWriteFileCreatesDirs(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := WriteFile(dir, "a/b/c.txt", "hi"); err != nil {
+	if _, err := EditFile(dir, "a/b/c.txt", "", "hi", false); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(filepath.Join(dir, "a/b/c.txt"))
@@ -157,8 +165,8 @@ func TestWriteFileCreatesDirs(t *testing.T) {
 
 func TestWriteFileOverwrites(t *testing.T) {
 	dir := t.TempDir()
-	WriteFile(dir, "f.txt", "old")
-	if _, err := WriteFile(dir, "f.txt", "new"); err != nil {
+	EditFile(dir, "f.txt", "", "old", false)
+	if _, err := EditFile(dir, "f.txt", "", "new", false); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(filepath.Join(dir, "f.txt"))
