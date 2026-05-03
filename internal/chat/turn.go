@@ -164,41 +164,17 @@ func runTurn(ctx context.Context, cfg TurnConfig, sess *session, userMsg llm.Mes
 			var out string
 			if hookErr != nil || !allowed {
 				out = fmt.Sprintf("Tool call blocked: %v", hookErr)
-			} else if tc.Name == "bash" {
-				command := parseBashCommand(tc.RawArgs)
-				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Yellow+patchtui.Bold+"#%s $ %s"+patchtui.Reset+"\n", tc.ID, command)}
-				out = executeBash(ctx, command, cfg.WorkDir)
-				display := truncateOutput(out)
-				if cfg.Truncate {
-					display = out
-				}
-				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(display, "\n")) + "\n\n"}
-			} else if tc.Name == "shell_interactive" {
-				command := parseBashCommand(tc.RawArgs)
-				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Yellow+patchtui.Bold+"#%s $ %s"+patchtui.Reset+" (interactive)\n", tc.ID, command)}
-				replyC := make(chan string, 1)
-				ch <- patchapp.TTYExecEvent{Cmd: command, WorkDir: cfg.WorkDir, ReplyC: replyC}
-				out = <-replyC
 			} else if tc.Name == "compact_history" {
 				ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, tc.Name, "", false) + "\n"}
 				out, allMsgs = handleCompactHistory(tc.RawArgs, cfg.Store, sess, allMsgs)
 				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(out, "\n")) + "\n\n"}
 				ch <- patchapp.AppendEvent{Text: patchtui.Dim + "tip: run /reload to pick up any new memories or skills" + patchtui.Reset + "\n\n"}
-			} else if tc.Name == "prune_tool_result" {
-				ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, tc.Name, tc.RawArgs, false) + "\n"}
-				out = handlePruneToolResult(tc.RawArgs, allMsgs, sess.messages)
-				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(out, "\n")) + "\n\n"}
-			} else if tc.Name == "edit_file" {
-				ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, tc.Name, summarizeEditArgs(tc.RawArgs), false) + "\n"}
-				out = handleEditTool(tc.Name, tc.RawArgs, cfg.WorkDir)
-				ch <- patchapp.AppendEvent{Text: colorizeEditOutput(strings.TrimRight(out, "\n")) + "\n\n"}
-			} else if tc.Name == "shell3_docs" {
-				ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, "shell3_docs", "", false) + "\n"}
-				if h, ok := cfg.Handlers["shell3_docs"]; ok {
-					out, _ = h.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), ToolConfig{})
-				} else {
-					out = "Documentation not available."
-				}
+			} else if tc.Name == "shell_interactive" {
+				command := parseBashArgs(tc.RawArgs)
+				ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Yellow+patchtui.Bold+"#%s $ %s"+patchtui.Reset+" (interactive)\n", tc.ID, command)}
+				replyC := make(chan string, 1)
+				ch <- patchapp.TTYExecEvent{Cmd: command, WorkDir: cfg.WorkDir, ReplyC: replyC}
+				out = <-replyC
 			} else if userTool, ok := cfg.UserTools[tc.Name]; ok {
 				ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, tc.Name, tc.RawArgs, true) + "\n"}
 				out = dispatchUserTool(ctx, userTool, tc.RawArgs, cfg.Secrets, cfg.WorkDir)
@@ -207,14 +183,45 @@ func runTurn(ctx context.Context, cfg TurnConfig, sess *session, userMsg llm.Mes
 					display = out
 				}
 				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(display, "\n")) + "\n\n"}
-			} else {
-				ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, tc.Name, tc.RawArgs, false) + "\n"}
-				out = dispatchStore(tc.Name, tc.RawArgs, cfg.Store)
-				display := truncateOutput(out)
-				if cfg.Truncate {
-					display = out
+			} else if handler, ok := cfg.Handlers[tc.Name]; ok {
+				toolCfg := ToolConfig{
+					Store:    cfg.Store,
+					WorkDir:  cfg.WorkDir,
+					Secrets:  cfg.Secrets,
+					AllMsgs:  allMsgs,
+					SessMsgs: sess.messages,
 				}
-				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(display, "\n")) + "\n\n"}
+				switch tc.Name {
+				case "bash":
+					command := parseBashArgs(tc.RawArgs)
+					ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Yellow+patchtui.Bold+"#%s $ %s"+patchtui.Reset+"\n", tc.ID, command)}
+					out, _ = handler.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), toolCfg)
+					display := truncateOutput(out)
+					if cfg.Truncate {
+						display = out
+					}
+					ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(display, "\n")) + "\n\n"}
+				case "edit_file":
+					ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, tc.Name, summarizeEditArgs(tc.RawArgs), false) + "\n"}
+					out, _ = handler.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), toolCfg)
+					ch <- patchapp.AppendEvent{Text: colorizeEditOutput(strings.TrimRight(out, "\n")) + "\n\n"}
+				case "prune_tool_result":
+					ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, tc.Name, tc.RawArgs, false) + "\n"}
+					out, _ = handler.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), toolCfg)
+					ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(out, "\n")) + "\n\n"}
+				default:
+					ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, tc.Name, tc.RawArgs, false) + "\n"}
+					out, _ = handler.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), toolCfg)
+					display := truncateOutput(out)
+					if cfg.Truncate {
+						display = out
+					}
+					ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(display, "\n")) + "\n\n"}
+				}
+			} else {
+				out = fmt.Sprintf("error: unknown tool %q", tc.Name)
+				ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, tc.Name, tc.RawArgs, false) + "\n"}
+				ch <- patchapp.AppendEvent{Text: dimLines(out) + "\n\n"}
 			}
 
 			cfg.Hooks.OnToolResult(ctx, tc.Name, out)
