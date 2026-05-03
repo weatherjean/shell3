@@ -32,7 +32,7 @@ type bodyTap struct {
 
 func (b *bodyTap) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.Body != nil {
-		buf, _ := io.ReadAll(req.Body)
+		buf, _ := io.ReadAll(req.Body) // err ignored: empty buf is acceptable for diagnostics
 		req.Body = io.NopCloser(bytes.NewReader(buf))
 		b.mu.Lock()
 		b.reqBody = buf
@@ -46,7 +46,7 @@ func (b *bodyTap) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		// Capture full error body — small JSON, worth the diagnostic value.
-		buf, _ := io.ReadAll(res.Body)
+		buf, _ := io.ReadAll(res.Body) // err ignored: empty buf is acceptable for diagnostics
 		res.Body = io.NopCloser(bytes.NewReader(buf))
 		b.mu.Lock()
 		b.resBody = buf
