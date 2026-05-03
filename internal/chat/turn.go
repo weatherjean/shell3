@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -84,7 +85,8 @@ func runTurn(ctx context.Context, cfg TurnConfig, sess *session, userMsg llm.Mes
 	defer close(ch)
 	defer func() {
 		if r := recover(); r != nil {
-			err := fmt.Errorf("panic: %v", r)
+			stack := debug.Stack()
+			err := fmt.Errorf("panic: %v\n%s", r, stack)
 			cfg.Hooks.OnError(ctx, err)
 			ch <- patchapp.TurnErrEvent{Err: err}
 		}
