@@ -12,12 +12,13 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/patchapp"
 	"github.com/weatherjean/shell3/internal/patchtui"
+	"github.com/weatherjean/shell3/internal/store"
 )
 
 // dumpStreamError writes the failing turn's messages and the last raw
 // HTTP traffic to .shell3/last_error.json under cfg.WorkDir. Best-effort —
 // any IO error is silently ignored.
-func dumpStreamError(cfg Config, msgs []llm.Message, streamErr error) {
+func dumpStreamError(cfg TurnConfig, msgs []llm.Message, streamErr error) {
 	if cfg.WorkDir == "" {
 		return
 	}
@@ -79,7 +80,7 @@ func toolCallHeader(id, name, args string, isUserTool bool) string {
 
 // runTurn executes one user→assistant exchange, sending events to ch.
 // The goroutine closes ch when done.
-func runTurn(ctx context.Context, cfg Config, sess *session, userMsg llm.Message, ch chan<- patchapp.Event) {
+func runTurn(ctx context.Context, cfg TurnConfig, sess *session, userMsg llm.Message, ch chan<- patchapp.Event) {
 	defer close(ch)
 	defer func() {
 		if r := recover(); r != nil {
@@ -180,7 +181,7 @@ func runTurn(ctx context.Context, cfg Config, sess *session, userMsg llm.Message
 				out = <-replyC
 			} else if tc.Name == "compact_history" {
 				ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, tc.Name, "", false) + "\n"}
-				out, allMsgs = handleCompactHistory(tc.RawArgs, cfg, sess, allMsgs)
+				out, allMsgs = handleCompactHistory(tc.RawArgs, cfg.Store, sess, allMsgs)
 				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(out, "\n")) + "\n\n"}
 				ch <- patchapp.AppendEvent{Text: patchtui.Dim + "tip: run /reload to pick up any new memories or skills" + patchtui.Reset + "\n\n"}
 			} else if tc.Name == "prune_tool_result" {
@@ -193,8 +194,9 @@ func runTurn(ctx context.Context, cfg Config, sess *session, userMsg llm.Message
 				ch <- patchapp.AppendEvent{Text: colorizeEditOutput(strings.TrimRight(out, "\n")) + "\n\n"}
 			} else if tc.Name == "shell3_docs" {
 				ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, "shell3_docs", "", false) + "\n"}
-				out = cfg.Docs
-				if out == "" {
+				if h, ok := cfg.Handlers["shell3_docs"]; ok {
+					out, _ = h.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), ToolConfig{})
+				} else {
 					out = "Documentation not available."
 				}
 			} else if userTool, ok := cfg.UserTools[tc.Name]; ok {
@@ -312,8 +314,8 @@ func parseRawArgs(raw string) map[string]any {
 }
 
 // saveHistory persists new messages to the store after a turn.
-func saveHistory(cfg Config, sess *session, sessionID int64, from int) {
-	if cfg.Store == nil {
+func saveHistory(st *store.Store, sess *session, sessionID int64, from int) {
+	if st == nil {
 		return
 	}
 	if from > len(sess.messages) {
@@ -324,9 +326,9 @@ func saveHistory(cfg Config, sess *session, sessionID int64, from int) {
 	for _, m := range sess.messages[from:] {
 		switch m.Role {
 		case llm.RoleUser, llm.RoleAssistant:
-			_ = cfg.Store.AppendHistory(sessionID, string(m.Role), m.Content)
+			_ = st.AppendHistory(sessionID, string(m.Role), m.Content)
 			for _, tc := range m.ToolCalls {
-				_ = cfg.Store.AppendHistory(sessionID, "tool", toolCallSummary(tc))
+				_ = st.AppendHistory(sessionID, "tool", toolCallSummary(tc))
 			}
 		}
 	}

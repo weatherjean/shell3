@@ -52,6 +52,27 @@ type Config struct {
 	Params        llm.RequestParams
 }
 
+// NewHandlers constructs the built-in tool handler map from a Config.
+// Handlers are injected into TurnConfig and looked up by tool name during dispatch.
+func NewHandlers(cfg Config) map[string]ToolHandler {
+	handlers := []ToolHandler{
+		BashHandler{},
+		EditHandler{},
+		PruneHandler{},
+		DocsHandler{docs: cfg.Docs},
+		StoreHandler{toolName: "memory_upsert"},
+		StoreHandler{toolName: "memory_list"},
+		StoreHandler{toolName: "memory_search"},
+		StoreHandler{toolName: "history_get"},
+		StoreHandler{toolName: "history_search"},
+	}
+	m := make(map[string]ToolHandler, len(handlers))
+	for _, h := range handlers {
+		m[h.Name()] = h
+	}
+	return m
+}
+
 // RunInteractive runs the TUI chat loop. Blocks until the user quits.
 func RunInteractive(ctx context.Context, cfg Config) error {
 	sess := &session{}
@@ -86,16 +107,30 @@ func RunInteractive(ctx context.Context, cfg Config) error {
 
 	var lastUsage llm.Usage
 
+	handlers := NewHandlers(cfg)
+
 	// launchTurn starts a turn goroutine for userMsg and wires drain.
 	launchTurn := func(userMsg llm.Message) {
 		ch := make(chan patchapp.Event, 256)
 		turnCtx, cancel := context.WithCancel(ctx)
 		app.SetBusy(true, cancel)
 		prevLen := len(sess.messages)
+		tc := TurnConfig{
+			LLM:        cfg.LLM,
+			Hooks:      cfg.Hooks,
+			Personality: cfg.Personality,
+			StatusLine: cfg.StatusLine,
+			WorkDir:    cfg.WorkDir,
+			Store:      cfg.Store,
+			UserTools:  cfg.UserTools,
+			Secrets:    cfg.Secrets,
+			Truncate:   cfg.Truncate,
+			Handlers:   handlers,
+		}
 		go func() {
 			defer cancel()
-			runTurn(turnCtx, cfg, sess, userMsg, ch)
-			saveHistory(cfg, sess, sess.id, prevLen)
+			runTurn(turnCtx, tc, sess, userMsg, ch)
+			saveHistory(cfg.Store, sess, sess.id, prevLen)
 		}()
 		go drainTurn(ch, app, &lastUsage, &cfg)
 	}
@@ -537,7 +572,19 @@ func currentParamValue(p llm.RequestParams, name string) string {
 func RunOnce(ctx context.Context, cfg Config, input string) error {
 	sess := &session{}
 	ch := make(chan patchapp.Event, 256)
-	go runTurn(ctx, cfg, sess, llm.Message{Role: llm.RoleUser, Content: input}, ch)
+	tc := TurnConfig{
+		LLM:        cfg.LLM,
+		Hooks:      cfg.Hooks,
+		Personality: cfg.Personality,
+		StatusLine: cfg.StatusLine,
+		WorkDir:    cfg.WorkDir,
+		Store:      cfg.Store,
+		UserTools:  cfg.UserTools,
+		Secrets:    cfg.Secrets,
+		Truncate:   cfg.Truncate,
+		Handlers:   NewHandlers(cfg),
+	}
+	go runTurn(ctx, tc, sess, llm.Message{Role: llm.RoleUser, Content: input}, ch)
 
 	for ev := range ch {
 		switch v := ev.(type) {

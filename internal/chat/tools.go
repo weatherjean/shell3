@@ -310,7 +310,7 @@ func truncateOutput(s string) string {
 // summary. Ends the current store session and starts a new one so the compact
 // boundary is visible in history. Both sess.messages and allMsgs are rebuilt
 // in place; the full compact args are saved to history before the session rolls.
-func handleCompactHistory(rawArgs string, cfg Config, sess *session, allMsgs []llm.Message) (out string, newAllMsgs []llm.Message) {
+func handleCompactHistory(rawArgs string, st *store.Store, sess *session, allMsgs []llm.Message) (out string, newAllMsgs []llm.Message) {
 	var args struct {
 		Summary             string   `json:"summary"`
 		ImportantFiles      []string `json:"important_files"`
@@ -328,22 +328,22 @@ func handleCompactHistory(rawArgs string, cfg Config, sess *session, allMsgs []l
 	prevSessionID := sess.id
 
 	// Roll the store session so compact boundary is visible in history.
-	if cfg.Store != nil {
+	if st != nil {
 		// Flush current session messages before wiping — saveHistory bails early
 		// after compact because prevLen > len(sess.messages), so we save here.
 		for _, m := range sess.messages {
 			switch m.Role {
 			case llm.RoleUser, llm.RoleAssistant:
-				_ = cfg.Store.AppendHistory(prevSessionID, string(m.Role), m.Content)
+				_ = st.AppendHistory(prevSessionID, string(m.Role), m.Content)
 				for _, tc := range m.ToolCalls {
-					_ = cfg.Store.AppendHistory(prevSessionID, "tool", toolCallSummary(tc))
+					_ = st.AppendHistory(prevSessionID, "tool", toolCallSummary(tc))
 				}
 			}
 		}
 		// Save the compact call itself as the final entry in the outgoing session.
-		_ = cfg.Store.AppendHistory(prevSessionID, "tool", "compact_history: "+rawArgs)
-		_ = cfg.Store.EndSession(prevSessionID)
-		newID, err := cfg.Store.StartSession()
+		_ = st.AppendHistory(prevSessionID, "tool", "compact_history: "+rawArgs)
+		_ = st.EndSession(prevSessionID)
+		newID, err := st.StartSession()
 		if err == nil {
 			sess.id = newID
 		}
