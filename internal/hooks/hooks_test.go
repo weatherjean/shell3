@@ -62,3 +62,25 @@ func TestNoHook(t *testing.T) {
 		t.Errorf("no hook should default to allow: allowed=%v err=%v", allowed, err)
 	}
 }
+
+func TestHookTildeExpansion(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home dir")
+	}
+	dir, err := os.MkdirTemp(home, ".shell3-hook-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	script := filepath.Join(dir, "hook.sh")
+	_ = os.WriteFile(script, []byte("#!/bin/bash\necho '{\"action\":\"allow\"}'"), 0755)
+
+	rel := "~/" + filepath.Base(dir) + "/hook.sh"
+	r := hooks.NewRunner(hooks.Config{OnToolCall: hooks.HookEntry{Command: "bash " + rel}})
+	allowed, err := r.OnToolCall(context.Background(), "bash", nil)
+	if err != nil || !allowed {
+		t.Errorf("tilde expansion failed: allowed=%v err=%v", allowed, err)
+	}
+}

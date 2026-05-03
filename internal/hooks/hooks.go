@@ -68,7 +68,7 @@ func (r *Runner) dispatch(ctx context.Context, cmd string, input hookInput, mode
 	}
 
 	data, _ := json.Marshal(input)
-	parts := strings.Fields(cmd)
+	parts := expandHomeParts(strings.Fields(cmd))
 	c := exec.CommandContext(ctx, parts[0], parts[1:]...)
 	c.Stdin = bytes.NewReader(data)
 
@@ -221,4 +221,21 @@ func (r *Runner) OnError(ctx context.Context, err error) {
 			Params: map[string]any{"error": err.Error()},
 		})
 	}
+}
+
+// expandHomeParts expands a leading ~ in each command token.
+func expandHomeParts(parts []string) []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return parts
+	}
+	out := make([]string, len(parts))
+	for i, p := range parts {
+		if p == "~" || strings.HasPrefix(p, "~/") {
+			out[i] = home + p[1:]
+		} else {
+			out[i] = p
+		}
+	}
+	return out
 }

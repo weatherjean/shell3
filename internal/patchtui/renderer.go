@@ -74,20 +74,40 @@ type Renderer struct {
 	height    int
 	inited    bool
 	out       io.Writer // destination; nil means os.Stdout
+	outFile   *os.File  // set when out is an *os.File; used for TIOCGWINSZ
 }
 
 // New returns a new Renderer. The first call to [Renderer.Render] or
 // [Renderer.Print] writes from the current cursor position; subsequent
 // calls update the frame in place.
-func New() *Renderer { return &Renderer{} }
+//
+// The terminal size is sampled immediately so that the first Render does not
+// treat the transition from zero to actual dimensions as a size change and
+// emit a full-screen clear.
+func New() *Renderer {
+	w, h := Size()
+	return &Renderer{width: w, height: h}
+}
 
 // SetOutput redirects renderer output to w. By default the renderer writes
 // to os.Stdout. Pass nil to restore the default. Safe to call between
 // renders; do not call concurrently with Render/Print.
+//
+// If w implements *os.File, the renderer uses its file descriptor for
+// TIOCGWINSZ so that terminal size is read correctly even when os.Stdout
+// is a pipe (e.g. inside hook subprocesses).
 func (r *Renderer) SetOutput(w io.Writer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.out = w
+	if f, ok := w.(*os.File); ok {
+		r.outFile = f
+		// Re-sample size from the new output file so the next Render does not
+		// treat the source switch as a size change and emit a full-screen clear.
+		r.width, r.height = sizeFromFd(f.Fd())
+	} else {
+		r.outFile = nil
+	}
 }
 
 // writer returns the current output destination.
@@ -107,10 +127,24 @@ type winsize struct {
 // It uses the TIOCGWINSZ ioctl on stdout. If the ioctl fails (for example,
 // when stdout is piped), Size returns 80x24.
 func Size() (width, height int) {
+	return sizeFromFd(os.Stdout.Fd())
+}
+
+// size returns the terminal dimensions using the renderer's output file when
+// available, falling back to os.Stdout. This ensures correct dimensions even
+// when os.Stdout is a pipe (e.g. inside hook subprocesses).
+func (r *Renderer) size() (int, int) {
+	if r.outFile != nil {
+		return sizeFromFd(r.outFile.Fd())
+	}
+	return Size()
+}
+
+func sizeFromFd(fd uintptr) (width, height int) {
 	var ws winsize
 	if _, _, errno := syscall.Syscall(
 		syscall.SYS_IOCTL,
-		os.Stdout.Fd(),
+		fd,
 		syscall.TIOCGWINSZ,
 		uintptr(unsafe.Pointer(&ws)),
 	); errno == 0 && ws.Col > 0 && ws.Row > 0 {
@@ -132,7 +166,7 @@ func (r *Renderer) Render(lines []string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	width, height := Size()
+	width, height := r.size()
 
 	// Extract cursor marker.
 	markerRow, markerCol := -1, -1
@@ -211,7 +245,7 @@ func (r *Renderer) Print(lines []string) {
 	// Reset state so the next Render starts a fresh frame at the new cursor.
 	// Set width/height to current so the first subsequent Render does not
 	// see a spurious size change and clear the screen.
-	w, h := Size()
+	w, h := r.size()
 	r.prev = nil
 	r.inited = false
 	r.cursorRow = 0
@@ -228,7 +262,7 @@ func (r *Renderer) PrintAndRender(lines, frame []string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	width, height := Size()
+	width, height := r.size()
 
 	// Extract cursor marker from the replacement frame.
 	markerRow, markerCol := -1, -1
@@ -319,7 +353,7 @@ func (r *Renderer) Reset() {
 	r.prev = nil
 	r.inited = false
 	r.cursorRow = 0
-	r.width, r.height = Size()
+	r.width, r.height = r.size()
 }
 
 // fullRender writes the entire frame from scratch. On a size change the

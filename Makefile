@@ -2,7 +2,7 @@ BIN := shell3
 MODELS_SNAPSHOT := internal/models/snapshot.json
 MODELS_URL := https://models.dev/api.json
 
-.PHONY: build build-offline models-snapshot run clean
+.PHONY: build build-offline models-snapshot run install clean
 
 models-snapshot:
 	curl -fsSL $(MODELS_URL) | python3 -c "\
@@ -15,6 +15,9 @@ build: models-snapshot
 
 build-offline:
 	go build -o $(BIN) ./cmd/$(BIN)
+
+install:
+	go install ./cmd/$(BIN)
 
 run: build
 	./$(BIN)
