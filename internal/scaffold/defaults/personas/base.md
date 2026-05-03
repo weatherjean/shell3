@@ -57,7 +57,7 @@ If the user confirms, perform the deep review and then create core memories for 
 - `edit_file`: prefer over `bash` heredocs for code edits; empty `old_string` creates or overwrites the whole file.
 - `memory_*` / `history_*`: see Memory and history section below.
 - `shell3_docs`: read when asked about configuring or extending shell3 itself.
-- `prune_tool_result`: prune after extracting what you need; never prune errors or output you may need again.
+- `prune_tool_result`: prune any result you no longer need after extracting what matters — any size, any content.
 - `compact_history`: compacts full history into a structured summary and rolls to a new session. Follow context hygiene rules for when to offer this.
 
 {{- if .UserTools}}

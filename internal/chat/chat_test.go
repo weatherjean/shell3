@@ -516,26 +516,20 @@ func TestPruneToolResult_Success(t *testing.T) {
 	}
 }
 
-func TestPruneToolResult_TooSmall(t *testing.T) {
+func TestPruneToolResult_SmallResult(t *testing.T) {
 	a := []llm.Message{mkToolMsg("tc1", "bash", "tiny output")}
 	out := handlePruneToolResultFrom(`{"tool_call_id":"tc1","reason":"x"}`, a)
-	if !strings.Contains(out, "below") {
-		t.Fatalf("expected size-gate refusal, got %q", out)
-	}
-	if !strings.Contains(a[0].Content, "tiny output") {
-		t.Fatalf("content unexpectedly modified: %q", a[0].Content)
+	if !strings.HasPrefix(out, "Pruned") {
+		t.Fatalf("expected success even for small result, got %q", out)
 	}
 }
 
-func TestPruneToolResult_RefusesError(t *testing.T) {
+func TestPruneToolResult_ErrorOutput(t *testing.T) {
 	body := "error: " + strings.Repeat("y", 600)
 	a := []llm.Message{mkToolMsg("tc1", "bash", body)}
 	out := handlePruneToolResultFrom(`{"tool_call_id":"tc1","reason":"x"}`, a)
-	if !strings.Contains(out, "error") || !strings.Contains(out, "refusing") {
-		t.Fatalf("expected error-gate refusal, got %q", out)
-	}
-	if a[0].Content != body {
-		t.Fatalf("content unexpectedly modified")
+	if !strings.HasPrefix(out, "Pruned") {
+		t.Fatalf("expected success even for error output, got %q", out)
 	}
 }
 

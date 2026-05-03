@@ -4,14 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/weatherjean/shell3/internal/llm"
 )
-
-// minPruneBytes is the smallest tool result worth replacing; pruning a result
-// smaller than this saves negligible context and is almost certainly a mistake.
-const minPruneBytes = 500
 
 // PruneHandler implements the prune_tool_result built-in tool.
 // It replaces a prior tool result in the conversation with a short stub,
@@ -62,13 +57,6 @@ func pruneByID(toolCallID, stem string, slices ...[]llm.Message) string {
 	}
 
 	content := target.Content
-	if len(content) < minPruneBytes {
-		return fmt.Sprintf("error: result is %d bytes; below %d-byte prune threshold", len(content), minPruneBytes)
-	}
-	if looksLikeError(content) {
-		return "error: refusing to prune a result that looks like a tool error"
-	}
-
 	stub := fmt.Sprintf("[%s — original was %d bytes]", stem, len(content))
 	count := 0
 	for _, msgs := range slices {
@@ -83,22 +71,4 @@ func pruneByID(toolCallID, stem string, slices ...[]llm.Message) string {
 		return "error: failed to update message content"
 	}
 	return fmt.Sprintf("Pruned result of %s (id=%s): freed %d bytes", name, toolCallID, len(content)-len(stub))
-}
-
-func looksLikeError(s string) bool {
-	t := strings.TrimSpace(s)
-	// Skip the synthetic [tool_call_id=...] header line if present so the
-	// real payload's first line is what we inspect.
-	if strings.HasPrefix(t, "[tool_call_id=") {
-		if nl := strings.IndexByte(t, '\n'); nl >= 0 {
-			t = strings.TrimSpace(t[nl+1:])
-		} else {
-			return false
-		}
-	}
-	if t == "" {
-		return false
-	}
-	low := strings.ToLower(t)
-	return strings.HasPrefix(low, "error:") || strings.HasPrefix(low, "error ")
 }

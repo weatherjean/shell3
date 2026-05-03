@@ -104,7 +104,7 @@ Flags: `--persona`, `--provider`, `--model`, `--no-bash`, `--no-memory-tools`.
 | `history_get`       | Fetch one chunk (25 turns) of one session by `session_id` + `chunk`; walk via `prev_session_id` / `next_session_id` |
 | `history_search`    | Full-text search past conversations; same `terms[]` + `match` shape as `memory_search`; hits include `session_id`/`chunk` for follow-up `history_get` |
 | `shell3_docs`       | Return this documentation (commands, config, slash commands, skills)  |
-| `prune_tool_result` | Replace a prior successful tool result with a stub to free context; gated to ≥500 bytes and non-error output |
+| `prune_tool_result` | Replace a prior tool result with a stub to free context; any size or content |
 | `compact_history`   | Compact full conversation into a structured summary (decisions, files, references, skills to re-read, next steps) and roll to a new session |
 
 User-defined tools appear after the built-ins. Memory and history are stored per-project in `~/.shell3/projects/<uuid>/shell3.db`.
