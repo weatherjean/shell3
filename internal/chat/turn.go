@@ -108,6 +108,12 @@ func runTurn(ctx context.Context, cfg TurnConfig, sess *session, userMsg llm.Mes
 	allMsgs = append(allMsgs, llm.Message{Role: llm.RoleSystem, Content: cfg.Personality.SystemPrompt})
 	allMsgs = append(allMsgs, msgs...)
 
+	// Build schema index for fast lookup during tool call validation.
+	toolSchemas := make(map[string]map[string]any, len(cfg.Personality.Tools))
+	for _, td := range cfg.Personality.Tools {
+		toolSchemas[td.Name] = td.Parameters
+	}
+
 	if reminder := sess.reminders.check(cfg.StatusLine, sess.lastPromptTokens); reminder != "" {
 		allMsgs = injectReminder(allMsgs, reminder)
 		ch <- patchapp.AppendEvent{Text: patchtui.Dim + reminder + patchtui.Reset + "\n\n"}
@@ -168,6 +174,13 @@ func runTurn(ctx context.Context, cfg TurnConfig, sess *session, userMsg llm.Mes
 			var out string
 			if hookErr != nil || !allowed {
 				out = fmt.Sprintf("Tool call blocked: %v", hookErr)
+			} else if schema, ok := toolSchemas[tc.Name]; ok {
+				if err := validateToolArgs(schema, json.RawMessage([]byte(tc.RawArgs))); err != nil {
+					out = fmt.Sprintf("error: invalid tool arguments: %v", err)
+				}
+			}
+			if out != "" {
+				// Hook blocked or validation failed — skip dispatch.
 			} else if tc.Name == "compact_history" {
 				ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, tc.Name, "", false) + "\n"}
 				out, allMsgs = handleCompactHistory(tc.RawArgs, cfg.Store, sess, allMsgs, cfg.Log)
