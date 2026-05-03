@@ -14,9 +14,6 @@ import (
 	"github.com/weatherjean/shell3/internal/usertools"
 )
 
-// minPruneBytes gates prune_tool_result: small results aren't worth pruning.
-const minPruneBytes = 500
-
 // handlePruneToolResult replaces the content of a prior tool message
 // (identified by tool_call_id) with a short stub. Mutates both slices in place.
 // Refuses small results and results that look like errors.
@@ -87,23 +84,6 @@ func pruneToolResultByID(toolCallID, stem string, slices ...[]llm.Message) strin
 	return fmt.Sprintf("Pruned result of %s (id=%s): freed %d bytes", name, toolCallID, len(content)-len(stub))
 }
 
-func looksLikeError(s string) bool {
-	t := strings.TrimSpace(s)
-	// Skip the synthetic [tool_call_id=...] header line if present so the
-	// real payload's first line is what we inspect.
-	if strings.HasPrefix(t, "[tool_call_id=") {
-		if nl := strings.IndexByte(t, '\n'); nl >= 0 {
-			t = strings.TrimSpace(t[nl+1:])
-		} else {
-			return false
-		}
-	}
-	if t == "" {
-		return false
-	}
-	low := strings.ToLower(t)
-	return strings.HasPrefix(low, "error:") || strings.HasPrefix(low, "error ")
-}
 
 func dispatchUserTool(ctx context.Context, tool usertools.Tool, rawArgs string, secrets map[string]string, workDir string) string {
 	out, err := usertools.Run(ctx, tool, rawArgs, secrets, workDir)
