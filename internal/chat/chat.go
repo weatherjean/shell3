@@ -301,7 +301,7 @@ func registerSlashCommands(app slashTarget, cfg *Config, sess *session, lastUsag
 				dim("[/prune usage: /prune <tool_call_id>]")
 				return
 			}
-			out := pruneToolResultByID(id, "pruned by user", sess.messages)
+			out := pruneByID(id, "pruned by user", sess.messages)
 			dim("[" + out + "]")
 		},
 	})

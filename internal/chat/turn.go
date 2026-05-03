@@ -344,7 +344,7 @@ func saveHistory(st *store.Store, sess *session, sessionID int64, from int) {
 func toolCallSummary(tc llm.ToolCall) string {
 	const maxLen = 80
 	if tc.Name == "bash" {
-		cmd := parseBashCommand(tc.RawArgs)
+		cmd := parseBashArgs(tc.RawArgs)
 		line := strings.SplitN(cmd, "\n", 2)[0]
 		if len(line) > maxLen {
 			line = line[:maxLen] + "…"

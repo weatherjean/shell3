@@ -507,7 +507,7 @@ func TestPruneToolResult_Success(t *testing.T) {
 	a := []llm.Message{mkToolMsg("tc1", "bash", big)}
 	b := []llm.Message{mkToolMsg("tc1", "bash", big)}
 
-	out := handlePruneToolResult(`{"tool_call_id":"tc1","reason":"not needed"}`, a, b)
+	out := handlePruneToolResultFrom(`{"tool_call_id":"tc1","reason":"not needed"}`, a, b)
 	if !strings.HasPrefix(out, "Pruned") {
 		t.Fatalf("want success, got %q", out)
 	}
@@ -518,7 +518,7 @@ func TestPruneToolResult_Success(t *testing.T) {
 
 func TestPruneToolResult_TooSmall(t *testing.T) {
 	a := []llm.Message{mkToolMsg("tc1", "bash", "tiny output")}
-	out := handlePruneToolResult(`{"tool_call_id":"tc1","reason":"x"}`, a)
+	out := handlePruneToolResultFrom(`{"tool_call_id":"tc1","reason":"x"}`, a)
 	if !strings.Contains(out, "below") {
 		t.Fatalf("expected size-gate refusal, got %q", out)
 	}
@@ -530,7 +530,7 @@ func TestPruneToolResult_TooSmall(t *testing.T) {
 func TestPruneToolResult_RefusesError(t *testing.T) {
 	body := "error: " + strings.Repeat("y", 600)
 	a := []llm.Message{mkToolMsg("tc1", "bash", body)}
-	out := handlePruneToolResult(`{"tool_call_id":"tc1","reason":"x"}`, a)
+	out := handlePruneToolResultFrom(`{"tool_call_id":"tc1","reason":"x"}`, a)
 	if !strings.Contains(out, "error") || !strings.Contains(out, "refusing") {
 		t.Fatalf("expected error-gate refusal, got %q", out)
 	}
@@ -541,14 +541,14 @@ func TestPruneToolResult_RefusesError(t *testing.T) {
 
 func TestPruneToolResult_MissingID(t *testing.T) {
 	a := []llm.Message{mkToolMsg("tc1", "bash", strings.Repeat("z", 600))}
-	out := handlePruneToolResult(`{"tool_call_id":"missing","reason":"x"}`, a)
+	out := handlePruneToolResultFrom(`{"tool_call_id":"missing","reason":"x"}`, a)
 	if !strings.Contains(out, "no tool result") {
 		t.Fatalf("expected not-found error, got %q", out)
 	}
 }
 
 func TestPruneToolResult_BadArgs(t *testing.T) {
-	out := handlePruneToolResult(`{"reason":"x"}`)
+	out := handlePruneToolResultFrom(`{"reason":"x"}`)
 	if !strings.Contains(out, "tool_call_id required") {
 		t.Fatalf("expected required-arg error, got %q", out)
 	}
