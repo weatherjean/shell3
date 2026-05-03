@@ -14,7 +14,13 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
+// hookTimeout caps non-interactive hook execution. Long enough for network
+// calls in hooks; short enough to not block the turn visibly.
 const hookTimeout = 20 * time.Second
+
+// hookTTYTimeout caps interactive (TTY) hook execution, e.g. confirm-bash.sh
+// waiting for user input. 5 minutes covers deliberate review without
+// leaving a zombie process if the user walks away.
 const hookTTYTimeout = 5 * time.Minute
 
 // Runner dispatches lifecycle hooks as shell subprocesses.

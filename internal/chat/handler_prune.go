@@ -9,6 +9,8 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
+// minPruneBytes is the smallest tool result worth replacing; pruning a result
+// smaller than this saves negligible context and is almost certainly a mistake.
 const minPruneBytes = 500
 
 // PruneHandler implements the prune_tool_result built-in tool.

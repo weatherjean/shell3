@@ -15,10 +15,14 @@ import (
 	"github.com/weatherjean/shell3/internal/patchtui"
 )
 
-// spinnerGlyph cycles · → ○ → ● every 500ms.
+// spinnerIntervalMs controls how long each spinner frame is shown.
+// 500ms gives a calm, readable animation without feeling sluggish.
+const spinnerIntervalMs = 500
+
+// spinnerGlyph cycles · → ○ → ● every spinnerIntervalMs milliseconds.
 func spinnerGlyph() string {
 	frames := []string{"·", "○", "●"}
-	return frames[(time.Now().UnixMilli()/500)%int64(len(frames))]
+	return frames[(time.Now().UnixMilli()/spinnerIntervalMs)%int64(len(frames))]
 }
 
 // renderInputBox returns the frame lines for the multi-line input box,

@@ -9,6 +9,10 @@ import (
 	"github.com/weatherjean/shell3/internal/patchtui"
 )
 
+// reservedRenderLines is the number of terminal lines reserved for the input
+// box and status bar so the streaming preview doesn't overwrite them.
+const reservedRenderLines = 4
+
 // buildFrame composes the live render frame: streaming preview (capped to
 // terminal height), input box (multi-line, wrapped, with cursor marker),
 // and status bar at the bottom.
@@ -21,7 +25,7 @@ func buildFrame(width, height int, st frameState) []string {
 	// Streaming preview, wrapped to width and capped to fit the screen.
 	if len(st.streamLines) > 0 {
 		wrapped := wrapToWidth(st.streamLines, width)
-		max := height - 4
+		max := height - reservedRenderLines
 		if max < 1 {
 			max = 1
 		}

@@ -22,20 +22,25 @@ func dispatchUserTool(ctx context.Context, tool usertools.Tool, rawArgs string, 
 	return out
 }
 
-func truncateOutput(s string) string {
-	const maxLines = 3
-	const maxBytes = 300
+// truncateOutputMaxLines and truncateOutputMaxBytes cap how much of a tool
+// result is shown inline in the TUI. The full result is always sent to the
+// model; this only affects the user-visible display.
+const (
+	truncateOutputMaxLines = 3
+	truncateOutputMaxBytes = 300
+)
 
+func truncateOutput(s string) string {
 	lines := strings.Split(s, "\n")
 	// Walk lines, stopping at whichever limit hits first.
 	var kept []string
 	used := 0
 	for i, l := range lines {
-		if i >= maxLines {
+		if i >= truncateOutputMaxLines {
 			remaining := strings.Join(lines[i:], "\n")
 			return strings.Join(kept, "\n") + fmt.Sprintf("\n… (+%d lines)\n", strings.Count(remaining, "\n")+1)
 		}
-		if used+len(l)+1 > maxBytes {
+		if used+len(l)+1 > truncateOutputMaxBytes {
 			leftover := len(s) - used
 			return strings.Join(kept, "\n") + fmt.Sprintf("\n… (+%d bytes)\n", leftover)
 		}
