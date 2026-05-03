@@ -170,7 +170,7 @@ func runTurn(ctx context.Context, cfg TurnConfig, sess *session, userMsg llm.Mes
 				out = fmt.Sprintf("Tool call blocked: %v", hookErr)
 			} else if tc.Name == "compact_history" {
 				ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, tc.Name, "", false) + "\n"}
-				out, allMsgs = handleCompactHistory(tc.RawArgs, cfg.Store, sess, allMsgs)
+				out, allMsgs = handleCompactHistory(tc.RawArgs, cfg.Store, sess, allMsgs, cfg.Log)
 				ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(out, "\n")) + "\n\n"}
 				ch <- patchapp.AppendEvent{Text: patchtui.Dim + "tip: run /reload to pick up any new memories or skills" + patchtui.Reset + "\n\n"}
 			} else if tc.Name == "shell_interactive" {

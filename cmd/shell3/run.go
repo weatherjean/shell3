@@ -200,6 +200,7 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	}
 
 	hookRunner := hooks.NewRunner(pCfg.Config)
+	hookRunner.SetLogger(log)
 
 	statusLine := fmt.Sprintf("%s │ %s", instance, model)
 	if pers.Parameters.ReasoningEffort != "" {

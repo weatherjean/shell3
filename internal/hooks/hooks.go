@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
@@ -27,14 +28,22 @@ const hookTTYTimeout = 5 * time.Minute
 type Runner struct {
 	cfg      Config
 	releaser TTYReleaser
+	log      applog.Logger
 	wg       sync.WaitGroup // tracks in-flight background (non-TTY) hooks
 }
 
 // NewRunner returns a Runner with the given hook configuration.
-func NewRunner(cfg Config) *Runner { return &Runner{cfg: cfg} }
+func NewRunner(cfg Config) *Runner { return &Runner{cfg: cfg, log: applog.Noop{}} }
 
 // SetReleaser sets the TTYReleaser used by hooks that need terminal access.
 func (r *Runner) SetReleaser(rel TTYReleaser) { r.releaser = rel }
+
+// SetLogger wires the application logger so hook failures are recorded.
+func (r *Runner) SetLogger(l applog.Logger) {
+	if l != nil {
+		r.log = l
+	}
+}
 
 type dispatchMode int
 
@@ -105,13 +114,17 @@ func (r *Runner) dispatchFireAndForget(ctx context.Context, entry HookEntry, inp
 	if entry.NeedsTTY {
 		// TTY hooks must run synchronously: they need to pause/resume the TUI
 		// and own the terminal for their duration.
-		r.dispatch(ctx, entry.Command, input, modeFireForgetTTY) //nolint:errcheck
+		if _, err := r.dispatch(ctx, entry.Command, input, modeFireForgetTTY); err != nil {
+			r.log.Warn("hook failed", "hook", input.Hook, "cmd", entry.Command, "error", err)
+		}
 		return
 	}
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
-		r.dispatch(ctx, entry.Command, input, modeFireForgetSilent) //nolint:errcheck
+		if _, err := r.dispatch(ctx, entry.Command, input, modeFireForgetSilent); err != nil {
+			r.log.Warn("hook failed", "hook", input.Hook, "cmd", entry.Command, "error", err)
+		}
 	}()
 }
 

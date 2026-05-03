@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/store"
 	"github.com/weatherjean/shell3/internal/usertools"
@@ -54,7 +55,7 @@ func truncateOutput(s string) string {
 // summary. Ends the current store session and starts a new one so the compact
 // boundary is visible in history. Both sess.messages and allMsgs are rebuilt
 // in place; the full compact args are saved to history before the session rolls.
-func handleCompactHistory(rawArgs string, st *store.Store, sess *session, allMsgs []llm.Message) (out string, newAllMsgs []llm.Message) {
+func handleCompactHistory(rawArgs string, st *store.Store, sess *session, allMsgs []llm.Message, lg applog.Logger) (out string, newAllMsgs []llm.Message) {
 	var args struct {
 		Summary             string   `json:"summary"`
 		ImportantFiles      []string `json:"important_files"`
@@ -86,7 +87,9 @@ func handleCompactHistory(rawArgs string, st *store.Store, sess *session, allMsg
 		}
 		// Save the compact call itself as the final entry in the outgoing session.
 		_ = st.AppendHistory(prevSessionID, "tool", "compact_history: "+rawArgs)
-		_ = st.EndSession(prevSessionID)
+		if err := st.EndSession(prevSessionID); err != nil {
+			lg.Warn("end session failed during compact", "session_id", prevSessionID, "error", err)
+		}
 		newID, err := st.StartSession()
 		if err == nil {
 			sess.id = newID

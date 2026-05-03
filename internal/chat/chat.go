@@ -88,7 +88,12 @@ func RunInteractive(ctx context.Context, cfg Config) error {
 		// End whichever session is current when the loop exits. compact_history
 		// may roll sess.id to a new session mid-conversation, so read sess.id
 		// at defer time rather than capturing the initial sessionID.
-		defer func() { _ = cfg.Store.EndSession(sess.id) }()
+		lg := logOrNoop(cfg.Log)
+		defer func() {
+			if err := cfg.Store.EndSession(sess.id); err != nil {
+				lg.Warn("end session failed", "session_id", sess.id, "error", err)
+			}
+		}()
 	}
 
 	app := patchapp.New(cfg.ModeLabel, cfg.StatusLine, patchapp.WelcomeInfo{

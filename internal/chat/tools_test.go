@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
@@ -17,7 +18,7 @@ func TestHandleCompactHistoryIncludesSkillsToReread(t *testing.T) {
 		{Role: llm.RoleUser, Content: "old context"},
 	}
 
-	_, newAllMsgs := handleCompactHistory(`{"summary":"summary","skills":["writing-plans","/tmp/codebase-discovery.md"]}`, nil, sess, allMsgs)
+	_, newAllMsgs := handleCompactHistory(`{"summary":"summary","skills":["writing-plans","/tmp/codebase-discovery.md"]}`, nil, sess, allMsgs, applog.Noop{})
 	if len(newAllMsgs) < 2 {
 		t.Fatalf("expected system and continuation messages, got %d", len(newAllMsgs))
 	}
