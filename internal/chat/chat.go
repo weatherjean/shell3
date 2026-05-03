@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/hooks"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/models"
@@ -50,6 +51,7 @@ type Config struct {
 	UserTools     map[string]usertools.Tool
 	Secrets       map[string]string
 	Params        llm.RequestParams
+	Log           applog.Logger
 }
 
 // NewHandlers constructs the built-in tool handler map from a Config.
@@ -116,16 +118,17 @@ func RunInteractive(ctx context.Context, cfg Config) error {
 		app.SetBusy(true, cancel)
 		prevLen := len(sess.messages)
 		tc := TurnConfig{
-			LLM:        cfg.LLM,
-			Hooks:      cfg.Hooks,
+			LLM:         cfg.LLM,
+			Hooks:       cfg.Hooks,
 			Personality: cfg.Personality,
-			StatusLine: cfg.StatusLine,
-			WorkDir:    cfg.WorkDir,
-			Store:      cfg.Store,
-			UserTools:  cfg.UserTools,
-			Secrets:    cfg.Secrets,
-			Truncate:   cfg.Truncate,
-			Handlers:   handlers,
+			StatusLine:  cfg.StatusLine,
+			WorkDir:     cfg.WorkDir,
+			Store:       cfg.Store,
+			UserTools:   cfg.UserTools,
+			Secrets:     cfg.Secrets,
+			Truncate:    cfg.Truncate,
+			Handlers:    handlers,
+			Log:         logOrNoop(cfg.Log),
 		}
 		go func() {
 			defer cancel()
@@ -573,16 +576,17 @@ func RunOnce(ctx context.Context, cfg Config, input string) error {
 	sess := &session{}
 	ch := make(chan patchapp.Event, 256)
 	tc := TurnConfig{
-		LLM:        cfg.LLM,
-		Hooks:      cfg.Hooks,
+		LLM:         cfg.LLM,
+		Hooks:       cfg.Hooks,
 		Personality: cfg.Personality,
-		StatusLine: cfg.StatusLine,
-		WorkDir:    cfg.WorkDir,
-		Store:      cfg.Store,
-		UserTools:  cfg.UserTools,
-		Secrets:    cfg.Secrets,
-		Truncate:   cfg.Truncate,
-		Handlers:   NewHandlers(cfg),
+		StatusLine:  cfg.StatusLine,
+		WorkDir:     cfg.WorkDir,
+		Store:       cfg.Store,
+		UserTools:   cfg.UserTools,
+		Secrets:     cfg.Secrets,
+		Truncate:    cfg.Truncate,
+		Handlers:    NewHandlers(cfg),
+		Log:         logOrNoop(cfg.Log),
 	}
 	go runTurn(ctx, tc, sess, llm.Message{Role: llm.RoleUser, Content: input}, ch)
 
@@ -602,6 +606,15 @@ func RunOnce(ctx context.Context, cfg Config, input string) error {
 }
 
 // pruneLastTurn removes the last user message and everything after it.
+// logOrNoop returns l if non-nil, otherwise a Noop logger.
+// Callers that did not configure a logger get silent behaviour rather than a nil panic.
+func logOrNoop(l applog.Logger) applog.Logger {
+	if l != nil {
+		return l
+	}
+	return applog.Noop{}
+}
+
 func pruneLastTurn(messages []llm.Message) []llm.Message {
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role == llm.RoleUser {

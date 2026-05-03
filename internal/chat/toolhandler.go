@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/hooks"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/persona"
@@ -32,14 +33,15 @@ type ToolConfig struct {
 // TurnConfig holds all dependencies needed for one user→assistant turn.
 // It is constructed from Config in RunInteractive/RunOnce and passed to runTurn.
 type TurnConfig struct {
-	LLM        LLMClient
-	Hooks      *hooks.Runner
+	LLM         LLMClient
+	Hooks       *hooks.Runner
 	Personality persona.Persona
-	StatusLine string
-	WorkDir    string
-	Store      *store.Store
-	UserTools  map[string]usertools.Tool
-	Secrets    map[string]string
-	Truncate   bool
-	Handlers   map[string]ToolHandler
+	StatusLine  string
+	WorkDir     string
+	Store       *store.Store
+	UserTools   map[string]usertools.Tool
+	Secrets     map[string]string
+	Truncate    bool
+	Handlers    map[string]ToolHandler
+	Log         applog.Logger
 }

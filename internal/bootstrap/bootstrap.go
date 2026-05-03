@@ -24,6 +24,9 @@ func EnsureGlobal(g paths.Global) error {
 	if err := scaffold.WriteDefaults(g.Personas, g.Tools, g.Skills, g.Hooks); err != nil {
 		return fmt.Errorf("bootstrap: write global defaults: %w", err)
 	}
+	if err := ensureGlobalGitignore(g); err != nil {
+		return fmt.Errorf("bootstrap: global gitignore: %w", err)
+	}
 	return nil
 }
 
@@ -74,3 +77,44 @@ func ensureGitignore(l paths.Local) error {
 	_, err = f.WriteString(entry)
 	return err
 }
+
+// ensureGlobalGitignore creates or updates ~/.shell3/.gitignore to ignore
+// files that should never be committed even when ~/.shell3/ is tracked in a
+// dotfiles repo: credentials, secrets, logs (including rotated archives).
+func ensureGlobalGitignore(g paths.Global) error {
+	path := filepath.Join(g.Root, ".gitignore")
+	b, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read: %w", err)
+	}
+	content := string(b)
+
+	// Sentinel: if the log pattern is already there, nothing to do.
+	if strings.Contains(content, "shell3.log") {
+		return nil
+	}
+
+	addition := globalGitignoreAddition
+	if len(b) > 0 && !strings.HasSuffix(content, "\n") {
+		addition = "\n" + addition
+	}
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("open: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	_, err = f.WriteString(addition)
+	return err
+}
+
+// globalGitignoreAddition is appended to ~/.shell3/.gitignore when the log
+// sentinel is absent. Covers credentials, secrets, and all log files
+// (current + rotated archives shell3.log.1 through shell3.log.N).
+const globalGitignoreAddition = `# shell3 — never commit these even in a dotfiles repo
+credentials.shell3
+secrets.shell3
+shell3.log
+shell3.log.*
+projects/
+`

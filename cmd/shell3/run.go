@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/bootstrap"
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/config"
@@ -79,6 +80,17 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	if err != nil {
 		return err
 	}
+
+	const logMaxBytes = 2 * 1024 * 1024 // 2 MB per log file
+	const logArchives = 3               // keep .1 .2 .3 → max ~8 MB total
+	log, logCloser, err := applog.Open(g.LogFile, logMaxBytes, logArchives)
+	if err != nil {
+		// Non-fatal: fall back to Noop so the rest of startup continues.
+		fmt.Fprintln(os.Stderr, "warning: open log file:", err)
+		log = applog.Noop{}
+		logCloser = io.NopCloser(nil)
+	}
+	defer logCloser.Close()
 	proj := paths.NewProject(g, uuid)
 
 	personaName := f.persona
@@ -120,13 +132,13 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 			st = s
 			defer func() { _ = st.Close() }()
 		} else {
-			fmt.Fprintln(os.Stderr, "warning: open store:", err)
+			log.Warn("open store failed — memory and history unavailable", "error", err)
 		}
 	}
 
 	allSkills, err := skills.LoadAll([]string{g.Skills, l.Skills})
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "warning: load skills:", err)
+		log.Warn("load skills failed", "error", err)
 	}
 	loadedSkills := filterSkills(allSkills, pCfg.Skills)
 
@@ -143,7 +155,7 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	toolsDirs := []string{g.Tools, l.Tools}
 	allTools, toolWarnings, _ := usertools.LoadAll(toolsDirs, available)
 	for _, w := range toolWarnings {
-		fmt.Fprintln(os.Stderr, "user-tool warning:", w)
+		log.Warn("user-tool warning: "+w)
 	}
 	loadedTools := filterTools(allTools, pCfg.Tools)
 	userToolDefs := make([]llm.ToolDefinition, 0, len(loadedTools))
@@ -161,17 +173,15 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	if st != nil {
 		mems, err := st.MemoryQuery("", true, 0)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "warning: load core memories:", err)
+			log.Warn("load core memories failed", "error", err)
 		} else {
 			coreMemories = mems
-			var bytes int
+			var memBytes int
 			for _, m := range mems {
-				bytes += len(m.Key) + len(m.Value) + 4
+				memBytes += len(m.Key) + len(m.Value) + 4
 			}
-			if bytes > 2048 {
-				fmt.Fprintf(os.Stderr,
-					"warning: core memories total %d bytes (>2KB), consider demoting some\n",
-					bytes)
+			if memBytes > 2048 {
+				log.Warn("core memories exceed 2KB — consider demoting some", "bytes", memBytes)
 			}
 		}
 	}
@@ -293,6 +303,7 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		UserTools:     userToolMap,
 		Secrets:       secretsMap,
 		Params:        pers.Parameters,
+		Log:           log,
 	}
 	cfg.Reloader = func() (persona.Persona, map[string]usertools.Tool, error) {
 		newPCfg, newBody, err := persona.ParseConfig([]string{l.Personas, g.Personas}, personaName)

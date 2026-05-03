@@ -185,6 +185,39 @@ func TestEnsureProjectIdempotent(t *testing.T) {
 	}
 }
 
+func TestGlobalGitignore(t *testing.T) {
+	home := t.TempDir()
+	g := paths.NewGlobal(home)
+	if err := bootstrap.EnsureGlobal(g); err != nil {
+		t.Fatalf("EnsureGlobal: %v", err)
+	}
+	gi, err := os.ReadFile(filepath.Join(g.Root, ".gitignore"))
+	if err != nil {
+		t.Fatalf("global .gitignore missing: %v", err)
+	}
+	content := string(gi)
+	for _, want := range []string{
+		"credentials.shell3",
+		"secrets.shell3",
+		"shell3.log",
+		"shell3.log.*",
+		"projects/",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("global .gitignore missing %q:\n%s", want, content)
+		}
+	}
+
+	// Idempotent: second call must not duplicate.
+	if err := bootstrap.EnsureGlobal(g); err != nil {
+		t.Fatalf("EnsureGlobal second call: %v", err)
+	}
+	gi2, _ := os.ReadFile(filepath.Join(g.Root, ".gitignore"))
+	if strings.Count(string(gi2), "shell3.log") != strings.Count(content, "shell3.log") {
+		t.Error("global .gitignore duplicated entries on second EnsureGlobal call")
+	}
+}
+
 func TestEnsureGitignoreAppends(t *testing.T) {
 	tmp := t.TempDir()
 	home := filepath.Join(tmp, "home")

@@ -20,6 +20,9 @@ func TestGlobal(t *testing.T) {
 	if g.Projects != "/home/user/.shell3/projects" {
 		t.Fatalf("Projects: got %q", g.Projects)
 	}
+	if g.LogFile != "/home/user/.shell3/shell3.log" {
+		t.Fatalf("LogFile: got %q", g.LogFile)
+	}
 }
 
 func TestProject(t *testing.T) {

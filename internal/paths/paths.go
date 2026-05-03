@@ -12,6 +12,7 @@ type Global struct {
 	Hooks       string // ~/.shell3/hooks/
 	Personas    string // ~/.shell3/personas/
 	Projects    string // ~/.shell3/projects/
+	LogFile     string // ~/.shell3/shell3.log
 }
 
 // Project holds paths for one project's personal state keyed by UUID.
@@ -43,6 +44,7 @@ func NewGlobal(homeDir string) Global {
 		Hooks:       filepath.Join(root, "hooks"),
 		Personas:    filepath.Join(root, "personas"),
 		Projects:    filepath.Join(root, "projects"),
+		LogFile:     filepath.Join(root, "shell3.log"),
 	}
 }
 

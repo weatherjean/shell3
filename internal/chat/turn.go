@@ -16,30 +16,31 @@ import (
 	"github.com/weatherjean/shell3/internal/store"
 )
 
-// dumpStreamError writes the failing turn's messages and the last raw
-// HTTP traffic to .shell3/last_error.json under cfg.WorkDir. Best-effort —
-// any IO error is silently ignored.
-func dumpStreamError(cfg TurnConfig, msgs []llm.Message, streamErr error) {
-	if cfg.WorkDir == "" {
-		return
-	}
+// logStreamError writes the failing turn's messages and the last raw HTTP
+// traffic to .shell3/last_error.json under cfg.WorkDir, then records the
+// event in the logger at Debug level (the TUI channel shows the error to the
+// user, so stderr duplication is not needed here).
+func logStreamError(cfg TurnConfig, msgs []llm.Message, streamErr error) {
 	var reqBody, resBody []byte
 	if ts, ok := cfg.LLM.(llm.TrafficInspector); ok {
 		reqBody, resBody = ts.LastTraffic()
 	}
-	rec := map[string]any{
-		"timestamp":     time.Now().Format(time.RFC3339),
-		"error":         streamErr.Error(),
-		"messages":      msgs,
-		"request_body":  string(reqBody),
-		"response_body": string(resBody),
+	dumpPath := ""
+	if cfg.WorkDir != "" {
+		rec := map[string]any{
+			"timestamp":     time.Now().Format(time.RFC3339),
+			"error":         streamErr.Error(),
+			"messages":      msgs,
+			"request_body":  string(reqBody),
+			"response_body": string(resBody),
+		}
+		if data, err := json.MarshalIndent(rec, "", "  "); err == nil {
+			dumpPath = filepath.Join(cfg.WorkDir, ".shell3", "last_error.json")
+			_ = os.WriteFile(dumpPath, data, 0644)
+		}
 	}
-	data, err := json.MarshalIndent(rec, "", "  ")
-	if err != nil {
-		return
-	}
-	path := filepath.Join(cfg.WorkDir, ".shell3", "last_error.json")
-	_ = os.WriteFile(path, data, 0644)
+	cfg.Log.Debug("stream error", "error", streamErr, "dump", dumpPath,
+		"req_bytes", len(reqBody), "res_bytes", len(resBody))
 }
 
 // dimLines wraps each non-empty line with dim+reset so the style is
@@ -87,6 +88,7 @@ func runTurn(ctx context.Context, cfg TurnConfig, sess *session, userMsg llm.Mes
 		if r := recover(); r != nil {
 			stack := debug.Stack()
 			err := fmt.Errorf("panic: %v\n%s", r, stack)
+			cfg.Log.Error("panic in turn goroutine", err)
 			cfg.Hooks.OnError(ctx, err)
 			ch <- patchapp.TurnErrEvent{Err: err}
 		}
@@ -122,7 +124,7 @@ func runTurn(ctx context.Context, cfg TurnConfig, sess *session, userMsg llm.Mes
 			sess.lastPromptTokens = usage.PromptTokens
 		}
 		if err != nil {
-			dumpStreamError(cfg, allMsgs, err)
+			logStreamError(cfg, allMsgs, err)
 			cfg.Hooks.OnError(ctx, err)
 			ch <- patchapp.TurnErrEvent{Err: err}
 			return
