@@ -157,6 +157,29 @@ func RunInteractive(ctx context.Context, cfg Config) error {
 // committed to scrollback and the App returns to idle.
 func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Usage, cfg *Config) {
 	var streamBuf strings.Builder
+	// reasoningBuf holds an incomplete (no trailing \n) reasoning line.
+	// Complete lines are committed to scrollback immediately for real-time display.
+	var reasoningBuf strings.Builder
+	reasoningStarted := false
+
+	commitReasoningLine := func(line string) {
+		app.Print([]string{patchtui.Dim + line + patchtui.Reset})
+	}
+
+	// flushReasoningPartial commits any buffered partial reasoning line, adds a
+	// trailing blank line if thinking was shown, and clears the preview.
+	flushReasoningPartial := func() {
+		if reasoningBuf.Len() > 0 {
+			commitReasoningLine(reasoningBuf.String())
+			reasoningBuf.Reset()
+		}
+		if reasoningStarted {
+			app.Print([]string{""})
+			reasoningStarted = false
+		}
+		app.SetStreamPreview(nil)
+	}
+
 	flushPreview := func() {
 		text := streamBuf.String()
 		if text == "" {
@@ -178,12 +201,39 @@ func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Us
 
 	for ev := range ch {
 		switch v := ev.(type) {
+		case patchapp.ReasoningChunkEvent:
+			// Commit each complete line to scrollback immediately (gray, real-time).
+			// Show the current partial line in the stream preview so mid-line
+			// progress is visible without the multi-line ANSI state bug.
+			if !reasoningStarted {
+				app.Print([]string{patchtui.Dim + "◆ thinking" + patchtui.Reset})
+				reasoningStarted = true
+			}
+			text := v.Text
+			for {
+				idx := strings.IndexByte(text, '\n')
+				if idx < 0 {
+					reasoningBuf.WriteString(text)
+					break
+				}
+				commitReasoningLine(reasoningBuf.String() + text[:idx])
+				reasoningBuf.Reset()
+				text = text[idx+1:]
+			}
+			if reasoningBuf.Len() > 0 {
+				app.SetStreamPreview([]string{patchtui.Dim + reasoningBuf.String() + patchtui.Reset})
+			} else {
+				app.SetStreamPreview(nil)
+			}
+
 		case patchapp.ChunkEvent:
+			flushReasoningPartial()
 			streamBuf.WriteString(v.Text)
 			flushPreview()
 
 		case patchapp.AppendEvent:
 			// Tool output. Commit any pending stream text first so order is preserved.
+			flushReasoningPartial()
 			if streamBuf.Len() > 0 {
 				app.SetStreamPreview(nil)
 				w, _ := patchtui.Size()
@@ -196,8 +246,8 @@ func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Us
 			publishUsage(v.Usage)
 
 		case patchapp.TurnDoneEvent:
+			flushReasoningPartial()
 			if streamBuf.Len() > 0 {
-				app.SetStreamPreview(nil)
 				w, _ := patchtui.Size()
 				app.Print(patchmd.Render(streamBuf.String(), w-2))
 				streamBuf.Reset()
@@ -206,8 +256,8 @@ func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Us
 			app.SetBusy(false, nil)
 
 		case patchapp.TurnErrEvent:
+			flushReasoningPartial()
 			if streamBuf.Len() > 0 {
-				app.SetStreamPreview(nil)
 				app.Print(patchtui.SplitLines(streamBuf.String()))
 				streamBuf.Reset()
 			}

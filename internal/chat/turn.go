@@ -286,6 +286,7 @@ func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools
 		}
 		if ev.ReasoningDelta != "" {
 			rb.WriteString(ev.ReasoningDelta)
+			ch <- patchapp.ReasoningChunkEvent{Text: ev.ReasoningDelta}
 		}
 		if len(ev.ProviderReasoning) > 0 {
 			providerReasoning = ev.ProviderReasoning

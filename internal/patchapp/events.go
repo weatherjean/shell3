@@ -10,6 +10,11 @@ type Event interface{ event() }
 // ChunkEvent is one streaming text delta from the LLM.
 type ChunkEvent struct{ Text string }
 
+// ReasoningChunkEvent is one streaming reasoning/thinking delta from the LLM.
+// Displayed transiently in the stream preview and flushed to scrollback when
+// text output begins. Not saved to conversation history.
+type ReasoningChunkEvent struct{ Text string }
+
 // AppendEvent is pre-formatted text (typically tool output) to commit to
 // scrollback in the order it arrives.
 type AppendEvent struct{ Text string }
@@ -34,7 +39,8 @@ type TTYExecEvent struct {
 	ReplyC  chan<- string
 }
 
-func (ChunkEvent) event()    {}
+func (ChunkEvent) event()          {}
+func (ReasoningChunkEvent) event() {}
 func (AppendEvent) event()   {}
 func (UsageEvent) event()    {}
 func (TurnDoneEvent) event() {}

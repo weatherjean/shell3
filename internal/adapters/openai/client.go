@@ -22,12 +22,13 @@ import (
 // fields go-openai does not parse — notably OpenRouter-style "reasoning"
 // (Moonshot/kimi via opencode-go).
 type bodyTap struct {
-	mu        sync.Mutex
-	reqBody   []byte
-	resBody   []byte
-	reasoning string
-	done      chan struct{} // closed when scanReasoning finishes
-	rt        http.RoundTripper
+	mu               sync.Mutex
+	reqBody          []byte
+	resBody          []byte
+	reasoning        string
+	done             chan struct{} // closed when scanReasoning finishes
+	rt               http.RoundTripper
+	onReasoningDelta func(string) // called per delta while streaming; nil = accumulate only
 }
 
 func (b *bodyTap) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -94,6 +95,12 @@ func (b *bodyTap) scanReasoning(r io.ReadCloser, done chan struct{}) {
 		for _, c := range chunk.Choices {
 			if c.Delta.Reasoning != "" {
 				sb.WriteString(c.Delta.Reasoning)
+				b.mu.Lock()
+				cb := b.onReasoningDelta
+				b.mu.Unlock()
+				if cb != nil {
+					cb(c.Delta.Reasoning)
+				}
 			}
 		}
 	}
@@ -218,6 +225,16 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 		req.ParallelToolCalls = *c.params.ParallelToolCalls
 	}
 
+	if c.tap != nil {
+		c.tap.mu.Lock()
+		c.tap.onReasoningDelta = func(r string) { onEvent(llm.StreamEvent{ReasoningDelta: r}) }
+		c.tap.mu.Unlock()
+		defer func() {
+			c.tap.mu.Lock()
+			c.tap.onReasoningDelta = nil
+			c.tap.mu.Unlock()
+		}()
+	}
 	stream, err := c.oc.CreateChatCompletionStream(ctx, req)
 	if err != nil {
 		return fmt.Errorf("llm: stream: %w", err)
@@ -250,6 +267,10 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 		if delta.Content != "" {
 			onEvent(llm.StreamEvent{TextDelta: delta.Content})
 		}
+		// delta.ReasoningContent (kimi/Moonshot) and the body-tap "reasoning" field
+		// (OpenRouter) are treated as mutually exclusive: a single provider uses one
+		// or the other. If a provider ever populates both, reasoning will be emitted
+		// twice. No known provider does this today.
 		if delta.ReasoningContent != "" {
 			onEvent(llm.StreamEvent{ReasoningDelta: delta.ReasoningContent})
 		}
@@ -289,14 +310,12 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 		}
 	}
 
-	// Side-band reasoning capture: close the stream so the body finishes
-	// being read (which lets the tee pipe close), then wait for the
-	// scanner goroutine to publish accumulated "reasoning" text.
+	// Wait for the body tap's scanner goroutine to finish so the accumulated
+	// reasoning is available for snapshot/diagnostics before Done fires.
+	// Deltas were already emitted live via onReasoningDelta; no second emit needed.
 	_ = stream.Close()
 	if c.tap != nil {
-		if r := c.tap.WaitReasoning(ctx); r != "" {
-			onEvent(llm.StreamEvent{ReasoningDelta: r})
-		}
+		c.tap.WaitReasoning(ctx)
 	}
 
 	onEvent(llm.StreamEvent{Done: true})

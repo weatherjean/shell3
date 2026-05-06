@@ -116,6 +116,26 @@ func TestScanReasoningExtractsReasoning(t *testing.T) {
 	}
 }
 
+func TestScanReasoningCallsOnDelta(t *testing.T) {
+	tap := &bodyTap{}
+	done := make(chan struct{})
+	tap.done = done
+
+	var got []string
+	tap.onReasoningDelta = func(s string) { got = append(got, s) }
+
+	sse := "data: {\"choices\":[{\"delta\":{\"reasoning\":\"alpha\"}}]}\n" +
+		"data: {\"choices\":[{\"delta\":{\"reasoning\":\"beta\"}}]}\n" +
+		"data: [DONE]\n"
+
+	go tap.scanReasoning(io.NopCloser(strings.NewReader(sse)), done)
+	<-done
+
+	if len(got) != 2 || got[0] != "alpha" || got[1] != "beta" {
+		t.Fatalf("onReasoningDelta: got %v", got)
+	}
+}
+
 func TestScanReasoningIgnoresBadJSON(t *testing.T) {
 	tap := &bodyTap{}
 	done := make(chan struct{})
