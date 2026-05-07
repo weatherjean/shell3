@@ -87,6 +87,10 @@ func openSecretsInEditor(path string) error {
 
 secrets:
   GITHUB_TOKEN: ghp_your_token_here
+
+# Example: Brave Search API key (used by the brave_search tool)
+# secrets:
+#   BRAVE_API_KEY: BSAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 `
 		if err := os.WriteFile(path, []byte(template), 0600); err != nil {
 			return fmt.Errorf("create secrets file: %w", err)

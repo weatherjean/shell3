@@ -100,6 +100,15 @@ instances:
     models:
       - id: gpt-4o
         context_window: 128000
+
+# Example: local Ollama (no API key needed)
+# instances:
+#   - name: ollama
+#     base_url: http://localhost:11434/v1
+#     api_key: ""
+#     models:
+#       - id: llama3.2
+#         context_window: 131072
 `
 		if err := os.WriteFile(path, []byte(template), 0600); err != nil {
 			return fmt.Errorf("create auth file: %w", err)
