@@ -155,6 +155,7 @@ Makefile `build` target no longer depends on `models-snapshot`. `models-snapshot
 - Integration: model picker correctly reads instances from auth YAML
 - All existing tests that mock or reference `credstore`, `obfile`, `internal/models` updated or removed
 - Full manual test pass before merging to main
+- **Trace audit:** grep codebase for every deleted symbol, package name, and file path. Any reference — import, comment, test fixture, string literal, doc — must be removed. End state: it should be as if the old system never existed.
 
 ---
 
