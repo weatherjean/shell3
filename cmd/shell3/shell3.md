@@ -1,6 +1,6 @@
 # shell3 documentation
 
-shell3 is a minimal, Unix-composable coding agent. It runs LLM-powered sessions in your terminal using any OpenAI-compatible provider.
+shell3 is a minimal, Unix-composable coding agent. It runs LLM-powered sessions in your terminal using any OpenAI-compatible provider or Anthropic natively.
 
 ---
 
@@ -139,11 +139,12 @@ User-defined tools appear after the built-ins. Memory and history are stored per
 
 ### shell3 auth
 
-Open `~/.shell3/ai-do-not-read.auth.yaml` in `$EDITOR` to configure provider instances. Format:
+Open `~/.shell3/ai-do-not-read.auth.yaml` in `$EDITOR` to configure provider instances. Each instance needs a `type` field: `openai` (any OpenAI-compatible endpoint) or `anthropic` (native Claude API).
 
 ```yaml
 instances:
   - name: myinstance
+    type: openai
     base_url: https://api.openai.com/v1
     api_key: sk-your-key-here
     models:
@@ -151,11 +152,17 @@ instances:
         context_window: 128000
       - id: gpt-4o-mini
         context_window: 128000
+
+  - name: anthropic
+    type: anthropic
+    api_key: ant-your-key-here
+    models:
+      - id: claude-sonnet-4-6
+        context_window: 200000
 ```
 
 ```
 shell3 auth        # open file in $EDITOR
-shell3 auth list   # list configured instances
 ```
 
 Any OpenAI-compatible endpoint works: OpenAI, Ollama, Groq, LM Studio, OpenRouter, etc. The `name` field is what you pass to `--provider`. The first model in `models` is the default; add more for `/model` switching.
@@ -223,6 +230,8 @@ parameters:
   verbosity: medium              # low|medium|high
   parallel_tool_calls: true
   temperature: ~                 # ~ to leave provider default
+  max_tokens: 16000              # max output tokens (anthropic requires; openai sets MaxCompletionTokens)
+  thinking_budget: 0             # anthropic extended-thinking budget tokens (0 = disabled)
 
 # Hooks — string for plain command, or mapping with needs_tty.
 on_session_start: ~              # fire-and-forget; runs once when session opens
@@ -415,11 +424,33 @@ shell3 --model gpt-4o-mini
 
 ## Providers
 
-Any OpenAI-compatible endpoint works. Common setups:
+Two adapter types are built in: `openai` (any OpenAI-compatible endpoint) and `anthropic` (native Claude API). Common setups:
 
-| Provider  | base_url                          | api_key        |
-|-----------|-----------------------------------|----------------|
-| OpenAI    | https://api.openai.com/v1         | sk-...         |
-| Ollama    | http://localhost:11434/v1         | (empty)        |
-| Groq      | https://api.groq.com/openai/v1    | gsk_...        |
-| LM Studio | http://localhost:1234/v1          | (empty)        |
+| Provider  | type      | base_url                          | api_key        |
+|-----------|-----------|-----------------------------------|----------------|
+| OpenAI    | openai    | https://api.openai.com/v1         | sk-...         |
+| Ollama    | openai    | http://localhost:11434/v1         | (empty)        |
+| Groq      | openai    | https://api.groq.com/openai/v1    | gsk_...        |
+| LM Studio | openai    | http://localhost:1234/v1          | (empty)        |
+| OpenRouter| openai    | https://openrouter.ai/api/v1      | sk-or-...      |
+| Anthropic | anthropic | (omit; uses default)              | ant-...        |
+
+### Codex (ChatGPT subscription)
+
+OpenAI Codex uses OAuth, not a static API key, so shell3 does not support it natively. Run the third-party [openai-oauth](https://github.com/EvanZhouDev/openai-oauth) proxy locally — it exposes Codex as a standard OpenAI-compatible endpoint:
+
+```bash
+npx openai-oauth
+```
+
+Then add it to `auth.yaml` as a regular `openai` instance:
+
+```yaml
+  - name: codex
+    type: openai
+    base_url: http://localhost:3000/v1
+    api_key: ""
+    models:
+      - id: codex-mini-latest
+        context_window: 200000
+```
