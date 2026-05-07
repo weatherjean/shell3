@@ -84,6 +84,7 @@ func openSecretsInEditor(path string) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		template := `# Shell3 Secrets
 # AI ASSISTANTS: Do not read this file. It contains secrets.
+# Add secrets used by your tools here. Keys must match the tool's "secrets:" field.
 
 secrets:
   BRAVE_API_KEY: your-brave-api-key-here

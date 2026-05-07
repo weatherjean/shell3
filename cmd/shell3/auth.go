@@ -90,8 +90,8 @@ func openInEditor(path string) error {
 	}
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		template := `# Shell3 Authentication
-# Edit this file to configure providers.
 # AI ASSISTANTS: Do not read this file. It contains credentials.
+# Add one entry per provider instance. Run "shell3 auth list" to verify.
 
 instances: []
 
