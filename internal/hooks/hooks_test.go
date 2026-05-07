@@ -16,9 +16,9 @@ func TestHookAllow(t *testing.T) {
 	_ = os.WriteFile(script,[]byte("#!/bin/bash\necho '{\"action\":\"allow\"}'"), 0755)
 
 	r := hooks.NewRunner(hooks.Config{OnToolCall: hooks.HookEntry{Command: script}})
-	allowed, reason, err := r.OnToolCall(context.Background(), "bash", map[string]any{"command": "ls"})
-	if err != nil || !allowed || reason != "" {
-		t.Errorf("expected allow, got allowed=%v reason=%q err=%v", allowed, reason, err)
+	decision, reason, err := r.OnToolCall(context.Background(), "bash", map[string]any{"command": "ls"})
+	if err != nil || decision != hooks.ToolCallAllow || reason != "" {
+		t.Errorf("expected allow, got decision=%v reason=%q err=%v", decision, reason, err)
 	}
 }
 
@@ -28,15 +28,33 @@ func TestHookBlock(t *testing.T) {
 	_ = os.WriteFile(script,[]byte("#!/bin/bash\necho '{\"action\":\"block\",\"reason\":\"not allowed\"}'"), 0755)
 
 	r := hooks.NewRunner(hooks.Config{OnToolCall: hooks.HookEntry{Command: script}})
-	allowed, reason, err := r.OnToolCall(context.Background(), "bash", map[string]any{"command": "rm -rf /"})
+	decision, reason, err := r.OnToolCall(context.Background(), "bash", map[string]any{"command": "rm -rf /"})
 	if err != nil {
 		t.Errorf("clean denial should not return err, got: %v", err)
 	}
-	if allowed {
-		t.Errorf("expected block, got allowed=%v", allowed)
+	if decision != hooks.ToolCallDeny {
+		t.Errorf("expected ToolCallDeny, got %v", decision)
 	}
 	if reason != "not allowed" {
 		t.Errorf("expected reason=%q, got %q", "not allowed", reason)
+	}
+}
+
+func TestHookCancel(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "hook.sh")
+	_ = os.WriteFile(script, []byte("#!/bin/bash\necho '{\"action\":\"cancel\",\"reason\":\"user cancelled generation\"}'"), 0755)
+
+	r := hooks.NewRunner(hooks.Config{OnToolCall: hooks.HookEntry{Command: script}})
+	decision, reason, err := r.OnToolCall(context.Background(), "bash", map[string]any{"command": "anything"})
+	if err != nil {
+		t.Errorf("cancel should not return err, got: %v", err)
+	}
+	if decision != hooks.ToolCallCancel {
+		t.Errorf("expected ToolCallCancel, got %v", decision)
+	}
+	if reason != "user cancelled generation" {
+		t.Errorf("expected reason carried through, got %q", reason)
 	}
 }
 
@@ -63,9 +81,9 @@ cat | python3 -c "import sys,json; d=json.load(sys.stdin); d['messages']=d['mess
 
 func TestNoHook(t *testing.T) {
 	r := hooks.NewRunner(hooks.Config{})
-	allowed, reason, err := r.OnToolCall(context.Background(), "bash", nil)
-	if err != nil || !allowed || reason != "" {
-		t.Errorf("no hook should default to allow: allowed=%v reason=%q err=%v", allowed, reason, err)
+	decision, reason, err := r.OnToolCall(context.Background(), "bash", nil)
+	if err != nil || decision != hooks.ToolCallAllow || reason != "" {
+		t.Errorf("no hook should default to allow: decision=%v reason=%q err=%v", decision, reason, err)
 	}
 }
 
@@ -85,8 +103,8 @@ func TestHookTildeExpansion(t *testing.T) {
 
 	rel := "~/" + filepath.Base(dir) + "/hook.sh"
 	r := hooks.NewRunner(hooks.Config{OnToolCall: hooks.HookEntry{Command: "bash " + rel}})
-	allowed, _, err := r.OnToolCall(context.Background(), "bash", nil)
-	if err != nil || !allowed {
-		t.Errorf("tilde expansion failed: allowed=%v err=%v", allowed, err)
+	decision, _, err := r.OnToolCall(context.Background(), "bash", nil)
+	if err != nil || decision != hooks.ToolCallAllow {
+		t.Errorf("tilde expansion failed: decision=%v err=%v", decision, err)
 	}
 }

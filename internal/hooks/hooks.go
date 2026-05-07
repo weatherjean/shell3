@@ -132,28 +132,48 @@ func (r *Runner) dispatchFireAndForget(ctx context.Context, entry HookEntry, inp
 // Call after OnSessionEnd to ensure no hooks are orphaned on teardown.
 func (r *Runner) Wait() { r.wg.Wait() }
 
-// OnToolCall asks the on_tool_call hook whether to allow tool. It returns:
+// ToolCallDecision is the outcome of an on_tool_call hook.
+type ToolCallDecision int
+
+const (
+	// ToolCallAllow lets the tool dispatch proceed.
+	ToolCallAllow ToolCallDecision = iota
+	// ToolCallDeny blocks this single tool call. The caller should report
+	// the denial to the model so it can pick a different approach; the
+	// turn continues.
+	ToolCallDeny
+	// ToolCallCancel aborts the entire turn. The caller should not run
+	// any more tools and should hand control back to the user.
+	ToolCallCancel
+)
+
+// OnToolCall asks the on_tool_call hook how to handle a tool call. It returns:
 //
-//   - allowed=true, reason="", err=nil — proceed with the tool call.
-//   - allowed=false, reason=<text>, err=nil — user/policy denied the call.
+//   - decision=Allow, reason="", err=nil — proceed.
+//   - decision=Deny, reason=<text>, err=nil — block this call only.
 //     Reason is the hook's "reason" field, possibly empty.
-//   - allowed=false, reason="", err=<err> — the hook itself failed
-//     (script error, bad JSON, timeout). Caller should treat as blocked
-//     but distinguish from a clean denial when reporting to the model.
-func (r *Runner) OnToolCall(ctx context.Context, tool string, params map[string]any) (allowed bool, reason string, err error) {
+//   - decision=Cancel, reason=<text>, err=nil — abort the whole turn.
+//   - decision=Deny, reason="", err=<err> — hook script itself failed.
+//     Caller should distinguish from a clean denial when reporting.
+//
+// Hook output "action" values: "allow", "block", "cancel".
+func (r *Runner) OnToolCall(ctx context.Context, tool string, params map[string]any) (decision ToolCallDecision, reason string, err error) {
 	if r.cfg.OnToolCall.Command == "" {
-		return true, "", nil
+		return ToolCallAllow, "", nil
 	}
 	out, err := r.dispatchBlocking(ctx, r.cfg.OnToolCall, hookInput{
 		Hook: "on_tool_call", Tool: tool, Params: params,
 	})
 	if err != nil {
-		return false, "", err
+		return ToolCallDeny, "", err
 	}
-	if out.Action == "block" {
-		return false, out.Reason, nil
+	switch out.Action {
+	case "block":
+		return ToolCallDeny, out.Reason, nil
+	case "cancel":
+		return ToolCallCancel, out.Reason, nil
 	}
-	return true, "", nil
+	return ToolCallAllow, "", nil
 }
 
 // OnContextBuild transforms the message list before the LLM call.

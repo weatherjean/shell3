@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/weatherjean/shell3/internal/hooks"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/patchapp"
 	"github.com/weatherjean/shell3/internal/patchtui"
@@ -170,11 +171,18 @@ func runTurn(ctx context.Context, cfg TurnConfig, sess *session, userMsg llm.Mes
 				return
 			}
 
-			allowed, hookReason, hookErr := cfg.Hooks.OnToolCall(ctx, tc.Name, parseRawArgs(tc.RawArgs))
+			decision, hookReason, hookErr := cfg.Hooks.OnToolCall(ctx, tc.Name, parseRawArgs(tc.RawArgs))
 			var out string
 			if hookErr != nil {
 				out = fmt.Sprintf("Tool-call hook failed (the on_tool_call hook script itself errored, not the user): %v. Do not retry the same call without adjusting your approach.", hookErr)
-			} else if !allowed {
+			} else if decision == hooks.ToolCallCancel {
+				if hookReason == "" {
+					hookReason = "user cancelled"
+				}
+				ch <- patchapp.AppendEvent{Text: patchtui.Dim + "[turn cancelled by user: " + hookReason + "]" + patchtui.Reset + "\n\n"}
+				ch <- patchapp.TurnDoneEvent{Usage: totalUsage}
+				return
+			} else if decision == hooks.ToolCallDeny {
 				if hookReason == "" {
 					hookReason = "no reason given"
 				}
