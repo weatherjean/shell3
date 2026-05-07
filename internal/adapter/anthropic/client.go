@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -228,6 +229,41 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 	return nil
 }
 
+// imageBlock translates a shell3 ImageURL value (either an HTTPS URL or a
+// "data:image/<type>;base64,<data>" URI) into an Anthropic image content
+// block. Unrecognized inputs return ok=false so the caller can drop them
+// instead of poisoning the request.
+func imageBlock(imageURL string) (anthropic.ContentBlockParamUnion, bool) {
+	if imageURL == "" {
+		return anthropic.ContentBlockParamUnion{}, false
+	}
+	if strings.HasPrefix(imageURL, "data:") {
+		// data:<mediatype>;base64,<data>
+		body, ok := strings.CutPrefix(imageURL, "data:")
+		if !ok {
+			return anthropic.ContentBlockParamUnion{}, false
+		}
+		semi := strings.Index(body, ";")
+		comma := strings.Index(body, ",")
+		if semi < 0 || comma < 0 || comma <= semi {
+			return anthropic.ContentBlockParamUnion{}, false
+		}
+		mediaType := body[:semi]
+		// Anthropic only accepts image/{jpeg,png,gif,webp}.
+		switch mediaType {
+		case "image/jpeg", "image/png", "image/gif", "image/webp":
+		default:
+			return anthropic.ContentBlockParamUnion{}, false
+		}
+		data := body[comma+1:]
+		return anthropic.NewImageBlockBase64(mediaType, data), true
+	}
+	if strings.HasPrefix(imageURL, "http://") || strings.HasPrefix(imageURL, "https://") {
+		return anthropic.NewImageBlock(anthropic.URLImageSourceParam{URL: imageURL}), true
+	}
+	return anthropic.ContentBlockParamUnion{}, false
+}
+
 // toAnthropicMessages converts shell3 messages to Anthropic MessageParam slice.
 // The system message (if any) is extracted and returned separately. Consecutive
 // RoleTool messages collapse into a single user message with multiple
@@ -244,10 +280,27 @@ func toAnthropicMessages(msgs []llm.Message) ([]anthropic.MessageParam, string) 
 			system = m.Content
 			i++
 		case llm.RoleUser:
-			// TODO: ContentParts (vision/image attachments) are dropped here.
-			// Anthropic supports image blocks via anthropic.NewImageBlock —
-			// add a translation when image input is needed on this adapter.
-			out = append(out, anthropic.NewUserMessage(anthropic.NewTextBlock(m.Content)))
+			if len(m.ContentParts) > 0 {
+				blocks := make([]anthropic.ContentBlockParamUnion, 0, len(m.ContentParts))
+				for _, p := range m.ContentParts {
+					switch p.Type {
+					case llm.ContentPartTypeText:
+						if p.Text != "" {
+							blocks = append(blocks, anthropic.NewTextBlock(p.Text))
+						}
+					case llm.ContentPartTypeImageURL:
+						if blk, ok := imageBlock(p.ImageURL); ok {
+							blocks = append(blocks, blk)
+						}
+					}
+				}
+				if len(blocks) == 0 {
+					blocks = append(blocks, anthropic.NewTextBlock(""))
+				}
+				out = append(out, anthropic.NewUserMessage(blocks...))
+			} else {
+				out = append(out, anthropic.NewUserMessage(anthropic.NewTextBlock(m.Content)))
+			}
 			i++
 		case llm.RoleAssistant:
 			var blocks []anthropic.ContentBlockParamUnion
