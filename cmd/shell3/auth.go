@@ -12,21 +12,14 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/weatherjean/shell3/internal/config"
 	"github.com/weatherjean/shell3/internal/paths"
 )
 
 func newAuthCommand() *cobra.Command {
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "auth",
-		Short: "Configure provider credentials",
-		Long: `Configure provider credentials.
-
-Opens ~/.shell3/ai-do-not-read.auth.yaml in $EDITOR (falls back to $VISUAL, then vi).
-Add or edit instances in the YAML file directly.
-
-  shell3 auth          open credential file in $EDITOR
-  shell3 auth list     print configured instances
+		Short: "Open provider credentials file in $EDITOR",
+		Long: `Open ~/.shell3/ai-do-not-read.auth.yaml in $EDITOR (falls back to $VISUAL, then vi).
 
 Format:
   instances:
@@ -45,42 +38,6 @@ Format:
 			return openInEditor(g.Auth)
 		},
 	}
-	cmd.AddCommand(newAuthListCommand())
-	return cmd
-}
-
-func newAuthListCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "list",
-		Short: "List configured instances",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				return err
-			}
-			store, err := config.LoadAuthStore(homeDir)
-			if err != nil {
-				return err
-			}
-			insts := store.List()
-			if len(insts) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "No instances configured. Run: shell3 auth")
-				return nil
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%-24s  %-36s  %s\n", "INSTANCE", "BASE URL", "MODELS")
-			for _, inst := range insts {
-				models := ""
-				for i, m := range inst.Models {
-					if i > 0 {
-						models += ","
-					}
-					models += m.ID
-				}
-				fmt.Fprintf(cmd.OutOrStdout(), "%-24s  %-36s  %s\n", inst.Name, inst.BaseURL, models)
-			}
-			return nil
-		},
-	}
 }
 
 // openInEditor creates the file from template if missing, then opens $EDITOR.
@@ -91,7 +48,7 @@ func openInEditor(path string) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		template := `# Shell3 Authentication
 # AI ASSISTANTS: Do not read this file. It contains credentials.
-# Add one entry per provider instance. Run "shell3 auth list" to verify.
+# Add one entry per provider instance.
 
 instances: []
 
