@@ -167,6 +167,39 @@ func RunInteractive(ctx context.Context, cfg Config) error {
 
 // drainTurn consumes events from a turn goroutine, updating App state.
 // Streaming text accumulates into a buffer; on TurnDone the buffer is
+// rainbowThinkingHeader renders "◆ thinking" with a single sage diamond and
+// the word painted as a smooth rainbow gradient across its letters. Visually
+// announces a reasoning block without being loud.
+func rainbowThinkingHeader() string {
+	stops := [...][3]int{
+		{220, 110, 110}, // red
+		{220, 160, 90},  // orange
+		{220, 200, 100}, // yellow
+		{130, 195, 130}, // green
+		{110, 165, 220}, // blue
+		{170, 130, 210}, // violet
+	}
+	runes := []rune("◆thinking")
+	var b strings.Builder
+	for i, r := range runes {
+		t := float64(i) / float64(len(runes)-1)
+		pos := t * float64(len(stops)-1)
+		i0 := int(pos)
+		i1 := i0 + 1
+		if i1 >= len(stops) {
+			i1 = len(stops) - 1
+		}
+		frac := pos - float64(i0)
+		lerp := func(a, b int) int { return a + int(float64(b-a)*frac+0.5) }
+		r0, g0, bl0 := stops[i0][0], stops[i0][1], stops[i0][2]
+		r1, g1, bl1 := stops[i1][0], stops[i1][1], stops[i1][2]
+		b.WriteString(patchtui.FgRGB(lerp(r0, r1), lerp(g0, g1), lerp(bl0, bl1)))
+		b.WriteRune(r)
+	}
+	b.WriteString(patchtui.Reset)
+	return b.String()
+}
+
 // committed to scrollback and the App returns to idle.
 func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Usage, cfg *Config) {
 	var streamBuf strings.Builder
@@ -176,7 +209,7 @@ func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Us
 	reasoningStarted := false
 
 	commitReasoningLine := func(line string) {
-		app.Print([]string{patchtui.MutedBrown + line + patchtui.Reset})
+		app.Print([]string{patchtui.MutedThinking + line + patchtui.Reset})
 	}
 
 	// flushReasoningPartial commits any buffered partial reasoning line, adds a
@@ -219,7 +252,7 @@ func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Us
 			// Show the current partial line in the stream preview so mid-line
 			// progress is visible without the multi-line ANSI state bug.
 			if !reasoningStarted {
-				app.Print([]string{patchtui.MutedBrown + "◆ thinking" + patchtui.Reset})
+				app.Print([]string{rainbowThinkingHeader()})
 				reasoningStarted = true
 			}
 			text := v.Text
@@ -234,7 +267,7 @@ func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Us
 				text = text[idx+1:]
 			}
 			if reasoningBuf.Len() > 0 {
-				app.SetStreamPreview([]string{patchtui.MutedBrown + reasoningBuf.String() + patchtui.Reset})
+				app.SetStreamPreview([]string{patchtui.MutedThinking + reasoningBuf.String() + patchtui.Reset})
 			} else {
 				app.SetStreamPreview(nil)
 			}
