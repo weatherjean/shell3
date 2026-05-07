@@ -77,7 +77,8 @@ func (b *bodyTap) scanReasoning(r io.ReadCloser, done chan struct{}) {
 		var chunk struct {
 			Choices []struct {
 				Delta struct {
-					Reasoning string `json:"reasoning"`
+					Reasoning        string `json:"reasoning"`
+					ReasoningContent string `json:"reasoning_content"`
 				} `json:"delta"`
 			} `json:"choices"`
 		}
@@ -85,13 +86,20 @@ func (b *bodyTap) scanReasoning(r io.ReadCloser, done chan struct{}) {
 			continue
 		}
 		for _, c := range chunk.Choices {
-			if c.Delta.Reasoning != "" {
-				sb.WriteString(c.Delta.Reasoning)
+			// Different providers emit reasoning under different field names:
+			// OpenRouter uses "reasoning", Moonshot/DeepSeek use "reasoning_content".
+			// Both feed the same accumulator and onReasoningDelta callback.
+			frag := c.Delta.Reasoning
+			if frag == "" {
+				frag = c.Delta.ReasoningContent
+			}
+			if frag != "" {
+				sb.WriteString(frag)
 				b.mu.Lock()
 				cb := b.onReasoningDelta
 				b.mu.Unlock()
 				if cb != nil {
-					cb(c.Delta.Reasoning)
+					cb(frag)
 				}
 			}
 		}
@@ -340,6 +348,13 @@ func toMessages(msgs []llm.Message) []openai.ChatCompletionMessageParamUnion {
 					}
 				}
 				asst.ToolCalls = tcs
+			}
+			// Moonshot/DeepSeek require reasoning_content echoed back on
+			// assistant turns when thinking mode produced one. The official
+			// SDK has no first-class field for this vendor extension; inject
+			// via SetExtraFields so it survives MarshalJSON.
+			if m.ReasoningContent != "" {
+				asst.SetExtraFields(map[string]any{"reasoning_content": m.ReasoningContent})
 			}
 			out = append(out, openai.ChatCompletionMessageParamUnion{OfAssistant: &asst})
 		case llm.RoleTool:

@@ -136,6 +136,27 @@ func TestScanReasoningCallsOnDelta(t *testing.T) {
 	}
 }
 
+func TestScanReasoningExtractsReasoningContent(t *testing.T) {
+	tap := &bodyTap{}
+	done := make(chan struct{})
+	tap.done = done
+
+	sse := "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"moonshot \"}}]}\n" +
+		"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thinks\"}}]}\n" +
+		"data: [DONE]\n"
+
+	pr := io.NopCloser(strings.NewReader(sse))
+	go tap.scanReasoning(pr, done)
+	<-done
+
+	tap.mu.Lock()
+	got := tap.reasoning
+	tap.mu.Unlock()
+	if got != "moonshot thinks" {
+		t.Fatalf("reasoning_content: got %q", got)
+	}
+}
+
 func TestScanReasoningIgnoresBadJSON(t *testing.T) {
 	tap := &bodyTap{}
 	done := make(chan struct{})
@@ -232,6 +253,27 @@ func TestToMessagesContentParts(t *testing.T) {
 	out := toMessages(msgs)
 	if len(out) != 1 || out[0].OfUser == nil {
 		t.Fatalf("expected user message, got %+v", out)
+	}
+}
+
+func TestToMessagesAssistantReasoningContentEchoed(t *testing.T) {
+	msgs := []llm.Message{
+		{
+			Role:             llm.RoleAssistant,
+			Content:          "thinking complete",
+			ReasoningContent: "step 1 step 2",
+			ToolCalls: []llm.ToolCall{
+				{ID: "tc1", Name: "bash", RawArgs: `{"cmd":"ls"}`},
+			},
+		},
+	}
+	out := toMessages(msgs)
+	raw, err := out[0].MarshalJSON()
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"reasoning_content":"step 1 step 2"`) {
+		t.Fatalf("reasoning_content not in serialized assistant message: %s", raw)
 	}
 }
 
