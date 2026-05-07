@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -99,22 +98,19 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		return err
 	}
 
-	if err := config.Migrate(homeDir); err != nil {
-		return fmt.Errorf("migrate credentials: %w", err)
-	}
-	credStore, err := config.LoadCredStore(homeDir)
+	authStore, err := config.LoadAuthStore(homeDir)
 	if err != nil {
 		return err
 	}
 
 	providerHint := coalesce(f.provider, pCfg.Provider)
-	adapterName, instance, model := resolveConnection(providerHint, pCfg.Model, credStore, f)
-	if adapterName == "" {
-		return fmt.Errorf("no adapter configured — run: shell3 auth")
+	instance, model := resolveConnection(providerHint, pCfg.Model, authStore, f)
+	if instance == "" {
+		return fmt.Errorf("no provider configured — run: shell3 auth")
 	}
-	prov, ok := llm.Get(adapterName)
+	prov, ok := llm.Get("openai")
 	if !ok {
-		return fmt.Errorf("unknown adapter %q (registered: %v)", adapterName, llm.Registered())
+		return fmt.Errorf("openai adapter not registered")
 	}
 
 	noBash := pCfg.NoBash || f.noBash
@@ -208,27 +204,13 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	}
 
 	var models []chat.ModelChoice
-	for _, meta := range credStore.List() {
-		p, ok := llm.Get(meta.Adapter)
-		if !ok {
-			continue
-		}
-		for _, m := range p.Models(credStore, meta.Instance) {
-			models = append(models, chat.ModelChoice{Provider: meta.Instance, Model: m})
-		}
-	}
-	regNames := llm.Registered()
-	sort.Strings(regNames)
-	for _, name := range regNames {
-		p, _ := llm.Get(name)
-		if !p.SingleInstance() {
-			continue
-		}
-		if _, _, ok := credStore.Get(name); ok {
-			continue
-		}
-		for _, m := range p.Models(credStore, name) {
-			models = append(models, chat.ModelChoice{Provider: name, Model: m})
+	for _, inst := range authStore.List() {
+		for _, m := range inst.Models {
+			models = append(models, chat.ModelChoice{
+				Provider:      inst.Name,
+				Model:         m.ID,
+				ContextWindow: m.ContextWindow,
+			})
 		}
 	}
 	if len(models) == 0 {
@@ -236,23 +218,10 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	}
 
 	buildClient := func(inst, m string) (chat.LLMClient, error) {
-		adapter := ""
-		if a, _, ok := credStore.Get(inst); ok {
-			adapter = a
-		} else if _, ok := llm.Get(inst); ok {
-			adapter = inst
-		}
-		if adapter == "" {
-			return nil, fmt.Errorf("unknown adapter for instance %q", inst)
-		}
-		p, ok := llm.Get(adapter)
-		if !ok {
-			return nil, fmt.Errorf("unknown adapter %q", adapter)
-		}
-		return p.NewClient(ctx, credStore, inst, m)
+		return prov.NewClient(ctx, authStore, inst, m)
 	}
 
-	streamer, err := prov.NewClient(ctx, credStore, instance, model)
+	streamer, err := prov.NewClient(ctx, authStore, instance, model)
 	if err != nil {
 		return err
 	}
@@ -353,35 +322,22 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	return chat.RunInteractive(ctx, cfg)
 }
 
-// resolveConnection picks the (adapter, instance, model) tuple for this run.
-func resolveConnection(providerHint, modelHint string, credStore *config.CredStore, f *runFlags) (adapter, instance, model string) {
+// resolveConnection picks the (instance, model) pair for this run.
+func resolveConnection(providerHint, modelHint string, store *config.AuthStore, f *runFlags) (instance, model string) {
 	if providerHint != "" {
-		if a, _, ok := credStore.Get(providerHint); ok {
-			adapter = a
-			instance = providerHint
-		} else if _, ok := llm.Get(providerHint); ok {
-			adapter = providerHint
+		if _, ok := store.Get(providerHint); ok {
 			instance = providerHint
 		}
 	}
-
-	if adapter == "" {
-		for _, m := range credStore.List() {
-			if m.Instance != "" {
-				adapter = m.Adapter
-				instance = m.Instance
-				break
-			}
+	if instance == "" {
+		if insts := store.List(); len(insts) > 0 {
+			instance = insts[0].Name
 		}
 	}
-
 	model = coalesce(f.model, modelHint)
-	if model == "" && adapter != "" {
-		if p, ok := llm.Get(adapter); ok {
-			ms := p.Models(credStore, instance)
-			if len(ms) > 0 {
-				model = ms[0]
-			}
+	if model == "" && instance != "" {
+		if inst, ok := store.Get(instance); ok && len(inst.Models) > 0 {
+			model = inst.Models[0].ID
 		}
 	}
 	if model == "" {
