@@ -7,10 +7,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	// Self-registering adapters. Each package's init() calls llm.Register;
-	// the main app dispatches generically via llm.Get.
-	_ "github.com/weatherjean/shell3/internal/adapters/codex"  // codex: ChatGPT subscription auth
-	_ "github.com/weatherjean/shell3/internal/adapters/openai" // openai-compatible: Ollama, OpenAI, OpenRouter, etc.
+	// Self-registering adapter. init() calls llm.Register.
+	_ "github.com/weatherjean/shell3/internal/adapter/openai"
 
 	"github.com/weatherjean/shell3/internal/patchapp"
 )
