@@ -231,7 +231,6 @@ parameters:
   parallel_tool_calls: true
   temperature: ~                 # ~ to leave provider default
   max_tokens: 16000              # max output tokens (anthropic requires; openai sets MaxCompletionTokens)
-  thinking_budget: 0             # anthropic extended-thinking budget tokens (0 = disabled)
 
 # Hooks — string for plain command, or mapping with needs_tty.
 on_session_start: ~              # fire-and-forget; runs once when session opens

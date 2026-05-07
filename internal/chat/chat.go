@@ -648,11 +648,6 @@ func currentParamValue(p llm.RequestParams, name string) string {
 			return ""
 		}
 		return fmt.Sprintf("%d", p.MaxTokens)
-	case "thinking_budget":
-		if p.ThinkingBudget == 0 {
-			return ""
-		}
-		return fmt.Sprintf("%d", p.ThinkingBudget)
 	}
 	return ""
 }

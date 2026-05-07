@@ -13,7 +13,7 @@ func TestParamSpecs(t *testing.T) {
 	for _, s := range specs {
 		names[s.Name] = true
 	}
-	for _, want := range []string{"max_tokens", "thinking_budget", "temperature"} {
+	for _, want := range []string{"reasoning_effort", "max_tokens", "temperature"} {
 		if !names[want] {
 			t.Errorf("missing param spec %q", want)
 		}

@@ -12,7 +12,6 @@ type RequestParams struct {
 	ParallelToolCalls *bool    // nil = leave provider default
 	Temperature       *float64 // nil = leave provider default
 	MaxTokens         int      // 0 = adapter default
-	ThinkingBudget    int      // anthropic extended thinking budget (0 = disabled)
 }
 
 // Merge returns base with non-zero fields from override applied.
@@ -35,9 +34,6 @@ func (p RequestParams) Merge(o RequestParams) RequestParams {
 	}
 	if o.MaxTokens > 0 {
 		out.MaxTokens = o.MaxTokens
-	}
-	if o.ThinkingBudget > 0 {
-		out.ThinkingBudget = o.ThinkingBudget
 	}
 	return out
 }
@@ -67,12 +63,6 @@ func (p *RequestParams) SetByName(name, value string) error {
 			return fmt.Errorf("max_tokens: %w", err)
 		}
 		p.MaxTokens = n
-	case "thinking_budget":
-		var n int
-		if _, err := fmt.Sscanf(value, "%d", &n); err != nil {
-			return fmt.Errorf("thinking_budget: %w", err)
-		}
-		p.ThinkingBudget = n
 	default:
 		return fmt.Errorf("unknown parameter %q", name)
 	}

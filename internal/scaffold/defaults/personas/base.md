@@ -18,7 +18,6 @@ parameters:
   verbosity: medium
   parallel_tool_calls: true
   max_tokens: 16000
-  thinking_budget: 0
 on_session_start: ~              # fire-and-forget; runs once when session opens
 on_session_end: ~                # fire-and-forget; runs once when session closes
 on_turn_start: ~                 # fire-and-forget; runs before each LLM call

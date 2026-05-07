@@ -40,7 +40,6 @@ func (c *Client) ParamSpecs() []llm.ParamSpec {
 	return []llm.ParamSpec{
 		{Name: "reasoning_effort", Enum: []string{"none", "minimal", "low", "medium", "high", "xhigh"}, Default: "medium"},
 		{Name: "max_tokens", Default: "16000"},
-		{Name: "thinking_budget", Default: "0"},
 		{Name: "temperature", Default: ""},
 	}
 }
@@ -72,13 +71,10 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 		maxTok = 16000
 	}
 
-	// Resolve thinking budget: explicit thinking_budget wins; else map
-	// reasoning_effort onto a budget. Auto-bump max_tokens to cover
-	// budget + 4k output headroom (Anthropic requires budget < max_tokens).
-	budget := int64(c.params.ThinkingBudget)
-	if budget == 0 && c.params.ReasoningEffort != "" {
-		budget = effortToBudget(c.params.ReasoningEffort)
-	}
+	// Map reasoning_effort onto thinking.budget_tokens. Auto-bump
+	// max_tokens to cover budget + 4k output headroom (Anthropic
+	// requires budget < max_tokens).
+	budget := effortToBudget(c.params.ReasoningEffort)
 	if budget > 0 && budget+4000 > maxTok {
 		maxTok = budget + 4000
 	}
