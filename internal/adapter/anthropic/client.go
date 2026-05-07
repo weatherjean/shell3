@@ -244,6 +244,9 @@ func toAnthropicMessages(msgs []llm.Message) ([]anthropic.MessageParam, string) 
 			system = m.Content
 			i++
 		case llm.RoleUser:
+			// TODO: ContentParts (vision/image attachments) are dropped here.
+			// Anthropic supports image blocks via anthropic.NewImageBlock —
+			// add a translation when image input is needed on this adapter.
 			out = append(out, anthropic.NewUserMessage(anthropic.NewTextBlock(m.Content)))
 			i++
 		case llm.RoleAssistant:
