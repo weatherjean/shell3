@@ -170,10 +170,15 @@ func runTurn(ctx context.Context, cfg TurnConfig, sess *session, userMsg llm.Mes
 				return
 			}
 
-			allowed, hookErr := cfg.Hooks.OnToolCall(ctx, tc.Name, parseRawArgs(tc.RawArgs))
+			allowed, hookReason, hookErr := cfg.Hooks.OnToolCall(ctx, tc.Name, parseRawArgs(tc.RawArgs))
 			var out string
-			if hookErr != nil || !allowed {
-				out = fmt.Sprintf("Tool call blocked: %v", hookErr)
+			if hookErr != nil {
+				out = fmt.Sprintf("Tool-call hook failed (the on_tool_call hook script itself errored, not the user): %v. Do not retry the same call without adjusting your approach.", hookErr)
+			} else if !allowed {
+				if hookReason == "" {
+					hookReason = "no reason given"
+				}
+				out = fmt.Sprintf("USER DENIED this %s tool call. Reason: %s. Treat this as the user explicitly disapproving this action — do NOT retry the same call. Acknowledge the denial, ask what they want instead, or pick a different approach.", tc.Name, hookReason)
 			} else if schema, ok := toolSchemas[tc.Name]; ok {
 				if err := validateToolArgs(schema, json.RawMessage([]byte(tc.RawArgs))); err != nil {
 					out = fmt.Sprintf("error: invalid tool arguments: %v", err)

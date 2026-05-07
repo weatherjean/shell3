@@ -16,9 +16,9 @@ func TestHookAllow(t *testing.T) {
 	_ = os.WriteFile(script,[]byte("#!/bin/bash\necho '{\"action\":\"allow\"}'"), 0755)
 
 	r := hooks.NewRunner(hooks.Config{OnToolCall: hooks.HookEntry{Command: script}})
-	allowed, err := r.OnToolCall(context.Background(), "bash", map[string]any{"command": "ls"})
-	if err != nil || !allowed {
-		t.Errorf("expected allow, got allowed=%v err=%v", allowed, err)
+	allowed, reason, err := r.OnToolCall(context.Background(), "bash", map[string]any{"command": "ls"})
+	if err != nil || !allowed || reason != "" {
+		t.Errorf("expected allow, got allowed=%v reason=%q err=%v", allowed, reason, err)
 	}
 }
 
@@ -28,9 +28,15 @@ func TestHookBlock(t *testing.T) {
 	_ = os.WriteFile(script,[]byte("#!/bin/bash\necho '{\"action\":\"block\",\"reason\":\"not allowed\"}'"), 0755)
 
 	r := hooks.NewRunner(hooks.Config{OnToolCall: hooks.HookEntry{Command: script}})
-	allowed, err := r.OnToolCall(context.Background(), "bash", map[string]any{"command": "rm -rf /"})
-	if err == nil || allowed {
-		t.Errorf("expected block, got allowed=%v err=%v", allowed, err)
+	allowed, reason, err := r.OnToolCall(context.Background(), "bash", map[string]any{"command": "rm -rf /"})
+	if err != nil {
+		t.Errorf("clean denial should not return err, got: %v", err)
+	}
+	if allowed {
+		t.Errorf("expected block, got allowed=%v", allowed)
+	}
+	if reason != "not allowed" {
+		t.Errorf("expected reason=%q, got %q", "not allowed", reason)
 	}
 }
 
@@ -57,9 +63,9 @@ cat | python3 -c "import sys,json; d=json.load(sys.stdin); d['messages']=d['mess
 
 func TestNoHook(t *testing.T) {
 	r := hooks.NewRunner(hooks.Config{})
-	allowed, err := r.OnToolCall(context.Background(), "bash", nil)
-	if err != nil || !allowed {
-		t.Errorf("no hook should default to allow: allowed=%v err=%v", allowed, err)
+	allowed, reason, err := r.OnToolCall(context.Background(), "bash", nil)
+	if err != nil || !allowed || reason != "" {
+		t.Errorf("no hook should default to allow: allowed=%v reason=%q err=%v", allowed, reason, err)
 	}
 }
 
@@ -79,7 +85,7 @@ func TestHookTildeExpansion(t *testing.T) {
 
 	rel := "~/" + filepath.Base(dir) + "/hook.sh"
 	r := hooks.NewRunner(hooks.Config{OnToolCall: hooks.HookEntry{Command: "bash " + rel}})
-	allowed, err := r.OnToolCall(context.Background(), "bash", nil)
+	allowed, _, err := r.OnToolCall(context.Background(), "bash", nil)
 	if err != nil || !allowed {
 		t.Errorf("tilde expansion failed: allowed=%v err=%v", allowed, err)
 	}

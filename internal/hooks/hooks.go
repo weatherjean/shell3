@@ -132,21 +132,28 @@ func (r *Runner) dispatchFireAndForget(ctx context.Context, entry HookEntry, inp
 // Call after OnSessionEnd to ensure no hooks are orphaned on teardown.
 func (r *Runner) Wait() { r.wg.Wait() }
 
-// OnToolCall returns true if the tool call is allowed by the hook.
-func (r *Runner) OnToolCall(ctx context.Context, tool string, params map[string]any) (bool, error) {
+// OnToolCall asks the on_tool_call hook whether to allow tool. It returns:
+//
+//   - allowed=true, reason="", err=nil — proceed with the tool call.
+//   - allowed=false, reason=<text>, err=nil — user/policy denied the call.
+//     Reason is the hook's "reason" field, possibly empty.
+//   - allowed=false, reason="", err=<err> — the hook itself failed
+//     (script error, bad JSON, timeout). Caller should treat as blocked
+//     but distinguish from a clean denial when reporting to the model.
+func (r *Runner) OnToolCall(ctx context.Context, tool string, params map[string]any) (allowed bool, reason string, err error) {
 	if r.cfg.OnToolCall.Command == "" {
-		return true, nil
+		return true, "", nil
 	}
 	out, err := r.dispatchBlocking(ctx, r.cfg.OnToolCall, hookInput{
 		Hook: "on_tool_call", Tool: tool, Params: params,
 	})
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 	if out.Action == "block" {
-		return false, fmt.Errorf("hooks: tool call blocked: %s", out.Reason)
+		return false, out.Reason, nil
 	}
-	return true, nil
+	return true, "", nil
 }
 
 // OnContextBuild transforms the message list before the LLM call.
