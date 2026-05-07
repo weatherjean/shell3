@@ -215,6 +215,9 @@ func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Us
 	// flushReasoningPartial commits any buffered partial reasoning line, adds a
 	// trailing blank line if thinking was shown, and clears the preview.
 	flushReasoningPartial := func() {
+		if reasoningBuf.Len() == 0 && !reasoningStarted {
+			return
+		}
 		if reasoningBuf.Len() > 0 {
 			commitReasoningLine(reasoningBuf.String())
 			reasoningBuf.Reset()
@@ -280,8 +283,8 @@ func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Us
 		case patchapp.AppendEvent:
 			// Tool output. Commit any pending stream text first so order is preserved.
 			flushReasoningPartial()
+			app.SetStreamPreview(nil)
 			if streamBuf.Len() > 0 {
-				app.SetStreamPreview(nil)
 				w, _ := patchtui.Size()
 				app.Print(patchmd.Render(streamBuf.String(), w-2))
 				streamBuf.Reset()
@@ -294,6 +297,7 @@ func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Us
 		case patchapp.TurnDoneEvent:
 			flushReasoningPartial()
 			if streamBuf.Len() > 0 {
+				app.SetStreamPreview(nil)
 				w, _ := patchtui.Size()
 				app.Print(patchmd.Render(streamBuf.String(), w-2))
 				streamBuf.Reset()
@@ -304,6 +308,7 @@ func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Us
 		case patchapp.TurnErrEvent:
 			flushReasoningPartial()
 			if streamBuf.Len() > 0 {
+				app.SetStreamPreview(nil)
 				app.Print(patchtui.SplitLines(streamBuf.String()))
 				streamBuf.Reset()
 			}
