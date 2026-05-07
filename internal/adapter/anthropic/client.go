@@ -1,9 +1,13 @@
 package anthropic
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"sync"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -11,26 +15,77 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
+// trafficTap is an http.RoundTripper that buffers the last request body and
+// non-2xx response body so the chat layer can dump them on stream errors.
+// 2xx response bodies are SSE streams — not buffered to avoid blocking.
+type trafficTap struct {
+	mu      sync.Mutex
+	reqBody []byte
+	resBody []byte
+	rt      http.RoundTripper
+}
+
+func (t *trafficTap) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Body != nil {
+		buf, _ := io.ReadAll(req.Body)
+		req.Body = io.NopCloser(bytes.NewReader(buf))
+		t.mu.Lock()
+		t.reqBody = buf
+		t.mu.Unlock()
+	}
+	res, err := t.rt.RoundTrip(req)
+	if err != nil || res == nil || res.Body == nil {
+		return res, err
+	}
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		buf, _ := io.ReadAll(res.Body)
+		res.Body = io.NopCloser(bytes.NewReader(buf))
+		t.mu.Lock()
+		t.resBody = buf
+		t.mu.Unlock()
+	}
+	return res, err
+}
+
+func (t *trafficTap) snapshot() (req, res []byte) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]byte(nil), t.reqBody...), append([]byte(nil), t.resBody...)
+}
+
 // Client is an Anthropic streaming LLM client using the official SDK.
 type Client struct {
 	ac     anthropic.Client
+	tap    *trafficTap
 	model  string
 	params llm.RequestParams
 }
 
 // NewClient creates a Client. baseURL is optional (empty = default api.anthropic.com).
 func NewClient(apiKey, baseURL, model string) *Client {
+	tap := &trafficTap{rt: http.DefaultTransport}
 	opts := []option.RequestOption{
 		option.WithAPIKey(apiKey),
+		option.WithHTTPClient(&http.Client{Transport: tap}),
 	}
 	if baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))
 	}
 	return &Client{
 		ac:     anthropic.NewClient(opts...),
+		tap:    tap,
 		model:  model,
 		params: llm.RequestParams{MaxTokens: 16000},
 	}
+}
+
+// LastTraffic returns the last request body and non-2xx response body
+// captured by the underlying HTTP transport. Empty if no request has been made.
+func (c *Client) LastTraffic() (req, res []byte) {
+	if c.tap == nil {
+		return nil, nil
+	}
+	return c.tap.snapshot()
 }
 
 func (c *Client) SetModel(model string)         { c.model = model }
