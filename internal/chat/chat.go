@@ -629,10 +629,6 @@ func currentParamValue(p llm.RequestParams, name string) string {
 	switch name {
 	case "reasoning_effort":
 		return p.ReasoningEffort
-	case "reasoning_summary":
-		return p.ReasoningSummary
-	case "verbosity":
-		return p.Verbosity
 	case "parallel_tool_calls":
 		if p.ParallelToolCalls == nil {
 			return ""

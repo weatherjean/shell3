@@ -25,18 +25,11 @@ type TrafficInspector interface {
 	LastTraffic() (req, res []byte)
 }
 
-// ReasoningInspector is implemented by Streamers that side-channel
-// "reasoning" text out of band of the standard delta stream.
-type ReasoningInspector interface {
-	LastReasoning() string
-}
-
 // Provider is a self-registering LLM backend. Each adapter package
 // (internal/adapter/<name>) owns one Provider impl, registers it via
 // Register from init(), and is wired in via blank import.
 type Provider interface {
 	Name() string
-	SingleInstance() bool
 	NewClient(ctx context.Context, store *config.AuthStore, instance, model string) (Streamer, error)
 }
 

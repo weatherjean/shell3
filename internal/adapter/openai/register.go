@@ -12,8 +12,7 @@ type provider struct{}
 
 func init() { llm.Register("openai", &provider{}) }
 
-func (*provider) Name() string         { return "openai" }
-func (*provider) SingleInstance() bool { return false }
+func (*provider) Name() string { return "openai" }
 
 // NewClient reads the instance from store and builds a Client.
 func (*provider) NewClient(_ context.Context, store *config.AuthStore, instance, model string) (llm.Streamer, error) {

@@ -363,9 +363,9 @@ func TestParseConfigParameters(t *testing.T) {
 name: x
 parameters:
   reasoning_effort: high
-  verbosity: low
   parallel_tool_calls: true
   temperature: 0.4
+  max_tokens: 8000
 ---
 hello
 `
@@ -377,8 +377,8 @@ hello
 	if cfg.Parameters.ReasoningEffort != "high" {
 		t.Fatalf("effort: %+v", cfg.Parameters)
 	}
-	if cfg.Parameters.Verbosity != "low" {
-		t.Fatalf("verbosity: %+v", cfg.Parameters)
+	if cfg.Parameters.MaxTokens != 8000 {
+		t.Fatalf("max_tokens: %+v", cfg.Parameters)
 	}
 	if cfg.Parameters.ParallelToolCalls == nil || !*cfg.Parameters.ParallelToolCalls {
 		t.Fatalf("parallel: %+v", cfg.Parameters)

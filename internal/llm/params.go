@@ -7,8 +7,6 @@ import "fmt"
 // they cannot represent (e.g. anthropic mapping reasoning_effort → budget).
 type RequestParams struct {
 	ReasoningEffort   string   // none|minimal|low|medium|high|xhigh
-	ReasoningSummary  string   // auto|concise|detailed|off
-	Verbosity         string   // low|medium|high
 	ParallelToolCalls *bool    // nil = leave provider default
 	Temperature       *float64 // nil = leave provider default
 	MaxTokens         int      // 0 = adapter default
@@ -19,12 +17,6 @@ func (p RequestParams) Merge(o RequestParams) RequestParams {
 	out := p
 	if o.ReasoningEffort != "" {
 		out.ReasoningEffort = o.ReasoningEffort
-	}
-	if o.ReasoningSummary != "" {
-		out.ReasoningSummary = o.ReasoningSummary
-	}
-	if o.Verbosity != "" {
-		out.Verbosity = o.Verbosity
 	}
 	if o.ParallelToolCalls != nil {
 		out.ParallelToolCalls = o.ParallelToolCalls
@@ -44,10 +36,6 @@ func (p *RequestParams) SetByName(name, value string) error {
 	switch name {
 	case "reasoning_effort":
 		p.ReasoningEffort = value
-	case "reasoning_summary":
-		p.ReasoningSummary = value
-	case "verbosity":
-		p.Verbosity = value
 	case "parallel_tool_calls":
 		b := value == "true"
 		p.ParallelToolCalls = &b

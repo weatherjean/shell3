@@ -196,14 +196,6 @@ func (c *Client) LastTraffic() (req, res []byte) {
 	return r, s
 }
 
-func (c *Client) LastReasoning() string {
-	if c.tap == nil {
-		return ""
-	}
-	_, _, r := c.tap.snapshot()
-	return r
-}
-
 // Stream sends msgs to the LLM and calls onEvent for each delta and completion.
 func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.ToolDefinition, onEvent func(llm.StreamEvent)) error {
 	params := openai.ChatCompletionNewParams{

@@ -122,7 +122,7 @@ func runTurn(ctx context.Context, cfg TurnConfig, sess *session, userMsg llm.Mes
 
 	var totalUsage llm.Usage
 	for {
-		text, reasoning, providerReasoning, toolCalls, usage, err := streamOnce(ctx, cfg.LLM, allMsgs, cfg.Personality.Tools, ch)
+		text, reasoning, toolCalls, usage, err := streamOnce(ctx, cfg.LLM, allMsgs, cfg.Personality.Tools, ch)
 		if usage.TotalTokens > 0 || usage.PromptTokens > 0 || usage.CompletionTokens > 0 {
 			totalUsage = addUsage(totalUsage, usage)
 			ch <- patchapp.UsageEvent{Usage: totalUsage}
@@ -148,12 +148,11 @@ func runTurn(ctx context.Context, cfg TurnConfig, sess *session, userMsg llm.Mes
 			toolCalls[i].ID = sess.allocToolCallID()
 		}
 
-		if text != "" || len(toolCalls) > 0 || len(providerReasoning) > 0 {
+		if text != "" || len(toolCalls) > 0 {
 			assistantMsg := llm.Message{
-				Role:              llm.RoleAssistant,
-				Content:           text,
-				ReasoningContent:  reasoning,
-				ProviderReasoning: providerReasoning,
+				Role:             llm.RoleAssistant,
+				Content:          text,
+				ReasoningContent: reasoning,
 			}
 			assistantMsg.ToolCalls = toolCalls
 			allMsgs = append(allMsgs, assistantMsg)
@@ -313,9 +312,9 @@ func runTurn(ctx context.Context, cfg TurnConfig, sess *session, userMsg llm.Mes
 
 // streamOnce calls the LLM once, collecting text/reasoning/tool-calls/usage
 // and emitting ChunkEvents on ch.
-func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools []llm.ToolDefinition, ch chan<- patchapp.Event) (text, reasoning string, providerReasoning []byte, toolCalls []llm.ToolCall, usage llm.Usage, err error) {
+func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools []llm.ToolDefinition, ch chan<- patchapp.Event) (text, reasoning string, toolCalls []llm.ToolCall, usage llm.Usage, err error) {
 	if ctx.Err() != nil {
-		return "", "", nil, nil, llm.Usage{}, fmt.Errorf("context canceled")
+		return "", "", nil, llm.Usage{}, fmt.Errorf("context canceled")
 	}
 	var sb, rb strings.Builder
 	streamErr := client.Stream(ctx, msgs, tools, func(ev llm.StreamEvent) {
@@ -327,9 +326,6 @@ func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools
 			rb.WriteString(ev.ReasoningDelta)
 			ch <- patchapp.ReasoningChunkEvent{Text: ev.ReasoningDelta}
 		}
-		if len(ev.ProviderReasoning) > 0 {
-			providerReasoning = ev.ProviderReasoning
-		}
 		if ev.ToolCall != nil {
 			toolCalls = append(toolCalls, *ev.ToolCall)
 		}
@@ -338,9 +334,9 @@ func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools
 		}
 	})
 	if ctx.Err() != nil {
-		return sb.String(), rb.String(), providerReasoning, toolCalls, usage, fmt.Errorf("context canceled")
+		return sb.String(), rb.String(), toolCalls, usage, fmt.Errorf("context canceled")
 	}
-	return sb.String(), rb.String(), providerReasoning, toolCalls, usage, streamErr
+	return sb.String(), rb.String(), toolCalls, usage, streamErr
 }
 
 // estimatePromptTokens approximates the token count for a message slice by

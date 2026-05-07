@@ -12,8 +12,7 @@ type provider struct{}
 
 func init() { llm.Register("anthropic", &provider{}) }
 
-func (*provider) Name() string         { return "anthropic" }
-func (*provider) SingleInstance() bool { return false }
+func (*provider) Name() string { return "anthropic" }
 
 // NewClient reads the instance from store and builds a Client.
 func (*provider) NewClient(_ context.Context, store *config.AuthStore, instance, model string) (llm.Streamer, error) {

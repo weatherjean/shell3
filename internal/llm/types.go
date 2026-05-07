@@ -40,11 +40,6 @@ type Message struct {
 	// echoed back on assistant tool-call messages by Moonshot when
 	// thinking mode is enabled, otherwise the next request 400s.
 	ReasoningContent string `json:"reasoning_content,omitempty"`
-	// ProviderReasoning is opaque JSON an adapter needs echoed back on the
-	// next turn (e.g. providers that emit reasoning items with
-	// `encrypted_content`). Chat layer treats it as a black box; only the
-	// originating adapter parses.
-	ProviderReasoning []byte `json:"provider_reasoning,omitempty"`
 }
 
 // ToolDefinition describes a tool the LLM may call.
@@ -75,8 +70,4 @@ type StreamEvent struct {
 	ToolCall       *ToolCall
 	Usage          *Usage
 	Done           bool
-	// ProviderReasoning is opaque JSON the adapter wants attached to the
-	// assistant message it is currently streaming. Chat layer copies it
-	// onto the assistant Message verbatim.
-	ProviderReasoning []byte
 }

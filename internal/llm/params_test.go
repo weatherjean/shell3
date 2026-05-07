@@ -17,14 +17,14 @@ func TestParamSpecValidate(t *testing.T) {
 }
 
 func TestRequestParamsMerge(t *testing.T) {
-	base := RequestParams{ReasoningEffort: "medium", Verbosity: "medium"}
+	base := RequestParams{ReasoningEffort: "medium", MaxTokens: 8000}
 	override := RequestParams{ReasoningEffort: "high"}
 	got := base.Merge(override)
 	if got.ReasoningEffort != "high" {
 		t.Fatalf("override lost: %+v", got)
 	}
-	if got.Verbosity != "medium" {
-		t.Fatalf("base verbosity lost: %+v", got)
+	if got.MaxTokens != 8000 {
+		t.Fatalf("base max_tokens lost: %+v", got)
 	}
 }
 

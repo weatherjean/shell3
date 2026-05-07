@@ -53,8 +53,6 @@ type PersonaConfig struct {
 // Pointers distinguish "absent" from "explicitly false/zero".
 type PersonaParams struct {
 	ReasoningEffort   string   `yaml:"reasoning_effort"`
-	ReasoningSummary  string   `yaml:"reasoning_summary"`
-	Verbosity         string   `yaml:"verbosity"`
 	ParallelToolCalls *bool    `yaml:"parallel_tool_calls"`
 	Temperature       *float64 `yaml:"temperature"`
 	MaxTokens         int      `yaml:"max_tokens"`
@@ -64,8 +62,6 @@ type PersonaParams struct {
 func (pp PersonaParams) ToRequestParams() llm.RequestParams {
 	return llm.RequestParams{
 		ReasoningEffort:   pp.ReasoningEffort,
-		ReasoningSummary:  pp.ReasoningSummary,
-		Verbosity:         pp.Verbosity,
 		ParallelToolCalls: pp.ParallelToolCalls,
 		Temperature:       pp.Temperature,
 		MaxTokens:         pp.MaxTokens,
