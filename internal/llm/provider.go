@@ -3,7 +3,6 @@ package llm
 import (
 	"context"
 	"fmt"
-	"io"
 	"sync"
 
 	"github.com/weatherjean/shell3/internal/config"
@@ -33,14 +32,12 @@ type ReasoningInspector interface {
 }
 
 // Provider is a self-registering LLM backend. Each adapter package
-// (internal/adapters/<name>) owns one Provider impl, registers it via
+// (internal/adapter/<name>) owns one Provider impl, registers it via
 // Register from init(), and is wired in via blank import.
 type Provider interface {
 	Name() string
 	SingleInstance() bool
-	Auth(ctx context.Context, w io.Writer, store *config.CredStore, instance string) error
-	NewClient(ctx context.Context, store *config.CredStore, instance, model string) (Streamer, error)
-	Models(store *config.CredStore, instance string) []string
+	NewClient(ctx context.Context, store *config.AuthStore, instance, model string) (Streamer, error)
 }
 
 var (
