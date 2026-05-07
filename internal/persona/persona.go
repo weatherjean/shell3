@@ -272,18 +272,21 @@ var bashTool = ToolDef{
 
 var editFileTool = ToolDef{
 	Name: "edit_file",
-	Description: "Edit a file by exact string replacement, or write/overwrite it entirely when old_string is empty. " +
+	Description: "WRITE-ONLY tool. Edits a file by exact string replacement, or writes/overwrites it when old_string is empty. " +
+		"NEVER call this tool to read a file — it has no read mode and an empty new_string DELETES the matched chunk. " +
+		"To inspect a file use `bash` with `cat`, `sed -n`, `head`, or `tail`. To search use `bash` with `grep` or `rg`. " +
+		"Calling edit_file with empty new_string when you only wanted to read will silently delete content; this is destructive and cannot be undone. " +
 		"To create or overwrite a file pass an empty old_string and the full content as new_string. " +
-		"To delete a chunk, pass an empty new_string. " +
+		"To delete a chunk, pass an empty new_string (intentional). " +
 		"By default old_string must be unique in the file; set replace_all=true to replace every occurrence. " +
 		"Falls back to fuzzy line-trim/whitespace/indentation/escape matching if exact match fails. " +
 		"Prefer this over `bash` heredoc for code edits — it is atomic, diffs cleanly, and refuses ambiguous matches.",
 	Parameters: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"file_path":   map[string]any{"type": "string", "description": "Path to the file (absolute or relative to project root)"},
-			"old_string":  map[string]any{"type": "string", "description": "Exact text to replace; empty to create or overwrite the file"},
-			"new_string":  map[string]any{"type": "string", "description": "Replacement text; empty to delete the matched chunk"},
+			"file_path":   map[string]any{"type": "string", "description": "Path to the file (absolute or relative to project root). This tool MUTATES the file — never call it to read."},
+			"old_string":  map[string]any{"type": "string", "description": "Exact text to replace; empty ONLY when you intend to create or overwrite the entire file"},
+			"new_string":  map[string]any{"type": "string", "description": "Replacement text; empty DELETES the matched chunk (do not leave empty unless deletion is intended)"},
 			"replace_all": map[string]any{"type": "boolean", "description": "Replace every occurrence (default false)"},
 		},
 		"required": []string{"file_path", "old_string", "new_string"},
