@@ -497,12 +497,20 @@ func registerSlashCommands(app slashTarget, cfg *Config, sess *session, lastUsag
 				lines := []string{patchtui.Bold + "parameters:" + patchtui.Reset}
 				for _, s := range describer.ParamSpecs() {
 					cur := currentParamValue(cfg.Params, s.Name)
+					if cur == "" {
+						cur = "—"
+					}
 					enum := ""
 					if len(s.Enum) > 0 {
 						enum = " [" + strings.Join(s.Enum, "|") + "]"
 					}
-					lines = append(lines, fmt.Sprintf("  %-22s %s%s  (default %s)", s.Name, cur, enum, s.Default))
+					def := s.Default
+					if def == "" {
+						def = "provider"
+					}
+					lines = append(lines, fmt.Sprintf("  %-22s = %-8s%s  (default %s)", s.Name, cur, enum, def))
 				}
+				lines = append(lines, "", patchtui.Dim+"usage: /parameters <name> <value>"+patchtui.Reset)
 				app.Print(lines)
 				return
 			}
@@ -635,6 +643,16 @@ func currentParamValue(p llm.RequestParams, name string) string {
 			return ""
 		}
 		return fmt.Sprintf("%g", *p.Temperature)
+	case "max_tokens":
+		if p.MaxTokens == 0 {
+			return ""
+		}
+		return fmt.Sprintf("%d", p.MaxTokens)
+	case "thinking_budget":
+		if p.ThinkingBudget == 0 {
+			return ""
+		}
+		return fmt.Sprintf("%d", p.ThinkingBudget)
 	}
 	return ""
 }
