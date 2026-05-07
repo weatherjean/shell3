@@ -57,6 +57,8 @@ type PersonaParams struct {
 	Verbosity         string   `yaml:"verbosity"`
 	ParallelToolCalls *bool    `yaml:"parallel_tool_calls"`
 	Temperature       *float64 `yaml:"temperature"`
+	MaxTokens         int      `yaml:"max_tokens"`
+	ThinkingBudget    int      `yaml:"thinking_budget"`
 }
 
 // ToRequestParams maps the YAML block onto the adapter-facing struct.
@@ -67,6 +69,8 @@ func (pp PersonaParams) ToRequestParams() llm.RequestParams {
 		Verbosity:         pp.Verbosity,
 		ParallelToolCalls: pp.ParallelToolCalls,
 		Temperature:       pp.Temperature,
+		MaxTokens:         pp.MaxTokens,
+		ThinkingBudget:    pp.ThinkingBudget,
 	}
 }
 
