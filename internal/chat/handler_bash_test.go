@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBashHandler_Name(t *testing.T) {
@@ -46,6 +47,23 @@ func TestBashHandler_Execute_canceledContext(t *testing.T) {
 	out, _ := h.Execute(ctx, "1", args, ToolConfig{})
 	// Should return error output or empty — must not block.
 	_ = out
+}
+
+func TestBashHandler_Execute_timeout(t *testing.T) {
+	h := BashHandler{}
+	args := json.RawMessage(`{"command":"sleep 5","timeout_seconds":1}`)
+	start := time.Now()
+	out, err := h.Execute(context.Background(), "1", args, ToolConfig{})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed > 3*time.Second {
+		t.Fatalf("timeout did not fire: elapsed %s", elapsed)
+	}
+	if !strings.Contains(out, "timed out") {
+		t.Fatalf("expected 'timed out' in output, got %q", out)
+	}
 }
 
 func TestBashHandler_Execute_nonzeroExit(t *testing.T) {

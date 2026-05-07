@@ -253,13 +253,17 @@ var shellInteractiveTool = ToolDef{
 
 var bashTool = ToolDef{
 	Name:        "bash",
-	Description: "Execute a non-interactive shell command in the project directory. Returns combined stdout and stderr. Do not use for editors or interactive programs — use shell_interactive instead.",
+	Description: "Execute a non-interactive shell command in the project directory. Returns combined stdout and stderr. Do not use for editors or interactive programs — use shell_interactive instead. Default timeout is 10s; pass timeout_seconds (max 600) for slower commands.",
 	Parameters: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"command": map[string]any{
 				"type":        "string",
 				"description": "The shell command to run",
+			},
+			"timeout_seconds": map[string]any{
+				"type":        "integer",
+				"description": "Max seconds before the command is killed. Defaults to 10. Clamped to [1, 600].",
 			},
 		},
 		"required": []string{"command"},
