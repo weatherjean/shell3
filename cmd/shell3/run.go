@@ -51,11 +51,11 @@ func newRunCommand() *cobra.Command {
 			return runChat(cmd.Context(), f, input)
 		},
 	}
-	cmd.Flags().StringVar(&f.persona, "persona", scaffold.DefaultPersonaName, "Persona to load from .shell3/personas/")
-	cmd.Flags().StringVar(&f.provider, "provider", "", "Configured instance name or single-instance adapter (e.g. codex). Run 'shell3 auth list' to see options.")
-	cmd.Flags().StringVar(&f.model, "model", "", "Model override")
-	cmd.Flags().BoolVar(&f.noBash, "no-bash", false, "Disable bash tool")
-	cmd.Flags().BoolVar(&f.noMemory, "no-memory-tools", false, "Disable memory and history tools")
+	cmd.Flags().StringVar(&f.persona, "persona", scaffold.DefaultPersonaName, "Persona name — loads from .shell3/personas/ or ~/.shell3/personas/")
+	cmd.Flags().StringVar(&f.provider, "provider", "", "Instance name from ~/.shell3/ai-do-not-read.auth.yaml (default: first configured instance)")
+	cmd.Flags().StringVar(&f.model, "model", "", "Model ID override (default: first model in the instance's models list)")
+	cmd.Flags().BoolVar(&f.noBash, "no-bash", false, "Disable bash and shell_interactive tools")
+	cmd.Flags().BoolVar(&f.noMemory, "no-memory-tools", false, "Disable memory and history tools; skip opening the store")
 	return cmd
 }
 
