@@ -9,9 +9,11 @@ skills:
   - writing-plans
   - executing-plans
   - web-search
-# Built-in tools (always loaded — uncomment and edit to override user-tool allowlist):
-# [bash, shell_interactive, edit_file, shell3_docs, prune_tool_result, compact_history, memory_upsert, memory_list, memory_search, history_get, history_search]
-# tools: [tool-name]     # allowlist for user tools; empty = load all from .shell3/tools/
+# tools: [name1, name2]  # allowlist; omit to load all available tools.
+# When set, only listed names load — applies to BUILT-INS and user tools alike.
+# Built-in names for reference:
+#   bash, shell_interactive, edit_file, shell3_docs, prune_tool_result, compact_history,
+#   memory_upsert, memory_list, memory_search, history_get, history_search
 parameters:
   reasoning_effort: medium
   parallel_tool_calls: true

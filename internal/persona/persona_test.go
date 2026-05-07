@@ -160,6 +160,40 @@ func TestLoad_StoreToolsAbsentWithoutStore(t *testing.T) {
 	}
 }
 
+func TestLoad_ToolsAllowlistFiltersBuiltins(t *testing.T) {
+	dir := t.TempDir()
+	writePersona(t, dir, "base", `---
+name: base
+description: t
+tools: [bash, edit_file]
+---
+body`)
+
+	p := loadForTest(t, dir, "base", persona.TemplateData{}, true, false, nil)
+	for _, name := range []string{"bash", "edit_file"} {
+		if !hasToolNamed(p.Tools, name) {
+			t.Errorf("allowlisted %q missing; tools: %v", name, toolNames(p.Tools))
+		}
+	}
+	for _, name := range []string{"shell_interactive", "shell3_docs", "compact_history", "memory_upsert", "history_get"} {
+		if hasToolNamed(p.Tools, name) {
+			t.Errorf("non-allowlisted %q present; tools: %v", name, toolNames(p.Tools))
+		}
+	}
+}
+
+func TestLoad_EmptyToolsLoadsAll(t *testing.T) {
+	dir := t.TempDir()
+	writePersona(t, dir, "base", simplePersona)
+
+	p := loadForTest(t, dir, "base", persona.TemplateData{}, true, false, nil)
+	for _, name := range []string{"bash", "edit_file", "shell_interactive", "memory_upsert"} {
+		if !hasToolNamed(p.Tools, name) {
+			t.Errorf("empty allowlist should load all; %q missing", name)
+		}
+	}
+}
+
 func TestLoad_MissingFileReturnsError(t *testing.T) {
 	_, _, err := persona.ParseConfig([]string{t.TempDir()}, "nonexistent")
 	if err == nil {

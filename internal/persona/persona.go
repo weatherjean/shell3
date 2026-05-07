@@ -40,7 +40,8 @@ type PersonaConfig struct {
 
 	// Skills and Tools are optional allowlists. Empty means load everything
 	// available. When non-empty, only items whose names appear in the list
-	// are loaded for this persona.
+	// are loaded for this persona. Tools applies to both built-ins and
+	// user-defined tools — names absent from a non-empty list are dropped.
 	Skills []string `yaml:"skills,omitempty"`
 	Tools  []string `yaml:"tools,omitempty"`
 
@@ -141,6 +142,20 @@ func Load(cfg PersonaConfig, body string, data TemplateData, hasStore, noBash bo
 		tools = append(tools, storeTools...)
 	}
 	tools = append(tools, userTools...)
+
+	if len(cfg.Tools) > 0 {
+		allow := make(map[string]struct{}, len(cfg.Tools))
+		for _, n := range cfg.Tools {
+			allow[n] = struct{}{}
+		}
+		filtered := tools[:0]
+		for _, t := range tools {
+			if _, ok := allow[t.Name]; ok {
+				filtered = append(filtered, t)
+			}
+		}
+		tools = filtered
+	}
 
 	return Persona{
 		Config:       cfg,
