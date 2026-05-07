@@ -63,15 +63,15 @@ func checkGlobalDoctor(out io.Writer, homeDir string, g paths.Global, fail func(
 	doctorCheck(out, fail, dirExists(g.Skills), "global skills dir")
 	doctorCheck(out, fail, dirExists(g.Tools), "global tools dir")
 
-	credStore, err := config.LoadCredStore(homeDir)
-	if err == nil && len(credStore.List()) > 0 {
-		names := make([]string, 0, len(credStore.List()))
-		for _, m := range credStore.List() {
-			names = append(names, m.Instance)
+	authStore, err := config.LoadAuthStore(homeDir)
+	if err == nil && len(authStore.List()) > 0 {
+		names := make([]string, 0, len(authStore.List()))
+		for _, inst := range authStore.List() {
+			names = append(names, inst.Name)
 		}
-		doctorCheck(out, fail, true, fmt.Sprintf("credentials: %v", names))
+		doctorCheck(out, fail, true, fmt.Sprintf("instances: %v", names))
 	} else {
-		doctorCheck(out, fail, false, "no credentials — run: shell3 auth")
+		doctorCheck(out, fail, false, "no instances configured — run: shell3 auth")
 	}
 
 	_, err = secrets.Load(homeDir)
