@@ -7,7 +7,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	// Self-registering adapter. init() calls llm.Register.
+	// Self-registering adapters. init() calls llm.Register.
+	_ "github.com/weatherjean/shell3/internal/adapter/anthropic"
 	_ "github.com/weatherjean/shell3/internal/adapter/openai"
 
 	"github.com/weatherjean/shell3/internal/patchapp"

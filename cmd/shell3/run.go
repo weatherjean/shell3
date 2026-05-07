@@ -108,10 +108,6 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	if instance == "" {
 		return fmt.Errorf("no provider configured — run: shell3 auth")
 	}
-	prov, ok := llm.Get("openai")
-	if !ok {
-		return fmt.Errorf("openai adapter not registered")
-	}
 
 	noBash := pCfg.NoBash || f.noBash
 	noMemory := pCfg.NoMemory || f.noMemory
@@ -217,11 +213,19 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		models = []chat.ModelChoice{{Provider: instance, Model: model}}
 	}
 
-	buildClient := func(inst, m string) (chat.LLMClient, error) {
-		return prov.NewClient(ctx, authStore, inst, m)
+	buildClient := func(instName, m string) (chat.LLMClient, error) {
+		instCfg, ok := authStore.Get(instName)
+		if !ok {
+			return nil, fmt.Errorf("no instance %q in auth store", instName)
+		}
+		p, ok := llm.Get(instCfg.Type)
+		if !ok {
+			return nil, fmt.Errorf("unknown adapter type %q for instance %q — set type to \"openai\" or \"anthropic\"", instCfg.Type, instName)
+		}
+		return p.NewClient(ctx, authStore, instName, m)
 	}
 
-	streamer, err := prov.NewClient(ctx, authStore, instance, model)
+	streamer, err := buildClient(instance, model)
 	if err != nil {
 		return err
 	}
