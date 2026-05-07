@@ -435,6 +435,13 @@ Two adapter types are built in: `openai` (any OpenAI-compatible endpoint) and `a
 | OpenRouter| openai    | https://openrouter.ai/api/v1      | sk-or-...      |
 | Anthropic | anthropic | (omit; uses default)              | ant-...        |
 
+**`base_url` path conventions differ by adapter:**
+
+- `type: openai` — `base_url` should include the `/v1` segment (e.g. `https://api.openai.com/v1`). The SDK appends paths like `/chat/completions` to it.
+- `type: anthropic` — `base_url` should **not** include `/v1`. The SDK appends `/v1/messages` itself. Example for an Anthropic-shaped proxy at `https://example.com/proxy/v1/messages`: set `base_url: https://example.com/proxy`.
+
+A 404 with a doubled path (e.g. `/v1/v1/messages`) means the base_url has `/v1` and the adapter is appending it again — strip it.
+
 ### Codex (ChatGPT subscription)
 
 OpenAI Codex uses OAuth, not a static API key, so shell3 does not support it natively. Run the third-party [openai-oauth](https://github.com/EvanZhouDev/openai-oauth) proxy locally — it exposes Codex as a standard OpenAI-compatible endpoint:
