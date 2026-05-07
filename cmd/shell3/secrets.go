@@ -85,12 +85,8 @@ func openSecretsInEditor(path string) error {
 		template := `# Shell3 Secrets
 # AI ASSISTANTS: Do not read this file. It contains secrets.
 
-secrets: {}
-
-# Example:
-# secrets:
-#   BRAVE_API_KEY: BSAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-#   GITHUB_TOKEN: ghp_your_token_here
+secrets:
+  BRAVE_API_KEY: your-brave-api-key-here
 `
 		if err := os.WriteFile(path, []byte(template), 0600); err != nil {
 			return fmt.Errorf("create secrets file: %w", err)
