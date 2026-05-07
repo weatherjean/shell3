@@ -224,10 +224,8 @@ db: ~                            # SQLite path override (~ = ~/.shell3/projects/
 
 # LLM request parameters
 parameters:
-  reasoning_effort: medium       # none|minimal|low|medium|high|xhigh
-  reasoning_summary: auto        # auto|concise|detailed|off
-  verbosity: medium              # low|medium|high
-  parallel_tool_calls: true
+  reasoning_effort: medium       # none|minimal|low|medium|high|xhigh — anthropic maps onto thinking budget; openai clamps xhigh→high
+  parallel_tool_calls: true      # openai only; anthropic ignores
   temperature: ~                 # ~ to leave provider default
   max_tokens: 16000              # max output tokens (anthropic requires; openai sets MaxCompletionTokens)
 

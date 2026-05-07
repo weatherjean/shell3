@@ -14,8 +14,6 @@ skills:
 # tools: [tool-name]     # allowlist for user tools; empty = load all from .shell3/tools/
 parameters:
   reasoning_effort: medium
-  reasoning_summary: auto
-  verbosity: medium
   parallel_tool_calls: true
   max_tokens: 16000
 on_session_start: ~              # fire-and-forget; runs once when session opens
