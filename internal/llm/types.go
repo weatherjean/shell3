@@ -35,10 +35,13 @@ type Message struct {
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	Name       string     `json:"name,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	// ReasoningContent holds the model's chain-of-thought when the
-	// provider exposes one (Moonshot/kimi, DeepSeek). Required to be
-	// echoed back on assistant tool-call messages by Moonshot when
-	// thinking mode is enabled, otherwise the next request 400s.
+	// ReasoningContent holds non-standard chain-of-thought text some
+	// OpenAI-compatible providers emit (Moonshot/kimi, DeepSeek). The
+	// openai adapter populates it from streaming and echoes it back on
+	// the next turn — Moonshot 400s when thinking mode is enabled and
+	// the assistant tool-call message lacks reasoning_content. The
+	// anthropic adapter ignores this field; Anthropic uses its own
+	// thinking blocks.
 	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 

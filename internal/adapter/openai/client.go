@@ -19,7 +19,8 @@ import (
 )
 
 // bodyTap is an http.RoundTripper that records the last request/response and
-// extracts the OpenRouter-style "reasoning" field from SSE streams (Moonshot/kimi).
+// extracts non-standard reasoning fields from SSE streams: OpenRouter's
+// "reasoning" and Moonshot/DeepSeek's "reasoning_content".
 type bodyTap struct {
 	mu               sync.Mutex
 	reqBody          []byte

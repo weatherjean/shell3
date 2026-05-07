@@ -30,11 +30,16 @@ command: 'echo "hello $WHO"'
 	if err := os.WriteFile(filepath.Join(toolsDir, "greet.yaml"), []byte(yaml), 0644); err != nil {
 		t.Fatal(err)
 	}
-	secStore, err := secrets.Load(dir)
-	if err != nil {
+	secretsDir := filepath.Join(dir, ".shell3")
+	if err := os.MkdirAll(secretsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := secStore.Set("IGNORED", "v"); err != nil {
+	secretsYAML := "secrets:\n  IGNORED: v\n"
+	if err := os.WriteFile(filepath.Join(secretsDir, "ai-do-not-read.secrets.yaml"), []byte(secretsYAML), 0600); err != nil {
+		t.Fatal(err)
+	}
+	secStore, err := secrets.Load(dir)
+	if err != nil {
 		t.Fatal(err)
 	}
 	envMap := secStore.All()

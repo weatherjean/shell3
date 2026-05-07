@@ -28,7 +28,7 @@ func TestStore_MemoryUpsert_InsertAndUpdate(t *testing.T) {
 	if err := st.MemoryUpsert("k", "v2", nil); err != nil {
 		t.Fatal(err)
 	}
-	results, _ := st.MemoryQuery("", false, 10)
+	results, _ := st.MemoryQuery(false, 10)
 	if len(results) != 1 || results[0].Value != "v2" {
 		t.Fatalf("expected single row v2, got %+v", results)
 	}
@@ -42,7 +42,7 @@ func TestStore_MemoryUpsert_EmptyValueDeletes(t *testing.T) {
 	if err := st.MemoryUpsert("k", "", nil); err != nil {
 		t.Fatal(err)
 	}
-	results, _ := st.MemoryQuery("", false, 10)
+	results, _ := st.MemoryQuery(false, 10)
 	if len(results) != 0 {
 		t.Fatalf("expected 0 rows after empty-value delete, got %d", len(results))
 	}
@@ -54,7 +54,7 @@ func TestStore_MemoryUpsert_CorePreservedOnUpdate(t *testing.T) {
 
 	_ = st.MemoryUpsert("k", "v1", boolPtr(true))
 	_ = st.MemoryUpsert("k", "v2", nil) // core omitted
-	results, _ := st.MemoryQuery("", false, 10)
+	results, _ := st.MemoryQuery(false, 10)
 	if len(results) != 1 || !results[0].Core {
 		t.Fatalf("expected core preserved on update, got %+v", results)
 	}
@@ -66,7 +66,7 @@ func TestStore_MemoryUpsert_CoreExplicitDemote(t *testing.T) {
 
 	_ = st.MemoryUpsert("k", "v1", boolPtr(true))
 	_ = st.MemoryUpsert("k", "v2", boolPtr(false))
-	results, _ := st.MemoryQuery("", false, 10)
+	results, _ := st.MemoryQuery(false, 10)
 	if len(results) != 1 || results[0].Core {
 		t.Fatalf("expected core=false after explicit demote, got %+v", results)
 	}
@@ -79,7 +79,7 @@ func TestStore_MemoryQuery_Search(t *testing.T) {
 	_ = st.MemoryUpsert("auth", "use JWT 1h expiry", nil)
 	_ = st.MemoryUpsert("deploy", "run migrations first", nil)
 
-	results, err := st.MemoryQuery("JWT", false, 5)
+	results, err := st.MemorySearchExpr(store.BuildFTSExpr([]string{"JWT"}, true), false, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestStore_MemoryQuery_CoreOnly(t *testing.T) {
 	_ = st.MemoryUpsert("c1", "core fact", boolPtr(true))
 	_ = st.MemoryUpsert("n1", "regular fact", nil)
 
-	results, _ := st.MemoryQuery("", true, 10)
+	results, _ := st.MemoryQuery(true, 10)
 	if len(results) != 1 || results[0].Key != "c1" {
 		t.Fatalf("expected only core entry, got %+v", results)
 	}
@@ -109,7 +109,7 @@ func TestStore_MemoryQuery_ListNewestFirst(t *testing.T) {
 	_ = st.MemoryUpsert("b", "2", nil)
 	_ = st.MemoryUpsert("c", "3", nil)
 
-	results, _ := st.MemoryQuery("", false, 10)
+	results, _ := st.MemoryQuery(false, 10)
 	if len(results) != 3 || results[0].Key != "c" {
 		t.Fatalf("expected newest-first c,b,a, got %+v", results)
 	}
@@ -214,7 +214,7 @@ func TestStore_HistorySearch_ReturnsLocator(t *testing.T) {
 	_ = st.AppendHistory(id, "assistant", "JWT_EXPIRY=3600")
 	_ = st.EndSession(id)
 
-	res, err := st.HistorySearch("JWT_EXPIRY", 5)
+	res, err := st.HistorySearchExpr(store.BuildFTSExpr([]string{"JWT_EXPIRY"}, true), 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +242,7 @@ func TestStore_HistorySearch_PunctuationSafe(t *testing.T) {
 	_ = st.AppendHistory(sid, "assistant", "use lipgloss for styling")
 	_ = st.EndSession(sid)
 
-	res, err := st.HistorySearch("cobra colorful cli ?", 10)
+	res, err := st.HistorySearchExpr(store.BuildFTSExpr([]string{"cobra", "colorful", "cli", "?"}, true), 10)
 	if err != nil {
 		t.Fatalf("search with `?` should not error: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestStore_MemoryQuery_PunctuationSafe(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	_ = st.MemoryUpsert("k", "JWT auth token spec", boolPtr(false))
 
-	res, err := st.MemoryQuery("JWT?", false, 5)
+	res, err := st.MemorySearchExpr(store.BuildFTSExpr([]string{"JWT?"}, true), false, 5)
 	if err != nil {
 		t.Fatalf("query with `?` should not error: %v", err)
 	}

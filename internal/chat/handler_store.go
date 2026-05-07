@@ -68,7 +68,7 @@ func storeMemoryList(rawArgs string, st *store.Store) string {
 		Limit    int  `json:"limit"`
 	}
 	_ = json.Unmarshal([]byte(rawArgs), &args)
-	results, err := st.MemoryQuery("", args.CoreOnly, args.Limit)
+	results, err := st.MemoryQuery(args.CoreOnly, args.Limit)
 	if err != nil {
 		return fmt.Sprintf("error: %v", err)
 	}

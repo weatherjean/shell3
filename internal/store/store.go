@@ -171,39 +171,30 @@ func (s *Store) MemoryUpsert(key, value string, core *bool) error {
 	return nil
 }
 
-// MemoryQuery returns memory entries.
-//
-//   - query == "" → list newest-first.
-//   - query != "" → FTS5 search ranked by BM25.
-//   - coreOnly filters to core entries.
-//   - limit caps results; pass <=0 for default 50.
-func (s *Store) MemoryQuery(query string, coreOnly bool, limit int) ([]MemoryEntry, error) {
+// MemoryQuery lists memory entries newest-first. coreOnly filters to core
+// entries. limit caps results; pass <=0 for default 50. For full-text
+// search use MemorySearchExpr.
+func (s *Store) MemoryQuery(coreOnly bool, limit int) ([]MemoryEntry, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-
 	var (
 		rows *sql.Rows
 		err  error
 	)
-	switch {
-	case query == "" && !coreOnly:
-		rows, err = s.db.Query(`
-			SELECT key, value, core, updated_at FROM memories
-			ORDER BY updated_at DESC, rowid DESC
-			LIMIT ?
-		`, limit)
-	case query == "" && coreOnly:
+	if coreOnly {
 		rows, err = s.db.Query(`
 			SELECT key, value, core, updated_at FROM memories
 			WHERE core = 1
 			ORDER BY updated_at DESC, rowid DESC
 			LIMIT ?
 		`, limit)
-	case query != "" && !coreOnly:
-		return s.MemorySearchExpr(sanitizeFTSQuery(query), false, limit)
-	default: // query != "" && coreOnly
-		return s.MemorySearchExpr(sanitizeFTSQuery(query), true, limit)
+	} else {
+		rows, err = s.db.Query(`
+			SELECT key, value, core, updated_at FROM memories
+			ORDER BY updated_at DESC, rowid DESC
+			LIMIT ?
+		`, limit)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: memory query: %w", err)
@@ -413,15 +404,6 @@ func (s *Store) HistoryGet(sessionID int64, chunk int) (HistoryGetResult, error)
 		res.SessionEndedAt, _ = time.Parse(time.RFC3339, endedAt.String)
 	}
 	return res, nil
-}
-
-// HistorySearch runs an FTS5 search over history content using a free-form
-// query string. The query is auto-sanitized via sanitizeFTSQuery (each
-// whitespace-separated token becomes a quoted phrase joined implicitly with
-// AND). For explicit OR/AND control over a list of terms, build the
-// expression with BuildFTSExpr and call HistorySearchExpr.
-func (s *Store) HistorySearch(query string, limit int) (HistorySearchResult, error) {
-	return s.HistorySearchExpr(sanitizeFTSQuery(query), limit)
 }
 
 // HistorySearchExpr runs an FTS5 search over history content using a

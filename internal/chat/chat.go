@@ -483,7 +483,7 @@ func registerSlashCommands(app slashTarget, cfg *Config, sess *session, lastUsag
 	})
 	app.RegisterSlash(patchapp.SlashCommand{
 		Name: "parameters",
-		Help: "/parameters [name value] — list or set tunable params (reasoning_effort, verbosity, ...)",
+		Help: "/parameters [name value] — list or set tunable params (reasoning_effort, max_tokens, ...)",
 		Handler: func(args string) {
 			describer, _ := cfg.LLM.(llm.ParamDescriber)
 			setter, _ := cfg.LLM.(llm.ParamSetter)

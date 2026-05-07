@@ -24,6 +24,7 @@ func newAuthCommand() *cobra.Command {
 Format:
   instances:
     - name: myinstance
+      type: openai          # "openai" or "anthropic"
       base_url: https://api.openai.com/v1
       api_key: sk-your-key-here
       models:

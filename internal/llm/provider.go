@@ -56,13 +56,3 @@ func Get(name string) (Provider, bool) {
 	return p, ok
 }
 
-// Registered returns the names of all registered providers.
-func Registered() []string {
-	registryMu.RLock()
-	defer registryMu.RUnlock()
-	out := make([]string, 0, len(registry))
-	for name := range registry {
-		out = append(out, name)
-	}
-	return out
-}

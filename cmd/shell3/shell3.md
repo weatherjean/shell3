@@ -185,7 +185,7 @@ Secrets are shared across all projects. Only the keys listed in a tool's `secret
 
 ### shell3 doctor
 
-Validate setup. Checks global dirs, credentials, secrets store, project `.ref`, meta.json, and default persona. Exit 0 when all checks pass.
+Validate setup. Checks global dirs, auth instances, secrets file, project `.ref`, meta.json, and default persona. Exit 0 when all checks pass.
 
 ```
 shell3 doctor

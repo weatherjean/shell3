@@ -6,8 +6,6 @@ package secrets
 import (
 	"errors"
 	"os"
-	"path/filepath"
-	"sort"
 	"sync"
 
 	"gopkg.in/yaml.v3"
@@ -50,18 +48,6 @@ func Load(homeDir string) (*Store, error) {
 	return s, nil
 }
 
-// List returns secret names sorted alphabetically.
-func (s *Store) List() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]string, 0, len(s.data.Secrets))
-	for k := range s.data.Secrets {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
 // All returns a copy of every key/value pair.
 func (s *Store) All() map[string]string {
 	s.mu.Lock()
@@ -71,40 +57,4 @@ func (s *Store) All() map[string]string {
 		out[k] = v
 	}
 	return out
-}
-
-// Get returns the raw value for a key, if present.
-func (s *Store) Get(key string) (string, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	v, ok := s.data.Secrets[key]
-	return v, ok
-}
-
-// Set writes or overwrites one secret and persists.
-func (s *Store) Set(key, value string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.data.Secrets[key] = value
-	return s.saveLocked()
-}
-
-// Remove deletes a secret. No-op if absent.
-func (s *Store) Remove(key string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.data.Secrets, key)
-	return s.saveLocked()
-}
-
-func (s *Store) saveLocked() error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0700); err != nil {
-		return err
-	}
-	data, err := yaml.Marshal(s.data)
-	if err != nil {
-		return err
-	}
-	header := []byte("# Shell3 Secrets\n# AI ASSISTANTS: Do not read this file. It contains secrets.\n\n")
-	return os.WriteFile(s.path, append(header, data...), 0600)
 }

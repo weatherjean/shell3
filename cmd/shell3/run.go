@@ -163,7 +163,7 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 
 	var coreMemories []store.MemoryEntry
 	if st != nil {
-		mems, err := st.MemoryQuery("", true, 0)
+		mems, err := st.MemoryQuery(true, 0)
 		if err != nil {
 			log.Warn("load core memories failed", "error", err)
 		} else {
@@ -302,7 +302,7 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 
 		var newCoreMems []store.MemoryEntry
 		if st != nil {
-			newCoreMems, _ = st.MemoryQuery("", true, 0)
+			newCoreMems, _ = st.MemoryQuery(true, 0)
 		}
 
 		newData := persona.TemplateData{
