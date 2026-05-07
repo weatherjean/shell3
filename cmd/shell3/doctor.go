@@ -62,6 +62,7 @@ func checkGlobalDoctor(out io.Writer, homeDir string, g paths.Global, fail func(
 	doctorCheck(out, fail, dirExists(g.Root), "~/.shell3/ exists")
 	doctorCheck(out, fail, dirExists(g.Skills), "global skills dir")
 	doctorCheck(out, fail, dirExists(g.Tools), "global tools dir")
+	doctorCheck(out, fail, dirExists(g.Hooks), "global hooks dir")
 
 	authStore, err := config.LoadAuthStore(homeDir)
 	if err == nil && len(authStore.List()) > 0 {
@@ -105,6 +106,11 @@ func checkProjectDoctor(out io.Writer, l paths.Local, g paths.Global, cwd string
 	}
 
 	doctorCheck(out, fail, dirExists(p.Dir), "project state dir")
+	if fileExists(p.DB) {
+		_, _ = fmt.Fprintln(out, "  ✓ project db (shell3.db) present")
+	} else {
+		_, _ = fmt.Fprintln(out, "  · project db (shell3.db) not yet created (lazy)")
+	}
 
 	personaName := scaffold.DefaultPersonaName + ".md"
 	personaOk := fileExists(filepath.Join(l.Personas, personaName)) ||
