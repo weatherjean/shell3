@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/weatherjean/shell3/internal/llm"
 )
@@ -34,7 +35,44 @@ func handlePruneToolResultFrom(rawArgs string, slices ...[]llm.Message) string {
 		return "error: reason required"
 	}
 	stem := fmt.Sprintf("pruned: %s", args.Reason)
-	return pruneByID(args.ToolCallID, stem, slices...)
+	// Scope model-driven prune to current + previous turn. The further back
+	// the mutation lands, the more downstream turns must be re-processed on
+	// the next request — capping the scope keeps that re-processing bounded.
+	// Users can still prune any id via the /prune slash command, which
+	// bypasses this scope.
+	scoped := make([][]llm.Message, 0, len(slices))
+	for _, s := range slices {
+		scoped = append(scoped, lastNTurns(s, 2))
+	}
+	out := pruneByID(args.ToolCallID, stem, scoped...)
+	if strings.HasPrefix(out, "error: no tool result with id") {
+		// Distinguish out-of-scope from truly-absent by re-checking full slices.
+		for _, s := range slices {
+			for i := range s {
+				if s[i].Role == llm.RoleTool && s[i].ToolCallID == args.ToolCallID {
+					return fmt.Sprintf("error: tool result %q is older than the last 2 turns and cannot be pruned.", args.ToolCallID)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// lastNTurns returns the suffix of msgs starting at the n-th-from-last user
+// message. A "turn" is bounded by user messages. If fewer than n user
+// messages exist, the whole slice is returned. The returned slice shares
+// the backing array with msgs, so element mutations propagate.
+func lastNTurns(msgs []llm.Message, n int) []llm.Message {
+	seen := 0
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == llm.RoleUser {
+			seen++
+			if seen == n {
+				return msgs[i:]
+			}
+		}
+	}
+	return msgs
 }
 
 func pruneByID(toolCallID, stem string, slices ...[]llm.Message) string {

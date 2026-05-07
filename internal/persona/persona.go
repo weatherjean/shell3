@@ -199,7 +199,8 @@ var docsTool = ToolDef{
 var pruneToolResultTool = ToolDef{
 	Name: "prune_tool_result",
 	Description: "Replace a prior tool result with a short stub to free context. " +
-		"Use whenever a result is no longer needed — any size, any content. " +
+		"Use whenever a result is no longer needed. " +
+		"Scoped to the last 2 turns; older results return an out-of-scope error. " +
 		"Copy the id from the result's `[tool_call_id=<id>]` header into tool_call_id.",
 	Parameters: map[string]any{
 		"type": "object",

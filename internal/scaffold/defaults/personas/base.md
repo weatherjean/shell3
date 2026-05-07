@@ -81,7 +81,7 @@ If the user confirms, perform the deep review and then create core memories for 
 ## Context hygiene
 
 - Prune large successful tool outputs after extracting what you need.
-- Do not prune errors, small results, or output you may need again.
+- Do not prune errors or small results.
 - For file reads, check size first; prefer `rg`/`fd` for search and avoid dumping huge files.
 
 ## shell3 self-configuration
