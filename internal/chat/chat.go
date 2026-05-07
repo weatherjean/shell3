@@ -11,7 +11,6 @@ import (
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/hooks"
 	"github.com/weatherjean/shell3/internal/llm"
-	"github.com/weatherjean/shell3/internal/models"
 	"github.com/weatherjean/shell3/internal/patchapp"
 	"github.com/weatherjean/shell3/internal/patchmd"
 	"github.com/weatherjean/shell3/internal/patchtui"
@@ -22,8 +21,19 @@ import (
 
 // ModelChoice pairs a provider name with one of its models.
 type ModelChoice struct {
-	Provider string
-	Model    string
+	Provider      string
+	Model         string
+	ContextWindow int
+}
+
+// contextWindowFor returns the context window for a model ID from the models list.
+func contextWindowFor(models []ModelChoice, id string) int {
+	for _, m := range models {
+		if m.Model == id {
+			return m.ContextWindow
+		}
+	}
+	return 0
 }
 
 // LLMClient is the streaming LLM interface.
@@ -78,6 +88,9 @@ func NewHandlers(cfg Config) map[string]ToolHandler {
 // RunInteractive runs the TUI chat loop. Blocks until the user quits.
 func RunInteractive(ctx context.Context, cfg Config) error {
 	sess := &session{}
+	sess.reminders.contextWindowFor = func(id string) int {
+		return contextWindowFor(cfg.Models, id)
+	}
 
 	if cfg.Store != nil {
 		sessionID, err := cfg.Store.StartSession()
@@ -103,7 +116,7 @@ func RunInteractive(ctx context.Context, cfg Config) error {
 		ActiveTools:  cfg.ActiveTools,
 	})
 	if _, initModel := splitStatus(cfg.StatusLine); initModel != "" {
-		app.SetContextWindow(models.ContextWindow(initModel))
+		app.SetContextWindow(contextWindowFor(cfg.Models, initModel))
 	}
 	cfg.Hooks.SetReleaser(app)
 	cfg.Hooks.OnSessionStart(ctx)
@@ -404,7 +417,7 @@ func registerSlashCommands(app slashTarget, cfg *Config, sess *session, lastUsag
 			}
 			cfg.StatusLine = formatStatus(choice.Provider, choice.Model, cfg.Params.ReasoningEffort)
 			app.SetStatus(cfg.StatusLine)
-			app.SetContextWindow(models.ContextWindow(choice.Model))
+			app.SetContextWindow(choice.ContextWindow)
 			dim(fmt.Sprintf("[model: %s/%s]", choice.Provider, choice.Model))
 		},
 	})

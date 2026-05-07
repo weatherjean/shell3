@@ -14,6 +14,14 @@ const (
 	statusGPT4o  = "openai │ gpt-4o"            // 128k token window
 )
 
+var testContextWindowFor = func(m string) int {
+	return map[string]int{
+		"claude-sonnet-4-6": 1_000_000,
+		"claude-opus-4-7":   1_000_000,
+		"gpt-4o":            128_000,
+	}[m]
+}
+
 func TestReminderTracker_NoEmitOnFirstTurn(t *testing.T) {
 	var r reminderTracker
 	got := r.check(statusSonnet, 0)
@@ -24,6 +32,7 @@ func TestReminderTracker_NoEmitOnFirstTurn(t *testing.T) {
 
 func TestReminderTracker_ContextBucket(t *testing.T) {
 	var r reminderTracker
+	r.contextWindowFor = testContextWindowFor
 	r.lastModel = "claude-sonnet-4-6"
 	r.lastContextPct = 0
 	r.lastTokens = 1000
@@ -43,6 +52,7 @@ func TestReminderTracker_ContextBucket(t *testing.T) {
 
 func TestReminderTracker_NoRepeatSameBucket(t *testing.T) {
 	var r reminderTracker
+	r.contextWindowFor = testContextWindowFor
 	r.lastModel = "claude-sonnet-4-6"
 	r.lastContextPct = 10
 	r.lastTokens = 110_000
@@ -88,9 +98,10 @@ func TestReminderTracker_30kDeltaThreshold(t *testing.T) {
 	// Delta check: tokenDelta >= 30000 && lastContextPct > 0 → also FALSE (lastContextPct=0).
 	// So we need lastContextPct > 0 for pure delta test.
 	r2 := reminderTracker{
-		lastModel:      "claude-sonnet-4-6",
-		lastContextPct: 10,
-		lastTokens:     100_000,
+		contextWindowFor: testContextWindowFor,
+		lastModel:        "claude-sonnet-4-6",
+		lastContextPct:   10,
+		lastTokens:       100_000,
 	}
 	got := r2.check(statusSonnet, 130_001) // delta = 30001, still bucket 10 (13%)
 	if got == "" {

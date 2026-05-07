@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/weatherjean/shell3/internal/llm"
-	"github.com/weatherjean/shell3/internal/models"
 )
 
 // session holds the in-progress conversation history.
@@ -35,9 +34,10 @@ func (s *session) allocToolCallID() string {
 // reminderTracker decides when to emit <system-reminder> injections and
 // remembers what was last sent so we don't repeat unchanged state.
 type reminderTracker struct {
-	lastContextPct int    // last 10%-bucket emitted (0 = never emitted)
-	lastModel      string // model name present in last emitted reminder
-	lastTokens     int    // prompt tokens at last emission (persists across turns)
+	lastContextPct   int    // last 10%-bucket emitted (0 = never emitted)
+	lastModel        string // model name present in last emitted reminder
+	lastTokens       int    // prompt tokens at last emission (persists across turns)
+	contextWindowFor func(string) int
 }
 
 // check returns a formatted <system-reminder> block if any condition warrants
@@ -48,7 +48,10 @@ type reminderTracker struct {
 // promptTokens is the most recent prompt token count (0 = unknown).
 func (r *reminderTracker) check(statusLine string, promptTokens int) string {
 	_, model := splitStatus(statusLine)
-	contextWindow := models.ContextWindow(model)
+	contextWindow := 0
+	if r.contextWindowFor != nil {
+		contextWindow = r.contextWindowFor(model)
+	}
 
 	var lines []string
 
