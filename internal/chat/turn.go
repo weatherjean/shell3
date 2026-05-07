@@ -166,7 +166,9 @@ func runTurn(ctx context.Context, cfg TurnConfig, sess *session, userMsg llm.Mes
 		}
 
 		// Execute tool calls.
-		for _, tc := range toolCalls {
+		var cancelled bool
+		var cancelReason string
+		for idx, tc := range toolCalls {
 			if ctx.Err() != nil {
 				return
 			}
@@ -179,9 +181,9 @@ func runTurn(ctx context.Context, cfg TurnConfig, sess *session, userMsg llm.Mes
 				if hookReason == "" {
 					hookReason = "user cancelled"
 				}
-				ch <- patchapp.AppendEvent{Text: patchtui.Dim + "[turn cancelled by user: " + hookReason + "]" + patchtui.Reset + "\n\n"}
-				ch <- patchapp.TurnDoneEvent{Usage: totalUsage}
-				return
+				cancelled = true
+				cancelReason = hookReason
+				out = fmt.Sprintf("USER CANCELLED the turn before this %s call ran. Reason: %s. Subsequent tool calls in this turn were not executed.", tc.Name, hookReason)
 			} else if decision == hooks.ToolCallDeny {
 				if hookReason == "" {
 					hookReason = "no reason given"
@@ -267,6 +269,30 @@ func runTurn(ctx context.Context, cfg TurnConfig, sess *session, userMsg llm.Mes
 			}
 			allMsgs = append(allMsgs, toolMsg)
 			sess.append(toolMsg)
+
+			if cancelled {
+				// Append synthetic results for any tool_calls we never reached
+				// so the assistant message's tool_calls list has matching
+				// tool_call_id results in history. Without this the next turn
+				// 400s on providers that strictly validate the pairing.
+				for _, rem := range toolCalls[idx+1:] {
+					stub := llm.Message{
+						Role:       llm.RoleTool,
+						Content:    fmt.Sprintf("[tool_call_id=%s]\nNot executed — turn cancelled by user.", rem.ID),
+						ToolCallID: rem.ID,
+						Name:       rem.Name,
+					}
+					allMsgs = append(allMsgs, stub)
+					sess.append(stub)
+				}
+				break
+			}
+		}
+
+		if cancelled {
+			ch <- patchapp.AppendEvent{Text: patchtui.Dim + "[turn cancelled by user: " + cancelReason + "]" + patchtui.Reset + "\n\n"}
+			ch <- patchapp.TurnDoneEvent{Usage: totalUsage}
+			return
 		}
 
 		if ctx.Err() != nil {
