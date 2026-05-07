@@ -72,6 +72,7 @@ instances:
   - `message_start` / `message_delta` → token usage
 - Message builders: `NewUserMessage`, `NewAssistantMessage`, `NewTextBlock`, `NewToolUseBlock`, `NewToolResultBlock`.
 - Extended thinking: `anthropic.ThinkingConfigParamOfEnabled(int64(budget))`. Plumbed via new `RequestParams.ThinkingBudget int`.
+- `MaxTokens` required by Anthropic API. Sourced from `RequestParams.MaxTokens` (new field, vendor-neutral, default 16000). Settable per-persona.
 - **Tool result grouping**: consecutive `RoleTool` messages collapse into one user message with multiple `tool_result` blocks (Anthropic requires this).
 
 ### `cmd/shell3/run.go` (dispatch refactor)
@@ -127,7 +128,7 @@ Chat loop is unchanged. Stream events emitted by either adapter use the existing
 ## Risks
 
 - **Tool-call IDs across providers.** OpenAI uses `call_…`, Anthropic uses `toolu_…`. shell3's chat loop already round-trips opaque IDs, so no breakage expected, but smoke test must verify a tool-using turn on Anthropic.
-- **Anthropic `MaxTokens` is required.** Hard-coded to 8192 in initial cut. Future task: surface as a persona param.
+- **Anthropic `MaxTokens` is required.** Surfaced as vendor-neutral persona param `max_tokens` (default 16000, double Cursor's 8k baseline since shell3 is a coding agent that emits long diffs and multi-file changes). Plumbed to anthropic `MaxTokens` and openai `MaxCompletionTokens`.
 - **bodyTap and the official SDK.** The official SDK respects `option.WithHTTPClient`, but its Transport injection path is less battle-tested than `sashabaranov`. Existing `bodyTap` tests stay green only because they exercise `bodyTap` in isolation; integration is verified by the smoke test.
 
 ## Out of Scope

@@ -1068,19 +1068,95 @@ func toAnthropicTools(tools []llm.ToolDefinition) []anthropic.ToolParam {
 }
 ```
 
-- [ ] **Step 5: Add `ThinkingBudget` to `llm.RequestParams`**
+- [ ] **Step 5: Add `ThinkingBudget` and `MaxTokens` to `llm.RequestParams`**
 
 In `internal/llm/types.go` (or wherever `RequestParams` is defined), add:
 
 ```go
 ThinkingBudget int // anthropic extended thinking budget tokens (0 = disabled)
+MaxTokens      int // max output tokens (0 = adapter default)
 ```
 
-And update `Merge` to handle it if it uses field-by-field merging (zero value means "not set"):
+Update `Merge` (zero value means "not set"):
 
 ```go
 if p.ThinkingBudget > 0 {
     out.ThinkingBudget = p.ThinkingBudget
+}
+if p.MaxTokens > 0 {
+    out.MaxTokens = p.MaxTokens
+}
+```
+
+Default `RequestParams` value (wherever defaults are set, e.g. persona loader or adapter `NewClient`) gets `MaxTokens: 16000`.
+
+In anthropic `client.go` `Stream`, replace `MaxTokens: 8192` with:
+
+```go
+maxTok := int64(c.params.MaxTokens)
+if maxTok <= 0 {
+    maxTok = 16000
+}
+params := anthropic.MessageNewParams{
+    Model:     anthropic.Model(c.model),
+    Messages:  history,
+    MaxTokens: maxTok,
+}
+```
+
+In openai `client.go` `Stream`, after temperature handling add:
+
+```go
+if c.params.MaxTokens > 0 {
+    params.MaxCompletionTokens = openai.Int(int64(c.params.MaxTokens))
+}
+```
+
+Add `max_tokens` to both adapters' `ParamSpecs()` returns:
+
+```go
+{Name: "max_tokens", Default: "16000"},
+```
+
+Append to `internal/scaffold/defaults/personas/base.md` parameters block:
+
+```yaml
+parameters:
+  reasoning_effort: medium
+  reasoning_summary: auto
+  verbosity: medium
+  parallel_tool_calls: true
+  max_tokens: 16000
+  thinking_budget: 0
+```
+
+In `internal/persona/persona.go`, extend `PersonaParams`:
+
+```go
+type PersonaParams struct {
+    ReasoningEffort   string   `yaml:"reasoning_effort"`
+    ReasoningSummary  string   `yaml:"reasoning_summary"`
+    Verbosity         string   `yaml:"verbosity"`
+    ParallelToolCalls *bool    `yaml:"parallel_tool_calls"`
+    Temperature       *float64 `yaml:"temperature"`
+    MaxTokens         int      `yaml:"max_tokens"`
+    ThinkingBudget    int      `yaml:"thinking_budget"`
+}
+```
+
+Update `ToRequestParams`:
+
+```go
+func (pp PersonaParams) ToRequestParams() llm.RequestParams {
+    return llm.RequestParams{
+        ReasoningEffort:   pp.ReasoningEffort,
+        ReasoningSummary:  pp.ReasoningSummary,
+        Verbosity:         pp.Verbosity,
+        ParallelToolCalls: pp.ParallelToolCalls,
+        Temperature:       pp.Temperature,
+        MaxTokens:         pp.MaxTokens,
+        ThinkingBudget:    pp.ThinkingBudget,
+    }
 }
 ```
 
