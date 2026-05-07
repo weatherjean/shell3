@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/weatherjean/shell3/internal/config"
 	"github.com/weatherjean/shell3/internal/paths"
@@ -102,6 +106,10 @@ instances:
 		}
 	}
 
+	if useSystemOpen(path) {
+		return nil
+	}
+
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
 		editor = os.Getenv("VISUAL")
@@ -115,4 +123,29 @@ instances:
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// useSystemOpen prompts the user to choose terminal or system editor when a
+// TTY is available. Returns true if the file was opened with the system opener.
+func useSystemOpen(path string) bool {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return false
+	}
+	fmt.Fprint(os.Stderr, "Open in [t]erminal or [s]ystem editor? ")
+	scanner := bufio.NewScanner(os.Stdin)
+	if !scanner.Scan() {
+		return false
+	}
+	choice := strings.ToLower(strings.TrimSpace(scanner.Text()))
+	if !strings.HasPrefix(choice, "s") {
+		return false
+	}
+	opener := "xdg-open"
+	if runtime.GOOS == "darwin" {
+		opener = "open"
+	}
+	cmd := exec.Command(opener, path)
+	cmd.Stderr = os.Stderr
+	_ = cmd.Start()
+	return true
 }
