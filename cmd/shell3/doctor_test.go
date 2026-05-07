@@ -2,10 +2,10 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/bootstrap"
-	"github.com/weatherjean/shell3/internal/config"
 	"github.com/weatherjean/shell3/internal/paths"
 )
 
@@ -18,16 +18,25 @@ func TestDoctorAllGreen(t *testing.T) {
 	_ = bootstrap.EnsureGlobal(g)
 	_, _ = bootstrap.EnsureProject(l, g, cwd)
 
-	cs, _ := config.LoadCredStore(home)
-	_ = cs.Set("test", "openai", map[string]string{"api_key": "sk-test"})
+	authYAML := `instances:
+  - name: test
+    base_url: https://api.openai.com/v1
+    api_key: sk-test
+    models:
+      - id: gpt-4o
+        context_window: 128000
+`
+	if err := os.WriteFile(g.Auth, []byte(authYAML), 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	var out bytes.Buffer
 	code := runDoctor(home, cwd, &out)
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d\noutput:\n%s", code, out.String())
 	}
-	if !bytes.Contains(out.Bytes(), []byte("credentials")) {
-		t.Errorf("output missing credentials check:\n%s", out.String())
+	if !bytes.Contains(out.Bytes(), []byte("instances")) {
+		t.Errorf("output missing instances check:\n%s", out.String())
 	}
 }
 
@@ -45,8 +54,8 @@ func TestDoctorMissingCredentials(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("expected non-zero exit, got 0\noutput:\n%s", out.String())
 	}
-	if !bytes.Contains(out.Bytes(), []byte("no credentials")) {
-		t.Errorf("expected 'no credentials' in output:\n%s", out.String())
+	if !bytes.Contains(out.Bytes(), []byte("no instances")) {
+		t.Errorf("expected 'no instances' in output:\n%s", out.String())
 	}
 }
 

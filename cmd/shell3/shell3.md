@@ -11,12 +11,12 @@ shell3 uses a two-tier directory structure.
 **Global** (`~/.shell3/`) — shared across all projects:
 ```
 ~/.shell3/
-├── credentials.shell3   # adapter credentials (XOR-obfuscated)
-├── secrets.shell3       # user secrets / API keys (XOR-obfuscated)
-├── personas/            # global personas (e.g. base.md)
-├── tools/               # global user-defined tools
-├── skills/              # global skills
-├── hooks/               # global hook scripts
+├── ai-do-not-read.auth.yaml     # provider instances (plain YAML) — DO NOT READ
+├── ai-do-not-read.secrets.yaml  # user-tool secrets (plain YAML) — DO NOT READ
+├── personas/                    # global personas (e.g. base.md)
+├── tools/                       # global user-defined tools
+├── skills/                      # global skills
+├── hooks/                       # global hook scripts
 └── projects/
     └── <uuid>/          # per-project state
         ├── shell3.db    # SQLite (memory + history)
@@ -51,8 +51,8 @@ The repository includes copyable example configurations under `examples/`. The c
 ```bash
 cd ~/.shell3
 git init
-# credentials.shell3 and secrets.shell3 are sensitive — keep them out
-echo -e "credentials.shell3\nsecrets.shell3\nprojects/" > .gitignore
+# credential and secret files are sensitive — keep them out
+echo -e "ai-do-not-read.*\nprojects/" > .gitignore
 git add .
 git commit -m "init global shell3 config"
 git remote add origin <your-repo>
@@ -65,10 +65,10 @@ On the new machine:
 # If ~/.shell3/ already exists (shell3 was run once), remove it first
 rm -rf ~/.shell3
 git clone <your-repo> ~/.shell3
-shell3   # bootstraps credentials fresh; personas/tools/skills arrive from git
+shell3   # bootstraps fresh; personas/tools/skills arrive from git
 ```
 
-`projects/` (SQLite DBs, session history) is machine-local and excluded. Credentials and secrets must be set up fresh on each machine via `shell3 auth` and `shell3 secrets set`.
+`projects/` (SQLite DBs, session history) is machine-local and excluded. Auth and secrets must be set up fresh on each machine via `shell3 auth` and `shell3 secrets`.
 
 ---
 
@@ -139,50 +139,43 @@ User-defined tools appear after the built-ins. Memory and history are stored per
 
 ### shell3 auth
 
-Configure adapter credentials. With no flags, presents an adapter menu and prompts for any required fields. Credentials are stored at `~/.shell3/credentials.shell3` (XOR-obfuscated).
+Open `~/.shell3/ai-do-not-read.auth.yaml` in `$EDITOR` to configure provider instances. Format:
+
+```yaml
+instances:
+  - name: myinstance
+    base_url: https://api.openai.com/v1
+    api_key: sk-your-key-here
+    models:
+      - id: gpt-4o
+        context_window: 128000
+      - id: gpt-4o-mini
+        context_window: 128000
+```
 
 ```
-shell3 auth                                          # interactive: pick adapter, configure instance
-shell3 auth --provider=openai                        # configure an OpenAI-compatible instance
-shell3 auth --provider=openai --instance=ollama-local
-shell3 auth --provider=codex                         # OAuth browser flow (single-instance)
-
-shell3 auth list                                     # list configured instances + their models
-shell3 auth remove <instance>                        # delete one instance
-shell3 auth models <instance>                        # show current default_model CSV
-shell3 auth models <instance> "a,b,c"                # replace default_model CSV
-shell3 auth models <instance> ""                     # clear; adapter built-in list applies
+shell3 auth        # open file in $EDITOR
+shell3 auth list   # list configured instances
 ```
 
-**Concepts:**
-- **Adapter** — code path for talking to a backend (`openai`, `codex`).
-- **Instance** — one user-configured set of credentials for an adapter. The OpenAI-compatible adapter supports many instances (e.g. `ollama-local`, `openrouter-prod`, `openai-prod`). Codex is single-instance (always named `codex`).
-- **default_model** — comma-separated list of models the persona's `/model` picker cycles through. First entry is the default.
-
-**Storage format.** The credential file is wrapped with a fixed XOR + base64 layer behind a magic header. **This is obfuscation, not encryption.** It defends against accidental disclosure to LLM tools that walk your home directory and read files verbatim. Anyone with shell access (or this source tree) can reverse it trivially. Store actual high-value secrets in your OS keyring or a dedicated secret manager.
-
-If `~/.shell3/credentials.yaml` or `~/.shell3/codex_tokens.json` exists from an older shell3, the first run automatically migrates them into `credentials.shell3` and renames the old file to `*.bak`.
-
-### Adapters
-
-shell3 ships with two adapters; new adapters live under `internal/adapters/<name>` and self-register via `init()`:
-
-| Adapter  | Instance count | Auth                                | Models                                                  |
-|----------|----------------|-------------------------------------|---------------------------------------------------------|
-| `openai` | many           | base URL + API key + default model  | per-instance `default_model` CSV                        |
-| `codex`  | one            | OAuth (ChatGPT subscription)        | per-instance `default_model` CSV; falls back to builtin |
-
-Pass an instance name via the persona's `provider:` field, or override at runtime with `--provider`. For single-instance adapters, instance name equals the adapter name.
+Any OpenAI-compatible endpoint works: OpenAI, Ollama, Groq, LM Studio, OpenRouter, etc. The `name` field is what you pass to `--provider`. The first model in `models` is the default; add more for `/model` switching.
 
 ### shell3 secrets
 
-Manage global secrets (API keys for user-defined tools). Secrets are stored at `~/.shell3/secrets.shell3` (XOR-obfuscated), shared across all projects.
+Open `~/.shell3/ai-do-not-read.secrets.yaml` in `$EDITOR` to manage tool secrets. Format:
+
+```yaml
+secrets:
+  BRAVE_API_KEY: sk-...
+  MY_API_KEY: abc123
+```
 
 ```
-shell3 secrets set --key BRAVE_API_KEY --secret sk-...
-shell3 secrets list
-shell3 secrets remove --key BRAVE_API_KEY
+shell3 secrets        # open file in $EDITOR
+shell3 secrets list   # list names (values masked)
 ```
+
+Secrets are shared across all projects. Only the keys listed in a tool's `secrets:` field are exposed to that tool.
 
 ### shell3 doctor
 
@@ -257,7 +250,7 @@ on_tool_call:
   needs_tty: true
 ```
 
-**Provider resolution.** If the persona's `provider` is `~`, shell3 picks the first provider from `~/.shell3/credentials.shell3`. Set it explicitly to avoid surprises when multiple providers are configured.
+**Provider resolution.** If the persona's `provider` is `~`, shell3 picks the first instance from `~/.shell3/ai-do-not-read.auth.yaml`. Set it explicitly to avoid surprises when multiple instances are configured.
 
 **`needs_tty: true`** releases the TUI so the hook can read from the terminal (prompts, fzf, etc.). Without it, hooks run silently in the background — no TUI flash.
 
@@ -307,7 +300,7 @@ Drop YAML files into `~/.shell3/tools/` (global) or `.shell3/tools/` (project). 
 name: brave_search           # required, [a-z][a-z0-9_]*, must not shadow built-ins
 description: Web search…     # required, shown to the model
 enabled: false               # required; tools default off
-secrets: [BRAVE_API_KEY]     # optional; keys from ~/.shell3/secrets.shell3
+secrets: [BRAVE_API_KEY]     # optional; keys from ~/.shell3/ai-do-not-read.secrets.yaml
 parameters:                  # required; JSON Schema (type must be object)
   type: object
   properties:
@@ -329,7 +322,7 @@ after: ""                    # optional; bash -c hook, stdin = command output
 - Complex values (arrays, objects) are JSON-encoded into their env var.
 - Args whose uppercased name collides with a declared secret are dropped (the secret wins).
 
-**Secrets:** Run `shell3 secrets set --key KEY --secret value`. Only the secrets listed in a tool's `secrets:` field are exposed to that tool. Secret values are scrubbed from tool output and replaced with `***REDACTED***` before reaching the model.
+**Secrets:** Run `shell3 secrets` to open the secrets file in `$EDITOR`. Only the secrets listed in a tool's `secrets:` field are exposed to that tool. Secret values are scrubbed from tool output and replaced with `***REDACTED***` before reaching the model.
 
 **Hooks (per-tool, optional):**
 - `before` — receives args JSON on stdin. Non-zero exit blocks the call (stderr becomes the block reason). Stdout, if valid JSON, replaces the args. Hooks do **not** receive declared secrets in env.
@@ -339,7 +332,7 @@ after: ""                    # optional; bash -c hook, stdin = command output
 
 **Validation at startup:** Invalid tools are skipped with a warning to stderr. Reasons include: missing required field, name shadowing a built-in, invalid name format, declared secret missing from secrets store, `parameters.type` not `object`.
 
-**Getting started:** On first run, a disabled `brave_search.yaml` and an enabled `web_fetch.yaml` are written to `~/.shell3/tools/` if absent. Run `shell3 secrets set --key BRAVE_API_KEY --secret <token>`, set `enabled: true` in `brave_search.yaml`, and restart to use Brave Search. See `examples/tools/` for fuller copyable tool configs, including a Brave Search tool with concise search and LLM Context modes.
+**Getting started:** On first run, a disabled `brave_search.yaml` and an enabled `web_fetch.yaml` are written to `~/.shell3/tools/` if absent. Run `shell3 secrets` to add `BRAVE_API_KEY`, set `enabled: true` in `brave_search.yaml`, and restart to use Brave Search. See `examples/tools/` for fuller copyable tool configs, including a Brave Search tool with concise search and LLM Context modes.
 
 ---
 
@@ -403,19 +396,19 @@ See `examples/skills/` for copyable skill files, including `web-search.md` for l
 
 ## Multiple models
 
-Available models are defined per-instance in `~/.shell3/credentials.shell3` as a comma-separated `default_model`. The session starts on the first model in that list, unless the active persona's frontmatter sets a `model`. Use `/model` inside a session to switch.
+Models are defined per-instance in `~/.shell3/ai-do-not-read.auth.yaml` under `models:`. The session starts on the first model, unless the active persona's frontmatter sets a `model`. Use `/model` inside a session to switch.
 
 ```markdown
 ---
 # ~/.shell3/personas/base.md — preferred starting model + provider for all projects
-model: gpt-5.3-codex
-provider: codex
+model: gpt-4o
+provider: myinstance
 ---
 ```
 
 `--model` flag overrides frontmatter:
 ```
-shell3 --model "gpt-4o,gpt-4o-mini"
+shell3 --model gpt-4o-mini
 ```
 
 ---

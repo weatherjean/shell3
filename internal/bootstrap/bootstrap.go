@@ -112,8 +112,7 @@ func ensureGlobalGitignore(g paths.Global) error {
 // sentinel is absent. Covers credentials, secrets, and all log files
 // (current + rotated archives shell3.log.1 through shell3.log.N).
 const globalGitignoreAddition = `# shell3 — never commit these even in a dotfiles repo
-credentials.shell3
-secrets.shell3
+ai-do-not-read.*
 shell3.log
 shell3.log.*
 projects/

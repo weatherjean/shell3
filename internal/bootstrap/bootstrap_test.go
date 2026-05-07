@@ -197,8 +197,7 @@ func TestGlobalGitignore(t *testing.T) {
 	}
 	content := string(gi)
 	for _, want := range []string{
-		"credentials.shell3",
-		"secrets.shell3",
+		"ai-do-not-read.*",
 		"shell3.log",
 		"shell3.log.*",
 		"projects/",
@@ -229,7 +228,7 @@ func TestEnsureGitignoreAppends(t *testing.T) {
 
 	// Pre-existing gitignore
 	_ = os.MkdirAll(l.Root, 0755)
-	_ = os.WriteFile(filepath.Join(l.Root, ".gitignore"), []byte("shell3.db\nsecrets.shell3\n"), 0644)
+	_ = os.WriteFile(filepath.Join(l.Root, ".gitignore"), []byte("shell3.db\nai-do-not-read.*\n"), 0644)
 
 	_, _ = bootstrap.EnsureProject(l, g, cwd)
 
