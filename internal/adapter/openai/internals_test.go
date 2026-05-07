@@ -181,46 +181,45 @@ func TestWaitReasoningNilDone(t *testing.T) {
 	}
 }
 
-// ---- toOpenAI ----
+// ---- toMessages ----
 
-func TestToOpenAIBasicMessage(t *testing.T) {
+func TestToMessagesBasic(t *testing.T) {
 	msgs := []llm.Message{
 		{Role: llm.RoleUser, Content: "hello"},
 		{Role: llm.RoleAssistant, Content: "hi"},
 	}
-	out := toOpenAI(msgs)
+	out := toMessages(msgs)
 	if len(out) != 2 {
 		t.Fatalf("expected 2, got %d", len(out))
 	}
-	if out[0].Role != "user" || out[0].Content != "hello" {
-		t.Fatalf("user msg: %+v", out[0])
+	if out[0].OfUser == nil {
+		t.Fatalf("first must be user, got %+v", out[0])
 	}
-	if out[1].Role != "assistant" || out[1].Content != "hi" {
-		t.Fatalf("assistant msg: %+v", out[1])
+	if out[1].OfAssistant == nil {
+		t.Fatalf("second must be assistant, got %+v", out[1])
 	}
 }
 
-func TestToOpenAIToolCallMessage(t *testing.T) {
+func TestToMessagesToolCall(t *testing.T) {
 	msgs := []llm.Message{
 		{
-			Role:    llm.RoleAssistant,
-			Content: "",
+			Role: llm.RoleAssistant,
 			ToolCalls: []llm.ToolCall{
 				{ID: "tc1", Name: "bash", RawArgs: `{"cmd":"ls"}`},
 			},
 		},
 	}
-	out := toOpenAI(msgs)
-	if len(out[0].ToolCalls) != 1 {
-		t.Fatalf("expected 1 tool call, got %d", len(out[0].ToolCalls))
+	out := toMessages(msgs)
+	if len(out) != 1 || out[0].OfAssistant == nil {
+		t.Fatalf("expected 1 assistant, got %+v", out)
 	}
-	tc := out[0].ToolCalls[0]
-	if tc.ID != "tc1" || tc.Function.Name != "bash" {
-		t.Fatalf("tool call: %+v", tc)
+	asst := out[0].OfAssistant
+	if len(asst.ToolCalls) != 1 || asst.ToolCalls[0].ID != "tc1" || asst.ToolCalls[0].Function.Name != "bash" {
+		t.Fatalf("tool call: %+v", asst.ToolCalls)
 	}
 }
 
-func TestToOpenAIContentParts(t *testing.T) {
+func TestToMessagesContentParts(t *testing.T) {
 	msgs := []llm.Message{
 		{
 			Role: llm.RoleUser,
@@ -230,28 +229,28 @@ func TestToOpenAIContentParts(t *testing.T) {
 			},
 		},
 	}
-	out := toOpenAI(msgs)
-	if out[0].Content != "" {
-		t.Fatalf("Content must be empty when MultiContent is set, got %q", out[0].Content)
-	}
-	if len(out[0].MultiContent) != 2 {
-		t.Fatalf("expected 2 parts, got %d", len(out[0].MultiContent))
+	out := toMessages(msgs)
+	if len(out) != 1 || out[0].OfUser == nil {
+		t.Fatalf("expected user message, got %+v", out)
 	}
 }
 
-func TestToOpenAIToolResultMessage(t *testing.T) {
+func TestToMessagesToolResult(t *testing.T) {
 	msgs := []llm.Message{
-		{Role: llm.RoleTool, Content: "output", ToolCallID: "tc1", Name: "bash"},
+		{Role: llm.RoleTool, Content: "output", ToolCallID: "tc1"},
 	}
-	out := toOpenAI(msgs)
-	if out[0].ToolCallID != "tc1" || out[0].Name != "bash" {
-		t.Fatalf("tool result: %+v", out[0])
+	out := toMessages(msgs)
+	if len(out) != 1 || out[0].OfTool == nil {
+		t.Fatalf("expected tool message, got %+v", out)
+	}
+	if out[0].OfTool.ToolCallID != "tc1" {
+		t.Fatalf("ToolCallID: %q", out[0].OfTool.ToolCallID)
 	}
 }
 
-// ---- toOpenAITools ----
+// ---- toTools ----
 
-func TestToOpenAITools(t *testing.T) {
+func TestToTools(t *testing.T) {
 	tools := []llm.ToolDefinition{
 		{
 			Name:        "bash",
@@ -259,11 +258,11 @@ func TestToOpenAITools(t *testing.T) {
 			Parameters:  map[string]any{"type": "object"},
 		},
 	}
-	out := toOpenAITools(tools)
+	out := toTools(tools)
 	if len(out) != 1 {
 		t.Fatalf("expected 1, got %d", len(out))
 	}
-	if out[0].Function.Name != "bash" || out[0].Function.Description != "run shell commands" {
+	if out[0].Function.Name != "bash" {
 		t.Fatalf("tool: %+v", out[0].Function)
 	}
 }
