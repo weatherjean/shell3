@@ -4,15 +4,15 @@ import "path/filepath"
 
 // Global holds all paths under ~/.shell3/ (user-scoped, never in repo).
 type Global struct {
-	Root        string // ~/.shell3/
-	Credentials string // ~/.shell3/credentials.shell3
-	Secrets     string // ~/.shell3/secrets.shell3
-	Skills      string // ~/.shell3/skills/
-	Tools       string // ~/.shell3/tools/
-	Hooks       string // ~/.shell3/hooks/
-	Personas    string // ~/.shell3/personas/
-	Projects    string // ~/.shell3/projects/
-	LogFile     string // ~/.shell3/shell3.log
+	Root     string // ~/.shell3/
+	Auth     string // ~/.shell3/ai-do-not-read.auth.yaml
+	Secrets  string // ~/.shell3/ai-do-not-read.secrets.yaml
+	Skills   string // ~/.shell3/skills/
+	Tools    string // ~/.shell3/tools/
+	Hooks    string // ~/.shell3/hooks/
+	Personas string // ~/.shell3/personas/
+	Projects string // ~/.shell3/projects/
+	LogFile  string // ~/.shell3/shell3.log
 }
 
 // Project holds paths for one project's personal state keyed by UUID.
@@ -36,9 +36,9 @@ type Local struct {
 func NewGlobal(homeDir string) Global {
 	root := filepath.Join(homeDir, ".shell3")
 	return Global{
-		Root:        root,
-		Credentials: filepath.Join(root, "credentials.shell3"),
-		Secrets:     filepath.Join(root, "secrets.shell3"),
+		Root:    root,
+		Auth:    filepath.Join(root, "ai-do-not-read.auth.yaml"),
+		Secrets: filepath.Join(root, "ai-do-not-read.secrets.yaml"),
 		Skills:      filepath.Join(root, "skills"),
 		Tools:       filepath.Join(root, "tools"),
 		Hooks:       filepath.Join(root, "hooks"),

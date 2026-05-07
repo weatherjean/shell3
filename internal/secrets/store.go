@@ -11,6 +11,8 @@ import (
 	"sync"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/weatherjean/shell3/internal/paths"
 )
 
 type secretsFile struct {
@@ -27,7 +29,7 @@ type Store struct {
 // Load reads ~/.shell3/ai-do-not-read.secrets.yaml. Returns an empty store if
 // the file does not exist — first Set auto-creates it.
 func Load(homeDir string) (*Store, error) {
-	path := filepath.Join(homeDir, ".shell3", "ai-do-not-read.secrets.yaml")
+	path := paths.NewGlobal(homeDir).Secrets
 	s := &Store{
 		path: path,
 		data: secretsFile{Secrets: map[string]string{}},

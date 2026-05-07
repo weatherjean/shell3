@@ -11,10 +11,10 @@ func TestGlobal(t *testing.T) {
 	if g.Root != "/home/user/.shell3" {
 		t.Fatalf("Root: got %q", g.Root)
 	}
-	if g.Credentials != "/home/user/.shell3/credentials.shell3" {
-		t.Fatalf("Credentials: got %q", g.Credentials)
+	if g.Auth != "/home/user/.shell3/ai-do-not-read.auth.yaml" {
+		t.Fatalf("Auth: got %q", g.Auth)
 	}
-	if g.Secrets != "/home/user/.shell3/secrets.shell3" {
+	if g.Secrets != "/home/user/.shell3/ai-do-not-read.secrets.yaml" {
 		t.Fatalf("Secrets: got %q", g.Secrets)
 	}
 	if g.Projects != "/home/user/.shell3/projects" {

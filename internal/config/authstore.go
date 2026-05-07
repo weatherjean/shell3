@@ -3,9 +3,10 @@ package config
 import (
 	"errors"
 	"os"
-	"path/filepath"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/weatherjean/shell3/internal/paths"
 )
 
 // ModelDef is one model entry in the auth YAML.
@@ -35,7 +36,7 @@ type AuthStore struct {
 // LoadAuthStore reads the auth YAML from homeDir. Returns an empty store if
 // the file does not exist.
 func LoadAuthStore(homeDir string) (*AuthStore, error) {
-	path := filepath.Join(homeDir, ".shell3", "ai-do-not-read.auth.yaml")
+	path := paths.NewGlobal(homeDir).Auth
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {

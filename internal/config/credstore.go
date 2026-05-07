@@ -40,7 +40,7 @@ type CredStore struct {
 // returns an empty store ready for Set/Save.
 func LoadCredStore(homeDir string) (*CredStore, error) {
 	c := &CredStore{
-		path: paths.NewGlobal(homeDir).Credentials,
+		path: paths.NewGlobal(homeDir).Auth,
 		data: credsFile{Instances: map[string]instanceRecord{}},
 	}
 	if err := obfile.Read(c.path, &c.data); err != nil {
