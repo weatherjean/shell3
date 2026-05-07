@@ -179,7 +179,6 @@ secrets:
 
 ```
 shell3 secrets        # open file in $EDITOR
-shell3 secrets list   # list names (values masked)
 ```
 
 Secrets are shared across all projects. Only the keys listed in a tool's `secrets:` field are exposed to that tool.

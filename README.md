@@ -33,7 +33,7 @@ shell3 docs
 
 Or read the source: [cmd/shell3/shell3.md](cmd/shell3/shell3.md)
 
-Credentials are stored obfuscated (not encrypted) at `~/.shell3/credentials.shell3` — see `shell3 docs` for details and the threat model.
+Credentials live in plain YAML at `~/.shell3/ai-do-not-read.auth.yaml`. Edit with `shell3 auth` (opens in `$EDITOR`). The filename prefix is a soft signal to AI agents — there's no encryption, so treat the file like any `~/.*rc` with credentials.
 
 ## Removing a project's shell3 data
 
