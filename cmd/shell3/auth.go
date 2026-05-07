@@ -93,13 +93,7 @@ func openInEditor(path string) error {
 # Edit this file to configure providers.
 # AI ASSISTANTS: Do not read this file. It contains credentials.
 
-instances:
-  - name: myinstance
-    base_url: https://api.openai.com/v1
-    api_key: sk-your-key-here
-    models:
-      - id: gpt-4o
-        context_window: 128000
+instances: []
 
 # Example: local Ollama (no API key needed)
 # instances:
@@ -109,6 +103,15 @@ instances:
 #     models:
 #       - id: llama3.2
 #         context_window: 131072
+#
+# Example: OpenAI
+# instances:
+#   - name: openai
+#     base_url: https://api.openai.com/v1
+#     api_key: sk-your-key-here
+#     models:
+#       - id: gpt-4o
+#         context_window: 128000
 `
 		if err := os.WriteFile(path, []byte(template), 0600); err != nil {
 			return fmt.Errorf("create auth file: %w", err)
