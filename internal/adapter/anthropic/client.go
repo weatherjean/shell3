@@ -38,9 +38,28 @@ func (c *Client) SetParams(p llm.RequestParams) { c.params = c.params.Merge(p) }
 
 func (c *Client) ParamSpecs() []llm.ParamSpec {
 	return []llm.ParamSpec{
+		{Name: "reasoning_effort", Enum: []string{"none", "minimal", "low", "medium", "high", "xhigh"}, Default: "medium"},
 		{Name: "max_tokens", Default: "16000"},
 		{Name: "thinking_budget", Default: "0"},
 		{Name: "temperature", Default: ""},
+	}
+}
+
+// effortToBudget maps the vendor-neutral reasoning_effort enum onto
+// Anthropic's thinking.budget_tokens. Values picked to match common
+// Claude Code tiers; budget must be < max_tokens.
+func effortToBudget(effort string) int64 {
+	switch effort {
+	case "low":
+		return 2000
+	case "medium":
+		return 6000
+	case "high":
+		return 12000
+	case "xhigh":
+		return 24000
+	default: // "", "none", "minimal" → no thinking
+		return 0
 	}
 }
 
@@ -52,6 +71,18 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 	if maxTok <= 0 {
 		maxTok = 16000
 	}
+
+	// Resolve thinking budget: explicit thinking_budget wins; else map
+	// reasoning_effort onto a budget. Auto-bump max_tokens to cover
+	// budget + 4k output headroom (Anthropic requires budget < max_tokens).
+	budget := int64(c.params.ThinkingBudget)
+	if budget == 0 && c.params.ReasoningEffort != "" {
+		budget = effortToBudget(c.params.ReasoningEffort)
+	}
+	if budget > 0 && budget+4000 > maxTok {
+		maxTok = budget + 4000
+	}
+
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(c.model),
 		Messages:  history,
@@ -63,8 +94,8 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 	if len(tools) > 0 {
 		params.Tools = toAnthropicTools(tools)
 	}
-	if c.params.ThinkingBudget > 0 {
-		params.Thinking = anthropic.ThinkingConfigParamOfEnabled(int64(c.params.ThinkingBudget))
+	if budget > 0 {
+		params.Thinking = anthropic.ThinkingConfigParamOfEnabled(budget)
 	}
 	if c.params.Temperature != nil {
 		params.Temperature = anthropic.Float(*c.params.Temperature)

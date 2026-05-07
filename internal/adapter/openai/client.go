@@ -181,7 +181,7 @@ func (c *Client) SetParams(p llm.RequestParams) { c.params = c.params.Merge(p) }
 
 func (c *Client) ParamSpecs() []llm.ParamSpec {
 	return []llm.ParamSpec{
-		{Name: "reasoning_effort", Enum: []string{"minimal", "low", "medium", "high"}, Default: "medium"},
+		{Name: "reasoning_effort", Enum: []string{"none", "minimal", "low", "medium", "high", "xhigh"}, Default: "medium"},
 		{Name: "parallel_tool_calls", Enum: []string{"true", "false"}, Default: "true"},
 		{Name: "temperature", Default: ""},
 		{Name: "max_tokens", Default: "16000"},
@@ -216,8 +216,13 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 	if len(tools) > 0 {
 		params.Tools = toTools(tools)
 	}
-	if c.params.ReasoningEffort != "" {
-		params.ReasoningEffort = shared.ReasoningEffort(c.params.ReasoningEffort)
+	if eff := c.params.ReasoningEffort; eff != "" && eff != "none" {
+		// OpenAI API accepts only minimal|low|medium|high; clamp xhigh→high
+		// so vendor-neutral personas (xhigh) work on both adapters.
+		if eff == "xhigh" {
+			eff = "high"
+		}
+		params.ReasoningEffort = shared.ReasoningEffort(eff)
 	}
 	if c.params.Temperature != nil {
 		params.Temperature = openai.Float(*c.params.Temperature)
