@@ -15,7 +15,7 @@ AI-powered shell assistant.
 
 ## Getting started
 
-Works with any **OpenAI-compatible API endpoint** (OpenAI, Ollama, Groq, LM Studio, OpenRouter, …) and **Codex** (ChatGPT subscription via OAuth).
+Works with any **OpenAI-compatible API endpoint** (OpenAI, Ollama, Groq, LM Studio, OpenRouter, …) and **Anthropic** natively. Codex (ChatGPT subscription via OAuth) is supported via the third-party [openai-oauth](https://github.com/EvanZhouDev/openai-oauth) proxy — see `shell3 docs`.
 
 ```sh
 make build

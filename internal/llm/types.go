@@ -41,8 +41,9 @@ type Message struct {
 	// thinking mode is enabled, otherwise the next request 400s.
 	ReasoningContent string `json:"reasoning_content,omitempty"`
 	// ProviderReasoning is opaque JSON an adapter needs echoed back on the
-	// next turn (e.g. codex `reasoning` items with `encrypted_content`).
-	// Chat layer treats it as a black box; only the originating adapter parses.
+	// next turn (e.g. providers that emit reasoning items with
+	// `encrypted_content`). Chat layer treats it as a black box; only the
+	// originating adapter parses.
 	ProviderReasoning []byte `json:"provider_reasoning,omitempty"`
 }
 
