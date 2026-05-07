@@ -176,7 +176,7 @@ func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Us
 	reasoningStarted := false
 
 	commitReasoningLine := func(line string) {
-		app.Print([]string{patchtui.Dim + line + patchtui.Reset})
+		app.Print([]string{patchtui.MutedBrown + line + patchtui.Reset})
 	}
 
 	// flushReasoningPartial commits any buffered partial reasoning line, adds a
@@ -219,7 +219,7 @@ func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Us
 			// Show the current partial line in the stream preview so mid-line
 			// progress is visible without the multi-line ANSI state bug.
 			if !reasoningStarted {
-				app.Print([]string{patchtui.Dim + "◆ thinking" + patchtui.Reset})
+				app.Print([]string{patchtui.MutedBrown + "◆ thinking" + patchtui.Reset})
 				reasoningStarted = true
 			}
 			text := v.Text
@@ -234,7 +234,7 @@ func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Us
 				text = text[idx+1:]
 			}
 			if reasoningBuf.Len() > 0 {
-				app.SetStreamPreview([]string{patchtui.Dim + reasoningBuf.String() + patchtui.Reset})
+				app.SetStreamPreview([]string{patchtui.MutedBrown + reasoningBuf.String() + patchtui.Reset})
 			} else {
 				app.SetStreamPreview(nil)
 			}

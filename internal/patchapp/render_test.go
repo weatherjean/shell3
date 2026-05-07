@@ -70,6 +70,56 @@ func TestWrapToWidth(t *testing.T) {
 	}
 }
 
+func TestWrapToWidth_StyleEnvelopeReapplied(t *testing.T) {
+	// Uniformly styled long line: leading SGR + content + trailing reset.
+	// Every wrapped continuation line must carry the same envelope so frame
+	// renderers that emit explicit resets between lines don't drop color.
+	brown := patchtui.MutedBrown
+	reset := patchtui.Reset
+	src := brown + "the quick brown fox jumps over the lazy dog" + reset
+
+	got := wrapToWidth([]string{src}, 12)
+	if len(got) < 2 {
+		t.Fatalf("expected multiple wrapped lines, got %d: %q", len(got), got)
+	}
+	for i, l := range got {
+		if !strings.HasPrefix(l, brown) {
+			t.Errorf("line %d missing leading SGR: %q", i, l)
+		}
+		if !strings.HasSuffix(l, reset) {
+			t.Errorf("line %d missing trailing reset: %q", i, l)
+		}
+	}
+}
+
+func TestWrapToWidth_AllSGRDoesNotPanic(t *testing.T) {
+	// Pathological inputs: line is only SGR codes (no body). Caused a slice
+	// out-of-range panic when lead and trail overlapped.
+	cases := []string{
+		patchtui.MutedBrown + patchtui.Reset,
+		patchtui.MutedBrown,
+		patchtui.Reset,
+		"\033[1m\033[0m",
+		"",
+	}
+	for _, in := range cases {
+		_ = wrapToWidth([]string{in}, 10) // must not panic
+	}
+}
+
+func TestWrapToWidth_MidLineResetNotReapplied(t *testing.T) {
+	// Lines with a reset partway through (multi-color content) should not
+	// have the leading SGR re-applied to continuation lines.
+	in := "\033[31mhello\033[0m world foo bar baz"
+	got := wrapToWidth([]string{in}, 8)
+	if len(got) < 2 {
+		t.Fatalf("expected wrap, got %q", got)
+	}
+	if strings.HasPrefix(got[1], "\033[31m") {
+		t.Errorf("continuation line wrongly re-applied red: %q", got[1])
+	}
+}
+
 func TestWrapToWidth_ListHangingIndent(t *testing.T) {
 	got := wrapToWidth([]string{"• But some committed output paths likely still rely on terminal wrapping"}, 24)
 	want := []string{

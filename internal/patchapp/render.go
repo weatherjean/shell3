@@ -66,18 +66,99 @@ func wrapToWidth(lines []string, width int) []string {
 	inFence := false
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "```") {
+		var wrapped []string
+		switch {
+		case strings.HasPrefix(trimmed, "```"):
 			inFence = !inFence
-			out = append(out, hardWrapLine(line, width)...)
-			continue
+			wrapped = hardWrapLine(line, width)
+		case inFence || looksLikeTableRow(trimmed):
+			wrapped = hardWrapLine(line, width)
+		default:
+			wrapped = smartWrapLine(line, width)
 		}
-		if inFence || looksLikeTableRow(trimmed) {
-			out = append(out, hardWrapLine(line, width)...)
-			continue
-		}
-		out = append(out, smartWrapLine(line, width)...)
+		out = append(out, reapplyStyleEnvelope(line, wrapped)...)
 	}
 	return out
+}
+
+// reapplyStyleEnvelope ensures every wrapped continuation line carries the
+// same leading SGR styling and trailing reset as the source line. Without
+// this, frame renderers that emit explicit resets between lines render
+// continuations unstyled until the next redraw.
+//
+// Only applies when the source line is uniformly styled — i.e. it starts
+// with an SGR run, ends with one (containing a reset), and has no embedded
+// resets in the middle. Lines with mid-line resets (e.g. multi-color
+// content) are left to terminal default carry-over behavior.
+func reapplyStyleEnvelope(src string, wrapped []string) []string {
+	if len(wrapped) <= 1 {
+		return wrapped
+	}
+	lead := leadingSGR(src)
+	trail := trailingSGR(src)
+	if lead == "" {
+		return wrapped
+	}
+	// Guard against lead and trail overlapping (e.g. line is all SGR codes).
+	if len(lead)+len(trail) > len(src) {
+		return wrapped
+	}
+	// Reject if there's any reset between lead and trail (mid-line style break).
+	body := src[len(lead) : len(src)-len(trail)]
+	if strings.Contains(body, "\033[0m") {
+		return wrapped
+	}
+	for i, w := range wrapped {
+		if !strings.HasPrefix(w, lead) {
+			w = lead + w
+		}
+		if trail != "" && !strings.HasSuffix(w, trail) {
+			w = w + trail
+		}
+		wrapped[i] = w
+	}
+	return wrapped
+}
+
+// leadingSGR returns the contiguous run of SGR escape sequences at the
+// start of s, or "" if none.
+func leadingSGR(s string) string {
+	end := 0
+	for end < len(s) && s[end] == '\033' {
+		j := end + 1
+		if j >= len(s) || s[j] != '[' {
+			break
+		}
+		j++
+		for j < len(s) && s[j] != 'm' {
+			j++
+		}
+		if j >= len(s) {
+			break
+		}
+		end = j + 1
+	}
+	return s[:end]
+}
+
+// trailingSGR returns the contiguous run of SGR escape sequences at the
+// end of s, or "" if none.
+func trailingSGR(s string) string {
+	start := len(s)
+	for start > 0 {
+		if s[start-1] != 'm' {
+			break
+		}
+		j := start - 2
+		for j >= 0 && s[j] != '\033' {
+			j--
+		}
+		if j < 0 || j+1 >= len(s) || s[j+1] != '[' {
+			break
+		}
+		start = j
+	}
+	return s[start:]
 }
 
 func smartWrapLine(line string, width int) []string {

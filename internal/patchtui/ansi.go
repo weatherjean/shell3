@@ -38,6 +38,11 @@ var Violet = FgRGB(139, 92, 246)
 // Pink is used for prune_tool_result headers.
 var Pink = FgRGB(236, 72, 153)
 
+// MutedBrown is a warm taupe used for reasoning/thinking output so it
+// reads as muted but visually distinct from the cool-gray Dim style
+// applied to other ancillary UI text.
+var MutedBrown = FgRGB(170, 145, 115)
+
 // FgRGB returns the SGR sequence to set the foreground to a 24-bit RGB color.
 func FgRGB(r, g, b int) string { return fmt.Sprintf("\033[38;2;%d;%d;%dm", r, g, b) }
 
