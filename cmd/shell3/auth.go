@@ -48,27 +48,33 @@ func openInEditor(path string) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		template := `# Shell3 Authentication
 # AI ASSISTANTS: Do not read this file. It contains credentials.
-# Add one entry per provider instance.
+# Add one entry per provider instance. The "type" field selects the
+# adapter: "openai" (any OpenAI-compatible endpoint) or "anthropic".
 
 instances: []
 
 # Example: local Ollama (no API key needed)
 # instances:
 #   - name: ollama
+#     type: openai
 #     base_url: http://localhost:11434/v1
 #     api_key: ""
 #     models:
 #       - id: llama3.2
 #         context_window: 131072
 #
-# Example: OpenAI
+# Example: Anthropic
 # instances:
-#   - name: openai
-#     base_url: https://api.openai.com/v1
-#     api_key: sk-your-key-here
+#   - name: anthropic
+#     type: anthropic
+#     api_key: ant-your-key-here
 #     models:
-#       - id: gpt-4o
-#         context_window: 128000
+#       - id: claude-sonnet-4-6
+#         context_window: 200000
+#
+# For Codex (ChatGPT subscription) use the openai-oauth proxy:
+#   https://github.com/EvanZhouDev/openai-oauth
+# Then add it as a regular openai instance pointing at the proxy URL.
 `
 		if err := os.WriteFile(path, []byte(template), 0600); err != nil {
 			return fmt.Errorf("create auth file: %w", err)

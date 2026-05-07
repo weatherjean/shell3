@@ -18,7 +18,8 @@ type ModelDef struct {
 // Instance is one configured provider in the auth YAML.
 type Instance struct {
 	Name    string     `yaml:"name"`
-	BaseURL string     `yaml:"base_url"`
+	Type    string     `yaml:"type"` // required: "openai" | "anthropic"
+	BaseURL string     `yaml:"base_url,omitempty"`
 	APIKey  string     `yaml:"api_key,omitempty"`
 	Models  []ModelDef `yaml:"models"`
 }

@@ -22,6 +22,7 @@ func writeAuthYAML(t *testing.T, dir, content string) {
 const testAuthYAML = `
 instances:
   - name: myopenai
+    type: openai
     base_url: https://api.openai.com/v1
     api_key: sk-test
     models:
@@ -30,10 +31,17 @@ instances:
       - id: o3
         context_window: 200000
   - name: ollama
+    type: openai
     base_url: http://localhost:11434/v1
     models:
       - id: llama3.2
         context_window: 131072
+  - name: anthropic
+    type: anthropic
+    api_key: ant-test
+    models:
+      - id: claude-sonnet-4-6
+        context_window: 200000
 `
 
 func TestLoadAuthStore_MissingFile(t *testing.T) {
@@ -54,8 +62,23 @@ func TestLoadAuthStore_ValidYAML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(store.List()) != 2 {
-		t.Fatalf("expected 2 instances, got %d", len(store.List()))
+	if len(store.List()) != 3 {
+		t.Fatalf("expected 3 instances, got %d", len(store.List()))
+	}
+}
+
+func TestAuthStore_Type(t *testing.T) {
+	dir := t.TempDir()
+	writeAuthYAML(t, dir, testAuthYAML)
+	store, _ := config.LoadAuthStore(dir)
+
+	oai, ok := store.Get("myopenai")
+	if !ok || oai.Type != "openai" {
+		t.Fatalf("openai instance: type=%q ok=%v", oai.Type, ok)
+	}
+	ant, ok := store.Get("anthropic")
+	if !ok || ant.Type != "anthropic" {
+		t.Fatalf("anthropic instance: type=%q ok=%v", ant.Type, ok)
 	}
 }
 
