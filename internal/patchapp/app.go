@@ -15,8 +15,8 @@ import (
 // newlines from alt+enter. The App is busy-locked until the callback's
 // goroutine completes (for non-slash, non-! inputs); the SubmitFunc is
 // responsible for either handling synchronously and returning, or
-// launching a goroutine and calling [App.SetBusy] / [App.SetStreamPreview]
-// / [App.Print] to feed events back.
+// launching a goroutine and calling [App.SetBusy] / [App.Print] to feed
+// events back.
 type SubmitFunc func(input string)
 
 // App is the top-level TUI controller. It owns the render loop, input
@@ -63,17 +63,8 @@ type App struct {
 	historyDraft  []rune
 	historyInDraft bool
 
-	// Live streaming preview shown above the input box during a turn.
-	streamLines []string
-
 	// Status bar info.
 	status statusInfo
-
-	// Tokens received while the app is busy are low-priority UI state. They are
-	// applied by the next content/input render instead of triggering a
-	// status-only repaint, which avoids footer flicker during tool chains.
-	pendingTokens    int
-	pendingTokensSet bool
 
 	// Busy/streaming.
 	busy         bool
@@ -134,43 +125,20 @@ func (a *App) Quit() {
 	}
 }
 
-// applyPendingTokensLocked promotes a deferred busy-state token update into
-// the status data used by the next non-status-only render. Caller must hold
-// a.mu.
-func (a *App) applyPendingTokensLocked() {
-	if !a.pendingTokensSet {
-		return
-	}
-	a.status.tokens = a.pendingTokens
-	a.pendingTokensSet = false
-}
-
 // liveFrameLocked builds the current live frame. Caller must hold a.mu.
 func (a *App) liveFrameLocked() []string {
-	w, h := patchtui.Size()
-	return buildFrame(w, h, frameState{
-		streamLines: a.streamLines,
-		input:       a.input,
-		cursor:      a.cursor,
-		busy:        a.busy,
-		status:      a.status,
+	w, _ := patchtui.Size()
+	return buildFrame(w, frameState{
+		input:  a.input,
+		cursor: a.cursor,
+		busy:   a.busy,
+		status: a.status,
 	})
 }
 
 // render rebuilds the frame and asks the renderer to paint it. Caller
 // must hold a.mu. Skipped while paused (during shell exec).
 func (a *App) render() {
-	if a.paused {
-		return
-	}
-	a.applyPendingTokensLocked()
-	a.r.Render(a.liveFrameLocked())
-}
-
-// renderStatusOnly redraws without applying deferred token updates. It is
-// used by the spinner/ctrl+c ticker so low-priority token usage can piggyback
-// on the next content/input render instead of causing status-only flashes.
-func (a *App) renderStatusOnly() {
 	if a.paused {
 		return
 	}
@@ -189,7 +157,6 @@ func (a *App) Print(lines []string) {
 		a.r.Print(wrapped)
 		return
 	}
-	a.applyPendingTokensLocked()
 	a.r.PrintAndRender(wrapped, a.liveFrameLocked())
 }
 
@@ -200,15 +167,6 @@ func (a *App) PrintLine(line string) { a.Print([]string{line}) }
 // of [App.Print] calls when no other state change will trigger a render.
 func (a *App) Refresh() {
 	a.mu.Lock()
-	a.render()
-	a.mu.Unlock()
-}
-
-// SetStreamPreview replaces the live streaming content shown above the
-// input box. Pass nil to clear it.
-func (a *App) SetStreamPreview(lines []string) {
-	a.mu.Lock()
-	a.streamLines = lines
 	a.render()
 	a.mu.Unlock()
 }
@@ -234,15 +192,9 @@ func (a *App) SetContextWindow(n int) {
 func (a *App) SetTokens(n int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.status.tokens == n && (!a.pendingTokensSet || a.pendingTokens == n) {
+	if a.status.tokens == n {
 		return
 	}
-	if a.busy {
-		a.pendingTokens = n
-		a.pendingTokensSet = true
-		return
-	}
-	a.pendingTokensSet = false
 	a.status.tokens = n
 	a.render()
 }
@@ -252,11 +204,7 @@ func (a *App) SetTokens(n int) {
 func (a *App) SetBusy(busy bool, cancel context.CancelFunc) {
 	a.mu.Lock()
 	a.busy = busy
-	a.status.busy = busy
 	a.streamCancel = cancel
-	if !busy {
-		a.streamLines = nil
-	}
 	a.render()
 	a.mu.Unlock()
 }

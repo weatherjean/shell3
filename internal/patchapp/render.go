@@ -9,50 +9,34 @@ import (
 	"github.com/weatherjean/shell3/internal/patchtui"
 )
 
-// reservedRenderLines is the number of terminal lines reserved for the input
-// box and status bar so the streaming preview doesn't overwrite them.
-const reservedRenderLines = 4
-
-// buildFrame composes the live render frame: streaming preview (capped to
-// terminal height), input box (multi-line, wrapped, with cursor marker),
-// and status bar at the bottom.
+// buildFrame composes the live render frame.
 //
-// History (user messages, tool output, finalized streamed responses) is
-// committed separately via Renderer.Print; it is not part of this frame.
-func buildFrame(width, height int, st frameState) []string {
-	frame := make([]string, 0, len(st.streamLines)+8)
-
-	// Streaming preview, wrapped to width and capped to fit the screen.
-	if len(st.streamLines) > 0 {
-		wrapped := wrapToWidth(st.streamLines, width)
-		max := height - reservedRenderLines
-		if max < 1 {
-			max = 1
-		}
-		if len(wrapped) > max {
-			wrapped = wrapped[len(wrapped)-max:]
-		}
-		frame = append(frame, wrapped...)
+// Two modes:
+//   - Idle: blank line + input box (multi-line, wrapped, with cursor marker)
+//     + status bar.
+//   - Busy: single line — the rainbow busy bar (see renderBusyLine).
+//
+// Streaming text and tool output are committed to scrollback via
+// Renderer.Print by event handlers (see chat.drainTurn); they are not part
+// of the live frame.
+func buildFrame(width int, st frameState) []string {
+	if st.busy {
+		return []string{renderBusyLine(width, st.status)}
 	}
 
-	// One blank line of breathing room above the input box.
+	frame := make([]string, 0, 8)
 	frame = append(frame, "")
-
-	// Input box (cursor visible only when not busy).
-	frame = append(frame, renderInputBox(st.input, st.cursor, width, !st.busy)...)
-
-	// Status bar.
+	frame = append(frame, renderInputBox(st.input, st.cursor, width, true)...)
 	frame = append(frame, renderStatusBar(width, st.status))
 	return frame
 }
 
 // frameState is the snapshot of app state buildFrame needs.
 type frameState struct {
-	streamLines []string
-	input       []rune
-	cursor      int
-	busy        bool
-	status      statusInfo
+	input  []rune
+	cursor int
+	busy   bool
+	status statusInfo
 }
 
 // wrapToWidth wraps each line so no rendered line exceeds width visual

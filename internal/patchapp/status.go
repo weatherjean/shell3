@@ -7,9 +7,8 @@ import (
 	"github.com/weatherjean/shell3/internal/patchtui"
 )
 
-// renderStatusBar returns the bottom status bar line, padded to terminal width.
-// When busy, the spinner + "thinking" label replaces the model/usage info and
-// the right hint becomes "ctrl+c cancel".
+// renderStatusBar returns the bottom status bar line for the idle frame,
+// padded to terminal width. The busy state uses renderBusyLine instead.
 func renderStatusBar(width int, st statusInfo) string {
 	yellow := patchtui.FgRGB(rPrimary, gPrimary, bPrimary)
 	black := patchtui.FgRGB(0, 0, 0)
@@ -18,20 +17,13 @@ func renderStatusBar(width int, st statusInfo) string {
 	gray7 := patchtui.BgRGB(rSubtle, gSubtle, bSubtle)
 	dark := patchtui.BgRGB(rDark, gDark, bDark)
 	redBg := patchtui.BgRGB(rRedBadge, gRedBadge, bRedBadge)
-	greenBg := patchtui.BgRGB(22, 101, 52) // gray-700 swap when streaming
 
-	// Pick the bar's main background based on state.
 	var barBg, badgeBg, badgeFg string
-	switch {
-	case st.ctrlCHint:
+	if st.ctrlCHint {
 		barBg = redBg
 		badgeBg = patchtui.BgRGB(rPrimary, gPrimary, bPrimary)
 		badgeFg = black
-	case st.busy:
-		barBg = greenBg
-		badgeBg = greenBg
-		badgeFg = white
-	default:
+	} else {
 		barBg = gray7
 		badgeBg = patchtui.BgRGB(rPrimary, gPrimary, bPrimary)
 		badgeFg = black
@@ -41,13 +33,9 @@ func renderStatusBar(width int, st statusInfo) string {
 	mode := styled(" "+st.mode+" ", white, redBg, true)
 
 	var mid string
-	switch {
-	case st.ctrlCHint:
+	if st.ctrlCHint {
 		mid = styled(" press ctrl+c again to exit ", white, redBg, true)
-	case st.busy:
-		text := fmt.Sprintf(" %s  thinking  %s ", spinnerGlyph(), formatTokens(st.tokens, st.contextWindow))
-		mid = styled(text, white, greenBg, false)
-	default:
+	} else {
 		text := " " + st.statusMsg + " "
 		if st.tokens > 0 {
 			text += fmt.Sprintf("│ %s ", formatTokens(st.tokens, st.contextWindow))
@@ -55,16 +43,9 @@ func renderStatusBar(width int, st statusInfo) string {
 		mid = styled(text, gray4, gray7, false)
 	}
 
-	var right string
-	if st.busy {
-		right = styled("  ", white, dark, false) +
-			styled("ctrl+c", yellow, dark, true) +
-			styled(" cancel  ", white, dark, false) + mode
-	} else {
-		right = styled("  ", gray4, dark, false) +
-			styled("/h", yellow, dark, true) +
-			styled(" help  ", gray4, dark, false) + mode
-	}
+	right := styled("  ", gray4, dark, false) +
+		styled("/h", yellow, dark, true) +
+		styled(" help  ", gray4, dark, false) + mode
 
 	pad := width - patchtui.VisibleLen(left) - patchtui.VisibleLen(mid) - patchtui.VisibleLen(right)
 	if pad < 0 {
@@ -73,13 +54,98 @@ func renderStatusBar(width int, st statusInfo) string {
 	return left + mid + styled(strings.Repeat(" ", pad), white, barBg, false) + right
 }
 
-// statusInfo carries everything renderStatusBar needs.
+// renderBusyLine returns the single live bar shown while the app is busy.
+// Rainbow gradient background spans the full width; spinner + "thinking" on
+// the left, token count center-ish, ctrl+c hint on the right. Foreground
+// glyphs are drawn over the gradient cell-by-cell.
+func renderBusyLine(width int, st statusInfo) string {
+	if width <= 0 {
+		return ""
+	}
+
+	// Foreground content laid out left/middle/right onto a cell grid.
+	cells := make([]rune, width)
+	bold := make([]bool, width)
+	for i := range cells {
+		cells[i] = ' '
+	}
+
+	putRunes := func(start int, runes []rune, boldRun bool) {
+		for i, r := range runes {
+			col := start + i
+			if col < 0 || col >= width {
+				continue
+			}
+			cells[col] = r
+			bold[col] = boldRun
+		}
+	}
+
+	leftRunes := []rune(fmt.Sprintf(" %s thinking ", spinnerGlyph()))
+	putRunes(0, leftRunes, false)
+
+	if st.tokens > 0 {
+		toks := []rune(fmt.Sprintf(" %s ", formatTokens(st.tokens, st.contextWindow)))
+		putRunes(len(leftRunes)+1, toks, false)
+	}
+
+	// Right block: "  ctrl+c cancel "
+	prefix := []rune("  ")
+	ctrl := []rune("ctrl+c")
+	suffix := []rune(" cancel ")
+	rightLen := len(prefix) + len(ctrl) + len(suffix)
+	rightStart := width - rightLen
+	if rightStart < 0 {
+		rightStart = 0
+	}
+	putRunes(rightStart, prefix, false)
+	putRunes(rightStart+len(prefix), ctrl, true)
+	putRunes(rightStart+len(prefix)+len(ctrl), suffix, false)
+
+	// Rainbow background per column, white foreground (bold for ctrl+c).
+	stops := [...][3]int{
+		{180, 70, 70},   // red
+		{200, 130, 70},  // orange
+		{200, 180, 80},  // yellow
+		{90, 170, 100},  // green
+		{80, 140, 200},  // blue
+		{150, 110, 200}, // violet
+	}
+	rainbow := func(col int) (r, g, b int) {
+		t := float64(col) / float64(max(width-1, 1))
+		pos := t * float64(len(stops)-1)
+		i0 := int(pos)
+		i1 := i0 + 1
+		if i1 >= len(stops) {
+			i1 = len(stops) - 1
+		}
+		frac := pos - float64(i0)
+		lerp := func(a, b int) int { return a + int(float64(b-a)*frac+0.5) }
+		return lerp(stops[i0][0], stops[i1][0]),
+			lerp(stops[i0][1], stops[i1][1]),
+			lerp(stops[i0][2], stops[i1][2])
+	}
+
+	var b strings.Builder
+	for col, r := range cells {
+		rr, gg, bb := rainbow(col)
+		b.WriteString(patchtui.BgRGB(rr, gg, bb))
+		b.WriteString(patchtui.FgRGB(255, 255, 255))
+		if bold[col] {
+			b.WriteString(patchtui.Bold)
+		}
+		b.WriteRune(r)
+		b.WriteString(patchtui.Reset)
+	}
+	return b.String()
+}
+
+// statusInfo carries everything renderStatusBar / renderBusyLine need.
 type statusInfo struct {
 	mode          string // mode badge text (persona name)
 	statusMsg     string // model/provider line when idle
 	tokens        int
 	contextWindow int // model context window size; 0 = unknown (no % shown)
-	busy          bool
 	ctrlCHint     bool
 }
 

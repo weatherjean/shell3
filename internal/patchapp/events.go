@@ -11,8 +11,8 @@ type Event interface{ event() }
 type ChunkEvent struct{ Text string }
 
 // ReasoningChunkEvent is one streaming reasoning/thinking delta from the LLM.
-// Displayed transiently in the stream preview and flushed to scrollback when
-// text output begins. Not saved to conversation history.
+// Committed line-by-line to scrollback in dim gray (see chat.drainTurn).
+// Not saved to conversation history.
 type ReasoningChunkEvent struct{ Text string }
 
 // AppendEvent is pre-formatted text (typically tool output) to commit to

@@ -50,9 +50,6 @@ func (f *fakeApp) SetBusy(busy bool, cancel context.CancelFunc) {
 	f.mu.Unlock()
 }
 func (f *fakeApp) SetStatus(msg string) { f.record(fmt.Sprintf("SetStatus(%q)", msg)) }
-func (f *fakeApp) SetStreamPreview(lines []string) {
-	f.record(fmt.Sprintf("SetStreamPreview(%d)", len(lines)))
-}
 func (f *fakeApp) SetTokens(n int)        { f.record(fmt.Sprintf("SetTokens(%d)", n)) }
 func (f *fakeApp) SetContextWindow(n int) { f.record(fmt.Sprintf("SetContextWindow(%d)", n)) }
 func (f *fakeApp) WithReleasedTerminal(fn func()) {
@@ -105,13 +102,10 @@ func TestDrainTurn_ChunkOnly_StreamsAndCommits(t *testing.T) {
 		patchapp.TurnDoneEvent{Usage: llm.Usage{TotalTokens: 42}},
 	})
 
-	// Each chunk triggers SetStreamPreview; TurnDone clears preview, prints
-	// committed text, sets tokens, clears busy.
+	// Chunks without trailing newline buffer silently; TurnDone prints the
+	// remainder to scrollback, sets tokens, clears busy.
 	if !containsAll(calls,
-		"SetStreamPreview",
-		"SetStreamPreview",
-		"SetStreamPreview(0)", // cleared on done
-		"Print(",              // committed render
+		"Print(",
 		"SetTokens(42)",
 		"SetBusy(false)",
 	) {
@@ -147,13 +141,11 @@ func TestDrainTurn_AppendCommitsPendingStreamFirst(t *testing.T) {
 		patchapp.TurnDoneEvent{},
 	})
 
-	// Order matters: stream chunk previews, then on Append we clear preview,
-	// commit stream, then commit append.
+	// Chunk buffers silently (no newline). Append flushes streamBuf to
+	// scrollback, then commits the append text. Order must be preserved.
 	wantOrder := []string{
-		"SetStreamPreview(1)", // chunk preview
-		"SetStreamPreview(0)", // cleared before commit
-		"Print(",              // committed stream
-		"Print(",              // committed append
+		"Print(", // committed stream remainder
+		"Print(", // committed append
 		"SetBusy(false)",
 	}
 	if !containsAll(calls, wantOrder...) {
@@ -176,6 +168,46 @@ func TestDrainTurn_DoneNoStream_NoCommit(t *testing.T) {
 	}
 }
 
+func TestDrainTurn_NewlineCommitsLineMidStream(t *testing.T) {
+	// Chunks containing \n commit completed lines to scrollback as they
+	// arrive — Print fires before TurnDone, not only on flush.
+	calls, _ := runDrain(t, []patchapp.Event{
+		patchapp.ChunkEvent{Text: "first line\n"},
+		patchapp.ChunkEvent{Text: "second line\n"},
+		patchapp.TurnDoneEvent{},
+	})
+
+	prints := 0
+	for _, c := range calls {
+		if strings.HasPrefix(c, "Print(") {
+			prints++
+		}
+	}
+	if prints < 2 {
+		t.Fatalf("expected at least 2 Print calls (one per completed line), got %d:\n%s", prints, strings.Join(calls, "\n"))
+	}
+}
+
+func TestDrainTurn_FencedCodeBlockIsPrintedVerbatim(t *testing.T) {
+	// Lines inside a ``` fence must be printed verbatim — no patchmd
+	// header treatment of leading "#" comments, no bold/italic processing.
+	calls, _ := runDrain(t, []patchapp.Event{
+		patchapp.ChunkEvent{Text: "```python\n# this is a comment\nprint('hi')\n```\n"},
+		patchapp.TurnDoneEvent{},
+	})
+
+	// The comment line must reach Print as-is, not as a styled header.
+	foundComment := false
+	for _, c := range calls {
+		if strings.Contains(c, "# this is a comment") && !strings.Contains(c, "\x1b[1m") {
+			foundComment = true
+		}
+	}
+	if !foundComment {
+		t.Fatalf("expected verbatim '# this is a comment' line, got:\n%s", strings.Join(calls, "\n"))
+	}
+}
+
 func TestDrainTurn_DoneZeroTokens_SkipsSetTokens(t *testing.T) {
 	calls, _ := runDrain(t, []patchapp.Event{
 		patchapp.TurnDoneEvent{},
@@ -193,8 +225,8 @@ func TestDrainTurn_ErrorPrintsErrorLine(t *testing.T) {
 		patchapp.TurnErrEvent{Err: errors.New("boom")},
 	})
 
-	// Error path: clear preview, print buffered raw, print error line, clear busy.
-	if !containsAll(calls, "SetStreamPreview(0)", "Print(", "PrintLine(", "SetBusy(false)") {
+	// Error path: print buffered raw, print error line, clear busy.
+	if !containsAll(calls, "Print(", "PrintLine(", "SetBusy(false)") {
 		t.Fatalf("error path missing steps: %v", calls)
 	}
 	hasError := false

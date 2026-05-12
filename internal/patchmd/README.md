@@ -12,10 +12,10 @@ Supports the markdown subset LLMs actually produce:
 - `[links](url)` (rendered as styled label, URL dropped).
 - Lists (`-`, `*`, `1.`).
 - `> blockquotes`.
-- Fenced code blocks (` ```lang `) with built-in syntax highlighter for ~20 languages.
 
 ## What it does NOT do
 
+- No fenced code block handling. Callers stream-rendering line-by-line should track fence state themselves and emit code-block lines verbatim — per-line rendering can't see block context anyway.
 - No tables, HTML, footnotes, definition lists.
 - No line wrapping — caller's responsibility (use `patchtui.VisibleLen` to measure).
 - No streaming state. Re-render the full accumulated text on each chunk; the function is pure and idempotent.
@@ -29,4 +29,4 @@ for _, l := range lines {
 }
 ```
 
-For streaming previews over a TUI frame, see `patchapp`'s stream preview pattern.
+For streaming chat output, see `chat.drainTurn` — it commits per-line patchmd output to scrollback as chunks arrive.

@@ -199,41 +199,10 @@ func RunInteractive(ctx context.Context, cfg Config) (runErr error) {
 }
 
 // drainTurn consumes events from a turn goroutine, updating App state.
-// Streaming text accumulates into a buffer; on TurnDone the buffer is
-// rainbowThinkingHeader renders "◆ thinking" with a single sage diamond and
-// the word painted as a smooth rainbow gradient across its letters. Visually
-// announces a reasoning block without being loud.
-func rainbowThinkingHeader() string {
-	stops := [...][3]int{
-		{220, 110, 110}, // red
-		{220, 160, 90},  // orange
-		{220, 200, 100}, // yellow
-		{130, 195, 130}, // green
-		{110, 165, 220}, // blue
-		{170, 130, 210}, // violet
-	}
-	runes := []rune("◆thinking")
-	var b strings.Builder
-	for i, r := range runes {
-		t := float64(i) / float64(len(runes)-1)
-		pos := t * float64(len(stops)-1)
-		i0 := int(pos)
-		i1 := i0 + 1
-		if i1 >= len(stops) {
-			i1 = len(stops) - 1
-		}
-		frac := pos - float64(i0)
-		lerp := func(a, b int) int { return a + int(float64(b-a)*frac+0.5) }
-		r0, g0, bl0 := stops[i0][0], stops[i0][1], stops[i0][2]
-		r1, g1, bl1 := stops[i1][0], stops[i1][1], stops[i1][2]
-		b.WriteString(patchtui.FgRGB(lerp(r0, r1), lerp(g0, g1), lerp(bl0, bl1)))
-		b.WriteRune(r)
-	}
-	b.WriteString(patchtui.Reset)
-	return b.String()
-}
-
-// committed to scrollback and the App returns to idle.
+// LLM text streams to scrollback line-by-line via patchmd (or verbatim
+// inside fenced code blocks). Reasoning chunks stream to scrollback dim,
+// also line-by-line. Tool output arrives as AppendEvent and commits in
+// order. TurnDone flushes the trailing partial line and clears busy.
 func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Usage, cfg *Config, sink *outSink) {
 	var streamBuf strings.Builder
 	// reasoningBuf holds an incomplete (no trailing \n) reasoning line.
@@ -241,12 +210,20 @@ func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Us
 	var reasoningBuf strings.Builder
 	reasoningStarted := false
 
+	// Sage-green diamond prepended to the first reasoning line of a turn.
+	const thinkingGlyph = "\033[38;2;130;195;130m◆\033[0m"
+
 	commitReasoningLine := func(line string) {
-		app.Print([]string{patchtui.MutedThinking + line + patchtui.Reset})
+		prefix := ""
+		if !reasoningStarted {
+			prefix = thinkingGlyph + " "
+			reasoningStarted = true
+		}
+		app.Print([]string{prefix + patchtui.MutedThinking + line + patchtui.Reset})
 	}
 
-	// flushReasoningPartial commits any buffered partial reasoning line, adds a
-	// trailing blank line if thinking was shown, and clears the preview.
+	// flushReasoningPartial commits any buffered partial reasoning line and
+	// emits a trailing blank line if any reasoning was shown this turn.
 	flushReasoningPartial := func() {
 		if reasoningBuf.Len() == 0 && !reasoningStarted {
 			return
@@ -259,17 +236,48 @@ func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Us
 			app.Print([]string{""})
 			reasoningStarted = false
 		}
-		app.SetStreamPreview(nil)
 	}
 
-	flushPreview := func() {
+	// inFence tracks whether streaming is currently inside a ``` fenced code
+	// block so we can emit those lines verbatim (no inline-markdown
+	// processing). The fence toggle line itself is printed dim.
+	inFence := false
+
+	// flushStream commits complete lines from streamBuf to scrollback,
+	// keeping any partial trailing line in the buffer for the next chunk.
+	// Lines outside a fenced code block are rendered via patchmd per-line;
+	// lines inside a fence are printed verbatim. This is the only path that
+	// makes streamed LLM text visible — the live frame during busy is just
+	// the status bar (see patchapp.buildFrame).
+	flushStream := func() {
 		text := streamBuf.String()
 		if text == "" {
-			app.SetStreamPreview(nil)
 			return
 		}
 		w, _ := patchtui.Size()
-		app.SetStreamPreview(patchmd.Render(text, w-2))
+		var emit []string
+		for {
+			idx := strings.IndexByte(text, '\n')
+			if idx < 0 {
+				break
+			}
+			line := text[:idx]
+			trimmed := strings.TrimLeft(line, " \t")
+			if strings.HasPrefix(trimmed, "```") {
+				inFence = !inFence
+				emit = append(emit, patchtui.Dim+line+patchtui.Reset)
+			} else if inFence {
+				emit = append(emit, line)
+			} else {
+				emit = append(emit, patchmd.Render(line, w-2)...)
+			}
+			text = text[idx+1:]
+		}
+		streamBuf.Reset()
+		streamBuf.WriteString(text)
+		if len(emit) > 0 {
+			app.Print(emit)
+		}
 	}
 	publishUsage := func(u llm.Usage) {
 		if u == *lastUsage {
@@ -287,13 +295,9 @@ func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Us
 		}
 		switch v := ev.(type) {
 		case patchapp.ReasoningChunkEvent:
-			// Commit each complete line to scrollback immediately (gray, real-time).
-			// Show the current partial line in the stream preview so mid-line
-			// progress is visible without the multi-line ANSI state bug.
-			if !reasoningStarted {
-				app.Print([]string{rainbowThinkingHeader()})
-				reasoningStarted = true
-			}
+			// Commit each complete line to scrollback as it arrives (dim gray).
+			// The trailing partial line stays in reasoningBuf until the next
+			// newline or a flush (text start, tool output, turn done).
 			text := v.Text
 			for {
 				idx := strings.IndexByte(text, '\n')
@@ -305,21 +309,15 @@ func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Us
 				reasoningBuf.Reset()
 				text = text[idx+1:]
 			}
-			if reasoningBuf.Len() > 0 {
-				app.SetStreamPreview([]string{patchtui.MutedThinking + reasoningBuf.String() + patchtui.Reset})
-			} else {
-				app.SetStreamPreview(nil)
-			}
 
 		case patchapp.ChunkEvent:
 			flushReasoningPartial()
 			streamBuf.WriteString(v.Text)
-			flushPreview()
+			flushStream()
 
 		case patchapp.AppendEvent:
 			// Tool output. Commit any pending stream text first so order is preserved.
 			flushReasoningPartial()
-			app.SetStreamPreview(nil)
 			if streamBuf.Len() > 0 {
 				w, _ := patchtui.Size()
 				app.Print(patchmd.Render(streamBuf.String(), w-2))
@@ -333,7 +331,6 @@ func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Us
 		case patchapp.TurnDoneEvent:
 			flushReasoningPartial()
 			if streamBuf.Len() > 0 {
-				app.SetStreamPreview(nil)
 				w, _ := patchtui.Size()
 				app.Print(patchmd.Render(streamBuf.String(), w-2))
 				streamBuf.Reset()
@@ -344,7 +341,6 @@ func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Us
 		case patchapp.TurnErrEvent:
 			flushReasoningPartial()
 			if streamBuf.Len() > 0 {
-				app.SetStreamPreview(nil)
 				app.Print(patchtui.SplitLines(streamBuf.String()))
 				streamBuf.Reset()
 			}

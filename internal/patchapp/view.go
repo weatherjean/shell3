@@ -12,7 +12,6 @@ import "context"
 //
 // Methods that mutate UI state from any goroutine:
 //   - Print / PrintLine — append to scrollback above the live frame
-//   - SetStreamPreview — replace the live preview lines (nil = clear)
 //   - SetTokens         — update the status-bar token counter
 //   - SetContextWindow  — set model context window size for % display
 //   - SetBusy           — toggle the streaming/spinner state with a cancel
@@ -23,7 +22,6 @@ import "context"
 type AppView interface {
 	Print(lines []string)
 	PrintLine(line string)
-	SetStreamPreview(lines []string)
 	SetTokens(n int)
 	SetContextWindow(n int)
 	SetBusy(busy bool, cancel context.CancelFunc)

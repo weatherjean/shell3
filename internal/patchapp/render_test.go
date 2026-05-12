@@ -214,7 +214,7 @@ func equalStrings(a, b []string) bool {
 	return true
 }
 
-func TestBusySetTokensDefersUntilContentRender(t *testing.T) {
+func TestBusySetTokensAppliesImmediately(t *testing.T) {
 	var out strings.Builder
 	app := New("test", "provider/model", WelcomeInfo{})
 	app.r.SetOutput(&out)
@@ -223,24 +223,14 @@ func TestBusySetTokensDefersUntilContentRender(t *testing.T) {
 	out.Reset()
 
 	app.SetTokens(42)
-	if got := out.String(); got != "" {
-		t.Fatalf("busy SetTokens should not render immediately, got %q", got)
-	}
 
 	app.mu.Lock()
-	app.renderStatusOnly()
+	tokens := app.status.tokens
 	app.mu.Unlock()
-	if strings.Contains(out.String(), "t:42") {
-		t.Fatalf("status-only render should not apply pending token update: %q", out.String())
+	if tokens != 42 {
+		t.Fatalf("SetTokens during busy should update status.tokens immediately, got %d", tokens)
 	}
-	out.Reset()
-
-	app.Print([]string{"committed"})
-	got := out.String()
-	if !strings.Contains(got, "committed\r\n") || !strings.Contains(got, "t:42") {
-		t.Fatalf("content render should commit output and apply pending tokens: %q", got)
-	}
-	if strings.Count(got, "\x1b[?2026h") != 1 || strings.Count(got, "\x1b[?2026l") != 1 {
-		t.Fatalf("content render should be one synchronized update: %q", got)
+	if out.String() == "" {
+		t.Fatalf("SetTokens during busy should paint busy bar with new tokens")
 	}
 }

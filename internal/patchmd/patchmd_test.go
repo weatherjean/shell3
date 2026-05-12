@@ -144,7 +144,10 @@ func TestRender_HeaderListBlockquote(t *testing.T) {
 	}
 }
 
-func TestRender_FencedCode(t *testing.T) {
+// patchmd no longer handles fenced code blocks — fence detection is the
+// caller's job. This test verifies the body text of a fenced block passes
+// through Render unscathed (treated as plain lines).
+func TestRender_FencedCodePassthrough(t *testing.T) {
 	in := "```go\nfunc x() {}\n```\n"
 	lines := Render(in, 80)
 	joined := stripANSI(strings.Join(lines, "\n"))

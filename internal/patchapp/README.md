@@ -7,7 +7,7 @@ App shell for inline chat-style terminal apps. Built on `patchtui`. Owns the inp
 - **Input loop** (`loop.go`): self-pipe + `unix.Poll` over stdin, so [App.Pause] from another goroutine can interrupt the wait without stealing keystrokes from a subprocess.
 - **Terminal lifecycle** (`lifecycle.go`): `Pause()` / `Resume()` / `WithReleasedTerminal(fn)` — restore cooked mode for `nvim`, `!cmd`, hooks; pair with `Pause`/`Resume` from any goroutine.
 - **Slash commands** (`slash.go`): `RegisterSlash(cmd)` table-driven dispatch with aliases, auto `/help`, case-insensitive lookup.
-- **Live frame**: streaming preview above the input box, status bar at the bottom. Mutators (`SetStreamPreview`, `SetTokens`, `SetBusy`, `SetStatus`, `Print`, `PrintLine`) are goroutine-safe.
+- **Live frame**: idle frame is `input box + status bar`; busy frame is a single rainbow status line with spinner + tokens + cancel hint. Streaming text/reasoning commits to scrollback via `Print` (no live preview region). Mutators (`SetTokens`, `SetBusy`, `SetStatus`, `Print`, `PrintLine`) are goroutine-safe.
 - **Editor** (`editor.go`): multi-line input with bracketed paste, alt+enter for newline, arrow nav, esc clear, ctrl+c cancel + double-tap quit.
 - **`AppView` interface** (`view.go`): the narrow consumer-side contract for goroutines feeding events into the live frame. Implemented by `*App`.
 - **Quit** (`App.Quit`): cleanly exits the input loop so callers' deferred teardown runs (instead of `os.Exit`).
