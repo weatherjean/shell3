@@ -44,4 +44,8 @@ type TurnConfig struct {
 	Truncate    bool
 	Handlers    map[string]ToolHandler
 	Log         applog.Logger
+	// Headless is true when shell3 runs as a subprocess (no human at the
+	// keyboard). turn.go drops shell_interactive and injects a system
+	// reminder when this is set.
+	Headless bool
 }

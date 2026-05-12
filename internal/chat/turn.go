@@ -17,6 +17,27 @@ import (
 	"github.com/weatherjean/shell3/internal/store"
 )
 
+// filterHeadlessTools returns tools with shell_interactive removed when
+// headless is true. Other tools pass through unchanged.
+func filterHeadlessTools(tools []llm.ToolDefinition, headless bool) []llm.ToolDefinition {
+	if !headless {
+		return tools
+	}
+	out := make([]llm.ToolDefinition, 0, len(tools))
+	for _, td := range tools {
+		if td.Name == "shell_interactive" {
+			continue
+		}
+		out = append(out, td)
+	}
+	return out
+}
+
+// headlessReminder is injected once at the start of a headless turn so the
+// model understands the environment. Adapters that block destructive tool
+// calls also append their own reasons via the existing hook path.
+const headlessReminder = "<system-reminder>\nheadless mode: no interactive shell, no human available to answer questions. Decide and proceed. Destructive commands may be blocked by host policy — if a block occurs, adapt rather than retry.\n</system-reminder>"
+
 // logStreamError writes the failing turn's messages and the last raw HTTP
 // traffic to .shell3/last_error.json under cfg.WorkDir, then records the
 // event in the logger at Debug level (the TUI channel shows the error to the
@@ -109,9 +130,14 @@ func runTurn(ctx context.Context, cfg TurnConfig, sess *session, userMsg llm.Mes
 	allMsgs = append(allMsgs, llm.Message{Role: llm.RoleSystem, Content: cfg.Personality.SystemPrompt})
 	allMsgs = append(allMsgs, msgs...)
 
+	toolList := filterHeadlessTools(cfg.Personality.Tools, cfg.Headless)
+	if cfg.Headless {
+		allMsgs = injectReminder(allMsgs, headlessReminder)
+	}
+
 	// Build schema index for fast lookup during tool call validation.
-	toolSchemas := make(map[string]map[string]any, len(cfg.Personality.Tools))
-	for _, td := range cfg.Personality.Tools {
+	toolSchemas := make(map[string]map[string]any, len(toolList))
+	for _, td := range toolList {
 		toolSchemas[td.Name] = td.Parameters
 	}
 
@@ -122,7 +148,7 @@ func runTurn(ctx context.Context, cfg TurnConfig, sess *session, userMsg llm.Mes
 
 	var totalUsage llm.Usage
 	for {
-		text, reasoning, toolCalls, usage, err := streamOnce(ctx, cfg.LLM, allMsgs, cfg.Personality.Tools, ch)
+		text, reasoning, toolCalls, usage, err := streamOnce(ctx, cfg.LLM, allMsgs, toolList, ch)
 		if usage.TotalTokens > 0 || usage.PromptTokens > 0 || usage.CompletionTokens > 0 {
 			totalUsage = addUsage(totalUsage, usage)
 			ch <- patchapp.UsageEvent{Usage: totalUsage}

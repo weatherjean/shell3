@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/hooks"
@@ -62,6 +63,13 @@ type Config struct {
 	Secrets       map[string]string
 	Params        llm.RequestParams
 	Log           applog.Logger
+	// OutPath, when non-empty, opens a JSONL audit log at this path and
+	// streams every turn event into it. Independent of stdout/TUI rendering.
+	OutPath string
+	// Headless flips on subprocess-friendly behaviors: strips
+	// shell_interactive from the tool schema, injects a system-reminder
+	// explaining the constraints, and signals hooks via SHELL3_HEADLESS=1.
+	Headless bool
 }
 
 // NewHandlers constructs the built-in tool handler map from a Config.
@@ -87,7 +95,7 @@ func NewHandlers(cfg Config) map[string]ToolHandler {
 }
 
 // RunInteractive runs the TUI chat loop. Blocks until the user quits.
-func RunInteractive(ctx context.Context, cfg Config) error {
+func RunInteractive(ctx context.Context, cfg Config) (runErr error) {
 	sess := &session{}
 	sess.reminders.contextWindowFor = func(id string) int {
 		return contextWindowFor(cfg.Models, id)
@@ -109,6 +117,28 @@ func RunInteractive(ctx context.Context, cfg Config) error {
 			}
 		}()
 	}
+
+	sink, sinkCleanup, openErr := openSink(cfg.OutPath)
+	if openErr != nil {
+		return openErr
+	}
+	defer sinkCleanup()
+	if sink != nil {
+		_, model := splitStatus(cfg.StatusLine)
+		sink.WriteStart("(interactive)", cfg.ModeLabel, model, cfg.OutPath, cfg.Headless)
+	}
+
+	// Status defer for the sink end-line. Must be deferred AFTER sinkCleanup so
+	// it runs FIRST (LIFO), writing the end line before the file closes.
+	defer func() {
+		if sink != nil {
+			status := "ok"
+			if runErr != nil {
+				status = "error"
+			}
+			sink.WriteEnd(status)
+		}
+	}()
 
 	app := patchapp.New(cfg.ModeLabel, cfg.StatusLine, patchapp.WelcomeInfo{
 		Persona:      cfg.ModeLabel,
@@ -145,16 +175,17 @@ func RunInteractive(ctx context.Context, cfg Config) error {
 			Store:       cfg.Store,
 			UserTools:   cfg.UserTools,
 			Secrets:     cfg.Secrets,
-			Truncate:    cfg.Truncate,
+			Truncate:    cfg.Truncate || cfg.OutPath != "",
 			Handlers:    handlers,
 			Log:         logOrNoop(cfg.Log),
+			Headless:    cfg.Headless,
 		}
 		go func() {
 			defer cancel()
 			runTurn(turnCtx, tc, sess, userMsg, ch)
 			saveHistory(cfg.Store, sess, sess.id, prevLen)
 		}()
-		go drainTurn(ch, app, &lastUsage, &cfg)
+		go drainTurn(ch, app, &lastUsage, &cfg, sink)
 	}
 
 	registerSlashCommands(app, &cfg, sess, &lastUsage, launchTurn)
@@ -163,7 +194,8 @@ func RunInteractive(ctx context.Context, cfg Config) error {
 		launchTurn(llm.Message{Role: llm.RoleUser, Content: input})
 	})
 
-	return app.Run(ctx)
+	runErr = app.Run(ctx)
+	return
 }
 
 // drainTurn consumes events from a turn goroutine, updating App state.
@@ -202,7 +234,7 @@ func rainbowThinkingHeader() string {
 }
 
 // committed to scrollback and the App returns to idle.
-func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Usage, cfg *Config) {
+func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Usage, cfg *Config, sink *outSink) {
 	var streamBuf strings.Builder
 	// reasoningBuf holds an incomplete (no trailing \n) reasoning line.
 	// Complete lines are committed to scrollback immediately for real-time display.
@@ -250,6 +282,9 @@ func drainTurn(ch <-chan patchapp.Event, app patchapp.AppView, lastUsage *llm.Us
 	}
 
 	for ev := range ch {
+		if sink != nil {
+			sink.WriteEvent(ev)
+		}
 		switch v := ev.(type) {
 		case patchapp.ReasoningChunkEvent:
 			// Commit each complete line to scrollback immediately (gray, real-time).
@@ -691,6 +726,17 @@ func currentParamValue(p llm.RequestParams, name string) string {
 func RunOnce(ctx context.Context, cfg Config, input string) error {
 	sess := &session{}
 	ch := make(chan patchapp.Event, 256)
+
+	sink, sinkCleanup, err := openSink(cfg.OutPath)
+	if err != nil {
+		return err
+	}
+	defer sinkCleanup()
+	if sink != nil {
+		_, model := splitStatus(cfg.StatusLine)
+		sink.WriteStart(input, cfg.ModeLabel, model, cfg.OutPath, cfg.Headless)
+	}
+
 	tc := TurnConfig{
 		LLM:         cfg.LLM,
 		Hooks:       cfg.Hooks,
@@ -700,13 +746,18 @@ func RunOnce(ctx context.Context, cfg Config, input string) error {
 		Store:       cfg.Store,
 		UserTools:   cfg.UserTools,
 		Secrets:     cfg.Secrets,
-		Truncate:    cfg.Truncate,
+		Truncate:    cfg.Truncate || cfg.OutPath != "", // full output when sink is active
 		Handlers:    NewHandlers(cfg),
 		Log:         logOrNoop(cfg.Log),
+		Headless:    cfg.Headless,
 	}
 	go runTurn(ctx, tc, sess, llm.Message{Role: llm.RoleUser, Content: input}, ch)
 
+	status := "ok"
 	for ev := range ch {
+		if sink != nil {
+			sink.WriteEvent(ev)
+		}
 		switch v := ev.(type) {
 		case patchapp.ChunkEvent:
 			fmt.Print(v.Text)
@@ -714,11 +765,34 @@ func RunOnce(ctx context.Context, cfg Config, input string) error {
 			fmt.Print(v.Text)
 		case patchapp.TurnErrEvent:
 			fmt.Fprintln(os.Stderr, "error:", v.Err)
+			status = "error"
 		case patchapp.TurnDoneEvent:
 			fmt.Println()
+		case patchapp.TTYExecEvent:
+			// Headless one-shot: refuse, unblock the turn with an error.
+			v.ReplyC <- "error: interactive TTY not available in headless mode"
 		}
 	}
+	if sink != nil {
+		sink.WriteEnd(status)
+	}
+	if status == "error" {
+		return fmt.Errorf("turn ended with error")
+	}
 	return nil
+}
+
+// openSink opens path for write+truncate (each run starts fresh) and returns
+// the sink and a cleanup closure. Returns (nil, no-op, nil) when path is empty.
+func openSink(path string) (*outSink, func(), error) {
+	if path == "" {
+		return nil, func() {}, nil
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("open --out %s: %w", path, err)
+	}
+	return newOutSink(f, time.Time{}), func() { _ = f.Close() }, nil
 }
 
 // pruneLastTurn removes the last user message and everything after it.

@@ -83,7 +83,7 @@ func runDrain(t *testing.T, events []patchapp.Event) ([]string, *llm.Usage) {
 		ch <- ev
 	}
 	close(ch)
-	drainTurn(ch, app, usage, cfg)
+	drainTurn(ch, app, usage, cfg, nil)
 	return app.snapshot(), usage
 }
 
@@ -236,7 +236,7 @@ func TestDrainTurn_TTYExecReleasesAndReplies(t *testing.T) {
 	ch <- patchapp.TTYExecEvent{Cmd: "true", ReplyC: replyC}
 	close(ch)
 
-	drainTurn(ch, app, usage, cfg)
+	drainTurn(ch, app, usage, cfg, nil)
 
 	select {
 	case got := <-replyC:

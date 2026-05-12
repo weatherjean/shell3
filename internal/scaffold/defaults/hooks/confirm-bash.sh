@@ -4,10 +4,15 @@
 #
 # Coverage: bash, bash_bg, shell_interactive. All other tools allowed.
 #
+# Headless mode (set by shell3 when --out is given OR stdin is piped with no
+# TTY): no widget prompt is possible, so this hook applies a safe policy:
+#   - SHELL3_HEADLESS=1, SHELL3_HEADLESS_TRUST unset → block dangerous, allow safe.
+#   - SHELL3_HEADLESS=1, SHELL3_HEADLESS_TRUST=1     → allow everything (orchestrator's risk).
+#
 # Match strategy: each pattern is an Extended Regular Expression run against
-# the raw command string with `grep -E -q`. If ANY pattern matches, the user
-# is prompted via the `shell3 widget pick` selector. If none match, the call
-# is allowed silently — zero TTY noise, zero latency on routine work.
+# the raw command string with `grep -E -q`. If ANY pattern matches in
+# interactive mode, the user is prompted via the `shell3 widget pick` selector.
+# In headless mode the same match drives the auto-block.
 #
 # To extend / override:
 #   - Copy this file and edit the DANGER_PATTERNS array below.
@@ -131,6 +136,17 @@ for pat in "${DANGER_PATTERNS[@]}"; do
     break
   fi
 done
+
+# Headless policy: dangerous → block (model adapts), safe → allow.
+# Set SHELL3_HEADLESS_TRUST=1 to bypass and use the same logic as interactive.
+if [[ "$SHELL3_HEADLESS" == "1" && "$SHELL3_HEADLESS_TRUST" != "1" ]]; then
+  if [[ -n "$HIT" ]]; then
+    echo '{"action":"block","reason":"Headless mode: destructive command requires human approval. Try a non-destructive alternative or skip this step."}'
+    exit 0
+  fi
+  echo '{"action":"allow"}'
+  exit 0
+fi
 
 if [[ -z "$HIT" ]]; then
   echo '{"action":"allow"}'

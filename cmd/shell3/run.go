@@ -32,6 +32,7 @@ type runFlags struct {
 	model    string
 	noBash   bool
 	noMemory bool
+	outPath  string
 }
 
 func newRunCommand() *cobra.Command {
@@ -56,6 +57,7 @@ func newRunCommand() *cobra.Command {
 	cmd.Flags().StringVar(&f.model, "model", "", "Model ID override (default: first model in the instance's models list)")
 	cmd.Flags().BoolVar(&f.noBash, "no-bash", false, "Disable bash and shell_interactive tools")
 	cmd.Flags().BoolVar(&f.noMemory, "no-memory-tools", false, "Disable memory and history tools; skip opening the store")
+	cmd.Flags().StringVar(&f.outPath, "out", "", "Stream a JSONL audit log of this run to <path>. Enables headless mode.")
 	return cmd
 }
 
@@ -67,6 +69,14 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("get home directory: %w", err)
+	}
+
+	headless := f.outPath != "" || (!term.IsTerminal(int(os.Stdin.Fd())) && initialInput != "")
+	if headless {
+		_ = os.Setenv("SHELL3_HEADLESS", "1")
+		if f.outPath != "" {
+			_ = os.Setenv("SHELL3_OUT", f.outPath)
+		}
 	}
 
 	g := paths.NewGlobal(homeDir)
@@ -278,6 +288,8 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		Secrets:       secretsMap,
 		Params:        pers.Parameters,
 		Log:           log,
+		OutPath:       f.outPath,
+		Headless:      headless,
 	}
 	cfg.Reloader = func() (persona.Persona, map[string]usertools.Tool, error) {
 		newPCfg, newBody, err := persona.ParseConfig([]string{l.Personas, g.Personas}, personaName)
