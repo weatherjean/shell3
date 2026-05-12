@@ -376,6 +376,19 @@ func (r *Renderer) Erase() {
 	r.cursorRow = 0
 }
 
+// SyncSize re-samples the terminal size and resets render state so the
+// next Render paints fresh at the current cursor position. Unlike Reset,
+// it is intended for use after the caller has already erased the old
+// frame (via Erase), so no screen clear is emitted.
+func (r *Renderer) SyncSize() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.prev = nil
+	r.inited = false
+	r.cursorRow = 0
+	r.width, r.height = r.size()
+}
+
 // Reset clears the renderer's internal state. The next call to
 // [Renderer.Render] will be treated as a first render at the current
 // cursor position. Call Reset after operations that disturb the terminal
@@ -391,15 +404,12 @@ func (r *Renderer) Reset() {
 	r.width, r.height = r.size()
 }
 
-// fullRender writes the entire frame from scratch. On a size change the
-// visible screen is cleared first; scrollback above is preserved by the
-// terminal.
-func (r *Renderer) fullRender(buf *strings.Builder, lines []string, sizeChanged bool) {
-	if sizeChanged {
-		buf.WriteString("\x1b[2J\x1b[H") // clear screen, cursor home
-	} else {
-		buf.WriteString("\r")
-	}
+// fullRender writes the entire frame from scratch starting at the current
+// cursor row. Callers are responsible for erasing any pre-existing live
+// frame (via Erase) before invoking this on a resize; fullRender never
+// emits a screen clear so scrollback above is preserved verbatim.
+func (r *Renderer) fullRender(buf *strings.Builder, lines []string, _ bool) {
+	buf.WriteString("\r")
 	for i, line := range lines {
 		if i > 0 {
 			buf.WriteString("\r\n")

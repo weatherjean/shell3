@@ -94,6 +94,17 @@ type App struct {
 
 	// Welcome card data printed once on session start.
 	welcome WelcomeInfo
+
+	// resizePending is set by winchLoop on SIGWINCH and consumed by the next
+	// render. The old frame is erased and the renderer re-syncs to the new
+	// terminal size before painting fresh, avoiding any full-screen clear.
+	resizePending bool
+
+	// altScreen, if true, makes Run switch to the terminal's alternate
+	// screen buffer for the session and restore the primary on exit. Used
+	// to keep the inline TUI from polluting scrollback inside multiplexers
+	// like tmux. Set via SetAltScreen before Run.
+	altScreen bool
 }
 
 // New returns a new App with the given mode label, initial status text, and
@@ -111,6 +122,10 @@ func New(mode, statusMsg string, welcome WelcomeInfo) *App {
 
 // SetSubmit registers the callback fired on Enter.
 func (a *App) SetSubmit(fn SubmitFunc) { a.submit = fn }
+
+// SetAltScreen toggles use of the terminal's alternate screen buffer.
+// Must be called before Run.
+func (a *App) SetAltScreen(on bool) { a.altScreen = on }
 
 // Quit asks the input loop to exit cleanly. Run will return after the
 // current input batch finishes processing, allowing the caller's deferred
@@ -141,6 +156,11 @@ func (a *App) liveFrameLocked() []string {
 func (a *App) render() {
 	if a.paused {
 		return
+	}
+	if a.resizePending {
+		a.r.Erase()
+		a.r.SyncSize()
+		a.resizePending = false
 	}
 	a.r.Render(a.liveFrameLocked())
 }
