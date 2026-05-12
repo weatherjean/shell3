@@ -3,6 +3,7 @@ package chat
 import (
 	"encoding/json"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,10 +15,18 @@ import (
 // outSink writes one JSONL event per call to a writer. Safe for concurrent
 // writes; serializes through an internal mutex. All text payloads have ANSI
 // escape sequences stripped before serialization.
+//
+// Streaming text and reasoning deltas are accumulated per message and flushed
+// as a single "text" or "reasoning" event whenever a boundary event arrives
+// (tool, usage, turn_done, error, tty_exec_request) or on WriteEnd. This keeps
+// the JSONL coherent — one event per logical message — instead of one event
+// per token.
 type outSink struct {
-	mu  sync.Mutex
-	w   io.Writer
-	now func() time.Time
+	mu        sync.Mutex
+	w         io.Writer
+	now       func() time.Time
+	textBuf   strings.Builder
+	reasonBuf strings.Builder
 }
 
 func newOutSink(w io.Writer, fixed time.Time) *outSink {
@@ -47,13 +56,9 @@ type outEvent struct {
 	Total      int    `json:"total,omitempty"`
 }
 
-func (s *outSink) write(e outEvent) {
-	if s == nil {
-		return
-	}
+// writeLocked serializes one event. Caller must hold s.mu.
+func (s *outSink) writeLocked(e outEvent) {
 	e.TS = s.now().Format(time.RFC3339Nano)
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	data, err := json.Marshal(e)
 	if err != nil {
 		return
@@ -62,38 +67,75 @@ func (s *outSink) write(e outEvent) {
 	_, _ = s.w.Write(data)
 }
 
+// flushBuffersLocked emits any accumulated reasoning then text as single events.
+// Order (reasoning first) matches the model's logical sequence: think, then speak.
+// Caller must hold s.mu.
+func (s *outSink) flushBuffersLocked() {
+	if s.reasonBuf.Len() > 0 {
+		s.writeLocked(outEvent{Kind: "reasoning", Text: s.reasonBuf.String()})
+		s.reasonBuf.Reset()
+	}
+	if s.textBuf.Len() > 0 {
+		s.writeLocked(outEvent{Kind: "text", Text: s.textBuf.String()})
+		s.textBuf.Reset()
+	}
+}
+
 // WriteStart emits the first line of the JSONL stream.
 func (s *outSink) WriteStart(input, persona, model, out string, headless bool) {
+	if s == nil {
+		return
+	}
 	h := headless
-	s.write(outEvent{Kind: "start", Input: input, Persona: persona, Model: model, Out: out, Headless: &h})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.writeLocked(outEvent{Kind: "start", Input: input, Persona: persona, Model: model, Out: out, Headless: &h})
 }
 
-// WriteEnd emits the final line. status should be "ok" or "error".
+// WriteEnd flushes any pending accumulated text/reasoning and emits the final line.
 func (s *outSink) WriteEnd(status string) {
-	s.write(outEvent{Kind: "end", Status: status})
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.flushBuffersLocked()
+	s.writeLocked(outEvent{Kind: "end", Status: status})
 }
 
-// WriteEvent maps a patchapp.Event to its JSONL form.
+// WriteEvent maps a patchapp.Event to its JSONL form. Streaming text and
+// reasoning deltas accumulate into per-message buffers; every other event
+// kind flushes pending buffers before emitting itself.
 func (s *outSink) WriteEvent(ev patchapp.Event) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	switch v := ev.(type) {
 	case patchapp.ChunkEvent:
-		s.write(outEvent{Kind: "text", Text: patchtui.StripANSI(v.Text)})
+		s.textBuf.WriteString(patchtui.StripANSI(v.Text))
 	case patchapp.ReasoningChunkEvent:
-		s.write(outEvent{Kind: "reasoning", Text: patchtui.StripANSI(v.Text)})
+		s.reasonBuf.WriteString(patchtui.StripANSI(v.Text))
 	case patchapp.AppendEvent:
-		s.write(outEvent{Kind: "tool", Raw: patchtui.StripANSI(v.Text)})
+		s.flushBuffersLocked()
+		s.writeLocked(outEvent{Kind: "tool", Raw: patchtui.StripANSI(v.Text)})
 	case patchapp.UsageEvent:
-		s.write(usageEv("usage", v.Usage))
+		s.flushBuffersLocked()
+		s.writeLocked(usageEv("usage", v.Usage))
 	case patchapp.TurnDoneEvent:
-		s.write(usageEv("turn_done", v.Usage))
+		s.flushBuffersLocked()
+		s.writeLocked(usageEv("turn_done", v.Usage))
 	case patchapp.TurnErrEvent:
+		s.flushBuffersLocked()
 		msg := ""
 		if v.Err != nil {
 			msg = v.Err.Error()
 		}
-		s.write(outEvent{Kind: "error", Error: msg})
+		s.writeLocked(outEvent{Kind: "error", Error: msg})
 	case patchapp.TTYExecEvent:
-		s.write(outEvent{Kind: "tty_exec_request", Cmd: v.Cmd, WorkDir: v.WorkDir})
+		s.flushBuffersLocked()
+		s.writeLocked(outEvent{Kind: "tty_exec_request", Cmd: v.Cmd, WorkDir: v.WorkDir})
 	}
 }
 

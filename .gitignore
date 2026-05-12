@@ -2,3 +2,4 @@
 /bin/
 .shell3/.env
 ai-do-not-read.*
+.shell3/bg.json

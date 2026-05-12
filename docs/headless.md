@@ -37,8 +37,8 @@ One JSON object per line. Every event carries `ts` (RFC3339Nano UTC) and `kind`.
 | Kind | Fields | Meaning |
 |------|--------|---------|
 | `start` | `input`, `persona`, `model`, `out`, `headless` | First line of every file. Identifies the run. |
-| `text` | `text` | Assistant text token. Concatenate all `text` events for the full reply. |
-| `reasoning` | `text` | Reasoning / thinking token (not part of saved history). |
+| `text` | `text` | Assistant reply (coalesced — one event per message, not per token). |
+| `reasoning` | `text` | Reasoning / thinking block (coalesced — one event per think block, not per token). Not part of saved history. |
 | `tool` | `raw` | Pre-formatted tool call block (header + output). ANSI stripped. |
 | `tty_exec_request` | `cmd`, `workdir` | Model asked for `shell_interactive`. Always denied in headless. |
 | `usage` | `prompt`, `completion`, `total` | Intermediate token usage between LLM rounds. |
@@ -47,6 +47,11 @@ One JSON object per line. Every event carries `ts` (RFC3339Nano UTC) and `kind`.
 | `end` | `status` | Last line. `status` is `"ok"` or `"error"`. |
 
 All `text` and `raw` fields have ANSI escape sequences removed.
+
+Streaming text and reasoning deltas are accumulated and flushed as a single
+event whenever a boundary event arrives (tool call, usage, turn_done, error,
+tty_exec_request) or on `end`. This keeps the JSONL coherent — one event per
+logical message — instead of one event per LLM token.
 
 ## Env vars exposed to hooks
 
