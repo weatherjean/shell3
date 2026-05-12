@@ -169,6 +169,7 @@ func runTurn(ctx context.Context, cfg TurnConfig, sess *session, userMsg llm.Mes
 		var cancelReason string
 		for idx, tc := range toolCalls {
 			if ctx.Err() != nil {
+				ch <- patchapp.TurnErrEvent{Err: ctx.Err()}
 				return
 			}
 
@@ -226,6 +227,17 @@ func runTurn(ctx context.Context, cfg TurnConfig, sess *session, userMsg llm.Mes
 				case "bash":
 					command := parseBashArgs(tc.RawArgs)
 					ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Yellow+patchtui.Bold+"#%s $ %s"+patchtui.Reset+"\n", tc.ID, command)}
+					out, _ = handler.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), toolCfg)
+					display := truncateOutput(out)
+					if cfg.Truncate {
+						display = out
+					}
+					ch <- patchapp.AppendEvent{Text: dimLines(strings.TrimRight(display, "\n")) + "\n\n"}
+				case "bash_bg":
+					command := parseBashArgs(tc.RawArgs)
+					// Red (bg)$ prefix so detached spawns stand out from
+					// normal foreground bash calls in scrollback.
+					ch <- patchapp.AppendEvent{Text: fmt.Sprintf(patchtui.Red+patchtui.Bold+"#%s (bg)$"+patchtui.Reset+patchtui.Bold+" %s"+patchtui.Reset+"\n", tc.ID, command)}
 					out, _ = handler.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), toolCfg)
 					display := truncateOutput(out)
 					if cfg.Truncate {
@@ -295,6 +307,7 @@ func runTurn(ctx context.Context, cfg TurnConfig, sess *session, userMsg llm.Mes
 		}
 
 		if ctx.Err() != nil {
+			ch <- patchapp.TurnErrEvent{Err: ctx.Err()}
 			return
 		}
 

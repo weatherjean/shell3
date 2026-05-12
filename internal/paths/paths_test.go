@@ -50,4 +50,16 @@ func TestLocal(t *testing.T) {
 	if l.Personas != "/work/project/.shell3/personas" {
 		t.Fatalf("Personas: got %q", l.Personas)
 	}
+	if l.BGJobs != "/work/project/.shell3/bg.json" {
+		t.Fatalf("BGJobs: got %q", l.BGJobs)
+	}
+}
+
+func TestBGLog(t *testing.T) {
+	if got := paths.BGLogDir(); got != "/tmp/shell3/runs" {
+		t.Fatalf("BGLogDir: got %q", got)
+	}
+	if got := paths.BGLogPath("bg_abc123"); got != "/tmp/shell3/runs/bg_abc123.log" {
+		t.Fatalf("BGLogPath: got %q", got)
+	}
 }

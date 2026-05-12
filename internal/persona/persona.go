@@ -136,7 +136,7 @@ func Load(cfg PersonaConfig, body string, data TemplateData, hasStore, noBash bo
 	var tools []ToolDef
 	tools = append(tools, docsTool, pruneToolResultTool, compactHistoryTool)
 	if !noBash {
-		tools = append(tools, bashTool, shellInteractiveTool, editFileTool)
+		tools = append(tools, bashTool, bashBgTool, shellInteractiveTool, editFileTool)
 	}
 	if hasStore {
 		tools = append(tools, storeTools...)
@@ -170,7 +170,7 @@ func Load(cfg PersonaConfig, body string, data TemplateData, hasStore, noBash bo
 // to prevent name collisions.
 func BuiltinToolNames() map[string]struct{} {
 	all := append([]ToolDef{docsTool, pruneToolResultTool, compactHistoryTool, bashTool, shellInteractiveTool,
-		editFileTool}, storeTools...)
+		editFileTool, bashBgTool}, storeTools...)
 	names := make(map[string]struct{}, len(all))
 	for _, t := range all {
 		names[t.Name] = struct{}{}
@@ -262,6 +262,28 @@ var shellInteractiveTool = ToolDef{
 				"type":        "string",
 				"description": "The shell command to run interactively",
 			},
+		},
+		"required": []string{"command"},
+	},
+}
+
+var bashBgTool = ToolDef{
+	Name: "bash_bg",
+	Description: "Spawn a detached background shell command and immediately return its pid + log path. " +
+		"The process runs in its own process group; shell3 does not wait on it. Use this for long-running " +
+		"servers, watchers, or any command that should not block the turn (e.g. `npx some-server`). " +
+		"Output is captured to a log file under /tmp/shell3/runs/<id>.log. Manage running jobs with the " +
+		"regular `bash` tool: " +
+		"`cat .shell3/bg.json` to list, " +
+		"`tail -n 100 <log>` to inspect output, " +
+		"`kill <pid>` or `kill -- -<pid>` (whole group) to stop, " +
+		"`kill -0 <pid>` to check if alive, " +
+		"`rm <log>` to clean up.",
+	Parameters: map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"command": map[string]any{"type": "string", "description": "The shell command to run in the background"},
+			"workdir": map[string]any{"type": "string", "description": "Working directory; defaults to the project root"},
 		},
 		"required": []string{"command"},
 	},

@@ -26,6 +26,40 @@ func TestRendererWritesValidUTF8(t *testing.T) {
 	}
 }
 
+func TestRendererSplitsMultilineEntries(t *testing.T) {
+	r := New()
+	var out bytes.Buffer
+	r.SetOutput(&out)
+
+	r.Render([]string{"? bash: line1\nline2\nline3" + CursorMarker})
+
+	got := out.String()
+	// Each split row must be separated by CRLF, not bare LF.
+	if strings.Contains(got, "line1\nline2") {
+		t.Fatalf("bare LF between split rows: %q", got)
+	}
+	for _, want := range []string{"line1", "line2", "line3"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing row %q: %q", want, got)
+		}
+	}
+	if !strings.Contains(got, "line1\r\n") || !strings.Contains(got, "line2\r\n") {
+		t.Fatalf("rows not separated by CRLF: %q", got)
+	}
+}
+
+func TestRendererStripsCarriageReturns(t *testing.T) {
+	r := New()
+	var out bytes.Buffer
+	r.SetOutput(&out)
+
+	r.Render([]string{"a\r\nb" + CursorMarker})
+	got := out.String()
+	if strings.Contains(got, "a\r\r\n") {
+		t.Fatalf("double CR leaked through: %q", got)
+	}
+}
+
 func TestRendererPrintAndRenderWritesOneSynchronizedUpdate(t *testing.T) {
 	r := New()
 	var out bytes.Buffer

@@ -153,6 +153,36 @@ func sizeFromFd(fd uintptr) (width, height int) {
 	return 80, 24
 }
 
+// expandLines splits any entries that contain embedded newlines into
+// separate frame rows. CR characters are stripped. Callers occasionally
+// pass multi-line strings (e.g. tool confirmation prompts whose Input
+// field carries a verbatim shell command); without this expansion the
+// terminal renders the bare LFs without a CR and produces staircase
+// output. Empty input is preserved as a single empty row so callers can
+// emit blank spacing intentionally.
+func expandLines(lines []string) []string {
+	needsSplit := false
+	for _, l := range lines {
+		if strings.ContainsAny(l, "\n\r") {
+			needsSplit = true
+			break
+		}
+	}
+	if !needsSplit {
+		return lines
+	}
+	out := make([]string, 0, len(lines))
+	for _, l := range lines {
+		l = strings.ReplaceAll(l, "\r", "")
+		if !strings.Contains(l, "\n") {
+			out = append(out, l)
+			continue
+		}
+		out = append(out, strings.Split(l, "\n")...)
+	}
+	return out
+}
+
 // Render diffs lines against the previous frame and writes the minimal
 // update. Unchanged lines are skipped; only the changed range is rewritten.
 //
@@ -166,6 +196,7 @@ func (r *Renderer) Render(lines []string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	lines = expandLines(lines)
 	width, height := r.size()
 
 	// Extract cursor marker.
@@ -221,6 +252,8 @@ func (r *Renderer) Print(lines []string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	lines = expandLines(lines)
+
 	var buf strings.Builder
 	buf.WriteString("\x1b[?25l\x1b[?2026h")
 
@@ -262,6 +295,8 @@ func (r *Renderer) PrintAndRender(lines, frame []string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	lines = expandLines(lines)
+	frame = expandLines(frame)
 	width, height := r.size()
 
 	// Extract cursor marker from the replacement frame.

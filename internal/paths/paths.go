@@ -30,6 +30,7 @@ type Local struct {
 	Tools    string // ./.shell3/tools/
 	Hooks    string // ./.shell3/hooks/
 	Personas string // ./.shell3/personas/
+	BGJobs   string // ./.shell3/bg.json (gitignored)
 }
 
 // NewGlobal returns a Global path set rooted at homeDir/.shell3/.
@@ -68,5 +69,13 @@ func NewLocal(cwd string) Local {
 		Tools:    filepath.Join(root, "tools"),
 		Hooks:    filepath.Join(root, "hooks"),
 		Personas: filepath.Join(root, "personas"),
+		BGJobs:   filepath.Join(root, "bg.json"),
 	}
 }
+
+// BGLogDir is where bash_bg writes per-job log files. Lives under /tmp so
+// the OS clears it on reboot; callers should mkdir before writing.
+func BGLogDir() string { return filepath.Join("/tmp", "shell3", "runs") }
+
+// BGLogPath returns the log file path for a given job id.
+func BGLogPath(id string) string { return filepath.Join(BGLogDir(), id+".log") }

@@ -182,6 +182,25 @@ body`)
 	}
 }
 
+func TestLoad_BashBgPresentByDefault(t *testing.T) {
+	dir := t.TempDir()
+	writePersona(t, dir, "base", simplePersona)
+
+	p := loadForTest(t, dir, "base", persona.TemplateData{}, false, false, nil)
+	if !hasToolNamed(p.Tools, "bash_bg") {
+		t.Errorf("bash_bg missing from default persona; tools: %v", toolNames(p.Tools))
+	}
+}
+
+func TestLoad_BashBgRespectsNoBash(t *testing.T) {
+	dir := t.TempDir()
+	writePersona(t, dir, "base", simplePersona)
+	p := loadForTest(t, dir, "base", persona.TemplateData{}, false, true, nil)
+	if hasToolNamed(p.Tools, "bash_bg") {
+		t.Errorf("bash_bg should be suppressed when noBash=true; tools: %v", toolNames(p.Tools))
+	}
+}
+
 func TestLoad_EmptyToolsLoadsAll(t *testing.T) {
 	dir := t.TempDir()
 	writePersona(t, dir, "base", simplePersona)

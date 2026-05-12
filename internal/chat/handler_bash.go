@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"syscall"
 	"time"
 )
 
@@ -15,6 +16,15 @@ const DefaultBashTimeoutSeconds = 10
 
 // MaxBashTimeoutSeconds caps the upper bound the model can request.
 const MaxBashTimeoutSeconds = 600
+
+// MaxBashOutputBytes caps captured stdout+stderr. Beyond this the middle is
+// elided so the model sees the head and tail of long outputs.
+const MaxBashOutputBytes = 30 * 1024
+
+// bashWaitDelay bounds how long c.Wait blocks on stdio pipes after the
+// process is killed. Grandchildren that inherit our fds would otherwise
+// hold the buffer copy goroutines open forever.
+const bashWaitDelay = 2 * time.Second
 
 // BashHandler executes a bash command and returns its combined stdout+stderr.
 // It respects context cancellation — callers set timeouts before invoking Execute.
@@ -29,6 +39,17 @@ func (BashHandler) Execute(ctx context.Context, id string, args json.RawMessage,
 	defer cancel()
 	c := exec.CommandContext(tctx, "bash", "-c", command)
 	c.Dir = cfg.WorkDir
+	// Put bash and its descendants in their own process group so we can
+	// signal the whole tree on cancel/timeout — bare SIGKILL on bash
+	// leaves grandchildren (e.g. node spawned by npx) holding our pipes.
+	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	c.Cancel = func() error {
+		if c.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-c.Process.Pid, syscall.SIGTERM)
+	}
+	c.WaitDelay = bashWaitDelay
 	var buf bytes.Buffer
 	c.Stdout = &buf
 	c.Stderr = &buf
@@ -41,7 +62,20 @@ func (BashHandler) Execute(ctx context.Context, id string, args json.RawMessage,
 	if buf.Len() == 0 {
 		return "(no output)", nil
 	}
-	return buf.String(), nil
+	return elideMiddle(buf.Bytes(), MaxBashOutputBytes), nil
+}
+
+// elideMiddle returns out unchanged if within max, otherwise keeps the
+// first and last half and elides the middle with a marker line.
+func elideMiddle(out []byte, max int) string {
+	if len(out) <= max {
+		return string(out)
+	}
+	half := max / 2
+	head := out[:half]
+	tail := out[len(out)-half:]
+	elided := len(out) - 2*half
+	return fmt.Sprintf("%s\n... [%d bytes elided] ...\n%s", head, elided, tail)
 }
 
 // parseBashArgsFull extracts command and timeout. Timeout defaults to

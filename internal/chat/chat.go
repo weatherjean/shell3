@@ -69,6 +69,7 @@ type Config struct {
 func NewHandlers(cfg Config) map[string]ToolHandler {
 	handlers := []ToolHandler{
 		BashHandler{},
+		BashBgHandler{},
 		EditHandler{},
 		PruneHandler{},
 		DocsHandler{docs: cfg.Docs},
