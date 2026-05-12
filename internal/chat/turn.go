@@ -200,9 +200,10 @@ func runTurn(ctx context.Context, cfg TurnConfig, sess *session, userMsg llm.Mes
 			}
 
 			decision, hookReason, hookErr := cfg.Hooks.OnToolCall(ctx, tc.Name, parseRawArgs(tc.RawArgs))
-			var out string
+			var out, userMsg string
 			if hookErr != nil {
 				out = fmt.Sprintf("Tool-call hook failed (the on_tool_call hook script itself errored, not the user): %v. Do not retry the same call without adjusting your approach.", hookErr)
+				userMsg = patchtui.Red + "hook error: " + hookErr.Error() + patchtui.Reset
 			} else if decision == hooks.ToolCallCancel {
 				if hookReason == "" {
 					hookReason = "user cancelled"
@@ -210,18 +211,39 @@ func runTurn(ctx context.Context, cfg TurnConfig, sess *session, userMsg llm.Mes
 				cancelled = true
 				cancelReason = hookReason
 				out = fmt.Sprintf("USER CANCELLED the turn before this %s call ran. Reason: %s. Subsequent tool calls in this turn were not executed.", tc.Name, hookReason)
+				userMsg = patchtui.Red + "cancelled: " + hookReason + patchtui.Reset
 			} else if decision == hooks.ToolCallDeny {
 				if hookReason == "" {
 					hookReason = "no reason given"
 				}
 				out = fmt.Sprintf("USER DENIED this %s tool call. Reason: %s. Treat this as the user explicitly disapproving this action — do NOT retry the same call. Acknowledge the denial, ask what they want instead, or pick a different approach.", tc.Name, hookReason)
+				userMsg = patchtui.Red + "denied: " + hookReason + patchtui.Reset
 			} else if schema, ok := toolSchemas[tc.Name]; ok {
 				if err := validateToolArgs(schema, json.RawMessage([]byte(tc.RawArgs))); err != nil {
 					out = fmt.Sprintf("error: invalid tool arguments: %v", err)
+					userMsg = patchtui.Red + "invalid arguments: " + err.Error() + patchtui.Reset
 				}
 			}
 			if out != "" {
-				// Hook blocked or validation failed — skip dispatch.
+				// Hook blocked or validation failed — show the would-be call
+				// header + reason in scrollback so the user sees what was
+				// denied/cancelled. Match the per-tool header style used on
+				// the success path (yellow $-prompt for bash family, default
+				// toolCallHeader otherwise).
+				var header string
+				switch tc.Name {
+				case "bash":
+					header = fmt.Sprintf(patchtui.Yellow+patchtui.Bold+"#%s $ %s"+patchtui.Reset, tc.ID, parseBashArgs(tc.RawArgs))
+				case "bash_bg":
+					header = fmt.Sprintf(patchtui.Red+patchtui.Bold+"#%s (bg)$"+patchtui.Reset+patchtui.Bold+" %s"+patchtui.Reset, tc.ID, parseBashArgs(tc.RawArgs))
+				case "shell_interactive":
+					header = fmt.Sprintf(patchtui.Yellow+patchtui.Bold+"#%s $ %s"+patchtui.Reset+" (interactive)", tc.ID, parseBashArgs(tc.RawArgs))
+				default:
+					_, isUserTool := cfg.UserTools[tc.Name]
+					header = toolCallHeader(tc.ID, tc.Name, tc.RawArgs, isUserTool)
+				}
+				ch <- patchapp.AppendEvent{Text: header + "\n"}
+				ch <- patchapp.AppendEvent{Text: "  " + userMsg + "\n\n"}
 			} else if tc.Name == "compact_history" {
 				ch <- patchapp.AppendEvent{Text: toolCallHeader(tc.ID, tc.Name, "", false) + "\n"}
 				out, allMsgs = handleCompactHistory(tc.RawArgs, cfg.Store, sess, allMsgs, cfg.Log)
