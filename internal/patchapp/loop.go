@@ -23,10 +23,6 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	a.oldTermState = oldState
 	defer term.Restore(int(os.Stdin.Fd()), oldState) //nolint:errcheck
-	if a.altScreen {
-		fmt.Print("\x1b[?1049h")
-		defer fmt.Print("\x1b[?1049l")
-	}
 	defer fmt.Print(pasteOff + "\x1b[?25h\n")
 
 	// Self-pipe so Pause from another goroutine can interrupt the Poll on
@@ -139,18 +135,41 @@ func (a *App) tickerLoop(ctx context.Context) {
 }
 
 // winchLoop marks a resize as pending on every SIGWINCH. The actual erase +
-// re-render happens inside App.render the next time it runs, driven by the
-// ticker (250ms cadence) or any natural state change (keystroke, stream
-// event). Bursts of SIGWINCH collapse to a single redraw because the flag is
-// idempotent — no debounce timer needed, and no screen clear is emitted.
+// winchLoop redraws the frame on terminal resize. The first SIGWINCH in
+// a burst immediately erases the live frame at its known anchor so a
+// stale bar at an old position does not linger on screen. The re-render
+// is debounced ~200ms so rapid drag-resize bursts collapse into one
+// paint at the final dimensions.
 func (a *App) winchLoop(ctx context.Context, winch <-chan os.Signal) {
+	var t *time.Timer
+	var pending <-chan time.Time
+	resizing := false
+
 	for {
 		select {
 		case <-ctx.Done():
+			if t != nil {
+				t.Stop()
+			}
 			return
 		case <-winch:
+			if !resizing {
+				resizing = true
+				a.mu.Lock()
+				a.r.Erase()
+				a.mu.Unlock()
+			}
+			if t != nil {
+				t.Stop()
+			}
+			t = time.NewTimer(200 * time.Millisecond)
+			pending = t.C
+		case <-pending:
+			pending = nil
+			resizing = false
 			a.mu.Lock()
-			a.resizePending = true
+			a.r.Reset()
+			a.render()
 			a.mu.Unlock()
 		}
 	}

@@ -70,10 +70,6 @@ type Config struct {
 	// shell_interactive from the tool schema, injects a system-reminder
 	// explaining the constraints, and signals hooks via SHELL3_HEADLESS=1.
 	Headless bool
-	// AltScreen runs the TUI on the terminal's alternate screen buffer so
-	// the live frame doesn't interleave with scrollback. Useful inside
-	// multiplexers like tmux where wheel scroll captures the pane.
-	AltScreen bool
 }
 
 // NewHandlers constructs the built-in tool handler map from a Config.
@@ -150,7 +146,6 @@ func RunInteractive(ctx context.Context, cfg Config) (runErr error) {
 		ActiveSkills: cfg.ActiveSkills,
 		ActiveTools:  cfg.ActiveTools,
 	})
-	app.SetAltScreen(cfg.AltScreen)
 	if _, initModel := splitStatus(cfg.StatusLine); initModel != "" {
 		app.SetContextWindow(contextWindowFor(cfg.Models, initModel))
 	}

@@ -27,13 +27,12 @@ import (
 )
 
 type runFlags struct {
-	persona   string
-	provider  string
-	model     string
-	noBash    bool
-	noMemory  bool
-	outPath   string
-	altScreen bool
+	persona  string
+	provider string
+	model    string
+	noBash   bool
+	noMemory bool
+	outPath  string
 }
 
 func newRunCommand() *cobra.Command {
@@ -59,7 +58,6 @@ func newRunCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&f.noBash, "no-bash", false, "Disable bash and shell_interactive tools")
 	cmd.Flags().BoolVar(&f.noMemory, "no-memory-tools", false, "Disable memory and history tools; skip opening the store")
 	cmd.Flags().StringVar(&f.outPath, "out", "", "Stream a JSONL audit log of this run to <path>. Enables headless mode.")
-	cmd.Flags().BoolVarP(&f.altScreen, "alt-screen", "A", false, "Run TUI on the terminal alternate screen (recommended inside tmux/screen).")
 	return cmd
 }
 
@@ -292,7 +290,6 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		Log:           log,
 		OutPath:       f.outPath,
 		Headless:      headless,
-		AltScreen:     f.altScreen,
 	}
 	cfg.Reloader = func() (persona.Persona, map[string]usertools.Tool, error) {
 		newPCfg, newBody, err := persona.ParseConfig([]string{l.Personas, g.Personas}, personaName)
