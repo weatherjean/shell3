@@ -3,6 +3,7 @@ package patchapp
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/weatherjean/shell3/internal/patchtui"
 )
@@ -51,7 +52,49 @@ func renderStatusBar(width int, st statusInfo) string {
 	if pad < 0 {
 		pad = 0
 	}
-	return left + mid + styled(strings.Repeat(" ", pad), white, barBg, false) + right
+	line := left + mid + styled(strings.Repeat(" ", pad), white, barBg, false) + right
+	// Guarantee the status bar fits on one row regardless of terminal width.
+	if width > 0 && patchtui.VisibleLen(line) > width {
+		line = truncateANSIToWidth(line, width) + patchtui.Reset
+	}
+	return line
+}
+
+// truncateANSIToWidth returns the longest prefix of s whose visible
+// width is at most width. ANSI SGR escape sequences (zero-width) are
+// preserved verbatim; visible content is counted per rune using
+// patchtui.RuneWidth so multi-byte UTF-8 characters (e.g. "│") count
+// as one column, not three.
+func truncateANSIToWidth(s string, width int) string {
+	if patchtui.VisibleLen(s) <= width {
+		return s
+	}
+	var b strings.Builder
+	vis := 0
+	i := 0
+	for i < len(s) {
+		if s[i] == '\x1b' {
+			j := i + 1
+			for j < len(s) && s[j] != 'm' {
+				j++
+			}
+			if j < len(s) {
+				j++
+			}
+			b.WriteString(s[i:j])
+			i = j
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		w := patchtui.RuneWidth(r)
+		if vis+w > width {
+			break
+		}
+		b.WriteString(s[i : i+size])
+		vis += w
+		i += size
+	}
+	return b.String()
 }
 
 // renderBusyLine returns the single live bar shown while the app is busy.
