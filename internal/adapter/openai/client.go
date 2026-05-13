@@ -15,7 +15,7 @@ import (
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/shared"
 
-	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/pkg/llm"
 )
 
 // bodyTap is an http.RoundTripper that records the last request/response and

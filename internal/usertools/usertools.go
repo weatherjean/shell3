@@ -12,7 +12,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/weatherjean/shell3/internal/persona"
+	"github.com/weatherjean/shell3/pkg/persona"
 )
 
 // Spec is the on-disk YAML format for a user tool.

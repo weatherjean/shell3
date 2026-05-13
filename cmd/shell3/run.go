@@ -11,18 +11,19 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/weatherjean/shell3/internal/applog"
+	"github.com/weatherjean/shell3/pkg/applog"
 	"github.com/weatherjean/shell3/internal/bootstrap"
-	"github.com/weatherjean/shell3/internal/chat"
+	"github.com/weatherjean/shell3/pkg/chat"
 	"github.com/weatherjean/shell3/internal/config"
-	"github.com/weatherjean/shell3/internal/hooks"
-	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/pkg/hooks"
+	"github.com/weatherjean/shell3/pkg/llm"
 	"github.com/weatherjean/shell3/internal/paths"
-	"github.com/weatherjean/shell3/internal/persona"
+	"github.com/weatherjean/shell3/pkg/persona"
 	"github.com/weatherjean/shell3/internal/scaffold"
 	"github.com/weatherjean/shell3/internal/secrets"
 	"github.com/weatherjean/shell3/internal/skills"
 	"github.com/weatherjean/shell3/internal/store"
+	"github.com/weatherjean/shell3/internal/tui"
 	"github.com/weatherjean/shell3/internal/usertools"
 )
 
@@ -333,9 +334,9 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	}
 
 	if initialInput != "" {
-		return chat.RunOnce(ctx, cfg, initialInput)
+		return tui.RunOnce(ctx, cfg, initialInput)
 	}
-	return chat.RunInteractive(ctx, cfg)
+	return tui.RunInteractive(ctx, cfg)
 }
 
 // resolveConnection picks the (instance, model) pair for this run.

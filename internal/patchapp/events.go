@@ -1,6 +1,6 @@
 package patchapp
 
-import "github.com/weatherjean/shell3/internal/llm"
+import "github.com/weatherjean/shell3/pkg/llm"
 
 // Event is the sealed interface implemented by all turn events emitted by
 // runTurn. It is sent on a channel from the turn goroutine and consumed by

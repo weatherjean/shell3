@@ -3,7 +3,7 @@ package anthropic
 import (
 	"testing"
 
-	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/pkg/llm"
 )
 
 func TestParamSpecs(t *testing.T) {

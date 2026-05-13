@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/weatherjean/shell3/internal/config"
-	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/pkg/llm"
 )
 
 type provider struct{}

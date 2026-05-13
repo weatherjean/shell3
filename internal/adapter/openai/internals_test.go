@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/pkg/llm"
 )
 
 // mockTransport satisfies http.RoundTripper and returns a fixed response.

@@ -1,0 +1,172 @@
+package chat
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/weatherjean/shell3/pkg/applog"
+	"github.com/weatherjean/shell3/pkg/hooks"
+	"github.com/weatherjean/shell3/pkg/llm"
+	"github.com/weatherjean/shell3/pkg/persona"
+	"github.com/weatherjean/shell3/internal/store"
+	"github.com/weatherjean/shell3/internal/usertools"
+)
+
+// ModelChoice pairs a provider name with one of its models and records the
+// model's context window in tokens. The Models slice on Config is built from
+// the auth store and consumed by /model resolution and reminder accounting.
+type ModelChoice struct {
+	// Provider is the adapter name (e.g. "openai", "anthropic").
+	Provider string
+	// Model is the provider-specific model id.
+	Model string
+	// ContextWindow is the maximum prompt+completion tokens, used by the
+	// reminder tracker to emit context-usage warnings. Zero means unknown.
+	ContextWindow int
+}
+
+// ContextWindowFor returns the context window for a model ID from the models list.
+func ContextWindowFor(models []ModelChoice, id string) int {
+	for _, m := range models {
+		if m.Model == id {
+			return m.ContextWindow
+		}
+	}
+	return 0
+}
+
+// LLMClient is the streaming interface the turn loop calls into. Implementers
+// must invoke onEvent synchronously for each delta (token, tool call, usage)
+// as it arrives from the provider and return an error only when the stream
+// cannot be completed. Returning nil with no events is treated as a no-op
+// turn. Implementations may also satisfy llm.TrafficInspector to expose the
+// last request/response bytes for error dumps.
+type LLMClient interface {
+	Stream(ctx context.Context, msgs []llm.Message, tools []llm.ToolDefinition, onEvent func(llm.StreamEvent)) error
+}
+
+// Config holds all dependencies for a chat session. It is the top-level
+// embedding contract: callers populate this once at startup and reuse it
+// across turns. TurnConfig is derived from Config for each turn.
+type Config struct {
+	// LLM is the active streaming client. Replace via ModelSwitcher when
+	// the user changes models mid-session.
+	LLM LLMClient
+	// Hooks runs PreToolUse/PostToolUse and related event hooks. Optional;
+	// nil disables hook dispatch.
+	Hooks *hooks.Runner
+	// Store persists conversation history and memory. Optional; nil keeps
+	// the session purely in-memory.
+	Store *store.Store
+	// Personality is the loaded persona (system prompt, allowed tools).
+	Personality persona.Persona
+	// WorkDir is the working directory for tool execution and error dumps.
+	WorkDir string
+	// StatusLine is the human-readable provider/model/effort line shown in
+	// the TUI and used by reminder tracking to detect model changes.
+	StatusLine string
+	// ModeLabel is a short tag (e.g. "chat", "code") surfaced to renderers.
+	ModeLabel string
+	// ProjectRef is the project UUID from .ref.
+	ProjectRef string
+	// ActiveSkills lists skill names enabled for this persona.
+	ActiveSkills []string
+	// ActiveTools lists user tool names enabled for this persona.
+	ActiveTools []string
+	// Models enumerates all available provider/model pairs for /model
+	// resolution and context-window lookups.
+	Models []ModelChoice
+	// ModelSwitcher constructs a new LLMClient when the user selects a
+	// different provider/model. Optional; nil disables /model.
+	ModelSwitcher func(provider, model string) (LLMClient, error)
+	// Reloader reloads persona and user tools from disk for /reload.
+	// Optional.
+	Reloader func() (persona.Persona, map[string]usertools.Tool, error)
+	// Truncate, when true, trims oversized tool outputs before sending
+	// them back to the model.
+	Truncate bool
+	// Docs is the rendered shell3_docs payload returned by the docs tool.
+	Docs string
+	// UserTools maps tool name to its YAML-defined definition. Dispatch
+	// goes through usertools, not ToolHandler.
+	UserTools map[string]usertools.Tool
+	// Secrets are user-tool secrets injected at dispatch. Keys match the
+	// secret names referenced in tool YAML.
+	Secrets map[string]string
+	// Params are provider-level request parameters (temperature, top_p,
+	// reasoning effort, etc.).
+	Params llm.RequestParams
+	// Log is the application logger. Nil is allowed; LogOrNoop wraps it.
+	Log applog.Logger
+	// OutPath, when non-empty, opens a JSONL audit log at this path and
+	// streams every turn event into it. Independent of stdout/TUI rendering.
+	OutPath string
+	// Headless flips on subprocess-friendly behaviors: strips
+	// shell_interactive from the tool schema, injects a system-reminder
+	// explaining the constraints, and signals hooks via SHELL3_HEADLESS=1.
+	Headless bool
+	// ShellInteractive runs an interactive shell command with TTY access and
+	// returns the result string to record as tool output. When nil, the
+	// shell_interactive tool returns an "unavailable" error string instead.
+	// The TUI sets this to a PTY runner that releases the terminal.
+	ShellInteractive func(ctx context.Context, cmd, workdir string) string
+}
+
+// NewHandlers constructs the built-in tool handler map from a Config.
+// Handlers are injected into TurnConfig and looked up by tool name during dispatch.
+func NewHandlers(cfg Config) map[string]ToolHandler {
+	handlers := []ToolHandler{
+		BashHandler{},
+		BashBgHandler{},
+		EditHandler{},
+		PruneHandler{},
+		DocsHandler{docs: cfg.Docs},
+		StoreHandler{toolName: "memory_upsert"},
+		StoreHandler{toolName: "memory_list"},
+		StoreHandler{toolName: "memory_search"},
+		StoreHandler{toolName: "history_get"},
+		StoreHandler{toolName: "history_search"},
+	}
+	m := make(map[string]ToolHandler, len(handlers))
+	for _, h := range handlers {
+		m[h.Name()] = h
+	}
+	return m
+}
+
+// OpenSink opens path for write+truncate (each run starts fresh) and returns
+// the sink and a cleanup closure. Returns (nil, no-op, nil) when path is empty.
+func OpenSink(path string) (*OutSink, func(), error) {
+	if path == "" {
+		return nil, func() {}, nil
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("open --out %s: %w", path, err)
+	}
+	return newOutSink(f, time.Time{}), func() { _ = f.Close() }, nil
+}
+
+// LogOrNoop returns l if non-nil, otherwise an applog.Noop logger. Callers
+// that did not configure a logger get silent behaviour rather than a nil
+// pointer panic.
+func LogOrNoop(l applog.Logger) applog.Logger {
+	if l != nil {
+		return l
+	}
+	return applog.Noop{}
+}
+
+// PruneLastTurn returns messages truncated to remove the last user message
+// and everything after it. Used by /rollback to back out the most recent
+// exchange. Returns messages unchanged when no user message is present.
+func PruneLastTurn(messages []llm.Message) []llm.Message {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == llm.RoleUser {
+			return messages[:i]
+		}
+	}
+	return messages
+}
