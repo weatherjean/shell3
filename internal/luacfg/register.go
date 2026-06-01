@@ -7,8 +7,9 @@ func registerShell3(c *LoadedConfig) {
 	tbl := L.NewTable()
 	L.SetGlobal("shell3", tbl)
 	L.SetField(tbl, "model", L.NewFunction(c.luaModel))
+	L.SetField(tbl, "skill", L.NewFunction(c.luaSkill))
 	L.SetField(tbl, "agent", L.NewFunction(c.luaAgent))
-	// tool, skill, guards, env, http, bash, urlencode added in later tasks.
+	// tool, guards, env, http, bash, urlencode added in later tasks.
 }
 
 var modelKeys = map[string]bool{
@@ -42,11 +43,33 @@ func (c *LoadedConfig) luaModel(L *lua.LState) int {
 	return 0
 }
 
+var skillKeys = map[string]bool{"name": true, "description": true, "body": true}
+
+func (c *LoadedConfig) luaSkill(L *lua.LState) int {
+	opts := L.CheckTable(1)
+	if err := checkKeys(opts, "skill", skillKeys); err != nil {
+		L.RaiseError("%s", err.Error())
+	}
+	s := Skill{Name: optStr(opts, "name"), Description: optStr(opts, "description"), Body: optStr(opts, "body")}
+	if s.Name == "" || s.Description == "" || s.Body == "" {
+		L.RaiseError("skill: name, description, body all required")
+	}
+	c.Skills = append(c.Skills, s)
+	// Return a handle table carrying a sentinel + the name.
+	h := L.NewTable()
+	h.RawSetString("__skill", lua.LString(s.Name))
+	L.Push(h)
+	return 1
+}
+
 // luaAgent is a minimal stub here; fully implemented in later tasks.
 func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 	opts := L.CheckTable(1)
 	c.Agent.Name = optStr(opts, "name")
 	c.Agent.ModelName = optStr(opts, "model")
 	c.Agent.Prompt = optStr(opts, "prompt")
+	if sk, ok := opts.RawGetString("skills").(*lua.LTable); ok {
+		c.Agent.Skills = handleNames(sk, "__skill")
+	}
 	return 0
 }
