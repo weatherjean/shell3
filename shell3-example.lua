@@ -599,7 +599,7 @@ local function guard_no_env_edit(call)
   local tool   = call.tool or ""
   local params = call.params or {}
   if tool == "edit_file" then
-    local path = tostring(params.path or "")
+    local path = tostring(params.file_path or "")
     if path:match("%.env$") then
       return { action = "block", reason = "editing .env files is not allowed; manage secrets manually" }
     end
