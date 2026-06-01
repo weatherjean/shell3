@@ -14,7 +14,8 @@ func registerShell3(c *LoadedConfig) {
 	env := L.NewTable()
 	L.SetField(env, "secret", L.NewFunction(c.luaSecret))
 	L.SetField(tbl, "env", env)
-	// guards, http, bash added in later tasks.
+	L.SetField(tbl, "bash", L.NewFunction(c.luaBash))
+	// guards, http added in later tasks.
 }
 
 var modelKeys = map[string]bool{
