@@ -47,6 +47,33 @@ func handleNames(list *lua.LTable, sentinel string) []string {
 	return out
 }
 
+func goToLua(L *lua.LState, v any) lua.LValue {
+	switch x := v.(type) {
+	case nil:
+		return lua.LNil
+	case string:
+		return lua.LString(x)
+	case bool:
+		return lua.LBool(x)
+	case float64:
+		return lua.LNumber(x)
+	case map[string]any:
+		t := L.NewTable()
+		for k, vv := range x {
+			t.RawSetString(k, goToLua(L, vv))
+		}
+		return t
+	case []any:
+		t := L.NewTable()
+		for i, vv := range x {
+			t.RawSetInt(i+1, goToLua(L, vv))
+		}
+		return t
+	default:
+		return lua.LNil
+	}
+}
+
 func luaToGo(v lua.LValue) any {
 	switch x := v.(type) {
 	case lua.LString:
