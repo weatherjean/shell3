@@ -85,4 +85,13 @@ type TurnConfig struct {
 	// shell_interactive tool calls. The TUI wires this to a PTY runner that
 	// releases the terminal; headless leaves it nil or stubs an error.
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
+	// CustomTool dispatches a custom (Lua-handler) tool call by name.
+	// Nil means no custom tools are wired.
+	CustomTool func(ctx context.Context, name, argsJSON string) (string, error)
+	// CustomToolNames is the set of tool names routed to CustomTool.
+	CustomToolNames map[string]bool
+	// ToolGuard runs the on_tool_call guard chain. Nil = allow all.
+	// Return values follow the guardAllow/guardBlock/guardCancel constants
+	// (0=allow, 1=block, 2=cancel).
+	ToolGuard func(ctx context.Context, tool string, params map[string]any) (guardDecision int, reason string, err error)
 }

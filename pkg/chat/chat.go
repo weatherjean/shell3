@@ -112,6 +112,17 @@ type Config struct {
 	// shell_interactive tool returns an "unavailable" error string instead.
 	// The TUI sets this to a PTY runner that releases the terminal.
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
+	// CustomTool dispatches a custom (Lua-handler) tool call by name.
+	// Nil means no custom tools are wired; unknown tools fall through to
+	// the built-in handler map.
+	CustomTool func(ctx context.Context, name, argsJSON string) (string, error)
+	// CustomToolNames is the set of tool names routed to CustomTool.
+	// Entries must match the names registered in the LLM tool schema.
+	CustomToolNames map[string]bool
+	// ToolGuard runs the on_tool_call guard chain. Nil = allow all.
+	// Return values follow the guardAllow/guardBlock/guardCancel constants
+	// defined in this package (0/1/2).
+	ToolGuard func(ctx context.Context, tool string, params map[string]any) (guardDecision int, reason string, err error)
 }
 
 // NewHandlers constructs the built-in tool handler map from a Config.

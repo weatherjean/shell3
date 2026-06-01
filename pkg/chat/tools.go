@@ -12,6 +12,27 @@ import (
 	"github.com/weatherjean/shell3/internal/usertools"
 )
 
+// Guard decision constants. These values are shared with luacfg.Decision and
+// must not be changed without updating that type.
+const (
+	guardAllow  = 0 // proceed with the tool call
+	guardBlock  = 1 // deny this single tool call; turn continues
+	guardCancel = 2 // abort the entire turn
+)
+
+// dispatchCustomTool calls cfg.CustomTool for a named custom tool. If
+// CustomTool is nil the call returns an unknown-tool error string.
+func dispatchCustomTool(ctx context.Context, cfg Config, name, rawArgs string) string {
+	if cfg.CustomTool == nil {
+		return fmt.Sprintf("error: unknown tool %q", name)
+	}
+	out, err := cfg.CustomTool(ctx, name, rawArgs)
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	return out
+}
+
 func dispatchUserTool(ctx context.Context, tool usertools.Tool, rawArgs string, secrets map[string]string, workDir string) string {
 	out, err := usertools.Run(ctx, tool, rawArgs, secrets, workDir)
 	if err != nil {

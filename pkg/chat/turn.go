@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weatherjean/shell3/pkg/hooks"
 	"github.com/weatherjean/shell3/pkg/llm"
 	"github.com/weatherjean/shell3/internal/store"
 )
@@ -164,18 +163,23 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 			}
 
 			emitToolCall(sess, tc.ID, tc.Name, tc.RawArgs)
-			decision, hookReason, hookErr := cfg.Hooks.OnToolCall(ctx, tc.Name, parseRawArgs(tc.RawArgs))
+			var decision int
+			var hookReason string
+			var hookErr error
+			if cfg.ToolGuard != nil {
+				decision, hookReason, hookErr = cfg.ToolGuard(ctx, tc.Name, parseRawArgs(tc.RawArgs))
+			}
 			var out string
 			if hookErr != nil {
 				out = fmt.Sprintf("Tool-call hook failed (the on_tool_call hook script itself errored, not the user): %v. Do not retry the same call without adjusting your approach.", hookErr)
-			} else if decision == hooks.ToolCallCancel {
+			} else if decision == guardCancel {
 				if hookReason == "" {
 					hookReason = "user cancelled"
 				}
 				cancelled = true
 				cancelReason = hookReason
 				out = fmt.Sprintf("USER CANCELLED the turn before this %s call ran. Reason: %s. Subsequent tool calls in this turn were not executed.", tc.Name, hookReason)
-			} else if decision == hooks.ToolCallDeny {
+			} else if decision == guardBlock {
 				if hookReason == "" {
 					hookReason = "no reason given"
 				}
@@ -199,6 +203,8 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 				} else {
 					out = "error: interactive TTY not available"
 				}
+			} else if cfg.CustomToolNames[tc.Name] {
+				out = dispatchCustomTool(ctx, Config{CustomTool: cfg.CustomTool}, tc.Name, tc.RawArgs)
 			} else if userTool, ok := cfg.UserTools[tc.Name]; ok {
 				out = dispatchUserTool(ctx, userTool, tc.RawArgs, cfg.Secrets, cfg.WorkDir)
 			} else if handler, ok := cfg.Handlers[tc.Name]; ok {
