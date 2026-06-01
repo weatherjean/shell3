@@ -60,6 +60,8 @@ func RunOnce(ctx context.Context, cfg chat.Config, input string) error {
 			fmt.Println()
 			fmt.Print(strings.TrimRight(ev.ToolOutput, "\n"))
 			fmt.Println()
+		case chat.EventRetry:
+			fmt.Fprintln(os.Stderr, "retry:", ev.Text)
 		case chat.EventError:
 			fmt.Fprintln(os.Stderr, "error:", ev.Text)
 			status = "error"

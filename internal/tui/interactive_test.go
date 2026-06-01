@@ -254,6 +254,31 @@ func TestDrainTurn_CancelMessageIsDimmed(t *testing.T) {
 	}
 }
 
+func TestDrainTurn_RetryPrintsDimNoticeWithoutClearingBusy(t *testing.T) {
+	calls, _ := runDrain(t, []chat.Event{
+		{Kind: chat.EventRetry, Text: "stream failed (HTTP 503), retrying (2/5)"},
+		{Kind: chat.EventTurnDone},
+	})
+
+	found := false
+	busyClears := 0
+	for _, c := range calls {
+		if strings.Contains(c, "⟳") && strings.Contains(c, "retrying (2/5)") {
+			found = true
+		}
+		if strings.Contains(c, "SetBusy(false)") {
+			busyClears++
+		}
+	}
+	if !found {
+		t.Fatalf("retry notice not rendered with ⟳ glyph: %v", calls)
+	}
+	// The retry event must not clear busy; only EventTurnDone does.
+	if busyClears != 1 {
+		t.Fatalf("expected exactly one SetBusy(false) (from TurnDone), got %d: %v", busyClears, calls)
+	}
+}
+
 // TestShellInteractive_CallbackInvoked exercises a stub Config.ShellInteractive
 // to confirm the callback shape: turn-side code invokes the func and uses its
 // return value as tool output. This replaces the previous TTYExecEvent-based

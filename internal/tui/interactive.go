@@ -314,6 +314,12 @@ func drainTurn(ch <-chan chat.Event, app patchapp.AppView, lastUsage *llm.Usage,
 			flushStreamFully()
 			app.Print(patchtui.SplitLines(patchtui.Dim + ev.Text + patchtui.Reset + "\n\n"))
 
+		case chat.EventRetry:
+			// A transient failure is being retried (pre-token, so buffers are
+			// empty). Render a dim notice and leave busy state untouched — the
+			// turn is still in progress.
+			app.Print(patchtui.SplitLines(patchtui.Dim + "⟳ " + ev.Text + patchtui.Reset + "\n"))
+
 		case chat.EventUsage:
 			if ev.Usage != nil {
 				publishUsage(llm.Usage{
