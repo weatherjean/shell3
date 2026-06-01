@@ -93,7 +93,8 @@ func New(opts Options) (chat.Config, func(), error) {
 	sysPrompt := lc.BuildPersona(luacfg.RuntimeData{CWD: workDir, Model: m.ModelID})
 
 	customDefs := lc.CustomToolsFor(lc.Agent.CustomTools)
-	toolDefs := luacfg.ToolDefs(lc.Agent.Gates, customDefs)
+	hasSkills := len(lc.Agent.Skills) > 0
+	toolDefs := luacfg.ToolDefs(lc.Agent.Gates, customDefs, hasSkills)
 
 	pers := persona.Persona{
 		Name:         lc.Agent.Name,
@@ -105,6 +106,9 @@ func New(opts Options) (chat.Config, func(), error) {
 	customNames := make(map[string]bool, len(lc.Agent.CustomTools))
 	for _, n := range lc.Agent.CustomTools {
 		customNames[n] = true
+	}
+	if hasSkills {
+		customNames["skill"] = true
 	}
 
 	cfg := chat.Config{

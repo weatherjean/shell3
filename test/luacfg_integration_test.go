@@ -134,7 +134,7 @@ shell3.agent({
 			return int(d), r, e
 		}
 		customDefs := lc.CustomToolsFor(lc.Agent.CustomTools)
-		toolDefs := luacfg.ToolDefs(lc.Agent.Gates, customDefs)
+		toolDefs := luacfg.ToolDefs(lc.Agent.Gates, customDefs, len(lc.Agent.Skills) > 0)
 
 		sess := chat.NewSession(chat.SessionOpts{BufSize: 128})
 		sess.Start(map[string]string{"mode": "test"})
@@ -206,7 +206,7 @@ shell3.agent({
 			return int(d), r, e
 		}
 		customDefs := lc.CustomToolsFor(lc.Agent.CustomTools)
-		toolDefs := luacfg.ToolDefs(lc.Agent.Gates, customDefs)
+		toolDefs := luacfg.ToolDefs(lc.Agent.Gates, customDefs, len(lc.Agent.Skills) > 0)
 
 		sess := chat.NewSession(chat.SessionOpts{BufSize: 128})
 		sess.Start(map[string]string{"mode": "test"})

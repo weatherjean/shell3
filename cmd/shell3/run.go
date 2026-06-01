@@ -164,7 +164,8 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	})
 
 	customDefs := lc.CustomToolsFor(lc.Agent.CustomTools)
-	toolDefs := luacfg.ToolDefs(lc.Agent.Gates, customDefs)
+	hasSkills := len(lc.Agent.Skills) > 0
+	toolDefs := luacfg.ToolDefs(lc.Agent.Gates, customDefs, hasSkills)
 
 	pers := persona.Persona{
 		Name:         lc.Agent.Name,
@@ -176,6 +177,9 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	customNames := make(map[string]bool, len(lc.Agent.CustomTools))
 	for _, n := range lc.Agent.CustomTools {
 		customNames[n] = true
+	}
+	if hasSkills {
+		customNames["skill"] = true
 	}
 
 	toolNames := make([]string, 0, len(toolDefs))
