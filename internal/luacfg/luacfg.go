@@ -2,6 +2,8 @@
 package luacfg
 
 import (
+	"fmt"
+	"path/filepath"
 	"sync"
 
 	lua "github.com/yuin/gopher-lua"
@@ -61,6 +63,29 @@ func (c *LoadedConfig) Close() {
 	if c.L != nil {
 		c.L.Close()
 	}
+}
+
+// Load reads shell3.lua at path; workdir is used for .env + relative paths.
+func Load(path, workdir string) (*LoadedConfig, error) {
+	env, err := loadDotEnv(filepath.Join(workdir, ".env"))
+	if err != nil {
+		return nil, err
+	}
+	c := &LoadedConfig{Tools: map[string]CustomTool{}, Secrets: env, L: lua.NewState()}
+	registerShell3(c)
+	if err := c.L.DoFile(path); err != nil {
+		c.L.Close()
+		return nil, fmt.Errorf("config: %w", err)
+	}
+	if c.Agent.Name == "" {
+		c.L.Close()
+		return nil, fmt.Errorf("config: no shell3.agent declared")
+	}
+	if _, ok := c.Model(c.Agent.ModelName); !ok {
+		c.L.Close()
+		return nil, fmt.Errorf("config: agent references unknown model %q", c.Agent.ModelName)
+	}
+	return c, nil
 }
 
 func (c *LoadedConfig) Model(name string) (Model, bool) {
