@@ -93,7 +93,7 @@ func New(opts Options) (chat.Config, func(), error) {
 	sysPrompt := lc.BuildPersona(luacfg.RuntimeData{CWD: workDir, Model: m.ModelID})
 
 	customDefs := lc.CustomToolsFor(lc.Agent.CustomTools)
-	hasSkills := len(lc.Agent.Skills) > 0
+	hasSkills := lc.Agent.SkillsActive()
 	toolDefs := luacfg.ToolDefs(lc.Agent.Gates, customDefs, hasSkills)
 
 	pers := persona.Persona{

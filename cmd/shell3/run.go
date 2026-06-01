@@ -164,7 +164,7 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	})
 
 	customDefs := lc.CustomToolsFor(lc.Agent.CustomTools)
-	hasSkills := len(lc.Agent.Skills) > 0
+	hasSkills := lc.Agent.SkillsActive()
 	toolDefs := luacfg.ToolDefs(lc.Agent.Gates, customDefs, hasSkills)
 
 	pers := persona.Persona{

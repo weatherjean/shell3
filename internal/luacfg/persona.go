@@ -24,7 +24,7 @@ func (c *LoadedConfig) BuildPersona(rd RuntimeData) string {
 			fmt.Fprintf(&b, "- %s: %s\n", m.Key, m.Value)
 		}
 	}
-	if len(c.Agent.Skills) > 0 {
+	if c.Agent.SkillsActive() {
 		b.WriteString("\n## Skills\nRead a skill body with the `skill` tool when it applies.\n")
 		for _, name := range c.Agent.Skills {
 			for _, s := range c.Skills {

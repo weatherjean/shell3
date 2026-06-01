@@ -43,7 +43,14 @@ type Agent struct {
 	Gates                   ToolGates
 	CustomTools             []string
 	Skills                  []string
+	SkillsDisabled          bool // true only when tools = { skill = false } is explicitly set
 	Guard                   []GuardEntry
+}
+
+// SkillsActive reports whether skills are enabled: the agent has at least one
+// skill listed AND the user has not explicitly disabled them with skill=false.
+func (a Agent) SkillsActive() bool {
+	return len(a.Skills) > 0 && !a.SkillsDisabled
 }
 
 // LoadedConfig is the parsed result. L stays alive for the session so custom

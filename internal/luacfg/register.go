@@ -81,7 +81,7 @@ var agentKeys = map[string]bool{
 
 var toolGateKeys = map[string]bool{
 	"bash": true, "bash_bg": true, "shell_interactive": true, "edit": true,
-	"memory": true, "history": true, "docs": true, "custom": true,
+	"memory": true, "history": true, "docs": true, "custom": true, "skill": true,
 }
 
 func (c *LoadedConfig) luaTool(L *lua.LState) int {
@@ -132,6 +132,9 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 		}
 		if cu, ok := tt.RawGetString("custom").(*lua.LTable); ok {
 			c.Agent.CustomTools = handleNames(cu, "__tool")
+		}
+		if tt.RawGetString("skill") == lua.LFalse {
+			c.Agent.SkillsDisabled = true
 		}
 	}
 	if g, ok := opts.RawGetString("on_tool_call").(*lua.LTable); ok {
