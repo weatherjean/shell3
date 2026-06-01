@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/bootstrap"
@@ -18,15 +19,10 @@ func TestDoctorAllGreen(t *testing.T) {
 	_ = bootstrap.EnsureGlobal(g)
 	_, _ = bootstrap.EnsureProject(l, g, cwd)
 
-	authYAML := `instances:
-  - name: test
-    base_url: https://api.openai.com/v1
-    api_key: sk-test
-    models:
-      - id: gpt-4o
-        context_window: 128000
+	cfg := `shell3.model("test", { base_url = "https://api.openai.com/v1", api_key = "sk-test", model = "gpt-4o", context_window = 128000 })
+shell3.agent({ name = "tester", model = "test", prompt = "p", tools = {} })
 `
-	if err := os.WriteFile(g.Auth, []byte(authYAML), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(cwd, "shell3.lua"), []byte(cfg), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -35,8 +31,8 @@ func TestDoctorAllGreen(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d\noutput:\n%s", code, out.String())
 	}
-	if !bytes.Contains(out.Bytes(), []byte("instances")) {
-		t.Errorf("output missing instances check:\n%s", out.String())
+	if !bytes.Contains(out.Bytes(), []byte("agent: tester")) {
+		t.Errorf("output missing agent check:\n%s", out.String())
 	}
 }
 
@@ -54,8 +50,8 @@ func TestDoctorMissingCredentials(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("expected non-zero exit, got 0\noutput:\n%s", out.String())
 	}
-	if !bytes.Contains(out.Bytes(), []byte("no instances")) {
-		t.Errorf("expected 'no instances' in output:\n%s", out.String())
+	if !bytes.Contains(out.Bytes(), []byte("no shell3.lua found")) {
+		t.Errorf("expected 'no shell3.lua found' in output:\n%s", out.String())
 	}
 }
 

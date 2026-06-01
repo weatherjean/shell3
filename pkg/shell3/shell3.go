@@ -4,11 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
+	"github.com/weatherjean/shell3/internal/adapter/openai"
+	"github.com/weatherjean/shell3/internal/luacfg"
 	"github.com/weatherjean/shell3/pkg/applog"
 	"github.com/weatherjean/shell3/pkg/chat"
-	"github.com/weatherjean/shell3/internal/config"
-	"github.com/weatherjean/shell3/pkg/hooks"
 	"github.com/weatherjean/shell3/pkg/llm"
 	"github.com/weatherjean/shell3/pkg/persona"
 )
@@ -16,29 +17,15 @@ import (
 // Options configures a slim bootstrap for library embedding.
 // All fields are optional except where noted.
 type Options struct {
-	// Ctx is used when constructing the LLM client. Defaults to
-	// context.Background() when nil.
+	// Ctx is reserved for future use. Defaults to context.Background() when nil.
 	Ctx context.Context
 
 	// HomeDir is the user home directory. Defaults to os.UserHomeDir() when empty.
 	HomeDir string
 
-	// Provider is the auth-store instance name (e.g. "openai", "anthropic").
-	// When empty, the first configured instance wins.
-	Provider string
-
-	// Model is the model id. When empty, the first model in the provider's
-	// models list wins.
-	Model string
-
-	// SystemPrompt overrides the base persona's system prompt. Empty uses
-	// the built-in baseline.
-	SystemPrompt string
-
-	// Tools is the schema list shown to the model. Empty means no tools.
-	// Embedders that want bash/edit/etc. can pass chat tool definitions or
-	// build their own.
-	Tools []llm.ToolDefinition
+	// ConfigPath is the path to shell3.lua. Defaults to
+	// ~/.shell3/shell3.lua when empty.
+	ConfigPath string
 
 	// WorkDir is the working directory passed to tool handlers. Defaults to
 	// os.Getwd when empty.
@@ -48,21 +35,14 @@ type Options struct {
 	Headless bool
 }
 
-// New returns a slim chat.Config suitable for embedding. Performs the
-// minimum bootstrap: reads auth, constructs the LLM adapter, builds a
-// base persona. Does NOT touch the filesystem beyond reading the auth
-// file and (optionally) the user-supplied WorkDir. Does NOT create
-// ~/.shell3/projects/, .shell3/ in cwd, log files, or SQLite stores.
+// New returns a chat.Config built from a shell3.lua config, suitable for
+// embedding. It loads the config, constructs the OpenAI-compatible adapter for
+// the agent's model, and assembles the persona carrier, custom-tool dispatch,
+// and guard chain.
 //
-// Returned cleanup is a no-op today but is reserved for future
-// resources (e.g. log file handles if Headless logging is added).
+// The returned cleanup closes the Lua state; callers MUST invoke it.
 func New(opts Options) (chat.Config, func(), error) {
 	noop := func() {}
-
-	ctx := opts.Ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
 
 	homeDir := opts.HomeDir
 	if homeDir == "" {
@@ -82,56 +62,69 @@ func New(opts Options) (chat.Config, func(), error) {
 		workDir = w
 	}
 
-	authStore, err := config.LoadAuthStore(homeDir)
+	configPath := opts.ConfigPath
+	if configPath == "" {
+		configPath = filepath.Join(homeDir, ".shell3", "shell3.lua")
+	}
+
+	lc, err := luacfg.Load(configPath, filepath.Dir(configPath))
 	if err != nil {
-		return chat.Config{}, noop, fmt.Errorf("load auth: %w", err)
+		return chat.Config{}, noop, fmt.Errorf("load config: %w", err)
 	}
+	cleanup := func() { lc.Close() }
 
-	instances := authStore.List()
-	if len(instances) == 0 {
-		return chat.Config{}, noop, fmt.Errorf("no provider configured — run 'shell3 auth'")
-	}
-
-	instanceName := opts.Provider
-	if instanceName == "" {
-		instanceName = instances[0].Name
-	}
-
-	inst, ok := authStore.Get(instanceName)
+	m, ok := lc.Model(lc.Agent.ModelName)
 	if !ok {
-		return chat.Config{}, noop, fmt.Errorf("provider %q not in auth store", instanceName)
+		cleanup()
+		return chat.Config{}, noop, fmt.Errorf("agent references unknown model %q", lc.Agent.ModelName)
 	}
 
-	model := opts.Model
-	if model == "" {
-		if len(inst.Models) == 0 {
-			return chat.Config{}, noop, fmt.Errorf("provider %q has no models configured", instanceName)
-		}
-		model = inst.Models[0].ID
+	client := openai.NewClient(m.BaseURL, m.APIKey, m.ModelID)
+	rp := llm.RequestParams{
+		ReasoningEffort: m.Reasoning,
+		MaxTokens:       m.MaxTokens,
+		Temperature:     m.Temperature,
+	}
+	client.SetParams(rp)
+	if m.Extra != nil {
+		client.SetExtra(m.Extra)
 	}
 
-	provider, ok := llm.Get(inst.Type)
-	if !ok {
-		return chat.Config{}, noop, fmt.Errorf("unknown adapter type %q for instance %q — set type to \"openai\" or \"anthropic\"", inst.Type, instanceName)
-	}
-	streamer, err := provider.NewClient(ctx, authStore, instanceName, model)
-	if err != nil {
-		return chat.Config{}, noop, fmt.Errorf("build adapter: %w", err)
+	sysPrompt := lc.BuildPersona(luacfg.RuntimeData{CWD: workDir, Model: m.ModelID})
+
+	customDefs := lc.CustomToolsFor(lc.Agent.CustomTools)
+	toolDefs := luacfg.ToolDefs(lc.Agent.Gates, customDefs)
+
+	pers := persona.Persona{
+		Name:         lc.Agent.Name,
+		SystemPrompt: sysPrompt,
+		Tools:        toolDefs,
+		Parameters:   rp,
 	}
 
-	p := persona.BasePersona(opts.SystemPrompt, opts.Tools)
+	customNames := make(map[string]bool, len(lc.Agent.CustomTools))
+	for _, n := range lc.Agent.CustomTools {
+		customNames[n] = true
+	}
 
 	cfg := chat.Config{
-		LLM:         streamer,
-		Hooks:       hooks.NewRunner(hooks.Config{}),
-		Personality: p,
-		WorkDir:     workDir,
-		StatusLine:  instanceName + " │ " + model,
-		ModeLabel:   "base",
-		Headless:    opts.Headless,
-		Log:         applog.Noop{},
-		Params:      llm.RequestParams{},
+		LLM:             client,
+		Personality:     pers,
+		WorkDir:         workDir,
+		StatusLine:      lc.Agent.Name + " │ " + m.ModelID,
+		ModeLabel:       lc.Agent.Name,
+		ContextWindow:   m.ContextWindow,
+		ActiveSkills:    lc.Agent.Skills,
+		CustomTool:      lc.CallTool,
+		CustomToolNames: customNames,
+		ToolGuard: func(ctx context.Context, t string, p map[string]any) (int, string, error) {
+			d, r, e := lc.OnToolCall(ctx, t, p)
+			return int(d), r, e
+		},
+		Headless: opts.Headless,
+		Log:      applog.Noop{},
+		Params:   rp,
 	}
 
-	return cfg, noop, nil
+	return cfg, cleanup, nil
 }

@@ -8,11 +8,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/weatherjean/shell3/internal/config"
+	"github.com/weatherjean/shell3/internal/luacfg"
 	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/ref"
-	"github.com/weatherjean/shell3/internal/scaffold"
-	"github.com/weatherjean/shell3/internal/secrets"
 )
 
 func newDoctorCommand() *cobra.Command {
@@ -44,7 +42,7 @@ func runDoctor(homeDir, cwd string, out io.Writer) int {
 	fail := func() { failures++ }
 
 	_, _ = fmt.Fprintln(out, "Global")
-	checkGlobalDoctor(out, homeDir, g, fail)
+	checkGlobalDoctor(out, homeDir, cwd, g, fail)
 
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "Project")
@@ -58,25 +56,24 @@ func runDoctor(homeDir, cwd string, out io.Writer) int {
 	return 0
 }
 
-func checkGlobalDoctor(out io.Writer, homeDir string, g paths.Global, fail func()) {
+func checkGlobalDoctor(out io.Writer, homeDir, cwd string, g paths.Global, fail func()) {
 	doctorCheck(out, fail, dirExists(g.Root), "~/.shell3/ exists")
 	doctorCheck(out, fail, dirExists(g.Skills), "global skills dir")
-	doctorCheck(out, fail, dirExists(g.Tools), "global tools dir")
-	doctorCheck(out, fail, dirExists(g.Hooks), "global hooks dir")
 
-	authStore, err := config.LoadAuthStore(homeDir)
-	if err == nil && len(authStore.List()) > 0 {
-		names := make([]string, 0, len(authStore.List()))
-		for _, inst := range authStore.List() {
-			names = append(names, inst.Name)
-		}
-		doctorCheck(out, fail, true, fmt.Sprintf("instances: %v", names))
-	} else {
-		doctorCheck(out, fail, false, "no instances configured — run: shell3 auth")
+	configPath, err := resolveConfigPath("", cwd, homeDir)
+	if err != nil {
+		doctorCheck(out, fail, false, err.Error())
+		return
 	}
-
-	_, err = secrets.Load(homeDir)
-	doctorCheck(out, fail, err == nil, "secrets store accessible")
+	lc, err := luacfg.Load(configPath, filepath.Dir(configPath))
+	if err != nil {
+		doctorCheck(out, fail, false, fmt.Sprintf("shell3.lua: %v", err))
+		return
+	}
+	defer lc.Close()
+	doctorCheck(out, fail, true, fmt.Sprintf("shell3.lua: %s", configPath))
+	doctorCheck(out, fail, true, fmt.Sprintf("models: %d", len(lc.Models)))
+	doctorCheck(out, fail, true, fmt.Sprintf("agent: %s", lc.Agent.Name))
 }
 
 func checkProjectDoctor(out io.Writer, l paths.Local, g paths.Global, cwd string, fail func()) {
@@ -111,11 +108,6 @@ func checkProjectDoctor(out io.Writer, l paths.Local, g paths.Global, cwd string
 	} else {
 		_, _ = fmt.Fprintln(out, "  · project db (shell3.db) not yet created (lazy)")
 	}
-
-	personaName := scaffold.DefaultPersonaName + ".md"
-	personaOk := fileExists(filepath.Join(l.Personas, personaName)) ||
-		fileExists(filepath.Join(g.Personas, personaName))
-	doctorCheck(out, fail, personaOk, fmt.Sprintf("persona: %s", scaffold.DefaultPersonaName))
 }
 
 func doctorCheck(out io.Writer, fail func(), ok bool, msg string) {

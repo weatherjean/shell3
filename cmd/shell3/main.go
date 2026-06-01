@@ -7,10 +7,6 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	// Self-registering adapters. init() calls llm.Register.
-	_ "github.com/weatherjean/shell3/internal/adapter/anthropic"
-	_ "github.com/weatherjean/shell3/internal/adapter/openai"
-
 	"github.com/weatherjean/shell3/internal/patchapp"
 )
 
@@ -47,9 +43,7 @@ func main() {
 		defaultHelp(cmd, args)
 	})
 
-	root.AddCommand(newAuthCommand())
 	root.AddCommand(newDoctorCommand())
-	root.AddCommand(newSecretsCommand())
 	root.AddCommand(newDocsCommand())
 	root.AddCommand(newWidgetCommand())
 
