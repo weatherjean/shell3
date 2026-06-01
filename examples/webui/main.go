@@ -64,14 +64,17 @@ func (s *server) chat(w http.ResponseWriter, r *http.Request) {
 
 	sess := chat.NewSession(chat.SessionOpts{BufSize: 256})
 	tc := chat.TurnConfig{
-		LLM:         s.cfg.LLM,
-		Hooks:       s.cfg.Hooks,
-		Personality: s.cfg.Personality,
-		StatusLine:  s.cfg.StatusLine,
-		WorkDir:     s.cfg.WorkDir,
-		Handlers:    s.handler,
-		Log:         chat.LogOrNoop(s.cfg.Log),
-		Headless:    true,
+		LLM:             s.cfg.LLM,
+		Hooks:           s.cfg.Hooks,
+		Personality:     s.cfg.Personality,
+		StatusLine:      s.cfg.StatusLine,
+		WorkDir:         s.cfg.WorkDir,
+		Handlers:        s.handler,
+		Log:             chat.LogOrNoop(s.cfg.Log),
+		Headless:        true,
+		CustomTool:      s.cfg.CustomTool,
+		CustomToolNames: s.cfg.CustomToolNames,
+		ToolGuard:       s.cfg.ToolGuard,
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)

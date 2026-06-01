@@ -116,18 +116,21 @@ func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
 	// prevLen stays a goroutine-local concern.
 	buildTurnConfig := func() chat.TurnConfig {
 		return chat.TurnConfig{
-			LLM:         cfg.LLM,
-			Hooks:       cfg.Hooks,
-			Personality: cfg.Personality,
-			StatusLine:  cfg.StatusLine,
-			WorkDir:     cfg.WorkDir,
-			Store:       cfg.Store,
-			UserTools:   cfg.UserTools,
-			Secrets:     cfg.Secrets,
-			Truncate:    cfg.Truncate || cfg.OutPath != "",
-			Handlers:    handlers,
-			Log:         chat.LogOrNoop(cfg.Log),
-			Headless:    cfg.Headless,
+			LLM:             cfg.LLM,
+			Hooks:           cfg.Hooks,
+			Personality:     cfg.Personality,
+			StatusLine:      cfg.StatusLine,
+			WorkDir:         cfg.WorkDir,
+			Store:           cfg.Store,
+			UserTools:       cfg.UserTools,
+			Secrets:         cfg.Secrets,
+			Truncate:        cfg.Truncate || cfg.OutPath != "",
+			Handlers:        handlers,
+			Log:             chat.LogOrNoop(cfg.Log),
+			Headless:        cfg.Headless,
+			CustomTool:      cfg.CustomTool,
+			CustomToolNames: cfg.CustomToolNames,
+			ToolGuard:       cfg.ToolGuard,
 			ShellInteractive: func(ctx context.Context, cmd, workdir string) string {
 				result := "(completed)"
 				app.WithReleasedTerminal(func() {

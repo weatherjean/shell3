@@ -24,18 +24,21 @@ func RunOnce(ctx context.Context, cfg chat.Config, input string) error {
 	}
 
 	tc := chat.TurnConfig{
-		LLM:         cfg.LLM,
-		Hooks:       cfg.Hooks,
-		Personality: cfg.Personality,
-		StatusLine:  cfg.StatusLine,
-		WorkDir:     cfg.WorkDir,
-		Store:       cfg.Store,
-		UserTools:   cfg.UserTools,
-		Secrets:     cfg.Secrets,
-		Truncate:    cfg.Truncate || cfg.OutPath != "", // full output when sink is active
-		Handlers:    chat.NewHandlers(cfg),
-		Log:         chat.LogOrNoop(cfg.Log),
-		Headless:    cfg.Headless,
+		LLM:             cfg.LLM,
+		Hooks:           cfg.Hooks,
+		Personality:     cfg.Personality,
+		StatusLine:      cfg.StatusLine,
+		WorkDir:         cfg.WorkDir,
+		Store:           cfg.Store,
+		UserTools:       cfg.UserTools,
+		Secrets:         cfg.Secrets,
+		Truncate:        cfg.Truncate || cfg.OutPath != "", // full output when sink is active
+		Handlers:        chat.NewHandlers(cfg),
+		Log:             chat.LogOrNoop(cfg.Log),
+		Headless:        cfg.Headless,
+		CustomTool:      cfg.CustomTool,
+		CustomToolNames: cfg.CustomToolNames,
+		ToolGuard:       cfg.ToolGuard,
 		ShellInteractive: func(ctx context.Context, cmd, workdir string) string {
 			return "error: interactive TTY not available in headless mode"
 		},
