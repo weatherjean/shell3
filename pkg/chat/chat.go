@@ -7,35 +7,10 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/pkg/applog"
-	"github.com/weatherjean/shell3/pkg/hooks"
 	"github.com/weatherjean/shell3/pkg/llm"
 	"github.com/weatherjean/shell3/pkg/persona"
 	"github.com/weatherjean/shell3/internal/store"
-	"github.com/weatherjean/shell3/internal/usertools"
 )
-
-// ModelChoice pairs a provider name with one of its models and records the
-// model's context window in tokens. The Models slice on Config is built from
-// the auth store and consumed by /model resolution and reminder accounting.
-type ModelChoice struct {
-	// Provider is the adapter name (e.g. "openai", "anthropic").
-	Provider string
-	// Model is the provider-specific model id.
-	Model string
-	// ContextWindow is the maximum prompt+completion tokens, used by the
-	// reminder tracker to emit context-usage warnings. Zero means unknown.
-	ContextWindow int
-}
-
-// ContextWindowFor returns the context window for a model ID from the models list.
-func ContextWindowFor(models []ModelChoice, id string) int {
-	for _, m := range models {
-		if m.Model == id {
-			return m.ContextWindow
-		}
-	}
-	return 0
-}
 
 // LLMClient is the streaming interface the turn loop calls into. Implementers
 // must invoke onEvent synchronously for each delta (token, tool call, usage)
@@ -51,12 +26,8 @@ type LLMClient interface {
 // embedding contract: callers populate this once at startup and reuse it
 // across turns. TurnConfig is derived from Config for each turn.
 type Config struct {
-	// LLM is the active streaming client. Replace via ModelSwitcher when
-	// the user changes models mid-session.
+	// LLM is the active streaming client.
 	LLM LLMClient
-	// Hooks runs PreToolUse/PostToolUse and related event hooks. Optional;
-	// nil disables hook dispatch.
-	Hooks *hooks.Runner
 	// Store persists conversation history and memory. Optional; nil keeps
 	// the session purely in-memory.
 	Store *store.Store
@@ -73,28 +44,16 @@ type Config struct {
 	ProjectRef string
 	// ActiveSkills lists skill names enabled for this persona.
 	ActiveSkills []string
-	// ActiveTools lists user tool names enabled for this persona.
+	// ActiveTools lists tool names enabled for this agent.
 	ActiveTools []string
-	// Models enumerates all available provider/model pairs for /model
-	// resolution and context-window lookups.
-	Models []ModelChoice
-	// ModelSwitcher constructs a new LLMClient when the user selects a
-	// different provider/model. Optional; nil disables /model.
-	ModelSwitcher func(provider, model string) (LLMClient, error)
-	// Reloader reloads persona and user tools from disk for /reload.
-	// Optional.
-	Reloader func() (persona.Persona, map[string]usertools.Tool, error)
+	// ContextWindow is the active model's context window in tokens, used by
+	// the reminder tracker to emit context-usage warnings. Zero means unknown.
+	ContextWindow int
 	// Truncate, when true, trims oversized tool outputs before sending
 	// them back to the model.
 	Truncate bool
 	// Docs is the rendered shell3_docs payload returned by the docs tool.
 	Docs string
-	// UserTools maps tool name to its YAML-defined definition. Dispatch
-	// goes through usertools, not ToolHandler.
-	UserTools map[string]usertools.Tool
-	// Secrets are user-tool secrets injected at dispatch. Keys match the
-	// secret names referenced in tool YAML.
-	Secrets map[string]string
 	// Params are provider-level request parameters (temperature, top_p,
 	// reasoning effort, etc.).
 	Params llm.RequestParams
@@ -112,6 +71,17 @@ type Config struct {
 	// shell_interactive tool returns an "unavailable" error string instead.
 	// The TUI sets this to a PTY runner that releases the terminal.
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
+	// CustomTool dispatches a custom (Lua-handler) tool call by name.
+	// Nil means no custom tools are wired; unknown tools fall through to
+	// the built-in handler map.
+	CustomTool func(ctx context.Context, name, argsJSON string) (string, error)
+	// CustomToolNames is the set of tool names routed to CustomTool.
+	// Entries must match the names registered in the LLM tool schema.
+	CustomToolNames map[string]bool
+	// ToolGuard runs the on_tool_call guard chain. Nil = allow all.
+	// Return values follow the guardAllow/guardBlock/guardCancel constants
+	// defined in this package (0/1/2).
+	ToolGuard func(ctx context.Context, tool string, params map[string]any) (guardDecision int, reason string, err error)
 }
 
 // NewHandlers constructs the built-in tool handler map from a Config.

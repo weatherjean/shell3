@@ -50,27 +50,23 @@ func TestCLIE2E_HeadlessRun(t *testing.T) {
 
 	homeDir := t.TempDir()
 	workDir := t.TempDir()
-	authDir := filepath.Join(homeDir, ".shell3")
-	if err := os.MkdirAll(authDir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	auth := fmt.Sprintf(`instances:
-  - name: fake
-    type: openai
-    base_url: %s/v1
-    api_key: "test"
-    models:
-      - id: test-model
-        context_window: 4096
+
+	configPath := filepath.Join(workDir, "shell3.lua")
+	cfg := fmt.Sprintf(`shell3.model("fake", {
+  base_url = "%s/v1",
+  api_key = "test",
+  model = "test-model",
+  context_window = 4096,
+})
+shell3.agent({ name = "tester", model = "fake", prompt = "you are a test", tools = {} })
 `, server.URL)
-	if err := os.WriteFile(filepath.Join(authDir, "ai-do-not-read.auth.yaml"), []byte(auth), 0600); err != nil {
+	if err := os.WriteFile(configPath, []byte(cfg), 0600); err != nil {
 		t.Fatal(err)
 	}
 
 	outPath := filepath.Join(workDir, "out.jsonl")
 	cmd := exec.Command(binary,
-		"--provider", "fake",
-		"--no-memory-tools",
+		"-c", configPath,
 		"--out", outPath,
 		"hello",
 	)

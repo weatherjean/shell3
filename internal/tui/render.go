@@ -145,8 +145,8 @@ func renderToolCallHeader(ev chat.Event, cfg *chat.Config) string {
 	case "compact_history":
 		return toolCallHeader(ev.ToolCallID, ev.ToolName, "", false)
 	default:
-		_, isUserTool := cfg.UserTools[ev.ToolName]
-		return toolCallHeader(ev.ToolCallID, ev.ToolName, ev.ToolInput, isUserTool)
+		isCustom := cfg.CustomToolNames[ev.ToolName]
+		return toolCallHeader(ev.ToolCallID, ev.ToolName, ev.ToolInput, isCustom)
 	}
 }
 

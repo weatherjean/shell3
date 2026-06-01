@@ -360,7 +360,7 @@ func mkToolMsg(id, name, content string) llm.Message {
 
 func TestSlash_RegistersExpectedCommands(t *testing.T) {
 	app, _, _, _ := register()
-	want := []string{"clear", "rollback", "prune", "model", "usage", "prompt", "truncate", "exit", "quit", "image"}
+	want := []string{"clear", "rollback", "prune", "usage", "prompt", "truncate", "exit", "quit", "image"}
 	for _, name := range want {
 		if _, ok := app.handlers[name]; !ok {
 			t.Errorf("missing handler: /%s", name)
@@ -417,35 +417,6 @@ func TestSlash_PruneByID(t *testing.T) {
 	msgs := sess.Messages()
 	if !strings.Contains(msgs[0].Content, "[pruned by user") {
 		t.Errorf("expected stub, got %q", msgs[0].Content)
-	}
-}
-
-func TestSlash_ModelSwitches(t *testing.T) {
-	app, cfg, _, _ := register()
-	switched := ""
-	cfg.ModelSwitcher = func(provider, name string) (chat.LLMClient, error) {
-		switched = provider + "/" + name
-		return nil, nil
-	}
-
-	app.call(t, "model", "claude-y")
-
-	if switched != "/claude-y" && !strings.HasSuffix(switched, "/claude-y") {
-		t.Errorf("ModelSwitcher got %q, want suffix /claude-y", switched)
-	}
-	if !strings.Contains(cfg.StatusLine, "claude-y") {
-		t.Errorf("status line not updated: %q", cfg.StatusLine)
-	}
-	if !containsAll(app.snapshot(), "SetStatus(", "[model: ") {
-		t.Errorf("missing status update: %v", app.snapshot())
-	}
-}
-
-func TestSlash_ModelMissingArg(t *testing.T) {
-	app, _, _, _ := register()
-	app.call(t, "model", "")
-	if !containsAll(app.snapshot(), "[/model usage:") {
-		t.Errorf("want usage hint: %v", app.snapshot())
 	}
 }
 

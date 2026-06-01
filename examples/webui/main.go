@@ -22,9 +22,6 @@ import (
 
 	"github.com/weatherjean/shell3/pkg/chat"
 	"github.com/weatherjean/shell3/pkg/shell3"
-
-	_ "github.com/weatherjean/shell3/internal/adapter/anthropic"
-	_ "github.com/weatherjean/shell3/internal/adapter/openai"
 )
 
 const indexHTML = `<!doctype html>
@@ -64,14 +61,16 @@ func (s *server) chat(w http.ResponseWriter, r *http.Request) {
 
 	sess := chat.NewSession(chat.SessionOpts{BufSize: 256})
 	tc := chat.TurnConfig{
-		LLM:         s.cfg.LLM,
-		Hooks:       s.cfg.Hooks,
-		Personality: s.cfg.Personality,
-		StatusLine:  s.cfg.StatusLine,
-		WorkDir:     s.cfg.WorkDir,
-		Handlers:    s.handler,
-		Log:         chat.LogOrNoop(s.cfg.Log),
-		Headless:    true,
+		LLM:             s.cfg.LLM,
+		Personality:     s.cfg.Personality,
+		StatusLine:      s.cfg.StatusLine,
+		WorkDir:         s.cfg.WorkDir,
+		Handlers:        s.handler,
+		Log:             chat.LogOrNoop(s.cfg.Log),
+		Headless:        true,
+		CustomTool:      s.cfg.CustomTool,
+		CustomToolNames: s.cfg.CustomToolNames,
+		ToolGuard:       s.cfg.ToolGuard,
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
@@ -120,14 +119,12 @@ func (s *server) chat(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	addr := flag.String("addr", ":8080", "listen address")
-	provider := flag.String("provider", "", "auth-store provider name (empty = first configured)")
-	model := flag.String("model", "", "model id (empty = provider's first)")
+	configPath := flag.String("config", "", "path to shell3.lua (empty = ~/.shell3/shell3.lua)")
 	flag.Parse()
 
 	cfg, cleanup, err := shell3.New(shell3.Options{
-		Provider: *provider,
-		Model:    *model,
-		Headless: true,
+		ConfigPath: *configPath,
+		Headless:   true,
 	})
 	if err != nil {
 		log.Fatalf("bootstrap: %v", err)

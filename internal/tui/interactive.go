@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"sort"
 	"strings"
 	"sync"
 
@@ -29,7 +28,7 @@ func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
 	sess := chat.NewSession(chat.SessionOpts{
 		BufSize:          256,
 		StoreID:          storeID,
-		ContextWindowFor: func(id string) int { return chat.ContextWindowFor(cfg.Models, id) },
+		ContextWindowFor: func(string) int { return cfg.ContextWindow },
 	})
 	if cfg.Store != nil {
 		// End whichever session is current when the loop exits. compact_history
@@ -67,15 +66,9 @@ func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
 		ActiveSkills: cfg.ActiveSkills,
 		ActiveTools:  cfg.ActiveTools,
 	})
-	if _, initModel := chat.SplitStatus(cfg.StatusLine); initModel != "" {
-		app.SetContextWindow(chat.ContextWindowFor(cfg.Models, initModel))
+	if cfg.ContextWindow > 0 {
+		app.SetContextWindow(cfg.ContextWindow)
 	}
-	cfg.Hooks.SetReleaser(app)
-	cfg.Hooks.OnSessionStart(ctx)
-	defer func() {
-		cfg.Hooks.OnSessionEnd(ctx)
-		cfg.Hooks.Wait() // drain background fire-and-forget hooks before teardown
-	}()
 
 	var lastUsage llm.Usage
 
@@ -116,18 +109,18 @@ func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
 	// prevLen stays a goroutine-local concern.
 	buildTurnConfig := func() chat.TurnConfig {
 		return chat.TurnConfig{
-			LLM:         cfg.LLM,
-			Hooks:       cfg.Hooks,
-			Personality: cfg.Personality,
-			StatusLine:  cfg.StatusLine,
-			WorkDir:     cfg.WorkDir,
-			Store:       cfg.Store,
-			UserTools:   cfg.UserTools,
-			Secrets:     cfg.Secrets,
-			Truncate:    cfg.Truncate || cfg.OutPath != "",
-			Handlers:    handlers,
-			Log:         chat.LogOrNoop(cfg.Log),
-			Headless:    cfg.Headless,
+			LLM:             cfg.LLM,
+			Personality:     cfg.Personality,
+			StatusLine:      cfg.StatusLine,
+			WorkDir:         cfg.WorkDir,
+			Store:           cfg.Store,
+			Truncate:        cfg.Truncate || cfg.OutPath != "",
+			Handlers:        handlers,
+			Log:             chat.LogOrNoop(cfg.Log),
+			Headless:        cfg.Headless,
+			CustomTool:      cfg.CustomTool,
+			CustomToolNames: cfg.CustomToolNames,
+			ToolGuard:       cfg.ToolGuard,
 			ShellInteractive: func(ctx context.Context, cmd, workdir string) string {
 				result := "(completed)"
 				app.WithReleasedTerminal(func() {
@@ -382,32 +375,9 @@ type slashTarget interface {
 func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session, lastUsage *llm.Usage, launchTurn func(llm.Message)) {
 	dim := func(s string) { app.PrintLine(patchtui.Dim + s + patchtui.Reset) }
 
-	doReload := func() bool {
-		if cfg.Reloader == nil {
-			return true
-		}
-		newPers, newToolMap, err := cfg.Reloader()
-		if err != nil {
-			dim(fmt.Sprintf("[reload failed: %v]", err))
-			return false
-		}
-		cfg.Personality = newPers
-		cfg.UserTools = newToolMap
-		return true
-	}
-
 	app.RegisterSlash(patchapp.SlashCommand{
-		Name: "reload", Help: "rebuild system prompt from disk (memories, skills, tools)",
+		Name: "clear", Help: "reset conversation context",
 		Handler: func(string) {
-			if doReload() {
-				dim("[reloaded: memories, skills, and tools refreshed]")
-			}
-		},
-	})
-	app.RegisterSlash(patchapp.SlashCommand{
-		Name: "clear", Help: "reset conversation context and reload system prompt",
-		Handler: func(string) {
-			doReload()
 			sess.SetMessages(nil)
 			dim("[context cleared]")
 		},
@@ -437,51 +407,6 @@ func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session
 			out := chat.PruneByID(id, "pruned by user", msgs)
 			sess.SetMessages(msgs)
 			dim("[" + out + "]")
-		},
-	})
-	app.RegisterSlash(patchapp.SlashCommand{
-		Name: "model", Help: "switch model: /model [provider/model] (no arg → picker)",
-		Handler: func(args string) {
-			curProv, curModel := chat.SplitStatus(cfg.StatusLine)
-			arg := strings.TrimSpace(args)
-			var choice chat.ModelChoice
-			if arg == "" {
-				if len(cfg.Models) < 2 {
-					dim("[/model usage: /model <provider/model>]")
-					return
-				}
-				picked, ok := pickModel(app, cfg.Models, curProv, curModel)
-				if !ok {
-					return
-				}
-				choice = picked
-			} else {
-				resolved, ok := chat.ResolveModelArg(cfg.Models, arg, curProv)
-				if !ok {
-					dim(fmt.Sprintf("[unknown model: %s]", arg))
-					return
-				}
-				choice = resolved
-			}
-			if cfg.ModelSwitcher == nil {
-				dim("[no model switcher configured]")
-				return
-			}
-			newClient, err := cfg.ModelSwitcher(choice.Provider, choice.Model)
-			if err != nil {
-				dim(fmt.Sprintf("[model switch failed: %v]", err))
-				return
-			}
-			if newClient != nil {
-				cfg.LLM = newClient
-				if setter, ok := newClient.(llm.ParamSetter); ok {
-					setter.SetParams(cfg.Params)
-				}
-			}
-			cfg.StatusLine = chat.FormatStatus(choice.Provider, choice.Model, cfg.Params.ReasoningEffort)
-			app.SetStatus(cfg.StatusLine)
-			app.SetContextWindow(choice.ContextWindow)
-			dim(fmt.Sprintf("[model: %s/%s]", choice.Provider, choice.Model))
 		},
 	})
 	app.RegisterSlash(patchapp.SlashCommand{
@@ -619,7 +544,7 @@ func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session
 		},
 	})
 	app.RegisterSlash(patchapp.SlashCommand{
-		Name: "info", Help: "show session details: persona, project, skills, tools, hooks",
+		Name: "info", Help: "show session details: agent, project, skills, tools",
 		Handler: func(string) {
 			lines := []string{""}
 			add := func(label, value string) {
@@ -628,7 +553,7 @@ func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session
 					lines = append(lines, "    "+value)
 				}
 			}
-			add("persona", cfg.ModeLabel)
+			add("agent", cfg.ModeLabel)
 			add("project", cfg.ProjectRef)
 			if len(cfg.ActiveSkills) > 0 {
 				lines = append(lines, patchtui.Bold+"skills"+patchtui.Reset)
@@ -637,27 +562,6 @@ func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session
 			if len(cfg.Personality.Tools) > 0 {
 				lines = append(lines, patchtui.Bold+"tools"+patchtui.Reset)
 				lines = append(lines, "    "+strings.Join(toolNames(cfg.Personality.Tools), ", "))
-			}
-			hcfg := cfg.Personality.Config.Config
-			var activeHooks []string
-			for name, entry := range map[string]string{
-				"on_session_start": hcfg.OnSessionStart.Command,
-				"on_session_end":   hcfg.OnSessionEnd.Command,
-				"on_turn_start":    hcfg.OnTurnStart.Command,
-				"on_turn_end":      hcfg.OnTurnEnd.Command,
-				"on_tool_call":     hcfg.OnToolCall.Command,
-				"on_tool_result":   hcfg.OnToolResult.Command,
-				"on_context_build": hcfg.OnContextBuild.Command,
-				"on_error":         hcfg.OnError.Command,
-			} {
-				if entry != "" {
-					activeHooks = append(activeHooks, name)
-				}
-			}
-			if len(activeHooks) > 0 {
-				sort.Strings(activeHooks)
-				lines = append(lines, patchtui.Bold+"hooks"+patchtui.Reset)
-				lines = append(lines, "    "+strings.Join(activeHooks, ", "))
 			}
 			lines = append(lines, "")
 			app.Print(lines)
