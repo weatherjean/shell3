@@ -10,7 +10,6 @@ import (
 	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/ref"
 	"github.com/weatherjean/shell3/internal/skills"
-	"github.com/weatherjean/shell3/internal/usertools"
 )
 
 func TestEnsureGlobal(t *testing.T) {
@@ -100,17 +99,6 @@ func TestEnsureBootstrapEndToEnd(t *testing.T) {
 		if !hasSkill(loadedSkills, name) {
 			t.Fatalf("default skill %q was not loadable; loaded: %#v", name, loadedSkills)
 		}
-	}
-
-	loadedTools, warnings, err := usertools.LoadAll([]string{g.Tools, l.Tools}, map[string]struct{}{})
-	if err != nil {
-		t.Fatalf("load tools: %v", err)
-	}
-	if len(warnings) != 0 {
-		t.Fatalf("unexpected tool warnings: %v", warnings)
-	}
-	if !hasTool(loadedTools, "web_fetch") {
-		t.Fatalf("default web_fetch tool was not loadable; loaded: %#v", loadedTools)
 	}
 
 	for _, dir := range []string{l.Root, l.Skills, l.Tools, l.Hooks, l.Personas} {
@@ -251,11 +239,3 @@ func hasSkill(all []skills.Skill, name string) bool {
 	return false
 }
 
-func hasTool(all []usertools.Tool, name string) bool {
-	for _, tool := range all {
-		if tool.Name == name {
-			return true
-		}
-	}
-	return false
-}

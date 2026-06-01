@@ -7,7 +7,6 @@ import (
 
 	"github.com/weatherjean/shell3/pkg/applog"
 	"github.com/weatherjean/shell3/pkg/chat"
-	"github.com/weatherjean/shell3/pkg/hooks"
 	"github.com/weatherjean/shell3/pkg/llm"
 	"github.com/weatherjean/shell3/pkg/llm/fakellm"
 	"github.com/weatherjean/shell3/pkg/persona"
@@ -44,7 +43,6 @@ func TestLibE2E_SingleTurn(t *testing.T) {
 
 	cfg := chat.TurnConfig{
 		LLM:         fake,
-		Hooks:       hooks.NewRunner(hooks.Config{}),
 		Personality: persona.BasePersona("you are a test", nil),
 		StatusLine:  "test │ model",
 		Log:         applog.Noop{},

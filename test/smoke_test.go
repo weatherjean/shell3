@@ -16,17 +16,14 @@ func TestSmoke_InitAndRun(t *testing.T) {
 	dir := t.TempDir()
 	homeDir := t.TempDir()
 
-	authDir := filepath.Join(homeDir, ".shell3")
-	os.MkdirAll(authDir, 0700)
-	os.WriteFile(filepath.Join(authDir, "ai-do-not-read.auth.yaml"), []byte(`
-instances:
-  - name: ollama
-    type: openai
-    base_url: http://localhost:11434/v1
-    api_key: ""
-    models:
-      - id: llama3.2
-        context_window: 131072
+	configPath := filepath.Join(dir, "shell3.lua")
+	os.WriteFile(configPath, []byte(`shell3.model("ollama", {
+  base_url = "http://localhost:11434/v1",
+  api_key = "",
+  model = "llama3.2",
+  context_window = 131072,
+})
+shell3.agent({ name = "smoke", model = "ollama", prompt = "you are a test", tools = {} })
 `), 0600)
 
 	binary := "../shell3"
@@ -34,7 +31,7 @@ instances:
 		t.Skip("binary not built — run go build -o shell3 ./cmd/shell3/ first")
 	}
 
-	cmd := exec.Command(binary, "--provider", "ollama", "say hello in one word")
+	cmd := exec.Command(binary, "-c", configPath, "say hello in one word")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "HOME="+homeDir)
 	out, err := cmd.Output()
