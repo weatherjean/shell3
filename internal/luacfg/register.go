@@ -20,7 +20,7 @@ func registerShell3(c *LoadedConfig) {
 	L.SetField(httpT, "get", L.NewFunction(c.luaHTTPGet))
 	L.SetField(httpT, "post", L.NewFunction(c.luaHTTPPost))
 	L.SetField(tbl, "http", httpT)
-	// guards added in later tasks.
+	registerGuards(c, tbl)
 }
 
 var modelKeys = map[string]bool{
@@ -118,6 +118,20 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 		if cu, ok := tt.RawGetString("custom").(*lua.LTable); ok {
 			c.Agent.CustomTools = handleNames(cu, "__tool")
 		}
+	}
+	if g, ok := opts.RawGetString("on_tool_call").(*lua.LTable); ok {
+		g.ForEach(func(_, v lua.LValue) {
+			switch x := v.(type) {
+			case *lua.LFunction:
+				c.Agent.Guard = append(c.Agent.Guard, GuardEntry{fn: x})
+			case *lua.LTable:
+				if b, ok := x.RawGetString("__guard").(lua.LString); ok {
+					c.Agent.Guard = append(c.Agent.Guard, GuardEntry{
+						Builtin: string(b), prompt: optBool(x, "prompt"),
+					})
+				}
+			}
+		})
 	}
 	return 0
 }
