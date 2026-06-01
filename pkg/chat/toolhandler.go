@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 
 	"github.com/weatherjean/shell3/pkg/applog"
-	"github.com/weatherjean/shell3/pkg/hooks"
 	"github.com/weatherjean/shell3/pkg/llm"
 	"github.com/weatherjean/shell3/pkg/persona"
 	"github.com/weatherjean/shell3/internal/store"
-	"github.com/weatherjean/shell3/internal/usertools"
 )
 
 // ToolHandler is the interface for built-in tool implementations. Each
@@ -35,8 +33,6 @@ type ToolConfig struct {
 	Store *store.Store
 	// WorkDir is the working directory tools should resolve paths against.
 	WorkDir string
-	// Secrets are user-tool secrets keyed by name.
-	Secrets map[string]string
 	// AllMsgs is the full conversation slice including any reminder
 	// injections; tools that need to operate on what the model sees use
 	// this view.
@@ -53,8 +49,6 @@ type ToolConfig struct {
 type TurnConfig struct {
 	// LLM is the streaming client for this turn.
 	LLM LLMClient
-	// Hooks runs tool-event hooks. May be nil.
-	Hooks *hooks.Runner
 	// Personality is the persona whose system prompt and tool allow-list
 	// drive this turn.
 	Personality persona.Persona
@@ -65,10 +59,6 @@ type TurnConfig struct {
 	WorkDir string
 	// Store persists newly appended messages when non-nil.
 	Store *store.Store
-	// UserTools are YAML-defined tools available this turn.
-	UserTools map[string]usertools.Tool
-	// Secrets are user-tool secrets.
-	Secrets map[string]string
 	// Truncate enables tool-output truncation before sending back to the model.
 	Truncate bool
 	// Handlers maps tool name to built-in implementation. Built once via

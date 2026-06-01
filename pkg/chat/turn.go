@@ -71,20 +71,13 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 			stack := debug.Stack()
 			err := fmt.Errorf("panic: %v\n%s", r, stack)
 			cfg.Log.Error("panic in turn goroutine", err)
-			cfg.Hooks.OnError(ctx, err)
 			emitError(sess, err.Error())
 		}
 	}()
 
-	cfg.Hooks.OnTurnStart(ctx)
-	defer func() { cfg.Hooks.OnTurnEnd(ctx, "") }()
-
 	sess.append(userMsg)
 
-	msgs, err := cfg.Hooks.OnContextBuild(ctx, sess.messages)
-	if err != nil {
-		msgs = sess.messages
-	}
+	msgs := sess.messages
 
 	allMsgs := make([]llm.Message, 0, len(msgs)+1)
 	allMsgs = append(allMsgs, llm.Message{Role: llm.RoleSystem, Content: cfg.Personality.SystemPrompt})
@@ -118,7 +111,6 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		}
 		if err != nil {
 			logStreamError(cfg, allMsgs, err)
-			cfg.Hooks.OnError(ctx, err)
 			emitError(sess, err.Error())
 			return
 		}
@@ -195,7 +187,6 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 				// emitted below carries the error string with ToolError=true.
 			} else if tc.Name == "compact_history" {
 				out, allMsgs = handleCompactHistory(tc.RawArgs, cfg.Store, sess, allMsgs, cfg.Log)
-				emitSystemReminder(sess, "tip: run /reload to pick up any new memories or skills")
 			} else if tc.Name == "shell_interactive" {
 				command := ParseBashArgs(tc.RawArgs)
 				if cfg.ShellInteractive != nil {
@@ -205,13 +196,10 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 				}
 			} else if cfg.CustomToolNames[tc.Name] {
 				out = dispatchCustomTool(ctx, Config{CustomTool: cfg.CustomTool}, tc.Name, tc.RawArgs)
-			} else if userTool, ok := cfg.UserTools[tc.Name]; ok {
-				out = dispatchUserTool(ctx, userTool, tc.RawArgs, cfg.Secrets, cfg.WorkDir)
 			} else if handler, ok := cfg.Handlers[tc.Name]; ok {
 				toolCfg := ToolConfig{
 					Store:    cfg.Store,
 					WorkDir:  cfg.WorkDir,
-					Secrets:  cfg.Secrets,
 					AllMsgs:  allMsgs,
 					SessMsgs: sess.messages,
 				}
@@ -220,7 +208,6 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 				out = fmt.Sprintf("error: unknown tool %q", tc.Name)
 			}
 
-			cfg.Hooks.OnToolResult(ctx, tc.Name, out)
 			emitToolResult(sess, tc.ID, tc.Name, out, strings.HasPrefix(out, "error:") || strings.HasPrefix(out, "USER DENIED") || strings.HasPrefix(out, "USER CANCELLED") || strings.HasPrefix(out, "Tool-call hook failed"))
 			// Prepend the tool_call_id so the model has a stable handle it
 			// can pass to prune_tool_result. Without this the id only lives

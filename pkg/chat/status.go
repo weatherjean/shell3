@@ -22,31 +22,3 @@ func FormatStatus(provider, model, effort string) string {
 	}
 	return out
 }
-
-// ResolveModelArg parses /model arg as either "provider/model" or bare "model".
-// Bare model resolves within curProvider first, then any provider.
-func ResolveModelArg(models []ModelChoice, arg, curProvider string) (ModelChoice, bool) {
-	if i := strings.IndexByte(arg, '/'); i > 0 {
-		prov, model := arg[:i], arg[i+1:]
-		for _, m := range models {
-			if m.Provider == prov && m.Model == model {
-				return m, true
-			}
-		}
-		return ModelChoice{Provider: prov, Model: model}, true
-	}
-	for _, m := range models {
-		if m.Provider == curProvider && m.Model == arg {
-			return m, true
-		}
-	}
-	for _, m := range models {
-		if m.Model == arg {
-			return m, true
-		}
-	}
-	if curProvider != "" {
-		return ModelChoice{Provider: curProvider, Model: arg}, true
-	}
-	return ModelChoice{}, false
-}

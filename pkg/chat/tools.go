@@ -9,7 +9,6 @@ import (
 	"github.com/weatherjean/shell3/pkg/applog"
 	"github.com/weatherjean/shell3/pkg/llm"
 	"github.com/weatherjean/shell3/internal/store"
-	"github.com/weatherjean/shell3/internal/usertools"
 )
 
 // Guard decision constants. These values are shared with luacfg.Decision and
@@ -28,17 +27,6 @@ func dispatchCustomTool(ctx context.Context, cfg Config, name, rawArgs string) s
 	}
 	out, err := cfg.CustomTool(ctx, name, rawArgs)
 	if err != nil {
-		return "error: " + err.Error()
-	}
-	return out
-}
-
-func dispatchUserTool(ctx context.Context, tool usertools.Tool, rawArgs string, secrets map[string]string, workDir string) string {
-	out, err := usertools.Run(ctx, tool, rawArgs, secrets, workDir)
-	if err != nil {
-		if out != "" {
-			return out + "\nerror: " + err.Error()
-		}
 		return "error: " + err.Error()
 	}
 	return out
