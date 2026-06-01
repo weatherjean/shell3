@@ -75,6 +75,15 @@ func (c *LoadedConfig) luaSkill(L *lua.LState) int {
 
 var toolKeys = map[string]bool{"name": true, "description": true, "parameters": true, "handler": true}
 
+var agentKeys = map[string]bool{
+	"name": true, "model": true, "prompt": true, "tools": true, "skills": true, "on_tool_call": true,
+}
+
+var toolGateKeys = map[string]bool{
+	"bash": true, "bash_bg": true, "shell_interactive": true, "edit": true,
+	"memory": true, "history": true, "docs": true, "custom": true,
+}
+
 func (c *LoadedConfig) luaTool(L *lua.LState) int {
 	opts := L.CheckTable(1)
 	if err := checkKeys(opts, "tool", toolKeys); err != nil {
@@ -99,6 +108,9 @@ func (c *LoadedConfig) luaTool(L *lua.LState) int {
 // luaAgent parses name/model/prompt, skills, and the tools struct (gates + custom).
 func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 	opts := L.CheckTable(1)
+	if err := checkKeys(opts, "agent", agentKeys); err != nil {
+		L.RaiseError("%s", err.Error())
+	}
 	c.Agent.Name = optStr(opts, "name")
 	c.Agent.ModelName = optStr(opts, "model")
 	c.Agent.Prompt = optStr(opts, "prompt")
@@ -106,6 +118,9 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 		c.Agent.Skills = handleNames(sk, "__skill")
 	}
 	if tt, ok := opts.RawGetString("tools").(*lua.LTable); ok {
+		if err := checkKeys(tt, "agent.tools", toolGateKeys); err != nil {
+			L.RaiseError("%s", err.Error())
+		}
 		c.Agent.Gates = ToolGates{
 			Bash:             optBool(tt, "bash"),
 			BashBg:           optBool(tt, "bash_bg"),

@@ -38,3 +38,27 @@ func TestLoadModelUnknownKey(t *testing.T) {
 		t.Fatalf("want strict-key failure, got %v", err)
 	}
 }
+
+func TestAgentUnknownKey(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "shell3.lua", `
+shell3.model("m", { base_url="u", api_key="k", model="x" })
+shell3.agent({ name="a", model="m", prompt="p", tools={}, bogus=1 })
+`)
+	_, err := Load(dir+"/shell3.lua", dir)
+	if err == nil || !contains(err.Error(), `unknown key "bogus"`) {
+		t.Fatalf("want strict-key failure on agent, got %v", err)
+	}
+}
+
+func TestAgentToolsUnknownKey(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "shell3.lua", `
+shell3.model("m", { base_url="u", api_key="k", model="x" })
+shell3.agent({ name="a", model="m", prompt="p", tools={ edt=true } })
+`)
+	_, err := Load(dir+"/shell3.lua", dir)
+	if err == nil || !contains(err.Error(), `unknown key "edt"`) {
+		t.Fatalf("want strict-key failure on agent.tools, got %v", err)
+	}
+}
