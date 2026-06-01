@@ -201,7 +201,10 @@ CLI surface finalized in the plan.
   by Lua agent block + injected blocks). Persona *concept* survives as the agent.
 - `internal/adapter/anthropic` + the `type` discriminator (Anthropic via
   OpenAI-compat returns in **v0.2**).
-- The **seagull** persona, the Telegram gateway, and any seagull-only code paths.
+- The **seagull** persona: a full repo grep confirms there is **no** seagull/
+  Telegram/gateway Go code in shell3 — it lives only in the user's personal
+  `~/.shell3/personas/seagull.md`. So this is a no-op in-repo: simply do not
+  carry the persona into the new config. (Plan adds a grep gate to prove it.)
 - Seven lifecycle hook events; `confirm-bash.sh` (→ `shell3.guards`).
 - YAML user-tool loader (`internal/usertools` YAML path) + `tools/*.yaml`,
   `personas/*.md`, `skills/*.md`, `hooks/*.sh` as config inputs.
