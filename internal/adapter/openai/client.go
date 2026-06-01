@@ -157,6 +157,7 @@ type Client struct {
 	model  string
 	tap    *bodyTap
 	params llm.RequestParams
+	extra  map[string]any
 }
 
 // NewClient creates a Client targeting baseURL with the given apiKey and model.
@@ -179,6 +180,7 @@ func NewClient(baseURL, apiKey, model string) *Client {
 
 func (c *Client) SetModel(model string)         { c.model = model }
 func (c *Client) SetParams(p llm.RequestParams) { c.params = c.params.Merge(p) }
+func (c *Client) SetExtra(m map[string]any)     { c.extra = m }
 
 func (c *Client) ParamSpecs() []llm.ParamSpec {
 	return []llm.ParamSpec{
@@ -238,7 +240,11 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 		}()
 	}
 
-	stream := c.oc.Chat.Completions.NewStreaming(ctx, params)
+	var extraOpts []option.RequestOption
+	for k, v := range c.extra {
+		extraOpts = append(extraOpts, option.WithJSONSet(k, v))
+	}
+	stream := c.oc.Chat.Completions.NewStreaming(ctx, params, extraOpts...)
 	defer func() { _ = stream.Close() }()
 
 	toolCalls := map[int64]*llm.ToolCall{}
