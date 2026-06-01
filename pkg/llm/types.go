@@ -66,11 +66,21 @@ type Usage struct {
 	TotalTokens      int
 }
 
+// RetryNotice describes a transient request failure that is about to be
+// retried. Adapters emit one via StreamEvent.Retry so the retry — otherwise
+// invisible inside the SDK's retry loop — can be surfaced to the user.
+type RetryNotice struct {
+	Attempt int    // 1-based index of the upcoming retry
+	Max     int    // maximum number of retries that will be attempted
+	Reason  string // why the attempt failed (e.g. "HTTP 503", "connection error: …")
+}
+
 // StreamEvent is one event from the LLM stream.
 type StreamEvent struct {
 	TextDelta      string
 	ReasoningDelta string
 	ToolCall       *ToolCall
 	Usage          *Usage
+	Retry          *RetryNotice
 	Done           bool
 }

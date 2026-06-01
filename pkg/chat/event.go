@@ -1,6 +1,11 @@
 package chat
 
-import "time"
+import (
+	"fmt"
+	"time"
+
+	"github.com/weatherjean/shell3/pkg/llm"
+)
 
 // EventKind classifies stream events emitted by a chat session.
 type EventKind int
@@ -44,6 +49,9 @@ const (
 	// <system-reminder> block (model change, context usage threshold).
 	// Text contains the rendered reminder.
 	EventSystemReminder
+	// EventRetry fires when a transient request failure is about to be
+	// retried. Text holds a human-readable summary (reason + attempt count).
+	EventRetry
 )
 
 func (k EventKind) String() string {
@@ -72,6 +80,8 @@ func (k EventKind) String() string {
 		return "turn_done"
 	case EventSystemReminder:
 		return "system_reminder"
+	case EventRetry:
+		return "retry"
 	}
 	return "unknown"
 }
@@ -195,6 +205,11 @@ func emitAssistantReasoning(s *Session, text string) {
 
 func emitSystemReminder(s *Session, text string) {
 	emit(s, Event{Kind: EventSystemReminder, Time: time.Now(), SessionID: s.id, Text: text})
+}
+
+func emitRetry(s *Session, n *llm.RetryNotice) {
+	text := fmt.Sprintf("stream failed (%s), retrying (%d/%d)", n.Reason, n.Attempt, n.Max)
+	emit(s, Event{Kind: EventRetry, Time: time.Now(), SessionID: s.id, Text: text})
 }
 
 func emitTurnDone(s *Session, prompt, completion, total int) {

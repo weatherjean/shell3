@@ -166,6 +166,7 @@ func NewClient(baseURL, apiKey, model string) *Client {
 	opts := []option.RequestOption{
 		option.WithAPIKey(apiKey),
 		option.WithHTTPClient(&http.Client{Transport: tap}),
+		option.WithMaxRetries(maxRetries),
 	}
 	if baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))
@@ -244,6 +245,10 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 	for k, v := range c.extra {
 		extraOpts = append(extraOpts, option.WithJSONSet(k, v))
 	}
+	// Surface the SDK's otherwise-invisible retries to the caller. The SDK
+	// only retries getting the initial response, so this fires for pre-stream
+	// failures (connection/5xx/429) — never mid-stream after tokens emit.
+	extraOpts = append(extraOpts, option.WithMiddleware(retryObserver(onEvent, maxRetries)))
 	stream := c.oc.Chat.Completions.NewStreaming(ctx, params, extraOpts...)
 	defer func() { _ = stream.Close() }()
 

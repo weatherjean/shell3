@@ -286,6 +286,9 @@ func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools
 		if ev.Usage != nil {
 			usage = *ev.Usage
 		}
+		if ev.Retry != nil {
+			emitRetry(sess, ev.Retry)
+		}
 	})
 	if ctx.Err() != nil {
 		return sb.String(), rb.String(), toolCalls, usage, fmt.Errorf("context canceled")
