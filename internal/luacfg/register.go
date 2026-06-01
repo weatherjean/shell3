@@ -8,8 +8,9 @@ func registerShell3(c *LoadedConfig) {
 	L.SetGlobal("shell3", tbl)
 	L.SetField(tbl, "model", L.NewFunction(c.luaModel))
 	L.SetField(tbl, "skill", L.NewFunction(c.luaSkill))
+	L.SetField(tbl, "tool", L.NewFunction(c.luaTool))
 	L.SetField(tbl, "agent", L.NewFunction(c.luaAgent))
-	// tool, guards, env, http, bash, urlencode added in later tasks.
+	// guards, env, http, bash, urlencode added in later tasks.
 }
 
 var modelKeys = map[string]bool{
@@ -62,7 +63,30 @@ func (c *LoadedConfig) luaSkill(L *lua.LState) int {
 	return 1
 }
 
-// luaAgent is a minimal stub here; fully implemented in later tasks.
+var toolKeys = map[string]bool{"name": true, "description": true, "parameters": true, "handler": true}
+
+func (c *LoadedConfig) luaTool(L *lua.LState) int {
+	opts := L.CheckTable(1)
+	if err := checkKeys(opts, "tool", toolKeys); err != nil {
+		L.RaiseError("%s", err.Error())
+	}
+	ct := CustomTool{Name: optStr(opts, "name"), Description: optStr(opts, "description")}
+	if fn, ok := opts.RawGetString("handler").(*lua.LFunction); ok {
+		ct.handler = fn
+	} else {
+		L.RaiseError("tool %q: handler function required", ct.Name)
+	}
+	if p, ok := opts.RawGetString("parameters").(*lua.LTable); ok {
+		ct.Parameters = tableToMap(p)
+	}
+	c.Tools[ct.Name] = ct
+	h := L.NewTable()
+	h.RawSetString("__tool", lua.LString(ct.Name))
+	L.Push(h)
+	return 1
+}
+
+// luaAgent parses name/model/prompt, skills, and the tools struct (gates + custom).
 func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 	opts := L.CheckTable(1)
 	c.Agent.Name = optStr(opts, "name")
@@ -70,6 +94,20 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 	c.Agent.Prompt = optStr(opts, "prompt")
 	if sk, ok := opts.RawGetString("skills").(*lua.LTable); ok {
 		c.Agent.Skills = handleNames(sk, "__skill")
+	}
+	if tt, ok := opts.RawGetString("tools").(*lua.LTable); ok {
+		c.Agent.Gates = ToolGates{
+			Bash:             optBool(tt, "bash"),
+			BashBg:           optBool(tt, "bash_bg"),
+			ShellInteractive: optBool(tt, "shell_interactive"),
+			Edit:             optBool(tt, "edit"),
+			Memory:           optBool(tt, "memory"),
+			History:          optBool(tt, "history"),
+			Docs:             optBool(tt, "docs"),
+		}
+		if cu, ok := tt.RawGetString("custom").(*lua.LTable); ok {
+			c.Agent.CustomTools = handleNames(cu, "__tool")
+		}
 	}
 	return 0
 }
