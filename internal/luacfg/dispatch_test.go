@@ -2,6 +2,29 @@ package luacfg
 
 import "testing"
 
+func TestCallToolNonStringReturn(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "shell3.lua", `
+shell3.model("m", { base_url="u", api_key="k", model="x" })
+local bad = shell3.tool({ name="bad", description="d",
+  parameters={ type="object", properties={} },
+  handler=function(args) return 42 end })
+shell3.agent({ name="a", model="m", prompt="p", tools={ custom={ bad } } })
+`)
+	c, err := Load(dir+"/shell3.lua", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_, err = c.CallTool(t.Context(), "bad", "{}")
+	if err == nil {
+		t.Fatal("expected error for non-string handler return, got nil")
+	}
+	if !contains(err.Error(), "must return a string") {
+		t.Fatalf("expected 'must return a string' in error, got: %v", err)
+	}
+}
+
 func TestCallTool(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "shell3.lua", `

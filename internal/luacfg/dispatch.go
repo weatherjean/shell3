@@ -98,5 +98,8 @@ func (c *LoadedConfig) CallTool(ctx context.Context, name, argsJSON string) (str
 	}
 	ret := c.L.Get(-1)
 	c.L.Pop(1)
+	if _, ok := ret.(lua.LString); !ok {
+		return "", fmt.Errorf("tool %q: handler must return a string, got %s", name, ret.Type().String())
+	}
 	return ret.String(), nil
 }
