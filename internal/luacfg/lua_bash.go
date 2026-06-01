@@ -14,6 +14,9 @@ import (
 // before any lock is held), TryLock succeeds — we acquired the lock ourselves,
 // so we release it, run f, and return without re-locking (we were never locked
 // to begin with).
+//
+// INVARIANT: luacfg is single-agent; CallTool is never called concurrently.
+// The TryLock below infers whether we're already inside CallTool's locked section.
 func (c *LoadedConfig) withIOUnlock(f func()) {
 	locked := c.mu.TryLock() // returns false if already held by CallTool
 	if locked {
