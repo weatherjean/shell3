@@ -33,11 +33,12 @@ current feature work.
 - [ ] **SSE backpressure tuning.** Per-subscriber buffer is 256 with drop-on-full;
       revisit for very chatty turns / slow clients.
 
-## 🟡 Multi-user & quality
+## 🟡 Quality
 
-- [ ] **Per-client sessions.** Currently one shared session for all browsers
-      (by design). For multi-user, add a session registry; the Hub is the natural
-      per-session unit.
+- [x] **Per-client sessions — WON'T DO (intentional).** One shared session across
+      all browsers is by design: a single user driving the agent from multiple
+      devices, sharing one conversation. Do not add a per-client session registry
+      or multi-user accounts unless this design decision is explicitly revisited.
 - [ ] **SPA tests.** The embedded JS (markdown renderer, autoscroll, slash
       handling) is manual-only — add a headless/browser or unit test harness.
 - [ ] **Markdown renderer** is intentionally minimal; extend for edge cases as
