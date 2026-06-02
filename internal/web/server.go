@@ -37,10 +37,14 @@ func (i Info) model() string {
 type Server struct {
 	hub  *Hub
 	info Info
+	cfg  Config
 }
 
-// NewServer wraps a Hub with the session info shown in the UI.
-func NewServer(hub *Hub, info Info) *Server { return &Server{hub: hub, info: info} }
+// NewServer wraps a Hub with the session info shown in the UI and the resolved
+// web Config (auth + origin policy).
+func NewServer(hub *Hub, info Info, cfg Config) *Server {
+	return &Server{hub: hub, info: info, cfg: cfg}
+}
 
 // Handler builds the HTTP router.
 func (s *Server) Handler() http.Handler {
@@ -54,7 +58,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /clear", s.handleClear)
 	mux.HandleFunc("POST /model", s.handleModel)
 	mux.HandleFunc("POST /image", s.handleImage)
-	return mux
+	mux.HandleFunc("GET /login", s.handleLoginPage)
+	mux.HandleFunc("POST /login", s.handleLoginSubmit)
+	mux.HandleFunc("POST /logout", s.handleLogout)
+	return s.originGuard(s.authGuard(mux))
 }
 
 func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {

@@ -20,8 +20,7 @@ import (
 	"github.com/weatherjean/shell3/pkg/persona"
 )
 
-func newTestServer(t *testing.T, scripts ...fakellm.Script) *httptest.Server {
-	t.Helper()
+func serverForTest(cfg Config, scripts ...fakellm.Script) (*Server, func()) {
 	client := fakellm.New(scripts...)
 	sess := chat.NewSession(chat.SessionOpts{BufSize: 256})
 	tc := chat.TurnConfig{
@@ -35,11 +34,17 @@ func newTestServer(t *testing.T, scripts ...fakellm.Script) *httptest.Server {
 	info := Info{
 		Persona: "test", Project: "p", Prompt: "SYS PROMPT", Tools: []string{"bash"},
 		Models: []string{"main"}, Model: func() string { return "fake" },
-		// Switch left nil → switching disabled.
 	}
-	srv := httptest.NewServer(NewServer(h, info).Handler())
-	t.Cleanup(func() { srv.Close(); h.Close(); sess.End("ok"); sess.CloseEvents() })
-	return srv
+	cleanup := func() { h.Close(); sess.End("ok"); sess.CloseEvents() }
+	return NewServer(h, info, cfg), cleanup
+}
+
+func newTestServer(t *testing.T, scripts ...fakellm.Script) *httptest.Server {
+	t.Helper()
+	srv, cleanup := serverForTest(Config{}, scripts...)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(func() { ts.Close(); cleanup() })
+	return ts
 }
 
 func TestServer_IndexServesHTML(t *testing.T) {

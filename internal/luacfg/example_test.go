@@ -28,7 +28,7 @@ func TestExampleParses(t *testing.T) {
 	}
 
 	// Write a .env with dummy values so env.secret("...") succeeds.
-	dotenv := "OPENCODE_KEY=x\nBRAVE_API_KEY=y\n"
+	dotenv := "OPENCODE_KEY=x\nBRAVE_API_KEY=y\nWEB_PASSWORD=\n"
 	if err := os.WriteFile(filepath.Join(tmp, ".env"), []byte(dotenv), 0600); err != nil {
 		t.Fatalf("write temp .env: %v", err)
 	}

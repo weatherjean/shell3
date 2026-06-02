@@ -336,6 +336,10 @@ function connect() {
   const es = new EventSource('/events');
   es.onopen = () => { resetView(); };
   es.onmessage = (m) => { try { handle(JSON.parse(m.data)); } catch (e) {} };
+  es.onerror = async () => {
+    // A 401 from /events closes the stream; confirm via /meta and bounce to login.
+    try { const r = await fetch('/meta'); if (r.status === 401) location = '/login'; } catch (e) {}
+  };
 }
 
 function showHelp() {
@@ -427,7 +431,7 @@ new ResizeObserver(updateInset).observe(bottomEl);
 updateInset();
 
 (async function init() {
-  try { meta = await (await fetch('/meta')).json(); } catch (e) {}
+  try { const r = await fetch('/meta'); if (r.status === 401) { location = '/login'; return; } meta = await r.json(); } catch (e) {}
   renderStatus();
   connect();
 })();

@@ -87,7 +87,7 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	log, logCloser := openAppLog(g.LogFile)
 	defer logCloser.Close()
 
-	cfg, cleanup, err := buildChatConfig(configPath, cwd, homeDir, f.outPath, headless, log)
+	cfg, _, cleanup, err := buildChatConfig(configPath, cwd, homeDir, f.outPath, headless, log)
 	if err != nil {
 		return err
 	}
