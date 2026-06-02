@@ -14,10 +14,6 @@ import (
 
 const cookieName = "shell3_session"
 
-// loginHTML is a temporary placeholder login form. Task 5 replaces this with a
-// //go:embed asset in assets.go.
-var loginHTML = []byte("<!doctype html><form method=post action=/login><input name=password type=password><button>log in</button></form>")
-
 // signKey derives the HMAC key from the password; rotating the password
 // invalidates every previously issued cookie.
 func signKey(password string) []byte {
