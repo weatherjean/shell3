@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sync"
+	"time"
 
 	lua "github.com/yuin/gopher-lua"
 )
@@ -16,6 +17,17 @@ type Model struct {
 	MaxTokens                      int
 	Temperature                    *float64
 	Extra                          map[string]any
+}
+
+// WebConfig is the raw parsed shell3.web{} block. Defaulting, validation, and
+// all serving behavior live in internal/web — this struct only carries values.
+type WebConfig struct {
+	Set            bool // true if shell3.web{} was called
+	Host           string
+	Port           int
+	Password       string
+	CookieTTL      time.Duration
+	AllowedOrigins []string
 }
 
 type ToolGates struct {
@@ -61,6 +73,7 @@ type LoadedConfig struct {
 	Tools   map[string]CustomTool
 	Skills  []Skill
 	Secrets map[string]string
+	Web     WebConfig
 
 	L  *lua.LState
 	mu sync.Mutex
