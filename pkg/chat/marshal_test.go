@@ -39,9 +39,17 @@ func TestMarshalEventJSON_Fields(t *testing.T) {
 }
 
 func TestMarshalEventJSON_OmitsEmpty(t *testing.T) {
-	b, _ := MarshalEventJSON(Event{Kind: EventTurnDone, Time: time.Unix(0, 0).UTC()})
+	b, err := MarshalEventJSON(Event{Kind: EventTurnDone, Time: time.Unix(0, 0).UTC()})
+	if err != nil {
+		t.Fatalf("MarshalEventJSON: %v", err)
+	}
 	var got map[string]any
-	_ = json.Unmarshal(b, &got)
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["kind"] != "turn_done" {
+		t.Errorf("kind = %v, want turn_done", got["kind"])
+	}
 	for _, k := range []string{"text", "tool", "session_id", "usage", "meta"} {
 		if _, ok := got[k]; ok {
 			t.Errorf("expected %q omitted, got %v", k, got[k])
