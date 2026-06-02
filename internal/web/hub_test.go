@@ -127,3 +127,35 @@ func drainHubIdle(t *testing.T, h *Hub, timeout time.Duration) {
 		}
 	}
 }
+
+// TestHub_CancelAbortsInFlightTurn uses a run closure that blocks until its
+// context is cancelled, so Cancel's effect is deterministic (real fakellm
+// turns finish too fast to observe). It also exercises that the hub reports
+// busy while a turn is in flight.
+func TestHub_CancelAbortsInFlightTurn(t *testing.T) {
+	sess := chat.NewSession(chat.SessionOpts{BufSize: 256})
+	started := make(chan struct{})
+	finished := make(chan struct{})
+	run := func(ctx context.Context, input string) {
+		close(started)
+		<-ctx.Done() // block until Cancel fires
+		close(finished)
+	}
+	h := NewHub(sess, run)
+	h.Start()
+	t.Cleanup(func() { h.Close(); sess.End("ok"); sess.CloseEvents() })
+
+	if err := h.Submit("go"); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	<-started
+	if !h.Busy() {
+		t.Error("expected Busy() == true while a turn is in flight")
+	}
+	h.Cancel()
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Cancel did not abort the in-flight turn")
+	}
+}
