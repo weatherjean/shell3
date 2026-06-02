@@ -25,7 +25,8 @@ make build
 - [ ] At idle, single `ctrl+c` shows the "press again to exit" hint; second
       `ctrl+c` within 500ms quits cleanly.
 - [ ] On quit, the session ends without dangling DB transactions
-      (check `~/.shell3/store.db` is not locked).
+      (check the project DB `~/.shell3/projects/<uuid>/shell3.db` is not locked;
+      the `<uuid>` is in `.shell3/.ref`).
 
 ## Slash commands
 

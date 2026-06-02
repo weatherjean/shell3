@@ -7,10 +7,6 @@ type Global struct {
 	Root     string // ~/.shell3/
 	Auth     string // ~/.shell3/ai-do-not-read.auth.yaml
 	Secrets  string // ~/.shell3/ai-do-not-read.secrets.yaml
-	Skills   string // ~/.shell3/skills/
-	Tools    string // ~/.shell3/tools/
-	Hooks    string // ~/.shell3/hooks/
-	Personas string // ~/.shell3/personas/
 	Projects string // ~/.shell3/projects/
 	LogFile  string // ~/.shell3/shell3.log
 }
@@ -24,28 +20,20 @@ type Project struct {
 
 // Local holds paths under ./.shell3/ (project-scoped, committed to repo).
 type Local struct {
-	Root     string // ./.shell3/
-	Ref      string // ./.shell3/.ref  (gitignored)
-	Skills   string // ./.shell3/skills/
-	Tools    string // ./.shell3/tools/
-	Hooks    string // ./.shell3/hooks/
-	Personas string // ./.shell3/personas/
-	BGJobs   string // ./.shell3/bg.json (gitignored)
+	Root   string // ./.shell3/
+	Ref    string // ./.shell3/.ref  (gitignored)
+	BGJobs string // ./.shell3/bg.json (gitignored)
 }
 
 // NewGlobal returns a Global path set rooted at homeDir/.shell3/.
 func NewGlobal(homeDir string) Global {
 	root := filepath.Join(homeDir, ".shell3")
 	return Global{
-		Root:    root,
-		Auth:    filepath.Join(root, "ai-do-not-read.auth.yaml"),
-		Secrets: filepath.Join(root, "ai-do-not-read.secrets.yaml"),
-		Skills:      filepath.Join(root, "skills"),
-		Tools:       filepath.Join(root, "tools"),
-		Hooks:       filepath.Join(root, "hooks"),
-		Personas:    filepath.Join(root, "personas"),
-		Projects:    filepath.Join(root, "projects"),
-		LogFile:     filepath.Join(root, "shell3.log"),
+		Root:     root,
+		Auth:     filepath.Join(root, "ai-do-not-read.auth.yaml"),
+		Secrets:  filepath.Join(root, "ai-do-not-read.secrets.yaml"),
+		Projects: filepath.Join(root, "projects"),
+		LogFile:  filepath.Join(root, "shell3.log"),
 	}
 }
 
@@ -63,13 +51,9 @@ func NewProject(g Global, uuid string) Project {
 func NewLocal(cwd string) Local {
 	root := filepath.Join(cwd, ".shell3")
 	return Local{
-		Root:     root,
-		Ref:      filepath.Join(root, ".ref"),
-		Skills:   filepath.Join(root, "skills"),
-		Tools:    filepath.Join(root, "tools"),
-		Hooks:    filepath.Join(root, "hooks"),
-		Personas: filepath.Join(root, "personas"),
-		BGJobs:   filepath.Join(root, "bg.json"),
+		Root:   root,
+		Ref:    filepath.Join(root, ".ref"),
+		BGJobs: filepath.Join(root, "bg.json"),
 	}
 }
 

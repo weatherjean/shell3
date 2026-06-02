@@ -11,18 +11,18 @@ import (
 	"github.com/weatherjean/shell3/internal/scaffold"
 )
 
-// EnsureGlobal creates ~/.shell3/ and its subdirectories if missing,
-// and writes default global config files (persona, example tool) if absent.
+// EnsureGlobal creates ~/.shell3/ (and its projects/ dir) if missing, and writes
+// the starter shell3.lua and .env.example into ~/.shell3/ if absent.
 func EnsureGlobal(g paths.Global) error {
-	for _, dir := range []string{
-		g.Root, g.Skills, g.Tools, g.Hooks, g.Personas, g.Projects,
-	} {
+	for _, dir := range []string{g.Root, g.Projects} {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return fmt.Errorf("bootstrap: mkdir %s: %w", dir, err)
 		}
 	}
-	if err := scaffold.WriteDefaults(g.Personas, g.Tools, g.Skills, g.Hooks); err != nil {
-		return fmt.Errorf("bootstrap: write global defaults: %w", err)
+	configPath := filepath.Join(g.Root, "shell3.lua")
+	envExamplePath := filepath.Join(g.Root, ".env.example")
+	if err := scaffold.WriteStarterConfig(configPath, envExamplePath); err != nil {
+		return fmt.Errorf("bootstrap: write starter config: %w", err)
 	}
 	if err := ensureGlobalGitignore(g); err != nil {
 		return fmt.Errorf("bootstrap: global gitignore: %w", err)
@@ -30,15 +30,11 @@ func EnsureGlobal(g paths.Global) error {
 	return nil
 }
 
-// EnsureProject creates .shell3/ subdirectories and the .ref file for this
-// project. Returns the project UUID (creating one on first call).
+// EnsureProject creates ./.shell3/ and the .ref file for this project, and the
+// project's global state dir. Returns the project UUID (created on first call).
 func EnsureProject(l paths.Local, g paths.Global, cwd string) (string, error) {
-	for _, dir := range []string{
-		l.Root, l.Skills, l.Tools, l.Hooks, l.Personas,
-	} {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return "", fmt.Errorf("bootstrap: mkdir %s: %w", dir, err)
-		}
+	if err := os.MkdirAll(l.Root, 0755); err != nil {
+		return "", fmt.Errorf("bootstrap: mkdir %s: %w", l.Root, err)
 	}
 
 	if err := ensureGitignore(l); err != nil {

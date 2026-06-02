@@ -50,8 +50,11 @@ func TestDoctorMissingCredentials(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("expected non-zero exit, got 0\noutput:\n%s", out.String())
 	}
-	if !bytes.Contains(out.Bytes(), []byte("no shell3.lua found")) {
-		t.Errorf("expected 'no shell3.lua found' in output:\n%s", out.String())
+	// EnsureGlobal writes a starter ~/.shell3/shell3.lua, but with no .env the
+	// required secrets are missing so the config fails to parse — doctor must
+	// surface that as a shell3.lua failure.
+	if !bytes.Contains(out.Bytes(), []byte("shell3.lua")) {
+		t.Errorf("expected a shell3.lua failure in output:\n%s", out.String())
 	}
 }
 

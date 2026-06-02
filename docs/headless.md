@@ -7,7 +7,7 @@ shell3 can run as a child process and stream a structured audit log of everythin
 ```bash
 shell3 "summarise the README" --out /tmp/run.jsonl
 tail -n1 /tmp/run.jsonl     # last line is {"kind":"end",...}
-jq -r 'select(.kind=="text") | .text' < /tmp/run.jsonl
+jq -r 'select(.kind=="assistant_message") | .text' < /tmp/run.jsonl
 ```
 
 ## What triggers headless mode
@@ -16,17 +16,16 @@ Either:
 - The `--out <path>` flag is given, OR
 - stdin is not a TTY *and* an input argument is provided (e.g. piped).
 
-Both conditions export `SHELL3_HEADLESS=1` to all subprocess hooks. The `--out` case additionally exports `SHELL3_OUT=<path>`.
+Both conditions export `SHELL3_HEADLESS=1` to the process environment (visible to any subprocess shell3 spawns, e.g. `bash` tool calls). The `--out` case additionally exports `SHELL3_OUT=<path>`.
 
 ## What changes in headless mode
 
 | Behavior | Interactive | Headless |
 |----------|-------------|----------|
-| `shell_interactive` tool exposed to the model | yes | no — stripped from tool schema |
+| `shell_interactive` tool exposed to the model | yes | no — interactive TTY is unavailable, the tool returns an error |
 | `<system-reminder>` about headless constraints injected | no | yes, once at turn start |
-| `confirm-bash` hook policy on destructive commands | TUI picker | auto-block (unless `SHELL3_HEADLESS_TRUST=1`) |
-| `confirm-bash` hook policy on safe commands | run silently | run silently |
-| Hooks run at all | yes | yes — env tells them they're headless |
+| `confirm_dangerous` guard on destructive commands | blocks the call | blocks the call (no human to prompt) |
+| `confirm_dangerous` guard on safe commands | allows | allows |
 | TUI rendered | yes | no, plain stdout |
 | `--out` audit log written | only if flag set | only if flag set |
 
@@ -37,57 +36,66 @@ One JSON object per line. Every event carries `ts` (RFC3339Nano UTC) and `kind`.
 | Kind | Fields | Meaning |
 |------|--------|---------|
 | `start` | `input`, `persona`, `model`, `out`, `headless` | First line of every file. Identifies the run. |
-| `text` | `text` | Assistant reply (coalesced — one event per message, not per token). |
-| `reasoning` | `text` | Reasoning / thinking block (coalesced — one event per think block, not per token). Not part of saved history. |
-| `tool` | `raw` | Pre-formatted tool call block (header + output). ANSI stripped. |
-| `tty_exec_request` | `cmd`, `workdir` | Model asked for `shell_interactive`. Always denied in headless. |
-| `usage` | `prompt`, `completion`, `total` | Intermediate token usage between LLM rounds. |
-| `turn_done` | `prompt`, `completion`, `total` | A single turn completed successfully. |
-| `error` | `error` | Turn failed; string from the underlying error. |
+| `user_message` | `role`, `text` | The user input for the turn. |
+| `assistant_token` | `text` | A streamed token delta of the assistant reply. |
+| `assistant_message` | `role`, `text` | The completed assistant reply for a message. |
+| `assistant_reasoning` | `text` | Reasoning / thinking block. Not part of saved history. |
+| `tool_call` | `tool`, `input`, `call_id` | The model invoked a tool, with its JSON arguments. |
+| `tool_result` | `tool`, `output`, `call_id`, `tool_error` | Result of a tool call (`tool_error: true` if it failed). |
+| `usage` | `usage` (`{prompt, completion, total}`) | Intermediate token usage between LLM rounds. |
+| `turn_done` | `usage` (`{prompt, completion, total}`) | A single turn completed successfully. |
+| `system_reminder` | `text` | Injected system reminder (e.g. the headless-constraints notice). |
+| `retry` | `text` | The SDK is retrying a failed LLM request. |
+| `error` | `text` | Turn failed; string from the underlying error. |
 | `end` | `status` | Last line. `status` is `"ok"` or `"error"`. |
 
-All `text` and `raw` fields have ANSI escape sequences removed.
+`session_id` (the store session id) is attached to most events when a store is configured. All `text` and tool `output` fields have ANSI escape sequences removed.
 
-Streaming text and reasoning deltas are accumulated and flushed as a single
-event whenever a boundary event arrives (tool call, usage, turn_done, error,
-tty_exec_request) or on `end`. This keeps the JSONL coherent — one event per
-logical message — instead of one event per LLM token.
+The `start` and `end` lines are written directly by the JSONL sink; every other kind is the string form of an internal chat event (`assistant_message`, `tool_call`, …). Tool calls and results are emitted as separate `tool_call` / `tool_result` events rather than a single pre-formatted block.
 
-## Env vars exposed to hooks
+## Environment variables
 
 | Var | Set when | Purpose |
 |-----|----------|---------|
-| `SHELL3_HEADLESS` | `1` in headless mode | Hooks branch on this to apply non-interactive policies. |
-| `SHELL3_OUT` | absolute path when `--out` is set | Hooks can write supplemental logs alongside the audit. |
-| `SHELL3_HEADLESS_TRUST` | not set by shell3; the orchestrator sets it | Opt-in: bypass the default safe-block policy in confirm-bash. |
+| `SHELL3_HEADLESS` | `1` in headless mode | Set by shell3. Visible to subprocesses (e.g. `bash` tool calls) and to custom `on_tool_call` guards, which can branch on it via `os.getenv`. |
+| `SHELL3_OUT` | absolute path when `--out` is set | Subprocesses can write supplemental logs alongside the audit file. |
+| `SHELL3_HEADLESS_TRUST` | not set by shell3; an orchestrator may set it | Opt-in marker the orchestrator can read from a custom guard to relax its non-interactive policy. shell3's built-in `confirm_dangerous` guard does **not** read it. |
 
-## Writing your own headless-aware hook
+## Guarding tool calls
 
-Follow the pattern in `confirm-bash.sh`:
+Tool-call gating is configured in `shell3.lua`, not via external hook scripts. Each agent's `on_tool_call` is a chain of:
 
-```bash
-if [[ "$SHELL3_HEADLESS" == "1" && "$SHELL3_HEADLESS_TRUST" != "1" ]]; then
-  # No human reachable. Pick a deterministic, safe action.
-  echo '{"action":"block","reason":"headless: would have prompted"}'
-  exit 0
-fi
-# Interactive fallback below — your existing logic here.
+- the built-in `shell3.guards.confirm_dangerous{}` handle, which blocks commands matching a denylist of destructive patterns. In headless mode there is no human to confirm, so a matched dangerous command is simply blocked (the `prompt` option is reserved and currently a no-op).
+- and/or custom Lua functions `(call) -> { action = "allow" | "block", reason = "..." }`.
+
+A custom guard can make a headless-aware decision by reading the environment:
+
+```lua
+on_tool_call = {
+  function(call)
+    if os.getenv("SHELL3_HEADLESS") == "1"
+       and os.getenv("SHELL3_HEADLESS_TRUST") ~= "1" then
+      -- No human reachable. Pick a deterministic, safe action.
+      return { action = "block", reason = "headless: would have prompted" }
+    end
+    return { action = "allow" }
+  end,
+  shell3.guards.confirm_dangerous{},
+}
 ```
 
-The hook contract is unchanged from interactive mode: stdin = on_tool_call JSON, stdout = action JSON (`allow`/`block`/`cancel`).
+See the canonical config at `internal/scaffold/defaults/shell3.lua` and `shell3 docs` for the full guard/tool API.
 
 ## Orchestrator example
 
-A parent agent uses the `spawning-subagents` skill (shipped with shell3) to:
+A parent agent can spawn a sibling shell3 as a child process and watch its JSONL:
 
-1. Spawn a sibling with `bash_bg`:
+1. Spawn a sibling in the background (e.g. via the `bash_bg` tool):
    ```bash
    shell3 "find every TODO in this repo" --out /tmp/find-todos.jsonl
    ```
-2. `sleep 30` and check whether the JSONL ends with `{"kind":"end",...}`.
-3. If yes: extract the final answer with `jq`. If no: sleep more.
-
-See `internal/scaffold/defaults/skills/spawning-subagents.md` (also installed into `~/.shell3/skills/spawning-subagents.md`).
+2. Poll until the JSONL ends with `{"kind":"end",...}`.
+3. If done: extract the final answer with `jq` (e.g. the last `assistant_message`). If not: poll again.
 
 ## Caveats
 

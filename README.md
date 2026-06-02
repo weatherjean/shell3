@@ -15,11 +15,20 @@ AI-powered shell assistant.
 
 ## Getting started
 
-Works with any **OpenAI-compatible API endpoint** (OpenAI, Ollama, Groq, LM Studio, OpenRouter, …) and **Anthropic** natively. Codex (ChatGPT subscription via OAuth) is supported via the third-party [openai-oauth](https://github.com/EvanZhouDev/openai-oauth) proxy — see `shell3 docs`.
+Works with any **OpenAI-compatible API endpoint** (OpenAI, Ollama, Groq, LM Studio, OpenRouter, …). Codex (ChatGPT subscription via OAuth) is supported via the third-party [openai-oauth](https://github.com/EvanZhouDev/openai-oauth) proxy, which exposes an OpenAI-compatible endpoint — see `shell3 docs`.
+
+shell3 is configured by a single Lua file, `shell3.lua`. It's discovered in this order: the `--config/-c` flag, then `./shell3.lua`, then `~/.shell3/shell3.lua`. Secrets (provider API keys, tool tokens) live in a `.env` file beside the config and are read from Lua via `shell3.env.secret("KEY")`.
 
 ```sh
 make build
-shell3 auth        # configure your provider
+
+# On first run shell3 scaffolds ~/.shell3/shell3.lua and ~/.shell3/.env.example.
+# (Or copy the canonical example yourself:)
+#   cp internal/scaffold/defaults/shell3.lua ~/.shell3/shell3.lua
+
+# Put your provider key in the .env beside the config, e.g.:
+#   cp ~/.shell3/.env.example ~/.shell3/.env  &&  $EDITOR ~/.shell3/.env
+
 shell3             # start a session
 ```
 
@@ -31,9 +40,9 @@ Full documentation is embedded in the binary:
 shell3 docs
 ```
 
-Or read the source: [cmd/shell3/shell3.md](cmd/shell3/shell3.md)
+Or read the source: [cmd/shell3/shell3.md](cmd/shell3/shell3.md). The canonical example config is [internal/scaffold/defaults/shell3.lua](internal/scaffold/defaults/shell3.lua).
 
-Credentials live in plain YAML at `~/.shell3/ai-do-not-read.auth.yaml`. Edit with `shell3 auth` (opens in `$EDITOR`). The filename prefix is a soft signal to AI agents — there's no encryption, so treat the file like any `~/.*rc` with credentials.
+Secrets live in a plain `.env` file beside your `shell3.lua` (e.g. `~/.shell3/.env`), referenced from the config via `shell3.env.secret("KEY")`. There's no encryption — treat the file like any `~/.*rc` with credentials. Keep it out of version control.
 
 ## Removing a project's shell3 data
 

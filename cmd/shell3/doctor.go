@@ -58,7 +58,6 @@ func runDoctor(homeDir, cwd string, out io.Writer) int {
 
 func checkGlobalDoctor(out io.Writer, homeDir, cwd string, g paths.Global, fail func()) {
 	doctorCheck(out, fail, dirExists(g.Root), "~/.shell3/ exists")
-	doctorCheck(out, fail, dirExists(g.Skills), "global skills dir")
 
 	configPath, err := resolveConfigPath("", cwd, homeDir)
 	if err != nil {
