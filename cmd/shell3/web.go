@@ -118,6 +118,14 @@ func runWeb(ctx context.Context, f *webFlags) error {
 	// Tear down: stop any in-flight turn and wait for its goroutine, THEN close
 	// the session so the hub's drain goroutine exits cleanly.
 	hub.Close()
+	// Close the store session row (mirrors the TUI). Read sess.ID() now —
+	// compact_history can roll the id mid-conversation, and hub.Close() has
+	// already ensured no turn is in flight.
+	if cfg.Store != nil {
+		if err := cfg.Store.EndSession(sess.ID()); err != nil {
+			log.Warn("end session failed", "session_id", sess.ID(), "error", err)
+		}
+	}
 	sess.End("ok")
 	sess.CloseEvents()
 
