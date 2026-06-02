@@ -151,7 +151,7 @@ func runWeb(ctx context.Context, f *webFlags) error {
 
 	srv := &http.Server{
 		Addr:    net.JoinHostPort(f.host, fmt.Sprintf("%d", f.port)),
-		Handler: web.NewServer(hub, info).Handler(),
+		Handler: web.NewServer(hub, info, web.Config{}).Handler(),
 	}
 
 	go func() {
