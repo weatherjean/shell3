@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>shell3 web</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0b0b0c; color: #d6d6d6;
+         font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  #log { padding: 16px; padding-bottom: 96px; white-space: pre-wrap; word-break: break-word; }
+  .user { color: #7aa2f7; }
+  .assistant { color: #d6d6d6; }
+  .reason, .tool, .meta { color: #6b6b70; }
+  .toolhdr { color: #9ece6a; }
+  .error { color: #f7768e; }
+  #bar { position: fixed; bottom: 0; left: 0; right: 0; display: flex; gap: 8px;
+         padding: 12px; background: #111113; border-top: 1px solid #222; }
+  #input { flex: 1; background: #1a1b1e; color: #eee; border: 1px solid #333;
+           border-radius: 6px; padding: 8px; font: inherit; }
+  button { background: #1a1b1e; color: #ccc; border: 1px solid #333;
+           border-radius: 6px; padding: 8px 12px; font: inherit; cursor: pointer; }
+  button:disabled { opacity: 0.4; cursor: default; }
+  #status { position: fixed; top: 0; right: 0; padding: 6px 10px; color: #6b6b70; }
+</style>
+</head>
+<body>
+<div id="status">connecting…</div>
+<div id="log"></div>
+<div id="bar">
+  <input id="input" placeholder="message… (/clear to reset)" autofocus autocomplete="off" />
+  <button id="send">Send</button>
+  <button id="stop">Stop</button>
+  <button id="clear">Clear</button>
+</div>
+<script>
+const logEl = document.getElementById('log');
+const statusEl = document.getElementById('status');
+const inputEl = document.getElementById('input');
+const sendEl = document.getElementById('send');
+let curAssistant = null; // element accumulating streamed tokens
+
+function line(cls, text) {
+  const el = document.createElement('div');
+  el.className = cls;
+  el.textContent = text;
+  logEl.appendChild(el);
+  window.scrollTo(0, document.body.scrollHeight);
+  return el;
+}
+function resetView() { logEl.innerHTML = ''; curAssistant = null; }
+function setBusy(b) { inputEl.disabled = b; sendEl.disabled = b; }
+
+function handle(ev) {
+  switch (ev.kind) {
+    case 'session_start':
+      if (ev.meta && ev.meta.reset === 'true') resetView();
+      break;
+    case 'user_message':
+      curAssistant = null;
+      line('user', '› ' + (ev.text || ''));
+      setBusy(true);
+      break;
+    case 'assistant_token':
+      if (!curAssistant) curAssistant = line('assistant', '');
+      curAssistant.textContent += ev.text || '';
+      window.scrollTo(0, document.body.scrollHeight);
+      break;
+    case 'assistant_reasoning':
+      line('reason', ev.text || '');
+      break;
+    case 'tool_call':
+      curAssistant = null;
+      line('toolhdr', '⚙ ' + (ev.tool || '') + ' ' + (ev.input || ''));
+      break;
+    case 'tool_result':
+      line('tool', (ev.tool_error ? '✗ ' : '✓ ') + (ev.output || ''));
+      break;
+    case 'error':
+      line('error', '✗ ' + (ev.text || ''));
+      break;
+    case 'turn_done':
+      curAssistant = null;
+      setBusy(false);
+      inputEl.focus();
+      break;
+  }
+}
+
+function connect() {
+  const es = new EventSource('/events');
+  es.onopen = () => { statusEl.textContent = 'live'; resetView(); };
+  es.onerror = () => { statusEl.textContent = 'reconnecting…'; };
+  es.onmessage = (m) => { try { handle(JSON.parse(m.data)); } catch (e) {} };
+}
+
+async function send() {
+  const text = inputEl.value.trim();
+  if (!text) return;
+  inputEl.value = '';
+  const res = await fetch('/input', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+  if (res.status === 409) { statusEl.textContent = 'busy'; }
+}
+
+sendEl.onclick = send;
+inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+document.getElementById('stop').onclick = () => fetch('/cancel', { method: 'POST' });
+document.getElementById('clear').onclick = () => fetch('/clear', { method: 'POST' });
+connect();
+</script>
+</body>
+</html>
