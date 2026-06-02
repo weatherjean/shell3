@@ -5,23 +5,38 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>shell3 — sign in</title>
   <style>
-    body { background:#0b0e14; color:#cbd5e1; font:15px/1.5 ui-monospace,Menlo,monospace;
-           display:flex; min-height:100vh; align-items:center; justify-content:center; margin:0; }
-    form { background:#11151f; border:1px solid #1e2536; border-radius:10px; padding:28px;
-           width:300px; box-shadow:0 8px 30px rgba(0,0,0,.4); }
-    h1 { font-size:16px; margin:0 0 16px; color:#e2e8f0; }
-    input { width:100%; box-sizing:border-box; padding:9px 10px; margin-bottom:12px;
-            background:#0b0e14; border:1px solid #2a3346; border-radius:6px; color:#e2e8f0; }
-    button { width:100%; padding:9px; background:#2563eb; border:0; border-radius:6px;
-             color:#fff; font:inherit; cursor:pointer; }
-    .err { color:#f87171; margin:0 0 12px; font-size:13px; display:none; }
+    /* Palette + type mirror the chat UI (assets/index.html). */
+    :root {
+      color-scheme: dark;
+      --bg: #16161e; --panel: #1a1b26; --bar: #1f2030;
+      --fg: #a9b1d6; --dim: #7e88b3; --gold: #e0af68; --red: #f7768e;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--fg);
+           font: 13.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+           display: flex; align-items: center; justify-content: center; }
+    form { background: var(--panel); border: 1px solid #2a2b3d; border-radius: 8px;
+           padding: 24px; width: 300px; }
+    .title { color: var(--gold); font-weight: 700; font-size: 1.25em; }
+    .tagline { color: var(--dim); margin: 2px 0 18px; }
+    label { display: block; color: var(--gold); margin-bottom: 6px; }
+    input { width: 100%; background: var(--bg); color: var(--fg); border: 1px solid #2a2b3d;
+            border-radius: 6px; padding: 8px 10px; font: inherit; line-height: 1.5; outline: none; }
+    input:focus { border-color: var(--gold); }
+    button { width: 100%; margin-top: 14px; background: var(--gold); color: #16161e;
+             border: 1px solid var(--gold); border-radius: 6px; padding: 8px 12px;
+             font: inherit; font-weight: 700; cursor: pointer; }
+    button:hover { filter: brightness(1.08); }
+    .err { color: var(--red); margin: 12px 0 0; display: none; }
   </style>
 </head>
 <body>
   <form method="post" action="/login">
-    <h1>shell3</h1>
+    <div class="title">shell3</div>
+    <div class="tagline">sign in to continue</div>
+    <label for="pw">password</label>
+    <input id="pw" type="password" name="password" autofocus autocomplete="current-password">
     <p class="err" id="err">Incorrect password.</p>
-    <input type="password" name="password" placeholder="password" autofocus autocomplete="current-password">
     <button type="submit">Sign in</button>
   </form>
   <script>
