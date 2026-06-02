@@ -57,19 +57,29 @@ func TestHub_SubmitStreamsToSubscriber(t *testing.T) {
 }
 
 func TestHub_BusyRejectsConcurrentSubmit(t *testing.T) {
-	h, _ := newTestHub(t, fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "a"}, {TextDelta: "b"}}})
+	// A blocking run holds the turn open so the busy window is deterministic
+	// (real fakellm turns finish too fast to reliably observe ErrBusy).
+	sess := chat.NewSession(chat.SessionOpts{BufSize: 256})
+	started := make(chan struct{})
+	release := make(chan struct{})
+	run := func(ctx context.Context, input string) {
+		close(started)
+		<-release
+	}
+	h := NewHub(sess, run)
+	h.Start()
+	t.Cleanup(func() { close(release); h.Close(); sess.End("ok"); sess.CloseEvents() })
+
 	if err := h.Submit("first"); err != nil {
 		t.Fatalf("first Submit: %v", err)
 	}
-	var got error
-	for i := 0; i < 100; i++ {
-		if got = h.Submit("second"); got == ErrBusy {
-			return
-		}
-		time.Sleep(time.Millisecond)
+	<-started
+	if err := h.Submit("second"); err != ErrBusy {
+		t.Fatalf("second Submit = %v, want ErrBusy", err)
 	}
-	if got != nil && got != ErrBusy {
-		t.Fatalf("Submit returned unexpected error: %v", got)
+	// Clear must also refuse while a turn is in flight.
+	if err := h.Clear(); err != ErrBusy {
+		t.Fatalf("Clear during turn = %v, want ErrBusy", err)
 	}
 }
 
@@ -102,7 +112,9 @@ func TestHub_ClearEmptiesLogAndBroadcastsReset(t *testing.T) {
 
 	_, ch, unsub := h.Subscribe()
 	defer unsub()
-	h.Clear()
+	if err := h.Clear(); err != nil {
+		t.Fatalf("Clear (idle): %v", err)
+	}
 
 	ev := drainKinds(t, ch, chat.EventSessionStart, time.Second)
 	if ev.Meta["reset"] != "true" {

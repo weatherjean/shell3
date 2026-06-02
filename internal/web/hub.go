@@ -104,9 +104,9 @@ func (h *Hub) Submit(input string) error {
 	h.busy = true
 	ctx, cancel := context.WithCancel(context.Background())
 	h.cancel = cancel
+	h.wg.Add(1) // under the lock: Close() must never observe a 0 count between unlock and Add
 	h.mu.Unlock()
 
-	h.wg.Add(1)
 	go func() {
 		defer func() {
 			cancel()
@@ -147,9 +147,10 @@ func (h *Hub) Close() {
 
 // Clear resets the conversation (sess.SetMessages(nil)), empties the replay
 // log, and broadcasts a session-reset marker (EventSessionStart with
-// meta.reset="true") so connected UIs clear their scrollback.
-func (h *Hub) Clear() {
-	h.sess.SetMessages(nil)
+// meta.reset="true") so connected UIs clear their scrollback. Returns ErrBusy
+// if a turn is in flight: clearing mid-turn would race the turn goroutine's
+// reads of the session history, so callers must cancel (or wait) first.
+func (h *Hub) Clear() error {
 	marker := chat.Event{
 		Kind: chat.EventSessionStart,
 		Time: time.Now().UTC(),
@@ -157,6 +158,12 @@ func (h *Hub) Clear() {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.busy {
+		return ErrBusy
+	}
+	// busy == false under the lock guarantees no turn goroutine is touching the
+	// session, so SetMessages here cannot race RunTurn's reads.
+	h.sess.SetMessages(nil)
 	h.log = []chat.Event{marker}
 	for s := range h.subs {
 		select {
@@ -166,4 +173,5 @@ func (h *Hub) Clear() {
 			delete(h.subs, s)
 		}
 	}
+	return nil
 }
