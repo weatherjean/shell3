@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -100,9 +101,16 @@ func runWeb(ctx context.Context, f *webFlags) error {
 	})
 	hub.Start()
 
+	// cfg.StatusLine is "<agent> │ <modelID>"; split out the model for the UI.
+	model := cfg.StatusLine
+	if i := strings.Index(cfg.StatusLine, "│"); i >= 0 {
+		model = strings.TrimSpace(cfg.StatusLine[i+len("│"):])
+	}
+	meta := web.Meta{Persona: cfg.ModeLabel, Model: model, Project: cfg.ProjectRef}
+
 	srv := &http.Server{
 		Addr:    net.JoinHostPort(f.host, fmt.Sprintf("%d", f.port)),
-		Handler: web.NewServer(hub).Handler(),
+		Handler: web.NewServer(hub, meta).Handler(),
 	}
 
 	go func() {

@@ -3,114 +3,326 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>shell3 web</title>
+<title>shell3</title>
 <style>
-  :root { color-scheme: dark; }
-  body { margin: 0; background: #0b0b0c; color: #d6d6d6;
-         font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
-  #log { padding: 16px; padding-bottom: 96px; white-space: pre-wrap; word-break: break-word; }
-  .user { color: #7aa2f7; }
-  .assistant { color: #d6d6d6; }
-  .reason, .tool, .meta { color: #6b6b70; }
-  .toolhdr { color: #9ece6a; }
-  .error { color: #f7768e; }
-  #bar { position: fixed; bottom: 0; left: 0; right: 0; display: flex; gap: 8px;
-         padding: 12px; background: #111113; border-top: 1px solid #222; }
-  #input { flex: 1; background: #1a1b1e; color: #eee; border: 1px solid #333;
-           border-radius: 6px; padding: 8px; font: inherit; }
-  button { background: #1a1b1e; color: #ccc; border: 1px solid #333;
+  :root {
+    color-scheme: dark;
+    --bg: #16161e; --panel: #1a1b26; --bar: #1f2030;
+    --fg: #a9b1d6; --dim: #565f89; --gold: #e0af68;
+    --green: #9ece6a; --blue: #7aa2f7; --red: #f7768e; --userbar: #222433;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 13.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  #log { padding: 18px 20px 120px; }
+  .row { white-space: pre-wrap; word-break: break-word; }
+
+  /* welcome card */
+  #welcome { color: var(--gold); }
+  .art { text-align: center; color: var(--gold); white-space: pre; line-height: 1.2;
+         margin: 4px 0 18px; opacity: 0.95; }
+  .title { color: var(--gold); font-weight: 700; }
+  .ipa { color: var(--dim); font-weight: 400; }
+  .tagline { color: var(--dim); margin-bottom: 14px; }
+  .label { color: var(--gold); }
+  .val { color: var(--fg); padding-left: 20px; }
+  .gap { height: 12px; }
+
+  /* events */
+  .user { color: var(--fg); background: var(--userbar); padding: 2px 20px;
+          margin: 10px -20px 6px; }
+  .user::before { content: '› '; color: var(--gold); font-weight: 700; }
+  .assistant { color: var(--fg); margin: 2px 0; }
+  .reason { color: var(--dim); margin: 2px 0; }
+  .reason::before { content: '◆ '; color: var(--green); }
+  .toolhdr { color: var(--green); margin: 6px 0 2px; }
+  .tool { color: var(--dim); margin: 0 0 6px; padding-left: 2px; }
+  .error { color: var(--red); margin: 4px 0; }
+  .meta { color: var(--dim); margin: 6px 0; }
+
+  /* collapsible long tool output */
+  details.tool { margin: 0 0 6px; }
+  details.tool > summary { color: var(--dim); cursor: pointer; list-style: none; }
+  details.tool > summary::-webkit-details-marker { display: none; }
+  details.tool > summary:hover { color: var(--green); }
+  .toolbody { white-space: pre-wrap; word-break: break-word; color: var(--dim);
+              margin-top: 4px; max-height: 360px; overflow: auto;
+              border-left: 2px solid #2a2b3d; padding-left: 10px; }
+
+  /* rendered markdown (final assistant message) */
+  .md { white-space: normal; }
+  .md h1, .md h2, .md h3, .md h4 { color: var(--fg); margin: 10px 0 4px; line-height: 1.3; }
+  .md h1 { font-size: 1.35em; } .md h2 { font-size: 1.2em; } .md h3 { font-size: 1.08em; }
+  .md p { margin: 6px 0; }
+  .md ul, .md ol { margin: 6px 0; padding-left: 22px; }
+  .md li { margin: 2px 0; }
+  .md code { background: #20222e; padding: 1px 5px; border-radius: 3px; color: var(--gold); }
+  .md pre.code { background: #1a1b26; border: 1px solid #2a2b3d; border-radius: 6px;
+                 padding: 10px 12px; overflow-x: auto; margin: 8px 0; }
+  .md pre.code code { background: none; padding: 0; color: var(--fg); }
+  .md table { border-collapse: collapse; margin: 8px 0; display: block; overflow-x: auto; }
+  .md th, .md td { border: 1px solid #2a2b3d; padding: 4px 10px; text-align: left; }
+  .md th { background: #1f2030; color: var(--gold); }
+  .md blockquote { border-left: 3px solid #2a2b3d; margin: 6px 0; padding-left: 10px; color: var(--dim); }
+  .md a { color: var(--blue); }
+  .md hr { border: none; border-top: 1px solid #2a2b3d; margin: 10px 0; }
+
+  /* bottom: status + input */
+  #bottom { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg); }
+  #statusrow { display: flex; justify-content: space-between; align-items: center;
+               font-size: 12px; height: 24px; }
+  #ident { background: var(--bar); color: var(--dim); height: 24px; line-height: 24px;
+           padding: 0 12px; flex: 1; }
+  #ident b { background: var(--gold); color: #16161e; padding: 0 6px; border-radius: 2px;
+             font-weight: 700; }
+  #ident .persona { color: var(--fg); }
+  #ident .model { color: var(--blue); }
+  #hint { background: var(--bar); color: var(--dim); height: 24px; line-height: 24px;
+          padding: 0 12px; }
+  #thinking { display: none; height: 24px; line-height: 24px; padding: 0 12px;
+              color: #16161e; font-weight: 700;
+              background: linear-gradient(90deg,#f7768e,#e0af68,#9ece6a,#7dcfff,#7aa2f7,#bb9af7,#f7768e);
+              background-size: 220% 100%; animation: slide 3s linear infinite; }
+  @keyframes slide { from { background-position: 0 0; } to { background-position: 220% 0; } }
+  body.busy #statusrow { display: none; }
+  body.busy #thinking { display: block; }
+
+  #bar { display: flex; gap: 8px; padding: 10px 12px; background: var(--panel);
+         border-top: 1px solid #2a2b3d; }
+  #input { flex: 1; background: var(--bg); color: var(--fg); border: 1px solid #2a2b3d;
+           border-radius: 6px; padding: 8px 10px; font: inherit; outline: none; }
+  #input:focus { border-color: var(--gold); }
+  button { background: var(--bg); color: var(--fg); border: 1px solid #2a2b3d;
            border-radius: 6px; padding: 8px 12px; font: inherit; cursor: pointer; }
-  button:disabled { opacity: 0.4; cursor: default; }
-  #status { position: fixed; top: 0; right: 0; padding: 6px 10px; color: #6b6b70; }
+  button:hover { border-color: var(--gold); }
+  button:disabled { opacity: 0.35; cursor: default; }
 </style>
 </head>
 <body>
-<div id="status">connecting…</div>
 <div id="log"></div>
-<div id="bar">
-  <input id="input" placeholder="message… (/clear to reset)" autofocus autocomplete="off" />
-  <button id="send">Send</button>
-  <button id="stop">Stop</button>
-  <button id="clear">Clear</button>
+<div id="bottom">
+  <div id="statusrow">
+    <span id="ident"><b>shell3</b> <span class="persona">—</span> │ <span class="model">—</span></span>
+    <span id="hint">/help</span>
+  </div>
+  <div id="thinking">● thinking…  ·  Stop to cancel</div>
+  <div id="bar">
+    <input id="input" placeholder="message…  (/help for commands)" autofocus autocomplete="off" />
+    <button id="send">Send</button>
+    <button id="stop">Stop</button>
+    <button id="clear">Clear</button>
+  </div>
 </div>
 <script>
 const logEl = document.getElementById('log');
-const statusEl = document.getElementById('status');
 const inputEl = document.getElementById('input');
 const sendEl = document.getElementById('send');
-let curAssistant = null; // element accumulating streamed tokens
+let meta = { persona: '', model: '', project: '' };
+let curEl = null, curKind = null;
+let pinned = true; // true while the viewport is at (or near) the bottom
 
-function line(cls, text) {
-  const el = document.createElement('div');
-  el.className = cls;
-  el.textContent = text;
-  logEl.appendChild(el);
-  window.scrollTo(0, document.body.scrollHeight);
-  return el;
+const ART = [
+  "       /\\",
+  "      {.-}",
+  "     ;_.-'\\",
+  "    {    _.}_",
+  "     \\.-' /  `",
+  "      \\  |    /",
+  "       \\ |  ,/",
+  "        \\|_/",
+].join("\n");
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
 }
-function resetView() { logEl.innerHTML = ''; curAssistant = null; }
-function setBusy(b) { inputEl.disabled = b; sendEl.disabled = b; }
+function atBottom() {
+  return window.innerHeight + window.scrollY >= document.body.scrollHeight - 60;
+}
+// Recompute pinned on every user/programmatic scroll. New content only yanks
+// the viewport down when we were already at the bottom.
+window.addEventListener('scroll', () => { pinned = atBottom(); });
+function scroll() { if (pinned) window.scrollTo(0, document.body.scrollHeight); }
+
+function renderWelcome() {
+  const w = el('div', 'row'); w.id = 'welcome';
+  w.appendChild(el('div', 'art', ART));
+  const h = el('div');
+  h.innerHTML = '<span class="title">◆ shell3</span> <span class="ipa">/ˈʃɛli/</span>';
+  w.appendChild(h);
+  w.appendChild(el('div', 'tagline', 'AI-powered shell assistant'));
+  w.appendChild(el('div', 'label', 'persona'));
+  w.appendChild(el('div', 'val', meta.persona || 'base'));
+  w.appendChild(el('div', 'label', 'project'));
+  w.appendChild(el('div', 'val', meta.project || '—'));
+  w.appendChild(el('div', 'gap'));
+  w.appendChild(el('div', 'label', '/help'));
+  w.appendChild(el('div', 'val', 'list commands · /clear to reset · Stop to cancel'));
+  w.appendChild(el('div', 'gap'));
+  logEl.appendChild(w);
+}
+
+function line(cls, text) { const e = el('div', 'row ' + cls, text); logEl.appendChild(e); scroll(); return e; }
+function stream(cls, kind, text) {
+  if (curKind !== kind || !curEl) { curEl = line(cls, ''); curKind = kind; }
+  curEl.textContent += text || ''; scroll();
+}
+function block(cls, text) { curEl = null; curKind = null; return line(cls, text); }
+function resetView() { logEl.innerHTML = ''; curEl = null; curKind = null; renderWelcome(); }
+function setBusy(b) { document.body.classList.toggle('busy', b); inputEl.disabled = b; sendEl.disabled = b; }
+
+function toolSummary(ev) {
+  let arg = ev.input || '';
+  try { const o = JSON.parse(ev.input); arg = o.command || o.file_path || o.path || o.query || ev.input; } catch (e) {}
+  return '#' + (ev.call_id || '?') + ' ' + (ev.tool || '') + (arg ? '  ' + arg : '');
+}
+
+// Long tool output renders collapsed so it doesn't flood the view.
+function renderToolResult(ev) {
+  curEl = null; curKind = null;
+  const out = ev.output || '';
+  const lines = out.split('\n');
+  if (lines.length <= 12 && out.length <= 1200) { line('tool', out); return; }
+  const d = el('details', 'tool');
+  const sum = el('summary', null, '▸ ' + (ev.tool || 'tool') + ' output — ' + lines.length + ' lines (click to expand)');
+  const body = el('div', 'toolbody', out);
+  d.appendChild(sum); d.appendChild(body);
+  logEl.appendChild(d); scroll();
+}
+
+// --- minimal, self-contained, XSS-safe markdown renderer ---
+function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function inlineMd(s) {
+  s = s.replace(/`([^`]+)`/g, (m, c) => '<code>' + c + '</code>');
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/(^|[^*])\*([^*\s][^*]*?)\*/g, '$1<em>$2</em>');
+  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  return s;
+}
+function renderMarkdown(src) {
+  const lines = esc(src).split('\n');
+  const sep = l => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/.test(l);
+  let html = '', i = 0;
+  while (i < lines.length) {
+    const l = lines[i];
+    const fence = l.match(/^\s*```(\w*)\s*$/);
+    if (fence) {
+      let code = ''; i++;
+      while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) { code += lines[i] + '\n'; i++; }
+      i++; html += '<pre class="code"><code>' + code.replace(/\n$/, '') + '</code></pre>'; continue;
+    }
+    const h = l.match(/^(#{1,6})\s+(.*)$/);
+    if (h) { const n = h[1].length; html += '<h' + n + '>' + inlineMd(h[2]) + '</h' + n + '>'; i++; continue; }
+    if (l.indexOf('|') >= 0 && i + 1 < lines.length && sep(lines[i + 1])) {
+      const row = r => r.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map(c => c.trim());
+      const head = row(l); i += 2; const body = [];
+      while (i < lines.length && lines[i].indexOf('|') >= 0 && lines[i].trim() !== '') { body.push(row(lines[i])); i++; }
+      html += '<table><thead><tr>' + head.map(c => '<th>' + inlineMd(c) + '</th>').join('') + '</tr></thead><tbody>'
+            + body.map(r => '<tr>' + r.map(c => '<td>' + inlineMd(c) + '</td>').join('') + '</tr>').join('')
+            + '</tbody></table>';
+      continue;
+    }
+    if (/^\s*>\s?/.test(l)) {
+      let q = '';
+      while (i < lines.length && /^\s*>\s?/.test(lines[i])) { q += lines[i].replace(/^\s*>\s?/, '') + '\n'; i++; }
+      html += '<blockquote>' + inlineMd(q.trim()).replace(/\n/g, '<br>') + '</blockquote>'; continue;
+    }
+    if (/^\s*[-*+]\s+/.test(l)) {
+      const items = [];
+      while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) { items.push(lines[i].replace(/^\s*[-*+]\s+/, '')); i++; }
+      html += '<ul>' + items.map(it => '<li>' + inlineMd(it) + '</li>').join('') + '</ul>'; continue;
+    }
+    if (/^\s*\d+\.\s+/.test(l)) {
+      const items = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) { items.push(lines[i].replace(/^\s*\d+\.\s+/, '')); i++; }
+      html += '<ol>' + items.map(it => '<li>' + inlineMd(it) + '</li>').join('') + '</ol>'; continue;
+    }
+    if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(l)) { html += '<hr>'; i++; continue; }
+    if (l.trim() === '') { i++; continue; }
+    const para = [];
+    while (i < lines.length && lines[i].trim() !== '' && !/^(#{1,6})\s+/.test(lines[i]) &&
+           !/^\s*```/.test(lines[i]) && !/^\s*[-*+]\s+/.test(lines[i]) && !/^\s*\d+\.\s+/.test(lines[i]) &&
+           !/^\s*>\s?/.test(lines[i]) &&
+           !(lines[i].indexOf('|') >= 0 && i + 1 < lines.length && sep(lines[i + 1]))) {
+      para.push(lines[i]); i++;
+    }
+    html += '<p>' + inlineMd(para.join('\n')).replace(/\n/g, '<br>') + '</p>';
+  }
+  return html;
+}
 
 function handle(ev) {
   switch (ev.kind) {
-    case 'session_start':
-      if (ev.meta && ev.meta.reset === 'true') resetView();
+    case 'session_start': if (ev.meta && ev.meta.reset === 'true') resetView(); break;
+    case 'user_message': block('user', ev.text || ''); setBusy(true); break;
+    case 'assistant_token': stream('assistant', 'assistant', ev.text); break;
+    case 'assistant_message': {
+      // Final message for this round: re-render the streamed block as markdown.
+      const txt = ev.text || '';
+      if (curKind === 'assistant' && curEl) { curEl.className = 'row assistant md'; curEl.innerHTML = renderMarkdown(txt); }
+      else if (txt.trim()) { const e = line('assistant md', ''); e.innerHTML = renderMarkdown(txt); }
+      curEl = null; curKind = null; scroll();
       break;
-    case 'user_message':
-      curAssistant = null;
-      line('user', '› ' + (ev.text || ''));
-      setBusy(true);
-      break;
-    case 'assistant_token':
-      if (!curAssistant) curAssistant = line('assistant', '');
-      curAssistant.textContent += ev.text || '';
-      window.scrollTo(0, document.body.scrollHeight);
-      break;
-    case 'assistant_reasoning':
-      line('reason', ev.text || '');
-      break;
-    case 'tool_call':
-      curAssistant = null;
-      line('toolhdr', '⚙ ' + (ev.tool || '') + ' ' + (ev.input || ''));
-      break;
-    case 'tool_result':
-      line('tool', (ev.tool_error ? '✗ ' : '✓ ') + (ev.output || ''));
-      break;
-    case 'error':
-      line('error', '✗ ' + (ev.text || ''));
-      break;
-    case 'turn_done':
-      curAssistant = null;
-      setBusy(false);
-      inputEl.focus();
-      break;
+    }
+    case 'assistant_reasoning': stream('reason', 'reason', ev.text); break;
+    case 'tool_call': block('toolhdr', toolSummary(ev)); break;
+    case 'tool_result': renderToolResult(ev); break;
+    // turn_done (success) and error (failure/cancel) are both terminal — clear busy on either.
+    case 'error': block('error', '✗ ' + (ev.text || '')); setBusy(false); inputEl.focus(); break;
+    case 'turn_done': curEl = null; curKind = null; setBusy(false); inputEl.focus(); break;
   }
+}
+
+function renderStatus() {
+  document.querySelector('#ident .persona').textContent = meta.persona || 'base';
+  document.querySelector('#ident .model').textContent = meta.model || '—';
 }
 
 function connect() {
   const es = new EventSource('/events');
-  es.onopen = () => { statusEl.textContent = 'live'; resetView(); };
-  es.onerror = () => { statusEl.textContent = 'reconnecting…'; };
+  es.onopen = () => { resetView(); };
   es.onmessage = (m) => { try { handle(JSON.parse(m.data)); } catch (e) {} };
+}
+
+function showHelp() {
+  block('meta',
+    'Commands (handled here — never sent to the agent):\n' +
+    '  /clear   reset the conversation\n' +
+    '  /help    show this help\n' +
+    'Anything not starting with / is sent to the agent. Stop cancels the current turn.');
 }
 
 async function send() {
   const text = inputEl.value.trim();
   if (!text) return;
   inputEl.value = '';
+  if (text[0] === '/') {
+    const cmd = text.slice(1).split(/\s+/)[0].toLowerCase();
+    if (cmd === 'clear') { await fetch('/clear', { method: 'POST' }); return; }
+    if (cmd === '' || cmd === 'help') { showHelp(); return; }
+    block('meta', 'unknown command: ' + text + ' — try /help');
+    return;
+  }
+  pinned = true; // submitting re-pins to the bottom so the new turn is visible
   const res = await fetch('/input', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text }),
   });
-  if (res.status === 409) { statusEl.textContent = 'busy'; }
+  if (res.status === 409) { block('meta', '(agent busy — wait for the current turn or Stop it)'); }
 }
 
 sendEl.onclick = send;
 inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
 document.getElementById('stop').onclick = () => fetch('/cancel', { method: 'POST' });
 document.getElementById('clear').onclick = () => fetch('/clear', { method: 'POST' });
-connect();
+
+(async function init() {
+  try { meta = await (await fetch('/meta')).json(); } catch (e) {}
+  renderStatus();
+  connect();
+})();
 </script>
 </body>
 </html>

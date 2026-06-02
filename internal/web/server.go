@@ -11,24 +11,39 @@ import (
 	"github.com/weatherjean/shell3/pkg/chat"
 )
 
-// Server exposes a Hub over HTTP: the embedded UI at /, an SSE event stream at
-// /events, and POST endpoints for input, cancel, and clear.
-type Server struct {
-	hub *Hub
+// Meta is the static session info the UI renders in its welcome card and
+// status bar (persona, model, project ref).
+type Meta struct {
+	Persona string `json:"persona"`
+	Model   string `json:"model"`
+	Project string `json:"project"`
 }
 
-// NewServer wraps a Hub.
-func NewServer(hub *Hub) *Server { return &Server{hub: hub} }
+// Server exposes a Hub over HTTP: the embedded UI at /, an SSE event stream at
+// /events, POST endpoints for input/cancel/clear, and session meta at /meta.
+type Server struct {
+	hub  *Hub
+	meta Meta
+}
+
+// NewServer wraps a Hub with the session meta shown in the UI.
+func NewServer(hub *Hub, meta Meta) *Server { return &Server{hub: hub, meta: meta} }
 
 // Handler builds the HTTP router.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.handleIndex)
+	mux.HandleFunc("GET /meta", s.handleMeta)
 	mux.HandleFunc("GET /events", s.handleEvents)
 	mux.HandleFunc("POST /input", s.handleInput)
 	mux.HandleFunc("POST /cancel", s.handleCancel)
 	mux.HandleFunc("POST /clear", s.handleClear)
 	return mux
+}
+
+func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(s.meta)
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {

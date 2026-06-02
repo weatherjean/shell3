@@ -27,7 +27,7 @@ func newTestServer(t *testing.T, scripts ...fakellm.Script) *httptest.Server {
 	}
 	h := NewHub(sess, func(ctx context.Context, input string) { sess.Run(ctx, tc, input) })
 	h.Start()
-	srv := httptest.NewServer(NewServer(h).Handler())
+	srv := httptest.NewServer(NewServer(h, Meta{Persona: "test", Model: "fake"}).Handler())
 	t.Cleanup(func() { srv.Close(); h.Close(); sess.End("ok"); sess.CloseEvents() })
 	return srv
 }
