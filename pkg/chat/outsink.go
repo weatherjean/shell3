@@ -69,14 +69,10 @@ func (s *OutSink) WriteEnd(status string) {
 	s.writeLocked(outEvent{Kind: "end", Status: status})
 }
 
-// WriteChatEvent serializes a chat.Event as one JSONL line. ANSI stripping
-// is the producer's responsibility, not the sink's.
-func (s *OutSink) WriteChatEvent(ev Event) {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// MarshalEventJSON serializes a chat Event as the canonical JSON object shared
+// by the --out JSONL sink and the web event stream. "ts" is the event's own
+// timestamp (RFC3339Nano, UTC). Empty fields are omitted.
+func MarshalEventJSON(ev Event) ([]byte, error) {
 	rec := map[string]any{
 		"ts":   ev.Time.UTC().Format(time.RFC3339Nano),
 		"kind": ev.Kind.String(),
@@ -115,9 +111,20 @@ func (s *OutSink) WriteChatEvent(ev Event) {
 	if len(ev.Meta) > 0 {
 		rec["meta"] = ev.Meta
 	}
-	b, err := json.Marshal(rec)
+	return json.Marshal(rec)
+}
+
+// WriteChatEvent serializes a chat.Event as one JSONL line via MarshalEventJSON.
+// ANSI stripping is the producer's responsibility, not the sink's.
+func (s *OutSink) WriteChatEvent(ev Event) {
+	if s == nil {
+		return
+	}
+	b, err := MarshalEventJSON(ev)
 	if err != nil {
 		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	_, _ = s.w.Write(append(b, '\n'))
 }
