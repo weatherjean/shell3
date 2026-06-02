@@ -8,11 +8,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/weatherjean/shell3/pkg/chat"
-	"github.com/weatherjean/shell3/pkg/llm"
 	"github.com/weatherjean/shell3/internal/patchapp"
 	"github.com/weatherjean/shell3/internal/patchmd"
 	"github.com/weatherjean/shell3/internal/patchtui"
+	"github.com/weatherjean/shell3/pkg/chat"
+	"github.com/weatherjean/shell3/pkg/llm"
 )
 
 // RunInteractive runs the TUI chat loop. Blocks until the user quits.
@@ -547,6 +547,43 @@ func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session
 				}
 			}
 			dim(fmt.Sprintf("[%s = %s]", name, value))
+		},
+	})
+	app.RegisterSlash(patchapp.SlashCommand{
+		Name: "model", Help: "/model [name] — list configured models or switch active model",
+		Handler: func(args string) {
+			if len(cfg.Models) == 0 || cfg.SwitchModel == nil {
+				dim("[no models configured]")
+				return
+			}
+			_, curID := chat.SplitStatus(cfg.StatusLine)
+			name := strings.TrimSpace(args)
+			if name == "" {
+				lines := []string{patchtui.Bold + "models:" + patchtui.Reset}
+				for _, mi := range cfg.Models {
+					marker := ""
+					if mi.ModelID == curID {
+						marker = patchtui.Dim + "  (active)" + patchtui.Reset
+					}
+					lines = append(lines, fmt.Sprintf("  %-12s %s%s", mi.Name, mi.ModelID, marker))
+				}
+				lines = append(lines, "", patchtui.Dim+"usage: /model <name>"+patchtui.Reset)
+				app.Print(lines)
+				return
+			}
+			am, err := cfg.SwitchModel(name)
+			if err != nil {
+				dim(fmt.Sprintf("[%v]", err))
+				return
+			}
+			cfg.LLM = am.Client
+			cfg.Params = am.Params
+			cfg.ContextWindow = am.ContextWindow
+			prov, _ := chat.SplitStatus(cfg.StatusLine)
+			cfg.StatusLine = chat.FormatStatus(prov, am.ModelID, am.Params.ReasoningEffort)
+			app.SetStatus(cfg.StatusLine)
+			app.SetContextWindow(am.ContextWindow)
+			dim(fmt.Sprintf("[model: %s → %s]", name, am.ModelID))
 		},
 	})
 	app.RegisterSlash(patchapp.SlashCommand{

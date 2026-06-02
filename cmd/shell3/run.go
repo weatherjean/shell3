@@ -123,17 +123,47 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	}
 	defer lc.Close()
 
-	m, _ := lc.Model(lc.Agent.ModelName) // Load already validated existence.
-
-	client := openai.NewClient(m.BaseURL, m.APIKey, m.ModelID)
-	rp := llm.RequestParams{
-		ReasoningEffort: m.Reasoning,
-		MaxTokens:       m.MaxTokens,
-		Temperature:     m.Temperature,
+	// buildClient constructs a streaming client plus its request params from a
+	// configured model. Reused for the initial client and for /model switches.
+	buildClient := func(md luacfg.Model) (chat.LLMClient, llm.RequestParams) {
+		cl := openai.NewClient(md.BaseURL, md.APIKey, md.ModelID)
+		rp := llm.RequestParams{
+			ReasoningEffort: md.Reasoning,
+			MaxTokens:       md.MaxTokens,
+			Temperature:     md.Temperature,
+		}
+		cl.SetParams(rp)
+		if md.Extra != nil {
+			cl.SetExtra(md.Extra)
+		}
+		return cl, rp
 	}
-	client.SetParams(rp)
-	if m.Extra != nil {
-		client.SetExtra(m.Extra)
+
+	m, _ := lc.Model(lc.Agent.ModelName) // Load already validated existence.
+	client, rp := buildClient(m)
+
+	// models enumerates every configured model for the /model command;
+	// switchModel rebuilds the active client when the user switches by name.
+	var models []chat.ModelInfo
+	for _, md := range lc.Models {
+		models = append(models, chat.ModelInfo{
+			Name:          md.Name,
+			ModelID:       md.ModelID,
+			ContextWindow: md.ContextWindow,
+		})
+	}
+	switchModel := func(name string) (chat.ActiveModel, error) {
+		md, ok := lc.Model(name)
+		if !ok {
+			return chat.ActiveModel{}, fmt.Errorf("unknown model %q", name)
+		}
+		cl, p := buildClient(md)
+		return chat.ActiveModel{
+			Client:        cl,
+			Params:        p,
+			ModelID:       md.ModelID,
+			ContextWindow: md.ContextWindow,
+		}, nil
 	}
 
 	var st *store.Store
@@ -205,10 +235,12 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 			d, r, e := lc.OnToolCall(ctx, t, p)
 			return int(d), r, e
 		},
-		Params:   rp,
-		Log:      log,
-		OutPath:  f.outPath,
-		Headless: headless,
+		Params:      rp,
+		Log:         log,
+		OutPath:     f.outPath,
+		Headless:    headless,
+		Models:      models,
+		SwitchModel: switchModel,
 	}
 
 	if initialInput != "" {
