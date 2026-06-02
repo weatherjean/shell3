@@ -92,22 +92,30 @@ Implementation:
 
 ### 2. Threading & the CLI
 
+**Guiding principle: keep web behavior inside `internal/web`.** `luacfg` only
+parses raw values; `boot.go` stays a thin pass-through; all defaulting,
+validation, and serving logic lives in `internal/web`.
+
 - Remove `--host` and `--port` from `newWebCommand` (`web.go:28-40`). Keep
   `--config`.
-- `buildChatConfig` resolves the web config — applies defaults
-  (host `127.0.0.1`, port `8080`, cookie_ttl `168h`) to any unset fields — and
-  returns it as a new value. Proposed signature:
-  `func buildChatConfig(...) (chat.Config, ResolvedWeb, func(), error)` where
-  `ResolvedWeb` is a small plain struct (defined in `cmd/shell3` or, preferably,
-  `internal/web` so the server can consume it directly).
+- `internal/web` owns a `web.Config` struct (host, port, password, cookie TTL,
+  allowed origins) plus two methods that hold all the behavior:
+  - `Resolve()` — apply defaults (host `127.0.0.1`, port `8080`, cookie_ttl
+    `168h`) to unset fields.
+  - `Validate()` — the bind-safety check (§5) and any other invariants.
+  `internal/web` does **not** import `luacfg`.
+- `buildChatConfig` returns the parsed `luacfg.WebConfig` as a new value
+  alongside `chat.Config`. `boot.go` does no web logic beyond returning it.
+  Signature: `func buildChatConfig(...) (chat.Config, luacfg.WebConfig, func(), error)`.
 - `run.go:90` discards the new return value (`cfg, _, cleanup, err := ...`).
-- `web.go` consumes it to build the listen address and the auth/origin
-  middleware.
+- `web.go` is the only mapping point: it copies the `luacfg.WebConfig` fields
+  into a `web.Config`, then calls `Resolve()` and `Validate()`, and uses the
+  result for the listen address and the auth/origin middleware. This trivial
+  field copy is the sole cross-package coupling.
 
 Layering note: do not add a `luacfg` type to `chat.Config` (keeps the chat
-package free of config-loader types). The resolved web config flows out of
-`buildChatConfig` as its own value; `cmd/shell3` is the wiring layer that already
-imports both `internal/web` and `internal/luacfg`.
+package free of config-loader types), and do not make `internal/web` depend on
+`luacfg`. `cmd/shell3` is the wiring layer that imports both.
 
 ### 3. Authentication — login page + signed cookie
 
@@ -161,23 +169,28 @@ targets localhost as well):
 
 When the resolved `host` is non-loopback (anything other than `127.0.0.1` /
 `::1` / `localhost`) AND no password is configured, refuse to start with a clear
-error that points at `shell3.web{ password = … }`. Implemented during web-config
-resolution / at the start of `runWeb`, before `ListenAndServe`. Only triggers in
-the genuinely dangerous configuration.
+error that points at `shell3.web{ password = … }`. Implemented as
+`web.Config.Validate()` (so the rule lives in `internal/web`), called from
+`runWeb` before `ListenAndServe`. Only triggers in the genuinely dangerous
+configuration.
 
 ### 6. Components / files touched
 
-- `internal/luacfg/luacfg.go` — `WebConfig` struct + `Web` field on
-  `LoadedConfig`.
+- `internal/luacfg/luacfg.go` — `WebConfig` struct (raw parsed values) + `Web`
+  field on `LoadedConfig`. Parsing only; no defaulting or validation.
 - `internal/luacfg/register.go` (or a new `internal/luacfg/web.go`) — `luaWeb`
   parser, `webKeys`, registration in `registerShell3`.
-- `cmd/shell3/boot.go` — resolve web config (apply defaults), return it; run the
-  bind-safety check (or expose a helper the web command calls).
+- `cmd/shell3/boot.go` — thin pass-through: return the parsed `luacfg.WebConfig`
+  alongside `chat.Config`. No web logic.
 - `cmd/shell3/run.go` — discard the new return value.
-- `cmd/shell3/web.go` — remove `--host`/`--port`; wire the resolved config into
-  the listen address and server middleware.
-- `internal/web/server.go` — accept an auth/origin config in `NewServer`; add
-  the middleware chain and `/login` + `/logout` handlers.
+- `cmd/shell3/web.go` — remove `--host`/`--port`; map `luacfg.WebConfig` →
+  `web.Config`, call `Resolve()` + `Validate()`, wire into the listen address and
+  server middleware.
+- `internal/web/config.go` *(new)* — `web.Config` struct + `Resolve()`
+  (defaults) + `Validate()` (bind safety). All web behavior lives here, not in
+  `cmd`/`boot`/`luacfg`. No import of `luacfg`.
+- `internal/web/server.go` — accept the resolved `web.Config` in `NewServer`;
+  add the middleware chain and `/login` + `/logout` handlers.
 - `internal/web/auth.go` *(new)* — cookie sign/verify, password compare, auth +
   origin middleware.
 - `internal/web/assets/login.html` *(new)* — login form. Small tweak to
@@ -203,11 +216,19 @@ the genuinely dangerous configuration.
   - Authenticated cookie → routes pass.
   - Origin/Host: same-origin allowed; foreign Origin on POST → 403; foreign Host
     → 403; `allowed_origins` entry accepted.
-- `cmd/shell3` (or `luacfg`) bind-safety: non-loopback host + no password →
-  start error; loopback or password set → ok.
+- `internal/web` `Config.Validate()` bind-safety: non-loopback host + no
+  password → error; loopback or password set → ok. `Config.Resolve()` applies
+  defaults to unset fields.
 - `luacfg` parse tests: `shell3.web{}` parses fields; bad `cookie_ttl` → error;
   unknown key → error (via `checkKeys`).
 
 ## Open questions
 
-None outstanding. Bind-safety guard confirmed kept.
+None outstanding. Bind-safety guard confirmed kept. Web behavior (defaults,
+validation, auth, origin) is scoped to `internal/web`; `luacfg`/`boot`/`chat`
+spillover is limited to raw parsing and a thin pass-through.
+
+## Execution
+
+Implement via subagents after the plan is written (parallel/subagent-driven
+development), per the agreed workflow.
