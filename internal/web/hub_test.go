@@ -23,7 +23,7 @@ func newTestHub(t *testing.T, scripts ...fakellm.Script) (*Hub, *chat.Session) {
 		Handlers:    chat.NewHandlers(chat.Config{}),
 		Log:         chat.LogOrNoop(nil),
 	}
-	run := func(ctx context.Context, input string) { sess.Run(ctx, tc, input) }
+	run := func(ctx context.Context, msg llm.Message) { sess.Run(ctx, tc, msg.Content) }
 	h := NewHub(sess, run)
 	h.Start()
 	t.Cleanup(func() { h.Close(); sess.End("ok"); sess.CloseEvents() })
@@ -62,7 +62,7 @@ func TestHub_BusyRejectsConcurrentSubmit(t *testing.T) {
 	sess := chat.NewSession(chat.SessionOpts{BufSize: 256})
 	started := make(chan struct{})
 	release := make(chan struct{})
-	run := func(ctx context.Context, input string) {
+	run := func(ctx context.Context, msg llm.Message) {
 		close(started)
 		<-release
 	}
@@ -163,7 +163,7 @@ func TestHub_CancelAbortsInFlightTurn(t *testing.T) {
 	sess := chat.NewSession(chat.SessionOpts{BufSize: 256})
 	started := make(chan struct{})
 	finished := make(chan struct{})
-	run := func(ctx context.Context, input string) {
+	run := func(ctx context.Context, msg llm.Message) {
 		close(started)
 		<-ctx.Done() // block until Cancel fires
 		close(finished)

@@ -26,7 +26,7 @@ func newTestServer(t *testing.T, scripts ...fakellm.Script) *httptest.Server {
 		Handlers:    chat.NewHandlers(chat.Config{}),
 		Log:         chat.LogOrNoop(nil),
 	}
-	h := NewHub(sess, func(ctx context.Context, input string) { sess.Run(ctx, tc, input) })
+	h := NewHub(sess, func(ctx context.Context, msg llm.Message) { sess.Run(ctx, tc, msg.Content) })
 	h.Start()
 	info := Info{
 		Persona: "test", Project: "p", Prompt: "SYS PROMPT", Tools: []string{"bash"},

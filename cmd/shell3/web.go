@@ -16,6 +16,7 @@ import (
 	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/web"
 	"github.com/weatherjean/shell3/pkg/chat"
+	"github.com/weatherjean/shell3/pkg/llm"
 )
 
 type webFlags struct {
@@ -120,11 +121,15 @@ func runWeb(ctx context.Context, f *webFlags) error {
 		return am.ModelID, nil
 	}
 
-	hub := web.NewHub(sess, func(turnCtx context.Context, input string) {
+	hub := web.NewHub(sess, func(turnCtx context.Context, msg llm.Message) {
 		modelMu.Lock()
 		snapshot := tc
 		modelMu.Unlock()
-		sess.Run(turnCtx, snapshot, input)
+		if len(msg.ContentParts) == 0 {
+			sess.Run(turnCtx, snapshot, msg.Content)
+		} else {
+			chat.RunTurn(turnCtx, snapshot, sess, msg)
+		}
 	})
 	hub.Start()
 

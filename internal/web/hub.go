@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/pkg/chat"
+	"github.com/weatherjean/shell3/pkg/llm"
 )
 
 // ErrBusy is returned by Submit when a turn is already running.
@@ -29,7 +30,7 @@ type subscriber struct {
 // concurrent use.
 type Hub struct {
 	sess *chat.Session
-	run  func(ctx context.Context, input string) // blocks until the turn completes
+	run  func(ctx context.Context, msg llm.Message) // blocks until the turn completes
 
 	mu     sync.Mutex
 	log    []chat.Event
@@ -42,7 +43,7 @@ type Hub struct {
 // NewHub builds a Hub for sess. run drives one turn to completion (typically a
 // closure over sess.Run with a prepared TurnConfig); the Hub owns the per-turn
 // context so Cancel works.
-func NewHub(sess *chat.Session, run func(ctx context.Context, input string)) *Hub {
+func NewHub(sess *chat.Session, run func(ctx context.Context, msg llm.Message)) *Hub {
 	return &Hub{sess: sess, run: run, subs: make(map[*subscriber]struct{})}
 }
 
@@ -94,8 +95,8 @@ func (h *Hub) Subscribe() (replay []chat.Event, ch <-chan chat.Event, unsub func
 	return replay, s.ch, unsub
 }
 
-// Submit starts a turn for input. Returns ErrBusy if a turn is in flight.
-func (h *Hub) Submit(input string) error {
+// submit starts a turn for msg. Returns ErrBusy if a turn is in flight.
+func (h *Hub) submit(msg llm.Message) error {
 	h.mu.Lock()
 	if h.busy {
 		h.mu.Unlock()
@@ -116,9 +117,19 @@ func (h *Hub) Submit(input string) error {
 			h.mu.Unlock()
 			h.wg.Done()
 		}()
-		h.run(ctx, input)
+		h.run(ctx, msg)
 	}()
 	return nil
+}
+
+// Submit starts a plain-text turn.
+func (h *Hub) Submit(text string) error {
+	return h.submit(llm.Message{Role: llm.RoleUser, Content: text})
+}
+
+// SubmitMessage starts a turn for a prebuilt message (e.g. multimodal/image).
+func (h *Hub) SubmitMessage(msg llm.Message) error {
+	return h.submit(msg)
 }
 
 // Busy reports whether a turn is currently running.
