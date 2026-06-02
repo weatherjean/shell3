@@ -588,6 +588,20 @@ A spawned agent runs with `SHELL3_HEADLESS=1` and the default `confirm-bash` hoo
 })
 
 -- ---------------------------------------------------------------------------
+-- Web portal (optional) — `shell3 web`
+-- ---------------------------------------------------------------------------
+-- Configures the browser frontend. Omit this block entirely for the default
+-- localhost:8080 with no authentication. Set a password to enable the login
+-- page (signed cookie) and to allow binding a non-loopback host.
+shell3.web({
+  host       = "127.0.0.1",                       -- use "0.0.0.0" to expose; requires password
+  port       = 8080,
+  password   = shell3.env.secret("WEB_PASSWORD"),  -- empty in .env → auth disabled
+  cookie_ttl = "168h",                             -- session length (7 days)
+  -- allowed_origins = { "https://shell3.example.com" }, -- extra trusted origins behind a proxy
+})
+
+-- ---------------------------------------------------------------------------
 -- Guard chain
 -- ---------------------------------------------------------------------------
 
