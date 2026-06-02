@@ -11,39 +11,92 @@ import (
 	"github.com/weatherjean/shell3/pkg/chat"
 )
 
-// Meta is the static session info the UI renders in its welcome card and
-// status bar (persona, model, project ref).
-type Meta struct {
-	Persona string `json:"persona"`
-	Model   string `json:"model"`
-	Project string `json:"project"`
+// Info is the session data the UI renders: welcome card / status bar (persona,
+// project, current model), the model list + switcher for /model, and the system
+// prompt + active tools for /prompt. Model and Switch are callbacks so the
+// reported model reflects runtime /model switches.
+type Info struct {
+	Persona string
+	Project string
+	Prompt  string
+	Tools   []string
+	Models  []string
+	Model   func() string                     // current model id; nil → ""
+	Switch  func(name string) (string, error) // switch active model; nil → switching disabled
+}
+
+func (i Info) model() string {
+	if i.Model == nil {
+		return ""
+	}
+	return i.Model()
 }
 
 // Server exposes a Hub over HTTP: the embedded UI at /, an SSE event stream at
-// /events, POST endpoints for input/cancel/clear, and session meta at /meta.
+// /events, POST input/cancel/clear/model, and read-only /meta and /prompt.
 type Server struct {
 	hub  *Hub
-	meta Meta
+	info Info
 }
 
-// NewServer wraps a Hub with the session meta shown in the UI.
-func NewServer(hub *Hub, meta Meta) *Server { return &Server{hub: hub, meta: meta} }
+// NewServer wraps a Hub with the session info shown in the UI.
+func NewServer(hub *Hub, info Info) *Server { return &Server{hub: hub, info: info} }
 
 // Handler builds the HTTP router.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.handleIndex)
 	mux.HandleFunc("GET /meta", s.handleMeta)
+	mux.HandleFunc("GET /prompt", s.handlePrompt)
 	mux.HandleFunc("GET /events", s.handleEvents)
 	mux.HandleFunc("POST /input", s.handleInput)
 	mux.HandleFunc("POST /cancel", s.handleCancel)
 	mux.HandleFunc("POST /clear", s.handleClear)
+	mux.HandleFunc("POST /model", s.handleModel)
 	return mux
 }
 
 func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(s.meta)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"persona": s.info.Persona,
+		"project": s.info.Project,
+		"model":   s.info.model(),
+		"models":  s.info.Models,
+	})
+}
+
+func (s *Server) handlePrompt(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"prompt": s.info.Prompt,
+		"tools":  s.info.Tools,
+	})
+}
+
+func (s *Server) handleModel(w http.ResponseWriter, r *http.Request) {
+	if s.info.Switch == nil {
+		http.Error(w, "model switching unavailable", http.StatusBadRequest)
+		return
+	}
+	if s.hub.Busy() {
+		http.Error(w, "agent busy", http.StatusConflict)
+		return
+	}
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+	id, err := s.info.Switch(strings.TrimSpace(body.Name))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"model": id})
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {

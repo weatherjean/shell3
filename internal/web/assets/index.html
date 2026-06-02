@@ -8,7 +8,7 @@
   :root {
     color-scheme: dark;
     --bg: #16161e; --panel: #1a1b26; --bar: #1f2030;
-    --fg: #a9b1d6; --dim: #565f89; --gold: #e0af68;
+    --fg: #a9b1d6; --dim: #7e88b3; --gold: #e0af68;
     --green: #9ece6a; --blue: #7aa2f7; --red: #f7768e; --userbar: #222433;
   }
   * { box-sizing: border-box; }
@@ -87,11 +87,14 @@
   body.busy #statusrow { display: none; }
   body.busy #thinking { display: block; }
 
-  #bar { display: flex; gap: 8px; padding: 10px 12px; background: var(--panel);
-         border-top: 1px solid #2a2b3d; }
-  #input { flex: 1; background: var(--bg); color: var(--fg); border: 1px solid #2a2b3d;
-           border-radius: 6px; padding: 8px 10px; font: inherit; outline: none; }
+  #bar { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px;
+         background: var(--panel); border-top: 1px solid #2a2b3d; }
+  #input { width: 100%; background: var(--bg); color: var(--fg); border: 1px solid #2a2b3d;
+           border-radius: 6px; padding: 8px 10px; font: inherit; line-height: 1.5;
+           outline: none; resize: none; min-height: 38px; max-height: 160px; overflow-y: auto; }
   #input:focus { border-color: var(--gold); }
+  #buttons { display: flex; gap: 8px; }
+  #buttons button { flex: 1; }
   button { background: var(--bg); color: var(--fg); border: 1px solid #2a2b3d;
            border-radius: 6px; padding: 8px 12px; font: inherit; cursor: pointer; }
   button:hover { border-color: var(--gold); }
@@ -107,10 +110,12 @@
   </div>
   <div id="thinking">● thinking…  ·  Stop to cancel</div>
   <div id="bar">
-    <input id="input" placeholder="message…  (/help for commands)" autofocus autocomplete="off" />
-    <button id="send">Send</button>
-    <button id="stop">Stop</button>
-    <button id="clear">Clear</button>
+    <textarea id="input" rows="1" placeholder="message…  (Enter to send · Shift+Enter for newline · /help)" autofocus autocomplete="off"></textarea>
+    <div id="buttons">
+      <button id="send">Send</button>
+      <button id="stop">Stop</button>
+      <button id="clear">Clear</button>
+    </div>
   </div>
 </div>
 <script>
@@ -289,19 +294,55 @@ function connect() {
 function showHelp() {
   block('meta',
     'Commands (handled here — never sent to the agent):\n' +
-    '  /clear   reset the conversation\n' +
-    '  /help    show this help\n' +
-    'Anything not starting with / is sent to the agent. Stop cancels the current turn.');
+    '  /help            show this help\n' +
+    '  /clear           reset the conversation\n' +
+    '  /model [name]    list models, or switch the active model\n' +
+    '  /prompt          show the system prompt + active tools\n' +
+    'Enter sends · Shift+Enter inserts a newline · anything else is sent to the agent.');
+}
+
+async function showPrompt() {
+  try {
+    const p = await (await fetch('/prompt')).json();
+    let s = 'System prompt:\n\n' + (p.prompt || '(none)');
+    if (p.tools && p.tools.length) s += '\n\nActive tools: ' + p.tools.join(', ');
+    block('meta', s);
+  } catch (e) { block('error', '✗ could not load prompt'); }
+}
+
+async function doModel(name) {
+  if (!name) {
+    const list = (meta.models && meta.models.length) ? meta.models.join(', ') : '(none configured)';
+    block('meta', 'current model: ' + (meta.model || '?') + '\navailable: ' + list +
+      ((meta.models && meta.models.length > 1) ? '\nswitch with: /model <name>' : ''));
+    return;
+  }
+  const res = await fetch('/model', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
+  });
+  if (res.ok) {
+    const j = await res.json();
+    meta.model = j.model; renderStatus();
+    block('meta', 'switched model → ' + j.model);
+  } else if (res.status === 409) {
+    block('meta', '(agent busy — can’t switch model mid-turn)');
+  } else {
+    block('error', '✗ ' + ((await res.text()).trim() || 'model switch failed'));
+  }
 }
 
 async function send() {
   const text = inputEl.value.trim();
   if (!text) return;
   inputEl.value = '';
+  inputEl.style.height = 'auto';
   if (text[0] === '/') {
-    const cmd = text.slice(1).split(/\s+/)[0].toLowerCase();
+    const parts = text.slice(1).split(/\s+/);
+    const cmd = parts[0].toLowerCase();
     if (cmd === 'clear') { await fetch('/clear', { method: 'POST' }); return; }
     if (cmd === '' || cmd === 'help') { showHelp(); return; }
+    if (cmd === 'prompt') { await showPrompt(); return; }
+    if (cmd === 'model') { await doModel(parts.slice(1).join(' ').trim()); return; }
     block('meta', 'unknown command: ' + text + ' — try /help');
     return;
   }
@@ -314,7 +355,14 @@ async function send() {
 }
 
 sendEl.onclick = send;
-inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+// Enter sends; Shift+Enter inserts a newline. Auto-grow the textarea up to its max.
+inputEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+inputEl.addEventListener('input', () => {
+  inputEl.style.height = 'auto';
+  inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
+});
 document.getElementById('stop').onclick = () => fetch('/cancel', { method: 'POST' });
 document.getElementById('clear').onclick = () => fetch('/clear', { method: 'POST' });
 

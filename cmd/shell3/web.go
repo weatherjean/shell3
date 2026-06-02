@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -96,21 +97,56 @@ func runWeb(ctx context.Context, f *webFlags) error {
 		// shell_interactive tool returns an "unavailable" string.
 	}
 
-	hub := web.NewHub(sess, func(turnCtx context.Context, input string) {
-		sess.Run(turnCtx, tc, input)
-	})
-	hub.Start()
-
 	// cfg.StatusLine is "<agent> │ <modelID>"; split out the model for the UI.
 	model := cfg.StatusLine
 	if i := strings.Index(cfg.StatusLine, "│"); i >= 0 {
 		model = strings.TrimSpace(cfg.StatusLine[i+len("│"):])
 	}
-	meta := web.Meta{Persona: cfg.ModeLabel, Model: model, Project: cfg.ProjectRef}
+
+	// Active model is swappable at runtime via /model. Only one turn runs at a
+	// time (the server rejects switches while busy), so a mutex guarding the
+	// client swap and the per-turn snapshot is sufficient.
+	var modelMu sync.Mutex
+	currentModel := model
+	switchModel := func(name string) (string, error) {
+		am, err := cfg.SwitchModel(name)
+		if err != nil {
+			return "", err
+		}
+		modelMu.Lock()
+		tc.LLM = am.Client
+		currentModel = am.ModelID
+		modelMu.Unlock()
+		return am.ModelID, nil
+	}
+
+	hub := web.NewHub(sess, func(turnCtx context.Context, input string) {
+		modelMu.Lock()
+		snapshot := tc
+		modelMu.Unlock()
+		sess.Run(turnCtx, snapshot, input)
+	})
+	hub.Start()
+
+	modelNames := make([]string, 0, len(cfg.Models))
+	for _, m := range cfg.Models {
+		modelNames = append(modelNames, m.Name)
+	}
+	info := web.Info{
+		Persona: cfg.ModeLabel,
+		Project: cfg.ProjectRef,
+		Prompt:  cfg.Personality.SystemPrompt,
+		Tools:   cfg.ActiveTools,
+		Models:  modelNames,
+		Model:   func() string { modelMu.Lock(); defer modelMu.Unlock(); return currentModel },
+	}
+	if cfg.SwitchModel != nil && len(cfg.Models) > 1 {
+		info.Switch = switchModel
+	}
 
 	srv := &http.Server{
 		Addr:    net.JoinHostPort(f.host, fmt.Sprintf("%d", f.port)),
-		Handler: web.NewServer(hub, meta).Handler(),
+		Handler: web.NewServer(hub, info).Handler(),
 	}
 
 	go func() {
