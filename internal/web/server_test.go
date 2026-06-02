@@ -2,8 +2,12 @@ package web
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"image"
+	"image/png"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -154,5 +158,55 @@ func TestServer_ModelSwitchDisabledReturns400(t *testing.T) {
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusBadRequest {
 		t.Errorf("model switch status = %d, want 400", res.StatusCode)
+	}
+}
+
+func pngMultipart(t *testing.T, prompt string) (string, *bytes.Buffer) {
+	t.Helper()
+	body := &bytes.Buffer{}
+	mw := multipart.NewWriter(body)
+	fw, err := mw.CreateFormFile("image", "x.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(fw, image.NewRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+		t.Fatal(err)
+	}
+	if prompt != "" {
+		_ = mw.WriteField("prompt", prompt)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return mw.FormDataContentType(), body
+}
+
+func TestServer_ImageUploadReturns202(t *testing.T) {
+	srv := newTestServer(t, fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
+	ct, body := pngMultipart(t, "what is this")
+	res, err := http.Post(srv.URL+"/image", ct, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusAccepted {
+		t.Fatalf("image status = %d, want 202", res.StatusCode)
+	}
+}
+
+func TestServer_ImageUploadRejectsNonImage(t *testing.T) {
+	srv := newTestServer(t)
+	body := &bytes.Buffer{}
+	mw := multipart.NewWriter(body)
+	fw, _ := mw.CreateFormFile("image", "x.png")
+	_, _ = fw.Write([]byte("not an image"))
+	_ = mw.Close()
+	res, err := http.Post(srv.URL+"/image", mw.FormDataContentType(), body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", res.StatusCode)
 	}
 }

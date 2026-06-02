@@ -53,6 +53,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /cancel", s.handleCancel)
 	mux.HandleFunc("POST /clear", s.handleClear)
 	mux.HandleFunc("POST /model", s.handleModel)
+	mux.HandleFunc("POST /image", s.handleImage)
 	return mux
 }
 
@@ -171,6 +172,39 @@ func (s *Server) handleInput(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.hub.Submit(text); err != nil {
+		http.Error(w, "agent busy", http.StatusConflict)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func (s *Server) handleImage(w http.ResponseWriter, r *http.Request) {
+	if s.hub.Busy() {
+		http.Error(w, "agent busy", http.StatusConflict)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 12<<20)
+	if err := r.ParseMultipartForm(12 << 20); err != nil {
+		http.Error(w, "bad upload", http.StatusBadRequest)
+		return
+	}
+	file, _, err := r.FormFile("image")
+	if err != nil {
+		http.Error(w, "missing image", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+	raw, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, "read failed", http.StatusBadRequest)
+		return
+	}
+	msg, err := chat.BuildImageMessageFromBytes(raw, r.FormValue("prompt"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.hub.SubmitMessage(msg); err != nil {
 		http.Error(w, "agent busy", http.StatusConflict)
 		return
 	}
