@@ -366,6 +366,16 @@ inputEl.addEventListener('input', () => {
 document.getElementById('stop').onclick = () => fetch('/cancel', { method: 'POST' });
 document.getElementById('clear').onclick = () => fetch('/clear', { method: 'POST' });
 
+// Keep the scrollback clear of the variable-height bottom bar (status row +
+// auto-growing textarea + button row). Tracks height changes via ResizeObserver.
+const bottomEl = document.getElementById('bottom');
+function updateInset() {
+  logEl.style.paddingBottom = (bottomEl.offsetHeight + 16) + 'px';
+  if (pinned) window.scrollTo(0, document.body.scrollHeight);
+}
+new ResizeObserver(updateInset).observe(bottomEl);
+updateInset();
+
 (async function init() {
   try { meta = await (await fetch('/meta')).json(); } catch (e) {}
   renderStatus();
