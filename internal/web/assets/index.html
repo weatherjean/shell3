@@ -95,6 +95,10 @@
   #input:focus { border-color: var(--gold); }
   #buttons { display: flex; gap: 8px; }
   #buttons button { flex: 1; }
+  #attach { flex: 0 0 auto; }
+  #preview { display: flex; align-items: center; gap: 8px; color: var(--dim); }
+  #preview img { height: 40px; width: 40px; object-fit: cover; border: 1px solid #2a2b3d; border-radius: 4px; }
+  #preview button { padding: 2px 8px; }
   button { background: var(--bg); color: var(--fg); border: 1px solid #2a2b3d;
            border-radius: 6px; padding: 8px 12px; font: inherit; cursor: pointer; }
   button:hover { border-color: var(--gold); }
@@ -111,7 +115,10 @@
   <div id="thinking">● thinking…  ·  Stop to cancel</div>
   <div id="bar">
     <textarea id="input" rows="1" placeholder="message…  (Enter to send · Shift+Enter for newline · /help)" autofocus autocomplete="off"></textarea>
+    <input id="file" type="file" accept="image/*" hidden />
+    <div id="preview" hidden></div>
     <div id="buttons">
+      <button id="attach" title="Attach image">📎</button>
       <button id="send">Send</button>
       <button id="stop">Stop</button>
       <button id="clear">Clear</button>
@@ -125,6 +132,7 @@ const sendEl = document.getElementById('send');
 let meta = { persona: '', model: '', project: '' };
 let curEl = null, curKind = null;
 let pinned = true; // true while the viewport is at (or near) the bottom
+let pendingImage = null; // File awaiting send
 
 const ART = [
   "       /\\",
@@ -176,7 +184,46 @@ function stream(cls, kind, text) {
 }
 function block(cls, text) { curEl = null; curKind = null; return line(cls, text); }
 function resetView() { logEl.innerHTML = ''; curEl = null; curKind = null; renderWelcome(); }
-function setBusy(b) { document.body.classList.toggle('busy', b); inputEl.disabled = b; sendEl.disabled = b; }
+const fileEl = document.getElementById('file');
+const previewEl = document.getElementById('preview');
+
+function clearPending() {
+  if (pendingImage && pendingImage._url) URL.revokeObjectURL(pendingImage._url);
+  pendingImage = null;
+  previewEl.hidden = true;
+  previewEl.innerHTML = '';
+  fileEl.value = '';
+}
+function setPending(file) {
+  clearPending();
+  pendingImage = file;
+  file._url = URL.createObjectURL(file);
+  previewEl.hidden = false;
+  const img = el('img'); img.src = file._url;
+  const name = el('span', null, file.name);
+  const x = el('button', null, '✕'); x.onclick = clearPending;
+  previewEl.appendChild(img); previewEl.appendChild(name); previewEl.appendChild(x);
+}
+async function sendImage(text) {
+  const fd = new FormData();
+  fd.append('image', pendingImage);
+  fd.append('prompt', text);
+  const url = pendingImage._url;
+  pinned = true;
+  const res = await fetch('/image', { method: 'POST', body: fd });
+  if (res.status === 202) {
+    // Render our own user block (server emits no user_message for image turns).
+    const b = block('user', '');
+    const img = el('img'); img.src = url;
+    img.style.height = '120px'; img.style.borderRadius = '4px'; img.style.display = 'block'; img.style.margin = '4px 0';
+    b.appendChild(img);
+    if (text) b.appendChild(el('div', null, text));
+    pendingImage = null; previewEl.hidden = true; previewEl.innerHTML = ''; fileEl.value = '';
+  } else {
+    block('meta', res.status === 409 ? '(agent busy — wait or Stop the current turn)' : '✗ image upload failed');
+  }
+}
+function setBusy(b) { document.body.classList.toggle('busy', b); inputEl.disabled = b; sendEl.disabled = b; document.getElementById('attach').disabled = b; }
 
 function toolSummary(ev) {
   let arg = ev.input || '';
@@ -333,9 +380,10 @@ async function doModel(name) {
 
 async function send() {
   const text = inputEl.value.trim();
-  if (!text) return;
+  if (!text && !pendingImage) return;
   inputEl.value = '';
   inputEl.style.height = 'auto';
+  if (pendingImage) { await sendImage(text); return; }
   if (text[0] === '/') {
     const parts = text.slice(1).split(/\s+/);
     const cmd = parts[0].toLowerCase();
@@ -363,6 +411,8 @@ inputEl.addEventListener('input', () => {
   inputEl.style.height = 'auto';
   inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
 });
+document.getElementById('attach').onclick = () => fileEl.click();
+fileEl.addEventListener('change', () => { if (fileEl.files[0]) setPending(fileEl.files[0]); });
 document.getElementById('stop').onclick = () => fetch('/cancel', { method: 'POST' });
 document.getElementById('clear').onclick = () => fetch('/clear', { method: 'POST' });
 
