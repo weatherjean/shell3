@@ -36,6 +36,7 @@ type Hub struct {
 	subs   map[*subscriber]struct{}
 	busy   bool
 	cancel context.CancelFunc
+	wg     sync.WaitGroup
 }
 
 // NewHub builds a Hub for sess. run drives one turn to completion (typically a
@@ -105,6 +106,7 @@ func (h *Hub) Submit(input string) error {
 	h.cancel = cancel
 	h.mu.Unlock()
 
+	h.wg.Add(1)
 	go func() {
 		defer func() {
 			cancel()
@@ -112,6 +114,7 @@ func (h *Hub) Submit(input string) error {
 			h.busy = false
 			h.cancel = nil
 			h.mu.Unlock()
+			h.wg.Done()
 		}()
 		h.run(ctx, input)
 	}()
@@ -132,6 +135,14 @@ func (h *Hub) Cancel() {
 	if h.cancel != nil {
 		h.cancel()
 	}
+}
+
+// Close cancels any in-flight turn and waits for its goroutine to finish, so
+// the caller can safely tear the session down (End + CloseEvents) with no
+// goroutine still emitting events. Safe to call once.
+func (h *Hub) Close() {
+	h.Cancel()
+	h.wg.Wait()
 }
 
 // Clear resets the conversation (sess.SetMessages(nil)), empties the replay

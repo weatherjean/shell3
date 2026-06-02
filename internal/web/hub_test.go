@@ -26,7 +26,7 @@ func newTestHub(t *testing.T, scripts ...fakellm.Script) (*Hub, *chat.Session) {
 	run := func(ctx context.Context, input string) { sess.Run(ctx, tc, input) }
 	h := NewHub(sess, run)
 	h.Start()
-	t.Cleanup(func() { sess.End("ok"); sess.CloseEvents() })
+	t.Cleanup(func() { h.Close(); sess.End("ok"); sess.CloseEvents() })
 	return h, sess
 }
 

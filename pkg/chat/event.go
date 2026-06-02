@@ -222,11 +222,11 @@ func emitTurnDone(s *Session, prompt, completion, total int) {
 }
 
 // emit performs a non-blocking send. Dropped events are not retried.
-// Checks evClosed before sending to prevent a data race between concurrent
-// emit calls and CloseEvents — the channel is closed exactly once during
-// shutdown, but a late goroutine may still try to emit.
+// Recovers from send-on-closed-channel so teardown races don't panic the
+// turn loop — the channel is closed exactly once during shutdown, but a
+// late hook or goroutine may still try to emit.
 func emit(s *Session, ev Event) {
-	if s == nil || s.events == nil || s.evClosed.Load() {
+	if s == nil || s.events == nil {
 		return
 	}
 	defer func() { _ = recover() }()

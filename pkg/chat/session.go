@@ -3,7 +3,6 @@ package chat
 import (
 	"fmt"
 	"strings"
-	"sync/atomic"
 
 	"github.com/weatherjean/shell3/pkg/llm"
 )
@@ -22,7 +21,6 @@ type Session struct {
 	lastPromptTokens int   // accurate token count from most recent streamOnce response
 	id               int64 // store session id; 0 if no store configured
 	events           chan Event
-	evClosed         atomic.Bool // set to true before close(events); guards emit
 }
 
 // SessionOpts configures a new Session. All fields are optional.
