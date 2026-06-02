@@ -9,16 +9,18 @@ import (
 
 func TestExampleParses(t *testing.T) {
 	_, thisFile, _, _ := runtime.Caller(0)
-	// thisFile is .../internal/luacfg/example_test.go; repo root is two dirs up.
+	// thisFile is .../internal/luacfg/example_test.go; the canonical config
+	// lives in the scaffold package's embedded defaults.
 	root := filepath.Join(filepath.Dir(thisFile), "..", "..")
+	examplePath := filepath.Join(root, "internal", "scaffold", "defaults", "shell3.lua")
 
 	// Copy the example lua into a temp dir so we can provide a .env without
 	// touching the working tree (shell3.env.secret reads .env from the workdir).
 	tmp := t.TempDir()
 
-	src, err := os.ReadFile(filepath.Join(root, "shell3-example.lua"))
+	src, err := os.ReadFile(examplePath)
 	if err != nil {
-		t.Fatalf("read shell3-example.lua: %v", err)
+		t.Fatalf("read scaffold default shell3.lua: %v", err)
 	}
 	luaPath := filepath.Join(tmp, "shell3.lua")
 	if err := os.WriteFile(luaPath, src, 0600); err != nil {

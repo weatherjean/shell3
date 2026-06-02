@@ -1,459 +1,511 @@
 # shell3 documentation
 
-shell3 is a minimal, Unix-composable coding agent. It runs LLM-powered sessions in your terminal using any OpenAI-compatible provider or Anthropic natively.
+shell3 is a minimal, Unix-composable coding agent. It runs an LLM-powered chat
+session in your terminal against any **OpenAI-compatible** provider, configured
+entirely from a single Lua file (`shell3.lua`).
 
----
-
-## Config layout
-
-shell3 uses a two-tier directory structure.
-
-**Global** (`~/.shell3/`) — shared across all projects:
-```
-~/.shell3/
-├── ai-do-not-read.auth.yaml     # provider instances (plain YAML) — DO NOT READ
-├── ai-do-not-read.secrets.yaml  # user-tool secrets (plain YAML) — DO NOT READ
-├── personas/                    # global personas (e.g. base.md)
-├── tools/                       # global user-defined tools
-├── skills/                      # global skills
-├── hooks/                       # global hook scripts
-└── projects/
-    └── <uuid>/          # per-project state
-        ├── shell3.db    # SQLite (memory + history)
-        └── meta.json    # project metadata
-```
-
-**Project** (`.shell3/` in your repo) — overrides and local additions:
-```
-.shell3/
-├── .ref             # UUID pointer to ~/.shell3/projects/<uuid>/ (gitignored)
-├── personas/        # project-local personas (override global by name)
-├── tools/           # project-local tools (override global by name)
-├── skills/          # project-local skills
-├── hooks/           # project-local hook scripts
-└── last_error.json  # last LLM error (gitignored)
-```
-
-`.ref` is auto-generated on first run and gitignored. Never commit it.
-
-Project tools and personas override global ones when names collide.
-
-The repository includes copyable example configurations under `examples/`. The canonical default bootstrap files shipped to new users live under `internal/scaffold/defaults/` and are written only when the target file is absent.
-
-- `examples/tools/` — user-defined tools such as Brave Search and page fetching
-- `examples/skills/` — reusable workflow skills, including web search guidance
-- `examples/hooks/` — hook scripts such as terminal confirmation before `bash`
-
-### Moving global config to a new machine
-
-`~/.shell3/` is a plain directory — you can turn it into a git repo and sync your personas, tools, skills, and hooks across machines:
-
-```bash
-cd ~/.shell3
-git init
-# credential and secret files are sensitive — keep them out
-echo -e "ai-do-not-read.*\nprojects/" > .gitignore
-git add .
-git commit -m "init global shell3 config"
-git remote add origin <your-repo>
-git push -u origin main
-```
-
-On the new machine:
-
-```bash
-# If ~/.shell3/ already exists (shell3 was run once), remove it first
-rm -rf ~/.shell3
-git clone <your-repo> ~/.shell3
-shell3   # bootstraps fresh; personas/tools/skills arrive from git
-```
-
-`projects/` (SQLite DBs, session history) is machine-local and excluded. Auth and secrets must be set up fresh on each machine via `shell3 auth` and `shell3 secrets`.
-
----
-
-## Commands
-
-### shell3 (root command)
-
-The root command runs the interactive chat agent. With a positional argument it runs once non-interactively.
-
-On first run in a directory, shell3 auto-bootstraps: creates `.shell3/`, writes a `.ref` UUID, and writes default global personas, tools, skills, and hooks if absent.
-
-```
-shell3                                           # interactive TUI
-shell3 "summarise TODO.md"                       # one-shot, prints to stdout
-shell3 --model gpt-4o
-shell3 --persona code                            # pick a persona from .shell3/personas/ or ~/.shell3/personas/
-shell3 --no-bash                                 # disable bash + shell_interactive tools
-shell3 --no-memory-tools                         # disable memory/history tools and store
-```
-
-Flags: `--persona`, `--provider`, `--model`, `--no-bash`, `--no-memory-tools`.
-
-**Tools available to the model:**
-
-| Tool                | What it does                                                          |
-|---------------------|-----------------------------------------------------------------------|
-| `bash`              | Execute non-interactive shell commands in the project directory       |
-| `shell_interactive` | Run a command that needs a TTY (vim, less, REPL); TUI yields and resumes |
-| `edit_file`         | Edit by exact string replacement; empty `old_string` creates or overwrites; atomic, diffs cleanly |
-| `memory_upsert`     | Insert/update/delete a memory entry; empty value deletes; `core=true` injects into every session prompt |
-| `memory_list`       | List memories newest-first; `core_only=true` restricts to core memories |
-| `memory_search`     | Full-text search memories; `terms[]` (one concept per element) + `match=any\|all` (default any) |
-| `history_get`       | Fetch one chunk (25 turns) of one session by `session_id` + `chunk`; walk via `prev_session_id` / `next_session_id` |
-| `history_search`    | Full-text search past conversations; same `terms[]` + `match` shape as `memory_search`; hits include `session_id`/`chunk` for follow-up `history_get` |
-| `shell3_docs`       | Return this documentation (commands, config, slash commands, skills)  |
-| `prune_tool_result` | Replace a prior tool result with a stub to free context; any size or content |
-| `compact_history`   | Compact full conversation into a structured summary (decisions, files, references, skills to re-read, next steps) and roll to a new session |
-
-User-defined tools appear after the built-ins. Memory and history are stored per-project in `~/.shell3/projects/<uuid>/shell3.db`.
-
-**Core memories.** Set `core=true` on `memory_upsert` to mark a fact important enough to be rendered into the system prompt at every session start (via the persona's `{{.CoreMemories}}` template variable). Use sparingly — every core memory inflates context.
-
-**Slash commands inside a session:**
-
-| Command     | Action                                                          |
-|-------------|-----------------------------------------------------------------|
-| `/`         | browse and pick a command                                       |
-| `/model`    | switch model: `/model <name>`, or no arg → picker (≥2 models)   |
-| `/clear`    | reset conversation context                                      |
-| `/rollback` | remove last turn from context                                   |
-| `/prune`    | `/prune <id>` — replace tool result `<id>` with a stub          |
-| `/usage`    | show token usage from last turn                                 |
-| `/prompt`   | dump system prompt and active tools                             |
-| `/truncate` | toggle truncated bash output                                    |
-| `/image`    | attach an image to the next turn: `/image "<path>" [prompt]`    |
-| `/parameters` | list current LLM params; `/parameters <name> <value>` to set  |
-| `/info`     | show session details: persona, project ref, skills, tools, hooks |
-| `/exit`     | quit shell3 (alias: `/quit`)                                    |
-| `/help`     | list available commands                                         |
-
-**Image support.** `/image` resizes the image to 1000 px on the longest side, converts to JPEG, and sends it as a multimodal turn. Requires a vision-capable model. Supported formats: jpg, png, gif, webp. Quote paths that contain spaces:
-
-```
-/image "/tmp/Screenshot 2026-04-28 at 12.43.18.png" what is broken in this UI?
-/image /tmp/shot.png describe the error
-/image /tmp/chart.png                   # default prompt: "Describe this image."
-```
-
-### shell3 auth
-
-Open `~/.shell3/ai-do-not-read.auth.yaml` in `$EDITOR` to configure provider instances. Each instance needs a `type` field: `openai` (any OpenAI-compatible endpoint) or `anthropic` (native Claude API).
-
-```yaml
-instances:
-  - name: myinstance
-    type: openai
-    base_url: https://api.openai.com/v1
-    api_key: sk-your-key-here
-    models:
-      - id: gpt-4o
-        context_window: 128000
-      - id: gpt-4o-mini
-        context_window: 128000
-
-  - name: anthropic
-    type: anthropic
-    api_key: ant-your-key-here
-    models:
-      - id: claude-sonnet-4-6
-        context_window: 200000
-```
-
-```
-shell3 auth        # open file in $EDITOR
-```
-
-Any OpenAI-compatible endpoint works: OpenAI, Ollama, Groq, LM Studio, OpenRouter, etc. The `name` field is what you pass to `--provider`. The first model in `models` is the default; add more for `/model` switching.
-
-### shell3 secrets
-
-Open `~/.shell3/ai-do-not-read.secrets.yaml` in `$EDITOR` to manage tool secrets. Format:
-
-```yaml
-secrets:
-  BRAVE_API_KEY: sk-...
-  MY_API_KEY: abc123
-```
-
-```
-shell3 secrets        # open file in $EDITOR
-```
-
-Secrets are shared across all projects. Only the keys listed in a tool's `secrets:` field are exposed to that tool.
-
-### shell3 doctor
-
-Validate setup. Checks global dirs, auth instances, secrets file, project `.ref`, meta.json, and default persona. Exit 0 when all checks pass.
-
-```
-shell3 doctor
-```
-
-### shell3 docs
-
-Print this documentation.
-
-```
-shell3 docs
-```
+This document describes the current Lua-config system. It is what `shell3 docs`
+prints and what the `shell3_docs` tool returns.
 
 ---
 
 ## Configuration
 
-### Persona config — `~/.shell3/personas/<name>.md` or `.shell3/personas/<name>.md`
+shell3 is configured by one Lua file, `shell3.lua`. There are no YAML files, no
+`auth`/`secrets` subcommands, and no `--persona`/`--provider`/`--model` flags.
 
-All per-project configuration — model, provider, store path, tool gating, hooks — lives in the YAML frontmatter of the active persona file. The default persona is `base.md`; switch with `--persona <name>`.
+### Discovery order
 
-Global personas (`~/.shell3/personas/`) apply everywhere. Project personas (`.shell3/personas/`) override global ones by filename. On first run, a default `base.md` is written to `~/.shell3/personas/` if absent.
+When you run `shell3`, the config file is resolved in this order:
 
-```markdown
----
-name: base                       # persona name (defaults to filename)
-description: short summary       # shown in pickers
-model: ~                         # starting model (~ = credential default)
-provider: ~                      # provider instance name (~ = alphabetically-first)
-db: ~                            # SQLite path override (~ = ~/.shell3/projects/<uuid>/shell3.db)
+1. `--config` / `-c <path>` — explicit path.
+2. `./shell3.lua` — in the current working directory.
+3. `~/.shell3/shell3.lua` — the global config.
 
-# skills: [skill-name]           # allowlist; empty = load all from .shell3/skills/
-# Built-in tools (always loaded — uncomment and edit to override user-tool allowlist):
-# [bash, shell_interactive, edit_file, shell3_docs, prune_tool_result, compact_history, memory_upsert, memory_list, memory_search, history_get, history_search]
-# tools: [tool-name]             # allowlist for user tools; empty = load all from .shell3/tools/
+If none is found, shell3 exits with:
 
-# LLM request parameters
-parameters:
-  reasoning_effort: medium       # none|minimal|low|medium|high|xhigh — anthropic maps onto thinking budget; openai clamps xhigh→high
-  parallel_tool_calls: true      # openai only; anthropic ignores
-  temperature: ~                 # ~ to leave provider default
-  max_tokens: 16000              # max output tokens (anthropic requires; openai sets MaxCompletionTokens)
-
-# Hooks — string for plain command, or mapping with needs_tty.
-on_session_start: ~              # fire-and-forget; runs once when session opens
-on_session_end: ~                # fire-and-forget; runs once when session closes
-on_turn_start: ~                 # fire-and-forget; runs before each LLM call
-on_turn_end: ~                   # fire-and-forget; gets params.response after each LLM call
-on_tool_call: ~                  # blocking; stdout {"action":"allow"|"block","reason":"..."} gates each tool call
-on_tool_result: ~                # fire-and-forget; gets params.result after each tool call
-on_context_build: ~              # blocking; stdout {"messages":[...]} can rewrite the message list sent to LLM
-on_error: ~                      # fire-and-forget; runs on LLM errors and panics
----
-The body is a Go template rendered into the system prompt.
-Available variables: `{{.Time}}`, `{{.CWD}}`, `{{.Model}}`, `{{.Skills}}`, `{{.CoreMemories}}`, `{{.UserTools}}`.
+```
+no shell3.lua found — pass --config or create ~/.shell3/shell3.lua
 ```
 
-Each hook value is either a plain string (command) or a mapping with `needs_tty`:
+The **directory containing the resolved `shell3.lua`** is the config working
+directory: it is where the `.env` file is read from and where relative paths
+inside the config resolve. (The agent's own `bash` tool still runs in your
+current shell directory — these two are intentionally distinct.)
 
-```yaml
-# plain string — no TTY, output discarded for fire-and-forget hooks
-on_turn_end: "bash .shell3/hooks/log.sh"
+### Secrets via `.env`
 
-# mapping — set needs_tty: true to release the TUI before running
-on_tool_call:
-  command: "bash .shell3/hooks/confirm.sh"
-  needs_tty: true
+Secrets live in a `.env` file **next to the config file**, never in the Lua
+source. Read them with `shell3.env.secret("KEY")`:
+
+```lua
+api_key = shell3.env.secret("OPENCODE_KEY")
 ```
 
-**Provider resolution.** If the persona's `provider` is `~`, shell3 picks the first instance from `~/.shell3/ai-do-not-read.auth.yaml`. Set it explicitly to avoid surprises when multiple instances are configured.
+`.env` is parsed line by line as `KEY=value` (surrounding double quotes are
+stripped; `#` lines and blanks are ignored).
 
-**`needs_tty: true`** releases the TUI so the hook can read from the terminal (prompts, fzf, etc.). Without it, hooks run silently in the background — no TUI flash.
+> **Note:** `shell3.env.secret("KEY")` raises a config error if `KEY` is not
+> present in `.env`. Define every key you reference (an empty value is fine —
+> e.g. `OPENCODE_KEY=`), then check for emptiness in your handler if needed.
 
-**Hook command quoting.** The command string is split on whitespace — quoted arguments with spaces are not supported. Use a script path instead of inline shell: `bash .shell3/hooks/my-hook.sh` rather than `bash -c "echo hello world"`.
+On first run shell3 scaffolds `~/.shell3/shell3.lua` and `~/.shell3/.env.example`.
+Copy the example to `.env`, fill in the keys, and edit `shell3.lua` to taste.
 
-**Hook protocol:** shell3 writes JSON to the hook's stdin and reads JSON from stdout.
+### Canonical example
 
-Stdin:
-```json
-{"hook": "on_tool_call", "tool": "bash", "params": {"command": "rm foo"}}
-```
-
-Stdout (blocking hooks only — `on_tool_call`, `on_context_build`):
-```json
-{"action": "allow"}
-{"action": "block", "reason": "Denied by user"}
-```
-
-For `on_context_build`, return `{"messages": [...]}` to rewrite the message list sent to the LLM.
-
-**Example — confirm before bash:**
-```bash
-#!/usr/bin/env bash
-# ~/.shell3/hooks/confirm-bash.sh
-INPUT=$(cat)
-TOOL=$(echo "$INPUT" | jq -r '.tool')
-[[ "$TOOL" != "bash" ]] && echo '{"action":"allow"}' && exit 0
-CMD=$(echo "$INPUT" | jq -r '.params.command // empty')
-echo "Run: $CMD" >/dev/tty
-read -r -p "Allow? [y/N] " ans </dev/tty
-[[ "$ans" =~ ^[Yy]$ ]] && echo '{"action":"allow"}' || echo '{"action":"block","reason":"User denied"}'
-```
-
-```yaml
-on_tool_call:
-  command: "bash ~/.shell3/hooks/confirm-bash.sh"
-  needs_tty: true
-```
+The reference config lives in the repo at
+`internal/scaffold/defaults/shell3.lua`. It is the gold standard and is covered
+by a golden-parse test; the same content is what first-run scaffolds into
+`~/.shell3/shell3.lua`. The matching secrets template is
+`internal/scaffold/defaults/env.example`.
 
 ---
 
-## User-Defined Tools
+## The four constructors
 
-Drop YAML files into `~/.shell3/tools/` (global) or `.shell3/tools/` (project). Project tools override global ones on name collision. Tools are loaded at startup.
+Everything in `shell3.lua` is built from four constructors on the global
+`shell3` table. Each one validates its keys strictly: **unknown keys are an
+error**.
 
-```yaml
-name: brave_search           # required, [a-z][a-z0-9_]*, must not shadow built-ins
-description: Web search…     # required, shown to the model
-enabled: false               # required; tools default off
-secrets: [BRAVE_API_KEY]     # optional; keys from ~/.shell3/ai-do-not-read.secrets.yaml
-parameters:                  # required; JSON Schema (type must be object)
-  type: object
-  properties:
-    query: {type: string, description: Search query}
-  required: [query]
-command: |                   # required; bash -c
-  curl -sG https://api.example.com/search \
-    -H "Authorization: Bearer $BRAVE_API_KEY" \
-    --data-urlencode "q=$QUERY"
-timeout: 15s                 # optional; default 30s
-cwd: ""                      # optional; default = project workdir
-before: ""                   # optional; bash -c hook, stdin = args JSON
-after: ""                    # optional; bash -c hook, stdin = command output
+### `shell3.model(name, opts)`
+
+Declares a model. `base_url`, `api_key`, and `model` are required.
+
+```lua
+shell3.model("main", {
+  base_url       = "https://api.openai.com/v1",
+  api_key        = shell3.env.secret("OPENCODE_KEY"),
+  model          = "o4-mini",
+  context_window = 128000,
+  reasoning      = "medium",
+  max_tokens     = 16000,
+  temperature    = 0.2,
+  extra = {
+    reasoning_summary   = "auto",
+    verbosity           = "medium",
+    parallel_tool_calls = true,
+  },
+})
 ```
 
-**How args reach your command:**
-- Each scalar arg → upper-cased env var (`query` → `$QUERY`, `count` → `$COUNT`).
-- The full args object is in `$ARGS_JSON` for `jq` consumers.
-- Complex values (arrays, objects) are JSON-encoded into their env var.
-- Args whose uppercased name collides with a declared secret are dropped (the secret wins).
+| key              | type    | notes                                                          |
+| ---------------- | ------- | -------------------------------------------------------------- |
+| `base_url`       | string  | **required** — OpenAI-compatible endpoint base URL            |
+| `api_key`        | string  | **required** — usually `shell3.env.secret(...)`               |
+| `model`          | string  | **required** — the provider's model ID                        |
+| `context_window` | integer | context size, used for the TUI usage meter                    |
+| `reasoning`      | string  | `none`/`minimal`/`low`/`medium`/`high`/`xhigh` (see Models)   |
+| `max_tokens`     | integer | max completion tokens                                          |
+| `temperature`    | number  | sampling temperature                                          |
+| `extra`          | table   | free-form vendor map sent as extra JSON fields (see Models)   |
 
-**Secrets:** Run `shell3 secrets` to open the secrets file in `$EDITOR`. Only the secrets listed in a tool's `secrets:` field are exposed to that tool. Secret values are scrubbed from tool output and replaced with `***REDACTED***` before reaching the model.
+You may declare multiple models; the agent picks one by name, and you can switch
+at runtime with `/model`.
 
-**Hooks (per-tool, optional):**
-- `before` — receives args JSON on stdin. Non-zero exit blocks the call (stderr becomes the block reason). Stdout, if valid JSON, replaces the args. Hooks do **not** receive declared secrets in env.
-- `after` — receives command output on stdin. Stdout replaces the output on success; on failure the original output is kept and a `[after-hook failed: …]` sentinel is appended. Final output is redacted regardless of hook outcome.
-- Order at runtime: `on_tool_call` (persona) → tool `before` → command → tool `after` → secret redaction → `on_tool_result` (persona).
-- Each hook gets its own timeout budget equal to the full `tool.Timeout`.
+### `shell3.skill(opts)`
 
-**Validation at startup:** Invalid tools are skipped with a warning to stderr. Reasons include: missing required field, name shadowing a built-in, invalid name format, declared secret missing from secrets store, `parameters.type` not `object`.
+Declares a skill — a named instruction document the agent can pull on demand.
+All three keys are required. Returns an opaque handle you pass to an agent's
+`skills` list.
 
-**Getting started:** On first run, a disabled `brave_search.yaml` and an enabled `web_fetch.yaml` are written to `~/.shell3/tools/` if absent. Run `shell3 secrets` to add `BRAVE_API_KEY`, set `enabled: true` in `brave_search.yaml`, and restart to use Brave Search. See `examples/tools/` for fuller copyable tool configs, including a Brave Search tool with concise search and LLM Context modes.
-
----
-
-## Skills
-
-Skills are persistent instruction sets injected into the system prompt at session start. Use them to encode workflows, conventions, or domain rules that should apply across sessions.
-
-### How skills work
-
-- Stored as `.md` files in `~/.shell3/skills/` (global) or `.shell3/skills/` (project)
-- At startup, skill name, description, and file path are injected into the system prompt under `# Skills`
-- Full content is **not** eagerly loaded — model reads the file via `bash` when the skill applies to the task
-- Take effect on next session start (restart required after adding/editing)
-- Skills **without** valid frontmatter are silently ignored
-
-### Skill format
-
-Frontmatter is **required**. Skills without it are not loaded.
-
-```markdown
----
-name: skill-name
-description: one-line summary of what this skill does
----
-
-# Instructions
-
-Write instructions here. Be direct and specific.
-Rules, workflows, constraints, decision trees — whatever the agent should follow.
+```lua
+local plan_skill = shell3.skill({
+  name        = "writing-plans",
+  description = "Plan and get approval before non-trivial changes.",
+  body        = [[
+# Writing Plans
+... full instructions the agent reads via the `skill` tool ...
+]],
+})
 ```
 
-### Creating a skill
+The `description` appears in the system prompt's skill index; the `body` is
+returned in full when the agent calls the `skill` tool with that name.
 
-```bash
-cat > ~/.shell3/skills/git-workflow.md << 'EOF'
----
-name: git-workflow
-description: Git conventions for this project
----
+### `shell3.tool(opts)`
 
-Always run tests before committing.
-Use conventional commits: feat/fix/chore/docs/refactor.
-Never force-push to main.
-EOF
+Declares a custom tool implemented in Lua. `handler` is required and must return
+a **string**. `parameters` is a JSON-Schema object table. Returns an opaque
+handle you pass to an agent's `tools.custom` list.
+
+```lua
+local web_fetch = shell3.tool({
+  name        = "web_fetch",
+  description = "Fetch a URL and return its plain-text content and links.",
+  parameters  = {
+    type       = "object",
+    properties = {
+      url = { type = "string", description = "The URL to fetch." },
+    },
+    required = { "url" },
+  },
+  handler = function(args)
+    local res, err = shell3.http.get(args.url, { timeout = 15, max_bytes = 524288 })
+    if err then return "error: " .. tostring(err) end
+    return res.body
+  end,
+})
 ```
 
-Then restart the session.
+The `handler` receives a Lua table of the decoded JSON arguments. Use the
+handler helpers (`shell3.bash`, `shell3.http.*`, `shell3.urlencode`,
+`shell3.env.secret`) to do work.
 
-See `examples/skills/` for copyable skill files, including `web-search.md` for low-limit Brave Search / LLM Context usage.
+### `shell3.agent(opts)`
 
-### When to use skills vs memory
+Declares the single agent. Exactly one agent must be declared.
 
-| Use skill | Use memory |
-|-----------|------------|
-| Rules that always apply | Facts discovered during session |
-| Workflows to follow | Project-specific one-off context |
-| Conventions for this project | Lookup values (keys, IDs, paths) |
-| Instructions for the agent | Information for the agent to recall |
+```lua
+shell3.agent({
+  name  = "base",
+  model = "main",
+  prompt = [[
+You are an expert coding assistant inside shell3.
+... your verbatim system prompt ...
+]],
+
+  tools = {
+    bash              = true,
+    bash_bg           = true,
+    shell_interactive = true,
+    edit              = true,
+    memory            = true,
+    history           = true,
+    docs              = true,
+    custom            = { web_fetch, brave_search },
+    -- skill = false,   -- set to suppress the skill tool + skill index
+  },
+
+  skills = { plan_skill, exec_skill },
+
+  on_tool_call = {
+    shell3.guards.confirm_dangerous{ prompt = true },
+    my_custom_guard,
+  },
+})
+```
+
+| key            | type   | notes                                                    |
+| -------------- | ------ | -------------------------------------------------------- |
+| `name`         | string | agent name (shown in the status line)                    |
+| `model`        | string | must match a declared `shell3.model` name                |
+| `prompt`       | string | the verbatim system prompt (see System prompt assembly)  |
+| `tools`        | table  | tool gate table (strict keys below)                      |
+| `skills`       | table  | list of skill handles                                    |
+| `on_tool_call` | table  | guard chain (see Guards)                                 |
 
 ---
 
-## Multiple models
+## Tools
 
-Models are defined per-instance in `~/.shell3/ai-do-not-read.auth.yaml` under `models:`. The session starts on the first model, unless the active persona's frontmatter sets a `model`. Use `/model` inside a session to switch.
+### Always-on tools
 
-```markdown
+These are present in every session regardless of gates:
+
+- `prune_tool_result` — replace a prior tool result with a short stub to free
+  context. Scoped to the last 2 turns.
+- `compact_history` — compact the full conversation into a structured summary and
+  roll to a fresh session.
+
+### The gate table (`tools = { ... }`)
+
+Each gate is a boolean (set `true` to enable). Strict keys — anything else is an
+error:
+
+| gate                | enables tool(s)                                   |
+| ------------------- | ------------------------------------------------- |
+| `bash`              | `bash` — non-interactive shell command            |
+| `bash_bg`           | `bash_bg` — detached background command           |
+| `shell_interactive` | `shell_interactive` — interactive TTY program     |
+| `edit`              | `edit_file` — exact-string-replacement file edits |
+| `memory`            | `memory_upsert`, `memory_list`, `memory_search`   |
+| `history`           | `history_get`, `history_search`                   |
+| `docs`              | `shell3_docs` — returns this document             |
+| `custom`            | list of `shell3.tool` handles to expose           |
+| `skill`             | set `false` to suppress the skill tool + index    |
+
+### Custom tools
+
+Pass a list of `shell3.tool` handles to `tools.custom`. Only listed tools are
+exposed to the model; their JSON-Schema `parameters` become the tool's
+parameters, and their Lua `handler` runs when called.
+
+### The skill tool
+
+When the agent has **≥1 skill** in its `skills` list **and** `tools.skill` is not
+set to `false`, a built-in `skill` tool is added. The model calls it with a skill
+name to retrieve that skill's full `body`. The skill index (name + description of
+each skill) is injected into the system prompt so the model knows what is
+available.
+
 ---
-# ~/.shell3/personas/base.md — preferred starting model + provider for all projects
-model: gpt-4o
-provider: myinstance
+
+## Guards
+
+Guards are middleware that inspect each tool call before it runs. They are listed
+in `on_tool_call` and run **in order**; the first non-allow result
+short-circuits. Two kinds:
+
+### Built-in guard: `shell3.guards.confirm_dangerous`
+
+```lua
+shell3.guards.confirm_dangerous{ prompt = true }
+```
+
+Blocks shell tool calls (`bash`, `bash_bg`, `shell_interactive`) whose `command`
+matches a built-in denylist of dangerous patterns — e.g. `rm`, `sudo`,
+`git push --force`, `git reset --hard`, `mkfs`, `dd ... of=`, fork bombs,
+`DROP TABLE`, `docker ... prune`, pipe-to-shell (`curl ... | bash`), and more.
+Non-shell tools are always allowed.
+
+> **`prompt` is currently reserved/no-op.** A matched dangerous command is
+> **always blocked**; there is no interactive confirm yet. The block message is
+> `blocked dangerous command (confirm_dangerous guard)`.
+
+### Custom guards (Lua functions)
+
+A guard function receives a `call` table with `tool` (string) and `params`
+(table) and returns a decision table:
+
+```lua
+local function guard_no_env_edit(call)
+  if call.tool == "edit_file" then
+    local path = tostring((call.params or {}).file_path or "")
+    if path:match("%.env$") then
+      return { action = "block", reason = "editing .env files is not allowed" }
+    end
+  end
+  return { action = "allow" }
+end
+```
+
+`action` may be:
+
+- `"allow"` — proceed (the default if you return nothing or an unrecognized value).
+- `"block"` — deny this call; the model sees the `reason` and may try something else.
+- `"cancel"` — abort the entire turn.
+
 ---
+
+## Handler helpers
+
+These functions are available on the `shell3` table for use inside custom-tool
+handlers and guards.
+
+### `shell3.env.secret(key)`
+
+Returns the value of `key` from `.env`. **Raises a config error if the key is
+absent** — declare every key you reference.
+
+### `shell3.bash(cmd [, opts])`
+
+Runs `bash -c cmd` and returns a table `{ exit, stdout, stderr }`.
+
+- `opts.timeout` — seconds (default `10`, clamped to a max of `600`).
+
+```lua
+local r = shell3.bash("ls -la", { timeout = 20 })
+if r.exit ~= 0 then return "error: " .. r.stderr end
+return r.stdout
 ```
 
-`--model` flag overrides frontmatter:
-```
-shell3 --model gpt-4o-mini
-```
+### `shell3.http.get(url [, opts])` / `shell3.http.post(url [, opts])`
+
+Convenience HTTP calls. Both return `(res, err)` where `res` is
+`{ status, body, truncated, headers }` and `err` is a string on failure (and
+`res` is nil).
+
+- `opts.timeout` — seconds (default `30`, clamped to `1..120`).
+- `opts.max_bytes` — response cap (default `1 MiB`, max `16 MiB`); if exceeded,
+  the body is truncated and `res.truncated` is `true`.
+- `opts.headers` — table of request headers.
+- `opts.body` — request body string (mainly for `post`).
+
+`res.headers` keys are lower-cased.
+
+### `shell3.http.request(opts)`
+
+The general form: `shell3.http.request{ url, method, headers, body, timeout, max_bytes }`.
+`method` defaults to `GET`. Same return shape as above.
+
+### `shell3.urlencode(s)`
+
+Returns `s` query-escaped (for building URLs).
 
 ---
 
-## Providers
+## System prompt assembly
 
-Two adapter types are built in: `openai` (any OpenAI-compatible endpoint) and `anthropic` (native Claude API). Common setups:
+The final system prompt is **assembled at runtime** — there are no Go-template
+variables in your `prompt`. shell3 concatenates, in order:
 
-| Provider  | type      | base_url                          | api_key        |
-|-----------|-----------|-----------------------------------|----------------|
-| OpenAI    | openai    | https://api.openai.com/v1         | sk-...         |
-| Ollama    | openai    | http://localhost:11434/v1         | (empty)        |
-| Groq      | openai    | https://api.groq.com/openai/v1    | gsk_...        |
-| LM Studio | openai    | http://localhost:1234/v1          | (empty)        |
-| OpenRouter| openai    | https://openrouter.ai/api/v1      | sk-or-...      |
-| Anthropic | anthropic | (omit; uses default)              | ant-...        |
+1. The agent's verbatim `prompt` text.
+2. `## Environment` — auto-injected: Workdir, Model, Time.
+3. `## Core memories` — injected only when memory is enabled and core memories
+   exist (memories marked `core=true` via `memory_upsert`).
+4. `## Skills` — the skill index (name + description), injected only when the
+   skill tool is active (≥1 skill and `tools.skill ≠ false`).
 
-**`base_url` path conventions differ by adapter:**
+Write your `prompt` as plain instructions; the engine appends the standard blocks.
 
-- `type: openai` — `base_url` should include the `/v1` segment (e.g. `https://api.openai.com/v1`). The SDK appends paths like `/chat/completions` to it.
-- `type: anthropic` — `base_url` should **not** include `/v1`. The SDK appends `/v1/messages` itself. Example for an Anthropic-shaped proxy at `https://example.com/proxy/v1/messages`: set `base_url: https://example.com/proxy`.
+---
 
-A 404 with a doubled path (e.g. `/v1/v1/messages`) means the base_url has `/v1` and the adapter is appending it again — strip it.
+## Models
 
-### Codex (ChatGPT subscription)
+### Reasoning levels
 
-OpenAI Codex uses OAuth, not a static API key, so shell3 does not support it natively. Run the third-party [openai-oauth](https://github.com/EvanZhouDev/openai-oauth) proxy locally — it exposes Codex as a standard OpenAI-compatible endpoint:
+The `reasoning` field (and the runtime `reasoning_effort` parameter) accepts:
 
-```bash
-npx openai-oauth
+```
+none | minimal | low | medium | high | xhigh
 ```
 
-Then add it to `auth.yaml` as a regular `openai` instance:
+`none` omits the reasoning field entirely. For the OpenAI API (which accepts only
+`minimal|low|medium|high`), `xhigh` is clamped down to `high`, so a single config
+works across providers.
 
-```yaml
-  - name: codex
-    type: openai
-    base_url: http://localhost:3000/v1
-    api_key: ""
-    models:
-      - id: codex-mini-latest
-        context_window: 200000
+### The `extra` map
+
+`extra` is a free-form table whose entries are sent as additional top-level JSON
+fields on each request via the SDK's `WithJSONSet`. Use it for vendor extensions
+the core schema does not model, e.g.:
+
+```lua
+extra = {
+  reasoning_summary   = "auto",
+  verbosity           = "medium",
+  parallel_tool_calls = true,
+}
 ```
+
+### Tunable parameters at runtime
+
+The OpenAI-compatible client exposes these via `/parameters`:
+
+| parameter             | values                                         | default    |
+| --------------------- | ---------------------------------------------- | ---------- |
+| `reasoning_effort`    | `none`/`minimal`/`low`/`medium`/`high`/`xhigh` | `medium`   |
+| `parallel_tool_calls` | `true`/`false`                                 | `true`     |
+| `temperature`         | number                                         | (provider) |
+| `max_tokens`          | integer                                        | `16000`    |
+
+The adapter also surfaces vendor reasoning streams: OpenRouter's `reasoning` and
+Moonshot/DeepSeek's `reasoning_content`.
+
+---
+
+## Slash commands
+
+In the interactive TUI, type `/` to see commands. The registered commands:
+
+| command       | description                                                       |
+| ------------- | ----------------------------------------------------------------- |
+| `/help`       | list available commands (auto; also `/h`, `/list`)                |
+| `/clear`      | reset conversation context                                        |
+| `/rollback`   | remove the last turn from context                                 |
+| `/prune <id>` | replace tool result `<id>` with a stub                            |
+| `/usage`      | show token usage from the last turn                               |
+| `/prompt`     | dump the system prompt and active tools                           |
+| `/truncate`   | toggle truncated bash output                                      |
+| `/parameters [name value]` | list or set tunable params (e.g. `reasoning_effort`) |
+| `/model [name]` | list configured models, or switch the active model              |
+| `/info`       | session details: agent, project, skills, tools                    |
+| `/image <path> [prompt]` | attach an image to the next turn                       |
+| `/exit`       | quit shell3 (also `/quit`)                                         |
+
+---
+
+## Commands
+
+The CLI surface is intentionally tiny.
+
+```
+shell3 [message]            run the chat agent (TUI, or headless if piped/--out)
+shell3 doctor               validate global + project setup
+shell3 docs                 print this documentation
+shell3 widget ask|pick|confirm   JSON-in/JSON-out interactive prompt widgets
+```
+
+Root flags (on `shell3` itself):
+
+| flag             | meaning                                                       |
+| ---------------- | ------------------------------------------------------------ |
+| `--config`, `-c` | path to `shell3.lua` (else `./shell3.lua`, else global)      |
+| `--out <path>`   | stream a JSONL audit log to `<path>`; enables headless mode  |
+
+### `doctor`
+
+Validates setup and exits non-zero if any check fails. It confirms `~/.shell3/`
+exists, the resolved `shell3.lua` parses, reports the number of models and the
+agent name, and validates the project's `.shell3/.ref`, `meta.json`, and project
+state directory.
+
+### `docs`
+
+Prints this document (the same text the `shell3_docs` tool returns).
+
+### `widget`
+
+`ask`, `pick`, and `confirm` are JSON-in / JSON-out interactive prompt widgets
+for hooks and scripts. Each reads a spec on stdin, paints on `/dev/tty`, and
+writes a Result on stdout. Exit codes: `0` ok, `1` confirm-no, `2` timeout, `130`
+cancel/eof.
+
+---
+
+## On-disk layout
+
+**Global** (`~/.shell3/`):
+
+```
+~/.shell3/
+├── shell3.lua            # global config (scaffolded on first run)
+├── .env.example          # secrets template (scaffolded on first run)
+├── .gitignore            # ignores ai-do-not-read.*, shell3.log*, projects/
+├── shell3.log            # rotating app log (shell3.log.1 ... archives)
+└── projects/
+    └── <uuid>/
+        ├── shell3.db     # SQLite: memory + history (lazy-created)
+        └── meta.json     # project name + cwd
+```
+
+**Project** (in the directory where you run shell3):
+
+```
+./shell3.lua              # optional project-local config
+./.env                    # secrets, read by shell3.env.secret (you create this)
+./.shell3/
+├── .ref                  # points to this project's ~/.shell3/projects/<uuid>/
+└── bg.json               # bash_bg job registry
+```
+
+The project's `.shell3/.ref` and `.shell3/bg.json` are gitignored automatically.
+
+---
+
+## Headless mode (`--out`)
+
+Passing `--out <path>` (or piping a message in on a non-TTY stdin) runs shell3
+headless and streams a structured **JSONL audit log** of everything it did — each
+line is one event, and the final line is `{"kind":"end", ...}`. This makes shell3
+composable: scripts, CI jobs, or other shell3 agents can spawn it, wait for the
+`end` line, and read what happened.
+
+Headless mode exports `SHELL3_HEADLESS=1` (and `SHELL3_OUT=<path>` when `--out`
+is set). See **`docs/headless.md`** in the repo for the full event schema, env
+vars, and the spawning-subagents pattern.
+
+---
+
+## Moving your config to a new machine
+
+shell3 config is portable. To replicate your setup:
+
+1. Copy your **`shell3.lua`** and your **`.env`** to the new machine (to
+   `~/.shell3/` for a global config, or into the project directory).
+2. Run `shell3` — it bootstraps the rest.
+
+Everything under `~/.shell3/projects/` (the SQLite memory/history databases and
+project metadata) is **machine-local** and is not meant to travel; the global
+`.gitignore` excludes it, along with secrets and logs.

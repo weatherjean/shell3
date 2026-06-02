@@ -47,9 +47,6 @@ func TestLocal(t *testing.T) {
 	if l.Ref != "/work/project/.shell3/.ref" {
 		t.Fatalf("Ref: got %q", l.Ref)
 	}
-	if l.Personas != "/work/project/.shell3/personas" {
-		t.Fatalf("Personas: got %q", l.Personas)
-	}
 	if l.BGJobs != "/work/project/.shell3/bg.json" {
 		t.Fatalf("BGJobs: got %q", l.BGJobs)
 	}

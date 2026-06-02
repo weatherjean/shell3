@@ -1,6 +1,6 @@
--- shell3-example.lua
+-- shell3.lua
 -- Reference configuration for shell3. Copy to your project (or ~/.shell3/)
--- alongside a .env file (see shell3-example.env.example).
+-- alongside a .env file (see env.example next to this file).
 --
 -- Requires: OPENCODE_KEY and BRAVE_API_KEY in .env next to this file.
 

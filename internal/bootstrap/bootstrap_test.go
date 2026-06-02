@@ -9,7 +9,6 @@ import (
 	"github.com/weatherjean/shell3/internal/bootstrap"
 	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/ref"
-	"github.com/weatherjean/shell3/internal/skills"
 )
 
 func TestEnsureGlobal(t *testing.T) {
@@ -18,24 +17,20 @@ func TestEnsureGlobal(t *testing.T) {
 	if err := bootstrap.EnsureGlobal(g); err != nil {
 		t.Fatalf("EnsureGlobal: %v", err)
 	}
-	for _, dir := range []string{g.Skills, g.Tools, g.Hooks, g.Personas, g.Projects} {
+	for _, dir := range []string{g.Root, g.Projects} {
 		if _, err := os.Stat(dir); err != nil {
 			t.Fatalf("dir missing: %s", dir)
 		}
 	}
-	// Default persona, tools, skills, and hooks are written to global.
-	if _, err := os.Stat(filepath.Join(g.Personas, "base.md")); err != nil {
-		t.Fatal("global base.md missing after EnsureGlobal")
+	// Starter config + .env template are written to ~/.shell3/.
+	cfg := filepath.Join(g.Root, "shell3.lua")
+	if data, err := os.ReadFile(cfg); err != nil {
+		t.Fatalf("global shell3.lua missing after EnsureGlobal: %v", err)
+	} else if !strings.Contains(string(data), "shell3.model") {
+		t.Error("global shell3.lua does not define a model")
 	}
-	for _, path := range []string{
-		filepath.Join(g.Tools, "brave_search.yaml"),
-		filepath.Join(g.Tools, "web_fetch.yaml"),
-		filepath.Join(g.Skills, "web-search.md"),
-		filepath.Join(g.Hooks, "confirm-bash.sh"),
-	} {
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("global default missing after EnsureGlobal: %s", path)
-		}
+	if _, err := os.Stat(filepath.Join(g.Root, ".env.example")); err != nil {
+		t.Fatalf("global .env.example missing after EnsureGlobal: %v", err)
 	}
 }
 
@@ -60,51 +55,17 @@ func TestEnsureBootstrapEndToEnd(t *testing.T) {
 		t.Fatal("empty project id")
 	}
 
-	wantGlobalFiles := []string{
-		filepath.Join(g.Personas, "base.md"),
-		filepath.Join(g.Tools, "brave_search.yaml"),
-		filepath.Join(g.Tools, "web_fetch.yaml"),
-		filepath.Join(g.Skills, "codebase-discovery.md"),
-		filepath.Join(g.Skills, "writing-plans.md"),
-		filepath.Join(g.Skills, "executing-plans.md"),
-		filepath.Join(g.Skills, "web-search.md"),
-		filepath.Join(g.Hooks, "confirm-bash.sh"),
-	}
-	for _, path := range wantGlobalFiles {
+	for _, path := range []string{
+		filepath.Join(g.Root, "shell3.lua"),
+		filepath.Join(g.Root, ".env.example"),
+	} {
 		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("global default missing: %s: %v", path, err)
-		}
-	}
-	if info, err := os.Stat(filepath.Join(g.Hooks, "confirm-bash.sh")); err != nil {
-		t.Fatal(err)
-	} else if info.Mode()&0111 == 0 {
-		t.Fatalf("confirm-bash.sh is not executable: %s", info.Mode())
-	}
-
-	base, err := os.ReadFile(filepath.Join(g.Personas, "base.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, skill := range []string{"codebase-discovery", "writing-plans", "executing-plans", "web-search"} {
-		if !strings.Contains(string(base), "- "+skill) {
-			t.Fatalf("base persona does not reference default skill %q", skill)
+			t.Fatalf("global starter file missing: %s: %v", path, err)
 		}
 	}
 
-	loadedSkills, err := skills.LoadAll([]string{g.Skills, l.Skills})
-	if err != nil {
-		t.Fatalf("load skills: %v", err)
-	}
-	for _, name := range []string{"codebase-discovery", "writing-plans", "executing-plans", "web-search"} {
-		if !hasSkill(loadedSkills, name) {
-			t.Fatalf("default skill %q was not loadable; loaded: %#v", name, loadedSkills)
-		}
-	}
-
-	for _, dir := range []string{l.Root, l.Skills, l.Tools, l.Hooks, l.Personas} {
-		if _, err := os.Stat(dir); err != nil {
-			t.Fatalf("local dir missing: %s", dir)
-		}
+	if _, err := os.Stat(l.Root); err != nil {
+		t.Fatalf("local .shell3/ missing: %v", err)
 	}
 	if loaded, err := ref.Load(l); err != nil {
 		t.Fatalf("load ref: %v", err)
@@ -134,10 +95,8 @@ func TestEnsureProject(t *testing.T) {
 		t.Fatal("empty uuid")
 	}
 
-	for _, dir := range []string{l.Skills, l.Tools, l.Hooks, l.Personas} {
-		if _, err := os.Stat(dir); err != nil {
-			t.Fatalf("local dir missing: %s", dir)
-		}
+	if _, err := os.Stat(l.Root); err != nil {
+		t.Fatalf("local .shell3/ missing: %v", err)
 	}
 
 	loaded, _ := ref.Load(l)
@@ -229,13 +188,3 @@ func TestEnsureGitignoreAppends(t *testing.T) {
 		t.Fatal("existing entries were lost")
 	}
 }
-
-func hasSkill(all []skills.Skill, name string) bool {
-	for _, s := range all {
-		if s.Name == name {
-			return true
-		}
-	}
-	return false
-}
-

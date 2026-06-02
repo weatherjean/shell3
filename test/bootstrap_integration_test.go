@@ -9,7 +9,6 @@ import (
 	"github.com/weatherjean/shell3/internal/bootstrap"
 	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/ref"
-	"github.com/weatherjean/shell3/internal/scaffold"
 )
 
 // TestBootstrap_FullFlow simulates a first-run bootstrap with an isolated
@@ -27,27 +26,21 @@ func TestBootstrap_FullFlow(t *testing.T) {
 		t.Fatalf("EnsureGlobal: %v", err)
 	}
 
-	globalDirs := []string{g.Root, g.Skills, g.Tools, g.Hooks, g.Personas, g.Projects}
-	for _, dir := range globalDirs {
+	for _, dir := range []string{g.Root, g.Projects} {
 		if _, err := os.Stat(dir); err != nil {
 			t.Errorf("global dir missing: %s", dir)
 		}
 	}
 
-	// Default persona and example tool written to global personas/tools.
-	personaPath := filepath.Join(g.Personas, scaffold.DefaultPersonaName+".md")
-	if data, err := os.ReadFile(personaPath); err != nil {
-		t.Errorf("global %s.md missing: %v", scaffold.DefaultPersonaName, err)
-	} else {
-		if !strings.Contains(string(data), "name: "+scaffold.DefaultPersonaName) {
-			t.Errorf("persona frontmatter missing name: %s", scaffold.DefaultPersonaName)
-		}
-		if !strings.Contains(string(data), "{{.") {
-			t.Error("persona has no template injection tags")
-		}
+	// Starter shell3.lua + .env.example written to ~/.shell3/.
+	configPath := filepath.Join(g.Root, "shell3.lua")
+	if data, err := os.ReadFile(configPath); err != nil {
+		t.Errorf("global shell3.lua missing: %v", err)
+	} else if !strings.Contains(string(data), "shell3.model") {
+		t.Error("global shell3.lua does not define a model")
 	}
-	if _, err := os.Stat(filepath.Join(g.Tools, "brave_search.yaml")); err != nil {
-		t.Error("global brave_search.yaml missing")
+	if _, err := os.Stat(filepath.Join(g.Root, ".env.example")); err != nil {
+		t.Error("global .env.example missing")
 	}
 
 	// ── project bootstrap ─────────────────────────────────────────────────────
@@ -59,11 +52,8 @@ func TestBootstrap_FullFlow(t *testing.T) {
 		t.Fatal("EnsureProject returned empty uuid")
 	}
 
-	localDirs := []string{l.Root, l.Skills, l.Tools, l.Hooks, l.Personas}
-	for _, dir := range localDirs {
-		if _, err := os.Stat(dir); err != nil {
-			t.Errorf("local dir missing: %s", dir)
-		}
+	if _, err := os.Stat(l.Root); err != nil {
+		t.Errorf("local .shell3/ missing: %s", l.Root)
 	}
 
 	// .ref must exist and round-trip the uuid.
@@ -98,9 +88,5 @@ func TestBootstrap_FullFlow(t *testing.T) {
 
 	if err := bootstrap.EnsureGlobal(g); err != nil {
 		t.Fatalf("second EnsureGlobal: %v", err)
-	}
-	data, _ := os.ReadFile(personaPath)
-	if !strings.Contains(string(data), "name: "+scaffold.DefaultPersonaName) {
-		t.Error("EnsureGlobal overwrote existing persona on second call")
 	}
 }
