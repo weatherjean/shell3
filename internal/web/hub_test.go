@@ -83,6 +83,21 @@ func TestHub_BusyRejectsConcurrentSubmit(t *testing.T) {
 	}
 }
 
+func TestHub_FanOutToMultipleSubscribers(t *testing.T) {
+	h, _ := newTestHub(t, fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "hi"}}})
+	_, ch1, unsub1 := h.Subscribe()
+	defer unsub1()
+	_, ch2, unsub2 := h.Subscribe()
+	defer unsub2()
+
+	if err := h.Submit("hello"); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Both independent subscribers must each receive the full turn.
+	drainKinds(t, ch1, chat.EventTurnDone, 2*time.Second)
+	drainKinds(t, ch2, chat.EventTurnDone, 2*time.Second)
+}
+
 func TestHub_ReplayThenLiveNoGap(t *testing.T) {
 	h, _ := newTestHub(t, fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "x"}}})
 	if err := h.Submit("one"); err != nil {
