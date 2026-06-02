@@ -36,22 +36,22 @@ func openAppLog(logFile string) (applog.Logger, io.Closer) {
 // OpenAI-compatible client, optional store, persona, and returns a ready
 // chat.Config plus a cleanup closure (closes the Lua state and store). It is
 // the shared core of the interactive (run) and web entry points.
-func buildChatConfig(configPath, cwd, homeDir, outPath string, headless bool, log applog.Logger) (chat.Config, func(), error) {
+func buildChatConfig(configPath, cwd, homeDir, outPath string, headless bool, log applog.Logger) (chat.Config, luacfg.WebConfig, func(), error) {
 	g := paths.NewGlobal(homeDir)
 	l := paths.NewLocal(cwd)
 
 	if err := bootstrap.EnsureGlobal(g); err != nil {
-		return chat.Config{}, func() {}, err
+		return chat.Config{}, luacfg.WebConfig{}, func() {}, err
 	}
 	uuid, err := bootstrap.EnsureProject(l, g, cwd)
 	if err != nil {
-		return chat.Config{}, func() {}, err
+		return chat.Config{}, luacfg.WebConfig{}, func() {}, err
 	}
 	proj := paths.NewProject(g, uuid)
 
 	lc, err := luacfg.Load(configPath, filepath.Dir(configPath))
 	if err != nil {
-		return chat.Config{}, func() {}, err
+		return chat.Config{}, luacfg.WebConfig{}, func() {}, err
 	}
 	cleanup := func() { lc.Close() }
 
@@ -166,5 +166,5 @@ func buildChatConfig(configPath, cwd, homeDir, outPath string, headless bool, lo
 		Models:      models,
 		SwitchModel: switchModel,
 	}
-	return cfg, cleanup, nil
+	return cfg, lc.Web, cleanup, nil
 }

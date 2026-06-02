@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -21,8 +20,6 @@ import (
 
 type webFlags struct {
 	configPath string
-	host       string
-	port       int
 }
 
 func newWebCommand() *cobra.Command {
@@ -35,8 +32,6 @@ func newWebCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&f.configPath, "config", "c", "", "Path to shell3.lua (default: ./shell3.lua, else ~/.shell3/shell3.lua)")
-	cmd.Flags().StringVar(&f.host, "host", "127.0.0.1", "Host/interface to bind (use 0.0.0.0 to expose; no auth — front with a reverse proxy)")
-	cmd.Flags().IntVar(&f.port, "port", 8080, "Port to listen on")
 	return cmd
 }
 
@@ -58,11 +53,22 @@ func runWeb(ctx context.Context, f *webFlags) error {
 	log, logCloser := openAppLog(g.LogFile)
 	defer logCloser.Close()
 
-	cfg, cleanup, err := buildChatConfig(configPath, cwd, homeDir, "", false, log)
+	cfg, webCfg, cleanup, err := buildChatConfig(configPath, cwd, homeDir, "", false, log)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
+
+	wc := web.Config{
+		Host:           webCfg.Host,
+		Port:           webCfg.Port,
+		Password:       webCfg.Password,
+		CookieTTL:      webCfg.CookieTTL,
+		AllowedOrigins: webCfg.AllowedOrigins,
+	}.Resolve()
+	if err := wc.Validate(); err != nil {
+		return err
+	}
 
 	// Build one long-lived session, mirroring tui.RunInteractive's setup.
 	var storeID int64
@@ -150,8 +156,8 @@ func runWeb(ctx context.Context, f *webFlags) error {
 	}
 
 	srv := &http.Server{
-		Addr:    net.JoinHostPort(f.host, fmt.Sprintf("%d", f.port)),
-		Handler: web.NewServer(hub, info, web.Config{}).Handler(),
+		Addr:    wc.Addr(),
+		Handler: web.NewServer(hub, info, wc).Handler(),
 	}
 
 	go func() {
