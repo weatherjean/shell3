@@ -92,3 +92,27 @@ func TestServer_BusyReturns409(t *testing.T) {
 	}
 	t.Skip("never observed busy window (turns completed too quickly)")
 }
+
+func TestServer_ClearReturns204(t *testing.T) {
+	srv := newTestServer(t)
+	res, err := http.Post(srv.URL+"/clear", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusNoContent {
+		t.Fatalf("clear status = %d, want 204", res.StatusCode)
+	}
+}
+
+func TestServer_CancelReturns204(t *testing.T) {
+	srv := newTestServer(t)
+	res, err := http.Post(srv.URL+"/cancel", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusNoContent {
+		t.Fatalf("cancel status = %d, want 204", res.StatusCode)
+	}
+}
