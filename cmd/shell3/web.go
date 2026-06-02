@@ -59,13 +59,17 @@ func runWeb(ctx context.Context, f *webFlags) error {
 	}
 	defer cleanup()
 
-	wc := web.Config{
+	raw := web.Config{
 		Host:           webCfg.Host,
 		Port:           webCfg.Port,
 		Password:       webCfg.Password,
 		CookieTTL:      webCfg.CookieTTL,
 		AllowedOrigins: webCfg.AllowedOrigins,
-	}.Resolve()
+	}
+	for _, warn := range raw.Warnings() {
+		fmt.Fprintln(os.Stderr, "warning: "+warn)
+	}
+	wc := raw.Resolve()
 	if err := wc.Validate(); err != nil {
 		return err
 	}

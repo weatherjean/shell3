@@ -70,6 +70,22 @@ func TestHostAndOriginAllowed(t *testing.T) {
 	}
 }
 
+func TestConfigWarnings(t *testing.T) {
+	// Non-loopback host, no user origins → warn (would 403 LAN/IP access).
+	w := (Config{Host: "0.0.0.0", Password: "pw"}).Warnings()
+	if len(w) != 1 {
+		t.Fatalf("want 1 warning for 0.0.0.0 + no origins, got %v", w)
+	}
+	// Loopback default → no warning.
+	if w := (Config{}).Warnings(); len(w) != 0 {
+		t.Fatalf("loopback should not warn, got %v", w)
+	}
+	// Non-loopback but user supplied origins → no warning.
+	if w := (Config{Host: "0.0.0.0", Password: "pw", AllowedOrigins: []string{"http://host:8080"}}).Warnings(); len(w) != 0 {
+		t.Fatalf("explicit origins should silence warning, got %v", w)
+	}
+}
+
 func containsStr(xs []string, want string) bool {
 	for _, x := range xs {
 		if x == want {

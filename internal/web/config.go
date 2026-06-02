@@ -71,6 +71,22 @@ func (c Config) Validate() error {
 	return nil
 }
 
+// Warnings returns non-fatal configuration advisories, evaluated on the raw
+// (pre-Resolve) config. It flags a non-loopback bind with no explicit
+// allowed_origins: Resolve only trusts loopback by default, so clients reaching
+// the server by its LAN IP or hostname would be rejected with 403 on every
+// route. Call before Resolve.
+func (c Config) Warnings() []string {
+	var out []string
+	if !isLoopback(c.Host) && c.Host != "" && len(c.AllowedOrigins) == 0 {
+		out = append(out, fmt.Sprintf("binding %s but allowed_origins is empty: "+
+			"only loopback origins are trusted, so browsers reaching this server by "+
+			"its IP or hostname will get 403 on every route. Add the client-facing "+
+			"origin(s) to shell3.web{ allowed_origins = { \"http://HOST:PORT\" } }.", c.Host))
+	}
+	return out
+}
+
 func isLoopback(host string) bool {
 	switch host {
 	case "", "localhost", "127.0.0.1", "::1":

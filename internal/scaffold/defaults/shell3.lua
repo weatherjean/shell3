@@ -598,7 +598,10 @@ shell3.web({
   port       = 8080,
   password   = shell3.env.secret("WEB_PASSWORD"),  -- empty in .env → auth disabled
   cookie_ttl = "168h",                             -- session length (7 days)
-  -- allowed_origins = { "https://shell3.example.com" }, -- extra trusted origins behind a proxy
+  -- When binding a non-loopback host, list every origin clients use to reach
+  -- this server (its LAN IP/hostname, or a public hostname behind a proxy) —
+  -- otherwise requests are rejected with 403. Loopback is always trusted.
+  -- allowed_origins = { "http://192.168.1.50:8080", "https://shell3.example.com" },
 })
 
 -- ---------------------------------------------------------------------------
