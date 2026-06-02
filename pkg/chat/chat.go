@@ -6,10 +6,10 @@ import (
 	"os"
 	"time"
 
+	"github.com/weatherjean/shell3/internal/store"
 	"github.com/weatherjean/shell3/pkg/applog"
 	"github.com/weatherjean/shell3/pkg/llm"
 	"github.com/weatherjean/shell3/pkg/persona"
-	"github.com/weatherjean/shell3/internal/store"
 )
 
 // LLMClient is the streaming interface the turn loop calls into. Implementers
@@ -20,6 +20,28 @@ import (
 // last request/response bytes for error dumps.
 type LLMClient interface {
 	Stream(ctx context.Context, msgs []llm.Message, tools []llm.ToolDefinition, onEvent func(llm.StreamEvent)) error
+}
+
+// ModelInfo describes one selectable model for the /model command, in the
+// order it was declared in the config.
+type ModelInfo struct {
+	// Name is the config-local model name (e.g. "main", "fast").
+	Name string
+	// ModelID is the provider-specific model id (e.g. "o4-mini").
+	ModelID string
+	// ContextWindow is the model's max prompt+completion tokens, used by the
+	// reminder tracker. Zero means unknown.
+	ContextWindow int
+}
+
+// ActiveModel is the result of a successful model switch: the new streaming
+// client plus the metadata the TUI needs to refresh the status line and
+// reminder accounting.
+type ActiveModel struct {
+	Client        LLMClient
+	Params        llm.RequestParams
+	ModelID       string
+	ContextWindow int
 }
 
 // Config holds all dependencies for a chat session. It is the top-level
@@ -82,6 +104,12 @@ type Config struct {
 	// Return values follow the guardAllow/guardBlock/guardCancel constants
 	// defined in this package (0/1/2).
 	ToolGuard func(ctx context.Context, tool string, params map[string]any) (guardDecision int, reason string, err error)
+	// Models lists the selectable models for the /model command, in
+	// declaration order. Empty disables /model.
+	Models []ModelInfo
+	// SwitchModel activates the model with the given config name and returns
+	// the new client plus its metadata. Nil disables model switching.
+	SwitchModel func(name string) (ActiveModel, error)
 }
 
 // NewHandlers constructs the built-in tool handler map from a Config.
