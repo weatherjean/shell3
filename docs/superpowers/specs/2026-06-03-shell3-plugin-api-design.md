@@ -1,180 +1,222 @@
 # shell3 plugin API — design
 
-**Date:** 2026-06-03
+**Date:** 2026-06-03 (revised)
 **Status:** Approved (design)
-**Branch:** fix/prompt-time-refresh-and-dead-guard
+**Branch:** feat/shell3-plugin-api
 
-## Problem
+## Core principle
 
-`pkg/shell3` is over-shaped and under-useful. Today it exposes `New(Options)
-(chat.Config, func(), error)`, which:
+**Plugin mode is the TUI with a different front-end — nothing less.** The
+embedder passes the same two inputs the CLI takes (config path + cwd) precisely
+so the plugin resolves *the same* `.shell3/` project, *the same* SQLite store,
+*the same* persona/docs/memory, and behaves **identically** to the interactive
+TUI. The only thing that differs is the front-end: a structured event stream
+instead of the bubbletea UI (`RunInteractive`) or the stdout loop (`RunOnce`).
 
-- does the hard setup (loads `shell3.lua`, builds the OpenAI adapter, assembles
-  persona/tools/guards) — good, but
-- hands back a raw `chat.Config`, leaking internal types (`persona.Persona`,
-  `llm.RequestParams`, the guard/tool wiring) into the public surface, and
-- stops short of *running* anything. To actually drive a turn an embedder must
-  reimplement the loop in `internal/tui/once.go` (`RunOnce`), which it cannot
-  import.
+This corrects an earlier draft that built a deliberately "minimal, stateless"
+embedded config. That was wrong: it produced a *different, degraded* agent (no
+store, no core memories, no real timestamp in the prompt, no docs). A plugin
+embedder wants the real agent, driven by their own UI.
 
-The result: there is no way to use shell3 as a library/plugin without
-copying internal code, and the surface that does exist exposes churn-prone
-internals as a public contract.
+## Architecture: three front-ends over one shared core
 
-## Goal
+```
+                 internal/agentsetup.Build(opts)  ← THE shared assembly
+                 (paths + bootstrap + log + store + core memories +
+                  luacfg + client + models/switchModel + persona + docs)
+                              │ returns (chat.Config, cleanup)
+        ┌─────────────────────┼─────────────────────┐
+        ▼                     ▼                     ▼
+  tui.RunInteractive    tui.RunOnce          pkg/shell3 (NEW)
+  (bubbletea)           (stdout one-shot)    (event stream)
+```
 
-Expose shell3 as a "plugin" for any Go app through **one** function: pass a
-prompt, the path to a `shell3.lua` config, and a working directory. It either
-returns an error (can't start) or streams structured output back to the caller.
+### 1. `internal/agentsetup` — the shared builder
 
-## Public surface (the entire exported API of `pkg/shell3`)
+Lift the entire config assembly out of `cmd/shell3/run.go:runChat` (≈ lines
+95–251) into one reusable function. It lives in `internal/` so both
+`cmd/shell3` (package main) and `pkg/shell3` (library) can import it — neither
+can import the other, but both can import `internal/`.
 
 ```go
-package shell3
+package agentsetup
 
-// Run loads the config at spec.ConfigPath, starts one turn for spec.Prompt,
-// and streams events on the returned channel.
-//
-// A non-nil error means Run failed to START (bad/missing config, unparseable
-// Lua, unknown model, missing key) — nothing ran and the channel is nil.
-// A nil error means the turn is underway; per-turn failures arrive as
-// Event{Kind: Error} on the channel. The channel is closed exactly once when
-// the turn completes (after a final Done event).
+type Options struct {
+    ConfigPath string // explicit path; "" triggers default resolution
+    CWD        string
+    HomeDir    string
+    Headless   bool
+    OutPath    string // JSONL audit log; "" disables
+}
+
+// Build resolves the config path (when ConfigPath is empty: ./shell3.lua, else
+// ~/.shell3/shell3.lua), ensures the global + project dirs, opens the app log,
+// opens the SQLite store when Gates.Memory/History, loads core memories, loads
+// shell3.lua, builds the client + models/switchModel, assembles the persona
+// (WITH timestamp + core memories) and the full chat.Config. The returned
+// cleanup closes the Lua state, the store, and the log.
+func Build(opts Options) (chat.Config, func(), error)
+```
+
+`resolveConfigPath` moves here too (shared default-resolution). `cmd/run.go`
+shrinks to: parse flags → compute headless → `agentsetup.Build` → dispatch to
+`RunInteractive` / `RunOnce`. CLI behavior is unchanged; its existing tests must
+still pass.
+
+The embedded markdown `docsContent` (`//go:embed shell3.md` in
+`cmd/shell3/docs.go`, currently `package main`) moves to a small importable
+embed (`internal/docs`) so the builder can populate `cfg.Docs` and the `docs`
+subcommand still works.
+
+### 2. `pkg/shell3` — the event-stream front-end
+
+Mirrors `RunInteractive`'s session lifecycle (one persistent `chat.Session`,
+`StartSession`/`EndSession`, one long-lived drain, turn boundaries via
+`TurnDone`/`Error`) but translates events onto a per-`Send` channel instead of
+rendering bubbletea.
+
+```go
+// Multi-turn handle — what a VSCode extension holds open.
+func Start(ctx context.Context, spec Spec) (*Session, error)
+func (s *Session) Send(ctx context.Context, prompt string) <-chan Event
+func (s *Session) ID() string                       // store session id (live; rolls on compaction)
+func (s *Session) Clear()                            // = /clear: reset history + re-stamp prompt
+func (s *Session) Rollback() bool                    // = /rollback: drop last turn; false if nothing to drop
+func (s *Session) SwitchModel(name string) error     // = /model <name>: swap client for later Sends
+func (s *Session) Close() error                      // EndSession + cleanup
+
+// One-shot convenience = Start → Send → Close.
 func Run(ctx context.Context, spec Spec) (<-chan Event, error)
 
 type Spec struct {
-    Prompt     string // required
-    ConfigPath string // path to shell3.lua; defaults to ~/.shell3/shell3.lua when empty
-    WorkDir    string // cwd for tool execution; defaults to os.Getwd() when empty
+    Prompt     string // used by Run; ignored by Start/Send
+    ConfigPath string // "" → default resolution (./shell3.lua, ~/.shell3/shell3.lua)
+    WorkDir    string // "" → os.Getwd()
+    // Phase 2 will add ResumeID here (additive, non-breaking).
 }
+```
+
+## Public Event
+
+```go
+type Kind int
+const (
+    Token      Kind = iota // assistant text       → Text
+    Reasoning              // thinking text         → Text
+    ToolCall               // tool started          → ToolName, ToolInput
+    ToolResult             // tool finished         → ToolName, ToolOutput
+    Usage                  // per-roundtrip tokens  → token fields
+    Retry                  // transient retry       → Text
+    Error                  // turn error            → Err
+    Done                   // turn end (normal)     → token fields (final totals)
+)
 
 type Event struct {
-    Kind       Kind
-    Text       string // assistant tokens (Kind == Token)
-    ToolName   string // Kind == ToolResult
-    ToolOutput string // Kind == ToolResult
-    Err        error  // Kind == Error
+    Kind             Kind
+    Text             string // Token, Reasoning, Retry
+    ToolName         string // ToolCall, ToolResult
+    ToolInput        string // ToolCall  (raw JSON args)
+    ToolOutput       string // ToolResult
+    PromptTokens     int    // Usage, Done
+    CompletionTokens int    // Usage, Done
+    TotalTokens      int    // Usage, Done
+    Err              error  // Error
 }
-
-type Kind int
-
-const (
-    Token      Kind = iota // streamed assistant text
-    ToolResult             // a tool ran; ToolName/ToolOutput set
-    Error                  // non-fatal turn error; Err set
-    Done                   // turn finished; channel closes right after
-)
 ```
 
-`New`, `Options`, and the `chat.Config` return all become unexported internals.
-As a plugin author, `pkg/chat`, `pkg/persona`, and `pkg/llm` disappear from the
-import graph.
+### Event mapping (`chat.EventKind` → public `Kind`)
 
-### Decisions locked during brainstorming
-
-- **Streaming via event channel** (not `io.Writer`, not callback). It is the
-  thinnest wrapper over what already flows internally (`chat.Session.Events()`),
-  and preserves structure a plugin author wants (tokens vs tool output vs
-  errors). A writer can be built on top of a channel; structure can't be
-  recovered once flattened.
-- **Slim public `Event`** (not a re-export of `chat.Event`). A minimal,
-  translated type gives a stable public contract so internals can churn without
-  breaking embedders.
-- **`Run` is the single entrypoint** (not `Run` + kept `New`). The leaky
-  `New`/`chat.Config` surface is removed. Maximum simplification, matching
-  "expose a single function."
-
-## Internals & data flow
-
-`Run` reuses existing machinery; this is relocation, not new logic.
-
-```
-Run(ctx, spec)
-  │
-  ├─ buildConfig(spec)         ← today's New() body, now unexported
-  │     loads shell3.lua, builds OpenAI adapter, persona, tools, guards
-  │     returns (chat.Config, closeLua func, error)
-  │     ⟵ if this errors, Run returns (nil, err) — nothing started
-  │
-  ├─ sess := chat.NewSession(...)
-  ├─ tc := turnConfig(cfg)     ← the TurnConfig assembly from once.go, moved here
-  │
-  └─ go {
-        sess.Run(ctx, tc, spec.Prompt)
-        sess.CloseEvents()
-        closeLua()             ← Lua state torn down when the turn ends
-     }
-     return translate(sess.Events()), nil
-        ↑ adapter goroutine maps chat.Event → shell3.Event, drops internal kinds
-```
-
-The current `pkg/shell3.New` body becomes the unexported `buildConfig`, and the
-session-driving loop (modeled on `internal/tui/once.go:RunOnce`) is reproduced
-inside an unexported `runConfig` that translates `chat.Event` → public `Event`.
-
-**Adjustment (post-spec, during planning):** the CLI's `RunOnce` is left
-untouched rather than rewritten to call `Run`. `cmd/shell3/run.go` builds a
-*rich* `chat.Config` (store persistence, docs-tool content, `/model` switching,
-`RefreshPrompt`) and hands it to `RunOnce`; routing that through `Run(Spec)` —
-which intentionally builds a minimal config — would regress those CLI features.
-The avoided duplication is only a ~10-line goroutine loop, not worth a
-regression. All changes are therefore isolated to `pkg/shell3`.
-
-Headless behavior is always on for embedders (no TTY): `shell_interactive`
-returns its "not available" string and the headless system-reminder is injected,
-exactly as `once.go` does today.
-
-## Event mapping (`chat.EventKind` → public `Kind`)
-
-| internal `chat.EventKind` | public `Kind` |
+| internal | public |
 |---|---|
 | `EventAssistantToken` | `Token` |
-| `EventAssistantReasoning` | *dropped* |
-| `EventToolResult` | `ToolResult` |
-| `EventError` | `Error` |
-| `EventTurnDone` | `Done` |
-| `EventToolCall` | *dropped* |
-| `EventRetry` | *dropped* |
-| `EventUsage` | *dropped* |
-| `EventSessionStart` / `EventSessionEnd` | *dropped* |
-| `EventUserMessage` | *dropped* |
-| `EventAssistantMessage` | *dropped* |
-| `EventSystemReminder` | *dropped* |
+| `EventAssistantReasoning` | `Reasoning` |
+| `EventToolCall` | `ToolCall` (ToolName, ToolInput) |
+| `EventToolResult` | `ToolResult` (ToolName, ToolOutput) |
+| `EventUsage` | `Usage` (token fields from `ev.Usage`) |
+| `EventTurnDone` | `Done` (token fields from `ev.Usage`) |
+| `EventRetry` | `Retry` (Text) |
+| `EventError` | `Error` (Err = `errors.New(ev.Text)`) |
+| `EventSessionStart/End`, `EventUserMessage`, `EventAssistantMessage`, `EventSystemReminder` | *dropped* |
 
-**Reasoning tokens are dropped by default** (approved): a plugin embedding
-shell3 usually wants final answer text, not chain-of-thought. This can be
-surfaced later as a distinct `Kind` without breaking existing consumers (new
-const appended).
+Note: `EventError` carries its message in `Text` (no error object), so `Err`
+wraps that string. `EventUsage`/`EventTurnDone` carry `*EventUsageData`
+(nil-guard before reading).
 
-## Error handling
+## Multi-turn mechanism (the key concurrency design)
 
-- **Failed-to-start** (bad path, unparseable Lua, unknown model, missing key) →
-  `Run` returns `(nil, error)`; no goroutine, no channel. The caller's
-  `if err != nil` is the "can't start" branch.
-- **Mid-turn failure** → delivered as `Event{Kind: Error, Err: ...}` on the
-  channel; the turn still drains to `Done` and the channel closes.
-- **Cancellation** → `ctx` cancellation propagates through `sess.Run` as today.
+`Start` builds the config, starts the store session, creates one persistent
+`chat.Session`, and launches one long-lived **drain** goroutine over
+`sess.Events()`.
 
-## Lifecycle / cleanup
+`Send` sets the Session's "current channel" to a fresh `out`, then runs one turn
+(`sess.Run`) in a goroutine. The drain translates each event and routes it to
+`out`. On `Done` or `Error` (every turn ends with exactly one of these — normal
+completion emits `TurnDone`; stream/cancel/panic paths emit `Error`), the drain
+closes `out` and clears current. Session-level events (`SessionStart/End`,
+`UserMessage`) are dropped by `translate`, so they never reach a `Send` channel.
 
-The Lua state is owned entirely by `Run` — closed inside the goroutine after
-`sess.CloseEvents()`. There is no caller-facing cleanup func and no leak. The
-caller's only obligation is to drain (range over) the channel until it closes.
+```go
+// drain (one per Session, started in Start):
+for ev := range s.sess.Events() {
+    pub, ok := translate(ev)
+    if !ok { continue }
+    s.mu.Lock(); cur := s.cur; s.mu.Unlock()
+    if cur == nil { continue }
+    cur <- pub                          // blocks if caller stops draining
+    if pub.Kind == Done || pub.Kind == Error {
+        s.mu.Lock(); close(s.cur); s.cur = nil; s.mu.Unlock()
+    }
+}
+close(s.drainDone)
+```
+
+**Contract:** the caller MUST drain each `Send` channel to completion before the
+next `Send` (or `Clear`/`Rollback`/`SwitchModel`). A chat UI does this naturally
+(wait for the reply before sending again). Abandoning a `Send` channel blocks
+the drain on the unread send and wedges the Session — same hazard the TUI's
+single-consumer `drainTurn` has, made explicit here.
+
+`Run` (one-shot) = `Start` → `Send(spec.Prompt)` → forward the channel → `Close`
+when it drains.
+
+## Lifecycle
+
+- **Start:** `Build` → (store) `StartSession` → `NewSession` → `sess.Start(meta)`
+  → launch drain. On `Build` error: return `(nil, err)`, nothing created.
+- **Close:** `sess.End("ok")` → `sess.CloseEvents()` (ends the drain) → wait
+  `drainDone` → (store) `EndSession(sess.ID())` → `cleanup()` (closes store, Lua,
+  log). `ID()` reads `sess.ID()` live because compaction can roll it.
+- **Side effects match the TUI** — the plugin creates `~/.shell3`/project dirs,
+  writes logs, opens the DB. By design: it is the same agent.
+
+## What is now in scope (vs the earlier minimal draft)
+
+Because it is the real TUI config, these all just work — no special handling,
+no "boundaries":
+
+- SQLite store, persistence, `memory_*` / `history_*` tools
+- core memories injected into the system prompt
+- real timestamp in the prompt; `RefreshPrompt` for `Clear`
+- `compact_history` including its `history_get` drill-back to the originals
+- `ID()` is the real store session id (and the future `ResumeID`)
+
+## Out of scope (YAGNI / later)
+
+- **Phase 2 reattach:** `Spec.ResumeID` + seeding a `chat.Session` from stored
+  history. Additive; `ID()` already returns the id to persist.
+- **`/image` multimodal input** (`ContentParts`): niche; deferred. `Send` is
+  string-only for now.
+- **`io.Writer`/callback sugar** over the channel.
+- Surfacing `SessionStart/End` / `AssistantMessage` events.
 
 ## Testing
 
-- `TestRun_BadConfig_Errors` — preserves the existing `TestNew_NoAuth_Errors`
-  semantics: a config dir with no auth returns a non-nil error and a nil
-  channel.
-- `TestRun_StreamsToDone` — using `pkg/llm/fakellm`, drive a canned stream and
-  assert the public channel yields `Token…` then `Done`, then closes.
-- `TestRun_MapsToolResult` — fake a tool call and assert exactly one
-  `ToolResult` event with `ToolName` / `ToolOutput` populated.
-
-## Out of scope (YAGNI)
-
-- `io.Writer` / callback convenience wrappers (`RunText`, `OnEvent`). Trivial to
-  add on top of the channel later if a concrete need appears.
-- Surfacing reasoning, tool-call (pre-result), usage, or retry events. Append
-  new `Kind` constants when needed.
-- Multi-turn / conversational embedding. `Run` is single-turn by design.
+- `agentsetup.Build`: builds a valid `chat.Config` from a temp `shell3.lua`
+  (+ `.env`); errors clearly when config is missing.
+- CLI regression: existing `cmd` / `tui` tests pass after the refactor.
+- `translate`: table covering all 8 mapped kinds + the dropped ones, incl. Usage
+  token fields and the Error→Err string.
+- Plugin multi-turn: `fakellm`-driven `chat.Config` through a real `Session` —
+  assert Token→Done on turn 1, history carried into turn 2, `ToolCall`+
+  `ToolResult` pairing, `Usage`/`Done` token fields, the error path (Error, no
+  Done, channel closes), `Clear`/`Rollback` mutate history, `Run` one-shot.
