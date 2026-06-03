@@ -10,10 +10,19 @@ import (
 	"github.com/weatherjean/shell3/internal/patchapp"
 )
 
+// version is the build version, overridable at link time:
+//
+//	go build -ldflags "-X main.version=v0.1.0" ./cmd/shell3
+//
+// The Makefile sets it from the latest git tag. Defaults to "dev" for a
+// plain `go build` / `go install`.
+var version = "dev"
+
 func main() {
 	root := &cobra.Command{
-		Use:   "shell3",
-		Short: "Minimal Unix-composable coding agent",
+		Use:     "shell3",
+		Short:   "Minimal Unix-composable coding agent",
+		Version: version,
 	}
 
 	runCmd := newRunCommand()

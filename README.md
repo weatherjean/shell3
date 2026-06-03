@@ -43,3 +43,22 @@ rm -rf .shell3
 cat .shell3/.ref   # prints the UUID
 rm -rf ~/.shell3/projects/<uuid>
 ```
+
+## Headless / scripting
+
+shell3 runs non-interactively for pipelines and automation: pass a message as an
+argument (or on stdin) and stream a structured JSONL audit log with `--out`:
+
+```sh
+shell3 "summarize the diff" --out run.jsonl
+```
+
+See [docs/headless.md](docs/headless.md) for the full event schema, environment
+variables, and the pattern for spawning subagents.
+
+## License
+
+[MIT](LICENSE) © 2026 WeatherJean.
+
+Portions of `internal/edittool` are ported from MIT-licensed third-party
+projects; see [NOTICE.md](NOTICE.md) for attributions.
