@@ -125,6 +125,11 @@ type MemoryEntry struct {
 //   - Empty value deletes any existing entry for key.
 //   - On insert, core defaults to false unless explicitly set.
 //   - On update, core is preserved unless explicitly set (pass *bool).
+//
+// memories is an FTS5 virtual table, which cannot carry a UNIQUE constraint on
+// key, so a single-statement upsert (ON CONFLICT / INSERT OR REPLACE) is not
+// available. The probe + delete + insert read-modify-write is instead wrapped
+// in one transaction so it is atomic against concurrent writers and crashes.
 func (s *Store) MemoryUpsert(key, value string, core *bool) error {
 	if key == "" {
 		return fmt.Errorf("store: memory upsert: empty key")
@@ -136,10 +141,15 @@ func (s *Store) MemoryUpsert(key, value string, core *bool) error {
 		return nil
 	}
 
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("store: memory upsert: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	var existingCore int
 	var existed bool
-	err := s.db.QueryRow(`SELECT core FROM memories WHERE key = ?`, key).Scan(&existingCore)
-	switch {
+	switch err := tx.QueryRow(`SELECT core FROM memories WHERE key = ?`, key).Scan(&existingCore); {
 	case err == sql.ErrNoRows:
 		existed = false
 	case err != nil:
@@ -159,16 +169,16 @@ func (s *Store) MemoryUpsert(key, value string, core *bool) error {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := s.db.Exec(`DELETE FROM memories WHERE key = ?`, key); err != nil {
+	if _, err := tx.Exec(`DELETE FROM memories WHERE key = ?`, key); err != nil {
 		return fmt.Errorf("store: memory delete: %w", err)
 	}
-	if _, err := s.db.Exec(
+	if _, err := tx.Exec(
 		`INSERT INTO memories(key, value, core, updated_at) VALUES(?, ?, ?, ?)`,
 		key, value, finalCore, now,
 	); err != nil {
 		return fmt.Errorf("store: memory insert: %w", err)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // MemoryQuery lists memory entries newest-first. coreOnly filters to core
@@ -417,8 +427,16 @@ func (s *Store) HistorySearchExpr(expr string, limit int) (HistorySearchResult, 
 		return HistorySearchResult{}, nil
 	}
 
+	// The correlated subquery computes each hit's chunk index in the same
+	// round-trip: count the turns earlier than this row (by rowid) within the
+	// same session, then divide by ChunkSize. Folding it in avoids an N+1
+	// per-result COUNT query. The count must range over the full history table
+	// (not just matched rows), so it can't be a window over the result set.
 	rows, err := s.db.Query(`
-		SELECT rowid, CAST(session_id AS INTEGER), role, content, created_at
+		SELECT rowid, CAST(session_id AS INTEGER), role, content, created_at,
+			(SELECT COUNT(*) FROM history e
+			 WHERE CAST(e.session_id AS INTEGER) = CAST(history.session_id AS INTEGER)
+			   AND e.rowid < history.rowid) AS earlier
 		FROM history
 		WHERE history MATCH ?
 		ORDER BY rank
@@ -429,38 +447,20 @@ func (s *Store) HistorySearchExpr(expr string, limit int) (HistorySearchResult, 
 	}
 	defer func() { _ = rows.Close() }()
 
-	type hitWithRowid struct {
-		rowid int64
-		turn  HistoryTurn
-	}
-	var raw []hitWithRowid
+	var hits []HistoryTurn
 	for rows.Next() {
-		var rowid int64
+		var rowid, earlier int64
 		var t HistoryTurn
 		var createdAt string
-		if err := rows.Scan(&rowid, &t.SessionID, &t.Role, &t.Content, &createdAt); err != nil {
+		if err := rows.Scan(&rowid, &t.SessionID, &t.Role, &t.Content, &createdAt, &earlier); err != nil {
 			return HistorySearchResult{}, fmt.Errorf("store: history search: scan: %w", err)
 		}
 		t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-		raw = append(raw, hitWithRowid{rowid, t})
+		t.Chunk = int(earlier) / ChunkSize
+		hits = append(hits, t)
 	}
 	if err := rows.Err(); err != nil {
 		return HistorySearchResult{}, err
-	}
-
-	// Compute chunk index for each hit: count earlier turns in the same session by rowid.
-	hits := make([]HistoryTurn, 0, len(raw))
-	for _, r := range raw {
-		var earlier int
-		err := s.db.QueryRow(`
-			SELECT COUNT(*) FROM history
-			WHERE CAST(session_id AS INTEGER) = ? AND rowid < ?
-		`, r.turn.SessionID, r.rowid).Scan(&earlier)
-		if err != nil {
-			return HistorySearchResult{}, fmt.Errorf("store: history search: chunk index: %w", err)
-		}
-		r.turn.Chunk = earlier / ChunkSize
-		hits = append(hits, r.turn)
 	}
 
 	return HistorySearchResult{TotalHits: len(hits), Hits: hits}, nil

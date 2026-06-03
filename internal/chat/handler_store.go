@@ -67,7 +67,13 @@ func storeMemoryList(rawArgs string, st *store.Store) string {
 		CoreOnly bool `json:"core_only"`
 		Limit    int  `json:"limit"`
 	}
-	_ = json.Unmarshal([]byte(rawArgs), &args)
+	// Empty args is valid here (list all); only a non-empty malformed payload
+	// is a tool error. Mirrors the checked pattern in the other store handlers.
+	if strings.TrimSpace(rawArgs) != "" {
+		if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
+			return fmt.Sprintf("error: bad arguments: %v", err)
+		}
+	}
 	results, err := st.MemoryQuery(args.CoreOnly, args.Limit)
 	if err != nil {
 		return fmt.Sprintf("error: %v", err)
@@ -119,7 +125,13 @@ func storeHistoryGet(rawArgs string, st *store.Store) string {
 		SessionID int64 `json:"session_id"`
 		Chunk     int   `json:"chunk"`
 	}
-	_ = json.Unmarshal([]byte(rawArgs), &args)
+	// Empty args is valid here (latest session, first chunk); only a non-empty
+	// malformed payload is a tool error. Mirrors the other store handlers.
+	if strings.TrimSpace(rawArgs) != "" {
+		if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
+			return fmt.Sprintf("error: bad arguments: %v", err)
+		}
+	}
 	chunk := args.Chunk
 	if chunk > 0 {
 		chunk--

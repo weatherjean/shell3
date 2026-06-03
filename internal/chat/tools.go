@@ -11,12 +11,15 @@ import (
 	"github.com/weatherjean/shell3/internal/store"
 )
 
-// Guard decision constants. These values are shared with luacfg.Decision and
-// must not be changed without updating that type.
+// guardDecision is the outcome of a tool-call guard. It is an alias for int
+// (so existing int comparisons keep compiling) whose values mirror
+// luacfg.Decision and must not be changed without updating that type.
+type guardDecision = int
+
 const (
-	guardAllow  = 0 // proceed with the tool call
-	guardBlock  = 1 // deny this single tool call; turn continues
-	guardCancel = 2 // abort the entire turn
+	guardAllow  guardDecision = 0 // proceed with the tool call
+	guardBlock  guardDecision = 1 // deny this single tool call; turn continues
+	guardCancel guardDecision = 2 // abort the entire turn
 )
 
 // dispatchCustomTool calls cfg.CustomTool for a named custom tool. If

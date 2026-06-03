@@ -63,10 +63,10 @@ func logStreamError(cfg TurnConfig, msgs []llm.Message, streamErr error) {
 		"req_bytes", len(reqBody), "res_bytes", len(resBody))
 }
 
-// RunTurn executes one user→assistant exchange, emitting chat.Events on
-// sess.events. The session's event channel is owned by the caller; teardown
-// (close) is the caller's responsibility via sess.CloseEvents().
-// RunTurn drives one user→assistant turn, emitting stream events on sess.events.
+// RunTurn executes one user→assistant turn, emitting chat.Events on sess.events.
+// The event channel is owned by the caller; teardown (close) is the caller's
+// responsibility via sess.CloseEvents().
+//
 // beforeDone, if non-nil, runs once at turn teardown immediately before the
 // single terminal event (turn_done or error) is emitted — Session.Run uses it
 // to persist history. The ordering matters: the terminal event is what embedders
@@ -224,12 +224,24 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 					AllMsgs:  allMsgs,
 					SessMsgs: sess.messages,
 				}
-				out, _ = handler.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), toolCfg)
+				var herr error
+				out, herr = handler.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), toolCfg)
+				if herr != nil {
+					// Most handlers encode failures in their output string and
+					// return a nil error; a non-nil error is a genuine handler
+					// fault (e.g. bash_bg failing to spawn). Log it, and if the
+					// handler left no output, surface the error to the model as a
+					// tool error rather than emitting an empty result.
+					cfg.Log.Warn("tool handler error", "tool", tc.Name, "error", herr)
+					if out == "" {
+						out = "error: " + herr.Error()
+					}
+				}
 			} else {
 				out = fmt.Sprintf("error: unknown tool %q", tc.Name)
 			}
 
-			emitToolResult(sess, tc.ID, tc.Name, out, strings.HasPrefix(out, "error:") || strings.HasPrefix(out, "USER DENIED") || strings.HasPrefix(out, "USER CANCELLED") || strings.HasPrefix(out, "Tool-call hook failed"))
+			emitToolResult(sess, tc.ID, tc.Name, out, isToolError(out))
 			// Prepend the tool_call_id so the model has a stable handle it
 			// can pass to prune_tool_result. Without this the id only lives
 			// in structured metadata, which the model cannot reliably echo.
@@ -285,6 +297,16 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 			emitSystemReminder(sess, reminder)
 		}
 	}
+}
+
+// isToolError reports whether a tool's output string represents a failure,
+// by its leading marker. Keep in sync with the markers produced in RunTurn's
+// tool-execution loop (validation errors, guard block/cancel, hook failures).
+func isToolError(out string) bool {
+	return strings.HasPrefix(out, "error:") ||
+		strings.HasPrefix(out, "USER DENIED") ||
+		strings.HasPrefix(out, "USER CANCELLED") ||
+		strings.HasPrefix(out, "Tool-call hook failed")
 }
 
 // streamOnce calls the LLM once, collecting text/reasoning/tool-calls/usage
