@@ -47,6 +47,26 @@ func TestReplaceAllMultiple(t *testing.T) {
 	}
 }
 
+// TestReplaceAllExactOverlappingSelfMatch pins that the exact-match replaceAll
+// path (simpleReplacer → single candidate) matches strings.ReplaceAll's
+// non-overlapping left-to-right semantics, including the odd-leftover case.
+func TestReplaceAllExactOverlappingSelfMatch(t *testing.T) {
+	cases := []struct{ content, old, new, want string }{
+		{"aaaa", "aa", "X", "XX"},  // two non-overlapping matches
+		{"aaa", "aa", "X", "Xa"},   // one match, trailing leftover
+		{"abab", "ab", "X", "XX"},  // adjacent matches
+	}
+	for _, c := range cases {
+		got, err := Replace(c.content, c.old, c.new, true)
+		if err != nil {
+			t.Fatalf("Replace(%q,%q): %v", c.content, c.old, err)
+		}
+		if got != c.want {
+			t.Errorf("Replace(%q,%q,%q,true) = %q, want %q (must match strings.ReplaceAll)", c.content, c.old, c.new, got, c.want)
+		}
+	}
+}
+
 func TestLineTrimmedReplacerHandlesTrailingWhitespace(t *testing.T) {
 	content := "func main() {\n\treturn nil  \n}\n"
 	// model emits the line without the trailing spaces — exact-match would fail.
@@ -153,6 +173,21 @@ func TestSimpleReplacerWinsOverMultiOccurrenceForUnique(t *testing.T) {
 	}
 	if got != "alpha\nBETA\ngamma\n" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestReplaceAllFuzzyReplacesEveryDistinctMatch(t *testing.T) {
+	// "foo   bar" (3 spaces) matches neither line literally, but
+	// whitespaceNormalizedReplacer matches both "foo bar" and "foo  bar" as two
+	// DISTINCT candidates. replaceAll must replace BOTH.
+	content := "foo bar\nfoo  bar\n"
+	got, err := Replace(content, "foo   bar", "X", true)
+	if err != nil {
+		t.Fatalf("Replace: %v", err)
+	}
+	want := "X\nX\n"
+	if got != want {
+		t.Fatalf("replaceAll fuzzy: got %q, want %q (some matches left unreplaced)", got, want)
 	}
 }
 

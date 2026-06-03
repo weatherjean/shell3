@@ -16,6 +16,7 @@ package edittool
 import (
 	"errors"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -34,21 +35,40 @@ type Replacer func(content, find string) []string
 // one occurrence in the source (or any occurrence when replaceAll is true)
 // wins. If no replacer yields a candidate, returns ErrNotFound. If candidates
 // were found but every one was ambiguous, returns ErrMultipleMatch.
+//
+// When replaceAll is true the first replacer with any occurring candidate wins
+// and ALL of its distinct occurring candidates are replaced; ambiguity is
+// expected, so this path returns only success or ErrNotFound (never
+// ErrMultipleMatch).
 func Replace(content, oldString, newString string, replaceAll bool) (string, error) {
 	if oldString == newString {
 		return "", ErrNoChange
 	}
 	notFound := true
 	for _, r := range replacers {
-		for _, search := range r(content, oldString) {
+		candidates := r(content, oldString)
+		if replaceAll {
+			// Replace-all must apply EVERY distinct candidate this replacer found
+			// that occurs in content — not just the first. Fuzzy replacers return
+			// several distinct substrings (e.g. blocks at different indentation);
+			// using only the first silently leaves the others unreplaced.
+			var occurring []string
+			for _, search := range candidates {
+				if strings.Contains(content, search) {
+					occurring = append(occurring, search)
+				}
+			}
+			if len(occurring) == 0 {
+				continue
+			}
+			return replaceAllOccurrences(content, occurring, newString), nil
+		}
+		for _, search := range candidates {
 			idx := strings.Index(content, search)
 			if idx == -1 {
 				continue
 			}
 			notFound = false
-			if replaceAll {
-				return strings.ReplaceAll(content, search, newString), nil
-			}
 			last := strings.LastIndex(content, search)
 			if idx != last {
 				continue
@@ -60,6 +80,56 @@ func Replace(content, oldString, newString string, replaceAll bool) (string, err
 		return "", ErrNotFound
 	}
 	return "", ErrMultipleMatch
+}
+
+// replaceAllOccurrences replaces every occurrence of every distinct candidate
+// substring with newString in one left-to-right pass over content. Overlapping
+// matches are resolved earliest-first (a later span that starts inside an
+// already-replaced span is skipped), and the replacement text is never itself
+// rescanned, so no double-replacement can occur.
+func replaceAllOccurrences(content string, candidates []string, newString string) string {
+	type span struct{ start, end int }
+	var spans []span
+	seen := map[string]bool{}
+	for _, c := range candidates {
+		if c == "" || seen[c] {
+			continue
+		}
+		seen[c] = true
+		for start := 0; ; {
+			idx := strings.Index(content[start:], c)
+			if idx == -1 {
+				break
+			}
+			at := start + idx
+			spans = append(spans, span{at, at + len(c)})
+			start = at + len(c)
+		}
+	}
+	if len(spans) == 0 {
+		return content
+	}
+	// Total order: earliest start first, and on a tie the longest span wins.
+	// A total order (not just start) keeps the result deterministic when two
+	// distinct candidates begin at the same offset.
+	sort.Slice(spans, func(i, j int) bool {
+		if spans[i].start != spans[j].start {
+			return spans[i].start < spans[j].start
+		}
+		return spans[i].end > spans[j].end
+	})
+	var b strings.Builder
+	last := 0
+	for _, s := range spans {
+		if s.start < last {
+			continue // overlaps an already-applied span
+		}
+		b.WriteString(content[last:s.start])
+		b.WriteString(newString)
+		last = s.end
+	}
+	b.WriteString(content[last:])
+	return b.String()
 }
 
 var replacers = []Replacer{
