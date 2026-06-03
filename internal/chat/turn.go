@@ -224,7 +224,19 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 					AllMsgs:  allMsgs,
 					SessMsgs: sess.messages,
 				}
-				out, _ = handler.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), toolCfg)
+				var herr error
+				out, herr = handler.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), toolCfg)
+				if herr != nil {
+					// Most handlers encode failures in their output string and
+					// return a nil error; a non-nil error is a genuine handler
+					// fault (e.g. bash_bg failing to spawn). Log it, and if the
+					// handler left no output, surface the error to the model as a
+					// tool error rather than emitting an empty result.
+					cfg.Log.Warn("tool handler error", "tool", tc.Name, "error", herr)
+					if out == "" {
+						out = "error: " + herr.Error()
+					}
+				}
 			} else {
 				out = fmt.Sprintf("error: unknown tool %q", tc.Name)
 			}
