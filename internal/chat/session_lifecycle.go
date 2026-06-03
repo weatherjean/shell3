@@ -18,7 +18,7 @@ func (s *Session) End(status string) {
 }
 
 // CloseEvents closes the underlying event channel. Must be called exactly once,
-// after the last emit. emit() recovers from send-on-closed so late hook
+// after the last emit. emit/emitSync recover from send-on-closed so late hook
 // emissions during teardown won't panic.
 func (s *Session) CloseEvents() {
 	close(s.events)

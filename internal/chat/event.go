@@ -143,7 +143,7 @@ func emitSessionStart(s *Session, meta map[string]string) {
 }
 
 func emitSessionEnd(s *Session, status string) {
-	emit(s, Event{
+	emitSync(s, Event{
 		Kind:      EventSessionEnd,
 		Time:      time.Now(),
 		SessionID: s.id,
@@ -187,7 +187,7 @@ func emitUserMessage(s *Session, text string) {
 }
 
 func emitError(s *Session, text string) {
-	emit(s, Event{Kind: EventError, Time: time.Now(), SessionID: s.id, Text: text})
+	emitSync(s, Event{Kind: EventError, Time: time.Now(), SessionID: s.id, Text: text})
 }
 
 func emitUsage(s *Session, prompt, completion, total int) {
@@ -213,7 +213,7 @@ func emitRetry(s *Session, n *llm.RetryNotice) {
 }
 
 func emitTurnDone(s *Session, prompt, completion, total int) {
-	emit(s, Event{
+	emitSync(s, Event{
 		Kind:      EventTurnDone,
 		Time:      time.Now(),
 		SessionID: s.id,
@@ -221,10 +221,13 @@ func emitTurnDone(s *Session, prompt, completion, total int) {
 	})
 }
 
-// emit performs a non-blocking send. Dropped events are not retried.
+// emit performs a best-effort non-blocking send for high-volume events
+// (tokens, reasoning, usage, etc.). Dropped events are not retried.
 // Recovers from send-on-closed-channel so teardown races don't panic the
 // turn loop — the channel is closed exactly once during shutdown, but a
 // late hook or goroutine may still try to emit.
+// Lifecycle-terminal events (turn_done, error, session_end) use emitSync
+// instead to guarantee delivery.
 func emit(s *Session, ev Event) {
 	if s == nil || s.events == nil {
 		return
@@ -234,4 +237,18 @@ func emit(s *Session, ev Event) {
 	case s.events <- ev:
 	default:
 	}
+}
+
+// emitSync performs a blocking send so the event is never dropped. Used for
+// lifecycle-terminal events (turn_done, error, session_end) that downstream
+// consumers (pkg/shell3 drain, the TUI) treat as a hard completion barrier:
+// dropping one permanently hangs the consumer. Recovers from
+// send-on-closed-channel so a late emit during teardown can't panic the turn
+// loop (the channel is closed exactly once during shutdown).
+func emitSync(s *Session, ev Event) {
+	if s == nil || s.events == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	s.events <- ev
 }
