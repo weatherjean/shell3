@@ -34,27 +34,28 @@ type Spec struct {
 type Kind int
 
 const (
-	// Token is a chunk of streamed assistant text. Text is set.
-	Token Kind = iota
-	// ToolResult reports a completed tool call. ToolName and ToolOutput are set.
-	ToolResult
-	// Error is a turn error. Err is set. A Done event is NOT guaranteed to
-	// follow: on a mid-stream failure the channel closes after Error with no
-	// Done. Either way the channel always closes exactly once.
-	Error
-	// Done marks normal end of the turn. The channel closes immediately after.
-	// Not emitted on the error path (see Error).
-	Done
+	Token      Kind = iota // assistant text       → Text
+	Reasoning              // thinking text         → Text
+	ToolCall               // tool started          → ToolName, ToolInput
+	ToolResult             // tool finished         → ToolName, ToolOutput
+	Usage                  // per-roundtrip tokens  → PromptTokens/CompletionTokens/TotalTokens
+	Retry                  // transient retry       → Text
+	Error                  // turn error            → Err
+	Done                   // turn end (normal)     → token fields (final totals)
 )
 
-// Event is one item streamed on the Run channel. Only the fields named for a
+// Event is one item streamed on a Send/Run channel. Only the fields named for a
 // given Kind are populated.
 type Event struct {
-	Kind       Kind
-	Text       string // Kind == Token
-	ToolName   string // Kind == ToolResult
-	ToolOutput string // Kind == ToolResult
-	Err        error  // Kind == Error
+	Kind             Kind
+	Text             string // Token, Reasoning, Retry
+	ToolName         string // ToolCall, ToolResult
+	ToolInput        string // ToolCall (raw JSON args)
+	ToolOutput       string // ToolResult
+	PromptTokens     int    // Usage, Done
+	CompletionTokens int    // Usage, Done
+	TotalTokens      int    // Usage, Done
+	Err              error  // Error
 }
 
 // runConfig runs one turn against an already-built chat.Config and streams
@@ -213,21 +214,38 @@ func buildConfig(spec Spec) (chat.Config, func(), error) {
 	return cfg, cleanup, nil
 }
 
-// translate maps an internal chat.Event to a public Event. The second return
-// is false when the internal event has no public equivalent and should be
-// dropped (reasoning, tool-call, usage, session, user/assistant-message,
-// system-reminder, retry).
+// translate maps an internal chat.Event to a public Event. ok is false when the
+// internal event has no public equivalent (session lifecycle, echoed user
+// message, post-stream assistant message, injected reminders).
 func translate(ev chat.Event) (Event, bool) {
 	switch ev.Kind {
 	case chat.EventAssistantToken:
 		return Event{Kind: Token, Text: ev.Text}, true
+	case chat.EventAssistantReasoning:
+		return Event{Kind: Reasoning, Text: ev.Text}, true
+	case chat.EventToolCall:
+		return Event{Kind: ToolCall, ToolName: ev.ToolName, ToolInput: ev.ToolInput}, true
 	case chat.EventToolResult:
 		return Event{Kind: ToolResult, ToolName: ev.ToolName, ToolOutput: ev.ToolOutput}, true
+	case chat.EventUsage:
+		return usageEvent(Usage, ev), true
+	case chat.EventTurnDone:
+		return usageEvent(Done, ev), true
+	case chat.EventRetry:
+		return Event{Kind: Retry, Text: ev.Text}, true
 	case chat.EventError:
 		return Event{Kind: Error, Err: errors.New(ev.Text)}, true
-	case chat.EventTurnDone:
-		return Event{Kind: Done}, true
 	default:
 		return Event{}, false
 	}
+}
+
+func usageEvent(k Kind, ev chat.Event) Event {
+	e := Event{Kind: k}
+	if ev.Usage != nil {
+		e.PromptTokens = ev.Usage.PromptTokens
+		e.CompletionTokens = ev.Usage.CompletionTokens
+		e.TotalTokens = ev.Usage.TotalTokens
+	}
+	return e
 }
