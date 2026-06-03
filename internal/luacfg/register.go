@@ -10,7 +10,6 @@ func registerShell3(c *LoadedConfig) {
 	L.SetField(tbl, "skill", L.NewFunction(c.luaSkill))
 	L.SetField(tbl, "tool", L.NewFunction(c.luaTool))
 	L.SetField(tbl, "agent", L.NewFunction(c.luaAgent))
-	L.SetField(tbl, "web", L.NewFunction(c.luaWeb))
 	L.SetField(tbl, "urlencode", L.NewFunction(luaURLEncode))
 	env := L.NewTable()
 	L.SetField(env, "secret", L.NewFunction(c.luaSecret))

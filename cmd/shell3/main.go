@@ -46,7 +46,6 @@ func main() {
 	root.AddCommand(newDoctorCommand())
 	root.AddCommand(newDocsCommand())
 	root.AddCommand(newWidgetCommand())
-	root.AddCommand(newWebCommand())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

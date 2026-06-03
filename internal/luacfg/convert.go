@@ -25,17 +25,6 @@ func optBool(t *lua.LTable, k string) bool {
 	return lua.LVAsBool(t.RawGetString(k))
 }
 
-// stringList collects the string values of a Lua array table, skipping non-strings.
-func stringList(t *lua.LTable) []string {
-	var out []string
-	t.ForEach(func(_, v lua.LValue) {
-		if s, ok := v.(lua.LString); ok {
-			out = append(out, string(s))
-		}
-	})
-	return out
-}
-
 // tableToMap converts a Lua table to a Go map (objects) or slice (arrays).
 func tableToMap(t *lua.LTable) map[string]any {
 	out := map[string]any{}

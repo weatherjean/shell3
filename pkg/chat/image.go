@@ -26,31 +26,6 @@ var supportedImageExts = map[string]bool{
 	".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true,
 }
 
-// BuildImageMessageFromBytes builds a multimodal user message from raw image
-// bytes (from an upload or a file). It enforces the 10 MB cap, resizes/encodes
-// to JPEG, and defaults the prompt when empty. Shared by the TUI /image path
-// and the web /image upload.
-func BuildImageMessageFromBytes(raw []byte, prompt string) (llm.Message, error) {
-	if len(raw) > maxImageBytes {
-		return llm.Message{}, fmt.Errorf("image too large (%d MB, max 10 MB)", len(raw)>>20)
-	}
-	encoded, err := resizeAndEncodeJPEG(raw, maxImageSide, jpegQuality)
-	if err != nil {
-		return llm.Message{}, fmt.Errorf("image encode: %w", err)
-	}
-	prompt = strings.TrimSpace(prompt)
-	if prompt == "" {
-		prompt = "Describe this image."
-	}
-	return llm.Message{
-		Role: llm.RoleUser,
-		ContentParts: []llm.ContentPart{
-			{Type: llm.ContentPartTypeImageURL, ImageURL: "data:image/jpeg;base64," + encoded},
-			{Type: llm.ContentPartTypeText, Text: prompt},
-		},
-	}, nil
-}
-
 // BuildImageMessage parses "/image args" into a multimodal llm.Message.
 // Quoted paths handle filenames with spaces: /image "Screenshot 2026.png" prompt
 func BuildImageMessage(args, workDir string) (llm.Message, error) {
@@ -71,6 +46,10 @@ func BuildImageMessage(args, workDir string) (llm.Message, error) {
 	} else {
 		path, prompt, _ = strings.Cut(args, " ")
 		prompt = strings.TrimSpace(prompt)
+	}
+
+	if prompt == "" {
+		prompt = "Describe this image."
 	}
 
 	if !filepath.IsAbs(path) && workDir != "" {
@@ -94,7 +73,21 @@ func BuildImageMessage(args, workDir string) (llm.Message, error) {
 	if err != nil {
 		return llm.Message{}, fmt.Errorf(`cannot read "%s": %w`, path, err)
 	}
-	return BuildImageMessageFromBytes(raw, prompt)
+
+	encoded, err := resizeAndEncodeJPEG(raw, maxImageSide, jpegQuality)
+	if err != nil {
+		return llm.Message{}, fmt.Errorf("image encode: %w", err)
+	}
+
+	dataURI := "data:image/jpeg;base64," + encoded
+
+	return llm.Message{
+		Role: llm.RoleUser,
+		ContentParts: []llm.ContentPart{
+			{Type: llm.ContentPartTypeImageURL, ImageURL: dataURI},
+			{Type: llm.ContentPartTypeText, Text: prompt},
+		},
+	}, nil
 }
 
 // resizeAndEncodeJPEG decodes raw image bytes, shrinks so longest side ≤

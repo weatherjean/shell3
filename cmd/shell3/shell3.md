@@ -422,7 +422,6 @@ The CLI surface is intentionally tiny.
 
 ```
 shell3 [message]            run the chat agent (TUI, or headless if piped/--out)
-shell3 web [--port 8080] [--host 127.0.0.1]   serve the interactive web UI
 shell3 doctor               validate global + project setup
 shell3 docs                 print this documentation
 shell3 widget ask|pick|confirm   JSON-in/JSON-out interactive prompt widgets
@@ -452,27 +451,6 @@ Prints this document (the same text the `shell3_docs` tool returns).
 for hooks and scripts. Each reads a spec on stdin, paints on `/dev/tty`, and
 writes a Result on stdout. Exit codes: `0` ok, `1` confirm-no, `2` timeout, `130`
 cancel/eof.
-
-### `web`
-
-`shell3 web --port <n>` runs one long-lived agent session and serves an
-interactive browser UI that streams the same event stream the TUI shows
-(assistant tokens, reasoning, tool calls/results, errors). Multiple browsers
-attach to the **same** conversation; input is serialized — one turn at a time, so
-a submit while the agent is working returns `409` until the turn finishes. On
-(re)connect the UI replays the session so far, then streams live over SSE.
-
-```
-shell3 web                  # http://127.0.0.1:8080
-shell3 web --port 9000
-shell3 web --host 0.0.0.0   # expose on all interfaces — no auth; front with a reverse proxy
-```
-
-The in-browser input box drives turns; `/clear` (or the Clear button) resets the
-conversation, Stop cancels the current turn. There is **no authentication** in
-this mode yet — bind to localhost (default) or place it behind an authenticating
-reverse proxy. Flags: `--port` (default 8080), `--host` (default `127.0.0.1`),
-`--config`/`-c`.
 
 ---
 
