@@ -29,26 +29,40 @@ func (a *App) Pause() error {
 	a.mu.Unlock()
 
 	fmt.Print("\x1b[?25h" + pasteOff)
-	term.Restore(int(os.Stdin.Fd()), oldState) //nolint:errcheck
+	if oldState != nil {
+		term.Restore(int(os.Stdin.Fd()), oldState) //nolint:errcheck
+	}
 	return nil
 }
 
 // Resume re-enters raw terminal mode, re-enables bracketed paste, and
 // repaints the live frame. Call after [App.Pause] returns from the
 // subprocess. Safe from any goroutine.
+//
+// Returns the error from term.MakeRaw if raw mode could not be re-entered (e.g.
+// the controlling TTY was lost). In that case the previous terminal state is
+// kept (so a later Pause does not Restore a nil state and panic) and the app
+// continues in degraded, non-raw mode; the lifecycle bookkeeping still runs so
+// a paired Pause/Resume cannot wedge.
 func (a *App) Resume() error {
-	newState, _ := term.MakeRaw(int(os.Stdin.Fd()))
+	newState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	fmt.Print(pasteOn)
 
 	a.mu.Lock()
-	a.term.oldTermState = newState
+	if err == nil {
+		// Only replace oldTermState when MakeRaw succeeded. On failure (e.g. the
+		// controlling TTY was lost) keep the previous state so a later Pause does
+		// not Restore(nil) and panic. Still clear paused / repaint / release the
+		// read lock below so the paused app doesn't wedge.
+		a.term.oldTermState = newState
+	}
 	a.term.paused = false
 	a.r.Reset()
 	a.render()
 	a.mu.Unlock()
 
 	a.term.readMu.Unlock()
-	return nil
+	return err
 }
 
 // WithReleasedTerminal pauses the render loop, runs fn with full TTY
