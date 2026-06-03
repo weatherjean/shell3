@@ -1,17 +1,6 @@
-# shell3 /'ʃɛli/
+# ๑ï shell3 /'ʃɛli/
 
 AI-powered shell assistant.
-
-```
-       /\
-      {.-}
-     ;_.-'\
-    {    _.}_
-     \.-' /  `
-      \  |    /
-       \ |  ,/
-        \|_/
-```
 
 ## Getting started
 
@@ -40,7 +29,7 @@ Full documentation is embedded in the binary:
 shell3 docs
 ```
 
-Or read the source: [cmd/shell3/shell3.md](cmd/shell3/shell3.md). The canonical example config is [internal/scaffold/defaults/shell3.lua](internal/scaffold/defaults/shell3.lua).
+Or read the source: [internal/docs/shell3.md](internal/docs/shell3.md). The canonical example config is [internal/scaffold/defaults/shell3.lua](internal/scaffold/defaults/shell3.lua).
 
 Secrets live in a plain `.env` file beside your `shell3.lua` (e.g. `~/.shell3/.env`), referenced from the config via `shell3.env.secret("KEY")`. There's no encryption — treat the file like any `~/.*rc` with credentials. Keep it out of version control.
 
@@ -54,7 +43,3 @@ rm -rf .shell3
 cat .shell3/.ref   # prints the UUID
 rm -rf ~/.shell3/projects/<uuid>
 ```
-
-## Credits
-
-Shell ASCII art by jgs (Joan G. Stark).
