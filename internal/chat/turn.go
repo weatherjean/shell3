@@ -241,7 +241,7 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 				out = fmt.Sprintf("error: unknown tool %q", tc.Name)
 			}
 
-			emitToolResult(sess, tc.ID, tc.Name, out, strings.HasPrefix(out, "error:") || strings.HasPrefix(out, "USER DENIED") || strings.HasPrefix(out, "USER CANCELLED") || strings.HasPrefix(out, "Tool-call hook failed"))
+			emitToolResult(sess, tc.ID, tc.Name, out, isToolError(out))
 			// Prepend the tool_call_id so the model has a stable handle it
 			// can pass to prune_tool_result. Without this the id only lives
 			// in structured metadata, which the model cannot reliably echo.
@@ -297,6 +297,16 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 			emitSystemReminder(sess, reminder)
 		}
 	}
+}
+
+// isToolError reports whether a tool's output string represents a failure,
+// by its leading marker. Keep in sync with the markers produced in RunTurn's
+// tool-execution loop (validation errors, guard block/cancel, hook failures).
+func isToolError(out string) bool {
+	return strings.HasPrefix(out, "error:") ||
+		strings.HasPrefix(out, "USER DENIED") ||
+		strings.HasPrefix(out, "USER CANCELLED") ||
+		strings.HasPrefix(out, "Tool-call hook failed")
 }
 
 // streamOnce calls the LLM once, collecting text/reasoning/tool-calls/usage
