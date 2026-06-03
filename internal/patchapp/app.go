@@ -58,9 +58,9 @@ type App struct {
 	// viewing the saved draft (one step before entering the history list).
 	// historyIdx > 0 means the user is viewing a history entry (1 = most
 	// recent); historyIdx is 0 in both live and in-draft modes.
-	history       []string
-	historyIdx    int
-	historyDraft  []rune
+	history        []string
+	historyIdx     int
+	historyDraft   []rune
 	historyInDraft bool
 
 	// Status bar info.

@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
 )
 
 func TestSinkWriteChatEventToolCall(t *testing.T) {

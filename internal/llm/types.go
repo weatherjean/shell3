@@ -28,13 +28,13 @@ type ContentPart struct {
 
 // Message is one turn in a conversation.
 type Message struct {
-	Role       Role       `json:"role"`
-	Content    string     `json:"content"`
+	Role    Role   `json:"role"`
+	Content string `json:"content"`
 	// ContentParts replaces Content for multimodal messages (vision).
 	ContentParts []ContentPart `json:"content_parts,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	Name       string     `json:"name,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID   string        `json:"tool_call_id,omitempty"`
+	Name         string        `json:"name,omitempty"`
+	ToolCalls    []ToolCall    `json:"tool_calls,omitempty"`
 	// ReasoningContent holds non-standard chain-of-thought text some
 	// OpenAI-compatible providers emit (Moonshot/kimi, DeepSeek). The
 	// openai adapter populates it from streaming and echoes it back on

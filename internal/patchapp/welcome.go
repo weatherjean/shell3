@@ -73,4 +73,3 @@ func renderWelcome(width int, info WelcomeInfo) []string {
 	out = append(out, "")
 	return out
 }
-

@@ -14,8 +14,8 @@ const (
 	rMuted, gMuted, bMuted       = 107, 114, 128 // gray-500
 )
 
-func dim(s string) string     { return patchtui.FgRGB(rDim, gDim, bDim) + s + patchtui.Reset }
-func muted(s string) string   { return patchtui.FgRGB(rMuted, gMuted, bMuted) + s + patchtui.Reset }
+func dim(s string) string   { return patchtui.FgRGB(rDim, gDim, bDim) + s + patchtui.Reset }
+func muted(s string) string { return patchtui.FgRGB(rMuted, gMuted, bMuted) + s + patchtui.Reset }
 func boldP(s string) string {
 	return patchtui.Bold + patchtui.FgRGB(rPrimary, gPrimary, bPrimary) + s + patchtui.Reset
 }

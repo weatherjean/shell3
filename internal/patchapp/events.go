@@ -41,8 +41,8 @@ type TTYExecEvent struct {
 
 func (ChunkEvent) event()          {}
 func (ReasoningChunkEvent) event() {}
-func (AppendEvent) event()   {}
-func (UsageEvent) event()    {}
-func (TurnDoneEvent) event() {}
-func (TurnErrEvent) event()  {}
-func (TTYExecEvent) event()  {}
+func (AppendEvent) event()         {}
+func (UsageEvent) event()          {}
+func (TurnDoneEvent) event()       {}
+func (TurnErrEvent) event()        {}
+func (TTYExecEvent) event()        {}

@@ -18,7 +18,7 @@ import (
 type Meta struct {
 	UUID      string    `json:"uuid"`
 	CWD       string    `json:"cwd"`
-	Name      string    `json:"name"`       // basename of CWD
+	Name      string    `json:"name"` // basename of CWD
 	CreatedAt time.Time `json:"created_at"`
 }
 

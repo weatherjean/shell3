@@ -55,7 +55,6 @@ func formatEditResult(r edittool.Result, fullWrite bool) string {
 	return header + "\n" + diff
 }
 
-
 func formatCreatedFilePreview(content string, maxLines int) string {
 	if content == "" || maxLines <= 0 {
 		return ""
@@ -86,4 +85,3 @@ func splitPreviewLines(content string) []string {
 	}
 	return lines
 }
-

@@ -149,13 +149,13 @@ shell3.agent({
 		}()
 
 		turnCfg := chat.TurnConfig{
-			LLM: fake,
-			Personality: persona.BasePersona("you are a test", toolDefs),
-			StatusLine:  "test │ x",
-			Log:         applog.Noop{},
-			CustomTool:  lc.CallTool,
+			LLM:             fake,
+			Personality:     persona.BasePersona("you are a test", toolDefs),
+			StatusLine:      "test │ x",
+			Log:             applog.Noop{},
+			CustomTool:      lc.CallTool,
 			CustomToolNames: customNames,
-			ToolGuard:   toolGuard,
+			ToolGuard:       toolGuard,
 		}
 
 		turnCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -221,13 +221,13 @@ shell3.agent({
 		}()
 
 		turnCfg := chat.TurnConfig{
-			LLM: fake,
-			Personality: persona.BasePersona("you are a test", toolDefs),
-			StatusLine:  "test │ x",
-			Log:         applog.Noop{},
-			CustomTool:  lc.CallTool,
+			LLM:             fake,
+			Personality:     persona.BasePersona("you are a test", toolDefs),
+			StatusLine:      "test │ x",
+			Log:             applog.Noop{},
+			CustomTool:      lc.CallTool,
 			CustomToolNames: customNames,
-			ToolGuard:   toolGuard,
+			ToolGuard:       toolGuard,
 		}
 
 		turnCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

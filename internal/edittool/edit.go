@@ -98,7 +98,6 @@ func EditFile(workDir, filePath, oldString, newString string, replaceAll bool) (
 	return Result{Path: abs, OldContent: original, NewContent: updated, Additions: add, Deletions: del}, nil
 }
 
-
 func resolvePath(workDir, p string) string {
 	if filepath.IsAbs(p) {
 		return p

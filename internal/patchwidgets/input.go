@@ -149,4 +149,3 @@ func trimToWord(s []rune) []rune {
 	}
 	return s[:i]
 }
-

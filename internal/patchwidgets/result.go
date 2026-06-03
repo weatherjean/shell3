@@ -42,8 +42,10 @@ func (r Result) ExitCode() int {
 	}
 }
 
-func okResult(value any) Result      { return Result{OK: true, Value: value, Reason: ReasonOK} }
-func okIndex(value any, i int) Result { return Result{OK: true, Value: value, Index: &i, Reason: ReasonOK} }
-func cancelResult() Result            { return Result{Reason: ReasonCancel} }
-func timeoutResult() Result           { return Result{Reason: ReasonTimeout} }
-func eofResult() Result               { return Result{Reason: ReasonEOF} }
+func okResult(value any) Result { return Result{OK: true, Value: value, Reason: ReasonOK} }
+func okIndex(value any, i int) Result {
+	return Result{OK: true, Value: value, Index: &i, Reason: ReasonOK}
+}
+func cancelResult() Result  { return Result{Reason: ReasonCancel} }
+func timeoutResult() Result { return Result{Reason: ReasonTimeout} }
+func eofResult() Result     { return Result{Reason: ReasonEOF} }

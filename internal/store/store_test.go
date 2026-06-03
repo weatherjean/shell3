@@ -230,7 +230,6 @@ func TestStore_HistorySearch_ReturnsLocator(t *testing.T) {
 	}
 }
 
-
 func TestStore_HistorySearch_PunctuationSafe(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "x.db"))
 	if err != nil {

@@ -13,7 +13,7 @@ import (
 //
 // Two modes:
 //   - Idle: blank line + input box (multi-line, wrapped, with cursor marker)
-//     + status bar.
+//   - status bar.
 //   - Busy: single line — the rainbow busy bar (see renderBusyLine).
 //
 // Streaming text and tool output are committed to scrollback via
