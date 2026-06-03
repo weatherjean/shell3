@@ -99,6 +99,8 @@ type Session struct {
 	cleanup   func()
 	drainDone chan struct{}
 
+	closing chan struct{} // closed by Close to tell drain to stop forwarding to cur and discard events
+
 	// mu guards cur, turnCancel, and turnDone.
 	mu         sync.Mutex
 	cur        chan Event         // current Send's channel; nil between turns (drain clears it on Done/Error)
@@ -155,18 +157,27 @@ func newSession(cfg chat.Config, cleanup func()) *Session {
 		handlers:  chat.NewHandlers(cfg),
 		cleanup:   cleanup,
 		drainDone: make(chan struct{}),
+		closing:   make(chan struct{}),
 	}
 	go s.drain()
 	return s
 }
 
 // drain is the single long-lived consumer of sess.Events(), routing translated
-// events to the current Send channel and closing it on Done/Error.
+// events to the current Send channel and closing it on Done/Error. On Close
+// (s.closing) it stops forwarding but keeps draining events so the turn's
+// blocking emits can complete, then exits when CloseEvents ends the range.
 func (s *Session) drain() {
 	defer close(s.drainDone)
+	discard := false
 	for ev := range s.sess.Events() {
 		pub, ok := translate(ev)
 		if !ok {
+			continue
+		}
+		if discard {
+			// Teardown: keep draining sess.Events() (so the turn's blocking
+			// emits don't wedge) but no longer forward to the Send channel.
 			continue
 		}
 		s.mu.Lock()
@@ -175,17 +186,35 @@ func (s *Session) drain() {
 		if cur == nil {
 			continue
 		}
-		cur <- pub
-		if pub.Kind == Done || pub.Kind == Error {
-			// Close the captured local, not a re-read of s.cur: a misbehaving
-			// caller could repoint s.cur via an early Send between the send
-			// above and here, and we must never close that fresh channel.
-			s.mu.Lock()
+		select {
+		case cur <- pub:
+			if pub.Kind == Done || pub.Kind == Error {
+				// Close the captured local, not a re-read of s.cur: a misbehaving
+				// caller could repoint s.cur via an early Send between the send
+				// above and here, and we must never close that fresh channel.
+				s.mu.Lock()
+				close(cur)
+				if s.cur == cur {
+					s.cur = nil
+				}
+				s.mu.Unlock()
+			}
+		case <-s.closing:
+			// Close signalled teardown while we were forwarding to an unread
+			// Send channel. Always close the channel we were forwarding to so a
+			// consumer ranging over it sees a clean close rather than hanging —
+			// including the case where a contract-violating concurrent Send has
+			// repointed s.cur (we still own the captured cur). cur is non-nil and
+			// unclosed here (a Done/Error for it would have nil'd s.cur and we'd
+			// have skipped above), so this closes it exactly once. Only clear
+			// s.cur when it still refers to this channel.
 			close(cur)
+			s.mu.Lock()
 			if s.cur == cur {
 				s.cur = nil
 			}
 			s.mu.Unlock()
+			discard = true
 		}
 	}
 }
@@ -225,10 +254,11 @@ func (s *Session) ID() string {
 // finish (so its deferred history persist runs against the still-open store),
 // then stops the drain, ends the store session, and releases the config.
 //
-// As with the other lifecycle methods, the caller must not abandon an in-flight
-// Send channel: if events go unread, the drain goroutine parks on the unbuffered
-// channel send and Close blocks at <-drainDone. Drain the Send channel (Close
-// cancels the turn, so an in-flight turn ends promptly with a terminal event).
+// Close is robust to an abandoned Send channel: signalling s.closing causes
+// drain to stop forwarding and switch to discard mode, so neither the turn
+// join nor <-drainDone can wedge on an unread Send channel. Draining the
+// channel is still the supported pattern (Close cancels the turn, so the
+// in-flight turn ends promptly with a terminal event).
 func (s *Session) Close() error {
 	// Cancel any in-flight turn so it stops streaming and runs its deferred
 	// history persist, then join it before we close the events channel — the
@@ -243,6 +273,10 @@ func (s *Session) Close() error {
 	if cancel != nil {
 		cancel()
 	}
+	// Tell drain to stop forwarding to (a possibly-abandoned) Send channel and
+	// discard events, so neither the join below nor <-drainDone can wedge on an
+	// unread Send channel.
+	close(s.closing)
 	if done != nil {
 		<-done // turn goroutine (and its deferred history persist) has finished
 	}

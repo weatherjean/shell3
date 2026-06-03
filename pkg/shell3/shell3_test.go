@@ -213,6 +213,38 @@ func TestSession_SwitchModel_Applies(t *testing.T) {
 	}
 }
 
+func TestSession_CloseDoesNotDeadlockWhenSendChannelAbandoned(t *testing.T) {
+	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{
+		{TextDelta: "a"}, {TextDelta: "b"}, {TextDelta: "c"},
+	}})
+	s := newTestSession(t, client, chat.Config{})
+
+	// Abandon the Send channel: never read it, so drain parks on the unbuffered
+	// forward of the first token.
+	out := s.Send(context.Background(), "hi")
+
+	done := make(chan error, 1)
+	go func() { done <- s.Close() }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close deadlocked: drain wedged on the abandoned unbuffered Send channel")
+	}
+
+	// Teardown must also CLOSE the abandoned Send channel so a consumer that
+	// later (or concurrently) ranges over it observes EOF instead of hanging.
+	for {
+		select {
+		case _, ok := <-out:
+			if !ok {
+				return // channel closed as required
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("Send channel was not closed on Close; a ranging consumer would hang")
+		}
+	}
+}
+
 // blockingClient.Stream blocks until its ctx is cancelled, simulating an
 // in-flight LLM stream. It signals when Stream is entered and when it returns.
 type blockingClient struct {
