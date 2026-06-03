@@ -84,3 +84,65 @@ func TestEmitTurnDone(t *testing.T) {
 		t.Errorf("usage data: %+v", got[0].Usage)
 	}
 }
+
+func TestTerminalTurnDoneNotDroppedWhenBufferFull(t *testing.T) {
+	s := NewSession(SessionOpts{BufSize: 2})
+	// Fill the buffer to capacity. Nothing consumes from here until the
+	// assertions below, so the buffer stays genuinely full while the terminal
+	// emit is attempted — no consumer can race in and free a slot first.
+	emitAssistantToken(s, "a")
+	emitAssistantToken(s, "b")
+
+	done := make(chan struct{})
+	go func() {
+		emitTurnDone(s, 1, 2, 3)
+		close(done)
+	}()
+
+	// A guaranteed (blocking) send must NOT complete while the buffer is full —
+	// it parks until a consumer frees a slot. The old lossy emit, by contrast,
+	// returns immediately having silently dropped the terminal event, which is
+	// exactly the hang-the-consumer bug. So a closed `done` here == dropped.
+	select {
+	case <-done:
+		t.Fatal("emitTurnDone returned while the buffer was full — terminal event was dropped (lossy send)")
+	case <-time.After(100 * time.Millisecond):
+		// Good: the send is blocking, waiting for the consumer. 100ms is a
+		// "did it block?" window, not a correctness timeout — a blocking send
+		// never closes `done` here regardless of scheduling, so this can only
+		// false-fail if a bare channel send is starved for 100ms (it isn't).
+	}
+
+	// Now drain. The terminal turn_done must be among the delivered events.
+	sawTurnDone := false
+	for range 3 {
+		select {
+		case ev := <-s.Events():
+			if ev.Kind == EventTurnDone {
+				sawTurnDone = true
+			}
+		case <-time.After(time.Second):
+			t.Fatal("timed out draining events")
+		}
+	}
+	if !sawTurnDone {
+		t.Fatal("terminal turn_done never arrived")
+	}
+	<-done
+}
+
+func TestAssistantTokenStillDroppedWhenBufferFull(t *testing.T) {
+	s := NewSession(SessionOpts{BufSize: 2})
+	emitAssistantToken(s, "a")
+	emitAssistantToken(s, "b")
+	done := make(chan struct{})
+	go func() {
+		emitAssistantToken(s, "c") // must return immediately, not block
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("emitAssistantToken blocked on a full buffer; tokens must stay droppable")
+	}
+}
