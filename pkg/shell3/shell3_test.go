@@ -155,3 +155,20 @@ func TestRunConfig_MapsToolResult(t *testing.T) {
 		t.Fatalf("tool event = %+v, want name=echo_tool output=echoed", tools[0])
 	}
 }
+
+func TestRun_BadConfig_Errors(t *testing.T) {
+	// Point at a temp dir with no shell3.lua — Run must fail to start:
+	// non-nil error AND nil channel (nothing ran).
+	tmp := t.TempDir()
+	ch, err := Run(context.Background(), Spec{
+		Prompt:     "hi",
+		ConfigPath: tmp + "/shell3.lua",
+		WorkDir:    tmp,
+	})
+	if err == nil {
+		t.Fatal("expected error for missing config, got nil")
+	}
+	if ch != nil {
+		t.Fatal("expected nil channel on start failure")
+	}
+}

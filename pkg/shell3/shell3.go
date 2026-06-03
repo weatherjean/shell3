@@ -7,8 +7,15 @@ package shell3
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 
+	"github.com/weatherjean/shell3/internal/adapter/openai"
+	"github.com/weatherjean/shell3/internal/luacfg"
 	"github.com/weatherjean/shell3/pkg/chat"
+	"github.com/weatherjean/shell3/pkg/llm"
+	"github.com/weatherjean/shell3/pkg/persona"
 )
 
 // Spec configures a single Run. Prompt is required; the rest default.
@@ -89,6 +96,112 @@ func runConfig(ctx context.Context, cfg chat.Config, prompt string, cleanup func
 	}()
 
 	return out
+}
+
+// Run loads the config at spec.ConfigPath, runs one turn for spec.Prompt in
+// spec.WorkDir, and streams translated Events on the returned channel.
+//
+// A non-nil error means Run failed to START (missing/invalid config, unknown
+// model, missing key): nothing ran and the channel is nil. A nil error means
+// the turn is underway; per-turn failures arrive as Event{Kind: Error}. The
+// channel is closed exactly once after a final Done event. The caller's only
+// obligation is to drain the channel until it closes.
+func Run(ctx context.Context, spec Spec) (<-chan Event, error) {
+	cfg, closeLua, err := buildConfig(spec)
+	if err != nil {
+		return nil, err
+	}
+	return runConfig(ctx, cfg, spec.Prompt, closeLua), nil
+}
+
+// buildConfig loads shell3.lua and assembles the minimal chat.Config for an
+// embedded single-turn run: OpenAI-compatible adapter, persona system prompt,
+// tool defs, custom-tool dispatch, and the guard chain. The returned cleanup
+// closes the Lua state and is invoked by runConfig after the turn.
+func buildConfig(spec Spec) (chat.Config, func(), error) {
+	noop := func() {}
+
+	workDir := spec.WorkDir
+	if workDir == "" {
+		w, err := os.Getwd()
+		if err != nil {
+			return chat.Config{}, noop, fmt.Errorf("get working directory: %w", err)
+		}
+		workDir = w
+	}
+
+	configPath := spec.ConfigPath
+	if configPath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return chat.Config{}, noop, fmt.Errorf("get home directory: %w", err)
+		}
+		configPath = filepath.Join(home, ".shell3", "shell3.lua")
+	}
+
+	lc, err := luacfg.Load(configPath, filepath.Dir(configPath))
+	if err != nil {
+		return chat.Config{}, noop, fmt.Errorf("load config: %w", err)
+	}
+	cleanup := func() { lc.Close() }
+
+	m, ok := lc.Model(lc.Agent.ModelName)
+	if !ok {
+		cleanup()
+		return chat.Config{}, noop, fmt.Errorf("agent references unknown model %q", lc.Agent.ModelName)
+	}
+
+	client := openai.NewClient(m.BaseURL, m.APIKey, m.ModelID)
+	rp := llm.RequestParams{
+		ReasoningEffort: m.Reasoning,
+		MaxTokens:       m.MaxTokens,
+		Temperature:     m.Temperature,
+	}
+	client.SetParams(rp)
+	if m.Extra != nil {
+		client.SetExtra(m.Extra)
+	}
+
+	sysPrompt := lc.BuildPersona(luacfg.RuntimeData{CWD: workDir, Model: m.ModelID})
+
+	customDefs := lc.CustomToolsFor(lc.Agent.CustomTools)
+	hasSkills := lc.Agent.SkillsActive()
+	toolDefs := luacfg.ToolDefs(lc.Agent.Gates, customDefs, hasSkills)
+
+	pers := persona.Persona{
+		Name:         lc.Agent.Name,
+		SystemPrompt: sysPrompt,
+		Tools:        toolDefs,
+		Parameters:   rp,
+	}
+
+	customNames := make(map[string]bool, len(lc.Agent.CustomTools))
+	for _, n := range lc.Agent.CustomTools {
+		customNames[n] = true
+	}
+	if hasSkills {
+		customNames["skill"] = true
+	}
+
+	cfg := chat.Config{
+		LLM:             client,
+		Personality:     pers,
+		WorkDir:         workDir,
+		StatusLine:      lc.Agent.Name + " │ " + m.ModelID,
+		ModeLabel:       lc.Agent.Name,
+		ContextWindow:   m.ContextWindow,
+		ActiveSkills:    lc.Agent.Skills,
+		CustomTool:      lc.CallTool,
+		CustomToolNames: customNames,
+		ToolGuard: func(ctx context.Context, t string, p map[string]any) (int, string, error) {
+			d, r, e := lc.OnToolCall(ctx, t, p)
+			return int(d), r, e
+		},
+		Headless: true,
+		Params:   rp,
+	}
+
+	return cfg, cleanup, nil
 }
 
 // translate maps an internal chat.Event to a public Event. The second return
