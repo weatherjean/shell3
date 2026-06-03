@@ -163,3 +163,38 @@ func TestRunTurn_GuardCancel_StubsRemainingCalls(t *testing.T) {
 		t.Fatalf("expected synthetic stub tool message for the unreached call")
 	}
 }
+
+// TestRunTurn_MidLoopCtxCancel_EmitsError characterizes mid-loop cancellation:
+// the guard cancels the context during the first call, so the second
+// iteration's top-of-loop ctx check trips and the turn ends with error (not
+// turn_done). The guard returns allow — the abort comes from ctx, not the guard.
+func TestRunTurn_MidLoopCtxCancel_EmitsError(t *testing.T) {
+	fake := fakellm.New(
+		fakellm.Script{Events: []llm.StreamEvent{
+			{ToolCall: &llm.ToolCall{ID: "a", Name: "echo", RawArgs: `{}`}},
+			{ToolCall: &llm.ToolCall{ID: "b", Name: "echo", RawArgs: `{}`}},
+			{Usage: &llm.Usage{TotalTokens: 5}},
+		}},
+	)
+	sess := NewSession(SessionOpts{BufSize: 256})
+	ctx, cancel := context.WithCancel(context.Background())
+	cfg := TurnConfig{
+		LLM:         fake,
+		Personality: persona.Persona{SystemPrompt: "test"},
+		Handlers:    map[string]ToolHandler{"echo": stubHandler{name: "echo", out: "echoed"}},
+		Log:         LogOrNoop(nil),
+		ToolGuard: func(c context.Context, tool string, params map[string]any) (int, string, error) {
+			cancel() // cancel during the first call; the next iteration's ctx check trips
+			return guardAllow, "", nil
+		},
+	}
+
+	events := collectTurn(t, ctx, cfg, sess, "hi")
+
+	if !hasKind(events, EventError) {
+		t.Fatalf("mid-loop ctx cancel should emit error; events=%+v", events)
+	}
+	if hasKind(events, EventTurnDone) {
+		t.Fatalf("mid-loop ctx cancel should not emit turn_done")
+	}
+}
