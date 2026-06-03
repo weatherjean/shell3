@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -36,10 +37,13 @@ func TestEmitUserMessage(t *testing.T) {
 
 func TestEmitError(t *testing.T) {
 	s := NewSession(SessionOpts{BufSize: 2})
-	emitError(s, "boom")
+	emitError(s, errors.New("boom"))
 	got := drainEvents(s, 1, 50*time.Millisecond)
 	if len(got) != 1 || got[0].Kind != EventError || got[0].Text != "boom" {
 		t.Fatalf("error event mismatch: %+v", got)
+	}
+	if got[0].Err == nil || got[0].Err.Error() != "boom" {
+		t.Fatalf("error event Err mismatch: %+v", got[0].Err)
 	}
 }
 

@@ -56,6 +56,19 @@ func TestTranslate(t *testing.T) {
 	}
 }
 
+// TestTranslateErrorPassesTypedErrThrough verifies translate threads the typed
+// chat.Event.Err verbatim (not a string-rebuilt copy), so errors.Is works.
+func TestTranslateErrorPassesTypedErrThrough(t *testing.T) {
+	sentinel := errors.New("typed boom")
+	got, ok := translate(chat.Event{Kind: chat.EventError, Text: sentinel.Error(), Err: sentinel})
+	if !ok || got.Kind != Error {
+		t.Fatalf("translate error event: got %+v ok=%v", got, ok)
+	}
+	if !errors.Is(got.Err, sentinel) {
+		t.Fatalf("typed error not preserved through translate: %v", got.Err)
+	}
+}
+
 // newTestSession builds a Session backed by a fakellm client, bypassing
 // agentsetup so the test needs no real config/network. It mirrors what Start
 // produces: a persistent chat.Session + drain over a fake-LLM chat.Config.
@@ -257,6 +270,26 @@ func (c *blockingClient) Stream(ctx context.Context, _ []llm.Message, _ []llm.To
 	<-ctx.Done()
 	close(c.returned)
 	return ctx.Err()
+}
+
+func TestSession_ErrorEventPreservesTypedError(t *testing.T) {
+	sentinel := errors.New("provider exploded")
+	client := fakellm.New(fakellm.Script{Err: sentinel})
+	s := newTestSession(t, client, chat.Config{})
+	defer s.Close()
+
+	var gotErr error
+	for ev := range s.Send(context.Background(), "hi") {
+		if ev.Kind == Error {
+			gotErr = ev.Err
+		}
+	}
+	if gotErr == nil {
+		t.Fatal("no Error event received")
+	}
+	if !errors.Is(gotErr, sentinel) {
+		t.Fatalf("public Error event lost the typed error: errors.Is(%v, sentinel) = false", gotErr)
+	}
 }
 
 func TestSession_CloseCancelsAndJoinsInFlightTurn(t *testing.T) {

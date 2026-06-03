@@ -72,7 +72,11 @@ func translate(ev chat.Event) (Event, bool) {
 	case chat.EventRetry:
 		return Event{Kind: Retry, Text: ev.Text}, true
 	case chat.EventError:
-		return Event{Kind: Error, Err: errors.New(ev.Text)}, true
+		err := ev.Err
+		if err == nil { // defensive: older/internal emitters may set only Text
+			err = errors.New(ev.Text)
+		}
+		return Event{Kind: Error, Err: err}, true
 	default:
 		return Event{}, false
 	}
