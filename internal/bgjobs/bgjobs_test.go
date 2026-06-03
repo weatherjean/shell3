@@ -2,6 +2,7 @@ package bgjobs
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -174,6 +175,26 @@ func TestStart_concurrentAppendsDoNotRace(t *testing.T) {
 func TestStart_emptyCommandRejected(t *testing.T) {
 	if _, err := Start("", t.TempDir()); err == nil {
 		t.Fatal("expected error on empty command")
+	}
+}
+
+func TestStart_killsProcessWhenPersistFails(t *testing.T) {
+	wd := t.TempDir()
+	// Force appendJob's MkdirAll(<wd>/.shell3) to fail by occupying that path
+	// with a regular file, so Start spawns the process but cannot persist it.
+	if err := os.WriteFile(filepath.Join(wd, ".shell3"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(wd, "ran.marker")
+	// If the spawned process is NOT killed, it survives the 1s sleep and creates
+	// the marker. If Start kills it on persist failure, the marker never appears.
+	_, err := Start(fmt.Sprintf("sleep 1 && touch %q", marker), wd)
+	if err == nil {
+		t.Fatal("expected persist error (.shell3 is a file), got nil")
+	}
+	time.Sleep(2 * time.Second) // past the 1s sleep
+	if _, statErr := os.Stat(marker); statErr == nil {
+		t.Fatal("spawned process was orphaned on persist failure (marker was created)")
 	}
 }
 

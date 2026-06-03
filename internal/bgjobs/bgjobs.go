@@ -107,6 +107,16 @@ func Start(command, workdir string) (Job, error) {
 		StartedAt: time.Now().UTC(),
 	}
 	if err := appendJob(workdir, job); err != nil {
+		// The process is spawned but unrecorded: the model can't find or kill it
+		// (the PID is never returned). Tear down the whole group (-pid, enabled
+		// by Setpgid above) and drop its log so a failing-disk persist can't
+		// orphan a live, unmanageable process. The reaping goroutine above then
+		// Wait()s it, leaving no zombie. The kill error is discarded: appendJob
+		// fails synchronously (microseconds after Start), so pid reuse is not a
+		// practical concern, and if the process already exited Kill just returns
+		// ESRCH — harmless either way.
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		_ = os.Remove(logPath)
 		return Job{}, fmt.Errorf("persist: %w", err)
 	}
 	return job, nil
