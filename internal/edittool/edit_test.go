@@ -175,6 +175,25 @@ func TestWriteFileOverwrites(t *testing.T) {
 	}
 }
 
+func TestEditFile_OverwritePreservesMode(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "script.sh")
+	if err := os.WriteFile(path, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Overwrite via empty oldString must keep the existing (executable) mode.
+	if _, err := EditFile(dir, "script.sh", "", "new", false); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o755 {
+		t.Fatalf("overwrite changed mode to %o, want 0755", got)
+	}
+}
+
 func TestUnifiedDiffShowsThreeContextLinesAroundSingleEdit(t *testing.T) {
 	oldContent := numberedLines(15)
 	newContent := strings.Replace(oldContent, "line-08\n", "LINE-08\n", 1)
