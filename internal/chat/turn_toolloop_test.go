@@ -178,6 +178,7 @@ func TestRunTurn_MidLoopCtxCancel_EmitsError(t *testing.T) {
 	)
 	sess := NewSession(SessionOpts{BufSize: 256})
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cfg := TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},

@@ -166,7 +166,7 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		}
 
 		// Execute tool calls. toolErr (distinct from the stream err above) is
-		// non-nil only on mid-loop context cancellation.
+		// non-nil only on context cancellation observed during the tool loop.
 		outcome, toolErr := executeToolCalls(ctx, cfg, sess, toolCalls, toolSchemas, allMsgs)
 		if toolErr != nil {
 			msg := toolErr.Error()
