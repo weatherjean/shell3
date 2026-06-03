@@ -31,3 +31,26 @@ shell3.agent({ name="a", model="m", prompt="p", tools={ edit=true }, on_tool_cal
 		t.Fatalf("guard should allow bash, got %v", d2)
 	}
 }
+
+func TestOnToolCall_LuaError_FailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "shell3.lua", `
+shell3.model("m", { base_url="u", api_key="k", model="x" })
+local g = {
+  function(call) error("boom") end,
+}
+shell3.agent({ name="a", model="m", prompt="p", tools={ bash=true }, on_tool_call=g })
+`)
+	c, err := Load(dir+"/shell3.lua", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	d, reason, err := c.OnToolCall(t.Context(), "bash", map[string]any{"command": "echo hi"})
+	if err != nil {
+		t.Fatalf("OnToolCall returned hard error: %v", err)
+	}
+	if d != DecisionBlock {
+		t.Fatalf("guard error should fail closed (block), got %v (reason=%q)", d, reason)
+	}
+}

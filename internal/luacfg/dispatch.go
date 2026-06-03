@@ -29,7 +29,12 @@ func (c *LoadedConfig) OnToolCall(ctx context.Context, tool string, params map[s
 			d, reason, err = c.runLuaGuard(ctx, g.fn, tool, params)
 		}
 		if err != nil {
-			return DecisionAllow, "", err
+			// A guard that errors at runtime (bug, corrupt guard, Lua
+			// exception) must fail closed: a safety guard exists to *block*
+			// dangerous calls, so a broken one denying the call is the safe
+			// direction. Returning allow here would silently permit whatever
+			// the guard was meant to stop.
+			return DecisionBlock, "guard execution error: " + err.Error(), nil
 		}
 		if d != DecisionAllow {
 			return d, reason, nil
