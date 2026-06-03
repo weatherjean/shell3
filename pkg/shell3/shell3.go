@@ -235,6 +235,45 @@ func (s *Session) turnConfig() chat.TurnConfig {
 	}
 }
 
+// Clear resets the conversation context (= /clear): drops all history and
+// re-stamps the system prompt with a fresh timestamp.
+func (s *Session) Clear() {
+	s.sess.SetMessages(nil)
+	if s.cfg.RefreshPrompt != nil {
+		s.cfg.Personality.SystemPrompt = s.cfg.RefreshPrompt()
+	}
+}
+
+// Rollback drops the last turn from context (= /rollback). Returns false when
+// there was nothing to remove.
+func (s *Session) Rollback() bool {
+	msgs := s.sess.Messages()
+	pruned := chat.PruneLastTurn(msgs)
+	if len(pruned) == len(msgs) {
+		return false
+	}
+	s.sess.SetMessages(pruned)
+	return true
+}
+
+// SwitchModel activates the configured model named name for subsequent Sends
+// (= /model <name>). Returns an error for an unknown model or when the config
+// declares no models.
+func (s *Session) SwitchModel(name string) error {
+	if s.cfg.SwitchModel == nil {
+		return fmt.Errorf("no models configured")
+	}
+	am, err := s.cfg.SwitchModel(name)
+	if err != nil {
+		return err
+	}
+	s.cfg.LLM = am.Client
+	s.cfg.Params = am.Params
+	s.cfg.ContextWindow = am.ContextWindow
+	s.cfg.StatusLine = fmt.Sprintf("%s │ %s", s.cfg.ModeLabel, am.ModelID)
+	return nil
+}
+
 // Run is the one-shot convenience: Start, send spec.Prompt, stream the turn,
 // and Close when it drains. A non-nil error means startup failed.
 func Run(ctx context.Context, spec Spec) (<-chan Event, error) {

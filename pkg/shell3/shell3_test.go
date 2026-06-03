@@ -140,3 +140,74 @@ func TestRun_BadConfig_Errors(t *testing.T) {
 		t.Fatal("expected nil channel on start failure")
 	}
 }
+
+func TestSession_Clear_ResetsHistory(t *testing.T) {
+	client := fakellm.New(
+		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "a"}}},
+		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "b"}}},
+	)
+	s := newTestSession(t, client, chat.Config{})
+	defer s.Close()
+
+	for range s.Send(context.Background(), "first") {
+	}
+	if len(s.sess.Messages()) == 0 {
+		t.Fatal("expected history after first turn")
+	}
+	s.Clear()
+	if got := len(s.sess.Messages()); got != 0 {
+		t.Fatalf("after Clear: %d messages, want 0", got)
+	}
+}
+
+func TestSession_Rollback(t *testing.T) {
+	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "x"}}})
+	s := newTestSession(t, client, chat.Config{})
+	defer s.Close()
+
+	if s.Rollback() {
+		t.Fatal("Rollback on empty history should return false")
+	}
+	for range s.Send(context.Background(), "hi") {
+	}
+	if !s.Rollback() {
+		t.Fatal("Rollback after a turn should return true")
+	}
+	if got := len(s.sess.Messages()); got != 0 {
+		t.Fatalf("after Rollback: %d messages, want 0", got)
+	}
+}
+
+func TestSession_SwitchModel_Unknown(t *testing.T) {
+	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "x"}}})
+	cfg := chat.Config{
+		SwitchModel: func(name string) (chat.ActiveModel, error) {
+			return chat.ActiveModel{}, errors.New("unknown model " + name)
+		},
+	}
+	s := newTestSession(t, client, cfg)
+	defer s.Close()
+
+	if err := s.SwitchModel("nope"); err == nil {
+		t.Fatal("expected error for unknown model")
+	}
+}
+
+func TestSession_SwitchModel_Applies(t *testing.T) {
+	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "x"}}})
+	newClient := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "y"}}})
+	cfg := chat.Config{
+		SwitchModel: func(name string) (chat.ActiveModel, error) {
+			return chat.ActiveModel{Client: newClient, ModelID: "m2", ContextWindow: 1000}, nil
+		},
+	}
+	s := newTestSession(t, client, cfg)
+	defer s.Close()
+
+	if err := s.SwitchModel("m2"); err != nil {
+		t.Fatalf("SwitchModel: %v", err)
+	}
+	if s.cfg.LLM != chat.LLMClient(newClient) {
+		t.Fatal("SwitchModel did not swap the active client")
+	}
+}
