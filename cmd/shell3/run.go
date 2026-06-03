@@ -14,6 +14,7 @@ import (
 
 	"github.com/weatherjean/shell3/internal/adapter/openai"
 	"github.com/weatherjean/shell3/internal/bootstrap"
+	"github.com/weatherjean/shell3/internal/docs"
 	"github.com/weatherjean/shell3/internal/luacfg"
 	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/store"
@@ -235,7 +236,7 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		ActiveSkills:    lc.Agent.Skills,
 		ActiveTools:     toolNames,
 		ContextWindow:   m.ContextWindow,
-		Docs:            docsContent,
+		Docs:            docs.Content,
 		CustomTool:      lc.CallTool,
 		CustomToolNames: customNames,
 		ToolGuard: func(ctx context.Context, t string, p map[string]any) (int, string, error) {

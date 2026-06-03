@@ -1,21 +1,19 @@
 package main
 
 import (
-	_ "embed"
 	"fmt"
 
 	"github.com/spf13/cobra"
-)
 
-//go:embed shell3.md
-var docsContent string
+	"github.com/weatherjean/shell3/internal/docs"
+)
 
 func newDocsCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "docs",
 		Short: "Print shell3 documentation",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Print(docsContent)
+			fmt.Print(docs.Content)
 		},
 	}
 }
