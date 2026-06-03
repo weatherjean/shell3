@@ -101,6 +101,10 @@ type Event struct {
 	// Text is the message payload for token, message, reasoning, error,
 	// and system-reminder events.
 	Text string
+	// Err is the underlying typed error on EventError, so consumers can use
+	// errors.Is/errors.As. Text holds its message for display. Not serialized
+	// (the JSONL sink uses Text).
+	Err error `json:"-"`
 	// Role is "user" or "assistant" for message events.
 	Role string
 	// ToolName is set on tool_call and tool_result.
@@ -186,8 +190,11 @@ func emitUserMessage(s *Session, text string) {
 	emit(s, Event{Kind: EventUserMessage, Time: time.Now(), SessionID: s.id, Role: "user", Text: text})
 }
 
-func emitError(s *Session, text string) {
-	emitSync(s, Event{Kind: EventError, Time: time.Now(), SessionID: s.id, Text: text})
+// emitError emits the turn's terminal error event. err must be non-nil: Text
+// carries its message for display, Err carries the value itself so embedders
+// can errors.Is/errors.As it.
+func emitError(s *Session, err error) {
+	emitSync(s, Event{Kind: EventError, Time: time.Now(), SessionID: s.id, Text: err.Error(), Err: err})
 }
 
 func emitUsage(s *Session, prompt, completion, total int) {

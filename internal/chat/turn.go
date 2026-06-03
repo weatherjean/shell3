@@ -83,7 +83,7 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 			stack := debug.Stack()
 			err := fmt.Errorf("panic: %v\n%s", r, stack)
 			cfg.Log.Error("panic in turn goroutine", err)
-			terminalEmit = func() { emitError(sess, err.Error()) }
+			terminalEmit = func() { emitError(sess, err) }
 		}
 		if beforeDone != nil {
 			beforeDone()
@@ -129,8 +129,12 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		}
 		if err != nil {
 			logStreamError(cfg, allMsgs, err)
-			msg := err.Error()
-			terminalEmit = func() { emitError(sess, msg) }
+			// Capture the typed error into a fresh local so terminalEmit carries
+			// the value itself (errors.Is/As survives the public boundary), and so
+			// the capture stays correct if this site is ever refactored away from
+			// the immediate return.
+			streamErr := err
+			terminalEmit = func() { emitError(sess, streamErr) }
 			return
 		}
 		if text != "" {
@@ -169,8 +173,8 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		// non-nil only on context cancellation observed during the tool loop.
 		outcome, toolErr := executeToolCalls(ctx, cfg, sess, toolCalls, toolSchemas, allMsgs)
 		if toolErr != nil {
-			msg := toolErr.Error()
-			terminalEmit = func() { emitError(sess, msg) }
+			turnErr := toolErr
+			terminalEmit = func() { emitError(sess, turnErr) }
 			return
 		}
 		allMsgs = outcome.allMsgs
