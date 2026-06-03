@@ -56,23 +56,23 @@ func TestHistoryRecall(t *testing.T) {
 	// Walk newest -> oldest from an empty live line, then clamp at the oldest.
 	t.Run("walk and clamp", func(t *testing.T) {
 		a := New("test", "", WelcomeInfo{})
-		a.history = []string{"first", "second", "third"}
+		a.ed.history = []string{"first", "second", "third"}
 
 		stepBack(a)
-		if got := string(a.input); got != "third" || a.historyIdx != 1 {
-			t.Fatalf("step 1: input=%q idx=%d; want \"third\" idx=1", got, a.historyIdx)
+		if got := string(a.ed.input); got != "third" || a.ed.historyIdx != 1 {
+			t.Fatalf("step 1: input=%q idx=%d; want \"third\" idx=1", got, a.ed.historyIdx)
 		}
 		stepBack(a)
-		if got := string(a.input); got != "second" || a.historyIdx != 2 {
-			t.Fatalf("step 2: input=%q idx=%d; want \"second\" idx=2", got, a.historyIdx)
+		if got := string(a.ed.input); got != "second" || a.ed.historyIdx != 2 {
+			t.Fatalf("step 2: input=%q idx=%d; want \"second\" idx=2", got, a.ed.historyIdx)
 		}
 		stepBack(a)
-		if got := string(a.input); got != "first" || a.historyIdx != 3 {
-			t.Fatalf("step 3: input=%q idx=%d; want \"first\" idx=3", got, a.historyIdx)
+		if got := string(a.ed.input); got != "first" || a.ed.historyIdx != 3 {
+			t.Fatalf("step 3: input=%q idx=%d; want \"first\" idx=3", got, a.ed.historyIdx)
 		}
 		stepBack(a) // clamp: no entry older than the oldest
-		if got := string(a.input); got != "first" || a.historyIdx != 3 {
-			t.Fatalf("clamp: input=%q idx=%d; want \"first\" idx=3 (unchanged)", got, a.historyIdx)
+		if got := string(a.ed.input); got != "first" || a.ed.historyIdx != 3 {
+			t.Fatalf("clamp: input=%q idx=%d; want \"first\" idx=3 (unchanged)", got, a.ed.historyIdx)
 		}
 	})
 
@@ -80,19 +80,19 @@ func TestHistoryRecall(t *testing.T) {
 	// post-Escape state). First step-back restores the draft before history.
 	t.Run("draft recovery", func(t *testing.T) {
 		a := New("test", "", WelcomeInfo{})
-		a.history = []string{"h1"}
-		a.historyDraft = []rune("recovered")
-		a.input = a.input[:0] // cleared; draft intact, input != draft
+		a.ed.history = []string{"h1"}
+		a.ed.historyDraft = []rune("recovered")
+		a.ed.input = a.ed.input[:0] // cleared; draft intact, input != draft
 
 		stepBack(a)
-		if got := string(a.input); got != "recovered" || !a.historyInDraft || a.historyIdx != 0 {
+		if got := string(a.ed.input); got != "recovered" || !a.ed.historyInDraft || a.ed.historyIdx != 0 {
 			t.Fatalf("recover: input=%q inDraft=%v idx=%d; want \"recovered\" inDraft=true idx=0",
-				got, a.historyInDraft, a.historyIdx)
+				got, a.ed.historyInDraft, a.ed.historyIdx)
 		}
 		stepBack(a)
-		if got := string(a.input); got != "h1" || a.historyInDraft || a.historyIdx != 1 {
+		if got := string(a.ed.input); got != "h1" || a.ed.historyInDraft || a.ed.historyIdx != 1 {
 			t.Fatalf("into history: input=%q inDraft=%v idx=%d; want \"h1\" inDraft=false idx=1",
-				got, a.historyInDraft, a.historyIdx)
+				got, a.ed.historyInDraft, a.ed.historyIdx)
 		}
 	})
 
@@ -100,20 +100,20 @@ func TestHistoryRecall(t *testing.T) {
 	// navigating history (historyIdx > 0).
 	t.Run("sync draft only in live mode", func(t *testing.T) {
 		a := New("test", "", WelcomeInfo{})
-		a.input = []rune("abc")
+		a.ed.input = []rune("abc")
 		a.mu.Lock()
 		a.syncDraftLocked()
 		a.mu.Unlock()
-		if got := string(a.historyDraft); got != "abc" {
+		if got := string(a.ed.historyDraft); got != "abc" {
 			t.Fatalf("live sync: draft=%q; want \"abc\"", got)
 		}
 
-		a.historyIdx = 1 // now navigating history
-		a.input = []rune("changed")
+		a.ed.historyIdx = 1 // now navigating history
+		a.ed.input = []rune("changed")
 		a.mu.Lock()
 		a.syncDraftLocked()
 		a.mu.Unlock()
-		if got := string(a.historyDraft); got != "abc" {
+		if got := string(a.ed.historyDraft); got != "abc" {
 			t.Fatalf("nav sync: draft=%q; want \"abc\" (unchanged while navigating)", got)
 		}
 	})

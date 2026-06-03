@@ -40,7 +40,7 @@ func TestProcessInput_BracketedPastePreservesUTF8(t *testing.T) {
 	app.processInput([]byte(pasteStart + "— ’ → ➜ 👋\rline" + pasteEnd))
 
 	want := "— ’ → ➜ 👋\nline"
-	if got := string(app.input); got != want {
+	if got := string(app.ed.input); got != want {
 		t.Fatalf("pasted input = %q; want %q", got, want)
 	}
 }
@@ -54,11 +54,11 @@ func TestProcessInput_SplitUTF8AndPasteEnd(t *testing.T) {
 	app.processInput(body[len(pasteStart)+1 : len(body)-2])
 	app.processInput(body[len(body)-2:])
 
-	if got, want := string(app.input), "—"; got != want {
+	if got, want := string(app.ed.input), "—"; got != want {
 		t.Fatalf("split pasted input = %q; want %q", got, want)
 	}
-	if len(app.inputPending) != 0 {
-		t.Fatalf("inputPending not drained: %q", string(app.inputPending))
+	if len(app.ed.inputPending) != 0 {
+		t.Fatalf("inputPending not drained: %q", string(app.ed.inputPending))
 	}
 }
 

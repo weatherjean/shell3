@@ -19,6 +19,34 @@ import (
 // events back.
 type SubmitFunc func(input string)
 
+// editorState is the user-input cluster: the live line, cursor, the up-arrow
+// history-recall state machine, the incomplete-UTF8 carry, and bracketed-paste
+// buffering. All fields are guarded by App.mu (unchanged from when they lived
+// directly on App).
+type editorState struct {
+	input  []rune
+	cursor int
+
+	// Message history for up-arrow recall. history[0] is oldest.
+	// historyDraft always mirrors live input (updated on every keystroke);
+	// Escape clears input but leaves historyDraft intact so it can be
+	// recovered. historyInDraft is true when the user has pressed Up and is
+	// viewing the saved draft (one step before entering the history list).
+	// historyIdx > 0 means the user is viewing a history entry (1 = most
+	// recent); historyIdx is 0 in both live and in-draft modes.
+	history        []string
+	historyIdx     int
+	historyDraft   []rune
+	historyInDraft bool
+
+	// Incomplete UTF-8/control-sequence bytes carried between terminal reads.
+	inputPending []byte
+
+	// Bracketed paste state.
+	pasting  bool
+	pasteBuf []rune
+}
+
 // App is the top-level TUI controller. It owns the render loop, input
 // parser, and terminal mode. Methods that mutate render state are
 // goroutine-safe.
@@ -47,21 +75,8 @@ type App struct {
 
 	r *patchtui.Renderer
 
-	// User input state.
-	input  []rune
-	cursor int
-
-	// Message history for up-arrow recall. history[0] is oldest.
-	// historyDraft always mirrors live input (updated on every keystroke);
-	// Escape clears input but leaves historyDraft intact so it can be
-	// recovered. historyInDraft is true when the user has pressed Up and is
-	// viewing the saved draft (one step before entering the history list).
-	// historyIdx > 0 means the user is viewing a history entry (1 = most
-	// recent); historyIdx is 0 in both live and in-draft modes.
-	history        []string
-	historyIdx     int
-	historyDraft   []rune
-	historyInDraft bool
+	// User input state (live line, cursor, history recall, paste, UTF-8 carry).
+	ed editorState
 
 	// Status bar info.
 	status statusInfo
@@ -73,13 +88,6 @@ type App struct {
 	// Quit/exit state.
 	lastCtrlC time.Time
 	exitFlag  bool
-
-	// Incomplete UTF-8/control-sequence bytes carried between terminal reads.
-	inputPending []byte
-
-	// Bracketed paste state.
-	pasting  bool
-	pasteBuf []rune
 
 	// Terminal lifecycle.
 	oldTermState *term.State
@@ -129,8 +137,8 @@ func (a *App) Quit() {
 func (a *App) liveFrameLocked() []string {
 	w, _ := patchtui.Size()
 	return buildFrame(w, frameState{
-		input:  a.input,
-		cursor: a.cursor,
+		input:  a.ed.input,
+		cursor: a.ed.cursor,
 		busy:   a.busy,
 		status: a.status,
 	})

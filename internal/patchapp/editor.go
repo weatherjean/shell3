@@ -15,12 +15,12 @@ import (
 // processInput consumes a chunk of bytes from stdin, dispatching parsed
 // keys to handlers. Returns true if the app should exit (double ctrl+c).
 func (a *App) processInput(data []byte) (exit bool) {
-	if len(a.inputPending) > 0 {
-		merged := make([]byte, 0, len(a.inputPending)+len(data))
-		merged = append(merged, a.inputPending...)
+	if len(a.ed.inputPending) > 0 {
+		merged := make([]byte, 0, len(a.ed.inputPending)+len(data))
+		merged = append(merged, a.ed.inputPending...)
 		merged = append(merged, data...)
 		data = merged
-		a.inputPending = a.inputPending[:0]
+		a.ed.inputPending = a.ed.inputPending[:0]
 	}
 
 	for i := 0; i < len(data); {
@@ -28,29 +28,29 @@ func (a *App) processInput(data []byte) (exit bool) {
 		// terminal sends the paste body as UTF-8 bytes; treating each byte as
 		// a rune corrupts non-ASCII punctuation when the input is echoed or
 		// submitted.
-		if a.pasting {
+		if a.ed.pasting {
 			if i+len(pasteEnd) <= len(data) && string(data[i:i+len(pasteEnd)]) == pasteEnd {
-				a.pasting = false
+				a.ed.pasting = false
 				a.mu.Lock()
 				if !a.busy {
-					for _, r := range a.pasteBuf {
+					for _, r := range a.ed.pasteBuf {
 						a.insertChar(r)
 					}
 					a.syncDraftLocked()
 					a.render()
 				}
 				a.mu.Unlock()
-				a.pasteBuf = a.pasteBuf[:0]
+				a.ed.pasteBuf = a.ed.pasteBuf[:0]
 				i += len(pasteEnd)
 				continue
 			}
 			if bytes.HasPrefix([]byte(pasteEnd), data[i:]) {
-				a.inputPending = append(a.inputPending, data[i:]...)
+				a.ed.inputPending = append(a.ed.inputPending, data[i:]...)
 				break
 			}
 
 			if !utf8.FullRune(data[i:]) {
-				a.inputPending = append(a.inputPending, data[i:]...)
+				a.ed.inputPending = append(a.ed.inputPending, data[i:]...)
 				break
 			}
 			r, size := utf8.DecodeRune(data[i:])
@@ -62,7 +62,7 @@ func (a *App) processInput(data []byte) (exit bool) {
 				r = '\n'
 			}
 			if r == '\n' || r >= 32 {
-				a.pasteBuf = append(a.pasteBuf, r)
+				a.ed.pasteBuf = append(a.ed.pasteBuf, r)
 			}
 			i += size
 			continue
@@ -70,15 +70,15 @@ func (a *App) processInput(data []byte) (exit bool) {
 
 		k, used := parseInput(data[i:])
 		if used == 0 {
-			a.inputPending = append(a.inputPending, data[i:]...)
+			a.ed.inputPending = append(a.ed.inputPending, data[i:]...)
 			break
 		}
 		i += used
 
 		switch k.kind {
 		case keyPasteStart:
-			a.pasting = true
-			a.pasteBuf = a.pasteBuf[:0]
+			a.ed.pasting = true
+			a.ed.pasteBuf = a.ed.pasteBuf[:0]
 		case keyCtrlC:
 			if a.handleCtrlC() {
 				return true
@@ -100,40 +100,40 @@ func (a *App) processInput(data []byte) (exit bool) {
 				a.lastCtrlC = time.Time{}
 				a.status.ctrlCHint = false
 			} else if !a.busy {
-				if a.historyIdx > 0 || a.historyInDraft {
+				if a.ed.historyIdx > 0 || a.ed.historyInDraft {
 					// Restore live input from draft; exit history navigation.
-					a.input = append([]rune(nil), a.historyDraft...)
-					a.cursor = len(a.input)
-					a.historyIdx = 0
-					a.historyInDraft = false
+					a.ed.input = append([]rune(nil), a.ed.historyDraft...)
+					a.ed.cursor = len(a.ed.input)
+					a.ed.historyIdx = 0
+					a.ed.historyInDraft = false
 				} else {
 					// Clear input but leave draft intact so up-arrow can recover it.
-					a.input = a.input[:0]
-					a.cursor = 0
+					a.ed.input = a.ed.input[:0]
+					a.ed.cursor = 0
 				}
 				a.render()
 			}
 			a.mu.Unlock()
 		case keyBackspace:
 			a.mu.Lock()
-			if !a.busy && a.cursor > 0 {
-				a.input = append(a.input[:a.cursor-1], a.input[a.cursor:]...)
-				a.cursor--
+			if !a.busy && a.ed.cursor > 0 {
+				a.ed.input = append(a.ed.input[:a.ed.cursor-1], a.ed.input[a.ed.cursor:]...)
+				a.ed.cursor--
 				a.syncDraftLocked()
 				a.render()
 			}
 			a.mu.Unlock()
 		case keyLeft:
 			a.mu.Lock()
-			if !a.busy && a.cursor > 0 {
-				a.cursor--
+			if !a.busy && a.ed.cursor > 0 {
+				a.ed.cursor--
 				a.render()
 			}
 			a.mu.Unlock()
 		case keyRight:
 			a.mu.Lock()
-			if !a.busy && a.cursor < len(a.input) {
-				a.cursor++
+			if !a.busy && a.ed.cursor < len(a.ed.input) {
+				a.ed.cursor++
 				a.render()
 			}
 			a.mu.Unlock()
@@ -141,11 +141,11 @@ func (a *App) processInput(data []byte) (exit bool) {
 			a.mu.Lock()
 			if !a.busy {
 				w, _ := patchtui.Size()
-				row, col := inputCursorPos(a.input, a.cursor, w)
+				row, col := inputCursorPos(a.ed.input, a.ed.cursor, w)
 				if row > 0 {
-					a.cursor = inputOffsetForRowCol(a.input, w, row-1, col)
+					a.ed.cursor = inputOffsetForRowCol(a.ed.input, w, row-1, col)
 					a.render()
-				} else if a.cursor == 0 || a.historyIdx > 0 || a.historyInDraft {
+				} else if a.ed.cursor == 0 || a.ed.historyIdx > 0 || a.ed.historyInDraft {
 					a.historyStepBackLocked()
 					a.render()
 				}
@@ -155,10 +155,10 @@ func (a *App) processInput(data []byte) (exit bool) {
 			a.mu.Lock()
 			if !a.busy {
 				w, _ := patchtui.Size()
-				row, col := inputCursorPos(a.input, a.cursor, w)
-				newCursor := inputOffsetForRowCol(a.input, w, row+1, col)
-				if newCursor != a.cursor {
-					a.cursor = newCursor
+				row, col := inputCursorPos(a.ed.input, a.ed.cursor, w)
+				newCursor := inputOffsetForRowCol(a.ed.input, w, row+1, col)
+				if newCursor != a.ed.cursor {
+					a.ed.cursor = newCursor
 					a.render()
 				}
 			}
@@ -166,14 +166,14 @@ func (a *App) processInput(data []byte) (exit bool) {
 		case keyHome:
 			a.mu.Lock()
 			if !a.busy {
-				a.cursor = 0
+				a.ed.cursor = 0
 				a.render()
 			}
 			a.mu.Unlock()
 		case keyEnd:
 			a.mu.Lock()
 			if !a.busy {
-				a.cursor = len(a.input)
+				a.ed.cursor = len(a.ed.input)
 				a.render()
 			}
 			a.mu.Unlock()
@@ -192,54 +192,54 @@ func (a *App) processInput(data []byte) (exit bool) {
 
 // insertChar inserts r at the cursor. Caller must hold a.mu.
 func (a *App) insertChar(r rune) {
-	a.input = append(a.input[:a.cursor], append([]rune{r}, a.input[a.cursor:]...)...)
-	a.cursor++
+	a.ed.input = append(a.ed.input[:a.ed.cursor], append([]rune{r}, a.ed.input[a.ed.cursor:]...)...)
+	a.ed.cursor++
 }
 
 // syncDraftLocked copies current input into historyDraft. Only called when
 // the user is in live mode (not navigating history). Caller must hold a.mu.
 func (a *App) syncDraftLocked() {
-	if a.historyIdx == 0 && !a.historyInDraft {
-		a.historyDraft = append(a.historyDraft[:0], a.input...)
+	if a.ed.historyIdx == 0 && !a.ed.historyInDraft {
+		a.ed.historyDraft = append(a.ed.historyDraft[:0], a.ed.input...)
 	}
 }
 
 // historyStepBackLocked advances one step back through draft→history.
 // Caller must hold a.mu.
 func (a *App) historyStepBackLocked() {
-	if a.historyIdx == 0 && !a.historyInDraft {
+	if a.ed.historyIdx == 0 && !a.ed.historyInDraft {
 		// Check if draft differs from current input (e.g. after Escape cleared it).
-		draftStr := string(a.historyDraft)
-		inputStr := string(a.input)
-		if draftStr != inputStr && len(a.historyDraft) > 0 {
-			a.historyInDraft = true
-			a.input = append([]rune(nil), a.historyDraft...)
-			a.cursor = len(a.input)
+		draftStr := string(a.ed.historyDraft)
+		inputStr := string(a.ed.input)
+		if draftStr != inputStr && len(a.ed.historyDraft) > 0 {
+			a.ed.historyInDraft = true
+			a.ed.input = append([]rune(nil), a.ed.historyDraft...)
+			a.ed.cursor = len(a.ed.input)
 			return
 		}
 		// Draft same as input: jump straight into history list.
-		if len(a.history) > 0 {
-			a.historyIdx = 1
-			a.input = []rune(a.history[len(a.history)-1])
-			a.cursor = len(a.input)
+		if len(a.ed.history) > 0 {
+			a.ed.historyIdx = 1
+			a.ed.input = []rune(a.ed.history[len(a.ed.history)-1])
+			a.ed.cursor = len(a.ed.input)
 		}
 		return
 	}
-	if a.historyInDraft {
+	if a.ed.historyInDraft {
 		// Was showing draft; step into history.
-		a.historyInDraft = false
-		if len(a.history) > 0 {
-			a.historyIdx = 1
-			a.input = []rune(a.history[len(a.history)-1])
-			a.cursor = len(a.input)
+		a.ed.historyInDraft = false
+		if len(a.ed.history) > 0 {
+			a.ed.historyIdx = 1
+			a.ed.input = []rune(a.ed.history[len(a.ed.history)-1])
+			a.ed.cursor = len(a.ed.input)
 		}
 		return
 	}
 	// Already in history list; go further back.
-	if a.historyIdx < len(a.history) {
-		a.historyIdx++
-		a.input = []rune(a.history[len(a.history)-a.historyIdx])
-		a.cursor = len(a.input)
+	if a.ed.historyIdx < len(a.ed.history) {
+		a.ed.historyIdx++
+		a.ed.input = []rune(a.ed.history[len(a.ed.history)-a.ed.historyIdx])
+		a.ed.cursor = len(a.ed.input)
 	}
 }
 
@@ -271,9 +271,9 @@ func (a *App) handleEnter() {
 		a.mu.Unlock()
 		return
 	}
-	line := strings.TrimRight(string(a.input), " \t\n")
-	a.input = a.input[:0]
-	a.cursor = 0
+	line := strings.TrimRight(string(a.ed.input), " \t\n")
+	a.ed.input = a.ed.input[:0]
+	a.ed.cursor = 0
 	a.render()
 	a.mu.Unlock()
 
@@ -283,10 +283,10 @@ func (a *App) handleEnter() {
 	}
 
 	a.mu.Lock()
-	a.history = append(a.history, line)
-	a.historyIdx = 0
-	a.historyInDraft = false
-	a.historyDraft = a.historyDraft[:0]
+	a.ed.history = append(a.ed.history, line)
+	a.ed.historyIdx = 0
+	a.ed.historyInDraft = false
+	a.ed.historyDraft = a.ed.historyDraft[:0]
 	a.mu.Unlock()
 
 	// Echo the user message to scrollback as a styled chat bubble.
