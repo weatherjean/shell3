@@ -52,9 +52,9 @@ func TestReplaceAllMultiple(t *testing.T) {
 // non-overlapping left-to-right semantics, including the odd-leftover case.
 func TestReplaceAllExactOverlappingSelfMatch(t *testing.T) {
 	cases := []struct{ content, old, new, want string }{
-		{"aaaa", "aa", "X", "XX"},  // two non-overlapping matches
-		{"aaa", "aa", "X", "Xa"},   // one match, trailing leftover
-		{"abab", "ab", "X", "XX"},  // adjacent matches
+		{"aaaa", "aa", "X", "XX"}, // two non-overlapping matches
+		{"aaa", "aa", "X", "Xa"},  // one match, trailing leftover
+		{"abab", "ab", "X", "XX"}, // adjacent matches
 	}
 	for _, c := range cases {
 		got, err := Replace(c.content, c.old, c.new, true)
