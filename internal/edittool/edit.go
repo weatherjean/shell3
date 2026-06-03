@@ -35,6 +35,7 @@ func EditFile(workDir, filePath, oldString, newString string, replaceAll bool) (
 	if oldString == "" {
 		var oldContent string
 		created := true
+		mode := os.FileMode(0o644) // default for newly created files
 		if info, err := os.Stat(abs); err == nil {
 			if info.IsDir() {
 				return Result{}, fmt.Errorf("path is a directory: %s", abs)
@@ -42,13 +43,14 @@ func EditFile(workDir, filePath, oldString, newString string, replaceAll bool) (
 			raw, _ := os.ReadFile(abs)
 			oldContent = string(raw)
 			created = false
+			mode = info.Mode().Perm() // preserve the existing file's mode on overwrite (matches the str-replace branch)
 		} else if !os.IsNotExist(err) {
 			return Result{}, fmt.Errorf("stat %s: %w", abs, err)
 		}
 		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 			return Result{}, err
 		}
-		if err := os.WriteFile(abs, []byte(newString), 0o644); err != nil {
+		if err := os.WriteFile(abs, []byte(newString), mode); err != nil {
 			return Result{}, err
 		}
 		add, del := lineStats(oldContent, newString)
