@@ -40,3 +40,81 @@ func TestRenderUserMessage_MixedWidthAlwaysFillsLine(t *testing.T) {
 		}
 	}
 }
+
+// TestHistoryRecall characterizes the up-arrow history-recall state machine
+// (historyStepBackLocked) and draft mirroring (syncDraftLocked) — the intricate
+// editor cluster with no other coverage. It drives the real helpers directly
+// under a.mu, the same white-box style the other patchapp tests use. Pins
+// current behavior ahead of moving these fields into editorState.
+func TestHistoryRecall(t *testing.T) {
+	stepBack := func(a *App) {
+		a.mu.Lock()
+		a.historyStepBackLocked()
+		a.mu.Unlock()
+	}
+
+	// Walk newest -> oldest from an empty live line, then clamp at the oldest.
+	t.Run("walk and clamp", func(t *testing.T) {
+		a := New("test", "", WelcomeInfo{})
+		a.history = []string{"first", "second", "third"}
+
+		stepBack(a)
+		if got := string(a.input); got != "third" || a.historyIdx != 1 {
+			t.Fatalf("step 1: input=%q idx=%d; want \"third\" idx=1", got, a.historyIdx)
+		}
+		stepBack(a)
+		if got := string(a.input); got != "second" || a.historyIdx != 2 {
+			t.Fatalf("step 2: input=%q idx=%d; want \"second\" idx=2", got, a.historyIdx)
+		}
+		stepBack(a)
+		if got := string(a.input); got != "first" || a.historyIdx != 3 {
+			t.Fatalf("step 3: input=%q idx=%d; want \"first\" idx=3", got, a.historyIdx)
+		}
+		stepBack(a) // clamp: no entry older than the oldest
+		if got := string(a.input); got != "first" || a.historyIdx != 3 {
+			t.Fatalf("clamp: input=%q idx=%d; want \"first\" idx=3 (unchanged)", got, a.historyIdx)
+		}
+	})
+
+	// Draft-recovery path: input cleared but a non-empty draft remains (the
+	// post-Escape state). First step-back restores the draft before history.
+	t.Run("draft recovery", func(t *testing.T) {
+		a := New("test", "", WelcomeInfo{})
+		a.history = []string{"h1"}
+		a.historyDraft = []rune("recovered")
+		a.input = a.input[:0] // cleared; draft intact, input != draft
+
+		stepBack(a)
+		if got := string(a.input); got != "recovered" || !a.historyInDraft || a.historyIdx != 0 {
+			t.Fatalf("recover: input=%q inDraft=%v idx=%d; want \"recovered\" inDraft=true idx=0",
+				got, a.historyInDraft, a.historyIdx)
+		}
+		stepBack(a)
+		if got := string(a.input); got != "h1" || a.historyInDraft || a.historyIdx != 1 {
+			t.Fatalf("into history: input=%q inDraft=%v idx=%d; want \"h1\" inDraft=false idx=1",
+				got, a.historyInDraft, a.historyIdx)
+		}
+	})
+
+	// syncDraftLocked mirrors live input into the draft, but not while
+	// navigating history (historyIdx > 0).
+	t.Run("sync draft only in live mode", func(t *testing.T) {
+		a := New("test", "", WelcomeInfo{})
+		a.input = []rune("abc")
+		a.mu.Lock()
+		a.syncDraftLocked()
+		a.mu.Unlock()
+		if got := string(a.historyDraft); got != "abc" {
+			t.Fatalf("live sync: draft=%q; want \"abc\"", got)
+		}
+
+		a.historyIdx = 1 // now navigating history
+		a.input = []rune("changed")
+		a.mu.Lock()
+		a.syncDraftLocked()
+		a.mu.Unlock()
+		if got := string(a.historyDraft); got != "abc" {
+			t.Fatalf("nav sync: draft=%q; want \"abc\" (unchanged while navigating)", got)
+		}
+	})
+}
