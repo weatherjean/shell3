@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/luacfg"
 	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/ref"
@@ -59,7 +60,7 @@ func runDoctor(homeDir, cwd string, out io.Writer) int {
 func checkGlobalDoctor(out io.Writer, homeDir, cwd string, g paths.Global, fail func()) {
 	doctorCheck(out, fail, dirExists(g.Root), "~/.shell3/ exists")
 
-	configPath, err := resolveConfigPath("", cwd, homeDir)
+	configPath, err := agentsetup.ResolveConfigPath("", cwd, homeDir)
 	if err != nil {
 		doctorCheck(out, fail, false, err.Error())
 		return
