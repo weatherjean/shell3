@@ -11,7 +11,7 @@ shell3 is configured by a single Lua file, `shell3.lua`. It's discovered in this
 ```sh
 make build
 
-# On first run shell3 scaffolds ~/.shell3/shell3.lua and ~/.shell3/.env.example.
+# On first run, shell3 auto-creates ~/.shell3/shell3.lua and ~/.shell3/.env.example.
 # (Or copy the canonical example yourself:)
 #   cp internal/scaffold/defaults/shell3.lua ~/.shell3/shell3.lua
 
