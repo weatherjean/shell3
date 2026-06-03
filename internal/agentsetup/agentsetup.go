@@ -60,6 +60,9 @@ func Build(opts Options) (chat.Config, func(), error) {
 	const logArchives = 3
 	log, logCloser, err := applog.Open(g.LogFile, logMaxBytes, logArchives)
 	if err != nil {
+		// Non-fatal: fall back to Noop so startup continues. Warn on stderr
+		// since the log itself is unavailable to record this.
+		fmt.Fprintln(os.Stderr, "warning: open log file:", err)
 		log = applog.Noop{}
 		logCloser = io.NopCloser(nil)
 	}

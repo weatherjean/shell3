@@ -174,9 +174,14 @@ func (s *Session) drain() {
 		}
 		cur <- pub
 		if pub.Kind == Done || pub.Kind == Error {
+			// Close the captured local, not a re-read of s.cur: a misbehaving
+			// caller could repoint s.cur via an early Send between the send
+			// above and here, and we must never close that fresh channel.
 			s.mu.Lock()
-			close(s.cur)
-			s.cur = nil
+			close(cur)
+			if s.cur == cur {
+				s.cur = nil
+			}
 			s.mu.Unlock()
 		}
 	}
