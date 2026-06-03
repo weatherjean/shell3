@@ -46,7 +46,8 @@ func (c *LoadedConfig) OnToolCall(ctx context.Context, tool string, params map[s
 // runLuaGuard calls a single Lua guard function, locking the VM mutex.
 func (c *LoadedConfig) runLuaGuard(ctx context.Context, fn *lua.LFunction, tool string, params map[string]any) (Decision, string, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.vmLockHeld = true
+	defer func() { c.vmLockHeld = false; c.mu.Unlock() }() // clear flag before releasing
 	c.L.SetContext(ctx)
 	call := c.L.NewTable()
 	call.RawSetString("tool", lua.LString(tool))
@@ -107,7 +108,8 @@ func (c *LoadedConfig) CallTool(ctx context.Context, name, argsJSON string) (str
 		return "", fmt.Errorf("unknown custom tool %q", name)
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.vmLockHeld = true
+	defer func() { c.vmLockHeld = false; c.mu.Unlock() }() // clear flag before releasing
 	c.L.SetContext(ctx)
 	argsT := goToLua(c.L, args)
 	if err := c.L.CallByParam(lua.P{Fn: tool.handler, NRet: 1, Protect: true}, argsT); err != nil {

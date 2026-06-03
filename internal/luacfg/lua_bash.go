@@ -9,27 +9,28 @@ import (
 )
 
 // withIOUnlock releases the VM mutex around blocking IO so other tools can
-// proceed when luaBash (or luaHTTP) is called from within a CallTool handler
-// that already holds c.mu. When called at config top-level (during DoFile,
-// before any lock is held), TryLock succeeds — we acquired the lock ourselves,
-// so we release it, run f, and return without re-locking (we were never locked
-// to begin with).
+// proceed when luaBash/luaHTTP is called from within a CallTool/runLuaGuard
+// handler that holds c.mu. Lock ownership is tracked explicitly via c.vmLockHeld
+// (set by CallTool/runLuaGuard) rather than inferred from the mutex, because
+// sync.Mutex has no ownership and a failed TryLock cannot distinguish
+// "held by me" from "held by another goroutine".
 //
-// INVARIANT: luacfg is single-agent; CallTool is never called concurrently.
-// The TryLock below infers whether we're already inside CallTool's locked section.
+// INVARIANT: luacfg is single-agent; the VM runs on one goroutine at a time,
+// so c.vmLockHeld reliably reflects whether THIS goroutine holds c.mu.
 func (c *LoadedConfig) withIOUnlock(f func()) {
-	locked := c.mu.TryLock() // returns false if already held by CallTool
-	if locked {
-		// Not under CallTool: we just acquired it; release for IO, then return.
-		// (The caller—DoFile top-level—did not hold the lock, so no re-lock.)
-		c.mu.Unlock()
+	if !c.vmLockHeld {
+		// Config top-level (DoFile during Load): no lock is held, so there is
+		// nothing to release — just run the IO.
 		f()
 		return
 	}
-	// Under CallTool: caller holds the lock; release around IO, then reacquire.
+	// Inside CallTool/runLuaGuard: we hold c.mu. Release it around the blocking
+	// IO so other operations can proceed, then reacquire.
+	c.vmLockHeld = false
 	c.mu.Unlock()
 	f()
 	c.mu.Lock()
+	c.vmLockHeld = true
 }
 
 func (c *LoadedConfig) luaBash(L *lua.LState) int {
