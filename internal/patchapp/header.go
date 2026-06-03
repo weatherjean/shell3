@@ -14,7 +14,7 @@ func PrintHeader(w io.Writer) {
 	yellow := patchtui.FgRGB(rPrimary, gPrimary, bPrimary)
 	dim := patchtui.FgRGB(rMuted, gMuted, bMuted)
 	sub := patchtui.FgRGB(rFgDim, gFgDim, bFgDim)
-	_, _ = fmt.Fprintln(w, styled("◆ shell3", yellow, "", true)+"  "+styled("/'ʃɛli/", dim, "", false))
+	_, _ = fmt.Fprintln(w, styled("๑ï shell3", yellow, "", true)+"  "+styled("/'ʃɛli/", dim, "", false))
 	_, _ = fmt.Fprintln(w, styled("AI-powered shell assistant", sub, "", false))
 	_, _ = fmt.Fprintln(w)
 }

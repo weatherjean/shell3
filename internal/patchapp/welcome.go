@@ -34,8 +34,6 @@ func labelBlock(styledLabel, value string, indent, width int) []string {
 	return append(out, line)
 }
 
-const asciiLogo = "       /\\\n      {.-}\n     ;_.-'\\\n    {    _.}_\n     \\.-' /  `,\n      \\  |    /\n       \\ |  ,/\n        \\|_/"
-
 // WelcomeInfo holds session metadata rendered in the welcome card.
 type WelcomeInfo struct {
 	Persona      string   // persona name
@@ -55,27 +53,9 @@ func renderWelcome(width int, info WelcomeInfo) []string {
 	dim := patchtui.FgRGB(rMuted, gMuted, bMuted)
 	sub := patchtui.FgRGB(rFgDim, gFgDim, bFgDim)
 
-	// Center the whole logo as a block (preserve internal alignment).
-	logoLines := strings.Split(asciiLogo, "\n")
-	maxW := 0
-	for _, l := range logoLines {
-		if patchtui.VisibleLen(l) > maxW {
-			maxW = patchtui.VisibleLen(l)
-		}
-	}
-	leftPad := (width - maxW) / 2
-	if leftPad < 0 {
-		leftPad = 0
-	}
-	pad := strings.Repeat(" ", leftPad)
-
 	var out []string
 	out = append(out, "")
-	for _, l := range logoLines {
-		out = append(out, pad+styled(l, yellow, "", true))
-	}
-	out = append(out, "")
-	out = append(out, "  "+styled("◆ shell3", yellow, "", true)+"  "+styled("/'ʃɛli/", dim, "", false))
+	out = append(out, "  "+styled("๑ï shell3", yellow, "", true)+"  "+styled("/'ʃɛli/", dim, "", false))
 	out = append(out, "  "+styled("AI-powered shell assistant", sub, "", false))
 	out = append(out, "")
 
@@ -90,7 +70,7 @@ func renderWelcome(width int, info WelcomeInfo) []string {
 	out = append(out, labelBlock(styled("/help", yellow, "", false), "list slash commands  ·  /info for session details", infoIndent, width)...)
 	out = append(out, "")
 	out = append(out, "  "+styled("Tell shelly:", sub, "", false)+" "+styled("read your docs", yellow, "", false)+styled(" and tell me about / help me with x to get to know and configure the harness", sub, "", false))
-	out = append(out, "", "", "", "")
+	out = append(out, "")
 	return out
 }
 
