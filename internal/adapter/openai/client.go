@@ -22,13 +22,24 @@ import (
 // extracts non-standard reasoning fields from SSE streams: OpenRouter's
 // "reasoning" and Moonshot/DeepSeek's "reasoning_content".
 type bodyTap struct {
-	mu               sync.Mutex
-	reqBody          []byte
-	resBody          []byte
-	reasoning        string
-	done             chan struct{}
-	rt               http.RoundTripper
-	onReasoningDelta func(string)
+	mu        sync.Mutex
+	reqBody   []byte
+	resBody   []byte
+	reasoning string
+	done      chan struct{}
+	rt        http.RoundTripper
+	// reasoningQueue holds reasoning fragments extracted by scanReasoning,
+	// pending delivery. The Stream goroutine drains it (drainReasoning) and
+	// emits them, so onEvent is only ever called from that single goroutine —
+	// never from the scan goroutine. Guarded by mu. (reasoning, above, is the
+	// full accumulated string for snapshot/WaitReasoning; the queue is the
+	// incremental feed for onEvent — two views of the same data, two consumers.)
+	//
+	// Like reasoning/done, this is per-request state on a tap reused across
+	// requests: RoundTrip resets it. All access is under mu, so it is race-free;
+	// a scan goroutine orphaned by a cancelled turn that appends here is
+	// harmless (cleared by the next RoundTrip / drain).
+	reasoningQueue []string
 }
 
 func (b *bodyTap) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -39,6 +50,7 @@ func (b *bodyTap) RoundTrip(req *http.Request) (*http.Response, error) {
 		b.reqBody = buf
 		b.reasoning = ""
 		b.done = make(chan struct{})
+		b.reasoningQueue = nil
 		b.mu.Unlock()
 	}
 	res, err := b.rt.RoundTrip(req)
@@ -89,7 +101,8 @@ func (b *bodyTap) scanReasoning(r io.ReadCloser, done chan struct{}) {
 		for _, c := range chunk.Choices {
 			// Different providers emit reasoning under different field names:
 			// OpenRouter uses "reasoning", Moonshot/DeepSeek use "reasoning_content".
-			// Both feed the same accumulator and onReasoningDelta callback.
+			// Both feed the local string builder (→ b.reasoning) and the
+			// reasoningQueue that the Stream goroutine drains.
 			frag := c.Delta.Reasoning
 			if frag == "" {
 				frag = c.Delta.ReasoningContent
@@ -97,11 +110,8 @@ func (b *bodyTap) scanReasoning(r io.ReadCloser, done chan struct{}) {
 			if frag != "" {
 				sb.WriteString(frag)
 				b.mu.Lock()
-				cb := b.onReasoningDelta
+				b.reasoningQueue = append(b.reasoningQueue, frag)
 				b.mu.Unlock()
-				if cb != nil {
-					cb(frag)
-				}
 			}
 		}
 	}
@@ -132,6 +142,17 @@ func (b *bodyTap) WaitReasoning(ctx context.Context) string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.reasoning
+}
+
+// drainReasoning returns and clears the reasoning fragments queued by the
+// scanReasoning goroutine since the last drain. The Stream goroutine calls
+// this and emits the fragments, keeping onEvent single-goroutine.
+func (b *bodyTap) drainReasoning() []string {
+	b.mu.Lock()
+	q := b.reasoningQueue
+	b.reasoningQueue = nil
+	b.mu.Unlock()
+	return q
 }
 
 type readCloser struct {
@@ -229,17 +250,6 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 		params.MaxCompletionTokens = openai.Int(int64(c.params.MaxTokens))
 	}
 
-	if c.tap != nil {
-		c.tap.mu.Lock()
-		c.tap.onReasoningDelta = func(r string) { onEvent(llm.StreamEvent{ReasoningDelta: r}) }
-		c.tap.mu.Unlock()
-		defer func() {
-			c.tap.mu.Lock()
-			c.tap.onReasoningDelta = nil
-			c.tap.mu.Unlock()
-		}()
-	}
-
 	var extraOpts []option.RequestOption
 	for k, v := range c.extra {
 		extraOpts = append(extraOpts, option.WithJSONSet(k, v))
@@ -256,6 +266,12 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 
 	for stream.Next() {
 		chunk := stream.Current()
+
+		if c.tap != nil {
+			for _, frag := range c.tap.drainReasoning() {
+				onEvent(llm.StreamEvent{ReasoningDelta: frag})
+			}
+		}
 
 		if u := chunk.Usage; u.PromptTokens > 0 || u.CompletionTokens > 0 {
 			onEvent(llm.StreamEvent{Usage: &llm.Usage{
@@ -289,12 +305,22 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 	}
 
 	if err := stream.Err(); err != nil {
+		// On error/ctx-cancel we return here without the final drain below, so
+		// any reasoning queued after the last in-loop drain is discarded.
+		// Reasoning is best-effort on a failed/cancelled turn, whose partial
+		// output the caller abandons anyway — matching the pre-funnel behavior.
 		return fmt.Errorf("llm: stream: %w", err)
 	}
 
 	_ = stream.Close()
 	if c.tap != nil {
+		// WaitReasoning blocks until scanReasoning finishes (on the success
+		// path it returns promptly), so this final drain captures any fragments
+		// queued after the last content chunk, before the Done event.
 		c.tap.WaitReasoning(ctx)
+		for _, frag := range c.tap.drainReasoning() {
+			onEvent(llm.StreamEvent{ReasoningDelta: frag})
+		}
 	}
 
 	seen := map[string]int{}

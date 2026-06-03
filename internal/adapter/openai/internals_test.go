@@ -116,13 +116,10 @@ func TestScanReasoningExtractsReasoning(t *testing.T) {
 	}
 }
 
-func TestScanReasoningCallsOnDelta(t *testing.T) {
+func TestScanReasoningQueuesFragments(t *testing.T) {
 	tap := &bodyTap{}
 	done := make(chan struct{})
 	tap.done = done
-
-	var got []string
-	tap.onReasoningDelta = func(s string) { got = append(got, s) }
 
 	sse := "data: {\"choices\":[{\"delta\":{\"reasoning\":\"alpha\"}}]}\n" +
 		"data: {\"choices\":[{\"delta\":{\"reasoning\":\"beta\"}}]}\n" +
@@ -131,8 +128,9 @@ func TestScanReasoningCallsOnDelta(t *testing.T) {
 	go tap.scanReasoning(io.NopCloser(strings.NewReader(sse)), done)
 	<-done
 
+	got := tap.drainReasoning()
 	if len(got) != 2 || got[0] != "alpha" || got[1] != "beta" {
-		t.Fatalf("onReasoningDelta: got %v", got)
+		t.Fatalf("reasoningQueue: got %v", got)
 	}
 }
 
