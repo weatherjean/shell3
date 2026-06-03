@@ -62,9 +62,9 @@ parseable output, use the JSONL audit log via `--out`.
 rewritten each run). Two layers of records appear:
 
 1. An **envelope** — a `start` line first and an `end` line last
-   ([`pkg/chat/outsink.go`](../pkg/chat/outsink.go)).
+   ([`internal/chat/outsink.go`](../internal/chat/outsink.go)).
 2. **Session events** in between — one line per chat event
-   ([`pkg/chat/event.go`](../pkg/chat/event.go)).
+   ([`internal/chat/event.go`](../internal/chat/event.go)).
 
 Every line has a `ts` (RFC 3339 / `RFC3339Nano`, UTC) and a `kind`. All other
 fields are omitted when empty, so consumers should treat missing fields as

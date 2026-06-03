@@ -63,10 +63,10 @@ func logStreamError(cfg TurnConfig, msgs []llm.Message, streamErr error) {
 		"req_bytes", len(reqBody), "res_bytes", len(resBody))
 }
 
-// RunTurn executes one user→assistant exchange, emitting chat.Events on
-// sess.events. The session's event channel is owned by the caller; teardown
-// (close) is the caller's responsibility via sess.CloseEvents().
-// RunTurn drives one user→assistant turn, emitting stream events on sess.events.
+// RunTurn executes one user→assistant turn, emitting chat.Events on sess.events.
+// The event channel is owned by the caller; teardown (close) is the caller's
+// responsibility via sess.CloseEvents().
+//
 // beforeDone, if non-nil, runs once at turn teardown immediately before the
 // single terminal event (turn_done or error) is emitted — Session.Run uses it
 // to persist history. The ordering matters: the terminal event is what embedders
