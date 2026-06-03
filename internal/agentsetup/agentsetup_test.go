@@ -95,3 +95,49 @@ func TestBuild_MalformedConfig_Errors(t *testing.T) {
 		t.Fatal("expected error for malformed config, got nil")
 	}
 }
+
+// writeConfigWithMemory writes a shell3.lua whose agent enables the memory
+// tool, so Build opens the store (Gates.Memory || Gates.History). Mirrors
+// writeMinimalConfig but flips tools = { memory = true }.
+func writeConfigWithMemory(t *testing.T, dir string) {
+	t.Helper()
+	lua := `
+shell3.model("main", {
+  base_url = "https://example.test/v1",
+  api_key = shell3.env.secret("TEST_KEY"),
+  model = "test-model",
+  context_window = 1000,
+})
+shell3.agent({ name = "tester", model = "main", prompt = "you are a tester", tools = { memory = true } })
+`
+	if err := os.WriteFile(filepath.Join(dir, "shell3.lua"), []byte(lua), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("TEST_KEY=sk-test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestBuild_WithStore_CleanupSafe characterizes the store-open path: with the
+// memory gate on, Build opens the store (cfg.Store != nil) and the returned
+// cleanup closes it without panicking. Covers the store closer the gates-off
+// happy-path test skips.
+func TestBuild_WithStore_CleanupSafe(t *testing.T) {
+	tmp := t.TempDir()
+	home := t.TempDir()
+	writeConfigWithMemory(t, tmp)
+
+	cfg, cleanup, err := agentsetup.Build(agentsetup.Options{
+		ConfigPath: filepath.Join(tmp, "shell3.lua"),
+		CWD:        tmp,
+		HomeDir:    home,
+		Headless:   true,
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if cfg.Store == nil {
+		t.Fatal("expected store to be opened with the memory gate on")
+	}
+	cleanup() // closes store + lua + log; must not panic
+}
