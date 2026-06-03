@@ -21,7 +21,9 @@ App shell for inline chat-style terminal apps. Built on `patchtui`. Owns the inp
 ## Usage
 
 ```go
-app := patchapp.New(modeLabel, statusMsg)
+app := patchapp.New(modeLabel, statusMsg, patchapp.WelcomeInfo{
+    Persona: "assistant", // + ProjectRef, ActiveSkills, ActiveTools — printed once on start
+})
 
 // Slash commands (auto /help built from the registry).
 app.RegisterSlash(patchapp.SlashCommand{
