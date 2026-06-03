@@ -188,8 +188,13 @@ func (s *Session) drain() {
 }
 
 // Send runs one turn for prompt and returns a channel of that turn's events,
-// closed after the turn's Done (or Error). The caller MUST drain it before the
-// next Send.
+// closed after the turn's Done (or Error).
+//
+// Single-turn-at-a-time contract: the caller MUST drain the returned channel
+// to completion before calling Send, Clear, Rollback, or SwitchModel again.
+// Those methods read and mutate unsynchronized session state (messages, cfg)
+// and assume exactly one turn is active; overlapping them is a data race, not
+// a supported concurrency mode.
 func (s *Session) Send(ctx context.Context, prompt string) <-chan Event {
 	out := make(chan Event)
 	s.mu.Lock()
@@ -241,7 +246,8 @@ func (s *Session) turnConfig() chat.TurnConfig {
 }
 
 // Clear resets the conversation context (= /clear): drops all history and
-// re-stamps the system prompt with a fresh timestamp.
+// re-stamps the system prompt with a fresh timestamp. Call only between turns:
+// drain any in-flight Send channel first (see Send's contract).
 func (s *Session) Clear() {
 	s.sess.SetMessages(nil)
 	if s.cfg.RefreshPrompt != nil {
@@ -250,7 +256,8 @@ func (s *Session) Clear() {
 }
 
 // Rollback drops the last turn from context (= /rollback). Returns false when
-// there was nothing to remove.
+// there was nothing to remove. Call only between turns: drain any in-flight
+// Send channel first (see Send's contract).
 func (s *Session) Rollback() bool {
 	msgs := s.sess.Messages()
 	pruned := chat.PruneLastTurn(msgs)
@@ -263,7 +270,9 @@ func (s *Session) Rollback() bool {
 
 // SwitchModel activates the configured model named name for subsequent Sends
 // (= /model <name>). Returns an error for an unknown model or when the config
-// declares no models.
+// declares no models. Call only between turns: it mutates cfg in place, which
+// the next Send's turnConfig reads, so drain any in-flight Send channel first
+// (see Send's contract).
 func (s *Session) SwitchModel(name string) error {
 	if s.cfg.SwitchModel == nil {
 		return fmt.Errorf("no models configured")
@@ -281,6 +290,10 @@ func (s *Session) SwitchModel(name string) error {
 
 // Run is the one-shot convenience: Start, send spec.Prompt, stream the turn,
 // and Close when it drains. A non-nil error means startup failed.
+//
+// Close always runs once the caller drains the returned channel: the turn
+// emits exactly one terminal event (Done, or Error on ctx cancellation), which
+// closes the inner turn channel and ends the forwarding range below.
 func Run(ctx context.Context, spec Spec) (<-chan Event, error) {
 	s, err := Start(ctx, spec)
 	if err != nil {
