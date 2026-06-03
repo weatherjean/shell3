@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/weatherjean/shell3/pkg/llm"
+	"github.com/weatherjean/shell3/internal/llm"
 )
 
 // EventKind classifies stream events emitted by a chat session.

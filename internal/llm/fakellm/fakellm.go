@@ -7,7 +7,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/weatherjean/shell3/pkg/llm"
+	"github.com/weatherjean/shell3/internal/llm"
 )
 
 // Script is a scripted reply for one Stream call. Events fire in order

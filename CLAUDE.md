@@ -25,12 +25,12 @@ internal/edittool/     edit_file tool implementation
 internal/bgjobs/       background job tracking (.shell3/bg.json)
 internal/tui/          terminal UI (interactive + headless once)
 internal/patchapp,patchmd,patchtui,patchwidgets/  patch-style TUI components
+internal/chat/         conversation loop, tools, events, JSONL sink
+internal/llm/          Provider/Streamer interfaces, registry (+ fakellm)
+internal/persona/      persona / system-prompt assembly
+internal/applog/       rotating app log
 
-pkg/chat/              conversation loop, tools, events, JSONL sink
-pkg/llm/               Provider/Streamer interfaces, registry (+ fakellm)
-pkg/persona/           persona / system-prompt assembly
-pkg/shell3/            embeddable library API
-pkg/applog/            rotating app log
+pkg/shell3/            embeddable library API (the only public package)
 ```
 
 ## Development

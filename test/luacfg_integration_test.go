@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/luacfg"
-	"github.com/weatherjean/shell3/pkg/applog"
-	"github.com/weatherjean/shell3/pkg/chat"
-	"github.com/weatherjean/shell3/pkg/llm"
-	"github.com/weatherjean/shell3/pkg/llm/fakellm"
-	"github.com/weatherjean/shell3/pkg/persona"
+	"github.com/weatherjean/shell3/internal/applog"
+	"github.com/weatherjean/shell3/internal/chat"
+	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/llm/fakellm"
+	"github.com/weatherjean/shell3/internal/persona"
 )
 
 // writeTmpFile writes content to dir/name and returns the full path.

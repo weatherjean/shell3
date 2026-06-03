@@ -3,7 +3,7 @@ package chat
 import (
 	"testing"
 
-	"github.com/weatherjean/shell3/pkg/llm"
+	"github.com/weatherjean/shell3/internal/llm"
 )
 
 func TestHeadless_StripsShellInteractiveTool(t *testing.T) {

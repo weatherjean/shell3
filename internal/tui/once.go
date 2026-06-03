@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/weatherjean/shell3/pkg/chat"
+	"github.com/weatherjean/shell3/internal/chat"
 )
 
 // RunOnce executes a single turn and prints output to stdout. No TUI.

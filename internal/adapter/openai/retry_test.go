@@ -8,7 +8,7 @@ import (
 
 	"github.com/openai/openai-go/option"
 
-	"github.com/weatherjean/shell3/pkg/llm"
+	"github.com/weatherjean/shell3/internal/llm"
 )
 
 func resp(status int, headers map[string]string) *http.Response {

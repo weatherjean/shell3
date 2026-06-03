@@ -4,7 +4,7 @@
 // chat session and TUI read from.
 package persona
 
-import "github.com/weatherjean/shell3/pkg/llm"
+import "github.com/weatherjean/shell3/internal/llm"
 
 // ToolDef is an alias so callers don't import llm directly.
 type ToolDef = llm.ToolDefinition

@@ -7,7 +7,7 @@ import (
 
 	"github.com/openai/openai-go/option"
 
-	"github.com/weatherjean/shell3/pkg/llm"
+	"github.com/weatherjean/shell3/internal/llm"
 )
 
 // maxRetries is how many times a failed request is retried. It is set both on

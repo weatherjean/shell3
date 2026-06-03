@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weatherjean/shell3/pkg/applog"
-	"github.com/weatherjean/shell3/pkg/llm"
+	"github.com/weatherjean/shell3/internal/applog"
+	"github.com/weatherjean/shell3/internal/llm"
 )
 
 func TestHandleCompactHistoryIncludesSkillsToReread(t *testing.T) {

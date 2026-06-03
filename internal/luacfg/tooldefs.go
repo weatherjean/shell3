@@ -1,6 +1,6 @@
 package luacfg
 
-import "github.com/weatherjean/shell3/pkg/llm"
+import "github.com/weatherjean/shell3/internal/llm"
 
 // skillTool is the built-in tool injected when the agent has ≥1 skill.
 var skillTool = llm.ToolDefinition{

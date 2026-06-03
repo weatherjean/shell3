@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weatherjean/shell3/pkg/llm"
+	"github.com/weatherjean/shell3/internal/llm"
 )
 
 func TestEmitRetry(t *testing.T) {

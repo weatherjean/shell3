@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weatherjean/shell3/pkg/llm"
+	"github.com/weatherjean/shell3/internal/llm"
 )
 
 // makePNG encodes a 4x4 red image to a PNG byte slice.

@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/store"
-	"github.com/weatherjean/shell3/pkg/applog"
-	"github.com/weatherjean/shell3/pkg/llm"
-	"github.com/weatherjean/shell3/pkg/persona"
+	"github.com/weatherjean/shell3/internal/applog"
+	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/persona"
 )
 
 // LLMClient is the streaming interface the turn loop calls into. Implementers

@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/patchapp"
-	"github.com/weatherjean/shell3/pkg/chat"
-	"github.com/weatherjean/shell3/pkg/llm"
-	"github.com/weatherjean/shell3/pkg/persona"
+	"github.com/weatherjean/shell3/internal/chat"
+	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/persona"
 )
 
 // fakeApp records calls to the appView interface for assertion.

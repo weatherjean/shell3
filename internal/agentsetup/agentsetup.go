@@ -19,10 +19,10 @@ import (
 	"github.com/weatherjean/shell3/internal/luacfg"
 	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/store"
-	"github.com/weatherjean/shell3/pkg/applog"
-	"github.com/weatherjean/shell3/pkg/chat"
-	"github.com/weatherjean/shell3/pkg/llm"
-	"github.com/weatherjean/shell3/pkg/persona"
+	"github.com/weatherjean/shell3/internal/applog"
+	"github.com/weatherjean/shell3/internal/chat"
+	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/persona"
 )
 
 // Options parameterizes Build. CWD/HomeDir default via the caller (front-ends

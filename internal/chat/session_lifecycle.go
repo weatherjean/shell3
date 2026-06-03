@@ -3,7 +3,7 @@ package chat
 import (
 	"context"
 
-	"github.com/weatherjean/shell3/pkg/llm"
+	"github.com/weatherjean/shell3/internal/llm"
 )
 
 // Start emits a session_start event with the given metadata. Call this once

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/weatherjean/shell3/pkg/llm"
+	"github.com/weatherjean/shell3/internal/llm"
 )
 
 // Session holds the in-progress conversation history and the event stream.

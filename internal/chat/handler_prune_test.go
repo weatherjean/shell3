@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weatherjean/shell3/pkg/llm"
+	"github.com/weatherjean/shell3/internal/llm"
 )
 
 func TestPruneHandler_Name(t *testing.T) {

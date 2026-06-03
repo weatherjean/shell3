@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/weatherjean/shell3/pkg/chat"
+	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/patchtui"
 )
 

@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/weatherjean/shell3/pkg/applog"
-	"github.com/weatherjean/shell3/pkg/llm"
-	"github.com/weatherjean/shell3/pkg/persona"
+	"github.com/weatherjean/shell3/internal/applog"
+	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/store"
 )
 

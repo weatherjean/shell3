@@ -11,8 +11,8 @@ import (
 	"github.com/weatherjean/shell3/internal/patchapp"
 	"github.com/weatherjean/shell3/internal/patchmd"
 	"github.com/weatherjean/shell3/internal/patchtui"
-	"github.com/weatherjean/shell3/pkg/chat"
-	"github.com/weatherjean/shell3/pkg/llm"
+	"github.com/weatherjean/shell3/internal/chat"
+	"github.com/weatherjean/shell3/internal/llm"
 )
 
 // RunInteractive runs the TUI chat loop. Blocks until the user quits.

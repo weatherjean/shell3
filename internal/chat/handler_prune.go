@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/weatherjean/shell3/pkg/llm"
+	"github.com/weatherjean/shell3/internal/llm"
 )
 
 // PruneHandler implements the prune_tool_result built-in tool.
