@@ -97,29 +97,11 @@ func collectTurn(t *testing.T, ctx context.Context, cfg TurnConfig, sess *Sessio
 	}
 }
 
-func hasKind(evs []Event, k EventKind) bool {
-	for _, ev := range evs {
-		if ev.Kind == k {
-			return true
-		}
-	}
-	return false
-}
-
 // hasToolMessage reports whether the session has a RoleTool message for the
 // named tool whose content contains substr.
 func hasToolMessage(sess *Session, name, substr string) bool {
 	for _, m := range sess.messages {
 		if m.Role == llm.RoleTool && m.Name == name && strings.Contains(m.Content, substr) {
-			return true
-		}
-	}
-	return false
-}
-
-func msgsContain(msgs []llm.Message, substr string) bool {
-	for _, m := range msgs {
-		if strings.Contains(m.Content, substr) {
 			return true
 		}
 	}
@@ -211,9 +193,21 @@ Pins the behavior where a guard `cancel` decision ends the turn with a reminder 
 **Files:**
 - Modify: `internal/chat/turn_toolloop_test.go`
 
-- [ ] **Step 1: Append the test**
+- [ ] **Step 1: Append the `hasKind` helper and the test**
+
+This task introduces the `hasKind` helper (first used here). Append both the helper and the test to `internal/chat/turn_toolloop_test.go`:
 
 ```go
+// hasKind reports whether any event in evs has the given kind.
+func hasKind(evs []Event, k EventKind) bool {
+	for _, ev := range evs {
+		if ev.Kind == k {
+			return true
+		}
+	}
+	return false
+}
+
 // TestRunTurn_GuardCancel_StubsRemainingCalls characterizes a guard cancel:
 // round 1 returns two tool calls, the guard cancels, and the turn ends with a
 // cancellation reminder + turn_done (not error). The first call gets a real
@@ -364,9 +358,21 @@ Pins the trickiest preserved behavior: `compact_history` wholesale-replaces `all
 **Files:**
 - Modify: `internal/chat/turn_toolloop_test.go`
 
-- [ ] **Step 1: Append the test**
+- [ ] **Step 1: Append the `msgsContain` helper and the test**
+
+This task introduces the `msgsContain` helper (first used here). Append both the helper and the test to `internal/chat/turn_toolloop_test.go`:
 
 ```go
+// msgsContain reports whether any message's content contains substr.
+func msgsContain(msgs []llm.Message, substr string) bool {
+	for _, m := range msgs {
+		if strings.Contains(m.Content, substr) {
+			return true
+		}
+	}
+	return false
+}
+
 // TestRunTurn_CompactHistory_ReplacesAllMsgs characterizes the compact_history
 // path: it replaces allMsgs in place, so the second round's prompt carries the
 // compact summary and not the pre-compaction user text. Runs with no Store
