@@ -71,3 +71,27 @@ shell3.agent({ name = "tester", model = "main", prompt = "you are a tester", too
 		t.Fatal(err)
 	}
 }
+
+// TestBuild_MalformedConfig_Errors characterizes the post-log-open error path:
+// a present but syntactically invalid shell3.lua resolves (so the log opens),
+// then luacfg.Load fails — Build must surface the error.
+func TestBuild_MalformedConfig_Errors(t *testing.T) {
+	tmp := t.TempDir()
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmp, "shell3.lua"), []byte("this is ((( not valid lua\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, ".env"), []byte("TEST_KEY=sk-test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := agentsetup.Build(agentsetup.Options{
+		ConfigPath: filepath.Join(tmp, "shell3.lua"),
+		CWD:        tmp,
+		HomeDir:    home,
+		Headless:   true,
+	})
+	if err == nil {
+		t.Fatal("expected error for malformed config, got nil")
+	}
+}
