@@ -385,6 +385,11 @@ func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session
 		Name: "clear", Help: "reset conversation context",
 		Handler: func(string) {
 			sess.SetMessages(nil)
+			// A new conversation starts now; re-stamp the system prompt so its
+			// timestamp reflects the new context rather than process-start time.
+			if cfg.RefreshPrompt != nil {
+				cfg.Personality.SystemPrompt = cfg.RefreshPrompt()
+			}
 			dim("[context cleared]")
 		},
 	})

@@ -145,7 +145,7 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 			case *lua.LTable:
 				if b, ok := x.RawGetString("__guard").(lua.LString); ok {
 					c.Agent.Guard = append(c.Agent.Guard, GuardEntry{
-						Builtin: string(b), prompt: optBool(x, "prompt"),
+						Builtin: string(b),
 					})
 				}
 			}

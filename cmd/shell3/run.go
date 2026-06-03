@@ -186,12 +186,18 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		}
 	}
 
-	sysPrompt := lc.BuildPersona(luacfg.RuntimeData{
-		Time:         time.Now().Format("Mon Jan 2 2006, 15:04 MST"),
-		CWD:          cwd,
-		Model:        m.ModelID,
-		CoreMemories: coreMemories,
-	})
+	// buildPrompt renders the system prompt with a fresh timestamp each call.
+	// Used once now for the initial prompt and again by /clear (via
+	// cfg.RefreshPrompt) so a new conversation re-stamps the clock.
+	buildPrompt := func() string {
+		return lc.BuildPersona(luacfg.RuntimeData{
+			Time:         time.Now().Format("Mon Jan 2 2006, 15:04 MST"),
+			CWD:          cwd,
+			Model:        m.ModelID,
+			CoreMemories: coreMemories,
+		})
+	}
+	sysPrompt := buildPrompt()
 
 	customDefs := lc.CustomToolsFor(lc.Agent.CustomTools)
 	hasSkills := lc.Agent.SkillsActive()
@@ -221,6 +227,7 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		LLM:             client,
 		Store:           st,
 		Personality:     pers,
+		RefreshPrompt:   buildPrompt,
 		WorkDir:         cwd,
 		StatusLine:      fmt.Sprintf("%s │ %s", lc.Agent.Name, m.ModelID),
 		ModeLabel:       lc.Agent.Name,

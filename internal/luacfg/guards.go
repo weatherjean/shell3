@@ -11,13 +11,8 @@ func registerGuards(c *LoadedConfig, tbl *lua.LTable) {
 	L := c.L
 	g := L.NewTable()
 	L.SetField(g, "confirm_dangerous", L.NewFunction(func(L *lua.LState) int {
-		prompt := false
-		if o, ok := L.Get(1).(*lua.LTable); ok {
-			prompt = optBool(o, "prompt")
-		}
 		h := L.NewTable()
 		h.RawSetString("__guard", lua.LString("confirm_dangerous"))
-		h.RawSetString("prompt", lua.LBool(prompt))
 		L.Push(h)
 		return 1
 	}))

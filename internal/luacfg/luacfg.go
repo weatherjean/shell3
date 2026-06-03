@@ -35,7 +35,6 @@ type Skill struct{ Name, Description, Body string }
 type GuardEntry struct {
 	fn      *lua.LFunction
 	Builtin string // "" unless a shell3.guards.* handle
-	prompt  bool
 }
 
 type Agent struct {

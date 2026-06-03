@@ -592,9 +592,8 @@ A spawned agent runs with `SHELL3_HEADLESS=1` and the default `confirm-bash` hoo
 -- ---------------------------------------------------------------------------
 
 -- Built-in: block dangerous shell commands (rm, git push --force, etc.).
--- NOTE: the `prompt` field is reserved for a future interactive-confirm flow
--- and is currently a no-op. A matched dangerous command is always blocked.
-local guard_dangerous = shell3.guards.confirm_dangerous{ prompt = true }
+-- A matched dangerous command is always blocked.
+local guard_dangerous = shell3.guards.confirm_dangerous{}
 
 -- Custom middleware: refuse edits to .env files.
 local function guard_no_env_edit(call)

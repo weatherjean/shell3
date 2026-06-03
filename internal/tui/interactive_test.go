@@ -435,6 +435,30 @@ func TestSlash_Clear(t *testing.T) {
 	}
 }
 
+func TestSlash_ClearRefreshesPrompt(t *testing.T) {
+	app, cfg, _, _ := register()
+	cfg.Personality.SystemPrompt = "stale boot-time prompt"
+	cfg.RefreshPrompt = func() string { return "fresh prompt with new time" }
+
+	app.call(t, "clear", "")
+
+	if cfg.Personality.SystemPrompt != "fresh prompt with new time" {
+		t.Errorf("clear did not refresh system prompt: %q", cfg.Personality.SystemPrompt)
+	}
+}
+
+func TestSlash_ClearNilRefreshIsNoop(t *testing.T) {
+	app, cfg, _, _ := register()
+	cfg.Personality.SystemPrompt = "original"
+	cfg.RefreshPrompt = nil // run.go may not wire it (e.g. embedders)
+
+	app.call(t, "clear", "")
+
+	if cfg.Personality.SystemPrompt != "original" {
+		t.Errorf("nil RefreshPrompt should leave prompt untouched, got %q", cfg.Personality.SystemPrompt)
+	}
+}
+
 func TestSlash_RollbackEmpty(t *testing.T) {
 	app, _, _, _ := register()
 	app.call(t, "rollback", "")

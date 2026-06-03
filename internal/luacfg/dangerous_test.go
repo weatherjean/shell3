@@ -10,7 +10,7 @@ func TestConfirmDangerous(t *testing.T) {
 		"git push --force": DecisionBlock,
 		"echo hi":          DecisionAllow,
 	}
-	g := GuardEntry{Builtin: "confirm_dangerous", prompt: false}
+	g := GuardEntry{Builtin: "confirm_dangerous"}
 	for cmd, want := range cases {
 		d, _ := runBuiltinGuard(g, "bash", map[string]any{"command": cmd})
 		if d != want {

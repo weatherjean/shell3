@@ -55,6 +55,12 @@ type Config struct {
 	Store *store.Store
 	// Personality is the loaded persona (system prompt, allowed tools).
 	Personality persona.Persona
+	// RefreshPrompt rebuilds the system prompt with current runtime data
+	// (notably a fresh timestamp). The /clear command calls it when starting a
+	// new conversation so a long-lived process doesn't carry a stale,
+	// boot-time clock into a fresh context. Nil leaves the prompt frozen at
+	// construction (the safe default for embedders).
+	RefreshPrompt func() string
 	// WorkDir is the working directory for tool execution and error dumps.
 	WorkDir string
 	// StatusLine is the human-readable provider/model/effort line shown in
