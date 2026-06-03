@@ -1,3 +1,8 @@
+// Package applog provides rotating file + stderr structured logging.
+//
+// Debug lines go to the log file only; Warn and Error are mirrored to stderr
+// so users see actionable messages in their terminal. Open rotates the file
+// when it exceeds a size bound, keeping a bounded number of archives.
 package applog
 
 import (
