@@ -1,9 +1,14 @@
 package shell3
 
 import (
+	"context"
+	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/weatherjean/shell3/pkg/chat"
+	"github.com/weatherjean/shell3/pkg/llm"
+	"github.com/weatherjean/shell3/pkg/llm/fakellm"
 )
 
 func TestTranslate(t *testing.T) {
@@ -47,5 +52,91 @@ func TestTranslate(t *testing.T) {
 				t.Fatalf("error: got Err=%v want %q", got.Err, tc.in.Text)
 			}
 		})
+	}
+}
+
+// newTestSession builds a Session backed by a fakellm client, bypassing
+// agentsetup so the test needs no real config/network. It mirrors what Start
+// produces: a persistent chat.Session + drain over a fake-LLM chat.Config.
+func newTestSession(t *testing.T, client chat.LLMClient, cfg chat.Config) *Session {
+	t.Helper()
+	cfg.LLM = client
+	if cfg.WorkDir == "" {
+		cfg.WorkDir = t.TempDir()
+	}
+	if cfg.Personality.Name == "" {
+		cfg.Personality.Name = "test"
+	}
+	return newSession(cfg, func() {})
+}
+
+func TestSession_MultiTurn_HistoryCarries(t *testing.T) {
+	client := fakellm.New(
+		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "first"}}},
+		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "second"}}},
+	)
+	s := newTestSession(t, client, chat.Config{})
+	defer s.Close()
+
+	collect := func(ch <-chan Event) (text string, done bool) {
+		for ev := range ch {
+			switch ev.Kind {
+			case Token:
+				text += ev.Text
+			case Done:
+				done = true
+			}
+		}
+		return
+	}
+
+	t1, d1 := collect(s.Send(context.Background(), "hello"))
+	if t1 != "first" || !d1 {
+		t.Fatalf("turn 1: text=%q done=%v", t1, d1)
+	}
+	t2, d2 := collect(s.Send(context.Background(), "again"))
+	if t2 != "second" || !d2 {
+		t.Fatalf("turn 2: text=%q done=%v", t2, d2)
+	}
+	// Two user turns + two assistant replies must be retained.
+	if got := len(s.sess.Messages()); got < 4 {
+		t.Fatalf("history has %d messages, want >= 4 (2 turns)", got)
+	}
+}
+
+func TestSession_ErrorPath(t *testing.T) {
+	client := fakellm.New(fakellm.Script{Err: errors.New("provider down")})
+	s := newTestSession(t, client, chat.Config{})
+	defer s.Close()
+
+	var sawError, sawDone bool
+	for ev := range s.Send(context.Background(), "hi") {
+		switch ev.Kind {
+		case Error:
+			sawError = true
+		case Done:
+			sawDone = true
+		}
+	}
+	if !sawError {
+		t.Fatal("expected Error event")
+	}
+	if sawDone {
+		t.Fatal("did not expect Done on error path")
+	}
+}
+
+func TestRun_BadConfig_Errors(t *testing.T) {
+	tmp := t.TempDir()
+	ch, err := Run(context.Background(), Spec{
+		Prompt:     "hi",
+		ConfigPath: filepath.Join(tmp, "shell3.lua"),
+		WorkDir:    tmp,
+	})
+	if err == nil {
+		t.Fatal("expected error for missing config")
+	}
+	if ch != nil {
+		t.Fatal("expected nil channel on start failure")
 	}
 }

@@ -1,7 +1,9 @@
-// Package shell3 embeds the shell3 coding agent as a library. Run loads a
-// shell3.lua config, executes one turn for a prompt, and streams structured
-// events back to the caller. It is the entire public surface; pkg/chat,
-// pkg/persona, and pkg/llm are internal details.
+// Package shell3 embeds the shell3 coding agent as a library. It exposes a
+// persistent multi-turn Session (the plugin equivalent of an open TUI) plus a
+// one-shot Run convenience, both streaming structured Events. The Session loads
+// the same shell3.lua config, store, memory, and persona as the CLI by building
+// on internal/agentsetup. pkg/chat, pkg/persona, and pkg/llm are internal
+// details.
 package shell3
 
 import (
@@ -9,25 +11,17 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
+	"sync"
 
-	"github.com/weatherjean/shell3/internal/adapter/openai"
-	"github.com/weatherjean/shell3/internal/luacfg"
+	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/pkg/chat"
-	"github.com/weatherjean/shell3/pkg/llm"
-	"github.com/weatherjean/shell3/pkg/persona"
 )
 
-// Spec configures a single Run. Prompt is required; the rest default.
+// Spec configures Run / Start. Prompt is used by Run only.
 type Spec struct {
-	// Prompt is the user input for the single turn. Required.
-	Prompt string
-	// ConfigPath is the path to shell3.lua. Defaults to
-	// ~/.shell3/shell3.lua when empty.
-	ConfigPath string
-	// WorkDir is the working directory for tool execution. Defaults to
-	// os.Getwd() when empty.
-	WorkDir string
+	Prompt     string
+	ConfigPath string // "" → ./shell3.lua then ~/.shell3/shell3.lua
+	WorkDir    string // "" → os.Getwd()
 }
 
 // Kind discriminates a streamed Event.
@@ -56,162 +50,6 @@ type Event struct {
 	CompletionTokens int    // Usage, Done
 	TotalTokens      int    // Usage, Done
 	Err              error  // Error
-}
-
-// runConfig runs one turn against an already-built chat.Config and streams
-// translated public Events. The returned channel is closed exactly once after
-// a final Done event; cleanup runs after teardown (used by Run to close the
-// Lua state). cfg.LLM is injectable, which is what makes this testable with
-// fakellm.
-func runConfig(ctx context.Context, cfg chat.Config, prompt string, cleanup func()) <-chan Event {
-	out := make(chan Event)
-
-	sess := chat.NewSession(chat.SessionOpts{BufSize: 256})
-	tc := chat.TurnConfig{
-		LLM:             cfg.LLM,
-		Personality:     cfg.Personality,
-		StatusLine:      cfg.StatusLine,
-		WorkDir:         cfg.WorkDir,
-		Truncate:        cfg.Truncate,
-		Handlers:        chat.NewHandlers(cfg),
-		Log:             chat.LogOrNoop(cfg.Log),
-		Headless:        true,
-		CustomTool:      cfg.CustomTool,
-		CustomToolNames: cfg.CustomToolNames,
-		ToolGuard:       cfg.ToolGuard,
-		ShellInteractive: func(ctx context.Context, cmd, workdir string) string {
-			return "error: interactive TTY not available in headless mode"
-		},
-	}
-
-	go func() {
-		sess.Run(ctx, tc, prompt)
-		sess.CloseEvents()
-	}()
-
-	go func() {
-		defer close(out)
-		defer cleanup()
-		for ev := range sess.Events() {
-			if pub, ok := translate(ev); ok {
-				out <- pub
-			}
-		}
-	}()
-
-	return out
-}
-
-// Run loads the config at spec.ConfigPath, runs one turn for spec.Prompt in
-// spec.WorkDir, and streams translated Events on the returned channel.
-//
-// A non-nil error means Run failed to START (missing/invalid config, unknown
-// model, missing key): nothing ran and the channel is nil. A nil error means
-// the turn is underway; per-turn failures arrive as Event{Kind: Error}. The
-// channel is closed exactly once when the turn ends (after Done normally, or
-// after Error on the failure path).
-//
-// The caller MUST drain the channel until it closes. Abandoning it mid-stream
-// leaks the internal forwarder goroutine — it blocks forever on the unread
-// send, and cancelling ctx does not release it. Under sustained back-pressure
-// (a consumer slower than the model) the underlying session may also drop
-// events, so a slow reader is not merely slow but lossy.
-func Run(ctx context.Context, spec Spec) (<-chan Event, error) {
-	cfg, closeLua, err := buildConfig(spec)
-	if err != nil {
-		return nil, err
-	}
-	return runConfig(ctx, cfg, spec.Prompt, closeLua), nil
-}
-
-// buildConfig loads shell3.lua and assembles the minimal chat.Config for an
-// embedded single-turn run: OpenAI-compatible adapter, persona system prompt,
-// tool defs, custom-tool dispatch, and the guard chain. The returned cleanup
-// closes the Lua state and is invoked by runConfig after the turn.
-func buildConfig(spec Spec) (chat.Config, func(), error) {
-	noop := func() {}
-
-	workDir := spec.WorkDir
-	if workDir == "" {
-		w, err := os.Getwd()
-		if err != nil {
-			return chat.Config{}, noop, fmt.Errorf("get working directory: %w", err)
-		}
-		workDir = w
-	}
-
-	configPath := spec.ConfigPath
-	if configPath == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return chat.Config{}, noop, fmt.Errorf("get home directory: %w", err)
-		}
-		configPath = filepath.Join(home, ".shell3", "shell3.lua")
-	}
-
-	lc, err := luacfg.Load(configPath, filepath.Dir(configPath))
-	if err != nil {
-		return chat.Config{}, noop, fmt.Errorf("load config: %w", err)
-	}
-	cleanup := func() { lc.Close() }
-
-	m, ok := lc.Model(lc.Agent.ModelName)
-	if !ok {
-		cleanup()
-		return chat.Config{}, noop, fmt.Errorf("agent references unknown model %q", lc.Agent.ModelName)
-	}
-
-	client := openai.NewClient(m.BaseURL, m.APIKey, m.ModelID)
-	rp := llm.RequestParams{
-		ReasoningEffort: m.Reasoning,
-		MaxTokens:       m.MaxTokens,
-		Temperature:     m.Temperature,
-	}
-	client.SetParams(rp)
-	if m.Extra != nil {
-		client.SetExtra(m.Extra)
-	}
-
-	sysPrompt := lc.BuildPersona(luacfg.RuntimeData{CWD: workDir, Model: m.ModelID})
-
-	customDefs := lc.CustomToolsFor(lc.Agent.CustomTools)
-	hasSkills := lc.Agent.SkillsActive()
-	toolDefs := luacfg.ToolDefs(lc.Agent.Gates, customDefs, hasSkills)
-
-	pers := persona.Persona{
-		Name:         lc.Agent.Name,
-		SystemPrompt: sysPrompt,
-		Tools:        toolDefs,
-		Parameters:   rp,
-	}
-
-	customNames := make(map[string]bool, len(lc.Agent.CustomTools))
-	for _, n := range lc.Agent.CustomTools {
-		customNames[n] = true
-	}
-	if hasSkills {
-		customNames["skill"] = true
-	}
-
-	cfg := chat.Config{
-		LLM:             client,
-		Personality:     pers,
-		WorkDir:         workDir,
-		StatusLine:      lc.Agent.Name + " │ " + m.ModelID,
-		ModeLabel:       lc.Agent.Name,
-		ContextWindow:   m.ContextWindow,
-		ActiveSkills:    lc.Agent.Skills,
-		CustomTool:      lc.CallTool,
-		CustomToolNames: customNames,
-		ToolGuard: func(ctx context.Context, t string, p map[string]any) (int, string, error) {
-			d, r, e := lc.OnToolCall(ctx, t, p)
-			return int(d), r, e
-		},
-		Headless: true,
-		Params:   rp,
-	}
-
-	return cfg, cleanup, nil
 }
 
 // translate maps an internal chat.Event to a public Event. ok is false when the
@@ -248,4 +86,170 @@ func usageEvent(k Kind, ev chat.Event) Event {
 		e.TotalTokens = ev.Usage.TotalTokens
 	}
 	return e
+}
+
+// Session is a live, multi-turn conversation — the plugin equivalent of an open
+// TUI. It wraps one persistent chat.Session and the full agent config, and
+// streams a per-Send channel of translated Events. Drain a Send channel to
+// completion before the next Send/Clear/Rollback/SwitchModel.
+type Session struct {
+	cfg       chat.Config
+	sess      *chat.Session
+	handlers  map[string]chat.ToolHandler
+	cleanup   func()
+	drainDone chan struct{}
+
+	mu  sync.Mutex
+	cur chan Event // current Send's channel; nil between turns
+}
+
+// Start loads the config (identically to the TUI), starts the store session,
+// and launches the event drain. A non-nil error means startup failed and no
+// Session was created.
+func Start(ctx context.Context, spec Spec) (*Session, error) {
+	workDir := spec.WorkDir
+	if workDir == "" {
+		w, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("get working directory: %w", err)
+		}
+		workDir = w
+	}
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("get home directory: %w", err)
+	}
+
+	cfg, cleanup, err := agentsetup.Build(agentsetup.Options{
+		ConfigPath: spec.ConfigPath,
+		CWD:        workDir,
+		HomeDir:    homeDir,
+		Headless:   true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return newSession(cfg, cleanup), nil
+}
+
+// newSession wires a Session around an already-built chat.Config and starts the
+// drain. Split out from Start so tests can inject a fakellm-backed config.
+func newSession(cfg chat.Config, cleanup func()) *Session {
+	var storeID int64
+	if cfg.Store != nil {
+		if id, err := cfg.Store.StartSession(); err == nil {
+			storeID = id
+		}
+	}
+	sess := chat.NewSession(chat.SessionOpts{
+		BufSize:          256,
+		StoreID:          storeID,
+		ContextWindowFor: func(string) int { return cfg.ContextWindow },
+	})
+	s := &Session{
+		cfg:       cfg,
+		sess:      sess,
+		handlers:  chat.NewHandlers(cfg),
+		cleanup:   cleanup,
+		drainDone: make(chan struct{}),
+	}
+	go s.drain()
+	return s
+}
+
+// drain is the single long-lived consumer of sess.Events(), routing translated
+// events to the current Send channel and closing it on Done/Error.
+func (s *Session) drain() {
+	defer close(s.drainDone)
+	for ev := range s.sess.Events() {
+		pub, ok := translate(ev)
+		if !ok {
+			continue
+		}
+		s.mu.Lock()
+		cur := s.cur
+		s.mu.Unlock()
+		if cur == nil {
+			continue
+		}
+		cur <- pub
+		if pub.Kind == Done || pub.Kind == Error {
+			s.mu.Lock()
+			close(s.cur)
+			s.cur = nil
+			s.mu.Unlock()
+		}
+	}
+}
+
+// Send runs one turn for prompt and returns a channel of that turn's events,
+// closed after the turn's Done (or Error). The caller MUST drain it before the
+// next Send.
+func (s *Session) Send(ctx context.Context, prompt string) <-chan Event {
+	out := make(chan Event)
+	s.mu.Lock()
+	s.cur = out
+	s.mu.Unlock()
+	tc := s.turnConfig()
+	go s.sess.Run(ctx, tc, prompt)
+	return out
+}
+
+// ID returns the store session id (rolls on compaction; "0" with no store).
+func (s *Session) ID() string {
+	return fmt.Sprintf("%d", s.sess.ID())
+}
+
+// Close ends the conversation: stops the drain, ends the store session, and
+// releases the config (store, Lua, log).
+func (s *Session) Close() error {
+	s.sess.End("ok")
+	s.sess.CloseEvents()
+	<-s.drainDone
+	if s.cfg.Store != nil {
+		_ = s.cfg.Store.EndSession(s.sess.ID())
+	}
+	s.cleanup()
+	return nil
+}
+
+// turnConfig derives the per-turn config from the current cfg. Built fresh each
+// turn so SwitchModel's mutations to cfg take effect on the next Send.
+func (s *Session) turnConfig() chat.TurnConfig {
+	return chat.TurnConfig{
+		LLM:             s.cfg.LLM,
+		Personality:     s.cfg.Personality,
+		StatusLine:      s.cfg.StatusLine,
+		WorkDir:         s.cfg.WorkDir,
+		Store:           s.cfg.Store,
+		Truncate:        s.cfg.Truncate,
+		Handlers:        s.handlers,
+		Log:             chat.LogOrNoop(s.cfg.Log),
+		Headless:        true,
+		CustomTool:      s.cfg.CustomTool,
+		CustomToolNames: s.cfg.CustomToolNames,
+		ToolGuard:       s.cfg.ToolGuard,
+		ShellInteractive: func(ctx context.Context, cmd, workdir string) string {
+			return "error: interactive TTY not available in plugin mode"
+		},
+	}
+}
+
+// Run is the one-shot convenience: Start, send spec.Prompt, stream the turn,
+// and Close when it drains. A non-nil error means startup failed.
+func Run(ctx context.Context, spec Spec) (<-chan Event, error) {
+	s, err := Start(ctx, spec)
+	if err != nil {
+		return nil, err
+	}
+	turn := s.Send(ctx, spec.Prompt)
+	out := make(chan Event)
+	go func() {
+		defer close(out)
+		defer s.Close()
+		for ev := range turn {
+			out <- ev
+		}
+	}()
+	return out, nil
 }
