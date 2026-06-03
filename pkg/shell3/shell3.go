@@ -99,8 +99,11 @@ type Session struct {
 	cleanup   func()
 	drainDone chan struct{}
 
-	mu  sync.Mutex
-	cur chan Event // current Send's channel; nil between turns
+	// mu guards cur, turnCancel, and turnDone.
+	mu         sync.Mutex
+	cur        chan Event         // current Send's channel; nil between turns (drain clears it on Done/Error)
+	turnCancel context.CancelFunc // cancels the in-flight turn; holds the last turn's (idempotent) cancel between turns
+	turnDone   chan struct{}      // closed when the turn goroutine returns; holds the last turn's (already-closed) channel between turns
 }
 
 // Start loads the config (identically to the TUI), starts the store session,
@@ -197,11 +200,19 @@ func (s *Session) drain() {
 // a supported concurrency mode.
 func (s *Session) Send(ctx context.Context, prompt string) <-chan Event {
 	out := make(chan Event)
+	turnCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
 	s.mu.Lock()
 	s.cur = out
+	s.turnCancel = cancel
+	s.turnDone = done
 	s.mu.Unlock()
 	tc := s.turnConfig()
-	go s.sess.Run(ctx, tc, prompt)
+	go func() {
+		defer close(done)
+		defer cancel() // release the child ctx when the turn ends
+		s.sess.Run(turnCtx, tc, prompt)
+	}()
 	return out
 }
 
@@ -210,9 +221,32 @@ func (s *Session) ID() string {
 	return fmt.Sprintf("%d", s.sess.ID())
 }
 
-// Close ends the conversation: stops the drain, ends the store session, and
-// releases the config (store, Lua, log).
+// Close ends the conversation: cancels any in-flight turn, waits for it to
+// finish (so its deferred history persist runs against the still-open store),
+// then stops the drain, ends the store session, and releases the config.
+//
+// As with the other lifecycle methods, the caller must not abandon an in-flight
+// Send channel: if events go unread, the drain goroutine parks on the unbuffered
+// channel send and Close blocks at <-drainDone. Drain the Send channel (Close
+// cancels the turn, so an in-flight turn ends promptly with a terminal event).
 func (s *Session) Close() error {
+	// Cancel any in-flight turn so it stops streaming and runs its deferred
+	// history persist, then join it before we close the events channel — the
+	// turn's terminal emitSync needs the drain goroutine (events channel still
+	// open) to receive it, so we must wait for <-done before CloseEvents.
+	// Joining before CloseEvents also avoids a race between close(s.events)
+	// and a concurrent s.events<-ev inside emitSync.
+	s.mu.Lock()
+	cancel := s.turnCancel
+	done := s.turnDone
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if done != nil {
+		<-done // turn goroutine (and its deferred history persist) has finished
+	}
+
 	s.sess.End("ok")
 	s.sess.CloseEvents()
 	<-s.drainDone
