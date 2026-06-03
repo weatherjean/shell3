@@ -1,0 +1,1172 @@
+[
+  {
+    "dimension": "error-handling",
+    "severity": "medium",
+    "title": "deferred sess.Close() never runs because of log.Fatal",
+    "file": "examples/webui/main.go",
+    "line": "49,64",
+    "description": "main defers sess.Close() at line 49, but the process only ever exits via log.Fatal(http.ListenAndServe(...)) at line 64 (or an earlier log.Fatal). log.Fatal calls os.Exit, which skips all deferred functions. So Session.Close() (which calls sess.End(\"ok\"), CloseEvents, and releases the store/Lua/log per pkg/shell3/shell3.go Close) is never invoked.",
+    "why": "On every shutdown the SQLite store session is left un-ended and the config resources (store handle, Lua state, app log file) are never released, so the store is not marked closed cleanly and resources are reclaimed only by process death. For a long-running server this means no clean teardown path ever exists.",
+    "suggestion": "Run the server with http.Server + Shutdown driven by signal.NotifyContext(os.Interrupt), and on shutdown explicitly call sess.Close(); reserve log.Fatal only for the ListenAndServe error after Shutdown returns, so the cleanup actually runs.",
+    "scope": "examples/webui",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "The description is factually accurate. examples/webui/main.go:49 has `defer sess.Close()`, and the function's only exit is `log.Fatal(http.ListenAndServe(addr, nil))` at line 64 (plus earlier `log.Fatal` calls at lines 34/38/47). log.Fatal calls os.Exit, which bypasses deferred functions. Since http.ListenAndServe never returns a nil error, the defer at line 49 is unreachable on every path: normal operation blocks forever in ListenAndServe, and an error goes straight to log.Fatal. Session.Close() (pkg/shell3/shell3.go:215-224) does real teardown — sess.End(\"ok\"), CloseEvents(), waits on drainDone, Store.EndSession(sess.ID()), and cleanup() — so none of that runs. The technical observation is genuine: the defer is effectively dead code and there is no clean shutdown path.\n\nHowever, severity should be low, not medium. This file is explicitly a minimal example (\"kicking the tires on the plugin API shape,\" go run ./examples/webui), not production server code. On process exit the OS reclaims the SQLite handle, Lua state, and app-log file regardless; the only lost behavior is the cosmetic EndSession \"clean close\" marker, which has no functional downstream impact (each run gets a fresh session ID). The defer-then-log.Fatal pattern is a common, low-stakes idiom in throwaway demos. The suggested fix (http.Server + signal.NotifyContext + Shutdown + explicit Close) is correct and reasonable, but the \"no clean teardown path ever exists\" framing overstates the impact for an example binary."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "error-handling",
+    "severity": "low",
+    "title": "json.Marshal error discarded with blank identifier",
+    "file": "examples/webui/main.go",
+    "line": "122",
+    "description": "b, _ := json.Marshal(out) drops the marshal error. If marshalling ever failed, b would be nil and the code would still write 'data: \\n\\n' to the SSE stream.",
+    "why": "Today sseEvent only holds strings/ints so Marshal cannot realistically fail, but discarding the error means any future field (e.g. a type with a failing MarshalJSON) would silently emit a malformed/empty SSE frame to the browser instead of surfacing the problem.",
+    "suggestion": "Check the error: if err != nil, log it and skip the Fprintf/Flush for that event rather than writing an empty data frame.",
+    "scope": "examples/webui",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Verified at /Users/weatherjean/CODE/AGENTS/shell3/examples/webui/main.go:122: `b, _ := json.Marshal(out)` then `fmt.Fprintf(w, \"data: %s\\n\\n\", b)` and `flusher.Flush()`. The error is indeed discarded. The sseEvent struct (lines 73-81) contains only string and int fields (Kind, Text, ToolName, ToolInput, ToolOutput, TotalTokens, Err), so json.Marshal cannot realistically fail today — the encoder only errors on channels/functions/cyclic structures/failing custom MarshalJSON, none of which are present. The description is factually accurate, the location is correct, and the consequence is honestly framed as forward-looking (a future field with a failing MarshalJSON would emit an empty `data: \\n\\n` frame). It is a genuine error-handling antipattern (discarded error), but unreachable in current code and confined to an example program, so low severity is appropriate. Not intentional/guarded — just a dropped error."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "concurrency",
+    "severity": "low",
+    "title": "slow SSE client blocks every other tab for a full turn under the global turn mutex",
+    "file": "examples/webui/main.go",
+    "line": "102",
+    "description": "handleSend takes s.mu for the entire Send drain (lines 102-125), and the writes to w plus flusher.Flush() happen while the lock is held. A slow or stalled HTTP client back-pressures the Flush, which back-pressures the drain loop, all while the single turn mutex is held.",
+    "why": "Because one shared Session drives all tabs and the mutex spans the whole turn including network writes to the client, a single slow consumer stalls every other browser tab's /send for the duration. This is inherent to the documented single-session design, but the per-event Flush being inside the lock makes client-side slowness, not just LLM latency, a global serialization point.",
+    "suggestion": "This is acceptable for a tires-kicking example; if it ever needs to scale, decouple draining the Session (under the lock) from writing to the client (outside the lock) via a buffered per-request channel, so a slow client no longer holds the shared turn mutex.",
+    "scope": "examples/webui",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "The code at examples/webui/main.go matches the claim. handleSend takes s.mu (line 102) with `defer s.mu.Unlock()` (line 103), so the lock is held for the entire `for ev := range s.sess.Send(ctx, msg)` drain (lines 106-125). The per-event `fmt.Fprintf(w, ...)` (line 123) and `flusher.Flush()` (line 124) execute while the lock is held. Because Flush back-pressures on a slow TCP consumer, a slow-but-connected client can stall the drain loop while the shared turn mutex (line 68, \"serialize turns: one Send fully drained before the next\") is held, serializing every other tab's /send. The description is factually correct.\\n\\nThe across-tab serialization itself is intentional and documented (file header lines 5-6, comment lines 100-101): the Session contract requires draining each Send channel before the next, so one shared Session inherently serializes turns. The finding correctly distinguishes this inherent behavior from the avoidable part — pulling *client-write* latency (not just LLM latency) inside the lock. There is a partial mitigation at lines 105/108-110: r.Context() cancels the turn on browser disconnect and writing stops once ctx.Err() != nil, but that only covers a fully-disconnected client, not a slow-but-alive one whose Flush blocks. So the issue is genuine.\\n\\nLocation is correct (line 102). Severity is honestly low: this is an explicitly labeled tire-kicking example (file header: \"for kicking the tires on the plugin API shape\"), the dominant serialization is by design, and the incremental cost is only client-side slowness. The suggested fix (buffer events per request, drain under lock, write outside lock) is sound but optional for an example. Real but low."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "concurrency",
+    "severity": "critical",
+    "title": "onEvent callback invoked concurrently from two goroutines (data race)",
+    "file": "internal/adapter/openai/client.go",
+    "line": "62, 102, 234, 257-289",
+    "description": "RoundTrip starts `go b.scanReasoning(pr, done)` which reads the SSE body via the TeeReader in lockstep with the main Stream loop. scanReasoning calls the `onReasoningDelta` callback (set in Stream to `func(r string){ onEvent(...) }`) on the scanner goroutine, while the main `for stream.Next()` loop simultaneously calls `onEvent` for TextDelta/ToolCall/Usage. Both run concurrently and invoke the same caller-supplied `onEvent` closure.",
+    "why": "The sole caller (chat/turn.go:346 streamOnce) closes over `sb`/`rb strings.Builder`, `toolCalls []llm.ToolCall`, and `usage`, none guarded by a lock. Concurrent onEvent calls from the scan goroutine (ReasoningDelta) and the main loop (TextDelta/ToolCall) produce a genuine data race on those variables — `go test -race` would flag it, and it can corrupt the accumulated reasoning/text/tool-call state or crash.",
+    "suggestion": "Do not call onEvent directly from the scanReasoning goroutine. Instead funnel reasoning deltas through a channel that the main Stream goroutine drains in its select/loop, so all onEvent calls happen on a single goroutine. Document in the llm.Provider/Stream contract that onEvent is invoked from exactly one goroutine.",
+    "scope": "internal/adapter/openai",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "high",
+      "reasoning": "Verified against the actual code. client.go:62 spawns `go b.scanReasoning(pr, done)` which runs concurrently with the main `for stream.Next()` loop (client.go:257) on the caller's goroutine. scanReasoning invokes `cb(frag)` (line 103) where cb is the closure set at line 234: `func(r string){ onEvent(llm.StreamEvent{ReasoningDelta: r}) }`. The main loop independently calls the same `onEvent` for Usage (261), TextDelta (274), and ToolCall (310). The `b.mu` mutex only guards struct fields and is explicitly released at line 101 BEFORE calling cb at line 103, so it does NOT serialize the two onEvent invocations. The io.Pipe (line 56) + TeeReader (line 57) synchronizes byte transfer (pw.Write blocks until pr is read) but after each read both goroutines independently parse and call onEvent — there is no lockstep that makes the onEvent calls mutually exclusive. The sole caller streamOnce (turn.go:345-360) closes over `sb, rb strings.Builder`, `toolCalls []llm.ToolCall`, and `usage`, mutating all of them inside onEvent with NO lock; strings.Builder.WriteString and slice append are not concurrency-safe, so this is a genuine data race that `go test -race` would flag and that can corrupt accumulated reasoning/text/tool-call state. The llm.Streamer contract (provider.go) does not document single-goroutine invocation, so the caller's assumption is reasonable and the defect is in the adapter. Reachable in practice: the code comments (lines 22-23, 90-96) confirm reasoning fields target OpenRouter/Moonshot/DeepSeek, which interleave reasoning and content/tool deltas in one stream. The claimed location and mechanism are all correct, and the suggested fix (funnel reasoning deltas through a channel drained by the main loop) is sound. Lowered from critical to high: the race is provider-conditional (only fires when reasoning deltas interleave with other deltas, i.e. reasoning-capable non-OpenAI providers) and corrupts per-turn accumulation rather than persistent or security-sensitive state, but it is unquestionably a real concurrency bug."
+    },
+    "finalSeverity": "high"
+  },
+  {
+    "dimension": "concurrency",
+    "severity": "high",
+    "title": "onReasoningDelta callback can fire after Stream returns",
+    "file": "internal/adapter/openai/client.go",
+    "line": "232-241, 99-104",
+    "description": "Stream sets `c.tap.onReasoningDelta` and clears it via defer when Stream returns. The scanReasoning goroutine reads `cb := b.onReasoningDelta` under lock then invokes cb. Closing the stream / returning from Stream does not guarantee the scanReasoning goroutine has stopped — WaitReasoning(ctx) returns early on ctx cancellation (line 129-131) without the goroutine finishing.",
+    "why": "On context cancellation, Stream returns and the deferred clear runs, but the still-running scanReasoning goroutine may have already snapshotted a non-nil cb and call onEvent after streamOnce has returned, writing to its strings.Builder after the caller considers the stream done — a use-after-return race. The goroutine also keeps running until the pipe closes, a transient leak per cancelled request.",
+    "suggestion": "Tie the scan goroutine's lifetime to the request: ensure it is signalled to stop and joined before Stream returns (e.g. close the pipe/read side and wait on done unconditionally, or guard onEvent dispatch behind a per-call generation token checked under the same lock).",
+    "scope": "internal/adapter/openai",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "medium",
+      "reasoning": "Verified against actual code in internal/adapter/openai/client.go. The mechanics in the claim are accurate:\n\n1. The scanReasoning goroutine is launched in RoundTrip (line 62) and its lifetime is NOT tied to Stream's return — nothing joins it unconditionally.\n2. Stream sets c.tap.onReasoningDelta under lock (lines 233-235) and clears it via defer (lines 236-240) when it returns.\n3. In scanReasoning (lines 99-104), the lock guards ONLY the read of the callback pointer (cb := b.onReasoningDelta), then cb(frag) is invoked OUTSIDE the lock. So the deferred clear cannot stop an already-snapshotted cb from firing.\n4. WaitReasoning(ctx) (lines 120-135) returns early on ctx.Done() (line 129-131) WITHOUT waiting on the `done` channel, so on cancellation Stream returns while scanReasoning is still running.\n\nThe cb is `func(r string){ onEvent(llm.StreamEvent{ReasoningDelta:r}) }` (line 234). The caller streamOnce (internal/chat/turn.go:346-364) has onEvent write to `rb`, a strings.Builder local to streamOnce (turn.go:352). On ctx cancellation streamOnce returns at turn.go:365-367 while a concurrent scanReasoning goroutine can still invoke cb -> onEvent -> rb.WriteString. That is a genuine data race / use-after-return on the caller's builder, plus a transient goroutine leak until the pipe closes.\n\nThe non-cancellation path is safe (WaitReasoning blocks on `done`, which is closed only after the scan loop fully completes at lines 68/107-110), so the bug is confined to the ctx-cancellation early-return path.\n\nTwo caveats lowering severity from the claimed high: (a) the description says it writes 'to its strings.Builder' — the sb builder inside scanReasoning (line 69) is goroutine-local and not the racy object; the actual racy write is the caller's rb via onEvent, a minor mischaracterization that does not change the substance. (b) The window is narrow (reasoning delta in-flight at the exact cancellation instant) and the affected data is reasoning text for an already-cancelled turn whose result is typically discarded. It is a real, race-detector-catchable concurrency bug, but practical impact is limited — hence medium rather than high. The suggested fix (join/signal the scan goroutine before Stream returns, or guard onEvent dispatch under the same lock that the clear holds) is appropriate."
+    },
+    "finalSeverity": "medium"
+  },
+  {
+    "dimension": "concurrency",
+    "severity": "medium",
+    "title": "stderr mirror write happens outside the mutex",
+    "file": "internal/applog/logger.go",
+    "line": "48-56, 74-76",
+    "description": "write() locks l.mu only around the file write (io.WriteString at line 75) and returns the formatted line. Warn() and Error() then call fmt.Fprint(l.stderr, line) at lines 50 and 55 with no lock held. fileLogger is shared across goroutines (e.g. internal/chat passes one applog.Logger to concurrent turn/tool handlers).",
+    "why": "Concurrent Warn/Error calls race on stderr: their lines can interleave byte-wise, and because the file write and the stderr write are not performed atomically under the same lock, the relative ordering of lines between the log file and stderr can diverge. The mutex gives a false impression that the whole emit is serialized.",
+    "suggestion": "Move the stderr mirror inside the locked region: have write() take the level (or a mirror bool) and do both the file write and the optional fmt.Fprint(l.stderr, line) while holding l.mu, instead of returning the line to be written unlocked by the caller.",
+    "scope": "internal/applog",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "The code matches the description. In logger.go, write() (lines 58-78) holds l.mu only around the file write: l.mu.Lock(); io.WriteString(l.w, line); l.mu.Unlock() (lines 74-76), then returns line. Warn() (line 49-50) and Error() (line 54-55) call fmt.Fprint(l.stderr, line) with no lock held. fileLogger has a sync.Mutex (struct, lines 38-42) and a single instance is created in Open() (line 91) and shared as applog.Logger. The logger IS used across goroutines: chat/turn.go RunTurn is documented as running in a goroutine (\"panic in turn goroutine\", line 85; doc.go shows `go func()`), and saveHistory/appendHistory take an applog.Logger; the test launches sess.Run in a goroutine. So concurrent Warn/Error is reachable.\n\nSeverity is overstated, however. The claim that \"lines can interleave byte-wise\" on stderr is wrong in practice: each fmt.Fprint(l.stderr, line) writes the complete line (including the trailing \"\\n\" appended at line 72) via a single os.File.Write -> one write(2) syscall, which is not byte-wise split across concurrent goroutines, and os.File.Write is internally goroutine-safe. So there is no data race and no intra-line corruption. The only genuine consequence is the accurate ordering point: because the file write (under lock) and the stderr write (unlocked) are not atomic together, the relative ordering of two goroutines' lines can differ between the log file and stderr. That is a real but cosmetic divergence in diagnostic output, not a correctness/safety bug. The suggested fix (do both writes under l.mu) is valid and cheap. Genuine antipattern, but low severity rather than medium."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "error-handling",
+    "severity": "low",
+    "title": "Trailing odd field is silently dropped",
+    "file": "internal/applog/logger.go",
+    "line": "69",
+    "description": "The loop condition `i+1 < len(fields)` stops before an unpaired final element, so calling e.g. Warn(\"msg\", \"key\") (value forgotten) silently omits the key entirely rather than recording that data was missing.",
+    "why": "A common caller mistake (odd number of variadic fields) loses information with zero feedback, making it hard to notice that a structured field was dropped from logs during an incident.",
+    "suggestion": "After the pairing loop, if len(fields) is odd, append the dangling key with an explicit placeholder, e.g. fmt.Fprintf(&b, \" %v=<MISSING>\", fields[len(fields)-1]).",
+    "scope": "internal/applog",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Verified at /Users/weatherjean/CODE/AGENTS/shell3/internal/applog/logger.go:69. The loop is `for i := 0; i+1 < len(fields); i += 2 { fmt.Fprintf(&b, \" %v=%v\", fields[i], fields[i+1]) }`. The description is factually accurate: with an odd-length fields slice (e.g. Warn(\"msg\", \"key\") with the value forgotten), the condition `i+1 < len(fields)` stops before the unpaired final element, so the dangling key is silently dropped with no feedback. The struct doc comment (line 22) documents the intended key/value-pair contract, confirming odd counts are a caller mistake rather than a supported call shape. The claimed location is correct, and the lock usage / err handling around it are unrelated and fine. This is a genuine antipattern but minor: it only affects structured log lines (no panic, no data corruption, no security impact), and the silently-dropped-key idiom is common in lightweight loggers. Low severity is appropriate. The suggested fix (emit a `<MISSING>` placeholder for a dangling key) is a reasonable, low-risk improvement."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "error-handling",
+    "severity": "high",
+    "title": "Process orphaned when registry persistence fails after spawn",
+    "file": "internal/bgjobs/bgjobs.go",
+    "line": "90-112",
+    "description": "Start() calls c.Start() (line 90) and spawns the reaping goroutine (line 99), then calls appendJob() (line 109). If appendJob fails (e.g. MkdirAll on .shell3 fails, or writeAtomic's CreateTemp/Write/Rename fails on a read-only or full disk), Start returns an error with a zero Job{}. The already-spawned, detached process (Setpgid) keeps running but is never recorded in bg.json and its PID is never returned to the caller (handler_bash_bg.go discards the zero Job on error at line 31-33).",
+    "why": "The background process is orphaned: it keeps consuming resources with no entry in bg.json and no PID surfaced to the model, so the documented 'manage via bash (kill, kill -0, rm)' workflow cannot find or terminate it. On a failing/full disk this leaks a real OS process per invocation.",
+    "suggestion": "On appendJob failure, kill the just-spawned process group before returning: capture pid, and in the error branch call syscall.Kill(-pid, syscall.SIGKILL) (and remove the log file), or alternatively return the Job alongside the error so the caller can still kill it. Persisting before/independently of the spawn is not possible since the PID is needed, so cleanup-on-failure is the correct fix.",
+    "scope": "internal/bgjobs",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "medium",
+      "reasoning": "Verified against the actual code. In internal/bgjobs/bgjobs.go, Start() spawns a detached process group via c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} then c.Start() (line 89-92), captures pid (line 93), launches a reaping goroutine that only does c.Wait() and never kills (line 99), then persists via appendJob() (line 109). On appendJob failure it returns Job{}, fmt.Errorf(\"persist: %w\", err) (line 110) — a zero Job with no PID. The caller internal/chat/handler_bash_bg.go:30-33 does `if err != nil { return \"\", fmt.Errorf(...) }`, discarding the zero Job entirely, so the PID is never surfaced to the model. appendJob (line 153-167) can genuinely fail: MkdirAll on <workdir>/.shell3 (line 156), LoadRegistry, and writeAtomic's CreateTemp/Write/Rename (line 175-189) all touch the project filesystem (read-only mount, full disk, or .shell3 being a regular file). Notably the log dir is /tmp/shell3 (line 64) on a different filesystem from the workdir registry, so the log open can succeed while the registry write fails — exactly the orphan window described. Result: a live bash process group keeps running with no entry in bg.json and no PID in the tool output, defeating the documented 'manage via bash (kill, kill -0, rm)' workflow. The claimed location (line 90-112) and all factual specifics are correct. The suggested fix is sound: the process group (Setpgid already set) can be cleanly torn down with syscall.Kill(-pid, syscall.SIGKILL) in the error branch, or the Job could be returned alongside the error. I downgrade high→medium because this leak is gated behind an uncommon error path (disk full / read-only / corrupt .shell3) rather than a normal-operation defect, though when triggered it leaks a real unmanageable OS process per invocation."
+    },
+    "finalSeverity": "medium"
+  },
+  {
+    "dimension": "concurrency",
+    "severity": "low",
+    "title": "Corrupt-registry backup unconditionally overwrites a prior .bak",
+    "file": "internal/bgjobs/bgjobs.go",
+    "line": "162",
+    "description": "When LoadRegistry returns a parse error, appendJob renames bg.json to bg.json.bak with a fixed name. The rename error is also ignored (assigned to _). If a previous corruption already produced a .bak, the older forensic copy is silently clobbered; if the rename fails, the code proceeds to overwrite the corrupt original with a fresh registry anyway, losing the corrupt data entirely.",
+    "why": "The stated intent (line 151-152) is to 'preserve forensics'; a fixed .bak name plus ignored rename error means the corrupt data can be lost despite the comment's promise, undermining post-mortem debugging.",
+    "suggestion": "Use a timestamped/unique backup name (e.g. bg.json.<unix>.bak) and check the rename error; if backup fails, return the error instead of silently destroying the corrupt file by overwriting it.",
+    "scope": "internal/bgjobs",
+    "verdict": {
+      "real": true,
+      "confidence": "medium",
+      "adjustedSeverity": "low",
+      "reasoning": "The code at internal/bgjobs/bgjobs.go:162 matches the description verbatim: `_ = os.Rename(registryPath(workdir), registryPath(workdir)+\".bak\")` uses a fixed `.bak` name and ignores the rename error, while the comment at lines 150-152 promises to \"preserve forensics.\" Factually accurate: a prior `bg.json.bak` from an earlier corruption would be silently clobbered, and if the rename fails, appendJob falls through to writeAtomic (line 166) which overwrites the corrupt original with a fresh registry, losing the corrupt data. So the documented forensics intent can be defeated. This is a genuine, if minor, robustness gap; the suggested fix (timestamped backup name + checking the rename error) is reasonable.\n\nHowever, two qualifications lower the importance and contradict the claimed dimension: (1) The \"concurrency\" label is wrong. appendJob holds fileLock.Lock() for the entire load-backup-write sequence (line 154-155), and os.Rename is atomic, so there is no concurrent-clobbering race within the process. The only way an older .bak gets overwritten is across sequential corruption events, which is not a concurrency bug. (2) The data at stake is the local .shell3/bg.json background-job tracking metadata — operational state, not user data — so the post-mortem value of preserving a corrupt copy is limited. Real but correctly rated low severity, and mis-categorized as concurrency."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "error-handling",
+    "severity": "medium",
+    "title": "Final WriteString error returned without %w wrapping; Close error discarded",
+    "file": "internal/bootstrap/bootstrap.go",
+    "line": "72-74",
+    "description": "ensureGitignore returns `err` from `f.WriteString(entry)` directly (unwrapped) and the deferred `_ = f.Close()` discards any close error. Every other failure path in this package is wrapped with `bootstrap: ...: %w`, so a write failure here surfaces as a bare, context-less error. On an append-only write to .gitignore the data may be partially written and a Close error (e.g. ENOSPC flushed at close) is silently lost.",
+    "why": "A failed append leaves a truncated/partial .gitignore and the caller gets an error with no `bootstrap:` prefix, breaking the package's error-context convention and making the failure hard to attribute. A lost Close error can mask a write that never durably landed.",
+    "suggestion": "Wrap the write error: `if _, err := f.WriteString(entry); err != nil { return fmt.Errorf(\"bootstrap: write gitignore: %w\", err) }` and capture/return the Close error via a named return or `errors.Join`, e.g. `defer func() { if cerr := f.Close(); cerr != nil && err == nil { err = cerr } }()`.",
+    "scope": "internal/bootstrap",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Factually accurate. At internal/bootstrap/bootstrap.go:72-74, ensureGitignore does `defer func() { _ = f.Close() }()` then `_, err = f.WriteString(entry); return err`, returning the write error unwrapped. The two other error paths in the same function (line 59 `bootstrap: read gitignore: %w`, line 70 `bootstrap: open gitignore: %w`) ARE wrapped, so the unwrapped write return is a genuine intra-function inconsistency. The consequence claim is also confirmed: the caller EnsureProject (lines 40-42) returns ensureGitignore's error directly with NO added prefix (unlike EnsureGlobal at line 28, which wraps ensureGlobalGitignore with `bootstrap: global gitignore:`), so a write failure here surfaces with no `bootstrap:` context at all. Location is correct.\n\nHowever, I downgrade from medium to low: (1) the discarded Close error via `defer _ = f.Close()` is a widely-accepted Go idiom, and the sibling ensureGlobalGitignore (lines 103-104) does the identical thing — this is the package's own pattern, not a deviation, so the Close half is not really an antipattern; (2) the partial-write/ENOSPC concern is theoretically valid but near-negligible for appending a tiny fixed string (\".ref\\n\") to .gitignore; (3) the real defect is purely the missing %w wrap on one error path, a cosmetic/consistency issue with no behavioral break. Worth fixing for convention adherence, but impact is low, not medium."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "error-handling",
+    "severity": "low",
+    "title": "ensureGlobalGitignore returns raw write error, not wrapped",
+    "file": "internal/bootstrap/bootstrap.go",
+    "line": "103-104",
+    "description": "Same pattern as ensureGitignore: the final `_, err = f.WriteString(addition); return err` returns an unwrapped error, and the deferred Close error is discarded. The caller (EnsureGlobal) wraps it once more, but the inner `read:`/`open:` errors here use terse non-`bootstrap:` prefixes inconsistent with the rest of the file.",
+    "why": "Inconsistent/under-specified error context and a discarded Close error on the write to ~/.shell3/.gitignore; a write that fails at flush-on-close is invisible.",
+    "suggestion": "Wrap the write error and propagate Close via named return or errors.Join, matching the wrapping style used elsewhere in this package.",
+    "scope": "internal/bootstrap",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Verified against the actual code at internal/bootstrap/bootstrap.go:80-105. Every factual claim holds:\n\n- Lines 103-104: `_, err = f.WriteString(addition); return err` returns the raw write error unwrapped, unlike the `fmt.Errorf(\"bootstrap: ...: %w\", ...)` wrapping used throughout the rest of the file (lines 19, 25, 28, 37, 46, 50, 59, 70).\n- Line 102: `defer func() { _ = f.Close() }()` explicitly discards the Close error, so a flush-on-close failure when appending to ~/.shell3/.gitignore is invisible — the function can return nil while the write never reached disk.\n- Lines 84 and 100: the inner errors use terse `read:` and `open:` prefixes, inconsistent with the `bootstrap:` prefix the rest of the package (and the sibling ensureGitignore at lines 55-75) uses. The sibling local function uses `bootstrap: read gitignore`/`bootstrap: open gitignore`, making the inconsistency real and in-file.\n\nIn-context this is genuine but minor. The caller EnsureGlobal (line 27-28) does wrap the result once with `bootstrap: global gitignore: %w`, so the user still gets package-level context — that softens the prefix-inconsistency point to cosmetic. The discarded Close error is the more substantive gap, though it affects a small append-only gitignore write whose failure is non-catastrophic. Not unreachable, not already-handled, not factually wrong. The claimed location is correct. This is an accurate low-severity error-handling nit; severity stays low."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "api-structure",
+    "severity": "medium",
+    "title": "Local .gitignore never ignores bg.json despite paths.go declaring it gitignored",
+    "file": "internal/bootstrap/bootstrap.go",
+    "line": "55-75",
+    "description": "ensureGitignore only ever adds the `.ref` entry to ./.shell3/.gitignore. However paths.go documents `BGJobs string // ./.shell3/bg.json (gitignored)` (internal/paths/paths.go:25). Nothing in the codebase adds `bg.json` to the local .gitignore, so the per-project background-job registry is committable.",
+    "why": "bg.json (per-project background job state, PIDs, command lines, log paths under /tmp) can be accidentally committed to the user's repo, contradicting the stated invariant and leaking machine-local state into version control.",
+    "suggestion": "Add `bg.json` to the local .gitignore alongside `.ref` (e.g. write both entries, checking each independently), or document why bg.json is intentionally not ignored if that is the real intent.",
+    "scope": "internal/bootstrap",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Verified against actual code. internal/bootstrap/bootstrap.go:55-75 (ensureGitignore) only ever handles `.ref`: it short-circuits with `if strings.Contains(string(b), \".ref\") { return nil }` and writes only `.ref\\n` (or `\\n.ref\\n`). Nothing in the codebase adds `bg.json` to ./.shell3/.gitignore (grep across internal/ and pkg/ for \"bg.json\" shows no gitignore writer). Meanwhile internal/paths/paths.go:25 documents `BGJobs string // ./.shell3/bg.json (gitignored)`, explicitly declaring the file gitignored. The contents are genuinely machine-local: internal/bgjobs/bgjobs.go:27-35 defines Job with PID, Cmd, Log (a /tmp path), Workdir, and StartedAt — transient per-machine state. So the description is factually accurate and the location is correct: the declared \"(gitignored)\" invariant is not enforced and bg.json is committable.\n\nThis is a real but low-severity invariant/contract mismatch rather than medium. It is clearly an oversight, not intentional design: the sibling ensureGlobalGitignore (bootstrap.go:80-115) deliberately ignores secrets/logs/projects, showing the author would have ignored bg.json had they remembered, and the paths.go comment states the intent. The blast radius is small — only low-sensitivity local PIDs/paths, leaked only if the user commits .shell3/, with no effect on the running program. The suggested fix (add bg.json as an independently-checked entry alongside .ref) is appropriate; the current `.ref`-substring sentinel is also fragile and would not detect a missing bg.json entry on its own."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "error-handling",
+    "severity": "medium",
+    "title": "Substring sentinel matching can produce false positives, skipping needed entries",
+    "file": "internal/bootstrap/bootstrap.go",
+    "line": "61,89",
+    "description": "`strings.Contains(string(b), \".ref\")` and `strings.Contains(content, \"shell3.log\")` decide whether the entries are already present. These are unanchored substring checks, not line/glob matches. A pre-existing .gitignore line such as `*.reference`, `my.ref.bak`, or a comment mentioning `shell3.log` (e.g. `# don't commit shell3.log`) matches the sentinel and causes the function to skip adding the real ignore rules.",
+    "why": "On a user's existing dotfiles .gitignore that merely mentions the substring, the intended ignore patterns (.ref, or the credential/log block) are never written, so secrets/logs can end up tracked — the exact outcome the global gitignore exists to prevent.",
+    "suggestion": "Match whole lines instead of substrings: split the file on newlines and compare trimmed lines to the exact entries (e.g. `slices.Contains(lines, \".ref\")` / check for a line equal to `shell3.log`), or use a more specific sentinel comment that the function itself writes.",
+    "scope": "internal/bootstrap",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "The code mechanics described are accurate. bootstrap.go:61 uses `strings.Contains(string(b), \".ref\")` and bootstrap.go:89 uses `strings.Contains(content, \"shell3.log\")` as idempotency sentinels — both unanchored substring checks. A pre-existing line such as `*.reference` or a comment like `# don't commit shell3.log` would match the sentinel and cause the real ignore rules in `entry`/`globalGitignoreAddition` (which includes credential patterns `ai-do-not-read.*` and `projects/`) to be skipped. So the failure mode is technically real and the suggested whole-line/`slices.Contains` fix is appropriate.\n\nHowever, the claimed consequence overstates real-world exposure, which is why I downgrade from medium to low. These functions do not touch the user's repo-root or top-level `~/.gitignore`. Per internal/paths/paths.go and the only callers (internal/agentsetup/agentsetup.go:102,105), the targets are always `./.shell3/.gitignore` (l.Root = cwd/.shell3) and `~/.shell3/.gitignore` (g.Root = home/.shell3) — files inside directories shell3 creates and owns. For a false-positive collision the user must have manually written a substring-matching line into shell3's own managed gitignore, which is unusual. The substring check is also a deliberate idempotency guard, verified by TestGlobalGitignore (no duplication on repeated EnsureGlobal) and TestEnsureGitignoreAppends. Genuine hardening opportunity, but low likelihood and not the dotfiles-mention scenario the description frames."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "concurrency",
+    "severity": "high",
+    "title": "Terminal turn_done/error event uses lossy non-blocking emit and can be silently dropped",
+    "file": "internal/chat/event.go",
+    "line": "228-237",
+    "description": "emit() does a non-blocking select send with a default branch, so when the buffered event channel (default cap 256) is full it drops the event. The single terminal event of a turn (emitTurnDone / emitError) goes through this exact path. During a long token stream with a slow consumer the buffer fills with EventAssistantToken events and the terminal event can be the one that gets dropped.",
+    "why": "Both embedding paths key 'turn finished' off the terminal event. In the TUI drainTurn (internal/tui/interactive.go:341-359) only EventTurnDone/EventError call app.SetBusy(false,...); a dropped terminal event leaves the UI busy forever and input is gated while busy. In pkg/shell3 drain (pkg/shell3/shell3.go:176-186) the per-Send channel is closed only on Done/Error, so a dropped terminal event leaves the caller's range-over-channel hung forever. This is a real user-visible hang, not just a lost token.",
+    "suggestion": "Send the terminal event (and other one-shot, non-token events) with a blocking send rather than the lossy non-blocking emit; reserve drop-on-full only for high-volume EventAssistantToken/EventAssistantReasoning. Alternatively guarantee delivery of the terminal event via a separate done signal that the consumer can always observe.",
+    "scope": "internal/chat",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "high",
+      "reasoning": "Verified against the actual code. internal/chat/event.go:228-237 defines emit() as a non-blocking `select { case s.events <- ev: default: }` with the comment \"emit performs a non-blocking send. Dropped events are not retried.\" The terminal events go through this exact path: emitTurnDone (lines 215-222) and emitError (lines 189-191) both call emit(), the same function used by the high-volume emitAssistantToken (line 178) and emitAssistantReasoning (line 203). They all share one channel (session.go:47, `events: make(chan Event, opts.BufSize)`), default BufSize 256 (session.go:43-44). There is no ordering or reservation that protects the terminal event from being the one dropped when the buffer is full — it is exactly as droppable as a token.\n\nThe claimed consequences are accurate. TUI consumer (internal/tui/interactive.go:341-359): only EventTurnDone and EventError call app.SetBusy(false, nil); a dropped terminal event leaves the UI busy forever. pkg/shell3 consumer (shell3.go:162-188 drain): translate() maps EventTurnDone→Done (line 70-71) and EventError→Error (line 74-75), and the per-Send channel `cur` is closed ONLY when pub.Kind == Done || Error (line 176-186). A dropped terminal event means close(cur) never runs, so a caller ranging over the Send channel hangs forever. Both are genuine permanent-hang failure modes, not lost-token glitches.\n\nThis is a real antipattern: a guaranteed-delivery control/terminal event is multiplexed onto the same drop-on-full channel as best-effort high-volume data events. Severity high is justified because the failure mode is a silent permanent hang of the embedding consumer. The trigger requires a consumer slow enough to let 256 buffered events accumulate; the pkg/shell3 path is entirely caller-paced (a slow caller trivially triggers it), and the TUI path can fall behind during fast token streams with heavy rendering. The suggested fix (blocking send for one-shot terminal/control events, drop-on-full reserved for token/reasoning) is sound."
+    },
+    "finalSeverity": "high"
+  },
+  {
+    "dimension": "error-handling",
+    "severity": "medium",
+    "title": "StartSession error during compact_history is swallowed, leaving session id stale",
+    "file": "internal/chat/tools.go",
+    "line": "77-80",
+    "description": "handleCompactHistory calls st.StartSession() and only assigns sess.id when err == nil. On error the error is neither logged nor surfaced, unlike the sibling EndSession call just above which logs via lg.Warn. sess.id then still points at the session that was just ended by EndSession(prevSessionID).",
+    "why": "After a failed roll, sess.id references an already-ended session, so subsequent saveHistory/appendHistory writes target a dead session and the 'History compacted (session X → Y)' message reports a misleading id. The fault is invisible because nothing logs it, contradicting the package's stated best-effort-but-surface-faults convention.",
+    "suggestion": "Log the StartSession error (lg.Warn) like the adjacent EndSession failure, so a failed session roll is at least observable; consider keeping the old id explicitly or aborting the roll cleanly.",
+    "scope": "internal/chat",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Verified the actual code at internal/chat/tools.go:77-80. The claim is factually accurate. handleCompactHistory does this:\n\n  if err := st.EndSession(prevSessionID); err != nil {\n      lg.Warn(\"end session failed during compact\", \"session_id\", prevSessionID, \"error\", err)\n  }\n  newID, err := st.StartSession()\n  if err == nil {\n      sess.id = newID\n  }\n\nThe sibling EndSession call logs its failure via lg.Warn, but the StartSession error is silently discarded (the `err` is never used in the else branch). On StartSession failure, StartSession returns (0, err) per internal/store/store.go:256, so sess.id retains prevSessionID — the session that was just ended by EndSession(prevSessionID) one line above. Confirmed sess.id == prevSessionID after a failed roll, so later appendHistory/saveHistory writes (turn.go:408,430) target an already-ended session.\n\nThis contradicts the package's own documented convention: appendHistory's comment (turn.go:428-429) states persistence is best-effort and logs on failure, and the immediately-adjacent EndSession does log. StartSession is the lone unlogged store error here, so a failed session roll is completely invisible.\n\nOne imprecision in the claimed consequence: the output line `History compacted (session %d → %d)` (tools.go:147) uses sess.id, which on error equals prevSessionID, so it would print \"session X → X\" — not a different misleading id Y. That detail is slightly overstated, but the core defect (swallowed error, stale sess.id, broken surface-faults convention) is real and the location is exactly correct.\n\nLowering severity from medium to low: store.Exec failures are rare (local SQLite), the function is already in best-effort persistence territory, and the impact is degraded observability/history rather than data corruption or a crash. The fix is trivial and worthwhile (add an lg.Warn matching the EndSession line), but the practical risk is minor."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "api-structure",
+    "severity": "low",
+    "title": "dispatchCustomTool takes a full Config but uses only one field; caller builds a throwaway Config",
+    "file": "internal/chat/turn.go",
+    "line": "265",
+    "description": "executeToolCalls calls dispatchCustomTool(ctx, Config{CustomTool: cfg.CustomTool}, ...), allocating a synthetic Config whose 29 other fields are zero, purely to pass a single function value. dispatchCustomTool (tools.go:27) only reads cfg.CustomTool.",
+    "why": "The big Config (the top-level embedding contract) is being repurposed as a one-field argument carrier, which is a leaky abstraction: a reader must inspect dispatchCustomTool to learn that all the zero fields are intentional, and it invites future code to assume the synthetic Config is fully populated.",
+    "suggestion": "Change dispatchCustomTool to accept the function value directly: dispatchCustomTool(ctx context.Context, custom func(context.Context,string,string)(string,error), name, rawArgs string).",
+    "scope": "internal/chat",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Verified against the actual code. At turn.go:265 the caller does `out = dispatchCustomTool(ctx, Config{CustomTool: cfg.CustomTool}, tc.Name, tc.RawArgs)`, building a synthetic Config whose other ~28 fields (LLM, Store, Personality, WorkDir, ToolGuard, Models, etc., per chat.go:50-119) are left zero. The callee `dispatchCustomTool` (tools.go:27-36) only reads `cfg.CustomTool` (nil-check + invoke); it never touches any other field. So the description is factually correct: the package's central Config type is repurposed as a single-field argument carrier. This is a real, if minor, api-structure smell — a reader must inspect dispatchCustomTool to confirm the zero fields are intentional, and there is no comment marking the synthetic Config as deliberate. It is not guarded, idiomatic, or framework-inherent. The suggested fix (pass the `func(ctx, name, argsJSON) (string, error)` value directly) is correct and clean. Severity is honestly low: behavior is correct, no bug, blast radius is one helper and one call site; this is a readability/abstraction-leak nit rather than a defect."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "error-handling",
+    "severity": "low",
+    "title": "logStreamError ignores the WriteFile error when dumping last_error.json",
+    "file": "internal/chat/turn.go",
+    "line": "59",
+    "description": "The error dump is written with _ = os.WriteFile(dumpPath, data, 0644). If the write fails (full disk, unwritable .shell3 dir), the failure is discarded, yet the subsequent Debug log still reports dumpPath as if the dump succeeded.",
+    "why": "On a real failure the debug log points operators at a dump file that does not exist, sending them down a dead end exactly when they are diagnosing a stream failure.",
+    "suggestion": "Capture the WriteFile error and, on failure, clear dumpPath (or include the write error) before logging so the debug record does not advertise a nonexistent dump.",
+    "scope": "internal/chat",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Confirmed against the actual code at /Users/weatherjean/CODE/AGENTS/shell3/internal/chat/turn.go. logStreamError (lines 43-64) sets dumpPath = filepath.Join(cfg.WorkDir, \".shell3\", \"last_error.json\") on line 58, then writes with `_ = os.WriteFile(dumpPath, data, 0644)` on line 59, discarding the error. On line 62 it unconditionally logs `cfg.Log.Debug(\"stream error\", ... \"dump\", dumpPath, ...)`. So if the write fails (unwritable .shell3 dir, full disk), the debug record still advertises dumpPath as though the dump exists — exactly the claimed consequence. The description is factually accurate and the location is correct. This is a genuine error-handling lapse, not intentional: the doc comment states the function \"writes ... then records the event,\" implying the log should reflect the actual write outcome. It is correctly rated low severity — it only manifests in the rare disk-write-failure case, in a diagnostic-only path, and at Debug level. The suggested fix (clear dumpPath or fold the write error into the log on failure) is reasonable."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "error-handling",
+    "severity": "high",
+    "title": "Read error silently ignored on overwrite path produces wrong stats",
+    "file": "internal/edittool/edit.go",
+    "line": "42",
+    "description": "In EditFile's create/overwrite branch (oldString==\"\"), after a successful os.Stat shows the file exists, the code does `raw, _ := os.ReadFile(abs)` discarding the error. oldContent is then used to compute lineStats and is returned in Result.OldContent.",
+    "why": "If the file exists but is unreadable (permission change, concurrent removal/truncate, transient I/O error between Stat and ReadFile), oldContent becomes \"\" with no error surfaced. The caller then renders Additions equal to the whole new file and Deletions=0, and the diff preview shows a spurious full-file creation rather than the real change — silently wrong output to the user.",
+    "suggestion": "Capture and act on the error: `raw, rerr := os.ReadFile(abs); if rerr != nil { return Result{}, fmt.Errorf(\"read %s: %w\", abs, rerr) }`.",
+    "scope": "internal/edittool",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "The claim is factually accurate. At internal/edittool/edit.go:42, in the create/overwrite branch (oldString==\"\"), after os.Stat succeeds and confirms a non-directory, the code does `raw, _ := os.ReadFile(abs)` (line 42) discarding the error, then sets oldContent = string(raw) and created = false. If ReadFile fails (e.g. permission change, concurrent removal/truncate, transient I/O between Stat and ReadFile), oldContent stays \"\" silently. lineStats(\"\", newString) then returns (len(b), 0) via the len(a)==0 branch at lines 139-141, so Additions = whole new file and Deletions = 0 — exactly the spurious full-file-creation stat the finding describes. There's also a subtle internal inconsistency: created=false but OldContent=\"\". The sibling str-replace branch at lines 69-72 handles the identical ReadFile call correctly (returns the error), confirming this is an oversight rather than an intentional pattern, and the suggested fix mirrors that existing handling. However, the claimed \"high\" severity is overstated. The actual file write still proceeds with the correct newString content (line 51), so there is no data loss or corruption — only the returned stats and diff preview are wrong, and only in a rare race/permission window between Stat and ReadFile. The impact is misleading user-facing output, not incorrect file state. That is a genuine but low-severity error-handling defect."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "go-idioms",
+    "severity": "medium",
+    "title": "Overwrite of an existing file resets permissions to 0o644",
+    "file": "internal/edittool/edit.go",
+    "line": "51",
+    "description": "In the oldString==\"\" branch, even when the file already exists (created=false), os.WriteFile is called with a hardcoded 0o644 mode instead of the existing file's mode. The str-replace branch correctly preserves info.Mode().Perm() (line 74/94), but the overwrite branch does not.",
+    "why": "Overwriting an existing executable script or a file with restricted/0600 permissions via an empty-oldString edit silently changes its mode to 0644, breaking executability or loosening intended access controls.",
+    "suggestion": "When the file already exists, reuse its current permissions: stat the existing file (already done) and pass info.Mode().Perm() to os.WriteFile; only fall back to 0o644 for newly created files.",
+    "scope": "internal/edittool",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "medium",
+      "reasoning": "Confirmed accurate against the real code in /Users/weatherjean/CODE/AGENTS/shell3/internal/edittool/edit.go. In the oldString==\"\" branch, lines 38-44 stat the path and, when the file already exists, read its content and set created=false — the os.FileInfo (info) holding the existing mode is in scope. But line 51 unconditionally calls os.WriteFile(abs, []byte(newString), 0o644), discarding the existing mode. The str-replace branch proves the codebase's own intent to preserve permissions: line 74 captures mode := info.Mode().Perm() and line 94 writes with that mode. So the overwrite branch is inconsistent with the edit branch. The path is reachable and a recognized operation: the dispatcher in internal/chat/edit_dispatch.go (line 38) labels it \"Overwrote\" when old_string==\"\" and the file pre-existed. Consequence is real — overwriting a 0755 executable script silently drops it to 0644 (loses executability), and a 0600 file is widened to 0644 (loosens access, e.g. CLAUDE.md notes secrets live in .env files an agent could rewrite). The suggested fix is correct and trivial: reuse the already-stat'd info.Mode().Perm() when created==false, falling back to 0o644 only for new files. Medium severity is appropriate given the narrow trigger (empty-oldString overwrite of an existing permission-sensitive file) balanced against the genuine functional/security impact."
+    },
+    "finalSeverity": "medium"
+  },
+  {
+    "dimension": "api-structure",
+    "severity": "medium",
+    "title": "replaceAll applies a fuzzy-derived substring globally, ignoring other candidates",
+    "file": "internal/edittool/replace.go",
+    "line": "49",
+    "description": "When replaceAll is true, Replace returns strings.ReplaceAll(content, search, newString) for the FIRST candidate from the FIRST replacer that occurs in content. For fuzzy replacers (lineTrimmed, whitespaceNormalized, blockAnchor, etc.) `search` is a concrete substring reconstructed from ONE matched location; the other candidate substrings returned by that same replacer are discarded.",
+    "why": "With replaceAll=true and a non-exact old_string, only occurrences textually identical to the single reconstructed candidate get replaced, while other fuzzy matches the same replacer found (e.g. blocks with different indentation) are left untouched — silently partial replace-all that the user believes was global.",
+    "suggestion": "For replaceAll, either restrict to the exact (simpleReplacer/multiOccurrence) path, or iterate and apply every candidate the chosen replacer yields; at minimum document that replaceAll only honors exact textual repetition of the first reconstructed match.",
+    "scope": "internal/edittool",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "medium",
+      "reasoning": "Verified against the actual code in /Users/weatherjean/CODE/AGENTS/shell3/internal/edittool/replace.go. The Replace loop (lines 42-57) iterates replacers, and for each takes candidates from r(content, oldString). On line 49-50, when replaceAll is true it immediately `return strings.ReplaceAll(content, search, newString)` using ONLY the first candidate `search` that occurs in content, never iterating the remaining candidates from that replacer.\n\nThis is a genuine problem for the fuzzy replacers that return multiple, textually-distinct candidates: lineTrimmedReplacer (line 84, appends `content[start:end]` for every line-block whose trimmed form matches — line 116), whitespaceNormalizedReplacer (line 245, appends multiple distinct lines/blocks), escapeNormalizedReplacer (line 335), and trimmedBoundaryReplacer (line 378). Concrete example: if two lines ` foo` (2 spaces) and `   foo` (3 spaces) both match a fuzzy old_string `foo`, lineTrimmedReplacer returns both as distinct substrings. With replaceAll=true, the code does strings.ReplaceAll(content, \" foo\", ...) for the first candidate only — which replaces every textual occurrence of ` foo` but leaves `   foo` untouched. The user requested a global replace and silently gets a partial one. The description's consequence is accurate.\n\nNote one inaccuracy in the finding's enumeration: blockAnchorReplacer (line 135) and contextAwareReplacer (line 399) always return exactly one candidate (lines 205/237/437), so they are NOT affected — the claim listing blockAnchor as an example is imprecise. But the core antipattern holds for the per-line/per-block fuzzy replacers. Location (line 49) is correct.\n\nSeverity medium is appropriate: it is a silent correctness/expectation mismatch (partial replace-all presented as global), but it requires a specific combination — replaceAll=true, a non-exact old_string, and multiple fuzzy matches differing in whitespace/escaping. The suggested fix (iterate and apply every candidate the chosen replacer yields, or restrict replaceAll to exact paths) is reasonable. This is a faithful port of opencode's algorithm, but the antipattern is still genuinely present in this codebase."
+    },
+    "finalSeverity": "medium"
+  },
+  {
+    "dimension": "go-idioms",
+    "severity": "low",
+    "title": "Regex compiled inside per-line loop in whitespaceNormalizedReplacer",
+    "file": "internal/edittool/replace.go",
+    "line": "266",
+    "description": "whitespaceNormalizedReplacer recompiles a regexp from the find words for every content line whose normalized form contains the normalized find. The pattern depends only on `find`, not on the line, so it is recompiled redundantly across iterations.",
+    "why": "On a large file where many lines contain the normalized find token, this performs O(lines) regexp.Compile calls of an identical pattern — wasted allocation/CPU on a path that runs for every edit attempt. Correctness is fine; it is unnecessary work.",
+    "suggestion": "Compile the pattern once before the loop (it depends only on find): build `pattern` and `re` ahead of the `for _, line := range lines` loop and reuse, handling the compile error once.",
+    "scope": "internal/edittool",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Verified at /Users/weatherjean/CODE/AGENTS/shell3/internal/edittool/replace.go lines 251-273. Inside `for _, line := range lines`, the code builds `words := strings.Fields(strings.TrimSpace(find))`, `parts` via `regexp.QuoteMeta`, `pattern := strings.Join(parts, \"\\\\s+\")`, then `re, err := regexp.Compile(pattern)` (line 266). Every one of these inputs derives solely from `find`, which is loop-invariant; nothing depends on `line`. So whenever a line's normalized form contains the normalized find (line 256 guard), the identical regex is recompiled. The claim is factually correct: pattern depends only on `find`, location at line 266 is exact, and the consequence (O(matching-lines) redundant regexp.Compile of an identical pattern, plus the Fields/QuoteMeta/Join allocations) is real. It is not guarded or intentional — there is no per-line variation. Hoisting the words/parts/pattern/re computation (and the empty-words early-return, which would then become a function-level early return) above the loop is a clean, correct fix. Severity is genuinely low: the recompile only fires on matching lines (often few), this is not in a tight inner CPU loop relative to file size in the common case, and the existing top-level wsRun regex shows the author knows the hoist-once pattern. So a real but minor go-idioms cleanup, confirming the claimed low severity."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "error-handling",
+    "severity": "medium",
+    "title": "Sscanf silently accepts trailing garbage / truncates user parameter values",
+    "file": "internal/llm/params.go",
+    "line": "44-53",
+    "description": "SetByName parses temperature with fmt.Sscanf(value, \"%f\", &f) and max_tokens with \"%d\". Sscanf returns no error as long as a prefix parses, so \"0.5abc\" yields 0.5, \"0.5 1.2\" yields 0.5 (rest ignored), and a float like \"12.9\" passed to max_tokens silently becomes 12. Empty string returns an io.EOF error (handled), but malformed-with-prefix input is accepted as if valid.",
+    "why": "A user typing /parameters set temperature 0.5x or max_tokens 12.9 gets a silently wrong value applied to the LLM request with no error feedback, making misconfiguration invisible and hard to diagnose.",
+    "suggestion": "Use strconv.ParseFloat/strconv.Atoi which reject the full string, or after Sscanf verify n==1 and that the entire input was consumed (e.g. check the value round-trips, or scan a trailing sentinel). Return a clear error on leftover input.",
+    "scope": "internal/llm",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Verified the actual code at internal/llm/params.go:42-53. SetByName parses temperature with `fmt.Sscanf(value, \"%f\", &f)` and max_tokens with `fmt.Sscanf(value, \"%d\", &n)`, returning an error only when Sscanf returns one. The description's claims about fmt.Sscanf are accurate: with %f, \"0.5abc\" parses to 0.5 (n=1, no error) and \"0.5 1.2\" parses to 0.5 with the rest ignored; with %d, \"12.9\" stops at the '.' yielding 12 (n=1, no error). Only fully-unparseable input (e.g. empty string -> io.EOF, or leading non-numeric like \"abc\") produces an error. The code never checks that the whole string was consumed.\n\nI confirmed there is no downstream numeric validation that would catch this: in internal/adapter/openai/client.go:185-192 the ParamSpec entries for \"temperature\" and \"max_tokens\" have empty Enum, and ParamSpec.Validate (params.go:69-79) returns nil immediately when Enum is empty. The caller in internal/tui/interactive.go:519-543 splits on strings.Fields and requires exactly 2 parts, so the empty-value/EOF path is effectively unreachable from the TUI; the only real parsing guard is the Sscanf itself. So malformed-with-prefix input is silently accepted and a wrong value is applied to the LLM request with no feedback (it does call setter.SetParams, then proceeds). The strconv.ParseFloat/Atoi (or n==1 + full-consumption check) fix is correct and idiomatic.\n\nThis is a genuine error-handling/input-validation antipattern, not a framework artifact or already-handled case, and the location is correct. I lowered severity from medium to low: it is self-inflicted interactive misconfiguration of the user's own session params (no security, data-integrity, or multi-user blast radius), and the resulting value is a plausible truncated/prefix number rather than a crash. Worth fixing for clear feedback, but low impact."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "go-idioms",
+    "severity": "medium",
+    "title": "Call records caller's slices by reference (aliasing)",
+    "file": "internal/llm/fakellm/fakellm.go",
+    "line": "45",
+    "description": "Stream stores the caller-supplied msgs and tools slice headers directly into the recorded Call via Call{Msgs: msgs, Tools: tools}. No defensive copy is made, so the recorded Call shares the backing arrays with the caller.",
+    "why": "If a caller reuses or mutates the msgs/tools slice after Stream returns (e.g. a conversation loop that maintains one growing message slice and passes it on each turn), previously recorded Calls appear to change or alias each other, making assertions over c.Calls unreliable. For an inspection fake whose purpose is recording what it received, this is a correctness foot-gun.",
+    "suggestion": "Snapshot inputs before recording, e.g. Call{Msgs: append([]llm.Message(nil), msgs...), Tools: append([]llm.ToolDefinition(nil), tools...)}, so each recorded Call is independent.",
+    "scope": "internal/llm/fakellm",
+    "verdict": {
+      "real": true,
+      "confidence": "medium",
+      "adjustedSeverity": "low",
+      "reasoning": "Factually accurate. At /Users/weatherjean/CODE/AGENTS/shell3/internal/llm/fakellm/fakellm.go:45 Stream records `c.Calls = append(c.Calls, Call{Msgs: msgs, Tools: tools})` with no defensive copy, so each recorded Call's Msgs/Tools share the caller's backing arrays. The Call struct (lines 20-24) and lock usage are as described, and the location is correct. The suggested snapshot fix (`append([]llm.Message(nil), msgs...)`) is the idiomatic remedy for a recording/inspection fake.\n\nHowever, the claimed concrete consequence — \"previously recorded Calls appear to change or alias each other\" — does NOT actually manifest with the real caller. The sole production caller is internal/chat/turn.go: streamOnce (line 346) is fed `allMsgs`, a slice that grows append-only across the tool loop (lines 122, 158, 301, 316). Appends write at indices >= the previously-recorded length, so earlier `Calls[i].Msgs` headers keep their original len and their elements are never overwritten. The only in-place mutation, `allMsgs[len(allMsgs)-1].Content += reminder` (line 190), targets the current tail, which lies beyond the length of any prior recorded Call. The one test that inspects recorded msgs (internal/chat/turn_toolloop_test.go:243, reading `fake.Calls[1].Msgs`) is also safe because compact_history swaps in a fresh slice, giving round 2 a distinct backing array.\n\nSo this is a genuine but latent idiomatic foot-gun: defensive copying is the right practice for a fake whose job is recording inputs, and a future caller/test that mutates existing message elements in place (or truncates+reuses the slice) would silently corrupt the record. But it is not an active bug in the current codebase and triggers no flakiness today. Downgrading claimed medium to low to reflect that the in-context impact is currently nil and the issue is hypothetical/preventative."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "concurrency",
+    "severity": "medium",
+    "title": "Exported mutable fields read without the guarding mutex",
+    "file": "internal/llm/fakellm/fakellm.go",
+    "line": "31-33",
+    "description": "Scripts and Calls are exported fields that Stream mutates/appends under c.mu, but callers (tests) inspect Calls directly (c.Calls[...]) without holding the lock, and the call counter is exposed via CallCount() while Calls is not. The synchronization contract is half-applied: internal writes lock, external reads do not.",
+    "why": "If Stream is ever invoked concurrently (e.g. testing a component that fans out LLM calls across goroutines) while a test reads c.Calls or another goroutine appends a Script, this is a data race under -race that the half-locked design invites. The exported Calls field gives no safe accessor parallel to CallCount().",
+    "suggestion": "Either document that the Client is not safe for concurrent Stream calls and make Calls/Scripts unexported with locked accessors (e.g. a CallsSnapshot() method returning a copy), or keep them exported but drop the mutex and document single-threaded use. Pick one consistent contract.",
+    "scope": "internal/llm/fakellm",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "The code is exactly as described. In /Users/weatherjean/CODE/AGENTS/shell3/internal/llm/fakellm/fakellm.go the Client struct (lines 29-34) has exported Scripts (31) and Calls (33) plus unexported calls (32). Stream (44-56) takes c.mu before appending to c.Calls and reading/incrementing c.calls, and CallCount() (68-72) is a locked accessor for calls — yet Calls has no locked accessor. So the synchronization contract is genuinely half-applied: internal writes lock, but the only external read (internal/chat/turn_toolloop_test.go:243, `round2 := fake.Calls[1].Msgs`) reads Calls without the lock. That part of the claim is factually correct.\n\nHowever, the claimed medium concurrency severity overstates the in-context risk. This is a test-only fixture (package doc: \"for tests\"). Every current caller invokes Stream sequentially within a single test goroutine, and the lone direct Calls read at line 243 occurs after collectTurn() has fully returned — i.e. after all writers are done — so there is no live data race and `go test -race` passes today. No code path fans Stream across goroutines; the claimed consequence is explicitly hypothetical (\"if Stream is ever invoked concurrently\"). The mutex itself is largely defensive for a fixture that is used single-threaded.\n\nSo this is a genuine but minor inconsistency in the locking contract, not a manifesting concurrency bug. Real=true but downgraded to low: the legitimate observation is the asymmetry (CallCount() guarded, Calls exported and unguarded), worth tidying for consistency, with negligible practical impact given test-only, single-threaded use."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "concurrency",
+    "severity": "medium",
+    "title": "withIOUnlock infers lock ownership via TryLock — latent unlock-of-unowned-mutex panic",
+    "file": "internal/luacfg/lua_bash.go",
+    "line": "20-33",
+    "description": "withIOUnlock calls c.mu.TryLock() to decide whether the caller (CallTool/runLuaGuard) already holds c.mu. If TryLock succeeds it assumes 'top-level DoFile, nobody held the lock' and unconditionally calls c.mu.Unlock() without re-locking; if it fails it assumes 'inside CallTool' and does Unlock()+f()+Lock(). The correctness depends entirely on the documented 'single-agent, CallTool never concurrent' invariant.",
+    "why": "TryLock cannot actually distinguish 'I am inside CallTool' from 'another goroutine momentarily released the lock'. If the no-concurrency invariant is ever broken (e.g. someone parallelizes tool dispatch or evaluates guards concurrently, or a future feature drives two LoadedConfig operations at once), TryLock can succeed against a lock a different goroutine owns and then Unlock() it — sync.Mutex.Unlock of a mutex not held by this goroutine panics and corrupts the lock state. This is a fragile, unsound concurrency primitive masquerading as safe.",
+    "suggestion": "Make lock ownership explicit instead of inferred. E.g. have CallTool/runLuaGuard pass a flag or call an unlocked variant of luaBash/httpExec that knows it must release+reacquire, and have the DoFile top-level path run with no lock at all. Removing the TryLock guesswork eliminates the panic risk if the invariant ever changes.",
+    "scope": "internal/luacfg",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "medium",
+      "reasoning": "Confirmed accurate at internal/luacfg/lua_bash.go:20-33. withIOUnlock does `locked := c.mu.TryLock()`; if it succeeds it calls `c.mu.Unlock()` + f() and returns (no re-lock), otherwise it does `c.mu.Unlock()` + f() + `c.mu.Lock()`. The field is a plain `sync.Mutex` (luacfg.go:65), which has NO goroutine-ownership concept — so TryLock succeeding only proves the lock was momentarily free, not \"the caller (DoFile top-level) does not hold it.\" The two real callers confirm the intended states: CallTool (dispatch.go:109) and runLuaGuard (dispatch.go:48) both `c.mu.Lock()`/defer Unlock and then drive the Lua VM (which invokes luaBash/luaHTTP on the same goroutine, so TryLock fails -> unlock/relock branch), while Load->DoFile (luacfg.go:82) holds no lock (TryLock succeeds branch). The scheme is therefore sound ONLY under the explicitly documented invariant (line 18: \"luacfg is single-agent; CallTool is never called concurrently\"). The finding's core technical claim is correct and is a recognized Go antipattern: Go's own sync.TryLock docs warn it should not be used for lock-ownership inference. If the invariant is ever broken (parallel tool dispatch, concurrent guard evaluation, two LoadedConfig-driven operations), TryLock can succeed against a lock another goroutine owns and then Unlock it, producing a \"sync: unlock of unlocked mutex\" panic and corrupted lock state. This is a latent, fragile concurrency primitive, not an active bug today — it is currently guarded by the invariant — so medium (not high) is the honest severity. The suggested fix (pass explicit ownership flag / unlocked variant rather than inferring via TryLock) is correct. Location and description are factually accurate."
+    },
+    "finalSeverity": "medium"
+  },
+  {
+    "dimension": "go-idioms",
+    "severity": "medium",
+    "title": "shell3.bash subprocess ignores the tool's context — cancellation does not stop the command",
+    "file": "internal/luacfg/lua_bash.go",
+    "line": "51",
+    "description": "CallTool stores the caller's ctx via c.L.SetContext(ctx), but luaBash builds its subprocess with context.WithTimeout(context.Background(), ...). The exec.CommandContext is therefore bound only to its own internal timeout, not to the turn/request context threaded through CallTool.",
+    "why": "If the user cancels the turn (ctx canceled / Ctrl-C), a bash command launched from a custom Lua tool handler keeps running up to its own 10s–600s timeout instead of being killed promptly. Cancellation is silently ignored, leaving orphan work and delaying shutdown.",
+    "suggestion": "Derive the command context from the tool ctx: read the ctx out of the LState (or thread it into luaBash) and use context.WithTimeout(toolCtx, ...) so canceling the turn also kills the subprocess.",
+    "scope": "internal/luacfg",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Verified against the actual code. internal/luacfg/lua_bash.go:51 builds the subprocess with `context.WithTimeout(context.Background(), ...)` and `exec.CommandContext(ctx, \"bash\", \"-c\", cmd)` (lines 51-53), so the command is bound only to its own internal timeout (default 10s, capped at 600s at lines 37/43-45). Meanwhile CallTool (internal/luacfg/dispatch.go:111) threads the turn/request ctx onto the same *lua.LState via `c.L.SetContext(ctx)`, and luaBash receives that same L (registered at register.go:17). The turn ctx is therefore available — `L.Context()` exists in the pinned gopher-lua v1.1.2 (state.go:2267) — but it is ignored. Consequence is accurate: on turn cancellation (Ctrl-C / ctx canceled), a bash command launched from a custom Lua tool keeps running up to its own timeout rather than being killed promptly, orphaning work and delaying shutdown. The suggested fix is viable but must guard for the top-level DoFile path where no ctx is set (L.Context() is nil there, since SetContext is only called inside CallTool/runLuaGuard), falling back to context.Background(). I downgrade severity from medium to low: the blast radius is narrow (only shell3.bash invoked from a custom Lua tool handler), it is not a correctness defect on normal completion, and the delay is bounded by the default 10s timeout — it only affects promptness of cancellation, not results."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "go-idioms",
+    "severity": "medium",
+    "title": "shell3.http request ignores the tool's context — cancellation only bounded by client timeout",
+    "file": "internal/luacfg/lua_http.go",
+    "line": "46-59",
+    "description": "httpExec creates the request with http.NewRequest (no context) and runs it with an http.Client whose only bound is Timeout. The tool ctx set via c.L.SetContext(ctx) in CallTool is never attached to the request.",
+    "why": "A turn cancellation cannot abort an in-flight HTTP call made by a custom tool; it runs until the client Timeout (up to 120s). Same ignored-cancellation problem as the bash binding, causing slow/uninterruptible shutdown.",
+    "suggestion": "Use http.NewRequestWithContext with the tool ctx (threaded from CallTool), keeping the Client.Timeout as a backstop.",
+    "scope": "internal/luacfg",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Verified against the actual code. In /Users/weatherjean/CODE/AGENTS/shell3/internal/luacfg/lua_http.go:46 the request is built with http.NewRequest(method, url, strings.NewReader(body)) (no context), and at lines 57-59 it is executed inside withIOUnlock via cl := &http.Client{Timeout: time.Duration(timeout)*time.Second}; resp, err = cl.Do(req). No context is attached to the request, so the only bound is the client Timeout.\n\nThe claim that the tool ctx is available but ignored is accurate: dispatch.go:111 does c.L.SetContext(ctx) in CallTool, and gopher-lua exposes L.Context() (verified in state.go:2267), which httpExec could retrieve since it holds *lua.LState L. The suggested fix http.NewRequestWithContext(L.Context(), ...) is feasible.\n\nThe \"same problem as the bash binding\" comparison is also correct: lua_bash.go:51 derives its context from context.Background(), not the tool ctx, so it likewise ignores turn cancellation.\n\nSo the description is factually correct and this is a genuine missed-context idiom: an in-flight custom-tool HTTP call cannot be aborted by turn/turn-shutdown cancellation and will run until the client Timeout. However the practical impact is bounded — timeout is clamped to <=120s at lines 37-39 (default 30s), and this affects only responsiveness/interruptibility of user-defined tools, not correctness or security. Medium overstates it; low is the honest severity for a bounded, single-agent (non-concurrent) tool with a hard timeout backstop."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "go-idioms",
+    "severity": "low",
+    "title": "luaToGo treats any table with Len()>0 as a pure array, dropping string keys",
+    "file": "internal/luacfg/convert.go",
+    "line": "85-94",
+    "description": "luaToGo checks x.Len(); if >0 it builds a []any from the integer-indexed part and returns, never visiting string keys. A Lua table that has both a sequence part and string keys (e.g. {1,2, foo='x'}) silently loses the string-keyed entries.",
+    "why": "Custom-tool argument tables or guard params that mix array and map shape will be partially dropped on the way into Go, producing silently incomplete data with no error. This is a correctness footgun for config authors.",
+    "suggestion": "Either decide shape by inspecting whether any non-integer keys exist, or always emit a map and add a parallel sequence only when the table is a pure 1..n sequence; at minimum document the limitation.",
+    "scope": "internal/luacfg",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Code at internal/luacfg/convert.go:85-94 matches the claim exactly. luaToGo's *lua.LTable case does `n := x.Len(); if n > 0 { ... return arr }` building a []any from RawGetInt(1..n) and returning immediately, only falling through to tableToMap(x) (the string-keyed path) when Len()==0. For a mixed table like {1,2,foo='x'}, Len() returns 2 (the sequence part), so it returns []any{1,2} and silently drops foo with no error. Location is correct. This is a real silent-data-loss footgun and is undocumented (no comment or test covers the mixed case; grep found none). However, the in-context blast radius is small: the only callers (register.go:51 extra, register.go:99 parameters) go through tableToMap at the top level, which always emits a map; the loss only affects nested values. Tool `parameters` are JSON Schema (object/array shaped) and model `extra` is provider params — both correspond to JSON, which itself cannot represent a node that is simultaneously an array and an object, so a well-formed config is unlikely to produce a mixed table. The behavior also mirrors Lua's inherent array/map table ambiguity. Genuine but minor; low severity is accurate."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "go-idioms",
+    "severity": "low",
+    "title": "HTTP response headers collapsed to a single value",
+    "file": "internal/luacfg/lua_http.go",
+    "line": "79-81",
+    "description": "Response headers are flattened with resp.Header.Get(k), which returns only the first value for each header key.",
+    "why": "Multi-valued headers (e.g. multiple Set-Cookie or repeated Link headers) lose all but the first value, so Lua tool code cannot see the full response metadata.",
+    "suggestion": "Expose repeated headers as a Lua array (one entry per value) using resp.Header[k], or at least join them, so no data is dropped.",
+    "scope": "internal/luacfg",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Verified at /Users/weatherjean/CODE/AGENTS/shell3/internal/luacfg/lua_http.go:78-82. The loop iterates over resp.Header keys and writes hdr.RawSetString(strings.ToLower(k), lua.LString(resp.Header.Get(k))). http.Header.Get returns only the first value associated with a key (it does textproto canonicalization and returns h[CanonicalMIMEHeaderKey(key)][0]). So for any multi-valued header — most importantly Set-Cookie, but also repeated Link, Via, Warning, etc. — only the first value reaches Lua and the rest are silently dropped. The description is factually accurate and the location is correct. This is not guarded or intentional anywhere; the header map is built unconditionally for every response. The suggested fix (use resp.Header[k] to expose all values, e.g. as a Lua array, or join them) is reasonable. Severity is appropriately low: it is real data loss in the exposed API, but it only affects the relatively uncommon case of multi-valued headers in Lua tool code, and the body/status are unaffected. Set-Cookie is the most likely real-world casualty."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "error-handling",
+    "severity": "low",
+    "title": "dotenv value quote-stripping is overly broad and ignores common forms",
+    "file": "internal/luacfg/dotenv.go",
+    "line": "26",
+    "description": "Values are processed with strings.Trim(v, \"\\\"\"), which strips every leading and trailing double-quote rather than a single matching pair, and the parser ignores single-quoted values, an `export ` prefix, and inline comments.",
+    "why": "A value like \"a\\\"b\" becomes a\\\"b (inner quote preserved, outer stripped asymmetrically), and `export KEY=val` stores the key as `export KEY`. Secrets/URLs can be silently mangled, producing confusing auth failures downstream.",
+    "suggestion": "Strip a single matching surrounding quote pair (handle both ' and \"), trim an optional leading `export `, and stop at unquoted `#` comments — or document the supported subset explicitly.",
+    "scope": "internal/luacfg",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Verified the actual code at /Users/weatherjean/CODE/AGENTS/shell3/internal/luacfg/dotenv.go:26. The line reads: out[strings.TrimSpace(k)] = strings.Trim(strings.TrimSpace(v), `\"`). All sub-claims are factually correct against the real code:\n\n1. strings.Trim(v, `\"`) strips ALL leading/trailing double-quotes, not a single matching pair. For a value `\"a\"` it works, but `\"\"x\"\"` becomes `x` and asymmetric/embedded quotes are mishandled.\n2. Single-quoted values are not unwrapped — `KEY='val'` stores `'val'` literally.\n3. No `export ` prefix handling. The key is taken as strings.TrimSpace(k) from strings.Cut(line, \"=\"), so `export KEY=val` stores the key literally as `export KEY` (the leading-`export ` is not stripped). This is a genuine silent footgun: shell3.env.secret(\"KEY\") would then fail to find it.\n4. Inline comments are not stripped — the only `#` handling is `strings.HasPrefix(line, \"#\")` at line 22, which catches whole-line comments only. So `KEY=val # note` stores `val # note`.\n\nIn context this is a minimal secrets/.env loader (loadDotEnv called from luacfg.go:76) used for API keys, base URLs, and tool tokens via shell3.env.secret. The existing test (dotenv_test.go) only covers whole-line comments, empty values, and a simple `\"a b\"` quoted value — it does not exercise export/inline-comment/single-quote cases, so these gaps are unguarded rather than intentional. Practical impact is genuinely low (API keys/URLs rarely contain quotes or `#`, and users following the scaffold template are unlikely to use `export`), but the export-prefix and inline-comment cases can silently mangle credentials and produce confusing downstream auth failures with no error surfaced. This is a real, if minor, robustness gap. Location is correct (line 26). Low severity is appropriate; suggested fix (single matching quote pair for both quote styles, strip optional leading `export `, stop at unquoted `#`, or document the supported subset) is reasonable."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "api-structure",
+    "severity": "low",
+    "title": "Duplicate model names silently shadowed; Load does not validate uniqueness",
+    "file": "internal/luacfg/luacfg.go",
+    "line": "97-104",
+    "description": "Models is a slice and Model(name) returns the first match by linear scan. luaModel appends without checking for an existing model of the same name, and Load performs no uniqueness validation.",
+    "why": "Declaring two shell3.model entries with the same name silently uses the first; the second is dead config the author believes is active. A misconfiguration that should be a load-time error instead becomes a confusing runtime behavior.",
+    "suggestion": "Detect duplicate model names in luaModel (RaiseError) or in Load, and return a clear config error.",
+    "scope": "internal/luacfg",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Verified against actual code. Model(name) at luacfg.go:97-104 does a linear scan returning the first match (`for _, m := range c.Models { if m.Name == name { return m, true } }`). luaModel at register.go:53 appends unconditionally (`c.Models = append(c.Models, m)`) with no name-collision check. Load (luacfg.go:75-95) validates agent presence and that the agent's referenced model exists, but never checks model-name uniqueness. grep for duplicate/already-declared logic in internal/luacfg/ returns nothing. So two shell3.model entries with the same name silently keep the first; the second becomes dead config — factually as described. This is inconsistent with the package's otherwise strict fail-loud style (checkKeys rejects unknown keys at register.go:34, required fields RaiseError at line 47-48, unknown agent model errors in Load), which argues it is an oversight rather than intentional. Minor footgun: single-file operator-authored config where a duplicate name is an obvious mistake, hence low severity is correct. The cited location (97-104) accurately describes the first-match lookup behavior; the actual missing-validation sites are register.go:53 and Load, both of which the description correctly names."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "concurrency",
+    "severity": "medium",
+    "title": "tickerLoop and winchLoop goroutines leak on non-ctx exit paths",
+    "file": "internal/patchapp/loop.go",
+    "line": "50-51",
+    "description": "Run spawns `go a.tickerLoop(ctx)` and `go a.winchLoop(ctx, winch)` bound to the incoming ctx. Both goroutines only return on `<-ctx.Done()`. But Run itself returns on several paths that do NOT cancel ctx: exitFlag set by Quit/`/exit` (line 67, `return nil`), double-ctrl+C via processInput (line 101-103), stdin EOF (line 99, `return nil`), and stdin read error (line 96). The caller (internal/tui/interactive.go RunInteractive) receives ctx from above and does not cancel it when app.Run returns.",
+    "why": "On the most common quit paths (ctrl+c twice, /exit), both background goroutines keep blocking forever, holding a reference to the *App and its renderer. signal.Stop(winch) runs via defer so winchLoop's `<-winch` never fires again, but it still blocks on select with a live ctx. If Run is ever invoked more than once in a process (tests, embedding via pkg/shell3), the leak accumulates; even in single-run use the goroutines outlive Run during teardown (DB close, hooks).",
+    "suggestion": "Derive a local cancelable context at the top of Run (`ctx, cancel := context.WithCancel(ctx); defer cancel()`) and pass that to tickerLoop/winchLoop so every Run return path tears them down.",
+    "scope": "internal/patchapp",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Verified against /Users/weatherjean/CODE/AGENTS/shell3/internal/patchapp/loop.go. The description is factually accurate on every point: Run spawns `go a.tickerLoop(ctx)` and `go a.winchLoop(ctx, winch)` at lines 50-51, both bound to the incoming ctx. tickerLoop returns only on `<-ctx.Done()` (line 114) and winchLoop only on `<-ctx.Done()` (line 150). Run returns without canceling ctx on the common quit paths: exitFlag set by /exit/Quit returns nil (line 67), processInput double-ctrl+C returns nil (line 101-103), stdin EOF returns nil (line 99), and stdin read error returns rerr (line 96). The caller internal/tui/interactive.go RunInteractive (line 169 `runErr = app.Run(ctx)`) passes ctx straight through and never cancels it; the only WithCancel there (line 145 turnCtx) is a per-turn child, so canceling it does not tear down the loop goroutines. The root ctx originates from cobra `root.Execute()` (cmd/shell3/main.go:59 — not ExecuteContext), i.e. an uncanceled context.Background(), so on these paths both goroutines block forever on `<-ctx.Done()`.\\n\\nThis is a genuine context-lifetime antipattern: goroutines tied to a context the spawning function's own return paths never cancel. However the in-context blast radius is small. The dominant caller is a one-shot CLI (cmd/shell3/run.go runChat -> RunInteractive); when Run returns the process exits and the OS reaps the goroutines, so there is no observable leak in normal use. The claim's stronger rationale — accumulation via repeated runs in a long-lived host through pkg/shell3 embedding — is overstated: the public embedding API (pkg/shell3/shell3.go) drives sess.Run directly and does not invoke patchapp.App.Run at all. The only real residual is that the goroutines outlive Run during RunInteractive's deferred teardown (session/DB close) and would accumulate if RunInteractive were called repeatedly in one process. The suggested fix (`ctx, cancel := context.WithCancel(ctx); defer cancel()` at the top of Run, passing the derived ctx to both loops) is correct, idiomatic, and cheap hygiene. Real, but low severity rather than medium given the one-shot-process reality."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "error-handling",
+    "severity": "high",
+    "title": "Resume swallows term.MakeRaw error, storing nil state that crashes a later Pause/Restore",
+    "file": "internal/patchapp/lifecycle.go",
+    "line": "40",
+    "description": "Resume does `newState, _ := term.MakeRaw(int(os.Stdin.Fd()))` and unconditionally assigns `a.term.oldTermState = newState`. The error is discarded. If MakeRaw fails (e.g. the controlling TTY was lost while a paused subprocess ran), newState is nil.",
+    "why": "A subsequent Pause reads that nil into oldState and calls `term.Restore(fd, nil)`; golang.org/x/term restore() dereferences `state.termios`, so a nil State causes a nil-pointer panic that takes down the whole TUI. The original Run path correctly checks MakeRaw's error and returns it, but Resume silently regresses that contract.",
+    "suggestion": "Check the MakeRaw error in Resume: if non-nil, return it (Resume already returns error) and do not overwrite oldTermState with nil; have Pause guard against a nil oldTermState before calling term.Restore.",
+    "scope": "internal/patchapp",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "medium",
+      "reasoning": "Verified against actual code. internal/patchapp/lifecycle.go:40 reads `newState, _ := term.MakeRaw(int(os.Stdin.Fd()))` and line 44 unconditionally assigns `a.term.oldTermState = newState`. The error is discarded exactly as described, and the location is correct.\n\nThe crash mechanism is real. golang.org/x/term@v0.42.0: Restore (term.go:44) calls restore(fd, oldState) with no nil check; restore on unix (term_unix.go:55-57) does `&state.termios`, so passing a nil *State panics with a nil-pointer dereference. makeRaw (term_unix.go:22-44) returns (nil, err) on IoctlGetTermios/IoctlSetTermios failure, so a lost TTY yields newState == nil. A later Pause (lifecycle.go:26,32) reads that nil into oldState and calls `term.Restore(int(os.Stdin.Fd()), oldState)` -> panic that crashes the TUI. WithReleasedTerminal (lifecycle.go:57-60) makes Pause/Resume cycles routine for every subprocess/hook, so the nil can persist across calls.\n\nThe claim that Run upholds the contract is also accurate: loop.go:20-23 checks MakeRaw's error and returns it, so Resume is a genuine regression of that invariant. The struct field oldTermState (app.go:66) is guarded by App.mu, and both Pause/Resume take that lock, so there is no additional locking defense against the nil.\n\nDowngraded from high to medium: the trigger requires MakeRaw to actually fail (controlling TTY lost mid-session, e.g. SSH hangup or terminal closed while a paused subprocess ran), which is uncommon, and in many such scenarios the process is already in a degraded/doomed state. But the defect is real, latent, leads to a hard panic, and contradicts the Run path's own error contract; the suggested fix (return the error and guard Pause against nil oldTermState) is correct."
+    },
+    "finalSeverity": "medium"
+  },
+  {
+    "dimension": "concurrency",
+    "severity": "low",
+    "title": "Doc claims all editorState fields are guarded by a.mu, but pasting/pasteBuf/inputPending are mutated unlocked",
+    "file": "internal/patchapp/editor.go",
+    "line": "18-81",
+    "description": "The editorState comment (app.go:26-48) states 'All fields are guarded by App.mu'. In processInput, inputPending (lines 18-24, 48, 53, 73), pasting (lines 31, 79), and pasteBuf (lines 43, 65, 80-81) are read and written without holding a.mu; a.mu is only taken around the insertChar/render sub-blocks. It happens to be safe today because these three fields are touched solely by the single input-loop goroutine, but the invariant documented on the struct is false.",
+    "why": "A future reader trusting the 'guarded by a.mu' comment could add a second accessor (e.g. a test helper or a paste-state getter called from another goroutine) and introduce a real data race, because the locking discipline the comment promises is not actually enforced for these fields.",
+    "suggestion": "Tighten the comment to state that inputPending/pasting/pasteBuf are owned exclusively by the input-loop goroutine and are NOT protected by a.mu, distinguishing them from input/cursor/history which are read under a.mu during render.",
+    "scope": "internal/patchapp",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Factually accurate. The editorState struct comment at internal/patchapp/app.go:24-25 states \"All fields are guarded by App.mu (unchanged from when they lived directly on App).\" However in processInput (editor.go), three fields are mutated/read WITHOUT holding a.mu:\n\n- inputPending: read at line 18-21 and reset at line 23, appended at lines 48, 53, 73 — all outside any a.mu.Lock().\n- pasting: read at line 31, set false at line 33 (the Lock at line 34 is taken AFTER this write), set true at line 80 (keyPasteStart case has no lock).\n- pasteBuf: appended at line 65 and reset at lines 81 — outside the lock; notably reset at line 43 is AFTER a.mu.Unlock() at line 42. It is only read under the lock at line 36, but the writes are unprotected, so the \"guarded by App.mu\" invariant is genuinely false for it.\n\nBy contrast, the other editorState fields (input, cursor, history, historyIdx, historyDraft, historyInDraft) ARE consistently accessed under a.mu (e.g. the switch cases at lines 89-188 wrap their mutations in Lock/Unlock, and render reads them under the lock), so the comment is correct for those but false for the paste/pending trio.\n\nIt is safe TODAY: I confirmed processInput is the only code that touches these three fields (grep shows no other accessors outside _test.go), and it is invoked from a single call site (loop.go:101) inside the single stdin input-reading loop, so there is currently no concurrent access. Hence this is a latent documentation/invariant trap rather than a live data race — correctly classified as low severity. The location (editor.go:18-81) and the supporting struct comment reference (app.go:24-48) are accurate. The suggested fix (clarify these fields are owned by the input-loop goroutine and not protected by a.mu) is appropriate."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "concurrency",
+    "severity": "low",
+    "title": "Resume unconditionally Unlocks readMu, so a stray Resume (no prior Pause) panics",
+    "file": "internal/patchapp/lifecycle.go",
+    "line": "50",
+    "description": "readMu.Lock() is acquired in Pause and released in Resume (different methods). Resume always calls `a.term.readMu.Unlock()`. If Resume is called without a preceding Pause, or twice for one Pause (the doc says 'nesting is not supported'), this unlocks an unheld mutex and panics. WithReleasedTerminal pairs them correctly, but external callers use Pause/Resume directly (it satisfies hooks.TTYReleaser).",
+    "why": "The lock-acquire/lock-release split across two public methods is fragile: any caller mismatch (e.g. an error path that calls Resume in a defer after Pause failed, or a hook that double-resumes) is an immediate runtime panic rather than a recoverable error.",
+    "suggestion": "Track paused state and make Resume a no-op (or return an error) when not currently paused, instead of blindly unlocking; or document loudly and add a guard so a mismatched Resume cannot unlock an unheld RWMutex.",
+    "scope": "internal/patchapp",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Factually accurate. In /Users/weatherjean/CODE/AGENTS/shell3/internal/patchapp/lifecycle.go, Pause() acquires the lock at line 23 (`a.term.readMu.Lock()`) and Resume() unconditionally releases it at line 50 (`a.term.readMu.Unlock()`). Resume does not consult any state before unlocking, so a stray Resume (no prior Pause) or a double-Resume for one Pause calls Unlock on an unheld sync.RWMutex (app.go:61 `readMu sync.RWMutex`), which is a hard runtime panic, not a recoverable error. Notably a `paused` bool field already exists and is written in both methods (lifecycle.go:27 sets true, line 45 sets false; read at app.go:155/169), so a guard is trivially available but unused — this is the design smell. The split-acquire/split-release across two public methods is genuinely fragile. However the claimed external-caller risk is overstated: every real call path pairs them correctly. The only callers are WithReleasedTerminal (lifecycle.go:57-61, pairs via defer) and its users interactive.go:127 / editor.go:325. There are zero direct .Pause()/.Resume() call sites in the repo, and the cited `hooks.TTYReleaser` interface does not actually exist anywhere in the codebase (no `hooks` package defines it; only .git/hooks and .shell3/hooks dirs exist) — it is aspirational doc text. So the panic is currently unreachable; this is a latent design fragility for future callers of the documented releaser contract rather than a live bug. Real but low severity, consistent with the claim."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "error-handling",
+    "severity": "low",
+    "title": "Nested inline styles lose the outer style after the first inner ansiReset",
+    "file": "internal/patchmd/patchmd.go",
+    "line": "130-153",
+    "description": "applyInline runs each inline formatter independently and each one terminates its span with a blanket ansiReset (e.g. boldRe emits ansiBold+inner+ansiReset, linkRe emits \\033[4m+colCyan+sub[1]+ansiReset). Because the formatters run in sequence over the same flat string, a link/code/italic span nested inside a bold span injects its own ansiReset in the middle of the bold region. For input like `**bold [link](u) end**`, boldRe first produces ansiBold+\"bold [link](u) end\"+ansiReset, then linkRe replaces the inner [link](u) with text ending in ansiReset; that inner reset clears the bold attribute, so the trailing \" end\" renders un-bold even though it is inside the bold delimiters.",
+    "why": "Visible rendering regression: text following any nested inline element inside a bold/italic span loses its enclosing style on the terminal. The existing tests only cover the visible (ANSI-stripped) text and side-by-side spans, so they do not catch the lost styling in the nested case.",
+    "suggestion": "Instead of emitting a blanket ansiReset to close each inline span, restore the enclosing style context (e.g. re-open the active bold/italic after an inner reset), or render inline formatting in a single pass that tracks a style stack rather than running independent regex replacements that each reset all attributes.",
+    "scope": "internal/patchmd",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Verified against /Users/weatherjean/CODE/AGENTS/shell3/internal/patchmd/patchmd.go:118-173. applyInline runs each inline formatter as an independent regex ReplaceAllStringFunc over the same flat string, and each emits a blanket ansiReset (\"\\033[0m\") to close its span: boldRe (line 137) emits ansiBold+inner+ansiReset; italicRe, strikeRe, and linkRe (line 152, \"\\033[4m\"+colCyan+sub[1]+ansiReset) do the same. ansiReset is defined at line 21 as \"\\033[0m\" (resets ALL SGR attributes, not just the one set).\n\nTracing the claimed input `**bold [link](u) end**`: there are no code spans to stash, so boldRe runs first and yields \"\\033[1m\"+\"bold [link](u) end\"+\"\\033[0m\". linkRe then matches the still-present `[link](u)` inside that string and replaces it with \"\\033[4m\\033[38;2;6;182;212m\"+\"link\"+\"\\033[0m\". The resulting stream is: \\033[1m \"bold \" \\033[4m\\033[38;2;...m \"link\" \\033[0m \" end\" \\033[0m. The inner \\033[0m clears the bold attribute, so \" end\" renders un-bold even though it sits inside the bold delimiters. The description is factually correct about the code and the consequence.\n\nLocation is correct (lines 130-153 cover the formatter block; the bold and link lines cited are 137 and 152). Tests (patchmd_test.go) only assert stripANSI visible text and side-by-side (non-nested) spans (e.g. TestInline_CodeAndLink_NoLeak uses separate `[link]` and `**bold**`), so they would not catch the lost styling — confirming the \"why\" claim.\n\nThis is a genuine, if minor, rendering correctness bug. It is purely cosmetic terminal styling with no functional impact, and only manifests when an inline element is nested inside a bold/italic/strike span on the same line, so low severity is appropriate. Note the assigned dimension \"error-handling\" is a mischaracterization — this is a string-rendering/correctness issue, not error handling — but the finding itself is real."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "go-idioms",
+    "severity": "medium",
+    "title": "diffRender mishandles transition to an empty frame (moveCursorTo(-1))",
+    "file": "internal/patchtui/renderer.go",
+    "line": "461-469",
+    "description": "When Render is called with an empty lines slice while a previous non-empty frame exists, diffRender's rewrite branch is skipped (end = len(lines)-1 = -1, so end>=firstChanged is false). It then enters the trailing-erase branch and calls r.moveCursorTo(buf, len(lines)-1) i.e. moveCursorTo(buf, -1). With cursorRow currently positive, diff = -1 - cursorRow is negative, emitting a CSI cursor-up that moves above frame row 0, then it writes \\r\\n\\x1b[2K lines from there and finally moveCursorTo(-1) again.",
+    "why": "Shrinking a live frame down to zero lines via Render (rather than Erase) leaves the cursor parked one row above where the frame started and erases a line that belongs to scrollback above the frame, corrupting committed history. The full-render path (used on first render) handles len==0 correctly, but the diff path does not.",
+    "suggestion": "Clamp the target row to 0 in the trailing-erase branch (e.g. base := len(lines)-1; if base < 0 { base = 0 }) or special-case len(lines)==0 to move to row 0 and emit \\r\\x1b[0J like Erase does.",
+    "scope": "internal/patchtui",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Confirmed by reading internal/patchtui/renderer.go:417-470 and by an empirical test. When Render is called with an empty slice while a non-empty frame exists: in diffRender, end = lastChanged is clamped to len(lines)-1 = -1, so end>=firstChanged (-1>=0) is false and the rewrite branch is skipped (lines 444-458). It then enters the trailing-erase branch (len(r.prev) > len(lines), line 461) and calls r.moveCursorTo(buf, len(lines)-1) = moveCursorTo(buf, -1) at lines 463 and 468. moveCursorTo (475-485) computes diff = -1 - cursorRow; with cursorRow=1 from a prior render this is -2, emitting \"\\x1b[2A\" (cursor up 2), which moves one row ABOVE frame row 0 into committed scrollback. My test produced exactly: \"\\x1b[2A\\r\\r\\n\\x1b[2K\\r\\n\\x1b[2K\\x1b[2A\\r\" with final cursorRow=-1. So it erases lines belonging to scrollback above the frame and parks the cursor one row above where the frame started — corrupting committed history. The description, the line numbers, and the consequence are all factually accurate. Notably the fullRender path explicitly special-cases len(lines)==0 (lines 407-411, sets cursorRow=0), confirming empty frames are a valid intended input that the diff path mishandles — a real contract inconsistency, and the suggested clamp/special-case fix is correct. Severity adjusted to low because the sole in-tree caller (patchapp.render -> liveFrameLocked -> buildFrame in internal/patchapp/render.go:22-32) always returns at least one line (busy line, or \"\"+input box+status bar), so the empty-Render path is currently unreachable in the app, and the documented way to clear a frame is Erase() (which handles empty correctly). It is a genuine latent defect in a documented-reusable renderer rather than an active production bug, hence low rather than medium."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "error-handling",
+    "severity": "medium",
+    "title": "Genuine read errors collapsed into ReasonEOF, losing the cause",
+    "file": "internal/patchwidgets/ask.go",
+    "line": "55-58",
+    "description": "readKey returns (keyEOF, err) for any non-timeout, non-io.EOF read failure (e.g. a real I/O error on /dev/tty). All three widget loops handle this as `if err != nil { return eofResult(), nil }`, discarding the underlying error and reporting ReasonEOF with a nil error. The same pattern is in confirm.go:48-51 and pick.go:74-77.",
+    "why": "A caller cannot distinguish a clean terminal close from an actual read failure, and the original error is never surfaced or wrapped. Failures are silently reclassified as a normal EOF dismissal, making real terminal/IO faults undebuggable.",
+    "suggestion": "Propagate the real error: in the loop, on err != nil return the error to the caller when it is not io.EOF (e.g. `if err != nil && !errors.Is(err, io.EOF) { return Result{}, fmt.Errorf(\"patchwidgets: read tty: %w\", err) }`). Reserve eofResult() for the genuine EOF case.",
+    "scope": "internal/patchwidgets",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Verified against the actual code. In ask.go:55-58, confirm.go:48-51, and pick.go:74-77 the loops all do `k, err := t.readKey(...); if err != nil { return eofResult(), nil }`, discarding err and reporting ReasonEOF with a nil error. readKey (tty.go:53-74) deliberately distinguishes two error paths: genuine EOF returns `(keyEOF, io.EOF)` (lines 64-65) and any other read failure returns `(keyEOF, err)` preserving the real cause (line 67). The doc comment even documents the EOF contract. So the underlying intent is to let callers tell a clean close from a real I/O fault, but the callers collapse both into eofResult(). The function signatures are already `(Result, error)` and the functions do return non-nil errors elsewhere (spec.Validate, openTTY), so propagating the read error is consistent with the API — the suggested fix is sound. Confirmed real, but downgraded from medium to low: these are interactive single-prompt TTY widgets, a genuine non-EOF read error on /dev/tty mid-prompt is rare, and the only consequence is reduced debuggability (real fault misreported as a normal EOF dismissal / exit 130). No correctness, data-loss, or security impact in normal operation."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "go-idioms",
+    "severity": "low",
+    "title": "Multi-byte input beyond the first key is silently discarded",
+    "file": "internal/patchwidgets/tty.go",
+    "line": "72",
+    "description": "readKey reads up to 32 bytes, calls parseKey(buf[:n]) and ignores the returned consumed count, so only the first decoded key is acted on; any remaining bytes in the same read (pasted text, a fast burst, or a CSI sequence followed by a char) are dropped.",
+    "why": "On terminals that deliver several keystrokes in one read (or on paste), keystrokes are lost — e.g. typing quickly into the Ask/Pick filter drops characters, which is a confusing correctness issue even though paste handling is intentionally out of scope.",
+    "suggestion": "Loop over the buffer using the consumed count from parseKey and emit/queue each decoded key, or buffer the unconsumed tail across calls, rather than parsing only the head and discarding the rest.",
+    "scope": "internal/patchwidgets",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Confirmed by reading the actual code. At internal/patchwidgets/tty.go:72, readKey does `k, _ := parseKey(buf[:n])` and discards the consumed byte count, returning only the first decoded key. parseKey (internal/patchwidgets/input.go:38) was explicitly designed to return that count — its doc comment says \"Returns the parsed key and the number of bytes consumed... callers advance and try again\" — confirming the intended usage is to loop over the buffer. The callers (ask.go:55, confirm.go:48, pick.go:74) each call readKey exactly once per loop iteration and process a single key, then issue a fresh Read on the next iteration. So when a single read() coalesces multiple keystrokes into one buffer (common in raw mode: fast typing, key auto-repeat, paste, or a CSI sequence immediately followed by a char), every byte after the first decoded key is silently dropped. The location is correct and the description is factually accurate. It is a genuine, if minor, correctness bug — the consumed-count return value exists precisely to be looped and is being thrown away. Severity is appropriately low: paste is documented as out of scope (input.go comment \"no bracketed paste handling\"), the affected widgets are short interactive prompts where reads are usually one key at a time, and the impact is occasional dropped characters under fast/coalesced input rather than a crash or data corruption. The suggested fix (loop using the consumed count, emitting/queuing each key, or buffering the unconsumed tail) is the correct remedy."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "api-structure",
+    "severity": "low",
+    "title": "paintFrame takes an unused *tty parameter",
+    "file": "internal/patchwidgets/ask.go",
+    "line": "136-138",
+    "description": "paintFrame(_ *tty, r *patchtui.Renderer, frame []string) ignores its first argument entirely and just calls r.Render(frame). Every call site passes t needlessly.",
+    "why": "The function is a no-op wrapper that implies a dependency on the tty it never uses, which is misleading and adds friction without abstraction value.",
+    "suggestion": "Drop the unused *tty parameter (or inline r.Render(frame) at the call sites). The renderer is already pointed at the tty via SetOutput.",
+    "scope": "internal/patchwidgets",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Verified at internal/patchwidgets/ask.go:136-138. The signature is `func paintFrame(_ *tty, r *patchtui.Renderer, frame []string)` and the body is solely `r.Render(frame)`. The first parameter is explicitly discarded via the blank identifier `_`, so it is truly unused. All three call sites pass `t` needlessly: ask.go:48 `paintFrame(t, r, frame)`, confirm.go:41 `paintFrame(t, r, frame)`, and pick.go:67 `paintFrame(t, r, lines)`. The function's own doc comment confirms the renderer is already pointed at the tty via SetOutput (see ask.go:26 `r.SetOutput(t.f)`), so the *tty argument carries no dependency the function needs. The description is factually correct and the location is correct. This is a real but minor API-structure smell — a dead parameter that implies a dependency that does not exist. Low severity is appropriate: no correctness or concurrency impact, purely cosmetic friction. The suggested fix (drop the parameter) is sound. Not intentional, not guarded, not framework-inherent."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "error-handling",
+    "severity": "low",
+    "title": "FindByCWD silently swallows ReadMeta errors",
+    "file": "internal/ref/ref.go",
+    "line": "97-100",
+    "description": "In the project scan loop, ReadMeta errors are discarded with a bare `continue`. A corrupt or unreadable meta.json (e.g. partially written, bad JSON, permission denied) is treated identically to a non-matching project.",
+    "why": "If a project's meta.json is genuinely corrupt or unreadable, FindByCWD returns (\"\", nil) as if the project does not exist, causing callers to create a duplicate project rather than surfacing the real problem. The recovery purpose of meta.json is defeated without any diagnostic.",
+    "suggestion": "Distinguish 'not present' from 'present but broken': for os.IsNotExist skip silently; for other errors either return the error or accumulate them (e.g. log/collect) so a corrupt meta is not silently invisible.",
+    "scope": "internal/ref",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Code at internal/ref/ref.go:97-100 matches the claim exactly: in FindByCWD's scan loop, `m, err := ReadMeta(p); if err != nil { continue }` discards the error with a bare continue. ReadMeta (line 70-80) returns wrapped errors for both os.ReadFile failures (incl. permission denied) and json.Unmarshal failures, so a corrupt/partially-written/unreadable meta.json is indeed treated identically to a non-match, and FindByCWD returns (\"\", nil). The Meta struct comment (line 16-17) explicitly states meta.json exists so AIs/humans can restore a lost .ref, so silently skipping a broken meta partially defeats that recovery purpose, and the suggested fix (distinguish os.IsNotExist from other errors) is the idiomatic Go remedy. So the description is factually accurate and it is a genuine error-handling smell. However the claimed consequence is hypothetical in this codebase: FindByCWD has NO production callers (grep shows only ref_test.go); bootstrap uses ref.Init (keyed off the local .ref file, line 44) and doctor.go uses ref.Load/ReadMeta directly with proper error handling. No caller currently performs the create-duplicate-project recovery flow described, so the impact is latent rather than active. Real but correctly rated low severity."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "error-handling",
+    "severity": "medium",
+    "title": "Init orphans the project dir and meta on later failure, and ignores existing meta on .ref loss",
+    "file": "internal/ref/ref.go",
+    "line": "49-66",
+    "description": "Init creates the project dir and writes meta.json before writing .ref. If writeMeta or the final os.WriteFile(l.Ref) fails, the already-created project directory (and meta.json) is left behind. Additionally Init never consults FindByCWD, so if .ref is lost but meta.json still exists for this cwd, Init mints a brand-new UUID and a second project dir instead of recovering the existing one.",
+    "why": "A failed .ref write (disk full, permissions) leaves an orphan ~/.shell3/projects/<uuid>/ with no .ref pointing at it; the next Init run creates yet another duplicate project for the same cwd, accumulating orphans and defeating the documented 'restore the .ref file if lost' intent of Meta.",
+    "suggestion": "On entry, after Load returns empty, call FindByCWD(g, cwd) and reuse that UUID (re-writing only .ref) if found. On error after MkdirAll, os.RemoveAll(p.Dir) to avoid leaving an orphan, or write .ref first / use the meta as the source of truth.",
+    "scope": "internal/ref",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Verified against /Users/weatherjean/CODE/AGENTS/shell3/internal/ref/ref.go:39-67. Both claims are factually correct.\n\n(1) Orphan on failure: Init does os.MkdirAll(p.Dir) (line 49), then writeMeta(p, meta) (line 59), and only afterward os.WriteFile(l.Ref) (line 63). On any error path after MkdirAll (writeMeta failure, or the .ref WriteFile failing on disk-full/permission), it returns early with no os.RemoveAll(p.Dir), leaving ~/.shell3/projects/<uuid>/ (and meta.json) with no .ref pointing at it.\n\n(2) Ignores existing meta on .ref loss: Init only consults Load(l) (the local .ref) at line 40. When Load returns \"\" it immediately mints uuid.New() (line 46) without ever calling FindByCWD. The Meta struct's own doc comment (line 16-17) states it exists 'to restore the .ref file if lost', and FindByCWD (line 84-106) scans projects/*/meta.json by CWD for exactly that purpose — but grep confirms FindByCWD has zero non-test callers and is unused by Init or its only caller bootstrap.EnsureProject (bootstrap.go:44). So a lost .ref with a surviving meta.json produces a brand-new UUID and a duplicate project dir for the same cwd, defeating the documented recovery intent.\n\nLocation (49-66) is correct.\n\nSeverity: I lower from medium to low. The consequences are bounded and non-corrupting: leftover empty/near-empty directories and duplicate project state dirs. The orphan path only triggers on rare I/O failures, and the duplicate-project path only on .ref loss. No crash, data loss, or incorrect runtime behavior in the common case — just accumulating cruft and an unrealized recovery feature. The suggested fixes (call FindByCWD after empty Load; RemoveAll(p.Dir) on post-MkdirAll error) are reasonable."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "concurrency",
+    "severity": "low",
+    "title": "Init has a time-of-check/time-of-use race on .ref",
+    "file": "internal/ref/ref.go",
+    "line": "40-66",
+    "description": "Init checks Load(l) (read .ref) and, only if empty, generates a UUID and writes .ref. Two concurrent Init calls (two processes in the same cwd, or a future concurrent caller) can both observe an absent .ref, both mint UUIDs, both create project dirs, and the last writer's .ref wins.",
+    "why": "The losing UUID's project dir + meta.json become a permanent orphan, and the two callers briefly disagree on the project identity. Low risk today because this is first-run CLI setup, but there is no guard if Init is ever called concurrently.",
+    "suggestion": "Create .ref atomically with O_CREATE|O_EXCL (os.OpenFile) so only one writer wins; on EEXIST, re-Load and return the existing UUID. Mint the project dir/meta only after winning the create.",
+    "scope": "internal/ref",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Verified against internal/ref/ref.go:39-67. Init() performs a classic check-then-act with no lock or atomic guard: it calls Load(l) (os.ReadFile of l.Ref, returning \"\" if absent, lines 40-44), and only if empty does it uuid.New() (46), os.MkdirAll(p.Dir) (49), writeMeta (59), then os.WriteFile(l.Ref, ...) (63). Nothing serializes this sequence across processes. Two shell3 processes started in the same cwd before .ref exists can both observe absent .ref, both mint distinct UUIDs, both create projects/<uuid>/ + meta.json, and the last WriteFile to .ref wins — exactly as described. The losing UUID's project dir/meta.json becomes a permanent orphan (no cleanup; though FindByCWD at :84 could later recover it). The location (40-66) is correct.\n\nIn context, severity is genuinely low and the claim says so. This is a cross-process file race, not an intra-process goroutine race: the sole non-test caller is bootstrap.EnsureProject -> agentsetup builder.resolvePaths (agentsetup.go:105), invoked once sequentially per CLI process start. So it only fires when two shell3 instances launch concurrently in the same project on first run, within the narrow window before .ref exists. Consequence is a harmless orphan directory, not corruption or wrong identity persistence (each process keeps a valid, regenerable UUID). The suggested fix (os.OpenFile with O_CREATE|O_EXCL on .ref, re-Load on EEXIST, mint dir/meta only after winning) is correct and idiomatic. Real antipattern, accurately described, low severity confirmed."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "go-idioms",
+    "severity": "low",
+    "title": "os.Stat non-NotExist error treated as \"file absent\", weakening the never-overwrite guarantee",
+    "file": "internal/scaffold/scaffold.go",
+    "line": "31-33",
+    "description": "writeIfAbsent decides a file is absent purely by `os.Stat(path); err == nil` returning non-nil. Any non-nil Stat error (permission denied on a parent component, a path element that is not a directory, etc.) is silently treated as \"absent\" and the code falls through to MkdirAll+WriteFile. The Stat error is discarded. Combined with the gap between Stat and WriteFile, this is a TOCTOU pattern: the doc comment promises \"existing files are never overwritten,\" but that holds only when Stat succeeds and reports presence.",
+    "why": "In the (admittedly rare) case Stat fails for a reason other than ErrNotExist, the function may attempt to (re)create/overwrite rather than no-op, contradicting its documented idempotency contract; the underlying Stat error is also swallowed rather than surfaced.",
+    "suggestion": "Distinguish the cases: treat only errors.Is(err, fs.ErrNotExist) as \"absent\" (proceed to write); if Stat succeeds, no-op; for any other Stat error, return it wrapped instead of silently writing.",
+    "scope": "internal/scaffold",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Code at internal/scaffold/scaffold.go:30-38 confirms the description verbatim: writeIfAbsent does `if _, err := os.Stat(path); err == nil { return nil }`, then falls through to MkdirAll + WriteFile for ANY non-nil Stat error, discarding that error. The doc comment at line 19 explicitly promises \"existing files are never overwritten.\" So the factual claims and location are accurate, and the idiomatic fix (errors.Is(err, fs.ErrNotExist)) is a real Go-idioms improvement — the precise way to detect absence is checking ErrNotExist, not treating every error as absent.\n\nHowever the severity is genuinely low (matching the claim). The harmful \"overwrite an existing file\" outcome is largely self-mitigating: for the common non-NotExist failures (EACCES on a parent, ENOTDIR), the subsequent MkdirAll/WriteFile will itself fail and return an error, so the operation does not silently succeed. To actually overwrite a real file you'd need Stat to fail with a non-NotExist error while WriteFile still succeeds — an extremely narrow, near-unreachable condition. This is also a single-user, first-run scaffolding helper writing config templates (not security-sensitive, no real concurrency), so the TOCTOU framing is technically correct but practically negligible. Net: a legitimate idiom nit (imprecise absence detection + swallowed Stat error) worth fixing, but correctly rated low."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "error-handling",
+    "severity": "high",
+    "title": "rows.Err() not checked in migrateMemoriesAddCore before a destructive rebuild",
+    "file": "internal/store/store.go",
+    "line": "67-84",
+    "description": "The PRAGMA table_info(memories) loop sets hasCore when it sees the core column, but after the loop only rows.Close() is called — rows.Err() is never checked. If row iteration aborts early due to a driver/IO error before reaching the 'core' row, hasCore stays false and the function proceeds to the copy-rebuild migration (CREATE memories_new / INSERT SELECT / DROP memories / RENAME).",
+    "why": "A transient iteration error could cause a table that already has the core column to be treated as legacy and rebuilt, or the INSERT...SELECT to run against a misread schema — risking data loss or a corrupt migration on a table that contains user memories.",
+    "suggestion": "After the loop, check `if err := rows.Err(); err != nil { rows.Close(); return fmt.Errorf(\"store: inspect memories: %w\", err) }` before deciding hasCore, so iteration failures abort the migration instead of triggering a destructive rebuild.",
+    "scope": "internal/store",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Factually accurate and correctly located. In migrateMemoriesAddCore (store.go:62-110), the PRAGMA table_info(memories) loop (lines 68-80) sets hasCore=true on the core column, handles the per-row Scan error (lines 73-76), then at line 81 only calls `_ = rows.Close()` — rows.Err() is genuinely never checked. If rows.Next() terminates due to a driver/IO error before reaching the core row, hasCore stays false and execution falls through to the copy-rebuild (CREATE memories_new / INSERT...SELECT core=0 / DROP memories / RENAME). This is a real idiomatic omission: checking rows.Err() after a Next() loop is standard Go practice, and it is inconsistent that the in-loop Scan error is handled while the iteration error is not.\n\nHowever, the claimed high severity and the \"data loss / corrupt migration\" consequence are overstated in context:\n- The rebuild runs inside a transaction with `defer tx.Rollback()` (lines 86-90, 104-109), so a mid-migration statement failure rolls back atomically — there is no partial/corrupt-migration risk.\n- The INSERT...SELECT (lines 99-100) preserves rowid/key/value/updated_at and only writes a literal 0 for core. So even in the worst case (a table that already had core, misread as legacy), the actual user memory content survives; only the `core` boolean flags would be reset to 0. That is a degradation, not destruction of user memories.\n- The trigger is exceptionally unlikely: this is a local modernc.org/sqlite file reading a tiny schema via PRAGMA, with no network and minimal IO surface for a transient mid-iteration error.\n\nSo it is a genuine but low-impact correctness/robustness defect. The suggested fix (check rows.Err() after the loop and abort) is correct and worth applying for idiomatic safety, but severity should be low, not high."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "error-handling",
+    "severity": "low",
+    "title": "StartSession returns LastInsertId error unwrapped, losing the store: prefix/context",
+    "file": "internal/store/store.go",
+    "line": "256-263",
+    "description": "StartSession returns res.LastInsertId() directly. Every other error in this file is wrapped with a 'store: ...: %w' prefix; this one returns the raw driver error with no operation context.",
+    "why": "Callers logging this error get a bare driver message with no indication it came from session creation, breaking the consistent error-context convention the rest of the package relies on for debugging.",
+    "suggestion": "id, err := res.LastInsertId(); if err != nil { return 0, fmt.Errorf(\"store: start session: last insert id: %w\", err) }; return id, nil.",
+    "scope": "internal/store",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Confirmed factually accurate at /Users/weatherjean/CODE/AGENTS/shell3/internal/store/store.go:256-263. StartSession ends with `return res.LastInsertId()` (line 262), returning the raw driver error unwrapped. Every other error path in the file follows a consistent `store: ...: %w` convention: line 233 (`store: memory search`), 246 (`store: memory scan`), 260 (`store: start session: %w` — the Exec error within this very function), 269 (`store: end session %d`), 282 (`store: append history`). So the LastInsertId error path is the lone exception that breaks the package's debugging convention, exactly as described. The suggested fix (wrap with `store: start session: last insert id: %w`) is correct and idiomatic. Severity is genuinely low: LastInsertId rarely returns a non-nil error for SQLite drivers (mattn/go-sqlite3 always returns nil), so the error branch is seldom hit in practice — but the inconsistency is real and the fix is cheap and harmless. Not intentional, not guarded, not unreachable in principle."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "error-handling",
+    "severity": "low",
+    "title": "time.Parse errors silently discarded across all row scans",
+    "file": "internal/store/store.go",
+    "line": "249",
+    "description": "scanMemoryRows (line 249) and HistoryGet/HistorySearchExpr (lines 385, 412, 414, 458) all do `x, _ = time.Parse(time.RFC3339, ...)`, discarding the parse error. A malformed or non-RFC3339 timestamp in the DB silently yields a zero time.Time with no signal.",
+    "why": "Corrupt or legacy-format timestamps surface as silent zero times (e.g. UpdatedAt/CreatedAt = 0001-01-01), which can mis-sort newest-first queries or display epoch dates with no diagnostic, making the underlying data issue invisible.",
+    "suggestion": "At least log or return on parse failure for at least one path, or document that zero-time on parse failure is intentional; do not blanket-discard the error on stored data you control the format of.",
+    "scope": "internal/store",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "The code is exactly as described. internal/store/store.go has five `x, _ = time.Parse(time.RFC3339, ...)` sites discarding the parse error: line 249 (scanMemoryRows, e.UpdatedAt), line 385 (HistoryGet, t.CreatedAt), lines 412/414 (HistoryGet session started/ended), and line 458 (HistorySearchExpr, t.CreatedAt). The package fully controls the timestamp format on the write side — MemoryUpsert (171), StartSession (257), EndSession (267), AppendHistory (276) all write time.Now().UTC().Format(time.RFC3339), and the FTS5 migration (lines 99-100) copies updated_at forward verbatim. So a parse failure can only come from external corruption/hand-editing, not the app's own writes. The error IS genuinely discarded, so the finding is factually real, but its impact is minor and one stated consequence is wrong: the claim that this 'mis-sorts newest-first queries' is incorrect — sorting is done by SQLite on the stored string column (ORDER BY updated_at DESC at lines 199/205), not on the parsed Go time.Time, so a parse failure never affects ordering. The only real effect is a benign zero-time (0001-01-01) on display with no diagnostic. Discarding parse errors and falling back to zero value in scan loops over self-controlled data is broadly idiomatic Go; the gap is purely observability. Genuine but trivial; low is the honest ceiling, and the suggested fix (log/document the zero-time-on-failure intent) is reasonable but optional."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "concurrency",
+    "severity": "medium",
+    "title": "Cross-goroutine cfg/lastUsage access relies on an undocumented busy-gate invariant in another package",
+    "file": "internal/tui/interactive.go",
+    "line": "179, 320-325, 384-636",
+    "description": "`drainTurn` runs on its own long-lived goroutine and reads shared `*chat.Config` fields while processing a turn's events: `cfg.Truncate` (renderToolResultBody, line 325) and `cfg.CustomToolNames` (renderToolCallHeader, line 320). Slash-command handlers run on the input-loop goroutine and mutate the same struct: `/truncate` writes `cfg.Truncate` (478), `/model` writes `cfg.LLM/Params/StatusLine/ContextWindow` (587-593), `/clear` writes `cfg.Personality.SystemPrompt` (394). The `/usage` handler reads `*lastUsage` (429) which `drainTurn` writes (259). There is no mutex around `cfg` or `lastUsage`. The only thing preventing a data race is that patchapp.handleEnter early-returns when `a.busy` is true, so slash handlers cannot fire while a turn (and thus drainTurn's reads) is active. That synchronization discipline lives in a different package (internal/patchapp/editor.go) and is not referenced or asserted anywhere in tui.",
+    "why": "The code is currently race-free only by accident of the busy-gate. Any future change — e.g. allowing a slash command to run during streaming, or a turn goroutine that lingers after busy is cleared — silently introduces an unsynchronized read/write on an interface (`cfg.LLM`) and bools, which `go test -race` would flag and which can corrupt the displayed/used config. The invariant is invisible to anyone editing tui.",
+    "suggestion": "Make the dependency explicit: either guard the shared config with a mutex (or an atomic snapshot) read by drainTurn and written by slash handlers, or thread an immutable per-turn config snapshot into drainTurn instead of sharing `&cfg`. At minimum, document the busy-gate invariant at the drainTurn/registerSlashCommands boundary so it survives refactors.",
+    "scope": "internal/tui",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "The factual claims are all verified against the actual code. drainTurn (interactive.go:179) runs on its own long-lived goroutine (launched at line 82-85) and reads shared *chat.Config fields per-event: cfg.CustomToolNames via renderToolCallHeader (interactive.go:320 -> render.go:148) and cfg.Truncate (interactive.go:325). Slash handlers, registered at registerSlashCommands (line 384) and dispatched from patchapp.handleEnter on the input-loop goroutine, mutate the same struct: /truncate writes cfg.Truncate (478), /model writes cfg.LLM/Params/StatusLine/ContextWindow (587-593), /clear writes cfg.Personality.SystemPrompt (394). /usage reads *lastUsage (429) which drainTurn writes (publishUsage, line 259). There is no mutex around cfg or lastUsage in tui.\n\nThe synchronization claim is also correct: the only thing serializing these accesses is patchapp.App.handleEnter (editor.go:268-273), which acquires a.mu and early-returns when a.busy is true, so a slash handler cannot fire while a turn is active. SetBusy (app.go:217) and handleEnter both take a.mu, and drainTurn clears busy via app.SetBusy(false,nil) (interactive.go:345/359) AFTER its last cfg read for the turn and before blocking on the next channel recv. So a.mu's lock/unlock establishes the happens-before edge that makes the code genuinely race-free TODAY. I confirmed there is no -race regression test and no comment in tui documenting this invariant.\n\nBecause it is race-free today, the claimed consequence that 'go test -race would flag it' is NOT currently true — this is not a present-day data race. It is a real but latent maintainability/fragility issue: correctness depends on an undocumented cross-package invariant (busy-gate in internal/patchapp/editor.go) that is invisible to anyone editing tui, and any future change (slash command allowed during streaming, or a turn goroutine lingering past busy-clear) would silently introduce an unsynchronized read/write on cfg.LLM (an interface) and bools. That makes it a genuine antipattern worth a documenting comment or an explicit snapshot/guard, but its severity is low, not medium: there is no current bug, the coupling is to first-party code in the same binary, and the suggested minimal fix (document the invariant at the boundary) is cheap. I downgraded medium -> low accordingly."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "concurrency",
+    "severity": "medium",
+    "title": "Turn goroutine is not awaited at teardown; can touch the store concurrently with EndSession on ctx cancel",
+    "file": "internal/tui/interactive.go",
+    "line": "89-101, 144-161",
+    "description": "`launchTurn` spawns the turn goroutine (`go func(){ ... sess.Run / chat.RunTurn ... }()`) but the teardown defer only does `drainWG.Wait()`, which waits for the drain goroutine, not the turn goroutine. The turn goroutine calls into `cfg.Store` (saveHistory / compact_history). When the parent `ctx` is cancelled, `app.Run` returns and the defer runs `cfg.Store.EndSession(...)` while the cancelled turn goroutine may still be unwinding through a `saveHistory`/compact store write.",
+    "why": "`RunInteractive` returns while a goroutine it started is still running and still using `cfg.Store`. Although `*sql.DB` serializes access (so no handle-level corruption), the result is a logically inconsistent interleave (history rows appended to a session that is concurrently being ended) and a brief goroutine still live after the function the user believes has fully torn down. If the store were ever swapped for a non-DB or closed earlier, this becomes a use-after-close.",
+    "suggestion": "Track the turn goroutine with its own WaitGroup (or reuse a turn-lifecycle signal) and wait for it before `sess.End`/`CloseEvents`/`EndSession`, after cancelling `turnCtx`. This guarantees no store writes are in flight when the session is ended.",
+    "scope": "internal/tui",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "The mechanism described is factually accurate. In /Users/weatherjean/CODE/AGENTS/shell3/internal/tui/interactive.go, launchTurn (lines 144-161) spawns the turn goroutine as fire-and-forget `go func(){ defer cancel(); sess.Run(turnCtx,...) / chat.RunTurn(...) }()` and nothing joins it. The only WaitGroup, drainWG (lines 80-85, 96), tracks the long-lived *drain* goroutine, not the turn goroutine. The teardown defer (lines 89-101) runs sess.End → CloseEvents → drainWG.Wait, and the earlier-registered store defer (lines 38-42) runs cfg.Store.EndSession AFTER that — neither waits for the turn goroutine. The turn goroutine does touch the store: RunTurn's deferred closure (internal/chat/turn.go:81-94) calls beforeDone() (= Session.Run's persist → saveHistory → store.AppendHistory, session_lifecycle.go:53-57, turn.go:408-425, store.go:275) BEFORE emitting the terminal event. So on parent-ctx cancel, app.Run returns (patchapp/loop.go:58-61 returns on ctx.Err without joining turns) while the cancelled turn goroutine can still be running AppendHistory concurrently with EndSession. That part of the claim holds.\n\nHowever the claimed consequences are largely benign in context, so medium overstates it. Both writes go through the same *sql.DB (store.go: s.db.Exec), which is concurrency-safe and serializes internally — no handle corruption and no use-after-close (the DB is not closed inside RunInteractive). The \"logical interleave\" of a history row landing after ended_at is set is real but harmless: ended_at is just a timestamp column with no ordering/integrity invariant and no FK enforcement on history, so a late row violates nothing. The emit path is also non-blocking and recover-guarded (event.go:228-237), so the turn goroutine unwinds quickly after cancel. The \"if the store were ever swapped for a non-DB or closed earlier\" scenario is hypothetical, not present in the current code.\n\nNet: a genuine but minor concurrency-hygiene defect (an un-joined goroutine that can touch shared state during/after teardown). The suggested fix (track the turn goroutine in its own WaitGroup and Wait after cancelling turnCtx, before EndSession) is correct and worthwhile. Adjusted severity: low."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "error-handling",
+    "severity": "high",
+    "title": "StartSession error silently swallowed, disabling persistence invisibly",
+    "file": "pkg/shell3/shell3.go",
+    "line": "138-143",
+    "description": "newSession calls cfg.Store.StartSession() and, on error, discards the error in the `if id, err := ...; err == nil` branch, leaving storeID at 0 and proceeding as if the session started normally. There is no log, no return, no signal to the caller.",
+    "why": "If the store fails to open a session (locked DB, full disk, corrupt SQLite), the Session still appears healthy and runs turns, but persistence is effectively misdirected/disabled (StoreID 0). Later Close() calls EndSession(0). The operator gets a silently non-persisting agent with no diagnostic.",
+    "suggestion": "Either log the StartSession error via cfg.Log (LogOrNoop) at Warn level, or surface it from Start as a returned error. At minimum record it so the silent-no-persistence condition is observable.",
+    "scope": "pkg/shell3",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "The code at pkg/shell3/shell3.go:138-143 matches the description exactly: `if id, err := cfg.Store.StartSession(); err == nil { storeID = id }` discards the error, leaves storeID at 0, and proceeds with no log or return. StartSession (internal/store/store.go:256) returns a wrapped error on Exec failure (locked/full/corrupt DB), and this branch swallows it.\n\nThe \"persistence silently disabled\" framing is largely accurate but slightly off in mechanism: StoreID 0 propagates into chat.NewSession as the session id (session.go:48), and appendHistory (turn.go:430) does NOT gate on a non-zero id — it would still INSERT history rows with session_id=0, orphaned from any real sessions row. So persistence is misattributed rather than fully disabled. Close() at shell3.go:220 calls EndSession(s.sess.ID()) i.e. EndSession(0), which no-ops (no row with id 0).\n\nThis is a genuine error-handling gap and is inconsistent with the codebase's own established pattern: turn.go:428-433 explicitly treats persistence as \"best-effort\" but logs failures via lg.Warn. Here cfg.Log is readily available (chat.LogOrNoop is used at shell3.go:237), yet the StartSession failure is recorded nowhere, making the silent non-persistence condition unobservable. The suggested fix (log via cfg.Log at Warn) is the idiomatic match.\n\nSeverity is adjusted down from high to low: persistence is documented as best-effort, the failure mode is uncommon, and core agent operation is unaffected (the session still runs turns correctly). The only impact is silent/misdirected history persistence with no diagnostic — a real but low-impact observability gap, not a correctness or data-loss-of-live-state issue."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "concurrency",
+    "severity": "high",
+    "title": "Close cannot cancel an in-flight turn; turn goroutine can outlive Close and touch a closed store",
+    "file": "pkg/shell3/shell3.go",
+    "line": "215-224",
+    "description": "Close calls sess.End, CloseEvents, waits on drainDone, then EndSession and cleanup() (which closes the SQLite store and log). It never cancels the per-Send ctx and the Session holds no cancel func. The turn runs in `go s.sess.Run(ctx, ...)` (line 204) driven solely by the caller-supplied ctx.",
+    "why": "If a caller calls Close while a turn is still streaming (the contract says drain first, but Close has no enforcement or cancellation path), cleanup() closes the store/DB while RunTurn's saveHistory/appendHistory may still write to it — a use-after-close on the DB — and the Run goroutine leaks until the LLM stream ends. Drain exits on CloseEvents, so emits after that are silently dropped (recover). There is no API-level way to stop the turn at teardown.",
+    "suggestion": "Store a context.CancelFunc per active turn (derive a child ctx in Send), and have Close cancel it before CloseEvents/cleanup so the turn unwinds and stops writing to the store before it is closed. Alternatively, wait for the active turn channel to drain before running cleanup.",
+    "scope": "pkg/shell3",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "medium",
+      "reasoning": "Verified against the actual code. Close() at shell3.go:215-224 does sess.End(\"ok\") → sess.CloseEvents() → <-drainDone → Store.EndSession → cleanup(). It never cancels the turn and the Session holds no cancel func (struct at lines 95-104 has only mu/cur, no CancelFunc). Send (line 198-206) runs `go s.sess.Run(ctx, ...)` driven solely by the caller-supplied ctx; the only handle is the event channel. So the structural claim is accurate: there is no API-level way for Close to stop an in-flight turn, and the Run goroutine outlives Close until the LLM stream ends — a genuine goroutine leak.\n\nThe store-write ordering is also as claimed. chat/session_lifecycle.go:50-59 builds a persist closure (saveHistory→appendHistory→Store.AppendHistory), and RunTurn (turn.go:76-94) runs beforeDone()/persist in a deferred closure that fires AFTER the stream loop completes. agentsetup.go:166 confirms cleanup closes the store (s.Close() → db.Close()) and the log. If a caller calls Close while a turn is still streaming, CloseEvents closes the events chan, drain exits (drainDone closes), and Close proceeds to close the SQLite DB and log while the still-running turn's deferred persist later calls AppendHistory on the now-closed store. That is a real use-after-close call.\n\nNotably, Send's documented single-turn contract (lines 192-197) lists Send/Clear/Rollback/SwitchModel as requiring a prior drain but omits Close, and Close's own doc says nothing about requiring the turn to be drained — so a contract-following caller is not told Close is unsafe mid-turn. The defect is therefore reachable, not purely hypothetical.\n\nTwo corrections that lower severity from the claimed high: (1) emit() (event.go:228-237) is non-blocking with default + recover, so the leaked goroutine cannot deadlock on the closed channel — it just drops events; (2) the store is *sql.DB (store.go:16,113,275), so AppendHistory on a closed DB returns sql.ErrConnDone and is logged/swallowed by appendHistory, not a panic or memory corruption. So the real-world harm is a leaked goroutine plus silently dropped history writes (and a Warn to an already-closed log), not a crash or DB corruption. Genuine concurrency antipattern, but medium rather than high given the graceful-failure of database/sql and that it requires a Close-mid-turn the happy path avoids."
+    },
+    "finalSeverity": "medium"
+  },
+  {
+    "dimension": "api-structure",
+    "severity": "medium",
+    "title": "Public Error event loses the original error type; errors.Is/As impossible",
+    "file": "pkg/shell3/shell3.go",
+    "line": "75",
+    "description": "translate maps chat.EventError to Event{Err: errors.New(ev.Text)}, reconstructing the error from a string. The public Event.Err is therefore always a plain *errorString, even when the underlying failure was context.Canceled, a provider error, or a wrapped sentinel.",
+    "why": "Callers of this embeddable library API cannot do errors.Is(ev.Err, context.Canceled) or errors.As to branch on cause — the documented 'Error on ctx cancellation' case (see Run's doc) is indistinguishable from any other failure. They are forced into fragile string matching on Err.Error().",
+    "suggestion": "Carry a typed error through the chat.Event (e.g. an Err error field on chat.Event populated by emitError), and pass it through verbatim here so errors.Is/As works. If chat cannot be changed, at least document that Err is always opaque and string-only.",
+    "scope": "pkg/shell3",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "medium",
+      "reasoning": "Verified the claim is factually accurate at /Users/weatherjean/CODE/AGENTS/shell3/pkg/shell3/shell3.go:75: `case chat.EventError: return Event{Kind: Error, Err: errors.New(ev.Text)}, true`. The public Event.Err is always a plain *errorString reconstructed from a string.\n\nThe error type is lost at two layers, both confirmed:\n1. internal/chat/event.go:93-122 — the internal chat.Event struct carries only `Text string`, no `Err error` field. emitError (event.go:189-191) takes a `text string`, not an error.\n2. At the emission sites in internal/chat/turn.go (lines 86, 130-134, 171-173), the original typed `err`/`toolErr` is in scope (e.g. line 122 `... err := streamOnce(...)`, line 170 `outcome, toolErr := executeToolCalls(...)` whose comment at line 168-169 explicitly says it is \"non-nil only on context cancellation\") but only `err.Error()` is passed forward. The typed cause — which the comment itself identifies as context.Canceled — is discarded before it ever reaches the public package.\n\nConsequence is real and not hypothetical: pkg/shell3 is documented (file header, line 1-7) as the only public/embeddable API. Run's doc comment (shell3.go:295-296) explicitly advertises \"Error on ctx cancellation\" as a distinguishable terminal case, yet callers cannot do errors.Is(ev.Err, context.Canceled) or errors.As — they are forced into fragile string matching on Err.Error(). Not intentional, not guarded, not unreachable.\n\nSeverity: medium is correct. It is a genuine public-API contract defect (broken error identity across the library boundary) with a fragile-but-functional string workaround; it is not a crash or safety issue, so not higher. The suggested fix is sound — it correctly notes the chat.Event needs an Err field populated by emitError to fully fix it, since the type is already lost internally."
+    },
+    "finalSeverity": "medium"
+  },
+  {
+    "dimension": "error-handling",
+    "severity": "low",
+    "title": "Close always returns nil despite an error-returning signature",
+    "file": "pkg/shell3/shell3.go",
+    "line": "215-224",
+    "description": "Close has signature `func (s *Session) Close() error` but unconditionally returns nil. The EndSession error is discarded with `_ =` (line 220) and cleanup() returns nothing.",
+    "why": "The signature promises callers a meaningful error (e.g. failure to end the store session or flush the log) but never delivers one, so a `if err := sess.Close(); err != nil` guard is dead code and real teardown failures (DB write failure on EndSession) are invisible.",
+    "suggestion": "Capture and return the EndSession error (joined with any cleanup error), or change the signature to no return value if teardown is genuinely best-effort. Do not advertise an error that is never produced.",
+    "scope": "pkg/shell3",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Verified against the actual code at pkg/shell3/shell3.go:215-224. `func (s *Session) Close() error` unconditionally `return nil` on line 223. Line 220 discards the result of `s.cfg.Store.EndSession(s.sess.ID())` with `_ =`. EndSession (internal/store/store.go:266-272) performs a real DB write (`UPDATE sessions SET ended_at`) and returns a wrapped error `store: end session %d: %w` on failure, so the discarded value is a genuine, meaningful error — not a no-op. `cleanup` is a `func()` (field declared line 99) that returns nothing, and CloseEvents/<-drainDone produce no errors, so EndSession is the sole real error source. The description is factually correct on every point: signature, the `_ =` discard, and cleanup having no return. The consequence is real: any caller writing `if err := sess.Close(); err != nil` has dead code, and a DB failure on session teardown is invisible. Severity is honestly low: the only failure mode is a missed `ended_at` bookkeeping update (observability/audit), not conversation data loss, and the rest of teardown is legitimately best-effort. The suggested fix (return the EndSession error, or drop the error from the signature) is appropriate."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "concurrency",
+    "severity": "high",
+    "title": "Terminal turn_done/error event can be silently dropped, hanging the consumer",
+    "file": "internal/chat/event.go",
+    "line": "228-237",
+    "description": "emit() does a non-blocking send (`select { case s.events <- ev: default: }`) for ALL events, including the single terminal EventTurnDone/EventError emitted by RunTurn (turn.go:164,173,180). The event channel is buffered (default 256, session.go:43-48). The downstream consumers treat the terminal event as the one signal that the turn finished: pkg/shell3.drain closes the per-Send channel only on Done/Error (shell3.go:176-186), and tui.drainTurn calls app.SetBusy(false) only on EventTurnDone/EventError (interactive.go:341-359).",
+    "why": "If a consumer falls behind (pkg/shell3: drain blocks on the UNBUFFERED `cur <- pub` send at shell3.go:175 because the embedder is draining slowly; TUI: a slow terminal during a heavy token burst), the 256-slot buffer fills and emit() takes the `default:` branch, dropping whatever event is in flight — which may be the terminal turn_done. In pkg/shell3 the per-Send channel is then never closed: the embedder's `for range` over the Send channel hangs forever, and Session.Close()'s `<-s.drainDone` (shell3.go:218) also blocks because drain is wedged on the unbuffered cur send. In the TUI, busy is never cleared: the spinner spins forever and input stays locked. A 'best-effort, droppable' policy is correct for high-volume token events but catastrophic for the lifecycle-terminal events that other packages use as a completion barrier.",
+    "suggestion": "Make the terminal events (and arguably session_end) a guaranteed blocking send while keeping token/reasoning events droppable: e.g. emit() takes a `mustDeliver bool`, and emitTurnDone/emitError/emitSessionEnd use a blocking `s.events <- ev` (still guarded by the recover for the closed-channel case). Alternatively have the consumers detect channel close as an implicit terminal and always clear busy / close cur in a `defer` when the events range ends.",
+    "scope": "crosscut:concurrency-integration",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "high",
+      "reasoning": "Verified against actual code. emit() (internal/chat/event.go:228-237) performs a non-blocking send `select { case s.events <- ev: default: }` for ALL event kinds, and its own comment (line 224) states \"Dropped events are not retried.\" The terminal lifecycle events go through this same droppable path: RunTurn (turn.go:76) stashes the single end event in `terminalEmit` and invokes it in a defer at turn.go:91-92; the assignments at turn.go:164/173/180 (and panic path at 86) all wrap emitTurnDone/emitError, which call emit(). The channel is buffered at 256 (session.go:43-47, BufSize defaults to 256).\n\nBoth downstream consumers treat the terminal event as the sole completion barrier with no fallback on channel-close or range-end:\n- pkg/shell3 drain (shell3.go:162-188) sends each translated event over an UNBUFFERED `cur <- pub` (line 175) and closes `cur` ONLY on `pub.Kind == Done || Error` (lines 176-186). If the terminal event is dropped, `cur` is never closed, the embedder's range over the Send channel hangs, and Close()'s `<-s.drainDone` (line 218) blocks.\n- TUI drainTurn (interactive.go:303 `for ev := range ch`, 341-359) calls app.SetBusy(false,...) ONLY on EventTurnDone/EventError; the range ends only at full session teardown (CloseEvents), so a dropped terminal leaves busy stuck for the turn.\n\nReachability is real, not theoretical: emitAssistantToken (turn.go:349) fires per stream delta — hundreds/thousands per turn — so a stalled consumer (slow embedder blocking the unbuffered cur send, or a slow terminal during a token burst) can fill the 256-slot buffer; since the terminal event is the LAST event emitted, a sustained overflow drops precisely it. Applying a best-effort/droppable policy uniformly to lifecycle-terminal events that other packages use as a guaranteed completion signal is a genuine concurrency antipattern. High severity is appropriate given the hard Close() deadlock in pkg/shell3."
+    },
+    "finalSeverity": "high"
+  },
+  {
+    "dimension": "concurrency",
+    "severity": "medium",
+    "title": "pkg/shell3 drain blocks indefinitely on the unbuffered Send channel with no ctx escape",
+    "file": "pkg/shell3/shell3.go",
+    "line": "169-187",
+    "description": "Send creates an unbuffered channel `out := make(chan Event)` (shell3.go:199) and stores it as s.cur. The single drain goroutine forwards every translated event with a blocking `cur <- pub` (shell3.go:175). drain has no select-on-ctx and no escape: if the embedder stops draining the returned channel, drain blocks forever on that send.",
+    "why": "A misbehaving or cancelled embedder that abandons the Send channel wedges the drain goroutine permanently. Session.Close() then deadlocks at `<-s.drainDone` (shell3.go:218) because drainDone is only closed when the drain range exits, which never happens. There is no timeout, ctx, or closed-channel signal that lets drain abandon a stuck send. Combined with finding #1 (dropped terminal event), this means a slow/abandoned consumer can permanently leak the drain goroutine and the whole Session.",
+    "suggestion": "Either document that abandoning a Send channel is a fatal misuse and make Close able to force-unblock drain (e.g. drain selects on a shutdown channel as well as the send), or buffer the Send channel and have drain select between `cur <- pub` and a per-turn ctx.Done()/shutdown signal so an abandoned consumer cannot wedge drain and Close.",
+    "scope": "crosscut:concurrency-integration",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "medium",
+      "reasoning": "Confirmed accurate against the real code. Send creates an unbuffered channel `out := make(chan Event)` (shell3.go:199) stored as s.cur. The single drain goroutine forwards each translated event with a blocking, select-free `cur <- pub` (shell3.go:175). drain's `defer close(s.drainDone)` (shell3.go:163) only fires when the `for ev := range s.sess.Events()` loop exits. Close() (shell3.go:215-218) calls s.sess.CloseEvents() then blocks on `<-s.drainDone`.\n\nThe escape claim holds: CloseEvents (internal/chat/session_lifecycle.go:23-25) closes the upstream s.events channel, but a goroutine parked on `cur <- pub` cannot observe that — the range expression only re-evaluates the closed upstream channel after the loop body returns, which it can't because it is stuck mid-iteration on the send. So if the embedder stops reading the Send channel, drain leaks permanently and Close() deadlocks at `<-s.drainDone`. There is no ctx, timeout, or shutdown-channel selected against the send.\n\nMitigations that cap severity at medium rather than high: the package documents a strict single-turn-drain-to-completion contract (shell3.go:92-94, 190-197), so abandoning a Send channel is explicitly out-of-contract misuse, and the upstream buffer is 256 (NewSession BufSize) so a momentarily-slow consumer is tolerated. But the contract does not cover the realistic path where a consumer cancels its ctx and stops reading: sess.Run honors ctx and stops producing, yet already-emitted/in-flight events plus the terminal Done/Error still hit drain's blocking send, so ctx cancellation does not propagate to drain — a cancelled-and-abandoned consumer can still wedge drain and deadlock Close(). Genuine concurrency robustness gap; the location (shell3.go:169-187) and the line references (199, 175, 218) are correct."
+    },
+    "finalSeverity": "medium"
+  },
+  {
+    "dimension": "concurrency",
+    "severity": "medium",
+    "title": "Concurrent SQLite writers (turn saveHistory vs teardown EndSession) can hit 'database is locked'",
+    "file": "internal/store/store.go",
+    "line": "19-29",
+    "description": "Store.Open uses `sql.Open(\"sqlite\", path)` with no MaxOpenConns(1) and no busy_timeout/journal pragma. The same *sql.Store is shared across the turn goroutine (AppendHistory, MemoryUpsert with a write transaction at store.go:144) and the teardown goroutine (EndSession, interactive.go:39). Because the turn goroutine is not awaited before teardown (see finding #2), these two can issue writes to the same DB concurrently.",
+    "why": "database/sql is goroutine-safe at the API level, but it opens multiple physical connections by default; modernc.org/sqlite without a busy_timeout will return SQLITE_BUSY ('database is locked') when one connection holds a write transaction (MemoryUpsert's BEGIN..COMMIT) while another connection tries to write (EndSession/AppendHistory). The error surfaces as a logged warning at best (turn.go:431-433) and a silently-failed EndSession at worst, leaving sessions with no ended_at. This only bites when teardown overlaps an in-flight write, which the unbounded turn goroutine makes reachable.",
+    "suggestion": "Constrain the DB to serialize writers: db.SetMaxOpenConns(1) after Open, and/or open with `?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)`. Pairing this with awaiting the turn goroutine (finding #2) removes the cross-goroutine write overlap entirely.",
+    "scope": "crosscut:concurrency-integration",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Verified against the actual code. store.go:19-29: `Open` calls `sql.Open(\"sqlite\", path)` with a bare path DSN and never sets `SetMaxOpenConns(1)`, nor any `busy_timeout`/`journal_mode` pragma (grep across internal/store and internal/paths confirms zero occurrences). `database/sql` therefore manages a pool of multiple physical SQLite connections. Writers exist on two paths: `MemoryUpsert` (store.go:133-182) wraps a probe+delete+insert in an explicit `BEGIN..COMMIT` write transaction (store.go:144), and `EndSession`/`AppendHistory`/`StartSession` issue `s.db.Exec` writes (store.go:258, 268, 277).\n\nThe cross-goroutine overlap claim holds for the interactive TUI. In interactive.go, `launchTurn` (line 144-161) spawns a fire-and-forget turn goroutine that is never registered with any WaitGroup. `app.Run(ctx)` (loop.go:19-105) returns immediately on ctx cancel (line 59), `/exit` exitFlag (line 66), or double ctrl+c — without joining that turn goroutine; ctrl+c only cooperatively cancels the turn context, so the goroutine can still be mid-write (AppendHistory runs at end-of-turn, turn.go:420-431; or a `store_memory` tool drives MemoryUpsert's write txn). The teardown defer (interactive.go:89-101) waits only on `drainWG` (the event consumer), then the earlier-registered EndSession defer (interactive.go:38-42) fires and issues an UPDATE write. Two distinct pooled connections issuing writes while one holds a write transaction yields SQLITE_BUSY ('database is locked') under modernc.org/sqlite with no busy_timeout.\n\nThe described consequences are accurate but bounded: AppendHistory failure is explicitly best-effort and only logs a warning (turn.go:428-433); EndSession failure logs and leaves `ended_at` NULL, degrading HistoryGet's 'latest completed session' lookup (store.go:318-340). No data corruption, no crash, and the overlap window is small (a single fast UPDATE vs. brief turn writes), and it only manifests on the interactive path — pkg/shell3.Session.Close (shell3.go:215-224) is protected by a documented single-turn-drain-before-Close contract (lines 193-197). Genuine antipattern and the suggested fix (SetMaxOpenConns(1) and/or `?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)`) is standard and cheap, but the impact profile (best-effort, non-corrupting, narrow window) is better calibrated as low than medium. Location store.go:19-29 is the correct root-cause site."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "concurrency",
+    "severity": "low",
+    "title": "drainTurn's app.Print can interleave stdout with a paused subprocess during shell_interactive",
+    "file": "internal/tui/interactive.go",
+    "line": "125-140",
+    "description": "shell_interactive runs the subprocess inside app.WithReleasedTerminal (interactive.go:127), which Pause()s the App: it takes term.readMu and sets term.paused, but App.Print only takes a.mu (app.go:164-174) and, when paused, writes directly to stdout via a.r.Print. The drain goroutine (a different goroutine from the turn goroutine that called Pause) may still call app.Print for any events buffered before the shell_interactive tool call.",
+    "why": "While the subprocess owns the real TTY (cooked mode, inheriting os.Stdout), a concurrent drainTurn->app.Print writes ANSI scrollback lines straight to the same stdout, corrupting the subprocess's terminal output. The readMu gate protects the input reader but not the Print writer; paused-Print intentionally still writes. In practice the turn goroutine is blocked in the subprocess so it is not emitting new events, but events emitted just before the tool call may still be in the 256 buffer and flushed by drain mid-subprocess.",
+    "suggestion": "While paused, have App.Print buffer committed lines and flush them on Resume (it already special-cases paused at app.go:170-172 — make that branch enqueue rather than write to stdout), so no scrollback is written to the TTY a subprocess currently owns.",
+    "scope": "crosscut:concurrency-integration",
+    "verdict": {
+      "real": true,
+      "confidence": "medium",
+      "adjustedSeverity": "low",
+      "reasoning": "Verified against the actual code. The factual claims hold:\n\n- interactive.go:125-138: shell_interactive runs the subprocess via app.WithReleasedTerminal(c.Run()), which Pauses the App.\n- lifecycle.go:16-34 Pause(): takes a.term.readMu.Lock(), sets a.term.paused=true under a.mu, then restores cooked terminal mode (term.Restore) so the subprocess (c.Stdout=os.Stdout) owns the real TTY in cooked mode.\n- app.go:164-174 App.Print(): takes only a.mu (not readMu); when a.term.paused it deliberately writes scrollback straight to stdout via a.r.Print(wrapped) (app.go:169-171) and returns.\n- interactive.go:82-85: drainTurn runs in its own long-lived goroutine, distinct from the per-turn goroutine (launchTurn, interactive.go:153) that ends up calling ShellInteractive synchronously inside the tool loop (turn.go:257-260).\n- The events channel is buffered (session.go:47, BufSize 256 from interactive.go:29), and emitToolCall is emitted at turn.go:224 BEFORE cfg.ShellInteractive blocks at turn.go:260. So events queued before the shell_interactive dispatch can still be sitting in the buffer.\n\nConsequence is real: while the turn goroutine is blocked in c.Run() with the TTY in cooked mode, the separate drainTurn goroutine can dequeue buffered events and call app.Print, whose paused branch writes ANSI scrollback lines directly to the same os.Stdout the subprocess is using, corrupting its output. readMu (the only pause gate) protects the input reader (loop.go:71) but not the Print writer. a.mu serializes byte writes so output is not torn, but it does not prevent a Print from landing after paused=true while the subprocess runs.\n\nThis is a genuine concurrency antipattern, not framework-inherent or already-handled — there is no buffer-on-pause path. Severity is genuinely low (the matching claim): the turn goroutine is blocked during the subprocess so no new events are produced, the racy window is narrow (only events buffered just before the tool call, typically already drained since shell_interactive is usually the only/first tool call after assistant tokens), and the worst case is cosmetic terminal corruption, not data loss or a crash. The suggested fix (enqueue committed lines while paused, flush on Resume) is correct and low-risk. Location is accurate."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "concurrency",
+    "severity": "low",
+    "title": "fileLock serializes bg.json within a process but the doc claims cross-process safety is unneeded",
+    "file": "internal/bgjobs/bgjobs.go",
+    "line": "43-45",
+    "description": "appendJob guards the read-modify-write of bg.json with a package-global sync.Mutex (bgjobs.go:154-166). The comment asserts cross-process races are 'unlikely (single shell3 instance per workdir)'. But pkg/shell3 explicitly supports embedding shell3 as a library, and multiple Sessions / multiple host processes can target the same workdir's .shell3/bg.json.",
+    "why": "The in-process mutex does nothing against a second shell3 process (or a second embedded host) writing the same bg.json: two appendJob calls in different processes do load/append/atomic-rename without coordination, so the last writer's atomic rename silently discards the other's appended job. The 'single instance per workdir' assumption is not enforced anywhere and is violated by the library use case the repo's public package is designed for.",
+    "suggestion": "Either enforce/document a single-process-per-workdir invariant at the library boundary, or use an OS file lock (flock) around the load-append-rename in appendJob so concurrent processes serialize correctly.",
+    "scope": "crosscut:concurrency-integration",
+    "verdict": {
+      "real": true,
+      "confidence": "medium",
+      "adjustedSeverity": "low",
+      "reasoning": "The description is factually accurate. internal/bgjobs/bgjobs.go:45 declares `var fileLock sync.Mutex` (a package-global, in-process lock), and appendJob (lines 153-167) does fileLock.Lock() → LoadRegistry → append → writeAtomic (temp file + os.Rename). The comment at lines 42-44 explicitly states cross-process races are \"unlikely (single shell3 instance per workdir) and not worth flock complexity here.\" The claimed location (43-45) is correct.\n\nThe race is real: the mutex only serializes goroutines within one process. pkg/shell3/shell3.go exposes Start()/Session as a public embeddable API (Session struct at line 95, Start at line 109) with no enforcement of single-process-per-workdir, so two host processes — or two shell3 binaries — running against the same .shell3/bg.json can each load → append → atomic-rename concurrently; the last rename wins and silently discards the other's appended Job. Nothing in the repo enforces the \"single instance per workdir\" invariant the comment relies on.\n\nHonest severity is low, not higher, for several reasons: (1) the consequence is only a lost *registry/tracking entry* — the background process itself is already fully detached and Wait-reaped (Start lines 89-99) before appendJob is even called, so no actual job is killed or leaked; the model just loses visibility of one bg.json row. (2) The race window is narrow (concurrent Start calls on the identical workdir from distinct processes). (3) It is a deliberate, documented tradeoff — the comment shows flock was consciously considered and rejected. So it is a genuine, accurately-described limitation rather than an accidental bug, but a minor one. The mutex correctly handles the in-process case, which is the common path. Confidence is medium because severity hinges on how often multi-process same-workdir embedding actually occurs, which is plausible but not demonstrated in the codebase."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "api-structure",
+    "severity": "medium",
+    "title": "chat.Session exposes unsynchronized mutators that multiple packages mutate from different goroutines",
+    "file": "internal/chat/session.go",
+    "line": "13-24",
+    "description": "Session's fields (messages, id, nextToolCallID, reminders, lastPromptTokens) carry no mutex, yet the type is exported and mutated from at least three goroutines across packages: the turn goroutine (chat.RunTurn/handleCompactHistory writing messages and id), the TUI input goroutine via slash handlers (SetMessages/Messages in interactive.go:389-424), and pkg/shell3's Clear/Rollback/SwitchModel (shell3.go:251-289). Safety rests entirely on an undocumented-in-the-type 'one turn at a time, drain first' convention enforced only by callers.",
+    "why": "The concurrency contract lives in prose comments on Send (shell3.go:194-197) and Run (session_lifecycle.go:44-48), not in the type. Any caller that violates the drain-first ordering — or any path like finding #2 where ctx cancellation lets a turn outlive the gate — is an immediate data race on id/messages with no detection. Exporting SetMessages/Messages/ID while leaving the fields lock-free makes the race trivially reachable from outside the package, which is a leaky abstraction: the invariant the type depends on is unenforceable by the type.",
+    "suggestion": "Either guard Session's mutable state with a sync.Mutex (cheap; turns are not hot on these fields) so the cross-package mutators are intrinsically safe, or make the lifecycle contract a hard barrier (e.g. SetMessages/Messages return an error / panic if a turn is active) instead of relying on every caller obeying a comment.",
+    "scope": "crosscut:concurrency-integration",
+    "verdict": {
+      "real": true,
+      "confidence": "medium",
+      "adjustedSeverity": "low",
+      "reasoning": "Factual core is accurate. internal/chat/session.go:13-24 defines Session with no mutex; messages/id/nextToolCallID/reminders/lastPromptTokens are mutated by the turn goroutine (RunTurn writes via append/allocToolCallID; Session.Run sets id-related save state), while session_lifecycle.go:29-42 exposes exported Messages()/SetMessages() and session.go:62 exposes ID(). External packages mutate through these: pkg/shell3/shell3.go:251-289 (Clear/Rollback/SwitchModel) and the TUI slash handlers at interactive.go:390-422. There is genuinely no synchronization on Session's state; safety rests on the prose 'single-turn-at-a-time, drain first' contract documented only on Send (shell3.go:193-197) and RunTurn/Run (turn.go:66-75, session_lifecycle.go:44-48). That is a legitimate api-structure smell: an exported, embeddable type whose correctness depends on an invariant the type cannot enforce.\\n\\nHowever the claim overstates the risk in two ways. (1) The description says Session's 'fields' are exported — they are not; all fields are lowercase/unexported, so outside packages can only touch state through the deliberately narrow Messages()/SetMessages()/ID() surface, and Messages() returns a defensive copy (lifecycle.go:33-35). (2) 'Trivially reachable from outside the package' is not true for the primary in-tree consumer: the TUI structurally gates concurrent mutation. handleEnter (patchapp/editor.go:270-273) early-returns whenever a.busy is set, and busy is set in launchTurn (interactive.go:146) and cleared only on the terminal TurnDone/Error event in drainTurn (interactive.go:345,359). So while a turn runs, the TUI input goroutine physically cannot dispatch a slash command (SetMessages); the 'three goroutines mutating concurrently' scenario is blocked, not open. The authors also engineered the persist-before-terminal-event ordering (turn.go:66-75) and the close-captured-channel guard (shell3.go:176-186) specifically around this contract, so it is a deliberate, documented design tradeoff, not an accidental oversight. The suggested mutex/hard-barrier is a reasonable hardening for the embeddable pkg/shell3 path where only caller discipline enforces the contract, which is why this is real — but it is a low-severity API-hygiene improvement, not a medium data-race exposure."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "error-handling",
+    "severity": "low",
+    "title": "newSession swallows store.StartSession error, silently producing a session with id 0",
+    "file": "pkg/shell3/shell3.go",
+    "line": "138-143",
+    "description": "newSession calls cfg.Store.StartSession() and on error simply leaves storeID at 0 (`if id, err := ...; err == nil { storeID = id }`). The error is discarded entirely — no log, no propagation — even though Start() returns an error and could surface it.",
+    "why": "A failed StartSession (locked DB, disk full, migration drift) silently yields a session with id 0. Every subsequent emit stamps SessionID 0, saveHistory writes history under session 0, and Close()'s EndSession(0) operates on a non-existent session. The user/embedder gets a working-looking Session whose entire history is silently misattributed, with no signal that persistence is broken. Contrast tui.RunInteractive, which propagates the same error (interactive.go:23-26).",
+    "suggestion": "Return the StartSession error from Start (newSession can return (*Session, error)), or at minimum log it via cfg.Log so a broken store is observable rather than silently degrading to session 0.",
+    "scope": "crosscut:concurrency-integration",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Verified against the actual code at pkg/shell3/shell3.go:137-143. newSession does exactly what the claim states: `if id, err := cfg.Store.StartSession(); err == nil { storeID = id }` — the error branch is absent, so a failed StartSession silently leaves storeID at 0. The claimed contrast is also accurate: internal/tui/interactive.go:20-27 calls the same `cfg.Store.StartSession()` but propagates failure via `return fmt.Errorf(\"chat: start session: %w\", err)`. Downstream impact is real: storeID 0 is passed as SessionOpts.StoreID (line 144-148), and Close() at line 220 does `_ = s.cfg.Store.EndSession(s.sess.ID())` against the bogus id. A logger is readily available — cfg.Log is referenced at line 237 and the codebase already uses chat.LogOrNoop(cfg.Log) (interactive.go) — so silently swallowing is a real, fixable error-handling lapse rather than an idiomatic or guarded choice. Severity stays low: the in-memory conversation still functions regardless of store id, so the concrete harm is unobservable/misattributed persistence, not a crash or live data loss. Genuine antipattern, low severity confirmed."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "error-handling",
+    "severity": "high",
+    "title": "emit() silently drops events, including the terminal turn_done/error",
+    "file": "internal/chat/event.go",
+    "line": "228-237",
+    "description": "emit performs a non-blocking send (`select { case s.events <- ev: default: }`) onto the 256-buffered event channel. When the buffer is full, ALL events are dropped, including the single terminal EventTurnDone / EventError emitted by emitTurnDone/emitError. The doc comment frames this as intentional back-pressure relief ('Dropped events are not retried'), but it applies uniformly to terminal events, not just high-volume assistant tokens.",
+    "why": "A slow or stalled consumer fills the 256 buffer; subsequent token events are dropped (corrupting the rendered/persisted assistant message), and if the terminal turn_done/error is dropped, downstream consumers that close their per-turn channel on that event never close it. In pkg/shell3.drain (shell3.go:164-188) the per-Send channel is only closed on Done/Error, so a dropped terminal event hangs the embedder's `range` on the Send channel forever — a latent deadlock, not merely a lost log line.",
+    "suggestion": "Make terminal events (turn_done, error, session_end) a blocking send so they can never be dropped, or remove the `default:` and block on all sends (the consumers are designed to drain continuously). At minimum, distinguish best-effort high-volume tokens from must-deliver lifecycle events.",
+    "scope": "crosscut:api-package-boundaries",
+    "verdict": {
+      "real": true,
+      "confidence": "medium",
+      "adjustedSeverity": "medium",
+      "reasoning": "Factually accurate and location correct. internal/chat/event.go:228-237 emit() does a non-blocking send `select { case s.events <- ev: default: }` onto the events channel (default buffer 256 via session.go:44 and pkg/shell3/shell3.go:145), with a doc comment explicitly framing drops as acceptable (\"Dropped events are not retried\"). The single terminal events flow through the very same emit() path: turn.go assigns terminalEmit = emitTurnDone/emitError (lines 133, 164, 173, 180) and fires it exactly once in the deferred closure (lines 80-94). emitTurnDone/emitError (event.go:189-222) just call emit(), so they are droppable like any token event. On the consumer side, pkg/shell3/drain() (shell3.go:162-188) only closes the per-Send channel `cur`/`out` when it receives a Done or Error pub (lines 176-186); the per-Send `out` is unbuffered (shell3.go:199). So if the terminal event is dropped, drain never closes `out`, and the embedder's `range out` hangs permanently — a real latent deadlock, not just a lost log line.\n\nI downgrade from high to medium for two reasons grounded in the code. (1) The dominant \"slow/stalled consumer\" scenario the finding leads with does NOT actually drop the terminal event in a way that adds harm: if the embedder stops reading `out`, drain is already blocked at `cur <- pub` (line 175) and the range is already hung regardless of any drop. (2) The terminal event is the LAST event emitted — RunTurn returns immediately after firing terminalEmit — so the producer then stops and drain catches up and empties the buffer. The terminal event is only lost if the 256-slot buffer happens to be full at the exact instant of that final emit (a transient overflow from a fast tool-heavy burst coinciding with a momentary consumer stall). That is a genuine but narrow race window, not a routine occurrence. The suggested fix (make lifecycle events turn_done/error/session_end a blocking send, or block on all sends since drain is a continuous consumer) is sound and would eliminate the deadlock. Real issue, medium severity given the narrow trigger and the severe-but-rare consequence."
+    },
+    "finalSeverity": "medium"
+  },
+  {
+    "dimension": "concurrency",
+    "severity": "medium",
+    "title": "withIOUnlock uses TryLock to infer caller lock ownership; cross-goroutine Unlock on contention",
+    "file": "internal/luacfg/lua_bash.go",
+    "line": "20-33",
+    "description": "withIOUnlock calls c.mu.TryLock() to decide whether it is running inside CallTool's locked section. If TryLock fails it ASSUMES the current goroutine already holds the lock (via CallTool) and calls c.mu.Unlock() then re-Lock(). This conflates 'lock held by me' with 'lock held by anyone'. sync.Mutex has no ownership, so a failed TryLock can also mean another goroutine holds it.",
+    "why": "The documented single-agent invariant is the only thing preventing a bug: if any second goroutine ever calls into the Lua VM (a future HTTP handler, a guard fired concurrently, a test), TryLock fails for the wrong reason and withIOUnlock unlocks a mutex held by a different goroutine — corrupting the other critical section and likely panicking later on a double-unlock. Using mutex acquisition state as a control-flow signal is fragile and unobservable to the race detector.",
+    "suggestion": "Track re-entrancy explicitly (e.g. a per-call boolean / depth counter threaded through CallTool, or pass a 'locked bool' into the Lua-binding closures) instead of probing the mutex. Then Unlock/Lock only when the caller actually held it.",
+    "scope": "crosscut:api-package-boundaries",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "medium",
+      "reasoning": "Verified against internal/luacfg/lua_bash.go:20-33. The description is factually exact: withIOUnlock calls c.mu.TryLock() (line 21) and uses the result to infer control flow. On success it treats itself as top-level (DoFile, no caller lock) — Unlock/run/return (lines 22-28). On failure it ASSUMES the current goroutine holds the lock via CallTool and does c.mu.Unlock() then c.mu.Lock() (lines 30-32). This is the classic sync.Mutex-has-no-ownership antipattern: a failed TryLock means \"held by anyone,\" not \"held by me.\" Both lock acquirers exist — CallTool (dispatch.go:109) and runLuaGuard (dispatch.go:48) — and withIOUnlock is reached from Lua bindings (luaBash lua_bash.go:50, luaHTTP lua_http.go:57) invoked inside those locked sections. If a second goroutine ever entered the VM concurrently, goroutine B's TryLock would fail because A holds the lock, and B would Unlock() A's lock, corrupting A's critical section and risking a double-unlock panic. This is invisible to the race detector since it is a logic bug, not a data race on the mutex word. The only thing preventing it today is the documented (not enforced) invariant \"luacfg is single-agent; CallTool is never called concurrently,\" and indeed chat/turn.go:216-229 dispatches tool calls and guards strictly sequentially, so it is not a live bug now — making medium (latent fragility, not active defect) the honest severity rather than high. Note c.L is a single gopher-lua LState that is itself not concurrency-safe, so the mutex's real role is to serialize VM access and withIOUnlock deliberately opens a hole in it during blocking IO. The suggested fix (thread an explicit locked bool / depth counter through CallTool into the bindings instead of probing the mutex) is correct. Location and claim are accurate."
+    },
+    "finalSeverity": "medium"
+  },
+  {
+    "dimension": "api-structure",
+    "severity": "medium",
+    "title": "chat.Config / TurnConfig god struct duplicated field-for-field across two types",
+    "file": "internal/chat/chat.go",
+    "line": "47-119",
+    "description": "Config carries ~26 fields mixing dependency injection (LLM, Store), behavior closures (RefreshPrompt, SwitchModel, ToolGuard, CustomTool), presentation strings (StatusLine, ModeLabel), and policy flags (Headless, Truncate). TurnConfig (toolhandler.go:49-87) then re-declares ~12 of these exact fields (LLM, Personality, StatusLine, WorkDir, Store, Truncate, Handlers, Log, Headless, ShellInteractive, CustomTool, CustomToolNames, ToolGuard), and every front-end hand-copies Config→TurnConfig (e.g. pkg/shell3 turnConfig at shell3.go:228-246).",
+    "why": "Two parallel structs that must be kept in sync mean every new turn-relevant option is added in two places and copied manually in each caller; a forgotten field is a silent behavior bug (e.g. an option that works in the TUI but not the embedder). The single struct mixing wiring, behavior, and presentation also makes the 'what is the agent' contract hard to validate.",
+    "suggestion": "Have TurnConfig embed or reference the shared subset (e.g. `TurnConfig{ Base *Config; Handlers ...; Log ... }`), or derive TurnConfig via a single Config method instead of duplicating fields and copying them in every front-end.",
+    "scope": "crosscut:api-package-boundaries",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Verified against the real code. chat.Config (internal/chat/chat.go:50-119) is indeed a ~26-field struct mixing DI (LLM, Store), behavior closures (RefreshPrompt, SwitchModel, ToolGuard, CustomTool, ShellInteractive), presentation strings (StatusLine, ModeLabel), and policy flags (Headless, Truncate). TurnConfig (toolhandler.go:49-87) re-declares 13 fields; 12 of them (LLM, Personality, StatusLine, WorkDir, Store, Truncate, Log, Headless, ShellInteractive, CustomTool, CustomToolNames, ToolGuard) are copied straight from Config — only Handlers is built separately via NewHandlers. The claimed exact field list is correct.\n\nThe hand-copy claim is confirmed in three production front-ends, none using a shared helper: pkg/shell3/shell3.go:228-246 (turnConfig method), internal/tui/interactive.go:111-141 (buildTurnConfig), and internal/tui/once.go:26-42. Each manually assigns the same ~12 fields. Notably the comment on TurnConfig says it 'is derived from a Config per turn,' yet no derivation method exists — derivation is done by hand each time.\n\nThe consequence is already manifest as divergence between the copies: once.go uses Truncate: cfg.Truncate||cfg.OutPath!=\"\" with Headless: cfg.Headless and a 'headless mode' ShellInteractive stub; interactive.go uses the same Truncate but a real PTY-releasing bash runner; shell3.go uses Truncate: cfg.Truncate (ignoring OutPath), hardcodes Headless: true, and a 'plugin mode' stub. So a new turn-relevant Config field genuinely must be threaded into all three sites by hand, and a forgotten field would silently drop behavior in one front-end — exactly the failure mode described. The suggested fix (embed/reference a shared subset, or add one Config method that produces the base TurnConfig) is sound.\n\nTwo reasons I down-grade from medium to low rather than rejecting: (1) the title's 'duplicated field-for-field' is overstated — TurnConfig is an intentional narrowing subset (13 of 26 fields), not a clone, deliberately excluding startup-only fields like RefreshPrompt/SwitchModel/Models/Docs/Params. (2) The per-turn rebuild is intentional and documented (shell3.go:226-227: rebuilt fresh so SwitchModel mutations take effect next Send), and the duplication is bounded to 3 well-commented callers. It is a genuine maintainability antipattern worth fixing, but its blast radius and current pain are modest, so low is the honest severity."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "api-structure",
+    "severity": "low",
+    "title": "OutSink uses two divergent JSONL schemas for the same stream",
+    "file": "internal/chat/outsink.go",
+    "line": "41-123",
+    "description": "OutSink serializes start/end lines through a typed `outEvent` struct (writeLocked, lines 41-49) but serializes every chat event through an ad-hoc `map[string]any` with different key names and shape (WriteChatEvent, lines 74-123). One sink emits two unrelated record schemas.",
+    "why": "Consumers of the JSONL audit log must handle two divergent record shapes from one file; field naming and presence rules live in two places and can drift (e.g. 'out' vs 'output', 'status' only on the typed path). Mixing a typed marshaller with an untyped map in one type is an inconsistent-serialization smell.",
+    "suggestion": "Marshal all lines through one typed record type (extend outEvent or define a single union record), so the on-disk schema is defined once.",
+    "scope": "crosscut:api-package-boundaries",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "Factually accurate. In /Users/weatherjean/CODE/AGENTS/shell3/internal/chat/outsink.go, start/end lines are serialized via the typed struct `outEvent` (lines 29-49, used by WriteStart line 59 and WriteEnd line 69), while every chat event is serialized through an ad-hoc `map[string]any` in WriteChatEvent (lines 80-122). Both write to the same writer s.w, so one JSONL file carries two divergent record schemas. The divergence is real and concrete: the start record names the user prompt `input` (line 59) and the destination `out` (line 35/59), while chat events name the tool argument `input` (line 97) and tool result `output` (line 100). So `input` is overloaded with two unrelated meanings across the two paths, and `out` vs `output` are gratuitously different keys for \"an output.\" `status` exists only on the typed path. Field naming/presence rules genuinely live in two places (struct json tags vs literal map keys) with no shared source of truth, so they can drift — the smell is correctly characterized. Location lines 41-123 is correct (struct at 29-38 is just outside the cited range but the cited functions are accurate). It is not guarded/intentional/unreachable; both methods are live (called from internal/tui/once.go and interactive.go). Severity is appropriately low: there are no in-repo consumers that parse this stream (grep found only test substring assertions), so the drift risk is latent and affects only external/forensic log readers rather than program correctness. The suggested fix (one typed union record) is reasonable. Genuine but minor consistency antipattern."
+    },
+    "finalSeverity": "low"
+  },
+  {
+    "dimension": "error-handling",
+    "severity": "low",
+    "title": "Public Error event discards the underlying error chain via errors.New(text)",
+    "file": "pkg/shell3/shell3.go",
+    "line": "74-75",
+    "description": "translate maps chat.EventError to a public Event by reconstructing the error with errors.New(ev.Text). The internal pipeline already stringified the original error into ev.Text (event.go emitError takes a string), so by the time it reaches the public boundary the typed/wrapped error is gone, and translate cannot do better than wrap a string.",
+    "why": "Embedders using pkg/shell3 receive Event.Err with no way to errors.Is/As against sentinel errors (context.Canceled, provider auth failures, etc.) — they can only string-match the message. The loss originates earlier (emitError(s, err.Error()) in turn.go:133/173), so the whole error path is lossy by construction.",
+    "suggestion": "Carry the original error (not just its string) through chat.Event (add an Err field on EventError) so translate can forward a real error that supports errors.Is/As at the public boundary.",
+    "scope": "crosscut:api-package-boundaries",
+    "verdict": {
+      "real": true,
+      "confidence": "high",
+      "adjustedSeverity": "low",
+      "reasoning": "The finding is factually accurate and the location is correct. At pkg/shell3/shell3.go:74-75, translate maps chat.EventError to a public Event via `return Event{Kind: Error, Err: errors.New(ev.Text)}, true`. The public Event struct (line 52) exposes `Err error`, but it is reconstructed from a plain string.\n\nThe claimed root cause is verified: internal chat.Event (internal/chat/event.go:93-103) has no Err field — only `Text string`. emitError takes a string (event.go:189: `func emitError(s *Session, text string)`), and every producer stringifies the original error before emitting it: turn.go:86 (`emitError(sess, err.Error())`), turn.go:132-133 (`msg := err.Error(); ... emitError(sess, msg)`), and turn.go:172-173 (same pattern for the tool loop). So the typed/wrapped error (e.g. a provider auth error, or context.Canceled surfacing as a stream err at turn.go:130) is irrecoverably flattened to a string before translate ever runs. errors.New(ev.Text) is genuinely the best translate can do.\n\nConsequence is real: embedders of the only public package (pkg/shell3) receive Event.Err that cannot be inspected with errors.Is/As against sentinels — they can only string-match. The suggested fix (carry the original error through chat.Event via an Err field so the public boundary forwards a real error) is the correct remediation.\n\nThis is a genuine API design antipattern, but severity is honestly low: the error message itself is still delivered to the embedder, so it is a loss of programmatic error inspection, not a correctness/data-loss bug. It also matches a common (if imperfect) pattern in event-stream APIs. Note context.Canceled may surface as a cancellation system-reminder + EventTurnDone (turn.go:177-182) rather than EventError in the tool-loop path, but stream-level cancellation still flows through the lossy EventError path at turn.go:130-134, so the cited example holds."
+    },
+    "finalSeverity": "low"
+  }
+]
