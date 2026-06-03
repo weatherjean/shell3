@@ -108,10 +108,17 @@ Run(ctx, spec)
         ↑ adapter goroutine maps chat.Event → shell3.Event, drops internal kinds
 ```
 
-The current `pkg/shell3.New` and the `internal/tui/once.go:RunOnce` loop are
-**merged** into `Run`. `RunOnce` is then rewritten as a thin caller of `Run`
-that prints the public channel to stdout, so the CLI `once` path and the
-library path share one code path instead of two parallel ones.
+The current `pkg/shell3.New` body becomes the unexported `buildConfig`, and the
+session-driving loop (modeled on `internal/tui/once.go:RunOnce`) is reproduced
+inside an unexported `runConfig` that translates `chat.Event` → public `Event`.
+
+**Adjustment (post-spec, during planning):** the CLI's `RunOnce` is left
+untouched rather than rewritten to call `Run`. `cmd/shell3/run.go` builds a
+*rich* `chat.Config` (store persistence, docs-tool content, `/model` switching,
+`RefreshPrompt`) and hands it to `RunOnce`; routing that through `Run(Spec)` —
+which intentionally builds a minimal config — would regress those CLI features.
+The avoided duplication is only a ~10-line goroutine loop, not worth a
+regression. All changes are therefore isolated to `pkg/shell3`.
 
 Headless behavior is always on for embedders (no TTY): `shell_interactive`
 returns its "not available" string and the headless system-reminder is injected,
