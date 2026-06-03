@@ -5,6 +5,7 @@
 package shell3
 
 import (
+	"context"
 	"errors"
 
 	"github.com/weatherjean/shell3/pkg/chat"
@@ -44,6 +45,50 @@ type Event struct {
 	ToolName   string // Kind == ToolResult
 	ToolOutput string // Kind == ToolResult
 	Err        error  // Kind == Error
+}
+
+// runConfig runs one turn against an already-built chat.Config and streams
+// translated public Events. The returned channel is closed exactly once after
+// a final Done event; cleanup runs after teardown (used by Run to close the
+// Lua state). cfg.LLM is injectable, which is what makes this testable with
+// fakellm.
+func runConfig(ctx context.Context, cfg chat.Config, prompt string, cleanup func()) <-chan Event {
+	out := make(chan Event)
+
+	sess := chat.NewSession(chat.SessionOpts{BufSize: 256})
+	tc := chat.TurnConfig{
+		LLM:             cfg.LLM,
+		Personality:     cfg.Personality,
+		StatusLine:      cfg.StatusLine,
+		WorkDir:         cfg.WorkDir,
+		Truncate:        cfg.Truncate,
+		Handlers:        chat.NewHandlers(cfg),
+		Log:             chat.LogOrNoop(cfg.Log),
+		Headless:        true,
+		CustomTool:      cfg.CustomTool,
+		CustomToolNames: cfg.CustomToolNames,
+		ToolGuard:       cfg.ToolGuard,
+		ShellInteractive: func(ctx context.Context, cmd, workdir string) string {
+			return "error: interactive TTY not available in headless mode"
+		},
+	}
+
+	go func() {
+		sess.Run(ctx, tc, prompt)
+		sess.CloseEvents()
+	}()
+
+	go func() {
+		defer close(out)
+		defer cleanup()
+		for ev := range sess.Events() {
+			if pub, ok := translate(ev); ok {
+				out <- pub
+			}
+		}
+	}()
+
+	return out
 }
 
 // translate maps an internal chat.Event to a public Event. The second return
