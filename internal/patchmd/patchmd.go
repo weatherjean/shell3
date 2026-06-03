@@ -41,7 +41,10 @@ var (
 	codeRe       = regexp.MustCompile("`([^`\n]+?)`")
 	linkRe       = regexp.MustCompile(`\[([^\]\n]+)\]\(([^)\n]+)\)`)
 	listRe       = regexp.MustCompile(`^(\s*)([-*]|\d+\.)\s+(.*)$`)
-	codeTokenRe  = regexp.MustCompile("\\d+") //nolint:staticcheck
+	// Matches a stashed inline-code placeholder: codeToken, the index digits,
+	// codeToken. Built from the constant so the sentinel never appears as an
+	// invisible literal in the pattern string.
+	codeTokenRe = regexp.MustCompile(string(codeToken) + `\d+` + string(codeToken))
 )
 
 // Render converts markdown text to a slice of ANSI-styled lines.
@@ -181,4 +184,3 @@ func headerLevel(line string) int {
 	}
 	return n
 }
-

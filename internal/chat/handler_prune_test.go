@@ -130,7 +130,7 @@ func TestLastNTurns(t *testing.T) {
 	if got := lastNTurns(msgs, 5); len(got) != len(msgs) {
 		t.Fatalf("n>actual want full slice, got %d", len(got))
 	}
-	if got := lastNTurns(nil, 2); got != nil && len(got) != 0 {
+	if got := lastNTurns(nil, 2); len(got) != 0 {
 		t.Fatalf("nil input should return empty/nil")
 	}
 }

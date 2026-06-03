@@ -155,7 +155,7 @@ func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
 				sess.Run(turnCtx, tc, userMsg.Content)
 				return
 			}
-			chat.RunTurn(turnCtx, tc, sess, userMsg)
+			chat.RunTurn(turnCtx, tc, sess, userMsg, nil)
 		}()
 	}
 

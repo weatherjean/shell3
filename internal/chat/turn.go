@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/store"
 )
@@ -65,13 +66,30 @@ func logStreamError(cfg TurnConfig, msgs []llm.Message, streamErr error) {
 // RunTurn executes one user→assistant exchange, emitting chat.Events on
 // sess.events. The session's event channel is owned by the caller; teardown
 // (close) is the caller's responsibility via sess.CloseEvents().
-func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Message) {
+// RunTurn drives one user→assistant turn, emitting stream events on sess.events.
+// beforeDone, if non-nil, runs once at turn teardown immediately before the
+// single terminal event (turn_done or error) is emitted — Session.Run uses it
+// to persist history. The ordering matters: the terminal event is what embedders
+// (pkg/shell3, the TUI) treat as "turn finished, safe to mutate session state",
+// so any read of sess.messages in beforeDone must complete before it fires, or
+// it races a concurrent SetMessages.
+func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Message, beforeDone func()) {
+	// terminalEmit holds the turn's single end event. It is emitted from the
+	// deferred closure below, after beforeDone, so persistence happens-before
+	// the done/error signal the embedder reacts to.
+	var terminalEmit func()
 	defer func() {
 		if r := recover(); r != nil {
 			stack := debug.Stack()
 			err := fmt.Errorf("panic: %v\n%s", r, stack)
 			cfg.Log.Error("panic in turn goroutine", err)
-			emitError(sess, err.Error())
+			terminalEmit = func() { emitError(sess, err.Error()) }
+		}
+		if beforeDone != nil {
+			beforeDone()
+		}
+		if terminalEmit != nil {
+			terminalEmit()
 		}
 	}()
 
@@ -111,7 +129,8 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		}
 		if err != nil {
 			logStreamError(cfg, allMsgs, err)
-			emitError(sess, err.Error())
+			msg := err.Error()
+			terminalEmit = func() { emitError(sess, msg) }
 			return
 		}
 		if text != "" {
@@ -141,7 +160,8 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		}
 
 		if len(toolCalls) == 0 {
-			emitTurnDone(sess, totalUsage.PromptTokens, totalUsage.CompletionTokens, totalUsage.TotalTokens)
+			u := totalUsage
+			terminalEmit = func() { emitTurnDone(sess, u.PromptTokens, u.CompletionTokens, u.TotalTokens) }
 			return
 		}
 
@@ -150,7 +170,8 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		var cancelReason string
 		for idx, tc := range toolCalls {
 			if ctx.Err() != nil {
-				emitError(sess, ctx.Err().Error())
+				msg := ctx.Err().Error()
+				terminalEmit = func() { emitError(sess, msg) }
 				return
 			}
 
@@ -243,12 +264,14 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 
 		if cancelled {
 			emitSystemReminder(sess, "[turn cancelled by user: "+cancelReason+"]")
-			emitTurnDone(sess, totalUsage.PromptTokens, totalUsage.CompletionTokens, totalUsage.TotalTokens)
+			u := totalUsage
+			terminalEmit = func() { emitTurnDone(sess, u.PromptTokens, u.CompletionTokens, u.TotalTokens) }
 			return
 		}
 
 		if ctx.Err() != nil {
-			emitError(sess, ctx.Err().Error())
+			msg := ctx.Err().Error()
+			terminalEmit = func() { emitError(sess, msg) }
 			return
 		}
 
@@ -330,8 +353,10 @@ func parseRawArgs(raw string) map[string]any {
 	return out
 }
 
-// saveHistory persists new messages to the store after a turn.
-func saveHistory(st *store.Store, sess *Session, sessionID int64, from int) {
+// saveHistory persists new messages to the store after a turn. Append failures
+// are logged but not fatal — history is best-effort, but a silent drop would
+// hide real faults (a full disk, a closed DB), so they surface via lg.
+func saveHistory(st *store.Store, lg applog.Logger, sess *Session, sessionID int64, from int) {
 	if st == nil {
 		return
 	}
@@ -343,11 +368,19 @@ func saveHistory(st *store.Store, sess *Session, sessionID int64, from int) {
 	for _, m := range sess.messages[from:] {
 		switch m.Role {
 		case llm.RoleUser, llm.RoleAssistant:
-			_ = st.AppendHistory(sessionID, string(m.Role), m.Content)
+			appendHistory(st, lg, sessionID, string(m.Role), m.Content)
 			for _, tc := range m.ToolCalls {
-				_ = st.AppendHistory(sessionID, "tool", toolCallSummary(tc))
+				appendHistory(st, lg, sessionID, "tool", toolCallSummary(tc))
 			}
 		}
+	}
+}
+
+// appendHistory writes one history row, logging on failure. Persistence is
+// best-effort; the turn proceeds regardless of the outcome.
+func appendHistory(st *store.Store, lg applog.Logger, sessionID int64, role, content string) {
+	if err := st.AppendHistory(sessionID, role, content); err != nil {
+		lg.Warn("append history failed", "session_id", sessionID, "role", role, "error", err)
 	}
 }
 

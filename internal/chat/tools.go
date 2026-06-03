@@ -60,14 +60,14 @@ func handleCompactHistory(rawArgs string, st *store.Store, sess *Session, allMsg
 		for _, m := range sess.messages {
 			switch m.Role {
 			case llm.RoleUser, llm.RoleAssistant:
-				_ = st.AppendHistory(prevSessionID, string(m.Role), m.Content)
+				appendHistory(st, lg, prevSessionID, string(m.Role), m.Content)
 				for _, tc := range m.ToolCalls {
-					_ = st.AppendHistory(prevSessionID, "tool", toolCallSummary(tc))
+					appendHistory(st, lg, prevSessionID, "tool", toolCallSummary(tc))
 				}
 			}
 		}
 		// Save the compact call itself as the final entry in the outgoing session.
-		_ = st.AppendHistory(prevSessionID, "tool", "compact_history: "+rawArgs)
+		appendHistory(st, lg, prevSessionID, "tool", "compact_history: "+rawArgs)
 		if err := st.EndSession(prevSessionID); err != nil {
 			lg.Warn("end session failed during compact", "session_id", prevSessionID, "error", err)
 		}

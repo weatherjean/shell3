@@ -43,12 +43,17 @@ func (s *Session) SetMessages(msgs []llm.Message) {
 
 // Run executes one user→assistant turn. Emits the user_message event, runs
 // the turn loop, and (if cfg.Store is non-nil) persists newly appended
-// messages to the store. Blocks until the turn completes.
+// messages to the store. Persistence happens inside the turn, before the
+// terminal turn_done/error event fires, so a consumer reacting to that event
+// (e.g. /clear, /rollback) can't mutate history concurrently with the save.
+// Blocks until the turn completes.
 func (s *Session) Run(ctx context.Context, cfg TurnConfig, input string) {
 	emitUserMessage(s, input)
-	prevLen := len(s.messages)
-	RunTurn(ctx, cfg, s, llm.Message{Role: llm.RoleUser, Content: input})
-	if cfg.Store != nil {
-		saveHistory(cfg.Store, s, s.id, prevLen)
+	from := len(s.messages)
+	persist := func() {
+		if cfg.Store != nil {
+			saveHistory(cfg.Store, LogOrNoop(cfg.Log), s, s.id, from)
+		}
 	}
+	RunTurn(ctx, cfg, s, llm.Message{Role: llm.RoleUser, Content: input}, persist)
 }
