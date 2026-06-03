@@ -198,3 +198,52 @@ func TestRunTurn_MidLoopCtxCancel_EmitsError(t *testing.T) {
 		t.Fatalf("mid-loop ctx cancel should not emit turn_done")
 	}
 }
+
+// msgsContain reports whether any message's content contains substr.
+func msgsContain(msgs []llm.Message, substr string) bool {
+	for _, m := range msgs {
+		if strings.Contains(m.Content, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestRunTurn_CompactHistory_ReplacesAllMsgs characterizes the compact_history
+// path: it replaces allMsgs in place, so the second round's prompt carries the
+// compact summary and not the pre-compaction user text. Runs with no Store
+// (handleCompactHistory skips store rolling when st == nil).
+func TestRunTurn_CompactHistory_ReplacesAllMsgs(t *testing.T) {
+	fake := fakellm.New(
+		fakellm.Script{Events: []llm.StreamEvent{
+			{ToolCall: &llm.ToolCall{ID: "c", Name: "compact_history", RawArgs: `{"summary":"did stuff"}`}},
+			{Usage: &llm.Usage{TotalTokens: 5}},
+		}},
+		fakellm.Script{Events: []llm.StreamEvent{
+			{TextDelta: "continued"},
+			{Usage: &llm.Usage{TotalTokens: 6}},
+		}},
+	)
+	sess := NewSession(SessionOpts{BufSize: 256})
+	cfg := TurnConfig{
+		LLM:         fake,
+		Personality: persona.Persona{SystemPrompt: "test"},
+		Log:         LogOrNoop(nil),
+	}
+
+	events := collectTurn(t, context.Background(), cfg, sess, "hello there")
+
+	if !hasKind(events, EventTurnDone) {
+		t.Fatalf("compact_history turn should complete with turn_done; events=%+v", events)
+	}
+	if fake.CallCount() != 2 {
+		t.Fatalf("expected 2 LLM rounds, got %d", fake.CallCount())
+	}
+	round2 := fake.Calls[1].Msgs
+	if !msgsContain(round2, "did stuff") {
+		t.Fatalf("round 2 prompt missing compact summary: %+v", round2)
+	}
+	if msgsContain(round2, "hello there") {
+		t.Fatalf("round 2 prompt still contains pre-compaction user text: %+v", round2)
+	}
+}
