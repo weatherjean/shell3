@@ -165,125 +165,19 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 			return
 		}
 
-		// Execute tool calls.
-		var cancelled bool
-		var cancelReason string
-		for idx, tc := range toolCalls {
-			if ctx.Err() != nil {
-				msg := ctx.Err().Error()
-				terminalEmit = func() { emitError(sess, msg) }
-				return
-			}
-
-			emitToolCall(sess, tc.ID, tc.Name, tc.RawArgs)
-			var decision int
-			var hookReason string
-			var hookErr error
-			if cfg.ToolGuard != nil {
-				decision, hookReason, hookErr = cfg.ToolGuard(ctx, tc.Name, parseRawArgs(tc.RawArgs))
-			}
-			var out string
-			if hookErr != nil {
-				out = fmt.Sprintf("Tool-call hook failed (the on_tool_call hook script itself errored, not the user): %v. Do not retry the same call without adjusting your approach.", hookErr)
-			} else if decision == guardCancel {
-				if hookReason == "" {
-					hookReason = "user cancelled"
-				}
-				cancelled = true
-				cancelReason = hookReason
-				out = fmt.Sprintf("USER CANCELLED the turn before this %s call ran. Reason: %s. Subsequent tool calls in this turn were not executed.", tc.Name, hookReason)
-			} else if decision == guardBlock {
-				if hookReason == "" {
-					hookReason = "no reason given"
-				}
-				out = fmt.Sprintf("USER DENIED this %s tool call. Reason: %s. Treat this as the user explicitly disapproving this action — do NOT retry the same call. Acknowledge the denial, ask what they want instead, or pick a different approach.", tc.Name, hookReason)
-			} else if schema, ok := toolSchemas[tc.Name]; ok {
-				if err := validateToolArgs(schema, json.RawMessage([]byte(tc.RawArgs))); err != nil {
-					out = fmt.Sprintf("error: invalid tool arguments: %v", err)
-				}
-			}
-			if out != "" {
-				// Hook blocked or validation failed — out already carries the
-				// reason text; nothing more to do here. The tool_result event
-				// emitted below carries the error string with ToolError=true.
-			} else if tc.Name == "compact_history" {
-				out, allMsgs = handleCompactHistory(tc.RawArgs, cfg.Store, sess, allMsgs, cfg.Log)
-			} else if tc.Name == "shell_interactive" {
-				command := ParseBashArgs(tc.RawArgs)
-				if cfg.ShellInteractive != nil {
-					out = cfg.ShellInteractive(ctx, command, cfg.WorkDir)
-				} else {
-					out = "error: interactive TTY not available"
-				}
-			} else if cfg.CustomToolNames[tc.Name] {
-				out = dispatchCustomTool(ctx, Config{CustomTool: cfg.CustomTool}, tc.Name, tc.RawArgs)
-			} else if handler, ok := cfg.Handlers[tc.Name]; ok {
-				toolCfg := ToolConfig{
-					Store:    cfg.Store,
-					WorkDir:  cfg.WorkDir,
-					AllMsgs:  allMsgs,
-					SessMsgs: sess.messages,
-				}
-				var herr error
-				out, herr = handler.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), toolCfg)
-				if herr != nil {
-					// Most handlers encode failures in their output string and
-					// return a nil error; a non-nil error is a genuine handler
-					// fault (e.g. bash_bg failing to spawn). Log it, and if the
-					// handler left no output, surface the error to the model as a
-					// tool error rather than emitting an empty result.
-					cfg.Log.Warn("tool handler error", "tool", tc.Name, "error", herr)
-					if out == "" {
-						out = "error: " + herr.Error()
-					}
-				}
-			} else {
-				out = fmt.Sprintf("error: unknown tool %q", tc.Name)
-			}
-
-			emitToolResult(sess, tc.ID, tc.Name, out, isToolError(out))
-			// Prepend the tool_call_id so the model has a stable handle it
-			// can pass to prune_tool_result. Without this the id only lives
-			// in structured metadata, which the model cannot reliably echo.
-			content := fmt.Sprintf("[tool_call_id=%s]\n%s", tc.ID, out)
-			toolMsg := llm.Message{
-				Role:       llm.RoleTool,
-				Content:    content,
-				ToolCallID: tc.ID,
-				Name:       tc.Name,
-			}
-			allMsgs = append(allMsgs, toolMsg)
-			sess.append(toolMsg)
-
-			if cancelled {
-				// Append synthetic results for any tool_calls we never reached
-				// so the assistant message's tool_calls list has matching
-				// tool_call_id results in history. Without this the next turn
-				// 400s on providers that strictly validate the pairing.
-				for _, rem := range toolCalls[idx+1:] {
-					stub := llm.Message{
-						Role:       llm.RoleTool,
-						Content:    fmt.Sprintf("[tool_call_id=%s]\nNot executed — turn cancelled by user.", rem.ID),
-						ToolCallID: rem.ID,
-						Name:       rem.Name,
-					}
-					allMsgs = append(allMsgs, stub)
-					sess.append(stub)
-				}
-				break
-			}
-		}
-
-		if cancelled {
-			emitSystemReminder(sess, "[turn cancelled by user: "+cancelReason+"]")
-			u := totalUsage
-			terminalEmit = func() { emitTurnDone(sess, u.PromptTokens, u.CompletionTokens, u.TotalTokens) }
+		// Execute tool calls. toolErr (distinct from the stream err above) is
+		// non-nil only on mid-loop context cancellation.
+		outcome, toolErr := executeToolCalls(ctx, cfg, sess, toolCalls, toolSchemas, allMsgs)
+		if toolErr != nil {
+			msg := toolErr.Error()
+			terminalEmit = func() { emitError(sess, msg) }
 			return
 		}
-
-		if ctx.Err() != nil {
-			msg := ctx.Err().Error()
-			terminalEmit = func() { emitError(sess, msg) }
+		allMsgs = outcome.allMsgs
+		if outcome.cancelled {
+			emitSystemReminder(sess, "[turn cancelled by user: "+outcome.cancelReason+"]")
+			u := totalUsage
+			terminalEmit = func() { emitTurnDone(sess, u.PromptTokens, u.CompletionTokens, u.TotalTokens) }
 			return
 		}
 
@@ -299,9 +193,142 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 	}
 }
 
+// toolLoopOutcome reports how a turn's tool-execution loop ended.
+type toolLoopOutcome struct {
+	allMsgs      []llm.Message // updated slice (compact_history may have replaced it)
+	cancelled    bool          // a guard returned a cancel decision
+	cancelReason string        // reason text for the cancellation reminder
+}
+
+// executeToolCalls runs the assistant's tool calls in order, emitting
+// tool_call/tool_result events and appending each tool message to both allMsgs
+// and the session. It returns the updated allMsgs plus cancellation state.
+//
+//   - a non-nil error means the context was cancelled mid-loop; the caller
+//     emits an error terminal event and ends the turn.
+//   - outcome.cancelled means a guard cancelled; the caller emits the
+//     cancellation reminder and a turn_done terminal event.
+//   - otherwise the loop completed normally; outcome.allMsgs carries the
+//     updated message slice for the next round.
+//
+// Guard-cancel takes precedence over ctx-cancel: on a guard cancel it returns
+// {cancelled:true}, nil without consulting ctx afterward.
+func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCalls []llm.ToolCall, toolSchemas map[string]map[string]any, allMsgs []llm.Message) (toolLoopOutcome, error) {
+	var cancelled bool
+	var cancelReason string
+	for idx, tc := range toolCalls {
+		if ctx.Err() != nil {
+			return toolLoopOutcome{}, ctx.Err()
+		}
+
+		emitToolCall(sess, tc.ID, tc.Name, tc.RawArgs)
+		var decision int
+		var hookReason string
+		var hookErr error
+		if cfg.ToolGuard != nil {
+			decision, hookReason, hookErr = cfg.ToolGuard(ctx, tc.Name, parseRawArgs(tc.RawArgs))
+		}
+		var out string
+		if hookErr != nil {
+			out = fmt.Sprintf("Tool-call hook failed (the on_tool_call hook script itself errored, not the user): %v. Do not retry the same call without adjusting your approach.", hookErr)
+		} else if decision == guardCancel {
+			if hookReason == "" {
+				hookReason = "user cancelled"
+			}
+			cancelled = true
+			cancelReason = hookReason
+			out = fmt.Sprintf("USER CANCELLED the turn before this %s call ran. Reason: %s. Subsequent tool calls in this turn were not executed.", tc.Name, hookReason)
+		} else if decision == guardBlock {
+			if hookReason == "" {
+				hookReason = "no reason given"
+			}
+			out = fmt.Sprintf("USER DENIED this %s tool call. Reason: %s. Treat this as the user explicitly disapproving this action — do NOT retry the same call. Acknowledge the denial, ask what they want instead, or pick a different approach.", tc.Name, hookReason)
+		} else if schema, ok := toolSchemas[tc.Name]; ok {
+			if err := validateToolArgs(schema, json.RawMessage([]byte(tc.RawArgs))); err != nil {
+				out = fmt.Sprintf("error: invalid tool arguments: %v", err)
+			}
+		}
+		if out != "" {
+			// Hook blocked or validation failed — out already carries the
+			// reason text; nothing more to do here. The tool_result event
+			// emitted below carries the error string with ToolError=true.
+		} else if tc.Name == "compact_history" {
+			out, allMsgs = handleCompactHistory(tc.RawArgs, cfg.Store, sess, allMsgs, cfg.Log)
+		} else if tc.Name == "shell_interactive" {
+			command := ParseBashArgs(tc.RawArgs)
+			if cfg.ShellInteractive != nil {
+				out = cfg.ShellInteractive(ctx, command, cfg.WorkDir)
+			} else {
+				out = "error: interactive TTY not available"
+			}
+		} else if cfg.CustomToolNames[tc.Name] {
+			out = dispatchCustomTool(ctx, Config{CustomTool: cfg.CustomTool}, tc.Name, tc.RawArgs)
+		} else if handler, ok := cfg.Handlers[tc.Name]; ok {
+			toolCfg := ToolConfig{
+				Store:    cfg.Store,
+				WorkDir:  cfg.WorkDir,
+				AllMsgs:  allMsgs,
+				SessMsgs: sess.messages,
+			}
+			var herr error
+			out, herr = handler.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), toolCfg)
+			if herr != nil {
+				// Most handlers encode failures in their output string and
+				// return a nil error; a non-nil error is a genuine handler
+				// fault (e.g. bash_bg failing to spawn). Log it, and if the
+				// handler left no output, surface the error to the model as a
+				// tool error rather than emitting an empty result.
+				cfg.Log.Warn("tool handler error", "tool", tc.Name, "error", herr)
+				if out == "" {
+					out = "error: " + herr.Error()
+				}
+			}
+		} else {
+			out = fmt.Sprintf("error: unknown tool %q", tc.Name)
+		}
+
+		emitToolResult(sess, tc.ID, tc.Name, out, isToolError(out))
+		// Prepend the tool_call_id so the model has a stable handle it
+		// can pass to prune_tool_result. Without this the id only lives
+		// in structured metadata, which the model cannot reliably echo.
+		content := fmt.Sprintf("[tool_call_id=%s]\n%s", tc.ID, out)
+		toolMsg := llm.Message{
+			Role:       llm.RoleTool,
+			Content:    content,
+			ToolCallID: tc.ID,
+			Name:       tc.Name,
+		}
+		allMsgs = append(allMsgs, toolMsg)
+		sess.append(toolMsg)
+
+		if cancelled {
+			// Append synthetic results for any tool_calls we never reached
+			// so the assistant message's tool_calls list has matching
+			// tool_call_id results in history. Without this the next turn
+			// 400s on providers that strictly validate the pairing.
+			for _, rem := range toolCalls[idx+1:] {
+				stub := llm.Message{
+					Role:       llm.RoleTool,
+					Content:    fmt.Sprintf("[tool_call_id=%s]\nNot executed — turn cancelled by user.", rem.ID),
+					ToolCallID: rem.ID,
+					Name:       rem.Name,
+				}
+				allMsgs = append(allMsgs, stub)
+				sess.append(stub)
+			}
+			return toolLoopOutcome{allMsgs: allMsgs, cancelled: true, cancelReason: cancelReason}, nil
+		}
+	}
+
+	if ctx.Err() != nil {
+		return toolLoopOutcome{}, ctx.Err()
+	}
+	return toolLoopOutcome{allMsgs: allMsgs}, nil
+}
+
 // isToolError reports whether a tool's output string represents a failure,
-// by its leading marker. Keep in sync with the markers produced in RunTurn's
-// tool-execution loop (validation errors, guard block/cancel, hook failures).
+// by its leading marker. Keep in sync with the markers produced in
+// executeToolCalls (validation errors, guard block/cancel, hook failures).
 func isToolError(out string) bool {
 	return strings.HasPrefix(out, "error:") ||
 		strings.HasPrefix(out, "USER DENIED") ||
