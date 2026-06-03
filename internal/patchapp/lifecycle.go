@@ -17,14 +17,14 @@ func (a *App) Pause() error {
 	// Wake the input loop out of its Poll so it can release the read lock.
 	// Without this, a Pause from a non-input goroutine would block until
 	// the user happened to press a key.
-	if a.pauseWakeW != nil {
-		_, _ = a.pauseWakeW.Write([]byte{0})
+	if a.term.pauseWakeW != nil {
+		_, _ = a.term.pauseWakeW.Write([]byte{0})
 	}
-	a.readMu.Lock()
+	a.term.readMu.Lock()
 
 	a.mu.Lock()
-	oldState := a.oldTermState
-	a.paused = true
+	oldState := a.term.oldTermState
+	a.term.paused = true
 	a.r.Erase() // move to frame row 0 before erasing, not just current cursor row
 	a.mu.Unlock()
 
@@ -41,13 +41,13 @@ func (a *App) Resume() error {
 	fmt.Print(pasteOn)
 
 	a.mu.Lock()
-	a.oldTermState = newState
-	a.paused = false
+	a.term.oldTermState = newState
+	a.term.paused = false
 	a.r.Reset()
 	a.render()
 	a.mu.Unlock()
 
-	a.readMu.Unlock()
+	a.term.readMu.Unlock()
 	return nil
 }
 

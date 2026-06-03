@@ -21,7 +21,7 @@ func (a *App) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("patchapp: enter raw mode: %w", err)
 	}
-	a.oldTermState = oldState
+	a.term.oldTermState = oldState
 	defer term.Restore(int(os.Stdin.Fd()), oldState) //nolint:errcheck
 	defer fmt.Print(pasteOff + "\x1b[?25h\n")
 
@@ -31,8 +31,8 @@ func (a *App) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("patchapp: pipe: %w", err)
 	}
-	a.pauseWakeR = pr
-	a.pauseWakeW = pw
+	a.term.pauseWakeR = pr
+	a.term.pauseWakeW = pw
 	defer func() { _ = pr.Close() }()
 	defer func() { _ = pw.Close() }()
 
@@ -68,14 +68,14 @@ func (a *App) Run(ctx context.Context) error {
 		}
 		// RLock blocks while Pause holds the write lock. While paused, any
 		// wake bytes are drained on Resume; we just wait.
-		a.readMu.RLock()
+		a.term.readMu.RLock()
 		fds := []unix.PollFd{
 			{Fd: int32(stdinFd), Events: unix.POLLIN},
 			{Fd: int32(wakeFd), Events: unix.POLLIN},
 		}
 		_, perr := unix.Poll(fds, -1)
 		if perr != nil && !errors.Is(perr, unix.EINTR) {
-			a.readMu.RUnlock()
+			a.term.readMu.RUnlock()
 			return fmt.Errorf("patchapp: poll: %w", perr)
 		}
 		// Drain any wake bytes (from Pause). If only the wake fd fired,
@@ -84,11 +84,11 @@ func (a *App) Run(ctx context.Context) error {
 			_, _ = pr.Read(wakeBuf)
 		}
 		if fds[0].Revents&unix.POLLIN == 0 {
-			a.readMu.RUnlock()
+			a.term.readMu.RUnlock()
 			continue
 		}
 		n, rerr := unix.Read(stdinFd, buf)
-		a.readMu.RUnlock()
+		a.term.readMu.RUnlock()
 		if rerr != nil {
 			if errors.Is(rerr, unix.EINTR) {
 				continue

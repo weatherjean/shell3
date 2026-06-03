@@ -47,6 +47,26 @@ type editorState struct {
 	pasteBuf []rune
 }
 
+// terminalState is the terminal/stdin-lifecycle cluster. Its fields do NOT
+// share one lock — the locking is unchanged from when they lived on App:
+//   - readMu: its own lock, gating the stdin Read so a paused subprocess owns
+//     the TTY without our reader stealing keystrokes / DSR replies.
+//   - pauseWakeR/W: a self-pipe assigned once in Run before its readers start,
+//     then only written (Quit, Pause); effectively immutable afterward. Used to
+//     interrupt the input loop's Poll when Pause is called from another
+//     goroutine (SetReadDeadline is unreliable for terminals).
+//   - oldTermState, paused: guarded by App.mu (set in Pause/Resume; paused is
+//     read in render()).
+type terminalState struct {
+	readMu sync.RWMutex
+
+	pauseWakeR *os.File
+	pauseWakeW *os.File
+
+	oldTermState *term.State
+	paused       bool
+}
+
 // App is the top-level TUI controller. It owns the render loop, input
 // parser, and terminal mode. Methods that mutate render state are
 // goroutine-safe.
@@ -59,24 +79,13 @@ type editorState struct {
 type App struct {
 	mu sync.Mutex
 
-	// readMu gates the stdin Read in the input loop. Held read-locked only
-	// while a Read is in progress; Pause acquires it write-locked to keep
-	// the reader out while a subprocess (nvim, !cmd, hook) owns the TTY.
-	// Without this gate, our Read steals keystrokes and DSR replies meant
-	// for the subprocess.
-	readMu sync.RWMutex
-
-	// pauseWake is a self-pipe used to interrupt the input loop's Poll when
-	// Pause is called from another goroutine. os.Stdin.SetReadDeadline is
-	// unreliable for terminals, so we multiplex stdin with this pipe via
-	// unix.Poll and wake by writing a byte. nil before Run starts.
-	pauseWakeR *os.File
-	pauseWakeW *os.File
-
 	r *patchtui.Renderer
 
 	// User input state (live line, cursor, history recall, paste, UTF-8 carry).
 	ed editorState
+
+	// Terminal/stdin lifecycle (own readMu lock + self-pipe + raw-mode state).
+	term terminalState
 
 	// Status bar info.
 	status statusInfo
@@ -88,10 +97,6 @@ type App struct {
 	// Quit/exit state.
 	lastCtrlC time.Time
 	exitFlag  bool
-
-	// Terminal lifecycle.
-	oldTermState *term.State
-	paused       bool // set during Pause/Resume
 
 	// Submit callback.
 	submit SubmitFunc
@@ -128,8 +133,8 @@ func (a *App) Quit() {
 	a.mu.Lock()
 	a.exitFlag = true
 	a.mu.Unlock()
-	if a.pauseWakeW != nil {
-		_, _ = a.pauseWakeW.Write([]byte{0})
+	if a.term.pauseWakeW != nil {
+		_, _ = a.term.pauseWakeW.Write([]byte{0})
 	}
 }
 
@@ -147,7 +152,7 @@ func (a *App) liveFrameLocked() []string {
 // render rebuilds the frame and asks the renderer to paint it. Caller
 // must hold a.mu. Skipped while paused (during shell exec).
 func (a *App) render() {
-	if a.paused {
+	if a.term.paused {
 		return
 	}
 	a.r.Render(a.liveFrameLocked())
@@ -161,7 +166,7 @@ func (a *App) Print(lines []string) {
 	defer a.mu.Unlock()
 	w, _ := patchtui.Size()
 	wrapped := wrapCommittedLines(lines, w)
-	if a.paused {
+	if a.term.paused {
 		a.r.Print(wrapped)
 		return
 	}
