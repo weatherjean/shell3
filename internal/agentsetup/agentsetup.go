@@ -14,15 +14,15 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/adapter/openai"
+	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/bootstrap"
+	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/docs"
+	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/luacfg"
 	"github.com/weatherjean/shell3/internal/paths"
-	"github.com/weatherjean/shell3/internal/store"
-	"github.com/weatherjean/shell3/internal/applog"
-	"github.com/weatherjean/shell3/internal/chat"
-	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/persona"
+	"github.com/weatherjean/shell3/internal/store"
 )
 
 // Options parameterizes Build. CWD/HomeDir default via the caller (front-ends

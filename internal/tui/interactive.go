@@ -8,11 +8,11 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/weatherjean/shell3/internal/chat"
+	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/patchapp"
 	"github.com/weatherjean/shell3/internal/patchmd"
 	"github.com/weatherjean/shell3/internal/patchtui"
-	"github.com/weatherjean/shell3/internal/chat"
-	"github.com/weatherjean/shell3/internal/llm"
 )
 
 // RunInteractive runs the TUI chat loop. Blocks until the user quits.
@@ -105,8 +105,9 @@ func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
 	// launchTurn starts a turn goroutine for userMsg. drainTurn runs as a
 	// long-lived consumer of sess.Events() (started above); per-turn UI
 	// state transitions (SetBusy false, etc.) happen via TurnDone/Error
-	// events. SaveHistory runs synchronously after RunTurn returns so
-	// prevLen stays a goroutine-local concern.
+	// events. History is persisted inside the turn (before the terminal
+	// event) by Session.Run, so it completes before the embedder is told
+	// the turn is done.
 	buildTurnConfig := func() chat.TurnConfig {
 		return chat.TurnConfig{
 			LLM:             cfg.LLM,
