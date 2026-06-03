@@ -376,19 +376,6 @@ func (r *Renderer) Erase() {
 	r.cursorRow = 0
 }
 
-// SyncSize re-samples the terminal size and resets render state so the
-// next Render paints fresh at the current cursor position. Unlike Reset,
-// it is intended for use after the caller has already erased the old
-// frame (via Erase), so no screen clear is emitted.
-func (r *Renderer) SyncSize() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.prev = nil
-	r.inited = false
-	r.cursorRow = 0
-	r.width, r.height = r.size()
-}
-
 // Reset clears the renderer's internal state. The next call to
 // [Renderer.Render] will be treated as a first render at the current
 // cursor position. Call Reset after operations that disturb the terminal

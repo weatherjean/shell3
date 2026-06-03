@@ -13,7 +13,7 @@ const (
 	createdFilePreviewLines = 5
 )
 
-func handleEditTool(name, rawArgs, workDir string) string {
+func handleEditTool(rawArgs, workDir string) string {
 	var args struct {
 		FilePath   string `json:"file_path"`
 		OldString  string `json:"old_string"`

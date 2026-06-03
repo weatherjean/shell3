@@ -1,4 +1,4 @@
-// Package mdrender is a small ANSI markdown renderer optimised for streaming
+// Package patchmd is a small ANSI markdown renderer optimised for streaming
 // LLM output. It supports the markdown subset that LLMs actually produce:
 // headers (# ## ###), **bold**, `inline code`, [links](url), `- *` lists,
 // and `> blockquotes`. Italics, tables, and HTML are passed through

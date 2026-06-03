@@ -179,7 +179,6 @@ func NewClient(baseURL, apiKey, model string) *Client {
 	}
 }
 
-func (c *Client) SetModel(model string)         { c.model = model }
 func (c *Client) SetParams(p llm.RequestParams) { c.params = c.params.Merge(p) }
 func (c *Client) SetExtra(m map[string]any)     { c.extra = m }
 

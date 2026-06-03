@@ -5,7 +5,8 @@
 //
 // Credit: this is a direct Go port of opencode's edit tool, licensed under
 // opencode's terms. See:
-//   https://github.com/sst/opencode/blob/main/packages/opencode/src/tool/edit.ts
+//
+//	https://github.com/sst/opencode/blob/main/packages/opencode/src/tool/edit.ts
 //
 // opencode in turn cites:
 //   - https://github.com/cline/cline (diff-apply)
@@ -19,9 +20,9 @@ import (
 )
 
 var (
-	ErrNotFound       = errors.New("could not find old_string in file. It must match exactly, including whitespace, indentation, and line endings")
-	ErrMultipleMatch  = errors.New("found multiple matches for old_string. Provide more surrounding context to make the match unique")
-	ErrNoChange       = errors.New("no changes to apply: old_string and new_string are identical")
+	ErrNotFound      = errors.New("could not find old_string in file. It must match exactly, including whitespace, indentation, and line endings")
+	ErrMultipleMatch = errors.New("found multiple matches for old_string. Provide more surrounding context to make the match unique")
+	ErrNoChange      = errors.New("no changes to apply: old_string and new_string are identical")
 )
 
 // Replacer yields candidate matches inside content for the given find string.
@@ -62,25 +63,25 @@ func Replace(content, oldString, newString string, replaceAll bool) (string, err
 }
 
 var replacers = []Replacer{
-	SimpleReplacer,
-	LineTrimmedReplacer,
-	BlockAnchorReplacer,
-	WhitespaceNormalizedReplacer,
-	IndentationFlexibleReplacer,
-	EscapeNormalizedReplacer,
-	TrimmedBoundaryReplacer,
-	ContextAwareReplacer,
-	MultiOccurrenceReplacer,
+	simpleReplacer,
+	lineTrimmedReplacer,
+	blockAnchorReplacer,
+	whitespaceNormalizedReplacer,
+	indentationFlexibleReplacer,
+	escapeNormalizedReplacer,
+	trimmedBoundaryReplacer,
+	contextAwareReplacer,
+	multiOccurrenceReplacer,
 }
 
-// SimpleReplacer yields find unchanged.
-func SimpleReplacer(_ string, find string) []string {
+// simpleReplacer yields find unchanged.
+func simpleReplacer(_ string, find string) []string {
 	return []string{find}
 }
 
-// LineTrimmedReplacer matches lines after .trim() — handles trailing/leading
+// lineTrimmedReplacer matches lines after .trim() — handles trailing/leading
 // whitespace differences per line. Returns the original (un-trimmed) substring.
-func LineTrimmedReplacer(content, find string) []string {
+func lineTrimmedReplacer(content, find string) []string {
 	originalLines := strings.Split(content, "\n")
 	searchLines := strings.Split(find, "\n")
 	if n := len(searchLines); n > 0 && searchLines[n-1] == "" {
@@ -129,9 +130,9 @@ const (
 	multipleCandidatesThreshold = 0.3
 )
 
-// BlockAnchorReplacer matches multi-line blocks where first and last lines
+// blockAnchorReplacer matches multi-line blocks where first and last lines
 // match (after trim), middle lines are scored by levenshtein similarity.
-func BlockAnchorReplacer(content, find string) []string {
+func blockAnchorReplacer(content, find string) []string {
 	originalLines := strings.Split(content, "\n")
 	searchLines := strings.Split(find, "\n")
 	if len(searchLines) < 3 {
@@ -240,8 +241,8 @@ func BlockAnchorReplacer(content, find string) []string {
 
 var wsRun = regexp.MustCompile(`\s+`)
 
-// WhitespaceNormalizedReplacer collapses whitespace runs to single space.
-func WhitespaceNormalizedReplacer(content, find string) []string {
+// whitespaceNormalizedReplacer collapses whitespace runs to single space.
+func whitespaceNormalizedReplacer(content, find string) []string {
 	norm := func(s string) string { return strings.TrimSpace(wsRun.ReplaceAllString(s, " ")) }
 	normalizedFind := norm(find)
 	var out []string
@@ -284,8 +285,8 @@ func WhitespaceNormalizedReplacer(content, find string) []string {
 	return out
 }
 
-// IndentationFlexibleReplacer strips common indent before matching.
-func IndentationFlexibleReplacer(content, find string) []string {
+// indentationFlexibleReplacer strips common indent before matching.
+func indentationFlexibleReplacer(content, find string) []string {
 	removeIndent := func(text string) string {
 		lines := strings.Split(text, "\n")
 		minIndent := -1
@@ -329,9 +330,9 @@ func IndentationFlexibleReplacer(content, find string) []string {
 	return out
 }
 
-// EscapeNormalizedReplacer treats literal `\n` `\t` `\r` `\\` `\"` `\'` `` ` `` `\$`
+// escapeNormalizedReplacer treats literal `\n` `\t` `\r` `\\` `\"` `\'` “ ` “ `\$`
 // in find as their unescaped forms.
-func EscapeNormalizedReplacer(content, find string) []string {
+func escapeNormalizedReplacer(content, find string) []string {
 	unescape := func(s string) string {
 		var b strings.Builder
 		for i := 0; i < len(s); i++ {
@@ -373,8 +374,8 @@ func EscapeNormalizedReplacer(content, find string) []string {
 	return out
 }
 
-// TrimmedBoundaryReplacer matches with leading/trailing whitespace stripped.
-func TrimmedBoundaryReplacer(content, find string) []string {
+// trimmedBoundaryReplacer matches with leading/trailing whitespace stripped.
+func trimmedBoundaryReplacer(content, find string) []string {
 	trimmed := strings.TrimSpace(find)
 	if trimmed == find {
 		return nil
@@ -394,8 +395,8 @@ func TrimmedBoundaryReplacer(content, find string) []string {
 	return out
 }
 
-// ContextAwareReplacer matches blocks where >= 50% of middle lines match.
-func ContextAwareReplacer(content, find string) []string {
+// contextAwareReplacer matches blocks where >= 50% of middle lines match.
+func contextAwareReplacer(content, find string) []string {
 	findLines := strings.Split(find, "\n")
 	if len(findLines) < 3 {
 		return nil
@@ -441,9 +442,9 @@ func ContextAwareReplacer(content, find string) []string {
 	return nil
 }
 
-// MultiOccurrenceReplacer yields find for every exact match position so the
+// multiOccurrenceReplacer yields find for every exact match position so the
 // driver loop can decide based on replaceAll.
-func MultiOccurrenceReplacer(content, find string) []string {
+func multiOccurrenceReplacer(content, find string) []string {
 	if find == "" {
 		return nil
 	}
@@ -460,7 +461,7 @@ func MultiOccurrenceReplacer(content, find string) []string {
 }
 
 // levenshtein returns the edit distance between a and b. Used by
-// BlockAnchorReplacer to score middle-line similarity.
+// blockAnchorReplacer to score middle-line similarity.
 func levenshtein(a, b string) int {
 	if len(a) == 0 || len(b) == 0 {
 		return max(len(a), len(b))
