@@ -2,6 +2,7 @@ package shell3
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/weatherjean/shell3/pkg/chat"
@@ -153,6 +154,42 @@ func TestRunConfig_MapsToolResult(t *testing.T) {
 	}
 	if tools[0].ToolName != "echo_tool" || tools[0].ToolOutput != "echoed" {
 		t.Fatalf("tool event = %+v, want name=echo_tool output=echoed", tools[0])
+	}
+}
+
+func TestRunConfig_ErrorPath(t *testing.T) {
+	// A stream error surfaces as Error, the channel still closes, cleanup
+	// runs once, and (per the documented contract) no Done event is emitted.
+	client := fakellm.New(fakellm.Script{Err: errors.New("boom")})
+	cfg := chat.Config{
+		LLM:         client,
+		Personality: persona.Persona{Name: "test"},
+		WorkDir:     t.TempDir(),
+	}
+
+	var calls int
+	events := runConfig(context.Background(), cfg, "hi", func() { calls++ })
+
+	var sawError, sawDone bool
+	for ev := range events {
+		switch ev.Kind {
+		case Error:
+			sawError = true
+			if ev.Err == nil {
+				t.Fatal("Error event has nil Err")
+			}
+		case Done:
+			sawDone = true
+		}
+	}
+	if !sawError {
+		t.Fatal("expected an Error event")
+	}
+	if sawDone {
+		t.Fatal("did not expect Done on the error path")
+	}
+	if calls != 1 {
+		t.Fatalf("cleanup called %d times, want 1", calls)
 	}
 }
 

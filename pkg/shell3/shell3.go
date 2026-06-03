@@ -38,9 +38,12 @@ const (
 	Token Kind = iota
 	// ToolResult reports a completed tool call. ToolName and ToolOutput are set.
 	ToolResult
-	// Error is a non-fatal turn error. Err is set. The turn still drains to Done.
+	// Error is a turn error. Err is set. A Done event is NOT guaranteed to
+	// follow: on a mid-stream failure the channel closes after Error with no
+	// Done. Either way the channel always closes exactly once.
 	Error
-	// Done marks the end of the turn. The channel closes immediately after.
+	// Done marks normal end of the turn. The channel closes immediately after.
+	// Not emitted on the error path (see Error).
 	Done
 )
 
@@ -104,8 +107,14 @@ func runConfig(ctx context.Context, cfg chat.Config, prompt string, cleanup func
 // A non-nil error means Run failed to START (missing/invalid config, unknown
 // model, missing key): nothing ran and the channel is nil. A nil error means
 // the turn is underway; per-turn failures arrive as Event{Kind: Error}. The
-// channel is closed exactly once after a final Done event. The caller's only
-// obligation is to drain the channel until it closes.
+// channel is closed exactly once when the turn ends (after Done normally, or
+// after Error on the failure path).
+//
+// The caller MUST drain the channel until it closes. Abandoning it mid-stream
+// leaks the internal forwarder goroutine — it blocks forever on the unread
+// send, and cancelling ctx does not release it. Under sustained back-pressure
+// (a consumer slower than the model) the underlying session may also drop
+// events, so a slow reader is not merely slow but lossy.
 func Run(ctx context.Context, spec Spec) (<-chan Event, error) {
 	cfg, closeLua, err := buildConfig(spec)
 	if err != nil {
