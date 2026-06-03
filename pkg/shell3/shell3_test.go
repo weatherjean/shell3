@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
@@ -209,5 +210,63 @@ func TestSession_SwitchModel_Applies(t *testing.T) {
 	}
 	if s.cfg.LLM != chat.LLMClient(newClient) {
 		t.Fatal("SwitchModel did not swap the active client")
+	}
+}
+
+// blockingClient.Stream blocks until its ctx is cancelled, simulating an
+// in-flight LLM stream. It signals when Stream is entered and when it returns.
+type blockingClient struct {
+	entered  chan struct{}
+	returned chan struct{}
+}
+
+func (c *blockingClient) Stream(ctx context.Context, _ []llm.Message, _ []llm.ToolDefinition, _ func(llm.StreamEvent)) error {
+	close(c.entered)
+	<-ctx.Done()
+	close(c.returned)
+	return ctx.Err()
+}
+
+func TestSession_CloseCancelsAndJoinsInFlightTurn(t *testing.T) {
+	client := &blockingClient{entered: make(chan struct{}), returned: make(chan struct{})}
+	s := newTestSession(t, client, chat.Config{})
+
+	out := s.Send(context.Background(), "hi")
+	// Drain the turn channel in the background so drain() can forward the
+	// terminal event (a real caller drains; this avoids the unrelated
+	// unbuffered-Send-channel block, which is a separate finding).
+	go func() {
+		for range out {
+		}
+	}()
+
+	// Wait until the turn is actually in-flight (Stream entered and blocked).
+	select {
+	case <-client.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stream never entered")
+	}
+
+	// Close must cancel the in-flight turn AND join its goroutine before
+	// returning. Before the fix, Close returns without cancelling, so the
+	// blocked Stream goroutine is leaked and `returned` is never closed.
+	closeDone := make(chan struct{})
+	go func() {
+		_ = s.Close()
+		close(closeDone)
+	}()
+	select {
+	case <-closeDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close did not return (deadlock)")
+	}
+
+	// Join proof: by the time Close returned, the turn's Stream must have
+	// returned (i.e. Close waited for the turn goroutine, so the deferred
+	// history persist completed before the store would be closed).
+	select {
+	case <-client.returned:
+	default:
+		t.Fatal("Close returned before the in-flight turn finished — turn not cancelled/joined (leak + potential write-after-close)")
 	}
 }
