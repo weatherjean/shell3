@@ -105,3 +105,61 @@ func TestRunTurn_ToolRoundTrip(t *testing.T) {
 		t.Fatalf("expected 2 LLM rounds, got %d", fake.CallCount())
 	}
 }
+
+// hasKind reports whether any event in evs has the given kind.
+func hasKind(evs []Event, k EventKind) bool {
+	for _, ev := range evs {
+		if ev.Kind == k {
+			return true
+		}
+	}
+	return false
+}
+
+// TestRunTurn_GuardCancel_StubsRemainingCalls characterizes a guard cancel:
+// round 1 returns two tool calls, the guard cancels, and the turn ends with a
+// cancellation reminder + turn_done (not error). The first call gets a real
+// "USER CANCELLED" result; the unreached second call gets a synthetic stub.
+func TestRunTurn_GuardCancel_StubsRemainingCalls(t *testing.T) {
+	fake := fakellm.New(
+		fakellm.Script{Events: []llm.StreamEvent{
+			{ToolCall: &llm.ToolCall{ID: "a", Name: "echo", RawArgs: `{}`}},
+			{ToolCall: &llm.ToolCall{ID: "b", Name: "echo", RawArgs: `{}`}},
+			{Usage: &llm.Usage{TotalTokens: 5}},
+		}},
+	)
+	sess := NewSession(SessionOpts{BufSize: 256})
+	cfg := TurnConfig{
+		LLM:         fake,
+		Personality: persona.Persona{SystemPrompt: "test"},
+		Handlers:    map[string]ToolHandler{"echo": stubHandler{name: "echo", out: "echoed"}},
+		Log:         LogOrNoop(nil),
+		ToolGuard: func(ctx context.Context, tool string, params map[string]any) (int, string, error) {
+			return guardCancel, "nope", nil
+		},
+	}
+
+	events := collectTurn(t, context.Background(), cfg, sess, "hi")
+
+	if hasKind(events, EventError) {
+		t.Fatalf("guard cancel should not emit error; events=%+v", events)
+	}
+	if !hasKind(events, EventTurnDone) {
+		t.Fatalf("guard cancel should still emit turn_done")
+	}
+	var sawReminder bool
+	for _, ev := range events {
+		if ev.Kind == EventSystemReminder && strings.Contains(ev.Text, "turn cancelled by user") {
+			sawReminder = true
+		}
+	}
+	if !sawReminder {
+		t.Fatalf("expected cancellation system reminder")
+	}
+	if !hasToolMessage(sess, "echo", "USER CANCELLED") {
+		t.Fatalf("expected USER CANCELLED tool message for the first call")
+	}
+	if !hasToolMessage(sess, "echo", "Not executed") {
+		t.Fatalf("expected synthetic stub tool message for the unreached call")
+	}
+}
