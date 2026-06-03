@@ -261,6 +261,33 @@ func drainTurn(ch <-chan chat.Event, app patchapp.AppView, lastUsage *llm.Usage,
 			app.SetTokens(u.TotalTokens)
 		}
 	}
+	// publishEventUsage forwards a wire usage payload (if present) to
+	// publishUsage. Shared by the usage and turn-done events.
+	publishEventUsage := func(u *chat.EventUsageData) {
+		if u == nil {
+			return
+		}
+		publishUsage(llm.Usage{
+			PromptTokens:     u.PromptTokens,
+			CompletionTokens: u.CompletionTokens,
+			TotalTokens:      u.TotalTokens,
+		})
+	}
+	// appendReasoning commits each complete (newline-terminated) reasoning line
+	// to scrollback as it arrives (dim gray), keeping the trailing partial line
+	// in reasoningBuf until the next newline or a flush.
+	appendReasoning := func(text string) {
+		for {
+			idx := strings.IndexByte(text, '\n')
+			if idx < 0 {
+				reasoningBuf.WriteString(text)
+				break
+			}
+			commitReasoningLine(reasoningBuf.String() + text[:idx])
+			reasoningBuf.Reset()
+			text = text[idx+1:]
+		}
+	}
 
 	// flushStreamFully commits any partial line as a final block (no trailing
 	// newline). Used before tool output or end-of-turn to preserve order.
@@ -279,20 +306,7 @@ func drainTurn(ch <-chan chat.Event, app patchapp.AppView, lastUsage *llm.Usage,
 		}
 		switch ev.Kind {
 		case chat.EventAssistantReasoning:
-			// Commit each complete line to scrollback as it arrives (dim gray).
-			// The trailing partial line stays in reasoningBuf until the next
-			// newline or a flush (text start, tool output, turn done).
-			text := ev.Text
-			for {
-				idx := strings.IndexByte(text, '\n')
-				if idx < 0 {
-					reasoningBuf.WriteString(text)
-					break
-				}
-				commitReasoningLine(reasoningBuf.String() + text[:idx])
-				reasoningBuf.Reset()
-				text = text[idx+1:]
-			}
+			appendReasoning(ev.Text)
 
 		case chat.EventAssistantToken:
 			flushReasoningPartial()
@@ -322,24 +336,12 @@ func drainTurn(ch <-chan chat.Event, app patchapp.AppView, lastUsage *llm.Usage,
 			app.Print(patchtui.SplitLines(patchtui.Dim + "⟳ " + ev.Text + patchtui.Reset + "\n"))
 
 		case chat.EventUsage:
-			if ev.Usage != nil {
-				publishUsage(llm.Usage{
-					PromptTokens:     ev.Usage.PromptTokens,
-					CompletionTokens: ev.Usage.CompletionTokens,
-					TotalTokens:      ev.Usage.TotalTokens,
-				})
-			}
+			publishEventUsage(ev.Usage)
 
 		case chat.EventTurnDone:
 			flushReasoningPartial()
 			flushStreamFully()
-			if ev.Usage != nil {
-				publishUsage(llm.Usage{
-					PromptTokens:     ev.Usage.PromptTokens,
-					CompletionTokens: ev.Usage.CompletionTokens,
-					TotalTokens:      ev.Usage.TotalTokens,
-				})
-			}
+			publishEventUsage(ev.Usage)
 			app.SetBusy(false, nil)
 
 		case chat.EventError:
