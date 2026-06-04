@@ -316,7 +316,6 @@ func (s *Session) turnConfig() chat.TurnConfig {
 		StatusLine:      s.cfg.StatusLine,
 		WorkDir:         s.cfg.WorkDir,
 		Store:           s.cfg.Store,
-		Truncate:        s.cfg.Truncate,
 		Handlers:        s.handlers,
 		Log:             chat.LogOrNoop(s.cfg.Log),
 		Headless:        true,

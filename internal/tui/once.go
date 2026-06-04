@@ -29,7 +29,6 @@ func RunOnce(ctx context.Context, cfg chat.Config, input string) error {
 		StatusLine:      cfg.StatusLine,
 		WorkDir:         cfg.WorkDir,
 		Store:           cfg.Store,
-		Truncate:        cfg.Truncate || cfg.OutPath != "", // full output when sink is active
 		Handlers:        chat.NewHandlers(cfg),
 		Log:             chat.LogOrNoop(cfg.Log),
 		Headless:        cfg.Headless,

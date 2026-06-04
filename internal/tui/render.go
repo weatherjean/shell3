@@ -152,15 +152,23 @@ func renderToolCallHeader(ev chat.Event, cfg *chat.Config) string {
 
 // renderToolResultBody returns the formatted body lines for a tool_result event.
 // edit_file results pass through diff colorization; everything else is dimmed
-// line-by-line. When truncate is false (default), large outputs are truncated
-// for TUI display — the full output still went to the model via the tool message.
-func renderToolResultBody(ev chat.Event, fullOutput bool) string {
+// line-by-line and truncated for inline display. The full output always went to
+// the model via the tool message, and the user can pull it up with /print <id>.
+func renderToolResultBody(ev chat.Event) string {
 	out := ev.ToolOutput
 	if ev.ToolName == "edit_file" {
 		return colorizeEditOutput(strings.TrimRight(out, "\n"))
 	}
-	if !fullOutput {
-		out = truncateOutput(out)
+	return dimLines(strings.TrimRight(truncateOutput(out), "\n"))
+}
+
+// stripToolIDPrefix removes the "[tool_call_id=…]\n" prefix that the turn loop
+// prepends to each tool result's stored content, leaving just the raw output.
+func stripToolIDPrefix(s string) string {
+	if strings.HasPrefix(s, "[tool_call_id=") {
+		if nl := strings.IndexByte(s, '\n'); nl >= 0 {
+			return s[nl+1:]
+		}
 	}
-	return dimLines(strings.TrimRight(out, "\n"))
+	return s
 }

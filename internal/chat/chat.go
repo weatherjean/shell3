@@ -71,10 +71,6 @@ type Config struct {
 	// ContextWindow is the active model's context window in tokens, used by
 	// the reminder tracker to emit context-usage warnings. Zero means unknown.
 	ContextWindow int
-	// Truncate, when true, shows full tool outputs in the TUI instead of the
-	// default head-truncated preview. Display-only: the model always receives
-	// the complete output regardless of this flag.
-	Truncate bool
 	// Docs is the rendered shell3_docs payload returned by the docs tool.
 	Docs string
 	// Params are provider-level request parameters (temperature, top_p,

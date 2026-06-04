@@ -152,7 +152,6 @@ func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
 			StatusLine:      cfg.StatusLine,
 			WorkDir:         cfg.WorkDir,
 			Store:           cfg.Store,
-			Truncate:        cfg.Truncate || cfg.OutPath != "",
 			Handlers:        handlers,
 			Log:             chat.LogOrNoop(cfg.Log),
 			Headless:        cfg.Headless,
@@ -256,10 +255,10 @@ func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
 // the trailing partial line and clears busy.
 //
 // CONCURRENCY INVARIANT (busy-gate): drainTurn runs on its own long-lived
-// goroutine and READS shared *chat.Config fields per event — e.g. cfg.Truncate
-// in renderToolResultBody and cfg.CustomToolNames in renderToolCallHeader — and
+// goroutine and READS shared *chat.Config fields per event — e.g.
+// cfg.CustomToolNames in renderToolCallHeader — and
 // WRITES *lastUsage. The slash-command handlers in registerSlashCommands run on
-// the input-loop goroutine and MUTATE the same struct (/truncate, /agent,
+// the input-loop goroutine and MUTATE the same struct (/agent,
 // /clear, ... — plus Tab agent switching) and READ *lastUsage (/usage). There is deliberately NO mutex
 // around cfg or lastUsage. This is race-free ONLY because of the busy-gate in
 // patchapp: App.handleEnter (internal/patchapp/editor.go) early-returns while
@@ -416,7 +415,7 @@ func drainTurn(ch <-chan chat.Event, app patchapp.AppView, lastUsage *llm.Usage,
 		case chat.EventToolResult:
 			flushReasoningPartial()
 			flushStreamFully()
-			app.Print(patchtui.SplitLines(renderToolResultBody(ev, cfg.Truncate) + "\n\n"))
+			app.Print(patchtui.SplitLines(renderToolResultBody(ev) + "\n\n"))
 
 		case chat.EventSystemReminder:
 			flushReasoningPartial()
@@ -476,9 +475,9 @@ type slashTarget interface {
 // registerSlashCommands wires up the slash registry. Closures capture cfg,
 // sess, and lastUsage so handlers can read and mutate session state.
 //
-// CONCURRENCY: these handlers mutate the shared *chat.Config (e.g. /truncate
-// writes cfg.Truncate; /agent writes cfg.LLM/Params/Personality/ToolGuard/
-// StatusLine/ContextWindow; /clear writes cfg.Personality.SystemPrompt) and read *lastUsage (/usage) with
+// CONCURRENCY: these handlers mutate the shared *chat.Config (e.g. /agent
+// writes cfg.LLM/Params/Personality/ToolGuard/StatusLine/ContextWindow; /clear
+// writes cfg.Personality.SystemPrompt) and read *lastUsage (/usage) with
 // NO mutex, even though drainTurn concurrently reads cfg/writes lastUsage from
 // another goroutine. This is safe ONLY because patchapp's busy-gate
 // (App.handleEnter in internal/patchapp/editor.go) refuses to dispatch any
@@ -579,14 +578,21 @@ func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session
 		},
 	})
 	app.RegisterSlash(patchapp.SlashCommand{
-		Name: "truncate", Help: "toggle truncated bash output",
-		Handler: func(string) {
-			cfg.Truncate = !cfg.Truncate
-			state := "off"
-			if cfg.Truncate {
-				state = "on"
+		Name: "print", Help: "/print <id> — show the full (untruncated) output of tool result <id>",
+		Handler: func(args string) {
+			id := strings.TrimSpace(args)
+			if id == "" {
+				dim("[/print usage: /print <tool_call_id>]")
+				return
 			}
-			dim(fmt.Sprintf("[full output: %s]", state))
+			for _, m := range sess.Messages() {
+				if m.Role == llm.RoleTool && m.ToolCallID == id {
+					body := strings.TrimRight(stripToolIDPrefix(m.Content), "\n")
+					app.Print(patchtui.SplitLines(dimLines(body) + "\n\n"))
+					return
+				}
+			}
+			dim(fmt.Sprintf("[no tool result with id %q]", id))
 		},
 	})
 	app.RegisterSlash(patchapp.SlashCommand{

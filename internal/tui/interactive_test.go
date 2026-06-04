@@ -418,7 +418,7 @@ func mkToolMsg(id, name, content string) llm.Message {
 
 func TestSlash_RegistersExpectedCommands(t *testing.T) {
 	app, _, _, _ := register()
-	want := []string{"clear", "rollback", "prune", "usage", "prompt", "truncate", "agent", "exit", "quit", "image"}
+	want := []string{"clear", "rollback", "prune", "usage", "prompt", "print", "agent", "exit", "quit", "image"}
 	for _, name := range want {
 		if _, ok := app.handlers[name]; !ok {
 			t.Errorf("missing handler: /%s", name)
@@ -540,16 +540,42 @@ func TestSlash_PromptDumps(t *testing.T) {
 	}
 }
 
-func TestSlash_TruncateToggles(t *testing.T) {
-	app, cfg, _, _ := register()
-	cfg.Truncate = false
-	app.call(t, "truncate", "")
-	if !cfg.Truncate {
-		t.Errorf("truncate not toggled on")
+func TestSlash_PrintNoArg(t *testing.T) {
+	app, _, _, _ := register()
+	app.call(t, "print", "")
+	if !containsAll(app.snapshot(), "/print usage") {
+		t.Errorf("want usage hint: %v", app.snapshot())
 	}
-	app.call(t, "truncate", "")
-	if cfg.Truncate {
-		t.Errorf("truncate not toggled off")
+}
+
+func TestSlash_PrintByID(t *testing.T) {
+	app, _, sess, _ := register()
+	// 15 lines so it exceeds the inline 10-line truncation cap; a tail marker
+	// on the last line proves /print shows the full, untruncated output. The
+	// [tool_call_id=…] prefix must be stripped from the display.
+	body := strings.Repeat("filler\n", 14) + "TAILMARKER"
+	sess.SetMessages([]llm.Message{mkToolMsg("3", "bash", "[tool_call_id=3]\n"+body)})
+	app.call(t, "print", "3")
+
+	var printed string
+	for _, c := range app.snapshot() {
+		if strings.HasPrefix(c, "Print(") {
+			printed = c
+		}
+	}
+	if !strings.Contains(printed, "TAILMARKER") {
+		t.Errorf("expected full untruncated output, got: %q", printed)
+	}
+	if strings.Contains(printed, "tool_call_id") {
+		t.Errorf("expected [tool_call_id=…] prefix stripped, got: %q", printed)
+	}
+}
+
+func TestSlash_PrintUnknownID(t *testing.T) {
+	app, _, _, _ := register()
+	app.call(t, "print", "999")
+	if !containsAll(app.snapshot(), "no tool result with id") {
+		t.Errorf("want not-found hint: %v", app.snapshot())
 	}
 }
 

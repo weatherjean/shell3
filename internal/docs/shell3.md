@@ -384,9 +384,9 @@ In the interactive TUI, type `/` to see commands. The registered commands:
 | `/clear`      | reset conversation context                                        |
 | `/rollback`   | remove the last turn from context                                 |
 | `/prune <id>` | replace tool result `<id>` with a stub                            |
+| `/print <id>` | show the full (untruncated) output of tool result `<id>`          |
 | `/usage`      | show token usage from the last turn                               |
 | `/prompt`     | dump the system prompt and active tools                           |
-| `/truncate`   | toggle truncated bash output                                      |
 | `/parameters [name value]` | list or set tunable params (e.g. `reasoning_effort`) |
 | `/agent [name]` | list configured agents, or switch the active agent (also Tab)     |
 | `/info`       | session details: agent, project, skills, tools                    |

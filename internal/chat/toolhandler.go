@@ -59,8 +59,6 @@ type TurnConfig struct {
 	WorkDir string
 	// Store persists newly appended messages when non-nil.
 	Store *store.Store
-	// Truncate enables tool-output truncation before sending back to the model.
-	Truncate bool
 	// Handlers maps tool name to built-in implementation. Built once via
 	// NewHandlers and shared across turns.
 	Handlers map[string]ToolHandler
