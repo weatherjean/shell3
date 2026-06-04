@@ -106,8 +106,8 @@ func summarizeEditArgs(rawArgs string) string {
 // result is shown inline in the TUI. The full result is always sent to the
 // model; this only affects the user-visible display.
 const (
-	truncateOutputMaxLines = 3
-	truncateOutputMaxBytes = 300
+	truncateOutputMaxLines = 10
+	truncateOutputMaxBytes = 500
 )
 
 func truncateOutput(s string) string {
