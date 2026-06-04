@@ -131,6 +131,39 @@ func TestInline_BoldAroundCode(t *testing.T) {
 	}
 }
 
+// ── regression: nested inline styles must not lose the outer style ───────────
+//
+// Previously each inline formatter closed its span with a blanket ansiReset
+// (\033[0m, which resets ALL SGR attributes). For "**bold [link](u) end**"
+// the link's inner reset cleared the surrounding bold, so the trailing
+// " end" rendered un-bold. Attribute-specific closers fix this: the link
+// closes only underline+color, leaving bold active through " end".
+
+func TestInline_NestedBoldLink_PreservesOuterBold(t *testing.T) {
+	in := "**bold [link](u) end**"
+	out := renderInline(in)
+
+	// Visible text contract is unchanged.
+	if got := stripANSI(out); got != "bold link end" {
+		t.Errorf("visible = %q, want %q", got, "bold link end")
+	}
+
+	// The bold span must not be closed (blanket reset \033[0m or bold-off
+	// \033[22m) before the trailing " end" — the nested link must not clear
+	// the enclosing bold.
+	endIdx := strings.Index(out, " end")
+	if endIdx < 0 {
+		t.Fatalf("trailing %q not found in %q", " end", out)
+	}
+	before := out[:endIdx]
+	if strings.Contains(before, ansiReset) {
+		t.Errorf("blanket reset cleared bold before %q: %q", " end", out)
+	}
+	if strings.Contains(before, "\033[22m") {
+		t.Errorf("bold-off cleared bold before %q: %q", " end", out)
+	}
+}
+
 // ── full Render() smoke ──────────────────────────────────────────────────────
 
 func TestRender_HeaderListBlockquote(t *testing.T) {

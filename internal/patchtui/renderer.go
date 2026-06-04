@@ -460,12 +460,17 @@ func (r *Renderer) diffRender(buf *strings.Builder, lines []string) {
 	// Erase trailing lines that were in the old frame but not the new.
 	if len(r.prev) > len(lines) {
 		extra := len(r.prev) - len(lines)
-		r.moveCursorTo(buf, len(lines)-1)
+		// Clamp the target row to >= 0. When the new frame is empty
+		// (len(lines)==0), len(lines)-1 is -1; moving to a negative row
+		// would emit a cursor-up that overshoots frame row 0 into committed
+		// scrollback, erasing a line that belongs to history above the frame.
+		base := max(0, len(lines)-1)
+		r.moveCursorTo(buf, base)
 		for i := 0; i < extra; i++ {
 			buf.WriteString("\r\n\x1b[2K")
 			r.cursorRow++
 		}
-		r.moveCursorTo(buf, len(lines)-1)
+		r.moveCursorTo(buf, base)
 	}
 }
 
