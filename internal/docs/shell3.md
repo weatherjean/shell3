@@ -192,44 +192,41 @@ You are an expert coding assistant inside shell3.
 })
 ```
 
-| key            | type   | notes                                                    |
-| -------------- | ------ | -------------------------------------------------------- |
-| `name`         | string | agent name (shown in the status line)                    |
-| `model`        | string | must match a declared `shell3.model` name                |
-| `prompt`       | string | the verbatim system prompt (see System prompt assembly)  |
-| `tools`        | table  | tool gate table (strict keys below)                      |
-| `skills`       | table  | list of skill handles                                    |
-| `on_tool_call` | table  | guard chain (see Guards)                                 |
+| key              | type   | notes                                                                |
+| ---------------- | ------ | -------------------------------------------------------------------- |
+| `name`           | string | agent name (shown in the status line)                                |
+| `model`          | string | must match a declared `shell3.model` name                            |
+| `prompt`         | string | the verbatim system prompt (see System prompt assembly)              |
+| `tools`          | table  | tool gate table (strict keys below)                                  |
+| `skills`         | table  | list of skill handles                                                |
+| `on_tool_call`   | table  | guard chain (see Guards)                                             |
+| `environment`    | bool   | inject the `## Environment` block (workdir/model/time); default off  |
+| `core_memories`  | bool   | inject the `## Core memories` block; default off                     |
+
+> All prompt-injection (`environment`, `core_memories`) and tool flags default off; a bare agent (`tools = {}` with no injection keys) is pure text — just its `prompt`, no tools.
 
 ---
 
 ## Tools
-
-### Always-on tools
-
-These are present in every session regardless of gates:
-
-- `prune_tool_result` — replace a prior tool result with a short stub to free
-  context. Scoped to the last 2 turns.
-- `compact_history` — compact the full conversation into a structured summary and
-  roll to a fresh session.
 
 ### The gate table (`tools = { ... }`)
 
 Each gate is a boolean (set `true` to enable). Strict keys — anything else is an
 error:
 
-| gate                | enables tool(s)                                   |
-| ------------------- | ------------------------------------------------- |
-| `bash`              | `bash` — non-interactive shell command            |
-| `bash_bg`           | `bash_bg` — detached background command           |
-| `shell_interactive` | `shell_interactive` — interactive TTY program     |
-| `edit`              | `edit_file` — exact-string-replacement file edits |
-| `memory`            | `memory_upsert`, `memory_list`, `memory_search`   |
-| `history`           | `history_get`, `history_search`                   |
-| `docs`              | `shell3_docs` — returns this document             |
-| `custom`            | list of `shell3.tool` handles to expose           |
-| `skill`             | set `false` to suppress the skill tool + index    |
+| gate                | enables tool(s)                                                        |
+| ------------------- | ---------------------------------------------------------------------- |
+| `bash`              | `bash` — non-interactive shell command                                 |
+| `bash_bg`           | `bash_bg` — detached background command                                |
+| `shell_interactive` | `shell_interactive` — interactive TTY program                          |
+| `edit`              | `edit_file` — exact-string-replacement file edits                      |
+| `memory`            | `memory_upsert`, `memory_list`, `memory_search`                        |
+| `history`           | `history_get`, `history_search`                                        |
+| `docs`              | `shell3_docs` — returns this document                                  |
+| `prune`             | `prune_tool_result` — replace a prior tool result with a stub (opt-in) |
+| `compact`           | `compact_history` — compact conversation into a summary (opt-in)       |
+| `custom`            | list of `shell3.tool` handles to expose                                |
+| `skill`             | set `false` to suppress the skill tool + index                         |
 
 ### Custom tools
 
@@ -347,8 +344,8 @@ The final system prompt is **assembled at runtime** — there are no Go-template
 variables in your `prompt`. shell3 concatenates, in order:
 
 1. The agent's verbatim `prompt` text.
-2. `## Environment` — auto-injected: Workdir, Model, Time.
-3. `## Core memories` — injected only when memory is enabled and core memories
+2. `## Environment` — injected only when `environment = true` on the agent: Workdir, Model, Time.
+3. `## Core memories` — injected only when `core_memories = true` on the agent and core memories
    exist (memories marked `core=true` via `memory_upsert`).
 4. `## Skills` — the skill index (name + description), injected only when the
    skill tool is active (≥1 skill and `tools.skill ≠ false`).

@@ -677,6 +677,9 @@ shell3.agent({
   name  = "base",
   model = "main",
 
+  environment   = true,
+  core_memories = true,
+
   prompt = base_prompt,
 
   tools = {
@@ -687,6 +690,8 @@ shell3.agent({
     memory            = true,
     history           = true,
     docs              = true,
+    prune             = true,
+    compact           = true,
     custom            = { web_fetch, brave_search },
   },
 
@@ -710,6 +715,10 @@ shell3.agent({
 shell3.agent({
   name  = "plan",
   model = "main",
+
+  environment   = true,
+  core_memories = true,
+
   prompt = base_prompt,
 
   tools = {
@@ -720,6 +729,8 @@ shell3.agent({
     memory            = true,
     history           = true,
     docs              = true,
+    prune             = true,
+    compact           = true,
     custom            = { web_fetch, brave_search },
   },
 

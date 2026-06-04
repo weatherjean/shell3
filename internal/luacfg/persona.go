@@ -18,8 +18,10 @@ func (c *LoadedConfig) BuildPersona(rd RuntimeData) string {
 	a := c.Active()
 	var b strings.Builder
 	b.WriteString(a.Prompt)
-	fmt.Fprintf(&b, "\n\n## Environment\n- Workdir: %s\n- Model: %s\n- Time: %s\n", rd.CWD, rd.Model, rd.Time)
-	if len(rd.CoreMemories) > 0 {
+	if a.Environment {
+		fmt.Fprintf(&b, "\n\n## Environment\n- Workdir: %s\n- Model: %s\n- Time: %s\n", rd.CWD, rd.Model, rd.Time)
+	}
+	if a.CoreMemories && len(rd.CoreMemories) > 0 {
 		b.WriteString("\n## Core memories\n")
 		for _, m := range rd.CoreMemories {
 			fmt.Fprintf(&b, "- %s: %s\n", m.Key, m.Value)

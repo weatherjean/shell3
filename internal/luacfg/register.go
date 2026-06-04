@@ -79,12 +79,14 @@ func (c *LoadedConfig) luaSkill(L *lua.LState) int {
 var toolKeys = map[string]bool{"name": true, "description": true, "parameters": true, "handler": true}
 
 var agentKeys = map[string]bool{
-	"name": true, "model": true, "prompt": true, "tools": true, "skills": true, "on_tool_call": true,
+	"name": true, "model": true, "prompt": true, "tools": true, "skills": true,
+	"on_tool_call": true, "environment": true, "core_memories": true,
 }
 
 var toolGateKeys = map[string]bool{
 	"bash": true, "bash_bg": true, "shell_interactive": true, "edit": true,
 	"memory": true, "history": true, "docs": true, "custom": true, "skill": true,
+	"prune": true, "compact": true,
 }
 
 func (c *LoadedConfig) luaTool(L *lua.LState) int {
@@ -127,6 +129,8 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 			L.RaiseError("agent %q: already declared (agent names must be unique)", a.Name)
 		}
 	}
+	a.Environment = optBool(opts, "environment")
+	a.CoreMemories = optBool(opts, "core_memories")
 	if sk, ok := opts.RawGetString("skills").(*lua.LTable); ok {
 		a.Skills = handleNames(sk, "__skill")
 	}
@@ -142,6 +146,8 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 			Memory:           optBool(tt, "memory"),
 			History:          optBool(tt, "history"),
 			Docs:             optBool(tt, "docs"),
+			Prune:            optBool(tt, "prune"),
+			Compact:          optBool(tt, "compact"),
 		}
 		if cu, ok := tt.RawGetString("custom").(*lua.LTable); ok {
 			a.CustomTools = handleNames(cu, "__tool")
