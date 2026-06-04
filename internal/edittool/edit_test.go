@@ -248,3 +248,37 @@ func numberedLines(n int) string {
 	}
 	return sb.String()
 }
+
+// TestEditFileOverwriteReadErrorReturned guards the create/overwrite branch
+// (oldString==""): if the existing file is stat-able and writable but NOT
+// readable, EditFile must return the read error rather than silently treating
+// oldContent as "" and reporting a spurious full-file-creation diff.
+//
+// A write-only file (mode 0200) isolates exactly this: os.ReadFile fails while
+// the subsequent os.WriteFile succeeds — so the unfixed code would swallow the
+// read error and return a successful Result whose stats wrongly count every new
+// line as an addition. The fix makes the read error surface instead.
+func TestEditFileOverwriteReadErrorReturned(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: mode 0200 is still readable, cannot inject read failure")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "writeonly.txt")
+	if err := os.WriteFile(path, []byte("old-a\nold-b\nold-c\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Write-only: read fails, but stat and the overwrite write still succeed.
+	if err := os.Chmod(path, 0o200); err != nil {
+		t.Fatal(err)
+	}
+	// Restore perms so t.TempDir cleanup can remove the file.
+	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+
+	res, err := EditFile(dir, "writeonly.txt", "", "new-1\nnew-2\n", false)
+	if err == nil {
+		t.Fatalf("expected read error, got nil (Result=%+v)", res)
+	}
+	if res.Additions != 0 || res.Deletions != 0 || res.NewContent != "" {
+		t.Fatalf("expected zero-value Result on error, got %+v", res)
+	}
+}

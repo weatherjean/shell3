@@ -40,7 +40,10 @@ func EditFile(workDir, filePath, oldString, newString string, replaceAll bool) (
 			if info.IsDir() {
 				return Result{}, fmt.Errorf("path is a directory: %s", abs)
 			}
-			raw, _ := os.ReadFile(abs)
+			raw, rerr := os.ReadFile(abs)
+			if rerr != nil {
+				return Result{}, rerr
+			}
 			oldContent = string(raw)
 			created = false
 			mode = info.Mode().Perm() // preserve the existing file's mode on overwrite (matches the str-replace branch)
