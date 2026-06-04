@@ -16,11 +16,17 @@ var skillTool = llm.ToolDefinition{
 }
 
 // ToolDefs returns the llm.ToolDefinition schema list for an agent: the
-// always-on built-ins (prune_tool_result, compact_history), the skill tool
-// when hasSkills is true, each gated built-in whose gate is enabled, plus
-// one definition per custom tool.
+// gated always-on tools (prune_tool_result, compact_history) when enabled,
+// the skill tool when hasSkills is true, each gated built-in whose gate is
+// enabled, plus one definition per custom tool.
 func ToolDefs(g ToolGates, custom []CustomTool, hasSkills bool) []llm.ToolDefinition {
-	defs := []llm.ToolDefinition{pruneToolResultTool, compactHistoryTool}
+	defs := []llm.ToolDefinition{}
+	if g.Prune {
+		defs = append(defs, pruneToolResultTool)
+	}
+	if g.Compact {
+		defs = append(defs, compactHistoryTool)
+	}
 	if hasSkills {
 		defs = append(defs, skillTool)
 	}

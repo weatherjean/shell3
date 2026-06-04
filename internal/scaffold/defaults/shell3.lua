@@ -687,6 +687,8 @@ shell3.agent({
     memory            = true,
     history           = true,
     docs              = true,
+    prune             = true,
+    compact           = true,
     custom            = { web_fetch, brave_search },
   },
 
@@ -720,6 +722,8 @@ shell3.agent({
     memory            = true,
     history           = true,
     docs              = true,
+    prune             = true,
+    compact           = true,
     custom            = { web_fetch, brave_search },
   },
 

@@ -34,3 +34,24 @@ shell3.agent({ name="bare", model="opus", prompt="p", tools={} })
 			bare.Environment, bare.CoreMemories, bare.Gates.Prune, bare.Gates.Compact)
 	}
 }
+
+func TestToolDefsGatesPruneCompact(t *testing.T) {
+	bare := ToolDefs(ToolGates{}, nil, false)
+	if len(bare) != 0 {
+		t.Fatalf("bare gates should yield 0 tool defs, got %d: %v", len(bare), bare)
+	}
+
+	with := ToolDefs(ToolGates{Prune: true, Compact: true}, nil, false)
+	names := make(map[string]bool, len(with))
+	for _, d := range with {
+		names[d.Name] = true
+	}
+	if !names["prune_tool_result"] || !names["compact_history"] {
+		t.Fatalf("Prune+Compact gates should expose both tools, got %v", names)
+	}
+
+	onlyPrune := ToolDefs(ToolGates{Prune: true}, nil, false)
+	if len(onlyPrune) != 1 || onlyPrune[0].Name != "prune_tool_result" {
+		t.Fatalf("Prune-only gate should yield exactly prune_tool_result, got %v", onlyPrune)
+	}
+}
