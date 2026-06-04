@@ -188,3 +188,142 @@ func TestEnsureGitignoreAppends(t *testing.T) {
 		t.Fatal("existing entries were lost")
 	}
 }
+
+// hasLine reports whether content contains want as its own whole trimmed line.
+func hasLine(content, want string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		if strings.TrimSpace(line) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// TestEnsureGitignoreWholeLineMatch verifies that a substring-but-not-whole-line
+// match (e.g. "*.reference") does not satisfy the ".ref" sentinel: the real
+// ".ref" rule must still be added as its own line. (F3)
+func TestEnsureGitignoreWholeLineMatch(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	cwd := filepath.Join(tmp, "project")
+	_ = os.MkdirAll(cwd, 0755)
+	g := paths.NewGlobal(home)
+	l := paths.NewLocal(cwd)
+	_ = bootstrap.EnsureGlobal(g)
+
+	_ = os.MkdirAll(l.Root, 0755)
+	// "*.reference" contains ".ref" as a substring but is not the .ref rule.
+	_ = os.WriteFile(filepath.Join(l.Root, ".gitignore"), []byte("*.reference\n"), 0644)
+
+	if _, err := bootstrap.EnsureProject(l, g, cwd); err != nil {
+		t.Fatalf("EnsureProject: %v", err)
+	}
+
+	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
+	content := string(gi)
+	if !hasLine(content, ".ref") {
+		t.Fatalf(".ref not added as its own line despite substring-only match:\n%s", content)
+	}
+	if !strings.Contains(content, "*.reference") {
+		t.Fatalf("existing *.reference entry was lost:\n%s", content)
+	}
+}
+
+// TestEnsureGitignoreBGJobs verifies bg.json is ignored locally and that
+// repeated runs do not duplicate either .ref or bg.json. (F4 + idempotency)
+func TestEnsureGitignoreBGJobs(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	cwd := filepath.Join(tmp, "project")
+	_ = os.MkdirAll(cwd, 0755)
+	g := paths.NewGlobal(home)
+	l := paths.NewLocal(cwd)
+	_ = bootstrap.EnsureGlobal(g)
+
+	if _, err := bootstrap.EnsureProject(l, g, cwd); err != nil {
+		t.Fatalf("EnsureProject: %v", err)
+	}
+	// Second run must not duplicate entries.
+	if _, err := bootstrap.EnsureProject(l, g, cwd); err != nil {
+		t.Fatalf("EnsureProject second call: %v", err)
+	}
+
+	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
+	content := string(gi)
+	if !hasLine(content, "bg.json") {
+		t.Fatalf("bg.json not present as its own line:\n%s", content)
+	}
+	if !hasLine(content, ".ref") {
+		t.Fatalf(".ref not present as its own line:\n%s", content)
+	}
+	if n := strings.Count(content, "bg.json"); n != 1 {
+		t.Errorf("bg.json appears %d times, want 1:\n%s", n, content)
+	}
+	if n := strings.Count(content, ".ref"); n != 1 {
+		t.Errorf(".ref appears %d times, want 1:\n%s", n, content)
+	}
+}
+
+// TestEnsureGitignoreNoTrailingNewline verifies that when the existing
+// .gitignore does NOT end in a newline, the appended entries are not glued
+// onto the final line: the leading-"\n" guard must insert a separator so the
+// last existing line and the first added line stay distinct. (no-newline branch)
+func TestEnsureGitignoreNoTrailingNewline(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	cwd := filepath.Join(tmp, "project")
+	_ = os.MkdirAll(cwd, 0755)
+	g := paths.NewGlobal(home)
+	l := paths.NewLocal(cwd)
+	_ = bootstrap.EnsureGlobal(g)
+
+	_ = os.MkdirAll(l.Root, 0755)
+	// No trailing newline: without the leading-"\n" guard, the first appended
+	// entry would be glued onto this line (e.g. "*.reference.ref").
+	_ = os.WriteFile(filepath.Join(l.Root, ".gitignore"), []byte("*.reference"), 0644)
+
+	if _, err := bootstrap.EnsureProject(l, g, cwd); err != nil {
+		t.Fatalf("EnsureProject: %v", err)
+	}
+
+	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
+	content := string(gi)
+	if strings.Contains(content, "reference.ref") {
+		t.Fatalf("appended entry glued onto newline-less final line:\n%s", content)
+	}
+	if !hasLine(content, ".ref") {
+		t.Fatalf(".ref not present as its own line:\n%s", content)
+	}
+	if !hasLine(content, "bg.json") {
+		t.Fatalf("bg.json not present as its own line:\n%s", content)
+	}
+}
+
+// TestEnsureGitignoreAddsMissingEntryIndependently verifies that when one
+// required entry already exists, the other is still added. (F4 interaction)
+func TestEnsureGitignoreAddsMissingEntryIndependently(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	cwd := filepath.Join(tmp, "project")
+	_ = os.MkdirAll(cwd, 0755)
+	g := paths.NewGlobal(home)
+	l := paths.NewLocal(cwd)
+	_ = bootstrap.EnsureGlobal(g)
+
+	_ = os.MkdirAll(l.Root, 0755)
+	// .ref already present as a whole line; bg.json must still be added.
+	_ = os.WriteFile(filepath.Join(l.Root, ".gitignore"), []byte(".ref\n"), 0644)
+
+	if _, err := bootstrap.EnsureProject(l, g, cwd); err != nil {
+		t.Fatalf("EnsureProject: %v", err)
+	}
+
+	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
+	content := string(gi)
+	if !hasLine(content, "bg.json") {
+		t.Fatalf("bg.json not added when .ref already present:\n%s", content)
+	}
+	if n := strings.Count(content, ".ref"); n != 1 {
+		t.Errorf(".ref duplicated: appears %d times:\n%s", n, content)
+	}
+}
