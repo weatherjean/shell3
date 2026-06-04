@@ -259,8 +259,8 @@ func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
 // goroutine and READS shared *chat.Config fields per event — e.g. cfg.Truncate
 // in renderToolResultBody and cfg.CustomToolNames in renderToolCallHeader — and
 // WRITES *lastUsage. The slash-command handlers in registerSlashCommands run on
-// the input-loop goroutine and MUTATE the same struct (/truncate, /model,
-// /clear, ...) and READ *lastUsage (/usage). There is deliberately NO mutex
+// the input-loop goroutine and MUTATE the same struct (/truncate, /agent,
+// /clear, ... — plus Tab agent switching) and READ *lastUsage (/usage). There is deliberately NO mutex
 // around cfg or lastUsage. This is race-free ONLY because of the busy-gate in
 // patchapp: App.handleEnter (internal/patchapp/editor.go) early-returns while
 // a.busy is true, so slash handlers (and SubmitFunc) cannot fire while a turn —
@@ -477,8 +477,8 @@ type slashTarget interface {
 // sess, and lastUsage so handlers can read and mutate session state.
 //
 // CONCURRENCY: these handlers mutate the shared *chat.Config (e.g. /truncate
-// writes cfg.Truncate; /model writes cfg.LLM/Params/StatusLine/ContextWindow;
-// /clear writes cfg.Personality.SystemPrompt) and read *lastUsage (/usage) with
+// writes cfg.Truncate; /agent writes cfg.LLM/Params/Personality/ToolGuard/
+// StatusLine/ContextWindow; /clear writes cfg.Personality.SystemPrompt) and read *lastUsage (/usage) with
 // NO mutex, even though drainTurn concurrently reads cfg/writes lastUsage from
 // another goroutine. This is safe ONLY because patchapp's busy-gate
 // (App.handleEnter in internal/patchapp/editor.go) refuses to dispatch any
