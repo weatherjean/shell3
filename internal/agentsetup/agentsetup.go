@@ -278,7 +278,7 @@ func (b *builder) assemble() (chat.Config, error) {
 }
 
 // buildClient constructs a streaming client plus its request params from a
-// configured model. Reused for the initial client and for /model switches.
+// configured model. Reused for the initial client and on each agent switch.
 func buildClient(md luacfg.Model) (chat.LLMClient, llm.RequestParams) {
 	cl := openai.NewClient(md.BaseURL, md.APIKey, md.ModelID)
 	rp := llm.RequestParams{
