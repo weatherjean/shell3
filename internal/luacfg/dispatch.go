@@ -64,6 +64,16 @@ func (c *LoadedConfig) runLuaGuard(ctx context.Context, fn *lua.LFunction, tool 
 	return parseAction(optStr(rt, "action")), optStr(rt, "reason"), nil
 }
 
+// toolContext returns the turn context stored on the VM by CallTool/runLuaGuard
+// (via L.SetContext), so IO bindings honor turn cancellation. On the top-level
+// DoFile path no context is set, so it falls back to context.Background().
+func toolContext(L *lua.LState) context.Context {
+	if ctx := L.Context(); ctx != nil {
+		return ctx
+	}
+	return context.Background()
+}
+
 func parseAction(s string) Decision {
 	switch s {
 	case "block":

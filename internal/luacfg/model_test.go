@@ -30,6 +30,19 @@ shell3.agent({ name="a", model="main", prompt="hi", tools={} })
 	}
 }
 
+func TestLoadModelDuplicateName(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "shell3.lua", `
+shell3.model("dup", { base_url="u", api_key="k", model="x" })
+shell3.model("dup", { base_url="u2", api_key="k2", model="x2" })
+shell3.agent({ name="a", model="dup", prompt="p", tools={} })
+`)
+	_, err := Load(dir+"/shell3.lua", dir)
+	if err == nil || !contains(err.Error(), `dup`) {
+		t.Fatalf("want duplicate-model error, got %v", err)
+	}
+}
+
 func TestLoadModelUnknownKey(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "shell3.lua", `shell3.model("m", { base_url="u", api_key="k", model="x", nope=1 })`)

@@ -47,6 +47,9 @@ func (c *LoadedConfig) luaModel(L *lua.LState) int {
 	if m.BaseURL == "" || m.APIKey == "" || m.ModelID == "" {
 		L.RaiseError("model %q: base_url, api_key, model are required", name)
 	}
+	if _, exists := c.Model(name); exists {
+		L.RaiseError("model %q: already declared (model names must be unique)", name)
+	}
 	if ex, ok := opts.RawGetString("extra").(*lua.LTable); ok {
 		m.Extra = tableToMap(ex)
 	}

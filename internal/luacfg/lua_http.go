@@ -43,7 +43,7 @@ func (c *LoadedConfig) httpExec(L *lua.LState, method, url string, o *lua.LTable
 	}
 	body := optStr(o, "body")
 
-	req, err := http.NewRequest(method, url, strings.NewReader(body))
+	req, err := http.NewRequestWithContext(toolContext(L), method, url, strings.NewReader(body))
 	if err != nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LString("error: " + err.Error()))
@@ -76,8 +76,12 @@ func (c *LoadedConfig) httpExec(L *lua.LState, method, url string, o *lua.LTable
 	res.RawSetString("body", lua.LString(string(raw)))
 	res.RawSetString("truncated", lua.LBool(truncated))
 	hdr := L.NewTable()
-	for k := range resp.Header {
-		hdr.RawSetString(strings.ToLower(k), lua.LString(resp.Header.Get(k)))
+	for k, vals := range resp.Header {
+		// Join multi-valued headers (Set-Cookie, repeated Link, etc.) so no
+		// values are dropped. The value stays a plain Lua string; for single-
+		// valued headers this equals the previous Get(k) behavior, so no
+		// in-repo consumer breaks.
+		hdr.RawSetString(strings.ToLower(k), lua.LString(strings.Join(vals, ", ")))
 	}
 	res.RawSetString("headers", hdr)
 	L.Push(res)

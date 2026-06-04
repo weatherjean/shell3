@@ -49,7 +49,7 @@ func (c *LoadedConfig) luaBash(L *lua.LState) int {
 	exit := 0
 
 	c.withIOUnlock(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+		ctx, cancel := context.WithTimeout(toolContext(L), time.Duration(timeout)*time.Second)
 		defer cancel()
 		ec := exec.CommandContext(ctx, "bash", "-c", cmd)
 		so, se := &captureBuf{}, &captureBuf{}
