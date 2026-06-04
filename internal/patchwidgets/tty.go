@@ -19,6 +19,14 @@ var ErrNoTTY = errors.New("patchwidgets: no controlling tty")
 type tty struct {
 	f        *os.File
 	oldState *term.State
+	// reader is the source readKey reads from. It defaults to f but may be
+	// overridden in tests with a bytes-backed or error-injecting reader.
+	reader io.Reader
+	// pending holds bytes read but not yet consumed by parseKey, so coalesced
+	// keystrokes (fast typing, key auto-repeat, a CSI sequence followed by a
+	// char) are returned one key at a time across successive readKey calls
+	// rather than dropped.
+	pending []byte
 }
 
 // openTTY opens /dev/tty and puts it in raw mode. The returned tty must
@@ -33,7 +41,9 @@ func openTTY() (*tty, error) {
 		_ = f.Close()
 		return nil, err
 	}
-	return &tty{f: f, oldState: state}, nil
+	t := &tty{f: f, oldState: state}
+	t.reader = f
+	return t, nil
 }
 
 // Close restores the original terminal state and closes the tty handle.
@@ -49,28 +59,56 @@ func (t *tty) Close() {
 
 // readKey reads one key event. If timeout > 0 and elapses with no key,
 // it returns (parsedKey{kind:keyTimeout}, nil). On EOF it returns
-// (parsedKey{kind:keyEOF}, io.EOF).
+// (parsedKey{kind:keyEOF}, io.EOF). Any other read failure is returned with
+// the underlying error so callers can distinguish a genuine I/O fault from a
+// normal end-of-input dismissal.
+//
+// Bytes read but not consumed by parseKey (coalesced keystrokes) are buffered
+// in t.pending and returned by subsequent calls, so no input is dropped.
 func (t *tty) readKey(timeout time.Duration) (parsedKey, error) {
-	buf := make([]byte, 32)
-	if timeout > 0 {
+	// Drain any buffered bytes from a previous read before touching the tty.
+	if len(t.pending) > 0 {
+		if k, consumed := parseKey(t.pending); consumed > 0 {
+			// Retaining t.pending's (small, 32-byte) backing array across
+			// keystrokes is intentional; correctness does not depend on it.
+			t.pending = t.pending[consumed:]
+			return k, nil
+		}
+		// Defensive: parseKey only returns consumed==0 on empty input, so with
+		// non-empty pending this should not fire today; the guard protects
+		// against a future parseKey that needs more bytes before deciding.
+	}
+
+	if timeout > 0 && t.f != nil {
 		_ = t.f.SetReadDeadline(time.Now().Add(timeout))
 		defer t.f.SetReadDeadline(time.Time{}) //nolint:errcheck
 	}
-	n, err := t.f.Read(buf)
-	if err != nil {
-		if isTimeout(err) {
-			return parsedKey{kind: keyTimeout}, nil
+
+	for {
+		buf := make([]byte, 32)
+		n, err := t.reader.Read(buf)
+		if err != nil {
+			if isTimeout(err) {
+				return parsedKey{kind: keyTimeout}, nil
+			}
+			if errors.Is(err, io.EOF) {
+				return parsedKey{kind: keyEOF}, io.EOF
+			}
+			return parsedKey{kind: keyEOF}, err
 		}
-		if errors.Is(err, io.EOF) {
+		if n == 0 {
 			return parsedKey{kind: keyEOF}, io.EOF
 		}
-		return parsedKey{kind: keyEOF}, err
+		t.pending = append(t.pending, buf[:n]...)
+		if k, consumed := parseKey(t.pending); consumed > 0 {
+			t.pending = t.pending[consumed:]
+			return k, nil
+		}
+		// Defensive: parseKey only returns consumed==0 on empty input, and
+		// pending is non-empty here (we just appended n>0 bytes), so this
+		// should not fire today; the guard protects against a future parseKey
+		// that needs more bytes before deciding, reading more rather than spin.
 	}
-	if n == 0 {
-		return parsedKey{kind: keyEOF}, io.EOF
-	}
-	k, _ := parseKey(buf[:n])
-	return k, nil
 }
 
 func isTimeout(err error) bool {

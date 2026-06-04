@@ -34,7 +34,9 @@ type parsedKey struct {
 
 // parseKey decodes one key from the head of data. Returns the parsed key
 // and the number of bytes consumed. Unknown sequences yield keyNone with
-// consumed=1 so callers advance and try again.
+// consumed=1 so callers advance and try again. Non-empty input always
+// consumes >=1 byte (only empty input yields consumed==0); readKey relies
+// on this for forward progress / loop termination.
 func parseKey(data []byte) (parsedKey, int) {
 	if len(data) == 0 {
 		return parsedKey{kind: keyNone}, 0

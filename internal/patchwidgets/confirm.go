@@ -1,6 +1,12 @@
 package patchwidgets
 
-import "github.com/weatherjean/shell3/internal/patchtui"
+import (
+	"errors"
+	"fmt"
+	"io"
+
+	"github.com/weatherjean/shell3/internal/patchtui"
+)
 
 // Confirm runs an interactive yes/no prompt. It blocks until the user
 // submits (Enter / y / n), cancels (Esc / Ctrl+C), or the timeout elapses.
@@ -38,7 +44,7 @@ func Confirm(spec ConfirmSpec) (Result, error) {
 			"  " + yesBtn + "    " + noBtn,
 			hintLine("y/n select", "tab toggle", "enter confirm", "esc cancel"),
 		}
-		paintFrame(t, r, frame)
+		paintFrame(r, frame)
 	}
 
 	render()
@@ -47,7 +53,10 @@ func Confirm(spec ConfirmSpec) (Result, error) {
 	for {
 		k, err := t.readKey(remaining(deadline))
 		if err != nil {
-			return eofResult(), nil
+			if errors.Is(err, io.EOF) {
+				return eofResult(), nil
+			}
+			return Result{}, fmt.Errorf("patchwidgets: read tty: %w", err)
 		}
 		switch k.kind {
 		case keyEnter:
