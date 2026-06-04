@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/weatherjean/shell3/internal/adapter/openai"
 	"github.com/weatherjean/shell3/internal/applog"
@@ -51,8 +50,6 @@ type builder struct {
 	log applog.Logger
 	lc  *luacfg.LoadedConfig
 	st  *store.Store
-
-	coreMemories []store.MemoryEntry
 
 	closers []func() // LIFO teardown stack
 }
@@ -135,12 +132,12 @@ func (b *builder) loadConfig() error {
 	return nil
 }
 
-// openStore opens the SQLite store when any agent gates memory or history, and
-// loads core memories. Both are non-fatal: a failure warns and proceeds.
+// openStore opens the SQLite store when any agent gates history. Non-fatal: a
+// failure warns and proceeds.
 func (b *builder) openStore() {
 	needsStore := false
 	for _, a := range b.lc.Agents() {
-		if a.Gates.Memory || a.Gates.History {
+		if a.Gates.History {
 			needsStore = true
 			break
 		}
@@ -150,14 +147,7 @@ func (b *builder) openStore() {
 			b.st = s
 			b.closers = append(b.closers, func() { _ = s.Close() })
 		} else {
-			b.log.Warn("open store failed — memory and history unavailable", "error", e)
-		}
-	}
-	if b.st != nil {
-		if mems, e := b.st.MemoryQuery(true, 0); e != nil {
-			b.log.Warn("load core memories failed", "error", e)
-		} else {
-			b.coreMemories = mems
+			b.log.Warn("open store failed — history unavailable", "error", e)
 		}
 	}
 }
@@ -181,12 +171,7 @@ func (b *builder) buildActiveRuntime() (chat.ActiveAgent, error) {
 		toolNames = append(toolNames, t.Name)
 	}
 
-	prompt := b.lc.BuildPersona(luacfg.RuntimeData{
-		Time:         time.Now().Format("Mon Jan 2 2006, 15:04 MST"),
-		CWD:          b.opts.CWD,
-		Model:        md.ModelID,
-		CoreMemories: b.coreMemories,
-	})
+	prompt := b.lc.BuildPersona()
 
 	customNames := make(map[string]bool, len(a.CustomTools))
 	for _, n := range a.CustomTools {
@@ -221,18 +206,11 @@ func (b *builder) buildActiveRuntime() (chat.ActiveAgent, error) {
 // assemble renders the active agent's runtime and builds the final chat.Config,
 // including the buildPrompt / switchAgent closures stored into it.
 func (b *builder) assemble() (chat.Config, error) {
-	// buildPrompt re-renders the active agent's system prompt with a fresh
-	// timestamp. Used by /clear (cfg.RefreshPrompt) so a new conversation
-	// re-stamps the clock against whatever agent is active at that moment.
+	// buildPrompt re-renders the active agent's system prompt. Used by /clear
+	// (cfg.RefreshPrompt) so a new conversation re-renders against whatever
+	// agent is active at that moment.
 	buildPrompt := func() string {
-		a := b.lc.Active()
-		md, _ := b.lc.Model(a.ModelName)
-		return b.lc.BuildPersona(luacfg.RuntimeData{
-			Time:         time.Now().Format("Mon Jan 2 2006, 15:04 MST"),
-			CWD:          b.opts.CWD,
-			Model:        md.ModelID,
-			CoreMemories: b.coreMemories,
-		})
+		return b.lc.BuildPersona()
 	}
 	switchAgent := func(name string) (chat.ActiveAgent, error) {
 		if _, err := b.lc.SwitchAgent(name); err != nil {

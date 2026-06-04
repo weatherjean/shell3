@@ -1,7 +1,7 @@
 // Package shell3 embeds the shell3 coding agent as a library. It exposes a
 // persistent multi-turn Session (the plugin equivalent of an open TUI) plus a
 // one-shot Run convenience, both streaming structured Events. The Session loads
-// the same shell3.lua config, store, memory, and persona as the CLI by building
+// the same shell3.lua config, store, and persona as the CLI by building
 // on internal/agentsetup. internal/chat, internal/persona, and internal/llm
 // are implementation details, not part of this package's public API.
 package shell3

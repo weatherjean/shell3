@@ -21,9 +21,9 @@ func dimLines(s string) string {
 	return strings.Join(lines, "\n")
 }
 
-func isMemoryHistoryTool(name string) bool {
+func isHistoryTool(name string) bool {
 	switch name {
-	case "memory_upsert", "memory_list", "memory_search", "history_get", "history_search":
+	case "history_get", "history_search":
 		return true
 	default:
 		return false
@@ -32,7 +32,7 @@ func isMemoryHistoryTool(name string) bool {
 
 // toolCallHeader formats the colored "#id → name(args)" header shown above a
 // tool's body in scrollback. Color picks reflect tool family: prune is pink,
-// user tools are violet, memory/history queries are blue, everything else is
+// user tools are violet, history queries are blue, everything else is
 // muted-green.
 func toolCallHeader(id, name, args string, isUserTool bool) string {
 	color := patchtui.MutedGreen
@@ -40,7 +40,7 @@ func toolCallHeader(id, name, args string, isUserTool bool) string {
 		color = patchtui.Pink
 	} else if isUserTool {
 		color = patchtui.Violet
-	} else if isMemoryHistoryTool(name) {
+	} else if isHistoryTool(name) {
 		color = patchtui.Blue
 	}
 

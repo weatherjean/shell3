@@ -42,9 +42,6 @@ func ToolDefs(g ToolGates, custom []CustomTool, hasSkills bool) []llm.ToolDefini
 	if g.Edit {
 		defs = append(defs, editFileTool)
 	}
-	if g.Memory {
-		defs = append(defs, memoryUpsertTool, memoryListTool, memorySearchTool)
-	}
 	if g.History {
 		defs = append(defs, historyGetTool, historySearchTool)
 	}
@@ -211,52 +208,6 @@ var editFileTool = llm.ToolDefinition{
 			"replace_all": map[string]any{"type": "boolean", "description": "Replace every occurrence (default false)"},
 		},
 		"required": []string{"file_path", "old_string", "new_string"},
-	},
-}
-
-var memoryUpsertTool = llm.ToolDefinition{
-	Name: "memory_upsert",
-	Description: "Insert, update, or delete a project memory entry. " +
-		"Pass an empty value to delete. " +
-		"Pass core=true to mark a fact important enough to be injected into every session prompt; " +
-		"omit core when updating to preserve its current setting.",
-	Parameters: map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"key":   map[string]any{"type": "string", "description": "Short unique key"},
-			"value": map[string]any{"type": "string", "description": "Content to remember; empty string deletes the entry"},
-			"core":  map[string]any{"type": "boolean", "description": "If true, memory is injected into the system prompt every session. Omit to preserve existing value."},
-		},
-		"required": []string{"key", "value"},
-	},
-}
-
-var memoryListTool = llm.ToolDefinition{
-	Name: "memory_list",
-	Description: "List project memory entries newest-first. No search — for that, use memory_search. " +
-		"Set core_only=true to restrict to memories marked core=true.",
-	Parameters: map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"core_only": map[string]any{"type": "boolean", "description": "Only return core memories"},
-			"limit":     map[string]any{"type": "integer", "description": "Maximum results (default 50)"},
-		},
-	},
-}
-
-var memorySearchTool = llm.ToolDefinition{
-	Name: "memory_search",
-	Description: "Full-text search project memories. Use `terms` as focused concepts, one per array element; do not pass whole sentences. " +
-		"Default match=any; use match=all only to narrow. Multi-word terms match as phrases.",
-	Parameters: map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"terms":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "One concept per element. Each becomes a quoted FTS5 phrase."},
-			"match":     map[string]any{"type": "string", "enum": []string{"any", "all"}, "description": "any = OR (default, broad recall); all = AND (narrow)."},
-			"core_only": map[string]any{"type": "boolean", "description": "Only search core memories"},
-			"limit":     map[string]any{"type": "integer", "description": "Maximum results (default 50)"},
-		},
-		"required": []string{"terms"},
 	},
 }
 

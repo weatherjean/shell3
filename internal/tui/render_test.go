@@ -7,14 +7,11 @@ import (
 	"github.com/weatherjean/shell3/internal/patchtui"
 )
 
-func TestIsMemoryHistoryTool(t *testing.T) {
+func TestIsHistoryTool(t *testing.T) {
 	tests := []struct {
 		name string
 		want bool
 	}{
-		{name: "memory_upsert", want: true},
-		{name: "memory_list", want: true},
-		{name: "memory_search", want: true},
 		{name: "history_get", want: true},
 		{name: "history_search", want: true},
 		{name: "prune_tool_result", want: false},
@@ -22,8 +19,8 @@ func TestIsMemoryHistoryTool(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		if got := isMemoryHistoryTool(tt.name); got != tt.want {
-			t.Errorf("isMemoryHistoryTool(%q) = %v, want %v", tt.name, got, tt.want)
+		if got := isHistoryTool(tt.name); got != tt.want {
+			t.Errorf("isHistoryTool(%q) = %v, want %v", tt.name, got, tt.want)
 		}
 	}
 }
@@ -37,7 +34,7 @@ func TestToolCallHeaderColorByCategory(t *testing.T) {
 		wantColor  string
 	}{
 		{name: "builtin", tool: "prune_tool_result", args: `{"tool_call_id":"1"}`, wantColor: patchtui.Pink},
-		{name: "memory", tool: "memory_search", args: `{"terms":["go"]}`, wantColor: patchtui.Blue},
+		{name: "history", tool: "history_search", args: `{"terms":["go"]}`, wantColor: patchtui.Blue},
 		{name: "user", tool: "brave_search", args: `{"query":"shell3"}`, isUserTool: true, wantColor: patchtui.Violet},
 	}
 

@@ -29,7 +29,7 @@ func writeTmpFile(t *testing.T, dir, name, body string) string {
 // TestLuacfgIntegration_GuardAndCustomTool loads a luacfg config and drives a
 // full chat turn through the pkg/chat turn loop using fakellm. It asserts:
 //   - A custom tool call returns the handler's string output.
-//   - A bash call with a dangerous command is blocked by confirm_dangerous.
+//   - A bash call with a dangerous command is blocked by a custom guard.
 func TestLuacfgIntegration_GuardAndCustomTool(t *testing.T) {
 	dir := t.TempDir()
 	writeTmpFile(t, dir, "shell3.lua", `
@@ -52,6 +52,14 @@ local greet = shell3.tool({
   end,
 })
 
+local function guard_block_rm(call)
+  local cmd = tostring((call.params or {}).command or "")
+  if cmd:match("rm") then
+    return { action = "block", reason = "blocked dangerous command" }
+  end
+  return { action = "allow" }
+end
+
 shell3.agent({
   name  = "test-agent",
   model = "m",
@@ -60,7 +68,7 @@ shell3.agent({
     bash   = true,
     custom = { greet },
   },
-  on_tool_call = { shell3.guards.confirm_dangerous{} },
+  on_tool_call = { guard_block_rm },
 })
 `)
 

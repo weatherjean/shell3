@@ -96,10 +96,10 @@ func TestBuild_MalformedConfig_Errors(t *testing.T) {
 	}
 }
 
-// writeConfigWithMemory writes a shell3.lua whose agent enables the memory
-// tool, so Build opens the store (Gates.Memory || Gates.History). Mirrors
-// writeMinimalConfig but flips tools = { memory = true }.
-func writeConfigWithMemory(t *testing.T, dir string) {
+// writeConfigWithHistory writes a shell3.lua whose agent enables the history
+// tool, so Build opens the store (Gates.History). Mirrors writeMinimalConfig
+// but flips tools = { history = true }.
+func writeConfigWithHistory(t *testing.T, dir string) {
 	t.Helper()
 	lua := `
 shell3.model("main", {
@@ -108,7 +108,7 @@ shell3.model("main", {
   model = "test-model",
   context_window = 1000,
 })
-shell3.agent({ name = "tester", model = "main", prompt = "you are a tester", tools = { memory = true } })
+shell3.agent({ name = "tester", model = "main", prompt = "you are a tester", tools = { history = true } })
 `
 	if err := os.WriteFile(filepath.Join(dir, "shell3.lua"), []byte(lua), 0o644); err != nil {
 		t.Fatal(err)
@@ -119,13 +119,13 @@ shell3.agent({ name = "tester", model = "main", prompt = "you are a tester", too
 }
 
 // TestBuild_WithStore_CleanupSafe characterizes the store-open path: with the
-// memory gate on, Build opens the store (cfg.Store != nil) and the returned
+// history gate on, Build opens the store (cfg.Store != nil) and the returned
 // cleanup closes it without panicking. Covers the store closer the gates-off
 // happy-path test skips.
 func TestBuild_WithStore_CleanupSafe(t *testing.T) {
 	tmp := t.TempDir()
 	home := t.TempDir()
-	writeConfigWithMemory(t, tmp)
+	writeConfigWithHistory(t, tmp)
 
 	cfg, cleanup, err := agentsetup.Build(agentsetup.Options{
 		ConfigPath: filepath.Join(tmp, "shell3.lua"),
@@ -137,7 +137,7 @@ func TestBuild_WithStore_CleanupSafe(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 	if cfg.Store == nil {
-		t.Fatal("expected store to be opened with the memory gate on")
+		t.Fatal("expected store to be opened with the history gate on")
 	}
 	cleanup() // closes store + lua + log; must not panic
 }

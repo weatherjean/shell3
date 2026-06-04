@@ -1,4 +1,4 @@
-// Package store provides a SQLite-backed store for memories, history, and sessions.
+// Package store provides a SQLite-backed store for history and sessions.
 package store
 
 import (
@@ -13,7 +13,7 @@ import (
 // ChunkSize is the number of history turns per chunk returned by HistoryGet.
 const ChunkSize = 25
 
-// Store wraps a SQLite database with tables for sessions, history, and memories.
+// Store wraps a SQLite database with tables for sessions and history.
 type Store struct{ db *sql.DB }
 
 // Open opens or creates the SQLite store at path and runs schema migrations.
@@ -63,225 +63,20 @@ func migrate(db *sql.DB) error {
 			role       UNINDEXED,
 			created_at UNINDEXED
 		)`,
-		`CREATE VIRTUAL TABLE IF NOT EXISTS memories USING fts5(
-			key,
-			value,
-			core       UNINDEXED,
-			updated_at UNINDEXED
-		)`,
+		// The memory feature was removed; drop any legacy table left in
+		// existing databases.
+		`DROP TABLE IF EXISTS memories`,
 	}
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
 			return fmt.Errorf("store: migrate: %w", err)
 		}
 	}
-	return migrateMemoriesAddCore(db)
-}
-
-// migrateMemoriesAddCore adds the `core` column to legacy memories tables
-// that predate the column. FTS5 has no ALTER ADD COLUMN, so we copy-rebuild.
-func migrateMemoriesAddCore(db *sql.DB) error {
-	rows, err := db.Query(`PRAGMA table_info(memories)`)
-	if err != nil {
-		return fmt.Errorf("store: inspect memories: %w", err)
-	}
-	hasCore := false
-	for rows.Next() {
-		var cid int
-		var name, ctype string
-		var notnull, pk int
-		var dflt sql.NullString
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			_ = rows.Close()
-			return fmt.Errorf("store: scan table_info: %w", err)
-		}
-		if name == "core" {
-			hasCore = true
-		}
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return fmt.Errorf("store: inspect memories: %w", err)
-	}
-	_ = rows.Close()
-	if hasCore {
-		return nil
-	}
-
-	tx, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("store: migrate memories: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	migration := []string{
-		`CREATE VIRTUAL TABLE memories_new USING fts5(
-			key,
-			value,
-			core       UNINDEXED,
-			updated_at UNINDEXED
-		)`,
-		`INSERT INTO memories_new(rowid, key, value, core, updated_at)
-			SELECT rowid, key, value, 0, updated_at FROM memories`,
-		`DROP TABLE memories`,
-		`ALTER TABLE memories_new RENAME TO memories`,
-	}
-	for _, s := range migration {
-		if _, err := tx.Exec(s); err != nil {
-			return fmt.Errorf("store: migrate memories: %w", err)
-		}
-	}
-	return tx.Commit()
+	return nil
 }
 
 // Close closes the underlying database connection.
 func (s *Store) Close() error { return s.db.Close() }
-
-// MemoryEntry is one memory record.
-type MemoryEntry struct {
-	Key       string
-	Value     string
-	Core      bool
-	UpdatedAt time.Time
-}
-
-// MemoryUpsert inserts or updates a memory entry.
-//
-//   - Empty value deletes any existing entry for key.
-//   - On insert, core defaults to false unless explicitly set.
-//   - On update, core is preserved unless explicitly set (pass *bool).
-//
-// memories is an FTS5 virtual table, which cannot carry a UNIQUE constraint on
-// key, so a single-statement upsert (ON CONFLICT / INSERT OR REPLACE) is not
-// available. The probe + delete + insert read-modify-write is instead wrapped
-// in one transaction so it is atomic against concurrent writers and crashes.
-func (s *Store) MemoryUpsert(key, value string, core *bool) error {
-	if key == "" {
-		return fmt.Errorf("store: memory upsert: empty key")
-	}
-	if value == "" {
-		if _, err := s.db.Exec(`DELETE FROM memories WHERE key = ?`, key); err != nil {
-			return fmt.Errorf("store: memory delete %q: %w", key, err)
-		}
-		return nil
-	}
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("store: memory upsert: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	var existingCore int
-	var existed bool
-	switch err := tx.QueryRow(`SELECT core FROM memories WHERE key = ?`, key).Scan(&existingCore); {
-	case err == sql.ErrNoRows:
-		existed = false
-	case err != nil:
-		return fmt.Errorf("store: memory probe %q: %w", key, err)
-	default:
-		existed = true
-	}
-
-	finalCore := 0
-	switch {
-	case core != nil && *core:
-		finalCore = 1
-	case core != nil && !*core:
-		finalCore = 0
-	case existed:
-		finalCore = existingCore
-	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := tx.Exec(`DELETE FROM memories WHERE key = ?`, key); err != nil {
-		return fmt.Errorf("store: memory delete: %w", err)
-	}
-	if _, err := tx.Exec(
-		`INSERT INTO memories(key, value, core, updated_at) VALUES(?, ?, ?, ?)`,
-		key, value, finalCore, now,
-	); err != nil {
-		return fmt.Errorf("store: memory insert: %w", err)
-	}
-	return tx.Commit()
-}
-
-// MemoryQuery lists memory entries newest-first. coreOnly filters to core
-// entries. limit caps results; pass <=0 for default 50. For full-text
-// search use MemorySearchExpr.
-func (s *Store) MemoryQuery(coreOnly bool, limit int) ([]MemoryEntry, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	var (
-		rows *sql.Rows
-		err  error
-	)
-	if coreOnly {
-		rows, err = s.db.Query(`
-			SELECT key, value, core, updated_at FROM memories
-			WHERE core = 1
-			ORDER BY updated_at DESC, rowid DESC
-			LIMIT ?
-		`, limit)
-	} else {
-		rows, err = s.db.Query(`
-			SELECT key, value, core, updated_at FROM memories
-			ORDER BY updated_at DESC, rowid DESC
-			LIMIT ?
-		`, limit)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("store: memory query: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	return scanMemoryRows(rows)
-}
-
-// MemorySearchExpr runs an FTS5 search over memories using a pre-built
-// MATCH expression (typically from BuildFTSExpr). Empty expr short-circuits
-// to a clean empty result.
-func (s *Store) MemorySearchExpr(expr string, coreOnly bool, limit int) ([]MemoryEntry, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	if expr == "" {
-		return nil, nil
-	}
-	q := `SELECT key, value, core, updated_at FROM memories WHERE memories MATCH ?`
-	if coreOnly {
-		q += ` AND core = 1`
-	}
-	q += ` ORDER BY rank LIMIT ?`
-	rows, err := s.db.Query(q, expr, limit)
-	if err != nil {
-		return nil, fmt.Errorf("store: memory search: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	return scanMemoryRows(rows)
-}
-
-func scanMemoryRows(rows *sql.Rows) ([]MemoryEntry, error) {
-	var results []MemoryEntry
-	for rows.Next() {
-		var e MemoryEntry
-		var coreInt int
-		var updatedAt string
-		if err := rows.Scan(&e.Key, &e.Value, &coreInt, &updatedAt); err != nil {
-			return nil, fmt.Errorf("store: memory scan: %w", err)
-		}
-		e.Core = coreInt != 0
-		// The store fully controls the write format (every write uses
-		// time.Now().UTC().Format(time.RFC3339)), so a parse error here can only
-		// mean the stored value was externally corrupted/hand-edited. In that
-		// case we deliberately fall back to the zero time.Time rather than fail
-		// the whole query. (Same rationale applies to the parses in HistoryGet
-		// and HistorySearchExpr below.)
-		e.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
-		results = append(results, e)
-	}
-	return results, rows.Err()
-}
 
 // StartSession inserts a new session row and returns its id.
 func (s *Store) StartSession() (int64, error) {
@@ -418,7 +213,7 @@ func (s *Store) HistoryGet(sessionID int64, chunk int) (HistoryGetResult, error)
 		t.SessionID = sessionID
 		t.Chunk = chunk
 		// Malformed stored timestamp deliberately falls back to zero time.Time
-		// (store-controlled write format; see scanMemoryRows).
+		// (store-controlled write format).
 		t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		turns = append(turns, t)
 	}
@@ -447,7 +242,7 @@ func (s *Store) HistoryGet(sessionID int64, chunk int) (HistoryGetResult, error)
 		Turns:         turns,
 	}
 	// Malformed stored timestamps deliberately fall back to zero time.Time
-	// (store-controlled write format; see scanMemoryRows).
+	// (store-controlled write format).
 	res.SessionStartedAt, _ = time.Parse(time.RFC3339, startedAt)
 	if endedAt.Valid {
 		res.SessionEndedAt, _ = time.Parse(time.RFC3339, endedAt.String)
@@ -495,7 +290,7 @@ func (s *Store) HistorySearchExpr(expr string, limit int) (HistorySearchResult, 
 			return HistorySearchResult{}, fmt.Errorf("store: history search: scan: %w", err)
 		}
 		// Malformed stored timestamp deliberately falls back to zero time.Time
-		// (store-controlled write format; see scanMemoryRows).
+		// (store-controlled write format).
 		t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		t.Chunk = int(earlier) / ChunkSize
 		hits = append(hits, t)

@@ -19,7 +19,7 @@ type Model struct {
 }
 
 type ToolGates struct {
-	Bash, BashBg, ShellInteractive, Edit, Memory, History, Docs, Prune, Compact bool
+	Bash, BashBg, ShellInteractive, Edit, History, Docs, Prune, Compact bool
 }
 
 type CustomTool struct {
@@ -30,17 +30,14 @@ type CustomTool struct {
 
 type Skill struct{ Name, Description, Body string }
 
-// GuardEntry is one middleware in the on_tool_call chain: either a Lua
-// function or a built-in guard identified by Builtin.
+// GuardEntry is one middleware in the on_tool_call chain: a Lua function that
+// inspects a tool call and returns an allow/block/cancel decision.
 type GuardEntry struct {
-	fn      *lua.LFunction
-	Builtin string // "" unless a shell3.guards.* handle
+	fn *lua.LFunction
 }
 
 type Agent struct {
 	Name, ModelName, Prompt string
-	Environment             bool // inject the "## Environment" block
-	CoreMemories            bool // inject the "## Core memories" block
 	Gates                   ToolGates
 	CustomTools             []string
 	Skills                  []string

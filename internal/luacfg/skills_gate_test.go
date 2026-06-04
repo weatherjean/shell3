@@ -26,7 +26,7 @@ shell3.agent({ name="a", model="m", prompt="p", tools={ skill=false }, skills={ 
 	}
 
 	// BuildPersona must NOT inject the ## Skills section.
-	persona := c.BuildPersona(RuntimeData{})
+	persona := c.BuildPersona()
 	if strings.Contains(persona, "## Skills") {
 		t.Error("BuildPersona injected '## Skills' but skills are disabled")
 	}
@@ -64,7 +64,7 @@ shell3.agent({ name="a", model="m", prompt="p", tools={}, skills={ s } })
 	}
 
 	// BuildPersona must inject the ## Skills section.
-	persona := c.BuildPersona(RuntimeData{})
+	persona := c.BuildPersona()
 	if !strings.Contains(persona, "## Skills") {
 		t.Error("BuildPersona did not inject '## Skills' but skills are enabled")
 	}

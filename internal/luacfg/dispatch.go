@@ -21,14 +21,7 @@ const (
 func (c *LoadedConfig) OnToolCall(ctx context.Context, tool string, params map[string]any) (Decision, string, error) {
 	// Snapshot the active agent's guard chain once; safe under the busy-gate.
 	for _, g := range c.Active().Guard {
-		var d Decision
-		var reason string
-		var err error
-		if g.Builtin != "" {
-			d, reason = runBuiltinGuard(g, tool, params)
-		} else {
-			d, reason, err = c.runLuaGuard(ctx, g.fn, tool, params)
-		}
+		d, reason, err := c.runLuaGuard(ctx, g.fn, tool, params)
 		if err != nil {
 			// A guard that errors at runtime (bug, corrupt guard, Lua
 			// exception) must fail closed: a safety guard exists to *block*

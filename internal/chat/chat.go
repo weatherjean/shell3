@@ -44,8 +44,8 @@ type ActiveAgent struct {
 type Config struct {
 	// LLM is the active streaming client.
 	LLM LLMClient
-	// Store persists conversation history and memory. Optional; nil keeps
-	// the session purely in-memory.
+	// Store persists conversation history. Optional; nil keeps the session
+	// purely in-memory.
 	Store *store.Store
 	// Personality is the loaded persona (system prompt, allowed tools).
 	Personality persona.Persona
@@ -121,9 +121,6 @@ func NewHandlers(cfg Config) map[string]ToolHandler {
 		EditHandler{},
 		PruneHandler{},
 		DocsHandler{docs: cfg.Docs},
-		StoreHandler{toolName: "memory_upsert"},
-		StoreHandler{toolName: "memory_list"},
-		StoreHandler{toolName: "memory_search"},
 		StoreHandler{toolName: "history_get"},
 		StoreHandler{toolName: "history_search"},
 	}

@@ -19,7 +19,7 @@ internal/scaffold/     embedded starter shell3.lua + .env template
 internal/adapter/openai/  OpenAI-compatible LLM adapter
 internal/paths/        global + local path resolution
 internal/ref/          project UUID (.shell3/.ref)
-internal/store/        SQLite memory/history
+internal/store/        SQLite history + sessions
 internal/skills/       skill loading + indexing
 internal/edittool/     edit_file tool implementation
 internal/bgjobs/       background job tracking (.shell3/bg.json)

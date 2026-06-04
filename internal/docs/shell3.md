@@ -176,7 +176,6 @@ You are an expert coding assistant inside shell3.
     bash_bg           = true,
     shell_interactive = true,
     edit              = true,
-    memory            = true,
     history           = true,
     docs              = true,
     custom            = { web_fetch, brave_search },
@@ -186,7 +185,6 @@ You are an expert coding assistant inside shell3.
   skills = { plan_skill, exec_skill },
 
   on_tool_call = {
-    shell3.guards.confirm_dangerous{ prompt = true },
     my_custom_guard,
   },
 })
@@ -200,10 +198,8 @@ You are an expert coding assistant inside shell3.
 | `tools`          | table  | tool gate table (strict keys below)                                  |
 | `skills`         | table  | list of skill handles                                                |
 | `on_tool_call`   | table  | guard chain (see Guards)                                             |
-| `environment`    | bool   | inject the `## Environment` block (workdir/model/time); default off  |
-| `core_memories`  | bool   | inject the `## Core memories` block; default off                     |
 
-> All prompt-injection (`environment`, `core_memories`) and tool flags default off; a bare agent (`tools = {}` with no injection keys) is pure text — just its `prompt`, no tools.
+> All tool flags default off; a bare agent (`tools = {}`) is pure text — just its `prompt`, no tools.
 
 ---
 
@@ -220,7 +216,6 @@ error:
 | `bash_bg`           | `bash_bg` — detached background command                                |
 | `shell_interactive` | `shell_interactive` — interactive TTY program                          |
 | `edit`              | `edit_file` — exact-string-replacement file edits                      |
-| `memory`            | `memory_upsert`, `memory_list`, `memory_search`                        |
 | `history`           | `history_get`, `history_search`                                        |
 | `docs`              | `shell3_docs` — returns this document                                  |
 | `prune`             | `prune_tool_result` — replace a prior tool result with a stub (opt-in) |
@@ -248,23 +243,7 @@ available.
 
 Guards are middleware that inspect each tool call before it runs. They are listed
 in `on_tool_call` and run **in order**; the first non-allow result
-short-circuits. Two kinds:
-
-### Built-in guard: `shell3.guards.confirm_dangerous`
-
-```lua
-shell3.guards.confirm_dangerous{ prompt = true }
-```
-
-Blocks shell tool calls (`bash`, `bash_bg`, `shell_interactive`) whose `command`
-matches a built-in denylist of dangerous patterns — e.g. `rm`, `sudo`,
-`git push --force`, `git reset --hard`, `mkfs`, `dd ... of=`, fork bombs,
-`DROP TABLE`, `docker ... prune`, pipe-to-shell (`curl ... | bash`), and more.
-Non-shell tools are always allowed.
-
-> **`prompt` is currently reserved/no-op.** A matched dangerous command is
-> **always blocked**; there is no interactive confirm yet. The block message is
-> `blocked dangerous command (confirm_dangerous guard)`.
+short-circuits.
 
 ### Custom guards (Lua functions)
 
@@ -344,10 +323,7 @@ The final system prompt is **assembled at runtime** — there are no Go-template
 variables in your `prompt`. shell3 concatenates, in order:
 
 1. The agent's verbatim `prompt` text.
-2. `## Environment` — injected only when `environment = true` on the agent: Workdir, Model, Time.
-3. `## Core memories` — injected only when `core_memories = true` on the agent and core memories
-   exist (memories marked `core=true` via `memory_upsert`).
-4. `## Skills` — the skill index (name + description), injected only when the
+2. `## Skills` — the skill index (name + description), injected only when the
    skill tool is active (≥1 skill and `tools.skill ≠ false`).
 
 Write your `prompt` as plain instructions; the engine appends the standard blocks.
@@ -469,7 +445,7 @@ cancel/eof.
 ├── shell3.log            # rotating app log (shell3.log.1 ... archives)
 └── projects/
     └── <uuid>/
-        ├── shell3.db     # SQLite: memory + history (lazy-created)
+        ├── shell3.db     # SQLite: history (lazy-created)
         └── meta.json     # project name + cwd
 ```
 
@@ -509,6 +485,6 @@ shell3 config is portable. To replicate your setup:
    `~/.shell3/` for a global config, or into the project directory).
 2. Run `shell3` — it bootstraps the rest.
 
-Everything under `~/.shell3/projects/` (the SQLite memory/history databases and
+Everything under `~/.shell3/projects/` (the SQLite history databases and
 project metadata) is **machine-local** and is not meant to travel; the global
 `.gitignore` excludes it, along with secrets and logs.

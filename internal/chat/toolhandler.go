@@ -29,7 +29,7 @@ type ToolHandler interface {
 // session's working message slices. Mutations to AllMsgs and SessMsgs
 // elements propagate to the caller's slices (PruneHandler relies on this).
 type ToolConfig struct {
-	// Store is the persistence layer for memory and history tools. May be nil.
+	// Store is the persistence layer for the history tools. May be nil.
 	Store *store.Store
 	// WorkDir is the working directory tools should resolve paths against.
 	WorkDir string

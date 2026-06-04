@@ -8,8 +8,6 @@ import (
 	"github.com/weatherjean/shell3/internal/store"
 )
 
-func boolPtr(b bool) *bool { return &b }
-
 func TestStore_Open(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
 	if err != nil {
@@ -30,103 +28,6 @@ func TestStore_Open_SerializesWriters(t *testing.T) {
 
 	if got := st.MaxOpenConns(); got != 1 {
 		t.Fatalf("MaxOpenConns: got %d, want 1", got)
-	}
-}
-
-func TestStore_MemoryUpsert_InsertAndUpdate(t *testing.T) {
-	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
-	defer func() { _ = st.Close() }()
-
-	if err := st.MemoryUpsert("k", "v1", nil); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.MemoryUpsert("k", "v2", nil); err != nil {
-		t.Fatal(err)
-	}
-	results, _ := st.MemoryQuery(false, 10)
-	if len(results) != 1 || results[0].Value != "v2" {
-		t.Fatalf("expected single row v2, got %+v", results)
-	}
-}
-
-func TestStore_MemoryUpsert_EmptyValueDeletes(t *testing.T) {
-	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
-	defer func() { _ = st.Close() }()
-
-	_ = st.MemoryUpsert("k", "v", nil)
-	if err := st.MemoryUpsert("k", "", nil); err != nil {
-		t.Fatal(err)
-	}
-	results, _ := st.MemoryQuery(false, 10)
-	if len(results) != 0 {
-		t.Fatalf("expected 0 rows after empty-value delete, got %d", len(results))
-	}
-}
-
-func TestStore_MemoryUpsert_CorePreservedOnUpdate(t *testing.T) {
-	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
-	defer func() { _ = st.Close() }()
-
-	_ = st.MemoryUpsert("k", "v1", boolPtr(true))
-	_ = st.MemoryUpsert("k", "v2", nil) // core omitted
-	results, _ := st.MemoryQuery(false, 10)
-	if len(results) != 1 || !results[0].Core {
-		t.Fatalf("expected core preserved on update, got %+v", results)
-	}
-}
-
-func TestStore_MemoryUpsert_CoreExplicitDemote(t *testing.T) {
-	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
-	defer func() { _ = st.Close() }()
-
-	_ = st.MemoryUpsert("k", "v1", boolPtr(true))
-	_ = st.MemoryUpsert("k", "v2", boolPtr(false))
-	results, _ := st.MemoryQuery(false, 10)
-	if len(results) != 1 || results[0].Core {
-		t.Fatalf("expected core=false after explicit demote, got %+v", results)
-	}
-}
-
-func TestStore_MemoryQuery_Search(t *testing.T) {
-	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
-	defer func() { _ = st.Close() }()
-
-	_ = st.MemoryUpsert("auth", "use JWT 1h expiry", nil)
-	_ = st.MemoryUpsert("deploy", "run migrations first", nil)
-
-	results, err := st.MemorySearchExpr(store.BuildFTSExpr([]string{"JWT"}, true), false, 5)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(results) == 0 || results[0].Key != "auth" {
-		t.Fatalf("expected auth result, got %+v", results)
-	}
-}
-
-func TestStore_MemoryQuery_CoreOnly(t *testing.T) {
-	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
-	defer func() { _ = st.Close() }()
-
-	_ = st.MemoryUpsert("c1", "core fact", boolPtr(true))
-	_ = st.MemoryUpsert("n1", "regular fact", nil)
-
-	results, _ := st.MemoryQuery(true, 10)
-	if len(results) != 1 || results[0].Key != "c1" {
-		t.Fatalf("expected only core entry, got %+v", results)
-	}
-}
-
-func TestStore_MemoryQuery_ListNewestFirst(t *testing.T) {
-	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
-	defer func() { _ = st.Close() }()
-
-	_ = st.MemoryUpsert("a", "1", nil)
-	_ = st.MemoryUpsert("b", "2", nil)
-	_ = st.MemoryUpsert("c", "3", nil)
-
-	results, _ := st.MemoryQuery(false, 10)
-	if len(results) != 3 || results[0].Key != "c" {
-		t.Fatalf("expected newest-first c,b,a, got %+v", results)
 	}
 }
 
@@ -265,23 +166,6 @@ func TestStore_HistorySearch_PunctuationSafe(t *testing.T) {
 	}
 }
 
-func TestStore_MemoryQuery_PunctuationSafe(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "x.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-	_ = st.MemoryUpsert("k", "JWT auth token spec", boolPtr(false))
-
-	res, err := st.MemorySearchExpr(store.BuildFTSExpr([]string{"JWT?"}, true), false, 5)
-	if err != nil {
-		t.Fatalf("query with `?` should not error: %v", err)
-	}
-	if len(res) == 0 {
-		t.Fatal("expected at least one hit for sanitized memory query")
-	}
-}
-
 func TestStore_HistorySearchExpr_OrAnd(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "x.db"))
 	if err != nil {
@@ -309,24 +193,5 @@ func TestStore_HistorySearchExpr_OrAnd(t *testing.T) {
 	}
 	if r2.TotalHits != 0 {
 		t.Fatalf("AND should match zero turns, got %d", r2.TotalHits)
-	}
-}
-
-func TestStore_MemorySearchExpr_Or(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "x.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-	_ = st.MemoryUpsert("a", "JWT auth", boolPtr(false))
-	_ = st.MemoryUpsert("b", "kafka pipeline", boolPtr(false))
-
-	expr := store.BuildFTSExpr([]string{"JWT", "kafka"}, false)
-	res, err := st.MemorySearchExpr(expr, false, 5)
-	if err != nil {
-		t.Fatalf("search: %v", err)
-	}
-	if len(res) != 2 {
-		t.Fatalf("OR should return 2 memories, got %d", len(res))
 	}
 }

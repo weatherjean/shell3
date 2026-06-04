@@ -20,7 +20,6 @@ func registerShell3(c *LoadedConfig) {
 	L.SetField(httpT, "get", L.NewFunction(c.luaHTTPGet))
 	L.SetField(httpT, "post", L.NewFunction(c.luaHTTPPost))
 	L.SetField(tbl, "http", httpT)
-	registerGuards(c, tbl)
 }
 
 var modelKeys = map[string]bool{
@@ -80,12 +79,12 @@ var toolKeys = map[string]bool{"name": true, "description": true, "parameters": 
 
 var agentKeys = map[string]bool{
 	"name": true, "model": true, "prompt": true, "tools": true, "skills": true,
-	"on_tool_call": true, "environment": true, "core_memories": true,
+	"on_tool_call": true,
 }
 
 var toolGateKeys = map[string]bool{
 	"bash": true, "bash_bg": true, "shell_interactive": true, "edit": true,
-	"memory": true, "history": true, "docs": true, "custom": true, "skill": true,
+	"history": true, "docs": true, "custom": true, "skill": true,
 	"prune": true, "compact": true,
 }
 
@@ -129,8 +128,6 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 			L.RaiseError("agent %q: already declared (agent names must be unique)", a.Name)
 		}
 	}
-	a.Environment = optBool(opts, "environment")
-	a.CoreMemories = optBool(opts, "core_memories")
 	if sk, ok := opts.RawGetString("skills").(*lua.LTable); ok {
 		a.Skills = handleNames(sk, "__skill")
 	}
@@ -143,7 +140,6 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 			BashBg:           optBool(tt, "bash_bg"),
 			ShellInteractive: optBool(tt, "shell_interactive"),
 			Edit:             optBool(tt, "edit"),
-			Memory:           optBool(tt, "memory"),
 			History:          optBool(tt, "history"),
 			Docs:             optBool(tt, "docs"),
 			Prune:            optBool(tt, "prune"),
@@ -158,13 +154,8 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 	}
 	if g, ok := opts.RawGetString("on_tool_call").(*lua.LTable); ok {
 		g.ForEach(func(_, v lua.LValue) {
-			switch x := v.(type) {
-			case *lua.LFunction:
-				a.Guard = append(a.Guard, GuardEntry{fn: x})
-			case *lua.LTable:
-				if b, ok := x.RawGetString("__guard").(lua.LString); ok {
-					a.Guard = append(a.Guard, GuardEntry{Builtin: string(b)})
-				}
+			if fn, ok := v.(*lua.LFunction); ok {
+				a.Guard = append(a.Guard, GuardEntry{fn: fn})
 			}
 		})
 	}

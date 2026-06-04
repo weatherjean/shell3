@@ -9,9 +9,9 @@ import (
 	"github.com/weatherjean/shell3/internal/store"
 )
 
-// StoreHandler implements memory and history built-in tools.
-// One struct, five tool names: memory_upsert, memory_list, memory_search,
-// history_get, history_search. Each instance handles one tool name.
+// StoreHandler implements the history built-in tools.
+// One struct, two tool names: history_get, history_search. Each instance
+// handles one tool name.
 type StoreHandler struct {
 	toolName string
 }
@@ -23,12 +23,6 @@ func (h StoreHandler) Execute(ctx context.Context, id string, args json.RawMessa
 		return fmt.Sprintf("error: store not available for tool %s", h.toolName), nil
 	}
 	switch h.toolName {
-	case "memory_upsert":
-		return storeMemoryUpsert(string(args), cfg.Store), nil
-	case "memory_list":
-		return storeMemoryList(string(args), cfg.Store), nil
-	case "memory_search":
-		return storeMemorySearch(string(args), cfg.Store), nil
 	case "history_get":
 		return storeHistoryGet(string(args), cfg.Store), nil
 	case "history_search":
@@ -36,88 +30,6 @@ func (h StoreHandler) Execute(ctx context.Context, id string, args json.RawMessa
 	default:
 		return fmt.Sprintf("unknown tool: %s", h.toolName), nil
 	}
-}
-
-func storeMemoryUpsert(rawArgs string, st *store.Store) string {
-	var args struct {
-		Key   string `json:"key"`
-		Value string `json:"value"`
-		Core  *bool  `json:"core"`
-	}
-	if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
-		return fmt.Sprintf("error: bad arguments: %v", err)
-	}
-	if args.Key == "" {
-		return "error: key required"
-	}
-	if err := st.MemoryUpsert(args.Key, args.Value, args.Core); err != nil {
-		return fmt.Sprintf("error: %v", err)
-	}
-	if args.Value == "" {
-		return "Removed: " + args.Key
-	}
-	if args.Core != nil && *args.Core {
-		return "Stored (core): " + args.Key
-	}
-	return "Stored: " + args.Key
-}
-
-func storeMemoryList(rawArgs string, st *store.Store) string {
-	var args struct {
-		CoreOnly bool `json:"core_only"`
-		Limit    int  `json:"limit"`
-	}
-	// Empty args is valid here (list all); only a non-empty malformed payload
-	// is a tool error. Mirrors the checked pattern in the other store handlers.
-	if strings.TrimSpace(rawArgs) != "" {
-		if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
-			return fmt.Sprintf("error: bad arguments: %v", err)
-		}
-	}
-	results, err := st.MemoryQuery(args.CoreOnly, args.Limit)
-	if err != nil {
-		return fmt.Sprintf("error: %v", err)
-	}
-	return renderMemoryEntries(results)
-}
-
-func storeMemorySearch(rawArgs string, st *store.Store) string {
-	var args struct {
-		Terms    []string `json:"terms"`
-		Match    string   `json:"match"`
-		CoreOnly bool     `json:"core_only"`
-		Limit    int      `json:"limit"`
-	}
-	if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
-		return fmt.Sprintf("error: bad arguments: %v", err)
-	}
-	if len(args.Terms) == 0 {
-		return "error: terms[] required (one concept per element)"
-	}
-	expr := store.BuildFTSExpr(args.Terms, args.Match == "all")
-	if expr == "" {
-		return "No memories found."
-	}
-	results, err := st.MemorySearchExpr(expr, args.CoreOnly, args.Limit)
-	if err != nil {
-		return fmt.Sprintf("error: %v", err)
-	}
-	return renderMemoryEntries(results)
-}
-
-func renderMemoryEntries(results []store.MemoryEntry) string {
-	if len(results) == 0 {
-		return "No memories found."
-	}
-	var sb strings.Builder
-	for _, r := range results {
-		marker := ""
-		if r.Core {
-			marker = " (core)"
-		}
-		fmt.Fprintf(&sb, "[%s%s]: %s\n", r.Key, marker, r.Value)
-	}
-	return sb.String()
 }
 
 func storeHistoryGet(rawArgs string, st *store.Store) string {
