@@ -310,22 +310,9 @@ func (s *Session) Close() error {
 // turnConfig derives the per-turn config from the current cfg. Built fresh each
 // turn so SwitchAgent's mutations to cfg take effect on the next Send.
 func (s *Session) turnConfig() chat.TurnConfig {
-	return chat.TurnConfig{
-		LLM:             s.cfg.LLM,
-		Personality:     s.cfg.Personality,
-		StatusLine:      s.cfg.StatusLine,
-		WorkDir:         s.cfg.WorkDir,
-		Store:           s.cfg.Store,
-		Handlers:        s.handlers,
-		Log:             chat.LogOrNoop(s.cfg.Log),
-		Headless:        true,
-		CustomTool:      s.cfg.CustomTool,
-		CustomToolNames: s.cfg.CustomToolNames,
-		ToolGuard:       s.cfg.ToolGuard,
-		ShellInteractive: func(ctx context.Context, cmd, workdir string) string {
-			return "error: interactive TTY not available in plugin mode"
-		},
-	}
+	return chat.NewTurnConfig(s.cfg, s.handlers, func(ctx context.Context, cmd, workdir string) string {
+		return "error: interactive TTY not available in plugin mode"
+	})
 }
 
 // Clear resets the conversation context (= /clear): drops all history and

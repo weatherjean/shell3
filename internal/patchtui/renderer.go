@@ -217,7 +217,7 @@ func (r *Renderer) Render(lines []string) {
 
 	sizeChanged := r.width != width || r.height != height
 	if !r.inited || sizeChanged {
-		r.fullRender(&buf, lines, sizeChanged)
+		r.fullRender(&buf, lines)
 	} else {
 		r.diffRender(&buf, lines)
 	}
@@ -337,7 +337,7 @@ func (r *Renderer) PrintAndRender(lines, frame []string) {
 	r.cursorRow = 0
 	r.width = width
 	r.height = height
-	r.fullRender(&buf, frame, false)
+	r.fullRender(&buf, frame)
 
 	if markerRow >= 0 && markerRow <= len(frame)-1 {
 		r.moveCursorTo(&buf, markerRow)
@@ -395,7 +395,7 @@ func (r *Renderer) Reset() {
 // cursor row. Callers are responsible for erasing any pre-existing live
 // frame (via Erase) before invoking this on a resize; fullRender never
 // emits a screen clear so scrollback above is preserved verbatim.
-func (r *Renderer) fullRender(buf *strings.Builder, lines []string, _ bool) {
+func (r *Renderer) fullRender(buf *strings.Builder, lines []string) {
 	buf.WriteString("\r")
 	for i, line := range lines {
 		if i > 0 {

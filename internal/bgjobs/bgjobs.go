@@ -138,9 +138,10 @@ func newID() (string, error) {
 	return "bg_" + hex.EncodeToString(b[:]), nil
 }
 
-// registryPath resolves the bg.json path for workdir.
+// registryPath resolves the bg.json path for workdir, via the shared paths
+// resolver so the location stays defined in one place (internal/paths).
 func registryPath(workdir string) string {
-	return filepath.Join(workdir, ".shell3", "bg.json")
+	return paths.NewLocal(workdir).BGJobs
 }
 
 // LoadRegistry reads bg.json from workdir. Missing file → empty registry.

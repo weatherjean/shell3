@@ -128,6 +128,29 @@ func NewHandlers(cfg Config) map[string]ToolHandler {
 	return m
 }
 
+// NewTurnConfig assembles a TurnConfig from a Config, the shared built-in
+// handler map, and the front-end's interactive-shell runner. The three
+// front-ends (TUI, stdout one-shot, embedded pkg/shell3) differ only in those
+// last two arguments and otherwise copy the same dozen fields from Config, so
+// this is the single place that copy lives. shellInteractive may be nil, in
+// which case shell_interactive tool calls return an "unavailable" error.
+func NewTurnConfig(cfg Config, handlers map[string]ToolHandler, shellInteractive func(ctx context.Context, cmd, workdir string) string) TurnConfig {
+	return TurnConfig{
+		LLM:              cfg.LLM,
+		Personality:      cfg.Personality,
+		StatusLine:       cfg.StatusLine,
+		WorkDir:          cfg.WorkDir,
+		Store:            cfg.Store,
+		Handlers:         handlers,
+		Log:              LogOrNoop(cfg.Log),
+		Headless:         cfg.Headless,
+		CustomTool:       cfg.CustomTool,
+		CustomToolNames:  cfg.CustomToolNames,
+		ToolGuard:        cfg.ToolGuard,
+		ShellInteractive: shellInteractive,
+	}
+}
+
 // OpenSink opens path for write+truncate (each run starts fresh) and returns
 // the sink and a cleanup closure. Returns (nil, no-op, nil) when path is empty.
 func OpenSink(path string) (*OutSink, func(), error) {

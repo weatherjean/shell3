@@ -2,31 +2,6 @@ package store
 
 import "strings"
 
-// sanitizeFTSQuery converts free-form user/model input into a safe FTS5
-// MATCH expression. Tokens (whitespace-separated) are wrapped in double
-// quotes so any FTS5-reserved characters inside (`?`, `:`, `-`, parens,
-// `*`, etc.) are treated as part of the token rather than as DSL syntax.
-// Embedded `"` is escaped as `""` per FTS5 string-literal rules.
-// Tokens consisting entirely of non-word characters are dropped.
-//
-// Examples:
-//
-//	"hello world"         → `"hello" "world"`
-//	"cobra colorful cli ?" → `"cobra" "colorful" "cli"`
-//	"a:b c-d"             → `"a:b" "c-d"`
-func sanitizeFTSQuery(q string) string {
-	var out []string
-	for _, tok := range strings.Fields(q) {
-		if !hasWordChar(tok) {
-			continue
-		}
-		// Escape internal double quotes per FTS5 grammar.
-		tok = strings.ReplaceAll(tok, `"`, `""`)
-		out = append(out, `"`+tok+`"`)
-	}
-	return strings.Join(out, " ")
-}
-
 // BuildFTSExpr converts a list of free-form search terms into a safe
 // FTS5 MATCH expression. Each term becomes a quoted phrase (so internal
 // punctuation, spaces, and FTS5-reserved chars are taken literally).

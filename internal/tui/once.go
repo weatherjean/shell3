@@ -23,22 +23,9 @@ func RunOnce(ctx context.Context, cfg chat.Config, input string) error {
 		sink.WriteStart(input, cfg.ModeLabel, model, cfg.OutPath, cfg.Headless)
 	}
 
-	tc := chat.TurnConfig{
-		LLM:             cfg.LLM,
-		Personality:     cfg.Personality,
-		StatusLine:      cfg.StatusLine,
-		WorkDir:         cfg.WorkDir,
-		Store:           cfg.Store,
-		Handlers:        chat.NewHandlers(cfg),
-		Log:             chat.LogOrNoop(cfg.Log),
-		Headless:        cfg.Headless,
-		CustomTool:      cfg.CustomTool,
-		CustomToolNames: cfg.CustomToolNames,
-		ToolGuard:       cfg.ToolGuard,
-		ShellInteractive: func(ctx context.Context, cmd, workdir string) string {
-			return "error: interactive TTY not available in headless mode"
-		},
-	}
+	tc := chat.NewTurnConfig(cfg, chat.NewHandlers(cfg), func(ctx context.Context, cmd, workdir string) string {
+		return "error: interactive TTY not available in headless mode"
+	})
 	go func() {
 		sess.Run(ctx, tc, input)
 		sess.CloseEvents()

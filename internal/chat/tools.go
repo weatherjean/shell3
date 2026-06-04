@@ -60,15 +60,7 @@ func handleCompactHistory(rawArgs string, st *store.Store, sess *Session, allMsg
 	if st != nil {
 		// Flush current session messages before wiping — saveHistory bails early
 		// after compact because prevLen > len(sess.messages), so we save here.
-		for _, m := range sess.messages {
-			switch m.Role {
-			case llm.RoleUser, llm.RoleAssistant:
-				appendHistory(st, lg, prevSessionID, string(m.Role), m.Content)
-				for _, tc := range m.ToolCalls {
-					appendHistory(st, lg, prevSessionID, "tool", toolCallSummary(tc))
-				}
-			}
-		}
+		flushMessages(st, lg, prevSessionID, sess.messages)
 		// Save the compact call itself as the final entry in the outgoing session.
 		appendHistory(st, lg, prevSessionID, "tool", "compact_history: "+rawArgs)
 		if err := st.EndSession(prevSessionID); err != nil {

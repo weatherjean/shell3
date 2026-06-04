@@ -427,7 +427,15 @@ func saveHistory(st *store.Store, lg applog.Logger, sess *Session, sessionID int
 		// (compact handler already wrote the summary to history directly).
 		return
 	}
-	for _, m := range sess.messages[from:] {
+	flushMessages(st, lg, sessionID, sess.messages[from:])
+}
+
+// flushMessages appends each user/assistant message in msgs to history under
+// sessionID, plus one summary row per tool call. Best-effort: appendHistory
+// logs any write failure rather than aborting. Shared by saveHistory (end of
+// turn) and handleCompactHistory (flushing the outgoing session before roll).
+func flushMessages(st *store.Store, lg applog.Logger, sessionID int64, msgs []llm.Message) {
+	for _, m := range msgs {
 		switch m.Role {
 		case llm.RoleUser, llm.RoleAssistant:
 			appendHistory(st, lg, sessionID, string(m.Role), m.Content)

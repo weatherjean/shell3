@@ -146,35 +146,22 @@ func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
 	// event) by Session.Run, so it completes before the embedder is told
 	// the turn is done.
 	buildTurnConfig := func() chat.TurnConfig {
-		return chat.TurnConfig{
-			LLM:             cfg.LLM,
-			Personality:     cfg.Personality,
-			StatusLine:      cfg.StatusLine,
-			WorkDir:         cfg.WorkDir,
-			Store:           cfg.Store,
-			Handlers:        handlers,
-			Log:             chat.LogOrNoop(cfg.Log),
-			Headless:        cfg.Headless,
-			CustomTool:      cfg.CustomTool,
-			CustomToolNames: cfg.CustomToolNames,
-			ToolGuard:       cfg.ToolGuard,
-			ShellInteractive: func(ctx context.Context, cmd, workdir string) string {
-				result := "(completed)"
-				app.WithReleasedTerminal(func() {
-					c := exec.Command("bash", "-c", cmd)
-					if workdir != "" {
-						c.Dir = workdir
-					}
-					c.Stdin = os.Stdin
-					c.Stdout = os.Stdout
-					c.Stderr = os.Stderr
-					if err := c.Run(); err != nil {
-						result = "error: " + err.Error()
-					}
-				})
-				return result
-			},
-		}
+		return chat.NewTurnConfig(cfg, handlers, func(ctx context.Context, cmd, workdir string) string {
+			result := "(completed)"
+			app.WithReleasedTerminal(func() {
+				c := exec.Command("bash", "-c", cmd)
+				if workdir != "" {
+					c.Dir = workdir
+				}
+				c.Stdin = os.Stdin
+				c.Stdout = os.Stdout
+				c.Stderr = os.Stderr
+				if err := c.Run(); err != nil {
+					result = "error: " + err.Error()
+				}
+			})
+			return result
+		})
 	}
 
 	launchTurn := func(userMsg llm.Message) {
