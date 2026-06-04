@@ -140,7 +140,7 @@ func (b *builder) loadConfig() error {
 	return nil
 }
 
-// resolveModel enumerates models for the (soon-to-be-removed) /model command.
+// resolveModel enumerates declared models for the /model command.
 func (b *builder) resolveModel() error {
 	for _, md := range b.lc.Models {
 		b.models = append(b.models, chat.ModelInfo{
@@ -159,6 +159,7 @@ func (b *builder) openStore() {
 	for _, a := range b.lc.Agents() {
 		if a.Gates.Memory || a.Gates.History {
 			needsStore = true
+			break
 		}
 	}
 	if needsStore {
@@ -204,6 +205,14 @@ func (b *builder) buildActiveRuntime() (chat.ActiveAgent, error) {
 		CoreMemories: b.coreMemories,
 	})
 
+	customNames := make(map[string]bool, len(a.CustomTools))
+	for _, n := range a.CustomTools {
+		customNames[n] = true
+	}
+	if hasSkills {
+		customNames["skill"] = true
+	}
+
 	return chat.ActiveAgent{
 		Personality: persona.Persona{
 			Name:         a.Name,
@@ -215,13 +224,14 @@ func (b *builder) buildActiveRuntime() (chat.ActiveAgent, error) {
 			d, r, e := b.lc.OnToolCall(ctx, t, p)
 			return int(d), r, e
 		},
-		ModeLabel:     a.Name,
-		ActiveSkills:  a.Skills,
-		ActiveTools:   toolNames,
-		LLM:           client,
-		Params:        rp,
-		ModelID:       md.ModelID,
-		ContextWindow: md.ContextWindow,
+		ModeLabel:       a.Name,
+		ActiveSkills:    a.Skills,
+		ActiveTools:     toolNames,
+		CustomToolNames: customNames,
+		LLM:             client,
+		Params:          rp,
+		ModelID:         md.ModelID,
+		ContextWindow:   md.ContextWindow,
 	}, nil
 }
 
@@ -261,16 +271,9 @@ func (b *builder) assemble() (chat.Config, error) {
 		return chat.Config{}, err
 	}
 
-	customNames := make(map[string]bool, len(b.lc.Active().CustomTools))
-	for _, n := range b.lc.Active().CustomTools {
-		customNames[n] = true
-	}
-	if b.lc.Active().SkillsActive() {
-		customNames["skill"] = true
-	}
-
-	agentNames := make([]string, 0)
-	for _, a := range b.lc.Agents() {
+	agents := b.lc.Agents()
+	agentNames := make([]string, 0, len(agents))
+	for _, a := range agents {
 		agentNames = append(agentNames, a.Name)
 	}
 
@@ -288,7 +291,7 @@ func (b *builder) assemble() (chat.Config, error) {
 		ContextWindow:   rt.ContextWindow,
 		Docs:            docs.Content,
 		CustomTool:      b.lc.CallTool,
-		CustomToolNames: customNames,
+		CustomToolNames: rt.CustomToolNames,
 		ToolGuard:       rt.ToolGuard,
 		Params:          rt.Params,
 		Log:             b.log,

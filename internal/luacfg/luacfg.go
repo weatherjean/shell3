@@ -120,6 +120,11 @@ func (c *LoadedConfig) Model(name string) (Model, bool) {
 	return Model{}, false
 }
 
+// Active/Agents/SwitchAgent guard activeIdx with c.mu for visibility, but
+// correctness also relies on the front-end busy-gate: SwitchAgent is only
+// called when no turn is in flight, so a tool call's guard chain (OnToolCall,
+// which snapshots the active agent) never races a switch mid-turn.
+
 // Active returns the currently selected agent.
 func (c *LoadedConfig) Active() Agent {
 	c.mu.Lock()

@@ -48,7 +48,10 @@ func TestSwitchAgentByName(t *testing.T) {
 shell3.agent({ name="build", model="opus",  prompt="b" })
 shell3.agent({ name="plan",  model="haiku", prompt="p" })
 `)
-	c, _ := Load(p, filepath.Dir(p))
+	c, err := Load(p, filepath.Dir(p))
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer c.Close()
 	a, err := c.SwitchAgent("plan")
 	if err != nil || a.Name != "plan" {

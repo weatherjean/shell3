@@ -52,10 +52,12 @@ type ActiveAgent struct {
 	ModeLabel     string
 	ActiveSkills  []string
 	ActiveTools   []string
-	LLM           LLMClient
-	Params        llm.RequestParams
-	ModelID       string
-	ContextWindow int
+	// CustomToolNames is the set of tool names routed to the custom-tool dispatcher.
+	CustomToolNames map[string]bool
+	LLM             LLMClient
+	Params          llm.RequestParams
+	ModelID         string
+	ContextWindow   int
 }
 
 // Config holds all dependencies for a chat session. It is the top-level
