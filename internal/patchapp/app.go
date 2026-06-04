@@ -21,8 +21,15 @@ type SubmitFunc func(input string)
 
 // editorState is the user-input cluster: the live line, cursor, the up-arrow
 // history-recall state machine, the incomplete-UTF8 carry, and bracketed-paste
-// buffering. All fields are guarded by App.mu (unchanged from when they lived
-// directly on App).
+// buffering.
+//
+// Locking is split into two groups:
+//   - input, cursor, history, historyIdx, historyDraft, historyInDraft are
+//     guarded by App.mu: they are mutated by the input handlers and read by
+//     render() (which runs under a.mu), so every access takes the lock.
+//   - inputPending, pasting, pasteBuf are owned exclusively by the single
+//     input-loop goroutine (processInput). They are NOT protected by a.mu and
+//     are safe only because nothing outside that one goroutine touches them.
 type editorState struct {
 	input  []rune
 	cursor int

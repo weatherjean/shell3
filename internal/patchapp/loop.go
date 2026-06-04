@@ -17,6 +17,13 @@ import (
 // Run takes over the terminal, prints the welcome message, and enters the
 // input loop. Returns when the user double-presses ctrl+c or ctx is done.
 func (a *App) Run(ctx context.Context) error {
+	// Derive a cancelable child context so every Run return path (exitFlag,
+	// double-ctrl+C, stdin EOF/read error — none of which cancel the caller's
+	// ctx) tears down tickerLoop and winchLoop via the deferred cancel.
+	// Otherwise those goroutines block forever on <-ctx.Done().
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
 		return fmt.Errorf("patchapp: enter raw mode: %w", err)
