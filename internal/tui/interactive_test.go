@@ -365,7 +365,7 @@ func (f *fakeSlashApp) handlerNames() []string {
 	return out
 }
 
-// fakeLLM is a no-op chat.LLMClient used as the switched-in client in /model
+// fakeLLM is a no-op chat.LLMClient used as the switched-in client in /agent
 // tests; identity is checked by pointer comparison.
 type fakeLLM struct{ id string }
 
@@ -375,36 +375,40 @@ func (f *fakeLLM) Stream(context.Context, []llm.Message, []llm.ToolDefinition, f
 
 // register sets up a fakeSlashApp with the chat command set, returning
 // it plus the cfg/sess/usage state the closures captured. The config is
-// seeded with two models and a stub SwitchModel so /model tests can run.
+// seeded with two agents and a stub SwitchAgent so /agent tests can run.
 func register() (*fakeSlashApp, *chat.Config, *chat.Session, *llm.Usage) {
 	app := &fakeSlashApp{}
 	cfg := &chat.Config{
 		StatusLine:  "anthropic │ claude-x",
+		ModeLabel:   "main",
 		Personality: persona.Persona{SystemPrompt: "be helpful"},
-		Models: []chat.ModelInfo{
-			{Name: "main", ModelID: "claude-x", ContextWindow: 200000},
-			{Name: "fast", ModelID: "claude-fast", ContextWindow: 64000},
-		},
-		SwitchModel: func(name string) (chat.ActiveModel, error) {
-			for _, mi := range []chat.ModelInfo{
-				{Name: "main", ModelID: "claude-x", ContextWindow: 200000},
-				{Name: "fast", ModelID: "claude-fast", ContextWindow: 64000},
-			} {
-				if mi.Name == name {
-					return chat.ActiveModel{
-						Client:        &fakeLLM{id: mi.ModelID},
-						Params:        llm.RequestParams{ReasoningEffort: "high"},
-						ModelID:       mi.ModelID,
-						ContextWindow: mi.ContextWindow,
-					}, nil
-				}
+		AgentNames:  []string{"main", "fast"},
+		SwitchAgent: func(name string) (chat.ActiveAgent, error) {
+			agents := map[string]chat.ActiveAgent{
+				"main": {
+					LLM:           &fakeLLM{id: "claude-x"},
+					Params:        llm.RequestParams{ReasoningEffort: "high"},
+					ModelID:       "claude-x",
+					ModeLabel:     "main",
+					ContextWindow: 200000,
+				},
+				"fast": {
+					LLM:           &fakeLLM{id: "claude-fast"},
+					Params:        llm.RequestParams{ReasoningEffort: "high"},
+					ModelID:       "claude-fast",
+					ModeLabel:     "fast",
+					ContextWindow: 64000,
+				},
 			}
-			return chat.ActiveModel{}, fmt.Errorf("unknown model %q", name)
+			if a, ok := agents[name]; ok {
+				return a, nil
+			}
+			return chat.ActiveAgent{}, fmt.Errorf("unknown agent %q", name)
 		},
 	}
 	sess := chat.NewSession(chat.SessionOpts{BufSize: 8})
 	usage := &llm.Usage{}
-	registerSlashCommands(app, cfg, sess, usage, func(llm.Message) {})
+	registerSlashCommands(app, cfg, sess, usage, func(llm.Message) {}, func(chat.ActiveAgent) {})
 	return app, cfg, sess, usage
 }
 
@@ -414,7 +418,7 @@ func mkToolMsg(id, name, content string) llm.Message {
 
 func TestSlash_RegistersExpectedCommands(t *testing.T) {
 	app, _, _, _ := register()
-	want := []string{"clear", "rollback", "prune", "usage", "prompt", "truncate", "model", "exit", "quit", "image"}
+	want := []string{"clear", "rollback", "prune", "usage", "prompt", "truncate", "agent", "exit", "quit", "image"}
 	for _, name := range want {
 		if _, ok := app.handlers[name]; !ok {
 			t.Errorf("missing handler: /%s", name)
@@ -549,9 +553,9 @@ func TestSlash_TruncateToggles(t *testing.T) {
 	}
 }
 
-func TestSlash_ModelList(t *testing.T) {
+func TestSlash_AgentList(t *testing.T) {
 	app, _, _, _ := register()
-	app.call(t, "model", "")
+	app.call(t, "agent", "")
 
 	var printed string
 	for _, c := range app.snapshot() {
@@ -560,61 +564,78 @@ func TestSlash_ModelList(t *testing.T) {
 		}
 	}
 	if printed == "" {
-		t.Fatalf("expected a Print listing models: %v", app.snapshot())
+		t.Fatalf("expected a Print listing agents: %v", app.snapshot())
 	}
-	// Both names listed, and the active model (matching StatusLine's claude-x) marked.
+	// Both agent names listed, and the active agent marked.
 	if !strings.Contains(printed, "main") || !strings.Contains(printed, "fast") {
-		t.Errorf("model names missing from list: %q", printed)
+		t.Errorf("agent names missing from list: %q", printed)
 	}
 	if !strings.Contains(printed, "(active)") {
 		t.Errorf("active marker missing: %q", printed)
 	}
 }
 
-func TestSlash_ModelSwitch(t *testing.T) {
-	app, cfg, _, _ := register()
-	app.call(t, "model", "fast")
+func TestSlash_AgentSwitch(t *testing.T) {
+	app := &fakeSlashApp{}
+	cfg := &chat.Config{
+		StatusLine:  "anthropic │ claude-x",
+		ModeLabel:   "main",
+		AgentNames:  []string{"main", "fast"},
+		SwitchAgent: func(name string) (chat.ActiveAgent, error) {
+			if name == "fast" {
+				return chat.ActiveAgent{
+					LLM:           &fakeLLM{id: "claude-fast"},
+					Params:        llm.RequestParams{ReasoningEffort: "high"},
+					ModelID:       "claude-fast",
+					ModeLabel:     "fast",
+					ContextWindow: 64000,
+				}, nil
+			}
+			return chat.ActiveAgent{}, fmt.Errorf("unknown agent %q", name)
+		},
+	}
+	sess := chat.NewSession(chat.SessionOpts{BufSize: 8})
+	var applied chat.ActiveAgent
+	registerSlashCommands(app, cfg, sess, &llm.Usage{}, func(llm.Message) {}, func(rt chat.ActiveAgent) {
+		applied = rt
+		cfg.LLM = rt.LLM
+		cfg.ModeLabel = rt.ModeLabel
+		cfg.ContextWindow = rt.ContextWindow
+		cfg.Params = rt.Params
+		cfg.StatusLine = fmt.Sprintf("%s │ %s", rt.ModeLabel, rt.ModelID)
+	})
+	app.call(t, "agent", "fast")
 
-	if _, ok := cfg.LLM.(*fakeLLM); !ok {
-		t.Fatalf("cfg.LLM not swapped to switched-in client: %T", cfg.LLM)
+	if applied.ModelID != "claude-fast" {
+		t.Errorf("applyAgent not called with fast agent: %+v", applied)
 	}
-	if cfg.ContextWindow != 64000 {
-		t.Errorf("context window not updated: %d", cfg.ContextWindow)
-	}
-	// Status line keeps the agent-name slot, swaps the model id, carries effort.
-	if cfg.StatusLine != "anthropic │ claude-fast │ high" {
-		t.Errorf("unexpected status line: %q", cfg.StatusLine)
-	}
-	if cfg.Params.ReasoningEffort != "high" {
-		t.Errorf("params not updated: %+v", cfg.Params)
-	}
-	if !containsAll(app.snapshot(), "SetStatus(", "SetContextWindow(64000)", "[model: fast → claude-fast]") {
-		t.Errorf("missing status/context/confirm calls: %v", app.snapshot())
+	if !containsAll(app.snapshot(), "[agent: fast]") {
+		t.Errorf("missing agent confirm: %v", app.snapshot())
 	}
 }
 
-func TestSlash_ModelUnknown(t *testing.T) {
+func TestSlash_AgentUnknown(t *testing.T) {
 	app, cfg, _, _ := register()
 	before := cfg.StatusLine
-	app.call(t, "model", "bogus")
+	app.call(t, "agent", "bogus")
 
-	if cfg.StatusLine != before || cfg.LLM != nil {
-		t.Errorf("state changed on unknown model: status=%q llm=%v", cfg.StatusLine, cfg.LLM)
+	if cfg.StatusLine != before {
+		t.Errorf("status changed on unknown agent: %q", cfg.StatusLine)
 	}
-	if !containsAll(app.snapshot(), "unknown model") {
-		t.Errorf("missing unknown-model error: %v", app.snapshot())
+	if !containsAll(app.snapshot(), "unknown agent") {
+		t.Errorf("missing unknown-agent error: %v", app.snapshot())
 	}
 }
 
-func TestSlash_ModelNoneConfigured(t *testing.T) {
+func TestSlash_AgentNoneConfigured(t *testing.T) {
 	app := &fakeSlashApp{}
 	cfg := &chat.Config{StatusLine: "anthropic │ claude-x"}
 	sess := chat.NewSession(chat.SessionOpts{BufSize: 8})
-	registerSlashCommands(app, cfg, sess, &llm.Usage{}, func(llm.Message) {})
-	app.call(t, "model", "fast")
+	registerSlashCommands(app, cfg, sess, &llm.Usage{}, func(llm.Message) {}, func(chat.ActiveAgent) {})
+	app.call(t, "agent", "fast")
 
-	if !containsAll(app.snapshot(), "[no models configured]") {
-		t.Errorf("want no-models message: %v", app.snapshot())
+	if !containsAll(app.snapshot(), "[no agents configured]") {
+		t.Errorf("want no-agents message: %v", app.snapshot())
 	}
 }
 

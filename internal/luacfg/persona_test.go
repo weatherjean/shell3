@@ -7,7 +7,7 @@ import (
 
 func TestBuildPersonaSystemPrompt(t *testing.T) {
 	c := &LoadedConfig{
-		Agent:  Agent{Name: "base", Prompt: "You are base.", Skills: []string{"web-search"}},
+		agents: []Agent{{Name: "base", Prompt: "You are base.", Skills: []string{"web-search"}}},
 		Skills: []Skill{{Name: "web-search", Description: "search the web", Body: "..."}},
 	}
 	rd := RuntimeData{Time: "Mon Jun 1", CWD: "/work", Model: "m-1"}

@@ -95,7 +95,7 @@ func usageEvent(k Kind, ev chat.Event) Event {
 // Session is a live, multi-turn conversation — the plugin equivalent of an open
 // TUI. It wraps one persistent chat.Session and the full agent config, and
 // streams a per-Send channel of translated Events. Drain a Send channel to
-// completion before the next Send/Clear/Rollback/SwitchModel.
+// completion before the next Send/Clear/Rollback/SwitchAgent.
 type Session struct {
 	cfg       chat.Config
 	sess      *chat.Session
@@ -232,7 +232,7 @@ func (s *Session) drain() {
 // closed after the turn's Done (or Error).
 //
 // Single-turn-at-a-time contract: the caller MUST drain the returned channel
-// to completion before calling Send, Clear, Rollback, or SwitchModel again.
+// to completion before calling Send, Clear, Rollback, or SwitchAgent again.
 // Those methods read and mutate unsynchronized session state (messages, cfg)
 // and assume exactly one turn is active; overlapping them is a data race, not
 // a supported concurrency mode.
@@ -306,7 +306,7 @@ func (s *Session) Close() error {
 }
 
 // turnConfig derives the per-turn config from the current cfg. Built fresh each
-// turn so SwitchModel's mutations to cfg take effect on the next Send.
+// turn so SwitchAgent's mutations to cfg take effect on the next Send.
 func (s *Session) turnConfig() chat.TurnConfig {
 	return chat.TurnConfig{
 		LLM:             s.cfg.LLM,
@@ -350,25 +350,42 @@ func (s *Session) Rollback() bool {
 	return true
 }
 
-// SwitchModel activates the configured model named name for subsequent Sends
-// (= /model <name>). Returns an error for an unknown model or when the config
-// declares no models. Call only between turns: it mutates cfg in place, which
-// the next Send's turnConfig reads, so drain any in-flight Send channel first
-// (see Send's contract).
-func (s *Session) SwitchModel(name string) error {
-	if s.cfg.SwitchModel == nil {
-		return fmt.Errorf("no models configured")
+// SwitchAgent activates the configured agent named name for subsequent Sends
+// (= the TUI's /agent <name> or Tab). Switching swaps the agent's model client,
+// system prompt, tool set, guard chain, custom-tool routing, skills, status
+// line, and context window while keeping conversation history. Returns an error
+// for an unknown agent or when the config declares no agents. Call only between
+// turns: it mutates cfg in place, which the next Send's turnConfig reads, so
+// drain any in-flight Send channel first (see Send's contract).
+func (s *Session) SwitchAgent(name string) error {
+	if s.cfg.SwitchAgent == nil {
+		return fmt.Errorf("no agents configured")
 	}
-	am, err := s.cfg.SwitchModel(name)
+	rt, err := s.cfg.SwitchAgent(name)
 	if err != nil {
 		return err
 	}
-	s.cfg.LLM = am.Client
-	s.cfg.Params = am.Params
-	s.cfg.ContextWindow = am.ContextWindow
-	s.cfg.StatusLine = fmt.Sprintf("%s │ %s", s.cfg.ModeLabel, am.ModelID)
+	s.cfg.LLM = rt.LLM
+	s.cfg.Personality = rt.Personality
+	s.cfg.Params = rt.Params
+	s.cfg.ToolGuard = rt.ToolGuard
+	s.cfg.ModeLabel = rt.ModeLabel
+	s.cfg.ActiveSkills = rt.ActiveSkills
+	s.cfg.ActiveTools = rt.ActiveTools
+	s.cfg.CustomToolNames = rt.CustomToolNames
+	s.cfg.ContextWindow = rt.ContextWindow
+	s.cfg.StatusLine = fmt.Sprintf("%s │ %s", rt.ModeLabel, rt.ModelID)
 	return nil
 }
+
+// AgentNames returns the configured agent names in declaration order — the set
+// SwitchAgent accepts. A caller can cycle (Tab-style) by finding ActiveAgent in
+// this list and switching to the next entry. Empty or single-element means no
+// switching is available.
+func (s *Session) AgentNames() []string { return s.cfg.AgentNames }
+
+// ActiveAgent returns the name of the currently active agent.
+func (s *Session) ActiveAgent() string { return s.cfg.ModeLabel }
 
 // Run is the one-shot convenience: Start, send spec.Prompt, stream the turn,
 // and Close when it drains. A non-nil error means startup failed.

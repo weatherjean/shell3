@@ -52,10 +52,6 @@ type builder struct {
 	lc  *luacfg.LoadedConfig
 	st  *store.Store
 
-	m            luacfg.Model
-	client       chat.LLMClient
-	rp           llm.RequestParams
-	models       []chat.ModelInfo
 	coreMemories []store.MemoryEntry
 
 	closers []func() // LIFO teardown stack
@@ -74,12 +70,13 @@ func Build(opts Options) (chat.Config, func(), error) {
 		b.closeAll()
 		return chat.Config{}, noop, err
 	}
-	if err := b.resolveModel(); err != nil {
+	b.openStore() // non-fatal; may push the store closer
+	cfg, err := b.assemble()
+	if err != nil {
 		b.closeAll()
 		return chat.Config{}, noop, err
 	}
-	b.openStore() // non-fatal; may push the store closer
-	return b.assemble(), b.closeAll, nil
+	return cfg, b.closeAll, nil
 }
 
 // closeAll runs the teardown stack in reverse-acquisition order.
@@ -138,29 +135,17 @@ func (b *builder) loadConfig() error {
 	return nil
 }
 
-// resolveModel resolves the agent's configured model, builds the initial client
-// and request params, and enumerates every model for the /model command.
-func (b *builder) resolveModel() error {
-	m, ok := b.lc.Model(b.lc.Agent.ModelName)
-	if !ok {
-		return fmt.Errorf("agent references unknown model %q", b.lc.Agent.ModelName)
-	}
-	b.m = m
-	b.client, b.rp = buildClient(m)
-	for _, md := range b.lc.Models {
-		b.models = append(b.models, chat.ModelInfo{
-			Name:          md.Name,
-			ModelID:       md.ModelID,
-			ContextWindow: md.ContextWindow,
-		})
-	}
-	return nil
-}
-
-// openStore opens the SQLite store when the agent gates memory or history, and
+// openStore opens the SQLite store when any agent gates memory or history, and
 // loads core memories. Both are non-fatal: a failure warns and proceeds.
 func (b *builder) openStore() {
-	if b.lc.Agent.Gates.Memory || b.lc.Agent.Gates.History {
+	needsStore := false
+	for _, a := range b.lc.Agents() {
+		if a.Gates.Memory || a.Gates.History {
+			needsStore = true
+			break
+		}
+	}
+	if needsStore {
 		if s, e := store.Open(b.proj.DB); e == nil {
 			b.st = s
 			b.closers = append(b.closers, func() { _ = s.Close() })
@@ -177,89 +162,123 @@ func (b *builder) openStore() {
 	}
 }
 
-// assemble renders the persona and builds the final chat.Config, including the
-// switchModel / buildPrompt / ToolGuard closures stored into it.
-func (b *builder) assemble() chat.Config {
-	// buildPrompt renders the system prompt with a fresh timestamp each call.
-	// Used once now for the initial prompt and again by /clear (via
-	// cfg.RefreshPrompt) so a new conversation re-stamps the clock.
-	buildPrompt := func() string {
-		return b.lc.BuildPersona(luacfg.RuntimeData{
-			Time:         time.Now().Format("Mon Jan 2 2006, 15:04 MST"),
-			CWD:          b.opts.CWD,
-			Model:        b.m.ModelID,
-			CoreMemories: b.coreMemories,
-		})
+// buildActiveRuntime assembles the full chat runtime for the currently active
+// agent: its model client, persona, tool defs, and guard closure. Called at
+// startup and on every agent switch.
+func (b *builder) buildActiveRuntime() (chat.ActiveAgent, error) {
+	a := b.lc.Active()
+	md, ok := b.lc.Model(a.ModelName)
+	if !ok {
+		return chat.ActiveAgent{}, fmt.Errorf("agent %q references unknown model %q", a.Name, a.ModelName)
 	}
-	// switchModel rebuilds the active client when the user switches by name.
-	switchModel := func(name string) (chat.ActiveModel, error) {
-		md, ok := b.lc.Model(name)
-		if !ok {
-			return chat.ActiveModel{}, fmt.Errorf("unknown model %q", name)
-		}
-		cl, p := buildClient(md)
-		return chat.ActiveModel{
-			Client:        cl,
-			Params:        p,
-			ModelID:       md.ModelID,
-			ContextWindow: md.ContextWindow,
-		}, nil
+	client, rp := buildClient(md)
+
+	customDefs := b.lc.CustomToolsFor(a.CustomTools)
+	hasSkills := a.SkillsActive()
+	toolDefs := luacfg.ToolDefs(a.Gates, customDefs, hasSkills)
+	toolNames := make([]string, 0, len(toolDefs))
+	for _, t := range toolDefs {
+		toolNames = append(toolNames, t.Name)
 	}
 
-	customDefs := b.lc.CustomToolsFor(b.lc.Agent.CustomTools)
-	hasSkills := b.lc.Agent.SkillsActive()
-	toolDefs := luacfg.ToolDefs(b.lc.Agent.Gates, customDefs, hasSkills)
+	prompt := b.lc.BuildPersona(luacfg.RuntimeData{
+		Time:         time.Now().Format("Mon Jan 2 2006, 15:04 MST"),
+		CWD:          b.opts.CWD,
+		Model:        md.ModelID,
+		CoreMemories: b.coreMemories,
+	})
 
-	pers := persona.Persona{
-		Name:         b.lc.Agent.Name,
-		SystemPrompt: buildPrompt(),
-		Tools:        toolDefs,
-		Parameters:   b.rp,
-	}
-
-	customNames := make(map[string]bool, len(b.lc.Agent.CustomTools))
-	for _, n := range b.lc.Agent.CustomTools {
+	customNames := make(map[string]bool, len(a.CustomTools))
+	for _, n := range a.CustomTools {
 		customNames[n] = true
 	}
 	if hasSkills {
 		customNames["skill"] = true
 	}
 
-	toolNames := make([]string, 0, len(toolDefs))
-	for _, t := range toolDefs {
-		toolNames = append(toolNames, t.Name)
-	}
-
-	return chat.Config{
-		LLM:             b.client,
-		Store:           b.st,
-		Personality:     pers,
-		RefreshPrompt:   buildPrompt,
-		WorkDir:         b.opts.CWD,
-		StatusLine:      fmt.Sprintf("%s │ %s", b.lc.Agent.Name, b.m.ModelID),
-		ModeLabel:       b.lc.Agent.Name,
-		ProjectRef:      b.uuid,
-		ActiveSkills:    b.lc.Agent.Skills,
-		ActiveTools:     toolNames,
-		ContextWindow:   b.m.ContextWindow,
-		Docs:            docs.Content,
-		CustomTool:      b.lc.CallTool,
-		CustomToolNames: customNames,
+	return chat.ActiveAgent{
+		Personality: persona.Persona{
+			Name:         a.Name,
+			SystemPrompt: prompt,
+			Tools:        toolDefs,
+			Parameters:   rp,
+		},
 		ToolGuard: func(ctx context.Context, t string, p map[string]any) (int, string, error) {
 			d, r, e := b.lc.OnToolCall(ctx, t, p)
 			return int(d), r, e
 		},
-		Params:      b.rp,
-		Log:         b.log,
-		OutPath:     b.opts.OutPath,
-		Headless:    b.opts.Headless,
-		Models:      b.models,
-		SwitchModel: switchModel,
+		ModeLabel:       a.Name,
+		ActiveSkills:    a.Skills,
+		ActiveTools:     toolNames,
+		CustomToolNames: customNames,
+		LLM:             client,
+		Params:          rp,
+		ModelID:         md.ModelID,
+		ContextWindow:   md.ContextWindow,
+	}, nil
+}
+
+// assemble renders the active agent's runtime and builds the final chat.Config,
+// including the buildPrompt / switchAgent closures stored into it.
+func (b *builder) assemble() (chat.Config, error) {
+	// buildPrompt re-renders the active agent's system prompt with a fresh
+	// timestamp. Used by /clear (cfg.RefreshPrompt) so a new conversation
+	// re-stamps the clock against whatever agent is active at that moment.
+	buildPrompt := func() string {
+		a := b.lc.Active()
+		md, _ := b.lc.Model(a.ModelName)
+		return b.lc.BuildPersona(luacfg.RuntimeData{
+			Time:         time.Now().Format("Mon Jan 2 2006, 15:04 MST"),
+			CWD:          b.opts.CWD,
+			Model:        md.ModelID,
+			CoreMemories: b.coreMemories,
+		})
 	}
+	switchAgent := func(name string) (chat.ActiveAgent, error) {
+		if _, err := b.lc.SwitchAgent(name); err != nil {
+			return chat.ActiveAgent{}, err
+		}
+		return b.buildActiveRuntime()
+	}
+
+	rt, err := b.buildActiveRuntime()
+	if err != nil {
+		return chat.Config{}, err
+	}
+
+	agents := b.lc.Agents()
+	agentNames := make([]string, 0, len(agents))
+	for _, a := range agents {
+		agentNames = append(agentNames, a.Name)
+	}
+
+	return chat.Config{
+		LLM:             rt.LLM,
+		Store:           b.st,
+		Personality:     rt.Personality,
+		RefreshPrompt:   buildPrompt,
+		WorkDir:         b.opts.CWD,
+		StatusLine:      fmt.Sprintf("%s │ %s", rt.ModeLabel, rt.ModelID),
+		ModeLabel:       rt.ModeLabel,
+		ProjectRef:      b.uuid,
+		ActiveSkills:    rt.ActiveSkills,
+		ActiveTools:     rt.ActiveTools,
+		ContextWindow:   rt.ContextWindow,
+		Docs:            docs.Content,
+		CustomTool:      b.lc.CallTool,
+		CustomToolNames: rt.CustomToolNames,
+		ToolGuard:       rt.ToolGuard,
+		Params:          rt.Params,
+		Log:             b.log,
+		OutPath:         b.opts.OutPath,
+		Headless:        b.opts.Headless,
+		AgentNames:      agentNames,
+		SwitchAgent:     switchAgent,
+	}, nil
 }
 
 // buildClient constructs a streaming client plus its request params from a
-// configured model. Reused for the initial client and for /model switches.
+// configured model. Reused for the initial client and on each agent switch.
 func buildClient(md luacfg.Model) (chat.LLMClient, llm.RequestParams) {
 	cl := openai.NewClient(md.BaseURL, md.APIKey, md.ModelID)
 	rp := llm.RequestParams{

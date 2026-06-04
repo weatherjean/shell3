@@ -62,6 +62,13 @@ func TestProcessInput_SplitUTF8AndPasteEnd(t *testing.T) {
 	}
 }
 
+func TestParseTab(t *testing.T) {
+	k, used := parseInput([]byte{9})
+	if k.kind != keyTab || used != 1 {
+		t.Fatalf("parseInput(Tab) = %v, %d; want keyTab, 1", k.kind, used)
+	}
+}
+
 type discardWriter struct{}
 
 func (discardWriter) Write(p []byte) (int, error) { return len(p), nil }

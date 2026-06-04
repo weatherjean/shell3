@@ -22,6 +22,7 @@ const (
 	keyNone keyKind = iota
 	keyChar
 	keyEnter
+	keyTab
 	keyAltEnter
 	keyBackspace
 	keyEscape
@@ -80,6 +81,9 @@ func parseInput(data []byte) (parsedKey, int) {
 	}
 	if b == 127 || b == 8 {
 		return parsedKey{kind: keyBackspace}, 1
+	}
+	if b == 9 {
+		return parsedKey{kind: keyTab}, 1
 	}
 
 	// Esc or Esc-prefixed sequence.

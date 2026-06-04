@@ -85,6 +85,14 @@ func (a *App) processInput(data []byte) (exit bool) {
 			}
 		case keyEnter:
 			a.handleEnter()
+		case keyTab:
+			a.mu.Lock()
+			busy := a.busy
+			fn := a.onTab
+			a.mu.Unlock()
+			if !busy && fn != nil {
+				fn()
+			}
 		case keyAltEnter:
 			a.mu.Lock()
 			if !a.busy {

@@ -19,7 +19,8 @@ const (
 
 // OnToolCall runs the guard chain in order; first non-allow short-circuits.
 func (c *LoadedConfig) OnToolCall(ctx context.Context, tool string, params map[string]any) (Decision, string, error) {
-	for _, g := range c.Agent.Guard {
+	// Snapshot the active agent's guard chain once; safe under the busy-gate.
+	for _, g := range c.Active().Guard {
 		var d Decision
 		var reason string
 		var err error

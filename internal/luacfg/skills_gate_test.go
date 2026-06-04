@@ -21,7 +21,7 @@ shell3.agent({ name="a", model="m", prompt="p", tools={ skill=false }, skills={ 
 	defer c.Close()
 
 	// SkillsActive() must be false when skill=false is set.
-	if c.Agent.SkillsActive() {
+	if c.Active().SkillsActive() {
 		t.Error("SkillsActive() = true, want false when tools.skill=false")
 	}
 
@@ -35,7 +35,7 @@ shell3.agent({ name="a", model="m", prompt="p", tools={ skill=false }, skills={ 
 	}
 
 	// ToolDefs must NOT include the "skill" tool when SkillsActive() is false.
-	defs := ToolDefs(c.Agent.Gates, nil, c.Agent.SkillsActive())
+	defs := ToolDefs(c.Active().Gates, nil, c.Active().SkillsActive())
 	for _, d := range defs {
 		if d.Name == "skill" {
 			t.Error("ToolDefs included 'skill' tool but skills are disabled")
@@ -59,7 +59,7 @@ shell3.agent({ name="a", model="m", prompt="p", tools={}, skills={ s } })
 	defer c.Close()
 
 	// SkillsActive() must be true when skill key is absent.
-	if !c.Agent.SkillsActive() {
+	if !c.Active().SkillsActive() {
 		t.Error("SkillsActive() = false, want true when skill key is absent from tools")
 	}
 
@@ -73,7 +73,7 @@ shell3.agent({ name="a", model="m", prompt="p", tools={}, skills={ s } })
 	}
 
 	// ToolDefs must include the "skill" tool.
-	defs := ToolDefs(c.Agent.Gates, nil, c.Agent.SkillsActive())
+	defs := ToolDefs(c.Active().Gates, nil, c.Active().SkillsActive())
 	found := false
 	for _, d := range defs {
 		if d.Name == "skill" {
@@ -101,7 +101,7 @@ shell3.agent({ name="a", model="m", prompt="p", tools={ skill=true }, skills={ s
 	}
 	defer c.Close()
 
-	if !c.Agent.SkillsActive() {
+	if !c.Active().SkillsActive() {
 		t.Error("SkillsActive() = false, want true when tools.skill=true")
 	}
 }

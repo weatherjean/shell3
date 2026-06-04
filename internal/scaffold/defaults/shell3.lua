@@ -612,11 +612,7 @@ end
 -- Agent
 -- ---------------------------------------------------------------------------
 
-shell3.agent({
-  name  = "base",
-  model = "main",
-
-  prompt = [[
+local base_prompt = [[
 You are an expert coding assistant inside shell3. Work autonomously as a senior pair-programmer: inspect, edit, test, and summarize clearly.
 
 ## Default workflow
@@ -675,13 +671,52 @@ When a skill applies, read its body and follow it:
 - `codebase-discovery`: for non-obvious code navigation.
 - `web-search`: for current or external information.
 - `spawning-subagents`: to delegate independent sub-tasks.
-]],
+]]
+
+shell3.agent({
+  name  = "base",
+  model = "main",
+
+  prompt = base_prompt,
 
   tools = {
     bash              = true,
     bash_bg           = true,
     shell_interactive = true,
     edit              = true,
+    memory            = true,
+    history           = true,
+    docs              = true,
+    custom            = { web_fetch, brave_search },
+  },
+
+  skills = {
+    skill_writing_plans,
+    skill_executing_plans,
+    skill_codebase_discovery,
+    skill_web_search,
+    skill_spawning_subagents,
+  },
+
+  on_tool_call = {
+    guard_dangerous,
+    guard_no_env_edit,
+  },
+})
+
+-- Read-only "plan" companion. Same model, prompt, skills, and guards as `base`,
+-- but file edits are disabled so it investigates and proposes rather than
+-- changing files. Switch between agents with Tab (when idle) or `/agent`.
+shell3.agent({
+  name  = "plan",
+  model = "main",
+  prompt = base_prompt,
+
+  tools = {
+    bash              = true,
+    bash_bg           = false,
+    shell_interactive = true,
+    edit              = false,
     memory            = true,
     history           = true,
     docs              = true,

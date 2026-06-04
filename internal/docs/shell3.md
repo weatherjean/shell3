@@ -100,8 +100,9 @@ shell3.model("main", {
 | `temperature`    | number  | sampling temperature                                          |
 | `extra`          | table   | free-form vendor map sent as extra JSON fields (see Models)   |
 
-You may declare multiple models; the agent picks one by name, and you can switch
-at runtime with `/model`.
+You may declare multiple models; each agent picks one by name. To change models
+at runtime, declare multiple agents (each with its own `model`) and switch
+between them with Tab or `/agent` — see `shell3.agent`.
 
 ### `shell3.skill(opts)`
 
@@ -154,7 +155,12 @@ handler helpers (`shell3.bash`, `shell3.http.*`, `shell3.urlencode`,
 
 ### `shell3.agent(opts)`
 
-Declares the single agent. Exactly one agent must be declared.
+Declares an agent. At least one agent must be declared; call `shell3.agent`
+multiple times to register several. Agents accumulate in declaration order and
+the **first declared is active** at startup. At runtime, switch the active agent
+with **Tab** (when idle) or `/agent <name>`; switching swaps the agent's model,
+prompt, tools, guards, and skills while keeping conversation history. Agent
+names must be unique. A single-agent config behaves exactly as before.
 
 ```lua
 shell3.agent({
@@ -409,7 +415,7 @@ In the interactive TUI, type `/` to see commands. The registered commands:
 | `/prompt`     | dump the system prompt and active tools                           |
 | `/truncate`   | toggle truncated bash output                                      |
 | `/parameters [name value]` | list or set tunable params (e.g. `reasoning_effort`) |
-| `/model [name]` | list configured models, or switch the active model              |
+| `/agent [name]` | list configured agents, or switch the active agent (also Tab)     |
 | `/info`       | session details: agent, project, skills, tools                    |
 | `/image <path> [prompt]` | attach an image to the next turn                       |
 | `/exit`       | quit shell3 (also `/quit`)                                         |

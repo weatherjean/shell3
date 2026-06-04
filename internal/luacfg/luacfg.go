@@ -56,10 +56,12 @@ func (a Agent) SkillsActive() bool {
 // tool handlers and guards can run; callers MUST call Close when done.
 type LoadedConfig struct {
 	Models  []Model
-	Agent   Agent
 	Tools   map[string]CustomTool
 	Skills  []Skill
 	Secrets map[string]string
+
+	agents    []Agent
+	activeIdx int
 
 	L  *lua.LState
 	mu sync.Mutex
@@ -89,13 +91,22 @@ func Load(path, workdir string) (*LoadedConfig, error) {
 		c.L.Close()
 		return nil, fmt.Errorf("config: %w", err)
 	}
-	if c.Agent.Name == "" {
+	if len(c.agents) == 0 {
 		c.L.Close()
 		return nil, fmt.Errorf("config: no shell3.agent declared")
 	}
-	if _, ok := c.Model(c.Agent.ModelName); !ok {
-		c.L.Close()
-		return nil, fmt.Errorf("config: agent references unknown model %q", c.Agent.ModelName)
+	for i := range c.agents {
+		if c.agents[i].ModelName == "" {
+			if len(c.Models) == 0 {
+				c.L.Close()
+				return nil, fmt.Errorf("config: agent %q has no model and no models are declared", c.agents[i].Name)
+			}
+			c.agents[i].ModelName = c.Models[0].Name
+		}
+		if _, ok := c.Model(c.agents[i].ModelName); !ok {
+			c.L.Close()
+			return nil, fmt.Errorf("config: agent %q references unknown model %q", c.agents[i].Name, c.agents[i].ModelName)
+		}
 	}
 	return c, nil
 }
@@ -107,4 +118,39 @@ func (c *LoadedConfig) Model(name string) (Model, bool) {
 		}
 	}
 	return Model{}, false
+}
+
+// Active/Agents/SwitchAgent guard activeIdx with c.mu for visibility, but
+// correctness also relies on the front-end busy-gate: SwitchAgent is only
+// called when no turn is in flight, so a tool call's guard chain (OnToolCall,
+// which snapshots the active agent) never races a switch mid-turn.
+
+// Active returns the currently selected agent.
+func (c *LoadedConfig) Active() Agent {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.agents[c.activeIdx]
+}
+
+// Agents returns a copy of the registered agents in declaration order.
+func (c *LoadedConfig) Agents() []Agent {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]Agent, len(c.agents))
+	copy(out, c.agents)
+	return out
+}
+
+// SwitchAgent sets the active agent by name. An unknown name returns an error
+// and leaves the active agent unchanged.
+func (c *LoadedConfig) SwitchAgent(name string) (Agent, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i, a := range c.agents {
+		if a.Name == name {
+			c.activeIdx = i
+			return c.agents[i], nil
+		}
+	}
+	return Agent{}, fmt.Errorf("unknown agent %q", name)
 }
