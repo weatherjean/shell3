@@ -22,6 +22,19 @@ const (
 	ansiBold   = "\033[1m"
 	ansiItalic = "\033[3m"
 	ansiDim    = "\033[2m"
+
+	// Attribute-specific SGR "off" codes. Inline spans close with the
+	// off-code for only the attribute(s) they set, rather than a blanket
+	// ansiReset, so a nested inner span does not clear an enclosing span's
+	// style. E.g. for "**bold [link](u) end**" the link closes underline +
+	// color but leaves bold active through " end".
+	ansiBoldOff      = "\033[22m" // also clears dim
+	ansiItalicOff    = "\033[23m"
+	ansiUnderlineOff = "\033[24m"
+	ansiStrikeOff    = "\033[29m"
+	ansiFgDefault    = "\033[39m" // reset foreground color only
+	ansiUnderline    = "\033[4m"
+	ansiStrike       = "\033[9m"
 )
 
 func fgRGB(r, g, b int) string { return fmt.Sprintf("\033[38;2;%d;%d;%dm", r, g, b) }
@@ -126,30 +139,37 @@ func applyInline(s string) string {
 		return fmt.Sprintf("%c%d%c", codeToken, idx, codeToken)
 	})
 
+	// Links — render as cyan underlined text, drop URL. Run FIRST, before
+	// the bold/italic/strike formatters introduce ANSI escapes: those
+	// escapes contain a literal '[' (e.g. "\033[1m") that linkRe's
+	// `\[...\]\(...\)` pattern would otherwise mis-parse, swallowing the
+	// escape and corrupting the preceding span. With links resolved first,
+	// no escape '[' exists when linkRe runs. The link span closes only its
+	// own attributes (underline + foreground color) so an enclosing bold or
+	// italic survives the nested link.
+	s = linkRe.ReplaceAllStringFunc(s, func(m string) string {
+		sub := linkRe.FindStringSubmatch(m)
+		return ansiUnderline + colCyan + sub[1] + ansiUnderlineOff + ansiFgDefault
+	})
 	// Bold italic ***text***.
 	s = boldItalicRe.ReplaceAllStringFunc(s, func(m string) string {
 		inner := m[3 : len(m)-3]
-		return ansiBold + ansiItalic + inner + ansiReset
+		return ansiBold + ansiItalic + inner + ansiItalicOff + ansiBoldOff
 	})
 	// Bold **text**.
 	s = boldRe.ReplaceAllStringFunc(s, func(m string) string {
 		inner := m[2 : len(m)-2]
-		return ansiBold + inner + ansiReset
+		return ansiBold + inner + ansiBoldOff
 	})
 	// Italic *text*.
 	s = italicRe.ReplaceAllStringFunc(s, func(m string) string {
 		inner := m[1 : len(m)-1]
-		return ansiItalic + inner + ansiReset
+		return ansiItalic + inner + ansiItalicOff
 	})
 	// Strikethrough ~~text~~.
 	s = strikeRe.ReplaceAllStringFunc(s, func(m string) string {
 		inner := m[2 : len(m)-2]
-		return "\033[9m" + inner + ansiReset
-	})
-	// Links — render as cyan underlined text, drop URL.
-	s = linkRe.ReplaceAllStringFunc(s, func(m string) string {
-		sub := linkRe.FindStringSubmatch(m)
-		return "\033[4m" + colCyan + sub[1] + ansiReset
+		return ansiStrike + inner + ansiStrikeOff
 	})
 
 	// Expand code-span placeholders.
@@ -166,7 +186,9 @@ func applyInline(s string) string {
 			if idx < 0 || idx >= len(stash) {
 				return m
 			}
-			return colYellow + "`" + stash[idx] + "`" + ansiReset
+			// Close only the foreground color so a code span nested inside
+			// an enclosing bold/italic span does not clear that style.
+			return colYellow + "`" + stash[idx] + "`" + ansiFgDefault
 		})
 	}
 	return s
