@@ -18,6 +18,21 @@ func TestStore_Open(t *testing.T) {
 	defer func() { _ = st.Close() }()
 }
 
+// TestStore_Open_SerializesWriters asserts Open caps the pool to a single
+// physical connection so concurrent writers serialize instead of racing for
+// the SQLite write lock and returning "database is locked".
+func TestStore_Open_SerializesWriters(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+
+	if got := st.MaxOpenConns(); got != 1 {
+		t.Fatalf("MaxOpenConns: got %d, want 1", got)
+	}
+}
+
 func TestStore_MemoryUpsert_InsertAndUpdate(t *testing.T) {
 	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
 	defer func() { _ = st.Close() }()
