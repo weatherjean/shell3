@@ -7,13 +7,11 @@ import (
 
 func TestCustomToolDispatcher(t *testing.T) {
 	called := ""
-	cfg := Config{
-		CustomTool: func(_ context.Context, name, args string) (string, error) {
-			called = name + ":" + args
-			return "ok", nil
-		},
+	custom := func(_ context.Context, name, args string) (string, error) {
+		called = name + ":" + args
+		return "ok", nil
 	}
-	out := dispatchCustomTool(context.Background(), cfg, "echo", `{"a":1}`)
+	out := dispatchCustomTool(context.Background(), custom, "echo", `{"a":1}`)
 	if out != "ok" || called != `echo:{"a":1}` {
 		t.Fatalf("dispatch: out=%q called=%q", out, called)
 	}
