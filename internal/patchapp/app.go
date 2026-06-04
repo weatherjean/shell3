@@ -108,6 +108,9 @@ type App struct {
 	// Submit callback.
 	submit SubmitFunc
 
+	// onTab is fired when Tab is pressed while not busy. Nil = no-op.
+	onTab func()
+
 	// Slash command registry. Keyed by lowercased name and each alias;
 	// multiple keys may point to the same SlashCommand value.
 	slash map[string]*SlashCommand
@@ -131,6 +134,17 @@ func New(mode, statusMsg string, welcome WelcomeInfo) *App {
 
 // SetSubmit registers the callback fired on Enter.
 func (a *App) SetSubmit(fn SubmitFunc) { a.submit = fn }
+
+// SetTab registers the callback fired on Tab (ignored while busy).
+func (a *App) SetTab(fn func()) { a.onTab = fn }
+
+// SetMode updates the agent badge shown in the status bar. Goroutine-safe.
+func (a *App) SetMode(name string) {
+	a.mu.Lock()
+	a.status.mode = name
+	a.render()
+	a.mu.Unlock()
+}
 
 // Quit asks the input loop to exit cleanly. Run will return after the
 // current input batch finishes processing, allowing the caller's deferred
