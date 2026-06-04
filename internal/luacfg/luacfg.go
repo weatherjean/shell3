@@ -19,7 +19,7 @@ type Model struct {
 }
 
 type ToolGates struct {
-	Bash, BashBg, ShellInteractive, Edit, Memory, History, Docs bool
+	Bash, BashBg, ShellInteractive, Edit, Memory, History, Docs, Prune, Compact bool
 }
 
 type CustomTool struct {
@@ -39,6 +39,8 @@ type GuardEntry struct {
 
 type Agent struct {
 	Name, ModelName, Prompt string
+	Environment             bool // inject the "## Environment" block
+	CoreMemories            bool // inject the "## Core memories" block
 	Gates                   ToolGates
 	CustomTools             []string
 	Skills                  []string
