@@ -52,7 +52,6 @@ type builder struct {
 	lc  *luacfg.LoadedConfig
 	st  *store.Store
 
-	models       []chat.ModelInfo
 	coreMemories []store.MemoryEntry
 
 	closers []func() // LIFO teardown stack
@@ -68,10 +67,6 @@ func Build(opts Options) (chat.Config, func(), error) {
 	}
 	b.openLog() // non-fatal; may push the log closer
 	if err := b.loadConfig(); err != nil {
-		b.closeAll()
-		return chat.Config{}, noop, err
-	}
-	if err := b.resolveModel(); err != nil {
 		b.closeAll()
 		return chat.Config{}, noop, err
 	}
@@ -137,18 +132,6 @@ func (b *builder) loadConfig() error {
 	}
 	b.lc = lc
 	b.closers = append(b.closers, func() { lc.Close() })
-	return nil
-}
-
-// resolveModel enumerates declared models for the /model command.
-func (b *builder) resolveModel() error {
-	for _, md := range b.lc.Models {
-		b.models = append(b.models, chat.ModelInfo{
-			Name:          md.Name,
-			ModelID:       md.ModelID,
-			ContextWindow: md.ContextWindow,
-		})
-	}
 	return nil
 }
 
@@ -297,7 +280,6 @@ func (b *builder) assemble() (chat.Config, error) {
 		Log:             b.log,
 		OutPath:         b.opts.OutPath,
 		Headless:        b.opts.Headless,
-		Models:          b.models,
 		SwitchModel:     switchModel,
 		AgentNames:      agentNames,
 		SwitchAgent:     switchAgent,
