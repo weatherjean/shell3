@@ -84,13 +84,50 @@ func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
 		drainTurn(sess.Events(), app, &lastUsage, &cfg, sink)
 	}()
 
-	// Ordered teardown: emit session_end, close channel, wait for drain,
-	// then WriteEnd + sinkCleanup. Single defer enforces ordering.
+	// turnWG tracks the in-flight turn goroutine (spawned per user message by
+	// launchTurn). The turn goroutine writes to cfg.Store (saveHistory/compact)
+	// as it unwinds, so teardown must JOIN it before EndSession runs — otherwise
+	// a cancelled turn could still be writing to the store while EndSession (and,
+	// in the embedded case, a subsequent store Close) runs. See the teardown
+	// defer below for the ordering that avoids both the inconsistent interleave
+	// and a drain deadlock.
+	var turnWG sync.WaitGroup
+
+	// turnsCtx is the parent of every per-turn context. Teardown cancels it so
+	// turnWG.Wait() never blocks on a turn that wasn't otherwise cancelled:
+	// app.Run can return WITHOUT cancelling the caller's ctx (e.g. stdin EOF), in
+	// which case an in-flight turn's per-turn ctx (derived from this one) would
+	// not be cancelled and the turn could run on indefinitely. Cancelling
+	// turnsCtx at teardown forces a prompt unwind in all exit paths.
+	turnsCtx, cancelTurns := context.WithCancel(ctx)
+	// safety net; the ordering-critical cancel is in the teardown defer below.
+	defer cancelTurns()
+
+	// Ordered teardown: cancel + join the in-flight turn (so its store writes
+	// finish) WHILE drainTurn is still consuming events, then emit session_end,
+	// close channel, wait for drain, then WriteEnd + sinkCleanup. Single defer
+	// enforces ordering.
+	//
+	// Why cancelTurns()+turnWG.Wait() come before sess.CloseEvents(): the turn
+	// goroutine emits events that drainTurn consumes, and drainTurn keeps running
+	// until CloseEvents closes sess.Events(). Cancelling turnsCtx makes the turn
+	// unwind promptly; leaving drainTurn consuming means the unwinding turn can
+	// still flush its final events (and finish its store writes) without blocking
+	// on a backed-up channel. If we closed events or stopped the drain first, the
+	// turn goroutine could deadlock trying to emit and never return — so
+	// turnWG.Wait() MUST happen while drain is still alive.
 	defer func() {
 		status := "ok"
 		if runErr != nil {
 			status = "error"
 		}
+		// Cancel any in-flight turn, then join it — while drain still consumes
+		// its events — so no store write is in flight when EndSession runs.
+		// cancelTurns is also deferred as the lostcancel safety net; this explicit
+		// call is the ordering-critical one — it must run before turnWG.Wait() so
+		// in-flight turns unwind before we join them.
+		cancelTurns()
+		turnWG.Wait()
 		sess.End(status)
 		sess.CloseEvents()
 		drainWG.Wait()
@@ -142,15 +179,20 @@ func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
 	}
 
 	launchTurn := func(userMsg llm.Message) {
-		turnCtx, cancel := context.WithCancel(ctx)
+		turnCtx, cancel := context.WithCancel(turnsCtx)
 		app.SetBusy(true, cancel)
 		tc := buildTurnConfig()
+		// turnWG lets teardown join this goroutine before EndSession so its
+		// store writes (saveHistory/compact) are never in flight when the
+		// session is ended. Add(1) before spawning; Done() inside the goroutine.
+		turnWG.Add(1)
 		// Plain user-text messages go through Session.Run (which handles the
 		// user_message event + history save). Messages with ContentParts (e.g.
 		// /image) bypass Run since Run is string-only — saveHistory only
 		// persists string Content anyway, so the image path drives RunTurn
 		// directly.
 		go func() {
+			defer turnWG.Done()
 			defer cancel()
 			if len(userMsg.ContentParts) == 0 {
 				sess.Run(turnCtx, tc, userMsg.Content)
@@ -176,6 +218,22 @@ func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
 // dim, also line-by-line. Tool calls render a header line; tool results
 // render a dimmed body (or colorized diff for edit_file). TurnDone flushes
 // the trailing partial line and clears busy.
+//
+// CONCURRENCY INVARIANT (busy-gate): drainTurn runs on its own long-lived
+// goroutine and READS shared *chat.Config fields per event — e.g. cfg.Truncate
+// in renderToolResultBody and cfg.CustomToolNames in renderToolCallHeader — and
+// WRITES *lastUsage. The slash-command handlers in registerSlashCommands run on
+// the input-loop goroutine and MUTATE the same struct (/truncate, /model,
+// /clear, ...) and READ *lastUsage (/usage). There is deliberately NO mutex
+// around cfg or lastUsage. This is race-free ONLY because of the busy-gate in
+// patchapp: App.handleEnter (internal/patchapp/editor.go) early-returns while
+// a.busy is true, so slash handlers (and SubmitFunc) cannot fire while a turn —
+// and therefore drainTurn's per-event reads of cfg/lastUsage — is active.
+// SetBusy(true) is set in launchTurn for the duration of the turn and cleared
+// only when drainTurn processes the terminal TurnDone/Error event. A future
+// maintainer who breaks that gate (e.g. allowing slash commands to run during
+// streaming, or clearing busy before drainTurn finishes a turn) reintroduces a
+// data race on cfg/lastUsage and must add real synchronization here.
 func drainTurn(ch <-chan chat.Event, app patchapp.AppView, lastUsage *llm.Usage, cfg *chat.Config, sink *chat.OutSink) {
 	var streamBuf strings.Builder
 	// reasoningBuf holds an incomplete (no trailing \n) reasoning line.
@@ -381,6 +439,18 @@ type slashTarget interface {
 
 // registerSlashCommands wires up the slash registry. Closures capture cfg,
 // sess, and lastUsage so handlers can read and mutate session state.
+//
+// CONCURRENCY: these handlers mutate the shared *chat.Config (e.g. /truncate
+// writes cfg.Truncate; /model writes cfg.LLM/Params/StatusLine/ContextWindow;
+// /clear writes cfg.Personality.SystemPrompt) and read *lastUsage (/usage) with
+// NO mutex, even though drainTurn concurrently reads cfg/writes lastUsage from
+// another goroutine. This is safe ONLY because patchapp's busy-gate
+// (App.handleEnter in internal/patchapp/editor.go) refuses to dispatch any
+// slash handler while a.busy is true, and a turn (with drainTurn actively
+// reading cfg) holds busy from launchTurn until drainTurn sees TurnDone/Error.
+// So a slash handler and drainTurn never touch cfg/lastUsage at the same time.
+// Keep that invariant intact, or add synchronization. See drainTurn for the
+// matching note on the read side.
 func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session, lastUsage *llm.Usage, launchTurn func(llm.Message)) {
 	dim := func(s string) { app.PrintLine(patchtui.Dim + s + patchtui.Reset) }
 
