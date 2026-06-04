@@ -4,6 +4,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -16,11 +17,31 @@ const ChunkSize = 25
 type Store struct{ db *sql.DB }
 
 // Open opens or creates the SQLite store at path and runs schema migrations.
+//
+// SQLite permits only one writer at a time. database/sql would otherwise open
+// several physical connections and let two of them race for the write lock,
+// surfacing as "database is locked" (SQLITE_BUSY). We serialize writers two
+// ways: SetMaxOpenConns(1) guarantees at most one connection (and thus one
+// writer) regardless of concurrency, and a busy_timeout pragma is a backstop
+// for cross-process contention from another process sharing the DB file;
+// in-process writers already serialize via the single connection. We do NOT
+// set journal_mode(WAL): the temp-file and in-memory DBs used here don't need
+// it and WAL is unsafe for :memory:.
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	dsn := path
+	// Append the busy_timeout pragma via modernc's query-param DSN syntax.
+	// Callers pass a bare filesystem path; the ?/& branch is a defensive
+	// fallback for the rare path that already carries DSN query params.
+	if strings.Contains(path, "?") {
+		dsn += "&_pragma=busy_timeout(5000)"
+	} else {
+		dsn += "?_pragma=busy_timeout(5000)"
+	}
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
 	}
+	db.SetMaxOpenConns(1)
 	if err := migrate(db); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -77,6 +98,10 @@ func migrateMemoriesAddCore(db *sql.DB) error {
 		if name == "core" {
 			hasCore = true
 		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("store: inspect memories: %w", err)
 	}
 	_ = rows.Close()
 	if hasCore {
@@ -246,6 +271,12 @@ func scanMemoryRows(rows *sql.Rows) ([]MemoryEntry, error) {
 			return nil, fmt.Errorf("store: memory scan: %w", err)
 		}
 		e.Core = coreInt != 0
+		// The store fully controls the write format (every write uses
+		// time.Now().UTC().Format(time.RFC3339)), so a parse error here can only
+		// mean the stored value was externally corrupted/hand-edited. In that
+		// case we deliberately fall back to the zero time.Time rather than fail
+		// the whole query. (Same rationale applies to the parses in HistoryGet
+		// and HistorySearchExpr below.)
 		e.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
 		results = append(results, e)
 	}
@@ -259,7 +290,11 @@ func (s *Store) StartSession() (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("store: start session: %w", err)
 	}
-	return res.LastInsertId()
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("store: start session: last insert id: %w", err)
+	}
+	return id, nil
 }
 
 // EndSession sets ended_at for the given session.
@@ -382,6 +417,8 @@ func (s *Store) HistoryGet(sessionID int64, chunk int) (HistoryGetResult, error)
 		}
 		t.SessionID = sessionID
 		t.Chunk = chunk
+		// Malformed stored timestamp deliberately falls back to zero time.Time
+		// (store-controlled write format; see scanMemoryRows).
 		t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		turns = append(turns, t)
 	}
@@ -409,6 +446,8 @@ func (s *Store) HistoryGet(sessionID int64, chunk int) (HistoryGetResult, error)
 		NextSessionID: nextID,
 		Turns:         turns,
 	}
+	// Malformed stored timestamps deliberately fall back to zero time.Time
+	// (store-controlled write format; see scanMemoryRows).
 	res.SessionStartedAt, _ = time.Parse(time.RFC3339, startedAt)
 	if endedAt.Valid {
 		res.SessionEndedAt, _ = time.Parse(time.RFC3339, endedAt.String)
@@ -455,6 +494,8 @@ func (s *Store) HistorySearchExpr(expr string, limit int) (HistorySearchResult, 
 		if err := rows.Scan(&rowid, &t.SessionID, &t.Role, &t.Content, &createdAt, &earlier); err != nil {
 			return HistorySearchResult{}, fmt.Errorf("store: history search: scan: %w", err)
 		}
+		// Malformed stored timestamp deliberately falls back to zero time.Time
+		// (store-controlled write format; see scanMemoryRows).
 		t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		t.Chunk = int(earlier) / ChunkSize
 		hits = append(hits, t)
