@@ -46,6 +46,7 @@ func logStreamError(cfg TurnConfig, msgs []llm.Message, streamErr error) {
 		reqBody, resBody = ts.LastTraffic()
 	}
 	dumpPath := ""
+	var dumpErr error
 	if cfg.WorkDir != "" {
 		rec := map[string]any{
 			"timestamp":     time.Now().Format(time.RFC3339),
@@ -55,11 +56,19 @@ func logStreamError(cfg TurnConfig, msgs []llm.Message, streamErr error) {
 			"response_body": string(resBody),
 		}
 		if data, err := json.MarshalIndent(rec, "", "  "); err == nil {
-			dumpPath = filepath.Join(cfg.WorkDir, ".shell3", "last_error.json")
-			_ = os.WriteFile(dumpPath, data, 0644)
+			p := filepath.Join(cfg.WorkDir, ".shell3", "last_error.json")
+			if werr := os.WriteFile(p, data, 0644); werr != nil {
+				// Don't advertise a dump file that wasn't written; surface the
+				// write error instead so the failure is observable.
+				dumpErr = werr
+			} else {
+				dumpPath = p
+			}
+		} else {
+			dumpErr = err
 		}
 	}
-	cfg.Log.Debug("stream error", "error", streamErr, "dump", dumpPath,
+	cfg.Log.Debug("stream error", "error", streamErr, "dump", dumpPath, "dump_error", dumpErr,
 		"req_bytes", len(reqBody), "res_bytes", len(resBody))
 }
 
@@ -266,7 +275,7 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 				out = "error: interactive TTY not available"
 			}
 		} else if cfg.CustomToolNames[tc.Name] {
-			out = dispatchCustomTool(ctx, Config{CustomTool: cfg.CustomTool}, tc.Name, tc.RawArgs)
+			out = dispatchCustomTool(ctx, cfg.CustomTool, tc.Name, tc.RawArgs)
 		} else if handler, ok := cfg.Handlers[tc.Name]; ok {
 			toolCfg := ToolConfig{
 				Store:    cfg.Store,

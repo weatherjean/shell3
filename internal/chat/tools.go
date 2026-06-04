@@ -22,13 +22,13 @@ const (
 	guardCancel guardDecision = 2 // abort the entire turn
 )
 
-// dispatchCustomTool calls cfg.CustomTool for a named custom tool. If
-// CustomTool is nil the call returns an unknown-tool error string.
-func dispatchCustomTool(ctx context.Context, cfg Config, name, rawArgs string) string {
-	if cfg.CustomTool == nil {
+// dispatchCustomTool calls custom for a named custom tool. If custom is nil the
+// call returns an unknown-tool error string.
+func dispatchCustomTool(ctx context.Context, custom func(ctx context.Context, name, argsJSON string) (string, error), name, rawArgs string) string {
+	if custom == nil {
 		return fmt.Sprintf("error: unknown tool %q", name)
 	}
-	out, err := cfg.CustomTool(ctx, name, rawArgs)
+	out, err := custom(ctx, name, rawArgs)
 	if err != nil {
 		return "error: " + err.Error()
 	}
@@ -75,7 +75,9 @@ func handleCompactHistory(rawArgs string, st *store.Store, sess *Session, allMsg
 			lg.Warn("end session failed during compact", "session_id", prevSessionID, "error", err)
 		}
 		newID, err := st.StartSession()
-		if err == nil {
+		if err != nil {
+			lg.Warn("start session failed during compact", "error", err)
+		} else {
 			sess.id = newID
 		}
 	}
