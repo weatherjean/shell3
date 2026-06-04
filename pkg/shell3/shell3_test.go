@@ -224,37 +224,41 @@ func TestSession_Rollback(t *testing.T) {
 	}
 }
 
-func TestSession_SwitchModel_Unknown(t *testing.T) {
+func TestSession_SwitchAgent_Unknown(t *testing.T) {
 	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "x"}}})
 	cfg := chat.Config{
-		SwitchModel: func(name string) (chat.ActiveModel, error) {
-			return chat.ActiveModel{}, errors.New("unknown model " + name)
+		SwitchAgent: func(name string) (chat.ActiveAgent, error) {
+			return chat.ActiveAgent{}, errors.New("unknown agent " + name)
 		},
 	}
 	s := newTestSession(t, client, cfg)
 	defer s.Close()
 
-	if err := s.SwitchModel("nope"); err == nil {
-		t.Fatal("expected error for unknown model")
+	if err := s.SwitchAgent("nope"); err == nil {
+		t.Fatal("expected error for unknown agent")
 	}
 }
 
-func TestSession_SwitchModel_Applies(t *testing.T) {
+func TestSession_SwitchAgent_Applies(t *testing.T) {
 	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "x"}}})
 	newClient := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "y"}}})
 	cfg := chat.Config{
-		SwitchModel: func(name string) (chat.ActiveModel, error) {
-			return chat.ActiveModel{Client: newClient, ModelID: "m2", ContextWindow: 1000}, nil
+		AgentNames: []string{"base", "plan"},
+		SwitchAgent: func(name string) (chat.ActiveAgent, error) {
+			return chat.ActiveAgent{LLM: newClient, ModeLabel: name, ModelID: "m2", ContextWindow: 1000}, nil
 		},
 	}
 	s := newTestSession(t, client, cfg)
 	defer s.Close()
 
-	if err := s.SwitchModel("m2"); err != nil {
-		t.Fatalf("SwitchModel: %v", err)
+	if err := s.SwitchAgent("plan"); err != nil {
+		t.Fatalf("SwitchAgent: %v", err)
 	}
 	if s.cfg.LLM != chat.LLMClient(newClient) {
-		t.Fatal("SwitchModel did not swap the active client")
+		t.Fatal("SwitchAgent did not swap the active client")
+	}
+	if s.ActiveAgent() != "plan" {
+		t.Fatalf("ActiveAgent() = %q, want plan", s.ActiveAgent())
 	}
 }
 

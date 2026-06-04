@@ -22,16 +22,6 @@ type LLMClient interface {
 	Stream(ctx context.Context, msgs []llm.Message, tools []llm.ToolDefinition, onEvent func(llm.StreamEvent)) error
 }
 
-// ActiveModel is the result of a successful model switch: the new streaming
-// client plus the metadata the TUI needs to refresh the status line and
-// reminder accounting.
-type ActiveModel struct {
-	Client        LLMClient
-	Params        llm.RequestParams
-	ModelID       string
-	ContextWindow int
-}
-
 // ActiveAgent is the full runtime bundle produced when switching agents:
 // everything the chat loop needs to run the next turn under a different agent.
 type ActiveAgent struct {
@@ -114,9 +104,6 @@ type Config struct {
 	// Return values follow the guardAllow/guardBlock/guardCancel constants
 	// defined in this package (0/1/2).
 	ToolGuard func(ctx context.Context, tool string, params map[string]any) (guardDecision int, reason string, err error)
-	// SwitchModel activates the model with the given config name and returns
-	// the new client plus its metadata. Nil disables model switching.
-	SwitchModel func(name string) (ActiveModel, error)
 	// AgentNames lists configured agents in declaration order, for /agent and
 	// Tab cycling. Empty or single-element disables switching.
 	AgentNames []string

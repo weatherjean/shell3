@@ -199,6 +199,19 @@ tui:
 - `/agent` with no arg lists agents; with a valid name switches; unknown errors.
 - Single-agent config → Tab no-op.
 
+## Library (pkg/shell3) parity
+
+The embeddable library API must be **1:1** with the TUI: agent switching, no model
+switching. Accordingly:
+
+- `pkg/shell3.Session.SwitchModel` is **removed** (along with `chat.Config.SwitchModel`,
+  the `chat.ActiveModel` type, and the agentsetup `switchModel` closure — all now dead).
+- `pkg/shell3.Session.SwitchAgent(name) error` is **added**, mirroring the TUI's
+  `applyAgent`: it swaps the model client, system prompt, tools, guards, custom-tool
+  routing, skills, status line, and context window, keeping history. Call between turns.
+- `Session.AgentNames() []string` and `Session.ActiveAgent() string` let an embedder
+  list/cycle agents (Tab-style) programmatically.
+
 ## Out of scope
 
 - Per-path / fine-grained permission rules (opencode-style declarative ruleset).

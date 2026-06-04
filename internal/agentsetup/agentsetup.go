@@ -234,14 +234,6 @@ func (b *builder) assemble() (chat.Config, error) {
 			CoreMemories: b.coreMemories,
 		})
 	}
-	switchModel := func(name string) (chat.ActiveModel, error) {
-		md, ok := b.lc.Model(name)
-		if !ok {
-			return chat.ActiveModel{}, fmt.Errorf("unknown model %q", name)
-		}
-		cl, p := buildClient(md)
-		return chat.ActiveModel{Client: cl, Params: p, ModelID: md.ModelID, ContextWindow: md.ContextWindow}, nil
-	}
 	switchAgent := func(name string) (chat.ActiveAgent, error) {
 		if _, err := b.lc.SwitchAgent(name); err != nil {
 			return chat.ActiveAgent{}, err
@@ -280,7 +272,6 @@ func (b *builder) assemble() (chat.Config, error) {
 		Log:             b.log,
 		OutPath:         b.opts.OutPath,
 		Headless:        b.opts.Headless,
-		SwitchModel:     switchModel,
 		AgentNames:      agentNames,
 		SwitchAgent:     switchAgent,
 	}, nil
