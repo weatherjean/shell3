@@ -3,6 +3,8 @@ package scaffold
 
 import (
 	_ "embed"
+	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -30,6 +32,8 @@ func WriteStarterConfig(configPath, envExamplePath string) error {
 func writeIfAbsent(path string, content []byte, mode fs.FileMode) error {
 	if _, err := os.Stat(path); err == nil {
 		return nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("scaffold: stat %s: %w", path, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err

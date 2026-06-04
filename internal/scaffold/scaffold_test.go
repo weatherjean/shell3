@@ -37,6 +37,32 @@ func TestWriteStarterConfig_WritesFiles(t *testing.T) {
 	}
 }
 
+func TestWriteStarterConfig_StatErrorSurfaced(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a regular file, then aim a config path *through* it. os.Stat on
+	// "afile/child" returns ENOTDIR (not fs.ErrNotExist), which must be
+	// surfaced rather than silently treated as "absent".
+	afile := filepath.Join(dir, "afile")
+	if err := os.WriteFile(afile, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(afile, "shell3.lua")
+	envExamplePath := filepath.Join(dir, ".env.example")
+
+	err := scaffold.WriteStarterConfig(configPath, envExamplePath)
+	if err == nil {
+		t.Fatal("expected error from non-NotExist Stat, got nil")
+	}
+	if !strings.Contains(err.Error(), "scaffold: stat") {
+		t.Errorf("expected wrapped stat error, got: %v", err)
+	}
+	// Nothing should have been created under the bogus path.
+	if _, statErr := os.Stat(configPath); statErr == nil {
+		t.Error("WriteStarterConfig created a file despite stat error")
+	}
+}
+
 func TestWriteStarterConfig_Idempotent(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "shell3.lua")
