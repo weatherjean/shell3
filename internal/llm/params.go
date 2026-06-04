@@ -1,6 +1,9 @@
 package llm
 
-import "fmt"
+import (
+	"fmt"
+	"strconv"
+)
 
 // RequestParams is the set of tunable knobs every adapter understands.
 // Empty string / nil = "use adapter default". Adapters must clamp values
@@ -40,14 +43,18 @@ func (p *RequestParams) SetByName(name, value string) error {
 		b := value == "true"
 		p.ParallelToolCalls = &b
 	case "temperature":
-		var f float64
-		if _, err := fmt.Sscanf(value, "%f", &f); err != nil {
+		// ParseFloat rejects the whole string on trailing garbage, unlike
+		// fmt.Sscanf which silently accepts a parseable prefix.
+		f, err := strconv.ParseFloat(value, 64)
+		if err != nil {
 			return fmt.Errorf("temperature: %w", err)
 		}
 		p.Temperature = &f
 	case "max_tokens":
-		var n int
-		if _, err := fmt.Sscanf(value, "%d", &n); err != nil {
+		// Atoi rejects floats/garbage outright, unlike fmt.Sscanf %d which
+		// silently truncates (e.g. "12.9" → 12).
+		n, err := strconv.Atoi(value)
+		if err != nil {
 			return fmt.Errorf("max_tokens: %w", err)
 		}
 		p.MaxTokens = n
