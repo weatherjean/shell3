@@ -39,12 +39,26 @@ func (a *App) Pause() error {
 // repaints the live frame. Call after [App.Pause] returns from the
 // subprocess. Safe from any goroutine.
 //
+// A Resume without a preceding (still-active) Pause is a no-op: it returns
+// early before touching the terminal or the read lock, so a stray or double
+// Resume cannot Unlock an unheld readMu and panic.
+//
 // Returns the error from term.MakeRaw if raw mode could not be re-entered (e.g.
 // the controlling TTY was lost). In that case the previous terminal state is
 // kept (so a later Pause does not Restore a nil state and panic) and the app
 // continues in degraded, non-raw mode; the lifecycle bookkeeping still runs so
 // a paired Pause/Resume cannot wedge.
 func (a *App) Resume() error {
+	// Guard against a stray/double Resume: paused is set true by Pause and
+	// false by Resume, both under a.mu. If we are not currently paused there is
+	// no readMu lock held to release, so return before touching the terminal.
+	a.mu.Lock()
+	paused := a.term.paused
+	a.mu.Unlock()
+	if !paused {
+		return nil
+	}
+
 	newState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	fmt.Print(pasteOn)
 
