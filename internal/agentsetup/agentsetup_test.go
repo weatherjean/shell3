@@ -3,6 +3,7 @@ package agentsetup_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/agentsetup"
@@ -44,6 +45,89 @@ func TestBuild_LoadsConfig(t *testing.T) {
 	}
 	if cfg.WorkDir != tmp {
 		t.Errorf("WorkDir = %q, want %q", cfg.WorkDir, tmp)
+	}
+}
+
+// writeTwoAgentConfig writes a config with two agents ("first", "second")
+// sharing one model, for exercising initial-agent selection.
+func writeTwoAgentConfig(t *testing.T, dir string) {
+	t.Helper()
+	lua := `
+shell3.model("main", {
+  base_url = "https://example.test/v1",
+  api_key = shell3.env.secret("TEST_KEY"),
+  model = "test-model",
+  context_window = 1000,
+})
+shell3.agent({ name = "first",  model = "main", prompt = "you are first",  tools = {} })
+shell3.agent({ name = "second", model = "main", prompt = "you are second", tools = {} })
+`
+	if err := os.WriteFile(filepath.Join(dir, "shell3.lua"), []byte(lua), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("TEST_KEY=sk-test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBuild_Agent_DefaultsToFirst(t *testing.T) {
+	tmp := t.TempDir()
+	writeTwoAgentConfig(t, tmp)
+
+	cfg, cleanup, err := agentsetup.Build(agentsetup.Options{
+		ConfigPath: filepath.Join(tmp, "shell3.lua"),
+		CWD:        tmp,
+		HomeDir:    t.TempDir(),
+		Headless:   true,
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer cleanup()
+	if cfg.ModeLabel != "first" {
+		t.Errorf("default active agent = %q, want %q", cfg.ModeLabel, "first")
+	}
+}
+
+func TestBuild_Agent_SelectsNamed(t *testing.T) {
+	tmp := t.TempDir()
+	writeTwoAgentConfig(t, tmp)
+
+	cfg, cleanup, err := agentsetup.Build(agentsetup.Options{
+		ConfigPath: filepath.Join(tmp, "shell3.lua"),
+		CWD:        tmp,
+		HomeDir:    t.TempDir(),
+		Headless:   true,
+		Agent:      "second",
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer cleanup()
+	if cfg.ModeLabel != "second" {
+		t.Errorf("active agent = %q, want %q", cfg.ModeLabel, "second")
+	}
+	if cfg.Personality.SystemPrompt != "you are second" {
+		t.Errorf("system prompt = %q, want the second agent's", cfg.Personality.SystemPrompt)
+	}
+}
+
+func TestBuild_Agent_UnknownErrors(t *testing.T) {
+	tmp := t.TempDir()
+	writeTwoAgentConfig(t, tmp)
+
+	_, _, err := agentsetup.Build(agentsetup.Options{
+		ConfigPath: filepath.Join(tmp, "shell3.lua"),
+		CWD:        tmp,
+		HomeDir:    t.TempDir(),
+		Headless:   true,
+		Agent:      "nope",
+	})
+	if err == nil {
+		t.Fatal("expected error for unknown agent, got nil")
+	}
+	if !strings.Contains(err.Error(), "nope") {
+		t.Errorf("error should name the unknown agent, got: %v", err)
 	}
 }
 

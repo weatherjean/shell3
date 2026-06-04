@@ -31,6 +31,9 @@ type Options struct {
 	HomeDir    string
 	Headless   bool
 	OutPath    string
+	// Agent selects the initial active agent by name. Empty uses the first
+	// declared agent. A non-empty name with no match makes Build fail.
+	Agent string
 }
 
 // builder accumulates the state and open resources used to assemble a
@@ -66,6 +69,14 @@ func Build(opts Options) (chat.Config, func(), error) {
 	if err := b.loadConfig(); err != nil {
 		b.closeAll()
 		return chat.Config{}, noop, err
+	}
+	// Select the initial active agent before assembling its runtime, so the
+	// persona/tools/model are built for the chosen agent from the start.
+	if opts.Agent != "" {
+		if _, err := b.lc.SwitchAgent(opts.Agent); err != nil {
+			b.closeAll()
+			return chat.Config{}, noop, err
+		}
 	}
 	b.openStore() // non-fatal; may push the store closer
 	cfg, err := b.assemble()

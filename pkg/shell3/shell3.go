@@ -22,6 +22,7 @@ type Spec struct {
 	Prompt     string
 	ConfigPath string // "" → ./shell3.lua then ~/.shell3/shell3.lua
 	WorkDir    string // "" → os.Getwd()
+	Agent      string // "" → first declared agent; unknown name fails Start/Run
 }
 
 // Kind discriminates a streamed Event.
@@ -134,6 +135,7 @@ func Start(ctx context.Context, spec Spec) (*Session, error) {
 		CWD:        workDir,
 		HomeDir:    homeDir,
 		Headless:   true,
+		Agent:      spec.Agent,
 	})
 	if err != nil {
 		return nil, err
