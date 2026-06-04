@@ -10,6 +10,7 @@ import (
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
+	"github.com/weatherjean/shell3/internal/store"
 )
 
 func TestTranslate(t *testing.T) {
@@ -137,6 +138,27 @@ func TestSession_ErrorPath(t *testing.T) {
 	}
 	if sawDone {
 		t.Fatal("did not expect Done on error path")
+	}
+}
+
+// TestSession_Close_ReturnsEndSessionError verifies Close surfaces the store's
+// EndSession error instead of always returning nil. The underlying store DB is
+// closed before Close runs, forcing EndSession to fail; embedders' `if err :=
+// sess.Close(); err != nil` must then see a non-nil error.
+func TestSession_Close_ReturnsEndSessionError(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "store.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "x"}}})
+	s := newTestSession(t, client, chat.Config{Store: st})
+
+	// Close the store's DB so EndSession fails when Close runs.
+	if err := st.Close(); err != nil {
+		t.Fatalf("store.Close: %v", err)
+	}
+	if err := s.Close(); err == nil {
+		t.Fatal("Close returned nil; expected the EndSession error to be surfaced")
 	}
 }
 

@@ -148,6 +148,11 @@ func newSession(cfg chat.Config, cleanup func()) *Session {
 	if cfg.Store != nil {
 		if id, err := cfg.Store.StartSession(); err == nil {
 			storeID = id
+		} else {
+			// Best-effort: a failed StartSession leaves storeID 0 (no
+			// persistence). Log it at Warn so the silent non-persistence is
+			// observable rather than vanishing.
+			chat.LogOrNoop(cfg.Log).Warn("start session failed", "error", err)
 		}
 	}
 	sess := chat.NewSession(chat.SessionOpts{
@@ -263,6 +268,10 @@ func (s *Session) ID() string {
 // join nor <-drainDone can wedge on an unread Send channel. Draining the
 // channel is still the supported pattern (Close cancels the turn, so the
 // in-flight turn ends promptly with a terminal event).
+//
+// Returns the store's EndSession error if ending the persisted session fails;
+// the other best-effort teardown steps (turn cancel, drain, cleanup) do not
+// contribute to the returned error.
 func (s *Session) Close() error {
 	// Cancel any in-flight turn so it stops streaming and runs its deferred
 	// history persist, then join it before we close the events channel — the
@@ -288,11 +297,12 @@ func (s *Session) Close() error {
 	s.sess.End("ok")
 	s.sess.CloseEvents()
 	<-s.drainDone
+	var endErr error
 	if s.cfg.Store != nil {
-		_ = s.cfg.Store.EndSession(s.sess.ID())
+		endErr = s.cfg.Store.EndSession(s.sess.ID())
 	}
 	s.cleanup()
-	return nil
+	return endErr
 }
 
 // turnConfig derives the per-turn config from the current cfg. Built fresh each
