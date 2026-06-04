@@ -85,6 +85,16 @@ func newTestSession(t *testing.T, client chat.LLMClient, cfg chat.Config) *Sessi
 	return newSession(cfg, func() {})
 }
 
+func TestSession_ID_NoStoreReportsZero(t *testing.T) {
+	s := newTestSession(t, fakellm.New(), chat.Config{})
+	defer s.Close()
+
+	// newTestSession configures no store, so ID reports the documented "0".
+	if got := s.ID(); got != "0" {
+		t.Fatalf("ID() = %q, want %q (no store)", got, "0")
+	}
+}
+
 func TestSession_MultiTurn_HistoryCarries(t *testing.T) {
 	client := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "first"}}},
