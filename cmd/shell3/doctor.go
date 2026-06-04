@@ -73,7 +73,7 @@ func checkGlobalDoctor(out io.Writer, homeDir, cwd string, g paths.Global, fail 
 	defer lc.Close()
 	doctorCheck(out, fail, true, fmt.Sprintf("shell3.lua: %s", configPath))
 	doctorCheck(out, fail, true, fmt.Sprintf("models: %d", len(lc.Models)))
-	doctorCheck(out, fail, true, fmt.Sprintf("agent: %s", lc.Agent.Name))
+	doctorCheck(out, fail, true, fmt.Sprintf("agent: %s", lc.Active().Name))
 }
 
 func checkProjectDoctor(out io.Writer, l paths.Local, g paths.Global, cwd string, fail func()) {

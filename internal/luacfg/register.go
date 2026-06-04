@@ -114,17 +114,27 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 	if err := checkKeys(opts, "agent", agentKeys); err != nil {
 		L.RaiseError("%s", err.Error())
 	}
-	c.Agent.Name = optStr(opts, "name")
-	c.Agent.ModelName = optStr(opts, "model")
-	c.Agent.Prompt = optStr(opts, "prompt")
+	a := Agent{
+		Name:      optStr(opts, "name"),
+		ModelName: optStr(opts, "model"),
+		Prompt:    optStr(opts, "prompt"),
+	}
+	if a.Name == "" {
+		L.RaiseError("agent: name is required")
+	}
+	for _, ex := range c.agents {
+		if ex.Name == a.Name {
+			L.RaiseError("agent %q: already declared (agent names must be unique)", a.Name)
+		}
+	}
 	if sk, ok := opts.RawGetString("skills").(*lua.LTable); ok {
-		c.Agent.Skills = handleNames(sk, "__skill")
+		a.Skills = handleNames(sk, "__skill")
 	}
 	if tt, ok := opts.RawGetString("tools").(*lua.LTable); ok {
 		if err := checkKeys(tt, "agent.tools", toolGateKeys); err != nil {
 			L.RaiseError("%s", err.Error())
 		}
-		c.Agent.Gates = ToolGates{
+		a.Gates = ToolGates{
 			Bash:             optBool(tt, "bash"),
 			BashBg:           optBool(tt, "bash_bg"),
 			ShellInteractive: optBool(tt, "shell_interactive"),
@@ -134,25 +144,24 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 			Docs:             optBool(tt, "docs"),
 		}
 		if cu, ok := tt.RawGetString("custom").(*lua.LTable); ok {
-			c.Agent.CustomTools = handleNames(cu, "__tool")
+			a.CustomTools = handleNames(cu, "__tool")
 		}
 		if tt.RawGetString("skill") == lua.LFalse {
-			c.Agent.SkillsDisabled = true
+			a.SkillsDisabled = true
 		}
 	}
 	if g, ok := opts.RawGetString("on_tool_call").(*lua.LTable); ok {
 		g.ForEach(func(_, v lua.LValue) {
 			switch x := v.(type) {
 			case *lua.LFunction:
-				c.Agent.Guard = append(c.Agent.Guard, GuardEntry{fn: x})
+				a.Guard = append(a.Guard, GuardEntry{fn: x})
 			case *lua.LTable:
 				if b, ok := x.RawGetString("__guard").(lua.LString); ok {
-					c.Agent.Guard = append(c.Agent.Guard, GuardEntry{
-						Builtin: string(b),
-					})
+					a.Guard = append(a.Guard, GuardEntry{Builtin: string(b)})
 				}
 			}
 		})
 	}
+	c.agents = append(c.agents, a)
 	return 0
 }

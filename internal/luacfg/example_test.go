@@ -39,7 +39,7 @@ func TestExampleParses(t *testing.T) {
 	}
 	defer c.Close()
 
-	if c.Agent.Name == "" {
+	if c.Active().Name == "" {
 		t.Fatal("agent name is empty")
 	}
 	if len(c.Models) < 1 {

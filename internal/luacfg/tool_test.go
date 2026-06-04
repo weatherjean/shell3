@@ -21,7 +21,7 @@ shell3.agent({ name="a", model="m", prompt="p", tools={ custom={ echo } } })
 	if _, ok := c.Tools["echo"]; !ok {
 		t.Fatalf("tool not registered: %+v", c.Tools)
 	}
-	if len(c.Agent.CustomTools) != 1 || c.Agent.CustomTools[0] != "echo" {
-		t.Fatalf("agent custom tools not linked: %+v", c.Agent.CustomTools)
+	if len(c.Active().CustomTools) != 1 || c.Active().CustomTools[0] != "echo" {
+		t.Fatalf("agent custom tools not linked: %+v", c.Active().CustomTools)
 	}
 }
