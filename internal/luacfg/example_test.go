@@ -51,4 +51,16 @@ func TestExampleParses(t *testing.T) {
 	if len(c.Tools) != 2 {
 		t.Fatalf("expected 2 tools, got %d", len(c.Tools))
 	}
+
+	// Two agents: "base" (first/active) and read-only "plan" companion.
+	agents := c.Agents()
+	if len(agents) != 2 {
+		t.Fatalf("expected 2 agents, got %d", len(agents))
+	}
+	if agents[0].Name != "base" {
+		t.Errorf("first agent: want %q, got %q", "base", agents[0].Name)
+	}
+	if agents[1].Name != "plan" {
+		t.Errorf("second agent: want %q, got %q", "plan", agents[1].Name)
+	}
 }
