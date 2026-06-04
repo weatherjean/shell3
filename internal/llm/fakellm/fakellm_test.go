@@ -50,3 +50,27 @@ func TestClient_MultipleScripts(t *testing.T) {
 		t.Errorf("CallCount = %d, want 3", c.CallCount())
 	}
 }
+
+func TestClient_RecordsDefensiveCopy(t *testing.T) {
+	c := New()
+	msgs := []llm.Message{{Role: "user", Content: "original"}}
+	tools := []llm.ToolDefinition{{Name: "tool0"}}
+	if err := c.Stream(context.Background(), msgs, tools, func(llm.StreamEvent) {}); err != nil {
+		t.Fatalf("Stream err: %v", err)
+	}
+
+	// Mutate the caller's slices after Stream returned.
+	msgs[0].Content = "mutated"
+	tools[0].Name = "mutated"
+
+	snap := c.CallsSnapshot()
+	if len(snap) != 1 {
+		t.Fatalf("CallsSnapshot len = %d, want 1", len(snap))
+	}
+	if snap[0].Msgs[0].Content != "original" {
+		t.Errorf("recorded Msgs aliased caller slice: got %q, want %q", snap[0].Msgs[0].Content, "original")
+	}
+	if snap[0].Tools[0].Name != "tool0" {
+		t.Errorf("recorded Tools aliased caller slice: got %q, want %q", snap[0].Tools[0].Name, "tool0")
+	}
+}

@@ -5,6 +5,7 @@ package fakellm
 
 import (
 	"context"
+	"slices"
 	"sync"
 
 	"github.com/weatherjean/shell3/internal/llm"
@@ -26,6 +27,13 @@ type Call struct {
 // Client implements chat.LLMClient (and llm.Provider's Streamer contract).
 // Each call to Stream consumes one Script from Scripts (in order). If
 // Scripts is exhausted, the last script repeats.
+//
+// Client is intended for single-threaded test use. Stream's own bookkeeping
+// (the call counter and the recorded Calls slice) is mutex-guarded, but the
+// exported Scripts and Calls fields are not safe to read directly while a
+// Stream call is in flight. Use CallCount and CallsSnapshot for locked,
+// concurrency-safe reads; read the exported fields directly only when no
+// Stream call is concurrent.
 type Client struct {
 	mu      sync.Mutex
 	Scripts []Script
@@ -42,7 +50,12 @@ func New(scripts ...Script) *Client {
 // script's configured error. Honors ctx cancellation between events.
 func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.ToolDefinition, onEvent func(llm.StreamEvent)) error {
 	c.mu.Lock()
-	c.Calls = append(c.Calls, Call{Msgs: msgs, Tools: tools})
+	// Snapshot the caller's slices so a later mutation/reuse of msgs or tools
+	// can't retroactively alter what we recorded.
+	c.Calls = append(c.Calls, Call{
+		Msgs:  slices.Clone(msgs),
+		Tools: slices.Clone(tools),
+	})
 	idx := c.calls
 	c.calls++
 	if len(c.Scripts) == 0 {
@@ -69,4 +82,13 @@ func (c *Client) CallCount() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.calls
+}
+
+// CallsSnapshot returns a copy of the recorded calls taken under the lock,
+// for callers that want a concurrency-safe view without touching the
+// exported Calls field directly.
+func (c *Client) CallsSnapshot() []Call {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.Calls)
 }
