@@ -107,6 +107,34 @@ func TestRotateKeepsMaxArchives(t *testing.T) {
 	}
 }
 
+func TestOddFieldMarkedMissing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.log")
+
+	lg, closer, err := Open(path, 2*1024*1024, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closer.Close()
+
+	// Odd number of fields: the dangling key has no value. Even pairs
+	// before it must still format normally.
+	lg.Warn("odd msg", "k1", "v1", "lonely")
+	_ = closer.Close()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	if !strings.Contains(s, "k1=v1") {
+		t.Errorf("missing even-pair field k1=v1:\n%s", s)
+	}
+	if !strings.Contains(s, "lonely=<MISSING>") {
+		t.Errorf("dangling odd field not marked missing:\n%s", s)
+	}
+}
+
 func TestNoopLogger(t *testing.T) {
 	var lg Logger = Noop{}
 	lg.Debug("d")

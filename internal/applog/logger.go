@@ -42,20 +42,22 @@ type fileLogger struct {
 }
 
 func (l *fileLogger) Debug(msg string, fields ...any) {
-	l.write("DEBUG", msg, nil, fields)
+	l.write("DEBUG", msg, nil, fields, false)
 }
 
 func (l *fileLogger) Warn(msg string, fields ...any) {
-	line := l.write("WARN", msg, nil, fields)
-	fmt.Fprint(l.stderr, line)
+	l.write("WARN", msg, nil, fields, true)
 }
 
 func (l *fileLogger) Error(msg string, err error, fields ...any) {
-	line := l.write("ERROR", msg, err, fields)
-	fmt.Fprint(l.stderr, line)
+	l.write("ERROR", msg, err, fields, true)
 }
 
-func (l *fileLogger) write(level, msg string, err error, fields []any) string {
+// write formats and emits a log line. When mirror is true the line is also
+// written to stderr. The file write and the optional stderr mirror both happen
+// while holding l.mu so their relative ordering stays consistent under
+// concurrency.
+func (l *fileLogger) write(level, msg string, err error, fields []any, mirror bool) {
 	var b strings.Builder
 	b.WriteString(time.Now().UTC().Format(time.RFC3339))
 	b.WriteString(" [")
@@ -69,12 +71,17 @@ func (l *fileLogger) write(level, msg string, err error, fields []any) string {
 	for i := 0; i+1 < len(fields); i += 2 {
 		fmt.Fprintf(&b, " %v=%v", fields[i], fields[i+1])
 	}
+	if len(fields)%2 == 1 {
+		fmt.Fprintf(&b, " %v=<MISSING>", fields[len(fields)-1])
+	}
 	b.WriteString("\n")
 	line := b.String()
 	l.mu.Lock()
 	_, _ = io.WriteString(l.w, line)
+	if mirror {
+		fmt.Fprint(l.stderr, line)
+	}
 	l.mu.Unlock()
-	return line
 }
 
 // Open creates a Logger that writes to path, rotating the file if it exceeds
