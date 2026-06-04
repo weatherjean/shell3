@@ -677,6 +677,9 @@ shell3.agent({
   name  = "base",
   model = "main",
 
+  environment   = true,
+  core_memories = true,
+
   prompt = base_prompt,
 
   tools = {
@@ -712,6 +715,10 @@ shell3.agent({
 shell3.agent({
   name  = "plan",
   model = "main",
+
+  environment   = true,
+  core_memories = true,
+
   prompt = base_prompt,
 
   tools = {
