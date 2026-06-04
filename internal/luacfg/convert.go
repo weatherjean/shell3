@@ -1,6 +1,23 @@
 package luacfg
 
-import lua "github.com/yuin/gopher-lua"
+import (
+	"strconv"
+
+	lua "github.com/yuin/gopher-lua"
+)
+
+// hasStringKey reports whether the table has any string (non-integer) key. It
+// scans the whole table: lua.LTable.ForEach has no break, so iteration always
+// runs to completion rather than stopping at the first match.
+func hasStringKey(t *lua.LTable) bool {
+	found := false
+	t.ForEach(func(k, _ lua.LValue) {
+		if _, ok := k.(lua.LString); ok {
+			found = true
+		}
+	})
+	return found
+}
 
 func optStr(t *lua.LTable, k string) string {
 	if s, ok := t.RawGetString(k).(lua.LString); ok {
@@ -84,14 +101,24 @@ func luaToGo(v lua.LValue) any {
 		return bool(x)
 	case *lua.LTable:
 		n := x.Len()
-		if n > 0 {
+		// A pure sequence (positive Len and no string keys) becomes a []any.
+		// Any table carrying string keys becomes a map that preserves BOTH the
+		// integer-indexed entries and the string-keyed entries so nothing is
+		// silently dropped.
+		if n > 0 && !hasStringKey(x) {
 			arr := make([]any, 0, n)
 			for i := 1; i <= n; i++ {
 				arr = append(arr, luaToGo(x.RawGetInt(i)))
 			}
 			return arr
 		}
-		return tableToMap(x)
+		m := tableToMap(x)
+		if n > 0 {
+			for i := 1; i <= n; i++ {
+				m[strconv.Itoa(i)] = luaToGo(x.RawGetInt(i))
+			}
+		}
+		return m
 	default:
 		return nil
 	}

@@ -1,9 +1,46 @@
 package luacfg
 
 import (
+	"context"
 	"testing"
 	"time"
+
+	lua "github.com/yuin/gopher-lua"
 )
+
+// TestLuaBashHonorsToolContext proves luaBash derives its command context from
+// the VM's tool context (L.Context, set by CallTool/runLuaGuard) rather than a
+// fresh Background context. A pre-cancelled context must abort the command
+// immediately instead of waiting out the (long) timeout.
+func TestLuaBashHonorsToolContext(t *testing.T) {
+	L := lua.NewState()
+	defer L.Close()
+	c := &LoadedConfig{L: L}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled before the command runs
+	L.SetContext(ctx)
+
+	// Long-running command with a generous timeout; only context cancellation
+	// can make this return quickly.
+	L.Push(lua.LString("sleep 30"))
+	opts := L.NewTable()
+	opts.RawSetString("timeout", lua.LNumber(600))
+	L.Push(opts)
+
+	start := time.Now()
+	c.luaBash(L)
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("luaBash ignored cancelled tool context (took %v)", elapsed)
+	}
+	res, ok := L.Get(-1).(*lua.LTable)
+	if !ok {
+		t.Fatalf("luaBash did not return a result table")
+	}
+	if exit := res.RawGetString("exit").(lua.LNumber); exit == 0 {
+		t.Fatalf("expected non-zero exit from cancelled command, got %v", exit)
+	}
+}
 
 func TestWithIOUnlockTopLevelLeavesForeignLockHeld(t *testing.T) {
 	c := &LoadedConfig{}
