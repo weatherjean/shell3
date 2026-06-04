@@ -1,7 +1,9 @@
 package patchwidgets
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/weatherjean/shell3/internal/patchtui"
@@ -64,7 +66,7 @@ func Pick(spec PickSpec) (Result, error) {
 			bindings = append([]string{"type to filter"}, bindings...)
 		}
 		lines = append(lines, hintLine(bindings...))
-		paintFrame(t, r, lines)
+		paintFrame(r, lines)
 	}
 
 	render()
@@ -73,7 +75,10 @@ func Pick(spec PickSpec) (Result, error) {
 	for {
 		k, err := t.readKey(remaining(deadline))
 		if err != nil {
-			return eofResult(), nil
+			if errors.Is(err, io.EOF) {
+				return eofResult(), nil
+			}
+			return Result{}, fmt.Errorf("patchwidgets: read tty: %w", err)
 		}
 		visible := filteredIndexes(spec.Choices, string(filter))
 		switch k.kind {

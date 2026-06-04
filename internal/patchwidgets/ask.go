@@ -1,6 +1,9 @@
 package patchwidgets
 
 import (
+	"errors"
+	"fmt"
+	"io"
 	"time"
 
 	"github.com/weatherjean/shell3/internal/patchtui"
@@ -45,7 +48,7 @@ func Ask(spec AskSpec) (Result, error) {
 			line,
 			hintLine("enter submit", "esc cancel"),
 		}
-		paintFrame(t, r, frame)
+		paintFrame(r, frame)
 	}
 
 	render()
@@ -54,7 +57,10 @@ func Ask(spec AskSpec) (Result, error) {
 	for {
 		k, err := t.readKey(remaining(deadline))
 		if err != nil {
-			return eofResult(), nil
+			if errors.Is(err, io.EOF) {
+				return eofResult(), nil
+			}
+			return Result{}, fmt.Errorf("patchwidgets: read tty: %w", err)
 		}
 		switch k.kind {
 		case keyEnter:
@@ -131,8 +137,8 @@ func remaining(deadline time.Time) time.Duration {
 	return d
 }
 
-// paintFrame renders frame to the tty via the renderer (which has been
-// pre-pointed at the tty file via [patchtui.Renderer.SetOutput]).
-func paintFrame(_ *tty, r *patchtui.Renderer, frame []string) {
+// paintFrame renders frame via the renderer (which has been pre-pointed at
+// the tty file via [patchtui.Renderer.SetOutput]).
+func paintFrame(r *patchtui.Renderer, frame []string) {
 	r.Render(frame)
 }
