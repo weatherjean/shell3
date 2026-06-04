@@ -44,6 +44,20 @@ type ActiveModel struct {
 	ContextWindow int
 }
 
+// ActiveAgent is the full runtime bundle produced when switching agents:
+// everything the chat loop needs to run the next turn under a different agent.
+type ActiveAgent struct {
+	Personality   persona.Persona
+	ToolGuard     func(ctx context.Context, tool string, params map[string]any) (int, string, error)
+	ModeLabel     string
+	ActiveSkills  []string
+	ActiveTools   []string
+	LLM           LLMClient
+	Params        llm.RequestParams
+	ModelID       string
+	ContextWindow int
+}
+
 // Config holds all dependencies for a chat session. It is the top-level
 // embedding contract: callers populate this once at startup and reuse it
 // across turns. TurnConfig is derived from Config for each turn.
@@ -116,6 +130,12 @@ type Config struct {
 	// SwitchModel activates the model with the given config name and returns
 	// the new client plus its metadata. Nil disables model switching.
 	SwitchModel func(name string) (ActiveModel, error)
+	// AgentNames lists configured agents in declaration order, for /agent and
+	// Tab cycling. Empty or single-element disables switching.
+	AgentNames []string
+	// SwitchAgent activates the agent with the given name and returns its full
+	// runtime bundle. Nil disables agent switching.
+	SwitchAgent func(name string) (ActiveAgent, error)
 }
 
 // NewHandlers constructs the built-in tool handler map from a Config.
