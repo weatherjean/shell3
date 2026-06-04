@@ -202,7 +202,43 @@ func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
 		}()
 	}
 
-	registerSlashCommands(app, &cfg, sess, &lastUsage, launchTurn)
+	applyAgent := func(rt chat.ActiveAgent) {
+		cfg.LLM = rt.LLM
+		cfg.Personality = rt.Personality
+		cfg.Params = rt.Params
+		cfg.ToolGuard = rt.ToolGuard
+		cfg.ModeLabel = rt.ModeLabel
+		cfg.ActiveSkills = rt.ActiveSkills
+		cfg.ActiveTools = rt.ActiveTools
+		cfg.CustomToolNames = rt.CustomToolNames
+		cfg.ContextWindow = rt.ContextWindow
+		cfg.StatusLine = fmt.Sprintf("%s │ %s", rt.ModeLabel, rt.ModelID)
+		app.SetMode(rt.ModeLabel)
+		app.SetStatus(cfg.StatusLine)
+		app.SetContextWindow(rt.ContextWindow)
+	}
+
+	app.SetTab(func() {
+		if cfg.SwitchAgent == nil || len(cfg.AgentNames) < 2 {
+			return
+		}
+		cur := 0
+		for i, n := range cfg.AgentNames {
+			if n == cfg.ModeLabel {
+				cur = i
+				break
+			}
+		}
+		next := cfg.AgentNames[(cur+1)%len(cfg.AgentNames)]
+		rt, err := cfg.SwitchAgent(next)
+		if err != nil {
+			return
+		}
+		applyAgent(rt)
+		app.PrintLine(patchtui.Dim + "[agent: " + rt.ModeLabel + "]" + patchtui.Reset)
+	})
+
+	registerSlashCommands(app, &cfg, sess, &lastUsage, launchTurn, applyAgent)
 
 	app.SetSubmit(func(input string) {
 		launchTurn(llm.Message{Role: llm.RoleUser, Content: input})
@@ -451,7 +487,7 @@ type slashTarget interface {
 // So a slash handler and drainTurn never touch cfg/lastUsage at the same time.
 // Keep that invariant intact, or add synchronization. See drainTurn for the
 // matching note on the read side.
-func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session, lastUsage *llm.Usage, launchTurn func(llm.Message)) {
+func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session, lastUsage *llm.Usage, launchTurn func(llm.Message), applyAgent func(chat.ActiveAgent)) {
 	dim := func(s string) { app.PrintLine(patchtui.Dim + s + patchtui.Reset) }
 
 	app.RegisterSlash(patchapp.SlashCommand{
@@ -628,40 +664,33 @@ func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session
 		},
 	})
 	app.RegisterSlash(patchapp.SlashCommand{
-		Name: "model", Help: "/model [name] — list configured models or switch active model",
+		Name: "agent", Help: "/agent [name] — list agents or switch the active agent",
 		Handler: func(args string) {
-			if len(cfg.Models) == 0 || cfg.SwitchModel == nil {
-				dim("[no models configured]")
+			if cfg.SwitchAgent == nil || len(cfg.AgentNames) == 0 {
+				dim("[no agents configured]")
 				return
 			}
-			_, curID := chat.SplitStatus(cfg.StatusLine)
 			name := strings.TrimSpace(args)
 			if name == "" {
-				lines := []string{patchtui.Bold + "models:" + patchtui.Reset}
-				for _, mi := range cfg.Models {
+				lines := []string{patchtui.Bold + "agents:" + patchtui.Reset}
+				for _, n := range cfg.AgentNames {
 					marker := ""
-					if mi.ModelID == curID {
+					if n == cfg.ModeLabel {
 						marker = patchtui.Dim + "  (active)" + patchtui.Reset
 					}
-					lines = append(lines, fmt.Sprintf("  %-12s %s%s", mi.Name, mi.ModelID, marker))
+					lines = append(lines, "  "+n+marker)
 				}
-				lines = append(lines, "", patchtui.Dim+"usage: /model <name>"+patchtui.Reset)
+				lines = append(lines, "", patchtui.Dim+"usage: /agent <name>"+patchtui.Reset)
 				app.Print(lines)
 				return
 			}
-			am, err := cfg.SwitchModel(name)
+			rt, err := cfg.SwitchAgent(name)
 			if err != nil {
 				dim(fmt.Sprintf("[%v]", err))
 				return
 			}
-			cfg.LLM = am.Client
-			cfg.Params = am.Params
-			cfg.ContextWindow = am.ContextWindow
-			prov, _ := chat.SplitStatus(cfg.StatusLine)
-			cfg.StatusLine = chat.FormatStatus(prov, am.ModelID, am.Params.ReasoningEffort)
-			app.SetStatus(cfg.StatusLine)
-			app.SetContextWindow(am.ContextWindow)
-			dim(fmt.Sprintf("[model: %s → %s]", name, am.ModelID))
+			applyAgent(rt)
+			dim(fmt.Sprintf("[agent: %s]", rt.ModeLabel))
 		},
 	})
 	app.RegisterSlash(patchapp.SlashCommand{
