@@ -39,9 +39,16 @@ type Registry struct {
 	Jobs []Job `json:"jobs"`
 }
 
-// fileLock serializes read-modify-write on bg.json across goroutines in
-// the same process. Cross-process races are unlikely (single shell3
-// instance per workdir) and not worth flock complexity here.
+// fileLock serializes the read-modify-write of bg.json across goroutines
+// WITHIN a single process. It does NOT guard against cross-process races:
+// because pkg/shell3 is a public embeddable library, multiple host
+// processes (or multiple shell3 binaries) can target the same workdir's
+// .shell3/bg.json concurrently. In that case two appendJob calls in
+// different processes can interleave and the last atomic rename wins,
+// silently dropping the other process's appended job. This is an accepted
+// limitation: the only lost state is a bg.json TRACKING entry — the
+// spawned process itself is already detached and reaped independently — so
+// flock was deliberately not added here.
 var fileLock sync.Mutex
 
 // Start spawns command in workdir detached, returning the recorded Job.
@@ -158,8 +165,11 @@ func LoadRegistry(workdir string) (Registry, error) {
 }
 
 // appendJob locks, loads, appends, atomically rewrites bg.json. If the
-// existing file is corrupt it is moved aside as bg.json.bak and a fresh
-// registry is written — preserves forensics without blocking new jobs.
+// existing file is corrupt it is moved aside under a unique, timestamped
+// bg.json.<nanos>.bak name and a fresh registry is written — preserves
+// forensics (without clobbering earlier backups) and does not block new
+// jobs. If the backup rename fails, appendJob returns the error rather than
+// overwriting (and so destroying) the corrupt original.
 func appendJob(workdir string, job Job) error {
 	fileLock.Lock()
 	defer fileLock.Unlock()
@@ -168,8 +178,15 @@ func appendJob(workdir string, job Job) error {
 	}
 	reg, err := LoadRegistry(workdir)
 	if err != nil {
-		// Back up the bad file, start fresh.
-		_ = os.Rename(registryPath(workdir), registryPath(workdir)+".bak")
+		// Back up the bad file under a unique name, then start fresh. A
+		// timestamped suffix keeps successive corruptions from clobbering
+		// each other's forensic copy. If the rename fails we must NOT
+		// proceed to overwrite the corrupt original (that would destroy the
+		// only copy of the bad data); surface the error instead.
+		bak := registryPath(workdir) + fmt.Sprintf(".%d.bak", time.Now().UnixNano())
+		if rerr := os.Rename(registryPath(workdir), bak); rerr != nil {
+			return fmt.Errorf("back up corrupt bg.json: %w", rerr)
+		}
 		reg = Registry{}
 	}
 	reg.Jobs = append(reg.Jobs, job)

@@ -128,8 +128,14 @@ func TestStart_corruptRegistryRecovers(t *testing.T) {
 		t.Fatalf("start should recover from corrupt bg.json: %v", err)
 	}
 	t.Cleanup(func() { os.Remove(job.Log) })
-	if _, err := os.Stat(bad + ".bak"); err != nil {
-		t.Fatalf("expected backup file at %s.bak", bad)
+	baks := backupFiles(t, wd)
+	if len(baks) != 1 {
+		t.Fatalf("expected exactly one .bak backup, got %d: %v", len(baks), baks)
+	}
+	if got, err := os.ReadFile(baks[0]); err != nil {
+		t.Fatalf("read backup: %v", err)
+	} else if string(got) != "{not valid json" {
+		t.Fatalf("backup did not preserve corrupt content: %q", got)
 	}
 	reg, err := LoadRegistry(wd)
 	if err != nil {
@@ -137,6 +143,115 @@ func TestStart_corruptRegistryRecovers(t *testing.T) {
 	}
 	if len(reg.Jobs) != 1 {
 		t.Fatalf("registry should hold 1 job, got %d", len(reg.Jobs))
+	}
+}
+
+// backupFiles returns all bg.json*.bak files under <wd>/.shell3.
+func backupFiles(t *testing.T, wd string) []string {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(wd, ".shell3", "bg.json.*.bak"))
+	if err != nil {
+		t.Fatalf("glob backups: %v", err)
+	}
+	return matches
+}
+
+// TestStart_corruptRegistryBackupsAreUnique verifies that two successive
+// corruption cycles produce two DISTINCT backup files: the second corruption
+// must not clobber the first one's forensic copy. With the old fixed-name
+// (bg.json.bak) scheme this left only a single backup, so this fails before
+// the unique/timestamped-name fix and passes after.
+func TestStart_corruptRegistryBackupsAreUnique(t *testing.T) {
+	wd := t.TempDir()
+	reg := filepath.Join(wd, ".shell3", "bg.json")
+	if err := os.MkdirAll(filepath.Dir(reg), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// First corruption cycle.
+	if err := os.WriteFile(reg, []byte("first-corrupt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	j1, err := Start("true", wd)
+	if err != nil {
+		t.Fatalf("first recover: %v", err)
+	}
+	t.Cleanup(func() { os.Remove(j1.Log) })
+
+	// Second corruption cycle: overwrite the freshly-written registry with
+	// new garbage and append again.
+	if err := os.WriteFile(reg, []byte("second-corrupt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	j2, err := Start("true", wd)
+	if err != nil {
+		t.Fatalf("second recover: %v", err)
+	}
+	t.Cleanup(func() { os.Remove(j2.Log) })
+
+	baks := backupFiles(t, wd)
+	if len(baks) != 2 {
+		t.Fatalf("want 2 distinct backups (no clobber), got %d: %v", len(baks), baks)
+	}
+	// Both corrupt payloads must be preserved across the two backups.
+	seen := map[string]bool{}
+	for _, b := range baks {
+		data, err := os.ReadFile(b)
+		if err != nil {
+			t.Fatalf("read backup %s: %v", b, err)
+		}
+		seen[string(data)] = true
+	}
+	if !seen["first-corrupt"] || !seen["second-corrupt"] {
+		t.Fatalf("backups did not preserve both corrupt payloads: %v", seen)
+	}
+}
+
+// TestAppendJob_backupRenameFailureDoesNotOverwrite verifies that when the
+// corrupt-registry backup rename fails, appendJob returns an error WITHOUT
+// overwriting the corrupt original — so the bad data is not silently
+// destroyed.
+func TestAppendJob_backupRenameFailureDoesNotOverwrite(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: mode 0555 dirs are still writable, rename cannot be forced to fail")
+	}
+	wd := t.TempDir()
+	reg := filepath.Join(wd, ".shell3", "bg.json")
+	if err := os.MkdirAll(filepath.Dir(reg), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(reg, []byte("corrupt-payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Make .shell3 read-only so the os.Rename of the backup fails (EACCES /
+	// EPERM): the directory entries cannot be modified.
+	dir := filepath.Dir(reg)
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o755) })
+
+	err := appendJob(wd, Job{ID: "bg_test"})
+	if err == nil {
+		t.Fatal("expected error when backup rename fails, got nil")
+	}
+	// The error must come from the backup step, proving appendJob bailed out
+	// BEFORE attempting to overwrite. With the old code the rename error was
+	// swallowed and the failure instead surfaced later from writeAtomic.
+	if !strings.Contains(err.Error(), "back up corrupt bg.json") {
+		t.Fatalf("error should report the failed backup, got: %v", err)
+	}
+	// Restore write perms so we can inspect, then confirm the corrupt
+	// original is intact (not overwritten with a fresh registry).
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(reg)
+	if err != nil {
+		t.Fatalf("read original: %v", err)
+	}
+	if string(got) != "corrupt-payload" {
+		t.Fatalf("corrupt original was overwritten: %q", got)
 	}
 }
 
