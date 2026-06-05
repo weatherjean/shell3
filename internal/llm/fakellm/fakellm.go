@@ -28,12 +28,9 @@ type Call struct {
 // Each call to Stream consumes one Script from Scripts (in order). If
 // Scripts is exhausted, the last script repeats.
 //
-// Client is intended for single-threaded test use. Stream's own bookkeeping
-// (the call counter and the recorded Calls slice) is mutex-guarded, but the
-// exported Scripts and Calls fields are not safe to read directly while a
-// Stream call is in flight. Use CallCount and CallsSnapshot for locked,
-// concurrency-safe reads; read the exported fields directly only when no
-// Stream call is concurrent.
+// Client is intended for single-threaded test use. Stream's bookkeeping is
+// mutex-guarded, but the exported Scripts/Calls fields are not safe to read
+// while a Stream call is in flight — use CallCount and CallsSnapshot for that.
 type Client struct {
 	mu      sync.Mutex
 	Scripts []Script

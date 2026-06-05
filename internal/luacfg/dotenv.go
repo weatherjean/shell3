@@ -48,12 +48,9 @@ func parseDotEnvValue(v string) string {
 	return v
 }
 
-// stripInlineComment removes a trailing unquoted `# comment`. A `#` only starts a
-// comment when it is outside any quoted span and preceded by whitespace (or is at
-// the start of the value); a `#` inside quotes, or one with no preceding space, is
-// kept as a literal value character. An unterminated opening quote leaves the
-// rest of the line treated as literal (no `#` is stripped), matching the
-// preserve-`#`-inside-quotes intent.
+// stripInlineComment removes a trailing unquoted `# comment`: a `#` starts a
+// comment only when outside quotes and preceded by whitespace (or at the start);
+// otherwise it is kept as a literal value character.
 func stripInlineComment(v string) string {
 	var quote byte // 0 when not inside quotes
 	for i := 0; i < len(v); i++ {

@@ -23,11 +23,8 @@ func (c *LoadedConfig) OnToolCall(ctx context.Context, tool string, params map[s
 	for _, g := range c.Active().Guard {
 		d, reason, err := c.runLuaGuard(ctx, g.fn, tool, params)
 		if err != nil {
-			// A guard that errors at runtime (bug, corrupt guard, Lua
-			// exception) must fail closed: a safety guard exists to *block*
-			// dangerous calls, so a broken one denying the call is the safe
-			// direction. Returning allow here would silently permit whatever
-			// the guard was meant to stop.
+			// Fail closed: a broken guard must block rather than silently
+			// allow whatever it was meant to stop.
 			return DecisionBlock, "guard execution error: " + err.Error(), nil
 		}
 		if d != DecisionAllow {
@@ -42,7 +39,7 @@ func (c *LoadedConfig) OnToolCall(ctx context.Context, tool string, params map[s
 func (c *LoadedConfig) lockVM() func() {
 	c.mu.Lock()
 	c.vmLockHeld = true
-	return func() { c.vmLockHeld = false; c.mu.Unlock() } // clear flag before releasing
+	return func() { c.vmLockHeld = false; c.mu.Unlock() }
 }
 
 // runLuaGuard calls a single Lua guard function, locking the VM mutex.

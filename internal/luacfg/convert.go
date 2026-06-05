@@ -6,9 +6,7 @@ import (
 	lua "github.com/yuin/gopher-lua"
 )
 
-// hasStringKey reports whether the table has any string (non-integer) key. It
-// scans the whole table: lua.LTable.ForEach has no break, so iteration always
-// runs to completion rather than stopping at the first match.
+// hasStringKey reports whether the table has any string (non-integer) key.
 func hasStringKey(t *lua.LTable) bool {
 	found := false
 	t.ForEach(func(k, _ lua.LValue) {
@@ -101,10 +99,8 @@ func luaToGo(v lua.LValue) any {
 		return bool(x)
 	case *lua.LTable:
 		n := x.Len()
-		// A pure sequence (positive Len and no string keys) becomes a []any.
-		// Any table carrying string keys becomes a map that preserves BOTH the
-		// integer-indexed entries and the string-keyed entries so nothing is
-		// silently dropped.
+		// A pure sequence becomes []any; a table with any string key becomes a
+		// map preserving BOTH integer- and string-keyed entries (nothing dropped).
 		if n > 0 && !hasStringKey(x) {
 			arr := make([]any, 0, n)
 			for i := 1; i <= n; i++ {

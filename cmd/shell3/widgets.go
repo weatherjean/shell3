@@ -27,8 +27,6 @@ writes the Result on stdout. Exit codes: 0 ok, 1 confirm-no, 2 timeout,
 	return cmd
 }
 
-// newAskCommand reads an AskSpec JSON from stdin, runs the widget, writes
-// the Result JSON to stdout, and exits with the conventional code.
 func newAskCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "ask",
@@ -52,8 +50,6 @@ Exit codes: 0 ok, 2 timeout, 130 cancel/eof.`,
 	}
 }
 
-// newPickCommand reads a PickSpec JSON from stdin and prints a Result
-// JSON on stdout.
 func newPickCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "pick",
@@ -77,8 +73,6 @@ timeout. Exit codes: 0 ok, 2 timeout, 130 cancel/eof.`,
 	}
 }
 
-// newConfirmCommand reads a ConfirmSpec JSON from stdin and prints a
-// Result JSON on stdout. Exit code 1 means the user answered "no".
 func newConfirmCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "confirm",

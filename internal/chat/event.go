@@ -229,12 +229,12 @@ func emitTurnDone(s *Session, prompt, completion, total int) {
 }
 
 // emit performs a best-effort non-blocking send for high-volume events
-// (tokens, reasoning, usage, etc.). Dropped events are not retried.
-// Recovers from send-on-closed-channel so teardown races don't panic the
-// turn loop — the channel is closed exactly once during shutdown, but a
-// late hook or goroutine may still try to emit.
-// Lifecycle-terminal events (turn_done, error, session_end) use emitSync
-// instead to guarantee delivery.
+// (tokens, reasoning, usage, etc.); dropped events are not retried.
+// Lifecycle-terminal events use emitSync instead to guarantee delivery.
+//
+// Both emit and emitSync recover from send-on-closed-channel so a late emit
+// during teardown can't panic the turn loop (the channel is closed exactly once
+// during shutdown, but a late hook or goroutine may still try to emit).
 func emit(s *Session, ev Event) {
 	if s == nil || s.events == nil {
 		return
@@ -249,9 +249,7 @@ func emit(s *Session, ev Event) {
 // emitSync performs a blocking send so the event is never dropped. Used for
 // lifecycle-terminal events (turn_done, error, session_end) that downstream
 // consumers (pkg/shell3 drain, the TUI) treat as a hard completion barrier:
-// dropping one permanently hangs the consumer. Recovers from
-// send-on-closed-channel so a late emit during teardown can't panic the turn
-// loop (the channel is closed exactly once during shutdown).
+// dropping one permanently hangs the consumer. See emit for the teardown recover.
 func emitSync(s *Session, ev Event) {
 	if s == nil || s.events == nil {
 		return

@@ -43,16 +43,15 @@ func (p *RequestParams) SetByName(name, value string) error {
 		b := value == "true"
 		p.ParallelToolCalls = &b
 	case "temperature":
-		// ParseFloat rejects the whole string on trailing garbage, unlike
-		// fmt.Sscanf which silently accepts a parseable prefix.
+		// strconv (here and for max_tokens) rejects trailing garbage outright,
+		// unlike fmt.Sscanf which silently accepts a parseable prefix.
 		f, err := strconv.ParseFloat(value, 64)
 		if err != nil {
 			return fmt.Errorf("temperature: %w", err)
 		}
 		p.Temperature = &f
 	case "max_tokens":
-		// Atoi rejects floats/garbage outright, unlike fmt.Sscanf %d which
-		// silently truncates (e.g. "12.9" → 12).
+		// Atoi also rejects floats (e.g. "12.9"), which Sscanf %d would truncate.
 		n, err := strconv.Atoi(value)
 		if err != nil {
 			return fmt.Errorf("max_tokens: %w", err)

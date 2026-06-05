@@ -15,11 +15,10 @@ import (
 // attempt is the last one (so it suppresses a spurious "retrying" notice).
 const maxRetries = 5
 
-// retryObserver returns SDK middleware that emits a Retry StreamEvent each
-// time an attempt fails retryably and the SDK will retry it. The SDK runs the
-// middleware once per attempt and tags the request with X-Stainless-Retry-Count
-// (the 0-based attempt index); the upcoming retry is therefore index+1. The
-// SDK still owns the backoff sleep and the retry itself — this only surfaces it.
+// retryObserver returns SDK middleware that emits a Retry StreamEvent each time
+// the SDK will retry a failed attempt. It only surfaces the retry; the SDK owns
+// the backoff and the retry itself. X-Stainless-Retry-Count is the 0-based
+// attempt index, so the upcoming retry is index+1.
 func retryObserver(onEvent func(llm.StreamEvent), max int) option.Middleware {
 	return func(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
 		res, err := next(req)

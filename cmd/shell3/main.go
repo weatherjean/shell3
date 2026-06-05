@@ -10,12 +10,8 @@ import (
 	"github.com/weatherjean/shell3/internal/patchapp"
 )
 
-// version is the build version, overridable at link time:
-//
-//	go build -ldflags "-X main.version=v0.1.0" ./cmd/shell3
-//
-// The Makefile sets it from the latest git tag. Defaults to "dev" for a
-// plain `go build` / `go install`.
+// version is the build version, set at link time via -X main.version (the
+// Makefile derives it from the latest git tag); "dev" for a plain go build.
 var version = "dev"
 
 func main() {

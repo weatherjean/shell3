@@ -64,11 +64,8 @@ type LoadedConfig struct {
 
 	L  *lua.LState
 	mu sync.Mutex
-	// vmLockHeld is true while c.mu is held by CallTool/runLuaGuard driving the VM
-	// on this (single) goroutine. withIOUnlock reads it to decide whether it
-	// must release+reacquire c.mu around blocking IO. Only ever touched by the
-	// goroutine holding c.mu (or at top-level Load, where it is false), per the
-	// single-agent VM invariant — so it needs no separate synchronization.
+	// vmLockHeld is true while c.mu is held by CallTool/runLuaGuard driving the
+	// VM. See withIOUnlock (lua_bash.go) for the locking model.
 	vmLockHeld bool
 }
 

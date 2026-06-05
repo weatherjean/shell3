@@ -14,12 +14,8 @@ import (
 	"time"
 )
 
-// Logger is the application-wide logging interface.
-//
-// Warn and Error write to both the log file and stderr so users see
-// actionable messages in their terminal. Debug writes to the log file only.
-//
-// Fields are key/value pairs: logger.Warn("msg", "key", val, "key2", val2).
+// Logger is the application-wide logging interface. Fields are key/value
+// pairs: logger.Warn("msg", "key", val, "key2", val2).
 type Logger interface {
 	Debug(msg string, fields ...any)
 	Warn(msg string, fields ...any)
@@ -33,8 +29,7 @@ func (Noop) Debug(string, ...any)        {}
 func (Noop) Warn(string, ...any)         {}
 func (Noop) Error(string, error, ...any) {}
 
-// fileLogger writes structured log lines to w, and mirrors Warn/Error to
-// stderr so users see actionable messages in their terminal.
+// fileLogger writes structured log lines to w (mirroring Warn/Error to stderr).
 type fileLogger struct {
 	mu     sync.Mutex
 	w      io.WriteCloser

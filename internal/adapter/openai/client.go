@@ -28,17 +28,13 @@ type bodyTap struct {
 	reasoning string
 	done      chan struct{}
 	rt        http.RoundTripper
-	// reasoningQueue holds reasoning fragments extracted by scanReasoning,
-	// pending delivery. The Stream goroutine drains it (drainReasoning) and
-	// emits them, so onEvent is only ever called from that single goroutine —
-	// never from the scan goroutine. Guarded by mu. (reasoning, above, is the
-	// full accumulated string for snapshot/WaitReasoning; the queue is the
-	// incremental feed for onEvent — two views of the same data, two consumers.)
-	//
-	// Like reasoning/done, this is per-request state on a tap reused across
-	// requests: RoundTrip resets it. All access is under mu, so it is race-free;
-	// a scan goroutine orphaned by a cancelled turn that appends here is
-	// harmless (cleared by the next RoundTrip / drain).
+	// reasoningQueue is the incremental feed of reasoning fragments for onEvent
+	// (reasoning, above, is the full accumulated string for snapshot/WaitReasoning).
+	// The Stream goroutine drains it via drainReasoning, so onEvent is only ever
+	// called from that single goroutine — never from the scan goroutine. Like
+	// reasoning/done, it is per-request state reset by RoundTrip. All access is
+	// under mu, so an orphaned scan goroutine appending here after a cancelled
+	// turn is harmless (cleared by the next RoundTrip / drain).
 	reasoningQueue []string
 }
 
@@ -99,10 +95,8 @@ func (b *bodyTap) scanReasoning(r io.ReadCloser, done chan struct{}) {
 			continue
 		}
 		for _, c := range chunk.Choices {
-			// Different providers emit reasoning under different field names:
-			// OpenRouter uses "reasoning", Moonshot/DeepSeek use "reasoning_content".
-			// Both feed the local string builder (→ b.reasoning) and the
-			// reasoningQueue that the Stream goroutine drains.
+			// Prefer "reasoning" (OpenRouter), fall back to "reasoning_content"
+			// (Moonshot/DeepSeek); see bodyTap for the field-naming note.
 			frag := c.Delta.Reasoning
 			if frag == "" {
 				frag = c.Delta.ReasoningContent
@@ -383,10 +377,9 @@ func toMessages(msgs []llm.Message) []openai.ChatCompletionMessageParamUnion {
 				}
 				asst.ToolCalls = tcs
 			}
-			// Moonshot/DeepSeek require reasoning_content echoed back on
-			// assistant turns when thinking mode produced one. The official
-			// SDK has no first-class field for this vendor extension; inject
-			// via SetExtraFields so it survives MarshalJSON.
+			// The SDK has no field for the reasoning_content vendor extension
+			// (see llm.Message.ReasoningContent); inject via SetExtraFields so
+			// it survives MarshalJSON.
 			if m.ReasoningContent != "" {
 				asst.SetExtraFields(map[string]any{"reasoning_content": m.ReasoningContent})
 			}

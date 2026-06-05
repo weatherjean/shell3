@@ -18,20 +18,13 @@ type Store struct{ db *sql.DB }
 
 // Open opens or creates the SQLite store at path and runs schema migrations.
 //
-// SQLite permits only one writer at a time. database/sql would otherwise open
-// several physical connections and let two of them race for the write lock,
-// surfacing as "database is locked" (SQLITE_BUSY). We serialize writers two
-// ways: SetMaxOpenConns(1) guarantees at most one connection (and thus one
-// writer) regardless of concurrency, and a busy_timeout pragma is a backstop
-// for cross-process contention from another process sharing the DB file;
-// in-process writers already serialize via the single connection. We do NOT
-// set journal_mode(WAL): the temp-file and in-memory DBs used here don't need
-// it and WAL is unsafe for :memory:.
+// SQLite permits only one writer at a time. SetMaxOpenConns(1) serializes
+// in-process writers; the busy_timeout pragma is a backstop for cross-process
+// contention. We do NOT set WAL: it is unneeded here and unsafe for :memory:.
 func Open(path string) (*Store, error) {
 	dsn := path
-	// Append the busy_timeout pragma via modernc's query-param DSN syntax.
-	// Callers pass a bare filesystem path; the ?/& branch is a defensive
-	// fallback for the rare path that already carries DSN query params.
+	// Append the busy_timeout pragma via modernc's query-param DSN syntax; the
+	// ?/& branch handles a path that already carries DSN query params.
 	if strings.Contains(path, "?") {
 		dsn += "&_pragma=busy_timeout(5000)"
 	} else {

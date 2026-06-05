@@ -12,10 +12,8 @@ import (
 // the underlying store session id without going through internal helpers.
 type Session struct {
 	messages []llm.Message
-	// nextToolCallID drives sequential numeric ids ("1", "2", ...) that
-	// replace whatever the provider emits. Models reliably echo a bare
-	// integer; provider-native ids like "web_fetch:0" get truncated by
-	// models and break tool_call_id-based addressing (e.g. prune_tool_result).
+	// nextToolCallID drives sequential numeric ids ("1", "2", ...) that replace
+	// provider-emitted ids. See turn.go (allocToolCallID call site) for why.
 	nextToolCallID   int
 	reminders        reminderTracker
 	lastPromptTokens int   // accurate token count from most recent streamOnce response

@@ -40,15 +40,10 @@ type Registry struct {
 }
 
 // fileLock serializes the read-modify-write of bg.json across goroutines
-// WITHIN a single process. It does NOT guard against cross-process races:
-// because pkg/shell3 is a public embeddable library, multiple host
-// processes (or multiple shell3 binaries) can target the same workdir's
-// .shell3/bg.json concurrently. In that case two appendJob calls in
-// different processes can interleave and the last atomic rename wins,
-// silently dropping the other process's appended job. This is an accepted
-// limitation: the only lost state is a bg.json TRACKING entry — the
-// spawned process itself is already detached and reaped independently — so
-// flock was deliberately not added here.
+// WITHIN a single process; it does NOT guard cross-process races (multiple
+// embedding hosts sharing one workdir can interleave, last rename wins). That
+// is an accepted limitation: only a TRACKING entry is lost — the spawned
+// process is detached and reaped independently — so flock was not added.
 var fileLock sync.Mutex
 
 // Start spawns command in workdir detached, returning the recorded Job.
@@ -88,21 +83,17 @@ func Start(command, workdir string) (Job, error) {
 	c.Stdin = devNull
 	c.Stdout = logFile
 	c.Stderr = logFile
-	// Setpgid: new process group so a single kill -- -pgid takes down
-	// the whole tree (bash + any grandchildren). We do not Setsid: it
-	// requires extra privileges in some sandboxes and is not needed
-	// because shell3 redirects stdio to a file (so tty signals can't
-	// reach the job anyway).
+	// Setpgid: new process group so kill -- -pgid takes down the whole tree.
+	// We don't Setsid (needs privileges in some sandboxes; unneeded since stdio
+	// is redirected to a file, so tty signals can't reach the job).
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := c.Start(); err != nil {
 		return Job{}, fmt.Errorf("start: %w", err)
 	}
 	pid := c.Process.Pid
-	// Reap in a goroutine so the kernel does not leave a zombie when the
-	// process exits. We do NOT call Release(): Release would leave the
-	// pid in zombie state forever (Go is the parent but never waits) and
-	// `kill(pid, 0)` reports zombies as alive, breaking liveness checks
-	// the model relies on.
+	// Reap in a goroutine so the exited process leaves no zombie. We do NOT
+	// Release(): that leaves the pid as a zombie forever, and `kill(pid, 0)`
+	// reports zombies as alive, breaking the model's liveness checks.
 	go func() { _ = c.Wait() }()
 
 	job := Job{
@@ -114,14 +105,12 @@ func Start(command, workdir string) (Job, error) {
 		StartedAt: time.Now().UTC(),
 	}
 	if err := appendJob(workdir, job); err != nil {
-		// The process is spawned but unrecorded: the model can't find or kill it
-		// (the PID is never returned). Tear down the whole group (-pid, enabled
-		// by Setpgid above) and drop its log so a failing-disk persist can't
-		// orphan a live, unmanageable process. The reaping goroutine above then
-		// Wait()s it, leaving no zombie. The kill error is discarded: appendJob
-		// fails synchronously (microseconds after Start), so pid reuse is not a
-		// practical concern, and if the process already exited Kill just returns
-		// ESRCH — harmless either way.
+		// The process is spawned but unrecorded (PID never returned), so the
+		// model can't manage it. Tear down the whole group and drop its log so a
+		// failing persist can't orphan a live, unmanageable process; the reaping
+		// goroutine then Wait()s it. The kill error is harmless to discard:
+		// appendJob fails synchronously so pid reuse isn't a concern, and an
+		// already-exited process just yields ESRCH.
 		_ = syscall.Kill(-pid, syscall.SIGKILL)
 		_ = os.Remove(logPath)
 		return Job{}, fmt.Errorf("persist: %w", err)
@@ -179,11 +168,8 @@ func appendJob(workdir string, job Job) error {
 	}
 	reg, err := LoadRegistry(workdir)
 	if err != nil {
-		// Back up the bad file under a unique name, then start fresh. A
-		// timestamped suffix keeps successive corruptions from clobbering
-		// each other's forensic copy. If the rename fails we must NOT
-		// proceed to overwrite the corrupt original (that would destroy the
-		// only copy of the bad data); surface the error instead.
+		// Corrupt file: back it up under a unique name and start fresh; on
+		// rename failure surface the error rather than overwrite (see doc above).
 		bak := registryPath(workdir) + fmt.Sprintf(".%d.bak", time.Now().UnixNano())
 		if rerr := os.Rename(registryPath(workdir), bak); rerr != nil {
 			return fmt.Errorf("back up corrupt bg.json: %w", rerr)

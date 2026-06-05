@@ -119,11 +119,9 @@ func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
 		if runErr != nil {
 			status = "error"
 		}
-		// Cancel any in-flight turn, then join it — while drain still consumes
-		// its events — so no store write is in flight when EndSession runs.
-		// cancelTurns is also deferred as the lostcancel safety net; this explicit
-		// call is the ordering-critical one — it must run before turnWG.Wait() so
-		// in-flight turns unwind before we join them.
+		// Ordering-critical (see block doc above): cancel before join so the
+		// in-flight turn unwinds before turnWG.Wait() joins it. The deferred
+		// cancelTurns is just the lostcancel safety net.
 		cancelTurns()
 		turnWG.Wait()
 		sess.End(status)
@@ -460,17 +458,9 @@ type slashTarget interface {
 // registerSlashCommands wires up the slash registry. Closures capture cfg,
 // sess, and lastUsage so handlers can read and mutate session state.
 //
-// CONCURRENCY: these handlers mutate the shared *chat.Config (e.g. /agent
-// writes cfg.LLM/Params/Personality/ToolGuard/StatusLine/ContextWindow; /clear
-// writes cfg.Personality.SystemPrompt) and read *lastUsage (/usage) with
-// NO mutex, even though drainTurn concurrently reads cfg/writes lastUsage from
-// another goroutine. This is safe ONLY because patchapp's busy-gate
-// (App.handleEnter in internal/patchapp/editor.go) refuses to dispatch any
-// slash handler while a.busy is true, and a turn (with drainTurn actively
-// reading cfg) holds busy from launchTurn until drainTurn sees TurnDone/Error.
-// So a slash handler and drainTurn never touch cfg/lastUsage at the same time.
-// Keep that invariant intact, or add synchronization. See drainTurn for the
-// matching note on the read side.
+// These handlers mutate the shared *chat.Config and read *lastUsage with NO
+// mutex; that is race-free only because of the busy-gate. See drainTurn for the
+// full CONCURRENCY INVARIANT (this is the write side).
 func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session, lastUsage *llm.Usage, launchTurn func(llm.Message), applyAgent func(chat.ActiveAgent)) {
 	dim := func(s string) { app.PrintLine(patchtui.Dim + s + patchtui.Reset) }
 
