@@ -25,11 +25,11 @@ type LLMClient interface {
 // ActiveAgent is the full runtime bundle produced when switching agents:
 // everything the chat loop needs to run the next turn under a different agent.
 type ActiveAgent struct {
-	Personality   persona.Persona
-	ToolGuard     func(ctx context.Context, tool string, params map[string]any) (int, string, error)
-	ModeLabel     string
-	ActiveSkills  []string
-	ActiveTools   []string
+	Personality  persona.Persona
+	ToolGuard    func(ctx context.Context, tool string, params map[string]any) (int, string, error)
+	ModeLabel    string
+	ActiveSkills []string
+	ActiveTools  []string
 	// CustomToolNames is the set of tool names routed to the custom-tool dispatcher.
 	CustomToolNames map[string]bool
 	LLM             LLMClient
