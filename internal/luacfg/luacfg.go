@@ -1,4 +1,5 @@
-// Package luacfg loads a strict single-file shell3.lua config.
+// Package luacfg loads the shell3.lua config. shell3.lua is the entry point;
+// it may require()/dofile() sibling .lua modules resolved relative to its dir.
 package luacfg
 
 import (
@@ -90,6 +91,16 @@ func Load(path, workdir string) (*LoadedConfig, error) {
 		}
 	}()
 	registerShell3(c)
+	// Let shell3.lua require()/dofile() sibling modules by name. gopher-lua's
+	// default package.path resolves relative to the process CWD, which is
+	// wherever shell3 was invoked from — not the config dir. Prepend the config
+	// dir so `require("foo")` finds foo.lua next to shell3.lua.
+	if pkg, ok := c.L.GetGlobal("package").(*lua.LTable); ok {
+		dir := filepath.Dir(path)
+		prev := lua.LVAsString(pkg.RawGetString("path"))
+		pkg.RawSetString("path", lua.LString(
+			filepath.Join(dir, "?.lua")+";"+filepath.Join(dir, "?", "init.lua")+";"+prev))
+	}
 	if err := c.L.DoFile(path); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
