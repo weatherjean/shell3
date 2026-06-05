@@ -185,19 +185,10 @@ func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
 	}
 
 	applyAgent := func(rt chat.ActiveAgent) {
-		cfg.LLM = rt.LLM
-		cfg.Personality = rt.Personality
-		cfg.Params = rt.Params
-		cfg.ToolGuard = rt.ToolGuard
-		cfg.ModeLabel = rt.ModeLabel
-		cfg.ActiveSkills = rt.ActiveSkills
-		cfg.ActiveTools = rt.ActiveTools
-		cfg.CustomToolNames = rt.CustomToolNames
-		cfg.ContextWindow = rt.ContextWindow
-		cfg.StatusLine = fmt.Sprintf("%s │ %s", rt.ModeLabel, rt.ModelID)
-		app.SetMode(rt.ModeLabel)
+		cfg.ApplyActiveAgent(rt)
+		app.SetMode(cfg.ModeLabel)
 		app.SetStatus(cfg.StatusLine)
-		app.SetContextWindow(rt.ContextWindow)
+		app.SetContextWindow(cfg.ContextWindow)
 	}
 
 	app.SetTab(func() {

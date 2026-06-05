@@ -241,29 +241,25 @@ func (b *builder) assemble() (chat.Config, error) {
 		agentNames = append(agentNames, a.Name)
 	}
 
-	return chat.Config{
-		LLM:             rt.LLM,
-		Store:           b.st,
-		Personality:     rt.Personality,
-		RefreshPrompt:   buildPrompt,
-		WorkDir:         b.opts.CWD,
-		StatusLine:      fmt.Sprintf("%s │ %s", rt.ModeLabel, rt.ModelID),
-		ModeLabel:       rt.ModeLabel,
-		ProjectRef:      b.uuid,
-		ActiveSkills:    rt.ActiveSkills,
-		ActiveTools:     rt.ActiveTools,
-		ContextWindow:   rt.ContextWindow,
-		Docs:            docs.Content,
-		CustomTool:      b.lc.CallTool,
-		CustomToolNames: rt.CustomToolNames,
-		ToolGuard:       rt.ToolGuard,
-		Params:          rt.Params,
-		Log:             b.log,
-		OutPath:         b.opts.OutPath,
-		Headless:        b.opts.Headless,
-		AgentNames:      agentNames,
-		SwitchAgent:     switchAgent,
-	}, nil
+	// Agent-independent fields are set here once; the agent-derived fields
+	// (LLM, persona, params, guard, tool/skill sets, context window, status
+	// line) are filled by ApplyActiveAgent — the same method every front-end
+	// uses on a switch, so initial assembly and switching can never drift.
+	cfg := chat.Config{
+		Store:         b.st,
+		RefreshPrompt: buildPrompt,
+		WorkDir:       b.opts.CWD,
+		ProjectRef:    b.uuid,
+		Docs:          docs.Content,
+		CustomTool:    b.lc.CallTool,
+		Log:           b.log,
+		OutPath:       b.opts.OutPath,
+		Headless:      b.opts.Headless,
+		AgentNames:    agentNames,
+		SwitchAgent:   switchAgent,
+	}
+	cfg.ApplyActiveAgent(rt)
+	return cfg, nil
 }
 
 // buildClient constructs a streaming client plus its request params from a

@@ -87,13 +87,7 @@ func (a *App) processInput(data []byte) (exit bool) {
 		case keyEnter:
 			a.handleEnter()
 		case keyTab:
-			a.mu.Lock()
-			busy := a.busy
-			fn := a.onTab
-			a.mu.Unlock()
-			if !busy && fn != nil {
-				fn()
-			}
+			a.handleTab()
 		case keyAltEnter:
 			a.mu.Lock()
 			if !a.busy {
@@ -271,7 +265,32 @@ func (a *App) handleCtrlC() bool {
 	return false
 }
 
+// handleTab fires the Tab callback (agent cycling) when idle, and is a no-op
+// while busy. Like handleEnter, it is part of the busy-gate: the callback
+// (tui.applyAgent) mutates the shared *chat.Config that the event-drain
+// goroutine reads during a turn. See handleEnter's busy-gate note and
+// busygate_test.go, which lock this behaviour in place.
+func (a *App) handleTab() {
+	a.mu.Lock()
+	busy := a.busy
+	fn := a.onTab
+	a.mu.Unlock()
+	if !busy && fn != nil {
+		fn()
+	}
+}
+
 // handleEnter dispatches the input to the SubmitFunc (or shell exec for !).
+//
+// BUSY-GATE (load-bearing): the early return while a.busy is what makes the
+// whole TUI's lock-free sharing of *chat.Config safe. SubmitFunc launches a
+// turn and the slash handlers mutate cfg/lastUsage with NO mutex; the long-lived
+// event-drain goroutine reads the same fields throughout a turn. They never race
+// only because this gate prevents any submit/slash dispatch while a turn is in
+// flight (busy is set for the turn's whole duration and cleared by the drain on
+// the terminal event). Removing or weakening this check reintroduces a data race
+// on cfg — see internal/tui/interactive.go's CONCURRENCY INVARIANT and the
+// busy-gate tests that pin this behaviour.
 func (a *App) handleEnter() {
 	a.mu.Lock()
 	if a.busy {

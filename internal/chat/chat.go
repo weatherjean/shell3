@@ -109,6 +109,35 @@ type Config struct {
 	SwitchAgent func(name string) (ActiveAgent, error)
 }
 
+// AgentStatusLine renders the status line for a switched-in agent: the agent
+// label and its model id, joined by a box-drawing separator. The single source
+// for this format, shared by initial config assembly and every agent switch.
+func AgentStatusLine(rt ActiveAgent) string {
+	return fmt.Sprintf("%s │ %s", rt.ModeLabel, rt.ModelID)
+}
+
+// ApplyActiveAgent copies a switched agent's runtime bundle into the config:
+// model client, persona, params, guard chain, tool/skill sets, context window,
+// and the derived status line. Every front-end (TUI /agent + Tab, pkg/shell3
+// SwitchAgent) and the initial assembly in agentsetup route through this method
+// so the agent-derived field copy lives in exactly one place.
+//
+// It deliberately does NOT touch agent-independent fields (Store, WorkDir,
+// ProjectRef, Docs, AgentNames, SwitchAgent, OutPath, Headless, Log,
+// RefreshPrompt): those are set once at assembly and survive switches.
+func (c *Config) ApplyActiveAgent(rt ActiveAgent) {
+	c.LLM = rt.LLM
+	c.Personality = rt.Personality
+	c.Params = rt.Params
+	c.ToolGuard = rt.ToolGuard
+	c.ModeLabel = rt.ModeLabel
+	c.ActiveSkills = rt.ActiveSkills
+	c.ActiveTools = rt.ActiveTools
+	c.CustomToolNames = rt.CustomToolNames
+	c.ContextWindow = rt.ContextWindow
+	c.StatusLine = AgentStatusLine(rt)
+}
+
 // NewHandlers constructs the built-in tool handler map from a Config.
 // Handlers are injected into TurnConfig and looked up by tool name during dispatch.
 func NewHandlers(cfg Config) map[string]ToolHandler {

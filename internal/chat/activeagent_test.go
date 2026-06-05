@@ -1,6 +1,73 @@
 package chat
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/persona"
+)
+
+func TestApplyActiveAgentCopiesAllAgentFields(t *testing.T) {
+	// Seed with agent-independent fields that must survive a switch unchanged.
+	cfg := Config{
+		WorkDir:    "/work",
+		ProjectRef: "ref-123",
+		AgentNames: []string{"build", "plan"},
+		Headless:   true,
+	}
+
+	guard := func(context.Context, string, map[string]any) (int, string, error) { return 0, "", nil }
+	rt := ActiveAgent{
+		Personality:     persona.Persona{Name: "plan", SystemPrompt: "sp"},
+		ToolGuard:       guard,
+		ModeLabel:       "plan",
+		ActiveSkills:    []string{"s1"},
+		ActiveTools:     []string{"bash"},
+		CustomToolNames: map[string]bool{"foo": true},
+		Params:          llm.RequestParams{ReasoningEffort: "high"},
+		ModelID:         "gpt-x",
+		ContextWindow:   128000,
+	}
+
+	cfg.ApplyActiveAgent(rt)
+
+	if cfg.ModeLabel != "plan" {
+		t.Errorf("ModeLabel = %q, want plan", cfg.ModeLabel)
+	}
+	if cfg.Personality.Name != "plan" {
+		t.Errorf("Personality not copied: %q", cfg.Personality.Name)
+	}
+	if cfg.Params.ReasoningEffort != "high" {
+		t.Errorf("Params not copied: %+v", cfg.Params)
+	}
+	if cfg.ContextWindow != 128000 {
+		t.Errorf("ContextWindow = %d, want 128000", cfg.ContextWindow)
+	}
+	if len(cfg.ActiveSkills) != 1 || cfg.ActiveSkills[0] != "s1" {
+		t.Errorf("ActiveSkills not copied: %v", cfg.ActiveSkills)
+	}
+	if len(cfg.ActiveTools) != 1 || cfg.ActiveTools[0] != "bash" {
+		t.Errorf("ActiveTools not copied: %v", cfg.ActiveTools)
+	}
+	if !cfg.CustomToolNames["foo"] {
+		t.Errorf("CustomToolNames not copied: %v", cfg.CustomToolNames)
+	}
+	if cfg.ToolGuard == nil {
+		t.Error("ToolGuard not copied")
+	}
+	if want := "plan │ gpt-x"; cfg.StatusLine != want {
+		t.Errorf("StatusLine = %q, want %q", cfg.StatusLine, want)
+	}
+
+	// Agent-independent fields must be untouched by a switch.
+	if cfg.WorkDir != "/work" || cfg.ProjectRef != "ref-123" || !cfg.Headless {
+		t.Errorf("switch clobbered agent-independent fields: %+v", cfg)
+	}
+	if len(cfg.AgentNames) != 2 {
+		t.Errorf("AgentNames clobbered: %v", cfg.AgentNames)
+	}
+}
 
 func TestConfigHasAgentSwitchingFields(t *testing.T) {
 	cfg := Config{

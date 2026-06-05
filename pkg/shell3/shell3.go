@@ -353,16 +353,7 @@ func (s *Session) SwitchAgent(name string) error {
 	if err != nil {
 		return err
 	}
-	s.cfg.LLM = rt.LLM
-	s.cfg.Personality = rt.Personality
-	s.cfg.Params = rt.Params
-	s.cfg.ToolGuard = rt.ToolGuard
-	s.cfg.ModeLabel = rt.ModeLabel
-	s.cfg.ActiveSkills = rt.ActiveSkills
-	s.cfg.ActiveTools = rt.ActiveTools
-	s.cfg.CustomToolNames = rt.CustomToolNames
-	s.cfg.ContextWindow = rt.ContextWindow
-	s.cfg.StatusLine = fmt.Sprintf("%s │ %s", rt.ModeLabel, rt.ModelID)
+	s.cfg.ApplyActiveAgent(rt)
 	return nil
 }
 
