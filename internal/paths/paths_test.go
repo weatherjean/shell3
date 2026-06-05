@@ -11,12 +11,6 @@ func TestGlobal(t *testing.T) {
 	if g.Root != "/home/user/.shell3" {
 		t.Fatalf("Root: got %q", g.Root)
 	}
-	if g.Auth != "/home/user/.shell3/ai-do-not-read.auth.yaml" {
-		t.Fatalf("Auth: got %q", g.Auth)
-	}
-	if g.Secrets != "/home/user/.shell3/ai-do-not-read.secrets.yaml" {
-		t.Fatalf("Secrets: got %q", g.Secrets)
-	}
 	if g.Projects != "/home/user/.shell3/projects" {
 		t.Fatalf("Projects: got %q", g.Projects)
 	}

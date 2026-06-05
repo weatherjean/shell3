@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -217,9 +218,7 @@ func (a *App) syncDraftLocked() {
 func (a *App) historyStepBackLocked() {
 	if a.ed.historyIdx == 0 && !a.ed.historyInDraft {
 		// Check if draft differs from current input (e.g. after Escape cleared it).
-		draftStr := string(a.ed.historyDraft)
-		inputStr := string(a.ed.input)
-		if draftStr != inputStr && len(a.ed.historyDraft) > 0 {
+		if len(a.ed.historyDraft) > 0 && !slices.Equal(a.ed.historyDraft, a.ed.input) {
 			a.ed.historyInDraft = true
 			a.ed.input = append([]rune(nil), a.ed.historyDraft...)
 			a.ed.cursor = len(a.ed.input)
