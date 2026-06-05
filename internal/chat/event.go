@@ -228,15 +228,22 @@ func emitTurnDone(s *Session, prompt, completion, total int) {
 	})
 }
 
-// emit performs a best-effort non-blocking send for high-volume events
-// (tokens, reasoning, usage, etc.); dropped events are not retried.
-// Lifecycle-terminal events use emitSync instead to guarantee delivery.
+// emit delivers a high-volume event (tokens, reasoning, usage, etc.).
 //
-// Both emit and emitSync recover from send-on-closed-channel so a late emit
-// during teardown can't panic the turn loop (the channel is closed exactly once
-// during shutdown, but a late hook or goroutine may still try to emit).
+// In sink mode the event is delivered synchronously and never dropped. In
+// channel mode it is a best-effort non-blocking send — a full buffer drops the
+// event rather than stalling the turn (terminal events use emitSync instead).
+// The channel-mode send recovers from send-on-closed-channel so a late emit
+// during teardown can't panic the turn loop.
 func emit(s *Session, ev Event) {
-	if s == nil || s.events == nil {
+	if s == nil {
+		return
+	}
+	if s.sink != nil {
+		s.sink(ev)
+		return
+	}
+	if s.events == nil {
 		return
 	}
 	defer func() { _ = recover() }()
@@ -246,12 +253,20 @@ func emit(s *Session, ev Event) {
 	}
 }
 
-// emitSync performs a blocking send so the event is never dropped. Used for
-// lifecycle-terminal events (turn_done, error, session_end) that downstream
-// consumers (pkg/shell3 drain, the TUI) treat as a hard completion barrier:
-// dropping one permanently hangs the consumer. See emit for the teardown recover.
+// emitSync delivers an event with guaranteed (blocking) delivery. Used for
+// lifecycle-terminal events (turn_done, error, session_end) that consumers
+// treat as a hard completion barrier: dropping one permanently hangs a
+// channel-mode consumer. In sink mode every emit is already synchronous, so
+// emit and emitSync are equivalent.
 func emitSync(s *Session, ev Event) {
-	if s == nil || s.events == nil {
+	if s == nil {
+		return
+	}
+	if s.sink != nil {
+		s.sink(ev)
+		return
+	}
+	if s.events == nil {
 		return
 	}
 	defer func() { _ = recover() }()

@@ -97,20 +97,24 @@ func usageEvent(k Kind, ev chat.Event) Event {
 // TUI. It wraps one persistent chat.Session and the full agent config, and
 // streams a per-Send channel of translated Events. Drain a Send channel to
 // completion before the next Send/Clear/Rollback/SwitchAgent.
+//
+// The underlying chat.Session runs in synchronous-sink mode: each turn's events
+// are delivered inline on the turn goroutine, which translates them onto the
+// current Send channel and closes it when the turn returns. There is no
+// long-lived drain goroutine and no event channel to close — "turn finished" is
+// simply "the turn goroutine returned".
 type Session struct {
-	cfg       chat.Config
-	sess      *chat.Session
-	handlers  map[string]chat.ToolHandler
-	cleanup   func()
-	drainDone chan struct{}
+	cfg      chat.Config
+	sess     *chat.Session
+	handlers map[string]chat.ToolHandler
+	cleanup  func()
 
-	closing chan struct{} // closed by Close to tell drain to stop forwarding to cur and discard events
-
-	// mu guards cur, turnCancel, and turnDone.
+	// mu guards the current turn's routing target and lifecycle handles.
 	mu         sync.Mutex
-	cur        chan Event         // current Send's channel; nil between turns (drain clears it on Done/Error)
-	turnCancel context.CancelFunc // cancels the in-flight turn; holds the last turn's (idempotent) cancel between turns
-	turnDone   chan struct{}      // closed when the turn goroutine returns; holds the last turn's (already-closed) channel between turns
+	cur        chan Event         // current Send's channel; nil between turns
+	curDone    <-chan struct{}    // current turn ctx's Done; unblocks a send to an abandoned cur on Close
+	turnCancel context.CancelFunc // cancels the in-flight turn (nil before the first Send)
+	turnDone   chan struct{}      // closed when the turn goroutine returns (nil before the first Send)
 }
 
 // Start loads the config (identically to the TUI), starts the store session,
@@ -143,8 +147,10 @@ func Start(ctx context.Context, spec Spec) (*Session, error) {
 	return newSession(cfg, cleanup), nil
 }
 
-// newSession wires a Session around an already-built chat.Config and starts the
-// drain. Split out from Start so tests can inject a fakellm-backed config.
+// newSession wires a Session around an already-built chat.Config. The
+// chat.Session runs in synchronous-sink mode: route translates each internal
+// event and forwards it to the current Send channel inline on the turn
+// goroutine. Split out from Start so tests can inject a fakellm-backed config.
 func newSession(cfg chat.Config, cleanup func()) *Session {
 	var storeID int64
 	if cfg.Store != nil {
@@ -157,76 +163,38 @@ func newSession(cfg chat.Config, cleanup func()) *Session {
 			chat.LogOrNoop(cfg.Log).Warn("start session failed", "error", err)
 		}
 	}
-	sess := chat.NewSession(chat.SessionOpts{
-		BufSize:          256,
+	s := &Session{
+		cfg:      cfg,
+		handlers: chat.NewHandlers(cfg),
+		cleanup:  cleanup,
+	}
+	s.sess = chat.NewSession(chat.SessionOpts{
 		StoreID:          storeID,
 		ContextWindowFor: func(string) int { return cfg.ContextWindow },
+		Sink:             s.route,
 	})
-	s := &Session{
-		cfg:       cfg,
-		sess:      sess,
-		handlers:  chat.NewHandlers(cfg),
-		cleanup:   cleanup,
-		drainDone: make(chan struct{}),
-		closing:   make(chan struct{}),
-	}
-	go s.drain()
 	return s
 }
 
-// drain is the single long-lived consumer of sess.Events(), routing translated
-// events to the current Send channel and closing it on Done/Error. On Close
-// (s.closing) it stops forwarding but keeps draining events so the turn's
-// blocking emits can complete, then exits when CloseEvents ends the range.
-func (s *Session) drain() {
-	defer close(s.drainDone)
-	discard := false
-	for ev := range s.sess.Events() {
-		pub, ok := translate(ev)
-		if !ok {
-			continue
-		}
-		if discard {
-			// Teardown: keep draining sess.Events() (so the turn's blocking
-			// emits don't wedge) but no longer forward to the Send channel.
-			continue
-		}
-		s.mu.Lock()
-		cur := s.cur
-		s.mu.Unlock()
-		if cur == nil {
-			continue
-		}
-		select {
-		case cur <- pub:
-			if pub.Kind == Done || pub.Kind == Error {
-				// Close the captured local, not a re-read of s.cur: a misbehaving
-				// caller could repoint s.cur via an early Send between the send
-				// above and here, and we must never close that fresh channel.
-				s.mu.Lock()
-				close(cur)
-				if s.cur == cur {
-					s.cur = nil
-				}
-				s.mu.Unlock()
-			}
-		case <-s.closing:
-			// Close signalled teardown while we were forwarding to an unread
-			// Send channel. Always close the channel we were forwarding to so a
-			// consumer ranging over it sees a clean close rather than hanging —
-			// including the case where a contract-violating concurrent Send has
-			// repointed s.cur (we still own the captured cur). cur is non-nil and
-			// unclosed here (a Done/Error for it would have nil'd s.cur and we'd
-			// have skipped above), so this closes it exactly once. Only clear
-			// s.cur when it still refers to this channel.
-			close(cur)
-			s.mu.Lock()
-			if s.cur == cur {
-				s.cur = nil
-			}
-			s.mu.Unlock()
-			discard = true
-		}
+// route is the chat.Session event sink. It runs synchronously on the in-flight
+// turn goroutine, so all forwarding to a given Send channel happens-before that
+// turn goroutine closes it — no separate drain, no close-ordering hazard. The
+// select on curDone lets Close cancel the turn unblock a send to a Send channel
+// the caller stopped reading. Events with no public equivalent are dropped.
+func (s *Session) route(ev chat.Event) {
+	pub, ok := translate(ev)
+	if !ok {
+		return
+	}
+	s.mu.Lock()
+	cur, done := s.cur, s.curDone
+	s.mu.Unlock()
+	if cur == nil {
+		return
+	}
+	select {
+	case cur <- pub:
+	case <-done:
 	}
 }
 
@@ -244,13 +212,25 @@ func (s *Session) Send(ctx context.Context, prompt string) <-chan Event {
 	done := make(chan struct{})
 	s.mu.Lock()
 	s.cur = out
+	s.curDone = turnCtx.Done()
 	s.turnCancel = cancel
 	s.turnDone = done
 	s.mu.Unlock()
 	tc := s.turnConfig()
 	go func() {
+		// route forwards events to out during the turn; once Run returns no
+		// further forwarding can happen, so clearing cur and closing out here
+		// is race-free (both run on this goroutine, strictly after Run).
+		defer func() {
+			s.mu.Lock()
+			if s.cur == out {
+				s.cur = nil
+			}
+			s.mu.Unlock()
+			close(out)
+			cancel() // release the child ctx
+		}()
 		defer close(done)
-		defer cancel() // release the child ctx when the turn ends
 		s.sess.Run(turnCtx, tc, prompt)
 	}()
 	return out
@@ -263,24 +243,20 @@ func (s *Session) ID() string {
 
 // Close ends the conversation: cancels any in-flight turn, waits for it to
 // finish (so its deferred history persist runs against the still-open store),
-// then stops the drain, ends the store session, and releases the config.
+// then ends the store session and releases the config.
 //
-// Close is robust to an abandoned Send channel: signalling s.closing causes
-// drain to stop forwarding and switch to discard mode, so neither the turn
-// join nor <-drainDone can wedge on an unread Send channel. Draining the
-// channel is still the supported pattern (Close cancels the turn, so the
-// in-flight turn ends promptly with a terminal event).
+// Close is robust to an abandoned Send channel: cancelling the turn ctx unblocks
+// route's send to an unread channel (its curDone select fires), so the turn
+// unwinds and the join below can't wedge. Draining the channel is still the
+// supported pattern, but Close does not require it.
 //
 // Returns the store's EndSession error if ending the persisted session fails;
-// the other best-effort teardown steps (turn cancel, drain, cleanup) do not
-// contribute to the returned error.
+// the other best-effort teardown steps (turn cancel, cleanup) do not contribute
+// to the returned error.
 func (s *Session) Close() error {
 	// Cancel any in-flight turn so it stops streaming and runs its deferred
-	// history persist, then join it before we close the events channel — the
-	// turn's terminal emitSync needs the drain goroutine (events channel still
-	// open) to receive it, so we must wait for <-done before CloseEvents.
-	// Joining before CloseEvents also avoids a race between close(s.events)
-	// and a concurrent s.events<-ev inside emitSync.
+	// history persist, then join it before ending the store session so a
+	// cancelled turn isn't still writing to the store as EndSession runs.
 	s.mu.Lock()
 	cancel := s.turnCancel
 	done := s.turnDone
@@ -288,17 +264,11 @@ func (s *Session) Close() error {
 	if cancel != nil {
 		cancel()
 	}
-	// Tell drain to stop forwarding to (a possibly-abandoned) Send channel and
-	// discard events, so neither the join below nor <-drainDone can wedge on an
-	// unread Send channel.
-	close(s.closing)
 	if done != nil {
 		<-done // turn goroutine (and its deferred history persist) has finished
 	}
 
 	s.sess.End("ok")
-	s.sess.CloseEvents()
-	<-s.drainDone
 	var endErr error
 	if s.cfg.Store != nil {
 		endErr = s.cfg.Store.EndSession(s.sess.ID())

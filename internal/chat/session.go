@@ -18,7 +18,17 @@ type Session struct {
 	reminders        reminderTracker
 	lastPromptTokens int   // accurate token count from most recent streamOnce response
 	id               int64 // store session id; 0 if no store configured
-	events           chan Event
+
+	// Exactly one delivery mechanism is active, chosen at construction:
+	//   - sink != nil   → synchronous mode: events are delivered by calling
+	//     sink(ev) inline on the turn goroutine. There is no channel and no
+	//     teardown: when Run returns, every event has already been delivered.
+	//     Embedders (pkg/shell3) use this.
+	//   - events != nil → channel mode: events are buffered on a chan consumed
+	//     via Events(), closed once by CloseEvents(). The TUI and one-shot path
+	//     use this because their consumer runs on a separate goroutine.
+	sink   func(Event)
+	events chan Event
 }
 
 // SessionOpts configures a new Session. All fields are optional.
@@ -29,23 +39,32 @@ type Session struct {
 // embedders that don't use a store can leave it zero.
 // ContextWindowFor resolves a model id to its context window in tokens;
 // the reminder tracker uses it to emit context-usage reminders.
+//
+// Sink selects synchronous delivery: when non-nil, events are delivered by
+// calling Sink(ev) inline on the turn goroutine and no channel is created
+// (Events returns nil, CloseEvents is a no-op). When nil, the Session runs in
+// channel mode with a buffered event channel of size BufSize.
 type SessionOpts struct {
 	BufSize          int
 	StoreID          int64
 	ContextWindowFor func(string) int
+	Sink             func(Event)
 }
 
-// NewSession constructs a Session with a buffered event channel.
-// opts.BufSize defaults to 256 when zero; other fields are optional.
+// NewSession constructs a Session in either synchronous-sink mode (opts.Sink
+// non-nil) or channel mode (opts.BufSize, defaulting to 256). Other fields are
+// optional.
 func NewSession(opts SessionOpts) *Session {
+	s := &Session{id: opts.StoreID}
+	s.reminders.contextWindowFor = opts.ContextWindowFor
+	if opts.Sink != nil {
+		s.sink = opts.Sink
+		return s
+	}
 	if opts.BufSize == 0 {
 		opts.BufSize = 256
 	}
-	s := &Session{
-		events: make(chan Event, opts.BufSize),
-		id:     opts.StoreID,
-	}
-	s.reminders.contextWindowFor = opts.ContextWindowFor
+	s.events = make(chan Event, opts.BufSize)
 	return s
 }
 

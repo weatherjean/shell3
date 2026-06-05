@@ -17,11 +17,14 @@ func (s *Session) End(status string) {
 	emitSessionEnd(s, status)
 }
 
-// CloseEvents closes the underlying event channel. Must be called exactly once,
-// after the last emit. emit/emitSync recover from send-on-closed so late hook
-// emissions during teardown won't panic.
+// CloseEvents closes the underlying event channel in channel mode. Must be
+// called exactly once, after the last emit. emit/emitSync recover from
+// send-on-closed so late hook emissions during teardown won't panic. In sink
+// mode there is no channel and this is a no-op.
 func (s *Session) CloseEvents() {
-	close(s.events)
+	if s.events != nil {
+		close(s.events)
+	}
 }
 
 // Messages returns a snapshot of the in-progress conversation history. The
