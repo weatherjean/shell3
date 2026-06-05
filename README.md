@@ -36,12 +36,12 @@ Secrets live in a plain `.env` file beside your `shell3.lua` (e.g. `~/.shell3/.e
 ## Removing a project's shell3 data
 
 ```bash
-# Remove project-local config
-rm -rf .shell3
-
-# Remove project state from global (find UUID first)
+# Find the project UUID FIRST — it lives in .shell3/.ref.
 cat .shell3/.ref   # prints the UUID
+
+# Remove project state from global, then the project-local config.
 rm -rf ~/.shell3/projects/<uuid>
+rm -rf .shell3
 ```
 
 ## Headless / scripting
@@ -60,5 +60,6 @@ environment variables, and the subagent-spawning pattern.
 
 [MIT](LICENSE) © 2026 WeatherJean.
 
-Portions of `internal/edittool` are ported from MIT-licensed third-party
-projects; see [NOTICE.md](NOTICE.md) for attributions.
+Portions of `internal/edittool` are a Go port of opencode's str-replace edit
+tool (which in turn cites cline and gemini-cli); see the package doc comment in
+[internal/edittool/replace.go](internal/edittool/replace.go) for attributions.

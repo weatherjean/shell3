@@ -13,21 +13,22 @@ Secrets and credentials (provider API keys, tool tokens) live in a plain `.env` 
 
 ```
 cmd/shell3/            entry point + subcommands (doctor, docs)
-internal/luacfg/       Lua config loader (shell3.lua → models/agents/tools/skills/guards)
+internal/agentsetup/   shared config assembly (Build → chat.Config) used by every front-end
+internal/luacfg/       Lua config loader (shell3.lua → models/agents/tools/skills/guards) + system-prompt assembly
 internal/bootstrap/    first-run global + project setup
 internal/scaffold/     embedded starter shell3.lua + .env template
+internal/docs/         embedded shell3.md (served by `docs` cmd + shell3_docs tool)
 internal/adapter/openai/  OpenAI-compatible LLM adapter
 internal/paths/        global + local path resolution
 internal/ref/          project UUID (.shell3/.ref)
 internal/store/        SQLite history + sessions
-internal/skills/       skill loading + indexing
-internal/edittool/     edit_file tool implementation
+internal/edittool/     edit_file tool implementation (Go port of opencode's str-replace)
 internal/bgjobs/       background job tracking (.shell3/bg.json)
 internal/tui/          terminal UI (interactive + headless once)
 internal/patchapp,patchmd,patchtui/  patch-style TUI components
 internal/chat/         conversation loop, tools, events, JSONL sink
-internal/llm/          Provider/Streamer interfaces, registry (+ fakellm)
-internal/persona/      persona / system-prompt assembly
+internal/llm/          Provider/Streamer interfaces, request params, types (+ fakellm)
+internal/persona/      runtime carrier for an agent's prompt/tools/params (data only)
 internal/applog/       rotating app log
 
 pkg/shell3/            embeddable library API (the only public package)

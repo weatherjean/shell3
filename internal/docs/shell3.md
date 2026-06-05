@@ -42,8 +42,10 @@ source. Read them with `shell3.env.secret("KEY")`:
 api_key = shell3.env.secret("OPENCODE_KEY")
 ```
 
-`.env` is parsed line by line as `KEY=value` (surrounding double quotes are
-stripped; `#` lines and blanks are ignored).
+`.env` is parsed line by line as `KEY=value`: a single surrounding pair of
+double or single quotes is stripped, an `export ` prefix on the key is dropped,
+and blank lines, full-line `#` comments, and trailing unquoted `# comments` are
+ignored (a `#` inside quotes is kept).
 
 > **Note:** `shell3.env.secret("KEY")` raises a config error if `KEY` is not
 > present in `.env`. Define every key you reference (an empty value is fine —
@@ -298,9 +300,11 @@ Convenience HTTP calls. Both return `(res, err)` where `res` is
 `{ status, body, truncated, headers }` and `err` is a string on failure (and
 `res` is nil).
 
-- `opts.timeout` — seconds (default `30`, clamped to `1..120`).
-- `opts.max_bytes` — response cap (default `1 MiB`, max `16 MiB`); if exceeded,
-  the body is truncated and `res.truncated` is `true`.
+- `opts.timeout` — seconds (default `30`). A value ≤0 or >120 falls back to the
+  default `30` (it is not clamped to the boundary).
+- `opts.max_bytes` — response cap (default `1 MiB`). A value ≤0 or >16 MiB falls
+  back to the default `1 MiB`. If the response exceeds the cap, the body is
+  truncated and `res.truncated` is `true`.
 - `opts.headers` — table of request headers.
 - `opts.body` — request body string (mainly for `post`).
 
@@ -448,10 +452,14 @@ Prints this document (the same text the `shell3_docs` tool returns).
 ./.env                    # secrets, read by shell3.env.secret (you create this)
 ./.shell3/
 ├── .ref                  # points to this project's ~/.shell3/projects/<uuid>/
-└── bg.json               # bash_bg job registry
+├── bg.json               # bash_bg job registry
+└── last_error.json       # dump of the last failed turn (request/response/messages)
 ```
 
 The project's `.shell3/.ref` and `.shell3/bg.json` are gitignored automatically.
+`last_error.json` is written only when a turn errors and is overwritten on the
+next failure; add it to your own `.gitignore` if you keep `.shell3/` partly
+tracked.
 
 ---
 
