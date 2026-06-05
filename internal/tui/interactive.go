@@ -25,23 +25,6 @@ func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
 			return fmt.Errorf("chat: start session: %w", err)
 		}
 	}
-	sess := chat.NewSession(chat.SessionOpts{
-		BufSize:          256,
-		StoreID:          storeID,
-		ContextWindowFor: func(string) int { return cfg.ContextWindow },
-	})
-	if cfg.Store != nil {
-		// End whichever session is current when the loop exits. compact_history
-		// may roll sess.id to a new session mid-conversation, so read sess.ID()
-		// at defer time rather than capturing the initial storeID.
-		lg := chat.LogOrNoop(cfg.Log)
-		defer func() {
-			if err := cfg.Store.EndSession(sess.ID()); err != nil {
-				lg.Warn("end session failed", "session_id", sess.ID(), "error", err)
-			}
-		}()
-	}
-
 	sink, sinkCleanup, openErr := chat.OpenSink(cfg.OutPath)
 	if openErr != nil {
 		return openErr
@@ -49,15 +32,6 @@ func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
 	if sink != nil {
 		_, model := chat.SplitStatus(cfg.StatusLine)
 		sink.WriteStart("(interactive)", cfg.ModeLabel, model, cfg.OutPath, cfg.Headless)
-	}
-	{
-		_, model := chat.SplitStatus(cfg.StatusLine)
-		sess.Start(map[string]string{
-			"mode":    cfg.ModeLabel,
-			"persona": cfg.Personality.Name,
-			"model":   model,
-			"out":     cfg.OutPath,
-		})
 	}
 
 	app := patchapp.New(cfg.ModeLabel, cfg.StatusLine, patchapp.WelcomeInfo{
@@ -70,25 +44,41 @@ func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
 
 	var lastUsage llm.Usage
 
-	// Long-lived drain: single consumer of sess.Events() for the whole session.
-	// drainTurn renders to the app and (if sink != nil) also writes the JSONL
-	// audit log. WaitGroup ensures all writes land before sinkCleanup closes
-	// the file. emit() recovers from send-on-closed so late hook emissions
-	// during teardown don't panic.
-	var drainWG sync.WaitGroup
-	drainWG.Add(1)
-	go func() {
-		defer drainWG.Done()
-		drainTurn(sess.Events(), app, &lastUsage, &cfg, sink)
-	}()
+	// The Session runs in synchronous-sink mode: newRenderSink delivers each
+	// event to the App inline on the turn goroutine. There is no events channel
+	// and no long-lived drain goroutine — "turn finished" is "the turn goroutine
+	// returned". The sink also writes the JSONL audit log when sink != nil.
+	sess := chat.NewSession(chat.SessionOpts{
+		StoreID:          storeID,
+		ContextWindowFor: func(string) int { return cfg.ContextWindow },
+		Sink:             newRenderSink(app, &lastUsage, &cfg, sink),
+	})
+	if cfg.Store != nil {
+		// End whichever session is current when the loop exits. compact_history
+		// may roll sess.id to a new session mid-conversation, so read sess.ID()
+		// at defer time rather than capturing the initial storeID.
+		lg := chat.LogOrNoop(cfg.Log)
+		defer func() {
+			if err := cfg.Store.EndSession(sess.ID()); err != nil {
+				lg.Warn("end session failed", "session_id", sess.ID(), "error", err)
+			}
+		}()
+	}
+	{
+		_, model := chat.SplitStatus(cfg.StatusLine)
+		sess.Start(map[string]string{
+			"mode":    cfg.ModeLabel,
+			"persona": cfg.Personality.Name,
+			"model":   model,
+			"out":     cfg.OutPath,
+		})
+	}
 
 	// turnWG tracks the in-flight turn goroutine (spawned per user message by
 	// launchTurn). The turn goroutine writes to cfg.Store (saveHistory/compact)
 	// as it unwinds, so teardown must JOIN it before EndSession runs — otherwise
 	// a cancelled turn could still be writing to the store while EndSession (and,
-	// in the embedded case, a subsequent store Close) runs. See the teardown
-	// defer below for the ordering that avoids both the inconsistent interleave
-	// and a drain deadlock.
+	// in the embedded case, a subsequent store Close) runs.
 	var turnWG sync.WaitGroup
 
 	// turnsCtx is the parent of every per-turn context. Teardown cancels it so
@@ -101,32 +91,19 @@ func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
 	// safety net; the ordering-critical cancel is in the teardown defer below.
 	defer cancelTurns()
 
-	// Ordered teardown: cancel + join the in-flight turn (so its store writes
-	// finish) WHILE drainTurn is still consuming events, then emit session_end,
-	// close channel, wait for drain, then WriteEnd + sinkCleanup. Single defer
-	// enforces ordering.
-	//
-	// Why cancelTurns()+turnWG.Wait() come before sess.CloseEvents(): the turn
-	// goroutine emits events that drainTurn consumes, and drainTurn keeps running
-	// until CloseEvents closes sess.Events(). Cancelling turnsCtx makes the turn
-	// unwind promptly; leaving drainTurn consuming means the unwinding turn can
-	// still flush its final events (and finish its store writes) without blocking
-	// on a backed-up channel. If we closed events or stopped the drain first, the
-	// turn goroutine could deadlock trying to emit and never return — so
-	// turnWG.Wait() MUST happen while drain is still alive.
+	// Teardown: cancel the in-flight turn and join it (so its store writes and
+	// its terminal event finish), then emit session_end and flush the audit log.
+	// With the synchronous sink there is no channel to close and no drain to
+	// join: once turnWG.Wait() returns, no goroutine can call the sink, so
+	// sess.End() and the sink writes below run with no concurrent emitter.
 	defer func() {
 		status := "ok"
 		if runErr != nil {
 			status = "error"
 		}
-		// Ordering-critical (see block doc above): cancel before join so the
-		// in-flight turn unwinds before turnWG.Wait() joins it. The deferred
-		// cancelTurns is just the lostcancel safety net.
 		cancelTurns()
 		turnWG.Wait()
 		sess.End(status)
-		sess.CloseEvents()
-		drainWG.Wait()
 		if sink != nil {
 			sink.WriteEnd(status)
 		}
@@ -135,12 +112,11 @@ func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
 
 	handlers := chat.NewHandlers(cfg)
 
-	// launchTurn starts a turn goroutine for userMsg. drainTurn runs as a
-	// long-lived consumer of sess.Events() (started above); per-turn UI
-	// state transitions (SetBusy false, etc.) happen via TurnDone/Error
-	// events. History is persisted inside the turn (before the terminal
-	// event) by Session.Run, so it completes before the embedder is told
-	// the turn is done.
+	// launchTurn starts a turn goroutine for userMsg. The Session's render sink
+	// runs inline on that goroutine; per-turn UI state transitions (SetBusy
+	// false, etc.) happen when the sink processes the TurnDone/Error event.
+	// History is persisted inside the turn (before the terminal event) by
+	// Session.Run, so it completes before the turn goroutine returns.
 	buildTurnConfig := func() chat.TurnConfig {
 		return chat.NewTurnConfig(cfg, handlers, func(ctx context.Context, cmd, workdir string) string {
 			result := "(completed)"
@@ -221,29 +197,30 @@ func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
 	return
 }
 
-// drainTurn consumes chat.Events for the lifetime of the session, updating
-// App state. LLM text streams to scrollback line-by-line via patchmd (or
-// verbatim inside fenced code blocks). Reasoning chunks stream to scrollback
-// dim, also line-by-line. Tool calls render a header line; tool results
-// render a dimmed body (or colorized diff for edit_file). TurnDone flushes
-// the trailing partial line and clears busy.
+// newRenderSink returns the chat.Session event sink that renders a turn to the
+// App. LLM text streams to scrollback line-by-line via patchmd (or verbatim
+// inside fenced code blocks). Reasoning chunks stream dim, also line-by-line.
+// Tool calls render a header line; tool results render a dimmed body (or
+// colorized diff for edit_file). TurnDone flushes the trailing partial line and
+// clears busy. The returned closure owns the per-turn streaming state (stream/
+// reasoning buffers, fence toggle), which is flushed and reset at TurnDone/Error.
 //
-// CONCURRENCY INVARIANT (busy-gate): drainTurn runs on its own long-lived
-// goroutine and READS shared *chat.Config fields per event — e.g.
-// cfg.CustomToolNames in renderToolCallHeader — and
-// WRITES *lastUsage. The slash-command handlers in registerSlashCommands run on
-// the input-loop goroutine and MUTATE the same struct (/agent,
-// /clear, ... — plus Tab agent switching) and READ *lastUsage (/usage). There is deliberately NO mutex
-// around cfg or lastUsage. This is race-free ONLY because of the busy-gate in
-// patchapp: App.handleEnter (internal/patchapp/editor.go) early-returns while
-// a.busy is true, so slash handlers (and SubmitFunc) cannot fire while a turn —
-// and therefore drainTurn's per-event reads of cfg/lastUsage — is active.
-// SetBusy(true) is set in launchTurn for the duration of the turn and cleared
-// only when drainTurn processes the terminal TurnDone/Error event. A future
-// maintainer who breaks that gate (e.g. allowing slash commands to run during
-// streaming, or clearing busy before drainTurn finishes a turn) reintroduces a
-// data race on cfg/lastUsage and must add real synchronization here.
-func drainTurn(ch <-chan chat.Event, app patchapp.AppView, lastUsage *llm.Usage, cfg *chat.Config, sink *chat.OutSink) {
+// CONCURRENCY INVARIANT (busy-gate): the sink runs synchronously on the in-flight
+// turn goroutine and READS shared *chat.Config fields per event — e.g.
+// cfg.CustomToolNames in renderToolCallHeader — and WRITES *lastUsage. The
+// slash-command handlers in registerSlashCommands run on the input-loop
+// goroutine and MUTATE the same struct (/agent, /clear, ... — plus Tab agent
+// switching) and READ *lastUsage (/usage). There is deliberately NO mutex around
+// cfg or lastUsage. This is race-free ONLY because of the busy-gate in patchapp:
+// App.handleEnter (internal/patchapp/editor.go) early-returns while a.busy is
+// true, so slash handlers (and SubmitFunc) cannot fire while a turn — and
+// therefore the sink's per-event reads of cfg/lastUsage — is active. SetBusy(true)
+// is set in launchTurn for the duration of the turn and cleared only when the
+// sink processes the terminal TurnDone/Error event. A future maintainer who
+// breaks that gate (e.g. allowing slash commands to run during streaming, or
+// clearing busy before the turn's terminal event) reintroduces a data race on
+// cfg/lastUsage and must add real synchronization here.
+func newRenderSink(app patchapp.AppView, lastUsage *llm.Usage, cfg *chat.Config, sink *chat.OutSink) func(chat.Event) {
 	var streamBuf strings.Builder
 	// reasoningBuf holds an incomplete (no trailing \n) reasoning line.
 	// Complete lines are committed to scrollback immediately for real-time display.
@@ -367,7 +344,7 @@ func drainTurn(ch <-chan chat.Event, app patchapp.AppView, lastUsage *llm.Usage,
 		streamBuf.Reset()
 	}
 
-	for ev := range ch {
+	return func(ev chat.Event) {
 		if sink != nil {
 			sink.WriteChatEvent(ev)
 		}
@@ -450,8 +427,8 @@ type slashTarget interface {
 // sess, and lastUsage so handlers can read and mutate session state.
 //
 // These handlers mutate the shared *chat.Config and read *lastUsage with NO
-// mutex; that is race-free only because of the busy-gate. See drainTurn for the
-// full CONCURRENCY INVARIANT (this is the write side).
+// mutex; that is race-free only because of the busy-gate. See newRenderSink for
+// the full CONCURRENCY INVARIANT (this is the write side).
 func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session, lastUsage *llm.Usage, launchTurn func(llm.Message), applyAgent func(chat.ActiveAgent)) {
 	dim := func(s string) { app.PrintLine(patchtui.Dim + s + patchtui.Reset) }
 

@@ -1,17 +1,14 @@
 package chat
 
-import (
-	"testing"
-	"time"
-)
+import "testing"
 
 func TestEmitToolCallAndResult(t *testing.T) {
-	s := NewSession(SessionOpts{BufSize: 4})
+	s, c := newCollectorSession(SessionOpts{})
 	s.id = 7
 	emitToolCall(s, "call_1", "bash", `{"cmd":"ls"}`)
 	emitToolResult(s, "call_1", "bash", "file1\nfile2\n", false)
 
-	got := drainEvents(s, 2, 100*time.Millisecond)
+	got := c.all()
 	if len(got) != 2 {
 		t.Fatalf("got %d events, want 2", len(got))
 	}

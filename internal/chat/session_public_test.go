@@ -1,29 +1,18 @@
 package chat
 
-import (
-	"testing"
-	"time"
-)
+import "testing"
 
-func TestSessionEventsAccessor(t *testing.T) {
-	s := NewSession(SessionOpts{BufSize: 4})
-	ch := s.Events()
-	if ch == nil {
-		t.Fatal("Events() returned nil")
-	}
+func TestSessionSinkReceivesEmit(t *testing.T) {
+	s, c := newCollectorSession(SessionOpts{})
 	emitAssistantToken(s, "hi")
-	select {
-	case ev := <-ch:
-		if ev.Kind != EventAssistantToken || ev.Text != "hi" {
-			t.Errorf("unexpected event: %+v", ev)
-		}
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("Events() channel did not receive emitted event")
+	got := c.all()
+	if len(got) != 1 || got[0].Kind != EventAssistantToken || got[0].Text != "hi" {
+		t.Fatalf("unexpected events: %+v", got)
 	}
 }
 
 func TestSessionIDAccessor(t *testing.T) {
-	s := NewSession(SessionOpts{BufSize: 1})
+	s := NewSession(SessionOpts{})
 	if got := s.ID(); got != 0 {
 		t.Errorf("default ID = %d, want 0", got)
 	}

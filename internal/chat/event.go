@@ -87,9 +87,9 @@ func (k EventKind) String() string {
 }
 
 // Event is a single observable occurrence during a chat session. Consumers
-// (TUI, JSONL sink, embedders) subscribe via Session.Events. Most fields are
-// optional and only populated for certain Kinds; see the EventKind constants
-// for which fields each kind sets.
+// (TUI, JSONL sink, embedders) receive each Event via the SessionOpts.Sink
+// callback. Most fields are optional and only populated for certain Kinds; see
+// the EventKind constants for which fields each kind sets.
 type Event struct {
 	// Kind discriminates the event; consumers switch on it.
 	Kind EventKind
@@ -147,7 +147,7 @@ func emitSessionStart(s *Session, meta map[string]string) {
 }
 
 func emitSessionEnd(s *Session, status string) {
-	emitSync(s, Event{
+	emit(s, Event{
 		Kind:      EventSessionEnd,
 		Time:      time.Now(),
 		SessionID: s.id,
@@ -194,7 +194,7 @@ func emitUserMessage(s *Session, text string) {
 // carries its message for display, Err carries the value itself so embedders
 // can errors.Is/errors.As it.
 func emitError(s *Session, err error) {
-	emitSync(s, Event{Kind: EventError, Time: time.Now(), SessionID: s.id, Text: err.Error(), Err: err})
+	emit(s, Event{Kind: EventError, Time: time.Now(), SessionID: s.id, Text: err.Error(), Err: err})
 }
 
 func emitUsage(s *Session, prompt, completion, total int) {
@@ -220,7 +220,7 @@ func emitRetry(s *Session, n *llm.RetryNotice) {
 }
 
 func emitTurnDone(s *Session, prompt, completion, total int) {
-	emitSync(s, Event{
+	emit(s, Event{
 		Kind:      EventTurnDone,
 		Time:      time.Now(),
 		SessionID: s.id,
@@ -228,47 +228,12 @@ func emitTurnDone(s *Session, prompt, completion, total int) {
 	})
 }
 
-// emit delivers a high-volume event (tokens, reasoning, usage, etc.).
-//
-// In sink mode the event is delivered synchronously and never dropped. In
-// channel mode it is a best-effort non-blocking send — a full buffer drops the
-// event rather than stalling the turn (terminal events use emitSync instead).
-// The channel-mode send recovers from send-on-closed-channel so a late emit
-// during teardown can't panic the turn loop.
+// emit delivers an event to the session sink. Delivery is synchronous and
+// inline on the turn goroutine, so events are never dropped and ordering is
+// exactly the emit order.
 func emit(s *Session, ev Event) {
-	if s == nil {
+	if s == nil || s.sink == nil {
 		return
 	}
-	if s.sink != nil {
-		s.sink(ev)
-		return
-	}
-	if s.events == nil {
-		return
-	}
-	defer func() { _ = recover() }()
-	select {
-	case s.events <- ev:
-	default:
-	}
-}
-
-// emitSync delivers an event with guaranteed (blocking) delivery. Used for
-// lifecycle-terminal events (turn_done, error, session_end) that consumers
-// treat as a hard completion barrier: dropping one permanently hangs a
-// channel-mode consumer. In sink mode every emit is already synchronous, so
-// emit and emitSync are equivalent.
-func emitSync(s *Session, ev Event) {
-	if s == nil {
-		return
-	}
-	if s.sink != nil {
-		s.sink(ev)
-		return
-	}
-	if s.events == nil {
-		return
-	}
-	defer func() { _ = recover() }()
-	s.events <- ev
+	s.sink(ev)
 }

@@ -17,8 +17,8 @@ import (
 //   - Busy: single line — the rainbow busy bar (see renderBusyLine).
 //
 // Streaming text and tool output are committed to scrollback via
-// Renderer.Print by event handlers (see chat.drainTurn); they are not part
-// of the live frame.
+// Renderer.Print by the TUI's event sink (see tui.newRenderSink); they are
+// not part of the live frame.
 func buildFrame(width int, st frameState) []string {
 	if st.busy {
 		return []string{renderBusyLine(width, st.status)}

@@ -144,17 +144,11 @@ shell3.agent({
 		customDefs := lc.CustomToolsFor(lc.Active().CustomTools)
 		toolDefs := luacfg.ToolDefs(lc.Active().Gates, customDefs, len(lc.Active().Skills) > 0)
 
-		sess := chat.NewSession(chat.SessionOpts{BufSize: 128})
-		sess.Start(map[string]string{"mode": "test"})
-
 		var events []chat.Event
-		done := make(chan struct{})
-		go func() {
-			for ev := range sess.Events() {
-				events = append(events, ev)
-			}
-			close(done)
-		}()
+		sess := chat.NewSession(chat.SessionOpts{Sink: func(ev chat.Event) {
+			events = append(events, ev)
+		}})
+		sess.Start(map[string]string{"mode": "test"})
 
 		turnCfg := chat.TurnConfig{
 			LLM:             fake,
@@ -170,8 +164,6 @@ shell3.agent({
 		defer cancel()
 		sess.Run(turnCtx, turnCfg, "say hi")
 		sess.End("ok")
-		sess.CloseEvents()
-		<-done
 
 		// Check that a tool_result event containing "hello, world" was emitted.
 		var foundToolResult bool
@@ -216,17 +208,11 @@ shell3.agent({
 		customDefs := lc.CustomToolsFor(lc.Active().CustomTools)
 		toolDefs := luacfg.ToolDefs(lc.Active().Gates, customDefs, len(lc.Active().Skills) > 0)
 
-		sess := chat.NewSession(chat.SessionOpts{BufSize: 128})
-		sess.Start(map[string]string{"mode": "test"})
-
 		var events []chat.Event
-		done := make(chan struct{})
-		go func() {
-			for ev := range sess.Events() {
-				events = append(events, ev)
-			}
-			close(done)
-		}()
+		sess := chat.NewSession(chat.SessionOpts{Sink: func(ev chat.Event) {
+			events = append(events, ev)
+		}})
+		sess.Start(map[string]string{"mode": "test"})
 
 		turnCfg := chat.TurnConfig{
 			LLM:             fake,
@@ -242,8 +228,6 @@ shell3.agent({
 		defer cancel()
 		sess.Run(turnCtx, turnCfg, "run dangerous command")
 		sess.End("ok")
-		sess.CloseEvents()
-		<-done
 
 		// Check that a tool_result event containing "USER DENIED" was emitted
 		// (turn.go emits this when the guard returns DecisionBlock).

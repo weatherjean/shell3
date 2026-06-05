@@ -10,9 +10,12 @@ import (
 )
 
 // RunOnce executes a single turn and prints output to stdout. No TUI.
+//
+// The chat.Session runs in synchronous-sink mode: events are delivered inline
+// by render as the turn streams, so the whole function is linear — no events
+// goroutine and no channel teardown. status is written by render (on this
+// goroutine, during Run) and read after Run returns, so there is no race.
 func RunOnce(ctx context.Context, cfg chat.Config, input string) error {
-	sess := chat.NewSession(chat.SessionOpts{BufSize: 256})
-
 	sink, sinkCleanup, err := chat.OpenSink(cfg.OutPath)
 	if err != nil {
 		return err
@@ -23,16 +26,8 @@ func RunOnce(ctx context.Context, cfg chat.Config, input string) error {
 		sink.WriteStart(input, cfg.ModeLabel, model, cfg.OutPath, cfg.Headless)
 	}
 
-	tc := chat.NewTurnConfig(cfg, chat.NewHandlers(cfg), func(ctx context.Context, cmd, workdir string) string {
-		return "error: interactive TTY not available in headless mode"
-	})
-	go func() {
-		sess.Run(ctx, tc, input)
-		sess.CloseEvents()
-	}()
-
 	status := "ok"
-	for ev := range sess.Events() {
+	render := func(ev chat.Event) {
 		if sink != nil {
 			sink.WriteChatEvent(ev)
 		}
@@ -55,6 +50,13 @@ func RunOnce(ctx context.Context, cfg chat.Config, input string) error {
 			fmt.Println()
 		}
 	}
+
+	sess := chat.NewSession(chat.SessionOpts{Sink: render})
+	tc := chat.NewTurnConfig(cfg, chat.NewHandlers(cfg), func(ctx context.Context, cmd, workdir string) string {
+		return "error: interactive TTY not available in headless mode"
+	})
+	sess.Run(ctx, tc, input)
+
 	if sink != nil {
 		sink.WriteEnd(status)
 	}

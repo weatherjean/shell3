@@ -3,7 +3,6 @@ package chat
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
@@ -17,12 +16,12 @@ import (
 // Why it matters: turn_done is the signal embedders (pkg/shell3, the TUI) use
 // to decide a turn is finished and that mutating session state — Clear,
 // Rollback → SetMessages — is now safe. saveHistory reads sess.messages. If
-// turn_done fires first, an embedder reacting to it can write sess.messages
+// turn_done fired first, an embedder reacting to it could write sess.messages
 // concurrently with saveHistory's read: a data race.
 //
-// A channel receive happens-after the send, so if Run persists before emitting
-// turn_done, a consumer that observes turn_done is guaranteed to see the
-// persisted rows. This makes the post-fix behavior deterministic.
+// The sink is invoked synchronously inside Run, so observing turn_done from it
+// means everything Run did before emitting it — including the saveHistory in
+// beforeDone — has already happened. The assertion runs right there.
 func TestRun_PersistsHistoryBeforeTurnDone(t *testing.T) {
 	st := openTestStore(t)
 	sessionID, err := st.StartSession()
@@ -37,7 +36,24 @@ func TestRun_PersistsHistoryBeforeTurnDone(t *testing.T) {
 		},
 	})
 
-	sess := NewSession(SessionOpts{BufSize: 256, StoreID: sessionID})
+	var sawTurnDone bool
+	sink := func(ev Event) {
+		if ev.Kind != EventTurnDone {
+			return
+		}
+		sawTurnDone = true
+		res, err := st.HistoryGet(sessionID, 0)
+		if err != nil {
+			t.Errorf("HistoryGet: %v", err)
+			return
+		}
+		if len(res.Turns) == 0 {
+			t.Errorf("history not persisted when turn_done was observed: " +
+				"turn_done fired before saveHistory ran")
+		}
+	}
+
+	sess := NewSession(SessionOpts{StoreID: sessionID, Sink: sink})
 	cfg := TurnConfig{
 		LLM:         llmClient,
 		Personality: persona.Persona{SystemPrompt: "test"},
@@ -45,31 +61,9 @@ func TestRun_PersistsHistoryBeforeTurnDone(t *testing.T) {
 		Log:         LogOrNoop(nil),
 	}
 
-	done := make(chan struct{})
-	go func() {
-		sess.Run(context.Background(), cfg, "hi there")
-		close(done)
-	}()
+	sess.Run(context.Background(), cfg, "hi there")
 
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case ev := <-sess.Events():
-			if ev.Kind != EventTurnDone {
-				continue
-			}
-			res, err := st.HistoryGet(sessionID, 0)
-			if err != nil {
-				t.Fatalf("HistoryGet: %v", err)
-			}
-			if len(res.Turns) == 0 {
-				t.Fatalf("history not persisted when turn_done was observed: " +
-					"turn_done fired before saveHistory ran")
-			}
-			<-done // let Run finish before the store is closed in cleanup
-			return
-		case <-deadline:
-			t.Fatal("timed out waiting for turn_done")
-		}
+	if !sawTurnDone {
+		t.Fatal("turn_done never observed")
 	}
 }

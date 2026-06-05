@@ -67,20 +67,17 @@ func (f *fakeApp) WithReleasedTerminal(fn func()) {
 // Compile-time assertion that fakeApp satisfies patchapp.AppView.
 var _ patchapp.AppView = (*fakeApp)(nil)
 
-// runDrain feeds events to drainTurn synchronously and returns the recorded
-// call list. The events slice is drained in order; the channel is closed
-// after the last event.
+// runDrain feeds events to the render sink in order and returns the recorded
+// call list.
 func runDrain(t *testing.T, events []chat.Event) ([]string, *llm.Usage) {
 	t.Helper()
 	app := &fakeApp{}
 	usage := &llm.Usage{}
 	cfg := &chat.Config{}
-	ch := make(chan chat.Event, len(events)+1)
+	render := newRenderSink(app, usage, cfg, nil)
 	for _, ev := range events {
-		ch <- ev
+		render(ev)
 	}
-	close(ch)
-	drainTurn(ch, app, usage, cfg, nil)
 	return app.snapshot(), usage
 }
 
@@ -406,7 +403,7 @@ func register() (*fakeSlashApp, *chat.Config, *chat.Session, *llm.Usage) {
 			return chat.ActiveAgent{}, fmt.Errorf("unknown agent %q", name)
 		},
 	}
-	sess := chat.NewSession(chat.SessionOpts{BufSize: 8})
+	sess := chat.NewSession(chat.SessionOpts{})
 	usage := &llm.Usage{}
 	registerSlashCommands(app, cfg, sess, usage, func(llm.Message) {}, func(chat.ActiveAgent) {})
 	return app, cfg, sess, usage
@@ -620,7 +617,7 @@ func TestSlash_AgentSwitch(t *testing.T) {
 			return chat.ActiveAgent{}, fmt.Errorf("unknown agent %q", name)
 		},
 	}
-	sess := chat.NewSession(chat.SessionOpts{BufSize: 8})
+	sess := chat.NewSession(chat.SessionOpts{})
 	var applied chat.ActiveAgent
 	registerSlashCommands(app, cfg, sess, &llm.Usage{}, func(llm.Message) {}, func(rt chat.ActiveAgent) {
 		applied = rt
@@ -656,7 +653,7 @@ func TestSlash_AgentUnknown(t *testing.T) {
 func TestSlash_AgentNoneConfigured(t *testing.T) {
 	app := &fakeSlashApp{}
 	cfg := &chat.Config{StatusLine: "anthropic │ claude-x"}
-	sess := chat.NewSession(chat.SessionOpts{BufSize: 8})
+	sess := chat.NewSession(chat.SessionOpts{})
 	registerSlashCommands(app, cfg, sess, &llm.Usage{}, func(llm.Message) {}, func(chat.ActiveAgent) {})
 	app.call(t, "agent", "fast")
 

@@ -19,60 +19,36 @@ type Session struct {
 	lastPromptTokens int   // accurate token count from most recent streamOnce response
 	id               int64 // store session id; 0 if no store configured
 
-	// Exactly one delivery mechanism is active, chosen at construction:
-	//   - sink != nil   → synchronous mode: events are delivered by calling
-	//     sink(ev) inline on the turn goroutine. There is no channel and no
-	//     teardown: when Run returns, every event has already been delivered.
-	//     Embedders (pkg/shell3) use this.
-	//   - events != nil → channel mode: events are buffered on a chan consumed
-	//     via Events(), closed once by CloseEvents(). The TUI and one-shot path
-	//     use this because their consumer runs on a separate goroutine.
-	sink   func(Event)
-	events chan Event
+	// sink receives every event synchronously, inline on the goroutine that
+	// runs the turn. There is no channel and no teardown: once Run returns,
+	// every event has already been delivered. Always non-nil (NewSession
+	// installs a no-op when SessionOpts.Sink is unset).
+	sink func(Event)
 }
 
 // SessionOpts configures a new Session. All fields are optional.
 //
-// BufSize controls event-channel back-pressure: too small blocks the turn
-// loop, too large hides slow consumers. Defaults to 256 when zero.
 // StoreID is the running session id returned by store.Store.StartSession;
 // embedders that don't use a store can leave it zero.
 // ContextWindowFor resolves a model id to its context window in tokens;
 // the reminder tracker uses it to emit context-usage reminders.
-//
-// Sink selects synchronous delivery: when non-nil, events are delivered by
-// calling Sink(ev) inline on the turn goroutine and no channel is created
-// (Events returns nil, CloseEvents is a no-op). When nil, the Session runs in
-// channel mode with a buffered event channel of size BufSize.
+// Sink receives every event synchronously, inline on the turn goroutine. When
+// nil, events are discarded (a no-op sink is installed).
 type SessionOpts struct {
-	BufSize          int
 	StoreID          int64
 	ContextWindowFor func(string) int
 	Sink             func(Event)
 }
 
-// NewSession constructs a Session in either synchronous-sink mode (opts.Sink
-// non-nil) or channel mode (opts.BufSize, defaulting to 256). Other fields are
-// optional.
+// NewSession constructs a Session that delivers events to opts.Sink. A nil Sink
+// installs a no-op so emits are always safe. Other fields are optional.
 func NewSession(opts SessionOpts) *Session {
-	s := &Session{id: opts.StoreID}
+	s := &Session{id: opts.StoreID, sink: opts.Sink}
 	s.reminders.contextWindowFor = opts.ContextWindowFor
-	if opts.Sink != nil {
-		s.sink = opts.Sink
-		return s
+	if s.sink == nil {
+		s.sink = func(Event) {}
 	}
-	if opts.BufSize == 0 {
-		opts.BufSize = 256
-	}
-	s.events = make(chan Event, opts.BufSize)
 	return s
-}
-
-// Events returns the read-only event channel for this session. Consumers
-// (TUI, JSONL sink, embedders) range over this channel until the session
-// closes. The channel is closed exactly once during teardown.
-func (s *Session) Events() <-chan Event {
-	return s.events
 }
 
 // ID returns the store session id (0 if no store is configured).

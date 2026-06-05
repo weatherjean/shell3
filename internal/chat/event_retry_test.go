@@ -3,15 +3,14 @@ package chat
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
 func TestEmitRetry(t *testing.T) {
-	s := NewSession(SessionOpts{BufSize: 2})
+	s, c := newCollectorSession(SessionOpts{})
 	emitRetry(s, &llm.RetryNotice{Attempt: 2, Max: 5, Reason: "HTTP 503"})
-	got := drainEvents(s, 1, 50*time.Millisecond)
+	got := c.all()
 	if len(got) != 1 || got[0].Kind != EventRetry {
 		t.Fatalf("retry event missing: %+v", got)
 	}
@@ -31,13 +30,13 @@ func (c retryOnlyClient) Stream(_ context.Context, _ []llm.Message, _ []llm.Tool
 }
 
 func TestStreamOnceRelaysRetry(t *testing.T) {
-	s := NewSession(SessionOpts{BufSize: 4})
+	s, c := newCollectorSession(SessionOpts{})
 	client := retryOnlyClient{notice: llm.RetryNotice{Attempt: 1, Max: 5, Reason: "HTTP 429"}}
 	_, _, _, _, err := streamOnce(context.Background(), client, nil, nil, s)
 	if err != nil {
 		t.Fatalf("streamOnce err: %v", err)
 	}
-	got := drainEvents(s, 1, 50*time.Millisecond)
+	got := c.all()
 	if len(got) != 1 || got[0].Kind != EventRetry {
 		t.Fatalf("expected EventRetry from relay, got %+v", got)
 	}

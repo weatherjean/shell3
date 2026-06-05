@@ -17,16 +17,6 @@ func (s *Session) End(status string) {
 	emitSessionEnd(s, status)
 }
 
-// CloseEvents closes the underlying event channel in channel mode. Must be
-// called exactly once, after the last emit. emit/emitSync recover from
-// send-on-closed so late hook emissions during teardown won't panic. In sink
-// mode there is no channel and this is a no-op.
-func (s *Session) CloseEvents() {
-	if s.events != nil {
-		close(s.events)
-	}
-}
-
 // Messages returns a snapshot of the in-progress conversation history. The
 // returned slice is safe to retain — internal mutations don't affect it.
 func (s *Session) Messages() []llm.Message {

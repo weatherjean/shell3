@@ -24,22 +24,17 @@ func TestLibE2E_SingleTurn(t *testing.T) {
 		},
 	})
 
-	sess := chat.NewSession(chat.SessionOpts{BufSize: 64})
-	sess.Start(map[string]string{"mode": "test"})
-
-	// Collect events in a goroutine until the channel closes.
+	// Collect events via the synchronous sink — delivered inline during
+	// Start/Run/End on this goroutine, so no channel or goroutine is needed.
 	type evRec struct {
 		Kind chat.EventKind
 		Text string
 	}
 	var collected []evRec
-	done := make(chan struct{})
-	go func() {
-		for ev := range sess.Events() {
-			collected = append(collected, evRec{Kind: ev.Kind, Text: ev.Text})
-		}
-		close(done)
-	}()
+	sess := chat.NewSession(chat.SessionOpts{Sink: func(ev chat.Event) {
+		collected = append(collected, evRec{Kind: ev.Kind, Text: ev.Text})
+	}})
+	sess.Start(map[string]string{"mode": "test"})
 
 	cfg := chat.TurnConfig{
 		LLM:         fake,
@@ -53,8 +48,6 @@ func TestLibE2E_SingleTurn(t *testing.T) {
 	sess.Run(ctx, cfg, "say hi")
 
 	sess.End("ok")
-	sess.CloseEvents()
-	<-done
 
 	// Assert: session_start, user_message, assistant_token+, assistant_message,
 	// usage, turn_done, session_end all present.

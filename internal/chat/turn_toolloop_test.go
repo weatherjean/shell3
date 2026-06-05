@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
@@ -24,25 +23,15 @@ func (h stubHandler) Execute(ctx context.Context, id string, args json.RawMessag
 	return h.out, nil
 }
 
-// collectTurn runs RunTurn in a goroutine and returns every event up to and
-// including the terminal turn_done/error event (or fails on timeout).
-func collectTurn(t *testing.T, ctx context.Context, cfg TurnConfig, sess *Session, input string) []Event {
+// collectTurn runs RunTurn against a fresh collector-backed session and returns
+// every event it emits (delivery is synchronous, so all events are present once
+// RunTurn returns) along with the session, so callers can inspect the resulting
+// message history.
+func collectTurn(t *testing.T, ctx context.Context, cfg TurnConfig, input string) ([]Event, *Session) {
 	t.Helper()
-	go RunTurn(ctx, cfg, sess, llm.Message{Role: llm.RoleUser, Content: input}, nil)
-	var out []Event
-	deadline := time.After(2 * time.Second)
-	for {
-		select {
-		case ev := <-sess.Events():
-			out = append(out, ev)
-			if ev.Kind == EventTurnDone || ev.Kind == EventError {
-				return out
-			}
-		case <-deadline:
-			t.Fatalf("timed out waiting for terminal event after %d events", len(out))
-			return out
-		}
-	}
+	sess, c := newCollectorSession(SessionOpts{})
+	RunTurn(ctx, cfg, sess, llm.Message{Role: llm.RoleUser, Content: input}, nil)
+	return c.all(), sess
 }
 
 // hasToolMessage reports whether the session has a RoleTool message for the
@@ -70,7 +59,6 @@ func TestRunTurn_ToolRoundTrip(t *testing.T) {
 			{Usage: &llm.Usage{PromptTokens: 6, CompletionTokens: 3, TotalTokens: 9}},
 		}},
 	)
-	sess := NewSession(SessionOpts{BufSize: 256})
 	cfg := TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
@@ -78,7 +66,7 @@ func TestRunTurn_ToolRoundTrip(t *testing.T) {
 		Log:         LogOrNoop(nil),
 	}
 
-	events := collectTurn(t, context.Background(), cfg, sess, "hi")
+	events, sess := collectTurn(t, context.Background(), cfg, "hi")
 
 	var sawCall, sawResult, sawDone bool
 	for _, ev := range events {
@@ -128,7 +116,6 @@ func TestRunTurn_GuardCancel_StubsRemainingCalls(t *testing.T) {
 			{Usage: &llm.Usage{TotalTokens: 5}},
 		}},
 	)
-	sess := NewSession(SessionOpts{BufSize: 256})
 	cfg := TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
@@ -139,7 +126,7 @@ func TestRunTurn_GuardCancel_StubsRemainingCalls(t *testing.T) {
 		},
 	}
 
-	events := collectTurn(t, context.Background(), cfg, sess, "hi")
+	events, sess := collectTurn(t, context.Background(), cfg, "hi")
 
 	if hasKind(events, EventError) {
 		t.Fatalf("guard cancel should not emit error; events=%+v", events)
@@ -176,7 +163,6 @@ func TestRunTurn_MidLoopCtxCancel_EmitsError(t *testing.T) {
 			{Usage: &llm.Usage{TotalTokens: 5}},
 		}},
 	)
-	sess := NewSession(SessionOpts{BufSize: 256})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cfg := TurnConfig{
@@ -190,7 +176,7 @@ func TestRunTurn_MidLoopCtxCancel_EmitsError(t *testing.T) {
 		},
 	}
 
-	events := collectTurn(t, ctx, cfg, sess, "hi")
+	events, _ := collectTurn(t, ctx, cfg, "hi")
 
 	if !hasKind(events, EventError) {
 		t.Fatalf("mid-loop ctx cancel should emit error; events=%+v", events)
@@ -225,14 +211,13 @@ func TestRunTurn_CompactHistory_ReplacesAllMsgs(t *testing.T) {
 			{Usage: &llm.Usage{TotalTokens: 6}},
 		}},
 	)
-	sess := NewSession(SessionOpts{BufSize: 256})
 	cfg := TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
 		Log:         LogOrNoop(nil),
 	}
 
-	events := collectTurn(t, context.Background(), cfg, sess, "hello there")
+	events, _ := collectTurn(t, context.Background(), cfg, "hello there")
 
 	if !hasKind(events, EventTurnDone) {
 		t.Fatalf("compact_history turn should complete with turn_done; events=%+v", events)
