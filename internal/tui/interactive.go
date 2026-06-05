@@ -61,10 +61,8 @@ func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
 	}
 
 	app := patchapp.New(cfg.ModeLabel, cfg.StatusLine, patchapp.WelcomeInfo{
-		Persona:      cfg.ModeLabel,
-		ProjectRef:   cfg.ProjectRef,
-		ActiveSkills: cfg.ActiveSkills,
-		ActiveTools:  cfg.ActiveTools,
+		Persona:    cfg.ModeLabel,
+		ProjectRef: cfg.ProjectRef,
 	})
 	if cfg.ContextWindow > 0 {
 		app.SetContextWindow(cfg.ContextWindow)

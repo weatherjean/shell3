@@ -18,7 +18,6 @@ const (
 	keyHome
 	keyEnd
 	keyTab
-	keyShiftTab
 	keyCtrlC
 	keyCtrlU // clear input line
 	keyCtrlW // delete previous word
@@ -75,8 +74,6 @@ func parseKey(data []byte) (parsedKey, int) {
 				return parsedKey{kind: keyHome}, 3
 			case 'F':
 				return parsedKey{kind: keyEnd}, 3
-			case 'Z':
-				return parsedKey{kind: keyShiftTab}, 3
 			}
 			// ESC [ N ~ forms — Home/End/Delete on some terminals.
 			for j := 3; j < len(data) && j < 8; j++ {

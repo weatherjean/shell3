@@ -23,7 +23,6 @@ func TestParseKey(t *testing.T) {
 		{"left", []byte{27, '[', 'D'}, keyLeft},
 		{"home", []byte{27, '[', 'H'}, keyHome},
 		{"end", []byte{27, '[', 'F'}, keyEnd},
-		{"shift-tab", []byte{27, '[', 'Z'}, keyShiftTab},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

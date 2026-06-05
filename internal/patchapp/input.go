@@ -34,7 +34,6 @@ const (
 	keyEnd
 	keyCtrlC
 	keyPasteStart
-	keyPasteEnd
 )
 
 // parsedKey is one decoded input event. Only the fields relevant to its
@@ -50,7 +49,8 @@ type parsedKey struct {
 //
 // parseInput is stateless. Bracketed paste body bytes between paste
 // boundaries are returned as keyChar; the caller tracks the paste flag
-// using the keyPasteStart / keyPasteEnd events.
+// using the keyPasteStart event and detects paste-end by a raw byte
+// compare against pasteEnd.
 func parseInput(data []byte) (parsedKey, int) {
 	if len(data) == 0 {
 		return parsedKey{kind: keyNone}, 0
@@ -64,8 +64,11 @@ func parseInput(data []byte) (parsedKey, int) {
 	if len(data) > 1 && bytes.HasPrefix([]byte(pasteStart), data) {
 		return parsedKey{kind: keyNone}, 0
 	}
+	// A stray paste-end marker (outside an active paste) is consumed and
+	// ignored; the in-paste path detects paste-end by a raw byte compare
+	// against pasteEnd before parseInput is ever reached.
 	if bytes.HasPrefix(data, []byte(pasteEnd)) {
-		return parsedKey{kind: keyPasteEnd}, len(pasteEnd)
+		return parsedKey{kind: keyNone}, len(pasteEnd)
 	}
 	if len(data) > 1 && bytes.HasPrefix([]byte(pasteEnd), data) {
 		return parsedKey{kind: keyNone}, 0

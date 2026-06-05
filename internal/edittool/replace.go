@@ -188,17 +188,13 @@ func lineTrimmedReplacer(content, find string) []string {
 	return out
 }
 
-const (
-	// With a single block-anchor candidate (one place in the file where both
-	// first and last anchor lines match), accept on any positive middle-line
-	// similarity. The anchor pair is already a strong signal; raising this
-	// would reject edits where the model only got the framing lines right
-	// and rewrote everything in between — which is the common case.
-	singleCandidateThreshold = 0.0
-	// With multiple candidates, require ≥30% average middle-line similarity
-	// to disambiguate; otherwise the match is too speculative.
-	multipleCandidatesThreshold = 0.3
-)
+// With multiple candidates, require ≥30% average middle-line similarity to
+// disambiguate; otherwise the match is too speculative. A single candidate
+// (one place in the file where both first and last anchor lines match) is
+// always accepted: the anchor pair is already a strong signal, and the
+// common case is the model getting the framing lines right while rewriting
+// everything in between.
+const multipleCandidatesThreshold = 0.3
 
 // blockAnchorReplacer matches multi-line blocks where first and last lines
 // match (after trim), middle lines are scored by levenshtein similarity.
@@ -250,31 +246,7 @@ func blockAnchorReplacer(content, find string) []string {
 	}
 
 	if len(candidates) == 1 {
-		c := candidates[0]
-		actualBlockSize := c.end - c.start + 1
-		similarity := 0.0
-		linesToCheck := min(searchBlockSize-2, actualBlockSize-2)
-		if linesToCheck > 0 {
-			for j := 1; j < searchBlockSize-1 && j < actualBlockSize-1; j++ {
-				ol := strings.TrimSpace(originalLines[c.start+j])
-				sl := strings.TrimSpace(searchLines[j])
-				maxLen := max(len(ol), len(sl))
-				if maxLen == 0 {
-					continue
-				}
-				dist := levenshtein(ol, sl)
-				similarity += (1 - float64(dist)/float64(maxLen)) / float64(linesToCheck)
-				if similarity >= singleCandidateThreshold {
-					break
-				}
-			}
-		} else {
-			similarity = 1.0
-		}
-		if similarity >= singleCandidateThreshold {
-			return []string{emit(c)}
-		}
-		return nil
+		return []string{emit(candidates[0])}
 	}
 
 	bestIdx := -1
