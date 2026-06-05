@@ -23,7 +23,7 @@ Initial release.
   secrets.
 - Interactive TUI and headless/once mode with a structured JSONL audit log
   (`--out <path>`); see `docs/headless.md`.
-- Subcommands: `doctor`, `docs`, and `widget` (`ask`/`pick`/`confirm`).
+- Subcommands: `doctor` and `docs`.
 - First-run scaffolding of `~/.shell3/shell3.lua` and `~/.shell3/.env.example`.
 - SQLite-backed memory/history, skill loading and indexing, background job
   tracking, and a `str-replace` edit tool ported from opencode (see `NOTICE.md`).

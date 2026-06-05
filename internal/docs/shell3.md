@@ -403,7 +403,6 @@ The CLI surface is intentionally tiny.
 shell3 [message]            run the chat agent (TUI, or headless if piped/--out)
 shell3 doctor               validate global + project setup
 shell3 docs                 print this documentation
-shell3 widget ask|pick|confirm   JSON-in/JSON-out interactive prompt widgets
 ```
 
 Root flags (on `shell3` itself):
@@ -423,13 +422,6 @@ state directory.
 ### `docs`
 
 Prints this document (the same text the `shell3_docs` tool returns).
-
-### `widget`
-
-`ask`, `pick`, and `confirm` are JSON-in / JSON-out interactive prompt widgets
-for hooks and scripts. Each reads a spec on stdin, paints on `/dev/tty`, and
-writes a Result on stdout. Exit codes: `0` ok, `1` confirm-no, `2` timeout, `130`
-cancel/eof.
 
 ---
 

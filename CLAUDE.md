@@ -12,7 +12,7 @@ Secrets and credentials (provider API keys, tool tokens) live in a plain `.env` 
 ## Project Layout
 
 ```
-cmd/shell3/            entry point + subcommands (doctor, docs, widget)
+cmd/shell3/            entry point + subcommands (doctor, docs)
 internal/luacfg/       Lua config loader (shell3.lua → models/agents/tools/skills/guards)
 internal/bootstrap/    first-run global + project setup
 internal/scaffold/     embedded starter shell3.lua + .env template
@@ -24,7 +24,7 @@ internal/skills/       skill loading + indexing
 internal/edittool/     edit_file tool implementation
 internal/bgjobs/       background job tracking (.shell3/bg.json)
 internal/tui/          terminal UI (interactive + headless once)
-internal/patchapp,patchmd,patchtui,patchwidgets/  patch-style TUI components
+internal/patchapp,patchmd,patchtui/  patch-style TUI components
 internal/chat/         conversation loop, tools, events, JSONL sink
 internal/llm/          Provider/Streamer interfaces, registry (+ fakellm)
 internal/persona/      persona / system-prompt assembly
