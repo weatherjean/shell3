@@ -66,7 +66,7 @@ func Pick(spec PickSpec) (Result, error) {
 			bindings = append([]string{"type to filter"}, bindings...)
 		}
 		lines = append(lines, hintLine(bindings...))
-		paintFrame(r, lines)
+		r.Render(lines)
 	}
 
 	render()

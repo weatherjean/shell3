@@ -151,8 +151,6 @@ func smartWrapLine(line string, width int) []string {
 	}
 	firstPrefix, contPrefix, content := listPrefixes(line)
 	if firstPrefix == "" && contPrefix == "" {
-		firstPrefix = ""
-		contPrefix = ""
 		content = line
 	}
 

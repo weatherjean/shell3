@@ -85,28 +85,32 @@ func Load(path, workdir string) (*LoadedConfig, error) {
 		return nil, err
 	}
 	c := &LoadedConfig{Tools: map[string]CustomTool{}, Secrets: env, L: lua.NewState()}
+	// The returned config owns c.L; close it only if we error out below.
+	var success bool
+	defer func() {
+		if !success {
+			c.L.Close()
+		}
+	}()
 	registerShell3(c)
 	if err := c.L.DoFile(path); err != nil {
-		c.L.Close()
 		return nil, fmt.Errorf("config: %w", err)
 	}
 	if len(c.agents) == 0 {
-		c.L.Close()
 		return nil, fmt.Errorf("config: no shell3.agent declared")
 	}
 	for i := range c.agents {
 		if c.agents[i].ModelName == "" {
 			if len(c.Models) == 0 {
-				c.L.Close()
 				return nil, fmt.Errorf("config: agent %q has no model and no models are declared", c.agents[i].Name)
 			}
 			c.agents[i].ModelName = c.Models[0].Name
 		}
 		if _, ok := c.Model(c.agents[i].ModelName); !ok {
-			c.L.Close()
 			return nil, fmt.Errorf("config: agent %q references unknown model %q", c.agents[i].Name, c.agents[i].ModelName)
 		}
 	}
+	success = true
 	return c, nil
 }
 

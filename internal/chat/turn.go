@@ -261,43 +261,44 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 				out = fmt.Sprintf("error: invalid tool arguments: %v", err)
 			}
 		}
-		if out != "" {
-			// Hook blocked or validation failed — out already carries the
-			// reason text; nothing more to do here. The tool_result event
-			// emitted below carries the error string with ToolError=true.
-		} else if tc.Name == "compact_history" {
-			out, allMsgs = handleCompactHistory(tc.RawArgs, cfg.Store, sess, allMsgs, cfg.Log)
-		} else if tc.Name == "shell_interactive" {
-			command := ParseBashArgs(tc.RawArgs)
-			if cfg.ShellInteractive != nil {
-				out = cfg.ShellInteractive(ctx, command, cfg.WorkDir)
-			} else {
-				out = "error: interactive TTY not available"
-			}
-		} else if cfg.CustomToolNames[tc.Name] {
-			out = dispatchCustomTool(ctx, cfg.CustomTool, tc.Name, tc.RawArgs)
-		} else if handler, ok := cfg.Handlers[tc.Name]; ok {
-			toolCfg := ToolConfig{
-				Store:    cfg.Store,
-				WorkDir:  cfg.WorkDir,
-				AllMsgs:  allMsgs,
-				SessMsgs: sess.messages,
-			}
-			var herr error
-			out, herr = handler.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), toolCfg)
-			if herr != nil {
-				// Most handlers encode failures in their output string and
-				// return a nil error; a non-nil error is a genuine handler
-				// fault (e.g. bash_bg failing to spawn). Log it, and if the
-				// handler left no output, surface the error to the model as a
-				// tool error rather than emitting an empty result.
-				cfg.Log.Warn("tool handler error", "tool", tc.Name, "error", herr)
-				if out == "" {
-					out = "error: " + herr.Error()
+		// If a hook blocked the call or validation failed, out already carries
+		// the reason text and we skip dispatch. The tool_result event emitted
+		// below surfaces it with ToolError=true. Otherwise route to the tool.
+		if out == "" {
+			if tc.Name == "compact_history" {
+				out, allMsgs = handleCompactHistory(tc.RawArgs, cfg.Store, sess, allMsgs, cfg.Log)
+			} else if tc.Name == "shell_interactive" {
+				command := ParseBashArgs(tc.RawArgs)
+				if cfg.ShellInteractive != nil {
+					out = cfg.ShellInteractive(ctx, command, cfg.WorkDir)
+				} else {
+					out = "error: interactive TTY not available"
 				}
+			} else if cfg.CustomToolNames[tc.Name] {
+				out = dispatchCustomTool(ctx, cfg.CustomTool, tc.Name, tc.RawArgs)
+			} else if handler, ok := cfg.Handlers[tc.Name]; ok {
+				toolCfg := ToolConfig{
+					Store:    cfg.Store,
+					WorkDir:  cfg.WorkDir,
+					AllMsgs:  allMsgs,
+					SessMsgs: sess.messages,
+				}
+				var herr error
+				out, herr = handler.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), toolCfg)
+				if herr != nil {
+					// Most handlers encode failures in their output string and
+					// return a nil error; a non-nil error is a genuine handler
+					// fault (e.g. bash_bg failing to spawn). Log it, and if the
+					// handler left no output, surface the error to the model as a
+					// tool error rather than emitting an empty result.
+					cfg.Log.Warn("tool handler error", "tool", tc.Name, "error", herr)
+					if out == "" {
+						out = "error: " + herr.Error()
+					}
+				}
+			} else {
+				out = fmt.Sprintf("error: unknown tool %q", tc.Name)
 			}
-		} else {
-			out = fmt.Sprintf("error: unknown tool %q", tc.Name)
 		}
 
 		emitToolResult(sess, tc.ID, tc.Name, out, isToolError(out))

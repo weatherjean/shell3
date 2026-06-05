@@ -205,7 +205,7 @@ func (r *Renderer) Render(lines []string) {
 	for i, line := range lines {
 		if idx := strings.Index(line, CursorMarker); idx >= 0 {
 			markerRow = i
-			markerCol = visibleWidth(line[:idx])
+			markerCol = VisibleLen(line[:idx])
 			line = line[:idx] + line[idx+len(CursorMarker):]
 		}
 		clean[i] = line
@@ -305,7 +305,7 @@ func (r *Renderer) PrintAndRender(lines, frame []string) {
 	for i, line := range frame {
 		if idx := strings.Index(line, CursorMarker); idx >= 0 {
 			markerRow = i
-			markerCol = visibleWidth(line[:idx])
+			markerCol = VisibleLen(line[:idx])
 			line = line[:idx] + line[idx+len(CursorMarker):]
 		}
 		clean[i] = line
@@ -487,12 +487,6 @@ func (r *Renderer) moveCursorTo(buf *strings.Builder, row int) {
 	}
 	buf.WriteString("\r")
 	r.cursorRow = row
-}
-
-// visibleWidth returns the number of visible columns occupied by s.
-// Delegates to VisibleLen for correct grapheme-cluster and wide-char handling.
-func visibleWidth(s string) int {
-	return VisibleLen(s)
 }
 
 // clone returns a shallow copy of s.

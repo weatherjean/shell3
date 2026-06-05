@@ -44,7 +44,7 @@ func Confirm(spec ConfirmSpec) (Result, error) {
 			"  " + yesBtn + "    " + noBtn,
 			hintLine("y/n select", "tab toggle", "enter confirm", "esc cancel"),
 		}
-		paintFrame(r, frame)
+		r.Render(frame)
 	}
 
 	render()

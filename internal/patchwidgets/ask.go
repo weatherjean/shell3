@@ -48,7 +48,7 @@ func Ask(spec AskSpec) (Result, error) {
 			line,
 			hintLine("enter submit", "esc cancel"),
 		}
-		paintFrame(r, frame)
+		r.Render(frame)
 	}
 
 	render()
@@ -135,10 +135,4 @@ func remaining(deadline time.Time) time.Duration {
 		return time.Millisecond
 	}
 	return d
-}
-
-// paintFrame renders frame via the renderer (which has been pre-pointed at
-// the tty file via [patchtui.Renderer.SetOutput]).
-func paintFrame(r *patchtui.Renderer, frame []string) {
-	r.Render(frame)
 }
