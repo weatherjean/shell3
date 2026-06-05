@@ -78,6 +78,14 @@ func migrate(db *sql.DB) error {
 // Close closes the underlying database connection.
 func (s *Store) Close() error { return s.db.Close() }
 
+// parseRFC3339 parses a store-written RFC3339 timestamp, returning the zero
+// time.Time on error. Malformed stored timestamps deliberately fall back to
+// zero (the write format is store-controlled, so this only fires on corruption).
+func parseRFC3339(s string) time.Time {
+	t, _ := time.Parse(time.RFC3339, s)
+	return t
+}
+
 // StartSession inserts a new session row and returns its id.
 func (s *Store) StartSession() (int64, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -212,9 +220,7 @@ func (s *Store) HistoryGet(sessionID int64, chunk int) (HistoryGetResult, error)
 		}
 		t.SessionID = sessionID
 		t.Chunk = chunk
-		// Malformed stored timestamp deliberately falls back to zero time.Time
-		// (store-controlled write format).
-		t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		t.CreatedAt = parseRFC3339(createdAt)
 		turns = append(turns, t)
 	}
 	if err := rows.Err(); err != nil {
@@ -241,11 +247,9 @@ func (s *Store) HistoryGet(sessionID int64, chunk int) (HistoryGetResult, error)
 		NextSessionID: nextID,
 		Turns:         turns,
 	}
-	// Malformed stored timestamps deliberately fall back to zero time.Time
-	// (store-controlled write format).
-	res.SessionStartedAt, _ = time.Parse(time.RFC3339, startedAt)
+	res.SessionStartedAt = parseRFC3339(startedAt)
 	if endedAt.Valid {
-		res.SessionEndedAt, _ = time.Parse(time.RFC3339, endedAt.String)
+		res.SessionEndedAt = parseRFC3339(endedAt.String)
 	}
 	return res, nil
 }
@@ -289,9 +293,7 @@ func (s *Store) HistorySearchExpr(expr string, limit int) (HistorySearchResult, 
 		if err := rows.Scan(&rowid, &t.SessionID, &t.Role, &t.Content, &createdAt, &earlier); err != nil {
 			return HistorySearchResult{}, fmt.Errorf("store: history search: scan: %w", err)
 		}
-		// Malformed stored timestamp deliberately falls back to zero time.Time
-		// (store-controlled write format).
-		t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		t.CreatedAt = parseRFC3339(createdAt)
 		t.Chunk = int(earlier) / ChunkSize
 		hits = append(hits, t)
 	}

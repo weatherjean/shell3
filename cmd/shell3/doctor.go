@@ -89,15 +89,7 @@ func checkProjectDoctor(out io.Writer, l paths.Local, g paths.Global, cwd string
 
 	meta, err := ref.ReadMeta(p)
 	if err == nil {
-		resolvedCWD, _ := filepath.EvalSymlinks(cwd)
-		resolvedMeta, _ := filepath.EvalSymlinks(meta.CWD)
-		if resolvedCWD == "" {
-			resolvedCWD = cwd
-		}
-		if resolvedMeta == "" {
-			resolvedMeta = meta.CWD
-		}
-		doctorCheck(out, fail, resolvedMeta == resolvedCWD, fmt.Sprintf("meta.json: project=%s", meta.Name))
+		doctorCheck(out, fail, resolveSymlink(meta.CWD) == resolveSymlink(cwd), fmt.Sprintf("meta.json: project=%s", meta.Name))
 	} else {
 		doctorCheck(out, fail, false, "meta.json unreadable")
 	}
@@ -117,6 +109,16 @@ func doctorCheck(out io.Writer, fail func(), ok bool, msg string) {
 		_, _ = fmt.Fprintf(out, "  ✗ %s\n", msg)
 		fail()
 	}
+}
+
+// resolveSymlink returns the symlink-resolved form of p, falling back to p
+// unchanged when EvalSymlinks fails (it returns "" on error).
+func resolveSymlink(p string) string {
+	resolved, _ := filepath.EvalSymlinks(p)
+	if resolved == "" {
+		return p
+	}
+	return resolved
 }
 
 func dirExists(path string) bool {

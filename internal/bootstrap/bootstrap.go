@@ -66,18 +66,25 @@ func ensureGitignore(l paths.Local) error {
 		return nil
 	}
 
-	addition := strings.Join(missing, "\n") + "\n"
-	if len(b) > 0 && !strings.HasSuffix(string(b), "\n") {
+	return appendGitignore("", path, string(b), strings.Join(missing, "\n")+"\n")
+}
+
+// appendGitignore appends addition to the .gitignore at path, given the file's
+// current content. It guards the leading newline so the addition always starts
+// on its own line, and creates the file with mode 0644 when absent. label (e.g.
+// "global ") is interpolated into error messages to distinguish the two
+// gitignore writers; pass "" for the project gitignore.
+func appendGitignore(label, path, content, addition string) error {
+	if len(content) > 0 && !strings.HasSuffix(content, "\n") {
 		addition = "\n" + addition
 	}
-
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return fmt.Errorf("bootstrap: open gitignore: %w", err)
+		return fmt.Errorf("bootstrap: open %sgitignore: %w", label, err)
 	}
 	defer func() { _ = f.Close() }()
 	if _, err := f.WriteString(addition); err != nil {
-		return fmt.Errorf("bootstrap: write gitignore: %w", err)
+		return fmt.Errorf("bootstrap: write %sgitignore: %w", label, err)
 	}
 	return nil
 }
@@ -116,20 +123,7 @@ func ensureGlobalGitignore(g paths.Global) error {
 		return nil
 	}
 
-	addition := globalGitignoreAddition
-	if len(b) > 0 && !strings.HasSuffix(content, "\n") {
-		addition = "\n" + addition
-	}
-
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("bootstrap: open global gitignore: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-	if _, err := f.WriteString(addition); err != nil {
-		return fmt.Errorf("bootstrap: write global gitignore: %w", err)
-	}
-	return nil
+	return appendGitignore("global ", path, content, globalGitignoreAddition)
 }
 
 // globalGitignoreAddition is appended to ~/.shell3/.gitignore when the log

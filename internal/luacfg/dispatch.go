@@ -37,11 +37,17 @@ func (c *LoadedConfig) OnToolCall(ctx context.Context, tool string, params map[s
 	return DecisionAllow, "", nil
 }
 
-// runLuaGuard calls a single Lua guard function, locking the VM mutex.
-func (c *LoadedConfig) runLuaGuard(ctx context.Context, fn *lua.LFunction, tool string, params map[string]any) (Decision, string, error) {
+// lockVM takes the VM mutex and marks it held, returning an unlock func that
+// clears the flag before releasing. Callers use it as `defer c.lockVM()()`.
+func (c *LoadedConfig) lockVM() func() {
 	c.mu.Lock()
 	c.vmLockHeld = true
-	defer func() { c.vmLockHeld = false; c.mu.Unlock() }() // clear flag before releasing
+	return func() { c.vmLockHeld = false; c.mu.Unlock() } // clear flag before releasing
+}
+
+// runLuaGuard calls a single Lua guard function, locking the VM mutex.
+func (c *LoadedConfig) runLuaGuard(ctx context.Context, fn *lua.LFunction, tool string, params map[string]any) (Decision, string, error) {
+	defer c.lockVM()()
 	c.L.SetContext(ctx)
 	call := c.L.NewTable()
 	call.RawSetString("tool", lua.LString(tool))
@@ -111,9 +117,7 @@ func (c *LoadedConfig) CallTool(ctx context.Context, name, argsJSON string) (str
 	if !ok {
 		return "", fmt.Errorf("unknown custom tool %q", name)
 	}
-	c.mu.Lock()
-	c.vmLockHeld = true
-	defer func() { c.vmLockHeld = false; c.mu.Unlock() }() // clear flag before releasing
+	defer c.lockVM()()
 	c.L.SetContext(ctx)
 	argsT := goToLua(c.L, args)
 	if err := c.L.CallByParam(lua.P{Fn: tool.handler, NRet: 1, Protect: true}, argsT); err != nil {
