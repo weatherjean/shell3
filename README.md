@@ -53,8 +53,8 @@ argument (or on stdin) and stream a structured JSONL audit log with `--out`:
 shell3 "summarize the diff" --out run.jsonl
 ```
 
-See [docs/headless.md](docs/headless.md) for the full event schema, environment
-variables, and the pattern for spawning subagents.
+See the **Headless mode** section of `shell3 docs` for the event stream,
+environment variables, and the subagent-spawning pattern.
 
 ## License
 

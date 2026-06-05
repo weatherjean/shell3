@@ -39,9 +39,7 @@ type Message struct {
 	// OpenAI-compatible providers emit (Moonshot/kimi, DeepSeek). The
 	// openai adapter populates it from streaming and echoes it back on
 	// the next turn — Moonshot 400s when thinking mode is enabled and
-	// the assistant tool-call message lacks reasoning_content. The
-	// anthropic adapter ignores this field; Anthropic uses its own
-	// thinking blocks.
+	// the assistant tool-call message lacks reasoning_content.
 	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 

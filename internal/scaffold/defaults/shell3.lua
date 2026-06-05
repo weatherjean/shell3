@@ -429,72 +429,38 @@ description: Use Brave Search and page fetching for current, external, or source
 
 Use this skill when a task needs current information, external facts, documentation, citations, or verification beyond the local repo/context.
 
-## Tool choices
+## Tools
 
-- Use `brave_search` with `mode=search` for quick discovery, candidate URLs, or broad orientation.
-- Use `brave_search` with `mode=context` when the model needs source text, tables, code, or grounded snippets in one call.
-- Use `web_fetch` when a specific URL needs closer reading after search, or when search snippets are insufficient.
+Two tools are available:
 
-## Keep limits low by default
+- `brave_search{ query, count }` — runs a Brave Web Search and returns titles, URLs, and snippets. `count` is 1-20 (default 10). Use it for discovery, candidate URLs, and quick orientation.
+- `web_fetch{ url }` — fetches a single page, strips HTML, and returns its plain text plus the links it contains. Use it to read a specific page closely once search snippets are insufficient.
 
-Start small and increase only when the task requires it.
+## Keep retrieval small by default
 
-Suggested defaults:
+Start with a low `count` and increase only when the task requires it.
 
-- Simple lookup / verify one fact:
-  - `mode=context`
-  - `count=3`
-  - `max_urls=2`
-  - `max_tokens=2048`
-  - `threshold=strict`
-- Normal research:
-  - `mode=context`
-  - `count=5-10`
-  - `max_urls=3-5`
-  - `max_tokens=4096-8192`
-  - `threshold=balanced` or `strict`
-- Broad discovery:
-  - `mode=search`
-  - `count=5-10`
-- Deep research only when explicitly needed:
-  - Increase `count`, `max_urls`, and `max_tokens` gradually.
-  - Explain why larger retrieval is necessary.
+- Simple lookup / verify one fact: `count=3`.
+- Normal research: `count=5-10`.
+- Broad discovery / deep research: raise `count` gradually, and `web_fetch` the most promising results rather than searching repeatedly. Explain why larger retrieval is necessary.
 
-## Freshness
-
-Use `freshness` for time-sensitive topics:
-
-- `pd`: past day
-- `pw`: past week
-- `pm`: past month
-- `py`: past year
-- `YYYY-MM-DDtoYYYY-MM-DD`: explicit date range
-
-Prefer a freshness filter for news, changelogs, recent API changes, pricing, availability, and security advisories.
-
-## Source quality
-
-- Prefer official docs, standards, release notes, and primary sources.
-- Use `threshold=strict` when precision matters more than recall.
-- Use `threshold=balanced` for normal research.
-- Use `threshold=lenient` only when strict/balanced misses relevant material.
-- If a search result is only a snippet, do not imply you fully read the page. Fetch it first when details matter.
+A search snippet is not the full page. Do not imply you read a page you only saw in snippets — `web_fetch` it first when details matter.
 
 ## Workflow
 
 1. Decide whether the question needs web search. If local files/docs can answer it, inspect those first.
-2. Start with small limits.
-3. Read enough source content to answer accurately; use `web_fetch` for specific pages as needed.
-4. Cross-check important claims with at least one authoritative source when practical.
-5. Summarize with links/source names when the answer depends on web content.
-6. Note uncertainty or stale/ambiguous information instead of overclaiming.
+2. Start with a small `count`.
+3. Read enough source content to answer accurately; `web_fetch` specific pages as needed.
+4. Prefer official docs, standards, release notes, and primary sources.
+5. Cross-check important claims with at least one authoritative source when practical.
+6. Summarize with links/source names when the answer depends on web content.
+7. Note uncertainty or stale/ambiguous information instead of overclaiming.
 
 ## Cost and context hygiene
 
-- Avoid large `max_tokens` unless needed.
 - Avoid repeatedly searching the same query; refine based on results.
 - Prune large successful tool outputs after extracting what you need.
-- Prefer targeted follow-up searches over one very large search.
+- Prefer a targeted `web_fetch` over many broad searches.
 ]],
 })
 
@@ -542,7 +508,7 @@ shell3 "summarise the open PRs on this repo" --out $OUT  # via bash_bg
 # Wait + check
 sleep 30
 if tail -n1 $OUT | grep -q '"kind":"end"'; then
-  cat $OUT | jq -r 'select(.kind=="text").text' | head -50
+  cat $OUT | jq -r 'select(.kind=="assistant_message").text' | head -50
 else
   echo "still working, sleep more"
 fi
@@ -556,11 +522,11 @@ Each line is one event. Useful filters:
 
 - Final assistant text:
   ```bash
-  jq -r 'select(.kind=="text") | .text' < $OUT
+  jq -r 'select(.kind=="assistant_message") | .text' < $OUT
   ```
 - Tool calls only:
   ```bash
-  jq 'select(.kind=="tool")' < $OUT
+  jq 'select(.kind=="tool_call")' < $OUT
   ```
 - Final usage:
   ```bash
@@ -571,14 +537,9 @@ Each line is one event. Useful filters:
   jq 'select(.kind=="error")' < $OUT
   ```
 
-See `docs/headless.md` in the shell3 repo for the full schema reference.
-
 ## Headless caveats
 
-A spawned agent runs with `SHELL3_HEADLESS=1` and the default `confirm-bash` hook will **block destructive commands automatically**. The blocked call appears in the JSONL as a tool result containing "Headless mode: destructive command requires human approval." If your sub-task legitimately needs destructive operations, either:
-
-- Refactor the sub-task to avoid them, OR
-- Spawn with `SHELL3_HEADLESS_TRUST=1 shell3 ...` to opt the child into "trust the agent" mode (only do this when you're sure the task is safe).
+A spawned agent runs with `SHELL3_HEADLESS=1`: the `shell_interactive` tool is removed and a system reminder tells it no human is available to answer questions, so it must decide and proceed. Whether a destructive command is blocked depends on the `on_tool_call` guards in the spawned agent's own `shell3.lua` — there is no built-in approval prompt in headless mode. If a sub-task needs operations a guard blocks, adjust that agent's guards or refactor the sub-task to avoid them.
 
 ## Output location convention
 
@@ -655,7 +616,7 @@ You are an expert coding assistant inside shell3. Work autonomously as a senior 
 
 ## shell3 self-configuration
 
-For shell3 configuration or extension work — models, providers, personas, built-in/user tools, skills, hooks, secrets, or database layout — read `shell3_docs` or `cmd/shell3/shell3.md` before acting. Project config lives under `.shell3/`.
+For shell3 configuration or extension work — models, providers, personas, built-in/user tools, skills, guards, secrets, or database layout — read the `shell3_docs` tool before acting. Project config lives under `.shell3/`.
 
 ## Skills
 

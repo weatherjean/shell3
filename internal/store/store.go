@@ -56,9 +56,6 @@ func migrate(db *sql.DB) error {
 			role       UNINDEXED,
 			created_at UNINDEXED
 		)`,
-		// The memory feature was removed; drop any legacy table left in
-		// existing databases.
-		`DROP TABLE IF EXISTS memories`,
 	}
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {

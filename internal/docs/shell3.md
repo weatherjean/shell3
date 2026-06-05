@@ -464,8 +464,10 @@ composable: scripts, CI jobs, or other shell3 agents can spawn it, wait for the
 `end` line, and read what happened.
 
 Headless mode exports `SHELL3_HEADLESS=1` (and `SHELL3_OUT=<path>` when `--out`
-is set). See **`docs/headless.md`** in the repo for the full event schema, env
-vars, and the spawning-subagents pattern.
+is set). Each JSONL line carries a `kind` field (`assistant_token`,
+`assistant_message`, `tool_call`, `tool_result`, `usage`, `turn_done`, …); the
+stream's first line is `{"kind":"start", ...}` and its last is
+`{"kind":"end","status":"ok|error"}`.
 
 ---
 

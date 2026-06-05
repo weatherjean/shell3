@@ -7,7 +7,8 @@ import (
 
 // RequestParams is the set of tunable knobs every adapter understands.
 // Empty string / nil = "use adapter default". Adapters must clamp values
-// they cannot represent (e.g. anthropic mapping reasoning_effort → budget).
+// they cannot represent (e.g. the openai adapter clamps xhigh reasoning
+// effort down to high).
 type RequestParams struct {
 	ReasoningEffort   string   // none|minimal|low|medium|high|xhigh
 	ParallelToolCalls *bool    // nil = leave provider default
