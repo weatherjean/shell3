@@ -604,9 +604,9 @@ func TestSlash_AgentList(t *testing.T) {
 func TestSlash_AgentSwitch(t *testing.T) {
 	app := &fakeSlashApp{}
 	cfg := &chat.Config{
-		StatusLine:  "anthropic │ claude-x",
-		ModeLabel:   "main",
-		AgentNames:  []string{"main", "fast"},
+		StatusLine: "anthropic │ claude-x",
+		ModeLabel:  "main",
+		AgentNames: []string{"main", "fast"},
 		SwitchAgent: func(name string) (chat.ActiveAgent, error) {
 			if name == "fast" {
 				return chat.ActiveAgent{
