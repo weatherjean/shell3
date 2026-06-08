@@ -17,6 +17,7 @@ import (
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/luacfg"
+	"github.com/weatherjean/shell3/internal/mcp"
 	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/store"
@@ -49,9 +50,10 @@ type builder struct {
 	proj       paths.Project
 	uuid       string
 
-	log applog.Logger
-	lc  *luacfg.LoadedConfig
-	st  *store.Store
+	log    applog.Logger
+	lc     *luacfg.LoadedConfig
+	st     *store.Store
+	mcpMgr *mcp.Manager
 
 	closers []func() // LIFO teardown stack
 }
@@ -78,6 +80,7 @@ func Build(opts Options) (chat.Config, func(), error) {
 		}
 	}
 	b.openStore() // non-fatal; may push the store closer
+	b.buildMCP()  // non-fatal; may push the MCP shutdown closer
 	cfg, err := b.assemble()
 	if err != nil {
 		b.closeAll()
@@ -162,6 +165,29 @@ func (b *builder) openStore() {
 	}
 }
 
+// buildMCP constructs the MCP manager from all declared servers. The schema
+// cache lives under the project dir so discovered tools persist across runs.
+// No-op when no servers are declared.
+func (b *builder) buildMCP() {
+	servers := b.lc.MCPServers
+	if len(servers) == 0 {
+		return
+	}
+	specs := make([]mcp.Spec, 0, len(servers))
+	for _, s := range servers {
+		specs = append(specs, mcp.Spec{
+			Name:    s.Name,
+			Command: s.Command,
+			Args:    s.Args,
+			Env:     s.Env,
+			Tools:   s.Tools,
+		})
+	}
+	cacheDir := filepath.Join(b.proj.Dir, "mcp")
+	b.mcpMgr = mcp.NewManager(specs, cacheDir)
+	b.closers = append(b.closers, func() { b.mcpMgr.Shutdown() })
+}
+
 // buildActiveRuntime assembles the full chat runtime for the currently active
 // agent: its model client, persona, tool defs, and guard closure. Called at
 // startup and on every agent switch.
@@ -179,6 +205,21 @@ func (b *builder) buildActiveRuntime() (chat.ActiveAgent, error) {
 	toolNames := make([]string, 0, len(toolDefs))
 	for _, t := range toolDefs {
 		toolNames = append(toolNames, t.Name)
+	}
+
+	// Merge this agent's selected MCP servers' tools (prefixed server__tool).
+	var mcpNames map[string]bool
+	if b.mcpMgr != nil && len(a.MCPServerNames) > 0 {
+		mcpDefs, err := b.mcpMgr.ToolDefinitionsFor(context.Background(), a.MCPServerNames)
+		if err != nil {
+			b.log.Warn("mcp: tool discovery failed; server tools unavailable", "error", err)
+		} else {
+			toolDefs = append(toolDefs, mcpDefs...)
+			for _, d := range mcpDefs {
+				toolNames = append(toolNames, d.Name)
+			}
+			mcpNames = b.mcpMgr.ToolNamesFor(a.MCPServerNames)
+		}
 	}
 
 	prompt := b.lc.BuildPersona()
@@ -206,6 +247,7 @@ func (b *builder) buildActiveRuntime() (chat.ActiveAgent, error) {
 		ActiveSkills:    a.Skills,
 		ActiveTools:     toolNames,
 		CustomToolNames: customNames,
+		MCPToolNames:    mcpNames,
 		LLM:             client,
 		Params:          rp,
 		ModelID:         md.ModelID,
@@ -250,11 +292,17 @@ func (b *builder) assemble() (chat.Config, error) {
 		WorkDir:       b.opts.CWD,
 		ProjectRef:    b.uuid,
 		CustomTool:    b.lc.CallTool,
-		Log:           b.log,
-		OutPath:       b.opts.OutPath,
-		Headless:      b.opts.Headless,
-		AgentNames:    agentNames,
-		SwitchAgent:   switchAgent,
+		MCPTool: func(ctx context.Context, name, args string) (string, error) {
+			if b.mcpMgr == nil {
+				return "", fmt.Errorf("no MCP servers configured")
+			}
+			return b.mcpMgr.Dispatch(ctx, name, args)
+		},
+		Log:         b.log,
+		OutPath:     b.opts.OutPath,
+		Headless:    b.opts.Headless,
+		AgentNames:  agentNames,
+		SwitchAgent: switchAgent,
 	}
 	cfg.ApplyActiveAgent(rt)
 	return cfg, nil
