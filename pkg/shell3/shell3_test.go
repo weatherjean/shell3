@@ -653,16 +653,16 @@ func TestSetParam(t *testing.T) {
 	}
 }
 
-// TestSendMessage_TextPath verifies SendMessage drives a plain-text turn just
-// like Send (tokens stream, Done fires, history carries).
-func TestSendMessage_TextPath(t *testing.T) {
+// TestSend_TextPath verifies Send drives a plain-text turn (tokens stream,
+// Done fires, history carries).
+func TestSend_TextPath(t *testing.T) {
 	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "reply"}}})
 	s := newTestSession(t, client, chat.Config{})
 	defer s.Close()
 
 	var text string
 	var done bool
-	for ev := range s.SendMessage(context.Background(), Message{Text: "hi there"}) {
+	for ev := range s.Send(context.Background(), "hi there") {
 		switch ev.Kind {
 		case Token:
 			text += ev.Text
@@ -671,7 +671,7 @@ func TestSendMessage_TextPath(t *testing.T) {
 		}
 	}
 	if text != "reply" || !done {
-		t.Fatalf("SendMessage text path: text=%q done=%v", text, done)
+		t.Fatalf("Send text path: text=%q done=%v", text, done)
 	}
 	if len(s.sess.Messages()) < 2 {
 		t.Fatalf("history not carried: %d messages", len(s.sess.Messages()))
@@ -731,13 +731,5 @@ func TestAuditSink_WritesStartEventsEnd(t *testing.T) {
 	}
 	if tokens == 0 {
 		t.Fatal("expected at least one assistant_token line in the audit log")
-	}
-}
-
-// TestImageMessage_BadPath verifies ImageMessage surfaces an error for a
-// missing/unsupported file rather than returning a half-built Message.
-func TestImageMessage_BadPath(t *testing.T) {
-	if _, err := ImageMessage("nonexistent.png", t.TempDir()); err == nil {
-		t.Fatal("expected error for missing image file")
 	}
 }

@@ -458,17 +458,10 @@ type fakeSession struct {
 	pruneOK    bool   // what Prune's ok returns
 	setParamFn func(string, string) error
 	sent       []string // prompts passed to Send
-	sentMsgs   []shell3.Message
 }
 
 func (f *fakeSession) Send(ctx context.Context, prompt string) <-chan shell3.Event {
 	f.sent = append(f.sent, prompt)
-	ch := make(chan shell3.Event)
-	close(ch)
-	return ch
-}
-func (f *fakeSession) SendMessage(ctx context.Context, msg shell3.Message) <-chan shell3.Event {
-	f.sentMsgs = append(f.sentMsgs, msg)
 	ch := make(chan shell3.Event)
 	close(ch)
 	return ch
@@ -517,13 +510,13 @@ func register() (*fakeSlashApp, *fakeSession, *usage) {
 		active: "main",
 	}
 	u := &usage{}
-	registerSlashCommands(app, sess, u, "/work", func(shell3.Message) {}, func() {})
+	registerSlashCommands(app, sess, u, func() {})
 	return app, sess, u
 }
 
 func TestSlash_RegistersExpectedCommands(t *testing.T) {
 	app, _, _ := register()
-	want := []string{"clear", "rollback", "prune", "usage", "prompt", "print", "agent", "exit", "quit", "image"}
+	want := []string{"clear", "rollback", "prune", "usage", "prompt", "print", "agent", "exit", "quit"}
 	for _, name := range want {
 		if _, ok := app.handlers[name]; !ok {
 			t.Errorf("missing handler: /%s", name)
@@ -688,7 +681,7 @@ func TestSlash_AgentSwitch(t *testing.T) {
 		active: "main",
 	}
 	applied := false
-	registerSlashCommands(app, sess, &usage{}, "/work", func(shell3.Message) {}, func() {
+	registerSlashCommands(app, sess, &usage{}, func() {
 		applied = true
 	})
 	app.call(t, "agent", "fast")
@@ -719,7 +712,7 @@ func TestSlash_AgentUnknown(t *testing.T) {
 func TestSlash_AgentNoneConfigured(t *testing.T) {
 	app := &fakeSlashApp{}
 	sess := &fakeSession{snap: shell3.Snapshot{StatusLine: "anthropic │ claude-x"}}
-	registerSlashCommands(app, sess, &usage{}, "/work", func(shell3.Message) {}, func() {})
+	registerSlashCommands(app, sess, &usage{}, func() {})
 	app.call(t, "agent", "fast")
 
 	if !containsAll(app.snapshot(), "[no agents configured]") {

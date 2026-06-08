@@ -254,7 +254,7 @@ func newSession(cfg chat.Config, cleanup func()) *Session {
 // turn cancel (Ctrl-C/ESC), not just Close. So once a turn is cancelled this
 // select MAY take the curDone branch and drop whatever it was delivering —
 // INCLUDING the turn's terminal Done/Error event. Consumers must therefore
-// treat channel close (see SendMessage) as the authoritative end-of-turn
+// treat channel close (see Send) as the authoritative end-of-turn
 // signal; the terminal event is best-effort and can be absent on a cancel.
 func (s *Session) route(ev chat.Event) {
 	// Audit first, losslessly: the internal chat.Event keeps ToolCallID, system
@@ -289,55 +289,12 @@ func (s *Session) route(ev chat.Event) {
 	}
 }
 
-// Message is one user turn for SendMessage. A plain Text message drives the
-// same path as Send; a message built from an Attachment (see ImageMessage)
-// carries a prepared multimodal payload that bypasses the string-only Run.
-type Message struct {
-	// Text is the user's prompt. For an ImageMessage it is the (already
-	// embedded) prompt accompanying the attachment.
-	Text string
-	// Attachments lists files attached to this turn (e.g. an image). Today only
-	// ImageMessage populates this; SendMessage drives the built payload.
-	Attachments []Attachment
-
-	// built is the prepared internal message for an attachment-bearing turn.
-	// Zero-value (no ContentParts) means "plain text" and SendMessage takes the
-	// Text path. Unexported so the chat/llm types never leak into the API.
-	built llm.Message
-}
-
-// Attachment is a file attached to a Message (carrier for ImageMessage).
-type Attachment struct {
-	Path string
-}
-
-// ImageMessage builds a Message from a "/image"-style argument string
-// ("<path> [prompt]", quotes allowed for paths with spaces), resolving relative
-// paths against workDir. The image is decoded, resized, and embedded so the
-// returned Message can be passed straight to SendMessage. Wraps the internal
-// image pipeline; mirrors the TUI's /image handler.
-func ImageMessage(args, workDir string) (Message, error) {
-	built, err := chat.BuildImageMessage(args, workDir)
-	if err != nil {
-		return Message{}, err
-	}
-	m := Message{Text: built.Content, built: built}
-	for _, p := range built.ContentParts {
-		if p.Type == llm.ContentPartTypeImageURL {
-			// Carry the source path for introspection; the embedded data URI is
-			// not surfaced here (it lives in built).
-			m.Attachments = append(m.Attachments, Attachment{Path: args})
-			break
-		}
-	}
-	return m, nil
-}
-
 // Send runs one turn for prompt and returns a channel of that turn's events,
-// closed when the turn ends. Channel close is the authoritative end-of-turn
-// signal: a terminal Done/Error event is emitted before close on a best-effort
-// basis but may be dropped on cancel (see route), so consumers must bind
-// end-of-turn UI/state transitions to close, not to receiving Done/Error.
+// closed when the turn ends (the deferred close(out) below always runs).
+// Channel close is the authoritative end-of-turn signal: a terminal Done/Error
+// event is emitted before close on a best-effort basis but may be dropped on
+// cancel (see route), so consumers must bind end-of-turn UI/state transitions
+// to close, not to receiving Done/Error.
 //
 // Single-turn-at-a-time contract: the caller MUST drain the returned channel
 // to completion before calling Send, Clear, Rollback, or SwitchAgent again.
@@ -345,22 +302,6 @@ func ImageMessage(args, workDir string) (Message, error) {
 // and assume exactly one turn is active; overlapping them is a data race, not
 // a supported concurrency mode.
 func (s *Session) Send(ctx context.Context, prompt string) <-chan Event {
-	return s.SendMessage(ctx, Message{Text: prompt})
-}
-
-// SendMessage runs one turn for msg and returns a channel of that turn's
-// events, closed when the turn ends (the deferred close(out) below always runs).
-// As with Send, channel close — not the terminal Done/Error event, which route
-// may drop on cancel — is the authoritative end-of-turn signal. It is the
-// multimodal-capable
-// sibling of Send: a plain-Text Message drives Session.Run (string path), while
-// a Message carrying a built attachment payload (see ImageMessage) drives
-// RunTurn directly — Run is string-only and would drop the ContentParts. Both
-// paths share the same per-turn routing/cancel/close machinery.
-//
-// Same single-turn-at-a-time contract as Send: drain the returned channel
-// before the next Send/SendMessage/Clear/Rollback/SwitchAgent.
-func (s *Session) SendMessage(ctx context.Context, msg Message) <-chan Event {
 	out := make(chan Event)
 	turnCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
@@ -385,14 +326,7 @@ func (s *Session) SendMessage(ctx context.Context, msg Message) <-chan Event {
 			cancel() // release the child ctx
 		}()
 		defer close(done)
-		// Branch like the TUI's launchTurn: plain text goes through Run (which
-		// emits the user_message event and persists history); a prepared
-		// multimodal payload drives RunTurn directly since Run is string-only.
-		if len(msg.built.ContentParts) == 0 {
-			s.sess.Run(turnCtx, tc, msg.Text)
-			return
-		}
-		chat.RunTurn(turnCtx, tc, s.sess, msg.built, nil)
+		s.sess.Run(turnCtx, tc, prompt)
 	}()
 	return out
 }

@@ -26,46 +26,6 @@ var supportedImageExts = map[string]bool{
 	".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true,
 }
 
-// BuildImageMessage parses "/image args" into a multimodal llm.Message.
-// Quoted paths handle filenames with spaces: /image "Screenshot 2026.png" prompt
-func BuildImageMessage(args, workDir string) (llm.Message, error) {
-	args = strings.TrimSpace(args)
-	if args == "" {
-		return llm.Message{}, fmt.Errorf(`usage: /image "<path>" [prompt]`)
-	}
-
-	var path, prompt string
-	if strings.HasPrefix(args, `"`) {
-		var ok bool
-		path, prompt, ok = strings.Cut(args[1:], `"`)
-		if !ok {
-			return llm.Message{}, fmt.Errorf("unterminated quote in path")
-		}
-		path = strings.ReplaceAll(path, `\ `, " ") // unescape shell-escaped spaces inside quotes
-		prompt = strings.TrimSpace(prompt)
-	} else {
-		path, prompt, _ = strings.Cut(args, " ")
-		prompt = strings.TrimSpace(prompt)
-	}
-
-	if prompt == "" {
-		prompt = "Describe this image."
-	}
-
-	part, _, _, err := loadImagePart(path, workDir)
-	if err != nil {
-		return llm.Message{}, err
-	}
-
-	return llm.Message{
-		Role: llm.RoleUser,
-		ContentParts: []llm.ContentPart{
-			part,
-			{Type: llm.ContentPartTypeText, Text: prompt},
-		},
-	}, nil
-}
-
 // loadImagePart resolves path against workDir, validates type and size, decodes,
 // downscales so the longest side is ≤ maxImageSide, JPEG-encodes, and returns an
 // image_url ContentPart whose URL is a base64 data URI, plus the source image's

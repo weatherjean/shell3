@@ -22,7 +22,6 @@ import (
 // for the App side.
 type session interface {
 	Send(ctx context.Context, prompt string) <-chan shell3.Event
-	SendMessage(ctx context.Context, msg shell3.Message) <-chan shell3.Event
 	Clear()
 	Rollback() bool
 	SwitchAgent(name string) error
@@ -84,16 +83,6 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 	// store EndSession defer or the JSONL sink itself.
 	defer sess.Close()
 
-	// workDir is captured for /image (Snapshot carries no WorkDir). spec.WorkDir
-	// is the source the old code used via cfg.WorkDir; fall back to the cwd when
-	// the spec left it empty (matching shell3.Start's own resolution).
-	workDir := spec.WorkDir
-	if workDir == "" {
-		if w, gwErr := os.Getwd(); gwErr == nil {
-			workDir = w
-		}
-	}
-
 	snap := sess.Snapshot()
 	app = patchapp.New(snap.Agent, snap.StatusLine, patchapp.WelcomeInfo{
 		Persona:    snap.Agent,
@@ -131,22 +120,14 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 
 	renderSink, finishTurn := newRenderSink(app, &lastUsage)
 
-	// launchTurn starts a turn goroutine for msg. The render sink runs on that
+	// launchTurn starts a turn goroutine for prompt. The render sink runs on that
 	// goroutine as it drains the per-turn Event channel; per-turn UI state
 	// transitions (SetBusy false, etc.) happen when the sink processes the
 	// Done/Error event. pkg persists history inside the turn.
-	launchTurn := func(msg shell3.Message) {
+	launchTurn := func(prompt string) {
 		turnCtx, cancel := context.WithCancel(turnsCtx)
 		app.SetBusy(true, cancel)
-		var ch <-chan shell3.Event
-		// A plain-text message drives Send (string path); a message carrying an
-		// attachment (e.g. /image) drives SendMessage so its built payload isn't
-		// dropped. Both share the per-turn drain/cancel machinery below.
-		if len(msg.Attachments) == 0 {
-			ch = sess.Send(turnCtx, msg.Text)
-		} else {
-			ch = sess.SendMessage(turnCtx, msg)
-		}
+		ch := sess.Send(turnCtx, prompt)
 		turnWG.Add(1)
 		go func() {
 			defer turnWG.Done()
@@ -193,10 +174,10 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 		app.PrintLine(patchtui.Dim + "[agent: " + sess.ActiveAgent() + "]" + patchtui.Reset)
 	})
 
-	registerSlashCommands(app, sess, &lastUsage, workDir, launchTurn, applyAgent)
+	registerSlashCommands(app, sess, &lastUsage, applyAgent)
 
 	app.SetSubmit(func(input string) {
-		launchTurn(shell3.Message{Text: input})
+		launchTurn(input)
 	})
 
 	runErr = app.Run(ctx)
@@ -417,7 +398,7 @@ func newRenderSink(app patchapp.AppView, lastUsage *usage) (func(shell3.Event), 
 
 	// finish finalizes a turn at channel close — the ONLY guaranteed end-of-turn
 	// signal, since route may drop the terminal Done/Error event when the turn
-	// ctx is cancelled (see the pkg/shell3 SendMessage/route contract). It flushes
+	// ctx is cancelled (see the pkg/shell3 Send/route contract). It flushes
 	// any partial output the dropped Done would have flushed, surfaces the cancel
 	// notice when the terminal Error was dropped, and clears the busy-gate so the
 	// "thinking" spinner always stops. Clearing busy here (rather than in the
@@ -452,14 +433,14 @@ type slashTarget interface {
 	Quit()
 }
 
-// registerSlashCommands wires up the slash registry. Closures capture sess,
-// lastUsage, and workDir so handlers can read and mutate session state via the
-// public pkg/shell3 API.
+// registerSlashCommands wires up the slash registry. Closures capture sess and
+// lastUsage so handlers can read and mutate session state via the public
+// pkg/shell3 API.
 //
 // These handlers read *lastUsage with NO mutex; that is race-free only because
 // of the busy-gate. See newRenderSink for the full CONCURRENCY INVARIANT (this
 // is the read side).
-func registerSlashCommands(app slashTarget, sess session, lastUsage *usage, workDir string, launchTurn func(shell3.Message), applyAgent func()) {
+func registerSlashCommands(app slashTarget, sess session, lastUsage *usage, applyAgent func()) {
 	dim := func(s string) { app.PrintLine(patchtui.Dim + s + patchtui.Reset) }
 
 	app.RegisterSlash(patchapp.SlashCommand{
@@ -669,17 +650,6 @@ func registerSlashCommands(app slashTarget, sess session, lastUsage *usage, work
 	app.RegisterSlash(patchapp.SlashCommand{
 		Name: "exit", Aliases: []string{"quit"}, Help: "quit shell3",
 		Handler: func(string) { app.Quit() },
-	})
-	app.RegisterSlash(patchapp.SlashCommand{
-		Name: "image", Help: "/image <path> [prompt] — attach image to next turn",
-		Handler: func(args string) {
-			msg, err := shell3.ImageMessage(args, workDir)
-			if err != nil {
-				dim(fmt.Sprintf("[image: %v]", err))
-				return
-			}
-			launchTurn(msg)
-		},
 	})
 }
 
