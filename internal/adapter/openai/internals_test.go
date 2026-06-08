@@ -254,6 +254,34 @@ func TestToMessagesContentParts(t *testing.T) {
 	}
 }
 
+func TestToMessages_InputAudio(t *testing.T) {
+	msgs := []llm.Message{{
+		Role: llm.RoleUser,
+		ContentParts: []llm.ContentPart{
+			{Type: llm.ContentPartTypeInputAudio, AudioData: "QUJD", AudioFormat: "mp3"},
+			{Type: llm.ContentPartTypeText, Text: "transcribe this"},
+		},
+	}}
+	out := toMessages(msgs)
+	if len(out) != 1 || out[0].OfUser == nil {
+		t.Fatalf("expected user message, got %+v", out)
+	}
+	raw, err := out[0].MarshalJSON()
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	s := string(raw)
+	if !strings.Contains(s, `"input_audio"`) {
+		t.Fatalf("input_audio not in serialized user message: %s", s)
+	}
+	if !strings.Contains(s, `"QUJD"`) {
+		t.Fatalf("audio data not in serialized user message: %s", s)
+	}
+	if !strings.Contains(s, `"mp3"`) {
+		t.Fatalf("audio format not in serialized user message: %s", s)
+	}
+}
+
 func TestToMessagesAssistantReasoningContentEchoed(t *testing.T) {
 	msgs := []llm.Message{
 		{

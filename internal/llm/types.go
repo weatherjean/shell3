@@ -15,15 +15,18 @@ const (
 type ContentPartType string
 
 const (
-	ContentPartTypeText     ContentPartType = "text"
-	ContentPartTypeImageURL ContentPartType = "image_url" // data URI or HTTPS URL
+	ContentPartTypeText       ContentPartType = "text"
+	ContentPartTypeImageURL   ContentPartType = "image_url"   // data URI or HTTPS URL
+	ContentPartTypeInputAudio ContentPartType = "input_audio" // base64 wav/mp3
 )
 
 // ContentPart is one element of a multimodal user message.
 type ContentPart struct {
-	Type     ContentPartType
-	Text     string
-	ImageURL string // data URI ("data:image/jpeg;base64,...") or HTTPS URL
+	Type        ContentPartType
+	Text        string
+	ImageURL    string // data URI ("data:image/jpeg;base64,...") or HTTPS URL
+	AudioData   string // base64-encoded raw audio bytes (input_audio)
+	AudioFormat string // "wav" | "mp3"
 }
 
 // Message is one turn in a conversation.

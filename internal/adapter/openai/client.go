@@ -351,6 +351,11 @@ func toMessages(msgs []llm.Message) []openai.ChatCompletionMessageParamUnion {
 						parts = append(parts, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
 							URL: p.ImageURL,
 						}))
+					case llm.ContentPartTypeInputAudio:
+						parts = append(parts, openai.InputAudioContentPart(openai.ChatCompletionContentPartInputAudioInputAudioParam{
+							Data:   p.AudioData,
+							Format: p.AudioFormat,
+						}))
 					}
 				}
 				out = append(out, openai.UserMessage(parts))
