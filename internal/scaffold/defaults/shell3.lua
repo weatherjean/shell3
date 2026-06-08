@@ -654,7 +654,7 @@ shell3.agent({
     history           = true,
     prune             = true,
     compact           = true,
-    image             = true,   -- read_image: load an image so a vision-capable model can see it
+    media             = true,   -- read_media: load an image/audio file so a capable model can perceive it
     custom            = { web_fetch, brave_search },
   },
 
@@ -688,7 +688,7 @@ shell3.agent({
     history           = true,
     prune             = true,
     compact           = true,
-    image             = true,   -- read_image: load an image so a vision-capable model can see it
+    media             = true,   -- read_media: load an image/audio file so a capable model can perceive it
     custom            = { web_fetch, brave_search },
   },
 

@@ -26,29 +26,29 @@ shell3.agent({ name="a", model="m", prompt="p", tools={ custom={ echo } } })
 	}
 }
 
-func TestToolDefs_ImageGate(t *testing.T) {
-	defs := ToolDefs(ToolGates{Image: true}, nil, false)
+func TestToolDefs_MediaGate(t *testing.T) {
+	defs := ToolDefs(ToolGates{Media: true}, nil, false)
 	var found bool
 	for _, d := range defs {
-		if d.Name == "read_image" {
+		if d.Name == "read_media" {
 			found = true
 			props, ok := d.Parameters["properties"].(map[string]any)
 			if !ok {
-				t.Fatalf("read_image schema has no properties map")
+				t.Fatalf("read_media schema has no properties map")
 			}
 			if _, ok := props["path"]; !ok {
-				t.Errorf("read_image schema missing 'path' property")
+				t.Errorf("read_media schema missing 'path' property")
 			}
 		}
 	}
 	if !found {
-		t.Fatalf("read_image not present when Image gate on; got %d defs", len(defs))
+		t.Fatalf("read_media not present when Media gate on; got %d defs", len(defs))
 	}
 
 	off := ToolDefs(ToolGates{}, nil, false)
 	for _, d := range off {
-		if d.Name == "read_image" {
-			t.Fatalf("read_image present with Image gate off")
+		if d.Name == "read_media" {
+			t.Fatalf("read_media present with Media gate off")
 		}
 	}
 }

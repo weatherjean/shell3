@@ -42,8 +42,8 @@ func ToolDefs(g ToolGates, custom []CustomTool, hasSkills bool) []llm.ToolDefini
 	if g.Edit {
 		defs = append(defs, editFileTool)
 	}
-	if g.Image {
-		defs = append(defs, readImageTool)
+	if g.Media {
+		defs = append(defs, readMediaTool)
 	}
 	if g.History {
 		defs = append(defs, historyGetTool, historySearchTool)
@@ -205,15 +205,15 @@ var editFileTool = llm.ToolDefinition{
 	},
 }
 
-var readImageTool = llm.ToolDefinition{
-	Name: "read_image",
-	Description: "Load an image file (jpg, png, gif) from disk so you can SEE it. " +
-		"The image is decoded, downscaled, and attached as a user message immediately after the tool results, so it appears in your view on the next step. " +
-		"Requires a vision-capable model. This tool is for images only — to read text files use `bash` with cat/sed/head.",
+var readMediaTool = llm.ToolDefinition{
+	Name: "read_media",
+	Description: "Load a media file from disk so a vision/audio-capable model can perceive it — images (jpg, png, gif) or audio (wav, mp3). " +
+		"The file is decoded and attached as a user message immediately after the tool results, so it appears in your view on the next step. " +
+		"Requires a model with the matching modality. This tool is for images/audio only — to read text files use `bash` with cat/sed/head.",
 	Parameters: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"path": map[string]any{"type": "string", "description": "Path to the image file (absolute or relative to the project root)."},
+			"path": map[string]any{"type": "string", "description": "Path to the media file (absolute or relative to the project root)."},
 		},
 		"required": []string{"path"},
 	},
