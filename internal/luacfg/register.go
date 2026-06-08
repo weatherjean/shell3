@@ -9,6 +9,7 @@ func registerShell3(c *LoadedConfig) {
 	L.SetField(tbl, "model", L.NewFunction(c.luaModel))
 	L.SetField(tbl, "skill", L.NewFunction(c.luaSkill))
 	L.SetField(tbl, "tool", L.NewFunction(c.luaTool))
+	L.SetField(tbl, "mcp", L.NewFunction(c.luaMCP))
 	L.SetField(tbl, "agent", L.NewFunction(c.luaAgent))
 	L.SetField(tbl, "urlencode", L.NewFunction(luaURLEncode))
 	env := L.NewTable()
@@ -85,7 +86,42 @@ var agentKeys = map[string]bool{
 var toolGateKeys = map[string]bool{
 	"bash": true, "bash_bg": true, "shell_interactive": true, "edit": true,
 	"history": true, "custom": true, "skill": true,
-	"prune": true, "compact": true,
+	"prune": true, "compact": true, "mcp": true,
+}
+
+var mcpKeys = map[string]bool{
+	"name": true, "command": true, "args": true, "env": true, "tools": true,
+}
+
+func (c *LoadedConfig) luaMCP(L *lua.LState) int {
+	opts := L.CheckTable(1)
+	if err := checkKeys(opts, "mcp", mcpKeys); err != nil {
+		L.RaiseError("%s", err.Error())
+	}
+	srv := MCPServer{Name: optStr(opts, "name"), Command: optStr(opts, "command")}
+	if srv.Name == "" || srv.Command == "" {
+		L.RaiseError("mcp: name and command are required")
+	}
+	if a, ok := opts.RawGetString("args").(*lua.LTable); ok {
+		srv.Args = stringList(a)
+	}
+	if e, ok := opts.RawGetString("env").(*lua.LTable); ok {
+		srv.Env = map[string]string{}
+		e.ForEach(func(k, v lua.LValue) {
+			if ks, ok := k.(lua.LString); ok {
+				srv.Env[string(ks)] = v.String()
+			}
+		})
+	}
+	if tools, ok := opts.RawGetString("tools").(*lua.LTable); ok {
+		srv.Tools = stringList(tools)
+	}
+	c.MCPServers[srv.Name] = srv
+
+	h := L.NewTable()
+	h.RawSetString("__mcp", lua.LString(srv.Name))
+	L.Push(h)
+	return 1
 }
 
 func (c *LoadedConfig) luaTool(L *lua.LState) int {
@@ -146,6 +182,9 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 		}
 		if cu, ok := tt.RawGetString("custom").(*lua.LTable); ok {
 			a.CustomTools = handleNames(cu, "__tool")
+		}
+		if mc, ok := tt.RawGetString("mcp").(*lua.LTable); ok {
+			a.MCPServerNames = handleNames(mc, "__mcp")
 		}
 		if tt.RawGetString("skill") == lua.LFalse {
 			a.SkillsDisabled = true

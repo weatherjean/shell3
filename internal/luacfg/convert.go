@@ -50,6 +50,19 @@ func tableToMap(t *lua.LTable) map[string]any {
 	})
 	return out
 }
+// stringList reads the array part of a Lua table as a []string.
+func stringList(t *lua.LTable) []string {
+	var out []string
+	for i := 1; ; i++ {
+		v := t.RawGetInt(i)
+		if v == lua.LNil {
+			break
+		}
+		out = append(out, v.String())
+	}
+	return out
+}
+
 func handleNames(list *lua.LTable, sentinel string) []string {
 	var out []string
 	list.ForEach(func(_, v lua.LValue) {
