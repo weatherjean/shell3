@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/weatherjean/shell3/internal/luacfg"
 )
 
 func TestRenderBaseConfig(t *testing.T) {
@@ -52,6 +54,47 @@ func TestRenderBaseConfigWithProxy(t *testing.T) {
 	cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.lua"))
 	if !strings.Contains(string(cfg), `run_proxy      = "npx codex-proxy --port 8787"`) {
 		t.Errorf("proxy not wired into shell3.lua:\n%s", cfg)
+	}
+}
+
+// TestRenderedConfigLoads renders the base config, supplies the .env secrets it
+// references, and loads it through the real luacfg loader — verifying the
+// shipped template + lib modules parse and produce the expected agent/tool/skill
+// shape. This is the canonical "does our default config work" test.
+func TestRenderedConfigLoads(t *testing.T) {
+	dir := t.TempDir()
+	v := Values{Name: "main", BaseURL: "http://localhost:8787/v1", EnvKey: "MAIN_API_KEY", Model: "test", Proxy: ""}
+	if err := RenderBaseConfig(dir, v); err != nil {
+		t.Fatalf("RenderBaseConfig: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("MAIN_API_KEY=x\nBRAVE_API_KEY=\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := luacfg.Load(filepath.Join(dir, "shell3.lua"), dir)
+	if err != nil {
+		t.Fatalf("rendered config failed to load: %v", err)
+	}
+	defer c.Close()
+
+	if len(c.Models) < 1 {
+		t.Errorf("expected >= 1 model, got %d", len(c.Models))
+	}
+	if len(c.Tools) != 2 {
+		t.Errorf("expected 2 tools (web_fetch, brave_search), got %d", len(c.Tools))
+	}
+	if len(c.Skills) != 2 {
+		t.Errorf("expected 2 skills (brainstorming, spawning-subagents), got %d", len(c.Skills))
+	}
+	agents := c.Agents()
+	if len(agents) != 2 {
+		t.Fatalf("expected 2 agents, got %d", len(agents))
+	}
+	if agents[0].Name != "code" {
+		t.Errorf("first agent: want %q, got %q", "code", agents[0].Name)
+	}
+	if agents[1].Name != "plan" {
+		t.Errorf("second agent: want %q, got %q", "plan", agents[1].Name)
 	}
 }
 
