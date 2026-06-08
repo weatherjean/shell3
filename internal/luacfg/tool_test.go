@@ -25,3 +25,30 @@ shell3.agent({ name="a", model="m", prompt="p", tools={ custom={ echo } } })
 		t.Fatalf("agent custom tools not linked: %+v", c.Active().CustomTools)
 	}
 }
+
+func TestToolDefs_ImageGate(t *testing.T) {
+	defs := ToolDefs(ToolGates{Image: true}, nil, false)
+	var found bool
+	for _, d := range defs {
+		if d.Name == "read_image" {
+			found = true
+			props, ok := d.Parameters["properties"].(map[string]any)
+			if !ok {
+				t.Fatalf("read_image schema has no properties map")
+			}
+			if _, ok := props["path"]; !ok {
+				t.Errorf("read_image schema missing 'path' property")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("read_image not present when Image gate on; got %d defs", len(defs))
+	}
+
+	off := ToolDefs(ToolGates{}, nil, false)
+	for _, d := range off {
+		if d.Name == "read_image" {
+			t.Fatalf("read_image present with Image gate off")
+		}
+	}
+}

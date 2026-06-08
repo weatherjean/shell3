@@ -86,7 +86,7 @@ var agentKeys = map[string]bool{
 var toolGateKeys = map[string]bool{
 	"bash": true, "bash_bg": true, "shell_interactive": true, "edit": true,
 	"history": true, "custom": true, "skill": true,
-	"prune": true, "compact": true, "mcp": true,
+	"prune": true, "compact": true, "mcp": true, "image": true,
 }
 
 var mcpKeys = map[string]bool{
@@ -179,6 +179,7 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 			History:          optBool(tt, "history"),
 			Prune:            optBool(tt, "prune"),
 			Compact:          optBool(tt, "compact"),
+			Image:            optBool(tt, "image"),
 		}
 		if cu, ok := tt.RawGetString("custom").(*lua.LTable); ok {
 			a.CustomTools = handleNames(cu, "__tool")

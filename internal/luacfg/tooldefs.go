@@ -42,6 +42,9 @@ func ToolDefs(g ToolGates, custom []CustomTool, hasSkills bool) []llm.ToolDefini
 	if g.Edit {
 		defs = append(defs, editFileTool)
 	}
+	if g.Image {
+		defs = append(defs, readImageTool)
+	}
 	if g.History {
 		defs = append(defs, historyGetTool, historySearchTool)
 	}
@@ -199,6 +202,20 @@ var editFileTool = llm.ToolDefinition{
 			"replace_all": map[string]any{"type": "boolean", "description": "Replace every occurrence (default false)"},
 		},
 		"required": []string{"file_path", "old_string", "new_string"},
+	},
+}
+
+var readImageTool = llm.ToolDefinition{
+	Name: "read_image",
+	Description: "Load an image file (jpg, png, gif) from disk so you can SEE it. " +
+		"The image is decoded, downscaled, and attached as a user message immediately after the tool results, so it appears in your view on the next step. " +
+		"Requires a vision-capable model. This tool is for images only — to read text files use `bash` with cat/sed/head.",
+	Parameters: map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"path": map[string]any{"type": "string", "description": "Path to the image file (absolute or relative to the project root)."},
+		},
+		"required": []string{"path"},
 	},
 }
 
