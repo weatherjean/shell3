@@ -1,8 +1,13 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/weatherjean/shell3/internal/agentsetup"
+	"github.com/weatherjean/shell3/internal/luacfg"
 )
 
 func TestMergeEnvAddsMissingKeysOnly(t *testing.T) {
@@ -52,4 +57,103 @@ func TestEnvKeyForName(t *testing.T) {
 	if got := envKeyForName("123model"); got != "_123MODEL_API_KEY" {
 		t.Errorf("envKeyForName(123model) = %q, want _123MODEL_API_KEY (leading digit)", got)
 	}
+}
+
+// TestBootEndToEnd drives the real `shell3 boot` flow against a temp HOME: it
+// asserts the cold-start redirect before boot, runs runBoot with flags (no TTY),
+// then verifies the written tree, .env (empty key + Brave placeholder, 0600),
+// that the generated config actually loads through luacfg with the code/plan
+// agents, the no-clobber guard, and that --force regenerates.
+func TestBootEndToEnd(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Cold start: no config anywhere -> ResolveConfigPath must fail (the message
+	// that points the user at `shell3 boot`). cwd (the package dir) has no
+	// shell3.lua, and the temp HOME has none yet.
+	if _, err := agentsetup.ResolveConfigPath("", cwd, home); err == nil {
+		t.Fatal("expected no-config error before boot, got nil")
+	}
+
+	f := &bootFlags{url: "http://localhost:9999/v1", model: "test-model", name: "main", proxy: "echo proxy"}
+	if err := runBoot(f); err != nil {
+		t.Fatalf("runBoot: %v", err)
+	}
+
+	dir := filepath.Join(home, ".shell3")
+	for _, p := range []string{
+		"shell3.lua", "lib/tools.lua", "lib/guards.lua",
+		"lib/skills/brainstorming.lua", "lib/skills/subagents.lua", ".env",
+	} {
+		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
+			t.Errorf("missing %s: %v", p, err)
+		}
+	}
+
+	// .env: empty model key (proxy handles auth) + Brave placeholder, mode 0600.
+	envPath := filepath.Join(dir, ".env")
+	env, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatalf("read .env: %v", err)
+	}
+	if !strings.Contains(string(env), "MAIN_API_KEY=") {
+		t.Errorf(".env missing MAIN_API_KEY line:\n%s", env)
+	}
+	if !strings.Contains(string(env), "BRAVE_API_KEY=") {
+		t.Errorf(".env missing BRAVE_API_KEY placeholder:\n%s", env)
+	}
+	if fi, err := os.Stat(envPath); err != nil {
+		t.Fatal(err)
+	} else if fi.Mode().Perm() != 0o600 {
+		t.Errorf(".env perms = %v, want 0600", fi.Mode().Perm())
+	}
+
+	// After boot, config resolution finds the home config.
+	resolved, err := agentsetup.ResolveConfigPath("", cwd, home)
+	if err != nil {
+		t.Fatalf("ResolveConfigPath after boot: %v", err)
+	}
+	if resolved != filepath.Join(dir, "shell3.lua") {
+		t.Errorf("resolved = %q, want home shell3.lua", resolved)
+	}
+
+	// The end-to-end payoff: the generated config loads with an empty api_key.
+	c, err := luacfg.Load(resolved, dir)
+	if err != nil {
+		t.Fatalf("generated config failed to load: %v", err)
+	}
+	defer c.Close()
+	agents := c.Agents()
+	if len(agents) != 2 || agents[0].Name != "code" || agents[1].Name != "plan" {
+		t.Errorf("agents = %v, want [code plan]", agentNames(agents))
+	}
+
+	// No-clobber: a second boot without --force refuses.
+	if err := runBoot(f); err == nil {
+		t.Error("second boot without --force should error (config exists)")
+	}
+
+	// --force regenerates with new values.
+	f.force = true
+	f.model = "changed-model"
+	if err := runBoot(f); err != nil {
+		t.Fatalf("force runBoot: %v", err)
+	}
+	cfg, _ := os.ReadFile(resolved)
+	if !strings.Contains(string(cfg), `model          = "changed-model"`) {
+		t.Errorf("--force did not regenerate the model; got:\n%s", cfg)
+	}
+}
+
+func agentNames(agents []luacfg.Agent) []string {
+	out := make([]string, len(agents))
+	for i, a := range agents {
+		out[i] = a.Name
+	}
+	return out
 }
