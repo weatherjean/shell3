@@ -63,7 +63,7 @@ func runBoot(f *bootFlags) error {
 	if err != nil {
 		return err
 	}
-	key, err := secret(f.key, "API key", in, tty, true)
+	key, err := secret(f.key, "API key (blank if your proxy handles auth)", in, tty, false)
 	if err != nil {
 		return err
 	}
@@ -176,7 +176,7 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool) {
 	fmt.Println("Edit shell3.lua (and lib/) to add tools, skills, MCP, or agents —")
 	fmt.Println("recipes live in the shell3 repo under docs/cookbook/.")
 	fmt.Println()
-	fmt.Println(`Run:  shell3 "hello"`)
+	fmt.Println("Run:  shell3")
 }
 
 // value reads a config value: flag wins; else prompt (TTY) with optional

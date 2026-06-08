@@ -46,8 +46,10 @@ func (c *LoadedConfig) luaModel(L *lua.LState) int {
 		MaxTokens:     optInt(opts, "max_tokens"),
 		Temperature:   optFloatPtr(opts, "temperature"),
 	}
-	if m.BaseURL == "" || m.APIKey == "" || m.ModelID == "" {
-		L.RaiseError("model %q: base_url, api_key, model are required", name)
+	// api_key is optional: a local proxy (e.g. run_proxy) can handle auth, so an
+	// empty key is valid. base_url and model are always required.
+	if m.BaseURL == "" || m.ModelID == "" {
+		L.RaiseError("model %q: base_url and model are required", name)
 	}
 	if _, exists := c.Model(name); exists {
 		L.RaiseError("model %q: already declared (model names must be unique)", name)
