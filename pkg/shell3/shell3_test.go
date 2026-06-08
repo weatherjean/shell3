@@ -179,6 +179,11 @@ func TestSession_Close_ReturnsEndSessionError(t *testing.T) {
 
 func TestRun_BadConfig_Errors(t *testing.T) {
 	tmp := t.TempDir()
+	// Isolate HOME: Start() resolves ~/.shell3 via os.UserHomeDir(), and
+	// resolvePaths runs EnsureProject (which mints a project dir) before the
+	// config load fails. Without this, the test writes an orphan project into
+	// the developer's real ~/.shell3/projects/ on every run.
+	t.Setenv("HOME", t.TempDir())
 	ch, err := Run(context.Background(), Spec{
 		Prompt:     "hi",
 		ConfigPath: filepath.Join(tmp, "shell3.lua"),
