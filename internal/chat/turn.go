@@ -203,14 +203,37 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 			allMsgs[len(allMsgs)-1].Content += "\n\n" + reminder
 			emitSystemReminder(sess, reminder)
 		}
+
+		// read_image results are text-only (tool messages can't carry images),
+		// so any images it loaded are appended here as a synthetic user
+		// message — the only role the adapter renders image parts for. This
+		// runs after the reminder block so the reminder lands on the last tool
+		// message (text), not on this parts-only user message (whose Content
+		// the adapter ignores).
+		if len(outcome.pendingImages) > 0 {
+			parts := make([]llm.ContentPart, 0, len(outcome.pendingImages)+1)
+			parts = append(parts, outcome.pendingImages...)
+			parts = append(parts, llm.ContentPart{
+				Type: llm.ContentPartTypeText,
+				Text: "Above are the image(s) you loaded with read_image.",
+			})
+			imgMsg := llm.Message{
+				Role:         llm.RoleUser,
+				Content:      fmt.Sprintf("[read_image attached %d image(s)]", len(outcome.pendingImages)),
+				ContentParts: parts,
+			}
+			allMsgs = append(allMsgs, imgMsg)
+			sess.append(imgMsg)
+		}
 	}
 }
 
 // toolLoopOutcome reports how a turn's tool-execution loop ended.
 type toolLoopOutcome struct {
-	allMsgs      []llm.Message // updated slice (compact_history may have replaced it)
-	cancelled    bool          // a guard returned a cancel decision
-	cancelReason string        // reason text for the cancellation reminder
+	allMsgs       []llm.Message     // updated slice (compact_history may have replaced it)
+	cancelled     bool              // a guard returned a cancel decision
+	cancelReason  string            // reason text for the cancellation reminder
+	pendingImages []llm.ContentPart // images loaded by read_image, injected as a user message after the loop
 }
 
 // executeToolCalls runs the assistant's tool calls in order, emitting
@@ -229,6 +252,7 @@ type toolLoopOutcome struct {
 func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCalls []llm.ToolCall, toolSchemas map[string]map[string]any, allMsgs []llm.Message) (toolLoopOutcome, error) {
 	var cancelled bool
 	var cancelReason string
+	var pendingImages []llm.ContentPart
 	for idx, tc := range toolCalls {
 		if ctx.Err() != nil {
 			return toolLoopOutcome{}, ctx.Err()
@@ -273,6 +297,12 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 					out = cfg.ShellInteractive(ctx, command, cfg.WorkDir)
 				} else {
 					out = "error: interactive TTY not available"
+				}
+			} else if tc.Name == "read_image" {
+				var part llm.ContentPart
+				out, part = handleReadImage(tc.RawArgs, cfg.WorkDir)
+				if part.ImageURL != "" {
+					pendingImages = append(pendingImages, part)
 				}
 			} else if cfg.MCPToolNames[tc.Name] {
 				out = dispatchMCPTool(ctx, cfg.MCPTool, tc.Name, tc.RawArgs)
@@ -339,7 +369,7 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 	if ctx.Err() != nil {
 		return toolLoopOutcome{}, ctx.Err()
 	}
-	return toolLoopOutcome{allMsgs: allMsgs}, nil
+	return toolLoopOutcome{allMsgs: allMsgs, pendingImages: pendingImages}, nil
 }
 
 // isToolError reports whether a tool's output string represents a failure,
