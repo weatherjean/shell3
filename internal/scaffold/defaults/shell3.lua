@@ -125,6 +125,23 @@ local brave_search = shell3.tool({
 })
 
 -- ---------------------------------------------------------------------------
+-- MCP servers (optional)
+-- ---------------------------------------------------------------------------
+-- Connect to an external MCP server over stdio. Its tools are advertised to the
+-- agent as `<name>__<tool>` (e.g. chrome__navigate_page). The server starts
+-- lazily on first tool use; tool schemas are cached under the project's
+-- .shell3 dir after a one-time discovery probe.
+--
+-- local chrome = shell3.mcp({
+--   name    = "chrome",
+--   command = "npx",
+--   args    = { "-y", "chrome-devtools-mcp@latest", "--autoConnect", "--no-usage-statistics" },
+--   -- tools = { "navigate_page", "click", "take_snapshot" }, -- optional allowlist
+-- })
+--
+-- Then add `mcp = { chrome }` to an agent's `tools = { ... }` block.
+
+-- ---------------------------------------------------------------------------
 -- Skills
 -- ---------------------------------------------------------------------------
 
