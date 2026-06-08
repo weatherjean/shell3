@@ -129,7 +129,7 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 		turnWG.Wait()
 	}()
 
-	renderSink := newRenderSink(app, &lastUsage)
+	renderSink, finishTurn := newRenderSink(app, &lastUsage)
 
 	// launchTurn starts a turn goroutine for msg. The render sink runs on that
 	// goroutine as it drains the per-turn Event channel; per-turn UI state
@@ -151,6 +151,11 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 		go func() {
 			defer turnWG.Done()
 			defer cancel()
+			// finishTurn runs at channel close (the guaranteed end-of-turn signal)
+			// BEFORE the deferred cancel() above — deferred LIFO — so turnCtx.Err()
+			// still reflects only an external cancel (Ctrl-C/ESC), not our own
+			// teardown. Deferred so a panic in the sink can't strand the busy-gate.
+			defer func() { finishTurn(turnCtx.Err() != nil) }()
 			for ev := range ch {
 				renderSink(ev)
 			}
@@ -218,17 +223,27 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 // (internal/patchapp/editor.go) early-returns while a.busy is true, so slash
 // handlers (and SubmitFunc) cannot fire while a turn — and therefore the sink's
 // writes of lastUsage — is active. SetBusy(true) is set in launchTurn for the
-// duration of the turn and cleared only when the sink processes the terminal
-// Done/Error event. A future maintainer who breaks that gate (e.g. allowing
-// slash commands to run during streaming, or clearing busy before the turn's
-// terminal event) reintroduces a data race on lastUsage and must add real
-// synchronization here.
-func newRenderSink(app patchapp.AppView, lastUsage *usage) func(shell3.Event) {
+// duration of the turn and cleared in finish, which the drain goroutine runs at
+// channel close — strictly after every event (including the last lastUsage
+// write) has been processed. (Busy is deliberately NOT cleared in the Done/Error
+// sink cases: route may drop that terminal event on cancel, which previously
+// left busy stuck on; binding the clear to channel close fixes that and also
+// guarantees no sink write can follow the clear.) A future maintainer who breaks
+// that gate (e.g. allowing slash commands to run during streaming, or clearing
+// busy before channel close) reintroduces a data race on lastUsage and must add
+// real synchronization here.
+func newRenderSink(app patchapp.AppView, lastUsage *usage) (func(shell3.Event), func(canceled bool)) {
 	var streamBuf strings.Builder
 	// reasoningBuf holds an incomplete (no trailing \n) reasoning line.
 	// Complete lines are committed to scrollback immediately for real-time display.
 	var reasoningBuf strings.Builder
 	reasoningStarted := false
+	// terminalRendered records whether this turn's Done/Error event was actually
+	// delivered to the sink. route (pkg/shell3) may drop the terminal event once
+	// the turn ctx is cancelled, so finish uses this to avoid double-rendering the
+	// cancel notice when the event DID arrive, and to know it must render it when
+	// the event did NOT. Reset at the end of finish for the next turn.
+	terminalRendered := false
 
 	// Sage-green diamond prepended to the first reasoning line of a turn.
 	const thinkingGlyph = "\033[38;2;130;195;130m◆\033[0m"
@@ -340,7 +355,7 @@ func newRenderSink(app patchapp.AppView, lastUsage *usage) func(shell3.Event) {
 		streamBuf.Reset()
 	}
 
-	return func(ev shell3.Event) {
+	sink := func(ev shell3.Event) {
 		switch ev.Kind {
 		case shell3.Reasoning:
 			appendReasoning(ev.Text)
@@ -379,7 +394,7 @@ func newRenderSink(app patchapp.AppView, lastUsage *usage) func(shell3.Event) {
 			flushReasoningPartial()
 			flushStreamFully()
 			publishUsage(ev)
-			app.SetBusy(false, nil)
+			terminalRendered = true
 
 		case shell3.Error:
 			flushReasoningPartial()
@@ -396,9 +411,31 @@ func newRenderSink(app patchapp.AppView, lastUsage *usage) func(shell3.Event) {
 			} else {
 				app.PrintLine(patchtui.Red + "[error: " + msg + "]" + patchtui.Reset)
 			}
-			app.SetBusy(false, nil)
+			terminalRendered = true
 		}
 	}
+
+	// finish finalizes a turn at channel close — the ONLY guaranteed end-of-turn
+	// signal, since route may drop the terminal Done/Error event when the turn
+	// ctx is cancelled (see the pkg/shell3 SendMessage/route contract). It flushes
+	// any partial output the dropped Done would have flushed, surfaces the cancel
+	// notice when the terminal Error was dropped, and clears the busy-gate so the
+	// "thinking" spinner always stops. Clearing busy here (rather than in the
+	// Done/Error cases) also tightens the busy-gate invariant above: busy stays
+	// true until the drain goroutine has processed every event, so no sink write
+	// to lastUsage can follow the clear. Idempotent flushes make a redundant call
+	// harmless; canceled is the turn ctx's cancellation state at channel close.
+	finish := func(canceled bool) {
+		flushReasoningPartial()
+		flushStreamFully()
+		inFence = false
+		if canceled && !terminalRendered {
+			app.PrintLine(patchtui.Dim + "[cancelled]" + patchtui.Reset)
+		}
+		app.SetBusy(false, nil)
+		terminalRendered = false
+	}
+	return sink, finish
 }
 
 // slashTarget abstracts the side of patchapp.App used by slash command

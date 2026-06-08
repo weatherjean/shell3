@@ -249,6 +249,13 @@ func newSession(cfg chat.Config, cleanup func()) *Session {
 // turn goroutine closes it — no separate drain, no close-ordering hazard. The
 // select on curDone lets Close cancel the turn unblock a send to a Send channel
 // the caller stopped reading. Events with no public equivalent are dropped.
+//
+// NOTE: curDone is the turn ctx's Done, which is also closed by an ordinary
+// turn cancel (Ctrl-C/ESC), not just Close. So once a turn is cancelled this
+// select MAY take the curDone branch and drop whatever it was delivering —
+// INCLUDING the turn's terminal Done/Error event. Consumers must therefore
+// treat channel close (see SendMessage) as the authoritative end-of-turn
+// signal; the terminal event is best-effort and can be absent on a cancel.
 func (s *Session) route(ev chat.Event) {
 	// Audit first, losslessly: the internal chat.Event keeps ToolCallID, system
 	// reminders, and full untruncated content even though the public Event below
@@ -327,7 +334,10 @@ func ImageMessage(args, workDir string) (Message, error) {
 }
 
 // Send runs one turn for prompt and returns a channel of that turn's events,
-// closed after the turn's Done (or Error).
+// closed when the turn ends. Channel close is the authoritative end-of-turn
+// signal: a terminal Done/Error event is emitted before close on a best-effort
+// basis but may be dropped on cancel (see route), so consumers must bind
+// end-of-turn UI/state transitions to close, not to receiving Done/Error.
 //
 // Single-turn-at-a-time contract: the caller MUST drain the returned channel
 // to completion before calling Send, Clear, Rollback, or SwitchAgent again.
@@ -339,7 +349,10 @@ func (s *Session) Send(ctx context.Context, prompt string) <-chan Event {
 }
 
 // SendMessage runs one turn for msg and returns a channel of that turn's
-// events, closed after the turn's Done (or Error). It is the multimodal-capable
+// events, closed when the turn ends (the deferred close(out) below always runs).
+// As with Send, channel close — not the terminal Done/Error event, which route
+// may drop on cancel — is the authoritative end-of-turn signal. It is the
+// multimodal-capable
 // sibling of Send: a plain-Text Message drives Session.Run (string path), while
 // a Message carrying a built attachment payload (see ImageMessage) drives
 // RunTurn directly — Run is string-only and would drop the ContentParts. Both

@@ -65,16 +65,18 @@ func (f *fakeApp) WithReleasedTerminal(fn func()) {
 // Compile-time assertion that fakeApp satisfies patchapp.AppView.
 var _ patchapp.AppView = (*fakeApp)(nil)
 
-// runDrain feeds public Events to the render sink in order and returns the
-// recorded call list plus the final usage tally.
+// runDrain feeds public Events to the render sink in order, then calls finish
+// to mirror the drain goroutine reaching channel close on a normally-completed
+// (non-cancelled) turn, and returns the recorded call list plus final usage.
 func runDrain(t *testing.T, events []shell3.Event) ([]string, usage) {
 	t.Helper()
 	app := &fakeApp{}
 	var u usage
-	render := newRenderSink(app, &u)
+	render, finish := newRenderSink(app, &u)
 	for _, ev := range events {
 		render(ev)
 	}
+	finish(false)
 	return app.snapshot(), u
 }
 
@@ -284,6 +286,70 @@ func TestDrainTurn_RetryPrintsDimNoticeWithoutClearingBusy(t *testing.T) {
 	// The retry event must not clear busy; only Done does.
 	if busyClears != 1 {
 		t.Fatalf("expected exactly one SetBusy(false) (from Done), got %d: %v", busyClears, calls)
+	}
+}
+
+// TestDrainTurn_ChannelClosesWithoutTerminalEvent_ClearsBusy reproduces the
+// hang: route (pkg/shell3) is free to drop a turn's terminal Done/Error event
+// once the turn ctx is cancelled, so the drain goroutine can reach channel
+// close having only seen partial output. finish — bound to channel close, the
+// one guaranteed end-of-turn signal — must still flush the partial, surface the
+// cancel notice, and clear the busy-gate so the "thinking" spinner stops.
+func TestDrainTurn_ChannelClosesWithoutTerminalEvent_ClearsBusy(t *testing.T) {
+	app := &fakeApp{}
+	var u usage
+	sink, finish := newRenderSink(app, &u)
+
+	// A streamed partial line arrives, then the channel closes with NO Done/
+	// Error (the terminal event was dropped by route on cancel).
+	sink(shell3.Event{Kind: shell3.Token, Text: "partial answer"})
+	finish(true) // drain goroutine: channel closed on a cancelled turn
+
+	calls := app.snapshot()
+	if !containsAll(calls, "SetBusy(false)") {
+		t.Fatalf("busy not cleared when channel closed without a terminal event:\n%s", strings.Join(calls, "\n"))
+	}
+	if !containsAll(calls, "Print(") {
+		t.Fatalf("buffered partial output not flushed on finish:\n%s", strings.Join(calls, "\n"))
+	}
+	cancels := 0
+	for _, c := range calls {
+		if strings.Contains(c, "[cancelled]") {
+			cancels++
+		}
+	}
+	if cancels != 1 {
+		t.Fatalf("expected exactly one [cancelled] notice, got %d:\n%s", cancels, strings.Join(calls, "\n"))
+	}
+}
+
+// TestDrainTurn_CancelTerminalDelivered_NoDoubleNotice covers the other side of
+// the route race: when the terminal Error(context canceled) DID win delivery,
+// finish still runs at channel close but must not double up the [cancelled]
+// notice or the busy-clear.
+func TestDrainTurn_CancelTerminalDelivered_NoDoubleNotice(t *testing.T) {
+	app := &fakeApp{}
+	var u usage
+	sink, finish := newRenderSink(app, &u)
+
+	sink(shell3.Event{Kind: shell3.Error, Err: fmt.Errorf("context canceled")})
+	finish(true) // drain goroutine runs finish even though the terminal arrived
+
+	calls := app.snapshot()
+	busy, cancels := 0, 0
+	for _, c := range calls {
+		if strings.Contains(c, "SetBusy(false)") {
+			busy++
+		}
+		if strings.Contains(c, "[cancelled]") {
+			cancels++
+		}
+	}
+	if busy != 1 {
+		t.Fatalf("expected exactly one SetBusy(false), got %d:\n%s", busy, strings.Join(calls, "\n"))
+	}
+	if cancels != 1 {
+		t.Fatalf("expected exactly one [cancelled] notice, got %d:\n%s", cancels, strings.Join(calls, "\n"))
 	}
 }
 
