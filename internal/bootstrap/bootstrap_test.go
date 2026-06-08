@@ -22,15 +22,13 @@ func TestEnsureGlobal(t *testing.T) {
 			t.Fatalf("dir missing: %s", dir)
 		}
 	}
-	// Starter config + .env template are written to ~/.shell3/.
-	cfg := filepath.Join(g.Root, "shell3.lua")
-	if data, err := os.ReadFile(cfg); err != nil {
-		t.Fatalf("global shell3.lua missing after EnsureGlobal: %v", err)
-	} else if !strings.Contains(string(data), "shell3.model") {
-		t.Error("global shell3.lua does not define a model")
+	// EnsureGlobal must NOT write shell3.lua or .env.example — those are
+	// created explicitly via `shell3 boot`.
+	if _, err := os.Stat(filepath.Join(g.Root, "shell3.lua")); !os.IsNotExist(err) {
+		t.Fatalf("EnsureGlobal must not write shell3.lua; stat err = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(g.Root, ".env.example")); err != nil {
-		t.Fatalf("global .env.example missing after EnsureGlobal: %v", err)
+	if _, err := os.Stat(filepath.Join(g.Root, ".env.example")); !os.IsNotExist(err) {
+		t.Fatalf("EnsureGlobal must not write .env.example; stat err = %v", err)
 	}
 }
 
@@ -55,12 +53,13 @@ func TestEnsureBootstrapEndToEnd(t *testing.T) {
 		t.Fatal("empty project id")
 	}
 
+	// EnsureGlobal no longer writes shell3.lua or .env.example.
 	for _, path := range []string{
 		filepath.Join(g.Root, "shell3.lua"),
 		filepath.Join(g.Root, ".env.example"),
 	} {
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("global starter file missing: %s: %v", path, err)
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("EnsureGlobal must not write %s; stat err = %v", path, err)
 		}
 	}
 
@@ -148,6 +147,7 @@ func TestGlobalGitignore(t *testing.T) {
 	content := string(gi)
 	for _, want := range []string{
 		"ai-do-not-read.*",
+		".env",
 		"shell3.log",
 		"shell3.log.*",
 		"projects/",
@@ -299,6 +299,26 @@ func TestEnsureGitignoreNoTrailingNewline(t *testing.T) {
 	}
 	if !hasLine(content, "bg.json") {
 		t.Fatalf("bg.json not present as its own line:\n%s", content)
+	}
+}
+
+func TestEnsureGlobalDoesNotWriteConfig(t *testing.T) {
+	home := t.TempDir()
+	g := paths.NewGlobal(home)
+	if err := bootstrap.EnsureGlobal(g); err != nil {
+		t.Fatalf("EnsureGlobal: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(g.Root, "shell3.lua")); !os.IsNotExist(err) {
+		t.Fatalf("EnsureGlobal must not write shell3.lua; stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(g.Root, ".env.example")); !os.IsNotExist(err) {
+		t.Fatalf("EnsureGlobal must not write .env.example; stat err = %v", err)
+	}
+	if _, err := os.Stat(g.Projects); err != nil {
+		t.Fatalf("projects dir missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(g.Root, ".gitignore")); err != nil {
+		t.Fatalf("gitignore missing: %v", err)
 	}
 }
 

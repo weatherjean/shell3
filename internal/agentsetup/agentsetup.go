@@ -343,7 +343,7 @@ func ResolveConfigPath(flag, cwd, homeDir string) (string, error) {
 	if fileExists(global) {
 		return global, nil
 	}
-	return "", fmt.Errorf("no shell3.lua found — pass --config or create ~/.shell3/shell3.lua")
+	return "", fmt.Errorf("no shell3.lua found — run 'shell3 boot' to create one (or pass --config)")
 }
 
 func fileExists(p string) bool {
