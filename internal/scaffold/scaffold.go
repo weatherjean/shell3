@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/template"
 )
 
@@ -28,14 +29,15 @@ type Values struct {
 }
 
 // RenderBaseConfig writes the base config tree into dir: shell3.lua rendered
-// from the embedded template with v, plus the verbatim lib/ modules. Existing
-// files are never overwritten (writeIfAbsent), so it is safe to re-run.
-func RenderBaseConfig(dir string, v Values) error {
+// from the embedded template with v, plus the verbatim lib/ modules. When force
+// is false, existing files are left untouched (safe to re-run); when true, both
+// shell3.lua and the lib/ modules are regenerated, overwriting any local edits.
+func RenderBaseConfig(dir string, v Values, force bool) error {
 	tmplBytes, err := baseFS.ReadFile(baseRoot + "/shell3.lua.tmpl")
 	if err != nil {
 		return fmt.Errorf("scaffold: read template: %w", err)
 	}
-	t, err := template.New("shell3.lua").Parse(string(tmplBytes))
+	t, err := template.New("shell3.lua").Funcs(template.FuncMap{"luaesc": luaEscape}).Parse(string(tmplBytes))
 	if err != nil {
 		return fmt.Errorf("scaffold: parse template: %w", err)
 	}
@@ -43,7 +45,7 @@ func RenderBaseConfig(dir string, v Values) error {
 	if err := t.Execute(&buf, v); err != nil {
 		return fmt.Errorf("scaffold: execute template: %w", err)
 	}
-	if err := writeIfAbsent(filepath.Join(dir, "shell3.lua"), buf.Bytes(), 0644); err != nil {
+	if err := writeFile(filepath.Join(dir, "shell3.lua"), buf.Bytes(), 0644, force); err != nil {
 		return err
 	}
 
@@ -62,15 +64,29 @@ func RenderBaseConfig(dir string, v Values) error {
 		if err != nil {
 			return err
 		}
-		return writeIfAbsent(filepath.Join(dir, rel), content, 0644)
+		return writeFile(filepath.Join(dir, rel), content, 0644, force)
 	})
 }
 
-func writeIfAbsent(path string, content []byte, mode fs.FileMode) error {
-	if _, err := os.Stat(path); err == nil {
-		return nil
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("scaffold: stat %s: %w", path, err)
+// luaEscape escapes a string for safe interpolation inside a double-quoted Lua
+// string literal: backslash, double-quote, and line breaks. Onboarding inputs
+// (URLs, model tags, proxy commands) can contain these; without escaping a stray
+// quote or backslash would produce a config that fails to parse.
+func luaEscape(s string) string {
+	return luaEscaper.Replace(s)
+}
+
+var luaEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`)
+
+// writeFile writes content to path. When force is false it skips an existing
+// file (idempotent re-run); when true it overwrites.
+func writeFile(path string, content []byte, mode fs.FileMode, force bool) error {
+	if !force {
+		if _, err := os.Stat(path); err == nil {
+			return nil
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("scaffold: stat %s: %w", path, err)
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err

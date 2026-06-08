@@ -42,4 +42,14 @@ func TestEnvKeyForName(t *testing.T) {
 	if got := envKeyForName("kimi-k2"); got != "KIMI_K2_API_KEY" {
 		t.Errorf("envKeyForName(kimi-k2) = %q, want KIMI_K2_API_KEY", got)
 	}
+	// Degenerate handles must still yield a valid identifier.
+	if got := envKeyForName("@@@"); got != "MAIN_API_KEY" {
+		t.Errorf("envKeyForName(@@@) = %q, want MAIN_API_KEY (empty -> fallback)", got)
+	}
+	if got := envKeyForName(""); got != "MAIN_API_KEY" {
+		t.Errorf("envKeyForName(empty) = %q, want MAIN_API_KEY", got)
+	}
+	if got := envKeyForName("123model"); got != "_123MODEL_API_KEY" {
+		t.Errorf("envKeyForName(123model) = %q, want _123MODEL_API_KEY (leading digit)", got)
+	}
 }

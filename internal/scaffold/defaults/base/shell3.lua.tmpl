@@ -11,17 +11,17 @@ local subagents     = require("lib.skills.subagents")
 -- ---------------------------------------------------------------------------
 -- Model
 -- ---------------------------------------------------------------------------
-shell3.model("{{.Name}}", {
-  base_url       = "{{.BaseURL}}",
+shell3.model("{{.Name | luaesc}}", {
+  base_url       = "{{.BaseURL | luaesc}}",
   api_key        = shell3.env.secret("{{.EnvKey}}"),  -- {{.EnvKey}} in .env
-  model          = "{{.Model}}",
+  model          = "{{.Model | luaesc}}",
   context_window = 128000,
   -- reasoning   = "medium",   -- uncomment if your model supports reasoning effort
   -- run_proxy: shell command auto-started (detached, fire-and-forget) the first
   -- time an agent uses this model. Use it to bring up a local proxy in front of
   -- base_url — e.g. a Codex subscription fronted by `npx ...`, or opencode-go.
   -- Output goes to ./.shell3/proxy-{{.Name}}.log.
-{{if .Proxy}}  run_proxy      = "{{.Proxy}}",
+{{if .Proxy}}  run_proxy      = "{{.Proxy | luaesc}}",
 {{else}}  -- run_proxy   = "npx @some/codex-proxy --port 8787",
 {{end}}})
 
@@ -30,7 +30,7 @@ shell3.model("{{.Name}}", {
 -- ---------------------------------------------------------------------------
 shell3.agent({
   name  = "code",
-  model = "{{.Name}}",
+  model = "{{.Name | luaesc}}",
   prompt = [[
 You are an expert coding assistant inside shell3. Work autonomously as a senior pair-programmer: inspect, edit, test, and summarize clearly.
 
@@ -73,7 +73,7 @@ You are an expert coding assistant inside shell3. Work autonomously as a senior 
 
 shell3.agent({
   name  = "plan",
-  model = "{{.Name}}",
+  model = "{{.Name | luaesc}}",
   prompt = [[
 You are the design partner inside shell3. You do NOT edit files — you investigate, ask, and design. Your job is to turn rough ideas into clear, agreed designs.
 

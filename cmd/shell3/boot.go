@@ -87,7 +87,7 @@ func runBoot(f *bootFlags) error {
 
 	if err := scaffold.RenderBaseConfig(dir, scaffold.Values{
 		Name: name, BaseURL: url, EnvKey: envKey, Model: model, Proxy: proxy,
-	}); err != nil {
+	}, f.force); err != nil {
 		return err
 	}
 
@@ -109,10 +109,18 @@ func runBoot(f *bootFlags) error {
 }
 
 // envKeyForName derives the .env key for a model handle: uppercased, with any
-// non-alphanumeric run collapsed to a single underscore, suffixed _API_KEY.
+// non-alphanumeric run collapsed to a single underscore, suffixed _API_KEY. It
+// guarantees a valid identifier: an empty result falls back to MAIN, and a
+// leading digit is prefixed with an underscore.
 func envKeyForName(name string) string {
 	s := nonAlnum.ReplaceAllString(strings.ToUpper(name), "_")
 	s = strings.Trim(s, "_")
+	if s == "" {
+		s = "MAIN"
+	}
+	if s[0] >= '0' && s[0] <= '9' {
+		s = "_" + s
+	}
 	return s + "_API_KEY"
 }
 
