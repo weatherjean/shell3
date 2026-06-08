@@ -3,7 +3,6 @@ package chat
 import (
 	"bytes"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
@@ -103,27 +102,6 @@ func loadImagePart(path, workDir string) (llm.ContentPart, int, int, error) {
 		Type:     llm.ContentPartTypeImageURL,
 		ImageURL: "data:image/jpeg;base64," + encoded,
 	}, w, h, nil
-}
-
-// handleReadImage parses {"path": "..."} tool args, loads the image via
-// loadImagePart, and returns the tool-result text plus the image ContentPart.
-// On any failure it returns an "error: ..." string and the zero ContentPart so
-// the caller queues no image.
-func handleReadImage(rawArgs, workDir string) (string, llm.ContentPart) {
-	var args struct {
-		Path string `json:"path"`
-	}
-	if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
-		return fmt.Sprintf("error: bad arguments: %v", err), llm.ContentPart{}
-	}
-	if strings.TrimSpace(args.Path) == "" {
-		return "error: path is required", llm.ContentPart{}
-	}
-	part, w, h, err := loadImagePart(args.Path, workDir)
-	if err != nil {
-		return "error: " + err.Error(), llm.ContentPart{}
-	}
-	return fmt.Sprintf("Loaded image %q (%dx%d). The image is attached as a user message right after the tool results so you can view it on the next step.", args.Path, w, h), part
 }
 
 // resizeAndEncodeJPEG decodes raw image bytes, shrinks so longest side ≤

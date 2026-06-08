@@ -156,47 +156,6 @@ func TestBuildImageMessage_LargeImageResized(t *testing.T) {
 	}
 }
 
-func TestHandleReadImage_Success(t *testing.T) {
-	tmp := t.TempDir()
-	imgPath := filepath.Join(tmp, "shot.png")
-	writePNG(t, imgPath)
-
-	out, part := handleReadImage(`{"path":"`+imgPath+`"}`, "")
-	if part.Type != llm.ContentPartTypeImageURL {
-		t.Fatalf("part type = %q, want image_url", part.Type)
-	}
-	if !strings.HasPrefix(part.ImageURL, "data:image/jpeg;base64,") {
-		t.Errorf("image URL prefix wrong: %.30s", part.ImageURL)
-	}
-	if !strings.Contains(out, "Loaded image") {
-		t.Errorf("result text = %q, want it to mention loading", out)
-	}
-}
-
-func TestHandleReadImage_BadJSON(t *testing.T) {
-	out, part := handleReadImage(`{not json`, "")
-	if part.ImageURL != "" {
-		t.Error("expected zero part on bad json")
-	}
-	if !strings.HasPrefix(out, "error:") {
-		t.Errorf("want error string, got %q", out)
-	}
-}
-
-func TestHandleReadImage_MissingPath(t *testing.T) {
-	out, part := handleReadImage(`{"path":"  "}`, "")
-	if part.ImageURL != "" || !strings.HasPrefix(out, "error:") {
-		t.Errorf("want error + zero part, got out=%q part=%+v", out, part)
-	}
-}
-
-func TestHandleReadImage_Unsupported(t *testing.T) {
-	out, part := handleReadImage(`{"path":"/tmp/x.bmp"}`, "")
-	if part.ImageURL != "" || !strings.Contains(out, "unsupported") {
-		t.Errorf("want unsupported error + zero part, got out=%q", out)
-	}
-}
-
 func TestLoadImagePart_ReturnsDimensions(t *testing.T) {
 	tmp := t.TempDir()
 	imgPath := filepath.Join(tmp, "shot.png")
