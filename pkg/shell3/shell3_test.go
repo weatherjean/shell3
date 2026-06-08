@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -207,6 +208,75 @@ func TestSession_Clear_ResetsHistory(t *testing.T) {
 	s.Clear()
 	if got := len(s.sess.Messages()); got != 0 {
 		t.Fatalf("after Clear: %d messages, want 0", got)
+	}
+}
+
+func TestAuditSink_EndStatusReflectsError(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "audit.jsonl")
+
+	client := fakellm.New(fakellm.Script{Err: errors.New("boom")})
+	s := newTestSession(t, client, chat.Config{})
+	sink, cleanup, err := chat.OpenSink(out)
+	if err != nil {
+		t.Fatalf("OpenSink: %v", err)
+	}
+	s.sink = sink
+	s.sinkCleanup = cleanup
+	sink.WriteStart("the prompt", "", "", out, false)
+
+	for range s.Send(context.Background(), "hi") {
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read audit log: %v", err)
+	}
+	var endStatus string
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("bad JSONL line %q: %v", line, err)
+		}
+		if rec["kind"] == "end" {
+			endStatus, _ = rec["status"].(string)
+		}
+	}
+	if endStatus != "error" {
+		t.Fatalf("audit end status = %q after an errored turn, want %q", endStatus, "error")
+	}
+}
+
+func TestSession_Clear_RefreshesPrompt(t *testing.T) {
+	client := fakellm.New()
+	calls := 0
+	cfg := chat.Config{RefreshPrompt: func() string {
+		calls++
+		return fmt.Sprintf("refreshed-%d", calls)
+	}}
+	cfg.Personality.SystemPrompt = "original"
+	s := newTestSession(t, client, cfg)
+	defer s.Close()
+
+	s.Clear()
+	if got := s.cfg.Personality.SystemPrompt; got != "refreshed-1" {
+		t.Fatalf("after Clear: SystemPrompt = %q, want %q", got, "refreshed-1")
+	}
+}
+
+func TestSession_Clear_NilRefreshIsNoop(t *testing.T) {
+	client := fakellm.New()
+	cfg := chat.Config{} // RefreshPrompt nil
+	cfg.Personality.SystemPrompt = "frozen"
+	s := newTestSession(t, client, cfg)
+	defer s.Close()
+
+	s.Clear()
+	if got := s.cfg.Personality.SystemPrompt; got != "frozen" {
+		t.Fatalf("after Clear with nil RefreshPrompt: SystemPrompt = %q, want %q", got, "frozen")
 	}
 }
 

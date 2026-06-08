@@ -178,14 +178,3 @@ func renderToolResultBody(ev shell3.Event) string {
 	}
 	return dimLines(strings.TrimRight(truncateOutput(out), "\n"))
 }
-
-// stripToolIDPrefix removes the "[tool_call_id=…]\n" prefix that the turn loop
-// prepends to each tool result's stored content, leaving just the raw output.
-func stripToolIDPrefix(s string) string {
-	if strings.HasPrefix(s, "[tool_call_id=") {
-		if nl := strings.IndexByte(s, '\n'); nl >= 0 {
-			return s[nl+1:]
-		}
-	}
-	return s
-}

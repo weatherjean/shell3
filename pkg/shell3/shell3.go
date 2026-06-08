@@ -153,6 +153,7 @@ type Session struct {
 	curDone    <-chan struct{}    // current turn ctx's Done; unblocks a send to an abandoned cur on Close
 	turnCancel context.CancelFunc // cancels the in-flight turn (nil before the first Send)
 	turnDone   chan struct{}      // closed when the turn goroutine returns (nil before the first Send)
+	sawError   bool               // any turn emitted an error event; drives the audit "end" status
 }
 
 // Start loads the config (identically to the TUI), starts the store session,
@@ -254,6 +255,11 @@ func (s *Session) route(ev chat.Event) {
 	// is a lossy projection. Independent of whether the event has a public form.
 	if s.sink != nil {
 		s.sink.WriteChatEvent(ev)
+	}
+	if ev.Kind == chat.EventError {
+		s.mu.Lock()
+		s.sawError = true
+		s.mu.Unlock()
 	}
 	pub, ok := translate(ev)
 	if !ok {
@@ -418,7 +424,13 @@ func (s *Session) Close() error {
 	// Flush the audit log: by here the turn goroutine has joined, so no route
 	// call can still be writing to the sink. Then release the file and config.
 	if s.sink != nil {
-		s.sink.WriteEnd("ok")
+		status := "ok"
+		s.mu.Lock()
+		if s.sawError {
+			status = "error"
+		}
+		s.mu.Unlock()
+		s.sink.WriteEnd(status)
 	}
 	s.sinkCleanup()
 	s.cleanup()
