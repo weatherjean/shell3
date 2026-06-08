@@ -10,8 +10,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/tui"
+	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
 type runFlags struct {
@@ -46,12 +46,10 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 	if err != nil {
 		return fmt.Errorf("get working directory: %w", err)
 	}
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("get home directory: %w", err)
-	}
 
 	headless := f.outPath != "" || (!term.IsTerminal(int(os.Stdin.Fd())) && initialInput != "")
+	// These env vars are consumed by external hook subprocesses (not by
+	// pkg/shell3, which never mutates global env). Preserve them exactly.
 	if headless {
 		_ = os.Setenv("SHELL3_HEADLESS", "1")
 		if f.outPath != "" {
@@ -59,20 +57,19 @@ func runChat(ctx context.Context, f *runFlags, initialInput string) error {
 		}
 	}
 
-	cfg, cleanup, err := agentsetup.Build(agentsetup.Options{
-		ConfigPath: f.configPath,
-		CWD:        cwd,
-		HomeDir:    homeDir,
-		Headless:   headless,
-		OutPath:    f.outPath,
-	})
-	if err != nil {
-		return err
+	// pkg/shell3 (via internal/tui) owns config assembly and teardown now; cmd
+	// just builds the Spec and dispatches. Interactive is the inverse of
+	// headless, mirroring how agentsetup.Options.Headless was computed before.
+	spec := shell3.Spec{
+		ConfigPath:  f.configPath,
+		WorkDir:     cwd,
+		Interactive: !headless,
+		OutPath:     f.outPath,
 	}
-	defer cleanup()
 
 	if initialInput != "" {
-		return tui.RunOnce(ctx, cfg, initialInput)
+		spec.Prompt = initialInput
+		return tui.RunOnce(ctx, spec)
 	}
-	return tui.RunInteractive(ctx, cfg)
+	return tui.RunInteractive(ctx, spec)
 }

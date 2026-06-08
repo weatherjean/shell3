@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/patchtui"
+	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
 // dimLines wraps each non-empty line with dim+reset so the style is
@@ -102,6 +102,22 @@ func summarizeEditArgs(rawArgs string) string {
 	return fmt.Sprintf(`file_path=%q`, probe.FilePath)
 }
 
+// parseBashArgs extracts the "command" field from the bash-family tools' raw
+// JSON args, mirroring chat.ParseBashArgs exactly so the TUI bash/bash_bg/
+// shell_interactive headers format identically to the rest of the agent. Kept
+// local (not imported from chat) so this package depends only on pkg/shell3.
+// Styled like summarizeEditArgs above: probe the one field we need, fall back to
+// the raw string on a parse failure.
+func parseBashArgs(rawArgs string) string {
+	var probe struct {
+		Command string `json:"command"`
+	}
+	if err := json.Unmarshal([]byte(rawArgs), &probe); err != nil {
+		return rawArgs
+	}
+	return probe.Command
+}
+
 // truncateOutputMaxLines and truncateOutputMaxBytes cap how much of a tool
 // result is shown inline in the TUI. The full result is always sent to the
 // model; this only affects the user-visible display.
@@ -129,24 +145,25 @@ func truncateOutput(s string) string {
 	return s
 }
 
-// renderToolCallHeader produces the per-tool header line for a tool_call event.
+// renderToolCallHeader produces the per-tool header line for a ToolCall event.
 // Bash family tools use the yellow $-prompt style; edit_file gets a one-line
-// args summary; everything else uses the default colored toolCallHeader.
-func renderToolCallHeader(ev chat.Event, cfg *chat.Config) string {
+// args summary; everything else uses the default colored toolCallHeader. The
+// custom-tool flag comes straight off the public event (ev.IsCustomTool,
+// resolved inside pkg/shell3) — renderers no longer need the agent config.
+func renderToolCallHeader(ev shell3.Event) string {
 	switch ev.ToolName {
 	case "bash":
-		return fmt.Sprintf(patchtui.Yellow+patchtui.Bold+"#%s $ %s"+patchtui.Reset, ev.ToolCallID, chat.ParseBashArgs(ev.ToolInput))
+		return fmt.Sprintf(patchtui.Yellow+patchtui.Bold+"#%s $ %s"+patchtui.Reset, ev.ToolCallID, parseBashArgs(ev.ToolInput))
 	case "bash_bg":
-		return fmt.Sprintf(patchtui.Red+patchtui.Bold+"#%s (bg)$"+patchtui.Reset+patchtui.Bold+" %s"+patchtui.Reset, ev.ToolCallID, chat.ParseBashArgs(ev.ToolInput))
+		return fmt.Sprintf(patchtui.Red+patchtui.Bold+"#%s (bg)$"+patchtui.Reset+patchtui.Bold+" %s"+patchtui.Reset, ev.ToolCallID, parseBashArgs(ev.ToolInput))
 	case "shell_interactive":
-		return fmt.Sprintf(patchtui.Yellow+patchtui.Bold+"#%s $ %s"+patchtui.Reset+" (interactive)", ev.ToolCallID, chat.ParseBashArgs(ev.ToolInput))
+		return fmt.Sprintf(patchtui.Yellow+patchtui.Bold+"#%s $ %s"+patchtui.Reset+" (interactive)", ev.ToolCallID, parseBashArgs(ev.ToolInput))
 	case "edit_file":
 		return toolCallHeader(ev.ToolCallID, ev.ToolName, summarizeEditArgs(ev.ToolInput), false)
 	case "compact_history":
 		return toolCallHeader(ev.ToolCallID, ev.ToolName, "", false)
 	default:
-		isCustom := cfg.CustomToolNames[ev.ToolName]
-		return toolCallHeader(ev.ToolCallID, ev.ToolName, ev.ToolInput, isCustom)
+		return toolCallHeader(ev.ToolCallID, ev.ToolName, ev.ToolInput, ev.IsCustomTool)
 	}
 }
 
@@ -154,7 +171,7 @@ func renderToolCallHeader(ev chat.Event, cfg *chat.Config) string {
 // edit_file results pass through diff colorization; everything else is dimmed
 // line-by-line and truncated for inline display. The full output always went to
 // the model via the tool message, and the user can pull it up with /print <id>.
-func renderToolResultBody(ev chat.Event) string {
+func renderToolResultBody(ev shell3.Event) string {
 	out := ev.ToolOutput
 	if ev.ToolName == "edit_file" {
 		return colorizeEditOutput(strings.TrimRight(out, "\n"))

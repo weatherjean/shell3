@@ -6,61 +6,48 @@ import (
 	"os"
 	"strings"
 
-	"github.com/weatherjean/shell3/internal/chat"
+	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
 // RunOnce executes a single turn and prints output to stdout. No TUI.
 //
-// The chat.Session runs in synchronous-sink mode: events are delivered inline
-// by render as the turn streams, so the whole function is linear — no events
-// goroutine and no channel teardown. status is written by render (on this
-// goroutine, during Run) and read after Run returns, so there is no race.
-func RunOnce(ctx context.Context, cfg chat.Config, input string) error {
-	sink, sinkCleanup, err := chat.OpenSink(cfg.OutPath)
+// It drives the turn through shell3.Run, which does Start + Send + Close: the
+// returned channel streams the turn's public Events and closes when the turn
+// drains (Close runs automatically). The JSONL audit log, if any, is owned by
+// pkg/shell3 via spec.OutPath — RunOnce no longer opens its own sink.
+func RunOnce(ctx context.Context, spec shell3.Spec) error {
+	events, err := shell3.Run(ctx, spec)
 	if err != nil {
 		return err
 	}
-	defer sinkCleanup()
-	if sink != nil {
-		_, model := chat.SplitStatus(cfg.StatusLine)
-		sink.WriteStart(input, cfg.ModeLabel, model, cfg.OutPath, cfg.Headless)
-	}
 
-	status := "ok"
-	render := func(ev chat.Event) {
-		if sink != nil {
-			sink.WriteChatEvent(ev)
-		}
+	hadError := false
+	for ev := range events {
 		switch ev.Kind {
-		case chat.EventAssistantToken:
+		case shell3.Token:
 			fmt.Print(ev.Text)
-		case chat.EventToolResult:
+		case shell3.ToolResult:
 			// Show tool body on stdout, trimmed and followed by a blank line
 			// for separation. Headers are skipped here — RunOnce is for
 			// pipeline use where minimal output is preferable.
 			fmt.Println()
 			fmt.Print(strings.TrimRight(ev.ToolOutput, "\n"))
 			fmt.Println()
-		case chat.EventRetry:
+		case shell3.Retry:
 			fmt.Fprintln(os.Stderr, "retry:", ev.Text)
-		case chat.EventError:
-			fmt.Fprintln(os.Stderr, "error:", ev.Text)
-			status = "error"
-		case chat.EventTurnDone:
+		case shell3.Error:
+			msg := ""
+			if ev.Err != nil {
+				msg = ev.Err.Error()
+			}
+			fmt.Fprintln(os.Stderr, "error:", msg)
+			hadError = true
+		case shell3.Done:
 			fmt.Println()
 		}
 	}
 
-	sess := chat.NewSession(chat.SessionOpts{Sink: render})
-	tc := chat.NewTurnConfig(cfg, chat.NewHandlers(cfg), func(ctx context.Context, cmd, workdir string) string {
-		return "error: interactive TTY not available in headless mode"
-	})
-	sess.Run(ctx, tc, input)
-
-	if sink != nil {
-		sink.WriteEnd(status)
-	}
-	if status == "error" {
+	if hadError {
 		return fmt.Errorf("turn ended with error")
 	}
 	return nil

@@ -7,10 +7,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/weatherjean/shell3/internal/chat"
-	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/patchapp"
-	"github.com/weatherjean/shell3/internal/persona"
+	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
 // fakeApp records calls to the appView interface for assertion.
@@ -67,23 +65,17 @@ func (f *fakeApp) WithReleasedTerminal(fn func()) {
 // Compile-time assertion that fakeApp satisfies patchapp.AppView.
 var _ patchapp.AppView = (*fakeApp)(nil)
 
-// runDrain feeds events to the render sink in order and returns the recorded
-// call list.
-func runDrain(t *testing.T, events []chat.Event) ([]string, *llm.Usage) {
+// runDrain feeds public Events to the render sink in order and returns the
+// recorded call list plus the final usage tally.
+func runDrain(t *testing.T, events []shell3.Event) ([]string, usage) {
 	t.Helper()
 	app := &fakeApp{}
-	usage := &llm.Usage{}
-	cfg := &chat.Config{}
-	render := newRenderSink(app, usage, cfg, nil)
+	var u usage
+	render := newRenderSink(app, &u)
 	for _, ev := range events {
 		render(ev)
 	}
-	return app.snapshot(), usage
-}
-
-// usageData is a convenience for tests building EventUsage/EventTurnDone events.
-func usageData(p, c, total int) *chat.EventUsageData {
-	return &chat.EventUsageData{PromptTokens: p, CompletionTokens: c, TotalTokens: total}
+	return app.snapshot(), u
 }
 
 // containsAll checks that every needle appears in the haystack in order.
@@ -98,10 +90,10 @@ func containsAll(haystack []string, needles ...string) bool {
 }
 
 func TestDrainTurn_ChunkOnly_StreamsAndCommits(t *testing.T) {
-	calls, _ := runDrain(t, []chat.Event{
-		{Kind: chat.EventAssistantToken, Text: "hello "},
-		{Kind: chat.EventAssistantToken, Text: "world"},
-		{Kind: chat.EventTurnDone, Usage: usageData(0, 0, 42)},
+	calls, _ := runDrain(t, []shell3.Event{
+		{Kind: shell3.Token, Text: "hello "},
+		{Kind: shell3.Token, Text: "world"},
+		{Kind: shell3.Done, TotalTokens: 42},
 	})
 
 	if !containsAll(calls,
@@ -114,11 +106,11 @@ func TestDrainTurn_ChunkOnly_StreamsAndCommits(t *testing.T) {
 }
 
 func TestDrainTurn_UsageEventUpdatesTokensBeforeDone(t *testing.T) {
-	calls, usage := runDrain(t, []chat.Event{
-		{Kind: chat.EventUsage, Usage: usageData(3, 4, 7)},
-		{Kind: chat.EventToolResult, ToolName: "bash", ToolOutput: "tool output\n"},
-		{Kind: chat.EventUsage, Usage: usageData(13, 9, 22)},
-		{Kind: chat.EventTurnDone, Usage: usageData(13, 9, 22)},
+	calls, u := runDrain(t, []shell3.Event{
+		{Kind: shell3.Usage, PromptTokens: 3, CompletionTokens: 4, TotalTokens: 7},
+		{Kind: shell3.ToolResult, ToolName: "bash", ToolOutput: "tool output\n"},
+		{Kind: shell3.Usage, PromptTokens: 13, CompletionTokens: 9, TotalTokens: 22},
+		{Kind: shell3.Done, PromptTokens: 13, CompletionTokens: 9, TotalTokens: 22},
 	})
 
 	if !containsAll(calls,
@@ -129,16 +121,16 @@ func TestDrainTurn_UsageEventUpdatesTokensBeforeDone(t *testing.T) {
 	) {
 		t.Fatalf("usage event ordering wrong:\n%s", strings.Join(calls, "\n"))
 	}
-	if usage.TotalTokens != 22 || usage.PromptTokens != 13 || usage.CompletionTokens != 9 {
-		t.Fatalf("unexpected usage: %+v", usage)
+	if u.total != 22 || u.prompt != 13 || u.completion != 9 {
+		t.Fatalf("unexpected usage: %+v", u)
 	}
 }
 
 func TestDrainTurn_ToolResultCommitsPendingStreamFirst(t *testing.T) {
-	calls, _ := runDrain(t, []chat.Event{
-		{Kind: chat.EventAssistantToken, Text: "thinking..."},
-		{Kind: chat.EventToolResult, ToolName: "bash", ToolOutput: "tool output\n"},
-		{Kind: chat.EventTurnDone},
+	calls, _ := runDrain(t, []shell3.Event{
+		{Kind: shell3.Token, Text: "thinking..."},
+		{Kind: shell3.ToolResult, ToolName: "bash", ToolOutput: "tool output\n"},
+		{Kind: shell3.Done},
 	})
 
 	wantOrder := []string{
@@ -152,8 +144,8 @@ func TestDrainTurn_ToolResultCommitsPendingStreamFirst(t *testing.T) {
 }
 
 func TestDrainTurn_DoneNoStream_NoCommit(t *testing.T) {
-	calls, _ := runDrain(t, []chat.Event{
-		{Kind: chat.EventTurnDone, Usage: usageData(0, 0, 7)},
+	calls, _ := runDrain(t, []shell3.Event{
+		{Kind: shell3.Done, TotalTokens: 7},
 	})
 
 	for _, c := range calls {
@@ -167,10 +159,10 @@ func TestDrainTurn_DoneNoStream_NoCommit(t *testing.T) {
 }
 
 func TestDrainTurn_NewlineCommitsLineMidStream(t *testing.T) {
-	calls, _ := runDrain(t, []chat.Event{
-		{Kind: chat.EventAssistantToken, Text: "first line\n"},
-		{Kind: chat.EventAssistantToken, Text: "second line\n"},
-		{Kind: chat.EventTurnDone},
+	calls, _ := runDrain(t, []shell3.Event{
+		{Kind: shell3.Token, Text: "first line\n"},
+		{Kind: shell3.Token, Text: "second line\n"},
+		{Kind: shell3.Done},
 	})
 
 	prints := 0
@@ -185,9 +177,9 @@ func TestDrainTurn_NewlineCommitsLineMidStream(t *testing.T) {
 }
 
 func TestDrainTurn_FencedCodeBlockIsPrintedVerbatim(t *testing.T) {
-	calls, _ := runDrain(t, []chat.Event{
-		{Kind: chat.EventAssistantToken, Text: "```python\n# this is a comment\nprint('hi')\n```\n"},
-		{Kind: chat.EventTurnDone},
+	calls, _ := runDrain(t, []shell3.Event{
+		{Kind: shell3.Token, Text: "```python\n# this is a comment\nprint('hi')\n```\n"},
+		{Kind: shell3.Done},
 	})
 
 	foundComment := false
@@ -202,8 +194,8 @@ func TestDrainTurn_FencedCodeBlockIsPrintedVerbatim(t *testing.T) {
 }
 
 func TestDrainTurn_DoneZeroTokens_SkipsSetTokens(t *testing.T) {
-	calls, _ := runDrain(t, []chat.Event{
-		{Kind: chat.EventTurnDone},
+	calls, _ := runDrain(t, []shell3.Event{
+		{Kind: shell3.Done},
 	})
 	for _, c := range calls {
 		if strings.HasPrefix(c, "SetTokens(") {
@@ -212,10 +204,29 @@ func TestDrainTurn_DoneZeroTokens_SkipsSetTokens(t *testing.T) {
 	}
 }
 
+func TestDrainTurn_SystemReminderRendersDim(t *testing.T) {
+	calls, _ := runDrain(t, []shell3.Event{
+		{Kind: shell3.SystemReminder, Text: "reminder text"},
+		{Kind: shell3.Done},
+	})
+
+	found := false
+	for _, c := range calls {
+		// The recorded call quotes the line via %q, so the dim escape appears as
+		// the literal "\x1b[2m" sequence around the reminder text.
+		if strings.Contains(c, "reminder text") && strings.Contains(c, `\x1b[2m`) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected dim system-reminder render, got:\n%s", strings.Join(calls, "\n"))
+	}
+}
+
 func TestDrainTurn_ErrorPrintsErrorLine(t *testing.T) {
-	calls, _ := runDrain(t, []chat.Event{
-		{Kind: chat.EventAssistantToken, Text: "partial"},
-		{Kind: chat.EventError, Text: "boom"},
+	calls, _ := runDrain(t, []shell3.Event{
+		{Kind: shell3.Token, Text: "partial"},
+		{Kind: shell3.Error, Err: fmt.Errorf("boom")},
 	})
 
 	if !containsAll(calls, "Print(", "PrintLine(", "SetBusy(false)") {
@@ -233,8 +244,8 @@ func TestDrainTurn_ErrorPrintsErrorLine(t *testing.T) {
 }
 
 func TestDrainTurn_CancelMessageIsDimmed(t *testing.T) {
-	calls, _ := runDrain(t, []chat.Event{
-		{Kind: chat.EventError, Text: "context canceled"},
+	calls, _ := runDrain(t, []shell3.Event{
+		{Kind: shell3.Error, Err: fmt.Errorf("context canceled")},
 	})
 
 	hasCancel, hasError := false, false
@@ -252,9 +263,9 @@ func TestDrainTurn_CancelMessageIsDimmed(t *testing.T) {
 }
 
 func TestDrainTurn_RetryPrintsDimNoticeWithoutClearingBusy(t *testing.T) {
-	calls, _ := runDrain(t, []chat.Event{
-		{Kind: chat.EventRetry, Text: "stream failed (HTTP 503), retrying (2/5)"},
-		{Kind: chat.EventTurnDone},
+	calls, _ := runDrain(t, []shell3.Event{
+		{Kind: shell3.Retry, Text: "stream failed (HTTP 503), retrying (2/5)"},
+		{Kind: shell3.Done},
 	})
 
 	found := false
@@ -270,17 +281,16 @@ func TestDrainTurn_RetryPrintsDimNoticeWithoutClearingBusy(t *testing.T) {
 	if !found {
 		t.Fatalf("retry notice not rendered with ⟳ glyph: %v", calls)
 	}
-	// The retry event must not clear busy; only EventTurnDone does.
+	// The retry event must not clear busy; only Done does.
 	if busyClears != 1 {
-		t.Fatalf("expected exactly one SetBusy(false) (from TurnDone), got %d: %v", busyClears, calls)
+		t.Fatalf("expected exactly one SetBusy(false) (from Done), got %d: %v", busyClears, calls)
 	}
 }
 
-// TestShellInteractive_CallbackInvoked exercises a stub Config.ShellInteractive
-// to confirm the callback shape: turn-side code invokes the func and uses its
-// return value as tool output. This replaces the previous TTYExecEvent-based
-// drainTurn test, which is obsolete now that the TTY round-trip is a direct
-// callback rather than an event-channel handshake.
+// TestShellInteractive_CallbackInvoked exercises a stub ShellInteractive
+// callback to confirm the callback shape: turn-side code invokes the func and
+// uses its return value as tool output. The callback now lives on
+// shell3.Spec.ShellInteractive (supplied by RunInteractive's closure).
 func TestShellInteractive_CallbackInvoked(t *testing.T) {
 	called := false
 	var gotCmd, gotWd string
@@ -362,59 +372,91 @@ func (f *fakeSlashApp) handlerNames() []string {
 	return out
 }
 
-// fakeLLM is a no-op chat.LLMClient used as the switched-in client in /agent
-// tests; identity is checked by pointer comparison.
-type fakeLLM struct{ id string }
+// fakeSession is a hand-rolled stand-in for *shell3.Session implementing the
+// local session interface. It records mutating calls and serves canned
+// Snapshot/History so each slash command's effect can be asserted without a
+// real agent config or store.
+type fakeSession struct {
+	snap    shell3.Snapshot
+	history []shell3.HistoryEntry
 
-func (f *fakeLLM) Stream(context.Context, []llm.Message, []llm.ToolDefinition, func(llm.StreamEvent)) error {
+	// agents/active drive AgentNames/ActiveAgent/SwitchAgent. switchErr, when
+	// set for a name, makes SwitchAgent fail (unknown-agent path).
+	agents []string
+	active string
+
+	cleared    bool
+	rolledBack bool   // controls Rollback's return
+	rollbackOK bool   // what Rollback returns
+	pruneOut   string // what Prune returns
+	pruneOK    bool   // what Prune's ok returns
+	setParamFn func(string, string) error
+	sent       []string // prompts passed to Send
+	sentMsgs   []shell3.Message
+}
+
+func (f *fakeSession) Send(ctx context.Context, prompt string) <-chan shell3.Event {
+	f.sent = append(f.sent, prompt)
+	ch := make(chan shell3.Event)
+	close(ch)
+	return ch
+}
+func (f *fakeSession) SendMessage(ctx context.Context, msg shell3.Message) <-chan shell3.Event {
+	f.sentMsgs = append(f.sentMsgs, msg)
+	ch := make(chan shell3.Event)
+	close(ch)
+	return ch
+}
+func (f *fakeSession) Clear() { f.cleared = true }
+func (f *fakeSession) Rollback() bool {
+	f.rolledBack = true
+	return f.rollbackOK
+}
+func (f *fakeSession) SwitchAgent(name string) error {
+	for _, n := range f.agents {
+		if n == name {
+			f.active = name
+			f.snap.Agent = name
+			return nil
+		}
+	}
+	return fmt.Errorf("unknown agent %q", name)
+}
+func (f *fakeSession) AgentNames() []string      { return f.agents }
+func (f *fakeSession) ActiveAgent() string       { return f.active }
+func (f *fakeSession) Snapshot() shell3.Snapshot { return f.snap }
+func (f *fakeSession) History() []shell3.HistoryEntry {
+	return f.history
+}
+func (f *fakeSession) Prune(id string) (string, bool) { return f.pruneOut, f.pruneOK }
+func (f *fakeSession) SetParam(name, value string) error {
+	if f.setParamFn != nil {
+		return f.setParamFn(name, value)
+	}
 	return nil
 }
 
-// register sets up a fakeSlashApp with the chat command set, returning
-// it plus the cfg/sess/usage state the closures captured. The config is
-// seeded with two agents and a stub SwitchAgent so /agent tests can run.
-func register() (*fakeSlashApp, *chat.Config, *chat.Session, *llm.Usage) {
+// register sets up a fakeSlashApp with the chat command set, returning it plus
+// the fakeSession and usage state the closures captured. The session is seeded
+// with two agents so /agent tests can run.
+func register() (*fakeSlashApp, *fakeSession, *usage) {
 	app := &fakeSlashApp{}
-	cfg := &chat.Config{
-		StatusLine:  "anthropic │ claude-x",
-		ModeLabel:   "main",
-		Personality: persona.Persona{SystemPrompt: "be helpful"},
-		AgentNames:  []string{"main", "fast"},
-		SwitchAgent: func(name string) (chat.ActiveAgent, error) {
-			agents := map[string]chat.ActiveAgent{
-				"main": {
-					LLM:           &fakeLLM{id: "claude-x"},
-					Params:        llm.RequestParams{ReasoningEffort: "high"},
-					ModelID:       "claude-x",
-					ModeLabel:     "main",
-					ContextWindow: 200000,
-				},
-				"fast": {
-					LLM:           &fakeLLM{id: "claude-fast"},
-					Params:        llm.RequestParams{ReasoningEffort: "high"},
-					ModelID:       "claude-fast",
-					ModeLabel:     "fast",
-					ContextWindow: 64000,
-				},
-			}
-			if a, ok := agents[name]; ok {
-				return a, nil
-			}
-			return chat.ActiveAgent{}, fmt.Errorf("unknown agent %q", name)
+	sess := &fakeSession{
+		snap: shell3.Snapshot{
+			Agent:        "main",
+			StatusLine:   "anthropic │ claude-x",
+			SystemPrompt: "be helpful",
 		},
+		agents: []string{"main", "fast"},
+		active: "main",
 	}
-	sess := chat.NewSession(chat.SessionOpts{})
-	usage := &llm.Usage{}
-	registerSlashCommands(app, cfg, sess, usage, func(llm.Message) {}, func(chat.ActiveAgent) {})
-	return app, cfg, sess, usage
-}
-
-func mkToolMsg(id, name, content string) llm.Message {
-	return llm.Message{Role: llm.RoleTool, ToolCallID: id, Name: name, Content: content}
+	u := &usage{}
+	registerSlashCommands(app, sess, u, "/work", func(shell3.Message) {}, func() {})
+	return app, sess, u
 }
 
 func TestSlash_RegistersExpectedCommands(t *testing.T) {
-	app, _, _, _ := register()
+	app, _, _ := register()
 	want := []string{"clear", "rollback", "prune", "usage", "prompt", "print", "agent", "exit", "quit", "image"}
 	for _, name := range want {
 		if _, ok := app.handlers[name]; !ok {
@@ -424,64 +466,40 @@ func TestSlash_RegistersExpectedCommands(t *testing.T) {
 }
 
 func TestSlash_Clear(t *testing.T) {
-	app, _, sess, _ := register()
-	sess.SetMessages([]llm.Message{{Role: llm.RoleUser, Content: "x"}})
+	app, sess, _ := register()
 	app.call(t, "clear", "")
 
-	if len(sess.Messages()) != 0 {
-		t.Errorf("messages not cleared")
+	if !sess.cleared {
+		t.Errorf("Clear not invoked on session")
 	}
 	if !containsAll(app.snapshot(), "[context cleared]") {
 		t.Errorf("missing dim: %v", app.snapshot())
 	}
 }
 
-func TestSlash_ClearRefreshesPrompt(t *testing.T) {
-	app, cfg, _, _ := register()
-	cfg.Personality.SystemPrompt = "stale boot-time prompt"
-	cfg.RefreshPrompt = func() string { return "fresh prompt with new time" }
-
-	app.call(t, "clear", "")
-
-	if cfg.Personality.SystemPrompt != "fresh prompt with new time" {
-		t.Errorf("clear did not refresh system prompt: %q", cfg.Personality.SystemPrompt)
-	}
-}
-
-func TestSlash_ClearNilRefreshIsNoop(t *testing.T) {
-	app, cfg, _, _ := register()
-	cfg.Personality.SystemPrompt = "original"
-	cfg.RefreshPrompt = nil // run.go may not wire it (e.g. embedders)
-
-	app.call(t, "clear", "")
-
-	if cfg.Personality.SystemPrompt != "original" {
-		t.Errorf("nil RefreshPrompt should leave prompt untouched, got %q", cfg.Personality.SystemPrompt)
-	}
-}
-
 func TestSlash_RollbackEmpty(t *testing.T) {
-	app, _, _, _ := register()
+	app, sess, _ := register()
+	sess.rollbackOK = false
 	app.call(t, "rollback", "")
+	if !sess.rolledBack {
+		t.Errorf("Rollback not invoked")
+	}
 	if !containsAll(app.snapshot(), "[nothing to roll back]") {
 		t.Errorf("want nothing-to-roll-back: %v", app.snapshot())
 	}
 }
 
 func TestSlash_RollbackRemovesTurn(t *testing.T) {
-	app, _, sess, _ := register()
-	sess.SetMessages([]llm.Message{
-		{Role: llm.RoleUser, Content: "q"},
-		{Role: llm.RoleAssistant, Content: "r"},
-	})
+	app, sess, _ := register()
+	sess.rollbackOK = true
 	app.call(t, "rollback", "")
-	if len(sess.Messages()) != 0 {
-		t.Errorf("expected rolled back, got %d msgs", len(sess.Messages()))
+	if !containsAll(app.snapshot(), "[last turn removed from context]") {
+		t.Errorf("want removed message: %v", app.snapshot())
 	}
 }
 
 func TestSlash_PruneNoArg(t *testing.T) {
-	app, _, _, _ := register()
+	app, _, _ := register()
 	app.call(t, "prune", "")
 	if !containsAll(app.snapshot(), "/prune usage") {
 		t.Errorf("want usage hint: %v", app.snapshot())
@@ -489,18 +507,17 @@ func TestSlash_PruneNoArg(t *testing.T) {
 }
 
 func TestSlash_PruneByID(t *testing.T) {
-	app, _, sess, _ := register()
-	big := strings.Repeat("x", 600)
-	sess.SetMessages([]llm.Message{mkToolMsg("3", "bash", big)})
+	app, sess, _ := register()
+	sess.pruneOut = "pruned by user (600 bytes freed)"
+	sess.pruneOK = true
 	app.call(t, "prune", "3")
-	msgs := sess.Messages()
-	if !strings.Contains(msgs[0].Content, "[pruned by user") {
-		t.Errorf("expected stub, got %q", msgs[0].Content)
+	if !containsAll(app.snapshot(), "pruned by user") {
+		t.Errorf("expected prune summary echoed: %v", app.snapshot())
 	}
 }
 
 func TestSlash_UsageNoData(t *testing.T) {
-	app, _, _, _ := register()
+	app, _, _ := register()
 	app.call(t, "usage", "")
 	if !containsAll(app.snapshot(), "[no usage data yet]") {
 		t.Errorf("want no-data: %v", app.snapshot())
@@ -508,8 +525,8 @@ func TestSlash_UsageNoData(t *testing.T) {
 }
 
 func TestSlash_UsageWithData(t *testing.T) {
-	app, _, _, usage := register()
-	*usage = llm.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30}
+	app, _, u := register()
+	*u = usage{prompt: 10, completion: 20, total: 30}
 	app.call(t, "usage", "")
 
 	hasPrint := false
@@ -524,7 +541,7 @@ func TestSlash_UsageWithData(t *testing.T) {
 }
 
 func TestSlash_PromptDumps(t *testing.T) {
-	app, _, _, _ := register()
+	app, _, _ := register()
 	app.call(t, "prompt", "")
 	hasPrint := false
 	for _, c := range app.snapshot() {
@@ -538,7 +555,7 @@ func TestSlash_PromptDumps(t *testing.T) {
 }
 
 func TestSlash_PrintNoArg(t *testing.T) {
-	app, _, _, _ := register()
+	app, _, _ := register()
 	app.call(t, "print", "")
 	if !containsAll(app.snapshot(), "/print usage") {
 		t.Errorf("want usage hint: %v", app.snapshot())
@@ -546,12 +563,14 @@ func TestSlash_PrintNoArg(t *testing.T) {
 }
 
 func TestSlash_PrintByID(t *testing.T) {
-	app, _, sess, _ := register()
-	// 15 lines so it exceeds the inline 10-line truncation cap; a tail marker
-	// on the last line proves /print shows the full, untruncated output. The
-	// [tool_call_id=…] prefix must be stripped from the display.
+	app, sess, _ := register()
+	// History returns Content already prefix-stripped (pkg owns that), so /print
+	// shows it raw. 15 lines proves it isn't subject to the inline 10-line cap;
+	// the tail marker on the last line proves full output.
 	body := strings.Repeat("filler\n", 14) + "TAILMARKER"
-	sess.SetMessages([]llm.Message{mkToolMsg("3", "bash", "[tool_call_id=3]\n"+body)})
+	sess.history = []shell3.HistoryEntry{
+		{Role: "tool", ToolCallID: "3", ToolName: "bash", Content: body},
+	}
 	app.call(t, "print", "3")
 
 	var printed string
@@ -563,13 +582,10 @@ func TestSlash_PrintByID(t *testing.T) {
 	if !strings.Contains(printed, "TAILMARKER") {
 		t.Errorf("expected full untruncated output, got: %q", printed)
 	}
-	if strings.Contains(printed, "tool_call_id") {
-		t.Errorf("expected [tool_call_id=…] prefix stripped, got: %q", printed)
-	}
 }
 
 func TestSlash_PrintUnknownID(t *testing.T) {
-	app, _, _, _ := register()
+	app, _, _ := register()
 	app.call(t, "print", "999")
 	if !containsAll(app.snapshot(), "no tool result with id") {
 		t.Errorf("want not-found hint: %v", app.snapshot())
@@ -577,7 +593,7 @@ func TestSlash_PrintUnknownID(t *testing.T) {
 }
 
 func TestSlash_AgentList(t *testing.T) {
-	app, _, _, _ := register()
+	app, _, _ := register()
 	app.call(t, "agent", "")
 
 	var printed string
@@ -600,37 +616,22 @@ func TestSlash_AgentList(t *testing.T) {
 
 func TestSlash_AgentSwitch(t *testing.T) {
 	app := &fakeSlashApp{}
-	cfg := &chat.Config{
-		StatusLine: "anthropic │ claude-x",
-		ModeLabel:  "main",
-		AgentNames: []string{"main", "fast"},
-		SwitchAgent: func(name string) (chat.ActiveAgent, error) {
-			if name == "fast" {
-				return chat.ActiveAgent{
-					LLM:           &fakeLLM{id: "claude-fast"},
-					Params:        llm.RequestParams{ReasoningEffort: "high"},
-					ModelID:       "claude-fast",
-					ModeLabel:     "fast",
-					ContextWindow: 64000,
-				}, nil
-			}
-			return chat.ActiveAgent{}, fmt.Errorf("unknown agent %q", name)
-		},
+	sess := &fakeSession{
+		snap:   shell3.Snapshot{Agent: "main", StatusLine: "anthropic │ claude-x"},
+		agents: []string{"main", "fast"},
+		active: "main",
 	}
-	sess := chat.NewSession(chat.SessionOpts{})
-	var applied chat.ActiveAgent
-	registerSlashCommands(app, cfg, sess, &llm.Usage{}, func(llm.Message) {}, func(rt chat.ActiveAgent) {
-		applied = rt
-		cfg.LLM = rt.LLM
-		cfg.ModeLabel = rt.ModeLabel
-		cfg.ContextWindow = rt.ContextWindow
-		cfg.Params = rt.Params
-		cfg.StatusLine = fmt.Sprintf("%s │ %s", rt.ModeLabel, rt.ModelID)
+	applied := false
+	registerSlashCommands(app, sess, &usage{}, "/work", func(shell3.Message) {}, func() {
+		applied = true
 	})
 	app.call(t, "agent", "fast")
 
-	if applied.ModelID != "claude-fast" {
-		t.Errorf("applyAgent not called with fast agent: %+v", applied)
+	if !applied {
+		t.Errorf("applyAgent not called after successful switch")
+	}
+	if sess.active != "fast" {
+		t.Errorf("SwitchAgent not applied, active=%q", sess.active)
 	}
 	if !containsAll(app.snapshot(), "[agent: fast]") {
 		t.Errorf("missing agent confirm: %v", app.snapshot())
@@ -638,12 +639,11 @@ func TestSlash_AgentSwitch(t *testing.T) {
 }
 
 func TestSlash_AgentUnknown(t *testing.T) {
-	app, cfg, _, _ := register()
-	before := cfg.StatusLine
+	app, sess, _ := register()
 	app.call(t, "agent", "bogus")
 
-	if cfg.StatusLine != before {
-		t.Errorf("status changed on unknown agent: %q", cfg.StatusLine)
+	if sess.active != "main" {
+		t.Errorf("active changed on unknown agent: %q", sess.active)
 	}
 	if !containsAll(app.snapshot(), "unknown agent") {
 		t.Errorf("missing unknown-agent error: %v", app.snapshot())
@@ -652,9 +652,8 @@ func TestSlash_AgentUnknown(t *testing.T) {
 
 func TestSlash_AgentNoneConfigured(t *testing.T) {
 	app := &fakeSlashApp{}
-	cfg := &chat.Config{StatusLine: "anthropic │ claude-x"}
-	sess := chat.NewSession(chat.SessionOpts{})
-	registerSlashCommands(app, cfg, sess, &llm.Usage{}, func(llm.Message) {}, func(chat.ActiveAgent) {})
+	sess := &fakeSession{snap: shell3.Snapshot{StatusLine: "anthropic │ claude-x"}}
+	registerSlashCommands(app, sess, &usage{}, "/work", func(shell3.Message) {}, func() {})
 	app.call(t, "agent", "fast")
 
 	if !containsAll(app.snapshot(), "[no agents configured]") {
@@ -663,8 +662,13 @@ func TestSlash_AgentNoneConfigured(t *testing.T) {
 }
 
 func TestSlash_QuitAliasesExit(t *testing.T) {
-	app, _, _, _ := register()
+	app, _, _ := register()
 	if app.handlers["exit"] == nil || app.handlers["quit"] == nil {
 		t.Errorf("exit/quit not both registered")
 	}
 }
+
+// Compile-time assertion that *shell3.Session satisfies the local session
+// interface the loop and handlers depend on. fakeSession satisfies it too.
+var _ session = (*shell3.Session)(nil)
+var _ session = (*fakeSession)(nil)

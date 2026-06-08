@@ -8,77 +8,107 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/weatherjean/shell3/internal/chat"
-	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/patchapp"
 	"github.com/weatherjean/shell3/internal/patchmd"
 	"github.com/weatherjean/shell3/internal/patchtui"
+	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
-// RunInteractive runs the TUI chat loop. Blocks until the user quits.
-func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
-	var storeID int64
-	if cfg.Store != nil {
-		var err error
-		storeID, err = cfg.Store.StartSession()
-		if err != nil {
-			return fmt.Errorf("chat: start session: %w", err)
+// session is the slice of *shell3.Session that the interactive loop and slash
+// handlers depend on. *shell3.Session satisfies it; tests fake it. Keeping it a
+// local interface (rather than taking the concrete *shell3.Session) lets the
+// slash-command tests drive each command's effect without standing up a real
+// session, agent config, or store — the same pattern the old slashTarget used
+// for the App side.
+type session interface {
+	Send(ctx context.Context, prompt string) <-chan shell3.Event
+	SendMessage(ctx context.Context, msg shell3.Message) <-chan shell3.Event
+	Clear()
+	Rollback() bool
+	SwitchAgent(name string) error
+	AgentNames() []string
+	ActiveAgent() string
+	Snapshot() shell3.Snapshot
+	History() []shell3.HistoryEntry
+	Prune(id string) (summary string, ok bool)
+	SetParam(name, value string) error
+}
+
+// usage is the TUI-local running tally of the last turn's token counts, fed from
+// the public Event token fields on Usage/Done. It replaces the old reliance on
+// the internal llm.Usage type so this package imports only pkg/shell3.
+type usage struct {
+	prompt     int
+	completion int
+	total      int
+}
+
+// RunInteractive runs the TUI chat loop on top of a pkg/shell3 Session. Blocks
+// until the user quits.
+//
+// App-creation ordering: app is declared BEFORE shell3.Start so the
+// ShellInteractive closure can capture it, but it is assigned AFTER Start
+// returns (using Snapshot() for the welcome/status info). This is safe because
+// ShellInteractive only fires during a turn (inside Send), long after app is
+// assigned — see pkg/shell3's Spec.ShellInteractive doc.
+func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
+	// app is captured by the ShellInteractive closure below but assigned after
+	// Start. The closure releases the terminal for an interactive shell command,
+	// mirroring the previous in-process interactive-bash runner.
+	var app *patchapp.App
+	spec.Interactive = true
+	spec.ShellInteractive = func(ctx context.Context, cmd, workdir string) string {
+		result := "(completed)"
+		app.WithReleasedTerminal(func() {
+			c := exec.Command("bash", "-c", cmd)
+			if workdir != "" {
+				c.Dir = workdir
+			}
+			c.Stdin = os.Stdin
+			c.Stdout = os.Stdout
+			c.Stderr = os.Stderr
+			if err := c.Run(); err != nil {
+				result = "error: " + err.Error()
+			}
+		})
+		return result
+	}
+
+	sess, err := shell3.Start(ctx, spec)
+	if err != nil {
+		return err
+	}
+	// Close cancels any in-flight turn, joins it (so its deferred history persist
+	// runs against the still-open store), ends the store session, and flushes the
+	// audit log. pkg owns all of that now, so this loop no longer manages the
+	// store EndSession defer or the JSONL sink itself.
+	defer sess.Close()
+
+	// workDir is captured for /image (Snapshot carries no WorkDir). spec.WorkDir
+	// is the source the old code used via cfg.WorkDir; fall back to the cwd when
+	// the spec left it empty (matching shell3.Start's own resolution).
+	workDir := spec.WorkDir
+	if workDir == "" {
+		if w, gwErr := os.Getwd(); gwErr == nil {
+			workDir = w
 		}
 	}
-	sink, sinkCleanup, openErr := chat.OpenSink(cfg.OutPath)
-	if openErr != nil {
-		return openErr
-	}
-	if sink != nil {
-		_, model := chat.SplitStatus(cfg.StatusLine)
-		sink.WriteStart("(interactive)", cfg.ModeLabel, model, cfg.OutPath, cfg.Headless)
-	}
 
-	app := patchapp.New(cfg.ModeLabel, cfg.StatusLine, patchapp.WelcomeInfo{
-		Persona:    cfg.ModeLabel,
-		ProjectRef: cfg.ProjectRef,
+	snap := sess.Snapshot()
+	app = patchapp.New(snap.Agent, snap.StatusLine, patchapp.WelcomeInfo{
+		Persona:    snap.Agent,
+		ProjectRef: snap.ProjectRef,
 	})
-	if cfg.ContextWindow > 0 {
-		app.SetContextWindow(cfg.ContextWindow)
+	if snap.ContextWindow > 0 {
+		app.SetContextWindow(snap.ContextWindow)
 	}
 
-	var lastUsage llm.Usage
-
-	// The Session runs in synchronous-sink mode: newRenderSink delivers each
-	// event to the App inline on the turn goroutine. There is no events channel
-	// and no long-lived drain goroutine — "turn finished" is "the turn goroutine
-	// returned". The sink also writes the JSONL audit log when sink != nil.
-	sess := chat.NewSession(chat.SessionOpts{
-		StoreID:          storeID,
-		ContextWindowFor: func(string) int { return cfg.ContextWindow },
-		Sink:             newRenderSink(app, &lastUsage, &cfg, sink),
-	})
-	if cfg.Store != nil {
-		// End whichever session is current when the loop exits. compact_history
-		// may roll sess.id to a new session mid-conversation, so read sess.ID()
-		// at defer time rather than capturing the initial storeID.
-		lg := chat.LogOrNoop(cfg.Log)
-		defer func() {
-			if err := cfg.Store.EndSession(sess.ID()); err != nil {
-				lg.Warn("end session failed", "session_id", sess.ID(), "error", err)
-			}
-		}()
-	}
-	{
-		_, model := chat.SplitStatus(cfg.StatusLine)
-		sess.Start(map[string]string{
-			"mode":    cfg.ModeLabel,
-			"persona": cfg.Personality.Name,
-			"model":   model,
-			"out":     cfg.OutPath,
-		})
-	}
+	var lastUsage usage
 
 	// turnWG tracks the in-flight turn goroutine (spawned per user message by
-	// launchTurn). The turn goroutine writes to cfg.Store (saveHistory/compact)
-	// as it unwinds, so teardown must JOIN it before EndSession runs — otherwise
-	// a cancelled turn could still be writing to the store while EndSession (and,
-	// in the embedded case, a subsequent store Close) runs.
+	// launchTurn). It only drains the public Event channel — pkg persists history
+	// and ends the store inside Send/Close — but teardown still joins it so the
+	// render sink isn't writing to the App while the loop unwinds.
 	var turnWG sync.WaitGroup
 
 	// turnsCtx is the parent of every per-turn context. Teardown cancels it so
@@ -91,136 +121,109 @@ func RunInteractive(ctx context.Context, cfg chat.Config) (runErr error) {
 	// safety net; the ordering-critical cancel is in the teardown defer below.
 	defer cancelTurns()
 
-	// Teardown: cancel the in-flight turn and join it (so its store writes and
-	// its terminal event finish), then emit session_end and flush the audit log.
-	// With the synchronous sink there is no channel to close and no drain to
-	// join: once turnWG.Wait() returns, no goroutine can call the sink, so
-	// sess.End() and the sink writes below run with no concurrent emitter.
+	// Teardown: cancel the in-flight turn and join its drain goroutine before
+	// sess.Close runs (deferred above, so it runs after this). Once turnWG.Wait()
+	// returns, no goroutine can still call the render sink.
 	defer func() {
-		status := "ok"
-		if runErr != nil {
-			status = "error"
-		}
 		cancelTurns()
 		turnWG.Wait()
-		sess.End(status)
-		if sink != nil {
-			sink.WriteEnd(status)
-		}
-		sinkCleanup()
 	}()
 
-	handlers := chat.NewHandlers(cfg)
+	renderSink := newRenderSink(app, &lastUsage)
 
-	// launchTurn starts a turn goroutine for userMsg. The Session's render sink
-	// runs inline on that goroutine; per-turn UI state transitions (SetBusy
-	// false, etc.) happen when the sink processes the TurnDone/Error event.
-	// History is persisted inside the turn (before the terminal event) by
-	// Session.Run, so it completes before the turn goroutine returns.
-	buildTurnConfig := func() chat.TurnConfig {
-		return chat.NewTurnConfig(cfg, handlers, func(ctx context.Context, cmd, workdir string) string {
-			result := "(completed)"
-			app.WithReleasedTerminal(func() {
-				c := exec.Command("bash", "-c", cmd)
-				if workdir != "" {
-					c.Dir = workdir
-				}
-				c.Stdin = os.Stdin
-				c.Stdout = os.Stdout
-				c.Stderr = os.Stderr
-				if err := c.Run(); err != nil {
-					result = "error: " + err.Error()
-				}
-			})
-			return result
-		})
-	}
-
-	launchTurn := func(userMsg llm.Message) {
+	// launchTurn starts a turn goroutine for msg. The render sink runs on that
+	// goroutine as it drains the per-turn Event channel; per-turn UI state
+	// transitions (SetBusy false, etc.) happen when the sink processes the
+	// Done/Error event. pkg persists history inside the turn.
+	launchTurn := func(msg shell3.Message) {
 		turnCtx, cancel := context.WithCancel(turnsCtx)
 		app.SetBusy(true, cancel)
-		tc := buildTurnConfig()
-		// turnWG lets teardown join this goroutine before EndSession so its
-		// store writes (saveHistory/compact) are never in flight when the
-		// session is ended. Add(1) before spawning; Done() inside the goroutine.
+		var ch <-chan shell3.Event
+		// A plain-text message drives Send (string path); a message carrying an
+		// attachment (e.g. /image) drives SendMessage so its built payload isn't
+		// dropped. Both share the per-turn drain/cancel machinery below.
+		if len(msg.Attachments) == 0 {
+			ch = sess.Send(turnCtx, msg.Text)
+		} else {
+			ch = sess.SendMessage(turnCtx, msg)
+		}
 		turnWG.Add(1)
-		// Plain user-text messages go through Session.Run (which handles the
-		// user_message event + history save). Messages with ContentParts (e.g.
-		// /image) bypass Run since Run is string-only — saveHistory only
-		// persists string Content anyway, so the image path drives RunTurn
-		// directly.
 		go func() {
 			defer turnWG.Done()
 			defer cancel()
-			if len(userMsg.ContentParts) == 0 {
-				sess.Run(turnCtx, tc, userMsg.Content)
-				return
+			for ev := range ch {
+				renderSink(ev)
 			}
-			chat.RunTurn(turnCtx, tc, sess, userMsg, nil)
 		}()
 	}
 
-	applyAgent := func(rt chat.ActiveAgent) {
-		cfg.ApplyActiveAgent(rt)
-		app.SetMode(cfg.ModeLabel)
-		app.SetStatus(cfg.StatusLine)
-		app.SetContextWindow(cfg.ContextWindow)
+	// applyAgent refreshes the badge/status/context-window after a switch. The
+	// switch itself already happened on sess (SwitchAgent); we read the fresh
+	// Snapshot to mirror it into the App.
+	applyAgent := func() {
+		snap := sess.Snapshot()
+		app.SetMode(snap.Agent)
+		app.SetStatus(snap.StatusLine)
+		app.SetContextWindow(snap.ContextWindow)
 	}
 
 	app.SetTab(func() {
-		if cfg.SwitchAgent == nil || len(cfg.AgentNames) < 2 {
+		names := sess.AgentNames()
+		if len(names) < 2 {
 			return
 		}
 		cur := 0
-		for i, n := range cfg.AgentNames {
-			if n == cfg.ModeLabel {
+		active := sess.ActiveAgent()
+		for i, n := range names {
+			if n == active {
 				cur = i
 				break
 			}
 		}
-		next := cfg.AgentNames[(cur+1)%len(cfg.AgentNames)]
-		rt, err := cfg.SwitchAgent(next)
-		if err != nil {
+		next := names[(cur+1)%len(names)]
+		if err := sess.SwitchAgent(next); err != nil {
 			return
 		}
-		applyAgent(rt)
-		app.PrintLine(patchtui.Dim + "[agent: " + rt.ModeLabel + "]" + patchtui.Reset)
+		applyAgent()
+		app.PrintLine(patchtui.Dim + "[agent: " + sess.ActiveAgent() + "]" + patchtui.Reset)
 	})
 
-	registerSlashCommands(app, &cfg, sess, &lastUsage, launchTurn, applyAgent)
+	registerSlashCommands(app, sess, &lastUsage, workDir, launchTurn, applyAgent)
 
 	app.SetSubmit(func(input string) {
-		launchTurn(llm.Message{Role: llm.RoleUser, Content: input})
+		launchTurn(shell3.Message{Text: input})
 	})
 
 	runErr = app.Run(ctx)
 	return
 }
 
-// newRenderSink returns the chat.Session event sink that renders a turn to the
-// App. LLM text streams to scrollback line-by-line via patchmd (or verbatim
+// newRenderSink returns the function that renders a stream of public Events to
+// the App. LLM text streams to scrollback line-by-line via patchmd (or verbatim
 // inside fenced code blocks). Reasoning chunks stream dim, also line-by-line.
 // Tool calls render a header line; tool results render a dimmed body (or
-// colorized diff for edit_file). TurnDone flushes the trailing partial line and
+// colorized diff for edit_file). Done flushes the trailing partial line and
 // clears busy. The returned closure owns the per-turn streaming state (stream/
-// reasoning buffers, fence toggle), which is flushed and reset at TurnDone/Error.
+// reasoning buffers, fence toggle), which is flushed and reset at Done/Error.
 //
-// CONCURRENCY INVARIANT (busy-gate): the sink runs synchronously on the in-flight
-// turn goroutine and READS shared *chat.Config fields per event — e.g.
-// cfg.CustomToolNames in renderToolCallHeader — and WRITES *lastUsage. The
-// slash-command handlers in registerSlashCommands run on the input-loop
-// goroutine and MUTATE the same struct (/agent, /clear, ... — plus Tab agent
-// switching) and READ *lastUsage (/usage). There is deliberately NO mutex around
-// cfg or lastUsage. This is race-free ONLY because of the busy-gate in patchapp:
-// App.handleEnter (internal/patchapp/editor.go) early-returns while a.busy is
-// true, so slash handlers (and SubmitFunc) cannot fire while a turn — and
-// therefore the sink's per-event reads of cfg/lastUsage — is active. SetBusy(true)
-// is set in launchTurn for the duration of the turn and cleared only when the
-// sink processes the terminal TurnDone/Error event. A future maintainer who
-// breaks that gate (e.g. allowing slash commands to run during streaming, or
-// clearing busy before the turn's terminal event) reintroduces a data race on
-// cfg/lastUsage and must add real synchronization here.
-func newRenderSink(app patchapp.AppView, lastUsage *llm.Usage, cfg *chat.Config, sink *chat.OutSink) func(chat.Event) {
+// The JSONL audit log is no longer written here — pkg/shell3 owns the sink and
+// writes every (lossless) internal event before translating to the public Event
+// streamed below.
+//
+// CONCURRENCY INVARIANT (busy-gate): the sink runs on the in-flight turn's drain
+// goroutine and WRITES *lastUsage. The slash-command handlers in
+// registerSlashCommands run on the input-loop goroutine and READ *lastUsage
+// (/usage). There is deliberately NO mutex around lastUsage. This is race-free
+// ONLY because of the busy-gate in patchapp: App.handleEnter
+// (internal/patchapp/editor.go) early-returns while a.busy is true, so slash
+// handlers (and SubmitFunc) cannot fire while a turn — and therefore the sink's
+// writes of lastUsage — is active. SetBusy(true) is set in launchTurn for the
+// duration of the turn and cleared only when the sink processes the terminal
+// Done/Error event. A future maintainer who breaks that gate (e.g. allowing
+// slash commands to run during streaming, or clearing busy before the turn's
+// terminal event) reintroduces a data race on lastUsage and must add real
+// synchronization here.
+func newRenderSink(app patchapp.AppView, lastUsage *usage) func(shell3.Event) {
 	var streamBuf strings.Builder
 	// reasoningBuf holds an incomplete (no trailing \n) reasoning line.
 	// Complete lines are committed to scrollback immediately for real-time display.
@@ -296,26 +299,19 @@ func newRenderSink(app patchapp.AppView, lastUsage *llm.Usage, cfg *chat.Config,
 			app.Print(emit)
 		}
 	}
-	publishUsage := func(u llm.Usage) {
+	// publishUsage forwards the per-roundtrip token counts to the status bar and
+	// records them for /usage. The Event carries the counts directly now (no
+	// llm.Usage), so we compare against the running tally to avoid redundant
+	// SetTokens calls.
+	publishUsage := func(ev shell3.Event) {
+		u := usage{prompt: ev.PromptTokens, completion: ev.CompletionTokens, total: ev.TotalTokens}
 		if u == *lastUsage {
 			return
 		}
 		*lastUsage = u
-		if u.TotalTokens > 0 {
-			app.SetTokens(u.TotalTokens)
+		if u.total > 0 {
+			app.SetTokens(u.total)
 		}
-	}
-	// publishEventUsage forwards a wire usage payload (if present) to
-	// publishUsage. Shared by the usage and turn-done events.
-	publishEventUsage := func(u *chat.EventUsageData) {
-		if u == nil {
-			return
-		}
-		publishUsage(llm.Usage{
-			PromptTokens:     u.PromptTokens,
-			CompletionTokens: u.CompletionTokens,
-			TotalTokens:      u.TotalTokens,
-		})
 	}
 	// appendReasoning commits each complete (newline-terminated) reasoning line
 	// to scrollback as it arrives (dim gray), keeping the trailing partial line
@@ -344,67 +340,63 @@ func newRenderSink(app patchapp.AppView, lastUsage *llm.Usage, cfg *chat.Config,
 		streamBuf.Reset()
 	}
 
-	return func(ev chat.Event) {
-		if sink != nil {
-			sink.WriteChatEvent(ev)
-		}
+	return func(ev shell3.Event) {
 		switch ev.Kind {
-		case chat.EventAssistantReasoning:
+		case shell3.Reasoning:
 			appendReasoning(ev.Text)
 
-		case chat.EventAssistantToken:
+		case shell3.Token:
 			flushReasoningPartial()
 			streamBuf.WriteString(ev.Text)
 			flushStream()
 
-		case chat.EventToolCall:
-			// Render the per-tool header. Body arrives later via EventToolResult.
+		case shell3.ToolCall:
+			// Render the per-tool header. Body arrives later via ToolResult.
 			flushReasoningPartial()
 			flushStreamFully()
-			app.Print(patchtui.SplitLines(renderToolCallHeader(ev, cfg) + "\n"))
+			app.Print(patchtui.SplitLines(renderToolCallHeader(ev) + "\n"))
 
-		case chat.EventToolResult:
+		case shell3.ToolResult:
 			flushReasoningPartial()
 			flushStreamFully()
 			app.Print(patchtui.SplitLines(renderToolResultBody(ev) + "\n\n"))
 
-		case chat.EventSystemReminder:
+		case shell3.SystemReminder:
 			flushReasoningPartial()
 			flushStreamFully()
 			app.Print(patchtui.SplitLines(patchtui.Dim + ev.Text + patchtui.Reset + "\n\n"))
 
-		case chat.EventRetry:
+		case shell3.Retry:
 			// A transient failure is being retried (pre-token, so buffers are
 			// empty). Render a dim notice and leave busy state untouched — the
 			// turn is still in progress.
 			app.Print(patchtui.SplitLines(patchtui.Dim + "⟳ " + ev.Text + patchtui.Reset + "\n"))
 
-		case chat.EventUsage:
-			publishEventUsage(ev.Usage)
+		case shell3.Usage:
+			publishUsage(ev)
 
-		case chat.EventTurnDone:
+		case shell3.Done:
 			flushReasoningPartial()
 			flushStreamFully()
-			publishEventUsage(ev.Usage)
+			publishUsage(ev)
 			app.SetBusy(false, nil)
 
-		case chat.EventError:
+		case shell3.Error:
 			flushReasoningPartial()
 			if streamBuf.Len() > 0 {
 				app.Print(patchtui.SplitLines(streamBuf.String()))
 				streamBuf.Reset()
 			}
-			msg := ev.Text
+			msg := ""
+			if ev.Err != nil {
+				msg = ev.Err.Error()
+			}
 			if strings.Contains(msg, "context canceled") {
 				app.PrintLine(patchtui.Dim + "[cancelled]" + patchtui.Reset)
 			} else {
 				app.PrintLine(patchtui.Red + "[error: " + msg + "]" + patchtui.Reset)
 			}
 			app.SetBusy(false, nil)
-
-		case chat.EventSessionStart, chat.EventSessionEnd, chat.EventUserMessage, chat.EventAssistantMessage:
-			// User input is shown via the input widget; full assistant message
-			// is already streamed via tokens. Session lifecycle events are sink-only.
 		}
 	}
 }
@@ -423,37 +415,32 @@ type slashTarget interface {
 	Quit()
 }
 
-// registerSlashCommands wires up the slash registry. Closures capture cfg,
-// sess, and lastUsage so handlers can read and mutate session state.
+// registerSlashCommands wires up the slash registry. Closures capture sess,
+// lastUsage, and workDir so handlers can read and mutate session state via the
+// public pkg/shell3 API.
 //
-// These handlers mutate the shared *chat.Config and read *lastUsage with NO
-// mutex; that is race-free only because of the busy-gate. See newRenderSink for
-// the full CONCURRENCY INVARIANT (this is the write side).
-func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session, lastUsage *llm.Usage, launchTurn func(llm.Message), applyAgent func(chat.ActiveAgent)) {
+// These handlers read *lastUsage with NO mutex; that is race-free only because
+// of the busy-gate. See newRenderSink for the full CONCURRENCY INVARIANT (this
+// is the read side).
+func registerSlashCommands(app slashTarget, sess session, lastUsage *usage, workDir string, launchTurn func(shell3.Message), applyAgent func()) {
 	dim := func(s string) { app.PrintLine(patchtui.Dim + s + patchtui.Reset) }
 
 	app.RegisterSlash(patchapp.SlashCommand{
 		Name: "clear", Help: "reset conversation context",
 		Handler: func(string) {
-			sess.SetMessages(nil)
-			// A new conversation starts now; re-stamp the system prompt so its
-			// timestamp reflects the new context rather than process-start time.
-			if cfg.RefreshPrompt != nil {
-				cfg.Personality.SystemPrompt = cfg.RefreshPrompt()
-			}
+			// Clear drops history and re-stamps the system prompt with a fresh
+			// timestamp inside the Session.
+			sess.Clear()
 			dim("[context cleared]")
 		},
 	})
 	app.RegisterSlash(patchapp.SlashCommand{
 		Name: "rollback", Help: "remove last turn from context",
 		Handler: func(string) {
-			msgs := sess.Messages()
-			pruned := chat.PruneLastTurn(msgs)
-			if len(pruned) == len(msgs) {
+			if !sess.Rollback() {
 				dim("[nothing to roll back]")
 				return
 			}
-			sess.SetMessages(pruned)
 			dim("[last turn removed from context]")
 		},
 	})
@@ -465,23 +452,21 @@ func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session
 				dim("[/prune usage: /prune <tool_call_id>]")
 				return
 			}
-			msgs := sess.Messages()
-			out := chat.PruneByID(id, "pruned by user", msgs)
-			sess.SetMessages(msgs)
+			out, _ := sess.Prune(id)
 			dim("[" + out + "]")
 		},
 	})
 	app.RegisterSlash(patchapp.SlashCommand{
 		Name: "usage", Help: "show token usage from last turn",
 		Handler: func(string) {
-			if lastUsage.TotalTokens == 0 {
+			if lastUsage.total == 0 {
 				dim("[no usage data yet]")
 				return
 			}
 			app.Print([]string{
-				fmt.Sprintf("prompt:     %d", lastUsage.PromptTokens),
-				fmt.Sprintf("completion: %d", lastUsage.CompletionTokens),
-				fmt.Sprintf("total:      %d", lastUsage.TotalTokens),
+				fmt.Sprintf("prompt:     %d", lastUsage.prompt),
+				fmt.Sprintf("completion: %d", lastUsage.completion),
+				fmt.Sprintf("total:      %d", lastUsage.total),
 			})
 		},
 	})
@@ -492,13 +477,14 @@ func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session
 			if w < 20 {
 				w = 80
 			}
+			snap := sess.Snapshot()
 
 			lines := []string{
 				"",
 				patchtui.Yellow + patchtui.Bold + "System prompt" + patchtui.Reset,
 				patchtui.Dim + strings.Repeat("─", min(40, max(0, w-2))) + patchtui.Reset,
 			}
-			prompt := strings.TrimSpace(cfg.Personality.SystemPrompt)
+			prompt := strings.TrimSpace(snap.SystemPrompt)
 			if prompt == "" {
 				lines = append(lines, patchtui.Dim+"(empty)"+patchtui.Reset)
 			} else {
@@ -506,10 +492,10 @@ func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session
 			}
 
 			lines = append(lines, "", patchtui.Cyan+patchtui.Bold+"Active tools"+patchtui.Reset)
-			if len(cfg.Personality.Tools) == 0 {
+			if len(snap.Tools) == 0 {
 				lines = append(lines, "  "+patchtui.Dim+"(none)"+patchtui.Reset)
 			} else {
-				for _, t := range cfg.Personality.Tools {
+				for _, t := range snap.Tools {
 					lines = append(lines,
 						"  "+patchtui.Green+patchtui.Bold+t.Name+patchtui.Reset,
 						"    "+patchtui.Dim+t.Description+patchtui.Reset,
@@ -528,9 +514,11 @@ func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session
 				dim("[/print usage: /print <tool_call_id>]")
 				return
 			}
-			for _, m := range sess.Messages() {
-				if m.Role == llm.RoleTool && m.ToolCallID == id {
-					body := strings.TrimRight(stripToolIDPrefix(m.Content), "\n")
+			// History returns Content already prefix-stripped, so /print can match
+			// on ToolCallID and show the raw output directly.
+			for _, m := range sess.History() {
+				if m.ToolCallID == id && m.Role == "tool" {
+					body := strings.TrimRight(m.Content, "\n")
 					app.Print(patchtui.SplitLines(dimLines(body) + "\n\n"))
 					return
 				}
@@ -542,30 +530,28 @@ func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session
 		Name: "parameters",
 		Help: "/parameters [name value] — list or set tunable params (reasoning_effort, max_tokens, ...)",
 		Handler: func(args string) {
-			describer, _ := cfg.LLM.(llm.ParamDescriber)
-			setter, _ := cfg.LLM.(llm.ParamSetter)
-
 			args = strings.TrimSpace(args)
 			if args == "" {
-				if describer == nil {
+				params := sess.Snapshot().Params
+				if len(params) == 0 {
 					dim("[current provider exposes no parameters]")
 					return
 				}
 				lines := []string{patchtui.Bold + "parameters:" + patchtui.Reset}
-				for _, s := range describer.ParamSpecs() {
-					cur := currentParamValue(cfg.Params, s.Name)
+				for _, p := range params {
+					cur := p.Value
 					if cur == "" {
 						cur = "—"
 					}
 					enum := ""
-					if len(s.Enum) > 0 {
-						enum = " [" + strings.Join(s.Enum, "|") + "]"
+					if len(p.Enum) > 0 {
+						enum = " [" + strings.Join(p.Enum, "|") + "]"
 					}
-					def := s.Default
+					def := p.Default
 					if def == "" {
 						def = "provider"
 					}
-					lines = append(lines, fmt.Sprintf("  %-22s = %-8s%s  (default %s)", s.Name, cur, enum, def))
+					lines = append(lines, fmt.Sprintf("  %-22s = %-8s%s  (default %s)", p.Name, cur, enum, def))
 				}
 				lines = append(lines, "", patchtui.Dim+"usage: /parameters <name> <value>"+patchtui.Reset)
 				app.Print(lines)
@@ -577,54 +563,31 @@ func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session
 				return
 			}
 			name, value := parts[0], parts[1]
-			if describer != nil {
-				var spec *llm.ParamSpec
-				for _, s := range describer.ParamSpecs() {
-					if s.Name == name {
-						s := s
-						spec = &s
-						break
-					}
-				}
-				if spec == nil {
-					dim(fmt.Sprintf("[unknown parameter %q for this provider]", name))
-					return
-				}
-				if err := spec.Validate(value); err != nil {
-					dim(fmt.Sprintf("[%v]", err))
-					return
-				}
-			}
-			if err := cfg.Params.SetByName(name, value); err != nil {
+			if err := sess.SetParam(name, value); err != nil {
 				dim(fmt.Sprintf("[%v]", err))
 				return
 			}
-			if setter != nil {
-				setter.SetParams(cfg.Params)
-			}
-			if name == "reasoning_effort" {
-				prov, model := chat.SplitStatus(cfg.StatusLine)
-				if prov != "" && model != "" {
-					cfg.StatusLine = chat.FormatStatus(prov, model, cfg.Params.ReasoningEffort)
-					app.SetStatus(cfg.StatusLine)
-				}
-			}
+			// SetParam re-derives the status line for reasoning_effort; refresh
+			// the bar from the fresh Snapshot regardless (cheap and correct).
+			app.SetStatus(sess.Snapshot().StatusLine)
 			dim(fmt.Sprintf("[%s = %s]", name, value))
 		},
 	})
 	app.RegisterSlash(patchapp.SlashCommand{
 		Name: "agent", Help: "/agent [name] — list agents or switch the active agent",
 		Handler: func(args string) {
-			if cfg.SwitchAgent == nil || len(cfg.AgentNames) == 0 {
+			names := sess.AgentNames()
+			if len(names) == 0 {
 				dim("[no agents configured]")
 				return
 			}
 			name := strings.TrimSpace(args)
 			if name == "" {
+				active := sess.ActiveAgent()
 				lines := []string{patchtui.Bold + "agents:" + patchtui.Reset}
-				for _, n := range cfg.AgentNames {
+				for _, n := range names {
 					marker := ""
-					if n == cfg.ModeLabel {
+					if n == active {
 						marker = patchtui.Dim + "  (active)" + patchtui.Reset
 					}
 					lines = append(lines, "  "+n+marker)
@@ -633,18 +596,18 @@ func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session
 				app.Print(lines)
 				return
 			}
-			rt, err := cfg.SwitchAgent(name)
-			if err != nil {
+			if err := sess.SwitchAgent(name); err != nil {
 				dim(fmt.Sprintf("[%v]", err))
 				return
 			}
-			applyAgent(rt)
-			dim(fmt.Sprintf("[agent: %s]", rt.ModeLabel))
+			applyAgent()
+			dim(fmt.Sprintf("[agent: %s]", sess.ActiveAgent()))
 		},
 	})
 	app.RegisterSlash(patchapp.SlashCommand{
 		Name: "info", Help: "show session details: agent, project, skills, tools",
 		Handler: func(string) {
+			snap := sess.Snapshot()
 			lines := []string{""}
 			add := func(label, value string) {
 				if value != "" {
@@ -652,15 +615,15 @@ func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session
 					lines = append(lines, "    "+value)
 				}
 			}
-			add("agent", cfg.ModeLabel)
-			add("project", cfg.ProjectRef)
-			if len(cfg.ActiveSkills) > 0 {
+			add("agent", snap.Agent)
+			add("project", snap.ProjectRef)
+			if len(snap.Skills) > 0 {
 				lines = append(lines, patchtui.Bold+"skills"+patchtui.Reset)
-				lines = append(lines, "    "+strings.Join(cfg.ActiveSkills, ", "))
+				lines = append(lines, "    "+strings.Join(snap.Skills, ", "))
 			}
-			if len(cfg.Personality.Tools) > 0 {
+			if len(snap.Tools) > 0 {
 				lines = append(lines, patchtui.Bold+"tools"+patchtui.Reset)
-				lines = append(lines, "    "+strings.Join(toolNames(cfg.Personality.Tools), ", "))
+				lines = append(lines, "    "+strings.Join(toolNames(snap.Tools), ", "))
 			}
 			lines = append(lines, "")
 			app.Print(lines)
@@ -673,7 +636,7 @@ func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session
 	app.RegisterSlash(patchapp.SlashCommand{
 		Name: "image", Help: "/image <path> [prompt] — attach image to next turn",
 		Handler: func(args string) {
-			msg, err := chat.BuildImageMessage(args, cfg.WorkDir)
+			msg, err := shell3.ImageMessage(args, workDir)
 			if err != nil {
 				dim(fmt.Sprintf("[image: %v]", err))
 				return
@@ -683,33 +646,10 @@ func registerSlashCommands(app slashTarget, cfg *chat.Config, sess *chat.Session
 	})
 }
 
-func toolNames(tools []llm.ToolDefinition) []string {
+func toolNames(tools []shell3.ToolInfo) []string {
 	names := make([]string, len(tools))
 	for i, t := range tools {
 		names[i] = t.Name
 	}
 	return names
-}
-
-func currentParamValue(p llm.RequestParams, name string) string {
-	switch name {
-	case "reasoning_effort":
-		return p.ReasoningEffort
-	case "parallel_tool_calls":
-		if p.ParallelToolCalls == nil {
-			return ""
-		}
-		return fmt.Sprintf("%t", *p.ParallelToolCalls)
-	case "temperature":
-		if p.Temperature == nil {
-			return ""
-		}
-		return fmt.Sprintf("%g", *p.Temperature)
-	case "max_tokens":
-		if p.MaxTokens == 0 {
-			return ""
-		}
-		return fmt.Sprintf("%d", p.MaxTokens)
-	}
-	return ""
 }
