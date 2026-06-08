@@ -99,6 +99,34 @@ func TestManagerDispatchLazySessionReused(t *testing.T) {
 	}
 }
 
+// TestManagerRealSubprocess exercises the full path: Manager -> real *Client ->
+// real stdio subprocess (the re-exec fake server), with no injected fake.
+func TestManagerRealSubprocess(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager([]Spec{fakeSpec()}, dir)
+	defer m.Shutdown()
+
+	defs, err := m.ToolDefinitionsFor(context.Background(), []string{"fake"})
+	if err != nil {
+		t.Fatalf("ToolDefinitionsFor: %v", err)
+	}
+	if len(defs) != 1 || defs[0].Name != "fake__echo" {
+		t.Fatalf("expected fake__echo over real subprocess, got %+v", defs)
+	}
+	// Cache file must have been written by the discovery probe.
+	if _, err := stat(filepath.Join(dir, "fake.tools.json")); err != nil {
+		t.Fatalf("cache not written: %v", err)
+	}
+
+	out, err := m.Dispatch(context.Background(), "fake__echo", `{"msg":"world"}`)
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if out != "echo:world" {
+		t.Fatalf("unexpected dispatch result: %q", out)
+	}
+}
+
 func TestManagerAllowlistFilters(t *testing.T) {
 	fc := &fakeClient{}
 	m := NewManager([]Spec{{Name: "fake", Command: "x", Tools: []string{"nope"}}}, t.TempDir())
