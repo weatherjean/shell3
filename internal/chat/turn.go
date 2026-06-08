@@ -274,6 +274,8 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 				} else {
 					out = "error: interactive TTY not available"
 				}
+			} else if cfg.MCPToolNames[tc.Name] {
+				out = dispatchMCPTool(ctx, cfg.MCPTool, tc.Name, tc.RawArgs)
 			} else if cfg.CustomToolNames[tc.Name] {
 				out = dispatchCustomTool(ctx, cfg.CustomTool, tc.Name, tc.RawArgs)
 			} else if handler, ok := cfg.Handlers[tc.Name]; ok {

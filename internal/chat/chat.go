@@ -32,9 +32,11 @@ type ActiveAgent struct {
 	ActiveTools  []string
 	// CustomToolNames is the set of tool names routed to the custom-tool dispatcher.
 	CustomToolNames map[string]bool
-	LLM             LLMClient
-	Params          llm.RequestParams
-	ModelID         string
+	// MCPToolNames is the set of prefixed (server__tool) names routed to MCPTool.
+	MCPToolNames map[string]bool
+	LLM          LLMClient
+	Params       llm.RequestParams
+	ModelID      string
 	ContextWindow   int
 }
 
@@ -95,6 +97,11 @@ type Config struct {
 	// CustomToolNames is the set of tool names routed to CustomTool.
 	// Entries must match the names registered in the LLM tool schema.
 	CustomToolNames map[string]bool
+	// MCPTool dispatches a prefixed MCP tool call (server__tool) by name.
+	// Nil means no MCP servers are wired.
+	MCPTool func(ctx context.Context, name, argsJSON string) (string, error)
+	// MCPToolNames is the set of prefixed tool names routed to MCPTool.
+	MCPToolNames map[string]bool
 	// ToolGuard runs the on_tool_call guard chain. Nil = allow all.
 	// Return values follow the guardAllow/guardBlock/guardCancel constants
 	// defined in this package (0/1/2).
@@ -132,6 +139,7 @@ func (c *Config) ApplyActiveAgent(rt ActiveAgent) {
 	c.ActiveSkills = rt.ActiveSkills
 	c.ActiveTools = rt.ActiveTools
 	c.CustomToolNames = rt.CustomToolNames
+	c.MCPToolNames = rt.MCPToolNames
 	c.ContextWindow = rt.ContextWindow
 	c.StatusLine = AgentStatusLine(rt)
 }
@@ -172,6 +180,8 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler, shellInteractive
 		Headless:         cfg.Headless,
 		CustomTool:       cfg.CustomTool,
 		CustomToolNames:  cfg.CustomToolNames,
+		MCPTool:          cfg.MCPTool,
+		MCPToolNames:     cfg.MCPToolNames,
 		ToolGuard:        cfg.ToolGuard,
 		ShellInteractive: shellInteractive,
 	}
