@@ -212,6 +212,13 @@ passes `Interactive: !headless` and `OutPath` into the `Spec`. `pkg/shell3` maps
 4. **Verify** — full build + `go test ./...` + `go vet`; fix fallout; confirm the
    import-boundary success criterion with `go list`/`grep`.
 
+## Accepted behavior change
+
+- **One-shot CLI persistence:** routing `shell3 "prompt"` through `shell3.Run` →
+  `Start` opens a store session, so one-shot runs now persist history (the old
+  store-less `RunOnce` did not). Accepted as an intentional improvement — one-shots
+  get history like any embedder, and no ephemeral knob is added.
+
 ## Out of scope / YAGNI
 
 - No `example_test.go` in pkg — the TUI *is* the example.
