@@ -3,6 +3,7 @@ package chat
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
@@ -52,55 +53,91 @@ func BuildImageMessage(args, workDir string) (llm.Message, error) {
 		prompt = "Describe this image."
 	}
 
+	part, _, _, err := loadImagePart(path, workDir)
+	if err != nil {
+		return llm.Message{}, err
+	}
+
+	return llm.Message{
+		Role: llm.RoleUser,
+		ContentParts: []llm.ContentPart{
+			part,
+			{Type: llm.ContentPartTypeText, Text: prompt},
+		},
+	}, nil
+}
+
+// loadImagePart resolves path against workDir, validates type and size, decodes,
+// downscales so the longest side is ≤ maxImageSide, JPEG-encodes, and returns an
+// image_url ContentPart whose URL is a base64 data URI, plus the source image's
+// pixel dimensions.
+func loadImagePart(path, workDir string) (llm.ContentPart, int, int, error) {
 	if !filepath.IsAbs(path) && workDir != "" {
 		path = filepath.Join(workDir, path)
 	}
 
 	ext := strings.ToLower(filepath.Ext(path))
 	if !supportedImageExts[ext] {
-		return llm.Message{}, fmt.Errorf("unsupported file type %q — use jpg, png, gif, or webp", ext)
+		return llm.ContentPart{}, 0, 0, fmt.Errorf("unsupported file type %q — use jpg, png, gif, or webp", ext)
 	}
 
 	info, err := os.Stat(path)
 	if err != nil {
-		return llm.Message{}, fmt.Errorf(`cannot read "%s": %w`, path, err)
+		return llm.ContentPart{}, 0, 0, fmt.Errorf(`cannot read "%s": %w`, path, err)
 	}
 	if info.Size() > maxImageBytes {
-		return llm.Message{}, fmt.Errorf("image too large (%d MB, max 10 MB)", info.Size()>>20)
+		return llm.ContentPart{}, 0, 0, fmt.Errorf("image too large (%d MB, max 10 MB)", info.Size()>>20)
 	}
 
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return llm.Message{}, fmt.Errorf(`cannot read "%s": %w`, path, err)
+		return llm.ContentPart{}, 0, 0, fmt.Errorf(`cannot read "%s": %w`, path, err)
 	}
 
-	encoded, err := resizeAndEncodeJPEG(raw, maxImageSide, jpegQuality)
+	encoded, w, h, err := resizeAndEncodeJPEG(raw, maxImageSide, jpegQuality)
 	if err != nil {
-		return llm.Message{}, fmt.Errorf("image encode: %w", err)
+		return llm.ContentPart{}, 0, 0, fmt.Errorf("image encode: %w", err)
 	}
 
-	dataURI := "data:image/jpeg;base64," + encoded
+	return llm.ContentPart{
+		Type:     llm.ContentPartTypeImageURL,
+		ImageURL: "data:image/jpeg;base64," + encoded,
+	}, w, h, nil
+}
 
-	return llm.Message{
-		Role: llm.RoleUser,
-		ContentParts: []llm.ContentPart{
-			{Type: llm.ContentPartTypeImageURL, ImageURL: dataURI},
-			{Type: llm.ContentPartTypeText, Text: prompt},
-		},
-	}, nil
+// handleReadImage parses {"path": "..."} tool args, loads the image via
+// loadImagePart, and returns the tool-result text plus the image ContentPart.
+// On any failure it returns an "error: ..." string and the zero ContentPart so
+// the caller queues no image.
+func handleReadImage(rawArgs, workDir string) (string, llm.ContentPart) {
+	var args struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
+		return fmt.Sprintf("error: bad arguments: %v", err), llm.ContentPart{}
+	}
+	if strings.TrimSpace(args.Path) == "" {
+		return "error: path is required", llm.ContentPart{}
+	}
+	part, w, h, err := loadImagePart(args.Path, workDir)
+	if err != nil {
+		return "error: " + err.Error(), llm.ContentPart{}
+	}
+	return fmt.Sprintf("Loaded image %q (%dx%d). The image is attached as a user message right after the tool results so you can view it on the next step.", args.Path, w, h), part
 }
 
 // resizeAndEncodeJPEG decodes raw image bytes, shrinks so longest side ≤
-// maxSide (no-op if already within bounds), JPEG-encodes at the given
-// quality, and returns the base64 result.
-func resizeAndEncodeJPEG(raw []byte, maxSide, quality int) (string, error) {
+// maxSide (no-op if already within bounds), JPEG-encodes at the given quality,
+// and returns the base64 result plus the source image's pixel width and height.
+func resizeAndEncodeJPEG(raw []byte, maxSide, quality int) (string, int, int, error) {
 	img, _, err := image.Decode(bytes.NewReader(raw))
 	if err != nil {
-		return "", fmt.Errorf("decode: %w", err)
+		return "", 0, 0, fmt.Errorf("decode: %w", err)
 	}
 
 	b := img.Bounds()
-	w, h := b.Dx(), b.Dy()
+	srcW, srcH := b.Dx(), b.Dy()
+	w, h := srcW, srcH
 	if w > maxSide || h > maxSide {
 		if w >= h {
 			h = h * maxSide / w
@@ -115,10 +152,10 @@ func resizeAndEncodeJPEG(raw []byte, maxSide, quality int) (string, error) {
 	// Pre-allocate: JPEG at q85 is typically 0.1–0.5 bits/pixel.
 	buf := bytes.NewBuffer(make([]byte, 0, len(raw)/4))
 	if err := jpeg.Encode(buf, img, &jpeg.Options{Quality: quality}); err != nil {
-		return "", fmt.Errorf("jpeg encode: %w", err)
+		return "", 0, 0, fmt.Errorf("jpeg encode: %w", err)
 	}
 
-	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
+	return base64.StdEncoding.EncodeToString(buf.Bytes()), srcW, srcH, nil
 }
 
 // resizeNearest scales src to newW×newH using nearest-neighbour sampling.
