@@ -108,6 +108,9 @@ func TestEnsureProject(t *testing.T) {
 	if !strings.Contains(string(gi), ".ref") {
 		t.Fatal(".gitignore missing .ref entry")
 	}
+	if !strings.Contains(string(gi), "proxy-*.log") {
+		t.Fatalf(".gitignore missing proxy-*.log entry:\n%s", gi)
+	}
 }
 
 func TestEnsureProjectIdempotent(t *testing.T) {

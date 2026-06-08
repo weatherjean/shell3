@@ -30,6 +30,28 @@ shell3.agent({ name="a", model="main", prompt="hi", tools={} })
 	}
 }
 
+func TestLoadModelRunProxy(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "shell3.lua", `
+shell3.model("proxied", {
+  base_url = "http://localhost:8787/v1",
+  api_key = "sk-test",
+  model = "m-1",
+  run_proxy = "litellm --port 8787",
+})
+shell3.agent({ name="a", model="proxied", prompt="hi", tools={} })
+`)
+	c, err := Load(dir+"/shell3.lua", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	m, ok := c.Model("proxied")
+	if !ok || m.RunProxy != "litellm --port 8787" {
+		t.Fatalf("run_proxy not captured: %+v", m)
+	}
+}
+
 func TestLoadModelDuplicateName(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "shell3.lua", `

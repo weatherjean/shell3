@@ -6,6 +6,8 @@ AI-powered shell assistant.
 
 Works with any **OpenAI-compatible API endpoint** (OpenAI, Ollama, Groq, LM Studio, OpenRouter, …). Codex (ChatGPT subscription via OAuth) is supported via the third-party [openai-oauth](https://github.com/EvanZhouDev/openai-oauth) proxy, which exposes an OpenAI-compatible endpoint.
 
+If a model needs a local proxy or translation shim in front of its `base_url`, set `run_proxy` on the model in `shell3.lua`. shell3 spawns that command (detached, fire-and-forget) the first time an agent uses the model, so you don't have to start it by hand — e.g. `run_proxy = "npx openai-oauth"`. If the proxy is already running, the spawn simply fails to bind and is ignored; the first request decides reality. Output goes to `./.shell3/proxy-<model>.log`.
+
 shell3 is configured by a single Lua file, `shell3.lua`. It's discovered in this order: the `--config/-c` flag, then `./shell3.lua`, then `~/.shell3/shell3.lua`. Secrets (provider API keys, tool tokens) live in a `.env` file beside the config and are read from Lua via `shell3.env.secret("KEY")`.
 
 ```sh

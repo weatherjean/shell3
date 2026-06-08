@@ -18,6 +18,7 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/luacfg"
 	"github.com/weatherjean/shell3/internal/mcp"
+	"github.com/weatherjean/shell3/internal/modelproxy"
 	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/store"
@@ -54,6 +55,7 @@ type builder struct {
 	lc     *luacfg.LoadedConfig
 	st     *store.Store
 	mcpMgr *mcp.Manager
+	proxy  *modelproxy.Spawner
 
 	closers []func() // LIFO teardown stack
 }
@@ -67,6 +69,7 @@ func Build(opts Options) (chat.Config, func(), error) {
 		return chat.Config{}, noop, err // nothing acquired yet
 	}
 	b.openLog() // non-fatal; may push the log closer
+	b.proxy = modelproxy.New(b.l.Root, b.log)
 	if err := b.loadConfig(); err != nil {
 		b.closeAll()
 		return chat.Config{}, noop, err
@@ -197,6 +200,7 @@ func (b *builder) buildActiveRuntime() (chat.ActiveAgent, error) {
 	if !ok {
 		return chat.ActiveAgent{}, fmt.Errorf("agent %q references unknown model %q", a.Name, a.ModelName)
 	}
+	b.proxy.Ensure(md.Name, md.RunProxy)
 	client, rp := buildClient(md)
 
 	customDefs := b.lc.CustomToolsFor(a.CustomTools)

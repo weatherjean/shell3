@@ -107,6 +107,33 @@ func TestRotateKeepsMaxArchives(t *testing.T) {
 	}
 }
 
+func TestOpenFileRotatesAndAppends(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "proxy.log")
+
+	// Existing oversized log must be rotated to .1 on open.
+	if err := os.WriteFile(path, []byte(strings.Repeat("x", 20)), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := OpenFile(path, 10, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("fresh output\n"); err != nil {
+		t.Fatalf("returned file not writable: %v", err)
+	}
+	_ = f.Close()
+
+	if _, err := os.Stat(path + ".1"); err != nil {
+		t.Fatalf("expected rotated archive at %s.1: %v", path, err)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "fresh output") {
+		t.Errorf("new file missing appended content:\n%s", string(data))
+	}
+}
+
 func TestOddFieldMarkedMissing(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.log")

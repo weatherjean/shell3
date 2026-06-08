@@ -26,6 +26,7 @@ func registerShell3(c *LoadedConfig) {
 var modelKeys = map[string]bool{
 	"base_url": true, "api_key": true, "model": true, "context_window": true,
 	"reasoning": true, "max_tokens": true, "temperature": true, "extra": true,
+	"run_proxy": true,
 }
 
 func (c *LoadedConfig) luaModel(L *lua.LState) int {
@@ -39,6 +40,7 @@ func (c *LoadedConfig) luaModel(L *lua.LState) int {
 		BaseURL:       optStr(opts, "base_url"),
 		APIKey:        optStr(opts, "api_key"),
 		ModelID:       optStr(opts, "model"),
+		RunProxy:      optStr(opts, "run_proxy"),
 		ContextWindow: optInt(opts, "context_window"),
 		Reasoning:     optStr(opts, "reasoning"),
 		MaxTokens:     optInt(opts, "max_tokens"),

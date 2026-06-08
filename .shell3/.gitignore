@@ -4,3 +4,4 @@ last_*.json
 last_*.jsonl
 secrets.shell3
 bg.json
+proxy-*.log

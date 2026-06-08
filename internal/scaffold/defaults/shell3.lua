@@ -13,6 +13,12 @@ shell3.model("main", {
   model          = "o4-mini",
   context_window = 128000,
   reasoning      = "medium",
+  -- run_proxy: optional shell command spawned (detached, fire-and-forget) the
+  -- first time an agent uses this model. Use it to bring up a local proxy or
+  -- translation shim in front of base_url. Spawning is best-effort: if a proxy
+  -- is already listening the command just fails to bind, and the first request
+  -- decides reality. Output goes to ./.shell3/proxy-main.log.
+  -- run_proxy   = "litellm --config ./litellm.yaml --port 8787",
   extra = {
     reasoning_summary    = "auto",
     verbosity            = "medium",

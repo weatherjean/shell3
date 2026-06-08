@@ -83,15 +83,27 @@ func (l *fileLogger) write(level, msg string, err error, fields []any, mirror bo
 // maxBytes before opening. Up to maxArchives rotated files are kept.
 // The caller is responsible for calling Close on the returned closer when done.
 func Open(path string, maxBytes int64, maxArchives int) (Logger, io.Closer, error) {
-	if err := rotate(path, maxBytes, maxArchives); err != nil {
-		return Noop{}, io.NopCloser(nil), fmt.Errorf("applog: rotate: %w", err)
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := OpenFile(path, maxBytes, maxArchives)
 	if err != nil {
-		return Noop{}, io.NopCloser(nil), fmt.Errorf("applog: open %s: %w", path, err)
+		return Noop{}, io.NopCloser(nil), err
 	}
 	lg := &fileLogger{w: f, stderr: os.Stderr}
 	return lg, f, nil
+}
+
+// OpenFile rotates path if it exceeds maxBytes (keeping up to maxArchives
+// archives), then opens it for append and returns the file. Unlike Open it
+// returns the raw *os.File so callers can use it as a subprocess's stdout/stderr
+// (see internal/modelproxy). The caller owns closing the file.
+func OpenFile(path string, maxBytes int64, maxArchives int) (*os.File, error) {
+	if err := rotate(path, maxBytes, maxArchives); err != nil {
+		return nil, fmt.Errorf("applog: rotate: %w", err)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("applog: open %s: %w", path, err)
+	}
+	return f, nil
 }
 
 // rotate renames path → path.1 → path.2 … up to maxArchives if path

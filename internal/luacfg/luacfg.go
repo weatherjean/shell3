@@ -17,6 +17,10 @@ type Model struct {
 	MaxTokens                      int
 	Temperature                    *float64
 	Extra                          map[string]any
+	// RunProxy, if set, is a shell command spawned (detached, fire-and-forget)
+	// the first time an agent activates this model — used to bring up a local
+	// proxy/translation shim in front of BaseURL. See internal/modelproxy.
+	RunProxy string
 }
 
 type ToolGates struct {

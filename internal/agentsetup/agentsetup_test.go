@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/weatherjean/shell3/internal/agentsetup"
 )
@@ -129,6 +130,46 @@ func TestBuild_Agent_UnknownErrors(t *testing.T) {
 	if !strings.Contains(err.Error(), "nope") {
 		t.Errorf("error should name the unknown agent, got: %v", err)
 	}
+}
+
+func TestBuild_RunProxy_SpawnsOnActivation(t *testing.T) {
+	tmp := t.TempDir()
+	marker := filepath.Join(tmp, "proxy-started")
+	lua := `
+shell3.model("main", {
+  base_url = "http://localhost:8787/v1",
+  api_key = shell3.env.secret("TEST_KEY"),
+  model = "test-model",
+  run_proxy = "touch ` + marker + `",
+})
+shell3.agent({ name = "tester", model = "main", prompt = "hi", tools = {} })
+`
+	if err := os.WriteFile(filepath.Join(tmp, "shell3.lua"), []byte(lua), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, ".env"), []byte("TEST_KEY=sk-test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, cleanup, err := agentsetup.Build(agentsetup.Options{
+		ConfigPath: filepath.Join(tmp, "shell3.lua"),
+		CWD:        tmp,
+		HomeDir:    t.TempDir(),
+		Headless:   true,
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer cleanup()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(marker); err == nil {
+			return // proxy command ran
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("run_proxy command was not spawned on model activation")
 }
 
 // writeMinimalConfig writes a shell3.lua + .env that Build can load: one model

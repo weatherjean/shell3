@@ -61,7 +61,7 @@ func ensureGitignore(l paths.Local) error {
 
 	// Each of these must appear as its own whole line; substring matches
 	// (e.g. "*.reference" or a "# don't commit bg.json" comment) do not count.
-	missing := missingLines(string(b), ".ref", "bg.json")
+	missing := missingLines(string(b), ".ref", "bg.json", "proxy-*.log")
 	if len(missing) == 0 {
 		return nil
 	}
