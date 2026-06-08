@@ -71,8 +71,6 @@ type Config struct {
 	// ContextWindow is the active model's context window in tokens, used by
 	// the reminder tracker to emit context-usage warnings. Zero means unknown.
 	ContextWindow int
-	// Docs is the rendered shell3_docs payload returned by the docs tool.
-	Docs string
 	// Params are provider-level request parameters (temperature, top_p,
 	// reasoning effort, etc.).
 	Params llm.RequestParams
@@ -146,7 +144,6 @@ func NewHandlers(cfg Config) map[string]ToolHandler {
 		BashBgHandler{},
 		EditHandler{},
 		PruneHandler{},
-		DocsHandler{docs: cfg.Docs},
 		StoreHandler{toolName: "history_get"},
 		StoreHandler{toolName: "history_search"},
 	}

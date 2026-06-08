@@ -84,7 +84,7 @@ var agentKeys = map[string]bool{
 
 var toolGateKeys = map[string]bool{
 	"bash": true, "bash_bg": true, "shell_interactive": true, "edit": true,
-	"history": true, "docs": true, "custom": true, "skill": true,
+	"history": true, "custom": true, "skill": true,
 	"prune": true, "compact": true,
 }
 
@@ -141,7 +141,6 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 			ShellInteractive: optBool(tt, "shell_interactive"),
 			Edit:             optBool(tt, "edit"),
 			History:          optBool(tt, "history"),
-			Docs:             optBool(tt, "docs"),
 			Prune:            optBool(tt, "prune"),
 			Compact:          optBool(tt, "compact"),
 		}

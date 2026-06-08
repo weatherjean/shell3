@@ -12,12 +12,11 @@ Secrets and credentials (provider API keys, tool tokens) live in a plain `.env` 
 ## Project Layout
 
 ```
-cmd/shell3/            entry point + subcommands (doctor, docs)
+cmd/shell3/            entry point (run command)
 internal/agentsetup/   shared config assembly (Build → chat.Config) used by every front-end
 internal/luacfg/       Lua config loader (shell3.lua → models/agents/tools/skills/guards) + system-prompt assembly
 internal/bootstrap/    first-run global + project setup
 internal/scaffold/     embedded starter shell3.lua + .env template
-internal/docs/         embedded shell3.md (served by `docs` cmd + shell3_docs tool)
 internal/adapter/openai/  OpenAI-compatible LLM adapter
 internal/paths/        global + local path resolution
 internal/ref/          project UUID (.shell3/.ref)

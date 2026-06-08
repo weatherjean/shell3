@@ -48,9 +48,6 @@ func main() {
 		defaultHelp(cmd, args)
 	})
 
-	root.AddCommand(newDoctorCommand())
-	root.AddCommand(newDocsCommand())
-
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

@@ -4,7 +4,7 @@ AI-powered shell assistant.
 
 ## Getting started
 
-Works with any **OpenAI-compatible API endpoint** (OpenAI, Ollama, Groq, LM Studio, OpenRouter, …). Codex (ChatGPT subscription via OAuth) is supported via the third-party [openai-oauth](https://github.com/EvanZhouDev/openai-oauth) proxy, which exposes an OpenAI-compatible endpoint — see `shell3 docs`.
+Works with any **OpenAI-compatible API endpoint** (OpenAI, Ollama, Groq, LM Studio, OpenRouter, …). Codex (ChatGPT subscription via OAuth) is supported via the third-party [openai-oauth](https://github.com/EvanZhouDev/openai-oauth) proxy, which exposes an OpenAI-compatible endpoint.
 
 shell3 is configured by a single Lua file, `shell3.lua`. It's discovered in this order: the `--config/-c` flag, then `./shell3.lua`, then `~/.shell3/shell3.lua`. Secrets (provider API keys, tool tokens) live in a `.env` file beside the config and are read from Lua via `shell3.env.secret("KEY")`.
 
@@ -23,13 +23,7 @@ shell3             # start a session
 
 ## Docs
 
-Full documentation is embedded in the binary:
-
-```sh
-shell3 docs
-```
-
-Or read the source: [internal/docs/shell3.md](internal/docs/shell3.md). The canonical example config is [internal/scaffold/defaults/shell3.lua](internal/scaffold/defaults/shell3.lua).
+The canonical, fully-commented example config is [internal/scaffold/defaults/shell3.lua](internal/scaffold/defaults/shell3.lua).
 
 Secrets live in a plain `.env` file beside your `shell3.lua` (e.g. `~/.shell3/.env`), referenced from the config via `shell3.env.secret("KEY")`. There's no encryption — treat the file like any `~/.*rc` with credentials. Keep it out of version control.
 
@@ -53,13 +47,14 @@ argument (or on stdin) and stream a structured JSONL audit log with `--out`:
 shell3 "summarize the diff" --out run.jsonl
 ```
 
-See the **Headless mode** section of `shell3 docs` for the event stream,
-environment variables, and the subagent-spawning pattern.
+The `--out` JSONL stream carries every turn event (assistant tokens, tool calls
+and results, usage, and the terminal status) for downstream tooling.
 
 ## License
 
 [MIT](LICENSE) © 2026 WeatherJean.
 
-Portions of `internal/edittool` are a Go port of opencode's str-replace edit
-tool (which in turn cites cline and gemini-cli); see the package doc comment in
-[internal/edittool/replace.go](internal/edittool/replace.go) for attributions.
+Portions of `internal/edittool` are a Go port of the str-replace edit tool from
+[opencode](https://github.com/sst/opencode), used under its license; see the
+package doc comment in [internal/edittool/replace.go](internal/edittool/replace.go)
+for details.

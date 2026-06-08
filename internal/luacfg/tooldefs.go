@@ -45,9 +45,6 @@ func ToolDefs(g ToolGates, custom []CustomTool, hasSkills bool) []llm.ToolDefini
 	if g.History {
 		defs = append(defs, historyGetTool, historySearchTool)
 	}
-	if g.Docs {
-		defs = append(defs, docsTool)
-	}
 	for _, ct := range custom {
 		defs = append(defs, llm.ToolDefinition{
 			Name:        ct.Name,
@@ -68,12 +65,6 @@ func (c *LoadedConfig) CustomToolsFor(names []string) []CustomTool {
 		}
 	}
 	return out
-}
-
-var docsTool = llm.ToolDefinition{
-	Name:        "shell3_docs",
-	Description: "Return shell3's own documentation. Use when asked what shell3 is or how to configure commands, personas, tools, skills, hooks, providers, secrets, or storage.",
-	Parameters:  map[string]any{"type": "object", "properties": map[string]any{}},
 }
 
 var pruneToolResultTool = llm.ToolDefinition{

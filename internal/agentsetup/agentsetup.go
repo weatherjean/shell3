@@ -15,7 +15,6 @@ import (
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/bootstrap"
 	"github.com/weatherjean/shell3/internal/chat"
-	"github.com/weatherjean/shell3/internal/docs"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/luacfg"
 	"github.com/weatherjean/shell3/internal/paths"
@@ -250,7 +249,6 @@ func (b *builder) assemble() (chat.Config, error) {
 		RefreshPrompt: buildPrompt,
 		WorkDir:       b.opts.CWD,
 		ProjectRef:    b.uuid,
-		Docs:          docs.Content,
 		CustomTool:    b.lc.CallTool,
 		Log:           b.log,
 		OutPath:       b.opts.OutPath,
