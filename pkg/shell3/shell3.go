@@ -11,10 +11,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/chat"
+	"github.com/weatherjean/shell3/internal/llm"
 )
 
 // Spec configures Run / Start. Prompt is used by Run only.
@@ -23,30 +25,49 @@ type Spec struct {
 	ConfigPath string // "" → ./shell3.lua then ~/.shell3/shell3.lua
 	WorkDir    string // "" → os.Getwd()
 	Agent      string // "" → first declared agent; unknown name fails Start/Run
+	// Interactive flips the underlying build out of headless mode. The zero
+	// value (false) preserves the historical headless behavior: the
+	// shell_interactive tool is stripped from the schema and a system-reminder
+	// explains the constraint. Set true for a TUI-style front-end that can
+	// release the terminal for an interactive shell (see ShellInteractive).
+	Interactive bool
+	// OutPath, when non-empty, opens a JSONL audit log at this path. The
+	// Session owns the sink: it writes a "start" line on Start, every internal
+	// chat.Event (lossless, before public translation) during each turn, and an
+	// "end" line on Close. Independent of the public Event stream.
+	OutPath string
+	// ShellInteractive runs an interactive shell command with TTY access and
+	// returns the result string recorded as tool output. nil keeps the
+	// shell_interactive tool returning an "unavailable" string. A TUI supplies
+	// a closure that releases the terminal for the duration of the command.
+	ShellInteractive func(ctx context.Context, cmd, workdir string) string
 }
 
 // Kind discriminates a streamed Event.
 type Kind int
 
 const (
-	Token      Kind = iota // assistant text       → Text
-	Reasoning              // thinking text         → Text
-	ToolCall               // tool started          → ToolName, ToolInput
-	ToolResult             // tool finished         → ToolName, ToolOutput
-	Usage                  // per-roundtrip tokens  → PromptTokens/CompletionTokens/TotalTokens
-	Retry                  // transient retry       → Text
-	Error                  // turn error            → Err
-	Done                   // turn end (normal)     → token fields (final totals)
+	Token          Kind = iota // assistant text         → Text
+	Reasoning                  // thinking text           → Text
+	ToolCall                   // tool started            → ToolName, ToolCallID, ToolInput, IsCustomTool
+	ToolResult                 // tool finished           → ToolName, ToolCallID, ToolOutput
+	SystemReminder             // injected reminder block → Text
+	Usage                      // per-roundtrip tokens    → PromptTokens/CompletionTokens/TotalTokens
+	Retry                      // transient retry         → Text
+	Error                      // turn error              → Err
+	Done                       // turn end (normal)       → token fields (final totals)
 )
 
 // Event is one item streamed on a Send/Run channel. Only the fields named for a
 // given Kind are populated.
 type Event struct {
 	Kind             Kind
-	Text             string // Token, Reasoning, Retry
+	Text             string // Token, Reasoning, Retry, SystemReminder
 	ToolName         string // ToolCall, ToolResult
+	ToolCallID       string // ToolCall, ToolResult (links a call to its result)
 	ToolInput        string // ToolCall (raw JSON args)
 	ToolOutput       string // ToolResult
+	IsCustomTool     bool   // ToolCall (resolved against the active agent's custom-tool set)
 	PromptTokens     int    // Usage, Done
 	CompletionTokens int    // Usage, Done
 	TotalTokens      int    // Usage, Done
@@ -55,7 +76,11 @@ type Event struct {
 
 // translate maps an internal chat.Event to a public Event. ok is false when the
 // internal event has no public equivalent (session lifecycle, echoed user
-// message, post-stream assistant message, injected reminders).
+// message, post-stream assistant message).
+//
+// translate is pure: it does NOT resolve Event.IsCustomTool, which depends on
+// the session's current agent config. route sets that field after translate
+// (see route), so this stays a config-free, table-testable mapping.
 func translate(ev chat.Event) (Event, bool) {
 	switch ev.Kind {
 	case chat.EventAssistantToken:
@@ -63,9 +88,11 @@ func translate(ev chat.Event) (Event, bool) {
 	case chat.EventAssistantReasoning:
 		return Event{Kind: Reasoning, Text: ev.Text}, true
 	case chat.EventToolCall:
-		return Event{Kind: ToolCall, ToolName: ev.ToolName, ToolInput: ev.ToolInput}, true
+		return Event{Kind: ToolCall, ToolName: ev.ToolName, ToolCallID: ev.ToolCallID, ToolInput: ev.ToolInput}, true
 	case chat.EventToolResult:
-		return Event{Kind: ToolResult, ToolName: ev.ToolName, ToolOutput: ev.ToolOutput}, true
+		return Event{Kind: ToolResult, ToolName: ev.ToolName, ToolCallID: ev.ToolCallID, ToolOutput: ev.ToolOutput}, true
+	case chat.EventSystemReminder:
+		return Event{Kind: SystemReminder, Text: ev.Text}, true
 	case chat.EventUsage:
 		return usageEvent(Usage, ev), true
 	case chat.EventTurnDone:
@@ -109,6 +136,17 @@ type Session struct {
 	handlers map[string]chat.ToolHandler
 	cleanup  func()
 
+	// shellInteractive is Spec.ShellInteractive, threaded into every turn's
+	// TurnConfig (see turnConfig). nil keeps shell_interactive "unavailable".
+	shellInteractive func(ctx context.Context, cmd, workdir string) string
+
+	// sink is the JSONL audit log, opened by Start when Spec.OutPath != "".
+	// route writes every internal chat.Event to it (lossless) before
+	// translating to a public Event; Close writes the "end" line. nil when no
+	// OutPath was configured. sinkCleanup closes the underlying file.
+	sink        *chat.OutSink
+	sinkCleanup func()
+
 	// mu guards the current turn's routing target and lifecycle handles.
 	mu         sync.Mutex
 	cur        chan Event         // current Send's channel; nil between turns
@@ -138,13 +176,39 @@ func Start(ctx context.Context, spec Spec) (*Session, error) {
 		ConfigPath: spec.ConfigPath,
 		CWD:        workDir,
 		HomeDir:    homeDir,
-		Headless:   true,
-		Agent:      spec.Agent,
+		// Interactive's zero value (false) maps to Headless:true, preserving the
+		// historical headless-only behavior for embedders that don't opt in.
+		Headless: !spec.Interactive,
+		OutPath:  spec.OutPath,
+		Agent:    spec.Agent,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return newSession(cfg, cleanup), nil
+
+	s := newSession(cfg, cleanup)
+	s.shellInteractive = spec.ShellInteractive
+
+	// Open the audit log (if requested) and write its opening "start" line.
+	// route streams every internal event into it for the rest of the session;
+	// Close writes the "end" line. Mirrors how internal/tui/once.go and
+	// interactive.go own their sinks.
+	sink, sinkCleanup, err := chat.OpenSink(spec.OutPath)
+	if err != nil {
+		cleanup()
+		return nil, err
+	}
+	s.sink = sink
+	s.sinkCleanup = sinkCleanup
+	if sink != nil {
+		label := spec.Prompt
+		if label == "" {
+			label = "(interactive)"
+		}
+		_, model := chat.SplitStatus(cfg.StatusLine)
+		sink.WriteStart(label, cfg.ModeLabel, model, cfg.OutPath, cfg.Headless)
+	}
+	return s, nil
 }
 
 // newSession wires a Session around an already-built chat.Config. The
@@ -167,6 +231,9 @@ func newSession(cfg chat.Config, cleanup func()) *Session {
 		cfg:      cfg,
 		handlers: chat.NewHandlers(cfg),
 		cleanup:  cleanup,
+		// Default to a no-op so Close is safe even when Start didn't open a
+		// sink (and for tests that build a Session via newSession directly).
+		sinkCleanup: func() {},
 	}
 	s.sess = chat.NewSession(chat.SessionOpts{
 		StoreID:          storeID,
@@ -182,9 +249,20 @@ func newSession(cfg chat.Config, cleanup func()) *Session {
 // select on curDone lets Close cancel the turn unblock a send to a Send channel
 // the caller stopped reading. Events with no public equivalent are dropped.
 func (s *Session) route(ev chat.Event) {
+	// Audit first, losslessly: the internal chat.Event keeps ToolCallID, system
+	// reminders, and full untruncated content even though the public Event below
+	// is a lossy projection. Independent of whether the event has a public form.
+	if s.sink != nil {
+		s.sink.WriteChatEvent(ev)
+	}
 	pub, ok := translate(ev)
 	if !ok {
 		return
+	}
+	// IsCustomTool can't be resolved in the pure translate (it has no config);
+	// resolve it here against the session's current agent custom-tool set.
+	if pub.Kind == ToolCall && s.cfg.CustomToolNames[pub.ToolName] {
+		pub.IsCustomTool = true
 	}
 	s.mu.Lock()
 	cur, done := s.cur, s.curDone
@@ -198,6 +276,50 @@ func (s *Session) route(ev chat.Event) {
 	}
 }
 
+// Message is one user turn for SendMessage. A plain Text message drives the
+// same path as Send; a message built from an Attachment (see ImageMessage)
+// carries a prepared multimodal payload that bypasses the string-only Run.
+type Message struct {
+	// Text is the user's prompt. For an ImageMessage it is the (already
+	// embedded) prompt accompanying the attachment.
+	Text string
+	// Attachments lists files attached to this turn (e.g. an image). Today only
+	// ImageMessage populates this; SendMessage drives the built payload.
+	Attachments []Attachment
+
+	// built is the prepared internal message for an attachment-bearing turn.
+	// Zero-value (no ContentParts) means "plain text" and SendMessage takes the
+	// Text path. Unexported so the chat/llm types never leak into the API.
+	built llm.Message
+}
+
+// Attachment is a file attached to a Message (carrier for ImageMessage).
+type Attachment struct {
+	Path string
+}
+
+// ImageMessage builds a Message from a "/image"-style argument string
+// ("<path> [prompt]", quotes allowed for paths with spaces), resolving relative
+// paths against workDir. The image is decoded, resized, and embedded so the
+// returned Message can be passed straight to SendMessage. Wraps the internal
+// image pipeline; mirrors the TUI's /image handler.
+func ImageMessage(args, workDir string) (Message, error) {
+	built, err := chat.BuildImageMessage(args, workDir)
+	if err != nil {
+		return Message{}, err
+	}
+	m := Message{Text: built.Content, built: built}
+	for _, p := range built.ContentParts {
+		if p.Type == llm.ContentPartTypeImageURL {
+			// Carry the source path for introspection; the embedded data URI is
+			// not surfaced here (it lives in built).
+			m.Attachments = append(m.Attachments, Attachment{Path: args})
+			break
+		}
+	}
+	return m, nil
+}
+
 // Send runs one turn for prompt and returns a channel of that turn's events,
 // closed after the turn's Done (or Error).
 //
@@ -207,6 +329,19 @@ func (s *Session) route(ev chat.Event) {
 // and assume exactly one turn is active; overlapping them is a data race, not
 // a supported concurrency mode.
 func (s *Session) Send(ctx context.Context, prompt string) <-chan Event {
+	return s.SendMessage(ctx, Message{Text: prompt})
+}
+
+// SendMessage runs one turn for msg and returns a channel of that turn's
+// events, closed after the turn's Done (or Error). It is the multimodal-capable
+// sibling of Send: a plain-Text Message drives Session.Run (string path), while
+// a Message carrying a built attachment payload (see ImageMessage) drives
+// RunTurn directly — Run is string-only and would drop the ContentParts. Both
+// paths share the same per-turn routing/cancel/close machinery.
+//
+// Same single-turn-at-a-time contract as Send: drain the returned channel
+// before the next Send/SendMessage/Clear/Rollback/SwitchAgent.
+func (s *Session) SendMessage(ctx context.Context, msg Message) <-chan Event {
 	out := make(chan Event)
 	turnCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
@@ -218,9 +353,9 @@ func (s *Session) Send(ctx context.Context, prompt string) <-chan Event {
 	s.mu.Unlock()
 	tc := s.turnConfig()
 	go func() {
-		// route forwards events to out during the turn; once Run returns no
+		// route forwards events to out during the turn; once the turn returns no
 		// further forwarding can happen, so clearing cur and closing out here
-		// is race-free (both run on this goroutine, strictly after Run).
+		// is race-free (both run on this goroutine, strictly after the turn).
 		defer func() {
 			s.mu.Lock()
 			if s.cur == out {
@@ -231,7 +366,14 @@ func (s *Session) Send(ctx context.Context, prompt string) <-chan Event {
 			cancel() // release the child ctx
 		}()
 		defer close(done)
-		s.sess.Run(turnCtx, tc, prompt)
+		// Branch like the TUI's launchTurn: plain text goes through Run (which
+		// emits the user_message event and persists history); a prepared
+		// multimodal payload drives RunTurn directly since Run is string-only.
+		if len(msg.built.ContentParts) == 0 {
+			s.sess.Run(turnCtx, tc, msg.Text)
+			return
+		}
+		chat.RunTurn(turnCtx, tc, s.sess, msg.built, nil)
 	}()
 	return out
 }
@@ -273,16 +415,30 @@ func (s *Session) Close() error {
 	if s.cfg.Store != nil {
 		endErr = s.cfg.Store.EndSession(s.sess.ID())
 	}
+	// Flush the audit log: by here the turn goroutine has joined, so no route
+	// call can still be writing to the sink. Then release the file and config.
+	if s.sink != nil {
+		s.sink.WriteEnd("ok")
+	}
+	s.sinkCleanup()
 	s.cleanup()
 	return endErr
 }
 
 // turnConfig derives the per-turn config from the current cfg. Built fresh each
 // turn so SwitchAgent's mutations to cfg take effect on the next Send.
+//
+// The interactive-shell runner is Spec.ShellInteractive (stored at Start). When
+// nil — the default for a headless embedder — shell_interactive tool calls
+// return an "unavailable" string instead of releasing a TTY.
 func (s *Session) turnConfig() chat.TurnConfig {
-	return chat.NewTurnConfig(s.cfg, s.handlers, func(ctx context.Context, cmd, workdir string) string {
-		return "error: interactive TTY not available in plugin mode"
-	})
+	shellInteractive := s.shellInteractive
+	if shellInteractive == nil {
+		shellInteractive = func(ctx context.Context, cmd, workdir string) string {
+			return "error: interactive TTY not available in plugin mode"
+		}
+	}
+	return chat.NewTurnConfig(s.cfg, s.handlers, shellInteractive)
 }
 
 // Clear resets the conversation context (= /clear): drops all history and
@@ -335,6 +491,201 @@ func (s *Session) AgentNames() []string { return s.cfg.AgentNames }
 
 // ActiveAgent returns the name of the currently active agent.
 func (s *Session) ActiveAgent() string { return s.cfg.ModeLabel }
+
+// ToolInfo names a tool exposed by the active agent and its one-line
+// description, for introspection (the TUI's /prompt and /info).
+type ToolInfo struct {
+	Name        string
+	Description string
+}
+
+// ParamValue is one tunable provider parameter and its current/default state,
+// for introspection (the TUI's /parameters list). Enum is empty for freeform
+// params. Value is "" when the param is at its provider default (unset).
+type ParamValue struct {
+	Name        string
+	Value       string
+	Default     string
+	Description string
+	Enum        []string
+}
+
+// Snapshot is a read-only view of the session's current agent state: everything
+// the TUI's welcome banner, status bar, /prompt, /info, and /parameters list
+// need, in one allocation. It is a point-in-time copy; mutate the Session (e.g.
+// SwitchAgent, SetParam) and call Snapshot again to observe changes. Call only
+// between turns (same contract as Clear/Rollback): it reads unsynchronized cfg.
+type Snapshot struct {
+	Agent         string
+	Model         string
+	ProjectRef    string
+	StatusLine    string
+	ContextWindow int
+	SystemPrompt  string
+	Tools         []ToolInfo
+	Skills        []string
+	Params        []ParamValue
+}
+
+// Snapshot returns the current agent state (see Snapshot). Params is populated
+// only when the active provider implements llm.ParamDescriber; each entry's
+// Value mirrors the TUI's currentParamValue mapping.
+func (s *Session) Snapshot() Snapshot {
+	_, model := chat.SplitStatus(s.cfg.StatusLine)
+	snap := Snapshot{
+		Agent:         s.cfg.ModeLabel,
+		Model:         model,
+		ProjectRef:    s.cfg.ProjectRef,
+		StatusLine:    s.cfg.StatusLine,
+		ContextWindow: s.cfg.ContextWindow,
+		SystemPrompt:  s.cfg.Personality.SystemPrompt,
+		Skills:        s.cfg.ActiveSkills,
+	}
+	for _, t := range s.cfg.Personality.Tools {
+		snap.Tools = append(snap.Tools, ToolInfo{Name: t.Name, Description: t.Description})
+	}
+	if describer, ok := s.cfg.LLM.(llm.ParamDescriber); ok {
+		for _, spec := range describer.ParamSpecs() {
+			snap.Params = append(snap.Params, ParamValue{
+				Name:    spec.Name,
+				Value:   currentParamValue(s.cfg.Params, spec.Name),
+				Default: spec.Default,
+				Enum:    spec.Enum,
+			})
+		}
+	}
+	return snap
+}
+
+// HistoryEntry is one stored conversation message, projected for introspection
+// (the TUI's /print). Content is already stripped of the internal
+// "[tool_call_id=…]\n" storage prefix that tool results carry. Role is the
+// plain string "user"/"assistant"/"tool"/"system".
+type HistoryEntry struct {
+	Role       string
+	Content    string
+	ToolName   string
+	ToolCallID string
+}
+
+// History returns the current conversation history as public HistoryEntry
+// values. Tool-role messages have their internal "[tool_call_id=…]\n" prefix
+// stripped from Content so embedders see the raw tool output. Call only between
+// turns (it reads unsynchronized session state).
+func (s *Session) History() []HistoryEntry {
+	msgs := s.sess.Messages()
+	out := make([]HistoryEntry, 0, len(msgs))
+	for _, m := range msgs {
+		content := m.Content
+		if m.Role == llm.RoleTool {
+			content = stripToolIDPrefix(content)
+		}
+		out = append(out, HistoryEntry{
+			Role:       string(m.Role),
+			Content:    content,
+			ToolName:   m.Name,
+			ToolCallID: m.ToolCallID,
+		})
+	}
+	return out
+}
+
+// stripToolIDPrefix removes the "[tool_call_id=…]\n" prefix the turn loop
+// prepends to each stored tool result's content, leaving just the raw output.
+// Replicated from internal/tui/render.go so the public projection in History
+// hides the internal storage detail.
+func stripToolIDPrefix(content string) string {
+	if strings.HasPrefix(content, "[tool_call_id=") {
+		if nl := strings.IndexByte(content, '\n'); nl >= 0 {
+			return content[nl+1:]
+		}
+	}
+	return content
+}
+
+// Prune replaces the tool result with the given tool-call id by a short stub,
+// freeing its context-window space (= the TUI's /prune <id>). summary is the
+// human-readable status string; ok is false when no tool result with that id
+// exists in the conversation. Call only between turns (mutates history).
+func (s *Session) Prune(id string) (summary string, ok bool) {
+	msgs := s.sess.Messages()
+	out := chat.PruneByID(id, "pruned by user", msgs)
+	s.sess.SetMessages(msgs)
+	// PruneByID reports a missing id with an "error: no tool result with id …"
+	// prefix; treat any other (success) string as ok.
+	if strings.HasPrefix(out, "error: no tool result with id") {
+		return out, false
+	}
+	return out, true
+}
+
+// SetParam sets a tunable provider parameter for subsequent turns (= the TUI's
+// /parameters <name> <value>). When the active provider implements
+// llm.ParamDescriber the value is validated against that param's spec first;
+// the new params are then pushed to the provider if it implements
+// llm.ParamSetter. Setting reasoning_effort also re-derives the status line so
+// the next Snapshot reflects it. Call only between turns (mutates cfg).
+func (s *Session) SetParam(name, value string) error {
+	describer, _ := s.cfg.LLM.(llm.ParamDescriber)
+	setter, _ := s.cfg.LLM.(llm.ParamSetter)
+
+	if describer != nil {
+		var spec *llm.ParamSpec
+		for _, sp := range describer.ParamSpecs() {
+			if sp.Name == name {
+				sp := sp
+				spec = &sp
+				break
+			}
+		}
+		if spec == nil {
+			return fmt.Errorf("unknown parameter %q for this provider", name)
+		}
+		if err := spec.Validate(value); err != nil {
+			return err
+		}
+	}
+	if err := s.cfg.Params.SetByName(name, value); err != nil {
+		return err
+	}
+	if setter != nil {
+		setter.SetParams(s.cfg.Params)
+	}
+	if name == "reasoning_effort" {
+		prov, model := chat.SplitStatus(s.cfg.StatusLine)
+		if prov != "" && model != "" {
+			s.cfg.StatusLine = chat.FormatStatus(prov, model, s.cfg.Params.ReasoningEffort)
+		}
+	}
+	return nil
+}
+
+// currentParamValue maps a RequestParams field to its display string for the
+// given /parameters name. Replicated from internal/tui/interactive.go so
+// Snapshot's ParamValue.Value matches the TUI exactly. "" means "unset
+// (provider default)".
+func currentParamValue(p llm.RequestParams, name string) string {
+	switch name {
+	case "reasoning_effort":
+		return p.ReasoningEffort
+	case "parallel_tool_calls":
+		if p.ParallelToolCalls == nil {
+			return ""
+		}
+		return fmt.Sprintf("%t", *p.ParallelToolCalls)
+	case "temperature":
+		if p.Temperature == nil {
+			return ""
+		}
+		return fmt.Sprintf("%g", *p.Temperature)
+	case "max_tokens":
+		if p.MaxTokens == 0 {
+			return ""
+		}
+		return fmt.Sprintf("%d", p.MaxTokens)
+	}
+	return ""
+}
 
 // Run is the one-shot convenience: Start, send spec.Prompt, stream the turn,
 // and Close when it drains. A non-nil error means startup failed.

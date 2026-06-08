@@ -2,8 +2,11 @@ package shell3
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,8 +24,9 @@ func TestTranslate(t *testing.T) {
 	}{
 		{"token", chat.Event{Kind: chat.EventAssistantToken, Text: "hi"}, &Event{Kind: Token, Text: "hi"}},
 		{"reasoning", chat.Event{Kind: chat.EventAssistantReasoning, Text: "think"}, &Event{Kind: Reasoning, Text: "think"}},
-		{"tool call", chat.Event{Kind: chat.EventToolCall, ToolName: "bash", ToolInput: `{"cmd":"ls"}`}, &Event{Kind: ToolCall, ToolName: "bash", ToolInput: `{"cmd":"ls"}`}},
-		{"tool result", chat.Event{Kind: chat.EventToolResult, ToolName: "bash", ToolOutput: "ok"}, &Event{Kind: ToolResult, ToolName: "bash", ToolOutput: "ok"}},
+		{"tool call", chat.Event{Kind: chat.EventToolCall, ToolName: "bash", ToolCallID: "3", ToolInput: `{"cmd":"ls"}`}, &Event{Kind: ToolCall, ToolName: "bash", ToolCallID: "3", ToolInput: `{"cmd":"ls"}`}},
+		{"tool result", chat.Event{Kind: chat.EventToolResult, ToolName: "bash", ToolCallID: "3", ToolOutput: "ok"}, &Event{Kind: ToolResult, ToolName: "bash", ToolCallID: "3", ToolOutput: "ok"}},
+		{"system reminder", chat.Event{Kind: chat.EventSystemReminder, Text: "<system-reminder>\nmodel changed\n</system-reminder>"}, &Event{Kind: SystemReminder, Text: "<system-reminder>\nmodel changed\n</system-reminder>"}},
 		{"usage", chat.Event{Kind: chat.EventUsage, Usage: &chat.EventUsageData{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}}, &Event{Kind: Usage, PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}},
 		{"done", chat.Event{Kind: chat.EventTurnDone, Usage: &chat.EventUsageData{PromptTokens: 20, CompletionTokens: 8, TotalTokens: 28}}, &Event{Kind: Done, PromptTokens: 20, CompletionTokens: 8, TotalTokens: 28}},
 		{"retry", chat.Event{Kind: chat.EventRetry, Text: "retrying"}, &Event{Kind: Retry, Text: "retrying"}},
@@ -30,7 +34,6 @@ func TestTranslate(t *testing.T) {
 		{"session start dropped", chat.Event{Kind: chat.EventSessionStart}, nil},
 		{"user message dropped", chat.Event{Kind: chat.EventUserMessage}, nil},
 		{"assistant message dropped", chat.Event{Kind: chat.EventAssistantMessage}, nil},
-		{"system reminder dropped", chat.Event{Kind: chat.EventSystemReminder}, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -45,7 +48,8 @@ func TestTranslate(t *testing.T) {
 				t.Fatal("expected event, got drop")
 			}
 			if got.Kind != tc.want.Kind || got.Text != tc.want.Text ||
-				got.ToolName != tc.want.ToolName || got.ToolInput != tc.want.ToolInput ||
+				got.ToolName != tc.want.ToolName || got.ToolCallID != tc.want.ToolCallID ||
+				got.ToolInput != tc.want.ToolInput ||
 				got.ToolOutput != tc.want.ToolOutput || got.PromptTokens != tc.want.PromptTokens ||
 				got.CompletionTokens != tc.want.CompletionTokens || got.TotalTokens != tc.want.TotalTokens {
 				t.Fatalf("translate(%+v) = %+v, want %+v", tc.in, got, *tc.want)
@@ -369,5 +373,301 @@ func TestSession_CloseCancelsAndJoinsInFlightTurn(t *testing.T) {
 	case <-client.returned:
 	default:
 		t.Fatal("Close returned before the in-flight turn finished — turn not cancelled/joined (leak + potential write-after-close)")
+	}
+}
+
+// describerClient is a fakellm wrapper that also satisfies llm.ParamDescriber
+// and llm.ParamSetter, so Snapshot's param population and SetParam's
+// validate/push path can be exercised without a real adapter.
+type describerClient struct {
+	*fakellm.Client
+	specs  []llm.ParamSpec
+	gotSet *llm.RequestParams // last params pushed via SetParams
+}
+
+func (d *describerClient) ParamSpecs() []llm.ParamSpec { return d.specs }
+func (d *describerClient) SetParams(p llm.RequestParams) {
+	cp := p
+	d.gotSet = &cp
+}
+
+func newDescriberClient(specs []llm.ParamSpec, scripts ...fakellm.Script) *describerClient {
+	return &describerClient{Client: fakellm.New(scripts...), specs: specs}
+}
+
+// TestRoute_SetsIsCustomTool verifies route resolves IsCustomTool against the
+// session's current CustomToolNames (translate stays pure, so route does it).
+func TestRoute_SetsIsCustomTool(t *testing.T) {
+	s := newTestSession(t, fakellm.New(), chat.Config{
+		CustomToolNames: map[string]bool{"my_tool": true},
+	})
+	defer s.Close()
+
+	got := make(chan Event, 4)
+	done := make(chan struct{})
+	s.mu.Lock()
+	s.cur = got
+	s.curDone = done
+	s.mu.Unlock()
+
+	s.route(chat.Event{Kind: chat.EventToolCall, ToolName: "my_tool", ToolCallID: "1"})
+	s.route(chat.Event{Kind: chat.EventToolCall, ToolName: "bash", ToolCallID: "2"})
+
+	custom := <-got
+	if custom.Kind != ToolCall || custom.ToolName != "my_tool" || !custom.IsCustomTool {
+		t.Fatalf("custom tool event = %+v, want IsCustomTool=true", custom)
+	}
+	if custom.ToolCallID != "1" {
+		t.Fatalf("ToolCallID = %q, want 1", custom.ToolCallID)
+	}
+	builtin := <-got
+	if builtin.IsCustomTool {
+		t.Fatalf("builtin tool wrongly flagged custom: %+v", builtin)
+	}
+}
+
+// TestSnapshot_PopulatesFromConfig verifies Snapshot mirrors cfg, including
+// params from a ParamDescriber provider with currentParamValue mapping.
+func TestSnapshot_PopulatesFromConfig(t *testing.T) {
+	client := newDescriberClient([]llm.ParamSpec{
+		{Name: "reasoning_effort", Enum: []string{"low", "high"}, Default: "low"},
+		{Name: "max_tokens", Default: "0"},
+	})
+	cfg := chat.Config{
+		ModeLabel:     "code",
+		StatusLine:    "openai │ gpt-x │ high",
+		ProjectRef:    "ref-123",
+		ContextWindow: 4096,
+		ActiveSkills:  []string{"a", "b"},
+		Params:        llm.RequestParams{ReasoningEffort: "high", MaxTokens: 512},
+	}
+	cfg.Personality.SystemPrompt = "be helpful"
+	cfg.Personality.Tools = []llm.ToolDefinition{{Name: "bash", Description: "run a command"}}
+	s := newTestSession(t, client, cfg)
+	defer s.Close()
+
+	snap := s.Snapshot()
+	if snap.Agent != "code" || snap.Model != "gpt-x" || snap.ProjectRef != "ref-123" {
+		t.Fatalf("snapshot header wrong: %+v", snap)
+	}
+	if snap.StatusLine != "openai │ gpt-x │ high" || snap.ContextWindow != 4096 {
+		t.Fatalf("snapshot status/window wrong: %+v", snap)
+	}
+	if snap.SystemPrompt != "be helpful" {
+		t.Fatalf("SystemPrompt = %q", snap.SystemPrompt)
+	}
+	if len(snap.Skills) != 2 || snap.Skills[0] != "a" {
+		t.Fatalf("Skills = %v", snap.Skills)
+	}
+	if len(snap.Tools) != 1 || snap.Tools[0].Name != "bash" || snap.Tools[0].Description != "run a command" {
+		t.Fatalf("Tools = %+v", snap.Tools)
+	}
+	if len(snap.Params) != 2 {
+		t.Fatalf("Params count = %d, want 2", len(snap.Params))
+	}
+	re := snap.Params[0]
+	if re.Name != "reasoning_effort" || re.Value != "high" || re.Default != "low" || len(re.Enum) != 2 {
+		t.Fatalf("reasoning_effort param = %+v", re)
+	}
+	mt := snap.Params[1]
+	if mt.Name != "max_tokens" || mt.Value != "512" {
+		t.Fatalf("max_tokens param = %+v", mt)
+	}
+}
+
+// TestSnapshot_NoDescriberHasNoParams verifies a provider that doesn't
+// implement ParamDescriber yields an empty Params slice (no panic).
+func TestSnapshot_NoDescriberHasNoParams(t *testing.T) {
+	s := newTestSession(t, fakellm.New(), chat.Config{ModeLabel: "base"})
+	defer s.Close()
+	if got := s.Snapshot().Params; len(got) != 0 {
+		t.Fatalf("Params = %v, want empty", got)
+	}
+}
+
+// TestHistory_StripsToolPrefix verifies History returns plain roles and strips
+// the internal "[tool_call_id=…]\n" prefix from tool-role content only.
+func TestHistory_StripsToolPrefix(t *testing.T) {
+	s := newTestSession(t, fakellm.New(), chat.Config{})
+	defer s.Close()
+	s.sess.SetMessages([]llm.Message{
+		{Role: llm.RoleUser, Content: "hello"},
+		{Role: llm.RoleAssistant, Content: "hi"},
+		{Role: llm.RoleTool, Name: "bash", ToolCallID: "1", Content: "[tool_call_id=1]\nthe output"},
+	})
+
+	h := s.History()
+	if len(h) != 3 {
+		t.Fatalf("History len = %d, want 3", len(h))
+	}
+	if h[0].Role != "user" || h[0].Content != "hello" {
+		t.Fatalf("user entry = %+v", h[0])
+	}
+	if h[1].Role != "assistant" || h[1].Content != "hi" {
+		t.Fatalf("assistant entry = %+v", h[1])
+	}
+	tool := h[2]
+	if tool.Role != "tool" || tool.Content != "the output" {
+		t.Fatalf("tool entry not prefix-stripped: %+v", tool)
+	}
+	if tool.ToolName != "bash" || tool.ToolCallID != "1" {
+		t.Fatalf("tool entry metadata = %+v", tool)
+	}
+}
+
+// TestPrune verifies Prune stubs a matching tool result (ok=true) and reports
+// ok=false for an unknown id.
+func TestPrune(t *testing.T) {
+	s := newTestSession(t, fakellm.New(), chat.Config{})
+	defer s.Close()
+	s.sess.SetMessages([]llm.Message{
+		{Role: llm.RoleUser, Content: "do it"},
+		{Role: llm.RoleTool, Name: "bash", ToolCallID: "7", Content: "[tool_call_id=7]\nlots of bytes here"},
+	})
+
+	if summary, ok := s.Prune("nope"); ok {
+		t.Fatalf("Prune(unknown) ok=true summary=%q", summary)
+	}
+
+	summary, ok := s.Prune("7")
+	if !ok {
+		t.Fatalf("Prune(7) ok=false summary=%q", summary)
+	}
+	if summary == "" {
+		t.Fatal("Prune returned empty summary")
+	}
+	// The stored tool result must now be the short stub, not the original.
+	for _, m := range s.sess.Messages() {
+		if m.Role == llm.RoleTool && m.ToolCallID == "7" {
+			if !strings.Contains(m.Content, "pruned by user") {
+				t.Fatalf("tool result not stubbed: %q", m.Content)
+			}
+		}
+	}
+}
+
+// TestSetParam verifies the validate → SetByName → SetParams path, the
+// reasoning_effort status-line refresh, and error cases.
+func TestSetParam(t *testing.T) {
+	client := newDescriberClient([]llm.ParamSpec{
+		{Name: "reasoning_effort", Enum: []string{"low", "high"}, Default: "low"},
+	})
+	cfg := chat.Config{StatusLine: "openai │ gpt-x │ low"}
+	s := newTestSession(t, client, cfg)
+	defer s.Close()
+
+	if err := s.SetParam("reasoning_effort", "high"); err != nil {
+		t.Fatalf("SetParam: %v", err)
+	}
+	if s.cfg.Params.ReasoningEffort != "high" {
+		t.Fatalf("Params.ReasoningEffort = %q", s.cfg.Params.ReasoningEffort)
+	}
+	if client.gotSet == nil || client.gotSet.ReasoningEffort != "high" {
+		t.Fatalf("SetParams not pushed to provider: %+v", client.gotSet)
+	}
+	if s.cfg.StatusLine != "openai │ gpt-x │ high" {
+		t.Fatalf("status line not refreshed: %q", s.cfg.StatusLine)
+	}
+	// Snapshot must reflect the new value.
+	if got := s.Snapshot().Params[0].Value; got != "high" {
+		t.Fatalf("snapshot after SetParam = %q, want high", got)
+	}
+
+	// Validation failure (not in enum) must be reported and leave state unchanged.
+	if err := s.SetParam("reasoning_effort", "bogus"); err == nil {
+		t.Fatal("expected validation error for out-of-enum value")
+	}
+	// Unknown parameter for this provider.
+	if err := s.SetParam("does_not_exist", "1"); err == nil {
+		t.Fatal("expected error for unknown parameter")
+	}
+}
+
+// TestSendMessage_TextPath verifies SendMessage drives a plain-text turn just
+// like Send (tokens stream, Done fires, history carries).
+func TestSendMessage_TextPath(t *testing.T) {
+	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "reply"}}})
+	s := newTestSession(t, client, chat.Config{})
+	defer s.Close()
+
+	var text string
+	var done bool
+	for ev := range s.SendMessage(context.Background(), Message{Text: "hi there"}) {
+		switch ev.Kind {
+		case Token:
+			text += ev.Text
+		case Done:
+			done = true
+		}
+	}
+	if text != "reply" || !done {
+		t.Fatalf("SendMessage text path: text=%q done=%v", text, done)
+	}
+	if len(s.sess.Messages()) < 2 {
+		t.Fatalf("history not carried: %d messages", len(s.sess.Messages()))
+	}
+}
+
+// TestAuditSink_WritesStartEventsEnd verifies that when Spec.OutPath is set the
+// Session opens a JSONL sink and writes a start line, every internal event
+// (losslessly), and an end line on Close.
+func TestAuditSink_WritesStartEventsEnd(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "audit.jsonl")
+
+	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "hi"}}})
+	cfg := chat.Config{StatusLine: "openai │ gpt-x", ModeLabel: "code"}
+	s := newTestSession(t, client, cfg)
+	// Wire the sink the way Start does (newTestSession bypasses Start).
+	sink, cleanup, err := chat.OpenSink(out)
+	if err != nil {
+		t.Fatalf("OpenSink: %v", err)
+	}
+	s.sink = sink
+	s.sinkCleanup = cleanup
+	_, model := chat.SplitStatus(cfg.StatusLine)
+	sink.WriteStart("the prompt", cfg.ModeLabel, model, out, cfg.Headless)
+
+	for range s.Send(context.Background(), "hi") {
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read audit log: %v", err)
+	}
+	var starts, ends, tokens int
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("bad JSONL line %q: %v", line, err)
+		}
+		switch rec["kind"] {
+		case "start":
+			starts++
+			if rec["input"] != "the prompt" || rec["model"] != "gpt-x" {
+				t.Fatalf("start line wrong: %v", rec)
+			}
+		case "end":
+			ends++
+		case "assistant_token":
+			tokens++
+		}
+	}
+	if starts != 1 || ends != 1 {
+		t.Fatalf("start=%d end=%d, want 1/1", starts, ends)
+	}
+	if tokens == 0 {
+		t.Fatal("expected at least one assistant_token line in the audit log")
+	}
+}
+
+// TestImageMessage_BadPath verifies ImageMessage surfaces an error for a
+// missing/unsupported file rather than returning a half-built Message.
+func TestImageMessage_BadPath(t *testing.T) {
+	if _, err := ImageMessage("nonexistent.png", t.TempDir()); err == nil {
+		t.Fatal("expected error for missing image file")
 	}
 }
