@@ -8,21 +8,16 @@ import (
 
 	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/ref"
-	"github.com/weatherjean/shell3/internal/scaffold"
 )
 
-// EnsureGlobal creates ~/.shell3/ (and its projects/ dir) if missing, and writes
-// the starter shell3.lua and .env.example into ~/.shell3/ if absent.
+// EnsureGlobal creates ~/.shell3/ (and its projects/ dir) and the global
+// .gitignore if missing. It does NOT write any shell3.lua — config is created
+// explicitly via `shell3 boot`.
 func EnsureGlobal(g paths.Global) error {
 	for _, dir := range []string{g.Root, g.Projects} {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return fmt.Errorf("bootstrap: mkdir %s: %w", dir, err)
 		}
-	}
-	configPath := filepath.Join(g.Root, "shell3.lua")
-	envExamplePath := filepath.Join(g.Root, ".env.example")
-	if err := scaffold.WriteStarterConfig(configPath, envExamplePath); err != nil {
-		return fmt.Errorf("bootstrap: write starter config: %w", err)
 	}
 	if err := ensureGlobalGitignore(g); err != nil {
 		return fmt.Errorf("bootstrap: global gitignore: %w", err)
@@ -131,6 +126,7 @@ func ensureGlobalGitignore(g paths.Global) error {
 // (current + rotated archives shell3.log.1 through shell3.log.N).
 const globalGitignoreAddition = `# shell3 — never commit these even in a dotfiles repo
 ai-do-not-read.*
+.env
 shell3.log
 shell3.log.*
 projects/

@@ -32,15 +32,21 @@ func TestBootstrap_FullFlow(t *testing.T) {
 		}
 	}
 
-	// Starter shell3.lua + .env.example written to ~/.shell3/.
-	configPath := filepath.Join(g.Root, "shell3.lua")
-	if data, err := os.ReadFile(configPath); err != nil {
-		t.Errorf("global shell3.lua missing: %v", err)
-	} else if !strings.Contains(string(data), "shell3.model") {
-		t.Error("global shell3.lua does not define a model")
+	// EnsureGlobal no longer auto-writes a starter config; shell3.lua and
+	// .env.example are created explicitly by `shell3 boot`.
+	if _, err := os.Stat(filepath.Join(g.Root, "shell3.lua")); !os.IsNotExist(err) {
+		t.Errorf("EnsureGlobal must not write shell3.lua; stat err = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(g.Root, ".env.example")); err != nil {
-		t.Error("global .env.example missing")
+	if _, err := os.Stat(filepath.Join(g.Root, ".env.example")); !os.IsNotExist(err) {
+		t.Errorf("EnsureGlobal must not write .env.example; stat err = %v", err)
+	}
+
+	// It must write the global .gitignore protecting credentials and logs.
+	ggi, err := os.ReadFile(filepath.Join(g.Root, ".gitignore"))
+	if err != nil {
+		t.Errorf("global .gitignore missing: %v", err)
+	} else if !strings.Contains(string(ggi), ".env") {
+		t.Error("global .gitignore missing .env entry")
 	}
 
 	// ── project bootstrap ─────────────────────────────────────────────────────
