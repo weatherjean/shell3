@@ -10,11 +10,6 @@ already listening, the spawn just fails to bind and the first request decides.
     run_proxy = "npx @some/codex-proxy --port 8787",
     base_url  = "http://localhost:8787/v1",
 
-## opencode-go
-
-    run_proxy = "opencode-go serve --port 8787",
-    base_url  = "http://localhost:8787/v1",
-
 ## litellm
 
     run_proxy = "litellm --config ~/.shell3/litellm.yaml --port 8787",

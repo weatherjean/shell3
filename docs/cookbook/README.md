@@ -23,4 +23,4 @@ out. Each `lib/...` file mirrors the base config's module layout: copy it into
 - `lib/guards.lua` — extra on_tool_call guards (block destructive bash).
 - `lib/tools.lua` — custom tool template.
 - `lib/extra-agents.lua` — adding more agents.
-- `proxy.md` — run_proxy recipes (Codex/npx, opencode-go, litellm).
+- `proxy.md` — run_proxy recipes (Codex/npx, litellm).

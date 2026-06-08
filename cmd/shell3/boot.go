@@ -71,7 +71,7 @@ func runBoot(f *bootFlags) error {
 	if tty {
 		fmt.Println()
 		fmt.Println("Local proxy? Some endpoints are a proxy you launch yourself —")
-		fmt.Println("e.g. a Codex subscription fronted by `npx ...`, or opencode-go.")
+		fmt.Println("e.g. a Codex subscription fronted by `npx ...`.")
 		fmt.Println("shell3 can auto-start it on activation (run_proxy).")
 	}
 	proxy, err := value(f.proxy, "Proxy command (blank to skip)", "", in, tty, false)

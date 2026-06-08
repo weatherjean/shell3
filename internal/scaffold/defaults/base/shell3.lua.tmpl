@@ -19,7 +19,7 @@ shell3.model("{{.Name | luaesc}}", {
   -- reasoning   = "medium",   -- uncomment if your model supports reasoning effort
   -- run_proxy: shell command auto-started (detached, fire-and-forget) the first
   -- time an agent uses this model. Use it to bring up a local proxy in front of
-  -- base_url — e.g. a Codex subscription fronted by `npx ...`, or opencode-go.
+  -- base_url — e.g. a Codex subscription fronted by `npx ...`.
   -- Output goes to ./.shell3/proxy-{{.Name}}.log.
 {{if .Proxy}}  run_proxy      = "{{.Proxy | luaesc}}",
 {{else}}  -- run_proxy   = "npx @some/codex-proxy --port 8787",
