@@ -654,6 +654,7 @@ shell3.agent({
     history           = true,
     prune             = true,
     compact           = true,
+    image             = true,   -- read_image: load an image so a vision-capable model can see it
     custom            = { web_fetch, brave_search },
   },
 
@@ -687,6 +688,7 @@ shell3.agent({
     history           = true,
     prune             = true,
     compact           = true,
+    image             = true,   -- read_image: load an image so a vision-capable model can see it
     custom            = { web_fetch, brave_search },
   },
 
