@@ -153,6 +153,11 @@ type Session struct {
 	sink        *chat.OutSink
 	sinkCleanup func()
 
+	// runtime and name link a runtime-hosted session back to its registry so
+	// Close deregisters it; both are nil/"" for Start-created sessions.
+	runtime *Runtime
+	name    string
+
 	// mu guards the current turn's routing target and lifecycle handles.
 	mu         sync.Mutex
 	cur        chan Event         // current Send's channel; nil between turns
@@ -411,6 +416,9 @@ func (s *Session) Close() error {
 	}
 	s.sinkCleanup()
 	s.cleanup()
+	if s.runtime != nil {
+		s.runtime.forget(s.name)
+	}
 	return endErr
 }
 
