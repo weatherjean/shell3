@@ -118,6 +118,31 @@ func TestRuntime_GeneratedNamesSkipTakenNames(t *testing.T) {
 	}
 }
 
+// TestRuntime_AgentSwitchIsPerSession: switching agents in one session must
+// not affect a sibling — the spec's core multi-session invariant.
+func TestRuntime_AgentSwitchIsPerSession(t *testing.T) {
+	mk := func() chat.Config {
+		cfg := chat.Config{LLM: fakellm.New(), ModeLabel: "code", AgentNames: []string{"code", "plan"}}
+		cfg.SwitchAgent = func(name string) (chat.ActiveAgent, error) {
+			return chat.ActiveAgent{ModeLabel: name, LLM: fakellm.New()}, nil
+		}
+		return cfg
+	}
+	rt := newTestRuntime(t, mk)
+	a, _ := rt.Session(SessionOpts{Name: "a"})
+	b, _ := rt.Session(SessionOpts{Name: "b"})
+
+	if err := b.SwitchAgent("plan"); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.ActiveAgent(); got != "code" {
+		t.Fatalf("session a's agent changed to %q when b switched", got)
+	}
+	if got := b.ActiveAgent(); got != "plan" {
+		t.Fatalf("session b should be plan, got %q", got)
+	}
+}
+
 // TestRuntime_CloseClosesSessions: Runtime.Close closes remaining sessions
 // then runs the shared cleanup exactly once.
 func TestRuntime_CloseClosesSessions(t *testing.T) {

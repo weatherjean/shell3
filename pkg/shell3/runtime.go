@@ -121,8 +121,7 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	s.runtime, s.name = rt, opts.Name
 	s.sink, s.sinkCleanup = sink, sinkCleanup
 	if sink != nil {
-		_, model := chat.SplitStatus(cfg.StatusLine)
-		sink.WriteStart("(session "+opts.Name+")", cfg.ModeLabel, model, cfg.OutPath, cfg.Headless)
+		s.writeStartLine("(session " + opts.Name + ")")
 	}
 	rt.sessions[opts.Name] = s
 	return s, nil

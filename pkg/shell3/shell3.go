@@ -10,11 +10,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 
-	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
 )
@@ -146,7 +144,8 @@ type Session struct {
 	// TurnConfig (see turnConfig). nil keeps shell_interactive "unavailable".
 	shellInteractive func(ctx context.Context, cmd, workdir string) string
 
-	// sink is the JSONL audit log, opened by Start when Spec.OutPath != "".
+	// sink is the JSONL audit log, opened by Start (Spec.OutPath) or
+	// Runtime.Session (SessionOpts.OutPath) when the path is non-empty.
 	// route writes every internal chat.Event to it (lossless) before
 	// translating to a public Event; Close writes the "end" line. nil when no
 	// OutPath was configured. sinkCleanup closes the underlying file.
@@ -154,9 +153,13 @@ type Session struct {
 	sinkCleanup func()
 
 	// runtime and name link a runtime-hosted session back to its registry so
-	// Close deregisters it; both are nil/"" for Start-created sessions.
-	runtime *Runtime
-	name    string
+	// Close deregisters it. ownsRuntime marks the single Session that Start
+	// creates over a private Runtime: its Close also tears down the shared
+	// runtime parts. Start never exposes that Runtime handle, so a competing
+	// Runtime.Close can't race the ownsRuntime cleanup.
+	runtime     *Runtime
+	name        string
+	ownsRuntime bool
 
 	// mu guards the current turn's routing target and lifecycle handles.
 	mu         sync.Mutex
@@ -172,60 +175,49 @@ type Session struct {
 	busy bool
 }
 
-// Start loads the config (identically to the TUI), starts the store session,
-// and launches the event drain. A non-nil error means startup failed and no
-// Session was created.
+// Start loads the config, builds a single-session Runtime, and returns its one
+// Session — the historical single-conversation entry point. Multi-session
+// hosts use NewRuntime + Runtime.Session directly. Closing the returned
+// Session also closes the underlying Runtime.
 func Start(ctx context.Context, spec Spec) (*Session, error) {
-	workDir := spec.WorkDir
-	if workDir == "" {
-		w, err := os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("get working directory: %w", err)
-		}
-		workDir = w
-	}
-	homeDir, err := os.UserHomeDir()
+	rt, err := NewRuntime(RuntimeSpec{ConfigPath: spec.ConfigPath, WorkDir: spec.WorkDir})
 	if err != nil {
-		return nil, fmt.Errorf("get home directory: %w", err)
+		return nil, err
 	}
-
-	cfg, cleanup, err := agentsetup.Build(agentsetup.Options{
-		ConfigPath: spec.ConfigPath,
-		CWD:        workDir,
-		HomeDir:    homeDir,
-		// Interactive's zero value (false) maps to Headless:true, preserving the
-		// historical headless-only behavior for embedders that don't opt in.
-		Headless: !spec.Interactive,
-		OutPath:  spec.OutPath,
-		Agent:    spec.Agent,
+	s, err := rt.Session(SessionOpts{
+		Name:             "main",
+		Agent:            spec.Agent,
+		Headless:         !spec.Interactive,
+		ShellInteractive: spec.ShellInteractive,
+		// OutPath deliberately empty: Start owns the sink so the start line
+		// keeps its historical prompt-derived label (byte-compatible logs).
 	})
 	if err != nil {
+		rt.Close()
 		return nil, err
 	}
-
-	s := newSession(cfg, cleanup)
-	s.shellInteractive = spec.ShellInteractive
-
-	// Open the audit log (if requested) and write its opening "start" line.
-	// route streams every internal event into it for the rest of the session;
-	// Close writes the "end" line. Mirrors how internal/tui/once.go and
-	// interactive.go own their sinks.
+	s.ownsRuntime = true
+	s.cfg.OutPath = spec.OutPath // introspection parity with the old build path
 	sink, sinkCleanup, err := chat.OpenSink(spec.OutPath)
 	if err != nil {
-		cleanup()
+		_ = s.Close() // also closes the runtime via ownsRuntime
 		return nil, err
 	}
-	s.sink = sink
-	s.sinkCleanup = sinkCleanup
+	s.sink, s.sinkCleanup = sink, sinkCleanup
 	if sink != nil {
 		label := spec.Prompt
 		if label == "" {
 			label = "(interactive)"
 		}
-		_, model := chat.SplitStatus(cfg.StatusLine)
-		sink.WriteStart(label, cfg.ModeLabel, model, cfg.OutPath, cfg.Headless)
+		s.writeStartLine(label)
 	}
 	return s, nil
+}
+
+// writeStartLine writes the audit log's opening line for this session.
+func (s *Session) writeStartLine(label string) {
+	_, model := chat.SplitStatus(s.cfg.StatusLine)
+	s.sink.WriteStart(label, s.cfg.ModeLabel, model, s.cfg.OutPath, s.cfg.Headless)
 }
 
 // newSession wires a Session around an already-built chat.Config. The
@@ -417,7 +409,15 @@ func (s *Session) Close() error {
 	s.sinkCleanup()
 	s.cleanup()
 	if s.runtime != nil {
-		s.runtime.forget(s.name)
+		rt := s.runtime
+		s.runtime = nil
+		rt.forget(s.name)
+		if s.ownsRuntime {
+			// Start-owned runtime: no public handle exists, so this is the only
+			// place its shared cleanup can run (calling rt.Close() here would
+			// re-enter this Close via the session registry).
+			rt.cleanup()
+		}
 	}
 	return endErr
 }
