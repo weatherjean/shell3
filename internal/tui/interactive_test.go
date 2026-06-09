@@ -466,10 +466,10 @@ func (f *fakeSession) Send(ctx context.Context, prompt string) <-chan shell3.Eve
 	close(ch)
 	return ch
 }
-func (f *fakeSession) Clear() { f.cleared = true }
-func (f *fakeSession) Rollback() bool {
+func (f *fakeSession) Clear() error { f.cleared = true; return nil }
+func (f *fakeSession) Rollback() (bool, error) {
 	f.rolledBack = true
-	return f.rollbackOK
+	return f.rollbackOK, nil
 }
 func (f *fakeSession) SwitchAgent(name string) error {
 	for _, n := range f.agents {

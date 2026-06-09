@@ -43,6 +43,12 @@ type Spec struct {
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
 }
 
+// ErrBusy reports a call that requires the session to be idle while a turn is
+// still in flight. Send returns it as an immediate Error event; Clear,
+// Rollback, SwitchAgent, and Prune return it (or surface it) directly. Drain
+// the in-flight Send channel to completion, then retry.
+var ErrBusy = errors.New("shell3: a turn is in flight; drain the Send channel before calling this")
+
 // Kind discriminates a streamed Event.
 type Kind int
 
@@ -154,6 +160,11 @@ type Session struct {
 	turnCancel context.CancelFunc // cancels the in-flight turn (nil before the first Send)
 	turnDone   chan struct{}      // closed when the turn goroutine returns (nil before the first Send)
 	sawError   bool               // any turn emitted an error event; drives the audit "end" status
+	// busy is true from Send until its turn goroutine finishes. It turns a
+	// contract violation (overlapping Send/Clear/Rollback/SwitchAgent/Prune,
+	// which would race on unsynchronized session state) into ErrBusy instead
+	// of a data race.
+	busy bool
 }
 
 // Start loads the config (identically to the TUI), starts the store session,
@@ -299,13 +310,23 @@ func (s *Session) route(ev chat.Event) {
 // Single-turn-at-a-time contract: the caller MUST drain the returned channel
 // to completion before calling Send, Clear, Rollback, or SwitchAgent again.
 // Those methods read and mutate unsynchronized session state (messages, cfg)
-// and assume exactly one turn is active; overlapping them is a data race, not
-// a supported concurrency mode.
+// and assume exactly one turn is active. The contract is enforced: a Send
+// while a turn is in flight does not start a turn — it returns a channel that
+// emits a single Error event carrying ErrBusy and closes.
 func (s *Session) Send(ctx context.Context, prompt string) <-chan Event {
 	out := make(chan Event)
 	turnCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	s.mu.Lock()
+	if s.busy {
+		s.mu.Unlock()
+		cancel()
+		rejected := make(chan Event, 1)
+		rejected <- Event{Kind: Error, Err: ErrBusy}
+		close(rejected)
+		return rejected
+	}
+	s.busy = true
 	s.cur = out
 	s.curDone = turnCtx.Done()
 	s.turnCancel = cancel
@@ -314,13 +335,15 @@ func (s *Session) Send(ctx context.Context, prompt string) <-chan Event {
 	tc := s.turnConfig()
 	go func() {
 		// route forwards events to out during the turn; once the turn returns no
-		// further forwarding can happen, so clearing cur and closing out here
-		// is race-free (both run on this goroutine, strictly after the turn).
+		// further forwarding can happen, so clearing cur, clearing busy, and
+		// closing out here is race-free (all run on this goroutine, strictly
+		// after the turn).
 		defer func() {
 			s.mu.Lock()
 			if s.cur == out {
 				s.cur = nil
 			}
+			s.busy = false
 			s.mu.Unlock()
 			close(out)
 			cancel() // release the child ctx
@@ -329,6 +352,13 @@ func (s *Session) Send(ctx context.Context, prompt string) <-chan Event {
 		s.sess.Run(turnCtx, tc, prompt)
 	}()
 	return out
+}
+
+// isBusy reports whether a turn is in flight (see Send's contract).
+func (s *Session) isBusy() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.busy
 }
 
 // ID returns the store session id (rolls on compaction; "0" with no store).
@@ -401,36 +431,46 @@ func (s *Session) turnConfig() chat.TurnConfig {
 }
 
 // Clear resets the conversation context (= /clear): drops all history and
-// re-stamps the system prompt with a fresh timestamp. Call only between turns:
-// drain any in-flight Send channel first (see Send's contract).
-func (s *Session) Clear() {
+// re-stamps the system prompt with a fresh timestamp. Returns ErrBusy while a
+// turn is in flight (see Send's contract).
+func (s *Session) Clear() error {
+	if s.isBusy() {
+		return ErrBusy
+	}
 	s.sess.SetMessages(nil)
 	if s.cfg.RefreshPrompt != nil {
 		s.cfg.Personality.SystemPrompt = s.cfg.RefreshPrompt()
 	}
+	return nil
 }
 
-// Rollback drops the last turn from context (= /rollback). Returns false when
-// there was nothing to remove. Call only between turns: drain any in-flight
-// Send channel first (see Send's contract).
-func (s *Session) Rollback() bool {
+// Rollback drops the last turn from context (= /rollback). ok is false when
+// there was nothing to remove. Returns ErrBusy while a turn is in flight (see
+// Send's contract).
+func (s *Session) Rollback() (ok bool, err error) {
+	if s.isBusy() {
+		return false, ErrBusy
+	}
 	msgs := s.sess.Messages()
 	pruned := chat.PruneLastTurn(msgs)
 	if len(pruned) == len(msgs) {
-		return false
+		return false, nil
 	}
 	s.sess.SetMessages(pruned)
-	return true
+	return true, nil
 }
 
 // SwitchAgent activates the configured agent named name for subsequent Sends
 // (= the TUI's /agent <name> or Tab). Switching swaps the agent's model client,
 // system prompt, tool set, guard chain, custom-tool routing, skills, status
 // line, and context window while keeping conversation history. Returns an error
-// for an unknown agent or when the config declares no agents. Call only between
-// turns: it mutates cfg in place, which the next Send's turnConfig reads, so
-// drain any in-flight Send channel first (see Send's contract).
+// for an unknown agent or when the config declares no agents, and ErrBusy
+// while a turn is in flight: it mutates cfg in place, which the next Send's
+// turnConfig reads (see Send's contract).
 func (s *Session) SwitchAgent(name string) error {
+	if s.isBusy() {
+		return ErrBusy
+	}
 	if s.cfg.SwitchAgent == nil {
 		return fmt.Errorf("no agents configured")
 	}
@@ -564,8 +604,12 @@ func stripToolIDPrefix(content string) string {
 // Prune replaces the tool result with the given tool-call id by a short stub,
 // freeing its context-window space (= the TUI's /prune <id>). summary is the
 // human-readable status string; ok is false when no tool result with that id
-// exists in the conversation. Call only between turns (mutates history).
+// exists in the conversation, or when a turn is in flight (mutates history;
+// see Send's contract).
 func (s *Session) Prune(id string) (summary string, ok bool) {
+	if s.isBusy() {
+		return "error: " + ErrBusy.Error(), false
+	}
 	msgs := s.sess.Messages()
 	out := chat.PruneByID(id, "pruned by user", msgs)
 	s.sess.SetMessages(msgs)

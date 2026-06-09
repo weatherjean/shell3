@@ -290,13 +290,13 @@ func TestSession_Rollback(t *testing.T) {
 	s := newTestSession(t, client, chat.Config{})
 	defer s.Close()
 
-	if s.Rollback() {
-		t.Fatal("Rollback on empty history should return false")
+	if ok, err := s.Rollback(); ok || err != nil {
+		t.Fatalf("Rollback on empty history should return (false, nil); got (%t, %v)", ok, err)
 	}
 	for range s.Send(context.Background(), "hi") {
 	}
-	if !s.Rollback() {
-		t.Fatal("Rollback after a turn should return true")
+	if ok, err := s.Rollback(); !ok || err != nil {
+		t.Fatalf("Rollback after a turn should return (true, nil); got (%t, %v)", ok, err)
 	}
 	if got := len(s.sess.Messages()); got != 0 {
 		t.Fatalf("after Rollback: %d messages, want 0", got)
@@ -736,5 +736,50 @@ func TestAuditSink_WritesStartEventsEnd(t *testing.T) {
 	}
 	if tokens == 0 {
 		t.Fatal("expected at least one assistant_token line in the audit log")
+	}
+}
+
+// TestSession_BusyEnforcement pins the runtime enforcement of the
+// single-turn-at-a-time contract: while a turn is in flight, Send yields an
+// immediate ErrBusy Error event (without starting a turn), and the
+// between-turns mutators return ErrBusy. Draining the in-flight turn clears
+// the gate.
+func TestSession_BusyEnforcement(t *testing.T) {
+	client := &blockingClient{entered: make(chan struct{}), returned: make(chan struct{})}
+	s := newTestSession(t, client, chat.Config{})
+	defer s.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	out := s.Send(ctx, "hi")
+	<-client.entered // the turn is now in flight inside Stream
+
+	// Overlapping Send: one ErrBusy Error event, then close. No second turn.
+	var rejected []Event
+	for ev := range s.Send(context.Background(), "overlap") {
+		rejected = append(rejected, ev)
+	}
+	if len(rejected) != 1 || rejected[0].Kind != Error || !errors.Is(rejected[0].Err, ErrBusy) {
+		t.Fatalf("overlapping Send: want exactly one ErrBusy Error event, got %+v", rejected)
+	}
+
+	if err := s.Clear(); !errors.Is(err, ErrBusy) {
+		t.Fatalf("Clear while busy: want ErrBusy, got %v", err)
+	}
+	if _, err := s.Rollback(); !errors.Is(err, ErrBusy) {
+		t.Fatalf("Rollback while busy: want ErrBusy, got %v", err)
+	}
+	if err := s.SwitchAgent("any"); !errors.Is(err, ErrBusy) {
+		t.Fatalf("SwitchAgent while busy: want ErrBusy, got %v", err)
+	}
+	if summary, ok := s.Prune("1"); ok || !strings.Contains(summary, ErrBusy.Error()) {
+		t.Fatalf("Prune while busy: want busy error summary, got (%q, %t)", summary, ok)
+	}
+
+	// Drain the in-flight turn; the gate must clear.
+	cancel()
+	for range out {
+	}
+	if err := s.Clear(); err != nil {
+		t.Fatalf("Clear after drain should succeed, got %v", err)
 	}
 }

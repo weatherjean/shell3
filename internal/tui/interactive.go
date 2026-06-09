@@ -23,8 +23,8 @@ import (
 // for the App side.
 type session interface {
 	Send(ctx context.Context, prompt string) <-chan shell3.Event
-	Clear()
-	Rollback() bool
+	Clear() error
+	Rollback() (bool, error)
 	SwitchAgent(name string) error
 	AgentNames() []string
 	ActiveAgent() string
@@ -451,15 +451,24 @@ func registerSlashCommands(app slashTarget, sess session, lastUsage *usage, appl
 		Name: "clear", Help: "reset conversation context",
 		Handler: func(string) {
 			// Clear drops history and re-stamps the system prompt with a fresh
-			// timestamp inside the Session.
-			sess.Clear()
+			// timestamp inside the Session. ErrBusy can't happen here (slash
+			// commands are busy-gated by the app), but surface it if it does.
+			if err := sess.Clear(); err != nil {
+				dim("[" + err.Error() + "]")
+				return
+			}
 			dim("[context cleared]")
 		},
 	})
 	app.RegisterSlash(patchapp.SlashCommand{
 		Name: "rollback", Help: "remove last turn from context",
 		Handler: func(string) {
-			if !sess.Rollback() {
+			ok, err := sess.Rollback()
+			if err != nil {
+				dim("[" + err.Error() + "]")
+				return
+			}
+			if !ok {
 				dim("[nothing to roll back]")
 				return
 			}
