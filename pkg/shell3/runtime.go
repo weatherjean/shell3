@@ -94,8 +94,14 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 		return nil, fmt.Errorf("shell3: runtime is closed")
 	}
 	if opts.Name == "" {
-		rt.nextName++
-		opts.Name = fmt.Sprintf("s%d", rt.nextName)
+		// Advance until we find a name not already taken by a live session.
+		for {
+			rt.nextName++
+			opts.Name = fmt.Sprintf("s%d", rt.nextName)
+			if _, taken := rt.sessions[opts.Name]; !taken {
+				break
+			}
+		}
 	}
 	if s, ok := rt.sessions[opts.Name]; ok {
 		return s, nil
@@ -104,14 +110,15 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := newSession(cfg, func() {}) // shared parts are the runtime's to clean
-	s.shellInteractive = opts.ShellInteractive
-	s.runtime, s.name = rt, opts.Name
-
+	// Open the sink before constructing anything stateful: a failure here must
+	// not leak a partially-initialised session or a store row.
 	sink, sinkCleanup, err := chat.OpenSink(opts.OutPath)
 	if err != nil {
 		return nil, err
 	}
+	s := newSession(cfg, func() {}) // shared parts are the runtime's to clean
+	s.shellInteractive = opts.ShellInteractive
+	s.runtime, s.name = rt, opts.Name
 	s.sink, s.sinkCleanup = sink, sinkCleanup
 	if sink != nil {
 		_, model := chat.SplitStatus(cfg.StatusLine)
@@ -146,7 +153,6 @@ func (rt *Runtime) Close() error {
 
 	var firstErr error
 	for _, s := range open {
-		s.runtime = nil // already deregistered; avoid forget() on a concurrently torn-down map
 		if err := s.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}

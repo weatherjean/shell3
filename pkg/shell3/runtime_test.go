@@ -82,6 +82,42 @@ func TestRuntime_SessionNameReuseAndClose(t *testing.T) {
 	}
 }
 
+// TestRuntime_SessionAfterCloseErrors: Session on a closed runtime returns an error.
+func TestRuntime_SessionAfterCloseErrors(t *testing.T) {
+	rt := newTestRuntime(t, fakeCfg("x"))
+	if err := rt.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err := rt.Session(SessionOpts{})
+	if err == nil {
+		t.Fatal("expected error from Session on closed runtime, got nil")
+	}
+}
+
+// TestRuntime_GeneratedNamesSkipTakenNames: when a manually-named session
+// occupies "s1", two auto-named sessions must each get a fresh distinct name.
+func TestRuntime_GeneratedNamesSkipTakenNames(t *testing.T) {
+	rt := newTestRuntime(t, fakeCfg("x"))
+	manual, err := rt.Session(SessionOpts{Name: "s1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	auto1, err := rt.Session(SessionOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	auto2, err := rt.Session(SessionOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if auto1 == manual || auto2 == manual {
+		t.Fatal("auto-generated session must not collide with manually-named session")
+	}
+	if auto1 == auto2 {
+		t.Fatal("two auto-generated sessions must be distinct")
+	}
+}
+
 // TestRuntime_CloseClosesSessions: Runtime.Close closes remaining sessions
 // then runs the shared cleanup exactly once.
 func TestRuntime_CloseClosesSessions(t *testing.T) {
