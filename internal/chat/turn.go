@@ -236,6 +236,43 @@ type toolLoopOutcome struct {
 	pendingMedia []llm.ContentPart // media loaded by read_media, injected as a user message after the loop
 }
 
+// toolLoopState is the mutable state one tool-execution loop threads through
+// its handlers: the working message slice (which compact_history replaces
+// wholesale) and the media parts read_media collects for post-loop injection.
+type toolLoopState struct {
+	allMsgs      []llm.Message
+	pendingMedia []llm.ContentPart
+}
+
+// turnScopedHandlers builds the ToolHandlers that exist per tool loop rather
+// than in the shared NewHandlers map, because they need state beyond
+// ToolConfig: compact_history rewrites the conversation itself,
+// shell_interactive borrows the front-end's TTY runner, and read_media
+// collects media parts for the post-loop user message. They close over st, so
+// the trio is rebuilt for each executeToolCalls invocation.
+func turnScopedHandlers(cfg TurnConfig, sess *Session, st *toolLoopState) map[string]ToolHandler {
+	return map[string]ToolHandler{
+		"compact_history": funcHandler{name: "compact_history", fn: func(_ context.Context, _ string, args json.RawMessage, _ ToolConfig) (string, error) {
+			out, newMsgs := handleCompactHistory(string(args), cfg.Store, sess, st.allMsgs, cfg.Log)
+			st.allMsgs = newMsgs
+			return out, nil
+		}},
+		"shell_interactive": funcHandler{name: "shell_interactive", fn: func(ctx context.Context, _ string, args json.RawMessage, _ ToolConfig) (string, error) {
+			if cfg.ShellInteractive == nil {
+				return "error: interactive TTY not available", nil
+			}
+			return cfg.ShellInteractive(ctx, ParseBashArgs(string(args)), cfg.WorkDir), nil
+		}},
+		"read_media": funcHandler{name: "read_media", fn: func(_ context.Context, _ string, args json.RawMessage, _ ToolConfig) (string, error) {
+			out, part := handleReadMedia(string(args), cfg.WorkDir)
+			if part.Type != "" {
+				st.pendingMedia = append(st.pendingMedia, part)
+			}
+			return out, nil
+		}},
+	}
+}
+
 // executeToolCalls runs the assistant's tool calls in order, emitting
 // tool_call/tool_result events and appending each tool message to both allMsgs
 // and the session. It returns the updated allMsgs plus cancellation state.
@@ -252,7 +289,8 @@ type toolLoopOutcome struct {
 func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCalls []llm.ToolCall, toolSchemas map[string]map[string]any, allMsgs []llm.Message) (toolLoopOutcome, error) {
 	var cancelled bool
 	var cancelReason string
-	var pendingMedia []llm.ContentPart
+	st := &toolLoopState{allMsgs: allMsgs}
+	turnScoped := turnScopedHandlers(cfg, sess, st)
 	for idx, tc := range toolCalls {
 		if ctx.Err() != nil {
 			return toolLoopOutcome{}, ctx.Err()
@@ -291,34 +329,28 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 			handled = false
 		}
 		// If a hook blocked the call or validation failed, res already carries
-		// the typed reason and we skip dispatch. Otherwise route to the tool.
+		// the typed reason and we skip dispatch. Otherwise resolve a handler —
+		// turn-scoped first, then the prefixed MCP and custom dispatchers, then
+		// the shared built-ins (custom before built-ins so a config-declared
+		// tool name always wins) — and run it through the single execute path.
 		if !handled {
-			if tc.Name == "compact_history" {
-				var out string
-				out, allMsgs = handleCompactHistory(tc.RawArgs, cfg.Store, sess, allMsgs, cfg.Log)
-				res = classifyHandlerOutput(out)
-			} else if tc.Name == "shell_interactive" {
-				command := ParseBashArgs(tc.RawArgs)
-				if cfg.ShellInteractive != nil {
-					res = classifyHandlerOutput(cfg.ShellInteractive(ctx, command, cfg.WorkDir))
-				} else {
-					res = errResult("error: interactive TTY not available")
-				}
-			} else if tc.Name == "read_media" {
-				out, part := handleReadMedia(tc.RawArgs, cfg.WorkDir)
-				if part.Type != "" {
-					pendingMedia = append(pendingMedia, part)
-				}
-				res = classifyHandlerOutput(out)
+			var handler ToolHandler
+			if h, ok := turnScoped[tc.Name]; ok {
+				handler = h
 			} else if cfg.MCPToolNames[tc.Name] {
 				res = dispatchMCPTool(ctx, cfg.MCPTool, tc.Name, tc.RawArgs)
 			} else if cfg.CustomToolNames[tc.Name] {
 				res = dispatchCustomTool(ctx, cfg.CustomTool, tc.Name, tc.RawArgs)
-			} else if handler, ok := cfg.Handlers[tc.Name]; ok {
+			} else if h, ok := cfg.Handlers[tc.Name]; ok {
+				handler = h
+			} else {
+				res = errResult(fmt.Sprintf("error: unknown tool %q", tc.Name))
+			}
+			if handler != nil {
 				toolCfg := ToolConfig{
 					Store:    cfg.Store,
 					WorkDir:  cfg.WorkDir,
-					AllMsgs:  allMsgs,
+					AllMsgs:  st.allMsgs,
 					SessMsgs: sess.messages,
 				}
 				out, herr := handler.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), toolCfg)
@@ -334,8 +366,6 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 						res = errResult("error: " + herr.Error())
 					}
 				}
-			} else {
-				res = errResult(fmt.Sprintf("error: unknown tool %q", tc.Name))
 			}
 		}
 
@@ -350,7 +380,7 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 			ToolCallID: tc.ID,
 			Name:       tc.Name,
 		}
-		allMsgs = append(allMsgs, toolMsg)
+		st.allMsgs = append(st.allMsgs, toolMsg)
 		sess.append(toolMsg)
 
 		if cancelled {
@@ -365,17 +395,17 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 					ToolCallID: rem.ID,
 					Name:       rem.Name,
 				}
-				allMsgs = append(allMsgs, stub)
+				st.allMsgs = append(st.allMsgs, stub)
 				sess.append(stub)
 			}
-			return toolLoopOutcome{allMsgs: allMsgs, cancelled: true, cancelReason: cancelReason}, nil
+			return toolLoopOutcome{allMsgs: st.allMsgs, cancelled: true, cancelReason: cancelReason}, nil
 		}
 	}
 
 	if ctx.Err() != nil {
 		return toolLoopOutcome{}, ctx.Err()
 	}
-	return toolLoopOutcome{allMsgs: allMsgs, pendingMedia: pendingMedia}, nil
+	return toolLoopOutcome{allMsgs: st.allMsgs, pendingMedia: st.pendingMedia}, nil
 }
 
 // streamOnce calls the LLM once, collecting text/reasoning/tool-calls/usage

@@ -24,6 +24,21 @@ type ToolHandler interface {
 	Execute(ctx context.Context, id string, args json.RawMessage, cfg ToolConfig) (string, error)
 }
 
+// funcHandler adapts a closure to the ToolHandler interface. Used for the
+// turn-scoped tools (compact_history, shell_interactive, read_media) whose
+// implementations close over the tool loop's mutable state — see
+// turnScopedHandlers in turn.go.
+type funcHandler struct {
+	name string
+	fn   func(ctx context.Context, id string, args json.RawMessage, cfg ToolConfig) (string, error)
+}
+
+func (h funcHandler) Name() string { return h.name }
+
+func (h funcHandler) Execute(ctx context.Context, id string, args json.RawMessage, cfg ToolConfig) (string, error) {
+	return h.fn(ctx, id, args, cfg)
+}
+
 // ToolConfig holds per-invocation state passed to ToolHandler.Execute. It is
 // constructed fresh for each tool call from the current TurnConfig and the
 // session's working message slices. Mutations to AllMsgs and SessMsgs
