@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -387,7 +388,10 @@ func newRenderSink(app patchapp.AppView, lastUsage *usage) (func(shell3.Event), 
 			if ev.Err != nil {
 				msg = ev.Err.Error()
 			}
-			if strings.Contains(msg, "context canceled") {
+			// errors.Is is the primary check now that the turn loop preserves
+			// ctx.Err(); the string fallback covers adapter-wrapped errors that
+			// embed the cancel text without the typed cause.
+			if errors.Is(ev.Err, context.Canceled) || strings.Contains(msg, "context canceled") {
 				app.PrintLine(patchtui.Dim + "[cancelled]" + patchtui.Reset)
 			} else {
 				app.PrintLine(patchtui.Red + "[error: " + msg + "]" + patchtui.Reset)

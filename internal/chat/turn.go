@@ -386,7 +386,7 @@ func isToolError(out string) bool {
 // and emitting per-token chat.Events on sess.events.
 func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools []llm.ToolDefinition, sess *Session) (text, reasoning string, toolCalls []llm.ToolCall, usage llm.Usage, err error) {
 	if ctx.Err() != nil {
-		return "", "", nil, llm.Usage{}, fmt.Errorf("context canceled")
+		return "", "", nil, llm.Usage{}, ctx.Err()
 	}
 	var sb, rb strings.Builder
 	streamErr := client.Stream(ctx, msgs, tools, func(ev llm.StreamEvent) {
@@ -409,7 +409,7 @@ func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools
 		}
 	})
 	if ctx.Err() != nil {
-		return sb.String(), rb.String(), toolCalls, usage, fmt.Errorf("context canceled")
+		return sb.String(), rb.String(), toolCalls, usage, ctx.Err()
 	}
 	return sb.String(), rb.String(), toolCalls, usage, streamErr
 }

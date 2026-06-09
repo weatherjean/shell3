@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -231,5 +232,45 @@ func TestRunTurn_CompactHistory_ReplacesAllMsgs(t *testing.T) {
 	}
 	if msgsContain(round2, "hello there") {
 		t.Fatalf("round 2 prompt still contains pre-compaction user text: %+v", round2)
+	}
+}
+
+// TestRunTurn_CtxCancel_PreservesTypedError pins that cancellation surfaces as
+// the typed context.Canceled (not a look-alike string error), so embedders can
+// errors.Is across the pkg/shell3 boundary.
+func TestRunTurn_CtxCancel_PreservesTypedError(t *testing.T) {
+	fake := fakellm.New(
+		fakellm.Script{Events: []llm.StreamEvent{
+			{ToolCall: &llm.ToolCall{ID: "a", Name: "echo", RawArgs: `{}`}},
+			{ToolCall: &llm.ToolCall{ID: "b", Name: "echo", RawArgs: `{}`}},
+		}},
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cfg := TurnConfig{
+		LLM:         fake,
+		Personality: persona.Persona{SystemPrompt: "test"},
+		Handlers:    map[string]ToolHandler{"echo": stubHandler{name: "echo", out: "echoed"}},
+		Log:         LogOrNoop(nil),
+		ToolGuard: func(c context.Context, tool string, params map[string]any) (int, string, error) {
+			cancel()
+			return guardAllow, "", nil
+		},
+	}
+
+	events, _ := collectTurn(t, ctx, cfg, "hi")
+
+	var errEv *Event
+	for i := range events {
+		if events[i].Kind == EventError {
+			errEv = &events[i]
+			break
+		}
+	}
+	if errEv == nil {
+		t.Fatalf("expected an error event; events=%+v", events)
+	}
+	if !errors.Is(errEv.Err, context.Canceled) {
+		t.Fatalf("error event should satisfy errors.Is(err, context.Canceled); got %v", errEv.Err)
 	}
 }
