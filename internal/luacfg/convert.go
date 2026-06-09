@@ -50,6 +50,7 @@ func tableToMap(t *lua.LTable) map[string]any {
 	})
 	return out
 }
+
 // stringList reads the array part of a Lua table as a []string.
 func stringList(t *lua.LTable) []string {
 	var out []string
