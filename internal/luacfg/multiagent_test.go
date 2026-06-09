@@ -43,30 +43,6 @@ shell3.agent({ name="plan",  model="haiku", prompt="p" })
 	}
 }
 
-func TestAgentByNameLookup(t *testing.T) {
-	p := writeConfig(t, twoModelsHdr+`
-shell3.agent({ name="build", model="opus",  prompt="b" })
-shell3.agent({ name="plan",  model="haiku", prompt="p" })
-`)
-	c, err := Load(p, filepath.Dir(p))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
-	a, ok := c.AgentByName("plan")
-	if !ok || a.Name != "plan" {
-		t.Fatalf("AgentByName(plan) = %v, ok=%v", a.Name, ok)
-	}
-	// Unknown name reports ok=false; no global state is mutated.
-	if _, ok := c.AgentByName("nope"); ok {
-		t.Fatal("AgentByName(nope) should report ok=false")
-	}
-	// Lookup again after miss: first agent still accessible via FirstAgent.
-	if c.FirstAgent().Name != "build" {
-		t.Fatal("FirstAgent should still be build after a failed lookup")
-	}
-}
-
 func TestDuplicateAgentNameErrors(t *testing.T) {
 	p := writeConfig(t, twoModelsHdr+`
 shell3.agent({ name="dup", model="opus", prompt="a" })
@@ -107,6 +83,7 @@ shell3.agent({ name="base", model="opus", prompt="x" })
 
 // TestAgentByName_LookupAndMiss pins the name-parameterized agent lookup that
 // replaces process-global active-agent state: sessions own their agent choice.
+// Combines lookup, miss, FirstAgent-still-first, and BuildPersonaFor assertions.
 func TestAgentByName_LookupAndMiss(t *testing.T) {
 	p := writeConfig(t, `
 shell3.model("m", { base_url = "http://x", api_key = "k", model = "mm" })
@@ -123,8 +100,13 @@ shell3.agent({ name = "plan", model = "m", prompt = "p" })
 	if !ok || a.Name != "plan" || a.Prompt != "p" {
 		t.Fatalf("AgentByName(plan) = %+v, %t", a, ok)
 	}
+	// Unknown name reports ok=false; no global state is mutated.
 	if _, ok := c.AgentByName("nope"); ok {
 		t.Fatal("AgentByName(nope) should report ok=false")
+	}
+	// Lookup again after miss: first agent still accessible via FirstAgent.
+	if c.FirstAgent().Name != "code" {
+		t.Fatal("FirstAgent should still be code after a failed lookup")
 	}
 	// BuildPersonaFor renders the *given* agent, independent of any global.
 	if got := c.BuildPersonaFor(a); got != "p" {

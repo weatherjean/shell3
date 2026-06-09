@@ -40,6 +40,17 @@ type Options struct {
 // Parts is the session-independent runtime assembly: everything one process
 // shares across N sessions. Front-ends derive per-session chat.Configs from it
 // via SessionConfig.
+//
+// Concurrency: all exported methods are safe for concurrent use by multiple
+// sessions. The Lua VM (luacfg.LoadedConfig) serialises access with a mutex.
+// The history store is database/sql over SQLite — safe for concurrent callers.
+// The proxy spawner and MCP manager are each mutex-guarded internally.
+// AgentRuntime builds a fresh LLM client per call, so no client state is
+// shared across sessions.
+//
+// Lifetime: Parts must not be used after the cleanup function returned by
+// BuildParts has run. The cleanup closes the store, Lua state, MCP servers,
+// and log; any method call after cleanup has undefined behaviour.
 type Parts struct {
 	lc     *luacfg.LoadedConfig
 	st     *store.Store
@@ -50,10 +61,17 @@ type Parts struct {
 	root   string // runtime root workdir (Options.CWD)
 }
 
+// Store returns the SQLite history store (nil when history is not enabled by any agent).
 func (p *Parts) Store() *store.Store { return p.st }
-func (p *Parts) Log() applog.Logger  { return p.log }
-func (p *Parts) ProjectRef() string  { return p.uuid }
-func (p *Parts) Root() string        { return p.root }
+
+// Log returns the rotating application logger.
+func (p *Parts) Log() applog.Logger { return p.log }
+
+// ProjectRef returns the project UUID used to namespace store entries and paths.
+func (p *Parts) ProjectRef() string { return p.uuid }
+
+// Root returns the runtime root working directory (the CWD passed to BuildParts).
+func (p *Parts) Root() string { return p.root }
 
 // AgentNames returns declared agent names in declaration order.
 func (p *Parts) AgentNames() []string {
@@ -158,6 +176,11 @@ func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
 }
 
 // RefreshPromptFor re-renders the named agent's system prompt (used by /clear).
+// name must be a declared agent name; callers are expected to pass names that
+// were previously validated by a successful AgentRuntime call (names come from
+// ModeLabel, which is set to a.Name only on a successful lookup). The
+// FirstAgent fallback exists only so an impossible miss degrades to a sane
+// prompt rather than panicking; in correct use that branch is never reached.
 func (p *Parts) RefreshPromptFor(name string) string {
 	a, ok := p.lc.AgentByName(name)
 	if !ok {
@@ -203,6 +226,11 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 		RefreshPrompt: func() string { return p.RefreshPromptFor(activeName) },
 	}
 	cfg.SwitchAgent = func(name string) (chat.ActiveAgent, error) {
+		// "" means "use the first agent" during initial session selection only
+		// (AgentRuntime's contract). Switching to "" is a caller bug.
+		if name == "" {
+			return chat.ActiveAgent{}, fmt.Errorf("unknown agent %q", name)
+		}
 		nrt, err := p.AgentRuntime(name)
 		if err != nil {
 			return chat.ActiveAgent{}, err
