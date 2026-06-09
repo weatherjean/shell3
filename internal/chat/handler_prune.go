@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/weatherjean/shell3/internal/llm"
 )
@@ -44,8 +43,8 @@ func handlePruneToolResultFrom(rawArgs string, slices ...[]llm.Message) string {
 	for _, s := range slices {
 		scoped = append(scoped, lastNTurns(s, 2))
 	}
-	out := PruneByID(args.ToolCallID, stem, scoped...)
-	if strings.HasPrefix(out, "error: no tool result with id") {
+	out, ok := PruneByID(args.ToolCallID, stem, scoped...)
+	if !ok {
 		// Distinguish out-of-scope from truly-absent by re-checking full slices.
 		for _, s := range slices {
 			for i := range s {
@@ -76,8 +75,10 @@ func lastNTurns(msgs []llm.Message, n int) []llm.Message {
 }
 
 // PruneByID replaces the tool result with the given id in any of the slices
-// with a short stem stub. Returns a human-readable status string.
-func PruneByID(toolCallID, stem string, slices ...[]llm.Message) string {
+// with a short stem stub. summary is a human-readable status string; ok is
+// false when no tool result with that id exists in the slices, so callers
+// branch on the flag instead of parsing the summary.
+func PruneByID(toolCallID, stem string, slices ...[]llm.Message) (summary string, ok bool) {
 	var target *llm.Message
 	var name string
 	for _, msgs := range slices {
@@ -93,7 +94,7 @@ func PruneByID(toolCallID, stem string, slices ...[]llm.Message) string {
 		}
 	}
 	if target == nil {
-		return fmt.Sprintf("error: no tool result with id %q in conversation", toolCallID)
+		return fmt.Sprintf("error: no tool result with id %q in conversation", toolCallID), false
 	}
 
 	content := target.Content
@@ -108,7 +109,7 @@ func PruneByID(toolCallID, stem string, slices ...[]llm.Message) string {
 		}
 	}
 	if count == 0 {
-		return "error: failed to update message content"
+		return "error: failed to update message content", false
 	}
-	return fmt.Sprintf("Pruned result of %s (id=%s): freed %d bytes", name, toolCallID, len(content)-len(stub))
+	return fmt.Sprintf("Pruned result of %s (id=%s): freed %d bytes", name, toolCallID, len(content)-len(stub)), true
 }

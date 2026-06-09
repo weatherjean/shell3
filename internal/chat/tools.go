@@ -22,30 +22,54 @@ const (
 	guardCancel guardDecision = 2 // abort the entire turn
 )
 
+// toolResult is the typed outcome of one tool call: the text recorded as the
+// tool message plus whether it represents a failure. Every dispatch path in
+// executeToolCalls produces one, so error-ness is carried as data instead of
+// being re-derived by sniffing prefixes off the output string.
+type toolResult struct {
+	output  string
+	isError bool
+}
+
+func okResult(out string) toolResult  { return toolResult{output: out} }
+func errResult(out string) toolResult { return toolResult{output: out, isError: true} }
+
+// classifyHandlerOutput types a built-in handler's output string. Handlers
+// report in-band failures to the model as "error: …" strings (so the text and
+// the flag can never disagree); this is the single place that convention is
+// interpreted. Guard, hook, validation, and dispatcher failures never pass
+// through here — they construct typed errResults directly.
+func classifyHandlerOutput(out string) toolResult {
+	if strings.HasPrefix(out, "error:") {
+		return errResult(out)
+	}
+	return okResult(out)
+}
+
 // dispatchCustomTool calls custom for a named custom tool. If custom is nil the
-// call returns an unknown-tool error string.
-func dispatchCustomTool(ctx context.Context, custom func(ctx context.Context, name, argsJSON string) (string, error), name, rawArgs string) string {
+// call returns an unknown-tool error.
+func dispatchCustomTool(ctx context.Context, custom func(ctx context.Context, name, argsJSON string) (string, error), name, rawArgs string) toolResult {
 	if custom == nil {
-		return fmt.Sprintf("error: unknown tool %q", name)
+		return errResult(fmt.Sprintf("error: unknown tool %q", name))
 	}
 	out, err := custom(ctx, name, rawArgs)
 	if err != nil {
-		return "error: " + err.Error()
+		return errResult("error: " + err.Error())
 	}
-	return out
+	return classifyHandlerOutput(out)
 }
 
 // dispatchMCPTool calls mcp for a prefixed MCP tool (server__tool). If mcp is
-// nil it returns an error string for the model.
-func dispatchMCPTool(ctx context.Context, mcp func(ctx context.Context, name, argsJSON string) (string, error), name, rawArgs string) string {
+// nil it returns an error for the model.
+func dispatchMCPTool(ctx context.Context, mcp func(ctx context.Context, name, argsJSON string) (string, error), name, rawArgs string) toolResult {
 	if mcp == nil {
-		return "error: MCP tool dispatcher unavailable"
+		return errResult("error: MCP tool dispatcher unavailable")
 	}
 	out, err := mcp(ctx, name, rawArgs)
 	if err != nil {
-		return "error: " + err.Error()
+		return errResult("error: " + err.Error())
 	}
-	return out
+	return classifyHandlerOutput(out)
 }
 
 // handleCompactHistory replaces the conversation history with a structured

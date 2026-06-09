@@ -265,49 +265,55 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 		if cfg.ToolGuard != nil {
 			decision, hookReason, hookErr = cfg.ToolGuard(ctx, tc.Name, parseRawArgs(tc.RawArgs))
 		}
-		var out string
+		var res toolResult
+		handled := true
 		if hookErr != nil {
-			out = fmt.Sprintf("Tool-call hook failed (the on_tool_call hook script itself errored, not the user): %v. Do not retry the same call without adjusting your approach.", hookErr)
+			res = errResult(fmt.Sprintf("Tool-call hook failed (the on_tool_call hook script itself errored, not the user): %v. Do not retry the same call without adjusting your approach.", hookErr))
 		} else if decision == guardCancel {
 			if hookReason == "" {
 				hookReason = "user cancelled"
 			}
 			cancelled = true
 			cancelReason = hookReason
-			out = fmt.Sprintf("USER CANCELLED the turn before this %s call ran. Reason: %s. Subsequent tool calls in this turn were not executed.", tc.Name, hookReason)
+			res = errResult(fmt.Sprintf("USER CANCELLED the turn before this %s call ran. Reason: %s. Subsequent tool calls in this turn were not executed.", tc.Name, hookReason))
 		} else if decision == guardBlock {
 			if hookReason == "" {
 				hookReason = "no reason given"
 			}
-			out = fmt.Sprintf("USER DENIED this %s tool call. Reason: %s. Treat this as the user explicitly disapproving this action — do NOT retry the same call. Acknowledge the denial, ask what they want instead, or pick a different approach.", tc.Name, hookReason)
+			res = errResult(fmt.Sprintf("USER DENIED this %s tool call. Reason: %s. Treat this as the user explicitly disapproving this action — do NOT retry the same call. Acknowledge the denial, ask what they want instead, or pick a different approach.", tc.Name, hookReason))
 		} else if schema, ok := toolSchemas[tc.Name]; ok {
 			if err := validateToolArgs(schema, json.RawMessage([]byte(tc.RawArgs))); err != nil {
-				out = fmt.Sprintf("error: invalid tool arguments: %v", err)
+				res = errResult(fmt.Sprintf("error: invalid tool arguments: %v", err))
+			} else {
+				handled = false
 			}
+		} else {
+			handled = false
 		}
-		// If a hook blocked the call or validation failed, out already carries
-		// the reason text and we skip dispatch. The tool_result event emitted
-		// below surfaces it with ToolError=true. Otherwise route to the tool.
-		if out == "" {
+		// If a hook blocked the call or validation failed, res already carries
+		// the typed reason and we skip dispatch. Otherwise route to the tool.
+		if !handled {
 			if tc.Name == "compact_history" {
+				var out string
 				out, allMsgs = handleCompactHistory(tc.RawArgs, cfg.Store, sess, allMsgs, cfg.Log)
+				res = classifyHandlerOutput(out)
 			} else if tc.Name == "shell_interactive" {
 				command := ParseBashArgs(tc.RawArgs)
 				if cfg.ShellInteractive != nil {
-					out = cfg.ShellInteractive(ctx, command, cfg.WorkDir)
+					res = classifyHandlerOutput(cfg.ShellInteractive(ctx, command, cfg.WorkDir))
 				} else {
-					out = "error: interactive TTY not available"
+					res = errResult("error: interactive TTY not available")
 				}
 			} else if tc.Name == "read_media" {
-				var part llm.ContentPart
-				out, part = handleReadMedia(tc.RawArgs, cfg.WorkDir)
+				out, part := handleReadMedia(tc.RawArgs, cfg.WorkDir)
 				if part.Type != "" {
 					pendingMedia = append(pendingMedia, part)
 				}
+				res = classifyHandlerOutput(out)
 			} else if cfg.MCPToolNames[tc.Name] {
-				out = dispatchMCPTool(ctx, cfg.MCPTool, tc.Name, tc.RawArgs)
+				res = dispatchMCPTool(ctx, cfg.MCPTool, tc.Name, tc.RawArgs)
 			} else if cfg.CustomToolNames[tc.Name] {
-				out = dispatchCustomTool(ctx, cfg.CustomTool, tc.Name, tc.RawArgs)
+				res = dispatchCustomTool(ctx, cfg.CustomTool, tc.Name, tc.RawArgs)
 			} else if handler, ok := cfg.Handlers[tc.Name]; ok {
 				toolCfg := ToolConfig{
 					Store:    cfg.Store,
@@ -315,8 +321,8 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 					AllMsgs:  allMsgs,
 					SessMsgs: sess.messages,
 				}
-				var herr error
-				out, herr = handler.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), toolCfg)
+				out, herr := handler.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), toolCfg)
+				res = classifyHandlerOutput(out)
 				if herr != nil {
 					// Most handlers encode failures in their output string and
 					// return a nil error; a non-nil error is a genuine handler
@@ -325,19 +331,19 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 					// tool error rather than emitting an empty result.
 					cfg.Log.Warn("tool handler error", "tool", tc.Name, "error", herr)
 					if out == "" {
-						out = "error: " + herr.Error()
+						res = errResult("error: " + herr.Error())
 					}
 				}
 			} else {
-				out = fmt.Sprintf("error: unknown tool %q", tc.Name)
+				res = errResult(fmt.Sprintf("error: unknown tool %q", tc.Name))
 			}
 		}
 
-		emitToolResult(sess, tc.ID, tc.Name, out, isToolError(out))
+		emitToolResult(sess, tc.ID, tc.Name, res.output, res.isError)
 		// Prepend the tool_call_id so the model has a stable handle it
 		// can pass to prune_tool_result. Without this the id only lives
 		// in structured metadata, which the model cannot reliably echo.
-		content := fmt.Sprintf("[tool_call_id=%s]\n%s", tc.ID, out)
+		content := fmt.Sprintf("[tool_call_id=%s]\n%s", tc.ID, res.output)
 		toolMsg := llm.Message{
 			Role:       llm.RoleTool,
 			Content:    content,
@@ -370,16 +376,6 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 		return toolLoopOutcome{}, ctx.Err()
 	}
 	return toolLoopOutcome{allMsgs: allMsgs, pendingMedia: pendingMedia}, nil
-}
-
-// isToolError reports whether a tool's output string represents a failure,
-// by its leading marker. Keep in sync with the markers produced in
-// executeToolCalls (validation errors, guard block/cancel, hook failures).
-func isToolError(out string) bool {
-	return strings.HasPrefix(out, "error:") ||
-		strings.HasPrefix(out, "USER DENIED") ||
-		strings.HasPrefix(out, "USER CANCELLED") ||
-		strings.HasPrefix(out, "Tool-call hook failed")
 }
 
 // streamOnce calls the LLM once, collecting text/reasoning/tool-calls/usage

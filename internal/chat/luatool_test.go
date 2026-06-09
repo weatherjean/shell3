@@ -11,9 +11,9 @@ func TestCustomToolDispatcher(t *testing.T) {
 		called = name + ":" + args
 		return "ok", nil
 	}
-	out := dispatchCustomTool(context.Background(), custom, "echo", `{"a":1}`)
-	if out != "ok" || called != `echo:{"a":1}` {
-		t.Fatalf("dispatch: out=%q called=%q", out, called)
+	res := dispatchCustomTool(context.Background(), custom, "echo", `{"a":1}`)
+	if res.output != "ok" || res.isError || called != `echo:{"a":1}` {
+		t.Fatalf("dispatch: res=%+v called=%q", res, called)
 	}
 }
 

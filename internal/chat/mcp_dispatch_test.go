@@ -11,15 +11,15 @@ func TestDispatchRoutesMCPName(t *testing.T) {
 		called = name
 		return "navigated", nil
 	}
-	out := dispatchMCPTool(context.Background(), mcp, "chrome__navigate_page", `{"url":"x"}`)
-	if out != "navigated" || called != "chrome__navigate_page" {
-		t.Fatalf("unexpected: out=%q called=%q", out, called)
+	res := dispatchMCPTool(context.Background(), mcp, "chrome__navigate_page", `{"url":"x"}`)
+	if res.output != "navigated" || res.isError || called != "chrome__navigate_page" {
+		t.Fatalf("unexpected: res=%+v called=%q", res, called)
 	}
 }
 
 func TestDispatchMCPToolNilSeam(t *testing.T) {
-	out := dispatchMCPTool(context.Background(), nil, "chrome__navigate_page", `{}`)
-	if out == "" {
-		t.Fatalf("expected an error string when seam is nil")
+	res := dispatchMCPTool(context.Background(), nil, "chrome__navigate_page", `{}`)
+	if res.output == "" || !res.isError {
+		t.Fatalf("expected a typed error result when seam is nil, got %+v", res)
 	}
 }

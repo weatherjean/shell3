@@ -611,14 +611,9 @@ func (s *Session) Prune(id string) (summary string, ok bool) {
 		return "error: " + ErrBusy.Error(), false
 	}
 	msgs := s.sess.Messages()
-	out := chat.PruneByID(id, "pruned by user", msgs)
+	out, ok := chat.PruneByID(id, "pruned by user", msgs)
 	s.sess.SetMessages(msgs)
-	// PruneByID reports a missing id with an "error: no tool result with id …"
-	// prefix; treat any other (success) string as ok.
-	if strings.HasPrefix(out, "error: no tool result with id") {
-		return out, false
-	}
-	return out, true
+	return out, ok
 }
 
 // SetParam sets a tunable provider parameter for subsequent turns (= the TUI's
