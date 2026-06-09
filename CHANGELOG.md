@@ -10,6 +10,9 @@ Until v1.0.0, minor versions may contain breaking changes.
 
 ### Added
 
+- `pkg/shell3.Runtime`: one shared build (config, store, MCP, log) hosting
+  multiple named sessions with per-session agent, workdir, headless flag,
+  and audit log. `Start`/`Run` are now thin single-session wrappers.
 - `shell3 boot` interactive onboarding: writes a split-file base config
   (`shell3.lua` + `lib/` modules) and merges secrets into `~/.shell3/.env`.
 - Embeddable library API at `pkg/shell3`: one-shot `Run`, persistent

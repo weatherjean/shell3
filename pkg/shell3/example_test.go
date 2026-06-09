@@ -76,3 +76,32 @@ func ExampleSession_Snapshot() {
 		fmt.Println(tool.Name, "—", tool.Description)
 	}
 }
+
+// ExampleNewRuntime shows the always-on host shape: one Runtime rooted at an
+// agent home, multiple named sessions (e.g. one per Telegram chat), each with
+// its own history, agent, and optional workdir.
+func ExampleNewRuntime() {
+	rt, err := shell3.NewRuntime(shell3.RuntimeSpec{WorkDir: "/home/me/assistant"})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rt.Close()
+
+	chat1, err := rt.Session(shell3.SessionOpts{Name: "tg:1234", Headless: true})
+	if err != nil {
+		log.Fatal(err)
+	}
+	for ev := range chat1.Send(context.Background(), "good morning") {
+		if ev.Kind == shell3.Token {
+			fmt.Print(ev.Text)
+		}
+	}
+
+	// A second session rooted in a repo behaves like a normal coding session.
+	coder, err := rt.Session(shell3.SessionOpts{Name: "job:fix-ci", WorkDir: "/home/me/src/myrepo", Headless: true})
+	if err != nil {
+		log.Fatal(err)
+	}
+	for range coder.Send(context.Background(), "make the tests pass") {
+	}
+}

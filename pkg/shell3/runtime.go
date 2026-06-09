@@ -120,9 +120,7 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	s.shellInteractive = opts.ShellInteractive
 	s.runtime, s.name = rt, opts.Name
 	s.sink, s.sinkCleanup = sink, sinkCleanup
-	if sink != nil {
-		s.writeStartLine("(session " + opts.Name + ")")
-	}
+	s.writeStartLine("(session " + opts.Name + ")")
 	rt.sessions[opts.Name] = s
 	return s, nil
 }

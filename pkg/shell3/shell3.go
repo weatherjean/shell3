@@ -197,25 +197,28 @@ func Start(ctx context.Context, spec Spec) (*Session, error) {
 		return nil, err
 	}
 	s.ownsRuntime = true
-	s.cfg.OutPath = spec.OutPath // introspection parity with the old build path
+	s.cfg.OutPath = spec.OutPath // also feeds writeStartLine's out field (byte-compat) and introspection
 	sink, sinkCleanup, err := chat.OpenSink(spec.OutPath)
 	if err != nil {
 		_ = s.Close() // also closes the runtime via ownsRuntime
 		return nil, err
 	}
 	s.sink, s.sinkCleanup = sink, sinkCleanup
-	if sink != nil {
-		label := spec.Prompt
-		if label == "" {
-			label = "(interactive)"
-		}
-		s.writeStartLine(label)
+	label := spec.Prompt
+	if label == "" {
+		label = "(interactive)"
 	}
+	s.writeStartLine(label)
 	return s, nil
 }
 
 // writeStartLine writes the audit log's opening line for this session.
+// Safe to call regardless of whether a sink was opened: returns immediately
+// when s.sink is nil so callers need not guard the call.
 func (s *Session) writeStartLine(label string) {
+	if s.sink == nil {
+		return
+	}
 	_, model := chat.SplitStatus(s.cfg.StatusLine)
 	s.sink.WriteStart(label, s.cfg.ModeLabel, model, s.cfg.OutPath, s.cfg.Headless)
 }
@@ -366,6 +369,16 @@ func (s *Session) ID() string {
 // Close ends the conversation: cancels any in-flight turn, waits for it to
 // finish (so its deferred history persist runs against the still-open store),
 // then ends the store session and releases the config.
+//
+// Concurrency: Close must not be called concurrently with itself. A sequential
+// second Close is a safe no-op: the turn-cancel and join are idempotent and
+// the store, sink, and cleanup paths guard against double execution.
+//
+// For Start-owned sessions (the common single-session case), Close also tears
+// down the private Runtime that Start created — the LLM client, store, MCP
+// servers, and proxy spawner. For Runtime-hosted sessions created via
+// Runtime.Session, Close deregisters the session from its Runtime (the shared
+// parts remain alive for the other sessions).
 //
 // Close is robust to an abandoned Send channel: cancelling the turn ctx unblocks
 // route's send to an unread channel (its curDone select fires), so the turn

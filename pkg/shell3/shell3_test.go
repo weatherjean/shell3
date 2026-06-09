@@ -783,3 +783,54 @@ func TestSession_BusyEnforcement(t *testing.T) {
 		t.Fatalf("Clear after drain should succeed, got %v", err)
 	}
 }
+
+// TestSession_SinkStartLabel pins the "(session <name>)" label written by
+// Runtime.Session into the JSONL audit log and exercises the writeStartLine +
+// cfg.OutPath plumbing for real. It creates a runtime-hosted session with an
+// OutPath, runs one trivial fakellm turn, closes, then reads the file and
+// asserts: first line is the start event with input="(session tg:1)", last
+// line is the end event.
+func TestSession_SinkStartLabel(t *testing.T) {
+	outFile := filepath.Join(t.TempDir(), "audit.jsonl")
+	rt := newTestRuntime(t, fakeCfg("hello"))
+	s, err := rt.Session(SessionOpts{Name: "tg:1", OutPath: outFile})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Run one turn so the sink has events in between start and end.
+	for range s.Send(context.Background(), "ping") {
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("reading audit log: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 lines in audit log, got %d: %q", len(lines), string(data))
+	}
+
+	// First line: start event with label "(session tg:1)".
+	var first map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatalf("parsing first line: %v (line=%q)", err, lines[0])
+	}
+	if got := first["kind"]; got != "start" {
+		t.Fatalf("first line kind=%q, want %q", got, "start")
+	}
+	if got := first["input"]; got != "(session tg:1)" {
+		t.Fatalf("first line input=%q, want %q", got, "(session tg:1)")
+	}
+
+	// Last line: end event.
+	var last map[string]any
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &last); err != nil {
+		t.Fatalf("parsing last line: %v (line=%q)", err, lines[len(lines)-1])
+	}
+	if got := last["kind"]; got != "end" {
+		t.Fatalf("last line kind=%q, want %q", got, "end")
+	}
+}

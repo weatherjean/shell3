@@ -2,11 +2,14 @@ package shell3
 
 import (
 	"context"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
+	"github.com/weatherjean/shell3/internal/persona"
 )
 
 // newTestRuntime builds a Runtime around fakellm-backed configs, bypassing
@@ -162,5 +165,45 @@ func TestRuntime_CloseClosesSessions(t *testing.T) {
 	}
 	if cleanups != 1 {
 		t.Fatalf("second Close re-ran cleanup (%d)", cleanups)
+	}
+}
+
+// TestRuntime_PerSessionWorkdir: a bash tool call runs in the session's own
+// workdir, not the runtime root — the substrate for repo-rooted subagents.
+func TestRuntime_PerSessionWorkdir(t *testing.T) {
+	dirA, dirB := t.TempDir(), t.TempDir()
+	mk := func() chat.Config {
+		return chat.Config{
+			LLM: fakellm.New(
+				fakellm.Script{Events: []llm.StreamEvent{
+					{ToolCall: &llm.ToolCall{ID: "1", Name: "bash", RawArgs: `{"command":"pwd"}`}},
+				}},
+				fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "done"}}},
+			),
+			ModeLabel: "code",
+			Personality: persona.Persona{Tools: []llm.ToolDefinition{{
+				Name: "bash", Parameters: map[string]any{"type": "object"},
+			}}},
+		}
+	}
+	rt := newTestRuntime(t, mk)
+	a, _ := rt.Session(SessionOpts{Name: "a", WorkDir: dirA})
+	b, _ := rt.Session(SessionOpts{Name: "b", WorkDir: dirB})
+
+	got := map[*Session]string{}
+	for _, s := range []*Session{a, b} {
+		for ev := range s.Send(context.Background(), "where am I?") {
+			if ev.Kind == ToolResult && ev.ToolName == "bash" {
+				got[s] = strings.TrimSpace(ev.ToolOutput)
+			}
+		}
+	}
+	// macOS tempdirs may resolve through /private; compare with EvalSymlinks.
+	wantA, _ := filepath.EvalSymlinks(dirA)
+	wantB, _ := filepath.EvalSymlinks(dirB)
+	gotA, _ := filepath.EvalSymlinks(got[a])
+	gotB, _ := filepath.EvalSymlinks(got[b])
+	if gotA != wantA || gotB != wantB {
+		t.Fatalf("bash cwd: a=%q (want %q) b=%q (want %q)", gotA, wantA, gotB, wantB)
 	}
 }
