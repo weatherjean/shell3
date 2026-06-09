@@ -550,9 +550,8 @@ func (s *Session) History() []HistoryEntry {
 }
 
 // stripToolIDPrefix removes the "[tool_call_id=…]\n" prefix the turn loop
-// prepends to each stored tool result's content, leaving just the raw output.
-// Replicated from internal/tui/render.go so the public projection in History
-// hides the internal storage detail.
+// prepends to each stored tool result's content, leaving just the raw output,
+// so the public projection in History hides the internal storage detail.
 func stripToolIDPrefix(content string) string {
 	if strings.HasPrefix(content, "[tool_call_id=") {
 		if nl := strings.IndexByte(content, '\n'); nl >= 0 {
@@ -620,9 +619,9 @@ func (s *Session) SetParam(name, value string) error {
 }
 
 // currentParamValue maps a RequestParams field to its display string for the
-// given /parameters name. Replicated from internal/tui/interactive.go so
-// Snapshot's ParamValue.Value matches the TUI exactly. "" means "unset
-// (provider default)".
+// given /parameters name. The TUI renders Snapshot's ParamValue.Value directly,
+// so this is the single source of that mapping. "" means "unset (provider
+// default)".
 func currentParamValue(p llm.RequestParams, name string) string {
 	switch name {
 	case "reasoning_effort":
