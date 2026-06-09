@@ -148,10 +148,10 @@ func TestRenderBaseConfigEscapesLuaSpecials(t *testing.T) {
 	dir := t.TempDir()
 	v := Values{
 		Name:    "main",
-		BaseURL: `http://x/v1"]] end --`,        // a quote + bracket that would break a raw literal
+		BaseURL: `http://x/v1"]] end --`, // a quote + bracket that would break a raw literal
 		EnvKey:  "MAIN_API_KEY",
-		Model:   `weird\model`,                  // a backslash → invalid Lua escape if unescaped
-		Proxy:   `sh -c "echo hi"`,              // quotes in a proxy command
+		Model:   `weird\model`,     // a backslash → invalid Lua escape if unescaped
+		Proxy:   `sh -c "echo hi"`, // quotes in a proxy command
 	}
 	if err := RenderBaseConfig(dir, v, false); err != nil {
 		t.Fatalf("RenderBaseConfig: %v", err)

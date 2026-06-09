@@ -1,0 +1,44 @@
+version: 2
+
+project_name: shell3
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/shell3
+    binary: shell3
+    env:
+      - CGO_ENABLED=0
+    # Unix-only by design (process groups, TTY handling); see README.
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - formats: [tar.gz]
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs"
+      - "^test"
+      - "^ci"
+      - "^chore"
+
+release:
+  draft: true # review the generated notes before publishing

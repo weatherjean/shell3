@@ -1,3 +1,5 @@
+//go:build unix
+
 // Package patchtui is a differential terminal renderer for inline TUI apps.
 //
 // patchtui solves a specific problem: building a TUI app where the user can

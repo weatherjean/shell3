@@ -1,3 +1,5 @@
+//go:build unix
+
 // Package modelproxy lazily brings up a model's proxy command.
 //
 // A model may declare a `run_proxy` shell command in shell3.lua. The first time

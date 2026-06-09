@@ -236,6 +236,43 @@ type toolLoopOutcome struct {
 	pendingMedia []llm.ContentPart // media loaded by read_media, injected as a user message after the loop
 }
 
+// toolLoopState is the mutable state one tool-execution loop threads through
+// its handlers: the working message slice (which compact_history replaces
+// wholesale) and the media parts read_media collects for post-loop injection.
+type toolLoopState struct {
+	allMsgs      []llm.Message
+	pendingMedia []llm.ContentPart
+}
+
+// turnScopedHandlers builds the ToolHandlers that exist per tool loop rather
+// than in the shared NewHandlers map, because they need state beyond
+// ToolConfig: compact_history rewrites the conversation itself,
+// shell_interactive borrows the front-end's TTY runner, and read_media
+// collects media parts for the post-loop user message. They close over st, so
+// the trio is rebuilt for each executeToolCalls invocation.
+func turnScopedHandlers(cfg TurnConfig, sess *Session, st *toolLoopState) map[string]ToolHandler {
+	return map[string]ToolHandler{
+		"compact_history": funcHandler{name: "compact_history", fn: func(_ context.Context, _ string, args json.RawMessage, _ ToolConfig) (string, error) {
+			out, newMsgs := handleCompactHistory(string(args), cfg.Store, sess, st.allMsgs, cfg.Log)
+			st.allMsgs = newMsgs
+			return out, nil
+		}},
+		"shell_interactive": funcHandler{name: "shell_interactive", fn: func(ctx context.Context, _ string, args json.RawMessage, _ ToolConfig) (string, error) {
+			if cfg.ShellInteractive == nil {
+				return "error: interactive TTY not available", nil
+			}
+			return cfg.ShellInteractive(ctx, ParseBashArgs(string(args)), cfg.WorkDir), nil
+		}},
+		"read_media": funcHandler{name: "read_media", fn: func(_ context.Context, _ string, args json.RawMessage, _ ToolConfig) (string, error) {
+			out, part := handleReadMedia(string(args), cfg.WorkDir)
+			if part.Type != "" {
+				st.pendingMedia = append(st.pendingMedia, part)
+			}
+			return out, nil
+		}},
+	}
+}
+
 // executeToolCalls runs the assistant's tool calls in order, emitting
 // tool_call/tool_result events and appending each tool message to both allMsgs
 // and the session. It returns the updated allMsgs plus cancellation state.
@@ -252,7 +289,8 @@ type toolLoopOutcome struct {
 func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCalls []llm.ToolCall, toolSchemas map[string]map[string]any, allMsgs []llm.Message) (toolLoopOutcome, error) {
 	var cancelled bool
 	var cancelReason string
-	var pendingMedia []llm.ContentPart
+	st := &toolLoopState{allMsgs: allMsgs}
+	turnScoped := turnScopedHandlers(cfg, sess, st)
 	for idx, tc := range toolCalls {
 		if ctx.Err() != nil {
 			return toolLoopOutcome{}, ctx.Err()
@@ -265,58 +303,58 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 		if cfg.ToolGuard != nil {
 			decision, hookReason, hookErr = cfg.ToolGuard(ctx, tc.Name, parseRawArgs(tc.RawArgs))
 		}
-		var out string
+		var res toolResult
+		handled := true
 		if hookErr != nil {
-			out = fmt.Sprintf("Tool-call hook failed (the on_tool_call hook script itself errored, not the user): %v. Do not retry the same call without adjusting your approach.", hookErr)
+			res = errResult(fmt.Sprintf("Tool-call hook failed (the on_tool_call hook script itself errored, not the user): %v. Do not retry the same call without adjusting your approach.", hookErr))
 		} else if decision == guardCancel {
 			if hookReason == "" {
 				hookReason = "user cancelled"
 			}
 			cancelled = true
 			cancelReason = hookReason
-			out = fmt.Sprintf("USER CANCELLED the turn before this %s call ran. Reason: %s. Subsequent tool calls in this turn were not executed.", tc.Name, hookReason)
+			res = errResult(fmt.Sprintf("USER CANCELLED the turn before this %s call ran. Reason: %s. Subsequent tool calls in this turn were not executed.", tc.Name, hookReason))
 		} else if decision == guardBlock {
 			if hookReason == "" {
 				hookReason = "no reason given"
 			}
-			out = fmt.Sprintf("USER DENIED this %s tool call. Reason: %s. Treat this as the user explicitly disapproving this action — do NOT retry the same call. Acknowledge the denial, ask what they want instead, or pick a different approach.", tc.Name, hookReason)
+			res = errResult(fmt.Sprintf("USER DENIED this %s tool call. Reason: %s. Treat this as the user explicitly disapproving this action — do NOT retry the same call. Acknowledge the denial, ask what they want instead, or pick a different approach.", tc.Name, hookReason))
 		} else if schema, ok := toolSchemas[tc.Name]; ok {
 			if err := validateToolArgs(schema, json.RawMessage([]byte(tc.RawArgs))); err != nil {
-				out = fmt.Sprintf("error: invalid tool arguments: %v", err)
+				res = errResult(fmt.Sprintf("error: invalid tool arguments: %v", err))
+			} else {
+				handled = false
 			}
+		} else {
+			handled = false
 		}
-		// If a hook blocked the call or validation failed, out already carries
-		// the reason text and we skip dispatch. The tool_result event emitted
-		// below surfaces it with ToolError=true. Otherwise route to the tool.
-		if out == "" {
-			if tc.Name == "compact_history" {
-				out, allMsgs = handleCompactHistory(tc.RawArgs, cfg.Store, sess, allMsgs, cfg.Log)
-			} else if tc.Name == "shell_interactive" {
-				command := ParseBashArgs(tc.RawArgs)
-				if cfg.ShellInteractive != nil {
-					out = cfg.ShellInteractive(ctx, command, cfg.WorkDir)
-				} else {
-					out = "error: interactive TTY not available"
-				}
-			} else if tc.Name == "read_media" {
-				var part llm.ContentPart
-				out, part = handleReadMedia(tc.RawArgs, cfg.WorkDir)
-				if part.Type != "" {
-					pendingMedia = append(pendingMedia, part)
-				}
+		// If a hook blocked the call or validation failed, res already carries
+		// the typed reason and we skip dispatch. Otherwise resolve a handler —
+		// turn-scoped first, then the prefixed MCP and custom dispatchers, then
+		// the shared built-ins (custom before built-ins so a config-declared
+		// tool name always wins) — and run it through the single execute path.
+		if !handled {
+			var handler ToolHandler
+			if h, ok := turnScoped[tc.Name]; ok {
+				handler = h
 			} else if cfg.MCPToolNames[tc.Name] {
-				out = dispatchMCPTool(ctx, cfg.MCPTool, tc.Name, tc.RawArgs)
+				res = dispatchMCPTool(ctx, cfg.MCPTool, tc.Name, tc.RawArgs)
 			} else if cfg.CustomToolNames[tc.Name] {
-				out = dispatchCustomTool(ctx, cfg.CustomTool, tc.Name, tc.RawArgs)
-			} else if handler, ok := cfg.Handlers[tc.Name]; ok {
+				res = dispatchCustomTool(ctx, cfg.CustomTool, tc.Name, tc.RawArgs)
+			} else if h, ok := cfg.Handlers[tc.Name]; ok {
+				handler = h
+			} else {
+				res = errResult(fmt.Sprintf("error: unknown tool %q", tc.Name))
+			}
+			if handler != nil {
 				toolCfg := ToolConfig{
 					Store:    cfg.Store,
 					WorkDir:  cfg.WorkDir,
-					AllMsgs:  allMsgs,
+					AllMsgs:  st.allMsgs,
 					SessMsgs: sess.messages,
 				}
-				var herr error
-				out, herr = handler.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), toolCfg)
+				out, herr := handler.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), toolCfg)
+				res = classifyHandlerOutput(out)
 				if herr != nil {
 					// Most handlers encode failures in their output string and
 					// return a nil error; a non-nil error is a genuine handler
@@ -325,26 +363,24 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 					// tool error rather than emitting an empty result.
 					cfg.Log.Warn("tool handler error", "tool", tc.Name, "error", herr)
 					if out == "" {
-						out = "error: " + herr.Error()
+						res = errResult("error: " + herr.Error())
 					}
 				}
-			} else {
-				out = fmt.Sprintf("error: unknown tool %q", tc.Name)
 			}
 		}
 
-		emitToolResult(sess, tc.ID, tc.Name, out, isToolError(out))
+		emitToolResult(sess, tc.ID, tc.Name, res.output, res.isError)
 		// Prepend the tool_call_id so the model has a stable handle it
 		// can pass to prune_tool_result. Without this the id only lives
 		// in structured metadata, which the model cannot reliably echo.
-		content := fmt.Sprintf("[tool_call_id=%s]\n%s", tc.ID, out)
+		content := fmt.Sprintf("[tool_call_id=%s]\n%s", tc.ID, res.output)
 		toolMsg := llm.Message{
 			Role:       llm.RoleTool,
 			Content:    content,
 			ToolCallID: tc.ID,
 			Name:       tc.Name,
 		}
-		allMsgs = append(allMsgs, toolMsg)
+		st.allMsgs = append(st.allMsgs, toolMsg)
 		sess.append(toolMsg)
 
 		if cancelled {
@@ -359,34 +395,24 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 					ToolCallID: rem.ID,
 					Name:       rem.Name,
 				}
-				allMsgs = append(allMsgs, stub)
+				st.allMsgs = append(st.allMsgs, stub)
 				sess.append(stub)
 			}
-			return toolLoopOutcome{allMsgs: allMsgs, cancelled: true, cancelReason: cancelReason}, nil
+			return toolLoopOutcome{allMsgs: st.allMsgs, cancelled: true, cancelReason: cancelReason}, nil
 		}
 	}
 
 	if ctx.Err() != nil {
 		return toolLoopOutcome{}, ctx.Err()
 	}
-	return toolLoopOutcome{allMsgs: allMsgs, pendingMedia: pendingMedia}, nil
-}
-
-// isToolError reports whether a tool's output string represents a failure,
-// by its leading marker. Keep in sync with the markers produced in
-// executeToolCalls (validation errors, guard block/cancel, hook failures).
-func isToolError(out string) bool {
-	return strings.HasPrefix(out, "error:") ||
-		strings.HasPrefix(out, "USER DENIED") ||
-		strings.HasPrefix(out, "USER CANCELLED") ||
-		strings.HasPrefix(out, "Tool-call hook failed")
+	return toolLoopOutcome{allMsgs: st.allMsgs, pendingMedia: st.pendingMedia}, nil
 }
 
 // streamOnce calls the LLM once, collecting text/reasoning/tool-calls/usage
 // and emitting per-token chat.Events on sess.events.
 func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools []llm.ToolDefinition, sess *Session) (text, reasoning string, toolCalls []llm.ToolCall, usage llm.Usage, err error) {
 	if ctx.Err() != nil {
-		return "", "", nil, llm.Usage{}, fmt.Errorf("context canceled")
+		return "", "", nil, llm.Usage{}, ctx.Err()
 	}
 	var sb, rb strings.Builder
 	streamErr := client.Stream(ctx, msgs, tools, func(ev llm.StreamEvent) {
@@ -409,7 +435,7 @@ func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools
 		}
 	})
 	if ctx.Err() != nil {
-		return sb.String(), rb.String(), toolCalls, usage, fmt.Errorf("context canceled")
+		return sb.String(), rb.String(), toolCalls, usage, ctx.Err()
 	}
 	return sb.String(), rb.String(), toolCalls, usage, streamErr
 }

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -22,8 +23,8 @@ import (
 // for the App side.
 type session interface {
 	Send(ctx context.Context, prompt string) <-chan shell3.Event
-	Clear()
-	Rollback() bool
+	Clear() error
+	Rollback() (bool, error)
 	SwitchAgent(name string) error
 	AgentNames() []string
 	ActiveAgent() string
@@ -387,7 +388,10 @@ func newRenderSink(app patchapp.AppView, lastUsage *usage) (func(shell3.Event), 
 			if ev.Err != nil {
 				msg = ev.Err.Error()
 			}
-			if strings.Contains(msg, "context canceled") {
+			// errors.Is is the primary check now that the turn loop preserves
+			// ctx.Err(); the string fallback covers adapter-wrapped errors that
+			// embed the cancel text without the typed cause.
+			if errors.Is(ev.Err, context.Canceled) || strings.Contains(msg, "context canceled") {
 				app.PrintLine(patchtui.Dim + "[cancelled]" + patchtui.Reset)
 			} else {
 				app.PrintLine(patchtui.Red + "[error: " + msg + "]" + patchtui.Reset)
@@ -447,15 +451,24 @@ func registerSlashCommands(app slashTarget, sess session, lastUsage *usage, appl
 		Name: "clear", Help: "reset conversation context",
 		Handler: func(string) {
 			// Clear drops history and re-stamps the system prompt with a fresh
-			// timestamp inside the Session.
-			sess.Clear()
+			// timestamp inside the Session. ErrBusy can't happen here (slash
+			// commands are busy-gated by the app), but surface it if it does.
+			if err := sess.Clear(); err != nil {
+				dim("[" + err.Error() + "]")
+				return
+			}
 			dim("[context cleared]")
 		},
 	})
 	app.RegisterSlash(patchapp.SlashCommand{
 		Name: "rollback", Help: "remove last turn from context",
 		Handler: func(string) {
-			if !sess.Rollback() {
+			ok, err := sess.Rollback()
+			if err != nil {
+				dim("[" + err.Error() + "]")
+				return
+			}
+			if !ok {
 				dim("[nothing to roll back]")
 				return
 			}

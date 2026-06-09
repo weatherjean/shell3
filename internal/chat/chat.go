@@ -33,11 +33,11 @@ type ActiveAgent struct {
 	// CustomToolNames is the set of tool names routed to the custom-tool dispatcher.
 	CustomToolNames map[string]bool
 	// MCPToolNames is the set of prefixed (server__tool) names routed to MCPTool.
-	MCPToolNames map[string]bool
-	LLM          LLMClient
-	Params       llm.RequestParams
-	ModelID      string
-	ContextWindow   int
+	MCPToolNames  map[string]bool
+	LLM           LLMClient
+	Params        llm.RequestParams
+	ModelID       string
+	ContextWindow int
 }
 
 // Config holds all dependencies for a chat session. It is the top-level

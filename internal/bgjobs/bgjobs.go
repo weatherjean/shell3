@@ -1,3 +1,5 @@
+//go:build unix
+
 // Package bgjobs spawns detached background processes for the bash_bg tool
 // and records them in a JSON registry the model can read with the regular
 // bash tool (cat, jq, rm).
