@@ -19,14 +19,15 @@ shell3.agent({ name="a", model="m", prompt="p", tools={ edit=true }, on_tool_cal
 		t.Fatal(err)
 	}
 	defer c.Close()
-	d, reason, err := c.OnToolCall(t.Context(), "edit_file", map[string]any{"file_path": "x"})
+	a := c.FirstAgent()
+	d, reason, err := c.OnToolCallFor(a, t.Context(), "edit_file", map[string]any{"file_path": "x"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if d != DecisionBlock || reason != "no edits" {
 		t.Fatalf("guard: d=%v reason=%q", d, reason)
 	}
-	d2, _, _ := c.OnToolCall(t.Context(), "bash", map[string]any{"command": "ls"})
+	d2, _, _ := c.OnToolCallFor(a, t.Context(), "bash", map[string]any{"command": "ls"})
 	if d2 != DecisionAllow {
 		t.Fatalf("guard should allow bash, got %v", d2)
 	}
@@ -46,7 +47,7 @@ shell3.agent({ name="a", model="m", prompt="p", tools={ bash=true }, on_tool_cal
 		t.Fatal(err)
 	}
 	defer c.Close()
-	d, reason, err := c.OnToolCall(t.Context(), "bash", map[string]any{"command": "echo hi"})
+	d, reason, err := c.OnToolCallFor(c.FirstAgent(), t.Context(), "bash", map[string]any{"command": "echo hi"})
 	if err != nil {
 		t.Fatalf("OnToolCall returned hard error: %v", err)
 	}

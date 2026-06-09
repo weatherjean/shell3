@@ -17,10 +17,11 @@ const (
 	DecisionCancel                 // abort the entire turn
 )
 
-// OnToolCall runs the guard chain in order; first non-allow short-circuits.
-func (c *LoadedConfig) OnToolCall(ctx context.Context, tool string, params map[string]any) (Decision, string, error) {
-	// Snapshot the active agent's guard chain once; safe under the busy-gate.
-	for _, g := range c.Active().Guard {
+// OnToolCallFor runs the given agent's guard chain in order; first non-allow
+// short-circuits. The agent is passed in (not read from global state) so
+// concurrent sessions with different active agents never race.
+func (c *LoadedConfig) OnToolCallFor(a Agent, ctx context.Context, tool string, params map[string]any) (Decision, string, error) {
+	for _, g := range a.Guard {
 		d, reason, err := c.runLuaGuard(ctx, g.fn, tool, params)
 		if err != nil {
 			// Fail closed: a broken guard must block rather than silently

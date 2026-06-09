@@ -75,8 +75,7 @@ type LoadedConfig struct {
 	Skills     []Skill
 	Secrets    map[string]string
 
-	agents    []Agent
-	activeIdx int
+	agents []Agent
 
 	L  *lua.LState
 	mu sync.Mutex
@@ -146,18 +145,6 @@ func (c *LoadedConfig) Model(name string) (Model, bool) {
 	return Model{}, false
 }
 
-// Active/Agents/SwitchAgent guard activeIdx with c.mu for visibility, but
-// correctness also relies on the front-end busy-gate: SwitchAgent is only
-// called when no turn is in flight, so a tool call's guard chain (OnToolCall,
-// which snapshots the active agent) never races a switch mid-turn.
-
-// Active returns the currently selected agent.
-func (c *LoadedConfig) Active() Agent {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.agents[c.activeIdx]
-}
-
 // Agents returns a copy of the registered agents in declaration order.
 func (c *LoadedConfig) Agents() []Agent {
 	c.mu.Lock()
@@ -167,16 +154,23 @@ func (c *LoadedConfig) Agents() []Agent {
 	return out
 }
 
-// SwitchAgent sets the active agent by name. An unknown name returns an error
-// and leaves the active agent unchanged.
-func (c *LoadedConfig) SwitchAgent(name string) (Agent, error) {
+// AgentByName returns the declared agent with the given name. Agent selection
+// is the caller's (per-session) state — the config holds only declarations.
+func (c *LoadedConfig) AgentByName(name string) (Agent, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for i, a := range c.agents {
+	for _, a := range c.agents {
 		if a.Name == name {
-			c.activeIdx = i
-			return c.agents[i], nil
+			return a, true
 		}
 	}
-	return Agent{}, fmt.Errorf("unknown agent %q", name)
+	return Agent{}, false
+}
+
+// FirstAgent returns the first declared agent (the default when a caller
+// doesn't name one). Load guarantees at least one agent exists.
+func (c *LoadedConfig) FirstAgent() Agent {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.agents[0]
 }

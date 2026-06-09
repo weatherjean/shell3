@@ -31,7 +31,7 @@ shell3.agent({ name="base", model="m", prompt="p",
 	if len(srv.Tools) != 1 || srv.Tools[0] != "navigate_page" {
 		t.Fatalf("bad allowlist: %+v", srv.Tools)
 	}
-	a := lc.Active()
+	a := lc.FirstAgent()
 	if len(a.MCPServerNames) != 1 || a.MCPServerNames[0] != "chrome" {
 		t.Fatalf("agent did not select server: %+v", a.MCPServerNames)
 	}

@@ -90,10 +90,12 @@ shell3.agent({
 		t.Errorf("CallTool output: got %q, want %q", toolOut, "hello, test")
 	}
 
+	agent := lc.FirstAgent()
+
 	// Guard closure: rm -rf / should be blocked
-	d, reason, err := lc.OnToolCall(ctx, "bash", map[string]any{"command": "rm -rf /"})
+	d, reason, err := lc.OnToolCallFor(agent, ctx, "bash", map[string]any{"command": "rm -rf /"})
 	if err != nil {
-		t.Fatalf("OnToolCall: %v", err)
+		t.Fatalf("OnToolCallFor: %v", err)
 	}
 	if d != luacfg.DecisionBlock {
 		t.Errorf("guard: expected DecisionBlock for rm -rf /, got %v (reason=%q)", d, reason)
@@ -103,9 +105,9 @@ shell3.agent({
 	}
 
 	// Guard closure: safe bash command should be allowed
-	d2, _, err := lc.OnToolCall(ctx, "bash", map[string]any{"command": "echo hello"})
+	d2, _, err := lc.OnToolCallFor(agent, ctx, "bash", map[string]any{"command": "echo hello"})
 	if err != nil {
-		t.Fatalf("OnToolCall (safe): %v", err)
+		t.Fatalf("OnToolCallFor (safe): %v", err)
 	}
 	if d2 != luacfg.DecisionAllow {
 		t.Errorf("guard: expected DecisionAllow for echo hello, got %v", d2)
@@ -136,13 +138,14 @@ shell3.agent({
 			}},
 		)
 
+		a := lc.FirstAgent()
 		customNames := map[string]bool{"greet": true}
 		toolGuard := func(ctx context.Context, t string, p map[string]any) (int, string, error) {
-			d, r, e := lc.OnToolCall(ctx, t, p)
+			d, r, e := lc.OnToolCallFor(a, ctx, t, p)
 			return int(d), r, e
 		}
-		customDefs := lc.CustomToolsFor(lc.Active().CustomTools)
-		toolDefs := luacfg.ToolDefs(lc.Active().Gates, customDefs, len(lc.Active().Skills) > 0)
+		customDefs := lc.CustomToolsFor(a.CustomTools)
+		toolDefs := luacfg.ToolDefs(a.Gates, customDefs, len(a.Skills) > 0)
 
 		var events []chat.Event
 		sess := chat.NewSession(chat.SessionOpts{Sink: func(ev chat.Event) {
@@ -200,13 +203,14 @@ shell3.agent({
 			}},
 		)
 
+		a := lc.FirstAgent()
 		customNames := map[string]bool{"greet": true}
 		toolGuard := func(ctx context.Context, t string, p map[string]any) (int, string, error) {
-			d, r, e := lc.OnToolCall(ctx, t, p)
+			d, r, e := lc.OnToolCallFor(a, ctx, t, p)
 			return int(d), r, e
 		}
-		customDefs := lc.CustomToolsFor(lc.Active().CustomTools)
-		toolDefs := luacfg.ToolDefs(lc.Active().Gates, customDefs, len(lc.Active().Skills) > 0)
+		customDefs := lc.CustomToolsFor(a.CustomTools)
+		toolDefs := luacfg.ToolDefs(a.Gates, customDefs, len(a.Skills) > 0)
 
 		var events []chat.Event
 		sess := chat.NewSession(chat.SessionOpts{Sink: func(ev chat.Event) {

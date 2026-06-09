@@ -31,8 +31,8 @@ shell3.agent({ name="plan",  model="haiku", prompt="p" })
 		t.Fatal(err)
 	}
 	defer c.Close()
-	if got := c.Active().Name; got != "build" {
-		t.Fatalf("active = %q, want build (first declared)", got)
+	if got := c.FirstAgent().Name; got != "build" {
+		t.Fatalf("first agent = %q, want build (first declared)", got)
 	}
 	names := []string{}
 	for _, a := range c.Agents() {
@@ -43,7 +43,7 @@ shell3.agent({ name="plan",  model="haiku", prompt="p" })
 	}
 }
 
-func TestSwitchAgentByName(t *testing.T) {
+func TestAgentByNameLookup(t *testing.T) {
 	p := writeConfig(t, twoModelsHdr+`
 shell3.agent({ name="build", model="opus",  prompt="b" })
 shell3.agent({ name="plan",  model="haiku", prompt="p" })
@@ -53,18 +53,17 @@ shell3.agent({ name="plan",  model="haiku", prompt="p" })
 		t.Fatal(err)
 	}
 	defer c.Close()
-	a, err := c.SwitchAgent("plan")
-	if err != nil || a.Name != "plan" {
-		t.Fatalf("SwitchAgent(plan) = %v, %v", a.Name, err)
+	a, ok := c.AgentByName("plan")
+	if !ok || a.Name != "plan" {
+		t.Fatalf("AgentByName(plan) = %v, ok=%v", a.Name, ok)
 	}
-	if c.Active().Name != "plan" {
-		t.Fatalf("active after switch = %q, want plan", c.Active().Name)
+	// Unknown name reports ok=false; no global state is mutated.
+	if _, ok := c.AgentByName("nope"); ok {
+		t.Fatal("AgentByName(nope) should report ok=false")
 	}
-	if _, err := c.SwitchAgent("nope"); err == nil {
-		t.Fatal("SwitchAgent(nope) should error")
-	}
-	if c.Active().Name != "plan" {
-		t.Fatal("failed switch must leave active unchanged")
+	// Lookup again after miss: first agent still accessible via FirstAgent.
+	if c.FirstAgent().Name != "build" {
+		t.Fatal("FirstAgent should still be build after a failed lookup")
 	}
 }
 
@@ -87,7 +86,7 @@ shell3.agent({ name="build", prompt="b" })
 		t.Fatal(err)
 	}
 	defer c.Close()
-	if got := c.Active().ModelName; got != "opus" {
+	if got := c.FirstAgent().ModelName; got != "opus" {
 		t.Fatalf("model fallback = %q, want opus (first declared)", got)
 	}
 }
@@ -101,7 +100,34 @@ shell3.agent({ name="base", model="opus", prompt="x" })
 		t.Fatal(err)
 	}
 	defer c.Close()
-	if c.Active().Name != "base" || len(c.Agents()) != 1 {
-		t.Fatalf("single-agent back-compat broken: %q / %d", c.Active().Name, len(c.Agents()))
+	if c.FirstAgent().Name != "base" || len(c.Agents()) != 1 {
+		t.Fatalf("single-agent back-compat broken: %q / %d", c.FirstAgent().Name, len(c.Agents()))
+	}
+}
+
+// TestAgentByName_LookupAndMiss pins the name-parameterized agent lookup that
+// replaces process-global active-agent state: sessions own their agent choice.
+func TestAgentByName_LookupAndMiss(t *testing.T) {
+	p := writeConfig(t, `
+shell3.model("m", { base_url = "http://x", api_key = "k", model = "mm" })
+shell3.agent({ name = "code", model = "m", prompt = "c" })
+shell3.agent({ name = "plan", model = "m", prompt = "p" })
+`)
+	c, err := Load(p, filepath.Dir(p))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	a, ok := c.AgentByName("plan")
+	if !ok || a.Name != "plan" || a.Prompt != "p" {
+		t.Fatalf("AgentByName(plan) = %+v, %t", a, ok)
+	}
+	if _, ok := c.AgentByName("nope"); ok {
+		t.Fatal("AgentByName(nope) should report ok=false")
+	}
+	// BuildPersonaFor renders the *given* agent, independent of any global.
+	if got := c.BuildPersonaFor(a); got != "p" {
+		t.Fatalf("BuildPersonaFor(plan) = %q, want %q", got, "p")
 	}
 }

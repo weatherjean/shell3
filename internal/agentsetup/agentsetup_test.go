@@ -172,6 +172,73 @@ shell3.agent({ name = "tester", model = "main", prompt = "hi", tools = {} })
 	t.Fatal("run_proxy command was not spawned on model activation")
 }
 
+// twoAgentOptions writes a two-agent config ("code" and "plan") and returns
+// Options pointing at it, with a fresh isolated HomeDir so no real ~/.shell3 is
+// touched. Follows the same helper pattern as writeMinimalConfig/writeTwoAgentConfig.
+func twoAgentOptions(t *testing.T) agentsetup.Options {
+	t.Helper()
+	tmp := t.TempDir()
+	lua := `
+shell3.model("main", {
+  base_url = "https://example.test/v1",
+  api_key = shell3.env.secret("TEST_KEY"),
+  model = "test-model",
+  context_window = 1000,
+})
+shell3.agent({ name = "code", model = "main", prompt = "c", tools = {} })
+shell3.agent({ name = "plan", model = "main", prompt = "p", tools = {} })
+`
+	if err := os.WriteFile(filepath.Join(tmp, "shell3.lua"), []byte(lua), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, ".env"), []byte("TEST_KEY=sk-test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return agentsetup.Options{
+		ConfigPath: filepath.Join(tmp, "shell3.lua"),
+		CWD:        tmp,
+		HomeDir:    t.TempDir(),
+		Headless:   true,
+	}
+}
+
+// TestSessionConfigs_IndependentAgentSwitch pins the phase-1 invariant: two
+// configs derived from one Parts hold independent agent state — switching one
+// never changes the other (the old global activeIdx is gone).
+func TestSessionConfigs_IndependentAgentSwitch(t *testing.T) {
+	parts, cleanup, err := agentsetup.BuildParts(twoAgentOptions(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	a, err := parts.SessionConfig(agentsetup.SessionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := parts.SessionConfig(agentsetup.SessionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rt, err := b.SwitchAgent("plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.ApplyActiveAgent(rt)
+
+	if a.ModeLabel != "code" {
+		t.Fatalf("config A's agent changed to %q when B switched", a.ModeLabel)
+	}
+	if b.ModeLabel != "plan" {
+		t.Fatalf("config B should be plan, got %q", b.ModeLabel)
+	}
+	// RefreshPrompt follows each session's own agent.
+	if a.RefreshPrompt() == b.RefreshPrompt() {
+		t.Fatal("RefreshPrompt should render different prompts for different active agents")
+	}
+}
+
 // writeMinimalConfig writes a shell3.lua + .env that Build can load: one model
 // referencing an env-injected key, and one agent selecting it. The Lua surface
 // matches internal/luacfg's loader: shell3.model("name", {base_url, api_key,

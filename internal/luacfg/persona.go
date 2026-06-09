@@ -5,10 +5,11 @@ import (
 	"strings"
 )
 
-// BuildPersona renders the final system prompt: the verbatim agent prompt
-// followed by the engine-injected skills block (when skills are active).
-func (c *LoadedConfig) BuildPersona() string {
-	a := c.Active()
+// BuildPersonaFor renders the final system prompt for the given agent: the
+// verbatim agent prompt followed by the engine-injected skills block (when
+// skills are active). The agent is passed in so concurrent sessions with
+// different active agents can render without touching global state.
+func (c *LoadedConfig) BuildPersonaFor(a Agent) string {
 	var b strings.Builder
 	b.WriteString(a.Prompt)
 	if a.SkillsActive() {

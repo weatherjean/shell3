@@ -10,7 +10,7 @@ func TestBuildPersonaSystemPrompt(t *testing.T) {
 		agents: []Agent{{Name: "base", Prompt: "You are base.", Skills: []string{"web-search"}}},
 		Skills: []Skill{{Name: "web-search", Description: "search the web", Body: "..."}},
 	}
-	sp := c.BuildPersona()
+	sp := c.BuildPersonaFor(c.FirstAgent())
 	for _, want := range []string{"You are base.", "web-search", "search the web"} {
 		if !strings.Contains(sp, want) {
 			t.Fatalf("system prompt missing %q:\n%s", want, sp)

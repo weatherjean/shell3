@@ -21,12 +21,12 @@ shell3.agent({ name="a", model="m", prompt="p", tools={ skill=false }, skills={ 
 	defer c.Close()
 
 	// SkillsActive() must be false when skill=false is set.
-	if c.Active().SkillsActive() {
+	if c.FirstAgent().SkillsActive() {
 		t.Error("SkillsActive() = true, want false when tools.skill=false")
 	}
 
 	// BuildPersona must NOT inject the ## Skills section.
-	persona := c.BuildPersona()
+	persona := c.BuildPersonaFor(c.FirstAgent())
 	if strings.Contains(persona, "## Skills") {
 		t.Error("BuildPersona injected '## Skills' but skills are disabled")
 	}
@@ -35,7 +35,7 @@ shell3.agent({ name="a", model="m", prompt="p", tools={ skill=false }, skills={ 
 	}
 
 	// ToolDefs must NOT include the "skill" tool when SkillsActive() is false.
-	defs := ToolDefs(c.Active().Gates, nil, c.Active().SkillsActive())
+	defs := ToolDefs(c.FirstAgent().Gates, nil, c.FirstAgent().SkillsActive())
 	for _, d := range defs {
 		if d.Name == "skill" {
 			t.Error("ToolDefs included 'skill' tool but skills are disabled")
@@ -59,12 +59,12 @@ shell3.agent({ name="a", model="m", prompt="p", tools={}, skills={ s } })
 	defer c.Close()
 
 	// SkillsActive() must be true when skill key is absent.
-	if !c.Active().SkillsActive() {
+	if !c.FirstAgent().SkillsActive() {
 		t.Error("SkillsActive() = false, want true when skill key is absent from tools")
 	}
 
 	// BuildPersona must inject the ## Skills section.
-	persona := c.BuildPersona()
+	persona := c.BuildPersonaFor(c.FirstAgent())
 	if !strings.Contains(persona, "## Skills") {
 		t.Error("BuildPersona did not inject '## Skills' but skills are enabled")
 	}
@@ -73,7 +73,7 @@ shell3.agent({ name="a", model="m", prompt="p", tools={}, skills={ s } })
 	}
 
 	// ToolDefs must include the "skill" tool.
-	defs := ToolDefs(c.Active().Gates, nil, c.Active().SkillsActive())
+	defs := ToolDefs(c.FirstAgent().Gates, nil, c.FirstAgent().SkillsActive())
 	found := false
 	for _, d := range defs {
 		if d.Name == "skill" {
@@ -101,7 +101,7 @@ shell3.agent({ name="a", model="m", prompt="p", tools={ skill=true }, skills={ s
 	}
 	defer c.Close()
 
-	if !c.Active().SkillsActive() {
+	if !c.FirstAgent().SkillsActive() {
 		t.Error("SkillsActive() = false, want true when tools.skill=true")
 	}
 }
