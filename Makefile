@@ -5,7 +5,7 @@ BIN := shell3
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: build run install test clean
+.PHONY: build run install test lint fmt clean
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/$(BIN)
@@ -17,7 +17,15 @@ run: build
 	./$(BIN)
 
 test:
-	go test ./...
+	go test -race ./...
+
+# Mirrors CI: formatting drift fails the build, then static analysis.
+lint:
+	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
+	go vet ./...
+
+fmt:
+	gofmt -w .
 
 clean:
-	rm -f $(BIN) webui
+	rm -f $(BIN)
