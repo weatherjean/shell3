@@ -46,6 +46,24 @@ Runtime              one per process: config (Lua state), store, MCP, log, proxy
   few channels, serializing Lua tool calls across sessions is acceptable.
   SQLite handles concurrent sessions; MCP servers are shared per-Runtime.
 
+### Working-directory scoping
+
+`WorkDir` moves from build-level to a **per-Session property** defaulting to
+the Runtime's root (it already travels per-turn in `TurnConfig`, so the
+plumbing is cheap). This gives both shapes:
+
+- **CLI/TUI:** Runtime created at the process cwd, one session inheriting
+  it — cwd-based coding sessions, behavior unchanged.
+- **Always-on host:** the Runtime is rooted at a stable agent home (config,
+  store, logs live there); individual sessions — and `spawn_agent`, which
+  gains a `workdir` parameter — can be rooted in a specific repo so coding
+  subtasks behave like normal project sessions.
+
+Caveat (v1): project identity and the store stay Runtime-level, so a
+repo-rooted session's history is recorded in the agent home's DB, not the
+repo's own `.shell3` project. Acceptable for a personal agent; per-session
+project stores are a possible later extension.
+
 ## Inbox, Interject, Wake
 
 The **inbox** (per session) is the unification seam: user steering messages
@@ -96,10 +114,10 @@ and finished-subagent results are both inbox items.
 Replaces the scaffold's `spawning-subagents` skill (bash_bg + CLI + JSONL
 polling) with in-process spawning on the shared Runtime:
 
-- `spawn_agent(task, agent?)` → returns an id immediately; runs
+- `spawn_agent(task, agent?, workdir?)` → returns an id immediately; runs
   `rt.Session("sub:<id>")` headless with a fresh context on a goroutine,
   using the named agent from the same shell3.lua (default: the caller's
-  agent).
+  agent) rooted at `workdir` (default: the caller's session workdir).
 - Completion posts a `subagent finished: <result>` item to the **parent's
   inbox** — injected mid-turn if the parent is still running, `Wake` if not
   (OpenClaw's announce flow).
