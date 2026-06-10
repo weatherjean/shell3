@@ -3,6 +3,7 @@ package chat
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/weatherjean/shell3/internal/llm"
 )
@@ -24,6 +25,47 @@ type Session struct {
 	// every event has already been delivered. Always non-nil (NewSession
 	// installs a no-op when SessionOpts.Sink is unset).
 	sink func(Event)
+
+	// inbox is the cross-goroutine message queue for a session: Interject pushes
+	// from any goroutine; the turn loop drains on the turn goroutine at round
+	// boundaries. Guarded by inboxMu — the only Session state touched off the
+	// turn goroutine.
+	inboxMu sync.Mutex
+	inbox   []string
+}
+
+// Interject queues text for delivery to the model: mid-turn at the next round
+// boundary, otherwise at the start of the next turn. Safe to call from any
+// goroutine at any time; it never fails and never blocks on a running turn.
+func (s *Session) Interject(text string) {
+	s.inboxMu.Lock()
+	defer s.inboxMu.Unlock()
+	s.inbox = append(s.inbox, text)
+}
+
+// drainInbox removes and returns all queued interjections. Called only from
+// the turn goroutine.
+func (s *Session) drainInbox() []string {
+	s.inboxMu.Lock()
+	defer s.inboxMu.Unlock()
+	items := s.inbox
+	s.inbox = nil
+	return items
+}
+
+// interjectReminder formats queued interjections as one system-reminder block.
+// Returns "" when items is empty.
+func interjectReminder(items []string) string {
+	if len(items) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("<system-reminder>\nuser interjected mid-task — adjust course accordingly:\n")
+	for _, it := range items {
+		b.WriteString("- " + it + "\n")
+	}
+	b.WriteString("</system-reminder>")
+	return b.String()
 }
 
 // SessionOpts configures a new Session. All fields are optional.

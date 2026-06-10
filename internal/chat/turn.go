@@ -125,6 +125,10 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		allMsgs = injectReminder(allMsgs, reminder)
 		emitSystemReminder(sess, reminder)
 	}
+	if reminder := interjectReminder(sess.drainInbox()); reminder != "" {
+		allMsgs = injectReminder(allMsgs, reminder)
+		emitSystemReminder(sess, reminder)
+	}
 
 	var totalUsage llm.Usage
 	for {
@@ -200,6 +204,10 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		// Count bytes across all of allMsgs (including pruned replacements)
 		// so prune is automatically reflected without any delta tracking.
 		if reminder := sess.reminders.check(cfg.StatusLine, estimatePromptTokens(allMsgs)); reminder != "" {
+			allMsgs[len(allMsgs)-1].Content += "\n\n" + reminder
+			emitSystemReminder(sess, reminder)
+		}
+		if reminder := interjectReminder(sess.drainInbox()); reminder != "" {
 			allMsgs[len(allMsgs)-1].Content += "\n\n" + reminder
 			emitSystemReminder(sess, reminder)
 		}
