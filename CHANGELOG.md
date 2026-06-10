@@ -16,7 +16,7 @@ Until v1.0.0, minor versions may contain breaking changes.
   `Start`/`Run` are now thin single-session wrappers over a Runtime.
 - Mid-turn steering and the wake bus: `Session.Interject(text, parts…)` queues
   a message from any goroutine and never fails — injected into a running turn at
-  the next round boundary as a `user interjected` reminder, or queued and woken
+  the next round boundary as a system-reminder that the user sent input, or queued and woken
   when idle. An inbox gaining an item while idle emits a `Wake` on the new
   `Runtime.Events() <-chan HostEvent` bus (or `Session.WakeEvents()` for a
   single-session host); the host reacts with `Session.RunQueued(ctx)`, a turn

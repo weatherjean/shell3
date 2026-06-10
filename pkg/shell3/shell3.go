@@ -27,7 +27,7 @@
 //
 // [Session.Interject] queues a message (and optional media [Part]s) from any
 // goroutine. It never fails: while a turn runs the text is injected at the next
-// round boundary as a "user interjected" reminder; while idle it is queued and
+// round boundary as a system-reminder that the user sent input; while idle it is queued and
 // the session Wakes (see below). [Session.Send] is the strict path that honors
 // ErrBusy; [Session.SendParts] is Send with media attachments.
 // [Session.RunQueued] runs one turn seeded from the queued inbox items — the
