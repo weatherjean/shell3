@@ -383,14 +383,12 @@ func TestAgentRuntime_ExposesRegisteredSubagents(t *testing.T) {
 		t.Fatalf("AgentRuntime: %v", err)
 	}
 
-	var spawnDef *struct{ params map[string]any }
 	hasSpawn := false
 	hasListAgents := false
 	for _, td := range rt.Personality.Tools {
 		switch td.Name {
 		case "spawn_agent":
 			hasSpawn = true
-			_ = spawnDef
 			// Drill into spawn_agent's subagent enum.
 			props, ok := td.Parameters["properties"].(map[string]any)
 			if !ok {
@@ -492,12 +490,30 @@ func TestSessionConfig_ResolvesSubagentConfig(t *testing.T) {
 		}
 	}
 	// Also check SessionConfig routes to SubagentRuntime when Subagent is set.
-	cfg, err := p.SessionConfig(agentsetup.SessionOptions{Subagent: "researcher", DisableSubagents: true})
+	cfg, err := p.SessionConfig(agentsetup.SessionOptions{Subagent: "researcher"})
 	if err != nil {
 		t.Fatalf("SessionConfig with Subagent: %v", err)
 	}
 	if cfg.ModeLabel != "researcher" {
 		t.Errorf("SessionConfig ModeLabel = %q, want %q", cfg.ModeLabel, "researcher")
+	}
+}
+
+// TestRefreshPromptFor_Subagent asserts that RefreshPromptFor returns the
+// subagent's own system prompt when called with a subagent name, covering the
+// /clear path for spawned-subagent sessions (Fix 2 regression guard).
+func TestRefreshPromptFor_Subagent(t *testing.T) {
+	p, cleanup := subagentParts(t)
+	defer cleanup()
+
+	// Build a subagent session so activeName == "researcher".
+	cfg, err := p.SessionConfig(agentsetup.SessionOptions{Subagent: "researcher"})
+	if err != nil {
+		t.Fatalf("SessionConfig: %v", err)
+	}
+	prompt := cfg.RefreshPrompt()
+	if !strings.Contains(prompt, "you are a researcher") {
+		t.Errorf("RefreshPrompt for subagent session = %q, want it to contain %q", prompt, "you are a researcher")
 	}
 }
 

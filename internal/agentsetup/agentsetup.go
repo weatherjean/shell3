@@ -113,15 +113,11 @@ func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
 	return p.runtimeForAgent(a)
 }
 
-// SubagentRuntime builds the runtime for a registered subagent (spawned via
-// spawn_agent). Subagents never appear in AgentNames/the Tab rotation and get
-// no spawn tooling of their own (depth limit 1).
-func (p *Parts) SubagentRuntime(name string) (chat.ActiveAgent, error) {
-	sa, ok := p.lc.SubagentByName(name)
-	if !ok {
-		return chat.ActiveAgent{}, fmt.Errorf("unknown subagent %q", name)
-	}
-	a := luacfg.Agent{
+// subagentToAgent adapts a registered subagent to the luacfg.Agent shape that
+// runtimeForAgent/BuildPersonaFor/OnToolCallFor consume. Subagents is left empty
+// on purpose (depth limit 1). Keep in sync with luacfg.Subagent's fields.
+func subagentToAgent(sa luacfg.Subagent) luacfg.Agent {
+	return luacfg.Agent{
 		Name:           sa.Name,
 		ModelName:      sa.ModelName,
 		Prompt:         sa.Prompt,
@@ -131,9 +127,18 @@ func (p *Parts) SubagentRuntime(name string) (chat.ActiveAgent, error) {
 		Skills:         sa.Skills,
 		SkillsDisabled: sa.SkillsDisabled,
 		Guard:          sa.Guard,
-		// Subagents intentionally empty: depth limit 1.
 	}
-	return p.runtimeForAgent(a)
+}
+
+// SubagentRuntime builds the runtime for a registered subagent (spawned via
+// spawn_agent). Subagents never appear in AgentNames/the Tab rotation and get
+// no spawn tooling of their own (depth limit 1).
+func (p *Parts) SubagentRuntime(name string) (chat.ActiveAgent, error) {
+	sa, ok := p.lc.SubagentByName(name)
+	if !ok {
+		return chat.ActiveAgent{}, fmt.Errorf("unknown subagent %q", name)
+	}
+	return p.runtimeForAgent(subagentToAgent(sa))
 }
 
 // runtimeForAgent assembles the full chat runtime for the given agent value.
@@ -220,18 +225,21 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 	}, nil
 }
 
-// RefreshPromptFor re-renders the named agent's system prompt (used by /clear).
-// name must be a declared agent name; callers are expected to pass names that
-// were previously validated by a successful AgentRuntime call (names come from
-// ModeLabel, which is set to a.Name only on a successful lookup). The
-// FirstAgent fallback exists only so an impossible miss degrades to a sane
-// prompt rather than panicking; in correct use that branch is never reached.
+// RefreshPromptFor re-renders the named agent's or subagent's system prompt
+// (used by /clear). name may be a declared agent name or a registered subagent
+// name; callers are expected to pass names that were previously validated by a
+// successful AgentRuntime/SubagentRuntime call (names come from ModeLabel,
+// which is set to a.Name only on a successful lookup). The FirstAgent fallback
+// exists only so an impossible miss degrades to a sane prompt rather than
+// panicking; in correct use that branch is never reached.
 func (p *Parts) RefreshPromptFor(name string) string {
-	a, ok := p.lc.AgentByName(name)
-	if !ok {
-		a = p.lc.FirstAgent()
+	if a, ok := p.lc.AgentByName(name); ok {
+		return p.lc.BuildPersonaFor(a)
 	}
-	return p.lc.BuildPersonaFor(a)
+	if sa, ok := p.lc.SubagentByName(name); ok {
+		return p.lc.BuildPersonaFor(subagentToAgent(sa))
+	}
+	return p.lc.BuildPersonaFor(p.lc.FirstAgent())
 }
 
 // SessionOptions parameterizes one session derived from shared Parts.
