@@ -784,6 +784,57 @@ func TestSession_BusyEnforcement(t *testing.T) {
 	}
 }
 
+// TestSession_InterjectMidTurn: Interject during a running turn surfaces as a
+// SystemReminder event in that same turn, after the tool round.
+func TestSession_InterjectMidTurn(t *testing.T) {
+	client := fakellm.New(
+		fakellm.Script{Events: []llm.StreamEvent{
+			{ToolCall: &llm.ToolCall{ID: "a", Name: "poke", RawArgs: `{}`}},
+		}},
+		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "adjusted"}}},
+	)
+	var s *Session
+	cfg := chat.Config{
+		LLM:             client,
+		CustomToolNames: map[string]bool{"poke": true},
+		CustomTool: func(ctx context.Context, name, args string) (string, error) {
+			s.Interject("change of plans")
+			return "ok", nil
+		},
+	}
+	s = newTestSession(t, client, cfg)
+	defer s.Close()
+
+	var sawReminder bool
+	for ev := range s.Send(context.Background(), "go") {
+		if ev.Kind == SystemReminder && strings.Contains(ev.Text, "change of plans") {
+			sawReminder = true
+		}
+	}
+	if !sawReminder {
+		t.Fatal("mid-turn Interject should surface as a SystemReminder event in the same turn")
+	}
+}
+
+// TestSession_InterjectWhileIdle: Interject between turns is delivered at the
+// start of the next Send.
+func TestSession_InterjectWhileIdle(t *testing.T) {
+	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
+	s := newTestSession(t, client, chat.Config{})
+	defer s.Close()
+
+	s.Interject("remember the deadline")
+	var sawReminder bool
+	for ev := range s.Send(context.Background(), "hi") {
+		if ev.Kind == SystemReminder && strings.Contains(ev.Text, "remember the deadline") {
+			sawReminder = true
+		}
+	}
+	if !sawReminder {
+		t.Fatal("idle Interject should be injected at the start of the next turn")
+	}
+}
+
 // TestSession_SinkStartLabel pins the "(session <name>)" label written by
 // Runtime.Session into the JSONL audit log and exercises the writeStartLine +
 // cfg.OutPath plumbing for real. It creates a runtime-hosted session with an

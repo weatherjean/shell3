@@ -300,6 +300,18 @@ func (s *Session) route(ev chat.Event) {
 	}
 }
 
+// Interject delivers text to the session outside the Send contract: during a
+// running turn it is injected at the next round boundary as a system reminder
+// ("user interjected …"), letting the model course-correct mid-task; while
+// idle it queues and is drained at the start of the next turn. Interject never
+// fails, never blocks on a running turn, and is safe to call from any
+// goroutine — it is the chat-message path for front-ends (the TUI's
+// Enter-while-busy, a bot's incoming message), while Send remains the strict
+// turn-starting call.
+func (s *Session) Interject(text string) {
+	s.sess.Interject(text)
+}
+
 // Send runs one turn for prompt and returns a channel of that turn's events,
 // closed when the turn ends (the deferred close(out) below always runs).
 // Channel close is the authoritative end-of-turn signal: a terminal Done/Error
