@@ -28,7 +28,10 @@ type Callback struct {
 // Button is one inline keyboard button.
 type Button struct {
 	Text string
-	Data string
+	Data string // callback payload (for approval-style buttons)
+	// WebApp, when non-empty, makes this a Telegram Web App button that opens
+	// the given HTTPS URL as a Mini App inside the client (Data is ignored).
+	WebApp string
 }
 
 // tgClient is the transport surface the Bot depends on. The real impl wraps

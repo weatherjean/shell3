@@ -60,7 +60,10 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 			b.sendReply(ctx, "dashboard is disabled")
 			return
 		}
-		b.sendReply(ctx, "📊 dashboard: "+b.dashURL)
+		// Send a Web App button so tapping opens the dashboard as a Mini App
+		// inside Telegram (with initData), not the external browser.
+		_, _ = b.client.Send(ctx, b.chatID, "📊 Conversation dashboard",
+			[]Button{{Text: "Open dashboard", WebApp: b.dashURL}})
 	default:
 		b.sendReply(ctx, "unknown command: "+cmd)
 	}

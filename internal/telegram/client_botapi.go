@@ -128,6 +128,10 @@ func (c *botAPIClient) Send(ctx context.Context, chatID int64, text string, butt
 	if len(buttons) > 0 {
 		row := make([]models.InlineKeyboardButton, len(buttons))
 		for i, btn := range buttons {
+			if btn.WebApp != "" {
+				row[i] = models.InlineKeyboardButton{Text: btn.Text, WebApp: &models.WebAppInfo{URL: btn.WebApp}}
+				continue
+			}
 			row[i] = models.InlineKeyboardButton{Text: btn.Text, CallbackData: btn.Data}
 		}
 		p.ReplyMarkup = models.InlineKeyboardMarkup{
