@@ -14,9 +14,15 @@ func TestSpawnToolDefs_EnumAndDescription(t *testing.T) {
 	if len(defs) != 2 {
 		t.Fatalf("SpawnToolDefs: want 2 defs, got %d", len(defs))
 	}
-	var spawnDef, listDef *struct{ Name, Description string; Parameters map[string]any }
+	var spawnDef, listDef *struct {
+		Name, Description string
+		Parameters        map[string]any
+	}
 	for i := range defs {
-		d := &struct{ Name, Description string; Parameters map[string]any }{
+		d := &struct {
+			Name, Description string
+			Parameters        map[string]any
+		}{
 			Name:        defs[i].Name,
 			Description: defs[i].Description,
 			Parameters:  defs[i].Parameters,
