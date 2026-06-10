@@ -16,6 +16,7 @@ import (
 // agentsetup the same way newTestSession does for single sessions.
 func newTestRuntime(t *testing.T, mk func() chat.Config) *Runtime {
 	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
 	rt := &Runtime{
 		sessionConfig: func(o SessionOpts) (chat.Config, error) {
 			cfg := mk()
@@ -25,6 +26,10 @@ func newTestRuntime(t *testing.T, mk func() chat.Config) *Runtime {
 			}
 			return cfg, nil
 		},
+		events:   make(chan HostEvent, 64),
+		workDir:  t.TempDir(),
+		ctx:      ctx,
+		cancel:   cancel,
 		cleanup:  func() {},
 		sessions: map[string]*Session{},
 	}

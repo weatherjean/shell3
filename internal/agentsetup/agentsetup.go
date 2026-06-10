@@ -195,6 +195,34 @@ type SessionOptions struct {
 	WorkDir  string // "" → runtime root
 	Headless bool
 	OutPath  string
+	// DisableSubagents force-strips spawn_agent/list_agents from this session's
+	// schema regardless of the agent's tools.subagents gate. The runtime sets it
+	// for spawned subagents to enforce depth-limit 1.
+	DisableSubagents bool
+}
+
+// stripSubagentTools removes spawn_agent/list_agents from an agent's schema,
+// enforcing the depth-limit-1 rule for spawned subagents. AgentRuntime returns
+// chat.ActiveAgent by value with freshly built slices, but [:0:0] makes a fresh
+// backing array so the strip can never alias a shared/cached persona slice.
+func stripSubagentTools(a chat.ActiveAgent) chat.ActiveAgent {
+	keep := a.Personality.Tools[:0:0]
+	for _, t := range a.Personality.Tools {
+		if t.Name == "spawn_agent" || t.Name == "list_agents" {
+			continue
+		}
+		keep = append(keep, t)
+	}
+	a.Personality.Tools = keep
+	names := a.ActiveTools[:0:0]
+	for _, n := range a.ActiveTools {
+		if n == "spawn_agent" || n == "list_agents" {
+			continue
+		}
+		names = append(names, n)
+	}
+	a.ActiveTools = names
+	return a
 }
 
 // SessionConfig derives a per-session chat.Config from the shared parts.
@@ -208,6 +236,9 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 	rt, err := p.AgentRuntime(so.Agent)
 	if err != nil {
 		return chat.Config{}, err
+	}
+	if so.DisableSubagents {
+		rt = stripSubagentTools(rt)
 	}
 	// activeName is the session's agent pointer, shared by the two closures
 	// below; pkg/shell3.Session.SwitchAgent is documented single-threaded

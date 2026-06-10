@@ -34,6 +34,26 @@ type SessionOpts struct {
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
 	// Approve resolves guard "ask" verdicts. Nil fails closed.
 	Approve func(ctx context.Context, req ApprovalRequest) bool
+	// DisableSubagents strips the spawn tools from this session (used for
+	// spawned subagents; depth limit 1).
+	DisableSubagents bool
+}
+
+// HostEventKind enumerates out-of-turn runtime events. v1: Wake only.
+type HostEventKind int
+
+const (
+	// Wake signals a session's inbox gained an item while no turn was running.
+	// The host should call Session.RunQueued to react.
+	Wake HostEventKind = iota
+)
+
+// HostEvent is one out-of-turn event for a session. Payload is reserved for
+// future kinds; Wake carries none.
+type HostEvent struct {
+	Session string
+	Kind    HostEventKind
+	Payload any
 }
 
 // Runtime hosts N sessions over one shared build. Create with NewRuntime,
@@ -47,6 +67,15 @@ type Runtime struct {
 	// agentsetup.Parts.SessionConfig, tests inject fakes.
 	sessionConfig func(SessionOpts) (chat.Config, error)
 	cleanup       func()
+
+	// events is the out-of-turn event bus (Wake). Buffered; emit drops on full.
+	events chan HostEvent
+	// workDir is the runtime root; subagents write audit logs under it.
+	workDir string
+	// ctx/cancel scope subagent goroutines so they outlive a spawning turn but
+	// are bounded by Close.
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	mu       sync.Mutex
 	sessions map[string]*Session
@@ -75,15 +104,36 @@ func NewRuntime(spec RuntimeSpec) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Runtime{
 		sessionConfig: func(o SessionOpts) (chat.Config, error) {
 			return parts.SessionConfig(agentsetup.SessionOptions{
 				Agent: o.Agent, WorkDir: o.WorkDir, Headless: o.Headless, OutPath: o.OutPath,
+				DisableSubagents: o.DisableSubagents,
 			})
 		},
 		cleanup:  cleanup,
+		events:   make(chan HostEvent, 64),
+		workDir:  workDir,
+		ctx:      ctx,
+		cancel:   cancel,
 		sessions: map[string]*Session{},
 	}, nil
+}
+
+// Events returns the out-of-turn event bus. One receiver drives N sessions.
+// Buffered; if the host is not draining, Wake events coalesce (drop on full —
+// the host re-checks inboxes on its next turn anyway).
+func (rt *Runtime) Events() <-chan HostEvent { return rt.events }
+
+func (rt *Runtime) root() string                 { return rt.workDir }
+func (rt *Runtime) baseContext() context.Context { return rt.ctx }
+
+func (rt *Runtime) emit(ev HostEvent) {
+	select {
+	case rt.events <- ev:
+	default: // bus full: drop (Wake is a hint, not a queue)
+	}
 }
 
 // Session returns the live session named opts.Name, creating it if necessary.
@@ -160,5 +210,10 @@ func (rt *Runtime) Close() error {
 		}
 	}
 	rt.cleanup()
+	// Cancel the runtime ctx so any in-flight subagent goroutine unwinds. Do
+	// NOT close rt.events: a late emit from a finishing subagent must not panic.
+	if rt.cancel != nil {
+		rt.cancel()
+	}
 	return firstErr
 }

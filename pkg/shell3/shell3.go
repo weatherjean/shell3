@@ -210,6 +210,15 @@ type Session struct {
 	name        string
 	ownsRuntime bool
 
+	// subs holds subagents this session has spawned (see spawn / subRegistry).
+	subs subRegistry
+	// closeOnce makes Close safe under concurrent invocation: a spawned
+	// subagent goroutine calls child.Close() at the same time Runtime.Close may
+	// close the same child from its session map. The body runs exactly once;
+	// later callers return the recorded error.
+	closeOnce sync.Once
+	closeErr  error
+
 	// mu guards the current turn's routing target and lifecycle handles.
 	mu         sync.Mutex
 	cur        chan Event         // current Send's channel; nil between turns
@@ -568,6 +577,12 @@ func (s *Session) ID() string {
 // the other best-effort teardown steps (turn cancel, cleanup) do not contribute
 // to the returned error.
 func (s *Session) Close() error {
+	s.closeOnce.Do(func() { s.closeErr = s.doClose() })
+	return s.closeErr
+}
+
+// doClose runs the teardown exactly once (guarded by closeOnce in Close).
+func (s *Session) doClose() error {
 	// Cancel any in-flight turn so it stops streaming and runs its deferred
 	// history persist, then join it before ending the store session so a
 	// cancelled turn isn't still writing to the store as EndSession runs.
@@ -627,7 +642,19 @@ func (s *Session) turnConfig() chat.TurnConfig {
 			return "error: interactive TTY not available in plugin mode"
 		}
 	}
-	return chat.NewTurnConfig(s.cfg, s.handlers, shellInteractive)
+	cfg := s.cfg
+	cfg.Spawn = func(ctx context.Context, req chat.SpawnRequest) (string, error) {
+		return s.spawn(ctx, req)
+	}
+	cfg.ListAgents = func() []chat.AgentSnapshot { return s.subs.snapshot() }
+	return chat.NewTurnConfig(cfg, s.handlers, shellInteractive)
+}
+
+// wake emits a Wake for this session on the runtime bus (no-op without a runtime).
+func (s *Session) wake() {
+	if s.runtime != nil {
+		s.runtime.emit(HostEvent{Session: s.name, Kind: Wake})
+	}
 }
 
 // Clear resets the conversation context (= /clear): drops all history and
