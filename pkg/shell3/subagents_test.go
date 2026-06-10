@@ -211,10 +211,39 @@ func TestSubagent_FailedSpawnLeavesNoDanglingEntry(t *testing.T) {
 	}
 }
 
+// delayedFinishClient emits one assistant token so the turn produces a real
+// streamed result, then blocks until its turn ctx is cancelled (by
+// Runtime.Close → rt.cancel), and finally waits a bounded delay BEFORE
+// returning. The subagent goroutine only runs finish() (which flips registry
+// status to "finished") after Stream returns, so this post-cancel delay forces
+// finish() to land strictly after the moment Close returns if Close did NOT
+// join the goroutine. With rt.wg.Wait() present Close blocks for the delay and
+// the status is "finished"; without it Close returns in microseconds and the
+// status is still "running" — making the guard deterministic at -count=1. The
+// timer (select-free, but bounded) keeps the test fast and hang-free: the delay
+// only begins after ctx is already cancelled.
+type delayedFinishClient struct {
+	delay time.Duration
+}
+
+func (c *delayedFinishClient) Stream(ctx context.Context, _ []llm.Message, _ []llm.ToolDefinition, emit func(llm.StreamEvent)) error {
+	// A non-empty streamed token makes the turn behave like a normal completion
+	// (an empty turn short-circuits finish() too early to be a useful guard).
+	emit(llm.StreamEvent{TextDelta: "subagent result here"})
+	<-ctx.Done()
+	// Bounded post-cancel delay: pushes finish() past Close's return point.
+	timer := time.NewTimer(c.delay)
+	defer timer.Stop()
+	<-timer.C
+	return ctx.Err()
+}
+
 // TestSubagent_CloseJoinsGoroutine: Close must join in-flight subagent
-// goroutines. The sub model blocks until its context is cancelled; a flag is
-// set at the very end of the subagent goroutine. After rt.Close() returns the
-// flag must already be set (no sleep) — proving Close waited.
+// goroutines. The sub model blocks until its turn ctx is cancelled, then delays
+// before returning; the registry only flips to "finished" once the goroutine's
+// finish() runs after Stream returns. After rt.Close() returns the status must
+// already be "finished" (no sleep) — which can only hold if Close waited on the
+// goroutine via rt.wg.Wait().
 func TestSubagent_CloseJoinsGoroutine(t *testing.T) {
 	rec := &subOptsRecorder{opts: map[string]SessionOpts{}}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -230,9 +259,11 @@ func TestSubagent_CloseJoinsGoroutine(t *testing.T) {
 		rec.record(o)
 		var cfg chat.Config
 		if strings.HasPrefix(o.Name, "sub:") {
-			// Blocks until its turn ctx is cancelled (by Runtime.Close → child.Close).
+			// Blocks until its turn ctx is cancelled (by Runtime.Close →
+			// child.Close), then delays ~50ms before returning so the goroutine's
+			// finish() lands after Close's return point unless Close joins it.
 			cfg = chat.Config{
-				LLM:       &blockingClient{entered: make(chan struct{}), returned: make(chan struct{})},
+				LLM:       &delayedFinishClient{delay: 50 * time.Millisecond},
 				ModeLabel: "code",
 			}
 		} else {
