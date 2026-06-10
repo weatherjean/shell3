@@ -85,6 +85,22 @@ func TestMediaPartFromBytes_UnsupportedMIME(t *testing.T) {
 	}
 }
 
+// TestMediaPartFromBytes_EmptyAudio: zero-length audio bytes must error rather
+// than pass the size cap (len 0 is not > max) and yield a bogus "valid"
+// input_audio part with empty base64 and a "0.0 MB" description. Mirrors the
+// image path, where image.Decode rejects empty bytes.
+func TestMediaPartFromBytes_EmptyAudio(t *testing.T) {
+	for _, mime := range []string{"audio/wav", "audio/mpeg"} {
+		part, _, err := MediaPartFromBytes([]byte{}, mime)
+		if err == nil {
+			t.Fatalf("%s: empty audio bytes should error, got part %+v", mime, part)
+		}
+		if !strings.Contains(err.Error(), "empty audio") {
+			t.Fatalf("%s: want empty-audio error, got %v", mime, err)
+		}
+	}
+}
+
 // TestMediaPartFromBytes_SizeCaps: the path loaders' caps apply to bytes too.
 func TestMediaPartFromBytes_SizeCaps(t *testing.T) {
 	if _, _, err := MediaPartFromBytes(make([]byte, maxImageBytes+1), "image/png"); err == nil || !strings.Contains(err.Error(), "too large") {

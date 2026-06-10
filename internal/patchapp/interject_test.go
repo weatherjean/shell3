@@ -1,6 +1,7 @@
 package patchapp
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -206,6 +207,49 @@ func TestMultiLineSteeringEcho(t *testing.T) {
 		if strings.Contains(segment, "\n") {
 			t.Errorf("raw newline found inside a single committed renderer segment: %q", segment)
 		}
+	}
+}
+
+// TestEscWhileBusy_NonEmptySteer_ClearsThenCancels: while busy with a half-typed
+// steer line, the first ESC clears the line (without cancelling the turn); a
+// second ESC (now empty) cancels the turn via streamCancel.
+func TestEscWhileBusy_NonEmptySteer_ClearsThenCancels(t *testing.T) {
+	a := New("test", "", WelcomeInfo{})
+	a.r.SetOutput(discardWriter{})
+	cancelled := false
+	// SetBusy wires busy=true and the streamCancel hook ESC fires on an empty line.
+	a.SetBusy(true, context.CancelFunc(func() { cancelled = true }))
+
+	setInputForTest(a, "half-typed steer")
+
+	// First ESC: clears the steer line, must NOT cancel the turn.
+	a.processInput([]byte{27})
+	if cancelled {
+		t.Fatal("first ESC cancelled the turn; want steer line cleared only")
+	}
+	if got := string(a.ed.input); got != "" {
+		t.Fatalf("first ESC did not clear steer line; input = %q", got)
+	}
+
+	// Second ESC: line now empty, must cancel the turn.
+	a.processInput([]byte{27})
+	if !cancelled {
+		t.Fatal("second ESC (empty steer line) did not cancel the turn")
+	}
+}
+
+// TestEscWhileBusy_EmptySteer_CancelsImmediately: ESC while busy with no steer
+// text cancels the turn on the first press (unchanged behavior).
+func TestEscWhileBusy_EmptySteer_CancelsImmediately(t *testing.T) {
+	a := New("test", "", WelcomeInfo{})
+	a.r.SetOutput(discardWriter{})
+	cancelled := false
+	a.SetBusy(true, context.CancelFunc(func() { cancelled = true }))
+
+	a.processInput([]byte{27})
+
+	if !cancelled {
+		t.Fatal("ESC with empty steer line did not cancel the turn")
 	}
 }
 

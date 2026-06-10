@@ -1213,6 +1213,87 @@ func TestEndOfTurn_TeardownNoRespin(t *testing.T) {
 	}
 }
 
+// ── dropped-input guard (launchTurn fallback) ───────────────────────────────
+
+// TestLaunchTurn_GateBusyFallsBackToInterject: when runTurn returns false
+// (a turn is already in flight — the wake goroutine won the gate in the narrow
+// window after patchapp cleared busy), launchTurn must NOT drop the user's
+// Enter-submitted prompt; it falls back to Interject so the running turn
+// consumes it as steering. This mirrors RunInteractive's launchTurn exactly,
+// with the shared turnGate pre-occupied to force the busy path.
+func TestLaunchTurn_GateBusyFallsBackToInterject(t *testing.T) {
+	sess := &fakeSession{name: "main"}
+	gate := &turnGate{}
+
+	// runTurn mirrors RunInteractive's: false when the gate is already busy.
+	runTurn := func(start func(context.Context) <-chan shell3.Event) bool {
+		if !gate.begin() {
+			return false
+		}
+		gate.end()
+		return true
+	}
+	// launchTurn mirrors RunInteractive's fallback wiring.
+	launchTurn := func(prompt string) {
+		started := runTurn(func(ctx context.Context) <-chan shell3.Event {
+			return sess.Send(ctx, prompt)
+		})
+		if !started {
+			sess.Interject(prompt)
+		}
+	}
+
+	// Occupy the gate to model a turn already in flight (the wake path won).
+	if !gate.begin() {
+		t.Fatal("precondition: gate should start idle")
+	}
+
+	launchTurn("user message")
+
+	if len(sess.sent) != 0 {
+		t.Fatalf("prompt was sent as a new turn despite busy gate: %v", sess.sent)
+	}
+	if len(sess.interjections) != 1 || sess.interjections[0] != "user message" {
+		t.Fatalf("dropped-input fallback did not interject the prompt; got %v", sess.interjections)
+	}
+
+	gate.end()
+}
+
+// TestLaunchTurn_GateFreeSendsNormally: when the gate is free, launchTurn sends
+// the prompt as a normal turn and does NOT also interject it (no double-submit).
+func TestLaunchTurn_GateFreeSendsNormally(t *testing.T) {
+	sess := &fakeSession{name: "main"}
+	gate := &turnGate{}
+	runTurn := func(start func(context.Context) <-chan shell3.Event) bool {
+		if !gate.begin() {
+			return false
+		}
+		// Drain the start channel like the real drain goroutine would, then free.
+		for range start(context.Background()) {
+		}
+		gate.end()
+		return true
+	}
+	launchTurn := func(prompt string) {
+		started := runTurn(func(ctx context.Context) <-chan shell3.Event {
+			return sess.Send(ctx, prompt)
+		})
+		if !started {
+			sess.Interject(prompt)
+		}
+	}
+
+	launchTurn("user message")
+
+	if len(sess.sent) != 1 || sess.sent[0] != "user message" {
+		t.Fatalf("prompt not sent as a normal turn; got %v", sess.sent)
+	}
+	if len(sess.interjections) != 0 {
+		t.Fatalf("normal-path prompt was also interjected (double-submit): %v", sess.interjections)
+	}
+}
+
 // Compile-time assertion that *shell3.Session satisfies the local session
 // interface the loop and handlers depend on. fakeSession satisfies it too.
 var _ session = (*shell3.Session)(nil)

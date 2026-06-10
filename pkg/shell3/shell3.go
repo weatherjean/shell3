@@ -485,12 +485,15 @@ func (s *Session) Interject(text string, parts ...Part) {
 }
 
 // wake emits a Wake for this session on the runtime bus (no-op without a
-// runtime). Call only from caller-goroutine code paths (e.g. Interject), not
-// from the subagent goroutine — that path uses a captured rt to avoid racing
-// doClose's nil of s.runtime.
+// runtime). Reachable from any goroutine via Interject, so it snapshots
+// s.runtime under s.mu — mirroring WakeEvents — to avoid racing doClose's nil
+// of s.runtime. The lock is not held across emit.
 func (s *Session) wake() {
-	if s.runtime != nil {
-		s.runtime.emit(HostEvent{Session: s.name, Kind: Wake})
+	s.mu.Lock()
+	rt := s.runtime
+	s.mu.Unlock()
+	if rt != nil {
+		rt.emit(HostEvent{Session: s.name, Kind: Wake})
 	}
 }
 

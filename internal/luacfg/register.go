@@ -151,6 +151,27 @@ func (c *LoadedConfig) luaTool(L *lua.LState) int {
 	return 1
 }
 
+// subagentHandleNames is like handleNames for the "__subagent" sentinel, but
+// fails fast (via L.RaiseError) on any array element that is not a valid
+// subagent handle instead of silently dropping it. A bare string, number, or a
+// table missing the sentinel all raise. agentName is used in the error message.
+func subagentHandleNames(L *lua.LState, list *lua.LTable, agentName string) []string {
+	var out []string
+	for i := 1; i <= list.Len(); i++ {
+		v := list.RawGetInt(i)
+		ht, ok := v.(*lua.LTable)
+		if !ok {
+			L.RaiseError("agent %q: tools.subagents[%d] is not a subagent handle", agentName, i)
+		}
+		s, ok := ht.RawGetString("__subagent").(lua.LString)
+		if !ok {
+			L.RaiseError("agent %q: tools.subagents[%d] is not a subagent handle", agentName, i)
+		}
+		out = append(out, string(s))
+	}
+	return out
+}
+
 // parseGates reads the boolean tool gates from a tools table.
 func parseGates(tt *lua.LTable) ToolGates {
 	return ToolGates{
@@ -206,8 +227,12 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 		if tt.RawGetString("skill") == lua.LFalse {
 			a.SkillsDisabled = true
 		}
-		if sg, ok := tt.RawGetString("subagents").(*lua.LTable); ok {
-			a.Subagents = handleNames(sg, "__subagent")
+		if sgv := tt.RawGetString("subagents"); sgv != lua.LNil {
+			sg, ok := sgv.(*lua.LTable)
+			if !ok {
+				L.RaiseError("agent %q: tools.subagents must be a list of subagent handles, got %s", a.Name, sgv.Type().String())
+			}
+			a.Subagents = subagentHandleNames(L, sg, a.Name)
 		}
 	}
 	if g, ok := opts.RawGetString("on_tool_call").(*lua.LTable); ok {

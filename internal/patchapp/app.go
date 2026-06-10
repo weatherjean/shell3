@@ -191,7 +191,13 @@ func (a *App) Quit() {
 // from the turn goroutine while busy. Concurrent calls are serialized by
 // approvalMu: a second request blocks until the first resolves. If the app
 // is exiting (Quit) the prompt resolves false so the caller cannot wedge.
-func (a *App) RequestApproval(question string) bool {
+//
+// ctx is the turn context: if it is cancelled (Ctrl-C/ESC interrupt, or
+// teardown) while the prompt is still pending, the wait unblocks and the
+// call returns false (deny). Without this, a turn cancelled mid-approval —
+// the input goroutine never receiving a y/N key — would leave the turn
+// goroutine blocked forever on the verdict channel.
+func (a *App) RequestApproval(ctx context.Context, question string) bool {
 	a.approvalMu.Lock()
 	defer a.approvalMu.Unlock()
 
@@ -234,7 +240,22 @@ func (a *App) RequestApproval(question string) bool {
 	}
 	a.mu.Unlock()
 
-	verdict := <-ch
+	var verdict bool
+	select {
+	case verdict = <-ch:
+	case <-ctx.Done():
+		// The turn was cancelled (Ctrl-C/ESC/teardown) before the user
+		// answered. Clear the pending state under mu so the now-orphaned
+		// channel can't be resolved later (a stray key after this would
+		// otherwise send on a channel nobody reads), then deny.
+		a.mu.Lock()
+		if a.pendingApproval == ch {
+			a.pendingApproval = nil
+		}
+		a.mu.Unlock()
+		a.PrintLine(patchtui.Dim + "[denied]" + patchtui.Reset)
+		return false
+	}
 	if verdict {
 		a.PrintLine(patchtui.Dim + "[approved]" + patchtui.Reset)
 	} else {

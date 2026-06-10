@@ -121,9 +121,21 @@ func (a *App) processInput(data []byte) (exit bool) {
 		case keyEscape:
 			a.mu.Lock()
 			if a.busy && a.streamCancel != nil {
-				a.streamCancel()
-				a.lastCtrlC = time.Time{}
-				a.status.ctrlCHint = false
+				// While busy the input line holds pending steer text. A first ESC
+				// with non-empty steer text clears that line (so the user can
+				// abandon a half-typed interjection without killing the turn); a
+				// second ESC (now empty) cancels the turn. This makes ESC-to-cancel
+				// non-destructive to in-progress steering.
+				if len(a.ed.input) > 0 {
+					a.ed.input = a.ed.input[:0]
+					a.ed.cursor = 0
+					a.ed.historyDraft = a.ed.historyDraft[:0]
+					a.render()
+				} else {
+					a.streamCancel()
+					a.lastCtrlC = time.Time{}
+					a.status.ctrlCHint = false
+				}
 			} else if !a.busy {
 				if a.ed.historyIdx > 0 || a.ed.historyInDraft {
 					// Restore live input from draft; exit history navigation.
