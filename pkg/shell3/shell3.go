@@ -502,6 +502,11 @@ func (s *Session) RunQueued(ctx context.Context) <-chan Event {
 	return s.Send(ctx, "")
 }
 
+// HasQueuedInput reports whether interjected items are waiting (e.g. steering
+// that arrived during a turn's final round). A host can call RunQueued to run a
+// turn that consumes them.
+func (s *Session) HasQueuedInput() bool { return s.sess.HasInbox() }
+
 // loadPart converts one public Part into an internal ContentPart, enforcing
 // the Part contract: exactly one of Path/Data, MIME with Data, and Kind
 // matching the loaded media type. Size caps are enforced by the chat loaders.
@@ -607,6 +612,10 @@ func (s *Session) SendParts(ctx context.Context, prompt string, parts []Part) <-
 	s.curDone = turnCtx.Done()
 	s.turnCancel = cancel
 	s.turnDone = done
+	// Capture the runtime here (under the busy gate, after the ErrBusy
+	// early-return) so the turn goroutine doesn't read s.runtime — doClose may
+	// nil it concurrently once `done` closes (see the big defer's wake below).
+	rt := s.runtime
 	s.mu.Unlock()
 	tc := s.turnConfig()
 	go func() {
@@ -622,6 +631,15 @@ func (s *Session) SendParts(ctx context.Context, prompt string, parts []Part) <-
 			s.busy = false
 			s.mu.Unlock()
 			close(out)
+			// Steering (or a subagent result) that arrived during the turn's final
+			// round was queued but never drained — there was no next round boundary.
+			// The session is now idle with a non-empty inbox, so Wake the host to run
+			// a follow-up turn (RunQueued). Uses the captured rt, not s.runtime, to
+			// avoid racing doClose's nil of s.runtime. Emitted after busy is cleared
+			// so a host's RunQueued isn't rejected as busy.
+			if rt != nil && s.sess.HasInbox() {
+				rt.emit(HostEvent{Session: s.name, Kind: Wake})
+			}
 			cancel() // release the child ctx
 		}()
 		defer close(done)

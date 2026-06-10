@@ -472,6 +472,13 @@ type fakeSession struct {
 	wakeBus        chan shell3.HostEvent
 	runQueued      []shell3.Event
 	runQueuedCalls int
+
+	// hasQueuedRemaining models the inbox: HasQueuedInput returns true while it is
+	// > 0, decrementing on each check. This lets a test arm exactly one follow-up
+	// re-dispatch (set to 1) without an infinite spin. hasQueuedCalls counts
+	// HasQueuedInput invocations.
+	hasQueuedRemaining int
+	hasQueuedCalls     int
 }
 
 func (f *fakeSession) Send(ctx context.Context, prompt string) <-chan shell3.Event {
@@ -514,6 +521,16 @@ func (f *fakeSession) Interject(text string, _ ...shell3.Part) {
 func (f *fakeSession) SetApprover(fn func(ctx context.Context, req shell3.ApprovalRequest) bool) error {
 	f.approver = fn
 	return nil
+}
+func (f *fakeSession) HasQueuedInput() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.hasQueuedCalls++
+	if f.hasQueuedRemaining > 0 {
+		f.hasQueuedRemaining--
+		return true
+	}
+	return false
 }
 func (f *fakeSession) Name() string { return f.name }
 func (f *fakeSession) WakeEvents() <-chan shell3.HostEvent {
@@ -1071,6 +1088,128 @@ func TestApproverWiring(t *testing.T) {
 	want := `main wants to run bash({"cmd":"ls"}) — policy`
 	if asked != want {
 		t.Fatalf("question = %q; want %q", asked, want)
+	}
+}
+
+// ── end-of-turn re-dispatch (Part B) ────────────────────────────────────────
+
+// newRedispatchRunTurn builds the same runTurn closure RunInteractive uses,
+// including the end-of-turn defer that auto-runs a follow-up RunQueued turn when
+// HasQueuedInput is true. It mirrors the production structure exactly (forward-
+// declared so the defer can re-dispatch via runTurn), driven by turnsCtx so the
+// teardown guard can be exercised.
+func newRedispatchRunTurn(turnsCtx context.Context, sess session, app patchapp.AppView, turnWG *sync.WaitGroup) func(func(context.Context) <-chan shell3.Event) bool {
+	var lastUsage usage
+	renderSink, finishTurn := newRenderSink(app, &lastUsage)
+	gate := &turnGate{}
+	var runTurn func(start func(context.Context) <-chan shell3.Event) bool
+	runTurn = func(start func(context.Context) <-chan shell3.Event) bool {
+		if !gate.begin() {
+			return false
+		}
+		turnCtx, cancel := context.WithCancel(turnsCtx)
+		app.SetBusy(true, cancel)
+		ch := start(turnCtx)
+		turnWG.Add(1)
+		go func() {
+			defer turnWG.Done()
+			defer func() {
+				gate.end()
+				if turnsCtx.Err() == nil && sess.HasQueuedInput() {
+					runTurn(func(ctx context.Context) <-chan shell3.Event { return sess.RunQueued(ctx) })
+				}
+			}()
+			defer cancel()
+			defer func() { finishTurn(turnCtx.Err() != nil) }()
+			for ev := range ch {
+				renderSink(ev)
+			}
+		}()
+		return true
+	}
+	return runTurn
+}
+
+// TestEndOfTurn_QueuedInputRunsFollowUp: when a turn completes and HasQueuedInput
+// reports true once, the TUI auto-runs exactly one follow-up RunQueued turn.
+func TestEndOfTurn_QueuedInputRunsFollowUp(t *testing.T) {
+	app := &fakeApp{}
+	sess := &fakeSession{
+		name:               "main",
+		hasQueuedRemaining: 1, // one follow-up armed; then inbox reports empty
+		runQueued:          []shell3.Event{{Kind: shell3.Done}},
+	}
+	var turnWG sync.WaitGroup
+	runTurn := newRedispatchRunTurn(context.Background(), sess, app, &turnWG)
+
+	// Initial turn ends immediately (closed channel), triggering the end-of-turn defer.
+	ok := runTurn(func(ctx context.Context) <-chan shell3.Event {
+		ch := make(chan shell3.Event)
+		close(ch)
+		return ch
+	})
+	if !ok {
+		t.Fatal("initial turn should have started")
+	}
+	turnWG.Wait()
+
+	sess.mu.Lock()
+	calls := sess.runQueuedCalls
+	sess.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("expected exactly one follow-up RunQueued turn, got %d", calls)
+	}
+}
+
+// TestEndOfTurn_NoQueuedInputNoFollowUp: when HasQueuedInput reports false, the
+// TUI runs NO follow-up turn.
+func TestEndOfTurn_NoQueuedInputNoFollowUp(t *testing.T) {
+	app := &fakeApp{}
+	sess := &fakeSession{name: "main", hasQueuedRemaining: 0}
+	var turnWG sync.WaitGroup
+	runTurn := newRedispatchRunTurn(context.Background(), sess, app, &turnWG)
+
+	runTurn(func(ctx context.Context) <-chan shell3.Event {
+		ch := make(chan shell3.Event)
+		close(ch)
+		return ch
+	})
+	turnWG.Wait()
+
+	sess.mu.Lock()
+	calls := sess.runQueuedCalls
+	sess.mu.Unlock()
+	if calls != 0 {
+		t.Fatalf("no queued input must not run a follow-up turn, got %d RunQueued calls", calls)
+	}
+}
+
+// TestEndOfTurn_TeardownNoRespin: with turnsCtx already cancelled, a completing
+// turn with queued input does NOT re-dispatch (no teardown spin). HasQueuedInput
+// must not even be consulted past the guard.
+func TestEndOfTurn_TeardownNoRespin(t *testing.T) {
+	app := &fakeApp{}
+	sess := &fakeSession{
+		name:               "main",
+		hasQueuedRemaining: 99, // would spin forever if the guard were absent
+		runQueued:          []shell3.Event{{Kind: shell3.Done}},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	var turnWG sync.WaitGroup
+	runTurn := newRedispatchRunTurn(ctx, sess, app, &turnWG)
+
+	// Start a turn, then cancel turnsCtx so the end-of-turn defer's guard trips.
+	ch := make(chan shell3.Event)
+	runTurn(func(ctx context.Context) <-chan shell3.Event { return ch })
+	cancel()
+	close(ch)
+	turnWG.Wait()
+
+	sess.mu.Lock()
+	calls := sess.runQueuedCalls
+	sess.mu.Unlock()
+	if calls != 0 {
+		t.Fatalf("teardown (turnsCtx cancelled) must not re-dispatch, got %d RunQueued calls", calls)
 	}
 }
 

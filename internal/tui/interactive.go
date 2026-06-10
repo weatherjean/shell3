@@ -43,6 +43,11 @@ type session interface {
 	// idle Interject). Returns an already-closed channel (no turn) when busy or
 	// the inbox is empty. Same Event stream shape as Send.
 	RunQueued(ctx context.Context) <-chan shell3.Event
+	// HasQueuedInput reports whether interjected items are waiting (e.g. steering
+	// that arrived during a turn's final round, undrained because there was no
+	// next round boundary). The drain goroutine checks this at turn end to
+	// auto-run a follow-up RunQueued.
+	HasQueuedInput() bool
 	// Name is the session's registry name, compared against HostEvent.Session to
 	// filter the wake bus down to this session in the single-session TUI.
 	Name() string
@@ -164,7 +169,11 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 	// drain goroutine completes. The render sink runs on that goroutine; per-turn
 	// UI transitions happen as it processes events. pkg persists history inside
 	// the turn.
-	runTurn := func(start func(context.Context) <-chan shell3.Event) bool {
+	//
+	// Declared (not :=) so the end-of-turn defer below can re-dispatch via runTurn
+	// itself (an auto follow-up turn when steering was queued at end-of-turn).
+	var runTurn func(start func(context.Context) <-chan shell3.Event) bool
+	runTurn = func(start func(context.Context) <-chan shell3.Event) bool {
 		if !gate.begin() {
 			return false
 		}
@@ -174,7 +183,18 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 		turnWG.Add(1)
 		go func() {
 			defer turnWG.Done()
-			defer gate.end()
+			defer func() {
+				gate.end()
+				// If steering arrived during this turn's final round it was queued but
+				// never drained; now that the turn is done, auto-run a follow-up turn to
+				// consume it. Guard on turnsCtx so we don't spin during teardown (a
+				// cancelled turn may not drain the inbox). gate mutual-exclusion + the
+				// idle-Interject/bus Wake make this run at most once; RunQueued no-ops on
+				// an empty inbox.
+				if turnsCtx.Err() == nil && sess.HasQueuedInput() {
+					runTurn(func(ctx context.Context) <-chan shell3.Event { return sess.RunQueued(ctx) })
+				}
+			}()
 			defer cancel()
 			// finishTurn runs at channel close (the guaranteed end-of-turn signal)
 			// BEFORE the deferred cancel() above — deferred LIFO — so turnCtx.Err()
