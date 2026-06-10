@@ -81,5 +81,25 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 // handleCommand stub — replaced by Task 8.
 func (b *Bot) handleCommand(context.Context, Msg) {}
 
-// consumeWakes stub — replaced by Task 7.
-func (b *Bot) consumeWakes(ctx context.Context) {}
+// consumeWakes pushes results when the session wakes (subagent/cron results).
+// Single-consumer note: rt.Events() is one channel; the bot is its only consumer
+// here (single session). If a future front-end shares the Runtime, route by ev.Session.
+func (b *Bot) consumeWakes(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-b.rt.Events():
+			if !ok {
+				return
+			}
+			if ev.Kind != shell3.Wake || ev.Session != b.sess.Name() {
+				continue
+			}
+			reply := drainToReply(b.sess.RunQueued(ctx))
+			if reply != "" {
+				b.sendReply(ctx, reply)
+			}
+		}
+	}
+}
