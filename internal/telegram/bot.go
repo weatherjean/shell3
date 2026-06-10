@@ -106,13 +106,35 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 		b.sess.Interject(text)
 		return
 	}
-	_ = b.client.Typing(ctx, b.chatID)
+	stopTyping := b.keepTyping(ctx)
 	turnCtx, cancel := context.WithCancel(ctx)
 	b.cancelTurn = cancel
 	reply := b.drainTurn(b.sess.Send(turnCtx, text))
 	b.cancelTurn = nil
 	cancel()
+	stopTyping()
 	b.sendReply(ctx, reply)
+}
+
+// keepTyping shows the "typing…" chat action and refreshes it every 4s until
+// the returned stop is called. Telegram's chat action only lasts ~5s, so a long
+// turn needs periodic re-sending or the indicator vanishes mid-turn.
+func (b *Bot) keepTyping(ctx context.Context) (stop func()) {
+	tctx, cancel := context.WithCancel(ctx)
+	go func() {
+		_ = b.client.Typing(tctx, b.chatID)
+		t := time.NewTicker(4 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-tctx.Done():
+				return
+			case <-t.C:
+				_ = b.client.Typing(tctx, b.chatID)
+			}
+		}
+	}()
+	return cancel
 }
 
 // hasTool reports whether the active agent has the named tool enabled.
@@ -140,7 +162,9 @@ func (b *Bot) consumeWakes(ctx context.Context) {
 			if ev.Kind != shell3.Wake || ev.Session != b.sess.Name() {
 				continue
 			}
+			stopTyping := b.keepTyping(ctx)
 			reply := b.drainTurn(b.sess.RunQueued(ctx))
+			stopTyping()
 			if reply != "" {
 				b.sendReply(ctx, reply)
 			}
