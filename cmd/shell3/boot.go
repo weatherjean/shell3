@@ -65,7 +65,7 @@ func runBoot(f *bootFlags) error {
 	if err != nil {
 		return err
 	}
-	key, err := secret(f.key, "API key (blank if your proxy handles auth)", in, tty, false)
+	key, err := value(f.key, "API key (blank if your proxy handles auth)", "", in, tty, false)
 	if err != nil {
 		return err
 	}
@@ -80,7 +80,7 @@ func runBoot(f *bootFlags) error {
 	if err != nil {
 		return err
 	}
-	braveKey, err := secret(f.braveKey, "Brave Search key (blank to add later)", in, tty, false)
+	braveKey, err := value(f.braveKey, "Brave Search key (blank to add later)", "", in, tty, false)
 	if err != nil {
 		return err
 	}
@@ -207,24 +207,4 @@ func value(flag, label, def string, in *bufio.Reader, tty, required bool) (strin
 		return def, nil
 	}
 	return line, nil
-}
-
-// secret reads a value without echoing it.
-func secret(flag, label string, in *bufio.Reader, tty, required bool) (string, error) {
-	if flag != "" {
-		return flag, nil
-	}
-	if !tty {
-		if required {
-			return "", fmt.Errorf("boot: --%s required when stdin is not a terminal", strings.ToLower(strings.Fields(label)[0]))
-		}
-		return "", nil
-	}
-	fmt.Printf("  %s: ", label)
-	b, err := term.ReadPassword(int(os.Stdin.Fd()))
-	fmt.Println()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(b)), nil
 }

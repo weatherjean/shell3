@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bufio"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,6 +59,46 @@ func TestEnvKeyForName(t *testing.T) {
 	}
 	if got := envKeyForName("123model"); got != "_123MODEL_API_KEY" {
 		t.Errorf("envKeyForName(123model) = %q, want _123MODEL_API_KEY (leading digit)", got)
+	}
+}
+
+// TestValueReadsVisibleLine covers the interactive read path used by every boot
+// prompt — including the API key, which now echoes (read as a normal line)
+// instead of being hidden. A long pasted token must come back intact.
+func TestValueReadsVisibleLine(t *testing.T) {
+	const pasted = "sk-proj-AbCdEf0123456789-very-long-pasted-key_value.0987654321"
+	in := bufio.NewReader(strings.NewReader(pasted + "\n"))
+	got, err := value("", "API key (blank if your proxy handles auth)", "", in, true, false)
+	if err != nil {
+		t.Fatalf("value: %v", err)
+	}
+	if got != pasted {
+		t.Fatalf("value = %q, want %q", got, pasted)
+	}
+}
+
+// TestValueBlankUsesDefault: an empty line returns the default (blank key is
+// allowed — e.g. when a proxy handles auth).
+func TestValueBlankUsesDefault(t *testing.T) {
+	in := bufio.NewReader(strings.NewReader("\n"))
+	got, err := value("", "API key", "", in, true, false)
+	if err != nil {
+		t.Fatalf("value: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("value = %q, want empty", got)
+	}
+}
+
+// TestValueFlagWins: a provided flag short-circuits the prompt entirely.
+func TestValueFlagWins(t *testing.T) {
+	in := bufio.NewReader(strings.NewReader("ignored\n"))
+	got, err := value("from-flag", "API key", "", in, true, false)
+	if err != nil {
+		t.Fatalf("value: %v", err)
+	}
+	if got != "from-flag" {
+		t.Fatalf("value = %q, want from-flag", got)
 	}
 }
 
