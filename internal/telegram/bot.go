@@ -85,8 +85,5 @@ func (b *Bot) handleCallback(context.Context, *Callback) {}
 // handleCommand stub — replaced by Task 8.
 func (b *Bot) handleCommand(context.Context, Msg) {}
 
-// mediaToParts stub — replaced by Task 5.
-func mediaToParts([]Media) []shell3.Part { return nil }
-
 // consumeWakes stub — replaced by Task 7.
 func (b *Bot) consumeWakes(ctx context.Context) {}
