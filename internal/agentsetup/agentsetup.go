@@ -73,6 +73,9 @@ func (p *Parts) ProjectRef() string { return p.uuid }
 // Root returns the runtime root working directory (the CWD passed to BuildParts).
 func (p *Parts) Root() string { return p.root }
 
+// Telegram returns the parsed shell3.telegram{} config (zero value if absent).
+func (p *Parts) Telegram() luacfg.TelegramConfig { return p.lc.Telegram() }
+
 // AgentNames returns declared agent names in declaration order.
 func (p *Parts) AgentNames() []string {
 	agents := p.lc.Agents()

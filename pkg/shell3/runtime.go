@@ -11,6 +11,20 @@ import (
 	"github.com/weatherjean/shell3/internal/chat"
 )
 
+// TelegramConfig mirrors the parsed shell3.telegram{} block.
+type TelegramConfig struct {
+	Token     string
+	ChatID    string
+	Dashboard DashboardConfig
+}
+
+// DashboardConfig mirrors the parsed shell3.telegram.dashboard{} block.
+type DashboardConfig struct {
+	Enabled bool
+	Addr    string
+	URL     string
+}
+
 // RuntimeSpec configures a long-lived Runtime: the process-wide unit owning
 // the config (Lua state), store, MCP servers, proxy spawner, and log.
 type RuntimeSpec struct {
@@ -81,6 +95,8 @@ type Runtime struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	telegram TelegramConfig
+
 	// subSeq mints process-unique subagent ids (see nextSubID). Global to the
 	// runtime so two parents never collide on a "sub:<id>" session name.
 	subSeq atomic.Int64
@@ -137,6 +153,7 @@ func NewRuntime(spec RuntimeSpec) (*Runtime, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	tg := parts.Telegram()
 	return &Runtime{
 		sessionConfig: func(o SessionOpts) (chat.Config, error) {
 			return parts.SessionConfig(agentsetup.SessionOptions{
@@ -144,7 +161,16 @@ func NewRuntime(spec RuntimeSpec) (*Runtime, error) {
 				DisableSubagents: o.DisableSubagents,
 			})
 		},
-		cleanup:  cleanup,
+		cleanup: cleanup,
+		telegram: TelegramConfig{
+			Token:  tg.Token,
+			ChatID: tg.ChatID,
+			Dashboard: DashboardConfig{
+				Enabled: tg.Dashboard.Enabled,
+				Addr:    tg.Dashboard.Addr,
+				URL:     tg.Dashboard.URL,
+			},
+		},
 		events:   make(chan HostEvent, 64),
 		workDir:  workDir,
 		ctx:      ctx,
@@ -157,6 +183,9 @@ func NewRuntime(spec RuntimeSpec) (*Runtime, error) {
 // Buffered; if the host is not draining, Wake events coalesce (drop on full —
 // the host re-checks inboxes on its next turn anyway).
 func (rt *Runtime) Events() <-chan HostEvent { return rt.events }
+
+// Telegram returns the parsed shell3.telegram{} config (zero value if absent).
+func (rt *Runtime) Telegram() TelegramConfig { return rt.telegram }
 
 func (rt *Runtime) root() string                 { return rt.workDir }
 func (rt *Runtime) baseContext() context.Context { return rt.ctx }
