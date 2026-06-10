@@ -914,6 +914,7 @@ type Snapshot struct {
 	SystemPrompt  string
 	Tools         []ToolInfo
 	Skills        []string
+	Subagents     []string
 	Params        []ParamValue
 }
 
@@ -930,6 +931,7 @@ func (s *Session) Snapshot() Snapshot {
 		ContextWindow: s.cfg.ContextWindow,
 		SystemPrompt:  s.cfg.Personality.SystemPrompt,
 		Skills:        s.cfg.ActiveSkills,
+		Subagents:     s.cfg.Subagents,
 	}
 	for _, t := range s.cfg.Personality.Tools {
 		snap.Tools = append(snap.Tools, ToolInfo{Name: t.Name, Description: t.Description})

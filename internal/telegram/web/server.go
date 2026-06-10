@@ -106,7 +106,9 @@ type statusResp struct {
 	ProjectRef    string     `json:"project_ref"`
 	Tools         []string   `json:"tools"`
 	Skills        []string   `json:"skills"`
+	Subagents     []string   `json:"subagents"`
 	Params        []param    `json:"params"`
+	SystemPrompt  string     `json:"system_prompt,omitempty"`
 	Usage         *usageResp `json:"usage,omitempty"`
 }
 
@@ -131,6 +133,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		ContextWindow: snap.ContextWindow,
 		ProjectRef:    snap.ProjectRef,
 		Skills:        snap.Skills,
+		Subagents:     snap.Subagents,
+		SystemPrompt:  snap.SystemPrompt,
 	}
 	for _, t := range snap.Tools {
 		out.Tools = append(out.Tools, t.Name)

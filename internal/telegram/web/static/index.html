@@ -277,8 +277,10 @@ function renderSubs(subs) {
 
 // ---- Status ---------------------------------------------------------------
 function renderStatus(st) {
-  const tools = (st.tools || []).map(t => `<span class="chip">${esc(t)}</span>`).join("") || '<span class="chip">none</span>';
-  const skills = (st.skills || []).map(t => `<span class="chip">${esc(t)}</span>`).join("") || '<span class="chip">none</span>';
+  const chips = arr => (arr || []).map(t => `<span class="chip">${esc(t)}</span>`).join("") || '<span class="chip">none</span>';
+  const tools = chips(st.tools);
+  const skills = chips(st.skills);
+  const subagents = chips(st.subagents);
   const params = (st.params || []).map(p => {
     const val = p.value || p.default || "—";
     const tag = (!p.value && p.default) ? '<span class="def">default</span>' : "";
@@ -302,7 +304,10 @@ function renderStatus(st) {
     ${usage}
     <div class="section-title">Tools</div><div class="chips">${tools}</div>
     <div class="section-title">Skills</div><div class="chips">${skills}</div>
-    ${params ? `<div class="section-title">Parameters</div>${params}` : ""}`;
+    <div class="section-title">Subagents</div><div class="chips">${subagents}</div>
+    ${params ? `<div class="section-title">Parameters</div>${params}` : ""}
+    ${st.system_prompt ? `<div class="section-title">System prompt</div>
+      <details class="tool"><summary><span class="chev">▸</span><span class="tname">📜 Full prompt</span></summary><pre>${esc(st.system_prompt)}</pre></details>` : ""}`;
 }
 
 // ---- Past sessions --------------------------------------------------------
