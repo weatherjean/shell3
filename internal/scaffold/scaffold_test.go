@@ -141,7 +141,18 @@ func TestRenderedConfigLoads(t *testing.T) {
 	for _, d := range defs {
 		if d.Name == "spawn_agent" {
 			sawSpawn = true
-			enum := d.Parameters["properties"].(map[string]any)["subagent"].(map[string]any)["enum"].([]string)
+			props, ok := d.Parameters["properties"].(map[string]any)
+			if !ok {
+				t.Fatal("spawn_agent schema missing properties map")
+			}
+			subProp, ok := props["subagent"].(map[string]any)
+			if !ok {
+				t.Fatal("spawn_agent schema missing subagent property")
+			}
+			enum, ok := subProp["enum"].([]string)
+			if !ok {
+				t.Fatalf("subagent enum has unexpected type %T", subProp["enum"])
+			}
 			if len(enum) != 1 || enum[0] != "explorer" {
 				t.Errorf("spawn_agent subagent enum = %v, want [explorer]", enum)
 			}

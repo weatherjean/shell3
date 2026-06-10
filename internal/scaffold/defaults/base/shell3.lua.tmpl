@@ -35,7 +35,7 @@ local explorer = shell3.subagent({
 You are a focused code explorer. Investigate the question using bash (rg, fd,
 cat, git log) and report a concise, concrete answer with file:line references.
 You cannot edit files. Decide and proceed; no human is available.
-  ]],
+]],
   tools = { bash = true, history = true },
   on_tool_call = { guards.no_env_edit },
 })
