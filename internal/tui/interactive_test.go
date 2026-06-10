@@ -451,13 +451,13 @@ type fakeSession struct {
 	agents []string
 	active string
 
-	cleared      bool
-	rolledBack   bool   // controls Rollback's return
-	rollbackOK   bool   // what Rollback returns
-	pruneOut     string // what Prune returns
-	pruneOK      bool   // what Prune's ok returns
-	setParamFn   func(string, string) error
-	sent         []string // prompts passed to Send
+	cleared       bool
+	rolledBack    bool   // controls Rollback's return
+	rollbackOK    bool   // what Rollback returns
+	pruneOut      string // what Prune returns
+	pruneOK       bool   // what Prune's ok returns
+	setParamFn    func(string, string) error
+	sent          []string // prompts passed to Send
 	interjections []string // texts passed to Interject
 }
 
