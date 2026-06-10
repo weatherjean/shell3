@@ -27,7 +27,8 @@ func NewRuntimeForTest(t *testing.T, replyText string) *Runtime {
 					fakellm.Script{Events: []llm.StreamEvent{{TextDelta: replyText}}},
 					fakellm.Script{Events: []llm.StreamEvent{{TextDelta: replyText}}},
 				),
-				ModeLabel: "code",
+				ModeLabel:  "code",
+				AgentNames: []string{"code"},
 			}
 			cfg.Headless = o.Headless
 			return cfg, nil

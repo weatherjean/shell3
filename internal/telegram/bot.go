@@ -19,16 +19,21 @@ type Bot struct {
 
 	approvals       *approvalRegistry
 	approvalTimeout time.Duration // 0 → 5 min default; set in tests
+
+	dashURL    string
+	cancelTurn context.CancelFunc
 }
 
 // NewBot wires a Bot. sess must be the runtime's persistent "telegram" session.
-func NewBot(client tgClient, rt *shell3.Runtime, sess *shell3.Session, chatID int64) *Bot {
+// dashURL is the URL to the dashboard (empty to disable).
+func NewBot(client tgClient, rt *shell3.Runtime, sess *shell3.Session, chatID int64, dashURL string) *Bot {
 	b := &Bot{
 		client:    client,
 		rt:        rt,
 		sess:      sess,
 		chatID:    chatID,
 		approvals: newApprovalRegistry(),
+		dashURL:   dashURL,
 	}
 	_ = sess.SetApprover(b.approve)
 	return b
@@ -36,7 +41,7 @@ func NewBot(client tgClient, rt *shell3.Runtime, sess *shell3.Session, chatID in
 
 // Run consumes inbound messages and the wake bus until ctx is cancelled.
 func (b *Bot) Run(ctx context.Context) {
-	go b.consumeWakes(ctx) // Task 7
+	go b.consumeWakes(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -60,7 +65,7 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 		return
 	}
 	if strings.HasPrefix(m.Text, "/") {
-		b.handleCommand(ctx, m) // Task 8
+		b.handleCommand(ctx, m) // defined in commands.go
 		return
 	}
 	parts := mediaToParts(m.Media)
@@ -73,13 +78,14 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 		return
 	}
 	_ = b.client.Typing(ctx, b.chatID)
-	ch := b.sess.SendParts(ctx, m.Text, parts)
+	turnCtx, cancel := context.WithCancel(ctx)
+	b.cancelTurn = cancel
+	ch := b.sess.SendParts(turnCtx, m.Text, parts)
 	reply := drainToReply(ch)
+	b.cancelTurn = nil
+	cancel()
 	b.sendReply(ctx, reply)
 }
-
-// handleCommand stub — replaced by Task 8.
-func (b *Bot) handleCommand(context.Context, Msg) {}
 
 // consumeWakes pushes results when the session wakes (subagent/cron results).
 // Single-consumer note: rt.Events() is one channel; the bot is its only consumer

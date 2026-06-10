@@ -14,7 +14,7 @@ import (
 func TestApprover_ApproveResolvesTrue(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "ok")
-	b := NewBot(fc, rt, sess, 42)
+	b := NewBot(fc, rt, sess, 42, "")
 	b.approvalTimeout = time.Minute
 
 	done := make(chan bool, 1)
@@ -40,7 +40,7 @@ func TestApprover_ApproveResolvesTrue(t *testing.T) {
 func TestApprover_TimeoutDenies(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "ok")
-	b := NewBot(fc, rt, sess, 42)
+	b := NewBot(fc, rt, sess, 42, "")
 	b.approvalTimeout = 50 * time.Millisecond
 
 	got := b.approve(context.Background(), shell3.ApprovalRequest{Tool: "bash"})

@@ -12,7 +12,7 @@ import (
 func TestHandleMsg_IdleSendsReply(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "hello from agent") // helper in runtime_fake_test.go (Step 3)
-	b := NewBot(fc, rt, sess, 42)
+	b := NewBot(fc, rt, sess, 42, "")
 
 	ctx := context.Background()
 	b.handleMsg(ctx, Msg{ChatID: 42, Text: "hi"})
@@ -26,7 +26,7 @@ func TestHandleMsg_IdleSendsReply(t *testing.T) {
 func TestHandleMsg_WrongChatDropped(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "should not run")
-	b := NewBot(fc, rt, sess, 42)
+	b := NewBot(fc, rt, sess, 42, "")
 
 	b.handleMsg(context.Background(), Msg{ChatID: 999, Text: "hi"})
 

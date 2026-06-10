@@ -8,7 +8,7 @@ import "context"
 type Msg struct {
 	ChatID   int64
 	Text     string
-	Media    []Media  // photos/voice/documents already resolved to bytes
+	Media    []Media // photos/voice/documents already resolved to bytes
 	Callback *Callback
 }
 
