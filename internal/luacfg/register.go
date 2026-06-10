@@ -1,6 +1,10 @@
 package luacfg
 
-import lua "github.com/yuin/gopher-lua"
+import (
+	"fmt"
+
+	lua "github.com/yuin/gopher-lua"
+)
 
 func registerShell3(c *LoadedConfig) {
 	L := c.L
@@ -8,6 +12,7 @@ func registerShell3(c *LoadedConfig) {
 	L.SetGlobal("shell3", tbl)
 	L.SetField(tbl, "model", L.NewFunction(c.luaModel))
 	L.SetField(tbl, "telegram", L.NewFunction(c.luaTelegram))
+	L.SetField(tbl, "cron", L.NewFunction(c.luaCron))
 	L.SetField(tbl, "skill", L.NewFunction(c.luaSkill))
 	L.SetField(tbl, "tool", L.NewFunction(c.luaTool))
 	L.SetField(tbl, "mcp", L.NewFunction(c.luaMCP))
@@ -50,6 +55,49 @@ func (c *LoadedConfig) luaTelegram(L *lua.LState) int {
 		}
 	}
 	c.telegram = tg
+	return 0
+}
+
+var cronKeys = map[string]bool{"jobs": true}
+var cronJobKeys = map[string]bool{
+	"name": true, "schedule": true, "agent": true, "prompt": true, "workdir": true, "notify": true,
+}
+
+func (c *LoadedConfig) luaCron(L *lua.LState) int {
+	opts := L.CheckTable(1)
+	if err := checkKeys(opts, "cron", cronKeys); err != nil {
+		L.RaiseError("%s", err.Error())
+	}
+	jobsT, ok := opts.RawGetString("jobs").(*lua.LTable)
+	if !ok {
+		return 0 // no jobs
+	}
+	n := 0
+	jobsT.ForEach(func(_, v lua.LValue) {
+		jt, ok := v.(*lua.LTable)
+		if !ok {
+			return
+		}
+		n++
+		if err := checkKeys(jt, "cron.job", cronJobKeys); err != nil {
+			L.RaiseError("%s", err.Error())
+		}
+		job := CronJob{
+			Name:     optStr(jt, "name"),
+			Schedule: optStr(jt, "schedule"),
+			Agent:    optStr(jt, "agent"),
+			Prompt:   optStr(jt, "prompt"),
+			WorkDir:  optStr(jt, "workdir"),
+			Notify:   true, // default
+		}
+		if v := jt.RawGetString("notify"); v != lua.LNil {
+			job.Notify = lua.LVAsBool(v)
+		}
+		if job.Name == "" {
+			job.Name = fmt.Sprintf("job-%d", n)
+		}
+		c.cron = append(c.cron, job)
+	})
 	return 0
 }
 

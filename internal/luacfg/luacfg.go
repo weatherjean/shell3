@@ -44,6 +44,16 @@ type MCPServer struct {
 	Tools   []string // optional allowlist
 }
 
+// CronJob is one parsed shell3.cron job entry.
+type CronJob struct {
+	Name     string
+	Schedule string
+	Agent    string
+	Prompt   string
+	WorkDir  string
+	Notify   bool
+}
+
 // TelegramConfig is the parsed shell3.telegram{...} block.
 type TelegramConfig struct {
 	Token     string
@@ -109,6 +119,7 @@ type LoadedConfig struct {
 	agents    []Agent
 	subagents []Subagent
 	telegram  TelegramConfig
+	cron      []CronJob
 
 	L  *lua.LState
 	mu sync.Mutex
@@ -191,12 +202,26 @@ func Load(path, workdir string) (*LoadedConfig, error) {
 			}
 		}
 	}
+	for i := range c.cron {
+		if c.cron[i].Schedule == "" {
+			return nil, fmt.Errorf("config: cron job %q has no schedule", c.cron[i].Name)
+		}
+		if c.cron[i].Agent == "" {
+			return nil, fmt.Errorf("config: cron job %q has no agent", c.cron[i].Name)
+		}
+		if _, ok := c.SubagentByName(c.cron[i].Agent); !ok {
+			return nil, fmt.Errorf("config: cron job %q references unknown subagent %q", c.cron[i].Name, c.cron[i].Agent)
+		}
+	}
 	success = true
 	return c, nil
 }
 
 // Telegram returns the parsed shell3.telegram{} block (zero value if absent).
 func (c *LoadedConfig) Telegram() TelegramConfig { return c.telegram }
+
+// Cron returns the parsed shell3.cron jobs (nil if absent).
+func (c *LoadedConfig) Cron() []CronJob { return c.cron }
 
 func (c *LoadedConfig) Model(name string) (Model, bool) {
 	for _, m := range c.Models {
