@@ -102,6 +102,14 @@ func ExampleNewRuntime() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	// Mid-turn steering: Interject can be called from any goroutine while
+	// Send is running. The text is queued and injected at the next round
+	// boundary as a system reminder ("user interjected …"). While idle it
+	// queues and is delivered at the start of the next turn.
+	go func() {
+		coder.Interject("stop after 3 steps and report status")
+	}()
 	for range coder.Send(context.Background(), "make the tests pass") {
 	}
 }

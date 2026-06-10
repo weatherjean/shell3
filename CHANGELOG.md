@@ -10,6 +10,10 @@ Until v1.0.0, minor versions may contain breaking changes.
 
 ### Added
 
+- Mid-turn steering: `Session.Interject` queues messages from any goroutine —
+  injected into a running turn at the next round boundary as a
+  `user interjected` reminder, or at the start of the next turn when idle.
+  In the TUI you can now type while the agent works and press Enter to steer.
 - `pkg/shell3.Runtime`: one shared build (config, store, MCP, log) hosting
   multiple named sessions with per-session agent, workdir, headless flag,
   and audit log. `Start`/`Run` are now thin single-session wrappers.
