@@ -48,6 +48,9 @@ func ToolDefs(g ToolGates, custom []CustomTool, hasSkills bool) []llm.ToolDefini
 	if g.History {
 		defs = append(defs, historyGetTool, historySearchTool)
 	}
+	if g.Subagents {
+		defs = append(defs, spawnAgentTool, listAgentsTool)
+	}
 	for _, ct := range custom {
 		defs = append(defs, llm.ToolDefinition{
 			Name:        ct.Name,
@@ -216,6 +219,33 @@ var readMediaTool = llm.ToolDefinition{
 			"path": map[string]any{"type": "string", "description": "Path to the media file (absolute or relative to the project root)."},
 		},
 		"required": []string{"path"},
+	},
+}
+
+var spawnAgentTool = llm.ToolDefinition{
+	Name: "spawn_agent",
+	Description: "Spawn a subagent to work a focused, independent subtask in the background. " +
+		"Returns an id immediately; the subagent runs on its own with a fresh context and reports back automatically — " +
+		"its result is delivered to you as a system message when it finishes (mid-turn if you are still working, otherwise on your next turn). " +
+		"Use for parallelizable work (e.g. investigate a file while you keep going). Do NOT poll in a tight loop; the result arrives on its own. " +
+		"Subagents cannot themselves spawn subagents.",
+	Parameters: map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"task":    map[string]any{"type": "string", "description": "The full task prompt for the subagent. Be self-contained: the subagent does not see this conversation."},
+			"agent":   map[string]any{"type": "string", "description": "Name of a configured agent to run as. Omit to use your own agent."},
+			"workdir": map[string]any{"type": "string", "description": "Working directory to root the subagent in (absolute, or relative to your workdir). Omit to use your workdir."},
+		},
+		"required": []string{"task"},
+	},
+}
+
+var listAgentsTool = llm.ToolDefinition{
+	Name:        "list_agents",
+	Description: "List the subagents you have spawned this session, with their id, status (running or finished), the task they were given, and (when finished) a short result preview. Use to check progress; results still arrive on their own.",
+	Parameters: map[string]any{
+		"type":       "object",
+		"properties": map[string]any{},
 	},
 }
 
