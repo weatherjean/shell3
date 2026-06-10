@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"github.com/weatherjean/shell3/internal/cron"
 	"github.com/weatherjean/shell3/internal/telegram"
 	"github.com/weatherjean/shell3/internal/telegram/web"
 	"github.com/weatherjean/shell3/pkg/shell3"
@@ -48,6 +49,18 @@ func newTelegramCommand() *cobra.Command {
 			sess, err := rt.Session(shell3.SessionOpts{Name: "telegram", Agent: tg.Agent, WorkDir: tg.WorkDir})
 			if err != nil {
 				return err
+			}
+
+			// Scheduled jobs (shell3.cron{}): arm a scheduler on the main session.
+			var sched *cron.Scheduler
+			if jobs := rt.Cron(); len(jobs) > 0 {
+				sched, err = cron.New(sess, jobs)
+				if err != nil {
+					return err // fail-fast on a bad schedule
+				}
+				sched.Start()
+				defer sched.Stop() // LIFO: stops before the earlier `defer rt.Close()`
+				fmt.Printf("cron: %d job(s) scheduled\n", len(jobs))
 			}
 
 			client, err := telegram.NewBotAPIClient(ctx, tg.Token)
