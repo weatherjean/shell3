@@ -10,6 +10,18 @@ Until v1.0.0, minor versions may contain breaking changes.
 
 ### Added
 
+- Subagents: `spawn_agent(task, agent?, workdir?)` runs a focused subtask
+  as a headless `sub:<id>` session on the shared `Runtime`; its result is
+  posted to the spawning session's inbox — injected mid-turn if the parent
+  is still working, or delivered as a `Wake` on the new
+  `Runtime.Events() <-chan HostEvent` bus if the parent is idle.
+  `list_agents()` returns a running/finished snapshot. Subagents are
+  depth-limited to 1 (the spawn tools are stripped from their schema) and
+  write their own audit JSONL under `.shell3/agents/`. Gated per agent by
+  `tools = { subagents = true }`. `Session.RunQueued(ctx)` runs a turn
+  seeded from queued inbox items — the host's response to a `Wake`. The TUI
+  auto-runs the wake turn when idle and renders a finished subagent as a dim
+  notice.
 - Inbound media: `Session.SendParts` starts a turn with image/audio
   attachments, and `Interject` accepts the same parts for mid-turn delivery.
   `Part{Kind, Path, Data, MIME}` loads from disk or straight from in-memory
