@@ -86,10 +86,25 @@ func renderSteerLine(input []rune, cursor, width int) []string {
 		return []string{patchtui.Dim + body + patchtui.Reset}
 	}
 
+	// WIDTH-BOUND INVARIANT: the returned single line MUST have
+	// patchtui.VisibleLen(line) <= max(1, width) for ALL widths and ALL cursor
+	// positions, so it never wraps to a 2nd physical row and corrupts the
+	// 2-row busy frame. CursorMarker is zero visible width (an APC sequence),
+	// so it never counts toward the bound; the bound is on visible TEXT cols.
+	//
+	// The prompt is treated as truncatable: if there isn't room for the full
+	// prompt plus at least one content/ellipsis column, truncate the prompt
+	// itself to width and return (mirrors the empty-input branch above, kept
+	// consistent across empty and non-empty input).
 	avail := width - promptVis
 	if avail < 1 {
-		// No room for any input next to the prompt; show the prompt alone.
-		return []string{patchtui.Dim + steerPrompt + patchtui.Reset}
+		// No room for any input next to the prompt; show a width-bounded
+		// prefix of the prompt alone (truncate the prompt, never overflow).
+		p := steerPrompt
+		if promptVis > width {
+			p = string(runesForVisibleColsStr(p, width))
+		}
+		return []string{patchtui.Dim + p + patchtui.Reset}
 	}
 
 	cursorCol := uniseg.StringWidth(string(flat[:cursor]))
@@ -101,11 +116,17 @@ func renderSteerLine(input []rune, cursor, width int) []string {
 		return []string{patchtui.Dim + steerPrompt + content + patchtui.Reset}
 	}
 
-	// Overflow: keep one line by left-truncating. Reserve one column for the
-	// leading "…" and ensure the cursor stays within the visible window. Show
-	// the last (avail-1) visible columns ending at/after the cursor.
+	// Overflow: keep one line by left-truncating into the `avail` columns. When
+	// there's room (avail >= 2) reserve one column for a leading "…"; when
+	// avail == 1 there's no room for an ellipsis, so show a single content
+	// column (the cursor's char) and no ellipsis. Either way the visible text
+	// is bounded to `avail`, so prompt(promptVis)+content(<=avail) <= width.
 	const ell = "…"
-	win := avail - 1
+	useEll := avail >= 2
+	win := avail
+	if useEll {
+		win = avail - 1 // reserve one column for the leading ellipsis
+	}
 	if win < 1 {
 		win = 1
 	}
@@ -129,11 +150,21 @@ func renderSteerLine(input []rune, cursor, width int) []string {
 		endRune = len(flat)
 	}
 	sub := flat[startRune:endRune]
-	// Cursor column within the truncated window, offset by the ellipsis.
+	// Cursor column within the truncated window. When an ellipsis is shown the
+	// cursor's visible column is offset by the ellipsis's single column. Clamp
+	// the marker column into the window so it stays on-screen.
 	relCol := uniseg.StringWidth(string(flat[startRune:cursor]))
-	subStr := ell + string(sub)
-	// "…" is one visible column; offset the cursor's visible col past it.
-	subStr = insertAtVisibleCol(subStr, 1+relCol, patchtui.CursorMarker)
+	subStr := string(sub)
+	markerCol := relCol
+	if useEll {
+		subStr = ell + subStr
+		markerCol = 1 + relCol
+	}
+	subVis := uniseg.StringWidth(subStr)
+	if markerCol > subVis {
+		markerCol = subVis
+	}
+	subStr = insertAtVisibleCol(subStr, markerCol, patchtui.CursorMarker)
 	return []string{patchtui.Dim + steerPrompt + subStr + patchtui.Reset}
 }
 

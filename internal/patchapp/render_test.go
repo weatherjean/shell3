@@ -315,6 +315,89 @@ func TestRenderSteerLine_FlattensMultiline(t *testing.T) {
 	}
 }
 
+// TestRenderSteerLine_WidthBoundNarrow asserts the width-bound invariant:
+// for ANY width and ANY cursor position, renderSteerLine returns exactly one
+// line whose visible width is <= max(1, width). A violation means the line
+// wraps to a 2nd physical row and corrupts the 2-row busy frame.
+func TestRenderSteerLine_WidthBoundNarrow(t *testing.T) {
+	input := []rune(strings.Repeat("abcdefghij", 20)) // 200 runes
+	widths := []int{1, 2, 7, 8, 9, 10}
+	cursors := []int{0, len(input) / 2, len(input)}
+	for _, w := range widths {
+		for _, c := range cursors {
+			lines := renderSteerLine(input, c, w)
+			if len(lines) != 1 {
+				t.Fatalf("width=%d cursor=%d: want 1 line, got %d: %q", w, c, len(lines), lines)
+			}
+			bound := w
+			if bound < 1 {
+				bound = 1
+			}
+			if vl := patchtui.VisibleLen(lines[0]); vl > bound {
+				t.Errorf("width=%d cursor=%d: visible width %d > max(1,width)=%d: %q",
+					w, c, vl, bound, lines[0])
+			}
+		}
+	}
+}
+
+// TestRenderSteerLine_CursorAtZeroMarker covers the cursor==0 marker position
+// at a narrow width: the marker must be present and the line within width.
+func TestRenderSteerLine_CursorAtZeroMarker(t *testing.T) {
+	input := []rune(strings.Repeat("x", 200))
+	for _, w := range []int{9, 12, 20} {
+		lines := renderSteerLine(input, 0, w)
+		if len(lines) != 1 {
+			t.Fatalf("width=%d: want 1 line, got %d", w, len(lines))
+		}
+		if vl := patchtui.VisibleLen(lines[0]); vl > w {
+			t.Fatalf("width=%d: visible %d > %d: %q", w, vl, w, lines[0])
+		}
+		if !strings.Contains(lines[0], patchtui.CursorMarker) {
+			t.Errorf("width=%d: cursor marker must be present at cursor==0; got %q", w, lines[0])
+		}
+	}
+}
+
+// TestRenderSteerLine_CursorMidOverflow covers a cursor in the middle of an
+// overflowing input at a narrow width: marker present, line within width.
+func TestRenderSteerLine_CursorMidOverflow(t *testing.T) {
+	input := []rune(strings.Repeat("y", 200))
+	for _, w := range []int{10, 15, 30} {
+		lines := renderSteerLine(input, 100, w)
+		if len(lines) != 1 {
+			t.Fatalf("width=%d: want 1 line, got %d", w, len(lines))
+		}
+		if vl := patchtui.VisibleLen(lines[0]); vl > w {
+			t.Fatalf("width=%d: visible %d > %d: %q", w, vl, w, lines[0])
+		}
+		if !strings.Contains(lines[0], patchtui.CursorMarker) {
+			t.Errorf("width=%d: cursor marker must be present mid-overflow; got %q", w, lines[0])
+		}
+	}
+}
+
+// TestRenderSteerLine_WideRunes asserts wide (CJK) input stays one line and
+// within width at narrow widths without panicking.
+func TestRenderSteerLine_WideRunes(t *testing.T) {
+	input := []rune(strings.Repeat("世", 100))
+	for _, w := range []int{1, 2, 7, 8, 9, 10, 13} {
+		for _, c := range []int{0, 50, len(input)} {
+			lines := renderSteerLine(input, c, w)
+			if len(lines) != 1 {
+				t.Fatalf("width=%d cursor=%d: want 1 line, got %d: %q", w, c, len(lines), lines)
+			}
+			bound := w
+			if bound < 1 {
+				bound = 1
+			}
+			if vl := patchtui.VisibleLen(lines[0]); vl > bound {
+				t.Errorf("width=%d cursor=%d: visible %d > %d: %q", w, c, vl, bound, lines[0])
+			}
+		}
+	}
+}
+
 func TestBusySetTokensAppliesImmediately(t *testing.T) {
 	var out strings.Builder
 	app := New("test", "provider/model", WelcomeInfo{})
