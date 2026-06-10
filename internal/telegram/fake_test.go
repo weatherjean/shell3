@@ -50,3 +50,15 @@ func (f *fakeClient) sentTexts() []string {
 	}
 	return out
 }
+
+// lastButtons returns the buttons of the last sent (non-edited) message, or nil.
+func (f *fakeClient) lastButtons() []Button {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := len(f.sent) - 1; i >= 0; i-- {
+		if !f.sent[i].edited {
+			return f.sent[i].buttons
+		}
+	}
+	return nil
+}

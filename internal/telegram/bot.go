@@ -5,6 +5,7 @@ package telegram
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/weatherjean/shell3/pkg/shell3"
 )
@@ -16,23 +17,21 @@ type Bot struct {
 	sess   *shell3.Session
 	chatID int64 // the single allowed chat
 
-	approvals *approvalRegistry // Task 6
+	approvals       *approvalRegistry
+	approvalTimeout time.Duration // 0 → 5 min default; set in tests
 }
-
-// approvalRegistry stub — replaced by Task 6.
-type approvalRegistry struct{}
-
-func newApprovalRegistry() *approvalRegistry { return &approvalRegistry{} }
 
 // NewBot wires a Bot. sess must be the runtime's persistent "telegram" session.
 func NewBot(client tgClient, rt *shell3.Runtime, sess *shell3.Session, chatID int64) *Bot {
-	return &Bot{
+	b := &Bot{
 		client:    client,
 		rt:        rt,
 		sess:      sess,
 		chatID:    chatID,
 		approvals: newApprovalRegistry(),
 	}
+	_ = sess.SetApprover(b.approve)
+	return b
 }
 
 // Run consumes inbound messages and the wake bus until ctx is cancelled.
@@ -57,14 +56,14 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 		return // unauthorized: drop silently
 	}
 	if m.Callback != nil {
-		b.handleCallback(ctx, m.Callback) // Task 6
+		b.handleCallback(ctx, m.Callback) // defined in approval.go
 		return
 	}
 	if strings.HasPrefix(m.Text, "/") {
 		b.handleCommand(ctx, m) // Task 8
 		return
 	}
-	parts := mediaToParts(m.Media) // Task 5
+	parts := mediaToParts(m.Media)
 	// HasQueuedInput reports inbox state. In the single-chat v1 flow, handleMsg
 	// is serial, so a running turn blocks here until the channel drains.
 	// HasQueuedInput catches the case where a wake/cron item is already queued.
@@ -78,9 +77,6 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 	reply := drainToReply(ch)
 	b.sendReply(ctx, reply)
 }
-
-// handleCallback stub — replaced by Task 6.
-func (b *Bot) handleCallback(context.Context, *Callback) {}
 
 // handleCommand stub — replaced by Task 8.
 func (b *Bot) handleCommand(context.Context, Msg) {}
