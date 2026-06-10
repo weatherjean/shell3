@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"time"
 
@@ -333,9 +334,12 @@ func turnScopedHandlers(cfg TurnConfig, sess *Session, st *toolLoopState) map[st
 			if strings.TrimSpace(a.Subagent) == "" {
 				return "error: spawn_agent requires a subagent (one of the registered names)", nil
 			}
-			if !containsStr(cfg.Subagents, a.Subagent) {
-				return "error: spawn_agent: subagent " + a.Subagent +
-					" is not available to this agent; choose one of: " + strings.Join(cfg.Subagents, ", "), nil
+			if !slices.Contains(cfg.Subagents, a.Subagent) {
+				msg := "error: spawn_agent: subagent " + a.Subagent + " is not available to this agent"
+				if len(cfg.Subagents) > 0 {
+					msg += "; choose one of: " + strings.Join(cfg.Subagents, ", ")
+				}
+				return msg, nil
 			}
 			id, err := cfg.Spawn(ctx, SpawnRequest{Task: a.Task, Subagent: a.Subagent, WorkDir: a.Workdir})
 			if err != nil {
@@ -646,16 +650,6 @@ func appendHistory(st *store.Store, lg applog.Logger, sessionID int64, role, con
 	if err := st.AppendHistory(sessionID, role, content); err != nil {
 		lg.Warn("append history failed", "session_id", sessionID, "role", role, "error", err)
 	}
-}
-
-// containsStr reports whether s is present in list.
-func containsStr(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }
 
 func toolCallSummary(tc llm.ToolCall) string {

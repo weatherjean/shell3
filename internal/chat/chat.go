@@ -35,7 +35,7 @@ type ActiveAgent struct {
 	// MCPToolNames is the set of prefixed (server__tool) names routed to MCPTool.
 	MCPToolNames map[string]bool
 	// Subagents is the active agent's allowlist of registered subagent names
-	// (its tools.subagents). The spawn_agent handler rejects names outside it.
+	// (its tools.subagents); the spawn_agent handler rejects names outside it.
 	Subagents     []string
 	LLM           LLMClient
 	Params        llm.RequestParams
