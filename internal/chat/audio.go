@@ -50,6 +50,9 @@ func loadAudioPart(path, workDir string) (llm.ContentPart, string, error) {
 // base64 input_audio ContentPart. format must be "wav" or "mp3" (the wire
 // formats); audio is never decoded or transcoded.
 func audioPartFromBytes(data []byte, format string) (llm.ContentPart, string, error) {
+	if len(data) == 0 {
+		return llm.ContentPart{}, "", fmt.Errorf("empty audio (0 bytes) — no %s data to attach", format)
+	}
 	if len(data) > maxAudioBytes {
 		return llm.ContentPart{}, "", fmt.Errorf("audio too large (%d MB, max 25 MB)", len(data)>>20)
 	}

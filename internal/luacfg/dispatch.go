@@ -78,6 +78,11 @@ func toolContext(L *lua.LState) context.Context {
 
 func parseAction(s string) Decision {
 	switch s {
+	case "":
+		// No opinion: an absent/empty action is the legitimate "allow" path.
+		return DecisionAllow
+	case "allow":
+		return DecisionAllow
 	case "block":
 		return DecisionBlock
 	case "cancel":
@@ -85,7 +90,8 @@ func parseAction(s string) Decision {
 	case "ask":
 		return DecisionAsk
 	default:
-		return DecisionAllow
+		// Unknown non-empty action (e.g. a typo like "blok"): fail closed.
+		return DecisionBlock
 	}
 }
 

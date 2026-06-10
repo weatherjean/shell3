@@ -42,5 +42,3 @@ make build      # go build ./cmd/shell3
 make install    # go install ./cmd/shell3
 go test ./...   # run all tests
 ```
-
-Feature branches only. Never merge to `main` until fully tested and trace-audited.

@@ -107,7 +107,8 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 	// empty initiating message; the queued text arrives via the inbox-drain
 	// reminder below. Don't persist an empty, part-less user message — it would
 	// replay as an empty user turn (rejected by real providers) on later turns.
-	if userMsg.Content != "" || len(userMsg.ContentParts) > 0 {
+	inboxSeeded := userMsg.Content == "" && len(userMsg.ContentParts) == 0
+	if !inboxSeeded {
 		sess.append(userMsg)
 	}
 
@@ -133,7 +134,8 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		emitSystemReminder(sess, reminder)
 	}
 	texts, userParts := sess.drainInbox()
-	if reminder := interjectReminder(texts); reminder != "" {
+	reminder := interjectReminder(texts)
+	if reminder != "" {
 		allMsgs = injectReminder(allMsgs, reminder)
 		emitSystemReminder(sess, reminder)
 	}
@@ -143,6 +145,17 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 	if msg, ok := attachmentsMessage(nil, userParts); ok {
 		allMsgs = append(allMsgs, msg)
 		sess.append(msg)
+	}
+
+	// Skip a wake/inbox-seeded turn that delivers nothing to the provider: an
+	// empty initiating message, plus a drained inbox whose items were all
+	// whitespace-only (no reminder text) and carried no media parts. allMsgs
+	// would otherwise be just [system] with no prior history and no user
+	// message — a system-only request a strict provider may reject. End the turn
+	// cleanly (turn_done, no usage, no stream call) instead.
+	if inboxSeeded && reminder == "" && len(userParts) == 0 && len(msgs) == 0 {
+		terminalEmit = func() { emitTurnDone(sess, 0, 0, 0) }
+		return
 	}
 
 	var totalUsage llm.Usage

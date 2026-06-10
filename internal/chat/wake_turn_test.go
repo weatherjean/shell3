@@ -63,6 +63,31 @@ func TestEmptyInboxSeededTurn_QueuedTextReachesWire(t *testing.T) {
 	}
 }
 
+// TestWhitespaceOnlyInboxSeededTurn_NoProviderCall proves FIX 2: a wake
+// (RunQueued-style, empty initiating message) turn whose entire inbox is
+// whitespace-only — interjectReminder returns "" and there are no media parts —
+// must NOT send a system-only request to the provider. With no prior history,
+// allMsgs would be just [system], which a strict provider rejects. The turn is
+// skipped cleanly: no LLM call, and no empty user row persisted.
+func TestWhitespaceOnlyInboxSeededTurn_NoProviderCall(t *testing.T) {
+	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
+	sess, _ := newCollectorSession(SessionOpts{})
+	sess.Interject("   \n\t  ") // whitespace-only steering text, no parts
+
+	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, Log: LogOrNoop(nil)}
+	// Mirror RunQueued: an empty initiating user message; the inbox supplies input.
+	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: ""}, nil)
+
+	if calls := fake.CallsSnapshot(); len(calls) != 0 {
+		t.Fatalf("whitespace-only wake turn sent %d provider call(s); want 0: %+v", len(calls), calls)
+	}
+	for i, m := range sess.Messages() {
+		if m.Role == llm.RoleUser && m.Content == "" && len(m.ContentParts) == 0 {
+			t.Fatalf("empty part-less user message persisted at index %d: %+v", i, sess.Messages())
+		}
+	}
+}
+
 // TestNormalTurn_PersistsUserMessage guards against over-stripping: a normal
 // non-empty turn must still persist its initiating user message.
 func TestNormalTurn_PersistsUserMessage(t *testing.T) {

@@ -1,6 +1,7 @@
 package patchapp
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -12,7 +13,7 @@ import (
 func startApproval(t *testing.T, a *App, question string) <-chan bool {
 	t.Helper()
 	verdict := make(chan bool, 1)
-	go func() { verdict <- a.RequestApproval(question) }()
+	go func() { verdict <- a.RequestApproval(context.Background(), question) }()
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
@@ -258,10 +259,50 @@ func TestApproval_AfterQuit_ReturnsFalseImmediately(t *testing.T) {
 	a.Quit()
 
 	done := make(chan bool, 1)
-	go func() { done <- a.RequestApproval("run tool?") }()
+	go func() { done <- a.RequestApproval(context.Background(), "run tool?") }()
 
 	if awaitVerdict(t, done) {
 		t.Fatal("RequestApproval after Quit = true; want false")
+	}
+}
+
+// TestApproval_CtxCancelDeniesAndUnblocks: cancelling the turn ctx while a
+// prompt is pending (no y/N key ever arrives) unblocks RequestApproval with a
+// false verdict and clears the pending state, so the turn goroutine can't wedge.
+func TestApproval_CtxCancelDeniesAndUnblocks(t *testing.T) {
+	a := newBusyApp()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	verdict := make(chan bool, 1)
+	go func() { verdict <- a.RequestApproval(ctx, "run tool?") }()
+
+	// Wait for the prompt to register.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		a.mu.Lock()
+		pending := a.pendingApproval != nil
+		a.mu.Unlock()
+		if pending {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("RequestApproval never registered a pending prompt")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	cancel()
+
+	if awaitVerdict(t, verdict) {
+		t.Fatal("verdict after ctx cancel = true; want false")
+	}
+	// Pending state must be cleared so a stray later key can't send on the
+	// orphaned channel.
+	a.mu.Lock()
+	pending := a.pendingApproval != nil
+	a.mu.Unlock()
+	if pending {
+		t.Fatal("pendingApproval not cleared after ctx-cancel deny")
 	}
 }
 
@@ -273,7 +314,7 @@ func TestApproval_SecondRequestBlocksUntilFirstResolves(t *testing.T) {
 	first := startApproval(t, a, "first?")
 
 	second := make(chan bool, 1)
-	go func() { second <- a.RequestApproval("second?") }()
+	go func() { second <- a.RequestApproval(context.Background(), "second?") }()
 
 	// The second request must not resolve or steal the pending slot yet.
 	select {

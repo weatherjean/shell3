@@ -123,7 +123,7 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 	// so SetApprover cannot return ErrBusy here (same reasoning as the
 	// Spec.Approve adoption in pkg/shell3.Start).
 	_ = sess.SetApprover(func(ctx context.Context, req shell3.ApprovalRequest) bool {
-		return app.RequestApproval(formatApprovalQuestion(req))
+		return app.RequestApproval(ctx, formatApprovalQuestion(req))
 	})
 
 	var lastUsage usage
@@ -209,12 +209,23 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 	}
 
 	// launchTurn starts a normal user-prompt turn. It runs on the input loop,
-	// which patchapp already gates while busy, so gate.begin always succeeds
+	// which patchapp already gates while busy, so gate.begin USUALLY succeeds
 	// here; runTurn's gate is the cross-goroutine guard for the wake path.
+	//
+	// Dropped-input guard: there is a narrow window where the wake goroutine
+	// (consumeWakes) wins the gate between patchapp clearing busy and this
+	// running, so runTurn returns false (a turn is already in flight). Rather
+	// than silently drop the user's Enter-submitted message — the bubble was
+	// already printed by handleEnter, so a no-op would look like the prompt
+	// vanished — fall back to Interject so it is queued as steering and the
+	// running turn consumes it at the next round boundary.
 	launchTurn := func(prompt string) {
-		runTurn(func(ctx context.Context) <-chan shell3.Event {
+		started := runTurn(func(ctx context.Context) <-chan shell3.Event {
 			return sess.Send(ctx, prompt)
 		})
+		if !started {
+			sess.Interject(prompt)
+		}
 	}
 
 	// Wake bus: when an out-of-turn Wake for this session arrives while idle,

@@ -140,6 +140,69 @@ shell3.subagent({ name = "dup", description = "a duplicate", model = "m", prompt
 	}
 }
 
+func TestAgent_SubagentsNonTableErrors(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "shell3.lua", minModelHdr+`
+shell3.agent({
+	name = "code",
+	model = "m",
+	prompt = "c",
+	tools = { bash = true, subagents = true },
+})
+`)
+	_, err := Load(dir+"/shell3.lua", dir)
+	if err == nil {
+		t.Fatal("expected error for non-table subagents on an agent")
+	}
+	if !contains(err.Error(), "tools.subagents must be a list") {
+		t.Fatalf("error should mention 'tools.subagents must be a list'; got: %v", err)
+	}
+}
+
+func TestAgent_SubagentsBareStringElementErrors(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "shell3.lua", minModelHdr+`
+shell3.subagent({ name = "explorer", description = "explores", model = "m", prompt = "p" })
+shell3.agent({
+	name = "code",
+	model = "m",
+	prompt = "c",
+	tools = { bash = true, subagents = { "explorer" } },
+})
+`)
+	_, err := Load(dir+"/shell3.lua", dir)
+	if err == nil {
+		t.Fatal("expected error for bare-string subagents array element")
+	}
+	if !contains(err.Error(), "is not a subagent handle") {
+		t.Fatalf("error should mention 'is not a subagent handle'; got: %v", err)
+	}
+}
+
+func TestAgent_SubagentsEmptyTableOk(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "shell3.lua", minModelHdr+`
+shell3.agent({
+	name = "code",
+	model = "m",
+	prompt = "c",
+	tools = { bash = true, subagents = {} },
+})
+`)
+	c, err := Load(dir+"/shell3.lua", dir)
+	if err != nil {
+		t.Fatalf("expected no error for empty subagents table; got: %v", err)
+	}
+	defer c.Close()
+	a, ok := c.AgentByName("code")
+	if !ok {
+		t.Fatal("AgentByName(code) returned ok=false")
+	}
+	if len(a.Subagents) != 0 {
+		t.Fatalf("code.Subagents = %v, want empty", a.Subagents)
+	}
+}
+
 func TestSubagent_FalseSubagentsKeyIsNotDepthError(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "shell3.lua", minModelHdr+`
