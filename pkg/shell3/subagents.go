@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/weatherjean/shell3/internal/chat"
 )
@@ -24,16 +25,30 @@ type subagent struct {
 type subRegistry struct {
 	mu   sync.Mutex
 	subs []*subagent
-	seq  int
 }
 
-func (r *subRegistry) add(agent, task string) *subagent {
+// add records a running subagent under the runtime-minted id (see
+// Runtime.nextSubID). The id is supplied by the caller so the registry entry
+// and the child's "sub:<id>" session name always agree.
+func (r *subRegistry) add(id, agent, task string) *subagent {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.seq++
-	sa := &subagent{id: fmt.Sprintf("a%d", r.seq), agent: agent, task: task, status: "running"}
+	sa := &subagent{id: id, agent: agent, task: task, status: "running"}
 	r.subs = append(r.subs, sa)
 	return sa
+}
+
+// remove drops sa from the registry. Used to undo an add when the goroutine
+// that would have run the subagent could not be started (runtime closing).
+func (r *subRegistry) remove(sa *subagent) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, s := range r.subs {
+		if s == sa {
+			r.subs = append(r.subs[:i], r.subs[i+1:]...)
+			return
+		}
+	}
 }
 
 func (r *subRegistry) finish(sa *subagent, result string) {
@@ -50,7 +65,13 @@ func (r *subRegistry) snapshot() []chat.AgentSnapshot {
 	for _, sa := range r.subs {
 		preview := sa.result
 		if len(preview) > 200 {
-			preview = preview[:200] + "…"
+			// Truncate on a rune boundary so we never split a multibyte UTF-8
+			// rune (which would marshal to U+FFFD / invalid UTF-8).
+			cut := 200
+			for cut > 0 && !utf8.RuneStart(preview[cut]) {
+				cut--
+			}
+			preview = preview[:cut] + "…"
 		}
 		out = append(out, chat.AgentSnapshot{ID: sa.id, Agent: sa.agent, Task: sa.task, Status: sa.status, Result: preview})
 	}
@@ -71,25 +92,29 @@ func (s *Session) spawn(_ context.Context, req chat.SpawnRequest) (string, error
 	} else if !filepath.IsAbs(workdir) {
 		workdir = filepath.Join(s.cfg.WorkDir, workdir)
 	}
-	sa := s.subs.add(agent, req.Task)
-	auditPath := filepath.Join(s.runtime.root(), ".shell3", "agents", sa.id+".jsonl")
+	// Mint a runtime-global id first, then create the child session. Only once
+	// the child exists do we record the subagent in the registry — so a failed
+	// MkdirAll/Session leaves no phantom forever-"running" entry.
+	rt := s.runtime
+	id := rt.nextSubID()
+	auditPath := filepath.Join(rt.root(), ".shell3", "agents", id+".jsonl")
 	if err := os.MkdirAll(filepath.Dir(auditPath), 0o755); err != nil {
 		return "", err
 	}
-	child, err := s.runtime.Session(SessionOpts{
-		Name: "sub:" + sa.id, Agent: agent, WorkDir: workdir,
+	child, err := rt.Session(SessionOpts{
+		Name: "sub:" + id, Agent: agent, WorkDir: workdir,
 		Headless: true, OutPath: auditPath, DisableSubagents: true,
 	})
 	if err != nil {
 		return "", err
 	}
+	sa := s.subs.add(id, agent, req.Task)
 	// Fresh runtime-scoped context: the subagent must OUTLIVE the spawning turn
 	// (its result arrives after the turn ends). Bounded by Runtime.Close.
-	// Capture runCtx up front: Session.Close (incl. via Runtime.Close) nils
+	// Capture rt up front (above): Session.Close (incl. via Runtime.Close) nils
 	// s.runtime, which would race with a read inside the goroutine.
-	rt := s.runtime
 	runCtx := rt.baseContext()
-	go func() {
+	started := rt.trackSubagent(func() {
 		var b strings.Builder
 		for ev := range child.Send(runCtx, req.Task) {
 			if ev.Kind == Token { // assistant text → accumulate the result
@@ -100,8 +125,15 @@ func (s *Session) spawn(_ context.Context, req chat.SpawnRequest) (string, error
 		s.subs.finish(sa, result)
 		_ = child.Close()
 		s.deliverSubagentResult(rt, sa.id, result)
-	}()
-	return sa.id, nil
+	})
+	if !started {
+		// Runtime is closing: undo the registry entry and tear down the child we
+		// just created, then report the spawn failure (nothing left dangling).
+		s.subs.remove(sa)
+		_ = child.Close()
+		return "", fmt.Errorf("shell3: runtime is closing; cannot spawn subagents")
+	}
+	return id, nil
 }
 
 // deliverSubagentResult posts a finished subagent's result to the parent inbox,

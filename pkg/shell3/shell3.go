@@ -650,13 +650,6 @@ func (s *Session) turnConfig() chat.TurnConfig {
 	return chat.NewTurnConfig(cfg, s.handlers, shellInteractive)
 }
 
-// wake emits a Wake for this session on the runtime bus (no-op without a runtime).
-func (s *Session) wake() {
-	if s.runtime != nil {
-		s.runtime.emit(HostEvent{Session: s.name, Kind: Wake})
-	}
-}
-
 // Clear resets the conversation context (= /clear): drops all history and
 // re-stamps the system prompt with a fresh timestamp. Returns ErrBusy while a
 // turn is in flight (see Send's contract).

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"sync/atomic"
 
 	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/chat"
@@ -77,10 +78,38 @@ type Runtime struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	// subSeq mints process-unique subagent ids (see nextSubID). Global to the
+	// runtime so two parents never collide on a "sub:<id>" session name.
+	subSeq atomic.Int64
+	// wg joins in-flight subagent goroutines at Close. Add happens only under
+	// rt.mu while !closed (see trackSubagent), so it can't race wg.Wait.
+	wg sync.WaitGroup
+
 	mu       sync.Mutex
 	sessions map[string]*Session
 	nextName int
 	closed   bool
+}
+
+// nextSubID returns a process-unique subagent id for this runtime.
+func (rt *Runtime) nextSubID() string {
+	return fmt.Sprintf("a%d", rt.subSeq.Add(1))
+}
+
+// trackSubagent starts fn as a tracked subagent goroutine, unless the runtime
+// is already closing. Returns false if the runtime is closed (caller should not
+// have created the child). Add happens under rt.mu so it cannot race Close's
+// transition to closed + wg.Wait.
+func (rt *Runtime) trackSubagent(fn func()) bool {
+	rt.mu.Lock()
+	if rt.closed {
+		rt.mu.Unlock()
+		return false
+	}
+	rt.wg.Add(1)
+	rt.mu.Unlock()
+	go func() { defer rt.wg.Done(); fn() }()
+	return true
 }
 
 // NewRuntime loads the config and assembles the shared runtime parts.
@@ -215,5 +244,9 @@ func (rt *Runtime) Close() error {
 	if rt.cancel != nil {
 		rt.cancel()
 	}
+	// Join in-flight subagent goroutines (child.Send → child.Close → deliver)
+	// so they finish their audit writes before Close returns. rt.closed was set
+	// true under rt.mu above, so trackSubagent can no longer Add (no Wait race).
+	rt.wg.Wait()
 	return firstErr
 }
