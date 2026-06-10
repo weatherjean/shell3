@@ -145,8 +145,9 @@ func (a *App) tickerLoop(ctx context.Context) {
 			a.status.ctrlCHint = false
 			needsRender = true
 		}
-		// Animate the busy spinner. Live frame during busy is a single
-		// status line (see buildFrame); diff is cheap and bounded to that line.
+		// Animate the busy spinner. Live frame during busy is the busy bar
+		// plus a slim steer input line (see buildFrame); the diff is cheap
+		// and bounded to those lines.
 		if a.busy {
 			needsRender = true
 		}

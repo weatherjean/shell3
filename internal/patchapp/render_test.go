@@ -214,6 +214,107 @@ func equalStrings(a, b []string) bool {
 	return true
 }
 
+func TestBuildFrame_BusyShowsSteerLine(t *testing.T) {
+	input := []rune("fix the auth bug")
+	frame := buildFrame(80, frameState{input: input, cursor: len(input), busy: true})
+
+	if len(frame) != 2 {
+		t.Fatalf("busy frame should be 2 lines (busy bar + steer line); got %d: %q", len(frame), frame)
+	}
+	steer := frame[1]
+	if !strings.Contains(steer, "steer") {
+		t.Errorf("steer line should contain the prompt label %q; got %q", "steer", steer)
+	}
+	if !strings.Contains(steer, "fix the auth bug") {
+		t.Errorf("steer line should echo the typed text; got %q", steer)
+	}
+	if !strings.Contains(steer, patchtui.Dim) {
+		t.Errorf("steer line should be dim-styled (contain %q); got %q", patchtui.Dim, steer)
+	}
+	// Distinct from the normal idle "> " bubble prefix.
+	if strings.Contains(steer, "> ") {
+		t.Errorf("steer line must NOT use the idle %q bubble prefix; got %q", "> ", steer)
+	}
+}
+
+func TestBuildFrame_BusyEmptyShowsAffordance(t *testing.T) {
+	frame := buildFrame(80, frameState{input: nil, cursor: 0, busy: true})
+	if len(frame) != 2 {
+		t.Fatalf("busy frame should be 2 lines even when empty; got %d: %q", len(frame), frame)
+	}
+	steer := frame[1]
+	if !strings.Contains(steer, "steer") {
+		t.Errorf("empty steer line should still show a 'steer' affordance; got %q", steer)
+	}
+	if !strings.Contains(steer, patchtui.Dim) {
+		t.Errorf("empty steer line should be dim-styled; got %q", steer)
+	}
+}
+
+func TestBuildFrame_IdleHasNoSteerLine(t *testing.T) {
+	input := []rune("hello")
+	frame := buildFrame(80, frameState{input: input, cursor: len(input), busy: false})
+	// Idle: blank line + input box line(s) + status bar. No steer line.
+	for _, l := range frame {
+		if strings.Contains(l, "steer") {
+			t.Fatalf("idle frame should not contain a steer line; got %q", frame)
+		}
+	}
+	if frame[0] != "" {
+		t.Errorf("idle frame should start with a blank line; got %q", frame[0])
+	}
+}
+
+func TestRenderSteerLine_CursorMarkerMidString(t *testing.T) {
+	input := []rune("abcdef")
+	lines := renderSteerLine(input, 3, 80) // cursor between 'c' and 'd'
+	if len(lines) != 1 {
+		t.Fatalf("steer line should be a single line; got %d: %q", len(lines), lines)
+	}
+	l := lines[0]
+	idx := strings.Index(l, patchtui.CursorMarker)
+	if idx < 0 {
+		t.Fatalf("steer line should contain the cursor marker; got %q", l)
+	}
+	// The cursor marker should sit immediately before 'd'.
+	after := l[idx+len(patchtui.CursorMarker):]
+	if !strings.HasPrefix(after, "def") {
+		t.Errorf("cursor marker should precede %q; got tail %q", "def", after)
+	}
+}
+
+func TestRenderSteerLine_OverflowKeepsCursorVisible(t *testing.T) {
+	input := []rune(strings.Repeat("x", 200))
+	width := 40
+	lines := renderSteerLine(input, len(input), width)
+	if len(lines) != 1 {
+		t.Fatalf("steer line must stay one line on overflow; got %d", len(lines))
+	}
+	if patchtui.VisibleLen(lines[0]) > width {
+		t.Fatalf("overflow steer line visible width %d > %d: %q", patchtui.VisibleLen(lines[0]), width, lines[0])
+	}
+	if !strings.Contains(lines[0], patchtui.CursorMarker) {
+		t.Errorf("cursor must stay on-screen on overflow; got %q", lines[0])
+	}
+	if !strings.Contains(lines[0], "…") {
+		t.Errorf("left-truncated overflow should show a leading ellipsis; got %q", lines[0])
+	}
+}
+
+func TestRenderSteerLine_FlattensMultiline(t *testing.T) {
+	input := []rune("first\nsecond")
+	lines := renderSteerLine(input, len(input), 80)
+	if len(lines) != 1 {
+		t.Fatalf("multi-line steer input must flatten to one line; got %d: %q", len(lines), lines)
+	}
+	if strings.Contains(lines[0], "\n") {
+		t.Errorf("flattened steer line must not contain a raw newline; got %q", lines[0])
+	}
+	if !strings.Contains(lines[0], "first second") {
+		t.Errorf("multi-line input should join with a space; got %q", lines[0])
+	}
+}
+
 func TestBusySetTokensAppliesImmediately(t *testing.T) {
 	var out strings.Builder
 	app := New("test", "provider/model", WelcomeInfo{})

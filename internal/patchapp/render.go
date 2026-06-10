@@ -21,7 +21,9 @@ import (
 // not part of the live frame.
 func buildFrame(width int, st frameState) []string {
 	if st.busy {
-		return []string{renderBusyLine(width, st.status)}
+		frame := []string{renderBusyLine(width, st.status)}
+		frame = append(frame, renderSteerLine(st.input, st.cursor, width)...)
+		return frame
 	}
 
 	frame := make([]string, 0, 8)
@@ -29,6 +31,118 @@ func buildFrame(width int, st frameState) []string {
 	frame = append(frame, renderInputBox(st.input, st.cursor, width, true)...)
 	frame = append(frame, renderStatusBar(width, st.status))
 	return frame
+}
+
+// steerPrompt is the dim label shown before the live steering input while a
+// turn is running. It is deliberately distinct from the idle input box's
+// "> " bubble prefix so the line reads as "interject into the running turn,"
+// not "start a new turn."
+const steerPrompt = "steer › "
+
+// steerPlaceholder is the affordance shown when the steer input is empty, so
+// the user always sees that mid-turn steering is available.
+const steerPlaceholder = "type to steer · Enter sends"
+
+// renderSteerLine renders the single-line live steering input shown beneath
+// the busy bar. It echoes what the user types while a turn streams so mid-turn
+// steering (routed to Session.Interject) is visible rather than blind.
+//
+// The whole line is dim. The input is flattened to one line: logical lines
+// (split on '\n', e.g. from alt+enter) are joined with a single space, since
+// interjected steering is plain text and a one-liner matches the intent. Long
+// or multi-line steers are flattened and, if still too wide, left-truncated
+// (drop runes from the front, prefix a dim "…") so the tail — where the cursor
+// usually sits — stays visible and the line never wraps.
+func renderSteerLine(input []rune, cursor, width int) []string {
+	if width < 1 {
+		width = 1
+	}
+	promptVis := patchtui.VisibleLen(steerPrompt)
+
+	// Flatten logical lines into one, joining with a single space. Track how
+	// the cursor offset maps into the flattened rune slice (each dropped '\n'
+	// becomes one space, so the total length is preserved and cursor maps 1:1).
+	logical := splitRunes(input, '\n')
+	var flat []rune
+	for i, l := range logical {
+		if i > 0 {
+			flat = append(flat, ' ')
+		}
+		flat = append(flat, l...)
+	}
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor > len(flat) {
+		cursor = len(flat)
+	}
+
+	// Empty input: prompt + dim placeholder, no cursor needed.
+	if len(flat) == 0 {
+		body := steerPrompt + steerPlaceholder
+		if patchtui.VisibleLen(body) > width {
+			body = string(runesForVisibleColsStr(body, width))
+		}
+		return []string{patchtui.Dim + body + patchtui.Reset}
+	}
+
+	avail := width - promptVis
+	if avail < 1 {
+		// No room for any input next to the prompt; show the prompt alone.
+		return []string{patchtui.Dim + steerPrompt + patchtui.Reset}
+	}
+
+	cursorCol := uniseg.StringWidth(string(flat[:cursor]))
+	full := uniseg.StringWidth(string(flat))
+
+	if full <= avail {
+		// Fits: prompt + input, cursor marker at its visible column.
+		content := insertAtVisibleCol(string(flat), cursorCol, patchtui.CursorMarker)
+		return []string{patchtui.Dim + steerPrompt + content + patchtui.Reset}
+	}
+
+	// Overflow: keep one line by left-truncating. Reserve one column for the
+	// leading "…" and ensure the cursor stays within the visible window. Show
+	// the last (avail-1) visible columns ending at/after the cursor.
+	const ell = "…"
+	win := avail - 1
+	if win < 1 {
+		win = 1
+	}
+	// Visible-column start of the window: end the window at the cursor so the
+	// cursor is always on-screen, but don't scroll past the input's tail.
+	startCol := cursorCol - win
+	if startCol < 0 {
+		startCol = 0
+	}
+	maxStart := full - win
+	if startCol > maxStart {
+		startCol = maxStart
+	}
+	if startCol < 0 {
+		startCol = 0
+	}
+	// Convert visible-column window to a rune sub-slice.
+	startRune := runesForVisibleCols(flat, startCol)
+	endRune := startRune + runesForVisibleCols(flat[startRune:], win)
+	if endRune > len(flat) {
+		endRune = len(flat)
+	}
+	sub := flat[startRune:endRune]
+	// Cursor column within the truncated window, offset by the ellipsis.
+	relCol := uniseg.StringWidth(string(flat[startRune:cursor]))
+	subStr := ell + string(sub)
+	// "…" is one visible column; offset the cursor's visible col past it.
+	subStr = insertAtVisibleCol(subStr, 1+relCol, patchtui.CursorMarker)
+	return []string{patchtui.Dim + steerPrompt + subStr + patchtui.Reset}
+}
+
+// runesForVisibleColsStr truncates s to at most cols visible columns,
+// returning the prefix. Mirrors runesForVisibleCols for a plain string.
+func runesForVisibleColsStr(s string, cols int) []rune {
+	rs := []rune(s)
+	n := runesForVisibleCols(rs, cols)
+	return rs[:n]
 }
 
 // frameState is the snapshot of app state buildFrame needs.
