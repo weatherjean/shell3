@@ -13,7 +13,7 @@ import (
 
 func TestRunTurn_SpawnAgent_InvokesSpawnAndReturnsID(t *testing.T) {
 	fake := fakellm.New(
-		fakellm.Script{Events: []llm.StreamEvent{{ToolCall: &llm.ToolCall{ID: "c", Name: "spawn_agent", RawArgs: `{"task":"check the logs","agent":"code","workdir":"/tmp/x"}`}}}},
+		fakellm.Script{Events: []llm.StreamEvent{{ToolCall: &llm.ToolCall{ID: "c", Name: "spawn_agent", RawArgs: `{"task":"check the logs","subagent":"researcher","workdir":"/tmp/x"}`}}}},
 		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "spawned"}}},
 	)
 	sess, c := newCollectorSession(SessionOpts{})
@@ -28,8 +28,8 @@ func TestRunTurn_SpawnAgent_InvokesSpawnAndReturnsID(t *testing.T) {
 		},
 	}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "go"}, nil)
-	if got.Task != "check the logs" || got.Agent != "code" || got.WorkDir != "/tmp/x" {
-		t.Fatalf("Spawn got %+v, want task/agent/workdir from args", got)
+	if got.Task != "check the logs" || got.Subagent != "researcher" || got.WorkDir != "/tmp/x" {
+		t.Fatalf("Spawn got %+v, want task/subagent/workdir from args", got)
 	}
 	var sawResult bool
 	for _, ev := range c.all() {
@@ -39,6 +39,37 @@ func TestRunTurn_SpawnAgent_InvokesSpawnAndReturnsID(t *testing.T) {
 	}
 	if !sawResult {
 		t.Fatalf("spawn_agent tool result should carry the spawned id; events=%+v", c.all())
+	}
+}
+
+func TestRunTurn_SpawnAgent_MissingSubagentReturnsError(t *testing.T) {
+	fake := fakellm.New(
+		fakellm.Script{Events: []llm.StreamEvent{{ToolCall: &llm.ToolCall{ID: "c", Name: "spawn_agent", RawArgs: `{"task":"do something"}`}}}},
+		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}},
+	)
+	sess, c := newCollectorSession(SessionOpts{})
+	spawnCalled := false
+	cfg := TurnConfig{
+		LLM:         fake,
+		Personality: persona.Persona{SystemPrompt: "t", Tools: []llm.ToolDefinition{{Name: "spawn_agent"}}},
+		Log:         LogOrNoop(nil),
+		Spawn: func(_ context.Context, _ SpawnRequest) (string, error) {
+			spawnCalled = true
+			return "should-not-reach", nil
+		},
+	}
+	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "go"}, nil)
+	if spawnCalled {
+		t.Fatal("Spawn must NOT be called when subagent is missing")
+	}
+	var sawErr bool
+	for _, ev := range c.all() {
+		if ev.Kind == EventToolResult && strings.Contains(ev.ToolOutput, "requires a subagent") {
+			sawErr = true
+		}
+	}
+	if !sawErr {
+		t.Fatalf("spawn_agent with missing subagent should return 'requires a subagent' error; events=%+v", c.all())
 	}
 }
 

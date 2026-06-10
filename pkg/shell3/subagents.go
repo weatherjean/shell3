@@ -82,9 +82,8 @@ func (s *Session) spawn(_ context.Context, req chat.SpawnRequest) (string, error
 	if s.runtime == nil {
 		return "", fmt.Errorf("shell3: session has no runtime; cannot spawn subagents")
 	}
-	agent := req.Agent
-	if agent == "" {
-		agent = s.cfg.Personality.Name
+	if req.Subagent == "" {
+		return "", fmt.Errorf("shell3: spawn requires a subagent name")
 	}
 	workdir := req.WorkDir
 	if workdir == "" {
@@ -102,13 +101,13 @@ func (s *Session) spawn(_ context.Context, req chat.SpawnRequest) (string, error
 		return "", err
 	}
 	child, err := rt.Session(SessionOpts{
-		Name: "sub:" + id, Agent: agent, WorkDir: workdir,
+		Name: "sub:" + id, Subagent: req.Subagent, WorkDir: workdir,
 		Headless: true, OutPath: auditPath, DisableSubagents: true,
 	})
 	if err != nil {
 		return "", err
 	}
-	sa := s.subs.add(id, agent, req.Task)
+	sa := s.subs.add(id, req.Subagent, req.Task)
 	// Fresh runtime-scoped context: the subagent must OUTLIVE the spawning turn
 	// (its result arrives after the turn ends). Bounded by Runtime.Close.
 	// Capture rt up front (above): Session.Close (incl. via Runtime.Close) nils

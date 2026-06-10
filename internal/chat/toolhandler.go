@@ -128,9 +128,9 @@ type TurnConfig struct {
 
 // SpawnRequest is a parsed spawn_agent call handed to the host's spawner.
 type SpawnRequest struct {
-	Task    string
-	Agent   string // "" → caller's agent
-	WorkDir string // "" → caller's workdir
+	Task     string
+	Subagent string // which registered subagent to run (required)
+	WorkDir  string // "" → caller's workdir
 }
 
 // AgentSnapshot is one row of a list_agents result.

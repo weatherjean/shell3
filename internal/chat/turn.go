@@ -320,9 +320,9 @@ func turnScopedHandlers(cfg TurnConfig, sess *Session, st *toolLoopState) map[st
 				return "error: subagent spawning is not available in this runtime", nil
 			}
 			var a struct {
-				Task    string `json:"task"`
-				Agent   string `json:"agent"`
-				Workdir string `json:"workdir"`
+				Task     string `json:"task"`
+				Subagent string `json:"subagent"`
+				Workdir  string `json:"workdir"`
 			}
 			if err := json.Unmarshal(args, &a); err != nil {
 				return "error: invalid spawn_agent arguments: " + err.Error(), nil
@@ -330,7 +330,10 @@ func turnScopedHandlers(cfg TurnConfig, sess *Session, st *toolLoopState) map[st
 			if strings.TrimSpace(a.Task) == "" {
 				return "error: spawn_agent requires a non-empty task", nil
 			}
-			id, err := cfg.Spawn(ctx, SpawnRequest{Task: a.Task, Agent: a.Agent, WorkDir: a.Workdir})
+			if strings.TrimSpace(a.Subagent) == "" {
+				return "error: spawn_agent requires a subagent (one of the registered names)", nil
+			}
+			id, err := cfg.Spawn(ctx, SpawnRequest{Task: a.Task, Subagent: a.Subagent, WorkDir: a.Workdir})
 			if err != nil {
 				return "error: spawn failed: " + err.Error(), nil
 			}

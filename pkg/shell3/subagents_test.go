@@ -59,7 +59,7 @@ func newSubagentTestRuntime(t *testing.T, rec *subOptsRecorder) *Runtime {
 			cfg = chat.Config{
 				LLM: fakellm.New(
 					fakellm.Script{Events: []llm.StreamEvent{
-						{ToolCall: &llm.ToolCall{ID: "1", Name: "spawn_agent", RawArgs: `{"task":"do the thing"}`}},
+						{ToolCall: &llm.ToolCall{ID: "1", Name: "spawn_agent", RawArgs: `{"task":"do the thing","subagent":"researcher"}`}},
 					}},
 					fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "parent done"}}},
 				),
@@ -129,6 +129,12 @@ func TestSubagent_DepthLimit(t *testing.T) {
 		if o, ok := rec.get("sub:a1"); ok {
 			if !o.DisableSubagents {
 				t.Fatal("sub session must be created with DisableSubagents=true")
+			}
+			if o.Subagent != "researcher" {
+				t.Fatalf("sub session Subagent=%q, want %q", o.Subagent, "researcher")
+			}
+			if o.Agent != "" {
+				t.Fatalf("sub session Agent=%q, want empty (Subagent takes precedence)", o.Agent)
 			}
 			break
 		}
@@ -202,9 +208,27 @@ func TestSubagent_FailedSpawnLeavesNoDanglingEntry(t *testing.T) {
 	if err := rt.Close(); err != nil {
 		t.Fatal(err)
 	}
-	id, err := parent.spawn(context.Background(), chat.SpawnRequest{Task: "do it"})
+	id, err := parent.spawn(context.Background(), chat.SpawnRequest{Task: "do it", Subagent: "researcher"})
 	if err == nil {
 		t.Fatalf("spawn on closed runtime should fail; got id %q", id)
+	}
+	if snap := parent.subs.snapshot(); len(snap) != 0 {
+		t.Fatalf("failed spawn left %d registry entries, want 0: %+v", len(snap), snap)
+	}
+}
+
+// TestSubagent_SpawnRequiresSubagentName: calling spawn with an empty Subagent
+// returns an error immediately and adds nothing to the registry.
+func TestSubagent_SpawnRequiresSubagentName(t *testing.T) {
+	rec := &subOptsRecorder{opts: map[string]SessionOpts{}}
+	rt := newSubagentTestRuntime(t, rec)
+	parent, err := rt.Session(SessionOpts{Name: "parent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := parent.spawn(context.Background(), chat.SpawnRequest{Task: "do it"})
+	if err == nil {
+		t.Fatalf("spawn with empty Subagent should fail; got id %q", id)
 	}
 	if snap := parent.subs.snapshot(); len(snap) != 0 {
 		t.Fatalf("failed spawn left %d registry entries, want 0: %+v", len(snap), snap)
@@ -270,7 +294,7 @@ func TestSubagent_CloseJoinsGoroutine(t *testing.T) {
 			cfg = chat.Config{
 				LLM: fakellm.New(
 					fakellm.Script{Events: []llm.StreamEvent{
-						{ToolCall: &llm.ToolCall{ID: "1", Name: "spawn_agent", RawArgs: `{"task":"do the thing"}`}},
+						{ToolCall: &llm.ToolCall{ID: "1", Name: "spawn_agent", RawArgs: `{"task":"do the thing","subagent":"researcher"}`}},
 					}},
 					fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "parent done"}}},
 				),

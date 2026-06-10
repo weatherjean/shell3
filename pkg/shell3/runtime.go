@@ -25,6 +25,9 @@ type SessionOpts struct {
 	Name string
 	// Agent selects the initial agent ("" → first declared).
 	Agent string
+	// Subagent, when non-empty, runs the named registered subagent's config
+	// instead of an agent (set by spawn_agent). Mutually exclusive with Agent.
+	Subagent string
 	// WorkDir roots tool execution for this session ("" → runtime root).
 	WorkDir string
 	// Headless strips shell_interactive and injects the headless reminder.
@@ -137,7 +140,7 @@ func NewRuntime(spec RuntimeSpec) (*Runtime, error) {
 	return &Runtime{
 		sessionConfig: func(o SessionOpts) (chat.Config, error) {
 			return parts.SessionConfig(agentsetup.SessionOptions{
-				Agent: o.Agent, WorkDir: o.WorkDir, Headless: o.Headless, OutPath: o.OutPath,
+				Agent: o.Agent, Subagent: o.Subagent, WorkDir: o.WorkDir, Headless: o.Headless, OutPath: o.OutPath,
 				DisableSubagents: o.DisableSubagents,
 			})
 		},
