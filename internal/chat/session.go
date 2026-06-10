@@ -28,8 +28,8 @@ type Session struct {
 
 	// inbox is the cross-goroutine message queue for a session: Interject pushes
 	// from any goroutine; the turn loop drains on the turn goroutine at round
-	// boundaries. Guarded by inboxMu — the only Session state touched off the
-	// turn goroutine.
+	// boundaries. Guarded by inboxMu — the only Session state that may be
+	// touched concurrently with a running turn.
 	inboxMu sync.Mutex
 	inbox   []string
 }
@@ -54,15 +54,20 @@ func (s *Session) drainInbox() []string {
 }
 
 // interjectReminder formats queued interjections as one system-reminder block.
-// Returns "" when items is empty.
+// Returns "" when items is empty. Empty-string items are skipped. Multi-line
+// items have their continuation lines indented two spaces so the bullet list
+// stays readable.
 func interjectReminder(items []string) string {
 	if len(items) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("<system-reminder>\nuser interjected mid-task — adjust course accordingly:\n")
+	b.WriteString("<system-reminder>\nuser sent additional input — incorporate it before continuing:\n")
 	for _, it := range items {
-		b.WriteString("- " + it + "\n")
+		if it == "" {
+			continue
+		}
+		b.WriteString("- " + strings.ReplaceAll(it, "\n", "\n  ") + "\n")
 	}
 	b.WriteString("</system-reminder>")
 	return b.String()
