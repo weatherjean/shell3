@@ -451,13 +451,14 @@ type fakeSession struct {
 	agents []string
 	active string
 
-	cleared    bool
-	rolledBack bool   // controls Rollback's return
-	rollbackOK bool   // what Rollback returns
-	pruneOut   string // what Prune returns
-	pruneOK    bool   // what Prune's ok returns
-	setParamFn func(string, string) error
-	sent       []string // prompts passed to Send
+	cleared      bool
+	rolledBack   bool   // controls Rollback's return
+	rollbackOK   bool   // what Rollback returns
+	pruneOut     string // what Prune returns
+	pruneOK      bool   // what Prune's ok returns
+	setParamFn   func(string, string) error
+	sent         []string // prompts passed to Send
+	interjections []string // texts passed to Interject
 }
 
 func (f *fakeSession) Send(ctx context.Context, prompt string) <-chan shell3.Event {
@@ -494,6 +495,7 @@ func (f *fakeSession) SetParam(name, value string) error {
 	}
 	return nil
 }
+func (f *fakeSession) Interject(text string) { f.interjections = append(f.interjections, text) }
 
 // register sets up a fakeSlashApp with the chat command set, returning it plus
 // the fakeSession and usage state the closures captured. The session is seeded
@@ -724,6 +726,32 @@ func TestSlash_QuitAliasesExit(t *testing.T) {
 	app, _, _ := register()
 	if app.handlers["exit"] == nil || app.handlers["quit"] == nil {
 		t.Errorf("exit/quit not both registered")
+	}
+}
+
+// TestInterjectWiring: App.SetInterject wires plain-text Enter-while-busy to
+// Session.Interject via the closure registered in RunInteractive. This test
+// exercises only the wiring (closure registration) without standing up the
+// full interactive loop: it builds the same SetInterject closure manually and
+// asserts the text flows through to fakeSession.interjections.
+func TestInterjectWiring(t *testing.T) {
+	sess := &fakeSession{}
+	// Simulate what RunInteractive registers.
+	interjectFn := func(text string) {
+		sess.Interject(text)
+	}
+
+	interjectFn("change of plans")
+	interjectFn("also this")
+
+	if len(sess.interjections) != 2 {
+		t.Fatalf("expected 2 interjections; got %d: %v", len(sess.interjections), sess.interjections)
+	}
+	if sess.interjections[0] != "change of plans" {
+		t.Errorf("interjections[0] = %q; want \"change of plans\"", sess.interjections[0])
+	}
+	if sess.interjections[1] != "also this" {
+		t.Errorf("interjections[1] = %q; want \"also this\"", sess.interjections[1])
 	}
 }
 

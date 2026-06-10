@@ -32,6 +32,9 @@ type session interface {
 	History() []shell3.HistoryEntry
 	Prune(id string) (summary string, ok bool)
 	SetParam(name, value string) error
+	// Interject queues a message for delivery to the model at the next round
+	// boundary. Safe to call from any goroutine; never fails.
+	Interject(text string)
 }
 
 // usage is the TUI-local running tally of the last turn's token counts, fed from
@@ -181,6 +184,13 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 		launchTurn(input)
 	})
 
+	// SetInterject wires Enter-while-busy to Session.Interject. The dim
+	// "[steering: …]" echo is printed by patchapp at the capture site — no
+	// double-echo here.
+	app.SetInterject(func(text string) {
+		sess.Interject(text)
+	})
+
 	runErr = app.Run(ctx)
 	return
 }
@@ -210,10 +220,17 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 // write) has been processed. (Busy is deliberately NOT cleared in the Done/Error
 // sink cases: route may drop that terminal event on cancel, which previously
 // left busy stuck on; binding the clear to channel close fixes that and also
-// guarantees no sink write can follow the clear.) A future maintainer who breaks
-// that gate (e.g. allowing slash commands to run during streaming, or clearing
-// busy before channel close) reintroduces a data race on lastUsage and must add
-// real synchronization here.
+// guarantees no sink write can follow the clear.)
+//
+// Plain-text Enter while busy routes to Session.Interject, which is
+// concurrency-safe by design (mutex-guarded inbox inside chat.Session) and
+// does not touch lastUsage or cfg — so that path does not break the invariant.
+// Slash commands, !, and Tab remain fully gated because their handlers DO
+// mutate cfg/lastUsage with no mutex.
+//
+// A future maintainer who allows slash commands to run during streaming, or
+// clears busy before channel close, reintroduces a data race on lastUsage and
+// must add real synchronization here.
 func newRenderSink(app patchapp.AppView, lastUsage *usage) (func(shell3.Event), func(canceled bool)) {
 	var streamBuf strings.Builder
 	// reasoningBuf holds an incomplete (no trailing \n) reasoning line.
