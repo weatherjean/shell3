@@ -1,0 +1,34 @@
+<!doctype html>
+<html><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 12px;
+    background: var(--tg-theme-bg-color, #fff); color: var(--tg-theme-text-color, #000); }
+  .msg { padding: 8px 10px; border-radius: 8px; margin: 6px 0; white-space: pre-wrap; }
+  .user { background: var(--tg-theme-secondary-bg-color, #eef); }
+  .assistant { background: var(--tg-theme-secondary-bg-color, #efe); }
+  .tool { font-family: ui-monospace, monospace; font-size: 12px; opacity: .8; }
+  pre { overflow-x: auto; background: #00000010; padding: 8px; border-radius: 6px; }
+</style></head>
+<body>
+<div id="log">loading…</div>
+<script>
+  const tg = window.Telegram.WebApp; tg.ready(); tg.expand();
+  const initData = tg.initData || "";
+  async function load() {
+    const r = await fetch("/api/history", { headers: { "X-Init-Data": initData } });
+    if (!r.ok) { document.getElementById("log").textContent = "unauthorized"; return; }
+    const hist = await r.json();
+    document.getElementById("log").innerHTML = hist.map(h => {
+      const cls = h.role === "user" ? "user" : h.role === "assistant" ? "assistant" : "tool";
+      const body = h.tool_name ? `<div class="tool">[${h.tool_name}] ${escapeHtml(h.content)}</div>`
+                               : `<div>${escapeHtml(h.content)}</div>`;
+      return `<div class="msg ${cls}">${body}</div>`;
+    }).join("");
+    window.scrollTo(0, document.body.scrollHeight);
+  }
+  function escapeHtml(s){ return (s||"").replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+  load(); setInterval(load, 4000); // poll (v1; see SSE follow-up)
+</script>
+</body></html>
