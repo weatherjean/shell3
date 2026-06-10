@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/weatherjean/shell3/internal/patchapp"
@@ -444,6 +445,7 @@ func (f *fakeSlashApp) handlerNames() []string {
 // Snapshot/History so each slash command's effect can be asserted without a
 // real agent config or store.
 type fakeSession struct {
+	mu      sync.Mutex
 	snap    shell3.Snapshot
 	history []shell3.HistoryEntry
 
@@ -461,6 +463,15 @@ type fakeSession struct {
 	sent          []string // prompts passed to Send
 	interjections []string // texts passed to Interject
 	approver      func(ctx context.Context, req shell3.ApprovalRequest) bool
+
+	// name/wakeBus/runQueued drive the Wake-bus consumption path. name is the
+	// session's registry name (compared against HostEvent.Session); wakeBus is
+	// the out-of-turn event bus; runQueued is the canned event stream RunQueued
+	// emits; runQueuedCalls counts RunQueued invocations.
+	name           string
+	wakeBus        chan shell3.HostEvent
+	runQueued      []shell3.Event
+	runQueuedCalls int
 }
 
 func (f *fakeSession) Send(ctx context.Context, prompt string) <-chan shell3.Event {
@@ -503,6 +514,26 @@ func (f *fakeSession) Interject(text string, _ ...shell3.Part) {
 func (f *fakeSession) SetApprover(fn func(ctx context.Context, req shell3.ApprovalRequest) bool) error {
 	f.approver = fn
 	return nil
+}
+func (f *fakeSession) Name() string { return f.name }
+func (f *fakeSession) WakeEvents() <-chan shell3.HostEvent {
+	return f.wakeBus
+}
+
+// RunQueued mirrors *shell3.Session.RunQueued: it emits the canned runQueued
+// events (the turn the host runs to react to a Wake) and records the call. An
+// empty runQueued slice models an empty inbox (closed channel, no turn).
+func (f *fakeSession) RunQueued(ctx context.Context) <-chan shell3.Event {
+	f.mu.Lock()
+	f.runQueuedCalls++
+	evs := f.runQueued
+	f.mu.Unlock()
+	ch := make(chan shell3.Event, len(evs)+1)
+	for _, ev := range evs {
+		ch <- ev
+	}
+	close(ch)
+	return ch
 }
 
 // register sets up a fakeSlashApp with the chat command set, returning it plus
@@ -766,6 +797,112 @@ func TestInterjectWiring(t *testing.T) {
 	}
 	if sess.interjections[1] != "also this" {
 		t.Errorf("interjections[1] = %q; want \"also this\"", sess.interjections[1])
+	}
+}
+
+// ── wake-bus consumption ────────────────────────────────────────────────────
+
+// TestWake_IdleRunsQueuedTurnWithDimNotice drives a Wake HostEvent for the
+// active session onto the bus while the TUI is idle and asserts the consumer
+// (a) prints the dim "woke" notice, (b) calls RunQueued, and (c) renders the
+// resulting turn (here a SystemReminder carrying a subagent-finished line) via
+// the SAME render sink used for normal Send turns — surfacing dim, not as user
+// input. consumeWakes is the extracted loop RunInteractive runs on a goroutine.
+func TestWake_IdleRunsQueuedTurnWithDimNotice(t *testing.T) {
+	app := &fakeApp{}
+	bus := make(chan shell3.HostEvent, 1)
+	sess := &fakeSession{
+		name:    "main",
+		wakeBus: bus,
+		runQueued: []shell3.Event{
+			{Kind: shell3.SystemReminder, Text: "subagent abc finished: did the thing"},
+			{Kind: shell3.Done},
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var turnWG sync.WaitGroup
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		consumeWakes(ctx, sess, app, &turnWG)
+	}()
+
+	bus <- shell3.HostEvent{Session: "main", Kind: shell3.Wake}
+
+	// Wait for the wake turn to launch + drain.
+	deadline := time.After(2 * time.Second)
+	for {
+		sess.mu.Lock()
+		n := sess.runQueuedCalls
+		sess.mu.Unlock()
+		if n >= 1 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("RunQueued was not called after Wake")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	turnWG.Wait()
+	cancel()
+	<-done
+
+	calls := app.snapshot()
+	// Dim woke notice rendered (the recorded line quotes the dim escape as the
+	// literal "\x1b[2m" sequence).
+	foundNotice := false
+	for _, c := range calls {
+		if strings.Contains(c, "woke") && strings.Contains(c, `\x1b[2m`) {
+			foundNotice = true
+		}
+	}
+	if !foundNotice {
+		t.Fatalf("expected dim woke notice, got:\n%s", strings.Join(calls, "\n"))
+	}
+	// Subagent-finished line rendered dim (SystemReminder path).
+	foundReminder := false
+	for _, c := range calls {
+		if strings.Contains(c, "subagent abc finished") && strings.Contains(c, `\x1b[2m`) {
+			foundReminder = true
+		}
+	}
+	if !foundReminder {
+		t.Fatalf("expected dim subagent-finished render, got:\n%s", strings.Join(calls, "\n"))
+	}
+	// The turn cleared busy at end (same lifecycle as a Send turn).
+	if !containsAll(calls, "SetBusy(true)", "SetBusy(false)") {
+		t.Fatalf("wake turn did not follow the busy lifecycle:\n%s", strings.Join(calls, "\n"))
+	}
+}
+
+// TestWake_OtherSessionIgnored: a Wake whose Session does not match the active
+// session is dropped (no RunQueued, no notice). Single-session TUI filtering.
+func TestWake_OtherSessionIgnored(t *testing.T) {
+	app := &fakeApp{}
+	bus := make(chan shell3.HostEvent, 1)
+	sess := &fakeSession{name: "main", wakeBus: bus, runQueued: []shell3.Event{{Kind: shell3.Done}}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var turnWG sync.WaitGroup
+	done := make(chan struct{})
+	go func() { defer close(done); consumeWakes(ctx, sess, app, &turnWG) }()
+
+	bus <- shell3.HostEvent{Session: "other", Kind: shell3.Wake}
+	// Give the consumer a moment to (incorrectly) act, then stop it.
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	<-done
+	turnWG.Wait()
+
+	sess.mu.Lock()
+	n := sess.runQueuedCalls
+	sess.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("RunQueued should not run for a non-matching session, called %d times", n)
 	}
 }
 

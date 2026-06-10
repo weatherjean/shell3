@@ -589,6 +589,23 @@ func (s *Session) ID() string {
 	return fmt.Sprintf("%d", s.sess.ID())
 }
 
+// Name returns the session's registry name (the value carried in
+// HostEvent.Session on the wake bus). Start-created sessions are named "main".
+// A host filtering Events() compares HostEvent.Session against this.
+func (s *Session) Name() string { return s.name }
+
+// WakeEvents exposes the owning Runtime's out-of-turn event bus (Wake) so a
+// single-session front-end created via Start can consume wakes for this session
+// without holding a separate *Runtime handle. Returns nil when the session has
+// no runtime (e.g. a closed session), in which case a host select on it simply
+// never fires. Multi-session hosts should use Runtime.Events() directly.
+func (s *Session) WakeEvents() <-chan HostEvent {
+	if s.runtime == nil {
+		return nil
+	}
+	return s.runtime.Events()
+}
+
 // Close ends the conversation: cancels any in-flight turn, waits for it to
 // finish (so its deferred history persist runs against the still-open store),
 // then ends the store session and releases the config.

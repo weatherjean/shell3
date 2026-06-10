@@ -39,6 +39,17 @@ type session interface {
 	// SetApprover installs the guard "ask" approval callback. Returns ErrBusy
 	// if a turn is in flight (never the case right after Start).
 	SetApprover(fn func(ctx context.Context, req shell3.ApprovalRequest) bool) error
+	// RunQueued runs one turn seeded from the queued inbox (a subagent result or
+	// idle Interject). Returns an already-closed channel (no turn) when busy or
+	// the inbox is empty. Same Event stream shape as Send.
+	RunQueued(ctx context.Context) <-chan shell3.Event
+	// Name is the session's registry name, compared against HostEvent.Session to
+	// filter the wake bus down to this session in the single-session TUI.
+	Name() string
+	// WakeEvents is the owning Runtime's out-of-turn event bus. A Wake on it for
+	// this session while idle triggers an auto-run of RunQueued. nil (e.g. a
+	// session with no runtime) yields a never-firing receive.
+	WakeEvents() <-chan shell3.HostEvent
 }
 
 // usage is the TUI-local running tally of the last turn's token counts, fed from
@@ -138,17 +149,32 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 
 	renderSink, finishTurn := newRenderSink(app, &lastUsage)
 
-	// launchTurn starts a turn goroutine for prompt. The render sink runs on that
-	// goroutine as it drains the per-turn Event channel; per-turn UI state
-	// transitions (SetBusy false, etc.) happen when the sink processes the
-	// Done/Error event. pkg persists history inside the turn.
-	launchTurn := func(prompt string) {
+	// gate serializes turn launches across the two producers that can start a
+	// turn: the input goroutine (SetSubmit → launchTurn) and the wake goroutine
+	// (consumeWakes → launchQueued). patchapp's busy-gate already blocks Enter
+	// while busy, but the wake goroutine is outside that gate, so a shared
+	// in-process flag prevents the wake path from kicking off a render that
+	// overlaps an in-flight Send (or another wake). The flag is held from launch
+	// until the drain goroutine finishes the turn.
+	gate := &turnGate{}
+
+	// runTurn starts a turn goroutine that drains start(turnCtx) through the
+	// shared render sink. It returns false (starting nothing) when a turn is
+	// already in flight; otherwise it marks the gate busy and clears it when the
+	// drain goroutine completes. The render sink runs on that goroutine; per-turn
+	// UI transitions happen as it processes events. pkg persists history inside
+	// the turn.
+	runTurn := func(start func(context.Context) <-chan shell3.Event) bool {
+		if !gate.begin() {
+			return false
+		}
 		turnCtx, cancel := context.WithCancel(turnsCtx)
 		app.SetBusy(true, cancel)
-		ch := sess.Send(turnCtx, prompt)
+		ch := start(turnCtx)
 		turnWG.Add(1)
 		go func() {
 			defer turnWG.Done()
+			defer gate.end()
 			defer cancel()
 			// finishTurn runs at channel close (the guaranteed end-of-turn signal)
 			// BEFORE the deferred cancel() above — deferred LIFO — so turnCtx.Err()
@@ -159,7 +185,23 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 				renderSink(ev)
 			}
 		}()
+		return true
 	}
+
+	// launchTurn starts a normal user-prompt turn. It runs on the input loop,
+	// which patchapp already gates while busy, so gate.begin always succeeds
+	// here; runTurn's gate is the cross-goroutine guard for the wake path.
+	launchTurn := func(prompt string) {
+		runTurn(func(ctx context.Context) <-chan shell3.Event {
+			return sess.Send(ctx, prompt)
+		})
+	}
+
+	// Wake bus: when an out-of-turn Wake for this session arrives while idle,
+	// auto-run the queued turn. Started after runTurn is defined; torn down by
+	// turnsCtx cancel at teardown (cancelTurns), so the goroutine exits before
+	// turnWG.Wait(). See consumeWakes for the per-event logic.
+	go consumeWakesWith(turnsCtx, sess, app, runTurn)
 
 	// applyAgent refreshes the badge/status/context-window after a switch. The
 	// switch itself already happened on sess (SwitchAgent); we read the fresh
@@ -207,6 +249,97 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 
 	runErr = app.Run(ctx)
 	return
+}
+
+// turnGate is the in-process flag that serializes turn launches across the
+// input goroutine and the wake goroutine (see RunInteractive's runTurn). begin
+// returns true and marks busy only if no turn is in flight; end clears it. It is
+// a thin mutex-guarded bool — the patchapp busy-gate handles the input side, so
+// this exists solely to stop the wake path from overlapping a turn.
+type turnGate struct {
+	mu   sync.Mutex
+	busy bool
+}
+
+func (g *turnGate) begin() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.busy {
+		return false
+	}
+	g.busy = true
+	return true
+}
+
+func (g *turnGate) end() {
+	g.mu.Lock()
+	g.busy = false
+	g.mu.Unlock()
+}
+
+// consumeWakesWith is the wake-bus loop RunInteractive runs on a goroutine. For
+// each Wake addressed to this session, it renders a dim "woke" notice and asks
+// runTurn to auto-run RunQueued, streaming the resulting turn through the same
+// render sink as a normal Send. Wakes for other sessions are dropped (the TUI is
+// single-session). A Wake arriving while a turn is in flight is ignored: runTurn
+// returns false (gate busy), so no notice is printed and no overlapping render
+// starts — the running turn drains the inbox itself. Returns when ctx is done or
+// the bus closes (the bus is never closed in practice; ctx-cancel is the exit).
+func consumeWakesWith(ctx context.Context, sess session, app patchapp.AppView, runTurn func(func(context.Context) <-chan shell3.Event) bool) {
+	bus := sess.WakeEvents()
+	name := sess.Name()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-bus:
+			if !ok {
+				return
+			}
+			if ev.Kind != shell3.Wake || ev.Session != name {
+				continue
+			}
+			// Print the dim notice only when we actually start the turn, so an
+			// ignored (busy) wake leaves no orphan line. runTurn checks the gate
+			// atomically; RunQueued itself no-ops on a busy session / empty inbox,
+			// in which case the turn drains immediately to a closed channel.
+			started := runTurn(func(turnCtx context.Context) <-chan shell3.Event {
+				app.PrintLine(patchtui.Dim + "[woke: responding to queued input]" + patchtui.Reset)
+				return sess.RunQueued(turnCtx)
+			})
+			_ = started
+		}
+	}
+}
+
+// consumeWakes is the test-facing entry point: it stands up the same render sink
+// and turn gate RunInteractive uses, then runs the wake loop. Tests drive the
+// session's wake bus and assert the rendered output. turnWG lets the test join
+// the launched turn's drain goroutine before asserting.
+func consumeWakes(ctx context.Context, sess session, app patchapp.AppView, turnWG *sync.WaitGroup) {
+	var lastUsage usage
+	renderSink, finishTurn := newRenderSink(app, &lastUsage)
+	gate := &turnGate{}
+	runTurn := func(start func(context.Context) <-chan shell3.Event) bool {
+		if !gate.begin() {
+			return false
+		}
+		turnCtx, cancel := context.WithCancel(ctx)
+		app.SetBusy(true, cancel)
+		ch := start(turnCtx)
+		turnWG.Add(1)
+		go func() {
+			defer turnWG.Done()
+			defer gate.end()
+			defer cancel()
+			defer func() { finishTurn(turnCtx.Err() != nil) }()
+			for ev := range ch {
+				renderSink(ev)
+			}
+		}()
+		return true
+	}
+	consumeWakesWith(ctx, sess, app, runTurn)
 }
 
 // newRenderSink returns the function that renders a stream of public Events to
