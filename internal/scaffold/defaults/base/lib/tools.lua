@@ -80,7 +80,7 @@ local brave_search = shell3.tool({
     local count = tostring(args.count or 10)
 
     local key = shell3.env.secret("BRAVE_API_KEY")
-    if key == "" then return "error: BRAVE_API_KEY not set in .env" end
+    if key == "" then return "error: brave_search is unavailable (no API key configured)" end
 
     local encoded = shell3.urlencode(query)
     local cmd = string.format(
