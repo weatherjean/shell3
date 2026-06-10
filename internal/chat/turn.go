@@ -309,6 +309,41 @@ func turnScopedHandlers(cfg TurnConfig, sess *Session, st *toolLoopState) map[st
 			}
 			return out, nil
 		}},
+		"spawn_agent": funcHandler{name: "spawn_agent", fn: func(ctx context.Context, _ string, args json.RawMessage, _ ToolConfig) (string, error) {
+			if cfg.Spawn == nil {
+				return "error: subagent spawning is not available in this runtime", nil
+			}
+			var a struct {
+				Task    string `json:"task"`
+				Agent   string `json:"agent"`
+				Workdir string `json:"workdir"`
+			}
+			if err := json.Unmarshal(args, &a); err != nil {
+				return "error: invalid spawn_agent arguments: " + err.Error(), nil
+			}
+			if strings.TrimSpace(a.Task) == "" {
+				return "error: spawn_agent requires a non-empty task", nil
+			}
+			id, err := cfg.Spawn(ctx, SpawnRequest{Task: a.Task, Agent: a.Agent, WorkDir: a.Workdir})
+			if err != nil {
+				return "error: spawn failed: " + err.Error(), nil
+			}
+			return "spawned subagent " + id + "; its result will arrive automatically when it finishes. Do not poll in a tight loop.", nil
+		}},
+		"list_agents": funcHandler{name: "list_agents", fn: func(_ context.Context, _ string, _ json.RawMessage, _ ToolConfig) (string, error) {
+			var snap []AgentSnapshot
+			if cfg.ListAgents != nil {
+				snap = cfg.ListAgents()
+			}
+			if snap == nil {
+				snap = []AgentSnapshot{}
+			}
+			b, err := json.Marshal(snap)
+			if err != nil {
+				return "error: " + err.Error(), nil
+			}
+			return string(b), nil
+		}},
 	}
 }
 

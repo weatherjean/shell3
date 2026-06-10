@@ -110,6 +110,12 @@ type Config struct {
 	// until the host answers (ctx-cancellable — treat cancellation as deny).
 	// Nil fails closed: ask degrades to a deny with an explanatory reason.
 	Approve func(ctx context.Context, req ApprovalRequest) bool
+	// Spawn launches a subagent for the parsed spawn_agent call and returns its
+	// id immediately. Nil → spawn_agent degrades to an "unavailable" result.
+	Spawn func(ctx context.Context, req SpawnRequest) (string, error)
+	// ListAgents returns a snapshot of subagents spawned by this session. Nil →
+	// list_agents returns an empty array.
+	ListAgents func() []AgentSnapshot
 	// AgentNames lists configured agents in declaration order, for /agent and
 	// Tab cycling. Empty or single-element disables switching.
 	AgentNames []string
@@ -188,6 +194,8 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler, shellInteractive
 		MCPToolNames:     cfg.MCPToolNames,
 		ToolGuard:        cfg.ToolGuard,
 		Approve:          cfg.Approve,
+		Spawn:            cfg.Spawn,
+		ListAgents:       cfg.ListAgents,
 		ShellInteractive: shellInteractive,
 	}
 }

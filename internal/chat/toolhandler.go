@@ -118,4 +118,26 @@ type TurnConfig struct {
 	// until the host answers (ctx-cancellable — treat cancellation as deny).
 	// Nil fails closed: ask degrades to a deny with an explanatory reason.
 	Approve func(ctx context.Context, req ApprovalRequest) bool
+	// Spawn launches a subagent for the parsed spawn_agent call and returns its
+	// id immediately. Nil → spawn_agent degrades to an "unavailable" result.
+	Spawn func(ctx context.Context, req SpawnRequest) (string, error)
+	// ListAgents returns a snapshot of subagents spawned by this session. Nil →
+	// list_agents returns an empty array.
+	ListAgents func() []AgentSnapshot
+}
+
+// SpawnRequest is a parsed spawn_agent call handed to the host's spawner.
+type SpawnRequest struct {
+	Task    string
+	Agent   string // "" → caller's agent
+	WorkDir string // "" → caller's workdir
+}
+
+// AgentSnapshot is one row of a list_agents result.
+type AgentSnapshot struct {
+	ID     string `json:"id"`
+	Agent  string `json:"agent"`
+	Task   string `json:"task"`
+	Status string `json:"status"`           // "running" | "finished"
+	Result string `json:"result,omitempty"` // short preview when finished
 }
