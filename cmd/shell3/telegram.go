@@ -75,6 +75,11 @@ func newTelegramCommand() *cobra.Command {
 			}
 			b.SetWorkDir(workDir)
 
+			// Wire /run <job> to the scheduler's manual fire (no-op if no cron).
+			if sched != nil {
+				b.SetJobRunner(sched.Run)
+			}
+
 			// Register the "/" command hints (best-effort).
 			if err := client.SetCommands(ctx, telegram.BotCommands()); err != nil {
 				fmt.Printf("warning: could not set commands: %v\n", err)
@@ -85,6 +90,18 @@ func newTelegramCommand() *cobra.Command {
 				b.SetUsageRecorder(usage.Set)
 				srv := web.NewServer(rt, sess, tg.Token, chatID)
 				srv.SetUsage(usage)
+				if sched != nil {
+					srv.SetCronSource(func() []web.CronJob {
+						var out []web.CronJob
+						for _, j := range sched.Jobs() {
+							out = append(out, web.CronJob{
+								Name: j.Name, Schedule: j.Schedule, Agent: j.Agent,
+								Notify: j.Notify, LastRun: j.LastRun, LastSubID: j.LastSubID,
+							})
+						}
+						return out
+					})
+				}
 				go func() {
 					_ = startDashboard(ctx, tg.Dashboard.Addr, srv.Handler())
 				}()
