@@ -258,7 +258,7 @@ func (c *LoadedConfig) luaSubagent(L *lua.LState) int {
 		if err := checkKeys(tt, "subagent.tools", toolGateKeys); err != nil {
 			L.RaiseError("%s", err.Error())
 		}
-		if tt.RawGetString("subagents") != lua.LNil {
+		if _, isTable := tt.RawGetString("subagents").(*lua.LTable); isTable {
 			L.RaiseError("subagent %q: a subagent may not declare its own subagents (depth limit 1)", s.Name)
 		}
 		s.Gates = parseGates(tt)

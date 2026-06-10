@@ -47,6 +47,11 @@ shell3.agent({
 		t.Fatalf("Description = %q, want %q", sa.Description, "investigate the repo")
 	}
 
+	// Subagents() plural accessor must return exactly one entry
+	if got := len(c.Subagents()); got != 1 {
+		t.Fatalf("len(Subagents()) = %d, want 1", got)
+	}
+
 	// code agent must list researcher in Subagents
 	code, ok := c.AgentByName("code")
 	if !ok {
@@ -132,5 +137,27 @@ shell3.subagent({ name = "dup", description = "a duplicate", model = "m", prompt
 	}
 	if !contains(err.Error(), "dup") {
 		t.Fatalf("error should mention 'dup'; got: %v", err)
+	}
+}
+
+func TestSubagent_FalseSubagentsKeyIsNotDepthError(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "shell3.lua", minModelHdr+`
+shell3.subagent({
+	name = "worker",
+	description = "does work",
+	model = "m",
+	prompt = "p",
+	tools = { bash = true, subagents = false },
+})
+shell3.agent({ name = "code", model = "m", prompt = "c" })
+`)
+	c, err := Load(dir+"/shell3.lua", dir)
+	if err != nil {
+		t.Fatalf("expected no error for subagents=false in subagent tools; got: %v", err)
+	}
+	defer c.Close()
+	if _, ok := c.SubagentByName("worker"); !ok {
+		t.Fatal("SubagentByName(worker) returned ok=false; subagent was not registered")
 	}
 }

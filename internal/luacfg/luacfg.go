@@ -161,9 +161,16 @@ func Load(path, workdir string) (*LoadedConfig, error) {
 	}
 	// Validate cross-references: agent.Subagents must all resolve.
 	for _, a := range c.agents {
-		for _, saName := range a.Subagents {
-			if _, ok := c.SubagentByName(saName); !ok {
-				return nil, fmt.Errorf("config: agent %q references unknown subagent %q", a.Name, saName)
+		for _, name := range a.Subagents {
+			found := false
+			for _, sa := range c.subagents {
+				if sa.Name == name {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return nil, fmt.Errorf("config: agent %q references unknown subagent %q", a.Name, name)
 			}
 		}
 	}
