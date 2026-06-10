@@ -11,6 +11,7 @@ func registerShell3(c *LoadedConfig) {
 	L.SetField(tbl, "tool", L.NewFunction(c.luaTool))
 	L.SetField(tbl, "mcp", L.NewFunction(c.luaMCP))
 	L.SetField(tbl, "agent", L.NewFunction(c.luaAgent))
+	L.SetField(tbl, "subagent", L.NewFunction(c.luaSubagent))
 	L.SetField(tbl, "urlencode", L.NewFunction(luaURLEncode))
 	env := L.NewTable()
 	L.SetField(env, "secret", L.NewFunction(c.luaSecret))
@@ -150,6 +151,20 @@ func (c *LoadedConfig) luaTool(L *lua.LState) int {
 	return 1
 }
 
+// parseGates reads the boolean tool gates from a tools table.
+func parseGates(tt *lua.LTable) ToolGates {
+	return ToolGates{
+		Bash:             optBool(tt, "bash"),
+		BashBg:           optBool(tt, "bash_bg"),
+		ShellInteractive: optBool(tt, "shell_interactive"),
+		Edit:             optBool(tt, "edit"),
+		History:          optBool(tt, "history"),
+		Prune:            optBool(tt, "prune"),
+		Compact:          optBool(tt, "compact"),
+		Media:            optBool(tt, "media"),
+	}
+}
+
 // luaAgent parses name/model/prompt, skills, and the tools struct (gates + custom).
 func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 	opts := L.CheckTable(1)
@@ -169,6 +184,11 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 			L.RaiseError("agent %q: already declared (agent names must be unique)", a.Name)
 		}
 	}
+	for _, ex := range c.subagents {
+		if ex.Name == a.Name {
+			L.RaiseError("config: %q is declared as both an agent and a subagent", a.Name)
+		}
+	}
 	if sk, ok := opts.RawGetString("skills").(*lua.LTable); ok {
 		a.Skills = handleNames(sk, "__skill")
 	}
@@ -176,17 +196,7 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 		if err := checkKeys(tt, "agent.tools", toolGateKeys); err != nil {
 			L.RaiseError("%s", err.Error())
 		}
-		a.Gates = ToolGates{
-			Bash:             optBool(tt, "bash"),
-			BashBg:           optBool(tt, "bash_bg"),
-			ShellInteractive: optBool(tt, "shell_interactive"),
-			Edit:             optBool(tt, "edit"),
-			History:          optBool(tt, "history"),
-			Prune:            optBool(tt, "prune"),
-			Compact:          optBool(tt, "compact"),
-			Media:            optBool(tt, "media"),
-			Subagents:        optBool(tt, "subagents"),
-		}
+		a.Gates = parseGates(tt)
 		if cu, ok := tt.RawGetString("custom").(*lua.LTable); ok {
 			a.CustomTools = handleNames(cu, "__tool")
 		}
@@ -195,6 +205,9 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 		}
 		if tt.RawGetString("skill") == lua.LFalse {
 			a.SkillsDisabled = true
+		}
+		if sg, ok := tt.RawGetString("subagents").(*lua.LTable); ok {
+			a.Subagents = handleNames(sg, "__subagent")
 		}
 	}
 	if g, ok := opts.RawGetString("on_tool_call").(*lua.LTable); ok {
@@ -206,4 +219,69 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 	}
 	c.agents = append(c.agents, a)
 	return 0
+}
+
+var subagentKeys = map[string]bool{
+	"name": true, "description": true, "model": true, "prompt": true,
+	"tools": true, "skills": true, "on_tool_call": true,
+}
+
+func (c *LoadedConfig) luaSubagent(L *lua.LState) int {
+	opts := L.CheckTable(1)
+	if err := checkKeys(opts, "subagent", subagentKeys); err != nil {
+		L.RaiseError("%s", err.Error())
+	}
+	s := Subagent{
+		Name:        optStr(opts, "name"),
+		Description: optStr(opts, "description"),
+		ModelName:   optStr(opts, "model"),
+		Prompt:      optStr(opts, "prompt"),
+	}
+	if s.Name == "" || s.Description == "" {
+		L.RaiseError("subagent: name and description are required")
+	}
+	// Reject collision with already-declared agents.
+	for _, ex := range c.agents {
+		if ex.Name == s.Name {
+			L.RaiseError("config: %q is declared as both an agent and a subagent", s.Name)
+		}
+	}
+	for _, ex := range c.subagents {
+		if ex.Name == s.Name {
+			L.RaiseError("subagent %q: already declared (subagent names must be unique)", s.Name)
+		}
+	}
+	if sk, ok := opts.RawGetString("skills").(*lua.LTable); ok {
+		s.Skills = handleNames(sk, "__skill")
+	}
+	if tt, ok := opts.RawGetString("tools").(*lua.LTable); ok {
+		if err := checkKeys(tt, "subagent.tools", toolGateKeys); err != nil {
+			L.RaiseError("%s", err.Error())
+		}
+		if tt.RawGetString("subagents") != lua.LNil {
+			L.RaiseError("subagent %q: a subagent may not declare its own subagents (depth limit 1)", s.Name)
+		}
+		s.Gates = parseGates(tt)
+		if cu, ok := tt.RawGetString("custom").(*lua.LTable); ok {
+			s.CustomTools = handleNames(cu, "__tool")
+		}
+		if mc, ok := tt.RawGetString("mcp").(*lua.LTable); ok {
+			s.MCPServerNames = handleNames(mc, "__mcp")
+		}
+		if tt.RawGetString("skill") == lua.LFalse {
+			s.SkillsDisabled = true
+		}
+	}
+	if g, ok := opts.RawGetString("on_tool_call").(*lua.LTable); ok {
+		g.ForEach(func(_, v lua.LValue) {
+			if fn, ok := v.(*lua.LFunction); ok {
+				s.Guard = append(s.Guard, GuardEntry{fn: fn})
+			}
+		})
+	}
+	c.subagents = append(c.subagents, s)
+	h := L.NewTable()
+	h.RawSetString("__subagent", lua.LString(s.Name))
+	L.Push(h)
+	return 1
 }

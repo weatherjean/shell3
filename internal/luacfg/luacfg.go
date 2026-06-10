@@ -24,7 +24,7 @@ type Model struct {
 }
 
 type ToolGates struct {
-	Bash, BashBg, ShellInteractive, Edit, History, Prune, Compact, Media, Subagents bool
+	Bash, BashBg, ShellInteractive, Edit, History, Prune, Compact, Media bool
 }
 
 type CustomTool struct {
@@ -58,6 +58,21 @@ type Agent struct {
 	Skills                  []string
 	SkillsDisabled          bool // true only when tools = { skill = false } is explicitly set
 	Guard                   []GuardEntry
+	Subagents               []string // names of registered subagents this agent can spawn
+	Description             string   // model-facing "when to use" (unused for top-level agents)
+}
+
+// Subagent is a delegatable specialist: a non-interactive agent the model can
+// spawn via spawn_agent. Registered separately from agents (never in the Tab
+// rotation). Description is the model-facing "when to use".
+type Subagent struct {
+	Name, Description, ModelName, Prompt string
+	Gates                                ToolGates
+	CustomTools                          []string
+	MCPServerNames                       []string
+	Skills                               []string
+	SkillsDisabled                       bool
+	Guard                                []GuardEntry
 }
 
 // SkillsActive reports whether skills are enabled: the agent has at least one
@@ -75,7 +90,8 @@ type LoadedConfig struct {
 	Skills     []Skill
 	Secrets    map[string]string
 
-	agents []Agent
+	agents    []Agent
+	subagents []Subagent
 
 	L  *lua.LState
 	mu sync.Mutex
@@ -132,6 +148,25 @@ func Load(path, workdir string) (*LoadedConfig, error) {
 			return nil, fmt.Errorf("config: agent %q references unknown model %q", c.agents[i].Name, c.agents[i].ModelName)
 		}
 	}
+	for i := range c.subagents {
+		if c.subagents[i].ModelName == "" {
+			if len(c.Models) == 0 {
+				return nil, fmt.Errorf("config: subagent %q has no model and no models are declared", c.subagents[i].Name)
+			}
+			c.subagents[i].ModelName = c.Models[0].Name
+		}
+		if _, ok := c.Model(c.subagents[i].ModelName); !ok {
+			return nil, fmt.Errorf("config: subagent %q references unknown model %q", c.subagents[i].Name, c.subagents[i].ModelName)
+		}
+	}
+	// Validate cross-references: agent.Subagents must all resolve.
+	for _, a := range c.agents {
+		for _, saName := range a.Subagents {
+			if _, ok := c.SubagentByName(saName); !ok {
+				return nil, fmt.Errorf("config: agent %q references unknown subagent %q", a.Name, saName)
+			}
+		}
+	}
 	success = true
 	return c, nil
 }
@@ -173,4 +208,25 @@ func (c *LoadedConfig) FirstAgent() Agent {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.agents[0]
+}
+
+// Subagents returns a copy of the registered subagents in declaration order.
+func (c *LoadedConfig) Subagents() []Subagent {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]Subagent, len(c.subagents))
+	copy(out, c.subagents)
+	return out
+}
+
+// SubagentByName returns the declared subagent with the given name.
+func (c *LoadedConfig) SubagentByName(name string) (Subagent, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, s := range c.subagents {
+		if s.Name == name {
+			return s, true
+		}
+	}
+	return Subagent{}, false
 }

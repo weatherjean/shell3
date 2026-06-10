@@ -1,6 +1,11 @@
 package luacfg
 
-import "github.com/weatherjean/shell3/internal/llm"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/weatherjean/shell3/internal/llm"
+)
 
 // skillTool is the built-in tool injected when the agent has ≥1 skill.
 var skillTool = llm.ToolDefinition{
@@ -47,9 +52,6 @@ func ToolDefs(g ToolGates, custom []CustomTool, hasSkills bool) []llm.ToolDefini
 	}
 	if g.History {
 		defs = append(defs, historyGetTool, historySearchTool)
-	}
-	if g.Subagents {
-		defs = append(defs, spawnAgentTool, listAgentsTool)
 	}
 	for _, ct := range custom {
 		defs = append(defs, llm.ToolDefinition{
@@ -222,22 +224,39 @@ var readMediaTool = llm.ToolDefinition{
 	},
 }
 
-var spawnAgentTool = llm.ToolDefinition{
-	Name: "spawn_agent",
-	Description: "Spawn a subagent to work a focused, independent subtask in the background. " +
-		"Returns an id immediately; the subagent runs on its own with a fresh context and reports back automatically — " +
-		"its result is delivered to you as a system message when it finishes (mid-turn if you are still working, otherwise on your next turn). " +
-		"Use for parallelizable work (e.g. investigate a file while you keep going). Do NOT poll in a tight loop; the result arrives on its own. " +
-		"Subagents cannot themselves spawn subagents.",
-	Parameters: map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"task":    map[string]any{"type": "string", "description": "The full task prompt for the subagent. Be self-contained: the subagent does not see this conversation."},
-			"agent":   map[string]any{"type": "string", "description": "Name of a configured agent to run as. Omit to use your own agent."},
-			"workdir": map[string]any{"type": "string", "description": "Working directory to root the subagent in (absolute, or relative to your workdir). Omit to use your workdir."},
+// SubagentInfo is the (name, when-to-use) pair surfaced to the model for one
+// registered subagent.
+type SubagentInfo struct{ Name, Description string }
+
+// SpawnToolDefs returns the spawn_agent + list_agents tool defs for an agent
+// that registered the given subagents. Returns nil when there are none.
+func SpawnToolDefs(subs []SubagentInfo) []llm.ToolDefinition {
+	if len(subs) == 0 {
+		return nil
+	}
+	names := make([]string, len(subs))
+	var b strings.Builder
+	b.WriteString("Delegate a focused, independent subtask to a subagent that runs in the background; " +
+		"its result comes back to you automatically when it finishes (you do not poll). " +
+		"Choose the subagent best suited to the task:\n")
+	for i, s := range subs {
+		names[i] = s.Name
+		fmt.Fprintf(&b, "- %s: %s\n", s.Name, s.Description)
+	}
+	spawn := llm.ToolDefinition{
+		Name:        "spawn_agent",
+		Description: b.String(),
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"task":     map[string]any{"type": "string", "description": "The full, self-contained task prompt. The subagent does not see this conversation."},
+				"subagent": map[string]any{"type": "string", "description": "Which subagent to run (see the list above).", "enum": names},
+				"workdir":  map[string]any{"type": "string", "description": "Working directory to root the subagent in (absolute, or relative to your workdir). Omit to use your workdir."},
+			},
+			"required": []string{"task", "subagent"},
 		},
-		"required": []string{"task"},
-	},
+	}
+	return []llm.ToolDefinition{spawn, listAgentsTool}
 }
 
 var listAgentsTool = llm.ToolDefinition{
