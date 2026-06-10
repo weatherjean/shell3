@@ -20,7 +20,7 @@ out. Each `lib/...` file mirrors the base config's module layout: copy it into
 - `lib/skills/codebase-discovery.lua` — navigating unfamiliar code.
 - `lib/skills/web-search.lua` — guidance for web research.
 - `lib/mcp.lua` — declaring an MCP server and attaching its tools.
-- `lib/guards.lua` — extra on_tool_call guards (block destructive bash).
+- `lib/guards.lua` — extra on_tool_call guards: a `block` verdict (block destructive bash) and an `ask` verdict (the ask verdict surfaces an approval prompt in the TUI / bot before a risky command runs).
 - `lib/tools.lua` — custom tool template.
 - `lib/extra-agents.lua` — adding more agents.
 - `proxy.md` — run_proxy recipes (Codex/npx, litellm).
