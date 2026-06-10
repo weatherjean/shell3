@@ -1,6 +1,9 @@
 package luacfg
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestGuardChainBlocks(t *testing.T) {
 	dir := t.TempDir()
@@ -30,6 +33,30 @@ shell3.agent({ name="a", model="m", prompt="p", tools={ edit=true }, on_tool_cal
 	d2, _, _ := c.OnToolCallFor(a, t.Context(), "bash", map[string]any{"command": "ls"})
 	if d2 != DecisionAllow {
 		t.Fatalf("guard should allow bash, got %v", d2)
+	}
+}
+
+// TestGuard_AskDecision: a guard returning action="ask" yields DecisionAsk
+// with the reason passed through.
+func TestGuard_AskDecision(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "shell3.lua", `
+shell3.model("m", { base_url = "http://x", api_key = "k", model = "mm" })
+shell3.agent({ name = "a", model = "m", prompt = "p",
+  on_tool_call = { function(call) return { action = "ask", reason = "needs a human" } end } })
+`)
+	c, err := Load(dir+"/shell3.lua", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	a := c.FirstAgent()
+	d, reason, err := c.OnToolCallFor(a, context.Background(), "bash", map[string]any{"command": "rm -rf /"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d != DecisionAsk || reason != "needs a human" {
+		t.Fatalf("got (%v, %q), want (DecisionAsk, \"needs a human\")", d, reason)
 	}
 }
 

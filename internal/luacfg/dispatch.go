@@ -15,6 +15,10 @@ const (
 	DecisionAllow  Decision = iota // proceed normally
 	DecisionBlock                  // deny this call; model may retry
 	DecisionCancel                 // abort the entire turn
+	// DecisionAsk suspends the call pending host approval: the front-end's
+	// approver (Approve in chat.TurnConfig) decides allow or deny. With no
+	// approver registered the engine treats ask as block (fail closed).
+	DecisionAsk
 )
 
 // OnToolCallFor runs the given agent's guard chain in order; first non-allow
@@ -78,6 +82,8 @@ func parseAction(s string) Decision {
 		return DecisionBlock
 	case "cancel":
 		return DecisionCancel
+	case "ask":
+		return DecisionAsk
 	default:
 		return DecisionAllow
 	}
