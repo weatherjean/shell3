@@ -35,7 +35,7 @@ type session interface {
 	SetParam(name, value string) error
 	// Interject queues a message for delivery to the model at the next round
 	// boundary. Safe to call from any goroutine; never fails.
-	Interject(text string)
+	Interject(text string, parts ...shell3.Part)
 	// SetApprover installs the guard "ask" approval callback. Returns ErrBusy
 	// if a turn is in flight (never the case right after Start).
 	SetApprover(fn func(ctx context.Context, req shell3.ApprovalRequest) bool) error

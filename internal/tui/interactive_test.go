@@ -497,7 +497,9 @@ func (f *fakeSession) SetParam(name, value string) error {
 	}
 	return nil
 }
-func (f *fakeSession) Interject(text string) { f.interjections = append(f.interjections, text) }
+func (f *fakeSession) Interject(text string, _ ...shell3.Part) {
+	f.interjections = append(f.interjections, text)
+}
 func (f *fakeSession) SetApprover(fn func(ctx context.Context, req shell3.ApprovalRequest) bool) error {
 	f.approver = fn
 	return nil
