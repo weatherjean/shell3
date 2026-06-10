@@ -54,20 +54,29 @@ func (s *Session) drainInbox() []string {
 }
 
 // interjectReminder formats queued interjections as one system-reminder block.
-// Returns "" when items is empty. Empty-string items are skipped. Multi-line
-// items have their continuation lines indented two spaces so the bullet list
-// stays readable.
+// Returns "" when items is empty or all items are blank after trimming. Each
+// item is trimmed with strings.TrimSpace; whitespace-only items are skipped.
+// Multi-line items have their continuation lines indented two spaces so the
+// bullet list stays readable.
 func interjectReminder(items []string) string {
 	if len(items) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("<system-reminder>\nuser sent additional input — incorporate it before continuing:\n")
+	wrote := false
 	for _, it := range items {
+		it = strings.TrimSpace(it)
 		if it == "" {
 			continue
 		}
+		if !wrote {
+			b.WriteString("<system-reminder>\nuser sent additional input — incorporate it before continuing:\n")
+			wrote = true
+		}
 		b.WriteString("- " + strings.ReplaceAll(it, "\n", "\n  ") + "\n")
+	}
+	if !wrote {
+		return ""
 	}
 	b.WriteString("</system-reminder>")
 	return b.String()

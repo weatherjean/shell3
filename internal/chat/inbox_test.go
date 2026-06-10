@@ -150,3 +150,22 @@ func TestInterject_CrossGoroutine(t *testing.T) {
 		t.Fatalf("cross-goroutine Interject must surface as a reminder; events=%+v", events)
 	}
 }
+
+// TestInterject_WhitespaceOnly_NoSystemReminder: an Interject containing only
+// whitespace must not produce a SystemReminder event — the reminder block
+// should be suppressed entirely (no header-only XML block).
+func TestInterject_WhitespaceOnly_NoSystemReminder(t *testing.T) {
+	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
+	sess, c := newCollectorSession(SessionOpts{})
+	sess.Interject("   ") // whitespace only
+
+	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, Log: LogOrNoop(nil)}
+	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "hi"}, nil)
+
+	events := c.all()
+	for _, ev := range events {
+		if ev.Kind == EventSystemReminder {
+			t.Fatalf("whitespace-only Interject produced a SystemReminder event; text=%q", ev.Text)
+		}
+	}
+}

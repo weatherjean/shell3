@@ -1,6 +1,7 @@
 package patchapp
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -104,8 +105,6 @@ func TestEnterWhileBusy_SlashInput_Preserved(t *testing.T) {
 
 	// Seed the input with "/clear".
 	setInputForTest(a, "/clear")
-	// Re-mark busy since setInputForTest needs the lock but doesn't change busy.
-	setBusy(a, true)
 
 	a.handleEnter()
 
@@ -129,7 +128,6 @@ func TestEnterWhileBusy_BangInput_Preserved(t *testing.T) {
 	a.SetInterject(func(string) { interjected = true })
 
 	setInputForTest(a, "!ls")
-	setBusy(a, true)
 
 	a.handleEnter()
 
@@ -149,7 +147,6 @@ func TestEnterWhileBusy_PlainText_CallsInterject(t *testing.T) {
 	a.SetInterject(func(text string) { received = text })
 
 	setInputForTest(a, "stop, change approach")
-	setBusy(a, true)
 
 	a.handleEnter()
 
@@ -169,12 +166,66 @@ func TestEnterWhileBusy_PlainText_NilCallback_Preserved(t *testing.T) {
 	// No SetInterject call.
 
 	setInputForTest(a, "some text")
-	setBusy(a, true)
 
 	a.handleEnter()
 
 	if got := string(a.ed.input); got != "some text" {
 		t.Fatalf("without onInterject, input should be preserved; got %q", got)
+	}
+}
+
+// TestMultiLineSteeringEcho: when a multi-line text (typed via alt+enter) is
+// interjected while busy, each line of the steering echo is committed to the
+// renderer as its own Print call — no raw '\n' appears inside any single
+// committed line.
+func TestMultiLineSteeringEcho(t *testing.T) {
+	// newBusyApp sets renderer output to discardWriter. Replace it with a
+	// recorder so we can inspect committed lines.
+	var out strings.Builder
+	a := New("test", "", WelcomeInfo{})
+	a.r.SetOutput(&out)
+	setBusy(a, true)
+
+	var received string
+	a.SetInterject(func(text string) { received = text })
+
+	// Seed input with two lines (as if the user typed alt+enter between them).
+	setInputForTest(a, "first line\nsecond line")
+
+	a.handleEnter()
+
+	// onInterject should receive the trimmed full text.
+	if received != "first line\nsecond line" {
+		t.Fatalf("onInterject received %q; want multi-line text", received)
+	}
+
+	// Inspect the committed output: split on CRLF sequences (the renderer uses
+	// line + "\r\n") and verify no individual segment contains a bare '\n'.
+	committed := out.String()
+	for _, segment := range strings.Split(committed, "\r\n") {
+		if strings.Contains(segment, "\n") {
+			t.Errorf("raw newline found inside a single committed renderer segment: %q", segment)
+		}
+	}
+}
+
+// TestHomeEndWorkWhileBusy: Home and End move the cursor while busy (they are
+// pure cursor operations with no concurrency implications).
+func TestHomeEndWorkWhileBusy(t *testing.T) {
+	a := newBusyApp()
+	setInputForTest(a, "hello")
+	// cursor is at 5 after setInputForTest
+
+	// Home = ESC [ H
+	a.processInput([]byte{27, '[', 'H'})
+	if a.ed.cursor != 0 {
+		t.Fatalf("Home while busy: cursor = %d; want 0", a.ed.cursor)
+	}
+
+	// End = ESC [ F
+	a.processInput([]byte{27, '[', 'F'})
+	if a.ed.cursor != 5 {
+		t.Fatalf("End while busy: cursor = %d; want 5", a.ed.cursor)
 	}
 }
 

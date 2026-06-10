@@ -734,6 +734,12 @@ func TestSlash_QuitAliasesExit(t *testing.T) {
 // exercises only the wiring (closure registration) without standing up the
 // full interactive loop: it builds the same SetInterject closure manually and
 // asserts the text flows through to fakeSession.interjections.
+//
+// Limitation: because RunInteractive's setup is monolithic (App construction,
+// all SetXxx calls, and the stdin/event loops are interleaved), the wiring
+// cannot be invoked hermetically without launching a real terminal loop. This
+// test verifies the closure shape and the fakeSession.Interject path rather
+// than the live RunInteractive registration path.
 func TestInterjectWiring(t *testing.T) {
 	sess := &fakeSession{}
 	// Simulate what RunInteractive registers.

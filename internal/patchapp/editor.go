@@ -164,17 +164,13 @@ func (a *App) processInput(data []byte) (exit bool) {
 			a.mu.Unlock()
 		case keyHome:
 			a.mu.Lock()
-			if !a.busy {
-				a.ed.cursor = 0
-				a.render()
-			}
+			a.ed.cursor = 0
+			a.render()
 			a.mu.Unlock()
 		case keyEnd:
 			a.mu.Lock()
-			if !a.busy {
-				a.ed.cursor = len(a.ed.input)
-				a.render()
-			}
+			a.ed.cursor = len(a.ed.input)
+			a.render()
 			a.mu.Unlock()
 		case keyChar:
 			a.mu.Lock()
@@ -314,10 +310,33 @@ func (a *App) handleEnter() {
 			a.ed.input = a.ed.input[:0]
 			a.ed.cursor = 0
 			a.ed.historyDraft = a.ed.historyDraft[:0]
+			// History nav is gated while busy, so historyIdx and historyInDraft
+			// are always already zero here — reset kept for symmetry with the
+			// submit path.
+			a.ed.historyIdx = 0
+			a.ed.historyInDraft = false
 			a.render()
 			a.mu.Unlock()
 			fn(trimmed)
-			a.PrintLine(patchtui.Dim + "[steering: " + trimmed + "]" + patchtui.Reset)
+			// Echo each line of the steering text so multi-line interjections
+			// (typed via alt+enter) don't corrupt the terminal. Each line is
+			// fully wrapped in Dim…Reset so no escape bleeds across lines.
+			steerLines := patchtui.SplitLines(trimmed)
+			if len(steerLines) == 0 {
+				steerLines = []string{trimmed}
+			}
+			for i, sl := range steerLines {
+				switch {
+				case i == 0 && len(steerLines) == 1:
+					a.PrintLine(patchtui.Dim + "[steering: " + sl + "]" + patchtui.Reset)
+				case i == 0:
+					a.PrintLine(patchtui.Dim + "[steering: " + sl + patchtui.Reset)
+				case i == len(steerLines)-1:
+					a.PrintLine(patchtui.Dim + "  " + sl + "]" + patchtui.Reset)
+				default:
+					a.PrintLine(patchtui.Dim + "  " + sl + patchtui.Reset)
+				}
+			}
 		}
 		// nil onInterject: preserve input (no-op).
 		return
