@@ -32,6 +32,8 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/api/history", s.auth(s.handleHistory))
+	mux.HandleFunc("/api/subagents", s.auth(s.handleSubagents))
+	mux.HandleFunc("/api/status", s.auth(s.handleStatus))
 	mux.HandleFunc("/api/stream", s.auth(s.handleStream))
 	return mux
 }
@@ -63,6 +65,49 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	out := make([]historyEntry, len(hist))
 	for i, h := range hist {
 		out[i] = historyEntry{Role: h.Role, Content: h.Content, ToolName: h.ToolName, ToolCallID: h.ToolCallID}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+func (s *Server) handleSubagents(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	subs := s.sess.Subagents()
+	if subs == nil {
+		subs = []shell3.SubagentInfo{}
+	}
+	_ = json.NewEncoder(w).Encode(subs)
+}
+
+type statusResp struct {
+	Agent         string   `json:"agent"`
+	Model         string   `json:"model"`
+	ContextWindow int      `json:"context_window"`
+	ProjectRef    string   `json:"project_ref"`
+	Tools         []string `json:"tools"`
+	Skills        []string `json:"skills"`
+	Params        []param  `json:"params"`
+}
+
+type param struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	snap := s.sess.Snapshot()
+	out := statusResp{
+		Agent:         snap.Agent,
+		Model:         snap.Model,
+		ContextWindow: snap.ContextWindow,
+		ProjectRef:    snap.ProjectRef,
+		Skills:        snap.Skills,
+	}
+	for _, t := range snap.Tools {
+		out.Tools = append(out.Tools, t.Name)
+	}
+	for _, p := range snap.Params {
+		out.Params = append(out.Params, param{Name: p.Name, Value: p.Value})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)

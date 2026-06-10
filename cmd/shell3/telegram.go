@@ -61,6 +61,15 @@ func newTelegramCommand() *cobra.Command {
 				fmt.Printf("dashboard on %s (expose via: tailscale serve https / proxy %s)\n", tg.Dashboard.Addr, tg.Dashboard.Addr)
 			}
 
+			// If the dashboard has a public URL, set the bot's in-chat menu
+			// button to open it as a Mini App (the bottom-left "Open App"
+			// button). Best-effort: a failure here must not stop the bot.
+			if tg.Dashboard.Enabled && tg.Dashboard.URL != "" {
+				if err := client.SetMenuButton(ctx, "📊 Dashboard", tg.Dashboard.URL); err != nil {
+					fmt.Printf("warning: could not set menu button: %v\n", err)
+				}
+			}
+
 			fmt.Printf("shell3 telegram: listening for chat %d\n", chatID)
 			b.Run(ctx)
 			return nil

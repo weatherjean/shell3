@@ -67,6 +67,49 @@ func TestHistory_ValidInitDataReturnsHistory(t *testing.T) {
 	}
 }
 
+// TestStatusAndSubagents_AuthAndShape covers the two new dashboard endpoints:
+// rejected without initData, and returning well-formed JSON with valid initData.
+func TestStatusAndSubagents_AuthAndShape(t *testing.T) {
+	const token = "test-bot-token"
+	const chatID int64 = 8701499393
+
+	rt := shell3.NewRuntimeForTest(t, "ok")
+	sess, err := rt.Session(shell3.SessionOpts{Name: "telegram", Agent: "code"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := NewServer(rt, sess, token, chatID)
+	signed := signInitData(t, token, `{"id":8701499393,"first_name":"T"}`)
+
+	for _, path := range []string{"/api/status", "/api/subagents"} {
+		// Unauthenticated → 401.
+		rr := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("%s without auth: want 401, got %d", path, rr.Code)
+		}
+		// Authenticated → 200 + JSON.
+		rr = httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("X-Init-Data", signed)
+		srv.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s with auth: want 200, got %d (%s)", path, rr.Code, rr.Body.String())
+		}
+		if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
+			t.Fatalf("%s content-type: want application/json, got %q", path, ct)
+		}
+	}
+	// /api/subagents returns a JSON array even with no subagents.
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/subagents", nil)
+	req.Header.Set("X-Init-Data", signed)
+	srv.Handler().ServeHTTP(rr, req)
+	if got := strings.TrimSpace(rr.Body.String()); got != "[]" {
+		t.Fatalf("empty subagents: want [], got %q", got)
+	}
+}
+
 // TestHistory_WrongUserRejected confirms a validly-signed payload for a
 // different user id is still rejected (the chat-id binding holds).
 func TestHistory_WrongUserRejected(t *testing.T) {

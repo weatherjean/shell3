@@ -164,6 +164,20 @@ func (c *botAPIClient) Typing(ctx context.Context, chatID int64) error {
 	return err
 }
 
+// SetMenuButton sets the bot's default in-chat menu button to a Web App that
+// opens url (the bottom-left "Open App" button). Best-effort; safe to ignore the
+// error on startup.
+func (c *botAPIClient) SetMenuButton(ctx context.Context, text, url string) error {
+	_, err := c.b.SetChatMenuButton(ctx, &bot.SetChatMenuButtonParams{
+		MenuButton: models.MenuButtonWebApp{
+			Type:   models.MenuButtonTypeWebApp,
+			Text:   text,
+			WebApp: models.WebAppInfo{URL: url},
+		},
+	})
+	return err
+}
+
 // AnswerCallback acknowledges an inline button press (stops the client spinner).
 func (c *botAPIClient) AnswerCallback(ctx context.Context, id string) error {
 	_, err := c.b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{

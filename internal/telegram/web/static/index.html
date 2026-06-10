@@ -1,34 +1,228 @@
 <!doctype html>
-<html><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>shell3</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-  body { font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 12px;
-    background: var(--tg-theme-bg-color, #fff); color: var(--tg-theme-text-color, #000); }
-  .msg { padding: 8px 10px; border-radius: 8px; margin: 6px 0; white-space: pre-wrap; }
-  .user { background: var(--tg-theme-secondary-bg-color, #eef); }
-  .assistant { background: var(--tg-theme-secondary-bg-color, #efe); }
-  .tool { font-family: ui-monospace, monospace; font-size: 12px; opacity: .8; }
-  pre { overflow-x: auto; background: #00000010; padding: 8px; border-radius: 6px; }
-</style></head>
-<body>
-<div id="log">loading…</div>
-<script>
-  const tg = window.Telegram.WebApp; tg.ready(); tg.expand();
-  const initData = tg.initData || "";
-  async function load() {
-    const r = await fetch("/api/history", { headers: { "X-Init-Data": initData } });
-    if (!r.ok) { document.getElementById("log").textContent = "unauthorized"; return; }
-    const hist = await r.json();
-    document.getElementById("log").innerHTML = hist.map(h => {
-      const cls = h.role === "user" ? "user" : h.role === "assistant" ? "assistant" : "tool";
-      const body = h.tool_name ? `<div class="tool">[${h.tool_name}] ${escapeHtml(h.content)}</div>`
-                               : `<div>${escapeHtml(h.content)}</div>`;
-      return `<div class="msg ${cls}">${body}</div>`;
-    }).join("");
-    window.scrollTo(0, document.body.scrollHeight);
+  :root {
+    --bg: var(--tg-theme-bg-color, #fff);
+    --text: var(--tg-theme-text-color, #1a1a1a);
+    --hint: var(--tg-theme-hint-color, #8b97a3);
+    --link: var(--tg-theme-link-color, #2b8ef0);
+    --sec: var(--tg-theme-secondary-bg-color, #f1f3f5);
+    --btn: var(--tg-theme-button-color, #2b8ef0);
+    --btn-text: var(--tg-theme-button-text-color, #fff);
+    --radius: 14px;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
   }
-  function escapeHtml(s){ return (s||"").replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
-  load(); setInterval(load, 4000); // poll (v1; see SSE follow-up)
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; flex-direction: column;
+    font: 15px/1.45 -apple-system, system-ui, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text);
+    overscroll-behavior: none;
+  }
+
+  /* Tab bar */
+  nav {
+    display: flex; gap: 2px; padding: 8px 8px 0;
+    background: var(--bg);
+    position: sticky; top: 0; z-index: 10;
+  }
+  nav button {
+    flex: 1; appearance: none; border: 0; cursor: pointer;
+    background: transparent; color: var(--hint);
+    font: inherit; font-weight: 600; font-size: 13px;
+    padding: 10px 4px 12px; border-radius: 10px 10px 0 0;
+    border-bottom: 2px solid transparent;
+    transition: color .15s, border-color .15s;
+  }
+  nav button.active { color: var(--text); border-bottom-color: var(--btn); }
+  nav button .count {
+    font-size: 11px; color: var(--btn-text); background: var(--btn);
+    border-radius: 9px; padding: 0 6px; margin-left: 5px; font-weight: 700;
+  }
+
+  /* Scrollable view area */
+  main { flex: 1; overflow-y: auto; padding: 10px 10px 24px; -webkit-overflow-scrolling: touch; }
+  .view { display: none; }
+  .view.active { display: block; }
+
+  .empty { color: var(--hint); text-align: center; padding: 40px 16px; font-size: 14px; }
+
+  /* Chat bubbles */
+  .msg { margin: 8px 0; display: flex; }
+  .msg .bubble {
+    max-width: 84%; padding: 8px 12px; border-radius: var(--radius);
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .msg.user { justify-content: flex-end; }
+  .msg.user .bubble { background: var(--btn); color: var(--btn-text); border-bottom-right-radius: 4px; }
+  .msg.assistant .bubble { background: var(--sec); border-bottom-left-radius: 4px; }
+  .msg.system .bubble { background: transparent; color: var(--hint); font-size: 13px; font-style: italic; padding: 4px 8px; }
+
+  /* Tool calls — collapsible */
+  details.tool {
+    margin: 6px 0; background: var(--sec); border-radius: 10px;
+    border: 1px solid color-mix(in srgb, var(--hint) 22%, transparent);
+    overflow: hidden;
+  }
+  details.tool > summary {
+    cursor: pointer; list-style: none; padding: 8px 12px;
+    font-family: var(--mono); font-size: 12.5px; color: var(--text);
+    display: flex; align-items: center; gap: 8px;
+  }
+  details.tool > summary::-webkit-details-marker { display: none; }
+  details.tool > summary .chev { color: var(--hint); transition: transform .15s; }
+  details.tool[open] > summary .chev { transform: rotate(90deg); }
+  details.tool > summary .tname { font-weight: 700; }
+  details.tool pre {
+    margin: 0; padding: 10px 12px; font-family: var(--mono); font-size: 12px;
+    line-height: 1.5; overflow-x: auto; white-space: pre-wrap; word-break: break-word;
+    border-top: 1px solid color-mix(in srgb, var(--hint) 18%, transparent);
+    color: var(--text); max-height: 50vh; overflow-y: auto;
+  }
+
+  /* Subagent cards */
+  .card {
+    background: var(--sec); border-radius: 12px; padding: 12px 14px; margin: 8px 0;
+  }
+  .card .row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .card .agent { font-weight: 700; }
+  .card .task { color: var(--text); font-size: 14px; }
+  .card .preview { margin-top: 8px; font-family: var(--mono); font-size: 12px; color: var(--hint); white-space: pre-wrap; }
+  .badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 8px; text-transform: uppercase; letter-spacing: .03em; }
+  .badge.running { background: #f5a623; color: #1a1a1a; }
+  .badge.finished { background: #34c759; color: #06280f; }
+
+  /* Status view */
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 6px 0 16px; }
+  .kv dt { color: var(--hint); font-size: 13px; }
+  .kv dd { margin: 0; font-weight: 600; word-break: break-word; }
+  .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--hint); margin: 16px 0 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { background: var(--sec); border-radius: 8px; padding: 4px 10px; font-size: 13px; font-family: var(--mono); }
+  .param { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--sec); font-size: 14px; }
+  .param .pname { color: var(--hint); }
+  .param .pval { font-family: var(--mono); font-weight: 600; }
+
+  .err { color: #e0392b; text-align: center; padding: 30px; }
+</style>
+</head>
+<body>
+<nav>
+  <button data-tab="chat" class="active">Chat<span class="count" id="c-chat" hidden></span></button>
+  <button data-tab="subs">Subagents<span class="count" id="c-subs" hidden></span></button>
+  <button data-tab="status">Status</button>
+</nav>
+<main>
+  <section id="chat" class="view active"><div class="empty">loading…</div></section>
+  <section id="subs" class="view"><div class="empty">loading…</div></section>
+  <section id="status" class="view"><div class="empty">loading…</div></section>
+</main>
+
+<script>
+const tg = window.Telegram && window.Telegram.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+const initData = (tg && tg.initData) || "";
+
+// All API calls carry the Telegram initData for auth.
+async function api(path) {
+  const r = await fetch(path, { headers: { "X-Init-Data": initData } });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+const esc = s => (s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+let active = "chat";
+const views = { chat: document.getElementById("chat"), subs: document.getElementById("subs"), status: document.getElementById("status") };
+const main = document.querySelector("main");
+
+document.querySelectorAll("nav button").forEach(b => {
+  b.onclick = () => {
+    active = b.dataset.tab;
+    document.querySelectorAll("nav button").forEach(x => x.classList.toggle("active", x === b));
+    Object.keys(views).forEach(k => views[k].classList.toggle("active", k === active));
+    refresh();
+  };
+});
+
+// ---- Chat -----------------------------------------------------------------
+let chatSig = null;
+function renderChat(hist) {
+  // Skip DOM work entirely when nothing changed — this is what stops the
+  // "scroll jacks me while idle" behavior.
+  const last = hist.length ? hist[hist.length - 1] : null;
+  const sig = hist.length + "|" + (last ? last.role + ":" + (last.content || "").length : "");
+  if (sig === chatSig) return;
+  const firstRender = chatSig === null;
+  chatSig = sig;
+
+  const badge = document.getElementById("c-chat");
+  badge.textContent = hist.length; badge.hidden = hist.length === 0;
+
+  // Only auto-scroll if the user is already pinned to the bottom.
+  const pinned = firstRender || (main.scrollHeight - main.scrollTop - main.clientHeight < 80);
+
+  if (!hist.length) { views.chat.innerHTML = '<div class="empty">No messages yet.</div>'; return; }
+  views.chat.innerHTML = hist.map(h => {
+    if (h.role === "tool") {
+      return `<details class="tool"><summary><span class="chev">▸</span><span class="tname">${esc(h.tool_name) || "tool"}</span></summary><pre>${esc(h.content) || "(no output)"}</pre></details>`;
+    }
+    const content = (h.content || "").trim();
+    if (!content) return ""; // skip empty assistant tool-call shells
+    const role = h.role === "user" ? "user" : h.role === "assistant" ? "assistant" : "system";
+    return `<div class="msg ${role}"><div class="bubble">${esc(content)}</div></div>`;
+  }).join("");
+
+  if (pinned) main.scrollTop = main.scrollHeight;
+}
+
+// ---- Subagents ------------------------------------------------------------
+function renderSubs(subs) {
+  const badge = document.getElementById("c-subs");
+  badge.textContent = subs.length; badge.hidden = subs.length === 0;
+  if (!subs.length) { views.subs.innerHTML = '<div class="empty">No subagents spawned.</div>'; return; }
+  views.subs.innerHTML = subs.map(s => `
+    <div class="card">
+      <div class="row"><span class="agent">${esc(s.agent)}</span><span class="badge ${esc(s.status)}">${esc(s.status)}</span></div>
+      <div class="task">${esc(s.task)}</div>
+      ${s.result ? `<div class="preview">${esc(s.result)}</div>` : ""}
+    </div>`).join("");
+}
+
+// ---- Status ---------------------------------------------------------------
+function renderStatus(st) {
+  const tools = (st.tools || []).map(t => `<span class="chip">${esc(t)}</span>`).join("") || '<span class="chip">none</span>';
+  const skills = (st.skills || []).map(t => `<span class="chip">${esc(t)}</span>`).join("") || '<span class="chip">none</span>';
+  const params = (st.params || []).map(p => `<div class="param"><span class="pname">${esc(p.name)}</span><span class="pval">${esc(p.value)}</span></div>`).join("");
+  views.status.innerHTML = `
+    <dl class="kv">
+      <dt>Agent</dt><dd>${esc(st.agent)}</dd>
+      <dt>Model</dt><dd>${esc(st.model)}</dd>
+      <dt>Context</dt><dd>${(st.context_window || 0).toLocaleString()} tokens</dd>
+      <dt>Project</dt><dd>${esc(st.project_ref) || "—"}</dd>
+    </dl>
+    <div class="section-title">Tools</div><div class="chips">${tools}</div>
+    <div class="section-title">Skills</div><div class="chips">${skills}</div>
+    ${params ? `<div class="section-title">Parameters</div>${params}` : ""}`;
+}
+
+// ---- Poll loop ------------------------------------------------------------
+async function refresh() {
+  try {
+    if (active === "chat") renderChat(await api("/api/history"));
+    else if (active === "subs") renderSubs(await api("/api/subagents"));
+    else if (active === "status") renderStatus(await api("/api/status"));
+  } catch (e) {
+    views[active].innerHTML = `<div class="err">⚠️ ${esc(e.message)}<br><small>open from inside Telegram to authenticate</small></div>`;
+  }
+}
+refresh();
+setInterval(refresh, 4000);
 </script>
-</body></html>
+</body>
+</html>
