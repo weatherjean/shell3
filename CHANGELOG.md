@@ -10,6 +10,11 @@ Until v1.0.0, minor versions may contain breaking changes.
 
 ### Added
 
+- Tool approval: Lua guards can return `{ action = "ask" }` to suspend a tool
+  call for human approval. Front-ends answer via `Spec.Approve` /
+  `SessionOpts.Approve` (Telegram buttons, webui dialogs); the TUI shows an
+  inline `[approve? y/N]` prompt. No approver registered → fail closed.
+  Requests and verdicts are recorded in the audit JSONL.
 - Mid-turn steering: `Session.Interject` queues messages from any goroutine —
   injected into a running turn at the next round boundary as a
   `user interjected` reminder, or at the start of the next turn when idle.
