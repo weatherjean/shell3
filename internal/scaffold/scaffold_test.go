@@ -32,12 +32,18 @@ func TestRenderBaseConfig(t *testing.T) {
 			t.Errorf("shell3.lua missing %q", want)
 		}
 	}
+	if !strings.Contains(string(cfg), "subagents") {
+		t.Error("rendered code agent should enable subagents")
+	}
+	if !strings.Contains(string(cfg), "confirm_destructive") {
+		t.Error("rendered config should wire the confirm_destructive ask guard")
+	}
 	if strings.Contains(string(cfg), "{{") {
 		t.Errorf("shell3.lua still contains an unrendered template delimiter")
 	}
 	for _, p := range []string{
 		"lib/tools.lua", "lib/guards.lua",
-		"lib/skills/brainstorming.lua", "lib/skills/subagents.lua",
+		"lib/skills/brainstorming.lua",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
 			t.Errorf("missing %s: %v", p, err)
@@ -85,8 +91,8 @@ func TestRenderedConfigLoads(t *testing.T) {
 	if len(c.Tools) != 2 {
 		t.Errorf("expected 2 tools (web_fetch, brave_search), got %d", len(c.Tools))
 	}
-	if len(c.Skills) != 2 {
-		t.Errorf("expected 2 skills (brainstorming, spawning-subagents), got %d", len(c.Skills))
+	if len(c.Skills) != 1 {
+		t.Errorf("expected 1 skill (brainstorming), got %d", len(c.Skills))
 	}
 	agents := c.Agents()
 	if len(agents) != 2 {
@@ -97,6 +103,22 @@ func TestRenderedConfigLoads(t *testing.T) {
 	}
 	if agents[1].Name != "plan" {
 		t.Errorf("second agent: want %q, got %q", "plan", agents[1].Name)
+	}
+	if !agents[0].Gates.Subagents {
+		t.Error("code agent should have subagents enabled")
+	}
+	if agents[1].Gates.Subagents {
+		t.Error("plan agent should not have subagents enabled")
+	}
+	defs := luacfg.ToolDefs(agents[0].Gates, nil, agents[0].SkillsActive())
+	var sawSpawn bool
+	for _, d := range defs {
+		if d.Name == "spawn_agent" {
+			sawSpawn = true
+		}
+	}
+	if !sawSpawn {
+		t.Error("code agent schema should expose spawn_agent")
 	}
 }
 
