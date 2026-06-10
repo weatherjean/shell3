@@ -81,9 +81,10 @@
   details.tool > summary .tname { font-weight: 700; }
   details.tool pre {
     margin: 0; padding: 10px 12px; font-family: var(--mono); font-size: 12px;
-    line-height: 1.5; overflow-x: auto; white-space: pre-wrap; word-break: break-word;
+    line-height: 1.5; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;
     border-top: 1px solid color-mix(in srgb, var(--hint) 18%, transparent);
-    color: var(--text); max-height: 50vh; overflow-y: auto;
+    color: var(--text);
+    /* Grow to fit — never an inner scrollbar; the page scrolls instead. */
   }
 
   /* Subagent cards */
@@ -276,7 +277,13 @@ function renderSubs(subs) {
 }
 
 // ---- Status ---------------------------------------------------------------
+let statusSig = null;
 function renderStatus(st) {
+  // Idle-safe: only rebuild when something changed, so an expanded section
+  // (e.g. the full system prompt) never collapses under the 4s poll.
+  const sig = JSON.stringify(st);
+  if (sig === statusSig) return;
+  statusSig = sig;
   const chips = arr => (arr || []).map(t => `<span class="chip">${esc(t)}</span>`).join("") || '<span class="chip">none</span>';
   const tools = chips(st.tools);
   const skills = chips(st.skills);
