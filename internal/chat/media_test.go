@@ -70,15 +70,15 @@ func TestLoadMediaPart_RoutesByExt(t *testing.T) {
 	aud := filepath.Join(tmp, "a.wav")
 	writeBytes(t, aud, []byte("RIFF"))
 
-	ip, _, err := loadMediaPart(img, "")
+	ip, _, err := LoadMediaPart(img, "")
 	if err != nil || ip.Type != llm.ContentPartTypeImageURL {
 		t.Fatalf("image route: type=%q err=%v", ip.Type, err)
 	}
-	ap, _, err := loadMediaPart(aud, "")
+	ap, _, err := LoadMediaPart(aud, "")
 	if err != nil || ap.Type != llm.ContentPartTypeInputAudio {
 		t.Fatalf("audio route: type=%q err=%v", ap.Type, err)
 	}
-	if _, _, err := loadMediaPart("/tmp/x.bmp", ""); err == nil {
+	if _, _, err := LoadMediaPart("/tmp/x.bmp", ""); err == nil {
 		t.Error("want error for unsupported ext")
 	}
 }

@@ -64,6 +64,23 @@ func loadImagePart(path, workDir string) (llm.ContentPart, int, int, error) {
 	}, w, h, nil
 }
 
+// imagePartFromBytes validates the size cap, downscales/JPEG-encodes raw image
+// bytes via resizeAndEncodeJPEG, and returns an image_url ContentPart plus an
+// "image WxH" description (source pixel dimensions).
+func imagePartFromBytes(data []byte) (llm.ContentPart, string, error) {
+	if len(data) > maxImageBytes {
+		return llm.ContentPart{}, "", fmt.Errorf("image too large (%d MB, max 10 MB)", len(data)>>20)
+	}
+	encoded, w, h, err := resizeAndEncodeJPEG(data, maxImageSide, jpegQuality)
+	if err != nil {
+		return llm.ContentPart{}, "", fmt.Errorf("image encode: %w", err)
+	}
+	return llm.ContentPart{
+		Type:     llm.ContentPartTypeImageURL,
+		ImageURL: "data:image/jpeg;base64," + encoded,
+	}, fmt.Sprintf("image %dx%d", w, h), nil
+}
+
 // resizeAndEncodeJPEG decodes raw image bytes, shrinks so longest side ≤
 // maxSide (no-op if already within bounds), JPEG-encodes at the given quality,
 // and returns the base64 result plus the source image's pixel width and height.

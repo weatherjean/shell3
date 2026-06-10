@@ -43,11 +43,20 @@ func loadAudioPart(path, workDir string) (llm.ContentPart, string, error) {
 		return llm.ContentPart{}, "", fmt.Errorf(`cannot read "%s": %w`, path, err)
 	}
 
-	format := strings.TrimPrefix(ext, ".")
-	desc := fmt.Sprintf("%s audio, %.1f MB", format, float64(len(raw))/(1<<20))
+	return audioPartFromBytes(raw, strings.TrimPrefix(ext, "."))
+}
+
+// audioPartFromBytes validates the size cap and wraps raw audio bytes as a
+// base64 input_audio ContentPart. format must be "wav" or "mp3" (the wire
+// formats); audio is never decoded or transcoded.
+func audioPartFromBytes(data []byte, format string) (llm.ContentPart, string, error) {
+	if len(data) > maxAudioBytes {
+		return llm.ContentPart{}, "", fmt.Errorf("audio too large (%d MB, max 25 MB)", len(data)>>20)
+	}
+	desc := fmt.Sprintf("%s audio, %.1f MB", format, float64(len(data))/(1<<20))
 	return llm.ContentPart{
 		Type:        llm.ContentPartTypeInputAudio,
-		AudioData:   base64.StdEncoding.EncodeToString(raw),
+		AudioData:   base64.StdEncoding.EncodeToString(data),
 		AudioFormat: format,
 	}, desc, nil
 }

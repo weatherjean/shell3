@@ -9,11 +9,12 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
-// loadMediaPart resolves and loads a media file as a multimodal ContentPart,
+// LoadMediaPart resolves and loads a media file as a multimodal ContentPart,
 // routing by file extension: images (jpg/png/gif) become image_url parts, audio
 // (wav/mp3) becomes input_audio parts. It returns the part plus a short
-// human-readable description for the tool result.
-func loadMediaPart(path, workDir string) (llm.ContentPart, string, error) {
+// human-readable description for the tool result. Consumed by the read_media
+// tool and by pkg/shell3's Part{Path: …}.
+func LoadMediaPart(path, workDir string) (llm.ContentPart, string, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch {
 	case supportedImageExts[ext]:
@@ -29,8 +30,37 @@ func loadMediaPart(path, workDir string) (llm.ContentPart, string, error) {
 	}
 }
 
+// MediaPartFromBytes converts in-memory media bytes into a multimodal
+// ContentPart, routing by MIME type — the byte-based sibling of LoadMediaPart
+// for hosts that hold the data directly (e.g. a Telegram photo download).
+// Matching is case-insensitive and parameters after ";" are ignored:
+//
+//	image/jpeg, image/png, image/gif, image/webp → image_url (resized,
+//	    JPEG-encoded base64 data URI, like read_media)
+//	audio/wav, audio/x-wav, audio/wave           → input_audio, format "wav"
+//	audio/mpeg, audio/mp3                        → input_audio, format "mp3"
+//
+// The path loaders' size caps apply (maxImageBytes / maxAudioBytes). Returns
+// the part plus a short human-readable description.
+func MediaPartFromBytes(data []byte, mime string) (llm.ContentPart, string, error) {
+	mt := strings.ToLower(strings.TrimSpace(mime))
+	if i := strings.IndexByte(mt, ';'); i >= 0 {
+		mt = strings.TrimSpace(mt[:i])
+	}
+	switch mt {
+	case "image/jpeg", "image/png", "image/gif", "image/webp":
+		return imagePartFromBytes(data)
+	case "audio/wav", "audio/x-wav", "audio/wave":
+		return audioPartFromBytes(data, "wav")
+	case "audio/mpeg", "audio/mp3":
+		return audioPartFromBytes(data, "mp3")
+	default:
+		return llm.ContentPart{}, "", fmt.Errorf("unsupported MIME type %q — use image/jpeg, image/png, image/gif, image/webp, audio/wav, or audio/mpeg", mime)
+	}
+}
+
 // handleReadMedia parses {"path": "..."} tool args, loads the media via
-// loadMediaPart, and returns the tool-result text plus the media ContentPart.
+// LoadMediaPart, and returns the tool-result text plus the media ContentPart.
 // On any failure it returns an "error: ..." string and the zero ContentPart so
 // the caller queues nothing.
 func handleReadMedia(rawArgs, workDir string) (string, llm.ContentPart) {
@@ -43,7 +73,7 @@ func handleReadMedia(rawArgs, workDir string) (string, llm.ContentPart) {
 	if strings.TrimSpace(args.Path) == "" {
 		return "error: path is required", llm.ContentPart{}
 	}
-	part, desc, err := loadMediaPart(args.Path, workDir)
+	part, desc, err := LoadMediaPart(args.Path, workDir)
 	if err != nil {
 		return "error: " + err.Error(), llm.ContentPart{}
 	}
