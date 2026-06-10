@@ -53,18 +53,30 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+type toolCall struct {
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name"`
+	Args string `json:"args,omitempty"`
+}
+
 type historyEntry struct {
-	Role       string `json:"role"`
-	Content    string `json:"content"`
-	ToolName   string `json:"tool_name,omitempty"`
-	ToolCallID string `json:"tool_call_id,omitempty"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content"`
+	ToolName   string     `json:"tool_name,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	ToolCalls  []toolCall `json:"tool_calls,omitempty"`
+	Reasoning  string     `json:"reasoning,omitempty"`
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	hist := s.sess.History()
 	out := make([]historyEntry, len(hist))
 	for i, h := range hist {
-		out[i] = historyEntry{Role: h.Role, Content: h.Content, ToolName: h.ToolName, ToolCallID: h.ToolCallID}
+		e := historyEntry{Role: h.Role, Content: h.Content, ToolName: h.ToolName, ToolCallID: h.ToolCallID, Reasoning: h.Reasoning}
+		for _, c := range h.ToolCalls {
+			e.ToolCalls = append(e.ToolCalls, toolCall{ID: c.ID, Name: c.Name, Args: c.Args})
+		}
+		out[i] = e
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
@@ -90,8 +102,10 @@ type statusResp struct {
 }
 
 type param struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
+	Name    string   `json:"name"`
+	Value   string   `json:"value"`
+	Default string   `json:"default,omitempty"`
+	Enum    []string `json:"enum,omitempty"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +121,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		out.Tools = append(out.Tools, t.Name)
 	}
 	for _, p := range snap.Params {
-		out.Params = append(out.Params, param{Name: p.Name, Value: p.Value})
+		out.Params = append(out.Params, param{Name: p.Name, Value: p.Value, Default: p.Default, Enum: p.Enum})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)

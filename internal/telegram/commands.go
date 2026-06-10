@@ -7,6 +7,20 @@ import (
 	"strings"
 )
 
+// BotCommands is the canonical command list, registered with Telegram for the
+// "/" autocomplete menu. Kept next to handleCommand so they stay in sync.
+func BotCommands() []Command {
+	return []Command{
+		{"agents", "List available agents"},
+		{"agent", "Switch agent: /agent <name>"},
+		{"set", "Set a parameter: /set <name> <value>"},
+		{"rollback", "Undo the last turn"},
+		{"clear", "Reset the conversation"},
+		{"stop", "Stop the current turn"},
+		{"dash", "Open the conversation dashboard"},
+	}
+}
+
 func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 	fields := strings.Fields(m.Text)
 	cmd := fields[0]

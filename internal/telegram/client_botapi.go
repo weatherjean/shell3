@@ -178,6 +178,17 @@ func (c *botAPIClient) SetMenuButton(ctx context.Context, text, url string) erro
 	return err
 }
 
+// SetCommands registers the bot's command list, shown in Telegram's "/"
+// autocomplete menu. Best-effort.
+func (c *botAPIClient) SetCommands(ctx context.Context, cmds []Command) error {
+	bc := make([]models.BotCommand, len(cmds))
+	for i, cmd := range cmds {
+		bc[i] = models.BotCommand{Command: cmd.Command, Description: cmd.Description}
+	}
+	_, err := c.b.SetMyCommands(ctx, &bot.SetMyCommandsParams{Commands: bc})
+	return err
+}
+
 // AnswerCallback acknowledges an inline button press (stops the client spinner).
 func (c *botAPIClient) AnswerCallback(ctx context.Context, id string) error {
 	_, err := c.b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{

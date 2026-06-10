@@ -42,7 +42,9 @@ func newTelegramCommand() *cobra.Command {
 				return fmt.Errorf("telegram chat_id %q is not a number: %w", tg.ChatID, err)
 			}
 
-			sess, err := rt.Session(shell3.SessionOpts{Name: "telegram"})
+			// WorkDir roots the agent's tools (bash, edit). Defaults to the
+			// runtime root (process cwd) when shell3.telegram.workdir is unset.
+			sess, err := rt.Session(shell3.SessionOpts{Name: "telegram", WorkDir: tg.WorkDir})
 			if err != nil {
 				return err
 			}
@@ -52,6 +54,11 @@ func newTelegramCommand() *cobra.Command {
 				return err
 			}
 			b := telegram.NewBot(client, rt, sess, chatID, tg.Dashboard.URL)
+
+			// Register the "/" command hints (best-effort).
+			if err := client.SetCommands(ctx, telegram.BotCommands()); err != nil {
+				fmt.Printf("warning: could not set commands: %v\n", err)
+			}
 
 			if tg.Dashboard.Enabled && tg.Dashboard.Addr != "" {
 				srv := web.NewServer(rt, sess, tg.Token, chatID)

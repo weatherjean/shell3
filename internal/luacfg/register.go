@@ -25,7 +25,7 @@ func registerShell3(c *LoadedConfig) {
 	L.SetField(tbl, "http", httpT)
 }
 
-var telegramKeys = map[string]bool{"token": true, "chat_id": true, "dashboard": true}
+var telegramKeys = map[string]bool{"token": true, "chat_id": true, "workdir": true, "dashboard": true}
 var telegramDashboardKeys = map[string]bool{"enabled": true, "addr": true, "url": true}
 
 func (c *LoadedConfig) luaTelegram(L *lua.LState) int {
@@ -34,8 +34,9 @@ func (c *LoadedConfig) luaTelegram(L *lua.LState) int {
 		L.RaiseError("%s", err.Error())
 	}
 	tg := TelegramConfig{
-		Token:  optStr(opts, "token"),
-		ChatID: optStr(opts, "chat_id"),
+		Token:   optStr(opts, "token"),
+		ChatID:  optStr(opts, "chat_id"),
+		WorkDir: optStr(opts, "workdir"),
 	}
 	if d, ok := opts.RawGetString("dashboard").(*lua.LTable); ok {
 		if err := checkKeys(d, "telegram.dashboard", telegramDashboardKeys); err != nil {

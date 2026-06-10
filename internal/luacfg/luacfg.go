@@ -48,6 +48,7 @@ type MCPServer struct {
 type TelegramConfig struct {
 	Token     string
 	ChatID    string
+	WorkDir   string
 	Dashboard DashboardConfig
 }
 

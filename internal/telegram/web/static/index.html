@@ -109,6 +109,13 @@
   .param .pname { color: var(--hint); }
   .param .pval { font-family: var(--mono); font-weight: 600; }
 
+  details.tool.think { background: transparent; border-style: dashed; }
+  details.tool.think > summary { color: var(--hint); }
+  .tlabel { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--hint);
+    padding: 8px 12px 0; font-family: var(--mono); }
+  .tlabel + pre { padding-top: 4px; border-top: 0; }
+  .def { font-size: 10px; color: var(--hint); font-weight: 600; margin-left: 6px; text-transform: uppercase; }
+
   .err { color: #e0392b; text-align: center; padding: 30px; }
 </style>
 </head>
@@ -151,12 +158,21 @@ document.querySelectorAll("nav button").forEach(b => {
 });
 
 // ---- Chat -----------------------------------------------------------------
+function prettyJSON(s) { try { return JSON.stringify(JSON.parse(s), null, 2); } catch (e) { return s || ""; } }
+
+// One collapsible showing a tool call's arguments and its paired result.
+function toolBlock(name, args, result) {
+  const a = args ? `<div class="tlabel">arguments</div><pre>${esc(prettyJSON(args))}</pre>` : "";
+  const r = `<div class="tlabel">result</div><pre>${esc(result) || "(no output)"}</pre>`;
+  return `<details class="tool"><summary><span class="chev">▸</span><span class="tname">🔧 ${esc(name) || "tool"}</span></summary>${a}${r}</details>`;
+}
+
 let chatSig = null;
 function renderChat(hist) {
   // Skip DOM work entirely when nothing changed — this is what stops the
-  // "scroll jacks me while idle" behavior.
-  const last = hist.length ? hist[hist.length - 1] : null;
-  const sig = hist.length + "|" + (last ? last.role + ":" + (last.content || "").length : "");
+  // "scroll jacks me while idle" behavior. The signature folds in the fields
+  // we actually render, so streamed tool calls/reasoning trigger a redraw.
+  const sig = hist.map(h => `${h.role}:${(h.content||"").length}:${(h.reasoning||"").length}:${(h.tool_calls||[]).length}`).join("|");
   if (sig === chatSig) return;
   const firstRender = chatSig === null;
   chatSig = sig;
@@ -168,14 +184,24 @@ function renderChat(hist) {
   const pinned = firstRender || (main.scrollHeight - main.scrollTop - main.clientHeight < 80);
 
   if (!hist.length) { views.chat.innerHTML = '<div class="empty">No messages yet.</div>'; return; }
+
+  // Map each tool result to its call id so we can fold it into the call block.
+  const results = {};
+  hist.forEach(h => { if (h.role === "tool" && h.tool_call_id) results[h.tool_call_id] = h.content; });
+
   views.chat.innerHTML = hist.map(h => {
-    if (h.role === "tool") {
-      return `<details class="tool"><summary><span class="chev">▸</span><span class="tname">${esc(h.tool_name) || "tool"}</span></summary><pre>${esc(h.content) || "(no output)"}</pre></details>`;
+    if (h.role === "tool") return ""; // folded into the assistant's tool call
+    let html = "";
+    if (h.reasoning) {
+      html += `<details class="tool think"><summary><span class="chev">▸</span><span class="tname">💭 Thinking</span></summary><pre>${esc(h.reasoning)}</pre></details>`;
     }
     const content = (h.content || "").trim();
-    if (!content) return ""; // skip empty assistant tool-call shells
-    const role = h.role === "user" ? "user" : h.role === "assistant" ? "assistant" : "system";
-    return `<div class="msg ${role}"><div class="bubble">${esc(content)}</div></div>`;
+    if (content) {
+      const role = h.role === "user" ? "user" : h.role === "assistant" ? "assistant" : "system";
+      html += `<div class="msg ${role}"><div class="bubble">${esc(content)}</div></div>`;
+    }
+    (h.tool_calls || []).forEach(tc => { html += toolBlock(tc.name, tc.args, results[tc.id]); });
+    return html;
   }).join("");
 
   if (pinned) main.scrollTop = main.scrollHeight;
@@ -198,7 +224,11 @@ function renderSubs(subs) {
 function renderStatus(st) {
   const tools = (st.tools || []).map(t => `<span class="chip">${esc(t)}</span>`).join("") || '<span class="chip">none</span>';
   const skills = (st.skills || []).map(t => `<span class="chip">${esc(t)}</span>`).join("") || '<span class="chip">none</span>';
-  const params = (st.params || []).map(p => `<div class="param"><span class="pname">${esc(p.name)}</span><span class="pval">${esc(p.value)}</span></div>`).join("");
+  const params = (st.params || []).map(p => {
+    const val = p.value || p.default || "—";
+    const tag = (!p.value && p.default) ? '<span class="def">default</span>' : "";
+    return `<div class="param"><span class="pname">${esc(p.name)}</span><span class="pval">${esc(val)}${tag}</span></div>`;
+  }).join("");
   views.status.innerHTML = `
     <dl class="kv">
       <dt>Agent</dt><dd>${esc(st.agent)}</dd>

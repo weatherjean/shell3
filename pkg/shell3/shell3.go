@@ -956,6 +956,19 @@ type HistoryEntry struct {
 	Content    string
 	ToolName   string
 	ToolCallID string
+	// ToolCalls holds an assistant message's tool invocations (name + raw JSON
+	// args). Empty for non-assistant messages or assistant messages with no calls.
+	ToolCalls []ToolCallInfo
+	// Reasoning is the assistant's chain-of-thought text, when the provider
+	// emits it (reasoning_content). Empty otherwise.
+	Reasoning string
+}
+
+// ToolCallInfo is one tool invocation made by an assistant message.
+type ToolCallInfo struct {
+	ID   string
+	Name string
+	Args string // raw JSON arguments
 }
 
 // History returns the current conversation history as public HistoryEntry
@@ -970,11 +983,17 @@ func (s *Session) History() []HistoryEntry {
 		if m.Role == llm.RoleTool {
 			content = stripToolIDPrefix(content)
 		}
+		var calls []ToolCallInfo
+		for _, tc := range m.ToolCalls {
+			calls = append(calls, ToolCallInfo{ID: tc.ID, Name: tc.Name, Args: tc.RawArgs})
+		}
 		out = append(out, HistoryEntry{
 			Role:       string(m.Role),
 			Content:    content,
 			ToolName:   m.Name,
 			ToolCallID: m.ToolCallID,
+			ToolCalls:  calls,
+			Reasoning:  m.ReasoningContent,
 		})
 	}
 	return out

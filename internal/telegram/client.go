@@ -25,6 +25,12 @@ type Callback struct {
 	MsgID int    // message the buttons were attached to (to edit it)
 }
 
+// Command is one bot command shown in Telegram's "/" autocomplete menu.
+type Command struct {
+	Command     string // without leading slash, e.g. "clear"
+	Description string
+}
+
 // Button is one inline keyboard button.
 type Button struct {
 	Text string
