@@ -35,6 +35,9 @@ func TestRenderBaseConfig(t *testing.T) {
 	if !strings.Contains(string(cfg), "subagents") {
 		t.Error("rendered code agent should enable subagents")
 	}
+	if !strings.Contains(string(cfg), "shell3.subagent(") {
+		t.Error("rendered config should declare an example subagent via shell3.subagent(")
+	}
 	if !strings.Contains(string(cfg), "confirm_destructive") {
 		t.Error("rendered config should wire the confirm_destructive ask guard")
 	}
@@ -104,17 +107,44 @@ func TestRenderedConfigLoads(t *testing.T) {
 	if agents[1].Name != "plan" {
 		t.Errorf("second agent: want %q, got %q", "plan", agents[1].Name)
 	}
-	if !agents[0].Gates.Subagents {
-		t.Error("code agent should have subagents enabled")
+	// Subagents are a separate registry, not in the Tab rotation.
+	subs := c.Subagents()
+	if len(subs) != 1 || subs[0].Name != "explorer" {
+		t.Fatalf("expected one registered subagent [explorer], got %v", subs)
 	}
-	if agents[1].Gates.Subagents {
-		t.Error("plan agent should not have subagents enabled")
+	if _, ok := c.SubagentByName("explorer"); !ok {
+		t.Error("explorer must be in the subagent registry")
 	}
-	defs := luacfg.ToolDefs(agents[0].Gates, nil, agents[0].SkillsActive())
+	for _, a := range agents {
+		if a.Name == "explorer" {
+			t.Error("explorer must NOT appear in Agents()/Tab rotation")
+		}
+	}
+	// The code agent opts into explorer; plan does not.
+	if len(agents[0].Subagents) != 1 || agents[0].Subagents[0] != "explorer" {
+		t.Errorf("code agent Subagents = %v, want [explorer]", agents[0].Subagents)
+	}
+	if len(agents[1].Subagents) != 0 {
+		t.Errorf("plan agent should have no subagents, got %v", agents[1].Subagents)
+	}
+	// The code agent's resolved schema exposes spawn_agent with explorer in its enum.
+	infos := make([]luacfg.SubagentInfo, 0, len(agents[0].Subagents))
+	for _, name := range agents[0].Subagents {
+		sa, ok := c.SubagentByName(name)
+		if !ok {
+			t.Fatalf("unresolved subagent %q", name)
+		}
+		infos = append(infos, luacfg.SubagentInfo{Name: sa.Name, Description: sa.Description})
+	}
+	defs := luacfg.SpawnToolDefs(infos)
 	var sawSpawn bool
 	for _, d := range defs {
 		if d.Name == "spawn_agent" {
 			sawSpawn = true
+			enum := d.Parameters["properties"].(map[string]any)["subagent"].(map[string]any)["enum"].([]string)
+			if len(enum) != 1 || enum[0] != "explorer" {
+				t.Errorf("spawn_agent subagent enum = %v, want [explorer]", enum)
+			}
 		}
 	}
 	if !sawSpawn {

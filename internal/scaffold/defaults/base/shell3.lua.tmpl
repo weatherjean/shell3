@@ -25,6 +25,22 @@ shell3.model("{{.Name | luaesc}}", {
 {{end}}})
 
 -- ---------------------------------------------------------------------------
+-- Subagents (delegatable specialists; not in the Tab/`/agent` rotation)
+-- ---------------------------------------------------------------------------
+local explorer = shell3.subagent({
+  name        = "explorer",
+  description = "Read-only investigation of the codebase — locate where/how something is implemented, summarize a subsystem, or gather context across many files. No edits.",
+  model       = "{{.Name | luaesc}}",
+  prompt = [[
+You are a focused code explorer. Investigate the question using bash (rg, fd,
+cat, git log) and report a concise, concrete answer with file:line references.
+You cannot edit files. Decide and proceed; no human is available.
+  ]],
+  tools = { bash = true, history = true },
+  on_tool_call = { guards.no_env_edit },
+})
+
+-- ---------------------------------------------------------------------------
 -- Agents
 -- ---------------------------------------------------------------------------
 shell3.agent({
@@ -62,7 +78,7 @@ You are an expert coding assistant inside shell3. Work autonomously as a senior 
     prune             = true,
     compact           = true,
     media             = true,
-    subagents         = true,
+    subagents         = { explorer },
     custom            = { tools.web_fetch, tools.brave_search },
   },
   on_tool_call = { guards.no_env_edit, guards.confirm_destructive },
