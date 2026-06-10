@@ -52,58 +52,50 @@ func (c *botAPIClient) onUpdate(ctx context.Context, b *bot.Bot, u *models.Updat
 	}
 }
 
-// resolveMedia downloads any photo/voice/document attached to m.
-// Errors fetching one attachment are silently skipped.
+// resolveMedia downloads every attachment on m (photo/voice/audio/video/
+// animation/document) to bytes. Errors fetching one attachment are skipped.
 func resolveMedia(ctx context.Context, c *botAPIClient, m *models.Message) []Media {
 	var out []Media
-
-	// Photo: pick largest size (last in the slice).
+	add := func(fileID, mime, filename string, size int64) {
+		if fileID == "" || size > maxMediaBytes {
+			return
+		}
+		if media, ok := c.downloadFile(ctx, fileID, mime, filename); ok {
+			out = append(out, media)
+		}
+	}
 	if len(m.Photo) > 0 {
-		ps := m.Photo[len(m.Photo)-1]
-		if ps.FileSize <= maxMediaBytes {
-			if media, ok := c.downloadFile(ctx, ps.FileID, "image/jpeg"); ok {
-				out = append(out, media)
-			}
-		}
+		ps := m.Photo[len(m.Photo)-1] // largest size
+		add(ps.FileID, "image/jpeg", "photo.jpg", int64(ps.FileSize))
 	}
-
-	// Voice note (always OGG/Opus; MimeType is sometimes empty).
 	if m.Voice != nil {
-		if m.Voice.FileSize <= maxMediaBytes {
-			mime := m.Voice.MimeType
-			if mime == "" {
-				mime = "audio/ogg"
-			}
-			if media, ok := c.downloadFile(ctx, m.Voice.FileID, mime); ok {
-				out = append(out, media)
-			}
-		}
+		add(m.Voice.FileID, orDefault(m.Voice.MimeType, "audio/ogg"), "voice.ogg", m.Voice.FileSize)
 	}
-
-	// Audio file (e.g. an mp3 sent as music).
 	if m.Audio != nil {
-		if m.Audio.FileSize <= maxMediaBytes {
-			if media, ok := c.downloadFile(ctx, m.Audio.FileID, m.Audio.MimeType); ok {
-				out = append(out, media)
-			}
-		}
+		add(m.Audio.FileID, orDefault(m.Audio.MimeType, "audio/mpeg"), orDefault(m.Audio.FileName, "audio.mp3"), m.Audio.FileSize)
 	}
-
-	// Document.
+	if m.Video != nil {
+		add(m.Video.FileID, orDefault(m.Video.MimeType, "video/mp4"), orDefault(m.Video.FileName, "video.mp4"), m.Video.FileSize)
+	}
+	if m.Animation != nil {
+		add(m.Animation.FileID, orDefault(m.Animation.MimeType, "video/mp4"), orDefault(m.Animation.FileName, "animation.mp4"), m.Animation.FileSize)
+	}
 	if m.Document != nil {
-		if m.Document.FileSize <= maxMediaBytes {
-			if media, ok := c.downloadFile(ctx, m.Document.FileID, m.Document.MimeType); ok {
-				out = append(out, media)
-			}
-		}
+		add(m.Document.FileID, orDefault(m.Document.MimeType, "application/octet-stream"), orDefault(m.Document.FileName, "document.bin"), m.Document.FileSize)
 	}
-
 	return out
+}
+
+func orDefault(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
 }
 
 // downloadFile fetches one Telegram file by its file_id and returns a Media.
 // Returns (zero, false) on any error.
-func (c *botAPIClient) downloadFile(ctx context.Context, fileID, mime string) (Media, bool) {
+func (c *botAPIClient) downloadFile(ctx context.Context, fileID, mime, filename string) (Media, bool) {
 	f, err := c.b.GetFile(ctx, &bot.GetFileParams{FileID: fileID})
 	if err != nil {
 		return Media{}, false
@@ -124,7 +116,7 @@ func (c *botAPIClient) downloadFile(ctx context.Context, fileID, mime string) (M
 	if len(data) > maxMediaBytes {
 		return Media{}, false // body exceeded the cap
 	}
-	return Media{Bytes: data, MIME: mime}, true
+	return Media{Bytes: data, MIME: mime, Filename: filename}, true
 }
 
 // Updates delivers normalized inbound messages until ctx is cancelled.

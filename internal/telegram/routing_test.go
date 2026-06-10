@@ -23,6 +23,22 @@ func TestHandleMsg_IdleSendsReply(t *testing.T) {
 	}
 }
 
+func TestHandleMsg_MediaRunsTurnWithNote(t *testing.T) {
+	fc := newFakeClient()
+	rt, sess := newFakeRuntime(t, "got your file")
+	b := NewBot(fc, rt, sess, 42, "")
+
+	// A media-only message (no text) must still run a turn — the attachment is
+	// transformed into a note, not dropped.
+	b.handleMsg(context.Background(), Msg{ChatID: 42, Media: []Media{
+		{Bytes: []byte("\xff\xd8\xff"), MIME: "image/jpeg", Filename: "photo.jpg"},
+	}})
+
+	if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "got your file") {
+		t.Fatalf("expected the agent to run on a media-only message, got %v", fc.sentTexts())
+	}
+}
+
 func TestHandleMsg_WrongChatDropped(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "should not run")

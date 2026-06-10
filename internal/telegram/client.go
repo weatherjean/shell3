@@ -14,8 +14,9 @@ type Msg struct {
 
 // Media is a downloaded attachment.
 type Media struct {
-	Bytes []byte
-	MIME  string // e.g. "image/jpeg", "audio/ogg"
+	Bytes    []byte
+	MIME     string // e.g. "image/jpeg", "audio/ogg"
+	Filename string // suggested name (with extension) for saving to disk
 }
 
 // Callback is an inline-button press.

@@ -75,32 +75,48 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 		b.handleCommand(ctx, m) // defined in commands.go
 		return
 	}
-	parts := mediaToParts(m.Media)
-	// Never send the agent an empty turn. If the message carried only an
-	// attachment the engine can't ingest (e.g. a PDF or video), tell the user
-	// instead of pushing a contentless prompt.
-	if strings.TrimSpace(m.Text) == "" && len(parts) == 0 {
-		if len(m.Media) > 0 {
-			b.sendReply(ctx, "⚠️ I can't read that attachment — send text, an image, or audio (voice notes, wav/mp3/ogg).")
+	// Transform any attachments into a text note: save the files to /tmp and
+	// tell the agent where they are + which tool to use. We never forward media
+	// bytes into the model — the agent ingests files itself with its own tools.
+	text := strings.TrimSpace(m.Text)
+	if note := attachmentNote(saveAttachments(m.Media), b.hasTool("read_media")); note != "" {
+		if text != "" {
+			text += "\n\n" + note
+		} else {
+			text = note
 		}
+	} else if len(m.Media) > 0 && text == "" {
+		b.sendReply(ctx, "⚠️ couldn't save that attachment.")
 		return
+	}
+	if text == "" {
+		return // nothing actionable
 	}
 	// HasQueuedInput reports inbox state. In the single-chat v1 flow, handleMsg
 	// is serial, so a running turn blocks here until the channel drains.
 	// HasQueuedInput catches the case where a wake/cron item is already queued.
 	if b.sess.HasQueuedInput() {
 		// A turn may be running; Interject never blocks and steers it.
-		b.sess.Interject(m.Text, parts...)
+		b.sess.Interject(text)
 		return
 	}
 	_ = b.client.Typing(ctx, b.chatID)
 	turnCtx, cancel := context.WithCancel(ctx)
 	b.cancelTurn = cancel
-	ch := b.sess.SendParts(turnCtx, m.Text, parts)
-	reply := b.drainTurn(ch)
+	reply := b.drainTurn(b.sess.Send(turnCtx, text))
 	b.cancelTurn = nil
 	cancel()
 	b.sendReply(ctx, reply)
+}
+
+// hasTool reports whether the active agent has the named tool enabled.
+func (b *Bot) hasTool(name string) bool {
+	for _, t := range b.sess.Snapshot().Tools {
+		if t.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // consumeWakes pushes results when the session wakes (subagent/cron results).
