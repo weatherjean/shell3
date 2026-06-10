@@ -27,10 +27,15 @@ type Bot struct {
 	// onUsage, if set, receives each completed turn's token totals (per turn,
 	// not accumulated). Wired by the host to a dashboard usage store.
 	onUsage func(prompt, completion, total int)
+
+	runJob func(name string) error // fires a cron job by name; nil if no scheduler
 }
 
 // SetUsageRecorder registers a callback invoked with each turn's token totals.
 func (b *Bot) SetUsageRecorder(fn func(prompt, completion, total int)) { b.onUsage = fn }
+
+// SetJobRunner wires /run <job> to the scheduler's manual fire.
+func (b *Bot) SetJobRunner(fn func(name string) error) { b.runJob = fn }
 
 // NewBot wires a Bot. sess must be the runtime's persistent "telegram" session.
 // dashURL is the URL to the dashboard (empty to disable).

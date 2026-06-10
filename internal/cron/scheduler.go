@@ -76,6 +76,17 @@ func (s *Scheduler) fire(j shell3.CronJob) {
 func (s *Scheduler) Start() { s.c.Start() }
 func (s *Scheduler) Stop()  { s.c.Stop() }
 
+// Run fires a job by name immediately. Returns an error if the name is unknown.
+func (s *Scheduler) Run(name string) error {
+	for _, j := range s.jobs {
+		if j.Name == name {
+			s.fire(j)
+			return nil
+		}
+	}
+	return fmt.Errorf("no job named %q", name)
+}
+
 // Jobs returns each configured job with its last run, for the dashboard.
 func (s *Scheduler) Jobs() []JobStatus {
 	s.mu.Lock()

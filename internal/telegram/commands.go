@@ -16,6 +16,7 @@ func BotCommands() []Command {
 		{"clear", "Reset the conversation"},
 		{"stop", "Stop the current turn"},
 		{"dash", "Open the conversation dashboard"},
+		{"run", "Run a scheduled job now: /run <name>"},
 	}
 }
 
@@ -72,6 +73,21 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 		// inside Telegram (with initData), not the external browser.
 		_, _ = b.client.Send(ctx, b.chatID, "📊 Conversation dashboard",
 			[]Button{{Text: "Open dashboard", WebApp: b.dashURL}})
+	case "/run":
+		if b.runJob == nil {
+			b.sendReply(ctx, "no scheduled jobs configured")
+			return
+		}
+		name := strings.TrimSpace(arg)
+		if name == "" {
+			b.sendReply(ctx, "usage: /run <job>")
+			return
+		}
+		if err := b.runJob(name); err != nil {
+			b.sendReply(ctx, "run failed: "+err.Error())
+			return
+		}
+		b.sendReply(ctx, "▶️ fired job "+name)
 	default:
 		b.sendReply(ctx, "unknown command: "+cmd)
 	}
