@@ -53,6 +53,14 @@ func (s *Session) Interject(text string, parts ...llm.ContentPart) {
 	s.inbox = append(s.inbox, inboxItem{text: text, parts: slices.Clone(parts)})
 }
 
+// HasInbox reports whether any interjected items are queued. Safe to call from
+// any goroutine.
+func (s *Session) HasInbox() bool {
+	s.inboxMu.Lock()
+	defer s.inboxMu.Unlock()
+	return len(s.inbox) > 0
+}
+
 // drainInbox removes all queued interjections, returning the steering texts
 // (in arrival order, feeding interjectReminder) and the flattened media parts
 // (same order, feeding attachmentsMessage). Called only from the turn

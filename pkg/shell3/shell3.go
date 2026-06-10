@@ -385,6 +385,41 @@ func (s *Session) Interject(text string, parts ...Part) {
 		cps = append(cps, cp)
 	}
 	s.sess.Interject(text, cps...)
+	// Idle steering must prod the host to run a turn; a busy session's running
+	// turn drains the inbox itself, so don't wake (avoids a redundant turn).
+	// Benign TOCTOU: isBusy() may flip between this check and the running turn
+	// ending — worst case a missed wake (the next Send drains the item anyway)
+	// or a spurious wake (RunQueued no-ops on an already-drained inbox). Same
+	// reasoning as subagent delivery.
+	if !s.isBusy() {
+		s.wake()
+	}
+}
+
+// wake emits a Wake for this session on the runtime bus (no-op without a
+// runtime). Call only from caller-goroutine code paths (e.g. Interject), not
+// from the subagent goroutine — that path uses a captured rt to avoid racing
+// doClose's nil of s.runtime.
+func (s *Session) wake() {
+	if s.runtime != nil {
+		s.runtime.emit(HostEvent{Session: s.name, Kind: Wake})
+	}
+}
+
+// RunQueued runs one turn seeded from the session's queued inbox items — the
+// host's response to a Wake event. With an empty inbox (or a turn already in
+// flight, which will itself drain the inbox) it returns an already-closed
+// channel and starts no turn. Same ErrBusy contract as Send otherwise.
+func (s *Session) RunQueued(ctx context.Context) <-chan Event {
+	if s.isBusy() || !s.sess.HasInbox() {
+		closed := make(chan Event)
+		close(closed)
+		return closed
+	}
+	// The turn loop drains the inbox at its top (the reminder + attachments
+	// injection point), so an empty-prompt turn consumes the queued items as its
+	// initiating input.
+	return s.Send(ctx, "")
 }
 
 // loadPart converts one public Part into an internal ContentPart, enforcing
