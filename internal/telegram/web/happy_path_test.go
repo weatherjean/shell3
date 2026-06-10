@@ -161,6 +161,36 @@ func TestNewEndpoints_AuthAndShape(t *testing.T) {
 	}
 }
 
+func TestCron_AuthAndShape(t *testing.T) {
+	const token = "test-bot-token"
+	const chatID int64 = 8701499393
+	rt := shell3.NewRuntimeForTest(t, "ok")
+	sess, err := rt.Session(shell3.SessionOpts{Name: "telegram", Agent: "code"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := NewServer(rt, sess, token, chatID)
+	srv.SetCronSource(func() []CronJob {
+		return []CronJob{{Name: "nightly", Schedule: "0 9 * * *", Agent: "explorer", Notify: true}}
+	})
+	signed := signInitData(t, token, `{"id":8701499393,"first_name":"T"}`)
+
+	// gated
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/cron", nil))
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("want 401, got %d", rr.Code)
+	}
+	// authed
+	rr = httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/cron", nil)
+	req.Header.Set("X-Init-Data", signed)
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"nightly"`) {
+		t.Fatalf("cron: got %d %q", rr.Code, rr.Body.String())
+	}
+}
+
 // TestHistory_WrongUserRejected confirms a validly-signed payload for a
 // different user id is still rejected (the chat-id binding holds).
 func TestHistory_WrongUserRejected(t *testing.T) {

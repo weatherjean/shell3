@@ -136,12 +136,14 @@
   <button data-tab="subs">Subagents<span class="count" id="c-subs" hidden></span></button>
   <button data-tab="status">Status</button>
   <button data-tab="past">Past</button>
+  <button data-tab="cron">Cron</button>
 </nav>
 <main>
   <section id="chat" class="view active"><div class="empty">loading…</div></section>
   <section id="subs" class="view"><div class="empty">loading…</div></section>
   <section id="status" class="view"><div class="empty">loading…</div></section>
   <section id="past" class="view"><div class="empty">loading…</div></section>
+  <section id="cron" class="view"><div class="empty">loading…</div></section>
 </main>
 
 <script>
@@ -158,7 +160,7 @@ async function api(path) {
 const esc = s => (s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 
 let active = "chat";
-const views = { chat: document.getElementById("chat"), subs: document.getElementById("subs"), status: document.getElementById("status"), past: document.getElementById("past") };
+const views = { chat: document.getElementById("chat"), subs: document.getElementById("subs"), status: document.getElementById("status"), past: document.getElementById("past"), cron: document.getElementById("cron") };
 const main = document.querySelector("main");
 
 document.querySelectorAll("nav button").forEach(b => {
@@ -342,6 +344,17 @@ async function renderPast() {
   }
 }
 
+// ---- Cron -----------------------------------------------------------------
+async function renderCron() {
+  const jobs = await api("/api/cron");
+  views.cron.innerHTML = jobs.length ? jobs.map(j => `
+    <div class="card">
+      <div class="row"><span class="agent">${esc(j.name)}</span><span class="badge ${j.notify ? "finished" : "running"}">${j.notify ? "notify" : "quiet"}</span></div>
+      <div class="task">${esc(j.agent)} · <code>${esc(j.schedule)}</code></div>
+      <div class="preview">${j.last_run ? "last run: " + esc(j.last_run) : "not run yet"}</div>
+    </div>`).join("") : '<div class="empty">No scheduled jobs.</div>';
+}
+
 // ---- Poll loop ------------------------------------------------------------
 async function refresh(force) {
   try {
@@ -349,6 +362,7 @@ async function refresh(force) {
     else if (active === "subs") renderSubs(await api("/api/subagents"));
     else if (active === "status") renderStatus(await api("/api/status"));
     else if (active === "past" && force) await renderPast();
+    else if (active === "cron" && force) await renderCron();
   } catch (e) {
     views[active].innerHTML = `<div class="err">⚠️ ${esc(e.message)}<br><small>open from inside Telegram to authenticate</small></div>`;
   }

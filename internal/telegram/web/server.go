@@ -11,6 +11,17 @@ import (
 	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
+// CronJob is the dashboard DTO for one scheduled job and its last run. Exported
+// so the host (cmd/shell3) can construct it from cron.Scheduler.Jobs().
+type CronJob struct {
+	Name      string `json:"name"`
+	Schedule  string `json:"schedule"`
+	Agent     string `json:"agent"`
+	Notify    bool   `json:"notify"`
+	LastRun   string `json:"last_run,omitempty"`
+	LastSubID string `json:"last_sub_id,omitempty"`
+}
+
 // Server is the read-only dashboard.
 type Server struct {
 	sess     *shell3.Session
@@ -19,6 +30,7 @@ type Server struct {
 	chatID   int64
 	usage    *UsageStore                         // nil → no usage shown
 	validate func(initData string) (int64, bool) // seam for tests
+	cron     func() []CronJob                    // nil → no jobs
 }
 
 func NewServer(rt *shell3.Runtime, sess *shell3.Session, token string, chatID int64) *Server {
@@ -33,6 +45,21 @@ func NewServer(rt *shell3.Runtime, sess *shell3.Session, token string, chatID in
 // SetUsage attaches a usage store so /api/status reports the last turn's tokens.
 func (s *Server) SetUsage(u *UsageStore) { s.usage = u }
 
+// SetCronSource attaches a provider of cron job statuses for /api/cron.
+func (s *Server) SetCronSource(fn func() []CronJob) { s.cron = fn }
+
+func (s *Server) handleCron(w http.ResponseWriter, r *http.Request) {
+	var out []CronJob
+	if s.cron != nil {
+		out = s.cron()
+	}
+	if out == nil {
+		out = []CronJob{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
+}
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
@@ -43,6 +70,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/sessions", s.auth(s.handleSessions))
 	mux.HandleFunc("/api/session", s.auth(s.handleSession))
 	mux.HandleFunc("/api/stream", s.auth(s.handleStream))
+	mux.HandleFunc("/api/cron", s.auth(s.handleCron))
 	return mux
 }
 
