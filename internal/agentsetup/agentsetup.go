@@ -216,6 +216,7 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 		ModeLabel:       a.Name,
 		ActiveSkills:    a.Skills,
 		ActiveTools:     toolNames,
+		Subagents:       a.Subagents,
 		CustomToolNames: customNames,
 		MCPToolNames:    mcpNames,
 		LLM:             client,

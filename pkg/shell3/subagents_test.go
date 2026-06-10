@@ -67,6 +67,7 @@ func newSubagentTestRuntime(t *testing.T, rec *subOptsRecorder) *Runtime {
 				Personality: persona.Persona{Name: "code", Tools: []llm.ToolDefinition{{
 					Name: "spawn_agent", Parameters: map[string]any{"type": "object"},
 				}}},
+				Subagents: []string{"researcher"},
 			}
 		}
 		cfg.Headless = o.Headless
@@ -302,6 +303,7 @@ func TestSubagent_CloseJoinsGoroutine(t *testing.T) {
 				Personality: persona.Persona{Name: "code", Tools: []llm.ToolDefinition{{
 					Name: "spawn_agent", Parameters: map[string]any{"type": "object"},
 				}}},
+				Subagents: []string{"researcher"},
 			}
 		}
 		cfg.Headless = o.Headless

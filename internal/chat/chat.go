@@ -33,7 +33,10 @@ type ActiveAgent struct {
 	// CustomToolNames is the set of tool names routed to the custom-tool dispatcher.
 	CustomToolNames map[string]bool
 	// MCPToolNames is the set of prefixed (server__tool) names routed to MCPTool.
-	MCPToolNames  map[string]bool
+	MCPToolNames map[string]bool
+	// Subagents is the active agent's allowlist of registered subagent names
+	// (its tools.subagents). The spawn_agent handler rejects names outside it.
+	Subagents     []string
 	LLM           LLMClient
 	Params        llm.RequestParams
 	ModelID       string
@@ -70,6 +73,9 @@ type Config struct {
 	ActiveSkills []string
 	// ActiveTools lists tool names enabled for this agent.
 	ActiveTools []string
+	// Subagents is the active agent's allowlist of registered subagent names,
+	// enforced by the spawn_agent handler (belt-and-suspenders to the schema enum).
+	Subagents []string
 	// ContextWindow is the active model's context window in tokens, used by
 	// the reminder tracker to emit context-usage warnings. Zero means unknown.
 	ContextWindow int
@@ -148,6 +154,7 @@ func (c *Config) ApplyActiveAgent(rt ActiveAgent) {
 	c.ModeLabel = rt.ModeLabel
 	c.ActiveSkills = rt.ActiveSkills
 	c.ActiveTools = rt.ActiveTools
+	c.Subagents = rt.Subagents
 	c.CustomToolNames = rt.CustomToolNames
 	c.MCPToolNames = rt.MCPToolNames
 	c.ContextWindow = rt.ContextWindow
@@ -196,6 +203,7 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler, shellInteractive
 		Approve:          cfg.Approve,
 		Spawn:            cfg.Spawn,
 		ListAgents:       cfg.ListAgents,
+		Subagents:        cfg.Subagents,
 		ShellInteractive: shellInteractive,
 	}
 }

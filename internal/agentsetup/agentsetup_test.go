@@ -434,6 +434,30 @@ func TestAgentRuntime_ExposesRegisteredSubagents(t *testing.T) {
 	}
 }
 
+// TestAgentRuntime_SubagentsAllowlist asserts that an agent's runtime bundle
+// carries the allowlist of registered subagent names in Subagents, and that a
+// subagent's own bundle has an empty Subagents (depth limit 1).
+func TestAgentRuntime_SubagentsAllowlist(t *testing.T) {
+	p, cleanup := subagentParts(t)
+	defer cleanup()
+
+	rt, err := p.AgentRuntime("code")
+	if err != nil {
+		t.Fatalf("AgentRuntime: %v", err)
+	}
+	if len(rt.Subagents) != 1 || rt.Subagents[0] != "researcher" {
+		t.Errorf("AgentRuntime(\"code\").Subagents = %v, want [researcher]", rt.Subagents)
+	}
+
+	srt, err := p.SubagentRuntime("researcher")
+	if err != nil {
+		t.Fatalf("SubagentRuntime: %v", err)
+	}
+	if len(srt.Subagents) != 0 {
+		t.Errorf("SubagentRuntime(\"researcher\").Subagents = %v, want empty (depth limit 1)", srt.Subagents)
+	}
+}
+
 // TestAgentRuntime_NoSubagentsNoSpawnTool asserts that an agent with no
 // Subagents list gets neither spawn_agent nor list_agents in its schema.
 func TestAgentRuntime_NoSubagentsNoSpawnTool(t *testing.T) {

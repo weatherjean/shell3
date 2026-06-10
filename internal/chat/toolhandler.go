@@ -124,6 +124,9 @@ type TurnConfig struct {
 	// ListAgents returns a snapshot of subagents spawned by this session. Nil →
 	// list_agents returns an empty array.
 	ListAgents func() []AgentSnapshot
+	// Subagents is the active agent's allowlist of registered subagent names;
+	// the spawn_agent handler rejects a subagent outside it.
+	Subagents []string
 }
 
 // SpawnRequest is a parsed spawn_agent call handed to the host's spawner.
