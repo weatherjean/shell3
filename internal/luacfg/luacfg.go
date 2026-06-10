@@ -44,6 +44,20 @@ type MCPServer struct {
 	Tools   []string // optional allowlist
 }
 
+// TelegramConfig is the parsed shell3.telegram{...} block.
+type TelegramConfig struct {
+	Token     string
+	ChatID    string
+	Dashboard DashboardConfig
+}
+
+// DashboardConfig is the parsed shell3.telegram.dashboard{} block.
+type DashboardConfig struct {
+	Enabled bool
+	Addr    string
+	URL     string
+}
+
 // GuardEntry is one middleware in the on_tool_call chain: a Lua function that
 // inspects a tool call and returns an allow/block/cancel decision.
 type GuardEntry struct {
@@ -92,6 +106,7 @@ type LoadedConfig struct {
 
 	agents    []Agent
 	subagents []Subagent
+	telegram  TelegramConfig
 
 	L  *lua.LState
 	mu sync.Mutex
@@ -177,6 +192,9 @@ func Load(path, workdir string) (*LoadedConfig, error) {
 	success = true
 	return c, nil
 }
+
+// Telegram returns the parsed shell3.telegram{} block (zero value if absent).
+func (c *LoadedConfig) Telegram() TelegramConfig { return c.telegram }
 
 func (c *LoadedConfig) Model(name string) (Model, bool) {
 	for _, m := range c.Models {
