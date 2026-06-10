@@ -80,15 +80,16 @@ Two guiding principles, consistent with the rest of shell3:
 ### Configuration (Lua declares, Go transports)
 
 ```lua
-telegram = {
+-- a function call, like shell3.model(...)/shell3.agent(...)
+shell3.telegram({
   token     = shell3.env.secret("TELEGRAM_BOT_TOKEN"),  -- secret, from .env
-  chat_id   = 123456789,            -- your numeric chat id (allowlist of one)
+  chat_id   = "123456789",          -- your chat id (allowlist of one)
   dashboard = {
     enabled = true,
     addr    = "127.0.0.1:8765",     -- bind localhost; expose via Tailscale Serve
     url     = "https://host.tailnet.ts.net/",  -- Mini App URL set on the menu button
   },
-}
+})
 ```
 
 `luacfg` gains an optional `Telegram` struct on the loaded config
