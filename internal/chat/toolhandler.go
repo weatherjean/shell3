@@ -136,7 +136,7 @@ type SpawnRequest struct {
 // AgentSnapshot is one row of a list_agents result.
 type AgentSnapshot struct {
 	ID     string `json:"id"`
-	Agent  string `json:"agent"`
+	Agent  string `json:"agent"` // registered subagent name (set by spawn_agent)
 	Task   string `json:"task"`
 	Status string `json:"status"`           // "running" | "finished"
 	Result string `json:"result,omitempty"` // short preview when finished

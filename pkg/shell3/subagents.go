@@ -14,7 +14,7 @@ import (
 
 type subagent struct {
 	id     string
-	agent  string
+	agent  string // registered subagent name (not the persona/agent name)
 	task   string
 	status string // "running" | "finished"
 	result string
@@ -27,13 +27,13 @@ type subRegistry struct {
 	subs []*subagent
 }
 
-// add records a running subagent under the runtime-minted id (see
-// Runtime.nextSubID). The id is supplied by the caller so the registry entry
-// and the child's "sub:<id>" session name always agree.
-func (r *subRegistry) add(id, agent, task string) *subagent {
+// add registers a running entry; agentName is the registered subagent name.
+// The id is supplied by the caller so the registry entry and the child's
+// "sub:<id>" session name always agree.
+func (r *subRegistry) add(id, agentName, task string) *subagent {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	sa := &subagent{id: id, agent: agent, task: task, status: "running"}
+	sa := &subagent{id: id, agent: agentName, task: task, status: "running"}
 	r.subs = append(r.subs, sa)
 	return sa
 }
@@ -82,7 +82,7 @@ func (s *Session) spawn(_ context.Context, req chat.SpawnRequest) (string, error
 	if s.runtime == nil {
 		return "", fmt.Errorf("shell3: session has no runtime; cannot spawn subagents")
 	}
-	if req.Subagent == "" {
+	if strings.TrimSpace(req.Subagent) == "" {
 		return "", fmt.Errorf("shell3: spawn requires a subagent name")
 	}
 	workdir := req.WorkDir
