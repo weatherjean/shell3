@@ -119,3 +119,16 @@ You are the design partner inside shell3. You do NOT edit files — you investig
   skills = { brainstorming },
   on_tool_call = { guards.no_env_edit, guards.confirm_destructive },
 })
+
+-- ---------------------------------------------------------------------------
+-- Personal Telegram bot + Mini App dashboard (run: `shell3 telegram`)
+-- ---------------------------------------------------------------------------
+-- Uncomment and set your numeric chat id (message @userinfobot to find it).
+-- Put TELEGRAM_BOT_TOKEN=<token from @BotFather> in .env beside this file.
+-- The dashboard is read-only; expose it on your tailnet with:
+--   tailscale serve https / proxy 127.0.0.1:8765
+-- shell3.telegram({
+--   token   = shell3.env.secret("TELEGRAM_BOT_TOKEN"),
+--   chat_id = "000000000",
+--   dashboard = { enabled = true, addr = "127.0.0.1:8765", url = "https://HOST.TAILNET.ts.net/" },
+-- })

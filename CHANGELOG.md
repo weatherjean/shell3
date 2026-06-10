@@ -10,6 +10,32 @@ Until v1.0.0, minor versions may contain breaking changes.
 
 ### Added
 
+- Personal Telegram bot front-end (`shell3 telegram`): a single-chat bot over
+  `pkg/shell3.Runtime` with a chat-id allowlist. Inbound text drives one
+  persistent session (idle → `SendParts`, busy → `Interject`); replies are
+  chunked to Telegram's 4096-byte limit. Image attachments become `shell3.Part`
+  inputs. Tool "ask" guards surface as inline Approve/Deny buttons with a
+  timeout that fails closed (deny). Subagent/cron results are pushed
+  unprompted via the wake bus. Commands: `/clear /agent /agents /set /rollback
+  /stop /dash`. Configured by a `shell3.telegram{ token, chat_id, dashboard }`
+  block in `shell3.lua` (token from `.env` via `shell3.env.secret`); wraps the
+  maintained `github.com/go-telegram/bot` library.
+- Telegram Mini App dashboard: a read-only `net/http` server rendering the
+  session's history, authenticated with Telegram `initData`
+  (`github.com/telegram-mini-apps/init-data-golang`) bound to the configured
+  chat id. Vanilla HTML/JS page (no build step), themed to the Telegram client.
+  Intended to be exposed over Tailscale (`tailscale serve`); exposure is
+  operator-configured.
+
+  **v1 limitations:** Telegram voice messages (OGG/Opus) are dropped — the
+  engine's audio loader accepts wav/mp3 only; OGG→wav transcoding is a future
+  follow-up. The dashboard **polls** `/api/history` (every 4s) rather than
+  streaming live updates; `/api/stream` is a heartbeat only, because
+  `Runtime.Events()` is a single-consumer channel owned by the bot — true SSE
+  fan-out is deferred. Tailscale exposure is not automated; the operator runs
+  `tailscale serve`/`funnel` themselves.
+- `shell3.telegram{}` Lua config block, parsed by `luacfg` and surfaced as
+  `Runtime.Telegram()` (re-exported `TelegramConfig`/`DashboardConfig`).
 - `pkg/shell3.Runtime`: one shared build (config, store, MCP, log) hosting
   multiple named sessions (`Runtime.Session(SessionOpts{Name: "tg:1234", …})`),
   each with its own agent, per-session workdir, headless flag, and audit log.
