@@ -99,6 +99,83 @@ func (s *Store) EndSession(id int64) error {
 	return nil
 }
 
+// SessionMeta summarizes one stored conversation for listing.
+type SessionMeta struct {
+	ID        int64
+	StartedAt time.Time
+	EndedAt   time.Time
+	Summary   string
+	NumMsgs   int
+	Preview   string // first user message, truncated
+}
+
+// ListSessions returns up to limit most-recent sessions (newest first), each
+// with a message count and a preview of its first user message.
+func (s *Store) ListSessions(limit int) ([]SessionMeta, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.Query(`
+		SELECT s.id, s.started_at, COALESCE(s.ended_at,''), COALESCE(s.summary,''),
+		       (SELECT COUNT(*) FROM history h WHERE h.session_id = s.id),
+		       COALESCE((SELECT h.content FROM history h
+		                 WHERE h.session_id = s.id AND h.role='user'
+		                 ORDER BY h.rowid ASC LIMIT 1), '')
+		FROM sessions s
+		ORDER BY s.id DESC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: list sessions: %w", err)
+	}
+	defer rows.Close()
+	var out []SessionMeta
+	for rows.Next() {
+		var m SessionMeta
+		var started, ended, preview string
+		if err := rows.Scan(&m.ID, &started, &ended, &m.Summary, &m.NumMsgs, &preview); err != nil {
+			return nil, fmt.Errorf("store: list sessions: scan: %w", err)
+		}
+		m.StartedAt = parseRFC3339(started)
+		if ended != "" {
+			m.EndedAt = parseRFC3339(ended)
+		}
+		m.Preview = truncateRunes(preview, 120)
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// SessionTurns returns every stored turn for one session, in order.
+func (s *Store) SessionTurns(sessionID int64) ([]HistoryTurn, error) {
+	rows, err := s.db.Query(
+		`SELECT session_id, role, content, created_at FROM history
+		 WHERE session_id = ? ORDER BY rowid ASC`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("store: session turns %d: %w", sessionID, err)
+	}
+	defer rows.Close()
+	var out []HistoryTurn
+	for rows.Next() {
+		var t HistoryTurn
+		var created string
+		if err := rows.Scan(&t.SessionID, &t.Role, &t.Content, &created); err != nil {
+			return nil, fmt.Errorf("store: session turns: scan: %w", err)
+		}
+		t.CreatedAt = parseRFC3339(created)
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// truncateRunes shortens s to at most n runes, appending an ellipsis if cut.
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
 // AppendHistory stores one conversation turn in the history FTS5 table.
 func (s *Store) AppendHistory(sessionID int64, role, content string) error {
 	now := time.Now().UTC().Format(time.RFC3339)

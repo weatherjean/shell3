@@ -7,6 +7,7 @@ func registerShell3(c *LoadedConfig) {
 	tbl := L.NewTable()
 	L.SetGlobal("shell3", tbl)
 	L.SetField(tbl, "model", L.NewFunction(c.luaModel))
+	L.SetField(tbl, "telegram", L.NewFunction(c.luaTelegram))
 	L.SetField(tbl, "skill", L.NewFunction(c.luaSkill))
 	L.SetField(tbl, "tool", L.NewFunction(c.luaTool))
 	L.SetField(tbl, "mcp", L.NewFunction(c.luaMCP))
@@ -22,6 +23,34 @@ func registerShell3(c *LoadedConfig) {
 	L.SetField(httpT, "get", L.NewFunction(c.luaHTTPGet))
 	L.SetField(httpT, "post", L.NewFunction(c.luaHTTPPost))
 	L.SetField(tbl, "http", httpT)
+}
+
+var telegramKeys = map[string]bool{"token": true, "chat_id": true, "agent": true, "workdir": true, "dashboard": true}
+var telegramDashboardKeys = map[string]bool{"enabled": true, "addr": true, "url": true}
+
+func (c *LoadedConfig) luaTelegram(L *lua.LState) int {
+	opts := L.CheckTable(1)
+	if err := checkKeys(opts, "telegram", telegramKeys); err != nil {
+		L.RaiseError("%s", err.Error())
+	}
+	tg := TelegramConfig{
+		Token:   optStr(opts, "token"),
+		ChatID:  optStr(opts, "chat_id"),
+		Agent:   optStr(opts, "agent"),
+		WorkDir: optStr(opts, "workdir"),
+	}
+	if d, ok := opts.RawGetString("dashboard").(*lua.LTable); ok {
+		if err := checkKeys(d, "telegram.dashboard", telegramDashboardKeys); err != nil {
+			L.RaiseError("%s", err.Error())
+		}
+		tg.Dashboard = DashboardConfig{
+			Enabled: optBool(d, "enabled"),
+			Addr:    optStr(d, "addr"),
+			URL:     optStr(d, "url"),
+		}
+	}
+	c.telegram = tg
+	return 0
 }
 
 var modelKeys = map[string]bool{

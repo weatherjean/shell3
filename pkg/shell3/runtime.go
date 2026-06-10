@@ -2,14 +2,35 @@ package shell3
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
 	"sync"
 	"sync/atomic"
 
 	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/chat"
+	"github.com/weatherjean/shell3/internal/store"
 )
+
+// TelegramConfig mirrors the parsed shell3.telegram{} block.
+type TelegramConfig struct {
+	Token     string
+	ChatID    string
+	Agent     string
+	WorkDir   string
+	Dashboard DashboardConfig
+}
+
+// DashboardConfig mirrors the parsed shell3.telegram.dashboard{} block.
+type DashboardConfig struct {
+	Enabled bool
+	Addr    string
+	URL     string
+}
 
 // RuntimeSpec configures a long-lived Runtime: the process-wide unit owning
 // the config (Lua state), store, MCP servers, proxy spawner, and log.
@@ -76,10 +97,15 @@ type Runtime struct {
 	events chan HostEvent
 	// workDir is the runtime root; subagents write audit logs under it.
 	workDir string
+	// store is the shared SQLite history store (nil if unavailable). Used by
+	// PastSessions/SessionTurns for the dashboard's conversation history.
+	store *store.Store
 	// ctx/cancel scope subagent goroutines so they outlive a spawning turn but
 	// are bounded by Close.
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	telegram TelegramConfig
 
 	// subSeq mints process-unique subagent ids (see nextSubID). Global to the
 	// runtime so two parents never collide on a "sub:<id>" session name.
@@ -137,6 +163,7 @@ func NewRuntime(spec RuntimeSpec) (*Runtime, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	tg := parts.Telegram()
 	return &Runtime{
 		sessionConfig: func(o SessionOpts) (chat.Config, error) {
 			return parts.SessionConfig(agentsetup.SessionOptions{
@@ -144,7 +171,19 @@ func NewRuntime(spec RuntimeSpec) (*Runtime, error) {
 				DisableSubagents: o.DisableSubagents,
 			})
 		},
-		cleanup:  cleanup,
+		cleanup: cleanup,
+		store:   parts.Store(),
+		telegram: TelegramConfig{
+			Token:   tg.Token,
+			ChatID:  tg.ChatID,
+			Agent:   tg.Agent,
+			WorkDir: tg.WorkDir,
+			Dashboard: DashboardConfig{
+				Enabled: tg.Dashboard.Enabled,
+				Addr:    tg.Dashboard.Addr,
+				URL:     tg.Dashboard.URL,
+			},
+		},
 		events:   make(chan HostEvent, 64),
 		workDir:  workDir,
 		ctx:      ctx,
@@ -157,6 +196,99 @@ func NewRuntime(spec RuntimeSpec) (*Runtime, error) {
 // Buffered; if the host is not draining, Wake events coalesce (drop on full —
 // the host re-checks inboxes on its next turn anyway).
 func (rt *Runtime) Events() <-chan HostEvent { return rt.events }
+
+// Telegram returns the parsed shell3.telegram{} config (zero value if absent).
+func (rt *Runtime) Telegram() TelegramConfig { return rt.telegram }
+
+// SessionMeta summarizes one stored past conversation.
+type SessionMeta struct {
+	ID        int64  `json:"id"`
+	StartedAt string `json:"started_at"`
+	EndedAt   string `json:"ended_at,omitempty"`
+	NumMsgs   int    `json:"num_msgs"`
+	Preview   string `json:"preview"`
+}
+
+// PastSessions lists up to limit recent stored conversations (newest first).
+// Returns nil if no store is configured.
+func (rt *Runtime) PastSessions(limit int) ([]SessionMeta, error) {
+	if rt.store == nil {
+		return nil, nil
+	}
+	rows, err := rt.store.ListSessions(limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SessionMeta, 0, len(rows))
+	for _, m := range rows {
+		e := SessionMeta{ID: m.ID, NumMsgs: m.NumMsgs, Preview: m.Preview, StartedAt: m.StartedAt.Format("2006-01-02 15:04")}
+		if !m.EndedAt.IsZero() {
+			e.EndedAt = m.EndedAt.Format("2006-01-02 15:04")
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
+// SessionTurns returns the stored turns of one past conversation as
+// HistoryEntry values (Role/Content only; tool args are not persisted).
+func (rt *Runtime) SessionTurns(id int64) ([]HistoryEntry, error) {
+	if rt.store == nil {
+		return nil, nil
+	}
+	turns, err := rt.store.SessionTurns(id)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]HistoryEntry, 0, len(turns))
+	for _, t := range turns {
+		out = append(out, HistoryEntry{Role: t.Role, Content: t.Content})
+	}
+	return out, nil
+}
+
+// subagentIDRe constrains transcript ids to the minted "a<N>" form, preventing
+// any path traversal when building the audit-file path.
+var subagentIDRe = regexp.MustCompile(`^[A-Za-z0-9]+$`)
+
+// TranscriptEvent is one lossless event from a subagent's audit log.
+type TranscriptEvent struct {
+	Kind   string `json:"kind"`
+	Text   string `json:"text,omitempty"`
+	Role   string `json:"role,omitempty"`
+	Tool   string `json:"tool,omitempty"`
+	Input  string `json:"input,omitempty"`
+	Output string `json:"output,omitempty"`
+	CallID string `json:"call_id,omitempty"`
+}
+
+// SubagentTranscript reads a subagent's audit JSONL (.shell3/agents/<id>.jsonl
+// under the runtime root) and returns its events. Returns nil if absent.
+func (rt *Runtime) SubagentTranscript(id string) ([]TranscriptEvent, error) {
+	if !subagentIDRe.MatchString(id) {
+		return nil, fmt.Errorf("shell3: invalid subagent id %q", id)
+	}
+	path := filepath.Join(rt.workDir, ".shell3", "agents", id+".jsonl")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var out []TranscriptEvent
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if line == "" {
+			continue
+		}
+		var ev TranscriptEvent
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			continue // skip malformed lines rather than failing the whole read
+		}
+		out = append(out, ev)
+	}
+	return out, nil
+}
 
 func (rt *Runtime) root() string                 { return rt.workDir }
 func (rt *Runtime) baseContext() context.Context { return rt.ctx }

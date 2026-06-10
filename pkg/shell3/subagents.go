@@ -78,6 +78,26 @@ func (r *subRegistry) snapshot() []chat.AgentSnapshot {
 	return out
 }
 
+// SubagentInfo is a public, read-only view of one spawned subagent.
+type SubagentInfo struct {
+	ID     string `json:"id"`
+	Agent  string `json:"agent"`
+	Task   string `json:"task"`
+	Status string `json:"status"` // "running" | "finished"
+	Result string `json:"result,omitempty"`
+}
+
+// Subagents returns a snapshot of this session's spawned subagents (running and
+// finished). Safe to call concurrently with turns; the registry is mutex-guarded.
+func (s *Session) Subagents() []SubagentInfo {
+	snap := s.subs.snapshot()
+	out := make([]SubagentInfo, len(snap))
+	for i, a := range snap {
+		out[i] = SubagentInfo{ID: a.ID, Agent: a.Agent, Task: a.Task, Status: a.Status, Result: a.Result}
+	}
+	return out
+}
+
 func (s *Session) spawn(_ context.Context, req chat.SpawnRequest) (string, error) {
 	if s.runtime == nil {
 		return "", fmt.Errorf("shell3: session has no runtime; cannot spawn subagents")
