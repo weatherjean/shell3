@@ -14,10 +14,19 @@ Both are Go front-ends over the existing `pkg/shell3.Runtime` — the same surfa
 the TUI consumes. Nothing in `internal/chat` or the runtime engine changes; this
 spec is "render and route data the engine already produces."
 
-The guiding principle, consistent with the rest of shell3: **Lua configures, Go
-transports.** Bot token, allowed chat, and dashboard settings live in
-`shell3.lua` (token via `shell3.env.secret`, exactly like the model `api_key`);
-the long-poll loop, HTTP server, and TLS exposure are Go.
+Two guiding principles, consistent with the rest of shell3:
+
+1. **Lua is king.** Lua holds *policy*, Go provides *mechanism*. Bot token,
+   allowed chat, dashboard settings, the enabled command set, approval timeout,
+   and message-formatting toggles all live in `shell3.lua` (token via
+   `shell3.env.secret`, exactly like the model `api_key`). Go owns only the
+   transport — the long-poll loop, HTTP server, TLS exposure. When a behavior
+   could be a Lua setting, it is one; Go ships sensible defaults that Lua
+   overrides.
+2. **Don't reinvent the wheel.** Prefer known, maintained libraries over
+   hand-rolled code — especially for anything security- or protocol-sensitive
+   (`initData` HMAC verification, the Bot API client, cron parsing, Tailscale).
+   Hand-rolled crypto/protocol code is where bugs hide.
 
 ## Non-goals (v1)
 
@@ -147,10 +156,11 @@ token**. The Mini App is a single static page + a small API, themed via the
 Telegram WebApp JS SDK to match the client's light/dark theme.
 
 **Auth (`initData` verification).** Every API/SSE request carries the `initData`
-(header or query). The server recomputes the HMAC per Telegram's documented
-algorithm using the bot token; rejects on mismatch; then checks the embedded
-user id equals the configured `chat_id`. This is real cryptographic auth with no
-login to build. Combined with Tailscale-only network reachability, it's defense
+(header or query). Verification uses the **maintained `github.com/telegram-mini-apps/init-data-golang`
+library** (don't hand-roll the HMAC) to validate the signature against the bot
+token and parse the payload; the server then checks the embedded user id equals
+the configured `chat_id`. This is real cryptographic auth with no login to
+build. Combined with Tailscale-only network reachability, it's defense
 in depth: a request must be *both* on the tailnet *and* carry valid
 Telegram-signed `initData` for the owner.
 
@@ -170,10 +180,18 @@ writes — `internal/chat`'s JSONL sink (message-shaped audit) and
 `Snapshot()`, with `rt.Events()` for the live layer.
 
 **Hosting / exposure.** The server binds `dashboard.addr` (localhost). Exposure
-is a **runtime concern, not code**: the recommended path is **Tailscale Serve**
-(`tailscale serve https / proxy 127.0.0.1:8765`), giving a real Let's Encrypt
-cert on `host.tailnet.ts.net`, reachable only from the tailnet. The machine runs
-`bash`, so keeping the dashboard off the public internet matters.
+is primarily a **runtime concern, not code**: the recommended path is
+**Tailscale Serve** (`tailscale serve https / proxy 127.0.0.1:8765`), giving a
+real Let's Encrypt cert on `host.tailnet.ts.net`, reachable only from the
+tailnet. The machine runs `bash`, so keeping the dashboard off the public
+internet matters.
+
+Per "don't reinvent the wheel," a clean alternative worth evaluating in the plan
+is **embedding Tailscale via the maintained `tailscale.com/tsnet` library**: the
+Go process joins the tailnet itself and serves HTTPS directly (auto-cert via the
+tailnet), removing the dependency on an external `tailscale serve` invocation and
+making "expose the dashboard" a Lua toggle rather than an out-of-band command.
+Lean `tsnet` if it integrates cleanly; fall back to external Serve otherwise.
 
 > **Spike before committing (build step 0):** verify Telegram's in-app webview
 > loads a `*.ts.net` URL. Mini Apps are a client-side webview over HTTPS, so a

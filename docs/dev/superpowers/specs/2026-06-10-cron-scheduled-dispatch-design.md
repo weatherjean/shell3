@@ -19,6 +19,11 @@ Independent of Spec A (Telegram + dashboard); it shares the `Runtime` foundation
 but the only thing it adds to the engine — `Session.Dispatch` — Spec A doesn't
 need. Build A first, then B.
 
+Same two principles as Spec A: **Lua is king** (jobs, schedules, agents,
+workdirs, timeouts all declared in `shell3.lua`; Go only runs the ticker), and
+**don't reinvent the wheel** (schedule parsing/firing uses the maintained
+`github.com/robfig/cron`, not a hand-rolled timer wheel).
+
 ## Non-goals (v1)
 
 - **An LLM "scheduler agent."** A heartbeat agent that *reasons* about what/when
