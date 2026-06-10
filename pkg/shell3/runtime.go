@@ -32,6 +32,8 @@ type SessionOpts struct {
 	OutPath string
 	// ShellInteractive runs an interactive shell command with TTY access.
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
+	// Approve resolves guard "ask" verdicts. Nil fails closed.
+	Approve func(ctx context.Context, req ApprovalRequest) bool
 }
 
 // Runtime hosts N sessions over one shared build. Create with NewRuntime,
@@ -118,6 +120,9 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	}
 	s := newSession(cfg, func() {}) // shared parts are the runtime's to clean
 	s.shellInteractive = opts.ShellInteractive
+	if opts.Approve != nil {
+		s.SetApprover(opts.Approve)
+	}
 	s.runtime, s.name = rt, opts.Name
 	s.sink, s.sinkCleanup = sink, sinkCleanup
 	s.writeStartLine("(session " + opts.Name + ")")

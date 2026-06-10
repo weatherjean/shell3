@@ -17,6 +17,15 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
+// ApprovalRequest describes a suspended tool call awaiting the host's verdict
+// (a Lua guard returned action="ask"). Render it and return true to allow.
+type ApprovalRequest struct {
+	Tool    string // tool name
+	RawArgs string // raw JSON arguments
+	Reason  string // the guard's stated reason ("" if none)
+	Agent   string // active agent name
+}
+
 // Spec configures Run / Start. Prompt is used by Run only.
 type Spec struct {
 	Prompt     string
@@ -39,6 +48,10 @@ type Spec struct {
 	// shell_interactive tool returning an "unavailable" string. A TUI supplies
 	// a closure that releases the terminal for the duration of the command.
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
+	// Approve resolves guard "ask" verdicts: it blocks the turn goroutine
+	// until the host answers (ctx-cancellable — treat cancellation as deny).
+	// Nil fails closed: ask degrades to a deny with an explanatory reason.
+	Approve func(ctx context.Context, req ApprovalRequest) bool
 }
 
 // ErrBusy reports a call that requires the session to be idle while a turn is
@@ -197,6 +210,9 @@ func Start(ctx context.Context, spec Spec) (*Session, error) {
 		return nil, err
 	}
 	s.ownsRuntime = true
+	if spec.Approve != nil {
+		s.SetApprover(spec.Approve)
+	}
 	s.cfg.OutPath = spec.OutPath // also feeds writeStartLine's out field (byte-compat) and introspection
 	sink, sinkCleanup, err := chat.OpenSink(spec.OutPath)
 	if err != nil {
@@ -364,6 +380,26 @@ func (s *Session) Send(ctx context.Context, prompt string) <-chan Event {
 		s.sess.Run(turnCtx, tc, prompt)
 	}()
 	return out
+}
+
+// SetApprover installs an approval callback for guard "ask" verdicts, adapting
+// the public ApprovalRequest type to the internal chat.ApprovalRequest. It may
+// be called between turns (before or after Start); the adapter is picked up by
+// turnConfig on every subsequent Send. Passing nil removes the approver (ask
+// then fails closed).
+func (s *Session) SetApprover(fn func(ctx context.Context, req ApprovalRequest) bool) {
+	if fn == nil {
+		s.cfg.Approve = nil
+		return
+	}
+	s.cfg.Approve = func(ctx context.Context, req chat.ApprovalRequest) bool {
+		return fn(ctx, ApprovalRequest{
+			Tool:    req.Tool,
+			RawArgs: req.RawArgs,
+			Reason:  req.Reason,
+			Agent:   req.Agent,
+		})
+	}
 }
 
 // isBusy reports whether a turn is in flight (see Send's contract).
