@@ -2,6 +2,7 @@ package chat
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
@@ -27,30 +28,44 @@ type Session struct {
 	sink func(Event)
 
 	// inbox is the cross-goroutine message queue for a session: Interject pushes
-	// from any goroutine; the turn loop drains on the turn goroutine at round
-	// boundaries. Guarded by inboxMu — the only Session state that may be
-	// touched concurrently with a running turn.
+	// items (steering text plus optional media parts) from any goroutine; the
+	// turn loop drains on the turn goroutine at round boundaries. Guarded by
+	// inboxMu — the only Session state that may be touched concurrently with a
+	// running turn.
 	inboxMu sync.Mutex
-	inbox   []string
+	inbox   []inboxItem
+}
+
+// inboxItem is one queued Interject: steering text plus optional media parts.
+type inboxItem struct {
+	text  string
+	parts []llm.ContentPart
 }
 
 // Interject queues text for delivery to the model: mid-turn at the next round
-// boundary, otherwise at the start of the next turn. Safe to call from any
-// goroutine at any time; it never fails and never blocks on a running turn.
-func (s *Session) Interject(text string) {
+// boundary, otherwise at the start of the next turn. Optional parts
+// (images/audio) are delivered alongside the text via a synthetic user message
+// — see drainInbox's callers. Safe to call from any goroutine at any time; it
+// never fails and never blocks on a running turn.
+func (s *Session) Interject(text string, parts ...llm.ContentPart) {
 	s.inboxMu.Lock()
 	defer s.inboxMu.Unlock()
-	s.inbox = append(s.inbox, text)
+	s.inbox = append(s.inbox, inboxItem{text: text, parts: slices.Clone(parts)})
 }
 
-// drainInbox removes and returns all queued interjections. Called only from
-// the turn goroutine.
-func (s *Session) drainInbox() []string {
+// drainInbox removes all queued interjections, returning the steering texts
+// (in arrival order, feeding interjectReminder) and the flattened media parts
+// (same order, feeding attachmentsMessage). Called only from the turn
+// goroutine.
+func (s *Session) drainInbox() (texts []string, parts []llm.ContentPart) {
 	s.inboxMu.Lock()
 	defer s.inboxMu.Unlock()
-	items := s.inbox
+	for _, it := range s.inbox {
+		texts = append(texts, it.text)
+		parts = append(parts, it.parts...)
+	}
 	s.inbox = nil
-	return items
+	return texts, parts
 }
 
 // interjectReminder formats queued interjections as one system-reminder block.
@@ -181,7 +196,10 @@ func (r *reminderTracker) check(statusLine string, promptTokens int) string {
 
 // injectReminder appends a <system-reminder> block to the last user message
 // in msgs. Returns msgs unchanged if reminder is empty or no user message exists.
-// Operates on the allMsgs slice only — never on sess.messages.
+// Operates on the allMsgs slice only — never on sess.messages. When the user
+// message is multimodal the reminder is mirrored into its text part — the
+// adapter sends ContentParts and ignores Content — on a cloned parts slice so
+// the message stored in sess.messages stays reminder-free.
 func injectReminder(msgs []llm.Message, reminder string) []llm.Message {
 	if reminder == "" {
 		return msgs
@@ -189,6 +207,21 @@ func injectReminder(msgs []llm.Message, reminder string) []llm.Message {
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Role == llm.RoleUser {
 			msgs[i].Content = msgs[i].Content + "\n\n" + reminder
+			if len(msgs[i].ContentParts) > 0 {
+				parts := slices.Clone(msgs[i].ContentParts)
+				appended := false
+				for j := range parts {
+					if parts[j].Type == llm.ContentPartTypeText {
+						parts[j].Text += "\n\n" + reminder
+						appended = true
+						break
+					}
+				}
+				if !appended {
+					parts = append(parts, llm.ContentPart{Type: llm.ContentPartTypeText, Text: reminder})
+				}
+				msgs[i].ContentParts = parts
+			}
 			return msgs
 		}
 	}

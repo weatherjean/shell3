@@ -125,9 +125,17 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		allMsgs = injectReminder(allMsgs, reminder)
 		emitSystemReminder(sess, reminder)
 	}
-	if reminder := interjectReminder(sess.drainInbox()); reminder != "" {
+	texts, userParts := sess.drainInbox()
+	if reminder := interjectReminder(texts); reminder != "" {
 		allMsgs = injectReminder(allMsgs, reminder)
 		emitSystemReminder(sess, reminder)
+	}
+	// Parts queued while idle are injected as a user message right after the
+	// reminder lands on the turn's user message (consecutive user messages are
+	// fine on the wire; only user messages can carry media parts).
+	if msg, ok := attachmentsMessage(nil, userParts); ok {
+		allMsgs = append(allMsgs, msg)
+		sess.append(msg)
 	}
 
 	var totalUsage llm.Usage
@@ -207,33 +215,56 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 			allMsgs[len(allMsgs)-1].Content += "\n\n" + reminder
 			emitSystemReminder(sess, reminder)
 		}
-		if reminder := interjectReminder(sess.drainInbox()); reminder != "" {
+		texts, userParts := sess.drainInbox()
+		if reminder := interjectReminder(texts); reminder != "" {
 			allMsgs[len(allMsgs)-1].Content += "\n\n" + reminder
 			emitSystemReminder(sess, reminder)
 		}
 
-		// read_media results are text-only (tool messages can't carry media),
-		// so any files it loaded are appended here as a synthetic user message —
-		// the only role the adapter renders image/audio parts for. This runs
-		// after the reminder block so the reminder lands on the last tool
-		// message (text), not on this parts-only user message (whose Content the
-		// adapter ignores).
-		if len(outcome.pendingMedia) > 0 {
-			parts := make([]llm.ContentPart, 0, len(outcome.pendingMedia)+1)
-			parts = append(parts, outcome.pendingMedia...)
-			parts = append(parts, llm.ContentPart{
-				Type: llm.ContentPartTypeText,
-				Text: "Above are the media file(s) you loaded with read_media.",
-			})
-			mediaMsg := llm.Message{
-				Role:         llm.RoleUser,
-				Content:      fmt.Sprintf("[read_media attached %d file(s)]", len(outcome.pendingMedia)),
-				ContentParts: parts,
-			}
-			allMsgs = append(allMsgs, mediaMsg)
-			sess.append(mediaMsg)
+		// read_media results are text-only (tool messages can't carry media), so
+		// files it loaded — plus any attachments the user interjected during the
+		// round — are appended here as a synthetic user message, the only role
+		// the adapter renders image/audio parts for. This runs after the
+		// reminder block so the reminder lands on the last tool message (text),
+		// not on this parts-carrying user message.
+		if msg, ok := attachmentsMessage(outcome.pendingMedia, userParts); ok {
+			allMsgs = append(allMsgs, msg)
+			sess.append(msg)
 		}
 	}
+}
+
+// attachmentsMessage builds the synthetic user message that delivers media
+// parts mid-conversation: read_media loads from the last tool round and/or
+// attachments the user sent via Interject. Tool messages can't carry media
+// and the adapter renders image/audio parts only on user messages, so this is
+// the single injection point. The trailing text part tells the model where
+// the media came from. ok is false when there is nothing to deliver.
+func attachmentsMessage(readMedia, userSent []llm.ContentPart) (llm.Message, bool) {
+	total := len(readMedia) + len(userSent)
+	if total == 0 {
+		return llm.Message{}, false
+	}
+	parts := make([]llm.ContentPart, 0, total+1)
+	parts = append(parts, readMedia...)
+	parts = append(parts, userSent...)
+	var notes []string
+	if len(readMedia) > 0 {
+		notes = append(notes, fmt.Sprintf("%d file(s) you loaded with read_media", len(readMedia)))
+	}
+	if len(userSent) > 0 {
+		notes = append(notes, fmt.Sprintf("%d attachment(s) sent by the user", len(userSent)))
+	}
+	label := strings.Join(notes, "; ")
+	parts = append(parts, llm.ContentPart{
+		Type: llm.ContentPartTypeText,
+		Text: "Above are the attached media file(s): " + label + ".",
+	})
+	return llm.Message{
+		Role:         llm.RoleUser,
+		Content:      "[attached: " + label + "]",
+		ContentParts: parts,
+	}, true
 }
 
 // toolLoopOutcome reports how a turn's tool-execution loop ended.
