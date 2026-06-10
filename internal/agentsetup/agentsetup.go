@@ -76,6 +76,9 @@ func (p *Parts) Root() string { return p.root }
 // Telegram returns the parsed shell3.telegram{} config (zero value if absent).
 func (p *Parts) Telegram() luacfg.TelegramConfig { return p.lc.Telegram() }
 
+// Cron returns the parsed shell3.cron jobs (nil if absent).
+func (p *Parts) Cron() []luacfg.CronJob { return p.lc.Cron() }
+
 // AgentNames returns declared agent names in declaration order.
 func (p *Parts) AgentNames() []string {
 	agents := p.lc.Agents()

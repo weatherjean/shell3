@@ -32,6 +32,16 @@ type DashboardConfig struct {
 	URL     string
 }
 
+// CronJob mirrors one parsed shell3.cron job.
+type CronJob struct {
+	Name     string
+	Schedule string
+	Agent    string
+	Prompt   string
+	WorkDir  string
+	Notify   bool
+}
+
 // RuntimeSpec configures a long-lived Runtime: the process-wide unit owning
 // the config (Lua state), store, MCP servers, proxy spawner, and log.
 type RuntimeSpec struct {
@@ -106,6 +116,7 @@ type Runtime struct {
 	cancel context.CancelFunc
 
 	telegram TelegramConfig
+	cron     []CronJob
 
 	// subSeq mints process-unique subagent ids (see nextSubID). Global to the
 	// runtime so two parents never collide on a "sub:<id>" session name.
@@ -164,6 +175,13 @@ func NewRuntime(spec RuntimeSpec) (*Runtime, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	tg := parts.Telegram()
+	var cronJobs []CronJob
+	for _, j := range parts.Cron() {
+		cronJobs = append(cronJobs, CronJob{
+			Name: j.Name, Schedule: j.Schedule, Agent: j.Agent,
+			Prompt: j.Prompt, WorkDir: j.WorkDir, Notify: j.Notify,
+		})
+	}
 	return &Runtime{
 		sessionConfig: func(o SessionOpts) (chat.Config, error) {
 			return parts.SessionConfig(agentsetup.SessionOptions{
@@ -184,6 +202,7 @@ func NewRuntime(spec RuntimeSpec) (*Runtime, error) {
 				URL:     tg.Dashboard.URL,
 			},
 		},
+		cron:     cronJobs,
 		events:   make(chan HostEvent, 64),
 		workDir:  workDir,
 		ctx:      ctx,
@@ -199,6 +218,9 @@ func (rt *Runtime) Events() <-chan HostEvent { return rt.events }
 
 // Telegram returns the parsed shell3.telegram{} config (zero value if absent).
 func (rt *Runtime) Telegram() TelegramConfig { return rt.telegram }
+
+// Cron returns the parsed shell3.cron jobs (nil if absent).
+func (rt *Runtime) Cron() []CronJob { return rt.cron }
 
 // SessionMeta summarizes one stored past conversation.
 type SessionMeta struct {
