@@ -134,3 +134,16 @@ You are the design partner inside shell3. You do NOT edit files — you investig
 --   workdir = "/abs/path/to/workdir", -- where the agent's tools run; defaults to the launch directory
 --   dashboard = { enabled = true, addr = "127.0.0.1:8765", url = "https://HOST.TAILNET.ts.net/" },
 -- })
+
+-- Scheduled jobs (run on the always-on `shell3 telegram` host). Each job
+-- dispatches an isolated subagent; notify=false is a quiet background job whose
+-- result shows only in the dashboard (errors still notify). Fire manually with
+-- /run <name>.
+-- shell3.cron({
+--   jobs = {
+--     { name="prs", schedule="0 9 * * *", agent="explorer", notify=true,
+--       prompt="Summarize my open PRs and anything that needs review today." },
+--     { name="tests", schedule="@hourly", agent="code", workdir="/path/to/repo", notify=false,
+--       prompt="Run the test suite; if anything fails, summarize the failure." },
+--   },
+-- })

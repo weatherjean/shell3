@@ -1,7 +1,7 @@
 # Cron / scheduled dispatch
 
 Date: 2026-06-10
-Status: approved (design), pending implementation plan
+Status: implemented (2026-06-11)
 
 ## Goal
 

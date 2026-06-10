@@ -10,6 +10,23 @@ Until v1.0.0, minor versions may contain breaking changes.
 
 ### Added
 
+- Scheduled dispatch (`shell3.cron{}`): cron-scheduled jobs that run on the
+  always-on `shell3 telegram` host. Each job dispatches an isolated depth-1
+  subagent (via the new `pkg/shell3.Session.Dispatch`) whose result reports
+  back into the main session — a per-job `notify` policy (default `true`)
+  governs the chat push: `notify=false` is a quiet background job whose
+  success is transcript/dashboard-only, while errors always break the
+  silence. Jobs are declared in `shell3.lua` (`{ name, schedule, agent,
+  prompt, workdir, notify }`), schedules parsed by the maintained
+  `github.com/robfig/cron/v3`; agent references are validated at config load.
+  A dashboard Cron tab and a `/run <name>` bot command (manual fire) round it
+  out.
+
+  **v1 limitations:** in-process `robfig/cron` only (no distributed/persistent
+  scheduling); no catch-up for fires missed while the host was down; jobs are
+  re-armed from config on each restart (edit config + restart to change them);
+  overlapping fires of the same job are allowed (each tick is a fresh
+  subagent).
 - Personal Telegram bot front-end (`shell3 telegram`): a single-chat bot over
   `pkg/shell3.Runtime` with a chat-id allowlist. Inbound text drives one
   persistent session (idle → `SendParts`, busy → `Interject`); replies are
