@@ -39,6 +39,9 @@ func RunOnce(ctx context.Context, spec shell3.Spec) error {
 			msg := ""
 			if ev.Err != nil {
 				msg = ev.Err.Error()
+				if h := shell3.RollbackHint(ev.Err); h != "" {
+					msg += "\n" + h
+				}
 			}
 			fmt.Fprintln(os.Stderr, "error:", msg)
 			hadError = true

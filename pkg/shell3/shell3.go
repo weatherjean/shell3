@@ -806,6 +806,24 @@ func (s *Session) doClose() error {
 // The interactive-shell runner is Spec.ShellInteractive (stored at Start). When
 // nil — the default for a headless embedder — shell_interactive tool calls
 // return an "unavailable" string instead of releasing a TTY.
+// RollbackHint returns a short suggestion to roll back the last turn when err
+// looks like a provider HTTP 400 (Bad Request) — which usually means the last
+// turn left the conversation in a state the model rejects (e.g. a bad tool
+// message or unsupported content), and undoing it recovers. Returns "" for
+// other errors (auth 401, rate-limit 429, network, 5xx), where rollback would
+// not help. Front-ends append it to the error they show, naming their own
+// /rollback command.
+func RollbackHint(err error) string {
+	if err == nil {
+		return ""
+	}
+	s := err.Error()
+	if strings.Contains(s, "400 Bad Request") || strings.Contains(s, `"http_code":"400"`) {
+		return "This usually means the last turn left the conversation in a state the model rejects — /rollback will likely fix it."
+	}
+	return ""
+}
+
 // HostTool is a Go-implemented tool the host registers on a Session so the
 // model can call it (e.g. a front-end action like sending a file). It
 // complements Lua custom tools; dispatch routes through the same path.

@@ -590,6 +590,9 @@ func newRenderSink(app patchapp.AppView, lastUsage *usage) (func(shell3.Event), 
 				app.PrintLine(patchtui.Dim + "[cancelled]" + patchtui.Reset)
 			} else {
 				app.PrintLine(patchtui.Red + "[error: " + msg + "]" + patchtui.Reset)
+				if h := shell3.RollbackHint(ev.Err); h != "" {
+					app.PrintLine(patchtui.Dim + h + patchtui.Reset)
+				}
 			}
 			terminalRendered = true
 		}

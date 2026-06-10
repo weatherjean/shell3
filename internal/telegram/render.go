@@ -22,6 +22,9 @@ func drainToReply(ch <-chan shell3.Event) string {
 		case shell3.Error:
 			if ev.Err != nil {
 				b.WriteString("\n⚠️ " + ev.Err.Error())
+				if h := shell3.RollbackHint(ev.Err); h != "" {
+					b.WriteString("\n💡 " + h)
+				}
 			}
 		}
 	}
@@ -39,6 +42,9 @@ func (b *Bot) drainTurn(ch <-chan shell3.Event) string {
 		case shell3.Error:
 			if ev.Err != nil {
 				sb.WriteString("\n⚠️ " + ev.Err.Error())
+				if h := shell3.RollbackHint(ev.Err); h != "" {
+					sb.WriteString("\n💡 " + h)
+				}
 			}
 		case shell3.Done:
 			if b.onUsage != nil {
