@@ -78,12 +78,20 @@
 //
 // # Subagents
 //
-// An agent with tools = { subagents = true } in its config gets the spawn_agent
-// and list_agents builtins. spawn_agent runs a focused subtask as a headless
-// "sub:<id>" session on the shared Runtime; its result is posted to the parent's
-// inbox (injected mid-turn if the parent is still working, or delivered as a
-// Wake if idle). Subagents are depth-limited to 1 (the spawn tools are stripped
-// from their schema) and write their own audit JSONL under .shell3/agents/.
+// Subagents are an explicit registry of delegatable specialists. Declare one
+// with shell3.subagent{name, description, ...} (the description is the
+// model-facing "when to use"); it is not part of the Tab/agent rotation. An
+// agent opts in by listing subagent handles: tools = { subagents = { explorer,
+// researcher } }. Such an agent gets one spawn_agent(task, subagent, workdir?)
+// tool whose subagent parameter is an enum of the registered names (each name
+// and its when-to-use listed in the tool description), plus list_agents.
+//
+// spawn_agent runs the chosen subagent's own config (model, prompt, tools) as a
+// headless "sub:<id>" session on the shared Runtime; its result is posted to the
+// parent's inbox (injected mid-turn if the parent is still working, or delivered
+// as a Wake if idle). Subagents are depth-limited to 1 — they get no spawn tools
+// and may not declare their own subagents — and write their own audit JSONL
+// under .shell3/agents/.
 package shell3
 
 import (

@@ -36,15 +36,18 @@ Until v1.0.0, minor versions may contain breaking changes.
   multimodal plumbing and size caps as `read_media` (10 MB images, 25 MB
   audio). Invalid SendParts attachments reject the turn with a single Error
   event; invalid Interject attachments are dropped with a bracketed note.
-- Subagents: `spawn_agent(task, agent?, workdir?)` runs a focused subtask
-  as a headless `sub:<id>` session on the shared `Runtime`; its result is
-  posted to the spawning session's inbox — injected mid-turn if the parent
-  is still working, or delivered as a `Wake` if the parent is idle.
-  `list_agents()` returns a running/finished snapshot. Subagents are
-  depth-limited to 1 (the spawn tools are stripped from their schema) and
-  write their own audit JSONL under `.shell3/agents/`. Gated per agent by
-  `tools = { subagents = true }`. The TUI auto-runs the wake turn when idle
-  and renders a finished subagent as a dim notice.
+- Subagents: an explicit registry of delegatable specialists. Declare one with
+  `shell3.subagent{name, description, …}` (the `description` is the model-facing
+  "when to use") and list them per-agent via `tools = { subagents = { … } }`.
+  That agent gets one `spawn_agent(task, subagent, workdir?)` tool whose
+  `subagent` parameter is an enum of the registered names; it runs the chosen
+  subagent's own config as a headless `sub:<id>` session whose result posts to
+  the spawning session's inbox — injected mid-turn if the parent is still
+  working, or delivered as a `Wake` if it is idle. `list_agents()` returns a
+  running/finished snapshot. Depth-limited to 1 (subagents get no spawn tools
+  and may not declare their own); each writes its own audit JSONL under
+  `.shell3/agents/`. The TUI auto-runs the wake turn when idle and renders a
+  finished subagent as a dim notice.
 - `shell3 boot` interactive onboarding: writes a split-file base config
   (`shell3.lua` + `lib/` modules) and merges secrets into `~/.shell3/.env`.
 - Embeddable library API at `pkg/shell3`: one-shot `Run`, persistent

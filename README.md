@@ -172,9 +172,11 @@ gains an item while idle emits a `Wake`, and the host answers with
 next) from any goroutine and never blocks; `Send`/`SendParts` are the strict
 single-turn path. Inbound images and audio ride along as `Part` attachments
 (from disk or in-memory bytes), and a guard's `ask` verdict suspends a tool call
-for a host `Approve` callback. Agents configured with `tools = { subagents =
-true }` can `spawn_agent` focused subtasks whose results return to the parent's
-inbox. See the
+for a host `Approve` callback. Subagents are an explicit registry — declare specialists with
+`shell3.subagent{name, description, …}` and list them per-agent via
+`tools = { subagents = { … } }`; that agent gets a
+`spawn_agent(task, subagent, …)` tool whose `subagent` is an enum of the
+registered names, and their results return to the parent's inbox. See the
 [package docs](https://pkg.go.dev/github.com/weatherjean/shell3/pkg/shell3).
 
 The TUI rides the same machinery: type while the agent is working and press
