@@ -39,9 +39,10 @@ shell3 "audit deps" --out audit.jsonl   # headless, with a JSONL audit log
   the session.
 - **Headless & auditable.** Pipe in, pipe out; `--out` streams a lossless
   JSONL log of every token, tool call, and result for downstream tooling.
-- **Embeddable.** Everything the TUI does is available as a Go library via
-  [`pkg/shell3`](pkg/shell3) — one-shot `Run` or a persistent multi-turn
-  `Session` streaming typed events.
+- **Embeddable, and a runtime.** Everything the TUI does is available as a Go
+  library via [`pkg/shell3`](pkg/shell3) — one-shot `Run`, a persistent
+  `Session`, or a `Runtime` hosting many named sessions for an always-on bot
+  (steering, a wake bus, host approval, inbound media, and subagents).
 
 ## Install
 
@@ -153,8 +154,33 @@ for ev := range events {
 ```
 
 `Start` gives a persistent multi-turn `Session` with agent switching,
-history introspection, pruning, and parameter control. See the
+history introspection, pruning, and parameter control.
+
+For an always-on personal agent, `NewRuntime` owns one shared build (config,
+store, MCP, log) and hosts many named sessions — one per chat, each with its own
+agent, workdir, and audit log:
+
+```go
+rt, _ := shell3.NewRuntime(shell3.RuntimeSpec{WorkDir: home})
+defer rt.Close()
+chat, _ := rt.Session(shell3.SessionOpts{Name: "tg:1234", Headless: true})
+```
+
+A long-lived host runs one select loop over `rt.Events()`: a session whose inbox
+gains an item while idle emits a `Wake`, and the host answers with
+`Session.RunQueued`. `Session.Interject` steers a running turn (or queues for the
+next) from any goroutine and never blocks; `Send`/`SendParts` are the strict
+single-turn path. Inbound images and audio ride along as `Part` attachments
+(from disk or in-memory bytes), and a guard's `ask` verdict suspends a tool call
+for a host `Approve` callback. Agents configured with `tools = { subagents =
+true }` can `spawn_agent` focused subtasks whose results return to the parent's
+inbox. See the
 [package docs](https://pkg.go.dev/github.com/weatherjean/shell3/pkg/shell3).
+
+The TUI rides the same machinery: type while the agent is working and press
+Enter to steer mid-turn (an `Interject`), answer an `ask` guard at an inline
+`[approve? y/N]` prompt, and see a finished subagent surface as a dim notice
+that auto-wakes the next turn.
 
 ## Removing a project's shell3 data
 
