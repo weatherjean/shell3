@@ -42,9 +42,10 @@ func newTelegramCommand() *cobra.Command {
 				return fmt.Errorf("telegram chat_id %q is not a number: %w", tg.ChatID, err)
 			}
 
-			// WorkDir roots the agent's tools (bash, edit). Defaults to the
-			// runtime root (process cwd) when shell3.telegram.workdir is unset.
-			sess, err := rt.Session(shell3.SessionOpts{Name: "telegram", WorkDir: tg.WorkDir})
+			// The Telegram bot runs one fixed agent (it spawns subagents but does
+			// not switch agents). Agent picks it; "" → first declared. WorkDir
+			// roots its tools, defaulting to the runtime root when unset.
+			sess, err := rt.Session(shell3.SessionOpts{Name: "telegram", Agent: tg.Agent, WorkDir: tg.WorkDir})
 			if err != nil {
 				return err
 			}

@@ -20,6 +20,7 @@ import (
 type TelegramConfig struct {
 	Token     string
 	ChatID    string
+	Agent     string
 	WorkDir   string
 	Dashboard DashboardConfig
 }
@@ -175,6 +176,7 @@ func NewRuntime(spec RuntimeSpec) (*Runtime, error) {
 		telegram: TelegramConfig{
 			Token:   tg.Token,
 			ChatID:  tg.ChatID,
+			Agent:   tg.Agent,
 			WorkDir: tg.WorkDir,
 			Dashboard: DashboardConfig{
 				Enabled: tg.Dashboard.Enabled,

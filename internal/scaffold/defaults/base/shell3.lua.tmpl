@@ -130,5 +130,7 @@ You are the design partner inside shell3. You do NOT edit files — you investig
 -- shell3.telegram({
 --   token   = shell3.env.secret("TELEGRAM_BOT_TOKEN"),
 --   chat_id = "000000000",
+--   agent   = "code",                 -- the single agent the bot runs (it spawns subagents); "" → first declared
+--   workdir = "/abs/path/to/workdir", -- where the agent's tools run; defaults to the launch directory
 --   dashboard = { enabled = true, addr = "127.0.0.1:8765", url = "https://HOST.TAILNET.ts.net/" },
 -- })

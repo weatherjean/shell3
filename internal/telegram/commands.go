@@ -11,8 +11,6 @@ import (
 // "/" autocomplete menu. Kept next to handleCommand so they stay in sync.
 func BotCommands() []Command {
 	return []Command{
-		{"agents", "List available agents"},
-		{"agent", "Switch agent: /agent <name>"},
 		{"set", "Set a parameter: /set <name> <value>"},
 		{"rollback", "Undo the last turn"},
 		{"clear", "Reset the conversation"},
@@ -32,18 +30,14 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 			return
 		}
 		b.sendReply(ctx, "🧹 cleared")
-	case "/agents":
-		b.sendReply(ctx, "agents: "+strings.Join(b.sess.AgentNames(), ", "))
-	case "/agent":
-		if err := b.sess.SwitchAgent(arg); err != nil {
-			b.sendReply(ctx, "switch failed: "+err.Error())
+	case "/set":
+		if arg == "" {
+			b.sendReply(ctx, b.settableList())
 			return
 		}
-		b.sendReply(ctx, "🤖 agent → "+b.sess.ActiveAgent())
-	case "/set":
 		kv := strings.SplitN(arg, " ", 2)
 		if len(kv) != 2 {
-			b.sendReply(ctx, "usage: /set <name> <value>")
+			b.sendReply(ctx, "usage: /set <name> <value>\nsend /set with no arguments to list settable parameters")
 			return
 		}
 		if err := b.sess.SetParam(kv[0], kv[1]); err != nil {
@@ -81,4 +75,30 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 	default:
 		b.sendReply(ctx, "unknown command: "+cmd)
 	}
+}
+
+// settableList renders the agent's tunable parameters with their current value
+// (falling back to the provider default) and allowed values, for a bare /set.
+func (b *Bot) settableList() string {
+	params := b.sess.Snapshot().Params
+	if len(params) == 0 {
+		return "no settable parameters for this model"
+	}
+	var sb strings.Builder
+	sb.WriteString("⚙️ settable parameters — /set <name> <value>:\n")
+	for _, p := range params {
+		val := p.Value
+		switch {
+		case val == "" && p.Default != "":
+			val = p.Default + " (default)"
+		case val == "":
+			val = "unset"
+		}
+		sb.WriteString("• " + p.Name + " = " + val)
+		if len(p.Enum) > 0 {
+			sb.WriteString(" [" + strings.Join(p.Enum, " | ") + "]")
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
 }
