@@ -101,6 +101,19 @@ type App struct {
 	busy         bool
 	streamCancel context.CancelFunc
 
+	// Pending tool-approval prompt. Non-nil while a RequestApproval call is
+	// blocked waiting for a y/N answer; the input goroutine resolves it via
+	// resolveApproval. Guarded by mu. Buffered (cap 1) so the resolver never
+	// blocks.
+	pendingApproval chan bool
+
+	// approvalMu serializes whole RequestApproval calls. Guard chains are
+	// sequential per turn, so today there is never more than one outstanding
+	// request — but two sessions could share an App in the future, and a
+	// second concurrent request must block until the first resolves rather
+	// than clobber pendingApproval.
+	approvalMu sync.Mutex
+
 	// Quit/exit state.
 	lastCtrlC time.Time
 	exitFlag  bool
@@ -164,8 +177,68 @@ func (a *App) Quit() {
 	a.mu.Lock()
 	a.exitFlag = true
 	a.mu.Unlock()
+	// Deny any pending approval prompt so a turn goroutine blocked in
+	// RequestApproval cannot wedge teardown.
+	a.resolveApproval(false)
 	if a.term.pauseWakeW != nil {
 		_, _ = a.term.pauseWakeW.Write([]byte{0})
+	}
+}
+
+// RequestApproval prints question as a dim [approve? y/N] prompt, blocks
+// until the user answers on the input goroutine (y/Y approves; n/N, Esc,
+// Enter, or ctrl+c denies), and returns the verdict. Designed to be called
+// from the turn goroutine while busy. Concurrent calls are serialized by
+// approvalMu: a second request blocks until the first resolves. If the app
+// is exiting (Quit) the prompt resolves false so the caller cannot wedge.
+func (a *App) RequestApproval(question string) bool {
+	a.approvalMu.Lock()
+	defer a.approvalMu.Unlock()
+
+	a.mu.Lock()
+	if a.exitFlag {
+		a.mu.Unlock()
+		return false
+	}
+	ch := make(chan bool, 1)
+	a.pendingApproval = ch
+	a.mu.Unlock()
+
+	// Echo each line of the question so multi-line questions don't corrupt
+	// the terminal — same convention as the steering echo in handleEnter.
+	// Each line is fully wrapped in Dim…Reset so no escape bleeds across lines.
+	qLines := patchtui.SplitLines(question)
+	if len(qLines) == 0 {
+		qLines = []string{question}
+	}
+	for i, ql := range qLines {
+		if i == 0 {
+			a.PrintLine(patchtui.Dim + "[approve? y/N] " + ql + patchtui.Reset)
+		} else {
+			a.PrintLine(patchtui.Dim + "  " + ql + patchtui.Reset)
+		}
+	}
+
+	verdict := <-ch
+	if verdict {
+		a.PrintLine(patchtui.Dim + "[approved]" + patchtui.Reset)
+	} else {
+		a.PrintLine(patchtui.Dim + "[denied]" + patchtui.Reset)
+	}
+	return verdict
+}
+
+// resolveApproval delivers verdict to a pending RequestApproval, if any,
+// and clears the pending state. Safe to call from any goroutine and when
+// nothing is pending (no-op). The channel is buffered, so the send never
+// blocks; clearing under mu makes a double resolution impossible.
+func (a *App) resolveApproval(verdict bool) {
+	a.mu.Lock()
+	ch := a.pendingApproval
+	a.pendingApproval = nil
+	a.mu.Unlock()
+	if ch != nil {
+		ch <- verdict
 	}
 }
 

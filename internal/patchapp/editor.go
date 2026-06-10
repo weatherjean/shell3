@@ -74,6 +74,16 @@ func (a *App) processInput(data []byte) (exit bool) {
 		}
 		i += used
 
+		// While an approval prompt is pending, every key is routed to the
+		// y/N resolver and consumed — no editing, no ctrl+c quit priming.
+		a.mu.Lock()
+		approvalPending := a.pendingApproval != nil
+		a.mu.Unlock()
+		if approvalPending {
+			a.handleApprovalKey(k)
+			continue
+		}
+
 		switch k.kind {
 		case keyPasteStart:
 			a.ed.pasting = true
@@ -181,6 +191,24 @@ func (a *App) processInput(data []byte) (exit bool) {
 		}
 	}
 	return a.exitFlag
+}
+
+// handleApprovalKey consumes one key while an approval prompt is pending.
+// y/Y approves; n/N, Esc, Enter (default No), and ctrl+c deny — ctrl+c here
+// answers the prompt instead of cancelling the turn or priming the
+// double-tap exit. Every other key is ignored.
+func (a *App) handleApprovalKey(k parsedKey) {
+	switch k.kind {
+	case keyChar:
+		switch k.r {
+		case 'y', 'Y':
+			a.resolveApproval(true)
+		case 'n', 'N':
+			a.resolveApproval(false)
+		}
+	case keyEnter, keyEscape, keyCtrlC:
+		a.resolveApproval(false)
+	}
 }
 
 // insertChar inserts r at the cursor. Caller must hold a.mu.
