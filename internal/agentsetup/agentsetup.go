@@ -110,7 +110,35 @@ func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
 			return chat.ActiveAgent{}, fmt.Errorf("unknown agent %q", name)
 		}
 	}
+	return p.runtimeForAgent(a)
+}
 
+// SubagentRuntime builds the runtime for a registered subagent (spawned via
+// spawn_agent). Subagents never appear in AgentNames/the Tab rotation and get
+// no spawn tooling of their own (depth limit 1).
+func (p *Parts) SubagentRuntime(name string) (chat.ActiveAgent, error) {
+	sa, ok := p.lc.SubagentByName(name)
+	if !ok {
+		return chat.ActiveAgent{}, fmt.Errorf("unknown subagent %q", name)
+	}
+	a := luacfg.Agent{
+		Name:           sa.Name,
+		ModelName:      sa.ModelName,
+		Prompt:         sa.Prompt,
+		Gates:          sa.Gates,
+		CustomTools:    sa.CustomTools,
+		MCPServerNames: sa.MCPServerNames,
+		Skills:         sa.Skills,
+		SkillsDisabled: sa.SkillsDisabled,
+		Guard:          sa.Guard,
+		// Subagents intentionally empty: depth limit 1.
+	}
+	return p.runtimeForAgent(a)
+}
+
+// runtimeForAgent assembles the full chat runtime for the given agent value.
+// It is the common implementation shared by AgentRuntime and SubagentRuntime.
+func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 	md, ok := p.lc.Model(a.ModelName)
 	if !ok {
 		return chat.ActiveAgent{}, fmt.Errorf("agent %q references unknown model %q", a.Name, a.ModelName)
@@ -138,6 +166,23 @@ func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
 				toolNames = append(toolNames, d.Name)
 			}
 			mcpNames = p.mcpMgr.ToolNamesFor(a.MCPServerNames)
+		}
+	}
+
+	// Inject spawn_agent + list_agents when this agent has registered subagents.
+	if len(a.Subagents) > 0 {
+		infos := make([]luacfg.SubagentInfo, 0, len(a.Subagents))
+		for _, saName := range a.Subagents {
+			sa, ok := p.lc.SubagentByName(saName)
+			if !ok {
+				continue // load-time validation already guarantees resolution; defensive
+			}
+			infos = append(infos, luacfg.SubagentInfo{Name: sa.Name, Description: sa.Description})
+		}
+		spawnDefs := luacfg.SpawnToolDefs(infos)
+		toolDefs = append(toolDefs, spawnDefs...)
+		for _, d := range spawnDefs {
+			toolNames = append(toolNames, d.Name)
 		}
 	}
 
@@ -199,6 +244,10 @@ type SessionOptions struct {
 	// schema regardless of the agent's tools.subagents gate. The runtime sets it
 	// for spawned subagents to enforce depth-limit 1.
 	DisableSubagents bool
+	// Subagent, when non-empty, runs the named subagent's config instead of an
+	// agent (resolved from the subagent registry). Set by spawn_agent. Mutually
+	// exclusive with Agent in practice.
+	Subagent string
 }
 
 // stripSubagentTools removes spawn_agent/list_agents from an agent's schema,
@@ -233,7 +282,13 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 	if workdir == "" {
 		workdir = p.root
 	}
-	rt, err := p.AgentRuntime(so.Agent)
+	var rt chat.ActiveAgent
+	var err error
+	if so.Subagent != "" {
+		rt, err = p.SubagentRuntime(so.Subagent)
+	} else {
+		rt, err = p.AgentRuntime(so.Agent)
+	}
 	if err != nil {
 		return chat.Config{}, err
 	}
