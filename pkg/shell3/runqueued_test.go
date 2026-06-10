@@ -86,6 +86,45 @@ func TestRunQueued_RunsTurnFromQueuedItems(t *testing.T) {
 	}
 }
 
+// TestRunQueued_BusyReturnsClosedChannelNoTurn: RunQueued on a busy session
+// returns an already-closed channel and starts no turn — the in-flight turn
+// drains the inbox itself.
+func TestRunQueued_BusyReturnsClosedChannelNoTurn(t *testing.T) {
+	rt := newTestRuntime(t, fakeCfg("ok"))
+	s, err := rt.Session(SessionOpts{Name: "tg:1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Queue an item so HasInbox() is true; the busy gate must still short-circuit.
+	s.sess.Interject("queued while busy")
+	// Hold the busy gate directly (same technique as TestInterject_BusyDoesNotWake).
+	s.mu.Lock()
+	s.busy = true
+	s.mu.Unlock()
+
+	ch := s.RunQueued(context.Background())
+	select {
+	case _, ok := <-ch:
+		if ok {
+			t.Fatal("busy RunQueued must return an already-closed channel (no events)")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("busy RunQueued channel should be already closed, not blocking")
+	}
+
+	s.mu.Lock()
+	stillBusyFromGate := s.busy
+	s.busy = false
+	s.mu.Unlock()
+	if !stillBusyFromGate {
+		t.Fatal("busy gate flipped unexpectedly — RunQueued may have started a turn")
+	}
+	// Inbox untouched: the (would-be) running turn drains it, not RunQueued.
+	if !s.sess.HasInbox() {
+		t.Fatal("busy RunQueued must not drain the inbox")
+	}
+}
+
 // TestInterject_BusyDoesNotWake: an Interject during a running turn must NOT
 // emit a Wake — the running turn drains the inbox itself.
 func TestInterject_BusyDoesNotWake(t *testing.T) {

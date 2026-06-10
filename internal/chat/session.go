@@ -203,11 +203,14 @@ func (r *reminderTracker) check(statusLine string, promptTokens int) string {
 }
 
 // injectReminder appends a <system-reminder> block to the last user message
-// in msgs. Returns msgs unchanged if reminder is empty or no user message exists.
-// Operates on the allMsgs slice only — never on sess.messages. When the user
-// message is multimodal the reminder is mirrored into its text part — the
-// adapter sends ContentParts and ignores Content — on a cloned parts slice so
-// the message stored in sess.messages stays reminder-free.
+// in msgs. Returns msgs unchanged if reminder is empty. If no user message
+// exists (e.g. a purely inbox-seeded wake turn whose empty carrier message was
+// not appended to history), the reminder is appended as a fresh user message so
+// the queued text still reaches the model. Operates on the allMsgs slice only —
+// never on sess.messages. When the user message is multimodal the reminder is
+// mirrored into its text part — the adapter sends ContentParts and ignores
+// Content — on a cloned parts slice so the message stored in sess.messages
+// stays reminder-free.
 func injectReminder(msgs []llm.Message, reminder string) []llm.Message {
 	if reminder == "" {
 		return msgs
@@ -233,5 +236,7 @@ func injectReminder(msgs []llm.Message, reminder string) []llm.Message {
 			return msgs
 		}
 	}
-	return msgs
+	// No trailing user message (inbox-seeded wake turn): carry the queued text
+	// to the model as a fresh user message rather than silently dropping it.
+	return append(msgs, llm.Message{Role: llm.RoleUser, Content: reminder})
 }

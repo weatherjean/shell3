@@ -102,7 +102,13 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		}
 	}()
 
-	sess.append(userMsg)
+	// A purely inbox-seeded turn (RunQueued → empty prompt, no parts) has an
+	// empty initiating message; the queued text arrives via the inbox-drain
+	// reminder below. Don't persist an empty, part-less user message — it would
+	// replay as an empty user turn (rejected by real providers) on later turns.
+	if userMsg.Content != "" || len(userMsg.ContentParts) > 0 {
+		sess.append(userMsg)
+	}
 
 	msgs := sess.messages
 
