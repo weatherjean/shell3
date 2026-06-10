@@ -211,7 +211,7 @@ func Start(ctx context.Context, spec Spec) (*Session, error) {
 	}
 	s.ownsRuntime = true
 	if spec.Approve != nil {
-		s.SetApprover(spec.Approve)
+		_ = s.SetApprover(spec.Approve) // freshly built session: never busy
 	}
 	s.cfg.OutPath = spec.OutPath // also feeds writeStartLine's out field (byte-compat) and introspection
 	sink, sinkCleanup, err := chat.OpenSink(spec.OutPath)
@@ -384,13 +384,19 @@ func (s *Session) Send(ctx context.Context, prompt string) <-chan Event {
 
 // SetApprover installs an approval callback for guard "ask" verdicts, adapting
 // the public ApprovalRequest type to the internal chat.ApprovalRequest. It may
-// be called between turns (before or after Start); the adapter is picked up by
-// turnConfig on every subsequent Send. Passing nil removes the approver (ask
-// then fails closed).
-func (s *Session) SetApprover(fn func(ctx context.Context, req ApprovalRequest) bool) {
+// be called before the first Send or between turns; the adapter is picked up
+// by turnConfig on every subsequent Send. Passing nil removes the approver
+// (ask then fails closed). Returns ErrBusy while a turn is in flight: it
+// mutates cfg, which the next Send's turnConfig reads (see Send's contract).
+func (s *Session) SetApprover(fn func(ctx context.Context, req ApprovalRequest) bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.busy {
+		return ErrBusy
+	}
 	if fn == nil {
 		s.cfg.Approve = nil
-		return
+		return nil
 	}
 	s.cfg.Approve = func(ctx context.Context, req chat.ApprovalRequest) bool {
 		return fn(ctx, ApprovalRequest{
@@ -400,6 +406,7 @@ func (s *Session) SetApprover(fn func(ctx context.Context, req ApprovalRequest) 
 			Agent:   req.Agent,
 		})
 	}
+	return nil
 }
 
 // isBusy reports whether a turn is in flight (see Send's contract).

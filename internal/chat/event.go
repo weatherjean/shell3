@@ -56,8 +56,11 @@ const (
 	// suspends awaiting the host's verdict. ToolName/ToolInput identify the
 	// call; Text holds the guard's reason. Audit-only: no public mapping.
 	EventApprovalRequest
-	// EventApprovalDecision fires when the verdict arrives. Text is "allow"
-	// or "deny"; ToolName identifies the call. Audit-only.
+	// EventApprovalDecision fires when the verdict arrives. Text is "allow",
+	// "deny" (approver answered false), or "deny (no approver)" (ask with no
+	// Approve hook configured); ToolName identifies the call. Context
+	// cancellation during the wait ends the turn without a decision event.
+	// Audit-only.
 	EventApprovalDecision
 )
 

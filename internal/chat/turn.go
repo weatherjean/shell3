@@ -330,12 +330,17 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 			approved := false
 			if cfg.Approve != nil {
 				// Approve blocks the turn goroutine until the host answers.
-				// If ctx is cancelled during the wait, Approve returns false
-				// (deny); the post-loop ctx.Err() check then ends the turn.
 				approved = cfg.Approve(ctx, ApprovalRequest{
 					Tool: tc.Name, RawArgs: tc.RawArgs, Reason: hookReason,
 					Agent: cfg.Personality.Name,
 				})
+				// A false answer caused by ctx cancellation is not a user
+				// verdict: end the turn with the typed context error before
+				// emitting any decision event or fabricating a denial message
+				// — mirroring the loop-top ctx check.
+				if !approved && ctx.Err() != nil {
+					return toolLoopOutcome{}, ctx.Err()
+				}
 				verdict := "deny"
 				if approved {
 					verdict = "allow"
@@ -354,29 +359,15 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 				// Approved: run schema validation before dispatch, same as the
 				// normal (allow) path. The else-if chain doesn't reach the
 				// validation branch for ask, so we handle it inline here.
-				if schema, ok := toolSchemas[tc.Name]; ok {
-					if err := validateToolArgs(schema, json.RawMessage([]byte(tc.RawArgs))); err != nil {
-						res = errResult(fmt.Sprintf("error: invalid tool arguments: %v", err))
-					} else {
-						handled = false
-					}
-				} else {
-					handled = false
-				}
+				res, handled = validateCall(toolSchemas, tc)
 			}
 		} else if decision == guardBlock {
 			if hookReason == "" {
 				hookReason = "no reason given"
 			}
 			res = errResult(fmt.Sprintf("USER DENIED this %s tool call. Reason: %s. Treat this as the user explicitly disapproving this action — do NOT retry the same call. Acknowledge the denial, ask what they want instead, or pick a different approach.", tc.Name, hookReason))
-		} else if schema, ok := toolSchemas[tc.Name]; ok {
-			if err := validateToolArgs(schema, json.RawMessage([]byte(tc.RawArgs))); err != nil {
-				res = errResult(fmt.Sprintf("error: invalid tool arguments: %v", err))
-			} else {
-				handled = false
-			}
 		} else {
-			handled = false
+			res, handled = validateCall(toolSchemas, tc)
 		}
 		// If a hook blocked the call or validation failed, res already carries
 		// the typed reason and we skip dispatch. Otherwise resolve a handler —
@@ -456,6 +447,21 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 		return toolLoopOutcome{}, ctx.Err()
 	}
 	return toolLoopOutcome{allMsgs: st.allMsgs, pendingMedia: st.pendingMedia}, nil
+}
+
+// validateCall checks tc's arguments against the tool's schema (when one is
+// registered). handled is true only when validation failed, in which case res
+// carries the error result to send back to the model; otherwise the call
+// should proceed to dispatch (handled false, res zero).
+func validateCall(toolSchemas map[string]map[string]any, tc llm.ToolCall) (res toolResult, handled bool) {
+	schema, ok := toolSchemas[tc.Name]
+	if !ok {
+		return toolResult{}, false
+	}
+	if err := validateToolArgs(schema, json.RawMessage([]byte(tc.RawArgs))); err != nil {
+		return errResult(fmt.Sprintf("error: invalid tool arguments: %v", err)), true
+	}
+	return toolResult{}, false
 }
 
 // streamOnce calls the LLM once, collecting text/reasoning/tool-calls/usage

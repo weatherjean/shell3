@@ -905,10 +905,12 @@ func TestSession_ApproveThreading(t *testing.T) {
 	}
 	s := newTestSession(t, client, cfg)
 	defer s.Close()
-	s.SetApprover(func(ctx context.Context, req ApprovalRequest) bool {
+	if err := s.SetApprover(func(ctx context.Context, req ApprovalRequest) bool {
 		asked = append(asked, req)
 		return false
-	})
+	}); err != nil {
+		t.Fatalf("SetApprover: %v", err)
+	}
 
 	var denied bool
 	for ev := range s.Send(context.Background(), "go") {
@@ -916,7 +918,8 @@ func TestSession_ApproveThreading(t *testing.T) {
 			denied = true
 		}
 	}
-	if len(asked) != 1 || asked[0].Tool != "bash" || asked[0].Reason != "scripted ask" {
+	if len(asked) != 1 || asked[0].Tool != "bash" || asked[0].Reason != "scripted ask" ||
+		asked[0].RawArgs != `{"command":"true"}` || asked[0].Agent != "test" {
 		t.Fatalf("approver not invoked correctly: %+v", asked)
 	}
 	if !denied {

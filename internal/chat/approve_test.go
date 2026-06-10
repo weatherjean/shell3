@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -71,6 +72,48 @@ func TestAsk_NoApproverFailsClosed(t *testing.T) {
 	}
 	if !hasToolMessage(sess, "echo", "no approver") {
 		t.Fatal("denial reason should mention the missing approver")
+	}
+}
+
+// TestAsk_CtxCancelDuringApprovalEndsTurn: when the turn context is cancelled
+// while the approver is blocked, the turn ends with context.Canceled — no
+// fabricated USER DENIED message lands in history and no approval_decision
+// event is emitted after the request.
+func TestAsk_CtxCancelDuringApprovalEndsTurn(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cfg := askTurnCfg(func(c context.Context, _ ApprovalRequest) bool {
+		cancel()
+		<-c.Done()
+		return false
+	})
+	events, sess := collectTurn(t, ctx, cfg, "go")
+
+	var turnErr error
+	reqSeen := false
+	for _, ev := range events {
+		switch ev.Kind {
+		case EventApprovalRequest:
+			reqSeen = true
+		case EventApprovalDecision:
+			if reqSeen {
+				t.Fatalf("approval_decision emitted after cancelled request: %+v", ev)
+			}
+		case EventError:
+			turnErr = ev.Err
+		}
+	}
+	if !reqSeen {
+		t.Fatal("approval_request event not emitted")
+	}
+	if !errors.Is(turnErr, context.Canceled) {
+		t.Fatalf("turn error = %v, want context.Canceled", turnErr)
+	}
+	if hasToolMessage(sess, "echo", "USER DENIED") {
+		t.Fatal("ctx cancel must not fabricate a USER DENIED tool message")
+	}
+	if hasToolMessage(sess, "echo", "echoed") {
+		t.Fatal("cancelled call must not execute")
 	}
 }
 

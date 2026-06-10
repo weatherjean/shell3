@@ -121,7 +121,7 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	s := newSession(cfg, func() {}) // shared parts are the runtime's to clean
 	s.shellInteractive = opts.ShellInteractive
 	if opts.Approve != nil {
-		s.SetApprover(opts.Approve)
+		_ = s.SetApprover(opts.Approve) // freshly built session: never busy
 	}
 	s.runtime, s.name = rt, opts.Name
 	s.sink, s.sinkCleanup = sink, sinkCleanup
