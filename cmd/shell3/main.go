@@ -28,6 +28,7 @@ func main() {
 	root.Args = cobra.ArbitraryArgs
 	root.Flags().AddFlagSet(runCmd.Flags())
 	root.AddCommand(newBootCommand())
+	root.AddCommand(newTelegramCommand())
 
 	// Print brand header on every subcommand and on --help output. The
 	// root chat command suppresses it (handled inside RunE) since chat
