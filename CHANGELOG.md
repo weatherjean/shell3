@@ -10,6 +10,13 @@ Until v1.0.0, minor versions may contain breaking changes.
 
 ### Added
 
+- Inbound media: `Session.SendParts` starts a turn with image/audio
+  attachments, and `Interject` accepts the same parts for mid-turn delivery.
+  `Part{Kind, Path, Data, MIME}` loads from disk or straight from in-memory
+  bytes (Telegram photos and voice notes never touch disk), riding the same
+  multimodal plumbing and size caps as `read_media` (10 MB images, 25 MB
+  audio). Invalid SendParts attachments reject the turn with a single Error
+  event; invalid Interject attachments are dropped with a bracketed note.
 - Tool approval: Lua guards can return `{ action = "ask" }` to suspend a tool
   call for human approval. Front-ends answer via `Spec.Approve` /
   `SessionOpts.Approve` (Telegram buttons, webui dialogs); the TUI shows an
