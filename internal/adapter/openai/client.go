@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -303,7 +304,7 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 		// any reasoning queued after the last in-loop drain is discarded.
 		// Reasoning is best-effort on a failed/cancelled turn, whose partial
 		// output the caller abandons anyway — matching the pre-funnel behavior.
-		return fmt.Errorf("llm: stream: %w", err)
+		return wrapStreamErr(err)
 	}
 
 	_ = stream.Close()
@@ -332,6 +333,20 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 
 	onEvent(llm.StreamEvent{Done: true})
 	return nil
+}
+
+// wrapStreamErr maps a stream.Err() into a returned error. A mid-stream EOF
+// (the provider closed the SSE connection with no terminating event — common on
+// out-of-credits/quota, rate limits, or an upstream proxy/timeout) gets a
+// clearer, actionable message; all other errors keep the generic wrap. The
+// original error is wrapped in both cases so errors.Is still works for callers.
+func wrapStreamErr(err error) error {
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
+		return fmt.Errorf("llm: the model stream ended early — the provider closed the connection mid-response. "+
+			"Common causes: out of credits/quota, a rate limit, or an upstream proxy/timeout. "+
+			"Check your provider balance and any .shell3/proxy-*.log: %w", err)
+	}
+	return fmt.Errorf("llm: stream: %w", err)
 }
 
 func toMessages(msgs []llm.Message) []openai.ChatCompletionMessageParamUnion {
