@@ -55,6 +55,12 @@ func newTelegramCommand() *cobra.Command {
 				return err
 			}
 			b := telegram.NewBot(client, rt, sess, chatID, tg.Dashboard.URL)
+			// Resolve send_media_telegram relative paths against the agent's workdir.
+			workDir := tg.WorkDir
+			if workDir == "" {
+				workDir = cwd
+			}
+			b.SetWorkDir(workDir)
 
 			// Register the "/" command hints (best-effort).
 			if err := client.SetCommands(ctx, telegram.BotCommands()); err != nil {

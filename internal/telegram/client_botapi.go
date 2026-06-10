@@ -3,6 +3,7 @@
 package telegram
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -191,6 +192,16 @@ func (c *botAPIClient) SetCommands(ctx context.Context, cmds []Command) error {
 		bc[i] = models.BotCommand{Command: cmd.Command, Description: cmd.Description}
 	}
 	_, err := c.b.SetMyCommands(ctx, &bot.SetMyCommandsParams{Commands: bc})
+	return err
+}
+
+// SendDocument uploads a file to the chat as a document.
+func (c *botAPIClient) SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string) error {
+	_, err := c.b.SendDocument(ctx, &bot.SendDocumentParams{
+		ChatID:   chatID,
+		Document: &models.InputFileUpload{Filename: filename, Data: bytes.NewReader(data)},
+		Caption:  caption,
+	})
 	return err
 }
 

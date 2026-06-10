@@ -21,6 +21,7 @@ type Bot struct {
 	approvalTimeout time.Duration // 0 → 5 min default; set in tests
 
 	dashURL    string
+	workDir    string // resolves relative paths for send_media_telegram
 	cancelTurn context.CancelFunc
 
 	// onUsage, if set, receives each completed turn's token totals (per turn,
@@ -43,8 +44,13 @@ func NewBot(client tgClient, rt *shell3.Runtime, sess *shell3.Session, chatID in
 		dashURL:   dashURL,
 	}
 	_ = sess.SetApprover(b.approve)
+	b.registerSendTool() // gives the agent send_media_telegram
 	return b
 }
+
+// SetWorkDir sets the directory used to resolve relative paths passed to
+// send_media_telegram (the agent's session workdir).
+func (b *Bot) SetWorkDir(dir string) { b.workDir = dir }
 
 // Run consumes inbound messages and the wake bus until ctx is cancelled.
 func (b *Bot) Run(ctx context.Context) {

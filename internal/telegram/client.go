@@ -54,4 +54,6 @@ type tgClient interface {
 	Typing(ctx context.Context, chatID int64) error
 	// AnswerCallback acknowledges a button press (stops the client spinner).
 	AnswerCallback(ctx context.Context, callbackID string) error
+	// SendDocument uploads a file to the chat with an optional caption.
+	SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string) error
 }

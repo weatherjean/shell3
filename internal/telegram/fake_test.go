@@ -12,6 +12,14 @@ type fakeClient struct {
 	mu   sync.Mutex
 	sent []sentMsg
 	next int
+	docs []sentDoc
+}
+
+type sentDoc struct {
+	chatID   int64
+	filename string
+	data     []byte
+	caption  string
 }
 
 type sentMsg struct {
@@ -24,6 +32,22 @@ type sentMsg struct {
 func newFakeClient() *fakeClient { return &fakeClient{in: make(chan Msg, 16)} }
 
 func (f *fakeClient) Updates(ctx context.Context) <-chan Msg { return f.in }
+
+func (f *fakeClient) SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.docs = append(f.docs, sentDoc{chatID: chatID, filename: filename, data: data, caption: caption})
+	return nil
+}
+
+func (f *fakeClient) lastDoc() (sentDoc, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.docs) == 0 {
+		return sentDoc{}, false
+	}
+	return f.docs[len(f.docs)-1], true
+}
 
 func (f *fakeClient) Send(ctx context.Context, chatID int64, text string, buttons []Button) (int, error) {
 	f.mu.Lock()
