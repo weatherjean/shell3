@@ -111,6 +111,10 @@ type App struct {
 	// onTab is fired when Tab is pressed while not busy. Nil = no-op.
 	onTab func()
 
+	// onInterject is fired when Enter is pressed while busy with plain (non-slash,
+	// non-!) text. If nil, the input is preserved (historical no-op behavior).
+	onInterject func(text string)
+
 	// Slash command registry. Keyed by lowercased name and each alias;
 	// multiple keys may point to the same SlashCommand value.
 	slash map[string]*SlashCommand
@@ -137,6 +141,12 @@ func (a *App) SetSubmit(fn SubmitFunc) { a.submit = fn }
 
 // SetTab registers the callback fired on Tab (ignored while busy).
 func (a *App) SetTab(fn func()) { a.onTab = fn }
+
+// SetInterject registers the callback fired when Enter is pressed while busy
+// with plain text in the editor (mid-turn steering). The callback runs on the
+// input goroutine and must not block; nil restores the historical
+// swallow-input-while-busy behavior.
+func (a *App) SetInterject(fn func(text string)) { a.onInterject = fn }
 
 // SetMode updates the agent badge shown in the status bar. Goroutine-safe.
 func (a *App) SetMode(name string) {

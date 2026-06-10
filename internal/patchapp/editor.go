@@ -33,13 +33,11 @@ func (a *App) processInput(data []byte) (exit bool) {
 			if i+len(pasteEnd) <= len(data) && string(data[i:i+len(pasteEnd)]) == pasteEnd {
 				a.ed.pasting = false
 				a.mu.Lock()
-				if !a.busy {
-					for _, r := range a.ed.pasteBuf {
-						a.insertChar(r)
-					}
-					a.syncDraftLocked()
-					a.render()
+				for _, r := range a.ed.pasteBuf {
+					a.insertChar(r)
 				}
+				a.syncDraftLocked()
+				a.render()
 				a.mu.Unlock()
 				a.ed.pasteBuf = a.ed.pasteBuf[:0]
 				i += len(pasteEnd)
@@ -90,11 +88,9 @@ func (a *App) processInput(data []byte) (exit bool) {
 			a.handleTab()
 		case keyAltEnter:
 			a.mu.Lock()
-			if !a.busy {
-				a.insertChar('\n')
-				a.syncDraftLocked()
-				a.render()
-			}
+			a.insertChar('\n')
+			a.syncDraftLocked()
+			a.render()
 			a.mu.Unlock()
 		case keyEscape:
 			a.mu.Lock()
@@ -119,7 +115,7 @@ func (a *App) processInput(data []byte) (exit bool) {
 			a.mu.Unlock()
 		case keyBackspace:
 			a.mu.Lock()
-			if !a.busy && a.ed.cursor > 0 {
+			if a.ed.cursor > 0 {
 				a.ed.input = append(a.ed.input[:a.ed.cursor-1], a.ed.input[a.ed.cursor:]...)
 				a.ed.cursor--
 				a.syncDraftLocked()
@@ -128,14 +124,14 @@ func (a *App) processInput(data []byte) (exit bool) {
 			a.mu.Unlock()
 		case keyLeft:
 			a.mu.Lock()
-			if !a.busy && a.ed.cursor > 0 {
+			if a.ed.cursor > 0 {
 				a.ed.cursor--
 				a.render()
 			}
 			a.mu.Unlock()
 		case keyRight:
 			a.mu.Lock()
-			if !a.busy && a.ed.cursor < len(a.ed.input) {
+			if a.ed.cursor < len(a.ed.input) {
 				a.ed.cursor++
 				a.render()
 			}
@@ -182,11 +178,9 @@ func (a *App) processInput(data []byte) (exit bool) {
 			a.mu.Unlock()
 		case keyChar:
 			a.mu.Lock()
-			if !a.busy {
-				a.insertChar(k.r)
-				a.syncDraftLocked()
-				a.render()
-			}
+			a.insertChar(k.r)
+			a.syncDraftLocked()
+			a.render()
 			a.mu.Unlock()
 		}
 	}
@@ -266,10 +260,10 @@ func (a *App) handleCtrlC() bool {
 }
 
 // handleTab fires the Tab callback (agent cycling) when idle, and is a no-op
-// while busy. Like handleEnter, it is part of the busy-gate: the callback
-// (tui.applyAgent) mutates the shared *chat.Config that the event-drain
-// goroutine reads during a turn. See handleEnter's busy-gate note and
-// busygate_test.go, which lock this behaviour in place.
+// while busy. Tab remains fully gated: the callback (tui.applyAgent) mutates
+// the shared *chat.Config that the event-drain goroutine reads during a turn —
+// the same concurrency contract as slash commands. See handleEnter's busy-gate
+// note and busygate_test.go, which lock this behaviour in place.
 func (a *App) handleTab() {
 	a.mu.Lock()
 	busy := a.busy
@@ -282,21 +276,53 @@ func (a *App) handleTab() {
 
 // handleEnter dispatches the input to the SubmitFunc (or shell exec for !).
 //
-// BUSY-GATE (load-bearing): the early return while a.busy is what makes the
-// whole TUI's lock-free sharing of *chat.Config safe. SubmitFunc launches a
-// turn and the slash handlers mutate cfg/lastUsage with NO mutex; the long-lived
-// event-drain goroutine reads the same fields throughout a turn. They never race
-// only because this gate prevents any submit/slash dispatch while a turn is in
-// flight (busy is set for the turn's whole duration and cleared by the drain on
-// the terminal event). Removing or weakening this check reintroduces a data race
-// on cfg — see internal/tui/interactive.go's CONCURRENCY INVARIANT and the
-// busy-gate tests that pin this behaviour.
+// BUSY-GATE (load-bearing): while a turn is in flight (a.busy), SubmitFunc,
+// slash commands, ! shell execution, and Tab are all gated — the shared
+// *chat.Config and *lastUsage are written by the drain goroutine throughout
+// the turn with NO mutex, and they must not be read or mutated concurrently
+// (see internal/tui/interactive.go's CONCURRENCY INVARIANT and busygate_test.go).
+// Removing or weakening those gates reintroduces a data race on cfg/lastUsage.
+//
+// While busy, plain-text Enter is routed to onInterject instead of SubmitFunc.
+// Session.Interject is concurrency-safe (mutex-guarded inbox), so plain-text
+// Enter while busy does not break the gate invariant. Slash commands and !
+// remain fully gated because their handlers mutate cfg/lastUsage.
 func (a *App) handleEnter() {
 	a.mu.Lock()
-	if a.busy {
+	busy := a.busy
+	if busy {
+		line := strings.TrimRight(string(a.ed.input), " \t\n")
+		trimmed := strings.TrimSpace(line)
+		fn := a.onInterject
 		a.mu.Unlock()
+
+		// Empty input while busy: no-op.
+		if trimmed == "" {
+			return
+		}
+
+		// Slash or ! command while busy: print a dim notice and keep the input
+		// intact. These handlers mutate cfg/lastUsage and must stay gated.
+		if strings.HasPrefix(trimmed, "/") || strings.HasPrefix(trimmed, "!") {
+			a.PrintLine(patchtui.Dim + "[busy — commands run after the turn finishes]" + patchtui.Reset)
+			return
+		}
+
+		// Plain text while busy: route to onInterject if registered.
+		if fn != nil {
+			a.mu.Lock()
+			a.ed.input = a.ed.input[:0]
+			a.ed.cursor = 0
+			a.ed.historyDraft = a.ed.historyDraft[:0]
+			a.render()
+			a.mu.Unlock()
+			fn(trimmed)
+			a.PrintLine(patchtui.Dim + "[steering: " + trimmed + "]" + patchtui.Reset)
+		}
+		// nil onInterject: preserve input (no-op).
 		return
 	}
+
 	line := strings.TrimRight(string(a.ed.input), " \t\n")
 	a.ed.input = a.ed.input[:0]
 	a.ed.cursor = 0
