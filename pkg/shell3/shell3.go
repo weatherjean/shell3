@@ -600,10 +600,13 @@ func (s *Session) Name() string { return s.name }
 // no runtime (e.g. a closed session), in which case a host select on it simply
 // never fires. Multi-session hosts should use Runtime.Events() directly.
 func (s *Session) WakeEvents() <-chan HostEvent {
-	if s.runtime == nil {
+	s.mu.Lock()
+	rt := s.runtime
+	s.mu.Unlock()
+	if rt == nil {
 		return nil
 	}
-	return s.runtime.Events()
+	return rt.Events()
 }
 
 // Close ends the conversation: cancels any in-flight turn, waits for it to
@@ -667,9 +670,16 @@ func (s *Session) doClose() error {
 	}
 	s.sinkCleanup()
 	s.cleanup()
-	if s.runtime != nil {
-		rt := s.runtime
-		s.runtime = nil
+	// Capture and nil s.runtime under s.mu so a concurrent WakeEvents() reader
+	// (a public accessor bot binaries call) never races this write. Only the
+	// field access is locked: rt.forget/rt.cleanup run after the unlock, since
+	// holding s.mu across them is unnecessary and could invite a lock-order
+	// deadlock with the runtime's own locking.
+	s.mu.Lock()
+	rt := s.runtime
+	s.runtime = nil
+	s.mu.Unlock()
+	if rt != nil {
 		rt.forget(s.name)
 		if s.ownsRuntime {
 			// Start-owned runtime: no public handle exists, so this is the only

@@ -906,6 +906,87 @@ func TestWake_OtherSessionIgnored(t *testing.T) {
 	}
 }
 
+// TestWake_BusyTurnNoOverlap is the core serialization invariant: when a turn is
+// already in flight (the turnGate is busy) and a Wake arrives for the active
+// session, the consumer must NOT start an overlapping turn — RunQueued is not
+// called and no second "[woke...]" notice is rendered. The running turn drains
+// the inbox itself; consumeWakesWith just drops the wake (runTurn returns false).
+//
+// To force the gate-busy path deterministically we drive consumeWakesWith with
+// the same runTurn closure RunInteractive/consumeWakes build, but pre-acquire the
+// shared turnGate so begin() returns false for the incoming wake. The gate is
+// released only after the assertion window, modelling an in-flight turn.
+func TestWake_BusyTurnNoOverlap(t *testing.T) {
+	app := &fakeApp{}
+	bus := make(chan shell3.HostEvent, 1)
+	sess := &fakeSession{
+		name:      "main",
+		wakeBus:   bus,
+		runQueued: []shell3.Event{{Kind: shell3.SystemReminder, Text: "should never run"}, {Kind: shell3.Done}},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Build the same gate + runTurn the loop uses, then occupy the gate to model
+	// a turn already in flight. runTurn must return false for the wake below.
+	var lastUsage usage
+	renderSink, finishTurn := newRenderSink(app, &lastUsage)
+	gate := &turnGate{}
+	var turnWG sync.WaitGroup
+	runTurn := func(start func(context.Context) <-chan shell3.Event) bool {
+		if !gate.begin() {
+			return false
+		}
+		turnCtx, c := context.WithCancel(ctx)
+		app.SetBusy(true, c)
+		ch := start(turnCtx)
+		turnWG.Add(1)
+		go func() {
+			defer turnWG.Done()
+			defer gate.end()
+			defer c()
+			defer func() { finishTurn(turnCtx.Err() != nil) }()
+			for ev := range ch {
+				renderSink(ev)
+			}
+		}()
+		return true
+	}
+
+	// Occupy the gate: a turn is "in flight" (begin returns true here; the wake's
+	// begin will then return false). We release it after the assertion window.
+	if !gate.begin() {
+		t.Fatal("precondition: gate should start idle")
+	}
+
+	done := make(chan struct{})
+	go func() { defer close(done); consumeWakesWith(ctx, sess, app, runTurn) }()
+
+	bus <- shell3.HostEvent{Session: "main", Kind: shell3.Wake}
+
+	// Give the consumer time to (incorrectly) act on the wake while busy.
+	time.Sleep(50 * time.Millisecond)
+
+	sess.mu.Lock()
+	n := sess.runQueuedCalls
+	sess.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("RunQueued must not run while a turn is in flight, called %d times", n)
+	}
+	// No "[woke...]" notice should have been printed for the ignored wake.
+	for _, c := range app.snapshot() {
+		if strings.Contains(c, "[woke") {
+			t.Fatalf("ignored busy wake printed a woke notice:\n%s", strings.Join(app.snapshot(), "\n"))
+		}
+	}
+
+	gate.end() // release the in-flight turn
+	cancel()
+	<-done
+	turnWG.Wait()
+}
+
 // ── approval wiring ────────────────────────────────────────────────────────────
 
 func TestFormatApprovalQuestion_RendersAgentToolArgsReason(t *testing.T) {
