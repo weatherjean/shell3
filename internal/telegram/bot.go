@@ -22,7 +22,14 @@ type Bot struct {
 
 	dashURL    string
 	cancelTurn context.CancelFunc
+
+	// onUsage, if set, receives each completed turn's token totals (per turn,
+	// not accumulated). Wired by the host to a dashboard usage store.
+	onUsage func(prompt, completion, total int)
 }
+
+// SetUsageRecorder registers a callback invoked with each turn's token totals.
+func (b *Bot) SetUsageRecorder(fn func(prompt, completion, total int)) { b.onUsage = fn }
 
 // NewBot wires a Bot. sess must be the runtime's persistent "telegram" session.
 // dashURL is the URL to the dashboard (empty to disable).
@@ -81,7 +88,7 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 	turnCtx, cancel := context.WithCancel(ctx)
 	b.cancelTurn = cancel
 	ch := b.sess.SendParts(turnCtx, m.Text, parts)
-	reply := drainToReply(ch)
+	reply := b.drainTurn(ch)
 	b.cancelTurn = nil
 	cancel()
 	b.sendReply(ctx, reply)
@@ -102,7 +109,7 @@ func (b *Bot) consumeWakes(ctx context.Context) {
 			if ev.Kind != shell3.Wake || ev.Session != b.sess.Name() {
 				continue
 			}
-			reply := drainToReply(b.sess.RunQueued(ctx))
+			reply := b.drainTurn(b.sess.RunQueued(ctx))
 			if reply != "" {
 				b.sendReply(ctx, reply)
 			}

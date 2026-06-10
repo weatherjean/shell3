@@ -94,6 +94,16 @@
   .card .agent { font-weight: 700; }
   .card .task { color: var(--text); font-size: 14px; }
   .card .preview { margin-top: 8px; font-family: var(--mono); font-size: 12px; color: var(--hint); white-space: pre-wrap; }
+  details.card > summary { list-style: none; cursor: pointer; }
+  details.card > summary::-webkit-details-marker { display: none; }
+  .card.sess { cursor: pointer; }
+  .subbody { margin-top: 10px; border-top: 1px solid color-mix(in srgb, var(--hint) 18%, transparent); padding-top: 8px; }
+  .back { appearance: none; border: 0; background: var(--sec); color: var(--text); font: inherit; font-weight: 600;
+    padding: 6px 12px; border-radius: 8px; cursor: pointer; margin-bottom: 10px; }
+  .usage { display: flex; gap: 8px; margin: 6px 0 8px; }
+  .usage .u { flex: 1; background: var(--sec); border-radius: 10px; padding: 8px; text-align: center; }
+  .usage .u .n { font-weight: 700; font-size: 16px; display: block; }
+  .usage .u .l { font-size: 11px; color: var(--hint); text-transform: uppercase; letter-spacing: .04em; }
   .badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 8px; text-transform: uppercase; letter-spacing: .03em; }
   .badge.running { background: #f5a623; color: #1a1a1a; }
   .badge.finished { background: #34c759; color: #06280f; }
@@ -124,11 +134,13 @@
   <button data-tab="chat" class="active">Chat<span class="count" id="c-chat" hidden></span></button>
   <button data-tab="subs">Subagents<span class="count" id="c-subs" hidden></span></button>
   <button data-tab="status">Status</button>
+  <button data-tab="past">Past</button>
 </nav>
 <main>
   <section id="chat" class="view active"><div class="empty">loading…</div></section>
   <section id="subs" class="view"><div class="empty">loading…</div></section>
   <section id="status" class="view"><div class="empty">loading…</div></section>
+  <section id="past" class="view"><div class="empty">loading…</div></section>
 </main>
 
 <script>
@@ -145,7 +157,7 @@ async function api(path) {
 const esc = s => (s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 
 let active = "chat";
-const views = { chat: document.getElementById("chat"), subs: document.getElementById("subs"), status: document.getElementById("status") };
+const views = { chat: document.getElementById("chat"), subs: document.getElementById("subs"), status: document.getElementById("status"), past: document.getElementById("past") };
 const main = document.querySelector("main");
 
 document.querySelectorAll("nav button").forEach(b => {
@@ -153,9 +165,33 @@ document.querySelectorAll("nav button").forEach(b => {
     active = b.dataset.tab;
     document.querySelectorAll("nav button").forEach(x => x.classList.toggle("active", x === b));
     Object.keys(views).forEach(k => views[k].classList.toggle("active", k === active));
-    refresh();
+    refresh(true);
   };
 });
+
+// Shared message renderers (used by chat, subagent transcripts, past sessions).
+const bubble = (role, content) => {
+  const r = role === "user" ? "user" : role === "assistant" ? "assistant" : "system";
+  return `<div class="msg ${r}"><div class="bubble">${esc(content)}</div></div>`;
+};
+const thinkBlock = text =>
+  `<details class="tool think"><summary><span class="chev">▸</span><span class="tname">💭 Thinking</span></summary><pre>${esc(text)}</pre></details>`;
+
+// renderTranscript renders a subagent's lossless event log (tool calls paired
+// with results, reasoning, and messages).
+function renderTranscript(evs) {
+  const results = {};
+  evs.forEach(e => { if (e.kind === "tool_result" && e.call_id) results[e.call_id] = e.output; });
+  return evs.map(e => {
+    switch (e.kind) {
+      case "user_message": return e.text ? bubble("user", e.text) : "";
+      case "assistant_message": return e.text ? bubble("assistant", e.text.trim()) : "";
+      case "assistant_reasoning": return e.text ? thinkBlock(e.text) : "";
+      case "tool_call": return toolBlock(e.tool, e.input, results[e.call_id]);
+      default: return ""; // skip tokens, usage, lifecycle
+    }
+  }).join("") || '<div class="empty">no transcript yet</div>';
+}
 
 // ---- Chat -----------------------------------------------------------------
 function prettyJSON(s) { try { return JSON.stringify(JSON.parse(s), null, 2); } catch (e) { return s || ""; } }
@@ -208,16 +244,35 @@ function renderChat(hist) {
 }
 
 // ---- Subagents ------------------------------------------------------------
+let subsSig = null;
 function renderSubs(subs) {
   const badge = document.getElementById("c-subs");
   badge.textContent = subs.length; badge.hidden = subs.length === 0;
+  // Idle-safe: don't clobber an open transcript on every poll.
+  const sig = subs.map(s => `${s.id}:${s.status}:${(s.result||"").length}`).join("|");
+  if (sig === subsSig) return;
+  subsSig = sig;
   if (!subs.length) { views.subs.innerHTML = '<div class="empty">No subagents spawned.</div>'; return; }
   views.subs.innerHTML = subs.map(s => `
-    <div class="card">
-      <div class="row"><span class="agent">${esc(s.agent)}</span><span class="badge ${esc(s.status)}">${esc(s.status)}</span></div>
-      <div class="task">${esc(s.task)}</div>
-      ${s.result ? `<div class="preview">${esc(s.result)}</div>` : ""}
-    </div>`).join("");
+    <details class="card subcard" data-id="${esc(s.id)}">
+      <summary>
+        <div class="row"><span class="agent">${esc(s.agent)}</span><span class="badge ${esc(s.status)}">${esc(s.status)}</span></div>
+        <div class="task">${esc(s.task)}</div>
+        ${s.result ? `<div class="preview">${esc(s.result)}</div>` : ""}
+      </summary>
+      <div class="subbody"><div class="empty">tap to load transcript…</div></div>
+    </details>`).join("");
+  // Lazy-load each subagent's transcript when expanded.
+  views.subs.querySelectorAll("details.subcard").forEach(d => {
+    d.addEventListener("toggle", async () => {
+      if (!d.open || d.dataset.loaded) return;
+      d.dataset.loaded = "1";
+      const body = d.querySelector(".subbody");
+      try {
+        body.innerHTML = renderTranscript(await api("/api/subagent?id=" + encodeURIComponent(d.dataset.id)));
+      } catch (e) { body.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+    });
+  });
 }
 
 // ---- Status ---------------------------------------------------------------
@@ -229,6 +284,14 @@ function renderStatus(st) {
     const tag = (!p.value && p.default) ? '<span class="def">default</span>' : "";
     return `<div class="param"><span class="pname">${esc(p.name)}</span><span class="pval">${esc(val)}${tag}</span></div>`;
   }).join("");
+  const u = st.usage;
+  const usage = u ? `
+    <div class="section-title">Last turn</div>
+    <div class="usage">
+      <div class="u"><span class="n">${(u.prompt||0).toLocaleString()}</span><span class="l">prompt</span></div>
+      <div class="u"><span class="n">${(u.completion||0).toLocaleString()}</span><span class="l">completion</span></div>
+      <div class="u"><span class="n">${(u.total||0).toLocaleString()}</span><span class="l">total</span></div>
+    </div>` : "";
   views.status.innerHTML = `
     <dl class="kv">
       <dt>Agent</dt><dd>${esc(st.agent)}</dd>
@@ -236,22 +299,49 @@ function renderStatus(st) {
       <dt>Context</dt><dd>${(st.context_window || 0).toLocaleString()} tokens</dd>
       <dt>Project</dt><dd>${esc(st.project_ref) || "—"}</dd>
     </dl>
+    ${usage}
     <div class="section-title">Tools</div><div class="chips">${tools}</div>
     <div class="section-title">Skills</div><div class="chips">${skills}</div>
     ${params ? `<div class="section-title">Parameters</div>${params}` : ""}`;
 }
 
+// ---- Past sessions --------------------------------------------------------
+let pastSel = null;
+async function renderPast() {
+  if (pastSel) {
+    const turns = await api("/api/session?id=" + encodeURIComponent(pastSel));
+    const body = turns.length
+      ? turns.map(t => t.role === "tool"
+          ? `<details class="tool"><summary><span class="chev">▸</span><span class="tname">🔧 ${esc(t.tool_name) || "tool"}</span></summary><pre>${esc(t.content) || "(no output)"}</pre></details>`
+          : bubble(t.role, (t.content || "").trim())).join("")
+      : '<div class="empty">empty conversation</div>';
+    views.past.innerHTML = `<button class="back">← all conversations</button>${body}`;
+    views.past.querySelector(".back").onclick = () => { pastSel = null; renderPast(); };
+  } else {
+    const list = await api("/api/sessions");
+    views.past.innerHTML = list.length
+      ? list.map(s => `<div class="card sess" data-id="${s.id}">
+          <div class="row"><span class="agent">#${s.id}</span><span class="badge finished">${s.num_msgs} msgs</span></div>
+          <div class="task">${esc(s.preview) || "(no preview)"}</div>
+          <div class="preview">${esc(s.started_at)}</div>
+        </div>`).join("")
+      : '<div class="empty">No past conversations.</div>';
+    views.past.querySelectorAll(".sess").forEach(c => c.onclick = () => { pastSel = c.dataset.id; renderPast(); });
+  }
+}
+
 // ---- Poll loop ------------------------------------------------------------
-async function refresh() {
+async function refresh(force) {
   try {
     if (active === "chat") renderChat(await api("/api/history"));
     else if (active === "subs") renderSubs(await api("/api/subagents"));
     else if (active === "status") renderStatus(await api("/api/status"));
+    else if (active === "past" && force) await renderPast();
   } catch (e) {
     views[active].innerHTML = `<div class="err">⚠️ ${esc(e.message)}<br><small>open from inside Telegram to authenticate</small></div>`;
   }
 }
-refresh();
+refresh(true);
 setInterval(refresh, 4000);
 </script>
 </body>

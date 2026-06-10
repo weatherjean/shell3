@@ -61,7 +61,10 @@ func newTelegramCommand() *cobra.Command {
 			}
 
 			if tg.Dashboard.Enabled && tg.Dashboard.Addr != "" {
+				usage := web.NewUsageStore()
+				b.SetUsageRecorder(usage.Set)
 				srv := web.NewServer(rt, sess, tg.Token, chatID)
+				srv.SetUsage(usage)
 				go func() {
 					_ = startDashboard(ctx, tg.Dashboard.Addr, srv.Handler())
 				}()

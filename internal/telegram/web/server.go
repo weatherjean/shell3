@@ -5,6 +5,7 @@ package web
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/weatherjean/shell3/pkg/shell3"
@@ -16,6 +17,7 @@ type Server struct {
 	rt       *shell3.Runtime // retained for future SSE fan-out
 	token    string
 	chatID   int64
+	usage    *UsageStore                         // nil → no usage shown
 	validate func(initData string) (int64, bool) // seam for tests
 }
 
@@ -28,12 +30,18 @@ func NewServer(rt *shell3.Runtime, sess *shell3.Session, token string, chatID in
 	return s
 }
 
+// SetUsage attaches a usage store so /api/status reports the last turn's tokens.
+func (s *Server) SetUsage(u *UsageStore) { s.usage = u }
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/api/history", s.auth(s.handleHistory))
 	mux.HandleFunc("/api/subagents", s.auth(s.handleSubagents))
+	mux.HandleFunc("/api/subagent", s.auth(s.handleSubagent))
 	mux.HandleFunc("/api/status", s.auth(s.handleStatus))
+	mux.HandleFunc("/api/sessions", s.auth(s.handleSessions))
+	mux.HandleFunc("/api/session", s.auth(s.handleSession))
 	mux.HandleFunc("/api/stream", s.auth(s.handleStream))
 	return mux
 }
@@ -92,13 +100,20 @@ func (s *Server) handleSubagents(w http.ResponseWriter, r *http.Request) {
 }
 
 type statusResp struct {
-	Agent         string   `json:"agent"`
-	Model         string   `json:"model"`
-	ContextWindow int      `json:"context_window"`
-	ProjectRef    string   `json:"project_ref"`
-	Tools         []string `json:"tools"`
-	Skills        []string `json:"skills"`
-	Params        []param  `json:"params"`
+	Agent         string     `json:"agent"`
+	Model         string     `json:"model"`
+	ContextWindow int        `json:"context_window"`
+	ProjectRef    string     `json:"project_ref"`
+	Tools         []string   `json:"tools"`
+	Skills        []string   `json:"skills"`
+	Params        []param    `json:"params"`
+	Usage         *usageResp `json:"usage,omitempty"`
+}
+
+type usageResp struct {
+	Prompt     int `json:"prompt"`
+	Completion int `json:"completion"`
+	Total      int `json:"total"`
 }
 
 type param struct {
@@ -122,6 +137,60 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, p := range snap.Params {
 		out.Params = append(out.Params, param{Name: p.Name, Value: p.Value, Default: p.Default, Enum: p.Enum})
+	}
+	if s.usage != nil {
+		if p, c, t, ok := s.usage.snapshot(); ok {
+			out.Usage = &usageResp{Prompt: p, Completion: c, Total: t}
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+// handleSubagent returns one subagent's full transcript (?id=<id>).
+func (s *Server) handleSubagent(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	evs, err := s.rt.SubagentTranscript(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if evs == nil {
+		evs = []shell3.TranscriptEvent{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(evs)
+}
+
+// handleSessions lists past stored conversations (newest first).
+func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
+	sess, err := s.rt.PastSessions(50)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if sess == nil {
+		sess = []shell3.SessionMeta{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(sess)
+}
+
+// handleSession returns the turns of one past conversation (?id=<n>).
+func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad id", http.StatusBadRequest)
+		return
+	}
+	turns, err := s.rt.SessionTurns(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	out := make([]historyEntry, 0, len(turns))
+	for _, t := range turns {
+		out = append(out, historyEntry{Role: t.Role, Content: t.Content})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)

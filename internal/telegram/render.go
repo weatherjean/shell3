@@ -28,6 +28,27 @@ func drainToReply(ch <-chan shell3.Event) string {
 	return strings.TrimSpace(b.String())
 }
 
+// drainTurn is drainToReply plus per-turn usage capture: the Done event carries
+// the turn's cumulative token totals, which it reports to onUsage (if set).
+func (b *Bot) drainTurn(ch <-chan shell3.Event) string {
+	var sb strings.Builder
+	for ev := range ch {
+		switch ev.Kind {
+		case shell3.Token:
+			sb.WriteString(ev.Text)
+		case shell3.Error:
+			if ev.Err != nil {
+				sb.WriteString("\n⚠️ " + ev.Err.Error())
+			}
+		case shell3.Done:
+			if b.onUsage != nil {
+				b.onUsage(ev.PromptTokens, ev.CompletionTokens, ev.TotalTokens)
+			}
+		}
+	}
+	return strings.TrimSpace(sb.String())
+}
+
 // chunk splits s into pieces no longer than max bytes, preferring newline
 // boundaries.
 func chunk(s string, max int) []string {

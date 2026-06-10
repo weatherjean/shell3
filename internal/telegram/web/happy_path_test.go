@@ -110,6 +110,57 @@ func TestStatusAndSubagents_AuthAndShape(t *testing.T) {
 	}
 }
 
+// TestNewEndpoints_AuthAndShape covers the subagent/sessions/session endpoints
+// and usage in /api/status.
+func TestNewEndpoints_AuthAndShape(t *testing.T) {
+	const token = "test-bot-token"
+	const chatID int64 = 8701499393
+
+	rt := shell3.NewRuntimeForTest(t, "ok")
+	sess, err := rt.Session(shell3.SessionOpts{Name: "telegram", Agent: "code"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := NewServer(rt, sess, token, chatID)
+	us := NewUsageStore()
+	us.Set(120, 30, 150)
+	srv.SetUsage(us)
+	signed := signInitData(t, token, `{"id":8701499393,"first_name":"T"}`)
+
+	get := func(path string) *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("X-Init-Data", signed)
+		srv.Handler().ServeHTTP(rr, req)
+		return rr
+	}
+
+	// All gated.
+	for _, p := range []string{"/api/subagents", "/api/subagent?id=a1", "/api/sessions", "/api/session?id=1"} {
+		rr := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, p, nil))
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("%s without auth: want 401, got %d", p, rr.Code)
+		}
+	}
+	// Empty subagent transcript (no audit file) → 200 [].
+	if rr := get("/api/subagent?id=a1"); rr.Code != http.StatusOK || strings.TrimSpace(rr.Body.String()) != "[]" {
+		t.Fatalf("subagent transcript: got %d %q", rr.Code, rr.Body.String())
+	}
+	// Bad subagent id → 400.
+	if rr := get("/api/subagent?id=../etc"); rr.Code != http.StatusBadRequest {
+		t.Fatalf("bad subagent id: want 400, got %d", rr.Code)
+	}
+	// Sessions list (nil store in test runtime → 200 []).
+	if rr := get("/api/sessions"); rr.Code != http.StatusOK || strings.TrimSpace(rr.Body.String()) != "[]" {
+		t.Fatalf("sessions: got %d %q", rr.Code, rr.Body.String())
+	}
+	// Usage surfaces in status.
+	if rr := get("/api/status"); rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"total":150`) {
+		t.Fatalf("status usage: got %d %q", rr.Code, rr.Body.String())
+	}
+}
+
 // TestHistory_WrongUserRejected confirms a validly-signed payload for a
 // different user id is still rejected (the chat-id binding holds).
 func TestHistory_WrongUserRejected(t *testing.T) {
