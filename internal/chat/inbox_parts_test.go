@@ -36,6 +36,26 @@ func TestRunParts_UserMessageCarriesParts(t *testing.T) {
 	}
 }
 
+// TestRunParts_EmptyText_NoEmptyTextPart: RunParts with empty input text and
+// media parts must not prepend an empty text part — some providers reject
+// empty text content parts. ContentParts carries the media only.
+func TestRunParts_EmptyText_NoEmptyTextPart(t *testing.T) {
+	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
+	sess, _ := newCollectorSession(SessionOpts{})
+	img, _, err := MediaPartFromBytes(pngBytes(t, 2, 2), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, Log: LogOrNoop(nil)}
+	sess.RunParts(context.Background(), cfg, "", []llm.ContentPart{img})
+
+	msgs := fake.Calls[0].Msgs
+	last := msgs[len(msgs)-1]
+	if len(last.ContentParts) != 1 || last.ContentParts[0].Type != llm.ContentPartTypeImageURL {
+		t.Fatalf("ContentParts = %+v, want [image] with no empty text part", last.ContentParts)
+	}
+}
+
 // TestRunParts_NoParts_PlainMessage: RunParts(nil) and Run produce the
 // historical plain user message (no ContentParts) — byte-compatible requests.
 func TestRunParts_NoParts_PlainMessage(t *testing.T) {

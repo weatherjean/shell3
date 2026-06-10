@@ -18,6 +18,8 @@ import (
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
 )
 
+// pngBytes duplicates internal/chat/media_bytes_test.go's helper of the same
+// name (test helpers can't be shared across packages without exporting).
 func pngBytes(t *testing.T, w, h int) []byte {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
@@ -108,6 +110,20 @@ func TestSendParts_InvalidPartErrorsAndStaysUsable(t *testing.T) {
 		}
 		if len(evs) != 1 || evs[0].Kind != Error || evs[0].Err == nil {
 			t.Fatalf("case %d: want single Error event, got %+v", i, evs)
+		}
+		// The package prefix must be outermost, exactly once:
+		// "shell3: part 0: <reason>", never "part 0: shell3: <reason>".
+		msg := evs[0].Err.Error()
+		if !strings.HasPrefix(msg, "shell3: part 0: ") {
+			t.Fatalf("case %d: error %q must start with %q", i, msg, "shell3: part 0: ")
+		}
+		if strings.Contains(strings.TrimPrefix(msg, "shell3: "), "shell3:") {
+			t.Fatalf("case %d: error %q nests the shell3: prefix", i, msg)
+		}
+	}
+	for ev := range s.SendParts(context.Background(), "x", []Part{{Kind: PartImage}}) {
+		if got, want := ev.Err.Error(), "shell3: part 0: part sets neither Path nor Data"; got != want {
+			t.Fatalf("rendered error = %q, want %q", got, want)
 		}
 	}
 	if client.CallCount() != 0 {

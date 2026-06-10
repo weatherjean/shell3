@@ -36,7 +36,9 @@ func (s *Session) SetMessages(msgs []llm.Message) {
 
 // RunParts executes one user→assistant turn whose user message carries media
 // parts alongside the prompt text. With parts the message gets
-// ContentParts = [text(input), parts...]; Content stays set to input for
+// ContentParts = [text(input), parts...] — the text part is omitted when
+// input is empty, since some providers reject empty text content parts.
+// Content stays set to input for
 // history rows and the user_message audit event (the openai adapter sends
 // ContentParts and ignores Content when both are present). Emits the
 // user_message event, runs the turn loop, and (if cfg.Store is non-nil)
@@ -55,7 +57,9 @@ func (s *Session) RunParts(ctx context.Context, cfg TurnConfig, input string, pa
 	userMsg := llm.Message{Role: llm.RoleUser, Content: input}
 	if len(parts) > 0 {
 		cps := make([]llm.ContentPart, 0, len(parts)+1)
-		cps = append(cps, llm.ContentPart{Type: llm.ContentPartTypeText, Text: input})
+		if input != "" { // some providers reject empty text parts
+			cps = append(cps, llm.ContentPart{Type: llm.ContentPartTypeText, Text: input})
+		}
 		cps = append(cps, parts...)
 		userMsg.ContentParts = cps
 	}
