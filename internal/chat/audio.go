@@ -13,7 +13,18 @@ import (
 const maxAudioBytes = 25 << 20 // 25 MB
 
 var supportedAudioExts = map[string]bool{
-	".wav": true, ".mp3": true,
+	".wav": true, ".mp3": true, ".ogg": true, ".oga": true, ".opus": true,
+}
+
+// audioExtFormat maps a file extension (no dot) to the input_audio wire format
+// string. Opus-carrying containers (oga/opus) report as "ogg".
+func audioExtFormat(ext string) string {
+	switch ext {
+	case "oga", "opus":
+		return "ogg"
+	default:
+		return ext
+	}
 }
 
 // loadAudioPart resolves path against workDir, validates the extension and size,
@@ -27,7 +38,7 @@ func loadAudioPart(path, workDir string) (llm.ContentPart, string, error) {
 
 	ext := strings.ToLower(filepath.Ext(path))
 	if !supportedAudioExts[ext] {
-		return llm.ContentPart{}, "", fmt.Errorf("unsupported audio type %q — use wav or mp3", ext)
+		return llm.ContentPart{}, "", fmt.Errorf("unsupported audio type %q — use wav, mp3, or ogg/opus", ext)
 	}
 
 	info, err := os.Stat(path)
@@ -43,7 +54,7 @@ func loadAudioPart(path, workDir string) (llm.ContentPart, string, error) {
 		return llm.ContentPart{}, "", fmt.Errorf(`cannot read "%s": %w`, path, err)
 	}
 
-	return audioPartFromBytes(raw, strings.TrimPrefix(ext, "."))
+	return audioPartFromBytes(raw, audioExtFormat(strings.TrimPrefix(ext, ".")))
 }
 
 // audioPartFromBytes validates the size cap and wraps raw audio bytes as a

@@ -53,7 +53,7 @@ func TestLoadAudioPart_WAV(t *testing.T) {
 }
 
 func TestLoadAudioPart_Unsupported(t *testing.T) {
-	_, _, err := loadAudioPart("/tmp/clip.ogg", "")
+	_, _, err := loadAudioPart("/tmp/clip.flac", "")
 	if err == nil || !strings.Contains(err.Error(), "unsupported") {
 		t.Errorf("want unsupported error, got %v", err)
 	}

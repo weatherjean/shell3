@@ -54,8 +54,10 @@ func MediaPartFromBytes(data []byte, mime string) (llm.ContentPart, string, erro
 		return audioPartFromBytes(data, "wav")
 	case "audio/mpeg", "audio/mp3":
 		return audioPartFromBytes(data, "mp3")
+	case "audio/ogg", "audio/opus", "audio/oga", "audio/x-opus+ogg":
+		return audioPartFromBytes(data, "ogg")
 	default:
-		return llm.ContentPart{}, "", fmt.Errorf("unsupported MIME type %q — use image/jpeg, image/png, image/gif, image/webp, audio/wav, or audio/mpeg", mime)
+		return llm.ContentPart{}, "", fmt.Errorf("unsupported MIME type %q — use image/jpeg, image/png, image/gif, image/webp, audio/wav, audio/mpeg, or audio/ogg", mime)
 	}
 }
 

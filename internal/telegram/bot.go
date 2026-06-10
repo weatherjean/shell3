@@ -76,6 +76,15 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 		return
 	}
 	parts := mediaToParts(m.Media)
+	// Never send the agent an empty turn. If the message carried only an
+	// attachment the engine can't ingest (e.g. a PDF or video), tell the user
+	// instead of pushing a contentless prompt.
+	if strings.TrimSpace(m.Text) == "" && len(parts) == 0 {
+		if len(m.Media) > 0 {
+			b.sendReply(ctx, "⚠️ I can't read that attachment — send text, an image, or audio (voice notes, wav/mp3/ogg).")
+		}
+		return
+	}
 	// HasQueuedInput reports inbox state. In the single-chat v1 flow, handleMsg
 	// is serial, so a running turn blocks here until the channel drains.
 	// HasQueuedInput catches the case where a wake/cron item is already queued.

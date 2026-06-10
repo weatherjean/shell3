@@ -67,10 +67,23 @@ func resolveMedia(ctx context.Context, c *botAPIClient, m *models.Message) []Med
 		}
 	}
 
-	// Voice note.
+	// Voice note (always OGG/Opus; MimeType is sometimes empty).
 	if m.Voice != nil {
 		if m.Voice.FileSize <= maxMediaBytes {
-			if media, ok := c.downloadFile(ctx, m.Voice.FileID, m.Voice.MimeType); ok {
+			mime := m.Voice.MimeType
+			if mime == "" {
+				mime = "audio/ogg"
+			}
+			if media, ok := c.downloadFile(ctx, m.Voice.FileID, mime); ok {
+				out = append(out, media)
+			}
+		}
+	}
+
+	// Audio file (e.g. an mp3 sent as music).
+	if m.Audio != nil {
+		if m.Audio.FileSize <= maxMediaBytes {
+			if media, ok := c.downloadFile(ctx, m.Audio.FileID, m.Audio.MimeType); ok {
 				out = append(out, media)
 			}
 		}

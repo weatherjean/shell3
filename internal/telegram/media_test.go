@@ -25,6 +25,14 @@ func TestMediaToParts_ImageAndAudio(t *testing.T) {
 	}
 }
 
+func TestMediaToParts_VoiceOggAccepted(t *testing.T) {
+	// Telegram voice note: OGG/Opus, sometimes with a charset-style suffix.
+	parts := mediaToParts([]Media{{Bytes: []byte("OggS"), MIME: "audio/ogg; codecs=opus"}})
+	if len(parts) != 1 || parts[0].Kind != shell3.PartAudio || parts[0].MIME != "audio/ogg" {
+		t.Fatalf("want 1 audio part (audio/ogg), got %+v", parts)
+	}
+}
+
 func TestMediaToParts_UnsupportedDropped(t *testing.T) {
 	parts := mediaToParts([]Media{{Bytes: []byte("x"), MIME: "application/pdf"}})
 	if len(parts) != 0 {
