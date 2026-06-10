@@ -141,6 +141,82 @@ func TestApproval_TypedCharsDoNotReachEditor(t *testing.T) {
 	}
 }
 
+// TestApproval_PasteStartingWhilePendingIsSwallowed: a bracketed paste that
+// begins while a prompt is pending is discarded whole — pasted 'y'/'n'
+// characters must neither answer the prompt nor reach the editor — and a
+// real 'y' afterwards still approves.
+func TestApproval_PasteStartingWhilePendingIsSwallowed(t *testing.T) {
+	a := newBusyApp()
+	verdict := startApproval(t, a, "run tool?")
+
+	a.processInput([]byte("\x1b[200~yny\x1b[201~"))
+
+	select {
+	case v := <-verdict:
+		t.Fatalf("pasted text resolved the prompt (%v); want still pending", v)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if got := string(a.ed.input); got != "" {
+		t.Fatalf("editor input after swallowed paste = %q; want empty", got)
+	}
+
+	a.processInput([]byte("y"))
+	if !awaitVerdict(t, verdict) {
+		t.Fatal("verdict after swallowed paste + 'y' = false; want true")
+	}
+}
+
+// TestApproval_PasteStartingWhilePendingIsSwallowed_SplitReads: same as above
+// but the paste arrives across multiple terminal reads.
+func TestApproval_PasteStartingWhilePendingIsSwallowed_SplitReads(t *testing.T) {
+	a := newBusyApp()
+	verdict := startApproval(t, a, "run tool?")
+
+	a.processInput([]byte("\x1b[200~y"))
+	a.processInput([]byte("ny"))
+	a.processInput([]byte("\x1b[201~"))
+
+	select {
+	case v := <-verdict:
+		t.Fatalf("pasted text resolved the prompt (%v); want still pending", v)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if got := string(a.ed.input); got != "" {
+		t.Fatalf("editor input after swallowed paste = %q; want empty", got)
+	}
+
+	a.processInput([]byte("y"))
+	if !awaitVerdict(t, verdict) {
+		t.Fatal("verdict after swallowed paste + 'y' = false; want true")
+	}
+}
+
+// TestApproval_PasteEndingWhilePendingIsDropped: a paste that started BEFORE
+// the prompt appeared but completes while it is pending must not commit its
+// buffer into the editor, and must not resolve the prompt.
+func TestApproval_PasteEndingWhilePendingIsDropped(t *testing.T) {
+	a := newBusyApp()
+	a.processInput([]byte("\x1b[200~hel"))
+
+	verdict := startApproval(t, a, "run tool?")
+
+	a.processInput([]byte("lo\x1b[201~"))
+
+	select {
+	case v := <-verdict:
+		t.Fatalf("paste completion resolved the prompt (%v); want still pending", v)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if got := string(a.ed.input); got != "" {
+		t.Fatalf("editor input after mid-prompt paste end = %q; want empty", got)
+	}
+
+	a.processInput([]byte("y"))
+	if !awaitVerdict(t, verdict) {
+		t.Fatal("verdict after dropped paste + 'y' = false; want true")
+	}
+}
+
 // TestApproval_CtrlCDeniesWithoutQuitting: ctrl+c while pending resolves
 // false and does NOT prime the double-tap exit or quit the app.
 func TestApproval_CtrlCDeniesWithoutQuitting(t *testing.T) {

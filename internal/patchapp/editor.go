@@ -33,11 +33,17 @@ func (a *App) processInput(data []byte) (exit bool) {
 			if i+len(pasteEnd) <= len(data) && string(data[i:i+len(pasteEnd)]) == pasteEnd {
 				a.ed.pasting = false
 				a.mu.Lock()
-				for _, r := range a.ed.pasteBuf {
-					a.insertChar(r)
+				// A paste completing while an approval prompt is pending is
+				// dropped whole — whether it started before the prompt or was
+				// swallowed by the pending path below, its body must not be
+				// committed into the editor mid-prompt.
+				if a.pendingApproval == nil {
+					for _, r := range a.ed.pasteBuf {
+						a.insertChar(r)
+					}
+					a.syncDraftLocked()
+					a.render()
 				}
-				a.syncDraftLocked()
-				a.render()
 				a.mu.Unlock()
 				a.ed.pasteBuf = a.ed.pasteBuf[:0]
 				i += len(pasteEnd)
@@ -80,6 +86,16 @@ func (a *App) processInput(data []byte) (exit bool) {
 		approvalPending := a.pendingApproval != nil
 		a.mu.Unlock()
 		if approvalPending {
+			// A bracketed paste beginning while a prompt is pending is
+			// swallowed in its entirety: enter paste mode so the body
+			// accumulates in pasteBuf instead of flowing through the key
+			// parser (a pasted 'y' must never answer the prompt), and the
+			// paste-end commit above drops the buffer while still pending.
+			if k.kind == keyPasteStart {
+				a.ed.pasting = true
+				a.ed.pasteBuf = a.ed.pasteBuf[:0]
+				continue
+			}
 			a.handleApprovalKey(k)
 			continue
 		}
@@ -190,7 +206,10 @@ func (a *App) processInput(data []byte) (exit bool) {
 			a.mu.Unlock()
 		}
 	}
-	return a.exitFlag
+	a.mu.Lock()
+	exit = a.exitFlag
+	a.mu.Unlock()
+	return exit
 }
 
 // handleApprovalKey consumes one key while an approval prompt is pending.

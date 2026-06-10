@@ -195,6 +195,29 @@ func (a *App) RequestApproval(question string) bool {
 	a.approvalMu.Lock()
 	defer a.approvalMu.Unlock()
 
+	// Build the full prompt block up front. Each line of a multi-line
+	// question is echoed separately so it doesn't corrupt the terminal —
+	// same convention as the steering echo in handleEnter — and each line
+	// is fully wrapped in Dim…Reset so no escape bleeds across lines.
+	qLines := patchtui.SplitLines(question)
+	if len(qLines) == 0 {
+		qLines = []string{question}
+	}
+	lines := make([]string, 0, len(qLines))
+	for i, ql := range qLines {
+		if i == 0 {
+			lines = append(lines, patchtui.Dim+"[approve? y/N] "+ql+patchtui.Reset)
+		} else {
+			lines = append(lines, patchtui.Dim+"  "+ql+patchtui.Reset)
+		}
+	}
+
+	// Register the pending prompt and print the block inside ONE mu critical
+	// section (the print is Print's body inlined — calling Print here would
+	// self-deadlock on mu): a single commit keeps concurrent Print calls from
+	// interleaving inside the block, and registering while the block lands on
+	// screen means no keystroke can be routed to the resolver before the
+	// prompt is visible. mu is released before blocking on the channel.
 	a.mu.Lock()
 	if a.exitFlag {
 		a.mu.Unlock()
@@ -202,22 +225,14 @@ func (a *App) RequestApproval(question string) bool {
 	}
 	ch := make(chan bool, 1)
 	a.pendingApproval = ch
+	w, _ := patchtui.Size()
+	wrapped := wrapCommittedLines(lines, w)
+	if a.term.paused {
+		a.r.Print(wrapped)
+	} else {
+		a.r.PrintAndRender(wrapped, a.liveFrameLocked())
+	}
 	a.mu.Unlock()
-
-	// Echo each line of the question so multi-line questions don't corrupt
-	// the terminal — same convention as the steering echo in handleEnter.
-	// Each line is fully wrapped in Dim…Reset so no escape bleeds across lines.
-	qLines := patchtui.SplitLines(question)
-	if len(qLines) == 0 {
-		qLines = []string{question}
-	}
-	for i, ql := range qLines {
-		if i == 0 {
-			a.PrintLine(patchtui.Dim + "[approve? y/N] " + ql + patchtui.Reset)
-		} else {
-			a.PrintLine(patchtui.Dim + "  " + ql + patchtui.Reset)
-		}
-	}
 
 	verdict := <-ch
 	if verdict {
