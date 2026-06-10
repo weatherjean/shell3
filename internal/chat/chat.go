@@ -103,9 +103,13 @@ type Config struct {
 	// MCPToolNames is the set of prefixed tool names routed to MCPTool.
 	MCPToolNames map[string]bool
 	// ToolGuard runs the on_tool_call guard chain. Nil = allow all.
-	// Return values follow the guardAllow/guardBlock/guardCancel constants
-	// defined in this package (0/1/2).
+	// Return values follow the guardAllow/guardBlock/guardCancel/guardAsk
+	// constants defined in this package (0/1/2/3).
 	ToolGuard func(ctx context.Context, tool string, params map[string]any) (guardDecision int, reason string, err error)
+	// Approve resolves guard "ask" verdicts: it blocks the turn goroutine
+	// until the host answers (ctx-cancellable — treat cancellation as deny).
+	// Nil fails closed: ask degrades to a deny with an explanatory reason.
+	Approve func(ctx context.Context, req ApprovalRequest) bool
 	// AgentNames lists configured agents in declaration order, for /agent and
 	// Tab cycling. Empty or single-element disables switching.
 	AgentNames []string
@@ -183,6 +187,7 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler, shellInteractive
 		MCPTool:          cfg.MCPTool,
 		MCPToolNames:     cfg.MCPToolNames,
 		ToolGuard:        cfg.ToolGuard,
+		Approve:          cfg.Approve,
 		ShellInteractive: shellInteractive,
 	}
 }

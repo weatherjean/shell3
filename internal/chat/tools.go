@@ -20,6 +20,9 @@ const (
 	guardAllow  guardDecision = 0 // proceed with the tool call
 	guardBlock  guardDecision = 1 // deny this single tool call; turn continues
 	guardCancel guardDecision = 2 // abort the entire turn
+	// guardAsk suspends the call pending host approval (Approve hook in TurnConfig).
+	// Values mirror luacfg.Decision and must stay in sync.
+	guardAsk guardDecision = 3
 )
 
 // toolResult is the typed outcome of one tool call: the text recorded as the

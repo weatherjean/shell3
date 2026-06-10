@@ -57,6 +57,19 @@ type ToolConfig struct {
 	SessMsgs []llm.Message
 }
 
+// ApprovalRequest describes one suspended tool call awaiting a human verdict
+// (a guard returned ask). Hosts render it (buttons, y/N prompt) and answer
+// allow (true) or deny (false).
+type ApprovalRequest struct {
+	// Tool is the tool name; RawArgs its raw JSON arguments.
+	Tool    string
+	RawArgs string
+	// Reason is the guard's stated reason for asking ("" if none given).
+	Reason string
+	// Agent is the active agent's name.
+	Agent string
+}
+
 // TurnConfig holds all dependencies needed for one user→assistant turn. It
 // is derived from a Config per turn and passed to RunTurn (and through it to
 // each ToolHandler.Execute). Handlers should be constructed once via
@@ -98,7 +111,11 @@ type TurnConfig struct {
 	// MCPToolNames is the set of prefixed tool names routed to MCPTool.
 	MCPToolNames map[string]bool
 	// ToolGuard runs the on_tool_call guard chain. Nil = allow all.
-	// Return values follow the guardAllow/guardBlock/guardCancel constants
-	// (0=allow, 1=block, 2=cancel).
+	// Return values follow the guardAllow/guardBlock/guardCancel/guardAsk
+	// constants (0=allow, 1=block, 2=cancel, 3=ask).
 	ToolGuard func(ctx context.Context, tool string, params map[string]any) (guardDecision int, reason string, err error)
+	// Approve resolves guard "ask" verdicts: it blocks the turn goroutine
+	// until the host answers (ctx-cancellable — treat cancellation as deny).
+	// Nil fails closed: ask degrades to a deny with an explanatory reason.
+	Approve func(ctx context.Context, req ApprovalRequest) bool
 }

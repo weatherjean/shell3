@@ -322,6 +322,48 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 			cancelled = true
 			cancelReason = hookReason
 			res = errResult(fmt.Sprintf("USER CANCELLED the turn before this %s call ran. Reason: %s. Subsequent tool calls in this turn were not executed.", tc.Name, hookReason))
+		} else if decision == guardAsk {
+			if hookReason == "" {
+				hookReason = "guard requested approval"
+			}
+			emitApprovalRequest(sess, tc.Name, tc.RawArgs, hookReason)
+			approved := false
+			if cfg.Approve != nil {
+				// Approve blocks the turn goroutine until the host answers.
+				// If ctx is cancelled during the wait, Approve returns false
+				// (deny); the post-loop ctx.Err() check then ends the turn.
+				approved = cfg.Approve(ctx, ApprovalRequest{
+					Tool: tc.Name, RawArgs: tc.RawArgs, Reason: hookReason,
+					Agent: cfg.Personality.Name,
+				})
+				verdict := "deny"
+				if approved {
+					verdict = "allow"
+				}
+				emitApprovalDecision(sess, tc.Name, verdict)
+			} else {
+				emitApprovalDecision(sess, tc.Name, "deny (no approver)")
+			}
+			if !approved {
+				reason := hookReason
+				if cfg.Approve == nil {
+					reason = "approval required but no approver is available in this front-end"
+				}
+				res = errResult(fmt.Sprintf("USER DENIED this %s tool call. Reason: %s. Treat this as the user explicitly disapproving this action — do NOT retry the same call. Acknowledge the denial, ask what they want instead, or pick a different approach.", tc.Name, reason))
+			} else {
+				// Approved: run schema validation before dispatch, same as the
+				// normal (allow) path. The else-if chain doesn't reach the
+				// validation branch for ask, so we handle it inline here.
+				if schema, ok := toolSchemas[tc.Name]; ok {
+					if err := validateToolArgs(schema, json.RawMessage([]byte(tc.RawArgs))); err != nil {
+						res = errResult(fmt.Sprintf("error: invalid tool arguments: %v", err))
+					} else {
+						handled = false
+					}
+				} else {
+					handled = false
+				}
+			}
 		} else if decision == guardBlock {
 			if hookReason == "" {
 				hookReason = "no reason given"
