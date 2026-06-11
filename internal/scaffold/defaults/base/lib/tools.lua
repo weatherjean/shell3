@@ -1,100 +1,57 @@
--- lib/tools.lua — example custom tools. Returned for require() in shell3.lua.
+-- lib/tools.lua — example custom tools as bash command templates.
+-- Params are exported into the command env by their (lowercase) name; declared
+-- secrets are exported too (and kept out of the command string). Returns
+-- { web_fetch, brave_search } for require().
+
 local web_fetch = shell3.tool({
   name        = "web_fetch",
-  description = "Fetch a URL and return its plain-text content (tags stripped) and a list of links.",
+  description = "Fetch a URL and return its plain-text content (tags stripped) plus a list of links.",
   parameters  = {
-    type       = "object",
-    properties = {
-      url = {
-        type        = "string",
-        description = "The URL to fetch.",
-      },
-    },
+    type = "object",
+    properties = { url = { type = "string", description = "The URL to fetch." } },
     required = { "url" },
   },
-  handler = function(args)
-    local url = args.url or ""
-    if url == "" then return "error: url is required" end
-
-    local res, err = shell3.http.get(url, { timeout = 15, max_bytes = 524288 })
-    if err then return "error fetching " .. url .. ": " .. tostring(err) end
-    if res.status ~= 200 then
-      return "HTTP " .. tostring(res.status) .. " fetching " .. url
-    end
-
-    local body = res.body or ""
-
-    -- Strip HTML tags.
-    local text = body:gsub("<style[^>]*>.-</style>", " ")
-                     :gsub("<script[^>]*>.-</script>", " ")
-                     :gsub("<!--.--->", " ")
-                     :gsub("<[^>]+>", " ")
-                     :gsub("&nbsp;", " ")
-                     :gsub("&amp;", "&")
-                     :gsub("&lt;", "<")
-                     :gsub("&gt;", ">")
-                     :gsub("&quot;", '"')
-                     :gsub("%s+", " ")
-                     :match("^%s*(.-)%s*$")
-
-    -- Extract links.
-    local links = {}
-    for href in body:gmatch('href="(https?://[^"]+)"') do
-      links[#links + 1] = href
-    end
-    -- Deduplicate.
-    local seen = {}
-    local uniq = {}
-    for _, l in ipairs(links) do
-      if not seen[l] then seen[l] = true; uniq[#uniq + 1] = l end
-    end
-
-    local out = "URL: " .. url .. "\n\n" .. text
-    if #uniq > 0 then
-      out = out .. "\n\nLinks:\n" .. table.concat(uniq, "\n")
-    end
-    return out
-  end,
+  command = [[
+curl -sfL --max-time 15 "$url" | python3 - "$url" <<'PY'
+import sys, re, html
+url = sys.argv[1]
+data = sys.stdin.read()
+links = sorted(set(re.findall(r'href="(https?://[^"]+)"', data)))
+text = re.sub(r'(?is)<(script|style)[^>]*>.*?</\1>', ' ', data)
+text = re.sub(r'(?s)<!--.*?-->', ' ', text)
+text = re.sub(r'(?s)<[^>]+>', ' ', text)
+text = html.unescape(text)
+text = re.sub(r'\s+', ' ', text).strip()
+print("URL:", url)
+print()
+print(text)
+if links:
+    print()
+    print("Links:")
+    print("\n".join(links))
+PY
+]],
 })
 
 local brave_search = shell3.tool({
   name        = "brave_search",
-  description = "Search the web using Brave Search API; returns titles, URLs, and snippets.",
+  description = "Search the web via Brave Search; returns titles, URLs, and snippets.",
   parameters  = {
-    type       = "object",
+    type = "object",
     properties = {
-      query = {
-        type        = "string",
-        description = "The search query.",
-      },
-      count = {
-        type        = "integer",
-        description = "Number of results to return (1-20, default 10).",
-      },
+      query = { type = "string",  description = "The search query." },
+      count = { type = "integer", description = "Results to return (1-20, default 10)." },
     },
     required = { "query" },
   },
-  handler = function(args)
-    local query = args.query or ""
-    if query == "" then return "error: query is required" end
-    local count = tostring(args.count or 10)
-
-    local key = shell3.env.secret("BRAVE_API_KEY")
-    if key == "" then return "error: brave_search is unavailable (no API key configured)" end
-
-    local encoded = shell3.urlencode(query)
-    local cmd = string.format(
-      "curl -sf -H 'Accept: application/json' -H 'X-Subscription-Token: %s' " ..
-      "'https://api.search.brave.com/res/v1/web/search?q=%s&count=%s' " ..
-      "| jq -r '.web.results[]? | .title + \"\\n\" + .url + \"\\n\" + (.description // \"\") + \"\\n---\"'",
-      key, encoded, count
-    )
-    local result = shell3.bash(cmd, { timeout = 20 })
-    if result.exit ~= 0 then
-      return "search error (exit " .. tostring(result.exit) .. "): " .. (result.stderr or "")
-    end
-    return result.stdout or "(no results)"
-  end,
+  secrets = { "BRAVE_API_KEY" },
+  command = [[
+curl -sf -G "https://api.search.brave.com/res/v1/web/search" \
+  -H "Accept: application/json" \
+  -H "X-Subscription-Token: $BRAVE_API_KEY" \
+  --data-urlencode "q=$query" --data "count=${count:-10}" \
+| jq -r '.web.results[]? | .title + "\n" + .url + "\n" + (.description // "") + "\n---"'
+]],
 })
 
 return { web_fetch = web_fetch, brave_search = brave_search }
