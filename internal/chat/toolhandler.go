@@ -48,6 +48,10 @@ type ToolConfig struct {
 	Store *store.Store
 	// WorkDir is the working directory tools should resolve paths against.
 	WorkDir string
+	// SinkPath is the session's notification sink (internal/sink): bash_bg's
+	// reaper appends a bg_done notification here on process exit. Empty when the
+	// front-end wires no sink (the bg job is still spawned, just not announced).
+	SinkPath string
 	// AllMsgs is the full conversation slice including any reminder
 	// injections; tools that need to operate on what the model sees use
 	// this view.
@@ -85,6 +89,9 @@ type TurnConfig struct {
 	StatusLine string
 	// WorkDir is the working directory for tool execution.
 	WorkDir string
+	// SinkPath is the session's notification sink, threaded to each tool call's
+	// ToolConfig (see ToolConfig.SinkPath). Empty disables sink notifications.
+	SinkPath string
 	// Store persists newly appended messages when non-nil.
 	Store *store.Store
 	// Handlers maps tool name to built-in implementation. Built once via

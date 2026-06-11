@@ -15,6 +15,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -24,6 +25,7 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/paths"
+	"github.com/weatherjean/shell3/internal/sink"
 )
 
 // Job is one entry in bg.json. Fields are JSON-tagged for direct persistence.
@@ -50,7 +52,13 @@ var fileLock sync.Mutex
 
 // Start spawns command in workdir detached, returning the recorded Job.
 // On return the process is fully released — bgjobs does not Wait on it.
-func Start(command, workdir string) (Job, error) {
+//
+// sinkPath, when non-empty, is the session's notification sink (see
+// internal/sink): the reaper goroutine appends a "bg_done" notification with
+// the job's exit code, log path, and command once the process exits, so the
+// host can notify the agent that the background job finished. An empty sinkPath
+// disables the notification (the job is still spawned and tracked as before).
+func Start(command, workdir, sinkPath string) (Job, error) {
 	if command == "" {
 		return Job{}, fmt.Errorf("command is required")
 	}
@@ -95,8 +103,22 @@ func Start(command, workdir string) (Job, error) {
 	pid := c.Process.Pid
 	// Reap in a goroutine so the exited process leaves no zombie. We do NOT
 	// Release(): that leaves the pid as a zombie forever, and `kill(pid, 0)`
-	// reports zombies as alive, breaking the model's liveness checks.
-	go func() { _ = c.Wait() }()
+	// reports zombies as alive, breaking the model's liveness checks. After the
+	// process is reaped we append a "bg_done" notification to the session sink
+	// (no-op when sinkPath is "") so the host can tell the agent the job exited;
+	// the exit code comes from Wait's error (an *exec.ExitError carries the
+	// real code, any other error means we couldn't determine it → -1).
+	go func() {
+		werr := c.Wait()
+		exit := exitCode(werr)
+		_ = sink.Append(sinkPath, sink.Notification{
+			Kind: "bg_done",
+			ID:   id,
+			Exit: &exit,
+			Log:  logPath,
+			Cmd:  command,
+		})
+	}()
 
 	job := Job{
 		ID:        id,
@@ -118,6 +140,21 @@ func Start(command, workdir string) (Job, error) {
 		return Job{}, fmt.Errorf("persist: %w", err)
 	}
 	return job, nil
+}
+
+// exitCode extracts the process exit code from the error returned by
+// (*exec.Cmd).Wait: nil → 0 (clean exit), an *exec.ExitError → the real code
+// (including signal-derived codes via ExitCode), and any other error (e.g. an
+// I/O failure waiting on the process) → -1 ("unknown").
+func exitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return ee.ExitCode()
+	}
+	return -1
 }
 
 // newID returns "bg_<6 hex>".

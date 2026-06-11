@@ -326,6 +326,14 @@ type Session struct {
 	// kill in-flight subagents without closing the session. Guarded by s.mu.
 	subCtx    context.Context
 	subCancel context.CancelFunc
+
+	// sink-watcher handles (see startSinkWatcher / stopSinkWatcher). sinkStop is
+	// closed to signal the tail goroutine to exit; sinkDone is closed by that
+	// goroutine when it returns; sinkFile is the watched path, removed on Close.
+	// All nil when no watcher runs (no workdir/name). Guarded by s.mu.
+	sinkStop chan struct{}
+	sinkDone chan struct{}
+	sinkFile string
 }
 
 // Start loads the config, builds a single-session Runtime, and returns its one
@@ -767,6 +775,11 @@ func (s *Session) doClose() error {
 	if done != nil {
 		<-done // turn goroutine (and its deferred history persist) has finished
 	}
+	// Stop the sink watcher (joins its goroutine, removes the sink file) before
+	// ending the store/sink: the turn is joined so no bash_bg reaper this turn
+	// spawned is still expected, and a final drain inside stopSinkWatcher
+	// catches a notification appended just before Close.
+	s.stopSinkWatcher()
 
 	s.sess.End("ok")
 	var endErr error
@@ -881,7 +894,12 @@ func (s *Session) turnConfig() chat.TurnConfig {
 		return s.spawn(ctx, req)
 	}
 	cfg.ListAgents = func() []chat.AgentSnapshot { return s.subs.snapshot() }
-	return chat.NewTurnConfig(cfg, s.handlers, shellInteractive)
+	tc := chat.NewTurnConfig(cfg, s.handlers, shellInteractive)
+	// Thread the session's sink path so bash_bg's reaper announces bg_done to
+	// this session's watcher (see sinkPath / startSinkWatcher). A runtime-hosted
+	// session has a name and workdir; the Start-owned "main" session does too.
+	tc.SinkPath = s.sinkPath()
+	return tc
 }
 
 // Clear resets the conversation context (= /clear): drops all history and

@@ -31,7 +31,7 @@ func waitDead(pid int, timeout time.Duration) bool {
 
 func TestStart_writesLogAndExits(t *testing.T) {
 	wd := t.TempDir()
-	job, err := Start("echo hi-from-bg", wd)
+	job, err := Start("echo hi-from-bg", wd, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,11 +55,11 @@ func TestStart_writesLogAndExits(t *testing.T) {
 
 func TestStart_appendsToRegistry(t *testing.T) {
 	wd := t.TempDir()
-	j1, err := Start("true", wd)
+	j1, err := Start("true", wd, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	j2, err := Start("true", wd)
+	j2, err := Start("true", wd, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestStart_appendsToRegistry(t *testing.T) {
 
 func TestStart_detached(t *testing.T) {
 	wd := t.TempDir()
-	job, err := Start("sleep 30", wd)
+	job, err := Start("sleep 30", wd, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestStart_detached(t *testing.T) {
 func TestStart_grandchildKillablyViaPgid(t *testing.T) {
 	wd := t.TempDir()
 	// `setsid bash` ensures the inner sleep inherits the pgid.
-	job, err := Start("sleep 30 & wait", wd)
+	job, err := Start("sleep 30 & wait", wd, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestStart_corruptRegistryRecovers(t *testing.T) {
 	if err := os.WriteFile(bad, []byte("{not valid json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	job, err := Start("true", wd)
+	job, err := Start("true", wd, "")
 	if err != nil {
 		t.Fatalf("start should recover from corrupt bg.json: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestStart_corruptRegistryBackupsAreUnique(t *testing.T) {
 	if err := os.WriteFile(reg, []byte("first-corrupt"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	j1, err := Start("true", wd)
+	j1, err := Start("true", wd, "")
 	if err != nil {
 		t.Fatalf("first recover: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestStart_corruptRegistryBackupsAreUnique(t *testing.T) {
 	if err := os.WriteFile(reg, []byte("second-corrupt"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	j2, err := Start("true", wd)
+	j2, err := Start("true", wd, "")
 	if err != nil {
 		t.Fatalf("second recover: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestStart_concurrentAppendsDoNotRace(t *testing.T) {
 	jobs := make(chan Job, n)
 	for i := 0; i < n; i++ {
 		go func() {
-			j, err := Start("true", wd)
+			j, err := Start("true", wd, "")
 			jobs <- j
 			errs <- err
 		}()
@@ -288,7 +288,7 @@ func TestStart_concurrentAppendsDoNotRace(t *testing.T) {
 }
 
 func TestStart_emptyCommandRejected(t *testing.T) {
-	if _, err := Start("", t.TempDir()); err == nil {
+	if _, err := Start("", t.TempDir(), ""); err == nil {
 		t.Fatal("expected error on empty command")
 	}
 }
@@ -303,7 +303,7 @@ func TestStart_killsProcessWhenPersistFails(t *testing.T) {
 	marker := filepath.Join(wd, "ran.marker")
 	// If the spawned process is NOT killed, it survives the 1s sleep and creates
 	// the marker. If Start kills it on persist failure, the marker never appears.
-	_, err := Start(fmt.Sprintf("sleep 1 && touch %q", marker), wd)
+	_, err := Start(fmt.Sprintf("sleep 1 && touch %q", marker), wd, "")
 	if err == nil {
 		t.Fatal("expected persist error (.shell3 is a file), got nil")
 	}
@@ -315,7 +315,7 @@ func TestStart_killsProcessWhenPersistFails(t *testing.T) {
 
 func TestKillAll(t *testing.T) {
 	dir := t.TempDir()
-	job, err := Start("sleep 60", dir) // command first, workdir second
+	job, err := Start("sleep 60", dir, "") // command first, workdir second
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,9 +338,90 @@ func TestKillAll(t *testing.T) {
 	}
 }
 
+// waitSinkLines polls a sink file until it holds at least n complete lines or
+// the timeout elapses, returning whatever lines it could read. The reaper
+// appends bg_done asynchronously after Wait, so the test can't read the sink
+// the instant Start returns.
+func waitSinkLines(t *testing.T, path string, n int, timeout time.Duration) []map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			var out []map[string]any
+			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+				if line == "" {
+					continue
+				}
+				var m map[string]any
+				if err := json.Unmarshal([]byte(line), &m); err != nil {
+					t.Fatalf("sink line not valid json: %q: %v", line, err)
+				}
+				out = append(out, m)
+			}
+			if len(out) >= n {
+				return out
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("sink %s did not reach %d lines within %s", path, n, timeout)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestStart_emitsBgDoneOnExit verifies the reaper appends a bg_done
+// notification to the sink with the job id, exit code, log path, and command
+// once the process exits.
+func TestStart_emitsBgDoneOnExit(t *testing.T) {
+	wd := t.TempDir()
+	sinkPath := filepath.Join(wd, ".shell3", "sink", "main.jsonl")
+	job, err := Start("exit 3", wd, sinkPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(job.Log) })
+
+	lines := waitSinkLines(t, sinkPath, 1, 3*time.Second)
+	n := lines[0]
+	if n["kind"] != "bg_done" {
+		t.Fatalf("kind = %v, want bg_done", n["kind"])
+	}
+	if n["id"] != job.ID {
+		t.Fatalf("id = %v, want %s", n["id"], job.ID)
+	}
+	// JSON numbers decode to float64.
+	if exit, ok := n["exit"].(float64); !ok || int(exit) != 3 {
+		t.Fatalf("exit = %v, want 3", n["exit"])
+	}
+	if n["log"] != job.Log {
+		t.Fatalf("log = %v, want %s", n["log"], job.Log)
+	}
+	if n["cmd"] != "exit 3" {
+		t.Fatalf("cmd = %v, want %q", n["cmd"], "exit 3")
+	}
+}
+
+// TestStart_emptySinkPathSkipsNotification verifies an empty sinkPath is a safe
+// no-op: the job still runs and is tracked, but no sink file is written.
+func TestStart_emptySinkPathSkipsNotification(t *testing.T) {
+	wd := t.TempDir()
+	job, err := Start("true", wd, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(job.Log) })
+	// Give the reaper a moment to run; it must NOT create a sink dir/file.
+	waitDead(job.PID, time.Second)
+	time.Sleep(100 * time.Millisecond)
+	if _, err := os.Stat(filepath.Join(wd, ".shell3", "sink")); !os.IsNotExist(err) {
+		t.Fatalf("sink dir should not exist with empty sinkPath, stat err: %v", err)
+	}
+}
+
 func TestRegistry_jsonShape(t *testing.T) {
 	wd := t.TempDir()
-	job, err := Start("true", wd)
+	job, err := Start("true", wd, "")
 	if err != nil {
 		t.Fatal(err)
 	}
