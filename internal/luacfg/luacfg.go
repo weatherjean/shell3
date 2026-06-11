@@ -35,15 +35,6 @@ type CustomTool struct {
 
 type Skill struct{ Name, Description, Body string }
 
-// MCPServer is a declared external MCP server (stdio transport).
-type MCPServer struct {
-	Name    string
-	Command string
-	Args    []string
-	Env     map[string]string
-	Tools   []string // optional allowlist
-}
-
 // CronJob is one parsed shell3.cron job entry.
 type CronJob struct {
 	Name     string
@@ -80,7 +71,6 @@ type Agent struct {
 	Name, ModelName, Prompt string
 	Gates                   ToolGates
 	CustomTools             []string
-	MCPServerNames          []string
 	Skills                  []string
 	SkillsDisabled          bool // true only when tools = { skill = false } is explicitly set
 	Guard                   []GuardEntry
@@ -95,7 +85,6 @@ type Subagent struct {
 	Name, Description, ModelName, Prompt string
 	Gates                                ToolGates
 	CustomTools                          []string
-	MCPServerNames                       []string
 	Skills                               []string
 	SkillsDisabled                       bool
 	Guard                                []GuardEntry
@@ -110,11 +99,10 @@ func (a Agent) SkillsActive() bool {
 // LoadedConfig is the parsed result. L stays alive for the session so custom
 // tool handlers and guards can run; callers MUST call Close when done.
 type LoadedConfig struct {
-	Models     []Model
-	Tools      map[string]CustomTool
-	MCPServers map[string]MCPServer
-	Skills     []Skill
-	Secrets    map[string]string
+	Models  []Model
+	Tools   map[string]CustomTool
+	Skills  []Skill
+	Secrets map[string]string
 
 	agents    []Agent
 	subagents []Subagent
@@ -140,7 +128,7 @@ func Load(path, workdir string) (*LoadedConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &LoadedConfig{Tools: map[string]CustomTool{}, MCPServers: map[string]MCPServer{}, Secrets: env, L: lua.NewState()}
+	c := &LoadedConfig{Tools: map[string]CustomTool{}, Secrets: env, L: lua.NewState()}
 	// The returned config owns c.L; close it only if we error out below.
 	var success bool
 	defer func() {

@@ -208,7 +208,7 @@ func TestBootTelegramEndToEnd(t *testing.T) {
 	f := &bootFlags{
 		url: "http://localhost:9999/v1", model: "test-model", name: "main",
 		telegram: true, tgToken: "BOT:TOKEN", chatID: "424242",
-		dashAddr: "127.0.0.1:8765", dashURL: "https://h.ts.net/", chrome: true,
+		dashAddr: "127.0.0.1:8765", dashURL: "https://h.ts.net/",
 	}
 	if err := runBoot(f); err != nil {
 		t.Fatalf("runBoot --telegram: %v", err)
@@ -245,9 +245,6 @@ func TestBootTelegramEndToEnd(t *testing.T) {
 	}
 	if !tg.Dashboard.Enabled || tg.Dashboard.URL != "https://h.ts.net/" {
 		t.Errorf("dashboard = %+v", tg.Dashboard)
-	}
-	if _, ok := c.MCPServers["chrome"]; !ok {
-		t.Errorf("--chrome should declare the chrome MCP server, got %v", c.MCPServers)
 	}
 
 	cwd, _ := os.Getwd()

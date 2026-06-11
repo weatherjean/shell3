@@ -62,19 +62,6 @@ func dispatchCustomTool(ctx context.Context, custom func(ctx context.Context, na
 	return classifyHandlerOutput(out)
 }
 
-// dispatchMCPTool calls mcp for a prefixed MCP tool (server__tool). If mcp is
-// nil it returns an error for the model.
-func dispatchMCPTool(ctx context.Context, mcp func(ctx context.Context, name, argsJSON string) (string, error), name, rawArgs string) toolResult {
-	if mcp == nil {
-		return errResult("error: MCP tool dispatcher unavailable")
-	}
-	out, err := mcp(ctx, name, rawArgs)
-	if err != nil {
-		return errResult("error: " + err.Error())
-	}
-	return classifyHandlerOutput(out)
-}
-
 // handleCompactHistory replaces the conversation history with a structured
 // summary. Ends the current store session and starts a new one so the compact
 // boundary is visible in history. Both sess.messages and allMsgs are rebuilt

@@ -10,7 +10,7 @@
 // channel closes (the session is built and torn down for you). Start gives a
 // persistent multi-turn [Session] — the embedding equivalent of an open TUI —
 // with agent switching, history, pruning, and parameter control. NewRuntime is
-// the host shape: one [Runtime] owning the shared build (config, store, MCP,
+// the host shape: one [Runtime] owning the shared build (config, store,
 // proxy spawner, log) and hosting N named [Session]s via [Runtime.Session].
 // Start and Run are thin single-session wrappers over a Runtime.
 //
@@ -729,8 +729,8 @@ func (s *Session) WakeEvents() <-chan HostEvent {
 // the store, sink, and cleanup paths guard against double execution.
 //
 // For Start-owned sessions (the common single-session case), Close also tears
-// down the private Runtime that Start created — the LLM client, store, MCP
-// servers, and proxy spawner. For Runtime-hosted sessions created via
+// down the private Runtime that Start created — the LLM client, store, and
+// proxy spawner. For Runtime-hosted sessions created via
 // Runtime.Session, Close deregisters the session from its Runtime (the shared
 // parts remain alive for the other sessions).
 //

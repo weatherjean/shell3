@@ -228,7 +228,7 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool) {
 		fmt.Println("           subscription via `npx ...`), add run_proxy to the model block.")
 	}
 	fmt.Println()
-	fmt.Println("Edit shell3.lua (and lib/) to add tools, skills, MCP, or agents —")
+	fmt.Println("Edit shell3.lua (and lib/) to add tools, skills, or agents —")
 	fmt.Println("recipes live in the shell3 repo under docs/cookbook/.")
 	fmt.Println()
 	fmt.Println("Run:  shell3")

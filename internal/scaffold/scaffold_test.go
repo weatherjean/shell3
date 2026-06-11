@@ -244,31 +244,6 @@ func TestRenderTelegramConfigLoads(t *testing.T) {
 	if !tg.Dashboard.Enabled || tg.Dashboard.Addr != "127.0.0.1:8765" {
 		t.Errorf("dashboard = %+v, want enabled 127.0.0.1:8765", tg.Dashboard)
 	}
-	if len(c.MCPServers) != 0 {
-		t.Errorf("default render should declare no MCP servers, got %v", c.MCPServers)
-	}
-}
-
-func TestRenderTelegramConfigChrome(t *testing.T) {
-	dir := t.TempDir()
-	if err := RenderTelegramConfig(dir, TelegramValues{
-		Values: Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m-1"},
-		ChatID: "1", WorkDir: dir, Chrome: true,
-	}, false); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("MAIN_API_KEY=\nTELEGRAM_BOT_TOKEN=\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	c, err := luacfg.Load(filepath.Join(dir, "shell3.lua"), dir)
-	if err != nil {
-		t.Fatalf("chrome config failed to load: %v", err)
-	}
-	defer c.Close()
-	// luacfg records the MCP server spec; it does NOT spawn npx at load time.
-	if _, ok := c.MCPServers["chrome"]; !ok {
-		t.Errorf("Chrome:true should declare the chrome MCP server, got %v", c.MCPServers)
-	}
 }
 
 func TestRenderTelegramConfigHasBrowserSkill(t *testing.T) {

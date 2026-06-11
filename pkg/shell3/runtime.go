@@ -43,7 +43,7 @@ type CronJob struct {
 }
 
 // RuntimeSpec configures a long-lived Runtime: the process-wide unit owning
-// the config (Lua state), store, MCP servers, proxy spawner, and log.
+// the config (Lua state), store, proxy spawner, and log.
 type RuntimeSpec struct {
 	ConfigPath string // "" → ./shell3.lua then ~/.shell3/shell3.lua
 	WorkDir    string // runtime root; "" → os.Getwd(). Sessions default here.

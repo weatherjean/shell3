@@ -467,15 +467,13 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 		}
 		// If a hook blocked the call or validation failed, res already carries
 		// the typed reason and we skip dispatch. Otherwise resolve a handler —
-		// turn-scoped first, then the prefixed MCP and custom dispatchers, then
-		// the shared built-ins (custom before built-ins so a config-declared
-		// tool name always wins) — and run it through the single execute path.
+		// turn-scoped first, then the custom dispatchers, then the shared
+		// built-ins (custom before built-ins so a config-declared tool name
+		// always wins) — and run it through the single execute path.
 		if !handled {
 			var handler ToolHandler
 			if h, ok := turnScoped[tc.Name]; ok {
 				handler = h
-			} else if cfg.MCPToolNames[tc.Name] {
-				res = dispatchMCPTool(ctx, cfg.MCPTool, tc.Name, tc.RawArgs)
 			} else if cfg.CustomToolNames[tc.Name] {
 				res = dispatchCustomTool(ctx, cfg.CustomTool, tc.Name, tc.RawArgs)
 			} else if h, ok := cfg.Handlers[tc.Name]; ok {

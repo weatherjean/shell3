@@ -106,10 +106,6 @@ type TurnConfig struct {
 	CustomTool func(ctx context.Context, name, argsJSON string) (string, error)
 	// CustomToolNames is the set of tool names routed to CustomTool.
 	CustomToolNames map[string]bool
-	// MCPTool dispatches a prefixed MCP tool call (server__tool) by name.
-	MCPTool func(ctx context.Context, name, argsJSON string) (string, error)
-	// MCPToolNames is the set of prefixed tool names routed to MCPTool.
-	MCPToolNames map[string]bool
 	// ToolGuard runs the on_tool_call guard chain. Nil = allow all.
 	// Return values follow the guardAllow/guardBlock/guardCancel/guardAsk
 	// constants (0=allow, 1=block, 2=cancel, 3=ask).

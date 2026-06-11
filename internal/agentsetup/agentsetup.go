@@ -17,7 +17,6 @@ import (
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/luacfg"
-	"github.com/weatherjean/shell3/internal/mcp"
 	"github.com/weatherjean/shell3/internal/modelproxy"
 	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/persona"
@@ -44,21 +43,20 @@ type Options struct {
 // Concurrency: all exported methods are safe for concurrent use by multiple
 // sessions. The Lua VM (luacfg.LoadedConfig) serialises access with a mutex.
 // The history store is database/sql over SQLite — safe for concurrent callers.
-// The proxy spawner and MCP manager are each mutex-guarded internally.
+// The proxy spawner is mutex-guarded internally.
 // AgentRuntime builds a fresh LLM client per call, so no client state is
 // shared across sessions.
 //
 // Lifetime: Parts must not be used after the cleanup function returned by
-// BuildParts has run. The cleanup closes the store, Lua state, MCP servers,
+// BuildParts has run. The cleanup closes the store, Lua state, proxies,
 // and log; any method call after cleanup has undefined behaviour.
 type Parts struct {
-	lc     *luacfg.LoadedConfig
-	st     *store.Store
-	mcpMgr *mcp.Manager
-	proxy  *modelproxy.Spawner
-	log    applog.Logger
-	uuid   string
-	root   string // runtime root workdir (Options.CWD)
+	lc    *luacfg.LoadedConfig
+	st    *store.Store
+	proxy *modelproxy.Spawner
+	log   applog.Logger
+	uuid  string
+	root  string // runtime root workdir (Options.CWD)
 }
 
 // Store returns the SQLite history store (nil when history is not enabled by any agent).
@@ -82,9 +80,6 @@ func (p *Parts) Cron() []luacfg.CronJob { return p.lc.Cron() }
 // ModelCount returns the number of declared models.
 func (p *Parts) ModelCount() int { return len(p.lc.Models) }
 
-// MCPServerCount returns the number of configured MCP servers.
-func (p *Parts) MCPServerCount() int { return len(p.lc.MCPServers) }
-
 // AgentNames returns declared agent names in declaration order.
 func (p *Parts) AgentNames() []string {
 	agents := p.lc.Agents()
@@ -98,14 +93,6 @@ func (p *Parts) AgentNames() []string {
 // CustomTool exposes the Lua custom-tool dispatcher.
 func (p *Parts) CustomTool(ctx context.Context, name, args string) (string, error) {
 	return p.lc.CallTool(ctx, name, args)
-}
-
-// MCPTool dispatches a prefixed MCP tool call; errors when no servers exist.
-func (p *Parts) MCPTool(ctx context.Context, name, args string) (string, error) {
-	if p.mcpMgr == nil {
-		return "", fmt.Errorf("no MCP servers configured")
-	}
-	return p.mcpMgr.Dispatch(ctx, name, args)
 }
 
 // AgentRuntime assembles the full chat runtime for the named agent: its model
@@ -135,7 +122,6 @@ func subagentToAgent(sa luacfg.Subagent) luacfg.Agent {
 		Prompt:         sa.Prompt,
 		Gates:          sa.Gates,
 		CustomTools:    sa.CustomTools,
-		MCPServerNames: sa.MCPServerNames,
 		Skills:         sa.Skills,
 		SkillsDisabled: sa.SkillsDisabled,
 		Guard:          sa.Guard,
@@ -169,21 +155,6 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 	toolNames := make([]string, 0, len(toolDefs))
 	for _, t := range toolDefs {
 		toolNames = append(toolNames, t.Name)
-	}
-
-	// Merge this agent's selected MCP servers' tools (prefixed server__tool).
-	var mcpNames map[string]bool
-	if p.mcpMgr != nil && len(a.MCPServerNames) > 0 {
-		mcpDefs, err := p.mcpMgr.ToolDefinitionsFor(context.Background(), a.MCPServerNames)
-		if err != nil {
-			p.log.Warn("mcp: tool discovery failed; server tools unavailable", "error", err)
-		} else {
-			toolDefs = append(toolDefs, mcpDefs...)
-			for _, d := range mcpDefs {
-				toolNames = append(toolNames, d.Name)
-			}
-			mcpNames = p.mcpMgr.ToolNamesFor(a.MCPServerNames)
-		}
 	}
 
 	// Inject spawn_agent + list_agents when this agent has registered subagents.
@@ -230,7 +201,6 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 		ActiveTools:     toolNames,
 		Subagents:       a.Subagents,
 		CustomToolNames: customNames,
-		MCPToolNames:    mcpNames,
 		LLM:             client,
 		Params:          rp,
 		ModelID:         md.ModelID,
@@ -325,7 +295,6 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 		WorkDir:       workdir,
 		ProjectRef:    p.uuid,
 		CustomTool:    p.CustomTool,
-		MCPTool:       p.MCPTool,
 		Log:           p.log,
 		OutPath:       so.OutPath,
 		Headless:      so.Headless,
@@ -368,7 +337,7 @@ func Build(opts Options) (chat.Config, func(), error) {
 }
 
 // BuildParts assembles the shared runtime parts. The returned cleanup closes
-// the store, Lua state, MCP servers, and log; callers MUST invoke it once.
+// the store, Lua state, proxies, and log; callers MUST invoke it once.
 func BuildParts(opts Options) (*Parts, func(), error) {
 	b := &builder{opts: opts}
 	noop := func() {}
@@ -382,8 +351,7 @@ func BuildParts(opts Options) (*Parts, func(), error) {
 		return nil, noop, err
 	}
 	b.openStore()
-	b.buildMCP()
-	p := &Parts{lc: b.lc, st: b.st, mcpMgr: b.mcpMgr, proxy: b.proxy,
+	p := &Parts{lc: b.lc, st: b.st, proxy: b.proxy,
 		log: b.log, uuid: b.uuid, root: b.opts.CWD}
 	return p, b.closeAll, nil
 }
@@ -402,11 +370,10 @@ type builder struct {
 	proj       paths.Project
 	uuid       string
 
-	log    applog.Logger
-	lc     *luacfg.LoadedConfig
-	st     *store.Store
-	mcpMgr *mcp.Manager
-	proxy  *modelproxy.Spawner
+	log   applog.Logger
+	lc    *luacfg.LoadedConfig
+	st    *store.Store
+	proxy *modelproxy.Spawner
 
 	closers []func() // LIFO teardown stack
 }
@@ -485,29 +452,6 @@ func (b *builder) openStore() {
 			b.log.Warn("open store failed — history unavailable", "error", e)
 		}
 	}
-}
-
-// buildMCP constructs the MCP manager from all declared servers. The schema
-// cache lives under the project dir so discovered tools persist across runs.
-// No-op when no servers are declared.
-func (b *builder) buildMCP() {
-	servers := b.lc.MCPServers
-	if len(servers) == 0 {
-		return
-	}
-	specs := make([]mcp.Spec, 0, len(servers))
-	for _, s := range servers {
-		specs = append(specs, mcp.Spec{
-			Name:    s.Name,
-			Command: s.Command,
-			Args:    s.Args,
-			Env:     s.Env,
-			Tools:   s.Tools,
-		})
-	}
-	cacheDir := filepath.Join(b.proj.Dir, "mcp")
-	b.mcpMgr = mcp.NewManager(specs, cacheDir)
-	b.closers = append(b.closers, func() { b.mcpMgr.Shutdown() })
 }
 
 // buildClient constructs a streaming client plus its request params from a

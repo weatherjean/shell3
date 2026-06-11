@@ -13,8 +13,7 @@ type ReloadResult struct {
 	Agents int      // number of agents now live
 	Models int      // number of models now live
 	Jobs   int      // number of cron jobs now armed
-	MCP    int      // number of MCP servers now configured
-	Notes  []string // human-readable notes (e.g. dropped override, MCP restart)
+	Notes  []string // human-readable notes
 }
 
 // Reload re-reads the config file the Runtime was built from and applies it to
@@ -28,8 +27,8 @@ type ReloadResult struct {
 //   - Idle only: the CALLER must ensure no live session has a turn in flight
 //     (the host gates on Session.isBusy). Reload holds rt.mu so it serializes
 //     against Session()/Close().
-//   - Full rebuild: the old cleanup() runs (closing the old VM, MCP servers,
-//     proxies, store handle) and every swappable Runtime field is replaced.
+//   - Full rebuild: the old cleanup() runs (closing the old VM, proxies, store
+//     handle) and every swappable Runtime field is replaced.
 //   - In place: live sessions keep their identity and history (s.sess); only
 //     s.cfg + s.handlers are rebuilt. Active agent + /set params are restored
 //     best-effort. Host-registered tools/approver are NOT restored here — the
@@ -80,7 +79,7 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 	}
 
 	// 3. Swap shared state: close the OLD parts, install the new.
-	oldCleanup := rt.cleanup
+	oldCleanup := rt.cleanup // closes old VM, proxies, old store handle
 	var cronJobs []CronJob
 	for _, j := range newParts.Cron() {
 		cronJobs = append(cronJobs, CronJob{
@@ -102,7 +101,7 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 		Token: tg.Token, ChatID: tg.ChatID, Agent: tg.Agent, WorkDir: tg.WorkDir,
 		Dashboard: DashboardConfig{Enabled: tg.Dashboard.Enabled, Addr: tg.Dashboard.Addr, URL: tg.Dashboard.URL},
 	}
-	oldCleanup() // closes old VM, MCP servers, proxies, old store handle
+	oldCleanup()
 
 	// 4. Re-derive each live session in place (keep history s.sess), restore overrides.
 	var notes []string
@@ -131,7 +130,6 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 		Agents: len(newParts.AgentNames()),
 		Models: newParts.ModelCount(),
 		Jobs:   len(cronJobs),
-		MCP:    newParts.MCPServerCount(),
 		Notes:  notes,
 	}
 	return res, nil

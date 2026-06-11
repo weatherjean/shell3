@@ -100,7 +100,7 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 
 // formatReload renders a ReloadResult as a chat reply.
 func formatReload(r shell3.ReloadResult) string {
-	msg := fmt.Sprintf("✅ reloaded — %d agents, %d models, %d jobs, %d MCP", r.Agents, r.Models, r.Jobs, r.MCP)
+	msg := fmt.Sprintf("✅ reloaded — %d agents, %d models, %d jobs", r.Agents, r.Models, r.Jobs)
 	if len(r.Notes) > 0 {
 		msg += "\n• " + strings.Join(r.Notes, "\n• ")
 	}
