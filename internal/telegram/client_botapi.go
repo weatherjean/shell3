@@ -47,10 +47,23 @@ func (c *botAPIClient) onUpdate(ctx context.Context, b *bot.Bot, u *models.Updat
 		}
 	case u.Message != nil:
 		m := u.Message
-		msg := Msg{ChatID: m.Chat.ID, Text: m.Text}
+		msg := Msg{ChatID: m.Chat.ID, Text: m.Text, ReplyTo: replyContext(m)}
 		msg.Media = resolveMedia(ctx, c, m)
 		c.out <- msg
 	}
+}
+
+// replyContext returns the text the message is replying to, for model context.
+// Prefers the user's highlighted Quote (the specific portion they selected);
+// otherwise falls back to the full replied-to message's text (or caption).
+func replyContext(m *models.Message) string {
+	if m.Quote != nil && m.Quote.Text != "" {
+		return m.Quote.Text
+	}
+	if r := m.ReplyToMessage; r != nil {
+		return orDefault(r.Text, r.Caption)
+	}
+	return ""
 }
 
 // resolveMedia downloads every attachment on m (photo/voice/audio/video/

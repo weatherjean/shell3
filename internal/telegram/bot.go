@@ -121,6 +121,9 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 	if text == "" {
 		return // nothing actionable
 	}
+	// If this is a Telegram reply/quote, prepend the quoted message so the model
+	// sees the context the user is responding to.
+	text = withReplyContext(text, m.ReplyTo)
 	// HasQueuedInput reports inbox state. In the single-chat v1 flow, handleMsg
 	// is serial, so a running turn blocks here until the channel drains.
 	// HasQueuedInput catches the case where a wake/cron item is already queued.
@@ -138,6 +141,22 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 	stopTyping()
 	b.sendReply(ctx, reply)
 	b.applyPendingReload(ctx) // self-evolution: agent edited config + called reload this turn
+}
+
+// withReplyContext prepends the replied-to message as a markdown blockquote so
+// the model sees what the user is responding to. Returns text unchanged when
+// there's no reply. The quote is capped so a reply to a huge message can't bloat
+// the turn.
+func withReplyContext(text, replyTo string) string {
+	replyTo = strings.TrimSpace(replyTo)
+	if replyTo == "" {
+		return text
+	}
+	lines := strings.Split(truncate(replyTo, 1500), "\n")
+	for i, ln := range lines {
+		lines[i] = "> " + ln
+	}
+	return strings.Join(lines, "\n") + "\n\n" + text
 }
 
 // keepTyping shows the "typing…" chat action and refreshes it every 4s until

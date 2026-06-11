@@ -8,6 +8,7 @@ import "context"
 type Msg struct {
 	ChatID   int64
 	Text     string
+	ReplyTo  string  // text of the message this replies to (Telegram reply/quote), for model context
 	Media    []Media // photos/voice/documents already resolved to bytes
 	Callback *Callback
 }
