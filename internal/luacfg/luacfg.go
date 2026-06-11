@@ -33,10 +33,19 @@ type ToolGates struct {
 	Bash, BashBg, ShellInteractive, Edit, Media bool
 }
 
+// CustomTool is a declarative bash-command tool. The model supplies typed
+// parameters (validated against Parameters); at call time each declared param is
+// exported into the command's environment by its (lowercase) name and the
+// command (a bash template) runs with that env. Secrets names each .env key to
+// also export — kept out of the command string. Background dispatches via
+// bash_bg (sink-reported) instead of blocking. There is no Lua handler.
 type CustomTool struct {
 	Name, Description string
 	Parameters        map[string]any
-	handler           *lua.LFunction
+	Command           string
+	Secrets           []string
+	Background        bool
+	Timeout           int
 }
 
 // Skill is a granted capability surfaced as a one-line entry in the agent's
@@ -108,8 +117,8 @@ func (a Agent) SkillsActive() bool {
 	return len(a.Skills) > 0 && !a.SkillsDisabled
 }
 
-// LoadedConfig is the parsed result. L stays alive for the session so custom
-// tool handlers and the wrap_bash hook can run; callers MUST call Close when done.
+// LoadedConfig is the parsed result. L stays alive for the session so the
+// wrap_bash hook can run; callers MUST call Close when done.
 type LoadedConfig struct {
 	Models  []Model
 	Tools   map[string]CustomTool
@@ -117,9 +126,10 @@ type LoadedConfig struct {
 	Secrets map[string]string
 	// StubTools maps a hallucinated tool name (e.g. "read_file", "grep") to a
 	// fixed redirect message. Registered config-globally via shell3.stub_tools;
-	// when the model calls such a name CallTool returns the message verbatim
-	// (never an error), nudging the model back toward bash/edit_file. See
-	// register.go (luaStubTools) and agentsetup.runtimeForAgent for the wiring.
+	// when the model calls such a name the chat layer returns the message
+	// verbatim (never an error), nudging the model back toward bash/edit_file.
+	// See register.go (luaStubTools) and agentsetup.runtimeForAgent for the
+	// wiring (StubNames → chat.Config.StubTools).
 	StubTools map[string]string
 
 	agents    []Agent
@@ -135,9 +145,6 @@ type LoadedConfig struct {
 
 	L  *lua.LState
 	mu sync.Mutex
-	// vmLockHeld is true while c.mu is held by CallTool/WrapBash driving the
-	// VM. See withIOUnlock (lua_bash.go) for the locking model.
-	vmLockHeld bool
 }
 
 func (c *LoadedConfig) Close() {

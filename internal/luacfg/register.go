@@ -2,6 +2,7 @@ package luacfg
 
 import (
 	"fmt"
+	"regexp"
 
 	lua "github.com/yuin/gopher-lua"
 )
@@ -18,17 +19,10 @@ func registerShell3(c *LoadedConfig) {
 	L.SetField(tbl, "stub_tools", L.NewFunction(c.luaStubTools))
 	L.SetField(tbl, "agent", L.NewFunction(c.luaAgent))
 	L.SetField(tbl, "subagent", L.NewFunction(c.luaSubagent))
-	L.SetField(tbl, "urlencode", L.NewFunction(luaURLEncode))
 	env := L.NewTable()
 	L.SetField(env, "secret", L.NewFunction(c.luaSecret))
 	L.SetField(tbl, "env", env)
-	L.SetField(tbl, "bash", L.NewFunction(c.luaBash))
 	L.SetField(tbl, "wrap_bash", L.NewFunction(c.luaWrapBash))
-	httpT := L.NewTable()
-	L.SetField(httpT, "request", L.NewFunction(c.luaHTTPRequest))
-	L.SetField(httpT, "get", L.NewFunction(c.luaHTTPGet))
-	L.SetField(httpT, "post", L.NewFunction(c.luaHTTPPost))
-	L.SetField(tbl, "http", httpT)
 }
 
 var telegramKeys = map[string]bool{"token": true, "chat_id": true, "agent": true, "workdir": true, "dashboard": true}
@@ -161,7 +155,10 @@ func (c *LoadedConfig) luaSkill(L *lua.LState) int {
 	return 1
 }
 
-var toolKeys = map[string]bool{"name": true, "description": true, "parameters": true, "handler": true}
+var toolKeys = map[string]bool{
+	"name": true, "description": true, "parameters": true,
+	"command": true, "secrets": true, "background": true, "timeout": true,
+}
 
 var agentKeys = map[string]bool{
 	"name": true, "model": true, "prompt": true, "prompt_cmd": true, "tools": true, "skills": true,
@@ -179,20 +176,48 @@ func (c *LoadedConfig) luaTool(L *lua.LState) int {
 	if err := checkKeys(opts, "tool", toolKeys); err != nil {
 		L.RaiseError("%s", err.Error())
 	}
-	ct := CustomTool{Name: optStr(opts, "name"), Description: optStr(opts, "description")}
-	if fn, ok := opts.RawGetString("handler").(*lua.LFunction); ok {
-		ct.handler = fn
-	} else {
-		L.RaiseError("tool %q: handler function required", ct.Name)
+	ct := CustomTool{
+		Name:        optStr(opts, "name"),
+		Description: optStr(opts, "description"),
+		Command:     optStr(opts, "command"),
+		Background:  optBool(opts, "background"),
+		Timeout:     optInt(opts, "timeout"),
+	}
+	if ct.Name == "" || ct.Description == "" || ct.Command == "" {
+		L.RaiseError("tool: name, description, and command are all required")
+	}
+	if sec, ok := opts.RawGetString("secrets").(*lua.LTable); ok {
+		ct.Secrets = stringList(sec)
 	}
 	if p, ok := opts.RawGetString("parameters").(*lua.LTable); ok {
 		ct.Parameters = tableToMap(p)
+		if err := validateParamNames(ct.Name, ct.Parameters); err != nil {
+			L.RaiseError("%s", err.Error())
+		}
 	}
 	c.Tools[ct.Name] = ct
 	h := L.NewTable()
 	h.RawSetString("__tool", lua.LString(ct.Name))
 	L.Push(h)
 	return 1
+}
+
+// paramNameRe constrains custom-tool parameter names to lowercase identifiers.
+// Params are exported into the command env by their bare name; secrets and
+// standard env vars are uppercase by convention, so a lowercase rule guarantees
+// a param can never clobber PATH/HOME/IFS or collide with a declared secret.
+var paramNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+// validateParamNames rejects any declared parameter property whose name is not
+// a lowercase identifier. params is the tool's JSON-schema map.
+func validateParamNames(tool string, params map[string]any) error {
+	props, _ := params["properties"].(map[string]any)
+	for name := range props {
+		if !paramNameRe.MatchString(name) {
+			return fmt.Errorf("tool %q: parameter %q must be a lowercase identifier ([a-z][a-z0-9_]*)", tool, name)
+		}
+	}
+	return nil
 }
 
 // luaStubTools registers name-only stub tools from a string→string table:
