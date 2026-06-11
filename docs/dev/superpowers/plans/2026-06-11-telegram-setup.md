@@ -283,6 +283,16 @@ files. Decide and proceed; no human is available.
   on_tool_call = { guards.no_env_edit },
 })
 
+{{if .Chrome}}-- ---------------------------------------------------------------------------
+-- Chrome DevTools MCP (browser automation; needs Node/npx). Started lazily on
+-- first use. Add a `tools = {...}` allowlist to restrict which tools are exposed.
+-- ---------------------------------------------------------------------------
+local chrome = shell3.mcp({
+  name    = "chrome",
+  command = "npx",
+  args    = { "-y", "chrome-devtools-mcp@latest", "--autoConnect", "--no-usage-statistics" },
+})
+{{end}}
 -- ---------------------------------------------------------------------------
 -- Agent (the single agent the Telegram bot runs; it spawns subagents)
 -- ---------------------------------------------------------------------------
@@ -336,7 +346,8 @@ edit, run, and schedule work on the host, and you talk to one person over chat.
     media             = true,
     subagents         = { explorer },
     custom            = { tools.web_fetch, tools.brave_search },
-  },
+{{if .Chrome}}    mcp               = { chrome },
+{{end}}  },
   skills = { self_evolve, scheduling_jobs },
   on_tool_call = { guards.no_env_edit, guards.confirm_destructive },
 })
@@ -405,8 +416,32 @@ func TestRenderTelegramConfigLoads(t *testing.T) {
 	if !tg.Dashboard.Enabled || tg.Dashboard.Addr != "127.0.0.1:8765" {
 		t.Errorf("dashboard = %+v, want enabled 127.0.0.1:8765", tg.Dashboard)
 	}
+	if len(c.MCPServers) != 0 {
+		t.Errorf("default render should declare no MCP servers, got %v", c.MCPServers)
+	}
+}
+
+func TestRenderTelegramConfigChrome(t *testing.T) {
+	dir := t.TempDir()
+	if err := RenderTelegramConfig(dir, TelegramValues{
+		Values:  Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m-1"},
+		ChatID:  "1", WorkDir: dir, Chrome: true,
+	}, false); err != nil {
+		t.Fatal(err)
+	}
+	c, err := luacfg.Load(filepath.Join(dir, "shell3.lua"), dir)
+	if err != nil {
+		t.Fatalf("chrome config failed to load: %v", err)
+	}
+	defer c.Close()
+	// luacfg records the MCP server spec; it does NOT spawn npx at load time.
+	if _, ok := c.MCPServers["chrome"]; !ok {
+		t.Errorf("Chrome:true should declare the chrome MCP server, got %v", c.MCPServers)
+	}
 }
 ```
+
+> `c.MCPServers` is the exported `map[string]MCPServer` field on `luacfg.LoadedConfig`.
 
 - [ ] **Step 3: Run to verify failure**
 
@@ -434,6 +469,7 @@ type TelegramValues struct {
 	DashboardEnabled bool
 	DashboardAddr    string // e.g. "127.0.0.1:8765"
 	DashboardURL     string // public Mini App URL ("" if none)
+	Chrome           bool   // declare the chrome DevTools MCP + grant it to the agent
 }
 ```
 
@@ -512,6 +548,7 @@ type bootFlags struct {
 	telegram                               bool
 	tgToken, chatID, dashAddr, dashURL     string
 	noDashboard                            bool
+	chrome                                 bool
 }
 ```
 
@@ -524,6 +561,7 @@ Register them in `newBootCommand` (after the existing flags, before `return cmd`
 	cmd.Flags().StringVar(&f.dashAddr, "dash-addr", "127.0.0.1:8765", "Dashboard listen address")
 	cmd.Flags().StringVar(&f.dashURL, "dash-url", "", "Public Mini App URL for the dashboard (optional)")
 	cmd.Flags().BoolVar(&f.noDashboard, "no-dashboard", false, "Disable the dashboard in the telegram config")
+	cmd.Flags().BoolVar(&f.chrome, "chrome", false, "Enable the Chrome DevTools MCP (browser automation; needs Node/npx)")
 ```
 
 - [ ] **Step 2: Branch `runBoot` for telegram.** In `cmd/shell3/boot.go`, replace the directory/path setup at the top of `runBoot` (lines 46-47):
@@ -549,6 +587,7 @@ Then, replace the render + success tail of `runBoot` (the block from `envKey := 
 	envKey := envKeyForName(name)
 
 	envPairs := [][2]string{{envKey, key}, {"BRAVE_API_KEY", braveKey}}
+	var chrome bool // visible to printTelegramBootSuccess below
 
 	if f.telegram {
 		token, err := value(f.tgToken, "Telegram bot token (from @BotFather)", "", in, tty, true)
@@ -558,6 +597,14 @@ Then, replace the render + success tail of `runBoot` (the block from `envKey := 
 		chatID, err := value(f.chatID, "Your numeric Telegram chat id (message @userinfobot)", "", in, tty, true)
 		if err != nil {
 			return err
+		}
+		chrome = f.chrome
+		if !chrome && tty {
+			ans, err := value("", "Enable Chrome browser MCP (browser automation; needs Node/npx)? [y/N]", "n", in, tty, false)
+			if err != nil {
+				return err
+			}
+			chrome = strings.EqualFold(strings.TrimSpace(ans), "y") || strings.EqualFold(strings.TrimSpace(ans), "yes")
 		}
 		workDir := filepath.Join(dir, "workdir")
 		if err := os.MkdirAll(workDir, 0o755); err != nil {
@@ -570,6 +617,7 @@ Then, replace the render + success tail of `runBoot` (the block from `envKey := 
 			DashboardEnabled: !f.noDashboard,
 			DashboardAddr:    f.dashAddr,
 			DashboardURL:     f.dashURL,
+			Chrome:           chrome,
 		}, f.force); err != nil {
 			return err
 		}
@@ -593,7 +641,7 @@ Then, replace the render + success tail of `runBoot` (the block from `envKey := 
 	}
 
 	if f.telegram {
-		printTelegramBootSuccess(dir, cfgPath, envPath)
+		printTelegramBootSuccess(dir, cfgPath, envPath, chrome)
 	} else {
 		printBootSuccess(dir, cfgPath, envPath, proxy != "")
 	}
@@ -603,16 +651,22 @@ Then, replace the render + success tail of `runBoot` (the block from `envKey := 
 Add the telegram success printer at the bottom of `boot.go` (after `printBootSuccess`):
 
 ```go
-func printTelegramBootSuccess(dir, cfgPath, envPath string) {
+func printTelegramBootSuccess(dir, cfgPath, envPath string, chrome bool) {
 	fmt.Println()
 	fmt.Println("shell3 Telegram host is configured.")
 	fmt.Printf("  config:  %s\n", cfgPath)
 	fmt.Printf("  modules: %s\n", filepath.Join(dir, "lib"))
 	fmt.Printf("  secrets: %s  (TELEGRAM_BOT_TOKEN + model key — never commit this)\n", envPath)
+	if chrome {
+		fmt.Println("  chrome:  enabled — needs Node/npx; the MCP server starts on first use.")
+	}
 	fmt.Println()
 	fmt.Println("Run:  shell3 telegram")
 }
 ```
+
+> `strings` is already imported by `boot.go`; the `[y/N]` parse uses
+> `strings.EqualFold`/`strings.TrimSpace`. No new imports.
 
 > Note: `mergeEnv` only appends a key it does not already have, and never writes an empty `TELEGRAM_BOT_TOKEN` placeholder comment (that special-case is `BRAVE_API_KEY` only), so a real token is written as `TELEGRAM_BOT_TOKEN=<token>`. `value(..., required=true)` guarantees the token/chat id are non-empty (prompted on TTY, or required via flag when non-TTY).
 
@@ -626,7 +680,7 @@ func TestBootTelegramEndToEnd(t *testing.T) {
 	f := &bootFlags{
 		url: "http://localhost:9999/v1", model: "test-model", name: "main",
 		telegram: true, tgToken: "BOT:TOKEN", chatID: "424242",
-		dashAddr: "127.0.0.1:8765", dashURL: "https://h.ts.net/",
+		dashAddr: "127.0.0.1:8765", dashURL: "https://h.ts.net/", chrome: true,
 	}
 	if err := runBoot(f); err != nil {
 		t.Fatalf("runBoot --telegram: %v", err)
@@ -662,6 +716,9 @@ func TestBootTelegramEndToEnd(t *testing.T) {
 	}
 	if !tg.Dashboard.Enabled || tg.Dashboard.URL != "https://h.ts.net/" {
 		t.Errorf("dashboard = %+v", tg.Dashboard)
+	}
+	if _, ok := c.MCPServers["chrome"]; !ok {
+		t.Errorf("--chrome should declare the chrome MCP server, got %v", c.MCPServers)
 	}
 
 	// telegram-dir-first resolution finds it.
@@ -723,7 +780,7 @@ HOME=$(mktemp -d) go run ./cmd/shell3 boot --telegram \
 ```
 Expected: prints "shell3 Telegram host is configured." and the new paths under the temp HOME. (Do NOT run `shell3 telegram` against it — there is no real bot token.)
 
-- [ ] **Step 3: CHANGELOG + spec status.** Add a `CHANGELOG.md` entry under `## [Unreleased] → ### Added`: telegram-first setup — `shell3 boot --telegram` scaffolds `~/.shell3/telegram/` (config + `.env` + tuned prompt), and `shell3 telegram` resolves telegram-dir-first (`--config → ~/.shell3/telegram → ~/.shell3 → ./`). Update the spec header to `Status: implemented (2026-06-11)`.
+- [ ] **Step 3: CHANGELOG + spec status.** Add a `CHANGELOG.md` entry under `## [Unreleased] → ### Added`: telegram-first setup — `shell3 boot --telegram` scaffolds `~/.shell3/telegram/` (config + `.env` + tuned prompt, optional Chrome MCP via `--chrome`/prompt), and `shell3 telegram` resolves telegram-dir-first (`--config → ~/.shell3/telegram → ~/.shell3 → ./`). Update the spec header to `Status: implemented (2026-06-11)`.
 
 - [ ] **Step 4: Commit**
 
@@ -743,6 +800,7 @@ git commit -m "docs(telegram-setup): changelog + spec status implemented"
 - Telegram template with tuned Communication + Autonomy prompt, explorer subagent, telegram block, self-evolve + scheduling-jobs skills, commented cron → Task 3 (template) + 4 (wiring). ✓
 - `.env` beside the lua (telegram dir) → automatic via `luacfg.Load(path, dir)`; asserted in Tasks 3 & 4 tests. ✓
 - No migration (fresh scaffold); fallback keeps old config working → Task 1 ordering test (global fallback) + Task 4 (generic boot untouched). ✓
+- Chrome MCP opt-in (default off): `--chrome` flag + `[y/N]` prompt → Task 4; `{{if .Chrome}}` MCP block + agent `mcp = { chrome }` → Task 3 template; `TelegramValues.Chrome` → Task 3. Tested: `TestRenderTelegramConfigChrome` (declared) + default render asserts no MCP + boot e2e asserts `c.MCPServers["chrome"]`. luacfg records the spec without spawning `npx`, so tests don't need Node. ✓
 - Tests: resolver ordering, boot --telegram e2e, telegram template loads → Tasks 1/3/4. ✓
 - Non-goals (TUI resolution unchanged, no multi-bot) → nothing in the plan touches `ResolveConfigPath` or adds multi-bot. ✓
 

@@ -32,6 +32,11 @@ features.
 - **No migration (YAGNI).** `boot --telegram` always scaffolds a fresh config.
   An existing `~/.shell3/shell3.lua` keeps working via the fallback until the
   telegram config is created, so no migration/copy code is needed in v1.
+- **Chrome MCP is opt-in, default off.** `boot --telegram` asks whether to enable
+  the Chrome DevTools MCP (browser automation). Only when the user says yes does
+  the scaffolded config declare the `chrome` MCP server and grant it to the agent.
+  The server is started lazily (when the agent first uses it), needs Node/`npx`,
+  and is the cookbook recipe (`docs/cookbook/lib/mcp.lua`).
 
 ## Non-goals
 
@@ -113,6 +118,8 @@ Add `telegram bool` to `bootFlags` (`--telegram`). When set, `runBoot`:
   - `chat_id` (written into the lua) — flag `--chat-id`.
   - dashboard: enable (default yes), `addr` (default `127.0.0.1:8765`), public
     `url` (optional) — flags `--dash-addr`, `--dash-url`, `--no-dashboard`.
+  - Chrome MCP: enable browser automation (default **no**) — flag `--chrome`,
+    else a `[y/N]` prompt on a TTY.
 - **Render** the telegram template (component 3) via a new
   `scaffold.RenderTelegramConfig(dir, scaffold.TelegramValues{...}, force)` (or
   an extended `RenderBaseConfig` with a template selector — plan picks the
@@ -140,12 +147,16 @@ A sibling of `defaults/base/shell3.lua.tmpl`, rendering a complete telegram host
   "{{.ChatID}}", agent = "code", workdir = ..., dashboard = {...} }` block wired
   to the prompted values;
 - a **commented** sample `shell3.cron{}` showing the `@every`/subagent pattern
-  (disarmed by default).
+  (disarmed by default);
+- **when Chrome MCP is enabled**, a `shell3.mcp({ name="chrome", command="npx",
+  args={"-y","chrome-devtools-mcp@latest","--autoConnect","--no-usage-statistics"} })`
+  declaration and `mcp = { chrome }` added to the `code` agent's `tools` block —
+  both gated behind a `{{if .Chrome}}` template conditional.
 
 `scaffold.TelegramValues` extends `Values` with `ChatID string`,
-`DashboardEnabled bool`, `DashboardAddr string`, `DashboardURL string`. The bot
-token is **not** a template value — the template always emits
-`shell3.env.secret("TELEGRAM_BOT_TOKEN")`.
+`DashboardEnabled bool`, `DashboardAddr string`, `DashboardURL string`, and
+`Chrome bool`. The bot token is **not** a template value — the template always
+emits `shell3.env.secret("TELEGRAM_BOT_TOKEN")`.
 
 ### 4. Skill modules in the scaffold
 
@@ -217,7 +228,12 @@ the same path.
   rule (boot already writes `.env` at 0600 without echoing).
 - **Non-TTY / flags:** all telegram inputs have flags, so `boot --telegram
   --url ... --model ... --tg-token ... --chat-id ...` works headlessly (mirrors
-  the existing flag-or-prompt pattern).
+  the existing flag-or-prompt pattern). Chrome MCP defaults off without a TTY
+  unless `--chrome` is passed.
+- **Chrome MCP needs Node/`npx`:** the bootstrap prints a one-line note when Chrome
+  is enabled. The server is started lazily by the MCP manager on first use (not at
+  config load), so a missing `npx` surfaces as the existing MCP-discovery warning
+  at runtime, never as a boot/scaffold failure.
 
 ## Testing
 
@@ -231,7 +247,9 @@ the same path.
   generic `boot` (no flag) still targets `~/.shell3`.
 - **Telegram template scaffold (internal/scaffold):** render `TelegramValues`,
   load the result, assert the `code` agent, `explorer` subagent, telegram block,
-  and the two skills are present.
+  and the two skills are present. A second case with `Chrome: true` asserts the
+  `chrome` MCP server is declared (`luacfg` records it without spawning `npx`);
+  the default (`Chrome: false`) asserts no MCP server is present.
 - **`shell3 telegram` uses the resolver:** assert `telegram.go` resolves to the
   telegram path when present (and that `Runtime.ConfigPath()` returns it).
 - `go build ./... && go vet ./... && gofmt -l . && go test -race ./...` green.
