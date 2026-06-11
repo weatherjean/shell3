@@ -136,6 +136,37 @@ Trade-off accepted: each spawn is a full process start (reload Lua, open store)
 rather than an in-process child Session — heavier, but maximally extensible and
 it unifies cancellation, isolation, and delivery onto one mechanism.
 
+### Resolved decisions (Phase 2 implementation)
+
+- **Single notification per spawn.** `bash_bg` gains `notify_on_exit` (bool,
+  default `true` → emits `bg_done`). A subagent spawn passes `notify_on_exit=false`
+  so the ONLY notification is the child's own `agent_done` (id / status /
+  transcript / preview ≤200 chars) written via `--append-sinkfile`. Plain bg
+  jobs (servers, watchers) keep `bg_done`. No double-injection.
+- **Delegation context comes from pkg/shell3, not agentsetup.** The per-session
+  values (concrete sink path, resolved config path, `shell3` binary path via
+  `os.Executable`, the active agent's allowed subagents + descriptions, the exact
+  templated `bash_bg` spawn command) are injected as a first-turn system context
+  by the Session — agentsetup can't see session-level paths. The agent picks a
+  per-spawn id; the transcript is `.shell3/agents/<id>.jsonl`.
+- **Depth-1 via `--no-subagents`.** Spawned children run with `--no-subagents`,
+  which suppresses the delegation context so they cannot recurse. `shell3.subagent{}`
+  declarations are KEPT (they name the headless agent configs the parent may
+  delegate to); only the spawn *mechanism* moves from an internal tool to `bash_bg`.
+- **Cron `Dispatch` → subprocess + Notice (NOT the sink).** Host-initiated cron
+  keeps its operator-notification semantics: exec `shell3 --agent X --out <t>
+  "<prompt>"` as a tracked subprocess, wait, read the final assistant text from
+  the transcript, emit `Notice` iff `notify || failed`. It does not route through
+  the sink watcher (which inject+wakes — wrong for an operator notice). The
+  `cron.Dispatcher` interface is preserved; only `Dispatch`'s body changes.
+- **`/stop`** drops `CancelSubagents()`: model-spawned subagents are now bg jobs,
+  already killed by the existing `bgjobs.KillAll`; cron subprocesses are joined
+  by `Runtime.Close`.
+- **Deletes:** `spawn_agent`/`list_agents` (SpawnToolDefs, listAgentsTool, the
+  turn.go dispatch + chat SpawnRequest/AgentSnapshot/Spawn/ListAgents), the whole
+  `subRegistry` + `Session.spawn`/`deliverSubagentResult`/`CancelSubagents`/`subCtx`,
+  and the agentsetup spawn-tool injection.
+
 ## 4. Auto-compaction (`compact_at`)
 
 `prune_tool_result` and `compact_history` (model-driven) are deleted in favor of
