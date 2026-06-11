@@ -143,4 +143,13 @@ Until v1.0.0, minor versions may contain breaking changes.
   --chrome` flag. Browser automation is now the `browser` skill (above). Configs
   that still call `shell3.mcp{}` fail loudly at load.
 
+### Fixed
+
+- `/stop` now cancels the in-flight turn, kills its synchronous `bash`/`node`
+  children and `bash_bg` jobs, and cancels in-flight subagents — and works
+  mid-turn: Telegram turns now run on their own goroutine so the message loop
+  stays responsive and `/stop` lands while a turn is still running (previously
+  the loop was wedged inside the turn and `/stop` was never read). Persistent
+  browser windows and model proxies are intentionally left running.
+
 [Unreleased]: https://github.com/weatherjean/shell3/commits/main
