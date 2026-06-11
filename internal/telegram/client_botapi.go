@@ -184,6 +184,43 @@ func (c *botAPIClient) SetMenuButton(ctx context.Context, text, url string) erro
 	return err
 }
 
+// ReplyKey is one button on the persistent reply keyboard (the bar above the
+// text input). A text-only button auto-sends its Text as a message when tapped;
+// a button with WebApp opens that HTTPS URL as a Mini App instead.
+type ReplyKey struct {
+	Text   string
+	WebApp string // HTTPS Mini App URL; empty ⇒ a plain command button
+}
+
+// ShowReplyKeyboard installs a persistent reply-keyboard bar for the chat by
+// sending text with the given button rows attached. IsPersistent keeps the bar
+// visible across messages until it is replaced; a tap on a text button sends
+// that text (e.g. "/stop"), a tap on a WebApp button opens the Mini App.
+// Best-effort, mirroring SetCommands/SetMenuButton.
+func (c *botAPIClient) ShowReplyKeyboard(ctx context.Context, chatID int64, text string, rows [][]ReplyKey) error {
+	kb := make([][]models.KeyboardButton, len(rows))
+	for i, row := range rows {
+		kb[i] = make([]models.KeyboardButton, len(row))
+		for j, k := range row {
+			if k.WebApp != "" {
+				kb[i][j] = models.KeyboardButton{Text: k.Text, WebApp: &models.WebAppInfo{URL: k.WebApp}}
+				continue
+			}
+			kb[i][j] = models.KeyboardButton{Text: k.Text}
+		}
+	}
+	_, err := c.b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID: chatID,
+		Text:   text,
+		ReplyMarkup: models.ReplyKeyboardMarkup{
+			Keyboard:       kb,
+			IsPersistent:   true,
+			ResizeKeyboard: true,
+		},
+	})
+	return err
+}
+
 // SetCommands registers the bot's command list, shown in Telegram's "/"
 // autocomplete menu. Best-effort.
 func (c *botAPIClient) SetCommands(ctx context.Context, cmds []Command) error {

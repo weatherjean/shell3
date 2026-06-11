@@ -143,6 +143,20 @@ func newTelegramCommand() *cobra.Command {
 				}
 			}
 
+			// Install a persistent reply-keyboard bar above the input: the
+			// dashboard Mini App first (when a public URL is set), then one-tap
+			// slash-command buttons that auto-send their command. Best-effort.
+			{
+				var rows [][]telegram.ReplyKey
+				if tg.Dashboard.Enabled && tg.Dashboard.URL != "" {
+					rows = append(rows, []telegram.ReplyKey{{Text: "📊 Dashboard", WebApp: tg.Dashboard.URL}})
+				}
+				rows = append(rows, []telegram.ReplyKey{{Text: "/stop"}, {Text: "/reload"}, {Text: "/clear"}})
+				if err := client.ShowReplyKeyboard(ctx, chatID, "shell3 online — quick actions ready.", rows); err != nil {
+					fmt.Printf("warning: could not set reply keyboard: %v\n", err)
+				}
+			}
+
 			fmt.Printf("shell3 telegram: listening for chat %d\n", chatID)
 			b.Run(ctx)
 			return nil
