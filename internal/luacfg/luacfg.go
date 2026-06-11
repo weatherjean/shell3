@@ -76,8 +76,9 @@ type Agent struct {
 }
 
 // Subagent is a delegatable specialist: a non-interactive agent the model can
-// spawn via spawn_agent. Registered separately from agents (never in the Tab
-// rotation). Description is the model-facing "when to use".
+// spawn as a backgrounded `shell3` process (the bash_bg delegation command).
+// Registered separately from agents (never in the Tab rotation). Description is
+// the model-facing "when to use".
 type Subagent struct {
 	Name, Description, ModelName, Prompt string
 	Gates                                ToolGates

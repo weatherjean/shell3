@@ -31,7 +31,7 @@ func waitDead(pid int, timeout time.Duration) bool {
 
 func TestStart_writesLogAndExits(t *testing.T) {
 	wd := t.TempDir()
-	job, err := Start("echo hi-from-bg", wd, "")
+	job, err := Start("echo hi-from-bg", wd, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,11 +55,11 @@ func TestStart_writesLogAndExits(t *testing.T) {
 
 func TestStart_appendsToRegistry(t *testing.T) {
 	wd := t.TempDir()
-	j1, err := Start("true", wd, "")
+	j1, err := Start("true", wd, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	j2, err := Start("true", wd, "")
+	j2, err := Start("true", wd, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestStart_appendsToRegistry(t *testing.T) {
 
 func TestStart_detached(t *testing.T) {
 	wd := t.TempDir()
-	job, err := Start("sleep 30", wd, "")
+	job, err := Start("sleep 30", wd, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestStart_detached(t *testing.T) {
 func TestStart_grandchildKillablyViaPgid(t *testing.T) {
 	wd := t.TempDir()
 	// `setsid bash` ensures the inner sleep inherits the pgid.
-	job, err := Start("sleep 30 & wait", wd, "")
+	job, err := Start("sleep 30 & wait", wd, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestStart_corruptRegistryRecovers(t *testing.T) {
 	if err := os.WriteFile(bad, []byte("{not valid json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	job, err := Start("true", wd, "")
+	job, err := Start("true", wd, "", true)
 	if err != nil {
 		t.Fatalf("start should recover from corrupt bg.json: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestStart_corruptRegistryBackupsAreUnique(t *testing.T) {
 	if err := os.WriteFile(reg, []byte("first-corrupt"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	j1, err := Start("true", wd, "")
+	j1, err := Start("true", wd, "", true)
 	if err != nil {
 		t.Fatalf("first recover: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestStart_corruptRegistryBackupsAreUnique(t *testing.T) {
 	if err := os.WriteFile(reg, []byte("second-corrupt"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	j2, err := Start("true", wd, "")
+	j2, err := Start("true", wd, "", true)
 	if err != nil {
 		t.Fatalf("second recover: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestStart_concurrentAppendsDoNotRace(t *testing.T) {
 	jobs := make(chan Job, n)
 	for i := 0; i < n; i++ {
 		go func() {
-			j, err := Start("true", wd, "")
+			j, err := Start("true", wd, "", true)
 			jobs <- j
 			errs <- err
 		}()
@@ -288,7 +288,7 @@ func TestStart_concurrentAppendsDoNotRace(t *testing.T) {
 }
 
 func TestStart_emptyCommandRejected(t *testing.T) {
-	if _, err := Start("", t.TempDir(), ""); err == nil {
+	if _, err := Start("", t.TempDir(), "", true); err == nil {
 		t.Fatal("expected error on empty command")
 	}
 }
@@ -303,7 +303,7 @@ func TestStart_killsProcessWhenPersistFails(t *testing.T) {
 	marker := filepath.Join(wd, "ran.marker")
 	// If the spawned process is NOT killed, it survives the 1s sleep and creates
 	// the marker. If Start kills it on persist failure, the marker never appears.
-	_, err := Start(fmt.Sprintf("sleep 1 && touch %q", marker), wd, "")
+	_, err := Start(fmt.Sprintf("sleep 1 && touch %q", marker), wd, "", true)
 	if err == nil {
 		t.Fatal("expected persist error (.shell3 is a file), got nil")
 	}
@@ -315,7 +315,7 @@ func TestStart_killsProcessWhenPersistFails(t *testing.T) {
 
 func TestKillAll(t *testing.T) {
 	dir := t.TempDir()
-	job, err := Start("sleep 60", dir, "") // command first, workdir second
+	job, err := Start("sleep 60", dir, "", true) // command first, workdir second
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +376,7 @@ func waitSinkLines(t *testing.T, path string, n int, timeout time.Duration) []ma
 func TestStart_emitsBgDoneOnExit(t *testing.T) {
 	wd := t.TempDir()
 	sinkPath := filepath.Join(wd, ".shell3", "sink", "main.jsonl")
-	job, err := Start("exit 3", wd, sinkPath)
+	job, err := Start("exit 3", wd, sinkPath, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,11 +402,32 @@ func TestStart_emitsBgDoneOnExit(t *testing.T) {
 	}
 }
 
+// TestStart_notifyOnExitFalseSkipsBgDone verifies that notifyOnExit=false
+// suppresses the bg_done append even when a sinkPath is configured — the path a
+// subagent spawn uses so its own agent_done is the only notification (no
+// duplicate bg_done). The job still runs and is reaped; only the sink stays empty.
+func TestStart_notifyOnExitFalseSkipsBgDone(t *testing.T) {
+	wd := t.TempDir()
+	sinkPath := filepath.Join(wd, ".shell3", "sink", "main.jsonl")
+	job, err := Start("exit 0", wd, sinkPath, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(job.Log) })
+
+	// Let the process exit and the reaper run, then assert no sink line landed.
+	waitDead(job.PID, 2*time.Second)
+	time.Sleep(150 * time.Millisecond)
+	if data, err := os.ReadFile(sinkPath); err == nil && len(data) > 0 {
+		t.Fatalf("notify_on_exit=false must write no bg_done, got sink content: %q", data)
+	}
+}
+
 // TestStart_emptySinkPathSkipsNotification verifies an empty sinkPath is a safe
 // no-op: the job still runs and is tracked, but no sink file is written.
 func TestStart_emptySinkPathSkipsNotification(t *testing.T) {
 	wd := t.TempDir()
-	job, err := Start("true", wd, "")
+	job, err := Start("true", wd, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +442,7 @@ func TestStart_emptySinkPathSkipsNotification(t *testing.T) {
 
 func TestRegistry_jsonShape(t *testing.T) {
 	wd := t.TempDir()
-	job, err := Start("true", wd, "")
+	job, err := Start("true", wd, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}

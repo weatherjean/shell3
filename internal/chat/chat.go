@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/weatherjean/shell3/internal/applog"
@@ -32,7 +33,8 @@ type ActiveAgent struct {
 	// CustomToolNames is the set of tool names routed to the custom-tool dispatcher.
 	CustomToolNames map[string]bool
 	// Subagents is the active agent's allowlist of registered subagent names
-	// (its tools.subagents); the spawn_agent handler rejects names outside it.
+	// (its tools.subagents). pkg/shell3 renders it into the per-session
+	// Delegation context (which subagents the agent may spawn via bash_bg).
 	Subagents     []string
 	LLM           LLMClient
 	Params        llm.RequestParams
@@ -72,8 +74,9 @@ type Config struct {
 	ActiveSkills []string
 	// ActiveTools lists tool names enabled for this agent.
 	ActiveTools []string
-	// Subagents is the active agent's allowlist of registered subagent names,
-	// enforced by the spawn_agent handler (belt-and-suspenders to the schema enum).
+	// Subagents is the active agent's allowlist of registered subagent names.
+	// pkg/shell3 renders it into the per-session Delegation context (the
+	// subagents this agent may spawn as a backgrounded shell3 via bash_bg).
 	Subagents []string
 	// ContextWindow is the active model's context window in tokens, used by
 	// the reminder tracker to emit context-usage warnings. Zero means unknown.
@@ -111,12 +114,6 @@ type Config struct {
 	// means no hook is declared — commands run verbatim (the unsafe default).
 	// Config-global (one hook for all agents), not swapped on agent switch.
 	WrapBash func(ctx context.Context, cmd string) (rewritten string, allowed bool, reason string, err error)
-	// Spawn launches a subagent for the parsed spawn_agent call and returns its
-	// id immediately. Nil → spawn_agent degrades to an "unavailable" result.
-	Spawn func(ctx context.Context, req SpawnRequest) (string, error)
-	// ListAgents returns a snapshot of subagents spawned by this session. Nil →
-	// list_agents returns an empty array.
-	ListAgents func() []AgentSnapshot
 	// AgentNames lists configured agents in declaration order, for /agent and
 	// Tab cycling. Empty or single-element disables switching.
 	AgentNames []string
@@ -191,9 +188,6 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler, shellInteractive
 		CustomTool:       cfg.CustomTool,
 		CustomToolNames:  cfg.CustomToolNames,
 		WrapBash:         cfg.WrapBash,
-		Spawn:            cfg.Spawn,
-		ListAgents:       cfg.ListAgents,
-		Subagents:        cfg.Subagents,
 		CompactAt:        cfg.CompactAt,
 		ShellInteractive: shellInteractive,
 	}
@@ -204,6 +198,13 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler, shellInteractive
 func OpenSink(path string) (*OutSink, func(), error) {
 	if path == "" {
 		return nil, func() {}, nil
+	}
+	// Create the parent directory: a subagent invocation passes
+	// --out .shell3/agents/<id>.jsonl, whose directory may not exist yet (the
+	// caller no longer pre-creates it). Best-effort — a failure here surfaces as
+	// the open error below with the same path context.
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		_ = os.MkdirAll(dir, 0o755)
 	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {

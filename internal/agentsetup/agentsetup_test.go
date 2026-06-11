@@ -378,10 +378,12 @@ func subagentParts(t *testing.T) (*agentsetup.Parts, func()) {
 	return parts, cleanup
 }
 
-// TestAgentRuntime_ExposesRegisteredSubagents asserts that an agent whose
-// Subagents list is non-empty gets spawn_agent and list_agents injected into
-// its schema, with spawn_agent's subagent enum matching the registered names.
-func TestAgentRuntime_ExposesRegisteredSubagents(t *testing.T) {
+// TestAgentRuntime_NoSpawnTools asserts that an agent with registered subagents
+// no longer gets in-process spawn_agent/list_agents tools (subagents are now a
+// bash_bg-backgrounded shell3 described in the prompt), but still carries the
+// Subagents allowlist and that each allowed subagent resolves a description for
+// the delegation context.
+func TestAgentRuntime_NoSpawnTools(t *testing.T) {
 	p, cleanup := subagentParts(t)
 	defer cleanup()
 
@@ -389,79 +391,43 @@ func TestAgentRuntime_ExposesRegisteredSubagents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentRuntime: %v", err)
 	}
-
-	hasSpawn := false
-	hasListAgents := false
 	for _, td := range rt.Personality.Tools {
-		switch td.Name {
-		case "spawn_agent":
-			hasSpawn = true
-			// Drill into spawn_agent's subagent enum.
-			props, ok := td.Parameters["properties"].(map[string]any)
-			if !ok {
-				t.Fatal("spawn_agent: Parameters[\"properties\"] is not map[string]any")
-			}
-			subagentProp, ok := props["subagent"].(map[string]any)
-			if !ok {
-				t.Fatal("spawn_agent: properties[\"subagent\"] is not map[string]any")
-			}
-			enum, ok := subagentProp["enum"].([]string)
-			if !ok {
-				t.Fatalf("spawn_agent: subagent enum is %T, want []string", subagentProp["enum"])
-			}
-			if len(enum) != 1 || enum[0] != "researcher" {
-				t.Errorf("spawn_agent subagent enum = %v, want [researcher]", enum)
-			}
-		case "list_agents":
-			hasListAgents = true
+		if td.Name == "spawn_agent" || td.Name == "list_agents" {
+			t.Errorf("unexpected in-process tool %q — spawn machinery was removed", td.Name)
 		}
-	}
-	if !hasSpawn {
-		t.Error("spawn_agent not found in Personality.Tools")
-	}
-	if !hasListAgents {
-		t.Error("list_agents not found in Personality.Tools")
-	}
-	// ActiveTools must also contain both names.
-	activeSpawn := false
-	activeList := false
-	for _, n := range rt.ActiveTools {
-		if n == "spawn_agent" {
-			activeSpawn = true
-		}
-		if n == "list_agents" {
-			activeList = true
-		}
-	}
-	if !activeSpawn {
-		t.Error("spawn_agent not found in ActiveTools")
-	}
-	if !activeList {
-		t.Error("list_agents not found in ActiveTools")
-	}
-}
-
-// TestAgentRuntime_SubagentsAllowlist asserts that an agent's runtime bundle
-// carries the allowlist of registered subagent names in Subagents, and that a
-// subagent's own bundle has an empty Subagents (depth limit 1).
-func TestAgentRuntime_SubagentsAllowlist(t *testing.T) {
-	p, cleanup := subagentParts(t)
-	defer cleanup()
-
-	rt, err := p.AgentRuntime("code")
-	if err != nil {
-		t.Fatalf("AgentRuntime: %v", err)
 	}
 	if len(rt.Subagents) != 1 || rt.Subagents[0] != "researcher" {
 		t.Errorf("AgentRuntime(\"code\").Subagents = %v, want [researcher]", rt.Subagents)
 	}
+	desc, ok := p.SubagentDescription("researcher")
+	if !ok || desc == "" {
+		t.Errorf("SubagentDescription(\"researcher\") = %q,%v; want a non-empty description", desc, ok)
+	}
+	if _, ok := p.SubagentDescription("ghost"); ok {
+		t.Error("SubagentDescription(\"ghost\") returned ok for an unregistered subagent")
+	}
+}
 
-	srt, err := p.SubagentRuntime("researcher")
+// TestAgentRuntime_SubagentResolvesAsAgent asserts that a registered subagent
+// name passed to AgentRuntime (the `shell3 --agent <subagent>` spawn path)
+// resolves the subagent's own config — correct name, and an empty Subagents
+// bundle (depth limit 1 — a subagent declares none).
+func TestAgentRuntime_SubagentResolvesAsAgent(t *testing.T) {
+	p, cleanup := subagentParts(t)
+	defer cleanup()
+
+	srt, err := p.AgentRuntime("researcher")
 	if err != nil {
-		t.Fatalf("SubagentRuntime: %v", err)
+		t.Fatalf("AgentRuntime(researcher): %v", err)
+	}
+	if srt.ModeLabel != "researcher" {
+		t.Errorf("ModeLabel = %q, want %q", srt.ModeLabel, "researcher")
+	}
+	if srt.Personality.Name != "researcher" {
+		t.Errorf("Personality.Name = %q, want %q", srt.Personality.Name, "researcher")
 	}
 	if len(srt.Subagents) != 0 {
-		t.Errorf("SubagentRuntime(\"researcher\").Subagents = %v, want empty (depth limit 1)", srt.Subagents)
+		t.Errorf("AgentRuntime(\"researcher\").Subagents = %v, want empty (depth limit 1)", srt.Subagents)
 	}
 }
 
@@ -497,33 +463,15 @@ func TestAgentRuntime_NoSubagentsNoSpawnTool(t *testing.T) {
 	}
 }
 
-// TestSessionConfig_ResolvesSubagentConfig asserts that a SessionOptions with
-// Subagent set builds the session as the subagent (correct name) and that the
-// resulting runtime has no spawn tooling (depth limit 1).
-func TestSessionConfig_ResolvesSubagentConfig(t *testing.T) {
+// TestSessionConfig_ResolvesSubagentAsAgent asserts that SessionConfig with
+// Agent set to a registered subagent name builds the session as that subagent.
+func TestSessionConfig_ResolvesSubagentAsAgent(t *testing.T) {
 	p, cleanup := subagentParts(t)
 	defer cleanup()
 
-	rt, err := p.SubagentRuntime("researcher")
+	cfg, err := p.SessionConfig(agentsetup.SessionOptions{Agent: "researcher"})
 	if err != nil {
-		t.Fatalf("SubagentRuntime: %v", err)
-	}
-
-	if rt.Personality.Name != "researcher" {
-		t.Errorf("Personality.Name = %q, want %q", rt.Personality.Name, "researcher")
-	}
-	if rt.ModeLabel != "researcher" {
-		t.Errorf("ModeLabel = %q, want %q", rt.ModeLabel, "researcher")
-	}
-	for _, td := range rt.Personality.Tools {
-		if td.Name == "spawn_agent" || td.Name == "list_agents" {
-			t.Errorf("subagent runtime should not have %q (depth limit 1)", td.Name)
-		}
-	}
-	// Also check SessionConfig routes to SubagentRuntime when Subagent is set.
-	cfg, err := p.SessionConfig(agentsetup.SessionOptions{Subagent: "researcher"})
-	if err != nil {
-		t.Fatalf("SessionConfig with Subagent: %v", err)
+		t.Fatalf("SessionConfig with Agent=researcher: %v", err)
 	}
 	if cfg.ModeLabel != "researcher" {
 		t.Errorf("SessionConfig ModeLabel = %q, want %q", cfg.ModeLabel, "researcher")
@@ -532,13 +480,12 @@ func TestSessionConfig_ResolvesSubagentConfig(t *testing.T) {
 
 // TestRefreshPromptFor_Subagent asserts that RefreshPromptFor returns the
 // subagent's own system prompt when called with a subagent name, covering the
-// /clear path for spawned-subagent sessions (Fix 2 regression guard).
+// /clear path for a session running a subagent config.
 func TestRefreshPromptFor_Subagent(t *testing.T) {
 	p, cleanup := subagentParts(t)
 	defer cleanup()
 
-	// Build a subagent session so activeName == "researcher".
-	cfg, err := p.SessionConfig(agentsetup.SessionOptions{Subagent: "researcher"})
+	cfg, err := p.SessionConfig(agentsetup.SessionOptions{Agent: "researcher"})
 	if err != nil {
 		t.Fatalf("SessionConfig: %v", err)
 	}
@@ -548,18 +495,18 @@ func TestRefreshPromptFor_Subagent(t *testing.T) {
 	}
 }
 
-// TestSubagentRuntime_UnknownErrors asserts that SubagentRuntime returns an
-// error for a name that is not registered.
-func TestSubagentRuntime_UnknownErrors(t *testing.T) {
+// TestAgentRuntime_UnknownErrors asserts that AgentRuntime returns an error for
+// a name in neither the agent nor the subagent registry.
+func TestAgentRuntime_UnknownErrors(t *testing.T) {
 	p, cleanup := subagentParts(t)
 	defer cleanup()
 
-	_, err := p.SubagentRuntime("ghost")
+	_, err := p.AgentRuntime("ghost")
 	if err == nil {
-		t.Fatal("expected error for unknown subagent, got nil")
+		t.Fatal("expected error for unknown agent, got nil")
 	}
 	if !strings.Contains(err.Error(), "ghost") {
-		t.Errorf("error should name the unknown subagent, got: %v", err)
+		t.Errorf("error should name the unknown agent, got: %v", err)
 	}
 }
 

@@ -65,8 +65,10 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 		b.mu.Lock()
 		c := b.cancelTurn
 		b.mu.Unlock()
+		// KillAll also terminates model-spawned subagents: they are now plain bg
+		// jobs (a backgrounded `shell3`), so killing the tracked bg groups stops
+		// them too — no separate subagent-cancellation path is needed.
 		killed, _ := bgjobs.KillAll(b.workDir)
-		b.sess.CancelSubagents()
 		if c != nil {
 			c() // cancels turnCtx → synchronous bash/node process groups get SIGTERM→SIGKILL
 			msg := "⏹ stopped"

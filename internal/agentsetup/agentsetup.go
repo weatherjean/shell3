@@ -98,21 +98,37 @@ func (p *Parts) CustomTool(ctx context.Context, name, args string) (string, erro
 	return p.lc.CallTool(ctx, name, args)
 }
 
+// SubagentDescription returns the model-facing "when to use" description for a
+// registered subagent, or ("", false) if no such subagent is declared. The
+// Session uses it to render the per-session delegation context (the allowed
+// subagents the active agent may spawn, each as "name: description").
+func (p *Parts) SubagentDescription(name string) (string, bool) {
+	sa, ok := p.lc.SubagentByName(name)
+	if !ok {
+		return "", false
+	}
+	return sa.Description, true
+}
+
 // AgentRuntime assembles the full chat runtime for the named agent: its model
 // client, persona, and tool defs. name "" uses the first declared agent. An
-// unknown non-empty name returns an error.
+// unknown non-empty name falls back to the subagent registry (so a spawned
+// `shell3 --agent <subagent>` resolves the headless subagent config); a name in
+// neither registry returns an error.
 func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
-	var a luacfg.Agent
 	if name == "" {
-		a = p.lc.FirstAgent()
-	} else {
-		var ok bool
-		a, ok = p.lc.AgentByName(name)
-		if !ok {
-			return chat.ActiveAgent{}, fmt.Errorf("unknown agent %q", name)
-		}
+		return p.runtimeForAgent(p.lc.FirstAgent())
 	}
-	return p.runtimeForAgent(a)
+	if a, ok := p.lc.AgentByName(name); ok {
+		return p.runtimeForAgent(a)
+	}
+	// A subagent name passed via --agent (the spawn command): resolve it from the
+	// subagent registry. Subagents get no delegation context (depth limit 1 is
+	// enforced by --no-subagents at spawn), so this is just a headless config.
+	if sa, ok := p.lc.SubagentByName(name); ok {
+		return p.runtimeForAgent(subagentToAgent(sa))
+	}
+	return chat.ActiveAgent{}, fmt.Errorf("unknown agent %q", name)
 }
 
 // subagentToAgent adapts a registered subagent to the luacfg.Agent shape that
@@ -130,19 +146,9 @@ func subagentToAgent(sa luacfg.Subagent) luacfg.Agent {
 	}
 }
 
-// SubagentRuntime builds the runtime for a registered subagent (spawned via
-// spawn_agent). Subagents never appear in AgentNames/the Tab rotation and get
-// no spawn tooling of their own (depth limit 1).
-func (p *Parts) SubagentRuntime(name string) (chat.ActiveAgent, error) {
-	sa, ok := p.lc.SubagentByName(name)
-	if !ok {
-		return chat.ActiveAgent{}, fmt.Errorf("unknown subagent %q", name)
-	}
-	return p.runtimeForAgent(subagentToAgent(sa))
-}
-
 // runtimeForAgent assembles the full chat runtime for the given agent value.
-// It is the common implementation shared by AgentRuntime and SubagentRuntime.
+// It is the common implementation shared by the agent and subagent resolution
+// paths in AgentRuntime.
 func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 	md, ok := p.lc.Model(a.ModelName)
 	if !ok {
@@ -159,22 +165,12 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 		toolNames = append(toolNames, t.Name)
 	}
 
-	// Inject spawn_agent + list_agents when this agent has registered subagents.
-	if len(a.Subagents) > 0 {
-		infos := make([]luacfg.SubagentInfo, 0, len(a.Subagents))
-		for _, saName := range a.Subagents {
-			sa, ok := p.lc.SubagentByName(saName)
-			if !ok {
-				continue // load-time validation already guarantees resolution; defensive
-			}
-			infos = append(infos, luacfg.SubagentInfo{Name: sa.Name, Description: sa.Description})
-		}
-		spawnDefs := luacfg.SpawnToolDefs(infos)
-		toolDefs = append(toolDefs, spawnDefs...)
-		for _, d := range spawnDefs {
-			toolNames = append(toolNames, d.Name)
-		}
-	}
+	// Subagents are no longer an in-process tool: an agent delegates by
+	// backgrounding a `shell3` subprocess (bash_bg). The per-session Delegation
+	// context (concrete sink/config/binary paths + the templated spawn command)
+	// is injected by pkg/shell3.Session, which can see session-level paths;
+	// a.Subagents (the allowlist) is surfaced via ActiveAgent.Subagents below so
+	// the Session knows which subagents this agent may spawn.
 
 	prompt := p.lc.BuildPersonaFor(a) + p.environmentSection()
 
@@ -255,7 +251,7 @@ func (p *Parts) environmentSection() string {
 // RefreshPromptFor re-renders the named agent's or subagent's system prompt
 // (used by /clear). name may be a declared agent name or a registered subagent
 // name; callers are expected to pass names that were previously validated by a
-// successful AgentRuntime/SubagentRuntime call (names come from ModeLabel,
+// successful AgentRuntime call (names come from ModeLabel,
 // which is set to a.Name only on a successful lookup). The FirstAgent fallback
 // exists only so an impossible miss degrades to a sane prompt rather than
 // panicking; in correct use that branch is never reached.
@@ -272,42 +268,10 @@ func (p *Parts) RefreshPromptFor(name string) string {
 
 // SessionOptions parameterizes one session derived from shared Parts.
 type SessionOptions struct {
-	Agent    string // "" → first declared
+	Agent    string // "" → first declared (falls back to a subagent name)
 	WorkDir  string // "" → runtime root
 	Headless bool
 	OutPath  string
-	// DisableSubagents force-strips spawn_agent/list_agents from this session's
-	// schema regardless of the agent's tools.subagents gate. The runtime sets it
-	// for spawned subagents to enforce depth-limit 1.
-	DisableSubagents bool
-	// Subagent, when non-empty, runs the named subagent's config instead of an
-	// agent (resolved from the subagent registry). Set by spawn_agent. Mutually
-	// exclusive with Agent in practice.
-	Subagent string
-}
-
-// stripSubagentTools removes spawn_agent/list_agents from an agent's schema,
-// enforcing the depth-limit-1 rule for spawned subagents. AgentRuntime returns
-// chat.ActiveAgent by value with freshly built slices, but [:0:0] makes a fresh
-// backing array so the strip can never alias a shared/cached persona slice.
-func stripSubagentTools(a chat.ActiveAgent) chat.ActiveAgent {
-	keep := a.Personality.Tools[:0:0]
-	for _, t := range a.Personality.Tools {
-		if t.Name == "spawn_agent" || t.Name == "list_agents" {
-			continue
-		}
-		keep = append(keep, t)
-	}
-	a.Personality.Tools = keep
-	names := a.ActiveTools[:0:0]
-	for _, n := range a.ActiveTools {
-		if n == "spawn_agent" || n == "list_agents" {
-			continue
-		}
-		names = append(names, n)
-	}
-	a.ActiveTools = names
-	return a
 }
 
 // SessionConfig derives a per-session chat.Config from the shared parts.
@@ -318,18 +282,9 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 	if workdir == "" {
 		workdir = p.root
 	}
-	var rt chat.ActiveAgent
-	var err error
-	if so.Subagent != "" {
-		rt, err = p.SubagentRuntime(so.Subagent)
-	} else {
-		rt, err = p.AgentRuntime(so.Agent)
-	}
+	rt, err := p.AgentRuntime(so.Agent)
 	if err != nil {
 		return chat.Config{}, err
-	}
-	if so.DisableSubagents {
-		rt = stripSubagentTools(rt)
 	}
 	// activeName is the session's agent pointer, shared by the two closures
 	// below; pkg/shell3.Session.SwitchAgent is documented single-threaded

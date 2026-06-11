@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -56,9 +57,6 @@ type SessionOpts struct {
 	Name string
 	// Agent selects the initial agent ("" → first declared).
 	Agent string
-	// Subagent, when non-empty, runs the named registered subagent's config
-	// instead of an agent (set by spawn_agent). Mutually exclusive with Agent.
-	Subagent string
 	// WorkDir roots tool execution for this session ("" → runtime root).
 	WorkDir string
 	// Headless strips shell_interactive and injects the headless reminder.
@@ -67,8 +65,11 @@ type SessionOpts struct {
 	OutPath string
 	// ShellInteractive runs an interactive shell command with TTY access.
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
-	// DisableSubagents strips the spawn tools from this session (used for
-	// spawned subagents; depth limit 1).
+	// DisableSubagents suppresses the per-session Delegation context (the
+	// allowed-subagents list + spawn command). Set for a spawned child (the
+	// `--no-subagents` flag) so it cannot itself delegate — enforcing depth
+	// limit 1. Unlike before, it strips no tools (there is no spawn tool); it
+	// only gates the first-turn delegation context Session injects.
 	DisableSubagents bool
 }
 
@@ -104,7 +105,11 @@ type Runtime struct {
 	// sessionConfig derives a per-session chat.Config; production wires
 	// agentsetup.Parts.SessionConfig, tests inject fakes.
 	sessionConfig func(SessionOpts) (chat.Config, error)
-	cleanup       func()
+	// subagentDesc returns a registered subagent's model-facing description (and
+	// whether it exists). The Session uses it to render the delegation context's
+	// "name: description" allowlist. nil in tests that don't exercise delegation.
+	subagentDesc func(name string) (string, bool)
+	cleanup      func()
 
 	// events is the out-of-turn event bus (Wake). Buffered; emit drops on full.
 	events chan HostEvent
@@ -113,8 +118,8 @@ type Runtime struct {
 	// store is the shared SQLite history store (nil if unavailable). Used by
 	// PastSessions/SessionTurns for the dashboard's conversation history.
 	store *store.Store
-	// ctx/cancel scope subagent goroutines so they outlive a spawning turn but
-	// are bounded by Close.
+	// ctx/cancel scope host-initiated cron dispatch subprocesses so a running
+	// cron job is cancelled (and its goroutine unblocks) when Close cancels ctx.
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -124,11 +129,12 @@ type Runtime struct {
 	configPath string // captured from RuntimeSpec for Reload
 	homeDir    string // captured for Reload's BuildParts
 
-	// subSeq mints process-unique subagent ids (see nextSubID). Global to the
-	// runtime so two parents never collide on a "sub:<id>" session name.
+	// subSeq mints process-unique ids for cron dispatch transcripts (see
+	// nextSubID). Global to the runtime so concurrent cron fires never collide on
+	// a transcript filename.
 	subSeq atomic.Int64
-	// wg joins in-flight subagent goroutines at Close. Add happens only under
-	// rt.mu while !closed (see trackSubagent), so it can't race wg.Wait.
+	// wg joins in-flight cron dispatch goroutines at Close. Add happens only
+	// under rt.mu while !closed (see trackSubagent), so it can't race wg.Wait.
 	wg sync.WaitGroup
 
 	mu       sync.Mutex
@@ -137,15 +143,16 @@ type Runtime struct {
 	closed   bool
 }
 
-// nextSubID returns a process-unique subagent id for this runtime.
+// nextSubID returns a process-unique id for this runtime, used as a cron
+// dispatch transcript filename stem.
 func (rt *Runtime) nextSubID() string {
 	return fmt.Sprintf("a%d", rt.subSeq.Add(1))
 }
 
-// trackSubagent starts fn as a tracked subagent goroutine, unless the runtime
-// is already closing. Returns false if the runtime is closed (caller should not
-// have created the child). Add happens under rt.mu so it cannot race Close's
-// transition to closed + wg.Wait.
+// trackSubagent starts fn as a tracked goroutine (a cron dispatch), unless the
+// runtime is already closing. Returns false if the runtime is closed (caller
+// should not have started the work). Add happens under rt.mu so it cannot race
+// Close's transition to closed + wg.Wait.
 func (rt *Runtime) trackSubagent(fn func()) bool {
 	rt.mu.Lock()
 	if rt.closed {
@@ -191,12 +198,12 @@ func NewRuntime(spec RuntimeSpec) (*Runtime, error) {
 	return &Runtime{
 		sessionConfig: func(o SessionOpts) (chat.Config, error) {
 			return parts.SessionConfig(agentsetup.SessionOptions{
-				Agent: o.Agent, Subagent: o.Subagent, WorkDir: o.WorkDir, Headless: o.Headless, OutPath: o.OutPath,
-				DisableSubagents: o.DisableSubagents,
+				Agent: o.Agent, WorkDir: o.WorkDir, Headless: o.Headless, OutPath: o.OutPath,
 			})
 		},
-		cleanup: cleanup,
-		store:   parts.Store(),
+		subagentDesc: parts.SubagentDescription,
+		cleanup:      cleanup,
+		store:        parts.Store(),
 		telegram: TelegramConfig{
 			Token:   tg.Token,
 			ChatID:  tg.ChatID,
@@ -286,9 +293,61 @@ func (rt *Runtime) SessionTurns(id int64) ([]HistoryEntry, error) {
 	return out, nil
 }
 
-// subagentIDRe constrains transcript ids to the minted "a<N>" form, preventing
-// any path traversal when building the audit-file path.
-var subagentIDRe = regexp.MustCompile(`^[A-Za-z0-9]+$`)
+// subagentIDRe constrains transcript ids to a safe charset (alphanumerics plus
+// '-'/'_'), preventing any path traversal when building the audit-file path.
+// Subagent ids are now caller-chosen (the agent picks one per spawn) rather than
+// minted, so the set is broadened from "a<N>" while still excluding '/' and '.'.
+var subagentIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// SubagentInfo is a read-only listing of one spawned subagent's transcript, for
+// the dashboard. Subagents are no longer an in-process registry — they are
+// backgrounded `shell3` runs that stream a transcript to .shell3/agents/<id>.jsonl
+// — so this is derived from those files on disk rather than a live registry.
+type SubagentInfo struct {
+	ID         string `json:"id"`         // transcript filename stem
+	Transcript string `json:"transcript"` // path under .shell3/agents
+}
+
+// SubagentList scans .shell3/agents/*.jsonl under the runtime root and returns
+// one entry per transcript (newest first by mod time). It replaces the former
+// in-process Subagents() registry view: the dashboard reads completed/running
+// subagent transcripts from disk. Returns nil when the directory is absent.
+func (rt *Runtime) SubagentList() ([]SubagentInfo, error) {
+	dir := filepath.Join(rt.workDir, ".shell3", "agents")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	type row struct {
+		info SubagentInfo
+		mod  int64
+	}
+	var rows []row
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".jsonl") {
+			continue
+		}
+		id := strings.TrimSuffix(name, ".jsonl")
+		var mod int64
+		if fi, err := e.Info(); err == nil {
+			mod = fi.ModTime().UnixNano()
+		}
+		rows = append(rows, row{
+			info: SubagentInfo{ID: id, Transcript: filepath.Join(dir, name)},
+			mod:  mod,
+		})
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].mod > rows[j].mod })
+	out := make([]SubagentInfo, len(rows))
+	for i, r := range rows {
+		out[i] = r.info
+	}
+	return out, nil
+}
 
 // TranscriptEvent is one lossless event from a subagent's audit log.
 type TranscriptEvent struct {
@@ -376,6 +435,11 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	s.opts = opts
 	s.runtime, s.name = rt, opts.Name
 	s.sink, s.sinkCleanup = sink, sinkCleanup
+	// Inject the per-session Delegation context now that runtime+name are set
+	// (sinkPath derives from them): it appends the allowed-subagents list + the
+	// exact templated spawn command to the system prompt. No-op when the agent
+	// has no subagents or the session is --no-subagents (depth limit 1).
+	s.applyDelegationContext(rt)
 	s.writeStartLine("(session " + opts.Name + ")")
 	rt.sessions[opts.Name] = s
 	// Launch the host-side sink watcher now that runtime+name are set (sinkPath
@@ -415,14 +479,15 @@ func (rt *Runtime) Close() error {
 		}
 	}
 	rt.cleanup()
-	// Cancel the runtime ctx so any in-flight subagent goroutine unwinds. Do
-	// NOT close rt.events: a late emit from a finishing subagent must not panic.
+	// Cancel the runtime ctx so any in-flight cron dispatch subprocess is killed
+	// and its goroutine unwinds. Do NOT close rt.events: a late emit from a
+	// finishing dispatch must not panic.
 	if rt.cancel != nil {
 		rt.cancel()
 	}
-	// Join in-flight subagent goroutines (child.Send → child.Close → deliver)
-	// so they finish their audit writes before Close returns. rt.closed was set
-	// true under rt.mu above, so trackSubagent can no longer Add (no Wait race).
+	// Join in-flight cron dispatch goroutines (exec → wait → deliver Notice) so
+	// they finish before Close returns. rt.closed was set true under rt.mu above,
+	// so trackSubagent can no longer Add (no Wait race).
 	rt.wg.Wait()
 	return firstErr
 }

@@ -168,6 +168,22 @@ func formatNotification(n sink.Notification) string {
 			msg += fmt.Sprintf(" cmd: %s", n.Cmd)
 		}
 		return msg
+	case "agent_done":
+		// A subagent (a backgrounded `shell3 --append-sinkfile`) finished and
+		// self-reported. Deliver a short POINTER, never the transcript inline: the
+		// preview is a teaser; the agent cats the transcript for the real detail.
+		status := n.Status
+		if status == "" {
+			status = "done"
+		}
+		msg := fmt.Sprintf("subagent %s finished (%s).", n.ID, status)
+		if n.Preview != "" {
+			msg += " " + n.Preview
+		}
+		if n.Transcript != "" {
+			msg += fmt.Sprintf(" Full transcript: %s — read it for detail.", n.Transcript)
+		}
+		return msg
 	default:
 		// Unknown / future kinds (e.g. agent_done in a later phase): deliver a
 		// generic pointer rather than dropping it, so a producer ahead of the

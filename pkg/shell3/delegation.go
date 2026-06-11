@@ -1,0 +1,133 @@
+package shell3
+
+import (
+	"fmt"
+	"path/filepath"
+	"strings"
+)
+
+// applyDelegationContext appends a "## Delegation" section to this session's
+// system prompt when the active agent has ≥1 allowed subagent AND the session
+// was not started with --no-subagents (opts.DisableSubagents). It is the
+// per-session counterpart to agentsetup's "## Environment" section: agentsetup
+// renders config-derived facts, but the delegation command needs SESSION-level
+// values agentsetup can't see — the concrete sink path, the resolved config
+// path, the running shell3 binary, and this session's name — so it is injected
+// here, once, at session construction.
+//
+// The result survives across turns (it lives in the system prompt, not a
+// per-turn reminder, so it never bloats later turns) and is suppressed entirely
+// for a child started with --no-subagents (depth limit 1): such a session gets
+// no delegation context and therefore cannot delegate.
+//
+// delegationMarker opens the appended section. stripDelegation removes a
+// previously-appended section so applyDelegationContext is idempotent and safe
+// to re-run after an agent switch or a config reload (both rebuild the system
+// prompt from the active agent and would otherwise drop, or duplicate, the
+// section).
+const delegationMarker = "\n## Delegation\n"
+
+// rt is the owning runtime, captured by the caller (Runtime.Session) before any
+// concurrent Close can nil s.runtime; it supplies the config path and the
+// subagent description lookup. Re-runnable: it first strips any prior Delegation
+// section, then re-appends one for the CURRENT active agent (whose allowed
+// subagents may differ after a /agent switch).
+func (s *Session) applyDelegationContext(rt *Runtime) {
+	s.cfg.Personality.SystemPrompt = stripDelegation(s.cfg.Personality.SystemPrompt)
+	if rt == nil || s.opts.DisableSubagents {
+		return
+	}
+	allowed := s.cfg.Subagents // the active agent's tools.subagents allowlist
+	if len(allowed) == 0 {
+		return
+	}
+	sink := s.sinkPath()
+	if sink == "" {
+		return // no sink → no way for a child to self-report; skip delegation
+	}
+	cfgPath, err := rt.ConfigPath()
+	if err != nil || cfgPath == "" {
+		return // can't template a spawn command without a concrete config path
+	}
+	section := renderDelegation(delegationParams{
+		Binary:     shell3Binary(),
+		ConfigPath: cfgPath,
+		SinkPath:   sink,
+		WorkDir:    s.cfg.WorkDir,
+		Subagents:  s.subagentList(rt, allowed),
+	})
+	if section == "" {
+		return
+	}
+	s.cfg.Personality.SystemPrompt += section
+}
+
+// stripDelegation removes a previously-appended "## Delegation" section (from
+// its marker to end-of-prompt), leaving the rest of the prompt intact. The
+// section is always appended last, so everything from the marker on is ours.
+func stripDelegation(prompt string) string {
+	if i := strings.Index(prompt, delegationMarker); i >= 0 {
+		return prompt[:i]
+	}
+	return prompt
+}
+
+// subagentItem is one allowed subagent, name + model-facing description.
+type subagentItem struct{ Name, Description string }
+
+// subagentList resolves the active agent's allowed subagent names to
+// name/description pairs via the runtime's subagentDesc lookup. A name with no
+// resolvable description still appears (description "") so the agent at least
+// knows it may delegate to it; load-time validation guarantees the names exist.
+func (s *Session) subagentList(rt *Runtime, names []string) []subagentItem {
+	out := make([]subagentItem, 0, len(names))
+	for _, n := range names {
+		desc := ""
+		if rt.subagentDesc != nil {
+			if d, ok := rt.subagentDesc(n); ok {
+				desc = d
+			}
+		}
+		out = append(out, subagentItem{Name: n, Description: desc})
+	}
+	return out
+}
+
+// delegationParams carries the concrete, session-resolved values the delegation
+// section templates into its spawn command.
+type delegationParams struct {
+	Binary     string
+	ConfigPath string
+	SinkPath   string
+	WorkDir    string
+	Subagents  []subagentItem
+}
+
+// renderDelegation builds the "## Delegation" system-prompt section: the allowed
+// subagents and the EXACT bash_bg command to spawn one, with every runtime path
+// already substituted. The command sets notify_on_exit=false (the child
+// self-reports agent_done, so a duplicate bg_done is suppressed), --no-subagents
+// (depth limit 1), and --append-sinkfile <this sink> (the child reports back to
+// THIS session). Returns "" when there are no subagents to list.
+func renderDelegation(p delegationParams) string {
+	if len(p.Subagents) == 0 {
+		return ""
+	}
+	transcript := filepath.Join(".shell3", "agents", "<id>.jsonl")
+	var b strings.Builder
+	b.WriteString(delegationMarker)
+	b.WriteString("You can delegate a focused, self-contained subtask to a subagent — a background `shell3` process that runs the chosen agent on the task and reports back to you automatically when it finishes. You do NOT poll; a notification with the transcript path arrives on its own. Read the transcript for the full result.\n\n")
+	b.WriteString("Subagents you may spawn:\n")
+	for _, sa := range p.Subagents {
+		if sa.Description != "" {
+			fmt.Fprintf(&b, "- %s: %s\n", sa.Name, sa.Description)
+		} else {
+			fmt.Fprintf(&b, "- %s\n", sa.Name)
+		}
+	}
+	b.WriteString("\nTo spawn one, call the `bash_bg` tool with this exact command, substituting `<name>` (a subagent from the list), `<id>` (a short unique id you choose, e.g. `explore1`), and `<task>` (the full self-contained prompt — the subagent does not see this conversation):\n\n")
+	fmt.Fprintf(&b, "  %s --config %s --agent <name> --out %s --append-sinkfile %s --id <id> --no-subagents \"<task>\"\n\n",
+		p.Binary, p.ConfigPath, transcript, p.SinkPath)
+	b.WriteString("Pass notify_on_exit=false to bash_bg (the subagent reports its own completion, so the generic background-job notice is redundant). When it finishes you'll get a pointer with the transcript path at `.shell3/agents/<id>.jsonl` — cat it for the detail.\n")
+	return b.String()
+}

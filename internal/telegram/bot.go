@@ -216,8 +216,8 @@ func (b *Bot) hasTool(name string) bool {
 //   - Notice (cron/host-dispatch result): shown verbatim as a system message — no
 //     model turn, so the operator sees the actual result and nothing is injected
 //     into the agent's context.
-//   - Wake (e.g. a spawn_agent result the agent itself requested): runs a queued
-//     turn so the agent reacts to it.
+//   - Wake (e.g. a subagent agent_done or a bg_done the agent itself requested,
+//     delivered via the session sink): runs a queued turn so the agent reacts.
 func (b *Bot) consumeWakes(ctx context.Context) {
 	for {
 		select {

@@ -109,3 +109,102 @@ shell3.agent({ name = "tester", model = "fake", prompt = "you are a test", tools
 		}
 	}
 }
+
+// TestCLIE2E_AppendSinkfileSelfReport asserts that a subagent invocation
+// (--append-sinkfile + --id) appends exactly one agent_done notification to the
+// sink on completion, with the chosen id, ok status, transcript pointer, and a
+// preview derived from the final assistant text. This is the child self-report
+// half of the bash-first subagent model.
+func TestCLIE2E_AppendSinkfileSelfReport(t *testing.T) {
+	binary, err := filepath.Abs(filepath.Join("..", "shell3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(binary); err != nil {
+		t.Skip("binary not built — run: go build -o shell3 ./cmd/shell3")
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		flusher, _ := w.(http.Flusher)
+		chunks := []string{
+			`{"id":"c1","object":"chat.completion.chunk","model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","content":"all"},"finish_reason":null}]}`,
+			`{"id":"c1","object":"chat.completion.chunk","model":"test-model","choices":[{"index":0,"delta":{"content":" done here"},"finish_reason":null}]}`,
+			`{"id":"c1","object":"chat.completion.chunk","model":"test-model","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`,
+		}
+		for _, c := range chunks {
+			fmt.Fprintf(w, "data: %s\n\n", c)
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}))
+	defer server.Close()
+
+	homeDir := t.TempDir()
+	workDir := t.TempDir()
+	configPath := filepath.Join(workDir, "shell3.lua")
+	cfg := fmt.Sprintf(`shell3.model("fake", {
+  base_url = "%s/v1",
+  api_key = "test",
+  model = "test-model",
+  context_window = 4096,
+})
+shell3.agent({ name = "tester", model = "fake", prompt = "you are a test", tools = {} })
+`, server.URL)
+	if err := os.WriteFile(configPath, []byte(cfg), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	transcript := filepath.Join(workDir, ".shell3", "agents", "sub1.jsonl")
+	sinkPath := filepath.Join(workDir, "parent-sink.jsonl")
+	cmd := exec.Command(binary,
+		"-c", configPath,
+		"--agent", "tester",
+		"--out", transcript,
+		"--append-sinkfile", sinkPath,
+		"--id", "sub1",
+		"--no-subagents",
+		"do the task",
+	)
+	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(), "HOME="+homeDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("shell3 failed: %v\noutput:\n%s", err, out)
+	}
+
+	data, err := os.ReadFile(sinkPath)
+	if err != nil {
+		t.Fatalf("read sink: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected exactly one agent_done line, got %d:\n%s", len(lines), data)
+	}
+	var n struct {
+		Kind, ID, Status, Transcript, Preview string
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &n); err != nil {
+		t.Fatalf("bad sink line %q: %v", lines[0], err)
+	}
+	if n.Kind != "agent_done" {
+		t.Errorf("kind = %q, want agent_done", n.Kind)
+	}
+	if n.ID != "sub1" {
+		t.Errorf("id = %q, want sub1", n.ID)
+	}
+	if n.Status != "ok" {
+		t.Errorf("status = %q, want ok", n.Status)
+	}
+	if n.Transcript != transcript {
+		t.Errorf("transcript = %q, want %q", n.Transcript, transcript)
+	}
+	if !strings.Contains(n.Preview, "all done here") {
+		t.Errorf("preview = %q, want it to contain the final assistant text", n.Preview)
+	}
+}

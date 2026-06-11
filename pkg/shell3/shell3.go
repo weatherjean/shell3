@@ -73,16 +73,19 @@
 // with shell3.subagent{name, description, ...} (the description is the
 // model-facing "when to use"); it is not part of the Tab/agent rotation. An
 // agent opts in by listing subagent handles: tools = { subagents = { explorer,
-// researcher } }. Such an agent gets one spawn_agent(task, subagent, workdir?)
-// tool whose subagent parameter is an enum of the registered names (each name
-// and its when-to-use listed in the tool description), plus list_agents.
+// researcher } }.
 //
-// spawn_agent runs the chosen subagent's own config (model, prompt, tools) as a
-// headless "sub:<id>" session on the shared Runtime; its result is posted to the
-// parent's inbox (injected mid-turn if the parent is still working, or delivered
-// as a Wake if idle). Subagents are depth-limited to 1 — they get no spawn tools
-// and may not declare their own subagents — and write their own audit JSONL
-// under .shell3/agents/.
+// A subagent is not an in-process subsystem: it is a backgrounded shell3
+// subprocess. The Session injects a first-turn "Delegation" system context
+// listing the agent's allowed subagents and the exact bash_bg command to spawn
+// one — `shell3 --config <cfg> --agent <name> --out .shell3/agents/<id>.jsonl
+// --append-sinkfile <session-sink> --id <id> --no-subagents "<task>"`. The
+// child streams its transcript to --out and, on completion, self-reports an
+// agent_done pointer to the session sink; the host watcher injects that pointer
+// (transcript path + short preview) into the parent's next turn. The parent
+// cats the transcript for detail. Spawned children run --no-subagents (no
+// delegation context), so they cannot recurse (depth limit 1). Cancellation
+// falls out of bgjobs.KillAll, since a subagent is just a tracked bg job.
 package shell3
 
 import (
@@ -154,6 +157,18 @@ type Spec struct {
 	// shell_interactive tool returning an "unavailable" string. A TUI supplies
 	// a closure that releases the terminal for the duration of the command.
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
+	// NoSubagents suppresses the per-session Delegation context (--no-subagents).
+	// Set for a spawned child so it cannot itself delegate (depth limit 1).
+	NoSubagents bool
+	// AppendSinkFile, when non-empty, is a sink file the run appends ONE
+	// agent_done Notification to on completion (--append-sinkfile): a subagent
+	// self-reporting its lifecycle to the parent session's sink. Empty disables
+	// the self-report (an ordinary headless run).
+	AppendSinkFile string
+	// ID is the caller-chosen id stamped into the agent_done notification
+	// (--id; conventionally also the transcript filename stem). Used only with
+	// AppendSinkFile. Empty leaves the id blank in the notification.
+	ID string
 }
 
 // ErrBusy reports a call that requires the session to be idle while a turn is
@@ -278,8 +293,6 @@ type Session struct {
 
 	opts SessionOpts // the SessionOpts this session was built from (for reload re-derivation)
 
-	// subs holds subagents this session has spawned (see spawn / subRegistry).
-	subs subRegistry
 	// closeOnce makes Close safe under concurrent invocation: a spawned
 	// subagent goroutine calls child.Close() at the same time Runtime.Close may
 	// close the same child from its session map. The body runs exactly once;
@@ -299,11 +312,6 @@ type Session struct {
 	// which would race on unsynchronized session state) into ErrBusy instead
 	// of a data race.
 	busy bool
-	// subCtx parents this session's subagent runs: created lazily from
-	// rt.baseContext() on first spawn, cancelled by CancelSubagents (/stop) to
-	// kill in-flight subagents without closing the session. Guarded by s.mu.
-	subCtx    context.Context
-	subCancel context.CancelFunc
 
 	// sink-watcher handles (see startSinkWatcher / stopSinkWatcher). sinkStop is
 	// closed to signal the tail goroutine to exit; sinkDone is closed by that
@@ -328,6 +336,7 @@ func Start(ctx context.Context, spec Spec) (*Session, error) {
 		Agent:            spec.Agent,
 		Headless:         !spec.Interactive,
 		ShellInteractive: spec.ShellInteractive,
+		DisableSubagents: spec.NoSubagents,
 		// OutPath deliberately empty: Start owns the sink so the start line
 		// keeps its historical prompt-derived label (byte-compatible logs).
 	})
@@ -838,10 +847,6 @@ func (s *Session) turnConfig() chat.TurnConfig {
 		}
 	}
 	cfg := s.cfg
-	cfg.Spawn = func(ctx context.Context, req chat.SpawnRequest) (string, error) {
-		return s.spawn(ctx, req)
-	}
-	cfg.ListAgents = func() []chat.AgentSnapshot { return s.subs.snapshot() }
 	tc := chat.NewTurnConfig(cfg, s.handlers, shellInteractive)
 	// Thread the session's sink path so bash_bg's reaper announces bg_done to
 	// this session's watcher (see sinkPath / startSinkWatcher). A runtime-hosted
@@ -860,6 +865,12 @@ func (s *Session) Clear() error {
 	s.sess.SetMessages(nil)
 	if s.cfg.RefreshPrompt != nil {
 		s.cfg.Personality.SystemPrompt = s.cfg.RefreshPrompt()
+		// RefreshPrompt rebuilds from the agent config without the Delegation
+		// section; re-append it (idempotent). Snapshot s.runtime under s.mu.
+		s.mu.Lock()
+		srt := s.runtime
+		s.mu.Unlock()
+		s.applyDelegationContext(srt)
 	}
 	return nil
 }
@@ -899,6 +910,14 @@ func (s *Session) SwitchAgent(name string) error {
 		return err
 	}
 	s.cfg.ApplyActiveAgent(rt)
+	// ApplyActiveAgent rebuilt the system prompt from the new agent, dropping any
+	// Delegation section and not adding the new agent's. Re-apply it for the new
+	// active agent (whose allowed subagents may differ). Snapshot s.runtime under
+	// s.mu to avoid racing a concurrent Close's nil. Between turns by contract.
+	s.mu.Lock()
+	srt := s.runtime
+	s.mu.Unlock()
+	s.applyDelegationContext(srt)
 	return nil
 }
 

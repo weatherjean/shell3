@@ -63,6 +63,68 @@ func TestSinkWatcher_DeliversBgDonePointer(t *testing.T) {
 	}
 }
 
+// TestFormatNotification_AgentDone verifies the agent_done branch renders a
+// short POINTER (id, status, preview, transcript path) and never inlines the
+// transcript — the agent reads it on demand.
+func TestFormatNotification_AgentDone(t *testing.T) {
+	got := formatNotification(sink.Notification{
+		Kind: "agent_done", ID: "explore1", Status: "ok",
+		Transcript: ".shell3/agents/explore1.jsonl",
+		Preview:    "Found 3 call sites in pkg/foo.",
+	})
+	for _, want := range []string{"explore1", "(ok)", "Found 3 call sites", ".shell3/agents/explore1.jsonl", "read it for detail"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("agent_done pointer %q missing %q", got, want)
+		}
+	}
+	// A status-less notification still renders a sane default.
+	if g := formatNotification(sink.Notification{Kind: "agent_done", ID: "x"}); !strings.Contains(g, "subagent x finished (done)") {
+		t.Errorf("status-less agent_done = %q, want default 'done' status", g)
+	}
+}
+
+// TestSinkWatcher_DeliversAgentDonePointer is the end-to-end agent_done path: a
+// child self-report appends an agent_done line; the watcher injects the pointer
+// (transcript path + preview) and Wakes the idle session.
+func TestSinkWatcher_DeliversAgentDonePointer(t *testing.T) {
+	old := sinkPollInterval
+	sinkPollInterval = 10 * time.Millisecond
+	t.Cleanup(func() { sinkPollInterval = old })
+
+	rt := newTestRuntime(t, fakeCfg("ok"))
+	wd := t.TempDir()
+	s, err := rt.Session(SessionOpts{Name: "tg:ad", WorkDir: wd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.Append(s.sinkPath(), sink.Notification{
+		Kind: "agent_done", ID: "explore1", Status: "ok",
+		Transcript: ".shell3/agents/explore1.jsonl", Preview: "did the thing",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case ev := <-rt.Events():
+		if ev.Kind != Wake || ev.Session != "tg:ad" {
+			t.Fatalf("got %+v, want Wake for tg:ad", ev)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("watcher did not Wake the session")
+	}
+	var reminder string
+	for ev := range s.Send(context.Background(), "next") {
+		if ev.Kind == SystemReminder && strings.Contains(ev.Text, "explore1") {
+			reminder = ev.Text
+		}
+	}
+	if reminder == "" {
+		t.Fatal("agent_done pointer not delivered to inbox")
+	}
+	if !strings.Contains(reminder, ".shell3/agents/explore1.jsonl") || !strings.Contains(reminder, "did the thing") {
+		t.Fatalf("pointer missing transcript/preview: %q", reminder)
+	}
+}
+
 // TestSinkWatcher_PartialLineNotConsumed verifies the watcher only advances
 // past complete (newline-terminated) lines: a half-written trailing line is not
 // decoded until its newline arrives, and the offset discipline means a complete

@@ -127,39 +127,18 @@ func TestRenderedConfigLoads(t *testing.T) {
 	if len(agents[1].Subagents) != 0 {
 		t.Errorf("plan agent should have no subagents, got %v", agents[1].Subagents)
 	}
-	// The code agent's resolved schema exposes spawn_agent with explorer in its enum.
-	infos := make([]luacfg.SubagentInfo, 0, len(agents[0].Subagents))
+	// Each subagent the code agent may delegate to resolves to a (name,
+	// description) pair — the raw material pkg/shell3 renders into the per-session
+	// Delegation context. (The former spawn_agent/list_agents tool schema is gone;
+	// delegation is now a bash_bg-backgrounded shell3 described in the prompt.)
 	for _, name := range agents[0].Subagents {
 		sa, ok := c.SubagentByName(name)
 		if !ok {
 			t.Fatalf("unresolved subagent %q", name)
 		}
-		infos = append(infos, luacfg.SubagentInfo{Name: sa.Name, Description: sa.Description})
-	}
-	defs := luacfg.SpawnToolDefs(infos)
-	var sawSpawn bool
-	for _, d := range defs {
-		if d.Name == "spawn_agent" {
-			sawSpawn = true
-			props, ok := d.Parameters["properties"].(map[string]any)
-			if !ok {
-				t.Fatal("spawn_agent schema missing properties map")
-			}
-			subProp, ok := props["subagent"].(map[string]any)
-			if !ok {
-				t.Fatal("spawn_agent schema missing subagent property")
-			}
-			enum, ok := subProp["enum"].([]string)
-			if !ok {
-				t.Fatalf("subagent enum has unexpected type %T", subProp["enum"])
-			}
-			if len(enum) != 1 || enum[0] != "explorer" {
-				t.Errorf("spawn_agent subagent enum = %v, want [explorer]", enum)
-			}
+		if sa.Description == "" {
+			t.Errorf("subagent %q has no description for the delegation context", name)
 		}
-	}
-	if !sawSpawn {
-		t.Error("code agent schema should expose spawn_agent")
 	}
 }
 

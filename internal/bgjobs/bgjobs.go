@@ -58,7 +58,13 @@ var fileLock sync.Mutex
 // the job's exit code, log path, and command once the process exits, so the
 // host can notify the agent that the background job finished. An empty sinkPath
 // disables the notification (the job is still spawned and tracked as before).
-func Start(command, workdir, sinkPath string) (Job, error) {
+//
+// notifyOnExit gates the bg_done append: false suppresses it even when sinkPath
+// is set. A subagent spawn (a backgrounded `shell3 --append-sinkfile`) passes
+// false because the child self-reports its own agent_done to the same sink — so
+// the agent is notified exactly once, not twice (a generic bg_done AND the rich
+// agent_done). Plain bg jobs (servers, watchers) pass true and keep bg_done.
+func Start(command, workdir, sinkPath string, notifyOnExit bool) (Job, error) {
 	if command == "" {
 		return Job{}, fmt.Errorf("command is required")
 	}
@@ -110,6 +116,12 @@ func Start(command, workdir, sinkPath string) (Job, error) {
 	// real code, any other error means we couldn't determine it → -1).
 	go func() {
 		werr := c.Wait()
+		// notifyOnExit=false suppresses bg_done even with a sink configured: the
+		// caller (a subagent spawn) emits its own agent_done, so a bg_done here
+		// would double-notify. We still Wait() above to reap the zombie either way.
+		if !notifyOnExit {
+			return
+		}
 		exit := exitCode(werr)
 		_ = sink.Append(sinkPath, sink.Notification{
 			Kind: "bg_done",

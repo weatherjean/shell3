@@ -120,7 +120,14 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSubagents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	subs := s.sess.Subagents()
+	// Subagents are no longer an in-process registry; list their transcripts on
+	// disk (.shell3/agents/*.jsonl) instead. handleSubagent (?id=) returns one
+	// transcript's events.
+	subs, err := s.rt.SubagentList()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	if subs == nil {
 		subs = []shell3.SubagentInfo{}
 	}

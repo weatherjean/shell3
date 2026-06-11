@@ -16,13 +16,19 @@ type BashBgHandler struct{}
 func (BashBgHandler) Name() string { return "bash_bg" }
 
 func (BashBgHandler) Execute(ctx context.Context, id string, args json.RawMessage, cfg ToolConfig) (string, error) {
+	// NotifyOnExit defaults to true (a missing key means "notify"): a pointer
+	// distinguishes an explicit false from an omitted key. A subagent spawn sets
+	// it false so the child's own agent_done is the only notification (no
+	// duplicate bg_done); plain bg jobs leave it unset and keep bg_done.
 	var p struct {
-		Command string `json:"command"`
-		Workdir string `json:"workdir"`
+		Command      string `json:"command"`
+		Workdir      string `json:"workdir"`
+		NotifyOnExit *bool  `json:"notify_on_exit"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("bash_bg: invalid args: %w", err)
 	}
+	notifyOnExit := p.NotifyOnExit == nil || *p.NotifyOnExit
 	wd := p.Workdir
 	if wd == "" {
 		wd = cfg.WorkDir
@@ -42,7 +48,7 @@ func (BashBgHandler) Execute(ctx context.Context, id string, args json.RawMessag
 	// cfg.SinkPath is the session's notification sink (empty for front-ends
 	// that don't wire one): the reaper appends a bg_done notification there on
 	// exit so the host can tell the agent the background job finished.
-	job, err := bgjobs.Start(p.Command, wd, cfg.SinkPath)
+	job, err := bgjobs.Start(p.Command, wd, cfg.SinkPath, notifyOnExit)
 	if err != nil {
 		return "", fmt.Errorf("bash_bg: %w", err)
 	}

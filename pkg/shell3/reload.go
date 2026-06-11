@@ -90,10 +90,11 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 	tg := newParts.Telegram()
 	rt.sessionConfig = func(o SessionOpts) (chat.Config, error) {
 		return newParts.SessionConfig(agentsetup.SessionOptions{
-			Agent: o.Agent, Subagent: o.Subagent, WorkDir: o.WorkDir,
-			Headless: o.Headless, OutPath: o.OutPath, DisableSubagents: o.DisableSubagents,
+			Agent: o.Agent, WorkDir: o.WorkDir,
+			Headless: o.Headless, OutPath: o.OutPath,
 		})
 	}
+	rt.subagentDesc = newParts.SubagentDescription
 	rt.cleanup = newCleanup
 	rt.store = newParts.Store()
 	rt.cron = cronJobs
@@ -114,6 +115,10 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 		}
 		s.cfg = cfg
 		s.handlers = chat.NewHandlers(cfg)
+		// Re-apply the per-session Delegation context: rt.sessionConfig rebuilt the
+		// prompt from the reloaded config without it. Idempotent (strips any prior
+		// section first), so a following SwitchAgent re-applying it is harmless.
+		s.applyDelegationContext(rt)
 		// Restore active agent if it still exists, else fall back + note it.
 		if ov.agent != "" && ov.agent != s.ActiveAgent() {
 			if err := s.SwitchAgent(ov.agent); err != nil {

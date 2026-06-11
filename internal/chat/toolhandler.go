@@ -111,32 +111,7 @@ type TurnConfig struct {
 	// WrapBash is the shell3.wrap_bash hook threaded to each tool call's
 	// ToolConfig (see ToolConfig.WrapBash). Nil = no hook = run commands verbatim.
 	WrapBash func(ctx context.Context, cmd string) (rewritten string, allowed bool, reason string, err error)
-	// Spawn launches a subagent for the parsed spawn_agent call and returns its
-	// id immediately. Nil → spawn_agent degrades to an "unavailable" result.
-	Spawn func(ctx context.Context, req SpawnRequest) (string, error)
-	// ListAgents returns a snapshot of subagents spawned by this session. Nil →
-	// list_agents returns an empty array.
-	ListAgents func() []AgentSnapshot
-	// Subagents is the active agent's allowlist of registered subagent names;
-	// the spawn_agent handler rejects a subagent outside it.
-	Subagents []string
 	// CompactAt is the auto-compaction prompt-token threshold (0 = off).
 	// maybeCompact (called at the top of RunTurn) consults it.
 	CompactAt int
-}
-
-// SpawnRequest is a parsed spawn_agent call handed to the host's spawner.
-type SpawnRequest struct {
-	Task     string
-	Subagent string // which registered subagent to run (required)
-	WorkDir  string // "" → caller's workdir
-}
-
-// AgentSnapshot is one row of a list_agents result.
-type AgentSnapshot struct {
-	ID     string `json:"id"`
-	Agent  string `json:"agent"` // registered subagent name (set by spawn_agent)
-	Task   string `json:"task"`
-	Status string `json:"status"`           // "running" | "finished"
-	Result string `json:"result,omitempty"` // short preview when finished
 }

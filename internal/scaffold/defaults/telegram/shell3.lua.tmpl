@@ -101,7 +101,8 @@ shell3.model("{{.Name | luaesc}}", {
 shell3.wrap_bash(function(cmd) return cmd end)
 
 -- ---------------------------------------------------------------------------
--- Subagent (cron jobs and spawn_agent dispatch this read-only investigator)
+-- Subagent (cron jobs dispatch this read-only investigator; an agent that lists
+-- it under tools.subagents may delegate to it via the injected bash_bg command)
 -- ---------------------------------------------------------------------------
 local explorer = shell3.subagent({
   name        = "explorer",
@@ -143,8 +144,8 @@ edit, run, and schedule work on the host, and you talk to one person over chat.
 - Ask at most one question, only when a single missing decision blocks safe
   progress; otherwise pick a sensible default and say what you assumed.
 - Long jobs: send a one-line "on it", then keep going. Hand parallel or
-  background work to a subagent with spawn_agent and DON'T poll — its result
-  comes back to you automatically when it finishes.
+  background work to a subagent (the injected "## Delegation" bash_bg command)
+  and DON'T poll — its result comes back to you automatically when it finishes.
 - Final claims need evidence (you ran the test/build, read the file, saw the
   output) or a named blocker.
 
