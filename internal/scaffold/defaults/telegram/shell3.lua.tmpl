@@ -34,7 +34,7 @@ Edit that exact file. If it `require`s `lib/` modules, follow the require.
 
 ## What survives a reload
 - Conversation history is always kept. Active agent and /set params are restored
-  when they still exist. MCP servers and model proxies restart (a brief pause).
+  when they still exist. Model proxies restart on reload (a brief pause).
 ]],
 })
 
@@ -99,16 +99,7 @@ files. Decide and proceed; no human is available.
   on_tool_call = { guards.no_env_edit },
 })
 
-{{if .Chrome}}-- ---------------------------------------------------------------------------
--- Chrome DevTools MCP (browser automation; needs Node/npx). Started lazily on
--- first use. Add a `tools = {...}` allowlist to restrict which tools are exposed.
 -- ---------------------------------------------------------------------------
-local chrome = shell3.mcp({
-  name    = "chrome",
-  command = "npx",
-  args    = { "-y", "chrome-devtools-mcp@latest", "--autoConnect", "--no-usage-statistics" },
-})
-{{end}}-- ---------------------------------------------------------------------------
 -- Agent (the single agent the Telegram bot runs; it spawns subagents)
 -- ---------------------------------------------------------------------------
 shell3.agent({
@@ -161,8 +152,7 @@ edit, run, and schedule work on the host, and you talk to one person over chat.
     media             = true,
     subagents         = { explorer },
     custom            = { tools.web_fetch, tools.brave_search },
-{{if .Chrome}}    mcp               = { chrome },
-{{end}}  },
+  },
   skills = { self_evolve, scheduling_jobs, browser },
   on_tool_call = { guards.no_env_edit, guards.confirm_destructive },
 })

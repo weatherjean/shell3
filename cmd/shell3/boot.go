@@ -22,7 +22,6 @@ type bootFlags struct {
 	telegram                               bool
 	tgToken, chatID, dashAddr, dashURL     string
 	noDashboard                            bool
-	chrome                                 bool
 }
 
 func newBootCommand() *cobra.Command {
@@ -45,7 +44,6 @@ func newBootCommand() *cobra.Command {
 	cmd.Flags().StringVar(&f.dashAddr, "dash-addr", "127.0.0.1:8765", "Dashboard listen address")
 	cmd.Flags().StringVar(&f.dashURL, "dash-url", "", "Public Mini App URL for the dashboard (optional)")
 	cmd.Flags().BoolVar(&f.noDashboard, "no-dashboard", false, "Disable the dashboard in the telegram config")
-	cmd.Flags().BoolVar(&f.chrome, "chrome", false, "Enable the Chrome DevTools MCP (browser automation; needs Node/npx)")
 	return cmd
 }
 
@@ -102,7 +100,6 @@ func runBoot(f *bootFlags) error {
 	envKey := envKeyForName(name)
 
 	envPairs := [][2]string{{envKey, key}, {"BRAVE_API_KEY", braveKey}}
-	var chrome bool // set in the telegram branch; read by printTelegramBootSuccess
 
 	if f.telegram {
 		token, err := value(f.tgToken, "Telegram bot token (from @BotFather)", "", in, tty, true)
@@ -112,14 +109,6 @@ func runBoot(f *bootFlags) error {
 		chatID, err := value(f.chatID, "Your numeric Telegram chat id (message @userinfobot)", "", in, tty, true)
 		if err != nil {
 			return err
-		}
-		chrome = f.chrome
-		if !chrome && tty {
-			ans, err := value("", "Enable Chrome browser MCP (browser automation; needs Node/npx)? [y/N]", "n", in, tty, false)
-			if err != nil {
-				return err
-			}
-			chrome = strings.EqualFold(strings.TrimSpace(ans), "y") || strings.EqualFold(strings.TrimSpace(ans), "yes")
 		}
 		workDir := filepath.Join(dir, "workdir")
 		if err := os.MkdirAll(workDir, 0o755); err != nil {
@@ -132,7 +121,6 @@ func runBoot(f *bootFlags) error {
 			DashboardEnabled: !f.noDashboard,
 			DashboardAddr:    f.dashAddr,
 			DashboardURL:     f.dashURL,
-			Chrome:           chrome,
 		}, f.force); err != nil {
 			return err
 		}
@@ -156,7 +144,7 @@ func runBoot(f *bootFlags) error {
 	}
 
 	if f.telegram {
-		printTelegramBootSuccess(dir, cfgPath, envPath, chrome)
+		printTelegramBootSuccess(dir, cfgPath, envPath)
 	} else {
 		printBootSuccess(dir, cfgPath, envPath, proxy != "")
 	}
@@ -234,15 +222,12 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool) {
 	fmt.Println("Run:  shell3")
 }
 
-func printTelegramBootSuccess(dir, cfgPath, envPath string, chrome bool) {
+func printTelegramBootSuccess(dir, cfgPath, envPath string) {
 	fmt.Println()
 	fmt.Println("shell3 Telegram host is configured.")
 	fmt.Printf("  config:  %s\n", cfgPath)
 	fmt.Printf("  modules: %s\n", filepath.Join(dir, "lib"))
 	fmt.Printf("  secrets: %s  (TELEGRAM_BOT_TOKEN + model key — never commit this)\n", envPath)
-	if chrome {
-		fmt.Println("  chrome:  enabled — needs Node/npx; the MCP server starts on first use.")
-	}
 	fmt.Println()
 	fmt.Println("Run:  shell3 telegram")
 }

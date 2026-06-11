@@ -42,7 +42,6 @@ type TelegramValues struct {
 	DashboardEnabled bool
 	DashboardAddr    string // e.g. "127.0.0.1:8765"
 	DashboardURL     string // public Mini App URL ("" if none)
-	Chrome           bool   // declare the chrome DevTools MCP + grant it to the agent
 }
 
 // RenderBaseConfig writes the base config tree into dir: shell3.lua rendered

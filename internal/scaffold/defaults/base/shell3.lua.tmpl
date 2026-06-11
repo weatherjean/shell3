@@ -1,6 +1,6 @@
 -- shell3.lua — base config written by `shell3 boot`. Edit freely.
 -- Secrets live in .env beside this file (never commit it).
--- Add tools, skills, MCP servers, or agents by editing — see the cookbook in
+-- Add tools, skills, or agents by editing — see the cookbook in
 -- the shell3 repo under docs/cookbook/.
 
 local tools  = require("lib.tools")            -- { web_fetch, brave_search }
@@ -52,7 +52,7 @@ Edit, call `reload`; on success the skill is live for that agent's next turn.
 - Active agent and /set params are restored when they still exist in the new
   config. If your edit REMOVES the agent you are currently using, reload does NOT
   error: it falls back to the configured default agent and says so in the result.
-- MCP servers and model proxies restart on reload (a brief pause); agents,
+- Model proxies restart on reload (a brief pause); agents,
   models, tools, skills, and cron apply cleanly.
 - A changed `context_window` for the already-live session takes effect on the
   next restart, not on this reload.
