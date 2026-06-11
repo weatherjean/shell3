@@ -17,10 +17,23 @@ func TestHandleMsg_IdleSendsReply(t *testing.T) {
 	ctx := context.Background()
 	b.handleMsg(ctx, Msg{ChatID: 42, Text: "hi"})
 
-	got := strings.Join(fc.sentTexts(), "\n")
-	if !strings.Contains(got, "hello from agent") {
-		t.Fatalf("expected agent reply, got: %q", got)
+	if !waitForReply(t, fc, "hello from agent") {
+		t.Fatalf("expected agent reply, got: %q", strings.Join(fc.sentTexts(), "\n"))
 	}
+}
+
+// waitForReply polls fc.sentTexts() until one contains want or the deadline
+// passes. The turn runs on its own goroutine, so replies arrive asynchronously.
+func waitForReply(t *testing.T, fc *fakeClient, want string) bool {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(strings.Join(fc.sentTexts(), "\n"), want) {
+			return true
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return false
 }
 
 func TestHandleMsg_MediaRunsTurnWithNote(t *testing.T) {
@@ -34,7 +47,7 @@ func TestHandleMsg_MediaRunsTurnWithNote(t *testing.T) {
 		{Bytes: []byte("\xff\xd8\xff"), MIME: "image/jpeg", Filename: "photo.jpg"},
 	}})
 
-	if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "got your file") {
+	if !waitForReply(t, fc, "got your file") {
 		t.Fatalf("expected the agent to run on a media-only message, got %v", fc.sentTexts())
 	}
 }
@@ -58,5 +71,3 @@ func TestChunk_SplitsAt4096(t *testing.T) {
 		t.Fatalf("bad chunking: %d chunks, first len %d", len(chunks), len(chunks[0]))
 	}
 }
-
-var _ = time.Second // keep import if unused after edits

@@ -5,6 +5,7 @@ package telegram
 import (
 	"context"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/weatherjean/shell3/pkg/shell3"
@@ -20,9 +21,12 @@ type Bot struct {
 	approvals       *approvalRegistry
 	approvalTimeout time.Duration // 0 → 5 min default; set in tests
 
-	dashURL    string
-	workDir    string // resolves relative paths for send_media_telegram
-	cancelTurn context.CancelFunc
+	dashURL string
+	workDir string // resolves relative paths for send_media_telegram
+
+	mu         sync.Mutex         // guards cancelTurn + turnActive
+	cancelTurn context.CancelFunc // non-nil while a turn runs
+	turnActive bool               // true from turn start until its goroutine ends
 
 	// onUsage, if set, receives each completed turn's token totals (per turn,
 	// not accumulated). Wired by the host to a dashboard usage store.
@@ -124,23 +128,33 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 	// If this is a Telegram reply/quote, prepend the quoted message so the model
 	// sees the context the user is responding to.
 	text = withReplyContext(text, m.ReplyTo)
-	// HasQueuedInput reports inbox state. In the single-chat v1 flow, handleMsg
-	// is serial, so a running turn blocks here until the channel drains.
-	// HasQueuedInput catches the case where a wake/cron item is already queued.
-	if b.sess.HasQueuedInput() {
-		// A turn may be running; Interject never blocks and steers it.
-		b.sess.Interject(text)
+	// turnActive is the authoritative "a turn is running" signal. If one is
+	// already in flight, steer it via Interject (never blocks) instead of
+	// starting a second turn.
+	b.mu.Lock()
+	if b.turnActive {
+		b.mu.Unlock()
+		b.sess.Interject(text) // steer the running turn; never blocks
 		return
 	}
-	stopTyping := b.keepTyping(ctx)
 	turnCtx, cancel := context.WithCancel(ctx)
 	b.cancelTurn = cancel
-	reply := b.drainTurn(b.sess.Send(turnCtx, text))
-	b.cancelTurn = nil
-	cancel()
-	stopTyping()
-	b.sendReply(ctx, reply)
-	b.applyPendingReload(ctx) // self-evolution: agent edited config + called reload this turn
+	b.turnActive = true
+	b.mu.Unlock()
+
+	stopTyping := b.keepTyping(ctx)
+	ch := b.sess.Send(turnCtx, text)
+	go func() {
+		reply := b.drainTurn(ch)
+		stopTyping()
+		b.mu.Lock()
+		b.cancelTurn = nil
+		b.turnActive = false
+		b.mu.Unlock()
+		cancel()
+		b.sendReply(ctx, reply)
+		b.applyPendingReload(ctx) // self-evolution: agent edited config + called reload this turn
+	}()
 }
 
 // withReplyContext prepends the replied-to message as a markdown blockquote so

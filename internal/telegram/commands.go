@@ -61,8 +61,11 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 		}
 		b.sendReply(ctx, "↩️ rolled back")
 	case "/stop":
-		if c := b.cancelTurn; c != nil {
-			c()
+		b.mu.Lock()
+		c := b.cancelTurn
+		b.mu.Unlock()
+		if c != nil {
+			c() // cancels turnCtx → synchronous bash/node process groups get SIGTERM→SIGKILL
 			b.sendReply(ctx, "⏹ stopped")
 			return
 		}
