@@ -103,7 +103,8 @@ func (c *LoadedConfig) luaCron(L *lua.LState) int {
 
 var modelKeys = map[string]bool{
 	"base_url": true, "api_key": true, "model": true, "context_window": true,
-	"reasoning": true, "max_tokens": true, "temperature": true, "extra": true,
+	"compact_at": true,
+	"reasoning":  true, "max_tokens": true, "temperature": true, "extra": true,
 	"run_proxy": true,
 }
 
@@ -120,6 +121,7 @@ func (c *LoadedConfig) luaModel(L *lua.LState) int {
 		ModelID:       optStr(opts, "model"),
 		RunProxy:      optStr(opts, "run_proxy"),
 		ContextWindow: optInt(opts, "context_window"),
+		CompactAt:     optInt(opts, "compact_at"),
 		Reasoning:     optStr(opts, "reasoning"),
 		MaxTokens:     optInt(opts, "max_tokens"),
 		Temperature:   optFloatPtr(opts, "temperature"),
@@ -168,7 +170,7 @@ var agentKeys = map[string]bool{
 var toolGateKeys = map[string]bool{
 	"bash": true, "bash_bg": true, "shell_interactive": true, "edit": true,
 	"custom": true, "skill": true,
-	"prune": true, "compact": true, "media": true,
+	"media":     true,
 	"subagents": true,
 }
 
@@ -243,8 +245,6 @@ func parseGates(tt *lua.LTable) ToolGates {
 		BashBg:           optBool(tt, "bash_bg"),
 		ShellInteractive: optBool(tt, "shell_interactive"),
 		Edit:             optBool(tt, "edit"),
-		Prune:            optBool(tt, "prune"),
-		Compact:          optBool(tt, "compact"),
 		Media:            optBool(tt, "media"),
 	}
 }

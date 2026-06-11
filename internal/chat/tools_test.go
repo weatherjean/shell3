@@ -18,7 +18,10 @@ func TestHandleCompactHistoryIncludesSkillsToReread(t *testing.T) {
 		{Role: llm.RoleUser, Content: "old context"},
 	}
 
-	_, newAllMsgs := handleCompactHistory(`{"summary":"summary","skills":["writing-plans","/tmp/codebase-discovery.md"]}`, nil, sess, allMsgs, applog.Noop{})
+	_, newAllMsgs := compactInto(CompactSummary{
+		Summary: "summary",
+		Skills:  []string{"writing-plans", "/tmp/codebase-discovery.md"},
+	}, nil, sess, allMsgs, applog.Noop{})
 	if len(newAllMsgs) < 2 {
 		t.Fatalf("expected system and continuation messages, got %d", len(newAllMsgs))
 	}

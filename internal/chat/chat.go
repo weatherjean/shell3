@@ -39,6 +39,8 @@ type ActiveAgent struct {
 	Params        llm.RequestParams
 	ModelID       string
 	ContextWindow int
+	// CompactAt is the model's auto-compaction prompt-token threshold (0 = off).
+	CompactAt int
 }
 
 // Config holds all dependencies for a chat session. It is the top-level
@@ -77,6 +79,10 @@ type Config struct {
 	// ContextWindow is the active model's context window in tokens, used by
 	// the reminder tracker to emit context-usage warnings. Zero means unknown.
 	ContextWindow int
+	// CompactAt is the active model's auto-compaction prompt-token threshold.
+	// When >0 and the prior turn's prompt tokens reach it, RunTurn compacts
+	// history before the next turn (see maybeCompact). Zero disables it.
+	CompactAt int
 	// Params are provider-level request parameters (temperature, top_p,
 	// reasoning effort, etc.).
 	Params llm.RequestParams
@@ -150,6 +156,7 @@ func (c *Config) ApplyActiveAgent(rt ActiveAgent) {
 	c.Subagents = rt.Subagents
 	c.CustomToolNames = rt.CustomToolNames
 	c.ContextWindow = rt.ContextWindow
+	c.CompactAt = rt.CompactAt
 	c.StatusLine = AgentStatusLine(rt)
 }
 
@@ -160,7 +167,6 @@ func NewHandlers(cfg Config) map[string]ToolHandler {
 		BashHandler{},
 		BashBgHandler{},
 		EditHandler{},
-		PruneHandler{},
 	}
 	m := make(map[string]ToolHandler, len(handlers))
 	for _, h := range handlers {
@@ -192,6 +198,7 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler, shellInteractive
 		Spawn:            cfg.Spawn,
 		ListAgents:       cfg.ListAgents,
 		Subagents:        cfg.Subagents,
+		CompactAt:        cfg.CompactAt,
 		ShellInteractive: shellInteractive,
 	}
 }

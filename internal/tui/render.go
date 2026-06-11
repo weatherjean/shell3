@@ -22,13 +22,11 @@ func dimLines(s string) string {
 }
 
 // toolCallHeader formats the colored "#id → name(args)" header shown above a
-// tool's body in scrollback. Color picks reflect tool family: prune is pink,
-// user tools are violet, everything else is muted-green.
+// tool's body in scrollback. Color picks reflect tool family: user tools are
+// violet, everything else is muted-green.
 func toolCallHeader(id, name, args string, isUserTool bool) string {
 	color := patchtui.MutedGreen
-	if name == "prune_tool_result" {
-		color = patchtui.Pink
-	} else if isUserTool {
+	if isUserTool {
 		color = patchtui.Violet
 	}
 
@@ -148,8 +146,6 @@ func renderToolCallHeader(ev shell3.Event) string {
 		return fmt.Sprintf(patchtui.Yellow+patchtui.Bold+"#%s $ %s"+patchtui.Reset+" (interactive)", ev.ToolCallID, parseBashArgs(ev.ToolInput))
 	case "edit_file":
 		return toolCallHeader(ev.ToolCallID, ev.ToolName, summarizeEditArgs(ev.ToolInput), false)
-	case "compact_history":
-		return toolCallHeader(ev.ToolCallID, ev.ToolName, "", false)
 	default:
 		return toolCallHeader(ev.ToolCallID, ev.ToolName, ev.ToolInput, ev.IsCustomTool)
 	}

@@ -103,6 +103,12 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		}
 	}()
 
+	// Host-enforced auto-compaction runs BEFORE the new user message is
+	// appended and allMsgs is built, so the turn proceeds against the compacted
+	// history. It is best-effort and never blocks or fails the turn (see
+	// maybeCompact): on any error it leaves history untouched.
+	maybeCompact(ctx, cfg, sess)
+
 	// A purely inbox-seeded turn (RunQueued → empty prompt, no parts) has an
 	// empty initiating message; the queued text arrives via the inbox-drain
 	// reminder below. Don't persist an empty, part-less user message — it would
@@ -185,8 +191,8 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		// Replace provider-emitted tool-call ids with sequential session-scoped
 		// decimal ids ("1", "2", ...). Provider-native ids like "web_fetch:0"
 		// get truncated by models when echoed back, breaking id-based tool
-		// result addressing (e.g. prune_tool_result). A bare integer has no
-		// separator to chop at. Provider just pairs ids by string match
+		// result addressing (e.g. the /prune slash command). A bare integer has
+		// no separator to chop at. Provider just pairs ids by string match
 		// between assistant.tool_calls[i].id and tool.tool_call_id, so the
 		// rewrite is transparent on the wire.
 		for i := range toolCalls {
@@ -289,15 +295,15 @@ func attachmentsMessage(readMedia, userSent []llm.ContentPart) (llm.Message, boo
 
 // toolLoopOutcome reports how a turn's tool-execution loop ended.
 type toolLoopOutcome struct {
-	allMsgs      []llm.Message     // updated slice (compact_history may have replaced it)
+	allMsgs      []llm.Message     // updated slice
 	cancelled    bool              // a guard returned a cancel decision
 	cancelReason string            // reason text for the cancellation reminder
 	pendingMedia []llm.ContentPart // media loaded by read_media, injected as a user message after the loop
 }
 
 // toolLoopState is the mutable state one tool-execution loop threads through
-// its handlers: the working message slice (which compact_history replaces
-// wholesale) and the media parts read_media collects for post-loop injection.
+// its handlers: the working message slice and the media parts read_media
+// collects for post-loop injection.
 type toolLoopState struct {
 	allMsgs      []llm.Message
 	pendingMedia []llm.ContentPart
@@ -305,17 +311,11 @@ type toolLoopState struct {
 
 // turnScopedHandlers builds the ToolHandlers that exist per tool loop rather
 // than in the shared NewHandlers map, because they need state beyond
-// ToolConfig: compact_history rewrites the conversation itself,
-// shell_interactive borrows the front-end's TTY runner, and read_media
-// collects media parts for the post-loop user message. They close over st, so
-// the trio is rebuilt for each executeToolCalls invocation.
+// ToolConfig: shell_interactive borrows the front-end's TTY runner, and
+// read_media collects media parts for the post-loop user message. They close
+// over st, so they are rebuilt for each executeToolCalls invocation.
 func turnScopedHandlers(cfg TurnConfig, sess *Session, st *toolLoopState) map[string]ToolHandler {
 	return map[string]ToolHandler{
-		"compact_history": funcHandler{name: "compact_history", fn: func(_ context.Context, _ string, args json.RawMessage, _ ToolConfig) (string, error) {
-			out, newMsgs := handleCompactHistory(string(args), cfg.Store, sess, st.allMsgs, cfg.Log)
-			st.allMsgs = newMsgs
-			return out, nil
-		}},
 		"shell_interactive": funcHandler{name: "shell_interactive", fn: func(ctx context.Context, _ string, args json.RawMessage, _ ToolConfig) (string, error) {
 			if cfg.ShellInteractive == nil {
 				return "error: interactive TTY not available", nil
@@ -506,9 +506,9 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 		}
 
 		emitToolResult(sess, tc.ID, tc.Name, res.output, res.isError)
-		// Prepend the tool_call_id so the model has a stable handle it
-		// can pass to prune_tool_result. Without this the id only lives
-		// in structured metadata, which the model cannot reliably echo.
+		// Prepend the tool_call_id so there is a stable handle the user can
+		// pass to the /prune slash command. Without this the id only lives
+		// in structured metadata, which is not visible in the rendered result.
 		content := fmt.Sprintf("[tool_call_id=%s]\n%s", tc.ID, res.output)
 		toolMsg := llm.Message{
 			Role:       llm.RoleTool,
@@ -591,6 +591,97 @@ func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools
 	return sb.String(), rb.String(), toolCalls, usage, streamErr
 }
 
+// compactionFloor is the minimum number of session messages required before
+// auto-compaction will run. Below this there is too little history for a
+// summary to free meaningful context, and compacting a near-empty
+// conversation only adds an LLM round-trip and a summary boilerplate message
+// for no benefit. A few exchanges (user+assistant pairs, plus tool messages)
+// comfortably clears this floor.
+const compactionFloor = 8
+
+// compactionInstruction is the system prompt for the single quiet LLM call that
+// produces the auto-compaction summary. It asks for a thorough narrative the
+// continuation can resume from. The lists the model-driven tool used to collect
+// are folded into the narrative here — the auto path keeps CompactSummary's
+// optional list fields empty.
+const compactionInstruction = "You are compacting a long coding-assistant conversation to free context. " +
+	"Write a thorough narrative summary of the conversation so far that a fresh continuation could resume from with no other context. " +
+	"Cover: the user's goal and any decisions made; code written and files created or modified (with paths); commands run and their outcomes; errors encountered and how they were resolved; references worth keeping (session ids, commit hashes, URLs); and any confirmed open next steps. " +
+	"Be comprehensive but do not invent detail. Output ONLY the summary prose — no preamble, no tool calls."
+
+// maybeCompact runs host-enforced auto-compaction before a turn when the prior
+// turn's prompt token count has reached the model's compact_at threshold. It is
+// strictly best-effort: it must NEVER block or fail the user's turn. On any
+// problem — disabled threshold, too little history, an LLM error, an empty
+// summary, anything — it logs (when warranted) and returns WITHOUT compacting,
+// so the turn proceeds normally on the un-compacted history.
+//
+// lastPromptTokens is 0 on the first turn, so the first turn never compacts.
+// After a successful compaction it is reset to the (small) estimated size of the
+// rewritten history so the threshold is not immediately re-tripped next turn.
+func maybeCompact(ctx context.Context, cfg TurnConfig, sess *Session) {
+	if cfg.CompactAt <= 0 || sess.lastPromptTokens < cfg.CompactAt {
+		return
+	}
+	if len(sess.messages) < compactionFloor {
+		return
+	}
+
+	// One quiet LLM call: a compaction system prompt over the current history.
+	// We accumulate text WITHOUT emitting any Token/assistant events — the user
+	// should not see the summary stream as if it were a turn response.
+	compactMsgs := make([]llm.Message, 0, len(sess.messages)+1)
+	compactMsgs = append(compactMsgs, llm.Message{Role: llm.RoleSystem, Content: compactionInstruction})
+	compactMsgs = append(compactMsgs, sess.messages...)
+
+	summary, err := streamQuiet(ctx, cfg.LLM, compactMsgs)
+	if err != nil {
+		cfg.Log.Warn("auto-compaction LLM call failed; proceeding on un-compacted history", "error", err)
+		return
+	}
+	if strings.TrimSpace(summary) == "" {
+		cfg.Log.Warn("auto-compaction produced an empty summary; proceeding on un-compacted history")
+		return
+	}
+
+	// Rebuild history from the summary. compactInto rewrites sess.messages in
+	// place (continuation + trigger assistant message) and rolls the store
+	// session. allMsgs here is the full system+history slice the rewrite peels
+	// the system prompt off of; RunTurn rebuilds its own allMsgs afterward.
+	allMsgs := make([]llm.Message, 0, len(sess.messages)+1)
+	allMsgs = append(allMsgs, llm.Message{Role: llm.RoleSystem, Content: cfg.Personality.SystemPrompt})
+	allMsgs = append(allMsgs, sess.messages...)
+	prevTokens := sess.lastPromptTokens
+	compactInto(CompactSummary{Summary: summary}, cfg.Store, sess, allMsgs, cfg.Log)
+
+	// Reset the token gauge to the rewritten history's (small) estimate so the
+	// next turn does not immediately re-trip the threshold before a real usage
+	// count from the provider lands.
+	sess.lastPromptTokens = estimatePromptTokens(sess.messages)
+
+	emitSystemReminder(sess, fmt.Sprintf("[context auto-compacted at %d tokens]", prevTokens))
+}
+
+// streamQuiet calls the LLM once and returns only the accumulated assistant
+// text, emitting NO chat.Events. It is the non-emitting sibling of streamOnce,
+// used by maybeCompact so the auto-compaction round-trip is invisible to the
+// user/UI. Tool calls and reasoning are ignored; usage is discarded.
+func streamQuiet(ctx context.Context, client LLMClient, msgs []llm.Message) (string, error) {
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	var sb strings.Builder
+	err := client.Stream(ctx, msgs, nil, func(ev llm.StreamEvent) {
+		if ev.TextDelta != "" {
+			sb.WriteString(ev.TextDelta)
+		}
+	})
+	if ctx.Err() != nil {
+		return sb.String(), ctx.Err()
+	}
+	return sb.String(), err
+}
+
 // estimatePromptTokens approximates the token count for a message slice by
 // summing content byte lengths and dividing by 4. allMsgs reflects pruning
 // in-place, so this automatically accounts for freed context.
@@ -633,8 +724,8 @@ func saveHistory(st *store.Store, lg applog.Logger, sess *Session, sessionID int
 		return
 	}
 	if from > len(sess.messages) {
-		// compact_history rebuilt sess.messages from scratch; nothing new to save
-		// (compact handler already wrote the summary to history directly).
+		// compaction rebuilt sess.messages from scratch; nothing new to save
+		// (compactInto already wrote the summary to history directly).
 		return
 	}
 	flushMessages(st, lg, sessionID, sess.messages[from:])
@@ -643,7 +734,7 @@ func saveHistory(st *store.Store, lg applog.Logger, sess *Session, sessionID int
 // flushMessages appends each user/assistant message in msgs to history under
 // sessionID, plus one summary row per tool call. Best-effort: appendHistory
 // logs any write failure rather than aborting. Shared by saveHistory (end of
-// turn) and handleCompactHistory (flushing the outgoing session before roll).
+// turn) and compactInto (flushing the outgoing session before roll).
 func flushMessages(st *store.Store, lg applog.Logger, sessionID int64, msgs []llm.Message) {
 	for _, m := range msgs {
 		switch m.Role {

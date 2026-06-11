@@ -233,6 +233,7 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 		Params:          rp,
 		ModelID:         md.ModelID,
 		ContextWindow:   md.ContextWindow,
+		CompactAt:       md.CompactAt,
 	}, nil
 }
 

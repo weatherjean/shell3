@@ -42,7 +42,8 @@ func (h funcHandler) Execute(ctx context.Context, id string, args json.RawMessag
 // ToolConfig holds per-invocation state passed to ToolHandler.Execute. It is
 // constructed fresh for each tool call from the current TurnConfig and the
 // session's working message slices. Mutations to AllMsgs and SessMsgs
-// elements propagate to the caller's slices (PruneHandler relies on this).
+// elements propagate to the caller's slices (handlers that rewrite prior
+// messages in place rely on this).
 type ToolConfig struct {
 	// Store is the persistence layer for the history tools. May be nil.
 	Store *store.Store
@@ -130,6 +131,9 @@ type TurnConfig struct {
 	// Subagents is the active agent's allowlist of registered subagent names;
 	// the spawn_agent handler rejects a subagent outside it.
 	Subagents []string
+	// CompactAt is the auto-compaction prompt-token threshold (0 = off).
+	// maybeCompact (called at the top of RunTurn) consults it.
+	CompactAt int
 }
 
 // SpawnRequest is a parsed spawn_agent call handed to the host's spawner.

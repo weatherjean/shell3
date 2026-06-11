@@ -35,7 +35,7 @@ var MutedGreen = FgRGB(120, 170, 120)
 // Violet is used for user-defined tool-call headers.
 var Violet = FgRGB(139, 92, 246)
 
-// Pink is used for prune_tool_result headers.
+// Pink is a spare accent in the palette (no current consumer).
 var Pink = FgRGB(236, 72, 153)
 
 // MutedThinking styles reasoning/thinking output. Named for its role rather

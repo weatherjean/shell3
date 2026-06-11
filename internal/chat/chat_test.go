@@ -34,54 +34,30 @@ func TestPruneLastTurn(t *testing.T) {
 	}
 }
 
-// ── handlePruneToolResult ──────────────────────────────────────────────────────
+// ── PruneByID (host-side /prune slash command) ─────────────────────────────────
 
 func mkToolMsg(id, name, content string) llm.Message {
 	return llm.Message{Role: llm.RoleTool, ToolCallID: id, Name: name, Content: content}
 }
 
-func TestPruneToolResult_Success(t *testing.T) {
+func TestPruneByID_Success(t *testing.T) {
 	big := strings.Repeat("x", 600)
 	a := []llm.Message{mkToolMsg("tc1", "bash", big)}
 	b := []llm.Message{mkToolMsg("tc1", "bash", big)}
 
-	out := handlePruneToolResultFrom(`{"tool_call_id":"tc1","reason":"not needed"}`, a, b)
-	if !strings.HasPrefix(out, "Pruned") {
-		t.Fatalf("want success, got %q", out)
+	out, ok := PruneByID("tc1", "pruned by user", a, b)
+	if !ok || !strings.HasPrefix(out, "Pruned") {
+		t.Fatalf("want success, got ok=%v %q", ok, out)
 	}
-	if !strings.Contains(a[0].Content, "[pruned:") || !strings.Contains(b[0].Content, "[pruned:") {
+	if !strings.Contains(a[0].Content, "[pruned by user") || !strings.Contains(b[0].Content, "[pruned by user") {
 		t.Fatalf("content not updated in both slices: a=%q b=%q", a[0].Content, b[0].Content)
 	}
 }
 
-func TestPruneToolResult_SmallResult(t *testing.T) {
-	a := []llm.Message{mkToolMsg("tc1", "bash", "tiny output")}
-	out := handlePruneToolResultFrom(`{"tool_call_id":"tc1","reason":"x"}`, a)
-	if !strings.HasPrefix(out, "Pruned") {
-		t.Fatalf("expected success even for small result, got %q", out)
-	}
-}
-
-func TestPruneToolResult_ErrorOutput(t *testing.T) {
-	body := "error: " + strings.Repeat("y", 600)
-	a := []llm.Message{mkToolMsg("tc1", "bash", body)}
-	out := handlePruneToolResultFrom(`{"tool_call_id":"tc1","reason":"x"}`, a)
-	if !strings.HasPrefix(out, "Pruned") {
-		t.Fatalf("expected success even for error output, got %q", out)
-	}
-}
-
-func TestPruneToolResult_MissingID(t *testing.T) {
+func TestPruneByID_NotFound(t *testing.T) {
 	a := []llm.Message{mkToolMsg("tc1", "bash", strings.Repeat("z", 600))}
-	out := handlePruneToolResultFrom(`{"tool_call_id":"missing","reason":"x"}`, a)
-	if !strings.Contains(out, "no tool result") {
-		t.Fatalf("expected not-found error, got %q", out)
-	}
-}
-
-func TestPruneToolResult_BadArgs(t *testing.T) {
-	out := handlePruneToolResultFrom(`{"reason":"x"}`)
-	if !strings.Contains(out, "tool_call_id required") {
-		t.Fatalf("expected required-arg error, got %q", out)
+	out, ok := PruneByID("missing", "pruned by user", a)
+	if ok || !strings.Contains(out, "no tool result") {
+		t.Fatalf("expected not-found, got ok=%v %q", ok, out)
 	}
 }

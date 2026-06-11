@@ -16,7 +16,7 @@ func TestToolCallHeaderColorByCategory(t *testing.T) {
 		isUserTool bool
 		wantColor  string
 	}{
-		{name: "builtin", tool: "prune_tool_result", args: `{"tool_call_id":"1"}`, wantColor: patchtui.Pink},
+		{name: "builtin", tool: "edit_file", args: `{"file_path":"a"}`, wantColor: patchtui.MutedGreen},
 		{name: "user", tool: "brave_search", args: `{"query":"shell3"}`, isUserTool: true, wantColor: patchtui.Violet},
 	}
 

@@ -80,6 +80,8 @@ shell3.model("{{.Name | luaesc}}", {
   api_key        = shell3.env.secret("{{.EnvKey}}"),  -- {{.EnvKey}} in .env
   model          = "{{.Model | luaesc}}",
   context_window = 128000,
+  -- compact_at: prompt-token threshold for host-enforced auto-compaction (0 = off).
+  compact_at     = 100000,
 {{if .Proxy}}  run_proxy      = "{{.Proxy | luaesc}}",
 {{else}}  -- run_proxy   = "npx @some/codex-proxy --port 8787",
 {{end}}})
@@ -139,16 +141,15 @@ edit, run, and schedule work on the host, and you talk to one person over chat.
 - The scheduling-jobs skill: add a shell3.cron job, then `reload` to arm it.
 
 ## Context hygiene
-- Prune large successful tool outputs after extracting what you need; never prune
-  errors or small results.
+- Context is managed for you: shell3 auto-compacts the conversation into a summary
+  when it crosses the model's `compact_at` token threshold. You do not prune or
+  compact manually.
 ]],
   tools = {
     bash              = true,
     bash_bg           = true,
     shell_interactive = true,
     edit              = true,
-    prune             = true,
-    compact           = true,
     media             = true,
     subagents         = { explorer },
     custom            = { tools.web_fetch, tools.brave_search },

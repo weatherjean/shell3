@@ -13,10 +13,14 @@ import (
 type Model struct {
 	Name, BaseURL, APIKey, ModelID string
 	ContextWindow                  int
-	Reasoning                      string
-	MaxTokens                      int
-	Temperature                    *float64
-	Extra                          map[string]any
+	// CompactAt is the absolute prompt-token threshold at which the host
+	// auto-compacts conversation history before the next turn. 0 (unset)
+	// disables auto-compaction. See chat.maybeCompact.
+	CompactAt   int
+	Reasoning   string
+	MaxTokens   int
+	Temperature *float64
+	Extra       map[string]any
 	// RunProxy, if set, is a shell command spawned (detached, fire-and-forget)
 	// the first time an agent activates this model — used to bring up a local
 	// proxy/translation shim in front of BaseURL. See internal/modelproxy.
@@ -24,7 +28,7 @@ type Model struct {
 }
 
 type ToolGates struct {
-	Bash, BashBg, ShellInteractive, Edit, Prune, Compact, Media bool
+	Bash, BashBg, ShellInteractive, Edit, Media bool
 }
 
 type CustomTool struct {

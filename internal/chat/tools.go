@@ -2,7 +2,6 @@ package chat
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -62,25 +61,24 @@ func dispatchCustomTool(ctx context.Context, custom func(ctx context.Context, na
 	return classifyHandlerOutput(out)
 }
 
-// handleCompactHistory replaces the conversation history with a structured
-// summary. Ends the current store session and starts a new one so the compact
-// boundary is visible in history. Both sess.messages and allMsgs are rebuilt
-// in place; the full compact args are saved to history before the session rolls.
-func handleCompactHistory(rawArgs string, st *store.Store, sess *Session, allMsgs []llm.Message, lg applog.Logger) (out string, newAllMsgs []llm.Message) {
-	var args struct {
-		Summary             string   `json:"summary"`
-		ImportantFiles      []string `json:"important_files"`
-		ImportantReferences []string `json:"important_references"`
-		Skills              []string `json:"skills"`
-		NextSteps           []string `json:"next_steps"`
-	}
-	if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
-		return fmt.Sprintf("error: bad arguments: %v", err), allMsgs
-	}
-	if strings.TrimSpace(args.Summary) == "" {
-		return "error: summary is required", allMsgs
-	}
+// CompactSummary is the structured product of one compaction: a narrative
+// summary plus optional pointer lists. The model-driven compact tool used to
+// supply all fields; the host-driven auto-compaction path (maybeCompact) fills
+// only Summary from a single quiet LLM call and leaves the lists empty.
+type CompactSummary struct {
+	Summary             string
+	ImportantFiles      []string
+	ImportantReferences []string
+	Skills              []string
+	NextSteps           []string
+}
 
+// compactInto replaces the conversation history with a structured summary. It
+// ends the current store session and starts a new one so the compact boundary
+// is visible in history. Both sess.messages and allMsgs are rebuilt in place;
+// the summary is saved to history before the session rolls. Callers are
+// responsible for validating that args.Summary is non-empty.
+func compactInto(args CompactSummary, st *store.Store, sess *Session, allMsgs []llm.Message, lg applog.Logger) (out string, newAllMsgs []llm.Message) {
 	prevSessionID := sess.id
 
 	// Roll the store session so compact boundary is visible in history.
@@ -88,8 +86,8 @@ func handleCompactHistory(rawArgs string, st *store.Store, sess *Session, allMsg
 		// Flush current session messages before wiping — saveHistory bails early
 		// after compact because prevLen > len(sess.messages), so we save here.
 		flushMessages(st, lg, prevSessionID, sess.messages)
-		// Save the compact call itself as the final entry in the outgoing session.
-		appendHistory(st, lg, prevSessionID, "tool", "compact_history: "+rawArgs)
+		// Save the summary itself as the final entry in the outgoing session.
+		appendHistory(st, lg, prevSessionID, "tool", "compact_history: "+args.Summary)
 		if err := st.EndSession(prevSessionID); err != nil {
 			lg.Warn("end session failed during compact", "session_id", prevSessionID, "error", err)
 		}
@@ -167,4 +165,46 @@ func handleCompactHistory(rawArgs string, st *store.Store, sess *Session, allMsg
 	}
 	out = fmt.Sprintf("History compacted (session %d → %d). Freed ~%d bytes.", prevSessionID, sess.id, freed)
 	return out, newAllMsgs
+}
+
+// PruneByID replaces the tool result with the given id in any of the slices
+// with a short stem stub. summary is a human-readable status string; ok is
+// false when no tool result with that id exists in the slices, so callers
+// branch on the flag instead of parsing the summary. Used by the host-side
+// /prune slash command (pkg/shell3.Session.Prune); element mutations propagate
+// to the caller's slices.
+func PruneByID(toolCallID, stem string, slices ...[]llm.Message) (summary string, ok bool) {
+	var target *llm.Message
+	var name string
+	for _, msgs := range slices {
+		for i := range msgs {
+			if msgs[i].Role == llm.RoleTool && msgs[i].ToolCallID == toolCallID {
+				target = &msgs[i]
+				name = msgs[i].Name
+				break
+			}
+		}
+		if target != nil {
+			break
+		}
+	}
+	if target == nil {
+		return fmt.Sprintf("error: no tool result with id %q in conversation", toolCallID), false
+	}
+
+	content := target.Content
+	stub := fmt.Sprintf("[%s — original was %d bytes]", stem, len(content))
+	count := 0
+	for _, msgs := range slices {
+		for i := range msgs {
+			if msgs[i].Role == llm.RoleTool && msgs[i].ToolCallID == toolCallID {
+				msgs[i].Content = stub
+				count++
+			}
+		}
+	}
+	if count == 0 {
+		return "error: failed to update message content", false
+	}
+	return fmt.Sprintf("Pruned result of %s (id=%s): freed %d bytes", name, toolCallID, len(content)-len(stub)), true
 }

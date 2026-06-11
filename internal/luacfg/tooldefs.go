@@ -21,17 +21,10 @@ var skillTool = llm.ToolDefinition{
 }
 
 // ToolDefs returns the llm.ToolDefinition schema list for an agent: each
-// built-in tool whose gate is enabled (prune_tool_result, compact_history,
-// bash, edit, …), the skill tool when hasSkills is true, plus one definition
-// per custom tool.
+// built-in tool whose gate is enabled (bash, edit, …), the skill tool when
+// hasSkills is true, plus one definition per custom tool.
 func ToolDefs(g ToolGates, custom []CustomTool, hasSkills bool) []llm.ToolDefinition {
 	defs := []llm.ToolDefinition{}
-	if g.Prune {
-		defs = append(defs, pruneToolResultTool)
-	}
-	if g.Compact {
-		defs = append(defs, compactHistoryTool)
-	}
 	if hasSkills {
 		defs = append(defs, skillTool)
 	}
@@ -70,62 +63,6 @@ func (c *LoadedConfig) CustomToolsFor(names []string) []CustomTool {
 		}
 	}
 	return out
-}
-
-var pruneToolResultTool = llm.ToolDefinition{
-	Name: "prune_tool_result",
-	Description: "Replace a prior tool result with a short stub to free context. " +
-		"Use whenever a result is no longer needed. " +
-		"Scoped to the last 2 turns; older results return an out-of-scope error. " +
-		"Copy the id from the result's `[tool_call_id=<id>]` header into tool_call_id.",
-	Parameters: map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"tool_call_id": map[string]any{"type": "string", "description": "ID of the tool call whose result should be pruned"},
-			"reason":       map[string]any{"type": "string", "description": "One-line note on why the result is no longer needed"},
-		},
-		"required": []string{"tool_call_id", "reason"},
-	},
-}
-
-var compactHistoryTool = llm.ToolDefinition{
-	Name: "compact_history",
-	Description: "Compact the conversation history into a structured summary to free context. " +
-		"ALWAYS follow the rules in the system prompt for when and how to offer compaction. " +
-		"Write a thorough summary: decisions made, code written, errors encountered, outcomes reached. " +
-		"List files created or modified. List references worth keeping (sessions, commits, URLs). " +
-		"List skills the continuation should re-read, especially active workflow skills. " +
-		"Include next steps only if there is confirmed remaining work.",
-	Parameters: map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"summary": map[string]any{
-				"type":        "string",
-				"description": "Narrative summary of the conversation: what was done, decisions made, errors encountered, outcomes reached.",
-			},
-			"important_files": map[string]any{
-				"type":        "array",
-				"items":       map[string]any{"type": "string"},
-				"description": "File paths created or modified that may need to be re-read after compaction.",
-			},
-			"important_references": map[string]any{
-				"type":        "array",
-				"items":       map[string]any{"type": "string"},
-				"description": "External references worth preserving: session IDs, commit hashes, URLs, ticket numbers.",
-			},
-			"skills": map[string]any{
-				"type":        "array",
-				"items":       map[string]any{"type": "string"},
-				"description": "Skill names or file paths the continuation should re-read before resuming work.",
-			},
-			"next_steps": map[string]any{
-				"type":        "array",
-				"items":       map[string]any{"type": "string"},
-				"description": "Remaining work items confirmed by the user. Omit if work is complete.",
-			},
-		},
-		"required": []string{"summary"},
-	},
 }
 
 var shellInteractiveTool = llm.ToolDefinition{

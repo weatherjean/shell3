@@ -197,41 +197,162 @@ func msgsContain(msgs []llm.Message, substr string) bool {
 	return false
 }
 
-// TestRunTurn_CompactHistory_ReplacesAllMsgs characterizes the compact_history
-// path: it replaces allMsgs in place, so the second round's prompt carries the
-// compact summary and not the pre-compaction user text. Runs with no Store
-// (handleCompactHistory skips store rolling when st == nil).
-func TestRunTurn_CompactHistory_ReplacesAllMsgs(t *testing.T) {
+// seedHistory fills a session with n filler user/assistant message pairs so it
+// clears compactionFloor, and primes lastPromptTokens. The marker string is
+// embedded in the first user message so a test can assert it was dropped (or
+// kept) by compaction.
+func seedHistory(sess *Session, marker string, lastPromptTokens int) {
+	sess.messages = []llm.Message{{Role: llm.RoleUser, Content: marker}}
+	for i := 0; i < compactionFloor; i++ {
+		sess.messages = append(sess.messages,
+			llm.Message{Role: llm.RoleAssistant, Content: "older assistant turn"},
+			llm.Message{Role: llm.RoleUser, Content: "older user turn"},
+		)
+	}
+	sess.lastPromptTokens = lastPromptTokens
+}
+
+// TestRunTurn_AutoCompact_Triggers pins host-enforced auto-compaction: with
+// compact_at primed below lastPromptTokens and enough history, RunTurn issues
+// one quiet compaction call (script 0) whose summary replaces history, then runs
+// the user's turn (script 1) against the compacted history — no pre-compaction
+// marker text, and the summary present. No Store (compactInto skips rolling).
+func TestRunTurn_AutoCompact_Triggers(t *testing.T) {
 	fake := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{
-			{ToolCall: &llm.ToolCall{ID: "c", Name: "compact_history", RawArgs: `{"summary":"did stuff"}`}},
-			{Usage: &llm.Usage{TotalTokens: 5}},
+			{TextDelta: "NARRATIVE SUMMARY of prior work"},
 		}},
 		fakellm.Script{Events: []llm.StreamEvent{
-			{TextDelta: "continued"},
-			{Usage: &llm.Usage{TotalTokens: 6}},
+			{TextDelta: "answer"},
+			{Usage: &llm.Usage{PromptTokens: 12, TotalTokens: 12}},
 		}},
 	)
 	cfg := TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
 		Log:         LogOrNoop(nil),
+		CompactAt:   100,
 	}
 
-	events, _ := collectTurn(t, context.Background(), cfg, "hello there")
+	sess, c := newCollectorSession(SessionOpts{})
+	seedHistory(sess, "PRE_COMPACT_MARKER", 500)
+	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "new question"}, nil)
+	events := c.all()
 
 	if !hasKind(events, EventTurnDone) {
-		t.Fatalf("compact_history turn should complete with turn_done; events=%+v", events)
+		t.Fatalf("auto-compact turn should complete with turn_done; events=%+v", events)
 	}
 	if fake.CallCount() != 2 {
-		t.Fatalf("expected 2 LLM rounds, got %d", fake.CallCount())
+		t.Fatalf("expected 2 LLM calls (compaction + turn), got %d", fake.CallCount())
 	}
-	round2 := fake.Calls[1].Msgs
-	if !msgsContain(round2, "did stuff") {
-		t.Fatalf("round 2 prompt missing compact summary: %+v", round2)
+	// The compaction call (call 0) must NOT have emitted assistant tokens.
+	for _, ev := range events {
+		if ev.Kind == EventAssistantToken && strings.Contains(ev.Text, "NARRATIVE SUMMARY") {
+			t.Fatalf("compaction summary leaked as an assistant token: %+v", ev)
+		}
 	}
-	if msgsContain(round2, "hello there") {
-		t.Fatalf("round 2 prompt still contains pre-compaction user text: %+v", round2)
+	if !hasKind(events, EventSystemReminder) {
+		t.Fatalf("expected an auto-compacted system reminder; events=%+v", events)
+	}
+	turnPrompt := fake.Calls[1].Msgs
+	if !msgsContain(turnPrompt, "NARRATIVE SUMMARY") {
+		t.Fatalf("turn prompt missing compaction summary: %+v", turnPrompt)
+	}
+	if msgsContain(turnPrompt, "PRE_COMPACT_MARKER") {
+		t.Fatalf("turn prompt still contains pre-compaction history: %+v", turnPrompt)
+	}
+}
+
+// TestRunTurn_AutoCompact_Disabled pins that compact_at=0 never compacts even
+// with a large lastPromptTokens and ample history: exactly one LLM call (the
+// turn itself) and the original history survives.
+func TestRunTurn_AutoCompact_Disabled(t *testing.T) {
+	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{
+		{TextDelta: "answer"},
+		{Usage: &llm.Usage{PromptTokens: 9, TotalTokens: 9}},
+	}})
+	cfg := TurnConfig{
+		LLM:         fake,
+		Personality: persona.Persona{SystemPrompt: "test"},
+		Log:         LogOrNoop(nil),
+		CompactAt:   0,
+	}
+
+	sess, _ := newCollectorSession(SessionOpts{})
+	seedHistory(sess, "PRE_COMPACT_MARKER", 5000)
+	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "new question"}, nil)
+
+	if fake.CallCount() != 1 {
+		t.Fatalf("compact_at=0 must not compact; expected 1 LLM call, got %d", fake.CallCount())
+	}
+	if !msgsContain(fake.Calls[0].Msgs, "PRE_COMPACT_MARKER") {
+		t.Fatalf("history should be untouched when compaction is disabled: %+v", fake.Calls[0].Msgs)
+	}
+}
+
+// TestRunTurn_AutoCompact_FirstTurnNeverCompacts pins that a first turn
+// (lastPromptTokens==0) never compacts even with compact_at set, because the
+// gauge has not yet been populated by a provider usage count.
+func TestRunTurn_AutoCompact_FirstTurnNeverCompacts(t *testing.T) {
+	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{
+		{TextDelta: "answer"},
+		{Usage: &llm.Usage{PromptTokens: 9, TotalTokens: 9}},
+	}})
+	cfg := TurnConfig{
+		LLM:         fake,
+		Personality: persona.Persona{SystemPrompt: "test"},
+		Log:         LogOrNoop(nil),
+		CompactAt:   1,
+	}
+
+	sess, _ := newCollectorSession(SessionOpts{})
+	// Ample history but lastPromptTokens==0 (never set by a prior turn).
+	seedHistory(sess, "PRE_COMPACT_MARKER", 0)
+	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "new question"}, nil)
+
+	if fake.CallCount() != 1 {
+		t.Fatalf("first turn must not compact; expected 1 LLM call, got %d", fake.CallCount())
+	}
+}
+
+// TestRunTurn_AutoCompact_FailSafe pins the hard fail-safe: when the quiet
+// compaction call errors, maybeCompact swallows it and the turn proceeds on the
+// UN-compacted history. The second (turn) call still runs and the original
+// history reaches the provider.
+func TestRunTurn_AutoCompact_FailSafe(t *testing.T) {
+	fake := fakellm.New(
+		// Compaction call fails.
+		fakellm.Script{Err: errors.New("compaction stream blew up")},
+		// The user's turn proceeds normally.
+		fakellm.Script{Events: []llm.StreamEvent{
+			{TextDelta: "answer"},
+			{Usage: &llm.Usage{PromptTokens: 12, TotalTokens: 12}},
+		}},
+	)
+	cfg := TurnConfig{
+		LLM:         fake,
+		Personality: persona.Persona{SystemPrompt: "test"},
+		Log:         LogOrNoop(nil),
+		CompactAt:   100,
+	}
+
+	sess, c := newCollectorSession(SessionOpts{})
+	seedHistory(sess, "PRE_COMPACT_MARKER", 500)
+	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "new question"}, nil)
+	events := c.all()
+
+	if !hasKind(events, EventTurnDone) {
+		t.Fatalf("turn must complete despite compaction failure; events=%+v", events)
+	}
+	if hasKind(events, EventError) {
+		t.Fatalf("compaction failure must not surface as a turn error; events=%+v", events)
+	}
+	if fake.CallCount() != 2 {
+		t.Fatalf("expected the failed compaction call + the turn call, got %d", fake.CallCount())
+	}
+	// The turn ran against the UN-compacted history.
+	if !msgsContain(fake.Calls[1].Msgs, "PRE_COMPACT_MARKER") {
+		t.Fatalf("fail-safe: turn should run on un-compacted history: %+v", fake.Calls[1].Msgs)
 	}
 }
 
