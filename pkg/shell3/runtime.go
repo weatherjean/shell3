@@ -227,6 +227,15 @@ func (rt *Runtime) Telegram() TelegramConfig { return rt.telegram }
 // Cron returns the parsed shell3.cron jobs (nil if absent).
 func (rt *Runtime) Cron() []CronJob { return rt.cron }
 
+// ConfigPath returns the absolute path of the shell3.lua this runtime was built
+// from. An empty or relative spec path is resolved exactly the way construction
+// (and Reload) resolves it — ./shell3.lua, else ~/.shell3/shell3.lua — so the
+// result is the actual file a reload reads. Useful for self-reconfiguration
+// surfaces that need to show the agent/operator which file to edit.
+func (rt *Runtime) ConfigPath() (string, error) {
+	return agentsetup.ResolveConfigPath(rt.configPath, rt.workDir, rt.homeDir)
+}
+
 // SessionMeta summarizes one stored past conversation.
 type SessionMeta struct {
 	ID        int64  `json:"id"`

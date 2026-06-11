@@ -49,6 +49,7 @@ func (b *Bot) decorateSession() {
 	_ = b.sess.SetApprover(b.approve)
 	b.registerSendTool()
 	b.registerReloadTool()
+	b.registerStatusTool()
 }
 
 // RedecorateSession re-applies host tools + approver after a reload rebuilt s.cfg.
