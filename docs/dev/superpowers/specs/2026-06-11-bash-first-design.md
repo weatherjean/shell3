@@ -239,19 +239,30 @@ down.
 Mechanism: `wrap_bash` is invoked inside the bash handler path (or just before
 dispatch) via a `luacfg` binding, not through the deleted guard chain.
 
-## 7. Command-backed prompt / skill content (optional, later commit)
+## 7. Command-backed prompt / skill content (IMPLEMENTED)
 
-Allow a skill/prompt body to come from a command instead of a literal, resolved
-**once per chat** (so prompt caching is preserved within a session):
+A skill/prompt body may come from a command instead of a literal, resolved
+**once per load/reload** (so prompt caching is preserved within a session):
 
 ```lua
 shell3.skill({ name = "history", description = "…",
-  body_cmd = "cat ~/.shell3/skills/history.md" })
+  body_cmd = "cat lib/skills/history.md" })
+shell3.agent({ name = "build", model = "…", prompt_cmd = "cat lib/prompts/build.md" })
+shell3.subagent({ name = "explorer", description = "…", prompt_cmd = "…" })
 ```
 
 Used to fill runtime values (DB path, sink path, subagent list) into the
-history skill and the delegation fragment from §3/§5. Auto-run at session start;
-never per-turn.
+history skill and the delegation fragment from §3/§5. Auto-run at load; never
+per-turn.
+
+Implemented in `internal/luacfg`: `body_cmd` on skills and `prompt_cmd` on
+agents/subagents (`register.go`); a resolution pass in `Load` (`luacfg.go`) runs
+each command via `runBodyCmd` (`cmdbody.go`) with **cwd = the config dir** (same
+dir as `.env`/`lib`), so relative paths resolve next to `shell3.lua`. Exactly
+one of `body`/`body_cmd` (skills) and `prompt`/`prompt_cmd` (agents/subagents) —
+setting both raises a Lua error. **Fail-closed**: a command that errors or
+returns empty output fails the whole `Load` (and reload goes through `Load`, so
+a broken prompt file can never silently swap in an empty prompt at runtime).
 
 ## 8. Stub-tools for hallucinated tool names
 
