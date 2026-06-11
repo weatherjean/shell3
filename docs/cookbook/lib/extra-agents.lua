@@ -5,5 +5,5 @@ shell3.agent({
   name   = "review",
   model  = "main",
   prompt = [[ You review diffs for correctness and clarity. You do not edit. ]],
-  tools  = { bash = true, edit = false, history = true, prune = true, compact = true },
+  tools  = { bash = true, edit = false, prune = true, compact = true },
 })

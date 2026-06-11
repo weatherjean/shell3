@@ -2,12 +2,32 @@ package chat
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
 	"github.com/weatherjean/shell3/internal/persona"
+	"github.com/weatherjean/shell3/internal/store"
 )
+
+// openTestStore opens a fresh file-backed store in a temp dir, registered for
+// cleanup. File-backed (not :memory:) so it exercises the real WAL path the
+// agent's out-of-process history reader relies on.
+func openTestStore(t *testing.T) *store.Store {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "test-*.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	st, err := store.Open(f.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	return st
+}
 
 // TestRun_PersistsHistoryBeforeTurnDone pins the ordering invariant that the
 // turn's messages are persisted to the store *before* the turn_done event is

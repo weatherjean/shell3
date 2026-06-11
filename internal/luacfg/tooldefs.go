@@ -50,9 +50,6 @@ func ToolDefs(g ToolGates, custom []CustomTool, hasSkills bool) []llm.ToolDefini
 	if g.Media {
 		defs = append(defs, readMediaTool)
 	}
-	if g.History {
-		defs = append(defs, historyGetTool, historySearchTool)
-	}
 	for _, ct := range custom {
 		defs = append(defs, llm.ToolDefinition{
 			Name:        ct.Name,
@@ -265,33 +262,5 @@ var listAgentsTool = llm.ToolDefinition{
 	Parameters: map[string]any{
 		"type":       "object",
 		"properties": map[string]any{},
-	},
-}
-
-var historyGetTool = llm.ToolDefinition{
-	Name: "history_get",
-	Description: "Read one chunk of a completed past session. Omit args for the most recent completed session, chunk 1. " +
-		"Use returned total_chunks to page and prev_session_id/next_session_id to walk sessions. Use for references like \"last time\" or \"earlier\".",
-	Parameters: map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"session_id": map[string]any{"type": "integer", "description": "Which session to read. Omit or 0 = most-recent completed. Use prev_session_id from a previous response to walk backwards."},
-			"chunk":      map[string]any{"type": "integer", "description": "1-based chunk within the session (25 turns each). Omit or 0 = chunk 1."},
-		},
-	},
-}
-
-var historySearchTool = llm.ToolDefinition{
-	Name: "history_search",
-	Description: "Full-text search past conversations. Use `terms` as focused concepts, one per array element; do not pass whole sentences. " +
-		"Default match=any; use match=all only to narrow. Hits include session_id and chunk for follow-up history_get.",
-	Parameters: map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"terms": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "One concept per element. Each becomes a quoted FTS5 phrase."},
-			"match": map[string]any{"type": "string", "enum": []string{"any", "all"}, "description": "any = OR (default, broad recall); all = AND (narrow)."},
-			"limit": map[string]any{"type": "integer", "description": "Max search hits (default 20)"},
-		},
-		"required": []string{"terms"},
 	},
 }

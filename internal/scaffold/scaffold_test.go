@@ -46,7 +46,7 @@ func TestRenderBaseConfig(t *testing.T) {
 	}
 	for _, p := range []string{
 		"lib/tools.lua", "lib/guards.lua",
-		"lib/skills/brainstorming.lua",
+		"lib/skills/brainstorming.lua", "lib/skills/history.lua",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
 			t.Errorf("missing %s: %v", p, err)
@@ -94,8 +94,8 @@ func TestRenderedConfigLoads(t *testing.T) {
 	if len(c.Tools) != 2 {
 		t.Errorf("expected 2 tools (web_fetch, brave_search), got %d", len(c.Tools))
 	}
-	if len(c.Skills) != 2 {
-		t.Errorf("expected 2 skills (brainstorming, self-evolve), got %d", len(c.Skills))
+	if len(c.Skills) != 3 {
+		t.Errorf("expected 3 skills (brainstorming, self-evolve, history), got %d", len(c.Skills))
 	}
 	agents := c.Agents()
 	if len(agents) != 2 {

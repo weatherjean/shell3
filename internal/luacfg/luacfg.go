@@ -24,7 +24,7 @@ type Model struct {
 }
 
 type ToolGates struct {
-	Bash, BashBg, ShellInteractive, Edit, History, Prune, Compact, Media bool
+	Bash, BashBg, ShellInteractive, Edit, Prune, Compact, Media bool
 }
 
 type CustomTool struct {

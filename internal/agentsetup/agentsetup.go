@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/weatherjean/shell3/internal/adapter/openai"
 	"github.com/weatherjean/shell3/internal/applog"
@@ -51,15 +52,17 @@ type Options struct {
 // BuildParts has run. The cleanup closes the store, Lua state, proxies,
 // and log; any method call after cleanup has undefined behaviour.
 type Parts struct {
-	lc    *luacfg.LoadedConfig
-	st    *store.Store
-	proxy *modelproxy.Spawner
-	log   applog.Logger
-	uuid  string
-	root  string // runtime root workdir (Options.CWD)
+	lc     *luacfg.LoadedConfig
+	st     *store.Store
+	proxy  *modelproxy.Spawner
+	log    applog.Logger
+	uuid   string
+	root   string // runtime root workdir (Options.CWD)
+	dbPath string // absolute path to the history SQLite DB (for the Environment section)
 }
 
-// Store returns the SQLite history store (nil when history is not enabled by any agent).
+// Store returns the SQLite history store (always opened; nil only when the
+// store-open itself failed, which is non-fatal and logged).
 func (p *Parts) Store() *store.Store { return p.st }
 
 // Log returns the rotating application logger.
@@ -174,7 +177,7 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 		}
 	}
 
-	prompt := p.lc.BuildPersonaFor(a)
+	prompt := p.lc.BuildPersonaFor(a) + p.environmentSection()
 
 	customNames := make(map[string]bool, len(a.CustomTools))
 	for _, n := range a.CustomTools {
@@ -208,6 +211,27 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 	}, nil
 }
 
+// environmentSection renders the host-injected "## Environment" block appended
+// to every agent's system prompt. It carries runtime values the agent can only
+// learn at session start — currently the read-only history DB path, which the
+// `history` skill reads via `sqlite3 'file:<path>?mode=ro'`. Kept minimal and
+// factual; later phases append more lines (sink path, subagent command, …), so
+// new facts are added as additional "- key: value" rows under this heading.
+//
+// Returns "" when no DB path is resolvable (store-open failed / nil store path),
+// so the section never advertises a query target the agent cannot use.
+func (p *Parts) environmentSection() string {
+	if p.dbPath == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n## Environment\n")
+	b.WriteString("Runtime paths for this session (read-only unless stated):\n")
+	fmt.Fprintf(&b, "- history_db: %s (open with `sqlite3 'file:%s?mode=ro'`; see the `history` skill)\n",
+		p.dbPath, p.dbPath)
+	return b.String()
+}
+
 // RefreshPromptFor re-renders the named agent's or subagent's system prompt
 // (used by /clear). name may be a declared agent name or a registered subagent
 // name; callers are expected to pass names that were previously validated by a
@@ -216,13 +240,14 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 // exists only so an impossible miss degrades to a sane prompt rather than
 // panicking; in correct use that branch is never reached.
 func (p *Parts) RefreshPromptFor(name string) string {
+	env := p.environmentSection()
 	if a, ok := p.lc.AgentByName(name); ok {
-		return p.lc.BuildPersonaFor(a)
+		return p.lc.BuildPersonaFor(a) + env
 	}
 	if sa, ok := p.lc.SubagentByName(name); ok {
-		return p.lc.BuildPersonaFor(subagentToAgent(sa))
+		return p.lc.BuildPersonaFor(subagentToAgent(sa)) + env
 	}
-	return p.lc.BuildPersonaFor(p.lc.FirstAgent())
+	return p.lc.BuildPersonaFor(p.lc.FirstAgent()) + env
 }
 
 // SessionOptions parameterizes one session derived from shared Parts.
@@ -352,7 +377,7 @@ func BuildParts(opts Options) (*Parts, func(), error) {
 	}
 	b.openStore()
 	p := &Parts{lc: b.lc, st: b.st, proxy: b.proxy,
-		log: b.log, uuid: b.uuid, root: b.opts.CWD}
+		log: b.log, uuid: b.uuid, root: b.opts.CWD, dbPath: b.proj.DB}
 	return p, b.closeAll, nil
 }
 
@@ -434,23 +459,17 @@ func (b *builder) loadConfig() error {
 	return nil
 }
 
-// openStore opens the SQLite store when any agent gates history. Non-fatal: a
-// failure warns and proceeds.
+// openStore opens the SQLite store unconditionally: the store always persists
+// the conversation (saveHistory), and the agent reads it back out-of-process
+// via the `history` skill (`sqlite3 'file:<db>?mode=ro'`). There is no longer a
+// gate — history is always on. Non-fatal: a failure warns and proceeds with a
+// nil store (persistence and the skill's queries silently degrade).
 func (b *builder) openStore() {
-	needsStore := false
-	for _, a := range b.lc.Agents() {
-		if a.Gates.History {
-			needsStore = true
-			break
-		}
-	}
-	if needsStore {
-		if s, e := store.Open(b.proj.DB); e == nil {
-			b.st = s
-			b.closers = append(b.closers, func() { _ = s.Close() })
-		} else {
-			b.log.Warn("open store failed — history unavailable", "error", e)
-		}
+	if s, e := store.Open(b.proj.DB); e == nil {
+		b.st = s
+		b.closers = append(b.closers, func() { _ = s.Close() })
+	} else {
+		b.log.Warn("open store failed — history unavailable", "error", e)
 	}
 }
 

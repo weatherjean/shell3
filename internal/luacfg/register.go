@@ -166,7 +166,7 @@ var agentKeys = map[string]bool{
 
 var toolGateKeys = map[string]bool{
 	"bash": true, "bash_bg": true, "shell_interactive": true, "edit": true,
-	"history": true, "custom": true, "skill": true,
+	"custom": true, "skill": true,
 	"prune": true, "compact": true, "media": true,
 	"subagents": true,
 }
@@ -220,7 +220,6 @@ func parseGates(tt *lua.LTable) ToolGates {
 		BashBg:           optBool(tt, "bash_bg"),
 		ShellInteractive: optBool(tt, "shell_interactive"),
 		Edit:             optBool(tt, "edit"),
-		History:          optBool(tt, "history"),
 		Prune:            optBool(tt, "prune"),
 		Compact:          optBool(tt, "compact"),
 		Media:            optBool(tt, "media"),

@@ -6,6 +6,7 @@
 local tools   = require("lib.tools")   -- { web_fetch, brave_search }
 local guards  = require("lib.guards")  -- { no_env_edit, confirm_destructive }
 local browser = require("lib.skills.browser")
+local history = require("lib.skills.history")
 
 local self_evolve = shell3.skill({
   name = "self-evolve",
@@ -95,7 +96,7 @@ You are a focused explorer. Investigate using bash (rg, fd, cat, git log) and
 report a concise, concrete answer with file:line references. You cannot edit
 files. Decide and proceed; no human is available.
 ]],
-  tools = { bash = true, history = true },
+  tools = { bash = true },
   on_tool_call = { guards.no_env_edit },
 })
 
@@ -146,14 +147,13 @@ edit, run, and schedule work on the host, and you talk to one person over chat.
     bash_bg           = true,
     shell_interactive = true,
     edit              = true,
-    history           = true,
     prune             = true,
     compact           = true,
     media             = true,
     subagents         = { explorer },
     custom            = { tools.web_fetch, tools.brave_search },
   },
-  skills = { self_evolve, scheduling_jobs, browser },
+  skills = { self_evolve, scheduling_jobs, browser, history },
   on_tool_call = { guards.no_env_edit, guards.confirm_destructive },
 })
 

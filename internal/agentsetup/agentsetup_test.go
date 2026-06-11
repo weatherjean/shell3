@@ -109,8 +109,13 @@ func TestBuild_Agent_SelectsNamed(t *testing.T) {
 	if cfg.ModeLabel != "second" {
 		t.Errorf("active agent = %q, want %q", cfg.ModeLabel, "second")
 	}
-	if cfg.Personality.SystemPrompt != "you are second" {
-		t.Errorf("system prompt = %q, want the second agent's", cfg.Personality.SystemPrompt)
+	// The persona leads with the agent's verbatim prompt; the host appends a
+	// "## Environment" section (history DB path, etc.) after it.
+	if !strings.HasPrefix(cfg.Personality.SystemPrompt, "you are second") {
+		t.Errorf("system prompt = %q, want a prefix of the second agent's prompt", cfg.Personality.SystemPrompt)
+	}
+	if !strings.Contains(cfg.Personality.SystemPrompt, "## Environment") {
+		t.Errorf("system prompt missing Environment section: %q", cfg.Personality.SystemPrompt)
 	}
 }
 
@@ -274,36 +279,15 @@ func TestBuild_MalformedConfig_Errors(t *testing.T) {
 	}
 }
 
-// writeConfigWithHistory writes a shell3.lua whose agent enables the history
-// tool, so Build opens the store (Gates.History). Mirrors writeMinimalConfig
-// but flips tools = { history = true }.
-func writeConfigWithHistory(t *testing.T, dir string) {
-	t.Helper()
-	lua := `
-shell3.model("main", {
-  base_url = "https://example.test/v1",
-  api_key = shell3.env.secret("TEST_KEY"),
-  model = "test-model",
-  context_window = 1000,
-})
-shell3.agent({ name = "tester", model = "main", prompt = "you are a tester", tools = { history = true } })
-`
-	if err := os.WriteFile(filepath.Join(dir, "shell3.lua"), []byte(lua), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("TEST_KEY=sk-test\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// TestBuild_WithStore_CleanupSafe characterizes the store-open path: with the
-// history gate on, Build opens the store (cfg.Store != nil) and the returned
-// cleanup closes it without panicking. Covers the store closer the gates-off
-// happy-path test skips.
-func TestBuild_WithStore_CleanupSafe(t *testing.T) {
+// TestBuild_AlwaysOpensStore characterizes the store-open path: history is no
+// longer gated — the store is opened unconditionally so the conversation always
+// persists (saveHistory) and the agent can read it back via the `history` skill.
+// A plain minimal config (no history gate; the gate no longer exists) must still
+// come up with cfg.Store != nil, and cleanup must close it without panicking.
+func TestBuild_AlwaysOpensStore(t *testing.T) {
 	tmp := t.TempDir()
 	home := t.TempDir()
-	writeConfigWithHistory(t, tmp)
+	writeMinimalConfig(t, tmp)
 
 	cfg, cleanup, err := agentsetup.Build(agentsetup.Options{
 		ConfigPath: filepath.Join(tmp, "shell3.lua"),
@@ -315,9 +299,45 @@ func TestBuild_WithStore_CleanupSafe(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 	if cfg.Store == nil {
-		t.Fatal("expected store to be opened with the history gate on")
+		t.Fatal("expected store to be opened unconditionally, got nil")
 	}
 	cleanup() // closes store + lua + log; must not panic
+}
+
+// TestBuild_PromptHasEnvironmentSection asserts the host appends an
+// "## Environment" section carrying the read-only history DB path to the
+// agent's system prompt — the runtime value the `history` skill needs to open
+// `sqlite3 'file:<db>?mode=ro'`. The path must be the real project DB and the
+// section must show the ro-open form.
+func TestBuild_PromptHasEnvironmentSection(t *testing.T) {
+	tmp := t.TempDir()
+	home := t.TempDir()
+	writeMinimalConfig(t, tmp)
+
+	cfg, cleanup, err := agentsetup.Build(agentsetup.Options{
+		ConfigPath: filepath.Join(tmp, "shell3.lua"),
+		CWD:        tmp,
+		HomeDir:    home,
+		Headless:   true,
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer cleanup()
+
+	prompt := cfg.Personality.SystemPrompt
+	if !strings.Contains(prompt, "## Environment") {
+		t.Fatalf("prompt missing Environment section:\n%s", prompt)
+	}
+	// The DB lives under the per-project dir in HomeDir; assert the path and the
+	// read-only open form both appear.
+	wantPathFragment := filepath.Join(home, ".shell3", "projects")
+	if !strings.Contains(prompt, wantPathFragment) {
+		t.Errorf("Environment section missing project DB path %q:\n%s", wantPathFragment, prompt)
+	}
+	if !strings.Contains(prompt, "shell3.db") || !strings.Contains(prompt, "?mode=ro") {
+		t.Errorf("Environment section missing ro history DB open form:\n%s", prompt)
+	}
 }
 
 // TestDecisionEnumSync pins the numeric values of luacfg.Decision that the

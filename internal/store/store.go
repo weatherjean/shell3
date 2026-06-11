@@ -19,16 +19,27 @@ type Store struct{ db *sql.DB }
 // Open opens or creates the SQLite store at path and runs schema migrations.
 //
 // SQLite permits only one writer at a time. SetMaxOpenConns(1) serializes
-// in-process writers; the busy_timeout pragma is a backstop for cross-process
-// contention. We do NOT set WAL: it is unneeded here and unsafe for :memory:.
+// in-process writers; the busy_timeout pragma is a backstop for contention.
+//
+// For real file paths we also enable WAL journal mode: the agent reads history
+// out-of-process via `sqlite3 'file:<db>?mode=ro'` (the `history` skill), and
+// WAL gives those external readers a lock-free, consistent snapshot that never
+// contends with the in-process writer (rollback-journal mode would block them
+// up to busy_timeout). WAL is deliberately NOT enabled for `:memory:`, which is
+// per-connection and where a journal-mode flip is meaningless/unsafe.
 func Open(path string) (*Store, error) {
 	dsn := path
-	// Append the busy_timeout pragma via modernc's query-param DSN syntax; the
-	// ?/& branch handles a path that already carries DSN query params.
+	// Append pragmas via modernc's query-param DSN syntax; the ?/& branch
+	// handles a path that already carries DSN query params.
+	sep := "?"
 	if strings.Contains(path, "?") {
-		dsn += "&_pragma=busy_timeout(5000)"
-	} else {
-		dsn += "?_pragma=busy_timeout(5000)"
+		sep = "&"
+	}
+	dsn += sep + "_pragma=busy_timeout(5000)"
+	// WAL only for file-backed DBs (see doc comment); :memory: stays in the
+	// default rollback-journal mode.
+	if path != ":memory:" {
+		dsn += "&_pragma=journal_mode(WAL)"
 	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {

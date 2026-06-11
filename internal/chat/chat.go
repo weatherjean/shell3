@@ -161,8 +161,6 @@ func NewHandlers(cfg Config) map[string]ToolHandler {
 		BashBgHandler{},
 		EditHandler{},
 		PruneHandler{},
-		StoreHandler{toolName: "history_get"},
-		StoreHandler{toolName: "history_search"},
 	}
 	m := make(map[string]ToolHandler, len(handlers))
 	for _, h := range handlers {

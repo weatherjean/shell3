@@ -6,6 +6,7 @@
 local tools  = require("lib.tools")            -- { web_fetch, brave_search }
 local guards = require("lib.guards")           -- { no_env_edit }
 local brainstorming = require("lib.skills.brainstorming")
+local history = require("lib.skills.history")
 
 local self_evolve = shell3.skill({
   name = "self-evolve",
@@ -88,7 +89,7 @@ You are a focused code explorer. Investigate the question using bash (rg, fd,
 cat, git log) and report a concise, concrete answer with file:line references.
 You cannot edit files. Decide and proceed; no human is available.
 ]],
-  tools = { bash = true, history = true },
+  tools = { bash = true },
   on_tool_call = { guards.no_env_edit },
 })
 
@@ -126,14 +127,13 @@ You are an expert coding assistant inside shell3. Work autonomously as a senior 
     bash_bg           = true,
     shell_interactive = true,
     edit              = true,
-    history           = true,
     prune             = true,
     compact           = true,
     media             = true,
     subagents         = { explorer },
     custom            = { tools.web_fetch, tools.brave_search },
   },
-  skills = { self_evolve },
+  skills = { self_evolve, history },
   on_tool_call = { guards.no_env_edit, guards.confirm_destructive },
 })
 
@@ -163,13 +163,12 @@ You are the design partner inside shell3. You do NOT edit files — you investig
     bash    = true,
     bash_bg = false,
     edit    = false,
-    history = true,
     prune   = true,
     compact = true,
     media   = true,
     custom  = { tools.web_fetch, tools.brave_search },
   },
-  skills = { brainstorming },
+  skills = { brainstorming, history },
   on_tool_call = { guards.no_env_edit, guards.confirm_destructive },
 })
 

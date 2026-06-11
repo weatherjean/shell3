@@ -31,6 +31,41 @@ func TestStore_Open_SerializesWriters(t *testing.T) {
 	}
 }
 
+// TestStore_Open_WALForFileDB asserts the WAL flip is gated to file-backed
+// DBs: a real file path comes up in WAL mode (lock-free external readers for
+// the `history` skill), while `:memory:` stays in its default journal mode.
+func TestStore_Open_WALForFileDB(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+
+	mode, err := st.JournalMode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode != "wal" {
+		t.Fatalf("file DB journal_mode: got %q, want %q", mode, "wal")
+	}
+}
+
+func TestStore_Open_NoWALForMemory(t *testing.T) {
+	st, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+
+	mode, err := st.JournalMode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode == "wal" {
+		t.Fatalf(":memory: journal_mode: got %q, want non-WAL", mode)
+	}
+}
+
 func TestStore_SessionLifecycle(t *testing.T) {
 	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
 	defer func() { _ = st.Close() }()
