@@ -103,6 +103,12 @@ type LoadedConfig struct {
 	Tools   map[string]CustomTool
 	Skills  []Skill
 	Secrets map[string]string
+	// StubTools maps a hallucinated tool name (e.g. "read_file", "grep") to a
+	// fixed redirect message. Registered config-globally via shell3.stub_tools;
+	// when the model calls such a name CallTool returns the message verbatim
+	// (never an error), nudging the model back toward bash/edit_file. See
+	// register.go (luaStubTools) and agentsetup.runtimeForAgent for the wiring.
+	StubTools map[string]string
 
 	agents    []Agent
 	subagents []Subagent
@@ -128,7 +134,7 @@ func Load(path, workdir string) (*LoadedConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &LoadedConfig{Tools: map[string]CustomTool{}, Secrets: env, L: lua.NewState()}
+	c := &LoadedConfig{Tools: map[string]CustomTool{}, StubTools: map[string]string{}, Secrets: env, L: lua.NewState()}
 	// The returned config owns c.L; close it only if we error out below.
 	var success bool
 	defer func() {
@@ -210,6 +216,12 @@ func (c *LoadedConfig) Telegram() TelegramConfig { return c.telegram }
 
 // Cron returns the parsed shell3.cron jobs (nil if absent).
 func (c *LoadedConfig) Cron() []CronJob { return c.cron }
+
+// StubNames returns the registered stub-tool names with their redirect
+// messages. The map is config-global (not per-agent); agentsetup appends one
+// minimal tool def per entry to every agent's schema. The returned map is the
+// live config map — read-only by convention (callers never mutate it).
+func (c *LoadedConfig) StubNames() map[string]string { return c.StubTools }
 
 func (c *LoadedConfig) Model(name string) (Model, bool) {
 	for _, m := range c.Models {

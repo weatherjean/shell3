@@ -123,6 +123,15 @@ func (c *LoadedConfig) CallTool(ctx context.Context, name, argsJSON string) (str
 		return "", fmt.Errorf("unknown skill %q", sn)
 	}
 
+	// Stub tools (shell3.stub_tools): a hallucinated tool name returns its fixed
+	// redirect message verbatim. A stub call must never error — it is a nudge,
+	// not a failure. Checked before the custom-tool lookup; a real tool with the
+	// same name always wins because agentsetup skips colliding stubs, so this map
+	// only ever holds names that are not real tools.
+	if msg, ok := c.StubTools[name]; ok {
+		return msg, nil
+	}
+
 	tool, ok := c.Tools[name]
 	if !ok {
 		return "", fmt.Errorf("unknown custom tool %q", name)

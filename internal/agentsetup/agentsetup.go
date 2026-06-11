@@ -187,6 +187,31 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 		customNames["skill"] = true
 	}
 
+	// Stub tools (shell3.stub_tools) are config-global: append one minimal,
+	// no-param def per stub to EVERY agent's schema so a hallucinated tool call
+	// returns a redirect instead of erroring. Precedence: if a stub name collides
+	// with a real/custom/spawn tool already present, SKIP the stub — the real tool
+	// always wins. Each surviving stub also goes into customNames so dispatch
+	// routes it through CallTool (where it resolves to its redirect message).
+	if stubs := p.lc.StubNames(); len(stubs) > 0 {
+		present := make(map[string]bool, len(toolNames))
+		for _, n := range toolNames {
+			present[n] = true
+		}
+		for name := range stubs {
+			if present[name] {
+				continue // real tool wins; silently skip the colliding stub
+			}
+			toolDefs = append(toolDefs, llm.ToolDefinition{
+				Name:        name,
+				Description: "stub: not a real tool — redirects you to bash/edit_file",
+				Parameters:  map[string]any{"type": "object", "properties": map[string]any{}},
+			})
+			toolNames = append(toolNames, name)
+			customNames[name] = true
+		}
+	}
+
 	agent := a // capture for the guard closure
 	return chat.ActiveAgent{
 		Personality: persona.Persona{

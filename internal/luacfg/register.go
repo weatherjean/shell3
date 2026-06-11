@@ -15,6 +15,7 @@ func registerShell3(c *LoadedConfig) {
 	L.SetField(tbl, "cron", L.NewFunction(c.luaCron))
 	L.SetField(tbl, "skill", L.NewFunction(c.luaSkill))
 	L.SetField(tbl, "tool", L.NewFunction(c.luaTool))
+	L.SetField(tbl, "stub_tools", L.NewFunction(c.luaStubTools))
 	L.SetField(tbl, "agent", L.NewFunction(c.luaAgent))
 	L.SetField(tbl, "subagent", L.NewFunction(c.luaSubagent))
 	L.SetField(tbl, "urlencode", L.NewFunction(luaURLEncode))
@@ -190,6 +191,28 @@ func (c *LoadedConfig) luaTool(L *lua.LState) int {
 	h.RawSetString("__tool", lua.LString(ct.Name))
 	L.Push(h)
 	return 1
+}
+
+// luaStubTools registers name-only stub tools from a string→string table:
+// tool-name → redirect message. Models trained on other harnesses reflexively
+// call tools like read_file/grep/write_file; a stub returns the message verbatim
+// (a self-correcting nudge toward bash/edit_file) instead of erroring. Stubs are
+// config-GLOBAL — they apply to every agent. Multiple calls merge into the same
+// map; a later key overwrites an earlier one. Values must be strings.
+func (c *LoadedConfig) luaStubTools(L *lua.LState) int {
+	t := L.CheckTable(1)
+	t.ForEach(func(k, v lua.LValue) {
+		name, ok := k.(lua.LString)
+		if !ok {
+			L.RaiseError("stub_tools: keys must be strings (tool names), got %s", k.Type().String())
+		}
+		msg, ok := v.(lua.LString)
+		if !ok {
+			L.RaiseError("stub_tools[%q]: value must be a string (redirect message), got %s", string(name), v.Type().String())
+		}
+		c.StubTools[string(name)] = string(msg)
+	})
+	return 0
 }
 
 // subagentHandleNames is like handleNames for the "__subagent" sentinel, but

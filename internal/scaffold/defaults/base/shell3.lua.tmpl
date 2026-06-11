@@ -78,6 +78,19 @@ shell3.model("{{.Name | luaesc}}", {
 {{end}}})
 
 -- ---------------------------------------------------------------------------
+-- Stub tools (optional) — redirect hallucinated tool calls to bash/edit_file.
+-- ---------------------------------------------------------------------------
+-- Models trained on other harnesses reflexively call read_file/grep/write_file.
+-- Registering them as stubs returns a one-line redirect (a self-correcting nudge)
+-- instead of erroring. Config-global: applies to every agent. Later keys override
+-- earlier ones; a stub whose name collides with a real tool is ignored.
+-- shell3.stub_tools({
+--   read_file  = "Use bash: cat <path> (or sed -n for ranges).",
+--   grep       = "Use bash: rg <pattern>.",
+--   write_file = "Use edit_file (empty old_string creates/overwrites).",
+-- })
+
+-- ---------------------------------------------------------------------------
 -- Subagents (delegatable specialists; not in the Tab/`/agent` rotation)
 -- ---------------------------------------------------------------------------
 local explorer = shell3.subagent({
