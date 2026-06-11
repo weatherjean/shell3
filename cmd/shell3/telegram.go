@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/cron"
 	"github.com/weatherjean/shell3/internal/telegram"
 	"github.com/weatherjean/shell3/internal/telegram/web"
@@ -28,7 +29,12 @@ func newTelegramCommand() *cobra.Command {
 			defer stop()
 
 			cwd, _ := os.Getwd()
-			rt, err := shell3.NewRuntime(shell3.RuntimeSpec{ConfigPath: configPath, WorkDir: cwd})
+			home, _ := os.UserHomeDir()
+			resolved, err := agentsetup.ResolveTelegramConfigPath(configPath, cwd, home)
+			if err != nil {
+				return err
+			}
+			rt, err := shell3.NewRuntime(shell3.RuntimeSpec{ConfigPath: resolved, WorkDir: cwd})
 			if err != nil {
 				return err
 			}
