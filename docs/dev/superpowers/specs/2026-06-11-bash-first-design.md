@@ -180,26 +180,33 @@ sqlite3 'file:<db>?mode=ro' "SELECT created_at, role, content FROM … WHERE …
   5s busy_timeout). WAL gives lock-free concurrent readers; keep it off only for
   `:memory:` as the current comment notes.
 
-## 6. Guard → `shell3.wrap_bash`, unsafe by default
+## 6. Guard → `shell3.wrap_bash`, unsafe by default (FULL REMOVAL)
 
-**Recommended middle path (not full removal).** The guard *engine* powers the
-human-in-the-loop approval flow: `action="ask"` → `ApprovalRequest` → Telegram
-Approve/Deny buttons (approval.go:46) and the TUI y/N prompt. Deleting it
-outright also deletes approval. So:
+Decision: **full removal of the guard engine.** Unsafe by default; the only
+safety surface is a Lua bash wrapper. This deletes the human-in-the-loop
+approval flow with it (accepted).
 
-- **Keep the engine** (`OnToolCallFor`, the `ask`/`block`/`cancel` decisions,
-  `ApprovalRequest`).
-- **Ship the scaffold with zero guards** — unsafe by default, as requested. The
-  default `wrap_bash` is a *loud no-op*: a comment stating "you are running an
-  unguarded shell; here is how to lock it down."
-- **Add `shell3.wrap_bash(fn)`** as the blessed user-facing safety API. `fn`
-  receives the command and returns `{action=allow|block|ask, command=<rewritten>,
-  reason=…}`. It compiles down to a bash-scoped `on_tool_call` guard, so it
-  reuses the engine (incl. `ask` → approval) and can also *rewrite* the command
-  (e.g. inject `--dry-run`, sandbox prefixes).
+Remove:
 
-Open question for the user: accept this middle path, or insist on full removal
-of the guard engine (which means dropping approval too)? Flagged in §Risks.
+- The guard engine: `OnToolCallFor`, `runLuaGuard`, `parseAction`, the
+  `Decision`/`guardDecision` types, `on_tool_call` parsing in register.go,
+  `GuardEntry`/`Guard` fields on `Agent`/`Subagent`.
+- The approval flow end-to-end: `DecisionAsk`/`guardAsk`, `ApprovalRequest`,
+  `Approve`/`SetApprover` (pkg/shell3 + chat `TurnConfig`), the TUI y/N approval
+  (`patchapp/approval*`, busy-gate approval bits), and the Telegram approver
+  (`internal/telegram/approval.go`, the `ap:` callback in the bot).
+- The scaffold `guards.lua` and all `on_tool_call = { … }` wiring.
+
+Add `shell3.wrap_bash(fn)`: a single Lua hook the bash tool's command passes
+through before execution. `fn(cmd)` returns either a string (the command to run,
+possibly rewritten) or `nil`/`false` + reason to reject. Pure allow / block /
+rewrite — **no `ask`** (nothing to ask; there is no approver anymore). Applies
+only to `bash`/`bash_bg`. The default scaffold ships a **loud no-op**
+`wrap_bash` whose comment states the shell is unguarded and shows how to lock it
+down.
+
+Mechanism: `wrap_bash` is invoked inside the bash handler path (or just before
+dispatch) via a `luacfg` binding, not through the deleted guard chain.
 
 ## 7. Command-backed prompt / skill content (optional, later commit)
 
@@ -262,8 +269,10 @@ Display-only; model-facing bytes unchanged.
 
 ## Risks & open questions
 
-1. **Guard removal scope (§6).** Recommend keeping the engine + unsafe default +
-   `wrap_bash` sugar. Full removal deletes the approval flow. **Needs a decision.**
+1. **Guard removal scope (§6).** DECIDED: full removal. The approval flow
+   (Telegram Approve/Deny, TUI y/N) is deleted with the engine. Touches
+   telegram/approval.go, patchapp approval, pkg/shell3 Approve/SetApprover, and
+   chat guard/Approve plumbing — the widest-blast-radius phase.
 2. **Subprocess subagent cost.** Process-per-spawn startup (Lua reload, store
    open). Fine for interactive/Telegram; could matter for fan-out. Mitigation
    later: a `shell3 serve` warm pool — out of scope here.
