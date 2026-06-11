@@ -1,0 +1,187 @@
+-- shell3.lua — Telegram host config written by `shell3 boot --telegram`.
+-- Secrets (TELEGRAM_BOT_TOKEN and the model api key) live in .env beside this file.
+-- Edit freely, then apply changes live with the `reload` tool (see the self-evolve skill).
+-- Run it with:  shell3 telegram
+
+local tools  = require("lib.tools")   -- { web_fetch, brave_search }
+local guards = require("lib.guards")  -- { no_env_edit, confirm_destructive }
+
+local self_evolve = shell3.skill({
+  name = "self-evolve",
+  description = "How to safely change your own shell3.lua config and apply it live with the reload + status tools. A failed reload keeps the old config, so self-editing is always safe.",
+  body = [[
+You can modify your own configuration and apply it live, without anyone
+restarting the bot. A failed reload keeps the current config running, so you can
+never brick yourself with a bad edit.
+
+## Orient first
+Call the `status` tool. It prints the absolute path of the `shell3.lua` you edit
+(plus your active agent, the model, the working directory, and any cron jobs).
+Edit that exact file. If it `require`s `lib/` modules, follow the require.
+
+## The loop
+1. Edit the file. Copy the shape of an existing block rather than writing from scratch.
+2. Respect the cross-reference rules (validated on every reload; a violation rejects it):
+   - every agent/subagent `model = "..."` must name a declared `shell3.model`;
+   - every `shell3.cron` job's `agent = "..."` must name a declared SUBAGENT;
+   - a skill or tool granted to an agent must be a declared handle.
+3. Call the `reload` tool. It validates the whole file, then applies it after this
+   turn ends. The result — success counts or the exact error — is delivered to chat.
+4. If it failed: a Lua `[string "shell3.lua"]:42: ...` error is a typo at that line;
+   an `unknown subagent "x"` / `unknown model "y"` error is a bad cross-reference.
+   The old config keeps running until a reload succeeds, so just edit and retry.
+
+## What survives a reload
+- Conversation history is always kept. Active agent and /set params are restored
+  when they still exist. MCP servers and model proxies restart (a brief pause).
+]],
+})
+
+local scheduling_jobs = shell3.skill({
+  name = "scheduling-jobs",
+  description = "How to add, arm, and test recurring scheduled jobs (shell3.cron). A cron job dispatches a SUBAGENT on a schedule; arm it with reload and fire it on demand with /run.",
+  body = [[
+You can give yourself recurring background work with `shell3.cron`. A job fires on
+a schedule and dispatches a SUBAGENT with a prompt; the result is posted to chat.
+
+## The block
+shell3.cron({
+  jobs = {
+    { name="nightly", schedule="0 9 * * *", agent="explorer",
+      prompt="Summarize anything noteworthy.", notify=true },
+  },
+})
+
+## Fields
+- name: identifier for /run <name> and the dashboard.
+- schedule: 5-field cron "min hour dom mon dow", or @hourly/@daily/@weekly,
+  or @every 30s / @every 5m / @every 1h.
+- agent: MUST be a declared shell3.subagent (e.g. explorer), NOT a top-level agent.
+- prompt: the instruction handed to the subagent.
+- workdir: optional working directory.
+- notify: true posts the result to chat; false runs quietly (errors still post).
+
+## Arming and testing
+1. Edit shell3.lua to add/adjust the job.
+2. Call the `reload` tool to validate and arm it (a bad schedule or unknown
+   subagent is rejected; the old config keeps running).
+3. Fire on demand with /run <name>; or wait for the schedule.
+Removing a job and reloading disarms it.
+]],
+})
+
+-- ---------------------------------------------------------------------------
+-- Model
+-- ---------------------------------------------------------------------------
+shell3.model("{{.Name | luaesc}}", {
+  base_url       = "{{.BaseURL | luaesc}}",
+  api_key        = shell3.env.secret("{{.EnvKey}}"),  -- {{.EnvKey}} in .env
+  model          = "{{.Model | luaesc}}",
+  context_window = 128000,
+{{if .Proxy}}  run_proxy      = "{{.Proxy | luaesc}}",
+{{else}}  -- run_proxy   = "npx @some/codex-proxy --port 8787",
+{{end}}})
+
+-- ---------------------------------------------------------------------------
+-- Subagent (cron jobs and spawn_agent dispatch this read-only investigator)
+-- ---------------------------------------------------------------------------
+local explorer = shell3.subagent({
+  name        = "explorer",
+  description = "Read-only investigation — locate where/how something is implemented, summarize a subsystem, or gather context across many files. No edits.",
+  model       = "{{.Name | luaesc}}",
+  prompt = [[
+You are a focused explorer. Investigate using bash (rg, fd, cat, git log) and
+report a concise, concrete answer with file:line references. You cannot edit
+files. Decide and proceed; no human is available.
+]],
+  tools = { bash = true, history = true },
+  on_tool_call = { guards.no_env_edit },
+})
+
+{{if .Chrome}}-- ---------------------------------------------------------------------------
+-- Chrome DevTools MCP (browser automation; needs Node/npx). Started lazily on
+-- first use. Add a `tools = {...}` allowlist to restrict which tools are exposed.
+-- ---------------------------------------------------------------------------
+local chrome = shell3.mcp({
+  name    = "chrome",
+  command = "npx",
+  args    = { "-y", "chrome-devtools-mcp@latest", "--autoConnect", "--no-usage-statistics" },
+})
+{{end}}-- ---------------------------------------------------------------------------
+-- Agent (the single agent the Telegram bot runs; it spawns subagents)
+-- ---------------------------------------------------------------------------
+shell3.agent({
+  name  = "code",
+  model = "{{.Name | luaesc}}",
+  prompt = [[
+You are a capable assistant running as an always-on Telegram bot. You inspect,
+edit, run, and schedule work on the host, and you talk to one person over chat.
+
+## Communication (you talk over Telegram)
+- Short, natural, human. No memo voice, no long preambles, no walls of text, no
+  restating the question. One phone screen, not three.
+- Lead with the answer or result; add detail only if asked.
+- Plain text by default; light markdown (`code`, short bullets) when it helps.
+  Avoid wide tables — they wrap badly on mobile.
+- Don't paste huge output — write it to a file and send it with send_media_telegram.
+- Emoji sparse, for warmth or a quick OK / warning.
+
+## Autonomy (you run unattended)
+- Actionable request -> act this turn; don't reply with a plan you could execute.
+- Continue until done or genuinely blocked; vary your approach on weak results
+  before giving up.
+- Reversible, local actions: just do them. Irreversible, destructive, external,
+  or privacy-sensitive actions: ask first, with one concise question.
+- Ask at most one question, only when a single missing decision blocks safe
+  progress; otherwise pick a sensible default and say what you assumed.
+- Long jobs: send a one-line "on it", then keep going. Hand parallel or
+  background work to a subagent with spawn_agent and DON'T poll — its result
+  comes back to you automatically when it finishes.
+- Final claims need evidence (you ran the test/build, read the file, saw the
+  output) or a named blocker.
+
+## Reshaping yourself
+- `status` shows your config path and what's live.
+- The self-evolve skill: edit shell3.lua, then call `reload` to apply it.
+- The scheduling-jobs skill: add a shell3.cron job, then `reload` to arm it.
+
+## Context hygiene
+- Prune large successful tool outputs after extracting what you need; never prune
+  errors or small results.
+]],
+  tools = {
+    bash              = true,
+    bash_bg           = true,
+    shell_interactive = true,
+    edit              = true,
+    history           = true,
+    prune             = true,
+    compact           = true,
+    media             = true,
+    subagents         = { explorer },
+    custom            = { tools.web_fetch, tools.brave_search },
+{{if .Chrome}}    mcp               = { chrome },
+{{end}}  },
+  skills = { self_evolve, scheduling_jobs },
+  on_tool_call = { guards.no_env_edit, guards.confirm_destructive },
+})
+
+-- ---------------------------------------------------------------------------
+-- Telegram host (run: shell3 telegram)
+-- ---------------------------------------------------------------------------
+shell3.telegram({
+  token   = shell3.env.secret("TELEGRAM_BOT_TOKEN"),
+  chat_id = "{{.ChatID | luaesc}}",
+  agent   = "code",
+  workdir = "{{.WorkDir | luaesc}}",
+{{if .DashboardEnabled}}  dashboard = { enabled = true, addr = "{{.DashboardAddr | luaesc}}", url = "{{.DashboardURL | luaesc}}" },
+{{else}}  dashboard = { enabled = false },
+{{end}}})
+
+-- Sample scheduled job (disarmed). Uncomment and `reload` to arm; /run <name> to test.
+-- shell3.cron({
+--   jobs = {
+--     { name="daily", schedule="@daily", agent="explorer", notify=true,
+--       prompt="Summarize anything noteworthy from the last day." },
+--   },
+-- })

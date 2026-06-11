@@ -204,6 +204,73 @@ func TestRenderBaseConfigForceOverwrites(t *testing.T) {
 	}
 }
 
+func TestRenderTelegramConfigLoads(t *testing.T) {
+	dir := t.TempDir()
+	if err := RenderTelegramConfig(dir, TelegramValues{
+		Values:           Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m-1"},
+		ChatID:           "123456",
+		WorkDir:          dir,
+		DashboardEnabled: true,
+		DashboardAddr:    "127.0.0.1:8765",
+		DashboardURL:     "https://h.ts.net/",
+	}, false); err != nil {
+		t.Fatal(err)
+	}
+	// lib modules copied + config written.
+	for _, p := range []string{"shell3.lua", "lib/tools.lua", "lib/guards.lua"} {
+		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
+			t.Errorf("missing %s: %v", p, err)
+		}
+	}
+	// Provide the token and model key the config references, then load through luacfg.
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("TELEGRAM_BOT_TOKEN=tok\nMAIN_API_KEY=\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := luacfg.Load(filepath.Join(dir, "shell3.lua"), dir)
+	if err != nil {
+		t.Fatalf("telegram config failed to load: %v", err)
+	}
+	defer c.Close()
+	if a := c.Agents(); len(a) != 1 || a[0].Name != "code" {
+		t.Errorf("agents = %v, want [code]", a)
+	}
+	if s := c.Subagents(); len(s) != 1 || s[0].Name != "explorer" {
+		t.Errorf("subagents = %v, want [explorer]", s)
+	}
+	tg := c.Telegram()
+	if tg.ChatID != "123456" || tg.Token != "tok" || tg.Agent != "code" {
+		t.Errorf("telegram = %+v, want chat_id=123456 token=tok agent=code", tg)
+	}
+	if !tg.Dashboard.Enabled || tg.Dashboard.Addr != "127.0.0.1:8765" {
+		t.Errorf("dashboard = %+v, want enabled 127.0.0.1:8765", tg.Dashboard)
+	}
+	if len(c.MCPServers) != 0 {
+		t.Errorf("default render should declare no MCP servers, got %v", c.MCPServers)
+	}
+}
+
+func TestRenderTelegramConfigChrome(t *testing.T) {
+	dir := t.TempDir()
+	if err := RenderTelegramConfig(dir, TelegramValues{
+		Values: Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m-1"},
+		ChatID: "1", WorkDir: dir, Chrome: true,
+	}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("MAIN_API_KEY=\nTELEGRAM_BOT_TOKEN=\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := luacfg.Load(filepath.Join(dir, "shell3.lua"), dir)
+	if err != nil {
+		t.Fatalf("chrome config failed to load: %v", err)
+	}
+	defer c.Close()
+	// luacfg records the MCP server spec; it does NOT spawn npx at load time.
+	if _, ok := c.MCPServers["chrome"]; !ok {
+		t.Errorf("Chrome:true should declare the chrome MCP server, got %v", c.MCPServers)
+	}
+}
+
 // TestRenderBaseConfigEscapesLuaSpecials ensures inputs containing Lua string
 // metacharacters (a quote, a backslash) produce a config that still parses,
 // rather than a literal that closes early or an invalid escape.
