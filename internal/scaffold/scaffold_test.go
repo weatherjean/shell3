@@ -271,6 +271,39 @@ func TestRenderTelegramConfigChrome(t *testing.T) {
 	}
 }
 
+func TestRenderTelegramConfigHasBrowserSkill(t *testing.T) {
+	dir := t.TempDir()
+	if err := RenderTelegramConfig(dir, TelegramValues{
+		Values: Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m-1"},
+		ChatID: "1", WorkDir: dir,
+	}, false); err != nil {
+		t.Fatal(err)
+	}
+	// Helper files shipped alongside the skill.
+	for _, p := range []string{"lib/skills/browser.lua", "lib/browser/cli.js", "lib/browser/package.json"} {
+		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
+			t.Errorf("missing %s: %v", p, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("TELEGRAM_BOT_TOKEN=tok\nMAIN_API_KEY=\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := luacfg.Load(filepath.Join(dir, "shell3.lua"), dir)
+	if err != nil {
+		t.Fatalf("telegram config failed to load: %v", err)
+	}
+	defer c.Close()
+	var found bool
+	for _, s := range c.Skills {
+		if s.Name == "browser" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("browser skill not declared; skills = %v", c.Skills)
+	}
+}
+
 // TestRenderBaseConfigEscapesLuaSpecials ensures inputs containing Lua string
 // metacharacters (a quote, a backslash) produce a config that still parses,
 // rather than a literal that closes early or an invalid escape.

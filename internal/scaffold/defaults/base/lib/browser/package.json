@@ -1,0 +1,9 @@
+{
+  "name": "shell3-browser",
+  "private": true,
+  "version": "1.0.0",
+  "description": "puppeteer-core helper for the shell3 browser skill",
+  "dependencies": {
+    "puppeteer-core": "^23.0.0"
+  }
+}

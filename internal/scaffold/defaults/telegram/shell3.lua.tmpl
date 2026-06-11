@@ -3,8 +3,9 @@
 -- Edit freely, then apply changes live with the `reload` tool (see the self-evolve skill).
 -- Run it with:  shell3 telegram
 
-local tools  = require("lib.tools")   -- { web_fetch, brave_search }
-local guards = require("lib.guards")  -- { no_env_edit, confirm_destructive }
+local tools   = require("lib.tools")   -- { web_fetch, brave_search }
+local guards  = require("lib.guards")  -- { no_env_edit, confirm_destructive }
+local browser = require("lib.skills.browser")
 
 local self_evolve = shell3.skill({
   name = "self-evolve",
@@ -162,7 +163,7 @@ edit, run, and schedule work on the host, and you talk to one person over chat.
     custom            = { tools.web_fetch, tools.brave_search },
 {{if .Chrome}}    mcp               = { chrome },
 {{end}}  },
-  skills = { self_evolve, scheduling_jobs },
+  skills = { self_evolve, scheduling_jobs, browser },
   on_tool_call = { guards.no_env_edit, guards.confirm_destructive },
 })
 
