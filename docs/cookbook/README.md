@@ -7,11 +7,10 @@ out. Each `lib/...` file mirrors the base config's module layout: copy it into
 ## Usage
 
     -- in ~/.shell3/shell3.lua
-    local plans = require("lib.skills.writing-plans")
-    local mcp   = require("lib.mcp")
+    local plans   = require("lib.skills.writing-plans")
+    local browser = require("lib.skills.browser")
     -- then, in an agent:
-    --   skills = { plans },
-    --   tools  = { mcp = { mcp.chrome } },
+    --   skills = { plans, browser },
 
 ## Contents
 
@@ -19,7 +18,7 @@ out. Each `lib/...` file mirrors the base config's module layout: copy it into
 - `lib/skills/executing-plans.lua` — safe execution + git workflow after a plan.
 - `lib/skills/codebase-discovery.lua` — navigating unfamiliar code.
 - `lib/skills/web-search.lua` — guidance for web research.
-- `lib/mcp.lua` — declaring an MCP server and attaching its tools.
+- `lib/browser.lua` — Drive a real headed Chrome via puppeteer-core (the `browser` skill); see `lib/browser.lua`.
 - `lib/guards.lua` — extra on_tool_call guards: a `block` verdict (block destructive bash) and an `ask` verdict (the ask verdict surfaces an approval prompt in the TUI / bot before a risky command runs).
 - `lib/tools.lua` — custom tool template.
 - `lib/extra-agents.lua` — adding more agents.

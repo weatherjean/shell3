@@ -28,8 +28,7 @@ shell3 "audit deps" --out audit.jsonl   # headless, with a JSONL audit log
   read-only `plan` agent; switch with Tab or `/agent` mid-session while
   keeping history.
 - **Custom tools in Lua.** A tool is a name, a JSON schema, and a Lua
-  function — no plugins, no separate processes. MCP servers (stdio) are
-  also supported for tools that live elsewhere.
+  function — no plugins, no separate processes.
 - **Guards.** `on_tool_call` middleware sees every tool call before it runs
   and can allow, block, or cancel the turn. The scaffold ships with a guard
   that blocks edits to your `.env`.
@@ -92,7 +91,6 @@ shell3.agent({
     bash = true, edit = true, bash_bg = true,
     history = true, prune = true, compact = true, media = true,
     custom = { my_tool },          -- Lua-defined tools
-    -- mcp = { mcp.chrome },       -- MCP servers
   },
   on_tool_call = { guards.no_env_edit },
 })
@@ -120,7 +118,7 @@ local weather = shell3.tool({
 Config resolution order: `--config/-c` flag → `./shell3.lua` →
 `~/.shell3/shell3.lua`. Secrets live in a `.env` beside the config, read via
 `shell3.env.secret("KEY")` — plain text, so treat it like any credentials
-file. Drop-in recipes (MCP, extra agents, planning skills, proxy setups) live
+file. Drop-in recipes (extra agents, planning skills, the browser skill, proxy setups) live
 in [docs/cookbook](docs/cookbook).
 
 If a model needs a local proxy in front of its endpoint (e.g. a Codex
@@ -157,7 +155,7 @@ for ev := range events {
 history introspection, pruning, and parameter control.
 
 For an always-on personal agent, `NewRuntime` owns one shared build (config,
-store, MCP, log) and hosts many named sessions — one per chat, each with its own
+store, log) and hosts many named sessions — one per chat, each with its own
 agent, workdir, and audit log:
 
 ```go

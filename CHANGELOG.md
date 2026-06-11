@@ -10,6 +10,10 @@ Until v1.0.0, minor versions may contain breaking changes.
 
 ### Added
 
+- `browser` skill: drive a real, headed, cross-platform Chrome via `puppeteer-core`
+  over `bash` (open/eval/click/type/wait/screenshot/pdf), shipped in the scaffold
+  (`lib/browser/` + `lib/skills/browser.lua`). Each action is a bounded command —
+  no long-lived server.
 - Telegram-first setup: `shell3 boot --telegram` scaffolds a dedicated
   `~/.shell3/telegram/` host config (`shell3.lua` + its own `.env` + a
   Telegram-tuned agent prompt with Communication/Autonomy sections, the
@@ -130,5 +134,13 @@ Until v1.0.0, minor versions may contain breaking changes.
 - `run_proxy`: auto-start a local proxy/shim command on first model use.
 - Runtime enforcement of the session single-turn contract (`ErrBusy`).
 - CI (gofmt/vet/race tests on Linux+macOS) and goreleaser release builds.
+
+### Removed
+
+- MCP support, entirely: the `internal/mcp` package, the `shell3.mcp()` Lua
+  builtin, `MCPServer`/`MCPServers`/`MCPServerNames`, MCP tool dispatch, the MCP
+  manager in agent setup, the reload MCP-restart path, and the `boot --telegram
+  --chrome` flag. Browser automation is now the `browser` skill (above). Configs
+  that still call `shell3.mcp{}` fail loudly at load.
 
 [Unreleased]: https://github.com/weatherjean/shell3/commits/main

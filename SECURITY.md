@@ -14,9 +14,9 @@ purpose, not a vulnerability — but it shapes what shell3 does and doesn't
 defend against.
 
 **What shell3 assumes:** the user trusts their own `shell3.lua` (it is code
-and runs with the user's privileges), the configured model endpoint, and the
-MCP servers they declare. A malicious config, provider, or MCP server is
-outside the threat model — treat all three like software you install.
+and runs with the user's privileges) and the configured model endpoint. A
+malicious config or provider is outside the threat model — treat both like
+software you install.
 
 **What shell3 defends:**
 

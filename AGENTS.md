@@ -19,7 +19,6 @@ internal/bootstrap/    first-run global + project setup
 internal/scaffold/     embedded starter shell3.lua + .env template
 internal/adapter/openai/  OpenAI-compatible LLM adapter
 internal/modelproxy/   run_proxy spawner (starts a model's proxy command on activation)
-internal/mcp/          MCP server manager (stdio transport → tool discovery + dispatch)
 internal/paths/        global + local path resolution
 internal/ref/          project UUID (.shell3/.ref)
 internal/store/        SQLite history + sessions
