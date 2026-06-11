@@ -298,6 +298,8 @@ type Session struct {
 	name        string
 	ownsRuntime bool
 
+	opts SessionOpts // the SessionOpts this session was built from (for reload re-derivation)
+
 	// subs holds subagents this session has spawned (see spawn / subRegistry).
 	subs subRegistry
 	// closeOnce makes Close safe under concurrent invocation: a spawned

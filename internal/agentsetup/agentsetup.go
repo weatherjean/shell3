@@ -79,6 +79,12 @@ func (p *Parts) Telegram() luacfg.TelegramConfig { return p.lc.Telegram() }
 // Cron returns the parsed shell3.cron jobs (nil if absent).
 func (p *Parts) Cron() []luacfg.CronJob { return p.lc.Cron() }
 
+// ModelCount returns the number of declared models.
+func (p *Parts) ModelCount() int { return len(p.lc.Models) }
+
+// MCPServerCount returns the number of configured MCP servers.
+func (p *Parts) MCPServerCount() int { return len(p.lc.MCPServers) }
+
 // AgentNames returns declared agent names in declaration order.
 func (p *Parts) AgentNames() []string {
 	agents := p.lc.Agents()

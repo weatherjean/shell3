@@ -118,6 +118,9 @@ type Runtime struct {
 	telegram TelegramConfig
 	cron     []CronJob
 
+	configPath string // captured from RuntimeSpec for Reload
+	homeDir    string // captured for Reload's BuildParts
+
 	// subSeq mints process-unique subagent ids (see nextSubID). Global to the
 	// runtime so two parents never collide on a "sub:<id>" session name.
 	subSeq atomic.Int64
@@ -202,12 +205,14 @@ func NewRuntime(spec RuntimeSpec) (*Runtime, error) {
 				URL:     tg.Dashboard.URL,
 			},
 		},
-		cron:     cronJobs,
-		events:   make(chan HostEvent, 64),
-		workDir:  workDir,
-		ctx:      ctx,
-		cancel:   cancel,
-		sessions: map[string]*Session{},
+		cron:       cronJobs,
+		events:     make(chan HostEvent, 64),
+		workDir:    workDir,
+		configPath: spec.ConfigPath,
+		homeDir:    homeDir,
+		ctx:        ctx,
+		cancel:     cancel,
+		sessions:   map[string]*Session{},
 	}, nil
 }
 
@@ -356,6 +361,7 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	}
 	s := newSession(cfg, func() {}) // shared parts are the runtime's to clean
 	s.shellInteractive = opts.ShellInteractive
+	s.opts = opts
 	if opts.Approve != nil {
 		_ = s.SetApprover(opts.Approve) // freshly built session: never busy
 	}
