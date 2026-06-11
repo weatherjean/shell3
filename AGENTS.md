@@ -8,8 +8,13 @@ subagent is a backgrounded `shell3` subprocess). Background work and subagents
 report completion through a per-session JSONL **sink** that the host watcher
 turns into short pointer notifications. The shell is **unsafe by default** — the
 only safety surface is the `shell3.wrap_bash(fn)` Lua hook (allow/block/rewrite;
-no approval flow). Context is host-managed via a model `compact_at` token
-threshold (auto-compaction), not model-driven prune/compact tools.
+no approval flow). Skills are `.md` files the agent reads with `cat` (listed by
+absolute path in the prompt under `## Skills` — there is no `skill` tool), and
+custom tools are declarative bash-command templates
+(`shell3.tool{command=...}`, params injected as lowercase env vars plus a
+`secrets` list; no Lua `handler`) — the `shell3.bash`/`http`/`urlencode` helpers
+are gone. Context is host-managed via a model `compact_at` token threshold
+(auto-compaction), not model-driven prune/compact tools.
 
 ## IMPORTANT: Do Not Read Credential Files
 

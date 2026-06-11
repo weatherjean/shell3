@@ -94,6 +94,22 @@ func TestRenderedConfigLoads(t *testing.T) {
 	if len(c.Tools) != 2 {
 		t.Errorf("expected 2 tools (web_fetch, brave_search), got %d", len(c.Tools))
 	}
+	// Both base tools are bash command templates (no Lua handler): each must
+	// register with a non-empty Command.
+	cmds := map[string]string{}
+	for _, tl := range c.Tools {
+		cmds[tl.Name] = tl.Command
+	}
+	for _, name := range []string{"web_fetch", "brave_search"} {
+		cmd, ok := cmds[name]
+		if !ok {
+			t.Errorf("custom tool %q not registered", name)
+			continue
+		}
+		if strings.TrimSpace(cmd) == "" {
+			t.Errorf("custom tool %q has an empty Command", name)
+		}
+	}
 	if len(c.Skills) != 3 {
 		t.Errorf("expected 3 skills (brainstorming, self-evolve, history), got %d", len(c.Skills))
 	}

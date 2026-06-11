@@ -241,6 +241,11 @@ dispatch) via a `luacfg` binding, not through the deleted guard chain.
 
 ## 7. Command-backed prompt / skill content (IMPLEMENTED)
 
+> **Note:** command-backed SKILL bodies (`body_cmd`) are SUPERSEDED by file-`path`
+> skills — skills are now `.md` files referenced via `shell3.skill{ path="…" }` that
+> the agent `cat`s itself (see the bash-first tools-and-skills spec). `prompt_cmd`
+> for agents/subagents still stands.
+
 A skill/prompt body may come from a command instead of a literal, resolved
 **once per load/reload** (so prompt caching is preserved within a session):
 

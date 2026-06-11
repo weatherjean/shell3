@@ -1,5 +1,7 @@
 # bash-first: file-backed skills + bash-template tools
 
+Status: IMPLEMENTED on feat/bash-first.
+
 Design for the next slice of the bash-first refactor (`feat/bash-first`). Goal:
 **stop wrapping bash in Lua/tool indirection.** Two coupled changes — skills
 become files the agent `cat`s (the `skill` tool goes away), and custom tools
