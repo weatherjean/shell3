@@ -29,7 +29,7 @@ func newBootCommand() *cobra.Command {
 	f := &bootFlags{}
 	cmd := &cobra.Command{
 		Use:   "boot",
-		Short: "Create a shell3 config interactively (url, model, name, key)",
+		Short: "Create a shell3 config interactively (url, model, name, key; or --telegram for the Telegram host)",
 		RunE:  func(cmd *cobra.Command, args []string) error { return runBoot(f) },
 	}
 	cmd.Flags().StringVar(&f.url, "url", "", "Base URL (OpenAI-compatible endpoint)")
@@ -102,7 +102,7 @@ func runBoot(f *bootFlags) error {
 	envKey := envKeyForName(name)
 
 	envPairs := [][2]string{{envKey, key}, {"BRAVE_API_KEY", braveKey}}
-	var chrome bool // visible to printTelegramBootSuccess below
+	var chrome bool // set in the telegram branch; read by printTelegramBootSuccess
 
 	if f.telegram {
 		token, err := value(f.tgToken, "Telegram bot token (from @BotFather)", "", in, tty, true)

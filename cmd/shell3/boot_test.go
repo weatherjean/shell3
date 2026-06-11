@@ -230,6 +230,9 @@ func TestBootTelegramEndToEnd(t *testing.T) {
 	if !strings.Contains(string(env), "MAIN_API_KEY=") {
 		t.Errorf(".env missing model key:\n%s", env)
 	}
+	if fi, err := os.Stat(filepath.Join(dir, ".env")); err == nil && fi.Mode().Perm() != 0o600 {
+		t.Errorf(".env perms = %v, want 0600", fi.Mode().Perm())
+	}
 
 	c, err := luacfg.Load(filepath.Join(dir, "shell3.lua"), dir)
 	if err != nil {

@@ -29,7 +29,10 @@ func newTelegramCommand() *cobra.Command {
 			defer stop()
 
 			cwd, _ := os.Getwd()
-			home, _ := os.UserHomeDir()
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
 			resolved, err := agentsetup.ResolveTelegramConfigPath(configPath, cwd, home)
 			if err != nil {
 				return err
