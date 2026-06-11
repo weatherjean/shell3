@@ -32,14 +32,12 @@ func (s *Session) sinkPath() string {
 // startSinkWatcher launches the host-side consumer of this session's sink: a
 // goroutine that tails the sink file by byte offset and, for each newly
 // appended complete JSON line, injects a short POINTER notification into the
-// session (Interject) and Wakes the session if it is idle — exactly the path
-// deliverSubagentResult uses. The injected message names the artifact (a log /
-// transcript path); the agent reads the heavy content itself with bash, so the
-// agent's context stays small.
+// session (Interject) and Wakes the session if it is idle. The injected message
+// names the artifact (a log / transcript path); the agent reads the heavy
+// content itself with bash, so the agent's context stays small.
 //
 // rt is captured up front (not read from s.runtime inside the goroutine): a
-// concurrent Close nils s.runtime, which would race a read here — the same
-// hazard documented on deliverSubagentResult. The goroutine stops when stop is
+// concurrent Close nils s.runtime, which would race a read here. The goroutine stops when stop is
 // closed (on Close); Close also removes the sink file. A nil sinkPath ("" from
 // sinkPath) skips the watcher entirely.
 func (s *Session) startSinkWatcher(rt *Runtime, sinkPath string) {
@@ -139,8 +137,8 @@ func (s *Session) drainSink(rt *Runtime, sinkPath string, offset int64) int64 {
 }
 
 // deliverNotification injects one sink notification as a short pointer message
-// and Wakes the session if idle — the exact delivery path deliverSubagentResult
-// uses (Interject + Wake-if-idle). The message points at the artifact; it does
+// and Wakes the session if idle (Interject + Wake-if-idle). The message points
+// at the artifact; it does
 // NOT inline the log/transcript contents (the agent cats those itself with
 // bash), keeping the agent's context small.
 func (s *Session) deliverNotification(rt *Runtime, n sink.Notification) {

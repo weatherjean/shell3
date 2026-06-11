@@ -11,7 +11,7 @@ import (
 )
 
 // ToolHandler is the interface for built-in tool implementations. Each
-// built-in tool (bash, edit_file, prune_tool_result, etc.) implements this.
+// built-in tool (bash, edit_file, bash_bg, etc.) implements this.
 // Name returns the canonical tool name used in the JSON schema and lookup
 // map. Execute runs the tool synchronously and returns the string written
 // back to the model as the tool result; non-nil errors are surfaced to the
@@ -25,7 +25,7 @@ type ToolHandler interface {
 }
 
 // funcHandler adapts a closure to the ToolHandler interface. Used for the
-// turn-scoped tools (compact_history, shell_interactive, read_media) whose
+// turn-scoped tools (shell_interactive, read_media) whose
 // implementations close over the tool loop's mutable state — see
 // turnScopedHandlers in turn.go.
 type funcHandler struct {

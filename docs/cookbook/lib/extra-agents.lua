@@ -1,6 +1,6 @@
 -- cookbook: a third agent. Declare additional agents in shell3.lua; switch with
 -- Tab (when idle) or /agent. This file is illustrative — paste the block into
--- shell3.lua where `tools`, `guards`, and skills locals are in scope.
+-- shell3.lua where `tools` and skills locals are in scope.
 shell3.agent({
   name   = "review",
   model  = "main",

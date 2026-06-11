@@ -21,27 +21,30 @@ shell3 "audit deps" --out audit.jsonl   # headless, with a JSONL audit log
   OpenRouter, Moonshot, DeepSeek… Reasoning-trace streaming included where
   vendors support it. Endpoints that need a local shim can declare
   `run_proxy`, and shell3 starts the proxy on first use.
-- **One Lua config.** Models, agents, system prompts, tools, skills, and
-  guards all live in `shell3.lua` — versionable, diffable, and programmable.
+- **One Lua config.** Models, agents, system prompts, tools, and skills all
+  live in `shell3.lua` — versionable, diffable, and programmable.
   `shell3 boot` scaffolds a working setup in under a minute.
 - **Multiple agents, one conversation.** Declare e.g. a `code` agent and a
   read-only `plan` agent; switch with Tab or `/agent` mid-session while
   keeping history.
 - **Custom tools in Lua.** A tool is a name, a JSON schema, and a Lua
   function — no plugins, no separate processes.
-- **Guards.** `on_tool_call` middleware sees every tool call before it runs
-  and can allow, block, or cancel the turn. The scaffold ships with a guard
-  that blocks edits to your `.env`.
-- **Context hygiene built in.** Prune any tool result by id, compact the
-  conversation into a structured summary, and get context-usage reminders as
-  the window fills. History persists in SQLite and is searchable from inside
-  the session.
+- **Bash-first, unsafe by default.** The agent acts through `bash` and
+  `edit_file`; everything else is a file it reads or a command it runs. The
+  shell is unrestricted by default — `shell3.wrap_bash(fn)` is the single hook
+  to inspect, rewrite, or block commands. `shell3.stub_tools{}` redirects
+  hallucinated tool names (`read_file`, `grep`, …) back to bash.
+- **Context managed for you.** Set `compact_at` (a prompt-token threshold) on a
+  model and shell3 auto-compacts the conversation into a structured summary when
+  it crosses the line — no model-driven prune/compact tools. History persists in
+  SQLite (WAL) and is readable read-only from inside the session via the
+  `history` bash skill.
 - **Headless & auditable.** Pipe in, pipe out; `--out` streams a lossless
   JSONL log of every token, tool call, and result for downstream tooling.
 - **Embeddable, and a runtime.** Everything the TUI does is available as a Go
   library via [`pkg/shell3`](pkg/shell3) — one-shot `Run`, a persistent
   `Session`, or a `Runtime` hosting many named sessions for an always-on bot
-  (steering, a wake bus, host approval, inbound media, and subagents).
+  (steering, a wake bus, inbound media, and sink-delivered subagents).
 
 ## Install
 
@@ -65,7 +68,7 @@ shell3          # start a session
 ```
 
 `boot` creates `~/.shell3/shell3.lua` (the config, with a `code` and a `plan`
-agent), `~/.shell3/lib/` (tools, guards, and skills as small Lua modules), and
+agent), `~/.shell3/lib/` (tools and skills as small Lua modules), and
 `~/.shell3/.env` (your secrets — never commit this file).
 
 Inside a session: type to chat, Tab to switch agents, `/help` for the slash
@@ -88,12 +91,17 @@ shell3.agent({
   model  = "main",
   prompt = [[You are a careful pair-programmer…]],
   tools  = {
-    bash = true, edit = true, bash_bg = true,
-    history = true, prune = true, compact = true, media = true,
+    bash = true, edit = true, bash_bg = true, media = true,
     custom = { my_tool },          -- Lua-defined tools
   },
-  on_tool_call = { guards.no_env_edit },
 })
+
+-- The shell is unrestricted by default. wrap_bash is the single hook to
+-- inspect, rewrite, or block every bash/bash_bg command:
+shell3.wrap_bash(function(cmd)
+  if cmd:match("%.env") then return nil, "refusing to touch .env" end
+  return cmd                       -- allow (optionally rewritten)
+end)
 ```
 
 A custom tool is just a function:
@@ -169,18 +177,19 @@ gains an item while idle emits a `Wake`, and the host answers with
 `Session.RunQueued`. `Session.Interject` steers a running turn (or queues for the
 next) from any goroutine and never blocks; `Send`/`SendParts` are the strict
 single-turn path. Inbound images and audio ride along as `Part` attachments
-(from disk or in-memory bytes), and a guard's `ask` verdict suspends a tool call
-for a host `Approve` callback. Subagents are an explicit registry — declare specialists with
-`shell3.subagent{name, description, …}` and list them per-agent via
-`tools = { subagents = { … } }`; that agent gets a
-`spawn_agent(task, subagent, …)` tool whose `subagent` is an enum of the
-registered names, and their results return to the parent's inbox. See the
+(from disk or in-memory bytes). Subagents are a convention, not a subsystem:
+declare specialists with `shell3.subagent{name, description, …}` and list them
+per-agent via `tools = { subagents = { … } }`; the host injects a "## Delegation"
+fragment with the exact `bash_bg` command to spawn one. A subagent is a
+backgrounded `shell3` subprocess that runs the chosen agent on a self-contained
+task and self-reports completion to the session's per-session JSONL **sink**; the
+host watcher injects a short pointer (with a transcript path the parent `cat`s on
+demand) and wakes the next turn. See the
 [package docs](https://pkg.go.dev/github.com/weatherjean/shell3/pkg/shell3).
 
 The TUI rides the same machinery: type while the agent is working and press
-Enter to steer mid-turn (an `Interject`), answer an `ask` guard at an inline
-`[approve? y/N]` prompt, and see a finished subagent surface as a dim notice
-that auto-wakes the next turn.
+Enter to steer mid-turn (an `Interject`), and see a finished subagent surface as
+a dim notice that auto-wakes the next turn.
 
 ## Removing a project's shell3 data
 
@@ -192,10 +201,11 @@ rm -rf .shell3                    # project-local state
 
 ## Security
 
-shell3 runs model-chosen shell commands — read
-[SECURITY.md](SECURITY.md) for the threat model (guards, secret isolation,
-process containment, audit logs) before pointing it at anything you care
-about. Vulnerabilities: please use GitHub Security Advisories.
+shell3 runs model-chosen shell commands and is **unsafe by default** (full,
+unrestricted shell). Read [SECURITY.md](SECURITY.md) for the threat model
+(`wrap_bash`, secret isolation, process containment, audit logs) before pointing
+it at anything you care about. Vulnerabilities: please use GitHub Security
+Advisories.
 
 ## Contributing
 

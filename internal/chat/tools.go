@@ -87,7 +87,7 @@ func compactInto(args CompactSummary, st *store.Store, sess *Session, allMsgs []
 
 	// Build the continuation message injected at the top of the new history.
 	var b strings.Builder
-	fmt.Fprintf(&b, "<system-reminder>\nContinuation of session %d. History compacted.\nFull prior conversation available via history_get(session_id=%d).\n</system-reminder>\n\n", prevSessionID, prevSessionID)
+	fmt.Fprintf(&b, "<system-reminder>\nContinuation of session %d. History compacted.\nPrior sessions are in the SQLite history DB (use the `history` skill, or query it read-only: sqlite3 'file:<db>?mode=ro' \"... WHERE session_id=%d\").\n</system-reminder>\n\n", prevSessionID, prevSessionID)
 	fmt.Fprintf(&b, "<compact-summary>\n%s\n</compact-summary>", args.Summary)
 	if len(args.ImportantFiles) > 0 {
 		b.WriteString("\n\n<important-files>\n")

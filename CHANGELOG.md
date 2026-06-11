@@ -8,6 +8,86 @@ Until v1.0.0, minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+### Bash-first refactor
+
+A branch-wide collapse of the tool surface onto `bash` + `edit_file`. The agent
+now acts through the shell; everything else is a file it reads or a command it
+runs, coordinated through one small per-session notification channel (the
+**sink**). See `docs/dev/superpowers/specs/2026-06-11-bash-first-design.md`.
+
+#### Added
+
+- **Sink notification channel** (`internal/sink`): a per-session append-only
+  JSONL file carrying short *pointer* notifications (`bg_done`, `agent_done`),
+  never full payloads. A host watcher in `pkg/shell3.Session` tails it by byte
+  offset and, for each new line, injects a one-line pointer into the agent's
+  next turn (and wakes the session if idle) — the agent `cat`s the referenced
+  transcript/log itself, keeping context small. Cleaned up on `Close`.
+- **`bash_bg` reports to the sink:** the reaper writes a `bg_done` notification
+  (id / exit / log path / cmd) on child exit. New `notify_on_exit` arg (default
+  `true`); subagent spawns pass `false` so the only notification is the child's
+  own `agent_done`.
+- **Subagents = a backgrounded `shell3`.** A subagent is now a `shell3`
+  subprocess launched via `bash_bg` that self-reports an `agent_done` pointer
+  (id / status / transcript / ≤200-char preview) to the parent's sink. The host
+  injects a "## Delegation" prompt fragment at session start listing declared
+  subagents and the exact templated `bash_bg` spawn command. New `shell3 run`
+  flags: `--agent <name>`, `--append-sinkfile <path>`, `--id <id>`, and
+  `--no-subagents` (suppresses the delegation fragment so children can't recurse
+  — depth-1). `shell3.subagent{}` declarations are kept (they name the headless
+  agent configs); only the spawn *mechanism* changed.
+- **Host-enforced auto-compaction:** new `compact_at` token threshold on the
+  model config. Before a user turn, if the last prompt crossed the threshold,
+  shell3 interrupts → compacts the history into the structured summary
+  (summary / important_files / references / skills / next_steps) → continues
+  against the summary. No model-driven prune/compact tools.
+- **History as a bash skill:** a `history` skill documenting the SQLite schema +
+  canonical read-only queries (`sqlite3 'file:<db>?mode=ro' …`, FTS5 search). The
+  store now enables **WAL** for file-backed DBs so a cross-process `sqlite3`
+  reader doesn't contend with the writer. The store still always persists
+  history; only the in-tool access changed.
+- **`shell3.wrap_bash(fn)`:** the single Lua hook every `bash`/`bash_bg` command
+  passes through before execution. `fn(cmd)` returns the command to run
+  (optionally rewritten) or `nil`/`false` + reason to block. Pure
+  allow/block/rewrite — no `ask`. The scaffold ships a loud no-op.
+- **`shell3.stub_tools(map)`:** name-only stub tools that return a redirect
+  string (e.g. `read_file` → "Use bash: cat <path>") instead of erroring, so
+  models trained on other harnesses self-correct toward bash/edit_file.
+- **Bash ANSI color forwarding:** `bash`/`bash_bg` output is passed to the TUI
+  unstyled (no dim/strip) so SGR colors survive; model-facing bytes unchanged.
+
+#### Changed (BREAKING)
+
+- **Removed tools:** `spawn_agent`, `list_agents`, `history_get`,
+  `history_search`, `prune_tool_result`, `compact_history`. The agent's
+  built-in tools are now `bash`, `edit_file`, `bash_bg`, `read_media`,
+  `shell_interactive` (5, down from 11).
+- **Guard engine removed.** `on_tool_call` guard chains, the `Decision`/`ask`
+  verdicts, and the `GuardEntry`/`Guard` fields on agents/subagents are gone.
+  Replaced by `shell3.wrap_bash` — **the shell is now unsafe by default** (full,
+  unrestricted bash) unless you wire up a `wrap_bash` hook.
+- **Human approval flow removed end-to-end.** The TUI `[approve? y/N]` prompt,
+  the Telegram Approve/Deny callback, and the `Approve`/`SetApprover` host
+  callbacks (pkg/shell3 + chat `TurnConfig`) are deleted along with the guard
+  engine. There is no `ask` verdict and no approver.
+- **Config keys:** added model `compact_at`; removed the agent/subagent tool
+  gates `history` / `prune` / `compact`; removed the `on_tool_call` agent key
+  and the in-process subagent-tool injection. New top-level Lua API
+  `shell3.wrap_bash` / `shell3.stub_tools`. Configs using the removed keys now
+  fail to load (strict `checkKeys`).
+- **Cron dispatch** now execs a tracked `shell3 --agent X --out <t>` subprocess
+  (joined by `Runtime.Close`) and emits an operator `Notice` — it does not route
+  through the sink watcher. The `cron.Dispatcher` interface is preserved.
+- **`/stop`** no longer calls `CancelSubagents()`: model-spawned subagents are
+  bg jobs, already killed by `bgjobs.KillAll`.
+
+#### Removed
+
+- `internal/chat/handler_prune.go`, `handler_store.go`, the in-process
+  `subRegistry` / `Session.spawn` / `deliverSubagentResult` / `CancelSubagents` /
+  `subCtx` machinery, `pkg/shell3/subagents.go`, the scaffold `guards.lua` and
+  all `on_tool_call` wiring, the Telegram approver, and the patchapp approval UI.
+
 ### Added
 
 - `browser` skill: drive a real, headed, cross-platform Chrome via `puppeteer-core`
