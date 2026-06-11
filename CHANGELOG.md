@@ -10,6 +10,19 @@ Until v1.0.0, minor versions may contain breaking changes.
 
 ### Added
 
+- Telegram-first setup: `shell3 boot --telegram` scaffolds a dedicated
+  `~/.shell3/telegram/` host config (`shell3.lua` + its own `.env` + a
+  Telegram-tuned agent prompt with Communication/Autonomy sections, the
+  `explorer` subagent, and the self-evolve + scheduling-jobs skills). The bot
+  token (`TELEGRAM_BOT_TOKEN`) is written to `.env` only (0600, never echoed);
+  the chat id, dashboard, and workdir go in the lua. The Chrome DevTools MCP is
+  opt-in (default off) via `--chrome` or a `[y/N]` bootstrap prompt — only then
+  is the `chrome` MCP server declared and granted to the agent. `shell3 telegram`
+  now resolves its config telegram-dir-first
+  (`--config → ~/.shell3/telegram → ~/.shell3 → ./shell3.lua`), the opposite of
+  the generic resolver, so an existing `~/.shell3/shell3.lua` keeps working until
+  a telegram config is created. No migration code (fresh scaffold); the generic
+  `boot` path is unchanged.
 - Config hot reload (`/reload` bot command + `reload` agent tool): re-reads
   `shell3.lua` and applies the new configuration without restarting the process.
   Validate-first: a bad edit leaves the running config untouched and returns the

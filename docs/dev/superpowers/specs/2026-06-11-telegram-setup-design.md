@@ -1,7 +1,7 @@
 # Telegram-first setup: config path + `boot --telegram` + tuned prompt
 
 Date: 2026-06-11
-Status: approved (design), pending implementation plan
+Status: implemented (2026-06-11)
 
 ## Goal
 
