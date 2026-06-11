@@ -182,6 +182,43 @@ func appendJob(workdir string, job Job) error {
 	return writeAtomic(registryPath(workdir), reg)
 }
 
+// KillAll terminates every tracked background job for workdir and clears the
+// registry. Each job runs in its own process group (Setpgid at Start), so we
+// signal the whole group (-pid) with SIGKILL. Already-dead PIDs are skipped.
+// Returns the number of live jobs signalled.
+func KillAll(workdir string) (int, error) {
+	jobs, err := LoadRegistry(workdir)
+	if err != nil {
+		return 0, err
+	}
+	killed := 0
+	for _, j := range jobs.Jobs {
+		if j.PID <= 0 {
+			continue
+		}
+		if syscall.Kill(j.PID, 0) != nil {
+			continue // already gone
+		}
+		if err := syscall.Kill(-j.PID, syscall.SIGKILL); err == nil {
+			killed++
+		}
+	}
+	_ = clearRegistry(workdir)
+	return killed, nil
+}
+
+// clearRegistry removes the bg.json registry file for workdir (best-effort).
+// A missing file is not an error: LoadRegistry treats absence as empty.
+func clearRegistry(workdir string) error {
+	fileLock.Lock()
+	defer fileLock.Unlock()
+	err := os.Remove(registryPath(workdir))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
 // writeAtomic marshals reg to path via a temp file + rename.
 func writeAtomic(path string, reg Registry) error {
 	data, err := json.MarshalIndent(reg, "", "  ")

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/weatherjean/shell3/internal/bgjobs"
 	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
@@ -64,9 +65,18 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 		b.mu.Lock()
 		c := b.cancelTurn
 		b.mu.Unlock()
+		killed, _ := bgjobs.KillAll(b.workDir)
 		if c != nil {
 			c() // cancels turnCtx → synchronous bash/node process groups get SIGTERM→SIGKILL
-			b.sendReply(ctx, "⏹ stopped")
+			msg := "⏹ stopped"
+			if killed > 0 {
+				msg += fmt.Sprintf(" — killed %d background job(s)", killed)
+			}
+			b.sendReply(ctx, msg)
+			return
+		}
+		if killed > 0 {
+			b.sendReply(ctx, fmt.Sprintf("⏹ no turn running — killed %d background job(s)", killed))
 			return
 		}
 		b.sendReply(ctx, "nothing running")

@@ -313,6 +313,31 @@ func TestStart_killsProcessWhenPersistFails(t *testing.T) {
 	}
 }
 
+func TestKillAll(t *testing.T) {
+	dir := t.TempDir()
+	job, err := Start("sleep 60", dir) // command first, workdir second
+	if err != nil {
+		t.Fatal(err)
+	}
+	if syscall.Kill(job.PID, 0) != nil {
+		t.Fatalf("job %d not alive after Start", job.PID)
+	}
+	n, err := KillAll(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n < 1 {
+		t.Errorf("KillAll reported %d killed, want >=1", n)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if syscall.Kill(job.PID, 0) == nil {
+		t.Errorf("job %d still alive after KillAll", job.PID)
+	}
+	if jobs, _ := LoadRegistry(dir); len(jobs.Jobs) != 0 {
+		t.Errorf("registry not pruned: %v", jobs.Jobs)
+	}
+}
+
 func TestRegistry_jsonShape(t *testing.T) {
 	wd := t.TempDir()
 	job, err := Start("true", wd)
