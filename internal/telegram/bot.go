@@ -28,7 +28,8 @@ type Bot struct {
 	// not accumulated). Wired by the host to a dashboard usage store.
 	onUsage func(prompt, completion, total int)
 
-	runJob func(name string) error // fires a cron job by name; nil if no scheduler
+	runJob func(name string) error             // fires a cron job by name; nil if no scheduler
+	reload func() (shell3.ReloadResult, error) // performs a full config reload; nil if unset
 }
 
 // SetUsageRecorder registers a callback invoked with each turn's token totals.
@@ -36,6 +37,25 @@ func (b *Bot) SetUsageRecorder(fn func(prompt, completion, total int)) { b.onUsa
 
 // SetJobRunner wires /run <job> to the scheduler's manual fire.
 func (b *Bot) SetJobRunner(fn func(name string) error) { b.runJob = fn }
+
+// SetReloader wires /reload (and the reload tool) to the host's reload coordinator.
+func (b *Bot) SetReloader(fn func() (shell3.ReloadResult, error)) { b.reload = fn }
+
+// decorateSession (re)applies the bot's host-level session customizations:
+// the approval hook and host tools. Must be called after NewBot AND after every
+// Runtime.Reload (which rebuilds s.cfg and drops these). Safe only when idle.
+func (b *Bot) decorateSession() {
+	_ = b.sess.SetApprover(b.approve)
+	b.registerSendTool()
+	b.registerReloadTool() // filled in by Task 3; no-op stub for now
+}
+
+// RedecorateSession re-applies host tools + approver after a reload rebuilt s.cfg.
+// Exported for the host reload coordinator (different package).
+func (b *Bot) RedecorateSession() { b.decorateSession() }
+
+// registerReloadTool is filled in by the reload-tool task; no-op stub for now.
+func (b *Bot) registerReloadTool() {}
 
 // NewBot wires a Bot. sess must be the runtime's persistent "telegram" session.
 // dashURL is the URL to the dashboard (empty to disable).
@@ -48,8 +68,7 @@ func NewBot(client tgClient, rt *shell3.Runtime, sess *shell3.Session, chatID in
 		approvals: newApprovalRegistry(),
 		dashURL:   dashURL,
 	}
-	_ = sess.SetApprover(b.approve)
-	b.registerSendTool() // gives the agent send_media_telegram
+	b.decorateSession()
 	return b
 }
 

@@ -85,28 +85,54 @@ func newTelegramCommand() *cobra.Command {
 				fmt.Printf("warning: could not set commands: %v\n", err)
 			}
 
+			var srv *web.Server
 			if tg.Dashboard.Enabled && tg.Dashboard.Addr != "" {
 				usage := web.NewUsageStore()
 				b.SetUsageRecorder(usage.Set)
-				srv := web.NewServer(rt, sess, tg.Token, chatID)
+				srv = web.NewServer(rt, sess, tg.Token, chatID)
 				srv.SetUsage(usage)
 				if sched != nil {
-					srv.SetCronSource(func() []web.CronJob {
-						var out []web.CronJob
-						for _, j := range sched.Jobs() {
-							out = append(out, web.CronJob{
-								Name: j.Name, Schedule: j.Schedule, Agent: j.Agent,
-								Notify: j.Notify, LastRun: j.LastRun, LastSubID: j.LastSubID,
-							})
-						}
-						return out
-					})
+					srv.SetCronSource(cronSource(sched))
 				}
 				go func() {
 					_ = startDashboard(ctx, tg.Dashboard.Addr, srv.Handler())
 				}()
 				fmt.Printf("dashboard on %s (expose via: tailscale serve https / proxy %s)\n", tg.Dashboard.Addr, tg.Dashboard.Addr)
 			}
+
+			// /reload + reload tool: rebuild config in place, re-decorate the
+			// session, and swap the cron scheduler. Runs only when the session
+			// is idle (commands handled between turns; the reload tool defers to
+			// end-of-turn — see registerReloadTool).
+			b.SetReloader(func() (shell3.ReloadResult, error) {
+				res, err := rt.Reload()
+				if err != nil {
+					return res, err
+				}
+				b.RedecorateSession() // re-apply approver + host tools dropped by reload
+				if sched != nil {
+					sched.Stop()
+				}
+				sched = nil
+				if jobs := rt.Cron(); len(jobs) > 0 {
+					ns, nerr := cron.New(sess, jobs)
+					if nerr != nil {
+						return res, nerr
+					}
+					ns.Start()
+					sched = ns
+					b.SetJobRunner(sched.Run)
+					if srv != nil {
+						srv.SetCronSource(cronSource(sched))
+					}
+				} else {
+					b.SetJobRunner(nil)
+					if srv != nil {
+						srv.SetCronSource(nil)
+					}
+				}
+				return res, nil
+			})
 
 			// If the dashboard has a public URL, set the bot's in-chat menu
 			// button to open it as a Mini App (the bottom-left "Open App"
@@ -124,6 +150,20 @@ func newTelegramCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "path to shell3.lua")
 	return cmd
+}
+
+// cronSource adapts a scheduler to the dashboard's cron DTO provider.
+func cronSource(sched *cron.Scheduler) func() []web.CronJob {
+	return func() []web.CronJob {
+		var out []web.CronJob
+		for _, j := range sched.Jobs() {
+			out = append(out, web.CronJob{
+				Name: j.Name, Schedule: j.Schedule, Agent: j.Agent,
+				Notify: j.Notify, LastRun: j.LastRun, LastSubID: j.LastSubID,
+			})
+		}
+		return out
+	}
 }
 
 // startDashboard runs an HTTP server on addr with the given handler, and

@@ -6,6 +6,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
 func TestCommand_SetNoArgsLists(t *testing.T) {
@@ -72,5 +74,33 @@ func TestCommand_RunNoRunner(t *testing.T) {
 	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/run x"})
 	if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "no scheduled jobs") {
 		t.Fatalf("expected a no-jobs reply, got %v", fc.sentTexts())
+	}
+}
+
+func TestCommand_Reload(t *testing.T) {
+	fc := newFakeClient()
+	rt, sess := newFakeRuntime(t, "ok")
+	b := NewBot(fc, rt, sess, 42, "")
+	called := false
+	b.SetReloader(func() (shell3.ReloadResult, error) {
+		called = true
+		return shell3.ReloadResult{Agents: 3, Jobs: 1}, nil
+	})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/reload"})
+	if !called {
+		t.Fatal("expected /reload to invoke the reloader")
+	}
+	if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "reloaded") {
+		t.Fatalf("expected a success reply, got %v", fc.sentTexts())
+	}
+}
+
+func TestCommand_ReloadNoReloader(t *testing.T) {
+	fc := newFakeClient()
+	rt, sess := newFakeRuntime(t, "ok")
+	b := NewBot(fc, rt, sess, 42, "")
+	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/reload"})
+	if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "reload not available") {
+		t.Fatalf("expected unavailable reply, got %v", fc.sentTexts())
 	}
 }

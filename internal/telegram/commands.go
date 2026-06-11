@@ -4,7 +4,10 @@ package telegram
 
 import (
 	"context"
+	"fmt"
 	"strings"
+
+	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
 // BotCommands is the canonical command list, registered with Telegram for the
@@ -17,6 +20,7 @@ func BotCommands() []Command {
 		{"stop", "Stop the current turn"},
 		{"dash", "Open the conversation dashboard"},
 		{"run", "Run a scheduled job now: /run <name>"},
+		{"reload", "Reload shell3.lua config without restarting"},
 	}
 }
 
@@ -88,9 +92,29 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 			return
 		}
 		b.sendReply(ctx, "▶️ fired job "+name)
+	case "/reload":
+		if b.reload == nil {
+			b.sendReply(ctx, "reload not available")
+			return
+		}
+		res, err := b.reload()
+		if err != nil {
+			b.sendReply(ctx, "❌ reload failed: "+err.Error())
+			return
+		}
+		b.sendReply(ctx, formatReload(res))
 	default:
 		b.sendReply(ctx, "unknown command: "+cmd)
 	}
+}
+
+// formatReload renders a ReloadResult as a chat reply.
+func formatReload(r shell3.ReloadResult) string {
+	msg := fmt.Sprintf("✅ reloaded — %d agents, %d models, %d jobs, %d MCP", r.Agents, r.Models, r.Jobs, r.MCP)
+	if len(r.Notes) > 0 {
+		msg += "\n• " + strings.Join(r.Notes, "\n• ")
+	}
+	return msg
 }
 
 // settableList renders the agent's tunable parameters with their current value
