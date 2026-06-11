@@ -4,7 +4,9 @@ package luacfg
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	lua "github.com/yuin/gopher-lua"
@@ -37,18 +39,12 @@ type CustomTool struct {
 	handler           *lua.LFunction
 }
 
-// Skill is a named, model-facing capability. Body is the prompt text the model
-// reads when the skill activates. BodyCmd, if set, is a shell command whose
-// stdout supplies Body; it is resolved once at load time (see Load) so prompt
-// caching is preserved. Exactly one of Body/BodyCmd is set after a successful
-// Load.
-type Skill struct {
-	Name, Description, Body string
-	// BodyCmd is the unresolved source command for Body (empty once resolved,
-	// or when Body was supplied inline). Kept on the struct so callers can tell
-	// command-backed skills apart if needed.
-	BodyCmd string
-}
+// Skill is a granted capability surfaced as a one-line entry in the agent's
+// ## Skills index (name + description). Body lives in the file at Path; the
+// agent reads it with `cat` when the skill applies. Path is stored relative as
+// declared, then rewritten to an absolute path during Load (see the skill
+// resolution loop) so the index can point the agent at it from any cwd.
+type Skill struct{ Name, Description, Path string }
 
 // CronJob is one parsed shell3.cron job entry.
 type CronJob struct {
@@ -185,15 +181,31 @@ func Load(path, workdir string) (*LoadedConfig, error) {
 	// Load (fail-closed) — and since reload goes through Load, a bad prompt
 	// file can never silently swap in an empty prompt at runtime.
 	cfgDir := filepath.Dir(path)
+	// Resolve + validate skill file paths ONCE (fail closed). Each path is
+	// resolved relative to the config dir (cfgDir) and must be a readable,
+	// non-empty regular file. A broken skill path is caught here at load/reload,
+	// never at turn time. The resolved absolute path is stored back so the
+	// ## Skills index can point the agent at it (BuildPersonaFor).
 	for i := range c.Skills {
-		if c.Skills[i].BodyCmd == "" {
-			continue
+		skillPath := c.Skills[i].Path
+		if !filepath.IsAbs(skillPath) {
+			skillPath = filepath.Join(cfgDir, skillPath)
 		}
-		out, err := runBodyCmd(cfgDir, c.Skills[i].BodyCmd)
+		info, err := os.Stat(skillPath)
 		if err != nil {
-			return nil, fmt.Errorf("config: skill %q body_cmd %q: %w", c.Skills[i].Name, c.Skills[i].BodyCmd, err)
+			return nil, fmt.Errorf("config: skill %q path %q: %w", c.Skills[i].Name, c.Skills[i].Path, err)
 		}
-		c.Skills[i].Body = out
+		if info.IsDir() || info.Size() == 0 {
+			return nil, fmt.Errorf("config: skill %q path %q: not a non-empty file", c.Skills[i].Name, c.Skills[i].Path)
+		}
+		data, err := os.ReadFile(skillPath)
+		if err != nil {
+			return nil, fmt.Errorf("config: skill %q path %q: %w", c.Skills[i].Name, c.Skills[i].Path, err)
+		}
+		if len(strings.TrimSpace(string(data))) == 0 {
+			return nil, fmt.Errorf("config: skill %q path %q: file is empty", c.Skills[i].Name, c.Skills[i].Path)
+		}
+		c.Skills[i].Path = skillPath
 	}
 	for i := range c.agents {
 		if c.agents[i].PromptCmd == "" {

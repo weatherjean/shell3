@@ -13,11 +13,11 @@ func (c *LoadedConfig) BuildPersonaFor(a Agent) string {
 	var b strings.Builder
 	b.WriteString(a.Prompt)
 	if a.SkillsActive() {
-		b.WriteString("\n## Skills\nRead a skill body with the `skill` tool when it applies.\n")
+		b.WriteString("\n## Skills\nRead a skill's file with `cat` when it applies.\n")
 		for _, name := range a.Skills {
 			for _, s := range c.Skills {
 				if s.Name == name {
-					fmt.Fprintf(&b, "- %s: %s\n", s.Name, s.Description)
+					fmt.Fprintf(&b, "- %s (%s): %s\n", s.Name, s.Path, s.Description)
 				}
 			}
 		}

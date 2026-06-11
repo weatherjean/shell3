@@ -10,65 +10,13 @@ local history = require("lib.skills.history")
 local self_evolve = shell3.skill({
   name = "self-evolve",
   description = "How to safely change your own shell3.lua config and apply it live with the reload + status tools. A failed reload keeps the old config, so self-editing is always safe.",
-  body = [[
-You can modify your own configuration and apply it live, without anyone
-restarting the bot. A failed reload keeps the current config running, so you can
-never brick yourself with a bad edit.
-
-## Orient first
-Call the `status` tool. It prints the absolute path of the `shell3.lua` you edit
-(plus your active agent, the model, the working directory, and any cron jobs).
-Edit that exact file. If it `require`s `lib/` modules, follow the require.
-
-## The loop
-1. Edit the file. Copy the shape of an existing block rather than writing from scratch.
-2. Respect the cross-reference rules (validated on every reload; a violation rejects it):
-   - every agent/subagent `model = "..."` must name a declared `shell3.model`;
-   - every `shell3.cron` job's `agent = "..."` must name a declared SUBAGENT;
-   - a skill or tool granted to an agent must be a declared handle.
-3. Call the `reload` tool. It validates the whole file, then applies it after this
-   turn ends. The result — success counts or the exact error — is delivered to chat.
-4. If it failed: a Lua `[string "shell3.lua"]:42: ...` error is a typo at that line;
-   an `unknown subagent "x"` / `unknown model "y"` error is a bad cross-reference.
-   The old config keeps running until a reload succeeds, so just edit and retry.
-
-## What survives a reload
-- Conversation history is always kept. Active agent and /set params are restored
-  when they still exist. Model proxies restart on reload (a brief pause).
-]],
+  path = "lib/skills/self-evolve.md",
 })
 
 local scheduling_jobs = shell3.skill({
   name = "scheduling-jobs",
   description = "How to add, arm, and test recurring scheduled jobs (shell3.cron). A cron job dispatches a SUBAGENT on a schedule; arm it with reload and fire it on demand with /run.",
-  body = [[
-You can give yourself recurring background work with `shell3.cron`. A job fires on
-a schedule and dispatches a SUBAGENT with a prompt; the result is posted to chat.
-
-## The block
-shell3.cron({
-  jobs = {
-    { name="nightly", schedule="0 9 * * *", agent="explorer",
-      prompt="Summarize anything noteworthy.", notify=true },
-  },
-})
-
-## Fields
-- name: identifier for /run <name> and the dashboard.
-- schedule: 5-field cron "min hour dom mon dow", or @hourly/@daily/@weekly,
-  or @every 30s / @every 5m / @every 1h.
-- agent: MUST be a declared shell3.subagent (e.g. explorer), NOT a top-level agent.
-- prompt: the instruction handed to the subagent.
-- workdir: optional working directory.
-- notify: true posts the result to chat; false runs quietly (errors still post).
-
-## Arming and testing
-1. Edit shell3.lua to add/adjust the job.
-2. Call the `reload` tool to validate and arm it (a bad schedule or unknown
-   subagent is rejected; the old config keeps running).
-3. Fire on demand with /run <name>; or wait for the schedule.
-Removing a job and reloading disarms it.
-]],
+  path = "lib/skills/scheduling-jobs.md",
 })
 
 -- ---------------------------------------------------------------------------

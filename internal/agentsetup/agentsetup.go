@@ -158,8 +158,7 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 	client, rp := buildClient(md)
 
 	customDefs := p.lc.CustomToolsFor(a.CustomTools)
-	hasSkills := a.SkillsActive()
-	toolDefs := luacfg.ToolDefs(a.Gates, customDefs, hasSkills)
+	toolDefs := luacfg.ToolDefs(a.Gates, customDefs)
 	toolNames := make([]string, 0, len(toolDefs))
 	for _, t := range toolDefs {
 		toolNames = append(toolNames, t.Name)
@@ -177,9 +176,6 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 	customNames := make(map[string]bool, len(a.CustomTools))
 	for _, n := range a.CustomTools {
 		customNames[n] = true
-	}
-	if hasSkills {
-		customNames["skill"] = true
 	}
 
 	// Stub tools (shell3.stub_tools) are config-global: append one minimal,

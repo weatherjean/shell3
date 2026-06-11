@@ -32,12 +32,12 @@ shell3.agent({ name="bare", model="opus", prompt="p", tools={} })
 }
 
 func TestToolDefsGates(t *testing.T) {
-	bare := ToolDefs(ToolGates{}, nil, false)
+	bare := ToolDefs(ToolGates{}, nil)
 	if len(bare) != 0 {
 		t.Fatalf("bare gates should yield 0 tool defs, got %d: %v", len(bare), bare)
 	}
 
-	with := ToolDefs(ToolGates{Bash: true, Edit: true}, nil, false)
+	with := ToolDefs(ToolGates{Bash: true, Edit: true}, nil)
 	names := make(map[string]bool, len(with))
 	for _, d := range with {
 		names[d.Name] = true
@@ -46,7 +46,7 @@ func TestToolDefsGates(t *testing.T) {
 		t.Fatalf("Bash+Edit gates should expose both tools, got %v", names)
 	}
 
-	onlyBash := ToolDefs(ToolGates{Bash: true}, nil, false)
+	onlyBash := ToolDefs(ToolGates{Bash: true}, nil)
 	if len(onlyBash) != 1 || onlyBash[0].Name != "bash" {
 		t.Fatalf("Bash-only gate should yield exactly bash, got %v", onlyBash)
 	}

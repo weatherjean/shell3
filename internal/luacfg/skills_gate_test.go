@@ -6,11 +6,12 @@ import (
 )
 
 // TestSkillsDisabledViaTools verifies that tools = { skill = false } suppresses
-// both the "## Skills" prompt injection and the "skill" tool definition.
+// the "## Skills" prompt injection.
 func TestSkillsDisabledViaTools(t *testing.T) {
 	dir := t.TempDir()
+	writeFile(t, dir, "web.md", "B\n")
 	writeFile(t, dir, "shell3.lua", `
-local s = shell3.skill({ name="web-search", description="searches the web", body="B" })
+local s = shell3.skill({ name="web-search", description="searches the web", path="web.md" })
 shell3.model("m", { base_url="u", api_key="k", model="x" })
 shell3.agent({ name="a", model="m", prompt="p", tools={ skill=false }, skills={ s } })
 `)
@@ -33,22 +34,15 @@ shell3.agent({ name="a", model="m", prompt="p", tools={ skill=false }, skills={ 
 	if strings.Contains(persona, "web-search") {
 		t.Error("BuildPersona injected skill name 'web-search' but skills are disabled")
 	}
-
-	// ToolDefs must NOT include the "skill" tool when SkillsActive() is false.
-	defs := ToolDefs(c.FirstAgent().Gates, nil, c.FirstAgent().SkillsActive())
-	for _, d := range defs {
-		if d.Name == "skill" {
-			t.Error("ToolDefs included 'skill' tool but skills are disabled")
-		}
-	}
 }
 
 // TestSkillsEnabledByDefault verifies that omitting skill=false in tools
-// keeps the normal behavior: ## Skills injected, skill tool present.
+// keeps the normal behavior: ## Skills injected.
 func TestSkillsEnabledByDefault(t *testing.T) {
 	dir := t.TempDir()
+	writeFile(t, dir, "web.md", "B\n")
 	writeFile(t, dir, "shell3.lua", `
-local s = shell3.skill({ name="web-search", description="searches the web", body="B" })
+local s = shell3.skill({ name="web-search", description="searches the web", path="web.md" })
 shell3.model("m", { base_url="u", api_key="k", model="x" })
 shell3.agent({ name="a", model="m", prompt="p", tools={}, skills={ s } })
 `)
@@ -71,27 +65,15 @@ shell3.agent({ name="a", model="m", prompt="p", tools={}, skills={ s } })
 	if !strings.Contains(persona, "web-search") {
 		t.Error("BuildPersona did not inject skill name 'web-search'")
 	}
-
-	// ToolDefs must include the "skill" tool.
-	defs := ToolDefs(c.FirstAgent().Gates, nil, c.FirstAgent().SkillsActive())
-	found := false
-	for _, d := range defs {
-		if d.Name == "skill" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("ToolDefs did not include 'skill' tool but skills are enabled")
-	}
 }
 
 // TestSkillsEnabledExplicitTrue verifies that tools = { skill = true } is
 // treated the same as omitting the key: skills remain enabled.
 func TestSkillsEnabledExplicitTrue(t *testing.T) {
 	dir := t.TempDir()
+	writeFile(t, dir, "web.md", "B\n")
 	writeFile(t, dir, "shell3.lua", `
-local s = shell3.skill({ name="web-search", description="searches the web", body="B" })
+local s = shell3.skill({ name="web-search", description="searches the web", path="web.md" })
 shell3.model("m", { base_url="u", api_key="k", model="x" })
 shell3.agent({ name="a", model="m", prompt="p", tools={ skill=true }, skills={ s } })
 `)
@@ -110,8 +92,9 @@ shell3.agent({ name="a", model="m", prompt="p", tools={ skill=true }, skills={ s
 // an unknown-key error (the key must be in toolGateKeys).
 func TestSkillKeyAllowed(t *testing.T) {
 	dir := t.TempDir()
+	writeFile(t, dir, "s.md", "b\n")
 	writeFile(t, dir, "shell3.lua", `
-local s = shell3.skill({ name="s", description="d", body="b" })
+local s = shell3.skill({ name="s", description="d", path="s.md" })
 shell3.model("m", { base_url="u", api_key="k", model="x" })
 shell3.agent({ name="a", model="m", prompt="p", tools={ skill=false }, skills={ s } })
 `)

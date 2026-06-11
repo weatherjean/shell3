@@ -4,27 +4,11 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
-// skillTool is the built-in tool injected when the agent has ≥1 skill.
-var skillTool = llm.ToolDefinition{
-	Name:        "skill",
-	Description: "Return the full body of a named skill from the skill index in the system prompt. Call this when one of the listed skills applies to the task.",
-	Parameters: map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"name": map[string]any{"type": "string", "description": "The skill name exactly as shown in the skill index."},
-		},
-		"required": []string{"name"},
-	},
-}
-
 // ToolDefs returns the llm.ToolDefinition schema list for an agent: each
-// built-in tool whose gate is enabled (bash, edit, …), the skill tool when
-// hasSkills is true, plus one definition per custom tool.
-func ToolDefs(g ToolGates, custom []CustomTool, hasSkills bool) []llm.ToolDefinition {
+// built-in tool whose gate is enabled (bash, edit, …), plus one definition per
+// custom tool.
+func ToolDefs(g ToolGates, custom []CustomTool) []llm.ToolDefinition {
 	defs := []llm.ToolDefinition{}
-	if hasSkills {
-		defs = append(defs, skillTool)
-	}
 	if g.Bash {
 		defs = append(defs, bashTool)
 	}

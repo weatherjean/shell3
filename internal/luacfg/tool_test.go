@@ -27,7 +27,7 @@ shell3.agent({ name="a", model="m", prompt="p", tools={ custom={ echo } } })
 }
 
 func TestToolDefs_MediaGate(t *testing.T) {
-	defs := ToolDefs(ToolGates{Media: true}, nil, false)
+	defs := ToolDefs(ToolGates{Media: true}, nil)
 	var found bool
 	for _, d := range defs {
 		if d.Name == "read_media" {
@@ -45,7 +45,7 @@ func TestToolDefs_MediaGate(t *testing.T) {
 		t.Fatalf("read_media not present when Media gate on; got %d defs", len(defs))
 	}
 
-	off := ToolDefs(ToolGates{}, nil, false)
+	off := ToolDefs(ToolGates{}, nil)
 	for _, d := range off {
 		if d.Name == "read_media" {
 			t.Fatalf("read_media present with Media gate off")

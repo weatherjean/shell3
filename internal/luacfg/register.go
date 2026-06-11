@@ -142,29 +142,16 @@ func (c *LoadedConfig) luaModel(L *lua.LState) int {
 	return 0
 }
 
-var skillKeys = map[string]bool{"name": true, "description": true, "body": true, "body_cmd": true}
+var skillKeys = map[string]bool{"name": true, "description": true, "path": true}
 
 func (c *LoadedConfig) luaSkill(L *lua.LState) int {
 	opts := L.CheckTable(1)
 	if err := checkKeys(opts, "skill", skillKeys); err != nil {
 		L.RaiseError("%s", err.Error())
 	}
-	s := Skill{
-		Name:        optStr(opts, "name"),
-		Description: optStr(opts, "description"),
-		Body:        optStr(opts, "body"),
-		BodyCmd:     optStr(opts, "body_cmd"),
-	}
-	if s.Name == "" || s.Description == "" {
-		L.RaiseError("skill: name, description, and one of body/body_cmd required")
-	}
-	// Exactly one body source. body_cmd is resolved at load time (see Load), so
-	// when it is set Body is legitimately empty here.
-	if s.Body != "" && s.BodyCmd != "" {
-		L.RaiseError("skill %q: set exactly one of body or body_cmd", s.Name)
-	}
-	if s.Body == "" && s.BodyCmd == "" {
-		L.RaiseError("skill: name, description, and one of body/body_cmd required")
+	s := Skill{Name: optStr(opts, "name"), Description: optStr(opts, "description"), Path: optStr(opts, "path")}
+	if s.Name == "" || s.Description == "" || s.Path == "" {
+		L.RaiseError("skill: name, description, and path are all required")
 	}
 	c.Skills = append(c.Skills, s)
 	// Return a handle table carrying a sentinel + the name.

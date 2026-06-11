@@ -30,24 +30,6 @@ func writeConfigWithFiles(t *testing.T, body string, files map[string]string) st
 	return p
 }
 
-func TestSkillBodyCmdResolves(t *testing.T) {
-	p := writeConfigWithFiles(t, twoModelsHdr+`
-local hist = shell3.skill({ name="history", description="d", body_cmd="cat body.md" })
-shell3.agent({ name="build", model="opus", prompt="b", skills={hist} })
-`, map[string]string{"body.md": "  the history body\n"})
-	c, err := Load(p, filepath.Dir(p))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
-	if len(c.Skills) != 1 {
-		t.Fatalf("want 1 skill, got %d", len(c.Skills))
-	}
-	if c.Skills[0].Body != "the history body" {
-		t.Fatalf("resolved body = %q, want trimmed file contents", c.Skills[0].Body)
-	}
-}
-
 func TestAgentPromptCmdResolves(t *testing.T) {
 	p := writeConfigWithFiles(t, twoModelsHdr+`
 shell3.agent({ name="build", model="opus", prompt_cmd="cat agent.md" })
@@ -81,16 +63,6 @@ shell3.agent({ name="build", model="opus", prompt="b", tools={ subagents={helper
 	}
 }
 
-func TestSkillBothBodyAndBodyCmdErrors(t *testing.T) {
-	p := writeConfigWithFiles(t, twoModelsHdr+`
-shell3.skill({ name="x", description="d", body="inline", body_cmd="cat body.md" })
-shell3.agent({ name="build", model="opus", prompt="b" })
-`, map[string]string{"body.md": "f"})
-	if _, err := Load(p, filepath.Dir(p)); err == nil {
-		t.Fatal("skill with both body and body_cmd should error")
-	}
-}
-
 func TestAgentBothPromptAndPromptCmdErrors(t *testing.T) {
 	p := writeConfigWithFiles(t, twoModelsHdr+`
 shell3.agent({ name="build", model="opus", prompt="inline", prompt_cmd="cat agent.md" })
@@ -110,64 +82,50 @@ shell3.agent({ name="build", model="opus", prompt="b" })
 	}
 }
 
-func TestSkillNeitherBodyNorBodyCmdErrors(t *testing.T) {
-	p := writeConfig(t, twoModelsHdr+`
-shell3.skill({ name="x", description="d" })
-shell3.agent({ name="build", model="opus", prompt="b" })
-`)
-	if _, err := Load(p, filepath.Dir(p)); err == nil {
-		t.Fatal("skill with neither body nor body_cmd should error")
-	}
-}
-
 func TestBodyCmdFailingCommandErrors(t *testing.T) {
 	p := writeConfig(t, twoModelsHdr+`
-shell3.skill({ name="x", description="d", body_cmd="exit 3" })
-shell3.agent({ name="build", model="opus", prompt="b" })
+shell3.agent({ name="build", model="opus", prompt_cmd="exit 3" })
 `)
 	if _, err := Load(p, filepath.Dir(p)); err == nil {
-		t.Fatal("failing body_cmd should error")
+		t.Fatal("failing prompt_cmd should error")
 	}
 }
 
 func TestBodyCmdEmptyOutputErrors(t *testing.T) {
 	p := writeConfig(t, twoModelsHdr+`
-shell3.skill({ name="x", description="d", body_cmd="true" })
-shell3.agent({ name="build", model="opus", prompt="b" })
+shell3.agent({ name="build", model="opus", prompt_cmd="true" })
 `)
 	if _, err := Load(p, filepath.Dir(p)); err == nil {
-		t.Fatal("empty body_cmd output should error")
+		t.Fatal("empty prompt_cmd output should error")
 	}
 }
 
 func TestBodyCmdCwdIsConfigDir(t *testing.T) {
 	// A relative path resolves only because cwd = the config directory.
 	p := writeConfigWithFiles(t, twoModelsHdr+`
-local s = shell3.skill({ name="x", description="d", body_cmd="cat skills/x.md" })
-shell3.agent({ name="build", model="opus", prompt="b", skills={s} })
-`, map[string]string{"skills/x.md": "nested body\n"})
+shell3.agent({ name="build", model="opus", prompt_cmd="cat skills/x.md" })
+`, map[string]string{"skills/x.md": "nested prompt\n"})
 	c, err := Load(p, filepath.Dir(p))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	if c.Skills[0].Body != "nested body" {
-		t.Fatalf("resolved body = %q, want %q", c.Skills[0].Body, "nested body")
+	if got := c.Agents()[0].Prompt; got != "nested prompt" {
+		t.Fatalf("resolved prompt = %q, want %q", got, "nested prompt")
 	}
 }
 
 func TestBodyCmdReResolvesOnReload(t *testing.T) {
 	p := writeConfigWithFiles(t, twoModelsHdr+`
-local s = shell3.skill({ name="x", description="d", body_cmd="cat body.md" })
-shell3.agent({ name="build", model="opus", prompt="b", skills={s} })
+shell3.agent({ name="build", model="opus", prompt_cmd="cat body.md" })
 `, map[string]string{"body.md": "first\n"})
 
 	c1, err := Load(p, filepath.Dir(p))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c1.Skills[0].Body != "first" {
-		t.Fatalf("first load body = %q", c1.Skills[0].Body)
+	if got := c1.Agents()[0].Prompt; got != "first" {
+		t.Fatalf("first load prompt = %q", got)
 	}
 	c1.Close()
 
@@ -180,7 +138,7 @@ shell3.agent({ name="build", model="opus", prompt="b", skills={s} })
 		t.Fatal(err)
 	}
 	defer c2.Close()
-	if c2.Skills[0].Body != "second" {
-		t.Fatalf("reloaded body = %q, want %q", c2.Skills[0].Body, "second")
+	if got := c2.Agents()[0].Prompt; got != "second" {
+		t.Fatalf("reloaded prompt = %q, want %q", got, "second")
 	}
 }

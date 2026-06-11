@@ -127,7 +127,7 @@ shell3.agent({
 
 		a := lc.FirstAgent()
 		customDefs := lc.CustomToolsFor(a.CustomTools)
-		toolDefs := luacfg.ToolDefs(a.Gates, customDefs, len(a.Skills) > 0)
+		toolDefs := luacfg.ToolDefs(a.Gates, customDefs)
 
 		var events []chat.Event
 		sess := chat.NewSession(chat.SessionOpts{Sink: func(ev chat.Event) {
@@ -180,7 +180,7 @@ shell3.agent({
 
 		a := lc.FirstAgent()
 		customDefs := lc.CustomToolsFor(a.CustomTools)
-		toolDefs := luacfg.ToolDefs(a.Gates, customDefs, len(a.Skills) > 0)
+		toolDefs := luacfg.ToolDefs(a.Gates, customDefs)
 
 		var events []chat.Event
 		sess := chat.NewSession(chat.SessionOpts{Sink: func(ev chat.Event) {
