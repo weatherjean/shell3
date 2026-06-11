@@ -1,7 +1,7 @@
 # Config hot reload (`/reload`)
 
 Date: 2026-06-11
-Status: approved (design), pending implementation plan
+Status: implemented (2026-06-11)
 
 ## Goal
 

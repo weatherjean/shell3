@@ -7,6 +7,31 @@ local tools  = require("lib.tools")            -- { web_fetch, brave_search }
 local guards = require("lib.guards")           -- { no_env_edit }
 local brainstorming = require("lib.skills.brainstorming")
 
+local self_evolve = shell3.skill({
+  name = "self-evolve",
+  description = "How to safely change your own shell3.lua config and apply it with reload",
+  body = [[
+You can modify your own configuration and apply it live.
+
+Loop:
+1. Edit `shell3.lua` with your file tools — add or change a `shell3.model{}`,
+   `shell3.agent{}`, `shell3.subagent{}`, custom tool, `shell3.skill{}`, or
+   `shell3.cron{}` block. Follow the syntax already in the file.
+2. Call the `reload` tool. It validates the whole file and applies it AFTER this
+   turn ends.
+3. If validation fails, the OLD config keeps running and you get the error — fix
+   the file and call `reload` again. You cannot break the bot with a bad edit.
+
+Notes:
+- Cron `agent` must reference a declared subagent; agents/models must reference
+  declared models — these are validated on reload.
+- MCP servers and model proxies restart on reload (a brief pause); everything
+  else (agents, models, tools, skills, cron) applies cleanly.
+- Your active agent and any /set params are preserved across reload when they
+  still exist in the new config.
+]],
+})
+
 -- ---------------------------------------------------------------------------
 -- Model
 -- ---------------------------------------------------------------------------
@@ -81,6 +106,7 @@ You are an expert coding assistant inside shell3. Work autonomously as a senior 
     subagents         = { explorer },
     custom            = { tools.web_fetch, tools.brave_search },
   },
+  skills = { self_evolve },
   on_tool_call = { guards.no_env_edit, guards.confirm_destructive },
 })
 

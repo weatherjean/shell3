@@ -10,6 +10,19 @@ Until v1.0.0, minor versions may contain breaking changes.
 
 ### Added
 
+- Config hot reload (`/reload` bot command + `reload` agent tool): re-reads
+  `shell3.lua` and applies the new configuration without restarting the process.
+  Validate-first: a bad edit leaves the running config untouched and returns the
+  error — the bot can never be bricked by a failed reload. Applied only at an
+  idle boundary (full rebuild after the current turn ends). Conversation history
+  is preserved across reload; active agent and `/set` params are best-effort
+  restored when they still exist in the new config. MCP servers and model
+  proxies restart on reload (brief pause); agents, models, tools, skills, and
+  cron apply cleanly.
+
+  **Intentional non-goals:** `fsnotify` auto-reload on file save is deliberately
+  excluded — reload is an explicit act, never an implicit side-effect. Carrying
+  live MCP tool-call state across reload is deferred as a future optimization.
 - Scheduled dispatch (`shell3.cron{}`): cron-scheduled jobs that run on the
   always-on `shell3 telegram` host. Each job dispatches an isolated depth-1
   subagent (via the new `pkg/shell3.Session.Dispatch`) whose result reports

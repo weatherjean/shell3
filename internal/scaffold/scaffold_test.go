@@ -94,8 +94,8 @@ func TestRenderedConfigLoads(t *testing.T) {
 	if len(c.Tools) != 2 {
 		t.Errorf("expected 2 tools (web_fetch, brave_search), got %d", len(c.Tools))
 	}
-	if len(c.Skills) != 1 {
-		t.Errorf("expected 1 skill (brainstorming), got %d", len(c.Skills))
+	if len(c.Skills) != 2 {
+		t.Errorf("expected 2 skills (brainstorming, self-evolve), got %d", len(c.Skills))
 	}
 	agents := c.Agents()
 	if len(agents) != 2 {
