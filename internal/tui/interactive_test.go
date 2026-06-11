@@ -7,7 +7,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/weatherjean/shell3/internal/patchapp"
 	"github.com/weatherjean/shell3/pkg/shell3"
@@ -462,7 +461,6 @@ type fakeSession struct {
 	setParamFn    func(string, string) error
 	sent          []string // prompts passed to Send
 	interjections []string // texts passed to Interject
-	approver      func(ctx context.Context, req shell3.ApprovalRequest) bool
 
 	// name/wakeBus/runQueued drive the Wake-bus consumption path. name is the
 	// session's registry name (compared against HostEvent.Session); wakeBus is
@@ -517,10 +515,6 @@ func (f *fakeSession) SetParam(name, value string) error {
 }
 func (f *fakeSession) Interject(text string, _ ...shell3.Part) {
 	f.interjections = append(f.interjections, text)
-}
-func (f *fakeSession) SetApprover(fn func(ctx context.Context, req shell3.ApprovalRequest) bool) error {
-	f.approver = fn
-	return nil
 }
 func (f *fakeSession) HasQueuedInput() bool {
 	f.mu.Lock()
@@ -1002,93 +996,6 @@ func TestWake_BusyTurnNoOverlap(t *testing.T) {
 	cancel()
 	<-done
 	turnWG.Wait()
-}
-
-// ── approval wiring ────────────────────────────────────────────────────────────
-
-func TestFormatApprovalQuestion_RendersAgentToolArgsReason(t *testing.T) {
-	q := formatApprovalQuestion(shell3.ApprovalRequest{
-		Tool:    "bash",
-		RawArgs: `{"cmd":"rm -rf build"}`,
-		Reason:  "destructive command",
-		Agent:   "main",
-	})
-	want := `main wants to run bash({"cmd":"rm -rf build"}) — destructive command`
-	if q != want {
-		t.Fatalf("question = %q; want %q", q, want)
-	}
-}
-
-func TestFormatApprovalQuestion_NoReasonOmitsSuffix(t *testing.T) {
-	q := formatApprovalQuestion(shell3.ApprovalRequest{
-		Tool:    "edit_file",
-		RawArgs: `{"path":"main.go"}`,
-		Agent:   "fast",
-	})
-	want := `fast wants to run edit_file({"path":"main.go"})`
-	if q != want {
-		t.Fatalf("question = %q; want %q", q, want)
-	}
-}
-
-func TestFormatApprovalQuestion_TruncatesLongArgs(t *testing.T) {
-	long := `{"data":"` + strings.Repeat("x", 500) + `"}`
-	q := formatApprovalQuestion(shell3.ApprovalRequest{
-		Tool: "bash", RawArgs: long, Agent: "main",
-	})
-	if !strings.Contains(q, "…") {
-		t.Fatalf("expected truncation ellipsis in: %q", q)
-	}
-	if strings.Contains(q, strings.Repeat("x", approvalArgsMax+1)) {
-		t.Fatalf("args not truncated to ~%d chars: %q", approvalArgsMax, q)
-	}
-	// Bound: prefix + truncated args + ellipsis + closing paren.
-	if len(q) > approvalArgsMax+64 {
-		t.Fatalf("question too long (%d chars): %q", len(q), q)
-	}
-}
-
-func TestFormatApprovalQuestion_TruncationKeepsRuneBoundary(t *testing.T) {
-	// Fill so a multi-byte rune straddles the byte-200 cut.
-	long := strings.Repeat("a", approvalArgsMax-1) + strings.Repeat("é", 50)
-	q := formatApprovalQuestion(shell3.ApprovalRequest{
-		Tool: "bash", RawArgs: long, Agent: "main",
-	})
-	if !utf8.ValidString(q) {
-		t.Fatalf("truncation split a rune: %q", q)
-	}
-}
-
-// TestApproverWiring mirrors TestInterjectWiring: it builds the same closure
-// RunInteractive registers via sess.SetApprover and asserts the formatted
-// question flows through to the App's RequestApproval (stubbed here) and the
-// verdict flows back. RunInteractive's setup is monolithic, so the live
-// registration path isn't invoked hermetically — this verifies the closure
-// shape and the fakeSession.SetApprover path.
-func TestApproverWiring(t *testing.T) {
-	sess := &fakeSession{}
-	var asked string
-	requestApproval := func(q string) bool { // stands in for app.RequestApproval
-		asked = q
-		return true
-	}
-	// Simulate what RunInteractive registers.
-	if err := sess.SetApprover(func(ctx context.Context, req shell3.ApprovalRequest) bool {
-		return requestApproval(formatApprovalQuestion(req))
-	}); err != nil {
-		t.Fatalf("SetApprover: %v", err)
-	}
-
-	ok := sess.approver(context.Background(), shell3.ApprovalRequest{
-		Tool: "bash", RawArgs: `{"cmd":"ls"}`, Reason: "policy", Agent: "main",
-	})
-	if !ok {
-		t.Fatal("verdict not propagated back through the approver")
-	}
-	want := `main wants to run bash({"cmd":"ls"}) — policy`
-	if asked != want {
-		t.Fatalf("question = %q; want %q", asked, want)
-	}
 }
 
 // ── end-of-turn re-dispatch (Part B) ────────────────────────────────────────

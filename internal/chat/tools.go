@@ -10,20 +10,6 @@ import (
 	"github.com/weatherjean/shell3/internal/store"
 )
 
-// guardDecision is the outcome of a tool-call guard. It is an alias for int
-// (so existing int comparisons keep compiling) whose values mirror
-// luacfg.Decision and must not be changed without updating that type.
-type guardDecision = int
-
-const (
-	guardAllow  guardDecision = 0 // proceed with the tool call
-	guardBlock  guardDecision = 1 // deny this single tool call; turn continues
-	guardCancel guardDecision = 2 // abort the entire turn
-	// guardAsk suspends the call pending host approval (Approve hook in TurnConfig).
-	// Values mirror luacfg.Decision and must stay in sync.
-	guardAsk guardDecision = 3
-)
-
 // toolResult is the typed outcome of one tool call: the text recorded as the
 // tool message plus whether it represents a failure. Every dispatch path in
 // executeToolCalls produces one, so error-ness is carried as data instead of
@@ -39,7 +25,7 @@ func errResult(out string) toolResult { return toolResult{output: out, isError: 
 // classifyHandlerOutput types a built-in handler's output string. Handlers
 // report in-band failures to the model as "error: …" strings (so the text and
 // the flag can never disagree); this is the single place that convention is
-// interpreted. Guard, hook, validation, and dispatcher failures never pass
+// interpreted. Hook, validation, and dispatcher failures never pass
 // through here — they construct typed errResults directly.
 func classifyHandlerOutput(out string) toolResult {
 	if strings.HasPrefix(out, "error:") {

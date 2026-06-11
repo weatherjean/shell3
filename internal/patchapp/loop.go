@@ -26,18 +26,12 @@ func (a *App) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Deny any pending approval prompt on every Run exit path (stdin EOF,
-	// poll error, ctx done, double-ctrl+c) — the input goroutine is the only
-	// resolver, so once it exits a blocked RequestApproval would wedge its
-	// turn goroutine forever. Setting exitFlag first also makes any
-	// RequestApproval that arrives after this point return false immediately
-	// instead of registering a prompt nobody can answer. Quit covers its own
-	// path the same way.
+	// Set exitFlag on every Run exit path (stdin EOF, poll error, ctx done,
+	// double-ctrl+c) so any late input handling sees the app is shutting down.
 	defer func() {
 		a.mu.Lock()
 		a.exitFlag = true
 		a.mu.Unlock()
-		a.resolveApproval(false)
 	}()
 
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))

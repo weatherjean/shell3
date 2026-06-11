@@ -12,15 +12,21 @@ import (
 	"github.com/weatherjean/shell3/internal/persona"
 )
 
-// stubHandler is a minimal ToolHandler that returns a fixed output string.
+// stubHandler is a minimal ToolHandler that returns a fixed output string. An
+// optional onExec hook runs first — tests use it to cancel the turn context
+// mid-loop (the guard engine that used to drive cancellation was removed).
 type stubHandler struct {
-	name string
-	out  string
+	name   string
+	out    string
+	onExec func()
 }
 
 func (h stubHandler) Name() string { return h.name }
 
 func (h stubHandler) Execute(ctx context.Context, id string, args json.RawMessage, cfg ToolConfig) (string, error) {
+	if h.onExec != nil {
+		h.onExec()
+	}
 	return h.out, nil
 }
 
@@ -105,57 +111,9 @@ func hasKind(evs []Event, k EventKind) bool {
 	return false
 }
 
-// TestRunTurn_GuardCancel_StubsRemainingCalls characterizes a guard cancel:
-// round 1 returns two tool calls, the guard cancels, and the turn ends with a
-// cancellation reminder + turn_done (not error). The first call gets a real
-// "USER CANCELLED" result; the unreached second call gets a synthetic stub.
-func TestRunTurn_GuardCancel_StubsRemainingCalls(t *testing.T) {
-	fake := fakellm.New(
-		fakellm.Script{Events: []llm.StreamEvent{
-			{ToolCall: &llm.ToolCall{ID: "a", Name: "echo", RawArgs: `{}`}},
-			{ToolCall: &llm.ToolCall{ID: "b", Name: "echo", RawArgs: `{}`}},
-			{Usage: &llm.Usage{TotalTokens: 5}},
-		}},
-	)
-	cfg := TurnConfig{
-		LLM:         fake,
-		Personality: persona.Persona{SystemPrompt: "test"},
-		Handlers:    map[string]ToolHandler{"echo": stubHandler{name: "echo", out: "echoed"}},
-		Log:         LogOrNoop(nil),
-		ToolGuard: func(ctx context.Context, tool string, params map[string]any) (int, string, error) {
-			return guardCancel, "nope", nil
-		},
-	}
-
-	events, sess := collectTurn(t, context.Background(), cfg, "hi")
-
-	if hasKind(events, EventError) {
-		t.Fatalf("guard cancel should not emit error; events=%+v", events)
-	}
-	if !hasKind(events, EventTurnDone) {
-		t.Fatalf("guard cancel should still emit turn_done")
-	}
-	var sawReminder bool
-	for _, ev := range events {
-		if ev.Kind == EventSystemReminder && strings.Contains(ev.Text, "turn cancelled by user") {
-			sawReminder = true
-		}
-	}
-	if !sawReminder {
-		t.Fatalf("expected cancellation system reminder")
-	}
-	if !hasToolMessage(sess, "echo", "USER CANCELLED") {
-		t.Fatalf("expected USER CANCELLED tool message for the first call")
-	}
-	if !hasToolMessage(sess, "echo", "Not executed") {
-		t.Fatalf("expected synthetic stub tool message for the unreached call")
-	}
-}
-
 // TestRunTurn_MidLoopCtxCancel_EmitsError characterizes mid-loop cancellation:
-// the guard cancels the context during the first call, so the second
-// iteration's top-of-loop ctx check trips and the turn ends with error (not
-// turn_done). The guard returns allow — the abort comes from ctx, not the guard.
+// the first tool handler cancels the context, so the second iteration's
+// top-of-loop ctx check trips and the turn ends with error (not turn_done).
 func TestRunTurn_MidLoopCtxCancel_EmitsError(t *testing.T) {
 	fake := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{
@@ -169,12 +127,10 @@ func TestRunTurn_MidLoopCtxCancel_EmitsError(t *testing.T) {
 	cfg := TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
-		Handlers:    map[string]ToolHandler{"echo": stubHandler{name: "echo", out: "echoed"}},
-		Log:         LogOrNoop(nil),
-		ToolGuard: func(c context.Context, tool string, params map[string]any) (int, string, error) {
-			cancel() // cancel during the first call; the next iteration's ctx check trips
-			return guardAllow, "", nil
-		},
+		// The handler cancels during the first call; the next iteration's ctx
+		// check trips and ends the turn with error.
+		Handlers: map[string]ToolHandler{"echo": stubHandler{name: "echo", out: "echoed", onExec: cancel}},
+		Log:      LogOrNoop(nil),
 	}
 
 	events, _ := collectTurn(t, ctx, cfg, "hi")
@@ -371,12 +327,8 @@ func TestRunTurn_CtxCancel_PreservesTypedError(t *testing.T) {
 	cfg := TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
-		Handlers:    map[string]ToolHandler{"echo": stubHandler{name: "echo", out: "echoed"}},
+		Handlers:    map[string]ToolHandler{"echo": stubHandler{name: "echo", out: "echoed", onExec: cancel}},
 		Log:         LogOrNoop(nil),
-		ToolGuard: func(c context.Context, tool string, params map[string]any) (int, string, error) {
-			cancel()
-			return guardAllow, "", nil
-		},
 	}
 
 	events, _ := collectTurn(t, ctx, cfg, "hi")

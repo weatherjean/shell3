@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/agentsetup"
-	"github.com/weatherjean/shell3/internal/luacfg"
 )
 
 func TestBuild_MissingConfig_Errors(t *testing.T) {
@@ -337,18 +336,6 @@ func TestBuild_PromptHasEnvironmentSection(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "shell3.db") || !strings.Contains(prompt, "?mode=ro") {
 		t.Errorf("Environment section missing ro history DB open form:\n%s", prompt)
-	}
-}
-
-// TestDecisionEnumSync pins the numeric values of luacfg.Decision that the
-// ToolGuard bridge in Build relies on (the bare int(d) cast handed to
-// chat's guardDecision ladder: Allow=0, Block=1, Cancel=2, Ask=3). If either
-// side renumbers, this fails instead of silently misrouting guard verdicts.
-func TestDecisionEnumSync(t *testing.T) {
-	if luacfg.DecisionAllow != 0 || luacfg.DecisionBlock != 1 ||
-		luacfg.DecisionCancel != 2 || luacfg.DecisionAsk != 3 {
-		t.Fatalf("luacfg.Decision values drifted from chat's guardDecision ladder: allow=%d block=%d cancel=%d ask=%d",
-			luacfg.DecisionAllow, luacfg.DecisionBlock, luacfg.DecisionCancel, luacfg.DecisionAsk)
 	}
 }
 

@@ -37,6 +37,19 @@ func (BashHandler) Name() string { return "bash" }
 
 func (BashHandler) Execute(ctx context.Context, id string, args json.RawMessage, cfg ToolConfig) (string, error) {
 	command, timeout := parseBashArgsFull(string(args))
+	// shell3.wrap_bash: the only bash safety surface (the guard engine is gone).
+	// When declared, the command passes through it before execution — allow,
+	// rewrite, or block. A nil hook means no wrapping (the unsafe default).
+	if cfg.WrapBash != nil {
+		rewritten, allowed, reason, err := cfg.WrapBash(ctx, command)
+		if err != nil {
+			return "error: wrap_bash failed: " + err.Error(), nil
+		}
+		if !allowed {
+			return "error: blocked by wrap_bash: " + reason, nil
+		}
+		command = rewritten
+	}
 	tctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	c := exec.CommandContext(tctx, "bash", "-c", command)

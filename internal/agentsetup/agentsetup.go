@@ -99,8 +99,8 @@ func (p *Parts) CustomTool(ctx context.Context, name, args string) (string, erro
 }
 
 // AgentRuntime assembles the full chat runtime for the named agent: its model
-// client, persona, tool defs, and guard closure. name "" uses the first
-// declared agent. An unknown non-empty name returns an error.
+// client, persona, and tool defs. name "" uses the first declared agent. An
+// unknown non-empty name returns an error.
 func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
 	var a luacfg.Agent
 	if name == "" {
@@ -116,8 +116,8 @@ func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
 }
 
 // subagentToAgent adapts a registered subagent to the luacfg.Agent shape that
-// runtimeForAgent/BuildPersonaFor/OnToolCallFor consume. Subagents is left empty
-// on purpose (depth limit 1). Keep in sync with luacfg.Subagent's fields.
+// runtimeForAgent/BuildPersonaFor consume. Subagents is left empty on purpose
+// (depth limit 1). Keep in sync with luacfg.Subagent's fields.
 func subagentToAgent(sa luacfg.Subagent) luacfg.Agent {
 	return luacfg.Agent{
 		Name:           sa.Name,
@@ -127,7 +127,6 @@ func subagentToAgent(sa luacfg.Subagent) luacfg.Agent {
 		CustomTools:    sa.CustomTools,
 		Skills:         sa.Skills,
 		SkillsDisabled: sa.SkillsDisabled,
-		Guard:          sa.Guard,
 	}
 }
 
@@ -212,17 +211,12 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 		}
 	}
 
-	agent := a // capture for the guard closure
 	return chat.ActiveAgent{
 		Personality: persona.Persona{
 			Name:         a.Name,
 			SystemPrompt: prompt,
 			Tools:        toolDefs,
 			Parameters:   rp,
-		},
-		ToolGuard: func(ctx context.Context, t string, prm map[string]any) (int, string, error) {
-			d, r, e := p.lc.OnToolCallFor(agent, ctx, t, prm)
-			return int(d), r, e
 		},
 		ModeLabel:       a.Name,
 		ActiveSkills:    a.Skills,
@@ -351,6 +345,15 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 		Headless:      so.Headless,
 		AgentNames:    p.AgentNames(),
 		RefreshPrompt: func() string { return p.RefreshPromptFor(activeName) },
+	}
+	// shell3.wrap_bash: a single config-global hook the bash/bash_bg tools pass
+	// their command through. Wired only when declared — a nil closure means no
+	// wrapping (the unsafe default: bash runs with no restrictions). Not
+	// per-agent and not swapped on agent switch.
+	if p.lc.HasWrapBash() {
+		cfg.WrapBash = func(ctx context.Context, cmd string) (string, bool, string, error) {
+			return p.lc.WrapBash(ctx, cmd)
+		}
 	}
 	cfg.SwitchAgent = func(name string) (chat.ActiveAgent, error) {
 		// "" means "use the first agent" during initial session selection only

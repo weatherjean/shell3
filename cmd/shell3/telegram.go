@@ -118,7 +118,7 @@ func newTelegramCommand() *cobra.Command {
 				if err != nil {
 					return res, err
 				}
-				b.RedecorateSession() // re-apply approver + host tools dropped by reload
+				b.RedecorateSession() // re-apply host tools dropped by reload
 				if sched != nil {
 					sched.Stop()
 				}

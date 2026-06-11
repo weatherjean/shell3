@@ -53,6 +53,13 @@ type ToolConfig struct {
 	// reaper appends a bg_done notification here on process exit. Empty when the
 	// front-end wires no sink (the bg job is still spawned, just not announced).
 	SinkPath string
+	// WrapBash, when non-nil, is the shell3.wrap_bash hook: the bash/bash_bg
+	// handlers pass their parsed command through it before execution. It returns
+	// the (possibly rewritten) command to run, whether the call is allowed, and a
+	// block reason. Nil means no hook is declared — the tools run the command
+	// verbatim (the unsafe default). The hook FAILS CLOSED on error (see
+	// luacfg.WrapBash): a broken wrapper blocks rather than silently runs.
+	WrapBash func(ctx context.Context, cmd string) (rewritten string, allowed bool, reason string, err error)
 	// AllMsgs is the full conversation slice including any reminder
 	// injections; tools that need to operate on what the model sees use
 	// this view.
@@ -60,19 +67,6 @@ type ToolConfig struct {
 	// SessMsgs is the persisted session history slice without reminder
 	// injections; tools that mutate authoritative state use this view.
 	SessMsgs []llm.Message
-}
-
-// ApprovalRequest describes one suspended tool call awaiting a human verdict
-// (a guard returned ask). Hosts render it (buttons, y/N prompt) and answer
-// allow (true) or deny (false).
-type ApprovalRequest struct {
-	// Tool is the tool name; RawArgs its raw JSON arguments.
-	Tool    string
-	RawArgs string
-	// Reason is the guard's stated reason for asking ("" if none given).
-	Reason string
-	// Agent is the active agent's name.
-	Agent string
 }
 
 // TurnConfig holds all dependencies needed for one user→assistant turn. It
@@ -114,14 +108,9 @@ type TurnConfig struct {
 	CustomTool func(ctx context.Context, name, argsJSON string) (string, error)
 	// CustomToolNames is the set of tool names routed to CustomTool.
 	CustomToolNames map[string]bool
-	// ToolGuard runs the on_tool_call guard chain. Nil = allow all.
-	// Return values follow the guardAllow/guardBlock/guardCancel/guardAsk
-	// constants (0=allow, 1=block, 2=cancel, 3=ask).
-	ToolGuard func(ctx context.Context, tool string, params map[string]any) (guardDecision int, reason string, err error)
-	// Approve resolves guard "ask" verdicts: it blocks the turn goroutine
-	// until the host answers (ctx-cancellable — treat cancellation as deny).
-	// Nil fails closed: ask degrades to a deny with an explanatory reason.
-	Approve func(ctx context.Context, req ApprovalRequest) bool
+	// WrapBash is the shell3.wrap_bash hook threaded to each tool call's
+	// ToolConfig (see ToolConfig.WrapBash). Nil = no hook = run commands verbatim.
+	WrapBash func(ctx context.Context, cmd string) (rewritten string, allowed bool, reason string, err error)
 	// Spawn launches a subagent for the parsed spawn_agent call and returns its
 	// id immediately. Nil → spawn_agent degrades to an "unavailable" result.
 	Spawn func(ctx context.Context, req SpawnRequest) (string, error)

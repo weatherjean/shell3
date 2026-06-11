@@ -23,6 +23,7 @@ func registerShell3(c *LoadedConfig) {
 	L.SetField(env, "secret", L.NewFunction(c.luaSecret))
 	L.SetField(tbl, "env", env)
 	L.SetField(tbl, "bash", L.NewFunction(c.luaBash))
+	L.SetField(tbl, "wrap_bash", L.NewFunction(c.luaWrapBash))
 	httpT := L.NewTable()
 	L.SetField(httpT, "request", L.NewFunction(c.luaHTTPRequest))
 	L.SetField(httpT, "get", L.NewFunction(c.luaHTTPGet))
@@ -164,7 +165,6 @@ var toolKeys = map[string]bool{"name": true, "description": true, "parameters": 
 
 var agentKeys = map[string]bool{
 	"name": true, "model": true, "prompt": true, "tools": true, "skills": true,
-	"on_tool_call": true,
 }
 
 var toolGateKeys = map[string]bool{
@@ -295,20 +295,13 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 			a.Subagents = subagentHandleNames(L, sg, a.Name)
 		}
 	}
-	if g, ok := opts.RawGetString("on_tool_call").(*lua.LTable); ok {
-		g.ForEach(func(_, v lua.LValue) {
-			if fn, ok := v.(*lua.LFunction); ok {
-				a.Guard = append(a.Guard, GuardEntry{fn: fn})
-			}
-		})
-	}
 	c.agents = append(c.agents, a)
 	return 0
 }
 
 var subagentKeys = map[string]bool{
 	"name": true, "description": true, "model": true, "prompt": true,
-	"tools": true, "skills": true, "on_tool_call": true,
+	"tools": true, "skills": true,
 }
 
 func (c *LoadedConfig) luaSubagent(L *lua.LState) int {
@@ -353,13 +346,6 @@ func (c *LoadedConfig) luaSubagent(L *lua.LState) int {
 		if tt.RawGetString("skill") == lua.LFalse {
 			s.SkillsDisabled = true
 		}
-	}
-	if g, ok := opts.RawGetString("on_tool_call").(*lua.LTable); ok {
-		g.ForEach(func(_, v lua.LValue) {
-			if fn, ok := v.(*lua.LFunction); ok {
-				s.Guard = append(s.Guard, GuardEntry{fn: fn})
-			}
-		})
 	}
 	c.subagents = append(c.subagents, s)
 	h := L.NewTable()

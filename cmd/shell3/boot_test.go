@@ -130,7 +130,7 @@ func TestBootEndToEnd(t *testing.T) {
 
 	dir := filepath.Join(home, ".shell3")
 	for _, p := range []string{
-		"shell3.lua", "lib/tools.lua", "lib/guards.lua",
+		"shell3.lua", "lib/tools.lua",
 		"lib/skills/brainstorming.lua", ".env",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
@@ -215,7 +215,7 @@ func TestBootTelegramEndToEnd(t *testing.T) {
 	}
 
 	dir := filepath.Join(home, ".shell3", "telegram")
-	for _, p := range []string{"shell3.lua", "lib/tools.lua", "lib/guards.lua", ".env", "workdir"} {
+	for _, p := range []string{"shell3.lua", "lib/tools.lua", ".env", "workdir"} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
 			t.Errorf("missing %s: %v", p, err)
 		}

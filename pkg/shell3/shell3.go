@@ -58,15 +58,6 @@
 //		}
 //	}
 //
-// # Approval
-//
-// A Lua guard may return an "ask" verdict to suspend a tool call for human
-// approval. The host supplies [SessionOpts].Approve (or [Session.SetApprover],
-// or [Spec].Approve) — a func(context.Context, [ApprovalRequest]) bool that
-// blocks the turn goroutine until the host answers. The [ApprovalRequest]
-// carries the Tool, RawArgs, Reason, and Agent. A nil approver fails closed: the
-// ask degrades to a deny. Requests and verdicts are recorded in the audit log.
-//
 // # Inbound media
 //
 // SendParts and Interject accept []Part / ...Part attachments. A [Part] sets
@@ -104,15 +95,6 @@ import (
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
 )
-
-// ApprovalRequest describes a suspended tool call awaiting the host's verdict
-// (a Lua guard returned action="ask"). Render it and return true to allow.
-type ApprovalRequest struct {
-	Tool    string // tool name
-	RawArgs string // raw JSON arguments
-	Reason  string // the guard's stated reason ("" if none)
-	Agent   string // active agent name
-}
 
 // PartKind discriminates a Part's media type.
 type PartKind int
@@ -172,10 +154,6 @@ type Spec struct {
 	// shell_interactive tool returning an "unavailable" string. A TUI supplies
 	// a closure that releases the terminal for the duration of the command.
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
-	// Approve resolves guard "ask" verdicts: it blocks the turn goroutine
-	// until the host answers (ctx-cancellable — treat cancellation as deny).
-	// Nil fails closed: ask degrades to a deny with an explanatory reason.
-	Approve func(ctx context.Context, req ApprovalRequest) bool
 }
 
 // ErrBusy reports a call that requires the session to be idle while a turn is
@@ -358,9 +336,6 @@ func Start(ctx context.Context, spec Spec) (*Session, error) {
 		return nil, err
 	}
 	s.ownsRuntime = true
-	if spec.Approve != nil {
-		_ = s.SetApprover(spec.Approve) // freshly built session: never busy
-	}
 	s.cfg.OutPath = spec.OutPath // also feeds writeStartLine's out field (byte-compat) and introspection
 	sink, sinkCleanup, err := chat.OpenSink(spec.OutPath)
 	if err != nil {
@@ -674,33 +649,6 @@ func (s *Session) SendParts(ctx context.Context, prompt string, parts []Part) <-
 	return out
 }
 
-// SetApprover installs an approval callback for guard "ask" verdicts, adapting
-// the public ApprovalRequest type to the internal chat.ApprovalRequest. It may
-// be called before the first Send or between turns; the adapter is picked up
-// by turnConfig on every subsequent Send. Passing nil removes the approver
-// (ask then fails closed). Returns ErrBusy while a turn is in flight: it
-// mutates cfg, which the next Send's turnConfig reads (see Send's contract).
-func (s *Session) SetApprover(fn func(ctx context.Context, req ApprovalRequest) bool) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.busy {
-		return ErrBusy
-	}
-	if fn == nil {
-		s.cfg.Approve = nil
-		return nil
-	}
-	s.cfg.Approve = func(ctx context.Context, req chat.ApprovalRequest) bool {
-		return fn(ctx, ApprovalRequest{
-			Tool:    req.Tool,
-			RawArgs: req.RawArgs,
-			Reason:  req.Reason,
-			Agent:   req.Agent,
-		})
-	}
-	return nil
-}
-
 // isBusy reports whether a turn is in flight (see Send's contract).
 func (s *Session) isBusy() bool {
 	s.mu.Lock()
@@ -934,7 +882,7 @@ func (s *Session) Rollback() (ok bool, err error) {
 
 // SwitchAgent activates the configured agent named name for subsequent Sends
 // (= the TUI's /agent <name> or Tab). Switching swaps the agent's model client,
-// system prompt, tool set, guard chain, custom-tool routing, skills, status
+// system prompt, tool set, custom-tool routing, skills, status
 // line, and context window while keeping conversation history. Returns an error
 // for an unknown agent or when the config declares no agents, and ErrBusy
 // while a turn is in flight: it mutates cfg in place, which the next Send's

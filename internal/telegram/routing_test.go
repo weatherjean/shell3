@@ -22,6 +22,20 @@ func TestHandleMsg_IdleSendsReply(t *testing.T) {
 	}
 }
 
+// waitFor polls cond until it returns true or a 1s deadline passes, failing the
+// test on timeout. Shared helper for async (goroutine-driven) assertions.
+func waitFor(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("waitFor: condition not met within 1s")
+}
+
 // waitForReply polls fc.sentTexts() until one contains want or the deadline
 // passes. The turn runs on its own goroutine, so replies arrive asynchronously.
 func waitForReply(t *testing.T, fc *fakeClient, want string) bool {

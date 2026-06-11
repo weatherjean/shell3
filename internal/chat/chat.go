@@ -26,7 +26,6 @@ type LLMClient interface {
 // everything the chat loop needs to run the next turn under a different agent.
 type ActiveAgent struct {
 	Personality  persona.Persona
-	ToolGuard    func(ctx context.Context, tool string, params map[string]any) (int, string, error)
 	ModeLabel    string
 	ActiveSkills []string
 	ActiveTools  []string
@@ -107,14 +106,11 @@ type Config struct {
 	// CustomToolNames is the set of tool names routed to CustomTool.
 	// Entries must match the names registered in the LLM tool schema.
 	CustomToolNames map[string]bool
-	// ToolGuard runs the on_tool_call guard chain. Nil = allow all.
-	// Return values follow the guardAllow/guardBlock/guardCancel/guardAsk
-	// constants defined in this package (0/1/2/3).
-	ToolGuard func(ctx context.Context, tool string, params map[string]any) (guardDecision int, reason string, err error)
-	// Approve resolves guard "ask" verdicts: it blocks the turn goroutine
-	// until the host answers (ctx-cancellable — treat cancellation as deny).
-	// Nil fails closed: ask degrades to a deny with an explanatory reason.
-	Approve func(ctx context.Context, req ApprovalRequest) bool
+	// WrapBash is the shell3.wrap_bash hook: the bash/bash_bg handlers pass
+	// their command through it before execution (allow / rewrite / block). Nil
+	// means no hook is declared — commands run verbatim (the unsafe default).
+	// Config-global (one hook for all agents), not swapped on agent switch.
+	WrapBash func(ctx context.Context, cmd string) (rewritten string, allowed bool, reason string, err error)
 	// Spawn launches a subagent for the parsed spawn_agent call and returns its
 	// id immediately. Nil → spawn_agent degrades to an "unavailable" result.
 	Spawn func(ctx context.Context, req SpawnRequest) (string, error)
@@ -137,19 +133,20 @@ func AgentStatusLine(rt ActiveAgent) string {
 }
 
 // ApplyActiveAgent copies a switched agent's runtime bundle into the config:
-// model client, persona, params, guard chain, tool/skill sets, context window,
+// model client, persona, params, tool/skill sets, context window,
 // and the derived status line. Every front-end (TUI /agent + Tab, pkg/shell3
 // SwitchAgent) and the initial assembly in agentsetup route through this method
 // so the agent-derived field copy lives in exactly one place.
 //
 // It deliberately does NOT touch agent-independent fields (Store, WorkDir,
 // ProjectRef, Docs, AgentNames, SwitchAgent, OutPath, Headless, Log,
-// RefreshPrompt): those are set once at assembly and survive switches.
+// RefreshPrompt, WrapBash): those are set once at assembly and survive switches.
+// WrapBash in particular is config-global (one shell3.wrap_bash hook for all
+// agents), so an agent switch must not clear it.
 func (c *Config) ApplyActiveAgent(rt ActiveAgent) {
 	c.LLM = rt.LLM
 	c.Personality = rt.Personality
 	c.Params = rt.Params
-	c.ToolGuard = rt.ToolGuard
 	c.ModeLabel = rt.ModeLabel
 	c.ActiveSkills = rt.ActiveSkills
 	c.ActiveTools = rt.ActiveTools
@@ -193,8 +190,7 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler, shellInteractive
 		Headless:         cfg.Headless,
 		CustomTool:       cfg.CustomTool,
 		CustomToolNames:  cfg.CustomToolNames,
-		ToolGuard:        cfg.ToolGuard,
-		Approve:          cfg.Approve,
+		WrapBash:         cfg.WrapBash,
 		Spawn:            cfg.Spawn,
 		ListAgents:       cfg.ListAgents,
 		Subagents:        cfg.Subagents,

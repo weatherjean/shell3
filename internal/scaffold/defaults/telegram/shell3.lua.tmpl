@@ -4,7 +4,6 @@
 -- Run it with:  shell3 telegram
 
 local tools   = require("lib.tools")   -- { web_fetch, brave_search }
-local guards  = require("lib.guards")  -- { no_env_edit, confirm_destructive }
 local browser = require("lib.skills.browser")
 local history = require("lib.skills.history")
 
@@ -87,6 +86,21 @@ shell3.model("{{.Name | luaesc}}", {
 {{end}}})
 
 -- ---------------------------------------------------------------------------
+-- Bash safety hook (shell3.wrap_bash) — YOUR ONLY BASH GUARD.
+-- ---------------------------------------------------------------------------
+-- UNSAFE BY DEFAULT: bash and bash_bg run with no restrictions. This hook is the
+-- ONLY place bash commands can be inspected, rewritten, or blocked. The default
+-- below is a pass-through that lets EVERYTHING through. To lock things down,
+-- inspect `cmd` and return nil + a reason to block, or a rewritten string to
+-- sandbox. A broken hook fails CLOSED (the command is blocked), never open.
+--   -- example: block recursive force-remove
+--   shell3.wrap_bash(function(cmd)
+--     if cmd:match("rm%s+%-rf") then return nil, "refusing rm -rf" end
+--     return cmd
+--   end)
+shell3.wrap_bash(function(cmd) return cmd end)
+
+-- ---------------------------------------------------------------------------
 -- Subagent (cron jobs and spawn_agent dispatch this read-only investigator)
 -- ---------------------------------------------------------------------------
 local explorer = shell3.subagent({
@@ -99,7 +113,6 @@ report a concise, concrete answer with file:line references. You cannot edit
 files. Decide and proceed; no human is available.
 ]],
   tools = { bash = true },
-  on_tool_call = { guards.no_env_edit },
 })
 
 -- ---------------------------------------------------------------------------
@@ -155,7 +168,6 @@ edit, run, and schedule work on the host, and you talk to one person over chat.
     custom            = { tools.web_fetch, tools.brave_search },
   },
   skills = { self_evolve, scheduling_jobs, browser, history },
-  on_tool_call = { guards.no_env_edit, guards.confirm_destructive },
 })
 
 -- ---------------------------------------------------------------------------

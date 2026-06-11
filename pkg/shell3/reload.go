@@ -31,8 +31,8 @@ type ReloadResult struct {
 //     handle) and every swappable Runtime field is replaced.
 //   - In place: live sessions keep their identity and history (s.sess); only
 //     s.cfg + s.handlers are rebuilt. Active agent + /set params are restored
-//     best-effort. Host-registered tools/approver are NOT restored here — the
-//     host re-applies them after Reload returns (they are not engine state).
+//     best-effort. Host-registered tools are NOT restored here — the host
+//     re-applies them after Reload returns (they are not engine state).
 //
 // NOTE: the kept s.sess was built with a ContextWindowFor closure over the OLD
 // cfg.ContextWindow, so a changed context_window for an already-live session is

@@ -225,12 +225,6 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 			return
 		}
 		allMsgs = outcome.allMsgs
-		if outcome.cancelled {
-			emitSystemReminder(sess, "[turn cancelled by user: "+outcome.cancelReason+"]")
-			u := totalUsage
-			terminalEmit = func() { emitTurnDone(sess, u.PromptTokens, u.CompletionTokens, u.TotalTokens) }
-			return
-		}
 
 		// After all tool results are appended, check if a reminder is due
 		// before the next LLM round. Inject into the last tool message in
@@ -296,8 +290,6 @@ func attachmentsMessage(readMedia, userSent []llm.ContentPart) (llm.Message, boo
 // toolLoopOutcome reports how a turn's tool-execution loop ended.
 type toolLoopOutcome struct {
 	allMsgs      []llm.Message     // updated slice
-	cancelled    bool              // a guard returned a cancel decision
-	cancelReason string            // reason text for the cancellation reminder
 	pendingMedia []llm.ContentPart // media loaded by read_media, injected as a user message after the loop
 }
 
@@ -379,94 +371,28 @@ func turnScopedHandlers(cfg TurnConfig, sess *Session, st *toolLoopState) map[st
 
 // executeToolCalls runs the assistant's tool calls in order, emitting
 // tool_call/tool_result events and appending each tool message to both allMsgs
-// and the session. It returns the updated allMsgs plus cancellation state.
+// and the session. It returns the updated allMsgs.
 //
 //   - a non-nil error means the context was cancelled mid-loop; the caller
 //     emits an error terminal event and ends the turn.
-//   - outcome.cancelled means a guard cancelled; the caller emits the
-//     cancellation reminder and a turn_done terminal event.
 //   - otherwise the loop completed normally; outcome.allMsgs carries the
 //     updated message slice for the next round.
-//
-// Guard-cancel takes precedence over ctx-cancel: on a guard cancel it returns
-// {cancelled:true}, nil without consulting ctx afterward.
 func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCalls []llm.ToolCall, toolSchemas map[string]map[string]any, allMsgs []llm.Message) (toolLoopOutcome, error) {
-	var cancelled bool
-	var cancelReason string
 	st := &toolLoopState{allMsgs: allMsgs}
 	turnScoped := turnScopedHandlers(cfg, sess, st)
-	for idx, tc := range toolCalls {
+	for _, tc := range toolCalls {
 		if ctx.Err() != nil {
 			return toolLoopOutcome{}, ctx.Err()
 		}
 
 		emitToolCall(sess, tc.ID, tc.Name, tc.RawArgs)
-		var decision int
-		var hookReason string
-		var hookErr error
-		if cfg.ToolGuard != nil {
-			decision, hookReason, hookErr = cfg.ToolGuard(ctx, tc.Name, parseRawArgs(tc.RawArgs))
-		}
-		var res toolResult
-		handled := true
-		if hookErr != nil {
-			res = errResult(fmt.Sprintf("Tool-call hook failed (the on_tool_call hook script itself errored, not the user): %v. Do not retry the same call without adjusting your approach.", hookErr))
-		} else if decision == guardCancel {
-			if hookReason == "" {
-				hookReason = "user cancelled"
-			}
-			cancelled = true
-			cancelReason = hookReason
-			res = errResult(fmt.Sprintf("USER CANCELLED the turn before this %s call ran. Reason: %s. Subsequent tool calls in this turn were not executed.", tc.Name, hookReason))
-		} else if decision == guardAsk {
-			if hookReason == "" {
-				hookReason = "guard requested approval"
-			}
-			emitApprovalRequest(sess, tc.Name, tc.RawArgs, hookReason)
-			approved := false
-			if cfg.Approve != nil {
-				// Approve blocks the turn goroutine until the host answers.
-				approved = cfg.Approve(ctx, ApprovalRequest{
-					Tool: tc.Name, RawArgs: tc.RawArgs, Reason: hookReason,
-					Agent: cfg.Personality.Name,
-				})
-				// A false answer caused by ctx cancellation is not a user
-				// verdict: end the turn with the typed context error before
-				// emitting any decision event or fabricating a denial message
-				// — mirroring the loop-top ctx check.
-				if !approved && ctx.Err() != nil {
-					return toolLoopOutcome{}, ctx.Err()
-				}
-				verdict := "deny"
-				if approved {
-					verdict = "allow"
-				}
-				emitApprovalDecision(sess, tc.Name, verdict)
-			} else {
-				emitApprovalDecision(sess, tc.Name, "deny (no approver)")
-			}
-			if !approved {
-				reason := hookReason
-				if cfg.Approve == nil {
-					reason = "approval required but no approver is available in this front-end"
-				}
-				res = errResult(fmt.Sprintf("USER DENIED this %s tool call. Reason: %s. Treat this as the user explicitly disapproving this action — do NOT retry the same call. Acknowledge the denial, ask what they want instead, or pick a different approach.", tc.Name, reason))
-			} else {
-				// Approved: run schema validation before dispatch, same as the
-				// normal (allow) path. The else-if chain doesn't reach the
-				// validation branch for ask, so we handle it inline here.
-				res, handled = validateCall(toolSchemas, tc)
-			}
-		} else if decision == guardBlock {
-			if hookReason == "" {
-				hookReason = "no reason given"
-			}
-			res = errResult(fmt.Sprintf("USER DENIED this %s tool call. Reason: %s. Treat this as the user explicitly disapproving this action — do NOT retry the same call. Acknowledge the denial, ask what they want instead, or pick a different approach.", tc.Name, hookReason))
-		} else {
-			res, handled = validateCall(toolSchemas, tc)
-		}
-		// If a hook blocked the call or validation failed, res already carries
-		// the typed reason and we skip dispatch. Otherwise resolve a handler —
+		// Every tool call dispatches: the tool-call guard engine (and its
+		// human-in-the-loop approval flow) was removed. The only bash safety
+		// surface now is shell3.wrap_bash, applied inside the bash/bash_bg
+		// handlers (see ToolConfig.WrapBash), not here.
+		res, handled := validateCall(toolSchemas, tc)
+		// If validation failed, res already carries the typed reason and we skip
+		// dispatch. Otherwise resolve a handler —
 		// turn-scoped first, then the custom dispatchers, then the shared
 		// built-ins (custom before built-ins so a config-declared tool name
 		// always wins) — and run it through the single execute path.
@@ -486,6 +412,7 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 					Store:    cfg.Store,
 					WorkDir:  cfg.WorkDir,
 					SinkPath: cfg.SinkPath,
+					WrapBash: cfg.WrapBash,
 					AllMsgs:  st.allMsgs,
 					SessMsgs: sess.messages,
 				}
@@ -518,24 +445,6 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 		}
 		st.allMsgs = append(st.allMsgs, toolMsg)
 		sess.append(toolMsg)
-
-		if cancelled {
-			// Append synthetic results for any tool_calls we never reached
-			// so the assistant message's tool_calls list has matching
-			// tool_call_id results in history. Without this the next turn
-			// 400s on providers that strictly validate the pairing.
-			for _, rem := range toolCalls[idx+1:] {
-				stub := llm.Message{
-					Role:       llm.RoleTool,
-					Content:    fmt.Sprintf("[tool_call_id=%s]\nNot executed — turn cancelled by user.", rem.ID),
-					ToolCallID: rem.ID,
-					Name:       rem.Name,
-				}
-				st.allMsgs = append(st.allMsgs, stub)
-				sess.append(stub)
-			}
-			return toolLoopOutcome{allMsgs: st.allMsgs, cancelled: true, cancelReason: cancelReason}, nil
-		}
 	}
 
 	if ctx.Err() != nil {
@@ -708,12 +617,6 @@ func addUsage(a, b llm.Usage) llm.Usage {
 		CompletionTokens: completion,
 		TotalTokens:      b.PromptTokens + completion,
 	}
-}
-
-func parseRawArgs(raw string) map[string]any {
-	var out map[string]any
-	_ = json.Unmarshal([]byte(raw), &out)
-	return out
 }
 
 // saveHistory persists new messages to the store after a turn. Append failures

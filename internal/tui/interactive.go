@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"unicode/utf8"
 
 	"github.com/weatherjean/shell3/internal/patchapp"
 	"github.com/weatherjean/shell3/internal/patchmd"
@@ -36,9 +35,6 @@ type session interface {
 	// Interject queues a message for delivery to the model at the next round
 	// boundary. Safe to call from any goroutine; never fails.
 	Interject(text string, parts ...shell3.Part)
-	// SetApprover installs the guard "ask" approval callback. Returns ErrBusy
-	// if a turn is in flight (never the case right after Start).
-	SetApprover(fn func(ctx context.Context, req shell3.ApprovalRequest) bool) error
 	// RunQueued runs one turn seeded from the queued inbox (a subagent result or
 	// idle Interject). Returns an already-closed channel (no turn) when busy or
 	// the inbox is empty. Same Event stream shape as Send.
@@ -115,16 +111,6 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 	if snap.ContextWindow > 0 {
 		app.SetContextWindow(snap.ContextWindow)
 	}
-
-	// Approval wiring: guard "ask" verdicts suspend the turn goroutine in this
-	// callback; App.RequestApproval blocks until the user answers y/N on the
-	// input goroutine. Registered AFTER Start (the App must exist to prompt),
-	// which the public API supports — a freshly started session is never busy,
-	// so SetApprover cannot return ErrBusy here (same reasoning as the
-	// Spec.Approve adoption in pkg/shell3.Start).
-	_ = sess.SetApprover(func(ctx context.Context, req shell3.ApprovalRequest) bool {
-		return app.RequestApproval(ctx, formatApprovalQuestion(req))
-	})
 
 	var lastUsage usage
 
@@ -862,33 +848,6 @@ func registerSlashCommands(app slashTarget, sess session, lastUsage *usage, appl
 		Name: "exit", Aliases: []string{"quit"}, Help: "quit shell3",
 		Handler: func(string) { app.Quit() },
 	})
-}
-
-// approvalArgsMax caps the raw-JSON args echoed in an approval question so the
-// inline [approve? y/N] prompt stays readable for tools with huge payloads.
-const approvalArgsMax = 200
-
-// formatApprovalQuestion renders an ApprovalRequest as the one-line question
-// shown by the inline approval prompt: "<agent> wants to run <tool>(<args>)",
-// with the guard's reason appended when present and very long args truncated.
-// Factored out of the SetApprover closure so it is testable without a
-// terminal.
-func formatApprovalQuestion(req shell3.ApprovalRequest) string {
-	args := req.RawArgs
-	if len(args) > approvalArgsMax {
-		// Back off to a rune boundary so the cut never splits a multi-byte
-		// character embedded in the JSON.
-		cut := approvalArgsMax
-		for cut > 0 && !utf8.RuneStart(args[cut]) {
-			cut--
-		}
-		args = args[:cut] + "…"
-	}
-	q := fmt.Sprintf("%s wants to run %s(%s)", req.Agent, req.Tool, args)
-	if req.Reason != "" {
-		q += " — " + req.Reason
-	}
-	return q
 }
 
 func toolNames(tools []shell3.ToolInfo) []string {

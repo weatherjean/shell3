@@ -16,10 +16,3 @@ func TestCustomToolDispatcher(t *testing.T) {
 		t.Fatalf("dispatch: res=%+v called=%q", res, called)
 	}
 }
-
-func TestGuardDecisionConstants(t *testing.T) {
-	// Document the contract: 0=allow,1=block,2=cancel — matches luacfg.Decision.
-	if guardAllow != 0 || guardBlock != 1 || guardCancel != 2 {
-		t.Fatal("guard decision constants drifted from luacfg.Decision")
-	}
-}

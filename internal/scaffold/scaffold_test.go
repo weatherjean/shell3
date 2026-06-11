@@ -38,14 +38,14 @@ func TestRenderBaseConfig(t *testing.T) {
 	if !strings.Contains(string(cfg), "shell3.subagent(") {
 		t.Error("rendered config should declare an example subagent via shell3.subagent(")
 	}
-	if !strings.Contains(string(cfg), "confirm_destructive") {
-		t.Error("rendered config should wire the confirm_destructive ask guard")
+	if !strings.Contains(string(cfg), "shell3.wrap_bash(") {
+		t.Error("rendered config should wire the shell3.wrap_bash bash safety hook")
 	}
 	if strings.Contains(string(cfg), "{{") {
 		t.Errorf("shell3.lua still contains an unrendered template delimiter")
 	}
 	for _, p := range []string{
-		"lib/tools.lua", "lib/guards.lua",
+		"lib/tools.lua",
 		"lib/skills/brainstorming.lua", "lib/skills/history.lua",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
@@ -217,7 +217,7 @@ func TestRenderTelegramConfigLoads(t *testing.T) {
 		t.Fatal(err)
 	}
 	// lib modules copied + config written.
-	for _, p := range []string{"shell3.lua", "lib/tools.lua", "lib/guards.lua"} {
+	for _, p := range []string{"shell3.lua", "lib/tools.lua"} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
 			t.Errorf("missing %s: %v", p, err)
 		}

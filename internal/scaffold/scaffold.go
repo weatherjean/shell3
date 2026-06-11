@@ -86,7 +86,7 @@ func RenderBaseConfig(dir string, v Values, force bool) error {
 
 // RenderTelegramConfig writes the telegram config tree into dir: shell3.lua
 // rendered from the embedded telegram template with v, plus the verbatim lib/
-// modules reused from the base scaffold (tools, guards, and the rest). When force
+// modules reused from the base scaffold (tools and the rest). When force
 // is false, existing files are left untouched (safe to re-run).
 func RenderTelegramConfig(dir string, v TelegramValues, force bool) error {
 	tmplBytes, err := telegramFS.ReadFile(telegramRoot + "/shell3.lua.tmpl")
@@ -104,7 +104,7 @@ func RenderTelegramConfig(dir string, v TelegramValues, force bool) error {
 	if err := writeFile(filepath.Join(dir, "shell3.lua"), buf.Bytes(), 0644, force); err != nil {
 		return err
 	}
-	// Reuse the base lib/ modules (tools, guards, …) verbatim.
+	// Reuse the base lib/ modules (tools, …) verbatim.
 	return fs.WalkDir(baseFS, baseRoot+"/lib", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err

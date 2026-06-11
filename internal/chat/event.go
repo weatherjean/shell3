@@ -52,16 +52,6 @@ const (
 	// EventRetry fires when a transient request failure is about to be
 	// retried. Text holds a human-readable summary (reason + attempt count).
 	EventRetry
-	// EventApprovalRequest fires when a guard answers ask and the call
-	// suspends awaiting the host's verdict. ToolName/ToolInput identify the
-	// call; Text holds the guard's reason. Audit-only: no public mapping.
-	EventApprovalRequest
-	// EventApprovalDecision fires when the verdict arrives. Text is "allow",
-	// "deny" (approver answered false), or "deny (no approver)" (ask with no
-	// Approve hook configured); ToolName identifies the call. Context
-	// cancellation during the wait ends the turn without a decision event.
-	// Audit-only.
-	EventApprovalDecision
 )
 
 func (k EventKind) String() string {
@@ -92,10 +82,6 @@ func (k EventKind) String() string {
 		return "system_reminder"
 	case EventRetry:
 		return "retry"
-	case EventApprovalRequest:
-		return "approval_request"
-	case EventApprovalDecision:
-		return "approval_decision"
 	}
 	return "unknown"
 }
@@ -240,14 +226,6 @@ func emitTurnDone(s *Session, prompt, completion, total int) {
 		SessionID: s.id,
 		Usage:     &EventUsageData{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total},
 	})
-}
-
-func emitApprovalRequest(s *Session, name, input, reason string) {
-	emit(s, Event{Kind: EventApprovalRequest, Time: time.Now(), SessionID: s.id, ToolName: name, ToolInput: input, Text: reason})
-}
-
-func emitApprovalDecision(s *Session, name, verdict string) {
-	emit(s, Event{Kind: EventApprovalDecision, Time: time.Now(), SessionID: s.id, ToolName: name, Text: verdict})
 }
 
 // emit delivers an event to the session sink. Delivery is synchronous and

@@ -18,9 +18,6 @@ type Bot struct {
 	sess   *shell3.Session
 	chatID int64 // the single allowed chat
 
-	approvals       *approvalRegistry
-	approvalTimeout time.Duration // 0 → 5 min default; set in tests
-
 	dashURL string
 	workDir string // resolves relative paths for send_media_telegram
 
@@ -47,16 +44,15 @@ func (b *Bot) SetJobRunner(fn func(name string) error) { b.runJob = fn }
 func (b *Bot) SetReloader(fn func() (shell3.ReloadResult, error)) { b.reload = fn }
 
 // decorateSession (re)applies the bot's host-level session customizations:
-// the approval hook and host tools. Must be called after NewBot AND after every
-// Runtime.Reload (which rebuilds s.cfg and drops these). Safe only when idle.
+// the host tools. Must be called after NewBot AND after every Runtime.Reload
+// (which rebuilds s.cfg and drops these). Safe only when idle.
 func (b *Bot) decorateSession() {
-	_ = b.sess.SetApprover(b.approve)
 	b.registerSendTool()
 	b.registerReloadTool()
 	b.registerStatusTool()
 }
 
-// RedecorateSession re-applies host tools + approver after a reload rebuilt s.cfg.
+// RedecorateSession re-applies host tools after a reload rebuilt s.cfg.
 // Exported for the host reload coordinator (different package).
 func (b *Bot) RedecorateSession() { b.decorateSession() }
 
@@ -64,12 +60,11 @@ func (b *Bot) RedecorateSession() { b.decorateSession() }
 // dashURL is the URL to the dashboard (empty to disable).
 func NewBot(client tgClient, rt *shell3.Runtime, sess *shell3.Session, chatID int64, dashURL string) *Bot {
 	b := &Bot{
-		client:    client,
-		rt:        rt,
-		sess:      sess,
-		chatID:    chatID,
-		approvals: newApprovalRegistry(),
-		dashURL:   dashURL,
+		client:  client,
+		rt:      rt,
+		sess:    sess,
+		chatID:  chatID,
+		dashURL: dashURL,
 	}
 	b.decorateSession()
 	return b
@@ -101,7 +96,9 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 		return // unauthorized: drop silently
 	}
 	if m.Callback != nil {
-		b.handleCallback(ctx, m.Callback) // defined in approval.go
+		// Inline-button callbacks were only ever produced by the (now-removed)
+		// approval flow. Acknowledge to stop the client spinner and drop it.
+		_ = b.client.AnswerCallback(ctx, m.Callback.ID)
 		return
 	}
 	if strings.HasPrefix(m.Text, "/") {
@@ -171,6 +168,14 @@ func withReplyContext(text, replyTo string) string {
 		lines[i] = "> " + ln
 	}
 	return strings.Join(lines, "\n") + "\n\n" + text
+}
+
+// truncate caps s at n bytes, appending an ellipsis when it cuts.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
 
 // keepTyping shows the "typing…" chat action and refreshes it every 4s until

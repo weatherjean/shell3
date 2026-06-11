@@ -65,19 +65,12 @@ type DashboardConfig struct {
 	URL     string
 }
 
-// GuardEntry is one middleware in the on_tool_call chain: a Lua function that
-// inspects a tool call and returns an allow/block/cancel decision.
-type GuardEntry struct {
-	fn *lua.LFunction
-}
-
 type Agent struct {
 	Name, ModelName, Prompt string
 	Gates                   ToolGates
 	CustomTools             []string
 	Skills                  []string
-	SkillsDisabled          bool // true only when tools = { skill = false } is explicitly set
-	Guard                   []GuardEntry
+	SkillsDisabled          bool     // true only when tools = { skill = false } is explicitly set
 	Subagents               []string // names of registered subagents this agent can spawn
 	Description             string   // model-facing "when to use" (unused for top-level agents)
 }
@@ -91,7 +84,6 @@ type Subagent struct {
 	CustomTools                          []string
 	Skills                               []string
 	SkillsDisabled                       bool
-	Guard                                []GuardEntry
 }
 
 // SkillsActive reports whether skills are enabled: the agent has at least one
@@ -101,7 +93,7 @@ func (a Agent) SkillsActive() bool {
 }
 
 // LoadedConfig is the parsed result. L stays alive for the session so custom
-// tool handlers and guards can run; callers MUST call Close when done.
+// tool handlers and the wrap_bash hook can run; callers MUST call Close when done.
 type LoadedConfig struct {
 	Models  []Model
 	Tools   map[string]CustomTool
@@ -119,9 +111,15 @@ type LoadedConfig struct {
 	telegram  TelegramConfig
 	cron      []CronJob
 
+	// wrapBash is the registered shell3.wrap_bash hook (nil when none declared):
+	// a single Lua function the bash/bash_bg tools pass their command through
+	// before execution. See luaWrapBash / WrapBash (lua_bash.go). A second
+	// shell3.wrap_bash call replaces it (last writer wins).
+	wrapBash *lua.LFunction
+
 	L  *lua.LState
 	mu sync.Mutex
-	// vmLockHeld is true while c.mu is held by CallTool/runLuaGuard driving the
+	// vmLockHeld is true while c.mu is held by CallTool/WrapBash driving the
 	// VM. See withIOUnlock (lua_bash.go) for the locking model.
 	vmLockHeld bool
 }
@@ -220,6 +218,11 @@ func (c *LoadedConfig) Telegram() TelegramConfig { return c.telegram }
 
 // Cron returns the parsed shell3.cron jobs (nil if absent).
 func (c *LoadedConfig) Cron() []CronJob { return c.cron }
+
+// HasWrapBash reports whether a shell3.wrap_bash hook was declared. agentsetup
+// uses it to decide whether to wire a WrapBash closure onto chat.Config (nil
+// closure = no wrapping = allow all, the unsafe default).
+func (c *LoadedConfig) HasWrapBash() bool { return c.wrapBash != nil }
 
 // StubNames returns the registered stub-tool names with their redirect
 // messages. The map is config-global (not per-agent); agentsetup appends one

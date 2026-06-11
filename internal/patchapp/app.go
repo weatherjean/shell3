@@ -101,19 +101,6 @@ type App struct {
 	busy         bool
 	streamCancel context.CancelFunc
 
-	// Pending tool-approval prompt. Non-nil while a RequestApproval call is
-	// blocked waiting for a y/N answer; the input goroutine resolves it via
-	// resolveApproval. Guarded by mu. Buffered (cap 1) so the resolver never
-	// blocks.
-	pendingApproval chan bool
-
-	// approvalMu serializes whole RequestApproval calls. Guard chains are
-	// sequential per turn, so today there is never more than one outstanding
-	// request — but two sessions could share an App in the future, and a
-	// second concurrent request must block until the first resolves rather
-	// than clobber pendingApproval.
-	approvalMu sync.Mutex
-
 	// Quit/exit state.
 	lastCtrlC time.Time
 	exitFlag  bool
@@ -177,104 +164,8 @@ func (a *App) Quit() {
 	a.mu.Lock()
 	a.exitFlag = true
 	a.mu.Unlock()
-	// Deny any pending approval prompt so a turn goroutine blocked in
-	// RequestApproval cannot wedge teardown.
-	a.resolveApproval(false)
 	if a.term.pauseWakeW != nil {
 		_, _ = a.term.pauseWakeW.Write([]byte{0})
-	}
-}
-
-// RequestApproval prints question as a dim [approve? y/N] prompt, blocks
-// until the user answers on the input goroutine (y/Y approves; n/N, Esc,
-// Enter, or ctrl+c denies), and returns the verdict. Designed to be called
-// from the turn goroutine while busy. Concurrent calls are serialized by
-// approvalMu: a second request blocks until the first resolves. If the app
-// is exiting (Quit) the prompt resolves false so the caller cannot wedge.
-//
-// ctx is the turn context: if it is cancelled (Ctrl-C/ESC interrupt, or
-// teardown) while the prompt is still pending, the wait unblocks and the
-// call returns false (deny). Without this, a turn cancelled mid-approval —
-// the input goroutine never receiving a y/N key — would leave the turn
-// goroutine blocked forever on the verdict channel.
-func (a *App) RequestApproval(ctx context.Context, question string) bool {
-	a.approvalMu.Lock()
-	defer a.approvalMu.Unlock()
-
-	// Build the full prompt block up front. Each line of a multi-line
-	// question is echoed separately so it doesn't corrupt the terminal —
-	// same convention as the steering echo in handleEnter — and each line
-	// is fully wrapped in Dim…Reset so no escape bleeds across lines.
-	qLines := patchtui.SplitLines(question)
-	if len(qLines) == 0 {
-		qLines = []string{question}
-	}
-	lines := make([]string, 0, len(qLines))
-	for i, ql := range qLines {
-		if i == 0 {
-			lines = append(lines, patchtui.Dim+"[approve? y/N] "+ql+patchtui.Reset)
-		} else {
-			lines = append(lines, patchtui.Dim+"  "+ql+patchtui.Reset)
-		}
-	}
-
-	// Register the pending prompt and print the block inside ONE mu critical
-	// section (the print is Print's body inlined — calling Print here would
-	// self-deadlock on mu): a single commit keeps concurrent Print calls from
-	// interleaving inside the block, and registering while the block lands on
-	// screen means no keystroke can be routed to the resolver before the
-	// prompt is visible. mu is released before blocking on the channel.
-	a.mu.Lock()
-	if a.exitFlag {
-		a.mu.Unlock()
-		return false
-	}
-	ch := make(chan bool, 1)
-	a.pendingApproval = ch
-	w, _ := patchtui.Size()
-	wrapped := wrapCommittedLines(lines, w)
-	if a.term.paused {
-		a.r.Print(wrapped)
-	} else {
-		a.r.PrintAndRender(wrapped, a.liveFrameLocked())
-	}
-	a.mu.Unlock()
-
-	var verdict bool
-	select {
-	case verdict = <-ch:
-	case <-ctx.Done():
-		// The turn was cancelled (Ctrl-C/ESC/teardown) before the user
-		// answered. Clear the pending state under mu so the now-orphaned
-		// channel can't be resolved later (a stray key after this would
-		// otherwise send on a channel nobody reads), then deny.
-		a.mu.Lock()
-		if a.pendingApproval == ch {
-			a.pendingApproval = nil
-		}
-		a.mu.Unlock()
-		a.PrintLine(patchtui.Dim + "[denied]" + patchtui.Reset)
-		return false
-	}
-	if verdict {
-		a.PrintLine(patchtui.Dim + "[approved]" + patchtui.Reset)
-	} else {
-		a.PrintLine(patchtui.Dim + "[denied]" + patchtui.Reset)
-	}
-	return verdict
-}
-
-// resolveApproval delivers verdict to a pending RequestApproval, if any,
-// and clears the pending state. Safe to call from any goroutine and when
-// nothing is pending (no-op). The channel is buffered, so the send never
-// blocks; clearing under mu makes a double resolution impossible.
-func (a *App) resolveApproval(verdict bool) {
-	a.mu.Lock()
-	ch := a.pendingApproval
-	a.pendingApproval = nil
-	a.mu.Unlock()
-	if ch != nil {
-		ch <- verdict
 	}
 }
 

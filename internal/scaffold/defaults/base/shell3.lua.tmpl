@@ -4,7 +4,6 @@
 -- the shell3 repo under docs/cookbook/.
 
 local tools  = require("lib.tools")            -- { web_fetch, brave_search }
-local guards = require("lib.guards")           -- { no_env_edit }
 local brainstorming = require("lib.skills.brainstorming")
 local history = require("lib.skills.history")
 
@@ -82,6 +81,21 @@ shell3.model("{{.Name | luaesc}}", {
 {{end}}})
 
 -- ---------------------------------------------------------------------------
+-- Bash safety hook (shell3.wrap_bash) — YOUR ONLY BASH GUARD.
+-- ---------------------------------------------------------------------------
+-- UNSAFE BY DEFAULT: bash and bash_bg run with no restrictions. This hook is the
+-- ONLY place bash commands can be inspected, rewritten, or blocked. The default
+-- below is a pass-through that lets EVERYTHING through. To lock things down,
+-- inspect `cmd` and return nil + a reason to block, or a rewritten string to
+-- sandbox. A broken hook fails CLOSED (the command is blocked), never open.
+--   -- example: block recursive force-remove
+--   shell3.wrap_bash(function(cmd)
+--     if cmd:match("rm%s+%-rf") then return nil, "refusing rm -rf" end
+--     return cmd
+--   end)
+shell3.wrap_bash(function(cmd) return cmd end)
+
+-- ---------------------------------------------------------------------------
 -- Stub tools (optional) — redirect hallucinated tool calls to bash/edit_file.
 -- ---------------------------------------------------------------------------
 -- Models trained on other harnesses reflexively call read_file/grep/write_file.
@@ -107,7 +121,6 @@ cat, git log) and report a concise, concrete answer with file:line references.
 You cannot edit files. Decide and proceed; no human is available.
 ]],
   tools = { bash = true },
-  on_tool_call = { guards.no_env_edit },
 })
 
 -- ---------------------------------------------------------------------------
@@ -147,7 +160,6 @@ You are an expert coding assistant inside shell3. Work autonomously as a senior 
     custom            = { tools.web_fetch, tools.brave_search },
   },
   skills = { self_evolve, history },
-  on_tool_call = { guards.no_env_edit, guards.confirm_destructive },
 })
 
 shell3.agent({
@@ -178,7 +190,6 @@ You are the design partner inside shell3. You do NOT edit files — you investig
     custom  = { tools.web_fetch, tools.brave_search },
   },
   skills = { brainstorming, history },
-  on_tool_call = { guards.no_env_edit, guards.confirm_destructive },
 })
 
 -- ---------------------------------------------------------------------------

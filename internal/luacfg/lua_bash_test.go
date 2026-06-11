@@ -9,7 +9,7 @@ import (
 )
 
 // TestLuaBashHonorsToolContext proves luaBash derives its command context from
-// the VM's tool context (L.Context, set by CallTool/runLuaGuard) rather than a
+// the VM's tool context (L.Context, set by CallTool/WrapBash) rather than a
 // fresh Background context. A pre-cancelled context must abort the command
 // immediately instead of waiting out the (long) timeout.
 func TestLuaBashHonorsToolContext(t *testing.T) {
@@ -61,7 +61,7 @@ func TestWithIOUnlockTopLevelLeavesForeignLockHeld(t *testing.T) {
 	}()
 	<-bHolds
 
-	// c.vmLockHeld is false: this call is NOT inside CallTool/runLuaGuard.
+	// c.vmLockHeld is false: this call is NOT inside CallTool/WrapBash.
 	heldDuringF := false
 	c.withIOUnlock(func() {
 		// Probe whether the lock is still held by B. TryLock succeeds only if
@@ -83,12 +83,12 @@ func TestWithIOUnlockTopLevelLeavesForeignLockHeld(t *testing.T) {
 
 // TestWithIOUnlockReleasesAndReacquiresWhenHeld is the positive-path companion:
 // when this goroutine genuinely holds the VM lock (vmLockHeld == true, as inside
-// CallTool/runLuaGuard), withIOUnlock MUST release c.mu around f() so other work
+// CallTool/WrapBash), withIOUnlock MUST release c.mu around f() so other work
 // can proceed, then reacquire it. A no-op withIOUnlock would fail this.
 func TestWithIOUnlockReleasesAndReacquiresWhenHeld(t *testing.T) {
 	c := &LoadedConfig{}
 
-	// Simulate being inside CallTool/runLuaGuard: we hold c.mu and the flag set.
+	// Simulate being inside CallTool/WrapBash: we hold c.mu and the flag set.
 	c.mu.Lock()
 	c.vmLockHeld = true
 

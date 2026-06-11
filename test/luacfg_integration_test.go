@@ -26,11 +26,12 @@ func writeTmpFile(t *testing.T, dir, name, body string) string {
 	return p
 }
 
-// TestLuacfgIntegration_GuardAndCustomTool loads a luacfg config and drives a
-// full chat turn through the pkg/chat turn loop using fakellm. It asserts:
+// TestLuacfgIntegration_WrapBashAndCustomTool loads a luacfg config and drives a
+// full chat turn through the chat turn loop using fakellm. It asserts:
 //   - A custom tool call returns the handler's string output.
-//   - A bash call with a dangerous command is blocked by a custom guard.
-func TestLuacfgIntegration_GuardAndCustomTool(t *testing.T) {
+//   - A bash call with a dangerous command is blocked by shell3.wrap_bash
+//     (the guard engine's replacement) before it ever executes.
+func TestLuacfgIntegration_WrapBashAndCustomTool(t *testing.T) {
 	dir := t.TempDir()
 	writeTmpFile(t, dir, "shell3.lua", `
 shell3.model("m", {
@@ -52,13 +53,11 @@ local greet = shell3.tool({
   end,
 })
 
-local function guard_block_rm(call)
-  local cmd = tostring((call.params or {}).command or "")
-  if cmd:match("rm") then
-    return { action = "block", reason = "blocked dangerous command" }
-  end
-  return { action = "allow" }
-end
+-- Block any rm command; rewrite nothing else.
+shell3.wrap_bash(function(cmd)
+  if cmd:match("rm") then return nil, "blocked dangerous command" end
+  return cmd
+end)
 
 shell3.agent({
   name  = "test-agent",
@@ -68,7 +67,6 @@ shell3.agent({
     bash   = true,
     custom = { greet },
   },
-  on_tool_call = { guard_block_rm },
 })
 `)
 
@@ -78,10 +76,9 @@ shell3.agent({
 	}
 	defer lc.Close()
 
-	// Verify wiring closures directly before running the full turn.
 	ctx := context.Background()
 
-	// Custom tool closure: greet tool should return "hello, test"
+	// Custom tool closure: greet tool should return "hello, test".
 	toolOut, err := lc.CallTool(ctx, "greet", `{"name":"test"}`)
 	if err != nil {
 		t.Fatalf("CallTool: %v", err)
@@ -90,48 +87,38 @@ shell3.agent({
 		t.Errorf("CallTool output: got %q, want %q", toolOut, "hello, test")
 	}
 
-	agent := lc.FirstAgent()
-
-	// Guard closure: rm -rf / should be blocked
-	d, reason, err := lc.OnToolCallFor(agent, ctx, "bash", map[string]any{"command": "rm -rf /"})
-	if err != nil {
-		t.Fatalf("OnToolCallFor: %v", err)
+	// wrap_bash closure: rm -rf / should be blocked, echo allowed.
+	if !lc.HasWrapBash() {
+		t.Fatal("expected a wrap_bash hook to be declared")
 	}
-	if d != luacfg.DecisionBlock {
-		t.Errorf("guard: expected DecisionBlock for rm -rf /, got %v (reason=%q)", d, reason)
+	_, allowed, reason, err := lc.WrapBash(ctx, "rm -rf /")
+	if err != nil {
+		t.Fatalf("WrapBash: %v", err)
+	}
+	if allowed {
+		t.Error("wrap_bash should block rm -rf /")
 	}
 	if !strings.Contains(reason, "dangerous") {
-		t.Errorf("guard reason should mention 'dangerous', got: %q", reason)
+		t.Errorf("wrap_bash reason should mention 'dangerous', got: %q", reason)
 	}
-
-	// Guard closure: safe bash command should be allowed
-	d2, _, err := lc.OnToolCallFor(agent, ctx, "bash", map[string]any{"command": "echo hello"})
+	cmd, allowed2, _, err := lc.WrapBash(ctx, "echo hello")
 	if err != nil {
-		t.Fatalf("OnToolCallFor (safe): %v", err)
+		t.Fatalf("WrapBash (safe): %v", err)
 	}
-	if d2 != luacfg.DecisionAllow {
-		t.Errorf("guard: expected DecisionAllow for echo hello, got %v", d2)
+	if !allowed2 || cmd != "echo hello" {
+		t.Errorf("wrap_bash should allow 'echo hello' unchanged, got allowed=%v cmd=%q", allowed2, cmd)
 	}
 
-	// Now run the fuller turn-loop test using fakellm.
-	// Script:
-	//   Turn 1: assistant calls greet("world"), then returns final text "done".
-	//   Turn 2 (scripted as the follow-up after tool result): assistant calls
-	//     bash("rm -rf /"), which is blocked, then returns "done".
-	// We use two separate sessions to keep the assertions clean.
+	wrapBash := func(ctx context.Context, cmd string) (string, bool, string, error) {
+		return lc.WrapBash(ctx, cmd)
+	}
 
 	// --- Turn 1: custom tool call path ---
 	t.Run("custom_tool_via_turn", func(t *testing.T) {
 		fake := fakellm.New(
-			// First stream call: emit a greet tool call.
 			fakellm.Script{Events: []llm.StreamEvent{
-				{ToolCall: &llm.ToolCall{
-					ID:      "1",
-					Name:    "greet",
-					RawArgs: `{"name":"world"}`,
-				}},
+				{ToolCall: &llm.ToolCall{ID: "1", Name: "greet", RawArgs: `{"name":"world"}`}},
 			}},
-			// Second stream call (after tool result): emit final text.
 			fakellm.Script{Events: []llm.StreamEvent{
 				{TextDelta: "done"},
 				{Usage: &llm.Usage{PromptTokens: 5, CompletionTokens: 1, TotalTokens: 6}},
@@ -139,11 +126,6 @@ shell3.agent({
 		)
 
 		a := lc.FirstAgent()
-		customNames := map[string]bool{"greet": true}
-		toolGuard := func(ctx context.Context, t string, p map[string]any) (int, string, error) {
-			d, r, e := lc.OnToolCallFor(a, ctx, t, p)
-			return int(d), r, e
-		}
 		customDefs := lc.CustomToolsFor(a.CustomTools)
 		toolDefs := luacfg.ToolDefs(a.Gates, customDefs, len(a.Skills) > 0)
 
@@ -159,8 +141,8 @@ shell3.agent({
 			StatusLine:      "test │ x",
 			Log:             applog.Noop{},
 			CustomTool:      lc.CallTool,
-			CustomToolNames: customNames,
-			ToolGuard:       toolGuard,
+			CustomToolNames: map[string]bool{"greet": true},
+			WrapBash:        wrapBash,
 		}
 
 		turnCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -168,7 +150,6 @@ shell3.agent({
 		sess.Run(turnCtx, turnCfg, "say hi")
 		sess.End("ok")
 
-		// Check that a tool_result event containing "hello, world" was emitted.
 		var foundToolResult bool
 		for _, ev := range events {
 			if ev.Kind == chat.EventToolResult && strings.Contains(ev.ToolOutput, "hello, world") {
@@ -185,18 +166,12 @@ shell3.agent({
 		}
 	})
 
-	// --- Turn 2: guard blocks dangerous bash call ---
-	t.Run("guard_blocks_bash_via_turn", func(t *testing.T) {
+	// --- Turn 2: wrap_bash blocks the dangerous bash call ---
+	t.Run("wrap_bash_blocks_via_turn", func(t *testing.T) {
 		fake := fakellm.New(
-			// First stream call: emit a bash tool call with dangerous command.
 			fakellm.Script{Events: []llm.StreamEvent{
-				{ToolCall: &llm.ToolCall{
-					ID:      "1",
-					Name:    "bash",
-					RawArgs: `{"command":"rm -rf /"}`,
-				}},
+				{ToolCall: &llm.ToolCall{ID: "1", Name: "bash", RawArgs: `{"command":"rm -rf /"}`}},
 			}},
-			// Second stream call (after tool result with block message): final text.
 			fakellm.Script{Events: []llm.StreamEvent{
 				{TextDelta: "blocked"},
 				{Usage: &llm.Usage{PromptTokens: 5, CompletionTokens: 1, TotalTokens: 6}},
@@ -204,11 +179,6 @@ shell3.agent({
 		)
 
 		a := lc.FirstAgent()
-		customNames := map[string]bool{"greet": true}
-		toolGuard := func(ctx context.Context, t string, p map[string]any) (int, string, error) {
-			d, r, e := lc.OnToolCallFor(a, ctx, t, p)
-			return int(d), r, e
-		}
 		customDefs := lc.CustomToolsFor(a.CustomTools)
 		toolDefs := luacfg.ToolDefs(a.Gates, customDefs, len(a.Skills) > 0)
 
@@ -224,8 +194,9 @@ shell3.agent({
 			StatusLine:      "test │ x",
 			Log:             applog.Noop{},
 			CustomTool:      lc.CallTool,
-			CustomToolNames: customNames,
-			ToolGuard:       toolGuard,
+			CustomToolNames: map[string]bool{"greet": true},
+			WrapBash:        wrapBash,
+			Handlers:        chat.NewHandlers(chat.Config{}),
 		}
 
 		turnCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -233,21 +204,21 @@ shell3.agent({
 		sess.Run(turnCtx, turnCfg, "run dangerous command")
 		sess.End("ok")
 
-		// Check that a tool_result event containing "USER DENIED" was emitted
-		// (turn.go emits this when the guard returns DecisionBlock).
-		var foundDenied bool
+		// The bash handler returns "error: blocked by wrap_bash: ..." instead of
+		// executing the command.
+		var foundBlocked bool
 		for _, ev := range events {
-			if ev.Kind == chat.EventToolResult && strings.Contains(ev.ToolOutput, "USER DENIED") {
-				foundDenied = true
+			if ev.Kind == chat.EventToolResult && strings.Contains(ev.ToolOutput, "blocked by wrap_bash") {
+				foundBlocked = true
 				break
 			}
 		}
-		if !foundDenied {
+		if !foundBlocked {
 			var texts []string
 			for _, ev := range events {
 				texts = append(texts, ev.Kind.String()+"="+ev.ToolOutput)
 			}
-			t.Errorf("expected tool result with 'USER DENIED'; events: %v", texts)
+			t.Errorf("expected tool result blocked by wrap_bash; events: %v", texts)
 		}
 	})
 }

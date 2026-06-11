@@ -27,6 +27,18 @@ func (BashBgHandler) Execute(ctx context.Context, id string, args json.RawMessag
 	if wd == "" {
 		wd = cfg.WorkDir
 	}
+	// shell3.wrap_bash applies to bash_bg too: allow / rewrite / block the
+	// command before it is backgrounded. Nil hook = no wrapping (unsafe default).
+	if cfg.WrapBash != nil {
+		rewritten, allowed, reason, err := cfg.WrapBash(ctx, p.Command)
+		if err != nil {
+			return "error: wrap_bash failed: " + err.Error(), nil
+		}
+		if !allowed {
+			return "error: blocked by wrap_bash: " + reason, nil
+		}
+		p.Command = rewritten
+	}
 	// cfg.SinkPath is the session's notification sink (empty for front-ends
 	// that don't wire one): the reaper appends a bg_done notification there on
 	// exit so the host can tell the agent the background job finished.

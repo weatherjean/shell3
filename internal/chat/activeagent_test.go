@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"context"
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/llm"
@@ -17,10 +16,8 @@ func TestApplyActiveAgentCopiesAllAgentFields(t *testing.T) {
 		Headless:   true,
 	}
 
-	guard := func(context.Context, string, map[string]any) (int, string, error) { return 0, "", nil }
 	rt := ActiveAgent{
 		Personality:     persona.Persona{Name: "plan", SystemPrompt: "sp"},
-		ToolGuard:       guard,
 		ModeLabel:       "plan",
 		ActiveSkills:    []string{"s1"},
 		ActiveTools:     []string{"bash"},
@@ -52,9 +49,6 @@ func TestApplyActiveAgentCopiesAllAgentFields(t *testing.T) {
 	}
 	if !cfg.CustomToolNames["foo"] {
 		t.Errorf("CustomToolNames not copied: %v", cfg.CustomToolNames)
-	}
-	if cfg.ToolGuard == nil {
-		t.Error("ToolGuard not copied")
 	}
 	if want := "plan │ gpt-x"; cfg.StatusLine != want {
 		t.Errorf("StatusLine = %q, want %q", cfg.StatusLine, want)
