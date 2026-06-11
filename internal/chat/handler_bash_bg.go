@@ -48,7 +48,7 @@ func (BashBgHandler) Execute(ctx context.Context, id string, args json.RawMessag
 	// cfg.SinkPath is the session's notification sink (empty for front-ends
 	// that don't wire one): the reaper appends a bg_done notification there on
 	// exit so the host can tell the agent the background job finished.
-	job, err := bgjobs.Start(p.Command, wd, cfg.SinkPath, notifyOnExit)
+	job, err := bgjobs.Start(p.Command, wd, nil, cfg.SinkPath, notifyOnExit)
 	if err != nil {
 		return "", fmt.Errorf("bash_bg: %w", err)
 	}

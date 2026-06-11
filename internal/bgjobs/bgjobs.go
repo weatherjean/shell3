@@ -64,7 +64,11 @@ var fileLock sync.Mutex
 // false because the child self-reports its own agent_done to the same sink — so
 // the agent is notified exactly once, not twice (a generic bg_done AND the rich
 // agent_done). Plain bg jobs (servers, watchers) pass true and keep bg_done.
-func Start(command, workdir, sinkPath string, notifyOnExit bool) (Job, error) {
+// env, when non-empty, supplies extra KEY=VALUE entries appended to the
+// inherited environment (os.Environ); used by command-template custom tools to
+// pass their declared params + secrets to the background command. nil/empty
+// means the job inherits only the host environment (the prior behavior).
+func Start(command, workdir string, env []string, sinkPath string, notifyOnExit bool) (Job, error) {
 	if command == "" {
 		return Job{}, fmt.Errorf("command is required")
 	}
@@ -96,6 +100,9 @@ func Start(command, workdir, sinkPath string, notifyOnExit bool) (Job, error) {
 
 	c := exec.Command("bash", "-c", command)
 	c.Dir = workdir
+	if len(env) > 0 {
+		c.Env = append(os.Environ(), env...)
+	}
 	c.Stdin = devNull
 	c.Stdout = logFile
 	c.Stderr = logFile
