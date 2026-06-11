@@ -74,20 +74,25 @@ type SessionOpts struct {
 	DisableSubagents bool
 }
 
-// HostEventKind enumerates out-of-turn runtime events. v1: Wake only.
+// HostEventKind enumerates out-of-turn runtime events.
 type HostEventKind int
 
 const (
 	// Wake signals a session's inbox gained an item while no turn was running.
-	// The host should call Session.RunQueued to react.
+	// The host should call Session.RunQueued to react (runs a model turn).
 	Wake HostEventKind = iota
+	// Notice is a ready-to-display message for the session's chat (e.g. a cron /
+	// host-dispatch result). The host shows Text verbatim; it is NOT a turn and
+	// never touches the agent's inbox or context.
+	Notice
 )
 
-// HostEvent is one out-of-turn event for a session. Payload is reserved for
-// future kinds; Wake carries none.
+// HostEvent is one out-of-turn event for a session. Notice carries Text;
+// Payload is reserved for future kinds.
 type HostEvent struct {
 	Session string
 	Kind    HostEventKind
+	Text    string
 	Payload any
 }
 

@@ -171,9 +171,15 @@ func (b *Bot) hasTool(name string) bool {
 	return false
 }
 
-// consumeWakes pushes results when the session wakes (subagent/cron results).
+// consumeWakes handles out-of-turn runtime events for this session.
 // Single-consumer note: rt.Events() is one channel; the bot is its only consumer
 // here (single session). If a future front-end shares the Runtime, route by ev.Session.
+//
+//   - Notice (cron/host-dispatch result): shown verbatim as a system message — no
+//     model turn, so the operator sees the actual result and nothing is injected
+//     into the agent's context.
+//   - Wake (e.g. a spawn_agent result the agent itself requested): runs a queued
+//     turn so the agent reacts to it.
 func (b *Bot) consumeWakes(ctx context.Context) {
 	for {
 		select {
@@ -183,14 +189,21 @@ func (b *Bot) consumeWakes(ctx context.Context) {
 			if !ok {
 				return
 			}
-			if ev.Kind != shell3.Wake || ev.Session != b.sess.Name() {
+			if ev.Session != b.sess.Name() {
 				continue
 			}
-			stopTyping := b.keepTyping(ctx)
-			reply := b.drainTurn(b.sess.RunQueued(ctx))
-			stopTyping()
-			if reply != "" {
-				b.sendReply(ctx, reply)
+			switch ev.Kind {
+			case shell3.Notice:
+				if ev.Text != "" {
+					b.sendReply(ctx, "🔔 "+ev.Text)
+				}
+			case shell3.Wake:
+				stopTyping := b.keepTyping(ctx)
+				reply := b.drainTurn(b.sess.RunQueued(ctx))
+				stopTyping()
+				if reply != "" {
+					b.sendReply(ctx, reply)
+				}
 			}
 		}
 	}

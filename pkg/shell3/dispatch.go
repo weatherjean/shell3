@@ -90,11 +90,12 @@ func (s *Session) Dispatch(agent, prompt string, opts DispatchOpts) (string, err
 	return id, nil
 }
 
-// deliverDispatchResult injects an already-labeled host-dispatch result into
-// this session's inbox and wakes it when idle (sibling of deliverSubagentResult).
+// deliverDispatchResult surfaces a finished host/cron dispatch result as a direct
+// chat Notice on this session — shown verbatim, NOT injected into the agent's
+// inbox. A host-initiated job (cron) is a notification to the operator, so it must
+// not trigger a hidden model turn or pollute the conversation history. This is the
+// deliberate contrast with deliverSubagentResult, which DOES inject + wake because
+// there the agent itself asked for the subagent's result mid-turn.
 func (s *Session) deliverDispatchResult(rt *Runtime, labeled string) {
-	s.sess.Interject(labeled)
-	if !s.isBusy() {
-		rt.emit(HostEvent{Session: s.name, Kind: Wake})
-	}
+	rt.emit(HostEvent{Session: s.name, Kind: Notice, Text: labeled})
 }

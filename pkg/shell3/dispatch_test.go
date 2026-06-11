@@ -24,7 +24,7 @@ func dispatchCfg(text string) func() chat.Config {
 	}
 }
 
-func TestDispatch_NotifyDeliversAndWakes(t *testing.T) {
+func TestDispatch_NotifyDeliversNotice(t *testing.T) {
 	rt := newTestRuntime(t, dispatchCfg("job done"))
 	main, err := rt.Session(SessionOpts{Name: "telegram"})
 	if err != nil {
@@ -34,17 +34,21 @@ func TestDispatch_NotifyDeliversAndWakes(t *testing.T) {
 	if err != nil || id == "" {
 		t.Fatalf("dispatch: id=%q err=%v", id, err)
 	}
+	// notify=true surfaces a direct Notice carrying the labeled result — shown
+	// verbatim to the operator, NOT injected into the agent's inbox.
 	select {
 	case ev := <-rt.Events():
-		if ev.Kind != Wake || ev.Session != "telegram" {
+		if ev.Kind != Notice || ev.Session != "telegram" {
 			t.Fatalf("unexpected event: %+v", ev)
 		}
+		if !strings.Contains(ev.Text, "job done") || !strings.Contains(ev.Text, "cron:nightly") {
+			t.Fatalf("notice should carry the labeled result, got %q", ev.Text)
+		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("expected a Wake from the notify=true dispatch")
+		t.Fatal("expected a Notice from the notify=true dispatch")
 	}
-	reply := drainText(main.RunQueued(dispatchCtx()))
-	if !strings.Contains(reply, "job done") {
-		t.Fatalf("expected the labeled result in the wake turn, got %q", reply)
+	if main.HasQueuedInput() {
+		t.Fatal("notify dispatch must not queue input (no hidden model turn)")
 	}
 }
 
