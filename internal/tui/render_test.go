@@ -8,24 +8,6 @@ import (
 	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
-func TestIsHistoryTool(t *testing.T) {
-	tests := []struct {
-		name string
-		want bool
-	}{
-		{name: "history_get", want: true},
-		{name: "history_search", want: true},
-		{name: "prune_tool_result", want: false},
-		{name: "bash", want: false},
-	}
-
-	for _, tt := range tests {
-		if got := isHistoryTool(tt.name); got != tt.want {
-			t.Errorf("isHistoryTool(%q) = %v, want %v", tt.name, got, tt.want)
-		}
-	}
-}
-
 func TestToolCallHeaderColorByCategory(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -35,7 +17,6 @@ func TestToolCallHeaderColorByCategory(t *testing.T) {
 		wantColor  string
 	}{
 		{name: "builtin", tool: "prune_tool_result", args: `{"tool_call_id":"1"}`, wantColor: patchtui.Pink},
-		{name: "history", tool: "history_search", args: `{"terms":["go"]}`, wantColor: patchtui.Blue},
 		{name: "user", tool: "brave_search", args: `{"query":"shell3"}`, isUserTool: true, wantColor: patchtui.Violet},
 	}
 
@@ -98,6 +79,33 @@ func TestRenderToolResultBody_EditFileColorizes(t *testing.T) {
 	// Added line should carry the green add background style.
 	if !strings.Contains(got, patchtui.BgRGB(20, 60, 20)) {
 		t.Errorf("edit_file body not colorized: %q", got)
+	}
+}
+
+func TestRenderToolResultBody_BashForwardsANSIColors(t *testing.T) {
+	// An embedded SGR color must survive: not dimmed, not stripped. The body
+	// must also end with Reset so a dangling color can't bleed into later lines.
+	colored := "\033[31mred line\033[0m\nplain line"
+	for _, tool := range []string{"bash", "bash_bg"} {
+		ev := shell3.Event{Kind: shell3.ToolResult, ToolName: tool, ToolOutput: colored}
+		got := renderToolResultBody(ev)
+		if !strings.Contains(got, "\033[31mred line") {
+			t.Errorf("%s: embedded ANSI color not preserved: %q", tool, got)
+		}
+		if strings.Contains(got, patchtui.Dim) {
+			t.Errorf("%s: bash output was dimmed, want forwarded as-is: %q", tool, got)
+		}
+		if !strings.HasSuffix(got, patchtui.Reset) {
+			t.Errorf("%s: bash body must end with Reset, got %q", tool, got)
+		}
+	}
+}
+
+func TestRenderToolResultBody_NonBashIsDimmed(t *testing.T) {
+	ev := shell3.Event{Kind: shell3.ToolResult, ToolName: "read_media", ToolOutput: "some output"}
+	got := renderToolResultBody(ev)
+	if !strings.Contains(got, patchtui.Dim+"some output"+patchtui.Reset) {
+		t.Errorf("non-bash tool output should be dimmed line-by-line, got %q", got)
 	}
 }
 

@@ -21,27 +21,15 @@ func dimLines(s string) string {
 	return strings.Join(lines, "\n")
 }
 
-func isHistoryTool(name string) bool {
-	switch name {
-	case "history_get", "history_search":
-		return true
-	default:
-		return false
-	}
-}
-
 // toolCallHeader formats the colored "#id → name(args)" header shown above a
 // tool's body in scrollback. Color picks reflect tool family: prune is pink,
-// user tools are violet, history queries are blue, everything else is
-// muted-green.
+// user tools are violet, everything else is muted-green.
 func toolCallHeader(id, name, args string, isUserTool bool) string {
 	color := patchtui.MutedGreen
 	if name == "prune_tool_result" {
 		color = patchtui.Pink
 	} else if isUserTool {
 		color = patchtui.Violet
-	} else if isHistoryTool(name) {
-		color = patchtui.Blue
 	}
 
 	if args == "" {
@@ -168,13 +156,23 @@ func renderToolCallHeader(ev shell3.Event) string {
 }
 
 // renderToolResultBody returns the formatted body lines for a tool_result event.
-// edit_file results pass through diff colorization; everything else is dimmed
+// edit_file results pass through diff colorization; bash-family output is
+// forwarded with its ANSI colors intact (see below); everything else is dimmed
 // line-by-line and truncated for inline display. The full output always went to
 // the model via the tool message, and the user can pull it up with /print <id>.
 func renderToolResultBody(ev shell3.Event) string {
 	out := ev.ToolOutput
 	if ev.ToolName == "edit_file" {
 		return colorizeEditOutput(strings.TrimRight(out, "\n"))
+	}
+	// Color forwarding: bash/bash_bg output is passed through unstyled — no
+	// dimLines (which would flatten color) and no ANSI strip — so SGR sequences
+	// the command emitted survive to the terminal. truncateOutput is line/byte
+	// based and never strips ANSI; if it splits mid-escape, the trailing Reset
+	// stops a dangling color from bleeding into later UI lines. Model-facing
+	// bytes are unchanged; this is display-only.
+	if ev.ToolName == "bash" || ev.ToolName == "bash_bg" {
+		return strings.TrimRight(truncateOutput(out), "\n") + patchtui.Reset
 	}
 	return dimLines(strings.TrimRight(truncateOutput(out), "\n"))
 }
