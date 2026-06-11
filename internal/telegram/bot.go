@@ -28,8 +28,9 @@ type Bot struct {
 	// not accumulated). Wired by the host to a dashboard usage store.
 	onUsage func(prompt, completion, total int)
 
-	runJob func(name string) error             // fires a cron job by name; nil if no scheduler
-	reload func() (shell3.ReloadResult, error) // performs a full config reload; nil if unset
+	runJob        func(name string) error             // fires a cron job by name; nil if no scheduler
+	reload        func() (shell3.ReloadResult, error) // performs a full config reload; nil if unset
+	pendingReload bool                                // set by the reload tool mid-turn; applied at end-of-turn
 }
 
 // SetUsageRecorder registers a callback invoked with each turn's token totals.
@@ -47,15 +48,12 @@ func (b *Bot) SetReloader(fn func() (shell3.ReloadResult, error)) { b.reload = f
 func (b *Bot) decorateSession() {
 	_ = b.sess.SetApprover(b.approve)
 	b.registerSendTool()
-	b.registerReloadTool() // filled in by Task 3; no-op stub for now
+	b.registerReloadTool()
 }
 
 // RedecorateSession re-applies host tools + approver after a reload rebuilt s.cfg.
 // Exported for the host reload coordinator (different package).
 func (b *Bot) RedecorateSession() { b.decorateSession() }
-
-// registerReloadTool is filled in by the reload-tool task; no-op stub for now.
-func (b *Bot) registerReloadTool() {}
 
 // NewBot wires a Bot. sess must be the runtime's persistent "telegram" session.
 // dashURL is the URL to the dashboard (empty to disable).
@@ -138,6 +136,7 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 	cancel()
 	stopTyping()
 	b.sendReply(ctx, reply)
+	b.applyPendingReload(ctx) // self-evolution: agent edited config + called reload this turn
 }
 
 // keepTyping shows the "typing…" chat action and refreshes it every 4s until
