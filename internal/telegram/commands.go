@@ -18,7 +18,6 @@ func BotCommands() []Command {
 		{"rollback", "Undo the last turn"},
 		{"clear", "Reset the conversation"},
 		{"stop", "Stop the current turn"},
-		{"dash", "Open the conversation dashboard"},
 		{"run", "Run a scheduled job now: /run <name>"},
 		{"reload", "Reload shell3.lua config without restarting"},
 	}
@@ -68,15 +67,6 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 			return
 		}
 		b.sendReply(ctx, "nothing running")
-	case "/dash":
-		if b.dashURL == "" {
-			b.sendReply(ctx, "dashboard is disabled")
-			return
-		}
-		// Send a Web App button so tapping opens the dashboard as a Mini App
-		// inside Telegram (with initData), not the external browser.
-		_, _ = b.client.Send(ctx, b.chatID, "📊 Conversation dashboard",
-			[]Button{{Text: "Open dashboard", WebApp: b.dashURL}})
 	case "/run":
 		if b.runJob == nil {
 			b.sendReply(ctx, "no scheduled jobs configured")

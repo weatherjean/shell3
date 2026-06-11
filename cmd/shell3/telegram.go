@@ -137,21 +137,21 @@ func newTelegramCommand() *cobra.Command {
 			// If the dashboard has a public URL, set the bot's in-chat menu
 			// button to open it as a Mini App (the bottom-left "Open App"
 			// button). Best-effort: a failure here must not stop the bot.
+			// The dashboard's authenticated launcher is the menu button (bottom-
+			// left): a Mini App opened from the menu button receives signed
+			// initData, so it passes the dashboard's auth. (A reply-keyboard
+			// web_app button cannot — it gets no initData — so the bar carries
+			// only command buttons; see below.)
 			if tg.Dashboard.Enabled && tg.Dashboard.URL != "" {
-				if err := client.SetMenuButton(ctx, "📊 Dashboard", tg.Dashboard.URL); err != nil {
+				if err := client.SetMenuButton(ctx, "dash", tg.Dashboard.URL); err != nil {
 					fmt.Printf("warning: could not set menu button: %v\n", err)
 				}
 			}
 
-			// Install a persistent reply-keyboard bar above the input: the
-			// dashboard Mini App first (when a public URL is set), then one-tap
+			// Install a persistent reply-keyboard bar above the input: one-tap
 			// slash-command buttons that auto-send their command. Best-effort.
 			{
-				var rows [][]telegram.ReplyKey
-				if tg.Dashboard.Enabled && tg.Dashboard.URL != "" {
-					rows = append(rows, []telegram.ReplyKey{{Text: "📊 Dashboard", WebApp: tg.Dashboard.URL}})
-				}
-				rows = append(rows, []telegram.ReplyKey{{Text: "/stop"}, {Text: "/reload"}, {Text: "/clear"}})
+				rows := [][]telegram.ReplyKey{{{Text: "/stop"}, {Text: "/reload"}, {Text: "/clear"}}}
 				if err := client.ShowReplyKeyboard(ctx, chatID, "shell3 online — quick actions ready.", rows); err != nil {
 					fmt.Printf("warning: could not set reply keyboard: %v\n", err)
 				}
