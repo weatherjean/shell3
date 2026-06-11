@@ -66,6 +66,7 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 		c := b.cancelTurn
 		b.mu.Unlock()
 		killed, _ := bgjobs.KillAll(b.workDir)
+		b.sess.CancelSubagents()
 		if c != nil {
 			c() // cancels turnCtx → synchronous bash/node process groups get SIGTERM→SIGKILL
 			msg := "⏹ stopped"

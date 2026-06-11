@@ -321,6 +321,11 @@ type Session struct {
 	// which would race on unsynchronized session state) into ErrBusy instead
 	// of a data race.
 	busy bool
+	// subCtx parents this session's subagent runs: created lazily from
+	// rt.baseContext() on first spawn, cancelled by CancelSubagents (/stop) to
+	// kill in-flight subagents without closing the session. Guarded by s.mu.
+	subCtx    context.Context
+	subCancel context.CancelFunc
 }
 
 // Start loads the config, builds a single-session Runtime, and returns its one

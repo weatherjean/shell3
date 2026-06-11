@@ -128,11 +128,13 @@ func (s *Session) spawn(_ context.Context, req chat.SpawnRequest) (string, error
 		return "", err
 	}
 	sa := s.subs.add(id, req.Subagent, req.Task)
-	// Fresh runtime-scoped context: the subagent must OUTLIVE the spawning turn
-	// (its result arrives after the turn ends). Bounded by Runtime.Close.
-	// Capture rt up front (above): Session.Close (incl. via Runtime.Close) nils
-	// s.runtime, which would race with a read inside the goroutine.
-	runCtx := rt.baseContext()
+	// Session-scoped context: the subagent must OUTLIVE the spawning turn (its
+	// result arrives after the turn ends), so it is NOT tied to the turn ctx.
+	// It is cancelled together by CancelSubagents (/stop) or by Runtime.Close
+	// (which cancels the parent base context). Capture rt up front (above):
+	// Session.Close (incl. via Runtime.Close) nils s.runtime, which would race
+	// with a read inside the goroutine.
+	runCtx := s.subagentContext(rt)
 	started := rt.trackSubagent(func() {
 		var b strings.Builder
 		for ev := range child.Send(runCtx, req.Task) {
@@ -153,6 +155,34 @@ func (s *Session) spawn(_ context.Context, req chat.SpawnRequest) (string, error
 		return "", fmt.Errorf("shell3: runtime is closing; cannot spawn subagents")
 	}
 	return id, nil
+}
+
+// subagentContext returns the session-scoped context that parents subagent
+// runs, created lazily as a child of the runtime base context. Subagents still
+// outlive the spawning turn (their result arrives after it ends), but are
+// cancelled together by CancelSubagents (or by Runtime.Close, which cancels the
+// parent base context). Guarded by s.mu.
+func (s *Session) subagentContext(rt *Runtime) context.Context {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.subCtx == nil {
+		s.subCtx, s.subCancel = context.WithCancel(rt.baseContext())
+	}
+	return s.subCtx
+}
+
+// CancelSubagents cancels every in-flight subagent this session spawned without
+// closing the session; the next spawn lazily creates a fresh context. Used by
+// /stop to kill subagent turn work while leaving the session usable. Safe to
+// call when no subagents are running (no-op).
+func (s *Session) CancelSubagents() {
+	s.mu.Lock()
+	cancel := s.subCancel
+	s.subCtx, s.subCancel = nil, nil
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 // deliverSubagentResult posts a finished subagent's result to the parent inbox,
