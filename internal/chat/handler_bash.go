@@ -88,7 +88,7 @@ func runBashCapture(ctx context.Context, command, workdir string, extraEnv []str
 		switch {
 		case errors.Is(tctx.Err(), context.DeadlineExceeded):
 			exit = 124
-			fmt.Fprintf(&buf, "\nerror: command timed out after %s\n", timeout)
+			fmt.Fprintf(&buf, "\nerror: command timed out after %s (set timeout_seconds to extend, max %ds)\n", timeout, MaxBashTimeoutSeconds)
 		default:
 			if ee, ok := err.(*exec.ExitError); ok {
 				exit = ee.ExitCode()

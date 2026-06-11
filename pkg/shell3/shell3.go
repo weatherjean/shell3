@@ -834,7 +834,7 @@ func (s *Session) RegisterHostTool(t HostTool) error {
 		if prev != nil {
 			return prev(ctx, called, argsJSON)
 		}
-		return "", fmt.Errorf("shell3: no handler for tool %q", called)
+		return "", fmt.Errorf("%w: %q", chat.ErrHostToolNotFound, called)
 	}
 	return nil
 }

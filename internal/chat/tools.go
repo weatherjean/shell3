@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +12,12 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/store"
 )
+
+// ErrHostToolNotFound is returned by a HostTool dispatcher when it does not
+// recognize the called tool name, signaling dispatchCustomTool to fall through
+// to the command-template (ResolveCustomTool) path. Any OTHER error from a
+// HostTool is a real failure and is surfaced as-is.
+var ErrHostToolNotFound = errors.New("host tool: name not handled")
 
 // toolResult is the typed outcome of one tool call: the text recorded as the
 // tool message plus whether it represents a failure. Every dispatch path in
@@ -47,14 +54,15 @@ func dispatchCustomTool(ctx context.Context, cfg TurnConfig, name, rawArgs strin
 	// string directly, so they dispatch here without the resolve-and-exec path.
 	if cfg.HostTool != nil {
 		out, err := cfg.HostTool(ctx, name, rawArgs)
-		if err == nil {
+		switch {
+		case err == nil:
 			return classifyHandlerOutput(out)
-		}
-		// A host tool that does not recognize this name falls through to the Lua
-		// command-template path below (only erroring if that path is unwired too).
-		if cfg.ResolveCustomTool == nil {
+		case !errors.Is(err, ErrHostToolNotFound):
+			// A real host-tool failure — surface it (don't mask with the Lua path).
 			return errResult("error: " + err.Error())
 		}
+		// errors.Is(err, ErrHostToolNotFound): this dispatcher doesn't own the
+		// name — fall through to the command-template path below.
 	}
 	if cfg.ResolveCustomTool == nil {
 		return errResult(fmt.Sprintf("error: unknown tool %q", name))
