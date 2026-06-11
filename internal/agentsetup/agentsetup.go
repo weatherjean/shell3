@@ -544,6 +544,31 @@ func ResolveConfigPath(flag, cwd, homeDir string) (string, error) {
 	return "", fmt.Errorf("no shell3.lua found — run 'shell3 boot' to create one (or pass --config)")
 }
 
+// ResolveTelegramConfigPath returns the shell3.lua the Telegram host should load.
+// Order (telegram-only; do not reorder): the explicit flag, else the dedicated
+// telegram config ~/.shell3/telegram/shell3.lua, else the legacy global
+// ~/.shell3/shell3.lua (so an existing setup keeps working), else a project-local
+// ./shell3.lua. This deliberately differs from ResolveConfigPath, which the TUI
+// and other front-ends keep using (project-local first).
+func ResolveTelegramConfigPath(flag, cwd, homeDir string) (string, error) {
+	if flag != "" {
+		return flag, nil
+	}
+	telegram := filepath.Join(homeDir, ".shell3", "telegram", "shell3.lua")
+	if fileExists(telegram) {
+		return telegram, nil
+	}
+	global := filepath.Join(homeDir, ".shell3", "shell3.lua")
+	if fileExists(global) {
+		return global, nil
+	}
+	local := filepath.Join(cwd, "shell3.lua")
+	if fileExists(local) {
+		return local, nil
+	}
+	return "", fmt.Errorf("no shell3.lua found — run 'shell3 boot --telegram' to create one (or pass --config)")
+}
+
 func fileExists(p string) bool {
 	info, err := os.Stat(p)
 	return err == nil && !info.IsDir()

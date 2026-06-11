@@ -555,3 +555,44 @@ func TestSubagentRuntime_UnknownErrors(t *testing.T) {
 		t.Errorf("error should name the unknown subagent, got: %v", err)
 	}
 }
+
+func TestResolveTelegramConfigPath(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	tgDir := filepath.Join(home, ".shell3", "telegram")
+	if err := os.MkdirAll(tgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tgCfg := filepath.Join(tgDir, "shell3.lua")
+	globalCfg := filepath.Join(home, ".shell3", "shell3.lua")
+	localCfg := filepath.Join(cwd, "shell3.lua")
+	write := func(p string) {
+		if err := os.WriteFile(p, []byte("-- x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Explicit flag always wins.
+	if got, err := agentsetup.ResolveTelegramConfigPath("/explicit/x.lua", cwd, home); err != nil || got != "/explicit/x.lua" {
+		t.Fatalf("flag: got %q err %v", got, err)
+	}
+	// Nothing exists yet -> error.
+	if _, err := agentsetup.ResolveTelegramConfigPath("", cwd, home); err == nil {
+		t.Fatal("expected error when no config exists")
+	}
+	// Only project-local exists -> it.
+	write(localCfg)
+	if got, _ := agentsetup.ResolveTelegramConfigPath("", cwd, home); got != localCfg {
+		t.Fatalf("local: got %q want %q", got, localCfg)
+	}
+	// Global beats project-local.
+	write(globalCfg)
+	if got, _ := agentsetup.ResolveTelegramConfigPath("", cwd, home); got != globalCfg {
+		t.Fatalf("global: got %q want %q", got, globalCfg)
+	}
+	// Telegram dir beats everything (except an explicit flag).
+	write(tgCfg)
+	if got, _ := agentsetup.ResolveTelegramConfigPath("", cwd, home); got != tgCfg {
+		t.Fatalf("telegram: got %q want %q", got, tgCfg)
+	}
+}
