@@ -142,16 +142,29 @@ func (c *LoadedConfig) luaModel(L *lua.LState) int {
 	return 0
 }
 
-var skillKeys = map[string]bool{"name": true, "description": true, "body": true}
+var skillKeys = map[string]bool{"name": true, "description": true, "body": true, "body_cmd": true}
 
 func (c *LoadedConfig) luaSkill(L *lua.LState) int {
 	opts := L.CheckTable(1)
 	if err := checkKeys(opts, "skill", skillKeys); err != nil {
 		L.RaiseError("%s", err.Error())
 	}
-	s := Skill{Name: optStr(opts, "name"), Description: optStr(opts, "description"), Body: optStr(opts, "body")}
-	if s.Name == "" || s.Description == "" || s.Body == "" {
-		L.RaiseError("skill: name, description, body all required")
+	s := Skill{
+		Name:        optStr(opts, "name"),
+		Description: optStr(opts, "description"),
+		Body:        optStr(opts, "body"),
+		BodyCmd:     optStr(opts, "body_cmd"),
+	}
+	if s.Name == "" || s.Description == "" {
+		L.RaiseError("skill: name, description, and one of body/body_cmd required")
+	}
+	// Exactly one body source. body_cmd is resolved at load time (see Load), so
+	// when it is set Body is legitimately empty here.
+	if s.Body != "" && s.BodyCmd != "" {
+		L.RaiseError("skill %q: set exactly one of body or body_cmd", s.Name)
+	}
+	if s.Body == "" && s.BodyCmd == "" {
+		L.RaiseError("skill: name, description, and one of body/body_cmd required")
 	}
 	c.Skills = append(c.Skills, s)
 	// Return a handle table carrying a sentinel + the name.
@@ -164,7 +177,7 @@ func (c *LoadedConfig) luaSkill(L *lua.LState) int {
 var toolKeys = map[string]bool{"name": true, "description": true, "parameters": true, "handler": true}
 
 var agentKeys = map[string]bool{
-	"name": true, "model": true, "prompt": true, "tools": true, "skills": true,
+	"name": true, "model": true, "prompt": true, "prompt_cmd": true, "tools": true, "skills": true,
 }
 
 var toolGateKeys = map[string]bool{
@@ -259,9 +272,15 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 		Name:      optStr(opts, "name"),
 		ModelName: optStr(opts, "model"),
 		Prompt:    optStr(opts, "prompt"),
+		PromptCmd: optStr(opts, "prompt_cmd"),
 	}
 	if a.Name == "" {
 		L.RaiseError("agent: name is required")
+	}
+	// An empty prompt stays valid for agents (a system prompt is assembled
+	// from other sources); only setting BOTH sources is an error.
+	if a.Prompt != "" && a.PromptCmd != "" {
+		L.RaiseError("agent %q: set exactly one of prompt or prompt_cmd", a.Name)
 	}
 	for _, ex := range c.agents {
 		if ex.Name == a.Name {
@@ -300,7 +319,7 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 }
 
 var subagentKeys = map[string]bool{
-	"name": true, "description": true, "model": true, "prompt": true,
+	"name": true, "description": true, "model": true, "prompt": true, "prompt_cmd": true,
 	"tools": true, "skills": true,
 }
 
@@ -314,9 +333,14 @@ func (c *LoadedConfig) luaSubagent(L *lua.LState) int {
 		Description: optStr(opts, "description"),
 		ModelName:   optStr(opts, "model"),
 		Prompt:      optStr(opts, "prompt"),
+		PromptCmd:   optStr(opts, "prompt_cmd"),
 	}
 	if s.Name == "" || s.Description == "" {
 		L.RaiseError("subagent: name and description are required")
+	}
+	// An empty prompt stays valid for subagents; only setting BOTH is an error.
+	if s.Prompt != "" && s.PromptCmd != "" {
+		L.RaiseError("subagent %q: set exactly one of prompt or prompt_cmd", s.Name)
 	}
 	// Reject collision with already-declared agents.
 	for _, ex := range c.agents {

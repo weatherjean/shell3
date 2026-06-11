@@ -7,6 +7,11 @@ local tools  = require("lib.tools")            -- { web_fetch, brave_search }
 local brainstorming = require("lib.skills.brainstorming")
 local history = require("lib.skills.history")
 
+-- Tip: source a body/prompt from a file instead of an inline string:
+--   shell3.skill({ name="history", description="...", body_cmd="cat lib/skills/history.md" })
+--   shell3.agent({ name="build", model="...", prompt_cmd="cat lib/prompts/build.md", ... })
+--   (the command runs once at load with cwd = this config's directory; set
+--    exactly one of body/body_cmd on a skill and prompt/prompt_cmd on an agent)
 local self_evolve = shell3.skill({
   name = "self-evolve",
   description = "How to safely change your own shell3.lua config and apply it live with the reload + status tools. A failed reload keeps the old config, so self-editing is always safe.",

@@ -37,7 +37,18 @@ type CustomTool struct {
 	handler           *lua.LFunction
 }
 
-type Skill struct{ Name, Description, Body string }
+// Skill is a named, model-facing capability. Body is the prompt text the model
+// reads when the skill activates. BodyCmd, if set, is a shell command whose
+// stdout supplies Body; it is resolved once at load time (see Load) so prompt
+// caching is preserved. Exactly one of Body/BodyCmd is set after a successful
+// Load.
+type Skill struct {
+	Name, Description, Body string
+	// BodyCmd is the unresolved source command for Body (empty once resolved,
+	// or when Body was supplied inline). Kept on the struct so callers can tell
+	// command-backed skills apart if needed.
+	BodyCmd string
+}
 
 // CronJob is one parsed shell3.cron job entry.
 type CronJob struct {
@@ -67,12 +78,16 @@ type DashboardConfig struct {
 
 type Agent struct {
 	Name, ModelName, Prompt string
-	Gates                   ToolGates
-	CustomTools             []string
-	Skills                  []string
-	SkillsDisabled          bool     // true only when tools = { skill = false } is explicitly set
-	Subagents               []string // names of registered subagents this agent can spawn
-	Description             string   // model-facing "when to use" (unused for top-level agents)
+	// PromptCmd, if set, is a shell command whose stdout supplies Prompt; it is
+	// resolved once at load time (see Load). Empty once resolved or when Prompt
+	// was supplied inline.
+	PromptCmd      string
+	Gates          ToolGates
+	CustomTools    []string
+	Skills         []string
+	SkillsDisabled bool     // true only when tools = { skill = false } is explicitly set
+	Subagents      []string // names of registered subagents this agent can spawn
+	Description    string   // model-facing "when to use" (unused for top-level agents)
 }
 
 // Subagent is a delegatable specialist: a non-interactive agent the model can
@@ -81,10 +96,14 @@ type Agent struct {
 // the model-facing "when to use".
 type Subagent struct {
 	Name, Description, ModelName, Prompt string
-	Gates                                ToolGates
-	CustomTools                          []string
-	Skills                               []string
-	SkillsDisabled                       bool
+	// PromptCmd, if set, is a shell command whose stdout supplies Prompt;
+	// resolved once at load time (see Load). Empty once resolved or when Prompt
+	// was supplied inline.
+	PromptCmd      string
+	Gates          ToolGates
+	CustomTools    []string
+	Skills         []string
+	SkillsDisabled bool
 }
 
 // SkillsActive reports whether skills are enabled: the agent has at least one
@@ -158,6 +177,43 @@ func Load(path, workdir string) (*LoadedConfig, error) {
 	}
 	if err := c.L.DoFile(path); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
+	}
+	// Resolve command-backed bodies/prompts ONCE, before any cross-reference
+	// validation. Each command runs with cwd = the config dir (same dir as
+	// .env and the lib/ modules), so relative paths like `cat lib/skills/x.md`
+	// resolve as authors expect. A failing or empty command fails the whole
+	// Load (fail-closed) — and since reload goes through Load, a bad prompt
+	// file can never silently swap in an empty prompt at runtime.
+	cfgDir := filepath.Dir(path)
+	for i := range c.Skills {
+		if c.Skills[i].BodyCmd == "" {
+			continue
+		}
+		out, err := runBodyCmd(cfgDir, c.Skills[i].BodyCmd)
+		if err != nil {
+			return nil, fmt.Errorf("config: skill %q body_cmd %q: %w", c.Skills[i].Name, c.Skills[i].BodyCmd, err)
+		}
+		c.Skills[i].Body = out
+	}
+	for i := range c.agents {
+		if c.agents[i].PromptCmd == "" {
+			continue
+		}
+		out, err := runBodyCmd(cfgDir, c.agents[i].PromptCmd)
+		if err != nil {
+			return nil, fmt.Errorf("config: agent %q prompt_cmd %q: %w", c.agents[i].Name, c.agents[i].PromptCmd, err)
+		}
+		c.agents[i].Prompt = out
+	}
+	for i := range c.subagents {
+		if c.subagents[i].PromptCmd == "" {
+			continue
+		}
+		out, err := runBodyCmd(cfgDir, c.subagents[i].PromptCmd)
+		if err != nil {
+			return nil, fmt.Errorf("config: subagent %q prompt_cmd %q: %w", c.subagents[i].Name, c.subagents[i].PromptCmd, err)
+		}
+		c.subagents[i].Prompt = out
 	}
 	if len(c.agents) == 0 {
 		return nil, fmt.Errorf("config: no shell3.agent declared")
