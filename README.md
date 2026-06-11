@@ -104,7 +104,10 @@ shell3.wrap_bash(function(cmd)
 end)
 ```
 
-A custom tool is just a function:
+A custom tool is a bash command template. Declared parameters are exported into
+the command's environment by their (lowercase) name; declared `secrets` are
+exported too (and kept out of the command string). The command's stdout is
+returned to the model:
 
 ```lua
 local weather = shell3.tool({
@@ -115,11 +118,7 @@ local weather = shell3.tool({
     properties = { city = { type = "string" } },
     required   = { "city" },
   },
-  handler = function(args)
-    local res, err = shell3.http.get("https://wttr.in/" .. shell3.urlencode(args.city) .. "?format=3")
-    if err then return "error: " .. tostring(err) end
-    return res.body
-  end,
+  command = [[ curl -sf "https://wttr.in/$city?format=3" ]],
 })
 ```
 
