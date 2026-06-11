@@ -200,3 +200,66 @@ func agentNames(agents []luacfg.Agent) []string {
 	}
 	return out
 }
+
+func TestBootTelegramEndToEnd(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	f := &bootFlags{
+		url: "http://localhost:9999/v1", model: "test-model", name: "main",
+		telegram: true, tgToken: "BOT:TOKEN", chatID: "424242",
+		dashAddr: "127.0.0.1:8765", dashURL: "https://h.ts.net/", chrome: true,
+	}
+	if err := runBoot(f); err != nil {
+		t.Fatalf("runBoot --telegram: %v", err)
+	}
+
+	dir := filepath.Join(home, ".shell3", "telegram")
+	for _, p := range []string{"shell3.lua", "lib/tools.lua", "lib/guards.lua", ".env", "workdir"} {
+		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
+			t.Errorf("missing %s: %v", p, err)
+		}
+	}
+	env, err := os.ReadFile(filepath.Join(dir, ".env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(env), "TELEGRAM_BOT_TOKEN=BOT:TOKEN") {
+		t.Errorf(".env missing bot token:\n%s", env)
+	}
+	if !strings.Contains(string(env), "MAIN_API_KEY=") {
+		t.Errorf(".env missing model key:\n%s", env)
+	}
+
+	c, err := luacfg.Load(filepath.Join(dir, "shell3.lua"), dir)
+	if err != nil {
+		t.Fatalf("generated telegram config failed to load: %v", err)
+	}
+	defer c.Close()
+	tg := c.Telegram()
+	if tg.ChatID != "424242" || tg.Token != "BOT:TOKEN" || tg.Agent != "code" {
+		t.Errorf("telegram = %+v, want chat_id=424242 token=BOT:TOKEN agent=code", tg)
+	}
+	if !tg.Dashboard.Enabled || tg.Dashboard.URL != "https://h.ts.net/" {
+		t.Errorf("dashboard = %+v", tg.Dashboard)
+	}
+	if _, ok := c.MCPServers["chrome"]; !ok {
+		t.Errorf("--chrome should declare the chrome MCP server, got %v", c.MCPServers)
+	}
+
+	cwd, _ := os.Getwd()
+	resolved, err := agentsetup.ResolveTelegramConfigPath("", cwd, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != filepath.Join(dir, "shell3.lua") {
+		t.Errorf("resolved = %q, want telegram shell3.lua", resolved)
+	}
+
+	if err := runBoot(&bootFlags{url: "http://x/v1", model: "m", name: "main"}); err != nil {
+		t.Fatalf("generic boot: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".shell3", "shell3.lua")); err != nil {
+		t.Errorf("generic boot did not write ~/.shell3/shell3.lua: %v", err)
+	}
+}

@@ -19,6 +19,10 @@ import (
 type bootFlags struct {
 	url, model, name, key, proxy, braveKey string
 	force                                  bool
+	telegram                               bool
+	tgToken, chatID, dashAddr, dashURL     string
+	noDashboard                            bool
+	chrome                                 bool
 }
 
 func newBootCommand() *cobra.Command {
@@ -35,6 +39,13 @@ func newBootCommand() *cobra.Command {
 	cmd.Flags().StringVar(&f.proxy, "proxy", "", "Optional run_proxy command")
 	cmd.Flags().StringVar(&f.braveKey, "brave-key", "", "Optional Brave Search API key")
 	cmd.Flags().BoolVar(&f.force, "force", false, "Overwrite an existing ~/.shell3/shell3.lua")
+	cmd.Flags().BoolVar(&f.telegram, "telegram", false, "Scaffold a Telegram host config in ~/.shell3/telegram/")
+	cmd.Flags().StringVar(&f.tgToken, "tg-token", "", "Telegram bot token (from @BotFather)")
+	cmd.Flags().StringVar(&f.chatID, "chat-id", "", "Your numeric Telegram chat id")
+	cmd.Flags().StringVar(&f.dashAddr, "dash-addr", "127.0.0.1:8765", "Dashboard listen address")
+	cmd.Flags().StringVar(&f.dashURL, "dash-url", "", "Public Mini App URL for the dashboard (optional)")
+	cmd.Flags().BoolVar(&f.noDashboard, "no-dashboard", false, "Disable the dashboard in the telegram config")
+	cmd.Flags().BoolVar(&f.chrome, "chrome", false, "Enable the Chrome DevTools MCP (browser automation; needs Node/npx)")
 	return cmd
 }
 
@@ -44,6 +55,9 @@ func runBoot(f *bootFlags) error {
 		return fmt.Errorf("boot: home dir: %w", err)
 	}
 	dir := filepath.Join(home, ".shell3")
+	if f.telegram {
+		dir = filepath.Join(home, ".shell3", "telegram")
+	}
 	cfgPath := filepath.Join(dir, "shell3.lua")
 
 	if _, err := os.Stat(cfgPath); err == nil && !f.force {
@@ -87,10 +101,48 @@ func runBoot(f *bootFlags) error {
 
 	envKey := envKeyForName(name)
 
-	if err := scaffold.RenderBaseConfig(dir, scaffold.Values{
-		Name: name, BaseURL: url, EnvKey: envKey, Model: model, Proxy: proxy,
-	}, f.force); err != nil {
-		return err
+	envPairs := [][2]string{{envKey, key}, {"BRAVE_API_KEY", braveKey}}
+	var chrome bool // visible to printTelegramBootSuccess below
+
+	if f.telegram {
+		token, err := value(f.tgToken, "Telegram bot token (from @BotFather)", "", in, tty, true)
+		if err != nil {
+			return err
+		}
+		chatID, err := value(f.chatID, "Your numeric Telegram chat id (message @userinfobot)", "", in, tty, true)
+		if err != nil {
+			return err
+		}
+		chrome = f.chrome
+		if !chrome && tty {
+			ans, err := value("", "Enable Chrome browser MCP (browser automation; needs Node/npx)? [y/N]", "n", in, tty, false)
+			if err != nil {
+				return err
+			}
+			chrome = strings.EqualFold(strings.TrimSpace(ans), "y") || strings.EqualFold(strings.TrimSpace(ans), "yes")
+		}
+		workDir := filepath.Join(dir, "workdir")
+		if err := os.MkdirAll(workDir, 0o755); err != nil {
+			return fmt.Errorf("boot: mkdir workdir: %w", err)
+		}
+		if err := scaffold.RenderTelegramConfig(dir, scaffold.TelegramValues{
+			Values:           scaffold.Values{Name: name, BaseURL: url, EnvKey: envKey, Model: model, Proxy: proxy},
+			ChatID:           chatID,
+			WorkDir:          workDir,
+			DashboardEnabled: !f.noDashboard,
+			DashboardAddr:    f.dashAddr,
+			DashboardURL:     f.dashURL,
+			Chrome:           chrome,
+		}, f.force); err != nil {
+			return err
+		}
+		envPairs = append(envPairs, [2]string{"TELEGRAM_BOT_TOKEN", token})
+	} else {
+		if err := scaffold.RenderBaseConfig(dir, scaffold.Values{
+			Name: name, BaseURL: url, EnvKey: envKey, Model: model, Proxy: proxy,
+		}, f.force); err != nil {
+			return err
+		}
 	}
 
 	envPath := filepath.Join(dir, ".env")
@@ -98,15 +150,16 @@ func runBoot(f *bootFlags) error {
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("boot: read .env: %w", err)
 	}
-	merged := mergeEnv(string(existing), [][2]string{
-		{envKey, key},
-		{"BRAVE_API_KEY", braveKey},
-	})
+	merged := mergeEnv(string(existing), envPairs)
 	if err := os.WriteFile(envPath, []byte(merged), 0600); err != nil {
 		return fmt.Errorf("boot: write .env: %w", err)
 	}
 
-	printBootSuccess(dir, cfgPath, envPath, proxy != "")
+	if f.telegram {
+		printTelegramBootSuccess(dir, cfgPath, envPath, chrome)
+	} else {
+		printBootSuccess(dir, cfgPath, envPath, proxy != "")
+	}
 	return nil
 }
 
@@ -179,6 +232,19 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool) {
 	fmt.Println("recipes live in the shell3 repo under docs/cookbook/.")
 	fmt.Println()
 	fmt.Println("Run:  shell3")
+}
+
+func printTelegramBootSuccess(dir, cfgPath, envPath string, chrome bool) {
+	fmt.Println()
+	fmt.Println("shell3 Telegram host is configured.")
+	fmt.Printf("  config:  %s\n", cfgPath)
+	fmt.Printf("  modules: %s\n", filepath.Join(dir, "lib"))
+	fmt.Printf("  secrets: %s  (TELEGRAM_BOT_TOKEN + model key — never commit this)\n", envPath)
+	if chrome {
+		fmt.Println("  chrome:  enabled — needs Node/npx; the MCP server starts on first use.")
+	}
+	fmt.Println()
+	fmt.Println("Run:  shell3 telegram")
 }
 
 // value reads a config value: flag wins; else prompt (TTY) with optional
