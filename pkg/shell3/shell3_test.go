@@ -797,7 +797,7 @@ func TestSession_InterjectMidTurn(t *testing.T) {
 	cfg := chat.Config{
 		LLM:             client,
 		CustomToolNames: map[string]bool{"poke": true},
-		CustomTool: func(ctx context.Context, name, args string) (string, error) {
+		HostTool: func(ctx context.Context, name, args string) (string, error) {
 			s.Interject("change of plans")
 			return "ok", nil
 		},

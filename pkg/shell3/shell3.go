@@ -825,9 +825,9 @@ func (s *Session) RegisterHostTool(t HostTool) error {
 		s.cfg.CustomToolNames = map[string]bool{}
 	}
 	s.cfg.CustomToolNames[t.Name] = true
-	prev := s.cfg.CustomTool
+	prev := s.cfg.HostTool
 	name, handler := t.Name, t.Handler
-	s.cfg.CustomTool = func(ctx context.Context, called, argsJSON string) (string, error) {
+	s.cfg.HostTool = func(ctx context.Context, called, argsJSON string) (string, error) {
 		if called == name {
 			return handler(ctx, argsJSON)
 		}

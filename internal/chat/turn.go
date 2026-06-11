@@ -355,9 +355,11 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 			if h, ok := turnScoped[tc.Name]; ok {
 				handler = h
 			} else if cfg.CustomToolNames[tc.Name] {
-				res = dispatchCustomTool(ctx, cfg.CustomTool, tc.Name, tc.RawArgs)
+				res = dispatchCustomTool(ctx, cfg, tc.Name, tc.RawArgs)
 			} else if h, ok := cfg.Handlers[tc.Name]; ok {
 				handler = h
+			} else if msg, ok := cfg.StubTools[tc.Name]; ok {
+				res = okResult(msg) // hallucinated tool: return its redirect nudge
 			} else {
 				res = errResult(fmt.Sprintf("error: unknown tool %q", tc.Name))
 			}

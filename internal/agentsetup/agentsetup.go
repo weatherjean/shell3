@@ -93,9 +93,14 @@ func (p *Parts) AgentNames() []string {
 	return names
 }
 
-// CustomTool exposes the Lua custom-tool dispatcher.
-func (p *Parts) CustomTool(ctx context.Context, name, args string) (string, error) {
-	return p.lc.CallTool(ctx, name, args)
+// ResolveCustomTool resolves a custom-tool call to its executable form for the
+// chat layer (which owns WorkDir/SinkPath and runs it).
+func (p *Parts) ResolveCustomTool(name, argsJSON string) (chat.ResolvedTool, error) {
+	rc, err := p.lc.ResolveCustomCall(name, argsJSON)
+	if err != nil {
+		return chat.ResolvedTool{}, err
+	}
+	return chat.ResolvedTool{Command: rc.Command, Env: rc.Env, Background: rc.Background, Timeout: rc.Timeout}, nil
 }
 
 // SubagentDescription returns the model-facing "when to use" description for a
@@ -182,8 +187,9 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 	// no-param def per stub to EVERY agent's schema so a hallucinated tool call
 	// returns a redirect instead of erroring. Precedence: if a stub name collides
 	// with a real/custom/spawn tool already present, SKIP the stub — the real tool
-	// always wins. Each surviving stub also goes into customNames so dispatch
-	// routes it through CallTool (where it resolves to its redirect message).
+	// always wins. Surviving stubs are NOT added to customNames: the chat layer
+	// routes them via cfg.StubTools (a separate, lower-precedence branch in
+	// turn.go), so a stub never shadows a real tool at dispatch time.
 	if stubs := p.lc.StubNames(); len(stubs) > 0 {
 		present := make(map[string]bool, len(toolNames))
 		for _, n := range toolNames {
@@ -199,7 +205,6 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 				Parameters:  map[string]any{"type": "object", "properties": map[string]any{}},
 			})
 			toolNames = append(toolNames, name)
-			customNames[name] = true
 		}
 	}
 
@@ -287,15 +292,16 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 	// (between turns), so a plain pointer is sufficient.
 	activeName := rt.ModeLabel
 	cfg := chat.Config{
-		Store:         p.st,
-		WorkDir:       workdir,
-		ProjectRef:    p.uuid,
-		CustomTool:    p.CustomTool,
-		Log:           p.log,
-		OutPath:       so.OutPath,
-		Headless:      so.Headless,
-		AgentNames:    p.AgentNames(),
-		RefreshPrompt: func() string { return p.RefreshPromptFor(activeName) },
+		Store:             p.st,
+		WorkDir:           workdir,
+		ProjectRef:        p.uuid,
+		ResolveCustomTool: p.ResolveCustomTool,
+		StubTools:         p.lc.StubNames(),
+		Log:               p.log,
+		OutPath:           so.OutPath,
+		Headless:          so.Headless,
+		AgentNames:        p.AgentNames(),
+		RefreshPrompt:     func() string { return p.RefreshPromptFor(activeName) },
 	}
 	// shell3.wrap_bash: a single config-global hook the bash/bash_bg tools pass
 	// their command through. Wired only when declared — a nil closure means no

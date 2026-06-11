@@ -35,9 +35,10 @@ shell3.agent({ name = "code", model = "main", prompt = "you are a coder", tools 
 }
 
 // TestAgentRuntime_StubTools asserts that a registered stub appears in the
-// agent's toolDefs (with a no-param object schema), in ActiveTools, and in
-// CustomToolNames (so dispatch routes it through CallTool). A stub whose name
-// collides with a real tool is skipped — the real tool wins.
+// agent's toolDefs (with a no-param object schema) and in ActiveTools, but is
+// NOT routed via CustomToolNames — stubs dispatch through the config-global
+// StubTools map (see SessionConfig). A stub whose name collides with a real
+// tool is skipped — the real tool wins.
 func TestAgentRuntime_StubTools(t *testing.T) {
 	tmp := t.TempDir()
 	writeStubToolsConfig(t, tmp)
@@ -94,11 +95,23 @@ func TestAgentRuntime_StubTools(t *testing.T) {
 		t.Error("read_file stub not found in ActiveTools")
 	}
 
-	// CustomToolNames routes the stub through CallTool.
-	if !rt.CustomToolNames["read_file"] {
-		t.Error("read_file stub not in CustomToolNames")
+	// Stubs are NOT routed via CustomToolNames anymore: a stub there could
+	// shadow a real tool at dispatch. They route via the config-global StubTools
+	// map instead (the lower-precedence branch in turn.go).
+	if rt.CustomToolNames["read_file"] {
+		t.Error("read_file stub must not be in CustomToolNames (routes via StubTools)")
 	}
 	if rt.CustomToolNames["bash"] {
 		t.Error("colliding bash stub must not be added to CustomToolNames")
+	}
+
+	// SessionConfig wires the config-global StubTools map; the stub's redirect
+	// message must be present so turn.go can return it verbatim.
+	cfg, err := parts.SessionConfig(agentsetup.SessionOptions{Agent: "code", Headless: true})
+	if err != nil {
+		t.Fatalf("SessionConfig: %v", err)
+	}
+	if cfg.StubTools["read_file"] != "Use bash: cat <path>" {
+		t.Errorf("StubTools[read_file] = %q, want the redirect message", cfg.StubTools["read_file"])
 	}
 }

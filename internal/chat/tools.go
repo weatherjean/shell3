@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/weatherjean/shell3/internal/applog"
+	"github.com/weatherjean/shell3/internal/bgjobs"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/store"
 )
@@ -34,17 +36,53 @@ func classifyHandlerOutput(out string) toolResult {
 	return okResult(out)
 }
 
-// dispatchCustomTool calls custom for a named custom tool. If custom is nil the
-// call returns an unknown-tool error.
-func dispatchCustomTool(ctx context.Context, custom func(ctx context.Context, name, argsJSON string) (string, error), name, rawArgs string) toolResult {
-	if custom == nil {
+// dispatchCustomTool resolves a custom-tool call to its bash command + env and
+// runs it. Foreground tools block and return the command's output (a non-zero
+// exit is surfaced as an error result, "exited N"). Background tools dispatch
+// via bgjobs (sink-reported) and return a pointer to the spawned job. The
+// resolved command is the trusted author template, so it deliberately BYPASSES
+// wrap_bash — the model supplies only env values, never the command string.
+func dispatchCustomTool(ctx context.Context, cfg TurnConfig, name, rawArgs string) toolResult {
+	// Host-registered Go tools (pkg/shell3.RegisterHostTool) return a result
+	// string directly, so they dispatch here without the resolve-and-exec path.
+	if cfg.HostTool != nil {
+		out, err := cfg.HostTool(ctx, name, rawArgs)
+		if err == nil {
+			return classifyHandlerOutput(out)
+		}
+		// A host tool that does not recognize this name falls through to the Lua
+		// command-template path below (only erroring if that path is unwired too).
+		if cfg.ResolveCustomTool == nil {
+			return errResult("error: " + err.Error())
+		}
+	}
+	if cfg.ResolveCustomTool == nil {
 		return errResult(fmt.Sprintf("error: unknown tool %q", name))
 	}
-	out, err := custom(ctx, name, rawArgs)
+	rt, err := cfg.ResolveCustomTool(name, rawArgs)
 	if err != nil {
 		return errResult("error: " + err.Error())
 	}
-	return classifyHandlerOutput(out)
+	if rt.Background {
+		job, err := bgjobs.Start(rt.Command, cfg.WorkDir, rt.Env, cfg.SinkPath, true)
+		if err != nil {
+			return errResult("error: " + err.Error())
+		}
+		return okResult(fmt.Sprintf("started background tool %s\npid: %d\nlog: %s\n", job.ID, job.PID, job.Log))
+	}
+	timeout := time.Duration(DefaultBashTimeoutSeconds) * time.Second
+	if rt.Timeout > 0 {
+		t := rt.Timeout
+		if t > MaxBashTimeoutSeconds {
+			t = MaxBashTimeoutSeconds
+		}
+		timeout = time.Duration(t) * time.Second
+	}
+	out, code := runBashCapture(ctx, rt.Command, cfg.WorkDir, rt.Env, timeout)
+	if code != 0 {
+		return errResult(fmt.Sprintf("error: command exited %d\n%s", code, out))
+	}
+	return okResult(out)
 }
 
 // CompactSummary is the structured product of one compaction: a narrative

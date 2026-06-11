@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"syscall"
 	"time"
@@ -50,10 +51,23 @@ func (BashHandler) Execute(ctx context.Context, id string, args json.RawMessage,
 		}
 		command = rewritten
 	}
+	out, _ := runBashCapture(ctx, command, cfg.WorkDir, nil, timeout)
+	return out, nil
+}
+
+// runBashCapture runs command via `bash -c` in workdir with extraEnv appended to
+// os.Environ() (nil = inherit only), capturing combined stdout+stderr, honoring
+// timeout + cancellation. It returns the elided output and the process exit code
+// (124 on timeout, -1 on a start error). Shared by the bash tool and foreground
+// command-template tools.
+func runBashCapture(ctx context.Context, command, workdir string, extraEnv []string, timeout time.Duration) (string, int) {
 	tctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	c := exec.CommandContext(tctx, "bash", "-c", command)
-	c.Dir = cfg.WorkDir
+	c.Dir = workdir
+	if len(extraEnv) > 0 {
+		c.Env = append(os.Environ(), extraEnv...)
+	}
 	// Put bash and its descendants in their own process group so we can
 	// signal the whole tree on cancel/timeout — bare SIGKILL on bash
 	// leaves grandchildren (e.g. node spawned by npx) holding our pipes.
@@ -68,16 +82,28 @@ func (BashHandler) Execute(ctx context.Context, id string, args json.RawMessage,
 	var buf bytes.Buffer
 	c.Stdout = &buf
 	c.Stderr = &buf
+	exit := 0
 	err := c.Run()
-	if err != nil && errors.Is(tctx.Err(), context.DeadlineExceeded) {
-		fmt.Fprintf(&buf, "\nerror: command timed out after %s (set timeout_seconds to extend, max %ds)\n", timeout, MaxBashTimeoutSeconds)
-	} else if err != nil && buf.Len() == 0 {
-		fmt.Fprintf(&buf, "error: %v\n", err)
+	if err != nil {
+		switch {
+		case errors.Is(tctx.Err(), context.DeadlineExceeded):
+			exit = 124
+			fmt.Fprintf(&buf, "\nerror: command timed out after %s\n", timeout)
+		default:
+			if ee, ok := err.(*exec.ExitError); ok {
+				exit = ee.ExitCode()
+			} else {
+				exit = -1
+				if buf.Len() == 0 {
+					fmt.Fprintf(&buf, "error: %v\n", err)
+				}
+			}
+		}
 	}
 	if buf.Len() == 0 {
-		return "(no output)", nil
+		return "(no output)", exit
 	}
-	return elideMiddle(buf.Bytes(), MaxBashOutputBytes), nil
+	return elideMiddle(buf.Bytes(), MaxBashOutputBytes), exit
 }
 
 // elideMiddle returns out unchanged if within max, otherwise keeps the

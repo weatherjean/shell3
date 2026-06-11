@@ -26,9 +26,23 @@ func writeTmpFile(t *testing.T, dir, name, body string) string {
 	return p
 }
 
+// resolveCustomTool maps a luacfg ResolvedCall to chat.ResolvedTool, mirroring
+// agentsetup.Parts.ResolveCustomTool so the integration test drives the same
+// resolve-and-exec path the real wiring uses.
+func resolveCustomTool(lc *luacfg.LoadedConfig) func(name, argsJSON string) (chat.ResolvedTool, error) {
+	return func(name, argsJSON string) (chat.ResolvedTool, error) {
+		rc, err := lc.ResolveCustomCall(name, argsJSON)
+		if err != nil {
+			return chat.ResolvedTool{}, err
+		}
+		return chat.ResolvedTool{Command: rc.Command, Env: rc.Env, Background: rc.Background, Timeout: rc.Timeout}, nil
+	}
+}
+
 // TestLuacfgIntegration_WrapBashAndCustomTool loads a luacfg config and drives a
 // full chat turn through the chat turn loop using fakellm. It asserts:
-//   - A custom tool call returns the handler's string output.
+//   - A custom (bash command-template) tool call runs its command with the
+//     declared param exported into the env and returns the command's stdout.
 //   - A bash call with a dangerous command is blocked by shell3.wrap_bash
 //     (the guard engine's replacement) before it ever executes.
 func TestLuacfgIntegration_WrapBashAndCustomTool(t *testing.T) {
@@ -48,9 +62,7 @@ local greet = shell3.tool({
     properties = { name = { type = "string" } },
     required   = { "name" },
   },
-  handler = function(args)
-    return "hello, " .. (args.name or "world")
-  end,
+  command = [[printf 'hello, %s' "$name"]],
 })
 
 -- Block any rm command; rewrite nothing else.
@@ -78,13 +90,22 @@ shell3.agent({
 
 	ctx := context.Background()
 
-	// Custom tool closure: greet tool should return "hello, test".
-	toolOut, err := lc.CallTool(ctx, "greet", `{"name":"test"}`)
+	// Resolution: greet should export name=test into the env for its command.
+	rc, err := lc.ResolveCustomCall("greet", `{"name":"test"}`)
 	if err != nil {
-		t.Fatalf("CallTool: %v", err)
+		t.Fatalf("ResolveCustomCall: %v", err)
 	}
-	if toolOut != "hello, test" {
-		t.Errorf("CallTool output: got %q, want %q", toolOut, "hello, test")
+	if rc.Command != `printf 'hello, %s' "$name"` {
+		t.Errorf("ResolveCustomCall command: got %q", rc.Command)
+	}
+	var sawName bool
+	for _, e := range rc.Env {
+		if e == "name=test" {
+			sawName = true
+		}
+	}
+	if !sawName {
+		t.Errorf("ResolveCustomCall env missing name=test: %v", rc.Env)
 	}
 
 	// wrap_bash closure: rm -rf / should be blocked, echo allowed.
@@ -136,13 +157,14 @@ shell3.agent({
 		sess.Start(map[string]string{"mode": "test"})
 
 		turnCfg := chat.TurnConfig{
-			LLM:             fake,
-			Personality:     persona.BasePersona("you are a test", toolDefs),
-			StatusLine:      "test │ x",
-			Log:             applog.Noop{},
-			CustomTool:      lc.CallTool,
-			CustomToolNames: map[string]bool{"greet": true},
-			WrapBash:        wrapBash,
+			LLM:               fake,
+			Personality:       persona.BasePersona("you are a test", toolDefs),
+			StatusLine:        "test │ x",
+			WorkDir:           dir,
+			Log:               applog.Noop{},
+			ResolveCustomTool: resolveCustomTool(lc),
+			CustomToolNames:   map[string]bool{"greet": true},
+			WrapBash:          wrapBash,
 		}
 
 		turnCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -189,14 +211,15 @@ shell3.agent({
 		sess.Start(map[string]string{"mode": "test"})
 
 		turnCfg := chat.TurnConfig{
-			LLM:             fake,
-			Personality:     persona.BasePersona("you are a test", toolDefs),
-			StatusLine:      "test │ x",
-			Log:             applog.Noop{},
-			CustomTool:      lc.CallTool,
-			CustomToolNames: map[string]bool{"greet": true},
-			WrapBash:        wrapBash,
-			Handlers:        chat.NewHandlers(chat.Config{}),
+			LLM:               fake,
+			Personality:       persona.BasePersona("you are a test", toolDefs),
+			StatusLine:        "test │ x",
+			WorkDir:           dir,
+			Log:               applog.Noop{},
+			ResolveCustomTool: resolveCustomTool(lc),
+			CustomToolNames:   map[string]bool{"greet": true},
+			WrapBash:          wrapBash,
+			Handlers:          chat.NewHandlers(chat.Config{}),
 		}
 
 		turnCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

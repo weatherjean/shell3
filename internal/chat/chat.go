@@ -102,13 +102,19 @@ type Config struct {
 	// shell_interactive tool returns an "unavailable" error string instead.
 	// The TUI sets this to a PTY runner that releases the terminal.
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
-	// CustomTool dispatches a custom (Lua-handler) tool call by name.
-	// Nil means no custom tools are wired; unknown tools fall through to
-	// the built-in handler map.
-	CustomTool func(ctx context.Context, name, argsJSON string) (string, error)
-	// CustomToolNames is the set of tool names routed to CustomTool.
+	// ResolveCustomTool resolves a custom-tool call to its executable form
+	// (command + env). Nil means no Lua custom tools are wired; unknown tools
+	// fall through to the built-in handler map.
+	ResolveCustomTool func(name, argsJSON string) (ResolvedTool, error)
+	// HostTool dispatches a host-registered Go tool by name (see
+	// pkg/shell3.RegisterHostTool). Tried before ResolveCustomTool. Nil = none.
+	HostTool func(ctx context.Context, name, argsJSON string) (string, error)
+	// CustomToolNames is the set of tool names routed to HostTool/ResolveCustomTool.
 	// Entries must match the names registered in the LLM tool schema.
 	CustomToolNames map[string]bool
+	// StubTools maps a hallucinated tool name to its redirect message (a nudge,
+	// never an error). Config-global; checked after real/custom tools.
+	StubTools map[string]string
 	// WrapBash is the shell3.wrap_bash hook: the bash/bash_bg handlers pass
 	// their command through it before execution (allow / rewrite / block). Nil
 	// means no hook is declared — commands run verbatim (the unsafe default).
@@ -177,19 +183,21 @@ func NewHandlers(cfg Config) map[string]ToolHandler {
 // which case shell_interactive tool calls return an "unavailable" error.
 func NewTurnConfig(cfg Config, handlers map[string]ToolHandler, shellInteractive func(ctx context.Context, cmd, workdir string) string) TurnConfig {
 	return TurnConfig{
-		LLM:              cfg.LLM,
-		Personality:      cfg.Personality,
-		StatusLine:       cfg.StatusLine,
-		WorkDir:          cfg.WorkDir,
-		Store:            cfg.Store,
-		Handlers:         handlers,
-		Log:              LogOrNoop(cfg.Log),
-		Headless:         cfg.Headless,
-		CustomTool:       cfg.CustomTool,
-		CustomToolNames:  cfg.CustomToolNames,
-		WrapBash:         cfg.WrapBash,
-		CompactAt:        cfg.CompactAt,
-		ShellInteractive: shellInteractive,
+		LLM:               cfg.LLM,
+		Personality:       cfg.Personality,
+		StatusLine:        cfg.StatusLine,
+		WorkDir:           cfg.WorkDir,
+		Store:             cfg.Store,
+		Handlers:          handlers,
+		Log:               LogOrNoop(cfg.Log),
+		Headless:          cfg.Headless,
+		ResolveCustomTool: cfg.ResolveCustomTool,
+		HostTool:          cfg.HostTool,
+		StubTools:         cfg.StubTools,
+		CustomToolNames:   cfg.CustomToolNames,
+		WrapBash:          cfg.WrapBash,
+		CompactAt:         cfg.CompactAt,
+		ShellInteractive:  shellInteractive,
 	}
 }
 

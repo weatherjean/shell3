@@ -20,7 +20,7 @@ func (c *LoadedConfig) luaWrapBash(L *lua.LState) int {
 
 // WrapBash runs the registered shell3.wrap_bash hook against cmd, returning the
 // (possibly rewritten) command to run, whether it is allowed, and an optional
-// block reason. It locks the VM (mirroring CallTool) and honors ctx via
+// block reason. It locks the VM and honors ctx via
 // L.SetContext. When no hook is declared the caller skips WrapBash entirely
 // (see chat.ToolConfig.WrapBash being nil); this method is only invoked when a
 // hook exists.

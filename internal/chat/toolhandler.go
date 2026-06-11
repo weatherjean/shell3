@@ -10,6 +10,17 @@ import (
 	"github.com/weatherjean/shell3/internal/store"
 )
 
+// ResolvedTool is a custom-tool call reduced to an executable form: the bash
+// command, the env to run it with (declared params + secrets), and dispatch
+// knobs. Produced by agentsetup (via luacfg.ResolveCustomCall) and run by
+// dispatchCustomTool.
+type ResolvedTool struct {
+	Command    string
+	Env        []string
+	Background bool
+	Timeout    int
+}
+
 // ToolHandler is the interface for built-in tool implementations. Each
 // built-in tool (bash, edit_file, bash_bg, etc.) implements this.
 // Name returns the canonical tool name used in the JSON schema and lookup
@@ -103,11 +114,19 @@ type TurnConfig struct {
 	// shell_interactive tool calls. The TUI wires this to a PTY runner that
 	// releases the terminal; headless leaves it nil or stubs an error.
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
-	// CustomTool dispatches a custom (Lua-handler) tool call by name.
-	// Nil means no custom tools are wired.
-	CustomTool func(ctx context.Context, name, argsJSON string) (string, error)
-	// CustomToolNames is the set of tool names routed to CustomTool.
+	// ResolveCustomTool resolves a custom-tool call to its executable form
+	// (command + env). Names in CustomToolNames route here.
+	ResolveCustomTool func(name, argsJSON string) (ResolvedTool, error)
+	// HostTool dispatches a host-registered Go tool (pkg/shell3.RegisterHostTool)
+	// by name, returning its result string. Tried BEFORE ResolveCustomTool so an
+	// embedding host can supply native tools (which return strings directly, not
+	// bash commands) alongside Lua command-template tools. Nil = none registered.
+	HostTool func(ctx context.Context, name, argsJSON string) (string, error)
+	// CustomToolNames is the set of tool names routed to HostTool/ResolveCustomTool.
 	CustomToolNames map[string]bool
+	// StubTools maps a hallucinated tool name to its redirect message (a nudge,
+	// never an error). Checked after real/custom tools so a real tool always wins.
+	StubTools map[string]string
 	// WrapBash is the shell3.wrap_bash hook threaded to each tool call's
 	// ToolConfig (see ToolConfig.WrapBash). Nil = no hook = run commands verbatim.
 	WrapBash func(ctx context.Context, cmd string) (rewritten string, allowed bool, reason string, err error)
