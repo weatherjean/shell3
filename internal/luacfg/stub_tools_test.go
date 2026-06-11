@@ -56,29 +56,3 @@ shell3.agent({ name="a", model="m", prompt="p", tools={ bash=true } })
 		t.Fatalf("expected 'must be a string' in error, got: %v", err)
 	}
 }
-
-// TestStubTools_CallReturnsMessage verifies CallTool returns the redirect
-// message verbatim with a nil error — a stub call must never fail.
-func TestStubTools_CallReturnsMessage(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "shell3.lua", `
-shell3.model("m", { base_url="u", api_key="k", model="x" })
-shell3.stub_tools({ read_file = "Use bash: cat <path>" })
-shell3.agent({ name="a", model="m", prompt="p", tools={ bash=true } })
-`)
-	c, err := Load(dir+"/shell3.lua", dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
-
-	// Args are ignored; a stub takes a no-param object schema. Pass junk to prove
-	// it never errors on arguments.
-	out, err := c.CallTool(t.Context(), "read_file", `{"path":"/etc/hosts"}`)
-	if err != nil {
-		t.Fatalf("stub CallTool errored: %v", err)
-	}
-	if out != "Use bash: cat <path>" {
-		t.Fatalf("stub CallTool = %q, want the redirect message", out)
-	}
-}

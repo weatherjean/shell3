@@ -8,7 +8,7 @@ func TestLoadTool(t *testing.T) {
 local echo = shell3.tool({
   name="echo", description="d",
   parameters={ type="object", properties={ msg={ type="string" } }, required={"msg"} },
-  handler=function(args) return "got:"..args.msg end,
+  command="echo got:$msg",
 })
 shell3.model("m", { base_url="u", api_key="k", model="x" })
 shell3.agent({ name="a", model="m", prompt="p", tools={ custom={ echo } } })

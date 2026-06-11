@@ -15,7 +15,7 @@ import (
 //
 // Resolution happens at load time only, so it deliberately uses
 // context.Background() (there is no per-turn context here) and os/exec
-// directly rather than the Lua-facing luaBash (which sets no cwd). The caller
+// directly. The caller
 // passes cwd = the config directory so relative paths resolve next to
 // shell3.lua / .env / lib.
 //

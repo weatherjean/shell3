@@ -1,15 +1,8 @@
 package luacfg
 
 import (
-	"net/url"
-
 	lua "github.com/yuin/gopher-lua"
 )
-
-func luaURLEncode(L *lua.LState) int {
-	L.Push(lua.LString(url.QueryEscape(L.CheckString(1))))
-	return 1
-}
 
 func (c *LoadedConfig) luaSecret(L *lua.LState) int {
 	key := L.CheckString(1)
