@@ -58,7 +58,7 @@ func dispatchCustomTool(ctx context.Context, cfg TurnConfig, name, rawArgs strin
 		case err == nil:
 			return classifyHandlerOutput(out)
 		case !errors.Is(err, ErrHostToolNotFound):
-			// A real host-tool failure — surface it (don't mask with the Lua path).
+			// A real host-tool failure — surface it.
 			return errResult("error: " + err.Error())
 		}
 		// errors.Is(err, ErrHostToolNotFound): this dispatcher doesn't own the
@@ -94,9 +94,9 @@ func dispatchCustomTool(ctx context.Context, cfg TurnConfig, name, rawArgs strin
 }
 
 // CompactSummary is the structured product of one compaction: a narrative
-// summary plus optional pointer lists. The model-driven compact tool used to
-// supply all fields; the host-driven auto-compaction path (maybeCompact) fills
-// only Summary from a single quiet LLM call and leaves the lists empty.
+// summary plus optional pointer lists. The host-driven auto-compaction path
+// (maybeCompact) fills only Summary from a single quiet LLM call and leaves the
+// pointer lists empty.
 type CompactSummary struct {
 	Summary             string
 	ImportantFiles      []string
@@ -110,7 +110,7 @@ type CompactSummary struct {
 // is visible in history. Both sess.messages and allMsgs are rebuilt in place;
 // the summary is saved to history before the session rolls. Callers are
 // responsible for validating that args.Summary is non-empty.
-func compactInto(args CompactSummary, st *store.Store, sess *Session, allMsgs []llm.Message, lg applog.Logger) (out string, newAllMsgs []llm.Message) {
+func compactInto(args CompactSummary, st *store.Store, sess *Session, allMsgs []llm.Message, lg applog.Logger) (newAllMsgs []llm.Message) {
 	prevSessionID := sess.id
 
 	// Roll the store session so compact boundary is visible in history.
@@ -179,10 +179,16 @@ func compactInto(args CompactSummary, st *store.Store, sess *Session, allMsgs []
 		}
 	}
 
-	sess.messages = []llm.Message{continuationMsg}
+	// Build the rewritten history in a local, then publish it under msgMu: this
+	// runs on the turn goroutine but replaces the slice the dashboard's
+	// Messages() reader may be copying concurrently (see Session.msgMu).
+	newMsgs := []llm.Message{continuationMsg}
 	if triggerMsg != nil {
-		sess.messages = append(sess.messages, *triggerMsg)
+		newMsgs = append(newMsgs, *triggerMsg)
 	}
+	sess.msgMu.Lock()
+	sess.messages = newMsgs
+	sess.msgMu.Unlock()
 
 	// Rebuild allMsgs: system prompt + continuation + trigger assistant message.
 	// Caller appends the tool result, completing the valid call/result pair.
@@ -191,12 +197,7 @@ func compactInto(args CompactSummary, st *store.Store, sess *Session, allMsgs []
 		newAllMsgs = append(newAllMsgs, *triggerMsg)
 	}
 
-	freed := 0
-	for _, m := range allMsgs[1:] {
-		freed += len(m.Content)
-	}
-	out = fmt.Sprintf("History compacted (session %d → %d). Freed ~%d bytes.", prevSessionID, sess.id, freed)
-	return out, newAllMsgs
+	return newAllMsgs
 }
 
 // PruneByID replaces the tool result with the given id in any of the slices
