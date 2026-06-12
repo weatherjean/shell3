@@ -193,8 +193,10 @@ func compactInto(args CompactSummary, st *store.Store, sess *Session, allMsgs []
 	// Mirror the compacted context into the replayable messages table under the
 	// NEW session id, so a resume of this session loads the within-window
 	// compacted history rather than the pre-compaction blob. flushMessages above
-	// wrote the OUTGOING session; this writes the incoming one.
-	if st != nil {
+	// wrote the OUTGOING session; this writes the incoming one. Guard on a
+	// successful roll (sess.id advanced past prevSessionID) so a failed
+	// StartSession doesn't clobber the outgoing session's seq 0/1.
+	if st != nil && sess.id != prevSessionID {
 		for i, m := range newMsgs {
 			if err := st.AppendMessage(sess.id, i, m); err != nil {
 				lg.Warn("mirror compacted message failed", "session_id", sess.id, "seq", i, "error", err)
