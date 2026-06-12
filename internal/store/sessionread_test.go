@@ -14,11 +14,11 @@ func TestStore_ListSessions(t *testing.T) {
 	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
 	defer st.Close()
 
-	s1, _ := st.StartSession()
+	s1, _ := st.StartSession("", "")
 	st.AppendHistory(s1, "user", "first question")
 	st.AppendHistory(s1, "assistant", "an answer")
 
-	s2, _ := st.StartSession()
+	s2, _ := st.StartSession("", "")
 	st.AppendHistory(s2, "user", "second question")
 
 	got, err := st.ListSessions(10)
@@ -53,12 +53,12 @@ func TestStore_SessionTurns(t *testing.T) {
 	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
 	defer st.Close()
 
-	a, _ := st.StartSession()
+	a, _ := st.StartSession("", "")
 	st.AppendHistory(a, "user", "u1")
 	st.AppendHistory(a, "assistant", "a1")
 	st.AppendHistory(a, "user", "u2")
 
-	b, _ := st.StartSession()
+	b, _ := st.StartSession("", "")
 	st.AppendHistory(b, "user", "other")
 
 	turns, err := st.SessionTurns(a)

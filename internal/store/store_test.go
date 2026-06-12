@@ -70,7 +70,7 @@ func TestStore_SessionLifecycle(t *testing.T) {
 	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
 	defer func() { _ = st.Close() }()
 
-	id, err := st.StartSession()
+	id, err := st.StartSession("", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,11 +86,11 @@ func TestStore_HistoryGet_DefaultsToLatestCompleted(t *testing.T) {
 	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
 	defer func() { _ = st.Close() }()
 
-	s1, _ := st.StartSession()
+	s1, _ := st.StartSession("", "")
 	_ = st.AppendHistory(s1, "user", "old")
 	_ = st.EndSession(s1)
 
-	s2, _ := st.StartSession()
+	s2, _ := st.StartSession("", "")
 	_ = st.AppendHistory(s2, "user", "current") // not ended
 
 	res, err := st.HistoryGet(0, 0)
@@ -112,7 +112,7 @@ func TestStore_HistoryGet_Chunking(t *testing.T) {
 	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
 	defer func() { _ = st.Close() }()
 
-	id, _ := st.StartSession()
+	id, _ := st.StartSession("", "")
 	for i := 0; i < 60; i++ {
 		_ = st.AppendHistory(id, "user", fmt.Sprintf("turn-%d", i))
 	}
@@ -137,13 +137,13 @@ func TestStore_HistoryGet_PrevNext(t *testing.T) {
 	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
 	defer func() { _ = st.Close() }()
 
-	a, _ := st.StartSession()
+	a, _ := st.StartSession("", "")
 	_ = st.AppendHistory(a, "u", "a")
 	_ = st.EndSession(a)
-	b, _ := st.StartSession()
+	b, _ := st.StartSession("", "")
 	_ = st.AppendHistory(b, "u", "b")
 	_ = st.EndSession(b)
-	c, _ := st.StartSession()
+	c, _ := st.StartSession("", "")
 	_ = st.AppendHistory(c, "u", "c")
 	_ = st.EndSession(c)
 
@@ -158,7 +158,7 @@ func TestStore_HistorySearch_ReturnsLocator(t *testing.T) {
 	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
 	defer func() { _ = st.Close() }()
 
-	id, _ := st.StartSession()
+	id, _ := st.StartSession("", "")
 	for i := 0; i < 30; i++ {
 		_ = st.AppendHistory(id, "user", fmt.Sprintf("plain turn %d", i))
 	}
@@ -187,7 +187,7 @@ func TestStore_HistorySearch_PunctuationSafe(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = st.Close() }()
-	sid, _ := st.StartSession()
+	sid, _ := st.StartSession("", "")
 	_ = st.AppendHistory(sid, "user", "make cobra cli colorful")
 	_ = st.AppendHistory(sid, "assistant", "use lipgloss for styling")
 	_ = st.EndSession(sid)
@@ -207,7 +207,7 @@ func TestStore_HistorySearchExpr_OrAnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = st.Close() }()
-	sid, _ := st.StartSession()
+	sid, _ := st.StartSession("", "")
 	_ = st.AppendHistory(sid, "user", "cobra cli colorful")
 	_ = st.AppendHistory(sid, "assistant", "termenv handles ansi colors")
 	_ = st.EndSession(sid)

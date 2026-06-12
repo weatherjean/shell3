@@ -1,5 +1,10 @@
 package store
 
+import "database/sql"
+
+// DB exposes the underlying *sql.DB for tests.
+func (s *Store) DB() *sql.DB { return s.db }
+
 // MaxOpenConns exposes the configured pool limit for tests.
 func (s *Store) MaxOpenConns() int { return s.db.Stats().MaxOpenConnections }
 

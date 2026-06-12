@@ -8,10 +8,11 @@ import (
 
 // StartSessionWithParent inserts a new session row whose parent_session_id
 // records the report pointer (who this session reports to on completion).
-func (s *Store) StartSessionWithParent(parent int64) (int64, error) {
+func (s *Store) StartSessionWithParent(parent int64, projectUUID, workdir string) (int64, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := s.db.Exec(
-		`INSERT INTO sessions(started_at, parent_session_id) VALUES(?, ?)`, now, parent)
+		`INSERT INTO sessions(started_at, parent_session_id, project_uuid, workdir) VALUES(?, ?, ?, ?)`,
+		now, parent, projectUUID, workdir)
 	if err != nil {
 		return 0, fmt.Errorf("store: start session with parent: %w", err)
 	}

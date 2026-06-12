@@ -2,12 +2,29 @@ package store
 
 import "testing"
 
+func TestStartSession_RecordsProjectAndWorkdir(t *testing.T) {
+	st, _ := Open(":memory:")
+	defer st.Close()
+	id, err := st.StartSession("proj-abc", "/tmp/work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var uuid, wd string
+	if err := st.db.QueryRow(
+		`SELECT project_uuid, workdir FROM sessions WHERE id=?`, id).Scan(&uuid, &wd); err != nil {
+		t.Fatal(err)
+	}
+	if uuid != "proj-abc" || wd != "/tmp/work" {
+		t.Fatalf("got (%q,%q), want (proj-abc,/tmp/work)", uuid, wd)
+	}
+}
+
 func TestSession_PointerAndLiveness(t *testing.T) {
 	st, _ := Open(":memory:")
 	defer st.Close()
 
-	parent, _ := st.StartSession()
-	child, err := st.StartSessionWithParent(parent)
+	parent, _ := st.StartSession("", "")
+	child, err := st.StartSessionWithParent(parent, "", "")
 	if err != nil {
 		t.Fatalf("start child: %v", err)
 	}
@@ -29,7 +46,7 @@ func TestSession_PointerAndLiveness(t *testing.T) {
 func TestSession_ReviveClaim_SingleWinner(t *testing.T) {
 	st, _ := Open(":memory:")
 	defer st.Close()
-	id, _ := st.StartSession()
+	id, _ := st.StartSession("", "")
 	_ = st.SetLiveness(id, 0, "", "dormant")
 
 	won1, err := st.ClaimRevive(id)
@@ -45,7 +62,7 @@ func TestSession_ReviveClaim_SingleWinner(t *testing.T) {
 func TestSession_Inbox_AppendDrain(t *testing.T) {
 	st, _ := Open(":memory:")
 	defer st.Close()
-	id, _ := st.StartSession()
+	id, _ := st.StartSession("", "")
 
 	_ = st.AppendInbox(id, []byte(`{"kind":"agent_done","id":"a1"}`))
 	_ = st.AppendInbox(id, []byte(`{"kind":"agent_done","id":"a2"}`))

@@ -63,7 +63,9 @@ func migrate(db *sql.DB) error {
 			parent_session_id INTEGER,
 			pid               INTEGER NOT NULL DEFAULT 0,
 			sock              TEXT NOT NULL DEFAULT '',
-			status            TEXT NOT NULL DEFAULT 'dormant'
+			status            TEXT NOT NULL DEFAULT 'dormant',
+			project_uuid      TEXT NOT NULL DEFAULT '',
+			workdir           TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS messages (
 			session_id      INTEGER NOT NULL,
@@ -84,9 +86,10 @@ func migrate(db *sql.DB) error {
 		)`,
 		`CREATE VIRTUAL TABLE IF NOT EXISTS history USING fts5(
 			content,
-			session_id UNINDEXED,
-			role       UNINDEXED,
-			created_at UNINDEXED
+			session_id   UNINDEXED,
+			role         UNINDEXED,
+			created_at   UNINDEXED,
+			project_uuid UNINDEXED
 		)`,
 	}
 	for _, s := range stmts {
@@ -109,9 +112,11 @@ func parseRFC3339(s string) time.Time {
 }
 
 // StartSession inserts a new session row and returns its id.
-func (s *Store) StartSession() (int64, error) {
+func (s *Store) StartSession(projectUUID, workdir string) (int64, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := s.db.Exec(`INSERT INTO sessions(started_at) VALUES(?)`, now)
+	res, err := s.db.Exec(
+		`INSERT INTO sessions(started_at, project_uuid, workdir) VALUES(?, ?, ?)`,
+		now, projectUUID, workdir)
 	if err != nil {
 		return 0, fmt.Errorf("store: start session: %w", err)
 	}
@@ -212,8 +217,9 @@ func truncateRunes(s string, n int) string {
 func (s *Store) AppendHistory(sessionID int64, role, content string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(
-		`INSERT INTO history(content, session_id, role, created_at) VALUES(?, ?, ?, ?)`,
-		content, sessionID, role, now,
+		`INSERT INTO history(content, session_id, role, created_at, project_uuid)
+ VALUES(?, ?, ?, ?, (SELECT project_uuid FROM sessions WHERE id = ?))`,
+		content, sessionID, role, now, sessionID,
 	)
 	if err != nil {
 		return fmt.Errorf("store: append history: %w", err)
