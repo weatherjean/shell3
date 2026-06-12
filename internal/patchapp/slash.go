@@ -115,6 +115,7 @@ func (a *App) printAutoHelp() {
 		patchtui.Yellow+patchtui.Bold+"Keyboard shortcuts"+patchtui.Reset,
 		patchtui.Cyan+patchtui.Bold+"  enter          "+patchtui.Reset+patchtui.Dim+"send message"+patchtui.Reset,
 		patchtui.Cyan+patchtui.Bold+"  alt+enter      "+patchtui.Reset+patchtui.Dim+"newline in message"+patchtui.Reset,
+		patchtui.Cyan+patchtui.Bold+"  tab            "+patchtui.Reset+patchtui.Dim+"cycle agent (same as /agent <name>)"+patchtui.Reset,
 		patchtui.Cyan+patchtui.Bold+"  esc            "+patchtui.Reset+patchtui.Dim+"clear input"+patchtui.Reset,
 		patchtui.Cyan+patchtui.Bold+"  ctrl+c         "+patchtui.Reset+patchtui.Dim+"cancel active response"+patchtui.Reset,
 		patchtui.Cyan+patchtui.Bold+"  ctrl+c ctrl+c  "+patchtui.Reset+patchtui.Dim+"quit (when idle)"+patchtui.Reset,
