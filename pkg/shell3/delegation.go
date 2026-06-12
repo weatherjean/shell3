@@ -2,34 +2,25 @@ package shell3
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 )
 
-// noSubagentsEnv is the hard backstop for the depth-1 subagent limit. The
-// primary mechanism is --no-subagents templated into the spawn command
-// (opts.DisableSubagents); but a non-compliant model-authored bash_bg command
-// could omit it. So bgjobs sets this var in every background child's
-// environment (see internal/bgjobs), and a session whose environment carries it
-// suppresses its Delegation context regardless of its launch args — a child can
-// never delegate even if --no-subagents was dropped. Defense in depth, not the
-// primary mechanism.
-const noSubagentsEnv = "SHELL3_NO_SUBAGENTS"
-
 // applyDelegationContext appends a "## Delegation" section to this session's
-// system prompt when the active agent has ≥1 allowed subagent AND the session
-// was not started with --no-subagents (opts.DisableSubagents). It is the
-// per-session counterpart to agentsetup's "## Environment" section: agentsetup
-// renders config-derived facts, but the delegation command needs SESSION-level
-// values agentsetup can't see — the concrete sink path, the resolved config
-// path, the running shell3 binary, and this session's name — so it is injected
-// here, once, at session construction.
+// system prompt when the active agent has ≥1 allowed subagent and a resolvable
+// config path. It is the per-session counterpart to agentsetup's "##
+// Environment" section: agentsetup renders config-derived facts, but the
+// delegation command needs SESSION-level values agentsetup can't see — the
+// resolved config path, the running shell3 binary, and this session's id (the
+// child's --parent-session report pointer) — so it is injected here, once, at
+// session construction.
 //
 // The result survives across turns (it lives in the system prompt, not a
-// per-turn reminder, so it never bloats later turns) and is suppressed entirely
-// for a child started with --no-subagents (depth limit 1): such a session gets
-// no delegation context and therefore cannot delegate.
+// per-turn reminder, so it never bloats later turns). There is no depth gate:
+// multi-level delegation is supported. A spawned child records its
+// --parent-session pointer and reports its result back automatically over the
+// socket/inbox transport when it finishes, so a child that itself has subagents
+// gets a delegation context too.
 //
 // delegationMarker opens the appended section. stripDelegation removes a
 // previously-appended section so applyDelegationContext is idempotent and safe
@@ -54,33 +45,27 @@ func (s *Session) applyDelegationContext(rt *Runtime) {
 }
 
 // delegationSection renders the "## Delegation" section to append for the
-// current active agent, or "" when delegation is suppressed: no runtime, a
-// --no-subagents child (opts.DisableSubagents), the SHELL3_NO_SUBAGENTS=1 env
-// backstop (see noSubagentsEnv), no allowed subagents, no sink, or no
-// resolvable config path. See applyDelegationContext for why this lives
-// per-session.
+// current active agent, or "" when there is nothing to delegate with: no
+// runtime, no allowed subagents, or no resolvable config path. See
+// applyDelegationContext for why this lives per-session.
 func (s *Session) delegationSection(rt *Runtime) string {
-	if rt == nil || s.opts.DisableSubagents || os.Getenv(noSubagentsEnv) == "1" {
+	if rt == nil {
 		return ""
 	}
 	allowed := s.cfg.Subagents // the active agent's tools.subagents allowlist
 	if len(allowed) == 0 {
 		return ""
 	}
-	sink := s.sinkPath()
-	if sink == "" {
-		return "" // no sink → no way for a child to self-report; skip delegation
-	}
 	cfgPath, err := rt.ConfigPath()
 	if err != nil || cfgPath == "" {
 		return "" // can't template a spawn command without a concrete config path
 	}
 	return renderDelegation(delegationParams{
-		Binary:     shell3Binary(),
-		ConfigPath: cfgPath,
-		SinkPath:   sink,
-		WorkDir:    s.cfg.WorkDir,
-		Subagents:  s.subagentList(rt, allowed),
+		Binary:        shell3Binary(),
+		ConfigPath:    cfgPath,
+		WorkDir:       s.cfg.WorkDir,
+		ParentSession: s.sess.ID(),
+		Subagents:     s.subagentList(rt, allowed),
 	})
 }
 
@@ -118,19 +103,21 @@ func (s *Session) subagentList(rt *Runtime, names []string) []subagentItem {
 // delegationParams carries the concrete, session-resolved values the delegation
 // section templates into its spawn command.
 type delegationParams struct {
-	Binary     string
-	ConfigPath string
-	SinkPath   string
-	WorkDir    string
-	Subagents  []subagentItem
+	Binary        string
+	ConfigPath    string
+	WorkDir       string
+	ParentSession int64
+	Subagents     []subagentItem
 }
 
 // renderDelegation builds the "## Delegation" system-prompt section: the allowed
-// subagents and the EXACT bash_bg command to spawn one, with every runtime path
+// subagents and the EXACT bash_bg command to spawn one, with every runtime value
 // already substituted. The command sets notify_on_exit=false (the child
-// self-reports agent_done, so a duplicate bg_done is suppressed), --no-subagents
-// (depth limit 1), and --append-sinkfile <this sink> (the child reports back to
-// THIS session). Returns "" when there are no subagents to list.
+// self-reports its result, so a duplicate bg_done is suppressed) and
+// --parent-session <this session> (the child records that report pointer and
+// reports back to THIS session over the socket/inbox transport when it
+// finishes). There is no depth gate — a spawned child may itself delegate.
+// Returns "" when there are no subagents to list.
 func renderDelegation(p delegationParams) string {
 	if len(p.Subagents) == 0 {
 		return ""
@@ -148,8 +135,8 @@ func renderDelegation(p delegationParams) string {
 		}
 	}
 	b.WriteString("\nTo spawn one, call the `bash_bg` tool with this exact command, substituting `<name>` (a subagent from the list), `<id>` (a short unique id you choose, e.g. `explore1`), and `<task>` (the full self-contained prompt — the subagent does not see this conversation):\n\n")
-	fmt.Fprintf(&b, "  %s --config %s --agent <name> --out %s --append-sinkfile %s --id <id> --no-subagents \"<task>\"\n\n",
-		p.Binary, p.ConfigPath, transcript, p.SinkPath)
+	fmt.Fprintf(&b, "  %s run --config %s --agent <name> --out %s --parent-session %d --id <id> --prompt \"<task>\"\n\n",
+		p.Binary, p.ConfigPath, transcript, p.ParentSession)
 	b.WriteString("Pass notify_on_exit=false to bash_bg (the subagent reports its own completion, so the generic background-job notice is redundant). When it finishes you'll get a notification with the subagent's result summary (act on it directly) plus the transcript path at `.shell3/agents/<id>.jsonl`. The transcript is a JSONL audit log — read it only if the summary isn't enough, and extract the subagent's full final answer cleanly with:\n\n")
 	fmt.Fprintf(&b, "    jq -rs 'map(select(.kind==\"assistant_message\"))[-1].text' %s\n", transcript)
 	return b.String()

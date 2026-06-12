@@ -5,39 +5,31 @@ import (
 	"testing"
 )
 
-// TestRenderDelegation_TemplatesSpawnCommand asserts the rendered Delegation
-// section lists the allowed subagents and embeds the exact bash_bg spawn command
-// with every runtime path substituted and the depth/notify flags set.
-func TestRenderDelegation_TemplatesSpawnCommand(t *testing.T) {
-	got := renderDelegation(delegationParams{
-		Binary:     "/usr/local/bin/shell3",
-		ConfigPath: "/home/me/.shell3/shell3.lua",
-		SinkPath:   "/proj/.shell3/sink/main.jsonl",
-		WorkDir:    "/proj",
-		Subagents: []subagentItem{
-			{Name: "explorer", Description: "read-only codebase exploration"},
-			{Name: "bare"}, // no description still lists the name
-		},
+// TestRenderDelegation_NewTemplate asserts the rendered Delegation section lists
+// the allowed subagents and embeds the new `shell3 run` spawn command with the
+// --parent-session report pointer, and that the retired flags are gone.
+func TestRenderDelegation_NewTemplate(t *testing.T) {
+	out := renderDelegation(delegationParams{
+		Binary:        "shell3",
+		ConfigPath:    "/c/shell3.lua",
+		WorkDir:       "/wd",
+		ParentSession: 42,
+		Subagents:     []subagentItem{{Name: "explore", Description: "search"}},
 	})
-	for _, want := range []string{
-		"## Delegation",
-		"- explorer: read-only codebase exploration",
-		"- bare\n",
-		"/usr/local/bin/shell3 --config /home/me/.shell3/shell3.lua",
-		"--agent <name>",
-		"--out .shell3/agents/<id>.jsonl",
-		"--append-sinkfile /proj/.shell3/sink/main.jsonl",
-		"--id <id>",
-		"--no-subagents",
-		"notify_on_exit=false",
-		// The result-readback guidance: the notification carries the answer, and
-		// the transcript has a schema-aware extraction one-liner (not a bare cat).
-		"act on it directly",
-		"jq -rs 'map(select(.kind==\"assistant_message\"))[-1].text' .shell3/agents/<id>.jsonl",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("delegation section missing %q\n---\n%s", want, got)
-		}
+	if !strings.Contains(out, "shell3 run ") {
+		t.Errorf("expected `shell3 run` subcommand:\n%s", out)
+	}
+	if !strings.Contains(out, "--parent-session 42") {
+		t.Errorf("expected --parent-session 42:\n%s", out)
+	}
+	if !strings.Contains(out, "--agent <name>") || !strings.Contains(out, "--prompt \"<task>\"") {
+		t.Errorf("expected new template flags:\n%s", out)
+	}
+	if strings.Contains(out, "--append-sinkfile") || strings.Contains(out, "--no-subagents") {
+		t.Errorf("retired flags must be gone:\n%s", out)
+	}
+	if !strings.Contains(out, "- explore: search") {
+		t.Errorf("expected subagent listing:\n%s", out)
 	}
 }
 
@@ -56,7 +48,7 @@ func TestRenderDelegation_EmptyWhenNoSubagents(t *testing.T) {
 func TestApplyDelegationContext_Idempotent(t *testing.T) {
 	base := "you are an agent.\n## Environment\n- history_db: /x"
 	section := renderDelegation(delegationParams{
-		Binary: "shell3", ConfigPath: "/c.lua", SinkPath: "/s.jsonl", WorkDir: "/w",
+		Binary: "shell3", ConfigPath: "/c.lua", ParentSession: 7, WorkDir: "/w",
 		Subagents: []subagentItem{{Name: "explorer", Description: "explore"}},
 	})
 	withOnce := base + section
@@ -72,39 +64,5 @@ func TestApplyDelegationContext_Idempotent(t *testing.T) {
 	reAppended := stripped + section
 	if n := strings.Count(reAppended, delegationMarker); n != 1 {
 		t.Fatalf("after strip+reapply: %d markers, want 1", n)
-	}
-}
-
-// TestApplyDelegationContext_SuppressedNoSubagents asserts a session started with
-// --no-subagents (DisableSubagents) gets no Delegation section even when its
-// agent has an allowlist — enforcing depth limit 1.
-func TestApplyDelegationContext_SuppressedNoSubagents(t *testing.T) {
-	s := &Session{}
-	s.opts.DisableSubagents = true
-	s.cfg.Subagents = []string{"explorer"}
-	s.cfg.WorkDir = t.TempDir()
-	s.name = "child"
-	s.cfg.Personality.SystemPrompt = "base prompt"
-	s.applyDelegationContext(&Runtime{}) // rt fields irrelevant; DisableSubagents short-circuits
-	if strings.Contains(s.cfg.Personality.SystemPrompt, "## Delegation") {
-		t.Errorf("child with --no-subagents must get no delegation context, got: %q", s.cfg.Personality.SystemPrompt)
-	}
-}
-
-// TestApplyDelegationContext_SuppressedByEnvBackstop asserts the hard backstop:
-// a session whose environment carries SHELL3_NO_SUBAGENTS=1 gets no Delegation
-// section even with DisableSubagents=false and a populated allowlist — so a
-// non-compliant child (launched without --no-subagents but spawned by bgjobs,
-// which sets the env var) still cannot delegate.
-func TestApplyDelegationContext_SuppressedByEnvBackstop(t *testing.T) {
-	t.Setenv(noSubagentsEnv, "1")
-	s := &Session{}
-	s.cfg.Subagents = []string{"explorer"} // allowlist present
-	s.cfg.WorkDir = t.TempDir()
-	s.name = "child"
-	s.cfg.Personality.SystemPrompt = "base prompt"
-	s.applyDelegationContext(&Runtime{})
-	if strings.Contains(s.cfg.Personality.SystemPrompt, "## Delegation") {
-		t.Errorf("SHELL3_NO_SUBAGENTS=1 must suppress delegation, got: %q", s.cfg.Personality.SystemPrompt)
 	}
 }

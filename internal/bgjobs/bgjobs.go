@@ -106,13 +106,10 @@ func Start(argv []string, display, workdir string, env []string, sinkPath string
 
 	c := exec.Command(argv[0], argv[1:]...)
 	c.Dir = workdir
-	// SHELL3_NO_SUBAGENTS=1 is the hard depth-1 backstop: every background child
-	// runs with it set, so a spawned `shell3` subagent suppresses its own
-	// Delegation context (pkg/shell3's noSubagentsEnv) and cannot spawn a
-	// grandchild — even if the model's bash_bg command omitted --no-subagents.
-	// Non-shell3 jobs ignore it. Kept as a literal here to avoid an import cycle
-	// (pkg/shell3 → internal/chat → internal/bgjobs).
-	c.Env = append(os.Environ(), "SHELL3_NO_SUBAGENTS=1")
+	// The child inherits this process's environment. The depth-1 gate is retired:
+	// a spawned `shell3` subagent may itself delegate, and reports its result back
+	// to its parent via the --parent-session pointer (socket/inbox transport).
+	c.Env = append([]string(nil), os.Environ()...)
 	if len(env) > 0 {
 		c.Env = append(c.Env, env...)
 	}

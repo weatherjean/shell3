@@ -65,12 +65,6 @@ type SessionOpts struct {
 	OutPath string
 	// ShellInteractive runs an interactive shell command with TTY access.
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
-	// DisableSubagents suppresses the per-session Delegation context (the
-	// allowed-subagents list + spawn command). Set for a spawned child (the
-	// `--no-subagents` flag) so it cannot itself delegate — enforcing depth
-	// limit 1. Unlike before, it strips no tools (there is no spawn tool); it
-	// only gates the first-turn delegation context Session injects.
-	DisableSubagents bool
 	// ResumeID reloads a stored session's messages when non-zero.
 	ResumeID int64
 	// ParentSession is the report pointer written to the new session row.

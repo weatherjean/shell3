@@ -359,7 +359,6 @@ func Start(ctx context.Context, spec Spec) (*Session, error) {
 		Agent:            spec.Agent,
 		Headless:         !spec.Interactive,
 		ShellInteractive: spec.ShellInteractive,
-		DisableSubagents: spec.NoSubagents,
 		ResumeID:         spec.ResumeID,
 		ParentSession:    spec.ParentSession,
 		// OutPath deliberately empty: Start owns the sink so the start line
