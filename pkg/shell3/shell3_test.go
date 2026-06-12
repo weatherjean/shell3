@@ -88,7 +88,7 @@ func newTestSession(t *testing.T, client chat.LLMClient, cfg chat.Config) *Sessi
 	if cfg.Personality.Name == "" {
 		cfg.Personality.Name = "test"
 	}
-	return newSession(cfg, func() {})
+	return newSession(cfg, func() {}, SessionOpts{})
 }
 
 func TestSession_ID_NoStoreReportsZero(t *testing.T) {

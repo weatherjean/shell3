@@ -10,6 +10,8 @@ import (
 	"golang.org/x/term"
 
 	"github.com/weatherjean/shell3/internal/patchapp"
+	"github.com/weatherjean/shell3/internal/tui"
+	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
 // version is the build version, set at link time via -X main.version (the
@@ -23,10 +25,30 @@ func main() {
 		Version: version,
 	}
 
-	runCmd := newRunCommand()
-	root.RunE = runCmd.RunE
+	var (
+		rootResume     int64
+		rootConfigPath string
+		rootAgent      string
+	)
 	root.Args = cobra.ArbitraryArgs
-	root.Flags().AddFlagSet(runCmd.Flags())
+	root.Flags().Int64Var(&rootResume, "resume", 0, "Resume a stored session by id in the interactive TUI.")
+	root.Flags().StringVarP(&rootConfigPath, "config", "c", "", "Path to shell3.lua (default: ./shell3.lua, else ~/.shell3/shell3.lua)")
+	root.Flags().StringVar(&rootAgent, "agent", "", "Select the active agent by name (default: first declared).")
+	root.RunE = func(cmd *cobra.Command, args []string) error {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("get working directory: %w", err)
+		}
+		spec := shell3.Spec{
+			ConfigPath:  rootConfigPath,
+			WorkDir:     cwd,
+			Agent:       rootAgent,
+			Interactive: true,
+			ResumeID:    rootResume,
+		}
+		return tui.RunInteractive(cmd.Context(), spec)
+	}
+	root.AddCommand(newRunCommand())
 	root.AddCommand(newBootCommand())
 	root.AddCommand(newTelegramCommand())
 

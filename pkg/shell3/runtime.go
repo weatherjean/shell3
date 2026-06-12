@@ -71,6 +71,10 @@ type SessionOpts struct {
 	// limit 1. Unlike before, it strips no tools (there is no spawn tool); it
 	// only gates the first-turn delegation context Session injects.
 	DisableSubagents bool
+	// ResumeID reloads a stored session's messages when non-zero.
+	ResumeID int64
+	// ParentSession is the report pointer written to the new session row.
+	ParentSession int64
 }
 
 // HostEventKind enumerates out-of-turn runtime events.
@@ -430,7 +434,7 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := newSession(cfg, func() {}) // shared parts are the runtime's to clean
+	s := newSession(cfg, func() {}, opts) // shared parts are the runtime's to clean
 	s.shellInteractive = opts.ShellInteractive
 	s.opts = opts
 	s.runtime, s.name = rt, opts.Name

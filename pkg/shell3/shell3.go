@@ -92,6 +92,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -170,6 +171,12 @@ type Spec struct {
 	// (--id; conventionally also the transcript filename stem). Used only with
 	// AppendSinkFile. Empty leaves the id blank in the notification.
 	ID string
+	// ResumeID, when non-zero, reloads that stored session's messages and
+	// continues its conversation instead of starting fresh.
+	ResumeID int64
+	// ParentSession, when non-zero, is the session id this run reports its
+	// completion to (the spawning agent). Persisted as parent_session_id.
+	ParentSession int64
 }
 
 // ErrBusy reports a call that requires the session to be idle while a turn is
@@ -341,6 +348,8 @@ func Start(ctx context.Context, spec Spec) (*Session, error) {
 		Headless:         !spec.Interactive,
 		ShellInteractive: spec.ShellInteractive,
 		DisableSubagents: spec.NoSubagents,
+		ResumeID:         spec.ResumeID,
+		ParentSession:    spec.ParentSession,
 		// OutPath deliberately empty: Start owns the sink so the start line
 		// keeps its historical prompt-derived label (byte-compatible logs).
 	})
@@ -379,16 +388,36 @@ func (s *Session) writeStartLine(label string) {
 // chat.Session runs in synchronous-sink mode: route translates each internal
 // event and forwards it to the current Send channel inline on the turn
 // goroutine. Split out from Start so tests can inject a fakellm-backed config.
-func newSession(cfg chat.Config, cleanup func()) *Session {
+func newSession(cfg chat.Config, cleanup func(), opts SessionOpts) *Session {
 	var storeID int64
+	var seed []llm.Message
 	if cfg.Store != nil {
-		if id, err := cfg.Store.StartSession(); err == nil {
-			storeID = id
-		} else {
-			// Best-effort: a failed StartSession leaves storeID 0 (no
-			// persistence). Log it at Warn so the silent non-persistence is
-			// observable rather than vanishing.
-			chat.LogOrNoop(cfg.Log).Warn("start session failed", "error", err)
+		switch {
+		case opts.ResumeID != 0:
+			storeID = opts.ResumeID
+			if msgs, err := cfg.Store.LoadSessionMessages(opts.ResumeID); err == nil {
+				seed = msgs
+			} else {
+				chat.LogOrNoop(cfg.Log).Warn("resume load failed", "session_id", opts.ResumeID, "error", err)
+			}
+			if err := cfg.Store.SetLiveness(opts.ResumeID, os.Getpid(), "", "live"); err != nil {
+				chat.LogOrNoop(cfg.Log).Warn("resume liveness failed", "error", err)
+			}
+		case opts.ParentSession != 0:
+			if id, err := cfg.Store.StartSessionWithParent(opts.ParentSession); err == nil {
+				storeID = id
+			} else {
+				chat.LogOrNoop(cfg.Log).Warn("start session with parent failed", "error", err)
+			}
+		default:
+			if id, err := cfg.Store.StartSession(); err == nil {
+				storeID = id
+			} else {
+				// Best-effort: a failed StartSession leaves storeID 0 (no
+				// persistence). Log it at Warn so the silent non-persistence is
+				// observable rather than vanishing.
+				chat.LogOrNoop(cfg.Log).Warn("start session failed", "error", err)
+			}
 		}
 	}
 	s := &Session{
@@ -401,6 +430,7 @@ func newSession(cfg chat.Config, cleanup func()) *Session {
 	}
 	s.sess = chat.NewSession(chat.SessionOpts{
 		StoreID:          storeID,
+		InitialMessages:  seed,
 		ContextWindowFor: func(string) int { return cfg.ContextWindow },
 		Sink:             s.route,
 	})
