@@ -89,19 +89,29 @@ Mapping inside `WrapBash`:
 
 ### Exec sites take argv
 
-Both sites stop hardcoding `"bash","-c",cmd` and exec the argv supplied by
-`WrapBash` (or the default when no hook is declared):
+Both exec primitives stop hardcoding `"bash","-c",cmd` and exec the argv supplied
+by `WrapBash` (or the default when no hook is declared):
 
-- `runBashCapture` (`internal/chat/handler_bash.go`) — used by the **bash tool**
-  *and* **custom command-template tools** (`internal/chat/tools.go`).
-- `bgjobs.Start` (`internal/bgjobs/bgjobs.go`) — used by **bash_bg** and
-  **subagents**. Its `command string` parameter becomes an argv `[]string`
-  (or it gains the argv alongside, for the `bg.json` `Cmd` display — see Open
-  Questions). The `SHELL3_NO_SUBAGENTS=1` env injection and process-group setup
-  are unchanged.
+- `runBashCapture` (`internal/chat/handler_bash.go`) — its `command string`
+  parameter becomes `argv []string`.
+- `bgjobs.Start` (`internal/bgjobs/bgjobs.go`) — gains an argv `[]string` for exec
+  plus a `display string` for the `bg.json` `Cmd` field and sink notification (so
+  it stays human-readable when a wrapper swapped the runner). The
+  `SHELL3_NO_SUBAGENTS=1` env injection and process-group setup are unchanged.
 
-**No hook declared** → both sites default to `{"bash","-c",cmd}`, byte-for-byte
-today's behavior. Zero config required; existing configs are unaffected.
+The runner applies to the seams that already honor `wrap_bash`: the **bash** tool
+(via `runBashCapture`) and **bash_bg / subagents** (via `bgjobs.Start`).
+
+**Custom command-template tools are NOT covered.** `dispatchCustomTool`
+(`internal/chat/tools.go`) deliberately bypasses `wrap_bash` — the resolved
+command is the trusted author template; the model supplies only env values, never
+the command string. Those calls pass the default `{"bash","-c",rt.Command}` argv.
+An author who wants a sandbox bakes it into their own template (they control the
+full command string). This corrects an earlier draft that claimed the runner must
+cover all three seams "or sandboxing leaks" — the bypass is by design.
+
+**No hook declared** → both primitives default to `{"bash","-c",cmd}`,
+byte-for-byte today's behavior. Zero config required; existing configs unaffected.
 
 ### Pipeline order
 
@@ -145,14 +155,13 @@ Extend `internal/luacfg/wrap_bash_test.go` and friends:
   nil), using the `docker exec` one-liner as the table example.
 - Cookbook note: the docker/sandbox recipe.
 
-## Open questions (resolve during planning)
+## Resolved during planning
 
-- `bgjobs.Start` signature: replace `command string` with `argv []string`, or
-  add `argv []string` while keeping `command` for the human-readable `Cmd` field
-  in `bg.json` and the sink notification. Leaning toward passing argv for exec
-  **and** a display string (the original `cmd`) so `bg.json` stays readable.
-- Whether the TUI bash header (`ParseBashArgs`) needs any change — likely not,
-  since it renders the model's requested command, not the post-wrap argv.
+- `bgjobs.Start` signature: takes argv `[]string` for exec **and** a separate
+  `display string` (the original command) for `bg.json`'s `Cmd` field and the
+  sink notification, so the background record stays readable after a runner swap.
+- TUI bash header (`ParseBashArgs`) needs no change — it renders the model's
+  requested command, not the post-wrap argv.
 
 ## Out of scope (YAGNI)
 
