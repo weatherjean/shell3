@@ -120,7 +120,7 @@ type TurnConfig struct {
 	// HostTool dispatches a host-registered Go tool (pkg/shell3.RegisterHostTool)
 	// by name, returning its result string. Tried BEFORE ResolveCustomTool so an
 	// embedding host can supply native tools (which return strings directly, not
-	// bash commands) alongside Lua command-template tools. Nil = none registered.
+	// bash commands) alongside command-template tools. Nil = none registered.
 	HostTool func(ctx context.Context, name, argsJSON string) (string, error)
 	// CustomToolNames is the set of tool names routed to HostTool/ResolveCustomTool.
 	CustomToolNames map[string]bool

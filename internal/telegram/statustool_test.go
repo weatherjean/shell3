@@ -11,7 +11,7 @@ import (
 func TestStatusTool_ReportsAgentAndConfig(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "ok")
-	b := NewBot(fc, rt, sess, 42, "")
+	b := NewBot(fc, rt, sess, 42)
 	out, err := b.statusToolHandler(context.Background(), "{}")
 	if err != nil {
 		t.Fatal(err)

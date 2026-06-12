@@ -131,7 +131,7 @@ func Start(command, workdir string, env []string, sinkPath string, notifyOnExit 
 		}
 		exit := exitCode(werr)
 		_ = sink.Append(sinkPath, sink.Notification{
-			Kind: "bg_done",
+			Kind: sink.KindBgDone,
 			ID:   id,
 			Exit: &exit,
 			Log:  logPath,
@@ -259,7 +259,9 @@ func KillAll(workdir string) (int, error) {
 			killed++
 		}
 	}
-	_ = clearRegistry(workdir)
+	if err := clearRegistry(workdir); err != nil {
+		return killed, fmt.Errorf("clear bg registry: %w", err)
+	}
 	return killed, nil
 }
 

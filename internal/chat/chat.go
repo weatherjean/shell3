@@ -103,7 +103,7 @@ type Config struct {
 	// The TUI sets this to a PTY runner that releases the terminal.
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
 	// ResolveCustomTool resolves a custom-tool call to its executable form
-	// (command + env). Nil means no Lua custom tools are wired; unknown tools
+	// (command + env). Nil means no custom tools are wired; unknown tools
 	// fall through to the built-in handler map.
 	ResolveCustomTool func(name, argsJSON string) (ResolvedTool, error)
 	// HostTool dispatches a host-registered Go tool by name (see

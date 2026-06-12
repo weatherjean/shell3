@@ -10,3 +10,6 @@ ai-do-not-read.*
 *.pprof
 *.coverprofile
 coverage.txt
+
+# test coverage profile
+cover.out

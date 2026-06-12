@@ -39,7 +39,7 @@ func renderInputBox(input []rune, cursor, width int, showCursor bool) []string {
 		return renderUserBubbleLine(isFirst, content, contentVisible, width)
 	}
 
-	rawLines := splitRunes(input, '\n')
+	rawLines := splitRunes(input)
 	cursorRow, cursorCol := 0, 0
 	cursorFound := false
 	inputPos := 0
@@ -126,7 +126,7 @@ func renderInputBox(input []rune, cursor, width int, showCursor bool) []string {
 // inputCursorPos computes the wrapped (row, col) for cursor offset.
 func inputCursorPos(input []rune, cursor, width int) (row, col int) {
 	prefixW, contW := 2, 2
-	rawLines := splitRunes(input, '\n')
+	rawLines := splitRunes(input)
 	inputPos := 0
 	for li, l := range rawLines {
 		availW := width - contW
@@ -178,7 +178,7 @@ func inputCursorPos(input []rune, cursor, width int) (row, col int) {
 // inputOffsetForRowCol is the inverse mapping from wrapped row/col to input offset.
 func inputOffsetForRowCol(input []rune, width, targetRow, targetCol int) int {
 	prefixW, contW := 2, 2
-	rawLines := splitRunes(input, '\n')
+	rawLines := splitRunes(input)
 	inputPos := 0
 	row := 0
 	for li, l := range rawLines {
@@ -370,13 +370,13 @@ func runesForVisibleCols(rs []rune, cols int) int {
 	return len(rs)
 }
 
-// splitRunes splits a rune slice on sep, returning sub-slices excluding
+// splitRunes splits a rune slice on newlines, returning sub-slices excluding
 // the separator. Always returns at least one element.
-func splitRunes(rs []rune, sep rune) [][]rune {
+func splitRunes(rs []rune) [][]rune {
 	var out [][]rune
 	var cur []rune
 	for _, r := range rs {
-		if r == sep {
+		if r == '\n' {
 			out = append(out, cur)
 			cur = nil
 		} else {

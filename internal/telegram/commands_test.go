@@ -13,7 +13,7 @@ import (
 func TestCommand_SetNoArgsLists(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "ok")
-	b := NewBot(fc, rt, sess, 42, "")
+	b := NewBot(fc, rt, sess, 42)
 	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/set"})
 	if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "settable") {
 		t.Fatalf("expected bare /set to list settable parameters, got %v", fc.sentTexts())
@@ -23,7 +23,7 @@ func TestCommand_SetNoArgsLists(t *testing.T) {
 func TestCommand_Clear(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "ok")
-	b := NewBot(fc, rt, sess, 42, "")
+	b := NewBot(fc, rt, sess, 42)
 	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/clear"})
 	if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "cleared") {
 		t.Fatalf("expected clear ack, got %v", fc.sentTexts())
@@ -33,7 +33,7 @@ func TestCommand_Clear(t *testing.T) {
 func TestCommand_Run(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "ok")
-	b := NewBot(fc, rt, sess, 42, "")
+	b := NewBot(fc, rt, sess, 42)
 	fired := ""
 	b.SetJobRunner(func(name string) error { fired = name; return nil })
 	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/run nightly"})
@@ -48,7 +48,7 @@ func TestCommand_Run(t *testing.T) {
 func TestCommand_RunNoRunner(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "ok")
-	b := NewBot(fc, rt, sess, 42, "")
+	b := NewBot(fc, rt, sess, 42)
 	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/run x"})
 	if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "no scheduled jobs") {
 		t.Fatalf("expected a no-jobs reply, got %v", fc.sentTexts())
@@ -58,7 +58,7 @@ func TestCommand_RunNoRunner(t *testing.T) {
 func TestCommand_Reload(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "ok")
-	b := NewBot(fc, rt, sess, 42, "")
+	b := NewBot(fc, rt, sess, 42)
 	called := false
 	b.SetReloader(func() (shell3.ReloadResult, error) {
 		called = true
@@ -76,7 +76,7 @@ func TestCommand_Reload(t *testing.T) {
 func TestCommand_ReloadNoReloader(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "ok")
-	b := NewBot(fc, rt, sess, 42, "")
+	b := NewBot(fc, rt, sess, 42)
 	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/reload"})
 	if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "reload not available") {
 		t.Fatalf("expected unavailable reply, got %v", fc.sentTexts())

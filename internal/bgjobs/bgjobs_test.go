@@ -329,8 +329,7 @@ func TestKillAll(t *testing.T) {
 	if n < 1 {
 		t.Errorf("KillAll reported %d killed, want >=1", n)
 	}
-	time.Sleep(200 * time.Millisecond)
-	if syscall.Kill(job.PID, 0) == nil {
+	if !waitDead(job.PID, 2*time.Second) {
 		t.Errorf("job %d still alive after KillAll", job.PID)
 	}
 	if jobs, _ := LoadRegistry(dir); len(jobs.Jobs) != 0 {

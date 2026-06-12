@@ -95,10 +95,11 @@ func minCursorRow(s string, row int) int {
 	lowest := row
 	i := 0
 	for i < len(s) {
-		if s[i] == '\n' {
+		switch {
+		case s[i] == '\n':
 			row++
 			i++
-		} else if strings.HasPrefix(s[i:], "\x1b[") {
+		case strings.HasPrefix(s[i:], "\x1b["):
 			j := i + 2
 			for j < len(s) && s[j] >= '0' && s[j] <= '9' {
 				j++
@@ -116,7 +117,7 @@ func minCursorRow(s string, row int) int {
 				}
 			}
 			i = j + 1
-		} else {
+		default:
 			i++
 		}
 		if row < lowest {

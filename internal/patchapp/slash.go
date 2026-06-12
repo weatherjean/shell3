@@ -42,12 +42,12 @@ func (a *App) RegisterSlash(cmd SlashCommand) {
 	}
 }
 
-// dispatchSlash looks up the command from a "/cmd args" input. Returns
-// true if a registered command (or the auto /help) handled it.
-func (a *App) dispatchSlash(input string) bool {
+// dispatchSlash looks up and runs the command from a "/cmd args" input,
+// falling back to the auto /help listing or an "unknown command" notice.
+func (a *App) dispatchSlash(input string) {
 	trimmed := strings.TrimSpace(input)
 	if !strings.HasPrefix(trimmed, "/") {
-		return false
+		return
 	}
 	body := trimmed[1:]
 	name, args, _ := strings.Cut(body, " ")
@@ -65,7 +65,7 @@ func (a *App) dispatchSlash(input string) bool {
 	if ok {
 		cmd.Handler(args)
 		a.Refresh()
-		return true
+		return
 	}
 	// Auto /help when nothing else handles "help" or its short aliases.
 	if !hasHelpOverride {
@@ -73,12 +73,11 @@ func (a *App) dispatchSlash(input string) bool {
 		case "help", "h", "list", "":
 			a.printAutoHelp()
 			a.Refresh()
-			return true
+			return
 		}
 	}
 	a.PrintLine(patchtui.Dim + fmt.Sprintf("[unknown command: /%s  (type /help to list commands)]", name) + patchtui.Reset)
 	a.Refresh()
-	return true
 }
 
 // printAutoHelp renders the registered command list, dedup'd by canonical

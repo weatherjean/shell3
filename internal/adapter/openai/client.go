@@ -115,10 +115,10 @@ func (b *bodyTap) scanReasoning(r io.ReadCloser, done chan struct{}) {
 	b.mu.Unlock()
 }
 
-func (b *bodyTap) snapshot() (req, res []byte, reasoning string) {
+func (b *bodyTap) snapshot() (req, res []byte) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return append([]byte(nil), b.reqBody...), append([]byte(nil), b.resBody...), b.reasoning
+	return append([]byte(nil), b.reqBody...), append([]byte(nil), b.resBody...)
 }
 
 // WaitReasoning blocks until scanReasoning finishes or ctx is cancelled.
@@ -211,8 +211,7 @@ func (c *Client) LastTraffic() (req, res []byte) {
 	if c.tap == nil {
 		return nil, nil
 	}
-	r, s, _ := c.tap.snapshot()
-	return r, s
+	return c.tap.snapshot()
 }
 
 // Stream sends msgs to the LLM and calls onEvent for each delta and completion.
@@ -252,7 +251,7 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 	// Surface the SDK's otherwise-invisible retries to the caller. The SDK
 	// only retries getting the initial response, so this fires for pre-stream
 	// failures (connection/5xx/429) — never mid-stream after tokens emit.
-	extraOpts = append(extraOpts, option.WithMiddleware(retryObserver(onEvent, maxRetries)))
+	extraOpts = append(extraOpts, option.WithMiddleware(retryObserver(onEvent)))
 	stream := c.oc.Chat.Completions.NewStreaming(ctx, params, extraOpts...)
 	defer func() { _ = stream.Close() }()
 

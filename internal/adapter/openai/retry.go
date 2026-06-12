@@ -19,16 +19,16 @@ const maxRetries = 5
 // the SDK will retry a failed attempt. It only surfaces the retry; the SDK owns
 // the backoff and the retry itself. X-Stainless-Retry-Count is the 0-based
 // attempt index, so the upcoming retry is index+1.
-func retryObserver(onEvent func(llm.StreamEvent), max int) option.Middleware {
+func retryObserver(onEvent func(llm.StreamEvent)) option.Middleware {
 	return func(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
 		res, err := next(req)
 		rc := retryCount(req)
 		// Suppress on a canceled context (e.g. user interrupt) and on the
 		// final attempt, where shouldRetry no longer leads to a retry.
-		if req.Context().Err() == nil && rc < max && isRetryable(res, err) {
+		if req.Context().Err() == nil && rc < maxRetries && isRetryable(res, err) {
 			onEvent(llm.StreamEvent{Retry: &llm.RetryNotice{
 				Attempt: rc + 1,
-				Max:     max,
+				Max:     maxRetries,
 				Reason:  retryReason(res, err),
 			}})
 		}

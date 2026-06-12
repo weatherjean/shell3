@@ -13,7 +13,7 @@ import (
 func TestReloadTool_DefersToEndOfTurn(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "ok")
-	b := NewBot(fc, rt, sess, 42, "")
+	b := NewBot(fc, rt, sess, 42)
 	reloads := 0
 	b.SetReloader(func() (shell3.ReloadResult, error) {
 		reloads++

@@ -18,7 +18,7 @@ func TestHandleCompactHistoryIncludesSkillsToReread(t *testing.T) {
 		{Role: llm.RoleUser, Content: "old context"},
 	}
 
-	_, newAllMsgs := compactInto(CompactSummary{
+	newAllMsgs := compactInto(CompactSummary{
 		Summary: "summary",
 		Skills:  []string{"writing-plans", "/tmp/codebase-discovery.md"},
 	}, nil, sess, allMsgs, applog.Noop{})

@@ -83,13 +83,13 @@ func ExampleSession_Snapshot() {
 func ExampleNewRuntime() {
 	rt, err := shell3.NewRuntime(shell3.RuntimeSpec{WorkDir: "/home/me/assistant"})
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	defer rt.Close()
 
 	chat1, err := rt.Session(shell3.SessionOpts{Name: "tg:1234", Headless: true})
 	if err != nil {
-		log.Fatal(err)
+		panic(err) // panic (not log.Fatal) so the deferred rt.Close still runs
 	}
 	for ev := range chat1.Send(context.Background(), "good morning") {
 		if ev.Kind == shell3.Token {
@@ -100,7 +100,7 @@ func ExampleNewRuntime() {
 	// A second session rooted in a repo behaves like a normal coding session.
 	coder, err := rt.Session(shell3.SessionOpts{Name: "job:fix-ci", WorkDir: "/home/me/src/myrepo", Headless: true})
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 
 	// Mid-turn steering: Interject can be called from any goroutine while

@@ -24,6 +24,10 @@ jobs:
           fi
       - name: go vet
         run: go vet ./...
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.12.1
 
   test:
     strategy:
@@ -35,8 +39,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: go test -race
-        run: go test -race ./...
+      - name: go test -race (with coverage)
+        run: go test -race -coverprofile=cover.out -covermode=atomic ./...
+      - name: coverage summary
+        run: go tool cover -func=cover.out | tail -1
 
   build:
     runs-on: ubuntu-latest

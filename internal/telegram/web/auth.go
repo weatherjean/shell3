@@ -3,7 +3,6 @@
 package web
 
 import (
-	"strconv"
 	"time"
 
 	initdata "github.com/telegram-mini-apps/init-data-golang"
@@ -20,7 +19,7 @@ func verifyInitData(raw, botToken string, wantUser int64) (bool, int64) {
 		return false, 0
 	}
 	uid := parsed.User.ID
-	if strconv.FormatInt(uid, 10) != strconv.FormatInt(wantUser, 10) {
+	if uid != wantUser {
 		return false, 0
 	}
 	return true, uid

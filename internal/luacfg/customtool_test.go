@@ -108,6 +108,18 @@ shell3.agent({ name="code", model="m", prompt="p", tools={ custom={ tl } } })
 	}
 }
 
+func TestResolveEmptySecretErrors(t *testing.T) {
+	c := loadToolCfg(t, `
+local tl = shell3.tool({ name="x", description="d", command="echo hi", secrets={ "BRAVE_API_KEY" } })
+shell3.agent({ name="code", model="m", prompt="p", tools={ custom={ tl } } })
+`)
+	defer c.Close()
+	c.Secrets["BRAVE_API_KEY"] = "" // present in .env but blank
+	if _, err := c.ResolveCustomCall("x", "{}"); err == nil {
+		t.Fatal("empty secret should error, not export a blank value")
+	}
+}
+
 func TestResolveDropsUndeclaredArgs(t *testing.T) {
 	c := loadToolCfg(t, `
 local tl = shell3.tool({ name="x", description="d", command="echo hi",

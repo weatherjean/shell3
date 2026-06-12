@@ -168,7 +168,7 @@ func TestInline_NestedBoldLink_PreservesOuterBold(t *testing.T) {
 
 func TestRender_HeaderListBlockquote(t *testing.T) {
 	in := "# Title\n\n- item one\n- item two\n\n> quoted line\n"
-	lines := Render(in, 80)
+	lines := Render(in)
 	joined := stripANSI(strings.Join(lines, "\n"))
 	for _, want := range []string{"# Title", "• item one", "• item two", "│ quoted line"} {
 		if !strings.Contains(joined, want) {
@@ -182,7 +182,7 @@ func TestRender_HeaderListBlockquote(t *testing.T) {
 // through Render unscathed (treated as plain lines).
 func TestRender_FencedCodePassthrough(t *testing.T) {
 	in := "```go\nfunc x() {}\n```\n"
-	lines := Render(in, 80)
+	lines := Render(in)
 	joined := stripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(joined, "func x() {}") {
 		t.Errorf("code body missing:\n%s", joined)
@@ -192,7 +192,7 @@ func TestRender_FencedCodePassthrough(t *testing.T) {
 func TestRender_MixedContentLine(t *testing.T) {
 	// The exact failure mode from the bug report.
 	in := "Here's a paragraph with a `code span`, a [link](https://x.io), and some **emphasis**. Below is a nested list:"
-	lines := Render(in, 80)
+	lines := Render(in)
 	joined := stripANSI(strings.Join(lines, "\n"))
 	want := "Here's a paragraph with a `code span`, a link, and some emphasis. Below is a nested list:"
 	if joined != want {

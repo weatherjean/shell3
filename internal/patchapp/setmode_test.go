@@ -1,27 +1,27 @@
 package patchapp
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestSetModeUpdatesBadge(t *testing.T) {
 	a := New("build", "status", WelcomeInfo{})
 	a.SetMode("plan")
 	a.mu.Lock()
-	got := a.status.mode
+	frame := strings.Join(a.liveFrameLocked(), "\n")
 	a.mu.Unlock()
-	if got != "plan" {
-		t.Fatalf("mode = %q, want plan", got)
+	if !strings.Contains(frame, "plan") {
+		t.Fatalf("status bar did not render new mode badge; frame:\n%s", frame)
 	}
 }
 
-func TestSetTabRegistersHandler(t *testing.T) {
+func TestTabFiresHandler(t *testing.T) {
 	a := New("build", "status", WelcomeInfo{})
 	called := false
 	a.SetTab(func() { called = true })
-	if a.onTab == nil {
-		t.Fatal("SetTab did not register handler")
-	}
-	a.onTab()
+	a.processInput([]byte{9}) // Tab
 	if !called {
-		t.Fatal("handler not invoked")
+		t.Fatal("Tab key did not fire the registered handler")
 	}
 }

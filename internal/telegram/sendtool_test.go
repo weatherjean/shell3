@@ -13,7 +13,7 @@ import (
 func TestSendMediaTool_RegisteredAndSends(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "ok")
-	b := NewBot(fc, rt, sess, 42, "")
+	b := NewBot(fc, rt, sess, 42)
 
 	if !b.hasTool("send_media_telegram") {
 		t.Fatal("send_media_telegram should be registered in the schema")
@@ -37,7 +37,7 @@ func TestSendMediaTool_RegisteredAndSends(t *testing.T) {
 func TestSendMediaTool_RefusesEnv(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "ok")
-	b := NewBot(fc, rt, sess, 42, "")
+	b := NewBot(fc, rt, sess, 42)
 	dir := t.TempDir()
 	b.SetWorkDir(dir)
 	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("SECRET=x"), 0o644); err != nil {

@@ -4,33 +4,27 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+
+	"github.com/weatherjean/shell3/internal/chat"
 )
 
-// ResolvedCall is a custom-tool invocation reduced to what the executor (in
-// internal/chat) needs: the bash command, the environment to run it with
-// (declared params + secrets, as KEY=VALUE), and the dispatch knobs.
-type ResolvedCall struct {
-	Command    string
-	Env        []string
-	Background bool
-	Timeout    int
-}
-
-// ResolveCustomCall validates a custom-tool call and returns its ResolvedCall.
+// ResolveCustomCall validates a custom-tool call and returns the executable
+// chat.ResolvedTool the chat layer runs: the bash command, the environment to
+// run it with (declared params + secrets, as KEY=VALUE), and the dispatch knobs.
 // Only arguments matching a DECLARED parameter are exported (so a misbehaving
 // model cannot inject arbitrary env vars). Each declared secret is looked up in
 // .env and exported by name; a missing secret is an error (never a silent
 // empty value). The command itself is the trusted, author-defined template — it
 // is NOT passed through wrap_bash (the model supplies only env values).
-func (c *LoadedConfig) ResolveCustomCall(name, argsJSON string) (ResolvedCall, error) {
+func (c *LoadedConfig) ResolveCustomCall(name, argsJSON string) (chat.ResolvedTool, error) {
 	tool, ok := c.Tools[name]
 	if !ok {
-		return ResolvedCall{}, fmt.Errorf("unknown custom tool %q", name)
+		return chat.ResolvedTool{}, fmt.Errorf("unknown custom tool %q", name)
 	}
 	var args map[string]any
 	if argsJSON != "" {
 		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-			return ResolvedCall{}, fmt.Errorf("tool %q: bad args json: %w", name, err)
+			return chat.ResolvedTool{}, fmt.Errorf("tool %q: bad args json: %w", name, err)
 		}
 	}
 	declared := declaredParamNames(tool.Parameters)
@@ -44,11 +38,14 @@ func (c *LoadedConfig) ResolveCustomCall(name, argsJSON string) (ResolvedCall, e
 	for _, s := range tool.Secrets {
 		val, ok := c.Secrets[s]
 		if !ok {
-			return ResolvedCall{}, fmt.Errorf("tool %q: secret %q not found in .env", name, s)
+			return chat.ResolvedTool{}, fmt.Errorf("tool %q: secret %q not found in .env", name, s)
+		}
+		if val == "" {
+			return chat.ResolvedTool{}, fmt.Errorf("tool %q: secret %q is empty in .env (set a value)", name, s)
 		}
 		env = append(env, s+"="+val)
 	}
-	return ResolvedCall{Command: tool.Command, Env: env, Background: tool.Background, Timeout: tool.Timeout}, nil
+	return chat.ResolvedTool{Command: tool.Command, Env: env, Background: tool.Background, Timeout: tool.Timeout}, nil
 }
 
 // declaredParamNames returns the set of property names from a tool's JSON-schema

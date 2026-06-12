@@ -25,6 +25,13 @@ import (
 	"time"
 )
 
+// Notification Kind values: the discriminator each producer sets and the host
+// watcher (pkg/shell3.Session) switches on.
+const (
+	KindBgDone    = "bg_done"    // a bash_bg job exited (reaper-produced)
+	KindAgentDone = "agent_done" // a subagent finished (self-reported)
+)
+
 // Notification is one pointer record appended to a sink. Every field except
 // Kind and TS is omitempty: a given Kind populates only the fields it needs
 // (bg_done uses ID/Exit/Log/Cmd; agent_done uses ID/Status/Transcript/Preview).
@@ -75,10 +82,11 @@ func Append(sinkPath string, n Notification) error {
 	if err != nil {
 		return fmt.Errorf("sink: marshal notification: %w", err)
 	}
-	// Build the line (JSON + '\n') and write it in a single call so the append
-	// is atomic; a separate write for the newline could interleave with another
-	// producer's line.
-	line := append(data, '\n')
+	// Terminate the line (JSON + '\n') and write it in a single call so the
+	// append is atomic; a separate write for the newline could interleave with
+	// another producer's line. data is freshly marshalled and not reused, so
+	// appending in place is safe.
+	data = append(data, '\n')
 	if err := os.MkdirAll(filepath.Dir(sinkPath), 0o755); err != nil {
 		return fmt.Errorf("sink: mkdir: %w", err)
 	}
@@ -87,7 +95,7 @@ func Append(sinkPath string, n Notification) error {
 		return fmt.Errorf("sink: open: %w", err)
 	}
 	defer f.Close()
-	if _, err := f.Write(line); err != nil {
+	if _, err := f.Write(data); err != nil {
 		return fmt.Errorf("sink: write: %w", err)
 	}
 	return nil

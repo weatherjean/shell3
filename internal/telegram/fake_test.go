@@ -23,10 +23,8 @@ type sentDoc struct {
 }
 
 type sentMsg struct {
-	chatID  int64
-	text    string
-	buttons []Button
-	edited  bool
+	chatID int64
+	text   string
 }
 
 func newFakeClient() *fakeClient { return &fakeClient{in: make(chan Msg, 16)} }
@@ -49,21 +47,14 @@ func (f *fakeClient) lastDoc() (sentDoc, bool) {
 	return f.docs[len(f.docs)-1], true
 }
 
-func (f *fakeClient) Send(ctx context.Context, chatID int64, text string, buttons []Button) (int, error) {
+func (f *fakeClient) Send(ctx context.Context, chatID int64, text string) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.next++
-	f.sent = append(f.sent, sentMsg{chatID: chatID, text: text, buttons: buttons})
+	f.sent = append(f.sent, sentMsg{chatID: chatID, text: text})
 	return f.next, nil
 }
-func (f *fakeClient) EditText(ctx context.Context, chatID int64, msgID int, text string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.sent = append(f.sent, sentMsg{chatID: chatID, text: text, edited: true})
-	return nil
-}
-func (f *fakeClient) Typing(ctx context.Context, chatID int64) error              { return nil }
-func (f *fakeClient) AnswerCallback(ctx context.Context, callbackID string) error { return nil }
+func (f *fakeClient) Typing(ctx context.Context, chatID int64) error { return nil }
 
 func (f *fakeClient) sentTexts() []string {
 	f.mu.Lock()
@@ -73,16 +64,4 @@ func (f *fakeClient) sentTexts() []string {
 		out[i] = m.text
 	}
 	return out
-}
-
-// lastButtons returns the buttons of the last sent (non-edited) message, or nil.
-func (f *fakeClient) lastButtons() []Button {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for i := len(f.sent) - 1; i >= 0; i-- {
-		if !f.sent[i].edited {
-			return f.sent[i].buttons
-		}
-	}
-	return nil
 }

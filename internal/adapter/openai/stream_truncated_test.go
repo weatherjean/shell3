@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -41,7 +40,7 @@ func TestStreamTruncatedMidResponse(t *testing.T) {
 			return
 		}
 		// Close abruptly without a terminating [DONE].
-		_ = conn.(net.Conn).Close()
+		_ = conn.Close()
 	}))
 	defer srv.Close()
 

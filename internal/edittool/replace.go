@@ -353,11 +353,12 @@ func indentationFlexibleReplacer(content, find string) []string {
 		}
 		out := make([]string, len(lines))
 		for i, l := range lines {
-			if strings.TrimSpace(l) == "" {
+			switch {
+			case strings.TrimSpace(l) == "":
 				out[i] = l
-			} else if len(l) >= minIndent {
+			case len(l) >= minIndent:
 				out[i] = l[minIndent:]
-			} else {
+			default:
 				out[i] = l
 			}
 		}

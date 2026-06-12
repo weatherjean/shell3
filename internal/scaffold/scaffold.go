@@ -61,7 +61,7 @@ func RenderBaseConfig(dir string, v Values, force bool) error {
 	if err := t.Execute(&buf, v); err != nil {
 		return fmt.Errorf("scaffold: execute template: %w", err)
 	}
-	if err := writeFile(filepath.Join(dir, "shell3.lua"), buf.Bytes(), 0644, force); err != nil {
+	if err := writeFile(filepath.Join(dir, "shell3.lua"), buf.Bytes(), force); err != nil {
 		return err
 	}
 
@@ -80,7 +80,7 @@ func RenderBaseConfig(dir string, v Values, force bool) error {
 		if err != nil {
 			return err
 		}
-		return writeFile(filepath.Join(dir, rel), content, 0644, force)
+		return writeFile(filepath.Join(dir, rel), content, force)
 	})
 }
 
@@ -101,7 +101,7 @@ func RenderTelegramConfig(dir string, v TelegramValues, force bool) error {
 	if err := t.Execute(&buf, v); err != nil {
 		return fmt.Errorf("scaffold: execute telegram template: %w", err)
 	}
-	if err := writeFile(filepath.Join(dir, "shell3.lua"), buf.Bytes(), 0644, force); err != nil {
+	if err := writeFile(filepath.Join(dir, "shell3.lua"), buf.Bytes(), force); err != nil {
 		return err
 	}
 	// Reuse the base lib/ modules (tools, …) verbatim.
@@ -120,7 +120,7 @@ func RenderTelegramConfig(dir string, v TelegramValues, force bool) error {
 		if err != nil {
 			return err
 		}
-		return writeFile(filepath.Join(dir, rel), content, 0644, force)
+		return writeFile(filepath.Join(dir, rel), content, force)
 	})
 }
 
@@ -136,7 +136,7 @@ var luaEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r
 
 // writeFile writes content to path. When force is false it skips an existing
 // file (idempotent re-run); when true it overwrites.
-func writeFile(path string, content []byte, mode fs.FileMode, force bool) error {
+func writeFile(path string, content []byte, force bool) error {
 	if !force {
 		if _, err := os.Stat(path); err == nil {
 			return nil
@@ -147,5 +147,5 @@ func writeFile(path string, content []byte, mode fs.FileMode, force bool) error 
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, content, mode)
+	return os.WriteFile(path, content, 0644)
 }

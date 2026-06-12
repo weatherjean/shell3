@@ -49,7 +49,7 @@ func TestBodyTapCapturesRequestBody(t *testing.T) {
 	resp.Body.Close()
 	<-tap.done
 
-	req2, res2, _ := tap.snapshot()
+	req2, res2 := tap.snapshot()
 	if !bytes.Equal(req2, body) {
 		t.Fatalf("request body: got %q want %q", req2, body)
 	}
@@ -73,7 +73,7 @@ func TestBodyTapCapturesErrorResponseBody(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	_, res, _ := tap.snapshot()
+	_, res := tap.snapshot()
 	if !strings.Contains(string(res), "not authorized") {
 		t.Fatalf("error body not captured: %q", res)
 	}

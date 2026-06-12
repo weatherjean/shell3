@@ -60,13 +60,9 @@ var (
 	codeTokenRe = regexp.MustCompile(string(codeToken) + `\d+` + string(codeToken))
 )
 
-// Render converts markdown text to a slice of ANSI-styled lines.
-// width is used only to enforce a minimum sanity bound; line wrapping
+// Render converts markdown text to a slice of ANSI-styled lines. Line wrapping
 // is the caller's responsibility (e.g. via the TUI's wrapToWidth).
-func Render(text string, width int) []string {
-	if width < 10 {
-		width = 80
-	}
+func Render(text string) []string {
 	lines := strings.Split(text, "\n")
 	out := make([]string, 0, len(lines))
 

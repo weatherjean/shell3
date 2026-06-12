@@ -33,24 +33,13 @@ func NewBotAPIClient(ctx context.Context, token string) (*botAPIClient, error) {
 }
 
 func (c *botAPIClient) onUpdate(ctx context.Context, b *bot.Bot, u *models.Update) {
-	switch {
-	case u.CallbackQuery != nil:
-		cq := u.CallbackQuery
-		// CRITICAL: cq.Message is MaybeInaccessibleMessage; inner may be nil.
-		inner := cq.Message.Message
-		if inner == nil {
-			return // inaccessible message; nothing to act on
-		}
-		c.out <- Msg{
-			ChatID:   inner.Chat.ID,
-			Callback: &Callback{ID: cq.ID, Data: cq.Data, MsgID: inner.ID},
-		}
-	case u.Message != nil:
-		m := u.Message
-		msg := Msg{ChatID: m.Chat.ID, Text: m.Text, ReplyTo: replyContext(m)}
-		msg.Media = resolveMedia(ctx, c, m)
-		c.out <- msg
+	if u.Message == nil {
+		return
 	}
+	m := u.Message
+	msg := Msg{ChatID: m.Chat.ID, Text: m.Text, ReplyTo: replyContext(m)}
+	msg.Media = resolveMedia(ctx, c, m)
+	c.out <- msg
 }
 
 // replyContext returns the text the message is replying to, for model context.
@@ -136,42 +125,18 @@ func (c *botAPIClient) downloadFile(ctx context.Context, fileID, mime, filename 
 // Updates delivers normalized inbound messages until ctx is cancelled.
 func (c *botAPIClient) Updates(ctx context.Context) <-chan Msg { return c.out }
 
-// Send posts a text message with optional inline keyboard buttons (one row).
-// ParseMode is deliberately omitted: arbitrary agent output often contains
-// unbalanced Markdown characters that cause Telegram to reject the message.
-func (c *botAPIClient) Send(ctx context.Context, chatID int64, text string, buttons []Button) (int, error) {
-	p := &bot.SendMessageParams{
+// Send posts a text message. ParseMode is deliberately omitted: arbitrary agent
+// output often contains unbalanced Markdown characters that cause Telegram to
+// reject the message.
+func (c *botAPIClient) Send(ctx context.Context, chatID int64, text string) (int, error) {
+	m, err := c.b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: chatID,
 		Text:   text,
-	}
-	if len(buttons) > 0 {
-		row := make([]models.InlineKeyboardButton, len(buttons))
-		for i, btn := range buttons {
-			if btn.WebApp != "" {
-				row[i] = models.InlineKeyboardButton{Text: btn.Text, WebApp: &models.WebAppInfo{URL: btn.WebApp}}
-				continue
-			}
-			row[i] = models.InlineKeyboardButton{Text: btn.Text, CallbackData: btn.Data}
-		}
-		p.ReplyMarkup = models.InlineKeyboardMarkup{
-			InlineKeyboard: [][]models.InlineKeyboardButton{row},
-		}
-	}
-	m, err := c.b.SendMessage(ctx, p)
+	})
 	if err != nil {
 		return 0, err
 	}
 	return m.ID, nil
-}
-
-// EditText replaces a message's text (and removes its inline buttons).
-func (c *botAPIClient) EditText(ctx context.Context, chatID int64, msgID int, text string) error {
-	_, err := c.b.EditMessageText(ctx, &bot.EditMessageTextParams{
-		ChatID:    chatID,
-		MessageID: msgID,
-		Text:      text,
-	})
-	return err
 }
 
 // Typing shows the "typing…" chat action.
@@ -251,14 +216,6 @@ func (c *botAPIClient) SendDocument(ctx context.Context, chatID int64, filename 
 		ChatID:   chatID,
 		Document: &models.InputFileUpload{Filename: filename, Data: bytes.NewReader(data)},
 		Caption:  caption,
-	})
-	return err
-}
-
-// AnswerCallback acknowledges an inline button press (stops the client spinner).
-func (c *botAPIClient) AnswerCallback(ctx context.Context, id string) error {
-	_, err := c.b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
-		CallbackQueryID: id,
 	})
 	return err
 }

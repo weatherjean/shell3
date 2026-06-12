@@ -26,19 +26,6 @@ func writeTmpFile(t *testing.T, dir, name, body string) string {
 	return p
 }
 
-// resolveCustomTool maps a luacfg ResolvedCall to chat.ResolvedTool, mirroring
-// agentsetup.Parts.ResolveCustomTool so the integration test drives the same
-// resolve-and-exec path the real wiring uses.
-func resolveCustomTool(lc *luacfg.LoadedConfig) func(name, argsJSON string) (chat.ResolvedTool, error) {
-	return func(name, argsJSON string) (chat.ResolvedTool, error) {
-		rc, err := lc.ResolveCustomCall(name, argsJSON)
-		if err != nil {
-			return chat.ResolvedTool{}, err
-		}
-		return chat.ResolvedTool{Command: rc.Command, Env: rc.Env, Background: rc.Background, Timeout: rc.Timeout}, nil
-	}
-}
-
 // TestLuacfgIntegration_WrapBashAndCustomTool loads a luacfg config and drives a
 // full chat turn through the chat turn loop using fakellm. It asserts:
 //   - A custom (bash command-template) tool call runs its command with the
@@ -162,7 +149,7 @@ shell3.agent({
 			StatusLine:        "test │ x",
 			WorkDir:           dir,
 			Log:               applog.Noop{},
-			ResolveCustomTool: resolveCustomTool(lc),
+			ResolveCustomTool: lc.ResolveCustomCall,
 			CustomToolNames:   map[string]bool{"greet": true},
 			WrapBash:          wrapBash,
 		}
@@ -216,7 +203,7 @@ shell3.agent({
 			StatusLine:        "test │ x",
 			WorkDir:           dir,
 			Log:               applog.Noop{},
-			ResolveCustomTool: resolveCustomTool(lc),
+			ResolveCustomTool: lc.ResolveCustomCall,
 			CustomToolNames:   map[string]bool{"greet": true},
 			WrapBash:          wrapBash,
 			Handlers:          chat.NewHandlers(chat.Config{}),

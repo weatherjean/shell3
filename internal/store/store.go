@@ -305,6 +305,9 @@ func (s *Store) HistoryGet(sessionID int64, chunk int) (HistoryGetResult, error)
 		return HistoryGetResult{}, err
 	}
 
+	// prev/next are best-effort navigation hints. A zero id (no row, or a query
+	// error) renders as "no neighbor", so both error cases collapse to the same
+	// harmless sentinel — discarding the error is intentional, not a swallow.
 	var prevID, nextID int64
 	_ = s.db.QueryRow(`
 		SELECT id FROM sessions

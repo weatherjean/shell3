@@ -240,7 +240,11 @@ func value(flag, label, def string, in *bufio.Reader, tty, required bool) (strin
 	}
 	if !tty {
 		if required {
-			return "", fmt.Errorf("boot: --%s required when stdin is not a terminal", strings.ToLower(strings.Fields(label)[0]))
+			name := strings.ToLower(label)
+			if f := strings.Fields(label); len(f) > 0 {
+				name = strings.ToLower(f[0])
+			}
+			return "", fmt.Errorf("boot: --%s required when stdin is not a terminal", name)
 		}
 		return def, nil
 	}

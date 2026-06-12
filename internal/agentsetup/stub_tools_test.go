@@ -46,7 +46,6 @@ func TestAgentRuntime_StubTools(t *testing.T) {
 		ConfigPath: filepath.Join(tmp, "shell3.lua"),
 		CWD:        tmp,
 		HomeDir:    t.TempDir(),
-		Headless:   true,
 	})
 	if err != nil {
 		t.Fatalf("BuildParts: %v", err)

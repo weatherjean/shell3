@@ -4,18 +4,18 @@ import "testing"
 
 func TestDispatchSlash_NoSlashPrefix_NoMatch(t *testing.T) {
 	a := &App{}
-	a.RegisterSlash(SlashCommand{Name: "x", Handler: func(string) {}})
-	if a.dispatchSlash("hello world") {
+	handled := false
+	a.RegisterSlash(SlashCommand{Name: "x", Handler: func(string) { handled = true }})
+	a.dispatchSlash("hello world") // returns early before any Refresh
+	if handled {
 		t.Errorf("non-slash input should not be handled")
 	}
 }
 
 func TestDispatchSlash_RoutesByName(t *testing.T) {
-	a := &App{r: nil}
+	a := New("build", "status", WelcomeInfo{})
 	got := ""
 	a.RegisterSlash(SlashCommand{Name: "say", Handler: func(args string) { got = args }})
-	// Refresh accesses a.r; bypass by using a no-op renderer expectation.
-	defer func() { _ = recover() }()
 	a.dispatchSlash("/say hi there")
 	if got != "hi there" {
 		t.Errorf("args = %q, want %q", got, "hi there")
@@ -23,13 +23,12 @@ func TestDispatchSlash_RoutesByName(t *testing.T) {
 }
 
 func TestDispatchSlash_AliasesWork(t *testing.T) {
-	a := &App{}
+	a := New("build", "status", WelcomeInfo{})
 	hits := 0
 	a.RegisterSlash(SlashCommand{
 		Name: "exit", Aliases: []string{"quit", "q"},
 		Handler: func(string) { hits++ },
 	})
-	defer func() { _ = recover() }()
 	a.dispatchSlash("/quit")
 	a.dispatchSlash("/q")
 	a.dispatchSlash("/exit")
@@ -39,10 +38,9 @@ func TestDispatchSlash_AliasesWork(t *testing.T) {
 }
 
 func TestDispatchSlash_CaseInsensitive(t *testing.T) {
-	a := &App{}
+	a := New("build", "status", WelcomeInfo{})
 	hit := false
 	a.RegisterSlash(SlashCommand{Name: "Foo", Handler: func(string) { hit = true }})
-	defer func() { _ = recover() }()
 	a.dispatchSlash("/FOO")
 	if !hit {
 		t.Errorf("case-insensitive lookup failed")

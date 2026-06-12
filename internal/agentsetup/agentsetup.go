@@ -24,17 +24,14 @@ import (
 	"github.com/weatherjean/shell3/internal/store"
 )
 
-// Options parameterizes Build. CWD/HomeDir default via the caller (front-ends
-// pass os.Getwd()/os.UserHomeDir()). ConfigPath "" triggers default resolution.
+// Options parameterizes BuildParts: where to find the config and which
+// directories the runtime resolves against. CWD/HomeDir default via the caller
+// (front-ends pass os.Getwd()/os.UserHomeDir()). Per-session concerns (agent,
+// headless, out path) live in SessionOptions.
 type Options struct {
-	ConfigPath string
+	ConfigPath string // "" triggers default resolution (ResolveConfigPath)
 	CWD        string
 	HomeDir    string
-	Headless   bool
-	OutPath    string
-	// Agent selects the initial active agent by name. Empty uses the first
-	// declared agent. A non-empty name with no match makes Build fail.
-	Agent string
 }
 
 // Parts is the session-independent runtime assembly: everything one process
@@ -91,16 +88,6 @@ func (p *Parts) AgentNames() []string {
 		names = append(names, a.Name)
 	}
 	return names
-}
-
-// ResolveCustomTool resolves a custom-tool call to its executable form for the
-// chat layer (which owns WorkDir/SinkPath and runs it).
-func (p *Parts) ResolveCustomTool(name, argsJSON string) (chat.ResolvedTool, error) {
-	rc, err := p.lc.ResolveCustomCall(name, argsJSON)
-	if err != nil {
-		return chat.ResolvedTool{}, err
-	}
-	return chat.ResolvedTool{Command: rc.Command, Env: rc.Env, Background: rc.Background, Timeout: rc.Timeout}, nil
 }
 
 // SubagentDescription returns the model-facing "when to use" description for a
@@ -295,7 +282,7 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 		Store:             p.st,
 		WorkDir:           workdir,
 		ProjectRef:        p.uuid,
-		ResolveCustomTool: p.ResolveCustomTool,
+		ResolveCustomTool: p.lc.ResolveCustomCall,
 		StubTools:         p.lc.StubNames(),
 		Log:               p.log,
 		OutPath:           so.OutPath,
@@ -327,24 +314,6 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 	}
 	cfg.ApplyActiveAgent(rt)
 	return cfg, nil
-}
-
-// Build assembles a single-session chat.Config — the historical entry point,
-// now a wrapper over BuildParts + SessionConfig. Multi-session hosts use
-// BuildParts directly via pkg/shell3.Runtime.
-func Build(opts Options) (chat.Config, func(), error) {
-	parts, cleanup, err := BuildParts(opts)
-	if err != nil {
-		return chat.Config{}, cleanup, err
-	}
-	cfg, err := parts.SessionConfig(SessionOptions{
-		Agent: opts.Agent, WorkDir: opts.CWD, Headless: opts.Headless, OutPath: opts.OutPath,
-	})
-	if err != nil {
-		cleanup()
-		return chat.Config{}, func() {}, err
-	}
-	return cfg, cleanup, nil
 }
 
 // BuildParts assembles the shared runtime parts. The returned cleanup closes

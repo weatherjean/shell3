@@ -91,7 +91,7 @@ func selfReport(spec shell3.Spec, finalText string, errored bool) {
 		status = "error"
 	}
 	_ = sink.Append(spec.AppendSinkFile, sink.Notification{
-		Kind:       "agent_done",
+		Kind:       sink.KindAgentDone,
 		ID:         spec.ID,
 		Status:     status,
 		Transcript: spec.OutPath,

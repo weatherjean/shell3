@@ -17,15 +17,18 @@ run: build
 	./$(BIN)
 
 test:
-	go test -race ./...
+	go test -race -coverprofile=cover.out -covermode=atomic ./...
+	@go tool cover -func=cover.out | tail -1
 
-# Mirrors CI: formatting drift fails the build, then static analysis.
+# Mirrors CI: formatting drift fails the build, then static analysis
+# (go vet first, then the deeper golangci-lint suite).
 lint:
 	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
 	go vet ./...
+	golangci-lint run ./...
 
 fmt:
 	gofmt -w .
 
 clean:
-	rm -f $(BIN)
+	rm -f $(BIN) cover.out

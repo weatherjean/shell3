@@ -72,7 +72,7 @@ func TestRetryObserverEmitsOnRetryableFailure(t *testing.T) {
 		if ev.Retry != nil {
 			got = append(got, *ev.Retry)
 		}
-	}, 5)
+	})
 
 	callObserver(mw, "0", context.Background(), resp(503, nil), nil)
 
@@ -90,7 +90,7 @@ func TestRetryObserverSuppressesOnLastAttempt(t *testing.T) {
 		if ev.Retry != nil {
 			n++
 		}
-	}, 5)
+	})
 	// retryCount == maxRetries: the SDK will not retry, so no notice.
 	callObserver(mw, "5", context.Background(), resp(503, nil), nil)
 	if n != 0 {
@@ -104,7 +104,7 @@ func TestRetryObserverSilentOnSuccess(t *testing.T) {
 		if ev.Retry != nil {
 			n++
 		}
-	}, 5)
+	})
 	callObserver(mw, "0", context.Background(), resp(200, nil), nil)
 	if n != 0 {
 		t.Fatalf("expected no notice on success, got %d", n)
@@ -117,7 +117,7 @@ func TestRetryObserverSilentOnCanceledContext(t *testing.T) {
 		if ev.Retry != nil {
 			n++
 		}
-	}, 5)
+	})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	callObserver(mw, "0", ctx, resp(503, nil), nil)

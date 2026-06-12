@@ -46,7 +46,7 @@ func EditFile(workDir, filePath, oldString, newString string, replaceAll bool) (
 			}
 			oldContent = string(raw)
 			created = false
-			mode = info.Mode().Perm() // preserve the existing file's mode on overwrite (matches the str-replace branch)
+			mode = info.Mode().Perm() // preserve the existing file's mode on overwrite
 		} else if !os.IsNotExist(err) {
 			return Result{}, fmt.Errorf("stat %s: %w", abs, err)
 		}

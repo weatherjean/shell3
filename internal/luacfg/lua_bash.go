@@ -31,7 +31,8 @@ func (c *LoadedConfig) luaWrapBash(L *lua.LState) int {
 // returns allowed=false with an explanatory reason. A safety hook that fails
 // open is worse than no hook at all, so the failure mode is deny.
 func (c *LoadedConfig) WrapBash(ctx context.Context, cmd string) (rewritten string, allowed bool, reason string, err error) {
-	defer c.lockVM()()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.L.SetContext(ctx)
 	if e := c.L.CallByParam(lua.P{Fn: c.wrapBash, NRet: 2, Protect: true}, lua.LString(cmd)); e != nil {
 		// Fail closed: a hook that errors blocks rather than runs.

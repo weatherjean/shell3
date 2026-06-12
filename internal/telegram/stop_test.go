@@ -22,7 +22,7 @@ func TestStopCancelsInFlightTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Session: %v", err)
 	}
-	b := NewBot(fc, rt, sess, 42, "")
+	b := NewBot(fc, rt, sess, 42)
 
 	go b.handleMsg(context.Background(), Msg{ChatID: 42, Text: "do work"})
 

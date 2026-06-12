@@ -18,7 +18,6 @@ type Bot struct {
 	sess   *shell3.Session
 	chatID int64 // the single allowed chat
 
-	dashURL string
 	workDir string // resolves relative paths for send_media_telegram
 
 	mu         sync.Mutex         // guards cancelTurn + turnActive
@@ -57,14 +56,12 @@ func (b *Bot) decorateSession() {
 func (b *Bot) RedecorateSession() { b.decorateSession() }
 
 // NewBot wires a Bot. sess must be the runtime's persistent "telegram" session.
-// dashURL is the URL to the dashboard (empty to disable).
-func NewBot(client tgClient, rt *shell3.Runtime, sess *shell3.Session, chatID int64, dashURL string) *Bot {
+func NewBot(client tgClient, rt *shell3.Runtime, sess *shell3.Session, chatID int64) *Bot {
 	b := &Bot{
-		client:  client,
-		rt:      rt,
-		sess:    sess,
-		chatID:  chatID,
-		dashURL: dashURL,
+		client: client,
+		rt:     rt,
+		sess:   sess,
+		chatID: chatID,
 	}
 	b.decorateSession()
 	return b
@@ -94,12 +91,6 @@ func (b *Bot) Run(ctx context.Context) {
 func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 	if m.ChatID != b.chatID {
 		return // unauthorized: drop silently
-	}
-	if m.Callback != nil {
-		// Inline-button callbacks were only ever produced by the (now-removed)
-		// approval flow. Acknowledge to stop the client spinner and drop it.
-		_ = b.client.AnswerCallback(ctx, m.Callback.ID)
-		return
 	}
 	if strings.HasPrefix(m.Text, "/") {
 		b.handleCommand(ctx, m) // defined in commands.go

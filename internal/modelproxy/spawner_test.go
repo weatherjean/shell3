@@ -34,10 +34,10 @@ func TestEnsureRunsCommandOncePerName(t *testing.T) {
 	s.Ensure("m", cmd)
 	s.Ensure("m", cmd) // guarded: must not spawn a second time
 
-	out := waitForFile(t, marker)
+	waitForFile(t, marker)
 	// Give any erroneous second spawn a chance to also write before asserting.
 	time.Sleep(150 * time.Millisecond)
-	out = mustRead(t, marker)
+	out := mustRead(t, marker)
 	if got := strings.Count(out, "run"); got != 1 {
 		t.Fatalf("expected command to run exactly once, ran %d times:\n%s", got, out)
 	}

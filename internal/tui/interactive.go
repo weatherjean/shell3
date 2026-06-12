@@ -452,7 +452,6 @@ func newRenderSink(app patchapp.AppView, lastUsage *usage) (func(shell3.Event), 
 		if text == "" {
 			return
 		}
-		w, _ := patchtui.Size()
 		var emit []string
 		for {
 			idx := strings.IndexByte(text, '\n')
@@ -461,13 +460,14 @@ func newRenderSink(app patchapp.AppView, lastUsage *usage) (func(shell3.Event), 
 			}
 			line := text[:idx]
 			trimmed := strings.TrimLeft(line, " \t")
-			if strings.HasPrefix(trimmed, "```") {
+			switch {
+			case strings.HasPrefix(trimmed, "```"):
 				inFence = !inFence
 				emit = append(emit, patchtui.Dim+line+patchtui.Reset)
-			} else if inFence {
+			case inFence:
 				emit = append(emit, line)
-			} else {
-				emit = append(emit, patchmd.Render(line, w-2)...)
+			default:
+				emit = append(emit, patchmd.Render(line)...)
 			}
 			text = text[idx+1:]
 		}
@@ -513,8 +513,7 @@ func newRenderSink(app patchapp.AppView, lastUsage *usage) (func(shell3.Event), 
 		if streamBuf.Len() == 0 {
 			return
 		}
-		w, _ := patchtui.Size()
-		app.Print(patchmd.Render(streamBuf.String(), w-2))
+		app.Print(patchmd.Render(streamBuf.String()))
 		streamBuf.Reset()
 	}
 
@@ -711,7 +710,7 @@ func registerSlashCommands(app slashTarget, sess session, lastUsage *usage, appl
 			if prompt == "" {
 				lines = append(lines, patchtui.Dim+"(empty)"+patchtui.Reset)
 			} else {
-				lines = append(lines, patchmd.Render(prompt, w-2)...)
+				lines = append(lines, patchmd.Render(prompt)...)
 			}
 
 			lines = append(lines, "", patchtui.Cyan+patchtui.Bold+"Active tools"+patchtui.Reset)

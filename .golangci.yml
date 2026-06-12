@@ -1,0 +1,40 @@
+# golangci-lint configuration (schema v2). Deeper than CI's gofmt + go vet:
+# catches unchecked errors, dead code, needless params, and common correctness
+# smells. Formatters that fight gofmt are deliberately left off, as is misspell
+# (the codebase uses British spelling by choice — not a correctness concern).
+version: "2"
+
+linters:
+  enable:
+    - bodyclose    # HTTP response bodies must be closed
+    - errcheck     # unchecked error returns
+    - gocritic     # opinionated correctness/style diagnostics
+    - govet        # the vet suite
+    - ineffassign  # assignments never read
+    - staticcheck  # the staticcheck suite
+    - unparam      # unused function parameters
+    - unused       # unused code
+
+  settings:
+    gocritic:
+      disabled-checks:
+        # `L` is the gopher-lua convention for *lua.LState; renaming it would
+        # fight the library idiom across every Lua binding.
+        - captLocal
+
+  exclusions:
+    generated: lax
+    presets:
+      # Excludes the idiomatic, can't-meaningfully-handle error cases:
+      # deferred Close(), fmt.Fprint* to in-memory/terminal writers, etc.
+      - std-error-handling
+    rules:
+      # Tests exercise many edge cases and use httptest writers / short-lived
+      # response bodies; this noise isn't actionable. errcheck on test setup
+      # (os.Chdir/Kill/seed inserts) is intentionally ignored — production code
+      # stays strict.
+      - path: _test\.go
+        linters:
+          - unparam
+          - bodyclose
+          - errcheck

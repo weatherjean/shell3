@@ -24,7 +24,7 @@ type Call struct {
 	Tools []llm.ToolDefinition
 }
 
-// Client implements chat.LLMClient (and llm.Provider's Streamer contract).
+// Client implements chat.LLMClient (and the llm.Streamer contract).
 // Each call to Stream consumes one Script from Scripts (in order). If
 // Scripts is exhausted, the last script repeats.
 //

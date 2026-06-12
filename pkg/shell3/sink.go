@@ -153,7 +153,7 @@ func (s *Session) deliverNotification(rt *Runtime, n sink.Notification) {
 // so the agent can read it on demand.
 func formatNotification(n sink.Notification) string {
 	switch n.Kind {
-	case "bg_done":
+	case sink.KindBgDone:
 		exit := "?"
 		if n.Exit != nil {
 			exit = fmt.Sprintf("%d", *n.Exit)
@@ -166,20 +166,29 @@ func formatNotification(n sink.Notification) string {
 			msg += fmt.Sprintf(" cmd: %s", n.Cmd)
 		}
 		return msg
-	case "agent_done":
+	case sink.KindAgentDone:
 		// A subagent (a backgrounded `shell3 --append-sinkfile`) finished and
-		// self-reported. Deliver a short POINTER, never the transcript inline: the
-		// preview is a teaser; the agent cats the transcript for the real detail.
+		// self-reported. The notification ITSELF carries the subagent's result
+		// summary (Preview); the transcript pointer is only for when the summary
+		// isn't enough. So we frame the preview as the answer to act on and make
+		// reading the transcript explicitly optional — with the exact one-liner to
+		// extract the final answer, so the agent never has to reverse-engineer the
+		// JSONL audit schema.
 		status := n.Status
 		if status == "" {
 			status = "done"
 		}
 		msg := fmt.Sprintf("subagent %s finished (%s).", n.ID, status)
 		if n.Preview != "" {
-			msg += " " + n.Preview
+			msg += " Result: " + n.Preview
 		}
 		if n.Transcript != "" {
-			msg += fmt.Sprintf(" Full transcript: %s — read it for detail.", n.Transcript)
+			extract := fmt.Sprintf("jq -rs 'map(select(.kind==\"assistant_message\"))[-1].text' %s", n.Transcript)
+			if n.Preview != "" {
+				msg += fmt.Sprintf(" That result is the subagent's own summary — act on it directly; you do NOT need to read anything else to get the answer. Only if you need its full output or intermediate steps, read the transcript: %s", extract)
+			} else {
+				msg += fmt.Sprintf(" Read its result from the transcript: %s", extract)
+			}
 		}
 		return msg
 	default:

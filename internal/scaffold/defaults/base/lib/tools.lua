@@ -12,10 +12,11 @@ local web_fetch = shell3.tool({
     required = { "url" },
   },
   command = [[
-curl -sfL --max-time 15 "$url" | python3 - "$url" <<'PY'
-import sys, re, html
-url = sys.argv[1]
-data = sys.stdin.read()
+page="$(curl -sfL --max-time 15 "$url")"
+page="$page" python3 <<'PY'
+import os, re, html
+url = os.environ.get("url", "")
+data = os.environ.get("page", "")
 links = sorted(set(re.findall(r'href="(https?://[^"]+)"', data)))
 text = re.sub(r'(?is)<(script|style)[^>]*>.*?</\1>', ' ', data)
 text = re.sub(r'(?s)<!--.*?-->', ' ', text)

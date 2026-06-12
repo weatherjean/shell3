@@ -30,6 +30,10 @@ func TestRenderDelegation_TemplatesSpawnCommand(t *testing.T) {
 		"--id <id>",
 		"--no-subagents",
 		"notify_on_exit=false",
+		// The result-readback guidance: the notification carries the answer, and
+		// the transcript has a schema-aware extraction one-liner (not a bare cat).
+		"act on it directly",
+		"jq -rs 'map(select(.kind==\"assistant_message\"))[-1].text' .shell3/agents/<id>.jsonl",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("delegation section missing %q\n---\n%s", want, got)

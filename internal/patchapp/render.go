@@ -62,7 +62,7 @@ func renderSteerLine(input []rune, cursor, width int) []string {
 	// Flatten logical lines into one, joining with a single space. Track how
 	// the cursor offset maps into the flattened rune slice (each dropped '\n'
 	// becomes one space, so the total length is preserved and cursor maps 1:1).
-	logical := splitRunes(input, '\n')
+	logical := splitRunes(input)
 	var flat []rune
 	for i, l := range logical {
 		if i > 0 {
@@ -242,7 +242,7 @@ func reapplyStyleEnvelope(src string, wrapped []string) []string {
 			w = lead + w
 		}
 		if trail != "" && !strings.HasSuffix(w, trail) {
-			w = w + trail
+			w += trail
 		}
 		wrapped[i] = w
 	}

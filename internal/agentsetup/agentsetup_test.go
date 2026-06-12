@@ -8,15 +8,34 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/agentsetup"
+	"github.com/weatherjean/shell3/internal/chat"
 )
+
+// buildConfig composes the single-session path (BuildParts + a headless
+// SessionConfig) the tests below exercise. agent "" selects the first declared
+// agent. The production front-ends compose these two phases inline.
+func buildConfig(opts agentsetup.Options, agent string) (chat.Config, func(), error) {
+	parts, cleanup, err := agentsetup.BuildParts(opts)
+	if err != nil {
+		return chat.Config{}, cleanup, err
+	}
+	cfg, err := parts.SessionConfig(agentsetup.SessionOptions{
+		Agent: agent, WorkDir: opts.CWD, Headless: true,
+	})
+	if err != nil {
+		cleanup()
+		return chat.Config{}, func() {}, err
+	}
+	return cfg, cleanup, nil
+}
 
 func TestBuild_MissingConfig_Errors(t *testing.T) {
 	tmp := t.TempDir()
-	_, _, err := agentsetup.Build(agentsetup.Options{
+	_, _, err := buildConfig(agentsetup.Options{
 		ConfigPath: filepath.Join(tmp, "shell3.lua"),
 		CWD:        tmp,
 		HomeDir:    tmp,
-	})
+	}, "")
 	if err == nil {
 		t.Fatal("expected error for missing config, got nil")
 	}
@@ -27,12 +46,11 @@ func TestBuild_LoadsConfig(t *testing.T) {
 	home := t.TempDir()
 	writeMinimalConfig(t, tmp)
 
-	cfg, cleanup, err := agentsetup.Build(agentsetup.Options{
+	cfg, cleanup, err := buildConfig(agentsetup.Options{
 		ConfigPath: filepath.Join(tmp, "shell3.lua"),
 		CWD:        tmp,
 		HomeDir:    home,
-		Headless:   true,
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -75,12 +93,11 @@ func TestBuild_Agent_DefaultsToFirst(t *testing.T) {
 	tmp := t.TempDir()
 	writeTwoAgentConfig(t, tmp)
 
-	cfg, cleanup, err := agentsetup.Build(agentsetup.Options{
+	cfg, cleanup, err := buildConfig(agentsetup.Options{
 		ConfigPath: filepath.Join(tmp, "shell3.lua"),
 		CWD:        tmp,
 		HomeDir:    t.TempDir(),
-		Headless:   true,
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -94,13 +111,11 @@ func TestBuild_Agent_SelectsNamed(t *testing.T) {
 	tmp := t.TempDir()
 	writeTwoAgentConfig(t, tmp)
 
-	cfg, cleanup, err := agentsetup.Build(agentsetup.Options{
+	cfg, cleanup, err := buildConfig(agentsetup.Options{
 		ConfigPath: filepath.Join(tmp, "shell3.lua"),
 		CWD:        tmp,
 		HomeDir:    t.TempDir(),
-		Headless:   true,
-		Agent:      "second",
-	})
+	}, "second")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -122,13 +137,11 @@ func TestBuild_Agent_UnknownErrors(t *testing.T) {
 	tmp := t.TempDir()
 	writeTwoAgentConfig(t, tmp)
 
-	_, _, err := agentsetup.Build(agentsetup.Options{
+	_, _, err := buildConfig(agentsetup.Options{
 		ConfigPath: filepath.Join(tmp, "shell3.lua"),
 		CWD:        tmp,
 		HomeDir:    t.TempDir(),
-		Headless:   true,
-		Agent:      "nope",
-	})
+	}, "nope")
 	if err == nil {
 		t.Fatal("expected error for unknown agent, got nil")
 	}
@@ -156,12 +169,11 @@ shell3.agent({ name = "tester", model = "main", prompt = "hi", tools = {} })
 		t.Fatal(err)
 	}
 
-	_, cleanup, err := agentsetup.Build(agentsetup.Options{
+	_, cleanup, err := buildConfig(agentsetup.Options{
 		ConfigPath: filepath.Join(tmp, "shell3.lua"),
 		CWD:        tmp,
 		HomeDir:    t.TempDir(),
-		Headless:   true,
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -188,7 +200,6 @@ func twoAgentOptions(t *testing.T) agentsetup.Options {
 		ConfigPath: filepath.Join(tmp, "shell3.lua"),
 		CWD:        tmp,
 		HomeDir:    t.TempDir(),
-		Headless:   true,
 	}
 }
 
@@ -267,12 +278,11 @@ func TestBuild_MalformedConfig_Errors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, err := agentsetup.Build(agentsetup.Options{
+	_, _, err := buildConfig(agentsetup.Options{
 		ConfigPath: filepath.Join(tmp, "shell3.lua"),
 		CWD:        tmp,
 		HomeDir:    home,
-		Headless:   true,
-	})
+	}, "")
 	if err == nil {
 		t.Fatal("expected error for malformed config, got nil")
 	}
@@ -288,12 +298,11 @@ func TestBuild_AlwaysOpensStore(t *testing.T) {
 	home := t.TempDir()
 	writeMinimalConfig(t, tmp)
 
-	cfg, cleanup, err := agentsetup.Build(agentsetup.Options{
+	cfg, cleanup, err := buildConfig(agentsetup.Options{
 		ConfigPath: filepath.Join(tmp, "shell3.lua"),
 		CWD:        tmp,
 		HomeDir:    home,
-		Headless:   true,
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -313,12 +322,11 @@ func TestBuild_PromptHasEnvironmentSection(t *testing.T) {
 	home := t.TempDir()
 	writeMinimalConfig(t, tmp)
 
-	cfg, cleanup, err := agentsetup.Build(agentsetup.Options{
+	cfg, cleanup, err := buildConfig(agentsetup.Options{
 		ConfigPath: filepath.Join(tmp, "shell3.lua"),
 		CWD:        tmp,
 		HomeDir:    home,
-		Headless:   true,
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -370,7 +378,6 @@ func subagentParts(t *testing.T) (*agentsetup.Parts, func()) {
 		ConfigPath: filepath.Join(tmp, "shell3.lua"),
 		CWD:        tmp,
 		HomeDir:    t.TempDir(),
-		Headless:   true,
 	})
 	if err != nil {
 		t.Fatalf("BuildParts: %v", err)
@@ -440,7 +447,6 @@ func TestAgentRuntime_NoSubagentsNoSpawnTool(t *testing.T) {
 		ConfigPath: filepath.Join(tmp, "shell3.lua"),
 		CWD:        tmp,
 		HomeDir:    t.TempDir(),
-		Headless:   true,
 	})
 	if err != nil {
 		t.Fatalf("BuildParts: %v", err)

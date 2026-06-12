@@ -305,7 +305,7 @@ type toolLoopState struct {
 // ToolConfig: shell_interactive borrows the front-end's TTY runner, and
 // read_media collects media parts for the post-loop user message. They close
 // over st, so they are rebuilt for each executeToolCalls invocation.
-func turnScopedHandlers(cfg TurnConfig, sess *Session, st *toolLoopState) map[string]ToolHandler {
+func turnScopedHandlers(cfg TurnConfig, st *toolLoopState) map[string]ToolHandler {
 	return map[string]ToolHandler{
 		"shell_interactive": funcHandler{name: "shell_interactive", fn: func(ctx context.Context, _ string, args json.RawMessage, _ ToolConfig) (string, error) {
 			if cfg.ShellInteractive == nil {
@@ -333,7 +333,7 @@ func turnScopedHandlers(cfg TurnConfig, sess *Session, st *toolLoopState) map[st
 //     updated message slice for the next round.
 func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCalls []llm.ToolCall, toolSchemas map[string]map[string]any, allMsgs []llm.Message) (toolLoopOutcome, error) {
 	st := &toolLoopState{allMsgs: allMsgs}
-	turnScoped := turnScopedHandlers(cfg, sess, st)
+	turnScoped := turnScopedHandlers(cfg, st)
 	for i, tc := range toolCalls {
 		if ctx.Err() != nil {
 			// Cancelled mid-loop. The assistant message carrying these tool_calls

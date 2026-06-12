@@ -44,6 +44,38 @@ func TestScheduler_FireDispatches(t *testing.T) {
 	}
 }
 
+// TestScheduler_Run covers the manual-trigger path (e.g. the /run command):
+// Run fires exactly the named job and returns an error for an unknown name
+// without dispatching anything.
+func TestScheduler_Run(t *testing.T) {
+	fd := &fakeDispatcher{}
+	jobs := []shell3.CronJob{
+		{Name: "nightly", Schedule: "@every 1h", Agent: "explorer", Prompt: "go"},
+		{Name: "weekly", Schedule: "@every 1h", Agent: "explorer", Prompt: "go"},
+	}
+	s, err := New(fd, jobs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Run("nightly"); err != nil {
+		t.Fatalf("Run(nightly): %v", err)
+	}
+	if fd.count() != 1 {
+		t.Fatalf("want exactly 1 dispatch for the named job, got %d", fd.count())
+	}
+	if got := fd.calls[0].Name; got != "cron:nightly" {
+		t.Errorf("dispatched label = %q, want cron:nightly", got)
+	}
+
+	if err := s.Run("nope"); err == nil {
+		t.Fatal("Run(nope): want error for unknown job name")
+	}
+	if fd.count() != 1 {
+		t.Fatalf("unknown-name Run fired a dispatch: count=%d", fd.count())
+	}
+}
+
 func TestScheduler_BadScheduleRejected(t *testing.T) {
 	if _, err := New(&fakeDispatcher{}, []shell3.CronJob{{Name: "x", Schedule: "not a cron", Agent: "a"}}); err == nil {
 		t.Fatal("expected error for malformed schedule")
