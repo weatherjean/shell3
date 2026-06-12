@@ -187,6 +187,7 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler, shellInteractive
 		Personality:       cfg.Personality,
 		StatusLine:        cfg.StatusLine,
 		WorkDir:           cfg.WorkDir,
+		ProjectRef:        cfg.ProjectRef,
 		Store:             cfg.Store,
 		Handlers:          handlers,
 		Log:               LogOrNoop(cfg.Log),

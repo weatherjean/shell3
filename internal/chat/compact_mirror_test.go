@@ -11,7 +11,7 @@ import (
 func TestCompactInto_MirrorsCompactedContextToNewSession(t *testing.T) {
 	st, _ := store.Open(":memory:")
 	defer st.Close()
-	id, _ := st.StartSession()
+	id, _ := st.StartSession("", "")
 
 	sess := NewSession(SessionOpts{StoreID: id})
 	sess.messages = []llm.Message{
@@ -24,7 +24,7 @@ func TestCompactInto_MirrorsCompactedContextToNewSession(t *testing.T) {
 		{Role: llm.RoleAssistant, Content: "old 2"},
 	}
 
-	compactInto(CompactSummary{Summary: "did stuff"}, st, sess, allMsgs, applog.Noop{})
+	compactInto(CompactSummary{Summary: "did stuff"}, st, sess, allMsgs, applog.Noop{}, "", "")
 
 	// New session id is now sess.id; its persisted messages must equal the
 	// compacted in-memory list.

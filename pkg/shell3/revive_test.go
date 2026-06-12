@@ -12,7 +12,7 @@ import (
 func TestRevivePrompt_SummarizesDrainedInbox(t *testing.T) {
 	st, _ := store.Open(":memory:")
 	defer st.Close()
-	parent, _ := st.StartSession()
+	parent, _ := st.StartSession("", "")
 	_ = st.AppendInbox(parent, mustJSON(notify.Notification{Kind: notify.KindAgentDone, ID: "explore1", Preview: "found 3 files"}))
 	_ = st.AppendInbox(parent, mustJSON(notify.Notification{Kind: notify.KindAgentDone, ID: "explore2", Preview: "all green"}))
 

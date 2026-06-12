@@ -92,6 +92,8 @@ type TurnConfig struct {
 	StatusLine string
 	// WorkDir is the working directory for tool execution.
 	WorkDir string
+	// ProjectRef is the project UUID from .ref, threaded into new store sessions.
+	ProjectRef string
 	// Store persists newly appended messages when non-nil.
 	Store *store.Store
 	// Handlers maps tool name to built-in implementation. Built once via
