@@ -291,9 +291,11 @@ func whitespaceNormalizedReplacer(content, find string) []string {
 
 	// The fuzzy-match regexp depends only on find, not on any line, so compile
 	// it once up front. re stays nil when find has no words, which disables the
-	// per-line Contains branch below, exactly as the per-line guards did. When
-	// there are words the pattern is always valid (QuoteMeta'd literals joined
-	// by \s+), so MustCompile documents that invariant by construction.
+	// per-line Contains branch below, exactly as the per-line guards did.
+	// QuoteMeta escapes regex metacharacters, but it cannot rescue invalid
+	// UTF-8 in find — regexp rejects those bytes — so compile defensively and
+	// leave re nil on failure (disabling the fuzzy branch) rather than panicking
+	// on an adversarial old_string. The nil guard below already handles it.
 	var re *regexp.Regexp
 	if words := strings.Fields(strings.TrimSpace(find)); len(words) > 0 {
 		parts := make([]string, len(words))
@@ -301,7 +303,7 @@ func whitespaceNormalizedReplacer(content, find string) []string {
 			parts[i] = regexp.QuoteMeta(w)
 		}
 		pattern := strings.Join(parts, `\s+`)
-		re = regexp.MustCompile(pattern)
+		re, _ = regexp.Compile(pattern)
 	}
 
 	lines := strings.Split(content, "\n")
