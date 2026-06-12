@@ -66,7 +66,8 @@ type ToolConfig struct {
 	SinkPath string
 	// WrapBash, when non-nil, is the shell3.wrap_bash hook: the bash/bash_bg
 	// handlers pass their parsed command through it before execution. It returns
-	// the (possibly rewritten) command to run, whether the call is allowed, and a
+	// the argv to exec (a string hook return maps to `bash -c <string>`, a table
+	// is exec'd directly — a runner swap), whether the call is allowed, and a
 	// block reason. Nil means no hook is declared — the tools run the command
 	// verbatim (the unsafe default). The hook FAILS CLOSED on error (see
 	// luacfg.WrapBash): a broken wrapper blocks rather than silently runs.
