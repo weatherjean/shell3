@@ -36,3 +36,4 @@ and declared `secrets` are exported into the command env.
 - `lib/extra-agents.lua` — adding more agents.
 - `models.md` — provider-specific model params via `extra` (e.g. MiniMax M3 `reasoning_split`).
 - `proxy.md` — run_proxy recipes (Codex/npx, litellm).
+- `sandbox.md` — sandbox/route bash via `wrap_bash` argv tables (docker, ssh, firejail).

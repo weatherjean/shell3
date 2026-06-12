@@ -41,11 +41,17 @@ shell3.model("{{.Name | luaesc}}", {
 -- Bash safety hook (shell3.wrap_bash) — YOUR ONLY BASH GUARD.
 -- ---------------------------------------------------------------------------
 -- UNSAFE BY DEFAULT: bash and bash_bg run with no restrictions. This hook is the
--- ONLY place bash commands can be inspected, rewritten, or blocked. The default
--- below is a pass-through that lets EVERYTHING through. To lock things down,
--- inspect `cmd` and return nil + a reason to block, or a rewritten string to
--- sandbox. A broken hook fails CLOSED (the command is blocked), never open.
---   -- example: block recursive force-remove
+-- ONLY place bash commands can be inspected, rewritten, or blocked. It receives
+-- the command string and returns one of:
+--   * a string        → run it under `bash -c` (rewrite the command text)
+--   * a table         → an argv list exec'd directly — swaps the RUNNER, not
+--                       just the text. The command is one argv element, so
+--                       nothing re-parses it. e.g. sandbox in a container:
+--                         return {"docker","exec","mycontainer","bash","-c",cmd}
+--                       or swap the shell: return {"zsh","-c",cmd}
+--   * nil/false[,why]  → block (optionally with a reason string)
+-- A broken hook fails CLOSED (the command is blocked), never open.
+--   -- example: block rm -rf, otherwise run normally
 --   shell3.wrap_bash(function(cmd)
 --     if cmd:match("rm%s+%-rf") then return nil, "refusing rm -rf" end
 --     return cmd
