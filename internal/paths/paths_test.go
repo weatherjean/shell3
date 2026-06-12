@@ -11,25 +11,14 @@ func TestGlobal(t *testing.T) {
 	if g.Root != "/home/user/.shell3" {
 		t.Fatalf("Root: got %q", g.Root)
 	}
-	if g.Projects != "/home/user/.shell3/projects" {
-		t.Fatalf("Projects: got %q", g.Projects)
+	if g.Data != "/home/user/.shell3/data" {
+		t.Fatalf("Data: got %q", g.Data)
+	}
+	if g.DB != "/home/user/.shell3/data/shell3.db" {
+		t.Fatalf("DB: got %q", g.DB)
 	}
 	if g.LogFile != "/home/user/.shell3/shell3.log" {
 		t.Fatalf("LogFile: got %q", g.LogFile)
-	}
-}
-
-func TestProject(t *testing.T) {
-	g := paths.NewGlobal("/home/user")
-	p := paths.NewProject(g, "abc-123")
-	if p.Dir != "/home/user/.shell3/projects/abc-123" {
-		t.Fatalf("Dir: got %q", p.Dir)
-	}
-	if p.DB != "/home/user/.shell3/projects/abc-123/shell3.db" {
-		t.Fatalf("DB: got %q", p.DB)
-	}
-	if p.Meta != "/home/user/.shell3/projects/abc-123/meta.json" {
-		t.Fatalf("Meta: got %q", p.Meta)
 	}
 }
 

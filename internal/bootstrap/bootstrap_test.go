@@ -17,7 +17,7 @@ func TestEnsureGlobal(t *testing.T) {
 	if err := bootstrap.EnsureGlobal(g); err != nil {
 		t.Fatalf("EnsureGlobal: %v", err)
 	}
-	for _, dir := range []string{g.Root, g.Projects} {
+	for _, dir := range []string{g.Root, g.Data} {
 		if _, err := os.Stat(dir); err != nil {
 			t.Fatalf("dir missing: %s", dir)
 		}
@@ -45,7 +45,7 @@ func TestEnsureBootstrapEndToEnd(t *testing.T) {
 	if err := bootstrap.EnsureGlobal(g); err != nil {
 		t.Fatalf("EnsureGlobal: %v", err)
 	}
-	id, err := bootstrap.EnsureProject(l, g, cwd)
+	id, err := bootstrap.EnsureProject(l, g)
 	if err != nil {
 		t.Fatalf("EnsureProject: %v", err)
 	}
@@ -71,8 +71,9 @@ func TestEnsureBootstrapEndToEnd(t *testing.T) {
 	} else if loaded != id {
 		t.Fatalf("ref mismatch: %q vs %q", loaded, id)
 	}
-	if _, err := os.Stat(filepath.Join(g.Projects, id)); err != nil {
-		t.Fatalf("project state dir missing: %v", err)
+	// No per-project dir: just verify the .ref was written.
+	if _, err := os.Stat(l.Ref); err != nil {
+		t.Fatalf(".ref file missing: %v", err)
 	}
 }
 
@@ -86,7 +87,7 @@ func TestEnsureProject(t *testing.T) {
 	l := paths.NewLocal(cwd)
 
 	_ = bootstrap.EnsureGlobal(g)
-	id, err := bootstrap.EnsureProject(l, g, cwd)
+	id, err := bootstrap.EnsureProject(l, g)
 	if err != nil {
 		t.Fatalf("EnsureProject: %v", err)
 	}
@@ -121,11 +122,11 @@ func TestEnsureProjectIdempotent(t *testing.T) {
 	l := paths.NewLocal(cwd)
 	_ = bootstrap.EnsureGlobal(g)
 
-	id1, err := bootstrap.EnsureProject(l, g, cwd)
+	id1, err := bootstrap.EnsureProject(l, g)
 	if err != nil {
 		t.Fatalf("EnsureProject 1: %v", err)
 	}
-	id2, err := bootstrap.EnsureProject(l, g, cwd)
+	id2, err := bootstrap.EnsureProject(l, g)
 	if err != nil {
 		t.Fatalf("EnsureProject 2: %v", err)
 	}
@@ -150,7 +151,7 @@ func TestGlobalGitignore(t *testing.T) {
 		".env",
 		"shell3.log",
 		"shell3.log.*",
-		"projects/",
+		"data/",
 	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("global .gitignore missing %q:\n%s", want, content)
@@ -180,7 +181,7 @@ func TestEnsureGitignoreAppends(t *testing.T) {
 	_ = os.MkdirAll(l.Root, 0755)
 	_ = os.WriteFile(filepath.Join(l.Root, ".gitignore"), []byte("shell3.db\nai-do-not-read.*\n"), 0644)
 
-	_, _ = bootstrap.EnsureProject(l, g, cwd)
+	_, _ = bootstrap.EnsureProject(l, g)
 
 	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
 	content := string(gi)
@@ -218,7 +219,7 @@ func TestEnsureGitignoreWholeLineMatch(t *testing.T) {
 	// "*.reference" contains ".ref" as a substring but is not the .ref rule.
 	_ = os.WriteFile(filepath.Join(l.Root, ".gitignore"), []byte("*.reference\n"), 0644)
 
-	if _, err := bootstrap.EnsureProject(l, g, cwd); err != nil {
+	if _, err := bootstrap.EnsureProject(l, g); err != nil {
 		t.Fatalf("EnsureProject: %v", err)
 	}
 
@@ -243,11 +244,11 @@ func TestEnsureGitignoreBGJobs(t *testing.T) {
 	l := paths.NewLocal(cwd)
 	_ = bootstrap.EnsureGlobal(g)
 
-	if _, err := bootstrap.EnsureProject(l, g, cwd); err != nil {
+	if _, err := bootstrap.EnsureProject(l, g); err != nil {
 		t.Fatalf("EnsureProject: %v", err)
 	}
 	// Second run must not duplicate entries.
-	if _, err := bootstrap.EnsureProject(l, g, cwd); err != nil {
+	if _, err := bootstrap.EnsureProject(l, g); err != nil {
 		t.Fatalf("EnsureProject second call: %v", err)
 	}
 
@@ -285,7 +286,7 @@ func TestEnsureGitignoreNoTrailingNewline(t *testing.T) {
 	// entry would be glued onto this line (e.g. "*.reference.ref").
 	_ = os.WriteFile(filepath.Join(l.Root, ".gitignore"), []byte("*.reference"), 0644)
 
-	if _, err := bootstrap.EnsureProject(l, g, cwd); err != nil {
+	if _, err := bootstrap.EnsureProject(l, g); err != nil {
 		t.Fatalf("EnsureProject: %v", err)
 	}
 
@@ -314,8 +315,8 @@ func TestEnsureGlobalDoesNotWriteConfig(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(g.Root, ".env.example")); !os.IsNotExist(err) {
 		t.Fatalf("EnsureGlobal must not write .env.example; stat err = %v", err)
 	}
-	if _, err := os.Stat(g.Projects); err != nil {
-		t.Fatalf("projects dir missing: %v", err)
+	if _, err := os.Stat(g.Data); err != nil {
+		t.Fatalf("data dir missing: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(g.Root, ".gitignore")); err != nil {
 		t.Fatalf("gitignore missing: %v", err)
@@ -337,7 +338,7 @@ func TestEnsureGitignoreAddsMissingEntryIndependently(t *testing.T) {
 	// .ref already present as a whole line; bg.json must still be added.
 	_ = os.WriteFile(filepath.Join(l.Root, ".gitignore"), []byte(".ref\n"), 0644)
 
-	if _, err := bootstrap.EnsureProject(l, g, cwd); err != nil {
+	if _, err := bootstrap.EnsureProject(l, g); err != nil {
 		t.Fatalf("EnsureProject: %v", err)
 	}
 

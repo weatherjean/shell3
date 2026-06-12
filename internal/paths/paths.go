@@ -7,16 +7,10 @@ import (
 
 // Global holds all paths under ~/.shell3/ (user-scoped, never in repo).
 type Global struct {
-	Root     string // ~/.shell3/
-	Projects string // ~/.shell3/projects/
-	LogFile  string // ~/.shell3/shell3.log
-}
-
-// Project holds paths for one project's personal state keyed by UUID.
-type Project struct {
-	Dir  string // ~/.shell3/projects/<uuid>/
-	DB   string // ~/.shell3/projects/<uuid>/shell3.db
-	Meta string // ~/.shell3/projects/<uuid>/meta.json
+	Root    string // ~/.shell3/
+	Data    string // ~/.shell3/data/
+	DB      string // ~/.shell3/data/shell3.db
+	LogFile string // ~/.shell3/shell3.log
 }
 
 // Local holds paths under ./.shell3/ (project-scoped, committed to repo).
@@ -29,20 +23,12 @@ type Local struct {
 // NewGlobal returns a Global path set rooted at homeDir/.shell3/.
 func NewGlobal(homeDir string) Global {
 	root := filepath.Join(homeDir, ".shell3")
+	data := filepath.Join(root, "data")
 	return Global{
-		Root:     root,
-		Projects: filepath.Join(root, "projects"),
-		LogFile:  filepath.Join(root, "shell3.log"),
-	}
-}
-
-// NewProject returns the Project path set for the given UUID under g.Projects.
-func NewProject(g Global, uuid string) Project {
-	dir := filepath.Join(g.Projects, uuid)
-	return Project{
-		Dir:  dir,
-		DB:   filepath.Join(dir, "shell3.db"),
-		Meta: filepath.Join(dir, "meta.json"),
+		Root:    root,
+		Data:    data,
+		DB:      filepath.Join(data, "shell3.db"),
+		LogFile: filepath.Join(root, "shell3.log"),
 	}
 }
 
@@ -68,4 +54,3 @@ func BGLogPath(id string) string { return filepath.Join(BGLogDir(), id+".log") }
 func SockPath(workdir string, sessionID int64) string {
 	return filepath.Join(workdir, ".shell3", "sock", fmt.Sprintf("%d.sock", sessionID))
 }
-

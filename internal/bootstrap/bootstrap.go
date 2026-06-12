@@ -10,11 +10,11 @@ import (
 	"github.com/weatherjean/shell3/internal/ref"
 )
 
-// EnsureGlobal creates ~/.shell3/ (and its projects/ dir) and the global
+// EnsureGlobal creates ~/.shell3/ (and its data/ dir) and the global
 // .gitignore if missing. It does NOT write any shell3.lua — config is created
 // explicitly via `shell3 boot`.
 func EnsureGlobal(g paths.Global) error {
-	for _, dir := range []string{g.Root, g.Projects} {
+	for _, dir := range []string{g.Root, g.Data} {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return fmt.Errorf("bootstrap: mkdir %s: %w", dir, err)
 		}
@@ -25,9 +25,9 @@ func EnsureGlobal(g paths.Global) error {
 	return nil
 }
 
-// EnsureProject creates ./.shell3/ and the .ref file for this project, and the
-// project's global state dir. Returns the project UUID (created on first call).
-func EnsureProject(l paths.Local, g paths.Global, cwd string) (string, error) {
+// EnsureProject creates ./.shell3/ and the .ref file for this project.
+// Returns the project UUID (created on first call). Idempotent.
+func EnsureProject(l paths.Local, g paths.Global) (string, error) {
 	if err := os.MkdirAll(l.Root, 0755); err != nil {
 		return "", fmt.Errorf("bootstrap: mkdir %s: %w", l.Root, err)
 	}
@@ -36,13 +36,9 @@ func EnsureProject(l paths.Local, g paths.Global, cwd string) (string, error) {
 		return "", err
 	}
 
-	id, err := ref.Init(l, g, cwd)
+	id, err := ref.Init(l, g)
 	if err != nil {
 		return "", fmt.Errorf("bootstrap: ref init: %w", err)
-	}
-	p := paths.NewProject(g, id)
-	if err := os.MkdirAll(p.Dir, 0700); err != nil {
-		return "", fmt.Errorf("bootstrap: mkdir project dir: %w", err)
 	}
 	return id, nil
 }
@@ -129,5 +125,5 @@ ai-do-not-read.*
 .env
 shell3.log
 shell3.log.*
-projects/
+data/
 `
