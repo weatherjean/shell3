@@ -60,10 +60,6 @@ type ToolConfig struct {
 	Store *store.Store
 	// WorkDir is the working directory tools should resolve paths against.
 	WorkDir string
-	// SinkPath is the session's notification sink (internal/sink): bash_bg's
-	// reaper appends a bg_done notification here on process exit. Empty when the
-	// front-end wires no sink (the bg job is still spawned, just not announced).
-	SinkPath string
 	// WrapBash, when non-nil, is the shell3.wrap_bash hook: the bash/bash_bg
 	// handlers pass their parsed command through it before execution. It returns
 	// the argv to exec (a string hook return maps to `bash -c <string>`, a table
@@ -96,9 +92,6 @@ type TurnConfig struct {
 	StatusLine string
 	// WorkDir is the working directory for tool execution.
 	WorkDir string
-	// SinkPath is the session's notification sink, threaded to each tool call's
-	// ToolConfig (see ToolConfig.SinkPath). Empty disables sink notifications.
-	SinkPath string
 	// Store persists newly appended messages when non-nil.
 	Store *store.Store
 	// Handlers maps tool name to built-in implementation. Built once via

@@ -29,30 +29,3 @@ func TestStartExecsArgv(t *testing.T) {
 	}
 	t.Fatal("argv background job did not run (marker never written)")
 }
-
-// TestStartSinkRecordsDisplayNotArgv proves the bg_done notification's Cmd field
-// carries the human-readable display string — the original model command — and
-// NOT argv[0] ("bash") or the argv-joined form, even after a runner swap where
-// argv differs from display. Uses notifyOnExit=true + a real sink so the reaper
-// actually writes the notification (TestStartExecsArgv passes notifyOnExit=false
-// and so never exercises the sink path).
-func TestStartSinkRecordsDisplayNotArgv(t *testing.T) {
-	wd := t.TempDir()
-	sinkPath := filepath.Join(wd, ".shell3", "sink", "main.jsonl")
-	const display = "the original model command"
-	argv := []string{"bash", "-c", "true"} // runner-swap flavor: argv != display
-	job, err := Start(argv, display, wd, nil, sinkPath, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Remove(job.Log) })
-
-	lines := waitSinkLines(t, sinkPath, 1, 3*time.Second)
-	n := lines[0]
-	if n["kind"] != "bg_done" {
-		t.Fatalf("kind = %v, want bg_done", n["kind"])
-	}
-	if n["cmd"] != display {
-		t.Fatalf("cmd = %v, want display %q (must not be argv[0] or argv-joined)", n["cmd"], display)
-	}
-}

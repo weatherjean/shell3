@@ -3,7 +3,6 @@ package paths
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 )
 
 // Global holds all paths under ~/.shell3/ (user-scoped, never in repo).
@@ -64,31 +63,9 @@ func BGLogDir() string { return filepath.Join("/tmp", "shell3", "runs") }
 // BGLogPath returns the log file path for a given job id.
 func BGLogPath(id string) string { return filepath.Join(BGLogDir(), id+".log") }
 
-// SinkPath returns the per-session sink file (the append-only JSONL
-// notification channel) under <workdir>/.shell3/sink/<session>.jsonl. The
-// session name is sanitized for filesystem safety — session names look like
-// "sub:a1f" or "tg:1234", and the colons (plus path separators, for paranoia)
-// are replaced — so the name never escapes the sink directory or names an
-// illegal file. Callers should mkdir the parent before writing.
-func SinkPath(workdir, session string) string {
-	return filepath.Join(workdir, ".shell3", "sink", sanitizeSession(session)+".jsonl")
-}
-
 // SockPath returns the per-session Unix-domain socket path. Kept short
 // (numeric session id) because macOS caps socket paths at ~104 bytes.
 func SockPath(workdir string, sessionID int64) string {
 	return filepath.Join(workdir, ".shell3", "sock", fmt.Sprintf("%d.sock", sessionID))
 }
 
-// sanitizeSession maps a session name to a filesystem-safe single path
-// component: ':' (the namespace separator in names like "sub:a1f") and the
-// path separators '/' and '\' become '_'. An empty result falls back to
-// "session" so we never produce a dotfile or an empty name.
-func sanitizeSession(session string) string {
-	r := strings.NewReplacer(":", "_", "/", "_", "\\", "_")
-	s := r.Replace(session)
-	if s == "" {
-		return "session"
-	}
-	return s
-}

@@ -376,7 +376,6 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 				toolCfg := ToolConfig{
 					Store:    cfg.Store,
 					WorkDir:  cfg.WorkDir,
-					SinkPath: cfg.SinkPath,
 					WrapBash: cfg.WrapBash,
 					AllMsgs:  st.allMsgs,
 					SessMsgs: sess.messages,

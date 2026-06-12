@@ -115,8 +115,9 @@ func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
 		return p.runtimeForAgent(a)
 	}
 	// A subagent name passed via --agent (the spawn command): resolve it from the
-	// subagent registry. Subagents get no delegation context (depth limit 1 is
-	// enforced by --no-subagents at spawn), so this is just a headless config.
+	// subagent registry into a plain headless config. The depth-1 gate is retired
+	// — whether a resolved agent gets a delegation context is decided per session
+	// (pkg/shell3) by whether it lists subagents, not by a spawn-time flag.
 	if sa, ok := p.lc.SubagentByName(name); ok {
 		return p.runtimeForAgent(subagentToAgent(sa))
 	}

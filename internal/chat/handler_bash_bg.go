@@ -49,11 +49,10 @@ func (BashBgHandler) Execute(ctx context.Context, id string, args json.RawMessag
 		}
 		argv = a
 	}
-	// cfg.SinkPath is the session's notification sink (empty for front-ends
-	// that don't wire one): the reaper appends a bg_done notification there on
-	// exit so the host can tell the agent the background job finished.
-	// Display the original command in bg.json/sink regardless of any runner swap.
-	job, err := bgjobs.Start(argv, p.Command, wd, nil, cfg.SinkPath, notifyOnExit)
+	// Display the original command in bg.json regardless of any runner swap. The
+	// sink-file path is retired (socket/inbox transport handles agent completion),
+	// so "" is passed; notifyOnExit is still threaded for signature stability.
+	job, err := bgjobs.Start(argv, p.Command, wd, nil, "", notifyOnExit)
 	if err != nil {
 		return "", fmt.Errorf("bash_bg: %w", err)
 	}

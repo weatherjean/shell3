@@ -338,105 +338,27 @@ func TestKillAll(t *testing.T) {
 	}
 }
 
-// waitSinkLines polls a sink file until it holds at least n complete lines or
-// the timeout elapses, returning whatever lines it could read. The reaper
-// appends bg_done asynchronously after Wait, so the test can't read the sink
-// the instant Start returns.
-func waitSinkLines(t *testing.T, path string, n int, timeout time.Duration) []map[string]any {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for {
-		data, err := os.ReadFile(path)
-		if err == nil {
-			var out []map[string]any
-			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-				if line == "" {
-					continue
-				}
-				var m map[string]any
-				if err := json.Unmarshal([]byte(line), &m); err != nil {
-					t.Fatalf("sink line not valid json: %q: %v", line, err)
-				}
-				out = append(out, m)
-			}
-			if len(out) >= n {
-				return out
-			}
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("sink %s did not reach %d lines within %s", path, n, timeout)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-}
-
-// TestStart_emitsBgDoneOnExit verifies the reaper appends a bg_done
-// notification to the sink with the job id, exit code, log path, and command
-// once the process exits.
-func TestStart_emitsBgDoneOnExit(t *testing.T) {
+// TestStart_noSinkFileWritten verifies the retired sink mechanism is gone: the
+// reaper no longer writes any per-session sink file on exit (durability is owed
+// only to agent completion, which self-reports over the socket transport). The
+// job still runs and is reaped; the sinkPath/notifyOnExit args are vestigial.
+func TestStart_noSinkFileWritten(t *testing.T) {
 	wd := t.TempDir()
 	sinkPath := filepath.Join(wd, ".shell3", "sink", "main.jsonl")
-	job, err := Start([]string{"bash", "-c", "exit 3"}, "exit 3", wd, nil, sinkPath, true)
+	job, err := Start([]string{"bash", "-c", "exit 0"}, "exit 0", wd, nil, sinkPath, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Remove(job.Log) })
 
-	lines := waitSinkLines(t, sinkPath, 1, 3*time.Second)
-	n := lines[0]
-	if n["kind"] != "bg_done" {
-		t.Fatalf("kind = %v, want bg_done", n["kind"])
-	}
-	if n["id"] != job.ID {
-		t.Fatalf("id = %v, want %s", n["id"], job.ID)
-	}
-	// JSON numbers decode to float64.
-	if exit, ok := n["exit"].(float64); !ok || int(exit) != 3 {
-		t.Fatalf("exit = %v, want 3", n["exit"])
-	}
-	if n["log"] != job.Log {
-		t.Fatalf("log = %v, want %s", n["log"], job.Log)
-	}
-	if n["cmd"] != "exit 3" {
-		t.Fatalf("cmd = %v, want %q", n["cmd"], "exit 3")
-	}
-}
-
-// TestStart_notifyOnExitFalseSkipsBgDone verifies that notifyOnExit=false
-// suppresses the bg_done append even when a sinkPath is configured — the path a
-// subagent spawn uses so its own agent_done is the only notification (no
-// duplicate bg_done). The job still runs and is reaped; only the sink stays empty.
-func TestStart_notifyOnExitFalseSkipsBgDone(t *testing.T) {
-	wd := t.TempDir()
-	sinkPath := filepath.Join(wd, ".shell3", "sink", "main.jsonl")
-	job, err := Start([]string{"bash", "-c", "exit 0"}, "exit 0", wd, nil, sinkPath, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Remove(job.Log) })
-
-	// Let the process exit and the reaper run, then assert no sink line landed.
+	// Let the process exit and the reaper run, then assert no sink file landed.
 	waitDead(job.PID, 2*time.Second)
 	time.Sleep(150 * time.Millisecond)
 	if data, err := os.ReadFile(sinkPath); err == nil && len(data) > 0 {
-		t.Fatalf("notify_on_exit=false must write no bg_done, got sink content: %q", data)
+		t.Fatalf("reaper must write no sink file, got content: %q", data)
 	}
-}
-
-// TestStart_emptySinkPathSkipsNotification verifies an empty sinkPath is a safe
-// no-op: the job still runs and is tracked, but no sink file is written.
-func TestStart_emptySinkPathSkipsNotification(t *testing.T) {
-	wd := t.TempDir()
-	job, err := Start([]string{"bash", "-c", "true"}, "true", wd, nil, "", true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Remove(job.Log) })
-	// Give the reaper a moment to run; it must NOT create a sink dir/file.
-	waitDead(job.PID, time.Second)
-	time.Sleep(100 * time.Millisecond)
 	if _, err := os.Stat(filepath.Join(wd, ".shell3", "sink")); !os.IsNotExist(err) {
-		t.Fatalf("sink dir should not exist with empty sinkPath, stat err: %v", err)
+		t.Fatalf("sink dir should not exist, stat err: %v", err)
 	}
 }
 

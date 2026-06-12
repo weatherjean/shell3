@@ -433,10 +433,9 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	s.opts = opts
 	s.runtime, s.name = rt, opts.Name
 	s.sink, s.sinkCleanup = sink, sinkCleanup
-	// Inject the per-session Delegation context now that runtime+name are set
-	// (sinkPath derives from them): it appends the allowed-subagents list + the
-	// exact templated spawn command to the system prompt. No-op when the agent
-	// has no subagents or the session is --no-subagents (depth limit 1).
+	// Inject the per-session Delegation context now that runtime+name are set:
+	// it appends the allowed-subagents list + the exact templated spawn command
+	// to the system prompt. No-op when the agent has no subagents.
 	s.applyDelegationContext(rt)
 	s.writeStartLine("(session " + opts.Name + ")")
 	rt.sessions[opts.Name] = s

@@ -78,14 +78,16 @@
 // A subagent is not an in-process subsystem: it is a backgrounded shell3
 // subprocess. The Session injects a first-turn "Delegation" system context
 // listing the agent's allowed subagents and the exact bash_bg command to spawn
-// one — `shell3 --config <cfg> --agent <name> --out .shell3/agents/<id>.jsonl
-// --append-sinkfile <session-sink> --id <id> --no-subagents "<task>"`. The
-// child streams its transcript to --out and, on completion, self-reports an
-// agent_done pointer to the session sink; the host watcher injects that pointer
-// (transcript path + short preview) into the parent's next turn. The parent
-// cats the transcript for detail. Spawned children run --no-subagents (no
-// delegation context), so they cannot recurse (depth limit 1). Cancellation
-// falls out of bgjobs.KillAll, since a subagent is just a tracked bg job.
+// one — `shell3 run --config <cfg> --agent <name> --out
+// .shell3/agents/<id>.jsonl --parent-session <id> --id <id> --prompt "<task>"`.
+// The child streams its transcript to --out and, on completion, self-reports an
+// agent_done pointer to its --parent-session over the socket/SQLite-inbox
+// transport (internal/notify, internal/socket); the parent's transport listener
+// injects that pointer (transcript path + short preview) into its next turn. The
+// parent cats the transcript for detail. A spawned child may itself delegate —
+// the depth-1 gate is retired — and reports up its own parent pointer, so
+// completions cascade toward root. Cancellation falls out of bgjobs.KillAll,
+// since a subagent is just a tracked bg job.
 package shell3
 
 import (
@@ -162,17 +164,9 @@ type Spec struct {
 	// shell_interactive tool returning an "unavailable" string. A TUI supplies
 	// a closure that releases the terminal for the duration of the command.
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
-	// NoSubagents suppresses the per-session Delegation context (--no-subagents).
-	// Set for a spawned child so it cannot itself delegate (depth limit 1).
-	NoSubagents bool
-	// AppendSinkFile, when non-empty, is a sink file the run appends ONE
-	// agent_done Notification to on completion (--append-sinkfile): a subagent
-	// self-reporting its lifecycle to the parent session's sink. Empty disables
-	// the self-report (an ordinary headless run).
-	AppendSinkFile string
-	// ID is the caller-chosen id stamped into the agent_done notification
-	// (--id; conventionally also the transcript filename stem). Used only with
-	// AppendSinkFile. Empty leaves the id blank in the notification.
+	// ID is the caller-chosen id stamped into the agent_done report (--id;
+	// conventionally also the transcript filename stem). Empty leaves the id
+	// blank in the report.
 	ID string
 	// ResumeID, when non-zero, reloads that stored session's messages and
 	// continues its conversation instead of starting fresh.
@@ -327,16 +321,8 @@ type Session struct {
 	// of a data race.
 	busy bool
 
-	// sink-watcher handles (see startSinkWatcher / stopSinkWatcher). sinkStop is
-	// closed to signal the tail goroutine to exit; sinkDone is closed by that
-	// goroutine when it returns; sinkFile is the watched path, removed on Close.
-	// All nil when no watcher runs (no workdir/name). Guarded by s.mu.
-	sinkStop chan struct{}
-	sinkDone chan struct{}
-	sinkFile string
-
 	// listener is the per-session socket transport (see startTransport /
-	// stopTransport). Replaces the sink-watcher above. nil when no transport
+	// stopTransport). nil when no transport
 	// runs (no store id / workdir / store). Guarded by s.mu.
 	listener *socket.Listener
 
@@ -947,10 +933,6 @@ func (s *Session) turnConfig() chat.TurnConfig {
 	}
 	cfg := s.cfg
 	tc := chat.NewTurnConfig(cfg, s.handlers, shellInteractive)
-	// Thread the session's sink path so bash_bg's reaper announces bg_done to
-	// this session's watcher (see sinkPath / startSinkWatcher). A runtime-hosted
-	// session has a name and workdir; the Start-owned "main" session does too.
-	tc.SinkPath = s.sinkPath()
 	return tc
 }
 

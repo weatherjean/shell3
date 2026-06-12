@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/paths"
-	"github.com/weatherjean/shell3/internal/sink"
 )
 
 // Job is one entry in bg.json. Fields are JSON-tagged for direct persistence.
@@ -54,21 +53,17 @@ var fileLock sync.Mutex
 // returning the recorded Job; on return the process is fully released (bgjobs
 // does not Wait on it).
 //
-// display is the human-readable command recorded as Job.Cmd in bg.json and in
-// the sink notification's Cmd field; it may differ from argv when wrap_bash
-// swapped the runner.
+// display is the human-readable command recorded as Job.Cmd in bg.json; it may
+// differ from argv when wrap_bash swapped the runner.
 //
-// sinkPath, when non-empty, is the session's notification sink (see
-// internal/sink): the reaper goroutine appends a "bg_done" notification with
-// the job's exit code, log path, and command once the process exits, so the
-// host can notify the agent that the background job finished. An empty sinkPath
-// disables the notification (the job is still spawned and tracked as before).
+// sinkPath is retained for signature stability but no longer drives anything:
+// the sink-file notification mechanism has been retired in favor of the
+// socket/SQLite-inbox transport (internal/notify, internal/socket). Callers pass
+// "". Plain bg-job completions are no longer notified (durability is owed only
+// to agent completion, which self-reports over the socket transport).
 //
-// notifyOnExit gates the bg_done append: false suppresses it even when sinkPath
-// is set. A subagent spawn (a backgrounded `shell3 --append-sinkfile`) passes
-// false because the child self-reports its own agent_done to the same sink — so
-// the agent is notified exactly once, not twice (a generic bg_done AND the rich
-// agent_done). Plain bg jobs (servers, watchers) pass true and keep bg_done.
+// notifyOnExit is also retained for signature stability and currently has no
+// effect (it formerly gated the bg_done sink append).
 //
 // env, when non-empty, supplies extra KEY=VALUE entries appended to the
 // inherited environment (os.Environ); used by command-template custom tools to
@@ -126,28 +121,14 @@ func Start(argv []string, display, workdir string, env []string, sinkPath string
 	pid := c.Process.Pid
 	// Reap in a goroutine so the exited process leaves no zombie. We do NOT
 	// Release(): that leaves the pid as a zombie forever, and `kill(pid, 0)`
-	// reports zombies as alive, breaking the model's liveness checks. After the
-	// process is reaped we append a "bg_done" notification to the session sink
-	// (no-op when sinkPath is "") so the host can tell the agent the job exited;
-	// the exit code comes from Wait's error (an *exec.ExitError carries the
-	// real code, any other error means we couldn't determine it → -1).
+	// reports zombies as alive, breaking the model's liveness checks. Plain
+	// bg-job completions are no longer notified (the sink mechanism is retired);
+	// the Wait() is solely to reap the zombie.
 	go func() {
-		werr := c.Wait()
-		// notifyOnExit=false suppresses bg_done even with a sink configured: the
-		// caller (a subagent spawn) emits its own agent_done, so a bg_done here
-		// would double-notify. We still Wait() above to reap the zombie either way.
-		if !notifyOnExit {
-			return
-		}
-		exit := exitCode(werr)
-		_ = sink.Append(sinkPath, sink.Notification{
-			Kind: sink.KindBgDone,
-			ID:   id,
-			Exit: &exit,
-			Log:  logPath,
-			Cmd:  display,
-		})
+		_ = c.Wait()
 	}()
+	_ = sinkPath    // retained for signature stability; no longer used
+	_ = notifyOnExit // retained for signature stability; no longer used
 
 	job := Job{
 		ID:        id,

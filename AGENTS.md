@@ -4,9 +4,10 @@ Minimal Unix-composable coding agent written in Go.
 
 **Bash-first.** The agent's verbs are `bash` and `edit_file`; everything else is
 a file it reads or a command it runs (history is a read-only SQLite query, a
-subagent is a backgrounded `shell3` subprocess). Background work and subagents
-report completion through a per-session JSONL **sink** that the host watcher
-turns into short pointer notifications. The shell is **unsafe by default** — the
+subagent is a backgrounded `shell3` subprocess). A subagent reports completion
+to its parent over a per-session **Unix-domain socket** (live parent) or a
+**SQLite inbox + revive** (dormant parent), which the host turns into short
+pointer notifications. The shell is **unsafe by default** — the
 only safety surface is the `shell3.wrap_bash(fn)` Lua hook (allow/block/rewrite;
 no approval flow). Skills are `.md` files the agent reads with `cat` (listed by
 absolute path in the prompt under `## Skills` — there is no `skill` tool), and
@@ -37,8 +38,9 @@ internal/paths/        global + local path resolution
 internal/ref/          project UUID (.shell3/.ref)
 internal/store/        SQLite history + sessions (WAL; read-only-queryable via the `history` bash skill)
 internal/edittool/     edit_file tool implementation (Go port of opencode's str-replace)
-internal/bgjobs/       background job tracking (.shell3/bg.json); reaper writes a sink notification on exit
-internal/sink/         per-session JSONL notification channel (bg_done / agent_done pointers)
+internal/bgjobs/       background job tracking (.shell3/bg.json); reaper reaps the process (no notification)
+internal/notify/       Notification type (bg_done / agent_done pointers) shared by transport + inbox
+internal/socket/       per-session Unix-domain socket (live-parent completion delivery)
 internal/tui/          terminal UI (interactive + headless once)
 internal/patchapp,patchmd,patchtui/  patch-style TUI components
 internal/chat/         conversation loop, tools, events, JSONL audit sink

@@ -209,7 +209,7 @@ func renderNotification(n notify.Notification) string {
 		}
 		return msg
 	case notify.KindAgentDone:
-		// A subagent (a backgrounded `shell3 --append-sinkfile`) finished and
+		// A subagent (a backgrounded `shell3 run --parent-session`) finished and
 		// self-reported. The notification ITSELF carries the subagent's result
 		// summary (Preview); the transcript pointer is only for when the summary
 		// isn't enough. So we frame the preview as the answer to act on and make

@@ -72,7 +72,7 @@ func dispatchCustomTool(ctx context.Context, cfg TurnConfig, name, rawArgs strin
 		return errResult("error: " + err.Error())
 	}
 	if rt.Background {
-		job, err := bgjobs.Start([]string{"bash", "-c", rt.Command}, rt.Command, cfg.WorkDir, rt.Env, cfg.SinkPath, true)
+		job, err := bgjobs.Start([]string{"bash", "-c", rt.Command}, rt.Command, cfg.WorkDir, rt.Env, "", true)
 		if err != nil {
 			return errResult("error: " + err.Error())
 		}
