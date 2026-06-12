@@ -190,6 +190,18 @@ func compactInto(args CompactSummary, st *store.Store, sess *Session, allMsgs []
 	sess.messages = newMsgs
 	sess.msgMu.Unlock()
 
+	// Mirror the compacted context into the replayable messages table under the
+	// NEW session id, so a resume of this session loads the within-window
+	// compacted history rather than the pre-compaction blob. flushMessages above
+	// wrote the OUTGOING session; this writes the incoming one.
+	if st != nil {
+		for i, m := range newMsgs {
+			if err := st.AppendMessage(sess.id, i, m); err != nil {
+				lg.Warn("mirror compacted message failed", "session_id", sess.id, "seq", i, "error", err)
+			}
+		}
+	}
+
 	// Rebuild allMsgs: system prompt + continuation + trigger assistant message.
 	// Caller appends the tool result, completing the valid call/result pair.
 	newAllMsgs = []llm.Message{allMsgs[0], continuationMsg}
