@@ -544,6 +544,14 @@ func newRenderSink(app patchapp.AppView, lastUsage *usage) (func(shell3.Event), 
 			flushStreamFully()
 			app.Print(patchtui.SplitLines(patchtui.Dim + ev.Text + patchtui.Reset + "\n\n"))
 
+		case shell3.Compacted:
+			// Auto-compaction is a host milestone, not turn output — mark it with a
+			// celebratory rainbow banner. ev.Text (the token-count note) goes to the
+			// audit log; the human just needs to know it happened.
+			flushReasoningPartial()
+			flushStreamFully()
+			app.Print(patchtui.SplitLines(patchtui.Rainbow("✦ conversation compacted ✦") + "\n\n"))
+
 		case shell3.Retry:
 			// A transient failure is being retried (pre-token, so buffers are
 			// empty). Render a dim notice and leave busy state untouched — the

@@ -187,6 +187,7 @@ const (
 	ToolCall                   // tool started            → ToolName, ToolCallID, ToolInput, IsCustomTool
 	ToolResult                 // tool finished           → ToolName, ToolCallID, ToolOutput
 	SystemReminder             // injected reminder block → Text
+	Compacted                  // auto-compaction occurred → Text (token-count note)
 	Usage                      // per-roundtrip tokens    → PromptTokens/CompletionTokens/TotalTokens
 	Retry                      // transient retry         → Text
 	Error                      // turn error              → Err
@@ -228,6 +229,8 @@ func translate(ev chat.Event) (Event, bool) {
 		return Event{Kind: ToolResult, ToolName: ev.ToolName, ToolCallID: ev.ToolCallID, ToolOutput: ev.ToolOutput}, true
 	case chat.EventSystemReminder:
 		return Event{Kind: SystemReminder, Text: ev.Text}, true
+	case chat.EventCompacted:
+		return Event{Kind: Compacted, Text: ev.Text}, true
 	case chat.EventUsage:
 		return usageEvent(Usage, ev), true
 	case chat.EventTurnDone:

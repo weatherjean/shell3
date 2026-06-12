@@ -143,6 +143,61 @@ func TestRunTurn_MidLoopCtxCancel_EmitsError(t *testing.T) {
 	}
 }
 
+// TestRunTurn_MidLoopCtxCancel_PairsAllToolCalls pins the cancellation
+// invariant: even when the context is cancelled mid-loop, every tool_call in
+// the persisted assistant message gets exactly one matching RoleTool result.
+// A gap leaves a dangling tool_call that makes the NEXT request 400
+// ("tool call result does not follow tool call"). Calls "a" (executed before
+// the cancel) and "b" (skipped by the cancel) must both be paired.
+func TestRunTurn_MidLoopCtxCancel_PairsAllToolCalls(t *testing.T) {
+	fake := fakellm.New(
+		fakellm.Script{Events: []llm.StreamEvent{
+			{ToolCall: &llm.ToolCall{ID: "a", Name: "echo", RawArgs: `{}`}},
+			{ToolCall: &llm.ToolCall{ID: "b", Name: "echo", RawArgs: `{}`}},
+			{Usage: &llm.Usage{TotalTokens: 5}},
+		}},
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cfg := TurnConfig{
+		LLM:         fake,
+		Personality: persona.Persona{SystemPrompt: "test"},
+		Handlers:    map[string]ToolHandler{"echo": stubHandler{name: "echo", out: "echoed", onExec: cancel}},
+		Log:         LogOrNoop(nil),
+	}
+
+	_, sess := collectTurn(t, ctx, cfg, "hi")
+
+	// Collect the tool_call ids the assistant emitted and the tool results.
+	wantIDs := map[string]bool{}
+	gotIDs := map[string]bool{}
+	for _, m := range sess.messages {
+		if m.Role == llm.RoleAssistant {
+			for _, tc := range m.ToolCalls {
+				wantIDs[tc.ID] = true
+			}
+		}
+		if m.Role == llm.RoleTool {
+			if gotIDs[m.ToolCallID] {
+				t.Fatalf("duplicate tool result for id %q", m.ToolCallID)
+			}
+			gotIDs[m.ToolCallID] = true
+		}
+	}
+	for id := range wantIDs {
+		if !gotIDs[id] {
+			t.Fatalf("tool_call %q has no matching tool result; session=%+v", id, sess.messages)
+		}
+	}
+	if len(gotIDs) != len(wantIDs) {
+		t.Fatalf("result/tool_call count mismatch: results=%d tool_calls=%d", len(gotIDs), len(wantIDs))
+	}
+	// The skipped call is paired with a synthetic cancelled result.
+	if !hasToolMessage(sess, "echo", "cancelled") {
+		t.Fatalf("expected a synthetic cancelled result for the skipped call; session=%+v", sess.messages)
+	}
+}
+
 // msgsContain reports whether any message's content contains substr.
 func msgsContain(msgs []llm.Message, substr string) bool {
 	for _, m := range msgs {
@@ -207,8 +262,8 @@ func TestRunTurn_AutoCompact_Triggers(t *testing.T) {
 			t.Fatalf("compaction summary leaked as an assistant token: %+v", ev)
 		}
 	}
-	if !hasKind(events, EventSystemReminder) {
-		t.Fatalf("expected an auto-compacted system reminder; events=%+v", events)
+	if !hasKind(events, EventCompacted) {
+		t.Fatalf("expected an auto-compacted event; events=%+v", events)
 	}
 	turnPrompt := fake.Calls[1].Msgs
 	if !msgsContain(turnPrompt, "NARRATIVE SUMMARY") {

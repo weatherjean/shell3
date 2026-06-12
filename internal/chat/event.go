@@ -52,6 +52,10 @@ const (
 	// EventRetry fires when a transient request failure is about to be
 	// retried. Text holds a human-readable summary (reason + attempt count).
 	EventRetry
+	// EventCompacted fires once when the host auto-compacts the conversation
+	// (the compact_at token threshold tripped and a summary was substituted).
+	// Text holds a human-readable note with the pre-compaction token count.
+	EventCompacted
 )
 
 func (k EventKind) String() string {
@@ -82,6 +86,8 @@ func (k EventKind) String() string {
 		return "system_reminder"
 	case EventRetry:
 		return "retry"
+	case EventCompacted:
+		return "compacted"
 	}
 	return "unknown"
 }
@@ -212,6 +218,18 @@ func emitAssistantReasoning(s *Session, text string) {
 
 func emitSystemReminder(s *Session, text string) {
 	emit(s, Event{Kind: EventSystemReminder, Time: time.Now(), SessionID: s.id, Text: text})
+}
+
+// emitCompacted announces an auto-compaction. prevTokens is the prompt-token
+// count that tripped the threshold, recorded for the audit log and any UI that
+// wants to surface it.
+func emitCompacted(s *Session, prevTokens int) {
+	emit(s, Event{
+		Kind:      EventCompacted,
+		Time:      time.Now(),
+		SessionID: s.id,
+		Text:      fmt.Sprintf("context auto-compacted at %d tokens", prevTokens),
+	})
 }
 
 func emitRetry(s *Session, n *llm.RetryNotice) {

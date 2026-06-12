@@ -334,16 +334,25 @@ func turnScopedHandlers(cfg TurnConfig, sess *Session, st *toolLoopState) map[st
 func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCalls []llm.ToolCall, toolSchemas map[string]map[string]any, allMsgs []llm.Message) (toolLoopOutcome, error) {
 	st := &toolLoopState{allMsgs: allMsgs}
 	turnScoped := turnScopedHandlers(cfg, sess, st)
-	for _, tc := range toolCalls {
+	for i, tc := range toolCalls {
 		if ctx.Err() != nil {
-			return toolLoopOutcome{}, ctx.Err()
+			// Cancelled mid-loop. The assistant message carrying these tool_calls
+			// is already persisted, and OpenAI-compatible APIs require a tool
+			// result for every tool_call id — a gap makes the NEXT request 400
+			// ("tool call result does not follow tool call"). Backfill a synthetic
+			// cancelled result for this and every remaining call so the session
+			// stays replayable, then surface the cancellation.
+			for _, rem := range toolCalls[i:] {
+				appendToolResult(sess, st, rem, errResult("error: tool call cancelled"))
+			}
+			return toolLoopOutcome{allMsgs: st.allMsgs, pendingMedia: st.pendingMedia}, ctx.Err()
 		}
 
 		emitToolCall(sess, tc.ID, tc.Name, tc.RawArgs)
-		// Every tool call dispatches: the tool-call guard engine (and its
-		// human-in-the-loop approval flow) was removed. The only bash safety
-		// surface now is shell3.wrap_bash, applied inside the bash/bash_bg
-		// handlers (see ToolConfig.WrapBash), not here.
+		// Every tool call dispatches directly: there is no guard engine or
+		// approval flow. The only bash safety surface is shell3.wrap_bash,
+		// applied inside the bash/bash_bg handlers (see ToolConfig.WrapBash),
+		// not here.
 		res, handled := validateCall(toolSchemas, tc)
 		// If validation failed, res already carries the typed reason and we skip
 		// dispatch. Otherwise resolve a handler —
@@ -388,25 +397,33 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 			}
 		}
 
-		emitToolResult(sess, tc.ID, tc.Name, res.output, res.isError)
-		// Prepend the tool_call_id so there is a stable handle the user can
-		// pass to the /prune slash command. Without this the id only lives
-		// in structured metadata, which is not visible in the rendered result.
-		content := fmt.Sprintf("[tool_call_id=%s]\n%s", tc.ID, res.output)
-		toolMsg := llm.Message{
-			Role:       llm.RoleTool,
-			Content:    content,
-			ToolCallID: tc.ID,
-			Name:       tc.Name,
-		}
-		st.allMsgs = append(st.allMsgs, toolMsg)
-		sess.append(toolMsg)
+		appendToolResult(sess, st, tc, res)
 	}
 
 	if ctx.Err() != nil {
-		return toolLoopOutcome{}, ctx.Err()
+		return toolLoopOutcome{allMsgs: st.allMsgs, pendingMedia: st.pendingMedia}, ctx.Err()
 	}
 	return toolLoopOutcome{allMsgs: st.allMsgs, pendingMedia: st.pendingMedia}, nil
+}
+
+// appendToolResult emits the tool_result event and appends the tool message to
+// both the in-flight slice and the persisted session. Every tool_call must get
+// exactly one of these (OpenAI requires strict tool_call/tool_result pairing),
+// so it is the single append site for both the normal and cancelled paths.
+func appendToolResult(sess *Session, st *toolLoopState, tc llm.ToolCall, res toolResult) {
+	emitToolResult(sess, tc.ID, tc.Name, res.output, res.isError)
+	// Prepend the tool_call_id so there is a stable handle the user can pass to
+	// the /prune slash command. Without this the id only lives in structured
+	// metadata, which is not visible in the rendered result.
+	content := fmt.Sprintf("[tool_call_id=%s]\n%s", tc.ID, res.output)
+	toolMsg := llm.Message{
+		Role:       llm.RoleTool,
+		Content:    content,
+		ToolCallID: tc.ID,
+		Name:       tc.Name,
+	}
+	st.allMsgs = append(st.allMsgs, toolMsg)
+	sess.append(toolMsg)
 }
 
 // validateCall checks tc's arguments against the tool's schema (when one is
@@ -466,9 +483,8 @@ const compactionFloor = 8
 
 // compactionInstruction is the system prompt for the single quiet LLM call that
 // produces the auto-compaction summary. It asks for a thorough narrative the
-// continuation can resume from. The lists the model-driven tool used to collect
-// are folded into the narrative here — the auto path keeps CompactSummary's
-// optional list fields empty.
+// continuation can resume from. Pointer lists are folded into the narrative
+// here, so the auto path keeps CompactSummary's optional list fields empty.
 const compactionInstruction = "You are compacting a long coding-assistant conversation to free context. " +
 	"Write a thorough narrative summary of the conversation so far that a fresh continuation could resume from with no other context. " +
 	"Cover: the user's goal and any decisions made; code written and files created or modified (with paths); commands run and their outcomes; errors encountered and how they were resolved; references worth keeping (session ids, commit hashes, URLs); and any confirmed open next steps. " +
@@ -524,7 +540,7 @@ func maybeCompact(ctx context.Context, cfg TurnConfig, sess *Session) {
 	// count from the provider lands.
 	sess.lastPromptTokens = estimatePromptTokens(sess.messages)
 
-	emitSystemReminder(sess, fmt.Sprintf("[context auto-compacted at %d tokens]", prevTokens))
+	emitCompacted(sess, prevTokens)
 }
 
 // streamQuiet calls the LLM once and returns only the accumulated assistant

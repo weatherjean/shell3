@@ -1,6 +1,10 @@
 package patchtui
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+	"strings"
+)
 
 // SGR (Select Graphic Rendition) primitives for styling text written to the
 // terminal. These are the raw ANSI escape sequences; concatenate them with
@@ -49,3 +53,53 @@ func FgRGB(r, g, b int) string { return fmt.Sprintf("\033[38;2;%d;%d;%dm", r, g,
 
 // BgRGB returns the SGR sequence to set the background to a 24-bit RGB color.
 func BgRGB(r, g, b int) string { return fmt.Sprintf("\033[48;2;%d;%d;%dm", r, g, b) }
+
+// Rainbow renders s with a left-to-right hue sweep: each rune gets its own
+// 24-bit color stepping through the spectrum, closing with Reset. Used for the
+// one-off auto-compaction banner. Whitespace runes are emitted uncolored to
+// keep the escape stream small; the visible text is preserved exactly, so
+// stripping the SGR codes returns s unchanged.
+func Rainbow(s string) string {
+	runes := []rune(s)
+	if len(runes) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i, r := range runes {
+		switch r {
+		case ' ', '\t', '\n':
+			b.WriteRune(r)
+			continue
+		}
+		hue := float64(i) / float64(len(runes)) * 360
+		rr, gg, bb := hsvToRGB(hue, 0.85, 1)
+		b.WriteString(FgRGB(rr, gg, bb))
+		b.WriteRune(r)
+	}
+	b.WriteString(Reset)
+	return b.String()
+}
+
+// hsvToRGB converts an HSV color (h in degrees [0,360), s and v in [0,1]) to
+// 8-bit RGB components. Used by Rainbow for an even perceptual hue sweep.
+func hsvToRGB(h, s, v float64) (int, int, int) {
+	c := v * s
+	x := c * (1 - math.Abs(math.Mod(h/60, 2)-1))
+	m := v - c
+	var r, g, b float64
+	switch {
+	case h < 60:
+		r, g, b = c, x, 0
+	case h < 120:
+		r, g, b = x, c, 0
+	case h < 180:
+		r, g, b = 0, c, x
+	case h < 240:
+		r, g, b = 0, x, c
+	case h < 300:
+		r, g, b = x, 0, c
+	default:
+		r, g, b = c, 0, x
+	}
+	return int((r + m) * 255), int((g + m) * 255), int((b + m) * 255)
+}

@@ -31,6 +31,7 @@ func TestTranslate(t *testing.T) {
 		{"usage", chat.Event{Kind: chat.EventUsage, Usage: &chat.EventUsageData{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}}, &Event{Kind: Usage, PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}},
 		{"done", chat.Event{Kind: chat.EventTurnDone, Usage: &chat.EventUsageData{PromptTokens: 20, CompletionTokens: 8, TotalTokens: 28}}, &Event{Kind: Done, PromptTokens: 20, CompletionTokens: 8, TotalTokens: 28}},
 		{"retry", chat.Event{Kind: chat.EventRetry, Text: "retrying"}, &Event{Kind: Retry, Text: "retrying"}},
+		{"compacted", chat.Event{Kind: chat.EventCompacted, Text: "context auto-compacted at 100000 tokens"}, &Event{Kind: Compacted, Text: "context auto-compacted at 100000 tokens"}},
 		{"error", chat.Event{Kind: chat.EventError, Text: "boom"}, &Event{Kind: Error}},
 		{"session start dropped", chat.Event{Kind: chat.EventSessionStart}, nil},
 		{"user message dropped", chat.Event{Kind: chat.EventUserMessage}, nil},

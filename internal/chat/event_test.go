@@ -19,6 +19,8 @@ func TestEventKindString(t *testing.T) {
 		{EventAssistantReasoning, "assistant_reasoning"},
 		{EventTurnDone, "turn_done"},
 		{EventSystemReminder, "system_reminder"},
+		{EventRetry, "retry"},
+		{EventCompacted, "compacted"},
 	}
 	for _, c := range cases {
 		if got := c.kind.String(); got != c.want {
