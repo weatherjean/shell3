@@ -34,4 +34,5 @@ and declared `secrets` are exported into the command env.
 - `lib/browser.lua` — Drive a real headed Chrome via puppeteer-core (the `browser` skill); see `lib/browser.lua`.
 - `lib/tools.lua` — custom tool template.
 - `lib/extra-agents.lua` — adding more agents.
+- `models.md` — provider-specific model params via `extra` (e.g. MiniMax M3 `reasoning_split`).
 - `proxy.md` — run_proxy recipes (Codex/npx, litellm).
