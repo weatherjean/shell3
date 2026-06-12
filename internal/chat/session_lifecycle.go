@@ -18,8 +18,13 @@ func (s *Session) End(status string) {
 }
 
 // Messages returns a snapshot of the in-progress conversation history. The
-// returned slice is safe to retain — internal mutations don't affect it.
+// returned slice is a copy safe to retain and mutate — internal mutations
+// don't affect it, and mutating it (e.g. Prune editing message Content in
+// place) doesn't touch session state. Safe to call concurrently with a running
+// turn: msgMu guards the read against the turn goroutine's append.
 func (s *Session) Messages() []llm.Message {
+	s.msgMu.RLock()
+	defer s.msgMu.RUnlock()
 	if s.messages == nil {
 		return nil
 	}
@@ -31,6 +36,8 @@ func (s *Session) Messages() []llm.Message {
 // SetMessages replaces the conversation history. Used by slash commands like
 // /clear and /rollback that mutate session state from outside the package.
 func (s *Session) SetMessages(msgs []llm.Message) {
+	s.msgMu.Lock()
+	defer s.msgMu.Unlock()
 	s.messages = msgs
 }
 

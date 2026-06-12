@@ -92,6 +92,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
@@ -818,6 +819,10 @@ func (s *Session) RegisterHostTool(t HostTool) error {
 	if t.Name == "" || t.Handler == nil {
 		return errors.New("shell3: host tool requires a Name and Handler")
 	}
+	// Guard the cfg mutations against the dashboard's concurrent Snapshot read
+	// (reads Personality.Tools under s.mu). Between turns by contract.
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.cfg.Personality.Tools = append(s.cfg.Personality.Tools, llm.ToolDefinition{
 		Name: t.Name, Description: t.Description, Parameters: t.Parameters,
 	})
@@ -864,10 +869,11 @@ func (s *Session) Clear() error {
 	}
 	s.sess.SetMessages(nil)
 	if s.cfg.RefreshPrompt != nil {
-		s.cfg.Personality.SystemPrompt = s.cfg.RefreshPrompt()
 		// RefreshPrompt rebuilds from the agent config without the Delegation
-		// section; re-append it (idempotent). Snapshot s.runtime under s.mu.
+		// section; re-append it (idempotent). Mutate SystemPrompt and snapshot
+		// s.runtime under s.mu (guards the dashboard's Snapshot read).
 		s.mu.Lock()
+		s.cfg.Personality.SystemPrompt = s.cfg.RefreshPrompt()
 		srt := s.runtime
 		s.mu.Unlock()
 		s.applyDelegationContext(srt)
@@ -909,12 +915,13 @@ func (s *Session) SwitchAgent(name string) error {
 	if err != nil {
 		return err
 	}
-	s.cfg.ApplyActiveAgent(rt)
 	// ApplyActiveAgent rebuilt the system prompt from the new agent, dropping any
 	// Delegation section and not adding the new agent's. Re-apply it for the new
-	// active agent (whose allowed subagents may differ). Snapshot s.runtime under
-	// s.mu to avoid racing a concurrent Close's nil. Between turns by contract.
+	// active agent (whose allowed subagents may differ). Mutate cfg and snapshot
+	// s.runtime under s.mu — guards the dashboard's Snapshot read and avoids
+	// racing a concurrent Close's nil. Between turns by contract.
 	s.mu.Lock()
+	s.cfg.ApplyActiveAgent(rt)
 	srt := s.runtime
 	s.mu.Unlock()
 	s.applyDelegationContext(srt)
@@ -951,8 +958,9 @@ type ParamValue struct {
 // Snapshot is a read-only view of the session's current agent state: everything
 // the TUI's welcome banner, status bar, /prompt, /info, and /parameters list
 // need, in one allocation. It is a point-in-time copy; mutate the Session (e.g.
-// SwitchAgent, SetParam) and call Snapshot again to observe changes. Call only
-// between turns (same contract as Clear/Rollback): it reads unsynchronized cfg.
+// SwitchAgent, SetParam) and call Snapshot again to observe changes. Safe to
+// call concurrently with a running turn: cfg reads are taken under s.mu against
+// the between-turns writers (the Telegram dashboard polls it mid-turn).
 type Snapshot struct {
 	Agent         string
 	Model         string
@@ -970,25 +978,33 @@ type Snapshot struct {
 // only when the active provider implements llm.ParamDescriber; each entry's
 // Value mirrors the TUI's currentParamValue mapping.
 func (s *Session) Snapshot() Snapshot {
-	_, model := chat.SplitStatus(s.cfg.StatusLine)
+	// Copy the cfg fields out under s.mu so a concurrent cfg writer (SwitchAgent,
+	// SetParam, Clear, RegisterHostTool — all between turns) can't race the read.
+	// Release before SplitStatus/ParamSpecs so we never hold s.mu across the
+	// provider's ParamSpecs() call.
+	s.mu.Lock()
 	snap := Snapshot{
 		Agent:         s.cfg.ModeLabel,
-		Model:         model,
 		ProjectRef:    s.cfg.ProjectRef,
 		StatusLine:    s.cfg.StatusLine,
 		ContextWindow: s.cfg.ContextWindow,
 		SystemPrompt:  s.cfg.Personality.SystemPrompt,
-		Skills:        s.cfg.ActiveSkills,
-		Subagents:     s.cfg.Subagents,
+		Skills:        slices.Clone(s.cfg.ActiveSkills),
+		Subagents:     slices.Clone(s.cfg.Subagents),
 	}
 	for _, t := range s.cfg.Personality.Tools {
 		snap.Tools = append(snap.Tools, ToolInfo{Name: t.Name, Description: t.Description})
 	}
-	if describer, ok := s.cfg.LLM.(llm.ParamDescriber); ok {
+	params := s.cfg.Params
+	describer, ok := s.cfg.LLM.(llm.ParamDescriber)
+	s.mu.Unlock()
+
+	_, snap.Model = chat.SplitStatus(snap.StatusLine)
+	if ok {
 		for _, spec := range describer.ParamSpecs() {
 			snap.Params = append(snap.Params, ParamValue{
 				Name:    spec.Name,
-				Value:   currentParamValue(s.cfg.Params, spec.Name),
+				Value:   currentParamValue(params, spec.Name),
 				Default: spec.Default,
 				Enum:    spec.Enum,
 			})
@@ -1023,8 +1039,9 @@ type ToolCallInfo struct {
 
 // History returns the current conversation history as public HistoryEntry
 // values. Tool-role messages have their internal "[tool_call_id=…]\n" prefix
-// stripped from Content so embedders see the raw tool output. Call only between
-// turns (it reads unsynchronized session state).
+// stripped from Content so embedders see the raw tool output. Safe to call
+// concurrently with a running turn: it reads a locked snapshot via
+// chat.Session.Messages (the Telegram dashboard polls it mid-turn).
 func (s *Session) History() []HistoryEntry {
 	msgs := s.sess.Messages()
 	out := make([]HistoryEntry, 0, len(msgs))
@@ -1102,6 +1119,12 @@ func (s *Session) SetParam(name, value string) error {
 			return err
 		}
 	}
+	// Guard the cfg mutations (Params, StatusLine) against the dashboard's
+	// concurrent Snapshot read. The describer validation above stays unlocked
+	// (read-only; mirrors Snapshot not holding s.mu across ParamSpecs). Between
+	// turns by contract.
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := s.cfg.Params.SetByName(name, value); err != nil {
 		return err
 	}

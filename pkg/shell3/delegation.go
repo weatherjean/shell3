@@ -33,33 +33,42 @@ const delegationMarker = "\n## Delegation\n"
 // section, then re-appends one for the CURRENT active agent (whose allowed
 // subagents may differ after a /agent switch).
 func (s *Session) applyDelegationContext(rt *Runtime) {
-	s.cfg.Personality.SystemPrompt = stripDelegation(s.cfg.Personality.SystemPrompt)
+	// Compute the new prompt unlocked (no concurrent cfg writer — callers are
+	// between-turns on the single bot goroutine), then publish it under s.mu so
+	// the dashboard's Snapshot reader never observes a torn assignment.
+	prompt := stripDelegation(s.cfg.Personality.SystemPrompt) + s.delegationSection(rt)
+	s.mu.Lock()
+	s.cfg.Personality.SystemPrompt = prompt
+	s.mu.Unlock()
+}
+
+// delegationSection renders the "## Delegation" section to append for the
+// current active agent, or "" when delegation is suppressed (no runtime, a
+// --no-subagents child, no allowed subagents, no sink, or no resolvable config
+// path). See applyDelegationContext for why this lives per-session.
+func (s *Session) delegationSection(rt *Runtime) string {
 	if rt == nil || s.opts.DisableSubagents {
-		return
+		return ""
 	}
 	allowed := s.cfg.Subagents // the active agent's tools.subagents allowlist
 	if len(allowed) == 0 {
-		return
+		return ""
 	}
 	sink := s.sinkPath()
 	if sink == "" {
-		return // no sink → no way for a child to self-report; skip delegation
+		return "" // no sink → no way for a child to self-report; skip delegation
 	}
 	cfgPath, err := rt.ConfigPath()
 	if err != nil || cfgPath == "" {
-		return // can't template a spawn command without a concrete config path
+		return "" // can't template a spawn command without a concrete config path
 	}
-	section := renderDelegation(delegationParams{
+	return renderDelegation(delegationParams{
 		Binary:     shell3Binary(),
 		ConfigPath: cfgPath,
 		SinkPath:   sink,
 		WorkDir:    s.cfg.WorkDir,
 		Subagents:  s.subagentList(rt, allowed),
 	})
-	if section == "" {
-		return
-	}
-	s.cfg.Personality.SystemPrompt += section
 }
 
 // stripDelegation removes a previously-appended "## Delegation" section (from
@@ -116,7 +125,7 @@ func renderDelegation(p delegationParams) string {
 	transcript := filepath.Join(".shell3", "agents", "<id>.jsonl")
 	var b strings.Builder
 	b.WriteString(delegationMarker)
-	b.WriteString("You can delegate a focused, self-contained subtask to a subagent — a background `shell3` process that runs the chosen agent on the task and reports back to you automatically when it finishes. You do NOT poll; a notification with the transcript path arrives on its own. Read the transcript for the full result.\n\n")
+	b.WriteString("You can delegate a focused, self-contained subtask to a subagent — a background `shell3` process that runs the chosen agent on the task and reports back to you automatically when it finishes. You do NOT poll; a notification arrives on its own, and it already carries the subagent's result summary — act on that directly. A transcript path comes with it for the rare case you need more.\n\n")
 	b.WriteString("Subagents you may spawn:\n")
 	for _, sa := range p.Subagents {
 		if sa.Description != "" {
@@ -128,6 +137,7 @@ func renderDelegation(p delegationParams) string {
 	b.WriteString("\nTo spawn one, call the `bash_bg` tool with this exact command, substituting `<name>` (a subagent from the list), `<id>` (a short unique id you choose, e.g. `explore1`), and `<task>` (the full self-contained prompt — the subagent does not see this conversation):\n\n")
 	fmt.Fprintf(&b, "  %s --config %s --agent <name> --out %s --append-sinkfile %s --id <id> --no-subagents \"<task>\"\n\n",
 		p.Binary, p.ConfigPath, transcript, p.SinkPath)
-	b.WriteString("Pass notify_on_exit=false to bash_bg (the subagent reports its own completion, so the generic background-job notice is redundant). When it finishes you'll get a pointer with the transcript path at `.shell3/agents/<id>.jsonl` — cat it for the detail.\n")
+	b.WriteString("Pass notify_on_exit=false to bash_bg (the subagent reports its own completion, so the generic background-job notice is redundant). When it finishes you'll get a notification with the subagent's result summary (act on it directly) plus the transcript path at `.shell3/agents/<id>.jsonl`. The transcript is a JSONL audit log — read it only if the summary isn't enough, and extract the subagent's full final answer cleanly with:\n\n")
+	fmt.Fprintf(&b, "    jq -rs 'map(select(.kind==\"assistant_message\"))[-1].text' %s\n", transcript)
 	return b.String()
 }
