@@ -126,7 +126,7 @@ func Start(argv []string, display, workdir string, env []string, sinkPath string
 	go func() {
 		_ = c.Wait()
 	}()
-	_ = sinkPath    // retained for signature stability; no longer used
+	_ = sinkPath     // retained for signature stability; no longer used
 	_ = notifyOnExit // retained for signature stability; no longer used
 
 	job := Job{
