@@ -99,6 +99,7 @@ import (
 
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/socket"
 )
 
 // PartKind discriminates a Part's media type.
@@ -331,6 +332,11 @@ type Session struct {
 	sinkStop chan struct{}
 	sinkDone chan struct{}
 	sinkFile string
+
+	// listener is the per-session socket transport (see startTransport /
+	// stopTransport). Replaces the sink-watcher above. nil when no transport
+	// runs (no store id / workdir / store). Guarded by s.mu.
+	listener *socket.Listener
 }
 
 // Start loads the config, builds a single-session Runtime, and returns its one
@@ -766,11 +772,10 @@ func (s *Session) doClose() error {
 	if done != nil {
 		<-done // turn goroutine (and its deferred history persist) has finished
 	}
-	// Stop the sink watcher (joins its goroutine, removes the sink file) before
-	// ending the store/sink: the turn is joined so no bash_bg reaper this turn
-	// spawned is still expected, and a final drain inside stopSinkWatcher
-	// catches a notification appended just before Close.
-	s.stopSinkWatcher()
+	// Stop the socket transport (closes the listener, marks the session dormant)
+	// before ending the store/sink: the turn is joined so no bash_bg reaper this
+	// turn spawned is still expected.
+	s.stopTransport()
 
 	s.sess.End("ok")
 	var endErr error

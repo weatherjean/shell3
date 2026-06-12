@@ -1,6 +1,7 @@
 package paths
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 )
@@ -71,6 +72,12 @@ func BGLogPath(id string) string { return filepath.Join(BGLogDir(), id+".log") }
 // illegal file. Callers should mkdir the parent before writing.
 func SinkPath(workdir, session string) string {
 	return filepath.Join(workdir, ".shell3", "sink", sanitizeSession(session)+".jsonl")
+}
+
+// SockPath returns the per-session Unix-domain socket path. Kept short
+// (numeric session id) because macOS caps socket paths at ~104 bytes.
+func SockPath(workdir string, sessionID int64) string {
+	return filepath.Join(workdir, ".shell3", "sock", fmt.Sprintf("%d.sock", sessionID))
 }
 
 // sanitizeSession maps a session name to a filesystem-safe single path

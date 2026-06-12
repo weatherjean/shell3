@@ -446,10 +446,10 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	s.applyDelegationContext(rt)
 	s.writeStartLine("(session " + opts.Name + ")")
 	rt.sessions[opts.Name] = s
-	// Launch the host-side sink watcher now that runtime+name are set (sinkPath
-	// derives from them). It tails this session's notification sink and injects
-	// bg_done / agent_done pointers; Close stops it and removes the file.
-	s.startSinkWatcher(rt, s.sinkPath())
+	// Launch the host-side socket transport now that runtime+name are set. It
+	// listens on this session's socket and injects bg_done / agent_done
+	// pointers; Close stops it and marks the session dormant.
+	s.startTransport(rt)
 	return s, nil
 }
 
