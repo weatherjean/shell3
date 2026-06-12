@@ -165,7 +165,7 @@ func TestStore_HistorySearch_ReturnsLocator(t *testing.T) {
 	_ = st.AppendHistory(id, "assistant", "JWT_EXPIRY=3600")
 	_ = st.EndSession(id)
 
-	res, err := st.HistorySearchExpr(store.BuildFTSExpr([]string{"JWT_EXPIRY"}, true), 5)
+	res, err := st.HistorySearchExpr(store.BuildFTSExpr([]string{"JWT_EXPIRY"}, true), "", 5, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestStore_HistorySearch_PunctuationSafe(t *testing.T) {
 	_ = st.AppendHistory(sid, "assistant", "use lipgloss for styling")
 	_ = st.EndSession(sid)
 
-	res, err := st.HistorySearchExpr(store.BuildFTSExpr([]string{"cobra", "colorful", "cli", "?"}, true), 10)
+	res, err := st.HistorySearchExpr(store.BuildFTSExpr([]string{"cobra", "colorful", "cli", "?"}, true), "", 10, 0)
 	if err != nil {
 		t.Fatalf("search with `?` should not error: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestStore_HistorySearchExpr_OrAnd(t *testing.T) {
 	_ = st.EndSession(sid)
 
 	exprAny := store.BuildFTSExpr([]string{"cobra", "termenv"}, false)
-	r, err := st.HistorySearchExpr(exprAny, 10)
+	r, err := st.HistorySearchExpr(exprAny, "", 10, 0)
 	if err != nil {
 		t.Fatalf("OR search: %v", err)
 	}
@@ -222,11 +222,50 @@ func TestStore_HistorySearchExpr_OrAnd(t *testing.T) {
 	}
 
 	exprAll := store.BuildFTSExpr([]string{"cobra", "termenv"}, true)
-	r2, err := st.HistorySearchExpr(exprAll, 10)
+	r2, err := st.HistorySearchExpr(exprAll, "", 10, 0)
 	if err != nil {
 		t.Fatalf("AND search: %v", err)
 	}
 	if r2.TotalHits != 0 {
 		t.Fatalf("AND should match zero turns, got %d", r2.TotalHits)
+	}
+}
+
+func TestHistorySearchExpr_ProjectScopedAndPaged(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+
+	a, err := st.StartSession("projA", "/a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := st.StartSession("projB", "/b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendHistory(a, "user", "alpha token here"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendHistory(b, "user", "alpha token here"); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := st.HistorySearchExpr("alpha", "", 20, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all.Hits) != 2 {
+		t.Fatalf("all-projects: got %d hits, want 2", len(all.Hits))
+	}
+
+	onlyA, err := st.HistorySearchExpr("alpha", "projA", 20, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(onlyA.Hits) != 1 || onlyA.Hits[0].SessionID != a {
+		t.Fatalf("project-scoped: got %+v, want 1 hit in session %d", onlyA.Hits, a)
 	}
 }

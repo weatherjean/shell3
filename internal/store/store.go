@@ -365,7 +365,10 @@ func (s *Store) HistoryGet(sessionID int64, chunk int) (HistoryGetResult, error)
 // HistorySearchExpr runs an FTS5 search over history content using a
 // pre-built MATCH expression (typically from BuildFTSExpr). Empty expr
 // short-circuits to an empty result.
-func (s *Store) HistorySearchExpr(expr string, limit int) (HistorySearchResult, error) {
+//
+// projectUUID filters to a single project when non-empty; pass "" to search
+// across all projects. offset is a zero-based row offset for pagination.
+func (s *Store) HistorySearchExpr(expr, projectUUID string, limit, offset int) (HistorySearchResult, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -385,9 +388,10 @@ func (s *Store) HistorySearchExpr(expr string, limit int) (HistorySearchResult, 
 			   AND e.rowid < history.rowid) AS earlier
 		FROM history
 		WHERE history MATCH ?
+		  AND (? = '' OR project_uuid = ?)
 		ORDER BY rank
-		LIMIT ?
-	`, expr, limit)
+		LIMIT ? OFFSET ?
+	`, expr, projectUUID, projectUUID, limit, offset)
 	if err != nil {
 		return HistorySearchResult{}, fmt.Errorf("store: history search: %w", err)
 	}
