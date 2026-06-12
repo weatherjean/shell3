@@ -56,10 +56,31 @@ func Open(path string) (*Store, error) {
 func migrate(db *sql.DB) error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS sessions (
-			id         INTEGER PRIMARY KEY AUTOINCREMENT,
-			started_at TEXT NOT NULL,
-			ended_at   TEXT,
-			summary    TEXT
+			id                INTEGER PRIMARY KEY AUTOINCREMENT,
+			started_at        TEXT NOT NULL,
+			ended_at          TEXT,
+			summary           TEXT,
+			parent_session_id INTEGER,
+			pid               INTEGER NOT NULL DEFAULT 0,
+			sock              TEXT NOT NULL DEFAULT '',
+			status            TEXT NOT NULL DEFAULT 'dormant'
+		)`,
+		`CREATE TABLE IF NOT EXISTS messages (
+			session_id      INTEGER NOT NULL,
+			seq             INTEGER NOT NULL,
+			role            TEXT NOT NULL,
+			content         TEXT NOT NULL,
+			tool_calls_json TEXT NOT NULL DEFAULT '',
+			tool_call_id    TEXT NOT NULL DEFAULT '',
+			name            TEXT NOT NULL DEFAULT '',
+			created_at      TEXT NOT NULL,
+			PRIMARY KEY (session_id, seq)
+		)`,
+		`CREATE TABLE IF NOT EXISTS inbox (
+			session_id   INTEGER NOT NULL,
+			seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+			payload_json TEXT NOT NULL,
+			created_at   TEXT NOT NULL
 		)`,
 		`CREATE VIRTUAL TABLE IF NOT EXISTS history USING fts5(
 			content,
