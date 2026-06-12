@@ -28,7 +28,10 @@ func newTelegramCommand() *cobra.Command {
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
-			cwd, _ := os.Getwd()
+			cwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("get working directory: %w", err)
+			}
 			home, err := os.UserHomeDir()
 			if err != nil {
 				return err
@@ -76,7 +79,7 @@ func newTelegramCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			b := telegram.NewBot(client, rt, sess, chatID, tg.Dashboard.URL)
+			b := telegram.NewBot(client, rt, sess, chatID)
 			// Resolve send_media_telegram relative paths against the agent's workdir.
 			workDir := tg.WorkDir
 			if workDir == "" {
@@ -112,35 +115,17 @@ func newTelegramCommand() *cobra.Command {
 			// /reload + reload tool: rebuild config in place, re-decorate the
 			// session, and swap the cron scheduler. Runs only when the session
 			// is idle (commands handled between turns; the reload tool defers to
-			// end-of-turn — see registerReloadTool).
+			// end-of-turn — see registerReloadTool). The coordination lives in
+			// reloadAndRearm (testable); the closure just threads the mutable
+			// scheduler handle across reloads.
 			b.SetReloader(func() (shell3.ReloadResult, error) {
-				res, err := rt.Reload()
-				if err != nil {
-					return res, err
+				var dash cronDashboard
+				if srv != nil { // avoid a non-nil interface wrapping a nil *web.Server
+					dash = srv
 				}
-				b.RedecorateSession() // re-apply host tools dropped by reload
-				if sched != nil {
-					sched.Stop()
-				}
-				sched = nil
-				if jobs := rt.Cron(); len(jobs) > 0 {
-					ns, nerr := cron.New(sess, jobs)
-					if nerr != nil {
-						return res, nerr
-					}
-					ns.Start()
-					sched = ns
-					b.SetJobRunner(sched.Run)
-					if srv != nil {
-						srv.SetCronSource(cronSource(sched))
-					}
-				} else {
-					b.SetJobRunner(nil)
-					if srv != nil {
-						srv.SetCronSource(nil)
-					}
-				}
-				return res, nil
+				ns, res, err := reloadAndRearm(rt, b, dash, sess, sched)
+				sched = ns
+				return res, err
 			})
 
 			// If the dashboard has a public URL, set the bot's in-chat menu
@@ -173,6 +158,60 @@ func newTelegramCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "path to shell3.lua")
 	return cmd
+}
+
+// configReloader, rearmBot, and cronDashboard are the narrow slices of
+// *shell3.Runtime, *telegram.Bot, and *web.Server that reloadAndRearm needs.
+// Defining them here keeps the reload-coordination logic unit-testable with
+// fakes instead of a live runtime, bot, and HTTP server.
+type configReloader interface {
+	Reload() (shell3.ReloadResult, error)
+	Cron() []shell3.CronJob
+}
+
+type rearmBot interface {
+	RedecorateSession()
+	SetJobRunner(func(name string) error)
+}
+
+type cronDashboard interface {
+	SetCronSource(func() []web.CronJob)
+}
+
+// reloadAndRearm performs a /reload: rebuild config, re-decorate the session's
+// host tools, then stop the old cron scheduler and arm a fresh one from the
+// reloaded jobs (rewiring the bot's /run handler and the dashboard's cron
+// source). It returns the new scheduler (nil when the reloaded config has no
+// jobs), the reload result, and any error. dash may be nil when no dashboard
+// runs. On reload failure the old scheduler is left running and returned
+// unchanged, so a bad config never tears down a working schedule.
+func reloadAndRearm(r configReloader, b rearmBot, dash cronDashboard, disp cron.Dispatcher, old *cron.Scheduler) (*cron.Scheduler, shell3.ReloadResult, error) {
+	res, err := r.Reload()
+	if err != nil {
+		return old, res, err
+	}
+	b.RedecorateSession() // re-apply host tools dropped by reload
+	if old != nil {
+		old.Stop()
+	}
+	jobs := r.Cron()
+	if len(jobs) == 0 {
+		b.SetJobRunner(nil)
+		if dash != nil {
+			dash.SetCronSource(nil)
+		}
+		return nil, res, nil
+	}
+	ns, err := cron.New(disp, jobs)
+	if err != nil {
+		return nil, res, err
+	}
+	ns.Start()
+	b.SetJobRunner(ns.Run)
+	if dash != nil {
+		dash.SetCronSource(cronSource(ns))
+	}
+	return ns, res, nil
 }
 
 // cronSource adapts a scheduler to the dashboard's cron DTO provider.
