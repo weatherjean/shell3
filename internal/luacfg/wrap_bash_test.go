@@ -38,8 +38,8 @@ func TestWrapBashAllowPassthrough(t *testing.T) {
 	if !allowed {
 		t.Fatalf("expected allowed, blocked with reason %q", reason)
 	}
-	if got != "echo hi" {
-		t.Fatalf("passthrough changed command: %q", got)
+	if !argvEq(got, "bash", "-c", "echo hi") {
+		t.Fatalf("passthrough argv wrong: %q", got)
 	}
 }
 
@@ -54,8 +54,8 @@ func TestWrapBashRewrite(t *testing.T) {
 	if !allowed {
 		t.Fatal("rewrite should be allowed")
 	}
-	if got != "echo SAFE" {
-		t.Fatalf("expected rewritten command, got %q", got)
+	if !argvEq(got, "bash", "-c", "echo SAFE") {
+		t.Fatalf("expected bash -c rewrite argv, got %q", got)
 	}
 }
 
@@ -72,9 +72,9 @@ func TestWrapBashBlockWithReason(t *testing.T) {
 	if reason != "no rm" {
 		t.Fatalf("expected reason %q, got %q", "no rm", reason)
 	}
-	// The original command is returned unchanged on a block (caller ignores it).
-	if got != "rm -rf /" {
-		t.Fatalf("block should return the original command, got %q", got)
+	// A block returns a nil argv (the caller ignores it and surfaces reason).
+	if got != nil {
+		t.Fatalf("block should return nil argv, got %q", got)
 	}
 }
 
@@ -126,4 +126,56 @@ func TestWrapBashFailsClosedOnBadReturn(t *testing.T) {
 			t.Fatalf("expected a wrap_bash error reason for %q, got %q", body, reason)
 		}
 	}
+}
+
+// TestWrapBashArgvTable: a table of strings is exec'd verbatim (runner swap).
+func TestWrapBashArgvTable(t *testing.T) {
+	c := loadWrap(t, `function(cmd) return {"zsh", "-c", cmd} end`)
+	got, allowed, _, err := c.WrapBash(context.Background(), "echo hi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !allowed {
+		t.Fatal("argv table should be allowed")
+	}
+	if !argvEq(got, "zsh", "-c", "echo hi") {
+		t.Fatalf("argv table not passed through, got %q", got)
+	}
+}
+
+// TestWrapBashArgvFailsClosed: malformed argv tables block (fail closed).
+func TestWrapBashArgvFailsClosed(t *testing.T) {
+	for _, body := range []string{
+		`function(cmd) return {} end`,                 // empty list
+		`function(cmd) return {"bash", "-c", 42} end`, // non-string element
+		`function(cmd) return {foo="bar"} end`,        // map-style, no array part
+	} {
+		c := loadWrap(t, body)
+		got, allowed, reason, err := c.WrapBash(context.Background(), "ls")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if allowed {
+			t.Fatalf("malformed argv %q must fail closed, got allowed", body)
+		}
+		if got != nil {
+			t.Fatalf("blocked argv should be nil, got %q", got)
+		}
+		if !contains(reason, "wrap_bash error") {
+			t.Fatalf("expected wrap_bash error reason for %q, got %q", body, reason)
+		}
+	}
+}
+
+// argvEq reports whether got equals the want elements in order.
+func argvEq(got []string, want ...string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
