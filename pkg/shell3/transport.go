@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
+	"github.com/weatherjean/shell3/internal/bgjobs"
 	"github.com/weatherjean/shell3/internal/notify"
 	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/socket"
@@ -86,9 +88,57 @@ func (s *Session) reportTo(st *store.Store, parentID int64, n notify.Notificatio
 	}
 }
 
-// spawnRevive is implemented in Phase 6 Task 6.1. Temporary stub so the package
-// compiles and routing tests pass.
-func (s *Session) spawnRevive(st *store.Store, parentID int64) error { return nil }
+// revivePrompt drains a dormant parent's inbox and renders the combined
+// notifications into a single wake prompt. ClaimRevive already elected a single
+// winner before this runs; we drain in the spawner and pass the text as
+// --prompt. Any late arrivals remain in the inbox for the next report cycle.
+func revivePrompt(st *store.Store, parentID int64) (string, error) {
+	payloads, err := st.DrainInbox(parentID)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	b.WriteString("<system-reminder>\nYou were resumed to handle completed delegated work. The following subagent results arrived while you were idle:\n</system-reminder>\n\n")
+	for _, p := range payloads {
+		var n notify.Notification
+		if err := json.Unmarshal(p, &n); err != nil {
+			continue
+		}
+		b.WriteString(renderNotification(n))
+		b.WriteByte('\n')
+	}
+	return b.String(), nil
+}
+
+// spawnRevive relaunches the dormant parent as a background `shell3 run --resume
+// <parentID>` whose prompt is the drained inbox. The revived process loads the
+// parent's full message history (newSession resume path), processes the results,
+// and on its own completion reports up ITS parent pointer — continuing the
+// cascade toward root.
+func (s *Session) spawnRevive(st *store.Store, parentID int64) error {
+	prompt, err := revivePrompt(st, parentID)
+	if err != nil {
+		return err
+	}
+	bin := shell3Binary()
+	cfgPath := ""
+	if s.runtime != nil {
+		if p, e := s.runtime.ConfigPath(); e == nil {
+			cfgPath = p
+		}
+	}
+	argv := []string{
+		bin, "run",
+		"--resume", fmt.Sprintf("%d", parentID),
+		"--prompt", prompt,
+	}
+	if cfgPath != "" {
+		argv = append(argv, "--config", cfgPath)
+	}
+	_, err = bgjobs.Start(argv, "revive session "+fmt.Sprintf("%d", parentID),
+		s.cfg.WorkDir, nil, "", false)
+	return err
+}
 
 // startTransport opens this session's socket listener and marks it live in the
 // store registry. Replaces the old sink watcher. A session with no store id, no
