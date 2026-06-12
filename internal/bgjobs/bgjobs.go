@@ -15,7 +15,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -150,21 +149,6 @@ func Start(argv []string, display, workdir string, env []string, sinkPath string
 		return Job{}, fmt.Errorf("persist: %w", err)
 	}
 	return job, nil
-}
-
-// exitCode extracts the process exit code from the error returned by
-// (*exec.Cmd).Wait: nil → 0 (clean exit), an *exec.ExitError → the real code
-// (including signal-derived codes via ExitCode), and any other error (e.g. an
-// I/O failure waiting on the process) → -1 ("unknown").
-func exitCode(err error) int {
-	if err == nil {
-		return 0
-	}
-	var ee *exec.ExitError
-	if errors.As(err, &ee) {
-		return ee.ExitCode()
-	}
-	return -1
 }
 
 // newID returns "bg_<6 hex>".
