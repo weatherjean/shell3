@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -18,6 +19,7 @@ import (
 
 type bootFlags struct {
 	url, model, name, key, proxy, braveKey string
+	contextWindow, compactAt               string
 	force                                  bool
 	telegram                               bool
 	tgToken, chatID, dashAddr, dashURL     string
@@ -36,6 +38,8 @@ func newBootCommand() *cobra.Command {
 	cmd.Flags().StringVar(&f.name, "name", "", "Handle for this model (default: main)")
 	cmd.Flags().StringVar(&f.key, "key", "", "API key")
 	cmd.Flags().StringVar(&f.proxy, "proxy", "", "Optional run_proxy command")
+	cmd.Flags().StringVar(&f.contextWindow, "context-window", "", "Model context window in tokens (default 128000)")
+	cmd.Flags().StringVar(&f.compactAt, "compact-at", "", "Auto-compaction threshold in tokens (default 80% of context window)")
 	cmd.Flags().StringVar(&f.braveKey, "brave-key", "", "Optional Brave Search API key")
 	cmd.Flags().BoolVar(&f.force, "force", false, "Overwrite an existing ~/.shell3/shell3.lua")
 	cmd.Flags().BoolVar(&f.telegram, "telegram", false, "Scaffold a Telegram host config in ~/.shell3/telegram/")
@@ -65,7 +69,7 @@ func runBoot(f *bootFlags) error {
 	in := bufio.NewReader(os.Stdin)
 	tty := term.IsTerminal(int(os.Stdin.Fd()))
 
-	url, err := value(f.url, "Base URL", "https://api.openai.com/v1", in, tty, false)
+	url, err := value(f.url, "Base URL (OpenAI API compatible)", "https://api.openai.com/v1", in, tty, false)
 	if err != nil {
 		return err
 	}
@@ -78,6 +82,23 @@ func runBoot(f *bootFlags) error {
 		return err
 	}
 	key, err := value(f.key, "API key (blank if your proxy handles auth)", "", in, tty, false)
+	if err != nil {
+		return err
+	}
+
+	if tty {
+		fmt.Println()
+		fmt.Println("Context window + compaction are model-specific. Set the context window")
+		fmt.Println("to your model's real token budget; the wrong value skews context-usage")
+		fmt.Println("reminders and when shell3 auto-compacts the conversation.")
+	}
+	ctxWindow, err := intValue(f.contextWindow, "Context window (tokens)", scaffold.DefaultContextWindow, in, tty)
+	if err != nil {
+		return err
+	}
+	// Default compaction threshold to 80% of the context window, leaving headroom
+	// for the post-compaction turn. Recomputed from whatever window the user chose.
+	compactAt, err := intValue(f.compactAt, "Auto-compact at (tokens)", ctxWindow*80/100, in, tty)
 	if err != nil {
 		return err
 	}
@@ -115,7 +136,7 @@ func runBoot(f *bootFlags) error {
 			return fmt.Errorf("boot: mkdir workdir: %w", err)
 		}
 		if err := scaffold.RenderTelegramConfig(dir, scaffold.TelegramValues{
-			Values:           scaffold.Values{Name: name, BaseURL: url, EnvKey: envKey, Model: model, Proxy: proxy},
+			Values:           scaffold.Values{Name: name, BaseURL: url, EnvKey: envKey, Model: model, Proxy: proxy, ContextWindow: ctxWindow, CompactAt: compactAt},
 			ChatID:           chatID,
 			WorkDir:          workDir,
 			DashboardEnabled: !f.noDashboard,
@@ -128,6 +149,7 @@ func runBoot(f *bootFlags) error {
 	} else {
 		if err := scaffold.RenderBaseConfig(dir, scaffold.Values{
 			Name: name, BaseURL: url, EnvKey: envKey, Model: model, Proxy: proxy,
+			ContextWindow: ctxWindow, CompactAt: compactAt,
 		}, f.force); err != nil {
 			return err
 		}
@@ -216,6 +238,12 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool) {
 		fmt.Println("           subscription via `npx ...`), add run_proxy to the model block.")
 	}
 	fmt.Println()
+	fmt.Printf("Take a minute to open %s and look it over —\n", cfgPath)
+	fmt.Println("the model block (context_window, compact_at) and the bash safety hook")
+	fmt.Println("are worth a glance before your first run. Some models also need a")
+	fmt.Println("provider-specific `extra = { ... }` field (e.g. MiniMax wants")
+	fmt.Println("reasoning_split = true) — there's a commented example in the model block.")
+	fmt.Println()
 	fmt.Println("Edit shell3.lua (and lib/) to add tools, skills, or agents —")
 	fmt.Println("recipes live in the shell3 repo under docs/cookbook/.")
 	fmt.Println()
@@ -229,7 +257,26 @@ func printTelegramBootSuccess(dir, cfgPath, envPath string) {
 	fmt.Printf("  modules: %s\n", filepath.Join(dir, "lib"))
 	fmt.Printf("  secrets: %s  (TELEGRAM_BOT_TOKEN + model key — never commit this)\n", envPath)
 	fmt.Println()
+	fmt.Printf("Take a minute to open %s and look it over — check context_window,\n", cfgPath)
+	fmt.Println("compact_at, and the bash safety hook. Some models also need a")
+	fmt.Println("provider-specific `extra = { ... }` field (a commented example is there).")
+	fmt.Println()
 	fmt.Println("Run:  shell3 telegram")
+}
+
+// intValue reads a positive-integer config value: flag wins; else prompt (TTY)
+// with the given default; falls back to def when stdin is not a terminal. The
+// value is never required — there is always a usable default.
+func intValue(flag, label string, def int, in *bufio.Reader, tty bool) (int, error) {
+	raw, err := value(flag, label, strconv.Itoa(def), in, tty, false)
+	if err != nil {
+		return 0, err
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("boot: %s must be a positive integer, got %q", label, raw)
+	}
+	return n, nil
 }
 
 // value reads a config value: flag wins; else prompt (TTY) with optional

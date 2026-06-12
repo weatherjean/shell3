@@ -54,6 +54,37 @@ func TestRenderBaseConfig(t *testing.T) {
 	}
 }
 
+func TestRenderBaseConfigContextWindow(t *testing.T) {
+	t.Run("explicit values render through", func(t *testing.T) {
+		dir := t.TempDir()
+		v := Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m", ContextWindow: 200000, CompactAt: 150000}
+		if err := RenderBaseConfig(dir, v, false); err != nil {
+			t.Fatalf("RenderBaseConfig: %v", err)
+		}
+		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.lua"))
+		for _, want := range []string{"context_window = 200000", "compact_at     = 150000"} {
+			if !strings.Contains(string(cfg), want) {
+				t.Errorf("shell3.lua missing %q", want)
+			}
+		}
+	})
+
+	t.Run("zero values default with compact_at at 80%", func(t *testing.T) {
+		dir := t.TempDir()
+		v := Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m"}
+		if err := RenderBaseConfig(dir, v, false); err != nil {
+			t.Fatalf("RenderBaseConfig: %v", err)
+		}
+		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.lua"))
+		// DefaultContextWindow (128000) and 80% of it (102400).
+		for _, want := range []string{"context_window = 128000", "compact_at     = 102400"} {
+			if !strings.Contains(string(cfg), want) {
+				t.Errorf("shell3.lua missing defaulted %q", want)
+			}
+		}
+	})
+}
+
 func TestRenderBaseConfigWithProxy(t *testing.T) {
 	dir := t.TempDir()
 	v := Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m", Proxy: "npx codex-proxy --port 8787"}

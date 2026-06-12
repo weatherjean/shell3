@@ -31,6 +31,29 @@ type Values struct {
 	EnvKey  string // .env key holding the API key, e.g. "MAIN_API_KEY"
 	Model   string // model tag/id
 	Proxy   string // optional run_proxy command ("" => commented out)
+
+	// ContextWindow is the model's token budget; CompactAt is the prompt-token
+	// threshold for host-enforced auto-compaction. Both are model-specific —
+	// boot prompts for them. Zero values are filled by withDefaults at render.
+	ContextWindow int
+	CompactAt     int
+}
+
+// DefaultContextWindow is the fallback model context window (tokens) when boot
+// is non-interactive and no --context-window flag is given.
+const DefaultContextWindow = 128000
+
+// withDefaults fills zero ContextWindow/CompactAt with sane values so callers
+// (and tests) that omit them still render a valid config. CompactAt defaults to
+// 80% of the context window, leaving headroom for the post-compaction turn.
+func (v Values) withDefaults() Values {
+	if v.ContextWindow <= 0 {
+		v.ContextWindow = DefaultContextWindow
+	}
+	if v.CompactAt <= 0 {
+		v.CompactAt = v.ContextWindow * 80 / 100
+	}
+	return v
 }
 
 // TelegramValues are the substitutions for the templated telegram shell3.lua.
@@ -49,6 +72,7 @@ type TelegramValues struct {
 // is false, existing files are left untouched (safe to re-run); when true, both
 // shell3.lua and the lib/ modules are regenerated, overwriting any local edits.
 func RenderBaseConfig(dir string, v Values, force bool) error {
+	v = v.withDefaults()
 	tmplBytes, err := baseFS.ReadFile(baseRoot + "/shell3.lua.tmpl")
 	if err != nil {
 		return fmt.Errorf("scaffold: read template: %w", err)
@@ -89,6 +113,7 @@ func RenderBaseConfig(dir string, v Values, force bool) error {
 // modules reused from the base scaffold (tools and the rest). When force
 // is false, existing files are left untouched (safe to re-run).
 func RenderTelegramConfig(dir string, v TelegramValues, force bool) error {
+	v.Values = v.Values.withDefaults()
 	tmplBytes, err := telegramFS.ReadFile(telegramRoot + "/shell3.lua.tmpl")
 	if err != nil {
 		return fmt.Errorf("scaffold: read telegram template: %w", err)

@@ -26,9 +26,13 @@ shell3.model("{{.Name | luaesc}}", {
   base_url       = "{{.BaseURL | luaesc}}",
   api_key        = shell3.env.secret("{{.EnvKey}}"),  -- {{.EnvKey}} in .env
   model          = "{{.Model | luaesc}}",
-  context_window = 128000,
+  context_window = {{.ContextWindow}},
   -- compact_at: prompt-token threshold for host-enforced auto-compaction (0 = off).
-  compact_at     = 100000,
+  compact_at     = {{.CompactAt}},
+  -- extra: provider-specific fields injected verbatim as top-level JSON on each
+  -- request. Leave empty unless your provider needs a non-standard knob — strict
+  -- endpoints reject unknown fields. e.g. MiniMax routes thinking to reasoning_content:
+  -- extra       = { reasoning_split = true },
 {{if .Proxy}}  run_proxy      = "{{.Proxy | luaesc}}",
 {{else}}  -- run_proxy   = "npx @some/codex-proxy --port 8787",
 {{end}}})

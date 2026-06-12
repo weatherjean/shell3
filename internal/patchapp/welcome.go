@@ -67,7 +67,7 @@ func renderWelcome(width int, info WelcomeInfo) []string {
 	out = append(out, "")
 	out = append(out, labelBlock(styled("/help", yellow, "", false), "list slash commands  ·  /info for session details", infoIndent, width)...)
 	out = append(out, "")
-	out = append(out, "  "+styled("Tell shelly:", sub, "", false)+" "+styled("read your docs", yellow, "", false)+styled(" and tell me about / help me with x to get to know and configure the harness", sub, "", false))
+	out = append(out, "  "+styled("Tell shell3:", sub, "", false)+" "+styled("read your self-evolve skill", yellow, "", false)+styled(" and help me get to know and configure the harness", sub, "", false))
 	out = append(out, "")
 	return out
 }
