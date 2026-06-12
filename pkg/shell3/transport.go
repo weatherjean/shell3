@@ -8,7 +8,87 @@ import (
 	"github.com/weatherjean/shell3/internal/notify"
 	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/socket"
+	"github.com/weatherjean/shell3/internal/store"
 )
+
+type reportRoute int
+
+const (
+	routeNone   reportRoute = iota // no parent (root) or not found
+	routeSocket                    // parent live → push over its socket
+	routeRevive                    // parent dormant → inbox + revive
+)
+
+// routeReport decides how to deliver a completion to parentID based on its
+// current liveness. Pure decision (no side effects) so it is unit-testable.
+func routeReport(st *store.Store, parentID int64) (reportRoute, string) {
+	if parentID == 0 {
+		return routeNone, ""
+	}
+	_, sock, status, err := st.Liveness(parentID)
+	if err != nil {
+		return routeRevive, "" // treat unknown as dormant; revive is the safe path
+	}
+	if status == "live" && sock != "" {
+		return routeSocket, sock
+	}
+	return routeRevive, ""
+}
+
+// report delivers this session's completion notification to its parent: live
+// parent → socket; dormant parent → SQLite inbox + revive (one winner). Revive
+// failure falls back to escalating one hop up so the human at root still learns
+// of it. Called once during Close, before stopTransport marks us dormant.
+func (s *Session) report(n notify.Notification) {
+	st := s.cfg.Store
+	if st == nil {
+		return
+	}
+	parentID, err := st.ParentSessionID(s.sess.ID())
+	if err != nil || parentID == 0 {
+		return
+	}
+	s.reportTo(st, parentID, n)
+}
+
+func (s *Session) reportTo(st *store.Store, parentID int64, n notify.Notification) {
+	if n.Origin == 0 {
+		n.Origin = s.sess.ID()
+	}
+	route, sock := routeReport(st, parentID)
+	switch route {
+	case routeSocket:
+		payload, _ := json.Marshal(n)
+		if err := socket.Send(sock, payload); err == nil {
+			return
+		}
+		// Socket vanished between the liveness read and the send: fall through to
+		// revive as if dormant.
+		fallthrough
+	case routeRevive:
+		payload, _ := json.Marshal(n)
+		_ = st.AppendInbox(parentID, payload)
+		won, err := st.ClaimRevive(parentID)
+		if err == nil && won {
+			if spawnErr := s.spawnRevive(st, parentID); spawnErr == nil {
+				return
+			}
+			// Revive spawn failed: release the claim and escalate one hop so the
+			// result is not black-holed.
+			_ = st.SetLiveness(parentID, 0, "", "dormant")
+		}
+		if err == nil && !won {
+			return // winner will deliver; our inbox append is enough
+		}
+		if grand, gerr := st.ParentSessionID(parentID); gerr == nil && grand != 0 {
+			s.reportTo(st, grand, n)
+		}
+	}
+}
+
+// spawnRevive is implemented in Phase 6 Task 6.1. Temporary stub so the package
+// compiles and routing tests pass.
+func (s *Session) spawnRevive(st *store.Store, parentID int64) error { return nil }
 
 // startTransport opens this session's socket listener and marks it live in the
 // store registry. Replaces the old sink watcher. A session with no store id, no

@@ -96,9 +96,11 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/notify"
 	"github.com/weatherjean/shell3/internal/socket"
 )
 
@@ -337,6 +339,10 @@ type Session struct {
 	// stopTransport). Replaces the sink-watcher above. nil when no transport
 	// runs (no store id / workdir / store). Guarded by s.mu.
 	listener *socket.Listener
+
+	// reportID is the caller-chosen id (Spec.ID) stamped into this session's
+	// completion notification reported to its parent during Close (see report).
+	reportID string
 }
 
 // Start loads the config, builds a single-session Runtime, and returns its one
@@ -364,6 +370,7 @@ func Start(ctx context.Context, spec Spec) (*Session, error) {
 		return nil, err
 	}
 	s.ownsRuntime = true
+	s.reportID = spec.ID         // stamped into the parent completion report (see report)
 	s.cfg.OutPath = spec.OutPath // also feeds writeStartLine's out field (byte-compat) and introspection
 	sink, sinkCleanup, err := chat.OpenSink(spec.OutPath)
 	if err != nil {
@@ -772,6 +779,15 @@ func (s *Session) doClose() error {
 	if done != nil {
 		<-done // turn goroutine (and its deferred history persist) has finished
 	}
+	// Report this session's completion to its parent (live → socket; dormant →
+	// inbox + revive) while we are still marked live in the registry — stopTransport
+	// below flips us dormant. A no-op for a root session (no parent).
+	s.report(notify.Notification{
+		Kind:    notify.KindAgentDone,
+		ID:      s.reportID,
+		Status:  s.completionStatus(),
+		Preview: s.completionPreview(),
+	})
 	// Stop the socket transport (closes the listener, marks the session dormant)
 	// before ending the store/sink: the turn is joined so no bash_bg reaper this
 	// turn spawned is still expected.
@@ -814,6 +830,47 @@ func (s *Session) doClose() error {
 		}
 	}
 	return endErr
+}
+
+// completionStatus reports "ok" or "error" for this session's parent report,
+// mirroring doClose's audit-end status: any turn that emitted an error event
+// flips sawError. Read under s.mu like doClose's WriteEnd status.
+func (s *Session) completionStatus() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sawError {
+		return "error"
+	}
+	return "ok"
+}
+
+// completionPreview returns the last assistant message's text, truncated to
+// ≤200 runes — the short result summary carried in the parent report (the
+// transcript holds the full output). Mirrors once.go's truncatePreview, but
+// sources the text from the session's last assistant message rather than
+// accumulated stream tokens (Close has no live stream).
+func (s *Session) completionPreview() string {
+	msgs := s.sess.Messages()
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == llm.RoleAssistant && msgs[i].Content != "" {
+			return truncatePreviewRunes(strings.TrimSpace(msgs[i].Content))
+		}
+	}
+	return ""
+}
+
+// truncatePreviewRunes clamps s to 200 runes on a rune boundary, appending an
+// ellipsis when cut — identical in spirit to internal/tui's truncatePreview.
+func truncatePreviewRunes(s string) string {
+	const previewMax = 200
+	if len(s) <= previewMax {
+		return s
+	}
+	cut := previewMax
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
 }
 
 // turnConfig derives the per-turn config from the current cfg. Built fresh each
