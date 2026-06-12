@@ -124,6 +124,9 @@ type SessionOpts struct {
 	StoreID          int64
 	ContextWindowFor func(string) int
 	Sink             func(Event)
+	// InitialMessages seeds the conversation when resuming a stored session.
+	// Applied verbatim as the starting in-memory history before the first turn.
+	InitialMessages []llm.Message
 }
 
 // NewSession constructs a Session that delivers events to opts.Sink. A nil Sink
@@ -133,6 +136,9 @@ func NewSession(opts SessionOpts) *Session {
 	s.reminders.contextWindowFor = opts.ContextWindowFor
 	if s.sink == nil {
 		s.sink = func(Event) {}
+	}
+	if len(opts.InitialMessages) > 0 {
+		s.messages = append(s.messages, opts.InitialMessages...)
 	}
 	return s
 }
