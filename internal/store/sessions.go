@@ -6,6 +6,47 @@ import (
 	"time"
 )
 
+// ProjectInfo summarizes one project for `shell3 list-projects`.
+type ProjectInfo struct {
+	UUID         string
+	Workdir      string
+	SessionCount int
+	LastActivity string // RFC3339, max(started_at) across the project's sessions
+}
+
+// ListProjects returns DISTINCT projects (by project_uuid) with their latest
+// workdir, session count, and most-recent activity, newest-active first. Rows
+// with an empty project_uuid (untagged) are skipped.
+func (s *Store) ListProjects(limit, offset int) ([]ProjectInfo, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := s.db.Query(`
+		SELECT project_uuid,
+		       (SELECT workdir FROM sessions x WHERE x.project_uuid = s.project_uuid
+		        ORDER BY x.id DESC LIMIT 1) AS workdir,
+		       COUNT(*) AS n,
+		       MAX(started_at) AS last
+		FROM sessions s
+		WHERE project_uuid <> ''
+		GROUP BY project_uuid
+		ORDER BY last DESC
+		LIMIT ? OFFSET ?`, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("store: list projects: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []ProjectInfo
+	for rows.Next() {
+		var p ProjectInfo
+		if err := rows.Scan(&p.UUID, &p.Workdir, &p.SessionCount, &p.LastActivity); err != nil {
+			return nil, fmt.Errorf("store: list projects: scan: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // StartSessionWithParent inserts a new session row whose parent_session_id
 // records the report pointer (who this session reports to on completion).
 func (s *Store) StartSessionWithParent(parent int64, projectUUID, workdir string) (int64, error) {

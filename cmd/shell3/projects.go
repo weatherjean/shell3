@@ -1,0 +1,44 @@
+//go:build unix
+
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/spf13/cobra"
+
+	"github.com/weatherjean/shell3/internal/paths"
+	"github.com/weatherjean/shell3/internal/store"
+)
+
+func newListProjectsCommand() *cobra.Command {
+	var page, pageSize int
+	cmd := &cobra.Command{
+		Use:   "list-projects",
+		Short: "List projects (distinct) with workdir and last activity.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			st, err := store.Open(paths.NewGlobal(home).DB)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = st.Close() }()
+			ps, err := st.ListProjects(pageSize, page*pageSize)
+			if err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			for _, p := range ps {
+				fmt.Fprintf(out, "%s\t%s\t%d sessions\tlast %s\n", p.UUID, p.Workdir, p.SessionCount, p.LastActivity)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().IntVar(&page, "page", 0, "Zero-based page index.")
+	cmd.Flags().IntVar(&pageSize, "page-size", 20, "Projects per page.")
+	return cmd
+}

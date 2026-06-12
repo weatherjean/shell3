@@ -59,6 +59,43 @@ func TestSession_ReviveClaim_SingleWinner(t *testing.T) {
 	}
 }
 
+func TestListProjects_DistinctWithLastActivity(t *testing.T) {
+	st, _ := Open(":memory:")
+	defer st.Close()
+	if _, err := st.StartSession("projA", "/a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.StartSession("projA", "/a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.StartSession("projB", "/b"); err != nil {
+		t.Fatal(err)
+	}
+	ps, err := st.ListProjects(10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ps) != 2 {
+		t.Fatalf("got %d projects, want 2 distinct", len(ps))
+	}
+	// projA has 2 sessions
+	var foundA bool
+	for _, p := range ps {
+		if p.UUID == "projA" {
+			foundA = true
+			if p.SessionCount != 2 {
+				t.Fatalf("projA SessionCount=%d, want 2", p.SessionCount)
+			}
+			if p.Workdir != "/a" {
+				t.Fatalf("projA Workdir=%q, want /a", p.Workdir)
+			}
+		}
+	}
+	if !foundA {
+		t.Fatalf("projA missing from %+v", ps)
+	}
+}
+
 func TestSession_Inbox_AppendDrain(t *testing.T) {
 	st, _ := Open(":memory:")
 	defer st.Close()
