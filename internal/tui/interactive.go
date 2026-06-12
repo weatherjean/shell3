@@ -112,6 +112,15 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 		app.SetContextWindow(snap.ContextWindow)
 	}
 
+	// Resume marker: mirror the welcome/status path (app.PrintLine, same as the
+	// "[agent: …]" line below) so the user sees they're continuing a stored
+	// conversation. len(History()) is the cheap count of messages the resumed
+	// session already loaded — no extra store round-trip. We deliberately do not
+	// re-render the full history here (see resumeBanner).
+	if spec.ResumeID != 0 {
+		app.PrintLine(patchtui.Dim + resumeBanner(spec.ResumeID, len(sess.History())) + patchtui.Reset)
+	}
+
 	var lastUsage usage
 
 	// turnWG tracks the in-flight turn goroutine (spawned per user message by
@@ -266,6 +275,14 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 
 	runErr = app.Run(ctx)
 	return
+}
+
+// resumeBanner is the marker line shown when resuming a stored conversation in
+// the TUI. We deliberately do not re-render the full history (could be huge);
+// the banner plus the always-loaded model context is enough for the user to
+// continue. Tail-rendering the last few turns is a future enhancement.
+func resumeBanner(sessionID int64, numMsgs int) string {
+	return fmt.Sprintf("⟲ resuming conversation %d (%d messages)", sessionID, numMsgs)
 }
 
 // turnGate is the in-process flag that serializes turn launches across the
