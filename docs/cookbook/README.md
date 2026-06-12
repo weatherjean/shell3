@@ -10,6 +10,13 @@ prose lives in the sibling `.md`. Custom tools are declarative bash-command temp
 (`shell3.tool{ command=... }`), not Lua handlers — params arrive as `$`-named env vars
 and declared `secrets` are exported into the command env.
 
+> **Secret exposure:** declared `secrets` are passed to the command via its
+> process environment. On a shared host, same-user processes can read another
+> process's environment (e.g. `/proc/<pid>/environ` on Linux), so a tool secret
+> is visible to anything that user can run. This is the natural cost of the
+> bash-template design and is fine for a local single-user setup; on a
+> multi-user host, treat tool secrets as readable by that user's other processes.
+
 ## Usage
 
     -- in ~/.shell3/shell3.lua

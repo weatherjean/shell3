@@ -90,3 +90,21 @@ func TestApplyDelegationContext_SuppressedNoSubagents(t *testing.T) {
 		t.Errorf("child with --no-subagents must get no delegation context, got: %q", s.cfg.Personality.SystemPrompt)
 	}
 }
+
+// TestApplyDelegationContext_SuppressedByEnvBackstop asserts the hard backstop:
+// a session whose environment carries SHELL3_NO_SUBAGENTS=1 gets no Delegation
+// section even with DisableSubagents=false and a populated allowlist — so a
+// non-compliant child (launched without --no-subagents but spawned by bgjobs,
+// which sets the env var) still cannot delegate.
+func TestApplyDelegationContext_SuppressedByEnvBackstop(t *testing.T) {
+	t.Setenv(noSubagentsEnv, "1")
+	s := &Session{}
+	s.cfg.Subagents = []string{"explorer"} // allowlist present
+	s.cfg.WorkDir = t.TempDir()
+	s.name = "child"
+	s.cfg.Personality.SystemPrompt = "base prompt"
+	s.applyDelegationContext(&Runtime{})
+	if strings.Contains(s.cfg.Personality.SystemPrompt, "## Delegation") {
+		t.Errorf("SHELL3_NO_SUBAGENTS=1 must suppress delegation, got: %q", s.cfg.Personality.SystemPrompt)
+	}
+}

@@ -2,9 +2,20 @@ package shell3
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
+
+// noSubagentsEnv is the hard backstop for the depth-1 subagent limit. The
+// primary mechanism is --no-subagents templated into the spawn command
+// (opts.DisableSubagents); but a non-compliant model-authored bash_bg command
+// could omit it. So bgjobs sets this var in every background child's
+// environment (see internal/bgjobs), and a session whose environment carries it
+// suppresses its Delegation context regardless of its launch args — a child can
+// never delegate even if --no-subagents was dropped. Defense in depth, not the
+// primary mechanism.
+const noSubagentsEnv = "SHELL3_NO_SUBAGENTS"
 
 // applyDelegationContext appends a "## Delegation" section to this session's
 // system prompt when the active agent has ≥1 allowed subagent AND the session
@@ -43,11 +54,13 @@ func (s *Session) applyDelegationContext(rt *Runtime) {
 }
 
 // delegationSection renders the "## Delegation" section to append for the
-// current active agent, or "" when delegation is suppressed (no runtime, a
-// --no-subagents child, no allowed subagents, no sink, or no resolvable config
-// path). See applyDelegationContext for why this lives per-session.
+// current active agent, or "" when delegation is suppressed: no runtime, a
+// --no-subagents child (opts.DisableSubagents), the SHELL3_NO_SUBAGENTS=1 env
+// backstop (see noSubagentsEnv), no allowed subagents, no sink, or no
+// resolvable config path. See applyDelegationContext for why this lives
+// per-session.
 func (s *Session) delegationSection(rt *Runtime) string {
-	if rt == nil || s.opts.DisableSubagents {
+	if rt == nil || s.opts.DisableSubagents || os.Getenv(noSubagentsEnv) == "1" {
 		return ""
 	}
 	allowed := s.cfg.Subagents // the active agent's tools.subagents allowlist

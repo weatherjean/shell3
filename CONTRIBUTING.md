@@ -52,6 +52,7 @@ front-ends over the same core.
 
 ## Security
 
-Never read or commit credential files (`.env` beside `shell3.lua`). See
-[SECURITY.md](SECURITY.md) for the threat model and how to report
-vulnerabilities.
+Never read or commit credential files (`.env` beside `shell3.lua`). shell3 is
+unsafe by default — model-chosen commands run with full shell access, gated only
+by the optional `shell3.wrap_bash` hook. Report vulnerabilities via GitHub
+Security Advisories.

@@ -201,10 +201,13 @@ rm -rf .shell3                    # project-local state
 ## Security
 
 shell3 runs model-chosen shell commands and is **unsafe by default** (full,
-unrestricted shell). Read [SECURITY.md](SECURITY.md) for the threat model
-(`wrap_bash`, secret isolation, process containment, audit logs) before pointing
-it at anything you care about. Vulnerabilities: please use GitHub Security
-Advisories.
+unrestricted shell). The only safety surface is the `shell3.wrap_bash(fn)` hook
+(allow/block/rewrite, no approval flow); secrets live in a plain `.env` beside
+`shell3.lua`, and declared custom-tool `secrets` are exported into the command's
+process environment (readable via `/proc/<pid>/environ` by same-user processes —
+treat multi-user hosts accordingly). Run shell3 in a sandbox, container, or
+throwaway user if you need hard isolation. Vulnerabilities: please use GitHub
+Security Advisories.
 
 ## Contributing
 
