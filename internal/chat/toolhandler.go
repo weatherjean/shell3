@@ -70,7 +70,7 @@ type ToolConfig struct {
 	// block reason. Nil means no hook is declared — the tools run the command
 	// verbatim (the unsafe default). The hook FAILS CLOSED on error (see
 	// luacfg.WrapBash): a broken wrapper blocks rather than silently runs.
-	WrapBash func(ctx context.Context, cmd string) (rewritten string, allowed bool, reason string, err error)
+	WrapBash func(ctx context.Context, cmd string) (argv []string, allowed bool, reason string, err error)
 	// AllMsgs is the full conversation slice including any reminder
 	// injections; tools that need to operate on what the model sees use
 	// this view.
@@ -129,7 +129,7 @@ type TurnConfig struct {
 	StubTools map[string]string
 	// WrapBash is the shell3.wrap_bash hook threaded to each tool call's
 	// ToolConfig (see ToolConfig.WrapBash). Nil = no hook = run commands verbatim.
-	WrapBash func(ctx context.Context, cmd string) (rewritten string, allowed bool, reason string, err error)
+	WrapBash func(ctx context.Context, cmd string) (argv []string, allowed bool, reason string, err error)
 	// CompactAt is the auto-compaction prompt-token threshold (0 = off).
 	// maybeCompact (called at the top of RunTurn) consults it.
 	CompactAt int

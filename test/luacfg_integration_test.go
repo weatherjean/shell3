@@ -109,15 +109,15 @@ shell3.agent({
 	if !strings.Contains(reason, "dangerous") {
 		t.Errorf("wrap_bash reason should mention 'dangerous', got: %q", reason)
 	}
-	cmd, allowed2, _, err := lc.WrapBash(ctx, "echo hello")
+	argv, allowed2, _, err := lc.WrapBash(ctx, "echo hello")
 	if err != nil {
 		t.Fatalf("WrapBash (safe): %v", err)
 	}
-	if !allowed2 || cmd != "echo hello" {
-		t.Errorf("wrap_bash should allow 'echo hello' unchanged, got allowed=%v cmd=%q", allowed2, cmd)
+	if !allowed2 || len(argv) != 3 || argv[0] != "bash" || argv[1] != "-c" || argv[2] != "echo hello" {
+		t.Errorf("wrap_bash should allow 'echo hello' as bash -c argv, got allowed=%v argv=%q", allowed2, argv)
 	}
 
-	wrapBash := func(ctx context.Context, cmd string) (string, bool, string, error) {
+	wrapBash := func(ctx context.Context, cmd string) ([]string, bool, string, error) {
 		return lc.WrapBash(ctx, cmd)
 	}
 

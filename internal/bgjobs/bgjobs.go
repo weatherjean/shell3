@@ -50,8 +50,13 @@ type Registry struct {
 // process is detached and reaped independently — so flock was not added.
 var fileLock sync.Mutex
 
-// Start spawns command in workdir detached, returning the recorded Job.
-// On return the process is fully released — bgjobs does not Wait on it.
+// Start spawns argv (argv[0] with argv[1:] as args) in workdir, detached,
+// returning the recorded Job; on return the process is fully released (bgjobs
+// does not Wait on it).
+//
+// display is the human-readable command recorded as Job.Cmd in bg.json and in
+// the sink notification's Cmd field; it may differ from argv when wrap_bash
+// swapped the runner.
 //
 // sinkPath, when non-empty, is the session's notification sink (see
 // internal/sink): the reaper goroutine appends a "bg_done" notification with
@@ -64,13 +69,14 @@ var fileLock sync.Mutex
 // false because the child self-reports its own agent_done to the same sink — so
 // the agent is notified exactly once, not twice (a generic bg_done AND the rich
 // agent_done). Plain bg jobs (servers, watchers) pass true and keep bg_done.
+//
 // env, when non-empty, supplies extra KEY=VALUE entries appended to the
 // inherited environment (os.Environ); used by command-template custom tools to
 // pass their declared params + secrets to the background command. nil/empty
 // means the job inherits only the host environment (the prior behavior).
-func Start(command, workdir string, env []string, sinkPath string, notifyOnExit bool) (Job, error) {
-	if command == "" {
-		return Job{}, fmt.Errorf("command is required")
+func Start(argv []string, display, workdir string, env []string, sinkPath string, notifyOnExit bool) (Job, error) {
+	if len(argv) == 0 {
+		return Job{}, fmt.Errorf("argv is required")
 	}
 	if workdir == "" {
 		wd, err := os.Getwd()
@@ -98,7 +104,7 @@ func Start(command, workdir string, env []string, sinkPath string, notifyOnExit 
 	}
 	defer devNull.Close()
 
-	c := exec.Command("bash", "-c", command)
+	c := exec.Command(argv[0], argv[1:]...)
 	c.Dir = workdir
 	// SHELL3_NO_SUBAGENTS=1 is the hard depth-1 backstop: every background child
 	// runs with it set, so a spawned `shell3` subagent suppresses its own
@@ -142,14 +148,14 @@ func Start(command, workdir string, env []string, sinkPath string, notifyOnExit 
 			ID:   id,
 			Exit: &exit,
 			Log:  logPath,
-			Cmd:  command,
+			Cmd:  display,
 		})
 	}()
 
 	job := Job{
 		ID:        id,
 		PID:       pid,
-		Cmd:       command,
+		Cmd:       display,
 		Log:       logPath,
 		Workdir:   workdir,
 		StartedAt: time.Now().UTC(),

@@ -28,27 +28,32 @@ func (BashBgHandler) Execute(ctx context.Context, id string, args json.RawMessag
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("bash_bg: invalid args: %w", err)
 	}
+	if p.Command == "" {
+		return "", fmt.Errorf("bash_bg: command is required")
+	}
 	notifyOnExit := p.NotifyOnExit == nil || *p.NotifyOnExit
 	wd := p.Workdir
 	if wd == "" {
 		wd = cfg.WorkDir
 	}
-	// shell3.wrap_bash applies to bash_bg too: allow / rewrite / block the
-	// command before it is backgrounded. Nil hook = no wrapping (unsafe default).
+	// shell3.wrap_bash applies to bash_bg too: rewrite, swap the runner, or
+	// block before the command is backgrounded. Nil hook = no wrapping.
+	argv := []string{"bash", "-c", p.Command}
 	if cfg.WrapBash != nil {
-		rewritten, allowed, reason, err := cfg.WrapBash(ctx, p.Command)
+		a, allowed, reason, err := cfg.WrapBash(ctx, p.Command)
 		if err != nil {
 			return "error: wrap_bash failed: " + err.Error(), nil
 		}
 		if !allowed {
 			return "error: blocked by wrap_bash: " + reason, nil
 		}
-		p.Command = rewritten
+		argv = a
 	}
 	// cfg.SinkPath is the session's notification sink (empty for front-ends
 	// that don't wire one): the reaper appends a bg_done notification there on
 	// exit so the host can tell the agent the background job finished.
-	job, err := bgjobs.Start(p.Command, wd, nil, cfg.SinkPath, notifyOnExit)
+	// Display the original command in bg.json/sink regardless of any runner swap.
+	job, err := bgjobs.Start(argv, p.Command, wd, nil, cfg.SinkPath, notifyOnExit)
 	if err != nil {
 		return "", fmt.Errorf("bash_bg: %w", err)
 	}

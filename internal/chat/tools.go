@@ -72,7 +72,7 @@ func dispatchCustomTool(ctx context.Context, cfg TurnConfig, name, rawArgs strin
 		return errResult("error: " + err.Error())
 	}
 	if rt.Background {
-		job, err := bgjobs.Start(rt.Command, cfg.WorkDir, rt.Env, cfg.SinkPath, true)
+		job, err := bgjobs.Start([]string{"bash", "-c", rt.Command}, rt.Command, cfg.WorkDir, rt.Env, cfg.SinkPath, true)
 		if err != nil {
 			return errResult("error: " + err.Error())
 		}
@@ -86,7 +86,7 @@ func dispatchCustomTool(ctx context.Context, cfg TurnConfig, name, rawArgs strin
 		}
 		timeout = time.Duration(t) * time.Second
 	}
-	out, code := runBashCapture(ctx, rt.Command, cfg.WorkDir, rt.Env, timeout)
+	out, code := runBashCapture(ctx, []string{"bash", "-c", rt.Command}, cfg.WorkDir, rt.Env, timeout)
 	if code != 0 {
 		return errResult(fmt.Sprintf("error: command exited %d\n%s", code, out))
 	}

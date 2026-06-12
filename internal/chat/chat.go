@@ -119,7 +119,7 @@ type Config struct {
 	// their command through it before execution (allow / rewrite / block). Nil
 	// means no hook is declared — commands run verbatim (the unsafe default).
 	// Config-global (one hook for all agents), not swapped on agent switch.
-	WrapBash func(ctx context.Context, cmd string) (rewritten string, allowed bool, reason string, err error)
+	WrapBash func(ctx context.Context, cmd string) (argv []string, allowed bool, reason string, err error)
 	// AgentNames lists configured agents in declaration order, for /agent and
 	// Tab cycling. Empty or single-element disables switching.
 	AgentNames []string

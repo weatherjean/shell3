@@ -38,32 +38,36 @@ func (BashHandler) Name() string { return "bash" }
 
 func (BashHandler) Execute(ctx context.Context, id string, args json.RawMessage, cfg ToolConfig) (string, error) {
 	command, timeout := parseBashArgsFull(string(args))
-	// shell3.wrap_bash: the only bash safety surface.
-	// When declared, the command passes through it before execution — allow,
-	// rewrite, or block. A nil hook means no wrapping (the unsafe default).
+	// shell3.wrap_bash: the only bash safety surface. Default argv runs the
+	// command under bash -c; a declared hook may rewrite it, swap the runner
+	// (argv table), or block. A nil hook means no wrapping (the unsafe default).
+	argv := []string{"bash", "-c", command}
 	if cfg.WrapBash != nil {
-		rewritten, allowed, reason, err := cfg.WrapBash(ctx, command)
+		a, allowed, reason, err := cfg.WrapBash(ctx, command)
 		if err != nil {
 			return "error: wrap_bash failed: " + err.Error(), nil
 		}
 		if !allowed {
 			return "error: blocked by wrap_bash: " + reason, nil
 		}
-		command = rewritten
+		argv = a
 	}
-	out, _ := runBashCapture(ctx, command, cfg.WorkDir, nil, timeout)
+	out, _ := runBashCapture(ctx, argv, cfg.WorkDir, nil, timeout)
 	return out, nil
 }
 
-// runBashCapture runs command via `bash -c` in workdir with extraEnv appended to
-// os.Environ() (nil = inherit only), capturing combined stdout+stderr, honoring
-// timeout + cancellation. It returns the elided output and the process exit code
-// (124 on timeout, -1 on a start error). Shared by the bash tool and foreground
-// command-template tools.
-func runBashCapture(ctx context.Context, command, workdir string, extraEnv []string, timeout time.Duration) (string, int) {
+// runBashCapture runs argv (argv[0] with argv[1:] as args) in workdir with
+// extraEnv appended to os.Environ() (nil = inherit only), capturing combined
+// stdout+stderr, honoring timeout + cancellation. It returns the elided output
+// and the process exit code (124 on timeout, -1 on a start error). Shared by the
+// bash tool and foreground command-template tools. argv must be non-empty.
+func runBashCapture(ctx context.Context, argv []string, workdir string, extraEnv []string, timeout time.Duration) (string, int) {
+	if len(argv) == 0 {
+		return "error: empty command argv\n", -1
+	}
 	tctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	c := exec.CommandContext(tctx, "bash", "-c", command)
+	c := exec.CommandContext(tctx, argv[0], argv[1:]...)
 	c.Dir = workdir
 	if len(extraEnv) > 0 {
 		c.Env = append(os.Environ(), extraEnv...)

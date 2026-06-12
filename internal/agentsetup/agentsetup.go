@@ -295,7 +295,7 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 	// wrapping (the unsafe default: bash runs with no restrictions). Not
 	// per-agent and not swapped on agent switch.
 	if p.lc.HasWrapBash() {
-		cfg.WrapBash = func(ctx context.Context, cmd string) (string, bool, string, error) {
+		cfg.WrapBash = func(ctx context.Context, cmd string) ([]string, bool, string, error) {
 			return p.lc.WrapBash(ctx, cmd)
 		}
 	}

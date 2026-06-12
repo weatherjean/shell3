@@ -31,7 +31,7 @@ func waitDead(pid int, timeout time.Duration) bool {
 
 func TestStart_writesLogAndExits(t *testing.T) {
 	wd := t.TempDir()
-	job, err := Start("echo hi-from-bg", wd, nil, "", true)
+	job, err := Start([]string{"bash", "-c", "echo hi-from-bg"}, "echo hi-from-bg", wd, nil, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,11 +55,11 @@ func TestStart_writesLogAndExits(t *testing.T) {
 
 func TestStart_appendsToRegistry(t *testing.T) {
 	wd := t.TempDir()
-	j1, err := Start("true", wd, nil, "", true)
+	j1, err := Start([]string{"bash", "-c", "true"}, "true", wd, nil, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	j2, err := Start("true", wd, nil, "", true)
+	j2, err := Start([]string{"bash", "-c", "true"}, "true", wd, nil, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestStart_appendsToRegistry(t *testing.T) {
 
 func TestStart_detached(t *testing.T) {
 	wd := t.TempDir()
-	job, err := Start("sleep 30", wd, nil, "", true)
+	job, err := Start([]string{"bash", "-c", "sleep 30"}, "sleep 30", wd, nil, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestStart_detached(t *testing.T) {
 func TestStart_grandchildKillablyViaPgid(t *testing.T) {
 	wd := t.TempDir()
 	// `setsid bash` ensures the inner sleep inherits the pgid.
-	job, err := Start("sleep 30 & wait", wd, nil, "", true)
+	job, err := Start([]string{"bash", "-c", "sleep 30 & wait"}, "sleep 30 & wait", wd, nil, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestStart_corruptRegistryRecovers(t *testing.T) {
 	if err := os.WriteFile(bad, []byte("{not valid json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	job, err := Start("true", wd, nil, "", true)
+	job, err := Start([]string{"bash", "-c", "true"}, "true", wd, nil, "", true)
 	if err != nil {
 		t.Fatalf("start should recover from corrupt bg.json: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestStart_corruptRegistryBackupsAreUnique(t *testing.T) {
 	if err := os.WriteFile(reg, []byte("first-corrupt"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	j1, err := Start("true", wd, nil, "", true)
+	j1, err := Start([]string{"bash", "-c", "true"}, "true", wd, nil, "", true)
 	if err != nil {
 		t.Fatalf("first recover: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestStart_corruptRegistryBackupsAreUnique(t *testing.T) {
 	if err := os.WriteFile(reg, []byte("second-corrupt"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	j2, err := Start("true", wd, nil, "", true)
+	j2, err := Start([]string{"bash", "-c", "true"}, "true", wd, nil, "", true)
 	if err != nil {
 		t.Fatalf("second recover: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestStart_concurrentAppendsDoNotRace(t *testing.T) {
 	jobs := make(chan Job, n)
 	for i := 0; i < n; i++ {
 		go func() {
-			j, err := Start("true", wd, nil, "", true)
+			j, err := Start([]string{"bash", "-c", "true"}, "true", wd, nil, "", true)
 			jobs <- j
 			errs <- err
 		}()
@@ -288,7 +288,7 @@ func TestStart_concurrentAppendsDoNotRace(t *testing.T) {
 }
 
 func TestStart_emptyCommandRejected(t *testing.T) {
-	if _, err := Start("", t.TempDir(), nil, "", true); err == nil {
+	if _, err := Start(nil, "", t.TempDir(), nil, "", true); err == nil {
 		t.Fatal("expected error on empty command")
 	}
 }
@@ -303,7 +303,8 @@ func TestStart_killsProcessWhenPersistFails(t *testing.T) {
 	marker := filepath.Join(wd, "ran.marker")
 	// If the spawned process is NOT killed, it survives the 1s sleep and creates
 	// the marker. If Start kills it on persist failure, the marker never appears.
-	_, err := Start(fmt.Sprintf("sleep 1 && touch %q", marker), wd, nil, "", true)
+	cmd := fmt.Sprintf("sleep 1 && touch %q", marker)
+	_, err := Start([]string{"bash", "-c", cmd}, cmd, wd, nil, "", true)
 	if err == nil {
 		t.Fatal("expected persist error (.shell3 is a file), got nil")
 	}
@@ -315,7 +316,7 @@ func TestStart_killsProcessWhenPersistFails(t *testing.T) {
 
 func TestKillAll(t *testing.T) {
 	dir := t.TempDir()
-	job, err := Start("sleep 60", dir, nil, "", true) // command first, workdir second
+	job, err := Start([]string{"bash", "-c", "sleep 60"}, "sleep 60", dir, nil, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +376,7 @@ func waitSinkLines(t *testing.T, path string, n int, timeout time.Duration) []ma
 func TestStart_emitsBgDoneOnExit(t *testing.T) {
 	wd := t.TempDir()
 	sinkPath := filepath.Join(wd, ".shell3", "sink", "main.jsonl")
-	job, err := Start("exit 3", wd, nil, sinkPath, true)
+	job, err := Start([]string{"bash", "-c", "exit 3"}, "exit 3", wd, nil, sinkPath, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,7 +409,7 @@ func TestStart_emitsBgDoneOnExit(t *testing.T) {
 func TestStart_notifyOnExitFalseSkipsBgDone(t *testing.T) {
 	wd := t.TempDir()
 	sinkPath := filepath.Join(wd, ".shell3", "sink", "main.jsonl")
-	job, err := Start("exit 0", wd, nil, sinkPath, false)
+	job, err := Start([]string{"bash", "-c", "exit 0"}, "exit 0", wd, nil, sinkPath, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +427,7 @@ func TestStart_notifyOnExitFalseSkipsBgDone(t *testing.T) {
 // no-op: the job still runs and is tracked, but no sink file is written.
 func TestStart_emptySinkPathSkipsNotification(t *testing.T) {
 	wd := t.TempDir()
-	job, err := Start("true", wd, nil, "", true)
+	job, err := Start([]string{"bash", "-c", "true"}, "true", wd, nil, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -441,7 +442,7 @@ func TestStart_emptySinkPathSkipsNotification(t *testing.T) {
 
 func TestRegistry_jsonShape(t *testing.T) {
 	wd := t.TempDir()
-	job, err := Start("true", wd, nil, "", true)
+	job, err := Start([]string{"bash", "-c", "true"}, "true", wd, nil, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -462,7 +463,8 @@ func TestRegistry_jsonShape(t *testing.T) {
 func TestStartInjectsEnv(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "out.txt")
-	job, err := Start(`printf "%s" "$GREETING" > `+out, dir, []string{"GREETING=hi-env"}, "", false)
+	cmd := `printf "%s" "$GREETING" > ` + out
+	job, err := Start([]string{"bash", "-c", cmd}, cmd, dir, []string{"GREETING=hi-env"}, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
