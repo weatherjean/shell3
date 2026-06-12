@@ -2,6 +2,25 @@ You can modify your own configuration and apply it live, without anyone
 restarting the bot. A failed reload keeps the current config running, so you can
 never brick yourself with a bad edit.
 
+## Evolve proactively
+Improving yourself is part of the job, not a special request. When you hit a
+recurring friction, a wrong or stale instruction, or a capability you keep
+wishing you had — fix it the moment you notice, don't wait to be asked. A skill
+or instruction that drifts out of date is a liability; patch it in place.
+
+## Footprint ladder — pick the smallest change that works
+Each rung adds more permanent surface than the one above. Choose the highest
+(least-footprint) rung that correctly solves the problem:
+1. Edit an existing skill `.md` or an agent's prompt — sharpen what's already there.
+2. Add a new skill `.md` (a file you `cat`) and grant it to the agent — see the
+   worked example below. This is the default home for a new procedure.
+3. Add a declarative custom tool (`shell3.tool{command=...}`) — only when a
+   bash-command template with injected params is genuinely reusable.
+4. Add or adjust an agent / subagent — when the work needs its own prompt,
+   toolset, or an isolated context to delegate to.
+5. A Go/core change — last resort; it needs a rebuild and can't be hot-reloaded.
+   Don't attempt it live; describe what's needed and hand it to the user.
+
 ## Orient first
 Call the `status` tool. It prints the absolute path of the `shell3.lua` you edit
 (plus your active agent, the agents available, the model, the working directory,
