@@ -603,15 +603,21 @@ func saveHistory(st *store.Store, lg applog.Logger, sess *Session, sessionID int
 		// (compactInto already wrote the summary to history directly).
 		return
 	}
-	flushMessages(st, lg, sessionID, sess.messages[from:])
+	flushMessages(st, lg, sessionID, from, sess.messages[from:])
 }
 
-// flushMessages appends each user/assistant message in msgs to history under
-// sessionID, plus one summary row per tool call. Best-effort: appendHistory
-// logs any write failure rather than aborting. Shared by saveHistory (end of
-// turn) and compactInto (flushing the outgoing session before roll).
-func flushMessages(st *store.Store, lg applog.Logger, sessionID int64, msgs []llm.Message) {
-	for _, m := range msgs {
+// flushMessages appends each message in msgs to the replayable messages table
+// (full fidelity, including RoleTool results) starting at seq `from`, and
+// mirrors user/assistant text plus one summary row per tool call into the FTS
+// history table for search. Best-effort: write failures are logged, not fatal.
+// Shared by saveHistory (end of turn) and compactInto (flushing the outgoing
+// session before roll). `from` is the base conversation seq of msgs[0] so that
+// seqs stay contiguous across turns.
+func flushMessages(st *store.Store, lg applog.Logger, sessionID int64, from int, msgs []llm.Message) {
+	for i, m := range msgs {
+		if err := st.AppendMessage(sessionID, from+i, m); err != nil {
+			lg.Warn("append message failed", "session_id", sessionID, "seq", from+i, "error", err)
+		}
 		switch m.Role {
 		case llm.RoleUser, llm.RoleAssistant:
 			appendHistory(st, lg, sessionID, string(m.Role), m.Content)

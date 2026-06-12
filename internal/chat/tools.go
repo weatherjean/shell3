@@ -117,7 +117,7 @@ func compactInto(args CompactSummary, st *store.Store, sess *Session, allMsgs []
 	if st != nil {
 		// Flush current session messages before wiping — saveHistory bails early
 		// after compact because prevLen > len(sess.messages), so we save here.
-		flushMessages(st, lg, prevSessionID, sess.messages)
+		flushMessages(st, lg, prevSessionID, 0, sess.messages)
 		// Save the summary itself as the final entry in the outgoing session.
 		appendHistory(st, lg, prevSessionID, "tool", "compact_history: "+args.Summary)
 		if err := st.EndSession(prevSessionID); err != nil {
