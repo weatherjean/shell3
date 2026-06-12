@@ -313,10 +313,10 @@ func TestBuild_AlwaysOpensStore(t *testing.T) {
 }
 
 // TestBuild_PromptHasEnvironmentSection asserts the host appends an
-// "## Environment" section carrying the read-only history DB path to the
-// agent's system prompt — the runtime value the `history` skill needs to open
-// `sqlite3 'file:<db>?mode=ro'`. The path must be the real project DB and the
-// section must show the ro-open form.
+// "## Environment" section to every agent's system prompt. The section must
+// carry the project_uuid, the shell3 fts command, the list-projects command,
+// and the canonical history DB path (under ~/.shell3/data/) with its ro-open
+// form.
 func TestBuild_PromptHasEnvironmentSection(t *testing.T) {
 	tmp := t.TempDir()
 	home := t.TempDir()
@@ -336,14 +336,24 @@ func TestBuild_PromptHasEnvironmentSection(t *testing.T) {
 	if !strings.Contains(prompt, "## Environment") {
 		t.Fatalf("prompt missing Environment section:\n%s", prompt)
 	}
-	// The DB lives under the per-project dir in HomeDir; assert the path and the
-	// read-only open form both appear.
-	wantPathFragment := filepath.Join(home, ".shell3", "projects")
+	// The canonical DB lives under ~/.shell3/data/; assert the path fragment and
+	// the read-only open form both appear.
+	wantPathFragment := filepath.Join(home, ".shell3", "data")
 	if !strings.Contains(prompt, wantPathFragment) {
-		t.Errorf("Environment section missing project DB path %q:\n%s", wantPathFragment, prompt)
+		t.Errorf("Environment section missing canonical DB path %q:\n%s", wantPathFragment, prompt)
 	}
 	if !strings.Contains(prompt, "shell3.db") || !strings.Contains(prompt, "?mode=ro") {
 		t.Errorf("Environment section missing ro history DB open form:\n%s", prompt)
+	}
+	// New interface: shell3 fts and list-projects commands must be advertised.
+	if !strings.Contains(prompt, "shell3 fts") {
+		t.Errorf("Environment section missing shell3 fts command:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "shell3 list-projects") {
+		t.Errorf("Environment section missing shell3 list-projects command:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "project_uuid") {
+		t.Errorf("Environment section missing project_uuid:\n%s", prompt)
 	}
 }
 

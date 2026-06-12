@@ -217,11 +217,10 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 }
 
 // environmentSection renders the host-injected "## Environment" block appended
-// to every agent's system prompt. It carries runtime values the agent can only
-// learn at session start — currently the read-only history DB path, which the
-// `history` skill reads via `sqlite3 'file:<path>?mode=ro'`. Kept minimal and
-// factual; later phases append more lines (sink path, subagent command, …), so
-// new facts are added as additional "- key: value" rows under this heading.
+// to every agent's system prompt. It exposes the project UUID, the preferred
+// shell3 fts / list-projects commands for history access, and the raw DB path
+// for advanced use. Kept minimal and factual; later phases append more lines
+// (sink path, subagent command, …) as additional "- key: value" rows.
 //
 // Returns "" when no DB path is resolvable (store-open failed / nil store path),
 // so the section never advertises a query target the agent cannot use.
@@ -232,7 +231,10 @@ func (p *Parts) environmentSection() string {
 	var b strings.Builder
 	b.WriteString("\n## Environment\n")
 	b.WriteString("Runtime paths for this session (read-only unless stated):\n")
-	fmt.Fprintf(&b, "- history_db: %s (open with `sqlite3 'file:%s?mode=ro'`; see the `history` skill)\n",
+	fmt.Fprintf(&b, "- project_uuid: %s\n", p.uuid)
+	fmt.Fprintf(&b, "- search history: `shell3 fts \"<query>\" --project-id %s` (omit --project-id to search all projects; --page N to page; see the `history` skill)\n", p.uuid)
+	fmt.Fprintf(&b, "- list projects: `shell3 list-projects` (--page N to page)\n")
+	fmt.Fprintf(&b, "- history_db (advanced raw replay only): %s (open with `sqlite3 'file:%s?mode=ro'`)\n",
 		p.dbPath, p.dbPath)
 	return b.String()
 }
@@ -333,7 +335,7 @@ func BuildParts(opts Options) (*Parts, func(), error) {
 	}
 	b.openStore()
 	p := &Parts{lc: b.lc, st: b.st, proxy: b.proxy,
-		log: b.log, uuid: b.uuid, root: b.opts.CWD, dbPath: b.proj.DB}
+		log: b.log, uuid: b.uuid, root: b.opts.CWD, dbPath: b.g.DB}
 	return p, b.closeAll, nil
 }
 
@@ -348,7 +350,6 @@ type builder struct {
 	configPath string
 	g          paths.Global
 	l          paths.Local
-	proj       paths.Project
 	uuid       string
 
 	log   applog.Logger
@@ -366,8 +367,8 @@ func (b *builder) closeAll() {
 	}
 }
 
-// resolvePaths resolves the config path, builds the global/local/project path
-// sets, and ensures the global and project directories exist.
+// resolvePaths resolves the config path, builds the global/local path sets,
+// and ensures the global and project directories exist.
 func (b *builder) resolvePaths() error {
 	configPath, err := ResolveConfigPath(b.opts.ConfigPath, b.opts.CWD, b.opts.HomeDir)
 	if err != nil {
@@ -379,12 +380,11 @@ func (b *builder) resolvePaths() error {
 	if err := bootstrap.EnsureGlobal(b.g); err != nil {
 		return err
 	}
-	uuid, err := bootstrap.EnsureProject(b.l, b.g, b.opts.CWD)
+	uuid, err := bootstrap.EnsureProject(b.l, b.g)
 	if err != nil {
 		return err
 	}
 	b.uuid = uuid
-	b.proj = paths.NewProject(b.g, uuid)
 	return nil
 }
 
@@ -415,13 +415,13 @@ func (b *builder) loadConfig() error {
 	return nil
 }
 
-// openStore opens the SQLite store unconditionally: the store always persists
-// the conversation (saveHistory), and the agent reads it back out-of-process
-// via the `history` skill (`sqlite3 'file:<db>?mode=ro'`). There is no longer a
-// gate — history is always on. Non-fatal: a failure warns and proceeds with a
-// nil store (persistence and the skill's queries silently degrade).
+// openStore opens the canonical SQLite store unconditionally: the store always
+// persists the conversation (saveHistory), and the agent reads it back
+// out-of-process via the `history` skill. Non-fatal: a failure warns and
+// proceeds with a nil store (persistence and the skill's queries silently
+// degrade).
 func (b *builder) openStore() {
-	if s, e := store.Open(b.proj.DB); e == nil {
+	if s, e := store.Open(b.g.DB); e == nil {
 		b.st = s
 		b.closers = append(b.closers, func() { _ = s.Close() })
 	} else {
