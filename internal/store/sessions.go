@@ -49,15 +49,30 @@ func (s *Store) ListProjects(limit, offset int) ([]ProjectInfo, error) {
 
 // StartSessionWithParent inserts a new session row whose parent_session_id
 // records the report pointer (who this session reports to on completion).
-func (s *Store) StartSessionWithParent(parent int64, projectUUID, workdir string) (int64, error) {
+func (s *Store) StartSessionWithParent(parent int64, projectUUID, workdir, configPath string) (int64, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := s.db.Exec(
-		`INSERT INTO sessions(started_at, parent_session_id, project_uuid, workdir) VALUES(?, ?, ?, ?)`,
-		now, parent, projectUUID, workdir)
+		`INSERT INTO sessions(started_at, parent_session_id, project_uuid, workdir, config_path) VALUES(?, ?, ?, ?, ?)`,
+		now, parent, projectUUID, workdir, configPath)
 	if err != nil {
 		return 0, fmt.Errorf("store: start session with parent: %w", err)
 	}
 	return res.LastInsertId()
+}
+
+// SessionConfigPath returns the resolved shell3.lua path recorded for a session,
+// or "" if the session has none or does not exist (mirrors ParentSessionID's
+// missing-row handling).
+func (s *Store) SessionConfigPath(id int64) (string, error) {
+	var p string
+	err := s.db.QueryRow(`SELECT config_path FROM sessions WHERE id = ?`, id).Scan(&p)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("store: session config path %d: %w", id, err)
+	}
+	return p, nil
 }
 
 // ParentSessionID returns the report pointer for a session, or 0 if it is a

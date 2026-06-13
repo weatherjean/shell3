@@ -56,6 +56,9 @@ type Parts struct {
 	uuid   string
 	root   string // runtime root workdir (Options.CWD)
 	dbPath string // absolute path to the history SQLite DB (for the Environment section)
+	// configPath is the resolved absolute shell3.lua that produced this Parts;
+	// recorded per session so resume/revive can reload the right config.
+	configPath string
 }
 
 // Store returns the SQLite history store (always opened; nil only when the
@@ -70,6 +73,10 @@ func (p *Parts) ProjectRef() string { return p.uuid }
 
 // Root returns the runtime root working directory (the CWD passed to BuildParts).
 func (p *Parts) Root() string { return p.root }
+
+// ConfigPath returns the resolved absolute shell3.lua path that produced these
+// parts (recorded per session for resume/revive).
+func (p *Parts) ConfigPath() string { return p.configPath }
 
 // Telegram returns the parsed shell3.telegram{} config (zero value if absent).
 func (p *Parts) Telegram() luacfg.TelegramConfig { return p.lc.Telegram() }
@@ -287,6 +294,7 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 		Store:             p.st,
 		WorkDir:           workdir,
 		ProjectRef:        p.uuid,
+		ConfigPath:        p.ConfigPath(),
 		ResolveCustomTool: p.lc.ResolveCustomCall,
 		StubTools:         p.lc.StubNames(),
 		Log:               p.log,
@@ -337,7 +345,8 @@ func BuildParts(opts Options) (*Parts, func(), error) {
 	}
 	b.openStore()
 	p := &Parts{lc: b.lc, st: b.st, proxy: b.proxy,
-		log: b.log, uuid: b.uuid, root: b.opts.CWD, dbPath: b.g.DB}
+		log: b.log, uuid: b.uuid, root: b.opts.CWD, dbPath: b.g.DB,
+		configPath: b.configPath}
 	return p, b.closeAll, nil
 }
 

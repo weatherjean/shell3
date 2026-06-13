@@ -402,13 +402,13 @@ func newSession(cfg chat.Config, cleanup func(), opts SessionOpts) *Session {
 				chat.LogOrNoop(cfg.Log).Warn("resume liveness failed", "error", err)
 			}
 		case opts.ParentSession != 0:
-			if id, err := cfg.Store.StartSessionWithParent(opts.ParentSession, cfg.ProjectRef, cfg.WorkDir); err == nil {
+			if id, err := cfg.Store.StartSessionWithParent(opts.ParentSession, cfg.ProjectRef, cfg.WorkDir, cfg.ConfigPath); err == nil {
 				storeID = id
 			} else {
 				chat.LogOrNoop(cfg.Log).Warn("start session with parent failed", "error", err)
 			}
 		default:
-			if id, err := cfg.Store.StartSession(cfg.ProjectRef, cfg.WorkDir); err == nil {
+			if id, err := cfg.Store.StartSession(cfg.ProjectRef, cfg.WorkDir, cfg.ConfigPath); err == nil {
 				storeID = id
 			} else {
 				// Best-effort: a failed StartSession leaves storeID 0 (no

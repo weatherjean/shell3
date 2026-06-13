@@ -114,7 +114,7 @@ type CompactSummary struct {
 // is visible in history. Both sess.messages and allMsgs are rebuilt in place;
 // the summary is saved to history before the session rolls. Callers are
 // responsible for validating that args.Summary is non-empty.
-func compactInto(args CompactSummary, st *store.Store, sess *Session, allMsgs []llm.Message, lg applog.Logger, projectRef, workDir string) (newAllMsgs []llm.Message) {
+func compactInto(args CompactSummary, st *store.Store, sess *Session, allMsgs []llm.Message, lg applog.Logger, projectRef, workDir, configPath string) (newAllMsgs []llm.Message) {
 	prevSessionID := sess.id
 
 	// Roll the store session so compact boundary is visible in history.
@@ -127,7 +127,7 @@ func compactInto(args CompactSummary, st *store.Store, sess *Session, allMsgs []
 		if err := st.EndSession(prevSessionID); err != nil {
 			lg.Warn("end session failed during compact", "session_id", prevSessionID, "error", err)
 		}
-		newID, err := st.StartSession(projectRef, workDir)
+		newID, err := st.StartSession(projectRef, workDir, configPath)
 		if err != nil {
 			lg.Warn("start session failed during compact", "error", err)
 		} else {

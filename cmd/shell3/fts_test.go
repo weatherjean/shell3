@@ -40,7 +40,7 @@ func TestFTSCommand_RunE(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sid, err := st.StartSession("proj-x", "/x")
+	sid, err := st.StartSession("proj-x", "/x", "")
 	if err != nil {
 		t.Fatal(err)
 	}

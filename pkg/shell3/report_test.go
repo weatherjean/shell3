@@ -10,7 +10,7 @@ import (
 func TestRouteReport_LiveParentGetsSocket(t *testing.T) {
 	st, _ := store.Open(":memory:")
 	defer st.Close()
-	parent, _ := st.StartSession("", "")
+	parent, _ := st.StartSession("", "", "")
 	// Use this test process's pid so the liveness probe sees a running process.
 	_ = st.SetLiveness(parent, os.Getpid(), "/tmp/p.sock", "live")
 
@@ -23,7 +23,7 @@ func TestRouteReport_LiveParentGetsSocket(t *testing.T) {
 func TestRouteReport_DormantParentGetsInboxRevive(t *testing.T) {
 	st, _ := store.Open(":memory:")
 	defer st.Close()
-	parent, _ := st.StartSession("", "")
+	parent, _ := st.StartSession("", "", "")
 	_ = st.SetLiveness(parent, 0, "", "dormant")
 
 	route, _, _ := routeReport(st, parent)
@@ -39,7 +39,7 @@ func TestRouteReport_DormantParentGetsInboxRevive(t *testing.T) {
 func TestRouteReport_CrashedLiveParentGoesToRevive(t *testing.T) {
 	st, _ := store.Open(":memory:")
 	defer st.Close()
-	parent, _ := st.StartSession("", "")
+	parent, _ := st.StartSession("", "", "")
 	const deadPID = 2147483646 // not a running process
 	_ = st.SetLiveness(parent, deadPID, "/tmp/p.sock", "live")
 

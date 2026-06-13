@@ -38,12 +38,12 @@ func TestListSessionsCommand_RunE(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := st.StartSession("proj-alpha", "/work/alpha")
+	a, err := st.StartSession("proj-alpha", "/work/alpha", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	st.AppendHistory(a, "user", "alpha question")
-	if _, err := st.StartSession("proj-beta", "/work/beta"); err != nil {
+	if _, err := st.StartSession("proj-beta", "/work/beta", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Close(); err != nil {

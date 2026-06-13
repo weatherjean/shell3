@@ -49,7 +49,7 @@ func TestReadSessionCommand_RunE(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := st.StartSession("proj-alpha", "/work/alpha")
+	id, err := st.StartSession("proj-alpha", "/work/alpha", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestReadSessionCommand_Pagination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := st.StartSession("proj-alpha", "/work/alpha")
+	id, err := st.StartSession("proj-alpha", "/work/alpha", "")
 	if err != nil {
 		t.Fatal(err)
 	}

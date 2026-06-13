@@ -44,7 +44,7 @@ func openTestStore(t *testing.T) *store.Store {
 // beforeDone — has already happened. The assertion runs right there.
 func TestRun_PersistsHistoryBeforeTurnDone(t *testing.T) {
 	st := openTestStore(t)
-	sessionID, err := st.StartSession("", "")
+	sessionID, err := st.StartSession("", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

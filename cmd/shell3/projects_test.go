@@ -40,13 +40,13 @@ func TestListProjectsCommand_RunE(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.StartSession("proj-alpha", "/work/alpha"); err != nil {
+	if _, err := st.StartSession("proj-alpha", "/work/alpha", ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.StartSession("proj-alpha", "/work/alpha"); err != nil {
+	if _, err := st.StartSession("proj-alpha", "/work/alpha", ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.StartSession("proj-beta", "/work/beta"); err != nil {
+	if _, err := st.StartSession("proj-beta", "/work/beta", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Close(); err != nil {

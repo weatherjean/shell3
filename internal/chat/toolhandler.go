@@ -94,6 +94,10 @@ type TurnConfig struct {
 	WorkDir string
 	// ProjectRef is the project UUID from .ref, threaded into new store sessions.
 	ProjectRef string
+	// ConfigPath is the resolved shell3.lua path, threaded into new store
+	// sessions (notably the compaction rollover, which starts a session deep in
+	// the turn loop). '' if unknown.
+	ConfigPath string
 	// Store persists newly appended messages when non-nil.
 	Store *store.Store
 	// Handlers maps tool name to built-in implementation. Built once via

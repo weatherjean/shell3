@@ -65,7 +65,8 @@ func migrate(db *sql.DB) error {
 			sock              TEXT NOT NULL DEFAULT '',
 			status            TEXT NOT NULL DEFAULT 'dormant',
 			project_uuid      TEXT NOT NULL DEFAULT '',
-			workdir           TEXT NOT NULL DEFAULT ''
+			workdir           TEXT NOT NULL DEFAULT '',
+			config_path       TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS messages (
 			session_id      INTEGER NOT NULL,
@@ -122,12 +123,14 @@ func parseRFC3339(s string) time.Time {
 	return t
 }
 
-// StartSession inserts a new session row and returns its id.
-func (s *Store) StartSession(projectUUID, workdir string) (int64, error) {
+// StartSession inserts a new session row and returns its id. configPath records
+// the resolved shell3.lua that produced the session ("" if unknown) so resume
+// and revive can later reload the right config.
+func (s *Store) StartSession(projectUUID, workdir, configPath string) (int64, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := s.db.Exec(
-		`INSERT INTO sessions(started_at, project_uuid, workdir) VALUES(?, ?, ?)`,
-		now, projectUUID, workdir)
+		`INSERT INTO sessions(started_at, project_uuid, workdir, config_path) VALUES(?, ?, ?, ?)`,
+		now, projectUUID, workdir, configPath)
 	if err != nil {
 		return 0, fmt.Errorf("store: start session: %w", err)
 	}

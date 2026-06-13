@@ -532,7 +532,7 @@ func maybeCompact(ctx context.Context, cfg TurnConfig, sess *Session) {
 	allMsgs = append(allMsgs, llm.Message{Role: llm.RoleSystem, Content: cfg.Personality.SystemPrompt})
 	allMsgs = append(allMsgs, sess.messages...)
 	prevTokens := sess.lastPromptTokens
-	compactInto(CompactSummary{Summary: summary}, cfg.Store, sess, allMsgs, cfg.Log, cfg.ProjectRef, cfg.WorkDir)
+	compactInto(CompactSummary{Summary: summary}, cfg.Store, sess, allMsgs, cfg.Log, cfg.ProjectRef, cfg.WorkDir, cfg.ConfigPath)
 
 	// Reset the token gauge to the rewritten history's (small) estimate so the
 	// next turn does not immediately re-trip the threshold before a real usage

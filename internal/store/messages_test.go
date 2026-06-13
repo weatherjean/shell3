@@ -14,7 +14,7 @@ func TestMessages_RoundTrip(t *testing.T) {
 	}
 	defer st.Close()
 
-	id, err := st.StartSession("", "")
+	id, err := st.StartSession("", "", "")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}

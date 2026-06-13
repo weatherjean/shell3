@@ -14,7 +14,7 @@ func TestFlushMessages_PersistsFullStreamIncludingToolResults(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	defer st.Close()
-	id, _ := st.StartSession("", "")
+	id, _ := st.StartSession("", "", "")
 
 	msgs := []llm.Message{
 		{Role: llm.RoleUser, Content: "hi"},

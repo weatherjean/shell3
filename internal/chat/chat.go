@@ -70,6 +70,10 @@ type Config struct {
 	ModeLabel string
 	// ProjectRef is the project UUID from .ref.
 	ProjectRef string
+	// ConfigPath is the resolved absolute shell3.lua path for this session; ''
+	// if unknown. Recorded per session so resume/revive can reload the right
+	// config. Agent-independent: set once at assembly, survives agent switches.
+	ConfigPath string
 	// ActiveSkills lists skill names enabled for this persona.
 	ActiveSkills []string
 	// ActiveTools lists tool names enabled for this agent.
@@ -142,7 +146,7 @@ func AgentStatusLine(rt ActiveAgent) string {
 // so the agent-derived field copy lives in exactly one place.
 //
 // It deliberately does NOT touch agent-independent fields (Store, WorkDir,
-// ProjectRef, Docs, AgentNames, SwitchAgent, OutPath, Headless, Log,
+// ProjectRef, ConfigPath, Docs, AgentNames, SwitchAgent, OutPath, Headless, Log,
 // RefreshPrompt, WrapBash): those are set once at assembly and survive switches.
 // WrapBash in particular is config-global (one shell3.wrap_bash hook for all
 // agents), so an agent switch must not clear it.
@@ -188,6 +192,7 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler, shellInteractive
 		StatusLine:        cfg.StatusLine,
 		WorkDir:           cfg.WorkDir,
 		ProjectRef:        cfg.ProjectRef,
+		ConfigPath:        cfg.ConfigPath,
 		Store:             cfg.Store,
 		Handlers:          handlers,
 		Log:               LogOrNoop(cfg.Log),

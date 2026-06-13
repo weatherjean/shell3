@@ -24,7 +24,7 @@ func TestCanonicalDB_ConcurrentWritersNoLoss(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open seed: %v", err)
 	}
-	sid, err := seed.StartSession("proj", "/w")
+	sid, err := seed.StartSession("proj", "/w", "")
 	if err != nil {
 		t.Fatalf("start session: %v", err)
 	}

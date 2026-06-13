@@ -5,7 +5,7 @@ import "testing"
 func TestStartSession_RecordsProjectAndWorkdir(t *testing.T) {
 	st, _ := Open(":memory:")
 	defer st.Close()
-	id, err := st.StartSession("proj-abc", "/tmp/work")
+	id, err := st.StartSession("proj-abc", "/tmp/work", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -19,12 +19,37 @@ func TestStartSession_RecordsProjectAndWorkdir(t *testing.T) {
 	}
 }
 
+func TestSessionConfigPath_RoundTrip(t *testing.T) {
+	st, _ := Open(":memory:")
+	defer st.Close()
+
+	id, err := st.StartSession("proj", "/x", "/x/.shell3/shell3.lua")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.SessionConfigPath(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "/x/.shell3/shell3.lua" {
+		t.Fatalf("config path = %q, want /x/.shell3/shell3.lua", got)
+	}
+
+	bare, err := st.StartSession("proj", "/x", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := st.SessionConfigPath(bare); err != nil || got != "" {
+		t.Fatalf("bare config path = %q,%v; want \"\",nil", got, err)
+	}
+}
+
 func TestSession_PointerAndLiveness(t *testing.T) {
 	st, _ := Open(":memory:")
 	defer st.Close()
 
-	parent, _ := st.StartSession("", "")
-	child, err := st.StartSessionWithParent(parent, "", "")
+	parent, _ := st.StartSession("", "", "")
+	child, err := st.StartSessionWithParent(parent, "", "", "")
 	if err != nil {
 		t.Fatalf("start child: %v", err)
 	}
@@ -46,7 +71,7 @@ func TestSession_PointerAndLiveness(t *testing.T) {
 func TestSession_ReviveClaim_SingleWinner(t *testing.T) {
 	st, _ := Open(":memory:")
 	defer st.Close()
-	id, _ := st.StartSession("", "")
+	id, _ := st.StartSession("", "", "")
 	_ = st.SetLiveness(id, 0, "", "dormant")
 
 	won1, err := st.ClaimRevive(id, 0)
@@ -66,7 +91,7 @@ func TestSession_ReviveClaim_SingleWinner(t *testing.T) {
 func TestSession_ReviveClaim_ReclaimsCrashedLiveParent(t *testing.T) {
 	st, _ := Open(":memory:")
 	defer st.Close()
-	id, _ := st.StartSession("", "")
+	id, _ := st.StartSession("", "", "")
 	const deadPID = 2147483646 // not a running process
 	_ = st.SetLiveness(id, deadPID, "/tmp/p.sock", "live")
 
@@ -88,7 +113,7 @@ func TestSession_ReviveClaim_ReclaimsCrashedLiveParent(t *testing.T) {
 func TestSession_ReviveClaim_LeavesHealthyLiveParent(t *testing.T) {
 	st, _ := Open(":memory:")
 	defer st.Close()
-	id, _ := st.StartSession("", "")
+	id, _ := st.StartSession("", "", "")
 	_ = st.SetLiveness(id, 4242, "/tmp/p.sock", "live")
 
 	if won, err := st.ClaimRevive(id, 0); err != nil || won {
@@ -102,13 +127,13 @@ func TestSession_ReviveClaim_LeavesHealthyLiveParent(t *testing.T) {
 func TestListProjects_DistinctWithLastActivity(t *testing.T) {
 	st, _ := Open(":memory:")
 	defer st.Close()
-	if _, err := st.StartSession("projA", "/a"); err != nil {
+	if _, err := st.StartSession("projA", "/a", ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.StartSession("projA", "/a"); err != nil {
+	if _, err := st.StartSession("projA", "/a", ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.StartSession("projB", "/b"); err != nil {
+	if _, err := st.StartSession("projB", "/b", ""); err != nil {
 		t.Fatal(err)
 	}
 	ps, err := st.ListProjects(10, 0)
@@ -139,7 +164,7 @@ func TestListProjects_DistinctWithLastActivity(t *testing.T) {
 func TestSession_Inbox_AppendDrain(t *testing.T) {
 	st, _ := Open(":memory:")
 	defer st.Close()
-	id, _ := st.StartSession("", "")
+	id, _ := st.StartSession("", "", "")
 
 	_ = st.AppendInbox(id, []byte(`{"kind":"agent_done","id":"a1"}`))
 	_ = st.AppendInbox(id, []byte(`{"kind":"agent_done","id":"a2"}`))
