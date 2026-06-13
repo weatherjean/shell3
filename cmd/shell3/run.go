@@ -69,9 +69,14 @@ func runHeadless(ctx context.Context, f *runFlags, input string) error {
 		_ = os.Setenv("SHELL3_OUT", f.outPath)
 	}
 
+	resumedCfg, err := resolveResumeConfig(f.resume, f.configPath)
+	if err != nil {
+		return err
+	}
+
 	spec := shell3.Spec{
 		Prompt:        input,
-		ConfigPath:    f.configPath,
+		ConfigPath:    resumedCfg,
 		WorkDir:       cwd,
 		Agent:         f.agent,
 		Interactive:   false,

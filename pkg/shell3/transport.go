@@ -142,7 +142,15 @@ func (s *Session) spawnRevive(st *store.Store, parentID int64) error {
 	}
 	bin := shell3Binary()
 	cfgPath := ""
-	if s.runtime != nil {
+	// Prefer the dormant parent's OWN recorded config so it revives under the
+	// same configuration it ran with; fall back to the reviver's runtime config
+	// only when the parent has none recorded.
+	if st != nil {
+		if p, e := st.SessionConfigPath(parentID); e == nil {
+			cfgPath = p
+		}
+	}
+	if cfgPath == "" && s.runtime != nil {
 		if p, e := s.runtime.ConfigPath(); e == nil {
 			cfgPath = p
 		}
