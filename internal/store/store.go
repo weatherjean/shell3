@@ -91,6 +91,17 @@ func migrate(db *sql.DB) error {
 			created_at   UNINDEXED,
 			project_uuid UNINDEXED
 		)`,
+		`CREATE TABLE IF NOT EXISTS jobs (
+			id           TEXT PRIMARY KEY,
+			pid          INTEGER NOT NULL,
+			cmd          TEXT NOT NULL,
+			log          TEXT NOT NULL DEFAULT '',
+			workdir      TEXT NOT NULL DEFAULT '',
+			session_id   INTEGER NOT NULL DEFAULT 0,
+			project_uuid TEXT NOT NULL DEFAULT '',
+			started_at   TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS jobs_workdir ON jobs(workdir)`,
 	}
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
