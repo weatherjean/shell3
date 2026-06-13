@@ -26,7 +26,7 @@ func TestBootstrap_FullFlow(t *testing.T) {
 		t.Fatalf("EnsureGlobal: %v", err)
 	}
 
-	for _, dir := range []string{g.Root, g.Projects} {
+	for _, dir := range []string{g.Root, g.Data} {
 		if _, err := os.Stat(dir); err != nil {
 			t.Errorf("global dir missing: %s", dir)
 		}
@@ -50,7 +50,7 @@ func TestBootstrap_FullFlow(t *testing.T) {
 	}
 
 	// ── project bootstrap ─────────────────────────────────────────────────────
-	uuid, err := bootstrap.EnsureProject(l, g, cwd)
+	uuid, err := bootstrap.EnsureProject(l, g)
 	if err != nil {
 		t.Fatalf("EnsureProject: %v", err)
 	}
@@ -77,14 +77,13 @@ func TestBootstrap_FullFlow(t *testing.T) {
 		t.Error(".gitignore missing .ref entry")
 	}
 
-	// Project state dir must exist under ~/.shell3/projects/<uuid>/.
-	proj := paths.NewProject(g, uuid)
-	if _, err := os.Stat(proj.Dir); err != nil {
-		t.Errorf("project state dir missing: %s", proj.Dir)
+	// Canonical data dir lives at <home>/.shell3/data/ (single shared DB location).
+	if _, err := os.Stat(g.Data); err != nil {
+		t.Errorf("canonical data dir missing: %s", g.Data)
 	}
 
 	// ── idempotency ───────────────────────────────────────────────────────────
-	uuid2, err := bootstrap.EnsureProject(l, g, cwd)
+	uuid2, err := bootstrap.EnsureProject(l, g)
 	if err != nil {
 		t.Fatalf("second EnsureProject: %v", err)
 	}

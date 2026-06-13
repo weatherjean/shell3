@@ -32,28 +32,7 @@ import (
 // loads A's history, runs a turn (the drained prompt + assistant ack), and
 // persists a NEW turn under A's session id. The proof is message growth on A.
 func TestDelegation_DormantParentRevived(t *testing.T) {
-	// Stateless fake OpenAI-compat server: every request returns the same SSE
-	// chat-completion ("ack"). Serves A's turn, B's turn, and the revived turn.
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		flusher, _ := w.(http.Flusher)
-		chunks := []string{
-			`{"id":"c1","object":"chat.completion.chunk","model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","content":"ack"},"finish_reason":null}]}`,
-			`{"id":"c1","object":"chat.completion.chunk","model":"test-model","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}`,
-		}
-		for _, c := range chunks {
-			fmt.Fprintf(w, "data: %s\n\n", c)
-			if flusher != nil {
-				flusher.Flush()
-			}
-		}
-		fmt.Fprintf(w, "data: [DONE]\n\n")
-		if flusher != nil {
-			flusher.Flush()
-		}
-	}))
-	defer server.Close()
+	server := fakeAckServer(t)
 
 	homeDir := t.TempDir()
 	// Short workdir: the transport opens a unix socket at
@@ -78,17 +57,7 @@ shell3.agent({ name = "tester", model = "fake", prompt = "you are a test", tools
 		t.Fatal(err)
 	}
 
-	// Build a fresh binary so we test HEAD, not a stale repo-root ./shell3.
-	repoRoot, err := filepath.Abs("..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	bin := filepath.Join(t.TempDir(), "shell3")
-	build := exec.Command("go", "build", "-o", bin, "./cmd/shell3")
-	build.Dir = repoRoot
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
+	bin := buildShell3(t)
 
 	run := func(args ...string) {
 		t.Helper()
@@ -105,7 +74,7 @@ shell3.agent({ name = "tester", model = "fake", prompt = "you are a test", tools
 	// 1. Parent A: create session, run a turn, persist messages, exit → dormant.
 	run("run", "-c", cfgPath, "--agent", "tester", "--id", "a1", "--prompt", "be the parent")
 
-	dbPath := findProjectDB(t, homeDir)
+	dbPath := canonicalDB(t, homeDir)
 
 	// Resolve A's session id: the first (only) session in a fresh db.
 	parentID := firstSessionID(t, dbPath)
@@ -161,17 +130,56 @@ shell3.agent({ name = "tester", model = "fake", prompt = "you are a test", tools
 		beforeCount, afterCount, parentID, dbPath)
 }
 
-// findProjectDB globs the single project db under <home>/.shell3/projects/.
-func findProjectDB(t *testing.T, homeDir string) string {
+// canonicalDB returns the single per-home database path.
+func canonicalDB(t *testing.T, homeDir string) string {
 	t.Helper()
-	matches, err := filepath.Glob(filepath.Join(homeDir, ".shell3", "projects", "*", "shell3.db"))
+	db := filepath.Join(homeDir, ".shell3", "data", "shell3.db")
+	if _, err := os.Stat(db); err != nil {
+		t.Fatalf("canonical db missing: %v", err)
+	}
+	return db
+}
+
+// fakeAckServer returns a stateless SSE server returning an "ack" chat-completion.
+func fakeAckServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		flusher, _ := w.(http.Flusher)
+		chunks := []string{
+			`{"id":"c1","object":"chat.completion.chunk","model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","content":"ack"},"finish_reason":null}]}`,
+			`{"id":"c1","object":"chat.completion.chunk","model":"test-model","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}`,
+		}
+		for _, c := range chunks {
+			fmt.Fprintf(w, "data: %s\n\n", c)
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// buildShell3 builds ./cmd/shell3 to a temp path and returns the binary path.
+func buildShell3(t *testing.T) string {
+	t.Helper()
+	repoRoot, err := filepath.Abs("..")
 	if err != nil {
-		t.Fatalf("glob project db: %v", err)
+		t.Fatal(err)
 	}
-	if len(matches) != 1 {
-		t.Fatalf("expected exactly one project db, found %d: %v", len(matches), matches)
+	bin := filepath.Join(t.TempDir(), "shell3")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/shell3")
+	build.Dir = repoRoot
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
 	}
-	return matches[0]
+	return bin
 }
 
 // roDB opens a read-only *sql.DB on the project file for raw queries that the
@@ -233,4 +241,90 @@ func diagnose(dbPath string) string {
 		out += fmt.Sprintf("  id=%d parent=%d status=%q msgs=%d inbox=%d\n", id, parent, status, msgs, inbox)
 	}
 	return out
+}
+
+// TestDelegation_DivergentChildCwdStillReachesParent proves orchestration is
+// CWD-independent: a child launched from a DIFFERENT directory than the parent
+// (no shared pwd) still reports to and revives the parent, because both open the
+// single canonical DB. Regression test for the silent black-hole bug where a
+// divergent launch CWD routed the child's completion into a separate project DB.
+func TestDelegation_DivergentChildCwdStillReachesParent(t *testing.T) {
+	server := fakeAckServer(t)
+	homeDir := t.TempDir()
+
+	workDir, err := os.MkdirTemp("/tmp", "cwdp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(workDir) })
+	otherDir, err := os.MkdirTemp("/tmp", "cwdo") // divergent child launch dir
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(otherDir) })
+
+	cfgPath := filepath.Join(workDir, "shell3.lua")
+	cfg := fmt.Sprintf(`shell3.model("fake", {
+  base_url = "%s/v1",
+  api_key = "test",
+  model = "test-model",
+  context_window = 4096,
+})
+shell3.agent({ name = "tester", model = "fake", prompt = "you are a test", tools = {} })
+`, server.URL)
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := buildShell3(t)
+	runIn := func(dir string, args ...string) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, bin, args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "HOME="+homeDir)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("run %v (dir=%s) failed: %v\noutput:\n%s", args, dir, err, out)
+		}
+	}
+
+	// Parent A in workDir → dormant.
+	runIn(workDir, "run", "-c", cfgPath, "--agent", "tester", "--id", "a1", "--prompt", "be the parent")
+
+	dbPath := canonicalDB(t, homeDir)
+	parentID := firstSessionID(t, dbPath)
+
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	before, err := st.LoadSessionMessages(parentID)
+	if err != nil {
+		t.Fatalf("load A messages: %v", err)
+	}
+	beforeCount := len(before)
+
+	// Child B launched from otherDir (NOT workDir). Must still reach A via the
+	// single canonical DB and revive it.
+	runIn(otherDir, "run", "-c", cfgPath, "--agent", "tester",
+		"--parent-session", fmt.Sprint(parentID), "--id", "b1", "--prompt", "child task")
+
+	const pollTimeout = 25 * time.Second
+	deadline := time.Now().Add(pollTimeout)
+	afterCount := beforeCount
+	for time.Now().Before(deadline) {
+		if msgs, lerr := st.LoadSessionMessages(parentID); lerr == nil {
+			afterCount = len(msgs)
+			if afterCount > beforeCount {
+				break
+			}
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	if afterCount <= beforeCount {
+		t.Fatalf("parent A NOT revived from divergent child CWD: messages stayed at %d (want > %d)\n%s",
+			afterCount, beforeCount, diagnose(dbPath))
+	}
 }
