@@ -48,15 +48,3 @@ func TestRouteReport_CrashedLiveParentGoesToRevive(t *testing.T) {
 		t.Fatalf("got route=%v sock=%q pid=%d; want revive, no sock, pid=%d", route, sock, pid, deadPID)
 	}
 }
-
-func TestPidAlive(t *testing.T) {
-	if !pidAlive(os.Getpid()) {
-		t.Errorf("pidAlive(self) = false; want true")
-	}
-	if pidAlive(2147483646) {
-		t.Errorf("pidAlive(unused high pid) = true; want false")
-	}
-	if pidAlive(0) {
-		t.Errorf("pidAlive(0) = true; want false")
-	}
-}

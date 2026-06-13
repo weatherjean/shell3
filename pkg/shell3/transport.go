@@ -5,28 +5,16 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"syscall"
 
 	"github.com/weatherjean/shell3/internal/bgjobs"
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/jobstore"
 	"github.com/weatherjean/shell3/internal/notify"
 	"github.com/weatherjean/shell3/internal/paths"
+	"github.com/weatherjean/shell3/internal/proc"
 	"github.com/weatherjean/shell3/internal/socket"
 	"github.com/weatherjean/shell3/internal/store"
 )
-
-// pidAlive reports whether pid names a running process. signal 0 probes without
-// delivering: nil (alive) or EPERM (alive but not ours) → alive; ESRCH → gone.
-// Used to detect a parent stuck "live" after a kill -9 / crash so its reports
-// are not stranded. Unix-only, which pkg/shell3 already is (it imports bgjobs).
-func pidAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	return err == nil || err == syscall.EPERM
-}
 
 type reportRoute int
 
@@ -40,7 +28,7 @@ const (
 // current liveness. Pure decision (no side effects) so it is unit-testable.
 // routeReport returns the delivery route plus the parent's recorded pid. The pid
 // lets reportTo reclaim a parent stuck "live" whose process has died: such a row
-// is NOT routed to the socket (pidAlive is false), so it falls to revive, and
+// is NOT routed to the socket (proc.Alive is false), so it falls to revive, and
 // the pid is handed to ClaimRevive as the dead pid to reclaim.
 func routeReport(st *store.Store, parentID int64) (reportRoute, string, int) {
 	if parentID == 0 {
@@ -50,7 +38,7 @@ func routeReport(st *store.Store, parentID int64) (reportRoute, string, int) {
 	if err != nil {
 		return routeRevive, "", 0 // treat unknown as dormant; revive is the safe path
 	}
-	if status == "live" && sock != "" && pidAlive(pid) {
+	if status == "live" && sock != "" && proc.Alive(pid) {
 		return routeSocket, sock, pid
 	}
 	return routeRevive, "", pid
@@ -97,7 +85,7 @@ func (s *Session) reportTo(st *store.Store, parentID int64, n notify.Notificatio
 		// pass its pid only when confirmed dead, so a healthy parent is never
 		// double-revived. A dormant parent uses deadPID 0 (the dormant branch).
 		reclaimPID := 0
-		if pid > 0 && !pidAlive(pid) {
+		if pid > 0 && !proc.Alive(pid) {
 			reclaimPID = pid
 		}
 		won, err := st.ClaimRevive(parentID, reclaimPID)
