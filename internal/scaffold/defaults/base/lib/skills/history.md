@@ -45,11 +45,11 @@ Most-recent completed session in this project, in order:
 
     sqlite3 'file:<history_db>?mode=ro' "
       SELECT created_at, role, content FROM history
-      WHERE CAST(session_id AS INTEGER) = (
-        SELECT id FROM sessions
-        WHERE ended_at IS NOT NULL AND project_uuid = '<project_uuid>'
-        ORDER BY id DESC LIMIT 1)
-        AND project_uuid = '<project_uuid>'
+      WHERE history.project_uuid = '<project_uuid>'
+        AND CAST(session_id AS INTEGER) = (
+          SELECT id FROM sessions
+          WHERE ended_at IS NOT NULL AND project_uuid = '<project_uuid>'
+          ORDER BY id DESC LIMIT 1)
       ORDER BY rowid ASC LIMIT 100;"
 
 Never open read-write; never `UPDATE`/`INSERT`/`DELETE`/`DROP`; never touch

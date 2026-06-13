@@ -20,11 +20,11 @@ func newListProjectsCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			home, err := os.UserHomeDir()
 			if err != nil {
-				return err
+				return fmt.Errorf("list-projects: resolve home: %w", err)
 			}
 			st, err := store.Open(paths.NewGlobal(home).DB)
 			if err != nil {
-				return err
+				return fmt.Errorf("list-projects: open store: %w", err)
 			}
 			defer func() { _ = st.Close() }()
 			ps, err := st.ListProjects(pageSize, page*pageSize)

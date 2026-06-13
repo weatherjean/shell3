@@ -23,11 +23,11 @@ func newFTSCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			home, err := os.UserHomeDir()
 			if err != nil {
-				return err
+				return fmt.Errorf("fts: resolve home: %w", err)
 			}
 			st, err := store.Open(paths.NewGlobal(home).DB)
 			if err != nil {
-				return err
+				return fmt.Errorf("fts: open store: %w", err)
 			}
 			defer func() { _ = st.Close() }()
 			expr := store.BuildFTSExpr(args, false)

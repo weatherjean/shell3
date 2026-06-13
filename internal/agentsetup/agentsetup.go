@@ -219,8 +219,8 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 // environmentSection renders the host-injected "## Environment" block appended
 // to every agent's system prompt. It exposes the project UUID, the preferred
 // shell3 fts / list-projects commands for history access, and the raw DB path
-// for advanced use. Kept minimal and factual; later phases append more lines
-// (sink path, subagent command, …) as additional "- key: value" rows.
+// for advanced use. Kept minimal and factual; new facts are added as additional
+// "- key: value" rows under this heading.
 //
 // Returns "" when no DB path is resolvable (store-open failed / nil store path),
 // so the section never advertises a query target the agent cannot use.
@@ -368,7 +368,8 @@ func (b *builder) closeAll() {
 }
 
 // resolvePaths resolves the config path, builds the global/local path sets,
-// and ensures the global and project directories exist.
+// and ensures the global root + data directories exist. The project UUID it
+// records is a namespacing key for the single canonical DB, not a directory.
 func (b *builder) resolvePaths() error {
 	configPath, err := ResolveConfigPath(b.opts.ConfigPath, b.opts.CWD, b.opts.HomeDir)
 	if err != nil {
