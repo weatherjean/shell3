@@ -132,8 +132,9 @@ func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
 }
 
 // subagentToAgent adapts a registered subagent to the luacfg.Agent shape that
-// runtimeForAgent/BuildPersonaFor consume. Subagents is left empty on purpose
-// (depth limit 1). Keep in sync with luacfg.Subagent's fields.
+// runtimeForAgent/BuildPersonaFor consume. Subagents is left empty because the
+// source luacfg.Subagent type carries no nested subagents (they are resolved
+// per session, not at load time). Keep in sync with luacfg.Subagent's fields.
 func subagentToAgent(sa luacfg.Subagent) luacfg.Agent {
 	return luacfg.Agent{
 		Name:           sa.Name,

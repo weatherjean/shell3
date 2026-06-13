@@ -38,7 +38,7 @@ type ToolGates struct {
 // exported into the command's environment by its (lowercase) name and the
 // command (a bash template) runs with that env. Secrets names each .env key to
 // also export — kept out of the command string. Background dispatches via
-// bash_bg (sink-reported) instead of blocking. There is no Lua handler.
+// bash_bg instead of blocking. There is no Lua handler.
 type CustomTool struct {
 	Name, Description string
 	Parameters        map[string]any

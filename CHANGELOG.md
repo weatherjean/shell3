@@ -12,30 +12,41 @@ Until v1.0.0, minor versions may contain breaking changes.
 
 A branch-wide collapse of the tool surface onto `bash` + `edit_file`. The agent
 now acts through the shell; everything else is a file it reads or a command it
-runs, coordinated through one small per-session notification channel (the
-**sink**). See `docs/dev/superpowers/specs/2026-06-11-bash-first-design.md`.
+runs, coordinated through short per-session *pointer* notifications. See
+`docs/dev/superpowers/specs/2026-06-11-bash-first-design.md`.
 
 #### Added
 
-- **Sink notification channel** (`internal/sink`): a per-session append-only
-  JSONL file carrying short *pointer* notifications (`bg_done`, `agent_done`),
-  never full payloads. A host watcher in `pkg/shell3.Session` tails it by byte
-  offset and, for each new line, injects a one-line pointer into the agent's
-  next turn (and wakes the session if idle) — the agent `cat`s the referenced
-  transcript/log itself, keeping context small. Cleaned up on `Close`.
-- **`bash_bg` reports to the sink:** the reaper writes a `bg_done` notification
+- **Durable subagent completion transport.** A subagent reports completion up
+  its parent pointer over a per-session **Unix-domain socket** when the parent
+  is live (`internal/socket`), or a **SQLite inbox + revive** when the parent
+  has gone dormant — the dormant parent is revived via `shell3 run --resume`
+  with its inbox drained. Notifications are short *pointers* (`bg_done`,
+  `agent_done`: id / status / transcript path / ≤200-char preview), never full
+  payloads; the host injects a one-line pointer into the agent's next turn (and
+  wakes the session if idle) and the agent `cat`s the referenced transcript/log
+  itself, keeping context small. (`internal/notify`, `pkg/shell3` transport.)
+- **`bash_bg` reports completion:** the reaper records a `bg_done` pointer
   (id / exit / log path / cmd) on child exit. New `notify_on_exit` arg (default
   `true`); subagent spawns pass `false` so the only notification is the child's
   own `agent_done`.
 - **Subagents = a backgrounded `shell3`.** A subagent is now a `shell3`
   subprocess launched via `bash_bg` that self-reports an `agent_done` pointer
-  (id / status / transcript / ≤200-char preview) to the parent's sink. The host
-  injects a "## Delegation" prompt fragment at session start listing declared
-  subagents and the exact templated `bash_bg` spawn command. New `shell3 run`
-  flags: `--agent <name>`, `--append-sinkfile <path>`, `--id <id>`, and
-  `--no-subagents` (suppresses the delegation fragment so children can't recurse
-  — depth-1). `shell3.subagent{}` declarations are kept (they name the headless
-  agent configs); only the spawn *mechanism* changed.
+  to its parent over the transport above. The host injects a "## Delegation"
+  prompt fragment at session start listing declared subagents and the exact
+  templated `bash_bg` spawn command. New `shell3 run` flags: `--agent <name>`,
+  `--id <id>`, `--resume`, and `--parent-session`. Delegation is multi-level
+  (no depth gate). `shell3.subagent{}` declarations are kept (they name the
+  headless agent configs); only the spawn *mechanism* changed.
+- **One canonical SQLite database.** History, sessions, and background jobs all
+  live in a single `~/.shell3/data/shell3.db` (WAL), tagged by `project_uuid`
+  and `workdir`, instead of a per-project directory — so orchestration is
+  independent of the working directory a subagent happens to run in. Read-only
+  access is via the `shell3 fts` / `list-projects` / `list-sessions` /
+  `read-session` / `jobs` CLIs (each accepts `--config` for DB resolution and
+  paginates). Background jobs moved from the old `bg.json` file registry into a
+  self-pruning `jobs` table. Each session records its `config_path` so
+  resume/revive prefer the config it ran under (an explicit `--config` wins).
 - **Host-enforced auto-compaction:** new `compact_at` token threshold on the
   model config. Before a user turn, if the last prompt crossed the threshold,
   shell3 interrupts → compacts the history into the structured summary
@@ -77,7 +88,8 @@ runs, coordinated through one small per-session notification channel (the
   fail to load (strict `checkKeys`).
 - **Cron dispatch** now execs a tracked `shell3 --agent X --out <t>` subprocess
   (joined by `Runtime.Close`) and emits an operator `Notice` — it does not route
-  through the sink watcher. The `cron.Dispatcher` interface is preserved.
+  through the subagent completion transport. The `cron.Dispatcher` interface is
+  preserved.
 - **`/stop`** no longer calls `CancelSubagents()`: model-spawned subagents are
   bg jobs, already killed by `bgjobs.KillAll`.
 

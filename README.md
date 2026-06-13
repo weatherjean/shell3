@@ -44,7 +44,7 @@ shell3 "audit deps" --out audit.jsonl   # headless, with a JSONL audit log
 - **Embeddable, and a runtime.** Everything the TUI does is available as a Go
   library via [`pkg/shell3`](pkg/shell3) — one-shot `Run`, a persistent
   `Session`, or a `Runtime` hosting many named sessions for an always-on bot
-  (steering, a wake bus, inbound media, and sink-delivered subagents).
+  (steering, a wake bus, inbound media, and self-reporting subagents).
 
 ## Install
 
@@ -181,9 +181,11 @@ declare specialists with `shell3.subagent{name, description, …}` and list them
 per-agent via `tools = { subagents = { … } }`; the host injects a "## Delegation"
 fragment with the exact `bash_bg` command to spawn one. A subagent is a
 backgrounded `shell3` subprocess that runs the chosen agent on a self-contained
-task and self-reports completion to the session's per-session JSONL **sink**; the
-host watcher injects a short pointer (with a transcript path the parent `cat`s on
-demand) and wakes the next turn. See the
+task and self-reports completion up its parent pointer — over a per-session
+Unix-domain socket if the parent is live, or a SQLite inbox + revive if the
+parent has gone dormant. The host turns that into a short pointer notification
+(with a transcript path the parent `cat`s on demand) and wakes the next turn.
+See the
 [package docs](https://pkg.go.dev/github.com/weatherjean/shell3/pkg/shell3).
 
 The TUI rides the same machinery: type while the agent is working and press
@@ -192,11 +194,18 @@ a dim notice that auto-wakes the next turn.
 
 ## Removing a project's shell3 data
 
+Project-local state (the project UUID, subagent transcripts, proxy logs) lives
+in the project's `.shell3/` directory:
+
 ```sh
-cat .shell3/.ref                  # the project UUID
-rm -rf ~/.shell3/projects/<uuid>  # project state in the global dir
 rm -rf .shell3                    # project-local state
 ```
+
+Conversation history, sessions, and background jobs are not per-project files —
+they live in the single shared database at `~/.shell3/data/shell3.db`, tagged
+with the project UUID (`cat .shell3/.ref`). Removing the directory above leaves
+those rows in place; delete the whole `~/.shell3/data/shell3.db` to wipe all
+history across every project.
 
 ## Security
 

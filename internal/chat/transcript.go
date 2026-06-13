@@ -10,7 +10,7 @@ import (
 // TranscriptResult summarizes the outcome of a headless run read back from its
 // --out JSONL transcript: the final assistant message text and whether the run
 // recorded a terminal error. It is the bridge a subprocess host uses to turn a
-// child run's transcript into a sink agent_done (status + preview) or a cron
+// child run's transcript into an agent_done pointer (status + preview) or a cron
 // Notice (the result text), without re-streaming the conversation.
 type TranscriptResult struct {
 	// FinalText is the text of the last assistant_message event (the run's
