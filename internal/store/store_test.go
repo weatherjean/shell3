@@ -154,6 +154,37 @@ func TestStore_HistoryGet_PrevNext(t *testing.T) {
 	}
 }
 
+func TestStore_HistorySearchExpr_ExcludesToolTurns(t *testing.T) {
+	st, _ := store.Open(":memory:")
+	defer func() { _ = st.Close() }()
+
+	id, _ := st.StartSession("", "")
+	if err := st.AppendHistory(id, "user", "remember zebraterm please"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendHistory(id, "tool", "bash: $ echo zebraterm"); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := st.HistorySearchExpr("zebraterm", "", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sawUser bool
+	for _, h := range res.Hits {
+		if h.Role == "tool" {
+			t.Errorf("tool turn leaked into FTS search: %+v", h)
+		}
+		if h.Role == "user" {
+			sawUser = true
+		}
+	}
+	if !sawUser {
+		t.Fatalf("expected user hit for zebraterm, got %d hits: %+v", len(res.Hits), res.Hits)
+	}
+}
+
 func TestStore_HistorySearch_ReturnsLocator(t *testing.T) {
 	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
 	defer func() { _ = st.Close() }()

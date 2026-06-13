@@ -447,6 +447,7 @@ func (s *Store) HistorySearchExpr(expr, projectUUID string, limit, offset int) (
 		FROM history
 		WHERE history MATCH ?
 		  AND (? = '' OR project_uuid = ?)
+		  AND role <> 'tool'
 		ORDER BY rank
 		LIMIT ? OFFSET ?
 	`, expr, projectUUID, projectUUID, limit, offset)
