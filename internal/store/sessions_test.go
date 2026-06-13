@@ -49,13 +49,53 @@ func TestSession_ReviveClaim_SingleWinner(t *testing.T) {
 	id, _ := st.StartSession("", "")
 	_ = st.SetLiveness(id, 0, "", "dormant")
 
-	won1, err := st.ClaimRevive(id)
+	won1, err := st.ClaimRevive(id, 0)
 	if err != nil {
 		t.Fatalf("claim1: %v", err)
 	}
-	won2, _ := st.ClaimRevive(id)
+	won2, _ := st.ClaimRevive(id, 0)
 	if !won1 || won2 {
 		t.Fatalf("expected exactly one winner; won1=%v won2=%v", won1, won2)
+	}
+}
+
+// TestSession_ReviveClaim_ReclaimsCrashedLiveParent: a parent that registered
+// "live" then died without cleanup (kill -9) stays "live" with a stale pid.
+// A reporter that confirms the pid is dead must be able to reclaim it, else
+// every report to it strands (ClaimRevive used to fire only on "dormant").
+func TestSession_ReviveClaim_ReclaimsCrashedLiveParent(t *testing.T) {
+	st, _ := Open(":memory:")
+	defer st.Close()
+	id, _ := st.StartSession("", "")
+	const deadPID = 2147483646 // not a running process
+	_ = st.SetLiveness(id, deadPID, "/tmp/p.sock", "live")
+
+	won, err := st.ClaimRevive(id, deadPID)
+	if err != nil {
+		t.Fatalf("reclaim: %v", err)
+	}
+	if !won {
+		t.Fatal("expected to reclaim a crashed-but-live parent")
+	}
+	if again, _ := st.ClaimRevive(id, deadPID); again {
+		t.Fatal("reclaim must elect a single winner (second claim won)")
+	}
+}
+
+// TestSession_ReviveClaim_LeavesHealthyLiveParent: a "live" parent must NOT be
+// reclaimed when the reporter has no dead pid to offer (deadPID 0) — a healthy
+// parent is reached over its socket, never double-revived.
+func TestSession_ReviveClaim_LeavesHealthyLiveParent(t *testing.T) {
+	st, _ := Open(":memory:")
+	defer st.Close()
+	id, _ := st.StartSession("", "")
+	_ = st.SetLiveness(id, 4242, "/tmp/p.sock", "live")
+
+	if won, err := st.ClaimRevive(id, 0); err != nil || won {
+		t.Fatalf("must not reclaim a live parent with deadPID 0; won=%v err=%v", won, err)
+	}
+	if won, _ := st.ClaimRevive(id, 999999); won {
+		t.Fatal("must not reclaim a live parent whose pid does not match deadPID")
 	}
 }
 

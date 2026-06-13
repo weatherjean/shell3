@@ -130,6 +130,95 @@ shell3.agent({ name = "tester", model = "fake", prompt = "you are a test", tools
 		beforeCount, afterCount, parentID, dbPath)
 }
 
+// TestDelegation_CrashedLiveParentRevived proves the crash-strand fix end to
+// end: a parent that registered "live" then died WITHOUT cleanup (kill -9 /
+// OOM / reboot) leaves a stale "live" row with a dead pid. Before the fix every
+// child report to it stranded (ClaimRevive only fired on "dormant"). Now the
+// reporter detects the pid is dead, reclaims the row, and revives the parent.
+// We simulate the crash by stamping a live row with an unused pid, then run a
+// real child process that must revive A (proven by A's message growth).
+func TestDelegation_CrashedLiveParentRevived(t *testing.T) {
+	server := fakeAckServer(t)
+	homeDir := t.TempDir()
+	workDir, err := os.MkdirTemp("/tmp", "crash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(workDir) })
+
+	cfgPath := filepath.Join(workDir, "shell3.lua")
+	cfg := fmt.Sprintf(`shell3.model("fake", {
+  base_url = "%s/v1",
+  api_key = "test",
+  model = "test-model",
+  context_window = 4096,
+})
+shell3.agent({ name = "tester", model = "fake", prompt = "you are a test", tools = {} })
+`, server.URL)
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := buildShell3(t)
+	run := func(dir string, args ...string) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, bin, args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "HOME="+homeDir)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("run %v failed: %v\noutput:\n%s", args, err, out)
+		}
+	}
+
+	// Parent A runs and exits.
+	run(workDir, "run", "-c", cfgPath, "--agent", "tester", "--id", "a1", "--prompt", "be the parent")
+
+	dbPath := canonicalDB(t, homeDir)
+	parentID := firstSessionID(t, dbPath)
+
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	before, err := st.LoadSessionMessages(parentID)
+	if err != nil {
+		t.Fatalf("load A messages: %v", err)
+	}
+	beforeCount := len(before)
+
+	// Simulate a crash: A is stuck "live" with a pid that is not running.
+	const deadPID = 2147483646
+	sock := filepath.Join(workDir, ".shell3", "sock", fmt.Sprintf("%d.sock", parentID))
+	if err := st.SetLiveness(parentID, deadPID, sock, "live"); err != nil {
+		t.Fatalf("seed crashed-live state: %v", err)
+	}
+
+	// Child B reports to the stuck-live A. The reporter must detect the dead pid,
+	// reclaim the row, and revive A.
+	run(workDir, "run", "-c", cfgPath, "--agent", "tester",
+		"--parent-session", fmt.Sprint(parentID), "--id", "b1", "--prompt", "child task")
+
+	const pollTimeout = 25 * time.Second
+	deadline := time.Now().Add(pollTimeout)
+	afterCount := beforeCount
+	for time.Now().Before(deadline) {
+		if msgs, lerr := st.LoadSessionMessages(parentID); lerr == nil {
+			afterCount = len(msgs)
+			if afterCount > beforeCount {
+				break
+			}
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	if afterCount <= beforeCount {
+		t.Fatalf("crashed-live parent A was NOT revived: messages stayed at %d (want > %d)\n%s",
+			afterCount, beforeCount, diagnose(dbPath))
+	}
+}
+
 // canonicalDB returns the single per-home database path.
 func canonicalDB(t *testing.T, homeDir string) string {
 	t.Helper()

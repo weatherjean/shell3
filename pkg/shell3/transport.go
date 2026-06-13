@@ -5,13 +5,27 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"syscall"
 
 	"github.com/weatherjean/shell3/internal/bgjobs"
+	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/notify"
 	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/socket"
 	"github.com/weatherjean/shell3/internal/store"
 )
+
+// pidAlive reports whether pid names a running process. signal 0 probes without
+// delivering: nil (alive) or EPERM (alive but not ours) → alive; ESRCH → gone.
+// Used to detect a parent stuck "live" after a kill -9 / crash so its reports
+// are not stranded. Unix-only, which pkg/shell3 already is (it imports bgjobs).
+func pidAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || err == syscall.EPERM
+}
 
 type reportRoute int
 
@@ -23,18 +37,22 @@ const (
 
 // routeReport decides how to deliver a completion to parentID based on its
 // current liveness. Pure decision (no side effects) so it is unit-testable.
-func routeReport(st *store.Store, parentID int64) (reportRoute, string) {
+// routeReport returns the delivery route plus the parent's recorded pid. The pid
+// lets reportTo reclaim a parent stuck "live" whose process has died: such a row
+// is NOT routed to the socket (pidAlive is false), so it falls to revive, and
+// the pid is handed to ClaimRevive as the dead pid to reclaim.
+func routeReport(st *store.Store, parentID int64) (reportRoute, string, int) {
 	if parentID == 0 {
-		return routeNone, ""
+		return routeNone, "", 0
 	}
-	_, sock, status, err := st.Liveness(parentID)
+	pid, sock, status, err := st.Liveness(parentID)
 	if err != nil {
-		return routeRevive, "" // treat unknown as dormant; revive is the safe path
+		return routeRevive, "", 0 // treat unknown as dormant; revive is the safe path
 	}
-	if status == "live" && sock != "" {
-		return routeSocket, sock
+	if status == "live" && sock != "" && pidAlive(pid) {
+		return routeSocket, sock, pid
 	}
-	return routeRevive, ""
+	return routeRevive, "", pid
 }
 
 // report delivers this session's completion notification to its parent: live
@@ -57,7 +75,7 @@ func (s *Session) reportTo(st *store.Store, parentID int64, n notify.Notificatio
 	if n.Origin == 0 {
 		n.Origin = s.sess.ID()
 	}
-	route, sock := routeReport(st, parentID)
+	route, sock, pid := routeReport(st, parentID)
 	switch route {
 	case routeSocket:
 		payload, _ := json.Marshal(n)
@@ -69,15 +87,28 @@ func (s *Session) reportTo(st *store.Store, parentID int64, n notify.Notificatio
 		fallthrough
 	case routeRevive:
 		payload, _ := json.Marshal(n)
-		_ = st.AppendInbox(parentID, payload)
-		won, err := st.ClaimRevive(parentID)
+		if err := st.AppendInbox(parentID, payload); err != nil {
+			// A dropped inbox row is a lost result — make the failure visible
+			// rather than silently black-holing it (the original-bug failure mode).
+			chat.LogOrNoop(s.cfg.Log).Warn("report: append inbox failed", "parent", parentID, "error", err)
+		}
+		// Reclaim a parent stuck "live" whose process is gone (kill -9 / crash):
+		// pass its pid only when confirmed dead, so a healthy parent is never
+		// double-revived. A dormant parent uses deadPID 0 (the dormant branch).
+		reclaimPID := 0
+		if pid > 0 && !pidAlive(pid) {
+			reclaimPID = pid
+		}
+		won, err := st.ClaimRevive(parentID, reclaimPID)
 		if err == nil && won {
 			if spawnErr := s.spawnRevive(st, parentID); spawnErr == nil {
 				return
 			}
 			// Revive spawn failed: release the claim and escalate one hop so the
 			// result is not black-holed.
-			_ = st.SetLiveness(parentID, 0, "", "dormant")
+			if serr := st.SetLiveness(parentID, 0, "", "dormant"); serr != nil {
+				chat.LogOrNoop(s.cfg.Log).Warn("report: release revive claim failed", "parent", parentID, "error", serr)
+			}
 		}
 		if err == nil && !won {
 			return // winner will deliver; our inbox append is enough
