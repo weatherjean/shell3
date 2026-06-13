@@ -1,0 +1,52 @@
+//go:build unix
+
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/spf13/cobra"
+
+	"github.com/weatherjean/shell3/internal/paths"
+	"github.com/weatherjean/shell3/internal/store"
+)
+
+func newListSessionsCommand() *cobra.Command {
+	var projectID string
+	var page, pageSize int
+	cmd := &cobra.Command{
+		Use:   "list-sessions",
+		Short: "List conversation sessions (newest first), optionally scoped to a project.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("list-sessions: resolve home: %w", err)
+			}
+			st, err := store.Open(paths.NewGlobal(home).DB)
+			if err != nil {
+				return fmt.Errorf("list-sessions: open store: %w", err)
+			}
+			defer func() { _ = st.Close() }()
+			sessions, err := st.ListSessionsPage(projectID, pageSize, page*pageSize)
+			if err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			for _, s := range sessions {
+				parent := "-"
+				if s.ParentID != 0 {
+					parent = fmt.Sprintf("%d", s.ParentID)
+				}
+				fmt.Fprintf(out, "%d\t%s\tparent:%s\t%d msgs\t%s\t%s\n",
+					s.ID, s.Status, parent, s.NumMsgs,
+					s.StartedAt.Format("2006-01-02T15:04:05Z"), s.Preview)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&projectID, "project-id", "", "Scope to one project UUID (default: all projects).")
+	cmd.Flags().IntVar(&page, "page", 0, "Zero-based page index.")
+	cmd.Flags().IntVar(&pageSize, "page-size", 50, "Sessions per page.")
+	return cmd
+}

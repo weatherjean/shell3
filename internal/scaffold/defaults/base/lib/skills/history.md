@@ -31,6 +31,15 @@ query below, using its session-id.
 
 Output columns: uuid, workdir, session count, last activity.
 
+## Listing sessions
+
+    shell3 list-sessions --project-id <project_uuid>   # this project, newest first
+    shell3 list-sessions                               # ALL projects
+    shell3 list-sessions --page 1
+
+Output columns: session-id, status, parent (subagent's parent, or `-`), message
+count, started, preview of the first user message.
+
 ## Advanced: raw replay
 
 To read a full past session in chronological order, use `history_db` from

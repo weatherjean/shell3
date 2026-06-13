@@ -234,6 +234,7 @@ func (p *Parts) environmentSection() string {
 	fmt.Fprintf(&b, "- project_uuid: %s\n", p.uuid)
 	fmt.Fprintf(&b, "- search history: `shell3 fts \"<query>\" --project-id %s` (omit --project-id to search all projects; --page N to page; see the `history` skill)\n", p.uuid)
 	fmt.Fprintf(&b, "- list projects: `shell3 list-projects` (--page N to page)\n")
+	fmt.Fprintf(&b, "- list sessions: `shell3 list-sessions --project-id %s` (omit --project-id for all; --page N to page)\n", p.uuid)
 	fmt.Fprintf(&b, "- history_db (advanced raw replay only): %s (open with `sqlite3 'file:%s?mode=ro'`)\n",
 		p.dbPath, p.dbPath)
 	return b.String()

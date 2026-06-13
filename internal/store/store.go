@@ -144,6 +144,10 @@ type SessionMeta struct {
 	Summary   string
 	NumMsgs   int
 	Preview   string // first user message, truncated
+	// Status and ParentID are populated by ListSessionsPage (the `shell3
+	// list-sessions` CLI path); the dashboard's ListSessions leaves them zero.
+	Status   string
+	ParentID int64
 }
 
 // ListSessions returns up to limit most-recent sessions (newest first), each
@@ -171,6 +175,49 @@ func (s *Store) ListSessions(limit int) ([]SessionMeta, error) {
 		var started, ended, preview string
 		if err := rows.Scan(&m.ID, &started, &ended, &m.Summary, &m.NumMsgs, &preview); err != nil {
 			return nil, fmt.Errorf("store: list sessions: scan: %w", err)
+		}
+		m.StartedAt = parseRFC3339(started)
+		if ended != "" {
+			m.EndedAt = parseRFC3339(ended)
+		}
+		m.Preview = truncateRunes(preview, 120)
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// ListSessionsPage returns most-recent sessions (newest first) for the `shell3
+// list-sessions` CLI: optionally scoped to one project (projectUUID ""=all) and
+// paginated via limit/offset. Each row carries status + parent in addition to
+// the dashboard fields, so the listing doubles as resume/discovery (which
+// sessions are dormant, which were spawned as subagents). Kept separate from
+// ListSessions so the dashboard read path is unaffected.
+func (s *Store) ListSessionsPage(projectUUID string, limit, offset int) ([]SessionMeta, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.Query(`
+		SELECT s.id, s.started_at, COALESCE(s.ended_at,''), COALESCE(s.summary,''),
+		       COALESCE(s.status,''), COALESCE(s.parent_session_id,0),
+		       (SELECT COUNT(*) FROM history h WHERE h.session_id = s.id),
+		       COALESCE((SELECT h.content FROM history h
+		                 WHERE h.session_id = s.id AND h.role='user'
+		                 ORDER BY h.rowid ASC LIMIT 1), '')
+		FROM sessions s
+		WHERE (? = '' OR s.project_uuid = ?)
+		ORDER BY s.id DESC
+		LIMIT ? OFFSET ?`, projectUUID, projectUUID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("store: list sessions page: %w", err)
+	}
+	defer rows.Close()
+	var out []SessionMeta
+	for rows.Next() {
+		var m SessionMeta
+		var started, ended, preview string
+		if err := rows.Scan(&m.ID, &started, &ended, &m.Summary, &m.Status, &m.ParentID,
+			&m.NumMsgs, &preview); err != nil {
+			return nil, fmt.Errorf("store: list sessions page: scan: %w", err)
 		}
 		m.StartedAt = parseRFC3339(started)
 		if ended != "" {
