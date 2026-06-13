@@ -3,7 +3,8 @@
 Minimal Unix-composable coding agent written in Go.
 
 **Bash-first.** The agent's verbs are `bash` and `edit_file`; everything else is
-a file it reads or a command it runs (history is a read-only SQLite query, a
+a file it reads or a command it runs (history and background jobs are read-only
+queries via the `shell3 fts`/`list-projects`/`list-sessions`/`jobs` CLIs, a
 subagent is a backgrounded `shell3` subprocess). A subagent reports completion
 to its parent over a per-session **Unix-domain socket** (live parent) or a
 **SQLite inbox + revive** (dormant parent), which the host turns into short
@@ -36,9 +37,9 @@ internal/adapter/openai/  OpenAI-compatible LLM adapter
 internal/modelproxy/   run_proxy spawner (starts a model's proxy command on activation)
 internal/paths/        global + local path resolution
 internal/ref/          project UUID (.shell3/.ref)
-internal/store/        SQLite history + sessions (WAL; read-only-queryable via the `history` bash skill)
+internal/store/        SQLite history + sessions (WAL; read-only via the `shell3 fts`/`list-projects`/`list-sessions`/`jobs` CLIs and the `history` skill)
 internal/edittool/     edit_file tool implementation (Go port of opencode's str-replace)
-internal/bgjobs/       background job tracking (.shell3/bg.json); reaper reaps the process (no notification)
+internal/bgjobs/       background job tracking (jobs table in the canonical SQLite DB; self-pruning on list); reaper reaps the process (no notification)
 internal/notify/       Notification type (bg_done / agent_done pointers) shared by transport + inbox
 internal/socket/       per-session Unix-domain socket (live-parent completion delivery)
 internal/tui/          terminal UI (interactive + headless once)

@@ -233,9 +233,9 @@ func TestEnsureGitignoreWholeLineMatch(t *testing.T) {
 	}
 }
 
-// TestEnsureGitignoreBGJobs verifies bg.json is ignored locally and that
-// repeated runs do not duplicate either .ref or bg.json. (F4 + idempotency)
-func TestEnsureGitignoreBGJobs(t *testing.T) {
+// TestEnsureGitignoreProxyLogs verifies proxy-*.log is ignored locally and that
+// repeated runs do not duplicate either .ref or proxy-*.log. (F4 + idempotency)
+func TestEnsureGitignoreProxyLogs(t *testing.T) {
 	tmp := t.TempDir()
 	home := filepath.Join(tmp, "home")
 	cwd := filepath.Join(tmp, "project")
@@ -254,14 +254,14 @@ func TestEnsureGitignoreBGJobs(t *testing.T) {
 
 	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
 	content := string(gi)
-	if !hasLine(content, "bg.json") {
-		t.Fatalf("bg.json not present as its own line:\n%s", content)
+	if !hasLine(content, "proxy-*.log") {
+		t.Fatalf("proxy-*.log not present as its own line:\n%s", content)
 	}
 	if !hasLine(content, ".ref") {
 		t.Fatalf(".ref not present as its own line:\n%s", content)
 	}
-	if n := strings.Count(content, "bg.json"); n != 1 {
-		t.Errorf("bg.json appears %d times, want 1:\n%s", n, content)
+	if n := strings.Count(content, "proxy-*.log"); n != 1 {
+		t.Errorf("proxy-*.log appears %d times, want 1:\n%s", n, content)
 	}
 	if n := strings.Count(content, ".ref"); n != 1 {
 		t.Errorf(".ref appears %d times, want 1:\n%s", n, content)
@@ -298,8 +298,8 @@ func TestEnsureGitignoreNoTrailingNewline(t *testing.T) {
 	if !hasLine(content, ".ref") {
 		t.Fatalf(".ref not present as its own line:\n%s", content)
 	}
-	if !hasLine(content, "bg.json") {
-		t.Fatalf("bg.json not present as its own line:\n%s", content)
+	if !hasLine(content, "proxy-*.log") {
+		t.Fatalf("proxy-*.log not present as its own line:\n%s", content)
 	}
 }
 
@@ -335,7 +335,7 @@ func TestEnsureGitignoreAddsMissingEntryIndependently(t *testing.T) {
 	_ = bootstrap.EnsureGlobal(g)
 
 	_ = os.MkdirAll(l.Root, 0755)
-	// .ref already present as a whole line; bg.json must still be added.
+	// .ref already present as a whole line; proxy-*.log must still be added.
 	_ = os.WriteFile(filepath.Join(l.Root, ".gitignore"), []byte(".ref\n"), 0644)
 
 	if _, err := bootstrap.EnsureProject(l, g); err != nil {
@@ -344,8 +344,8 @@ func TestEnsureGitignoreAddsMissingEntryIndependently(t *testing.T) {
 
 	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
 	content := string(gi)
-	if !hasLine(content, "bg.json") {
-		t.Fatalf("bg.json not added when .ref already present:\n%s", content)
+	if !hasLine(content, "proxy-*.log") {
+		t.Fatalf("proxy-*.log not added when .ref already present:\n%s", content)
 	}
 	if n := strings.Count(content, ".ref"); n != 1 {
 		t.Errorf(".ref duplicated: appears %d times:\n%s", n, content)

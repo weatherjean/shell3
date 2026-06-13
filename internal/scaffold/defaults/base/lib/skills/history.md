@@ -1,6 +1,6 @@
 ---
 name: history
-description: Search and read past conversations from the shell3 SQLite store via shell3 fts / shell3 list-projects commands (read-only).
+description: Search and read past conversations and list background jobs from the shell3 SQLite store via shell3 fts / list-projects / list-sessions / jobs commands (read-only).
 ---
 
 # History — search and read past conversations
@@ -39,6 +39,16 @@ Output columns: uuid, workdir, session count, last activity.
 
 Output columns: session-id, status, parent (subagent's parent, or `-`), message
 count, started, preview of the first user message.
+
+## Background jobs
+
+    shell3 jobs            # tracked background jobs for the current workdir
+    shell3 jobs --page 1
+
+Lists the background jobs (`bash_bg` runs and subagents) tracked for this
+session's workdir. Read-only; dead jobs are auto-pruned on listing.
+
+Output columns: id, pid, log, cmd.
 
 ## Advanced: raw replay
 
