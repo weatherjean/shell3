@@ -50,6 +50,12 @@ session's workdir. Read-only; dead jobs are auto-pruned on listing.
 
 Output columns: id, pid, log, cmd.
 
+`shell3 jobs` only shows jobs that are still running — a finished job (e.g. a
+short subagent) is pruned and won't appear, so an empty list usually means the
+work already completed, not that it was never tracked. To see subagents that
+have finished, use `shell3 list-sessions`: a delegated subagent is a session
+whose `parent` column points at the session that spawned it.
+
 ## Reading a full session
 
 To read a past session's full transcript in chronological order (oldest-first):
