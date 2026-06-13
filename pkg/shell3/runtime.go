@@ -235,6 +235,9 @@ func (rt *Runtime) Telegram() TelegramConfig { return rt.telegram }
 // Cron returns the parsed shell3.cron jobs (nil if absent).
 func (rt *Runtime) Cron() []CronJob { return rt.cron }
 
+// Store returns the shared canonical store (nil if unavailable).
+func (rt *Runtime) Store() *store.Store { return rt.store }
+
 // ConfigPath returns the absolute path of the shell3.lua this runtime was built
 // from. An empty or relative spec path is resolved exactly the way construction
 // (and Reload) resolves it — ./shell3.lua, else ~/.shell3/shell3.lua — so the

@@ -15,9 +15,8 @@ type Global struct {
 
 // Local holds paths under ./.shell3/ (project-scoped, committed to repo).
 type Local struct {
-	Root   string // ./.shell3/
-	Ref    string // ./.shell3/.ref  (gitignored)
-	BGJobs string // ./.shell3/bg.json (gitignored)
+	Root string // ./.shell3/
+	Ref  string // ./.shell3/.ref  (gitignored)
 }
 
 // NewGlobal returns a Global path set rooted at homeDir/.shell3/.
@@ -36,9 +35,8 @@ func NewGlobal(homeDir string) Global {
 func NewLocal(cwd string) Local {
 	root := filepath.Join(cwd, ".shell3")
 	return Local{
-		Root:   root,
-		Ref:    filepath.Join(root, ".ref"),
-		BGJobs: filepath.Join(root, "bg.json"),
+		Root: root,
+		Ref:  filepath.Join(root, ".ref"),
 	}
 }
 

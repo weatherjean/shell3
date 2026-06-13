@@ -9,6 +9,7 @@ import (
 
 	"github.com/weatherjean/shell3/internal/bgjobs"
 	"github.com/weatherjean/shell3/internal/chat"
+	"github.com/weatherjean/shell3/internal/jobstore"
 	"github.com/weatherjean/shell3/internal/notify"
 	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/socket"
@@ -166,8 +167,8 @@ func (s *Session) spawnRevive(st *store.Store, parentID int64) error {
 	if cfgPath != "" {
 		argv = append(argv, "--config", cfgPath)
 	}
-	_, err = bgjobs.Start(argv, "revive session "+fmt.Sprintf("%d", parentID),
-		s.cfg.WorkDir, nil, "", false)
+	_, err = bgjobs.Start(jobstore.New(st), argv, "revive session "+fmt.Sprintf("%d", parentID),
+		s.cfg.WorkDir, nil)
 	return err
 }
 

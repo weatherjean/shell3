@@ -30,9 +30,6 @@ func TestLocal(t *testing.T) {
 	if l.Ref != "/work/project/.shell3/.ref" {
 		t.Fatalf("Ref: got %q", l.Ref)
 	}
-	if l.BGJobs != "/work/project/.shell3/bg.json" {
-		t.Fatalf("BGJobs: got %q", l.BGJobs)
-	}
 }
 
 func TestBGLog(t *testing.T) {

@@ -1,15 +1,63 @@
 package bgjobs
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
 )
+
+// fakeRegistry is an in-memory bgjobs.Registry for tests. addErr, when set,
+// makes Add fail (to exercise teardown).
+type fakeRegistry struct {
+	mu     sync.Mutex
+	jobs   []Job
+	addErr error
+}
+
+func (r *fakeRegistry) Add(j Job) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.addErr != nil {
+		return r.addErr
+	}
+	r.jobs = append(r.jobs, j)
+	return nil
+}
+
+func (r *fakeRegistry) List(workdir string) ([]Job, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]Job, 0, len(r.jobs))
+	for _, j := range r.jobs {
+		if j.Workdir == workdir {
+			out = append(out, j)
+		}
+	}
+	return out, nil
+}
+
+func (r *fakeRegistry) Clear(workdir string) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	kept := r.jobs[:0]
+	n := 0
+	for _, j := range r.jobs {
+		if j.Workdir == workdir {
+			n++
+			continue
+		}
+		kept = append(kept, j)
+	}
+	r.jobs = kept
+	return n, nil
+}
+
+var _ Registry = (*fakeRegistry)(nil)
 
 // alive returns true if pid responds to signal 0 (process exists and we
 // can signal it). Used to assert detachment / liveness in tests.
@@ -31,7 +79,7 @@ func waitDead(pid int, timeout time.Duration) bool {
 
 func TestStart_writesLogAndExits(t *testing.T) {
 	wd := t.TempDir()
-	job, err := Start([]string{"bash", "-c", "echo hi-from-bg"}, "echo hi-from-bg", wd, nil, "", true)
+	job, err := Start(&fakeRegistry{}, []string{"bash", "-c", "echo hi-from-bg"}, "echo hi-from-bg", wd, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,33 +101,34 @@ func TestStart_writesLogAndExits(t *testing.T) {
 	t.Cleanup(func() { os.Remove(job.Log) })
 }
 
-func TestStart_appendsToRegistry(t *testing.T) {
+func TestStart_recordsInRegistry(t *testing.T) {
 	wd := t.TempDir()
-	j1, err := Start([]string{"bash", "-c", "true"}, "true", wd, nil, "", true)
+	reg := &fakeRegistry{}
+	j1, err := Start(reg, []string{"bash", "-c", "true"}, "true", wd, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	j2, err := Start([]string{"bash", "-c", "true"}, "true", wd, nil, "", true)
+	j2, err := Start(reg, []string{"bash", "-c", "true"}, "true", wd, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Remove(j1.Log); os.Remove(j2.Log) })
 
-	reg, err := LoadRegistry(wd)
+	got, err := reg.List(wd)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reg.Jobs) != 2 {
-		t.Fatalf("want 2 jobs, got %d", len(reg.Jobs))
+	if len(got) != 2 {
+		t.Fatalf("want 2 jobs, got %d", len(got))
 	}
-	if reg.Jobs[0].ID != j1.ID || reg.Jobs[1].ID != j2.ID {
-		t.Fatalf("ids: %v", reg.Jobs)
+	if got[0].ID != j1.ID || got[1].ID != j2.ID {
+		t.Fatalf("ids: %v", got)
 	}
 }
 
 func TestStart_detached(t *testing.T) {
 	wd := t.TempDir()
-	job, err := Start([]string{"bash", "-c", "sleep 30"}, "sleep 30", wd, nil, "", true)
+	job, err := Start(&fakeRegistry{}, []string{"bash", "-c", "sleep 30"}, "sleep 30", wd, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,8 +145,7 @@ func TestStart_detached(t *testing.T) {
 
 func TestStart_grandchildKillablyViaPgid(t *testing.T) {
 	wd := t.TempDir()
-	// `setsid bash` ensures the inner sleep inherits the pgid.
-	job, err := Start([]string{"bash", "-c", "sleep 30 & wait"}, "sleep 30 & wait", wd, nil, "", true)
+	job, err := Start(&fakeRegistry{}, []string{"bash", "-c", "sleep 30 & wait"}, "sleep 30 & wait", wd, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,155 +162,15 @@ func TestStart_grandchildKillablyViaPgid(t *testing.T) {
 	}
 }
 
-func TestStart_corruptRegistryRecovers(t *testing.T) {
+func TestStart_concurrentAddsDoNotRace(t *testing.T) {
 	wd := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(wd, ".shell3"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	bad := filepath.Join(wd, ".shell3", "bg.json")
-	if err := os.WriteFile(bad, []byte("{not valid json"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	job, err := Start([]string{"bash", "-c", "true"}, "true", wd, nil, "", true)
-	if err != nil {
-		t.Fatalf("start should recover from corrupt bg.json: %v", err)
-	}
-	t.Cleanup(func() { os.Remove(job.Log) })
-	baks := backupFiles(t, wd)
-	if len(baks) != 1 {
-		t.Fatalf("expected exactly one .bak backup, got %d: %v", len(baks), baks)
-	}
-	if got, err := os.ReadFile(baks[0]); err != nil {
-		t.Fatalf("read backup: %v", err)
-	} else if string(got) != "{not valid json" {
-		t.Fatalf("backup did not preserve corrupt content: %q", got)
-	}
-	reg, err := LoadRegistry(wd)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(reg.Jobs) != 1 {
-		t.Fatalf("registry should hold 1 job, got %d", len(reg.Jobs))
-	}
-}
-
-// backupFiles returns all bg.json*.bak files under <wd>/.shell3.
-func backupFiles(t *testing.T, wd string) []string {
-	t.Helper()
-	matches, err := filepath.Glob(filepath.Join(wd, ".shell3", "bg.json.*.bak"))
-	if err != nil {
-		t.Fatalf("glob backups: %v", err)
-	}
-	return matches
-}
-
-// TestStart_corruptRegistryBackupsAreUnique verifies that two successive
-// corruption cycles produce two DISTINCT backup files: the second corruption
-// must not clobber the first one's forensic copy. With the old fixed-name
-// (bg.json.bak) scheme this left only a single backup, so this fails before
-// the unique/timestamped-name fix and passes after.
-func TestStart_corruptRegistryBackupsAreUnique(t *testing.T) {
-	wd := t.TempDir()
-	reg := filepath.Join(wd, ".shell3", "bg.json")
-	if err := os.MkdirAll(filepath.Dir(reg), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	// First corruption cycle.
-	if err := os.WriteFile(reg, []byte("first-corrupt"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	j1, err := Start([]string{"bash", "-c", "true"}, "true", wd, nil, "", true)
-	if err != nil {
-		t.Fatalf("first recover: %v", err)
-	}
-	t.Cleanup(func() { os.Remove(j1.Log) })
-
-	// Second corruption cycle: overwrite the freshly-written registry with
-	// new garbage and append again.
-	if err := os.WriteFile(reg, []byte("second-corrupt"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	j2, err := Start([]string{"bash", "-c", "true"}, "true", wd, nil, "", true)
-	if err != nil {
-		t.Fatalf("second recover: %v", err)
-	}
-	t.Cleanup(func() { os.Remove(j2.Log) })
-
-	baks := backupFiles(t, wd)
-	if len(baks) != 2 {
-		t.Fatalf("want 2 distinct backups (no clobber), got %d: %v", len(baks), baks)
-	}
-	// Both corrupt payloads must be preserved across the two backups.
-	seen := map[string]bool{}
-	for _, b := range baks {
-		data, err := os.ReadFile(b)
-		if err != nil {
-			t.Fatalf("read backup %s: %v", b, err)
-		}
-		seen[string(data)] = true
-	}
-	if !seen["first-corrupt"] || !seen["second-corrupt"] {
-		t.Fatalf("backups did not preserve both corrupt payloads: %v", seen)
-	}
-}
-
-// TestAppendJob_backupRenameFailureDoesNotOverwrite verifies that when the
-// corrupt-registry backup rename fails, appendJob returns an error WITHOUT
-// overwriting the corrupt original — so the bad data is not silently
-// destroyed.
-func TestAppendJob_backupRenameFailureDoesNotOverwrite(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("running as root: mode 0555 dirs are still writable, rename cannot be forced to fail")
-	}
-	wd := t.TempDir()
-	reg := filepath.Join(wd, ".shell3", "bg.json")
-	if err := os.MkdirAll(filepath.Dir(reg), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(reg, []byte("corrupt-payload"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// Make .shell3 read-only so the os.Rename of the backup fails (EACCES /
-	// EPERM): the directory entries cannot be modified.
-	dir := filepath.Dir(reg)
-	if err := os.Chmod(dir, 0o555); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Chmod(dir, 0o755) })
-
-	err := appendJob(wd, Job{ID: "bg_test"})
-	if err == nil {
-		t.Fatal("expected error when backup rename fails, got nil")
-	}
-	// The error must come from the backup step, proving appendJob bailed out
-	// BEFORE attempting to overwrite. With the old code the rename error was
-	// swallowed and the failure instead surfaced later from writeAtomic.
-	if !strings.Contains(err.Error(), "back up corrupt bg.json") {
-		t.Fatalf("error should report the failed backup, got: %v", err)
-	}
-	// Restore write perms so we can inspect, then confirm the corrupt
-	// original is intact (not overwritten with a fresh registry).
-	if err := os.Chmod(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	got, err := os.ReadFile(reg)
-	if err != nil {
-		t.Fatalf("read original: %v", err)
-	}
-	if string(got) != "corrupt-payload" {
-		t.Fatalf("corrupt original was overwritten: %q", got)
-	}
-}
-
-func TestStart_concurrentAppendsDoNotRace(t *testing.T) {
-	wd := t.TempDir()
+	reg := &fakeRegistry{}
 	const n = 10
 	errs := make(chan error, n)
 	jobs := make(chan Job, n)
 	for i := 0; i < n; i++ {
 		go func() {
-			j, err := Start([]string{"bash", "-c", "true"}, "true", wd, nil, "", true)
+			j, err := Start(reg, []string{"bash", "-c", "true"}, "true", wd, nil)
 			jobs <- j
 			errs <- err
 		}()
@@ -278,35 +186,39 @@ func TestStart_concurrentAppendsDoNotRace(t *testing.T) {
 			os.Remove(j.Log)
 		}
 	})
-	reg, err := LoadRegistry(wd)
+	got, err := reg.List(wd)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reg.Jobs) != n {
-		t.Fatalf("want %d jobs, got %d", n, len(reg.Jobs))
+	if len(got) != n {
+		t.Fatalf("want %d jobs, got %d", n, len(got))
 	}
 }
 
 func TestStart_emptyCommandRejected(t *testing.T) {
-	if _, err := Start(nil, "", t.TempDir(), nil, "", true); err == nil {
+	if _, err := Start(&fakeRegistry{}, nil, "", t.TempDir(), nil); err == nil {
 		t.Fatal("expected error on empty command")
 	}
 }
 
 func TestStart_killsProcessWhenPersistFails(t *testing.T) {
 	wd := t.TempDir()
-	// Force appendJob's MkdirAll(<wd>/.shell3) to fail by occupying that path
-	// with a regular file, so Start spawns the process but cannot persist it.
-	if err := os.WriteFile(filepath.Join(wd, ".shell3"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	reg := &fakeRegistry{addErr: fmt.Errorf("boom")}
 	marker := filepath.Join(wd, "ran.marker")
 	// If the spawned process is NOT killed, it survives the 1s sleep and creates
 	// the marker. If Start kills it on persist failure, the marker never appears.
 	cmd := fmt.Sprintf("sleep 1 && touch %q", marker)
-	_, err := Start([]string{"bash", "-c", cmd}, cmd, wd, nil, "", true)
+	job, err := Start(reg, []string{"bash", "-c", cmd}, cmd, wd, nil)
 	if err == nil {
-		t.Fatal("expected persist error (.shell3 is a file), got nil")
+		t.Fatal("expected persist error (Add fails), got nil")
+	}
+	if !strings.Contains(err.Error(), "persist") {
+		t.Fatalf("error should be a persist failure, got: %v", err)
+	}
+	// On persist failure Start returns a zero-value Job, so no usable Log/PID
+	// is handed back to the caller.
+	if job.Log != "" {
+		t.Fatalf("expected zero Job on failure, got %+v", job)
 	}
 	time.Sleep(2 * time.Second) // past the 1s sleep
 	if _, statErr := os.Stat(marker); statErr == nil {
@@ -316,14 +228,15 @@ func TestStart_killsProcessWhenPersistFails(t *testing.T) {
 
 func TestKillAll(t *testing.T) {
 	dir := t.TempDir()
-	job, err := Start([]string{"bash", "-c", "sleep 60"}, "sleep 60", dir, nil, "", true)
+	reg := &fakeRegistry{}
+	job, err := Start(reg, []string{"bash", "-c", "sleep 60"}, "sleep 60", dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if syscall.Kill(job.PID, 0) != nil {
 		t.Fatalf("job %d not alive after Start", job.PID)
 	}
-	n, err := KillAll(dir)
+	n, err := KillAll(reg, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,52 +246,8 @@ func TestKillAll(t *testing.T) {
 	if !waitDead(job.PID, 2*time.Second) {
 		t.Errorf("job %d still alive after KillAll", job.PID)
 	}
-	if jobs, _ := LoadRegistry(dir); len(jobs.Jobs) != 0 {
-		t.Errorf("registry not pruned: %v", jobs.Jobs)
-	}
-}
-
-// TestStart_noSinkFileWritten verifies the retired sink mechanism is gone: the
-// reaper no longer writes any per-session sink file on exit (durability is owed
-// only to agent completion, which self-reports over the socket transport). The
-// job still runs and is reaped; the sinkPath/notifyOnExit args are vestigial.
-func TestStart_noSinkFileWritten(t *testing.T) {
-	wd := t.TempDir()
-	sinkPath := filepath.Join(wd, ".shell3", "sink", "main.jsonl")
-	job, err := Start([]string{"bash", "-c", "exit 0"}, "exit 0", wd, nil, sinkPath, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Remove(job.Log) })
-
-	// Let the process exit and the reaper run, then assert no sink file landed.
-	waitDead(job.PID, 2*time.Second)
-	time.Sleep(150 * time.Millisecond)
-	if data, err := os.ReadFile(sinkPath); err == nil && len(data) > 0 {
-		t.Fatalf("reaper must write no sink file, got content: %q", data)
-	}
-	if _, err := os.Stat(filepath.Join(wd, ".shell3", "sink")); !os.IsNotExist(err) {
-		t.Fatalf("sink dir should not exist, stat err: %v", err)
-	}
-}
-
-func TestRegistry_jsonShape(t *testing.T) {
-	wd := t.TempDir()
-	job, err := Start([]string{"bash", "-c", "true"}, "true", wd, nil, "", true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Remove(job.Log) })
-	data, err := os.ReadFile(registryPath(wd))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("bg.json not valid json: %v", err)
-	}
-	if _, ok := raw["jobs"]; !ok {
-		t.Fatalf("missing 'jobs' key: %s", data)
+	if jobs, _ := reg.List(dir); len(jobs) != 0 {
+		t.Errorf("registry not cleared: %v", jobs)
 	}
 }
 
@@ -386,7 +255,7 @@ func TestStartInjectsEnv(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "out.txt")
 	cmd := `printf "%s" "$GREETING" > ` + out
-	job, err := Start([]string{"bash", "-c", cmd}, cmd, dir, []string{"GREETING=hi-env"}, "", false)
+	job, err := Start(&fakeRegistry{}, []string{"bash", "-c", cmd}, cmd, dir, []string{"GREETING=hi-env"})
 	if err != nil {
 		t.Fatal(err)
 	}

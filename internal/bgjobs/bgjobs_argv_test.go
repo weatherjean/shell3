@@ -13,7 +13,7 @@ func TestStartExecsArgv(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "marker")
 	argv := []string{"bash", "-c", "echo ok > " + marker}
-	job, err := Start(argv, "display-cmd", dir, nil, "", false)
+	job, err := Start(&fakeRegistry{}, argv, "display-cmd", dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

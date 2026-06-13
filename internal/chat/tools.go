@@ -9,6 +9,7 @@ import (
 
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/bgjobs"
+	"github.com/weatherjean/shell3/internal/jobstore"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/store"
 )
@@ -72,7 +73,10 @@ func dispatchCustomTool(ctx context.Context, cfg TurnConfig, name, rawArgs strin
 		return errResult("error: " + err.Error())
 	}
 	if rt.Background {
-		job, err := bgjobs.Start([]string{"bash", "-c", rt.Command}, rt.Command, cfg.WorkDir, rt.Env, "", true)
+		if cfg.Store == nil {
+			return errResult("error: background tools require a store")
+		}
+		job, err := bgjobs.Start(jobstore.New(cfg.Store), []string{"bash", "-c", rt.Command}, rt.Command, cfg.WorkDir, rt.Env)
 		if err != nil {
 			return errResult("error: " + err.Error())
 		}

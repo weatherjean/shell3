@@ -68,7 +68,7 @@ var bashBgTool = llm.ToolDefinition{
 		"servers, watchers, or any command that should not block the turn (e.g. `npx some-server`). " +
 		"Output is captured to a log file under /tmp/shell3/runs/<id>.log. Manage running jobs with the " +
 		"regular `bash` tool: " +
-		"`cat .shell3/bg.json` to list, " +
+		"`shell3 jobs` to list, " +
 		"`tail -n 100 <log>` to inspect output, " +
 		"`kill <pid>` or `kill -- -<pid>` (whole group) to stop, " +
 		"`kill -0 <pid>` to check if alive, " +
@@ -76,9 +76,8 @@ var bashBgTool = llm.ToolDefinition{
 	Parameters: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"command":        map[string]any{"type": "string", "description": "The shell command to run in the background"},
-			"workdir":        map[string]any{"type": "string", "description": "Working directory; defaults to the project root"},
-			"notify_on_exit": map[string]any{"type": "boolean", "description": "Whether to post a notification when the job exits (default true). Set false only for a job that reports its own completion by another channel."},
+			"command": map[string]any{"type": "string", "description": "The shell command to run in the background"},
+			"workdir": map[string]any{"type": "string", "description": "Working directory; defaults to the project root"},
 		},
 		"required": []string{"command"},
 	},

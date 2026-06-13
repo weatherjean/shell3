@@ -112,11 +112,10 @@ type delegationParams struct {
 
 // renderDelegation builds the "## Delegation" system-prompt section: the allowed
 // subagents and the EXACT bash_bg command to spawn one, with every runtime value
-// already substituted. The command sets notify_on_exit=false (the child
-// self-reports its result, so a duplicate bg_done is suppressed) and
-// --parent-session <this session> (the child records that report pointer and
-// reports back to THIS session over the socket/inbox transport when it
-// finishes). There is no depth gate — a spawned child may itself delegate.
+// already substituted. The command passes --parent-session <this session> (the
+// child records that report pointer and reports back to THIS session over the
+// socket/inbox transport when it finishes). There is no depth gate — a spawned
+// child may itself delegate.
 // Returns "" when there are no subagents to list.
 func renderDelegation(p delegationParams) string {
 	if len(p.Subagents) == 0 {
@@ -137,7 +136,7 @@ func renderDelegation(p delegationParams) string {
 	b.WriteString("\nTo spawn one, call the `bash_bg` tool with this exact command, substituting `<name>` (a subagent from the list), `<id>` (a short unique id you choose, e.g. `explore1`), and `<task>` (the full self-contained prompt — the subagent does not see this conversation):\n\n")
 	fmt.Fprintf(&b, "  %s run --config %s --agent <name> --out %s --parent-session %d --id <id> --prompt \"<task>\"\n\n",
 		p.Binary, p.ConfigPath, transcript, p.ParentSession)
-	b.WriteString("Pass notify_on_exit=false to bash_bg (the subagent reports its own completion, so the generic background-job notice is redundant). When it finishes you'll get a notification with the subagent's result summary (act on it directly) plus the transcript path at `.shell3/agents/<id>.jsonl`. The transcript is a JSONL audit log — read it only if the summary isn't enough, and extract the subagent's full final answer cleanly with:\n\n")
+	b.WriteString("When it finishes you'll get a notification with the subagent's result summary (act on it directly) plus the transcript path at `.shell3/agents/<id>.jsonl`. The transcript is a JSONL audit log — read it only if the summary isn't enough, and extract the subagent's full final answer cleanly with:\n\n")
 	fmt.Fprintf(&b, "    jq -rs 'map(select(.kind==\"assistant_message\"))[-1].text' %s\n", transcript)
 	return b.String()
 }

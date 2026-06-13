@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/weatherjean/shell3/internal/store"
 	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
@@ -19,6 +20,8 @@ type Bot struct {
 	chatID int64 // the single allowed chat
 
 	workDir string // resolves relative paths for send_media_telegram
+
+	store *store.Store // canonical store; backs /stop's KillAll (nil if unwired)
 
 	mu         sync.Mutex         // guards cancelTurn + turnActive
 	cancelTurn context.CancelFunc // non-nil while a turn runs
@@ -70,6 +73,9 @@ func NewBot(client tgClient, rt *shell3.Runtime, sess *shell3.Session, chatID in
 // SetWorkDir sets the directory used to resolve relative paths passed to
 // send_media_telegram (the agent's session workdir).
 func (b *Bot) SetWorkDir(dir string) { b.workDir = dir }
+
+// SetStore wires the canonical store used by /stop to kill tracked bg jobs.
+func (b *Bot) SetStore(st *store.Store) { b.store = st }
 
 // Run consumes inbound messages and the wake bus until ctx is cancelled.
 func (b *Bot) Run(ctx context.Context) {
