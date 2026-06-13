@@ -23,8 +23,8 @@ type DispatchOpts struct {
 //
 // Unlike a model-spawned subagent (now a bash_bg-backgrounded `shell3` that
 // self-reports an agent_done to the session sink and inject+wakes the agent),
-// cron Dispatch must stay an OPERATOR notice: it execs a `shell3 --config <cfg>
-// --agent <agent> --out <transcript> "<prompt>"` SUBPROCESS, waits for it, reads
+// cron Dispatch must stay an OPERATOR notice: it execs a `shell3 run --config
+// <cfg> --agent <agent> --out <transcript> "<prompt>"` SUBPROCESS, waits for it, reads
 // the final assistant text from the transcript, and emits a chat Notice via
 // deliverDispatchResult. It deliberately does NOT route through the sink watcher
 // (which inject+wakes — wrong for a host-initiated job that must not start a
@@ -58,6 +58,13 @@ func (s *Session) Dispatch(agent, prompt string, opts DispatchOpts) (string, err
 	if err := os.MkdirAll(filepath.Dir(transcript), 0o755); err != nil {
 		return "", err
 	}
+	// The id scheme (a1, a2, …) resets each process, so this path can collide
+	// with a leftover transcript from a prior run. Remove any stale file first:
+	// if the child dies before writing, ReadTranscript must not surface old
+	// content as this run's result (the child truncates it fresh when it starts).
+	if err := os.Remove(transcript); err != nil && !os.IsNotExist(err) {
+		return "", fmt.Errorf("shell3: dispatch: clear stale transcript: %w", err)
+	}
 
 	// Resolve the shell3 binary and the config file the child should reload. A
 	// failure to resolve the config path is fatal to the dispatch (the child
@@ -78,7 +85,11 @@ func (s *Session) Dispatch(agent, prompt string, opts DispatchOpts) (string, err
 	// the process, so Close's wg.Wait then joins cleanly.
 	runCtx := rt.baseContext()
 
+	// NOTE: the `run` subcommand is required — --out/--id and subagent-capable
+	// --agent live there, not on the root command. Without it the child hits the
+	// interactive root, which rejects --out ("unknown flag") and exits non-zero.
 	args := []string{
+		"run",
 		"--config", cfgPath,
 		"--agent", agent,
 		"--out", transcript,
