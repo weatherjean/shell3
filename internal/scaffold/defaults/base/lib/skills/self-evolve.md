@@ -22,10 +22,9 @@ Each rung adds more permanent surface than the one above. Choose the highest
    Don't attempt it live; describe what's needed and hand it to the user.
 
 ## Orient first
-Call the `status` tool. It prints the absolute path of the `shell3.lua` you edit
-(plus your active agent, the agents available, the model, the working directory,
-and any cron jobs). Edit that exact file. If it `require`s `lib/` modules, follow
-the require to the right file.
+Your `shell3.lua` path is in the `## Environment` section of your system prompt
+(the `config:` line). Edit that exact file. If it `require`s `lib/` modules,
+follow the require to the right file.
 
 ## The loop
 1. Edit the file. Copy the shape of an existing block — e.g. an agent, the

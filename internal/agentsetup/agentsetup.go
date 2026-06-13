@@ -224,9 +224,10 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 }
 
 // environmentSection renders the host-injected "## Environment" block appended
-// to every agent's system prompt. It exposes the project UUID, the preferred
-// shell3 fts / list-projects / list-sessions / read-session / jobs helper
-// commands for history and background-job access. Kept minimal
+// to every agent's system prompt. It exposes the project UUID, the agent's own
+// config path (so any front-end can resolve its config dir without a tool), and
+// the preferred shell3 fts / list-projects / list-sessions / read-session / jobs
+// helper commands for history and background-job access. Kept minimal
 // and factual; new facts are added as additional
 // "- key: value" rows under this heading.
 //
@@ -240,6 +241,9 @@ func (p *Parts) environmentSection() string {
 	b.WriteString("\n## Environment\n")
 	b.WriteString("Runtime paths for this session (read-only unless stated):\n")
 	fmt.Fprintf(&b, "- project_uuid: %s\n", p.uuid)
+	if p.configPath != "" {
+		fmt.Fprintf(&b, "- config: `%s` (your shell3.lua; its directory holds your skills/lib — edit it via the self-evolve skill)\n", p.configPath)
+	}
 	fmt.Fprintf(&b, "- search history: `shell3 fts \"<query>\" --project-id %s` (omit --project-id to search all projects; --page N to page; see the `history` skill)\n", p.uuid)
 	fmt.Fprintf(&b, "- list projects: `shell3 list-projects` (--page N to page)\n")
 	fmt.Fprintf(&b, "- list sessions: `shell3 list-sessions --project-id %s` (omit --project-id for all; --page N to page)\n", p.uuid)
