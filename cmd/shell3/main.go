@@ -54,6 +54,7 @@ func main() {
 	root.AddCommand(newFTSCommand())
 	root.AddCommand(newListProjectsCommand())
 	root.AddCommand(newListSessionsCommand())
+	root.AddCommand(newJobsCommand())
 
 	// Print brand header on every subcommand and on --help output. The
 	// root chat command suppresses it (handled inside RunE) since chat
