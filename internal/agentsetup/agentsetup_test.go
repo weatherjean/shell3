@@ -336,14 +336,9 @@ func TestBuild_PromptHasEnvironmentSection(t *testing.T) {
 	if !strings.Contains(prompt, "## Environment") {
 		t.Fatalf("prompt missing Environment section:\n%s", prompt)
 	}
-	// The canonical DB lives under ~/.shell3/data/; assert the path fragment and
-	// the read-only open form both appear.
-	wantPathFragment := filepath.Join(home, ".shell3", "data")
-	if !strings.Contains(prompt, wantPathFragment) {
-		t.Errorf("Environment section missing canonical DB path %q:\n%s", wantPathFragment, prompt)
-	}
-	if !strings.Contains(prompt, "shell3.db") || !strings.Contains(prompt, "?mode=ro") {
-		t.Errorf("Environment section missing ro history DB open form:\n%s", prompt)
+	// Reading a full past session is via the read-session CLI (no raw SQL).
+	if !strings.Contains(prompt, "shell3 read-session") {
+		t.Errorf("Environment section missing shell3 read-session command:\n%s", prompt)
 	}
 	// New interface: shell3 fts and list-projects commands must be advertised.
 	if !strings.Contains(prompt, "shell3 fts") {

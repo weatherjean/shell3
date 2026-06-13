@@ -218,8 +218,8 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 
 // environmentSection renders the host-injected "## Environment" block appended
 // to every agent's system prompt. It exposes the project UUID, the preferred
-// shell3 fts / list-projects / list-sessions / jobs helper commands for history
-// and background-job access, and the raw DB path for advanced use. Kept minimal
+// shell3 fts / list-projects / list-sessions / read-session / jobs helper
+// commands for history and background-job access. Kept minimal
 // and factual; new facts are added as additional
 // "- key: value" rows under this heading.
 //
@@ -237,8 +237,7 @@ func (p *Parts) environmentSection() string {
 	fmt.Fprintf(&b, "- list projects: `shell3 list-projects` (--page N to page)\n")
 	fmt.Fprintf(&b, "- list sessions: `shell3 list-sessions --project-id %s` (omit --project-id for all; --page N to page)\n", p.uuid)
 	fmt.Fprintf(&b, "- list jobs: `shell3 jobs` (background jobs for this session's workdir; --page N to page; dead jobs auto-pruned)\n")
-	fmt.Fprintf(&b, "- history_db (advanced raw replay only): %s (open with `sqlite3 'file:%s?mode=ro'`)\n",
-		p.dbPath, p.dbPath)
+	fmt.Fprintf(&b, "- read a past session: `shell3 read-session <session-id>` (full transcript oldest-first; --page N)\n")
 	return b.String()
 }
 

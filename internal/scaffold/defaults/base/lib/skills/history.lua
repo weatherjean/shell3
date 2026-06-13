@@ -1,5 +1,5 @@
--- lib/skills/history.lua — read past conversations from the SQLite store via
--- bash + a read-only sqlite3 connection. The body lives in history.md (next to
+-- lib/skills/history.lua — read past conversations via the shell3 fts /
+-- list-projects / list-sessions / read-session commands. The body lives in history.md (next to
 -- this file); the agent reads it with `cat`. Returned for require().
 return shell3.skill({
   name        = "history",

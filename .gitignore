@@ -13,3 +13,7 @@ coverage.txt
 
 # test coverage profile
 cover.out
+
+# stress-test scratch artifacts
+/.stress_scratch
+/tmp/

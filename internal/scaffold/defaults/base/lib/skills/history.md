@@ -1,13 +1,13 @@
 ---
 name: history
-description: Search and read past conversations and list background jobs from the shell3 SQLite store via shell3 fts / list-projects / list-sessions / jobs commands (read-only).
+description: Search and read past conversations and list background jobs via the shell3 fts / list-projects / list-sessions / read-session / jobs commands (read-only).
 ---
 
 # History — search and read past conversations
 
 shell3 persists every conversation turn to a single SQLite database, shared
 across ALL projects (namespaced by `project_uuid`). Use the first-class
-commands below — no need to hand-write SQL for search.
+commands below.
 
 ## Searching history
 
@@ -21,8 +21,8 @@ Output columns: session-id, timestamp, role, snippet.
 
 FTS5 query tips: space-separated terms are AND by default; use `OR` for broad
 recall; quote a phrase with double-quotes (`"context window"`); a trailing `*`
-is a prefix match (`compact*`). Re-read a hit's full session with the raw replay
-query below, using its session-id.
+is a prefix match (`compact*`). Re-read a hit's full session with
+`shell3 read-session <session-id>`, using its session-id.
 
 ## Listing projects
 
@@ -50,32 +50,17 @@ session's workdir. Read-only; dead jobs are auto-pruned on listing.
 
 Output columns: id, pid, log, cmd.
 
-## Advanced: raw replay
+## Reading a full session
 
-To read a full past session in chronological order, use `history_db` from
-`## Environment` — always open READ-ONLY:
+To read a past session's full transcript in chronological order (oldest-first):
 
-    sqlite3 'file:<history_db>?mode=ro' "<SQL>"
+    shell3 read-session <session-id>            # full transcript
+    shell3 read-session <session-id> --page 1   # next page (large sessions)
 
-Both `sessions` and `history` carry a `project_uuid` column, so raw queries
-can scope to a single project with `AND project_uuid = '<uuid>'`.
-
-Most-recent completed session in this project, in order:
-
-    sqlite3 'file:<history_db>?mode=ro' "
-      SELECT created_at, role, content FROM history
-      WHERE history.project_uuid = '<project_uuid>'
-        AND CAST(session_id AS INTEGER) = (
-          SELECT id FROM sessions
-          WHERE ended_at IS NOT NULL AND project_uuid = '<project_uuid>'
-          ORDER BY id DESC LIMIT 1)
-      ORDER BY rowid ASC LIMIT 100;"
-
-Never open read-write; never `UPDATE`/`INSERT`/`DELETE`/`DROP`; never touch
-the `-wal`/`-shm` sidecar files.
+The session-id comes from `shell3 list-sessions` or an `shell3 fts` hit.
 
 ## Rules
 
-- READ-ONLY, always. `?mode=ro` for raw queries; commands are already safe.
-- Pull only what you need (`LIMIT` / `--page`); sessions can be large.
+- READ-ONLY, always; the commands are inherently read-only.
+- Pull only what you need (`--page`); sessions can be large.
 - Cite what you find by session id + timestamp so the user can follow up.
