@@ -113,7 +113,7 @@ func RenderBaseConfig(dir string, v Values, force bool) error {
 // modules reused from the base scaffold (tools and the rest). When force
 // is false, existing files are left untouched (safe to re-run).
 func RenderTelegramConfig(dir string, v TelegramValues, force bool) error {
-	v.Values = v.Values.withDefaults()
+	v.Values = v.withDefaults()
 	tmplBytes, err := telegramFS.ReadFile(telegramRoot + "/shell3.lua.tmpl")
 	if err != nil {
 		return fmt.Errorf("scaffold: read telegram template: %w", err)
