@@ -4,28 +4,26 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/store"
 )
 
 func newFTSCommand() *cobra.Command {
-	var projectID string
+	var configPath, projectID string
 	var page, pageSize int
 	cmd := &cobra.Command{
 		Use:   "fts [query]",
 		Short: "Full-text search conversation history (read-only).",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			home, err := os.UserHomeDir()
+			dbPath, err := canonicalDBPath(configPath)
 			if err != nil {
-				return fmt.Errorf("fts: resolve home: %w", err)
+				return fmt.Errorf("fts: resolve db: %w", err)
 			}
-			st, err := store.Open(paths.NewGlobal(home).DB)
+			st, err := store.Open(dbPath)
 			if err != nil {
 				return fmt.Errorf("fts: open store: %w", err)
 			}
@@ -43,6 +41,7 @@ func newFTSCommand() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVarP(&configPath, "config", "c", "", "Path to shell3.lua (anchors the canonical DB; default: ~/.shell3).")
 	cmd.Flags().StringVar(&projectID, "project-id", "", "Scope to one project UUID (default: all projects).")
 	cmd.Flags().IntVar(&page, "page", 0, "Zero-based page index.")
 	cmd.Flags().IntVar(&pageSize, "page-size", 20, "Results per page.")

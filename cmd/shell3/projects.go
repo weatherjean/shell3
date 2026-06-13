@@ -4,25 +4,24 @@ package main
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 
-	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/store"
 )
 
 func newListProjectsCommand() *cobra.Command {
+	var configPath string
 	var page, pageSize int
 	cmd := &cobra.Command{
 		Use:   "list-projects",
 		Short: "List projects (distinct) with workdir and last activity.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			home, err := os.UserHomeDir()
+			dbPath, err := canonicalDBPath(configPath)
 			if err != nil {
-				return fmt.Errorf("list-projects: resolve home: %w", err)
+				return fmt.Errorf("list-projects: resolve db: %w", err)
 			}
-			st, err := store.Open(paths.NewGlobal(home).DB)
+			st, err := store.Open(dbPath)
 			if err != nil {
 				return fmt.Errorf("list-projects: open store: %w", err)
 			}
@@ -38,6 +37,7 @@ func newListProjectsCommand() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVarP(&configPath, "config", "c", "", "Path to shell3.lua (anchors the canonical DB; default: ~/.shell3).")
 	cmd.Flags().IntVar(&page, "page", 0, "Zero-based page index.")
 	cmd.Flags().IntVar(&pageSize, "page-size", 20, "Projects per page.")
 	return cmd

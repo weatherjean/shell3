@@ -4,26 +4,24 @@ package main
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 
-	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/store"
 )
 
 func newListSessionsCommand() *cobra.Command {
-	var projectID string
+	var configPath, projectID string
 	var page, pageSize int
 	cmd := &cobra.Command{
 		Use:   "list-sessions",
 		Short: "List conversation sessions (newest first), optionally scoped to a project.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			home, err := os.UserHomeDir()
+			dbPath, err := canonicalDBPath(configPath)
 			if err != nil {
-				return fmt.Errorf("list-sessions: resolve home: %w", err)
+				return fmt.Errorf("list-sessions: resolve db: %w", err)
 			}
-			st, err := store.Open(paths.NewGlobal(home).DB)
+			st, err := store.Open(dbPath)
 			if err != nil {
 				return fmt.Errorf("list-sessions: open store: %w", err)
 			}
@@ -45,6 +43,7 @@ func newListSessionsCommand() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVarP(&configPath, "config", "c", "", "Path to shell3.lua (anchors the canonical DB; default: ~/.shell3).")
 	cmd.Flags().StringVar(&projectID, "project-id", "", "Scope to one project UUID (default: all projects).")
 	cmd.Flags().IntVar(&page, "page", 0, "Zero-based page index.")
 	cmd.Flags().IntVar(&pageSize, "page-size", 50, "Sessions per page.")
