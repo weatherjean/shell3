@@ -158,10 +158,12 @@ type SessionMeta struct {
 	Summary   string
 	NumMsgs   int
 	Preview   string // first user message, truncated
-	// Status and ParentID are populated by ListSessionsPage (the `shell3
-	// list-sessions` CLI path); the dashboard's ListSessions leaves them zero.
-	Status   string
-	ParentID int64
+	// Status, ParentID, and ConfigPath are populated by ListSessionsPage (the
+	// `shell3 list-sessions` CLI path); the dashboard's ListSessions leaves them
+	// zero/empty.
+	Status     string
+	ParentID   int64
+	ConfigPath string
 }
 
 // ListSessions returns up to limit most-recent sessions (newest first), each
@@ -213,6 +215,7 @@ func (s *Store) ListSessionsPage(projectUUID string, limit, offset int) ([]Sessi
 	rows, err := s.db.Query(`
 		SELECT s.id, s.started_at, COALESCE(s.ended_at,''), COALESCE(s.summary,''),
 		       COALESCE(s.status,''), COALESCE(s.parent_session_id,0),
+		       COALESCE(s.config_path,''),
 		       (SELECT COUNT(*) FROM history h WHERE h.session_id = s.id),
 		       COALESCE((SELECT h.content FROM history h
 		                 WHERE h.session_id = s.id AND h.role='user'
@@ -230,7 +233,7 @@ func (s *Store) ListSessionsPage(projectUUID string, limit, offset int) ([]Sessi
 		var m SessionMeta
 		var started, ended, preview string
 		if err := rows.Scan(&m.ID, &started, &ended, &m.Summary, &m.Status, &m.ParentID,
-			&m.NumMsgs, &preview); err != nil {
+			&m.ConfigPath, &m.NumMsgs, &preview); err != nil {
 			return nil, fmt.Errorf("store: list sessions page: scan: %w", err)
 		}
 		m.StartedAt = parseRFC3339(started)

@@ -53,7 +53,7 @@ func TestStore_ListSessionsPage(t *testing.T) {
 	st, _ := store.Open(filepath.Join(t.TempDir(), "shell3.db"))
 	defer st.Close()
 
-	a1, _ := st.StartSession("projA", "/a", "")
+	a1, _ := st.StartSession("projA", "/a", "/projA/.shell3/shell3.lua")
 	st.AppendHistory(a1, "user", "alpha one")
 	a2, _ := st.StartSessionWithParent(a1, "projA", "/a", "") // a subagent of a1
 	b1, _ := st.StartSession("projB", "/b", "")
@@ -81,6 +81,10 @@ func TestStore_ListSessionsPage(t *testing.T) {
 	}
 	if onlyA[1].Preview != "alpha one" {
 		t.Errorf("a1 preview = %q, want %q", onlyA[1].Preview, "alpha one")
+	}
+	// config_path round-trips through the listing.
+	if onlyA[1].ConfigPath != "/projA/.shell3/shell3.lua" {
+		t.Errorf("a1 config path = %q, want %q", onlyA[1].ConfigPath, "/projA/.shell3/shell3.lua")
 	}
 
 	// Paging: limit 1 offset 1 returns the second-newest overall.

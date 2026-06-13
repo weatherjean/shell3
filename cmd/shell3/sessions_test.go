@@ -38,7 +38,7 @@ func TestListSessionsCommand_RunE(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := st.StartSession("proj-alpha", "/work/alpha", "")
+	a, err := st.StartSession("proj-alpha", "/work/alpha", "/work/alpha/.shell3/shell3.lua")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,6 +67,9 @@ func TestListSessionsCommand_RunE(t *testing.T) {
 	}
 	if !strings.Contains(out, "alpha question") {
 		t.Errorf("expected preview 'alpha question' in output, got: %q", out)
+	}
+	if !strings.Contains(out, "cfg:/work/alpha/.shell3/shell3.lua") {
+		t.Errorf("expected config path in output, got: %q", out)
 	}
 	if strings.Contains(out, "/work/beta") || strings.Count(out, "\n") != 1 {
 		t.Errorf("project scope leaked other-project sessions: %q", out)

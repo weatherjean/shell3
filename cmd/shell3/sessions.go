@@ -36,9 +36,13 @@ func newListSessionsCommand() *cobra.Command {
 				if s.ParentID != 0 {
 					parent = fmt.Sprintf("%d", s.ParentID)
 				}
-				fmt.Fprintf(out, "%d\t%s\tparent:%s\t%d msgs\t%s\t%s\n",
+				cfg := s.ConfigPath
+				if cfg == "" {
+					cfg = "-"
+				}
+				fmt.Fprintf(out, "%d\t%s\tparent:%s\t%d msgs\t%s\t%s\tcfg:%s\n",
 					s.ID, s.Status, parent, s.NumMsgs,
-					s.StartedAt.Format("2006-01-02T15:04:05Z"), s.Preview)
+					s.StartedAt.Format("2006-01-02T15:04:05Z"), s.Preview, cfg)
 			}
 			return nil
 		},
