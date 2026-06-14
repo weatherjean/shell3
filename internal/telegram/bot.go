@@ -151,10 +151,9 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 	}()
 }
 
-// withReplyContext prepends the replied-to message as a markdown blockquote so
-// the model sees what the user is responding to. Returns text unchanged when
-// there's no reply. The quote is capped so a reply to a huge message can't bloat
-// the turn.
+// withReplyContext prepends the replied-to message as a capped markdown
+// blockquote so the model sees what the user is responding to. Returns text
+// unchanged when there's no reply.
 func withReplyContext(text, replyTo string) string {
 	replyTo = strings.TrimSpace(replyTo)
 	if replyTo == "" {
@@ -175,9 +174,8 @@ func truncate(s string, n int) string {
 	return s[:n] + "…"
 }
 
-// keepTyping shows the "typing…" chat action and refreshes it every 4s until
-// the returned stop is called. Telegram's chat action only lasts ~5s, so a long
-// turn needs periodic re-sending or the indicator vanishes mid-turn.
+// keepTyping shows the "typing…" chat action and refreshes it every 4s (the
+// action expires after ~5s) until the returned stop is called.
 func (b *Bot) keepTyping(ctx context.Context) (stop func()) {
 	tctx, cancel := context.WithCancel(ctx)
 	go func() {

@@ -47,12 +47,12 @@ func newRunCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&f.configPath, "config", "c", "", "Config name (→ ~/.shell3/<name>.lua) or path to a *.lua file (default: ~/.shell3/shell3.lua)")
-	cmd.Flags().StringVar(&f.outPath, "out", "", "Stream a JSONL audit log of this run to <path>.")
-	cmd.Flags().StringVar(&f.agent, "agent", "", "Select the active agent by name (default: first declared). May also name a registered subagent.")
-	cmd.Flags().StringVar(&f.id, "id", "", "Caller-chosen id for this run (conventionally the transcript filename stem).")
-	cmd.Flags().StringVar(&f.prompt, "prompt", "", "The prompt for this run (alternative to positional args / stdin).")
-	cmd.Flags().Int64Var(&f.resume, "resume", 0, "Resume a stored session by id: reload its messages and continue the conversation.")
-	cmd.Flags().Int64Var(&f.parentSession, "parent-session", 0, "Stored session id this run reports completion to (the spawning agent).")
+	cmd.Flags().StringVar(&f.outPath, "out", "", "Stream a JSONL audit log of this run to <path>")
+	cmd.Flags().StringVar(&f.agent, "agent", "", "Select the active agent by name (default: first declared). May also name a registered subagent")
+	cmd.Flags().StringVar(&f.id, "id", "", "Caller-chosen id for this run (conventionally the transcript filename stem)")
+	cmd.Flags().StringVar(&f.prompt, "prompt", "", "The prompt for this run (alternative to positional args / stdin)")
+	cmd.Flags().Int64Var(&f.resume, "resume", 0, "Resume a stored session by id: reload its messages and continue the conversation")
+	cmd.Flags().Int64Var(&f.parentSession, "parent-session", 0, "Stored session id this run reports completion to (the spawning agent)")
 	return cmd
 }
 
@@ -62,8 +62,7 @@ func runHeadless(ctx context.Context, f *runFlags, input string) error {
 		return fmt.Errorf("get working directory: %w", err)
 	}
 
-	// These env vars are consumed by external hook subprocesses (not by
-	// pkg/shell3, which never mutates global env). Preserve them exactly.
+	// These env vars are read by external hook subprocesses, not by pkg/shell3.
 	_ = os.Setenv("SHELL3_HEADLESS", "1")
 	if f.outPath != "" {
 		_ = os.Setenv("SHELL3_OUT", f.outPath)

@@ -66,9 +66,8 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 		b.mu.Lock()
 		c := b.cancelTurn
 		b.mu.Unlock()
-		// KillAll also terminates model-spawned subagents: they are now plain bg
-		// jobs (a backgrounded `shell3`), so killing the tracked bg groups stops
-		// them too — no separate subagent-cancellation path is needed.
+		// KillAll also terminates model-spawned subagents: they are plain bg jobs
+		// (a backgrounded `shell3`), so killing the tracked bg groups stops them too.
 		killed := 0
 		if b.store != nil {
 			killed, _ = bgjobs.KillAll(jobstore.New(b.store), b.workDir)

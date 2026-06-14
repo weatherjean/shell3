@@ -9,10 +9,9 @@ import (
 // luaWrapBash binds shell3.wrap_bash(fn): the single Lua hook the bash/bash_bg
 // tools pass their command through before execution. fn(cmd) returns either a
 // string (the command to run, possibly rewritten), a table of strings (the argv
-// to exec directly), or nil/false[, reason] to block. There is no "ask" — the
-// guard/approval engine was removed, so there is no approver to suspend for. A
-// second call replaces the first (last writer wins): wrap_bash is a single
-// global hook, not a chain.
+// to exec directly), or nil/false[, reason] to block. There is no "ask": there
+// is no approval engine, so no approver to suspend for. A second call replaces
+// the first (last writer wins): wrap_bash is a single global hook, not a chain.
 func (c *LoadedConfig) luaWrapBash(L *lua.LState) int {
 	fn := L.CheckFunction(1)
 	c.wrapBash = fn
@@ -45,7 +44,7 @@ func (c *LoadedConfig) WrapBash(ctx context.Context, cmd string) (argv []string,
 	c.L.Pop(2)
 	switch v := r1.(type) {
 	case lua.LString:
-		// A string runs under bash -c (back-compat with the string-rewrite era).
+		// A string runs under bash -c.
 		return []string{"bash", "-c", string(v)}, true, "", nil
 	case *lua.LTable:
 		// A list of strings is the argv to exec directly (the runner swap).

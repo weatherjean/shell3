@@ -181,17 +181,16 @@ func Load(path, workdir string) (*LoadedConfig, error) {
 	if err := c.L.DoFile(path); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
-	// Resolve command-backed bodies/prompts ONCE, before any cross-reference
+	// Resolve command-backed bodies/prompts before any cross-reference
 	// validation. Each command runs with cwd = the config dir (same dir as
 	// .env and the lib/ modules), so relative paths like `cat lib/skills/x.md`
 	// resolve as authors expect. A failing or empty command fails the whole
-	// Load (fail-closed) — and since reload goes through Load, a bad prompt
-	// file can never silently swap in an empty prompt at runtime.
+	// Load (fail-closed); since reload goes through Load, a bad prompt file can
+	// never silently swap in an empty prompt at runtime.
 	cfgDir := filepath.Dir(path)
-	// Resolve + validate skill file paths ONCE (fail closed). Each path is
-	// resolved relative to the config dir (cfgDir) and must be a readable,
-	// non-empty regular file. A broken skill path is caught here at load/reload,
-	// never at turn time. The resolved absolute path is stored back so the
+	// Resolve + validate skill file paths against the config dir (cfgDir): each
+	// must be a readable, non-empty regular file, caught here at load/reload
+	// rather than at turn time. The resolved absolute path is stored back so the
 	// ## Skills index can point the agent at it (BuildPersonaFor).
 	for i := range c.Skills {
 		skillPath := c.Skills[i].Path

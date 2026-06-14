@@ -10,9 +10,9 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
-// maxRetries is how many times a failed request is retried. It is set both on
-// the client (option.WithMaxRetries) and read by retryObserver to know when an
-// attempt is the last one (so it suppresses a spurious "retrying" notice).
+// maxRetries is how many times a failed request is retried. It is set on the
+// client (option.WithMaxRetries) and read by retryObserver to suppress a
+// "retrying" notice on the final attempt.
 const maxRetries = 5
 
 // retryObserver returns SDK middleware that emits a Retry StreamEvent each time
@@ -44,7 +44,7 @@ func retryCount(req *http.Request) int {
 
 // isRetryable mirrors the openai-go SDK's shouldRetry: connection errors and
 // 408/409/429/5xx are retryable, with the x-should-retry header taking
-// precedence. Kept in sync with the SDK so the notice matches its behavior.
+// precedence.
 func isRetryable(res *http.Response, err error) bool {
 	if err != nil || res == nil {
 		return true

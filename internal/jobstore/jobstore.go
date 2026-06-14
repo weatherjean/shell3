@@ -1,5 +1,5 @@
-// Package jobstore adapts the canonical *store.Store to the bgjobs.Registry
-// interface, translating between bgjobs.Job and store.Job.
+// Package jobstore adapts *store.Store to the bgjobs.Registry interface,
+// keeping bgjobs decoupled from store (no import cycle).
 package jobstore
 
 import (
@@ -7,7 +7,7 @@ import (
 	"github.com/weatherjean/shell3/internal/store"
 )
 
-// Store adapts *store.Store to bgjobs.Registry, translating bgjobs.Job <-> store.Job.
+// Store translates bgjobs.Job <-> store.Job.
 type Store struct{ st *store.Store }
 
 // New wraps st as a bgjobs.Registry.

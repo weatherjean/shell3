@@ -47,8 +47,7 @@ func New(scripts ...Script) *Client {
 // script's configured error. Honors ctx cancellation between events.
 func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.ToolDefinition, onEvent func(llm.StreamEvent)) error {
 	c.mu.Lock()
-	// Snapshot the caller's slices so a later mutation/reuse of msgs or tools
-	// can't retroactively alter what we recorded.
+	// Clone the caller's slices so a later mutation can't alter what we recorded.
 	c.Calls = append(c.Calls, Call{
 		Msgs:  slices.Clone(msgs),
 		Tools: slices.Clone(tools),
@@ -81,9 +80,8 @@ func (c *Client) CallCount() int {
 	return c.calls
 }
 
-// CallsSnapshot returns a copy of the recorded calls taken under the lock,
-// for callers that want a concurrency-safe view without touching the
-// exported Calls field directly.
+// CallsSnapshot returns a copy of the recorded calls taken under the lock, for
+// a concurrency-safe view without touching the exported Calls field directly.
 func (c *Client) CallsSnapshot() []Call {
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -10,8 +10,9 @@ import (
 )
 
 // LoadMediaPart resolves and loads a media file as a multimodal ContentPart,
-// routing by file extension: images (jpg/png/gif) become image_url parts, audio
-// (wav/mp3) becomes input_audio parts. It returns the part plus a short
+// routing by file extension: images (jpg, jpeg, png, gif, webp) become
+// image_url parts, audio (wav, mp3, ogg, oga, opus) becomes input_audio parts.
+// It returns the part plus a short
 // human-readable description for the tool result. Consumed by the read_media
 // tool and by pkg/shell3's Part{Path: …}.
 func LoadMediaPart(path, workDir string) (llm.ContentPart, string, error) {
@@ -26,7 +27,7 @@ func LoadMediaPart(path, workDir string) (llm.ContentPart, string, error) {
 	case supportedAudioExts[ext]:
 		return loadAudioPart(path, workDir)
 	default:
-		return llm.ContentPart{}, "", fmt.Errorf("unsupported media type %q — use jpg, png, gif, wav, or mp3", ext)
+		return llm.ContentPart{}, "", fmt.Errorf("unsupported media type %q — use jpg, jpeg, png, gif, webp, wav, mp3, ogg, oga, or opus", ext)
 	}
 }
 

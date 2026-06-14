@@ -27,7 +27,7 @@ type CronJob struct {
 // Server is the read-only dashboard.
 type Server struct {
 	sess     *shell3.Session
-	rt       *shell3.Runtime // retained for future SSE fan-out
+	rt       *shell3.Runtime // used for subagent transcripts and the stream heartbeat
 	token    string
 	chatID   int64
 	usage    *UsageStore                         // nil → no usage shown
@@ -122,9 +122,8 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSubagents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	// Subagents are no longer an in-process registry; list their transcripts on
-	// disk (.shell3/agents/*.jsonl) instead. handleSubagent (?id=) returns one
-	// transcript's events.
+	// List subagent transcripts on disk (.shell3/agents/*.jsonl). handleSubagent
+	// (?id=) returns one transcript's events.
 	subs, err := s.rt.SubagentList()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -237,10 +236,8 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(out)
 }
 
-// handleStream is a v1 poll-based simplification: sends a keep-alive heartbeat
-// only. True SSE fan-out (subscribing to rt.Events()) is a follow-up task — the
-// bot's consumeWakes is the sole consumer of rt.Events() and sharing the channel
-// would race.
+// handleStream sends a keep-alive heartbeat only. The bot's consumeWakes is the
+// sole consumer of rt.Events(), so the stream does not fan out those events.
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	fl, ok := w.(http.Flusher)
 	if !ok {
@@ -267,5 +264,5 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(indexHTML) // Task 10
+	_, _ = w.Write(indexHTML)
 }

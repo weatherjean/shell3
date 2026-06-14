@@ -21,11 +21,11 @@ type Store struct{ db *sql.DB }
 // SQLite permits only one writer at a time. SetMaxOpenConns(1) serializes
 // in-process writers; the busy_timeout pragma is a backstop for contention.
 //
-// For real file paths we also enable WAL journal mode: the agent reads history
+// File paths also enable WAL journal mode: the agent reads history
 // out-of-process via `sqlite3 'file:<db>?mode=ro'` (the `history` skill), and
 // WAL gives those external readers a lock-free, consistent snapshot that never
 // contends with the in-process writer (rollback-journal mode would block them
-// up to busy_timeout). WAL is deliberately NOT enabled for `:memory:`, which is
+// up to busy_timeout). WAL is NOT enabled for `:memory:`, which is
 // per-connection and where a journal-mode flip is meaningless/unsafe.
 func Open(path string) (*Store, error) {
 	dsn := path
@@ -229,8 +229,7 @@ func (s *Store) ListSessions(limit int) ([]SessionMeta, error) {
 // list-sessions` CLI: optionally scoped to one project (projectUUID ""=all) and
 // paginated via limit/offset. Each row carries status + parent in addition to
 // the dashboard fields, so the listing doubles as resume/discovery (which
-// sessions are dormant, which were spawned as subagents). Kept separate from
-// ListSessions so the dashboard read path is unaffected.
+// sessions are dormant, which were spawned as subagents).
 func (s *Store) ListSessionsPage(projectUUID string, limit, offset int) ([]SessionMeta, error) {
 	if limit <= 0 {
 		limit = 50
@@ -419,9 +418,8 @@ func (s *Store) HistoryGet(sessionID int64, chunk int) (HistoryGetResult, error)
 		return HistoryGetResult{}, err
 	}
 
-	// prev/next are best-effort navigation hints. A zero id (no row, or a query
-	// error) renders as "no neighbor", so both error cases collapse to the same
-	// harmless sentinel — discarding the error is intentional, not a swallow.
+	// prev/next are best-effort navigation hints. A zero id (no row or a query
+	// error) renders as "no neighbor", so discarding the error is intentional.
 	var prevID, nextID int64
 	_ = s.db.QueryRow(`
 		SELECT id FROM sessions

@@ -39,15 +39,14 @@ type Options struct {
 // via SessionConfig.
 //
 // Concurrency: all exported methods are safe for concurrent use by multiple
-// sessions. The Lua VM (luacfg.LoadedConfig) serialises access with a mutex.
-// The history store is database/sql over SQLite — safe for concurrent callers.
-// The proxy spawner is mutex-guarded internally.
-// AgentRuntime builds a fresh LLM client per call, so no client state is
-// shared across sessions.
+// sessions. The Lua VM (luacfg.LoadedConfig) serialises access with a mutex,
+// the history store (database/sql over SQLite) is safe for concurrent callers,
+// the proxy spawner is mutex-guarded internally, and AgentRuntime builds a fresh
+// LLM client per call, so no client state is shared across sessions.
 //
-// Lifetime: Parts must not be used after the cleanup function returned by
-// BuildParts has run. The cleanup closes the store, Lua state, proxies,
-// and log; any method call after cleanup has undefined behaviour.
+// Lifetime: Parts must not be used after the cleanup returned by BuildParts has
+// run. The cleanup closes the store, Lua state, proxies, and log; any method
+// call after cleanup has undefined behaviour.
 type Parts struct {
 	lc     *luacfg.LoadedConfig
 	st     *store.Store
@@ -122,9 +121,9 @@ func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
 		return p.runtimeForAgent(a)
 	}
 	// A subagent name passed via --agent (the spawn command): resolve it from the
-	// subagent registry into a plain headless config. The depth-1 gate is retired
-	// — whether a resolved agent gets a delegation context is decided per session
-	// (pkg/shell3) by whether it lists subagents, not by a spawn-time flag.
+	// subagent registry into a plain headless config. Whether a resolved agent
+	// gets a delegation context is decided per session (pkg/shell3) by whether it
+	// lists subagents, not by a spawn-time flag.
 	if sa, ok := p.lc.SubagentByName(name); ok {
 		return p.runtimeForAgent(subagentToAgent(sa))
 	}
@@ -132,9 +131,9 @@ func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
 }
 
 // subagentToAgent adapts a registered subagent to the luacfg.Agent shape that
-// runtimeForAgent/BuildPersonaFor consume. Subagents is left empty because the
-// source luacfg.Subagent type carries no nested subagents (they are resolved
-// per session, not at load time). Keep in sync with luacfg.Subagent's fields.
+// runtimeForAgent/BuildPersonaFor consume. Subagents is left empty (nested
+// subagents are resolved per session, not at load time). Keep in sync with
+// luacfg.Subagent's fields.
 func subagentToAgent(sa luacfg.Subagent) luacfg.Agent {
 	return luacfg.Agent{
 		Name:           sa.Name,
@@ -165,8 +164,8 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 		toolNames = append(toolNames, t.Name)
 	}
 
-	// Subagents are no longer an in-process tool: an agent delegates by
-	// backgrounding a `shell3` subprocess (bash_bg). The per-session Delegation
+	// An agent delegates by backgrounding a `shell3` subprocess (bash_bg), not
+	// via an in-process tool. The per-session Delegation
 	// context (concrete sink/config/binary paths + the templated spawn command)
 	// is injected by pkg/shell3.Session, which can see session-level paths;
 	// a.Subagents (the allowlist) is surfaced via ActiveAgent.Subagents below so
@@ -181,11 +180,11 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 
 	// Stub tools (shell3.stub_tools) are config-global: append one minimal,
 	// no-param def per stub to EVERY agent's schema so a hallucinated tool call
-	// returns a redirect instead of erroring. Precedence: if a stub name collides
-	// with a real/custom/spawn tool already present, SKIP the stub — the real tool
-	// always wins. Surviving stubs are NOT added to customNames: the chat layer
-	// routes them via cfg.StubTools (a separate, lower-precedence branch in
-	// turn.go), so a stub never shadows a real tool at dispatch time.
+	// returns a redirect instead of erroring. A stub colliding with a real tool
+	// already present is skipped (the real tool wins). Surviving stubs are NOT
+	// added to customNames: the chat layer routes them via cfg.StubTools (a
+	// separate, lower-precedence branch in turn.go), so a stub never shadows a
+	// real tool at dispatch time.
 	if stubs := p.lc.StubNames(); len(stubs) > 0 {
 		present := make(map[string]bool, len(toolNames))
 		for _, n := range toolNames {
@@ -227,10 +226,8 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 // environmentSection renders the host-injected "## Environment" block appended
 // to every agent's system prompt. It exposes the project UUID, the agent's own
 // config path (so any front-end can resolve its config dir without a tool), and
-// the preferred shell3 fts / list-projects / list-sessions / read-session / jobs
-// helper commands for history and background-job access. Kept minimal
-// and factual; new facts are added as additional
-// "- key: value" rows under this heading.
+// the shell3 fts / list-projects / list-sessions / read-session / jobs helper
+// commands for history and background-job access.
 //
 // Returns "" when no DB path is resolvable (store-open failed / nil store path),
 // so the section never advertises a query target the agent cannot use.
@@ -255,11 +252,10 @@ func (p *Parts) environmentSection() string {
 
 // RefreshPromptFor re-renders the named agent's or subagent's system prompt
 // (used by /clear). name may be a declared agent name or a registered subagent
-// name; callers are expected to pass names that were previously validated by a
-// successful AgentRuntime call (names come from ModeLabel,
-// which is set to a.Name only on a successful lookup). The FirstAgent fallback
-// exists only so an impossible miss degrades to a sane prompt rather than
-// panicking; in correct use that branch is never reached.
+// name; callers pass names already validated by a successful AgentRuntime call
+// (names come from ModeLabel, set to a.Name only on a successful lookup). The
+// FirstAgent fallback exists only so an impossible miss degrades to a sane
+// prompt rather than panicking; in correct use that branch is never reached.
 func (p *Parts) RefreshPromptFor(name string) string {
 	env := p.environmentSection()
 	if a, ok := p.lc.AgentByName(name); ok {
@@ -491,8 +487,8 @@ func ResolveConfigPath(flag, cwd, homeDir string) (string, error) {
 
 // ResolveTelegramConfigPath returns the shell3.lua the Telegram host should load.
 // Order (telegram-only; do not reorder): the explicit flag, else the dedicated
-// telegram config ~/.shell3/telegram/shell3.lua, else the legacy global
-// ~/.shell3/shell3.lua (so an existing setup keeps working), else a project-local
+// telegram config ~/.shell3/telegram/shell3.lua, else the global
+// ~/.shell3/shell3.lua, else a project-local
 // ./shell3.lua. This deliberately differs from ResolveConfigPath, which the TUI
 // and other front-ends keep using (project-local first).
 func ResolveTelegramConfigPath(flag, cwd, homeDir string) (string, error) {

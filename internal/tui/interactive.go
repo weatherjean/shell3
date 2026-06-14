@@ -19,8 +19,7 @@ import (
 // handlers depend on. *shell3.Session satisfies it; tests fake it. Keeping it a
 // local interface (rather than taking the concrete *shell3.Session) lets the
 // slash-command tests drive each command's effect without standing up a real
-// session, agent config, or store — the same pattern the old slashTarget used
-// for the App side.
+// session, agent config, or store.
 type session interface {
 	Send(ctx context.Context, prompt string) <-chan shell3.Event
 	Clear() error
@@ -54,8 +53,8 @@ type session interface {
 }
 
 // usage is the TUI-local running tally of the last turn's token counts, fed from
-// the public Event token fields on Usage/Done. It replaces the old reliance on
-// the internal llm.Usage type so this package imports only pkg/shell3.
+// the public Event token fields on Usage/Done. It keeps this package on
+// pkg/shell3 only.
 type usage struct {
 	prompt     int
 	completion int
@@ -72,8 +71,7 @@ type usage struct {
 // assigned — see pkg/shell3's Spec.ShellInteractive doc.
 func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 	// app is captured by the ShellInteractive closure below but assigned after
-	// Start. The closure releases the terminal for an interactive shell command,
-	// mirroring the previous in-process interactive-bash runner.
+	// Start. The closure releases the terminal for an interactive shell command.
 	var app *patchapp.App
 	spec.Interactive = true
 	spec.ShellInteractive = func(ctx context.Context, cmd, workdir string) string {
@@ -97,10 +95,8 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 	if err != nil {
 		return err
 	}
-	// Close cancels any in-flight turn, joins it (so its deferred history persist
-	// runs against the still-open store), ends the store session, and flushes the
-	// audit log. pkg owns all of that now, so this loop no longer manages the
-	// store EndSession defer or the JSONL sink itself.
+	// Close cancels any in-flight turn, ends the store session, and flushes the
+	// audit log.
 	defer sess.Close()
 
 	snap := sess.Snapshot()
@@ -384,9 +380,8 @@ func consumeWakes(ctx context.Context, sess session, app patchapp.AppView, turnW
 // clears busy. The returned closure owns the per-turn streaming state (stream/
 // reasoning buffers, fence toggle), which is flushed and reset at Done/Error.
 //
-// The JSONL audit log is no longer written here — pkg/shell3 owns the sink and
-// writes every (lossless) internal event before translating to the public Event
-// streamed below.
+// pkg/shell3 owns the JSONL audit sink and writes every (lossless) internal
+// event before translating to the public Event streamed below.
 //
 // CONCURRENCY INVARIANT (busy-gate): the sink runs on the in-flight turn's drain
 // goroutine and WRITES *lastUsage. The slash-command handlers in
@@ -399,8 +394,8 @@ func consumeWakes(ctx context.Context, sess session, app patchapp.AppView, turnW
 // duration of the turn and cleared in finish, which the drain goroutine runs at
 // channel close — strictly after every event (including the last lastUsage
 // write) has been processed. (Busy is deliberately NOT cleared in the Done/Error
-// sink cases: route may drop that terminal event on cancel, which previously
-// left busy stuck on; binding the clear to channel close fixes that and also
+// sink cases: route may drop that terminal event on cancel, which would leave
+// busy stuck on; binding the clear to channel close avoids that and also
 // guarantees no sink write can follow the clear.)
 //
 // Plain-text Enter while busy routes to Session.Interject, which is
@@ -495,9 +490,8 @@ func newRenderSink(app patchapp.AppView, lastUsage *usage) (func(shell3.Event), 
 		}
 	}
 	// publishUsage forwards the per-roundtrip token counts to the status bar and
-	// records them for /usage. The Event carries the counts directly now (no
-	// llm.Usage), so we compare against the running tally to avoid redundant
-	// SetTokens calls.
+	// records them for /usage. The Event carries the counts directly, so we
+	// compare against the running tally to avoid redundant SetTokens calls.
 	publishUsage := func(ev shell3.Event) {
 		u := usage{prompt: ev.PromptTokens, completion: ev.CompletionTokens, total: ev.TotalTokens}
 		if u == *lastUsage {

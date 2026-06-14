@@ -43,16 +43,15 @@ func (s *Session) SetMessages(msgs []llm.Message) {
 
 // RunParts executes one user→assistant turn whose user message carries media
 // parts alongside the prompt text. With parts the message gets
-// ContentParts = [text(input), parts...] — the text part is omitted when
-// input is empty, since some providers reject empty text content parts.
-// Content stays set to input for
-// history rows and the user_message audit event (the openai adapter sends
-// ContentParts and ignores Content when both are present). Emits the
-// user_message event, runs the turn loop, and (if cfg.Store is non-nil)
-// persists newly appended messages to the store. Persistence happens inside
-// the turn, before the terminal turn_done/error event fires, so a consumer
-// reacting to that event (e.g. /clear, /rollback) can't mutate history
-// concurrently with the save. Blocks until the turn completes.
+// ContentParts = [text(input), parts...] — the text part is omitted when input
+// is empty, since some providers reject empty text content parts. Content stays
+// set to input for history rows and the user_message audit event (the openai
+// adapter sends ContentParts and ignores Content when both are present). Emits
+// the user_message event, runs the turn loop, and (if cfg.Store is non-nil)
+// persists newly appended messages to the store. Persistence happens inside the
+// turn, before the terminal turn_done/error event fires, so a consumer reacting
+// to that event (e.g. /clear, /rollback) can't mutate history concurrently with
+// the save. Blocks until the turn completes.
 func (s *Session) RunParts(ctx context.Context, cfg TurnConfig, input string, parts []llm.ContentPart) {
 	emitUserMessage(s, input)
 	from := len(s.messages)

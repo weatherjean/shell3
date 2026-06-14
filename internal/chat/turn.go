@@ -189,11 +189,11 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 
 		// Replace provider-emitted tool-call ids with sequential session-scoped
 		// decimal ids ("1", "2", ...). Provider-native ids like "web_fetch:0"
-		// get truncated by models when echoed back, breaking id-based tool
-		// result addressing (e.g. the /prune slash command). A bare integer has
-		// no separator to chop at. Provider just pairs ids by string match
-		// between assistant.tool_calls[i].id and tool.tool_call_id, so the
-		// rewrite is transparent on the wire.
+		// get truncated by models when echoed back, breaking id-based tool-result
+		// addressing (e.g. the /prune slash command); a bare integer has no
+		// separator to chop at. The provider pairs ids by string match between
+		// assistant.tool_calls[i].id and tool.tool_call_id, so the rewrite is
+		// transparent on the wire.
 		for i := range toolCalls {
 			toolCalls[i].ID = sess.allocToolCallID()
 		}
@@ -473,11 +473,9 @@ func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools
 }
 
 // compactionFloor is the minimum number of session messages required before
-// auto-compaction will run. Below this there is too little history for a
-// summary to free meaningful context, and compacting a near-empty
-// conversation only adds an LLM round-trip and a summary boilerplate message
-// for no benefit. A few exchanges (user+assistant pairs, plus tool messages)
-// comfortably clears this floor.
+// auto-compaction will run. Below this there is too little history for a summary
+// to free meaningful context, so compacting only adds an LLM round-trip and a
+// boilerplate summary message for no benefit.
 const compactionFloor = 8
 
 // compactionInstruction is the system prompt for the single quiet LLM call that

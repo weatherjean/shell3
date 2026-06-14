@@ -1,3 +1,4 @@
+// Package ref manages the per-project UUID stored in .ref.
 package ref
 
 import (
@@ -39,7 +40,7 @@ func reloadWinner(l paths.Local) (string, error) {
 }
 
 // Init returns the project UUID for this cwd, minting and writing .ref on first
-// use. Idempotent. The UUID is now purely a namespacing key for the single
+// use. Idempotent. The UUID is purely a namespacing key for the single
 // canonical DB — no project dir or meta is created. O_EXCL serialises concurrent
 // first-use in the same cwd.
 func Init(l paths.Local, g paths.Global) (string, error) {

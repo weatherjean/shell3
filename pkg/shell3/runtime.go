@@ -308,14 +308,14 @@ func (rt *Runtime) SessionTurns(id int64) ([]HistoryEntry, error) {
 
 // subagentIDRe constrains transcript ids to a safe charset (alphanumerics plus
 // '-'/'_'), preventing any path traversal when building the audit-file path.
-// Subagent ids are now caller-chosen (the agent picks one per spawn) rather than
-// minted, so the set is broadened from "a<N>" while still excluding '/' and '.'.
+// Subagent ids are caller-chosen (the agent picks one per spawn), so the charset
+// excludes '/' and '.'.
 var subagentIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // SubagentInfo is a read-only listing of one spawned subagent's transcript, for
-// the dashboard. Subagents are no longer an in-process registry — they are
-// backgrounded `shell3` runs that stream a transcript to .shell3/agents/<id>.jsonl
-// — so this is derived from those files on disk rather than a live registry.
+// the dashboard. Subagents are backgrounded `shell3` runs that stream a
+// transcript to .shell3/agents/<id>.jsonl; this is derived from those files on
+// disk.
 type SubagentInfo struct {
 	ID         string `json:"id"`               // transcript filename stem
 	Transcript string `json:"transcript"`       // path under .shell3/agents
@@ -369,9 +369,9 @@ func peekTranscript(path string) SubagentInfo {
 }
 
 // SubagentList scans .shell3/agents/*.jsonl under the runtime root and returns
-// one entry per transcript (newest first by mod time). It replaces the former
-// in-process Subagents() registry view: the dashboard reads completed/running
-// subagent transcripts from disk. Returns nil when the directory is absent.
+// one entry per transcript (newest first by mod time). The dashboard reads
+// completed/running subagent transcripts from disk. Returns nil when the
+// directory is absent.
 func (rt *Runtime) SubagentList() ([]SubagentInfo, error) {
 	dir := filepath.Join(rt.workDir, ".shell3", "agents")
 	entries, err := os.ReadDir(dir)

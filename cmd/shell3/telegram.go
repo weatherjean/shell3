@@ -113,12 +113,9 @@ func newTelegramCommand() *cobra.Command {
 				fmt.Printf("dashboard on %s (expose via: tailscale serve https / proxy %s)\n", tg.Dashboard.Addr, tg.Dashboard.Addr)
 			}
 
-			// /reload + reload tool: rebuild config in place, re-decorate the
-			// session, and swap the cron scheduler. Runs only when the session
-			// is idle (commands handled between turns; the reload tool defers to
-			// end-of-turn — see registerReloadTool). The coordination lives in
-			// reloadAndRearm (testable); the closure just threads the mutable
-			// scheduler handle across reloads.
+			// /reload + reload tool: rebuild config, re-decorate the session, swap
+			// the cron scheduler. Coordination lives in reloadAndRearm (testable);
+			// the closure threads the mutable scheduler handle across reloads.
 			b.SetReloader(func() (shell3.ReloadResult, error) {
 				var dash cronDashboard
 				if srv != nil { // avoid a non-nil interface wrapping a nil *web.Server
@@ -129,14 +126,10 @@ func newTelegramCommand() *cobra.Command {
 				return res, err
 			})
 
-			// If the dashboard has a public URL, set the bot's in-chat menu
-			// button to open it as a Mini App (the bottom-left "Open App"
-			// button). Best-effort: a failure here must not stop the bot.
-			// The dashboard's authenticated launcher is the menu button (bottom-
-			// left): a Mini App opened from the menu button receives signed
-			// initData, so it passes the dashboard's auth. (A reply-keyboard
-			// web_app button cannot — it gets no initData — so the bar carries
-			// only command buttons; see below.)
+			// Point the menu button at the dashboard Mini App (best-effort). The
+			// menu button is the authenticated launcher: a Mini App opened from it
+			// receives signed initData and passes auth. A reply-keyboard web_app
+			// button gets no initData, so the bar carries only command buttons.
 			if tg.Dashboard.Enabled && tg.Dashboard.URL != "" {
 				if err := client.SetMenuButton(ctx, "dash", tg.Dashboard.URL); err != nil {
 					fmt.Printf("warning: could not set menu button: %v\n", err)
@@ -166,9 +159,8 @@ func newTelegramCommand() *cobra.Command {
 }
 
 // configReloader, rearmBot, and cronDashboard are the narrow slices of
-// *shell3.Runtime, *telegram.Bot, and *web.Server that reloadAndRearm needs.
-// Defining them here keeps the reload-coordination logic unit-testable with
-// fakes instead of a live runtime, bot, and HTTP server.
+// *shell3.Runtime, *telegram.Bot, and *web.Server that reloadAndRearm needs,
+// keeping the reload-coordination logic unit-testable with fakes.
 type configReloader interface {
 	Reload() (shell3.ReloadResult, error)
 	Cron() []shell3.CronJob
@@ -186,10 +178,10 @@ type cronDashboard interface {
 // reloadAndRearm performs a /reload: rebuild config, re-decorate the session's
 // host tools, then stop the old cron scheduler and arm a fresh one from the
 // reloaded jobs (rewiring the bot's /run handler and the dashboard's cron
-// source). It returns the new scheduler (nil when the reloaded config has no
-// jobs), the reload result, and any error. dash may be nil when no dashboard
-// runs. On reload failure the old scheduler is left running and returned
-// unchanged, so a bad config never tears down a working schedule.
+// source). Returns the new scheduler (nil when no jobs), the reload result, and
+// any error; dash may be nil when no dashboard runs. On failure the old
+// scheduler is left running and returned unchanged, so a bad config never tears
+// down a working schedule.
 func reloadAndRearm(r configReloader, b rearmBot, dash cronDashboard, disp cron.Dispatcher, old *cron.Scheduler) (*cron.Scheduler, shell3.ReloadResult, error) {
 	res, err := r.Reload()
 	if err != nil {

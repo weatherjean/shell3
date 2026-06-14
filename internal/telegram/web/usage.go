@@ -5,8 +5,7 @@ package web
 import "sync"
 
 // UsageStore holds the most recent turn's token usage (per turn, not
-// accumulated). The bot writes it; the dashboard reads it. Safe for concurrent
-// use.
+// accumulated). The bot writes it; the dashboard reads it. Concurrency-safe.
 type UsageStore struct {
 	mu                        sync.Mutex
 	set                       bool

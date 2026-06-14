@@ -15,14 +15,14 @@ App shell for inline chat-style terminal apps. Built on `patchtui`. Owns the inp
 ## What it does NOT do
 
 - No LLM logic, no conversation state — that's the caller's domain.
-- No event types beyond bare struct definitions in `events.go`; the caller emits and drains them.
+- No event types; the caller emits and drains its own events.
 - No persistent storage, hooks, or auth.
 
 ## Usage
 
 ```go
 app := patchapp.New(modeLabel, statusMsg, patchapp.WelcomeInfo{
-    Persona: "assistant", // + ProjectRef, ActiveSkills, ActiveTools — printed once on start
+    Persona: "assistant", // + ProjectRef — printed once on start
 })
 
 // Slash commands (auto /help built from the registry).

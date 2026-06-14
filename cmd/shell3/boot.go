@@ -96,8 +96,7 @@ func runBoot(f *bootFlags) error {
 	if err != nil {
 		return err
 	}
-	// Default compaction threshold to 80% of the context window, leaving headroom
-	// for the post-compaction turn. Recomputed from whatever window the user chose.
+	// Default compact threshold to 80% of the context window (headroom for the next turn).
 	compactAt, err := intValue(f.compactAt, "Auto-compact at (tokens)", ctxWindow*80/100, in, tty)
 	if err != nil {
 		return err
@@ -173,10 +172,9 @@ func runBoot(f *bootFlags) error {
 	return nil
 }
 
-// envKeyForName derives the .env key for a model handle: uppercased, with any
-// non-alphanumeric run collapsed to a single underscore, suffixed _API_KEY. It
-// guarantees a valid identifier: an empty result falls back to MAIN, and a
-// leading digit is prefixed with an underscore.
+// envKeyForName derives the .env key for a model handle: upper-cased, non-alnum
+// runs collapsed to "_", suffixed _API_KEY. Empty falls back to MAIN; a leading
+// digit is prefixed with "_".
 func envKeyForName(name string) string {
 	s := nonAlnum.ReplaceAllString(strings.ToUpper(name), "_")
 	s = strings.Trim(s, "_")
@@ -191,9 +189,8 @@ func envKeyForName(name string) string {
 
 var nonAlnum = regexp.MustCompile(`[^A-Z0-9]+`)
 
-// mergeEnv appends each key=value from kv to existing only if the key is not
-// already present as its own line. Existing values are never changed. The
-// result always ends with a trailing newline.
+// mergeEnv appends each kv pair absent from existing (existing values
+// untouched); result ends with a newline.
 func mergeEnv(existing string, kv [][2]string) string {
 	have := map[string]bool{}
 	for _, line := range strings.Split(existing, "\n") {
@@ -264,9 +261,8 @@ func printTelegramBootSuccess(dir, cfgPath, envPath string) {
 	fmt.Println("Run:  shell3 telegram")
 }
 
-// intValue reads a positive-integer config value: flag wins; else prompt (TTY)
-// with the given default; falls back to def when stdin is not a terminal. The
-// value is never required — there is always a usable default.
+// intValue reads a positive-integer config value: flag wins, else prompt (TTY)
+// or def. Never required.
 func intValue(flag, label string, def int, in *bufio.Reader, tty bool) (int, error) {
 	raw, err := value(flag, label, strconv.Itoa(def), in, tty, false)
 	if err != nil {

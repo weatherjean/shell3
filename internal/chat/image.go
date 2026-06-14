@@ -42,7 +42,7 @@ func loadImagePart(path, workDir string) (llm.ContentPart, int, int, error) {
 
 	info, err := os.Stat(path)
 	if err != nil {
-		return llm.ContentPart{}, 0, 0, fmt.Errorf(`cannot read "%s": %w`, path, err)
+		return llm.ContentPart{}, 0, 0, fmt.Errorf("cannot read %q: %w", path, err)
 	}
 	if info.Size() > maxImageBytes {
 		return llm.ContentPart{}, 0, 0, fmt.Errorf("image too large (%d MB, max 10 MB)", info.Size()>>20)
@@ -50,7 +50,7 @@ func loadImagePart(path, workDir string) (llm.ContentPart, int, int, error) {
 
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return llm.ContentPart{}, 0, 0, fmt.Errorf(`cannot read "%s": %w`, path, err)
+		return llm.ContentPart{}, 0, 0, fmt.Errorf("cannot read %q: %w", path, err)
 	}
 
 	encoded, w, h, err := resizeAndEncodeJPEG(raw, maxImageSide, jpegQuality)

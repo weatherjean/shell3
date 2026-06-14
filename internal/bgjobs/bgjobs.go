@@ -25,8 +25,7 @@ import (
 )
 
 // Registry records and lists spawned background jobs. Implemented by
-// internal/jobstore over the canonical store; kept as an interface here so
-// bgjobs stays decoupled from store (no import cycle).
+// internal/jobstore over the canonical store.
 type Registry interface {
 	Add(Job) error
 	List(workdir string) ([]Job, error)
@@ -53,7 +52,7 @@ type Job struct {
 // env, when non-empty, supplies extra KEY=VALUE entries appended to the
 // inherited environment (os.Environ); used by command-template custom tools to
 // pass their declared params + secrets to the background command. nil/empty
-// means the job inherits only the host environment (the prior behavior).
+// means the job inherits only the host environment.
 func Start(reg Registry, argv []string, display, workdir string, env []string) (Job, error) {
 	if len(argv) == 0 {
 		return Job{}, fmt.Errorf("argv is required")
@@ -86,9 +85,9 @@ func Start(reg Registry, argv []string, display, workdir string, env []string) (
 
 	c := exec.Command(argv[0], argv[1:]...)
 	c.Dir = workdir
-	// The child inherits this process's environment. The depth-1 gate is retired:
-	// a spawned `shell3` subagent may itself delegate, and reports its result back
-	// to its parent via the --parent-session pointer (socket/inbox transport).
+	// The child inherits this process's environment. A spawned shell3 subagent
+	// may itself delegate, reporting its result back to its parent via the
+	// --parent-session pointer (socket/inbox transport).
 	c.Env = append([]string(nil), os.Environ()...)
 	if len(env) > 0 {
 		c.Env = append(c.Env, env...)
@@ -104,10 +103,9 @@ func Start(reg Registry, argv []string, display, workdir string, env []string) (
 		return Job{}, fmt.Errorf("start: %w", err)
 	}
 	pid := c.Process.Pid
-	// Reap in a goroutine so the exited process leaves no zombie. We do NOT
-	// Release(): that leaves the pid as a zombie forever, and `kill(pid, 0)`
-	// reports zombies as alive, breaking the model's liveness checks. The Wait()
-	// is solely to reap the zombie.
+	// Reap in a goroutine so the exited process leaves no zombie. Release()
+	// would leave the pid a zombie, and kill(pid, 0) reports zombies as alive,
+	// breaking the model's liveness checks; the Wait() reaps it.
 	go func() {
 		_ = c.Wait()
 	}()
@@ -124,9 +122,9 @@ func Start(reg Registry, argv []string, display, workdir string, env []string) (
 		// The process is spawned but unrecorded (PID never returned), so the
 		// model can't manage it. Tear down the whole group and drop its log so a
 		// failing persist can't orphan a live, unmanageable process; the reaping
-		// goroutine then Wait()s it. The kill error is harmless to discard:
-		// Add fails synchronously so pid reuse isn't a concern, and an
-		// already-exited process just yields ESRCH.
+		// goroutine then Wait()s it. The kill error is safe to discard: Add
+		// fails synchronously so pid reuse isn't a concern, and an already-exited
+		// process just yields ESRCH.
 		_ = syscall.Kill(-pid, syscall.SIGKILL)
 		_ = os.Remove(logPath)
 		return Job{}, fmt.Errorf("persist: %w", err)
@@ -160,7 +158,7 @@ func KillAll(reg Registry, workdir string) (int, error) {
 		}
 	}
 	if _, err := reg.Clear(workdir); err != nil {
-		return killed, fmt.Errorf("bgjobs: clear registry: %w", err)
+		return killed, fmt.Errorf("clear registry: %w", err)
 	}
 	return killed, nil
 }

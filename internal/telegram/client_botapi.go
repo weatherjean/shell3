@@ -125,9 +125,8 @@ func (c *botAPIClient) downloadFile(ctx context.Context, fileID, mime, filename 
 // Updates delivers normalized inbound messages until ctx is cancelled.
 func (c *botAPIClient) Updates(ctx context.Context) <-chan Msg { return c.out }
 
-// Send posts a text message. ParseMode is deliberately omitted: arbitrary agent
-// output often contains unbalanced Markdown characters that cause Telegram to
-// reject the message.
+// Send posts a text message. ParseMode is omitted because arbitrary agent output
+// often contains unbalanced Markdown that Telegram would reject.
 func (c *botAPIClient) Send(ctx context.Context, chatID int64, text string) (int, error) {
 	m, err := c.b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: chatID,

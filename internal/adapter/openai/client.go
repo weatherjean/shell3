@@ -29,13 +29,9 @@ type bodyTap struct {
 	reasoning string
 	done      chan struct{}
 	rt        http.RoundTripper
-	// reasoningQueue is the incremental feed of reasoning fragments for onEvent
-	// (reasoning, above, is the full accumulated string for snapshot/WaitReasoning).
-	// The Stream goroutine drains it via drainReasoning, so onEvent is only ever
-	// called from that single goroutine — never from the scan goroutine. Like
-	// reasoning/done, it is per-request state reset by RoundTrip. All access is
-	// under mu, so an orphaned scan goroutine appending here after a cancelled
-	// turn is harmless (cleared by the next RoundTrip / drain).
+	// reasoningQueue is the incremental feed of reasoning fragments, drained by
+	// the Stream goroutine so onEvent is only ever called from that single
+	// goroutine. All access is under mu.
 	reasoningQueue []string
 }
 
@@ -96,8 +92,7 @@ func (b *bodyTap) scanReasoning(r io.ReadCloser, done chan struct{}) {
 			continue
 		}
 		for _, c := range chunk.Choices {
-			// Prefer "reasoning" (OpenRouter), fall back to "reasoning_content"
-			// (Moonshot/DeepSeek); see bodyTap for the field-naming note.
+			// Prefer "reasoning", fall back to "reasoning_content" (see bodyTap).
 			frag := c.Delta.Reasoning
 			if frag == "" {
 				frag = c.Delta.ReasoningContent
@@ -248,9 +243,9 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 	for k, v := range c.extra {
 		extraOpts = append(extraOpts, option.WithJSONSet(k, v))
 	}
-	// Surface the SDK's otherwise-invisible retries to the caller. The SDK
-	// only retries getting the initial response, so this fires for pre-stream
-	// failures (connection/5xx/429) — never mid-stream after tokens emit.
+	// Surface the SDK's otherwise-invisible retries to the caller. The SDK only
+	// retries getting the initial response, so this fires for pre-stream failures
+	// (connection/5xx/429), never mid-stream after tokens emit.
 	extraOpts = append(extraOpts, option.WithMiddleware(retryObserver(onEvent)))
 	stream := c.oc.Chat.Completions.NewStreaming(ctx, params, extraOpts...)
 	defer func() { _ = stream.Close() }()
@@ -302,15 +297,14 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 		// On error/ctx-cancel we return here without the final drain below, so
 		// any reasoning queued after the last in-loop drain is discarded.
 		// Reasoning is best-effort on a failed/cancelled turn, whose partial
-		// output the caller abandons anyway — matching the pre-funnel behavior.
+		// output the caller abandons anyway.
 		return wrapStreamErr(err)
 	}
 
 	_ = stream.Close()
 	if c.tap != nil {
-		// WaitReasoning blocks until scanReasoning finishes (on the success
-		// path it returns promptly), so this final drain captures any fragments
-		// queued after the last content chunk, before the Done event.
+		// Wait for scanReasoning to finish, then drain any fragments queued
+		// after the last content chunk, before the Done event.
 		c.tap.WaitReasoning(ctx)
 		for _, frag := range c.tap.drainReasoning() {
 			onEvent(llm.StreamEvent{ReasoningDelta: frag})
@@ -335,10 +329,9 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 }
 
 // wrapStreamErr maps a stream.Err() into a returned error. A mid-stream EOF
-// (the provider closed the SSE connection with no terminating event — common on
-// out-of-credits/quota, rate limits, or an upstream proxy/timeout) gets a
+// (the provider closed the SSE connection with no terminating event) gets a
 // clearer, actionable message; all other errors keep the generic wrap. The
-// original error is wrapped in both cases so errors.Is still works for callers.
+// original error is wrapped in both cases so errors.Is still works.
 func wrapStreamErr(err error) error {
 	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
 		return fmt.Errorf("llm: the model stream ended early — the provider closed the connection mid-response. "+

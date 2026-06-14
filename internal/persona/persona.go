@@ -1,7 +1,7 @@
 // Package persona holds the slim runtime carrier for an agent's system
-// prompt, tool schema, and request parameters. Loading and templating now
-// live in internal/luacfg; this package is just the data structure that the
-// chat session and TUI read from.
+// prompt, tool schema, and request parameters. Loading and templating live in
+// internal/luacfg; this package is just the data structure that the chat
+// session and TUI read from.
 package persona
 
 import "github.com/weatherjean/shell3/internal/llm"

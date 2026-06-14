@@ -78,7 +78,7 @@ func (s *Session) reportTo(st *store.Store, parentID int64, n notify.Notificatio
 		payload, _ := json.Marshal(n)
 		if err := st.AppendInbox(parentID, payload); err != nil {
 			// A dropped inbox row is a lost result — make the failure visible
-			// rather than silently black-holing it (the original-bug failure mode).
+			// rather than silently black-holing it.
 			chat.LogOrNoop(s.cfg.Log).Warn("report: append inbox failed", "parent", parentID, "error", err)
 		}
 		// Reclaim a parent stuck "live" whose process is gone (kill -9 / crash):
@@ -169,8 +169,8 @@ func (s *Session) spawnRevive(st *store.Store, parentID int64) error {
 }
 
 // startTransport opens this session's socket listener and marks it live in the
-// store registry. Replaces the old sink watcher. A session with no store id, no
-// workdir, or no store skips the transport.
+// store registry. A session with no store id, no workdir, or no store skips the
+// transport.
 func (s *Session) startTransport(rt *Runtime) {
 	id := s.sess.ID()
 	if id == 0 || s.cfg.WorkDir == "" || s.cfg.Store == nil {
@@ -210,7 +210,7 @@ func (s *Session) stopTransport() {
 }
 
 // injectNotification injects a received notification into the running session,
-// waking it if idle. Mirrors the old sink watcher's deliverNotification.
+// waking it if idle.
 func (s *Session) injectNotification(rt *Runtime, n notify.Notification) {
 	s.sess.Interject(renderNotification(n))
 	if !s.isBusy() {
@@ -220,7 +220,7 @@ func (s *Session) injectNotification(rt *Runtime, n notify.Notification) {
 
 // renderNotification renders a notification as the short pointer string injected
 // into the agent's next turn. Each Kind names where the detail lives so the
-// agent can read it on demand. Mirrors the old sink watcher's formatNotification.
+// agent can read it on demand.
 func renderNotification(n notify.Notification) string {
 	switch n.Kind {
 	case notify.KindBgDone:

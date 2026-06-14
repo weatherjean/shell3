@@ -39,13 +39,10 @@ var MutedGreen = FgRGB(120, 170, 120)
 // Violet is used for user-defined tool-call headers.
 var Violet = FgRGB(139, 92, 246)
 
-// Pink is a spare accent in the palette (no current consumer).
-var Pink = FgRGB(236, 72, 153)
-
 // MutedThinking styles reasoning/thinking output. Named for its role rather
-// than its hue so the color can evolve without churn at call sites. Current
-// value is a desaturated sage that reads as quiet but stays distinct from
-// the cool-gray Dim style and the louder MutedGreen used for tool output.
+// than its hue so the color can evolve without churn at call sites. A
+// desaturated sage that stays distinct from the cool-gray Dim style and the
+// louder MutedGreen used for tool output.
 var MutedThinking = FgRGB(135, 165, 140)
 
 // FgRGB returns the SGR sequence to set the foreground to a 24-bit RGB color.

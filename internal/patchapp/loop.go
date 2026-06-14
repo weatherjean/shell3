@@ -152,12 +152,11 @@ func (a *App) tickerLoop(ctx context.Context) {
 	}
 }
 
-// winchLoop marks a resize as pending on every SIGWINCH. The actual erase +
-// winchLoop redraws the frame on terminal resize. The first SIGWINCH in
-// a burst immediately erases the live frame at its known anchor so a
-// stale bar at an old position does not linger on screen. The re-render
-// is debounced ~200ms so rapid drag-resize bursts collapse into one
-// paint at the final dimensions.
+// winchLoop redraws the frame on terminal resize. The first SIGWINCH in a
+// burst immediately erases the live frame at its known anchor so a stale bar
+// at an old position does not linger on screen. The re-render is debounced
+// ~200ms so rapid drag-resize bursts collapse into one paint at the final
+// dimensions.
 func (a *App) winchLoop(ctx context.Context, winch <-chan os.Signal) {
 	var t *time.Timer
 	var pending <-chan time.Time

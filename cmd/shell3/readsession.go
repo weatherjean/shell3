@@ -16,7 +16,7 @@ func newReadSessionCommand() *cobra.Command {
 	var page, pageSize int
 	cmd := &cobra.Command{
 		Use:   "read-session <session-id>",
-		Short: "Dump a past session's full transcript in chronological order (read-only).",
+		Short: "Dump a past session's full transcript in chronological order (read-only)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := strconv.ParseInt(args[0], 10, 64)
@@ -58,8 +58,8 @@ func newReadSessionCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&configPath, "config", "c", "", "Config name or *.lua path (anchors the canonical DB; default: ~/.shell3).")
-	cmd.Flags().IntVar(&page, "page", 0, "Zero-based page index.")
-	cmd.Flags().IntVar(&pageSize, "page-size", 50, "Turns per page.")
+	cmd.Flags().StringVarP(&configPath, "config", "c", "", "Config name or *.lua path (anchors the canonical DB; default: ~/.shell3)")
+	cmd.Flags().IntVar(&page, "page", 0, "Zero-based page index")
+	cmd.Flags().IntVar(&pageSize, "page-size", 50, "Turns per page")
 	return cmd
 }

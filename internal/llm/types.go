@@ -38,11 +38,10 @@ type Message struct {
 	ToolCallID   string        `json:"tool_call_id,omitempty"`
 	Name         string        `json:"name,omitempty"`
 	ToolCalls    []ToolCall    `json:"tool_calls,omitempty"`
-	// ReasoningContent holds non-standard chain-of-thought text some
-	// OpenAI-compatible providers emit (Moonshot/kimi, DeepSeek). The
-	// openai adapter populates it from streaming and echoes it back on
-	// the next turn — Moonshot 400s when thinking mode is enabled and
-	// the assistant tool-call message lacks reasoning_content.
+	// ReasoningContent holds the non-standard chain-of-thought text the openai
+	// adapter populates from streaming and echoes back on the next turn:
+	// Moonshot 400s when thinking mode is on and an assistant tool-call message
+	// lacks reasoning_content.
 	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 

@@ -135,7 +135,7 @@ func truncateOutput(s string) string {
 // Bash family tools use the yellow $-prompt style; edit_file gets a one-line
 // args summary; everything else uses the default colored toolCallHeader. The
 // custom-tool flag comes straight off the public event (ev.IsCustomTool,
-// resolved inside pkg/shell3) — renderers no longer need the agent config.
+// resolved inside pkg/shell3) — renderers read it straight off the event.
 func renderToolCallHeader(ev shell3.Event) string {
 	switch ev.ToolName {
 	case "bash":

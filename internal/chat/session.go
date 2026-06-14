@@ -14,11 +14,9 @@ import (
 // the underlying store session id without going through internal helpers.
 type Session struct {
 	// msgMu guards the cross-goroutine append-vs-read on messages: the turn
-	// goroutine appends (and reads sequentially, no self-race) while a second
-	// reader — the Telegram dashboard polling History() — copies the slice
-	// concurrently. Only that pair needs guarding; the turn loop's own reads
-	// stay lock-free. Kept separate from inboxMu (different invariant, avoids a
-	// lock-order coupling).
+	// goroutine appends while a second reader — the Telegram dashboard polling
+	// History() — copies the slice concurrently. The turn loop's own reads stay
+	// lock-free. Kept separate from inboxMu to avoid a lock-order coupling.
 	msgMu    sync.RWMutex
 	messages []llm.Message
 	// nextToolCallID drives sequential numeric ids ("1", "2", ...) that replace

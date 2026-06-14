@@ -4,11 +4,10 @@
 //
 // A model may declare a `run_proxy` shell command in shell3.lua. The first time
 // an agent activates that model, Spawner runs the command once — detached, in
-// its own process group, fire-and-forget. The OS port bind is the mutex: if a
-// proxy is already listening (started earlier, by another shell3 instance, or by
-// the user), the freshly spawned command simply fails to bind and exits, which
-// is harmless. Spawn failures are never fatal; the first request to the model is
-// the source of truth and surfaces any real problem as an ordinary API error.
+// its own process group, fire-and-forget. The OS port bind acts as the mutex: a
+// command spawned while a proxy is already listening simply fails to bind and
+// exits harmlessly. Spawn failures are never fatal; the first request to the
+// model surfaces any real problem as an ordinary API error.
 //
 // The proxy outlives shell3 — it is never killed or reaped on exit.
 package modelproxy

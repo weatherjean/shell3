@@ -48,10 +48,8 @@ func (l *fileLogger) Error(msg string, err error, fields ...any) {
 	l.write("ERROR", msg, err, fields, true)
 }
 
-// write formats and emits a log line. When mirror is true the line is also
-// written to stderr. The file write and the optional stderr mirror both happen
-// while holding l.mu so their relative ordering stays consistent under
-// concurrency.
+// write formats and emits a log line, also mirroring to stderr when mirror is
+// true. Both writes happen under l.mu so their ordering stays consistent.
 func (l *fileLogger) write(level, msg string, err error, fields []any, mirror bool) {
 	var b strings.Builder
 	b.WriteString(time.Now().UTC().Format(time.RFC3339))
@@ -80,8 +78,8 @@ func (l *fileLogger) write(level, msg string, err error, fields []any, mirror bo
 }
 
 // Open creates a Logger that writes to path, rotating the file if it exceeds
-// maxBytes before opening. Up to maxArchives rotated files are kept.
-// The caller is responsible for calling Close on the returned closer when done.
+// maxBytes (keeping up to maxArchives archives). The caller closes the returned
+// closer when done.
 func Open(path string, maxBytes int64, maxArchives int) (Logger, io.Closer, error) {
 	f, err := OpenFile(path, maxBytes, maxArchives)
 	if err != nil {

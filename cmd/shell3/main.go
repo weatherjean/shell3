@@ -31,9 +31,9 @@ func main() {
 		rootAgent      string
 	)
 	root.Args = cobra.ArbitraryArgs
-	root.Flags().Int64Var(&rootResume, "resume", 0, "Resume a stored session by id in the interactive TUI.")
+	root.Flags().Int64Var(&rootResume, "resume", 0, "Resume a stored session by id in the interactive TUI")
 	root.Flags().StringVarP(&rootConfigPath, "config", "c", "", "Config name (→ ~/.shell3/<name>.lua) or path to a *.lua file (default: ~/.shell3/shell3.lua)")
-	root.Flags().StringVar(&rootAgent, "agent", "", "Select the active agent by name (default: first declared).")
+	root.Flags().StringVar(&rootAgent, "agent", "", "Select the active agent by name (default: first declared)")
 	root.RunE = func(cmd *cobra.Command, args []string) error {
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -57,10 +57,8 @@ func main() {
 	root.AddCommand(newJobsCommand())
 	root.AddCommand(newReadSessionCommand())
 
-	// Print brand header on every subcommand and on --help output. The
-	// root chat command suppresses it (handled inside RunE) since chat
-	// renders its own welcome banner. Skip when stdout is not a terminal
-	// so piped output stays clean.
+	// Print the brand header for subcommands and --help (TTY only). Root chat
+	// suppresses it — it renders its own banner.
 	maybeHeader := func() {
 		if !term.IsTerminal(int(os.Stdout.Fd())) {
 			return

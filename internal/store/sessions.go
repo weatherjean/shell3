@@ -117,14 +117,14 @@ func (s *Store) Liveness(id int64) (pid int, sock, status string, err error) {
 }
 
 // ClaimRevive atomically transitions a session to "reviving", returning true
-// only for the single caller that wins the race. It fires for a "dormant"
-// parent, OR for one stuck "live" whose process is gone (kill -9 / crash /
-// reboot): pass deadPID = the recorded pid the caller confirmed dead, and 0 when
-// there is none. A "live" parent whose process is still running (deadPID 0, or a
-// pid that doesn't match the row) is never reclaimed, so a healthy parent is
-// never double-revived. Without the dead-pid branch a crashed parent would stay
-// "live" forever and strand every report (ClaimRevive could only fire on
-// "dormant"). This is the leader election that spawns exactly one reviver.
+// only for the single caller that wins the race (leader election for exactly
+// one reviver). It fires for a "dormant" parent, OR for one stuck "live" whose
+// process is gone (kill -9 / crash / reboot): pass deadPID = the recorded pid
+// the caller confirmed dead, 0 when there is none. A "live" parent whose
+// process is still running (deadPID 0, or a pid that doesn't match the row) is
+// never reclaimed, so a healthy parent is never double-revived. The dead-pid
+// branch keeps a crashed parent from staying "live" forever and stranding
+// every report.
 func (s *Store) ClaimRevive(id int64, deadPID int) (bool, error) {
 	res, err := s.db.Exec(
 		`UPDATE sessions SET status = 'reviving'

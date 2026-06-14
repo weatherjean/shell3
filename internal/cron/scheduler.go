@@ -51,9 +51,8 @@ func New(disp Dispatcher, jobs []shell3.CronJob) (*Scheduler, error) {
 	for _, j := range jobs {
 		job := j // capture
 		s.last[job.Name] = JobStatus{Name: job.Name, Schedule: job.Schedule, Agent: job.Agent, Prompt: job.Prompt, WorkDir: job.WorkDir, Notify: job.Notify}
-		// v1 deliberately allows overlapping fires: each tick is a fresh
-		// subagent (plain AddFunc, no cron.SkipIfStillRunning wrapper). If a
-		// job's runs prove noisy, wrap with a skip-if-running chain later.
+		// Overlapping fires are allowed: each tick is a fresh subagent (no
+		// SkipIfStillRunning wrapper).
 		if _, err := s.c.AddFunc(job.Schedule, func() { s.fire(job) }); err != nil {
 			return nil, fmt.Errorf("cron: job %q bad schedule %q: %w", job.Name, job.Schedule, err)
 		}

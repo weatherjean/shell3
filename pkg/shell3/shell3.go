@@ -85,7 +85,7 @@
 // transport (internal/notify, internal/socket); the parent's transport listener
 // injects that pointer (transcript path + short preview) into its next turn. The
 // parent cats the transcript for detail. A spawned child may itself delegate —
-// the depth-1 gate is retired — and reports up its own parent pointer, so
+// there is no depth gate — and reports up its own parent pointer, so
 // completions cascade toward root. Cancellation falls out of bgjobs.KillAll,
 // since a subagent is just a tracked bg job.
 package shell3
@@ -149,7 +149,7 @@ type Spec struct {
 	WorkDir    string // "" → os.Getwd()
 	Agent      string // "" → first declared agent; unknown name fails Start/Run
 	// Interactive flips the underlying build out of headless mode. The zero
-	// value (false) preserves the historical headless behavior: the
+	// value (false) keeps headless: the
 	// shell_interactive tool is stripped from the schema and a system-reminder
 	// explains the constraint. Set true for a TUI-style front-end that can
 	// release the terminal for an interactive shell (see ShellInteractive).
@@ -243,7 +243,7 @@ func translate(ev chat.Event) (Event, bool) {
 		return Event{Kind: Retry, Text: ev.Text}, true
 	case chat.EventError:
 		err := ev.Err
-		if err == nil { // defensive: older/internal emitters may set only Text
+		if err == nil { // defensive: some emitters may set only Text
 			err = errors.New(ev.Text)
 		}
 		return Event{Kind: Error, Err: err}, true
@@ -269,8 +269,7 @@ func usageEvent(k Kind, ev chat.Event) Event {
 //
 // The underlying chat.Session runs in synchronous-sink mode: each turn's events
 // are delivered inline on the turn goroutine, which translates them onto the
-// current Send channel and closes it when the turn returns. There is no
-// long-lived drain goroutine and no event channel to close — "turn finished" is
+// current Send channel and closes it when the turn returns. "turn finished" is
 // simply "the turn goroutine returned".
 type Session struct {
 	cfg      chat.Config
@@ -338,7 +337,7 @@ type Session struct {
 }
 
 // Start loads the config, builds a single-session Runtime, and returns its one
-// Session — the historical single-conversation entry point. Multi-session
+// Session — the single-conversation entry point. Multi-session
 // hosts use NewRuntime + Runtime.Session directly. Closing the returned
 // Session also closes the underlying Runtime.
 func Start(ctx context.Context, spec Spec) (*Session, error) {
@@ -354,7 +353,7 @@ func Start(ctx context.Context, spec Spec) (*Session, error) {
 		ResumeID:         spec.ResumeID,
 		ParentSession:    spec.ParentSession,
 		// OutPath deliberately empty: Start owns the sink so the start line
-		// keeps its historical prompt-derived label (byte-compatible logs).
+		// keeps its prompt-derived label.
 	})
 	if err != nil {
 		rt.Close()
@@ -362,7 +361,7 @@ func Start(ctx context.Context, spec Spec) (*Session, error) {
 	}
 	s.ownsRuntime = true
 	s.reportID = spec.ID         // stamped into the parent completion report (see report)
-	s.cfg.OutPath = spec.OutPath // also feeds writeStartLine's out field (byte-compat) and introspection
+	s.cfg.OutPath = spec.OutPath // also feeds writeStartLine's out field and introspection
 	sink, sinkCleanup, err := chat.OpenSink(spec.OutPath)
 	if err != nil {
 		_ = s.Close() // also closes the runtime via ownsRuntime
@@ -859,9 +858,7 @@ func (s *Session) completionStatus() string {
 
 // completionPreview returns the last assistant message's text, truncated to
 // ≤200 runes — the short result summary carried in the parent report (the
-// transcript holds the full output). Mirrors once.go's truncatePreview, but
-// sources the text from the session's last assistant message rather than
-// accumulated stream tokens (Close has no live stream).
+// transcript holds the full output).
 func (s *Session) completionPreview() string {
 	msgs := s.sess.Messages()
 	for i := len(msgs) - 1; i >= 0; i-- {
@@ -873,7 +870,7 @@ func (s *Session) completionPreview() string {
 }
 
 // truncatePreviewRunes clamps s to 200 runes on a rune boundary, appending an
-// ellipsis when cut — identical in spirit to internal/tui's truncatePreview.
+// ellipsis when cut.
 func truncatePreviewRunes(s string) string {
 	const previewMax = 200
 	if len(s) <= previewMax {

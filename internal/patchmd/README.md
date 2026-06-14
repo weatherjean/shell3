@@ -23,10 +23,10 @@ Supports the markdown subset LLMs actually produce:
 ## Usage
 
 ```go
-lines := patchmd.Render(markdown, terminalWidth)
+lines := patchmd.Render(markdown)
 for _, l := range lines {
     fmt.Println(l)
 }
 ```
 
-For streaming chat output, see `chat.drainTurn` — it commits per-line patchmd output to scrollback as chunks arrive.
+For streaming chat output, see the render sink in `internal/tui` — it commits per-line patchmd output to scrollback as chunks arrive.

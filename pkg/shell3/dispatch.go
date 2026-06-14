@@ -21,14 +21,14 @@ type DispatchOpts struct {
 // back into THIS (main) session's chat as a Notice (operator notification),
 // waking nothing and touching no agent inbox. It is the cron/host-side trigger.
 //
-// Unlike a model-spawned subagent (now a bash_bg-backgrounded `shell3` that
-// self-reports an agent_done to the session sink and inject+wakes the agent),
+// Unlike a model-spawned subagent (a bash_bg-backgrounded `shell3` that
+// self-reports an agent_done to the session and inject+wakes the agent),
 // cron Dispatch must stay an OPERATOR notice: it execs a `shell3 run --config
 // <cfg> --agent <agent> --out <transcript> "<prompt>"` SUBPROCESS, waits for it, reads
 // the final assistant text from the transcript, and emits a chat Notice via
-// deliverDispatchResult. It deliberately does NOT route through the sink watcher
-// (which inject+wakes — wrong for a host-initiated job that must not start a
-// hidden model turn or pollute the conversation).
+// deliverDispatchResult. It deliberately does NOT inject+wake the agent — that
+// is wrong for a host-initiated job that must not start a hidden model turn or
+// pollute the conversation.
 //
 // notify gating: on a successful run the Notice is delivered only when Notify is
 // true; a run that ends in a terminal error ALWAYS delivers, so a quiet
@@ -139,9 +139,9 @@ var shell3Binary = func() string {
 // deliverDispatchResult surfaces a finished host/cron dispatch result as a direct
 // chat Notice on this session — shown verbatim, NOT injected into the agent's
 // inbox. A host-initiated job (cron) is a notification to the operator, so it must
-// not trigger a hidden model turn or pollute the conversation history. This is the
-// deliberate contrast with the sink watcher's agent_done delivery, which DOES
-// inject + wake because there the agent itself asked for the subagent's result.
+// not trigger a hidden model turn or pollute the conversation history — in
+// contrast to agent_done delivery, which DOES inject + wake because there the
+// agent itself asked for the subagent's result.
 func (s *Session) deliverDispatchResult(rt *Runtime, labeled string) {
 	rt.emit(HostEvent{Session: s.name, Kind: Notice, Text: labeled})
 }

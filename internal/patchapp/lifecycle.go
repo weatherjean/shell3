@@ -45,13 +45,11 @@ func (a *App) Pause() error {
 //
 // Returns the error from term.MakeRaw if raw mode could not be re-entered (e.g.
 // the controlling TTY was lost). In that case the previous terminal state is
-// kept (so a later Pause does not Restore a nil state and panic) and the app
-// continues in degraded, non-raw mode; the lifecycle bookkeeping still runs so
-// a paired Pause/Resume cannot wedge.
+// kept and the app continues in degraded, non-raw mode; the lifecycle
+// bookkeeping still runs so a paired Pause/Resume cannot wedge.
 func (a *App) Resume() error {
-	// Guard against a stray/double Resume: paused is set true by Pause and
-	// false by Resume, both under a.mu. If we are not currently paused there is
-	// no readMu lock held to release, so return before touching the terminal.
+	// If not currently paused there is no readMu lock held to release, so return
+	// before touching the terminal.
 	a.mu.Lock()
 	paused := a.term.paused
 	a.mu.Unlock()
@@ -64,10 +62,8 @@ func (a *App) Resume() error {
 
 	a.mu.Lock()
 	if err == nil {
-		// Only replace oldTermState when MakeRaw succeeded. On failure (e.g. the
-		// controlling TTY was lost) keep the previous state so a later Pause does
-		// not Restore(nil) and panic. Still clear paused / repaint / release the
-		// read lock below so the paused app doesn't wedge.
+		// Only replace oldTermState when MakeRaw succeeded, so a later Pause does
+		// not Restore(nil) and panic on failure.
 		a.term.oldTermState = newState
 	}
 	a.term.paused = false

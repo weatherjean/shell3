@@ -44,9 +44,8 @@ type ActiveAgent struct {
 	CompactAt int
 }
 
-// Config holds all dependencies for a chat session. It is the top-level
-// embedding contract: callers populate this once at startup and reuse it
-// across turns. TurnConfig is derived from Config for each turn.
+// Config holds all dependencies for a chat session: callers populate it once at
+// startup and reuse it across turns. TurnConfig is derived from Config per turn.
 type Config struct {
 	// LLM is the active streaming client.
 	LLM LLMClient
@@ -56,10 +55,9 @@ type Config struct {
 	// Personality is the loaded persona (system prompt, allowed tools).
 	Personality persona.Persona
 	// RefreshPrompt rebuilds the system prompt with current runtime data
-	// (notably a fresh timestamp). The /clear command calls it when starting a
-	// new conversation so a long-lived process doesn't carry a stale,
-	// boot-time clock into a fresh context. Nil leaves the prompt frozen at
-	// construction (the safe default for embedders).
+	// (notably a fresh timestamp). /clear calls it when starting a new
+	// conversation so a long-lived process doesn't carry a stale boot-time clock
+	// into a fresh context. Nil leaves the prompt frozen at construction.
 	RefreshPrompt func() string
 	// WorkDir is the working directory for tool execution and error dumps.
 	WorkDir string
@@ -140,16 +138,14 @@ func AgentStatusLine(rt ActiveAgent) string {
 }
 
 // ApplyActiveAgent copies a switched agent's runtime bundle into the config:
-// model client, persona, params, tool/skill sets, context window,
-// and the derived status line. Every front-end (TUI /agent + Tab, pkg/shell3
-// SwitchAgent) and the initial assembly in agentsetup route through this method
+// model client, persona, params, tool/skill sets, context window, and the
+// derived status line. Every front-end (TUI /agent + Tab, pkg/shell3
+// SwitchAgent) and the initial assembly in agentsetup route through this method,
 // so the agent-derived field copy lives in exactly one place.
 //
 // It deliberately does NOT touch agent-independent fields (Store, WorkDir,
 // ProjectRef, ConfigPath, Docs, AgentNames, SwitchAgent, OutPath, Headless, Log,
 // RefreshPrompt, WrapBash): those are set once at assembly and survive switches.
-// WrapBash in particular is config-global (one shell3.wrap_bash hook for all
-// agents), so an agent switch must not clear it.
 func (c *Config) ApplyActiveAgent(rt ActiveAgent) {
 	c.LLM = rt.LLM
 	c.Personality = rt.Personality
@@ -182,9 +178,9 @@ func NewHandlers(cfg Config) map[string]ToolHandler {
 // NewTurnConfig assembles a TurnConfig from a Config, the shared built-in
 // handler map, and the front-end's interactive-shell runner. The three
 // front-ends (TUI, stdout one-shot, embedded pkg/shell3) differ only in those
-// last two arguments and otherwise copy the same dozen fields from Config, so
-// this is the single place that copy lives. shellInteractive may be nil, in
-// which case shell_interactive tool calls return an "unavailable" error.
+// last two arguments, so this is the single place the field copy lives.
+// shellInteractive may be nil, in which case shell_interactive tool calls
+// return an "unavailable" error.
 func NewTurnConfig(cfg Config, handlers map[string]ToolHandler, shellInteractive func(ctx context.Context, cmd, workdir string) string) TurnConfig {
 	return TurnConfig{
 		LLM:               cfg.LLM,
@@ -214,9 +210,9 @@ func OpenSink(path string) (*OutSink, func(), error) {
 		return nil, func() {}, nil
 	}
 	// Create the parent directory: a subagent invocation passes
-	// --out .shell3/agents/<id>.jsonl, whose directory may not exist yet (the
-	// caller no longer pre-creates it). Best-effort — a failure here surfaces as
-	// the open error below with the same path context.
+	// --out .shell3/agents/<id>.jsonl, whose directory may not exist yet.
+	// Best-effort — a failure here surfaces as the open error below with the
+	// same path context.
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		_ = os.MkdirAll(dir, 0o755)
 	}

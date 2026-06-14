@@ -10,10 +10,9 @@ import (
 	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
-// registerStatusTool gives the agent a `status` tool that reports where its
-// config lives and what is currently active — the orientation a self-editing
-// agent needs before changing shell3.lua and calling reload. Telegram-only,
-// like the other host tools (registered via decorateSession).
+// registerStatusTool gives the agent a `status` tool reporting where its config
+// lives and what is currently active, the orientation a self-editing agent needs
+// before changing shell3.lua and calling reload. Telegram-only host tool.
 func (b *Bot) registerStatusTool() {
 	_ = b.sess.RegisterHostTool(shell3.HostTool{
 		Name: "status",

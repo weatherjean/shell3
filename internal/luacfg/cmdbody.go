@@ -12,16 +12,13 @@ import (
 // directory and returns its trimmed stdout. It backs the body_cmd/prompt_cmd
 // config options: a skill body or agent/subagent prompt sourced from a shell
 // command (typically `cat some-file.md`) instead of an inline Lua string.
-//
-// Resolution happens at load time only, so it deliberately uses
-// context.Background() (there is no per-turn context here) and os/exec
-// directly. The caller
+// Resolution happens at load time only, hence context.Background(). The caller
 // passes cwd = the config directory so relative paths resolve next to
 // shell3.lua / .env / lib.
 //
 // It fails CLOSED: a non-zero exit returns an error (with captured stderr for
-// diagnosis), and empty stdout (after trimming whitespace) is also an error —
-// an empty prompt/body is never a valid resolution.
+// diagnosis), and empty stdout (after trimming) is also an error — an empty
+// prompt/body is never a valid resolution.
 func runBodyCmd(workdir, command string) (string, error) {
 	cmd := exec.CommandContext(context.Background(), "bash", "-c", command)
 	cmd.Dir = workdir

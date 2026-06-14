@@ -14,11 +14,9 @@ import (
 // table. Idempotent on (session_id, seq) via INSERT OR REPLACE so a compaction
 // rewrite can overwrite a seq in place.
 //
-// Note: llm.Message.ContentParts and llm.Message.ReasoningContent are not
-// persisted. ContentParts is used for multimodal vision messages; ReasoningContent
-// holds chain-of-thought from providers like Moonshot/DeepSeek. Both are
-// omitempty and not needed for standard replay; they can be added later if
-// required.
+// llm.Message.ContentParts (multimodal vision) and ReasoningContent
+// (provider chain-of-thought) are not persisted: both are omitempty and not
+// needed for standard replay.
 func (s *Store) AppendMessage(sessionID int64, seq int, m llm.Message) error {
 	var toolCalls string
 	if len(m.ToolCalls) > 0 {

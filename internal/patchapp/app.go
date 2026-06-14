@@ -11,12 +11,10 @@ import (
 )
 
 // SubmitFunc is the callback invoked when the user presses Enter on a
-// non-empty input. The text is the full input including any embedded
-// newlines from alt+enter. The App is busy-locked until the callback's
-// goroutine completes (for non-slash, non-! inputs); the SubmitFunc is
-// responsible for either handling synchronously and returning, or
-// launching a goroutine and calling [App.SetBusy] / [App.Print] to feed
-// events back.
+// non-empty input. The text is the full input including embedded newlines
+// from alt+enter. The callback either handles synchronously and returns, or
+// launches a goroutine and calls [App.SetBusy] / [App.Print] to feed events
+// back.
 type SubmitFunc func(input string)
 
 // editorState is the user-input cluster: the live line, cursor, the up-arrow
@@ -55,12 +53,12 @@ type editorState struct {
 }
 
 // terminalState is the terminal/stdin-lifecycle cluster. Its fields do NOT
-// share one lock — the locking is unchanged from when they lived on App:
+// share one lock:
 //   - readMu: its own lock, gating the stdin Read so a paused subprocess owns
 //     the TTY without our reader stealing keystrokes / DSR replies.
 //   - pauseWakeR/W: a self-pipe assigned once in Run before its readers start,
-//     then only written (Quit, Pause); effectively immutable afterward. Used to
-//     interrupt the input loop's Poll when Pause is called from another
+//     then only written (Quit, Pause); effectively immutable afterward. It
+//     interrupts the input loop's Poll when Pause is called from another
 //     goroutine (SetReadDeadline is unreliable for terminals).
 //   - oldTermState, paused: guarded by App.mu (set in Pause/Resume; paused is
 //     read in render()).
@@ -112,7 +110,7 @@ type App struct {
 	onTab func()
 
 	// onInterject is fired when Enter is pressed while busy with plain (non-slash,
-	// non-!) text. If nil, the input is preserved (historical no-op behavior).
+	// non-!) text. If nil, the input is preserved (no-op).
 	onInterject func(text string)
 
 	// Slash command registry. Keyed by lowercased name and each alias;
@@ -144,8 +142,8 @@ func (a *App) SetTab(fn func()) { a.onTab = fn }
 
 // SetInterject registers the callback fired when Enter is pressed while busy
 // with plain text in the editor (mid-turn steering). The callback runs on the
-// input goroutine and must not block; nil restores the historical
-// swallow-input-while-busy behavior.
+// input goroutine and must not block; nil makes Enter-while-busy a no-op
+// (input preserved).
 func (a *App) SetInterject(fn func(text string)) { a.onInterject = fn }
 
 // SetMode updates the agent badge shown in the status bar. Goroutine-safe.
@@ -156,10 +154,8 @@ func (a *App) SetMode(name string) {
 	a.mu.Unlock()
 }
 
-// Quit asks the input loop to exit cleanly. Run will return after the
-// current input batch finishes processing, allowing the caller's deferred
-// teardown (DB close, hook OnSessionEnd, etc.) to execute. Safe from any
-// goroutine; calling Quit before Run is a no-op until Run starts.
+// Quit asks the input loop to exit cleanly so the caller's deferred teardown
+// runs. Safe from any goroutine; a no-op until Run starts.
 func (a *App) Quit() {
 	a.mu.Lock()
 	a.exitFlag = true

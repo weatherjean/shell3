@@ -43,7 +43,7 @@ func loadAudioPart(path, workDir string) (llm.ContentPart, string, error) {
 
 	info, err := os.Stat(path)
 	if err != nil {
-		return llm.ContentPart{}, "", fmt.Errorf(`cannot read "%s": %w`, path, err)
+		return llm.ContentPart{}, "", fmt.Errorf("cannot read %q: %w", path, err)
 	}
 	if info.Size() > maxAudioBytes {
 		return llm.ContentPart{}, "", fmt.Errorf("audio too large (%d MB, max 25 MB)", info.Size()>>20)
@@ -51,7 +51,7 @@ func loadAudioPart(path, workDir string) (llm.ContentPart, string, error) {
 
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return llm.ContentPart{}, "", fmt.Errorf(`cannot read "%s": %w`, path, err)
+		return llm.ContentPart{}, "", fmt.Errorf("cannot read %q: %w", path, err)
 	}
 
 	return audioPartFromBytes(raw, audioExtFormat(strings.TrimPrefix(ext, ".")))
