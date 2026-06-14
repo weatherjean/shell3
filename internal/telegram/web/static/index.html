@@ -41,10 +41,6 @@
     transition: color .15s, border-color .15s;
   }
   nav button.active { color: var(--text); border-bottom-color: var(--btn); }
-  nav button .count {
-    font-size: 11px; color: var(--btn-text); background: var(--btn);
-    border-radius: 9px; padding: 0 6px; margin-left: 5px; font-weight: 700;
-  }
 
   /* Scrollable view area */
   main { flex: 1; overflow-y: auto; padding: 10px 10px 24px; -webkit-overflow-scrolling: touch; }
@@ -97,7 +93,12 @@
   .card .preview { margin-top: 8px; font-family: var(--mono); font-size: 12px; color: var(--hint); white-space: pre-wrap; }
   details.card > summary { list-style: none; cursor: pointer; }
   details.card > summary::-webkit-details-marker { display: none; }
-  .card.sess { cursor: pointer; }
+  .card.sess, .card.run, .card.cronjob { cursor: pointer; }
+  pre.prompt {
+    margin: 0; padding: 12px 14px; background: var(--sec); border-radius: 12px;
+    font-family: var(--mono); font-size: 13px; line-height: 1.5;
+    white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;
+  }
   .subbody { margin-top: 10px; border-top: 1px solid color-mix(in srgb, var(--hint) 18%, transparent); padding-top: 8px; }
   .back { appearance: none; border: 0; background: var(--sec); color: var(--text); font: inherit; font-weight: 600;
     padding: 6px 12px; border-radius: 8px; cursor: pointer; margin-bottom: 10px; }
@@ -132,17 +133,15 @@
 </head>
 <body>
 <nav>
-  <button data-tab="chat" class="active">Chat<span class="count" id="c-chat" hidden></span></button>
-  <button data-tab="subs">Subagents<span class="count" id="c-subs" hidden></span></button>
+  <button data-tab="chat" class="active">Chat</button>
+  <button data-tab="runs">Runs</button>
   <button data-tab="status">Status</button>
-  <button data-tab="past">Past</button>
   <button data-tab="cron">Cron</button>
 </nav>
 <main>
   <section id="chat" class="view active"><div class="empty">loading…</div></section>
-  <section id="subs" class="view"><div class="empty">loading…</div></section>
+  <section id="runs" class="view"><div class="empty">loading…</div></section>
   <section id="status" class="view"><div class="empty">loading…</div></section>
-  <section id="past" class="view"><div class="empty">loading…</div></section>
   <section id="cron" class="view"><div class="empty">loading…</div></section>
 </main>
 
@@ -160,7 +159,7 @@ async function api(path) {
 const esc = s => (s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 
 let active = "chat";
-const views = { chat: document.getElementById("chat"), subs: document.getElementById("subs"), status: document.getElementById("status"), past: document.getElementById("past"), cron: document.getElementById("cron") };
+const views = { chat: document.getElementById("chat"), runs: document.getElementById("runs"), status: document.getElementById("status"), cron: document.getElementById("cron") };
 const main = document.querySelector("main");
 
 document.querySelectorAll("nav button").forEach(b => {
@@ -177,21 +176,22 @@ const bubble = (role, content) => {
   const r = role === "user" ? "user" : role === "assistant" ? "assistant" : "system";
   return `<div class="msg ${r}"><div class="bubble">${esc(content)}</div></div>`;
 };
-const thinkBlock = text =>
-  `<details class="tool think"><summary><span class="chev">▸</span><span class="tname">💭 Thinking</span></summary><pre>${esc(text)}</pre></details>`;
 
 // renderTranscript renders a subagent's lossless event log (tool calls paired
-// with results, reasoning, and messages).
+// with results, and messages). Reasoning is intentionally dropped here: thinking
+// is a live, ephemeral artifact we don't persist for past conversations, so Runs
+// stays consistent by never showing it (the live Chat tab still renders it).
 function renderTranscript(evs) {
   const results = {};
   evs.forEach(e => { if (e.kind === "tool_result" && e.call_id) results[e.call_id] = e.output; });
   return evs.map(e => {
     switch (e.kind) {
-      case "user_message": return e.text ? bubble("user", e.text) : "";
-      case "assistant_message": return e.text ? bubble("assistant", e.text.trim()) : "";
-      case "assistant_reasoning": return e.text ? thinkBlock(e.text) : "";
+      // Guard on the TRIMMED text: a tool-only turn emits a whitespace-only
+      // assistant message, which would otherwise render as an empty bubble.
+      case "user_message": return e.text && e.text.trim() ? bubble("user", e.text.trim()) : "";
+      case "assistant_message": return e.text && e.text.trim() ? bubble("assistant", e.text.trim()) : "";
       case "tool_call": return toolBlock(e.tool, e.input, results[e.call_id]);
-      default: return ""; // skip tokens, usage, lifecycle
+      default: return ""; // skip reasoning, tokens, usage, lifecycle
     }
   }).join("") || '<div class="empty">no transcript yet</div>';
 }
@@ -199,12 +199,20 @@ function renderTranscript(evs) {
 // ---- Chat -----------------------------------------------------------------
 function prettyJSON(s) { try { return JSON.stringify(JSON.parse(s), null, 2); } catch (e) { return s || ""; } }
 
-// One collapsible showing a tool call's arguments and its paired result.
-function toolBlock(name, args, result) {
+// One collapsible showing a tool call's arguments and its paired result. `key`,
+// when given, tags the panel so its open/closed state survives a re-render.
+function toolBlock(name, args, result, key) {
   const a = args ? `<div class="tlabel">arguments</div><pre>${esc(prettyJSON(args))}</pre>` : "";
   const r = `<div class="tlabel">result</div><pre>${esc(result) || "(no output)"}</pre>`;
-  return `<details class="tool"><summary><span class="chev">▸</span><span class="tname">🔧 ${esc(name) || "tool"}</span></summary>${a}${r}</details>`;
+  const k = key ? ` data-k="${esc(key)}"` : "";
+  return `<details class="tool"${k}><summary><span class="chev">▸</span><span class="tname">🔧 ${esc(name) || "tool"}</span></summary>${a}${r}</details>`;
 }
+
+// Capture/restore which keyed <details> are open, so a re-render of the chat
+// view never collapses a panel the user expanded. Keys are stable (tool call
+// ids, message indices) so panels keep their open state as new events stream in.
+const snapshotOpen = el => { const s = new Set(); el.querySelectorAll("details[data-k]").forEach(d => { if (d.open) s.add(d.dataset.k); }); return s; };
+const restoreOpen = (el, set) => el.querySelectorAll("details[data-k]").forEach(d => { if (set.has(d.dataset.k)) d.open = true; });
 
 let chatSig = null;
 function renderChat(hist) {
@@ -216,9 +224,6 @@ function renderChat(hist) {
   const firstRender = chatSig === null;
   chatSig = sig;
 
-  const badge = document.getElementById("c-chat");
-  badge.textContent = hist.length; badge.hidden = hist.length === 0;
-
   // Only auto-scroll if the user is already pinned to the bottom.
   const pinned = firstRender || (main.scrollHeight - main.scrollTop - main.clientHeight < 80);
 
@@ -228,54 +233,84 @@ function renderChat(hist) {
   const results = {};
   hist.forEach(h => { if (h.role === "tool" && h.tool_call_id) results[h.tool_call_id] = h.content; });
 
-  views.chat.innerHTML = hist.map(h => {
+  // Remember which panels are open so streaming a new event never collapses them.
+  const open = snapshotOpen(views.chat);
+
+  views.chat.innerHTML = hist.map((h, i) => {
     if (h.role === "tool") return ""; // folded into the assistant's tool call
     let html = "";
     if (h.reasoning) {
-      html += `<details class="tool think"><summary><span class="chev">▸</span><span class="tname">💭 Thinking</span></summary><pre>${esc(h.reasoning)}</pre></details>`;
+      html += `<details class="tool think" data-k="think-${i}"><summary><span class="chev">▸</span><span class="tname">💭 Thinking</span></summary><pre>${esc(h.reasoning)}</pre></details>`;
     }
     const content = (h.content || "").trim();
     if (content) {
       const role = h.role === "user" ? "user" : h.role === "assistant" ? "assistant" : "system";
       html += `<div class="msg ${role}"><div class="bubble">${esc(content)}</div></div>`;
     }
-    (h.tool_calls || []).forEach(tc => { html += toolBlock(tc.name, tc.args, results[tc.id]); });
+    (h.tool_calls || []).forEach(tc => { html += toolBlock(tc.name, tc.args, results[tc.id], tc.id || `tool-${i}`); });
     return html;
   }).join("");
 
+  restoreOpen(views.chat, open);
   if (pinned) main.scrollTop = main.scrollHeight;
 }
 
-// ---- Subagents ------------------------------------------------------------
-let subsSig = null;
-function renderSubs(subs) {
-  const badge = document.getElementById("c-subs");
-  badge.textContent = subs.length; badge.hidden = subs.length === 0;
-  // Idle-safe: don't clobber an open transcript on every poll.
-  const sig = subs.map(s => `${s.id}:${s.status}:${(s.result||"").length}`).join("|");
-  if (sig === subsSig) return;
-  subsSig = sig;
-  if (!subs.length) { views.subs.innerHTML = '<div class="empty">No subagents spawned.</div>'; return; }
-  views.subs.innerHTML = subs.map(s => `
-    <details class="card subcard" data-id="${esc(s.id)}">
-      <summary>
-        <div class="row"><span class="agent">${esc(s.agent)}</span><span class="badge ${esc(s.status)}">${esc(s.status)}</span></div>
-        <div class="task">${esc(s.task)}</div>
-        ${s.result ? `<div class="preview">${esc(s.result)}</div>` : ""}
-      </summary>
-      <div class="subbody"><div class="empty">tap to load transcript…</div></div>
-    </details>`).join("");
-  // Lazy-load each subagent's transcript when expanded.
-  views.subs.querySelectorAll("details.subcard").forEach(d => {
-    d.addEventListener("toggle", async () => {
-      if (!d.open || d.dataset.loaded) return;
-      d.dataset.loaded = "1";
-      const body = d.querySelector(".subbody");
-      try {
-        body.innerHTML = renderTranscript(await api("/api/subagent?id=" + encodeURIComponent(d.dataset.id)));
-      } catch (e) { body.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
-    });
-  });
+// ---- Runs (subagents + past conversations, newest first) ------------------
+// One unified list of everything that has run: backgrounded subagents (read
+// from their on-disk transcripts) and past chat conversations. Tapping a run
+// opens its full transcript/turns on a back-able subpage.
+let runSel = null;   // { kind: "sub"|"sess", id } when a run is open
+let runsSig = null;
+async function renderRuns(force) {
+  if (runSel) return; // a subpage is open — leave it untouched until "back"
+  const [subs, sess] = await Promise.all([api("/api/subagents"), api("/api/sessions")]);
+  const items = [
+    ...subs.map(s => ({ kind: "sub", id: s.id, title: s.agent || s.id, badge: s.status || "finished",
+                        task: s.task || "(no task)", meta: s.result || s.id, last: s.last_at || s.time || "" })),
+    ...sess.map(s => ({ kind: "sess", id: String(s.id), title: "conversation #" + s.id, badge: s.num_msgs + " msgs",
+                        task: s.preview || "(no preview)", meta: s.started_at || "", last: s.last_at || "" })),
+  ];
+  // Sort by last activity (newest response first), not by when each run started.
+  // Both sides carry RFC3339 last_at, so a plain string compare orders correctly.
+  items.sort((a, b) => (b.last || "").localeCompare(a.last || ""));
+  // Idle-safe: only rebuild the list when something actually changed.
+  const sig = items.map(i => `${i.kind}${i.id}:${i.badge}:${i.last}`).join("|");
+  if (!force && sig === runsSig) return;
+  runsSig = sig;
+  if (!items.length) { views.runs.innerHTML = '<div class="empty">Nothing has run yet.</div>'; return; }
+  const badgeClass = b => /running/.test(b) ? "running" : "finished";
+  views.runs.innerHTML = items.map(i => `
+    <div class="card run" data-kind="${i.kind}" data-id="${esc(i.id)}">
+      <div class="row"><span class="agent">${esc(i.title)}</span><span class="badge ${badgeClass(i.badge)}">${esc(i.badge)}</span></div>
+      <div class="task">${esc(i.task)}</div>
+      ${i.meta ? `<div class="preview">${esc(i.meta)}</div>` : ""}
+    </div>`).join("");
+  views.runs.querySelectorAll(".run").forEach(c => c.onclick = () => openRun(c.dataset.kind, c.dataset.id));
+}
+
+async function openRun(kind, id) {
+  runSel = { kind, id };
+  const back = () => { runSel = null; runsSig = null; renderRuns(true); };
+  views.runs.innerHTML = `<button class="back">← all runs</button><div class="empty">loading…</div>`;
+  views.runs.querySelector(".back").onclick = back;
+  try {
+    let body;
+    if (kind === "sub") {
+      body = renderTranscript(await api("/api/subagent?id=" + encodeURIComponent(id)));
+    } else {
+      const turns = await api("/api/session?id=" + encodeURIComponent(id));
+      body = turns.length
+        ? turns.map(t => t.role === "tool"
+            ? `<details class="tool"><summary><span class="chev">▸</span><span class="tname">🔧 ${esc(t.tool_name) || "tool"}</span></summary><pre>${esc(t.content) || "(no output)"}</pre></details>`
+            : bubble(t.role, (t.content || "").trim())).join("")
+        : '<div class="empty">empty conversation</div>';
+    }
+    views.runs.innerHTML = `<button class="back">← all runs</button>${body}`;
+    views.runs.querySelector(".back").onclick = back;
+  } catch (e) {
+    views.runs.innerHTML = `<button class="back">← all runs</button><div class="err">${esc(e.message)}</div>`;
+    views.runs.querySelector(".back").onclick = back;
+  }
 }
 
 // ---- Status ---------------------------------------------------------------
@@ -319,49 +354,49 @@ function renderStatus(st) {
       <details class="tool"><summary><span class="chev">▸</span><span class="tname">📜 Full prompt</span></summary><pre>${esc(st.system_prompt)}</pre></details>` : ""}`;
 }
 
-// ---- Past sessions --------------------------------------------------------
-let pastSel = null;
-async function renderPast() {
-  if (pastSel) {
-    const turns = await api("/api/session?id=" + encodeURIComponent(pastSel));
-    const body = turns.length
-      ? turns.map(t => t.role === "tool"
-          ? `<details class="tool"><summary><span class="chev">▸</span><span class="tname">🔧 ${esc(t.tool_name) || "tool"}</span></summary><pre>${esc(t.content) || "(no output)"}</pre></details>`
-          : bubble(t.role, (t.content || "").trim())).join("")
-      : '<div class="empty">empty conversation</div>';
-    views.past.innerHTML = `<button class="back">← all conversations</button>${body}`;
-    views.past.querySelector(".back").onclick = () => { pastSel = null; renderPast(); };
-  } else {
-    const list = await api("/api/sessions");
-    views.past.innerHTML = list.length
-      ? list.map(s => `<div class="card sess" data-id="${s.id}">
-          <div class="row"><span class="agent">#${s.id}</span><span class="badge finished">${s.num_msgs} msgs</span></div>
-          <div class="task">${esc(s.preview) || "(no preview)"}</div>
-          <div class="preview">${esc(s.started_at)}</div>
-        </div>`).join("")
-      : '<div class="empty">No past conversations.</div>';
-    views.past.querySelectorAll(".sess").forEach(c => c.onclick = () => { pastSel = c.dataset.id; renderPast(); });
-  }
-}
-
 // ---- Cron -----------------------------------------------------------------
+// The list shows each job at a glance; tapping one opens a detail subpage with
+// its full prompt and run metadata.
+let cronSel = null; // job name when a detail subpage is open
 async function renderCron() {
   const jobs = await api("/api/cron");
+  if (cronSel) {
+    const j = jobs.find(x => x.name === cronSel);
+    if (j) { cronDetail(j); return; }
+    cronSel = null; // job vanished (config reload) — fall back to the list
+  }
   views.cron.innerHTML = jobs.length ? jobs.map(j => `
-    <div class="card">
+    <div class="card cronjob" data-name="${esc(j.name)}">
       <div class="row"><span class="agent">${esc(j.name)}</span><span class="badge ${j.notify ? "finished" : "running"}">${j.notify ? "notify" : "quiet"}</span></div>
       <div class="task">${esc(j.agent)} · <code>${esc(j.schedule)}</code></div>
       <div class="preview">${j.last_run ? "last run: " + esc(j.last_run) : "not run yet"}</div>
     </div>`).join("") : '<div class="empty">No scheduled jobs.</div>';
+  views.cron.querySelectorAll(".cronjob").forEach(c => c.onclick = () => { cronSel = c.dataset.name; renderCron(); });
+}
+
+function cronDetail(j) {
+  views.cron.innerHTML = `
+    <button class="back">← all jobs</button>
+    <dl class="kv">
+      <dt>Name</dt><dd>${esc(j.name)}</dd>
+      <dt>Schedule</dt><dd><code>${esc(j.schedule)}</code></dd>
+      <dt>Agent</dt><dd>${esc(j.agent) || "—"}</dd>
+      <dt>Work dir</dt><dd>${esc(j.work_dir) || "—"}</dd>
+      <dt>Notify</dt><dd>${j.notify ? "yes" : "no"}</dd>
+      <dt>Last run</dt><dd>${j.last_run ? esc(j.last_run) : "not run yet"}</dd>
+      ${j.last_sub_id ? `<dt>Last run id</dt><dd>${esc(j.last_sub_id)}</dd>` : ""}
+    </dl>
+    <div class="section-title">Prompt</div>
+    <pre class="prompt">${esc(j.prompt) || "(no prompt)"}</pre>`;
+  views.cron.querySelector(".back").onclick = () => { cronSel = null; renderCron(); };
 }
 
 // ---- Poll loop ------------------------------------------------------------
 async function refresh(force) {
   try {
     if (active === "chat") renderChat(await api("/api/history"));
-    else if (active === "subs") renderSubs(await api("/api/subagents"));
+    else if (active === "runs") await renderRuns(force);
     else if (active === "status") renderStatus(await api("/api/status"));
-    else if (active === "past" && force) await renderPast();
     else if (active === "cron" && force) await renderCron();
   } catch (e) {
     views[active].innerHTML = `<div class="err">⚠️ ${esc(e.message)}<br><small>open from inside Telegram to authenticate</small></div>`;

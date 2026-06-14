@@ -141,6 +141,24 @@ func (s *Store) StartSession(projectUUID, workdir, configPath string) (int64, er
 	return id, nil
 }
 
+// LatestSession returns the id of the most recent session matching workdir and
+// configPath (the pair that identifies one front-end's conversation stream, e.g.
+// the Telegram bot). found is false when none exist. Used to reattach on boot
+// instead of spawning a fresh session each restart.
+func (s *Store) LatestSession(workdir, configPath string) (id int64, found bool, err error) {
+	row := s.db.QueryRow(
+		`SELECT id FROM sessions WHERE workdir = ? AND config_path = ? ORDER BY id DESC LIMIT 1`,
+		workdir, configPath)
+	switch err := row.Scan(&id); err {
+	case nil:
+		return id, true, nil
+	case sql.ErrNoRows:
+		return 0, false, nil
+	default:
+		return 0, false, fmt.Errorf("store: latest session: %w", err)
+	}
+}
+
 // EndSession sets ended_at for the given session.
 func (s *Store) EndSession(id int64) error {
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -155,6 +173,7 @@ type SessionMeta struct {
 	ID        int64
 	StartedAt time.Time
 	EndedAt   time.Time
+	LastAt    time.Time // newest history row's created_at (zero if no messages)
 	Summary   string
 	NumMsgs   int
 	Preview   string // first user message, truncated
@@ -177,7 +196,8 @@ func (s *Store) ListSessions(limit int) ([]SessionMeta, error) {
 		       (SELECT COUNT(*) FROM history h WHERE h.session_id = s.id),
 		       COALESCE((SELECT h.content FROM history h
 		                 WHERE h.session_id = s.id AND h.role='user'
-		                 ORDER BY h.rowid ASC LIMIT 1), '')
+		                 ORDER BY h.rowid ASC LIMIT 1), ''),
+		       COALESCE((SELECT MAX(h.created_at) FROM history h WHERE h.session_id = s.id), '')
 		FROM sessions s
 		ORDER BY s.id DESC
 		LIMIT ?`, limit)
@@ -188,13 +208,16 @@ func (s *Store) ListSessions(limit int) ([]SessionMeta, error) {
 	var out []SessionMeta
 	for rows.Next() {
 		var m SessionMeta
-		var started, ended, preview string
-		if err := rows.Scan(&m.ID, &started, &ended, &m.Summary, &m.NumMsgs, &preview); err != nil {
+		var started, ended, preview, last string
+		if err := rows.Scan(&m.ID, &started, &ended, &m.Summary, &m.NumMsgs, &preview, &last); err != nil {
 			return nil, fmt.Errorf("store: list sessions: scan: %w", err)
 		}
 		m.StartedAt = parseRFC3339(started)
 		if ended != "" {
 			m.EndedAt = parseRFC3339(ended)
+		}
+		if last != "" {
+			m.LastAt = parseRFC3339(last)
 		}
 		m.Preview = truncateRunes(preview, 120)
 		out = append(out, m)

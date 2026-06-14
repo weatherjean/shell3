@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/chat"
@@ -67,6 +68,11 @@ type SessionOpts struct {
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
 	// ResumeID reloads a stored session's messages when non-zero.
 	ResumeID int64
+	// ResumeLatest reattaches to the newest stored session matching this
+	// session's workdir+config (instead of starting fresh) when ResumeID is 0.
+	// Falls back to a new session when none exists. The Telegram bot sets this so
+	// a restart rejoins the live conversation rather than spawning empties.
+	ResumeLatest bool
 	// ParentSession is the report pointer written to the new session row.
 	ParentSession int64
 }
@@ -252,6 +258,7 @@ type SessionMeta struct {
 	ID        int64  `json:"id"`
 	StartedAt string `json:"started_at"`
 	EndedAt   string `json:"ended_at,omitempty"`
+	LastAt    string `json:"last_at"` // RFC3339 of newest message; falls back to start. Sort key for the dashboard.
 	NumMsgs   int    `json:"num_msgs"`
 	Preview   string `json:"preview"`
 }
@@ -272,6 +279,11 @@ func (rt *Runtime) PastSessions(limit int) ([]SessionMeta, error) {
 		if !m.EndedAt.IsZero() {
 			e.EndedAt = m.EndedAt.Format("2006-01-02 15:04")
 		}
+		last := m.LastAt
+		if last.IsZero() {
+			last = m.StartedAt // no messages yet — sort by when it started
+		}
+		e.LastAt = last.UTC().Format(time.RFC3339)
 		out = append(out, e)
 	}
 	return out, nil
@@ -305,8 +317,55 @@ var subagentIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 // backgrounded `shell3` runs that stream a transcript to .shell3/agents/<id>.jsonl
 // — so this is derived from those files on disk rather than a live registry.
 type SubagentInfo struct {
-	ID         string `json:"id"`         // transcript filename stem
-	Transcript string `json:"transcript"` // path under .shell3/agents
+	ID         string `json:"id"`               // transcript filename stem
+	Transcript string `json:"transcript"`       // path under .shell3/agents
+	Agent      string `json:"agent,omitempty"`  // persona, from the start event
+	Task       string `json:"task,omitempty"`   // the spawn prompt, from the start event
+	Status     string `json:"status"`           // "running" until a terminal event is seen, else "finished"
+	Result     string `json:"result,omitempty"` // last assistant message (final answer)
+	Time       string `json:"time,omitempty"`   // start timestamp (RFC3339)
+	LastAt     string `json:"last_at"`          // newest event timestamp (RFC3339); the dashboard's sort key
+}
+
+// peekTranscript reads a subagent transcript and extracts the summary fields the
+// dashboard's run cards show: agent/task/time from the `start` line, status from
+// whether a terminal (`end`/`session_end`) line is present, and result from the
+// last assistant message. Failures degrade gracefully to a "running" stub.
+func peekTranscript(path string) SubagentInfo {
+	info := SubagentInfo{Status: "running"}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return info
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if line == "" {
+			continue
+		}
+		var ev struct {
+			Kind    string `json:"kind"`
+			Input   string `json:"input"`
+			Persona string `json:"persona"`
+			TS      string `json:"ts"`
+			Text    string `json:"text"`
+		}
+		if json.Unmarshal([]byte(line), &ev) != nil {
+			continue
+		}
+		if ev.TS != "" {
+			info.LastAt = ev.TS // events are append-ordered, so the last wins
+		}
+		switch ev.Kind {
+		case "start":
+			info.Agent, info.Task, info.Time = ev.Persona, ev.Input, ev.TS
+		case "assistant_message":
+			if ev.Text != "" {
+				info.Result = ev.Text
+			}
+		case "end", "session_end":
+			info.Status = "finished"
+		}
+	}
+	return info
 }
 
 // SubagentList scans .shell3/agents/*.jsonl under the runtime root and returns
@@ -337,10 +396,10 @@ func (rt *Runtime) SubagentList() ([]SubagentInfo, error) {
 		if fi, err := e.Info(); err == nil {
 			mod = fi.ModTime().UnixNano()
 		}
-		rows = append(rows, row{
-			info: SubagentInfo{ID: id, Transcript: filepath.Join(dir, name)},
-			mod:  mod,
-		})
+		path := filepath.Join(dir, name)
+		info := peekTranscript(path)
+		info.ID, info.Transcript = id, path
+		rows = append(rows, row{info: info, mod: mod})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].mod > rows[j].mod })
 	out := make([]SubagentInfo, len(rows))

@@ -87,3 +87,68 @@ func TestResume_CarriesPriorContext(t *testing.T) {
 		t.Fatalf("first user message lost on resume: %#v", final[0])
 	}
 }
+
+// TestResumeLatest_ReattachesNewest proves SessionOpts.ResumeLatest rejoins the
+// most recent session sharing the same workdir (the Telegram-restart path) and
+// reports Resumed(), instead of spawning a fresh empty row.
+func TestResumeLatest_ReattachesNewest(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	wd := t.TempDir() // the shared "front-end" workdir both boots use
+
+	// First boot: fresh session, one turn that persists.
+	rtA := newTestRuntime(t, fakeCfgWithStore(st, fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "noted"}}}))
+	sA, err := rtA.Session(SessionOpts{Name: "a", WorkDir: wd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range sA.Send(context.Background(), "remember 42") {
+	}
+	id := sA.sess.ID()
+	if id == 0 {
+		t.Fatal("first session has no store id")
+	}
+	if _, resumed := sA.Resumed(); resumed {
+		t.Fatal("fresh session reported Resumed()=true")
+	}
+
+	// Second boot: ResumeLatest must reattach to id, not create a new row.
+	rtB := newTestRuntime(t, fakeCfgWithStore(st, fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "still 42"}}}))
+	sB, err := rtB.Session(SessionOpts{Name: "b", WorkDir: wd, ResumeLatest: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sB.sess.ID(); got != id {
+		t.Fatalf("ResumeLatest: attached to session %d, want reattach to %d", got, id)
+	}
+	msgs, resumed := sB.Resumed()
+	if !resumed || msgs == 0 {
+		t.Fatalf("Resumed() = (%d, %v), want resumed with msgs > 0", msgs, resumed)
+	}
+}
+
+// TestResumeLatest_NoMatchStartsFresh verifies ResumeLatest falls back to a new
+// session when nothing matches the workdir.
+func TestResumeLatest_NoMatchStartsFresh(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	rt := newTestRuntime(t, fakeCfgWithStore(st, fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "hi"}}}))
+	s, err := rt.Session(SessionOpts{Name: "fresh", WorkDir: t.TempDir(), ResumeLatest: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.sess.ID() == 0 {
+		t.Fatal("expected a fresh non-zero session id")
+	}
+	if _, resumed := s.Resumed(); resumed {
+		t.Fatal("no prior session existed, but Resumed() reported true")
+	}
+}

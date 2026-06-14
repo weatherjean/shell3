@@ -101,6 +101,31 @@ func TestSession_ID_NoStoreReportsZero(t *testing.T) {
 	}
 }
 
+// TestSession_History_CarriesReasoning proves a live turn's reasoning reaches
+// History() (and thus the dashboard's /api/history "reasoning" field). This is
+// the Chat-tab thinking path; it is independent of resume (which doesn't persist
+// reasoning by design).
+func TestSession_History_CarriesReasoning(t *testing.T) {
+	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{
+		{ReasoningDelta: "let me think about 42"},
+		{TextDelta: "the answer"},
+	}})
+	s := newTestSession(t, client, chat.Config{})
+	defer s.Close()
+
+	for range s.Send(context.Background(), "question") {
+	}
+	var got string
+	for _, h := range s.History() {
+		if h.Role == "assistant" && h.Reasoning != "" {
+			got = h.Reasoning
+		}
+	}
+	if got != "let me think about 42" {
+		t.Fatalf("History() assistant reasoning = %q, want the streamed thinking text", got)
+	}
+}
+
 func TestSession_MultiTurn_HistoryCarries(t *testing.T) {
 	client := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "first"}}},
@@ -214,6 +239,58 @@ func TestSession_Clear_ResetsHistory(t *testing.T) {
 	s.Clear()
 	if got := len(s.sess.Messages()); got != 0 {
 		t.Fatalf("after Clear: %d messages, want 0", got)
+	}
+}
+
+// TestSession_Clear_RotatesStoreSession verifies /clear ends the current store
+// session (so it becomes a finished past conversation that retains its history)
+// and opens a fresh one that later turns record under — rather than leaving the
+// same open session lingering at the top of the dashboard's Runs list.
+func TestSession_Clear_RotatesStoreSession(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "store.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "a"}}})
+	s := newTestSession(t, client, chat.Config{Store: st})
+	defer s.Close()
+
+	old := s.sess.ID()
+	if old == 0 {
+		t.Fatal("expected a non-zero store session id after start")
+	}
+	for range s.Send(context.Background(), "first") {
+	}
+
+	if err := s.Clear(); err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+
+	// Clear must rotate onto a new, non-zero session id.
+	if got := s.sess.ID(); got == old || got == 0 {
+		t.Fatalf("after Clear: session id = %d, want a fresh non-zero id (old=%d)", got, old)
+	}
+
+	// The old session must be ended and keep its persisted history.
+	sessions, err := st.ListSessions(10)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	var found bool
+	for _, m := range sessions {
+		if m.ID != old {
+			continue
+		}
+		found = true
+		if m.EndedAt.IsZero() {
+			t.Fatalf("old session %d not ended after Clear", old)
+		}
+		if m.NumMsgs == 0 {
+			t.Fatalf("old session %d lost its history on Clear", old)
+		}
+	}
+	if !found {
+		t.Fatalf("old session %d not listed after Clear", old)
 	}
 }
 

@@ -148,6 +148,15 @@ func (s *Session) ID() int64 {
 	return s.id
 }
 
+// SetID swaps the store session id. Used by Session.Clear to rotate onto a fresh
+// session row so subsequent turns persist under the new conversation. Guarded by
+// msgMu because the dashboard's History() reader pairs id with the message slice.
+func (s *Session) SetID(id int64) {
+	s.msgMu.Lock()
+	defer s.msgMu.Unlock()
+	s.id = id
+}
+
 func (s *Session) append(m llm.Message) {
 	s.msgMu.Lock()
 	defer s.msgMu.Unlock()

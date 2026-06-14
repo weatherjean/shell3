@@ -17,6 +17,8 @@ type CronJob struct {
 	Name      string `json:"name"`
 	Schedule  string `json:"schedule"`
 	Agent     string `json:"agent"`
+	Prompt    string `json:"prompt,omitempty"`
+	WorkDir   string `json:"work_dir,omitempty"`
 	Notify    bool   `json:"notify"`
 	LastRun   string `json:"last_run,omitempty"`
 	LastSubID string `json:"last_sub_id,omitempty"`

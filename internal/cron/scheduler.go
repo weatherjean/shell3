@@ -21,6 +21,8 @@ type JobStatus struct {
 	Name      string `json:"name"`
 	Schedule  string `json:"schedule"`
 	Agent     string `json:"agent"`
+	Prompt    string `json:"prompt,omitempty"`
+	WorkDir   string `json:"work_dir,omitempty"`
 	Notify    bool   `json:"notify"`
 	LastRun   string `json:"last_run,omitempty"` // RFC3339, "" if never
 	LastSubID string `json:"last_sub_id,omitempty"`
@@ -48,7 +50,7 @@ func New(disp Dispatcher, jobs []shell3.CronJob) (*Scheduler, error) {
 	}
 	for _, j := range jobs {
 		job := j // capture
-		s.last[job.Name] = JobStatus{Name: job.Name, Schedule: job.Schedule, Agent: job.Agent, Notify: job.Notify}
+		s.last[job.Name] = JobStatus{Name: job.Name, Schedule: job.Schedule, Agent: job.Agent, Prompt: job.Prompt, WorkDir: job.WorkDir, Notify: job.Notify}
 		// v1 deliberately allows overlapping fires: each tick is a fresh
 		// subagent (plain AddFunc, no cron.SkipIfStillRunning wrapper). If a
 		// job's runs prove noisy, wrap with a skip-if-running chain later.

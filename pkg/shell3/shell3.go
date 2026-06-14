@@ -301,6 +301,12 @@ type Session struct {
 
 	opts SessionOpts // the SessionOpts this session was built from (for reload re-derivation)
 
+	// resumedFrom is the store id this session reattached to on creation (0 when
+	// it started fresh); resumedMsgs is how many messages were reloaded. Both feed
+	// front-end "attached to session #N" status lines. Immutable after newSession.
+	resumedFrom int64
+	resumedMsgs int
+
 	// closeOnce makes Close safe under concurrent invocation: a spawned
 	// subagent goroutine calls child.Close() at the same time Runtime.Close may
 	// close the same child from its session map. The body runs exactly once;
@@ -389,16 +395,29 @@ func (s *Session) writeStartLine(label string) {
 func newSession(cfg chat.Config, cleanup func(), opts SessionOpts) *Session {
 	var storeID int64
 	var seed []llm.Message
+	var resumedFrom int64 // non-zero when this session reattached to an existing row
 	if cfg.Store != nil {
+		// Reattach to the newest matching session when asked (and no explicit
+		// ResumeID is given) so a front-end restart rejoins its conversation
+		// instead of spawning a fresh row each boot.
+		resumeID := opts.ResumeID
+		if resumeID == 0 && opts.ResumeLatest {
+			if id, found, err := cfg.Store.LatestSession(cfg.WorkDir, cfg.ConfigPath); err != nil {
+				chat.LogOrNoop(cfg.Log).Warn("resume-latest lookup failed", "error", err)
+			} else if found {
+				resumeID = id
+			}
+		}
 		switch {
-		case opts.ResumeID != 0:
-			storeID = opts.ResumeID
-			if msgs, err := cfg.Store.LoadSessionMessages(opts.ResumeID); err == nil {
+		case resumeID != 0:
+			storeID = resumeID
+			resumedFrom = resumeID
+			if msgs, err := cfg.Store.LoadSessionMessages(resumeID); err == nil {
 				seed = msgs
 			} else {
-				chat.LogOrNoop(cfg.Log).Warn("resume load failed", "session_id", opts.ResumeID, "error", err)
+				chat.LogOrNoop(cfg.Log).Warn("resume load failed", "session_id", resumeID, "error", err)
 			}
-			if err := cfg.Store.SetLiveness(opts.ResumeID, os.Getpid(), "", "live"); err != nil {
+			if err := cfg.Store.SetLiveness(resumeID, os.Getpid(), "", "live"); err != nil {
 				chat.LogOrNoop(cfg.Log).Warn("resume liveness failed", "error", err)
 			}
 		case opts.ParentSession != 0:
@@ -432,6 +451,8 @@ func newSession(cfg chat.Config, cleanup func(), opts SessionOpts) *Session {
 		ContextWindowFor: func(string) int { return cfg.ContextWindow },
 		Sink:             s.route,
 	})
+	s.resumedFrom = resumedFrom
+	s.resumedMsgs = len(seed)
 	return s
 }
 
@@ -702,6 +723,13 @@ func (s *Session) ID() string {
 	return fmt.Sprintf("%d", s.sess.ID())
 }
 
+// Resumed reports whether this session reattached to an existing stored session
+// on creation, and how many messages were reloaded. resumed is false for a fresh
+// session. Front-ends use this to show an "attached to session #N" status line.
+func (s *Session) Resumed() (msgs int, resumed bool) {
+	return s.resumedMsgs, s.resumedFrom != 0
+}
+
 // Name returns the session's registry name (the value carried in
 // HostEvent.Session on the wake bus). Start-created sessions are named "main".
 // A host filtering Events() compares HostEvent.Session against this.
@@ -944,6 +972,24 @@ func (s *Session) Clear() error {
 		return ErrBusy
 	}
 	s.sess.SetMessages(nil)
+	// Rotate onto a fresh store session: end the conversation just cleared (its
+	// turns were already persisted per-turn, so it becomes a finished past
+	// session) and open a new row that subsequent turns record under. Without
+	// this, /clear only empties the in-memory buffer and the open session lingers
+	// at the top of the dashboard's Runs list. Best-effort — a store hiccup logs
+	// and leaves the live id untouched rather than dropping persistence.
+	if s.cfg.Store != nil {
+		if old := s.sess.ID(); old != 0 {
+			if err := s.cfg.Store.EndSession(old); err != nil {
+				chat.LogOrNoop(s.cfg.Log).Warn("clear: end session failed", "session_id", old, "error", err)
+			}
+		}
+		if id, err := s.cfg.Store.StartSession(s.cfg.ProjectRef, s.cfg.WorkDir, s.cfg.ConfigPath); err == nil {
+			s.sess.SetID(id)
+		} else {
+			chat.LogOrNoop(s.cfg.Log).Warn("clear: start session failed", "error", err)
+		}
+	}
 	if s.cfg.RefreshPrompt != nil {
 		// RefreshPrompt rebuilds from the agent config without the Delegation
 		// section; re-append it (idempotent). Mutate SystemPrompt and snapshot

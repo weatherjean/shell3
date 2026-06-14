@@ -58,7 +58,7 @@ func newTelegramCommand() *cobra.Command {
 			// The Telegram bot runs one fixed agent (it spawns subagents but does
 			// not switch agents). Agent picks it; "" → first declared. WorkDir
 			// roots its tools, defaulting to the runtime root when unset.
-			sess, err := rt.Session(shell3.SessionOpts{Name: "telegram", Agent: tg.Agent, WorkDir: tg.WorkDir})
+			sess, err := rt.Session(shell3.SessionOpts{Name: "telegram", Agent: tg.Agent, WorkDir: tg.WorkDir, ResumeLatest: true})
 			if err != nil {
 				return err
 			}
@@ -146,8 +146,12 @@ func newTelegramCommand() *cobra.Command {
 			// Install a persistent reply-keyboard bar above the input: one-tap
 			// slash-command buttons that auto-send their command. Best-effort.
 			{
+				banner := fmt.Sprintf("shell3 online — session #%s", sess.ID())
+				if msgs, resumed := sess.Resumed(); resumed && msgs > 0 {
+					banner = fmt.Sprintf("shell3 online — resumed session #%s (%d msgs)", sess.ID(), msgs)
+				}
 				rows := [][]telegram.ReplyKey{{{Text: "/stop"}, {Text: "/reload"}, {Text: "/clear"}}}
-				if err := client.ShowReplyKeyboard(ctx, chatID, "shell3 online — quick actions ready.", rows); err != nil {
+				if err := client.ShowReplyKeyboard(ctx, chatID, banner, rows); err != nil {
 					fmt.Printf("warning: could not set reply keyboard: %v\n", err)
 				}
 			}
@@ -222,6 +226,7 @@ func cronSource(sched *cron.Scheduler) func() []web.CronJob {
 		for _, j := range sched.Jobs() {
 			out = append(out, web.CronJob{
 				Name: j.Name, Schedule: j.Schedule, Agent: j.Agent,
+				Prompt: j.Prompt, WorkDir: j.WorkDir,
 				Notify: j.Notify, LastRun: j.LastRun, LastSubID: j.LastSubID,
 			})
 		}
