@@ -42,15 +42,22 @@ func TestBgJobs_LifecycleAndPrune(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	reg := jobstore.New(st)
 
-	// Spawn a REAL long-lived bg process, tracked via the store registry.
-	job, err := bgjobs.Start(reg, []string{"sleep", "30"}, "sleep 30", workDir, nil)
+	// Build the CLI BEFORE spawning the job: compiling cmd/shell3 (which pulls
+	// in the pure-Go modernc.org/sqlite) can take tens of seconds on a cold
+	// runner, and the spawned process must outlive that compile. Building first
+	// keeps the slow step out of the job's lifetime window.
+	bin := buildShell3(t)
+
+	// Spawn a REAL long-lived bg process, tracked via the store registry. Use a
+	// generous sleep so the job stays live across the (already-built) CLI calls
+	// even on a slow/loaded CI runner.
+	job, err := bgjobs.Start(reg, []string{"sleep", "120"}, "sleep 120", workDir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Ensure cleanup kills the group even if asserts fail.
 	t.Cleanup(func() { _ = syscall.Kill(-job.PID, syscall.SIGKILL) })
 
-	bin := buildShell3(t)
 	// runJobs invokes the built binary's `jobs` subcommand against the same
 	// canonical DB (resolved from HOME) and returns its stdout.
 	runJobs := func() string {
