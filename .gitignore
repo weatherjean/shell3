@@ -4,6 +4,11 @@
 ai-do-not-read.*
 .shell3/bg.json
 
+# AI dev-process artifacts (kept local, not shipped publicly)
+CLAUDE.md
+docs/superpowers/
+docs/dev/superpowers/
+
 # Build / test artifacts
 *.out
 *.prof
