@@ -7,7 +7,6 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/weatherjean/shell3/internal/store"
 )
@@ -34,7 +33,11 @@ func TestBashBgHandler_Execute_happyPath(t *testing.T) {
 	wd := t.TempDir()
 	h := BashBgHandler{}
 	st := memStore(t)
-	args := json.RawMessage(`{"command":"echo bg-output"}`)
+	// Long-lived command so the recorded row survives ListJobs' dead-pid prune.
+	// A fast command like `echo` can exit before the assertion runs, dropping
+	// the row and making this flaky on loaded CI runners (the sibling tests
+	// below use `sleep 30` for the same reason).
+	args := json.RawMessage(`{"command":"sleep 30"}`)
 	out, err := h.Execute(context.Background(), "1", args, ToolConfig{WorkDir: wd, Store: st})
 	if err != nil {
 		t.Fatal(err)
@@ -55,8 +58,7 @@ func TestBashBgHandler_Execute_happyPath(t *testing.T) {
 	if len(jobs) != 1 {
 		t.Fatalf("want 1 job recorded, got %d", len(jobs))
 	}
-	// Give the spawned echo a moment to exit + log to flush, then clean up.
-	time.Sleep(200 * time.Millisecond)
+	t.Cleanup(func() { _ = syscall.Kill(jobs[0].PID, syscall.SIGKILL) })
 }
 
 func TestBashBgHandler_Execute_requiresStore(t *testing.T) {
