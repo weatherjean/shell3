@@ -135,14 +135,14 @@
 <nav>
   <button data-tab="chat" class="active">Chat</button>
   <button data-tab="runs">Runs</button>
-  <button data-tab="status">Status</button>
   <button data-tab="cron">Cron</button>
+  <button data-tab="status">Status</button>
 </nav>
 <main>
   <section id="chat" class="view active"><div class="empty">loading…</div></section>
   <section id="runs" class="view"><div class="empty">loading…</div></section>
-  <section id="status" class="view"><div class="empty">loading…</div></section>
   <section id="cron" class="view"><div class="empty">loading…</div></section>
+  <section id="status" class="view"><div class="empty">loading…</div></section>
 </main>
 
 <script>
@@ -300,9 +300,13 @@ async function openRun(kind, id) {
     } else {
       const turns = await api("/api/session?id=" + encodeURIComponent(id));
       body = turns.length
-        ? turns.map(t => t.role === "tool"
-            ? `<details class="tool"><summary><span class="chev">▸</span><span class="tname">🔧 ${esc(t.tool_name) || "tool"}</span></summary><pre>${esc(t.content) || "(no output)"}</pre></details>`
-            : bubble(t.role, (t.content || "").trim())).join("")
+        ? turns.map(t => {
+            if (t.role === "tool") return `<details class="tool"><summary><span class="chev">▸</span><span class="tname">🔧 ${esc(t.tool_name) || "tool"}</span></summary><pre>${esc(t.content) || "(no output)"}</pre></details>`;
+            // Skip empty/whitespace-only turns (a tool-only turn persists an empty
+            // assistant row) so they don't render as blank bubbles.
+            const c = (t.content || "").trim();
+            return c ? bubble(t.role, c) : "";
+          }).join("")
         : '<div class="empty">empty conversation</div>';
     }
     views.runs.innerHTML = `<button class="back">← all runs</button>${body}`;
