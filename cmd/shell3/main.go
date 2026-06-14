@@ -32,7 +32,7 @@ func main() {
 	)
 	root.Args = cobra.ArbitraryArgs
 	root.Flags().Int64Var(&rootResume, "resume", 0, "Resume a stored session by id in the interactive TUI.")
-	root.Flags().StringVarP(&rootConfigPath, "config", "c", "", "Path to shell3.lua (default: ./shell3.lua, else ~/.shell3/shell3.lua)")
+	root.Flags().StringVarP(&rootConfigPath, "config", "c", "", "Config name (→ ~/.shell3/<name>.lua) or path to a *.lua file (default: ~/.shell3/shell3.lua)")
 	root.Flags().StringVar(&rootAgent, "agent", "", "Select the active agent by name (default: first declared).")
 	root.RunE = func(cmd *cobra.Command, args []string) error {
 		cwd, err := os.Getwd()

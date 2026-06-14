@@ -36,7 +36,7 @@ func newTelegramCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resolved, err := agentsetup.ResolveTelegramConfigPath(configPath, cwd, home)
+			resolved, err := agentsetup.ResolveTelegramConfigPath(agentsetup.ExpandConfigName(configPath, home), cwd, home)
 			if err != nil {
 				return err
 			}
@@ -157,7 +157,7 @@ func newTelegramCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&configPath, "config", "", "path to shell3.lua")
+	cmd.Flags().StringVarP(&configPath, "config", "c", "", "Config name (→ ~/.shell3/<name>.lua) or path to a *.lua file")
 	return cmd
 }
 

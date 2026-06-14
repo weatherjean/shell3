@@ -40,6 +40,11 @@ func TestCanonicalDBPath(t *testing.T) {
 			config: "/tmp/foo/shell3.lua",
 			want:   filepath.Join("/tmp/foo", "data", "shell3.db"),
 		},
+		{
+			name:   "bare name expands under ~/.shell3 and anchors there",
+			config: "code",
+			want:   paths.NewGlobal(home).DB,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

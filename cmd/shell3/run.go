@@ -46,7 +46,7 @@ func newRunCommand() *cobra.Command {
 			return runHeadless(cmd.Context(), f, input)
 		},
 	}
-	cmd.Flags().StringVarP(&f.configPath, "config", "c", "", "Path to shell3.lua (default: ./shell3.lua, else ~/.shell3/shell3.lua)")
+	cmd.Flags().StringVarP(&f.configPath, "config", "c", "", "Config name (→ ~/.shell3/<name>.lua) or path to a *.lua file (default: ~/.shell3/shell3.lua)")
 	cmd.Flags().StringVar(&f.outPath, "out", "", "Stream a JSONL audit log of this run to <path>.")
 	cmd.Flags().StringVar(&f.agent, "agent", "", "Select the active agent by name (default: first declared). May also name a registered subagent.")
 	cmd.Flags().StringVar(&f.id, "id", "", "Caller-chosen id for this run (conventionally the transcript filename stem).")

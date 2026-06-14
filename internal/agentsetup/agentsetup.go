@@ -462,16 +462,25 @@ func buildClient(md luacfg.Model) (chat.LLMClient, llm.RequestParams) {
 	return cl, rp
 }
 
-// ResolveConfigPath returns the shell3.lua to load: the explicit flag, else
-// ./shell3.lua if it exists, else ~/.shell3/shell3.lua if it exists. Returns
-// an error when nothing is found.
-func ResolveConfigPath(flag, cwd, homeDir string) (string, error) {
-	if flag != "" {
-		return flag, nil
+// ExpandConfigName turns a raw --config flag value into a config path. A value
+// ending in ".lua" is a literal path (returned unchanged); any other non-empty
+// value is a name resolved to ~/.shell3/<name>.lua; an empty value is returned
+// as-is (the caller applies its own default). This is the single rule every
+// front-end and CLI uses so name-vs-path resolution stays consistent.
+func ExpandConfigName(flag, homeDir string) string {
+	if flag == "" || strings.HasSuffix(flag, ".lua") {
+		return flag
 	}
-	local := filepath.Join(cwd, "shell3.lua")
-	if fileExists(local) {
-		return local, nil
+	return filepath.Join(homeDir, ".shell3", flag+".lua")
+}
+
+// ResolveConfigPath returns the shell3.lua to load: the explicit flag (a name
+// like "code" → ~/.shell3/code.lua, or a literal *.lua path), else the default
+// ~/.shell3/shell3.lua. It does NOT look in cwd. Returns an error when the
+// resolved file does not exist.
+func ResolveConfigPath(flag, cwd, homeDir string) (string, error) {
+	if expanded := ExpandConfigName(flag, homeDir); expanded != "" {
+		return expanded, nil
 	}
 	global := filepath.Join(homeDir, ".shell3", "shell3.lua")
 	if fileExists(global) {

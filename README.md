@@ -122,8 +122,10 @@ local weather = shell3.tool({
 })
 ```
 
-Config resolution order: `--config/-c` flag → `./shell3.lua` →
-`~/.shell3/shell3.lua`. Secrets live in a `.env` beside the config, read via
+Config resolution: the `--config/-c` value is a **name** (`-c code` →
+`~/.shell3/code.lua`) unless it ends in `.lua`, in which case it's a literal
+path; with no flag it defaults to `~/.shell3/shell3.lua`. The current directory
+is not consulted. Secrets live in a `.env` beside the config, read via
 `shell3.env.secret("KEY")` — plain text, so treat it like any credentials
 file. Drop-in recipes (extra agents, planning skills, the browser skill, proxy setups) live
 in [docs/cookbook](docs/cookbook).

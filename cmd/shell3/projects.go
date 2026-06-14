@@ -37,7 +37,7 @@ func newListProjectsCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&configPath, "config", "c", "", "Path to shell3.lua (anchors the canonical DB; default: ~/.shell3).")
+	cmd.Flags().StringVarP(&configPath, "config", "c", "", "Config name or *.lua path (anchors the canonical DB; default: ~/.shell3).")
 	cmd.Flags().IntVar(&page, "page", 0, "Zero-based page index.")
 	cmd.Flags().IntVar(&pageSize, "page-size", 20, "Projects per page.")
 	return cmd
