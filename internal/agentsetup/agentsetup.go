@@ -81,7 +81,7 @@ func (p *Parts) ConfigPath() string { return p.configPath }
 // Telegram returns the parsed shell3.telegram{} config (zero value if absent).
 func (p *Parts) Telegram() luacfg.TelegramConfig { return p.lc.Telegram() }
 
-// Cron returns the parsed shell3.cron jobs (nil if absent).
+// Cron returns the parsed cron jobs from shell3.telegram (nil if absent).
 func (p *Parts) Cron() []luacfg.CronJob { return p.lc.Cron() }
 
 // ModelCount returns the number of declared models.

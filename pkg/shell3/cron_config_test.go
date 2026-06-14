@@ -14,7 +14,7 @@ func TestRuntime_CronConfig(t *testing.T) {
 shell3.model("main", { base_url="https://api.x/v1", api_key="k", model="m-1", context_window=1000 })
 local explorer = shell3.subagent({ name="explorer", model="main", description="d", prompt="p", tools={} })
 shell3.agent({ name="code", model="main", prompt="hi", tools={ subagents={explorer} } })
-shell3.cron({ jobs = { { name="n", schedule="@daily", agent="explorer", prompt="go", notify=false } } })
+shell3.telegram({ token="t", chat_id="1", agent="code", cron = { { name="n", schedule="@daily", agent="explorer", prompt="go", notify=false } } })
 `
 	path := filepath.Join(dir, "shell3.lua")
 	if err := os.WriteFile(path, []byte(cfg), 0o644); err != nil {

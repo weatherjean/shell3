@@ -32,8 +32,8 @@ follow the require to the right file.
 2. Respect the cross-reference rules (validated on every reload; a violation
    rejects the whole reload):
    - every agent/subagent `model = "..."` must name a declared `shell3.model`;
-   - every `shell3.cron` job's `agent = "..."` must name a declared SUBAGENT
-     (not a top-level agent);
+   - every cron job (in `shell3.telegram{ cron = {...} }`) must set
+     `agent = "..."` to a declared SUBAGENT (not a top-level agent);
    - a skill or tool granted to an agent must be a declared handle.
 3. Call the `reload` tool. It validates the whole file, then applies it after
    this turn ends. It acknowledges immediately; the validated result — success

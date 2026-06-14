@@ -1,9 +1,13 @@
-You can give yourself recurring background work with `shell3.cron`. A job fires on
-a schedule and dispatches a SUBAGENT with a prompt; the result is posted to chat.
+You can give yourself recurring background work with cron jobs. A job fires on a
+schedule and dispatches a SUBAGENT with a prompt; the result is posted to chat.
+Cron is a Telegram-host feature, so jobs live INSIDE the `shell3.telegram{}`
+block under a `cron = { ... }` key (a flat list of jobs — no `jobs=` wrapper).
 
 ## The block
-shell3.cron({
-  jobs = {
+shell3.telegram({
+  token = shell3.env.secret("TELEGRAM_BOT_TOKEN"),
+  chat_id = "...", agent = "code",
+  cron = {
     { name="nightly", schedule="0 9 * * *", agent="explorer",
       prompt="Summarize anything noteworthy.", notify=true },
   },

@@ -34,7 +34,7 @@ type DashboardConfig struct {
 	URL     string
 }
 
-// CronJob mirrors one parsed shell3.cron job.
+// CronJob mirrors one parsed cron job (shell3.telegram cron list).
 type CronJob struct {
 	Name     string
 	Schedule string
@@ -238,7 +238,7 @@ func (rt *Runtime) Events() <-chan HostEvent { return rt.events }
 // Telegram returns the parsed shell3.telegram{} config (zero value if absent).
 func (rt *Runtime) Telegram() TelegramConfig { return rt.telegram }
 
-// Cron returns the parsed shell3.cron jobs (nil if absent).
+// Cron returns the parsed cron jobs from shell3.telegram (nil if absent).
 func (rt *Runtime) Cron() []CronJob { return rt.cron }
 
 // Store returns the shared canonical store (nil if unavailable).

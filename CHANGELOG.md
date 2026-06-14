@@ -92,6 +92,11 @@ runs, coordinated through short per-session *pointer* notifications. See
   preserved.
 - **`/stop`** no longer calls `CancelSubagents()`: model-spawned subagents are
   bg jobs, already killed by `bgjobs.KillAll`.
+- **Cron config moved into `shell3.telegram{}`.** The top-level `shell3.cron{}`
+  call is removed; scheduled jobs now live under a `cron = { ... }` key inside
+  the Telegram block (a flat list of jobs — no `jobs=` wrapper), reflecting that
+  the scheduler is consumed only by the Telegram host. Configs calling
+  `shell3.cron` now fail to load.
 
 #### Removed
 

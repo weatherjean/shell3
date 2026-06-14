@@ -180,20 +180,17 @@ You are the design partner inside shell3. You do NOT edit files — you investig
 -- Put TELEGRAM_BOT_TOKEN=<token from @BotFather> in .env beside this file.
 -- The dashboard is read-only; expose it on your tailnet with:
 --   tailscale serve https / proxy 127.0.0.1:8765
+-- Scheduled jobs (cron) live INSIDE this block — they run only on the always-on
+-- `shell3 telegram` host. Each job dispatches an isolated subagent; notify=false
+-- is a quiet background job whose result shows only in the dashboard (errors
+-- still notify). Fire manually with /run <name>.
 -- shell3.telegram({
 --   token   = shell3.env.secret("TELEGRAM_BOT_TOKEN"),
 --   chat_id = "000000000",
 --   agent   = "code",                 -- the single agent the bot runs (it spawns subagents); "" → first declared
 --   workdir = "/abs/path/to/workdir", -- where the agent's tools run; defaults to the launch directory
 --   dashboard = { enabled = true, addr = "127.0.0.1:8765", url = "https://HOST.TAILNET.ts.net/" },
--- })
-
--- Scheduled jobs (run on the always-on `shell3 telegram` host). Each job
--- dispatches an isolated subagent; notify=false is a quiet background job whose
--- result shows only in the dashboard (errors still notify). Fire manually with
--- /run <name>.
--- shell3.cron({
---   jobs = {
+--   cron = {
 --     { name="prs", schedule="0 9 * * *", agent="explorer", notify=true,
 --       prompt="Summarize my open PRs and anything that needs review today." },
 --     { name="tests", schedule="@hourly", agent="code", workdir="/path/to/repo", notify=false,

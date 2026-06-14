@@ -29,7 +29,7 @@ func TestReload_PreservesHistoryAndArmsNewJob(t *testing.T) {
 	}
 
 	writeCfg(t, dir, baseCfg+`
-shell3.cron({ jobs = { { name="nightly", schedule="@daily", agent="explorer", prompt="go", notify=false } } })
+shell3.telegram({ token="t", chat_id="1", agent="code", cron = { { name="nightly", schedule="@daily", agent="explorer", prompt="go", notify=false } } })
 `)
 	if _, err := rt.Reload(); err != nil {
 		t.Fatal(err)

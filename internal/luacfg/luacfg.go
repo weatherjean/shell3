@@ -55,7 +55,7 @@ type CustomTool struct {
 // resolution loop) so the index can point the agent at it from any cwd.
 type Skill struct{ Name, Description, Path string }
 
-// CronJob is one parsed shell3.cron job entry.
+// CronJob is one parsed cron job entry (shell3.telegram cron list).
 type CronJob struct {
 	Name     string
 	Schedule string
@@ -292,7 +292,7 @@ func Load(path, workdir string) (*LoadedConfig, error) {
 // Telegram returns the parsed shell3.telegram{} block (zero value if absent).
 func (c *LoadedConfig) Telegram() TelegramConfig { return c.telegram }
 
-// Cron returns the parsed shell3.cron jobs (nil if absent).
+// Cron returns the parsed cron jobs from shell3.telegram (nil if absent).
 func (c *LoadedConfig) Cron() []CronJob { return c.cron }
 
 // HasWrapBash reports whether a shell3.wrap_bash hook was declared. agentsetup

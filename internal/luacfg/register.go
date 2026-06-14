@@ -13,7 +13,6 @@ func registerShell3(c *LoadedConfig) {
 	L.SetGlobal("shell3", tbl)
 	L.SetField(tbl, "model", L.NewFunction(c.luaModel))
 	L.SetField(tbl, "telegram", L.NewFunction(c.luaTelegram))
-	L.SetField(tbl, "cron", L.NewFunction(c.luaCron))
 	L.SetField(tbl, "skill", L.NewFunction(c.luaSkill))
 	L.SetField(tbl, "tool", L.NewFunction(c.luaTool))
 	L.SetField(tbl, "stub_tools", L.NewFunction(c.luaStubTools))
@@ -25,7 +24,7 @@ func registerShell3(c *LoadedConfig) {
 	L.SetField(tbl, "wrap_bash", L.NewFunction(c.luaWrapBash))
 }
 
-var telegramKeys = map[string]bool{"token": true, "chat_id": true, "agent": true, "workdir": true, "dashboard": true}
+var telegramKeys = map[string]bool{"token": true, "chat_id": true, "agent": true, "workdir": true, "dashboard": true, "cron": true}
 var telegramDashboardKeys = map[string]bool{"enabled": true, "addr": true, "url": true}
 
 func (c *LoadedConfig) luaTelegram(L *lua.LState) int {
@@ -49,24 +48,22 @@ func (c *LoadedConfig) luaTelegram(L *lua.LState) int {
 			URL:     optStr(d, "url"),
 		}
 	}
+	// cron jobs are nested under telegram{}: the scheduler is consumed only by
+	// the Telegram host, so the config shape reflects that coupling. `cron` is a
+	// flat list of job tables (no `jobs=` wrapper).
+	if jobsT, ok := opts.RawGetString("cron").(*lua.LTable); ok {
+		c.parseCronJobs(L, jobsT)
+	}
 	c.telegram = tg
 	return 0
 }
 
-var cronKeys = map[string]bool{"jobs": true}
 var cronJobKeys = map[string]bool{
 	"name": true, "schedule": true, "agent": true, "prompt": true, "workdir": true, "notify": true,
 }
 
-func (c *LoadedConfig) luaCron(L *lua.LState) int {
-	opts := L.CheckTable(1)
-	if err := checkKeys(opts, "cron", cronKeys); err != nil {
-		L.RaiseError("%s", err.Error())
-	}
-	jobsT, ok := opts.RawGetString("jobs").(*lua.LTable)
-	if !ok {
-		return 0 // no jobs
-	}
+// parseCronJobs reads a flat list of cron job tables and appends them to c.cron.
+func (c *LoadedConfig) parseCronJobs(L *lua.LState, jobsT *lua.LTable) {
 	n := 0
 	jobsT.ForEach(func(_, v lua.LValue) {
 		jt, ok := v.(*lua.LTable)
@@ -93,7 +90,6 @@ func (c *LoadedConfig) luaCron(L *lua.LState) int {
 		}
 		c.cron = append(c.cron, job)
 	})
-	return 0
 }
 
 var modelKeys = map[string]bool{

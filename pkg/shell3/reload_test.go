@@ -38,7 +38,7 @@ func TestReload_AddAgentTakesEffect(t *testing.T) {
 	}
 	writeCfg(t, dir, baseCfg+`
 shell3.agent({ name="research", model="main", prompt="research", tools={} })
-shell3.cron({ jobs = { { name="n", schedule="@daily", agent="explorer", prompt="go" } } })
+shell3.telegram({ token="t", chat_id="1", agent="code", cron = { { name="n", schedule="@daily", agent="explorer", prompt="go" } } })
 `)
 	res, err := rt.Reload()
 	if err != nil {
@@ -65,7 +65,7 @@ func TestReload_InvalidKeepsOldConfig(t *testing.T) {
 	defer rt.Close()
 	sess, _ := rt.Session(shell3.SessionOpts{Name: "telegram", Agent: "code"})
 	writeCfg(t, dir, baseCfg+`
-shell3.cron({ jobs = { { schedule="@daily", agent="ghost", prompt="x" } } })
+shell3.telegram({ token="t", chat_id="1", agent="code", cron = { { schedule="@daily", agent="ghost", prompt="x" } } })
 `)
 	if _, err := rt.Reload(); err == nil {
 		t.Fatal("expected reload to reject the invalid config")

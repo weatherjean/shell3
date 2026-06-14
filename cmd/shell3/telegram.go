@@ -63,7 +63,7 @@ func newTelegramCommand() *cobra.Command {
 				return err
 			}
 
-			// Scheduled jobs (shell3.cron{}): arm a scheduler on the main session.
+			// Scheduled jobs (shell3.telegram cron list): arm a scheduler on the main session.
 			var sched *cron.Scheduler
 			if jobs := rt.Cron(); len(jobs) > 0 {
 				sched, err = cron.New(sess, jobs)

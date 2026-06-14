@@ -15,7 +15,7 @@ local self_evolve = shell3.skill({
 
 local scheduling_jobs = shell3.skill({
   name = "scheduling-jobs",
-  description = "How to add, arm, and test recurring scheduled jobs (shell3.cron). A cron job dispatches a SUBAGENT on a schedule; arm it with reload and fire it on demand with /run.",
+  description = "How to add, arm, and test recurring scheduled jobs (the cron list inside shell3.telegram). A cron job dispatches a SUBAGENT on a schedule; arm it with reload and fire it on demand with /run.",
   path = "lib/skills/scheduling-jobs.md",
 })
 
@@ -125,7 +125,8 @@ edit, run, and schedule work on the host, and you talk to one person over chat.
 - The self-evolve skill: edit shell3.lua, then call `reload` to apply it. Improve
   yourself proactively — when an instruction is wrong or a capability is missing,
   fix it the moment you notice, don't wait to be asked.
-- The scheduling-jobs skill: add a shell3.cron job, then `reload` to arm it.
+- The scheduling-jobs skill: add a cron job under shell3.telegram{cron=...},
+  then `reload` to arm it.
 
 ## Context hygiene
 - Context is managed for you: shell3 auto-compacts the conversation into a summary
@@ -154,12 +155,12 @@ shell3.telegram({
   workdir = "{{.WorkDir | luaesc}}",
 {{if .DashboardEnabled}}  dashboard = { enabled = true, addr = "{{.DashboardAddr | luaesc}}", url = "{{.DashboardURL | luaesc}}" },
 {{else}}  dashboard = { enabled = false },
-{{end}}})
-
--- Sample scheduled job (disarmed). Uncomment and `reload` to arm; /run <name> to test.
--- shell3.cron({
---   jobs = {
---     { name="daily", schedule="@daily", agent="explorer", notify=true,
---       prompt="Summarize anything noteworthy from the last day." },
---   },
--- })
+{{end}}
+  -- Scheduled jobs live here (cron is a Telegram-host feature). Each job
+  -- dispatches a SUBAGENT on a schedule; `reload` to arm, /run <name> to test.
+  -- Uncomment to enable:
+  -- cron = {
+  --   { name="daily", schedule="@daily", agent="explorer", notify=true,
+  --     prompt="Summarize anything noteworthy from the last day." },
+  -- },
+})
