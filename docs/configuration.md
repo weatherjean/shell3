@@ -4,9 +4,9 @@ Everything shell3 does is decided by one file: `shell3.lua`. It's plain Lua, so
 it's versionable, diffable, and programmable — you configure shell3 like
 software, not like a platform with a settings panel.
 
-`shell3 boot` writes a working config for you in under a minute. This page is for
-when you want to go beyond the defaults: add a model, write a tool, gate the
-shell, or understand how shell3 finds your config in the first place.
+`shell3 boot` writes a working config for you. This page is for when you want to
+go beyond the defaults: add a model, write a tool, gate the shell, or understand
+how shell3 finds your config in the first place.
 
 ## Where the config lives
 
@@ -113,9 +113,9 @@ shell3.agent({
 ```
 
 The convention that ships with `boot` is two agents: a full-access `code` agent
-and a read-only `plan` agent that investigates and designs but cannot edit. It's
-a good pattern — design with `plan`, switch to `code` to build — but it's only a
-convention. Add a `review` agent, a `docs` agent, whatever fits your work. See
+and a read-only `plan` agent that investigates and designs but cannot edit —
+design with `plan`, switch to `code` to build. But it's only a convention: add a
+`review` agent, a `docs` agent, whatever fits your work. See
 [cookbook/lib/extra-agents.lua](cookbook/lib/extra-agents.lua).
 
 ## Custom tools
@@ -236,7 +236,7 @@ codebase discovery, and web search.
 
 ## Putting it together
 
-The base config `boot` writes is the best worked example — read your own
+For a full example, read the base config `boot` writes —
 `~/.shell3/shell3.lua`. For drop-in additions (extra agents, more skills, the
 browser skill, proxy and sandbox setups), see the
 [cookbook](cookbook/README.md).

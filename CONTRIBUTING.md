@@ -1,7 +1,7 @@
 # Contributing to shell3
 
-Thanks for your interest! shell3 is a small codebase with a high bar for
-clarity — most of these guidelines exist to keep it that way.
+shell3 is a small Go codebase. A few conventions keep it consistent — they're
+below.
 
 ## Development setup
 
@@ -15,6 +15,13 @@ make lint      # gofmt drift check + go vet (what CI enforces)
 
 The test suite is hermetic: it runs against a temp `HOME`, uses a fake LLM
 provider (`internal/llm/fakellm`), and needs no network or API keys.
+
+## Scope
+
+shell3 aims to stay small. Prefer improving what's already here — sharpening,
+fixing, and simplifying existing behavior — over adding new surface or features.
+Changes that make the current pieces work better are more welcome than ones that
+grow the footprint.
 
 ## Workflow
 

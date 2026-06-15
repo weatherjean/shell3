@@ -5,8 +5,8 @@ personal agent you talk to from your phone. It's one binary, one config, one
 chat — the bot runs a single agent on a host you control, can schedule its own
 recurring work, and can even edit and reload its own config while it's running.
 
-It's the most natural way to test shell3 on your devices: scaffold it once, run
-it on a machine that stays up, and message it like you'd message a person.
+It's a way to use shell3 from your phone: scaffold it once, run it on a machine
+that stays up, and message it like you'd message a person.
 
 ## What you get
 

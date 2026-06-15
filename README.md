@@ -76,9 +76,9 @@ commands. Full walkthrough in [docs/cli.md](docs/cli.md).
 
 ## Telegram bot
 
-shell3 ships an always-on personal agent you talk to over Telegram — the easiest
-way to run it on your devices. One bot, tied to your chat, running a single agent
-on a host you control:
+shell3 ships an always-on personal agent you talk to over Telegram, for using it
+from your phone. One bot, tied to your chat, running a single agent on a host you
+control:
 
 ```sh
 shell3 boot --telegram     # scaffold a Telegram host config
