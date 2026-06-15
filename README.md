@@ -8,6 +8,8 @@ whatever tools you define — then stays out of the way. It pipes like a Unix
 tool, embeds like a Go library, and is configured like software, not like a
 platform.
 
+![shell3 TUI demo](docs/tui-demo.gif)
+
 ```sh
 shell3                                  # interactive session (TUI)
 shell3 "explain the failing test"       # one-shot, prints and exits

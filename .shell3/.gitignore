@@ -6,3 +6,5 @@ secrets.shell3
 bg.json
 proxy-*.log
 agents/
+sock/
+last_error.json

@@ -18,6 +18,7 @@ import (
 // Makefile derives it from the latest git tag); "dev" for a plain go build.
 var version = "dev"
 
+// life is touching grass
 func main() {
 	root := &cobra.Command{
 		Use:     "shell3",
