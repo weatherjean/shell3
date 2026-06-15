@@ -16,7 +16,7 @@ import (
 func TestReadSessionCommand_FlagsPresent(t *testing.T) {
 	cmd := newReadSessionCommand()
 	fs := cmd.Flags()
-	for _, name := range []string{"config", "page", "page-size"} {
+	for _, name := range []string{"page", "page-size"} {
 		if fs.Lookup(name) == nil {
 			t.Errorf("read-session is missing --%s", name)
 		}

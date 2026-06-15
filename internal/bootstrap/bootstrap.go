@@ -27,7 +27,7 @@ func EnsureGlobal(g paths.Global) error {
 
 // EnsureProject creates ./.shell3/ and the .ref file for this project.
 // Returns the project UUID (created on first call). Idempotent.
-func EnsureProject(l paths.Local, g paths.Global) (string, error) {
+func EnsureProject(l paths.Local) (string, error) {
 	if err := os.MkdirAll(l.Root, 0755); err != nil {
 		return "", fmt.Errorf("bootstrap: mkdir %s: %w", l.Root, err)
 	}
@@ -36,7 +36,7 @@ func EnsureProject(l paths.Local, g paths.Global) (string, error) {
 		return "", err
 	}
 
-	id, err := ref.Init(l, g)
+	id, err := ref.Init(l)
 	if err != nil {
 		return "", fmt.Errorf("bootstrap: ref init: %w", err)
 	}
@@ -52,7 +52,11 @@ func ensureGitignore(l paths.Local) error {
 
 	// Each of these must appear as its own whole line; substring matches
 	// (e.g. "*.reference" or a "# don't commit .ref here" comment) do not count.
-	missing := missingLines(string(b), ".ref", "proxy-*.log")
+	// Covers everything the runtime writes under ./.shell3/: the project UUID,
+	// per-session sockets, subagent transcripts, and the last-error dump (which
+	// can contain request/response bodies). Proxy logs now live under
+	// ~/.shell3/ and are ignored by the global gitignore instead.
+	missing := missingLines(string(b), ".ref", "sock/", "agents/", "last_error.json")
 	if len(missing) == 0 {
 		return nil
 	}
@@ -125,5 +129,6 @@ ai-do-not-read.*
 .env
 shell3.log
 shell3.log.*
+proxy-*.log
 data/
 `

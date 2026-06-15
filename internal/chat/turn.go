@@ -12,6 +12,7 @@ import (
 
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/store"
 )
 
@@ -56,8 +57,10 @@ func logStreamError(cfg TurnConfig, msgs []llm.Message, streamErr error) {
 			"response_body": string(resBody),
 		}
 		if data, err := json.MarshalIndent(rec, "", "  "); err == nil {
-			p := filepath.Join(cfg.WorkDir, ".shell3", "last_error.json")
-			if werr := os.WriteFile(p, data, 0644); werr != nil {
+			p := paths.LastErrorPath(cfg.WorkDir)
+			if werr := os.MkdirAll(filepath.Dir(p), 0o755); werr != nil {
+				dumpErr = werr
+			} else if werr := os.WriteFile(p, data, 0644); werr != nil {
 				// Don't advertise a dump file that wasn't written; surface the
 				// write error instead so the failure is observable.
 				dumpErr = werr

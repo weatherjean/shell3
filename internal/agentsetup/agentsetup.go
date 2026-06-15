@@ -339,7 +339,7 @@ func BuildParts(opts Options) (*Parts, func(), error) {
 		return nil, noop, err
 	}
 	b.openLog()
-	b.proxy = modelproxy.New(b.l.Root, b.log)
+	b.proxy = modelproxy.New(b.g.Root, b.log)
 	if err := b.loadConfig(); err != nil {
 		b.closeAll()
 		return nil, noop, err
@@ -383,7 +383,7 @@ func (b *builder) closeAll() {
 // and ensures the global root + data directories exist. The project UUID it
 // records is a namespacing key for the single canonical DB, not a directory.
 func (b *builder) resolvePaths() error {
-	configPath, err := ResolveConfigPath(b.opts.ConfigPath, b.opts.CWD, b.opts.HomeDir)
+	configPath, err := ResolveConfigPath(b.opts.ConfigPath, b.opts.HomeDir)
 	if err != nil {
 		return err
 	}
@@ -393,7 +393,7 @@ func (b *builder) resolvePaths() error {
 	if err := bootstrap.EnsureGlobal(b.g); err != nil {
 		return err
 	}
-	uuid, err := bootstrap.EnsureProject(b.l, b.g)
+	uuid, err := bootstrap.EnsureProject(b.l)
 	if err != nil {
 		return err
 	}
@@ -474,7 +474,7 @@ func ExpandConfigName(flag, homeDir string) string {
 // like "code" → ~/.shell3/code.lua, or a literal *.lua path), else the default
 // ~/.shell3/shell3.lua. It does NOT look in cwd. Returns an error when the
 // resolved file does not exist.
-func ResolveConfigPath(flag, cwd, homeDir string) (string, error) {
+func ResolveConfigPath(flag, homeDir string) (string, error) {
 	if expanded := ExpandConfigName(flag, homeDir); expanded != "" {
 		return expanded, nil
 	}

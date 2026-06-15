@@ -341,7 +341,7 @@ type Session struct {
 // hosts use NewRuntime + Runtime.Session directly. Closing the returned
 // Session also closes the underlying Runtime.
 func Start(ctx context.Context, spec Spec) (*Session, error) {
-	rt, err := NewRuntime(RuntimeSpec{ConfigPath: spec.ConfigPath, WorkDir: spec.WorkDir})
+	rt, err := NewRuntime(RuntimeSpec{ConfigPath: spec.ConfigPath, WorkDir: spec.WorkDir, Context: ctx})
 	if err != nil {
 		return nil, err
 	}
@@ -438,7 +438,7 @@ func newSession(cfg chat.Config, cleanup func(), opts SessionOpts) *Session {
 	}
 	s := &Session{
 		cfg:      cfg,
-		handlers: chat.NewHandlers(cfg),
+		handlers: chat.NewHandlers(),
 		cleanup:  cleanup,
 		// Default to a no-op so Close is safe even when Start didn't open a
 		// sink (and for tests that build a Session via newSession directly).

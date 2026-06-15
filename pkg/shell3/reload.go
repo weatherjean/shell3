@@ -114,7 +114,7 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 			continue
 		}
 		s.cfg = cfg
-		s.handlers = chat.NewHandlers(cfg)
+		s.handlers = chat.NewHandlers()
 		// Re-apply the per-session Delegation context: rt.sessionConfig rebuilt the
 		// prompt from the reloaded config without it. Idempotent (strips any prior
 		// section first), so a following SwitchAgent re-applying it is harmless.

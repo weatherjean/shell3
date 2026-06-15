@@ -45,7 +45,7 @@ func TestEnsureBootstrapEndToEnd(t *testing.T) {
 	if err := bootstrap.EnsureGlobal(g); err != nil {
 		t.Fatalf("EnsureGlobal: %v", err)
 	}
-	id, err := bootstrap.EnsureProject(l, g)
+	id, err := bootstrap.EnsureProject(l)
 	if err != nil {
 		t.Fatalf("EnsureProject: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestEnsureProject(t *testing.T) {
 	l := paths.NewLocal(cwd)
 
 	_ = bootstrap.EnsureGlobal(g)
-	id, err := bootstrap.EnsureProject(l, g)
+	id, err := bootstrap.EnsureProject(l)
 	if err != nil {
 		t.Fatalf("EnsureProject: %v", err)
 	}
@@ -105,11 +105,10 @@ func TestEnsureProject(t *testing.T) {
 	}
 
 	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
-	if !strings.Contains(string(gi), ".ref") {
-		t.Fatal(".gitignore missing .ref entry")
-	}
-	if !strings.Contains(string(gi), "proxy-*.log") {
-		t.Fatalf(".gitignore missing proxy-*.log entry:\n%s", gi)
+	for _, want := range []string{".ref", "sock/", "agents/", "last_error.json"} {
+		if !hasLine(string(gi), want) {
+			t.Fatalf(".gitignore missing %q entry:\n%s", want, gi)
+		}
 	}
 }
 
@@ -122,11 +121,11 @@ func TestEnsureProjectIdempotent(t *testing.T) {
 	l := paths.NewLocal(cwd)
 	_ = bootstrap.EnsureGlobal(g)
 
-	id1, err := bootstrap.EnsureProject(l, g)
+	id1, err := bootstrap.EnsureProject(l)
 	if err != nil {
 		t.Fatalf("EnsureProject 1: %v", err)
 	}
-	id2, err := bootstrap.EnsureProject(l, g)
+	id2, err := bootstrap.EnsureProject(l)
 	if err != nil {
 		t.Fatalf("EnsureProject 2: %v", err)
 	}
@@ -151,6 +150,7 @@ func TestGlobalGitignore(t *testing.T) {
 		".env",
 		"shell3.log",
 		"shell3.log.*",
+		"proxy-*.log",
 		"data/",
 	} {
 		if !strings.Contains(content, want) {
@@ -181,7 +181,7 @@ func TestEnsureGitignoreAppends(t *testing.T) {
 	_ = os.MkdirAll(l.Root, 0755)
 	_ = os.WriteFile(filepath.Join(l.Root, ".gitignore"), []byte("shell3.db\nai-do-not-read.*\n"), 0644)
 
-	_, _ = bootstrap.EnsureProject(l, g)
+	_, _ = bootstrap.EnsureProject(l)
 
 	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
 	content := string(gi)
@@ -219,7 +219,7 @@ func TestEnsureGitignoreWholeLineMatch(t *testing.T) {
 	// "*.reference" contains ".ref" as a substring but is not the .ref rule.
 	_ = os.WriteFile(filepath.Join(l.Root, ".gitignore"), []byte("*.reference\n"), 0644)
 
-	if _, err := bootstrap.EnsureProject(l, g); err != nil {
+	if _, err := bootstrap.EnsureProject(l); err != nil {
 		t.Fatalf("EnsureProject: %v", err)
 	}
 
@@ -233,9 +233,10 @@ func TestEnsureGitignoreWholeLineMatch(t *testing.T) {
 	}
 }
 
-// TestEnsureGitignoreProxyLogs verifies proxy-*.log is ignored locally and that
-// repeated runs do not duplicate either .ref or proxy-*.log. (F4 + idempotency)
-func TestEnsureGitignoreProxyLogs(t *testing.T) {
+// TestEnsureGitignoreLocalEntries verifies the runtime-written project artifacts
+// (sockets, subagent transcripts, the last-error dump) are ignored locally and
+// that repeated runs do not duplicate any entry. (idempotency)
+func TestEnsureGitignoreLocalEntries(t *testing.T) {
 	tmp := t.TempDir()
 	home := filepath.Join(tmp, "home")
 	cwd := filepath.Join(tmp, "project")
@@ -244,27 +245,23 @@ func TestEnsureGitignoreProxyLogs(t *testing.T) {
 	l := paths.NewLocal(cwd)
 	_ = bootstrap.EnsureGlobal(g)
 
-	if _, err := bootstrap.EnsureProject(l, g); err != nil {
+	if _, err := bootstrap.EnsureProject(l); err != nil {
 		t.Fatalf("EnsureProject: %v", err)
 	}
 	// Second run must not duplicate entries.
-	if _, err := bootstrap.EnsureProject(l, g); err != nil {
+	if _, err := bootstrap.EnsureProject(l); err != nil {
 		t.Fatalf("EnsureProject second call: %v", err)
 	}
 
 	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
 	content := string(gi)
-	if !hasLine(content, "proxy-*.log") {
-		t.Fatalf("proxy-*.log not present as its own line:\n%s", content)
-	}
-	if !hasLine(content, ".ref") {
-		t.Fatalf(".ref not present as its own line:\n%s", content)
-	}
-	if n := strings.Count(content, "proxy-*.log"); n != 1 {
-		t.Errorf("proxy-*.log appears %d times, want 1:\n%s", n, content)
-	}
-	if n := strings.Count(content, ".ref"); n != 1 {
-		t.Errorf(".ref appears %d times, want 1:\n%s", n, content)
+	for _, want := range []string{".ref", "sock/", "agents/", "last_error.json"} {
+		if !hasLine(content, want) {
+			t.Fatalf("%q not present as its own line:\n%s", want, content)
+		}
+		if n := strings.Count(content, want); n != 1 {
+			t.Errorf("%q appears %d times, want 1:\n%s", want, n, content)
+		}
 	}
 }
 
@@ -286,7 +283,7 @@ func TestEnsureGitignoreNoTrailingNewline(t *testing.T) {
 	// entry would be glued onto this line (e.g. "*.reference.ref").
 	_ = os.WriteFile(filepath.Join(l.Root, ".gitignore"), []byte("*.reference"), 0644)
 
-	if _, err := bootstrap.EnsureProject(l, g); err != nil {
+	if _, err := bootstrap.EnsureProject(l); err != nil {
 		t.Fatalf("EnsureProject: %v", err)
 	}
 
@@ -298,8 +295,8 @@ func TestEnsureGitignoreNoTrailingNewline(t *testing.T) {
 	if !hasLine(content, ".ref") {
 		t.Fatalf(".ref not present as its own line:\n%s", content)
 	}
-	if !hasLine(content, "proxy-*.log") {
-		t.Fatalf("proxy-*.log not present as its own line:\n%s", content)
+	if !hasLine(content, "last_error.json") {
+		t.Fatalf("last_error.json not present as its own line:\n%s", content)
 	}
 }
 
@@ -335,17 +332,19 @@ func TestEnsureGitignoreAddsMissingEntryIndependently(t *testing.T) {
 	_ = bootstrap.EnsureGlobal(g)
 
 	_ = os.MkdirAll(l.Root, 0755)
-	// .ref already present as a whole line; proxy-*.log must still be added.
+	// .ref already present as a whole line; the rest must still be added.
 	_ = os.WriteFile(filepath.Join(l.Root, ".gitignore"), []byte(".ref\n"), 0644)
 
-	if _, err := bootstrap.EnsureProject(l, g); err != nil {
+	if _, err := bootstrap.EnsureProject(l); err != nil {
 		t.Fatalf("EnsureProject: %v", err)
 	}
 
 	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
 	content := string(gi)
-	if !hasLine(content, "proxy-*.log") {
-		t.Fatalf("proxy-*.log not added when .ref already present:\n%s", content)
+	for _, want := range []string{"sock/", "agents/", "last_error.json"} {
+		if !hasLine(content, want) {
+			t.Fatalf("%q not added when .ref already present:\n%s", want, content)
+		}
 	}
 	if n := strings.Count(content, ".ref"); n != 1 {
 		t.Errorf(".ref duplicated: appears %d times:\n%s", n, content)

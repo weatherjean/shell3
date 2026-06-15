@@ -15,6 +15,7 @@ import (
 
 	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/chat"
+	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/store"
 )
 
@@ -49,6 +50,10 @@ type CronJob struct {
 type RuntimeSpec struct {
 	ConfigPath string // "" → ./shell3.lua then ~/.shell3/shell3.lua
 	WorkDir    string // runtime root; "" → os.Getwd(). Sessions default here.
+	// Context, when non-nil, parents the runtime's base context: cancelling it
+	// tears down the runtime (and any in-flight session/turn) just as Close
+	// does. "" → context.Background() (lifetime bounded only by Close).
+	Context context.Context
 }
 
 // SessionOpts parameterizes one Session on a Runtime.
@@ -172,6 +177,13 @@ func (rt *Runtime) trackSubagent(fn func()) bool {
 // NewRuntime loads the config and assembles the shared runtime parts.
 // The Runtime must be Closed; sessions left open are closed by Close.
 func NewRuntime(spec RuntimeSpec) (*Runtime, error) {
+	parent := spec.Context
+	if parent == nil {
+		parent = context.Background()
+	}
+	if err := parent.Err(); err != nil {
+		return nil, err // caller already cancelled — don't build a runtime
+	}
 	workDir := spec.WorkDir
 	if workDir == "" {
 		w, err := os.Getwd()
@@ -190,7 +202,7 @@ func NewRuntime(spec RuntimeSpec) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parent)
 	tg := parts.Telegram()
 	var cronJobs []CronJob
 	for _, j := range parts.Cron() {
@@ -250,7 +262,7 @@ func (rt *Runtime) Store() *store.Store { return rt.store }
 // result is the actual file a reload reads. Useful for self-reconfiguration
 // surfaces that need to show the agent/operator which file to edit.
 func (rt *Runtime) ConfigPath() (string, error) {
-	return agentsetup.ResolveConfigPath(rt.configPath, rt.workDir, rt.homeDir)
+	return agentsetup.ResolveConfigPath(rt.configPath, rt.homeDir)
 }
 
 // SessionMeta summarizes one stored past conversation.
@@ -373,7 +385,7 @@ func peekTranscript(path string) SubagentInfo {
 // completed/running subagent transcripts from disk. Returns nil when the
 // directory is absent.
 func (rt *Runtime) SubagentList() ([]SubagentInfo, error) {
-	dir := filepath.Join(rt.workDir, ".shell3", "agents")
+	dir := paths.AgentsDir(rt.workDir)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -426,7 +438,7 @@ func (rt *Runtime) SubagentTranscript(id string) ([]TranscriptEvent, error) {
 	if !subagentIDRe.MatchString(id) {
 		return nil, fmt.Errorf("shell3: invalid subagent id %q", id)
 	}
-	path := filepath.Join(rt.workDir, ".shell3", "agents", id+".jsonl")
+	path := paths.AgentTranscript(rt.workDir, id)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

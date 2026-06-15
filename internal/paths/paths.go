@@ -52,3 +52,18 @@ func BGLogPath(id string) string { return filepath.Join(BGLogDir(), id+".log") }
 func SockPath(workdir string, sessionID int64) string {
 	return filepath.Join(workdir, ".shell3", "sock", fmt.Sprintf("%d.sock", sessionID))
 }
+
+// AgentsDir is where subagents write their audit-JSONL transcripts, under the
+// runtime workdir. The parent writes here and the dashboard reads back from it,
+// so both sides must agree — route through this helper, never hand-build it.
+func AgentsDir(workdir string) string { return filepath.Join(workdir, ".shell3", "agents") }
+
+// AgentTranscript returns the transcript path for a given subagent id.
+func AgentTranscript(workdir, id string) string {
+	return filepath.Join(AgentsDir(workdir), id+".jsonl")
+}
+
+// LastErrorPath is where a failed turn dumps its request/response for debugging.
+func LastErrorPath(workdir string) string {
+	return filepath.Join(workdir, ".shell3", "last_error.json")
+}

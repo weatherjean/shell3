@@ -43,7 +43,7 @@ func reloadWinner(l paths.Local) (string, error) {
 // use. Idempotent. The UUID is purely a namespacing key for the single
 // canonical DB — no project dir or meta is created. O_EXCL serialises concurrent
 // first-use in the same cwd.
-func Init(l paths.Local, g paths.Global) (string, error) {
+func Init(l paths.Local) (string, error) {
 	if id, err := Load(l); err != nil {
 		return "", err
 	} else if id != "" {

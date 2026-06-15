@@ -206,7 +206,7 @@ shell3.agent({
 			ResolveCustomTool: lc.ResolveCustomCall,
 			CustomToolNames:   map[string]bool{"greet": true},
 			WrapBash:          wrapBash,
-			Handlers:          chat.NewHandlers(chat.Config{}),
+			Handlers:          chat.NewHandlers(),
 		}
 
 		turnCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

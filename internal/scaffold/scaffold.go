@@ -169,7 +169,10 @@ func writeFile(path string, content []byte, force bool) error {
 			return fmt.Errorf("scaffold: stat %s: %w", path, err)
 		}
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	// 0700: everything scaffold writes lives under ~/.shell3, which also holds
+	// the .env secrets file — keep the whole tree user-private and consistent
+	// with bootstrap.EnsureGlobal (which creates ~/.shell3 at 0700).
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
 	return os.WriteFile(path, content, 0644)

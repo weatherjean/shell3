@@ -131,7 +131,9 @@ func runBoot(f *bootFlags) error {
 			return err
 		}
 		workDir := filepath.Join(dir, "workdir")
-		if err := os.MkdirAll(workDir, 0o755); err != nil {
+		// 0700: workdir sits under ~/.shell3/telegram alongside the .env secrets
+		// — keep the whole global tree user-private and consistent.
+		if err := os.MkdirAll(workDir, 0o700); err != nil {
 			return fmt.Errorf("boot: mkdir workdir: %w", err)
 		}
 		if err := scaffold.RenderTelegramConfig(dir, scaffold.TelegramValues{
@@ -160,7 +162,7 @@ func runBoot(f *bootFlags) error {
 		return fmt.Errorf("boot: read .env: %w", err)
 	}
 	merged := mergeEnv(string(existing), envPairs)
-	if err := os.WriteFile(envPath, []byte(merged), 0600); err != nil {
+	if err := atomicWriteFile(envPath, []byte(merged), 0600); err != nil {
 		return fmt.Errorf("boot: write .env: %w", err)
 	}
 
@@ -170,6 +172,32 @@ func runBoot(f *bootFlags) error {
 		printBootSuccess(dir, cfgPath, envPath, proxy != "")
 	}
 	return nil
+}
+
+// atomicWriteFile writes data to path via a temp file in the same directory
+// followed by a rename, so a crash mid-write cannot truncate or corrupt an
+// existing file — it either has the old contents or the new ones. Used for the
+// .env credentials file. The temp file is created 0600; mode is applied before
+// the rename. The deferred Remove is a no-op once the rename succeeds.
+func atomicWriteFile(path string, data []byte, mode os.FileMode) error {
+	f, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer func() { _ = os.Remove(tmp) }()
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Chmod(mode); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // envKeyForName derives the .env key for a model handle: upper-cased, non-alnum

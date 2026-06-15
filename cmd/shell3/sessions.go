@@ -11,13 +11,13 @@ import (
 )
 
 func newListSessionsCommand() *cobra.Command {
-	var configPath, projectID string
+	var projectID string
 	var page, pageSize int
 	cmd := &cobra.Command{
 		Use:   "list-sessions",
 		Short: "List conversation sessions (newest first), optionally scoped to a project",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dbPath, err := canonicalDBPath(configPath)
+			dbPath, err := canonicalDBPath()
 			if err != nil {
 				return fmt.Errorf("list-sessions: resolve db: %w", err)
 			}
@@ -47,7 +47,6 @@ func newListSessionsCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&configPath, "config", "c", "", "Config name or *.lua path (anchors the canonical DB; default: ~/.shell3)")
 	cmd.Flags().StringVar(&projectID, "project-id", "", "Scope to one project UUID (default: all projects)")
 	cmd.Flags().IntVar(&page, "page", 0, "Zero-based page index")
 	cmd.Flags().IntVar(&pageSize, "page-size", 50, "Sessions per page")

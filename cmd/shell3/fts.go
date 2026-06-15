@@ -12,14 +12,14 @@ import (
 )
 
 func newFTSCommand() *cobra.Command {
-	var configPath, projectID string
+	var projectID string
 	var page, pageSize int
 	cmd := &cobra.Command{
 		Use:   "fts [query]",
 		Short: "Full-text search conversation history (read-only)",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dbPath, err := canonicalDBPath(configPath)
+			dbPath, err := canonicalDBPath()
 			if err != nil {
 				return fmt.Errorf("fts: resolve db: %w", err)
 			}
@@ -41,7 +41,6 @@ func newFTSCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&configPath, "config", "c", "", "Config name or *.lua path (anchors the canonical DB; default: ~/.shell3)")
 	cmd.Flags().StringVar(&projectID, "project-id", "", "Scope to one project UUID (default: all projects)")
 	cmd.Flags().IntVar(&page, "page", 0, "Zero-based page index")
 	cmd.Flags().IntVar(&pageSize, "page-size", 20, "Results per page")

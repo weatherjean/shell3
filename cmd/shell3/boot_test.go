@@ -111,15 +111,9 @@ func TestBootEndToEnd(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	// Cold start: no config anywhere -> ResolveConfigPath must fail (the message
-	// that points the user at `shell3 boot`). cwd (the package dir) has no
-	// shell3.lua, and the temp HOME has none yet.
-	if _, err := agentsetup.ResolveConfigPath("", cwd, home); err == nil {
+	// that points the user at `shell3 boot`). The temp HOME has no shell3.lua yet.
+	if _, err := agentsetup.ResolveConfigPath("", home); err == nil {
 		t.Fatal("expected no-config error before boot, got nil")
 	}
 
@@ -157,7 +151,7 @@ func TestBootEndToEnd(t *testing.T) {
 	}
 
 	// After boot, config resolution finds the home config.
-	resolved, err := agentsetup.ResolveConfigPath("", cwd, home)
+	resolved, err := agentsetup.ResolveConfigPath("", home)
 	if err != nil {
 		t.Fatalf("ResolveConfigPath after boot: %v", err)
 	}

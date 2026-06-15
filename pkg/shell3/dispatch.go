@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/weatherjean/shell3/internal/chat"
+	"github.com/weatherjean/shell3/internal/paths"
 )
 
 // DispatchOpts parameterizes a host-initiated subagent dispatch (e.g. cron).
@@ -54,8 +55,8 @@ func (s *Session) Dispatch(agent, prompt string, opts DispatchOpts) (string, err
 	// which would race a read inside the tracked goroutine below.
 	rt := s.runtime
 	id := rt.nextSubID()
-	transcript := filepath.Join(rt.root(), ".shell3", "agents", id+".jsonl")
-	if err := os.MkdirAll(filepath.Dir(transcript), 0o755); err != nil {
+	transcript := paths.AgentTranscript(rt.root(), id)
+	if err := os.MkdirAll(paths.AgentsDir(rt.root()), 0o755); err != nil {
 		return "", err
 	}
 	// The id scheme (a1, a2, …) resets each process, so this path can collide

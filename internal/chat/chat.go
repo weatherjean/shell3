@@ -160,9 +160,9 @@ func (c *Config) ApplyActiveAgent(rt ActiveAgent) {
 	c.StatusLine = AgentStatusLine(rt)
 }
 
-// NewHandlers constructs the built-in tool handler map from a Config.
-// Handlers are injected into TurnConfig and looked up by tool name during dispatch.
-func NewHandlers(cfg Config) map[string]ToolHandler {
+// NewHandlers constructs the built-in tool handler map. Handlers are injected
+// into TurnConfig and looked up by tool name during dispatch.
+func NewHandlers() map[string]ToolHandler {
 	handlers := []ToolHandler{
 		BashHandler{},
 		BashBgHandler{},

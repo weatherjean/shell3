@@ -2,8 +2,9 @@ package shell3
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
+
+	"github.com/weatherjean/shell3/internal/paths"
 )
 
 // applyDelegationContext appends a "## Delegation" section to this session's
@@ -121,7 +122,7 @@ func renderDelegation(p delegationParams) string {
 	if len(p.Subagents) == 0 {
 		return ""
 	}
-	transcript := filepath.Join(".shell3", "agents", "<id>.jsonl")
+	transcript := paths.AgentTranscript("", "<id>")
 	var b strings.Builder
 	b.WriteString(delegationMarker)
 	b.WriteString("You can delegate a focused, self-contained subtask to a subagent — a background `shell3` process that runs the chosen agent on the task and reports back to you automatically when it finishes. You do NOT poll; a notification arrives on its own, and it already carries the subagent's result summary — act on that directly. A transcript path comes with it for the rare case you need more.\n\n")

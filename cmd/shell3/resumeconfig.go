@@ -15,7 +15,7 @@ func resolveResumeConfig(resumeID int64, flagConfig string) (string, error) {
 	if flagConfig != "" || resumeID == 0 {
 		return flagConfig, nil
 	}
-	dbPath, err := canonicalDBPath("")
+	dbPath, err := canonicalDBPath()
 	if err != nil {
 		return "", fmt.Errorf("run: resolve resume config: %w", err)
 	}

@@ -11,13 +11,12 @@ import (
 )
 
 func newListProjectsCommand() *cobra.Command {
-	var configPath string
 	var page, pageSize int
 	cmd := &cobra.Command{
 		Use:   "list-projects",
 		Short: "List projects (distinct) with workdir and last activity",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dbPath, err := canonicalDBPath(configPath)
+			dbPath, err := canonicalDBPath()
 			if err != nil {
 				return fmt.Errorf("list-projects: resolve db: %w", err)
 			}
@@ -37,7 +36,6 @@ func newListProjectsCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&configPath, "config", "c", "", "Config name or *.lua path (anchors the canonical DB; default: ~/.shell3)")
 	cmd.Flags().IntVar(&page, "page", 0, "Zero-based page index")
 	cmd.Flags().IntVar(&pageSize, "page-size", 20, "Projects per page")
 	return cmd

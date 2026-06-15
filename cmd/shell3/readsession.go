@@ -12,7 +12,6 @@ import (
 )
 
 func newReadSessionCommand() *cobra.Command {
-	var configPath string
 	var page, pageSize int
 	cmd := &cobra.Command{
 		Use:   "read-session <session-id>",
@@ -23,7 +22,7 @@ func newReadSessionCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("read-session: invalid session id %q: %w", args[0], err)
 			}
-			dbPath, err := canonicalDBPath(configPath)
+			dbPath, err := canonicalDBPath()
 			if err != nil {
 				return fmt.Errorf("read-session: resolve db: %w", err)
 			}
@@ -58,7 +57,6 @@ func newReadSessionCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&configPath, "config", "c", "", "Config name or *.lua path (anchors the canonical DB; default: ~/.shell3)")
 	cmd.Flags().IntVar(&page, "page", 0, "Zero-based page index")
 	cmd.Flags().IntVar(&pageSize, "page-size", 50, "Turns per page")
 	return cmd

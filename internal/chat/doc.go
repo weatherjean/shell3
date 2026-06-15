@@ -22,7 +22,7 @@
 //     one is configured.
 //   - RunTurn is the lower-level loop used by Session.Run; embedders can call
 //     it directly when they need to manage history or persistence themselves.
-//   - NewHandlers builds the built-in tool dispatch map from a Config.
+//   - NewHandlers builds the built-in tool dispatch map.
 //
 // Concurrency: the sink is invoked synchronously on the goroutine running the
 // turn, in emit order — when Run returns, every event has been delivered. Tool

@@ -50,7 +50,7 @@ func TestBootstrap_FullFlow(t *testing.T) {
 	}
 
 	// ── project bootstrap ─────────────────────────────────────────────────────
-	uuid, err := bootstrap.EnsureProject(l, g)
+	uuid, err := bootstrap.EnsureProject(l)
 	if err != nil {
 		t.Fatalf("EnsureProject: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestBootstrap_FullFlow(t *testing.T) {
 	}
 
 	// ── idempotency ───────────────────────────────────────────────────────────
-	uuid2, err := bootstrap.EnsureProject(l, g)
+	uuid2, err := bootstrap.EnsureProject(l)
 	if err != nil {
 		t.Fatalf("second EnsureProject: %v", err)
 	}

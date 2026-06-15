@@ -37,7 +37,7 @@ func TestResolveConfigPath(t *testing.T) {
 	}
 
 	// A bare name resolves to ~/.shell3/<name>.lua without needing the file to exist.
-	got, err := ResolveConfigPath("code", cwd, home)
+	got, err := ResolveConfigPath("code", home)
 	if err != nil {
 		t.Fatalf("name: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestResolveConfigPath(t *testing.T) {
 
 	// A literal *.lua path is returned unchanged.
 	lit := "/somewhere/custom.lua"
-	if got, err := ResolveConfigPath(lit, cwd, home); err != nil || got != lit {
+	if got, err := ResolveConfigPath(lit, home); err != nil || got != lit {
 		t.Errorf("literal path: got %q err %v, want %q", got, err, lit)
 	}
 
@@ -55,7 +55,7 @@ func TestResolveConfigPath(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, "shell3.lua"), []byte("--"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ResolveConfigPath("", cwd, home); err == nil {
+	if _, err := ResolveConfigPath("", home); err == nil {
 		t.Error("empty flag: expected error (cwd shell3.lua must be ignored, ~/.shell3/shell3.lua absent)")
 	}
 
@@ -64,7 +64,7 @@ func TestResolveConfigPath(t *testing.T) {
 	if err := os.WriteFile(global, []byte("--"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := ResolveConfigPath("", cwd, home); err != nil || got != global {
+	if got, err := ResolveConfigPath("", home); err != nil || got != global {
 		t.Errorf("default: got %q err %v, want %q", got, err, global)
 	}
 }

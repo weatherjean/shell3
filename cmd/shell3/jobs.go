@@ -12,13 +12,13 @@ import (
 )
 
 func newJobsCommand() *cobra.Command {
-	var configPath, workdir string
+	var workdir string
 	var page, pageSize int
 	cmd := &cobra.Command{
 		Use:   "jobs",
 		Short: "List tracked background jobs for a workdir (read-only; dead jobs auto-pruned)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dbPath, err := canonicalDBPath(configPath)
+			dbPath, err := canonicalDBPath()
 			if err != nil {
 				return fmt.Errorf("jobs: resolve db: %w", err)
 			}
@@ -44,7 +44,6 @@ func newJobsCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&configPath, "config", "c", "", "Config name or *.lua path (anchors the canonical DB; default: ~/.shell3)")
 	cmd.Flags().StringVar(&workdir, "workdir", "", "Workdir whose jobs to list (default: current directory)")
 	cmd.Flags().IntVar(&page, "page", 0, "Zero-based page index")
 	cmd.Flags().IntVar(&pageSize, "page-size", 50, "Jobs per page")

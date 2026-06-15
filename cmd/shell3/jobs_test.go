@@ -16,7 +16,7 @@ import (
 func TestJobsCommand_FlagsPresent(t *testing.T) {
 	cmd := newJobsCommand()
 	fs := cmd.Flags()
-	for _, name := range []string{"config", "workdir", "page", "page-size"} {
+	for _, name := range []string{"workdir", "page", "page-size"} {
 		if fs.Lookup(name) == nil {
 			t.Errorf("jobs is missing --%s", name)
 		}
