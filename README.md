@@ -15,50 +15,27 @@ git diff | shell3 "write a commit msg"  # reads stdin like any filter
 shell3 "audit deps" --out audit.jsonl   # headless, with a JSONL audit log
 ```
 
-## Features
-
-- **Any OpenAI-compatible provider** — OpenAI, Ollama, Groq, LM Studio,
-  OpenRouter, Moonshot, DeepSeek… Reasoning-trace streaming included where
-  vendors support it. Endpoints that need a local shim can declare
-  `run_proxy`, and shell3 starts the proxy on first use.
-- **One Lua config.** Models, agents, system prompts, tools, and skills all
-  live in `shell3.lua` — versionable, diffable, and programmable.
-  `shell3 boot` scaffolds a working setup in under a minute.
-- **Multiple agents, one conversation.** Declare e.g. a `code` agent and a
-  read-only `plan` agent; switch with Tab or `/agent` mid-session while
-  keeping history.
-- **Custom tools in Lua.** A tool is a name, a JSON schema, and a Lua
-  function — no plugins, no separate processes.
-- **Bash-first, unsafe by default.** The agent acts through `bash` and
-  `edit_file`; everything else is a file it reads or a command it runs. The
-  shell is unrestricted by default — `shell3.wrap_bash(fn)` is the single hook
-  to inspect, rewrite, or block commands. `shell3.stub_tools{}` redirects
-  hallucinated tool names (`read_file`, `grep`, …) back to bash.
-- **Context managed for you.** Set `compact_at` (a prompt-token threshold) on a
-  model and shell3 auto-compacts the conversation into a structured summary when
-  it crosses the line — no model-driven prune/compact tools. History persists in
-  SQLite (WAL) and is readable read-only from inside the session via the
-  `history` bash skill.
-- **Headless & auditable.** Pipe in, pipe out; `--out` streams a lossless
-  JSONL log of every token, tool call, and result for downstream tooling.
-- **Embeddable, and a runtime.** Everything the TUI does is available as a Go
-  library via [`pkg/shell3`](pkg/shell3) — one-shot `Run`, a persistent
-  `Session`, or a `Runtime` hosting many named sessions for an always-on bot
-  (steering, a wake bus, inbound media, and self-reporting subagents).
-
 ## Install
 
-Prebuilt binaries for Linux and macOS are on the
-[releases page](https://github.com/weatherjean/shell3/releases), or:
-
 ```sh
-go install github.com/weatherjean/shell3/cmd/shell3@latest
+curl -fsSL https://raw.githubusercontent.com/weatherjean/shell3/main/install.sh | sh
 ```
 
-From a checkout: `make build` (stamps the version from git).
+This downloads the right prebuilt binary for your OS and architecture and
+installs it to `~/.local/bin`. Make sure that directory is on your `PATH`.
 
-shell3 targets Unix-like systems (Linux, macOS). Windows is not supported —
-it leans on Unix process groups and TTY semantics.
+Other ways to install:
+
+```sh
+go install github.com/weatherjean/shell3/cmd/shell3@latest   # with a Go toolchain
+make build                                                   # from a checkout
+```
+
+Prebuilt binaries also live on the
+[releases page](https://github.com/weatherjean/shell3/releases).
+
+shell3 targets Unix-like systems (Linux, macOS). Windows is not supported — it
+leans on Unix process groups and TTY semantics. WSL works.
 
 ## Quickstart
 
@@ -71,166 +48,83 @@ shell3          # start a session
 agent), `~/.shell3/lib/` (tools and skills as small Lua modules), and
 `~/.shell3/.env` (your secrets — never commit this file).
 
-Inside a session: type to chat, Tab to switch agents, `/help` for the slash
-commands (`/clear`, `/rollback`, `/prune <id>`, `/agent`, `/parameters`, …).
+Inside a session: type to chat, `Tab` to switch agents, `/help` for the slash
+commands. Full walkthrough in [docs/cli.md](docs/cli.md).
 
-## Configuration
+## Features
 
-The config is plain Lua. A model + agent in full:
+- **Any OpenAI-compatible provider.** OpenAI, Ollama, Groq, LM Studio,
+  OpenRouter, Moonshot, DeepSeek — with reasoning-trace streaming where vendors
+  support it, and a `run_proxy` escape hatch for endpoints that need a local shim.
+- **One Lua config.** Models, agents, system prompts, tools, and skills all live
+  in `shell3.lua` — versionable, diffable, programmable.
+- **Multiple agents, one conversation.** Switch between a full-access `code`
+  agent and a read-only `plan` agent (or your own) with `Tab` or `/agent`,
+  keeping history.
+- **Bash-first, unsafe by default.** The agent acts through `bash` and
+  `edit_file`; everything else is a file it reads or a command it runs.
+  `shell3.wrap_bash(fn)` is the single hook to inspect, rewrite, or block
+  commands.
+- **Context managed for you.** Set a `compact_at` token threshold and shell3
+  auto-compacts the conversation into a summary — no model-driven prune/compact
+  tools. History persists in SQLite and is searchable from inside a session.
+- **Headless & auditable.** Pipe in, pipe out; `--out` streams a lossless JSONL
+  log of every token, tool call, and result.
+- **Embeddable, and a runtime.** Everything the TUI does is available as a Go
+  library via [`pkg/shell3`](pkg/shell3) — one-shot, persistent session, or a
+  multi-session runtime for an always-on bot.
 
-```lua
-shell3.model("main", {
-  base_url       = "https://api.openai.com/v1",
-  api_key        = shell3.env.secret("MAIN_API_KEY"),  -- from .env
-  model          = "gpt-5.2",
-  context_window = 128000,
-})
+## Telegram bot
 
-shell3.agent({
-  name   = "code",
-  model  = "main",
-  prompt = [[You are a careful pair-programmer…]],
-  tools  = {
-    bash = true, edit = true, bash_bg = true, media = true,
-    custom = { my_tool },          -- Lua-defined tools
-  },
-})
-
--- The shell is unrestricted by default. wrap_bash is the single hook to
--- inspect, rewrite, or block every bash/bash_bg command:
-shell3.wrap_bash(function(cmd)
-  if cmd:match("%.env") then return nil, "refusing to touch .env" end
-  return cmd                       -- allow (optionally rewritten)
-end)
-```
-
-A custom tool is a bash command template. Declared parameters are exported into
-the command's environment by their (lowercase) name; declared `secrets` are
-exported too (and kept out of the command string). The command's stdout is
-returned to the model:
-
-```lua
-local weather = shell3.tool({
-  name        = "weather",
-  description = "Current weather for a city",
-  parameters  = {
-    type       = "object",
-    properties = { city = { type = "string" } },
-    required   = { "city" },
-  },
-  command = [[ curl -sf "https://wttr.in/$city?format=3" ]],
-})
-```
-
-Config resolution: the `--config/-c` value is a **name** (`-c code` →
-`~/.shell3/code.lua`) unless it ends in `.lua`, in which case it's a literal
-path; with no flag it defaults to `~/.shell3/shell3.lua`. The current directory
-is not consulted. Secrets live in a `.env` beside the config, read via
-`shell3.env.secret("KEY")` — plain text, so treat it like any credentials
-file. Drop-in recipes (extra agents, planning skills, the browser skill, proxy setups) live
-in [docs/cookbook](docs/cookbook).
-
-If a model needs a local proxy in front of its endpoint (e.g. a Codex
-subscription fronted by `npx openai-oauth`), set `run_proxy` on the model and
-shell3 spawns it (detached) the first time an agent uses that model; logs go
-to `./.shell3/proxy-<model>.log`.
-
-## Headless / scripting
-
-Pass a message as an argument or on stdin and shell3 runs one turn and exits.
-`--out` adds a structured JSONL audit log — every assistant token, tool call
-with raw arguments, tool result, usage count, and the terminal status:
+shell3 ships an always-on personal agent you talk to over Telegram — the easiest
+way to run it on your devices. One bot, tied to your chat, running a single agent
+on a host you control:
 
 ```sh
-shell3 "summarize the diff" --out run.jsonl
+shell3 boot --telegram     # scaffold a Telegram host config
+shell3 telegram            # run it on a machine that stays up
 ```
 
-Headless mode strips the interactive-shell tool from the model's schema and
-tells it no human is present.
+It speaks in short, mobile-friendly replies, keeps durable memory across chats,
+can schedule its own recurring jobs (cron), and can edit and `reload` its own
+config live without a restart. An optional read-only dashboard (a Telegram Mini
+App) shows sessions, usage, and jobs. See [docs/telegram.md](docs/telegram.md).
 
-## Library
+## Documentation
 
-The same engine embeds in Go programs:
-
-```go
-events, err := shell3.Run(ctx, shell3.Spec{Prompt: "what does this repo do?"})
-if err != nil { log.Fatal(err) }
-for ev := range events {
-    if ev.Kind == shell3.Token { fmt.Print(ev.Text) }
-}
-```
-
-`Start` gives a persistent multi-turn `Session` with agent switching,
-history introspection, pruning, and parameter control.
-
-For an always-on personal agent, `NewRuntime` owns one shared build (config,
-store, log) and hosts many named sessions — one per chat, each with its own
-agent, workdir, and audit log:
-
-```go
-rt, _ := shell3.NewRuntime(shell3.RuntimeSpec{WorkDir: home})
-defer rt.Close()
-chat, _ := rt.Session(shell3.SessionOpts{Name: "tg:1234", Headless: true})
-```
-
-A long-lived host runs one select loop over `rt.Events()`: a session whose inbox
-gains an item while idle emits a `Wake`, and the host answers with
-`Session.RunQueued`. `Session.Interject` steers a running turn (or queues for the
-next) from any goroutine and never blocks; `Send`/`SendParts` are the strict
-single-turn path. Inbound images and audio ride along as `Part` attachments
-(from disk or in-memory bytes). Subagents are a convention, not a subsystem:
-declare specialists with `shell3.subagent{name, description, …}` and list them
-per-agent via `tools = { subagents = { … } }`; the host injects a "## Delegation"
-fragment with the exact `bash_bg` command to spawn one. A subagent is a
-backgrounded `shell3` subprocess that runs the chosen agent on a self-contained
-task and self-reports completion up its parent pointer — over a per-session
-Unix-domain socket if the parent is live, or a SQLite inbox + revive if the
-parent has gone dormant. The host turns that into a short pointer notification
-(with a transcript path the parent `cat`s on demand) and wakes the next turn.
-See the
-[package docs](https://pkg.go.dev/github.com/weatherjean/shell3/pkg/shell3).
-
-The TUI rides the same machinery: type while the agent is working and press
-Enter to steer mid-turn (an `Interject`), and see a finished subagent surface as
-a dim notice that auto-wakes the next turn.
-
-## Removing a project's shell3 data
-
-Project-local state (the project UUID, subagent transcripts, proxy logs) lives
-in the project's `.shell3/` directory:
-
-```sh
-rm -rf .shell3                    # project-local state
-```
-
-Conversation history, sessions, and background jobs are not per-project files —
-they live in the single shared database at `~/.shell3/data/shell3.db`, tagged
-with the project UUID (`cat .shell3/.ref`). Removing the directory above leaves
-those rows in place; delete the whole `~/.shell3/data/shell3.db` to wipe all
-history across every project.
+- **[Configuration](docs/configuration.md)** — models, agents, custom tools,
+  `wrap_bash`, `stub_tools`, skills, proxies.
+- **[Library / runtime](docs/library.md)** — embedding `pkg/shell3`: `Run`,
+  `Session`, `Runtime`, subagents.
+- **[CLI & headless](docs/cli.md)** — scripting, the `--out` audit log, the
+  read-only query commands, slash commands.
+- **[Telegram bot](docs/telegram.md)** — the personal Telegram front-end and
+  scheduled jobs.
+- **[Security & data](docs/security.md)** — the threat model, secrets, and
+  removing shell3's data.
+- **[Cookbook](docs/cookbook/README.md)** — drop-in recipes: extra agents,
+  planning skills, the browser skill, proxy and sandbox setups.
 
 ## Security
 
-shell3 runs model-chosen shell commands and is **unsafe by default** (full,
-unrestricted shell). The only safety surface is the `shell3.wrap_bash(fn)` hook
-(allow/block/rewrite, no approval flow); secrets live in a plain `.env` beside
-`shell3.lua`, and declared custom-tool `secrets` are exported into the command's
-process environment (readable via `/proc/<pid>/environ` by same-user processes —
-treat multi-user hosts accordingly). Run shell3 in a sandbox, container, or
-throwaway user if you need hard isolation. Vulnerabilities: please use GitHub
-Security Advisories.
+shell3 runs model-chosen shell commands and is **unsafe by default** — a full,
+unrestricted shell with no approval prompt. The only safety surface is the
+`shell3.wrap_bash(fn)` hook (allow/block/rewrite). Run it in a sandbox,
+container, or throwaway user if you need hard isolation, and read
+[docs/security.md](docs/security.md) before pointing it at anything you care
+about. Report vulnerabilities via
+[GitHub Security Advisories](https://github.com/weatherjean/shell3/security/advisories).
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Short version: `make test` (race
-detector on), `make lint`, feature branches, and tests with every behavior
-change.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Short version: `make test` (race detector
+on), `make lint`, feature branches, and tests with every behavior change.
 
 ## License
 
 [MIT](LICENSE) © 2026 WeatherJean.
 
-Portions of `internal/edittool` are a Go port of the str-replace edit tool
-from [opencode](https://github.com/sst/opencode), used under its license; see
-the package doc comment in
+Portions of `internal/edittool` are a Go port of the str-replace edit tool from
+[opencode](https://github.com/sst/opencode), used under its license; see the
+package doc comment in
 [internal/edittool/replace.go](internal/edittool/replace.go) for details.

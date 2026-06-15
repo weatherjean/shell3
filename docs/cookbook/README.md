@@ -1,14 +1,28 @@
 # shell3 cookbook
 
-Drop-in recipes for features the base config (written by `shell3 boot`) leaves
-out. Each `lib/...` file mirrors the base config's module layout: copy it into
-`~/.shell3/lib/`, `require` it in `shell3.lua`, and wire it into an agent.
+`shell3 boot` writes a lean, working config. This cookbook is everything it
+*doesn't* write by default — drop-in recipes you copy in when you want them.
 
-Skills are plain `.md` files the agent reads with `cat`; each `lib/skills/<name>.lua`
-just declares `shell3.skill{ name, description, path="lib/skills/<name>.md" }` and the
-prose lives in the sibling `.md`. Custom tools are declarative bash-command templates
-(`shell3.tool{ command=... }`), not Lua handlers — params arrive as `$`-named env vars
-and declared `secrets` are exported into the command env.
+Each `lib/...` file here mirrors the base config's module layout. The pattern is
+always the same three steps:
+
+1. copy the file into `~/.shell3/lib/`,
+2. `require` it in your `shell3.lua`,
+3. wire it into an agent.
+
+A reminder on how the two extensible pieces work, since the recipes lean on both:
+
+- **Skills** are plain `.md` files the agent reads with `cat`. Each
+  `lib/skills/<name>.lua` just declares
+  `shell3.skill{ name, description, path="lib/skills/<name>.md" }`, and the actual
+  prose lives in the sibling `.md`.
+- **Custom tools** are declarative bash-command templates
+  (`shell3.tool{ command=... }`), not Lua handlers. Parameters arrive as
+  `$`-named environment variables, and declared `secrets` are exported into the
+  command's environment.
+
+See [../configuration.md](../configuration.md) for the full reference on models,
+agents, tools, and skills.
 
 > **Secret exposure:** declared `secrets` are passed to the command via its
 > process environment. On a shared host, same-user processes can read another
@@ -19,21 +33,32 @@ and declared `secrets` are exported into the command env.
 
 ## Usage
 
-    -- in ~/.shell3/shell3.lua
-    local plans   = require("lib.skills.writing-plans")
-    local browser = require("lib.skills.browser")
-    -- then, in an agent:
-    --   skills = { plans, browser },
+```lua
+-- in ~/.shell3/shell3.lua
+local plans   = require("lib.skills.writing-plans")
+local browser = require("lib.skills.browser")
+
+-- then, in an agent:
+--   skills = { plans, browser },
+```
 
 ## Contents
 
-- `lib/skills/writing-plans.lua` — planning/approval gate before non-trivial changes.
-- `lib/skills/executing-plans.lua` — safe execution + git workflow after a plan.
-- `lib/skills/codebase-discovery.lua` — navigating unfamiliar code.
-- `lib/skills/web-search.lua` — guidance for web research.
-- `lib/browser.lua` — Drive a real headed Chrome via puppeteer-core (the `browser` skill); see `lib/browser.lua`.
-- `lib/tools.lua` — custom tool template.
-- `lib/extra-agents.lua` — adding more agents.
-- `models.md` — provider-specific model params via `extra` (e.g. MiniMax M3 `reasoning_split`).
-- `proxy.md` — run_proxy recipes (Codex/npx, litellm).
-- `sandbox.md` — sandbox/route bash via `wrap_bash` argv tables (docker, ssh, firejail).
+**Skills** (`lib/skills/`)
+
+- `writing-plans.lua` — a planning and approval gate before non-trivial changes.
+- `executing-plans.lua` — safe execution plus a git workflow once a plan is agreed.
+- `codebase-discovery.lua` — navigating unfamiliar code and pruning context aggressively.
+- `web-search.lua` — guidance for web research with the `brave_search` / `web_fetch` tools.
+
+**Tools and agents** (`lib/`)
+
+- `browser.lua` — drive a real, headed Chrome via puppeteer-core (the `browser` skill).
+- `tools.lua` — a custom-tool template to copy from.
+- `extra-agents.lua` — adding more agents (e.g. a read-only `review` agent).
+
+**Provider and host recipes**
+
+- `models.md` — provider-specific request params via `extra` (e.g. MiniMax M3 `reasoning_split`).
+- `proxy.md` — `run_proxy` recipes (Codex via npx, litellm).
+- `sandbox.md` — sandbox or route bash via `wrap_bash` argv tables (docker, ssh, firejail).
