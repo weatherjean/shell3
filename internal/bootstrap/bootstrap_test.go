@@ -105,10 +105,8 @@ func TestEnsureProject(t *testing.T) {
 	}
 
 	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
-	for _, want := range []string{".ref", "sock/", "agents/", "last_error.json"} {
-		if !hasLine(string(gi), want) {
-			t.Fatalf(".gitignore missing %q entry:\n%s", want, gi)
-		}
+	if !hasLine(string(gi), "*") {
+		t.Fatalf(".gitignore missing %q entry:\n%s", "*", gi)
 	}
 }
 
@@ -185,8 +183,8 @@ func TestEnsureGitignoreAppends(t *testing.T) {
 
 	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
 	content := string(gi)
-	if !strings.Contains(content, ".ref") {
-		t.Fatal(".ref not appended to existing .gitignore")
+	if !hasLine(content, "*") {
+		t.Fatal("\"*\" not appended to existing .gitignore")
 	}
 	if !strings.Contains(content, "shell3.db") {
 		t.Fatal("existing entries were lost")
@@ -204,8 +202,8 @@ func hasLine(content, want string) bool {
 }
 
 // TestEnsureGitignoreWholeLineMatch verifies that a substring-but-not-whole-line
-// match (e.g. "*.reference") does not satisfy the ".ref" sentinel: the real
-// ".ref" rule must still be added as its own line. (F3)
+// match (e.g. "*.reference", which contains "*") does not satisfy the "*"
+// sentinel: the real "*" rule must still be added as its own line. (F3)
 func TestEnsureGitignoreWholeLineMatch(t *testing.T) {
 	tmp := t.TempDir()
 	home := filepath.Join(tmp, "home")
@@ -216,7 +214,7 @@ func TestEnsureGitignoreWholeLineMatch(t *testing.T) {
 	_ = bootstrap.EnsureGlobal(g)
 
 	_ = os.MkdirAll(l.Root, 0755)
-	// "*.reference" contains ".ref" as a substring but is not the .ref rule.
+	// "*.reference" contains "*" as a substring but is not the catch-all rule.
 	_ = os.WriteFile(filepath.Join(l.Root, ".gitignore"), []byte("*.reference\n"), 0644)
 
 	if _, err := bootstrap.EnsureProject(l); err != nil {
@@ -225,17 +223,17 @@ func TestEnsureGitignoreWholeLineMatch(t *testing.T) {
 
 	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
 	content := string(gi)
-	if !hasLine(content, ".ref") {
-		t.Fatalf(".ref not added as its own line despite substring-only match:\n%s", content)
+	if !hasLine(content, "*") {
+		t.Fatalf("\"*\" not added as its own line despite substring-only match:\n%s", content)
 	}
 	if !strings.Contains(content, "*.reference") {
 		t.Fatalf("existing *.reference entry was lost:\n%s", content)
 	}
 }
 
-// TestEnsureGitignoreLocalEntries verifies the runtime-written project artifacts
-// (sockets, subagent transcripts, the last-error dump) are ignored locally and
-// that repeated runs do not duplicate any entry. (idempotency)
+// TestEnsureGitignoreLocalEntries verifies the whole ./.shell3/ folder is
+// ignored via a single "*" and that repeated runs do not duplicate it.
+// (idempotency)
 func TestEnsureGitignoreLocalEntries(t *testing.T) {
 	tmp := t.TempDir()
 	home := filepath.Join(tmp, "home")
@@ -248,20 +246,18 @@ func TestEnsureGitignoreLocalEntries(t *testing.T) {
 	if _, err := bootstrap.EnsureProject(l); err != nil {
 		t.Fatalf("EnsureProject: %v", err)
 	}
-	// Second run must not duplicate entries.
+	// Second run must not duplicate the entry.
 	if _, err := bootstrap.EnsureProject(l); err != nil {
 		t.Fatalf("EnsureProject second call: %v", err)
 	}
 
 	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
 	content := string(gi)
-	for _, want := range []string{".ref", "sock/", "agents/", "last_error.json"} {
-		if !hasLine(content, want) {
-			t.Fatalf("%q not present as its own line:\n%s", want, content)
-		}
-		if n := strings.Count(content, want); n != 1 {
-			t.Errorf("%q appears %d times, want 1:\n%s", want, n, content)
-		}
+	if !hasLine(content, "*") {
+		t.Fatalf("%q not present as its own line:\n%s", "*", content)
+	}
+	if n := strings.Count(content, "*"); n != 1 {
+		t.Errorf("%q appears %d times, want 1:\n%s", "*", n, content)
 	}
 }
 
@@ -289,14 +285,11 @@ func TestEnsureGitignoreNoTrailingNewline(t *testing.T) {
 
 	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
 	content := string(gi)
-	if strings.Contains(content, "reference.ref") {
+	if strings.Contains(content, "reference*") {
 		t.Fatalf("appended entry glued onto newline-less final line:\n%s", content)
 	}
-	if !hasLine(content, ".ref") {
-		t.Fatalf(".ref not present as its own line:\n%s", content)
-	}
-	if !hasLine(content, "last_error.json") {
-		t.Fatalf("last_error.json not present as its own line:\n%s", content)
+	if !hasLine(content, "*") {
+		t.Fatalf("\"*\" not present as its own line:\n%s", content)
 	}
 }
 
@@ -320,9 +313,9 @@ func TestEnsureGlobalDoesNotWriteConfig(t *testing.T) {
 	}
 }
 
-// TestEnsureGitignoreAddsMissingEntryIndependently verifies that when one
-// required entry already exists, the other is still added. (F4 interaction)
-func TestEnsureGitignoreAddsMissingEntryIndependently(t *testing.T) {
+// TestEnsureGitignoreRespectsExistingStar verifies that when the catch-all "*"
+// is already present, EnsureProject leaves the file untouched (no duplicate).
+func TestEnsureGitignoreRespectsExistingStar(t *testing.T) {
 	tmp := t.TempDir()
 	home := filepath.Join(tmp, "home")
 	cwd := filepath.Join(tmp, "project")
@@ -332,8 +325,8 @@ func TestEnsureGitignoreAddsMissingEntryIndependently(t *testing.T) {
 	_ = bootstrap.EnsureGlobal(g)
 
 	_ = os.MkdirAll(l.Root, 0755)
-	// .ref already present as a whole line; the rest must still be added.
-	_ = os.WriteFile(filepath.Join(l.Root, ".gitignore"), []byte(".ref\n"), 0644)
+	// "*" already present as a whole line; nothing should be appended.
+	_ = os.WriteFile(filepath.Join(l.Root, ".gitignore"), []byte("*\n"), 0644)
 
 	if _, err := bootstrap.EnsureProject(l); err != nil {
 		t.Fatalf("EnsureProject: %v", err)
@@ -341,12 +334,7 @@ func TestEnsureGitignoreAddsMissingEntryIndependently(t *testing.T) {
 
 	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
 	content := string(gi)
-	for _, want := range []string{"sock/", "agents/", "last_error.json"} {
-		if !hasLine(content, want) {
-			t.Fatalf("%q not added when .ref already present:\n%s", want, content)
-		}
-	}
-	if n := strings.Count(content, ".ref"); n != 1 {
-		t.Errorf(".ref duplicated: appears %d times:\n%s", n, content)
+	if n := strings.Count(content, "*"); n != 1 {
+		t.Errorf("\"*\" duplicated: appears %d times:\n%s", n, content)
 	}
 }

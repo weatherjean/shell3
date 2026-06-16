@@ -50,18 +50,18 @@ func ensureGitignore(l paths.Local) error {
 		return fmt.Errorf("bootstrap: read gitignore: %w", err)
 	}
 
-	// Each of these must appear as its own whole line; substring matches
-	// (e.g. "*.reference" or a "# don't commit .ref here" comment) do not count.
-	// Covers everything the runtime writes under ./.shell3/: the project UUID,
-	// per-session sockets, subagent transcripts, and the last-error dump (which
-	// can contain request/response bodies). Proxy logs now live under
-	// ~/.shell3/ and are ignored by the global gitignore instead.
-	missing := missingLines(string(b), ".ref", "sock/", "agents/", "last_error.json")
-	if len(missing) == 0 {
+	// Ignore the entire ./.shell3/ directory. Everything the runtime writes
+	// here is scratch or per-project identity that must never be committed: the
+	// project UUID, per-session sockets, subagent transcripts, and the
+	// last-error dump (which can contain request/response bodies). A lone "*"
+	// matches every entry — including this .gitignore itself — so the folder is
+	// invisible to git in whatever repo shell3 runs in. Matched as a whole line
+	// so a substring (e.g. "*.reference") does not satisfy the sentinel.
+	if len(missingLines(string(b), "*")) == 0 {
 		return nil
 	}
 
-	return appendGitignore("", path, string(b), strings.Join(missing, "\n")+"\n")
+	return appendGitignore("", path, string(b), "*\n")
 }
 
 // appendGitignore appends addition to the .gitignore at path, given the file's

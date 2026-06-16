@@ -1,8 +1,10 @@
 /shell3
 /bin/
-.shell3/.env
 ai-do-not-read.*
-.shell3/bg.json
+# ./.shell3/ is runtime scratch + per-project identity — never committed.
+# A "*" in .shell3/.gitignore ignores the whole folder, but list it here too
+# so it stays ignored even if that file is missing.
+/.shell3/
 
 # AI dev-process artifacts (kept local, not shipped publicly)
 CLAUDE.md

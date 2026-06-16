@@ -71,10 +71,10 @@ func TestBootstrap_FullFlow(t *testing.T) {
 		t.Errorf("ref mismatch: got %q want %q", loaded, uuid)
 	}
 
-	// .gitignore must contain .ref.
+	// .gitignore must ignore the whole folder via "*".
 	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
-	if !strings.Contains(string(gi), ".ref") {
-		t.Error(".gitignore missing .ref entry")
+	if !strings.Contains(string(gi), "*") {
+		t.Error(".gitignore missing \"*\" entry")
 	}
 
 	// Canonical data dir lives at <home>/.shell3/data/ (single shared DB location).

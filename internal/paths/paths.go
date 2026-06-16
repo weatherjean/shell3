@@ -13,10 +13,11 @@ type Global struct {
 	LogFile string // ~/.shell3/shell3.log
 }
 
-// Local holds paths under ./.shell3/ (project-scoped, committed to repo).
+// Local holds paths under ./.shell3/ (project-scoped runtime scratch; the whole
+// folder is gitignored via a "*" and never committed).
 type Local struct {
 	Root string // ./.shell3/
-	Ref  string // ./.shell3/.ref  (gitignored)
+	Ref  string // ./.shell3/.ref
 }
 
 // NewGlobal returns a Global path set rooted at homeDir/.shell3/.
