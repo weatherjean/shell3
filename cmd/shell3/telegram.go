@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 
@@ -104,6 +105,7 @@ func newTelegramCommand() *cobra.Command {
 				b.SetUsageRecorder(usage.Set)
 				srv = web.NewServer(rt, sess, tg.Token, chatID)
 				srv.SetUsage(usage)
+				srv.SetConfigDir(filepath.Dir(resolved)) // read-only file explorer rooted at the config folder
 				if sched != nil {
 					srv.SetCronSource(cronSource(sched))
 				}

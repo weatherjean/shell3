@@ -4,6 +4,7 @@ package web
 
 import (
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"strconv"
 	"time"
@@ -30,9 +31,10 @@ type Server struct {
 	rt       *shell3.Runtime // used for subagent transcripts and the stream heartbeat
 	token    string
 	chatID   int64
-	usage    *UsageStore                         // nil → no usage shown
-	validate func(initData string) (int64, bool) // seam for tests
-	cron     func() []CronJob                    // nil → no jobs
+	usage     *UsageStore                         // nil → no usage shown
+	validate  func(initData string) (int64, bool) // seam for tests
+	cron      func() []CronJob                    // nil → no jobs
+	configDir string                              // root for the read-only file explorer; "" → disabled
 }
 
 func NewServer(rt *shell3.Runtime, sess *shell3.Session, token string, chatID int64) *Server {
@@ -49,6 +51,10 @@ func (s *Server) SetUsage(u *UsageStore) { s.usage = u }
 
 // SetCronSource attaches a provider of cron job statuses for /api/cron.
 func (s *Server) SetCronSource(fn func() []CronJob) { s.cron = fn }
+
+// SetConfigDir roots the read-only file explorer at dir (the directory holding
+// the active shell3.lua). When unset, the file endpoints return empty listings.
+func (s *Server) SetConfigDir(dir string) { s.configDir = dir }
 
 func (s *Server) handleCron(w http.ResponseWriter, r *http.Request) {
 	var out []CronJob
@@ -73,6 +79,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/session", s.auth(s.handleSession))
 	mux.HandleFunc("/api/stream", s.auth(s.handleStream))
 	mux.HandleFunc("/api/cron", s.auth(s.handleCron))
+	mux.HandleFunc("/api/files", s.auth(s.handleFiles))
+	mux.HandleFunc("/api/file", s.auth(s.handleFile))
+	// Vendored frontend assets (highlight.js + themes). Public, like the inline
+	// index — they carry no secrets and the file APIs above remain auth-gated.
+	if sub, err := fs.Sub(staticFS, "static"); err == nil {
+		mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(sub))))
+	}
 	return mux
 }
 

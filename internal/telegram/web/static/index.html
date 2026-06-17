@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>shell3</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<!-- Syntax highlighting for the Files viewer. Vendored (see static/vendor/highlight/NOTICE.md)
+     so the dashboard has no third-party runtime dependency. Falls back to plain text if absent. -->
+<script src="/static/vendor/highlight/highlight.min.js"></script>
 <style>
   :root {
     --bg: var(--tg-theme-bg-color, #fff);
@@ -128,6 +131,8 @@
   .tlabel + pre { padding-top: 4px; border-top: 0; }
   .def { font-size: 10px; color: var(--hint); font-weight: 600; margin-left: 6px; text-transform: uppercase; }
 
+  .crumb { font-family: var(--mono); font-size: 12.5px; color: var(--hint); padding: 4px 2px 10px; word-break: break-all; }
+
   .err { color: #e0392b; text-align: center; padding: 30px; }
 </style>
 </head>
@@ -136,12 +141,14 @@
   <button data-tab="chat" class="active">Chat</button>
   <button data-tab="runs">Runs</button>
   <button data-tab="cron">Cron</button>
+  <button data-tab="files">Files</button>
   <button data-tab="status">Status</button>
 </nav>
 <main>
   <section id="chat" class="view active"><div class="empty">loading…</div></section>
   <section id="runs" class="view"><div class="empty">loading…</div></section>
   <section id="cron" class="view"><div class="empty">loading…</div></section>
+  <section id="files" class="view"><div class="empty">loading…</div></section>
   <section id="status" class="view"><div class="empty">loading…</div></section>
 </main>
 
@@ -158,8 +165,36 @@ async function api(path) {
 }
 const esc = s => (s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 
+// Syntax highlighting (Files viewer). Load the vendored hljs theme matching
+// Telegram's color scheme; token colors apply globally so we keep the panel's bg.
+(function () {
+  const dark = !tg || tg.colorScheme === "dark";
+  const l = document.createElement("link");
+  l.rel = "stylesheet";
+  l.href = "/static/vendor/highlight/" + (dark ? "github-dark" : "github") + ".min.css";
+  document.head.appendChild(l);
+})();
+// Map file extensions to hljs language ids. Anything unmapped renders as plain
+// text. Covers the config-folder file types worth highlighting.
+const EXT_LANG = {
+  lua: "lua", md: "markdown", markdown: "markdown",
+  py: "python", js: "javascript", mjs: "javascript", cjs: "javascript",
+  jsx: "javascript", ts: "typescript", tsx: "typescript",
+  json: "json", yaml: "yaml", yml: "yaml", toml: "ini", sh: "bash", bash: "bash",
+};
+const langOf = name => EXT_LANG[(name.slice(name.lastIndexOf(".") + 1) || "").toLowerCase()] || "";
+// Returns highlighted HTML for known languages, else plain escaped text. Falls
+// back to escaping if hljs failed to load (offline) or throws.
+function highlight(content, name) {
+  const lang = langOf(name);
+  if (lang && window.hljs) {
+    try { return hljs.highlight(content, { language: lang }).value; } catch (e) {}
+  }
+  return esc(content);
+}
+
 let active = "chat";
-const views = { chat: document.getElementById("chat"), runs: document.getElementById("runs"), status: document.getElementById("status"), cron: document.getElementById("cron") };
+const views = { chat: document.getElementById("chat"), runs: document.getElementById("runs"), status: document.getElementById("status"), cron: document.getElementById("cron"), files: document.getElementById("files") };
 const main = document.querySelector("main");
 
 document.querySelectorAll("nav button").forEach(b => {
@@ -395,6 +430,64 @@ function cronDetail(j) {
   views.cron.querySelector(".back").onclick = () => { cronSel = null; renderCron(); };
 }
 
+// ---- Files (read-only explorer of the config folder) ----------------------
+// Navigates the directory holding the active shell3.lua. Tapping a folder
+// descends; tapping a file opens its contents on a back-able subpage. Secrets
+// (.env, ai-do-not-read.*) are listed but their contents are redacted server-side.
+let filePath = "";    // current directory, relative to the config root ("" = root)
+let fileSel = null;   // relative path of the open file, or null
+let filesSig = null;
+const fmtSize = n => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB";
+const parentDir = p => { const i = p.lastIndexOf("/"); return i < 0 ? "" : p.slice(0, i); };
+
+async function renderFiles(force) {
+  if (fileSel !== null) return; // a file is open — leave the subpage untouched
+  const data = await api("/api/files?path=" + encodeURIComponent(filePath));
+  const sig = filePath + "|" + data.entries.map(e => `${e.name}:${e.dir?1:0}:${e.size}`).join("|");
+  if (!force && sig === filesSig) return;
+  filesSig = sig;
+
+  const crumb = `<div class="crumb">📁 config root${filePath ? " / " + esc(filePath) : ""}</div>`;
+  const up = filePath ? `<div class="card run" data-up="1"><div class="row"><span class="agent">↩︎ ..</span></div></div>` : "";
+  const rows = data.entries.map(e => {
+    const icon = e.dir ? "📁" : (e.redacted ? "🔒" : "📄");
+    const tag = e.dir ? "" : `<span class="badge finished">${e.redacted ? "secret" : fmtSize(e.size)}</span>`;
+    return `<div class="card run" data-name="${esc(e.name)}" data-dir="${e.dir ? 1 : 0}">
+      <div class="row"><span class="agent">${icon} ${esc(e.name)}</span>${tag}</div></div>`;
+  }).join("");
+  views.files.innerHTML = crumb + up + (rows || '<div class="empty">empty folder</div>');
+
+  const up0 = views.files.querySelector("[data-up]");
+  if (up0) up0.onclick = () => { filePath = parentDir(filePath); filesSig = null; renderFiles(true); };
+  views.files.querySelectorAll(".card.run[data-name]").forEach(c => c.onclick = () => {
+    const name = c.dataset.name, rel = filePath ? filePath + "/" + name : name;
+    if (c.dataset.dir === "1") { filePath = rel; filesSig = null; renderFiles(true); }
+    else openFile(rel);
+  });
+}
+
+async function openFile(rel) {
+  fileSel = rel;
+  const back = () => { fileSel = null; filesSig = null; renderFiles(true); };
+  views.files.innerHTML = `<button class="back">← ${esc(filePath || "config root")}</button><div class="empty">loading…</div>`;
+  views.files.querySelector(".back").onclick = back;
+  try {
+    const f = await api("/api/file?path=" + encodeURIComponent(rel));
+    const notes = [];
+    if (f.redacted) notes.push("redacted");
+    if (f.truncated) notes.push("truncated — first 256 KB");
+    if (f.binary) notes.push("binary");
+    const note = notes.length ? `<div class="section-title">${esc(notes.join(" · "))}</div>` : "";
+    views.files.innerHTML = `<button class="back">← ${esc(filePath || "config root")}</button>
+      <div class="crumb">${f.redacted ? "🔒" : "📄"} ${esc(rel)}</div>${note}
+      <pre class="prompt"><code>${(f.redacted || f.binary) ? esc(f.content) : (highlight(f.content, rel) || "(empty file)")}</code></pre>`;
+    views.files.querySelector(".back").onclick = back;
+  } catch (e) {
+    views.files.innerHTML = `<button class="back">← back</button><div class="err">${esc(e.message)}</div>`;
+    views.files.querySelector(".back").onclick = back;
+  }
+}
+
 // ---- Poll loop ------------------------------------------------------------
 async function refresh(force) {
   try {
@@ -402,6 +495,7 @@ async function refresh(force) {
     else if (active === "runs") await renderRuns(force);
     else if (active === "status") renderStatus(await api("/api/status"));
     else if (active === "cron" && force) await renderCron();
+    else if (active === "files") await renderFiles(force);
   } catch (e) {
     views[active].innerHTML = `<div class="err">⚠️ ${esc(e.message)}<br><small>open from inside Telegram to authenticate</small></div>`;
   }
