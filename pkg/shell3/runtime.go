@@ -254,7 +254,12 @@ func NewRuntime(spec RuntimeSpec) (*Runtime, error) {
 	// into the live session(s) as a short notification. Bounded by ctx (cancelled
 	// at Close). No-op when no store is configured.
 	if rt.store != nil {
-		go func() { _ = rt.store.Watch(ctx, rt.injectPointer) }()
+		// Capture the store in a local: this goroutine outlives a Reload, which
+		// swaps rt.store, so reading the field here would race the swap. The
+		// inbox path is derived from workDir (unchanged across reloads), so the
+		// captured store watches the same file for the runtime's lifetime.
+		store := rt.store
+		go func() { _ = store.Watch(ctx, rt.injectPointer) }()
 	}
 	return rt, nil
 }
