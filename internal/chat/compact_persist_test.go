@@ -78,7 +78,7 @@ func TestSaveHistory_AfterCompaction(t *testing.T) {
 		t.Fatalf("LoadMessages: %v", err)
 	}
 
-	want := append(compactedMsgs, thisTurnUser, thisTurnAssistant)
+	want := append(append([]llm.Message{}, compactedMsgs...), thisTurnUser, thisTurnAssistant)
 	if len(got) != len(want) {
 		t.Errorf("got %d messages, want %d", len(got), len(want))
 		for i, m := range got {
