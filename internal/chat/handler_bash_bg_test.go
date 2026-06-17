@@ -7,9 +7,26 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/weatherjean/shell3/internal/bgjobs"
 )
+
+// killAndReap SIGKILLs a job's process group, then waits for its reaper
+// goroutine to finish all file I/O (Done closes after the reaper's final
+// writeStatus). Without this wait, the reaper races t.TempDir's RemoveAll:
+// it rewrites the .status file into jobs/ just as cleanup is deleting it,
+// failing the rmdir with "directory not empty". Use in t.Cleanup so the wait
+// runs before TempDir cleanup (Cleanup is LIFO; TempDir registers first).
+func killAndReap(job bgjobs.Job) {
+	_ = syscall.Kill(job.PID, syscall.SIGKILL)
+	if d := job.Done(); d != nil {
+		select {
+		case <-d:
+		case <-time.After(5 * time.Second):
+		}
+	}
+}
 
 func TestBashBgHandler_Name(t *testing.T) {
 	h := BashBgHandler{}
@@ -46,7 +63,7 @@ func TestBashBgHandler_Execute_happyPath(t *testing.T) {
 	if len(jobs) != 1 {
 		t.Fatalf("want 1 job recorded, got %d", len(jobs))
 	}
-	t.Cleanup(func() { _ = syscall.Kill(jobs[0].PID, syscall.SIGKILL) })
+	t.Cleanup(func() { killAndReap(jobs[0]) })
 }
 
 func TestBashBgHandler_Execute_requiresRunsDir(t *testing.T) {
@@ -93,7 +110,7 @@ func TestBashBgHandler_Execute_workdirOverride(t *testing.T) {
 	if jobs[0].Workdir != override {
 		t.Fatalf("job workdir = %q, want %q", jobs[0].Workdir, override)
 	}
-	t.Cleanup(func() { syscall.Kill(jobs[0].PID, syscall.SIGKILL) })
+	t.Cleanup(func() { killAndReap(jobs[0]) })
 	if !strings.Contains(out, ".shell3_project/runs/jobs") {
 		t.Fatalf("output should reference '.shell3_project/runs/jobs'; got %q", out)
 	}
@@ -124,7 +141,13 @@ func TestBashBgHandler_Execute_processControllableByModel(t *testing.T) {
 	if err := syscall.Kill(pid, 0); err != nil {
 		t.Fatalf("process not alive: %v", err)
 	}
-	t.Cleanup(func() { syscall.Kill(pid, syscall.SIGKILL) })
+	// Recover the Job (with its reaper done-channel) so cleanup waits for the
+	// reaper before t.TempDir's RemoveAll — see killAndReap.
+	jobs, err := bgjobs.List(runsDir)
+	if err != nil || len(jobs) != 1 {
+		t.Fatalf("want 1 job recorded, got %d (err=%v)", len(jobs), err)
+	}
+	t.Cleanup(func() { killAndReap(jobs[0]) })
 }
 
 // fmtSscan is a tiny indirection to avoid importing fmt in the production
