@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/runs"
 )
 
 // Session holds the in-progress conversation history and the event stream.
@@ -19,12 +20,29 @@ type Session struct {
 	// lock-free. Kept separate from inboxMu to avoid a lock-order coupling.
 	msgMu    sync.RWMutex
 	messages []llm.Message
+	// standingReminders holds host-level "standing" reminders (Environment,
+	// Delegation context) set by SetStandingReminders. They are injected into
+	// every turn's allMsgs and exposed via Reminders() for the dashboard, but
+	// are NOT persisted to the sidecar — they regenerate on session resume.
+	// Guarded by msgMu.
+	standingReminders []string
 	// nextToolCallID drives sequential numeric ids ("1", "2", ...) that replace
 	// provider-emitted ids. See turn.go (allocToolCallID call site) for why.
-	nextToolCallID   int
-	reminders        reminderTracker
-	lastPromptTokens int   // accurate token count from most recent streamOnce response
-	id               int64 // store session id; 0 if no store configured
+	nextToolCallID int
+	reminders      reminderTracker
+	// reminderLog records each emitted <system-reminder> with the message index
+	// it precedes (the assistant reply it was injected ahead of), so the dashboard
+	// can interleave reminders into History() as system-role entries. Live-only
+	// (in-memory); not persisted. Guarded by msgMu.
+	reminderLog      []ReminderRecord
+	lastPromptTokens int         // accurate token count from most recent streamOnce response
+	id               string      // runs session id; "" if no store configured
+	store            *runs.Store // optional; nil → no sidecar persistence
+	// persistedLen is the count of sess.messages already written to the current
+	// sess.id's messages.jsonl. Updated by saveHistory after each flush and by
+	// compactInto after the session roll. Touched only on the turn goroutine
+	// (same as sess.id) so no extra lock is required.
+	persistedLen int
 
 	// sink receives every event synchronously, inline on the goroutine that
 	// runs the turn. There is no channel and no teardown: once Run returns,
@@ -112,25 +130,34 @@ func interjectReminder(items []string) string {
 
 // SessionOpts configures a new Session. All fields are optional.
 //
-// StoreID is the running session id returned by store.Store.StartSession;
-// embedders that don't use a store can leave it zero.
+// StoreID is the runs session id returned by runs.Store.NewSession;
+// embedders that don't use a store can leave it empty.
 // ContextWindowFor resolves a model id to its context window in tokens;
 // the reminder tracker uses it to emit context-usage reminders.
 // Sink receives every event synchronously, inline on the turn goroutine. When
 // nil, events are discarded (a no-op sink is installed).
 type SessionOpts struct {
-	StoreID          int64
+	StoreID          string
 	ContextWindowFor func(string) int
 	Sink             func(Event)
 	// InitialMessages seeds the conversation when resuming a stored session.
 	// Applied verbatim as the starting in-memory history before the first turn.
 	InitialMessages []llm.Message
+	// Store and ID wire sidecar persistence for reminders. When Store is non-nil
+	// and ID is non-empty, recordReminder appends to runs/<ID>/reminders.jsonl
+	// and RestoreReminders reloads it on resume.
+	Store *runs.Store
+	ID    string
 }
 
 // NewSession constructs a Session that delivers events to opts.Sink. A nil Sink
 // installs a no-op so emits are always safe. Other fields are optional.
 func NewSession(opts SessionOpts) *Session {
-	s := &Session{id: opts.StoreID, sink: opts.Sink}
+	id := opts.StoreID
+	if id == "" {
+		id = opts.ID
+	}
+	s := &Session{id: id, store: opts.Store, sink: opts.Sink}
 	s.reminders.contextWindowFor = opts.ContextWindowFor
 	if s.sink == nil {
 		s.sink = func(Event) {}
@@ -141,24 +168,95 @@ func NewSession(opts SessionOpts) *Session {
 	return s
 }
 
-// ID returns the store session id (0 if no store is configured).
-func (s *Session) ID() int64 {
+// ID returns the runs session id ("" if no store is configured).
+func (s *Session) ID() string {
 	return s.id
 }
 
-// SetID swaps the store session id. Used by Session.Clear to rotate onto a fresh
-// session row so subsequent turns persist under the new conversation. Guarded by
+// SetID swaps the runs session id. Used by Session.Clear to rotate onto a fresh
+// session so subsequent turns persist under the new conversation. Guarded by
 // msgMu because the dashboard's History() reader pairs id with the message slice.
-func (s *Session) SetID(id int64) {
+func (s *Session) SetID(id string) {
 	s.msgMu.Lock()
 	defer s.msgMu.Unlock()
 	s.id = id
+}
+
+// SetStandingReminders replaces the host "standing" reminders (Environment,
+// Delegation) — regenerated at every prompt-assembly, so they are recorded for
+// the dashboard but NOT persisted (resume re-assembles them fresh).
+func (s *Session) SetStandingReminders(texts []string) {
+	s.msgMu.Lock()
+	s.standingReminders = append(s.standingReminders[:0], texts...)
+	s.msgMu.Unlock()
 }
 
 func (s *Session) append(m llm.Message) {
 	s.msgMu.Lock()
 	defer s.msgMu.Unlock()
 	s.messages = append(s.messages, m)
+}
+
+// ReminderRecord is one emitted system-reminder, anchored to the message index
+// it precedes (the assistant reply it was injected ahead of). The dashboard
+// uses Seq to interleave it into the rendered history.
+type ReminderRecord struct {
+	Seq  int
+	Text string
+}
+
+// recordReminder logs a system-reminder for dashboard display, anchored before
+// the next message to be appended. Called from emitSystemReminder.
+func (s *Session) recordReminder(text string) {
+	s.msgMu.Lock()
+	defer s.msgMu.Unlock()
+	seq := len(s.messages)
+	s.reminderLog = append(s.reminderLog, ReminderRecord{Seq: seq, Text: text})
+	if s.store != nil && s.id != "" {
+		_ = s.store.AppendReminder(s.id, seq, text) // best-effort; never blocks the turn
+	}
+}
+
+// RestoreReminders reloads reminderLog from the persisted sidecar (resume path).
+func (s *Session) RestoreReminders() error {
+	if s.store == nil || s.id == "" {
+		return nil
+	}
+	lines, err := s.store.LoadReminders(s.id)
+	if err != nil {
+		return err
+	}
+	s.msgMu.Lock()
+	defer s.msgMu.Unlock()
+	s.reminderLog = s.reminderLog[:0]
+	for _, l := range lines {
+		s.reminderLog = append(s.reminderLog, ReminderRecord{Seq: l.Seq, Text: l.Text})
+	}
+	return nil
+}
+
+// Reminders returns a snapshot of all system-reminders, safe to retain.
+// Standing reminders (anchored at Seq 0) are prepended ahead of the logged
+// ones so History() interleaves them at the top of the conversation.
+// Safe to call concurrently with a running turn (mirrors Messages()).
+func (s *Session) Reminders() []ReminderRecord {
+	s.msgMu.RLock()
+	defer s.msgMu.RUnlock()
+	out := make([]ReminderRecord, 0, len(s.standingReminders)+len(s.reminderLog))
+	for _, t := range s.standingReminders {
+		out = append(out, ReminderRecord{Seq: 0, Text: t})
+	}
+	out = append(out, slices.Clone(s.reminderLog)...)
+	return out
+}
+
+// StandingReminders returns a copy of the host standing reminders (Environment,
+// Delegation) for display in the prompt-inspection views (the TUI /prompt
+// command and the dashboard Status → Prompt). Safe to call concurrently.
+func (s *Session) StandingReminders() []string {
+	s.msgMu.RLock()
+	defer s.msgMu.RUnlock()
+	return slices.Clone(s.standingReminders)
 }
 
 // allocToolCallID returns the next sequential numeric tool-call id as

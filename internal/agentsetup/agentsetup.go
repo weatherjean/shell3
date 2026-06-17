@@ -21,7 +21,7 @@ import (
 	"github.com/weatherjean/shell3/internal/modelproxy"
 	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/persona"
-	"github.com/weatherjean/shell3/internal/store"
+	"github.com/weatherjean/shell3/internal/runs"
 )
 
 // Options parameterizes BuildParts: where to find the config and which
@@ -40,41 +40,41 @@ type Options struct {
 //
 // Concurrency: all exported methods are safe for concurrent use by multiple
 // sessions. The Lua VM (luacfg.LoadedConfig) serialises access with a mutex,
-// the history store (database/sql over SQLite) is safe for concurrent callers,
-// the proxy spawner is mutex-guarded internally, and AgentRuntime builds a fresh
-// LLM client per call, so no client state is shared across sessions.
+// the file-native runs store appends each line with a single O_APPEND write
+// (safe for concurrent callers), the proxy spawner is mutex-guarded internally,
+// and AgentRuntime builds a fresh LLM client per call, so no client state is
+// shared across sessions.
 //
 // Lifetime: Parts must not be used after the cleanup returned by BuildParts has
-// run. The cleanup closes the store, Lua state, proxies, and log; any method
-// call after cleanup has undefined behaviour.
+// run. The cleanup closes the Lua state, proxies, and log; the runs store has no
+// handle to close. Any method call after cleanup has undefined behaviour.
 type Parts struct {
-	lc     *luacfg.LoadedConfig
-	st     *store.Store
-	proxy  *modelproxy.Spawner
-	log    applog.Logger
-	uuid   string
-	root   string // runtime root workdir (Options.CWD)
-	dbPath string // absolute path to the history SQLite DB (for the Environment section)
+	lc      *luacfg.LoadedConfig
+	st      *runs.Store
+	proxy   *modelproxy.Spawner
+	log     applog.Logger
+	root    string // runtime root workdir (Options.CWD)
+	runsDir string // absolute path to .shell3_project/runs (for chat.Config.RunsDir + the Environment section)
 	// configPath is the resolved absolute shell3.lua that produced this Parts;
-	// recorded per session so resume/revive can reload the right config.
+	// recorded per session so resume can reload the right config.
 	configPath string
 }
 
-// Store returns the SQLite history store (always opened; nil only when the
+// Store returns the file-native runs store (always opened; nil only when the
 // store-open itself failed, which is non-fatal and logged).
-func (p *Parts) Store() *store.Store { return p.st }
+func (p *Parts) Store() *runs.Store { return p.st }
+
+// RunsDir returns the project's .shell3_project/runs directory path.
+func (p *Parts) RunsDir() string { return p.runsDir }
 
 // Log returns the rotating application logger.
 func (p *Parts) Log() applog.Logger { return p.log }
-
-// ProjectRef returns the project UUID used to namespace store entries and paths.
-func (p *Parts) ProjectRef() string { return p.uuid }
 
 // Root returns the runtime root working directory (the CWD passed to BuildParts).
 func (p *Parts) Root() string { return p.root }
 
 // ConfigPath returns the resolved absolute shell3.lua path that produced these
-// parts (recorded per session for resume/revive).
+// parts (recorded per session for resume).
 func (p *Parts) ConfigPath() string { return p.configPath }
 
 // Telegram returns the parsed shell3.telegram{} config (zero value if absent).
@@ -143,6 +143,8 @@ func subagentToAgent(sa luacfg.Subagent) luacfg.Agent {
 		CustomTools:    sa.CustomTools,
 		Skills:         sa.Skills,
 		SkillsDisabled: sa.SkillsDisabled,
+		Environment:    sa.Environment,
+		Delegation:     sa.Delegation,
 	}
 }
 
@@ -171,7 +173,7 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 	// a.Subagents (the allowlist) is surfaced via ActiveAgent.Subagents below so
 	// the Session knows which subagents this agent may spawn.
 
-	prompt := p.lc.BuildPersonaFor(a) + p.environmentSection()
+	prompt := p.lc.BuildPersonaFor(a)
 
 	customNames := make(map[string]bool, len(a.CustomTools))
 	for _, n := range a.CustomTools {
@@ -214,6 +216,8 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 		ActiveSkills:    a.Skills,
 		ActiveTools:     toolNames,
 		Subagents:       a.Subagents,
+		Environment:     a.Environment,
+		Delegation:      a.Delegation,
 		CustomToolNames: customNames,
 		LLM:             client,
 		Params:          rp,
@@ -223,30 +227,39 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 	}, nil
 }
 
-// environmentSection renders the host-injected "## Environment" block appended
-// to every agent's system prompt. It exposes the project UUID, the agent's own
-// config path (so any front-end can resolve its config dir without a tool), and
-// the shell3 fts / list-projects / list-sessions / read-session / jobs helper
-// commands for history and background-job access.
+// EnvironmentReminder renders the host-injected Environment standing reminder
+// (no longer part of the system prompt). It exposes the agent's own config path
+// (so any front-end can resolve its config dir without a tool), the active model
+// and this session's id, and where conversation history and background-job logs
+// live on disk — all file-native, searchable with ordinary Unix tools
+// (rg/grep/cat). The result is wrapped in <system-reminder>…</system-reminder>.
 //
-// Returns "" when no DB path is resolvable (store-open failed / nil store path),
-// so the section never advertises a query target the agent cannot use.
-func (p *Parts) environmentSection() string {
-	if p.dbPath == "" {
+// It is a package-level function (not a *Parts method) so pkg/shell3 can render
+// it from the per-session chat.Config fields it already holds — config path,
+// runs dir, model (from the status line), and the runs session id — keeping the
+// fact wording in exactly one place.
+//
+// Returns "" when runsDir is empty (store-open failed), so the reminder never
+// advertises a path the agent cannot use.
+func EnvironmentReminder(configPath, runsDir, model, sessionID string) string {
+	if runsDir == "" {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("\n## Environment\n")
-	b.WriteString("Runtime paths for this session (read-only unless stated):\n")
-	fmt.Fprintf(&b, "- project_uuid: %s\n", p.uuid)
-	if p.configPath != "" {
-		fmt.Fprintf(&b, "- config: `%s` (your shell3.lua; its directory holds your skills/lib — edit it via the self-evolve skill)\n", p.configPath)
+	b.WriteString("<system-reminder>\nEnvironment (read-only unless stated):\n")
+	if model != "" {
+		fmt.Fprintf(&b, "- model: %s\n", model)
 	}
-	fmt.Fprintf(&b, "- search history: `shell3 fts \"<query>\" --project-id %s` (omit --project-id to search all projects; --page N to page; see the `history` skill)\n", p.uuid)
-	fmt.Fprintf(&b, "- list projects: `shell3 list-projects` (--page N to page)\n")
-	fmt.Fprintf(&b, "- list sessions: `shell3 list-sessions --project-id %s` (omit --project-id for all; --page N to page)\n", p.uuid)
-	fmt.Fprintf(&b, "- list jobs: `shell3 jobs` (background jobs for this session's workdir; --page N to page; dead jobs auto-pruned)\n")
-	fmt.Fprintf(&b, "- read a past session: `shell3 read-session <session-id>` (full transcript oldest-first; --page N)\n")
+	if sessionID != "" {
+		fmt.Fprintf(&b, "- session id: %s\n", sessionID)
+	}
+	if configPath != "" {
+		fmt.Fprintf(&b, "- config: `%s` (your shell3.lua; its directory holds your skills/lib — edit it via the self-evolve skill)\n", configPath)
+	}
+	b.WriteString("- history: every conversation is verbatim JSONL at `.shell3_project/runs/<id>/messages.jsonl` (one message per line; `meta.json` beside it holds model/status/timestamps)\n")
+	b.WriteString("- search history: `rg <terms> .shell3_project/runs` (ordinary ripgrep over the JSONL — no special CLI)\n")
+	b.WriteString("- background job logs: `.shell3_project/runs/jobs/<job-id>.jsonl` (stdout+stderr) with a tiny `<job-id>.status` (pid, started_at, exit code)\n")
+	b.WriteString("</system-reminder>")
 	return b.String()
 }
 
@@ -257,14 +270,13 @@ func (p *Parts) environmentSection() string {
 // FirstAgent fallback exists only so an impossible miss degrades to a sane
 // prompt rather than panicking; in correct use that branch is never reached.
 func (p *Parts) RefreshPromptFor(name string) string {
-	env := p.environmentSection()
 	if a, ok := p.lc.AgentByName(name); ok {
-		return p.lc.BuildPersonaFor(a) + env
+		return p.lc.BuildPersonaFor(a)
 	}
 	if sa, ok := p.lc.SubagentByName(name); ok {
-		return p.lc.BuildPersonaFor(subagentToAgent(sa)) + env
+		return p.lc.BuildPersonaFor(subagentToAgent(sa))
 	}
-	return p.lc.BuildPersonaFor(p.lc.FirstAgent()) + env
+	return p.lc.BuildPersonaFor(p.lc.FirstAgent())
 }
 
 // SessionOptions parameterizes one session derived from shared Parts.
@@ -293,8 +305,8 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 	activeName := rt.ModeLabel
 	cfg := chat.Config{
 		Store:             p.st,
+		RunsDir:           p.runsDir,
 		WorkDir:           workdir,
-		ProjectRef:        p.uuid,
 		ConfigPath:        p.ConfigPath(),
 		ResolveCustomTool: p.lc.ResolveCustomCall,
 		StubTools:         p.lc.StubNames(),
@@ -303,6 +315,8 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 		Headless:          so.Headless,
 		AgentNames:        p.AgentNames(),
 		RefreshPrompt:     func() string { return p.RefreshPromptFor(activeName) },
+		Environment:       rt.Environment,
+		Delegation:        rt.Delegation,
 	}
 	// shell3.wrap_bash: a single config-global hook the bash/bash_bg tools pass
 	// their command through. Wired only when declared — a nil closure means no
@@ -346,7 +360,7 @@ func BuildParts(opts Options) (*Parts, func(), error) {
 	}
 	b.openStore()
 	p := &Parts{lc: b.lc, st: b.st, proxy: b.proxy,
-		log: b.log, uuid: b.uuid, root: b.opts.CWD, dbPath: b.g.DB,
+		log: b.log, root: b.opts.CWD, runsDir: b.l.Runs,
 		configPath: b.configPath}
 	return p, b.closeAll, nil
 }
@@ -362,11 +376,10 @@ type builder struct {
 	configPath string
 	g          paths.Global
 	l          paths.Local
-	uuid       string
 
 	log   applog.Logger
 	lc    *luacfg.LoadedConfig
-	st    *store.Store
+	st    *runs.Store
 	proxy *modelproxy.Spawner
 
 	closers []func() // LIFO teardown stack
@@ -379,9 +392,9 @@ func (b *builder) closeAll() {
 	}
 }
 
-// resolvePaths resolves the config path, builds the global/local path sets,
-// and ensures the global root + data directories exist. The project UUID it
-// records is a namespacing key for the single canonical DB, not a directory.
+// resolvePaths resolves the config path, builds the global/local path sets, and
+// ensures the global root + project runtime directories exist. The project
+// identity is now the directory itself (.shell3_project/), so there is no UUID.
 func (b *builder) resolvePaths() error {
 	configPath, err := ResolveConfigPath(b.opts.ConfigPath, b.opts.HomeDir)
 	if err != nil {
@@ -393,11 +406,9 @@ func (b *builder) resolvePaths() error {
 	if err := bootstrap.EnsureGlobal(b.g); err != nil {
 		return err
 	}
-	uuid, err := bootstrap.EnsureProject(b.l)
-	if err != nil {
+	if err := bootstrap.EnsureProject(b.l); err != nil {
 		return err
 	}
-	b.uuid = uuid
 	return nil
 }
 
@@ -428,15 +439,14 @@ func (b *builder) loadConfig() error {
 	return nil
 }
 
-// openStore opens the canonical SQLite store unconditionally: the store always
-// persists the conversation (saveHistory), and the agent reads it back
-// out-of-process via the `history` skill. Non-fatal: a failure warns and
-// proceeds with a nil store (persistence and the skill's queries silently
-// degrade).
+// openStore opens the file-native runs store unconditionally: it always persists
+// the conversation (saveHistory) and the agent reads it back out-of-process with
+// rg/cat over the JSONL. Non-fatal: a failure warns and proceeds with a nil store
+// (persistence and history reads silently degrade). The store has no handle to
+// close — runs.Store is stateless over the filesystem.
 func (b *builder) openStore() {
-	if s, e := store.Open(b.g.DB); e == nil {
+	if s, e := runs.Open(b.l.Root); e == nil {
 		b.st = s
-		b.closers = append(b.closers, func() { _ = s.Close() })
 	} else {
 		b.log.Warn("open store failed — history unavailable", "error", e)
 	}

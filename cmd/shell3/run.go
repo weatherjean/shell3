@@ -22,8 +22,9 @@ type runFlags struct {
 	agent         string
 	id            string
 	prompt        string
-	resume        int64
-	parentSession int64
+	resume        string
+	parentSession string
+	inbox         string
 }
 
 func newRunCommand() *cobra.Command {
@@ -51,8 +52,9 @@ func newRunCommand() *cobra.Command {
 	cmd.Flags().StringVar(&f.agent, "agent", "", "Select the active agent by name (default: first declared). May also name a registered subagent")
 	cmd.Flags().StringVar(&f.id, "id", "", "Caller-chosen id for this run (conventionally the transcript filename stem)")
 	cmd.Flags().StringVar(&f.prompt, "prompt", "", "The prompt for this run (alternative to positional args / stdin)")
-	cmd.Flags().Int64Var(&f.resume, "resume", 0, "Resume a stored session by id: reload its messages and continue the conversation")
-	cmd.Flags().Int64Var(&f.parentSession, "parent-session", 0, "Stored session id this run reports completion to (the spawning agent)")
+	cmd.Flags().StringVar(&f.resume, "resume", "", "Resume a stored session by id: reload its messages and continue the conversation")
+	cmd.Flags().StringVar(&f.parentSession, "parent-session", "", "Session id this run reports completion to (the spawning agent)")
+	cmd.Flags().StringVar(&f.inbox, "inbox", "", "Absolute inbox.jsonl path to append this run's completion pointer to (the parent's inbox); defaults to this run's own project inbox")
 	return cmd
 }
 
@@ -83,6 +85,7 @@ func runHeadless(ctx context.Context, f *runFlags, input string) error {
 		ID:            f.id,
 		ResumeID:      f.resume,
 		ParentSession: f.parentSession,
+		ReportInbox:   f.inbox,
 	}
 	return tui.RunOnce(ctx, spec)
 }

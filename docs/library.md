@@ -81,16 +81,18 @@ Subagents are a convention, not a subsystem. You declare a specialist with
 into that agent's prompt containing the exact `bash_bg` command to spawn one.
 
 When the agent delegates, a subagent is simply a **backgrounded `shell3`
-subprocess** running the chosen agent on a self-contained task. When it finishes,
-it self-reports completion up its parent pointer:
+subprocess** running the chosen agent on a self-contained task. Subagents are
+**fire-and-forget**: when one finishes it appends a single completion pointer
+line to the project's `.shell3_project/inbox.jsonl` and exits — there is no
+socket, no liveness tracking, and no dormant-parent revive.
 
-- over a **per-session Unix-domain socket** if the parent is still live, or
-- via a **SQLite inbox + revive** if the parent has since gone dormant.
-
-The host turns that report into a short pointer notification — a one-line notice
-plus a transcript path the parent `cat`s on demand — and wakes the next turn.
-The parent never polls; it gets told. This means delegation survives the parent
-going idle and even multiple levels deep.
+The live host holds one `fsnotify` watch on that inbox (offset-persisted, so each
+pointer is delivered exactly once across restarts) and turns each pointer into a
+short notification — the subagent's result summary inline, plus a transcript path
+the parent `cat`s only if it needs the full detail — then wakes the next turn.
+The parent never polls; it gets told. A subagent that itself needs children just
+runs them with plain blocking `bash` + `wait`, so delegation composes multiple
+levels deep with no extra machinery.
 
 ## The TUI rides the same rails
 

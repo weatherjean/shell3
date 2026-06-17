@@ -2,54 +2,62 @@ package shell3
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
+	"github.com/weatherjean/shell3/internal/agentsetup"
+	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/paths"
 )
 
-// applyDelegationContext appends a "## Delegation" section to this session's
-// system prompt when the active agent has ≥1 allowed subagent and a resolvable
-// config path. It is the per-session counterpart to agentsetup's "##
-// Environment" section: agentsetup renders config-derived facts, but the
-// delegation command needs SESSION-level values agentsetup can't see — the
-// resolved config path, the running shell3 binary, and this session's id (the
-// child's --parent-session report pointer) — so it is injected here, once, at
-// session construction.
+// applyHostReminders sets this session's standing reminders to the host-level
+// Environment and Delegation context, gated by the active agent's toggles
+// (cfg.Environment / cfg.Delegation, default off). Standing reminders are
+// injected into every turn's context and shown on the dashboard, but are NOT
+// persisted — they are re-assembled fresh at every prompt-assembly event
+// (session create, agent switch, config reload, /clear).
 //
-// The result survives across turns (it lives in the system prompt, not a
-// per-turn reminder, so it never bloats later turns). There is no depth gate:
-// multi-level delegation is supported. A spawned child records its
-// --parent-session pointer and reports its result back automatically over the
-// socket/inbox transport when it finishes, so a child that itself has subagents
-// gets a delegation context too.
+// These are host-injected facts that depend on SESSION-level values the system
+// prompt can't carry — the resolved config path, the running shell3 binary,
+// this session's id, and the active model — so they live as standing reminders
+// rather than in the Lua-authored system prompt. SetStandingReminders replaces
+// the set wholesale, so this is naturally idempotent across re-runs (no
+// prompt-splicing / strip step is needed).
 //
-// delegationMarker opens the appended section. stripDelegation removes a
-// previously-appended section so applyDelegationContext is idempotent and safe
-// to re-run after an agent switch or a config reload (both rebuild the system
-// prompt from the active agent and would otherwise drop, or duplicate, the
-// section).
-const delegationMarker = "\n## Delegation\n"
-
 // rt is the owning runtime, captured by the caller (Runtime.Session) before any
 // concurrent Close can nil s.runtime; it supplies the config path and the
-// subagent description lookup. Re-runnable: it first strips any prior Delegation
-// section, then re-appends one for the CURRENT active agent (whose allowed
-// subagents may differ after a /agent switch).
-func (s *Session) applyDelegationContext(rt *Runtime) {
-	// Compute the new prompt unlocked (no concurrent cfg writer — callers are
-	// between-turns on the single bot goroutine), then publish it under s.mu so
-	// the dashboard's Snapshot reader never observes a torn assignment.
-	prompt := stripDelegation(s.cfg.Personality.SystemPrompt) + s.delegationSection(rt)
-	s.mu.Lock()
-	s.cfg.Personality.SystemPrompt = prompt
-	s.mu.Unlock()
+// subagent description lookup.
+func (s *Session) applyHostReminders(rt *Runtime) {
+	var rems []string
+	if s.cfg.Environment {
+		if env := s.envReminder(); env != "" {
+			rems = append(rems, env)
+		}
+	}
+	if s.cfg.Delegation {
+		if d := s.delegationReminder(rt); d != "" {
+			rems = append(rems, d)
+		}
+	}
+	s.sess.SetStandingReminders(rems)
 }
 
-// delegationSection renders the "## Delegation" section to append for the
-// current active agent, or "" when there is nothing to delegate with: no
-// runtime, no allowed subagents, or no resolvable config path. See
-// applyDelegationContext for why this lives per-session.
-func (s *Session) delegationSection(rt *Runtime) string {
+// envReminder renders the host Environment standing reminder from this session's
+// config (config path, runs dir, model from the status line) plus the runs
+// session id. The fact wording lives in agentsetup.EnvironmentReminder so it
+// stays in one place. Returns "" when no runs dir is resolvable.
+func (s *Session) envReminder() string {
+	_, model := chat.SplitStatus(s.cfg.StatusLine)
+	return agentsetup.EnvironmentReminder(s.cfg.ConfigPath, s.cfg.RunsDir, model, s.sess.ID())
+}
+
+// delegationReminder renders the host Delegation standing reminder for the
+// current active agent: the allowed-subagents list + the exact templated spawn
+// command (with absolute --out/--inbox/--parent-session already substituted),
+// wrapped in <system-reminder>…</system-reminder>. Returns "" when there is
+// nothing to delegate with: no runtime, no allowed subagents, or no resolvable
+// config path.
+func (s *Session) delegationReminder(rt *Runtime) string {
 	if rt == nil {
 		return ""
 	}
@@ -61,23 +69,18 @@ func (s *Session) delegationSection(rt *Runtime) string {
 	if err != nil || cfgPath == "" {
 		return "" // can't template a spawn command without a concrete config path
 	}
-	return renderDelegation(delegationParams{
+	section := renderDelegation(delegationParams{
 		Binary:        shell3Binary(),
 		ConfigPath:    cfgPath,
 		WorkDir:       s.cfg.WorkDir,
+		RunsDir:       s.cfg.RunsDir,
 		ParentSession: s.sess.ID(),
 		Subagents:     s.subagentList(rt, allowed),
 	})
-}
-
-// stripDelegation removes a previously-appended "## Delegation" section (from
-// its marker to end-of-prompt), leaving the rest of the prompt intact. The
-// section is always appended last, so everything from the marker on is ours.
-func stripDelegation(prompt string) string {
-	if i := strings.Index(prompt, delegationMarker); i >= 0 {
-		return prompt[:i]
+	if section == "" {
+		return ""
 	}
-	return prompt
+	return "<system-reminder>\n" + section + "\n</system-reminder>"
 }
 
 // subagentItem is one allowed subagent, name + model-facing description.
@@ -107,24 +110,38 @@ type delegationParams struct {
 	Binary        string
 	ConfigPath    string
 	WorkDir       string
-	ParentSession int64
+	RunsDir       string // parent's <root>/.shell3_project/runs — derives the absolute --out + --inbox paths
+	ParentSession string
 	Subagents     []subagentItem
 }
 
-// renderDelegation builds the "## Delegation" system-prompt section: the allowed
-// subagents and the EXACT bash_bg command to spawn one, with every runtime value
-// already substituted. The command passes --parent-session <this session> (the
-// child records that report pointer and reports back to THIS session over the
-// socket/inbox transport when it finishes). There is no depth gate — a spawned
+// renderDelegation builds the Delegation reminder body: the allowed subagents
+// and the EXACT bash_bg command to spawn one, with every runtime value already
+// substituted. The caller (delegationReminder) wraps the result in a
+// <system-reminder> envelope. The command passes --parent-session <this session> (the
+// child records that report pointer and reports back by appending a pointer line
+// to the project inbox when it finishes). There is no depth gate — a spawned
 // child may itself delegate.
 // Returns "" when there are no subagents to list.
 func renderDelegation(p delegationParams) string {
 	if len(p.Subagents) == 0 {
 		return ""
 	}
+	// Resolve the transcript and the report inbox to ABSOLUTE paths under the
+	// parent's runtime root (<root>/.shell3_project), so a spawned subagent —
+	// which runs from its own working directory — writes its transcript and its
+	// completion pointer where THIS host actually watches, not relative to the
+	// child's cwd. RunsDir is <root>/.shell3_project/runs; its grandparent is the
+	// root. Falls back to a relative transcript (and no --inbox) when unknown.
 	transcript := paths.AgentTranscript("", "<id>")
+	inbox := ""
+	if p.RunsDir != "" {
+		root := filepath.Dir(filepath.Dir(p.RunsDir))
+		transcript = paths.AgentTranscript(root, "<id>")
+		inbox = paths.NewLocal(root).Inbox
+	}
 	var b strings.Builder
-	b.WriteString(delegationMarker)
+	b.WriteString("Delegation:\n")
 	b.WriteString("You can delegate a focused, self-contained subtask to a subagent — a background `shell3` process that runs the chosen agent on the task and reports back to you automatically when it finishes. You do NOT poll; a notification arrives on its own, and it already carries the subagent's result summary — act on that directly. A transcript path comes with it for the rare case you need more.\n\n")
 	b.WriteString("Subagents you may spawn:\n")
 	for _, sa := range p.Subagents {
@@ -135,9 +152,14 @@ func renderDelegation(p delegationParams) string {
 		}
 	}
 	b.WriteString("\nTo spawn one, call the `bash_bg` tool with this exact command, substituting `<name>` (a subagent from the list), `<id>` (a short unique id you choose, e.g. `explore1`), and `<task>` (the full self-contained prompt — the subagent does not see this conversation):\n\n")
-	fmt.Fprintf(&b, "  %s run --config %s --agent <name> --out %s --parent-session %d --id <id> --prompt \"<task>\"\n\n",
-		p.Binary, p.ConfigPath, transcript, p.ParentSession)
-	b.WriteString("When it finishes you'll get a notification with the subagent's result summary (act on it directly) plus the transcript path at `.shell3/agents/<id>.jsonl`. The transcript is a JSONL audit log — read it only if the summary isn't enough, and extract the subagent's full final answer cleanly with:\n\n")
+	if inbox != "" {
+		fmt.Fprintf(&b, "  %s run --config %s --agent <name> --out %s --inbox %s --parent-session %s --id <id> --prompt \"<task>\"\n\n",
+			p.Binary, p.ConfigPath, transcript, inbox, p.ParentSession)
+	} else {
+		fmt.Fprintf(&b, "  %s run --config %s --agent <name> --out %s --parent-session %s --id <id> --prompt \"<task>\"\n\n",
+			p.Binary, p.ConfigPath, transcript, p.ParentSession)
+	}
+	b.WriteString("When it finishes you'll get a notification with the subagent's result summary (act on it directly) plus the transcript path at `" + transcript + "`. The transcript is a JSONL audit log — read it only if the summary isn't enough, and extract the subagent's full final answer cleanly with:\n\n")
 	fmt.Fprintf(&b, "    jq -rs 'map(select(.kind==\"assistant_message\"))[-1].text' %s\n", transcript)
 	return b.String()
 }

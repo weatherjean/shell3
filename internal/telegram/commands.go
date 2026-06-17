@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/weatherjean/shell3/internal/bgjobs"
-	"github.com/weatherjean/shell3/internal/jobstore"
 	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
@@ -27,6 +26,9 @@ func BotCommands() []Command {
 
 func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 	fields := strings.Fields(m.Text)
+	if len(fields) == 0 { // e.g. "/" followed only by whitespace
+		return
+	}
 	cmd := fields[0]
 	arg := strings.TrimSpace(strings.TrimPrefix(m.Text, cmd))
 	switch cmd {
@@ -69,8 +71,8 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 		// KillAll also terminates model-spawned subagents: they are plain bg jobs
 		// (a backgrounded `shell3`), so killing the tracked bg groups stops them too.
 		killed := 0
-		if b.store != nil {
-			killed, _ = bgjobs.KillAll(jobstore.New(b.store), b.workDir)
+		if b.runsDir != "" {
+			killed, _ = bgjobs.KillAll(b.runsDir, b.workDir)
 		}
 		if c != nil {
 			c() // cancels turnCtx → synchronous bash/node process groups get SIGTERM→SIGKILL

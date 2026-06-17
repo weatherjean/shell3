@@ -15,8 +15,10 @@ import (
 
 	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/chat"
+	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/notify"
 	"github.com/weatherjean/shell3/internal/paths"
-	"github.com/weatherjean/shell3/internal/store"
+	"github.com/weatherjean/shell3/internal/runs"
 )
 
 // TelegramConfig mirrors the parsed shell3.telegram{} block.
@@ -48,7 +50,7 @@ type CronJob struct {
 // RuntimeSpec configures a long-lived Runtime: the process-wide unit owning
 // the config (Lua state), store, proxy spawner, and log.
 type RuntimeSpec struct {
-	ConfigPath string // "" → ./shell3.lua then ~/.shell3/shell3.lua
+	ConfigPath string // "" → ~/.shell3/shell3.lua
 	WorkDir    string // runtime root; "" → os.Getwd(). Sessions default here.
 	// Context, when non-nil, parents the runtime's base context: cancelling it
 	// tears down the runtime (and any in-flight session/turn) just as Close
@@ -71,15 +73,21 @@ type SessionOpts struct {
 	OutPath string
 	// ShellInteractive runs an interactive shell command with TTY access.
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
-	// ResumeID reloads a stored session's messages when non-zero.
-	ResumeID int64
+	// ResumeID reloads a stored session's messages when non-empty.
+	ResumeID string
 	// ResumeLatest reattaches to the newest stored session matching this
-	// session's workdir+config (instead of starting fresh) when ResumeID is 0.
+	// session's workdir+config (instead of starting fresh) when ResumeID is empty.
 	// Falls back to a new session when none exists. The Telegram bot sets this so
 	// a restart rejoins the live conversation rather than spawning empties.
 	ResumeLatest bool
-	// ParentSession is the report pointer written to the new session row.
-	ParentSession int64
+	// ParentSession is the report pointer written to the new session row. When
+	// non-empty this run is a subagent: on completion it appends one pointer line
+	// to the project inbox for the live host to surface.
+	ParentSession string
+	// ReportInbox, when non-empty, is the absolute inbox.jsonl path this run
+	// reports completion to instead of its own store inbox — the parent's inbox,
+	// so delivery is independent of the subagent's working directory.
+	ReportInbox string
 }
 
 // HostEventKind enumerates out-of-turn runtime events.
@@ -95,13 +103,12 @@ const (
 	Notice
 )
 
-// HostEvent is one out-of-turn event for a session. Notice carries Text;
-// Payload is reserved for future kinds.
+// HostEvent is one out-of-turn event for a session. Notice carries Text; Wake
+// carries only the session name.
 type HostEvent struct {
 	Session string
 	Kind    HostEventKind
 	Text    string
-	Payload any
 }
 
 // Runtime hosts N sessions over one shared build. Create with NewRuntime,
@@ -124,9 +131,10 @@ type Runtime struct {
 	events chan HostEvent
 	// workDir is the runtime root; subagents write audit logs under it.
 	workDir string
-	// store is the shared SQLite history store (nil if unavailable). Used by
-	// PastSessions/SessionTurns for the dashboard's conversation history.
-	store *store.Store
+	// store is the shared file-native runs store (nil if unavailable). Used by
+	// PastSessions/SessionTurns for the dashboard's conversation history and by
+	// the inbox watcher that surfaces subagent completions.
+	store *runs.Store
 	// ctx/cancel scope host-initiated cron dispatch subprocesses so a running
 	// cron job is cancelled (and its goroutine unblocks) when Close cancels ctx.
 	ctx    context.Context
@@ -211,7 +219,7 @@ func NewRuntime(spec RuntimeSpec) (*Runtime, error) {
 			Prompt: j.Prompt, WorkDir: j.WorkDir, Notify: j.Notify,
 		})
 	}
-	return &Runtime{
+	rt := &Runtime{
 		sessionConfig: func(o SessionOpts) (chat.Config, error) {
 			return parts.SessionConfig(agentsetup.SessionOptions{
 				Agent: o.Agent, WorkDir: o.WorkDir, Headless: o.Headless, OutPath: o.OutPath,
@@ -239,7 +247,42 @@ func NewRuntime(spec RuntimeSpec) (*Runtime, error) {
 		ctx:        ctx,
 		cancel:     cancel,
 		sessions:   map[string]*Session{},
-	}, nil
+	}
+	// Watch the project inbox for subagent completion pointers. A finishing
+	// fire-and-forget subagent appends one pointer line to .shell3_project/inbox.jsonl
+	// (see Session.report); the watcher tails the file and injects each pointer
+	// into the live session(s) as a short notification. Bounded by ctx (cancelled
+	// at Close). No-op when no store is configured.
+	if rt.store != nil {
+		go func() { _ = rt.store.Watch(ctx, rt.injectPointer) }()
+	}
+	return rt, nil
+}
+
+// injectPointer surfaces one completion pointer (read from the project inbox) to
+// the live host. It reconstructs a notify.Notification, renders it, then
+// interjects the rendered pointer into every live session, waking idle ones.
+// The inbox carries no payload — Path
+// points at the subagent transcript and Summary is the preview — so detail stays
+// in the run's own jsonl and the injected line is a short pointer.
+func (rt *Runtime) injectPointer(p runs.Pointer) {
+	n := notify.Notification{
+		Kind:       p.Kind,
+		ID:         p.RunID,
+		Transcript: p.Path,
+		Preview:    p.Summary,
+		Exit:       p.Exit,
+		TS:         p.TS,
+	}
+	rt.mu.Lock()
+	live := make([]*Session, 0, len(rt.sessions))
+	for _, s := range rt.sessions {
+		live = append(live, s)
+	}
+	rt.mu.Unlock()
+	for _, s := range live {
+		s.injectNotification(rt, n)
+	}
 }
 
 // Events returns the out-of-turn event bus. One receiver drives N sessions.
@@ -254,11 +297,11 @@ func (rt *Runtime) Telegram() TelegramConfig { return rt.telegram }
 func (rt *Runtime) Cron() []CronJob { return rt.cron }
 
 // Store returns the shared canonical store (nil if unavailable).
-func (rt *Runtime) Store() *store.Store { return rt.store }
+func (rt *Runtime) Store() *runs.Store { return rt.store }
 
 // ConfigPath returns the absolute path of the shell3.lua this runtime was built
 // from. An empty or relative spec path is resolved exactly the way construction
-// (and Reload) resolves it — ./shell3.lua, else ~/.shell3/shell3.lua — so the
+// (and Reload) resolves it — ~/.shell3/shell3.lua — so the
 // result is the actual file a reload reads. Useful for self-reconfiguration
 // surfaces that need to show the agent/operator which file to edit.
 func (rt *Runtime) ConfigPath() (string, error) {
@@ -267,7 +310,7 @@ func (rt *Runtime) ConfigPath() (string, error) {
 
 // SessionMeta summarizes one stored past conversation.
 type SessionMeta struct {
-	ID        int64  `json:"id"`
+	ID        string `json:"id"`
 	StartedAt string `json:"started_at"`
 	EndedAt   string `json:"ended_at,omitempty"`
 	LastAt    string `json:"last_at"` // RFC3339 of newest message; falls back to start. Sort key for the dashboard.
@@ -276,7 +319,8 @@ type SessionMeta struct {
 }
 
 // PastSessions lists up to limit recent stored conversations (newest first).
-// Returns nil if no store is configured.
+// Returns nil if no store is configured. NumMsgs and Preview are derived from the
+// run's messages.jsonl, since the file-native meta carries only lifecycle data.
 func (rt *Runtime) PastSessions(limit int) ([]SessionMeta, error) {
 	if rt.store == nil {
 		return nil, nil
@@ -287,7 +331,7 @@ func (rt *Runtime) PastSessions(limit int) ([]SessionMeta, error) {
 	}
 	out := make([]SessionMeta, 0, len(rows))
 	for _, m := range rows {
-		e := SessionMeta{ID: m.ID, NumMsgs: m.NumMsgs, Preview: m.Preview, StartedAt: m.StartedAt.Format("2006-01-02 15:04")}
+		e := SessionMeta{ID: m.ID, StartedAt: m.StartedAt.Format("2006-01-02 15:04")}
 		if !m.EndedAt.IsZero() {
 			e.EndedAt = m.EndedAt.Format("2006-01-02 15:04")
 		}
@@ -296,24 +340,62 @@ func (rt *Runtime) PastSessions(limit int) ([]SessionMeta, error) {
 			last = m.StartedAt // no messages yet — sort by when it started
 		}
 		e.LastAt = last.UTC().Format(time.RFC3339)
+		// Derive the message count + a preview (newest assistant/user text) from the
+		// run's jsonl. Best-effort: a read error leaves NumMsgs 0 / Preview "".
+		if msgs, err := rt.store.LoadMessages(m.ID); err == nil {
+			e.NumMsgs = len(msgs)
+			e.Preview = previewOf(msgs)
+		}
 		out = append(out, e)
 	}
 	return out, nil
 }
 
+// previewOf returns a short preview for a run-list card: the newest non-empty
+// user-or-assistant message text, truncated. Empty when there is nothing to show.
+func previewOf(msgs []llm.Message) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		if (m.Role == llm.RoleUser || m.Role == llm.RoleAssistant) && strings.TrimSpace(m.Content) != "" {
+			return truncatePreviewRunes(strings.TrimSpace(m.Content))
+		}
+	}
+	return ""
+}
+
 // SessionTurns returns the stored turns of one past conversation as
-// HistoryEntry values (Role/Content only; tool args are not persisted).
-func (rt *Runtime) SessionTurns(id int64) ([]HistoryEntry, error) {
+// HistoryEntry values (Role/Content only). Reads the run's messages.jsonl.
+func (rt *Runtime) SessionTurns(id string) ([]HistoryEntry, error) {
 	if rt.store == nil {
 		return nil, nil
 	}
-	turns, err := rt.store.SessionTurns(id)
+	msgs, err := rt.store.LoadMessages(id)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]HistoryEntry, 0, len(turns))
-	for _, t := range turns {
-		out = append(out, HistoryEntry{Role: t.Role, Content: t.Content})
+	out := make([]HistoryEntry, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, HistoryEntry{Role: string(m.Role), Content: m.Content})
+	}
+	return out, nil
+}
+
+// SessionMessages returns the full-fidelity stored messages of one past
+// conversation as HistoryEntry values — tool calls, tool results, and reasoning
+// (thinking) included. Reads the run's messages.jsonl so the dashboard's
+// conversation replay matches the live Chat view. Returns nil if no store is
+// configured.
+func (rt *Runtime) SessionMessages(id string) ([]HistoryEntry, error) {
+	if rt.store == nil {
+		return nil, nil
+	}
+	msgs, err := rt.store.LoadMessages(id)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]HistoryEntry, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, messageToEntry(m))
 	}
 	return out, nil
 }
@@ -326,11 +408,11 @@ var subagentIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // SubagentInfo is a read-only listing of one spawned subagent's transcript, for
 // the dashboard. Subagents are backgrounded `shell3` runs that stream a
-// transcript to .shell3/agents/<id>.jsonl; this is derived from those files on
+// transcript to .shell3_project/agents/<id>.jsonl; this is derived from those files on
 // disk.
 type SubagentInfo struct {
 	ID         string `json:"id"`               // transcript filename stem
-	Transcript string `json:"transcript"`       // path under .shell3/agents
+	Transcript string `json:"transcript"`       // path under .shell3_project/agents
 	Agent      string `json:"agent,omitempty"`  // persona, from the start event
 	Task       string `json:"task,omitempty"`   // the spawn prompt, from the start event
 	Status     string `json:"status"`           // "running" until a terminal event is seen, else "finished"
@@ -380,7 +462,7 @@ func peekTranscript(path string) SubagentInfo {
 	return info
 }
 
-// SubagentList scans .shell3/agents/*.jsonl under the runtime root and returns
+// SubagentList scans .shell3_project/agents/*.jsonl under the runtime root and returns
 // one entry per transcript (newest first by mod time). The dashboard reads
 // completed/running subagent transcripts from disk. Returns nil when the
 // directory is absent.
@@ -432,7 +514,7 @@ type TranscriptEvent struct {
 	CallID string `json:"call_id,omitempty"`
 }
 
-// SubagentTranscript reads a subagent's audit JSONL (.shell3/agents/<id>.jsonl
+// SubagentTranscript reads a subagent's audit JSONL (.shell3_project/agents/<id>.jsonl
 // under the runtime root) and returns its events. Returns nil if absent.
 func (rt *Runtime) SubagentTranscript(id string) ([]TranscriptEvent, error) {
 	if !subagentIDRe.MatchString(id) {
@@ -507,16 +589,14 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	s.opts = opts
 	s.runtime, s.name = rt, opts.Name
 	s.sink, s.sinkCleanup = sink, sinkCleanup
-	// Inject the per-session Delegation context now that runtime+name are set:
-	// it appends the allowed-subagents list + the exact templated spawn command
-	// to the system prompt. No-op when the agent has no subagents.
-	s.applyDelegationContext(rt)
+	// Set the per-session host standing reminders now that runtime+name are set:
+	// the Environment + Delegation context (each gated by the active agent's
+	// toggle). No-op when both toggles are off.
+	s.applyHostReminders(rt)
 	s.writeStartLine("(session " + opts.Name + ")")
 	rt.sessions[opts.Name] = s
-	// Launch the host-side socket transport now that runtime+name are set. It
-	// listens on this session's socket and injects bg_done / agent_done
-	// pointers; Close stops it and marks the session dormant.
-	s.startTransport(rt)
+	// Subagent completions arrive via the runtime's single inbox watcher (see
+	// NewRuntime), not a per-session socket — nothing to launch here.
 	return s, nil
 }
 

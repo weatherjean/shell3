@@ -9,9 +9,8 @@ import (
 
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/bgjobs"
-	"github.com/weatherjean/shell3/internal/jobstore"
 	"github.com/weatherjean/shell3/internal/llm"
-	"github.com/weatherjean/shell3/internal/store"
+	"github.com/weatherjean/shell3/internal/runs"
 )
 
 // ErrHostToolNotFound is returned by a HostTool dispatcher when it does not
@@ -73,10 +72,10 @@ func dispatchCustomTool(ctx context.Context, cfg TurnConfig, name, rawArgs strin
 		return errResult("error: " + err.Error())
 	}
 	if rt.Background {
-		if cfg.Store == nil {
-			return errResult("error: background tools require a store")
+		if cfg.RunsDir == "" {
+			return errResult("error: background tools require a runs directory")
 		}
-		job, err := bgjobs.Start(jobstore.New(cfg.Store), []string{"bash", "-c", rt.Command}, rt.Command, cfg.WorkDir, rt.Env)
+		job, err := bgjobs.Start(cfg.RunsDir, []string{"bash", "-c", rt.Command}, rt.Command, cfg.WorkDir, rt.Env)
 		if err != nil {
 			return errResult("error: " + err.Error())
 		}
@@ -110,24 +109,26 @@ type CompactSummary struct {
 }
 
 // compactInto replaces the conversation history with a structured summary. It
-// ends the current store session and starts a new one so the compact boundary
+// ends the current runs session and starts a new one so the compact boundary
 // is visible in history. Both sess.messages and allMsgs are rebuilt in place;
 // the summary is saved to history before the session rolls. Callers are
 // responsible for validating that args.Summary is non-empty.
-func compactInto(args CompactSummary, st *store.Store, sess *Session, allMsgs []llm.Message, lg applog.Logger, projectRef, workDir, configPath string) (newAllMsgs []llm.Message) {
+func compactInto(args CompactSummary, st *runs.Store, sess *Session, allMsgs []llm.Message, lg applog.Logger, workDir, configPath string) (newAllMsgs []llm.Message) {
 	prevSessionID := sess.id
 
-	// Roll the store session so compact boundary is visible in history.
+	// Roll the runs session so compact boundary is visible in history.
 	if st != nil {
-		// Flush current session messages before wiping — saveHistory bails early
-		// after compact because prevLen > len(sess.messages), so we save here.
-		flushMessages(st, lg, prevSessionID, 0, sess.messages)
-		// Save the summary itself as the final entry in the outgoing session.
-		appendHistory(st, lg, prevSessionID, "tool", "compact_history: "+args.Summary)
+		// Flush only the unsaved tail of the outgoing session. Messages
+		// 0..persistedLen-1 were already written by prior saveHistory calls;
+		// re-flushing the full slice would duplicate those lines in the
+		// append-only JSONL file. A guard mirrors saveHistory's own guard.
+		if sess.persistedLen <= len(sess.messages) {
+			flushMessages(st, lg, prevSessionID, sess.messages[sess.persistedLen:])
+		}
 		if err := st.EndSession(prevSessionID); err != nil {
 			lg.Warn("end session failed during compact", "session_id", prevSessionID, "error", err)
 		}
-		newID, err := st.StartSession(projectRef, workDir, configPath)
+		newID, err := st.NewSession(runs.Meta{Workdir: workDir, ConfigPath: configPath})
 		if err != nil {
 			lg.Warn("start session failed during compact", "error", err)
 		} else {
@@ -137,7 +138,7 @@ func compactInto(args CompactSummary, st *store.Store, sess *Session, allMsgs []
 
 	// Build the continuation message injected at the top of the new history.
 	var b strings.Builder
-	fmt.Fprintf(&b, "<system-reminder>\nContinuation of session %d. History compacted.\nPrior sessions are in the SQLite history DB (use the `history` skill, or query it read-only: sqlite3 'file:<db>?mode=ro' \"... WHERE session_id=%d\").\n</system-reminder>\n\n", prevSessionID, prevSessionID)
+	fmt.Fprintf(&b, "<system-reminder>\nContinuation of session %s. History compacted.\nPrior session messages are in the runs directory (use the `history` skill, or read .shell3_project/runs/%s/messages.jsonl directly).\n</system-reminder>\n\n", prevSessionID, prevSessionID)
 	fmt.Fprintf(&b, "<compact-summary>\n%s\n</compact-summary>", args.Summary)
 	if len(args.ImportantFiles) > 0 {
 		b.WriteString("\n\n<important-files>\n")
@@ -194,18 +195,21 @@ func compactInto(args CompactSummary, st *store.Store, sess *Session, allMsgs []
 	sess.messages = newMsgs
 	sess.msgMu.Unlock()
 
-	// Mirror the compacted context into the replayable messages table under the
-	// NEW session id, so a resume of this session loads the within-window
-	// compacted history rather than the pre-compaction blob. flushMessages above
-	// wrote the OUTGOING session; this writes the incoming one. Guard on a
-	// successful roll (sess.id advanced past prevSessionID) so a failed
-	// StartSession doesn't clobber the outgoing session's seq 0/1.
+	// Mirror the compacted context into the runs store under the NEW session id,
+	// so a resume of this session loads the within-window compacted history
+	// rather than the pre-compaction blob. flushMessages above wrote the OUTGOING
+	// session; this writes the incoming one. Guard on a successful roll
+	// (sess.id advanced past prevSessionID) so a failed NewSession doesn't
+	// clobber the outgoing session's messages.
 	if st != nil && sess.id != prevSessionID {
-		for i, m := range newMsgs {
-			if err := st.AppendMessage(sess.id, i, m); err != nil {
-				lg.Warn("mirror compacted message failed", "session_id", sess.id, "seq", i, "error", err)
-			}
-		}
+		flushMessages(st, lg, sess.id, newMsgs)
+		// The new session's messages are now persisted; advance the high-water
+		// mark so the next saveHistory doesn't re-flush them.
+		sess.persistedLen = len(newMsgs)
+	} else {
+		// Session roll failed; the outgoing session is still active. Reset to
+		// zero so saveHistory starts fresh (avoids a stale offset).
+		sess.persistedLen = 0
 	}
 
 	// Rebuild allMsgs: system prompt + continuation + trigger assistant message.

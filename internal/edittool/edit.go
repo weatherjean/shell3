@@ -83,18 +83,21 @@ func EditFile(workDir, filePath, oldString, newString string, replaceAll bool) (
 	new_ := convertToLineEnding(normalizeLineEndings(newString), ending)
 
 	updated, rerr := Replace(original, old, new_, replaceAll)
-	if rerr != nil {
-		// Fallback: if the file's native ending is CRLF but the model emitted
-		// the search/replacement against an LF-normalized version of the
-		// content, try matching on the LF-normalized original and re-coerce
-		// the output to the source's ending.
+	if errors.Is(rerr, ErrNotFound) {
+		// Fallback ONLY when the search text wasn't found: if the file's native
+		// ending is CRLF but the model emitted the search/replacement against an
+		// LF-normalized version of the content, try matching on the LF-normalized
+		// original and re-coerce the output to the source's ending. We do not run
+		// this on ErrMultipleMatch (it could collapse an ambiguous match into a
+		// false unique one) or ErrNoChange.
 		altOld := strings.ReplaceAll(old, "\r\n", "\n")
 		altNew := strings.ReplaceAll(new_, "\r\n", "\n")
 		if alt, aerr := Replace(normalized, altOld, altNew, replaceAll); aerr == nil {
-			updated = convertToLineEnding(alt, ending)
-		} else {
-			return Result{}, rerr
+			updated, rerr = convertToLineEnding(alt, ending), nil
 		}
+	}
+	if rerr != nil {
+		return Result{}, rerr
 	}
 	if err := os.WriteFile(abs, []byte(updated), mode); err != nil {
 		return Result{}, err

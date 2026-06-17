@@ -47,24 +47,29 @@ user's other processes and scope them accordingly.
 
 ## Where data lives, and how to remove it
 
-shell3 keeps two kinds of state in two different places.
+shell3 is file-native: there is no database. State lives in two places.
 
-**Project-local state** lives in each project's `.shell3/` directory: the project
-UUID, subagent transcripts, and proxy logs. To remove it:
+**Project-local runtime state** lives in each project's `.shell3_project/`
+directory — conversation history, sessions, the completion inbox, background-job
+logs, and subagent transcripts, all as plain JSONL:
+
+- `.shell3_project/runs/<id>/messages.jsonl` — one conversation per directory
+  (`meta.json` beside it holds model/status/timestamps)
+- `.shell3_project/runs/jobs/<id>.jsonl` — background-job output (`<id>.status` beside it)
+- `.shell3_project/agents/<id>.jsonl` — subagent transcripts
+- `.shell3_project/inbox.jsonl` — completion pointers
+
+The directory ignores itself (a self-contained `.gitignore` of `*`), so it is
+never committed. To wipe a project's entire history:
 
 ```sh
-rm -rf .shell3            # this project's local state
+rm -rf .shell3_project    # this project's history, jobs, transcripts, inbox
 ```
 
-**Shared state** — conversation history, sessions, and background jobs — does
-*not* live in per-project files. It's all in one shared database at
-`~/.shell3/data/shell3.db` (WAL mode), with each row tagged by the project's UUID
-(`cat .shell3/.ref`). Deleting a project's `.shell3/` directory leaves those rows
-in place. To wipe all history across every project:
-
-```sh
-rm -rf ~/.shell3/data/shell3.db   # wipes ALL history, sessions, and jobs
-```
+**Global state** lives under `~/.shell3/`: your `shell3.lua` config, the `.env`
+secrets, the rotating app log, and any `run_proxy` logs. It holds no conversation
+history. Remove a config (and its secrets) by deleting its directory, e.g.
+`rm -rf ~/.shell3/telegram`.
 
 ## Reporting vulnerabilities
 

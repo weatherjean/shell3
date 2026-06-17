@@ -30,8 +30,12 @@ type Command struct {
 type tgClient interface {
 	// Updates delivers normalized inbound messages until ctx is cancelled.
 	Updates(ctx context.Context) <-chan Msg
-	// Send posts text; returns the sent message id.
+	// Send posts plain text (no parse mode); returns the sent message id.
 	Send(ctx context.Context, chatID int64, text string) (msgID int, err error)
+	// SendHTML posts text with parse_mode=HTML. Callers must pass a valid
+	// Telegram HTML subset; on any API error the caller should fall back to Send
+	// with a plain-text version.
+	SendHTML(ctx context.Context, chatID int64, html string) (msgID int, err error)
 	// Typing shows the "typing…" chat action.
 	Typing(ctx context.Context, chatID int64) error
 	// SendDocument uploads a file to the chat with an optional caption.

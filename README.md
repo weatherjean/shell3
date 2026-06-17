@@ -69,7 +69,8 @@ commands. Full walkthrough in [docs/cli.md](docs/cli.md).
   commands.
 - **Context managed for you.** Set a `compact_at` token threshold and shell3
   auto-compacts the conversation into a summary — no model-driven prune/compact
-  tools. History persists in SQLite and is searchable from inside a session.
+  tools. History persists as plain JSONL under `.shell3_project/runs/` and is
+  searchable from inside a session with `rg`.
 - **Headless & auditable.** Pipe in, pipe out; `--out` streams a lossless JSONL
   log of every token, tool call, and result.
 - **Embeddable, and a runtime.** Everything the TUI does is available as a Go

@@ -2,30 +2,22 @@ package chat
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
 	"github.com/weatherjean/shell3/internal/persona"
-	"github.com/weatherjean/shell3/internal/store"
+	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// openTestStore opens a fresh file-backed store in a temp dir, registered for
-// cleanup. File-backed (not :memory:) so it exercises the real WAL path the
-// agent's out-of-process history reader relies on.
-func openTestStore(t *testing.T) *store.Store {
+// openTestStore opens a fresh file-native runs store in a temp dir, registered
+// for cleanup. File-backed so it exercises the real append path.
+func openTestStore(t *testing.T) *runs.Store {
 	t.Helper()
-	f, err := os.CreateTemp(t.TempDir(), "test-*.db")
+	st, err := runs.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
-	st, err := store.Open(f.Name())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
 	return st
 }
 
@@ -44,7 +36,7 @@ func openTestStore(t *testing.T) *store.Store {
 // beforeDone — has already happened. The assertion runs right there.
 func TestRun_PersistsHistoryBeforeTurnDone(t *testing.T) {
 	st := openTestStore(t)
-	sessionID, err := st.StartSession("", "", "")
+	sessionID, err := st.NewSession(runs.Meta{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,12 +54,13 @@ func TestRun_PersistsHistoryBeforeTurnDone(t *testing.T) {
 			return
 		}
 		sawTurnDone = true
-		res, err := st.HistoryGet(sessionID, 0)
+		// Verify that messages have been persisted before turn_done fires.
+		msgs, err := st.LoadMessages(sessionID)
 		if err != nil {
-			t.Errorf("HistoryGet: %v", err)
+			t.Errorf("LoadMessages: %v", err)
 			return
 		}
-		if len(res.Turns) == 0 {
+		if len(msgs) == 0 {
 			t.Errorf("history not persisted when turn_done was observed: " +
 				"turn_done fired before saveHistory ran")
 		}

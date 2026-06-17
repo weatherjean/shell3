@@ -36,8 +36,7 @@ func labelBlock(styledLabel, value string, indent, width int) []string {
 
 // WelcomeInfo holds session metadata rendered in the welcome card.
 type WelcomeInfo struct {
-	Persona    string // persona name
-	ProjectRef string // project UUID
+	Persona string // persona name
 }
 
 // renderWelcome returns the welcome lines printed once on session start.
@@ -60,9 +59,6 @@ func renderWelcome(width int, info WelcomeInfo) []string {
 	const infoIndent = 4
 	if info.Persona != "" {
 		out = append(out, labelBlock(styled("persona", yellow, "", false), info.Persona, infoIndent, width)...)
-	}
-	if info.ProjectRef != "" {
-		out = append(out, labelBlock(styled("project", yellow, "", false), info.ProjectRef, infoIndent, width)...)
 	}
 	out = append(out, "")
 	out = append(out, labelBlock(styled("/help", yellow, "", false), "list slash commands  ·  /info for session details", infoIndent, width)...)

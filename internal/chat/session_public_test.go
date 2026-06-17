@@ -13,11 +13,11 @@ func TestSessionSinkReceivesEmit(t *testing.T) {
 
 func TestSessionIDAccessor(t *testing.T) {
 	s := NewSession(SessionOpts{})
-	if got := s.ID(); got != 0 {
-		t.Errorf("default ID = %d, want 0", got)
+	if got := s.ID(); got != "" {
+		t.Errorf("default ID = %q, want empty string", got)
 	}
-	s.id = 99
-	if got := s.ID(); got != 99 {
-		t.Errorf("ID() = %d, want 99", got)
+	s.id = "test-session-99"
+	if got := s.ID(); got != "test-session-99" {
+		t.Errorf("ID() = %q, want test-session-99", got)
 	}
 }

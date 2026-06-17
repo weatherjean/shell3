@@ -93,6 +93,8 @@ type Agent struct {
 	SkillsDisabled bool     // true only when tools = { skill = false } is explicitly set
 	Subagents      []string // names of registered subagents this agent can spawn
 	Description    string   // model-facing "when to use" (unused for top-level agents)
+	Environment    bool     // inject the host Environment system-reminder
+	Delegation     bool     // inject the host Delegation (spawn-command) system-reminder
 }
 
 // Subagent is a delegatable specialist: a non-interactive agent the model can
@@ -109,6 +111,8 @@ type Subagent struct {
 	CustomTools    []string
 	Skills         []string
 	SkillsDisabled bool
+	Environment    bool // inject the host Environment system-reminder
+	Delegation     bool // inject the host Delegation (spawn-command) system-reminder
 }
 
 // SkillsActive reports whether skills are enabled: the agent has at least one

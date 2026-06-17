@@ -40,7 +40,7 @@ shell3.model("{{.Name | luaesc}}", {
   -- run_proxy: shell command auto-started (detached, fire-and-forget) the first
   -- time an agent uses this model. Use it to bring up a local proxy in front of
   -- base_url — e.g. a Codex subscription fronted by `npx ...`.
-  -- Output goes to ./.shell3/proxy-{{.Name}}.log.
+  -- Output goes to ~/.shell3/proxy-{{.Name}}.log.
 {{if .Proxy}}  run_proxy      = "{{.Proxy | luaesc}}",
 {{else}}  -- run_proxy   = "npx @some/codex-proxy --port 8787",
 {{end}}})
@@ -100,6 +100,11 @@ You cannot edit files. Decide and proceed; no human is available.
 shell3.agent({
   name  = "code",
   model = "{{.Name | luaesc}}",
+  -- Host-injected system-reminders (kept OUT of the prompt above). environment:
+  -- model/paths/inbox + this session's id. delegation: the spawn command for the
+  -- subagents listed under tools.subagents below. Both default off.
+  environment = true,
+  delegation  = true,
   prompt = [[
 You are an expert coding assistant inside shell3. Work autonomously as a senior pair-programmer: inspect, edit, test, and summarize clearly.
 
@@ -121,7 +126,7 @@ You are an expert coding assistant inside shell3. Work autonomously as a senior 
 - `edit_file`: prefer over `bash` heredocs; empty `old_string` creates or overwrites the whole file.
 - `bash_bg`: long or parallel background work.
 - `web_fetch`: fetch a URL as plain text + links. `brave_search`: web search.
-- Delegation: if you list subagents under `tools = { subagents = { ... } }`, a "## Delegation" section is injected at session start with the exact `bash_bg` command to spawn one. A subagent is a background `shell3` process that runs the chosen agent on a self-contained task and reports back automatically (you don't poll) with a transcript path you cat for the result. Good for parallelizable work you don't need to watch.
+- Delegation: if you list subagents under `tools = { subagents = { ... } }`, a "## Delegation" section is injected at session start with the exact `bash_bg` command to spawn one. A subagent is a background `shell3` process that runs the chosen agent on a self-contained task and reports back automatically (you don't poll): the notification carries the subagent's result summary, so act on it directly — a transcript path comes too, for the rare case you need the full detail. Good for parallelizable work you don't need to watch.
 
 ## Context hygiene
 - Context is managed for you: shell3 auto-compacts the conversation into a summary when it crosses the model's `compact_at` token threshold. You do not prune or compact manually.
@@ -193,7 +198,7 @@ You are the design partner inside shell3. You do NOT edit files — you investig
 --   cron = {
 --     { name="prs", schedule="0 9 * * *", agent="explorer", notify=true,
 --       prompt="Summarize my open PRs and anything that needs review today." },
---     { name="tests", schedule="@hourly", agent="code", workdir="/path/to/repo", notify=false,
+--     { name="tests", schedule="@hourly", agent="explorer", workdir="/path/to/repo", notify=false,
 --       prompt="Run the test suite; if anything fails, summarize the failure." },
 --   },
 -- })

@@ -41,7 +41,12 @@ func newTelegramCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			rt, err := shell3.NewRuntime(shell3.RuntimeSpec{ConfigPath: resolved, WorkDir: cwd})
+			// Anchor the bot to its own config directory, NOT the launch cwd: the
+			// runtime root determines where runs/ + history live (runs.Open under
+			// <workdir>/.shell3_project). Tying it to the config dir keeps the bot
+			// self-contained and isolated from a TUI launched in the same shell.
+			tgHome := filepath.Dir(resolved)
+			rt, err := shell3.NewRuntime(shell3.RuntimeSpec{ConfigPath: resolved, WorkDir: tgHome})
 			if err != nil {
 				return err
 			}
@@ -81,11 +86,10 @@ func newTelegramCommand() *cobra.Command {
 				return err
 			}
 			b := telegram.NewBot(client, rt, sess, chatID)
-			b.SetStore(rt.Store())
 			// Resolve send_media_telegram relative paths against the agent's workdir.
 			workDir := tg.WorkDir
 			if workDir == "" {
-				workDir = cwd
+				workDir = tgHome
 			}
 			b.SetWorkDir(workDir)
 

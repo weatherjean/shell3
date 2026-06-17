@@ -14,6 +14,16 @@ import (
 // satisfies hooks.TTYReleaser; the current implementation never returns a
 // non-nil error.
 func (a *App) Pause() error {
+	// If already paused there is nothing to release, and re-locking readMu on
+	// this same goroutine would self-deadlock. Mirror Resume's guard so a stray
+	// double Pause is a no-op.
+	a.mu.Lock()
+	already := a.term.paused
+	a.mu.Unlock()
+	if already {
+		return nil
+	}
+
 	// Wake the input loop out of its Poll so it can release the read lock.
 	// Without this, a Pause from a non-input goroutine would block until
 	// the user happened to press a key.

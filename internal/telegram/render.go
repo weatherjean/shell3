@@ -6,6 +6,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/weatherjean/shell3/internal/telegram/mdhtml"
 	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
@@ -63,6 +64,11 @@ func (b *Bot) sendReply(ctx context.Context, text string) {
 		text = "(no output)"
 	}
 	for _, c := range chunk(text, tgMaxMessage) {
-		_, _ = b.client.Send(ctx, b.chatID, c)
+		// Render the agent's Markdown to Telegram-safe HTML so bold/italics/code
+		// show up. If Telegram still rejects it, fall back to the raw text.
+		html := mdhtml.ToTelegramHTML(c)
+		if _, err := b.client.SendHTML(ctx, b.chatID, html); err != nil {
+			_, _ = b.client.Send(ctx, b.chatID, c)
+		}
 	}
 }

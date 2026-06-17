@@ -8,7 +8,6 @@ import (
 
 	"github.com/weatherjean/shell3/internal/bootstrap"
 	"github.com/weatherjean/shell3/internal/paths"
-	"github.com/weatherjean/shell3/internal/ref"
 )
 
 func TestEnsureGlobal(t *testing.T) {
@@ -17,13 +16,14 @@ func TestEnsureGlobal(t *testing.T) {
 	if err := bootstrap.EnsureGlobal(g); err != nil {
 		t.Fatalf("EnsureGlobal: %v", err)
 	}
-	for _, dir := range []string{g.Root, g.Data} {
-		if _, err := os.Stat(dir); err != nil {
-			t.Fatalf("dir missing: %s", dir)
-		}
+	// Only Root should exist; no data/ dir.
+	if _, err := os.Stat(g.Root); err != nil {
+		t.Fatalf("Root dir missing: %v", err)
 	}
-	// EnsureGlobal must NOT write shell3.lua or .env.example — those are
-	// created explicitly via `shell3 boot`.
+	if _, err := os.Stat(filepath.Join(g.Root, "data")); !os.IsNotExist(err) {
+		t.Fatalf("EnsureGlobal must NOT create data/; stat err = %v", err)
+	}
+	// EnsureGlobal must NOT write shell3.lua or .env.example.
 	if _, err := os.Stat(filepath.Join(g.Root, "shell3.lua")); !os.IsNotExist(err) {
 		t.Fatalf("EnsureGlobal must not write shell3.lua; stat err = %v", err)
 	}
@@ -45,12 +45,8 @@ func TestEnsureBootstrapEndToEnd(t *testing.T) {
 	if err := bootstrap.EnsureGlobal(g); err != nil {
 		t.Fatalf("EnsureGlobal: %v", err)
 	}
-	id, err := bootstrap.EnsureProject(l)
-	if err != nil {
+	if err := bootstrap.EnsureProject(l); err != nil {
 		t.Fatalf("EnsureProject: %v", err)
-	}
-	if id == "" {
-		t.Fatal("empty project id")
 	}
 
 	// EnsureGlobal no longer writes shell3.lua or .env.example.
@@ -63,72 +59,68 @@ func TestEnsureBootstrapEndToEnd(t *testing.T) {
 		}
 	}
 
+	// .shell3_project/ and .shell3_project/runs/ must exist.
 	if _, err := os.Stat(l.Root); err != nil {
-		t.Fatalf("local .shell3/ missing: %v", err)
+		t.Fatalf(".shell3_project/ missing: %v", err)
 	}
-	if loaded, err := ref.Load(l); err != nil {
-		t.Fatalf("load ref: %v", err)
-	} else if loaded != id {
-		t.Fatalf("ref mismatch: %q vs %q", loaded, id)
-	}
-	// No per-project dir: just verify the .ref was written.
-	if _, err := os.Stat(l.Ref); err != nil {
-		t.Fatalf(".ref file missing: %v", err)
+	if _, err := os.Stat(l.Runs); err != nil {
+		t.Fatalf(".shell3_project/runs/ missing: %v", err)
 	}
 }
 
 func TestEnsureProject(t *testing.T) {
 	tmp := t.TempDir()
-	home := filepath.Join(tmp, "home")
 	cwd := filepath.Join(tmp, "project")
 	_ = os.MkdirAll(cwd, 0755)
-
-	g := paths.NewGlobal(home)
 	l := paths.NewLocal(cwd)
 
-	_ = bootstrap.EnsureGlobal(g)
-	id, err := bootstrap.EnsureProject(l)
-	if err != nil {
+	if err := bootstrap.EnsureProject(l); err != nil {
 		t.Fatalf("EnsureProject: %v", err)
-	}
-	if id == "" {
-		t.Fatal("empty uuid")
 	}
 
 	if _, err := os.Stat(l.Root); err != nil {
-		t.Fatalf("local .shell3/ missing: %v", err)
+		t.Fatalf(".shell3_project/ missing: %v", err)
+	}
+	if _, err := os.Stat(l.Runs); err != nil {
+		t.Fatalf(".shell3_project/runs/ missing: %v", err)
 	}
 
-	loaded, _ := ref.Load(l)
-	if loaded != id {
-		t.Fatalf("ref mismatch: %q vs %q", loaded, id)
+	// .shell3_project/ self-ignores via a "*" .gitignore written inside it.
+	gi, err := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
+	if err != nil {
+		t.Fatalf(".shell3_project/.gitignore missing: %v", err)
 	}
-
-	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
 	if !hasLine(string(gi), "*") {
-		t.Fatalf(".gitignore missing %q entry:\n%s", "*", gi)
+		t.Fatalf(".shell3_project/.gitignore missing '*' entry:\n%s", gi)
+	}
+	// The enclosing repo's own .gitignore is NOT touched (self-contained).
+	if _, err := os.Stat(filepath.Join(cwd, ".gitignore")); !os.IsNotExist(err) {
+		t.Fatalf("cwd/.gitignore should not be created by EnsureProject; stat err = %v", err)
+	}
+
+	// No .ref file, no .shell3/ subdir.
+	if _, err := os.Stat(filepath.Join(cwd, ".shell3")); !os.IsNotExist(err) {
+		t.Fatalf(".shell3/ should not exist; stat err = %v", err)
 	}
 }
 
 func TestEnsureProjectIdempotent(t *testing.T) {
 	tmp := t.TempDir()
-	home := filepath.Join(tmp, "home")
 	cwd := filepath.Join(tmp, "project")
 	_ = os.MkdirAll(cwd, 0755)
-	g := paths.NewGlobal(home)
 	l := paths.NewLocal(cwd)
-	_ = bootstrap.EnsureGlobal(g)
 
-	id1, err := bootstrap.EnsureProject(l)
-	if err != nil {
+	if err := bootstrap.EnsureProject(l); err != nil {
 		t.Fatalf("EnsureProject 1: %v", err)
 	}
-	id2, err := bootstrap.EnsureProject(l)
-	if err != nil {
+	if err := bootstrap.EnsureProject(l); err != nil {
 		t.Fatalf("EnsureProject 2: %v", err)
 	}
-	if id1 != id2 {
-		t.Fatalf("not idempotent: %q vs %q", id1, id2)
+
+	// "*" must appear exactly once in .shell3_project/.gitignore.
+	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
+	if n := strings.Count(string(gi), "*"); n != 1 {
+		t.Errorf("'*' appears %d times in .shell3_project/.gitignore, want 1:\n%s", n, gi)
 	}
 }
 
@@ -143,13 +135,16 @@ func TestGlobalGitignore(t *testing.T) {
 		t.Fatalf("global .gitignore missing: %v", err)
 	}
 	content := string(gi)
+	// data/ must NOT appear (no more SQLite).
+	if strings.Contains(content, "data/") {
+		t.Errorf("global .gitignore must not contain data/:\n%s", content)
+	}
 	for _, want := range []string{
 		"ai-do-not-read.*",
 		".env",
 		"shell3.log",
 		"shell3.log.*",
 		"proxy-*.log",
-		"data/",
 	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("global .gitignore missing %q:\n%s", want, content)
@@ -166,133 +161,6 @@ func TestGlobalGitignore(t *testing.T) {
 	}
 }
 
-func TestEnsureGitignoreAppends(t *testing.T) {
-	tmp := t.TempDir()
-	home := filepath.Join(tmp, "home")
-	cwd := filepath.Join(tmp, "project")
-	_ = os.MkdirAll(cwd, 0755)
-	g := paths.NewGlobal(home)
-	l := paths.NewLocal(cwd)
-	_ = bootstrap.EnsureGlobal(g)
-
-	// Pre-existing gitignore
-	_ = os.MkdirAll(l.Root, 0755)
-	_ = os.WriteFile(filepath.Join(l.Root, ".gitignore"), []byte("shell3.db\nai-do-not-read.*\n"), 0644)
-
-	_, _ = bootstrap.EnsureProject(l)
-
-	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
-	content := string(gi)
-	if !hasLine(content, "*") {
-		t.Fatal("\"*\" not appended to existing .gitignore")
-	}
-	if !strings.Contains(content, "shell3.db") {
-		t.Fatal("existing entries were lost")
-	}
-}
-
-// hasLine reports whether content contains want as its own whole trimmed line.
-func hasLine(content, want string) bool {
-	for _, line := range strings.Split(content, "\n") {
-		if strings.TrimSpace(line) == want {
-			return true
-		}
-	}
-	return false
-}
-
-// TestEnsureGitignoreWholeLineMatch verifies that a substring-but-not-whole-line
-// match (e.g. "*.reference", which contains "*") does not satisfy the "*"
-// sentinel: the real "*" rule must still be added as its own line. (F3)
-func TestEnsureGitignoreWholeLineMatch(t *testing.T) {
-	tmp := t.TempDir()
-	home := filepath.Join(tmp, "home")
-	cwd := filepath.Join(tmp, "project")
-	_ = os.MkdirAll(cwd, 0755)
-	g := paths.NewGlobal(home)
-	l := paths.NewLocal(cwd)
-	_ = bootstrap.EnsureGlobal(g)
-
-	_ = os.MkdirAll(l.Root, 0755)
-	// "*.reference" contains "*" as a substring but is not the catch-all rule.
-	_ = os.WriteFile(filepath.Join(l.Root, ".gitignore"), []byte("*.reference\n"), 0644)
-
-	if _, err := bootstrap.EnsureProject(l); err != nil {
-		t.Fatalf("EnsureProject: %v", err)
-	}
-
-	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
-	content := string(gi)
-	if !hasLine(content, "*") {
-		t.Fatalf("\"*\" not added as its own line despite substring-only match:\n%s", content)
-	}
-	if !strings.Contains(content, "*.reference") {
-		t.Fatalf("existing *.reference entry was lost:\n%s", content)
-	}
-}
-
-// TestEnsureGitignoreLocalEntries verifies the whole ./.shell3/ folder is
-// ignored via a single "*" and that repeated runs do not duplicate it.
-// (idempotency)
-func TestEnsureGitignoreLocalEntries(t *testing.T) {
-	tmp := t.TempDir()
-	home := filepath.Join(tmp, "home")
-	cwd := filepath.Join(tmp, "project")
-	_ = os.MkdirAll(cwd, 0755)
-	g := paths.NewGlobal(home)
-	l := paths.NewLocal(cwd)
-	_ = bootstrap.EnsureGlobal(g)
-
-	if _, err := bootstrap.EnsureProject(l); err != nil {
-		t.Fatalf("EnsureProject: %v", err)
-	}
-	// Second run must not duplicate the entry.
-	if _, err := bootstrap.EnsureProject(l); err != nil {
-		t.Fatalf("EnsureProject second call: %v", err)
-	}
-
-	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
-	content := string(gi)
-	if !hasLine(content, "*") {
-		t.Fatalf("%q not present as its own line:\n%s", "*", content)
-	}
-	if n := strings.Count(content, "*"); n != 1 {
-		t.Errorf("%q appears %d times, want 1:\n%s", "*", n, content)
-	}
-}
-
-// TestEnsureGitignoreNoTrailingNewline verifies that when the existing
-// .gitignore does NOT end in a newline, the appended entries are not glued
-// onto the final line: the leading-"\n" guard must insert a separator so the
-// last existing line and the first added line stay distinct. (no-newline branch)
-func TestEnsureGitignoreNoTrailingNewline(t *testing.T) {
-	tmp := t.TempDir()
-	home := filepath.Join(tmp, "home")
-	cwd := filepath.Join(tmp, "project")
-	_ = os.MkdirAll(cwd, 0755)
-	g := paths.NewGlobal(home)
-	l := paths.NewLocal(cwd)
-	_ = bootstrap.EnsureGlobal(g)
-
-	_ = os.MkdirAll(l.Root, 0755)
-	// No trailing newline: without the leading-"\n" guard, the first appended
-	// entry would be glued onto this line (e.g. "*.reference.ref").
-	_ = os.WriteFile(filepath.Join(l.Root, ".gitignore"), []byte("*.reference"), 0644)
-
-	if _, err := bootstrap.EnsureProject(l); err != nil {
-		t.Fatalf("EnsureProject: %v", err)
-	}
-
-	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
-	content := string(gi)
-	if strings.Contains(content, "reference*") {
-		t.Fatalf("appended entry glued onto newline-less final line:\n%s", content)
-	}
-	if !hasLine(content, "*") {
-		t.Fatalf("\"*\" not present as its own line:\n%s", content)
-	}
-}
-
 func TestEnsureGlobalDoesNotWriteConfig(t *testing.T) {
 	home := t.TempDir()
 	g := paths.NewGlobal(home)
@@ -305,36 +173,42 @@ func TestEnsureGlobalDoesNotWriteConfig(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(g.Root, ".env.example")); !os.IsNotExist(err) {
 		t.Fatalf("EnsureGlobal must not write .env.example; stat err = %v", err)
 	}
-	if _, err := os.Stat(g.Data); err != nil {
-		t.Fatalf("data dir missing: %v", err)
+	// No data/ dir.
+	if _, err := os.Stat(filepath.Join(g.Root, "data")); !os.IsNotExist(err) {
+		t.Fatalf("EnsureGlobal must not create data/; stat err = %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(g.Root, ".gitignore")); err != nil {
 		t.Fatalf("gitignore missing: %v", err)
 	}
 }
 
-// TestEnsureGitignoreRespectsExistingStar verifies that when the catch-all "*"
-// is already present, EnsureProject leaves the file untouched (no duplicate).
-func TestEnsureGitignoreRespectsExistingStar(t *testing.T) {
+// TestEnsureProjectGitignoreIdempotent verifies that repeated EnsureProject
+// calls do not add "*" more than once to the self-ignoring .gitignore.
+func TestEnsureProjectGitignoreIdempotent(t *testing.T) {
 	tmp := t.TempDir()
-	home := filepath.Join(tmp, "home")
 	cwd := filepath.Join(tmp, "project")
 	_ = os.MkdirAll(cwd, 0755)
-	g := paths.NewGlobal(home)
 	l := paths.NewLocal(cwd)
-	_ = bootstrap.EnsureGlobal(g)
 
-	_ = os.MkdirAll(l.Root, 0755)
-	// "*" already present as a whole line; nothing should be appended.
-	_ = os.WriteFile(filepath.Join(l.Root, ".gitignore"), []byte("*\n"), 0644)
-
-	if _, err := bootstrap.EnsureProject(l); err != nil {
+	if err := bootstrap.EnsureProject(l); err != nil {
 		t.Fatalf("EnsureProject: %v", err)
+	}
+	if err := bootstrap.EnsureProject(l); err != nil {
+		t.Fatalf("EnsureProject second: %v", err)
 	}
 
 	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
-	content := string(gi)
-	if n := strings.Count(content, "*"); n != 1 {
-		t.Errorf("\"*\" duplicated: appears %d times:\n%s", n, content)
+	if n := strings.Count(string(gi), "*"); n != 1 {
+		t.Errorf("'*' appears %d times, want 1:\n%s", n, gi)
 	}
+}
+
+// hasLine reports whether content contains want as its own whole trimmed line.
+func hasLine(content, want string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		if strings.TrimSpace(line) == want {
+			return true
+		}
+	}
+	return false
 }

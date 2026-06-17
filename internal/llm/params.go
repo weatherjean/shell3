@@ -41,7 +41,10 @@ func (p *RequestParams) SetByName(name, value string) error {
 	case "reasoning_effort":
 		p.ReasoningEffort = value
 	case "parallel_tool_calls":
-		b := value == "true"
+		b, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("parallel_tool_calls: %w", err)
+		}
 		p.ParallelToolCalls = &b
 	case "temperature":
 		// strconv (here and for max_tokens) rejects trailing garbage outright,
@@ -56,6 +59,9 @@ func (p *RequestParams) SetByName(name, value string) error {
 		n, err := strconv.Atoi(value)
 		if err != nil {
 			return fmt.Errorf("max_tokens: %w", err)
+		}
+		if n <= 0 {
+			return fmt.Errorf("max_tokens: must be positive, got %d", n)
 		}
 		p.MaxTokens = n
 	default:

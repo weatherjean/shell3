@@ -13,7 +13,7 @@ import (
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/paths"
-	"github.com/weatherjean/shell3/internal/store"
+	"github.com/weatherjean/shell3/internal/runs"
 )
 
 // filterHeadlessTools returns tools with shell_interactive removed when
@@ -38,7 +38,7 @@ func filterHeadlessTools(tools []llm.ToolDefinition, headless bool) []llm.ToolDe
 const headlessReminder = "<system-reminder>\nheadless mode: no interactive shell, no human available to answer questions. Decide and proceed. Destructive commands may be blocked by host policy — if a block occurs, adapt rather than retry.\n</system-reminder>"
 
 // logStreamError writes the failing turn's messages and the last raw HTTP
-// traffic to .shell3/last_error.json under cfg.WorkDir, then records the
+// traffic to .shell3_project/last_error.json under cfg.WorkDir, then records the
 // event in the logger at Debug level (the TUI channel shows the error to the
 // user, so stderr duplication is not needed here).
 func logStreamError(cfg TurnConfig, msgs []llm.Message, streamErr error) {
@@ -125,6 +125,13 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 	allMsgs := make([]llm.Message, 0, len(msgs)+1)
 	allMsgs = append(allMsgs, llm.Message{Role: llm.RoleSystem, Content: cfg.Personality.SystemPrompt})
 	allMsgs = append(allMsgs, msgs...)
+
+	// Inject standing reminders (host Environment/Delegation context) so they
+	// sit right after the system prompt every turn. These are set by
+	// SetStandingReminders and regenerated on resume — not persisted.
+	for _, r := range sess.standingReminders {
+		allMsgs = injectReminder(allMsgs, r)
+	}
 
 	toolList := filterHeadlessTools(cfg.Personality.Tools, cfg.Headless)
 	if cfg.Headless {
@@ -378,6 +385,7 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 			if handler != nil {
 				toolCfg := ToolConfig{
 					Store:    cfg.Store,
+					RunsDir:  cfg.RunsDir,
 					WorkDir:  cfg.WorkDir,
 					WrapBash: cfg.WrapBash,
 					AllMsgs:  st.allMsgs,
@@ -444,7 +452,7 @@ func validateCall(toolSchemas map[string]map[string]any, tc llm.ToolCall) (res t
 }
 
 // streamOnce calls the LLM once, collecting text/reasoning/tool-calls/usage
-// and emitting per-token chat.Events on sess.events.
+// and emitting per-token chat.Events on the session sink.
 func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools []llm.ToolDefinition, sess *Session) (text, reasoning string, toolCalls []llm.ToolCall, usage llm.Usage, err error) {
 	if ctx.Err() != nil {
 		return "", "", nil, llm.Usage{}, ctx.Err()
@@ -533,7 +541,7 @@ func maybeCompact(ctx context.Context, cfg TurnConfig, sess *Session) {
 	allMsgs = append(allMsgs, llm.Message{Role: llm.RoleSystem, Content: cfg.Personality.SystemPrompt})
 	allMsgs = append(allMsgs, sess.messages...)
 	prevTokens := sess.lastPromptTokens
-	compactInto(CompactSummary{Summary: summary}, cfg.Store, sess, allMsgs, cfg.Log, cfg.ProjectRef, cfg.WorkDir, cfg.ConfigPath)
+	compactInto(CompactSummary{Summary: summary}, cfg.Store, sess, allMsgs, cfg.Log, cfg.WorkDir, cfg.ConfigPath)
 
 	// Reset the token gauge to the rewritten history's (small) estimate so the
 	// next turn does not immediately re-trip the threshold before a real usage
@@ -591,64 +599,35 @@ func addUsage(a, b llm.Usage) llm.Usage {
 	}
 }
 
-// saveHistory persists new messages to the store after a turn. Append failures
-// are logged but not fatal — history is best-effort, but a silent drop would
-// hide real faults (a full disk, a closed DB), so they surface via lg.
-func saveHistory(st *store.Store, lg applog.Logger, sess *Session, sessionID int64, from int) {
+// saveHistory persists new messages to the runs store after a turn. Append
+// failures are logged but not fatal — history is best-effort, but a silent
+// drop would hide real faults (a full disk), so they surface via lg.
+//
+// On a compacting turn, maybeCompact runs before the user message is appended
+// and resets sess.messages to a short continuation (2 messages) while
+// sess.persistedLen is set to that length. This function uses persistedLen as
+// the high-water mark so it always flushes exactly the new messages appended
+// during this turn regardless of whether compaction ran.
+func saveHistory(st *runs.Store, lg applog.Logger, sess *Session, sessionID string) {
 	if st == nil {
 		return
 	}
-	if from > len(sess.messages) {
-		// compaction rebuilt sess.messages from scratch; nothing new to save
-		// (compactInto already wrote the summary to history directly).
+	if sess.persistedLen > len(sess.messages) {
+		// Shouldn't happen, but guard against it.
 		return
 	}
-	flushMessages(st, lg, sessionID, from, sess.messages[from:])
+	flushMessages(st, lg, sessionID, sess.messages[sess.persistedLen:])
+	sess.persistedLen = len(sess.messages)
 }
 
-// flushMessages appends each message in msgs to the replayable messages table
-// (full fidelity, including RoleTool results) starting at seq `from`, and
-// mirrors user/assistant text plus one summary row per tool call into the FTS
-// history table for search. Best-effort: write failures are logged, not fatal.
-// Shared by saveHistory (end of turn) and compactInto (flushing the outgoing
-// session before roll). `from` is the base conversation seq of msgs[0] so that
-// seqs stay contiguous across turns.
-func flushMessages(st *store.Store, lg applog.Logger, sessionID int64, from int, msgs []llm.Message) {
-	for i, m := range msgs {
-		if err := st.AppendMessage(sessionID, from+i, m); err != nil {
-			lg.Warn("append message failed", "session_id", sessionID, "seq", from+i, "error", err)
-		}
-		switch m.Role {
-		case llm.RoleUser, llm.RoleAssistant:
-			appendHistory(st, lg, sessionID, string(m.Role), m.Content)
-			for _, tc := range m.ToolCalls {
-				appendHistory(st, lg, sessionID, "tool", toolCallSummary(tc))
-			}
+// flushMessages appends each message in msgs to the runs store (one JSONL line
+// per message, append-only). Best-effort: write failures are logged, not fatal.
+// Shared by saveHistory (end of turn) and compactInto (flushing the incoming
+// compacted session).
+func flushMessages(st *runs.Store, lg applog.Logger, sessionID string, msgs []llm.Message) {
+	for _, m := range msgs {
+		if err := st.AppendMessage(sessionID, m); err != nil {
+			lg.Warn("append message failed", "session_id", sessionID, "error", err)
 		}
 	}
-}
-
-// appendHistory writes one history row, logging on failure. Persistence is
-// best-effort; the turn proceeds regardless of the outcome.
-func appendHistory(st *store.Store, lg applog.Logger, sessionID int64, role, content string) {
-	if err := st.AppendHistory(sessionID, role, content); err != nil {
-		lg.Warn("append history failed", "session_id", sessionID, "role", role, "error", err)
-	}
-}
-
-func toolCallSummary(tc llm.ToolCall) string {
-	const maxLen = 80
-	if tc.Name == "bash" {
-		cmd := ParseBashArgs(tc.RawArgs)
-		line := strings.SplitN(cmd, "\n", 2)[0]
-		if len(line) > maxLen {
-			line = line[:maxLen] + "…"
-		}
-		return "bash: $ " + line
-	}
-	args := tc.RawArgs
-	if len(args) > maxLen {
-		args = args[:maxLen] + "…"
-	}
-	return tc.Name + "(" + args + ")"
 }

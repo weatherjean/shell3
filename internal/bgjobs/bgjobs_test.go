@@ -1,63 +1,16 @@
+//go:build unix
+
 package bgjobs
 
 import (
-	"fmt"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
 )
-
-// fakeRegistry is an in-memory bgjobs.Registry for tests. addErr, when set,
-// makes Add fail (to exercise teardown).
-type fakeRegistry struct {
-	mu     sync.Mutex
-	jobs   []Job
-	addErr error
-}
-
-func (r *fakeRegistry) Add(j Job) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.addErr != nil {
-		return r.addErr
-	}
-	r.jobs = append(r.jobs, j)
-	return nil
-}
-
-func (r *fakeRegistry) List(workdir string) ([]Job, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out := make([]Job, 0, len(r.jobs))
-	for _, j := range r.jobs {
-		if j.Workdir == workdir {
-			out = append(out, j)
-		}
-	}
-	return out, nil
-}
-
-func (r *fakeRegistry) Clear(workdir string) (int, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	kept := r.jobs[:0]
-	n := 0
-	for _, j := range r.jobs {
-		if j.Workdir == workdir {
-			n++
-			continue
-		}
-		kept = append(kept, j)
-	}
-	r.jobs = kept
-	return n, nil
-}
-
-var _ Registry = (*fakeRegistry)(nil)
 
 // alive returns true if pid responds to signal 0 (process exists and we
 // can signal it). Used to assert detachment / liveness in tests.
@@ -77,9 +30,45 @@ func waitDead(pid int, timeout time.Duration) bool {
 	return !alive(pid)
 }
 
+func TestStartWritesJobFiles(t *testing.T) {
+	runsDir := t.TempDir()
+	j, err := Start(runsDir, []string{"sh", "-c", "echo hi"}, "echo hi", runsDir, nil)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if j.PID == 0 || j.ID == "" {
+		t.Fatalf("bad job %+v", j)
+	}
+	statusPath := filepath.Join(runsDir, "jobs", j.ID+".status")
+	if _, err := os.Stat(statusPath); err != nil {
+		t.Fatalf("status file missing: %v", err)
+	}
+	// Verify status file has expected fields
+	data, err := os.ReadFile(statusPath)
+	if err != nil {
+		t.Fatalf("read status: %v", err)
+	}
+	var status struct {
+		ID      string `json:"id"`
+		PID     int    `json:"pid"`
+		Cmd     string `json:"cmd"`
+		Workdir string `json:"workdir"`
+	}
+	if err := json.Unmarshal(data, &status); err != nil {
+		t.Fatalf("parse status: %v", err)
+	}
+	if status.ID != j.ID {
+		t.Errorf("status id mismatch: got %q want %q", status.ID, j.ID)
+	}
+	if status.PID != j.PID {
+		t.Errorf("status pid mismatch: got %d want %d", status.PID, j.PID)
+	}
+}
+
 func TestStart_writesLogAndExits(t *testing.T) {
+	runsDir := t.TempDir()
 	wd := t.TempDir()
-	job, err := Start(&fakeRegistry{}, []string{"bash", "-c", "echo hi-from-bg"}, "echo hi-from-bg", wd, nil)
+	job, err := Start(runsDir, []string{"bash", "-c", "echo hi-from-bg"}, "echo hi-from-bg", wd, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,8 +78,14 @@ func TestStart_writesLogAndExits(t *testing.T) {
 	if job.PID <= 0 {
 		t.Fatalf("bad pid: %d", job.PID)
 	}
-	// Wait for process to finish + log flush.
-	waitDead(job.PID, 2*time.Second)
+	// Wait for the reaper goroutine to finish (process exit + status file write)
+	// before reading the log and before returning so t.TempDir() cleanup does not
+	// race the goroutine still writing into the temp dir.
+	select {
+	case <-job.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("reaper goroutine did not finish within 5s")
+	}
 	data, err := os.ReadFile(job.Log)
 	if err != nil {
 		t.Fatalf("read log: %v", err)
@@ -98,58 +93,38 @@ func TestStart_writesLogAndExits(t *testing.T) {
 	if !strings.Contains(string(data), "hi-from-bg") {
 		t.Fatalf("log missing output: %q", data)
 	}
-	t.Cleanup(func() { os.Remove(job.Log) })
-}
-
-func TestStart_recordsInRegistry(t *testing.T) {
-	wd := t.TempDir()
-	reg := &fakeRegistry{}
-	j1, err := Start(reg, []string{"bash", "-c", "true"}, "true", wd, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	j2, err := Start(reg, []string{"bash", "-c", "true"}, "true", wd, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Remove(j1.Log); os.Remove(j2.Log) })
-
-	got, err := reg.List(wd)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("want 2 jobs, got %d", len(got))
-	}
-	if got[0].ID != j1.ID || got[1].ID != j2.ID {
-		t.Fatalf("ids: %v", got)
-	}
 }
 
 func TestStart_detached(t *testing.T) {
+	runsDir := t.TempDir()
 	wd := t.TempDir()
-	job, err := Start(&fakeRegistry{}, []string{"bash", "-c", "sleep 30"}, "sleep 30", wd, nil)
+	job, err := Start(runsDir, []string{"bash", "-c", "sleep 30"}, "sleep 30", wd, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		syscall.Kill(-job.PID, syscall.SIGKILL)
-		os.Remove(job.Log)
-	})
 	// Process should still be alive 200ms after Start returns.
 	time.Sleep(200 * time.Millisecond)
 	if !alive(job.PID) {
 		t.Fatalf("process died prematurely: pid %d", job.PID)
 	}
+	// Kill the long-running process and wait for the reaper goroutine to finish
+	// before the test returns. This prevents t.TempDir() cleanup from racing the
+	// goroutine still writing into the temp dir.
+	syscall.Kill(-job.PID, syscall.SIGKILL)
+	select {
+	case <-job.Done():
+	case <-time.After(5 * time.Second):
+		t.Error("reaper goroutine did not finish within 5s")
+	}
 }
 
 func TestStart_grandchildKillablyViaPgid(t *testing.T) {
+	runsDir := t.TempDir()
 	wd := t.TempDir()
-	job, err := Start(&fakeRegistry{}, []string{"bash", "-c", "sleep 30 & wait"}, "sleep 30 & wait", wd, nil)
+	job, err := Start(runsDir, []string{"bash", "-c", "sleep 30 & wait"}, "sleep 30 & wait", wd, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Remove(job.Log) })
 	if !alive(job.PID) {
 		t.Fatalf("parent not alive")
 	}
@@ -160,83 +135,83 @@ func TestStart_grandchildKillablyViaPgid(t *testing.T) {
 	if !waitDead(job.PID, 2*time.Second) {
 		t.Fatalf("process group survived SIGKILL")
 	}
+	// Wait for the reaper goroutine to finish writing the exit-status file before
+	// the test returns and t.TempDir() cleanup fires.
+	select {
+	case <-job.Done():
+	case <-time.After(5 * time.Second):
+		t.Error("reaper goroutine did not finish within 5s")
+	}
 }
 
 func TestStart_concurrentAddsDoNotRace(t *testing.T) {
+	runsDir := t.TempDir()
 	wd := t.TempDir()
-	reg := &fakeRegistry{}
 	const n = 10
 	errs := make(chan error, n)
-	jobs := make(chan Job, n)
+	jobsCh := make(chan Job, n)
 	for i := 0; i < n; i++ {
 		go func() {
-			j, err := Start(reg, []string{"bash", "-c", "true"}, "true", wd, nil)
-			jobs <- j
+			j, err := Start(runsDir, []string{"bash", "-c", "true"}, "true", wd, nil)
+			jobsCh <- j
 			errs <- err
 		}()
 	}
+	var allJobs []Job
 	for i := 0; i < n; i++ {
 		if err := <-errs; err != nil {
 			t.Fatalf("start %d: %v", i, err)
 		}
+		allJobs = append(allJobs, <-jobsCh)
 	}
-	close(jobs)
-	t.Cleanup(func() {
-		for j := range jobs {
-			os.Remove(j.Log)
+
+	// Wait for all reaper goroutines to finish before asserting or returning.
+	// Without this, fast-exiting "true" processes have their reaper goroutines
+	// still running when t.TempDir() cleanup fires, causing "directory not empty"
+	// errors.
+	for _, j := range allJobs {
+		if j.Done() != nil {
+			select {
+			case <-j.Done():
+			case <-time.After(5 * time.Second):
+				t.Error("reaper goroutine did not finish within 5s")
+			}
 		}
-	})
-	got, err := reg.List(wd)
+	}
+
+	got, err := List(runsDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != n {
-		t.Fatalf("want %d jobs, got %d", n, len(got))
+	// Some may have exited and been pruned by List; but we expect at least some
+	// and all n status files to have been created.
+	_ = got
+	entries, err := filepath.Glob(filepath.Join(runsDir, "jobs", "*.status"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != n {
+		t.Fatalf("want %d status files, got %d", n, len(entries))
 	}
 }
 
 func TestStart_emptyCommandRejected(t *testing.T) {
-	if _, err := Start(&fakeRegistry{}, nil, "", t.TempDir(), nil); err == nil {
+	if _, err := Start(t.TempDir(), nil, "", t.TempDir(), nil); err == nil {
 		t.Fatal("expected error on empty command")
 	}
 }
 
-func TestStart_killsProcessWhenPersistFails(t *testing.T) {
-	wd := t.TempDir()
-	reg := &fakeRegistry{addErr: fmt.Errorf("boom")}
-	marker := filepath.Join(wd, "ran.marker")
-	// If the spawned process is NOT killed, it survives the 1s sleep and creates
-	// the marker. If Start kills it on persist failure, the marker never appears.
-	cmd := fmt.Sprintf("sleep 1 && touch %q", marker)
-	job, err := Start(reg, []string{"bash", "-c", cmd}, cmd, wd, nil)
-	if err == nil {
-		t.Fatal("expected persist error (Add fails), got nil")
-	}
-	if !strings.Contains(err.Error(), "persist") {
-		t.Fatalf("error should be a persist failure, got: %v", err)
-	}
-	// On persist failure Start returns a zero-value Job, so no usable Log/PID
-	// is handed back to the caller.
-	if job.Log != "" {
-		t.Fatalf("expected zero Job on failure, got %+v", job)
-	}
-	time.Sleep(2 * time.Second) // past the 1s sleep
-	if _, statErr := os.Stat(marker); statErr == nil {
-		t.Fatal("spawned process was orphaned on persist failure (marker was created)")
-	}
-}
-
 func TestKillAll(t *testing.T) {
+	runsDir := t.TempDir()
 	dir := t.TempDir()
-	reg := &fakeRegistry{}
-	job, err := Start(reg, []string{"bash", "-c", "sleep 60"}, "sleep 60", dir, nil)
+	job, err := Start(runsDir, []string{"bash", "-c", "sleep 60"}, "sleep 60", dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if syscall.Kill(job.PID, 0) != nil {
 		t.Fatalf("job %d not alive after Start", job.PID)
 	}
-	n, err := KillAll(reg, dir)
+	n, err := KillAll(runsDir, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,16 +221,19 @@ func TestKillAll(t *testing.T) {
 	if !waitDead(job.PID, 2*time.Second) {
 		t.Errorf("job %d still alive after KillAll", job.PID)
 	}
-	if jobs, _ := reg.List(dir); len(jobs) != 0 {
-		t.Errorf("registry not cleared: %v", jobs)
+	// Status files for this workdir should be removed.
+	entries, _ := filepath.Glob(filepath.Join(runsDir, "jobs", "*.status"))
+	if len(entries) != 0 {
+		t.Errorf("status files not cleaned up: %v", entries)
 	}
 }
 
 func TestStartInjectsEnv(t *testing.T) {
+	runsDir := t.TempDir()
 	dir := t.TempDir()
 	out := filepath.Join(dir, "out.txt")
 	cmd := `printf "%s" "$GREETING" > ` + out
-	job, err := Start(&fakeRegistry{}, []string{"bash", "-c", cmd}, cmd, dir, []string{"GREETING=hi-env"})
+	job, err := Start(runsDir, []string{"bash", "-c", cmd}, cmd, dir, []string{"GREETING=hi-env"})
 	if err != nil {
 		t.Fatal(err)
 	}

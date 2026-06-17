@@ -123,13 +123,13 @@ func TestBuild_Agent_SelectsNamed(t *testing.T) {
 	if cfg.ModeLabel != "second" {
 		t.Errorf("active agent = %q, want %q", cfg.ModeLabel, "second")
 	}
-	// The persona leads with the agent's verbatim prompt; the host appends a
-	// "## Environment" section (history DB path, etc.) after it.
+	// The persona is the agent's verbatim Lua prompt; the host Environment facts
+	// now live in a standing reminder (set by pkg/shell3), NOT the system prompt.
 	if !strings.HasPrefix(cfg.Personality.SystemPrompt, "you are second") {
 		t.Errorf("system prompt = %q, want a prefix of the second agent's prompt", cfg.Personality.SystemPrompt)
 	}
-	if !strings.Contains(cfg.Personality.SystemPrompt, "## Environment") {
-		t.Errorf("system prompt missing Environment section: %q", cfg.Personality.SystemPrompt)
+	if strings.Contains(cfg.Personality.SystemPrompt, "## Environment") {
+		t.Errorf("system prompt should NOT contain Environment section: %q", cfg.Personality.SystemPrompt)
 	}
 }
 
@@ -312,43 +312,35 @@ func TestBuild_AlwaysOpensStore(t *testing.T) {
 	cleanup() // closes store + lua + log; must not panic
 }
 
-// TestBuild_PromptHasEnvironmentSection asserts the host appends an
-// "## Environment" section to every agent's system prompt. The section must
-// carry the project_uuid, the shell3 fts command, the list-projects command,
-// and the canonical history DB path (under ~/.shell3/data/) with its ro-open
-// form.
-func TestBuild_PromptHasEnvironmentSection(t *testing.T) {
-	tmp := t.TempDir()
-	home := t.TempDir()
-	writeMinimalConfig(t, tmp)
-
-	cfg, cleanup, err := buildConfig(agentsetup.Options{
-		ConfigPath: filepath.Join(tmp, "shell3.lua"),
-		CWD:        tmp,
-		HomeDir:    home,
-	}, "")
-	if err != nil {
-		t.Fatalf("Build: %v", err)
+// TestEnvironmentReminder asserts the host Environment standing reminder (no
+// longer part of the system prompt) carries the model, session id, config path,
+// the JSONL runs layout and the ripgrep search recipe — and none of the retired
+// CLIs/UUID — all wrapped in a <system-reminder> envelope.
+func TestEnvironmentReminder(t *testing.T) {
+	rem := agentsetup.EnvironmentReminder("/c/shell3.lua", "/root/.shell3_project/runs", "gpt-x", "sess-42")
+	if !strings.HasPrefix(rem, "<system-reminder>") || !strings.HasSuffix(rem, "</system-reminder>") {
+		t.Fatalf("reminder not wrapped in <system-reminder>:\n%s", rem)
 	}
-	defer cleanup()
-
-	prompt := cfg.Personality.SystemPrompt
-	if !strings.Contains(prompt, "## Environment") {
-		t.Fatalf("prompt missing Environment section:\n%s", prompt)
+	for _, want := range []string{
+		"- model: gpt-x",
+		"- session id: sess-42",
+		"- config: `/c/shell3.lua`",
+		".shell3_project/runs/<id>/messages.jsonl",
+		"rg <terms> .shell3_project/runs",
+		".shell3_project/runs/jobs/",
+	} {
+		if !strings.Contains(rem, want) {
+			t.Errorf("Environment reminder missing %q:\n%s", want, rem)
+		}
 	}
-	// Reading a full past session is via the read-session CLI (no raw SQL).
-	if !strings.Contains(prompt, "shell3 read-session") {
-		t.Errorf("Environment section missing shell3 read-session command:\n%s", prompt)
+	for _, gone := range []string{"shell3 fts", "shell3 list-projects", "shell3 read-session", "project_uuid"} {
+		if strings.Contains(rem, gone) {
+			t.Errorf("Environment reminder still advertises retired %q:\n%s", gone, rem)
+		}
 	}
-	// New interface: shell3 fts and list-projects commands must be advertised.
-	if !strings.Contains(prompt, "shell3 fts") {
-		t.Errorf("Environment section missing shell3 fts command:\n%s", prompt)
-	}
-	if !strings.Contains(prompt, "shell3 list-projects") {
-		t.Errorf("Environment section missing shell3 list-projects command:\n%s", prompt)
-	}
-	if !strings.Contains(prompt, "project_uuid") {
-		t.Errorf("Environment section missing project_uuid:\n%s", prompt)
+	// Empty runs dir → no reminder (never advertise an unusable path).
+	if got := agentsetup.EnvironmentReminder("/c/shell3.lua", "", "gpt-x", "sess-42"); got != "" {
+		t.Errorf("EnvironmentReminder with empty runsDir = %q, want empty", got)
 	}
 }
 

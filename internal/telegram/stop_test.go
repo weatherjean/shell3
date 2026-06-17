@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/pkg/shell3"
+	"github.com/weatherjean/shell3/pkg/shell3/shell3test"
 )
 
 // TestStopCancelsInFlightTurn proves that /stop reaches and cancels a turn that
@@ -16,8 +17,8 @@ import (
 // in-flight turn (turnActive clears) and reply "stopped".
 func TestStopCancelsInFlightTurn(t *testing.T) {
 	fc := newFakeClient()
-	blk := shell3.NewBlockingLLM()
-	rt := shell3.NewRuntimeForTestClient(t, blk)
+	blk := shell3test.NewBlockingLLM()
+	rt := shell3test.NewRuntimeForTestClient(t, blk)
 	sess, err := rt.Session(shell3.SessionOpts{Name: "telegram", Agent: "code"})
 	if err != nil {
 		t.Fatalf("Session: %v", err)

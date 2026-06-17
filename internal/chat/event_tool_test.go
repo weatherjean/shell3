@@ -4,7 +4,7 @@ import "testing"
 
 func TestEmitToolCallAndResult(t *testing.T) {
 	s, c := newCollectorSession(SessionOpts{})
-	s.id = 7
+	s.id = "test-session-7"
 	emitToolCall(s, "call_1", "bash", `{"cmd":"ls"}`)
 	emitToolResult(s, "call_1", "bash", "file1\nfile2\n", false)
 

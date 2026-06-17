@@ -13,7 +13,7 @@ func TestRenderDelegation_NewTemplate(t *testing.T) {
 		Binary:        "shell3",
 		ConfigPath:    "/c/shell3.lua",
 		WorkDir:       "/wd",
-		ParentSession: 42,
+		ParentSession: "42",
 		Subagents:     []subagentItem{{Name: "explore", Description: "search"}},
 	})
 	if !strings.Contains(out, "shell3 run ") {
@@ -33,36 +33,50 @@ func TestRenderDelegation_NewTemplate(t *testing.T) {
 	}
 }
 
+// TestRenderDelegation_InboxAbsolutePaths asserts that when RunsDir is known the
+// spawn command targets ABSOLUTE paths under the parent's runtime root: --out to
+// the parent's agents dir and --inbox to the parent's inbox.jsonl. This is what
+// lets a subagent (which runs from its own cwd) report to the file THIS host
+// watches, rather than to its own incidental project inbox.
+func TestRenderDelegation_InboxAbsolutePaths(t *testing.T) {
+	out := renderDelegation(delegationParams{
+		Binary:        "shell3",
+		ConfigPath:    "/c/shell3.lua",
+		WorkDir:       "/wd",
+		RunsDir:       "/root/.shell3_project/runs",
+		ParentSession: "42",
+		Subagents:     []subagentItem{{Name: "explore", Description: "search"}},
+	})
+	if !strings.Contains(out, "--inbox /root/.shell3_project/inbox.jsonl") {
+		t.Errorf("expected absolute --inbox under parent root:\n%s", out)
+	}
+	if !strings.Contains(out, "--out /root/.shell3_project/agents/<id>.jsonl") {
+		t.Errorf("expected absolute --out under parent agents dir:\n%s", out)
+	}
+}
+
+// TestRenderDelegation_NoInboxWithoutRunsDir asserts the fallback: with no
+// RunsDir the command stays relative and omits --inbox (no regression for
+// callers that cannot resolve a runtime root).
+func TestRenderDelegation_NoInboxWithoutRunsDir(t *testing.T) {
+	out := renderDelegation(delegationParams{
+		Binary:        "shell3",
+		ConfigPath:    "/c/shell3.lua",
+		ParentSession: "42",
+		Subagents:     []subagentItem{{Name: "explore"}},
+	})
+	if strings.Contains(out, "--inbox") {
+		t.Errorf("did not expect --inbox without RunsDir:\n%s", out)
+	}
+	if !strings.Contains(out, "--out .shell3_project/agents/<id>.jsonl") {
+		t.Errorf("expected relative --out fallback:\n%s", out)
+	}
+}
+
 // TestRenderDelegation_EmptyWhenNoSubagents asserts the section is omitted when
 // there is nothing to delegate to.
 func TestRenderDelegation_EmptyWhenNoSubagents(t *testing.T) {
 	if got := renderDelegation(delegationParams{Binary: "shell3"}); got != "" {
 		t.Errorf("renderDelegation with no subagents = %q, want empty", got)
-	}
-}
-
-// TestApplyDelegationContext_Idempotent asserts applyDelegationContext strips a
-// prior Delegation section before re-appending, so repeated application (agent
-// switch / reload / clear) never duplicates it. It drives the strip/replace path
-// directly against a synthesized prompt via stripDelegation.
-func TestApplyDelegationContext_Idempotent(t *testing.T) {
-	base := "you are an agent.\n## Environment\n- history_db: /x"
-	section := renderDelegation(delegationParams{
-		Binary: "shell3", ConfigPath: "/c.lua", ParentSession: 7, WorkDir: "/w",
-		Subagents: []subagentItem{{Name: "explorer", Description: "explore"}},
-	})
-	withOnce := base + section
-	if n := strings.Count(withOnce, delegationMarker); n != 1 {
-		t.Fatalf("expected 1 delegation marker, got %d", n)
-	}
-	// Re-deriving from withOnce (e.g. a reload that carried the appended prompt)
-	// must strip the old section first so a re-append leaves exactly one.
-	stripped := stripDelegation(withOnce)
-	if stripped != base {
-		t.Fatalf("stripDelegation = %q, want %q", stripped, base)
-	}
-	reAppended := stripped + section
-	if n := strings.Count(reAppended, delegationMarker); n != 1 {
-		t.Fatalf("after strip+reapply: %d markers, want 1", n)
 	}
 }

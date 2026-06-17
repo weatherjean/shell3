@@ -81,7 +81,7 @@ func (s *OutSink) WriteChatEvent(ev Event) {
 		"ts":   ev.Time.UTC().Format(time.RFC3339Nano),
 		"kind": ev.Kind.String(),
 	}
-	if ev.SessionID != 0 {
+	if ev.SessionID != "" {
 		rec["session_id"] = ev.SessionID
 	}
 	if ev.Text != "" {

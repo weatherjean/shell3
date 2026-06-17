@@ -2,20 +2,19 @@ package shell3
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
-	"github.com/weatherjean/shell3/internal/store"
+	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// fakeCfgWithStore mirrors fakeCfg but wires a shared on-disk Store so turns
-// persist their message stream. ContextWindow is set because newSession's
+// fakeCfgWithStore mirrors fakeCfg but wires a shared file-native runs Store so
+// turns persist their message stream. ContextWindow is set because newSession's
 // ContextWindowFor closure (and the turn's reminder accounting) reads it.
-func fakeCfgWithStore(st *store.Store, scripts ...fakellm.Script) func() chat.Config {
+func fakeCfgWithStore(st *runs.Store, scripts ...fakellm.Script) func() chat.Config {
 	return func() chat.Config {
 		return chat.Config{
 			LLM:           fakellm.New(scripts...),
@@ -26,6 +25,16 @@ func fakeCfgWithStore(st *store.Store, scripts ...fakellm.Script) func() chat.Co
 	}
 }
 
+// openTestStore opens a fresh file-native runs store rooted in a temp dir.
+func openTestStore(t *testing.T) *runs.Store {
+	t.Helper()
+	st, err := runs.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st
+}
+
 // TestResume_CarriesPriorContext proves end-to-end (via the fakellm harness)
 // that resuming a session by id (SessionOpts.ResumeID) loads the prior
 // conversation and that a second turn accumulates into the SAME session's
@@ -34,14 +43,10 @@ func fakeCfgWithStore(st *store.Store, scripts ...fakellm.Script) func() chat.Co
 // Two runtimes are used deliberately: newTestRuntime's sessionConfig calls
 // mk() per session, and each mk() builds a fresh fakellm with the full script
 // list (consuming script[0] first). Splitting the first run and the resumed
-// run across two runtimes — both sharing the SAME *store.Store — gives each
+// run across two runtimes — both sharing the SAME *runs.Store — gives each
 // turn its own script without script-sharing ambiguity.
 func TestResume_CarriesPriorContext(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
+	st := openTestStore(t)
 
 	// First run: fresh session, one turn.
 	rtA := newTestRuntime(t, fakeCfgWithStore(st, fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "noted"}}}))
@@ -52,12 +57,12 @@ func TestResume_CarriesPriorContext(t *testing.T) {
 	for range sA.Send(context.Background(), "remember the number 42") {
 	}
 	id := sA.sess.ID()
-	if id == 0 {
+	if id == "" {
 		t.Fatal("first session has no store id; persistence cannot be proven")
 	}
 
 	// Sanity: the first turn persisted (>= user + assistant).
-	msgs, err := st.LoadSessionMessages(id)
+	msgs, err := st.LoadMessages(id)
 	if err != nil || len(msgs) < 2 {
 		t.Fatalf("first run didn't persist: len=%d err=%v", len(msgs), err)
 	}
@@ -76,7 +81,7 @@ func TestResume_CarriesPriorContext(t *testing.T) {
 	}
 
 	// Assert carryover: the same id now holds both turns, first user msg intact.
-	final, err := st.LoadSessionMessages(id)
+	final, err := st.LoadMessages(id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,11 +97,7 @@ func TestResume_CarriesPriorContext(t *testing.T) {
 // most recent session sharing the same workdir (the Telegram-restart path) and
 // reports Resumed(), instead of spawning a fresh empty row.
 func TestResumeLatest_ReattachesNewest(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
+	st := openTestStore(t)
 
 	wd := t.TempDir() // the shared "front-end" workdir both boots use
 
@@ -109,7 +110,7 @@ func TestResumeLatest_ReattachesNewest(t *testing.T) {
 	for range sA.Send(context.Background(), "remember 42") {
 	}
 	id := sA.sess.ID()
-	if id == 0 {
+	if id == "" {
 		t.Fatal("first session has no store id")
 	}
 	if _, resumed := sA.Resumed(); resumed {
@@ -123,7 +124,7 @@ func TestResumeLatest_ReattachesNewest(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := sB.sess.ID(); got != id {
-		t.Fatalf("ResumeLatest: attached to session %d, want reattach to %d", got, id)
+		t.Fatalf("ResumeLatest: attached to session %s, want reattach to %s", got, id)
 	}
 	msgs, resumed := sB.Resumed()
 	if !resumed || msgs == 0 {
@@ -134,19 +135,15 @@ func TestResumeLatest_ReattachesNewest(t *testing.T) {
 // TestResumeLatest_NoMatchStartsFresh verifies ResumeLatest falls back to a new
 // session when nothing matches the workdir.
 func TestResumeLatest_NoMatchStartsFresh(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
+	st := openTestStore(t)
 
 	rt := newTestRuntime(t, fakeCfgWithStore(st, fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "hi"}}}))
 	s, err := rt.Session(SessionOpts{Name: "fresh", WorkDir: t.TempDir(), ResumeLatest: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.sess.ID() == 0 {
-		t.Fatal("expected a fresh non-zero session id")
+	if s.sess.ID() == "" {
+		t.Fatal("expected a fresh non-empty session id")
 	}
 	if _, resumed := s.Resumed(); resumed {
 		t.Fatal("no prior session existed, but Resumed() reported true")

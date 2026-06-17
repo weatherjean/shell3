@@ -158,6 +158,7 @@ var toolKeys = map[string]bool{
 
 var agentKeys = map[string]bool{
 	"name": true, "model": true, "prompt": true, "prompt_cmd": true, "tools": true, "skills": true,
+	"environment": true, "delegation": true,
 }
 
 var toolGateKeys = map[string]bool{
@@ -322,6 +323,8 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 			a.Subagents = subagentHandleNames(L, sg, a.Name)
 		}
 	}
+	a.Environment = optBool(opts, "environment")
+	a.Delegation = optBool(opts, "delegation")
 	c.agents = append(c.agents, a)
 	return 0
 }
@@ -329,6 +332,7 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 var subagentKeys = map[string]bool{
 	"name": true, "description": true, "model": true, "prompt": true, "prompt_cmd": true,
 	"tools": true, "skills": true,
+	"environment": true, "delegation": true,
 }
 
 func (c *LoadedConfig) luaSubagent(L *lua.LState) int {
@@ -379,6 +383,8 @@ func (c *LoadedConfig) luaSubagent(L *lua.LState) int {
 			s.SkillsDisabled = true
 		}
 	}
+	s.Environment = optBool(opts, "environment")
+	s.Delegation = optBool(opts, "delegation")
 	c.subagents = append(c.subagents, s)
 	h := L.NewTable()
 	h.RawSetString("__subagent", lua.LString(s.Name))

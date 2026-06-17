@@ -22,7 +22,7 @@ App shell for inline chat-style terminal apps. Built on `patchtui`. Owns the inp
 
 ```go
 app := patchapp.New(modeLabel, statusMsg, patchapp.WelcomeInfo{
-    Persona: "assistant", // + ProjectRef — printed once on start
+    Persona: "assistant", // printed once on start
 })
 
 // Slash commands (auto /help built from the registry).

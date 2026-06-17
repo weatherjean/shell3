@@ -2,7 +2,7 @@
 
 `run_proxy` is a shell command shell3 auto-starts (detached, fire-and-forget)
 the first time an agent uses the model. Use it to bring up a local proxy in
-front of `base_url`. Output goes to `./.shell3/proxy-<model>.log`. If a proxy is
+front of `base_url`. Output goes to `~/.shell3/proxy-<model>.log`. If a proxy is
 already listening, the spawn just fails to bind and the first request decides.
 
 ## Codex subscription via npx

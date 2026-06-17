@@ -5,13 +5,18 @@ import (
 
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/llm"
-	"github.com/weatherjean/shell3/internal/store"
+	"github.com/weatherjean/shell3/internal/runs"
 )
 
 func TestCompactInto_MirrorsCompactedContextToNewSession(t *testing.T) {
-	st, _ := store.Open(":memory:")
-	defer st.Close()
-	id, _ := st.StartSession("", "", "")
+	st, err := runs.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open runs store: %v", err)
+	}
+	id, err := st.NewSession(runs.Meta{})
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
 
 	sess := NewSession(SessionOpts{StoreID: id})
 	sess.messages = []llm.Message{
@@ -24,11 +29,11 @@ func TestCompactInto_MirrorsCompactedContextToNewSession(t *testing.T) {
 		{Role: llm.RoleAssistant, Content: "old 2"},
 	}
 
-	compactInto(CompactSummary{Summary: "did stuff"}, st, sess, allMsgs, applog.Noop{}, "", "", "")
+	compactInto(CompactSummary{Summary: "did stuff"}, st, sess, allMsgs, applog.Noop{}, "", "")
 
 	// New session id is now sess.id; its persisted messages must equal the
 	// compacted in-memory list.
-	got, err := st.LoadSessionMessages(sess.id)
+	got, err := st.LoadMessages(sess.id)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}

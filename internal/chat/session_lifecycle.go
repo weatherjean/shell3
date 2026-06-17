@@ -7,7 +7,8 @@ import (
 )
 
 // Start emits a session_start event with the given metadata. Call this once
-// per session, after Store.StartSession() if a store is used.
+// per session, after the store session is created (runs.Store.NewSession) when
+// a store is used.
 func (s *Session) Start(meta map[string]string) {
 	emitSessionStart(s, meta)
 }
@@ -39,6 +40,13 @@ func (s *Session) SetMessages(msgs []llm.Message) {
 	s.msgMu.Lock()
 	defer s.msgMu.Unlock()
 	s.messages = msgs
+	// Reminder anchors index into the message slice; a /clear or /rollback that
+	// replaces history invalidates them, so drop the log rather than show stale
+	// reminders against the new conversation.
+	s.reminderLog = nil
+	if s.store != nil && s.id != "" {
+		_ = s.store.TruncateReminders(s.id)
+	}
 }
 
 // RunParts executes one user→assistant turn whose user message carries media
@@ -54,10 +62,9 @@ func (s *Session) SetMessages(msgs []llm.Message) {
 // the save. Blocks until the turn completes.
 func (s *Session) RunParts(ctx context.Context, cfg TurnConfig, input string, parts []llm.ContentPart) {
 	emitUserMessage(s, input)
-	from := len(s.messages)
 	persist := func() {
-		if cfg.Store != nil {
-			saveHistory(cfg.Store, LogOrNoop(cfg.Log), s, s.id, from)
+		if cfg.Store != nil && s.id != "" {
+			saveHistory(cfg.Store, LogOrNoop(cfg.Log), s, s.id)
 		}
 	}
 	userMsg := llm.Message{Role: llm.RoleUser, Content: input}

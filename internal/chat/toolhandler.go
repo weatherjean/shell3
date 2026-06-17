@@ -7,7 +7,7 @@ import (
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/persona"
-	"github.com/weatherjean/shell3/internal/store"
+	"github.com/weatherjean/shell3/internal/runs"
 )
 
 // ResolvedTool is a custom-tool call reduced to an executable form: the bash
@@ -57,7 +57,11 @@ func (h funcHandler) Execute(ctx context.Context, id string, args json.RawMessag
 // messages in place rely on this).
 type ToolConfig struct {
 	// Store is the persistence layer for the history tools. May be nil.
-	Store *store.Store
+	Store *runs.Store
+	// RunsDir is the project's .shell3_project/runs directory path, used by
+	// background job tools (bash_bg, background custom tools) to write status
+	// files. Empty disables background jobs.
+	RunsDir string
 	// WorkDir is the working directory tools should resolve paths against.
 	WorkDir string
 	// WrapBash, when non-nil, is the shell3.wrap_bash hook: the bash/bash_bg
@@ -92,14 +96,15 @@ type TurnConfig struct {
 	StatusLine string
 	// WorkDir is the working directory for tool execution.
 	WorkDir string
-	// ProjectRef is the project UUID from .ref, threaded into new store sessions.
-	ProjectRef string
 	// ConfigPath is the resolved shell3.lua path, threaded into new store
 	// sessions (notably the compaction rollover, which starts a session deep in
 	// the turn loop). '' if unknown.
 	ConfigPath string
 	// Store persists newly appended messages when non-nil.
-	Store *store.Store
+	Store *runs.Store
+	// RunsDir is the project's .shell3_project/runs directory path, threaded to
+	// background-job tools. Empty disables background jobs.
+	RunsDir string
 	// Handlers maps tool name to built-in implementation. Built once via
 	// NewHandlers and shared across turns.
 	Handlers map[string]ToolHandler

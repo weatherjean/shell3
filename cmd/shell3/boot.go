@@ -162,7 +162,7 @@ func runBoot(f *bootFlags) error {
 		return fmt.Errorf("boot: read .env: %w", err)
 	}
 	merged := mergeEnv(string(existing), envPairs)
-	if err := atomicWriteFile(envPath, []byte(merged), 0600); err != nil {
+	if err := atomicWriteFile(envPath, []byte(merged), 0o600); err != nil {
 		return fmt.Errorf("boot: write .env: %w", err)
 	}
 

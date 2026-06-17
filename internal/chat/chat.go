@@ -10,7 +10,7 @@ import (
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/persona"
-	"github.com/weatherjean/shell3/internal/store"
+	"github.com/weatherjean/shell3/internal/runs"
 )
 
 // LLMClient is the streaming interface the turn loop calls into. Implementers
@@ -35,7 +35,12 @@ type ActiveAgent struct {
 	// Subagents is the active agent's allowlist of registered subagent names
 	// (its tools.subagents). pkg/shell3 renders it into the per-session
 	// Delegation context (which subagents the agent may spawn via bash_bg).
-	Subagents     []string
+	Subagents []string
+	// Environment/Delegation are the active agent's host-reminder toggles
+	// (luacfg agent.environment / agent.delegation, default off). pkg/shell3
+	// gates the standing Environment / Delegation reminders on them.
+	Environment   bool
+	Delegation    bool
 	LLM           LLMClient
 	Params        llm.RequestParams
 	ModelID       string
@@ -51,7 +56,11 @@ type Config struct {
 	LLM LLMClient
 	// Store persists conversation history. Optional; nil keeps the session
 	// purely in-memory.
-	Store *store.Store
+	Store *runs.Store
+	// RunsDir is the project's .shell3_project/runs directory path, threaded
+	// to the background-job tool (bash_bg and background custom tools) so they
+	// can write job status files. Empty disables background jobs.
+	RunsDir string
 	// Personality is the loaded persona (system prompt, allowed tools).
 	Personality persona.Persona
 	// RefreshPrompt rebuilds the system prompt with current runtime data
@@ -66,10 +75,8 @@ type Config struct {
 	StatusLine string
 	// ModeLabel is a short tag (e.g. "chat", "code") surfaced to renderers.
 	ModeLabel string
-	// ProjectRef is the project UUID from .ref.
-	ProjectRef string
 	// ConfigPath is the resolved absolute shell3.lua path for this session; ''
-	// if unknown. Recorded per session so resume/revive can reload the right
+	// if unknown. Recorded per session so resume can reload the right
 	// config. Agent-independent: set once at assembly, survives agent switches.
 	ConfigPath string
 	// ActiveSkills lists skill names enabled for this persona.
@@ -80,6 +87,12 @@ type Config struct {
 	// pkg/shell3 renders it into the per-session Delegation context (the
 	// subagents this agent may spawn as a backgrounded shell3 via bash_bg).
 	Subagents []string
+	// Environment/Delegation are the active agent's host-reminder toggles,
+	// copied from the active agent by ApplyActiveAgent so they follow agent
+	// switches. pkg/shell3 reads them to gate the standing Environment /
+	// Delegation reminders (default off).
+	Environment bool
+	Delegation  bool
 	// ContextWindow is the active model's context window in tokens, used by
 	// the reminder tracker to emit context-usage warnings. Zero means unknown.
 	ContextWindow int
@@ -144,8 +157,8 @@ func AgentStatusLine(rt ActiveAgent) string {
 // so the agent-derived field copy lives in exactly one place.
 //
 // It deliberately does NOT touch agent-independent fields (Store, WorkDir,
-// ProjectRef, ConfigPath, Docs, AgentNames, SwitchAgent, OutPath, Headless, Log,
-// RefreshPrompt, WrapBash): those are set once at assembly and survive switches.
+// ConfigPath, AgentNames, SwitchAgent, OutPath, Headless, Log, RefreshPrompt,
+// WrapBash): those are set once at assembly and survive switches.
 func (c *Config) ApplyActiveAgent(rt ActiveAgent) {
 	c.LLM = rt.LLM
 	c.Personality = rt.Personality
@@ -154,6 +167,8 @@ func (c *Config) ApplyActiveAgent(rt ActiveAgent) {
 	c.ActiveSkills = rt.ActiveSkills
 	c.ActiveTools = rt.ActiveTools
 	c.Subagents = rt.Subagents
+	c.Environment = rt.Environment
+	c.Delegation = rt.Delegation
 	c.CustomToolNames = rt.CustomToolNames
 	c.ContextWindow = rt.ContextWindow
 	c.CompactAt = rt.CompactAt
@@ -187,9 +202,9 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler, shellInteractive
 		Personality:       cfg.Personality,
 		StatusLine:        cfg.StatusLine,
 		WorkDir:           cfg.WorkDir,
-		ProjectRef:        cfg.ProjectRef,
 		ConfigPath:        cfg.ConfigPath,
 		Store:             cfg.Store,
+		RunsDir:           cfg.RunsDir,
 		Handlers:          handlers,
 		Log:               LogOrNoop(cfg.Log),
 		Headless:          cfg.Headless,
@@ -210,13 +225,13 @@ func OpenSink(path string) (*OutSink, func(), error) {
 		return nil, func() {}, nil
 	}
 	// Create the parent directory: a subagent invocation passes
-	// --out .shell3/agents/<id>.jsonl, whose directory may not exist yet.
+	// --out .shell3_project/agents/<id>.jsonl, whose directory may not exist yet.
 	// Best-effort — a failure here surfaces as the open error below with the
 	// same path context.
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		_ = os.MkdirAll(dir, 0o755)
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		return nil, func() {}, fmt.Errorf("open --out %s: %w", path, err)
 	}

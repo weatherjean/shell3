@@ -59,7 +59,11 @@ func stringList(t *lua.LTable) []string {
 		if v == lua.LNil {
 			break
 		}
-		out = append(out, v.String())
+		// Only accept genuine strings; a non-string element (e.g. a stray number
+		// in a secrets list) is ignored rather than coerced into a garbage value.
+		if s, ok := v.(lua.LString); ok {
+			out = append(out, string(s))
+		}
 	}
 	return out
 }

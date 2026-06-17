@@ -7,39 +7,53 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/weatherjean/shell3/internal/paths"
-	"github.com/weatherjean/shell3/internal/store"
+	"github.com/weatherjean/shell3/internal/runs"
 )
 
+// seedSession creates a session with the given configPath in a runs store rooted at
+// projectRoot and returns the session ID.
+func seedSession(t *testing.T, projectRoot, workdir, configPath string) string {
+	t.Helper()
+	st, err := runs.Open(projectRoot)
+	if err != nil {
+		t.Fatalf("runs.Open: %v", err)
+	}
+	id, err := st.NewSession(runs.Meta{
+		Workdir:    workdir,
+		ConfigPath: configPath,
+	})
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	return id
+}
+
 // TestResolveResumeConfig covers the precedence rules: explicit --config wins,
-// resumeID==0 short-circuits, otherwise the resumed session's recorded
+// resumeID=="" short-circuits, otherwise the resumed session's recorded
 // config_path is used (or "" when none was recorded).
 func TestResolveResumeConfig(t *testing.T) {
-	tmpHome := t.TempDir()
-	dbDir := filepath.Join(tmpHome, ".shell3", "data")
-	if err := os.MkdirAll(dbDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	st, err := store.Open(paths.NewGlobal(tmpHome).DB)
-	if err != nil {
-		t.Fatal(err)
-	}
-	seeded, err := st.StartSession("proj-uuid", "/work/seeded", "/seeded/.shell3/shell3.lua")
-	if err != nil {
-		t.Fatal(err)
-	}
-	noCfg, err := st.StartSession("proj-uuid", "/work/nocfg", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Close(); err != nil {
+	// Use a temp dir as cwd so paths.NewLocal resolves inside it.
+	tmpDir := t.TempDir()
+	projectRoot := filepath.Join(tmpDir, ".shell3_project")
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	t.Setenv("HOME", tmpHome)
+	seededID := seedSession(t, projectRoot, "/work/seeded", "/seeded/.shell3/shell3.lua")
+	noCfgID := seedSession(t, projectRoot, "/work/nocfg", "")
+
+	// Point os.Getwd() to tmpDir by changing working directory.
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
 
 	t.Run("recorded config used", func(t *testing.T) {
-		got, err := resolveResumeConfig(seeded, "")
+		got, err := resolveResumeConfig(seededID, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -49,7 +63,7 @@ func TestResolveResumeConfig(t *testing.T) {
 	})
 
 	t.Run("explicit flag overrides", func(t *testing.T) {
-		got, err := resolveResumeConfig(seeded, "/explicit.lua")
+		got, err := resolveResumeConfig(seededID, "/explicit.lua")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -59,7 +73,7 @@ func TestResolveResumeConfig(t *testing.T) {
 	})
 
 	t.Run("no resume short-circuits", func(t *testing.T) {
-		got, err := resolveResumeConfig(0, "")
+		got, err := resolveResumeConfig("", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -69,7 +83,7 @@ func TestResolveResumeConfig(t *testing.T) {
 	})
 
 	t.Run("no recorded config returns empty", func(t *testing.T) {
-		got, err := resolveResumeConfig(noCfg, "")
+		got, err := resolveResumeConfig(noCfgID, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -77,4 +91,15 @@ func TestResolveResumeConfig(t *testing.T) {
 			t.Errorf("got %q, want empty", got)
 		}
 	})
+
+	t.Run("unknown session id returns empty", func(t *testing.T) {
+		got, err := resolveResumeConfig("20991231T235959.000000000", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != "" {
+			t.Errorf("got %q, want empty for unknown session", got)
+		}
+	})
+
 }

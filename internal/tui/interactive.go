@@ -101,8 +101,7 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 
 	snap := sess.Snapshot()
 	app = patchapp.New(snap.Agent, snap.StatusLine, patchapp.WelcomeInfo{
-		Persona:    snap.Agent,
-		ProjectRef: snap.ProjectRef,
+		Persona: snap.Agent,
 	})
 	if snap.ContextWindow > 0 {
 		app.SetContextWindow(snap.ContextWindow)
@@ -113,7 +112,7 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 	// conversation. len(History()) is the cheap count of messages the resumed
 	// session already loaded — no extra store round-trip. We deliberately do not
 	// re-render the full history here (see resumeBanner).
-	if spec.ResumeID != 0 {
+	if spec.ResumeID != "" {
 		app.PrintLine(patchtui.Dim + resumeBanner(spec.ResumeID, len(sess.History())) + patchtui.Reset)
 	}
 
@@ -277,8 +276,8 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 // the TUI. We deliberately do not re-render the full history (could be huge);
 // the banner plus the always-loaded model context is enough for the user to
 // continue. Tail-rendering the last few turns is a future enhancement.
-func resumeBanner(sessionID int64, numMsgs int) string {
-	return fmt.Sprintf("⟲ resuming conversation %d (%d messages)", sessionID, numMsgs)
+func resumeBanner(sessionID string, numMsgs int) string {
+	return fmt.Sprintf("⟲ resuming conversation %s (%d messages)", sessionID, numMsgs)
 }
 
 // turnGate is the in-process flag that serializes turn launches across the
@@ -849,7 +848,6 @@ func registerSlashCommands(app slashTarget, sess session, lastUsage *usage, appl
 				}
 			}
 			add("agent", snap.Agent)
-			add("project", snap.ProjectRef)
 			if len(snap.Skills) > 0 {
 				lines = append(lines, patchtui.Bold+"skills"+patchtui.Reset)
 				lines = append(lines, "    "+strings.Join(snap.Skills, ", "))

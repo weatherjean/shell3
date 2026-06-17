@@ -3,20 +3,20 @@
 Minimal Unix-composable coding agent written in Go.
 
 **Bash-first.** The agent's verbs are `bash` and `edit_file`; everything else is
-a file it reads or a command it runs (history and background jobs are read-only
-queries via the `shell3 fts`/`list-projects`/`list-sessions`/`jobs` CLIs, a
-subagent is a backgrounded `shell3` subprocess). A subagent reports completion
-to its parent over a per-session **Unix-domain socket** (live parent) or a
-**SQLite inbox + revive** (dormant parent), which the host turns into short
-pointer notifications. The shell is **unsafe by default** — the
-only safety surface is the `shell3.wrap_bash(fn)` Lua hook (allow/block/rewrite;
-no approval flow). Skills are `.md` files the agent reads with `cat` (listed by
-absolute path in the prompt under `## Skills` — there is no `skill` tool), and
-custom tools are declarative bash-command templates
-(`shell3.tool{command=...}`, params injected as lowercase env vars plus a
-`secrets` list; no Lua `handler`) — the `shell3.bash`/`http`/`urlencode` helpers
-are gone. Context is host-managed via a model `compact_at` token threshold
-(auto-compaction), not model-driven prune/compact tools.
+a file it reads or a command it runs (history is searched with `rg` over
+`.shell3_project/runs/**/*.jsonl`; a subagent is a fire-and-forget backgrounded
+`shell3` subprocess). A finishing subagent appends one pointer line to
+`.shell3_project/inbox.jsonl`; the live host tails it (fsnotify, offset-persisted,
+exactly-once) and injects a short pointer notification. Nested subagents use
+plain blocking bash — there is no dormant-parent revive. The shell is
+**unsafe by default** — the only safety surface is the `shell3.wrap_bash(fn)`
+Lua hook (allow/block/rewrite; no approval flow). Skills are `.md` files the
+agent reads with `cat` (listed by absolute path in the prompt under `## Skills`
+— there is no `skill` tool), and custom tools are declarative bash-command
+templates (`shell3.tool{command=...}`, params injected as lowercase env vars
+plus a `secrets` list; no Lua `handler`) — the `shell3.bash`/`http`/`urlencode`
+helpers are gone. Context is host-managed via a model `compact_at` token
+threshold (auto-compaction), not model-driven prune/compact tools.
 
 ## IMPORTANT: Do Not Read Credential Files
 
@@ -35,13 +35,11 @@ internal/bootstrap/    first-run global + project setup
 internal/scaffold/     embedded starter shell3.lua + .env template
 internal/adapter/openai/  OpenAI-compatible LLM adapter
 internal/modelproxy/   run_proxy spawner (starts a model's proxy command on activation)
-internal/paths/        global + local path resolution
-internal/ref/          project UUID (.shell3/.ref)
-internal/store/        SQLite history + sessions (WAL; read-only via the `shell3 fts`/`list-projects`/`list-sessions`/`jobs` CLIs and the `history` skill)
+internal/paths/        global (~/.shell3/) + local (.shell3_project/) path resolution; no DB fields
+internal/runs/         file-native JSONL store: sessions at .shell3_project/runs/<id>/; inbox watcher (fsnotify)
 internal/edittool/     edit_file tool implementation (Go port of opencode's str-replace)
-internal/bgjobs/       background job tracking (jobs table in the canonical SQLite DB; self-pruning on list); reaper reaps the process (no notification)
-internal/notify/       Notification type (bg_done / agent_done pointers) shared by transport + inbox
-internal/socket/       per-session Unix-domain socket (live-parent completion delivery)
+internal/bgjobs/       background job tracking (file-based, fire-and-forget; logs under .shell3_project/runs/jobs/)
+internal/notify/       Notification type (bg_done / agent_done pointers) shared by inbox watcher + chat
 internal/tui/          terminal UI (interactive + headless once)
 internal/patchapp,patchmd,patchtui/  patch-style TUI components
 internal/chat/         conversation loop, tools, events, JSONL audit sink

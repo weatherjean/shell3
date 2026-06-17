@@ -17,8 +17,8 @@ import (
 // pkg/shell3 via spec.OutPath.
 //
 // Completion reporting (a subagent reporting its lifecycle to its parent) is
-// owned by pkg/shell3: Session.report fires during Close over the
-// socket/SQLite-inbox transport.
+// owned by pkg/shell3: Session.report fires during Close, appending one pointer
+// line to the project's .shell3_project/inbox.jsonl that the live host watches.
 func RunOnce(ctx context.Context, spec shell3.Spec) error {
 	events, err := shell3.Run(ctx, spec)
 	if err != nil {

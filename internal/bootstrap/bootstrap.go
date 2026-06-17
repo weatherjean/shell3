@@ -7,17 +7,13 @@ import (
 	"strings"
 
 	"github.com/weatherjean/shell3/internal/paths"
-	"github.com/weatherjean/shell3/internal/ref"
 )
 
-// EnsureGlobal creates ~/.shell3/ (and its data/ dir) and the global
-// .gitignore if missing. It does NOT write any shell3.lua — config is created
-// explicitly via `shell3 boot`.
+// EnsureGlobal creates ~/.shell3/ and the global .gitignore if missing. It does
+// not write any shell3.lua — config is created explicitly via `shell3 boot`.
 func EnsureGlobal(g paths.Global) error {
-	for _, dir := range []string{g.Root, g.Data} {
-		if err := os.MkdirAll(dir, 0700); err != nil {
-			return fmt.Errorf("bootstrap: mkdir %s: %w", dir, err)
-		}
+	if err := os.MkdirAll(g.Root, 0700); err != nil {
+		return fmt.Errorf("bootstrap: mkdir %s: %w", g.Root, err)
 	}
 	if err := ensureGlobalGitignore(g); err != nil {
 		return fmt.Errorf("bootstrap: global gitignore: %w", err)
@@ -25,43 +21,38 @@ func EnsureGlobal(g paths.Global) error {
 	return nil
 }
 
-// EnsureProject creates ./.shell3/ and the .ref file for this project.
-// Returns the project UUID (created on first call). Idempotent.
-func EnsureProject(l paths.Local) (string, error) {
-	if err := os.MkdirAll(l.Root, 0755); err != nil {
-		return "", fmt.Errorf("bootstrap: mkdir %s: %w", l.Root, err)
+// EnsureProject creates .shell3_project/runs/ under cwd and writes a
+// self-ignoring .gitignore ("*") at the root of .shell3_project/ so the whole
+// runtime directory is ignored by any enclosing git repo WITHOUT touching that
+// repo's own .gitignore. Idempotent.
+func EnsureProject(l paths.Local) error {
+	if err := os.MkdirAll(l.Runs, 0755); err != nil {
+		return fmt.Errorf("bootstrap: mkdir %s: %w", l.Runs, err)
 	}
-
-	if err := ensureGitignore(l); err != nil {
-		return "", err
+	if err := ensureSelfGitignore(l.Root); err != nil {
+		return fmt.Errorf("bootstrap: project gitignore: %w", err)
 	}
-
-	id, err := ref.Init(l)
-	if err != nil {
-		return "", fmt.Errorf("bootstrap: ref init: %w", err)
-	}
-	return id, nil
+	return nil
 }
 
-func ensureGitignore(l paths.Local) error {
-	path := filepath.Join(l.Root, ".gitignore")
+// ensureSelfGitignore writes a .gitignore containing "*" at root so the entire
+// .shell3_project/ folder is ignored from within (the original ./.shell3/ '*'
+// pattern). Self-contained: an enclosing repo needs no entry of its own.
+// Idempotent — skips the write when "*" is already present.
+func ensureSelfGitignore(root string) error {
+	path := filepath.Join(root, ".gitignore")
 	b, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("bootstrap: read gitignore: %w", err)
+	if err == nil {
+		if len(missingLines(string(b), "*")) == 0 {
+			return nil
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("bootstrap: read project gitignore: %w", err)
 	}
-
-	// Ignore the entire ./.shell3/ directory. Everything the runtime writes
-	// here is scratch or per-project identity that must never be committed: the
-	// project UUID, per-session sockets, subagent transcripts, and the
-	// last-error dump (which can contain request/response bodies). A lone "*"
-	// matches every entry — including this .gitignore itself — so the folder is
-	// invisible to git in whatever repo shell3 runs in. Matched as a whole line
-	// so a substring (e.g. "*.reference") does not satisfy the sentinel.
-	if len(missingLines(string(b), "*")) == 0 {
-		return nil
+	if err := os.WriteFile(path, []byte("*\n"), 0644); err != nil {
+		return fmt.Errorf("bootstrap: write project gitignore: %w", err)
 	}
-
-	return appendGitignore("", path, string(b), "*\n")
+	return nil
 }
 
 // appendGitignore appends addition to the .gitignore at path, given the file's
@@ -130,5 +121,4 @@ ai-do-not-read.*
 shell3.log
 shell3.log.*
 proxy-*.log
-data/
 `

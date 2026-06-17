@@ -101,8 +101,8 @@ type Event struct {
 	Kind EventKind
 	// Time is when the event was emitted.
 	Time time.Time
-	// SessionID is the store session id (0 if no store is configured).
-	SessionID int64
+	// SessionID is the runs session id ("" if no store is configured).
+	SessionID string
 
 	// Text is the message payload for token, message, reasoning, error,
 	// and system-reminder events.
@@ -217,6 +217,9 @@ func emitAssistantReasoning(s *Session, text string) {
 }
 
 func emitSystemReminder(s *Session, text string) {
+	// Record before emitting so the dashboard's History() can interleave the
+	// reminder as a system-role entry (the live TUI consumes the event instead).
+	s.recordReminder(text)
 	emit(s, Event{Kind: EventSystemReminder, Time: time.Now(), SessionID: s.id, Text: text})
 }
 

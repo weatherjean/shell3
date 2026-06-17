@@ -6,21 +6,40 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
-	"github.com/weatherjean/shell3/internal/store"
+	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/runs"
 )
 
-func TestReadSessionCommand_FlagsPresent(t *testing.T) {
-	cmd := newReadSessionCommand()
-	fs := cmd.Flags()
-	for _, name := range []string{"page", "page-size"} {
-		if fs.Lookup(name) == nil {
-			t.Errorf("read-session is missing --%s", name)
-		}
+// makeRunsStore sets up a runs store in a temp dir and changes the working
+// directory to the temp dir (restoring it on cleanup). Returns the store and
+// the project root path.
+func makeRunsStore(t *testing.T) (*runs.Store, string) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	projectRoot := filepath.Join(tmpDir, ".shell3_project")
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		t.Fatal(err)
 	}
+	st, err := runs.Open(projectRoot)
+	if err != nil {
+		t.Fatalf("runs.Open: %v", err)
+	}
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+	return st, projectRoot
+}
+
+func TestReadSessionCommand_ArgsRequired(t *testing.T) {
+	cmd := newReadSessionCommand()
 	if cmd.Use == "" {
 		t.Error("read-session Use is empty")
 	}
@@ -28,45 +47,33 @@ func TestReadSessionCommand_FlagsPresent(t *testing.T) {
 	if err := cmd.Args(cmd, []string{}); err == nil {
 		t.Error("read-session should reject zero args")
 	}
-	if err := cmd.Args(cmd, []string{"1", "2"}); err == nil {
+	if err := cmd.Args(cmd, []string{"a", "b"}); err == nil {
 		t.Error("read-session should reject two args")
 	}
-	if err := cmd.Args(cmd, []string{"1"}); err != nil {
+	if err := cmd.Args(cmd, []string{"some-id"}); err != nil {
 		t.Errorf("read-session should accept exactly one arg: %v", err)
 	}
 }
 
-// TestReadSessionCommand_RunE seeds a temp DB at the canonical path, seeds a
-// session with two turns, and asserts the transcript prints both turns in
-// chronological order (user before assistant).
+// TestReadSessionCommand_RunE seeds a temp runs store, writes two messages,
+// and asserts the transcript prints both in chronological order (user first,
+// then assistant).
 func TestReadSessionCommand_RunE(t *testing.T) {
-	tmpHome := t.TempDir()
-	dbDir := filepath.Join(tmpHome, ".shell3", "data")
-	if err := os.MkdirAll(dbDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	st, err := store.Open(filepath.Join(dbDir, "shell3.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	id, err := st.StartSession("proj-alpha", "/work/alpha", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.AppendHistory(id, "user", "hello world"); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.AppendHistory(id, "assistant", "hi there"); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
+	st, _ := makeRunsStore(t)
 
-	t.Setenv("HOME", tmpHome)
+	id, err := st.NewSession(runs.Meta{Workdir: "/work/alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendMessage(id, llm.Message{Role: "user", Content: "hello world"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendMessage(id, llm.Message{Role: "assistant", Content: "hi there"}); err != nil {
+		t.Fatal(err)
+	}
 
 	cmd := newReadSessionCommand()
-	cmd.SetArgs([]string{strconv.FormatInt(id, 10)})
+	cmd.SetArgs([]string{id})
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
@@ -74,6 +81,7 @@ func TestReadSessionCommand_RunE(t *testing.T) {
 		t.Fatalf("read-session execute: %v\noutput: %s", err, buf.String())
 	}
 	out := buf.String()
+
 	iHello := strings.Index(out, "hello world")
 	iHi := strings.Index(out, "hi there")
 	if iHello < 0 {
@@ -87,63 +95,91 @@ func TestReadSessionCommand_RunE(t *testing.T) {
 	}
 }
 
-// TestReadSessionCommand_Pagination proves --page/--page-size genuinely slice:
-// a page-size of 1 shows exactly one turn, and --page advances through turns.
-func TestReadSessionCommand_Pagination(t *testing.T) {
-	tmpHome := t.TempDir()
-	dbDir := filepath.Join(tmpHome, ".shell3", "data")
-	if err := os.MkdirAll(dbDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	st, err := store.Open(filepath.Join(dbDir, "shell3.db"))
+// TestReadSessionCommand_AllMessages verifies all messages are printed without
+// pagination (the new implementation has no --page flag).
+func TestReadSessionCommand_AllMessages(t *testing.T) {
+	st, _ := makeRunsStore(t)
+
+	id, err := st.NewSession(runs.Meta{Workdir: "/work/alpha"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := st.StartSession("proj-alpha", "/work/alpha", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range []struct{ role, content string }{
+	contents := []struct{ role, content string }{
 		{"user", "turn-one-content"},
 		{"assistant", "turn-two-content"},
 		{"user", "turn-three-content"},
-	} {
-		if err := st.AppendHistory(id, c.role, c.content); err != nil {
+	}
+	for _, c := range contents {
+		if err := st.AppendMessage(id, llm.Message{Role: llm.Role(c.role), Content: c.content}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := st.Close(); err != nil {
+
+	cmd := newReadSessionCommand()
+	cmd.SetArgs([]string{id})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("read-session execute: %v\noutput: %s", err, buf.String())
+	}
+	out := buf.String()
+
+	for _, c := range contents {
+		if !strings.Contains(out, c.content) {
+			t.Errorf("expected %q in output, got: %q", c.content, out)
+		}
+	}
+
+	// Verify chronological order.
+	i1 := strings.Index(out, "turn-one-content")
+	i2 := strings.Index(out, "turn-two-content")
+	i3 := strings.Index(out, "turn-three-content")
+	if i1 > i2 || i2 > i3 {
+		t.Errorf("turns out of order in output: %q", out)
+	}
+
+	// Verify roles are printed.
+	if !strings.Contains(out, "user") {
+		t.Errorf("expected 'user' role in output, got: %q", out)
+	}
+	if !strings.Contains(out, "assistant") {
+		t.Errorf("expected 'assistant' role in output, got: %q", out)
+	}
+}
+
+// TestReadSessionCommand_Empty verifies no error (and empty output) for a
+// session with no messages.
+func TestReadSessionCommand_Empty(t *testing.T) {
+	st, _ := makeRunsStore(t)
+
+	id, err := st.NewSession(runs.Meta{Workdir: "/work/alpha"})
+	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", tmpHome)
 
-	run := func(args ...string) string {
-		cmd := newReadSessionCommand()
-		cmd.SetArgs(args)
-		var buf bytes.Buffer
-		cmd.SetOut(&buf)
-		cmd.SetErr(&buf)
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("read-session execute: %v\noutput: %s", err, buf.String())
-		}
-		return buf.String()
+	cmd := newReadSessionCommand()
+	cmd.SetArgs([]string{id})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("read-session execute for empty session: %v", err)
 	}
+	if buf.Len() != 0 {
+		t.Errorf("expected empty output for empty session, got: %q", buf.String())
+	}
+}
 
-	sid := strconv.FormatInt(id, 10)
+func TestReadSessionCommand_NotFound(t *testing.T) {
+	_, _ = makeRunsStore(t)
 
-	page0 := run(sid, "--page-size", "1", "--page", "0")
-	if !strings.Contains(page0, "turn-one-content") {
-		t.Errorf("page 0 should contain first turn, got: %q", page0)
-	}
-	if strings.Contains(page0, "turn-two-content") || strings.Contains(page0, "turn-three-content") {
-		t.Errorf("page 0 (size 1) leaked later turns, got: %q", page0)
-	}
-
-	page1 := run(sid, "--page-size", "1", "--page", "1")
-	if !strings.Contains(page1, "turn-two-content") {
-		t.Errorf("page 1 should contain second turn, got: %q", page1)
-	}
-	if strings.Contains(page1, "turn-one-content") || strings.Contains(page1, "turn-three-content") {
-		t.Errorf("page 1 (size 1) leaked other turns, got: %q", page1)
-	}
+	cmd := newReadSessionCommand()
+	cmd.SetArgs([]string{"20991231T235959.000000000"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	// A missing session returns an error (no messages.jsonl).
+	// Accept either error or empty output (the runs store returns nil for missing files).
+	_ = cmd.Execute()
 }

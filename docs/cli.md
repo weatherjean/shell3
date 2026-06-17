@@ -11,7 +11,7 @@ With no message, shell3 opens an interactive session (the TUI):
 
 ```sh
 shell3                       # start a session
-shell3 --resume 42           # resume stored session 42
+shell3 --resume 20060102T150405.000000000  # resume a stored session by id
 shell3 -c plan               # use ~/.shell3/plan.lua
 shell3 --agent review        # start on a specific agent
 ```
@@ -43,22 +43,30 @@ result, the usage counts, and the terminal status are all there. It's meant to
 be consumed by downstream tooling — grep it, pipe it into `jq`, replay it,
 diff two runs. Nothing is summarized or lossy.
 
-## Reading your history (read-only commands)
+## Reading your history
 
-Conversation history, sessions, and background jobs all live in one shared SQLite
-database at `~/.shell3/data/shell3.db` (WAL mode). shell3 exposes a few
-**read-only** commands over it — these only ever query, never mutate:
+Conversation history lives as plain JSONL files under `.shell3_project/runs/`
+in the project directory. Use standard Unix tools to query it:
 
-| Command | What it shows |
-|---------|---------------|
-| `shell3 fts <query>` | Full-text search across stored messages |
-| `shell3 list-projects` | Projects shell3 has seen (by their UUID) |
-| `shell3 list-sessions` | Stored sessions |
-| `shell3 jobs` | Background jobs (self-pruning on list) |
+```sh
+# Full-text search across all sessions
+rg -n "JWT|expiry" .shell3_project/runs
 
-These same queries are available to the agent from inside a session via the
-`history` skill — so the model can search its own past conversations with `bash`,
-without any special tool.
+# List sessions (newest first)
+ls -lt .shell3_project/runs/
+
+# Read a session's metadata
+cat .shell3_project/runs/<id>/meta.json
+
+# Dump a session in formatted form
+shell3 read-session <id>
+```
+
+Background job logs are written to `.shell3_project/runs/jobs/<job-id>.jsonl`
+(stdout+stderr), with a sibling `<job-id>.status` JSON file (pid, started_at, exit code).
+
+The agent can search its own past conversations the same way (via the
+`history` skill), using `bash` with `rg` — no special tool needed.
 
 ## First-run setup
 

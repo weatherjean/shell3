@@ -1,3 +1,5 @@
+//go:build unix
+
 package bgjobs
 
 import (
@@ -10,10 +12,11 @@ import (
 // TestStartExecsArgv proves Start execs the given argv (not a literal bash -c
 // command) and records the display string as Cmd.
 func TestStartExecsArgv(t *testing.T) {
+	runsDir := t.TempDir()
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "marker")
 	argv := []string{"bash", "-c", "echo ok > " + marker}
-	job, err := Start(&fakeRegistry{}, argv, "display-cmd", dir, nil)
+	job, err := Start(runsDir, argv, "display-cmd", dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,9 +26,18 @@ func TestStartExecsArgv(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		if b, err := os.ReadFile(marker); err == nil && len(b) > 0 {
-			return // argv ran
+			break // argv ran — wait for reaper before returning
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatal("argv background job did not run (marker never written)")
+	if b, _ := os.ReadFile(marker); len(b) == 0 {
+		t.Fatal("argv background job did not run (marker never written)")
+	}
+	// Wait for the reaper goroutine to finish writing the status file before the
+	// test returns and t.TempDir() cleanup fires.
+	select {
+	case <-job.Done():
+	case <-time.After(5 * time.Second):
+		t.Error("reaper goroutine did not finish within 5s")
+	}
 }

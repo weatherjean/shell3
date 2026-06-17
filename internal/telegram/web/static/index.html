@@ -91,6 +91,7 @@
     background: var(--sec); border-radius: 12px; padding: 12px 14px; margin: 8px 0;
   }
   .card .row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .card .badge-top { margin-bottom: 6px; }
   .card .agent { font-weight: 700; }
   .card .task { color: var(--text); font-size: 14px; }
   .card .preview { margin-top: 8px; font-family: var(--mono); font-size: 12px; color: var(--hint); white-space: pre-wrap; }
@@ -126,6 +127,11 @@
 
   details.tool.think { background: transparent; border-style: dashed; }
   details.tool.think > summary { color: var(--hint); }
+  /* System reminders: a pill like Thinking but visually distinct — amber dashed
+     border + warm summary, so injected context reads as meta, not message body. */
+  details.tool.reminder { background: transparent; border-style: dashed;
+    border-color: color-mix(in srgb, #f5a623 42%, transparent); }
+  details.tool.reminder > summary { color: color-mix(in srgb, #f5a623 70%, var(--hint)); }
   .tlabel { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--hint);
     padding: 8px 12px 0; font-family: var(--mono); }
   .tlabel + pre { padding-top: 4px; border-top: 0; }
@@ -249,6 +255,50 @@ function toolBlock(name, args, result, key) {
 const snapshotOpen = el => { const s = new Set(); el.querySelectorAll("details[data-k]").forEach(d => { if (d.open) s.add(d.dataset.k); }); return s; };
 const restoreOpen = (el, set) => el.querySelectorAll("details[data-k]").forEach(d => { if (set.has(d.dataset.k)) d.open = true; });
 
+// Pull <system-reminder>…</system-reminder> blocks out of a message's body and
+// render each as its own collapsible pill (like Thinking, but a distinct icon
+// and an amber dashed border) instead of dumping the raw tags into the bubble.
+// Plain text segments around the reminders render as normal bubbles, preserving
+// document order.
+function contentWithReminders(content, role, key) {
+  const re = /<system-reminder>([\s\S]*?)<\/system-reminder>/g;
+  let out = "", last = 0, m, ri = 0;
+  const flushText = (txt) => {
+    const t = txt.trim();
+    if (t) out += `<div class="msg ${role}"><div class="bubble">${esc(t)}</div></div>`;
+  };
+  while ((m = re.exec(content)) !== null) {
+    flushText(content.slice(last, m.index));
+    const inner = m[1].trim();
+    if (inner) out += `<details class="tool reminder" data-k="${key}-rem-${ri++}"><summary><span class="chev">▸</span><span class="tname">📌 System reminder</span></summary><pre>${esc(inner)}</pre></details>`;
+    last = re.lastIndex;
+  }
+  flushText(content.slice(last));
+  return out;
+}
+
+// Render a history array (reasoning + bubbles + tool calls, tool results folded
+// into their call) to HTML. Shared by the live Chat tab and the Runs past-
+// conversation replay so both show the same fidelity, including thinking.
+function historyToHTML(hist) {
+  const results = {};
+  hist.forEach(h => { if (h.role === "tool" && h.tool_call_id) results[h.tool_call_id] = h.content; });
+  return hist.map((h, i) => {
+    if (h.role === "tool") return ""; // folded into the assistant's tool call
+    let html = "";
+    if (h.reasoning) {
+      html += `<details class="tool think" data-k="think-${i}"><summary><span class="chev">▸</span><span class="tname">💭 Thinking</span></summary><pre>${esc(h.reasoning)}</pre></details>`;
+    }
+    const content = (h.content || "").trim();
+    if (content) {
+      const role = h.role === "user" ? "user" : h.role === "assistant" ? "assistant" : "system";
+      html += contentWithReminders(content, role, `m-${i}`);
+    }
+    (h.tool_calls || []).forEach(tc => { html += toolBlock(tc.name, tc.args, results[tc.id], tc.id || `tool-${i}`); });
+    return html;
+  }).join("");
+}
+
 let chatSig = null;
 function renderChat(hist) {
   // Skip DOM work entirely when nothing changed — this is what stops the
@@ -264,27 +314,10 @@ function renderChat(hist) {
 
   if (!hist.length) { views.chat.innerHTML = '<div class="empty">No messages yet.</div>'; return; }
 
-  // Map each tool result to its call id so we can fold it into the call block.
-  const results = {};
-  hist.forEach(h => { if (h.role === "tool" && h.tool_call_id) results[h.tool_call_id] = h.content; });
-
   // Remember which panels are open so streaming a new event never collapses them.
   const open = snapshotOpen(views.chat);
 
-  views.chat.innerHTML = hist.map((h, i) => {
-    if (h.role === "tool") return ""; // folded into the assistant's tool call
-    let html = "";
-    if (h.reasoning) {
-      html += `<details class="tool think" data-k="think-${i}"><summary><span class="chev">▸</span><span class="tname">💭 Thinking</span></summary><pre>${esc(h.reasoning)}</pre></details>`;
-    }
-    const content = (h.content || "").trim();
-    if (content) {
-      const role = h.role === "user" ? "user" : h.role === "assistant" ? "assistant" : "system";
-      html += `<div class="msg ${role}"><div class="bubble">${esc(content)}</div></div>`;
-    }
-    (h.tool_calls || []).forEach(tc => { html += toolBlock(tc.name, tc.args, results[tc.id], tc.id || `tool-${i}`); });
-    return html;
-  }).join("");
+  views.chat.innerHTML = historyToHTML(hist);
 
   restoreOpen(views.chat, open);
   if (pinned) main.scrollTop = main.scrollHeight;
@@ -300,26 +333,34 @@ async function renderRuns(force) {
   if (runSel) return; // a subpage is open — leave it untouched until "back"
   const [subs, sess] = await Promise.all([api("/api/subagents"), api("/api/sessions")]);
   const items = [
-    ...subs.map(s => ({ kind: "sub", id: s.id, title: s.agent || s.id, badge: s.status || "finished",
+    ...subs.map(s => ({ kind: "sub", id: s.id, title: "🤖 " + (s.agent || s.id), badge: s.status || "finished",
                         task: s.task || "(no task)", meta: s.result || s.id, last: s.last_at || s.time || "" })),
-    ...sess.map(s => ({ kind: "sess", id: String(s.id), title: "conversation #" + s.id, badge: s.num_msgs + " msgs",
+    ...sess.map(s => ({ kind: "sess", id: String(s.id), title: "💬 #" + s.id, badge: s.num_msgs + " msgs",
                         task: s.preview || "(no preview)", meta: s.started_at || "", last: s.last_at || "" })),
   ];
   // Sort by last activity (newest response first), not by when each run started.
   // Both sides carry RFC3339 last_at, so a plain string compare orders correctly.
   items.sort((a, b) => (b.last || "").localeCompare(a.last || ""));
+  // The runs list grows without bound; show only the 50 most recent and note
+  // how many older runs are hidden.
+  const total = items.length;
+  if (items.length > 50) items.length = 50;
   // Idle-safe: only rebuild the list when something actually changed.
   const sig = items.map(i => `${i.kind}${i.id}:${i.badge}:${i.last}`).join("|");
   if (!force && sig === runsSig) return;
   runsSig = sig;
   if (!items.length) { views.runs.innerHTML = '<div class="empty">Nothing has run yet.</div>'; return; }
   const badgeClass = b => /running/.test(b) ? "running" : "finished";
+  const more = total > items.length
+    ? `<div class="empty">+ ${total - items.length} older run${total - items.length === 1 ? "" : "s"} not shown</div>`
+    : "";
   views.runs.innerHTML = items.map(i => `
     <div class="card run" data-kind="${i.kind}" data-id="${esc(i.id)}">
-      <div class="row"><span class="agent">${esc(i.title)}</span><span class="badge ${badgeClass(i.badge)}">${esc(i.badge)}</span></div>
+      <div class="badge-top"><span class="badge ${badgeClass(i.badge)}">${esc(i.badge)}</span></div>
+      <div class="row"><span class="agent">${esc(i.title)}</span></div>
       <div class="task">${esc(i.task)}</div>
       ${i.meta ? `<div class="preview">${esc(i.meta)}</div>` : ""}
-    </div>`).join("");
+    </div>`).join("") + more;
   views.runs.querySelectorAll(".run").forEach(c => c.onclick = () => openRun(c.dataset.kind, c.dataset.id));
 }
 
@@ -333,15 +374,11 @@ async function openRun(kind, id) {
     if (kind === "sub") {
       body = renderTranscript(await api("/api/subagent?id=" + encodeURIComponent(id)));
     } else {
+      // Full-fidelity replay: /api/session now returns the stored messages
+      // (tool calls, results, reasoning), rendered identically to live Chat.
       const turns = await api("/api/session?id=" + encodeURIComponent(id));
       body = turns.length
-        ? turns.map(t => {
-            if (t.role === "tool") return `<details class="tool"><summary><span class="chev">▸</span><span class="tname">🔧 ${esc(t.tool_name) || "tool"}</span></summary><pre>${esc(t.content) || "(no output)"}</pre></details>`;
-            // Skip empty/whitespace-only turns (a tool-only turn persists an empty
-            // assistant row) so they don't render as blank bubbles.
-            const c = (t.content || "").trim();
-            return c ? bubble(t.role, c) : "";
-          }).join("")
+        ? historyToHTML(turns)
         : '<div class="empty">empty conversation</div>';
     }
     views.runs.innerHTML = `<button class="back">← all runs</button>${body}`;
@@ -382,7 +419,6 @@ function renderStatus(st) {
       <dt>Agent</dt><dd>${esc(st.agent)}</dd>
       <dt>Model</dt><dd>${esc(st.model)}</dd>
       <dt>Context</dt><dd>${(st.context_window || 0).toLocaleString()} tokens</dd>
-      <dt>Project</dt><dd>${esc(st.project_ref) || "—"}</dd>
     </dl>
     ${usage}
     <div class="section-title">Tools</div><div class="chips">${tools}</div>

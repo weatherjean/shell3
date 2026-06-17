@@ -115,10 +115,11 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 		}
 		s.cfg = cfg
 		s.handlers = chat.NewHandlers()
-		// Re-apply the per-session Delegation context: rt.sessionConfig rebuilt the
-		// prompt from the reloaded config without it. Idempotent (strips any prior
-		// section first), so a following SwitchAgent re-applying it is harmless.
-		s.applyDelegationContext(rt)
+		// Re-apply the per-session host standing reminders: rt.sessionConfig
+		// rebuilt the cfg (including the Environment/Delegation toggles) from the
+		// reloaded config. SetStandingReminders replaces the set wholesale, so a
+		// following SwitchAgent re-applying it is harmless.
+		s.applyHostReminders(rt)
 		// Restore active agent if it still exists, else fall back + note it.
 		if ov.agent != "" && ov.agent != s.ActiveAgent() {
 			if err := s.SwitchAgent(ov.agent); err != nil {

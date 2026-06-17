@@ -1,72 +1,57 @@
 ---
 name: history
-description: Search and read past conversations and list background jobs via the shell3 fts / list-projects / list-sessions / read-session / jobs commands (read-only).
+description: Search and read past conversations and background job logs via the file-native runs store (read-only).
 ---
 
 # History — search and read past conversations
 
-shell3 persists every conversation turn to a single SQLite database, shared
-across ALL projects (namespaced by `project_uuid`). Use the first-class
-commands below.
+shell3 persists every conversation as plain JSONL files under
+`.shell3_project/runs/<session-id>/messages.jsonl`, one JSON object per line.
+Session IDs are sortable timestamp strings (e.g. `20060102T150405.000000000`).
 
 ## Searching history
 
-    shell3 fts "JWT OR expiry" --project-id <project_uuid>   # this project
-    shell3 fts "context window"                              # ALL projects
-    shell3 fts "compact*" --page 1                           # next page
+Use `rg` (ripgrep) to search across all sessions:
 
-Your `project_uuid` is in the `## Environment` section of your system prompt.
-Omit `--project-id` to search across every project in the DB.
-Output columns: session-id, timestamp, role, snippet.
+    rg -n "JWT|expiry" .shell3_project/runs        # OR: alternation, not the word "OR"
+    rg -n "context window" .shell3_project/runs
+    rg -in "compact" .shell3_project/runs          # case-insensitive
 
-FTS5 query tips: space-separated terms are AND by default; use `OR` for broad
-recall; quote a phrase with double-quotes (`"context window"`); a trailing `*`
-is a prefix match (`compact*`). Re-read a hit's full session with
-`shell3 read-session <session-id>`, using its session-id.
-
-## Listing projects
-
-    shell3 list-projects            # distinct projects, newest-active first
-    shell3 list-projects --page 1
-
-Output columns: uuid, workdir, session count, last activity.
+Output shows `<path>:<line>:<json-line>`. Extract the session id from the path
+(the directory component after `runs/`).
 
 ## Listing sessions
 
-    shell3 list-sessions --project-id <project_uuid>   # this project, newest first
-    shell3 list-sessions                               # ALL projects
-    shell3 list-sessions --page 1
+    ls -lt .shell3_project/runs/                   # newest directories first
+    cat .shell3_project/runs/<id>/meta.json        # session metadata (workdir, model, status)
 
-Output columns: session-id, status, parent (subagent's parent, or `-`), message
-count, started, preview of the first user message.
-
-## Background jobs
-
-    shell3 jobs            # tracked background jobs for the current workdir
-    shell3 jobs --page 1
-
-Lists the background jobs (`bash_bg` runs and subagents) tracked for this
-session's workdir. Read-only; dead jobs are auto-pruned on listing.
-
-Output columns: id, pid, log, cmd.
-
-`shell3 jobs` only shows jobs that are still running — a finished job (e.g. a
-short subagent) is pruned and won't appear, so an empty list usually means the
-work already completed, not that it was never tracked. To see subagents that
-have finished, use `shell3 list-sessions`: a delegated subagent is a session
-whose `parent` column points at the session that spawned it.
+The `meta.json` fields: `id`, `workdir`, `config_path`, `model`, `status`
+(`live` or `ended`), `parent_id` (set for subagents), `started_at`, `last_at`,
+`ended_at` (set once the session ends).
 
 ## Reading a full session
 
-To read a past session's full transcript in chronological order (oldest-first):
+    cat .shell3_project/runs/<id>/messages.jsonl \
+      | jq -r '.role + ": " + (.content // "")'
 
-    shell3 read-session <session-id>            # full transcript
-    shell3 read-session <session-id> --page 1   # next page (large sessions)
+Or print raw JSON lines with line numbers:
 
-The session-id comes from `shell3 list-sessions` or an `shell3 fts` hit.
+    cat -n .shell3_project/runs/<id>/messages.jsonl
+
+Use `shell3 read-session <session-id>` for a formatted chronological dump:
+
+    shell3 read-session 20060102T150405.000000000
+
+## Background job logs
+
+Background job logs are written under `.shell3_project/runs/jobs/`:
+
+    ls .shell3_project/runs/jobs/                  # list job files
+    cat .shell3_project/runs/jobs/<job-id>.jsonl   # read a job's output (stdout+stderr)
+    cat .shell3_project/runs/jobs/<job-id>.status  # pid, started_at, exit code
 
 ## Rules
 
-- READ-ONLY, always; the commands are inherently read-only.
-- Pull only what you need (`--page`); sessions can be large.
-- Cite what you find by session id + timestamp so the user can follow up.
+- READ-ONLY always; do not modify any file under `.shell3_project/runs/`.
+- Pull only what you need; sessions can be large — pipe through `head`/`tail`/`jq`.
+- Cite what you find by session id so the user can follow up.

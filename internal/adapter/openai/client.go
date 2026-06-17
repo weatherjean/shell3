@@ -36,16 +36,19 @@ type bodyTap struct {
 }
 
 func (b *bodyTap) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Reset the reasoning tap for this attempt unconditionally — its lifecycle
+	// is per-request and must not leak across requests or retries even on the
+	// (unusual) path where a request carries no body.
+	b.mu.Lock()
+	b.reasoning = ""
+	b.done = make(chan struct{})
+	b.reasoningQueue = nil
 	if req.Body != nil {
 		buf, _ := io.ReadAll(req.Body)
 		req.Body = io.NopCloser(bytes.NewReader(buf))
-		b.mu.Lock()
 		b.reqBody = buf
-		b.reasoning = ""
-		b.done = make(chan struct{})
-		b.reasoningQueue = nil
-		b.mu.Unlock()
 	}
+	b.mu.Unlock()
 	res, err := b.rt.RoundTrip(req)
 	if err != nil || res == nil || res.Body == nil {
 		return res, err
@@ -336,7 +339,7 @@ func wrapStreamErr(err error) error {
 	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
 		return fmt.Errorf("llm: the model stream ended early — the provider closed the connection mid-response. "+
 			"Common causes: out of credits/quota, a rate limit, or an upstream proxy/timeout. "+
-			"Check your provider balance and any .shell3/proxy-*.log: %w", err)
+			"Check your provider balance and any ~/.shell3/proxy-*.log: %w", err)
 	}
 	return fmt.Errorf("llm: stream: %w", err)
 }

@@ -66,9 +66,9 @@ var bashBgTool = llm.ToolDefinition{
 	Description: "Spawn a detached background shell command and immediately return its pid + log path. " +
 		"The process runs in its own process group; shell3 does not wait on it. Use this for long-running " +
 		"servers, watchers, or any command that should not block the turn (e.g. `npx some-server`). " +
-		"Output is captured to a log file under /tmp/shell3/runs/<id>.log. Manage running jobs with the " +
+		"Output is captured to a log file under .shell3_project/runs/jobs/<id>.jsonl. Manage running jobs with the " +
 		"regular `bash` tool: " +
-		"`shell3 jobs` to list, " +
+		"`cat .shell3_project/runs/jobs/*.status` to list, " +
 		"`tail -n 100 <log>` to inspect output, " +
 		"`kill <pid>` or `kill -- -<pid>` (whole group) to stop, " +
 		"`kill -0 <pid>` to check if alive, " +
@@ -127,7 +127,7 @@ var editFileTool = llm.ToolDefinition{
 
 var readMediaTool = llm.ToolDefinition{
 	Name: "read_media",
-	Description: "Load a media file from disk so a vision/audio-capable model can perceive it — images (jpg, png, gif) or audio (wav, mp3). " +
+	Description: "Load a media file from disk so a vision/audio-capable model can perceive it — images (jpg, png, gif, webp) or audio (wav, mp3, ogg/opus). " +
 		"The file is decoded and attached as a user message immediately after the tool results, so it appears in your view on the next step. " +
 		"Requires a model with the matching modality. This tool is for images/audio only — to read text files use `bash` with cat/sed/head.",
 	Parameters: map[string]any{

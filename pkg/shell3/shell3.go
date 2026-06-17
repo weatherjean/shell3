@@ -76,25 +76,29 @@
 // researcher } }.
 //
 // A subagent is not an in-process subsystem: it is a backgrounded shell3
-// subprocess. The Session injects a first-turn "Delegation" system context
-// listing the agent's allowed subagents and the exact bash_bg command to spawn
-// one — `shell3 run --config <cfg> --agent <name> --out
-// .shell3/agents/<id>.jsonl --parent-session <id> --id <id> --prompt "<task>"`.
+// subprocess. When the active agent sets delegation=true, the Session carries a
+// standing "Delegation" system-reminder (injected every turn, not baked into the
+// Lua prompt) listing the agent's allowed subagents and the exact bash_bg command
+// to spawn one — `shell3 run --config <cfg> --agent <name> --out
+// <root>/.shell3_project/agents/<id>.jsonl --inbox <root>/.shell3_project/inbox.jsonl
+// --parent-session <id> --id <id> --prompt "<task>"` (paths are absolute under the
+// parent's runtime root so the child reports where THIS host watches).
 // The child streams its transcript to --out and, on completion, self-reports an
-// agent_done pointer to its --parent-session over the socket/SQLite-inbox
-// transport (internal/notify, internal/socket); the parent's transport listener
-// injects that pointer (transcript path + short preview) into its next turn. The
-// parent cats the transcript for detail. A spawned child may itself delegate —
-// there is no depth gate — and reports up its own parent pointer, so
-// completions cascade toward root. Cancellation falls out of bgjobs.KillAll,
-// since a subagent is just a tracked bg job.
+// agent_done pointer by appending ONE line to the project's
+// .shell3_project/inbox.jsonl (a run with a recorded --parent-session is a
+// subagent). The live host holds a single fsnotify watch on that file
+// (Runtime.injectPointer) and injects the pointer (transcript path + short
+// preview) into its next turn. The host cats the transcript for detail.
+// Background subagents are fire-and-forget; a subagent that itself needs
+// children runs them with plain blocking bash + wait, so there is no dormant
+// parent to wake and no socket/revive machinery. Cancellation falls out of
+// bgjobs.KillAll, since a subagent is just a tracked bg job.
 package shell3
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -103,7 +107,7 @@ import (
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/notify"
-	"github.com/weatherjean/shell3/internal/socket"
+	"github.com/weatherjean/shell3/internal/runs"
 )
 
 // PartKind discriminates a Part's media type.
@@ -145,7 +149,7 @@ type Part struct {
 // Spec configures Run / Start. Prompt is used by Run only.
 type Spec struct {
 	Prompt     string
-	ConfigPath string // "" → ./shell3.lua then ~/.shell3/shell3.lua
+	ConfigPath string // "" → ~/.shell3/shell3.lua
 	WorkDir    string // "" → os.Getwd()
 	Agent      string // "" → first declared agent; unknown name fails Start/Run
 	// Interactive flips the underlying build out of headless mode. The zero
@@ -168,12 +172,17 @@ type Spec struct {
 	// conventionally also the transcript filename stem). Empty leaves the id
 	// blank in the report.
 	ID string
-	// ResumeID, when non-zero, reloads that stored session's messages and
+	// ResumeID, when non-empty, reloads that stored session's messages and
 	// continues its conversation instead of starting fresh.
-	ResumeID int64
-	// ParentSession, when non-zero, is the session id this run reports its
-	// completion to (the spawning agent). Persisted as parent_session_id.
-	ParentSession int64
+	ResumeID string
+	// ParentSession, when non-empty, marks this run as a subagent: on completion
+	// it appends one pointer line to the project inbox for the spawning host to
+	// surface. Recorded as the run's meta.json parent_id.
+	ParentSession string
+	// ReportInbox, when non-empty, is the absolute inbox.jsonl path this run
+	// reports completion to (--inbox) — the parent's inbox. Decouples completion
+	// delivery from the subagent's working directory.
+	ReportInbox string
 }
 
 // ErrBusy reports a call that requires the session to be idle while a turn is
@@ -300,11 +309,23 @@ type Session struct {
 
 	opts SessionOpts // the SessionOpts this session was built from (for reload re-derivation)
 
-	// resumedFrom is the store id this session reattached to on creation (0 when
+	// resumedFrom is the store id this session reattached to on creation ("" when
 	// it started fresh); resumedMsgs is how many messages were reloaded. Both feed
 	// front-end "attached to session #N" status lines. Immutable after newSession.
-	resumedFrom int64
+	resumedFrom string
 	resumedMsgs int
+
+	// parentSession is the spawning session id ("" for a root session). Non-empty
+	// marks this run as a subagent: Close appends a completion pointer to the
+	// project inbox (see report). Immutable after newSession.
+	parentSession string
+
+	// reportInbox is an absolute inbox.jsonl path to report completion to (from
+	// `shell3 run --inbox <path>`). When set, Close appends the pointer there —
+	// the PARENT's inbox — instead of this run's own store inbox, so delivery
+	// does not depend on the subagent sharing a working directory with its
+	// parent. "" → report to the own store inbox. Immutable after newSession.
+	reportInbox string
 
 	// closeOnce makes Close safe under concurrent invocation: a spawned
 	// subagent goroutine calls child.Close() at the same time Runtime.Close may
@@ -325,11 +346,6 @@ type Session struct {
 	// which would race on unsynchronized session state) into ErrBusy instead
 	// of a data race.
 	busy bool
-
-	// listener is the per-session socket transport (see startTransport /
-	// stopTransport). nil when no transport
-	// runs (no store id / workdir / store). Guarded by s.mu.
-	listener *socket.Listener
 
 	// reportID is the caller-chosen id (Spec.ID) stamped into this session's
 	// completion notification reported to its parent during Close (see report).
@@ -352,6 +368,7 @@ func Start(ctx context.Context, spec Spec) (*Session, error) {
 		ShellInteractive: spec.ShellInteractive,
 		ResumeID:         spec.ResumeID,
 		ParentSession:    spec.ParentSession,
+		ReportInbox:      spec.ReportInbox,
 		// OutPath deliberately empty: Start owns the sink so the start line
 		// keeps its prompt-derived label.
 	})
@@ -392,15 +409,15 @@ func (s *Session) writeStartLine(label string) {
 // event and forwards it to the current Send channel inline on the turn
 // goroutine. Split out from Start so tests can inject a fakellm-backed config.
 func newSession(cfg chat.Config, cleanup func(), opts SessionOpts) *Session {
-	var storeID int64
+	var storeID string
 	var seed []llm.Message
-	var resumedFrom int64 // non-zero when this session reattached to an existing row
+	var resumedFrom string // non-empty when this session reattached to an existing run
 	if cfg.Store != nil {
 		// Reattach to the newest matching session when asked (and no explicit
 		// ResumeID is given) so a front-end restart rejoins its conversation
-		// instead of spawning a fresh row each boot.
+		// instead of spawning a fresh run each boot.
 		resumeID := opts.ResumeID
-		if resumeID == 0 && opts.ResumeLatest {
+		if resumeID == "" && opts.ResumeLatest {
 			if id, found, err := cfg.Store.LatestSession(cfg.WorkDir, cfg.ConfigPath); err != nil {
 				chat.LogOrNoop(cfg.Log).Warn("resume-latest lookup failed", "error", err)
 			} else if found {
@@ -408,38 +425,36 @@ func newSession(cfg chat.Config, cleanup func(), opts SessionOpts) *Session {
 			}
 		}
 		switch {
-		case resumeID != 0:
+		case resumeID != "":
 			storeID = resumeID
 			resumedFrom = resumeID
-			if msgs, err := cfg.Store.LoadSessionMessages(resumeID); err == nil {
+			if msgs, err := cfg.Store.LoadMessages(resumeID); err == nil {
 				seed = msgs
 			} else {
 				chat.LogOrNoop(cfg.Log).Warn("resume load failed", "session_id", resumeID, "error", err)
 			}
-			if err := cfg.Store.SetLiveness(resumeID, os.Getpid(), "", "live"); err != nil {
-				chat.LogOrNoop(cfg.Log).Warn("resume liveness failed", "error", err)
-			}
-		case opts.ParentSession != 0:
-			if id, err := cfg.Store.StartSessionWithParent(opts.ParentSession, cfg.ProjectRef, cfg.WorkDir, cfg.ConfigPath); err == nil {
-				storeID = id
-			} else {
-				chat.LogOrNoop(cfg.Log).Warn("start session with parent failed", "error", err)
-			}
 		default:
-			if id, err := cfg.Store.StartSession(cfg.ProjectRef, cfg.WorkDir, cfg.ConfigPath); err == nil {
+			// Fresh run. A non-empty ParentSession marks it a subagent (recorded as
+			// meta.json parent_id); root sessions leave it blank. Best-effort: a
+			// failed NewSession leaves storeID "" (no persistence), logged at Warn so
+			// the silent non-persistence is observable rather than vanishing.
+			if id, err := cfg.Store.NewSession(runs.Meta{
+				Workdir:    cfg.WorkDir,
+				ConfigPath: cfg.ConfigPath,
+				ParentID:   opts.ParentSession,
+			}); err == nil {
 				storeID = id
 			} else {
-				// Best-effort: a failed StartSession leaves storeID 0 (no
-				// persistence). Log it at Warn so the silent non-persistence is
-				// observable rather than vanishing.
 				chat.LogOrNoop(cfg.Log).Warn("start session failed", "error", err)
 			}
 		}
 	}
 	s := &Session{
-		cfg:      cfg,
-		handlers: chat.NewHandlers(),
-		cleanup:  cleanup,
+		cfg:           cfg,
+		handlers:      chat.NewHandlers(),
+		cleanup:       cleanup,
+		parentSession: opts.ParentSession,
+		reportInbox:   opts.ReportInbox,
 		// Default to a no-op so Close is safe even when Start didn't open a
 		// sink (and for tests that build a Session via newSession directly).
 		sinkCleanup: func() {},
@@ -449,7 +464,13 @@ func newSession(cfg chat.Config, cleanup func(), opts SessionOpts) *Session {
 		InitialMessages:  seed,
 		ContextWindowFor: func(string) int { return cfg.ContextWindow },
 		Sink:             s.route,
+		Store:            cfg.Store,
 	})
+	if resumedFrom != "" {
+		if err := s.sess.RestoreReminders(); err != nil {
+			chat.LogOrNoop(cfg.Log).Warn("restore reminders failed", "session_id", resumedFrom, "error", err)
+		}
+	}
 	s.resumedFrom = resumedFrom
 	s.resumedMsgs = len(seed)
 	return s
@@ -717,16 +738,16 @@ func (s *Session) isBusy() bool {
 	return s.busy
 }
 
-// ID returns the store session id (rolls on compaction; "0" with no store).
+// ID returns the store session id (rolls on /clear; "" with no store).
 func (s *Session) ID() string {
-	return fmt.Sprintf("%d", s.sess.ID())
+	return s.sess.ID()
 }
 
 // Resumed reports whether this session reattached to an existing stored session
 // on creation, and how many messages were reloaded. resumed is false for a fresh
 // session. Front-ends use this to show an "attached to session #N" status line.
 func (s *Session) Resumed() (msgs int, resumed bool) {
-	return s.resumedMsgs, s.resumedFrom != 0
+	return s.resumedMsgs, s.resumedFrom != ""
 }
 
 // Name returns the session's registry name (the value carried in
@@ -791,19 +812,16 @@ func (s *Session) doClose() error {
 	if done != nil {
 		<-done // turn goroutine (and its deferred history persist) has finished
 	}
-	// Report this session's completion to its parent (live → socket; dormant →
-	// inbox + revive) while we are still marked live in the registry — stopTransport
-	// below flips us dormant. A no-op for a root session (no parent).
+	// Report this session's completion by appending one pointer line to the
+	// project inbox, which the live host watches. A no-op for a root session (no
+	// parent) and when no store is configured. See report.
 	s.report(notify.Notification{
-		Kind:    notify.KindAgentDone,
-		ID:      s.reportID,
-		Status:  s.completionStatus(),
-		Preview: s.completionPreview(),
+		Kind:       notify.KindAgentDone,
+		ID:         s.reportID,
+		Status:     s.completionStatus(),
+		Preview:    s.completionPreview(),
+		Transcript: s.cfg.OutPath,
 	})
-	// Stop the socket transport (closes the listener, marks the session dormant)
-	// before ending the store/sink: the turn is joined so no bash_bg reaper this
-	// turn spawned is still expected.
-	s.stopTransport()
 
 	s.sess.End("ok")
 	var endErr error
@@ -883,12 +901,6 @@ func truncatePreviewRunes(s string) string {
 	return s[:cut] + "…"
 }
 
-// turnConfig derives the per-turn config from the current cfg. Built fresh each
-// turn so SwitchAgent's mutations to cfg take effect on the next Send.
-//
-// The interactive-shell runner is Spec.ShellInteractive (stored at Start). When
-// nil — the default for a headless embedder — shell_interactive tool calls
-// return an "unavailable" string instead of releasing a TTY.
 // RollbackHint returns a short suggestion to roll back the last turn when err
 // looks like a provider HTTP 400 (Bad Request) — which usually means the last
 // turn left the conversation in a state the model rejects (e.g. a bad tool
@@ -949,6 +961,12 @@ func (s *Session) RegisterHostTool(t HostTool) error {
 	return nil
 }
 
+// turnConfig derives the per-turn config from the current cfg. Built fresh each
+// turn so SwitchAgent's mutations to cfg take effect on the next Send.
+//
+// The interactive-shell runner is Spec.ShellInteractive (stored at Start). When
+// nil — the default for a headless embedder — shell_interactive tool calls
+// return an "unavailable" string instead of releasing a TTY.
 func (s *Session) turnConfig() chat.TurnConfig {
 	shellInteractive := s.shellInteractive
 	if shellInteractive == nil {
@@ -976,26 +994,29 @@ func (s *Session) Clear() error {
 	// at the top of the dashboard's Runs list. Best-effort — a store hiccup logs
 	// and leaves the live id untouched rather than dropping persistence.
 	if s.cfg.Store != nil {
-		if old := s.sess.ID(); old != 0 {
+		if old := s.sess.ID(); old != "" {
 			if err := s.cfg.Store.EndSession(old); err != nil {
 				chat.LogOrNoop(s.cfg.Log).Warn("clear: end session failed", "session_id", old, "error", err)
 			}
 		}
-		if id, err := s.cfg.Store.StartSession(s.cfg.ProjectRef, s.cfg.WorkDir, s.cfg.ConfigPath); err == nil {
+		if id, err := s.cfg.Store.NewSession(runs.Meta{
+			Workdir:    s.cfg.WorkDir,
+			ConfigPath: s.cfg.ConfigPath,
+		}); err == nil {
 			s.sess.SetID(id)
 		} else {
 			chat.LogOrNoop(s.cfg.Log).Warn("clear: start session failed", "error", err)
 		}
 	}
 	if s.cfg.RefreshPrompt != nil {
-		// RefreshPrompt rebuilds from the agent config without the Delegation
-		// section; re-append it (idempotent). Mutate SystemPrompt and snapshot
-		// s.runtime under s.mu (guards the dashboard's Snapshot read).
+		// RefreshPrompt rebuilds the bare Lua system prompt; re-assemble the host
+		// standing reminders for the new session id. Mutate SystemPrompt and
+		// snapshot s.runtime under s.mu (guards the dashboard's Snapshot read).
 		s.mu.Lock()
 		s.cfg.Personality.SystemPrompt = s.cfg.RefreshPrompt()
 		srt := s.runtime
 		s.mu.Unlock()
-		s.applyDelegationContext(srt)
+		s.applyHostReminders(srt)
 	}
 	return nil
 }
@@ -1034,16 +1055,16 @@ func (s *Session) SwitchAgent(name string) error {
 	if err != nil {
 		return err
 	}
-	// ApplyActiveAgent rebuilt the system prompt from the new agent, dropping any
-	// Delegation section and not adding the new agent's. Re-apply it for the new
-	// active agent (whose allowed subagents may differ). Mutate cfg and snapshot
-	// s.runtime under s.mu — guards the dashboard's Snapshot read and avoids
-	// racing a concurrent Close's nil. Between turns by contract.
+	// ApplyActiveAgent swapped in the new agent's prompt + toggles
+	// (Environment/Delegation). Re-assemble the host standing reminders for the
+	// new active agent (whose toggles and allowed subagents may differ). Mutate
+	// cfg and snapshot s.runtime under s.mu — guards the dashboard's Snapshot
+	// read and avoids racing a concurrent Close's nil. Between turns by contract.
 	s.mu.Lock()
 	s.cfg.ApplyActiveAgent(rt)
 	srt := s.runtime
 	s.mu.Unlock()
-	s.applyDelegationContext(srt)
+	s.applyHostReminders(srt)
 	return nil
 }
 
@@ -1083,7 +1104,6 @@ type ParamValue struct {
 type Snapshot struct {
 	Agent         string
 	Model         string
-	ProjectRef    string
 	StatusLine    string
 	ContextWindow int
 	SystemPrompt  string
@@ -1102,12 +1122,19 @@ func (s *Session) Snapshot() Snapshot {
 	// Release before SplitStatus/ParamSpecs so we never hold s.mu across the
 	// provider's ParamSpecs() call.
 	s.mu.Lock()
+	// The displayed prompt is the authored prompt PLUS the host standing
+	// reminders (Environment, Delegation) — they're injected into every turn but
+	// kept out of cfg.Personality.SystemPrompt, so the /prompt view and the
+	// dashboard Status → Prompt surface the full effective context here.
+	systemPrompt := s.cfg.Personality.SystemPrompt
+	if rems := s.sess.StandingReminders(); len(rems) > 0 {
+		systemPrompt += "\n\n## Host reminders (injected each turn — not part of the authored prompt above)\n\n" + strings.Join(rems, "\n\n")
+	}
 	snap := Snapshot{
 		Agent:         s.cfg.ModeLabel,
-		ProjectRef:    s.cfg.ProjectRef,
 		StatusLine:    s.cfg.StatusLine,
 		ContextWindow: s.cfg.ContextWindow,
-		SystemPrompt:  s.cfg.Personality.SystemPrompt,
+		SystemPrompt:  systemPrompt,
 		Skills:        slices.Clone(s.cfg.ActiveSkills),
 		Subagents:     slices.Clone(s.cfg.Subagents),
 	}
@@ -1163,26 +1190,45 @@ type ToolCallInfo struct {
 // chat.Session.Messages (the Telegram dashboard polls it mid-turn).
 func (s *Session) History() []HistoryEntry {
 	msgs := s.sess.Messages()
-	out := make([]HistoryEntry, 0, len(msgs))
-	for _, m := range msgs {
-		content := m.Content
-		if m.Role == llm.RoleTool {
-			content = stripToolIDPrefix(content)
+	rems := s.sess.Reminders()
+	out := make([]HistoryEntry, 0, len(msgs)+len(rems))
+	// Interleave recorded system-reminders ahead of the message index they were
+	// injected before. rems is append-ordered, so Seq is non-decreasing.
+	ri := 0
+	flush := func(upto int) {
+		for ri < len(rems) && rems[ri].Seq <= upto {
+			out = append(out, HistoryEntry{Role: "system", Content: rems[ri].Text})
+			ri++
 		}
-		var calls []ToolCallInfo
-		for _, tc := range m.ToolCalls {
-			calls = append(calls, ToolCallInfo{ID: tc.ID, Name: tc.Name, Args: tc.RawArgs})
-		}
-		out = append(out, HistoryEntry{
-			Role:       string(m.Role),
-			Content:    content,
-			ToolName:   m.Name,
-			ToolCallID: m.ToolCallID,
-			ToolCalls:  calls,
-			Reasoning:  m.ReasoningContent,
-		})
 	}
+	for i, m := range msgs {
+		flush(i)
+		out = append(out, messageToEntry(m))
+	}
+	flush(len(msgs)) // trailing reminders (mid-turn, before the reply lands)
 	return out
+}
+
+// messageToEntry projects one internal message to the public HistoryEntry,
+// stripping the tool-result id prefix and carrying tool calls + reasoning.
+// Shared by History (live) and SessionMessages (stored replay).
+func messageToEntry(m llm.Message) HistoryEntry {
+	content := m.Content
+	if m.Role == llm.RoleTool {
+		content = stripToolIDPrefix(content)
+	}
+	var calls []ToolCallInfo
+	for _, tc := range m.ToolCalls {
+		calls = append(calls, ToolCallInfo{ID: tc.ID, Name: tc.Name, Args: tc.RawArgs})
+	}
+	return HistoryEntry{
+		Role:       string(m.Role),
+		Content:    content,
+		ToolName:   m.Name,
+		ToolCallID: m.ToolCallID,
+		ToolCalls:  calls,
+		Reasoning:  m.ReasoningContent,
+	}
 }
 
 // stripToolIDPrefix removes the "[tool_call_id=…]\n" prefix the turn loop

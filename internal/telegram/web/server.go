@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net/http"
-	"strconv"
-	"time"
 
 	"github.com/weatherjean/shell3/pkg/shell3"
 )
@@ -27,10 +25,10 @@ type CronJob struct {
 
 // Server is the read-only dashboard.
 type Server struct {
-	sess     *shell3.Session
-	rt       *shell3.Runtime // used for subagent transcripts and the stream heartbeat
-	token    string
-	chatID   int64
+	sess      *shell3.Session
+	rt        *shell3.Runtime // used for subagent transcripts and the stream heartbeat
+	token     string
+	chatID    int64
 	usage     *UsageStore                         // nil → no usage shown
 	validate  func(initData string) (int64, bool) // seam for tests
 	cron      func() []CronJob                    // nil → no jobs
@@ -77,7 +75,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/status", s.auth(s.handleStatus))
 	mux.HandleFunc("/api/sessions", s.auth(s.handleSessions))
 	mux.HandleFunc("/api/session", s.auth(s.handleSession))
-	mux.HandleFunc("/api/stream", s.auth(s.handleStream))
 	mux.HandleFunc("/api/cron", s.auth(s.handleCron))
 	mux.HandleFunc("/api/files", s.auth(s.handleFiles))
 	mux.HandleFunc("/api/file", s.auth(s.handleFile))
@@ -135,7 +132,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSubagents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	// List subagent transcripts on disk (.shell3/agents/*.jsonl). handleSubagent
+	// List subagent transcripts on disk (.shell3_project/agents/*.jsonl). handleSubagent
 	// (?id=) returns one transcript's events.
 	subs, err := s.rt.SubagentList()
 	if err != nil {
@@ -152,7 +149,6 @@ type statusResp struct {
 	Agent         string     `json:"agent"`
 	Model         string     `json:"model"`
 	ContextWindow int        `json:"context_window"`
-	ProjectRef    string     `json:"project_ref"`
 	Tools         []string   `json:"tools"`
 	Skills        []string   `json:"skills"`
 	Subagents     []string   `json:"subagents"`
@@ -180,7 +176,6 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Agent:         snap.Agent,
 		Model:         snap.Model,
 		ContextWindow: snap.ContextWindow,
-		ProjectRef:    snap.ProjectRef,
 		Skills:        snap.Skills,
 		Subagents:     snap.Subagents,
 		SystemPrompt:  snap.SystemPrompt,
@@ -229,50 +224,30 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(sess)
 }
 
-// handleSession returns the turns of one past conversation (?id=<n>).
+// handleSession returns one past conversation (?id=<n>) at full fidelity —
+// tool calls, tool results, and reasoning — so the Runs replay matches the live
+// Chat view. Shares the historyEntry shape with handleHistory.
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
-	if err != nil {
+	id := r.URL.Query().Get("id")
+	if id == "" {
 		http.Error(w, "bad id", http.StatusBadRequest)
 		return
 	}
-	turns, err := s.rt.SessionTurns(id)
+	msgs, err := s.rt.SessionMessages(id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	out := make([]historyEntry, 0, len(turns))
-	for _, t := range turns {
-		out = append(out, historyEntry{Role: t.Role, Content: t.Content})
+	out := make([]historyEntry, 0, len(msgs))
+	for _, m := range msgs {
+		e := historyEntry{Role: m.Role, Content: m.Content, ToolName: m.ToolName, ToolCallID: m.ToolCallID, Reasoning: m.Reasoning}
+		for _, c := range m.ToolCalls {
+			e.ToolCalls = append(e.ToolCalls, toolCall{ID: c.ID, Name: c.Name, Args: c.Args})
+		}
+		out = append(out, e)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
-}
-
-// handleStream sends a keep-alive heartbeat only. The bot's consumeWakes is the
-// sole consumer of rt.Events(), so the stream does not fan out those events.
-func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
-	fl, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "stream unsupported", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	t := time.NewTicker(15 * time.Second)
-	defer t.Stop()
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case <-t.C:
-			if _, err := w.Write([]byte(": ping\n\n")); err != nil {
-				return
-			}
-			fl.Flush()
-		}
-	}
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {

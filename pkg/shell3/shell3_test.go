@@ -14,7 +14,7 @@ import (
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
-	"github.com/weatherjean/shell3/internal/store"
+	"github.com/weatherjean/shell3/internal/runs"
 )
 
 func TestTranslate(t *testing.T) {
@@ -91,13 +91,13 @@ func newTestSession(t *testing.T, client chat.LLMClient, cfg chat.Config) *Sessi
 	return newSession(cfg, func() {}, SessionOpts{})
 }
 
-func TestSession_ID_NoStoreReportsZero(t *testing.T) {
+func TestSession_ID_NoStoreReportsEmpty(t *testing.T) {
 	s := newTestSession(t, fakellm.New(), chat.Config{})
 	defer s.Close()
 
-	// newTestSession configures no store, so ID reports the documented "0".
-	if got := s.ID(); got != "0" {
-		t.Fatalf("ID() = %q, want %q (no store)", got, "0")
+	// newTestSession configures no store, so ID reports the documented "".
+	if got := s.ID(); got != "" {
+		t.Fatalf("ID() = %q, want %q (no store)", got, "")
 	}
 }
 
@@ -187,16 +187,18 @@ func TestSession_ErrorPath(t *testing.T) {
 // closed before Close runs, forcing EndSession to fail; embedders' `if err :=
 // sess.Close(); err != nil` must then see a non-nil error.
 func TestSession_Close_ReturnsEndSessionError(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "store.db"))
+	root := t.TempDir()
+	st, err := runs.Open(root)
 	if err != nil {
-		t.Fatalf("store.Open: %v", err)
+		t.Fatalf("runs.Open: %v", err)
 	}
 	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "x"}}})
 	s := newTestSession(t, client, chat.Config{Store: st})
 
-	// Close the store's DB so EndSession fails when Close runs.
-	if err := st.Close(); err != nil {
-		t.Fatalf("store.Close: %v", err)
+	// Delete the run's meta.json so EndSession (which reads meta) fails when Close
+	// runs; embedders' `if err := sess.Close(); err != nil` must then see it.
+	if err := os.RemoveAll(filepath.Join(root, "runs", s.sess.ID())); err != nil {
+		t.Fatalf("remove run dir: %v", err)
 	}
 	if err := s.Close(); err == nil {
 		t.Fatal("Close returned nil; expected the EndSession error to be surfaced")
@@ -247,17 +249,17 @@ func TestSession_Clear_ResetsHistory(t *testing.T) {
 // and opens a fresh one that later turns record under — rather than leaving the
 // same open session lingering at the top of the dashboard's Runs list.
 func TestSession_Clear_RotatesStoreSession(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "store.db"))
+	st, err := runs.Open(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.Open: %v", err)
+		t.Fatalf("runs.Open: %v", err)
 	}
 	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "a"}}})
 	s := newTestSession(t, client, chat.Config{Store: st})
 	defer s.Close()
 
 	old := s.sess.ID()
-	if old == 0 {
-		t.Fatal("expected a non-zero store session id after start")
+	if old == "" {
+		t.Fatal("expected a non-empty store session id after start")
 	}
 	for range s.Send(context.Background(), "first") {
 	}
@@ -266,9 +268,9 @@ func TestSession_Clear_RotatesStoreSession(t *testing.T) {
 		t.Fatalf("Clear: %v", err)
 	}
 
-	// Clear must rotate onto a new, non-zero session id.
-	if got := s.sess.ID(); got == old || got == 0 {
-		t.Fatalf("after Clear: session id = %d, want a fresh non-zero id (old=%d)", got, old)
+	// Clear must rotate onto a new, non-empty session id.
+	if got := s.sess.ID(); got == old || got == "" {
+		t.Fatalf("after Clear: session id = %q, want a fresh non-empty id (old=%q)", got, old)
 	}
 
 	// The old session must be ended and keep its persisted history.
@@ -283,14 +285,14 @@ func TestSession_Clear_RotatesStoreSession(t *testing.T) {
 		}
 		found = true
 		if m.EndedAt.IsZero() {
-			t.Fatalf("old session %d not ended after Clear", old)
+			t.Fatalf("old session %s not ended after Clear", old)
 		}
-		if m.NumMsgs == 0 {
-			t.Fatalf("old session %d lost its history on Clear", old)
+		if msgs, err := st.LoadMessages(old); err != nil || len(msgs) == 0 {
+			t.Fatalf("old session %s lost its history on Clear (len=%d err=%v)", old, len(msgs), err)
 		}
 	}
 	if !found {
-		t.Fatalf("old session %d not listed after Clear", old)
+		t.Fatalf("old session %s not listed after Clear", old)
 	}
 }
 
@@ -589,7 +591,6 @@ func TestSnapshot_PopulatesFromConfig(t *testing.T) {
 	cfg := chat.Config{
 		ModeLabel:     "code",
 		StatusLine:    "openai │ gpt-x │ high",
-		ProjectRef:    "ref-123",
 		ContextWindow: 4096,
 		ActiveSkills:  []string{"a", "b"},
 		Params:        llm.RequestParams{ReasoningEffort: "high", MaxTokens: 512},
@@ -600,7 +601,7 @@ func TestSnapshot_PopulatesFromConfig(t *testing.T) {
 	defer s.Close()
 
 	snap := s.Snapshot()
-	if snap.Agent != "code" || snap.Model != "gpt-x" || snap.ProjectRef != "ref-123" {
+	if snap.Agent != "code" || snap.Model != "gpt-x" {
 		t.Fatalf("snapshot header wrong: %+v", snap)
 	}
 	if snap.StatusLine != "openai │ gpt-x │ high" || snap.ContextWindow != 4096 {

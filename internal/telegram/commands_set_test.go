@@ -10,6 +10,7 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
 	"github.com/weatherjean/shell3/pkg/shell3"
+	"github.com/weatherjean/shell3/pkg/shell3/shell3test"
 )
 
 // paramClient is a fakellm with a tunable parameter surface (ParamDescriber +
@@ -30,7 +31,7 @@ func newParamBot(t *testing.T) (*fakeClient, *Bot) {
 		Client: fakellm.New(),
 		specs:  []llm.ParamSpec{{Name: "reasoning_effort", Enum: []string{"low", "high"}, Default: "low"}},
 	}
-	rt := shell3.NewRuntimeForTestClient(t, client)
+	rt := shell3test.NewRuntimeForTestClient(t, client)
 	sess, err := rt.Session(shell3.SessionOpts{Name: "telegram", Agent: "code"})
 	if err != nil {
 		t.Fatal(err)

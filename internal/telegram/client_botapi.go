@@ -7,12 +7,17 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 )
 
 const maxMediaBytes = 25 * 1024 * 1024 // 25 MB
+
+// mediaHTTPClient bounds attachment downloads. The per-request context still
+// applies; this timeout is the hard ceiling for a single hung connection.
+var mediaHTTPClient = &http.Client{Timeout: 60 * time.Second}
 
 type botAPIClient struct {
 	b   *bot.Bot
@@ -104,7 +109,14 @@ func (c *botAPIClient) downloadFile(ctx context.Context, fileID, mime, filename 
 		return Media{}, false
 	}
 	link := c.b.FileDownloadLink(f)
-	resp, err := http.Get(link) //nolint:noctx // best-effort; ctx applied above
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, link, nil)
+	if err != nil {
+		return Media{}, false
+	}
+	// Bound the body fetch so a hung file-CDN connection can't park this
+	// goroutine (and, since onUpdate downloads media inline, stall the whole
+	// update loop) indefinitely.
+	resp, err := mediaHTTPClient.Do(req)
 	if err != nil {
 		return Media{}, false
 	}
@@ -125,12 +137,27 @@ func (c *botAPIClient) downloadFile(ctx context.Context, fileID, mime, filename 
 // Updates delivers normalized inbound messages until ctx is cancelled.
 func (c *botAPIClient) Updates(ctx context.Context) <-chan Msg { return c.out }
 
-// Send posts a text message. ParseMode is omitted because arbitrary agent output
-// often contains unbalanced Markdown that Telegram would reject.
+// Send posts a plain-text message. ParseMode is omitted; this is the safe
+// fallback path when SendHTML is rejected.
 func (c *botAPIClient) Send(ctx context.Context, chatID int64, text string) (int, error) {
 	m, err := c.b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: chatID,
 		Text:   text,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return m.ID, nil
+}
+
+// SendHTML posts a message with parse_mode=HTML so the agent's formatting
+// (bold, italics, code, links) renders. Telegram rejects malformed HTML with a
+// 400, so callers fall back to Send on error.
+func (c *botAPIClient) SendHTML(ctx context.Context, chatID int64, html string) (int, error) {
+	m, err := c.b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:    chatID,
+		Text:      html,
+		ParseMode: models.ParseModeHTML,
 	})
 	if err != nil {
 		return 0, err

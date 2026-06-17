@@ -8,12 +8,16 @@ import (
 
 	"github.com/weatherjean/shell3/internal/bootstrap"
 	"github.com/weatherjean/shell3/internal/paths"
-	"github.com/weatherjean/shell3/internal/ref"
 )
 
-// TestBootstrap_FullFlow simulates a first-run bootstrap with an isolated
-// tmp home and tmp workdir, then asserts the complete resulting filesystem.
-// No LLM or running services required.
+// TestBootstrap_FullFlow simulates a first-run bootstrap with an isolated tmp
+// home and tmp workdir, then asserts the complete resulting filesystem for the
+// file-native layout. No LLM or running services required.
+//
+// This is the end-to-end pairing of EnsureGlobal + EnsureProject; the
+// individual idempotency/gitignore details are covered by the bootstrap
+// package's own unit tests, so this test focuses on the combined first-run
+// shape and the absence of the old SQLite/.ref artifacts.
 func TestBootstrap_FullFlow(t *testing.T) {
 	home := t.TempDir()
 	cwd := t.TempDir()
@@ -26,19 +30,18 @@ func TestBootstrap_FullFlow(t *testing.T) {
 		t.Fatalf("EnsureGlobal: %v", err)
 	}
 
-	for _, dir := range []string{g.Root, g.Data} {
-		if _, err := os.Stat(dir); err != nil {
-			t.Errorf("global dir missing: %s", dir)
-		}
+	// g.Root must exist; there must be NO data/ dir (no SQLite anymore).
+	if _, err := os.Stat(g.Root); err != nil {
+		t.Errorf("global root missing: %s", g.Root)
+	}
+	if _, err := os.Stat(filepath.Join(g.Root, "data")); !os.IsNotExist(err) {
+		t.Errorf("EnsureGlobal must NOT create data/; stat err = %v", err)
 	}
 
-	// EnsureGlobal no longer auto-writes a starter config; shell3.lua and
+	// EnsureGlobal does not auto-write a starter config; shell3.lua and
 	// .env.example are created explicitly by `shell3 boot`.
 	if _, err := os.Stat(filepath.Join(g.Root, "shell3.lua")); !os.IsNotExist(err) {
 		t.Errorf("EnsureGlobal must not write shell3.lua; stat err = %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(g.Root, ".env.example")); !os.IsNotExist(err) {
-		t.Errorf("EnsureGlobal must not write .env.example; stat err = %v", err)
 	}
 
 	// It must write the global .gitignore protecting credentials and logs.
@@ -50,48 +53,43 @@ func TestBootstrap_FullFlow(t *testing.T) {
 	}
 
 	// ── project bootstrap ─────────────────────────────────────────────────────
-	uuid, err := bootstrap.EnsureProject(l)
-	if err != nil {
+	if err := bootstrap.EnsureProject(l); err != nil {
 		t.Fatalf("EnsureProject: %v", err)
 	}
-	if uuid == "" {
-		t.Fatal("EnsureProject returned empty uuid")
-	}
 
+	// .shell3_project/ and .shell3_project/runs/ must exist.
 	if _, err := os.Stat(l.Root); err != nil {
-		t.Errorf("local .shell3/ missing: %s", l.Root)
+		t.Errorf("local .shell3_project/ missing: %s", l.Root)
+	}
+	if _, err := os.Stat(l.Runs); err != nil {
+		t.Errorf(".shell3_project/runs/ missing: %s", l.Runs)
 	}
 
-	// .ref must exist and round-trip the uuid.
-	loaded, err := ref.Load(l)
-	if err != nil {
-		t.Fatalf("ref.Load: %v", err)
-	}
-	if loaded != uuid {
-		t.Errorf("ref mismatch: got %q want %q", loaded, uuid)
+	// No legacy .ref file, no .shell3/ subdir under the project.
+	if _, err := os.Stat(filepath.Join(cwd, ".shell3")); !os.IsNotExist(err) {
+		t.Errorf("project .shell3/ should not exist; stat err = %v", err)
 	}
 
-	// .gitignore must ignore the whole folder via "*".
+	// .shell3_project/ self-ignores via a "*" .gitignore inside it; the
+	// enclosing repo's own .gitignore is never touched.
 	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
 	if !strings.Contains(string(gi), "*") {
-		t.Error(".gitignore missing \"*\" entry")
+		t.Errorf(".shell3_project/.gitignore missing '*' entry:\n%s", gi)
 	}
-
-	// Canonical data dir lives at <home>/.shell3/data/ (single shared DB location).
-	if _, err := os.Stat(g.Data); err != nil {
-		t.Errorf("canonical data dir missing: %s", g.Data)
+	if _, err := os.Stat(filepath.Join(cwd, ".gitignore")); !os.IsNotExist(err) {
+		t.Errorf("cwd/.gitignore should not be created by EnsureProject; stat err = %v", err)
 	}
 
 	// ── idempotency ───────────────────────────────────────────────────────────
-	uuid2, err := bootstrap.EnsureProject(l)
-	if err != nil {
+	if err := bootstrap.EnsureProject(l); err != nil {
 		t.Fatalf("second EnsureProject: %v", err)
 	}
-	if uuid2 != uuid {
-		t.Errorf("not idempotent: %q vs %q", uuid, uuid2)
-	}
-
 	if err := bootstrap.EnsureGlobal(g); err != nil {
 		t.Fatalf("second EnsureGlobal: %v", err)
+	}
+	// "*" must appear exactly once after the repeat call.
+	gi2, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
+	if n := strings.Count(string(gi2), "*"); n != 1 {
+		t.Errorf("'*' appears %d times in .shell3_project/.gitignore, want 1:\n%s", n, gi2)
 	}
 }

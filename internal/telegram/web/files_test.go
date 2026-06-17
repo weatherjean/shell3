@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/weatherjean/shell3/pkg/shell3"
+	"github.com/weatherjean/shell3/pkg/shell3/shell3test"
 )
 
 // newFilesServer builds a dashboard server rooted at a temp config dir seeded
@@ -29,7 +30,7 @@ func newFilesServer(t *testing.T) (*Server, string, string) {
 	}
 	mustWrite(t, filepath.Join(dir, "skills", "history.md"), "# history skill\n")
 
-	rt := shell3.NewRuntimeForTest(t, "ok")
+	rt := shell3test.NewRuntimeForTest(t, "ok")
 	sess, err := rt.Session(shell3.SessionOpts{Name: "telegram", Agent: "code"})
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +124,7 @@ func TestFiles_TraversalBlocked(t *testing.T) {
 func TestFiles_NoConfigDirEmptyListing(t *testing.T) {
 	const token = "test-bot-token"
 	const chatID int64 = 8701499393
-	rt := shell3.NewRuntimeForTest(t, "ok")
+	rt := shell3test.NewRuntimeForTest(t, "ok")
 	sess, err := rt.Session(shell3.SessionOpts{Name: "telegram", Agent: "code"})
 	if err != nil {
 		t.Fatal(err)

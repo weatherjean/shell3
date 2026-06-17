@@ -18,7 +18,8 @@ import (
 // Makefile derives it from the latest git tag); "dev" for a plain go build.
 var version = "dev"
 
-// life is touching grass
+// main wires the cobra command tree (interactive root + run/boot/telegram/
+// read-session subcommands) and executes it.
 func main() {
 	root := &cobra.Command{
 		Use:     "shell3",
@@ -27,12 +28,12 @@ func main() {
 	}
 
 	var (
-		rootResume     int64
+		rootResume     string
 		rootConfigPath string
 		rootAgent      string
 	)
 	root.Args = cobra.ArbitraryArgs
-	root.Flags().Int64Var(&rootResume, "resume", 0, "Resume a stored session by id in the interactive TUI")
+	root.Flags().StringVar(&rootResume, "resume", "", "Resume a stored session by id in the interactive TUI")
 	root.Flags().StringVarP(&rootConfigPath, "config", "c", "", "Config name (→ ~/.shell3/<name>.lua) or path to a *.lua file (default: ~/.shell3/shell3.lua)")
 	root.Flags().StringVar(&rootAgent, "agent", "", "Select the active agent by name (default: first declared)")
 	root.RunE = func(cmd *cobra.Command, args []string) error {
@@ -52,10 +53,6 @@ func main() {
 	root.AddCommand(newRunCommand())
 	root.AddCommand(newBootCommand())
 	root.AddCommand(newTelegramCommand())
-	root.AddCommand(newFTSCommand())
-	root.AddCommand(newListProjectsCommand())
-	root.AddCommand(newListSessionsCommand())
-	root.AddCommand(newJobsCommand())
 	root.AddCommand(newReadSessionCommand())
 
 	// Print the brand header for subcommands and --help (TTY only). Root chat

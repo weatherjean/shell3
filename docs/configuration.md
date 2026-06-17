@@ -74,7 +74,7 @@ Only set `extra` when you need it — strict endpoints reject unknown fields. Se
 If a model needs a shim in front of its endpoint — say a Codex subscription
 fronted by `npx`, or a litellm gateway — set `run_proxy`. shell3 starts that
 command (detached, fire-and-forget) the first time an agent uses the model, and
-logs go to `./.shell3/proxy-<model>.log`:
+logs go to `~/.shell3/proxy-<model>.log`:
 
 ```lua
 shell3.model("codex", {
