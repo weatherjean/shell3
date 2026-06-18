@@ -22,12 +22,13 @@ var mediaHTTPClient = &http.Client{Timeout: 60 * time.Second}
 type botAPIClient struct {
 	b   *bot.Bot
 	out chan Msg
+	cb  chan Callback
 }
 
 // NewBotAPIClient builds the real Telegram transport. token comes from config
 // (rt.Telegram().Token) — never print it.
 func NewBotAPIClient(ctx context.Context, token string) (*botAPIClient, error) {
-	c := &botAPIClient{out: make(chan Msg, 32)}
+	c := &botAPIClient{out: make(chan Msg, 32), cb: make(chan Callback, 64)}
 	b, err := bot.New(token, bot.WithDefaultHandler(c.onUpdate))
 	if err != nil {
 		return nil, err
@@ -38,6 +39,18 @@ func NewBotAPIClient(ctx context.Context, token string) (*botAPIClient, error) {
 }
 
 func (c *botAPIClient) onUpdate(ctx context.Context, b *bot.Bot, u *models.Update) {
+	// Inline-keyboard button presses (bash_safety approval) arrive as callback
+	// queries, not messages. Route them to the callback channel and stop.
+	if u.CallbackQuery != nil {
+		select {
+		case c.cb <- Callback{ID: u.CallbackQuery.ID, Data: u.CallbackQuery.Data}:
+		default:
+			// Buffer full (64 deep): drop the press. The waiting Ask then resolves
+			// via its bash_safety ask-timeout → deny, which is the fail-safe
+			// direction. A human tap rate filling 64 is not realistic in practice.
+		}
+		return
+	}
 	if u.Message == nil {
 		return
 	}
@@ -163,6 +176,50 @@ func (c *botAPIClient) SendHTML(ctx context.Context, chatID int64, html string) 
 		return 0, err
 	}
 	return m.ID, nil
+}
+
+// Callbacks returns the inline-keyboard button-press channel. The channel lives
+// for the client's lifetime (its source goroutine stops when the ctx passed to
+// NewBotAPIClient is cancelled); the ctx argument here is unused. Consumers stop
+// reading on their own ctx (see consumeCallbacks).
+func (c *botAPIClient) Callbacks(_ context.Context) <-chan Callback { return c.cb }
+
+// SendConfirm posts text with a single row of two inline buttons — "✅ Allow"
+// (yesData) and "🚫 Deny" (noData) — and returns the sent message id. Plain
+// text (no parse mode) so an arbitrary command string can't break formatting.
+func (c *botAPIClient) SendConfirm(ctx context.Context, chatID int64, text, yesData, noData string) (int, error) {
+	m, err := c.b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID: chatID,
+		Text:   text,
+		ReplyMarkup: models.InlineKeyboardMarkup{
+			InlineKeyboard: [][]models.InlineKeyboardButton{{
+				{Text: "✅ Allow", CallbackData: yesData},
+				{Text: "🚫 Deny", CallbackData: noData},
+			}},
+		},
+	})
+	if err != nil {
+		return 0, err
+	}
+	return m.ID, nil
+}
+
+// EditPlain replaces a message's text and removes its inline keyboard (omitting
+// ReplyMarkup on editMessageText clears it), so the confirm buttons disappear.
+func (c *botAPIClient) EditPlain(ctx context.Context, chatID int64, msgID int, text string) error {
+	_, err := c.b.EditMessageText(ctx, &bot.EditMessageTextParams{
+		ChatID:    chatID,
+		MessageID: msgID,
+		Text:      text,
+	})
+	return err
+}
+
+// AnswerCallback acknowledges a callback query so the button stops showing a
+// loading spinner. Best-effort.
+func (c *botAPIClient) AnswerCallback(ctx context.Context, callbackID string) error {
+	_, err := c.b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: callbackID})
+	return err
 }
 
 // Typing shows the "typing…" chat action.

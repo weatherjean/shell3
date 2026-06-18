@@ -26,6 +26,10 @@ type Bot struct {
 	cancelTurn context.CancelFunc // non-nil while a turn runs
 	turnActive bool               // true from turn start until its goroutine ends
 
+	askMu   sync.Mutex           // guards pending + askSeq
+	pending map[string]chan bool // bash_safety Ask id → answer channel
+	askSeq  int                  // monotonic id source for Ask
+
 	// onUsage, if set, receives each completed turn's token totals (per turn,
 	// not accumulated). Wired by the host to a dashboard usage store.
 	onUsage func(prompt, completion, total int)
@@ -60,10 +64,11 @@ func (b *Bot) RedecorateSession() { b.decorateSession() }
 // NewBot wires a Bot. sess must be the runtime's persistent "telegram" session.
 func NewBot(client tgClient, rt *shell3.Runtime, sess *shell3.Session, chatID int64) *Bot {
 	b := &Bot{
-		client: client,
-		rt:     rt,
-		sess:   sess,
-		chatID: chatID,
+		client:  client,
+		rt:      rt,
+		sess:    sess,
+		chatID:  chatID,
+		pending: make(map[string]chan bool),
 	}
 	b.decorateSession()
 	return b
@@ -80,6 +85,7 @@ func (b *Bot) SetRunsDir(dir string) { b.runsDir = dir }
 // Run consumes inbound messages and the wake bus until ctx is cancelled.
 func (b *Bot) Run(ctx context.Context) {
 	go b.consumeWakes(ctx)
+	go b.consumeCallbacks(ctx)
 	for {
 		select {
 		case <-ctx.Done():

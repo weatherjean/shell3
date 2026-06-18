@@ -137,5 +137,8 @@ menu passes Telegram's signed `initData` and authenticates automatically.
 
 The Telegram bot runs model-chosen shell commands on the host, unattended, the
 same as any shell3 session — it is **unsafe by default**. Run it as a dedicated
-user, in a container, or on a throwaway machine, and gate commands with
-`wrap_bash` if you need to. See [security.md](security.md).
+user, in a container, or on a throwaway machine. To put yourself in the loop,
+enable `shell3.bash_safety{allow=, deny=}`: anything not allowlisted prompts you
+with inline **Allow**/**Deny** buttons in the chat before it runs (and falls back
+to deny after `ask_timeout`). Use `wrap_bash` for anything that needs Lua logic.
+See [security.md](security.md).

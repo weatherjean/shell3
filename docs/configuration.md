@@ -160,6 +160,98 @@ ships with.
 > single-user setup; on a multi-user box, treat tool secrets as readable by
 > anything that user can run. More in [security.md](security.md).
 
+## Opt-in command approval — `bash_safety`
+
+`shell3.bash_safety` adds a declarative, glob-based approval gate in front of
+every `bash` and `bash_bg` call. It is **off by default** — shell3 remains
+unsafe if you never call it. Enable it when you want the model's commands to
+pass through an allowlist, or when you want certain commands hard-blocked
+regardless of context.
+
+```lua
+shell3.bash_safety{
+  enabled = true,
+  allow = { "ls*", "cat *", "rg *", "git status*", "git diff*", "go test*" },
+  deny  = { "rm -rf /*", "shutdown*", "mkfs*", "dd *" },
+  ask_timeout = 300, -- seconds to wait for a human before denying (default 300)
+}
+```
+
+### Keys
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `enabled` | bool | Gate is active when `true`. Absent or `false` ⇒ no gating. |
+| `allow` | list of glob strings | Segments that match run without asking. |
+| `deny` | list of glob strings | Segments that match are hard-blocked (never executed). |
+| `ask_timeout` | number (seconds) | How long an ask-verdict waits for a human before falling back to deny. Omitted ⇒ 300s (5 min); `0` ⇒ wait forever. |
+
+A wrong-typed `allow`/`deny` (e.g. `allow = "ls"` instead of a list) is a load
+error, not a silent empty list — a silently empty `allow` would brick the agent.
+
+### How it works
+
+Before any bash command is executed, shell3 splits it on shell operators
+(`&&`, `||`, `|`, `;`, newline, `&`, `$(`, backtick, and the redirection
+operators `>` `>>` `<` `<<` `<<<`) to get individual segments. Each trimmed
+segment is matched against the glob lists using `*` as the only wildcard,
+anchored to the whole segment.
+
+**Decision algorithm** (applied once per command, using all segments):
+
+1. If *any* segment matches a `deny` glob ⇒ **block** (hard deny, no prompt).
+2. Else if *every* segment matches an `allow` glob ⇒ **run**.
+3. Otherwise ⇒ **ask** (request human confirmation).
+
+**Deny wins over allow.** A segment that matches both lists is always blocked.
+
+**Important splitter limitation:** the split is a cheap heuristic scan — it
+does **not** parse shell quotes or escape sequences. A `;` that appears inside a
+quoted string is still treated as a command separator. The splitter catches
+`&`, `$(`, backtick (substitution/background channels) and `>`/`<` redirection
+(so a redirect target lands on its own segment instead of riding inside an
+allowlisted one), but it is NOT exhaustive — anything hidden inside quotes or
+behind indirection like `eval`/`exec` can still defeat `deny`.
+**`deny` is best-effort defense-in-depth**, not a hard block. The **`allow`
+list is the real safety boundary**: allowlists should stay conservative — write
+globs that match your known-safe commands rather than trying to cover every
+possible safe input.
+
+**Glob word-boundary note:** `*` is a greedy substring wildcard with no word
+boundary. For example, `ls*` also matches `lsof` and `lsattr`. If you mean to
+allow only the `ls` command (with arguments), write `ls *` or `ls` rather than
+`ls*`.
+
+### Ask-verdict confirmation and headless degradation
+
+When the verdict is `ask`, a human must confirm. The interactive **TUI presents
+an inline `y/N` prompt** (the terminal is released for a single keypress);
+answering `y` runs the command, anything else blocks it. The **Telegram host
+sends inline `Allow` / `Deny` buttons** to the chat (they vanish once tapped).
+**Headless subagents** — background `shell3` processes spawned via `bash_bg` —
+have no attached human, so **an ask-verdict is automatically treated as deny**;
+the block reason flows back to the parent agent via the completion inbox, so the
+parent can decide how to proceed.
+
+An ask that no one answers does not hang the agent: after `ask_timeout` seconds
+(default 300; `0` = wait forever) the gate gives up and denies. This applies to
+both front-ends — a TUI prompt left untouched and an un-tapped Telegram button
+both resolve to deny once the timeout elapses.
+
+> **You must allowlist the agent's read commands.** The agent reads its skills
+> and inspects files with bash (`cat`, `rg`, `ls`, …). If you enable
+> `bash_safety`, your `allow` list **must** include those reads, or the agent
+> cannot read its own skills or config — and where no prompt is wired
+> (Telegram/headless) it cannot recover. An empty `allow` list bricks the agent.
+
+### Ordering relative to `wrap_bash`
+
+`bash_safety` runs **before** `shell3.wrap_bash`. Only commands that pass the
+safety gate (verdict: run) are handed to `wrap_bash` for any further
+inspection, rewriting, or sandboxing. The two hooks compose: use `bash_safety`
+for glob-based allow/deny policy, and `wrap_bash` for anything that needs Lua
+logic (regex matching, command rewriting, container routing).
+
 ## Gating the shell — `wrap_bash`
 
 shell3 is **unsafe by default**: `bash` and `bash_bg` run with no restrictions.

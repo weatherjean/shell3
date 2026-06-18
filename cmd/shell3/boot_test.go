@@ -209,10 +209,20 @@ func TestBootTelegramEndToEnd(t *testing.T) {
 	}
 
 	dir := filepath.Join(home, ".shell3", "telegram")
-	for _, p := range []string{"shell3.lua", "lib/tools.lua", ".env", "workdir"} {
+	for _, p := range []string{"shell3.lua", "lib/tools.lua", ".env", "workdir", "shell3-telegram.service", "install-systemd.sh"} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
 			t.Errorf("missing %s: %v", p, err)
 		}
+	}
+	if fi, err := os.Stat(filepath.Join(dir, "install-systemd.sh")); err == nil && fi.Mode().Perm() != 0o755 {
+		t.Errorf("install-systemd.sh perms = %v, want 0755", fi.Mode().Perm())
+	}
+	unit, err := os.ReadFile(filepath.Join(dir, "shell3-telegram.service"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(unit), "telegram --config "+filepath.Join(dir, "shell3.lua")) {
+		t.Errorf("unit ExecStart does not point at the config:\n%s", unit)
 	}
 	env, err := os.ReadFile(filepath.Join(dir, ".env"))
 	if err != nil {

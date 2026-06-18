@@ -64,7 +64,17 @@ func newTelegramCommand() *cobra.Command {
 			// The Telegram bot runs one fixed agent (it spawns subagents but does
 			// not switch agents). Agent picks it; "" → first declared. WorkDir
 			// roots its tools, defaulting to the runtime root when unset.
-			sess, err := rt.Session(shell3.SessionOpts{Name: "telegram", Agent: tg.Agent, WorkDir: tg.WorkDir, ResumeLatest: true})
+			//
+			// b is declared before the session so the bash_safety Asker closure can
+			// capture it; it is assigned just below, before any turn runs (and the
+			// Asker only fires mid-turn), mirroring the TUI's app-capture pattern.
+			var b *telegram.Bot
+			sess, err := rt.Session(shell3.SessionOpts{
+				Name: "telegram", Agent: tg.Agent, WorkDir: tg.WorkDir, ResumeLatest: true,
+				Asker: func(ctx context.Context, command, reason string) bool {
+					return b.Ask(ctx, command, reason)
+				},
+			})
 			if err != nil {
 				return err
 			}
@@ -85,7 +95,7 @@ func newTelegramCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			b := telegram.NewBot(client, rt, sess, chatID)
+			b = telegram.NewBot(client, rt, sess, chatID)
 			// Resolve send_media_telegram relative paths against the agent's workdir.
 			workDir := tg.WorkDir
 			if workDir == "" {

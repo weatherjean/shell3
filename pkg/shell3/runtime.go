@@ -73,6 +73,8 @@ type SessionOpts struct {
 	OutPath string
 	// ShellInteractive runs an interactive shell command with TTY access.
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
+	// Asker confirms a bash_safety ask-verdict command with a human (true = allow).
+	Asker func(ctx context.Context, command, reason string) bool
 	// ResumeID reloads a stored session's messages when non-empty.
 	ResumeID string
 	// ResumeLatest reattaches to the newest stored session matching this
@@ -591,6 +593,7 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	}
 	s := newSession(cfg, func() {}, opts) // shared parts are the runtime's to clean
 	s.shellInteractive = opts.ShellInteractive
+	s.asker = opts.Asker
 	s.opts = opts
 	s.runtime, s.name = rt, opts.Name
 	s.sink, s.sinkCleanup = sink, sinkCleanup

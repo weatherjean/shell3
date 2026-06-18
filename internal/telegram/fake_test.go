@@ -5,6 +5,7 @@ package telegram
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 )
 
@@ -12,12 +13,27 @@ var errFakeHTML = errors.New("fake: html rejected")
 
 type fakeClient struct {
 	in       chan Msg
+	cb       chan Callback
 	mu       sync.Mutex
 	sent     []sentMsg
 	html     []string
 	failHTML bool
 	next     int
 	docs     []sentDoc
+	confirms []sentConfirm
+	edits    []sentEdit
+	answered []string
+}
+
+type sentConfirm struct {
+	msgID           int
+	text            string
+	yesData, noData string
+}
+
+type sentEdit struct {
+	msgID int
+	text  string
 }
 
 type sentDoc struct {
@@ -32,9 +48,69 @@ type sentMsg struct {
 	text   string
 }
 
-func newFakeClient() *fakeClient { return &fakeClient{in: make(chan Msg, 16)} }
+func newFakeClient() *fakeClient {
+	return &fakeClient{in: make(chan Msg, 16), cb: make(chan Callback, 8)}
+}
 
 func (f *fakeClient) Updates(ctx context.Context) <-chan Msg { return f.in }
+
+func (f *fakeClient) Callbacks(ctx context.Context) <-chan Callback { return f.cb }
+
+func (f *fakeClient) SendConfirm(ctx context.Context, chatID int64, text, yesData, noData string) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.next++
+	f.confirms = append(f.confirms, sentConfirm{msgID: f.next, text: text, yesData: yesData, noData: noData})
+	return f.next, nil
+}
+
+func (f *fakeClient) EditPlain(ctx context.Context, chatID int64, msgID int, text string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.edits = append(f.edits, sentEdit{msgID: msgID, text: text})
+	return nil
+}
+
+func (f *fakeClient) AnswerCallback(ctx context.Context, callbackID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.answered = append(f.answered, callbackID)
+	return nil
+}
+
+// lastConfirm returns the most recent inline-confirm sent, or ok=false if none.
+func (f *fakeClient) lastConfirm() (sentConfirm, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.confirms) == 0 {
+		return sentConfirm{}, false
+	}
+	return f.confirms[len(f.confirms)-1], true
+}
+
+// confirmMatching returns the most recent inline-confirm whose text contains
+// sub, or ok=false if none. Lets a test pick out one of several pending asks.
+func (f *fakeClient) confirmMatching(sub string) (sentConfirm, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := len(f.confirms) - 1; i >= 0; i-- {
+		if strings.Contains(f.confirms[i].text, sub) {
+			return f.confirms[i], true
+		}
+	}
+	return sentConfirm{}, false
+}
+
+// editTexts returns every edit's text in order.
+func (f *fakeClient) editTexts() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, len(f.edits))
+	for i, e := range f.edits {
+		out[i] = e.text
+	}
+	return out
+}
 
 func (f *fakeClient) SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string) error {
 	f.mu.Lock()

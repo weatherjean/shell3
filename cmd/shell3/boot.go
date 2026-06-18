@@ -146,6 +146,21 @@ func runBoot(f *bootFlags) error {
 		}, f.force); err != nil {
 			return err
 		}
+		bin, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("boot: locate shell3 binary: %w", err)
+		}
+		if resolved, err := filepath.EvalSymlinks(bin); err == nil {
+			bin = resolved
+		}
+		if err := scaffold.RenderTelegramSystemd(dir, scaffold.SystemdValues{
+			ConfigDir:   dir,
+			DefaultBin:  bin,
+			ServiceName: "shell3-telegram",
+			Home:        home,
+		}, f.force); err != nil {
+			return err
+		}
 		envPairs = append(envPairs, [2]string{"TELEGRAM_BOT_TOKEN", token})
 	} else {
 		if err := scaffold.RenderBaseConfig(dir, scaffold.Values{
@@ -286,7 +301,11 @@ func printTelegramBootSuccess(dir, cfgPath, envPath string) {
 	fmt.Println("compact_at, and the bash safety hook. Some models also need a")
 	fmt.Println("provider-specific `extra = { ... }` field (a commented example is there).")
 	fmt.Println()
-	fmt.Println("Run:  shell3 telegram")
+	fmt.Println("Run it now (interactive):  shell3 telegram")
+	fmt.Println()
+	fmt.Println("Run it as a service (auto-restart + survives reboot):")
+	fmt.Printf("    bash %s          # dedicated 'shell3' user (recommended)\n", filepath.Join(dir, "install-systemd.sh"))
+	fmt.Printf("    bash %s --root    # run as root instead\n", filepath.Join(dir, "install-systemd.sh"))
 }
 
 // intValue reads a positive-integer config value: flag wins, else prompt (TTY)

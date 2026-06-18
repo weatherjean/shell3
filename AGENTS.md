@@ -9,8 +9,12 @@ a file it reads or a command it runs (history is searched with `rg` over
 `.shell3_project/inbox.jsonl`; the live host tails it (fsnotify, offset-persisted,
 exactly-once) and injects a short pointer notification. Nested subagents use
 plain blocking bash — there is no dormant-parent revive. The shell is
-**unsafe by default** — the only safety surface is the `shell3.wrap_bash(fn)`
-Lua hook (allow/block/rewrite; no approval flow). Skills are `.md` files the
+**unsafe by default**; two opt-in Lua hooks gate it: `shell3.bash_safety{allow=,
+deny=}` — a declarative glob allow/deny gate with a live human-approval (ask)
+flow for anything unlisted (TUI `y/N` prompt / Telegram inline buttons; headless
+subagents deny on ask, bounded by `ask_timeout`) — and `shell3.wrap_bash(fn)`
+(allow/block/rewrite/route; no prompt). `bash_safety` runs first; only its `run`
+verdict reaches `wrap_bash`. Skills are `.md` files the
 agent reads with `cat` (listed by absolute path in the prompt under `## Skills`
 — there is no `skill` tool), and custom tools are declarative bash-command
 templates (`shell3.tool{command=...}`, params injected as lowercase env vars

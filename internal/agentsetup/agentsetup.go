@@ -327,6 +327,12 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 			return p.lc.WrapBash(ctx, cmd)
 		}
 	}
+	// shell3.bash_safety: an opt-in command-approval policy applied to bash/bash_bg
+	// before execution. Config-global like WrapBash; zero value (disabled) when the
+	// config declares none, so it is always safe to set.
+	if p.lc.HasBashSafety() {
+		cfg.BashSafety = p.lc.BashSafety()
+	}
 	cfg.SwitchAgent = func(name string) (chat.ActiveAgent, error) {
 		// "" means "use the first agent" during initial session selection only
 		// (AgentRuntime's contract). Switching to "" is a caller bug.

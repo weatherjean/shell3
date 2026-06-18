@@ -168,6 +168,10 @@ type Spec struct {
 	// shell_interactive tool returning an "unavailable" string. A TUI supplies
 	// a closure that releases the terminal for the duration of the command.
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
+	// Asker confirms a bash_safety ask-verdict command with a human and returns
+	// true to allow. A front-end supplies it (TUI prompt / Telegram buttons). nil
+	// means no human is attached (headless), so ask degrades to deny.
+	Asker func(ctx context.Context, command, reason string) bool
 	// ID is the caller-chosen id stamped into the agent_done report (--id;
 	// conventionally also the transcript filename stem). Empty leaves the id
 	// blank in the report.
@@ -290,6 +294,10 @@ type Session struct {
 	// TurnConfig (see turnConfig). nil keeps shell_interactive "unavailable".
 	shellInteractive func(ctx context.Context, cmd, workdir string) string
 
+	// asker is Spec.Asker, threaded into every turn's TurnConfig.Asker (see
+	// turnConfig). nil keeps bash_safety ask-verdicts denying.
+	asker func(ctx context.Context, command, reason string) bool
+
 	// sink is the JSONL audit log, opened by Start (Spec.OutPath) or
 	// Runtime.Session (SessionOpts.OutPath) when the path is non-empty.
 	// route writes every internal chat.Event to it (lossless) before
@@ -366,6 +374,7 @@ func Start(ctx context.Context, spec Spec) (*Session, error) {
 		Agent:            spec.Agent,
 		Headless:         !spec.Interactive,
 		ShellInteractive: spec.ShellInteractive,
+		Asker:            spec.Asker,
 		ResumeID:         spec.ResumeID,
 		ParentSession:    spec.ParentSession,
 		ReportInbox:      spec.ReportInbox,
@@ -976,6 +985,7 @@ func (s *Session) turnConfig() chat.TurnConfig {
 	}
 	cfg := s.cfg
 	tc := chat.NewTurnConfig(cfg, s.handlers, shellInteractive)
+	tc.Asker = chat.AskFunc(s.asker)
 	return tc
 }
 

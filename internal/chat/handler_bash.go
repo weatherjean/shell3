@@ -38,6 +38,9 @@ func (BashHandler) Name() string { return "bash" }
 
 func (BashHandler) Execute(ctx context.Context, id string, args json.RawMessage, cfg ToolConfig) (string, error) {
 	command, timeout := parseBashArgsFull(string(args))
+	if msg, blocked := gateCommand(ctx, cfg, command); blocked {
+		return msg, nil
+	}
 	// shell3.wrap_bash: the only bash safety surface. Default argv runs the
 	// command under bash -c; a declared hook may rewrite it, swap the runner
 	// (argv table), or block. A nil hook means no wrapping (the unsafe default).

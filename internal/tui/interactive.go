@@ -90,6 +90,18 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 		})
 		return result
 	}
+	// Asker presents a bash_safety approval prompt and blocks the turn goroutine
+	// on a yes/no answer. Like ShellInteractive, it releases the terminal so the
+	// prompt and the user's keystrokes use the real tty; the UI loop keeps
+	// running on its own goroutine. Returning false (no/EOF) leaves the command
+	// blocked — fail-safe.
+	spec.Asker = func(ctx context.Context, command, _ string) bool {
+		approved := false
+		app.WithReleasedTerminal(func() {
+			approved = confirmPrompt(ctx, os.Stdin, os.Stdout, command)
+		})
+		return approved
+	}
 
 	sess, err := shell3.Start(ctx, spec)
 	if err != nil {

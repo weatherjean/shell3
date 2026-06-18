@@ -22,6 +22,7 @@ func registerShell3(c *LoadedConfig) {
 	L.SetField(env, "secret", L.NewFunction(c.luaSecret))
 	L.SetField(tbl, "env", env)
 	L.SetField(tbl, "wrap_bash", L.NewFunction(c.luaWrapBash))
+	L.SetField(tbl, "bash_safety", L.NewFunction(c.luaBashSafety))
 }
 
 var telegramKeys = map[string]bool{"token": true, "chat_id": true, "agent": true, "workdir": true, "dashboard": true, "cron": true}

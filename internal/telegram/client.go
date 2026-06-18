@@ -25,6 +25,14 @@ type Command struct {
 	Description string
 }
 
+// Callback is an inline-keyboard button press, normalized from a Telegram
+// callback query. ID acknowledges the press (stops the button spinner); Data is
+// the pressed button's callback_data, which routes it to a pending Ask.
+type Callback struct {
+	ID   string
+	Data string
+}
+
 // tgClient is the transport surface the Bot depends on. The real impl wraps
 // github.com/go-telegram/bot; tests inject a fake.
 type tgClient interface {
@@ -40,4 +48,16 @@ type tgClient interface {
 	Typing(ctx context.Context, chatID int64) error
 	// SendDocument uploads a file to the chat with an optional caption.
 	SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string) error
+	// SendConfirm posts text with two inline buttons (Allow/Deny) carrying the
+	// given callback_data, and returns the sent message id so it can be edited
+	// when the choice is made.
+	SendConfirm(ctx context.Context, chatID int64, text, yesData, noData string) (msgID int, err error)
+	// EditPlain replaces a message's text and removes its inline keyboard. Used
+	// to make the confirm buttons disappear once a choice is made.
+	EditPlain(ctx context.Context, chatID int64, msgID int, text string) error
+	// AnswerCallback acknowledges a callback query, stopping the button's spinner.
+	AnswerCallback(ctx context.Context, callbackID string) error
+	// Callbacks returns the inline-keyboard button-press channel, live for the
+	// client's lifetime. Consumers stop reading on their own ctx.
+	Callbacks(ctx context.Context) <-chan Callback
 }

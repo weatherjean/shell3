@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/applog"
+	"github.com/weatherjean/shell3/internal/bashsafety"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/runs"
@@ -135,6 +136,11 @@ type Config struct {
 	// means no hook is declared — commands run verbatim (the unsafe default).
 	// Config-global (one hook for all agents), not swapped on agent switch.
 	WrapBash func(ctx context.Context, cmd string) (argv []string, allowed bool, reason string, err error)
+	// BashSafety is the shell3.bash_safety policy (config-global, like WrapBash).
+	BashSafety bashsafety.Policy
+	// Asker confirms ask-verdict commands with a human; supplied per-front-end.
+	// Nil ⇒ headless: ask degrades to deny.
+	Asker AskFunc
 	// AgentNames lists configured agents in declaration order, for /agent and
 	// Tab cycling. Empty or single-element disables switching.
 	AgentNames []string
@@ -213,6 +219,8 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler, shellInteractive
 		StubTools:         cfg.StubTools,
 		CustomToolNames:   cfg.CustomToolNames,
 		WrapBash:          cfg.WrapBash,
+		BashSafety:        cfg.BashSafety,
+		Asker:             cfg.Asker,
 		CompactAt:         cfg.CompactAt,
 		ShellInteractive:  shellInteractive,
 	}

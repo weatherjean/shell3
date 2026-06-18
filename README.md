@@ -64,9 +64,10 @@ commands. Full walkthrough in [docs/cli.md](docs/cli.md).
   agent and a read-only `plan` agent (or your own) with `Tab` or `/agent`,
   keeping history.
 - **Bash-first, unsafe by default.** The agent acts through `bash` and
-  `edit_file`; everything else is a file it reads or a command it runs.
-  `shell3.wrap_bash(fn)` is the single hook to inspect, rewrite, or block
-  commands.
+  `edit_file`; everything else is a file it reads or a command it runs. Two
+  opt-in hooks gate the shell: `shell3.bash_safety{allow=, deny=}` (a glob
+  allow/deny gate with a live human-approval prompt) and `shell3.wrap_bash(fn)`
+  (inspect, rewrite, or block commands).
 - **Context managed for you.** Set a `compact_at` token threshold and shell3
   auto-compacts the conversation into a summary — no model-driven prune/compact
   tools. History persists as plain JSONL under `.shell3_project/runs/` and is
@@ -96,7 +97,7 @@ App) shows sessions, usage, and jobs. See [docs/telegram.md](docs/telegram.md).
 ## Documentation
 
 - **[Configuration](docs/configuration.md)** — models, agents, custom tools,
-  `wrap_bash`, `stub_tools`, skills, proxies.
+  `bash_safety`, `wrap_bash`, `stub_tools`, skills, proxies.
 - **[Library / runtime](docs/library.md)** — embedding `pkg/shell3`: `Run`,
   `Session`, `Runtime`, subagents.
 - **[CLI & headless](docs/cli.md)** — scripting, the `--out` audit log, the
@@ -111,8 +112,10 @@ App) shows sessions, usage, and jobs. See [docs/telegram.md](docs/telegram.md).
 ## Security
 
 shell3 runs model-chosen shell commands and is **unsafe by default** — a full,
-unrestricted shell with no approval prompt. The only safety surface is the
-`shell3.wrap_bash(fn)` hook (allow/block/rewrite). Run it in a sandbox,
+unrestricted shell with no approval prompt until you opt in. Two hooks gate it:
+`shell3.bash_safety` (a glob allow/deny gate that prompts a human — `y/N` in the
+TUI, inline buttons on Telegram — for anything unlisted) and
+`shell3.wrap_bash(fn)` (allow/block/rewrite). Run it in a sandbox,
 container, or throwaway user if you need hard isolation, and read
 [docs/security.md](docs/security.md) before pointing it at anything you care
 about. Report vulnerabilities via

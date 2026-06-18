@@ -29,6 +29,9 @@ func (BashBgHandler) Execute(ctx context.Context, id string, args json.RawMessag
 	if cfg.RunsDir == "" {
 		return "", fmt.Errorf("bash_bg: background jobs require a runs directory")
 	}
+	if msg, blocked := gateCommand(ctx, cfg, p.Command); blocked {
+		return msg, nil
+	}
 	wd := p.Workdir
 	if wd == "" {
 		wd = cfg.WorkDir

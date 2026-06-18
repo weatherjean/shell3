@@ -24,6 +24,11 @@ var telegramFS embed.FS
 
 const telegramRoot = "defaults/telegram"
 
+//go:embed all:defaults/telegram/systemd
+var telegramSystemdFS embed.FS
+
+const telegramSystemdRoot = "defaults/telegram/systemd"
+
 // Values are the user-supplied substitutions for the templated shell3.lua.
 type Values struct {
 	Name    string // model handle, e.g. "main"
@@ -147,6 +152,65 @@ func RenderTelegramConfig(dir string, v TelegramValues, force bool) error {
 		}
 		return writeFile(filepath.Join(dir, rel), content, force)
 	})
+}
+
+// SystemdValues are the substitutions for the systemd reference unit and the
+// install script that `shell3 boot --telegram` writes alongside the config.
+type SystemdValues struct {
+	ConfigDir   string // absolute telegram config dir, e.g. /root/.shell3/telegram
+	DefaultBin  string // absolute shell3 binary path baked in as the installer fallback
+	ServiceName string // systemd service name, e.g. "shell3-telegram"
+	Home        string // home dir of the boot user, e.g. /root (used for HOME + path rewrite)
+}
+
+// RenderTelegramSystemd writes the systemd reference unit (0644) and the
+// one-shot install script (0755) into dir from the embedded templates. When
+// force is false, existing files are left untouched (safe to re-run).
+func RenderTelegramSystemd(dir string, v SystemdValues, force bool) error {
+	unit, err := renderTemplate(telegramSystemdFS, telegramSystemdRoot+"/shell3-telegram.service.tmpl", v)
+	if err != nil {
+		return err
+	}
+	if err := writeFile(filepath.Join(dir, v.ServiceName+".service"), unit, force); err != nil {
+		return err
+	}
+	script, err := renderTemplate(telegramSystemdFS, telegramSystemdRoot+"/install-systemd.sh.tmpl", v)
+	if err != nil {
+		return err
+	}
+	return writeExecFile(filepath.Join(dir, "install-systemd.sh"), script, force)
+}
+
+// renderTemplate reads and executes an embedded template against v.
+func renderTemplate(fsys embed.FS, path string, v any) ([]byte, error) {
+	tmplBytes, err := fsys.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("scaffold: read template %s: %w", path, err)
+	}
+	t, err := template.New(filepath.Base(path)).Parse(string(tmplBytes))
+	if err != nil {
+		return nil, fmt.Errorf("scaffold: parse template %s: %w", path, err)
+	}
+	var buf bytes.Buffer
+	if err := t.Execute(&buf, v); err != nil {
+		return nil, fmt.Errorf("scaffold: execute template %s: %w", path, err)
+	}
+	return buf.Bytes(), nil
+}
+
+// writeExecFile is writeFile with an executable (0755) mode for generated scripts.
+func writeExecFile(path string, content []byte, force bool) error {
+	if !force {
+		if _, err := os.Stat(path); err == nil {
+			return nil
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("scaffold: stat %s: %w", path, err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, content, 0755)
 }
 
 // luaEscape escapes a string for safe interpolation inside a double-quoted Lua

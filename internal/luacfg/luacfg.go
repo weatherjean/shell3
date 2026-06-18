@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/weatherjean/shell3/internal/bashsafety"
 	lua "github.com/yuin/gopher-lua"
 )
 
@@ -146,6 +147,10 @@ type LoadedConfig struct {
 	// before execution. See luaWrapBash / WrapBash (lua_bash.go). A second
 	// shell3.wrap_bash call replaces it (last writer wins).
 	wrapBash *lua.LFunction
+
+	// bashSafety is the parsed shell3.bash_safety policy, or nil when the config
+	// declares none. Config-global, like wrapBash.
+	bashSafety *bashsafety.Policy
 
 	L  *lua.LState
 	mu sync.Mutex

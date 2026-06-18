@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/weatherjean/shell3/internal/applog"
+	"github.com/weatherjean/shell3/internal/bashsafety"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/runs"
@@ -72,6 +73,12 @@ type ToolConfig struct {
 	// verbatim (the unsafe default). The hook FAILS CLOSED on error (see
 	// luacfg.WrapBash): a broken wrapper blocks rather than silently runs.
 	WrapBash func(ctx context.Context, cmd string) (argv []string, allowed bool, reason string, err error)
+	// BashSafety is the command-approval policy; the bash/bash_bg handlers gate
+	// each command through it before execution. Zero value (disabled) = no gating.
+	BashSafety bashsafety.Policy
+	// Asker confirms an ask-verdict command with a human. Nil ⇒ ask degrades to
+	// deny (headless subagent path).
+	Asker AskFunc
 	// AllMsgs is the full conversation slice including any reminder
 	// injections; tools that need to operate on what the model sees use
 	// this view.
@@ -135,6 +142,12 @@ type TurnConfig struct {
 	// WrapBash is the shell3.wrap_bash hook threaded to each tool call's
 	// ToolConfig (see ToolConfig.WrapBash). Nil = no hook = run commands verbatim.
 	WrapBash func(ctx context.Context, cmd string) (argv []string, allowed bool, reason string, err error)
+	// BashSafety is the command-approval policy; the bash/bash_bg handlers gate
+	// each command through it before execution. Zero value (disabled) = no gating.
+	BashSafety bashsafety.Policy
+	// Asker confirms an ask-verdict command with a human. Nil ⇒ ask degrades to
+	// deny (headless subagent path).
+	Asker AskFunc
 	// CompactAt is the auto-compaction prompt-token threshold (0 = off).
 	// maybeCompact (called at the top of RunTurn) consults it.
 	CompactAt int

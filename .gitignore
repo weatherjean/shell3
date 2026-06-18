@@ -22,3 +22,6 @@ cover.out
 # stress-test scratch artifacts
 /.stress_scratch
 /tmp/
+
+# stray scratch dir — never commit
+asfd/

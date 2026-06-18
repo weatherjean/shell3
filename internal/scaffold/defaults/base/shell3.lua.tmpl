@@ -46,6 +46,35 @@ shell3.model("{{.Name | luaesc}}", {
 {{end}}})
 
 -- ---------------------------------------------------------------------------
+-- Opt-in command approval — bash_safety.
+-- ---------------------------------------------------------------------------
+-- Off by default. When enabled, each bash command is split on shell operators
+-- (&& || | ; newline & $( backtick and the > >> < << <<< redirections) and each
+-- segment is matched against the lists below:
+--   * deny  → hard-blocked, never executed (deny wins over allow).
+--   * allow → runs without asking.
+--   * neither → asks for human confirmation. The interactive TUI shows a y/N
+--     prompt; the Telegram host sends inline Allow/Deny buttons. A headless
+--     subagent has no human, so an "ask" verdict is automatically denied (the
+--     block reason is reported back to the parent agent via the inbox). An ask
+--     nobody answers falls back to deny after ask_timeout (default 300s).
+-- IMPORTANT: the splitter is a cheap heuristic — it does NOT parse quotes or
+-- escapes, and anything hidden inside quotes or behind eval/exec can still defeat
+-- deny. deny is best-effort defense-in-depth, NOT a hard boundary. The allow list
+-- is the real safety boundary: keep it conservative.
+-- IMPORTANT: the agent reads its skills and inspects files with bash (`cat`,
+-- `rg`, `ls`, …). If you enable this, the allow list MUST include those read
+-- commands or the agent can't read its own skills or config — and where no
+-- prompt is wired (Telegram/headless) it cannot recover. An empty allow list
+-- bricks the agent.
+-- shell3.bash_safety{
+--   enabled = true,
+--   allow = { "ls*", "cat *", "rg *", "git status*", "git diff*", "go test*" },
+--   deny  = { "rm -rf /*", "shutdown*", "mkfs*", "dd *" },
+--   ask_timeout = 300, -- seconds to wait for a human before denying; 0 = forever
+-- }
+
+-- ---------------------------------------------------------------------------
 -- Bash safety hook (shell3.wrap_bash) — YOUR ONLY BASH GUARD.
 -- ---------------------------------------------------------------------------
 -- UNSAFE BY DEFAULT: bash and bash_bg run with no restrictions. This hook is the
