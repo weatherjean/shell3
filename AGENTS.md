@@ -44,8 +44,7 @@ internal/runs/         file-native JSONL store: sessions at .shell3_project/runs
 internal/edittool/     edit_file tool implementation (Go port of opencode's str-replace)
 internal/bgjobs/       background job tracking (file-based, fire-and-forget; logs under .shell3_project/runs/jobs/)
 internal/notify/       Notification type (bg_done / agent_done pointers) shared by inbox watcher + chat
-internal/tui/          terminal UI (interactive + headless once)
-internal/patchapp,patchmd,patchtui/  patch-style TUI components
+internal/tui/          full-screen vim-modal terminal UI (interactive + headless once)
 internal/chat/         conversation loop, tools, events, JSONL audit sink
 internal/llm/          Provider/Streamer interfaces, request params, types (+ fakellm)
 internal/persona/      runtime carrier for an agent's prompt/tools/params (data only)

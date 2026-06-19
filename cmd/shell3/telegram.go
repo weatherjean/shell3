@@ -67,7 +67,7 @@ func newTelegramCommand() *cobra.Command {
 			//
 			// b is declared before the session so the bash_safety Asker closure can
 			// capture it; it is assigned just below, before any turn runs (and the
-			// Asker only fires mid-turn), mirroring the TUI's app-capture pattern.
+			// Asker only fires mid-turn).
 			var b *telegram.Bot
 			sess, err := rt.Session(shell3.SessionOpts{
 				Name: "telegram", Agent: tg.Agent, WorkDir: tg.WorkDir, ResumeLatest: true,

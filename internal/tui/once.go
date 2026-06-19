@@ -3,22 +3,18 @@ package tui
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
-// RunOnce executes a single turn and prints output to stdout. No TUI.
-//
-// It drives the turn through shell3.Run, which does Start + Send + Close: the
-// returned channel streams the turn's public Events and closes when the turn
-// drains (Close runs automatically). The JSONL audit log, if any, is owned by
-// pkg/shell3 via spec.OutPath.
-//
-// Completion reporting (a subagent reporting its lifecycle to its parent) is
-// owned by pkg/shell3: Session.report fires during Close, appending one pointer
-// line to the project's .shell3_project/inbox.jsonl that the live host watches.
+// RunOnce executes a single turn and streams output to stdout with no TUI. It is
+// used for headless and pipeline invocations. The turn drives through
+// shell3.Run, whose channel streams public events and closes when the turn
+// drains. Returns an error if the turn ended in failure.
 func RunOnce(ctx context.Context, spec shell3.Spec) error {
 	events, err := shell3.Run(ctx, spec)
 	if err != nil {
@@ -31,9 +27,7 @@ func RunOnce(ctx context.Context, spec shell3.Spec) error {
 		case shell3.Token:
 			fmt.Print(ev.Text)
 		case shell3.ToolResult:
-			// Show tool body on stdout, trimmed and followed by a blank line
-			// for separation. Headers are skipped here — RunOnce is for
-			// pipeline use where minimal output is preferable.
+			// Tool output, trimmed and wrapped in blank lines for separation.
 			fmt.Println()
 			fmt.Print(strings.TrimRight(ev.ToolOutput, "\n"))
 			fmt.Println()
@@ -58,4 +52,15 @@ func RunOnce(ctx context.Context, spec shell3.Spec) error {
 		return fmt.Errorf("turn ended with error")
 	}
 	return nil
+}
+
+// PrintHeader writes the two-line shell3 brand banner to w, used as a uniform
+// top banner for non-interactive commands.
+func PrintHeader(w io.Writer) {
+	brand := lipgloss.NewStyle().Foreground(cPrimary).Bold(true)
+	dim := lipgloss.NewStyle().Foreground(cMuted)
+	sub := lipgloss.NewStyle().Foreground(cFgDim)
+	fmt.Fprintln(w, brand.Render("๑ï shell3")+"  "+dim.Render("/ˈʃɛli/"))
+	fmt.Fprintln(w, sub.Render("minimal Unix-composable coding agent"))
+	fmt.Fprintln(w)
 }

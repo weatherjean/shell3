@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/weatherjean/shell3/internal/patchapp"
 	"github.com/weatherjean/shell3/internal/tui"
 	"github.com/weatherjean/shell3/pkg/shell3"
 )
@@ -61,7 +60,7 @@ func main() {
 		if !term.IsTerminal(int(os.Stdout.Fd())) {
 			return
 		}
-		patchapp.PrintHeader(os.Stdout)
+		tui.PrintHeader(os.Stdout)
 	}
 	root.PersistentPreRun = func(cmd *cobra.Command, args []string) {
 		if !shouldPrintHeaderInPreRun(root, cmd) {
