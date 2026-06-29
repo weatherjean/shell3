@@ -310,6 +310,7 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 		RunsDir:           p.runsDir,
 		WorkDir:           workdir,
 		ConfigPath:        p.ConfigPath(),
+		ConfigWarnings:    p.lc.Warnings(),
 		ResolveCustomTool: p.lc.ResolveCustomCall,
 		StubTools:         p.lc.StubNames(),
 		Log:               p.log,
@@ -443,6 +444,13 @@ func (b *builder) loadConfig() error {
 		return err
 	}
 	b.lc = lc
+	// Surface non-fatal config issues (e.g. a removed bash_safety key that is now
+	// ignored). To both the app log and stderr: the log keeps a durable record,
+	// and stderr reaches headless/CLI runs before any TUI takes the screen.
+	for _, w := range lc.Warnings() {
+		b.log.Warn("config warning", "detail", w)
+		fmt.Fprintln(os.Stderr, "shell3: config warning: "+w)
+	}
 	b.closers = append(b.closers, func() { lc.Close() })
 	return nil
 }

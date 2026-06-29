@@ -13,9 +13,9 @@ type AskFunc func(ctx context.Context, command, reason string) bool
 
 // gateCommand applies cfg.BashSafety to command. It returns (message, true) when
 // the command must be blocked — the message is the tool result the model sees —
-// and ("", false) when the command may run. Order: deny → hard block; allow →
-// run; otherwise ask the human via cfg.Asker, and with no asker (headless),
-// block with an instructive reason the parent can act on.
+// and ("", false) when the command may run. Order: hard_deny → hard block; deny →
+// ask the human via cfg.Asker (and with no asker (headless), block with an
+// instructive reason the parent can act on); otherwise run.
 func gateCommand(ctx context.Context, cfg ToolConfig, command string) (string, bool) {
 	verdict, reason := cfg.BashSafety.Decide(command)
 	switch verdict {

@@ -54,31 +54,25 @@ shell3.model("{{.Name | luaesc}}", {
 {{end}}})
 
 -- ---------------------------------------------------------------------------
--- Opt-in command approval — bash_safety.
+-- Opt-in command gate — bash_safety (regex denylist).
 -- ---------------------------------------------------------------------------
--- Off by default. When enabled, each bash command is split on shell operators
--- (&& || | ; newline & $( backtick and the > >> < << <<< redirections) and each
--- segment is matched against the lists below:
---   * deny  → hard-blocked, never executed (deny wins over allow).
---   * allow → runs without asking.
---   * neither → asks for human confirmation. The interactive TUI shows a y/N
---     prompt; the Telegram host sends inline Allow/Deny buttons. A headless
---     subagent has no human, so an "ask" verdict is automatically denied (the
---     block reason is reported back to the parent agent via the inbox). An ask
---     nobody answers falls back to deny after ask_timeout (default 300s).
--- IMPORTANT: the splitter is a cheap heuristic — it does NOT parse quotes or
--- escapes, and anything hidden inside quotes or behind eval/exec can still defeat
--- deny. deny is best-effort defense-in-depth, NOT a hard boundary. The allow list
--- is the real safety boundary: keep it conservative.
--- IMPORTANT: the agent reads its skills and inspects files with bash (`cat`,
--- `rg`, `ls`, …). If you enable this, the allow list MUST include those read
--- commands or the agent can't read its own skills or config — and where no
--- prompt is wired (Telegram/headless) it cannot recover. An empty allow list
--- bricks the agent.
+-- Off by default. When enabled, each bash command is matched (as a whole string)
+-- against two regex lists:
+--   * hard_deny → hard-blocked, never run, never prompted.
+--   * deny      → prompts a human to allow/deny before running. The interactive
+--     TUI shows a y/N prompt; the Telegram host sends inline Allow/Deny buttons.
+--     A headless subagent has no human, so a deny match is auto-denied (the block
+--     reason is reported back to the parent agent via the inbox). A prompt nobody
+--     answers falls back to deny after ask_timeout (default 300s).
+--   * neither   → runs.
+-- Patterns are Go regexes matched anywhere in the command, so chaining can't hide
+-- a match (`echo hi; rm -rf /` still matches `rm\s+-rf`). There is no allowlist:
+-- bash is unsafe by default and these lists are the guardrails. (wrap_bash, below,
+-- is the escape hatch for anything that needs Lua logic.)
 -- shell3.bash_safety{
 --   enabled = true,
---   allow = { "ls*", "cat *", "rg *", "git status*", "git diff*", "go test*" },
---   deny  = { "rm -rf /*", "shutdown*", "mkfs*", "dd *" },
+--   hard_deny = { [[rm\s+-rf\s+/]], [[mkfs]], [[dd\s+if=]], "shutdown" }, -- never run
+--   deny      = { [[rm\s+-rf]], [[\bgit\s+push]], [[curl\b.*\|\s*(ba)?sh]] }, -- prompt
 --   ask_timeout = 300, -- seconds to wait for a human before denying; 0 = forever
 -- }
 

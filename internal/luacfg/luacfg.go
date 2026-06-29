@@ -159,9 +159,23 @@ type LoadedConfig struct {
 	// declares none. Config-global, like wrapBash.
 	bashSafety *bashsafety.Policy
 
+	// warnings accumulates non-fatal config issues found at load time (e.g. a
+	// removed key that is now silently ignored, or a gate that gates nothing). The
+	// caller drains them via Warnings() and decides how to surface them; an empty
+	// slice means a clean load.
+	warnings []string
+
 	L  *lua.LState
 	mu sync.Mutex
 }
+
+// Warnings returns the non-fatal issues collected while loading the config
+// (ignored deprecated keys, an enabled gate with no patterns, …). Empty on a
+// clean load. Surfacing them is the caller's choice; the config still loaded.
+func (c *LoadedConfig) Warnings() []string { return c.warnings }
+
+// warn records a non-fatal load-time issue (see Warnings).
+func (c *LoadedConfig) warn(msg string) { c.warnings = append(c.warnings, msg) }
 
 func (c *LoadedConfig) Close() {
 	if c.L != nil {
