@@ -95,8 +95,8 @@ func (c *LoadedConfig) parseCronJobs(L *lua.LState, jobsT *lua.LTable) {
 
 var modelKeys = map[string]bool{
 	"base_url": true, "api_key": true, "model": true, "context_window": true,
-	"compact_at": true,
-	"reasoning":  true, "max_tokens": true, "temperature": true, "extra": true,
+	"compact_at": true, "keep_recent": true, "prune_at": true,
+	"reasoning": true, "max_tokens": true, "temperature": true, "extra": true,
 	"run_proxy": true,
 }
 
@@ -114,9 +114,29 @@ func (c *LoadedConfig) luaModel(L *lua.LState) int {
 		RunProxy:      optStr(opts, "run_proxy"),
 		ContextWindow: optInt(opts, "context_window"),
 		CompactAt:     optInt(opts, "compact_at"),
+		KeepRecent:    optInt(opts, "keep_recent"),
+		PruneAt:       optInt(opts, "prune_at"),
 		Reasoning:     optStr(opts, "reasoning"),
 		MaxTokens:     optInt(opts, "max_tokens"),
 		Temperature:   optFloatPtr(opts, "temperature"),
+	}
+	// Clamp keep_recent below compact_at: a tail >= the trigger threshold is
+	// nonsensical (compaction would never reduce context). Clamp to half of
+	// compact_at so the head always has room to summarise.
+	if m.CompactAt > 0 && m.KeepRecent >= m.CompactAt {
+		m.KeepRecent = m.CompactAt / 2 // round(compact_at*0.5); tail must stay below trigger
+	}
+	// prune_at defaults to round(compact_at*0.6) so the cheap-prune tier is on by
+	// default, sitting below the compaction trigger. An explicit 0 disables it; an
+	// explicit value at or above compact_at is pointless (compaction supersedes
+	// it) and also disables it. Lua can't distinguish an unset key from an explicit
+	// 0, so presence is checked against the raw table.
+	if m.CompactAt > 0 {
+		if opts.RawGetString("prune_at") == lua.LNil {
+			m.PruneAt = m.CompactAt * 60 / 100
+		} else if m.PruneAt >= m.CompactAt {
+			m.PruneAt = 0
+		}
 	}
 	// api_key is optional: a local proxy (e.g. run_proxy) can handle auth, so an
 	// empty key is valid. base_url and model are always required.
@@ -166,6 +186,7 @@ var toolGateKeys = map[string]bool{
 	"bash": true, "bash_bg": true, "shell_interactive": true, "edit": true,
 	"custom": true, "skill": true,
 	"media":     true,
+	"read":      true,
 	"subagents": true,
 }
 
@@ -269,6 +290,7 @@ func parseGates(tt *lua.LTable) ToolGates {
 		ShellInteractive: optBool(tt, "shell_interactive"),
 		Edit:             optBool(tt, "edit"),
 		Media:            optBool(tt, "media"),
+		Read:             optBool(tt, "read"),
 	}
 }
 

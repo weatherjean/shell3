@@ -29,9 +29,17 @@ shell3.model("{{.Name | luaesc}}", {
   -- this model — the wrong number throws off context-usage reminders and compaction.
   context_window = {{.ContextWindow}},
   -- compact_at: absolute prompt-token threshold for host-enforced auto-compaction.
-  -- When a turn's prompt reaches it, shell3 summarizes the conversation so far and
-  -- continues against the summary — no model-driven prune/compact tools. 0/unset = off.
+  -- When a turn's prompt reaches it, shell3 summarizes the head and keeps a verbatim
+  -- recent tail — no model-driven prune/compact tools. 0/unset = off.
   compact_at     = {{.CompactAt}},
+  -- keep_recent: verbatim tail (in prompt tokens) preserved across a compaction.
+  --   Defaults to round(compact_at * 0.33); clamped to round(compact_at * 0.5) if >= compact_at.
+  --   Uncomment to override with an absolute token count, e.g.:
+  -- keep_recent  = 30000,
+  -- prune_at: lower threshold; cheaply stubs old tool outputs with no LLM call.
+  --   Defaults to round(compact_at * 0.6); set to 0 to disable; ignored if >= compact_at.
+  --   Uncomment to override with an absolute token count, e.g.:
+  -- prune_at     = 60000,
   -- reasoning   = "medium",   -- uncomment if your model supports reasoning effort
   -- extra: provider-specific fields injected verbatim as top-level JSON on each
   -- request. Leave empty unless your provider needs a non-standard knob — strict
@@ -103,7 +111,7 @@ shell3.wrap_bash(function(cmd) return cmd end)
 -- instead of erroring. Config-global: applies to every agent. Later keys override
 -- earlier ones; a stub whose name collides with a real tool is ignored.
 -- shell3.stub_tools({
---   read_file  = "Use bash: cat <path> (or sed -n for ranges).",
+--   read_file  = "Use the read tool.",
 --   grep       = "Use bash: rg <pattern>.",
 --   write_file = "Use edit_file (empty old_string creates/overwrites).",
 -- })
@@ -120,7 +128,7 @@ You are a focused code explorer. Investigate the question using bash (rg, fd,
 cat, git log) and report a concise, concrete answer with file:line references.
 You cannot edit files. Decide and proceed; no human is available.
 ]],
-  tools = { bash = true },
+  tools = { bash = true, read = true },
 })
 
 -- ---------------------------------------------------------------------------
@@ -162,6 +170,7 @@ You are an expert coding assistant inside shell3. Work autonomously as a senior 
 ]],
   tools = {
     bash              = true,
+    read              = true,
     bash_bg           = true,
     shell_interactive = true,
     edit              = true,
@@ -199,6 +208,7 @@ You are the design partner inside shell3. You do NOT edit files — you investig
 ]],
   tools = {
     bash    = true,
+    read    = true,
     bash_bg = false,
     edit    = false,
     media   = true,

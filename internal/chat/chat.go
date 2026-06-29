@@ -48,6 +48,12 @@ type ActiveAgent struct {
 	ContextWindow int
 	// CompactAt is the model's auto-compaction prompt-token threshold (0 = off).
 	CompactAt int
+	// KeepRecent is the verbatim tail (prompt tokens) preserved across an
+	// auto-compaction. 0 derives a default from CompactAt (resolveKeepRecent).
+	KeepRecent int
+	// PruneAt is the lower threshold; stub old tool outputs with no LLM call.
+	// 0 disables. Must be below CompactAt.
+	PruneAt int
 }
 
 // Config holds all dependencies for a chat session: callers populate it once at
@@ -80,6 +86,11 @@ type Config struct {
 	// if unknown. Recorded per session so resume can reload the right
 	// config. Agent-independent: set once at assembly, survives agent switches.
 	ConfigPath string
+	// ConfigWarnings are non-fatal config load issues (e.g. a removed bash_safety
+	// key that is now ignored). Already logged + printed to stderr at load; also
+	// carried here so an interactive front-end can surface them in-band, since an
+	// alt-screen TUI clears the stderr line before the user can read it.
+	ConfigWarnings []string
 	// ActiveSkills lists skill names enabled for this persona.
 	ActiveSkills []string
 	// ActiveTools lists tool names enabled for this agent.
@@ -101,6 +112,12 @@ type Config struct {
 	// When >0 and the prior turn's prompt tokens reach it, RunTurn compacts
 	// history before the next turn (see maybeCompact). Zero disables it.
 	CompactAt int
+	// KeepRecent is the verbatim tail (prompt tokens) preserved across an
+	// auto-compaction. 0 derives a default from CompactAt (resolveKeepRecent).
+	KeepRecent int
+	// PruneAt is the lower threshold; stub old tool outputs with no LLM call.
+	// 0 disables. Must be below CompactAt.
+	PruneAt int
 	// Params are provider-level request parameters (temperature, top_p,
 	// reasoning effort, etc.).
 	Params llm.RequestParams
@@ -178,6 +195,8 @@ func (c *Config) ApplyActiveAgent(rt ActiveAgent) {
 	c.CustomToolNames = rt.CustomToolNames
 	c.ContextWindow = rt.ContextWindow
 	c.CompactAt = rt.CompactAt
+	c.KeepRecent = rt.KeepRecent
+	c.PruneAt = rt.PruneAt
 	c.StatusLine = AgentStatusLine(rt)
 }
 
@@ -188,6 +207,7 @@ func NewHandlers() map[string]ToolHandler {
 		BashHandler{},
 		BashBgHandler{},
 		EditHandler{},
+		ReadHandler{},
 	}
 	m := make(map[string]ToolHandler, len(handlers))
 	for _, h := range handlers {
@@ -222,6 +242,8 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler, shellInteractive
 		BashSafety:        cfg.BashSafety,
 		Asker:             cfg.Asker,
 		CompactAt:         cfg.CompactAt,
+		KeepRecent:        cfg.KeepRecent,
+		PruneAt:           cfg.PruneAt,
 		ShellInteractive:  shellInteractive,
 	}
 }

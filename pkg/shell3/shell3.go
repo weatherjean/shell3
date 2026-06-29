@@ -204,7 +204,7 @@ const (
 	ToolCall                   // tool started            → ToolName, ToolCallID, ToolInput, IsCustomTool
 	ToolResult                 // tool finished           → ToolName, ToolCallID, ToolOutput
 	SystemReminder             // injected reminder block → Text
-	Compacted                  // auto-compaction occurred → Text (token-count note)
+	Compacted                  // auto-compaction occurred → Text + post-compaction PromptTokens/TotalTokens estimate
 	Usage                      // per-roundtrip tokens    → PromptTokens/CompletionTokens/TotalTokens
 	Retry                      // transient retry         → Text
 	Error                      // turn error              → Err
@@ -247,7 +247,9 @@ func translate(ev chat.Event) (Event, bool) {
 	case chat.EventSystemReminder:
 		return Event{Kind: SystemReminder, Text: ev.Text}, true
 	case chat.EventCompacted:
-		return Event{Kind: Compacted, Text: ev.Text}, true
+		e := usageEvent(Compacted, ev)
+		e.Text = ev.Text
+		return e, true
 	case chat.EventUsage:
 		return usageEvent(Usage, ev), true
 	case chat.EventTurnDone:
@@ -1267,6 +1269,11 @@ func (s *Session) Prune(id string) (summary string, ok bool) {
 	s.sess.SetMessages(msgs)
 	return out, ok
 }
+
+// QueueCompact requests a compaction before the next turn acts (= the TUI's
+// :compact). It does not compact immediately — the next turn summarizes the
+// conversation before the model does anything. See chat.Session.QueueCompact.
+func (s *Session) QueueCompact() { s.sess.QueueCompact() }
 
 // SetParam sets a tunable provider parameter for subsequent turns (= the TUI's
 // /parameters <name> <value>). When the active provider implements

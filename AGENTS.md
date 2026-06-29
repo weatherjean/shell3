@@ -2,8 +2,9 @@
 
 Minimal Unix-composable coding agent written in Go.
 
-**Bash-first.** The agent's verbs are `bash` and `edit_file`; everything else is
-a file it reads or a command it runs (history is searched with `rg` over
+**Bash-first.** The agent's verbs are `bash`, `read`, and `edit_file`; text files
+are read with the `read` tool (paged, capped at 2000 lines / 50 KB); everything
+else is a command it runs (history is searched with `rg` over
 `.shell3_project/runs/**/*.jsonl`; a subagent is a fire-and-forget backgrounded
 `shell3` subprocess). A finishing subagent appends one pointer line to
 `.shell3_project/inbox.jsonl`; the live host tails it (fsnotify, offset-persisted,
@@ -19,8 +20,11 @@ agent reads with `cat` (listed by absolute path in the prompt under `## Skills`
 — there is no `skill` tool), and custom tools are declarative bash-command
 templates (`shell3.tool{command=...}`, params injected as lowercase env vars
 plus a `secrets` list; no Lua `handler`) — the `shell3.bash`/`http`/`urlencode`
-helpers are gone. Context is host-managed via a model `compact_at` token
-threshold (auto-compaction), not model-driven prune/compact tools.
+helpers are gone. Context is host-managed via two token thresholds: `prune_at`
+cheaply stubs old tool outputs (no LLM call), and `compact_at` triggers
+tail-preserving compaction — summarizing the head while keeping recent turns
+verbatim. The `prune_at` and `keep_recent` knobs are optional, defaulting to
+fractions of `compact_at`; no model-driven prune/compact tools.
 
 ## IMPORTANT: Do Not Read Credential Files
 

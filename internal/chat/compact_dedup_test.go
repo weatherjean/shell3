@@ -50,16 +50,9 @@ func TestCompactInto_NoDuplicateMessages(t *testing.T) {
 	sess.messages = append(sess.messages, msgs...)
 	sess.persistedLen = len(msgs) // high-water mark: all persisted
 
-	allMsgs := []llm.Message{
-		{Role: llm.RoleSystem, Content: "sys"},
-		msgs[0],
-		msgs[1],
-		msgs[2],
-	}
-
 	// Call compactInto; it should flush ONLY the unsaved tail (nothing, since
 	// persistedLen == len(sess.messages)) to the outgoing session.
-	compactInto(CompactSummary{Summary: "compacted"}, st, sess, allMsgs, applog.Noop{}, "", "")
+	compactInto(CompactSummary{Summary: "compacted"}, st, sess, nil, applog.Noop{}, "", "")
 
 	// The outgoing session (prevID) must contain EXACTLY the 3 original
 	// messages — no duplicates.

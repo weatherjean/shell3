@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -98,26 +99,48 @@ func dispatchCustomTool(ctx context.Context, cfg TurnConfig, name, rawArgs strin
 
 // CompactSummary is the structured product of one compaction: a narrative
 // summary plus optional pointer lists. The host-driven auto-compaction path
-// (maybeCompact) fills only Summary from a single quiet LLM call and leaves the
-// pointer lists empty.
+// (maybeCompact) fills Summary, ImportantFiles, and ReadFiles from the
+// compacted head's tool calls; the remaining lists are left empty.
 type CompactSummary struct {
 	Summary             string
-	ImportantFiles      []string
+	ImportantFiles      []string // files modified (edit_file) in the compacted head
+	ReadFiles           []string // files read (read) but not modified in the compacted head
 	ImportantReferences []string
 	Skills              []string
 	NextSteps           []string
 }
 
-// compactInto replaces the conversation history with a structured summary. It
-// ends the current runs session and starts a new one so the compact boundary
-// is visible in history. Both sess.messages and allMsgs are rebuilt in place;
-// the summary is saved to history before the session rolls. Callers are
-// responsible for validating that args.Summary is non-empty.
-func compactInto(args CompactSummary, st *runs.Store, sess *Session, allMsgs []llm.Message, lg applog.Logger, workDir, configPath string) (newAllMsgs []llm.Message) {
+// compactInto replaces the conversation history with a structured summary
+// followed by the preserved verbatim tail. It ends the current runs session and
+// starts a new one so the compact boundary is visible in history. Callers pass
+// `tail` = the recent sub-slice of sess.messages to keep (see compactionCut).
+// Callers are responsible for validating that args.Summary is non-empty.
+//
+// Returns true when the compaction was applied. It returns false WITHOUT
+// touching the in-memory history when the runs-session roll fails (e.g. a full
+// disk): rewriting memory to the short slice while the outgoing session's JSONL
+// still holds the full history would let the next saveHistory duplicate the tail
+// into it. Aborting keeps the on-disk history coherent; the caller proceeds on
+// the un-compacted history (compaction is best-effort).
+func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.Message, lg applog.Logger, workDir, configPath string) bool {
 	prevSessionID := sess.id
+	// newSessionID stays prevSessionID unless the runs-session roll below
+	// succeeds; it is published into sess.id atomically with sess.messages under
+	// msgMu, so a concurrent ID() reader never sees a torn id/messages pairing.
+	newSessionID := prevSessionID
+	rolled := false
 
-	// Roll the runs session so compact boundary is visible in history.
+	// Roll the runs session so the compact boundary is visible in history. Start
+	// the NEW session FIRST: only if that succeeds do we flush and end the
+	// outgoing one. A failed NewSession then leaves the outgoing session intact
+	// (not ended, still persistable) and we abort the compaction below, rather
+	// than ending a session we keep writing to and corrupting its JSONL.
 	if st != nil {
+		newID, err := st.NewSession(runs.Meta{Workdir: workDir, ConfigPath: configPath})
+		if err != nil {
+			lg.Warn("start session failed during compact; skipping compaction", "error", err)
+			return false
+		}
 		// Flush only the unsaved tail of the outgoing session. Messages
 		// 0..persistedLen-1 were already written by prior saveHistory calls;
 		// re-flushing the full slice would duplicate those lines in the
@@ -128,12 +151,8 @@ func compactInto(args CompactSummary, st *runs.Store, sess *Session, allMsgs []l
 		if err := st.EndSession(prevSessionID); err != nil {
 			lg.Warn("end session failed during compact", "session_id", prevSessionID, "error", err)
 		}
-		newID, err := st.NewSession(runs.Meta{Workdir: workDir, ConfigPath: configPath})
-		if err != nil {
-			lg.Warn("start session failed during compact", "error", err)
-		} else {
-			sess.id = newID
-		}
+		newSessionID = newID
+		rolled = true
 	}
 
 	// Build the continuation message injected at the top of the new history.
@@ -141,11 +160,18 @@ func compactInto(args CompactSummary, st *runs.Store, sess *Session, allMsgs []l
 	fmt.Fprintf(&b, "<system-reminder>\nContinuation of session %s. History compacted.\nPrior session messages are in the runs directory (use the `history` skill, or read .shell3_project/runs/%s/messages.jsonl directly).\n</system-reminder>\n\n", prevSessionID, prevSessionID)
 	fmt.Fprintf(&b, "<compact-summary>\n%s\n</compact-summary>", args.Summary)
 	if len(args.ImportantFiles) > 0 {
-		b.WriteString("\n\n<important-files>\n")
+		b.WriteString("\n\n<modified-files>\n")
 		for _, f := range args.ImportantFiles {
 			fmt.Fprintf(&b, "- %s\n", f)
 		}
-		b.WriteString("</important-files>")
+		b.WriteString("</modified-files>")
+	}
+	if len(args.ReadFiles) > 0 {
+		b.WriteString("\n\n<read-files>\n")
+		for _, f := range args.ReadFiles {
+			fmt.Fprintf(&b, "- %s\n", f)
+		}
+		b.WriteString("</read-files>")
 	}
 	if len(args.ImportantReferences) > 0 {
 		b.WriteString("\n\n<important-references>\n")
@@ -171,55 +197,110 @@ func compactInto(args CompactSummary, st *runs.Store, sess *Session, allMsgs []l
 
 	continuationMsg := llm.Message{Role: llm.RoleUser, Content: b.String()}
 
-	// Find the assistant message that triggered compact. It must be preserved
-	// in both allMsgs and sess.messages so the tool result the caller appends
-	// has a matching tool call — both in this turn AND in subsequent turns
-	// that rebuild allMsgs from sess.messages.
-	var triggerMsg *llm.Message
-	for i := len(allMsgs) - 1; i >= 0; i-- {
-		if allMsgs[i].Role == llm.RoleAssistant {
-			m := allMsgs[i]
-			triggerMsg = &m
-			break
-		}
-	}
-
 	// Build the rewritten history in a local, then publish it under msgMu: this
 	// runs on the turn goroutine but replaces the slice the dashboard's
 	// Messages() reader may be copying concurrently (see Session.msgMu).
-	newMsgs := []llm.Message{continuationMsg}
-	if triggerMsg != nil {
-		newMsgs = append(newMsgs, *triggerMsg)
-	}
+	newMsgs := make([]llm.Message, 0, 1+len(tail))
+	newMsgs = append(newMsgs, continuationMsg)
+	newMsgs = append(newMsgs, tail...)
 	sess.msgMu.Lock()
+	sess.id = newSessionID
 	sess.messages = newMsgs
+	// Reminder anchors index the pre-compaction message slice; the rewrite
+	// invalidates them. Drop the log exactly as SetMessages does — stale high-Seq
+	// anchors otherwise break History()'s non-decreasing-Seq interleave and
+	// silently hide every later reminder from the dashboard. The new runs session
+	// has its own (empty) reminder sidecar, so no truncation is needed.
+	sess.reminderLog = nil
 	sess.msgMu.Unlock()
 
 	// Mirror the compacted context into the runs store under the NEW session id,
 	// so a resume of this session loads the within-window compacted history
 	// rather than the pre-compaction blob. flushMessages above wrote the OUTGOING
-	// session; this writes the incoming one. Guard on a successful roll
-	// (sess.id advanced past prevSessionID) so a failed NewSession doesn't
-	// clobber the outgoing session's messages.
-	if st != nil && sess.id != prevSessionID {
-		flushMessages(st, lg, sess.id, newMsgs)
+	// session; this writes the incoming one.
+	if rolled {
+		flushMessages(st, lg, newSessionID, newMsgs)
 		// The new session's messages are now persisted; advance the high-water
 		// mark so the next saveHistory doesn't re-flush them.
 		sess.persistedLen = len(newMsgs)
 	} else {
-		// Session roll failed; the outgoing session is still active. Reset to
-		// zero so saveHistory starts fresh (avoids a stale offset).
+		// No store configured: nothing was persisted, so start the high-water
+		// mark fresh.
 		sess.persistedLen = 0
 	}
+	return true
+}
 
-	// Rebuild allMsgs: system prompt + continuation + trigger assistant message.
-	// Caller appends the tool result, completing the valid call/result pair.
-	newAllMsgs = []llm.Message{allMsgs[0], continuationMsg}
-	if triggerMsg != nil {
-		newAllMsgs = append(newAllMsgs, *triggerMsg)
+// manifestCap is the maximum number of file paths reported per list in the
+// compaction manifest. Capping avoids bloating the continuation message when
+// many files were touched in a long head.
+const manifestCap = 20
+
+// extractFileManifest scans the compacted head's structured tool calls for file
+// paths: edit_file.file_path -> modified, read.path -> read. A file both read
+// and modified appears only under modified. Malformed tool args are skipped.
+// Each list is capped at manifestCap, first-seen order preserved.
+func extractFileManifest(head []llm.Message) (modified, read []string) {
+	modSeen, readSeen := map[string]bool{}, map[string]bool{}
+	for _, m := range head {
+		if m.Role != llm.RoleAssistant {
+			continue
+		}
+		for _, tc := range m.ToolCalls {
+			switch tc.Name {
+			case "edit_file":
+				if p := jsonPathArg(tc.RawArgs, "file_path"); p != "" && !modSeen[p] {
+					modSeen[p] = true
+					modified = append(modified, p)
+				}
+			case "read":
+				if p := jsonPathArg(tc.RawArgs, "path"); p != "" && !readSeen[p] {
+					readSeen[p] = true
+					read = append(read, p)
+				}
+			}
+		}
 	}
+	// read-only = read minus modified.
+	filtered := read[:0]
+	for _, p := range read {
+		if !modSeen[p] {
+			filtered = append(filtered, p)
+		}
+	}
+	return capStrings(modified, manifestCap), capStrings(filtered, manifestCap)
+}
 
-	return newAllMsgs
+// jsonPathArg returns the named string field from a tool call's raw JSON args,
+// or "" if absent/malformed.
+func jsonPathArg(rawArgs, field string) string {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(rawArgs), &m); err != nil {
+		return ""
+	}
+	if v, ok := m[field].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// capStrings returns s[:n] when len(s) > n, otherwise s unchanged.
+func capStrings(s []string, n int) []string {
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
+}
+
+// pruneMinBytes is the minimum content length (in bytes) for a tool result to
+// be eligible for auto-pruning. Stubs are ~30 bytes, well below this threshold,
+// making pruneOldToolOutputs naturally idempotent without a separate flag.
+const pruneMinBytes = 2048
+
+// pruneStub is the placeholder a pruned tool result is replaced with. Shared by
+// the manual /prune command (PruneByID) and the automatic prune pass.
+func pruneStub(stem string, origLen int) string {
+	return fmt.Sprintf("[%s — original was %d bytes]", stem, origLen)
 }
 
 // PruneByID replaces the tool result with the given id in any of the slices
@@ -248,7 +329,7 @@ func PruneByID(toolCallID, stem string, slices ...[]llm.Message) (summary string
 	}
 
 	content := target.Content
-	stub := fmt.Sprintf("[%s — original was %d bytes]", stem, len(content))
+	stub := pruneStub(stem, len(content))
 	count := 0
 	for _, msgs := range slices {
 		for i := range msgs {

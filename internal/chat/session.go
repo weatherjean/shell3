@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/runs"
@@ -43,6 +44,12 @@ type Session struct {
 	// compactInto after the session roll. Touched only on the turn goroutine
 	// (same as sess.id) so no extra lock is required.
 	persistedLen int
+
+	// forceCompact, when set via QueueCompact (e.g. the TUI :compact command),
+	// makes the next turn compact the conversation before the model acts,
+	// regardless of the token threshold. maybeCompact consumes (swaps off) the
+	// flag. Atomic because it is set from another goroutine (the front-end).
+	forceCompact atomic.Bool
 
 	// sink receives every event synchronously, inline on the goroutine that
 	// runs the turn. There is no channel and no teardown: once Run returns,
@@ -168,10 +175,19 @@ func NewSession(opts SessionOpts) *Session {
 	return s
 }
 
-// ID returns the runs session id ("" if no store is configured).
+// ID returns the runs session id ("" if no store is configured). Guarded by
+// msgMu to pair with the guarded writes in SetID and compactInto (a torn read
+// against a concurrent session roll would otherwise mis-pair id and messages).
 func (s *Session) ID() string {
+	s.msgMu.RLock()
+	defer s.msgMu.RUnlock()
 	return s.id
 }
+
+// QueueCompact requests that the next turn compact the conversation before the
+// model acts, regardless of the token threshold. Safe to call from any
+// goroutine; maybeCompact consumes the request at the next turn start.
+func (s *Session) QueueCompact() { s.forceCompact.Store(true) }
 
 // SetID swaps the runs session id. Used by Session.Clear to rotate onto a fresh
 // session so subsequent turns persist under the new conversation. Guarded by
