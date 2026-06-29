@@ -2,9 +2,11 @@ package tui
 
 import (
 	"fmt"
+	"image"
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
@@ -17,7 +19,6 @@ const (
 	ItemReasoning
 	ItemTool
 	ItemNotice
-	ItemBanner // session-start brand line, above the first user prompt
 )
 
 // NoticeKind sub-classifies an ItemNotice.
@@ -54,7 +55,10 @@ type Item struct {
 	mdOut   string
 }
 
-func (it *Item) foldable() bool { return it.Kind == ItemTool || it.Kind == ItemReasoning }
+func (it *Item) foldable() bool {
+	return it.Kind == ItemTool || it.Kind == ItemReasoning ||
+		(it.Kind == ItemNotice && it.Notice == NoticeReminder)
+}
 
 // toolRender describes how a tool's block is presented. A richly-rendered tool
 // is one table entry rather than edits scattered across several functions.
@@ -88,20 +92,16 @@ func toolStyle(name string) lipgloss.Style { return toolRenderFor(name).style }
 
 // Transcript folds the streamed event sequence into ordered items.
 type Transcript struct {
-	items         []*Item
-	openAssistant int
-	openReasoning int
+	items          []*Item
+	openAssistant  int
+	openReasoning  int
+	pendingNotices []*Item // reminder chrome held back while an assistant block streams (flushed on close)
 }
 
 func NewTranscript() *Transcript { return &Transcript{openAssistant: -1, openReasoning: -1} }
 
 func (t *Transcript) AddUser(text string) {
 	t.closeStreaming()
-	// Keep the brand + phonetic as a one-line session-start marker above the
-	// first prompt (the full welcome card only shows on an empty transcript).
-	if len(t.items) == 0 {
-		t.items = append(t.items, &Item{Kind: ItemBanner})
-	}
 	t.items = append(t.items, &Item{Kind: ItemUser, Text: text})
 }
 
@@ -172,8 +172,11 @@ func (t *Transcript) Apply(ev shell3.Event) bool {
 		}
 		return t.addNotice(NoticeError, msg)
 	case shell3.Done:
+		// Return true when closeStreaming flushes reminder chrome held back during
+		// streaming, so the view refreshes to show it.
+		hadPending := len(t.pendingNotices) > 0
 		t.closeStreaming()
-		return false
+		return hadPending
 	case shell3.Usage:
 		return false
 	}
@@ -181,14 +184,61 @@ func (t *Transcript) Apply(ev shell3.Event) bool {
 }
 
 func (t *Transcript) addNotice(kind NoticeKind, text string) bool {
+	// System reminders start folded — they're frequent host chrome, shown as a
+	// compact one-line indicator the user can expand.
+	n := &Item{Kind: ItemNotice, Notice: kind, Text: text, Folded: kind == NoticeReminder}
+	// A reminder must never split a streaming assistant answer. If one arrives
+	// while the answer block is still open, hold it and flush it when the block
+	// closes (closeStreaming) so it renders right after the finished answer. Only
+	// NoticeReminder is held (host notifications, steering, context reminders);
+	// errors/retries stay inline so they remain visible mid-stream.
+	if kind == NoticeReminder && t.openAssistant >= 0 {
+		t.pendingNotices = append(t.pendingNotices, n)
+		return false
+	}
 	t.closeStreaming()
-	t.items = append(t.items, &Item{Kind: ItemNotice, Notice: kind, Text: text})
+	t.items = append(t.items, n)
 	return true
+}
+
+// reminderBody strips the <system-reminder> wrapper for display, leaving just the
+// reminder content.
+func reminderBody(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "<system-reminder>")
+	s = strings.TrimSuffix(s, "</system-reminder>")
+	return strings.TrimSpace(s)
 }
 
 func (t *Transcript) closeStreaming() {
 	t.foldOpenReasoning()
+	// Drop a streaming assistant block that carries no visible content. Models
+	// often emit a stray space/newline — or a leaked reasoning tag like </think>
+	// (MiniMax) — into content right before a tool call; glamour renders it to
+	// nothing, leaving an empty block that reads as a blank gap above the tool.
+	// The open assistant is always the last item (only Token appends to it, and
+	// every other event calls closeStreaming first), so it is safe to trim.
+	if t.openAssistant >= 0 && t.openAssistant == len(t.items)-1 &&
+		isBlankAssistant(t.items[t.openAssistant].Text) {
+		t.items = t.items[:t.openAssistant]
+	}
 	t.openAssistant = -1
+	// Flush reminder chrome held back while the answer streamed (addNotice), so it
+	// renders right after the completed block instead of splitting it.
+	if len(t.pendingNotices) > 0 {
+		t.items = append(t.items, t.pendingNotices...)
+		t.pendingNotices = nil
+	}
+}
+
+// isBlankAssistant reports whether assistant text has no visible content once
+// whitespace and leaked reasoning tags are removed. Such a block renders empty,
+// so it is dropped rather than shown as a gap.
+func isBlankAssistant(s string) bool {
+	for _, tag := range []string{"<think>", "</think>", "<thinking>", "</thinking>"} {
+		s = strings.ReplaceAll(s, tag, "")
+	}
+	return strings.TrimSpace(s) == ""
 }
 
 // foldOpenReasoning collapses the currently-streaming thinking block (if any)
@@ -254,21 +304,25 @@ func (t *Transcript) raw(i int) string {
 // starts[i] is the first content line of item i; total is the line count. The
 // caller maps cursorLine→block for folding/yank and scrolls to keep the cursor
 // visible.
-func (t *Transcript) renderBlocks(cursorLine int, normal bool, w int) (content string, starts []int, total int) {
+func (t *Transcript) renderBlocks(cursorLine int, normal bool, w int, selLo, selHi int) (content string, starts []int, total int, excluded []bool) {
 	inner := w - 2
 	if inner < 1 {
 		inner = 1
 	}
 	wrap := lipgloss.NewStyle().Width(inner)
 	var all []string
+	// excluded is parallel to all: true = a meta line never highlighted (and so
+	// never copied — selection copy consults the same mask).
+	// A blank top margin so the first block doesn't sit flush against the
+	// viewport's top edge; it scrolls with the content and never copies.
+	all = append(all, "")
+	excluded = append(excluded, true)
 	starts = make([]int, len(t.items))
 	for i, it := range t.items {
 		starts[i] = len(all)
 		var rendered string
-		switch {
-		case it.Kind == ItemBanner:
-			rendered = renderBanner(inner)
-		case it.Kind == ItemAssistant:
+		switch it.Kind {
+		case ItemAssistant:
 			// Assistant text is markdown (glamour wraps it itself, so bypass the
 			// lipgloss wrapper that would mangle its ANSI). Cached by (width,len)
 			// so a refresh that didn't change the text — e.g. scrolling — reuses
@@ -282,39 +336,91 @@ func (t *Transcript) renderBlocks(cursorLine int, normal bool, w int) (content s
 		default:
 			rendered = wrap.Render(renderItem(it))
 		}
-		all = append(all, strings.Split(rendered, "\n")...)
+		lines := strings.Split(rendered, "\n")
+		all = append(all, lines...)
+		for li := range lines {
+			excluded = append(excluded, metaExcluded(it, li == 0))
+		}
 		if i < len(t.items)-1 {
 			all = append(all, "") // blank separator between blocks (not after the last)
+			excluded = append(excluded, true)
 		}
+	}
+	// Clamp the cursor to a real line here so the bar renders on the right line
+	// in THIS frame — even on the first render after entering NORMAL, where the
+	// caller passes a sentinel (1<<30) meaning "last line" that it only clamps
+	// against the total *after* this call. Without this, the bar would be missing
+	// until the next refresh (i.e. only after the first action).
+	cur := cursorLine
+	if cur >= len(all) {
+		cur = len(all) - 1
+	}
+	if cur < 0 {
+		cur = 0
 	}
 	for idx := range all {
 		bar := "  "
-		if normal && idx == cursorLine {
+		if normal && idx == cur {
 			bar = stBar.Render("▌") + " "
 		}
-		all[idx] = bar + all[idx]
+		line := all[idx]
+		if selLo <= selHi && idx >= selLo && idx <= selHi && !excluded[idx] {
+			line = reverseContent(line, inner)
+		}
+		all[idx] = bar + line
 	}
-	return strings.Join(all, "\n"), starts, len(all)
+	return strings.Join(all, "\n"), starts, len(all), excluded
 }
 
-// renderBanner is the session-start "shell3" line. When width > 0 the middle is
-// filled with dim "/" (matching the slash backgrounds) and a right-aligned hint
-// reminds you to press esc to scroll the output.
-func renderBanner(width int) string {
-	head := stBrand.Render("๑ï shell3") + "  " + stDim.Render("/ˈʃɛli/")
-	if width <= 0 {
-		return head
+// metaExcluded reports whether a rendered line is meta chrome that mouse
+// selection/copy should skip. isHeaderLine is true for the first line of the
+// owning item. Injected system reminders are excluded entirely; a thinking
+// (reasoning) block excludes only its "thinking" indicator line — the reasoning
+// content below it stays selectable and copyable.
+func metaExcluded(it *Item, isHeaderLine bool) bool {
+	switch {
+	case it.Kind == ItemNotice && it.Notice == NoticeReminder:
+		return true
+	case it.Kind == ItemReasoning:
+		return isHeaderLine
 	}
-	hint := stDim.Render("esc to scroll output")
-	used, hintW := lipgloss.Width(head), lipgloss.Width(hint)
-	if gap := width - used - hintW - 2; gap >= 1 {
-		return head + " " + stSlashBg.Render(strings.Repeat("/", gap)) + " " + hint
+	return false
+}
+
+// reverseContent inverts the colors (AttrReverse) of a rendered line's content
+// cells — the selection highlight. It parses the line (with its own ANSI) into an
+// ultraviolet cell grid, so the highlight survives the SGR resets glamour bakes
+// into colored content (a plain background style would be switched off mid-line
+// by those resets). Only cells up to the last non-blank one are inverted, so
+// trailing whitespace stays plain and an empty line (a block separator) is left
+// untouched.
+func reverseContent(s string, width int) string {
+	if width < 1 {
+		return s
 	}
-	// Too narrow for the hint: just fill with slashes.
-	if width > used+1 {
-		return head + " " + stSlashBg.Render(strings.Repeat("/", width-used-1))
+	// Size the cell grid to the wider of the viewport width and the line's own
+	// content width: glamour markdown (e.g. long code lines) can exceed the
+	// viewport, and a grid clipped to width would truncate both the highlight and
+	// the text copied from it.
+	w := width
+	if cw := lipgloss.Width(s); cw > w {
+		w = cw
 	}
-	return head
+	buf := uv.NewScreenBuffer(w, 1)
+	uv.NewStyledString(s).Draw(&buf, image.Rect(0, 0, w, 1))
+	line := buf.Line(0)
+	last := -1
+	for x := 0; x < w; x++ {
+		if c := line.At(x); c != nil && c.Content != "" && c.Content != " " {
+			last = x
+		}
+	}
+	for x := 0; x <= last; x++ {
+		if c := line.At(x); c != nil {
+			c.Style.Attrs |= uv.AttrReverse
+		}
+	}
+	return strings.TrimRight(line.Render(), "\n")
 }
 
 func renderItem(it *Item) string {
@@ -325,8 +431,6 @@ func renderItem(it *Item) string {
 		return stChevron.Render("▾")
 	}
 	switch it.Kind {
-	case ItemBanner:
-		return renderBanner(0)
 	case ItemUser:
 		if it.Steer {
 			return stThinking.Render("⤷ steer ") + stUserText.Render(it.Text)
@@ -338,7 +442,7 @@ func renderItem(it *Item) string {
 		if it.Folded {
 			return chev(true) + " " + stThinking.Render(fmt.Sprintf("thinking (%d lines)", countLines(it.Text)))
 		}
-		return chev(false) + " " + stThinking.Render("thinking") + "\n" + stThinking.Render(indent(it.Text))
+		return chev(false) + " " + stThinking.Render("thinking") + "\n" + stThinking.Render(strings.TrimRight(it.Text, "\n"))
 	case ItemTool:
 		tr := toolRenderFor(it.ToolName)
 		status := stDim.Render("…")
@@ -352,14 +456,14 @@ func renderItem(it *Item) string {
 		var b strings.Builder
 		b.WriteString(head + "  " + status)
 		if !tr.hideInput && strings.TrimSpace(it.ToolInput) != "" {
-			b.WriteString("\n" + stDim.Render(indent(it.ToolInput)))
+			b.WriteString("\n" + stDim.Render(strings.TrimRight(it.ToolInput, "\n")))
 		}
 		if it.ToolDone && strings.TrimSpace(it.ToolOutput) != "" {
 			out := it.ToolOutput
 			if tr.colorize != nil {
 				out = tr.colorize(out)
 			}
-			b.WriteString("\n" + indent(out))
+			b.WriteString("\n" + strings.TrimRight(out, "\n"))
 		}
 		return b.String()
 	case ItemNotice:
@@ -372,6 +476,15 @@ func renderItem(it *Item) string {
 			return stDim.Render("⟳ " + it.Text)
 		case NoticeInfo:
 			return stInfo.Render(it.Text)
+		case NoticeReminder:
+			// Render like a thinking block but in muted yellow, folded by default —
+			// reminders are frequent host chrome, not content. Folded keeps them to a
+			// one-line indicator instead of an invisible dim-gray gap.
+			body := reminderBody(it.Text)
+			if it.Folded {
+				return chev(true) + " " + stReminder.Render(fmt.Sprintf("reminder (%d lines)", countLines(body)))
+			}
+			return chev(false) + " " + stReminder.Render("reminder") + "\n" + stReminder.Render(body)
 		default:
 			return stDim.Render(it.Text)
 		}
@@ -426,12 +539,4 @@ func countLines(s string) int {
 		return 0
 	}
 	return strings.Count(s, "\n") + 1
-}
-
-func indent(s string) string {
-	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
-	for i, ln := range lines {
-		lines[i] = "  " + ln
-	}
-	return strings.Join(lines, "\n")
 }

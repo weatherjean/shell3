@@ -159,7 +159,7 @@ func renderDelegation(p delegationParams) string {
 		fmt.Fprintf(&b, "  %s run --config %s --agent <name> --out %s --parent-session %s --id <id> --prompt \"<task>\"\n\n",
 			p.Binary, p.ConfigPath, transcript, p.ParentSession)
 	}
-	b.WriteString("When it finishes you'll get a notification with the subagent's result summary (act on it directly) plus the transcript path at `" + transcript + "`. The transcript is a JSONL audit log — read it only if the summary isn't enough, and extract the subagent's full final answer cleanly with:\n\n")
+	b.WriteString("When it finishes you'll get a notification with the subagent's result summary — relay it to the user (summarize or present it in your reply; the user hasn't seen the subagent's output, only you have) — plus the transcript path at `" + transcript + "`. The transcript is a JSONL audit log — read it only if the summary isn't enough, and extract the subagent's full final answer cleanly with:\n\n")
 	fmt.Fprintf(&b, "    jq -rs 'map(select(.kind==\"assistant_message\"))[-1].text' %s\n", transcript)
 	return b.String()
 }

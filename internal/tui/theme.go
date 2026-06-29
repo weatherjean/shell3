@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"hash/fnv"
+	"image/color"
 	"math"
 	"strings"
 
@@ -16,6 +18,7 @@ var (
 	cMuted   = lipgloss.Color("#6B7280") // gray-500
 	cGreen   = lipgloss.Color("#78AA78") // muted green — tool headers
 	cSage    = lipgloss.Color("#87A58C") // muted sage — reasoning
+	cAmber   = lipgloss.Color("#BFA94A") // muted yellow — system reminders
 	cRed     = lipgloss.Color("#B91C1C") // errors / mode badge
 	cUser    = lipgloss.Color("#E5E7EB") // near-white user text
 	cCyan    = lipgloss.Color("#5BB6C9") // : command info
@@ -34,6 +37,7 @@ var (
 
 	stUserText = lipgloss.NewStyle().Foreground(cUser)
 	stThinking = lipgloss.NewStyle().Foreground(cSage)
+	stReminder = lipgloss.NewStyle().Foreground(cAmber)
 	stDim      = lipgloss.NewStyle().Foreground(cMuted)
 	stFgDim    = lipgloss.NewStyle().Foreground(cFgDim)
 	stErr      = lipgloss.NewStyle().Foreground(cRed).Bold(true)
@@ -53,20 +57,69 @@ var (
 	// Ctrl+C "press again to quit" — red middle bar.
 	stCtrlCArmed = lipgloss.NewStyle().Foreground(cUser).Background(cRed).Bold(true)
 
-	// ":disable_safety" indicator — green "!" pill next to the model.
+	// Danger "!" pill — shown when bash_safety is off (runtime :disable_safety or
+	// disabled in the lua config).
 	stYolo = lipgloss.NewStyle().Foreground(cBlack).Background(cGreen).Bold(true)
 
-	// Active-agent badge, right side of the footer (Tab cycles it).
-	stAgent = lipgloss.NewStyle().Foreground(cUser).Background(cRed).Bold(true)
+	// Live subprocess count ("bg: N") — its own background so it reads apart from
+	// the danger/agent pills around it on the footer.
+	stBgCount = lipgloss.NewStyle().Foreground(cBlack).Background(cCyan).Bold(true)
 
-	// Decorative "/" field behind the welcome card and modals — kept very dim.
-	stSlashBg = lipgloss.NewStyle().Foreground(lipgloss.Color("#2E2E33"))
+	// Brand snail "๑ï", glued to the agent badge on the right of the footer:
+	// dark text on the primary background.
+	stSnail = lipgloss.NewStyle().Foreground(cBlack).Background(cPrimary).Bold(true)
+
+	// Transient last-action notice on the footer (primary text, auto-hides).
+	stNotice = lipgloss.NewStyle().Foreground(cPrimary)
 
 	// edit_file diff colors (git-diff-style preview).
 	stDiffAdd  = lipgloss.NewStyle().Foreground(lipgloss.Color("#B4E6B4")).Background(lipgloss.Color("#143C14"))
 	stDiffDel  = lipgloss.NewStyle().Foreground(lipgloss.Color("#F0B4B4")).Background(lipgloss.Color("#461414"))
 	stDiffMeta = lipgloss.NewStyle().Foreground(cFgDim).Background(lipgloss.Color("#4A4018"))
 )
+
+// agentBadge renders the active-agent pill for the footer. Its background color
+// is derived deterministically from the agent name, and the text is black or
+// white — whichever reads better on that background.
+func agentBadge(name string) string {
+	bg := agentColor(name)
+	return lipgloss.NewStyle().Foreground(readableOn(bg)).Background(bg).Bold(true).
+		Render(" " + name + " ")
+}
+
+// agentColor maps an agent name to a stable, muted background color without a
+// config knob. The name hashes into one of 12 hue buckets 30° apart, rendered at
+// the palette's saturation/value — so two agents are either the same color or
+// clearly distinct, never a muddy near-match (raw hash%360 once put "code" and
+// "plan" two degrees apart).
+func agentColor(name string) colorful.Color {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(name))
+	hue := float64(h.Sum32()%12) * 30
+	return colorful.Hsv(hue, 0.55, 0.7)
+}
+
+// readableOn returns black or near-white text for the higher-contrast pairing
+// against bg. The crossover sits at relative luminance ≈ 0.179 — the point where
+// black and white give equal WCAG contrast.
+func readableOn(bg colorful.Color) color.Color {
+	if relLuminance(bg) > 0.179 {
+		return cBlack
+	}
+	return cUser
+}
+
+// relLuminance is the WCAG relative luminance of an sRGB color: each channel is
+// linearized, then weighted by the eye's sensitivity.
+func relLuminance(c colorful.Color) float64 {
+	lin := func(v float64) float64 {
+		if v <= 0.03928 {
+			return v / 12.92
+		}
+		return math.Pow((v+0.055)/1.055, 2.4)
+	}
+	return 0.2126*lin(c.R) + 0.7152*lin(c.G) + 0.0722*lin(c.B)
+}
 
 // rainbowBg renders s as white text over an animated rainbow background — the
 // thinking indicator. shift flows the colors per frame.

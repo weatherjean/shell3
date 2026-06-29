@@ -148,11 +148,18 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		allMsgs = injectReminder(allMsgs, reminder)
 		emitSystemReminder(sess, reminder)
 	}
-	texts, userParts := sess.drainInbox()
-	reminder := interjectReminder(texts)
-	if reminder != "" {
-		allMsgs = injectReminder(allMsgs, reminder)
-		emitSystemReminder(sess, reminder)
+	// Turn start drains BOTH user steering and host notifications (a fresh turn
+	// is a clean boundary). Each source gets its own labeled reminder block.
+	steerTexts, noticeTexts, userParts := sess.drainInbox(false)
+	steerReminder := reminderBlock(steerReminderHeader, steerTexts)
+	noticeReminder := reminderBlock(noticeReminderHeader, noticeTexts)
+	if steerReminder != "" {
+		allMsgs = injectReminder(allMsgs, steerReminder)
+		emitSystemReminder(sess, steerReminder)
+	}
+	if noticeReminder != "" {
+		allMsgs = injectReminder(allMsgs, noticeReminder)
+		emitSystemReminder(sess, noticeReminder)
 	}
 	// Parts queued while idle are injected as a user message right after the
 	// reminder lands on the turn's user message (consecutive user messages are
@@ -168,7 +175,7 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 	// would otherwise be just [system] with no prior history and no user
 	// message — a system-only request a strict provider may reject. End the turn
 	// cleanly (turn_done, no usage, no stream call) instead.
-	if inboxSeeded && reminder == "" && len(userParts) == 0 && len(msgs) == 0 {
+	if inboxSeeded && steerReminder == "" && noticeReminder == "" && len(userParts) == 0 && len(msgs) == 0 {
 		terminalEmit = func() { emitTurnDone(sess, 0, 0, 0) }
 		return
 	}
@@ -244,8 +251,11 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 			allMsgs[len(allMsgs)-1].Content += "\n\n" + reminder
 			emitSystemReminder(sess, reminder)
 		}
-		texts, userParts := sess.drainInbox()
-		if reminder := interjectReminder(texts); reminder != "" {
+		// Mid-turn: deliver user steering promptly (it's interactive), but leave
+		// host notifications queued — a finished background task waits for a turn
+		// boundary so it never interrupts the in-flight turn.
+		steerTexts, _, userParts := sess.drainInbox(true)
+		if reminder := reminderBlock(steerReminderHeader, steerTexts); reminder != "" {
 			allMsgs[len(allMsgs)-1].Content += "\n\n" + reminder
 			emitSystemReminder(sess, reminder)
 		}
@@ -491,6 +501,12 @@ func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools
 // only adds an LLM round-trip and a boilerplate summary message for no benefit.
 const compactionFloor = 8
 
+// compactionFloorTokens is the alternative, token-based floor: a head with fewer
+// than compactionFloor messages still compacts when its estimated tokens reach
+// this, so a short-but-huge head (e.g. a couple of giant tool results) — exactly
+// what needs collapsing — is not skipped by the message-count floor alone.
+const compactionFloorTokens = 4096
+
 // keepRecentFraction is the default fraction of compact_at preserved as the
 // verbatim tail when keep_recent is unset.
 const keepRecentFraction = 33 // percent
@@ -537,7 +553,7 @@ func maybeCompact(ctx context.Context, cfg TurnConfig, sess *Session) {
 		return
 	}
 	if forced || sess.lastPromptTokens >= cfg.CompactAt {
-		compactNow(ctx, cfg, sess)
+		compactNow(ctx, cfg, sess, forced)
 		return
 	}
 	if cfg.PruneAt > 0 && sess.lastPromptTokens >= cfg.PruneAt {
@@ -553,7 +569,7 @@ func maybeCompact(ctx context.Context, cfg TurnConfig, sess *Session) {
 // proceeds on the un-compacted history. After a successful compaction
 // lastPromptTokens is reset to the rewritten history's (small) estimated size so
 // the threshold is not immediately re-tripped next turn.
-func compactNow(ctx context.Context, cfg TurnConfig, sess *Session) {
+func compactNow(ctx context.Context, cfg TurnConfig, sess *Session, forced bool) {
 	// Compute the tail boundary before checking the floor: if the entire history
 	// fits within keepRecent, there is nothing left to summarise.
 	keepRecent := resolveKeepRecent(cfg)
@@ -564,14 +580,21 @@ func compactNow(ctx context.Context, cfg TurnConfig, sess *Session) {
 		keepRecent = minKeepRecent
 	}
 	cut := compactionCut(sess.messages, keepRecent)
-	if cut <= 0 || cut < compactionFloor || cut >= len(sess.messages) {
-		// Tail already covers everything meaningful, the head is too small to be
-		// worth a summary round-trip, or the snap-forward consumed the whole tail
-		// (a trailing all-tool run) — compacting here would summarize the latest
-		// turn away. Proceed on the un-compacted history.
+	if cut <= 0 || cut >= len(sess.messages) {
+		// There is no head to summarise: the tail already covers everything
+		// meaningful, or the snap-forward over a trailing all-tool run consumed the
+		// whole tail (compacting here would summarize the latest turn away).
 		return
 	}
 	head := sess.messages[:cut]
+	// Floor check (auto path only — a forced :compact always proceeds when there
+	// is a head). Skip only when the head is BOTH few messages AND few tokens: a
+	// short head with many tokens (a couple of giant tool results) is exactly
+	// what compaction should collapse, so the message-count floor alone would
+	// wrongly no-op and leave context growing unbounded.
+	if !forced && cut < compactionFloor && estimatePromptTokens(head) < compactionFloorTokens {
+		return
+	}
 	tail := sess.messages[cut:]
 
 	// One quiet LLM call: summarise only the head we are about to discard. We
@@ -600,13 +623,23 @@ func compactNow(ctx context.Context, cfg TurnConfig, sess *Session) {
 	// rewrites sess.messages in place and rolls the store session.
 	// RunTurn rebuilds its own allMsgs after maybeCompact returns.
 	prevTokens := sess.lastPromptTokens
-	compactInto(summaryArgs, cfg.Store, sess, tail, cfg.Log, cfg.WorkDir, cfg.ConfigPath)
+	if !compactInto(summaryArgs, cfg.Store, sess, tail, cfg.Log, cfg.WorkDir, cfg.ConfigPath) {
+		// The runs-session roll failed; history is untouched. Proceed on the
+		// un-compacted history without resetting the gauge or emitting a
+		// (misleading) compacted event.
+		return
+	}
 
 	// Reset the token gauge to the rewritten history's (small) estimate so the
 	// next turn does not immediately re-trip the threshold before a real usage
 	// count from the provider lands.
 	newTokens := estimatePromptTokens(sess.messages)
 	sess.lastPromptTokens = newTokens
+	// The context-usage reminder tracker remembers the last emitted bucket and
+	// token mark across turns; without resetting it here, those stale (high)
+	// values would suppress every context reminder as the conversation re-grows
+	// from the post-compaction low back up through the same band.
+	sess.reminders.resetContextGauge()
 
 	emitCompacted(sess, prevTokens, newTokens)
 }
@@ -705,10 +738,17 @@ func compactionCut(msgs []llm.Message, keepRecent int) int {
 // genuinely additive across rounds.
 func addUsage(a, b llm.Usage) llm.Usage {
 	completion := a.CompletionTokens + b.CompletionTokens
+	// A follow-up round may stream completion tokens but omit the prompt count
+	// (PromptTokens=0); keep the last known prompt count rather than zeroing the
+	// reported prompt/total for that round.
+	prompt := b.PromptTokens
+	if prompt == 0 {
+		prompt = a.PromptTokens
+	}
 	return llm.Usage{
-		PromptTokens:     b.PromptTokens,
+		PromptTokens:     prompt,
 		CompletionTokens: completion,
-		TotalTokens:      b.PromptTokens + completion,
+		TotalTokens:      prompt + completion,
 	}
 }
 

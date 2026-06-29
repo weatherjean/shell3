@@ -31,6 +31,15 @@ func TestRenderDelegation_NewTemplate(t *testing.T) {
 	if !strings.Contains(out, "- explore: search") {
 		t.Errorf("expected subagent listing:\n%s", out)
 	}
+	// The completion sentence must tell the agent to relay the result to the user
+	// (it lands on a silent idle-wake turn). The old "(act on it directly)" let
+	// the model treat the task as done and never surface the answer.
+	if !strings.Contains(out, "relay it to the user") {
+		t.Errorf("expected a relay-to-user instruction:\n%s", out)
+	}
+	if strings.Contains(out, "(act on it directly)") {
+		t.Errorf("completion sentence still says 'act on it directly':\n%s", out)
+	}
 }
 
 // TestRenderDelegation_InboxAbsolutePaths asserts that when RunsDir is known the

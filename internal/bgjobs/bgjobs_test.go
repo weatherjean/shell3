@@ -228,6 +228,47 @@ func TestKillAll(t *testing.T) {
 	}
 }
 
+func TestKill(t *testing.T) {
+	runsDir := t.TempDir()
+	dir := t.TempDir()
+	job, err := Start(runsDir, []string{"bash", "-c", "sleep 60"}, "sleep 60", dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !alive(job.PID) {
+		t.Fatalf("job %d not alive after Start", job.PID)
+	}
+	if err := Kill(runsDir, job.ID); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	if !waitDead(job.PID, 3*time.Second) {
+		t.Errorf("job %d still alive after Kill", job.PID)
+	}
+	// Wait for the reaper so t.TempDir() cleanup doesn't race it.
+	select {
+	case <-job.Done():
+	case <-time.After(5 * time.Second):
+		t.Error("reaper goroutine did not finish within 5s")
+	}
+	// Unlike KillAll, Kill keeps the log readable so the user can inspect output.
+	if _, err := os.Stat(job.Log); err != nil {
+		t.Errorf("log should be preserved after Kill: %v", err)
+	}
+	// The dead job is pruned from the live list.
+	jobs, _ := List(runsDir)
+	for _, j := range jobs {
+		if j.ID == job.ID {
+			t.Errorf("killed job should be pruned from List: %+v", j)
+		}
+	}
+}
+
+func TestKill_unknownID(t *testing.T) {
+	if err := Kill(t.TempDir(), "bg_nope"); err == nil {
+		t.Fatal("expected an error killing an unknown job id")
+	}
+}
+
 func TestStartInjectsEnv(t *testing.T) {
 	runsDir := t.TempDir()
 	dir := t.TempDir()

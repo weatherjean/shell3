@@ -66,14 +66,17 @@ type Session struct {
 	inbox   []inboxItem
 }
 
-// inboxItem is one queued Interject: steering text plus optional media parts.
+// inboxItem is one queued interjection: text, optional media parts, and whether
+// it is a host notification (a subagent/background-job completion reported back)
+// rather than user steering. The two are delivered differently — see drainInbox.
 type inboxItem struct {
-	text  string
-	parts []llm.ContentPart
+	text   string
+	parts  []llm.ContentPart
+	notice bool
 }
 
-// Interject queues text for delivery to the model: mid-turn at the next round
-// boundary, otherwise at the start of the next turn. Optional parts
+// Interject queues user steering for delivery to the model: mid-turn at the next
+// round boundary, otherwise at the start of the next turn. Optional parts
 // (images/audio) are delivered alongside the text via a synthetic user message
 // — see drainInbox's callers. Safe to call from any goroutine at any time; it
 // never fails and never blocks on a running turn.
@@ -81,6 +84,17 @@ func (s *Session) Interject(text string, parts ...llm.ContentPart) {
 	s.inboxMu.Lock()
 	defer s.inboxMu.Unlock()
 	s.inbox = append(s.inbox, inboxItem{text: text, parts: slices.Clone(parts)})
+}
+
+// InterjectNotice queues a host notification — a fire-and-forget subagent or
+// background job reporting that it finished. Unlike Interject (user steering), a
+// notice is NEVER drained mid-turn: it surfaces only at a turn boundary, so a
+// task completing can't interrupt an in-flight turn. Safe to call from any
+// goroutine at any time.
+func (s *Session) InterjectNotice(text string) {
+	s.inboxMu.Lock()
+	defer s.inboxMu.Unlock()
+	s.inbox = append(s.inbox, inboxItem{text: text, notice: true})
 }
 
 // HasInbox reports whether any interjected items are queued. Safe to call from
@@ -91,30 +105,45 @@ func (s *Session) HasInbox() bool {
 	return len(s.inbox) > 0
 }
 
-// drainInbox removes all queued interjections, returning the steering texts
-// (in arrival order, feeding interjectReminder) and the flattened media parts
-// (same order, feeding attachmentsMessage). Called only from the turn
+// drainInbox removes queued interjections, returning user-steering texts and
+// host-notification texts separately (each in arrival order, feeding
+// reminderBlock) plus the flattened media parts (steering only — notices carry
+// no media). When steerOnly is true, host notifications are LEFT queued so they
+// surface at a turn boundary rather than mid-turn. Called only from the turn
 // goroutine.
-func (s *Session) drainInbox() (texts []string, parts []llm.ContentPart) {
+func (s *Session) drainInbox(steerOnly bool) (steer, notices []string, parts []llm.ContentPart) {
 	s.inboxMu.Lock()
 	defer s.inboxMu.Unlock()
+	var keep []inboxItem
 	for _, it := range s.inbox {
-		texts = append(texts, it.text)
+		if it.notice {
+			if steerOnly {
+				keep = append(keep, it)
+				continue
+			}
+			notices = append(notices, it.text)
+			continue
+		}
+		steer = append(steer, it.text)
 		parts = append(parts, it.parts...)
 	}
-	s.inbox = nil
-	return texts, parts
+	s.inbox = keep
+	return steer, notices, parts
 }
 
-// interjectReminder formats queued interjections as one system-reminder block.
-// Returns "" when items is empty or all items are blank after trimming. Each
-// item is trimmed with strings.TrimSpace; whitespace-only items are skipped.
-// Multi-line items have their continuation lines indented two spaces so the
-// bullet list stays readable.
-func interjectReminder(items []string) string {
-	if len(items) == 0 {
-		return ""
-	}
+// Reminder headers label the two inbox sources distinctly so the model never
+// mistakes a background-task report for the user speaking.
+const (
+	steerReminderHeader  = "user sent additional input — incorporate it before continuing:"
+	noticeReminderHeader = "a background task you started reported back:"
+)
+
+// reminderBlock formats queued inbox items as one system-reminder block under
+// header. Returns "" when items is empty or all items are blank after trimming.
+// Each item is trimmed with strings.TrimSpace; whitespace-only items are
+// skipped. Multi-line items have their continuation lines indented two spaces so
+// the bullet list stays readable.
+func reminderBlock(header string, items []string) string {
 	var b strings.Builder
 	wrote := false
 	for _, it := range items {
@@ -123,7 +152,7 @@ func interjectReminder(items []string) string {
 			continue
 		}
 		if !wrote {
-			b.WriteString("<system-reminder>\nuser sent additional input — incorporate it before continuing:\n")
+			b.WriteString("<system-reminder>\n" + header + "\n")
 			wrote = true
 		}
 		b.WriteString("- " + strings.ReplaceAll(it, "\n", "\n  ") + "\n")
@@ -222,14 +251,20 @@ type ReminderRecord struct {
 }
 
 // recordReminder logs a system-reminder for dashboard display, anchored before
-// the next message to be appended. Called from emitSystemReminder.
+// the next message to be appended. Called from emitSystemReminder (turn
+// goroutine only). The in-memory append is done under msgMu; the sidecar write
+// is done AFTER releasing the lock so a slow disk (fsync stall, NFS) can't block
+// the dashboard's concurrent readers (History/Messages/Reminders/ID) behind the
+// held write lock. Single-writer (turn goroutine), so the persisted order still
+// matches the in-memory order.
 func (s *Session) recordReminder(text string) {
 	s.msgMu.Lock()
-	defer s.msgMu.Unlock()
 	seq := len(s.messages)
 	s.reminderLog = append(s.reminderLog, ReminderRecord{Seq: seq, Text: text})
-	if s.store != nil && s.id != "" {
-		_ = s.store.AppendReminder(s.id, seq, text) // best-effort; never blocks the turn
+	store, id := s.store, s.id
+	s.msgMu.Unlock()
+	if store != nil && id != "" {
+		_ = store.AppendReminder(id, seq, text) // best-effort; never blocks readers
 	}
 }
 
@@ -266,6 +301,27 @@ func (s *Session) Reminders() []ReminderRecord {
 	return out
 }
 
+// HistorySnapshot returns a consistent point-in-time copy of the conversation
+// messages together with the recorded reminders (standing reminders first,
+// anchored at Seq 0, then the logged ones), taken under a SINGLE msgMu read
+// lock. compactInto swaps sess.messages and clears sess.reminderLog atomically
+// under that same lock; taking both here in one acquisition prevents a reader
+// (the dashboard's History()) from pairing a post-compaction message slice with
+// pre-compaction reminder anchors. Mirrors Messages()+Reminders() but without
+// the split-lock window between them.
+func (s *Session) HistorySnapshot() ([]llm.Message, []ReminderRecord) {
+	s.msgMu.RLock()
+	defer s.msgMu.RUnlock()
+	msgs := make([]llm.Message, len(s.messages))
+	copy(msgs, s.messages)
+	rems := make([]ReminderRecord, 0, len(s.standingReminders)+len(s.reminderLog))
+	for _, t := range s.standingReminders {
+		rems = append(rems, ReminderRecord{Seq: 0, Text: t})
+	}
+	rems = append(rems, slices.Clone(s.reminderLog)...)
+	return msgs, rems
+}
+
 // StandingReminders returns a copy of the host standing reminders (Environment,
 // Delegation) for display in the prompt-inspection views (the TUI /prompt
 // command and the dashboard Status → Prompt). Safe to call concurrently.
@@ -289,6 +345,16 @@ type reminderTracker struct {
 	lastModel        string // model name present in last emitted reminder
 	lastTokens       int    // prompt tokens at last emission (persists across turns)
 	contextWindowFor func(string) int
+}
+
+// resetContextGauge clears the context-usage state (last emitted bucket and
+// token mark) so the next check re-baselines. Called after a compaction drops
+// the prompt-token count: without it the stale high-water values suppress every
+// context reminder as the conversation re-grows. lastModel is intentionally
+// preserved so a model-change reminder is not spuriously re-emitted.
+func (r *reminderTracker) resetContextGauge() {
+	r.lastContextPct = 0
+	r.lastTokens = 0
 }
 
 // check returns a formatted <system-reminder> block if any condition warrants

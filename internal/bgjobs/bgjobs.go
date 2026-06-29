@@ -73,6 +73,10 @@ func statusPath(runsDir, id string) string {
 }
 
 // logPath returns the path for a job's output log.
+// LogPath returns the path to a job's combined stdout/stderr log, so callers
+// outside the package can read a job's output by id.
+func LogPath(runsDir, id string) string { return logPath(runsDir, id) }
+
 func logPath(runsDir, id string) string {
 	return filepath.Join(jobsDir(runsDir), id+".jsonl")
 }
@@ -304,6 +308,33 @@ func KillAll(runsDir, workdir string) (int, error) {
 		_ = os.Remove(logPath(runsDir, v.sf.ID))
 	}
 	return killed, nil
+}
+
+// Kill signals one job by id with SIGTERM to its whole process group, allowing a
+// graceful shutdown. Unlike KillAll it does NOT remove the status/log files: the
+// reaper records the exit code and List prunes the job once its pid is dead, so
+// the job's output stays readable after the kill. Returns an error when no job
+// with that id exists or the signal fails; an already-exited job is a no-op
+// (nil), since there is nothing to signal.
+func Kill(runsDir, id string) error {
+	path := statusPath(runsDir, id)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("no such job %q", id)
+		}
+		return fmt.Errorf("read status %q: %w", id, err)
+	}
+	var sf statusFile
+	if err := json.Unmarshal(data, &sf); err != nil {
+		return fmt.Errorf("parse status %q: %w", id, err)
+	}
+	if sf.PID > 0 && proc.Alive(sf.PID) {
+		if err := syscall.Kill(-sf.PID, syscall.SIGTERM); err != nil {
+			return fmt.Errorf("signal job %q (pid %d): %w", id, sf.PID, err)
+		}
+	}
+	return nil
 }
 
 // newID returns "bg_<6 hex>".

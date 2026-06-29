@@ -29,20 +29,27 @@ func TestRenderNotification_AgentDone(t *testing.T) {
 	})
 	for _, want := range []string{
 		"explore1", "Found 3 call sites", ".shell3/agents/explore1.jsonl",
-		"act on it directly", // preview framed as the answer
+		"relay it to the user", // the agent must surface the result, not sit on it
 		"jq -rs 'map(select(.kind==\"assistant_message\"))[-1].text'", // exact extraction recipe
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("agent_done pointer %q missing %q", got, want)
 		}
 	}
-	// With no preview, the message points straight at the transcript extraction.
+	// The old wording told the agent it was already done ("act on it directly;
+	// you do NOT need to read anything else") — which let it stay silent instead
+	// of relaying. Guard against that regressing.
+	if strings.Contains(got, "you do NOT need to read anything else") {
+		t.Errorf("agent_done pointer still discourages relaying: %q", got)
+	}
+	// With no preview, the message points straight at the transcript extraction
+	// and still tells the agent to relay what it finds.
 	noPrev := renderNotification(notify.Notification{
 		Kind: "agent_done", ID: "x", Status: "ok",
 		Transcript: ".shell3/agents/x.jsonl",
 	})
-	if !strings.Contains(noPrev, "Read its result from the transcript") {
-		t.Errorf("preview-less agent_done = %q, want transcript-read instruction", noPrev)
+	if !strings.Contains(noPrev, "Read its result from the transcript") || !strings.Contains(noPrev, "relay it to the user") {
+		t.Errorf("preview-less agent_done = %q, want transcript-read + relay instruction", noPrev)
 	}
 	// A status-less notification still renders a sane default.
 	if g := renderNotification(notify.Notification{Kind: "agent_done", ID: "x"}); !strings.Contains(g, "subagent x finished (done)") {

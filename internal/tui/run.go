@@ -46,11 +46,16 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 		// the app never drops out). Block this turn goroutine until the user
 		// answers or the turn is canceled.
 		reply := make(chan bool, 1)
-		prog.Send(confirmMsg{req: &confirmReq{command: command, reason: reason, reply: reply}})
+		req := &confirmReq{command: command, reason: reason, reply: reply}
+		prog.Send(confirmMsg{req: req})
 		select {
 		case ok := <-reply:
 			return ok
 		case <-ctx.Done():
+			// Context canceled (ask_timeout fired, or the turn was canceled): tell
+			// the TUI to dismiss the now-abandoned modal so it doesn't trap the
+			// keyboard, then deny.
+			prog.Send(confirmAbortMsg{req: req})
 			return false
 		}
 	}
@@ -70,6 +75,12 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 		sess, snap.Agent, snap.StatusLine,
 	)
 	m.contextWindow = snap.ContextWindow
+	m.safetyConfigured = snap.BashSafetyOn
+	// Surface non-fatal config warnings in-band: they were printed to stderr at
+	// load, but the alt-screen TUI clears that line before the user sees it.
+	for _, w := range snap.Warnings {
+		m.tr.AddInfo("config warning: " + w)
+	}
 	// Mid-turn steering: queue interjected text, and run it as a follow-up turn
 	// when the current one ends with input still queued.
 	m.steer = func(text string) { sess.Interject(text) }
