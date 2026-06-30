@@ -96,14 +96,20 @@
 package shell3
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
+	"github.com/weatherjean/shell3/internal/bgjobs"
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/notify"
@@ -1123,6 +1129,14 @@ type Snapshot struct {
 	Skills        []string
 	Subagents     []string
 	Params        []ParamValue
+	// BashSafetyOn reports whether shell3.bash_safety is enabled in the loaded
+	// config. When false the shell is unsafe by default, which the TUI surfaces
+	// with a standing "!" indicator.
+	BashSafetyOn bool
+	// Warnings are non-fatal config load issues (e.g. a removed bash_safety key
+	// that is now ignored). A front-end surfaces them in-band at startup — the
+	// alt-screen TUI otherwise clears the stderr line they were printed on.
+	Warnings []string
 }
 
 // Snapshot returns the current agent state (see Snapshot). Params is populated
@@ -1149,6 +1163,8 @@ func (s *Session) Snapshot() Snapshot {
 		SystemPrompt:  systemPrompt,
 		Skills:        slices.Clone(s.cfg.ActiveSkills),
 		Subagents:     slices.Clone(s.cfg.Subagents),
+		BashSafetyOn:  s.cfg.BashSafety.Enabled,
+		Warnings:      slices.Clone(s.cfg.ConfigWarnings),
 	}
 	for _, t := range s.cfg.Personality.Tools {
 		snap.Tools = append(snap.Tools, ToolInfo{Name: t.Name, Description: t.Description})
@@ -1198,11 +1214,11 @@ type ToolCallInfo struct {
 // History returns the current conversation history as public HistoryEntry
 // values. Tool-role messages have their internal "[tool_call_id=…]\n" prefix
 // stripped from Content so embedders see the raw tool output. Safe to call
-// concurrently with a running turn: it reads a locked snapshot via
-// chat.Session.Messages (the Telegram dashboard polls it mid-turn).
+// concurrently with a running turn: it reads a single locked snapshot via
+// chat.Session.HistorySnapshot (the Telegram dashboard polls it mid-turn), so a
+// concurrent compaction can't split the message slice from its reminder anchors.
 func (s *Session) History() []HistoryEntry {
-	msgs := s.sess.Messages()
-	rems := s.sess.Reminders()
+	msgs, rems := s.sess.HistorySnapshot()
 	out := make([]HistoryEntry, 0, len(msgs)+len(rems))
 	// Interleave recorded system-reminders ahead of the message index they were
 	// injected before. rems is append-ordered, so Seq is non-decreasing.
@@ -1274,6 +1290,184 @@ func (s *Session) Prune(id string) (summary string, ok bool) {
 // :compact). It does not compact immediately — the next turn summarizes the
 // conversation before the model does anything. See chat.Session.QueueCompact.
 func (s *Session) QueueCompact() { s.sess.QueueCompact() }
+
+// JobInfo is the public projection of one live background job (a bash_bg
+// process or a fire-and-forget subagent) for an embedder to display.
+type JobInfo struct {
+	ID        string
+	Cmd       string
+	PID       int
+	StartedAt time.Time
+}
+
+// runsDir reads the project runs directory under s.mu, since SwitchAgent
+// reassigns s.cfg wholesale between turns (mirrors Snapshot's locking).
+func (s *Session) runsDir() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg.RunsDir
+}
+
+// Jobs lists the live background jobs for this session's project — bash_bg
+// processes and fire-and-forget subagents — newest first. Returns nil when no
+// runs directory is configured or none are running. (= the TUI's :background.)
+func (s *Session) Jobs() []JobInfo {
+	dir := s.runsDir()
+	if dir == "" {
+		return nil
+	}
+	jobs, err := bgjobs.List(dir)
+	if err != nil {
+		return nil
+	}
+	out := make([]JobInfo, 0, len(jobs))
+	for _, j := range jobs {
+		out = append(out, JobInfo{ID: j.ID, Cmd: j.Cmd, PID: j.PID, StartedAt: j.StartedAt})
+	}
+	slices.SortFunc(out, func(a, b JobInfo) int { return b.StartedAt.Compare(a.StartedAt) })
+	return out
+}
+
+// jobOutputCap bounds how many trailing bytes of a job's log JobOutput returns.
+const jobOutputCap = 64 * 1024
+
+// tailFile reads up to the trailing max bytes of the file at path WITHOUT loading
+// the whole file into memory: a long-running job's log or transcript can grow to
+// many MB, and these reads run on the TUI's update goroutine, so a whole-file
+// read would briefly freeze the UI. The bool reports whether the head was skipped
+// (file larger than max), so the caller can drop the now-partial first line.
+func tailFile(path string, max int64) (data []byte, truncated bool, err error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, false, err
+	}
+	if info.Size() > max {
+		// Seek relative to the CURRENT end rather than from the (possibly stale)
+		// Stat size, and bound the read with io.LimitReader: a job log being
+		// actively appended must not make this read grow past the cap. These reads
+		// run on the TUI goroutine, so staying bounded is what keeps the UI from
+		// freezing on a large, fast-growing log.
+		if _, err := f.Seek(-max, io.SeekEnd); err != nil {
+			return nil, false, err
+		}
+		b, err := io.ReadAll(io.LimitReader(f, max))
+		return b, true, err
+	}
+	// Even when the file fit at Stat time it may grow before/while we read; cap it.
+	b, err := io.ReadAll(io.LimitReader(f, max))
+	return b, false, err
+}
+
+// dropPartialFirstLine removes the (almost certainly partial) first line left by
+// a byte-cap tail read, so plain output and JSONL parsing both start on a clean
+// line boundary. No-op when there is no newline.
+func dropPartialFirstLine(data []byte) []byte {
+	if i := bytes.IndexByte(data, '\n'); i >= 0 {
+		return data[i+1:]
+	}
+	return data
+}
+
+// JobOutput returns the tail (up to jobOutputCap bytes) of a background job's
+// combined stdout/stderr log, or "" when the log is unavailable.
+func (s *Session) JobOutput(id string) string {
+	dir := s.runsDir()
+	if dir == "" {
+		return ""
+	}
+	data, truncated, err := tailFile(bgjobs.LogPath(dir, id), jobOutputCap)
+	if err != nil {
+		return ""
+	}
+	if truncated {
+		data = dropPartialFirstLine(data) // byte-cap left a partial first line
+	}
+	return string(data)
+}
+
+// transcriptPath extracts the --out transcript path from a job's recorded spawn
+// command, or "" when the job has none. Only a `shell3 run` invocation (a
+// subagent, or a headless run) writes a JSONL transcript at --out; a plain
+// bash_bg job that merely happens to use an --out flag (e.g. `ffmpeg --out=x.mp4`
+// or `mytool --out report.csv`) is NOT one, so it falls back to its stdout log
+// rather than rendering an empty, unparseable "transcript". Handles both
+// "--out <path>" and "--out=<path>".
+func transcriptPath(cmd string) string {
+	fields := strings.Fields(cmd)
+	if !isShell3Run(fields) {
+		return ""
+	}
+	for i, f := range fields {
+		if after, ok := strings.CutPrefix(f, "--out="); ok {
+			return after
+		}
+		if f == "--out" && i+1 < len(fields) {
+			return fields[i+1]
+		}
+	}
+	return ""
+}
+
+// isShell3Run reports whether the command fields are a `shell3 run …` invocation:
+// the first non-env-assignment token's basename is "shell3" and the next token is
+// the "run" subcommand. Leading `VAR=val` env assignments are skipped.
+func isShell3Run(fields []string) bool {
+	for i, f := range fields {
+		if strings.Contains(f, "=") && !strings.HasPrefix(f, "-") {
+			continue // leading env assignment (FOO=bar)
+		}
+		return filepath.Base(f) == "shell3" && i+1 < len(fields) && fields[i+1] == "run"
+	}
+	return false
+}
+
+// JobTranscript returns the structured --out transcript (the rich JSONL audit
+// log: reasoning, tool calls, assistant messages) of a background SUBAGENT job,
+// capped to the trailing jobOutputCap bytes, or "" when the job has no transcript
+// (a plain bash_bg job) or it is unreadable. The TUI's :background view renders
+// this instead of the plain stdout log when present — see JobOutput for the
+// fallback.
+func (s *Session) JobTranscript(id string) string {
+	dir := s.runsDir()
+	if dir == "" {
+		return ""
+	}
+	var cmd string
+	for _, j := range s.Jobs() {
+		if j.ID == id {
+			cmd = j.Cmd
+			break
+		}
+	}
+	path := transcriptPath(cmd)
+	if path == "" {
+		return ""
+	}
+	data, truncated, err := tailFile(path, jobOutputCap)
+	if err != nil {
+		return ""
+	}
+	if truncated {
+		data = dropPartialFirstLine(data) // byte-cap left a partial first JSONL line
+	}
+	return string(data)
+}
+
+// KillJob signals one background job with SIGTERM to its process group so it
+// shuts down gracefully (= the TUI's ctrl+x in :background). It does not block;
+// the job leaves the live list once its process dies.
+func (s *Session) KillJob(id string) error {
+	dir := s.runsDir()
+	if dir == "" {
+		return errors.New("no runs directory configured")
+	}
+	return bgjobs.Kill(dir, id)
+}
 
 // SetParam sets a tunable provider parameter for subsequent turns (= the TUI's
 // /parameters <name> <value>). When the active provider implements

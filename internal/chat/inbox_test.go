@@ -151,6 +151,68 @@ func TestInterject_CrossGoroutine(t *testing.T) {
 	}
 }
 
+// TestInterjectNotice_DeliveredWithNoticeHeader: a host notification surfaces at
+// turn start under its own header — never labeled as user input.
+func TestInterjectNotice_DeliveredWithNoticeHeader(t *testing.T) {
+	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
+	sess, c := newCollectorSession(SessionOpts{})
+	sess.InterjectNotice("subagent x finished (done). Result: built the thing")
+
+	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, Log: LogOrNoop(nil)}
+	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "hi"}, nil)
+
+	var rem string
+	for _, ev := range c.all() {
+		if ev.Kind == EventSystemReminder && strings.Contains(ev.Text, "subagent x finished") {
+			rem = ev.Text
+		}
+	}
+	if rem == "" {
+		t.Fatalf("notice should surface as a system-reminder at turn start; events=%+v", c.all())
+	}
+	if !strings.Contains(rem, "a background task you started reported back") {
+		t.Fatalf("notice must use the host-notification header: %q", rem)
+	}
+	if strings.Contains(rem, "user sent additional input") {
+		t.Fatalf("notice must NOT be labeled as user input: %q", rem)
+	}
+}
+
+// TestInterjectNotice_NotDeliveredMidTurn: a notification that arrives during a
+// tool round must NOT be injected at the after-tool-round boundary (unlike user
+// steering) — it stays queued for a turn boundary so it can't interrupt the
+// in-flight turn.
+func TestInterjectNotice_NotDeliveredMidTurn(t *testing.T) {
+	fake := fakellm.New(
+		fakellm.Script{Events: []llm.StreamEvent{
+			{ToolCall: &llm.ToolCall{ID: "a", Name: "echo", RawArgs: `{}`}},
+		}},
+		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "done"}}},
+	)
+	sess, c := newCollectorSession(SessionOpts{})
+	cfg := TurnConfig{
+		LLM:         fake,
+		Personality: persona.Persona{SystemPrompt: "t"},
+		Handlers: map[string]ToolHandler{"echo": funcHandler{name: "echo",
+			fn: func(context.Context, string, json.RawMessage, ToolConfig) (string, error) {
+				sess.InterjectNotice("subagent bg1 finished (done).")
+				return "echoed", nil
+			}}},
+		Log: LogOrNoop(nil),
+	}
+	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "go"}, nil)
+
+	for _, ev := range c.all() {
+		if ev.Kind == EventSystemReminder && strings.Contains(ev.Text, "subagent bg1 finished") {
+			t.Fatalf("a notice must not be injected mid-turn; got reminder: %q", ev.Text)
+		}
+	}
+	// It stays queued — a later turn/wake boundary delivers it.
+	if !sess.HasInbox() {
+		t.Fatal("notice should remain queued after the turn's mid-round drain")
+	}
+}
+
 // TestInterject_WhitespaceOnly_NoSystemReminder: an Interject containing only
 // whitespace must not produce a SystemReminder event — the reminder block
 // should be suppressed entirely (no header-only XML block).

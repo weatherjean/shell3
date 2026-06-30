@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
@@ -44,6 +46,7 @@ type sessionCmds interface {
 	Clear() error
 	Rollback() (bool, error)
 	Prune(id string) (string, bool)
+	QueueCompact()
 	SwitchAgent(name string) error
 	AgentNames() []string
 	ActiveAgent() string
@@ -52,6 +55,14 @@ type sessionCmds interface {
 	// still waiting (it arrived too late for an in-turn round boundary), so the
 	// model can auto-run a follow-up turn once the current one ends.
 	HasQueuedInput() bool
+	// Jobs lists the live background jobs (bash_bg processes + subagents);
+	// JobOutput returns the tail of one job's stdout log; JobTranscript returns a
+	// subagent's structured --out transcript ("" for a plain bash_bg job);
+	// KillJob signals one to stop. They drive the :background modal.
+	Jobs() []shell3.JobInfo
+	JobOutput(id string) string
+	JobTranscript(id string) string
+	KillJob(id string) error
 }
 
 type model struct {
@@ -78,19 +89,43 @@ type model struct {
 	totalLines  int   // total rendered content lines
 	blockStarts []int // first content line of each block
 	cmdline     string
-	pending     rune // multi-key prefix in NORMAL (g, y, z, d)
+	pending     rune // multi-key prefix in NORMAL (g, z, d)
 
-	helpOpen   bool
-	confirm    *confirmReq // pending bash_safety ask modal (nil = none)
-	confirmYes bool        // which button is selected (default Yes)
-	safetyOff  bool        // :disable_safety — auto-allow every bash_safety ask
-	follow     bool        // stick the viewport to the bottom as new content streams in
-	busy       bool
-	canceling  bool // user pressed ctrl+c; emit a clean marker when the turn ends
-	cancel     context.CancelFunc
-	spinner    int
-	spinning   bool // a spinnerTick chain is live (guards against duplicates)
-	quitArmed  bool
+	// Line-level mouse selection over the transcript viewport.
+	selecting     bool     // a left-button drag is in progress
+	dragged       bool     // motion occurred since the last mouse-down
+	hasSel        bool     // a selection exists (highlight + copy target)
+	selAnchor     int      // content line where the drag started
+	selHead       int      // content line of the drag's current end
+	renderedLines []string // flattened viewport content lines (set in refresh)
+	selExcluded   []bool   // parallel to renderedLines: meta lines excluded from select/copy
+
+	// :background modal — list, inspect, and kill background jobs (bash_bg
+	// processes and fire-and-forget subagents).
+	bgOpen         bool
+	bgJobs         []shell3.JobInfo
+	bgSel          int      // selected row in the list view
+	bgViewID       string   // non-empty = viewing this job's output (else the list)
+	bgOutput       string   // loaded output of the viewed job (raw transcript JSONL or stdout)
+	bgIsTranscript bool     // true ⇒ bgOutput is a subagent --out transcript (render structured)
+	bgScroll       int      // first visible output line in the output view
+	bgNotice       string   // status line shown inside the modal (e.g. a kill result)
+	bgRows         []string // memoized rendered output rows (nil = recompute; see bgWrappedLines)
+	bgRowsW        int      // content width bgRows was rendered at (re-render on resize)
+	bgCount        int      // live count of background jobs, shown as "bg: N" on the footer (polled)
+
+	helpOpen         bool
+	confirm          *confirmReq // pending bash_safety ask modal (nil = none)
+	confirmYes       bool        // which button is selected (default Yes)
+	safetyOff        bool        // :disable_safety — auto-allow every bash_safety ask
+	safetyConfigured bool        // bash_safety enabled in the lua config (else the shell is unsafe by default)
+	follow           bool        // stick the viewport to the bottom as new content streams in
+	busy             bool
+	canceling        bool // user pressed ctrl+c; emit a clean marker when the turn ends
+	cancel           context.CancelFunc
+	spinner          int
+	spinning         bool // a spinnerTick chain is live (guards against duplicates)
+	quitArmed        bool
 
 	agentName     string
 	statusMsg     string
@@ -99,6 +134,7 @@ type model struct {
 	completTokens int
 	contextWindow int
 	notice        string
+	noticeAt      time.Time // when notice was last set; the footer hides it after noticeTTL
 }
 
 func newModel(send func(string) (<-chan shell3.Event, context.CancelFunc), cmds sessionCmds, agentName, statusMsg string) *model {
@@ -152,7 +188,21 @@ func newModel(send func(string) (<-chan shell3.Event, context.CancelFunc), cmds 
 	}
 }
 
-func (m *model) Init() tea.Cmd { return tea.Batch(m.ta.Focus(), waitWake(m.wakeEvents)) }
+func (m *model) Init() tea.Cmd {
+	return tea.Batch(m.ta.Focus(), waitWake(m.wakeEvents), bgPollTick())
+}
+
+// bgPollTickMsg periodically refreshes the footer's subprocess count.
+type bgPollTickMsg struct{}
+
+// bgPollTick schedules the next subprocess-count refresh. The count drives the
+// footer's "bg: N" pill and changes out-of-band (a subagent finishes, a bash_bg
+// exits) with no event to react to, so a steady poll keeps it honest; 2s is
+// invisible to the eye and cheap (a jobs-dir glob). The steady tick also lets the
+// footer's timed notice fade when the app is otherwise idle.
+func bgPollTick() tea.Cmd {
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return bgPollTickMsg{} })
+}
 
 // openEditorMsg carries the result of composing a prompt in an external editor.
 type openEditorMsg struct {
@@ -170,6 +220,18 @@ type confirmReq struct {
 
 // confirmMsg delivers a confirmReq into the bubbletea loop via Program.Send.
 type confirmMsg struct{ req *confirmReq }
+
+// confirmAbortMsg tells the TUI to dismiss a pending confirm modal that the
+// Asker has abandoned (its context was canceled — an ask_timeout fired, or the
+// turn was canceled). Without it the modal would linger as a zombie that traps
+// every keypress in handleConfirmKey for an ask already resolved as denied.
+type confirmAbortMsg struct{ req *confirmReq }
+
+// shellDoneMsg reports the result of a `:! <cmd>` terminal-handoff run.
+type shellDoneMsg struct {
+	cmd string
+	err error
+}
 
 // resolveEditor returns the editor command string from $VISUAL/$EDITOR, falling
 // back to nvim → vim → nano. The string may contain arguments and quoting; it is
@@ -287,7 +349,7 @@ func (m *model) relayout() {
 	// Cap the input's max height to fit this terminal — leave the footer plus a
 	// few transcript rows — so a tall paste/draft can't overflow the layout and
 	// freeze input. Content beyond this scrolls inside the textarea.
-	maxIH := m.height - 1 - 3 // footer + at least 3 transcript rows
+	maxIH := m.height - 2 - 3 // footer + blank spacer + at least 3 transcript rows
 	if maxIH > inputMaxRows {
 		maxIH = inputMaxRows
 	}
@@ -300,7 +362,8 @@ func (m *model) relayout() {
 	if ih < 1 {
 		ih = 1
 	}
-	vpH := m.height - 1 - ih // footer only (no top header)
+	// footer (1) + one blank spacer line above the input (1).
+	vpH := m.height - 2 - ih
 	if vpH < 1 {
 		vpH = 1
 	}
@@ -316,9 +379,7 @@ func (m *model) refresh(forceBottom bool) {
 	// Before any message, fill the viewport with the centered welcome card.
 	if m.tr.count() == 0 {
 		card := lipgloss.Place(m.vp.Width(), m.vp.Height(),
-			lipgloss.Center, lipgloss.Center, m.welcomeCard(),
-			lipgloss.WithWhitespaceChars("/"),
-			lipgloss.WithWhitespaceStyle(stSlashBg))
+			lipgloss.Center, lipgloss.Center, m.welcomeCard())
 		m.vp.SetContent(card)
 		m.blockStarts = nil
 		m.totalLines = 0
@@ -326,9 +387,15 @@ func (m *model) refresh(forceBottom bool) {
 		return
 	}
 	off := m.vp.YOffset()
-	content, starts, total := m.tr.renderBlocks(m.cursorLine, m.mode == modeNormal, m.vp.Width())
+	selLo, selHi := -1, -1
+	if m.hasSel {
+		selLo, selHi = m.selRange()
+	}
+	content, starts, total, excluded := m.tr.renderBlocks(m.cursorLine, m.mode == modeNormal, m.vp.Width(), selLo, selHi)
 	m.blockStarts = starts
 	m.totalLines = total
+	m.renderedLines = strings.Split(content, "\n")
+	m.selExcluded = excluded
 	if m.cursorLine >= total {
 		m.cursorLine = total - 1
 	}
@@ -360,14 +427,12 @@ func (m *model) welcomeCard() string {
 	}
 	lines = append(lines,
 		mode("INSERT", "type, enter sends  ·  esc → NORMAL"),
-		mode("NORMAL", "j/k move · enter folds · yy copy · i types"),
+		mode("NORMAL", "j/k move · click/enter folds · drag or y copies · i types"),
 		mode("COMMAND", ": commands (:clear :agent :q …)"),
 		"",
 		stDim.Render("?")+stFgDim.Render(" help")+stDim.Render("   ·   tab")+stFgDim.Render(" switch agent"),
 	)
 	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(cPrimary).
 		Padding(1, 4).
 		Render(strings.Join(lines, "\n"))
 }
@@ -383,6 +448,191 @@ func (m *model) blockAtLine(line int) int {
 		}
 	}
 	return b
+}
+
+// eventLine maps a mouse screen-Y to a transcript content-line index. inViewport
+// is false when the event is below the transcript (in the input or footer). The
+// viewport is the top region of the screen, so content line = YOffset + y.
+func (m *model) eventLine(y int) (line int, inViewport bool) {
+	if y < 0 || y >= m.vp.Height() {
+		return 0, false
+	}
+	line = m.vp.YOffset() + y
+	if line < 0 {
+		line = 0
+	}
+	if m.totalLines > 0 && line >= m.totalLines {
+		line = m.totalLines - 1
+	}
+	return line, true
+}
+
+// selRange returns the selection bounds low..high (inclusive), regardless of
+// drag direction.
+func (m *model) selRange() (lo, hi int) {
+	lo, hi = m.selAnchor, m.selHead
+	if lo > hi {
+		lo, hi = hi, lo
+	}
+	return lo, hi
+}
+
+// handleMouse drives line-level selection, click-to-collapse, and wheel scroll.
+// It is active in every mode — the mouse acts on the transcript while the
+// keyboard does its mode-specific thing.
+func (m *model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	e := msg.Mouse()
+	// The :background modal owns the mouse while open: the wheel scrolls it, and
+	// clicks/drags don't reach the (hidden) transcript underneath.
+	if m.bgOpen {
+		if _, ok := msg.(tea.MouseWheelMsg); ok {
+			m.handleBackgroundWheel(e)
+		}
+		return m, nil
+	}
+	switch msg.(type) {
+	case tea.MouseWheelMsg:
+		return m.handleWheel(e)
+	case tea.MouseClickMsg:
+		if e.Button != tea.MouseLeft {
+			return m, nil
+		}
+		line, ok := m.eventLine(e.Y)
+		if !ok {
+			return m, nil
+		}
+		m.selecting = true
+		m.dragged = false
+		m.selAnchor = line
+		m.selHead = line
+		if m.hasSel { // starting a new gesture clears the old highlight
+			m.hasSel = false
+			m.refresh(false)
+		}
+		return m, nil
+	case tea.MouseMotionMsg:
+		if !m.selecting || e.Button != tea.MouseLeft {
+			return m, nil
+		}
+		// Scroll first when the drag reaches an edge, then map the pointer (clamped
+		// into the viewport) against the new offset — so the selection end tracks
+		// content scrolling under it instead of freezing one line short.
+		m.edgeScroll(e.Y)
+		y := e.Y
+		if y < 0 {
+			y = 0
+		}
+		if y >= m.vp.Height() {
+			y = m.vp.Height() - 1
+		}
+		if line, ok := m.eventLine(y); ok {
+			m.selHead = line
+		}
+		// Only a span beyond the anchor line is a drag; a jittery click that stays
+		// on one line still folds (decided on release).
+		if m.selHead != m.selAnchor {
+			m.dragged = true
+			m.hasSel = true
+		}
+		m.refresh(false)
+		return m, nil
+	case tea.MouseReleaseMsg:
+		if !m.selecting {
+			return m, nil
+		}
+		m.selecting = false
+		if m.dragged && m.selHead != m.selAnchor {
+			return m.finishSelection()
+		}
+		return m.handleClick(e.Y)
+	}
+	return m, nil
+}
+
+// selectedText returns the plain text of the current selection: the flattened
+// lines in range, with the 2-cell gutter and all ANSI stripped and trailing
+// spaces trimmed per line. Empty when there is no selection.
+func (m *model) selectedText() string {
+	if !m.hasSel || len(m.renderedLines) == 0 {
+		return ""
+	}
+	lo, hi := m.selRange()
+	var b strings.Builder
+	for i := lo; i <= hi && i < len(m.renderedLines); i++ {
+		// Copy exactly what is highlighted: excluded lines (banner, system
+		// reminders, the thinking indicator, inter-block separators) are not
+		// highlighted, so they are not copied either (WYSIWYG). Thinking *content*
+		// stays selectable; only its indicator line is excluded.
+		if i < len(m.selExcluded) && m.selExcluded[i] {
+			continue
+		}
+		s := ansi.Strip(m.renderedLines[i])
+		r := []rune(s)
+		if len(r) >= 2 {
+			r = r[2:] // drop the gutter ("▌ " or "  ")
+		}
+		b.WriteString(strings.TrimRight(string(r), " "))
+		b.WriteByte('\n')
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// finishSelection copies the dragged selection and reports it. The highlight
+// stays visible until the next click so the user sees what was copied.
+func (m *model) finishSelection() (tea.Model, tea.Cmd) {
+	text := m.selectedText()
+	if text == "" {
+		return m, nil
+	}
+	n := strings.Count(text, "\n") + 1
+	m.notice = fmt.Sprintf("copied %d line(s)", n)
+	return m, copyToClipboard(text)
+}
+
+// handleClick handles a plain (non-drag) left click: toggle a foldable block at
+// the clicked line, otherwise just clear any existing selection. A click always
+// dismisses the prior selection highlight.
+func (m *model) handleClick(y int) (tea.Model, tea.Cmd) {
+	m.hasSel = false
+	line, ok := m.eventLine(y)
+	if !ok {
+		m.refresh(false)
+		return m, nil
+	}
+	b := m.blockAtLine(line)
+	if b >= 0 && b < len(m.tr.items) && m.tr.items[b].foldable() {
+		m.tr.ToggleFold(b)
+	}
+	m.refresh(false)
+	return m, nil
+}
+
+// handleWheel scrolls the transcript viewport. Scrolling up breaks autoscroll
+// (follow); reaching the bottom re-engages it.
+func (m *model) handleWheel(e tea.Mouse) (tea.Model, tea.Cmd) {
+	switch e.Button {
+	case tea.MouseWheelUp:
+		m.vp.ScrollUp(3)
+		m.follow = false
+	case tea.MouseWheelDown:
+		m.vp.ScrollDown(3)
+		m.syncFollow()
+	}
+	return m, nil
+}
+
+// edgeScroll nudges the viewport by one line when a drag reaches the top or
+// bottom edge, so a selection can extend past the visible page (edge-scroll
+// during drag). The caller refreshes after, preserving the new offset, and the
+// next motion event at the edge maps to a further line.
+func (m *model) edgeScroll(y int) {
+	switch {
+	case y <= 0:
+		m.vp.ScrollUp(1)
+		m.follow = false
+	case y >= m.vp.Height()-1:
+		m.vp.ScrollDown(1)
+	}
 }
 
 // syncFollow re-derives the autoscroll lock from the viewport: new output is
@@ -414,11 +664,40 @@ func (m *model) moveLine(d int) {
 	m.syncFollow()
 }
 
+// noticeTTL is how long the footer keeps showing a last-action notice before it
+// fades. The 2s bgPollTick forces a re-render so it disappears even when the app
+// is otherwise idle.
+const noticeTTL = 10 * time.Second
+
+// Update wraps update and restarts the notice's display window whenever the
+// notice text changes, so every place that sets m.notice gets the timed fade for
+// free.
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	prev := m.notice
+	res, cmd := m.update(msg)
+	if m.notice != prev {
+		m.noticeAt = time.Now()
+	}
+	return res, cmd
+}
+
+// activeNotice returns the last-action notice while it is still within its
+// display window, else "" (so the footer drops it after noticeTTL).
+func (m *model) activeNotice() string {
+	if m.notice == "" || m.noticeAt.IsZero() || time.Since(m.noticeAt) >= noticeTTL {
+		return ""
+	}
+	return m.notice
+}
+
+func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.ready = true
+		if m.cmds != nil {
+			m.bgCount = len(m.cmds.Jobs()) // seed the footer count before the first poll
+		}
 		m.relayout()
 		return m, nil
 	case spinnerTickMsg:
@@ -428,6 +707,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.spinning = false // chain ends when the turn is no longer busy
 		return m, nil
+	case bgPollTickMsg:
+		if m.cmds != nil {
+			m.bgCount = len(m.cmds.Jobs())
+		}
+		return m, bgPollTick()
 	case eventMsg:
 		return m.handleEvent(msg)
 	case wakeMsg:
@@ -445,8 +729,26 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.confirm = msg.req
 		m.confirmYes = true // default to Yes so a quick Enter allows
 		return m, nil
+	case confirmAbortMsg:
+		// Dismiss only if this is still the same pending ask: a user keypress may
+		// have resolved (and replaced/cleared) it just before the abort arrived.
+		if m.confirm == msg.req {
+			m.confirm = nil
+			m.notice = "bash_safety prompt timed out — command denied"
+		}
+		return m, nil
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
+	case shellDoneMsg:
+		if msg.err != nil {
+			m.notice = "! " + msg.cmd + ": " + msg.err.Error()
+		} else {
+			m.notice = "! " + msg.cmd
+		}
+		m.refresh(false)
+		return m, nil
 	}
 	if m.mode == modeInsert {
 		var cmd tea.Cmd
@@ -520,6 +822,14 @@ func (m *model) handleEvent(msg eventMsg) (tea.Model, tea.Cmd) {
 			m.completTokens = msg.ev.CompletionTokens
 		}
 	}
+	// Compaction rewrote history: drop the meter to the post-compaction estimate
+	// at once, rather than waiting for the next provider usage. The estimate is
+	// prompt-only (no response yet), so clear the completion count.
+	if msg.ev.Kind == shell3.Compacted && msg.ev.TotalTokens > 0 {
+		m.tokens = msg.ev.TotalTokens
+		m.promptTokens = msg.ev.PromptTokens
+		m.completTokens = 0
+	}
 	if m.tr.Apply(msg.ev) {
 		m.refresh(false)
 	}
@@ -538,6 +848,12 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.helpOpen {
 		m.helpOpen = false
 		return m, nil
+	}
+
+	// The :background modal owns every key while open (so esc/q close it and
+	// ctrl+c can't arm quit underneath).
+	if m.bgOpen {
+		return m.handleBackgroundKey(s)
 	}
 
 	// Ctrl+C is global: cancel a running turn, else require a second press.
@@ -560,6 +876,13 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.notice = ""
 	}
 
+	// esc also dismisses a mouse selection (without early-returning, so it still
+	// does its mode-specific work below).
+	if s == "esc" && m.hasSel {
+		m.hasSel = false
+		m.refresh(false)
+	}
+
 	switch m.mode {
 	case modeCommand:
 		return m.handleCommandKey(s)
@@ -576,7 +899,9 @@ func (m *model) handleConfirmKey(s string) (tea.Model, tea.Cmd) {
 	switch s {
 	case "left", "h":
 		m.confirmYes = true
-	case "right", "l", "tab":
+	case "right", "l":
+		m.confirmYes = false
+	case "tab":
 		m.confirmYes = !m.confirmYes
 	case "y", "Y":
 		return m.resolveConfirm(true)
@@ -734,7 +1059,7 @@ func (m *model) handleNormalKey(s string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Multi-key prefixes: gg, yy, zM, zR, dd.
+	// Multi-key prefixes: gg, zM, zR, dd.
 	if m.pending != 0 {
 		p := m.pending
 		m.pending = 0
@@ -744,9 +1069,6 @@ func (m *model) handleNormalKey(s string) (tea.Model, tea.Cmd) {
 			m.follow = false
 			m.refresh(false)
 			m.vp.SetYOffset(0)
-		case p == 'y' && s == "y":
-			m.notice = "yanked to clipboard"
-			return m, tea.SetClipboard(m.tr.raw(m.blockAtLine(m.cursorLine)))
 		case p == 'z' && s == "M":
 			m.tr.FoldAll(true)
 			m.refresh(false)
@@ -763,8 +1085,11 @@ func (m *model) handleNormalKey(s string) (tea.Model, tea.Cmd) {
 	}
 
 	switch s {
-	case "g", "y", "z", "d":
+	case "g", "z", "d":
 		m.pending = rune(s[0])
+	case "y":
+		m.notice = "yanked to clipboard"
+		return m, copyToClipboard(m.tr.raw(m.blockAtLine(m.cursorLine)))
 	case "j", "down":
 		m.moveLine(1) // move the line cursor (scrolls only at the edge)
 	case "k", "up":
@@ -907,107 +1232,44 @@ func longestCommonPrefix(ss []string) string {
 	return pre
 }
 
-// runCommand executes a : command. Returns tea.Quit for :q.
+// cmdInfo prints a one-line result into the transcript and refreshes. Shared by
+// every ":" command handler.
+func (m *model) cmdInfo(s string) { m.tr.AddInfo(s); m.refresh(true) }
+
+// runCommand executes a ":" command by dispatching to its exCommands entry (the
+// single source of truth). Returns the entry's tea.Cmd (e.g. tea.Quit for :q).
 func (m *model) runCommand(line string) tea.Cmd {
+	line = strings.TrimSpace(line)
 	if line == "" {
 		return nil
 	}
 	parts := strings.SplitN(line, " ", 2)
-	cmd := parts[0]
+	name := parts[0]
 	arg := ""
 	if len(parts) > 1 {
 		arg = strings.TrimSpace(parts[1])
 	}
-	info := func(s string) { m.tr.AddInfo(s); m.refresh(true) }
-
-	switch cmd {
-	case "q", "quit":
-		return tea.Quit
-	case "edit", "p":
-		// Compose the draft in $EDITOR (doesn't need a session).
-		return m.openEditor()
-	case "disable_safety", "safety":
-		// Toggle auto-allow for bash_safety asks (the "!" indicator).
-		m.safetyOff = !m.safetyOff
-		if m.safetyOff {
-			info("bash_safety asks auto-allowed (!) — run :disable_safety again to re-enable")
-		} else {
-			info("bash_safety prompts re-enabled")
-		}
-		return nil
-	case "help":
-		info("commands: :clear :rollback :prune <id> :usage :prompt :edit :agent <name> :agents :info :q")
+	c := findCommand(name)
+	// An unknown name, or a session-only command with no session attached, both
+	// surface as "unknown command" (the latter matches the prior behavior).
+	if c == nil || (c.session && m.cmds == nil) {
+		m.cmdInfo("unknown command: " + name)
 		return nil
 	}
-	if m.cmds == nil {
-		info("unknown command: " + cmd)
-		return nil
-	}
-	switch cmd {
-	case "clear":
-		if err := m.cmds.Clear(); err != nil {
-			info("error: " + err.Error())
-		} else {
-			info("context cleared")
-		}
-	case "rollback":
-		ok, err := m.cmds.Rollback()
-		switch {
-		case err != nil:
-			info("error: " + err.Error())
-		case !ok:
-			info("nothing to roll back")
-		default:
-			info("last turn removed")
-		}
-	case "prune":
-		if arg == "" {
-			info("usage: :prune <tool_call_id>")
-		} else {
-			out, _ := m.cmds.Prune(arg)
-			info(out)
-		}
-	case "usage":
-		usage := fmt.Sprintf("tokens: %d total", m.tokens)
-		if m.promptTokens > 0 || m.completTokens > 0 {
-			usage += fmt.Sprintf(" (prompt %d · completion %d)", m.promptTokens, m.completTokens)
-		}
-		if m.contextWindow > 0 {
-			usage += fmt.Sprintf(" · context window %d", m.contextWindow)
-		}
-		info(usage)
-	case "prompt":
-		snap := m.cmds.Snapshot()
-		info("system prompt:\n" + strings.TrimSpace(snap.SystemPrompt))
-	case "agent":
-		if arg == "" {
-			info("agents: " + strings.Join(m.cmds.AgentNames(), ", "))
-		} else if err := m.cmds.SwitchAgent(arg); err != nil {
-			info("error: " + err.Error())
-		} else {
-			m.applyAgent()
-			info("switched to agent: " + m.agentName)
-		}
-	case "agents":
-		info("agents: " + strings.Join(m.cmds.AgentNames(), ", "))
-	case "info":
-		snap := m.cmds.Snapshot()
-		info(fmt.Sprintf("agent: %s · %s", snap.Agent, snap.StatusLine))
-	default:
-		info("unknown command: " + cmd)
-	}
-	return nil
+	return c.run(m, arg)
 }
 
 func (m *model) View() tea.View {
 	var v tea.View
-	v.AltScreen = true // mouse not captured → native select+copy
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion // capture mouse for select/copy + click-to-collapse
 	v.WindowTitle = "shell3"
 	if !m.ready || m.width <= 0 {
 		return v
 	}
 	base := lipgloss.JoinVertical(lipgloss.Left,
 		m.vp.View(),
+		"", // one blank line above the input; the input then sits directly on the bar
 		m.ta.View(),
 		m.renderFooter(),
 	)
@@ -1016,6 +1278,8 @@ func (m *model) View() tea.View {
 		base = m.placeModal(m.confirmBox())
 	case m.helpOpen:
 		base = m.placeModal(m.helpBox())
+	case m.bgOpen:
+		base = m.placeModal(m.backgroundBox())
 	case m.mode == modeCommand:
 		// The command palette floats just above the input so the typed line in
 		// the footer stays visible.
@@ -1025,21 +1289,24 @@ func (m *model) View() tea.View {
 	return v
 }
 
-// placeModal centers a modal box on a dim "/" field (lipgloss fills the
-// surrounding whitespace), replacing the transcript while the modal is open.
+// placeModal centers a modal box on the otherwise-blank screen, replacing the
+// transcript while the modal is open.
 func (m *model) placeModal(box string) string {
 	return lipgloss.Place(m.width, m.height,
-		lipgloss.Center, lipgloss.Center, box,
-		lipgloss.WithWhitespaceChars("/"),
-		lipgloss.WithWhitespaceStyle(stSlashBg))
+		lipgloss.Center, lipgloss.Center, box)
 }
 
-// modalWidth clamps a preferred modal content width to [min,max] and to what
-// the terminal can actually fit, so a narrow window never overflows the border.
-func (m *model) modalWidth(preferred, min, max int) int {
+// minModalWidth is the floor for any modal's content width; below this a box
+// becomes too cramped to read.
+const minModalWidth = 40
+
+// modalWidth clamps a preferred modal content width to [minModalWidth,max] and
+// to what the terminal can actually fit, so a narrow window never overflows the
+// edge.
+func (m *model) modalWidth(preferred, max int) int {
 	w := preferred
-	if w < min {
-		w = min
+	if w < minModalWidth {
+		w = minModalWidth
 	}
 	if w > max {
 		w = max
@@ -1053,22 +1320,157 @@ func (m *model) modalWidth(preferred, min, max int) int {
 	return w
 }
 
-// exCommand is one ":" command for the palette + help.
-type exCommand struct{ name, args, desc string }
+// exCommand is one ":" command — the SINGLE source of truth for the command
+// palette, the help overlay, AND dispatch (runCommand). Adding a command here is
+// all it takes for it to be handled, completed, listed in the palette, and shown
+// in help — there are no parallel lists to keep in sync.
+type exCommand struct {
+	name    string
+	aliases []string
+	args    string
+	desc    string
+	// session marks commands that need a live session (m.cmds); they degrade to
+	// "unknown command" when none is attached.
+	session bool
+	run     func(m *model, arg string) tea.Cmd
+}
 
 var exCommands = []exCommand{
-	{"clear", "", "reset the conversation context"},
-	{"rollback", "", "undo the last turn"},
-	{"prune", "<id>", "drop a tool result by id"},
-	{"usage", "", "show token usage"},
-	{"prompt", "", "print the system prompt"},
-	{"p", "", "compose the draft in $EDITOR (:edit, ctrl+o)"},
-	{"agent", "<name>", "switch agent (blank = list)"},
-	{"agents", "", "list agents"},
-	{"info", "", "session info"},
-	{"disable_safety", "", "toggle auto-allow for bash_safety (!)"},
-	{"help", "", "command help"},
-	{"q", "", "quit"},
+	{name: "!", args: "<cmd>", desc: "run a shell command (terminal handoff)", run: func(m *model, arg string) tea.Cmd {
+		if arg == "" {
+			m.cmdInfo("usage: :! <command>")
+			return nil
+		}
+		return tea.ExecProcess(exec.Command("bash", "-c", arg), func(err error) tea.Msg {
+			return shellDoneMsg{cmd: arg, err: err}
+		})
+	}},
+	{name: "compact", desc: "summarize history now to free context", session: true, run: func(m *model, _ string) tea.Cmd {
+		m.cmds.QueueCompact()
+		m.cmdInfo("compaction queued — runs before your next turn")
+		return nil
+	}},
+	{name: "clear", desc: "reset the conversation context", session: true, run: func(m *model, _ string) tea.Cmd {
+		if err := m.cmds.Clear(); err != nil {
+			m.cmdInfo("error: " + err.Error())
+		} else {
+			m.cmdInfo("context cleared")
+		}
+		return nil
+	}},
+	{name: "rollback", desc: "undo the last turn", session: true, run: func(m *model, _ string) tea.Cmd {
+		ok, err := m.cmds.Rollback()
+		switch {
+		case err != nil:
+			m.cmdInfo("error: " + err.Error())
+		case !ok:
+			m.cmdInfo("nothing to roll back")
+		default:
+			m.cmdInfo("last turn removed")
+		}
+		return nil
+	}},
+	{name: "prune", args: "<id>", desc: "drop a tool result by id", session: true, run: func(m *model, arg string) tea.Cmd {
+		if arg == "" {
+			m.cmdInfo("usage: :prune <tool_call_id>")
+		} else {
+			out, _ := m.cmds.Prune(arg)
+			m.cmdInfo(out)
+		}
+		return nil
+	}},
+	{name: "usage", desc: "show token usage", session: true, run: func(m *model, _ string) tea.Cmd {
+		usage := fmt.Sprintf("tokens: %d total", m.tokens)
+		if m.promptTokens > 0 || m.completTokens > 0 {
+			usage += fmt.Sprintf(" (prompt %d · completion %d)", m.promptTokens, m.completTokens)
+		}
+		if m.contextWindow > 0 {
+			usage += fmt.Sprintf(" · context window %d", m.contextWindow)
+		}
+		m.cmdInfo(usage)
+		return nil
+	}},
+	{name: "prompt", desc: "print the system prompt", session: true, run: func(m *model, _ string) tea.Cmd {
+		m.cmdInfo("system prompt:\n" + strings.TrimSpace(m.cmds.Snapshot().SystemPrompt))
+		return nil
+	}},
+	{name: "p", aliases: []string{"edit"}, desc: "compose the draft in $EDITOR (:edit, ctrl+o)", run: func(m *model, _ string) tea.Cmd {
+		return m.openEditor()
+	}},
+	{name: "agent", args: "<name>", desc: "switch agent (blank = list)", session: true, run: func(m *model, arg string) tea.Cmd {
+		switch {
+		case arg == "":
+			m.cmdInfo("agents: " + strings.Join(m.cmds.AgentNames(), ", "))
+		default:
+			if err := m.cmds.SwitchAgent(arg); err != nil {
+				m.cmdInfo("error: " + err.Error())
+			} else {
+				m.applyAgent()
+				m.cmdInfo("switched to agent: " + m.agentName)
+			}
+		}
+		return nil
+	}},
+	{name: "agents", desc: "list agents", session: true, run: func(m *model, _ string) tea.Cmd {
+		m.cmdInfo("agents: " + strings.Join(m.cmds.AgentNames(), ", "))
+		return nil
+	}},
+	{name: "info", desc: "session info", session: true, run: func(m *model, _ string) tea.Cmd {
+		snap := m.cmds.Snapshot()
+		m.cmdInfo(fmt.Sprintf("agent: %s · %s", snap.Agent, snap.StatusLine))
+		return nil
+	}},
+	{name: "background", aliases: []string{"bg", "jobs"}, desc: "list & kill background jobs", session: true, run: func(m *model, _ string) tea.Cmd {
+		m.openBackground()
+		return nil
+	}},
+	{name: "disable_safety", aliases: []string{"safety"}, desc: "toggle auto-allow for bash_safety (!)", run: func(m *model, _ string) tea.Cmd {
+		m.safetyOff = !m.safetyOff
+		if m.safetyOff {
+			m.cmdInfo("bash_safety asks auto-allowed (!) — run :disable_safety again to re-enable")
+		} else {
+			m.cmdInfo("bash_safety prompts re-enabled")
+		}
+		return nil
+	}},
+	{name: "help", desc: "show keys & commands", run: func(m *model, _ string) tea.Cmd {
+		m.helpOpen = true
+		return nil
+	}},
+	{name: "q", aliases: []string{"quit"}, desc: "quit", run: func(m *model, _ string) tea.Cmd {
+		return tea.Quit
+	}},
+}
+
+// commandRefLines renders the ":" command reference from exCommands, grouped
+// perLine tokens per line for the help overlay. Single source: same list the
+// palette and runCommand use.
+func commandRefLines(perLine int) []string {
+	toks := make([]string, 0, len(exCommands))
+	for _, c := range exCommands {
+		t := ":" + c.name
+		if c.args != "" {
+			t += " " + c.args
+		}
+		toks = append(toks, t)
+	}
+	var lines []string
+	for i := 0; i < len(toks); i += perLine {
+		end := min(i+perLine, len(toks))
+		lines = append(lines, " "+strings.Join(toks[i:end], "   "))
+	}
+	return lines
+}
+
+// findCommand resolves a command name (or alias) to its exCommand, or nil.
+func findCommand(name string) *exCommand {
+	for i := range exCommands {
+		c := &exCommands[i]
+		if c.name == name || slices.Contains(c.aliases, name) {
+			return c
+		}
+	}
+	return nil
 }
 
 // commandPalette renders the filtered ":" command list shown in COMMAND mode.
@@ -1093,8 +1495,6 @@ func (m *model) commandPalette() string {
 		rows = append(rows, desc.Render(" (no match)"))
 	}
 	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(cPrimary).
 		Padding(0, 1).
 		Render(strings.Join(rows, "\n"))
 }
@@ -1126,26 +1526,83 @@ func (m *model) confirmBox() string {
 	} else {
 		no = selStyle.Render("No")
 	}
-	boxW := m.modalWidth(m.width/2, 30, 72)
+	// Content width capped so the box (content + 4-col padding) never exceeds the
+	// terminal. Every long/variable line is hard-wrapped to it — a long command,
+	// echoed into the gate's reason, otherwise overflows the screen.
+	contentW := m.modalWidth(m.width/2, 72)
+	if contentW > m.width-4 {
+		contentW = m.width - 4
+	}
+	if contentW < 1 {
+		contentW = 1
+	}
+	wrapLines := func(s string) []string {
+		return strings.Split(ansi.Wrap(s, contentW, " "), "\n")
+	}
+	// Vertical budget so the whole box stays within the screen. Fixed chrome is the
+	// header + three blank separators + the buttons row + the footer (6 lines),
+	// plus vertical padding (2) = 8. The reason (short — it names the matched rule)
+	// gets up to 3 lines; the command gets the rest. Both are truncated with a
+	// "… +N more lines" marker rather than overflowing.
+	bodyBudget := m.height - 8
+	if bodyBudget < 2 {
+		bodyBudget = 2
+	}
+	var reasonKept []string
+	reasonMore := 0
+	if m.confirm.reason != "" {
+		rb := min(3, bodyBudget-1)
+		reasonKept, reasonMore = clampLines(wrapLines(m.confirm.reason), rb)
+	}
+	cmdBudget := bodyBudget - len(reasonKept) - boolToInt(reasonMore > 0)
+	if cmdBudget < 1 {
+		cmdBudget = 1
+	}
+	cmdKept, cmdMore := clampLines(wrapLines(m.confirm.command), cmdBudget)
+
 	lines := []string{
 		stErr.Render("⚠ bash_safety") + stDim.Render("  allow this command?"),
 		"",
-		lipgloss.NewStyle().Foreground(cUser).Width(boxW).Render(m.confirm.command),
+		lipgloss.NewStyle().Foreground(cUser).Render(strings.Join(cmdKept, "\n")),
 	}
-	if m.confirm.reason != "" {
-		lines = append(lines, stDim.Render(m.confirm.reason))
+	if cmdMore > 0 {
+		lines = append(lines, stDim.Render(fmt.Sprintf("… +%d more lines", cmdMore)))
+	}
+	if len(reasonKept) > 0 {
+		lines = append(lines, stDim.Render(strings.Join(reasonKept, "\n")))
+		if reasonMore > 0 {
+			lines = append(lines, stDim.Render(fmt.Sprintf("… +%d more lines", reasonMore)))
+		}
 	}
 	lines = append(lines,
 		"",
 		yes+"  "+no,
 		"",
-		stDim.Render("y / enter: allow   ·   n / esc: deny   ·   ← →: select"),
+		stDim.Render(ansi.Wrap("y/enter allow · n/esc deny · ←→ select", contentW, " ")),
 	)
 	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(cRed).
 		Padding(1, 2).
 		Render(strings.Join(lines, "\n"))
+}
+
+// clampLines caps a wrapped block to maxLines, reserving the last line for the
+// "… +N more lines" marker the caller renders. Returns the kept lines and the
+// count of dropped lines (0 when nothing was truncated).
+func clampLines(lines []string, maxLines int) (kept []string, more int) {
+	if maxLines < 1 {
+		maxLines = 1
+	}
+	if len(lines) <= maxLines {
+		return lines, 0
+	}
+	return lines[:maxLines-1], len(lines) - (maxLines - 1)
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // helpBox renders the keybinding/command reference shown by '?'.
@@ -1166,7 +1623,8 @@ func (m *model) helpBox() string {
 		row("ctrl+d / u", "half-page down / up"),
 		row("enter", "fold / unfold block"),
 		row("zM / zR", "fold / unfold all"),
-		row("yy / dd", "copy block / clear input"),
+		row("y / dd", "copy block / clear input"),
+		row("mouse", "drag selects + copies · click folds · wheel scrolls"),
 		row("i / a", "insert mode"),
 		row("tab", "cycle agent (any mode)"),
 		row(": / ?", "command mode / help"),
@@ -1179,14 +1637,17 @@ func (m *model) helpBox() string {
 		row("esc", "normal mode (keeps draft)"),
 		"",
 		head.Render("COMMAND"),
-		desc.Render(" :clear  :rollback  :prune <id>  :usage"),
-		desc.Render(" :prompt  :agent <name>  :agents  :info  :q"),
+	}
+	// Command reference derived from exCommands (the single source of truth), so
+	// it can never drift from what the palette lists and runCommand handles.
+	for _, l := range commandRefLines(4) {
+		lines = append(lines, desc.Render(l))
+	}
+	lines = append(lines,
 		"",
 		desc.Render(" ctrl+c: cancel turn / quit   ·   any key: close"),
-	}
+	)
 	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(cPrimary).
 		Padding(0, 1).
 		Render(strings.Join(lines, "\n"))
 }
@@ -1214,62 +1675,58 @@ func (m *model) renderFooter() string {
 	var mode string
 	switch m.mode {
 	case modeNormal:
-		mode = stModeNormal.Render(" NORMAL ")
+		mode = stModeNormal.Render(" N ")
 	default:
-		mode = stModeInsert.Render(" INSERT ")
+		mode = stModeInsert.Render(" I ")
 	}
-	var parts []string
+	// Left: mode pill, then the model with its context-window fill (ctx: x%), then
+	// the transient last-action notice (primary, auto-hidden after noticeTTL), then
+	// the live turn state (quit-armed prompt / thinking shimmer).
+	left := mode
+	if model := modelLabel(m.statusMsg); model != "" {
+		// Context-window fill sits right after the model name.
+		if m.tokens > 0 && m.contextWindow > 0 {
+			model += fmt.Sprintf("  (ctx: %d%%)", m.tokens*100/m.contextWindow)
+		}
+		left += " " + stDim.Render(model)
+	}
 	switch {
 	case m.quitArmed:
 		// Ctrl+C once: red middle bar telling you to press again.
-		parts = append(parts, stCtrlCArmed.Render(" press ctrl+c again to quit "))
-	case m.busy:
-		// Thinking: white text on an animated rainbow background (no spinner).
-		parts = append(parts, rainbowBg(" thinking ", m.spinner))
-	}
-	if m.tokens > 0 {
-		tok := fmt.Sprintf("t:%d", m.tokens)
-		// Show how full the context window is, when known.
-		if m.contextWindow > 0 {
-			tok += fmt.Sprintf("/%d (%d%%)", m.contextWindow, m.tokens*100/m.contextWindow)
+		left += " " + stCtrlCArmed.Render(" press ctrl+c again to quit ")
+	default:
+		if n := m.activeNotice(); n != "" {
+			left += " " + stNotice.Render(n)
 		}
-		parts = append(parts, stDim.Render(tok))
+		if m.busy {
+			// Thinking: white text on an animated rainbow background (no spinner).
+			left += " " + rainbowBg(" thinking ", m.spinner)
+		}
 	}
-	// notice is shown red in the quitArmed bar above; don't duplicate it here.
-	if m.notice != "" && !m.quitArmed {
-		parts = append(parts, stFgDim.Render(m.notice))
-	}
-	// Not-at-bottom indicator: scrolled up while content sits below (#6).
-	if m.totalLines > m.vp.Height() && !m.vp.AtBottom() {
-		parts = append(parts, stChevron.Render("↓ G to follow"))
-	}
-	left := mode + " " + strings.Join(parts, stDim.Render("  ·  "))
 
-	// Right side: "? help" hint (only at rest), the model (dim), then the active
-	// agent badge (Tab cycles it). The agent is named once — just the pill.
-	var right string
+	// Right side, left-to-right: "? help" hint (only at rest), the "!" danger pill
+	// when the shell is unsafe, the live subprocess count (bg: N), then the brand
+	// snail glued to the active agent badge (Tab cycles the agent).
+	var seg []string
 	if strings.TrimSpace(m.ta.Value()) == "" {
-		right = stDim.Render("? help")
+		seg = append(seg, stDim.Render("? help"))
 	}
-	if model := modelLabel(m.statusMsg); model != "" {
-		if right != "" {
-			right += "  "
-		}
-		// Green "!" when bash_safety asks are auto-allowed (:disable_safety).
-		if m.safetyOff {
-			right += stYolo.Render(" ! ") + " "
-		}
-		right += stDim.Render(model)
+	// "!" when the shell is unsafe: runtime :disable_safety, or bash_safety not
+	// enabled in the lua config (unsafe by default).
+	if m.safetyOff || !m.safetyConfigured {
+		seg = append(seg, stYolo.Render(" ! "))
 	}
+	if m.bgCount > 0 {
+		seg = append(seg, stBgCount.Render(fmt.Sprintf(" bg: %d ", m.bgCount)))
+	}
+	// Snail brand + agent badge form one visual unit (no gap between them).
+	badge := stSnail.Render(" ๑ï ")
 	if m.agentName != "" {
-		if right != "" {
-			right += " "
-		}
-		right += stAgent.Render(" " + m.agentName + " ")
+		badge += agentBadge(m.agentName)
 	}
-	if right == "" {
-		return left
-	}
+	seg = append(seg, badge)
+
+	right := strings.Join(seg, "  ")
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		return left // no room; drop the right side rather than wrap

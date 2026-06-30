@@ -47,7 +47,7 @@ func (s *Session) report(n notify.Notification) {
 // injectNotification injects a received notification into the running session,
 // waking it if idle.
 func (s *Session) injectNotification(rt *Runtime, n notify.Notification) {
-	s.sess.Interject(renderNotification(n))
+	s.sess.InterjectNotice(renderNotification(n))
 	if !s.isBusy() {
 		rt.emit(HostEvent{Session: s.name, Kind: Wake})
 	}
@@ -75,25 +75,32 @@ func renderNotification(n notify.Notification) string {
 		// A subagent (a backgrounded `shell3 run --parent-session`) finished and
 		// self-reported. The notification ITSELF carries the subagent's result
 		// summary (Preview); the transcript pointer is only for when the summary
-		// isn't enough. So we frame the preview as the answer to act on and make
-		// reading the transcript explicitly optional — with the exact one-liner to
-		// extract the final answer, so the agent never has to reverse-engineer the
-		// JSONL audit schema.
+		// isn't enough. The agent surfaces this on an idle wake turn with no user
+		// message, so the reminder must tell it to RELAY the result to the user —
+		// the human has not seen the subagent's output, only this pointer has. An
+		// earlier wording ("act on it directly; you do NOT need to read anything
+		// else") let the model treat the task as done and stay silent, dropping the
+		// answer on the floor. The transcript pointer (with the exact extraction
+		// one-liner, so the agent never reverse-engineers the JSONL schema) stays
+		// explicitly optional, for full output or intermediate steps.
 		status := n.Status
 		if status == "" {
 			status = "done"
 		}
 		msg := fmt.Sprintf("subagent %s finished (%s).", n.ID, status)
-		if n.Preview != "" {
-			msg += " Result: " + n.Preview
-		}
+		extract := ""
 		if n.Transcript != "" {
-			extract := fmt.Sprintf("jq -rs 'map(select(.kind==\"assistant_message\"))[-1].text' %s", n.Transcript)
-			if n.Preview != "" {
-				msg += fmt.Sprintf(" That result is the subagent's own summary — act on it directly; you do NOT need to read anything else to get the answer. Only if you need its full output or intermediate steps, read the transcript: %s", extract)
-			} else {
-				msg += fmt.Sprintf(" Read its result from the transcript: %s", extract)
+			extract = fmt.Sprintf("jq -rs 'map(select(.kind==\"assistant_message\"))[-1].text' %s", n.Transcript)
+		}
+		switch {
+		case n.Preview != "":
+			msg += " Result: " + n.Preview
+			msg += " That result is the subagent's own summary — relay it to the user now (the user has NOT seen it yet): summarize or present it in your reply."
+			if extract != "" {
+				msg += fmt.Sprintf(" Only if you need its full output or intermediate steps, read the transcript: %s", extract)
 			}
+		case extract != "":
+			msg += fmt.Sprintf(" Read its result from the transcript and relay it to the user: %s", extract)
 		}
 		return msg
 	default:

@@ -39,13 +39,9 @@ func TestSubmitSendsPromptAndAddsUserItem(t *testing.T) {
 	if !sent || prompt != "hello world" {
 		t.Fatalf("submit should send the prompt: sent=%v prompt=%q", sent, prompt)
 	}
-	// items[0] is the session-start banner; the user prompt follows it.
 	last := m.tr.items[m.tr.count()-1]
-	if m.tr.count() < 2 || last.Kind != ItemUser || last.Text != "hello world" {
+	if m.tr.count() < 1 || last.Kind != ItemUser || last.Text != "hello world" {
 		t.Fatalf("submit should add a user item: %+v", m.tr.items)
-	}
-	if m.tr.items[0].Kind != ItemBanner {
-		t.Fatalf("first item should be the session-start banner, got %v", m.tr.items[0].Kind)
 	}
 	if !m.busy {
 		t.Fatal("should be busy after submit")
@@ -153,9 +149,10 @@ func TestInputGrowsWithNewlinesAndShrinksViewport(t *testing.T) {
 	if m.vp.Height() >= base {
 		t.Fatalf("viewport should shrink as input grows: now %d, was %d", m.vp.Height(), base)
 	}
-	// Total rows still fit the terminal: vp + input + footer == height.
-	if m.vp.Height()+m.ta.Height()+1 != m.height {
-		t.Fatalf("rows must sum to height: %d+%d+1 != %d", m.vp.Height(), m.ta.Height(), m.height)
+	// Total rows still fit the terminal: vp + input + footer + 1 spacer line (one
+	// above the input) == height.
+	if m.vp.Height()+m.ta.Height()+1+1 != m.height {
+		t.Fatalf("rows must sum to height: %d+%d+1+1 != %d", m.vp.Height(), m.ta.Height(), m.height)
 	}
 }
 
@@ -181,21 +178,32 @@ func TestHelpOverlayOpensAndCloses(t *testing.T) {
 
 // fakeCmds is a minimal sessionCmds for agent-cycle tests.
 type fakeCmds struct {
-	names  []string
-	active string
-	status string
-	queued bool
+	names         []string
+	active        string
+	status        string
+	queued        bool
+	compactQueued bool
+	jobs          []shell3.JobInfo
+	jobOut        map[string]string
+	jobTranscript map[string]string
+	killed        []string
+	killErr       error // when set, KillJob returns it (exercises the failure notice)
 }
 
 func (f *fakeCmds) Clear() error                { return nil }
 func (f *fakeCmds) Rollback() (bool, error)     { return false, nil }
 func (f *fakeCmds) Prune(string) (string, bool) { return "", false }
+func (f *fakeCmds) QueueCompact()               { f.compactQueued = true }
 func (f *fakeCmds) AgentNames() []string        { return f.names }
 func (f *fakeCmds) ActiveAgent() string         { return f.active }
 func (f *fakeCmds) Snapshot() shell3.Snapshot {
 	return shell3.Snapshot{Agent: f.active, StatusLine: f.status}
 }
-func (f *fakeCmds) HasQueuedInput() bool { return f.queued }
+func (f *fakeCmds) HasQueuedInput() bool           { return f.queued }
+func (f *fakeCmds) Jobs() []shell3.JobInfo         { return f.jobs }
+func (f *fakeCmds) JobOutput(id string) string     { return f.jobOut[id] }
+func (f *fakeCmds) JobTranscript(id string) string { return f.jobTranscript[id] }
+func (f *fakeCmds) KillJob(id string) error        { f.killed = append(f.killed, id); return f.killErr }
 func (f *fakeCmds) SwitchAgent(name string) error {
 	f.active = name
 	return nil
@@ -339,6 +347,45 @@ func TestCommandPaletteFilters(t *testing.T) {
 	}
 }
 
+// :compact is a real, handled command; it must be discoverable in the palette.
+func TestCommandPalette_ListsCompact(t *testing.T) {
+	m := sized(closedSend(nil))
+	m.mode = modeCommand
+	m.cmdline = "comp"
+	if box := stripANSI(m.commandPalette()); !strings.Contains(box, ":compact") {
+		t.Fatalf("palette should list :compact for 'comp':\n%s", box)
+	}
+}
+
+// :help opens the help overlay (same as '?') rather than dumping a one-line
+// text — one help surface, no dual handling.
+func TestHelpCommand_OpensOverlay(t *testing.T) {
+	m := sized(closedSend(nil))
+	m.runCommand("help")
+	if !m.helpOpen {
+		t.Fatal(":help should open the help overlay")
+	}
+}
+
+// The help overlay's command reference is derived from exCommands (single source
+// of truth), so every handled command — including the ones that used to be
+// missing from one list or another — appears, and the lists can't drift.
+func TestHelpOverlay_ListsEveryPaletteCommand(t *testing.T) {
+	m := sized(closedSend(nil))
+	box := stripANSI(m.helpBox())
+	for _, c := range exCommands {
+		if !strings.Contains(box, ":"+c.name) {
+			t.Errorf("help overlay is missing :%s (command reference must list every exCommands entry):\n%s", c.name, box)
+		}
+	}
+	// Spot-check the ones that were previously missing from one list or another.
+	for _, want := range []string{":compact", ":disable_safety", ":background"} {
+		if !strings.Contains(box, want) {
+			t.Errorf("help overlay missing %s", want)
+		}
+	}
+}
+
 func TestFollowBreaksOnScrollUpAndRelocksOnG(t *testing.T) {
 	m := sized(closedSend(nil))
 	for i := 0; i < 60; i++ {
@@ -354,9 +401,6 @@ func TestFollowBreaksOnScrollUpAndRelocksOnG(t *testing.T) {
 	m.Update(keyRune('g'))
 	if m.follow {
 		t.Fatal("scrolling up should break the autoscroll lock")
-	}
-	if !strings.Contains(stripANSI(m.renderFooter()), "↓ G to follow") {
-		t.Fatalf("footer should show the not-at-bottom indicator: %q", stripANSI(m.renderFooter()))
 	}
 	m.Update(keyRune('G')) // shift+g → relock + bottom
 	if !m.follow || !m.vp.AtBottom() {
@@ -693,11 +737,29 @@ func TestEditorEmptySaveKeepsDraft(t *testing.T) {
 	}
 }
 
-func TestFooterShowsContextWindowFraction(t *testing.T) {
-	m := sized(closedSend(nil))
+func TestFooterShowsContextWindowFill(t *testing.T) {
+	m := newModel(closedSend(nil), nil, "build", "openai │ gpt-x")
+	m.Update(tea.WindowSizeMsg{Width: 90, Height: 24})
 	m.tokens, m.contextWindow = 5000, 10000
-	if !strings.Contains(stripANSI(m.renderFooter()), "5000/10000 (50%)") {
-		t.Fatalf("footer should show the context-window fraction: %q", stripANSI(m.renderFooter()))
+	foot := stripANSI(m.renderFooter())
+	// The fill sits right after the model name.
+	if !strings.Contains(foot, "gpt-x  (ctx: 50%)") {
+		t.Fatalf("footer should show the context-window fill after the model: %q", foot)
+	}
+}
+
+func TestCompactedEventDropsTokenMeter(t *testing.T) {
+	m := sized(closedSend(nil))
+	m.tokens, m.promptTokens, m.completTokens = 90000, 85000, 5000
+	// A compacted event carries the post-compaction estimate; the meter should
+	// drop to it immediately (completion cleared — no response yet).
+	m.Update(eventMsg{ok: true, ch: nil, ev: shell3.Event{
+		Kind: shell3.Compacted, Text: "context auto-compacted at 90000 tokens",
+		PromptTokens: 1200, TotalTokens: 1200,
+	}})
+	if m.tokens != 1200 || m.promptTokens != 1200 || m.completTokens != 0 {
+		t.Fatalf("compaction should drop the meter to the estimate: tokens=%d prompt=%d compl=%d",
+			m.tokens, m.promptTokens, m.completTokens)
 	}
 }
 
