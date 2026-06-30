@@ -14,8 +14,9 @@ import (
 // Only arguments matching a DECLARED parameter are exported (so a misbehaving
 // model cannot inject arbitrary env vars). Each declared secret is looked up in
 // .env and exported by name; a missing secret is an error (never a silent
-// empty value). The command itself is the trusted, author-defined template — it
-// is NOT passed through wrap_bash (the model supplies only env values).
+// empty value). The command itself is the trusted, author-defined template — its
+// text is never rewritten or denylisted by on_tool_call (though the tool *call*
+// still fires the chain by name, so it can be blocked/asked).
 func (c *LoadedConfig) ResolveCustomCall(name, argsJSON string) (chat.ResolvedTool, error) {
 	tool, ok := c.Tools[name]
 	if !ok {

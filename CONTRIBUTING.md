@@ -1,7 +1,6 @@
 # Contributing to shell3
 
-shell3 is a small Go codebase. A few conventions keep it consistent — they're
-below.
+shell3 is a small Go codebase. A few conventions keep it consistent.
 
 ## Development setup
 
@@ -13,53 +12,47 @@ make test      # go test -race ./...
 make lint      # gofmt drift check + go vet (what CI enforces)
 ```
 
-The test suite is hermetic: it runs against a temp `HOME`, uses a fake LLM
-provider (`internal/llm/fakellm`), and needs no network or API keys.
+The test suite is hermetic: temp `HOME`, a fake LLM provider
+(`internal/llm/fakellm`), no network or API keys.
 
 ## Scope
 
-shell3 aims to stay small. Prefer improving what's already here — sharpening,
-fixing, and simplifying existing behavior — over adding new surface or features.
-Changes that make the current pieces work better are more welcome than ones that
-grow the footprint.
+shell3 aims to stay small. Prefer sharpening, fixing, and simplifying what's
+already here over adding new surface — changes that make the current pieces work
+better are more welcome than ones that grow the footprint.
 
 ## Workflow
 
 - Work on feature branches; `main` only takes fully tested changes.
-- Keep PRs focused — one logical change per PR.
-- CI must be green: `gofmt` clean, `go vet` clean, race-enabled tests passing
-  on Linux and macOS.
-- Add or update tests with behavior changes. Concurrency-sensitive code
-  (the turn loop, `pkg/shell3` session lifecycle, the openai adapter's body
-  tap) must stay race-clean — run `make test`, not bare `go test`.
+- Keep PRs focused — one logical change each.
+- CI must be green: `gofmt` clean, `go vet` clean, race-enabled tests passing on
+  Linux and macOS. Run `make test` (not bare `go test`) so concurrency-sensitive
+  code — the turn loop, `pkg/shell3` session lifecycle, the openai adapter's body
+  tap — stays race-clean.
+- Add or update tests with behavior changes.
 
 ## Code style
 
-- Standard Go style; `gofmt` is law, `go vet` must pass.
-- Doc comments explain **why**, not what. Where code has a concurrency or
-  lifecycle contract (who closes a channel, what must be drained before
-  what), the contract is written down at the declaration — follow the
-  patterns in `internal/chat/session.go` and `pkg/shell3/shell3.go`.
-- `pkg/shell3` is the only public package. Everything else lives under
-  `internal/` and may change freely; think twice before widening the public
-  surface.
-- Tool failures use the typed `toolResult` path inside `internal/chat`;
-  built-in handlers report in-band failures to the model as `"error: …"`
-  strings (classified in exactly one place). Don't introduce new
-  string-sniffing.
+- `gofmt` is law; `go vet` must pass.
+- Doc comments explain **why**, not what. Write down any concurrency or lifecycle
+  contract at the declaration (see `internal/chat/session.go`,
+  `pkg/shell3/shell3.go`).
+- `pkg/shell3` is the only public package; everything under `internal/` may
+  change freely. Think twice before widening the public surface.
+- Tool failures use the typed `toolResult` path in `internal/chat`, classified in
+  one place — don't introduce new string-sniffing.
 
 ## Architecture orientation
 
 `AGENTS.md` has the package map. The short version: `cmd/shell3` is the CLI,
 `internal/agentsetup` assembles a `chat.Config` from `shell3.lua`
-(`internal/luacfg`), `internal/chat` runs turns against an
-OpenAI-compatible provider (`internal/adapter/openai`), and the TUI
-(`internal/tui`, `internal/patch*`) plus the embeddable `pkg/shell3` are
-front-ends over the same core.
+(`internal/luacfg`), `internal/chat` runs turns against an OpenAI-compatible
+provider (`internal/adapter/openai`), and the `internal/tui` TUI plus the
+embeddable `pkg/shell3` are front-ends over the same core.
 
 ## Security
 
 Never read or commit credential files (`.env` beside `shell3.lua`). shell3 is
 unsafe by default — model-chosen commands run with full shell access, gated only
-by the optional `shell3.wrap_bash` hook. Report vulnerabilities via GitHub
+by the optional `shell3.on_tool_call` hook. Report vulnerabilities via GitHub
 Security Advisories.

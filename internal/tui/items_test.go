@@ -26,13 +26,13 @@ func TestReducerToolMergeByID(t *testing.T) {
 	}
 }
 
-// A tool result flagged as an error (e.g. a bash_safety denial) must render a
+// A tool result flagged as an error (e.g. an on_tool_call denial) must render a
 // red ✗, never the green ✓ used for success.
 func TestToolResultErrorRendersCross(t *testing.T) {
 	tr := NewTranscript()
 	tr.Apply(shell3.Event{Kind: shell3.ToolCall, ToolName: "bash", ToolCallID: "1", ToolInput: "rm -rf /"})
 	tr.Apply(shell3.Event{Kind: shell3.ToolResult, ToolName: "bash", ToolCallID: "1",
-		ToolOutput: "error: blocked by bash_safety", ToolError: true})
+		ToolOutput: "error: blocked by on_tool_call", ToolError: true})
 	if !tr.items[0].ToolError {
 		t.Fatal("ToolError should flow from the event onto the item")
 	}

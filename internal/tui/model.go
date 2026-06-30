@@ -115,10 +115,10 @@ type model struct {
 	bgCount        int      // live count of background jobs, shown as "bg: N" on the footer (polled)
 
 	helpOpen         bool
-	confirm          *confirmReq // pending bash_safety ask modal (nil = none)
+	confirm          *confirmReq // pending on_tool_call ask modal (nil = none)
 	confirmYes       bool        // which button is selected (default Yes)
-	safetyOff        bool        // :disable_safety — auto-allow every bash_safety ask
-	safetyConfigured bool        // bash_safety enabled in the lua config (else the shell is unsafe by default)
+	safetyOff        bool        // :disable_safety — auto-allow every on_tool_call ask
+	safetyConfigured bool        // on_tool_call enabled in the lua config (else the shell is unsafe by default)
 	follow           bool        // stick the viewport to the bottom as new content streams in
 	busy             bool
 	canceling        bool // user pressed ctrl+c; emit a clean marker when the turn ends
@@ -220,7 +220,7 @@ type openEditorMsg struct {
 	err  error
 }
 
-// confirmReq is a bash_safety ask routed to the TUI: the Asker (on the turn
+// confirmReq is an on_tool_call ask routed to the TUI: the Asker (on the turn
 // goroutine) blocks on reply while the model shows a Yes/No modal.
 type confirmReq struct {
 	command string
@@ -773,7 +773,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// have resolved (and replaced/cleared) it just before the abort arrived.
 		if m.confirm == msg.req {
 			m.confirm = nil
-			m.notice = "bash_safety prompt timed out — command denied"
+			m.notice = "command gate prompt timed out — command denied"
 		}
 		return m, nil
 	case tea.KeyPressMsg:
@@ -893,7 +893,7 @@ func (m *model) handleEvent(msg eventMsg) (tea.Model, tea.Cmd) {
 func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	s := msg.String()
 
-	// A pending bash_safety ask is modal and takes priority over everything.
+	// A pending on_tool_call ask is modal and takes priority over everything.
 	if m.confirm != nil {
 		return m.handleConfirmKey(s)
 	}
@@ -947,7 +947,7 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// handleConfirmKey drives the Yes/No bash_safety modal. Enter confirms the
+// handleConfirmKey drives the Yes/No on_tool_call modal. Enter confirms the
 // selected button (Yes by default); y/n are shortcuts; esc/ctrl+c deny.
 func (m *model) handleConfirmKey(s string) (tea.Model, tea.Cmd) {
 	switch s {
@@ -1482,12 +1482,12 @@ var exCommands = []exCommand{
 		m.openBackground()
 		return nil
 	}},
-	{name: "disable_safety", aliases: []string{"safety"}, desc: "toggle auto-allow for bash_safety (!)", run: func(m *model, _ string) tea.Cmd {
+	{name: "disable_safety", aliases: []string{"safety"}, desc: "toggle auto-allow for command gate (!)", run: func(m *model, _ string) tea.Cmd {
 		m.safetyOff = !m.safetyOff
 		if m.safetyOff {
-			m.cmdInfo("bash_safety asks auto-allowed (!) — run :disable_safety again to re-enable")
+			m.cmdInfo("command gate asks auto-allowed (!) — run :disable_safety again to re-enable")
 		} else {
-			m.cmdInfo("bash_safety prompts re-enabled")
+			m.cmdInfo("command gate prompts re-enabled")
 		}
 		return nil
 	}},
@@ -1574,7 +1574,7 @@ func overlayAbove(base, box string, vpBottom int) string {
 	return strings.Join(bl, "\n")
 }
 
-// confirmBox renders the bash_safety Yes/No modal, Yes selected by default.
+// confirmBox renders the on_tool_call Yes/No modal, Yes selected by default.
 func (m *model) confirmBox() string {
 	selStyle := lipgloss.NewStyle().Foreground(cBlack).Background(cPrimary).Bold(true).Padding(0, 2)
 	offStyle := lipgloss.NewStyle().Foreground(cFgDim).Padding(0, 2)
@@ -1619,7 +1619,7 @@ func (m *model) confirmBox() string {
 	cmdKept, cmdMore := clampLines(wrapLines(m.confirm.command), cmdBudget)
 
 	lines := []string{
-		stErr.Render("⚠ bash_safety") + stDim.Render("  allow this command?"),
+		stErr.Render("⚠ command gate") + stDim.Render("  allow this command?"),
 		"",
 		lipgloss.NewStyle().Foreground(cUser).Render(strings.Join(cmdKept, "\n")),
 	}
@@ -1769,7 +1769,7 @@ func (m *model) renderFooter() string {
 	if strings.TrimSpace(m.ta.Value()) == "" {
 		seg = append(seg, stDim.Render("? help"))
 	}
-	// "!" when the shell is unsafe: runtime :disable_safety, or bash_safety not
+	// "!" when the shell is unsafe: runtime :disable_safety, or on_tool_call not
 	// enabled in the lua config (unsafe by default).
 	if m.safetyOff || !m.safetyConfigured {
 		seg = append(seg, stYolo.Render(" ! "))

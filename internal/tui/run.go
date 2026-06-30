@@ -75,7 +75,7 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 		sess, snap.Agent, snap.StatusLine,
 	)
 	m.contextWindow = snap.ContextWindow
-	m.safetyConfigured = snap.BashSafetyOn
+	m.safetyConfigured = snap.ToolHooksOn
 	// Surface non-fatal config warnings in-band: they were printed to stderr at
 	// load, but the alt-screen TUI clears that line before the user sees it.
 	for _, w := range snap.Warnings {

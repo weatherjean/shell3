@@ -92,7 +92,7 @@ func writeStatus(runsDir string, sf statusFile) error {
 
 // Start spawns argv (argv[0] with argv[1:] as args) in workdir, detached.
 // display is the human-readable command recorded as Job.Cmd; it may differ from
-// argv when wrap_bash swapped the runner.
+// argv when on_tool_call rewrote the runner.
 //
 // env, when non-empty, supplies extra KEY=VALUE entries appended to the
 // inherited environment (os.Environ); used by command-template custom tools to

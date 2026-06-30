@@ -61,4 +61,4 @@ local browser = require("lib.skills.browser")
 
 - `models.md` — provider-specific request params via `extra` (e.g. MiniMax M3 `reasoning_split`).
 - `proxy.md` — `run_proxy` recipes (Codex via npx, litellm).
-- `sandbox.md` — sandbox or route bash via `wrap_bash` argv tables (docker, ssh, firejail).
+- `sandbox.md` — sandbox or route bash via `on_tool_call` argv verdicts (docker, ssh, firejail).

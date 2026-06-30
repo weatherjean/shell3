@@ -292,6 +292,22 @@ type SessionOptions struct {
 // SessionConfig derives a per-session chat.Config from the shared parts.
 // The returned config embeds per-session closures (RefreshPrompt, SwitchAgent)
 // that consult only declared config plus the session's own agent choice.
+// bridgeToolCallAction maps a luacfg verdict action to the chat package's
+// equivalent. The two enums are independent iota blocks; an explicit mapping
+// (rather than a numeric cast) keeps this security boundary correct if either is
+// ever reordered, and an unrecognized action fails closed (Block) rather than
+// silently falling through to Run.
+func bridgeToolCallAction(a luacfg.ToolCallAction) chat.ToolCallAction {
+	switch a {
+	case luacfg.ActionRun:
+		return chat.Run
+	case luacfg.ActionAsk:
+		return chat.Ask
+	default: // ActionBlock or any unmapped future action → fail closed
+		return chat.Block
+	}
+}
+
 func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 	workdir := so.WorkDir
 	if workdir == "" {
@@ -321,20 +337,25 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 		Environment:       rt.Environment,
 		Delegation:        rt.Delegation,
 	}
-	// shell3.wrap_bash: a single config-global hook the bash/bash_bg tools pass
-	// their command through. Wired only when declared — a nil closure means no
-	// wrapping (the unsafe default: bash runs with no restrictions). Not
-	// per-agent and not swapped on agent switch.
-	if p.lc.HasWrapBash() {
-		cfg.WrapBash = func(ctx context.Context, cmd string) ([]string, bool, string, error) {
-			return p.lc.WrapBash(ctx, cmd)
+	// shell3.on_tool_call: config-global hook chain run before every tool.
+	if p.lc.HasToolCall() {
+		cfg.RunToolCall = func(ctx context.Context, name, command, argsJSON string) chat.ToolCallVerdict {
+			v := p.lc.RunToolCall(ctx, name, command, argsJSON)
+			return chat.ToolCallVerdict{
+				Action:      bridgeToolCallAction(v.Action),
+				Argv:        v.Argv,
+				Prompt:      v.Prompt,
+				Reason:      v.Reason,
+				AskTimeout:  v.AskTimeout,
+				Passthrough: v.Passthrough,
+			}
 		}
 	}
-	// shell3.bash_safety: an opt-in command-approval policy applied to bash/bash_bg
-	// before execution. Config-global like WrapBash; zero value (disabled) when the
-	// config declares none, so it is always safe to set.
-	if p.lc.HasBashSafety() {
-		cfg.BashSafety = p.lc.BashSafety()
+	// shell3.on_tool_result: config-global output-rewrite chain.
+	if p.lc.HasToolResult() {
+		cfg.RunToolResult = func(ctx context.Context, name, argsJSON, output string) string {
+			return p.lc.RunToolResult(ctx, name, argsJSON, output)
+		}
 	}
 	cfg.SwitchAgent = func(name string) (chat.ActiveAgent, error) {
 		// "" means "use the first agent" during initial session selection only
@@ -444,7 +465,7 @@ func (b *builder) loadConfig() error {
 		return err
 	}
 	b.lc = lc
-	// Surface non-fatal config issues (e.g. a removed bash_safety key that is now
+	// Surface non-fatal config issues (e.g. a removed config key that is now
 	// ignored). To both the app log and stderr: the log keeps a durable record,
 	// and stderr reaches headless/CLI runs before any TUI takes the screen.
 	for _, w := range lc.Warnings() {

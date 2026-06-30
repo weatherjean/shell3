@@ -39,14 +39,14 @@ func NewBotAPIClient(ctx context.Context, token string) (*botAPIClient, error) {
 }
 
 func (c *botAPIClient) onUpdate(ctx context.Context, b *bot.Bot, u *models.Update) {
-	// Inline-keyboard button presses (bash_safety approval) arrive as callback
+	// Inline-keyboard button presses (on_tool_call approval) arrive as callback
 	// queries, not messages. Route them to the callback channel and stop.
 	if u.CallbackQuery != nil {
 		select {
 		case c.cb <- Callback{ID: u.CallbackQuery.ID, Data: u.CallbackQuery.Data}:
 		default:
 			// Buffer full (64 deep): drop the press. The waiting Ask then resolves
-			// via its bash_safety ask-timeout → deny, which is the fail-safe
+			// via its on_tool_call ask-timeout → deny, which is the fail-safe
 			// direction. A human tap rate filling 64 is not realistic in practice.
 		}
 		return

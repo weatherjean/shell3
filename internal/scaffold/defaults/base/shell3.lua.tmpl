@@ -54,48 +54,44 @@ shell3.model("{{.Name | luaesc}}", {
 {{end}}})
 
 -- ---------------------------------------------------------------------------
--- Opt-in command gate — bash_safety (regex denylist).
+-- Command gate — shell3.on_tool_call (YOUR ONLY POLICY GATE)
 -- ---------------------------------------------------------------------------
--- Off by default. When enabled, each bash command is matched (as a whole string)
--- against two regex lists:
---   * hard_deny → hard-blocked, never run, never prompted.
---   * deny      → prompts a human to allow/deny before running. The interactive
---     TUI shows a y/N prompt; the Telegram host sends inline Allow/Deny buttons.
---     A headless subagent has no human, so a deny match is auto-denied (the block
---     reason is reported back to the parent agent via the inbox). A prompt nobody
---     answers falls back to deny after ask_timeout (default 300s).
---   * neither   → runs.
--- Patterns are Go regexes matched anywhere in the command, so chaining can't hide
--- a match (`echo hi; rm -rf /` still matches `rm\s+-rf`). There is no allowlist:
--- bash is unsafe by default and these lists are the guardrails. (wrap_bash, below,
--- is the escape hatch for anything that needs Lua logic.)
--- shell3.bash_safety{
---   enabled = true,
---   hard_deny = { [[rm\s+-rf\s+/]], [[mkfs]], [[dd\s+if=]], "shutdown" }, -- never run
---   deny      = { [[rm\s+-rf]], [[\bgit\s+push]], [[curl\b.*\|\s*(ba)?sh]] }, -- prompt
---   ask_timeout = 300, -- seconds to wait for a human before denying; 0 = forever
--- }
+-- UNSAFE BY DEFAULT: tools run with no restrictions. on_tool_call is the one place
+-- a model-issued action can be inspected, rewritten, routed, or blocked. It fires
+-- before EVERY tool with the real t.name (bash, bash_bg, shell_interactive, read,
+-- list_files, edit_file, custom). t.command is the bash text for the three bash
+-- tools and NIL otherwise — so guard on t.name before matching t.command.
+-- Handlers are chainable (declaration order) and receive t = { name, command, args }.
+-- Return one of:
+--   * nil                         → pass to the next handler / run
+--   * { command = "..." }         → rewrite the bash text, continue (bash tools only)
+--   * { argv = {...} }            → exec this argv directly (runner swap; bash/bash_bg
+--                                   only — fails closed for shell_interactive)
+--   * { block = true, reason="" } → block (reason shown to the model)
+--   * { ask = "prompt", reason="" } → ask a human (TUI y/N or Telegram buttons);
+--                                   allowed → run, declined/headless → block(reason)
+-- Write denylists with shell3.regex (Go RE2; compiled at load). Use (?s) so .*
+-- spans multi-line commands. A handler that errors FAILS CLOSED (blocks).
+-- Example (uncomment to enable a guard):
+-- local re   = shell3.regex
+-- local HARD = { re([[(?s)rm\s+-rf\s+/]]), re([[(?s)mkfs]]), re([[(?s)dd\s+if=]]) }
+-- local ASK  = { re([[(?s)rm\s+-rf]]), re([[(?s)\bgit\s+push]]), re([[(?s)curl\b.*\|\s*(ba)?sh]]) }
+-- local ENV  = re([[\.env]]) -- hoisted like the lists above: compiled once at load
+-- shell3.on_tool_call(function(t)
+--   if t.name == "bash" or t.name == "bash_bg" or t.name == "shell_interactive" then
+--     for _, p in ipairs(HARD) do if p:match(t.command) then return { block = true, reason = "hard_deny" } end end
+--     for _, p in ipairs(ASK)  do if p:match(t.command) then return { ask = "Run?\n" .. t.command, reason = "denied" } end end
+--   end
+--   -- non-bash tools fire too — gate them by t.name + t.args, e.g.:
+--   -- if t.name == "read" and ENV:match(t.args) then return { block = true, reason = "no .env" } end
+-- end)
 
--- ---------------------------------------------------------------------------
--- Bash safety hook (shell3.wrap_bash) — YOUR ONLY BASH GUARD.
--- ---------------------------------------------------------------------------
--- UNSAFE BY DEFAULT: bash and bash_bg run with no restrictions. This hook is the
--- ONLY place bash commands can be inspected, rewritten, or blocked. It receives
--- the command string and returns one of:
---   * a string        → run it under `bash -c` (rewrite the command text)
---   * a table         → an argv list exec'd directly — swaps the RUNNER, not
---                       just the text. The command is one argv element, so
---                       nothing re-parses it. e.g. sandbox in a container:
---                         return {"docker","exec","mycontainer","bash","-c",cmd}
---                       or swap the shell: return {"zsh","-c",cmd}
---   * nil/false[,why]  → block (optionally with a reason string)
--- A broken hook fails CLOSED (the command is blocked), never open.
---   -- example: block rm -rf, otherwise run normally
---   shell3.wrap_bash(function(cmd)
---     if cmd:match("rm%s+%-rf") then return nil, "refusing rm -rf" end
---     return cmd
---   end)
-shell3.wrap_bash(function(cmd) return cmd end)
+-- Optional: rewrite a tool's OUTPUT before the model sees it (e.g. redact secrets).
+-- Fires for EVERY tool; r.name is the real tool name ("bash", "read", custom, ...).
+-- Gate on r.name only if you mean to — for redaction you usually want all output.
+-- shell3.on_tool_result(function(r)
+--   return { output = (r.output:gsub("API_KEY=%S+", "API_KEY=[redacted]")) }
+-- end)
 
 -- ---------------------------------------------------------------------------
 -- Stub tools (optional) — redirect hallucinated tool calls to bash/edit_file.

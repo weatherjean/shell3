@@ -27,7 +27,7 @@ type Bot struct {
 	turnActive bool               // true from turn start until its goroutine ends
 
 	askMu   sync.Mutex           // guards pending + askSeq
-	pending map[string]chan bool // bash_safety Ask id → answer channel
+	pending map[string]chan bool // on_tool_call Ask id → answer channel
 	askSeq  int                  // monotonic id source for Ask
 
 	// onUsage, if set, receives each completed turn's token totals (per turn,

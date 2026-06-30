@@ -41,6 +41,19 @@ func (c *LoadedConfig) uniqueName(base string) string {
 	}
 }
 
+// luaSecret binds shell3.env.secret(key): look up a secret from the .env file
+// loaded alongside shell3.lua. Raises a Lua error if the key is not found so a
+// missing secret is a hard load-time failure, not a silent empty string.
+func (c *LoadedConfig) luaSecret(L *lua.LState) int {
+	key := L.CheckString(1)
+	v, ok := c.Secrets[key]
+	if !ok {
+		L.RaiseError("config: secret %q not found in .env", key)
+	}
+	L.Push(lua.LString(v))
+	return 1
+}
+
 func registerShell3(c *LoadedConfig) {
 	L := c.L
 	tbl := L.NewTable()
@@ -55,8 +68,10 @@ func registerShell3(c *LoadedConfig) {
 	env := L.NewTable()
 	L.SetField(env, "secret", L.NewFunction(c.luaSecret))
 	L.SetField(tbl, "env", env)
-	L.SetField(tbl, "wrap_bash", L.NewFunction(c.luaWrapBash))
-	L.SetField(tbl, "bash_safety", L.NewFunction(c.luaBashSafety))
+	registerRegex(L)
+	L.SetField(tbl, "regex", L.NewFunction(c.luaRegex))
+	L.SetField(tbl, "on_tool_call", L.NewFunction(c.luaOnToolCall))
+	L.SetField(tbl, "on_tool_result", L.NewFunction(c.luaOnToolResult))
 }
 
 var telegramKeys = map[string]bool{"token": true, "chat_id": true, "agent": true, "workdir": true, "dashboard": true, "cron": true}

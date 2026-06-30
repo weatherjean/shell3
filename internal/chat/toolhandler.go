@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 
 	"github.com/weatherjean/shell3/internal/applog"
-	"github.com/weatherjean/shell3/internal/bashsafety"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/runs"
@@ -65,20 +64,15 @@ type ToolConfig struct {
 	RunsDir string
 	// WorkDir is the working directory tools should resolve paths against.
 	WorkDir string
-	// WrapBash, when non-nil, is the shell3.wrap_bash hook: the bash/bash_bg
-	// handlers pass their parsed command through it before execution. It returns
-	// the argv to exec (a string hook return maps to `bash -c <string>`, a table
-	// is exec'd directly — a runner swap), whether the call is allowed, and a
-	// block reason. Nil means no hook is declared — the tools run the command
-	// verbatim (the unsafe default). The hook FAILS CLOSED on error (see
-	// luacfg.WrapBash): a broken wrapper blocks rather than silently runs.
-	WrapBash func(ctx context.Context, cmd string) (argv []string, allowed bool, reason string, err error)
-	// BashSafety is the command-approval policy; the bash/bash_bg handlers gate
-	// each command through it before execution. Zero value (disabled) = no gating.
-	BashSafety bashsafety.Policy
 	// Asker confirms an ask-verdict command with a human. Nil ⇒ ask degrades to
 	// deny (headless subagent path).
 	Asker AskFunc
+	// RunToolCall runs the shell3.on_tool_call chain (pass / rewrite / argv / block /
+	// ask) with the real tool name. The bash family self-gates via this in their
+	// handlers (gateBash / gateInteractiveCommand); every other tool is gated in the
+	// dispatch loop via gateNonBashTool. Nil = no hooks declared (everything runs —
+	// the unsafe default). Config-global.
+	RunToolCall func(ctx context.Context, name, command, argsJSON string) ToolCallVerdict
 	// AllMsgs is the full conversation slice including any reminder
 	// injections; tools that need to operate on what the model sees use
 	// this view.
@@ -139,15 +133,11 @@ type TurnConfig struct {
 	// StubTools maps a hallucinated tool name to its redirect message (a nudge,
 	// never an error). Checked after real/custom tools so a real tool always wins.
 	StubTools map[string]string
-	// WrapBash is the shell3.wrap_bash hook threaded to each tool call's
-	// ToolConfig (see ToolConfig.WrapBash). Nil = no hook = run commands verbatim.
-	WrapBash func(ctx context.Context, cmd string) (argv []string, allowed bool, reason string, err error)
-	// BashSafety is the command-approval policy; the bash/bash_bg handlers gate
-	// each command through it before execution. Zero value (disabled) = no gating.
-	BashSafety bashsafety.Policy
 	// Asker confirms an ask-verdict command with a human. Nil ⇒ ask degrades to
 	// deny (headless subagent path).
-	Asker AskFunc
+	Asker         AskFunc
+	RunToolCall   func(ctx context.Context, name, command, argsJSON string) ToolCallVerdict
+	RunToolResult func(ctx context.Context, name, argsJSON, output string) string
 	// CompactAt is the auto-compaction prompt-token threshold (0 = off).
 	// maybeCompact (called at the top of RunTurn) consults it.
 	CompactAt int

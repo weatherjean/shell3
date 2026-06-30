@@ -331,7 +331,14 @@ func turnScopedHandlers(cfg TurnConfig, st *toolLoopState) map[string]ToolHandle
 			if cfg.ShellInteractive == nil {
 				return "error: interactive TTY not available", nil
 			}
-			return cfg.ShellInteractive(ctx, ParseBashArgs(string(args)), cfg.WorkDir), nil
+			// shell_interactive runs bash too, so it is gated by the same
+			// on_tool_call chain under its real name (t.name == "shell_interactive")
+			// — otherwise it would be an ungated bash path around any denylist.
+			cmd, blockMsg, blocked := gateInteractiveCommand(ctx, cfg, ParseBashArgs(string(args)), string(args))
+			if blocked {
+				return blockMsg, nil
+			}
+			return cfg.ShellInteractive(ctx, cmd, cfg.WorkDir), nil
 		}},
 		"read_media": funcHandler{name: "read_media", fn: func(_ context.Context, _ string, args json.RawMessage, _ ToolConfig) (string, error) {
 			out, part := handleReadMedia(string(args), cfg.WorkDir)
@@ -369,10 +376,10 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 		}
 
 		emitToolCall(sess, tc.ID, tc.Name, tc.RawArgs)
-		// Every tool call dispatches directly: there is no guard engine or
-		// approval flow. The only bash safety surface is shell3.wrap_bash,
-		// applied inside the bash/bash_bg handlers (see ToolConfig.WrapBash),
-		// not here.
+		// Every tool call dispatches directly: there is no guard engine or approval
+		// flow. The only policy surface is shell3.on_tool_call, which fires before
+		// every tool — the bash family self-gates in its handlers (command rewrite /
+		// runner-swap there); all other tools are gated by name/args just below.
 		res, handled := validateCall(toolSchemas, tc)
 		// If validation failed, res already carries the typed reason and we skip
 		// dispatch. Otherwise resolve a handler —
@@ -380,45 +387,59 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 		// built-ins (custom before built-ins so a config-declared tool name
 		// always wins) — and run it through the single execute path.
 		if !handled {
-			var handler ToolHandler
-			if h, ok := turnScoped[tc.Name]; ok {
-				handler = h
-			} else if cfg.CustomToolNames[tc.Name] {
-				res = dispatchCustomTool(ctx, cfg, tc.Name, tc.RawArgs)
-			} else if h, ok := cfg.Handlers[tc.Name]; ok {
-				handler = h
-			} else if msg, ok := cfg.StubTools[tc.Name]; ok {
-				res = okResult(msg) // hallucinated tool: return its redirect nudge
-			} else {
-				res = errResult(fmt.Sprintf("error: unknown tool %q", tc.Name))
+			// on_tool_call fires before every tool. The bash family (bash, bash_bg,
+			// shell_interactive) self-gates inside its handlers, where command
+			// rewrite and runner-swap are resolved; every other tool is gated here
+			// by name/args (block / ask only — t.command is nil for them).
+			gateMsg, gateBlocked := "", false
+			if !isBashTool(tc.Name) {
+				gateMsg, gateBlocked = gateNonBashTool(ctx, cfg, tc.Name, tc.RawArgs)
 			}
-			if handler != nil {
-				toolCfg := ToolConfig{
-					Store:      cfg.Store,
-					RunsDir:    cfg.RunsDir,
-					WorkDir:    cfg.WorkDir,
-					WrapBash:   cfg.WrapBash,
-					BashSafety: cfg.BashSafety,
-					Asker:      cfg.Asker,
-					AllMsgs:    st.allMsgs,
-					SessMsgs:   sess.messages,
+			if gateBlocked {
+				res = errResult(gateMsg)
+			} else {
+				var handler ToolHandler
+				if h, ok := turnScoped[tc.Name]; ok {
+					handler = h
+				} else if cfg.CustomToolNames[tc.Name] {
+					res = dispatchCustomTool(ctx, cfg, tc.Name, tc.RawArgs)
+				} else if h, ok := cfg.Handlers[tc.Name]; ok {
+					handler = h
+				} else if msg, ok := cfg.StubTools[tc.Name]; ok {
+					res = okResult(msg) // hallucinated tool: return its redirect nudge
+				} else {
+					res = errResult(fmt.Sprintf("error: unknown tool %q", tc.Name))
 				}
-				out, herr := handler.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), toolCfg)
-				res = classifyHandlerOutput(out)
-				if herr != nil {
-					// Most handlers encode failures in their output string and
-					// return a nil error; a non-nil error is a genuine handler
-					// fault (e.g. bash_bg failing to spawn). Log it, and if the
-					// handler left no output, surface the error to the model as a
-					// tool error rather than emitting an empty result.
-					cfg.Log.Warn("tool handler error", "tool", tc.Name, "error", herr)
-					if out == "" {
-						res = errResult("error: " + herr.Error())
+				if handler != nil {
+					toolCfg := ToolConfig{
+						Store:       cfg.Store,
+						RunsDir:     cfg.RunsDir,
+						WorkDir:     cfg.WorkDir,
+						RunToolCall: cfg.RunToolCall,
+						Asker:       cfg.Asker,
+						AllMsgs:     st.allMsgs,
+						SessMsgs:    sess.messages,
+					}
+					out, herr := handler.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), toolCfg)
+					res = classifyHandlerOutput(out)
+					if herr != nil {
+						// Most handlers encode failures in their output string and
+						// return a nil error; a non-nil error is a genuine handler
+						// fault (e.g. bash_bg failing to spawn). Log it, and if the
+						// handler left no output, surface the error to the model as a
+						// tool error rather than emitting an empty result.
+						cfg.Log.Warn("tool handler error", "tool", tc.Name, "error", herr)
+						if out == "" {
+							res = errResult("error: " + herr.Error())
+						}
 					}
 				}
 			}
 		}
 
+		if cfg.RunToolResult != nil {
+			res.output = cfg.RunToolResult(ctx, tc.Name, tc.RawArgs, res.output)
+		}
 		appendToolResult(sess, st, tc, res)
 	}
 

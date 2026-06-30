@@ -616,7 +616,7 @@ func TestResolveEditorPrefersEnv(t *testing.T) {
 	}
 }
 
-func TestBashSafetyConfirmDefaultsYesOnEnter(t *testing.T) {
+func TestCommandGateConfirmDefaultsYesOnEnter(t *testing.T) {
 	m := sized(closedSend(nil))
 	reply := make(chan bool, 1)
 	m.Update(confirmMsg{req: &confirmReq{command: "rm -rf /tmp/x", reply: reply}})
@@ -625,7 +625,7 @@ func TestBashSafetyConfirmDefaultsYesOnEnter(t *testing.T) {
 	}
 	// Modal renders over the transcript with the command + buttons.
 	plain := stripANSI(m.View().Content)
-	for _, want := range []string{"bash_safety", "rm -rf /tmp/x", "Yes", "No"} {
+	for _, want := range []string{"command gate", "rm -rf /tmp/x", "Yes", "No"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("confirm modal missing %q", want)
 		}
@@ -644,7 +644,7 @@ func TestBashSafetyConfirmDefaultsYesOnEnter(t *testing.T) {
 	}
 }
 
-func TestBashSafetyConfirmDenyKeys(t *testing.T) {
+func TestCommandGateConfirmDenyKeys(t *testing.T) {
 	for _, key := range []tea.KeyPressMsg{
 		{Code: 'n'},
 		{Code: tea.KeyEscape},
@@ -675,7 +675,7 @@ func TestDisableSafetyAutoAllowsAndShowsBang(t *testing.T) {
 	if !strings.Contains(stripANSI(m.renderFooter()), "!") {
 		t.Fatal("footer should show the ! indicator when safety is off")
 	}
-	// A bash_safety ask now auto-allows without showing the modal.
+	// An on_tool_call ask now auto-allows without showing the modal.
 	reply := make(chan bool, 1)
 	m.Update(confirmMsg{req: &confirmReq{command: "rm x", reply: reply}})
 	if m.confirm != nil {

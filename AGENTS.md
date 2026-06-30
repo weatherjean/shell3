@@ -13,23 +13,30 @@ it runs (history is searched with `rg` over
 `.shell3_project/inbox.jsonl`; the live host tails it (fsnotify, offset-persisted,
 exactly-once) and injects a short pointer notification. Nested subagents use
 plain blocking bash — there is no dormant-parent revive. The shell is
-**unsafe by default**; two opt-in Lua hooks gate it: `shell3.bash_safety{deny=,
-hard_deny=}` — a declarative **regex denylist** (no allowlist): a `hard_deny`
-match is blocked outright, a `deny` match prompts a human to allow/deny (TUI `y/N`
-prompt / Telegram inline buttons; headless subagents deny on a match, bounded by
-`ask_timeout`), anything matching neither runs. Patterns match the whole command,
-so chaining can't hide a flagged command. And `shell3.wrap_bash(fn)`
-(allow/block/rewrite/route; no prompt). `bash_safety` runs first; only its `run`
-verdict reaches `wrap_bash`. Skills are `.md` files the
-agent reads with `cat` (listed by absolute path in the prompt under `## Skills`
-— there is no `skill` tool), and custom tools are declarative bash-command
-templates (`shell3.tool{command=...}`, params injected as lowercase env vars
-plus a `secrets` list; no Lua `handler`) — the `shell3.bash`/`http`/`urlencode`
-helpers are gone. Context is host-managed via two token thresholds: `prune_at`
-cheaply stubs old tool outputs (no LLM call), and `compact_at` triggers
-tail-preserving compaction — summarizing the head while keeping recent turns
-verbatim. The `prune_at` and `keep_recent` knobs are optional, defaulting to
-fractions of `compact_at`; no model-driven prune/compact tools.
+**unsafe by default**; the single opt-in hook that gates it is
+`shell3.on_tool_call(fn)` — a chainable handler that runs before **every** tool with
+the real `t.name` (`bash`/`bash_bg`/`shell_interactive`/`read`/`list_files`/`edit_file`/custom;
+`t.command` is the bash text for the three bash tools, nil otherwise) and returns a
+verdict: `nil` (run) / `{command=...}` (rewrite, continue chain — bash tools only) /
+`{argv={...}}` (runner-swap, terminal — `bash`/`bash_bg` only; fails closed for
+`shell_interactive` and non-bash) / `{block=true, reason=...}` (block) /
+`{ask="prompt", reason=...}` (prompt a human; allow→run, decline/headless→block).
+Denylists are written with `shell3.regex(pat):match(s)` (Go RE2; compiled at load;
+use `(?s)` so `.*` spans newlines; match the whole command so chaining can't hide a
+flagged fragment) — guard on `t.name` before matching `t.command` (nil for non-bash).
+`shell3.on_tool_result(fn)` can rewrite a tool's output (e.g. redact secrets). The
+default config gates only the bash family, so `read`/`list_files` run ungated by
+default (a config choice, not a hardcoded exemption). Skills
+are `.md` files the agent reads with `cat` (listed by absolute path in the prompt
+under `## Skills` — there is no `skill` tool), and custom tools are declarative
+bash-command templates (`shell3.tool{command=...}`, params injected as lowercase
+env vars plus a `secrets` list; no Lua `handler`) — the
+`shell3.bash`/`http`/`urlencode` helpers are gone. Context is host-managed via
+two token thresholds: `prune_at` cheaply stubs old tool outputs (no LLM call),
+and `compact_at` triggers tail-preserving compaction — summarizing the head while
+keeping recent turns verbatim. The `prune_at` and `keep_recent` knobs are
+optional, defaulting to fractions of `compact_at`; no model-driven prune/compact
+tools.
 
 ## IMPORTANT: Do Not Read Credential Files
 
@@ -43,7 +50,7 @@ Secrets and credentials (provider API keys, tool tokens) live in a plain `.env` 
 ```
 cmd/shell3/            entry point (run command)
 internal/agentsetup/   shared config assembly (Build → chat.Config) used by every front-end
-internal/luacfg/       Lua config loader (shell3.lua → models/agents/tools/skills, wrap_bash/stub_tools) + system-prompt assembly
+internal/luacfg/       Lua config loader (shell3.lua → models/agents/tools/skills, on_tool_call/stub_tools) + system-prompt assembly
 internal/bootstrap/    first-run global + project setup
 internal/scaffold/     embedded starter shell3.lua + .env template
 internal/adapter/openai/  OpenAI-compatible LLM adapter

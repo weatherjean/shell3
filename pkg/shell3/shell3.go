@@ -174,7 +174,7 @@ type Spec struct {
 	// shell_interactive tool returning an "unavailable" string. A TUI supplies
 	// a closure that releases the terminal for the duration of the command.
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
-	// Asker confirms a bash_safety ask-verdict command with a human and returns
+	// Asker confirms an on_tool_call ask-verdict command with a human and returns
 	// true to allow. A front-end supplies it (TUI prompt / Telegram buttons). nil
 	// means no human is attached (headless), so ask degrades to deny.
 	Asker func(ctx context.Context, command, reason string) bool
@@ -226,7 +226,7 @@ type Event struct {
 	ToolCallID       string // ToolCall, ToolResult (links a call to its result)
 	ToolInput        string // ToolCall (raw JSON args)
 	ToolOutput       string // ToolResult
-	ToolError        bool   // ToolResult — the tool reported an error (a bash_safety denial, a dispatch/validation failure, or a custom tool's non-zero exit; bash builtin exit codes are not classified)
+	ToolError        bool   // ToolResult — the tool reported an error (an on_tool_call denial, a dispatch/validation failure, or a custom tool's non-zero exit; bash builtin exit codes are not classified)
 	IsCustomTool     bool   // ToolCall (resolved against the active agent's custom-tool set)
 	PromptTokens     int    // Usage, Done
 	CompletionTokens int    // Usage, Done
@@ -304,7 +304,7 @@ type Session struct {
 	shellInteractive func(ctx context.Context, cmd, workdir string) string
 
 	// asker is Spec.Asker, threaded into every turn's TurnConfig.Asker (see
-	// turnConfig). nil keeps bash_safety ask-verdicts denying.
+	// turnConfig). nil keeps on_tool_call ask-verdicts denying.
 	asker func(ctx context.Context, command, reason string) bool
 
 	// sink is the JSONL audit log, opened by Start (Spec.OutPath) or
@@ -1130,11 +1130,11 @@ type Snapshot struct {
 	Skills        []string
 	Subagents     []string
 	Params        []ParamValue
-	// BashSafetyOn reports whether shell3.bash_safety is enabled in the loaded
-	// config. When false the shell is unsafe by default, which the TUI surfaces
-	// with a standing "!" indicator.
-	BashSafetyOn bool
-	// Warnings are non-fatal config load issues (e.g. a removed bash_safety key
+	// ToolHooksOn reports whether shell3.on_tool_call hooks are declared in the
+	// loaded config. When false the shell is unsafe by default, which the TUI
+	// surfaces with a standing "!" indicator.
+	ToolHooksOn bool
+	// Warnings are non-fatal config load issues (e.g. a removed config key
 	// that is now ignored). A front-end surfaces them in-band at startup — the
 	// alt-screen TUI otherwise clears the stderr line they were printed on.
 	Warnings []string
@@ -1164,7 +1164,7 @@ func (s *Session) Snapshot() Snapshot {
 		SystemPrompt:  systemPrompt,
 		Skills:        slices.Clone(s.cfg.ActiveSkills),
 		Subagents:     slices.Clone(s.cfg.Subagents),
-		BashSafetyOn:  s.cfg.BashSafety.Enabled,
+		ToolHooksOn:   s.cfg.RunToolCall != nil,
 		Warnings:      slices.Clone(s.cfg.ConfigWarnings),
 	}
 	for _, t := range s.cfg.Personality.Tools {
