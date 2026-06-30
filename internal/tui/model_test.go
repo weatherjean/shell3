@@ -347,6 +347,60 @@ func TestCommandPaletteFilters(t *testing.T) {
 	}
 }
 
+// A bracketed paste (tea.PasteMsg, not a KeyPressMsg) must still recompute the
+// layout, so a multi-line paste doesn't leave the footer/viewport stale until
+// the next keystroke. A taller input shrinks the viewport.
+func TestPasteRecomputesLayout(t *testing.T) {
+	m := newModel(closedSend(nil), nil, "", "")
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24}) // mode defaults to insert
+	vpBefore := m.vp.Height()
+	m.Update(tea.PasteMsg{Content: "a\nb\nc\nd\ne\nf"})
+	if m.vp.Height() >= vpBefore {
+		t.Fatalf("multi-line paste should shrink the viewport via relayout (before %d, after %d)", vpBefore, m.vp.Height())
+	}
+}
+
+// The input shows a scroll indicator only when it has grown past its visible
+// height (so off-screen text isn't silently hidden).
+func TestInputScrollIndicator(t *testing.T) {
+	// A fitting input (empty, a single char, or a single short line) must show
+	// NO indicator — render the input first, as a real frame does.
+	for _, val := range []string{"", "a", "hello world"} {
+		m := newModel(closedSend(nil), nil, "", "")
+		m.Update(tea.WindowSizeMsg{Width: 40, Height: 24})
+		m.ta.SetValue(val)
+		m.relayout()
+		m.ta.View()
+		if got := stripANSI(m.inputScrollIndicator()); got != "" {
+			t.Fatalf("input %q fits but showed an indicator %q", val, got)
+		}
+	}
+	// An input taller than its visible height shows a scroll arrow.
+	m := newModel(closedSend(nil), nil, "", "")
+	m.Update(tea.WindowSizeMsg{Width: 40, Height: 10})
+	m.ta.SetValue(strings.Repeat("line\n", 40))
+	m.relayout()
+	m.ta.View()
+	if ind := stripANSI(m.inputScrollIndicator()); !strings.ContainsAny(ind, "▲▼") {
+		t.Fatalf("an overflowing input should show a scroll arrow, got %q", ind)
+	}
+}
+
+// The "›" prompt marker shows only on a single-line input; a multi-line input
+// drops it so continuation rows aren't cluttered.
+func TestPromptMarkerOnlyWhenSingleLine(t *testing.T) {
+	m := newModel(closedSend(nil), nil, "", "")
+	m.Update(tea.WindowSizeMsg{Width: 60, Height: 24})
+	m.ta.SetValue("one line")
+	if !strings.Contains(stripANSI(m.ta.View()), "›") {
+		t.Fatalf("single-line input should show the › prompt:\n%s", stripANSI(m.ta.View()))
+	}
+	m.ta.SetValue("first\nsecond")
+	if strings.Contains(stripANSI(m.ta.View()), "›") {
+		t.Fatalf("multi-line input should NOT show the › prompt:\n%s", stripANSI(m.ta.View()))
+	}
+}
+
 // :compact is a real, handled command; it must be discoverable in the palette.
 func TestCommandPalette_ListsCompact(t *testing.T) {
 	m := sized(closedSend(nil))

@@ -17,3 +17,10 @@ func TestToolDefs_ReadGate(t *testing.T) {
 		t.Fatalf("no gates should yield no defs, got %d", len(defs2))
 	}
 }
+
+func TestToolDefs_ListFilesGate(t *testing.T) {
+	defs := ToolDefs(ToolGates{ListFiles: true}, nil)
+	if len(defs) != 1 || defs[0].Name != "list_files" {
+		t.Fatalf("list_files gate should yield exactly the list_files def, got %+v", defs)
+	}
+}

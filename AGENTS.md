@@ -10,10 +10,12 @@ else is a command it runs (history is searched with `rg` over
 `.shell3_project/inbox.jsonl`; the live host tails it (fsnotify, offset-persisted,
 exactly-once) and injects a short pointer notification. Nested subagents use
 plain blocking bash — there is no dormant-parent revive. The shell is
-**unsafe by default**; two opt-in Lua hooks gate it: `shell3.bash_safety{allow=,
-deny=}` — a declarative glob allow/deny gate with a live human-approval (ask)
-flow for anything unlisted (TUI `y/N` prompt / Telegram inline buttons; headless
-subagents deny on ask, bounded by `ask_timeout`) — and `shell3.wrap_bash(fn)`
+**unsafe by default**; two opt-in Lua hooks gate it: `shell3.bash_safety{deny=,
+hard_deny=}` — a declarative **regex denylist** (no allowlist): a `hard_deny`
+match is blocked outright, a `deny` match prompts a human to allow/deny (TUI `y/N`
+prompt / Telegram inline buttons; headless subagents deny on a match, bounded by
+`ask_timeout`), anything matching neither runs. Patterns match the whole command,
+so chaining can't hide a flagged command. And `shell3.wrap_bash(fn)`
 (allow/block/rewrite/route; no prompt). `bash_safety` runs first; only its `run`
 verdict reaches `wrap_bash`. Skills are `.md` files the
 agent reads with `cat` (listed by absolute path in the prompt under `## Skills`

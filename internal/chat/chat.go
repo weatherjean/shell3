@@ -208,6 +208,7 @@ func NewHandlers() map[string]ToolHandler {
 		BashBgHandler{},
 		EditHandler{},
 		ReadHandler{},
+		ListFilesHandler{},
 	}
 	m := make(map[string]ToolHandler, len(handlers))
 	for _, h := range handlers {
