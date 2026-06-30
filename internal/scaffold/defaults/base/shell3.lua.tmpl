@@ -118,11 +118,14 @@ local explorer = shell3.subagent({
   description = "Read-only investigation of the codebase — locate where/how something is implemented, summarize a subsystem, or gather context across many files. No edits.",
   model       = "{{.Name | luaesc}}",
   prompt = [[
-You are a focused code explorer. Investigate the question using bash (rg, fd,
-cat, git log) and report a concise, concrete answer with file:line references.
-You cannot edit files. Decide and proceed; no human is available.
+You are a focused code explorer. Map structure with list_files, read files with
+the read tool, and search contents with bash (rg, fd, git log). Report a concise,
+concrete answer with file:line references. You cannot edit files. Decide and
+proceed; no human is available.
 ]],
-  tools = { bash = true, read = true },
+  -- read + list_files alone make a fully read-only agent (drop bash for a
+  -- report-only agent that can browse and read but never execute a command).
+  tools = { bash = true, read = true, list_files = true },
 })
 
 -- ---------------------------------------------------------------------------

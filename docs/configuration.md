@@ -164,6 +164,30 @@ Directories, missing files, and offsets past EOF are clean errors. Search still
 belongs in bash — reach for `rg` or `grep` when you want to match patterns
 across files rather than read one file's content.
 
+### The `list_files` tool
+
+`list_files = true` gives the agent a directory lister that returns an indented
+tree (directories first, suffixed `/`). It accepts a `path` (absolute or
+workdir-relative, default the project root), a `depth` (max levels to recurse,
+**default 2**), and an `ignore` list of glob patterns. A pattern without `/`
+matches the base name (`*.test.go`); with `/` it matches the path relative to the
+listed directory (`src/gen/*`).
+
+It does **no automatic filtering** — hidden and vendored files are listed unless
+you `ignore` them — so start shallow and narrow as you go: widen `depth` only
+when needed, pass a deeper `path`, or add `ignore` globs like
+`{ "node_modules", "*.lock" }`. Output is capped at **1000 entries** with a
+truncation notice; missing paths and non-directories are clean errors.
+
+Together, `read` + `list_files` make a **fully read-only agent that needs no
+bash** — it can browse the tree and read files but never execute a command. Drop
+`bash`/`edit` from such an agent's `tools` and it can still investigate and
+report (for content *search*, it would still need `bash` for `rg`/`grep`):
+
+```lua
+tools = { read = true, list_files = true }  -- browse + read, no shell
+```
+
 ## Custom tools
 
 A custom tool is **not** a Lua function — it's a bash command template. You give
