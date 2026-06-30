@@ -7,7 +7,10 @@ ai-do-not-read.*
 # AI dev-process artifacts (kept local, not shipped publicly)
 CLAUDE.md
 docs/superpowers/
-docs/dev/superpowers/
+# Design specs / implementation plans + other AI working notes live in docs/dev
+# locally but are never committed — only its README is tracked.
+docs/dev/*
+!docs/dev/README.md
 
 # Build / test artifacts
 *.out
