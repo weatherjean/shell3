@@ -1,6 +1,8 @@
-# Developer history
+# Developer history (local-only)
 
-Design specs and implementation plans written during development, kept for
-archaeology. They describe the state of the code at the time of writing and
-are not maintained as documentation — see the top-level README and
-`docs/cookbook/` for current docs.
+AI-generated design specs and implementation plans written during development
+land in this directory, but everything here except this README is
+**gitignored** (see `.gitignore`) — kept for local archaeology, never committed.
+
+Shipped documentation lives elsewhere: the top-level `README.md`, `docs/`, and
+`docs/cookbook/`.

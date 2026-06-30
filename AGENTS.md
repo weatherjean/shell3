@@ -2,9 +2,12 @@
 
 Minimal Unix-composable coding agent written in Go.
 
-**Bash-first.** The agent's verbs are `bash`, `read`, and `edit_file`; text files
-are read with the `read` tool (paged, capped at 2000 lines / 50 KB); everything
-else is a command it runs (history is searched with `rg` over
+**Bash-first.** The agent's verbs are `bash`, `read`, `list_files`, and
+`edit_file`; text files are read with the `read` tool (paged, capped at 2000
+lines / 50 KB) and directories with `list_files` (an indented tree; `path`,
+`depth` default 2, `ignore` globs, no auto-filtering, 1000-entry cap) — `read` +
+`list_files` alone make a no-bash read-only agent; everything else is a command
+it runs (history is searched with `rg` over
 `.shell3_project/runs/**/*.jsonl`; a subagent is a fire-and-forget backgrounded
 `shell3` subprocess). A finishing subagent appends one pointer line to
 `.shell3_project/inbox.jsonl`; the live host tails it (fsnotify, offset-persisted,
@@ -66,3 +69,12 @@ make build      # go build ./cmd/shell3
 make install    # go install ./cmd/shell3
 go test ./...   # run all tests
 ```
+
+## AI artifacts are not committed
+
+Design specs, implementation plans, and other AI-generated working notes are
+**gitignored, never committed** — `docs/dev/*` (except its `README.md`),
+`docs/superpowers/`, `docs/dev/superpowers/`, and `ai-do-not-read.*`. Keep them
+local; the repo carries only shipped documentation (top-level `README.md`,
+`docs/`, `docs/cookbook/`). If you generate a design/plan doc, leave it in
+`docs/dev/` where the ignore rule keeps it out of commits.

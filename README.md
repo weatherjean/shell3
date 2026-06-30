@@ -63,8 +63,9 @@ commands. Full walkthrough in [docs/cli.md](docs/cli.md).
 - **Multiple agents, one conversation.** Switch between a full-access `code`
   agent and a read-only `plan` agent (or your own) with `Tab` or `/agent`,
   keeping history.
-- **Bash-first, unsafe by default.** The agent acts through `bash`, `read`, and
-  `edit_file`; everything else is a command it runs. Two
+- **Bash-first, unsafe by default.** The agent acts through `bash`, `read`,
+  `list_files`, and `edit_file`; everything else is a command it runs (`read` +
+  `list_files` alone make a fully read-only agent that needs no shell). Two
   opt-in hooks gate the shell: `shell3.bash_safety{deny=, hard_deny=}` (a regex
   denylist — `hard_deny` blocks, `deny` prompts a human) and `shell3.wrap_bash(fn)`
   (inspect, rewrite, or block commands).
