@@ -41,6 +41,7 @@ type Item struct {
 	ToolOutput string
 	ToolCallID string
 	ToolDone   bool
+	ToolError  bool // the tool result was an error (renders ✗, not ✓)
 	Notice     NoticeKind
 	Folded     bool
 	Steer      bool // a mid-turn steering message (user item, marked)
@@ -155,8 +156,9 @@ func (t *Transcript) Apply(ev shell3.Event) bool {
 		if i := t.findOpenTool(ev.ToolCallID); i >= 0 {
 			t.items[i].ToolOutput = ev.ToolOutput
 			t.items[i].ToolDone = true
+			t.items[i].ToolError = ev.ToolError
 		} else {
-			t.items = append(t.items, &Item{Kind: ItemTool, ToolName: ev.ToolName, ToolOutput: ev.ToolOutput, ToolCallID: ev.ToolCallID, ToolDone: true, Folded: foldedByDefault(ev.ToolName)})
+			t.items = append(t.items, &Item{Kind: ItemTool, ToolName: ev.ToolName, ToolOutput: ev.ToolOutput, ToolCallID: ev.ToolCallID, ToolDone: true, ToolError: ev.ToolError, Folded: foldedByDefault(ev.ToolName)})
 		}
 		return true
 	case shell3.SystemReminder:
@@ -447,7 +449,11 @@ func renderItem(it *Item) string {
 		tr := toolRenderFor(it.ToolName)
 		status := stDim.Render("…")
 		if it.ToolDone {
-			status = stTool.Render("✓")
+			if it.ToolError {
+				status = stErr.Render("✗")
+			} else {
+				status = stTool.Render("✓")
+			}
 		}
 		head := chev(it.Folded) + " " + tr.style.Render("● "+it.ToolName)
 		if it.Folded {

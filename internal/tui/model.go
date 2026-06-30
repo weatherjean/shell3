@@ -138,10 +138,10 @@ type model struct {
 }
 
 func newModel(send func(string) (<-chan shell3.Event, context.CancelFunc), cmds sessionCmds, agentName, statusMsg string) *model {
-	// Line numbers off, a "›" prompt, unlimited length, dynamic height up to
-	// inputMaxRows, and custom newline keys; everything else stays default.
+	// Line numbers off, a dynamic "›" prompt (set below), unlimited length,
+	// dynamic height up to inputMaxRows, and custom newline keys; everything else
+	// stays default.
 	ta := textarea.New()
-	ta.Prompt = "› "
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0 // unlimited
 	ta.DynamicHeight = true
@@ -175,7 +175,7 @@ func newModel(send func(string) (<-chan shell3.Event, context.CancelFunc), cmds 
 	ta.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("shift+enter", "alt+enter", "ctrl+j"))
 	ta.Focus()
 
-	return &model{
+	m := &model{
 		tr:        NewTranscript(),
 		vp:        viewport.New(),
 		ta:        ta,
@@ -186,6 +186,16 @@ func newModel(send func(string) (<-chan shell3.Event, context.CancelFunc), cmds 
 		agentName: agentName,
 		statusMsg: statusMsg,
 	}
+	// Prompt marker: show "› " only when the input is a single logical line, and
+	// only on its first visual row — so a multi-line (or wrapped) input isn't
+	// cluttered with a marker on every row. Width 2 keeps text aligned either way.
+	m.ta.SetPromptFunc(2, func(pi textarea.PromptInfo) string {
+		if pi.LineNumber == 0 && m.ta.LineCount() <= 1 {
+			return "› "
+		}
+		return "  "
+	})
+	return m
 }
 
 func (m *model) Init() tea.Cmd {
@@ -370,6 +380,35 @@ func (m *model) relayout() {
 	m.vp.SetWidth(m.width)
 	m.vp.SetHeight(vpH)
 	m.refresh(false)
+}
+
+// inputScrollIndicator is the one-line gutter above the input. It is blank
+// unless the input has grown past its visible height, in which case it shows a
+// dim, right-aligned ▲ (more above), ▼ (more below), or ▲▼ — so a long
+// paste/draft doesn't silently hide content off the top or bottom.
+//
+// Overflow is measured by logical line count vs the visible height: the
+// textarea's ScrollPercent is unreliable here (it pads its viewport content to
+// the view height, so a fitting single line reports a non-1.0 percent and would
+// show a spurious ▼). Logical lines undercount only when a line soft-wraps, so
+// at worst an arrow is omitted — never shown for input that actually fits.
+func (m *model) inputScrollIndicator() string {
+	visible := m.ta.Height()
+	off := m.ta.ScrollYOffset()
+	total := m.ta.LineCount()
+	above := off > 0
+	below := total > off+visible
+	if !above && !below {
+		return ""
+	}
+	marker := "▼"
+	switch {
+	case above && below:
+		marker = "▲▼"
+	case above:
+		marker = "▲"
+	}
+	return lipgloss.NewStyle().Width(m.width).Align(lipgloss.Right).Render(stFgDim.Render(marker))
 }
 
 // refresh rebuilds the viewport content. It preserves the scroll position in
@@ -739,6 +778,19 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
+	case tea.PasteMsg:
+		// A bracketed paste isn't a KeyPressMsg, so it skips the keystroke path
+		// that recomputes layout — without relayout a multi-line paste grows the
+		// input but leaves the footer/viewport stale (mangled) until the next key.
+		// Scoped to PasteMsg specifically: the catch-all below must NOT relayout,
+		// or the cursor's recurring BlinkMsg would re-render the transcript ~2x/sec.
+		if m.mode != modeInsert {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.ta, cmd = m.ta.Update(msg)
+		m.relayout()
+		return m, cmd
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
 	case shellDoneMsg:
@@ -751,6 +803,8 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.mode == modeInsert {
+		// Catch-all for other insert-mode messages (e.g. the cursor BlinkMsg):
+		// forward to the textarea WITHOUT relayout — see the PasteMsg case above.
 		var cmd tea.Cmd
 		m.ta, cmd = m.ta.Update(msg)
 		return m, cmd
@@ -1267,10 +1321,14 @@ func (m *model) View() tea.View {
 	if !m.ready || m.width <= 0 {
 		return v
 	}
+	// Render the input first: ta.View() refreshes the textarea's internal scroll
+	// state, which inputScrollIndicator then reads for the same frame (no 1-frame
+	// lag on the ▲/▼ markers).
+	taView := m.ta.View()
 	base := lipgloss.JoinVertical(lipgloss.Left,
 		m.vp.View(),
-		"", // one blank line above the input; the input then sits directly on the bar
-		m.ta.View(),
+		m.inputScrollIndicator(), // blank, or ▲/▼ when the input scrolls off-screen
+		taView,
 		m.renderFooter(),
 	)
 	switch {

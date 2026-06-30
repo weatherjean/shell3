@@ -226,6 +226,7 @@ type Event struct {
 	ToolCallID       string // ToolCall, ToolResult (links a call to its result)
 	ToolInput        string // ToolCall (raw JSON args)
 	ToolOutput       string // ToolResult
+	ToolError        bool   // ToolResult — the tool reported an error (a bash_safety denial, a dispatch/validation failure, or a custom tool's non-zero exit; bash builtin exit codes are not classified)
 	IsCustomTool     bool   // ToolCall (resolved against the active agent's custom-tool set)
 	PromptTokens     int    // Usage, Done
 	CompletionTokens int    // Usage, Done
@@ -249,7 +250,7 @@ func translate(ev chat.Event) (Event, bool) {
 	case chat.EventToolCall:
 		return Event{Kind: ToolCall, ToolName: ev.ToolName, ToolCallID: ev.ToolCallID, ToolInput: ev.ToolInput}, true
 	case chat.EventToolResult:
-		return Event{Kind: ToolResult, ToolName: ev.ToolName, ToolCallID: ev.ToolCallID, ToolOutput: ev.ToolOutput}, true
+		return Event{Kind: ToolResult, ToolName: ev.ToolName, ToolCallID: ev.ToolCallID, ToolOutput: ev.ToolOutput, ToolError: ev.ToolError}, true
 	case chat.EventSystemReminder:
 		return Event{Kind: SystemReminder, Text: ev.Text}, true
 	case chat.EventCompacted:
