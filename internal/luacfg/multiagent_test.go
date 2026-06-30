@@ -43,13 +43,21 @@ shell3.agent({ name="plan",  model="haiku", prompt="p" })
 	}
 }
 
-func TestDuplicateAgentNameErrors(t *testing.T) {
+func TestDuplicateAgentNameAutoSuffix(t *testing.T) {
 	p := writeConfig(t, twoModelsHdr+`
 shell3.agent({ name="dup", model="opus", prompt="a" })
 shell3.agent({ name="dup", model="opus", prompt="b" })
 `)
-	if _, err := Load(p, filepath.Dir(p)); err == nil {
-		t.Fatal("duplicate agent name should error")
+	c, err := Load(p, filepath.Dir(p))
+	if err != nil {
+		t.Fatalf("duplicate agent name should auto-suffix, not error: %v", err)
+	}
+	defer c.Close()
+	if _, ok := c.AgentByName("dup"); !ok {
+		t.Fatal(`first "dup" agent should keep its name`)
+	}
+	if _, ok := c.AgentByName("dup2"); !ok {
+		t.Fatalf(`second "dup" agent should become "dup2"; got %v`, c.AgentNames())
 	}
 }
 

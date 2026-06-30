@@ -3,9 +3,43 @@ package luacfg
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 
 	lua "github.com/yuin/gopher-lua"
 )
+
+// nameTaken reports whether any already-registered agent or subagent uses name.
+// Agents and subagents share one namespace so AgentByName/SubagentByName stay
+// unambiguous. Called only during single-threaded config load, so no lock.
+func (c *LoadedConfig) nameTaken(name string) bool {
+	for _, a := range c.agents {
+		if a.Name == name {
+			return true
+		}
+	}
+	for _, s := range c.subagents {
+		if s.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// uniqueName returns base when it is free, otherwise the lowest base<N>
+// (N counting from 2) that no agent or subagent already claims. This makes a
+// duplicate agent/subagent declaration auto-suffix ("code", "code2", "code3")
+// instead of failing the whole config load — the first declaration keeps its
+// bare name, so existing --agent/cron references to it stay valid.
+func (c *LoadedConfig) uniqueName(base string) string {
+	if !c.nameTaken(base) {
+		return base
+	}
+	for n := 2; ; n++ {
+		if cand := base + strconv.Itoa(n); !c.nameTaken(cand) {
+			return cand
+		}
+	}
+}
 
 func registerShell3(c *LoadedConfig) {
 	L := c.L
@@ -316,16 +350,9 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 	if a.Prompt != "" && a.PromptCmd != "" {
 		L.RaiseError("agent %q: set exactly one of prompt or prompt_cmd", a.Name)
 	}
-	for _, ex := range c.agents {
-		if ex.Name == a.Name {
-			L.RaiseError("agent %q: already declared (agent names must be unique)", a.Name)
-		}
-	}
-	for _, ex := range c.subagents {
-		if ex.Name == a.Name {
-			L.RaiseError("config: %q is declared as both an agent and a subagent", a.Name)
-		}
-	}
+	// Duplicate names auto-suffix rather than failing the load (the first
+	// declaration keeps its bare name; later collisions become name2, name3…).
+	a.Name = c.uniqueName(a.Name)
 	if sk, ok := opts.RawGetString("skills").(*lua.LTable); ok {
 		a.Skills = handleNames(sk, "__skill")
 	}
@@ -379,17 +406,10 @@ func (c *LoadedConfig) luaSubagent(L *lua.LState) int {
 	if s.Prompt != "" && s.PromptCmd != "" {
 		L.RaiseError("subagent %q: set exactly one of prompt or prompt_cmd", s.Name)
 	}
-	// Reject collision with already-declared agents.
-	for _, ex := range c.agents {
-		if ex.Name == s.Name {
-			L.RaiseError("config: %q is declared as both an agent and a subagent", s.Name)
-		}
-	}
-	for _, ex := range c.subagents {
-		if ex.Name == s.Name {
-			L.RaiseError("subagent %q: already declared (subagent names must be unique)", s.Name)
-		}
-	}
+	// Duplicate names (against any agent or subagent) auto-suffix rather than
+	// failing the load. The returned handle below carries the deduped name, so
+	// tools.subagents={handle} references still resolve.
+	s.Name = c.uniqueName(s.Name)
 	if sk, ok := opts.RawGetString("skills").(*lua.LTable); ok {
 		s.Skills = handleNames(sk, "__skill")
 	}

@@ -115,7 +115,10 @@ request proceeds against whatever is there. See
 
 An agent is a name, a model, a system prompt, and a set of tools. Declare as
 many as you like and switch between them mid-session with `Tab` (when idle) or
-`/agent` — your conversation history comes along.
+`/agent` — your conversation history comes along. Names are deduplicated rather
+than rejected: agents and subagents share one namespace, so a second entry
+named `code` auto-suffixes to `code2` (then `code3`, …) while the first keeps
+its bare name.
 
 ```lua
 shell3.agent({

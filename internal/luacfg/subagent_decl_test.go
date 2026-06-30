@@ -125,18 +125,22 @@ shell3.agent({
 	}
 }
 
-func TestSubagent_NameCollisionWithAgentErrors(t *testing.T) {
+func TestSubagent_NameCollisionWithAgentAutoSuffixes(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "shell3.lua", minModelHdr+`
 shell3.agent({ name = "dup", model = "m", prompt = "a" })
 shell3.subagent({ name = "dup", description = "a duplicate", model = "m", prompt = "p" })
 `)
-	_, err := Load(dir+"/shell3.lua", dir)
-	if err == nil {
-		t.Fatal("expected error for name collision between agent and subagent")
+	c, err := Load(dir+"/shell3.lua", dir)
+	if err != nil {
+		t.Fatalf("agent/subagent name collision should auto-suffix, not error: %v", err)
 	}
-	if !contains(err.Error(), "dup") {
-		t.Fatalf("error should mention 'dup'; got: %v", err)
+	defer c.Close()
+	if _, ok := c.AgentByName("dup"); !ok {
+		t.Fatal(`agent "dup" should keep its name`)
+	}
+	if _, ok := c.SubagentByName("dup2"); !ok {
+		t.Fatalf(`colliding subagent should become "dup2"; got %+v`, c.Subagents())
 	}
 }
 
