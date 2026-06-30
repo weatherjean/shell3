@@ -50,9 +50,32 @@ Set `context_window` to the model's *actual* budget — the wrong number throws
 off the context-usage reminders and the compaction trigger.
 
 `compact_at` is an absolute prompt-token threshold. When a turn's prompt crosses
-it, shell3 summarizes the conversation so far and continues against that
-summary. This is host-managed: there are no model-driven prune or compact tools
-to call. Leave it unset (or `0`) to disable.
+it, shell3 summarizes the head of the conversation and keeps a verbatim recent
+tail — so the model retains its immediate working context. This is
+host-managed: there are no model-driven prune or compact tools to call. Leave
+it unset (or `0`) to disable.
+
+Two optional knobs tune the compaction policy:
+
+```lua
+shell3.model("main", {
+  compact_at   = 100000,  -- full tail-preserving compaction
+  keep_recent  = 33000,   -- verbatim tail size (tokens); default round(compact_at * 0.33)
+  prune_at     = 60000,   -- lower threshold: stubs old tool outputs, no LLM call
+                          --   default round(compact_at * 0.6); 0 = disabled
+})
+```
+
+`keep_recent` controls how many recent prompt tokens are preserved verbatim
+across a compaction. Only the head (everything before that boundary) is
+summarized. Defaults to `round(compact_at * 0.33)`; clamped to
+`round(compact_at * 0.5)` if you set it at or above `compact_at`.
+
+`prune_at` is a cheaper first response: when the prompt crosses this lower
+threshold shell3 stubs old tool outputs inline (no LLM call needed), buying
+room before a full compaction is required. Defaults to
+`round(compact_at * 0.6)`; set to `0` to skip this tier entirely. Ignored if
+set at or above `compact_at`.
 
 ### Provider-specific knobs
 
@@ -101,6 +124,7 @@ shell3.agent({
   prompt = [[You are a careful pair-programmer…]],
   tools  = {
     bash              = true,
+    read              = true,   -- paged text-file reading (see below)
     bash_bg           = true,   -- background / long-running work
     shell_interactive = true,   -- only for truly interactive programs
     edit              = true,   -- the edit_file tool
@@ -117,6 +141,28 @@ and a read-only `plan` agent that investigates and designs but cannot edit —
 design with `plan`, switch to `code` to build. But it's only a convention: add a
 `review` agent, a `docs` agent, whatever fits your work. See
 [cookbook/lib/extra-agents.lua](cookbook/lib/extra-agents.lua).
+
+### The `read` tool
+
+`read = true` gives the agent a paged, text-file reader. It accepts a `path`
+(absolute or workdir-relative), an optional 1-indexed `offset` (default 1), and
+an optional `limit` in lines (default 2000). Output is raw file content — no
+line-number prefixes — so `edit_file` can exact-match strings straight from the
+output.
+
+Truncation is capped at **2000 lines or 50 KB**, whichever comes first. When
+the file is longer, a machine-readable footer tells the model exactly where to
+resume:
+
+```
+[Showing lines 1-2000 of 8421. Use offset=2001 to continue.]
+```
+
+The tool is **text-only**: binary files (detected by a ~4 KB NUL-byte / high
+non-printable scan) are refused with a redirect to `read_media` or `bash xxd`.
+Directories, missing files, and offsets past EOF are clean errors. Search still
+belongs in bash — reach for `rg` or `grep` when you want to match patterns
+across files rather than read one file's content.
 
 ## Custom tools
 
@@ -296,7 +342,7 @@ redirect instead of erroring — a self-correcting nudge back to bash and
 
 ```lua
 shell3.stub_tools({
-  read_file  = "Use bash: cat <path> (or sed -n for ranges).",
+  read_file  = "Use the read tool.",
   grep       = "Use bash: rg <pattern>.",
   write_file = "Use edit_file (empty old_string creates/overwrites).",
 })

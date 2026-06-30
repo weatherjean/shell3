@@ -54,7 +54,9 @@ const (
 	EventRetry
 	// EventCompacted fires once when the host auto-compacts the conversation
 	// (the compact_at token threshold tripped and a summary was substituted).
-	// Text holds a human-readable note with the pre-compaction token count.
+	// Text holds a human-readable note with the pre-compaction token count;
+	// Usage carries the estimated post-compaction prompt-token size so a UI can
+	// reflect the freed context immediately.
 	EventCompacted
 )
 
@@ -224,14 +226,16 @@ func emitSystemReminder(s *Session, text string) {
 }
 
 // emitCompacted announces an auto-compaction. prevTokens is the prompt-token
-// count that tripped the threshold, recorded for the audit log and any UI that
-// wants to surface it.
-func emitCompacted(s *Session, prevTokens int) {
+// count that tripped the threshold; newTokens is the estimated prompt-token size
+// of the rewritten (compacted) history. Carrying newTokens lets a UI drop its
+// context meter immediately, before the next provider usage report lands.
+func emitCompacted(s *Session, prevTokens, newTokens int) {
 	emit(s, Event{
 		Kind:      EventCompacted,
 		Time:      time.Now(),
 		SessionID: s.id,
 		Text:      fmt.Sprintf("context auto-compacted at %d tokens", prevTokens),
+		Usage:     &EventUsageData{PromptTokens: newTokens, TotalTokens: newTokens},
 	})
 }
 

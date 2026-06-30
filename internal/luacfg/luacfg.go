@@ -19,7 +19,14 @@ type Model struct {
 	// CompactAt is the absolute prompt-token threshold at which the host
 	// auto-compacts conversation history before the next turn. 0 (unset)
 	// disables auto-compaction. See chat.maybeCompact.
-	CompactAt   int
+	CompactAt int
+	// KeepRecent is the verbatim tail (in prompt tokens) preserved across an
+	// auto-compaction. 0 (unset) derives a default from CompactAt. See
+	// chat.resolveKeepRecent.
+	KeepRecent int
+	// PruneAt is the lower threshold; stub old tool outputs with no LLM call.
+	// 0 disables. Must be below CompactAt (clamped to 0 if not).
+	PruneAt     int
 	Reasoning   string
 	MaxTokens   int
 	Temperature *float64
@@ -31,7 +38,7 @@ type Model struct {
 }
 
 type ToolGates struct {
-	Bash, BashBg, ShellInteractive, Edit, Media bool
+	Bash, BashBg, ShellInteractive, Edit, Media, Read bool
 }
 
 // CustomTool is a declarative bash-command tool. The model supplies typed

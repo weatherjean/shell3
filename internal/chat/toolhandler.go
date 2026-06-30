@@ -151,4 +151,10 @@ type TurnConfig struct {
 	// CompactAt is the auto-compaction prompt-token threshold (0 = off).
 	// maybeCompact (called at the top of RunTurn) consults it.
 	CompactAt int
+	// KeepRecent is the verbatim tail (prompt tokens) preserved across an
+	// auto-compaction. 0 derives a default from CompactAt (resolveKeepRecent).
+	KeepRecent int
+	// PruneAt is the lower threshold; stub old tool outputs with no LLM call.
+	// 0 disables. Must be below CompactAt.
+	PruneAt int
 }

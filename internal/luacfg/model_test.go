@@ -1,6 +1,8 @@
 package luacfg
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestLoadModel(t *testing.T) {
 	dir := t.TempDir()
@@ -95,5 +97,97 @@ shell3.agent({ name="a", model="m", prompt="p", tools={ edt=true } })
 	_, err := Load(dir+"/shell3.lua", dir)
 	if err == nil || !contains(err.Error(), `unknown key "edt"`) {
 		t.Fatalf("want strict-key failure on agent.tools, got %v", err)
+	}
+}
+
+func TestModel_KeepRecentParsed(t *testing.T) {
+	cfg := mustLoad(t, `
+shell3.model("m", { base_url="http://x", model="m", context_window=1000, compact_at=800, keep_recent=300 })
+shell3.agent({ name="a", model="m", prompt="p", tools={ bash=true } })
+`)
+	m, ok := cfg.Model("m")
+	if !ok {
+		t.Fatal("model m not found")
+	}
+	if m.KeepRecent != 300 {
+		t.Fatalf("KeepRecent = %d, want 300", m.KeepRecent)
+	}
+}
+
+func TestModel_KeepRecentClampedBelowCompactAt(t *testing.T) {
+	cfg := mustLoad(t, `
+shell3.model("m", { base_url="http://x", model="m", context_window=1000, compact_at=800, keep_recent=900 })
+shell3.agent({ name="a", model="m", prompt="p", tools={ bash=true } })
+`)
+	// keep_recent (900) >= compact_at (800) is nonsensical (tail never shrinks);
+	// it must be clamped to round(compact_at*0.5) = 400.
+	m, ok := cfg.Model("m")
+	if !ok {
+		t.Fatal("model m not found")
+	}
+	if got := m.KeepRecent; got != 400 {
+		t.Fatalf("KeepRecent = %d, want clamped 400", got)
+	}
+}
+
+func TestModel_PruneAtParsed(t *testing.T) {
+	cfg := mustLoad(t, `
+shell3.model("m", { base_url="http://x", model="m", context_window=1000, compact_at=800, prune_at=400 })
+shell3.agent({ name="a", model="m", prompt="p", tools={ bash=true } })
+`)
+	m, ok := cfg.Model("m")
+	if !ok {
+		t.Fatal("model m not found")
+	}
+	if m.PruneAt != 400 {
+		t.Fatalf("PruneAt = %d, want 400", m.PruneAt)
+	}
+}
+
+func TestModel_PruneAtClampedAtOrAboveCompactAt(t *testing.T) {
+	cfg := mustLoad(t, `
+shell3.model("m", { base_url="http://x", model="m", context_window=1000, compact_at=800, prune_at=800 })
+shell3.agent({ name="a", model="m", prompt="p", tools={ bash=true } })
+`)
+	// prune_at (800) >= compact_at (800) is pointless; must be clamped to 0 (disabled).
+	m, ok := cfg.Model("m")
+	if !ok {
+		t.Fatal("model m not found")
+	}
+	if got := m.PruneAt; got != 0 {
+		t.Fatalf("PruneAt = %d, want clamped 0", got)
+	}
+}
+
+func TestModel_PruneAtDefaultsToFractionOfCompactAt(t *testing.T) {
+	cfg := mustLoad(t, `
+shell3.model("m", { base_url="http://x", model="m", context_window=1000, compact_at=800 })
+shell3.agent({ name="a", model="m", prompt="p", tools={ bash=true } })
+`)
+	// Omitting prune_at must default it to round(compact_at*0.6) = 480 so the
+	// cheap-prune tier is on by default (this is the regression the missing
+	// default produced: pruning silently disabled despite the docs).
+	m, ok := cfg.Model("m")
+	if !ok {
+		t.Fatal("model m not found")
+	}
+	if got := m.PruneAt; got != 480 {
+		t.Fatalf("PruneAt = %d, want defaulted 480", got)
+	}
+}
+
+func TestModel_PruneAtExplicitZeroDisables(t *testing.T) {
+	cfg := mustLoad(t, `
+shell3.model("m", { base_url="http://x", model="m", context_window=1000, compact_at=800, prune_at=0 })
+shell3.agent({ name="a", model="m", prompt="p", tools={ bash=true } })
+`)
+	// An explicit prune_at=0 means "disable this tier" and must NOT be rewritten
+	// to the default (unset vs explicit-0 are distinguished at parse time).
+	m, ok := cfg.Model("m")
+	if !ok {
+		t.Fatal("model m not found")
+	}
+	if got := m.PruneAt; got != 0 {
+		t.Fatalf("PruneAt = %d, want explicit 0 (disabled)", got)
 	}
 }
