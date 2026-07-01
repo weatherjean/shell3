@@ -49,10 +49,12 @@ type Item struct {
 	// Cached glamour render of an assistant block, so refresh() (fired on every
 	// key/scroll event) doesn't re-run the expensive markdown renderer when
 	// nothing changed. Assistant text is append-only, so (width, len) is a sound
-	// cache key. Without this, mouse-scroll bursts re-rendered every block per
-	// event and pegged the CPU.
+	// cache key — plus mdEpoch, which bumps on a palette switch so a light/dark
+	// change recolors already-rendered blocks. Without this, mouse-scroll bursts
+	// re-rendered every block per event and pegged the CPU.
 	mdWidth int
 	mdLen   int
+	mdEpoch uint64
 	mdOut   string
 }
 
@@ -329,10 +331,11 @@ func (t *Transcript) renderBlocks(cursorLine int, normal bool, w int, selLo, sel
 			// lipgloss wrapper that would mangle its ANSI). Cached by (width,len)
 			// so a refresh that didn't change the text — e.g. scrolling — reuses
 			// the render instead of re-running glamour.
-			if it.mdOut == "" || it.mdWidth != inner || it.mdLen != len(it.Text) {
+			if it.mdOut == "" || it.mdWidth != inner || it.mdLen != len(it.Text) || it.mdEpoch != mdEpoch {
 				it.mdOut = renderMarkdown(it.Text, inner)
 				it.mdWidth = inner
 				it.mdLen = len(it.Text)
+				it.mdEpoch = mdEpoch
 			}
 			rendered = it.mdOut
 		default:

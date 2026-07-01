@@ -142,6 +142,18 @@ type LoadedConfig struct {
 	// See register.go (luaStubTools) and agentsetup.runtimeForAgent for the
 	// wiring (StubNames → chat.Config.StubTools).
 	StubTools map[string]string
+	// Theme holds config-global TUI color overrides (token → "#RRGGBB"), set via
+	// shell3.theme{}. luaTheme validates the hex *format* here (a malformed value
+	// is dropped with a load warning); unknown token names pass through and are
+	// filtered by the front-end that owns the palette vocabulary. The overrides sit
+	// atop the sensed light/dark palette in the TUI. Wiring: register.go (luaTheme)
+	// → agentsetup SessionConfig (chat.Config.Theme) → pkg/shell3 Snapshot.Theme →
+	// internal/tui.
+	Theme map[string]string
+	// Welcome, if set, replaces the built-in TUI welcome card verbatim (set via
+	// shell3.welcome). Rendered raw and centered, so it may embed ANSI escapes for
+	// terminal colors. Same wiring path as Theme (→ Snapshot.Welcome → tui).
+	Welcome string
 
 	agents    []Agent
 	subagents []Subagent
@@ -184,7 +196,7 @@ func Load(path, workdir string) (*LoadedConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &LoadedConfig{Tools: map[string]CustomTool{}, StubTools: map[string]string{}, Secrets: env, L: lua.NewState()}
+	c := &LoadedConfig{Tools: map[string]CustomTool{}, StubTools: map[string]string{}, Theme: map[string]string{}, Secrets: env, L: lua.NewState()}
 	// The returned config owns c.L; close it only if we error out below.
 	var success bool
 	defer func() {

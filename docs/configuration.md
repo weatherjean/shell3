@@ -400,6 +400,63 @@ shell3.stub_tools({
 Stubs are config-global (every agent sees them). Later keys override earlier
 ones, and a stub whose name collides with a real tool is ignored.
 
+## Theming — `shell3.theme`
+
+The TUI **senses the terminal background** and adapts: it never paints its own
+canvas, so backgrounds pass through, and it switches between a dark and a light
+foreground palette so text stays legible on either. Terminals that don't answer
+the background query keep the dark palette.
+
+Override individual colors with `shell3.theme` — a table of colour tokens to
+`#RRGGBB` hex values. Overrides sit on top of the sensed palette:
+
+```lua
+shell3.theme({
+  primary = "#EAB308", -- brand: prompt, edit_file, headings, NORMAL badge
+  green   = "#78AA78", -- bash / INSERT badge
+  red     = "#DC2626", -- errors / bash_bg / ctrl-c
+  cyan    = "#5BB6C9", -- : commands, bg count
+  pink    = "#D98FB8", -- other tools
+  reason  = "#87A58C", -- reasoning / help headers
+  fg      = "#E5E7EB", -- body text
+  fg_dim  = "#9CA3AF", -- secondary text
+  muted   = "#6B7280", -- chrome: chevrons, hints, reminders
+})
+```
+
+Every token is optional — declare only the ones you want to change. An unknown
+token or a value that isn't `#RRGGBB` is skipped with a startup warning rather
+than failing the load. Overrides are config-global and apply to both the light
+and dark palette.
+
+### Custom welcome card — `shell3.welcome`
+
+The centered splash shown before your first message can be replaced entirely.
+`shell3.welcome` takes a string that is rendered **verbatim** (centered in the
+viewport), so it may embed ANSI escapes for terminal colors — use `\27` for the
+escape byte:
+
+```lua
+shell3.welcome(
+  "\27[38;5;208m✦ my agent ✦\27[0m\n" ..
+  "ready when you are"
+)
+```
+
+The content is passed through untouched, so anything your terminal understands
+works — 16-color, 256-color, or truecolor escapes, box-drawing, ASCII art. It is
+config-global; a later `shell3.welcome` call replaces an earlier one, and an
+empty string keeps the built-in card.
+
+Keep the card within the viewport: it's centered as-is, so art taller or wider
+than the window can't be centered and will clip or wrap. Size it for a small
+terminal.
+
+The string is built at config-load time by the full Lua VM, so it can come from a
+command — `shell3.welcome(io.popen("cat art.ansi"):read("*a"))`, or a `pwd` /
+`git branch` card. See [the cookbook](cookbook/welcome.md) for ready-to-copy
+recipes.
+
 ## Skills
 
 A skill is a plain `.md` file the agent reads with `cat` when it's relevant —

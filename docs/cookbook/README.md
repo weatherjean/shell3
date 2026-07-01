@@ -62,3 +62,4 @@ local browser = require("lib.skills.browser")
 - `models.md` — provider-specific request params via `extra` (e.g. MiniMax M3 `reasoning_split`).
 - `proxy.md` — `run_proxy` recipes (Codex via npx, litellm).
 - `sandbox.md` — sandbox or route bash via `on_tool_call` argv verdicts (docker, ssh, firejail).
+- `welcome.md` — custom welcome cards with `shell3.welcome` (colors, a command in the body, ANSI art).

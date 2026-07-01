@@ -188,6 +188,32 @@ func TestAssistantMarkdownCachedAcrossRenders(t *testing.T) {
 	}
 }
 
+// TestAssistantMarkdownRecolorsOnPaletteSwitch is the regression guard for the
+// adaptive-theme bug: a light/dark switch must recolor markdown that was ALREADY
+// rendered under the old palette, not just newly appended blocks. The per-item
+// cache is keyed on width+len (both unchanged here), so mdEpoch — bumped by
+// applyPalette via resetMarkdown — is what forces the re-render.
+func TestAssistantMarkdownRecolorsOnPaletteSwitch(t *testing.T) {
+	t.Cleanup(func() { applyPalette(darkPalette) })
+	applyPalette(darkPalette)
+	tr := NewTranscript()
+	tr.Apply(shell3.Event{Kind: shell3.Token, Text: "# heading"})
+	tr.Apply(shell3.Event{Kind: shell3.Done})
+	tr.renderBlocks(-1, false, 80, -1, -1) // render under the dark palette
+	a := tr.items[0]
+	darkRender := a.mdOut
+	if darkRender == "" {
+		t.Fatal("assistant block should have rendered")
+	}
+	// Same text, same width — only the palette changed. The block must re-render
+	// so its colors track the new palette.
+	applyPalette(lightPalette)
+	tr.renderBlocks(-1, false, 80, -1, -1)
+	if a.mdOut == darkRender {
+		t.Fatal("a palette switch must recolor already-rendered assistant markdown")
+	}
+}
+
 func mustRender(tr *Transcript) string {
 	out, _, _, _ := tr.renderBlocks(-1, false, 80, -1, -1)
 	return out

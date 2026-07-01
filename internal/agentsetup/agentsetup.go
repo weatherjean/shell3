@@ -327,6 +327,8 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 		WorkDir:           workdir,
 		ConfigPath:        p.ConfigPath(),
 		ConfigWarnings:    p.lc.Warnings(),
+		Theme:             p.lc.Theme,
+		Welcome:           p.lc.Welcome,
 		ResolveCustomTool: p.lc.ResolveCustomCall,
 		StubTools:         p.lc.StubNames(),
 		Log:               p.log,

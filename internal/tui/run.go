@@ -76,9 +76,19 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 	)
 	m.contextWindow = snap.ContextWindow
 	m.safetyConfigured = snap.ToolHooksOn
+	m.welcome = snap.Welcome // custom welcome card (shell3.welcome), if any
+	// Apply shell3.theme{} color overrides atop the (still dark) default palette;
+	// terminal-background sensing later re-applies them over the light palette if
+	// the terminal turns out to be light. Unknown tokens come back as warnings
+	// (the TUI owns the palette vocabulary) and join the config warnings below.
+	ov, themeWarns := parseThemeOverride(snap.Theme)
+	if ov != nil {
+		m.themeOverride = ov
+		m.applyTheme()
+	}
 	// Surface non-fatal config warnings in-band: they were printed to stderr at
 	// load, but the alt-screen TUI clears that line before the user sees it.
-	for _, w := range snap.Warnings {
+	for _, w := range append(snap.Warnings, themeWarns...) {
 		m.tr.AddInfo("config warning: " + w)
 	}
 	// Mid-turn steering: queue interjected text, and run it as a follow-up turn
