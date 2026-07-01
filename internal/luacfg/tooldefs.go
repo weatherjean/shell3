@@ -54,7 +54,7 @@ func (c *LoadedConfig) CustomToolsFor(names []string) []CustomTool {
 
 var shellInteractiveTool = llm.ToolDefinition{
 	Name:        "shell_interactive",
-	Description: "Run a command that requires an interactive terminal (e.g. vim, less, python REPL). The TUI hands the terminal to the process and resumes when it exits.",
+	Description: "Run a command that requires an interactive terminal (e.g. vim, less, python REPL). The TUI hands the terminal to the process and resumes when it exits. Returns only a completion status — the command's output goes to the user's terminal and is NOT returned to you, so you cannot read or verify what it printed.",
 	Parameters: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
