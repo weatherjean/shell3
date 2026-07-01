@@ -15,26 +15,29 @@ import (
 // for inline-code padding, so code spans survive.
 var trailingPad = regexp.MustCompile(`(?:\x1b\[[0-9;]*m| )+$`)
 
-// shell3's markdown palette as hex strings (glamour wants string pointers).
-const (
-	mdYellow = "#EAB308" // headings — cPrimary
-	mdSage   = "#87A58C" // code — cSage
-	mdCyan   = "#5BB6C9" // links — cCyan
-	mdDim    = "#9CA3AF" // blockquote / hr — cFgDim
-	mdUser   = "#E5E7EB" // body / strong — cUser
-)
-
 func sptr(s string) *string { return &s }
 func bptr(b bool) *bool     { return &b }
 
-// shell3MarkdownStyle is glamour's dark theme recolored to shell3's palette,
-// with the document margin removed so blocks hug the transcript's gutter.
+// shell3MarkdownStyle recolors glamour's base theme to shell3's active palette
+// (theme.go), with the document margin removed so blocks hug the transcript's
+// gutter. The colors derive from the live palette via hexOf, so markdown tracks
+// the light/dark sensing. The base is glamour's light or dark theme, chosen by the
+// sensed terminal (activeLight) so glamour's own defaults (e.g. code-block chrome)
+// suit it — not by the fg color, which a shell3.theme override could flip.
 func shell3MarkdownStyle() ansi.StyleConfig {
-	c := styles.DarkStyleConfig
-	c.Document.Margin = func() *uint { z := uint(0); return &z }()
-	c.Document.Color = sptr(mdUser)
+	var c ansi.StyleConfig
+	if activeLight {
+		c = styles.LightStyleConfig
+	} else {
+		c = styles.DarkStyleConfig
+	}
+	mdYellow, mdReason, mdCyan := hexOf(cPrimary), hexOf(cReason), hexOf(cCyan)
+	mdDim, mdFg := hexOf(cFgDim), hexOf(cFg)
 
-	// Headings: flat yellow, no filled background block.
+	c.Document.Margin = func() *uint { z := uint(0); return &z }()
+	c.Document.Color = sptr(mdFg)
+
+	// Headings: flat brand color, no filled background block.
 	c.Heading.Color, c.Heading.Bold = sptr(mdYellow), bptr(true)
 	c.Heading.BackgroundColor = nil
 	for _, h := range []*ansi.StyleBlock{&c.H1, &c.H2, &c.H3, &c.H4, &c.H5, &c.H6} {
@@ -42,15 +45,31 @@ func shell3MarkdownStyle() ansi.StyleConfig {
 	}
 	c.H1.Prefix, c.H1.Suffix = "", ""
 
-	c.Strong.Color, c.Strong.Bold = sptr(mdUser), bptr(true)
+	c.Strong.Color, c.Strong.Bold = sptr(mdFg), bptr(true)
 	c.Emph.Italic = bptr(true)
 	c.Link.Color, c.Link.Underline = sptr(mdCyan), bptr(true)
 	c.LinkText.Color = sptr(mdCyan)
-	c.Code.Color = sptr(mdSage)
+	c.Code.Color = sptr(mdReason)
 	c.BlockQuote.Color = sptr(mdDim)
 	c.HorizontalRule.Color = sptr(mdDim)
-	c.Item.Color = sptr(mdUser)
+	c.Item.Color = sptr(mdFg)
 	return c
+}
+
+// mdEpoch counts palette changes. Rendered assistant markdown is memoized per
+// item (see items.go, keyed on width+len); those keys don't change on a palette
+// switch, so the epoch is also part of the item key — bumping it here forces
+// already-rendered blocks to recolor, not just newly appended ones.
+var mdEpoch uint64
+
+// resetMarkdown drops the width-keyed renderer cache and bumps mdEpoch so the next
+// render picks up a palette change — both for new items and for ones already
+// rendered under the old palette (applyPalette calls this).
+func resetMarkdown() {
+	mdMu.Lock()
+	mdCache = map[int]*glamour.TermRenderer{}
+	mdMu.Unlock()
+	mdEpoch++
 }
 
 // Markdown renderers are width-bound and stateful (goldmark carries block state

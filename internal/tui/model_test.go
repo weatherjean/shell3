@@ -3,10 +3,13 @@ package tui
 import (
 	"context"
 	"fmt"
+	"image/color"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	colorful "github.com/lucasb-eyer/go-colorful"
 	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
@@ -575,8 +578,92 @@ func TestFooterQuitArmedShowsRedBar(t *testing.T) {
 	if !strings.Contains(stripANSI(foot), "press ctrl+c again to quit") {
 		t.Fatal("quit-armed footer should prompt to press again")
 	}
-	if !strings.Contains(foot, "48;2;185;28;28") { // cRed background
-		t.Fatalf("quit-armed bar should have a red background:\n%q", foot)
+	if !strings.Contains(foot, bgSeq(cRed)) { // the quit bar carries cRed as its background
+		t.Fatalf("quit-armed bar should have a red (cRed) background:\n%q", foot)
+	}
+}
+
+func TestLightTerminalSwitchesToLightPalette(t *testing.T) {
+	t.Cleanup(func() { applyPalette(darkPalette) }) // restore global palette for other tests
+	m := sized(closedSend(nil))
+	if !m.isDark {
+		t.Fatal("model should default to the dark palette")
+	}
+	white, _ := colorful.Hex("#FFFFFF")
+	m.Update(tea.BackgroundColorMsg{Color: white})
+	if m.isDark {
+		t.Fatal("a white terminal background should switch the model to light")
+	}
+	if cFg != lightPalette.fg {
+		t.Fatalf("active fg should be the light palette's, got %v want %v", cFg, lightPalette.fg)
+	}
+}
+
+// TestSameModeBackgroundReportIsNoOp guards applyTerminalBackground's early
+// return: a background report matching the current mode must not flip the palette
+// (which would rebuild every style and re-render the whole transcript for nothing).
+func TestSameModeBackgroundReportIsNoOp(t *testing.T) {
+	t.Cleanup(func() { applyPalette(darkPalette) })
+	m := sized(closedSend(nil))
+	applyPalette(darkPalette) // known dark baseline, matching m.isDark
+	if !m.isDark {
+		t.Fatal("model should default to dark")
+	}
+	black, _ := colorful.Hex("#000000")
+	m.Update(tea.BackgroundColorMsg{Color: black}) // a dark report on an already-dark model
+	if !m.isDark {
+		t.Fatal("a dark report on a dark model must leave it dark")
+	}
+	if cFg != darkPalette.fg {
+		t.Fatalf("same-mode report must not rebuild the palette, got fg %v", cFg)
+	}
+}
+
+func TestThemeOverrideSurvivesPaletteSwitch(t *testing.T) {
+	t.Cleanup(func() { applyPalette(darkPalette) }) // restore global palette for other tests
+	m := sized(closedSend(nil))
+	magenta := lipgloss.Color("#FF00FF")
+	m.themeOverride = map[string]color.Color{"primary": magenta}
+	m.applyTheme() // dark base + override
+	if cPrimary != magenta {
+		t.Fatalf("override not applied on the dark base: got %v", cPrimary)
+	}
+	// Sensing a light terminal rebuilds from the light base but must keep the
+	// override on top.
+	white, _ := colorful.Hex("#FFFFFF")
+	m.Update(tea.BackgroundColorMsg{Color: white})
+	if cFg != lightPalette.fg {
+		t.Fatalf("should switch to the light fg, got %v", cFg)
+	}
+	if cPrimary != magenta {
+		t.Fatalf("the theme override should survive the switch to light, got %v", cPrimary)
+	}
+}
+
+func TestCustomWelcomeReplacesBuiltIn(t *testing.T) {
+	m := sized(closedSend(nil))
+	// Default: the built-in card (carries the shell3 brand).
+	if !strings.Contains(stripANSI(m.welcomeCard()), "shell3") {
+		t.Fatal("built-in welcome card should mention shell3")
+	}
+	// A custom card replaces it verbatim, including any embedded ANSI.
+	m.welcome = "\x1b[31m✦ MY SPLASH ✦\x1b[0m"
+	got := m.welcomeCard()
+	if got != m.welcome {
+		t.Fatalf("custom welcome should render verbatim, got %q", got)
+	}
+	if strings.Contains(stripANSI(got), "shell3") {
+		t.Fatal("custom card must not include the built-in card's content")
+	}
+}
+
+func TestViewUsesPassthroughBackground(t *testing.T) {
+	m := sized(closedSend(nil))
+	v := m.View()
+	// Backgrounds pass through to the terminal — shell3 never paints a canvas
+	// (adaptive foreground colors keep text legible on light and dark instead).
+	if v.BackgroundColor != nil {
+		t.Errorf("View must not force a terminal background, got %v", v.BackgroundColor)
 	}
 }
 

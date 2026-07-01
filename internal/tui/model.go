@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image/color"
 	"os"
 	"os/exec"
 	"slices"
@@ -84,6 +85,8 @@ type model struct {
 	mode          editMode
 	width, height int
 	ready         bool
+	isDark        bool                   // sensed terminal background; drives the active palette (default dark)
+	themeOverride map[string]color.Color // shell3.theme{} color overrides, applied atop the sensed palette
 
 	cursorLine  int   // NORMAL-mode line cursor (flattened content line)
 	totalLines  int   // total rendered content lines
@@ -128,6 +131,7 @@ type model struct {
 	quitArmed        bool
 
 	agentName     string
+	welcome       string // custom welcome card (shell3.welcome); empty = built-in
 	statusMsg     string
 	tokens        int
 	promptTokens  int
@@ -152,18 +156,13 @@ func newModel(send func(string) (<-chan shell3.Event, context.CancelFunc), cmds 
 	// MaxHeight logical lines. Set a high content cap so you can keep adding
 	// lines — they scroll inside the input past MaxHeight.
 	ta.MaxContentHeight = 10000
-	// Give every input row the same subtle background so the input reads as one
-	// solid box. Each StyleState field inherits Base, but CursorLine carries its
-	// own contrasting highlight by default — override it to match so the current
-	// row isn't shaded differently. (No SetVirtualCursor/prompt-func: the stock
-	// cursor stays visible.)
+	// Passthrough: the input carries no background of its own (a fixed surface
+	// would become a dark band on a light terminal). CursorLine otherwise gets a
+	// contrasting highlight by default — neutralize it so the current row isn't
+	// shaded differently from the rest. (No SetVirtualCursor/prompt-func: the
+	// stock cursor stays visible.)
 	tint := func(s textarea.StyleState) textarea.StyleState {
-		s.Base = s.Base.Background(cInputBg)
-		s.Text = s.Text.Background(cInputBg)
-		s.Prompt = s.Prompt.Background(cInputBg)
-		s.Placeholder = s.Placeholder.Background(cInputBg)
-		s.EndOfBuffer = s.EndOfBuffer.Background(cInputBg)
-		s.CursorLine = lipgloss.NewStyle().Background(cInputBg)
+		s.CursorLine = lipgloss.NewStyle()
 		return s
 	}
 	st := ta.Styles()
@@ -183,6 +182,7 @@ func newModel(send func(string) (<-chan shell3.Event, context.CancelFunc), cmds 
 		cmds:      cmds,
 		mode:      modeInsert,
 		follow:    true,
+		isDark:    true, // assume dark until the terminal reports its background
 		agentName: agentName,
 		statusMsg: statusMsg,
 	}
@@ -199,7 +199,36 @@ func newModel(send func(string) (<-chan shell3.Event, context.CancelFunc), cmds 
 }
 
 func (m *model) Init() tea.Cmd {
-	return tea.Batch(m.ta.Focus(), waitWake(m.wakeEvents), bgPollTick())
+	// RequestBackgroundColor lets us sense a light vs. dark terminal and pick the
+	// matching palette (we default to dark until the reply arrives, so terminals
+	// that never answer stay on the historical look).
+	return tea.Batch(m.ta.Focus(), waitWake(m.wakeEvents), bgPollTick(),
+		func() tea.Msg { return tea.RequestBackgroundColor() })
+}
+
+// applyTheme rebuilds the active palette from the current mode (dark/light) with
+// the shell3.theme{} overrides applied on top. Call after changing isDark or
+// themeOverride.
+func (m *model) applyTheme() {
+	base := darkPalette
+	if !m.isDark {
+		base = lightPalette
+	}
+	applyPalette(base.withOverrides(m.themeOverride))
+}
+
+// applyTerminalBackground switches the active palette to match the sensed
+// terminal background. It's a no-op when the mode is unchanged, so a repeated or
+// same-mode report doesn't rebuild styles or re-render needlessly.
+func (m *model) applyTerminalBackground(dark bool) {
+	if dark == m.isDark {
+		return
+	}
+	m.isDark = dark
+	m.applyTheme()
+	if m.ready {
+		m.refresh(false) // re-render the transcript in the new palette
+	}
 }
 
 // bgPollTickMsg periodically refreshes the footer's subprocess count.
@@ -455,6 +484,12 @@ func (m *model) refresh(forceBottom bool) {
 // message is sent. lipgloss.Place centers
 // it within the viewport in refresh().
 func (m *model) welcomeCard() string {
+	// A config-supplied card (shell3.welcome) replaces the built-in one verbatim,
+	// so any ANSI escapes it embeds render in the terminal's own colors. refresh()
+	// still centers it in the viewport.
+	if m.welcome != "" {
+		return m.welcome
+	}
 	title := stBrand.Render("๑ï shell3") + "  " + stDim.Render("/ˈʃɛli/")
 	sub := stFgDim.Render("minimal Unix-composable coding agent")
 	lines := []string{title, sub, ""}
@@ -738,6 +773,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.bgCount = len(m.cmds.Jobs()) // seed the footer count before the first poll
 		}
 		m.relayout()
+		return m, nil
+	case tea.BackgroundColorMsg:
+		m.applyTerminalBackground(msg.IsDark())
 		return m, nil
 	case spinnerTickMsg:
 		if m.busy {
@@ -1621,7 +1659,7 @@ func (m *model) confirmBox() string {
 	lines := []string{
 		stErr.Render("⚠ command gate") + stDim.Render("  allow this command?"),
 		"",
-		lipgloss.NewStyle().Foreground(cUser).Render(strings.Join(cmdKept, "\n")),
+		lipgloss.NewStyle().Foreground(cFg).Render(strings.Join(cmdKept, "\n")),
 	}
 	if cmdMore > 0 {
 		lines = append(lines, stDim.Render(fmt.Sprintf("… +%d more lines", cmdMore)))
@@ -1667,7 +1705,7 @@ func boolToInt(b bool) int {
 func (m *model) helpBox() string {
 	key := lipgloss.NewStyle().Foreground(cPrimary).Bold(true)
 	desc := lipgloss.NewStyle().Foreground(cFgDim)
-	head := lipgloss.NewStyle().Foreground(cSage).Bold(true)
+	head := lipgloss.NewStyle().Foreground(cReason).Bold(true)
 	row := func(k, d string) string {
 		return key.Render(fmt.Sprintf(" %-12s", k)) + desc.Render(d)
 	}

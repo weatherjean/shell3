@@ -90,6 +90,14 @@ type Config struct {
 	// carried here so an interactive front-end can surface them in-band, since an
 	// alt-screen TUI clears the stderr line before the user can read it.
 	ConfigWarnings []string
+	// Theme holds config-global TUI color overrides (token → "#RRGGBB") from
+	// shell3.theme{}. Carried here only so pkg/shell3 Snapshot can surface it to a
+	// front-end; the chat layer itself never reads it. Agent-independent.
+	Theme map[string]string
+	// Welcome, if set, is a custom TUI welcome card (shell3.welcome). Carried only
+	// for pkg/shell3 Snapshot to surface to a front-end; the chat layer never
+	// reads it. Agent-independent.
+	Welcome string
 	// ActiveSkills lists skill names enabled for this persona.
 	ActiveSkills []string
 	// ActiveTools lists tool names enabled for this agent.

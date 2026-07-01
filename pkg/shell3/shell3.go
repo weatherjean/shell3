@@ -101,6 +101,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1138,6 +1139,13 @@ type Snapshot struct {
 	// that is now ignored). A front-end surfaces them in-band at startup — the
 	// alt-screen TUI otherwise clears the stderr line they were printed on.
 	Warnings []string
+	// Theme holds config-global TUI color overrides (token → "#RRGGBB") from
+	// shell3.theme{}. A front-end applies them atop its palette; empty means the
+	// built-in palette is used unchanged.
+	Theme map[string]string
+	// Welcome is a custom welcome-card string (shell3.welcome), rendered verbatim
+	// in place of the built-in card. Empty means the built-in card is shown.
+	Welcome string
 }
 
 // Snapshot returns the current agent state (see Snapshot). Params is populated
@@ -1166,6 +1174,8 @@ func (s *Session) Snapshot() Snapshot {
 		Subagents:     slices.Clone(s.cfg.Subagents),
 		ToolHooksOn:   s.cfg.RunToolCall != nil,
 		Warnings:      slices.Clone(s.cfg.ConfigWarnings),
+		Theme:         maps.Clone(s.cfg.Theme),
+		Welcome:       s.cfg.Welcome,
 	}
 	for _, t := range s.cfg.Personality.Tools {
 		snap.Tools = append(snap.Tools, ToolInfo{Name: t.Name, Description: t.Description})
