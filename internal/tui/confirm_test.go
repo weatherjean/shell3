@@ -15,7 +15,7 @@ import (
 func TestConfirm_AbortDismissesMatchingModal(t *testing.T) {
 	m := newModel(closedSend(nil), nil, "", "")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	req := &confirmReq{command: "rm -rf x", reason: "matches a bash_safety deny rule: rm", reply: make(chan bool, 1)}
+	req := &confirmReq{command: "rm -rf x", reason: "matches an on_tool_call deny rule: rm", reply: make(chan bool, 1)}
 	m.Update(confirmMsg{req: req})
 	if m.confirm == nil {
 		t.Fatal("confirmMsg should open the modal")
@@ -43,7 +43,7 @@ func TestConfirmBox_FitsHeight(t *testing.T) {
 	for _, h := range []int{24, 16, 40} {
 		m := newModel(closedSend(nil), nil, "", "")
 		m.Update(tea.WindowSizeMsg{Width: 80, Height: h})
-		m.confirm = &confirmReq{command: sb.String(), reason: "matches a bash_safety deny rule: step"}
+		m.confirm = &confirmReq{command: sb.String(), reason: "matches an on_tool_call deny rule: step"}
 		box := m.confirmBox()
 		if got := strings.Count(box, "\n") + 1; got > h {
 			t.Fatalf("height %d: confirm box is %d lines (overflows):\n%s", h, got, stripANSI(box))
@@ -60,7 +60,7 @@ func TestConfirmBox_FitsHeight(t *testing.T) {
 func TestConfirmNav_DirectionalArrowsTabToggles(t *testing.T) {
 	m := newModel(closedSend(nil), nil, "", "")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	m.confirm = &confirmReq{command: "rm -rf x", reason: "matches a bash_safety deny rule: rm"}
+	m.confirm = &confirmReq{command: "rm -rf x", reason: "matches an on_tool_call deny rule: rm"}
 	m.confirmYes = true
 	m.handleConfirmKey("right")
 	if m.confirmYes {
@@ -80,7 +80,7 @@ func TestConfirmNav_DirectionalArrowsTabToggles(t *testing.T) {
 	}
 }
 
-// The bash_safety confirm modal must never render wider than the terminal: a long
+// The command gate confirm modal must never render wider than the terminal: a long
 // command (echoed into the gate's reason) used to produce one un-wrapped line that
 // overflowed the screen.
 func TestConfirmBox_FitsWidth(t *testing.T) {
@@ -90,7 +90,7 @@ func TestConfirmBox_FitsWidth(t *testing.T) {
 		m.Update(tea.WindowSizeMsg{Width: w, Height: 24})
 		m.confirm = &confirmReq{
 			command: long,
-			reason:  "matches a bash_safety deny rule: " + long,
+			reason:  "matches an on_tool_call deny rule: " + long,
 		}
 		for _, line := range strings.Split(m.confirmBox(), "\n") {
 			if got := lipgloss.Width(line); got > w {

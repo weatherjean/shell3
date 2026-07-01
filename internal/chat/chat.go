@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/applog"
-	"github.com/weatherjean/shell3/internal/bashsafety"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/runs"
@@ -86,8 +85,8 @@ type Config struct {
 	// if unknown. Recorded per session so resume can reload the right
 	// config. Agent-independent: set once at assembly, survives agent switches.
 	ConfigPath string
-	// ConfigWarnings are non-fatal config load issues (e.g. a removed bash_safety
-	// key that is now ignored). Already logged + printed to stderr at load; also
+	// ConfigWarnings are non-fatal config load issues (e.g. a removed config key
+	// that is now ignored). Already logged + printed to stderr at load; also
 	// carried here so an interactive front-end can surface them in-band, since an
 	// alt-screen TUI clears the stderr line before the user can read it.
 	ConfigWarnings []string
@@ -148,16 +147,13 @@ type Config struct {
 	// StubTools maps a hallucinated tool name to its redirect message (a nudge,
 	// never an error). Config-global; checked after real/custom tools.
 	StubTools map[string]string
-	// WrapBash is the shell3.wrap_bash hook: the bash/bash_bg handlers pass
-	// their command through it before execution (allow / rewrite / block). Nil
-	// means no hook is declared — commands run verbatim (the unsafe default).
-	// Config-global (one hook for all agents), not swapped on agent switch.
-	WrapBash func(ctx context.Context, cmd string) (argv []string, allowed bool, reason string, err error)
-	// BashSafety is the shell3.bash_safety policy (config-global, like WrapBash).
-	BashSafety bashsafety.Policy
 	// Asker confirms ask-verdict commands with a human; supplied per-front-end.
 	// Nil ⇒ headless: ask degrades to deny.
 	Asker AskFunc
+	// RunToolCall runs the on_tool_call chain (config-global, nil = no hooks).
+	RunToolCall func(ctx context.Context, name, command, argsJSON string) ToolCallVerdict
+	// RunToolResult runs the on_tool_result chain (config-global, nil = none).
+	RunToolResult func(ctx context.Context, name, argsJSON, output string) string
 	// AgentNames lists configured agents in declaration order, for /agent and
 	// Tab cycling. Empty or single-element disables switching.
 	AgentNames []string
@@ -181,7 +177,7 @@ func AgentStatusLine(rt ActiveAgent) string {
 //
 // It deliberately does NOT touch agent-independent fields (Store, WorkDir,
 // ConfigPath, AgentNames, SwitchAgent, OutPath, Headless, Log, RefreshPrompt,
-// WrapBash): those are set once at assembly and survive switches.
+// RunToolCall): those are set once at assembly and survive switches.
 func (c *Config) ApplyActiveAgent(rt ActiveAgent) {
 	c.LLM = rt.LLM
 	c.Personality = rt.Personality
@@ -239,9 +235,9 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler, shellInteractive
 		HostTool:          cfg.HostTool,
 		StubTools:         cfg.StubTools,
 		CustomToolNames:   cfg.CustomToolNames,
-		WrapBash:          cfg.WrapBash,
-		BashSafety:        cfg.BashSafety,
 		Asker:             cfg.Asker,
+		RunToolCall:       cfg.RunToolCall,
+		RunToolResult:     cfg.RunToolResult,
 		CompactAt:         cfg.CompactAt,
 		KeepRecent:        cfg.KeepRecent,
 		PruneAt:           cfg.PruneAt,

@@ -38,8 +38,8 @@ func TestRenderBaseConfig(t *testing.T) {
 	if !strings.Contains(string(cfg), "shell3.subagent(") {
 		t.Error("rendered config should declare an example subagent via shell3.subagent(")
 	}
-	if !strings.Contains(string(cfg), "shell3.wrap_bash(") {
-		t.Error("rendered config should wire the shell3.wrap_bash bash safety hook")
+	if !strings.Contains(string(cfg), "shell3.on_tool_call") {
+		t.Error("rendered config should document the shell3.on_tool_call command gate")
 	}
 	if strings.Contains(string(cfg), "{{") {
 		t.Errorf("shell3.lua still contains an unrendered template delimiter")

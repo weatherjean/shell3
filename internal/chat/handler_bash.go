@@ -38,25 +38,37 @@ func (BashHandler) Name() string { return "bash" }
 
 func (BashHandler) Execute(ctx context.Context, id string, args json.RawMessage, cfg ToolConfig) (string, error) {
 	command, timeout := parseBashArgsFull(string(args))
-	if msg, blocked := gateCommand(ctx, cfg, command); blocked {
-		return msg, nil
-	}
-	// shell3.wrap_bash: the only bash safety surface. Default argv runs the
-	// command under bash -c; a declared hook may rewrite it, swap the runner
-	// (argv table), or block. A nil hook means no wrapping (the unsafe default).
-	argv := []string{"bash", "-c", command}
-	if cfg.WrapBash != nil {
-		a, allowed, reason, err := cfg.WrapBash(ctx, command)
-		if err != nil {
-			return "error: wrap_bash failed: " + err.Error(), nil
-		}
-		if !allowed {
-			return "error: blocked by wrap_bash: " + reason, nil
-		}
-		argv = a
+	argv, blockMsg, blocked := gateBash(ctx, cfg, "bash", command, string(args))
+	if blocked {
+		return blockMsg, nil
 	}
 	out, _ := runBashCapture(ctx, argv, cfg.WorkDir, nil, timeout)
 	return out, nil
+}
+
+// gateBash runs the on_tool_call chain for a bash/bash_bg command and resolves
+// the verdict to either an argv to exec or a block message for the model. name is
+// the real tool name ("bash" or "bash_bg") so the handler sees the exact tool.
+func gateBash(ctx context.Context, cfg ToolConfig, name, command, argsJSON string) (argv []string, blockMsg string, blocked bool) {
+	if cfg.RunToolCall == nil {
+		return []string{"bash", "-c", command}, "", false // no hooks: unsafe default
+	}
+	v := cfg.RunToolCall(ctx, name, command, argsJSON)
+	switch v.Action {
+	case Block:
+		return nil, "error: blocked by on_tool_call: " + v.Reason, true
+	case Ask:
+		if resolveAsk(ctx, cfg.Asker, v) {
+			if len(v.Argv) > 0 {
+				return v.Argv, "", false // run exactly what was approved (carries any rewrite)
+			}
+			return []string{"bash", "-c", command}, "", false
+		}
+		return nil, "error: blocked by on_tool_call — needs human approval (" + v.Reason +
+			"). Stop and ask the human before running this.", true
+	default: // Run
+		return v.Argv, "", false
+	}
 }
 
 // runBashCapture runs argv (argv[0] with argv[1:] as args) in workdir with

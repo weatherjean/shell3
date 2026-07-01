@@ -73,7 +73,7 @@ type SessionOpts struct {
 	OutPath string
 	// ShellInteractive runs an interactive shell command with TTY access.
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
-	// Asker confirms a bash_safety ask-verdict command with a human (true = allow).
+	// Asker confirms an on_tool_call ask-verdict command with a human (true = allow).
 	Asker func(ctx context.Context, command, reason string) bool
 	// ResumeID reloads a stored session's messages when non-empty.
 	ResumeID string

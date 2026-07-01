@@ -57,7 +57,7 @@ var (
 	// Ctrl+C "press again to quit" — red middle bar.
 	stCtrlCArmed = lipgloss.NewStyle().Foreground(cUser).Background(cRed).Bold(true)
 
-	// Danger "!" pill — shown when bash_safety is off (runtime :disable_safety or
+	// Danger "!" pill — shown when on_tool_call is off (runtime :disable_safety or
 	// disabled in the lua config).
 	stYolo = lipgloss.NewStyle().Foreground(cBlack).Background(cGreen).Bold(true)
 

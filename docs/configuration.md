@@ -233,126 +233,154 @@ ships with.
 > single-user setup; on a multi-user box, treat tool secrets as readable by
 > anything that user can run. More in [security.md](security.md).
 
-## Opt-in command gate — `bash_safety`
+## Opt-in command gate — `on_tool_call`
 
-`shell3.bash_safety` is a **regex denylist** in front of every `bash` and
-`bash_bg` call. It is **off by default** — shell3 stays unsafe if you never call
-it. There is no allowlist: bash runs freely, and you list the patterns you want
-**blocked** or **confirmed**. Two lists:
+shell3 is **unsafe by default**: bash commands run with no restrictions.
+`on_tool_call` fires before **every** tool the model calls — `bash`, `bash_bg`,
+`shell_interactive`, `read`, `list_files`, `edit_file`, and custom tools — and the
+handler decides per tool by switching on `t.name`. It is off until you register it;
+a fresh config gates nothing. `t.command` carries the bash command for the three
+bash tools and is **nil** for everything else, so a denylist that matches
+`t.command` must first check `t.name` (see the idiom below). Handlers are
+**chainable** — multiple `on_tool_call` calls run in declaration order; the first
+**terminal** verdict wins.
 
-```lua
-shell3.bash_safety{
-  enabled = true,
-  hard_deny = { [[rm\s+-rf\s+/]], [[mkfs]], [[dd\s+if=]], "shutdown" }, -- never run
-  deny      = { [[rm\s+-rf]], [[\bgit\s+push]], [[curl\b.*\|\s*(ba)?sh]] }, -- prompt
-  ask_timeout = 300, -- seconds to wait for a human before denying (default 300)
-}
-```
+### The `t` event
 
-### Keys
+Each handler receives a table `t`:
 
-| Key | Type | Description |
-|-----|------|-------------|
-| `enabled` | bool | Gate is active when `true`. Absent or `false` ⇒ no gating. |
-| `hard_deny` | list of regex strings | A command matching any pattern is **hard-blocked** — never run, never prompted. |
-| `deny` | list of regex strings | A command matching any pattern **prompts** a human to allow/deny before running (auto-denied when headless). |
-| `ask_timeout` | number (seconds) | How long a deny-prompt waits for a human before falling back to deny. Omitted ⇒ 300s (5 min); `0` ⇒ wait forever. |
+| Field | Description |
+|-------|-------------|
+| `t.name` | The **real** tool name: `"bash"`, `"bash_bg"`, `"shell_interactive"`, `"read"`, `"list_files"`, `"edit_file"`, or a custom tool's name. |
+| `t.command` | The bash command string — only for the three bash tools; **nil** for every other tool. |
+| `t.args` | Raw arguments JSON string (every tool). Gate a non-bash tool by inspecting this, e.g. a `read`/`edit_file` path. |
 
-Patterns are **Go regexes**, compiled at config load — an invalid pattern is a
-**load error**, not a silent failure. A wrong-typed list (e.g. `deny = "rm"`
-instead of `{ "rm" }`) is also a load error.
+### Verdict contract
 
-> **Migration:** the old `allow` and `read_baseline` keys are **accepted but
-> ignored** — there is no allowlist or read-only baseline anymore. shell3 prints a
-> load-time warning when it sees them, since an allow-only config no longer gates
-> anything. Remove them and move any "dangerous" globs you had in `deny` into the
-> new `deny`/`hard_deny` regex lists (note: glob `*` → regex `.*`).
+A handler returns one of:
 
-### How it works
+| Return value | Effect |
+|---|---|
+| `nil` | Pass; continue to the next handler (or run). |
+| `{ command = "..." }` | Rewrite the bash command text; continue the chain. **Bash tools only** — on a non-bash tool this fails closed. |
+| `{ argv = { ... } }` | **Terminal**: exec this argv exactly (runner swap). **`bash`/`bash_bg` only** — `shell_interactive` and non-bash tools fail closed. |
+| `{ block = true, reason = "..." }` | **Terminal**: block; `reason` is surfaced to the model. Works for any tool. |
+| `{ ask = "prompt", reason = "...", ask_timeout = N }` | Prompt a human; allowed → run, declined/headless → block with `reason`. Works for any tool. `ask_timeout` optional (seconds, default 300). |
 
-Each command is matched **as a whole string** (no splitting) against the regex
-lists with `regexp.MatchString` (unanchored and DOTALL — a match anywhere counts,
-and `.` spans newlines, so a command split across lines can't dodge a `.*` rule):
+A handler that raises a Lua error **fails closed** (blocks). Only `{block=true}`
+blocks via the block verdict; a returned table that contains none of the recognized
+keys (`block`/`argv`/`ask`/`command`) fails closed (is blocked) as a safety
+default; return `nil` to pass.
 
-1. If any **`hard_deny`** pattern matches ⇒ **block** (no prompt, ever).
-2. Else if any **`deny`** pattern matches ⇒ **prompt** the human (allow / deny).
-3. Otherwise ⇒ **run**.
+### Writing a denylist with `shell3.regex`
 
-`hard_deny` is checked first, so it wins. Because matching is over the whole
-command, chaining or substitution **cannot hide** a flagged command behind a
-benign prefix — `echo hi; rm -rf /` still matches `rm\s+-rf`, and
-`x=$(rm -rf /)` matches too. Write patterns against the dangerous form you want
-to catch (`rm\s+-rf`, `\bgit\s+push`, `curl\b.*\|\s*sh`); `\b` word boundaries
-and `\s+` keep them from over- or under-matching.
+`shell3.regex(pattern)` compiles a Go RE2 pattern **at config load** — a bad
+pattern is a load error, never a runtime surprise. Returns an object with
+`:match(s) -> bool (unanchored)`.
 
-> **Anchors:** only `(?s)` (DOTALL) is applied, not `(?m)` (multiline). So `^`
-> and `$` anchor to the start/end of the **whole** command, not to each line —
-> `^git\s+push` will *not* match `make build && git push` or a `git push` on the
-> third line of a multi-line command. Prefer `\b`-anchored fragments
-> (`\bgit\s+push\b`) over `^`/`$` unless you specifically mean the command's ends.
-
-This is a **guardrail, not a sandbox**: a determined model can still phrase a
-destructive command in a way your regexes don't catch. For anything that needs
-real logic (rewriting, container routing, programmatic policy), use
-[`wrap_bash`](#gating-the-shell--wrap_bash).
-
-### Deny-prompt confirmation and headless degradation
-
-When a `deny` pattern matches, a human must confirm. The interactive **TUI shows
-an inline `y/N` prompt**; the **Telegram host sends inline `Allow` / `Deny`
-buttons**. **Headless subagents** (background `shell3` processes spawned via
-`bash_bg`) have no attached human, so **a deny match is automatically denied**;
-the block reason flows back to the parent agent via the completion inbox, so the
-parent — where a human *is* attached — can decide how to proceed. A prompt nobody
-answers does not hang the agent: after `ask_timeout` seconds (default 300; `0` =
-wait forever) it falls back to deny. (`hard_deny` never prompts — it blocks
-everywhere, headless or not.)
-
-> Because there's no allowlist, ordinary reads (`cat`, `rg`, `ls`, …) match no
-> pattern and just run — a headless subagent explores freely. Only commands you
-> explicitly flag in `deny`/`hard_deny` are gated.
-
-### Ordering relative to `wrap_bash`
-
-`bash_safety` runs **before** `shell3.wrap_bash`. Only a command the gate lets
-through (verdict: run, or an approved deny-prompt) is handed to `wrap_bash` for
-any further inspection, rewriting, or sandboxing. Use `bash_safety` for the
-declarative regex denylist, and `wrap_bash` for anything that needs Lua logic.
-
-## Gating the shell — `wrap_bash`
-
-shell3 is **unsafe by default**: `bash` and `bash_bg` run with no restrictions.
-The single place to inspect, rewrite, or block commands is `shell3.wrap_bash`.
-It receives the command string and returns one of:
-
-- **a string** → run it under `bash -c` (you can rewrite the text),
-- **a table** (list of strings) → an argv list exec'd directly — this swaps the
-  *runner*, not just the text, and the command arrives as one argv element so
-  nothing re-parses or re-quotes it,
-- **nil / false `[, reason]`** → block it.
+Recommended idiom for a hard-block / ask-human denylist:
 
 ```lua
-shell3.wrap_bash(function(cmd)
-  if cmd:match("rm%s+%-rf%s+/") then return nil, "refusing rm -rf /" end
-  return cmd                       -- allow (optionally rewritten)
+local re   = shell3.regex
+-- (?s) so .* spans newlines; match t.command (the whole string) so
+-- chaining can't hide a flagged fragment behind a benign prefix.
+local HARD = { re([[(?s)rm\s+-rf\s+/]]), re([[(?s)mkfs]]), re([[(?s)dd\s+if=]]) }
+local ASK  = { re([[(?s)rm\s+-rf]]), re([[(?s)\bgit\s+push]]), re([[(?s)curl\b.*\|\s*(ba)?sh]]) }
+local ENV  = re([[\.env]]) -- hoisted like the lists above: compiled once at load
+
+shell3.on_tool_call(function(t)
+  -- Gate the bash family. This guard is REQUIRED: t.command is nil for non-bash
+  -- tools, so matching it without the check would error (→ fail closed).
+  if t.name == "bash" or t.name == "bash_bg" or t.name == "shell_interactive" then
+    for _, p in ipairs(HARD) do
+      if p:match(t.command) then return { block = true, reason = "hard_deny" } end
+    end
+    for _, p in ipairs(ASK) do
+      if p:match(t.command) then
+        return { ask = "Run?\n" .. t.command, reason = "denied" }
+      end
+    end
+  end
+  -- Other tools fall through to nil (run). Gate them by name + args if you want,
+  -- e.g. refuse to read the secrets file:
+  if t.name == "read" and ENV:match(t.args) then
+    return { block = true, reason = "no reading .env" }
+  end
 end)
 ```
 
-The table form is what makes this a real wrapper — you choose the program that
-runs the agent's command, so you can route everything through a container, an
-SSH host, or `firejail`:
+Because the gate sees every tool, the same hook can enforce things like "never
+read `.env`" or "no `edit_file` under `/etc`" — match on `t.name` and `t.args`.
+`{command}`/`{argv}` rewrites only make sense for the bash family, so returning one
+for a non-bash tool fails closed.
+
+> **No implicit `(?s)`.** `shell3.regex` does not prepend `(?s)` automatically —
+> add it yourself on patterns where `.*` must span newlines. `^`/`$` anchor to the
+> start/end of the whole command (not each line); prefer `\b`-anchored fragments
+> (`\bgit\s+push`) over `^`/`$` unless you specifically mean the command's ends.
+
+### Deny-prompt confirmation and headless degradation
+
+When a handler returns `{ask=...}`, a human must confirm. The interactive **TUI
+shows an inline `y/N` prompt**; the **Telegram host sends inline `Allow` / `Deny`
+buttons**. **Headless subagents** have no attached human, so an `{ask=...}` verdict
+is auto-denied with its `reason`; the block reason flows back to the parent agent
+via the completion inbox so the parent — where a human *is* attached — can decide
+how to proceed. A prompt nobody answers falls back to deny after the timeout
+(`ask_timeout`, default 300 s). `{block=true}` never prompts — it blocks
+everywhere, headless or not.
+
+Because there's no allowlist, ordinary reads (`cat`, `rg`, `ls`, …) match no
+pattern and just run — a headless subagent explores freely. Only commands you
+explicitly gate in a handler are affected.
+
+### Runner swap (container, SSH, firejail)
+
+The `{ argv = { ... } }` verdict lets you choose the program that runs the
+agent's command — the command arrives as one argv element so nothing re-parses or
+re-quotes it:
 
 ```lua
-shell3.wrap_bash(function(cmd)
-  return {"docker", "exec", "mycontainer", "bash", "-c", cmd}
+shell3.on_tool_call(function(t)
+  -- Wrap every bash command in the container. shell_interactive has no argv form,
+  -- so listing it here blocks it (fail closed) rather than running it un-sandboxed.
+  if t.name == "bash" or t.name == "bash_bg" or t.name == "shell_interactive" then
+    return { argv = {"docker", "exec", "mycontainer", "bash", "-c", t.command} }
+  end
 end)
 ```
 
 A malformed argv table (empty, or any non-string element) fails **closed**: the
-command is blocked, never run unwrapped. Custom command-template tools bypass
-`wrap_bash` by design — that command is your trusted template, not model input —
-so bake any sandboxing into the tool's own command. The full recipe set is in
+command is blocked, never run unwrapped. A runner swap also has no interactive-PTY
+form, so a `shell_interactive` call under an `{argv=...}` policy fails **closed**
+(blocked) — or set `shell_interactive = false` for that agent. A custom
+command-template tool's command is your trusted template (not model input), so it is
+never rewritten — but the tool **call** still fires `on_tool_call` (by its name, with
+`t.command` nil), so you can `block`/`ask` it. The full recipe set is in
 [cookbook/sandbox.md](cookbook/sandbox.md).
+
+### Tool-result rewriting — `on_tool_result`
+
+The symmetric post-execution hook `shell3.on_tool_result(fn)` runs after a tool
+produces output. Like `on_tool_call`, it fires for **every** tool, and `r.name` is
+the real tool name — `"bash"`, `"bash_bg"`, `"read"`, `"edit_file"`, or a custom
+tool's name. The
+handler receives `r` with `r.name`, `r.args` (raw arguments JSON), and `r.output`.
+Return `{ output = "..." }` to replace what the model sees; return `nil` to pass
+through unchanged. Primary use: secret redaction — for which you usually want to
+cover all output, not just one tool:
+
+```lua
+shell3.on_tool_result(function(r)
+  return { output = (r.output:gsub("API_KEY=%S+", "API_KEY=[redacted]")) }
+end)
+```
+
+Errors in `on_tool_result` handlers fail **open** — a broken result-rewriter
+must not destroy tool output — so they are logged and the original passes through.
+(Contrast `on_tool_call`, which fails closed: blocking is safe, silently nuking
+output is not.) The flip side: if your redactor errors, the **unredacted** output
+reaches the model, so keep redaction handlers simple and total.
 
 ## Redirecting hallucinated tools — `stub_tools`
 

@@ -29,25 +29,13 @@ func (BashBgHandler) Execute(ctx context.Context, id string, args json.RawMessag
 	if cfg.RunsDir == "" {
 		return "", fmt.Errorf("bash_bg: background jobs require a runs directory")
 	}
-	if msg, blocked := gateCommand(ctx, cfg, p.Command); blocked {
-		return msg, nil
+	argv, blockMsg, blocked := gateBash(ctx, cfg, "bash_bg", p.Command, string(args))
+	if blocked {
+		return blockMsg, nil
 	}
 	wd := p.Workdir
 	if wd == "" {
 		wd = cfg.WorkDir
-	}
-	// shell3.wrap_bash applies to bash_bg too: rewrite, swap the runner, or
-	// block before the command is backgrounded. Nil hook = no wrapping.
-	argv := []string{"bash", "-c", p.Command}
-	if cfg.WrapBash != nil {
-		a, allowed, reason, err := cfg.WrapBash(ctx, p.Command)
-		if err != nil {
-			return "error: wrap_bash failed: " + err.Error(), nil
-		}
-		if !allowed {
-			return "error: blocked by wrap_bash: " + reason, nil
-		}
-		argv = a
 	}
 	// Display the original command regardless of any runner swap. The job is
 	// recorded under cfg.RunsDir/jobs/ as a status file.

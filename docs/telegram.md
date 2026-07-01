@@ -138,8 +138,10 @@ menu passes Telegram's signed `initData` and authenticates automatically.
 The Telegram bot runs model-chosen shell commands on the host, unattended, the
 same as any shell3 session — it is **unsafe by default**. Run it as a dedicated
 user, in a container, or on a throwaway machine. To put yourself in the loop,
-enable `shell3.bash_safety{deny=, hard_deny=}`: a command matching a `deny` regex
-prompts you with inline **Allow**/**Deny** buttons in the chat before it runs (and
-falls back to deny after `ask_timeout`); a `hard_deny` match is blocked outright.
-Use `wrap_bash` for anything that needs Lua logic.
-See [security.md](security.md).
+use `shell3.on_tool_call`. Inside a `t.name`-guarded handler (see
+[security.md](security.md) for the full recipe — the guard is required because
+`t.command` is nil for non-bash tools), return `{ ask = "Run?\n" .. t.command,
+reason = "confirm" }` for commands you want to confirm — you'll receive inline
+**Allow**/**Deny** buttons in the chat (falls back to deny after the timeout); or
+`{ block = true, reason = "..." }` for commands that should never run. Denylists
+use `shell3.regex` (Go RE2).

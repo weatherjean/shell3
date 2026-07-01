@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/weatherjean/shell3/internal/bashsafety"
 	lua "github.com/yuin/gopher-lua"
 )
 
@@ -130,7 +129,7 @@ func (a Agent) SkillsActive() bool {
 }
 
 // LoadedConfig is the parsed result. L stays alive for the session so the
-// wrap_bash hook can run; callers MUST call Close when done.
+// on_tool_call hooks can run; callers MUST call Close when done.
 type LoadedConfig struct {
 	Models  []Model
 	Tools   map[string]CustomTool
@@ -149,15 +148,14 @@ type LoadedConfig struct {
 	telegram  TelegramConfig
 	cron      []CronJob
 
-	// wrapBash is the registered shell3.wrap_bash hook (nil when none declared):
-	// a single Lua function the bash/bash_bg tools pass their command through
-	// before execution. See luaWrapBash / WrapBash (lua_bash.go). A second
-	// shell3.wrap_bash call replaces it (last writer wins).
-	wrapBash *lua.LFunction
-
-	// bashSafety is the parsed shell3.bash_safety policy, or nil when the config
-	// declares none. Config-global, like wrapBash.
-	bashSafety *bashsafety.Policy
+	// onToolCall is the shell3.on_tool_call handler chain (declaration order): each
+	// runs before any tool executes, with the real t.name, and returns a verdict
+	// (pass / rewrite / argv / block / ask). command/argv apply to the bash family
+	// only; t.command is nil for non-bash tools.
+	onToolCall []*lua.LFunction
+	// onToolResult is the shell3.on_tool_result chain (declaration order): each
+	// may rewrite a tool's output before the model sees it (e.g. redaction).
+	onToolResult []*lua.LFunction
 
 	// warnings accumulates non-fatal config issues found at load time (e.g. a
 	// removed key that is now silently ignored, or a gate that gates nothing). The
@@ -173,9 +171,6 @@ type LoadedConfig struct {
 // (ignored deprecated keys, an enabled gate with no patterns, …). Empty on a
 // clean load. Surfacing them is the caller's choice; the config still loaded.
 func (c *LoadedConfig) Warnings() []string { return c.warnings }
-
-// warn records a non-fatal load-time issue (see Warnings).
-func (c *LoadedConfig) warn(msg string) { c.warnings = append(c.warnings, msg) }
 
 func (c *LoadedConfig) Close() {
 	if c.L != nil {
@@ -323,11 +318,6 @@ func (c *LoadedConfig) Telegram() TelegramConfig { return c.telegram }
 
 // Cron returns the parsed cron jobs from shell3.telegram (nil if absent).
 func (c *LoadedConfig) Cron() []CronJob { return c.cron }
-
-// HasWrapBash reports whether a shell3.wrap_bash hook was declared. agentsetup
-// uses it to decide whether to wire a WrapBash closure onto chat.Config (nil
-// closure = no wrapping = allow all, the unsafe default).
-func (c *LoadedConfig) HasWrapBash() bool { return c.wrapBash != nil }
 
 // StubNames returns the registered stub-tool names with their redirect
 // messages. The map is config-global (not per-agent); agentsetup appends one
