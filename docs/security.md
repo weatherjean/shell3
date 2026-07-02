@@ -16,9 +16,10 @@ The single opt-in hook is `shell3.on_tool_call(fn)` — it fires before **every*
 the model calls (`bash`, `bash_bg`, `shell_interactive`, `read`, `list_files`,
 `edit_file`, and custom tools), and is off until you call it. Your handler decides
 per tool by switching on `t.name`. See the next section for the full model. The
-default config gates only the bash family, so `read`/`list_files`/`edit_file` run
-**ungated by default** — but that's a config choice you can change (e.g. to refuse
-reading a secrets file), not a hardcoded exemption.
+scaffold config that `boot` writes ships its example gate **commented out**, so a
+fresh config gates **nothing**; that example, once enabled, covers only the bash
+family, leaving `read`/`list_files`/`edit_file` ungated — a config choice you can
+change (e.g. to refuse reading a secrets file), not a hardcoded exemption.
 
 `t.command` is the bash command for the three bash tools and **nil** for everything
 else. `shell_interactive` (the TUI-only tool that hands the model your terminal for a
@@ -55,7 +56,7 @@ A handler returns one of:
 - `{ command = "..." }` — rewrite the bash command text; continue the chain (bash tools only — fails closed on a non-bash tool)
 - `{ argv = { ... } }` — **terminal**: exec this argv exactly (runner swap, e.g. into Docker or SSH; `bash`/`bash_bg` only)
 - `{ block = true, reason = "..." }` — **terminal**: block; `reason` is shown to the model
-- `{ ask = "prompt", reason = "...", ask_timeout = N }` — prompt a human (TUI `y/N` / Telegram inline buttons); allowed → run, declined or headless → block with `reason`. `ask_timeout` is optional (seconds, default 300).
+- `{ ask = "prompt", reason = "...", ask_timeout = N }` — prompt a human (TUI `y/N` / ACP `session/request_permission`); allowed → run, declined or headless → block with `reason`. `ask_timeout` is optional (seconds, default 300).
 
 A handler that raises a Lua error **fails closed** (blocks). Only `{block=true}`
 blocks via the block verdict; a returned table that contains none of the recognized
@@ -94,8 +95,8 @@ entire command, a flagged command can't hide behind a benign prefix: `echo hi; r
 too — splitting a command across lines can't slip a fragment past a `.*` rule.
 
 **Headless subagents deny on `{ask=}` matches.** The TUI shows a `y/N` prompt;
-the Telegram host sends inline `Allow`/`Deny` buttons. Headless `shell3`
-subagents have no attached human, so an `{ask=...}` verdict is auto-denied with
+ACP clients receive a `session/request_permission` request. In-process subagents (spawned
+via the `task` tool) run headless, so an `{ask=...}` verdict is auto-denied with
 its `reason`. A prompt nobody answers falls back to deny after the timeout
 (`ask_timeout`, default 300 s). `{block=true}` never prompts — it blocks
 everywhere. Ordinary reads (`cat`, `rg`, `ls`) match nothing and run, so a
@@ -157,26 +158,23 @@ user's other processes and scope them accordingly.
 shell3 is file-native: there is no database. State lives in two places.
 
 **Project-local runtime state** lives in each project's `.shell3_project/`
-directory — conversation history, sessions, the completion inbox, background-job
-logs, and subagent transcripts, all as plain JSONL:
+directory — conversation history, sessions, and background-job logs, all as plain
+JSONL:
 
 - `.shell3_project/runs/<id>/messages.jsonl` — one conversation per directory
   (`meta.json` beside it holds model/status/timestamps)
-- `.shell3_project/runs/jobs/<id>.jsonl` — background-job output (`<id>.status` beside it)
-- `.shell3_project/agents/<id>.jsonl` — subagent transcripts
-- `.shell3_project/inbox.jsonl` — completion pointers
+- `.shell3_project/runs/jobs/<id>.jsonl` — custom background-tool output (`<id>.status` beside it)
 
 The directory ignores itself (a self-contained `.gitignore` of `*`), so it is
 never committed. To wipe a project's entire history:
 
 ```sh
-rm -rf .shell3_project    # this project's history, jobs, transcripts, inbox
+rm -rf .shell3_project    # this project's history and job logs
 ```
 
 **Global state** lives under `~/.shell3/`: your `shell3.lua` config, the `.env`
 secrets, the rotating app log, and any `run_proxy` logs. It holds no conversation
-history. Remove a config (and its secrets) by deleting its directory, e.g.
-`rm -rf ~/.shell3/telegram`.
+history. To wipe your global config entirely: `rm -rf ~/.shell3`.
 
 ## Reporting vulnerabilities
 

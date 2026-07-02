@@ -20,7 +20,7 @@ func TestReload_PreservesHistoryAndArmsNewJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rt.Close()
-	sess, err := rt.Session(shell3.SessionOpts{Name: "telegram", Agent: "code"})
+	sess, err := rt.Session(shell3.SessionOpts{Name: "frontend", Agent: "code"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,15 +29,10 @@ func TestReload_PreservesHistoryAndArmsNewJob(t *testing.T) {
 	}
 
 	writeCfg(t, dir, baseCfg+`
-shell3.telegram({ token="t", chat_id="1", agent="code", cron = { { name="nightly", schedule="@daily", agent="explorer", prompt="go", notify=false } } })
+shell3.agent({ name="research", model="main", prompt="research", tools={} })
 `)
 	if _, err := rt.Reload(); err != nil {
 		t.Fatal(err)
-	}
-
-	// The newly-declared job is armed and visible via the Runtime.
-	if jobs := rt.Cron(); len(jobs) != 1 || jobs[0].Name != "nightly" {
-		t.Fatalf("new job not armed: %+v", jobs)
 	}
 
 	// Same *Session object survived in place: its active agent is preserved and

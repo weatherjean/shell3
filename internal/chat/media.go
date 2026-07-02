@@ -33,7 +33,7 @@ func LoadMediaPart(path, workDir string) (llm.ContentPart, string, error) {
 
 // MediaPartFromBytes converts in-memory media bytes into a multimodal
 // ContentPart, routing by MIME type — the byte-based sibling of LoadMediaPart
-// for hosts that hold the data directly (e.g. a Telegram photo download).
+// for hosts that hold the data directly (e.g. an in-memory photo download).
 // Matching is case-insensitive and parameters after ";" are ignored:
 //
 //	image/jpeg, image/png, image/gif, image/webp → image_url (resized,

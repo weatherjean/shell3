@@ -94,7 +94,7 @@ func TestResume_CarriesPriorContext(t *testing.T) {
 }
 
 // TestResumeLatest_ReattachesNewest proves SessionOpts.ResumeLatest rejoins the
-// most recent session sharing the same workdir (the Telegram-restart path) and
+// most recent session sharing the same workdir (the front-end restart path) and
 // reports Resumed(), instead of spawning a fresh empty row.
 func TestResumeLatest_ReattachesNewest(t *testing.T) {
 	st := openTestStore(t)

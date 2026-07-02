@@ -7,7 +7,7 @@ in-session slash commands.
 
 ## Interactive vs. headless
 
-With no message, shell3 opens an interactive session (the TUI):
+The bare `shell3` command opens an interactive session (the TUI):
 
 ```sh
 shell3                       # start a session
@@ -16,18 +16,29 @@ shell3 -c plan               # use ~/.shell3/plan.lua
 shell3 --agent review        # start on a specific agent
 ```
 
-Give it a message — as an argument or on stdin — and it runs exactly one turn,
-prints the result, and exits:
+The `run` subcommand is the headless mode: it runs exactly one turn, prints the
+result, and exits. The prompt comes from `--prompt`, positional arguments, or
+stdin — the first non-empty source wins:
 
 ```sh
-shell3 "explain the failing test"       # one-shot
-git diff | shell3 "write a commit msg"  # reads stdin like any filter
-echo "$LOG" | shell3 "what broke?"      # stdin as context
+shell3 run "explain the failing test"                 # one-shot
+git log -3 | shell3 run                               # stdin is the prompt
+{ echo "write a commit msg:"; git diff; } | shell3 run  # compose a prompt in the pipe
 ```
 
 In headless mode shell3 strips the interactive-shell tool from the model's
 schema and tells the model that no human is present, so it decides and proceeds
 rather than asking questions it can't get answered.
+
+### `shell3 run` flags
+
+| Flag | Effect |
+|------|--------|
+| `--prompt <text>` | The prompt for this run (alternative to positional args / stdin) |
+| `-c`, `--config <name\|path>` | Config name (→ `~/.shell3/<name>.lua`) or path to a `*.lua` file (default `~/.shell3/shell3.lua`) |
+| `--agent <name>` | Select the active agent (default: first declared). May also name a registered subagent |
+| `--resume <id>` | Resume a stored session by id: reload its messages and continue the conversation |
+| `--out <path>` | Stream a JSONL audit log of this run to `<path>` (see below) |
 
 ## The audit log (`--out`)
 
@@ -35,7 +46,7 @@ Add `--out <file>` and shell3 writes a lossless JSONL record of the run — one
 line per event:
 
 ```sh
-shell3 "audit deps" --out audit.jsonl
+shell3 run "audit deps" --out audit.jsonl
 ```
 
 Every assistant token, every tool call **with its raw arguments**, every tool
@@ -62,8 +73,9 @@ cat .shell3_project/runs/<id>/meta.json
 shell3 read-session <id>
 ```
 
-Background job logs are written to `.shell3_project/runs/jobs/<job-id>.jsonl`
-(stdout+stderr), with a sibling `<job-id>.status` JSON file (pid, started_at, exit code).
+Custom background-tool output (`shell3.tool{background=true}`) is written to
+`.shell3_project/runs/jobs/<job-id>.jsonl` (stdout+stderr), with a sibling
+`<job-id>.status` JSON file (pid, started_at, exit code).
 
 The agent can search its own past conversations the same way (via the
 `history` skill), using `bash` with `rg` — no special tool needed.
@@ -71,13 +83,23 @@ The agent can search its own past conversations the same way (via the
 ## First-run setup
 
 ```sh
-shell3 boot              # interactive: endpoint, model, name, API key → writes config
-shell3 boot --telegram   # scaffold a Telegram host config under ~/.shell3/telegram/
+shell3 boot     # interactive: endpoint, model, name, API key → writes config
 ```
 
 `boot` writes `~/.shell3/shell3.lua`, the `lib/` modules, and `~/.shell3/.env`.
-See [configuration.md](configuration.md) for what it produces and how to extend
-it, and [telegram.md](telegram.md) for the Telegram host.
+See [configuration.md](configuration.md) for what it produces and how to extend it.
+
+## ACP server
+
+```sh
+shell3 acp                     # ACP server on stdin/stdout (for Zed, OpenACP, ...)
+shell3 acp --agent plan        # set the initial agent for new sessions
+shell3 acp --config ~/work.lua # use a specific config file
+```
+
+Runs shell3 as an ACP (Agent Client Protocol) stdio server. All logs go to
+`~/.shell3/shell3.log`; stdout carries only protocol messages. See
+[acp.md](acp.md) for client setup and supported methods.
 
 ## Slash commands (in-session)
 

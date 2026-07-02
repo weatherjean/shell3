@@ -32,13 +32,12 @@ func TestReload_AddAgentTakesEffect(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rt.Close()
-	sess, err := rt.Session(shell3.SessionOpts{Name: "telegram", Agent: "code"})
+	sess, err := rt.Session(shell3.SessionOpts{Name: "frontend", Agent: "code"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	writeCfg(t, dir, baseCfg+`
 shell3.agent({ name="research", model="main", prompt="research", tools={} })
-shell3.telegram({ token="t", chat_id="1", agent="code", cron = { { name="n", schedule="@daily", agent="explorer", prompt="go" } } })
 `)
 	res, err := rt.Reload()
 	if err != nil {
@@ -47,10 +46,7 @@ shell3.telegram({ token="t", chat_id="1", agent="code", cron = { { name="n", sch
 	if err := sess.SwitchAgent("research"); err != nil {
 		t.Fatalf("new agent not live after reload: %v", err)
 	}
-	if jobs := rt.Cron(); len(jobs) != 1 || jobs[0].Name != "n" {
-		t.Fatalf("cron not reloaded: %+v", jobs)
-	}
-	if res.Agents < 2 || res.Jobs != 1 {
+	if res.Agents < 2 {
 		t.Fatalf("bad reload result: %+v", res)
 	}
 }
@@ -63,18 +59,15 @@ func TestReload_InvalidKeepsOldConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rt.Close()
-	sess, _ := rt.Session(shell3.SessionOpts{Name: "telegram", Agent: "code"})
+	sess, _ := rt.Session(shell3.SessionOpts{Name: "frontend", Agent: "code"})
 	writeCfg(t, dir, baseCfg+`
-shell3.telegram({ token="t", chat_id="1", agent="code", cron = { { schedule="@daily", agent="ghost", prompt="x" } } })
+shell3.agent({ name="broken", model="nonexistent", prompt="x", tools={} })
 `)
 	if _, err := rt.Reload(); err == nil {
 		t.Fatal("expected reload to reject the invalid config")
 	}
 	if err := sess.SwitchAgent("code"); err != nil {
 		t.Fatalf("old config broken after failed reload: %v", err)
-	}
-	if jobs := rt.Cron(); len(jobs) != 0 {
-		t.Fatalf("failed reload must not arm jobs: %+v", jobs)
 	}
 }
 
@@ -88,7 +81,7 @@ shell3.agent({ name="research", model="main", prompt="research", tools={} })
 		t.Fatal(err)
 	}
 	defer rt.Close()
-	sess, _ := rt.Session(shell3.SessionOpts{Name: "telegram", Agent: "code"})
+	sess, _ := rt.Session(shell3.SessionOpts{Name: "frontend", Agent: "code"})
 	if err := sess.SwitchAgent("research"); err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +106,7 @@ shell3.agent({ name="research", model="main", prompt="research", tools={} })
 		t.Fatal(err)
 	}
 	defer rt.Close()
-	sess, _ := rt.Session(shell3.SessionOpts{Name: "telegram", Agent: "code"})
+	sess, _ := rt.Session(shell3.SessionOpts{Name: "frontend", Agent: "code"})
 	if err := sess.SwitchAgent("research"); err != nil {
 		t.Fatal(err)
 	}

@@ -412,13 +412,19 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 				}
 				if handler != nil {
 					toolCfg := ToolConfig{
-						Store:       cfg.Store,
-						RunsDir:     cfg.RunsDir,
-						WorkDir:     cfg.WorkDir,
-						RunToolCall: cfg.RunToolCall,
-						Asker:       cfg.Asker,
-						AllMsgs:     st.allMsgs,
-						SessMsgs:    sess.messages,
+						Store:         cfg.Store,
+						RunsDir:       cfg.RunsDir,
+						WorkDir:       cfg.WorkDir,
+						FS:            cfg.FS,
+						RunToolCall:   cfg.RunToolCall,
+						Asker:         cfg.Asker,
+						StartBashBg:   cfg.StartBashBg,
+						StartSubagent: cfg.StartSubagent,
+						ListJobs:      cfg.ListJobs,
+						JobStatus:     cfg.JobStatus,
+						CancelJob:     cfg.CancelJob,
+						AllMsgs:       st.allMsgs,
+						SessMsgs:      sess.messages,
 					}
 					out, herr := handler.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), toolCfg)
 					res = classifyHandlerOutput(out)

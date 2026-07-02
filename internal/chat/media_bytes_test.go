@@ -46,7 +46,7 @@ func TestMediaPartFromBytes_PNG(t *testing.T) {
 }
 
 // TestMediaPartFromBytes_MIMENormalization: case and ";"-parameters are
-// tolerated (Telegram and HTTP stacks send e.g. "audio/ogg; codecs=opus" —
+// tolerated (various HTTP stacks send e.g. "audio/ogg; codecs=opus" —
 // for supported types we must accept "image/PNG; charset=binary" forms).
 func TestMediaPartFromBytes_MIMENormalization(t *testing.T) {
 	if _, _, err := MediaPartFromBytes(pngBytes(t, 1, 1), "IMAGE/PNG; charset=binary"); err != nil {

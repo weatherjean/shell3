@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-
-	"github.com/weatherjean/shell3/internal/bgjobs"
 )
 
-// BashBgHandler spawns a detached background process for the bash_bg tool.
-// Output is a short human-readable block the model can follow up on with
-// the regular bash tool (cat .shell3_project/runs/jobs/*.status, tail <log>, kill <pid>).
+// BashBgHandler starts a background shell command on the managed in-process
+// job runtime (via cfg.StartBashBg, wired to the pkg/shell3 jobManager). The
+// job runs as a goroutine-supervised child of the session; the agent is woken
+// with a completion notice on a later turn — there is no detached pid or log
+// path to poll.
 type BashBgHandler struct{}
 
 func (BashBgHandler) Name() string { return "bash_bg" }
@@ -26,8 +26,8 @@ func (BashBgHandler) Execute(ctx context.Context, id string, args json.RawMessag
 	if p.Command == "" {
 		return "", fmt.Errorf("bash_bg: command is required")
 	}
-	if cfg.RunsDir == "" {
-		return "", fmt.Errorf("bash_bg: background jobs require a runs directory")
+	if cfg.StartBashBg == nil {
+		return "", fmt.Errorf("bash_bg: background jobs are not available")
 	}
 	argv, blockMsg, blocked := gateBash(ctx, cfg, "bash_bg", p.Command, string(args))
 	if blocked {
@@ -37,15 +37,9 @@ func (BashBgHandler) Execute(ctx context.Context, id string, args json.RawMessag
 	if wd == "" {
 		wd = cfg.WorkDir
 	}
-	// Display the original command regardless of any runner swap. The job is
-	// recorded under cfg.RunsDir/jobs/ as a status file.
-	job, err := bgjobs.Start(cfg.RunsDir, argv, p.Command, wd, nil)
+	jobID, err := cfg.StartBashBg(p.Command, wd, argv)
 	if err != nil {
 		return "", fmt.Errorf("bash_bg: %w", err)
 	}
-	out := fmt.Sprintf(
-		"started %s\npid: %d\nlog: %s\n\nmanage with bash:\n  status: kill -0 %d  # exits 0 if alive, 1 if dead\n  output: tail -n 200 %s\n  kill:   kill %d         # or 'kill -- -%d' for whole group\n  list:   cat .shell3_project/runs/jobs/*.status\n",
-		job.ID, job.PID, job.Log, job.PID, job.Log, job.PID, job.PID,
-	)
-	return out, nil
+	return fmt.Sprintf("started background job %s\nYou'll get a completion notice on your next turn. Do not poll.", jobID), nil
 }

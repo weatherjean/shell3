@@ -12,7 +12,6 @@ import (
 type ReloadResult struct {
 	Agents int      // number of agents now live
 	Models int      // number of models now live
-	Jobs   int      // number of cron jobs now armed
 	Notes  []string // human-readable notes
 }
 
@@ -80,14 +79,6 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 
 	// 3. Swap shared state: close the OLD parts, install the new.
 	oldCleanup := rt.cleanup // closes old VM, proxies, old store handle
-	var cronJobs []CronJob
-	for _, j := range newParts.Cron() {
-		cronJobs = append(cronJobs, CronJob{
-			Name: j.Name, Schedule: j.Schedule, Agent: j.Agent,
-			Prompt: j.Prompt, WorkDir: j.WorkDir, Notify: j.Notify,
-		})
-	}
-	tg := newParts.Telegram()
 	rt.sessionConfig = func(o SessionOpts) (chat.Config, error) {
 		return newParts.SessionConfig(agentsetup.SessionOptions{
 			Agent: o.Agent, WorkDir: o.WorkDir,
@@ -97,11 +88,6 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 	rt.subagentDesc = newParts.SubagentDescription
 	rt.cleanup = newCleanup
 	rt.store = newParts.Store()
-	rt.cron = cronJobs
-	rt.telegram = TelegramConfig{
-		Token: tg.Token, ChatID: tg.ChatID, Agent: tg.Agent, WorkDir: tg.WorkDir,
-		Dashboard: DashboardConfig{Enabled: tg.Dashboard.Enabled, Addr: tg.Dashboard.Addr, URL: tg.Dashboard.URL},
-	}
 	oldCleanup()
 
 	// 4. Re-derive each live session in place (keep history s.sess), restore overrides.
@@ -135,7 +121,6 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 	res := ReloadResult{
 		Agents: len(newParts.AgentNames()),
 		Models: newParts.ModelCount(),
-		Jobs:   len(cronJobs),
 		Notes:  notes,
 	}
 	return res, nil

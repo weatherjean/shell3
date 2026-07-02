@@ -32,8 +32,7 @@ follow the require to the right file.
 2. Respect the cross-reference rules (validated on every reload; a violation
    rejects the whole reload):
    - every agent/subagent `model = "..."` must name a declared `shell3.model`;
-   - every cron job (in `shell3.telegram{ cron = {...} }`) must set
-     `agent = "..."` to a declared SUBAGENT (not a top-level agent);
+   - a skill or tool `agent = "..."` must reference a declared subagent;
    - a skill or tool granted to an agent must be a declared handle.
 3. Call the `reload` tool. It validates the whole file, then applies it after
    this turn ends. It acknowledges immediately; the validated result — success
@@ -58,7 +57,7 @@ Edit, call `reload`; on success the skill is live for that agent's next turn.
 - Active agent and /set params are restored when they still exist in the new
   config. If your edit REMOVES the agent you are currently using, reload does NOT
   error: it falls back to the configured default agent and says so in the result.
-- Model proxies restart on reload (a brief pause); agents,
-  models, tools, skills, and cron apply cleanly.
+- Model proxies restart on reload (a brief pause); models, agents,
+  tools, and skills apply cleanly.
 - A changed `context_window` for the already-live session takes effect on the
   next restart, not on this reload.

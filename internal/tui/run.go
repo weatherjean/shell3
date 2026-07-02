@@ -107,6 +107,7 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 	// steering is queued) the runtime emits a Wake for this session; drain it as
 	// a follow-up turn so the agent reacts without the user typing first.
 	m.wakeEvents = sess.WakeEvents()
+	m.jobEvents = sess.JobEvents()
 	m.sessionName = sess.Name()
 
 	prog = tea.NewProgram(m, tea.WithContext(ctx))

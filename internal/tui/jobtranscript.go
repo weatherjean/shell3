@@ -6,38 +6,27 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/weatherjean/shell3/internal/llm"
 )
 
-// The :background output view renders a subagent's structured --out transcript
+// The :background output view renders a subagent's messages.jsonl transcript
 // (this file) when the job has one, instead of the plain stdout log. The
-// transcript carries reasoning, tool calls, and the final assistant message —
-// none of which reach stdout — so it can colorize thinking, label tool calls,
-// truncate tool output, and render the answer as markdown. Plain bash_bg jobs
-// have no transcript and keep the wrapped stdout (see bgWrappedLines).
-
-// transcriptEvent is the subset of a --out JSONL line the view renders. Unknown
-// kinds and fields are ignored, and an unparseable line (a half-written tail, an
-// unknown schema) is skipped — so a live, still-streaming transcript renders
-// fine.
-type transcriptEvent struct {
-	Kind      string `json:"kind"`
-	Text      string `json:"text"`
-	Tool      string `json:"tool"`
-	Input     string `json:"input"`
-	Output    string `json:"output"`
-	ToolError bool   `json:"tool_error"`
-}
+// transcript carries user turns, reasoning, tool calls, tool results, and the
+// final assistant message — all of which are stored in the child session's
+// messages.jsonl as llm.Message records. Plain bash_bg jobs have no transcript
+// and keep the wrapped stdout path (see bgWrappedLines).
 
 // toolResultMaxLines bounds how many lines of a tool result the transcript view
 // shows before collapsing the rest into a "… +N more lines" marker.
 const toolResultMaxLines = 12
 
-// renderJobTranscript parses a subagent's --out transcript (JSONL) into wrapped
-// display rows for the output view: the user prompt, reasoning in the thinking
-// colour, tool calls labelled by tool with their input, tool results truncated
-// and dimmed, and the assistant's answer as markdown. width is the content width
-// to wrap to. Streaming assistant_token deltas are skipped — the final
-// assistant_message is the form shown — as are lifecycle/usage events.
+// renderJobTranscript parses a subagent's messages.jsonl (one llm.Message JSON
+// record per line) into wrapped display rows for the output view: user prompts,
+// reasoning in the thinking colour, tool calls labelled by tool with their
+// args, tool results truncated and dimmed, and the assistant's answer as
+// markdown. width is the content width to wrap to. Unparseable lines and
+// system messages are skipped so a live, still-streaming transcript renders
+// fine.
 func renderJobTranscript(raw string, width int) []string {
 	if width < 1 {
 		width = 1
@@ -60,45 +49,51 @@ func renderJobTranscript(raw string, width int) []string {
 		if line == "" {
 			continue
 		}
-		var ev transcriptEvent
-		if json.Unmarshal([]byte(line), &ev) != nil {
+		var msg llm.Message
+		if json.Unmarshal([]byte(line), &msg) != nil {
 			continue // half-written tail line or unknown schema — skip
 		}
-		switch ev.Kind {
-		case "user_message":
-			if t := strings.TrimSpace(ev.Text); t != "" {
+		switch msg.Role {
+		case llm.RoleSystem:
+			// skip system prompts — they are not meaningful to the human reader
+
+		case llm.RoleUser:
+			if t := strings.TrimSpace(msg.Content); t != "" {
 				add(stUserPrompt.Render("› ") + stUserText.Render(wrap(t)))
 			}
-		case "assistant_reasoning":
-			if t := strings.TrimSpace(ev.Text); t != "" {
+
+		case llm.RoleAssistant:
+			// Reasoning (thinking) comes first in display order.
+			if t := strings.TrimSpace(msg.ReasoningContent); t != "" {
 				add(stThinking.Render("✲ thinking") + "\n" + stThinking.Render(wrap(t)))
 			}
-		case "assistant_message":
-			if t := strings.TrimSpace(ev.Text); t != "" {
+			// Tool calls (may be multiple in one assistant message).
+			for _, tc := range msg.ToolCalls {
+				block := toolStyle(tc.Name).Render("● " + tc.Name)
+				if in := strings.TrimSpace(tc.RawArgs); in != "" {
+					block += "\n" + stDim.Render(wrap(in))
+				}
+				add(block)
+			}
+			// Text content: the final answer or a preamble before tool calls.
+			if t := strings.TrimSpace(msg.Content); t != "" {
 				add(strings.TrimRight(renderMarkdown(t, width), "\n"))
 			}
-		case "tool_call":
-			block := toolStyle(ev.Tool).Render("● " + ev.Tool)
-			if in := strings.TrimSpace(ev.Input); in != "" {
-				block += "\n" + stDim.Render(wrap(in))
-			}
-			add(block)
-		case "tool_result":
-			add(renderToolResult(ev, wrap))
+
+		case llm.RoleTool:
+			add(renderMsgToolResult(msg, wrap))
 		}
 	}
 	return rows
 }
 
-// renderToolResult formats one tool result: a ✓/✗ tool label and the output
-// truncated to toolResultMaxLines lines (dimmed), with a "… +N more lines"
-// marker when it was cut.
-func renderToolResult(ev transcriptEvent, wrap func(string) string) string {
-	label := stTool.Render("✓ " + ev.Tool)
-	if ev.ToolError {
-		label = stErr.Render("✗ " + ev.Tool)
-	}
-	out := strings.TrimRight(ev.Output, "\n")
+// renderMsgToolResult formats one tool-result message: a ✓ tool label and the
+// output truncated to toolResultMaxLines lines (dimmed), with a "… +N more
+// lines" marker when it was cut. msg.Name is the tool name; msg.Content is the
+// raw output.
+func renderMsgToolResult(msg llm.Message, wrap func(string) string) string {
+	label := stTool.Render("✓ " + msg.Name)
+	out := strings.TrimRight(msg.Content, "\n")
 	if strings.TrimSpace(out) == "" {
 		return label + "  " + stDim.Render("(no output)")
 	}

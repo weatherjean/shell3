@@ -210,6 +210,10 @@ func NewHandlers() map[string]ToolHandler {
 	handlers := []ToolHandler{
 		BashHandler{},
 		BashBgHandler{},
+		TaskHandler{},
+		TaskListHandler{},
+		TaskStatusHandler{},
+		TaskCancelHandler{},
 		EditHandler{},
 		ReadHandler{},
 		ListFilesHandler{},

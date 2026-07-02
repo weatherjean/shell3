@@ -6,7 +6,7 @@ import (
 )
 
 // AskFunc asks a human to approve command (reason explains why it was gated).
-// Front-ends supply it (TUI prompt, Telegram buttons). Nil means no human is
+// Front-ends supply it (TUI prompt or equivalent). Nil means no human is
 // attached (headless subagent) — on_tool_call then denies instead of asking.
 type AskFunc func(ctx context.Context, command, reason string) bool
 

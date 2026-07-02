@@ -12,5 +12,5 @@ type EditHandler struct{}
 func (EditHandler) Name() string { return "edit_file" }
 
 func (EditHandler) Execute(ctx context.Context, id string, args json.RawMessage, cfg ToolConfig) (string, error) {
-	return handleEditTool(string(args), cfg.WorkDir), nil
+	return handleEditTool(ctx, string(args), cfg.WorkDir, cfg.fs()), nil
 }

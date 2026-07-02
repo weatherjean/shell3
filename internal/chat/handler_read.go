@@ -10,6 +10,6 @@ type ReadHandler struct{}
 
 func (ReadHandler) Name() string { return "read" }
 
-func (ReadHandler) Execute(_ context.Context, _ string, args json.RawMessage, cfg ToolConfig) (string, error) {
-	return handleReadTool(string(args), cfg.WorkDir), nil
+func (ReadHandler) Execute(ctx context.Context, _ string, args json.RawMessage, cfg ToolConfig) (string, error) {
+	return handleReadTool(ctx, string(args), cfg.WorkDir, cfg.fs()), nil
 }

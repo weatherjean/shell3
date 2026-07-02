@@ -78,7 +78,10 @@ type model struct {
 	runQueued func() (<-chan shell3.Event, context.CancelFunc)
 	// wakeEvents is the runtime's out-of-turn bus; a Wake for this session while
 	// idle drains the queued inbox as a follow-up turn. nil disables it.
-	wakeEvents  <-chan shell3.HostEvent
+	wakeEvents <-chan shell3.HostEvent
+	// jobEvents is the runtime's background-job progress bus; each event carries
+	// incremental output (Chunk) or a Done signal. nil disables live-tail.
+	jobEvents   <-chan shell3.JobProgress
 	sessionName string
 	cmds        sessionCmds
 
@@ -202,7 +205,7 @@ func (m *model) Init() tea.Cmd {
 	// RequestBackgroundColor lets us sense a light vs. dark terminal and pick the
 	// matching palette (we default to dark until the reply arrives, so terminals
 	// that never answer stay on the historical look).
-	return tea.Batch(m.ta.Focus(), waitWake(m.wakeEvents), bgPollTick(),
+	return tea.Batch(m.ta.Focus(), waitWake(m.wakeEvents), waitJobProgress(m.jobEvents), bgPollTick(),
 		func() tea.Msg { return tea.RequestBackgroundColor() })
 }
 
@@ -241,6 +244,19 @@ type bgPollTickMsg struct{}
 // footer's timed notice fade when the app is otherwise idle.
 func bgPollTick() tea.Cmd {
 	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return bgPollTickMsg{} })
+}
+
+// countRunningJobs counts jobs still running. Finished jobs are retained in the
+// list (so they stay viewable in the :background modal) but must NOT inflate the
+// footer's "bg: N" pill, which reflects active work only.
+func countRunningJobs(jobs []shell3.JobInfo) int {
+	n := 0
+	for _, j := range jobs {
+		if !j.Done {
+			n++
+		}
+	}
+	return n
 }
 
 // openEditorMsg carries the result of composing a prompt in an external editor.
@@ -344,6 +360,23 @@ func waitWake(ch <-chan shell3.HostEvent) tea.Cmd {
 	return func() tea.Msg {
 		ev, ok := <-ch
 		return wakeMsg{ev: ev, ok: ok}
+	}
+}
+
+// jobProgressMsg carries one background-job progress event from the job bus.
+type jobProgressMsg shell3.JobProgress
+
+// waitJobProgress blocks for the next job-progress event. nil channel → no command.
+func waitJobProgress(ch <-chan shell3.JobProgress) tea.Cmd {
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		p, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return jobProgressMsg(p)
 	}
 }
 
@@ -770,7 +803,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.ready = true
 		if m.cmds != nil {
-			m.bgCount = len(m.cmds.Jobs()) // seed the footer count before the first poll
+			m.bgCount = countRunningJobs(m.cmds.Jobs()) // running-only; done jobs are retained but don't count
 		}
 		m.relayout()
 		return m, nil
@@ -786,7 +819,15 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case bgPollTickMsg:
 		if m.cmds != nil {
-			m.bgCount = len(m.cmds.Jobs())
+			jobs := m.cmds.Jobs()
+			m.bgCount = countRunningJobs(jobs)
+			if m.bgOpen {
+				m.bgJobs = jobs
+				m.clampJobSel()
+				if m.bgViewID != "" {
+					m.loadJobOutput(m.bgViewID)
+				}
+			}
 		}
 		return m, bgPollTick()
 	case eventMsg:
@@ -796,6 +837,8 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil // bus closed
 		}
 		return m, tea.Batch(m.handleWake(msg.ev), waitWake(m.wakeEvents))
+	case jobProgressMsg:
+		return m, tea.Batch(m.handleJobProgress(shell3.JobProgress(msg)), waitJobProgress(m.jobEvents))
 	case openEditorMsg:
 		return m.handleEditorResult(msg)
 	case confirmMsg:

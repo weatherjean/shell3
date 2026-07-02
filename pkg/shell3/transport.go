@@ -5,43 +5,21 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/notify"
-	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// report delivers this session's completion to the live host by appending ONE
-// pointer line to the project's inbox.jsonl (the file the runtime watches; see
-// Runtime.injectPointer). It is the entire completion path: background subagents
-// are fire-and-forget, so there is no socket, no liveness, and no dormant-parent
-// revive — a finishing subagent just drops a pointer and exits.
-//
-// A pointer is appended only for a subagent: a run with a recorded ParentSession.
-// A root session (no parent) reports nothing — there is no one above it to
-// notify. The pointer carries no payload: Path points at this run's transcript
-// and Summary is the short preview, so the detail stays in the run's own jsonl.
-// Called once during Close, after the turn has joined.
-func (s *Session) report(n notify.Notification) {
-	if s.parentSession == "" {
-		return
+// notifyBg builds a bg_done completion notification for a command job.
+func notifyBg(id, cmd string, exit *int, preview string) notify.Notification {
+	return notify.Notification{
+		Kind: notify.KindBgDone, ID: id, Cmd: cmd, Exit: exit,
+		Preview: preview, TS: time.Now().UTC().Format(time.RFC3339),
 	}
-	p := runs.Pointer{
-		TS:      time.Now().UTC().Format(time.RFC3339),
-		RunID:   s.sess.ID(),
-		Kind:    n.Kind,
-		Path:    n.Transcript,
-		Summary: n.Preview,
-		Exit:    n.Exit,
-	}
-	// reportInbox (from `shell3 run --inbox <path>`) targets the PARENT's inbox
-	// directly, so the completion lands in the file the parent watches regardless
-	// of this subagent's own working directory. Falls back to this run's own
-	// store inbox when unset (parent and child share a runtime root).
-	if s.reportInbox != "" {
-		_ = runs.AppendPointer(s.reportInbox, p)
-		return
-	}
-	if s.cfg.Store != nil {
-		_ = s.cfg.Store.AppendInbox(p)
-	}
+}
+
+// injectNoticeNoWake adds a completion notice to the session's inbox WITHOUT
+// emitting a Wake (bash_bg completions are informational; the agent sees them on
+// its next turn).
+func (s *Session) injectNoticeNoWake(n notify.Notification) {
+	s.sess.InterjectNotice(renderNotification(n))
 }
 
 // injectNotification injects a received notification into the running session,
@@ -56,6 +34,12 @@ func (s *Session) injectNotification(rt *Runtime, n notify.Notification) {
 // renderNotification renders a notification as the short pointer string injected
 // into the agent's next turn. Each Kind names where the detail lives so the
 // agent can read it on demand.
+// agentDoneResultCap bounds (in runes) how much of a subagent's final summary is
+// injected into the parent's context on completion, so a long final message can't
+// blow up the parent. The full result stays available via `task_status <id>` and
+// the :background modal transcript.
+const agentDoneResultCap = 2000
+
 func renderNotification(n notify.Notification) string {
 	switch n.Kind {
 	case notify.KindBgDone:
@@ -72,35 +56,31 @@ func renderNotification(n notify.Notification) string {
 		}
 		return msg
 	case notify.KindAgentDone:
-		// A subagent (a backgrounded `shell3 run --parent-session`) finished and
-		// self-reported. The notification ITSELF carries the subagent's result
-		// summary (Preview); the transcript pointer is only for when the summary
-		// isn't enough. The agent surfaces this on an idle wake turn with no user
-		// message, so the reminder must tell it to RELAY the result to the user —
-		// the human has not seen the subagent's output, only this pointer has. An
-		// earlier wording ("act on it directly; you do NOT need to read anything
-		// else") let the model treat the task as done and stay silent, dropping the
-		// answer on the floor. The transcript pointer (with the exact extraction
-		// one-liner, so the agent never reverse-engineers the JSONL schema) stays
-		// explicitly optional, for full output or intermediate steps.
+		// A subagent finished; its completion was injected in-process and the
+		// parent surfaces this on an idle wake turn with no user message. The
+		// notice carries the subagent's own result summary (Preview) — the human
+		// has NOT seen it, so the reminder must tell the model to RELAY it (an
+		// earlier "act on it directly, no need to read anything else" wording let
+		// the model treat the task as done and stay silent, dropping the answer).
+		// The summary is CAPPED here so a subagent that ends with a huge final
+		// message can't blow up the parent's context; the model fetches the rest
+		// with `task_status <id>`. n.ID is the job id (e.g. sub1), matching the
+		// task_* tools and the "started subagent sub1" spawn message.
 		status := n.Status
 		if status == "" {
 			status = "done"
 		}
 		msg := fmt.Sprintf("subagent %s finished (%s).", n.ID, status)
-		extract := ""
-		if n.Transcript != "" {
-			extract = fmt.Sprintf("jq -rs 'map(select(.kind==\"assistant_message\"))[-1].text' %s", n.Transcript)
-		}
-		switch {
-		case n.Preview != "":
-			msg += " Result: " + n.Preview
-			msg += " That result is the subagent's own summary — relay it to the user now (the user has NOT seen it yet): summarize or present it in your reply."
-			if extract != "" {
-				msg += fmt.Sprintf(" Only if you need its full output or intermediate steps, read the transcript: %s", extract)
+		if n.Preview != "" {
+			result := n.Preview
+			if r := []rune(result); len(r) > agentDoneResultCap {
+				result = string(r[:agentDoneResultCap]) +
+					fmt.Sprintf("… (result truncated; call `task_status %s` for the full result, or open the :background modal for the transcript)", n.ID)
 			}
-		case extract != "":
-			msg += fmt.Sprintf(" Read its result from the transcript and relay it to the user: %s", extract)
+			msg += " Result: " + result
+			msg += " That result is the subagent's own summary — relay it to the user now (they have NOT seen it yet): summarize or present it in your reply."
+		} else {
+			msg += fmt.Sprintf(" It produced no final summary text; call `task_status %s` to read its output, then relay it to the user.", n.ID)
 		}
 		return msg
 	default:

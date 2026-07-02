@@ -62,32 +62,6 @@ type CustomTool struct {
 // resolution loop) so the index can point the agent at it from any cwd.
 type Skill struct{ Name, Description, Path string }
 
-// CronJob is one parsed cron job entry (shell3.telegram cron list).
-type CronJob struct {
-	Name     string
-	Schedule string
-	Agent    string
-	Prompt   string
-	WorkDir  string
-	Notify   bool
-}
-
-// TelegramConfig is the parsed shell3.telegram{...} block.
-type TelegramConfig struct {
-	Token     string
-	ChatID    string
-	Agent     string
-	WorkDir   string
-	Dashboard DashboardConfig
-}
-
-// DashboardConfig is the parsed shell3.telegram.dashboard{} block.
-type DashboardConfig struct {
-	Enabled bool
-	Addr    string
-	URL     string
-}
-
 type Agent struct {
 	Name, ModelName, Prompt string
 	// PromptCmd, if set, is a shell command whose stdout supplies Prompt; it is
@@ -154,11 +128,17 @@ type LoadedConfig struct {
 	// shell3.welcome). Rendered raw and centered, so it may embed ANSI escapes for
 	// terminal colors. Same wiring path as Theme (→ Snapshot.Welcome → tui).
 	Welcome string
+	// SubagentMaxDepth is the maximum allowed subagent nesting depth, set via
+	// shell3.subagents{ max_depth = N }. 0 means unset; the runtime applies the
+	// default (3) at the read site.
+	SubagentMaxDepth int
+	// BackgroundMaxConcurrent is the maximum number of concurrent background jobs,
+	// set via shell3.background{ max_concurrent = N }. 0 means unset; the runtime
+	// applies the default (8) at the read site.
+	BackgroundMaxConcurrent int
 
 	agents    []Agent
 	subagents []Subagent
-	telegram  TelegramConfig
-	cron      []CronJob
 
 	// onToolCall is the shell3.on_tool_call handler chain (declaration order): each
 	// runs before any tool executes, with the real t.name, and returns a verdict
@@ -310,26 +290,9 @@ func Load(path, workdir string) (*LoadedConfig, error) {
 			}
 		}
 	}
-	for i := range c.cron {
-		if c.cron[i].Schedule == "" {
-			return nil, fmt.Errorf("config: cron job %q has no schedule", c.cron[i].Name)
-		}
-		if c.cron[i].Agent == "" {
-			return nil, fmt.Errorf("config: cron job %q has no agent", c.cron[i].Name)
-		}
-		if _, ok := c.SubagentByName(c.cron[i].Agent); !ok {
-			return nil, fmt.Errorf("config: cron job %q references unknown subagent %q", c.cron[i].Name, c.cron[i].Agent)
-		}
-	}
 	success = true
 	return c, nil
 }
-
-// Telegram returns the parsed shell3.telegram{} block (zero value if absent).
-func (c *LoadedConfig) Telegram() TelegramConfig { return c.telegram }
-
-// Cron returns the parsed cron jobs from shell3.telegram (nil if absent).
-func (c *LoadedConfig) Cron() []CronJob { return c.cron }
 
 // StubNames returns the registered stub-tool names with their redirect
 // messages. The map is config-global (not per-agent); agentsetup appends one

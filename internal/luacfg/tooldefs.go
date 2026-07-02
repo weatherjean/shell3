@@ -69,16 +69,10 @@ var shellInteractiveTool = llm.ToolDefinition{
 
 var bashBgTool = llm.ToolDefinition{
 	Name: "bash_bg",
-	Description: "Spawn a detached background shell command and immediately return its pid + log path. " +
-		"The process runs in its own process group; shell3 does not wait on it. Use this for long-running " +
-		"servers, watchers, or any command that should not block the turn (e.g. `npx some-server`). " +
-		"Output is captured to a log file under .shell3_project/runs/jobs/<id>.jsonl. Manage running jobs with the " +
-		"regular `bash` tool: " +
-		"`cat .shell3_project/runs/jobs/*.status` to list, " +
-		"`tail -n 100 <log>` to inspect output, " +
-		"`kill <pid>` or `kill -- -<pid>` (whole group) to stop, " +
-		"`kill -0 <pid>` to check if alive, " +
-		"`rm <log>` to clean up.",
+	Description: "Start a shell command in the background on the in-process runtime and return a job id immediately. " +
+		"Use this for long-running servers, watchers, or any command that should not block the turn. " +
+		"The host notifies you of completion on a later turn — do not poll. " +
+		"There is no pid, no status file, and no log path; job management is host-side.",
 	Parameters: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -86,6 +80,80 @@ var bashBgTool = llm.ToolDefinition{
 			"workdir": map[string]any{"type": "string", "description": "Working directory; defaults to the project root"},
 		},
 		"required": []string{"command"},
+	},
+}
+
+// TaskTool is the llm.ToolDefinition for the `task` tool: spawns a subagent
+// (child session) that runs in the background and notifies the parent on
+// completion. Exposed via luacfg so agentsetup can append it to the tool schema
+// for any agent that has delegation enabled.
+var TaskTool = llm.ToolDefinition{
+	Name: "task",
+	Description: "Spawn a subagent that runs in the background. Returns immediately — you will be notified " +
+		"of completion on a later turn. Do NOT poll for results. Use this to delegate work to a " +
+		"specialised subagent while you continue with other tasks.",
+	Parameters: map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"subagent_type": map[string]any{
+				"type":        "string",
+				"description": "The subagent type to spawn (one of the names listed in the Delegation context)",
+			},
+			"prompt": map[string]any{
+				"type":        "string",
+				"description": "The task prompt to send to the subagent",
+			},
+			"description": map[string]any{
+				"type":        "string",
+				"description": "A short 3-5 word label describing the task (used in completion notices)",
+			},
+		},
+		"required": []string{"subagent_type", "prompt"},
+	},
+}
+
+// TaskListTool is the llm.ToolDefinition for task_list: lists all running and
+// finished background tasks (subagents and bash_bg commands).
+var TaskListTool = llm.ToolDefinition{
+	Name:        "task_list",
+	Description: "List all background tasks (subagents and bash_bg commands) with their status. Returns running tasks first, then finished ones.",
+	Parameters: map[string]any{
+		"type":       "object",
+		"properties": map[string]any{},
+	},
+}
+
+// TaskStatusTool is the llm.ToolDefinition for task_status: returns one task's
+// status and a truncated result (transcript tail for subagents, output for commands).
+var TaskStatusTool = llm.ToolDefinition{
+	Name:        "task_status",
+	Description: "Get the status and result of a single background task by id (e.g. sub1, bg1). Returns status, type, depth, and a truncated result.",
+	Parameters: map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id": map[string]any{
+				"type":        "string",
+				"description": "The task id returned by the task or bash_bg tool (e.g. sub1, bg1)",
+			},
+		},
+		"required": []string{"id"},
+	},
+}
+
+// TaskCancelTool is the llm.ToolDefinition for task_cancel: cancels a running
+// background task.
+var TaskCancelTool = llm.ToolDefinition{
+	Name:        "task_cancel",
+	Description: "Cancel a running background task by id. No-op if the task is already done.",
+	Parameters: map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id": map[string]any{
+				"type":        "string",
+				"description": "The task id to cancel (e.g. sub1, bg1)",
+			},
+		},
+		"required": []string{"id"},
 	},
 }
 

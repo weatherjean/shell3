@@ -58,6 +58,12 @@ type Parts struct {
 	// configPath is the resolved absolute shell3.lua that produced this Parts;
 	// recorded per session so resume can reload the right config.
 	configPath string
+	// SubagentMaxDepth mirrors LoadedConfig.SubagentMaxDepth (0 = unset; default
+	// applied at the runtime read site).
+	SubagentMaxDepth int
+	// BackgroundMaxConcurrent mirrors LoadedConfig.BackgroundMaxConcurrent (0 =
+	// unset; default applied at newJobManager).
+	BackgroundMaxConcurrent int
 }
 
 // Store returns the file-native runs store (always opened; nil only when the
@@ -76,12 +82,6 @@ func (p *Parts) Root() string { return p.root }
 // ConfigPath returns the resolved absolute shell3.lua path that produced these
 // parts (recorded per session for resume).
 func (p *Parts) ConfigPath() string { return p.configPath }
-
-// Telegram returns the parsed shell3.telegram{} config (zero value if absent).
-func (p *Parts) Telegram() luacfg.TelegramConfig { return p.lc.Telegram() }
-
-// Cron returns the parsed cron jobs from shell3.telegram (nil if absent).
-func (p *Parts) Cron() []luacfg.CronJob { return p.lc.Cron() }
 
 // ModelCount returns the number of declared models.
 func (p *Parts) ModelCount() int { return len(p.lc.Models) }
@@ -166,12 +166,22 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 		toolNames = append(toolNames, t.Name)
 	}
 
-	// An agent delegates by backgrounding a `shell3` subprocess (bash_bg), not
-	// via an in-process tool. The per-session Delegation
-	// context (concrete sink/config/binary paths + the templated spawn command)
-	// is injected by pkg/shell3.Session, which can see session-level paths;
-	// a.Subagents (the allowlist) is surfaced via ActiveAgent.Subagents below so
-	// the Session knows which subagents this agent may spawn.
+	// Inject the `task` tool when the agent has both the Delegation toggle and a
+	// non-empty Subagents allowlist — exactly the same gate that the per-session
+	// delegation reminder uses (pkg/shell3.Session.applyHostReminders →
+	// delegationReminder). The tool and the reminder MUST appear together: one
+	// without the other is a bug (model has a tool with no guidance, or guidance
+	// with no callable tool).
+	if a.Delegation && len(a.Subagents) > 0 {
+		toolDefs = append(toolDefs, luacfg.TaskTool, luacfg.TaskListTool, luacfg.TaskStatusTool, luacfg.TaskCancelTool)
+		toolNames = append(toolNames, luacfg.TaskTool.Name, luacfg.TaskListTool.Name, luacfg.TaskStatusTool.Name, luacfg.TaskCancelTool.Name)
+	}
+
+	// The per-session Delegation context (concrete sink/config/binary paths +
+	// the templated spawn command) is injected by pkg/shell3.Session, which can
+	// see session-level paths; a.Subagents (the allowlist) is surfaced via
+	// ActiveAgent.Subagents below so the Session knows which subagents this
+	// agent may spawn.
 
 	prompt := p.lc.BuildPersonaFor(a)
 
@@ -393,7 +403,10 @@ func BuildParts(opts Options) (*Parts, func(), error) {
 	b.openStore()
 	p := &Parts{lc: b.lc, st: b.st, proxy: b.proxy,
 		log: b.log, root: b.opts.CWD, runsDir: b.l.Runs,
-		configPath: b.configPath}
+		configPath:              b.configPath,
+		SubagentMaxDepth:        b.lc.SubagentMaxDepth,
+		BackgroundMaxConcurrent: b.lc.BackgroundMaxConcurrent,
+	}
 	return p, b.closeAll, nil
 }
 
@@ -447,9 +460,7 @@ func (b *builder) resolvePaths() error {
 // openLog opens the rotating app log. Failure is non-fatal: it warns on stderr
 // (the log itself being unavailable to record it) and falls back to Noop.
 func (b *builder) openLog() {
-	const logMaxBytes = 2 * 1024 * 1024
-	const logArchives = 3
-	log, logCloser, err := applog.Open(b.g.LogFile, logMaxBytes, logArchives)
+	log, logCloser, err := applog.Open(b.g.LogFile, applog.DefaultMaxBytes, applog.DefaultMaxArchives)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "warning: open log file:", err)
 		b.log = applog.Noop{}
@@ -532,31 +543,6 @@ func ResolveConfigPath(flag, homeDir string) (string, error) {
 		return global, nil
 	}
 	return "", fmt.Errorf("no shell3.lua found — run 'shell3 boot' to create one (or pass --config)")
-}
-
-// ResolveTelegramConfigPath returns the shell3.lua the Telegram host should load.
-// Order (telegram-only; do not reorder): the explicit flag, else the dedicated
-// telegram config ~/.shell3/telegram/shell3.lua, else the global
-// ~/.shell3/shell3.lua, else a project-local
-// ./shell3.lua. This deliberately differs from ResolveConfigPath, which the TUI
-// and other front-ends keep using (project-local first).
-func ResolveTelegramConfigPath(flag, cwd, homeDir string) (string, error) {
-	if flag != "" {
-		return flag, nil
-	}
-	telegram := filepath.Join(homeDir, ".shell3", "telegram", "shell3.lua")
-	if fileExists(telegram) {
-		return telegram, nil
-	}
-	global := filepath.Join(homeDir, ".shell3", "shell3.lua")
-	if fileExists(global) {
-		return global, nil
-	}
-	local := filepath.Join(cwd, "shell3.lua")
-	if fileExists(local) {
-		return local, nil
-	}
-	return "", fmt.Errorf("no shell3.lua found — run 'shell3 boot --telegram' to create one (or pass --config)")
 }
 
 func fileExists(p string) bool {
