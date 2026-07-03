@@ -52,6 +52,9 @@ func TestBackground_NavigateAndViewOutput(t *testing.T) {
 	if m.bgViewID != "bg_bbb" {
 		t.Fatalf("enter should open the selected job's output, got %q", m.bgViewID)
 	}
+	if m.bgIsTranscript {
+		t.Fatal("command job output should not use the transcript branch")
+	}
 	if !strings.Contains(stripANSI(m.View().Content), "hello from bbb") {
 		t.Fatalf("output view should show the job log:\n%s", stripANSI(m.View().Content))
 	}
@@ -122,13 +125,14 @@ func TestBackground_OutputWrapsLongLines(t *testing.T) {
 }
 
 func TestBackground_RendersSubagentTranscript(t *testing.T) {
+	// Transcript is now messages.jsonl format (llm.Message records per line).
 	raw := strings.Join([]string{
-		`{"kind":"assistant_reasoning","text":"pondering the question"}`,
-		`{"kind":"tool_call","tool":"bash","input":"{\"command\":\"ls\"}"}`,
-		`{"kind":"assistant_message","role":"assistant","text":"the answer is **42**"}`,
+		`{"role":"assistant","reasoning_content":"pondering the question","tool_calls":[{"ID":"c1","Name":"bash","RawArgs":"{\"command\":\"ls\"}"}]}`,
+		`{"role":"tool","content":"file1.go\nfile2.go","name":"bash","tool_call_id":"c1"}`,
+		`{"role":"assistant","content":"the answer is **42**"}`,
 	}, "\n")
 	fc := &fakeCmds{
-		jobs:          []shell3.JobInfo{{ID: "bg_sub", Cmd: "shell3 run --out /x.jsonl", PID: 1}},
+		jobs:          []shell3.JobInfo{{ID: "bg_sub", Cmd: "describe-42", Kind: shell3.JobSubagent, PID: 1}},
 		jobTranscript: map[string]string{"bg_sub": raw},
 	}
 	m := newModel(closedSend(nil), fc, "main", "")
@@ -139,7 +143,7 @@ func TestBackground_RendersSubagentTranscript(t *testing.T) {
 		t.Fatal("a job with a transcript should render structured, not stdout")
 	}
 	plain := stripANSI(m.View().Content)
-	for _, want := range []string{"thinking", "pondering the question", "bash", "42"} {
+	for _, want := range []string{"thinking", "pondering the question", "bash", "42", "file1.go"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("transcript modal missing %q in:\n%s", want, plain)
 		}
@@ -152,9 +156,9 @@ func TestBackground_TranscriptHardWrapsLongTokens(t *testing.T) {
 	// re-wrap it into extra terminal rows, desyncing the one-row-per-element scroll
 	// and height math. Every row must be hard-wrapped to the content width.
 	longTok := strings.Repeat("x", 200)
-	raw := `{"kind":"assistant_message","role":"assistant","text":"see ` + longTok + ` end"}`
+	raw := `{"role":"assistant","content":"see ` + longTok + ` end"}`
 	fc := &fakeCmds{
-		jobs:          []shell3.JobInfo{{ID: "bg_sub", Cmd: "shell3 run --out /x.jsonl", PID: 1}},
+		jobs:          []shell3.JobInfo{{ID: "bg_sub", Cmd: "task", Kind: shell3.JobSubagent, PID: 1}},
 		jobTranscript: map[string]string{"bg_sub": raw},
 	}
 	m := newModel(closedSend(nil), fc, "main", "")
@@ -251,9 +255,86 @@ func TestBackground_MouseWheelScrolls(t *testing.T) {
 func TestBackground_EmptyList(t *testing.T) {
 	m, _ := bgModel(nil, nil)
 	m.openBackground()
-	if !strings.Contains(stripANSI(m.View().Content), "no running background jobs") {
+	if !strings.Contains(stripANSI(m.View().Content), "no background jobs") {
 		t.Fatalf("empty modal should say so:\n%s", stripANSI(m.View().Content))
 	}
 	// ctrl+x with nothing selected is a no-op (no panic, no kill).
 	m.Update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
+}
+
+// TestBackground_DoneJobShowsStatusLabel verifies that a finished job renders
+// "✓ done" (zero exit) or "✗ error" (non-zero exit) in the modal list.
+func TestBackground_DoneJobShowsStatusLabel(t *testing.T) {
+	exitZero, exitOne := 0, 1
+	jobs := []shell3.JobInfo{
+		{ID: "bg_ok", Cmd: "ok-cmd", PID: 1, Done: true, Exit: &exitZero},
+		{ID: "bg_err", Cmd: "err-cmd", PID: 2, Done: true, Exit: &exitOne},
+		{ID: "bg_run", Cmd: "run-cmd", PID: 3, Done: false},
+	}
+	m, _ := bgModel(jobs, nil)
+	m.openBackground()
+	plain := stripANSI(m.View().Content)
+	if !strings.Contains(plain, "✓ done") {
+		t.Fatalf("done job with exit 0 should show '✓ done':\n%s", plain)
+	}
+	if !strings.Contains(plain, "✗ error") {
+		t.Fatalf("done job with non-zero exit should show '✗ error':\n%s", plain)
+	}
+	// Running job should not show either label.
+	if strings.Count(plain, "✓ done") != 1 || strings.Count(plain, "✗ error") != 1 {
+		t.Fatalf("unexpected label counts in:\n%s", plain)
+	}
+}
+
+// TestBackground_DoneSubagentTranscriptViewable verifies that selecting a done
+// subagent job and pressing enter opens its transcript.
+func TestBackground_DoneSubagentTranscriptViewable(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"role":"assistant","content":"done answer"}`,
+	}, "\n")
+	fc := &fakeCmds{
+		jobs: []shell3.JobInfo{
+			{ID: "sub1", Cmd: "task", Kind: shell3.JobSubagent, PID: 0, Done: true},
+		},
+		jobTranscript: map[string]string{"sub1": raw},
+	}
+	m := newModel(closedSend(nil), fc, "main", "")
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.openBackground()
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.bgViewID != "sub1" {
+		t.Fatalf("enter should open the done subagent job, got %q", m.bgViewID)
+	}
+	plain := stripANSI(m.View().Content)
+	if !strings.Contains(plain, "done answer") {
+		t.Fatalf("done subagent transcript not shown:\n%s", plain)
+	}
+}
+
+// TestBackground_TickRefreshesJobListWhenOpen verifies that a bgPollTickMsg
+// while the modal is open refreshes m.bgJobs to reflect newly-finished jobs.
+func TestBackground_TickRefreshesJobListWhenOpen(t *testing.T) {
+	runningJob := shell3.JobInfo{ID: "bg1", Cmd: "run", PID: 1, Done: false}
+	fc := &fakeCmds{jobs: []shell3.JobInfo{runningJob}}
+	m := newModel(closedSend(nil), fc, "main", "")
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.openBackground()
+
+	// Initially the job is running.
+	if len(m.bgJobs) != 1 || m.bgJobs[0].Done {
+		t.Fatalf("expected one running job, got %+v", m.bgJobs)
+	}
+
+	// Simulate the job finishing: update fc.jobs to report Done=true.
+	exitCode := 0
+	fc.jobs = []shell3.JobInfo{
+		{ID: "bg1", Cmd: "run", PID: 1, Done: true, Exit: &exitCode},
+	}
+
+	// Fire a bgPollTickMsg — the handler should refresh m.bgJobs.
+	m.Update(bgPollTickMsg{})
+
+	if len(m.bgJobs) != 1 || !m.bgJobs[0].Done {
+		t.Fatalf("after tick, bgJobs should show Done=true, got %+v", m.bgJobs)
+	}
 }

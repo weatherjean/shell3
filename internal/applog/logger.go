@@ -14,6 +14,18 @@ import (
 	"time"
 )
 
+// Rotation bounds for the shared global app log. Every opener of that file
+// (agentsetup's runtime logger, the ACP command's slog writer, ...) MUST use
+// these same constants: rotation happens at open time by renaming the path, so
+// two openers with different bounds could rotate the file out from under each
+// other's file descriptor, sending lines to an orphaned inode.
+const (
+	// DefaultMaxBytes is the size beyond which the log is rotated at open.
+	DefaultMaxBytes = 2 * 1024 * 1024
+	// DefaultMaxArchives is how many rotated archives (.1, .2, …) are kept.
+	DefaultMaxArchives = 3
+)
+
 // Logger is the application-wide logging interface. Fields are key/value
 // pairs: logger.Warn("msg", "key", val, "key2", val2).
 type Logger interface {

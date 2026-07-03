@@ -499,6 +499,85 @@ func TestRefreshPromptFor_Subagent(t *testing.T) {
 	}
 }
 
+// writeSubagentConfigWithDelegation writes a config with an agent that has both
+// a subagent allowlist AND delegation=true, so the `task` tool gate fires.
+func writeSubagentConfigWithDelegation(t *testing.T, dir string) {
+	t.Helper()
+	lua := `
+shell3.model("main", {
+  base_url = "https://example.test/v1",
+  api_key = shell3.env.secret("TEST_KEY"),
+  model = "test-model",
+  context_window = 1000,
+})
+local r = shell3.subagent({ name = "researcher", description = "investigate things", model = "main", prompt = "you are a researcher", tools = { bash = true } })
+shell3.agent({ name = "code", model = "main", prompt = "you are a coder", tools = { bash = true, subagents = { r } }, delegation = true })
+`
+	if err := os.WriteFile(filepath.Join(dir, "shell3.lua"), []byte(lua), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("TEST_KEY=sk-test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestAgentRuntime_TaskToolInSchema proves the invariant: the `task` tool
+// appears in an agent's schema iff it has delegation=true AND a non-empty
+// Subagents allowlist (the identical gate the delegation reminder uses).
+func TestAgentRuntime_TaskToolInSchema(t *testing.T) {
+	// --- Agent WITH delegation=true + subagents: task + management tools must be in schema ---
+	tmp := t.TempDir()
+	writeSubagentConfigWithDelegation(t, tmp)
+	parts, cleanup, err := agentsetup.BuildParts(agentsetup.Options{
+		ConfigPath: filepath.Join(tmp, "shell3.lua"),
+		CWD:        tmp,
+		HomeDir:    t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("BuildParts: %v", err)
+	}
+	defer cleanup()
+
+	rt, err := parts.AgentRuntime("code")
+	if err != nil {
+		t.Fatalf("AgentRuntime(code): %v", err)
+	}
+	toolSet := make(map[string]bool)
+	for _, td := range rt.Personality.Tools {
+		toolSet[td.Name] = true
+	}
+	for _, want := range []string{"task", "task_list", "task_status", "task_cancel"} {
+		if !toolSet[want] {
+			t.Errorf("agent with delegation=true + subagents should have %q in its tool schema", want)
+		}
+	}
+
+	// --- Agent WITHOUT subagents (minimal config): management tools must NOT be in schema ---
+	tmp2 := t.TempDir()
+	writeMinimalConfig(t, tmp2)
+	parts2, cleanup2, err := agentsetup.BuildParts(agentsetup.Options{
+		ConfigPath: filepath.Join(tmp2, "shell3.lua"),
+		CWD:        tmp2,
+		HomeDir:    t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("BuildParts2: %v", err)
+	}
+	defer cleanup2()
+
+	rt2, err := parts2.AgentRuntime("tester")
+	if err != nil {
+		t.Fatalf("AgentRuntime2(tester): %v", err)
+	}
+	for _, td := range rt2.Personality.Tools {
+		for _, mgmt := range []string{"task", "task_list", "task_status", "task_cancel"} {
+			if td.Name == mgmt {
+				t.Errorf("agent with no subagents should NOT have %q in its tool schema", mgmt)
+			}
+		}
+	}
+}
+
 // TestAgentRuntime_UnknownErrors asserts that AgentRuntime returns an error for
 // a name in neither the agent nor the subagent registry.
 func TestAgentRuntime_UnknownErrors(t *testing.T) {
@@ -517,46 +596,5 @@ func TestAgentRuntime_UnknownErrors(t *testing.T) {
 func TestVerdictActionIotaAlignment(t *testing.T) {
 	if int(chat.Run) != int(luacfg.ActionRun) || int(chat.Block) != int(luacfg.ActionBlock) || int(chat.Ask) != int(luacfg.ActionAsk) {
 		t.Fatal("chat and luacfg ToolCallAction iota orders must stay aligned (agentsetup casts between them)")
-	}
-}
-
-func TestResolveTelegramConfigPath(t *testing.T) {
-	home := t.TempDir()
-	cwd := t.TempDir()
-	tgDir := filepath.Join(home, ".shell3", "telegram")
-	if err := os.MkdirAll(tgDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	tgCfg := filepath.Join(tgDir, "shell3.lua")
-	globalCfg := filepath.Join(home, ".shell3", "shell3.lua")
-	localCfg := filepath.Join(cwd, "shell3.lua")
-	write := func(p string) {
-		if err := os.WriteFile(p, []byte("-- x"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	// Explicit flag always wins.
-	if got, err := agentsetup.ResolveTelegramConfigPath("/explicit/x.lua", cwd, home); err != nil || got != "/explicit/x.lua" {
-		t.Fatalf("flag: got %q err %v", got, err)
-	}
-	// Nothing exists yet -> error.
-	if _, err := agentsetup.ResolveTelegramConfigPath("", cwd, home); err == nil {
-		t.Fatal("expected error when no config exists")
-	}
-	// Only project-local exists -> it.
-	write(localCfg)
-	if got, _ := agentsetup.ResolveTelegramConfigPath("", cwd, home); got != localCfg {
-		t.Fatalf("local: got %q want %q", got, localCfg)
-	}
-	// Global beats project-local.
-	write(globalCfg)
-	if got, _ := agentsetup.ResolveTelegramConfigPath("", cwd, home); got != globalCfg {
-		t.Fatalf("global: got %q want %q", got, globalCfg)
-	}
-	// Telegram dir beats everything (except an explicit flag).
-	write(tgCfg)
-	if got, _ := agentsetup.ResolveTelegramConfigPath("", cwd, home); got != tgCfg {
-		t.Fatalf("telegram: got %q want %q", got, tgCfg)
 	}
 }

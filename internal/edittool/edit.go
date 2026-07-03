@@ -1,6 +1,7 @@
 package edittool
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/aymanbagabas/go-udiff"
+	"github.com/weatherjean/shell3/internal/fsx"
 )
 
 // Result reports what an edit/write produced so callers can render stats.
@@ -26,57 +28,42 @@ type Result struct {
 // the replacement is also written CRLF.
 //
 // workDir resolves a relative filePath.
-func EditFile(workDir, filePath, oldString, newString string, replaceAll bool) (Result, error) {
+func EditFile(ctx context.Context, fs fsx.FileSystem, workDir, filePath, oldString, newString string, replaceAll bool) (Result, error) {
 	if filePath == "" {
 		return Result{}, errors.New("file_path is required")
 	}
 	abs := resolvePath(workDir, filePath)
 
 	if oldString == "" {
-		var oldContent string
-		created := true
-		mode := os.FileMode(0o644) // default for newly created files
-		if info, err := os.Stat(abs); err == nil {
-			if info.IsDir() {
-				return Result{}, fmt.Errorf("path is a directory: %s", abs)
-			}
-			raw, rerr := os.ReadFile(abs)
-			if rerr != nil {
-				return Result{}, rerr
-			}
-			oldContent = string(raw)
+		oldContent, rerr := fs.ReadTextFile(ctx, abs)
+		created := false
+		switch {
+		case rerr == nil:
 			created = false
-			mode = info.Mode().Perm() // preserve the existing file's mode on overwrite
-		} else if !os.IsNotExist(err) {
-			return Result{}, fmt.Errorf("stat %s: %w", abs, err)
+		case errors.Is(rerr, os.ErrNotExist):
+			oldContent, created = "", true
+		case errors.Is(rerr, fsx.ErrIsDir):
+			return Result{}, fmt.Errorf("path is a directory: %s", abs)
+		default:
+			return Result{}, rerr
 		}
-		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-			return Result{}, err
-		}
-		if err := os.WriteFile(abs, []byte(newString), mode); err != nil {
+		if err := fs.WriteTextFile(ctx, abs, newString); err != nil {
 			return Result{}, err
 		}
 		add, del := lineStats(oldContent, newString)
 		return Result{Path: abs, OldContent: oldContent, NewContent: newString, Created: created, Additions: add, Deletions: del}, nil
 	}
 
-	info, err := os.Stat(abs)
+	original, err := fs.ReadTextFile(ctx, abs)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return Result{}, fmt.Errorf("file %s not found", abs)
+		}
+		if errors.Is(err, fsx.ErrIsDir) {
+			return Result{}, fmt.Errorf("path is a directory, not a file: %s", abs)
 		}
 		return Result{}, err
 	}
-	if info.IsDir() {
-		return Result{}, fmt.Errorf("path is a directory, not a file: %s", abs)
-	}
-
-	raw, err := os.ReadFile(abs)
-	if err != nil {
-		return Result{}, err
-	}
-	original := string(raw)
-	mode := info.Mode().Perm()
 	ending := detectLineEnding(original)
 	normalized := normalizeLineEndings(original)
 	old := convertToLineEnding(normalizeLineEndings(oldString), ending)
@@ -99,7 +86,7 @@ func EditFile(workDir, filePath, oldString, newString string, replaceAll bool) (
 	if rerr != nil {
 		return Result{}, rerr
 	}
-	if err := os.WriteFile(abs, []byte(updated), mode); err != nil {
+	if err := fs.WriteTextFile(ctx, abs, updated); err != nil {
 		return Result{}, err
 	}
 	add, del := lineStats(original, updated)

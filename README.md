@@ -11,10 +11,10 @@ platform.
 ![shell3 TUI demo](docs/tui-demo.gif)
 
 ```sh
-shell3                                  # interactive session (TUI)
-shell3 "explain the failing test"       # one-shot, prints and exits
-git diff | shell3 "write a commit msg"  # reads stdin like any filter
-shell3 "audit deps" --out audit.jsonl   # headless, with a JSONL audit log
+shell3                                           # interactive session (TUI)
+shell3 run "explain the failing test"            # one-shot, prints and exits
+git diff | shell3 run                            # stdin is the prompt — pipes like a filter
+shell3 run "audit deps" --out audit.jsonl        # headless, with a JSONL audit log
 ```
 
 ## Install
@@ -64,7 +64,8 @@ commands. Full walkthrough in [docs/cli.md](docs/cli.md).
   agent and a read-only `plan` agent (or your own) with `Tab` or `/agent`,
   keeping history.
 - **Bash-first, unsafe by default.** The agent acts through `bash`, `read`,
-  `list_files`, and `edit_file`; everything else is a command it runs (`read` +
+  `list_files`, and `edit_file` — plus `read_media` for images and audio on
+  multimodal models; everything else is a command it runs (`read` +
   `list_files` alone make a fully read-only agent that needs no shell). The
   single opt-in hook is `shell3.on_tool_call(fn)` — chainable, verdict-based
   (block / rewrite / runner-swap / ask a human); denylists use `shell3.regex`.
@@ -79,21 +80,20 @@ commands. Full walkthrough in [docs/cli.md](docs/cli.md).
   library via [`pkg/shell3`](pkg/shell3) — one-shot, persistent session, or a
   multi-session runtime for an always-on bot.
 
-## Telegram bot
+## ACP (editors & chat bridges)
 
-shell3 ships an always-on personal agent you talk to over Telegram, for using it
-from your phone. One bot, tied to your chat, running a single agent on a host you
-control:
+shell3 implements the [Agent Client Protocol](https://agentclientprotocol.com) —
+run it as a stdio ACP server and any ACP-capable editor or bridge (Zed, OpenACP)
+can open sessions, stream responses, switch agents, and handle permission
+requests:
 
 ```sh
-shell3 boot --telegram     # scaffold a Telegram host config
-shell3 telegram            # run it on a machine that stays up
+shell3 acp                     # ACP server on stdin/stdout
+shell3 acp --agent plan        # start new sessions on the "plan" agent
 ```
 
-It speaks in short, mobile-friendly replies, keeps durable memory across chats,
-can schedule its own recurring jobs (cron), and can edit and `reload` its own
-config live without a restart. An optional read-only dashboard (a Telegram Mini
-App) shows sessions, usage, and jobs. See [docs/telegram.md](docs/telegram.md).
+See [docs/acp.md](docs/acp.md) for the quickstart, supported methods, permissions
+mapping, and known limitations.
 
 ## Documentation
 
@@ -103,8 +103,8 @@ App) shows sessions, usage, and jobs. See [docs/telegram.md](docs/telegram.md).
   `Session`, `Runtime`, subagents.
 - **[CLI & headless](docs/cli.md)** — scripting, the `--out` audit log, the
   read-only query commands, slash commands.
-- **[Telegram bot](docs/telegram.md)** — the personal Telegram front-end and
-  scheduled jobs.
+- **[ACP front-end](docs/acp.md)** — editor and bridge integration via the Agent
+  Client Protocol.
 - **[Security & data](docs/security.md)** — the threat model, secrets, and
   removing shell3's data.
 - **[Cookbook](docs/cookbook/README.md)** — drop-in recipes: extra agents,
@@ -115,7 +115,7 @@ App) shows sessions, usage, and jobs. See [docs/telegram.md](docs/telegram.md).
 shell3 runs model-chosen shell commands and is **unsafe by default** — a full,
 unrestricted shell with no approval prompt until you opt in. The single hook is
 `shell3.on_tool_call(fn)`: chainable, verdict-based (block / rewrite / runner-swap /
-ask a human via `y/N` in the TUI or inline buttons on Telegram). Denylists use
+ask a human via `y/N` in the TUI or `session/request_permission` over ACP). Denylists use
 `shell3.regex` (Go RE2, compiled at load). Run it in a sandbox, container, or
 throwaway user if you need hard isolation, and read
 [docs/security.md](docs/security.md) before pointing it at anything you care

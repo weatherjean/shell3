@@ -17,8 +17,8 @@ import (
 // Makefile derives it from the latest git tag); "dev" for a plain go build.
 var version = "dev"
 
-// main wires the cobra command tree (interactive root + run/boot/telegram/
-// read-session subcommands) and executes it.
+// main wires the cobra command tree (interactive root + run/boot/
+// read-session/acp subcommands) and executes it.
 func main() {
 	root := &cobra.Command{
 		Use:     "shell3",
@@ -51,8 +51,8 @@ func main() {
 	}
 	root.AddCommand(newRunCommand())
 	root.AddCommand(newBootCommand())
-	root.AddCommand(newTelegramCommand())
 	root.AddCommand(newReadSessionCommand())
+	root.AddCommand(newAcpCommand())
 
 	// Print the brand header for subcommands and --help (TTY only). Root chat
 	// suppresses it — it renders its own banner.

@@ -16,8 +16,8 @@ import (
 // the underlying store session id without going through internal helpers.
 type Session struct {
 	// msgMu guards the cross-goroutine append-vs-read on messages: the turn
-	// goroutine appends while a second reader — the Telegram dashboard polling
-	// History() — copies the slice concurrently. The turn loop's own reads stay
+	// goroutine appends while a second reader (e.g. a front-end polling
+	// History()) copies the slice concurrently. The turn loop's own reads stay
 	// lock-free. Kept separate from inboxMu to avoid a lock-order coupling.
 	msgMu    sync.RWMutex
 	messages []llm.Message

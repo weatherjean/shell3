@@ -78,7 +78,7 @@ func ExampleSession_Snapshot() {
 }
 
 // ExampleNewRuntime shows the always-on host shape: one Runtime rooted at an
-// agent home, multiple named sessions (e.g. one per Telegram chat), each with
+// agent home, multiple named sessions (e.g. one per client connection), each with
 // its own history, agent, and optional workdir.
 func ExampleNewRuntime() {
 	rt, err := shell3.NewRuntime(shell3.RuntimeSpec{WorkDir: "/home/me/assistant"})

@@ -17,14 +17,11 @@ import (
 )
 
 type runFlags struct {
-	configPath    string
-	outPath       string
-	agent         string
-	id            string
-	prompt        string
-	resume        string
-	parentSession string
-	inbox         string
+	configPath string
+	outPath    string
+	agent      string
+	prompt     string
+	resume     string
 }
 
 func newRunCommand() *cobra.Command {
@@ -50,11 +47,8 @@ func newRunCommand() *cobra.Command {
 	cmd.Flags().StringVarP(&f.configPath, "config", "c", "", "Config name (→ ~/.shell3/<name>.lua) or path to a *.lua file (default: ~/.shell3/shell3.lua)")
 	cmd.Flags().StringVar(&f.outPath, "out", "", "Stream a JSONL audit log of this run to <path>")
 	cmd.Flags().StringVar(&f.agent, "agent", "", "Select the active agent by name (default: first declared). May also name a registered subagent")
-	cmd.Flags().StringVar(&f.id, "id", "", "Caller-chosen id for this run (conventionally the transcript filename stem)")
 	cmd.Flags().StringVar(&f.prompt, "prompt", "", "The prompt for this run (alternative to positional args / stdin)")
 	cmd.Flags().StringVar(&f.resume, "resume", "", "Resume a stored session by id: reload its messages and continue the conversation")
-	cmd.Flags().StringVar(&f.parentSession, "parent-session", "", "Session id this run reports completion to (the spawning agent)")
-	cmd.Flags().StringVar(&f.inbox, "inbox", "", "Absolute inbox.jsonl path to append this run's completion pointer to (the parent's inbox); defaults to this run's own project inbox")
 	return cmd
 }
 
@@ -76,16 +70,13 @@ func runHeadless(ctx context.Context, f *runFlags, input string) error {
 	}
 
 	spec := shell3.Spec{
-		Prompt:        input,
-		ConfigPath:    resumedCfg,
-		WorkDir:       cwd,
-		Agent:         f.agent,
-		Interactive:   false,
-		OutPath:       f.outPath,
-		ID:            f.id,
-		ResumeID:      f.resume,
-		ParentSession: f.parentSession,
-		ReportInbox:   f.inbox,
+		Prompt:      input,
+		ConfigPath:  resumedCfg,
+		WorkDir:     cwd,
+		Agent:       f.agent,
+		Interactive: false,
+		OutPath:     f.outPath,
+		ResumeID:    f.resume,
 	}
 	return tui.RunOnce(ctx, spec)
 }

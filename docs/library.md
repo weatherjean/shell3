@@ -70,29 +70,79 @@ A long-lived host runs a single select loop over `rt.Events()`. The key ideas:
 - **Media.** Inbound images and audio ride along as `Part` attachments, exactly
   as with `SendParts`.
 
-This is the machinery behind the built-in Telegram host — see
-[telegram.md](telegram.md).
+This is the machinery behind front-ends like the ACP server (`shell3 acp`) — see
+[acp.md](acp.md).
+
+## The job-progress stream: `JobEvents`
+
+`Runtime.JobEvents()` and `Session.JobEvents()` expose one unified stream of
+`JobProgress` events covering every background job — `task` subagents and
+`bash_bg` commands alike. Each event carries the job id, kind, and title, plus
+either an incremental rendered text `Chunk` (while the job runs) or `Done` with
+the capped result `Summary` (subagent jobs only). The TUI `:background` modal
+live-tails this stream, and the ACP front-end renders each job as its own
+live-updating tool-call card — both are built on the same channel, and an
+embedder can be too.
+
+## Pluggable file I/O: `SessionOpts.FS`
+
+`SessionOpts.FS` accepts a `FileSystem` (re-exported from `internal/fsx`) that
+backs the session's `read` and `edit_file` tools. The default is direct disk;
+the ACP front-end swaps in an editor-buffer backend so reads see unsaved buffers
+and writes flow through the editor. `bash` is unaffected — it always hits disk
+directly.
+
+## Reloading config in place: `Runtime.Reload`
+
+`Runtime.Reload()` re-reads the config file the runtime was built from and
+applies it without restarting the process — the host-side entry behind the
+`/reload` command. It validates first: on any error the running config is left
+untouched and nothing changes. Live sessions keep their identity and history;
+the caller must ensure no turn is in flight. Returns a `ReloadResult` (agent
+and model counts, human-readable notes).
+
+## Host-driven dispatch: `Session.Dispatch`
+
+`Session.Dispatch(agent, prompt, DispatchOpts)` runs an agent from the host —
+not from a model turn — and reports the result back into the session as an
+operator notice, without starting a hidden model turn. It's the hook for
+host-side triggers such as an external scheduler (cron). `DispatchOpts` sets
+the working directory, a label that tags the delivered result (e.g.
+`"cron:nightly"`), and `Notify`: a successful run is delivered only when
+`Notify` is true, while a failed run **always** delivers, so a quiet background
+job can never fail silently.
+
+## Session introspection and host tools
+
+A `Session` exposes the programmatic equivalents of the slash commands:
+`Snapshot` (a point-in-time view of state and context usage), `History` (the
+conversation entries), `Prune(id)` (drop one message from context), `Clear`,
+`Rollback`, and `SwitchAgent(name)`. `RegisterHostTool` adds a Go-implemented
+tool (name, JSON-schema parameters, and a handler func) to the session's schema
+before the first turn — it complements Lua custom tools and dispatches through
+the same path.
 
 ## Subagents
 
-Subagents are a convention, not a subsystem. You declare a specialist with
-`shell3.subagent{ name, description, … }` and list it on an agent via
-`tools = { subagents = { … } }`. shell3 then injects a `## Delegation` fragment
-into that agent's prompt containing the exact `bash_bg` command to spawn one.
+Subagents are **in-process background jobs**, not subprocess forks. Declare a
+specialist with `shell3.subagent{ name, description, … }` and list it on an
+agent via `tools = { subagents = { … } }` with `delegation = true`. shell3 then
+advertises the `task`, `task_list`, `task_status`, and `task_cancel` tools to
+that agent.
 
-When the agent delegates, a subagent is simply a **backgrounded `shell3`
-subprocess** running the chosen agent on a self-contained task. Subagents are
-**fire-and-forget**: when one finishes it appends a single completion pointer
-line to the project's `.shell3_project/inbox.jsonl` and exits — there is no
-socket, no liveness tracking, and no dormant-parent revive.
+When the agent calls `task{ subagent_type, prompt, description }` the call
+returns immediately; the runtime (`pkg/shell3` jobManager) runs the child as a
+goroutine under a concurrency cap (`shell3.background{ max_concurrent = N }`,
+default 8). On completion the jobManager **wakes the parent session with a capped
+result summary** injected into its next turn — there is no subprocess, no
+`.shell3_project/inbox.jsonl`, and no fsnotify watch. The parent acts on the
+summary directly and never polls.
 
-The live host holds one `fsnotify` watch on that inbox (offset-persisted, so each
-pointer is delivered exactly once across restarts) and turns each pointer into a
-short notification — the subagent's result summary inline, plus a transcript path
-the parent `cat`s only if it needs the full detail — then wakes the next turn.
-The parent never polls; it gets told. A subagent that itself needs children just
-runs them with plain blocking `bash` + `wait`, so delegation composes multiple
-levels deep with no extra machinery.
+Delegation is **single-level**: a subagent is not given the `task` tool.
+Recursion depth is capped by `shell3.subagents{ max_depth = N }` (default 3).
+`task_list` / `task_status <id>` / `task_cancel <id>` manage running jobs (ids
+look like `sub1`, `bg1`). The TUI `:background` modal shows all running and
+recently finished jobs live; the footer `bg: N` pill counts only running ones.
 
 ## The TUI rides the same rails
 

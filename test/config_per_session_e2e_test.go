@@ -76,7 +76,7 @@ shell3.agent({ name = "tester", model = "fake", prompt = "you are a test", tools
 
 	// 1. Create the session under config A. This records config_path = cfgA in the
 	// run's meta.json.
-	out, err := run(workDir, "run", "-c", cfgA, "--agent", "tester", "--id", "a1", "--prompt", "be the parent")
+	out, err := run(workDir, "run", "-c", cfgA, "--agent", "tester", "--prompt", "be the parent")
 	if err != nil {
 		t.Fatalf("seed run failed: %v\n%s", err, out)
 	}

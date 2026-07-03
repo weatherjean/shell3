@@ -16,6 +16,12 @@ import (
 // a two-pane overlay: a list view, and an output view for the selected job. All
 // keys route here while it is open (see handleKey).
 
+// bgLiveTailCap is the maximum byte length of m.bgOutput during a live raw-mode
+// view. It matches the ring buffer size in jobs.go (newRingBuffer(64*1024)) so
+// unbounded growth is impossible: when exceeded, the front is trimmed to keep the
+// most-recent 64 KB — the same tail-keeping semantics the ring uses.
+const bgLiveTailCap = 64 * 1024
+
 // openBackground snapshots the live jobs and opens the modal in its list view.
 func (m *model) openBackground() {
 	if m.cmds == nil {
@@ -191,6 +197,43 @@ func (m *model) killTargetJob() {
 	m.bgScroll = 0
 }
 
+// handleJobProgress processes one event from the job-progress bus. It keeps the
+// bg:N footer pill up-to-date and, when the :background modal is open and
+// displaying the job's raw stdout view, live-appends the chunk so the user sees
+// output stream in without pressing 'r'. Transcript views are left untouched
+// (appending raw chunk text into structured JSONL would corrupt the render).
+func (m *model) handleJobProgress(p shell3.JobProgress) tea.Cmd {
+	// Update the pill on Done events (running count may have changed).
+	if p.Done && m.cmds != nil {
+		jobs := m.cmds.Jobs()
+		m.bgCount = countRunningJobs(jobs)
+		if m.bgOpen {
+			m.bgJobs = jobs
+			m.clampJobSel()
+			// If we were viewing this job in raw mode, reload its final output from
+			// the ring buffer so the view is authoritative and complete.
+			if m.bgViewID == p.JobID && !m.bgIsTranscript {
+				m.loadJobOutput(m.bgViewID)
+			}
+		}
+		return nil
+	}
+	// Live-append chunk only when the modal is open, viewing this job, in raw mode.
+	if p.Chunk != "" && m.bgOpen && m.bgViewID == p.JobID && !m.bgIsTranscript {
+		m.bgOutput += p.Chunk
+		// Cap to bgLiveTailCap by trimming from the front (tail-preserving, matching
+		// the ring buffer semantics). Byte-trim is intentional — no rune/ANSI boundary
+		// logic, consistent with how the ring itself trims.
+		if len(m.bgOutput) > bgLiveTailCap {
+			m.bgOutput = m.bgOutput[len(m.bgOutput)-bgLiveTailCap:]
+		}
+		// Invalidate the memoized row cache so bgWrappedLines recomputes on the
+		// next render (same mechanism as loadJobOutput — nil bgRows triggers a reflow).
+		m.bgRows = nil
+	}
+	return nil
+}
+
 // refreshJobs re-snapshots the live job list, clamping the selection.
 func (m *model) refreshJobs() {
 	m.bgJobs = m.cmds.Jobs()
@@ -226,7 +269,7 @@ func (m *model) backgroundBox() string {
 	w := m.modalWidth(m.width*3/4, 100)
 	rows := []string{stBrand.Render("background jobs"), ""}
 	if len(m.bgJobs) == 0 {
-		rows = append(rows, stFgDim.Render("no running background jobs"))
+		rows = append(rows, stFgDim.Render("no background jobs"))
 	} else {
 		// Window the list around the selection so a long list never overflows.
 		maxRows := m.bgModalHeight()
@@ -258,21 +301,41 @@ func (m *model) backgroundBox() string {
 	return bgPanel(w).Render(strings.Join(rows, "\n"))
 }
 
-// jobRow renders one job line: a selection bar, id, age, pid, and the command.
+// jobRow renders one job line: a selection bar, id, age, pid, state, and
+// label. Finished jobs show "✓ done" or "✗ error"; running jobs show nothing.
+// Subagent jobs are prefixed with "@subagent"; nested jobs get an indented
+// label with a depth marker (e.g. "  (depth 2)") so the user can see the
+// nesting level at a glance.
 func (m *model) jobRow(j shell3.JobInfo, selected bool, w int) string {
 	bar := "  "
 	if selected {
 		bar = stBar.Render("▌") + " "
 	}
 	meta := stDim.Render(fmt.Sprintf("%s  %-4s pid %d  ", j.ID, shortAge(j.StartedAt), j.PID))
-	cmd := strings.Join(strings.Fields(j.Cmd), " ")
-	// Fit the whole row (bar + meta + cmd) within the box content width, leaving
-	// margin for the selection bar and padding so no row wraps to a second line.
-	avail := w - lipgloss.Width(meta) - 6
+
+	var state string
+	if j.Done {
+		if j.Exit != nil && *j.Exit != 0 {
+			state = stErr.Render("✗ error") + " "
+		} else {
+			state = stInfo.Render("✓ done") + " "
+		}
+	}
+
+	label := strings.Join(strings.Fields(j.Cmd), " ")
+	if j.Kind == shell3.JobSubagent {
+		label = "@subagent " + label
+	}
+	if j.Depth > 0 {
+		label = strings.Repeat("  ", j.Depth) + label + fmt.Sprintf("  (depth %d)", j.Depth)
+	}
+	// Fit the whole row (bar + meta + state + label) within the box content
+	// width, leaving margin for the selection bar and padding.
+	avail := w - lipgloss.Width(meta) - lipgloss.Width(state) - 6
 	if avail < 8 {
 		avail = 8
 	}
-	return bar + meta + stUserText.Render(clip(cmd, avail))
+	return bar + meta + state + stUserText.Render(clip(label, avail))
 }
 
 // clip truncates s to at most n runes, appending an ellipsis when it overflows.

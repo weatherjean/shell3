@@ -2,11 +2,15 @@ package chat
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/weatherjean/shell3/internal/fsx"
 )
 
 const (
@@ -26,7 +30,7 @@ type readArgs struct {
 // line/byte cap, returning the raw file text (no line-number gutter, so the
 // model can copy substrings straight into edit_file) plus a continuation footer
 // when truncated. Binary files are refused with a redirect to read_media.
-func handleReadTool(argsJSON, workDir string) string {
+func handleReadTool(ctx context.Context, argsJSON, workDir string, fs fsx.FileSystem) string {
 	var a readArgs
 	if err := json.Unmarshal([]byte(argsJSON), &a); err != nil {
 		return "error: invalid read arguments: " + err.Error()
@@ -42,32 +46,32 @@ func handleReadTool(argsJSON, workDir string) string {
 	}
 
 	path := resolveReadPath(a.Path, workDir)
-	info, err := os.Stat(path)
+	// All existence/type knowledge comes from the backend, not a disk pre-stat:
+	// with a non-OS backend (e.g. the ACP editor bridge) a file may exist only in
+	// an editor buffer, so stat-ing the disk first would wrongly report it missing.
+	content, err := fs.ReadTextFile(ctx, path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		switch {
+		case errors.Is(err, os.ErrNotExist):
 			return "error: file not found: " + a.Path
+		case errors.Is(err, fsx.ErrIsDir):
+			return "error: " + a.Path + " is a directory; use bash ls"
 		}
 		return "error: " + err.Error()
 	}
-	if info.IsDir() {
-		return "error: " + a.Path + " is a directory; use bash ls"
-	}
-	// Guard against reading a huge file fully into memory just to emit the first
-	// page: redirect to a streaming bash extractor instead.
-	if info.Size() > maxReadFileBytes {
+	// Size ceiling, applied to what the backend returned: only the backend knows
+	// the file's true content (an editor buffer has no disk size to pre-stat), so
+	// the cap is on len(content) after the read. Redirect to a streaming bash
+	// extractor for anything bigger.
+	if len(content) > maxReadFileBytes {
 		return fmt.Sprintf("error: %s is %d MB, exceeds the %d MB read limit; use bash (sed -n / head) to extract the part you need",
-			a.Path, info.Size()/(1024*1024), int64(maxReadFileBytes)/(1024*1024))
+			a.Path, len(content)/(1024*1024), maxReadFileBytes/(1024*1024))
 	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "error: " + err.Error()
-	}
-	if isBinary(data) {
+	if isBinary([]byte(content)) {
 		return "error: binary file; use read_media for images/audio, or bash xxd for raw bytes"
 	}
 
-	return renderRead(string(data), a.Offset, a.Limit)
+	return renderRead(content, a.Offset, a.Limit)
 }
 
 // resolveReadPath expands ~ and resolves a relative path against workDir.

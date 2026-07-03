@@ -1,4 +1,5 @@
 /shell3
+/shell3-acp
 /bin/
 ai-do-not-read.*
 # ./.shell3_project/ is runtime data — runs, inbox, sockets — never committed.
@@ -28,3 +29,6 @@ cover.out
 
 # stray scratch dir — never commit
 asfd/
+
+# subagent-driven-development scratch
+.superpowers/

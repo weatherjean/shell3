@@ -68,7 +68,7 @@ shell3.model("{{.Name | luaesc}}", {
 --   * { argv = {...} }            → exec this argv directly (runner swap; bash/bash_bg
 --                                   only — fails closed for shell_interactive)
 --   * { block = true, reason="" } → block (reason shown to the model)
---   * { ask = "prompt", reason="" } → ask a human (TUI y/N or Telegram buttons);
+--   * { ask = "prompt", reason="" } → ask a human (TUI y/N prompt);
 --                                   allowed → run, declined/headless → block(reason)
 -- Write denylists with shell3.regex (Go RE2; compiled at load). Use (?s) so .*
 -- spans multi-line commands. A handler that errors FAILS CLOSED (blocks).
@@ -146,9 +146,9 @@ proceed; no human is available.
 shell3.agent({
   name  = "code",
   model = "{{.Name | luaesc}}",
-  -- Host-injected system-reminders (kept OUT of the prompt above). environment:
-  -- model/paths/inbox + this session's id. delegation: the spawn command for the
-  -- subagents listed under tools.subagents below. Both default off.
+  -- Host-injected system-reminders (kept OUT of the prompt below). environment:
+  -- config path, runs dir, model + this session's id. delegation: task-tool
+  -- guidance + the subagents listed under tools.subagents below. Both default off.
   environment = true,
   delegation  = true,
   prompt = [[
@@ -172,7 +172,7 @@ You are an expert coding assistant inside shell3. Work autonomously as a senior 
 - `edit_file`: prefer over `bash` heredocs; empty `old_string` creates or overwrites the whole file.
 - `bash_bg`: long or parallel background work.
 - `web_fetch`: fetch a URL as plain text + links. `brave_search`: web search.
-- Delegation: if you list subagents under `tools = { subagents = { ... } }`, a "## Delegation" section is injected at session start with the exact `bash_bg` command to spawn one. A subagent is a background `shell3` process that runs the chosen agent on a self-contained task and reports back automatically (you don't poll): the notification carries the subagent's result summary, so act on it directly — a transcript path comes too, for the rare case you need the full detail. Good for parallelizable work you don't need to watch.
+- Delegation: if you list subagents under `tools = { subagents = { ... } }`, a "Delegation" reminder is injected at session start naming the subagents you may spawn. Spawn one with the `task` tool ({subagent_type, prompt, description}) — it returns immediately and the subagent runs as an in-process background job; keep working, don't poll. The completion notice carries the job id and result summary, so act on it directly; use `task_status <id>` for the full detail, and `task_list` / `task_cancel <id>` to manage active jobs. Good for parallelizable work you don't need to watch.
 
 ## Context hygiene
 - Context is managed for you: shell3 auto-compacts the conversation into a summary when it crosses the model's `compact_at` token threshold. You do not prune or compact manually.
@@ -226,27 +226,3 @@ You are the design partner inside shell3. You do NOT edit files — you investig
   skills = { brainstorming, history },
 })
 
--- ---------------------------------------------------------------------------
--- Personal Telegram bot + Mini App dashboard (run: `shell3 telegram`)
--- ---------------------------------------------------------------------------
--- Uncomment and set your numeric chat id (message @userinfobot to find it).
--- Put TELEGRAM_BOT_TOKEN=<token from @BotFather> in .env beside this file.
--- The dashboard is read-only; expose it on your tailnet with:
---   tailscale serve https / proxy 127.0.0.1:8765
--- Scheduled jobs (cron) live INSIDE this block — they run only on the always-on
--- `shell3 telegram` host. Each job dispatches an isolated subagent; notify=false
--- is a quiet background job whose result shows only in the dashboard (errors
--- still notify). Fire manually with /run <name>.
--- shell3.telegram({
---   token   = shell3.env.secret("TELEGRAM_BOT_TOKEN"),
---   chat_id = "000000000",
---   agent   = "code",                 -- the single agent the bot runs (it spawns subagents); "" → first declared
---   workdir = "/abs/path/to/workdir", -- where the agent's tools run; defaults to the launch directory
---   dashboard = { enabled = true, addr = "127.0.0.1:8765", url = "https://HOST.TAILNET.ts.net/" },
---   cron = {
---     { name="prs", schedule="0 9 * * *", agent="explorer", notify=true,
---       prompt="Summarize my open PRs and anything that needs review today." },
---     { name="tests", schedule="@hourly", agent="explorer", workdir="/path/to/repo", notify=false,
---       prompt="Run the test suite; if anything fails, summarize the failure." },
---   },
--- })

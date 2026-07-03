@@ -10,7 +10,7 @@ import (
 	"github.com/weatherjean/shell3/internal/persona"
 )
 
-// TestSession_DashboardReadsRaceTurn pins P0: the Telegram dashboard polls
+// TestSession_DashboardReadsRaceTurn pins P0: a front-end polls
 // History() and Snapshot() from net/http goroutines concurrently with a running
 // turn on the same Session. Before the fix the turn goroutine's append to
 // chat.Session.messages raced the dashboard's slice copy, and Snapshot's

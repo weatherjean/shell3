@@ -24,8 +24,7 @@ Run one verb per call (the window persists across calls on a fixed debug port):
 ## Reading and reporting
 - To read a page, prefer `eval "document.body.innerText"` (rendered text) over raw
   HTML. Slice long output so you don't flood the chat.
-- Captures (screenshot/pdf): write to a file, then deliver it with the media tool
-  (send_media_telegram) if you have one; otherwise just report the path.
+- Captures (screenshot/pdf): write to a file, then report the path.
 
 ## Notes
 - It uses a dedicated Chrome profile (not the user's everyday browser). Log in once

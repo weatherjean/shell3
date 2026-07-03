@@ -10,12 +10,12 @@ import (
 func TestRunCommand_HasNewFlagsNotOld(t *testing.T) {
 	cmd := newRunCommand()
 	fs := cmd.Flags()
-	for _, name := range []string{"prompt", "resume", "parent-session"} {
+	for _, name := range []string{"prompt", "resume"} {
 		if fs.Lookup(name) == nil {
 			t.Errorf("run is missing --%s", name)
 		}
 	}
-	for _, gone := range []string{"append-sinkfile", "no-subagents"} {
+	for _, gone := range []string{"append-sinkfile", "no-subagents", "parent-session", "inbox", "id"} {
 		if fs.Lookup(gone) != nil {
 			t.Errorf("run still has retired flag --%s", gone)
 		}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/weatherjean/shell3/internal/applog"
+	"github.com/weatherjean/shell3/internal/fsx"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/runs"
@@ -64,9 +65,28 @@ type ToolConfig struct {
 	RunsDir string
 	// WorkDir is the working directory tools should resolve paths against.
 	WorkDir string
+	// FS is the file-I/O backend for the read and edit_file tools. Nil ⇒ the
+	// OS backend (direct disk). ACP sessions inject an editor-buffer backend.
+	FS fsx.FileSystem
 	// Asker confirms an ask-verdict command with a human. Nil ⇒ ask degrades to
 	// deny (headless subagent path).
 	Asker AskFunc
+	// StartBashBg launches a background shell command on the host's in-process
+	// job runtime and returns its job id. Nil ⇒ background jobs disabled.
+	StartBashBg func(command, workdir string, argv []string) (string, error)
+	// StartSubagent launches a background subagent (child session) and returns its
+	// id. It enforces the recursion depth guard and concurrency cap. Nil ⇒ subagents
+	// unavailable.
+	StartSubagent func(agent, prompt, desc string) (string, error)
+	// ListJobs returns a compact formatted list of all background jobs (running +
+	// done) for the task_list tool. Nil ⇒ task management unavailable.
+	ListJobs func() string
+	// JobStatus returns one job's status and truncated result for the task_status
+	// tool. Nil ⇒ task management unavailable.
+	JobStatus func(id string) string
+	// CancelJob cancels a running job and returns a short confirmation or error
+	// for the task_cancel tool. Nil ⇒ task management unavailable.
+	CancelJob func(id string) string
 	// RunToolCall runs the shell3.on_tool_call chain (pass / rewrite / argv / block /
 	// ask) with the real tool name. The bash family self-gates via this in their
 	// handlers (gateBash / gateInteractiveCommand); every other tool is gated in the
@@ -80,6 +100,15 @@ type ToolConfig struct {
 	// SessMsgs is the persisted session history slice without reminder
 	// injections; tools that mutate authoritative state use this view.
 	SessMsgs []llm.Message
+}
+
+// fs returns the configured FileSystem backend, defaulting to direct OS disk
+// I/O when none was injected.
+func (c ToolConfig) fs() fsx.FileSystem {
+	if c.FS != nil {
+		return c.FS
+	}
+	return fsx.OS{}
 }
 
 // TurnConfig holds all dependencies needed for one user→assistant turn. It
@@ -97,6 +126,9 @@ type TurnConfig struct {
 	StatusLine string
 	// WorkDir is the working directory for tool execution.
 	WorkDir string
+	// FS is the file-I/O backend threaded into each tool call's ToolConfig.
+	// Nil ⇒ OS disk backend.
+	FS fsx.FileSystem
 	// ConfigPath is the resolved shell3.lua path, threaded into new store
 	// sessions (notably the compaction rollover, which starts a session deep in
 	// the turn loop). '' if unknown.
@@ -135,7 +167,23 @@ type TurnConfig struct {
 	StubTools map[string]string
 	// Asker confirms an ask-verdict command with a human. Nil ⇒ ask degrades to
 	// deny (headless subagent path).
-	Asker         AskFunc
+	Asker AskFunc
+	// StartBashBg launches a background shell command on the host's in-process
+	// job runtime and returns its job id. Nil ⇒ background jobs disabled.
+	StartBashBg func(command, workdir string, argv []string) (string, error)
+	// StartSubagent launches a background subagent (child session) and returns its
+	// id. It enforces the recursion depth guard and concurrency cap. Nil ⇒ subagents
+	// unavailable.
+	StartSubagent func(agent, prompt, desc string) (string, error)
+	// ListJobs returns a compact formatted list of all background jobs (running +
+	// done) for the task_list tool. Nil ⇒ task management unavailable.
+	ListJobs func() string
+	// JobStatus returns one job's status and truncated result for the task_status
+	// tool. Nil ⇒ task management unavailable.
+	JobStatus func(id string) string
+	// CancelJob cancels a running job and returns a short confirmation or error
+	// for the task_cancel tool. Nil ⇒ task management unavailable.
+	CancelJob     func(id string) string
 	RunToolCall   func(ctx context.Context, name, command, argsJSON string) ToolCallVerdict
 	RunToolResult func(ctx context.Context, name, argsJSON, output string) string
 	// CompactAt is the auto-compaction prompt-token threshold (0 = off).

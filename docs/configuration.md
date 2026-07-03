@@ -191,6 +191,56 @@ report (for content *search*, it would still need `bash` for `rg`/`grep`):
 tools = { read = true, list_files = true }  -- browse + read, no shell
 ```
 
+## Subagents & delegation
+
+A subagent is a delegatable specialist: declared with `shell3.subagent({...})`
+instead of `shell3.agent({...})`, so it never appears in the `Tab`/`/agent`
+rotation — only the agents that list it may spawn it. The shape is the same as
+an agent's (name, model, prompt, tools) plus a `description`, which is what the
+parent model reads when deciding what to delegate:
+
+```lua
+local explorer = shell3.subagent({
+  name        = "explorer",
+  description = "Read-only investigation of the codebase. No edits.",
+  model       = "main",
+  prompt      = [[You are a focused code explorer…]],
+  tools       = { bash = true, read = true, list_files = true },
+})
+
+shell3.agent({
+  name       = "code",
+  delegation = true,                      -- inject the task-tool guidance
+  tools      = { subagents = { explorer } },  -- who this agent may spawn
+  -- ...
+})
+```
+
+When an agent sets **both** `delegation = true` and a non-empty
+`tools.subagents` list, shell3 advertises four tools to it — `task` (spawn one:
+`{subagent_type, prompt, description}`; returns immediately), `task_list`,
+`task_status <id>`, and `task_cancel <id>` — and injects a "Delegation"
+system reminder naming the allowed subagents. One without the other advertises
+nothing: the tool and the guidance always appear together.
+
+A spawned subagent runs as an **in-process background job** — a child-session
+goroutine, not a subprocess — and on completion the parent is woken with a
+capped result summary injected into its context. Subagents run headless (an
+`{ask=...}` gate verdict is auto-denied; see
+[the gate section](#deny-prompt-confirmation-and-headless-degradation)), and
+delegation is single-level: a subagent is not given the `task` tool.
+
+Two optional config-global knobs cap the machinery:
+
+```lua
+shell3.background({ max_concurrent = 8 })  -- concurrent background jobs (default 8)
+shell3.subagents({ max_depth = 3 })        -- max subagent nesting depth (default 3)
+```
+
+The same job runtime backs `bash_bg`, which is gated separately by
+`tools = { bash_bg = true }` — not by `delegation`. See
+[library.md](library.md#subagents) for the runtime view.
+
 ## Custom tools
 
 A custom tool is **not** a Lua function — it's a bash command template. You give
@@ -322,10 +372,11 @@ for a non-bash tool fails closed.
 ### Deny-prompt confirmation and headless degradation
 
 When a handler returns `{ask=...}`, a human must confirm. The interactive **TUI
-shows an inline `y/N` prompt**; the **Telegram host sends inline `Allow` / `Deny`
-buttons**. **Headless subagents** have no attached human, so an `{ask=...}` verdict
+shows an inline `y/N` prompt**; **ACP clients receive a `session/request_permission`
+request** (see [acp.md](acp.md#permissions-on_tool_call--sessionrequest_permission)).
+**Headless subagents** have no attached human, so an `{ask=...}` verdict
 is auto-denied with its `reason`; the block reason flows back to the parent agent
-via the completion inbox so the parent — where a human *is* attached — can decide
+in the in-process completion notice so the parent — where a human *is* attached — can decide
 how to proceed. A prompt nobody answers falls back to deny after the timeout
 (`ask_timeout`, default 300 s). `{block=true}` never prompts — it blocks
 everywhere, headless or not.

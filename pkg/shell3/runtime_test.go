@@ -10,12 +10,19 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
 	"github.com/weatherjean/shell3/internal/persona"
+	"github.com/weatherjean/shell3/internal/runs"
 )
 
 // newTestRuntime builds a Runtime around fakellm-backed configs, bypassing
-// agentsetup the same way newTestSession does for single sessions.
+// agentsetup the same way newTestSession does for single sessions. It opens a
+// real runs.Store in a temp dir so sessions (including in-process subagents)
+// can persist messages, and initialises rt.jobs for background-job tests.
 func newTestRuntime(t *testing.T, mk func() chat.Config) *Runtime {
 	t.Helper()
+	store, err := runs.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("newTestRuntime: runs.Open: %v", err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	rt := &Runtime{
 		sessionConfig: func(o SessionOpts) (chat.Config, error) {
@@ -24,15 +31,23 @@ func newTestRuntime(t *testing.T, mk func() chat.Config) *Runtime {
 			if o.WorkDir != "" {
 				cfg.WorkDir = o.WorkDir
 			}
+			// Only inject the runtime's store when the config doesn't already
+			// carry an explicit one (tests using fakeCfgWithStore bring their own).
+			if cfg.Store == nil {
+				cfg.Store = store
+			}
 			return cfg, nil
 		},
-		events:   make(chan HostEvent, 64),
-		workDir:  t.TempDir(),
-		ctx:      ctx,
-		cancel:   cancel,
-		cleanup:  func() {},
-		sessions: map[string]*Session{},
+		events:    make(chan HostEvent, 64),
+		jobEvents: make(chan JobProgress, 256),
+		workDir:   t.TempDir(),
+		store:     store,
+		ctx:       ctx,
+		cancel:    cancel,
+		cleanup:   func() {},
+		sessions:  map[string]*Session{},
 	}
+	rt.jobs = newJobManager(rt, 0)
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
 }

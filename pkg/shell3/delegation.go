@@ -2,12 +2,10 @@ package shell3
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/chat"
-	"github.com/weatherjean/shell3/internal/paths"
 )
 
 // applyHostReminders sets this session's standing reminders to the host-level
@@ -52,11 +50,9 @@ func (s *Session) envReminder() string {
 }
 
 // delegationReminder renders the host Delegation standing reminder for the
-// current active agent: the allowed-subagents list + the exact templated spawn
-// command (with absolute --out/--inbox/--parent-session already substituted),
+// current active agent: the allowed-subagents list + task-tool guidance,
 // wrapped in <system-reminder>…</system-reminder>. Returns "" when there is
-// nothing to delegate with: no runtime, no allowed subagents, or no resolvable
-// config path.
+// nothing to delegate with: no runtime or no allowed subagents.
 func (s *Session) delegationReminder(rt *Runtime) string {
 	if rt == nil {
 		return ""
@@ -65,17 +61,8 @@ func (s *Session) delegationReminder(rt *Runtime) string {
 	if len(allowed) == 0 {
 		return ""
 	}
-	cfgPath, err := rt.ConfigPath()
-	if err != nil || cfgPath == "" {
-		return "" // can't template a spawn command without a concrete config path
-	}
 	section := renderDelegation(delegationParams{
-		Binary:        shell3Binary(),
-		ConfigPath:    cfgPath,
-		WorkDir:       s.cfg.WorkDir,
-		RunsDir:       s.cfg.RunsDir,
-		ParentSession: s.sess.ID(),
-		Subagents:     s.subagentList(rt, allowed),
+		Subagents: s.subagentList(rt, allowed),
 	})
 	if section == "" {
 		return ""
@@ -107,42 +94,22 @@ func (s *Session) subagentList(rt *Runtime, names []string) []subagentItem {
 // delegationParams carries the concrete, session-resolved values the delegation
 // section templates into its spawn command.
 type delegationParams struct {
-	Binary        string
-	ConfigPath    string
-	WorkDir       string
-	RunsDir       string // parent's <root>/.shell3_project/runs — derives the absolute --out + --inbox paths
-	ParentSession string
-	Subagents     []subagentItem
+	WorkDir   string
+	Subagents []subagentItem
 }
 
 // renderDelegation builds the Delegation reminder body: the allowed subagents
-// and the EXACT bash_bg command to spawn one, with every runtime value already
-// substituted. The caller (delegationReminder) wraps the result in a
-// <system-reminder> envelope. The command passes --parent-session <this session> (the
-// child records that report pointer and reports back by appending a pointer line
-// to the project inbox when it finishes). There is no depth gate — a spawned
-// child may itself delegate.
+// and guidance to spawn one via the `task` tool. The caller (delegationReminder)
+// wraps the result in a <system-reminder> envelope.
 // Returns "" when there are no subagents to list.
 func renderDelegation(p delegationParams) string {
 	if len(p.Subagents) == 0 {
 		return ""
 	}
-	// Resolve the transcript and the report inbox to ABSOLUTE paths under the
-	// parent's runtime root (<root>/.shell3_project), so a spawned subagent —
-	// which runs from its own working directory — writes its transcript and its
-	// completion pointer where THIS host actually watches, not relative to the
-	// child's cwd. RunsDir is <root>/.shell3_project/runs; its grandparent is the
-	// root. Falls back to a relative transcript (and no --inbox) when unknown.
-	transcript := paths.AgentTranscript("", "<id>")
-	inbox := ""
-	if p.RunsDir != "" {
-		root := filepath.Dir(filepath.Dir(p.RunsDir))
-		transcript = paths.AgentTranscript(root, "<id>")
-		inbox = paths.NewLocal(root).Inbox
-	}
 	var b strings.Builder
-	b.WriteString("Delegation:\n")
-	b.WriteString("You can delegate a focused, self-contained subtask to a subagent — a background `shell3` process that runs the chosen agent on the task and reports back to you automatically when it finishes. You do NOT poll; a notification arrives on its own, and it already carries the subagent's result summary — act on that directly. A transcript path comes with it for the rare case you need more.\n\n")
+	b.WriteString("Delegation: to run work in the background, call the `task` tool with\n")
+	b.WriteString("{subagent_type, prompt, description}. It returns immediately and you'll be\n")
+	b.WriteString("notified when the subagent finishes — keep working, don't poll.\n\n")
 	b.WriteString("Subagents you may spawn:\n")
 	for _, sa := range p.Subagents {
 		if sa.Description != "" {
@@ -151,15 +118,9 @@ func renderDelegation(p delegationParams) string {
 			fmt.Fprintf(&b, "- %s\n", sa.Name)
 		}
 	}
-	b.WriteString("\nTo spawn one, call the `bash_bg` tool with this exact command, substituting `<name>` (a subagent from the list), `<id>` (a short unique id you choose, e.g. `explore1`), and `<task>` (the full self-contained prompt — the subagent does not see this conversation):\n\n")
-	if inbox != "" {
-		fmt.Fprintf(&b, "  %s run --config %s --agent <name> --out %s --inbox %s --parent-session %s --id <id> --prompt \"<task>\"\n\n",
-			p.Binary, p.ConfigPath, transcript, inbox, p.ParentSession)
-	} else {
-		fmt.Fprintf(&b, "  %s run --config %s --agent <name> --out %s --parent-session %s --id <id> --prompt \"<task>\"\n\n",
-			p.Binary, p.ConfigPath, transcript, p.ParentSession)
-	}
-	b.WriteString("When it finishes you'll get a notification with the subagent's result summary — relay it to the user (summarize or present it in your reply; the user hasn't seen the subagent's output, only you have) — plus the transcript path at `" + transcript + "`. The transcript is a JSONL audit log — read it only if the summary isn't enough, and extract the subagent's full final answer cleanly with:\n\n")
-	fmt.Fprintf(&b, "    jq -rs 'map(select(.kind==\"assistant_message\"))[-1].text' %s\n", transcript)
+	b.WriteString("\nTask management tools (use after spawning):\n")
+	b.WriteString("- task_list: see all running/finished tasks (ids look like sub1, bg1)\n")
+	b.WriteString("- task_status {id}: check one task's status and result\n")
+	b.WriteString("- task_cancel {id}: stop a running task\n")
 	return b.String()
 }

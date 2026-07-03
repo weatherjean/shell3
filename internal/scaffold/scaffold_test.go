@@ -176,8 +176,8 @@ func TestRenderedConfigLoads(t *testing.T) {
 	}
 	// Each subagent the code agent may delegate to resolves to a (name,
 	// description) pair — the raw material pkg/shell3 renders into the per-session
-	// Delegation context. (The former spawn_agent/list_agents tool schema is gone;
-	// delegation is now a bash_bg-backgrounded shell3 described in the prompt.)
+	// Delegation context. (Delegation runs through the `task` tool as an
+	// in-process background job.)
 	for _, name := range agents[0].Subagents {
 		sa, ok := c.SubagentByName(name)
 		if !ok {
@@ -227,81 +227,6 @@ func TestRenderBaseConfigForceOverwrites(t *testing.T) {
 	}
 	if !strings.Contains(string(got), `shell3.model("main"`) {
 		t.Errorf("force render did not regenerate config; got:\n%s", got)
-	}
-}
-
-func TestRenderTelegramConfigLoads(t *testing.T) {
-	dir := t.TempDir()
-	if err := RenderTelegramConfig(dir, TelegramValues{
-		Values:           Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m-1"},
-		ChatID:           "123456",
-		WorkDir:          dir,
-		DashboardEnabled: true,
-		DashboardAddr:    "127.0.0.1:8765",
-		DashboardURL:     "https://h.ts.net/",
-	}, false); err != nil {
-		t.Fatal(err)
-	}
-	// lib modules copied + config written.
-	for _, p := range []string{"shell3.lua", "lib/tools.lua"} {
-		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
-			t.Errorf("missing %s: %v", p, err)
-		}
-	}
-	// Provide the token and model key the config references, then load through luacfg.
-	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("TELEGRAM_BOT_TOKEN=tok\nMAIN_API_KEY=\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	c, err := luacfg.Load(filepath.Join(dir, "shell3.lua"), dir)
-	if err != nil {
-		t.Fatalf("telegram config failed to load: %v", err)
-	}
-	defer c.Close()
-	if a := c.Agents(); len(a) != 1 || a[0].Name != "code" {
-		t.Errorf("agents = %v, want [code]", a)
-	}
-	if s := c.Subagents(); len(s) != 1 || s[0].Name != "explorer" {
-		t.Errorf("subagents = %v, want [explorer]", s)
-	}
-	tg := c.Telegram()
-	if tg.ChatID != "123456" || tg.Token != "tok" || tg.Agent != "code" {
-		t.Errorf("telegram = %+v, want chat_id=123456 token=tok agent=code", tg)
-	}
-	if !tg.Dashboard.Enabled || tg.Dashboard.Addr != "127.0.0.1:8765" {
-		t.Errorf("dashboard = %+v, want enabled 127.0.0.1:8765", tg.Dashboard)
-	}
-}
-
-func TestRenderTelegramConfigHasBrowserSkill(t *testing.T) {
-	dir := t.TempDir()
-	if err := RenderTelegramConfig(dir, TelegramValues{
-		Values: Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m-1"},
-		ChatID: "1", WorkDir: dir,
-	}, false); err != nil {
-		t.Fatal(err)
-	}
-	// Helper files shipped alongside the skill.
-	for _, p := range []string{"lib/skills/browser.lua", "lib/browser/cli.js", "lib/browser/package.json"} {
-		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
-			t.Errorf("missing %s: %v", p, err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("TELEGRAM_BOT_TOKEN=tok\nMAIN_API_KEY=\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	c, err := luacfg.Load(filepath.Join(dir, "shell3.lua"), dir)
-	if err != nil {
-		t.Fatalf("telegram config failed to load: %v", err)
-	}
-	defer c.Close()
-	var found bool
-	for _, s := range c.Skills {
-		if s.Name == "browser" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("browser skill not declared; skills = %v", c.Skills)
 	}
 }
 

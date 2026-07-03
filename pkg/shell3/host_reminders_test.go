@@ -92,12 +92,12 @@ func TestHostReminders_BothToggles(t *testing.T) {
 		t.Errorf("Environment reminder not wrapped in <system-reminder>:\n%s", env)
 	}
 
-	deleg := findReminder(s, "--parent-session")
+	deleg := findReminder(s, "Subagents you may spawn")
 	if deleg == "" {
 		t.Fatalf("expected a Delegation standing reminder:\n%s", hostReminderText(s))
 	}
-	if !strings.Contains(deleg, "--inbox /root/.shell3_project/inbox.jsonl") {
-		t.Errorf("Delegation reminder missing absolute --inbox:\n%s", deleg)
+	if !strings.Contains(deleg, "`task`") {
+		t.Errorf("Delegation reminder missing task tool guidance:\n%s", deleg)
 	}
 	if !strings.HasPrefix(deleg, "<system-reminder>") {
 		t.Errorf("Delegation reminder not wrapped in <system-reminder>:\n%s", deleg)
@@ -115,7 +115,7 @@ func TestHostReminders_BothToggles(t *testing.T) {
 	if !strings.Contains(shown, "Host reminders") {
 		t.Errorf("Snapshot prompt missing the Host reminders section:\n%s", shown)
 	}
-	if !strings.Contains(shown, "session id") || !strings.Contains(shown, "--parent-session") {
+	if !strings.Contains(shown, "session id") || !strings.Contains(shown, "Subagents you may spawn") {
 		t.Errorf("Snapshot prompt must surface both standing reminders:\n%s", shown)
 	}
 }
@@ -140,7 +140,7 @@ func TestHostReminders_DelegationTrueNoSubagents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := findReminder(s, "--parent-session"); got != "" {
+	if got := findReminder(s, "Subagents you may spawn"); got != "" {
 		t.Errorf("expected no Delegation reminder without subagents, got:\n%s", got)
 	}
 }
@@ -153,13 +153,13 @@ func TestHostReminders_SwitchDropsDelegation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if findReminder(s, "--parent-session") == "" {
+	if findReminder(s, "Subagents you may spawn") == "" {
 		t.Fatal("precondition: expected a Delegation reminder before the switch")
 	}
 	if err := s.SwitchAgent("plain"); err != nil {
 		t.Fatal(err)
 	}
-	if got := findReminder(s, "--parent-session"); got != "" {
+	if got := findReminder(s, "Subagents you may spawn"); got != "" {
 		t.Errorf("Delegation reminder should be gone after switching to a Delegation=false agent, got:\n%s", got)
 	}
 }

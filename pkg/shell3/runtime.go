@@ -15,37 +15,11 @@ import (
 
 	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/chat"
+	"github.com/weatherjean/shell3/internal/fsx"
 	"github.com/weatherjean/shell3/internal/llm"
-	"github.com/weatherjean/shell3/internal/notify"
 	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/runs"
 )
-
-// TelegramConfig mirrors the parsed shell3.telegram{} block.
-type TelegramConfig struct {
-	Token     string
-	ChatID    string
-	Agent     string
-	WorkDir   string
-	Dashboard DashboardConfig
-}
-
-// DashboardConfig mirrors the parsed shell3.telegram.dashboard{} block.
-type DashboardConfig struct {
-	Enabled bool
-	Addr    string
-	URL     string
-}
-
-// CronJob mirrors one parsed cron job (shell3.telegram cron list).
-type CronJob struct {
-	Name     string
-	Schedule string
-	Agent    string
-	Prompt   string
-	WorkDir  string
-	Notify   bool
-}
 
 // RuntimeSpec configures a long-lived Runtime: the process-wide unit owning
 // the config (Lua state), store, proxy spawner, and log.
@@ -60,7 +34,7 @@ type RuntimeSpec struct {
 
 // SessionOpts parameterizes one Session on a Runtime.
 type SessionOpts struct {
-	// Name keys the session on the runtime (e.g. "tg:1234"). "" gets a unique
+	// Name keys the session on the runtime (e.g. "acp:1234"). "" gets a unique
 	// generated name. Requesting an existing live name returns that session.
 	Name string
 	// Agent selects the initial agent ("" → first declared).
@@ -73,23 +47,21 @@ type SessionOpts struct {
 	OutPath string
 	// ShellInteractive runs an interactive shell command with TTY access.
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
+	// FS is the file-I/O backend for this session's read/edit_file tools.
+	// Nil ⇒ OS disk. The ACP front-end sets this to an editor-buffer backend
+	// when the client advertises the fs capability.
+	FS fsx.FileSystem
 	// Asker confirms an on_tool_call ask-verdict command with a human (true = allow).
 	Asker func(ctx context.Context, command, reason string) bool
 	// ResumeID reloads a stored session's messages when non-empty.
 	ResumeID string
 	// ResumeLatest reattaches to the newest stored session matching this
 	// session's workdir+config (instead of starting fresh) when ResumeID is empty.
-	// Falls back to a new session when none exists. The Telegram bot sets this so
-	// a restart rejoins the live conversation rather than spawning empties.
+	// Falls back to a new session when none exists. A front-end sets this to
+	// rejoin the live conversation rather than spawning empty sessions on restart.
 	ResumeLatest bool
-	// ParentSession is the report pointer written to the new session row. When
-	// non-empty this run is a subagent: on completion it appends one pointer line
-	// to the project inbox for the live host to surface.
-	ParentSession string
-	// ReportInbox, when non-empty, is the absolute inbox.jsonl path this run
-	// reports completion to instead of its own store inbox — the parent's inbox,
-	// so delivery is independent of the subagent's working directory.
-	ReportInbox string
+	// Depth is the subagent nesting depth; 0 for the root user session.
+	Depth int
 }
 
 // HostEventKind enumerates out-of-turn runtime events.
@@ -131,22 +103,30 @@ type Runtime struct {
 
 	// events is the out-of-turn event bus (Wake). Buffered; emit drops on full.
 	events chan HostEvent
+	// jobEvents is the background-job progress bus. Buffered at 256; emitJob
+	// drops on full so a slow consumer never stalls a running job. Not closed
+	// at Close (a late emit from an unwinding job goroutine must not panic).
+	jobEvents chan JobProgress
 	// workDir is the runtime root; subagents write audit logs under it.
 	workDir string
 	// store is the shared file-native runs store (nil if unavailable). Used by
 	// PastSessions/SessionTurns for the dashboard's conversation history and by
-	// the inbox watcher that surfaces subagent completions.
+	// the job runtime's transcript reads (task_status / JobTranscript).
 	store *runs.Store
 	// ctx/cancel scope host-initiated cron dispatch subprocesses so a running
 	// cron job is cancelled (and its goroutine unblocks) when Close cancels ctx.
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	telegram TelegramConfig
-	cron     []CronJob
-
 	configPath string // captured from RuntimeSpec for Reload
 	homeDir    string // captured for Reload's BuildParts
+
+	// jobs manages in-process background jobs (command jobs and, in future tasks,
+	// subagent jobs). Owned by this Runtime; cancelled at Close.
+	jobs *jobManager
+	// subagentMaxDepthVal is the configured max subagent nesting depth (0 = unset;
+	// subagentMaxDepth() applies the default of 3).
+	subagentMaxDepthVal int
 
 	// subSeq mints process-unique ids for cron dispatch transcripts (see
 	// nextSubID). Global to the runtime so concurrent cron fires never collide on
@@ -213,83 +193,27 @@ func NewRuntime(spec RuntimeSpec) (*Runtime, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(parent)
-	tg := parts.Telegram()
-	var cronJobs []CronJob
-	for _, j := range parts.Cron() {
-		cronJobs = append(cronJobs, CronJob{
-			Name: j.Name, Schedule: j.Schedule, Agent: j.Agent,
-			Prompt: j.Prompt, WorkDir: j.WorkDir, Notify: j.Notify,
-		})
-	}
 	rt := &Runtime{
 		sessionConfig: func(o SessionOpts) (chat.Config, error) {
 			return parts.SessionConfig(agentsetup.SessionOptions{
 				Agent: o.Agent, WorkDir: o.WorkDir, Headless: o.Headless, OutPath: o.OutPath,
 			})
 		},
-		subagentDesc: parts.SubagentDescription,
-		cleanup:      cleanup,
-		store:        parts.Store(),
-		telegram: TelegramConfig{
-			Token:   tg.Token,
-			ChatID:  tg.ChatID,
-			Agent:   tg.Agent,
-			WorkDir: tg.WorkDir,
-			Dashboard: DashboardConfig{
-				Enabled: tg.Dashboard.Enabled,
-				Addr:    tg.Dashboard.Addr,
-				URL:     tg.Dashboard.URL,
-			},
-		},
-		cron:       cronJobs,
-		events:     make(chan HostEvent, 64),
-		workDir:    workDir,
-		configPath: spec.ConfigPath,
-		homeDir:    homeDir,
-		ctx:        ctx,
-		cancel:     cancel,
-		sessions:   map[string]*Session{},
+		subagentDesc:        parts.SubagentDescription,
+		cleanup:             cleanup,
+		store:               parts.Store(),
+		events:              make(chan HostEvent, 64),
+		jobEvents:           make(chan JobProgress, 256),
+		workDir:             workDir,
+		configPath:          spec.ConfigPath,
+		homeDir:             homeDir,
+		ctx:                 ctx,
+		cancel:              cancel,
+		sessions:            map[string]*Session{},
+		subagentMaxDepthVal: parts.SubagentMaxDepth,
 	}
-	// Watch the project inbox for subagent completion pointers. A finishing
-	// fire-and-forget subagent appends one pointer line to .shell3_project/inbox.jsonl
-	// (see Session.report); the watcher tails the file and injects each pointer
-	// into the live session(s) as a short notification. Bounded by ctx (cancelled
-	// at Close). No-op when no store is configured.
-	if rt.store != nil {
-		// Capture the store in a local: this goroutine outlives a Reload, which
-		// swaps rt.store, so reading the field here would race the swap. The
-		// inbox path is derived from workDir (unchanged across reloads), so the
-		// captured store watches the same file for the runtime's lifetime.
-		store := rt.store
-		go func() { _ = store.Watch(ctx, rt.injectPointer) }()
-	}
+	rt.jobs = newJobManager(rt, parts.BackgroundMaxConcurrent)
 	return rt, nil
-}
-
-// injectPointer surfaces one completion pointer (read from the project inbox) to
-// the live host. It reconstructs a notify.Notification, renders it, then
-// interjects the rendered pointer into every live session, waking idle ones.
-// The inbox carries no payload — Path
-// points at the subagent transcript and Summary is the preview — so detail stays
-// in the run's own jsonl and the injected line is a short pointer.
-func (rt *Runtime) injectPointer(p runs.Pointer) {
-	n := notify.Notification{
-		Kind:       p.Kind,
-		ID:         p.RunID,
-		Transcript: p.Path,
-		Preview:    p.Summary,
-		Exit:       p.Exit,
-		TS:         p.TS,
-	}
-	rt.mu.Lock()
-	live := make([]*Session, 0, len(rt.sessions))
-	for _, s := range rt.sessions {
-		live = append(live, s)
-	}
-	rt.mu.Unlock()
-	for _, s := range live {
-		s.injectNotification(rt, n)
-	}
 }
 
 // Events returns the out-of-turn event bus. One receiver drives N sessions.
@@ -297,11 +221,11 @@ func (rt *Runtime) injectPointer(p runs.Pointer) {
 // the host re-checks inboxes on its next turn anyway).
 func (rt *Runtime) Events() <-chan HostEvent { return rt.events }
 
-// Telegram returns the parsed shell3.telegram{} config (zero value if absent).
-func (rt *Runtime) Telegram() TelegramConfig { return rt.telegram }
-
-// Cron returns the parsed cron jobs from shell3.telegram (nil if absent).
-func (rt *Runtime) Cron() []CronJob { return rt.cron }
+// JobEvents returns the background-job progress bus. Each write to a job's
+// output tee emits a Chunk event; job completion emits a Done event. The
+// channel is buffered at 256 and drops on full — a slow consumer never stalls
+// a running job. The channel is never closed.
+func (rt *Runtime) JobEvents() <-chan JobProgress { return rt.jobEvents }
 
 // Store returns the shared canonical store (nil if unavailable).
 func (rt *Runtime) Store() *runs.Store { return rt.store }
@@ -413,10 +337,11 @@ func (rt *Runtime) SessionMessages(id string) ([]HistoryEntry, error) {
 // excludes '/' and '.'.
 var subagentIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
-// SubagentInfo is a read-only listing of one spawned subagent's transcript, for
-// the dashboard. Subagents are backgrounded `shell3` runs that stream a
-// transcript to .shell3_project/agents/<id>.jsonl; this is derived from those files on
-// disk.
+// SubagentInfo is a read-only listing of a LEGACY subprocess-subagent transcript
+// under .shell3_project/agents/<id>.jsonl. In-process subagents (spawned via the
+// `task` tool) are tracked by the job runtime and their transcript lives under
+// .shell3_project/runs/<id>/; this type only surfaces older on-disk agents/
+// transcripts (predating the in-process model).
 type SubagentInfo struct {
 	ID         string `json:"id"`               // transcript filename stem
 	Transcript string `json:"transcript"`       // path under .shell3_project/agents
@@ -552,10 +477,29 @@ func (rt *Runtime) SubagentTranscript(id string) ([]TranscriptEvent, error) {
 func (rt *Runtime) root() string                 { return rt.workDir }
 func (rt *Runtime) baseContext() context.Context { return rt.ctx }
 
+// subagentMaxDepth returns the maximum allowed subagent nesting depth.
+// Reads the Lua-configured value (shell3.subagents{ max_depth = N }); defaults
+// to 3 when unset (subagentMaxDepthVal == 0).
+func (rt *Runtime) subagentMaxDepth() int {
+	if rt.subagentMaxDepthVal <= 0 {
+		return 3
+	}
+	return rt.subagentMaxDepthVal
+}
+
 func (rt *Runtime) emit(ev HostEvent) {
 	select {
 	case rt.events <- ev:
 	default: // bus full: drop (Wake is a hint, not a queue)
+	}
+}
+
+// emitJob sends a JobProgress event on the job bus. Non-blocking: if the
+// buffer is full the event is dropped so a slow consumer never stalls a job.
+func (rt *Runtime) emitJob(ev JobProgress) {
+	select {
+	case rt.jobEvents <- ev:
+	default: // bus full: drop
 	}
 }
 
@@ -593,8 +537,10 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	}
 	s := newSession(cfg, func() {}, opts) // shared parts are the runtime's to clean
 	s.shellInteractive = opts.ShellInteractive
+	s.fs = opts.FS
 	s.asker = opts.Asker
 	s.opts = opts
+	s.depth = opts.Depth
 	s.runtime, s.name = rt, opts.Name
 	s.sink, s.sinkCleanup = sink, sinkCleanup
 	// Set the per-session host standing reminders now that runtime+name are set:
@@ -603,8 +549,8 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	s.applyHostReminders(rt)
 	s.writeStartLine("(session " + opts.Name + ")")
 	rt.sessions[opts.Name] = s
-	// Subagent completions arrive via the runtime's single inbox watcher (see
-	// NewRuntime), not a per-session socket — nothing to launch here.
+	// Subagent completions are injected in-process by the runtime's jobManager
+	// (finishSubagent notifies the parent directly) — nothing to launch here.
 	return s, nil
 }
 
@@ -636,6 +582,12 @@ func (rt *Runtime) Close() error {
 		if err := s.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
+	}
+	// Cancel and join all in-process background job goroutines BEFORE the store
+	// closes so no goroutine can write to a closed store (Fix 3: write-after-close).
+	if rt.jobs != nil {
+		rt.jobs.cancelAll()
+		rt.jobs.wait()
 	}
 	rt.cleanup()
 	// Cancel the runtime ctx so any in-flight cron dispatch subprocess is killed

@@ -234,6 +234,17 @@ func (s *Store) TruncateReminders(id string) error {
 	return nil
 }
 
+// Transcript returns the raw contents of runs/<id>/messages.jsonl, or ""
+// when the file is absent or unreadable. Used by jobManager.transcript to
+// surface the child session's persisted message log after completion.
+func (s *Store) Transcript(id string) string {
+	b, err := os.ReadFile(filepath.Join(s.sessDir(id), "messages.jsonl"))
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
 // LatestSession returns the newest session ID matching workdir+configPath.
 func (s *Store) LatestSession(workdir, configPath string) (string, bool, error) {
 	metas, err := s.ListSessions(0)

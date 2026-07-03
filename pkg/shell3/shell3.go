@@ -19,7 +19,7 @@
 // A Session runs one turn at a time. [Session.Send] streams a turn's events and
 // returns [ErrBusy] (as an Error event) if a turn is already in flight; drain
 // the channel to completion before the next Send, Clear, SwitchAgent, or Prune.
-// Name sessions on the runtime (e.g. "tg:1234") via [SessionOpts]; requesting an
+// Name sessions on the runtime (e.g. "acp:1234") via [SessionOpts]; requesting an
 // existing live name returns that session. Each session has its own agent,
 // workdir, headless flag, and audit log.
 //
@@ -62,7 +62,7 @@
 //
 // SendParts and Interject accept []Part / ...Part attachments. A [Part] sets
 // exactly one of Path (extension-routed) or Data (MIME-routed, MIME required) —
-// so Telegram photos and voice notes never touch disk — with Kind [PartImage]
+// so media attachments from any front-end never touch disk — with Kind [PartImage]
 // or [PartAudio]. Size caps match read_media (10 MB images, 25 MB audio).
 // SendParts is all-or-nothing (one invalid part rejects the turn with an Error);
 // Interject drops invalid parts with a bracketed note and still delivers.
@@ -73,47 +73,34 @@
 // with shell3.subagent{name, description, ...} (the description is the
 // model-facing "when to use"); it is not part of the Tab/agent rotation. An
 // agent opts in by listing subagent handles: tools = { subagents = { explorer,
-// researcher } }.
+// researcher } } and sets delegation=true to receive the task/task_list/
+// task_status/task_cancel tools.
 //
-// A subagent is not an in-process subsystem: it is a backgrounded shell3
-// subprocess. When the active agent sets delegation=true, the Session carries a
-// standing "Delegation" system-reminder (injected every turn, not baked into the
-// Lua prompt) listing the agent's allowed subagents and the exact bash_bg command
-// to spawn one — `shell3 run --config <cfg> --agent <name> --out
-// <root>/.shell3_project/agents/<id>.jsonl --inbox <root>/.shell3_project/inbox.jsonl
-// --parent-session <id> --id <id> --prompt "<task>"` (paths are absolute under the
-// parent's runtime root so the child reports where THIS host watches).
-// The child streams its transcript to --out and, on completion, self-reports an
-// agent_done pointer by appending ONE line to the project's
-// .shell3_project/inbox.jsonl (a run with a recorded --parent-session is a
-// subagent). The live host holds a single fsnotify watch on that file
-// (Runtime.injectPointer) and injects the pointer (transcript path + short
-// preview) into its next turn. The host cats the transcript for detail.
-// Background subagents are fire-and-forget; a subagent that itself needs
-// children runs them with plain blocking bash + wait, so there is no dormant
-// parent to wake and no socket/revive machinery. Cancellation falls out of
-// bgjobs.KillAll, since a subagent is just a tracked bg job.
+// A subagent is an in-process background job. The agent spawns one with the
+// task tool ({subagent_type, prompt, description}); the call returns immediately.
+// The jobManager (this package, jobs.go) runs the child as a goroutine under a
+// concurrency cap (shell3.background{max_concurrent=N}, default 8). On
+// completion the jobManager wakes the parent session with a capped result summary
+// injected into context — there is no subprocess, no .shell3_project/inbox.jsonl,
+// and no fsnotify watch. Delegation is single-level: a subagent is not given the
+// task tool. Max nesting depth is shell3.subagents{max_depth=N} (default 3).
+// Cancellation is via task_cancel <id> through the jobManager.
 package shell3
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
 
-	"github.com/weatherjean/shell3/internal/bgjobs"
 	"github.com/weatherjean/shell3/internal/chat"
+	"github.com/weatherjean/shell3/internal/fsx"
 	"github.com/weatherjean/shell3/internal/llm"
-	"github.com/weatherjean/shell3/internal/notify"
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
@@ -153,6 +140,10 @@ type Part struct {
 	MIME string // required with Data, e.g. "image/png", "audio/mpeg"
 }
 
+// FileSystem is the pluggable file-I/O backend for the read and edit_file
+// tools, settable per session via SessionOpts.FS. Nil ⇒ direct OS disk I/O.
+type FileSystem = fsx.FileSystem
+
 // Spec configures Run / Start. Prompt is used by Run only.
 type Spec struct {
 	Prompt     string
@@ -176,24 +167,12 @@ type Spec struct {
 	// a closure that releases the terminal for the duration of the command.
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
 	// Asker confirms an on_tool_call ask-verdict command with a human and returns
-	// true to allow. A front-end supplies it (TUI prompt / Telegram buttons). nil
+	// true to allow. A front-end supplies it (TUI prompt or equivalent). nil
 	// means no human is attached (headless), so ask degrades to deny.
 	Asker func(ctx context.Context, command, reason string) bool
-	// ID is the caller-chosen id stamped into the agent_done report (--id;
-	// conventionally also the transcript filename stem). Empty leaves the id
-	// blank in the report.
-	ID string
 	// ResumeID, when non-empty, reloads that stored session's messages and
 	// continues its conversation instead of starting fresh.
 	ResumeID string
-	// ParentSession, when non-empty, marks this run as a subagent: on completion
-	// it appends one pointer line to the project inbox for the spawning host to
-	// surface. Recorded as the run's meta.json parent_id.
-	ParentSession string
-	// ReportInbox, when non-empty, is the absolute inbox.jsonl path this run
-	// reports completion to (--inbox) — the parent's inbox. Decouples completion
-	// delivery from the subagent's working directory.
-	ReportInbox string
 }
 
 // ErrBusy reports a call that requires the session to be idle while a turn is
@@ -304,6 +283,10 @@ type Session struct {
 	// TurnConfig (see turnConfig). nil keeps shell_interactive "unavailable".
 	shellInteractive func(ctx context.Context, cmd, workdir string) string
 
+	// fs is SessionOpts.FS, threaded into every turn's TurnConfig.FS (see
+	// turnConfig). nil keeps the OS disk backend.
+	fs fsx.FileSystem
+
 	// asker is Spec.Asker, threaded into every turn's TurnConfig.Asker (see
 	// turnConfig). nil keeps on_tool_call ask-verdicts denying.
 	asker func(ctx context.Context, command, reason string) bool
@@ -325,25 +308,14 @@ type Session struct {
 	name        string
 	ownsRuntime bool
 
-	opts SessionOpts // the SessionOpts this session was built from (for reload re-derivation)
+	opts  SessionOpts // the SessionOpts this session was built from (for reload re-derivation)
+	depth int         // subagent nesting depth (0 = root user session)
 
 	// resumedFrom is the store id this session reattached to on creation ("" when
 	// it started fresh); resumedMsgs is how many messages were reloaded. Both feed
 	// front-end "attached to session #N" status lines. Immutable after newSession.
 	resumedFrom string
 	resumedMsgs int
-
-	// parentSession is the spawning session id ("" for a root session). Non-empty
-	// marks this run as a subagent: Close appends a completion pointer to the
-	// project inbox (see report). Immutable after newSession.
-	parentSession string
-
-	// reportInbox is an absolute inbox.jsonl path to report completion to (from
-	// `shell3 run --inbox <path>`). When set, Close appends the pointer there —
-	// the PARENT's inbox — instead of this run's own store inbox, so delivery
-	// does not depend on the subagent sharing a working directory with its
-	// parent. "" → report to the own store inbox. Immutable after newSession.
-	reportInbox string
 
 	// closeOnce makes Close safe under concurrent invocation: a spawned
 	// subagent goroutine calls child.Close() at the same time Runtime.Close may
@@ -364,10 +336,6 @@ type Session struct {
 	// which would race on unsynchronized session state) into ErrBusy instead
 	// of a data race.
 	busy bool
-
-	// reportID is the caller-chosen id (Spec.ID) stamped into this session's
-	// completion notification reported to its parent during Close (see report).
-	reportID string
 }
 
 // Start loads the config, builds a single-session Runtime, and returns its one
@@ -386,8 +354,6 @@ func Start(ctx context.Context, spec Spec) (*Session, error) {
 		ShellInteractive: spec.ShellInteractive,
 		Asker:            spec.Asker,
 		ResumeID:         spec.ResumeID,
-		ParentSession:    spec.ParentSession,
-		ReportInbox:      spec.ReportInbox,
 		// OutPath deliberately empty: Start owns the sink so the start line
 		// keeps its prompt-derived label.
 	})
@@ -396,7 +362,6 @@ func Start(ctx context.Context, spec Spec) (*Session, error) {
 		return nil, err
 	}
 	s.ownsRuntime = true
-	s.reportID = spec.ID         // stamped into the parent completion report (see report)
 	s.cfg.OutPath = spec.OutPath // also feeds writeStartLine's out field and introspection
 	sink, sinkCleanup, err := chat.OpenSink(spec.OutPath)
 	if err != nil {
@@ -453,14 +418,14 @@ func newSession(cfg chat.Config, cleanup func(), opts SessionOpts) *Session {
 				chat.LogOrNoop(cfg.Log).Warn("resume load failed", "session_id", resumeID, "error", err)
 			}
 		default:
-			// Fresh run. A non-empty ParentSession marks it a subagent (recorded as
-			// meta.json parent_id); root sessions leave it blank. Best-effort: a
-			// failed NewSession leaves storeID "" (no persistence), logged at Warn so
-			// the silent non-persistence is observable rather than vanishing.
+			// Fresh run. Best-effort: a failed NewSession leaves storeID "" (no
+			// persistence), logged at Warn so the silent non-persistence is
+			// observable rather than vanishing.
+			_, metaModel := chat.SplitStatus(cfg.StatusLine)
 			if id, err := cfg.Store.NewSession(runs.Meta{
 				Workdir:    cfg.WorkDir,
 				ConfigPath: cfg.ConfigPath,
-				ParentID:   opts.ParentSession,
+				Model:      metaModel,
 			}); err == nil {
 				storeID = id
 			} else {
@@ -469,11 +434,9 @@ func newSession(cfg chat.Config, cleanup func(), opts SessionOpts) *Session {
 		}
 	}
 	s := &Session{
-		cfg:           cfg,
-		handlers:      chat.NewHandlers(),
-		cleanup:       cleanup,
-		parentSession: opts.ParentSession,
-		reportInbox:   opts.ReportInbox,
+		cfg:      cfg,
+		handlers: chat.NewHandlers(),
+		cleanup:  cleanup,
 		// Default to a no-op so Close is safe even when Start didn't open a
 		// sink (and for tests that build a Session via newSession directly).
 		sinkCleanup: func() {},
@@ -789,6 +752,19 @@ func (s *Session) WakeEvents() <-chan HostEvent {
 	return rt.Events()
 }
 
+// JobEvents exposes the owning Runtime's background-job progress stream so a
+// single-session front-end created via Start can live-tail jobs without holding
+// a separate *Runtime handle. Returns nil when the session has no runtime.
+func (s *Session) JobEvents() <-chan JobProgress {
+	s.mu.Lock()
+	rt := s.runtime
+	s.mu.Unlock()
+	if rt == nil {
+		return nil
+	}
+	return rt.JobEvents()
+}
+
 // Close ends the conversation: cancels any in-flight turn, waits for it to
 // finish (so its deferred history persist runs against the still-open store),
 // then ends the store session and releases the config.
@@ -831,17 +807,6 @@ func (s *Session) doClose() error {
 	if done != nil {
 		<-done // turn goroutine (and its deferred history persist) has finished
 	}
-	// Report this session's completion by appending one pointer line to the
-	// project inbox, which the live host watches. A no-op for a root session (no
-	// parent) and when no store is configured. See report.
-	s.report(notify.Notification{
-		Kind:       notify.KindAgentDone,
-		ID:         s.reportID,
-		Status:     s.completionStatus(),
-		Preview:    s.completionPreview(),
-		Transcript: s.cfg.OutPath,
-	})
-
 	s.sess.End("ok")
 	var endErr error
 	if s.cfg.Store != nil {
@@ -881,39 +846,19 @@ func (s *Session) doClose() error {
 	return endErr
 }
 
-// completionStatus reports "ok" or "error" for this session's parent report,
-// mirroring doClose's audit-end status: any turn that emitted an error event
-// flips sawError. Read under s.mu like doClose's WriteEnd status.
-func (s *Session) completionStatus() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.sawError {
-		return "error"
-	}
-	return "ok"
-}
-
-// completionPreview returns the last assistant message's text, truncated to
-// ≤200 runes — the short result summary carried in the parent report (the
-// transcript holds the full output).
-func (s *Session) completionPreview() string {
-	msgs := s.sess.Messages()
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == llm.RoleAssistant && msgs[i].Content != "" {
-			return truncatePreviewRunes(strings.TrimSpace(msgs[i].Content))
-		}
-	}
-	return ""
-}
-
-// truncatePreviewRunes clamps s to 200 runes on a rune boundary, appending an
-// ellipsis when cut.
+// truncatePreviewRunes clamps s to ~200 bytes on a rune boundary, appending an
+// ellipsis when cut — the short-preview budget for run-list cards.
 func truncatePreviewRunes(s string) string {
-	const previewMax = 200
-	if len(s) <= previewMax {
+	return truncateRunes(s, 200)
+}
+
+// truncateRunes clamps s to at most max bytes, cutting on a rune boundary
+// (never mid-UTF-8-sequence) and appending an ellipsis when trimmed.
+func truncateRunes(s string, max int) string {
+	if len(s) <= max {
 		return s
 	}
-	cut := previewMax
+	cut := max
 	for cut > 0 && !utf8.RuneStart(s[cut]) {
 		cut--
 	}
@@ -996,6 +941,41 @@ func (s *Session) turnConfig() chat.TurnConfig {
 	cfg := s.cfg
 	tc := chat.NewTurnConfig(cfg, s.handlers, shellInteractive)
 	tc.Asker = chat.AskFunc(s.asker)
+	tc.FS = s.fs
+	if s.runtime != nil && s.runtime.jobs != nil {
+		rt := s.runtime
+		parent := s
+		tc.StartBashBg = func(command, workdir string, argv []string) (string, error) {
+			return rt.jobs.startCommand(parent, command, workdir, argv)
+		}
+		maxDepth := rt.subagentMaxDepth() // Task 5; default 3
+		allowed := cfg.Subagents          // the active agent's tools.subagents allowlist
+		tc.StartSubagent = func(agent, prompt, desc string) (string, error) {
+			// Enforce the allowlist the delegation reminder advertises: only the
+			// names in tools.subagents may be spawned, never an arbitrary declared
+			// agent. An empty allowlist means this agent may not delegate at all.
+			if !slices.Contains(allowed, agent) {
+				if len(allowed) == 0 {
+					return "", fmt.Errorf("this agent has no subagents configured (tools.subagents is empty)")
+				}
+				return "", fmt.Errorf("subagent_type %q is not allowed for this agent; allowed subagents: %s", agent, strings.Join(allowed, ", "))
+			}
+			depth := parent.depth + 1
+			if depth > maxDepth {
+				return "", fmt.Errorf("max subagent depth %d reached (this session is at depth %d)", maxDepth, parent.depth)
+			}
+			return rt.jobs.startSubagent(parent, agent, prompt, desc, depth)
+		}
+		tc.ListJobs = func() string {
+			return rt.jobs.formatJobList()
+		}
+		tc.JobStatus = func(id string) string {
+			return rt.jobs.formatJobStatus(id)
+		}
+		tc.CancelJob = func(id string) string {
+			return rt.jobs.formatJobCancel(id)
+		}
+	}
 	return tc
 }
 
@@ -1019,9 +999,11 @@ func (s *Session) Clear() error {
 				chat.LogOrNoop(s.cfg.Log).Warn("clear: end session failed", "session_id", old, "error", err)
 			}
 		}
+		_, clearModel := chat.SplitStatus(s.cfg.StatusLine)
 		if id, err := s.cfg.Store.NewSession(runs.Meta{
 			Workdir:    s.cfg.WorkDir,
 			ConfigPath: s.cfg.ConfigPath,
+			Model:      clearModel,
 		}); err == nil {
 			s.sess.SetID(id)
 		} else {
@@ -1120,7 +1102,7 @@ type ParamValue struct {
 // need, in one allocation. It is a point-in-time copy; mutate the Session (e.g.
 // SwitchAgent, SetParam) and call Snapshot again to observe changes. Safe to
 // call concurrently with a running turn: cfg reads are taken under s.mu against
-// the between-turns writers (the Telegram dashboard polls it mid-turn).
+// the between-turns writers (a front-end may poll it mid-turn).
 type Snapshot struct {
 	Agent         string
 	Model         string
@@ -1226,7 +1208,7 @@ type ToolCallInfo struct {
 // values. Tool-role messages have their internal "[tool_call_id=…]\n" prefix
 // stripped from Content so embedders see the raw tool output. Safe to call
 // concurrently with a running turn: it reads a single locked snapshot via
-// chat.Session.HistorySnapshot (the Telegram dashboard polls it mid-turn), so a
+// chat.Session.HistorySnapshot (a front-end may poll it mid-turn), so a
 // concurrent compaction can't split the message slice from its reminder anchors.
 func (s *Session) History() []HistoryEntry {
 	msgs, rems := s.sess.HistorySnapshot()
@@ -1302,182 +1284,78 @@ func (s *Session) Prune(id string) (summary string, ok bool) {
 // conversation before the model does anything. See chat.Session.QueueCompact.
 func (s *Session) QueueCompact() { s.sess.QueueCompact() }
 
-// JobInfo is the public projection of one live background job (a bash_bg
-// process or a fire-and-forget subagent) for an embedder to display.
+// JobProgress is an incremental progress event emitted on the JobEvents() bus
+// for each background job. Chunk events carry a non-empty Chunk field; the
+// terminal event has Done=true and an empty Chunk (plus Summary for subagents).
+// Parent is the parent session's registry name (same value bgJob.parentID holds).
+type JobProgress struct {
+	JobID   string
+	Parent  string
+	Kind    JobKind
+	Title   string
+	Chunk   string // incremental rendered text; empty on the terminal event
+	Done    bool
+	Summary string // subagent jobs only; empty for command jobs
+}
+
+// JobInfo is the public projection of one background job (a bash_bg process or
+// a fire-and-forget subagent) for an embedder to display. Done jobs are
+// retained in-memory for the session lifetime (up to 100) so the TUI can show
+// their final output and transcript.
 type JobInfo struct {
 	ID        string
 	Cmd       string
 	PID       int
 	StartedAt time.Time
-}
-
-// runsDir reads the project runs directory under s.mu, since SwitchAgent
-// reassigns s.cfg wholesale between turns (mirrors Snapshot's locking).
-func (s *Session) runsDir() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.cfg.RunsDir
+	Kind      JobKind
+	Depth     int
+	ParentID  string
+	Done      bool      // true once the job has finished
+	Exit      *int      // command jobs: exit code (nil while running or for subagents)
+	Summary   string    // subagent jobs: final assistant text (empty for command jobs)
+	Error     string    // subagent jobs: last turn error ("" = clean run)
+	EndedAt   time.Time // zero while running
 }
 
 // Jobs lists the live background jobs for this session's project — bash_bg
-// processes and fire-and-forget subagents — newest first. Returns nil when no
-// runs directory is configured or none are running. (= the TUI's :background.)
+// processes and in-process subagents — newest first. Returns nil when the
+// in-process job runtime is unavailable. (= the TUI's :background.)
 func (s *Session) Jobs() []JobInfo {
-	dir := s.runsDir()
-	if dir == "" {
+	if s.runtime == nil || s.runtime.jobs == nil {
 		return nil
 	}
-	jobs, err := bgjobs.List(dir)
-	if err != nil {
-		return nil
-	}
-	out := make([]JobInfo, 0, len(jobs))
-	for _, j := range jobs {
-		out = append(out, JobInfo{ID: j.ID, Cmd: j.Cmd, PID: j.PID, StartedAt: j.StartedAt})
-	}
-	slices.SortFunc(out, func(a, b JobInfo) int { return b.StartedAt.Compare(a.StartedAt) })
-	return out
+	return s.runtime.jobs.list()
 }
 
-// jobOutputCap bounds how many trailing bytes of a job's log JobOutput returns.
-const jobOutputCap = 64 * 1024
-
-// tailFile reads up to the trailing max bytes of the file at path WITHOUT loading
-// the whole file into memory: a long-running job's log or transcript can grow to
-// many MB, and these reads run on the TUI's update goroutine, so a whole-file
-// read would briefly freeze the UI. The bool reports whether the head was skipped
-// (file larger than max), so the caller can drop the now-partial first line.
-func tailFile(path string, max int64) (data []byte, truncated bool, err error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, false, err
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
-		return nil, false, err
-	}
-	if info.Size() > max {
-		// Seek relative to the CURRENT end rather than from the (possibly stale)
-		// Stat size, and bound the read with io.LimitReader: a job log being
-		// actively appended must not make this read grow past the cap. These reads
-		// run on the TUI goroutine, so staying bounded is what keeps the UI from
-		// freezing on a large, fast-growing log.
-		if _, err := f.Seek(-max, io.SeekEnd); err != nil {
-			return nil, false, err
-		}
-		b, err := io.ReadAll(io.LimitReader(f, max))
-		return b, true, err
-	}
-	// Even when the file fit at Stat time it may grow before/while we read; cap it.
-	b, err := io.ReadAll(io.LimitReader(f, max))
-	return b, false, err
-}
-
-// dropPartialFirstLine removes the (almost certainly partial) first line left by
-// a byte-cap tail read, so plain output and JSONL parsing both start on a clean
-// line boundary. No-op when there is no newline.
-func dropPartialFirstLine(data []byte) []byte {
-	if i := bytes.IndexByte(data, '\n'); i >= 0 {
-		return data[i+1:]
-	}
-	return data
-}
-
-// JobOutput returns the tail (up to jobOutputCap bytes) of a background job's
-// combined stdout/stderr log, or "" when the log is unavailable.
+// JobOutput returns the in-memory output buffer of a background command job,
+// or "" when the job runtime is unavailable or the job is a subagent.
 func (s *Session) JobOutput(id string) string {
-	dir := s.runsDir()
-	if dir == "" {
+	if s.runtime == nil || s.runtime.jobs == nil {
 		return ""
 	}
-	data, truncated, err := tailFile(bgjobs.LogPath(dir, id), jobOutputCap)
-	if err != nil {
-		return ""
-	}
-	if truncated {
-		data = dropPartialFirstLine(data) // byte-cap left a partial first line
-	}
-	return string(data)
+	return s.runtime.jobs.output(id)
 }
 
-// transcriptPath extracts the --out transcript path from a job's recorded spawn
-// command, or "" when the job has none. Only a `shell3 run` invocation (a
-// subagent, or a headless run) writes a JSONL transcript at --out; a plain
-// bash_bg job that merely happens to use an --out flag (e.g. `ffmpeg --out=x.mp4`
-// or `mytool --out report.csv`) is NOT one, so it falls back to its stdout log
-// rather than rendering an empty, unparseable "transcript". Handles both
-// "--out <path>" and "--out=<path>".
-func transcriptPath(cmd string) string {
-	fields := strings.Fields(cmd)
-	if !isShell3Run(fields) {
-		return ""
-	}
-	for i, f := range fields {
-		if after, ok := strings.CutPrefix(f, "--out="); ok {
-			return after
-		}
-		if f == "--out" && i+1 < len(fields) {
-			return fields[i+1]
-		}
-	}
-	return ""
-}
-
-// isShell3Run reports whether the command fields are a `shell3 run …` invocation:
-// the first non-env-assignment token's basename is "shell3" and the next token is
-// the "run" subcommand. Leading `VAR=val` env assignments are skipped.
-func isShell3Run(fields []string) bool {
-	for i, f := range fields {
-		if strings.Contains(f, "=") && !strings.HasPrefix(f, "-") {
-			continue // leading env assignment (FOO=bar)
-		}
-		return filepath.Base(f) == "shell3" && i+1 < len(fields) && fields[i+1] == "run"
-	}
-	return false
-}
-
-// JobTranscript returns the structured --out transcript (the rich JSONL audit
-// log: reasoning, tool calls, assistant messages) of a background SUBAGENT job,
-// capped to the trailing jobOutputCap bytes, or "" when the job has no transcript
-// (a plain bash_bg job) or it is unreadable. The TUI's :background view renders
-// this instead of the plain stdout log when present — see JobOutput for the
-// fallback.
+// JobTranscript returns the messages.jsonl contents of a background SUBAGENT
+// job's child session, or "" when the job runtime is unavailable or the job is
+// a command (not a subagent). The TUI's :background view renders this instead
+// of the plain stdout log when present — see JobOutput for the fallback.
 func (s *Session) JobTranscript(id string) string {
-	dir := s.runsDir()
-	if dir == "" {
+	if s.runtime == nil || s.runtime.jobs == nil {
 		return ""
 	}
-	var cmd string
-	for _, j := range s.Jobs() {
-		if j.ID == id {
-			cmd = j.Cmd
-			break
-		}
-	}
-	path := transcriptPath(cmd)
-	if path == "" {
-		return ""
-	}
-	data, truncated, err := tailFile(path, jobOutputCap)
-	if err != nil {
-		return ""
-	}
-	if truncated {
-		data = dropPartialFirstLine(data) // byte-cap left a partial first JSONL line
-	}
-	return string(data)
+	return s.runtime.jobs.transcript(id)
 }
 
-// KillJob signals one background job with SIGTERM to its process group so it
-// shuts down gracefully (= the TUI's ctrl+x in :background). It does not block;
-// the job leaves the live list once its process dies.
+// KillJob cancels one background job (= the TUI's ctrl+x in :background). For
+// command jobs this sends a cancellation signal; for subagent jobs it cancels
+// the child session's context. It does not block; the job leaves the live list
+// once it exits.
 func (s *Session) KillJob(id string) error {
-	dir := s.runsDir()
-	if dir == "" {
-		return errors.New("no runs directory configured")
+	if s.runtime == nil || s.runtime.jobs == nil {
+		return fmt.Errorf("no job runtime")
 	}
-	return bgjobs.Kill(dir, id)
+	return s.runtime.jobs.cancel(id)
 }
 
 // SetParam sets a tunable provider parameter for subsequent turns (= the TUI's
