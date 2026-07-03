@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/applog"
-	"github.com/weatherjean/shell3/internal/bgjobs"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/runs"
 )
@@ -47,7 +46,8 @@ func classifyHandlerOutput(out string) toolResult {
 // dispatchCustomTool resolves a custom-tool call to its bash command + env and
 // runs it. Foreground tools block and return the command's output (a non-zero
 // exit is surfaced as an error result, "exited N"). Background tools dispatch
-// via bgjobs (sink-reported) and return a pointer to the spawned job. The
+// onto the in-process job runtime (StartBashBg, same as bash_bg) and return the
+// job id; completion is delivered as a notice on a later turn. The
 // resolved command is the trusted author template, so its text BYPASSES on_tool_call
 // rewriting/denylisting (the tool call itself still fires the chain by name) — the
 // model supplies only env values, never the command string.
@@ -74,14 +74,14 @@ func dispatchCustomTool(ctx context.Context, cfg TurnConfig, name, rawArgs strin
 		return errResult("error: " + err.Error())
 	}
 	if rt.Background {
-		if cfg.RunsDir == "" {
-			return errResult("error: background tools require a runs directory")
+		if cfg.StartBashBg == nil {
+			return errResult("error: background tools are not available")
 		}
-		job, err := bgjobs.Start(cfg.RunsDir, []string{"bash", "-c", rt.Command}, rt.Command, cfg.WorkDir, rt.Env)
+		jobID, err := cfg.StartBashBg(rt.Command, cfg.WorkDir, []string{"bash", "-c", rt.Command}, rt.Env)
 		if err != nil {
 			return errResult("error: " + err.Error())
 		}
-		return okResult(fmt.Sprintf("started background tool %s\npid: %d\nlog: %s\n", job.ID, job.PID, job.Log))
+		return okResult(fmt.Sprintf("started background tool %s\nYou'll get a completion notice on your next turn. Do not poll.", jobID))
 	}
 	timeout := time.Duration(DefaultBashTimeoutSeconds) * time.Second
 	if rt.Timeout > 0 {

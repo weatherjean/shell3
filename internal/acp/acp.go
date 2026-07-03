@@ -44,7 +44,7 @@ func Run(ctx context.Context, rt *shell3.Runtime, in io.Reader, out io.Writer, o
 		opts.onReady(a)
 	}
 	// Start the connection-lifetime event pump BEFORE blocking. It forwards
-	// out-of-turn Notices and Wake-driven queued turns to the client. pumpCtx is
+	// Wake-driven queued turns to the client out-of-turn. pumpCtx is
 	// cancelled when Run returns (via the defer below), so the pump exits on peer
 	// disconnect too — not only when the caller cancels ctx.
 	pumpCtx, cancelPump := context.WithCancel(ctx)

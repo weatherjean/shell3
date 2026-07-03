@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -156,7 +157,10 @@ func (m *jobManager) evictOldestDoneIfNeeded() {
 	}
 }
 
-func (m *jobManager) startCommand(parent *Session, command, workdir string, argv []string) (string, error) {
+// startCommand launches argv as a managed background job. env holds extra
+// "K=V" entries appended to the inherited environment (background custom tools
+// inject their params this way); nil inherits the environment unchanged.
+func (m *jobManager) startCommand(parent *Session, command, workdir string, argv, env []string) (string, error) {
 	m.mu.Lock()
 	if m.runningCount() >= m.max {
 		m.mu.Unlock()
@@ -179,6 +183,9 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = workdir
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	cmd.Stdout = out
 	cmd.Stderr = out
 	// Put the command and its descendants in their own process group and signal

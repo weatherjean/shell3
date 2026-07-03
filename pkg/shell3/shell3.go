@@ -945,8 +945,8 @@ func (s *Session) turnConfig() chat.TurnConfig {
 	if s.runtime != nil && s.runtime.jobs != nil {
 		rt := s.runtime
 		parent := s
-		tc.StartBashBg = func(command, workdir string, argv []string) (string, error) {
-			return rt.jobs.startCommand(parent, command, workdir, argv)
+		tc.StartBashBg = func(command, workdir string, argv, env []string) (string, error) {
+			return rt.jobs.startCommand(parent, command, workdir, argv, env)
 		}
 		maxDepth := rt.subagentMaxDepth() // Task 5; default 3
 		allowed := cfg.Subagents          // the active agent's tools.subagents allowlist

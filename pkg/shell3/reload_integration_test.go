@@ -6,13 +6,13 @@ import (
 	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
-// TestReload_PreservesHistoryAndArmsNewJob proves that a reload arms a
-// newly-declared cron job AND that the SAME live *Session object survives the
-// rebuild (its identity and active agent are preserved in place — it is never
-// recreated). Reusing the same `sess` handle across the reload is the identity
-// proof; the active-agent + agent-list assertions prove the in-place re-derive
-// actually took effect on that same object rather than leaving it stale.
-func TestReload_PreservesHistoryAndArmsNewJob(t *testing.T) {
+// TestReload_PreservesHistory proves that the SAME live *Session object
+// survives the rebuild (its identity and active agent are preserved in place —
+// it is never recreated). Reusing the same `sess` handle across the reload is
+// the identity proof; the active-agent + agent-list assertions prove the
+// in-place re-derive actually took effect on that same object rather than
+// leaving it stale.
+func TestReload_PreservesHistory(t *testing.T) {
 	dir := t.TempDir()
 	path := writeCfg(t, dir, baseCfg)
 	rt, err := shell3.NewRuntime(shell3.RuntimeSpec{ConfigPath: path, WorkDir: dir})

@@ -15,7 +15,7 @@ import (
 func TestJobManagerCommandLifecycle(t *testing.T) {
 	m := newJobManager(nil, 8)
 	// echo writes to the in-memory buffer and exits; no parent notice in this unit test.
-	id, err := m.startCommand(nil, "echo hi", t.TempDir(), []string{"echo", "hi"})
+	id, err := m.startCommand(nil, "echo hi", t.TempDir(), []string{"echo", "hi"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -36,11 +36,11 @@ func TestJobManagerCommandLifecycle(t *testing.T) {
 
 func TestJobManagerConcurrencyCap(t *testing.T) {
 	m := newJobManager(nil, 1)
-	_, err := m.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "1"})
+	_, err := m.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "1"}, nil)
 	if err != nil {
 		t.Fatalf("first start: %v", err)
 	}
-	if _, err := m.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "1"}); err == nil {
+	if _, err := m.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "1"}, nil); err == nil {
 		t.Fatal("expected cap error on second start, got nil")
 	}
 }
@@ -144,7 +144,7 @@ func TestSubagentTranscriptAfterClose(t *testing.T) {
 // in list() with Done=true, and that output() returns the captured output.
 func TestJobManagerRetainsDoneCommandJob(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "echo retained", t.TempDir(), []string{"echo", "retained"})
+	id, err := m.startCommand(nil, "echo retained", t.TempDir(), []string{"echo", "retained"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestJobManagerDoneCap(t *testing.T) {
 
 	// Start and let maxDoneJobs+1 command jobs finish.
 	for i := 0; i < maxDoneJobs+1; i++ {
-		_, err := m.startCommand(nil, "echo x", t.TempDir(), []string{"echo", "x"})
+		_, err := m.startCommand(nil, "echo x", t.TempDir(), []string{"echo", "x"}, nil)
 		if err != nil {
 			t.Fatalf("startCommand %d: %v", i, err)
 		}
@@ -253,7 +253,7 @@ func TestJobManagerDoneCap(t *testing.T) {
 // returns nil and does not panic.
 func TestJobManagerCancelDoneJobIsNoOp(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "echo done", t.TempDir(), []string{"echo", "done"})
+	id, err := m.startCommand(nil, "echo done", t.TempDir(), []string{"echo", "done"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestFormatJobList_Empty(t *testing.T) {
 // TestFormatJobList_ShowsRunning verifies a running command job appears with status "running".
 func TestFormatJobList_ShowsRunning(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "sleep 60", t.TempDir(), []string{"sleep", "60"})
+	id, err := m.startCommand(nil, "sleep 60", t.TempDir(), []string{"sleep", "60"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestFormatJobStatus_UnknownID(t *testing.T) {
 // TestFormatJobStatus_Truncates verifies that a large output is capped.
 func TestFormatJobStatus_Truncates(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "echo x", t.TempDir(), []string{"echo", "x"})
+	id, err := m.startCommand(nil, "echo x", t.TempDir(), []string{"echo", "x"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -401,7 +401,7 @@ func TestTruncateRunes(t *testing.T) {
 // (not collapsed to 1) in list() and the task_list rendering.
 func TestCommandRealExitCode(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "exit 7", t.TempDir(), []string{"sh", "-c", "exit 7"})
+	id, err := m.startCommand(nil, "exit 7", t.TempDir(), []string{"sh", "-c", "exit 7"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -424,7 +424,7 @@ func TestCommandRealExitCode(t *testing.T) {
 // the pipe wait, so wg.Wait returns promptly (this used to hang forever).
 func TestCommandCancelWithLingeringGrandchild(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "orphan", t.TempDir(), []string{"bash", "-c", "sleep 60 & echo started"})
+	id, err := m.startCommand(nil, "orphan", t.TempDir(), []string{"bash", "-c", "sleep 60 & echo started"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -519,7 +519,7 @@ func TestFormatJobCancel_UnknownID(t *testing.T) {
 // TestFormatJobCancel_KnownJob returns "cancelled task <id>".
 func TestFormatJobCancel_KnownJob(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "sleep 60", t.TempDir(), []string{"sleep", "60"})
+	id, err := m.startCommand(nil, "sleep 60", t.TempDir(), []string{"sleep", "60"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}

@@ -42,13 +42,13 @@ Use `shell3 read-session <session-id>` for a formatted chronological dump:
 
     shell3 read-session 20060102T150405.000000000
 
-## Background job logs
+## Subagent runs
 
-Background job logs are written under `.shell3_project/runs/jobs/`:
+A subagent's conversation is a session like any other, stored under
+`.shell3_project/runs/<id>/` and searchable the same way as your own history.
 
-    ls .shell3_project/runs/jobs/                  # list job files
-    cat .shell3_project/runs/jobs/<job-id>.jsonl   # read a job's output (stdout+stderr)
-    cat .shell3_project/runs/jobs/<job-id>.status  # pid, started_at, exit code
+(Live background jobs — subagents, `bash_bg`, and background custom tools — are
+inspected with the `task_list` / `task_status` tools, not files.)
 
 ## Rules
 

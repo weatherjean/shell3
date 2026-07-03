@@ -177,7 +177,7 @@ func (s *Store) ListSessions(limit int) ([]Meta, error) {
 }
 
 // ReminderLine is one persisted system-reminder, anchored to the message index
-// it precedes (mirrors chat.ReminderRecord) for faithful dashboard replay.
+// it precedes (mirrors chat.ReminderRecord) for faithful session replay.
 type ReminderLine struct {
 	Seq  int    `json:"seq"`
 	Text string `json:"text"`

@@ -82,9 +82,8 @@ See [configuration.md](configuration.md#opt-in-command-gate--on_tool_call) for h
 
 ## Out-of-band events
 
-Two kinds of events can arrive while no `session/prompt` is in flight:
+Events can arrive while no `session/prompt` is in flight:
 
-- **Host-dispatched results.** An embedding host can run an agent out-of-band with the library's `Session.Dispatch()` (e.g. driven by an external scheduler) and have the result posted back into the session as an operator notice. shell3 forwards these as `session/update` notifications — an out-of-turn message the user didn't prompt. See [library.md](library.md#host-driven-dispatch-sessiondispatch).
 - **Async subagent and `bash_bg` completions.** When a background job finishes while the session is idle, shell3 wakes the parent session and drains the queued turn, streaming the result as out-of-turn `agent_message_chunk` updates.
 
 ### Live job-progress cards

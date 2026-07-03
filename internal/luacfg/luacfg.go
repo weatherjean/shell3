@@ -340,6 +340,8 @@ func (c *LoadedConfig) FirstAgent() Agent {
 }
 
 // Subagents returns a copy of the registered subagents in declaration order.
+// Production reads go through SubagentDescription; this accessor exists for
+// tests asserting on declaration/dedup behavior.
 func (c *LoadedConfig) Subagents() []Subagent {
 	c.mu.Lock()
 	defer c.mu.Unlock()

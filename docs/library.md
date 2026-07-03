@@ -101,17 +101,6 @@ untouched and nothing changes. Live sessions keep their identity and history;
 the caller must ensure no turn is in flight. Returns a `ReloadResult` (agent
 and model counts, human-readable notes).
 
-## Host-driven dispatch: `Session.Dispatch`
-
-`Session.Dispatch(agent, prompt, DispatchOpts)` runs an agent from the host —
-not from a model turn — and reports the result back into the session as an
-operator notice, without starting a hidden model turn. It's the hook for
-host-side triggers such as an external scheduler (cron). `DispatchOpts` sets
-the working directory, a label that tags the delivered result (e.g.
-`"cron:nightly"`), and `Notify`: a successful run is delivered only when
-`Notify` is true, while a failed run **always** delivers, so a quiet background
-job can never fail silently.
-
 ## Session introspection and host tools
 
 A `Session` exposes the programmatic equivalents of the slash commands:

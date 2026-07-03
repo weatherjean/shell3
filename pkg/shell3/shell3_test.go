@@ -966,14 +966,14 @@ func TestSession_SinkStartLabel(t *testing.T) {
 }
 
 // TestSessionJobsFromManager verifies that Session.Jobs() reads from the
-// in-process job runtime rather than the old bgjobs file store.
+// in-process job runtime.
 func TestSessionJobsFromManager(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	s, err := rt.Session(SessionOpts{Name: "s1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = rt.jobs.startCommand(s, "sleep 1", t.TempDir(), []string{"sleep", "1"})
+	_, _ = rt.jobs.startCommand(s, "sleep 1", t.TempDir(), []string{"sleep", "1"}, nil)
 	jobs := s.Jobs()
 	if len(jobs) != 1 || jobs[0].Kind != JobCommand {
 		t.Fatalf("Session.Jobs = %+v, want one JobCommand", jobs)

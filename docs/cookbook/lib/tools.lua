@@ -4,7 +4,8 @@
 -- A custom tool is a bash command template, not a Lua function. Declared params
 -- are exported into the command env by their (lowercase) name; declared secrets
 -- are exported too (and kept out of the command string). Optionally set
--- background = true (fire-and-forget) and timeout = N (seconds).
+-- background = true (an in-process background job, like bash_bg — the agent
+-- gets a completion notice) and timeout = N (seconds, foreground only).
 
 -- A trivial template: params arrive as $-named env vars.
 local my_tool = shell3.tool({

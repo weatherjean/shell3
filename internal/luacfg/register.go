@@ -29,7 +29,7 @@ func (c *LoadedConfig) nameTaken(name string) bool {
 // (N counting from 2) that no agent or subagent already claims. This makes a
 // duplicate agent/subagent declaration auto-suffix ("code", "code2", "code3")
 // instead of failing the whole config load — the first declaration keeps its
-// bare name, so existing --agent/cron references to it stay valid.
+// bare name, so existing --agent references to it stay valid.
 func (c *LoadedConfig) uniqueName(base string) string {
 	if !c.nameTaken(base) {
 		return base

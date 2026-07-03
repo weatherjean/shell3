@@ -41,18 +41,7 @@ func (a *acpAgent) pump(ctx context.Context) {
 			if s == nil {
 				continue // session owned by another front-end / a child session
 			}
-			switch ev.Kind {
-			case shell3.Notice:
-				// A Notice (cron/host-dispatch result) is a ready-to-display
-				// message — forward it verbatim as an agent message. Use
-				// context.Background() (as every other out-of-turn send in this
-				// package does) so teardown can't drop a pending Notice mid-write;
-				// ctx only gates the loop.
-				_ = conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
-					SessionId: acpsdk.SessionId(s.id),
-					Update:    acpsdk.UpdateAgentMessageText(ev.Text),
-				})
-			case shell3.Wake:
+			if ev.Kind == shell3.Wake {
 				// A Wake means the session's inbox gained an item while idle (an
 				// async subagent completed, or steering that outlived a turn). Drain
 				// it as a fresh turn on its own goroutine so the pump keeps servicing

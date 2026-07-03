@@ -63,9 +63,9 @@ type Config struct {
 	// Store persists conversation history. Optional; nil keeps the session
 	// purely in-memory.
 	Store *runs.Store
-	// RunsDir is the project's .shell3_project/runs directory path, threaded
-	// to the background-job tool (bash_bg and background custom tools) so they
-	// can write job status files. Empty disables background jobs.
+	// RunsDir is the project's .shell3_project/runs directory path, shown in
+	// the system prompt's Environment section (history is searched with rg
+	// over it).
 	RunsDir string
 	// Personality is the loaded persona (system prompt, allowed tools).
 	Personality persona.Persona
@@ -239,7 +239,6 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler, shellInteractive
 		WorkDir:           cfg.WorkDir,
 		ConfigPath:        cfg.ConfigPath,
 		Store:             cfg.Store,
-		RunsDir:           cfg.RunsDir,
 		Handlers:          handlers,
 		Log:               LogOrNoop(cfg.Log),
 		Headless:          cfg.Headless,

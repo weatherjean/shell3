@@ -70,15 +70,6 @@ type Parts struct {
 // store-open itself failed, which is non-fatal and logged).
 func (p *Parts) Store() *runs.Store { return p.st }
 
-// RunsDir returns the project's .shell3_project/runs directory path.
-func (p *Parts) RunsDir() string { return p.runsDir }
-
-// Log returns the rotating application logger.
-func (p *Parts) Log() applog.Logger { return p.log }
-
-// Root returns the runtime root working directory (the CWD passed to BuildParts).
-func (p *Parts) Root() string { return p.root }
-
 // ConfigPath returns the resolved absolute shell3.lua path that produced these
 // parts (recorded per session for resume).
 func (p *Parts) ConfigPath() string { return p.configPath }

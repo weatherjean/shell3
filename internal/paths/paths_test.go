@@ -27,7 +27,4 @@ func TestLocal(t *testing.T) {
 	if l.Runs != "/work/project/.shell3_project/runs" {
 		t.Fatalf("Runs: got %q", l.Runs)
 	}
-	if l.Inbox != "/work/project/.shell3_project/inbox.jsonl" {
-		t.Fatalf("Inbox: got %q", l.Inbox)
-	}
 }

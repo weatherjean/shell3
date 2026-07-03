@@ -59,10 +59,6 @@ func (h funcHandler) Execute(ctx context.Context, id string, args json.RawMessag
 type ToolConfig struct {
 	// Store is the persistence layer for the history tools. May be nil.
 	Store *runs.Store
-	// RunsDir is the project's .shell3_project/runs directory path, used by
-	// background job tools (bash_bg, background custom tools) to write status
-	// files. Empty disables background jobs.
-	RunsDir string
 	// WorkDir is the working directory tools should resolve paths against.
 	WorkDir string
 	// FS is the file-I/O backend for the read and edit_file tools. Nil ⇒ the
@@ -72,8 +68,10 @@ type ToolConfig struct {
 	// deny (headless subagent path).
 	Asker AskFunc
 	// StartBashBg launches a background shell command on the host's in-process
-	// job runtime and returns its job id. Nil ⇒ background jobs disabled.
-	StartBashBg func(command, workdir string, argv []string) (string, error)
+	// job runtime and returns its job id. env holds extra "K=V" entries appended
+	// to the inherited environment (background custom tools inject their params
+	// this way; bash_bg passes nil). Nil func ⇒ background jobs disabled.
+	StartBashBg func(command, workdir string, argv, env []string) (string, error)
 	// StartSubagent launches a background subagent (child session) and returns its
 	// id. It enforces the recursion depth guard and concurrency cap. Nil ⇒ subagents
 	// unavailable.
@@ -135,9 +133,6 @@ type TurnConfig struct {
 	ConfigPath string
 	// Store persists newly appended messages when non-nil.
 	Store *runs.Store
-	// RunsDir is the project's .shell3_project/runs directory path, threaded to
-	// background-job tools. Empty disables background jobs.
-	RunsDir string
 	// Handlers maps tool name to built-in implementation. Built once via
 	// NewHandlers and shared across turns.
 	Handlers map[string]ToolHandler
@@ -169,8 +164,10 @@ type TurnConfig struct {
 	// deny (headless subagent path).
 	Asker AskFunc
 	// StartBashBg launches a background shell command on the host's in-process
-	// job runtime and returns its job id. Nil ⇒ background jobs disabled.
-	StartBashBg func(command, workdir string, argv []string) (string, error)
+	// job runtime and returns its job id. env holds extra "K=V" entries appended
+	// to the inherited environment (background custom tools inject their params
+	// this way; bash_bg passes nil). Nil func ⇒ background jobs disabled.
+	StartBashBg func(command, workdir string, argv, env []string) (string, error)
 	// StartSubagent launches a background subagent (child session) and returns its
 	// id. It enforces the recursion depth guard and concurrency cap. Nil ⇒ subagents
 	// unavailable.

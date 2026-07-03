@@ -37,7 +37,7 @@ func (BashBgHandler) Execute(ctx context.Context, id string, args json.RawMessag
 	if wd == "" {
 		wd = cfg.WorkDir
 	}
-	jobID, err := cfg.StartBashBg(p.Command, wd, argv)
+	jobID, err := cfg.StartBashBg(p.Command, wd, argv, nil)
 	if err != nil {
 		return "", fmt.Errorf("bash_bg: %w", err)
 	}

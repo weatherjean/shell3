@@ -272,8 +272,10 @@ Two habits keep tools safe and tidy: use `curl --data-urlencode` for any
 user-supplied parameter (never interpolate model text straight into a URL), and
 shape the output with `jq` so you return a clean line, not a wall of JSON.
 
-Optional fields: `background = true` (fire-and-forget) and `timeout = N`
-(seconds). See [cookbook/lib/tools.lua](cookbook/lib/tools.lua) for a full
+Optional fields: `background = true` (runs the command as an in-process
+background job, like `bash_bg`: it shows up in the TUI `:background` modal and
+the agent is notified with a completion notice on a later turn) and
+`timeout = N` (seconds; foreground tools only). See [cookbook/lib/tools.lua](cookbook/lib/tools.lua) for a full
 template, including the `web_fetch` and `brave_search` tools the base config
 ships with.
 

@@ -413,7 +413,6 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 				if handler != nil {
 					toolCfg := ToolConfig{
 						Store:         cfg.Store,
-						RunsDir:       cfg.RunsDir,
 						WorkDir:       cfg.WorkDir,
 						FS:            cfg.FS,
 						RunToolCall:   cfg.RunToolCall,

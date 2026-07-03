@@ -73,10 +73,6 @@ cat .shell3_project/runs/<id>/meta.json
 shell3 read-session <id>
 ```
 
-Custom background-tool output (`shell3.tool{background=true}`) is written to
-`.shell3_project/runs/jobs/<job-id>.jsonl` (stdout+stderr), with a sibling
-`<job-id>.status` JSON file (pid, started_at, exit code).
-
 The agent can search its own past conversations the same way (via the
 `history` skill), using `bash` with `rg` — no special tool needed.
 
