@@ -33,12 +33,12 @@ func writeTmpFile(t *testing.T, dir, name, body string) string {
 // fail-closed boundary — and the same Passthrough plumbing — the production bridge
 // guarantees, instead of relying on the two iota blocks happening to align.
 func bridgeVerdict(v luacfg.ToolCallVerdict) chat.ToolCallVerdict {
-	action := chat.Block // fail closed on any unmapped action
+	action := chat.ActionBlock // fail closed on any unmapped action
 	switch v.Action {
 	case luacfg.ActionRun:
-		action = chat.Run
+		action = chat.ActionRun
 	case luacfg.ActionAsk:
-		action = chat.Ask
+		action = chat.ActionAsk
 	}
 	return chat.ToolCallVerdict{
 		Action:      action,
@@ -247,12 +247,14 @@ func runToolCallTurn(t *testing.T, lc *luacfg.LoadedConfig, dir, prompt string, 
 		LLM:               fake,
 		Personality:       persona.BasePersona("you are a test", toolDefs),
 		StatusLine:        "test │ x",
-		WorkDir:           dir,
 		Log:               applog.Noop{},
 		ResolveCustomTool: lc.ResolveCustomCall,
 		AgentKnobs:        chat.AgentKnobs{CustomToolNames: map[string]bool{"greet": true}},
-		RunToolCall: func(ctx context.Context, name, command, argsJSON string) chat.ToolCallVerdict {
-			return bridgeVerdict(lc.RunToolCall(ctx, name, command, argsJSON))
+		ToolConfig: chat.ToolConfig{
+			WorkDir: dir,
+			RunToolCall: func(ctx context.Context, name, command, argsJSON string) chat.ToolCallVerdict {
+				return bridgeVerdict(lc.RunToolCall(ctx, name, command, argsJSON))
+			},
 		},
 		Handlers: chat.NewHandlers(),
 	}
@@ -329,10 +331,12 @@ shell3.agent({ name = "a", model = "m", prompt = "p", tools = { bash = true } })
 		LLM:         fake,
 		Personality: persona.BasePersona("you are a test", toolDefs),
 		StatusLine:  "test │ x",
-		WorkDir:     dir,
 		Log:         applog.Noop{},
-		RunToolCall: func(ctx context.Context, name, command, argsJSON string) chat.ToolCallVerdict {
-			return bridgeVerdict(lc.RunToolCall(ctx, name, command, argsJSON))
+		ToolConfig: chat.ToolConfig{
+			WorkDir: dir,
+			RunToolCall: func(ctx context.Context, name, command, argsJSON string) chat.ToolCallVerdict {
+				return bridgeVerdict(lc.RunToolCall(ctx, name, command, argsJSON))
+			},
 		},
 		Handlers: chat.NewHandlers(),
 	}

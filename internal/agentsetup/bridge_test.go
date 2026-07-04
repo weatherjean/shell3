@@ -15,15 +15,15 @@ func TestBridgeToolCallAction(t *testing.T) {
 		in   luacfg.ToolCallAction
 		want chat.ToolCallAction
 	}{
-		{luacfg.ActionRun, chat.Run},
-		{luacfg.ActionBlock, chat.Block},
-		{luacfg.ActionAsk, chat.Ask},
+		{luacfg.ActionRun, chat.ActionRun},
+		{luacfg.ActionBlock, chat.ActionBlock},
+		{luacfg.ActionAsk, chat.ActionAsk},
 	} {
 		if got := bridgeToolCallAction(c.in); got != c.want {
 			t.Errorf("bridgeToolCallAction(%v) = %v, want %v", c.in, got, c.want)
 		}
 	}
-	if got := bridgeToolCallAction(luacfg.ToolCallAction(99)); got != chat.Block {
+	if got := bridgeToolCallAction(luacfg.ToolCallAction(99)); got != chat.ActionBlock {
 		t.Errorf("bridgeToolCallAction(unknown) = %v, want Block (fail closed)", got)
 	}
 }

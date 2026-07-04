@@ -151,7 +151,7 @@ func Start(ctx context.Context, spec Spec) (*Session, error) {
 	}
 	s.ownsRuntime = true
 	s.cfg.OutPath = spec.OutPath // also feeds writeStartLine's out field and introspection
-	sink, sinkCleanup, err := chat.OpenSink(spec.OutPath)
+	sink, sinkCleanup, err := chat.OpenSink(spec.OutPath, s.cfg.Log)
 	if err != nil {
 		_ = s.Close() // also closes the runtime via ownsRuntime
 		return nil, err

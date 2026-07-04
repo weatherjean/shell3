@@ -129,7 +129,7 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 	var totalUsage llm.Usage
 	for {
 		text, reasoning, toolCalls, usage, err := streamOnce(ctx, cfg.LLM, allMsgs, toolList, sess)
-		if usage.TotalTokens > 0 || usage.PromptTokens > 0 || usage.CompletionTokens > 0 {
+		if usage != (llm.Usage{}) {
 			totalUsage = addUsage(totalUsage, usage)
 			emitUsage(sess, totalUsage.PromptTokens, totalUsage.CompletionTokens, totalUsage.TotalTokens)
 		}
@@ -347,7 +347,11 @@ func turnScopedHandlers(cfg TurnConfig, st *toolLoopState) map[string]ToolHandle
 			// shell_interactive runs bash too, so it is gated by the same
 			// on_tool_call chain under its real name (t.name == "shell_interactive")
 			// — otherwise it would be an ungated bash path around any denylist.
-			cmd, blockMsg, blocked := gateInteractiveCommand(ctx, cfg, ParseBashArgs(string(args)), string(args))
+			command, _, perr := parseBashArgsFull(string(args))
+			if perr != nil {
+				return "error: invalid shell_interactive arguments: " + perr.Error(), nil
+			}
+			cmd, blockMsg, blocked := gateInteractiveCommand(ctx, cfg.ToolConfig, command, string(args))
 			if blocked {
 				return blockMsg, nil
 			}
@@ -393,20 +397,20 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 		// flow. The only policy surface is shell3.on_tool_call, which fires before
 		// every tool — the bash family self-gates in its handlers (command rewrite /
 		// runner-swap there); all other tools are gated by name/args just below.
-		res, handled := validateCall(toolSchemas, tc)
+		res, invalid := validateCall(toolSchemas, tc)
 		// If validation failed, res already carries the typed reason and we skip
 		// dispatch. Otherwise resolve a handler —
 		// turn-scoped first, then the custom dispatchers, then the shared
 		// built-ins (custom before built-ins so a config-declared tool name
 		// always wins) — and run it through the single execute path.
-		if !handled {
+		if !invalid {
 			// on_tool_call fires before every tool. The bash family (bash, bash_bg,
 			// shell_interactive) self-gates inside its handlers, where command
 			// rewrite and runner-swap are resolved; every other tool is gated here
 			// by name/args (block / ask only — t.command is nil for them).
 			gateMsg, gateBlocked := "", false
 			if !isBashTool(tc.Name) {
-				gateMsg, gateBlocked = gateNonBashTool(ctx, cfg, tc.Name, tc.RawArgs)
+				gateMsg, gateBlocked = gateNonBashTool(ctx, cfg.ToolConfig, tc.Name, tc.RawArgs)
 			}
 			if gateBlocked {
 				res = errResult(gateMsg)
@@ -424,19 +428,7 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 					res = errResult(fmt.Sprintf("error: unknown tool %q", tc.Name))
 				}
 				if handler != nil {
-					toolCfg := ToolConfig{
-						Store:         cfg.Store,
-						WorkDir:       cfg.WorkDir,
-						FS:            cfg.FS,
-						RunToolCall:   cfg.RunToolCall,
-						Asker:         cfg.Asker,
-						StartBashBg:   cfg.StartBashBg,
-						StartSubagent: cfg.StartSubagent,
-						ListJobs:      cfg.ListJobs,
-						JobStatus:     cfg.JobStatus,
-						CancelJob:     cfg.CancelJob,
-					}
-					out, herr := handler.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), toolCfg)
+					out, herr := handler.Execute(ctx, tc.ID, json.RawMessage(tc.RawArgs), cfg.ToolConfig)
 					res = classifyHandlerOutput(out)
 					if herr != nil {
 						// Most handlers encode failures in their output string and
@@ -486,15 +478,15 @@ func appendToolResult(sess *Session, st *toolLoopState, tc llm.ToolCall, res too
 }
 
 // validateCall checks tc's arguments against the tool's schema (when one is
-// registered). handled is true only when validation failed, in which case res
+// registered). invalid is true when validation failed, in which case res
 // carries the error result to send back to the model; otherwise the call
-// should proceed to dispatch (handled false, res zero).
-func validateCall(toolSchemas map[string]map[string]any, tc llm.ToolCall) (res toolResult, handled bool) {
+// should proceed to dispatch (invalid false, res zero).
+func validateCall(toolSchemas map[string]map[string]any, tc llm.ToolCall) (res toolResult, invalid bool) {
 	schema, ok := toolSchemas[tc.Name]
 	if !ok {
 		return toolResult{}, false
 	}
-	if err := validateToolArgs(schema, json.RawMessage([]byte(tc.RawArgs))); err != nil {
+	if err := validateToolArgs(schema, json.RawMessage(tc.RawArgs)); err != nil {
 		return errResult(fmt.Sprintf("error: invalid tool arguments: %v", err)), true
 	}
 	return toolResult{}, false
@@ -530,242 +522,6 @@ func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools
 		return sb.String(), rb.String(), toolCalls, usage, ctx.Err()
 	}
 	return sb.String(), rb.String(), toolCalls, usage, streamErr
-}
-
-// compactionFloor is the minimum head size (number of messages to be summarized,
-// i.e. the cut index) required before auto-compaction will run. Below this there
-// is too little history for a summary to free meaningful context, so compacting
-// only adds an LLM round-trip and a boilerplate summary message for no benefit.
-const compactionFloor = 8
-
-// compactionFloorTokens is the alternative, token-based floor: a head with fewer
-// than compactionFloor messages still compacts when its estimated tokens reach
-// this, so a short-but-huge head (e.g. a couple of giant tool results) — exactly
-// what needs collapsing — is not skipped by the message-count floor alone.
-const compactionFloorTokens = 4096
-
-// keepRecentFraction is the default fraction of compact_at preserved as the
-// verbatim tail when keep_recent is unset.
-const keepRecentFraction = 33 // percent
-
-// minKeepRecent floors the verbatim tail (in estimated tokens) when keep_recent
-// resolves to 0 — e.g. a forced :compact while auto-compaction is off
-// (compact_at=0). Without it the tail would be empty and the entire
-// conversation, including the latest turn, would be summarized away.
-const minKeepRecent = 4096
-
-// resolveKeepRecent returns the tail size in prompt tokens: the explicit
-// cfg.KeepRecent when set, otherwise a fraction of compact_at.
-func resolveKeepRecent(cfg TurnConfig) int {
-	if cfg.KeepRecent > 0 {
-		return cfg.KeepRecent
-	}
-	return cfg.CompactAt * keepRecentFraction / 100
-}
-
-// compactionInstruction is the system prompt for the single quiet LLM call that
-// produces the auto-compaction summary. It asks for a thorough narrative the
-// continuation can resume from. Pointer lists are folded into the narrative
-// here, so the auto path keeps CompactSummary's optional list fields empty.
-const compactionInstruction = "You are compacting a long coding-assistant conversation to free context. " +
-	"Write a thorough narrative summary of the conversation so far that a fresh continuation could resume from with no other context. " +
-	"Cover: the user's goal and any decisions made; code written and files created or modified (with paths); commands run and their outcomes; errors encountered and how they were resolved; references worth keeping (session ids, commit hashes, URLs); and any confirmed open next steps. " +
-	"Be comprehensive but do not invent detail. Output ONLY the summary prose — no preamble, no tool calls."
-
-// maybeCompact is the turn-start context-management dispatcher. Two tiers keyed
-// off the prior turn's real prompt-token count: at or above compact_at it
-// summarises the head and keeps the tail (compactNow); in the band
-// [prune_at, compact_at) it cheaply stubs old tool outputs (pruneOldToolOutputs).
-// It is strictly best-effort: it must NEVER abort or fail the user's turn — on
-// any problem it logs and proceeds on the un-compacted history (compactNow does
-// make one synchronous summarisation round-trip, so it is not instantaneous).
-//
-// lastPromptTokens is 0 on the first turn, so the first turn never compacts or
-// prunes.
-func maybeCompact(ctx context.Context, cfg TurnConfig, sess *Session) {
-	// A queued :compact forces a compaction regardless of the threshold (and even
-	// when auto-compaction is disabled). Swap clears the request atomically.
-	forced := sess.forceCompact.Swap(false)
-	if !forced && cfg.CompactAt <= 0 {
-		return
-	}
-	if forced || sess.lastPromptTokens >= cfg.CompactAt {
-		compactNow(ctx, cfg, sess, forced)
-		return
-	}
-	if cfg.PruneAt > 0 && sess.lastPromptTokens >= cfg.PruneAt {
-		pruneOldToolOutputs(cfg, sess)
-	}
-}
-
-// compactNow performs host-enforced auto-compaction: it summarises the head of
-// the conversation and rebuilds history as that summary plus the verbatim recent
-// tail. Called only when the prompt token count has reached compact_at. Strictly
-// best-effort — on any problem (too little history, an LLM error, an empty
-// summary) it logs when warranted and returns WITHOUT compacting, so the turn
-// proceeds on the un-compacted history. After a successful compaction
-// lastPromptTokens is reset to the rewritten history's (small) estimated size so
-// the threshold is not immediately re-tripped next turn.
-func compactNow(ctx context.Context, cfg TurnConfig, sess *Session, forced bool) {
-	// Compute the tail boundary before checking the floor: if the entire history
-	// fits within keepRecent, there is nothing left to summarise.
-	keepRecent := resolveKeepRecent(cfg)
-	if keepRecent <= 0 {
-		// A forced :compact can reach here with compact_at=0 (auto-compaction
-		// off), which makes resolveKeepRecent return 0. Floor the tail so a forced
-		// compaction never summarizes away the most recent turns.
-		keepRecent = minKeepRecent
-	}
-	cut := compactionCut(sess.messages, keepRecent)
-	if cut <= 0 || cut >= len(sess.messages) {
-		// There is no head to summarise: the tail already covers everything
-		// meaningful, or the snap-forward over a trailing all-tool run consumed the
-		// whole tail (compacting here would summarize the latest turn away).
-		return
-	}
-	head := sess.messages[:cut]
-	// Floor check (auto path only — a forced :compact always proceeds when there
-	// is a head). Skip only when the head is BOTH few messages AND few tokens: a
-	// short head with many tokens (a couple of giant tool results) is exactly
-	// what compaction should collapse, so the message-count floor alone would
-	// wrongly no-op and leave context growing unbounded.
-	if !forced && cut < compactionFloor && estimatePromptTokens(head) < compactionFloorTokens {
-		return
-	}
-	tail := sess.messages[cut:]
-
-	// One quiet LLM call: summarise only the head we are about to discard. We
-	// accumulate text WITHOUT emitting any Token/assistant events — the user
-	// should not see the summary stream as if it were a turn response.
-	compactMsgs := make([]llm.Message, 0, len(head)+1)
-	compactMsgs = append(compactMsgs, llm.Message{Role: llm.RoleSystem, Content: compactionInstruction})
-	compactMsgs = append(compactMsgs, head...)
-
-	summary, err := streamQuiet(ctx, cfg.LLM, compactMsgs)
-	if err != nil {
-		cfg.Log.Warn("auto-compaction LLM call failed; proceeding on un-compacted history", "error", err)
-		return
-	}
-	if strings.TrimSpace(summary) == "" {
-		cfg.Log.Warn("auto-compaction produced an empty summary; proceeding on un-compacted history")
-		return
-	}
-
-	// Build the file manifest from the head we are about to discard: modified
-	// files (edit_file) and read-only files (read), deduplicated and capped.
-	modified, read := extractFileManifest(head)
-	summaryArgs := CompactSummary{Summary: summary, ImportantFiles: modified, ReadFiles: read}
-
-	// Rebuild history: continuation summary + verbatim tail. compactInto
-	// rewrites sess.messages in place and rolls the store session.
-	// RunTurn rebuilds its own allMsgs after maybeCompact returns.
-	prevTokens := sess.lastPromptTokens
-	if !compactInto(summaryArgs, cfg.Store, sess, tail, cfg.Log, cfg.WorkDir, cfg.ConfigPath) {
-		// The runs-session roll failed; history is untouched. Proceed on the
-		// un-compacted history without resetting the gauge or emitting a
-		// (misleading) compacted event.
-		return
-	}
-
-	// Reset the token gauge to the rewritten history's (small) estimate so the
-	// next turn does not immediately re-trip the threshold before a real usage
-	// count from the provider lands.
-	newTokens := estimatePromptTokens(sess.messages)
-	sess.lastPromptTokens = newTokens
-	// The context-usage reminder tracker remembers the last emitted bucket and
-	// token mark across turns; without resetting it here, those stale (high)
-	// values would suppress every context reminder as the conversation re-grows
-	// from the post-compaction low back up through the same band.
-	sess.reminders.resetContextGauge()
-
-	emitCompacted(sess, prevTokens, newTokens)
-}
-
-// pruneOldToolOutputs stubs large tool results that sit before the protected
-// recent tail, with no LLM call. It is the cheap first tier of context relief;
-// only the manual /prune and full compaction persist — this mutates the
-// in-memory slice only (the append-only JSONL keeps originals). Idempotent: a
-// stub is far below pruneMinBytes, so re-running skips it.
-func pruneOldToolOutputs(cfg TurnConfig, sess *Session) {
-	cut := compactionCut(sess.messages, resolveKeepRecent(cfg))
-	changed := false
-	sess.msgMu.Lock()
-	for i := 0; i < cut && i < len(sess.messages); i++ {
-		m := &sess.messages[i]
-		if m.Role == llm.RoleTool && len(m.Content) > pruneMinBytes {
-			m.Content = pruneStub("pruned", len(m.Content))
-			changed = true
-		}
-	}
-	sess.msgMu.Unlock()
-	if changed {
-		sess.lastPromptTokens = estimatePromptTokens(sess.messages)
-	}
-}
-
-// streamQuiet calls the LLM once and returns only the accumulated assistant
-// text, emitting NO chat.Events. It is the non-emitting sibling of streamOnce,
-// used by maybeCompact so the auto-compaction round-trip is invisible to the
-// user/UI. Tool calls and reasoning are ignored; usage is discarded.
-func streamQuiet(ctx context.Context, client LLMClient, msgs []llm.Message) (string, error) {
-	if ctx.Err() != nil {
-		return "", ctx.Err()
-	}
-	var sb strings.Builder
-	err := client.Stream(ctx, msgs, nil, func(ev llm.StreamEvent) {
-		if ev.TextDelta != "" {
-			sb.WriteString(ev.TextDelta)
-		}
-	})
-	if ctx.Err() != nil {
-		return sb.String(), ctx.Err()
-	}
-	return sb.String(), err
-}
-
-// msgTokens approximates one message's token cost as (content + tool-call
-// argument bytes) / 4.
-func msgTokens(m llm.Message) int {
-	n := len(m.Content)
-	for _, tc := range m.ToolCalls {
-		n += len(tc.RawArgs)
-	}
-	return n / 4
-}
-
-// estimatePromptTokens approximates the token count for a message slice. The
-// slice reflects pruning in-place, so this automatically accounts for freed
-// context.
-func estimatePromptTokens(msgs []llm.Message) int {
-	var total int
-	for _, m := range msgs {
-		total += msgTokens(m)
-	}
-	return total
-}
-
-// compactionCut returns the index in msgs at which the preserved tail begins:
-// the most recent messages whose estimated tokens sum to at least keepRecent,
-// snapped FORWARD past any leading tool message so the tail never begins with an
-// orphan tool result (an OpenAI-compatible request rejects a tool message whose
-// assistant tool_call is absent). The head is msgs[:cut]; the tail is msgs[cut:].
-// Returns len(msgs) when keepRecent <= 0 (no tail kept).
-func compactionCut(msgs []llm.Message, keepRecent int) int {
-	if keepRecent <= 0 {
-		return len(msgs)
-	}
-	total, cut := 0, len(msgs)
-	for i := len(msgs) - 1; i >= 0; i-- {
-		total += msgTokens(msgs[i])
-		cut = i
-		if total >= keepRecent {
-			break
-		}
-	}
-	for cut < len(msgs) && msgs[cut].Role == llm.RoleTool {
-		cut++
-	}
-	return cut
 }
 
 // addUsage accumulates token usage across the multiple LLM requests that can

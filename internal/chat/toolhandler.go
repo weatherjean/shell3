@@ -50,8 +50,9 @@ func (h funcHandler) Execute(ctx context.Context, id string, args json.RawMessag
 	return h.fn(ctx, id, args, cfg)
 }
 
-// ToolConfig holds per-invocation state passed to ToolHandler.Execute. It is
-// constructed fresh for each tool call from the current TurnConfig.
+// ToolConfig holds the state passed to ToolHandler.Execute. It is embedded in
+// TurnConfig — the turn loop hands each handler the turn's ToolConfig directly,
+// so a field added here reaches handlers with no per-field copy to forget.
 type ToolConfig struct {
 	// Store is the persistence layer for the history tools. May be nil.
 	Store *runs.Store
@@ -103,6 +104,11 @@ func (c ToolConfig) fs() fsx.FileSystem {
 // each ToolHandler.Execute). Handlers should be constructed once via
 // NewHandlers and reused across turns.
 type TurnConfig struct {
+	// ToolConfig is the per-turn tool-execution state (WorkDir, Store, FS,
+	// Asker, job-runtime hooks, RunToolCall) handed to each ToolHandler.Execute.
+	// Embedded so its fields are set and read as TurnConfig fields directly and
+	// there is no per-call copy that could drift.
+	ToolConfig
 	// LLM is the streaming client for this turn.
 	LLM LLMClient
 	// Personality is the persona whose system prompt and tool allow-list
@@ -111,17 +117,10 @@ type TurnConfig struct {
 	// StatusLine is the current provider/model/effort string; used for
 	// reminder tracking.
 	StatusLine string
-	// WorkDir is the working directory for tool execution.
-	WorkDir string
-	// FS is the file-I/O backend threaded into each tool call's ToolConfig.
-	// Nil ⇒ OS disk backend.
-	FS fsx.FileSystem
 	// ConfigPath is the resolved shell3.lua path, threaded into new store
 	// sessions (notably the compaction rollover, which starts a session deep in
 	// the turn loop). '' if unknown.
 	ConfigPath string
-	// Store persists newly appended messages when non-nil.
-	Store *runs.Store
 	// Handlers maps tool name to built-in implementation. Built once via
 	// NewHandlers and shared across turns.
 	Handlers map[string]ToolHandler
@@ -147,28 +146,9 @@ type TurnConfig struct {
 	// StubTools maps a hallucinated tool name to its redirect message (a nudge,
 	// never an error). Checked after real/custom tools so a real tool always wins.
 	StubTools map[string]string
-	// Asker confirms an ask-verdict command with a human. Nil ⇒ ask degrades to
-	// deny (headless subagent path).
-	Asker AskFunc
-	// StartBashBg launches a background shell command on the host's in-process
-	// job runtime and returns its job id. env holds extra "K=V" entries appended
-	// to the inherited environment (background custom tools inject their params
-	// this way; bash_bg passes nil). Nil func ⇒ background jobs disabled.
-	StartBashBg func(command, workdir string, argv, env []string) (string, error)
-	// StartSubagent launches a background subagent (child session) and returns its
-	// id. It enforces the recursion depth guard and concurrency cap. Nil ⇒ subagents
-	// unavailable.
-	StartSubagent func(agent, prompt, desc string) (string, error)
-	// ListJobs returns a compact formatted list of all background jobs (running +
-	// done) for the task_list tool. Nil ⇒ task management unavailable.
-	ListJobs func() string
-	// JobStatus returns one job's status and truncated result for the task_status
-	// tool. Nil ⇒ task management unavailable.
-	JobStatus func(id string) string
-	// CancelJob cancels a running job and returns a short confirmation or error
-	// for the task_cancel tool. Nil ⇒ task management unavailable.
-	CancelJob     func(id string) string
-	RunToolCall   func(ctx context.Context, name, command, argsJSON string) ToolCallVerdict
+	// RunToolResult runs the on_tool_result chain over a tool's output
+	// (config-global, nil = none). Its input sibling RunToolCall lives on the
+	// embedded ToolConfig because handlers self-gate with it.
 	RunToolResult func(ctx context.Context, name, argsJSON, output string) string
 	// AgentKnobs are the agent-scoped runtime knobs (compaction thresholds,
 	// custom-tool routing, …), forwarded wholesale from Config by NewTurnConfig.

@@ -594,7 +594,7 @@ func TestAgentRuntime_UnknownErrors(t *testing.T) {
 }
 
 func TestVerdictActionIotaAlignment(t *testing.T) {
-	if int(chat.Run) != int(luacfg.ActionRun) || int(chat.Block) != int(luacfg.ActionBlock) || int(chat.Ask) != int(luacfg.ActionAsk) {
+	if int(chat.ActionRun) != int(luacfg.ActionRun) || int(chat.ActionBlock) != int(luacfg.ActionBlock) || int(chat.ActionAsk) != int(luacfg.ActionAsk) {
 		t.Fatal("chat and luacfg ToolCallAction iota orders must stay aligned (agentsetup casts between them)")
 	}
 }

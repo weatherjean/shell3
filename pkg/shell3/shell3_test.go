@@ -350,7 +350,7 @@ func TestAuditSink_EndStatusReflectsError(t *testing.T) {
 
 	client := fakellm.New(fakellm.Script{Err: errors.New("boom")})
 	s := newTestSession(t, client, chat.Config{})
-	sink, cleanup, err := chat.OpenSink(out)
+	sink, cleanup, err := chat.OpenSink(out, nil)
 	if err != nil {
 		t.Fatalf("OpenSink: %v", err)
 	}
@@ -818,7 +818,7 @@ func TestAuditSink_WritesStartEventsEnd(t *testing.T) {
 	cfg := chat.Config{StatusLine: "openai │ gpt-x", ModeLabel: "code"}
 	s := newTestSession(t, client, cfg)
 	// Wire the sink the way Start does (newTestSession bypasses Start).
-	sink, cleanup, err := chat.OpenSink(out)
+	sink, cleanup, err := chat.OpenSink(out, nil)
 	if err != nil {
 		t.Fatalf("OpenSink: %v", err)
 	}

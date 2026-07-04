@@ -8,7 +8,7 @@ import (
 
 func TestDispatchCustomToolForeground(t *testing.T) {
 	cfg := TurnConfig{
-		WorkDir:    t.TempDir(),
+		ToolConfig: ToolConfig{WorkDir: t.TempDir()},
 		AgentKnobs: AgentKnobs{CustomToolNames: map[string]bool{"echoer": true}},
 		ResolveCustomTool: func(name, args string) (ResolvedTool, error) {
 			return ResolvedTool{Command: `printf "%s" "$msg"`, Env: []string{"msg=hello-tool"}}, nil
@@ -27,14 +27,16 @@ func TestDispatchCustomToolBackground(t *testing.T) {
 	var gotCommand string
 	var gotEnv []string
 	cfg := TurnConfig{
-		WorkDir:    t.TempDir(),
 		AgentKnobs: AgentKnobs{CustomToolNames: map[string]bool{"bg_echo": true}},
 		ResolveCustomTool: func(name, args string) (ResolvedTool, error) {
 			return ResolvedTool{Command: `printf "%s" "$msg"`, Env: []string{"msg=hi"}, Background: true}, nil
 		},
-		StartBashBg: func(command, workdir string, argv, env []string) (string, error) {
-			gotCommand, gotEnv = command, env
-			return "bg7", nil
+		ToolConfig: ToolConfig{
+			WorkDir: t.TempDir(),
+			StartBashBg: func(command, workdir string, argv, env []string) (string, error) {
+				gotCommand, gotEnv = command, env
+				return "bg7", nil
+			},
 		},
 	}
 	res := dispatchCustomTool(context.Background(), cfg, "bg_echo", `{"msg":"hi"}`)
@@ -50,7 +52,7 @@ func TestDispatchCustomToolBackground(t *testing.T) {
 // runtime is wired (StartBashBg nil).
 func TestDispatchCustomToolBackgroundUnavailable(t *testing.T) {
 	cfg := TurnConfig{
-		WorkDir:    t.TempDir(),
+		ToolConfig: ToolConfig{WorkDir: t.TempDir()},
 		AgentKnobs: AgentKnobs{CustomToolNames: map[string]bool{"bg_echo": true}},
 		ResolveCustomTool: func(name, args string) (ResolvedTool, error) {
 			return ResolvedTool{Command: "true", Background: true}, nil
@@ -64,7 +66,7 @@ func TestDispatchCustomToolBackgroundUnavailable(t *testing.T) {
 
 func TestDispatchCustomToolNonZeroExitIsError(t *testing.T) {
 	cfg := TurnConfig{
-		WorkDir:    t.TempDir(),
+		ToolConfig: ToolConfig{WorkDir: t.TempDir()},
 		AgentKnobs: AgentKnobs{CustomToolNames: map[string]bool{"boom": true}},
 		ResolveCustomTool: func(name, args string) (ResolvedTool, error) {
 			return ResolvedTool{Command: `echo nope; exit 7`}, nil

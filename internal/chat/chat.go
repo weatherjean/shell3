@@ -215,12 +215,16 @@ func NewHandlers() map[string]ToolHandler {
 // return an "unavailable" error.
 func NewTurnConfig(cfg Config, handlers map[string]ToolHandler, shellInteractive func(ctx context.Context, cmd, workdir string) string) TurnConfig {
 	return TurnConfig{
+		ToolConfig: ToolConfig{
+			Store:       cfg.Store,
+			WorkDir:     cfg.WorkDir,
+			Asker:       cfg.Asker,
+			RunToolCall: cfg.RunToolCall,
+		},
 		LLM:               cfg.LLM,
 		Personality:       cfg.Personality,
 		StatusLine:        cfg.StatusLine,
-		WorkDir:           cfg.WorkDir,
 		ConfigPath:        cfg.ConfigPath,
-		Store:             cfg.Store,
 		Handlers:          handlers,
 		Log:               LogOrNoop(cfg.Log),
 		Headless:          cfg.Headless,
@@ -228,8 +232,6 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler, shellInteractive
 		HostTool:          cfg.HostTool,
 		StubTools:         cfg.StubTools,
 		AgentKnobs:        cfg.AgentKnobs,
-		Asker:             cfg.Asker,
-		RunToolCall:       cfg.RunToolCall,
 		RunToolResult:     cfg.RunToolResult,
 		ShellInteractive:  shellInteractive,
 	}
@@ -237,7 +239,9 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler, shellInteractive
 
 // OpenSink opens path for write+truncate (each run starts fresh) and returns
 // the sink and a cleanup closure. Returns (nil, no-op, nil) when path is empty.
-func OpenSink(path string) (*OutSink, func(), error) {
+// lg (nil-safe) receives a one-time warning if the sink ever drops a line —
+// this is an audit log, so a silent drop would hide real faults.
+func OpenSink(path string, lg applog.Logger) (*OutSink, func(), error) {
 	if path == "" {
 		return nil, func() {}, nil
 	}
@@ -252,7 +256,12 @@ func OpenSink(path string) (*OutSink, func(), error) {
 	if err != nil {
 		return nil, func() {}, fmt.Errorf("open --out %s: %w", path, err)
 	}
-	return newOutSink(f, time.Time{}), func() { _ = f.Close() }, nil
+	sink := newOutSink(f, time.Time{})
+	log := LogOrNoop(lg)
+	sink.onErr = func(err error) {
+		log.Warn("audit sink write failed; further drops are silent", "path", path, "error", err)
+	}
+	return sink, func() { _ = f.Close() }, nil
 }
 
 // LogOrNoop returns l if non-nil, otherwise an applog.Noop logger. Callers

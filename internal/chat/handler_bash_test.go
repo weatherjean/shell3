@@ -46,9 +46,18 @@ func TestBashHandler_Execute_canceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	args := json.RawMessage(`{"command":"echo should not run"}`)
-	out, _ := h.Execute(ctx, "1", args, ToolConfig{})
-	// Should return error output or empty — must not block.
-	_ = out
+	out, err := h.Execute(ctx, "1", args, ToolConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The command must not have run: a pre-cancelled context kills it before
+	// exec, so the output carries the error marker, never the echo text.
+	if strings.Contains(out, "should not run") {
+		t.Fatalf("command ran despite cancelled context: %q", out)
+	}
+	if !strings.HasPrefix(out, "error:") {
+		t.Fatalf("expected error output, got %q", out)
+	}
 }
 
 func TestBashHandler_Execute_timeout(t *testing.T) {
@@ -132,5 +141,26 @@ func TestBashHandler_Execute_nonzeroExit(t *testing.T) {
 	}
 	if !strings.Contains(out, "oops") {
 		t.Fatalf("expected 'oops' in output, got %q", out)
+	}
+	// A quiet failure must be distinguishable from success: the exit code is
+	// surfaced as an error: prefix line (which also flips the tool_result
+	// error flag via classifyHandlerOutput).
+	if !strings.HasPrefix(out, "error: command exited 1") {
+		t.Fatalf("expected exit-code marker, got %q", out)
+	}
+}
+
+// A malformed args blob must never fall back to executing the raw JSON as the
+// shell command (e.g. {"command": 5} passes schema presence checks but fails
+// unmarshal).
+func TestBashHandler_Execute_malformedArgs(t *testing.T) {
+	h := BashHandler{}
+	args := json.RawMessage(`{"command": 5}`)
+	out, err := h.Execute(context.Background(), "1", args, ToolConfig{WorkDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out, "error: invalid bash arguments") {
+		t.Fatalf("expected invalid-arguments error, got %q", out)
 	}
 }

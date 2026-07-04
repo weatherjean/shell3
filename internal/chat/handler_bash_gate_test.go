@@ -16,7 +16,7 @@ func bashArgs(cmd string) json.RawMessage {
 func TestBashHandlerBlocks(t *testing.T) {
 	cfg := ToolConfig{
 		RunToolCall: func(ctx context.Context, name, command, argsJSON string) ToolCallVerdict {
-			return ToolCallVerdict{Action: Block, Reason: "nope"}
+			return ToolCallVerdict{Action: ActionBlock, Reason: "nope"}
 		},
 	}
 	out, _ := BashHandler{}.Execute(context.Background(), "1", bashArgs("rm -rf /"), cfg)
@@ -29,7 +29,7 @@ func TestBashHandlerRunnerSwap(t *testing.T) {
 	cfg := ToolConfig{
 		WorkDir: t.TempDir(),
 		RunToolCall: func(ctx context.Context, name, command, argsJSON string) ToolCallVerdict {
-			return ToolCallVerdict{Action: Run, Argv: []string{"bash", "-c", "echo swapped"}}
+			return ToolCallVerdict{Action: ActionRun, Argv: []string{"bash", "-c", "echo swapped"}}
 		},
 	}
 	out, _ := BashHandler{}.Execute(context.Background(), "1", bashArgs("echo orig"), cfg)
@@ -43,7 +43,7 @@ func TestBashHandlerAskAllow(t *testing.T) {
 		WorkDir: t.TempDir(),
 		Asker:   func(ctx context.Context, cmd, reason string) bool { return true },
 		RunToolCall: func(ctx context.Context, name, command, argsJSON string) ToolCallVerdict {
-			return ToolCallVerdict{Action: Ask, Prompt: "ok?", Reason: "denied"}
+			return ToolCallVerdict{Action: ActionAsk, Prompt: "ok?", Reason: "denied"}
 		},
 	}
 	out, _ := BashHandler{}.Execute(context.Background(), "1", bashArgs("echo hi"), cfg)
@@ -60,7 +60,7 @@ func TestBashHandlerRunnerSwapNoShellReparse(t *testing.T) {
 		RunToolCall: func(ctx context.Context, name, command, argsJSON string) ToolCallVerdict {
 			// argv: bash -c 'echo safe' bash '; touch <sentinel>'
 			// $0=bash, $1="; touch <sentinel>" — $1 must NOT be executed.
-			return ToolCallVerdict{Action: Run, Argv: []string{"bash", "-c", "echo safe", "bash", "; touch " + sentinel}}
+			return ToolCallVerdict{Action: ActionRun, Argv: []string{"bash", "-c", "echo safe", "bash", "; touch " + sentinel}}
 		},
 	}
 	out, _ := BashHandler{}.Execute(context.Background(), "1", bashArgs("ignored"), cfg)
@@ -76,7 +76,7 @@ func TestBashHandlerAskDeny(t *testing.T) {
 	cfg := ToolConfig{
 		Asker: func(ctx context.Context, cmd, reason string) bool { return false },
 		RunToolCall: func(ctx context.Context, name, command, argsJSON string) ToolCallVerdict {
-			return ToolCallVerdict{Action: Ask, Prompt: "ok?", Reason: "denied"}
+			return ToolCallVerdict{Action: ActionAsk, Prompt: "ok?", Reason: "denied"}
 		},
 	}
 	out, _ := BashHandler{}.Execute(context.Background(), "1", bashArgs("echo hi"), cfg)

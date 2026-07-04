@@ -331,7 +331,7 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	}
 	// Open the sink before constructing anything stateful: a failure here must
 	// not leak a partially-initialised session or a store row.
-	sink, sinkCleanup, err := chat.OpenSink(opts.OutPath)
+	sink, sinkCleanup, err := chat.OpenSink(opts.OutPath, cfg.Log)
 	if err != nil {
 		return nil, err
 	}

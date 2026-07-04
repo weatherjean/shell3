@@ -303,11 +303,11 @@ type SessionOptions struct {
 func bridgeToolCallAction(a luacfg.ToolCallAction) chat.ToolCallAction {
 	switch a {
 	case luacfg.ActionRun:
-		return chat.Run
+		return chat.ActionRun
 	case luacfg.ActionAsk:
-		return chat.Ask
+		return chat.ActionAsk
 	default: // ActionBlock or any unmapped future action → fail closed
-		return chat.Block
+		return chat.ActionBlock
 	}
 }
 

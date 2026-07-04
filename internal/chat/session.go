@@ -3,6 +3,7 @@ package chat
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -335,7 +336,7 @@ func (s *Session) StandingReminders() []string {
 // a decimal string.
 func (s *Session) allocToolCallID() string {
 	s.nextToolCallID++
-	return fmt.Sprintf("%d", s.nextToolCallID)
+	return strconv.Itoa(s.nextToolCallID)
 }
 
 // reminderTracker decides when to emit <system-reminder> injections and
