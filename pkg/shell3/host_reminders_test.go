@@ -36,21 +36,20 @@ func findReminder(s *Session, sub string) string {
 func hostRemindersCfg(env, deleg bool, subagents []string) func() chat.Config {
 	return func() chat.Config {
 		cfg := chat.Config{
-			LLM:         fakellm.New(fakellm.Script{}),
-			ModeLabel:   "code",
-			StatusLine:  "openai │ gpt-x",
-			ConfigPath:  "/cfg/shell3.lua",
-			RunsDir:     "/root/.shell3_project/runs",
-			Environment: env,
-			Delegation:  deleg,
-			Subagents:   subagents,
-			AgentNames:  []string{"code", "plain"},
+			LLM:        fakellm.New(fakellm.Script{}),
+			ModeLabel:  "code",
+			StatusLine: "openai │ gpt-x",
+			ConfigPath: "/cfg/shell3.lua",
+			RunsDir:    "/root/.shell3_project/runs",
+			AgentKnobs: chat.AgentKnobs{Environment: env, Delegation: deleg, Subagents: subagents},
+			AgentNames: []string{"code", "plain"},
 		}
 		cfg.SwitchAgent = func(name string) (chat.ActiveAgent, error) {
 			// "plain" has delegation off and no subagents.
 			return chat.ActiveAgent{
 				ModeLabel: name, LLM: fakellm.New(fakellm.Script{}),
-				ModelID: "gpt-x", Environment: false, Delegation: false,
+				ModelID:    "gpt-x",
+				AgentKnobs: chat.AgentKnobs{Environment: false, Delegation: false},
 			}, nil
 		}
 		return cfg

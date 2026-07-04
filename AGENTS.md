@@ -87,6 +87,7 @@ internal/tui/          full-screen vim-modal terminal UI (interactive + headless
 internal/chat/         conversation loop, tools, events, JSONL audit sink
 internal/llm/          Provider/Streamer interfaces, request params, types (+ fakellm)
 internal/persona/      runtime carrier for an agent's prompt/tools/params (data only)
+internal/strutil/      rune-safe string truncation helpers (byte-cap + rune-count) shared by runtime and front-ends
 internal/applog/       rotating app log
 
 pkg/shell3/            embeddable library API (the only public package); jobs.go hosts the in-process job runtime (subagents + bash_bg)

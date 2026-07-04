@@ -1,6 +1,7 @@
 package shell3_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -8,10 +9,26 @@ import (
 	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
+// writeCfg writes body as dir/shell3.lua and returns its path.
+func writeCfg(t *testing.T, dir, body string) string {
+	t.Helper()
+	p := filepath.Join(dir, "shell3.lua")
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+const baseCfg = `
+shell3.model("main", { base_url="https://api.x/v1", api_key="k", model="m-1", context_window=1000 })
+local explorer = shell3.subagent({ name="explorer", model="main", description="d", prompt="p", tools={} })
+shell3.agent({ name="code", model="main", prompt="hi", tools={ subagents={explorer} } })
+`
+
 func TestConfigPath_ExplicitSpec(t *testing.T) {
 	dir := t.TempDir()
 	path := writeCfg(t, dir, baseCfg)
-	rt, err := shell3.NewRuntime(shell3.RuntimeSpec{ConfigPath: path, WorkDir: dir})
+	rt, err := shell3.NewRuntime(context.Background(), shell3.RuntimeSpec{ConfigPath: path, WorkDir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +57,7 @@ func TestConfigPath_ResolvesEmptySpec(t *testing.T) {
 	dir := t.TempDir()
 	writeCfg(t, dir, baseCfg) // a cwd ./shell3.lua that must be ignored
 
-	rt, err := shell3.NewRuntime(shell3.RuntimeSpec{ConfigPath: "", WorkDir: dir})
+	rt, err := shell3.NewRuntime(context.Background(), shell3.RuntimeSpec{ConfigPath: "", WorkDir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}

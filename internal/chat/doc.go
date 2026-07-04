@@ -13,7 +13,7 @@
 //	}})
 //	sess.Start(meta)
 //	sess.Run(ctx, turnCfg, "hello")
-//	sess.End("ok")
+//	sess.End(chat.StatusOK)
 //
 // Key entry points:
 //

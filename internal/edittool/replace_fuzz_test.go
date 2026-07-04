@@ -15,11 +15,11 @@ func FuzzReplace(f *testing.F) {
 	f.Add("hello world", "world", "go", false)
 	f.Add("a\nb\nc\n", "b", "B", true)
 	f.Add("  indented line\n", "indented line", "x", false)
-	f.Add("dup\ndup\n", "dup", "y", false) // ambiguous → ErrMultipleMatch, must not panic
+	f.Add("dup\ndup\n", "dup", "y", false) // ambiguous → errMultipleMatch, must not panic
 	f.Add("", "", "", false)
 
 	f.Fuzz(func(t *testing.T, content, oldString, newString string, all bool) {
-		got, err := Replace(content, oldString, newString, all) // must never panic
+		got, err := replace(content, oldString, newString, all) // must never panic
 
 		// "Exactly one occurrence" must mirror simpleReplacer's own test
 		// (Index == LastIndex), not strings.Count: overlapping matches like

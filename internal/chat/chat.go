@@ -13,37 +13,34 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// LLMClient is the streaming interface the turn loop calls into. Implementers
-// must invoke onEvent synchronously for each delta (token, tool call, usage)
-// as it arrives from the provider and return an error only when the stream
-// cannot be completed. Returning nil with no events is treated as a no-op
-// turn. Implementations may also satisfy llm.TrafficInspector to expose the
-// last request/response bytes for error dumps.
-type LLMClient interface {
-	Stream(ctx context.Context, msgs []llm.Message, tools []llm.ToolDefinition, onEvent func(llm.StreamEvent)) error
-}
+// LLMClient is the streaming interface the turn loop calls into — an alias of
+// llm.Streamer, which owns the contract (onEvent invoked synchronously per
+// delta from one goroutine; nil with no events is a no-op turn).
+// Implementations may also satisfy llm.TrafficInspector to expose the last
+// request/response bytes for error dumps.
+type LLMClient = llm.Streamer
 
-// ActiveAgent is the full runtime bundle produced when switching agents:
-// everything the chat loop needs to run the next turn under a different agent.
-type ActiveAgent struct {
-	Personality  persona.Persona
-	ModeLabel    string
-	ActiveSkills []string
-	ActiveTools  []string
-	// CustomToolNames is the set of tool names routed to the custom-tool dispatcher.
+// AgentKnobs are the agent-scoped runtime knobs that follow every agent
+// switch as one unit: ActiveAgent carries them, ApplyActiveAgent copies them
+// into Config wholesale, and NewTurnConfig forwards them into TurnConfig.
+// Adding a knob here flows through all three automatically — no per-field
+// copy lines to forget.
+type AgentKnobs struct {
+	// CustomToolNames is the set of tool names routed to the custom-tool
+	// dispatcher (HostTool/ResolveCustomTool). Entries must match the names
+	// registered in the LLM tool schema.
 	CustomToolNames map[string]bool
 	// Subagents is the active agent's allowlist of registered subagent names
 	// (its tools.subagents). pkg/shell3 renders it into the per-session
-	// Delegation context (which subagents the agent may spawn via bash_bg).
+	// Delegation context (which subagents the agent may spawn via the task tool).
 	Subagents []string
 	// Environment/Delegation are the active agent's host-reminder toggles
 	// (luacfg agent.environment / agent.delegation, default off). pkg/shell3
 	// gates the standing Environment / Delegation reminders on them.
-	Environment   bool
-	Delegation    bool
-	LLM           LLMClient
-	Params        llm.RequestParams
-	ModelID       string
+	Environment bool
+	Delegation  bool
+	// ContextWindow is the active model's context window in tokens, used by
+	// the reminder tracker to emit context-usage warnings. Zero means unknown.
 	ContextWindow int
 	// CompactAt is the model's auto-compaction prompt-token threshold (0 = off).
 	CompactAt int
@@ -53,6 +50,19 @@ type ActiveAgent struct {
 	// PruneAt is the lower threshold; stub old tool outputs with no LLM call.
 	// 0 disables. Must be below CompactAt.
 	PruneAt int
+}
+
+// ActiveAgent is the full runtime bundle produced when switching agents:
+// everything the chat loop needs to run the next turn under a different agent.
+type ActiveAgent struct {
+	AgentKnobs
+	Personality  persona.Persona
+	ModeLabel    string
+	ActiveSkills []string
+	ActiveTools  []string
+	LLM          LLMClient
+	Params       llm.RequestParams
+	ModelID      string
 }
 
 // Config holds all dependencies for a chat session: callers populate it once at
@@ -102,29 +112,11 @@ type Config struct {
 	ActiveSkills []string
 	// ActiveTools lists tool names enabled for this agent.
 	ActiveTools []string
-	// Subagents is the active agent's allowlist of registered subagent names.
-	// pkg/shell3 renders it into the per-session Delegation context (the
-	// subagents this agent may spawn as a backgrounded shell3 via bash_bg).
-	Subagents []string
-	// Environment/Delegation are the active agent's host-reminder toggles,
-	// copied from the active agent by ApplyActiveAgent so they follow agent
-	// switches. pkg/shell3 reads them to gate the standing Environment /
-	// Delegation reminders (default off).
-	Environment bool
-	Delegation  bool
-	// ContextWindow is the active model's context window in tokens, used by
-	// the reminder tracker to emit context-usage warnings. Zero means unknown.
-	ContextWindow int
-	// CompactAt is the active model's auto-compaction prompt-token threshold.
-	// When >0 and the prior turn's prompt tokens reach it, RunTurn compacts
-	// history before the next turn (see maybeCompact). Zero disables it.
-	CompactAt int
-	// KeepRecent is the verbatim tail (prompt tokens) preserved across an
-	// auto-compaction. 0 derives a default from CompactAt (resolveKeepRecent).
-	KeepRecent int
-	// PruneAt is the lower threshold; stub old tool outputs with no LLM call.
-	// 0 disables. Must be below CompactAt.
-	PruneAt int
+	// AgentKnobs are the agent-scoped runtime knobs (context window,
+	// compaction thresholds, reminder toggles, custom-tool routing), copied
+	// wholesale from the active agent by ApplyActiveAgent so they follow
+	// agent switches.
+	AgentKnobs
 	// Params are provider-level request parameters (temperature, top_p,
 	// reasoning effort, etc.).
 	Params llm.RequestParams
@@ -149,9 +141,6 @@ type Config struct {
 	// HostTool dispatches a host-registered Go tool by name (see
 	// pkg/shell3.RegisterHostTool). Tried before ResolveCustomTool. Nil = none.
 	HostTool func(ctx context.Context, name, argsJSON string) (string, error)
-	// CustomToolNames is the set of tool names routed to HostTool/ResolveCustomTool.
-	// Entries must match the names registered in the LLM tool schema.
-	CustomToolNames map[string]bool
 	// StubTools maps a hallucinated tool name to its redirect message (a nudge,
 	// never an error). Config-global; checked after real/custom tools.
 	StubTools map[string]string
@@ -193,14 +182,7 @@ func (c *Config) ApplyActiveAgent(rt ActiveAgent) {
 	c.ModeLabel = rt.ModeLabel
 	c.ActiveSkills = rt.ActiveSkills
 	c.ActiveTools = rt.ActiveTools
-	c.Subagents = rt.Subagents
-	c.Environment = rt.Environment
-	c.Delegation = rt.Delegation
-	c.CustomToolNames = rt.CustomToolNames
-	c.ContextWindow = rt.ContextWindow
-	c.CompactAt = rt.CompactAt
-	c.KeepRecent = rt.KeepRecent
-	c.PruneAt = rt.PruneAt
+	c.AgentKnobs = rt.AgentKnobs
 	c.StatusLine = AgentStatusLine(rt)
 }
 
@@ -245,13 +227,10 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler, shellInteractive
 		ResolveCustomTool: cfg.ResolveCustomTool,
 		HostTool:          cfg.HostTool,
 		StubTools:         cfg.StubTools,
-		CustomToolNames:   cfg.CustomToolNames,
+		AgentKnobs:        cfg.AgentKnobs,
 		Asker:             cfg.Asker,
 		RunToolCall:       cfg.RunToolCall,
 		RunToolResult:     cfg.RunToolResult,
-		CompactAt:         cfg.CompactAt,
-		KeepRecent:        cfg.KeepRecent,
-		PruneAt:           cfg.PruneAt,
 		ShellInteractive:  shellInteractive,
 	}
 }

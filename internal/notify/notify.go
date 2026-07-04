@@ -1,7 +1,8 @@
-// Package notify defines the completion-notification value rendered into a live
-// agent's context. It is the in-process shape that a runs.Pointer (read from the
-// project inbox) is reconstructed into before rendering; the inbox file, not this
-// type, is the cross-process transport.
+// Package notify defines the completion-notification value rendered into a
+// live agent's context when a background job or subagent finishes. Jobs run
+// in-process (pkg/shell3's job runtime), which injects the rendered
+// notification directly into the parent session — there is no cross-process
+// transport.
 package notify
 
 // Kind values for Notification.Kind.

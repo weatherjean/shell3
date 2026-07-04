@@ -120,62 +120,8 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		sess.append(userMsg)
 	}
 
-	msgs := sess.messages
-
-	allMsgs := make([]llm.Message, 0, len(msgs)+1)
-	allMsgs = append(allMsgs, llm.Message{Role: llm.RoleSystem, Content: cfg.Personality.SystemPrompt})
-	allMsgs = append(allMsgs, msgs...)
-
-	// Inject standing reminders (host Environment/Delegation context) so they
-	// sit right after the system prompt every turn. These are set by
-	// SetStandingReminders and regenerated on resume — not persisted.
-	for _, r := range sess.standingReminders {
-		allMsgs = injectReminder(allMsgs, r)
-	}
-
-	toolList := filterHeadlessTools(cfg.Personality.Tools, cfg.Headless)
-	if cfg.Headless {
-		allMsgs = injectReminder(allMsgs, headlessReminder)
-	}
-
-	// Build schema index for fast lookup during tool call validation.
-	toolSchemas := make(map[string]map[string]any, len(toolList))
-	for _, td := range toolList {
-		toolSchemas[td.Name] = td.Parameters
-	}
-
-	if reminder := sess.reminders.check(cfg.StatusLine, sess.lastPromptTokens); reminder != "" {
-		allMsgs = injectReminder(allMsgs, reminder)
-		emitSystemReminder(sess, reminder)
-	}
-	// Turn start drains BOTH user steering and host notifications (a fresh turn
-	// is a clean boundary). Each source gets its own labeled reminder block.
-	steerTexts, noticeTexts, userParts := sess.drainInbox(false)
-	steerReminder := reminderBlock(steerReminderHeader, steerTexts)
-	noticeReminder := reminderBlock(noticeReminderHeader, noticeTexts)
-	if steerReminder != "" {
-		allMsgs = injectReminder(allMsgs, steerReminder)
-		emitSystemReminder(sess, steerReminder)
-	}
-	if noticeReminder != "" {
-		allMsgs = injectReminder(allMsgs, noticeReminder)
-		emitSystemReminder(sess, noticeReminder)
-	}
-	// Parts queued while idle are injected as a user message right after the
-	// reminder lands on the turn's user message (consecutive user messages are
-	// fine on the wire; only user messages can carry media parts).
-	if msg, ok := attachmentsMessage(nil, userParts); ok {
-		allMsgs = append(allMsgs, msg)
-		sess.append(msg)
-	}
-
-	// Skip a wake/inbox-seeded turn that delivers nothing to the provider: an
-	// empty initiating message, plus a drained inbox whose items were all
-	// whitespace-only (no reminder text) and carried no media parts. allMsgs
-	// would otherwise be just [system] with no prior history and no user
-	// message — a system-only request a strict provider may reject. End the turn
-	// cleanly (turn_done, no usage, no stream call) instead.
-	if inboxSeeded && steerReminder == "" && noticeReminder == "" && len(userParts) == 0 && len(msgs) == 0 {
+	allMsgs, toolList, toolSchemas, skip := assembleTurnContext(cfg, sess, inboxSeeded)
+	if skip {
 		terminalEmit = func() { emitTurnDone(sess, 0, 0, 0) }
 		return
 	}
@@ -243,22 +189,16 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		allMsgs = outcome.allMsgs
 
 		// After all tool results are appended, check if a reminder is due
-		// before the next LLM round. Inject into the last tool message in
+		// before the next LLM round. Append to the last tool message in
 		// allMsgs only — sess.messages stays clean.
 		// Count bytes across all of allMsgs (including pruned replacements)
 		// so prune is automatically reflected without any delta tracking.
-		if reminder := sess.reminders.check(cfg.StatusLine, estimatePromptTokens(allMsgs)); reminder != "" {
-			allMsgs[len(allMsgs)-1].Content += "\n\n" + reminder
-			emitSystemReminder(sess, reminder)
-		}
+		injectAndEmit(sess, &allMsgs, sess.reminders.check(cfg.StatusLine, estimatePromptTokens(allMsgs)), true)
 		// Mid-turn: deliver user steering promptly (it's interactive), but leave
 		// host notifications queued — a finished background task waits for a turn
 		// boundary so it never interrupts the in-flight turn.
 		steerTexts, _, userParts := sess.drainInbox(true)
-		if reminder := reminderBlock(steerReminderHeader, steerTexts); reminder != "" {
-			allMsgs[len(allMsgs)-1].Content += "\n\n" + reminder
-			emitSystemReminder(sess, reminder)
-		}
+		injectAndEmit(sess, &allMsgs, reminderBlock(steerReminderHeader, steerTexts), true)
 
 		// read_media results are text-only (tool messages can't carry media), so
 		// files it loaded — plus any attachments the user interjected during the
@@ -271,6 +211,79 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 			sess.append(msg)
 		}
 	}
+}
+
+// injectAndEmit adds reminder r to the outbound context and mirrors it on the
+// event stream; no-op for "". appendToLast=false places it via injectReminder
+// (the turn-start path: the reminder rides the turn's user message);
+// appendToLast=true appends to the trailing message (the mid-turn path: the
+// reminder rides the round's last tool message, never a parts-carrying user
+// message).
+func injectAndEmit(sess *Session, allMsgs *[]llm.Message, r string, appendToLast bool) {
+	if r == "" {
+		return
+	}
+	if appendToLast {
+		(*allMsgs)[len(*allMsgs)-1].Content += "\n\n" + r
+	} else {
+		*allMsgs = injectReminder(*allMsgs, r)
+	}
+	emitSystemReminder(sess, r)
+}
+
+// assembleTurnContext builds the provider-bound context for one turn: system
+// prompt + history + standing reminders (+ headless reminder), the tool list
+// and its schema index, then the turn-start reminder-and-inbox drain (a fresh
+// turn is a clean boundary, so BOTH user steering and host notifications are
+// delivered, each as its own labeled block). Parts queued while idle are
+// appended — to allMsgs and to sess — as a user message AFTER the reminders,
+// so a reminder never lands on a parts-carrying message (only user messages
+// can carry media; consecutive user messages are fine on the wire).
+//
+// skip=true reports a wake/inbox-seeded turn that delivers nothing to the
+// provider: an empty initiating message, a drained inbox whose items were all
+// whitespace-only, no media parts, and no prior history. allMsgs would
+// otherwise be just [system] — a system-only request a strict provider may
+// reject — so the caller ends the turn cleanly (turn_done, no stream call).
+func assembleTurnContext(cfg TurnConfig, sess *Session, inboxSeeded bool) (allMsgs []llm.Message, toolList []llm.ToolDefinition, toolSchemas map[string]map[string]any, skip bool) {
+	msgs := sess.messages
+
+	allMsgs = make([]llm.Message, 0, len(msgs)+1)
+	allMsgs = append(allMsgs, llm.Message{Role: llm.RoleSystem, Content: cfg.Personality.SystemPrompt})
+	allMsgs = append(allMsgs, msgs...)
+
+	// Standing reminders (host Environment/Delegation context) sit right after
+	// the system prompt every turn. Set by SetStandingReminders and regenerated
+	// on resume — not persisted. Snapshot via the accessor (msgMu): an agent
+	// switch may replace the slice while a turn is in flight.
+	for _, r := range sess.StandingReminders() {
+		allMsgs = injectReminder(allMsgs, r)
+	}
+
+	toolList = filterHeadlessTools(cfg.Personality.Tools, cfg.Headless)
+	if cfg.Headless {
+		allMsgs = injectReminder(allMsgs, headlessReminder)
+	}
+
+	// Schema index for fast lookup during tool call validation.
+	toolSchemas = make(map[string]map[string]any, len(toolList))
+	for _, td := range toolList {
+		toolSchemas[td.Name] = td.Parameters
+	}
+
+	injectAndEmit(sess, &allMsgs, sess.reminders.check(cfg.StatusLine, sess.lastPromptTokens), false)
+	steerTexts, noticeTexts, userParts := sess.drainInbox(false)
+	steerReminder := reminderBlock(steerReminderHeader, steerTexts)
+	noticeReminder := reminderBlock(noticeReminderHeader, noticeTexts)
+	injectAndEmit(sess, &allMsgs, steerReminder, false)
+	injectAndEmit(sess, &allMsgs, noticeReminder, false)
+	if msg, ok := attachmentsMessage(nil, userParts); ok {
+		allMsgs = append(allMsgs, msg)
+		sess.append(msg)
+	}
+
+	skip = inboxSeeded && steerReminder == "" && noticeReminder == "" && len(userParts) == 0 && len(msgs) == 0
+	return allMsgs, toolList, toolSchemas, skip
 }
 
 // attachmentsMessage builds the synthetic user message that delivers media
@@ -422,8 +435,6 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 						ListJobs:      cfg.ListJobs,
 						JobStatus:     cfg.JobStatus,
 						CancelJob:     cfg.CancelJob,
-						AllMsgs:       st.allMsgs,
-						SessMsgs:      sess.messages,
 					}
 					out, herr := handler.Execute(ctx, tc.ID, json.RawMessage([]byte(tc.RawArgs)), toolCfg)
 					res = classifyHandlerOutput(out)

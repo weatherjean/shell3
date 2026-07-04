@@ -99,16 +99,25 @@ func dispatchCustomTool(ctx context.Context, cfg TurnConfig, name, rawArgs strin
 }
 
 // CompactSummary is the structured product of one compaction: a narrative
-// summary plus optional pointer lists. The host-driven auto-compaction path
-// (maybeCompact) fills Summary, ImportantFiles, and ReadFiles from the
-// compacted head's tool calls; the remaining lists are left empty.
+// summary plus the file-pointer lists the host-driven auto-compaction path
+// (maybeCompact) derives from the compacted head's tool calls.
 type CompactSummary struct {
-	Summary             string
-	ImportantFiles      []string // files modified (edit_file) in the compacted head
-	ReadFiles           []string // files read (read) but not modified in the compacted head
-	ImportantReferences []string
-	Skills              []string
-	NextSteps           []string
+	Summary        string
+	ImportantFiles []string // files modified (edit_file) in the compacted head
+	ReadFiles      []string // files read (read) but not modified in the compacted head
+}
+
+// writeBulletSection appends a "<tag>\n- item\n</tag>" block to b, or nothing
+// when items is empty.
+func writeBulletSection(b *strings.Builder, tag string, items []string) {
+	if len(items) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "\n\n<%s>\n", tag)
+	for _, it := range items {
+		fmt.Fprintf(b, "- %s\n", it)
+	}
+	fmt.Fprintf(b, "</%s>", tag)
 }
 
 // compactInto replaces the conversation history with a structured summary
@@ -160,41 +169,8 @@ func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.
 	var b strings.Builder
 	fmt.Fprintf(&b, "<system-reminder>\nContinuation of session %s. History compacted.\nPrior session messages are in the runs directory (use the `history` skill, or read .shell3_project/runs/%s/messages.jsonl directly).\n</system-reminder>\n\n", prevSessionID, prevSessionID)
 	fmt.Fprintf(&b, "<compact-summary>\n%s\n</compact-summary>", args.Summary)
-	if len(args.ImportantFiles) > 0 {
-		b.WriteString("\n\n<modified-files>\n")
-		for _, f := range args.ImportantFiles {
-			fmt.Fprintf(&b, "- %s\n", f)
-		}
-		b.WriteString("</modified-files>")
-	}
-	if len(args.ReadFiles) > 0 {
-		b.WriteString("\n\n<read-files>\n")
-		for _, f := range args.ReadFiles {
-			fmt.Fprintf(&b, "- %s\n", f)
-		}
-		b.WriteString("</read-files>")
-	}
-	if len(args.ImportantReferences) > 0 {
-		b.WriteString("\n\n<important-references>\n")
-		for _, r := range args.ImportantReferences {
-			fmt.Fprintf(&b, "- %s\n", r)
-		}
-		b.WriteString("</important-references>")
-	}
-	if len(args.Skills) > 0 {
-		b.WriteString("\n\n<skills-to-reread>\n")
-		for _, s := range args.Skills {
-			fmt.Fprintf(&b, "- %s\n", s)
-		}
-		b.WriteString("</skills-to-reread>")
-	}
-	if len(args.NextSteps) > 0 {
-		b.WriteString("\n\n<next-steps>\n")
-		for _, s := range args.NextSteps {
-			fmt.Fprintf(&b, "- %s\n", s)
-		}
-		b.WriteString("</next-steps>")
-	}
+	writeBulletSection(&b, "modified-files", args.ImportantFiles)
+	writeBulletSection(&b, "read-files", args.ReadFiles)
 
 	continuationMsg := llm.Message{Role: llm.RoleUser, Content: b.String()}
 

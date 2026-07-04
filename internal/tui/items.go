@@ -534,8 +534,11 @@ func toolSummary(it *Item) string {
 	return truncateSummary(s)
 }
 
+// truncateSummary clamps a one-line summary to the 60-rune card budget:
+// anything over 60 runes becomes the first 60 plus an ellipsis. Not
+// strutil.ClipRunes — that helper's budget includes the ellipsis (total ≤ n),
+// which differs at exactly n runes.
 func truncateSummary(s string) string {
-	// Truncate by runes, not bytes, so a multibyte character is never split.
 	if r := []rune(s); len(r) > 60 {
 		return string(r[:60]) + "…"
 	}

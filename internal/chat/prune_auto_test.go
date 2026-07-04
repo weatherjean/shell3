@@ -31,7 +31,7 @@ func TestMaybeCompact_TwoTierBands(t *testing.T) {
 		}
 		return sess
 	}
-	cfg := TurnConfig{CompactAt: 1000, PruneAt: 600, KeepRecent: 1500, Log: noopLogger()}
+	cfg := TurnConfig{AgentKnobs: AgentKnobs{CompactAt: 1000, PruneAt: 600, KeepRecent: 1500}, Log: noopLogger()}
 
 	// Below prune_at: the dispatcher does nothing; the long tool output survives.
 	below := mkSession()
@@ -61,7 +61,7 @@ func TestPruneOldToolOutputs_StubsOldProtectsTail(t *testing.T) {
 		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "2", Name: "bash"}}},
 		bigTool("2"), // recent -> protected
 	}
-	cfg := TurnConfig{CompactAt: 1000, KeepRecent: 1500, Log: noopLogger()}
+	cfg := TurnConfig{AgentKnobs: AgentKnobs{CompactAt: 1000, KeepRecent: 1500}, Log: noopLogger()}
 	pruneOldToolOutputs(cfg, sess)
 
 	if !strings.HasPrefix(sess.messages[1].Content, "[pruned") {

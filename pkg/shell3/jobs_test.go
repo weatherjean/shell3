@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
@@ -23,15 +22,11 @@ func TestJobManagerCommandLifecycle(t *testing.T) {
 	if got := m.list(); len(got) != 1 || got[0].ID != id || got[0].Kind != JobCommand {
 		t.Fatalf("list = %+v, want one JobCommand id=%s", got, id)
 	}
-	// Wait for completion, then output tail holds the echoed line.
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if strings.Contains(m.output(id), "hi") {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	// Join the job goroutine (a real sync point), then read the output once.
+	m.wg.Wait()
+	if !strings.Contains(m.output(id), "hi") {
+		t.Fatalf("output never contained 'hi': %q", m.output(id))
 	}
-	t.Fatalf("output never contained 'hi': %q", m.output(id))
 }
 
 func TestJobManagerConcurrencyCap(t *testing.T) {
@@ -149,14 +144,8 @@ func TestJobManagerRetainsDoneCommandJob(t *testing.T) {
 		t.Fatalf("startCommand: %v", err)
 	}
 
-	// Wait until the job is done (output contains the echoed text).
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if strings.Contains(m.output(id), "retained") {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	// Join the job goroutine, then read once.
+	m.wg.Wait()
 	if !strings.Contains(m.output(id), "retained") {
 		t.Fatalf("output never contained 'retained': %q", m.output(id))
 	}
@@ -361,39 +350,6 @@ func TestAppendCappedTail_Truncates(t *testing.T) {
 	}
 	if len(got) > jobStatusCap+40 {
 		t.Errorf("appendCappedTail result too large: %d bytes", len(got))
-	}
-}
-
-// TestTail_NegativeAndRuneSafety pins tail's edge cases: non-positive n returns
-// "" (no panic), and a cut never lands mid-UTF-8-sequence.
-func TestTail_NegativeAndRuneSafety(t *testing.T) {
-	if got := tail("hello", -3); got != "" {
-		t.Errorf("tail(s, -3) = %q, want empty", got)
-	}
-	if got := tail("hello", 0); got != "" {
-		t.Errorf("tail(s, 0) = %q, want empty", got)
-	}
-	s := strings.Repeat("é", 100) // 2 bytes per rune
-	for n := 1; n < 10; n++ {
-		got := tail(s, n)
-		if !strings.HasPrefix(got, "…") || !utf8.ValidString(got) {
-			t.Errorf("tail(%d runes, %d) = %q, not rune-safe", 100, n, got)
-		}
-		if rest := strings.TrimPrefix(got, "…"); rest != "" && !strings.HasSuffix(rest, "é") {
-			t.Errorf("tail(%d runes, %d) = %q, kept a partial rune", 100, n, got)
-		}
-	}
-}
-
-// TestTruncateRunes pins the shared rune-safe truncation helper.
-func TestTruncateRunes(t *testing.T) {
-	if got := truncateRunes("short", 100); got != "short" {
-		t.Errorf("truncateRunes short = %q", got)
-	}
-	s := strings.Repeat("é", 100)
-	got := truncateRunes(s, 5) // 5 bytes lands mid-rune; must back off to 4
-	if got != strings.Repeat("é", 2)+"…" {
-		t.Errorf("truncateRunes = %q, want two é + ellipsis", got)
 	}
 }
 

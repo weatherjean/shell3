@@ -17,14 +17,16 @@ func TestApplyActiveAgentCopiesAllAgentFields(t *testing.T) {
 	}
 
 	rt := ActiveAgent{
-		Personality:     persona.Persona{Name: "plan", SystemPrompt: "sp"},
-		ModeLabel:       "plan",
-		ActiveSkills:    []string{"s1"},
-		ActiveTools:     []string{"bash"},
-		CustomToolNames: map[string]bool{"foo": true},
-		Params:          llm.RequestParams{ReasoningEffort: "high"},
-		ModelID:         "gpt-x",
-		ContextWindow:   128000,
+		Personality:  persona.Persona{Name: "plan", SystemPrompt: "sp"},
+		ModeLabel:    "plan",
+		ActiveSkills: []string{"s1"},
+		ActiveTools:  []string{"bash"},
+		Params:       llm.RequestParams{ReasoningEffort: "high"},
+		ModelID:      "gpt-x",
+		AgentKnobs: AgentKnobs{
+			CustomToolNames: map[string]bool{"foo": true},
+			ContextWindow:   128000,
+		},
 	}
 
 	cfg.ApplyActiveAgent(rt)

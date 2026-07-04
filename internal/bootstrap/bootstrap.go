@@ -58,8 +58,7 @@ func ensureSelfGitignore(root string) error {
 // appendGitignore appends addition to the .gitignore at path, given the file's
 // current content. It guards the leading newline so the addition always starts
 // on its own line, and creates the file with mode 0644 when absent. label (e.g.
-// "global ") is interpolated into error messages to distinguish the two
-// gitignore writers; pass "" for the project gitignore.
+// "global ") is interpolated into error messages.
 func appendGitignore(label, path, content, addition string) error {
 	if len(content) > 0 && !strings.HasSuffix(content, "\n") {
 		addition = "\n" + addition

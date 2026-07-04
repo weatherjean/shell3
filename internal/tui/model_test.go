@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	colorful "github.com/lucasb-eyer/go-colorful"
+	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
@@ -191,22 +192,26 @@ type fakeCmds struct {
 	jobTranscript map[string]string
 	killed        []string
 	killErr       error // when set, KillJob returns it (exercises the failure notice)
+	safetyOff     bool
 }
 
-func (f *fakeCmds) Clear() error                { return nil }
-func (f *fakeCmds) Rollback() (bool, error)     { return false, nil }
-func (f *fakeCmds) Prune(string) (string, bool) { return "", false }
-func (f *fakeCmds) QueueCompact()               { f.compactQueued = true }
-func (f *fakeCmds) AgentNames() []string        { return f.names }
-func (f *fakeCmds) ActiveAgent() string         { return f.active }
+func (f *fakeCmds) Clear() error                 { return nil }
+func (f *fakeCmds) Rollback() (bool, error)      { return false, nil }
+func (f *fakeCmds) Prune(string) (string, error) { return "", nil }
+func (f *fakeCmds) QueueCompact()                { f.compactQueued = true }
+func (f *fakeCmds) AgentNames() []string         { return f.names }
+func (f *fakeCmds) ActiveAgent() string          { return f.active }
 func (f *fakeCmds) Snapshot() shell3.Snapshot {
-	return shell3.Snapshot{Agent: f.active, StatusLine: f.status}
+	// Mirror the real Snapshot: Model is the parsed middle of the status line.
+	_, model := chat.SplitStatus(f.status)
+	return shell3.Snapshot{Agent: f.active, StatusLine: f.status, Model: model}
 }
 func (f *fakeCmds) HasQueuedInput() bool           { return f.queued }
 func (f *fakeCmds) Jobs() []shell3.JobInfo         { return f.jobs }
 func (f *fakeCmds) JobOutput(id string) string     { return f.jobOut[id] }
 func (f *fakeCmds) JobTranscript(id string) string { return f.jobTranscript[id] }
 func (f *fakeCmds) KillJob(id string) error        { f.killed = append(f.killed, id); return f.killErr }
+func (f *fakeCmds) SetSafetyOff(off bool)          { f.safetyOff = off }
 func (f *fakeCmds) SwitchAgent(name string) error {
 	f.active = name
 	return nil
@@ -307,18 +312,6 @@ func TestEditFileOutputColorizedAsDiff(t *testing.T) {
 	}
 	if !strings.Contains(out, "\x1b[") {
 		t.Fatal("diff output should contain ANSI color codes")
-	}
-}
-
-func TestModelLabelExtractsModel(t *testing.T) {
-	if got := modelLabel("openai │ gpt-x │ high"); got != "gpt-x" {
-		t.Fatalf("modelLabel = %q, want gpt-x", got)
-	}
-	if got := modelLabel("solo"); got != "solo" {
-		t.Fatalf("single-segment modelLabel = %q, want solo", got)
-	}
-	if got := modelLabel(""); got != "" {
-		t.Fatalf("empty modelLabel = %q", got)
 	}
 }
 
@@ -751,35 +744,27 @@ func TestCommandGateConfirmDenyKeys(t *testing.T) {
 	}
 }
 
-func TestDisableSafetyAutoAllowsAndShowsBang(t *testing.T) {
-	m := newModel(closedSend(nil), nil, "build", "openai │ gpt-x")
+func TestDisableSafetyTogglesSessionAndShowsBang(t *testing.T) {
+	// The auto-allow itself lives in the Session's Asker wrapper
+	// (shell3.Session.SetSafetyOff); the TUI's job is to propagate the toggle
+	// and show the "!" indicator.
+	fc := &fakeCmds{}
+	m := newModel(closedSend(nil), fc, "build", "openai │ gpt-x")
 	m.Update(tea.WindowSizeMsg{Width: 90, Height: 24})
-	// Toggle safety off via the command.
 	m.runCommand("disable_safety")
 	if !m.safetyOff {
 		t.Fatal(":disable_safety should turn safety off")
 	}
+	if !fc.safetyOff {
+		t.Fatal(":disable_safety should propagate the toggle to the session")
+	}
 	if !strings.Contains(stripANSI(m.renderFooter()), "!") {
 		t.Fatal("footer should show the ! indicator when safety is off")
 	}
-	// An on_tool_call ask now auto-allows without showing the modal.
-	reply := make(chan bool, 1)
-	m.Update(confirmMsg{req: &confirmReq{command: "rm x", reply: reply}})
-	if m.confirm != nil {
-		t.Fatal("no modal should appear when safety is off")
-	}
-	select {
-	case ok := <-reply:
-		if !ok {
-			t.Fatal("ask should auto-allow when safety is off")
-		}
-	default:
-		t.Fatal("ask should have been auto-answered")
-	}
 	// Toggle back on.
 	m.runCommand("disable_safety")
-	if m.safetyOff {
-		t.Fatal(":disable_safety should toggle back on")
+	if m.safetyOff || fc.safetyOff {
+		t.Fatal(":disable_safety should toggle back on (model + session)")
 	}
 }
 
@@ -832,8 +817,8 @@ func TestApplyAgentRefreshesStatusAndContext(t *testing.T) {
 	if m.agentName != "b" || m.statusMsg != "openai │ gpt-b │ low" {
 		t.Fatalf("applyAgent should refresh agent + status from the snapshot: %q / %q", m.agentName, m.statusMsg)
 	}
-	if modelLabel(m.statusMsg) != "gpt-b" {
-		t.Fatalf("footer model label should track the new agent, got %q", modelLabel(m.statusMsg))
+	if m.modelName != "gpt-b" {
+		t.Fatalf("footer model label should track the new agent, got %q", m.modelName)
 	}
 }
 

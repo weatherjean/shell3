@@ -16,6 +16,10 @@ shell3 -c plan               # use ~/.shell3/plan.lua
 shell3 --agent review        # start on a specific agent
 ```
 
+A resume without `--config` runs under the config the session was originally
+created with (recorded in its metadata), so a conversation started under
+`~/.shell3/plan.lua` resumes under it too. An explicit `--config` always wins.
+
 The `run` subcommand is the headless mode: it runs exactly one turn, prints the
 result, and exits. The prompt comes from `--prompt`, positional arguments, or
 stdin — the first non-empty source wins:
@@ -37,7 +41,7 @@ rather than asking questions it can't get answered.
 | `--prompt <text>` | The prompt for this run (alternative to positional args / stdin) |
 | `-c`, `--config <name\|path>` | Config name (→ `~/.shell3/<name>.lua`) or path to a `*.lua` file (default `~/.shell3/shell3.lua`) |
 | `--agent <name>` | Select the active agent (default: first declared). May also name a registered subagent |
-| `--resume <id>` | Resume a stored session by id: reload its messages and continue the conversation |
+| `--resume <id>` | Resume a stored session by id: reload its messages and continue the conversation (without `--config`, runs under the session's recorded config) |
 | `--out <path>` | Stream a JSONL audit log of this run to `<path>` (see below) |
 
 ## The audit log (`--out`)

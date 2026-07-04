@@ -7,6 +7,7 @@ import (
 
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/llm/fakellm"
 	"github.com/weatherjean/shell3/internal/persona"
 )
 
@@ -19,7 +20,7 @@ import (
 // append at turn start (before Started) and the terminal append after cancel —
 // so the race window is covered on both ends. Must be clean under -race.
 func TestSession_DashboardReadsRaceTurn(t *testing.T) {
-	block := &blockingLLM{started: make(chan struct{})}
+	block := fakellm.NewBlocking()
 	rt := newTestRuntime(t, func() chat.Config {
 		return chat.Config{
 			LLM:        block,
@@ -56,26 +57,11 @@ func TestSession_DashboardReadsRaceTurn(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	turn := s.Send(ctx, "hello") // turn goroutine appends the user message, then blocks in Stream
-	<-block.started
+	<-block.Started
 
 	cancel()
 	for range turn { // drain until the turn's terminal append + channel close
 	}
 	close(stop)
 	wg.Wait()
-}
-
-// blockingLLM is a chat.LLMClient whose Stream blocks until ctx is cancelled,
-// closing started on its first call — the internal-package twin of
-// shell3test.BlockingLLM (which package shell3's own tests cannot import without
-// an import cycle).
-type blockingLLM struct {
-	started chan struct{}
-	once    sync.Once
-}
-
-func (b *blockingLLM) Stream(ctx context.Context, _ []llm.Message, _ []llm.ToolDefinition, _ func(llm.StreamEvent)) error {
-	b.once.Do(func() { close(b.started) })
-	<-ctx.Done()
-	return ctx.Err()
 }

@@ -199,7 +199,9 @@ func (c *Client) SetExtra(m map[string]any)     { c.extra = m }
 func (c *Client) ParamSpecs() []llm.ParamSpec {
 	return []llm.ParamSpec{
 		{Name: "reasoning_effort", Enum: []string{"none", "minimal", "low", "medium", "high", "xhigh"}, Default: "medium"},
-		{Name: "parallel_tool_calls", Enum: []string{"true", "false"}, Default: "true"},
+		// Default "" — the adapter never sets ParallelToolCalls unless asked
+		// (nil leaves the provider's own default in effect).
+		{Name: "parallel_tool_calls", Enum: []string{"true", "false"}, Default: ""},
 		{Name: "temperature", Default: ""},
 		{Name: "max_tokens", Default: "16000"},
 	}
@@ -215,7 +217,7 @@ func (c *Client) LastTraffic() (req, res []byte) {
 // Stream sends msgs to the LLM and calls onEvent for each delta and completion.
 func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.ToolDefinition, onEvent func(llm.StreamEvent)) error {
 	params := openai.ChatCompletionNewParams{
-		Model:    openai.ChatModel(c.model),
+		Model:    c.model,
 		Messages: toMessages(msgs),
 		StreamOptions: openai.ChatCompletionStreamOptionsParam{
 			IncludeUsage: openai.Bool(true),
@@ -242,7 +244,7 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 		params.MaxCompletionTokens = openai.Int(int64(c.params.MaxTokens))
 	}
 
-	var extraOpts []option.RequestOption
+	extraOpts := make([]option.RequestOption, 0, len(c.extra)+1)
 	for k, v := range c.extra {
 		extraOpts = append(extraOpts, option.WithJSONSet(k, v))
 	}

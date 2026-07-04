@@ -1,12 +1,12 @@
 package tui
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/runs"
 )
 
 // The :background output view renders a subagent's messages.jsonl transcript
@@ -44,15 +44,7 @@ func renderJobTranscript(raw string, width int) []string {
 		rows = append(rows, strings.Split(strings.TrimRight(block, "\n"), "\n")...)
 	}
 
-	for _, line := range strings.Split(raw, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		var msg llm.Message
-		if json.Unmarshal([]byte(line), &msg) != nil {
-			continue // half-written tail line or unknown schema — skip
-		}
+	for _, msg := range runs.ParseMessages(raw) {
 		switch msg.Role {
 		case llm.RoleSystem:
 			// skip system prompts — they are not meaningful to the human reader

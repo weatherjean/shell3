@@ -13,9 +13,17 @@ func (s *Session) Start(meta map[string]string) {
 	emitSessionStart(s, meta)
 }
 
-// End emits a session_end event with the given status string ("ok" or "error").
-func (s *Session) End(status string) {
-	emitSessionEnd(s, status)
+// Status is a session's terminal state, written to the session_end event.
+type Status string
+
+const (
+	StatusOK    Status = "ok"
+	StatusError Status = "error"
+)
+
+// End emits a session_end event with the given status.
+func (s *Session) End(status Status) {
+	emitSessionEnd(s, string(status))
 }
 
 // Messages returns a snapshot of the in-progress conversation history. The

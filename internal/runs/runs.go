@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/weatherjean/shell3/internal/llm"
@@ -92,18 +91,8 @@ func (s *Store) readMeta(id string) (Meta, error) {
 
 // AppendMessage appends one JSON-encoded message line to runs/<id>/messages.jsonl.
 func (s *Store) AppendMessage(id string, m llm.Message) error {
-	b, err := json.Marshal(m)
-	if err != nil {
-		return fmt.Errorf("runs: marshal message: %w", err)
-	}
-	f, err := os.OpenFile(filepath.Join(s.sessDir(id), "messages.jsonl"),
-		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("runs: open messages: %w", err)
-	}
-	defer f.Close()
-	if _, err := f.Write(append(b, '\n')); err != nil {
-		return fmt.Errorf("runs: append message: %w", err)
+	if err := appendLine(filepath.Join(s.sessDir(id), "messages.jsonl"), "message", m); err != nil {
+		return err
 	}
 	return s.TouchSession(id)
 }
@@ -117,16 +106,9 @@ func (s *Store) LoadMessages(id string) ([]llm.Message, error) {
 	if err != nil {
 		return nil, fmt.Errorf("runs: load messages %s: %w", id, err)
 	}
-	var out []llm.Message
-	for _, line := range strings.Split(strings.TrimRight(string(b), "\n"), "\n") {
-		if line == "" {
-			continue
-		}
-		var m llm.Message
-		if err := json.Unmarshal([]byte(line), &m); err != nil {
-			return nil, fmt.Errorf("runs: decode message in %s: %w", id, err)
-		}
-		out = append(out, m)
+	out, err := decodeLines[llm.Message](string(b), true)
+	if err != nil {
+		return nil, fmt.Errorf("runs: decode message in %s: %w", id, err)
 	}
 	return out, nil
 }
@@ -189,22 +171,11 @@ func (s *Store) remindersPath(id string) string {
 
 // AppendReminder appends one reminder as a JSON line to runs/<id>/reminders.jsonl.
 func (s *Store) AppendReminder(id string, seq int, text string) error {
-	b, err := json.Marshal(ReminderLine{Seq: seq, Text: text})
-	if err != nil {
-		return fmt.Errorf("runs: marshal reminder: %w", err)
-	}
-	f, err := os.OpenFile(s.remindersPath(id), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("runs: open reminders: %w", err)
-	}
-	defer f.Close()
-	if _, err := f.Write(append(b, '\n')); err != nil {
-		return fmt.Errorf("runs: append reminder: %w", err)
-	}
-	return nil
+	return appendLine(s.remindersPath(id), "reminder", ReminderLine{Seq: seq, Text: text})
 }
 
 // LoadReminders reads runs/<id>/reminders.jsonl in order. Missing file → (nil,nil).
+// Malformed lines are skipped, never fatal.
 func (s *Store) LoadReminders(id string) ([]ReminderLine, error) {
 	b, err := os.ReadFile(s.remindersPath(id))
 	if os.IsNotExist(err) {
@@ -213,16 +184,7 @@ func (s *Store) LoadReminders(id string) ([]ReminderLine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("runs: load reminders %s: %w", id, err)
 	}
-	var out []ReminderLine
-	for _, line := range strings.Split(strings.TrimRight(string(b), "\n"), "\n") {
-		if line == "" {
-			continue
-		}
-		var r ReminderLine
-		if json.Unmarshal([]byte(line), &r) == nil { // skip malformed, never fatal
-			out = append(out, r)
-		}
-	}
+	out, _ := decodeLines[ReminderLine](string(b), false)
 	return out, nil
 }
 

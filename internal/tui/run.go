@@ -74,6 +74,7 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 		},
 		sess, snap.Agent, snap.StatusLine,
 	)
+	m.modelName = snap.Model
 	m.contextWindow = snap.ContextWindow
 	m.safetyConfigured = snap.ToolHooksOn
 	m.welcome = snap.Welcome // custom welcome card (shell3.welcome), if any

@@ -51,7 +51,10 @@ func tableToMap(t *lua.LTable) map[string]any {
 	return out
 }
 
-// stringList reads the array part of a Lua table as a []string.
+// stringList reads the array part of a Lua table as a []string. It is
+// deliberately LENIENT (skips non-string elements) — suitable for config lists
+// like secrets. Do not merge with luaStringList (lua_ontools.go), which fails
+// closed for the on_tool_call argv security boundary.
 func stringList(t *lua.LTable) []string {
 	var out []string
 	for i := 1; ; i++ {

@@ -3,7 +3,6 @@ package acp
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
@@ -32,12 +31,6 @@ type acpSession struct {
 	mu         sync.Mutex
 	cancelTurn context.CancelFunc // set while a turn holds turnSlot; invoked by session/cancel
 	liveToolID string             // ToolCallID of the tool call currently streaming/executing ("" when none)
-
-	// safetyOff, when set via the /disable_safety command, makes askerFor
-	// auto-allow every on_tool_call ask without prompting the client — the ACP
-	// parallel to the TUI's :disable_safety toggle. Read on tool-call goroutines
-	// and toggled on the Prompt goroutine, so it is atomic.
-	safetyOff atomic.Bool
 }
 
 // newACPSession constructs an acpSession with its turn slot initialized.

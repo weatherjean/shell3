@@ -20,10 +20,6 @@ import (
 type RuntimeSpec struct {
 	ConfigPath string // "" → ~/.shell3/shell3.lua
 	WorkDir    string // runtime root; "" → os.Getwd(). Sessions default here.
-	// Context, when non-nil, parents the runtime's base context: cancelling it
-	// tears down the runtime (and any in-flight session/turn) just as Close
-	// does. "" → context.Background() (lifetime bounded only by Close).
-	Context context.Context
 }
 
 // SessionOpts parameterizes one Session on a Runtime.
@@ -58,7 +54,7 @@ type SessionOpts struct {
 	Depth int
 }
 
-// HostEventKind enumerates out-of-turn runtime events.
+// HostEventKind discriminates out-of-turn runtime events.
 type HostEventKind int
 
 const (
@@ -66,6 +62,14 @@ const (
 	// The host should call Session.RunQueued to react (runs a model turn).
 	Wake HostEventKind = iota
 )
+
+// String returns the event name ("wake") for logs and diagnostics.
+func (k HostEventKind) String() string {
+	if k == Wake {
+		return "wake"
+	}
+	return fmt.Sprintf("HostEventKind(%d)", int(k))
+}
 
 // HostEvent is one out-of-turn event for a session. Wake carries only the
 // session name.
@@ -108,8 +112,8 @@ type Runtime struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	configPath string // captured from RuntimeSpec for Reload
-	homeDir    string // captured for Reload's BuildParts
+	configPath string // captured from RuntimeSpec for ConfigPath
+	homeDir    string // captured from construction for ConfigPath
 
 	// jobs manages in-process background jobs (command jobs and, in future tasks,
 	// subagent jobs). Owned by this Runtime; cancelled at Close.
@@ -124,10 +128,13 @@ type Runtime struct {
 	closed   bool
 }
 
-// NewRuntime loads the config and assembles the shared runtime parts.
+// NewRuntime loads the config and assembles the shared runtime parts. ctx
+// parents the runtime's base context: cancelling it tears down the runtime
+// (and any in-flight session/turn) just as Close does; pass
+// context.Background() for a lifetime bounded only by Close.
 // The Runtime must be Closed; sessions left open are closed by Close.
-func NewRuntime(spec RuntimeSpec) (*Runtime, error) {
-	parent := spec.Context
+func NewRuntime(ctx context.Context, spec RuntimeSpec) (*Runtime, error) {
+	parent := ctx
 	if parent == nil {
 		parent = context.Background()
 	}
@@ -187,13 +194,9 @@ func (rt *Runtime) Events() <-chan HostEvent { return rt.events }
 // a running job. The channel is never closed.
 func (rt *Runtime) JobEvents() <-chan JobProgress { return rt.jobEvents }
 
-// Store returns the shared canonical store (nil if unavailable).
-func (rt *Runtime) Store() *runs.Store { return rt.store }
-
 // ConfigPath returns the absolute path of the shell3.lua this runtime was built
 // from. An empty or relative spec path is resolved exactly the way construction
-// (and Reload) resolves it — ~/.shell3/shell3.lua — so the
-// result is the actual file a reload reads. Useful for self-reconfiguration
+// resolves it — ~/.shell3/shell3.lua. Useful for self-reconfiguration
 // surfaces that need to show the agent/operator which file to edit.
 func (rt *Runtime) ConfigPath() (string, error) {
 	return agentsetup.ResolveConfigPath(rt.configPath, rt.homeDir)
@@ -307,7 +310,7 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 	if rt.closed {
-		return nil, fmt.Errorf("shell3: runtime is closed")
+		return nil, ErrRuntimeClosed
 	}
 	if opts.Name == "" {
 		// Advance until we find a name not already taken by a live session.

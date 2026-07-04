@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/notify"
+	"github.com/weatherjean/shell3/internal/strutil"
 )
 
 // notifyBg builds a bg_done completion notification for a command job.
@@ -72,10 +73,9 @@ func renderNotification(n notify.Notification) string {
 		}
 		msg := fmt.Sprintf("subagent %s finished (%s).", n.ID, status)
 		if n.Preview != "" {
-			result := n.Preview
-			if r := []rune(result); len(r) > agentDoneResultCap {
-				result = string(r[:agentDoneResultCap]) +
-					fmt.Sprintf("… (result truncated; call `task_status %s` for the full result, or open the :background modal for the transcript)", n.ID)
+			result, cut := strutil.CutRunes(n.Preview, agentDoneResultCap)
+			if cut {
+				result += fmt.Sprintf("… (result truncated; call `task_status %s` for the full result, or open the :background modal for the transcript)", n.ID)
 			}
 			msg += " Result: " + result
 			msg += " That result is the subagent's own summary — relay it to the user now (they have NOT seen it yet): summarize or present it in your reply."

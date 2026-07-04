@@ -117,7 +117,8 @@ func verdictFromTable(tbl *lua.LTable, cmd *string) (ToolCallVerdict, bool) {
 // the table is empty or any element 1..N is not a string (a hole reads as nil,
 // which is not a string, so it is rejected). This is fail-closed input
 // validation for the on_tool_call argv shape — a map-style table has Len()==0
-// and is rejected as empty.
+// and is rejected as empty. Deliberately stricter than convert.go's lenient
+// stringList (config lists); do not merge the two.
 func luaStringList(t *lua.LTable) ([]string, bool) {
 	n := t.Len()
 	if n == 0 {

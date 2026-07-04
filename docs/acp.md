@@ -80,6 +80,13 @@ A headless in-process subagent (spawned via the `task` tool) has no attached hum
 
 See [configuration.md](configuration.md#opt-in-command-gate--on_tool_call) for how to write `on_tool_call` handlers.
 
+## Turn errors
+
+A failed turn surfaces as a JSON-RPC internal error on `session/prompt`. When
+the error looks recoverable by undoing the last turn (a provider HTTP 400 —
+usually a conversation state the model rejects), the message includes a
+rollback hint, matching the other front-ends.
+
 ## Out-of-band events
 
 Events can arrive while no `session/prompt` is in flight:
@@ -107,7 +114,7 @@ History lives as plain JSONL under `.shell3_project/runs/<id>/messages.jsonl` an
 ```sh
 shell3 acp                        # default agent (first declared in shell3.lua)
 shell3 acp --agent plan           # start new sessions on the "plan" agent
-shell3 acp --config ~/work.lua    # use a specific config file
+shell3 acp -c work                # use ~/.shell3/work.lua (or --config <path>)
 ```
 
 shell3's named agents **are** the ACP modes. `session/new` returns the available modes and the current mode; `session/set_mode` switches the active agent mid-session (without resetting conversation history, same as pressing `Tab` in the TUI). Each mode ID is the agent's name as declared in `shell3.lua`.

@@ -218,6 +218,13 @@ type recorder struct {
 	// Initialized by newTestEnv; tests use waitForFirstUpdate.
 	firstUpdateOnce sync.Once
 	firstUpdateCh   chan struct{}
+
+	// fsFiles, when non-nil, turns the recorder into a fake editor-buffer
+	// backend: ReadTextFile serves from it, WriteTextFile stores into it, and
+	// fsReads/fsWrites record the request paths (see fs_e2e_test.go).
+	fsFiles  map[string]string
+	fsReads  []string
+	fsWrites []string
 }
 
 func (r *recorder) SessionUpdate(_ context.Context, params acpsdk.SessionNotification) error {
@@ -276,11 +283,31 @@ func (r *recorder) RequestPermission(ctx context.Context, params acpsdk.RequestP
 	}, nil
 }
 
-func (r *recorder) ReadTextFile(_ context.Context, _ acpsdk.ReadTextFileRequest) (acpsdk.ReadTextFileResponse, error) {
+// ReadTextFile serves fsFiles when the test installed an editor-buffer fake
+// (see fs_e2e_test.go); with no fsFiles it errors like a capability-less client.
+func (r *recorder) ReadTextFile(_ context.Context, req acpsdk.ReadTextFileRequest) (acpsdk.ReadTextFileResponse, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.fsFiles != nil {
+		r.fsReads = append(r.fsReads, req.Path)
+		if content, ok := r.fsFiles[req.Path]; ok {
+			return acpsdk.ReadTextFileResponse{Content: content}, nil
+		}
+		return acpsdk.ReadTextFileResponse{}, acpsdk.NewInvalidRequest("file not found: " + req.Path)
+	}
 	return acpsdk.ReadTextFileResponse{}, acpsdk.NewInvalidRequest("ReadTextFile not supported by test recorder")
 }
 
-func (r *recorder) WriteTextFile(_ context.Context, _ acpsdk.WriteTextFileRequest) (acpsdk.WriteTextFileResponse, error) {
+// WriteTextFile records the write into fsFiles when the editor-buffer fake is
+// installed; otherwise it errors like a capability-less client.
+func (r *recorder) WriteTextFile(_ context.Context, req acpsdk.WriteTextFileRequest) (acpsdk.WriteTextFileResponse, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.fsFiles != nil {
+		r.fsFiles[req.Path] = req.Content
+		r.fsWrites = append(r.fsWrites, req.Path)
+		return acpsdk.WriteTextFileResponse{}, nil
+	}
 	return acpsdk.WriteTextFileResponse{}, acpsdk.NewInvalidRequest("WriteTextFile not supported by test recorder")
 }
 
@@ -414,7 +441,7 @@ shell3.agent({
 	}
 
 	workDir := t.TempDir()
-	rt, err := shell3.NewRuntime(shell3.RuntimeSpec{
+	rt, err := shell3.NewRuntime(context.Background(), shell3.RuntimeSpec{
 		ConfigPath: luaPath,
 		WorkDir:    workDir,
 	})
@@ -523,7 +550,7 @@ shell3.agent({
 		t.Fatalf("newTestEnvSameDir: write shell3.lua: %v", err)
 	}
 
-	rt, err := shell3.NewRuntime(shell3.RuntimeSpec{
+	rt, err := shell3.NewRuntime(context.Background(), shell3.RuntimeSpec{
 		ConfigPath: luaPath,
 		WorkDir:    parent.workDir, // shared with parent
 	})

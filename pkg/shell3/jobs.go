@@ -2,7 +2,6 @@ package shell3
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -12,19 +11,31 @@ import (
 	"sync"
 	"syscall"
 	"time"
-	"unicode/utf8"
 
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/notify"
+	"github.com/weatherjean/shell3/internal/runs"
+	"github.com/weatherjean/shell3/internal/strutil"
 )
 
-// JobKind distinguishes an in-process background job's payload.
+// JobKind discriminates an in-process background job's payload.
 type JobKind int
 
 const (
 	JobCommand  JobKind = iota // a shell command (bash_bg)
 	JobSubagent                // a child Session (task tool)
 )
+
+// String returns "command"/"subagent" for logs and diagnostics.
+func (k JobKind) String() string {
+	switch k {
+	case JobCommand:
+		return "command"
+	case JobSubagent:
+		return "subagent"
+	}
+	return fmt.Sprintf("JobKind(%d)", int(k))
+}
 
 const defaultMaxConcurrent = 8
 
@@ -225,7 +236,12 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 	go func() {
 		var exit int
 		defer func() {
-			_ = recover()
+			// A panic here is a runtime bug, not a command failure — surface it in
+			// the job output and a nonzero exit instead of reporting a clean done.
+			if r := recover(); r != nil {
+				exit = -1
+				fmt.Fprintf(j.out, "\npanic in job runtime: %v\n", r)
+			}
 			m.finishCommand(j, exit)
 			m.wg.Done()
 		}()
@@ -247,7 +263,7 @@ func (m *jobManager) finishCommand(j *bgJob, exit int) {
 	outStr := j.out.String()
 	if j.parent != nil {
 		e := exit
-		j.parent.injectNoticeNoWake(notifyBg(j.id, j.title, &e, tail(outStr, 400)))
+		j.parent.injectNoticeNoWake(notifyBg(j.id, j.title, &e, strutil.Tail(outStr, 400)))
 	}
 	m.mu.Lock()
 	ex := exit
@@ -417,7 +433,18 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 		var last strings.Builder
 		var runErr error
 		defer func() {
-			_ = recover()
+			// A panic escaping the event loop must mark the job failed, not let it
+			// finish as a clean "done" with partial output.
+			if r := recover(); r != nil {
+				runErr = fmt.Errorf("panic in subagent runtime: %v", r)
+			}
+			// A cancelled job (task_cancel, Runtime.Close) may never see a
+			// terminal Error event — route drops it when the channel is being
+			// abandoned — so consult the job ctx directly: a cancelled run must
+			// report as failed, never as a clean "done" with partial output.
+			if runErr == nil && ctx.Err() != nil {
+				runErr = ctx.Err()
+			}
 			_ = child.Close()
 			errText := ""
 			if runErr != nil {
@@ -433,14 +460,14 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 			switch ev.Kind {
 			case Token:
 				last.WriteString(ev.Text)
-				j.out.Write([]byte(ev.Text))
+				_, _ = j.out.Write([]byte(ev.Text))
 			case ToolCall:
 				fmt.Fprintf(j.out, "\n\n$ %s %s\n", ev.ToolName, ev.ToolInput)
 			case ToolResult:
 				last.Reset() // the next assistant message starts fresh
 				res := ev.ToolOutput
 				if len(res) > 2000 {
-					res = truncateRunes(res, 2000) + "(truncated)"
+					res = strutil.Truncate(res, 2000) + "(truncated)"
 				}
 				fmt.Fprintf(j.out, "%s\n", res)
 			case Error:
@@ -494,7 +521,7 @@ func notifyAgentDone(id, summary, errText string) notify.Notification {
 		TS:      time.Now().UTC().Format(time.RFC3339),
 	}
 	if errText != "" {
-		n.Status = "error: " + truncateRunes(errText, 200)
+		n.Status = "error: " + strutil.Truncate(errText, 200)
 	}
 	return n
 }
@@ -521,23 +548,6 @@ func parentName(s *Session) string {
 		return ""
 	}
 	return s.name
-}
-
-// tail returns the last n bytes of s (rune-safe: the cut advances past any
-// partial UTF-8 sequence), prefixed with an ellipsis when trimmed. n <= 0
-// returns "".
-func tail(s string, n int) string {
-	if n <= 0 {
-		return ""
-	}
-	if len(s) <= n {
-		return s
-	}
-	cut := len(s) - n
-	for cut < len(s) && !utf8.RuneStart(s[cut]) {
-		cut++
-	}
-	return "…" + s[cut:]
 }
 
 func trimSummary(s string) string { return strings.TrimSpace(s) }
@@ -572,15 +582,7 @@ func (m *jobManager) formatJobList() string {
 // "role: content".
 func renderTranscriptText(raw string) string {
 	var b strings.Builder
-	for _, line := range strings.Split(raw, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		var msg llm.Message
-		if json.Unmarshal([]byte(line), &msg) != nil {
-			continue
-		}
+	for _, msg := range runs.ParseMessages(raw) {
 		switch msg.Role {
 		case llm.RoleSystem:
 			// skip — system prompts are not useful in a status summary
@@ -638,10 +640,10 @@ func (m *jobManager) formatJobStatus(id string) string {
 
 	if jKind == JobSubagent {
 		if errText != "" {
-			fmt.Fprintf(&b, "error: %s\n", truncateRunes(errText, 500))
+			fmt.Fprintf(&b, "error: %s\n", strutil.Truncate(errText, 500))
 		}
 		if summary != "" {
-			fmt.Fprintf(&b, "summary: %s\n", truncateRunes(summary, 2000))
+			fmt.Fprintf(&b, "summary: %s\n", strutil.Truncate(summary, 2000))
 		}
 		// Prefer the on-disk transcript once the run ends; while it's still
 		// running that file doesn't exist yet, so fall back to the live in-memory
@@ -684,7 +686,7 @@ func appendCappedTail(b *strings.Builder, label, body string) {
 		return
 	}
 	// Reserve room for the header + truncation-marker lines so the tail budget
-	// can never go negative (a negative tail() n used to panic here).
+	// can never go negative (strutil.Tail returns "" for a non-positive budget).
 	const overhead = 20
 	remaining := jobStatusCap - b.Len() - overhead
 	if remaining <= 0 {
@@ -692,7 +694,7 @@ func appendCappedTail(b *strings.Builder, label, body string) {
 	}
 	if len(body) > remaining {
 		b.WriteString(label + " tail:\n")
-		b.WriteString(tail(body, remaining))
+		b.WriteString(strutil.Tail(body, remaining))
 		b.WriteString("\n…(truncated)")
 	} else {
 		b.WriteString(label + ":\n")

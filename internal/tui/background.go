@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/weatherjean/shell3/internal/strutil"
 	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
@@ -202,7 +203,7 @@ func (m *model) killTargetJob() {
 // displaying the job's raw stdout view, live-appends the chunk so the user sees
 // output stream in without pressing 'r'. Transcript views are left untouched
 // (appending raw chunk text into structured JSONL would corrupt the render).
-func (m *model) handleJobProgress(p shell3.JobProgress) tea.Cmd {
+func (m *model) handleJobProgress(p shell3.JobProgress) {
 	// Update the pill on Done events (running count may have changed).
 	if p.Done && m.cmds != nil {
 		jobs := m.cmds.Jobs()
@@ -216,7 +217,7 @@ func (m *model) handleJobProgress(p shell3.JobProgress) tea.Cmd {
 				m.loadJobOutput(m.bgViewID)
 			}
 		}
-		return nil
+		return
 	}
 	// Live-append chunk only when the modal is open, viewing this job, in raw mode.
 	if p.Chunk != "" && m.bgOpen && m.bgViewID == p.JobID && !m.bgIsTranscript {
@@ -231,7 +232,6 @@ func (m *model) handleJobProgress(p shell3.JobProgress) tea.Cmd {
 		// next render (same mechanism as loadJobOutput — nil bgRows triggers a reflow).
 		m.bgRows = nil
 	}
-	return nil
 }
 
 // refreshJobs re-snapshots the live job list, clamping the selection.
@@ -335,18 +335,7 @@ func (m *model) jobRow(j shell3.JobInfo, selected bool, w int) string {
 	if avail < 8 {
 		avail = 8
 	}
-	return bar + meta + state + stUserText.Render(clip(label, avail))
-}
-
-// clip truncates s to at most n runes, appending an ellipsis when it overflows.
-func clip(s string, n int) string {
-	if n < 1 {
-		n = 1
-	}
-	if r := []rune(s); len(r) > n {
-		return string(r[:n-1]) + "…"
-	}
-	return s
+	return bar + meta + state + stUserText.Render(strutil.ClipRunes(label, avail))
 }
 
 // bgOutputWidth is the wrapped content width of the output view — the modal
