@@ -51,8 +51,8 @@ func TestRunTurn_AutoCompact_TailWireValid_SecondTurn(t *testing.T) {
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
 		Log:         LogOrNoop(nil),
-		CompactAt:   100,
-		KeepRecent:  25, // keeps roughly the last three messages as the tail
+		// KeepRecent keeps roughly the last three messages as the tail.
+		AgentKnobs: AgentKnobs{CompactAt: 100, KeepRecent: 25},
 	}
 
 	sess, c := newCollectorSession(SessionOpts{})

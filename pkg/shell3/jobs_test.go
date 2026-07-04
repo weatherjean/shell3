@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
@@ -15,7 +14,7 @@ import (
 func TestJobManagerCommandLifecycle(t *testing.T) {
 	m := newJobManager(nil, 8)
 	// echo writes to the in-memory buffer and exits; no parent notice in this unit test.
-	id, err := m.startCommand(nil, "echo hi", t.TempDir(), []string{"echo", "hi"})
+	id, err := m.startCommand(nil, "echo hi", t.TempDir(), []string{"echo", "hi"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -23,24 +22,20 @@ func TestJobManagerCommandLifecycle(t *testing.T) {
 	if got := m.list(); len(got) != 1 || got[0].ID != id || got[0].Kind != JobCommand {
 		t.Fatalf("list = %+v, want one JobCommand id=%s", got, id)
 	}
-	// Wait for completion, then output tail holds the echoed line.
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if strings.Contains(m.output(id), "hi") {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	// Join the job goroutine (a real sync point), then read the output once.
+	m.wg.Wait()
+	if !strings.Contains(m.output(id), "hi") {
+		t.Fatalf("output never contained 'hi': %q", m.output(id))
 	}
-	t.Fatalf("output never contained 'hi': %q", m.output(id))
 }
 
 func TestJobManagerConcurrencyCap(t *testing.T) {
 	m := newJobManager(nil, 1)
-	_, err := m.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "1"})
+	_, err := m.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "1"}, nil)
 	if err != nil {
 		t.Fatalf("first start: %v", err)
 	}
-	if _, err := m.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "1"}); err == nil {
+	if _, err := m.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "1"}, nil); err == nil {
 		t.Fatal("expected cap error on second start, got nil")
 	}
 }
@@ -144,19 +139,13 @@ func TestSubagentTranscriptAfterClose(t *testing.T) {
 // in list() with Done=true, and that output() returns the captured output.
 func TestJobManagerRetainsDoneCommandJob(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "echo retained", t.TempDir(), []string{"echo", "retained"})
+	id, err := m.startCommand(nil, "echo retained", t.TempDir(), []string{"echo", "retained"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
 
-	// Wait until the job is done (output contains the echoed text).
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if strings.Contains(m.output(id), "retained") {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	// Join the job goroutine, then read once.
+	m.wg.Wait()
 	if !strings.Contains(m.output(id), "retained") {
 		t.Fatalf("output never contained 'retained': %q", m.output(id))
 	}
@@ -228,7 +217,7 @@ func TestJobManagerDoneCap(t *testing.T) {
 
 	// Start and let maxDoneJobs+1 command jobs finish.
 	for i := 0; i < maxDoneJobs+1; i++ {
-		_, err := m.startCommand(nil, "echo x", t.TempDir(), []string{"echo", "x"})
+		_, err := m.startCommand(nil, "echo x", t.TempDir(), []string{"echo", "x"}, nil)
 		if err != nil {
 			t.Fatalf("startCommand %d: %v", i, err)
 		}
@@ -253,7 +242,7 @@ func TestJobManagerDoneCap(t *testing.T) {
 // returns nil and does not panic.
 func TestJobManagerCancelDoneJobIsNoOp(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "echo done", t.TempDir(), []string{"echo", "done"})
+	id, err := m.startCommand(nil, "echo done", t.TempDir(), []string{"echo", "done"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -288,7 +277,7 @@ func TestFormatJobList_Empty(t *testing.T) {
 // TestFormatJobList_ShowsRunning verifies a running command job appears with status "running".
 func TestFormatJobList_ShowsRunning(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "sleep 60", t.TempDir(), []string{"sleep", "60"})
+	id, err := m.startCommand(nil, "sleep 60", t.TempDir(), []string{"sleep", "60"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -314,7 +303,7 @@ func TestFormatJobStatus_UnknownID(t *testing.T) {
 // TestFormatJobStatus_Truncates verifies that a large output is capped.
 func TestFormatJobStatus_Truncates(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "echo x", t.TempDir(), []string{"echo", "x"})
+	id, err := m.startCommand(nil, "echo x", t.TempDir(), []string{"echo", "x"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -364,44 +353,11 @@ func TestAppendCappedTail_Truncates(t *testing.T) {
 	}
 }
 
-// TestTail_NegativeAndRuneSafety pins tail's edge cases: non-positive n returns
-// "" (no panic), and a cut never lands mid-UTF-8-sequence.
-func TestTail_NegativeAndRuneSafety(t *testing.T) {
-	if got := tail("hello", -3); got != "" {
-		t.Errorf("tail(s, -3) = %q, want empty", got)
-	}
-	if got := tail("hello", 0); got != "" {
-		t.Errorf("tail(s, 0) = %q, want empty", got)
-	}
-	s := strings.Repeat("é", 100) // 2 bytes per rune
-	for n := 1; n < 10; n++ {
-		got := tail(s, n)
-		if !strings.HasPrefix(got, "…") || !utf8.ValidString(got) {
-			t.Errorf("tail(%d runes, %d) = %q, not rune-safe", 100, n, got)
-		}
-		if rest := strings.TrimPrefix(got, "…"); rest != "" && !strings.HasSuffix(rest, "é") {
-			t.Errorf("tail(%d runes, %d) = %q, kept a partial rune", 100, n, got)
-		}
-	}
-}
-
-// TestTruncateRunes pins the shared rune-safe truncation helper.
-func TestTruncateRunes(t *testing.T) {
-	if got := truncateRunes("short", 100); got != "short" {
-		t.Errorf("truncateRunes short = %q", got)
-	}
-	s := strings.Repeat("é", 100)
-	got := truncateRunes(s, 5) // 5 bytes lands mid-rune; must back off to 4
-	if got != strings.Repeat("é", 2)+"…" {
-		t.Errorf("truncateRunes = %q, want two é + ellipsis", got)
-	}
-}
-
 // TestCommandRealExitCode verifies a command's actual exit code is surfaced
 // (not collapsed to 1) in list() and the task_list rendering.
 func TestCommandRealExitCode(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "exit 7", t.TempDir(), []string{"sh", "-c", "exit 7"})
+	id, err := m.startCommand(nil, "exit 7", t.TempDir(), []string{"sh", "-c", "exit 7"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -424,7 +380,7 @@ func TestCommandRealExitCode(t *testing.T) {
 // the pipe wait, so wg.Wait returns promptly (this used to hang forever).
 func TestCommandCancelWithLingeringGrandchild(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "orphan", t.TempDir(), []string{"bash", "-c", "sleep 60 & echo started"})
+	id, err := m.startCommand(nil, "orphan", t.TempDir(), []string{"bash", "-c", "sleep 60 & echo started"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -519,7 +475,7 @@ func TestFormatJobCancel_UnknownID(t *testing.T) {
 // TestFormatJobCancel_KnownJob returns "cancelled task <id>".
 func TestFormatJobCancel_KnownJob(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "sleep 60", t.TempDir(), []string{"sleep", "60"})
+	id, err := m.startCommand(nil, "sleep 60", t.TempDir(), []string{"sleep", "60"}, nil)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}

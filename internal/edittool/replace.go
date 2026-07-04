@@ -11,6 +11,9 @@
 // opencode in turn cites:
 //   - https://github.com/cline/cline (diff-apply)
 //   - https://github.com/google-gemini/gemini-cli (editCorrector)
+//
+// Error strings here are model-facing tool output, deliberately unprefixed
+// (no "edittool:" wrapping) — they are shown to the LLM verbatim as guidance.
 package edittool
 
 import (
@@ -21,28 +24,28 @@ import (
 )
 
 var (
-	ErrNotFound      = errors.New("could not find old_string in file. It must match exactly, including whitespace, indentation, and line endings")
-	ErrMultipleMatch = errors.New("found multiple matches for old_string. Provide more surrounding context to make the match unique")
-	ErrNoChange      = errors.New("no changes to apply: old_string and new_string are identical")
+	errNotFound      = errors.New("could not find old_string in file. It must match exactly, including whitespace, indentation, and line endings")
+	errMultipleMatch = errors.New("found multiple matches for old_string. Provide more surrounding context to make the match unique")
+	errNoChange      = errors.New("no changes to apply: old_string and new_string are identical")
 )
 
-// Replacer yields candidate matches inside content for the given find string.
+// replacer yields candidate matches inside content for the given find string.
 // Candidates may differ from find (e.g. with original whitespace restored).
-type Replacer func(content, find string) []string
+type replacer func(content, find string) []string
 
-// Replace applies the replacer cascade and returns the modified content.
+// replace applies the replacer cascade and returns the modified content.
 // Tries each replacer in order; the first candidate that resolves to exactly
 // one occurrence in the source (or any occurrence when replaceAll is true)
-// wins. If no replacer yields a candidate, returns ErrNotFound. If candidates
-// were found but every one was ambiguous, returns ErrMultipleMatch.
+// wins. If no replacer yields a candidate, returns errNotFound. If candidates
+// were found but every one was ambiguous, returns errMultipleMatch.
 //
 // When replaceAll is true the first replacer with any occurring candidate wins
 // and ALL of its distinct occurring candidates are replaced; ambiguity is
-// expected, so this path returns only success or ErrNotFound (never
-// ErrMultipleMatch).
-func Replace(content, oldString, newString string, replaceAll bool) (string, error) {
+// expected, so this path returns only success or errNotFound (never
+// errMultipleMatch).
+func replace(content, oldString, newString string, replaceAll bool) (string, error) {
 	if oldString == newString {
-		return "", ErrNoChange
+		return "", errNoChange
 	}
 	notFound := true
 	for _, r := range replacers {
@@ -77,9 +80,9 @@ func Replace(content, oldString, newString string, replaceAll bool) (string, err
 		}
 	}
 	if notFound {
-		return "", ErrNotFound
+		return "", errNotFound
 	}
-	return "", ErrMultipleMatch
+	return "", errMultipleMatch
 }
 
 // replaceAllOccurrences replaces every occurrence of every distinct candidate
@@ -132,7 +135,7 @@ func replaceAllOccurrences(content string, candidates []string, newString string
 	return b.String()
 }
 
-var replacers = []Replacer{
+var replacers = []replacer{
 	simpleReplacer,
 	lineTrimmedReplacer,
 	blockAnchorReplacer,

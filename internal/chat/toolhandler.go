@@ -6,7 +6,6 @@ import (
 
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/fsx"
-	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/runs"
 )
@@ -52,17 +51,10 @@ func (h funcHandler) Execute(ctx context.Context, id string, args json.RawMessag
 }
 
 // ToolConfig holds per-invocation state passed to ToolHandler.Execute. It is
-// constructed fresh for each tool call from the current TurnConfig and the
-// session's working message slices. Mutations to AllMsgs and SessMsgs
-// elements propagate to the caller's slices (handlers that rewrite prior
-// messages in place rely on this).
+// constructed fresh for each tool call from the current TurnConfig.
 type ToolConfig struct {
 	// Store is the persistence layer for the history tools. May be nil.
 	Store *runs.Store
-	// RunsDir is the project's .shell3_project/runs directory path, used by
-	// background job tools (bash_bg, background custom tools) to write status
-	// files. Empty disables background jobs.
-	RunsDir string
 	// WorkDir is the working directory tools should resolve paths against.
 	WorkDir string
 	// FS is the file-I/O backend for the read and edit_file tools. Nil ⇒ the
@@ -72,8 +64,10 @@ type ToolConfig struct {
 	// deny (headless subagent path).
 	Asker AskFunc
 	// StartBashBg launches a background shell command on the host's in-process
-	// job runtime and returns its job id. Nil ⇒ background jobs disabled.
-	StartBashBg func(command, workdir string, argv []string) (string, error)
+	// job runtime and returns its job id. env holds extra "K=V" entries appended
+	// to the inherited environment (background custom tools inject their params
+	// this way; bash_bg passes nil). Nil func ⇒ background jobs disabled.
+	StartBashBg func(command, workdir string, argv, env []string) (string, error)
 	// StartSubagent launches a background subagent (child session) and returns its
 	// id. It enforces the recursion depth guard and concurrency cap. Nil ⇒ subagents
 	// unavailable.
@@ -93,13 +87,6 @@ type ToolConfig struct {
 	// dispatch loop via gateNonBashTool. Nil = no hooks declared (everything runs —
 	// the unsafe default). Config-global.
 	RunToolCall func(ctx context.Context, name, command, argsJSON string) ToolCallVerdict
-	// AllMsgs is the full conversation slice including any reminder
-	// injections; tools that need to operate on what the model sees use
-	// this view.
-	AllMsgs []llm.Message
-	// SessMsgs is the persisted session history slice without reminder
-	// injections; tools that mutate authoritative state use this view.
-	SessMsgs []llm.Message
 }
 
 // fs returns the configured FileSystem backend, defaulting to direct OS disk
@@ -135,9 +122,6 @@ type TurnConfig struct {
 	ConfigPath string
 	// Store persists newly appended messages when non-nil.
 	Store *runs.Store
-	// RunsDir is the project's .shell3_project/runs directory path, threaded to
-	// background-job tools. Empty disables background jobs.
-	RunsDir string
 	// Handlers maps tool name to built-in implementation. Built once via
 	// NewHandlers and shared across turns.
 	Handlers map[string]ToolHandler
@@ -160,8 +144,6 @@ type TurnConfig struct {
 	// embedding host can supply native tools (which return strings directly, not
 	// bash commands) alongside command-template tools. Nil = none registered.
 	HostTool func(ctx context.Context, name, argsJSON string) (string, error)
-	// CustomToolNames is the set of tool names routed to HostTool/ResolveCustomTool.
-	CustomToolNames map[string]bool
 	// StubTools maps a hallucinated tool name to its redirect message (a nudge,
 	// never an error). Checked after real/custom tools so a real tool always wins.
 	StubTools map[string]string
@@ -169,8 +151,10 @@ type TurnConfig struct {
 	// deny (headless subagent path).
 	Asker AskFunc
 	// StartBashBg launches a background shell command on the host's in-process
-	// job runtime and returns its job id. Nil ⇒ background jobs disabled.
-	StartBashBg func(command, workdir string, argv []string) (string, error)
+	// job runtime and returns its job id. env holds extra "K=V" entries appended
+	// to the inherited environment (background custom tools inject their params
+	// this way; bash_bg passes nil). Nil func ⇒ background jobs disabled.
+	StartBashBg func(command, workdir string, argv, env []string) (string, error)
 	// StartSubagent launches a background subagent (child session) and returns its
 	// id. It enforces the recursion depth guard and concurrency cap. Nil ⇒ subagents
 	// unavailable.
@@ -186,13 +170,7 @@ type TurnConfig struct {
 	CancelJob     func(id string) string
 	RunToolCall   func(ctx context.Context, name, command, argsJSON string) ToolCallVerdict
 	RunToolResult func(ctx context.Context, name, argsJSON, output string) string
-	// CompactAt is the auto-compaction prompt-token threshold (0 = off).
-	// maybeCompact (called at the top of RunTurn) consults it.
-	CompactAt int
-	// KeepRecent is the verbatim tail (prompt tokens) preserved across an
-	// auto-compaction. 0 derives a default from CompactAt (resolveKeepRecent).
-	KeepRecent int
-	// PruneAt is the lower threshold; stub old tool outputs with no LLM call.
-	// 0 disables. Must be below CompactAt.
-	PruneAt int
+	// AgentKnobs are the agent-scoped runtime knobs (compaction thresholds,
+	// custom-tool routing, …), forwarded wholesale from Config by NewTurnConfig.
+	AgentKnobs
 }

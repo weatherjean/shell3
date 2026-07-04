@@ -230,6 +230,23 @@ func TestTruncateSummaryRuneSafe(t *testing.T) {
 	}
 }
 
+// TestTruncateSummaryBoundary pins the exact 60-rune budget: 60 passes
+// through, 61 and beyond become first-60 + ellipsis.
+func TestTruncateSummaryBoundary(t *testing.T) {
+	at60 := strings.Repeat("x", 60)
+	if got := truncateSummary(at60); got != at60 {
+		t.Fatalf("60 runes must pass through, got %q", got)
+	}
+	at61 := strings.Repeat("x", 61)
+	if got := truncateSummary(at61); got != at60+"…" {
+		t.Fatalf("61 runes must clip to 60+ellipsis, got %q", got)
+	}
+	at62 := strings.Repeat("x", 62)
+	if got := truncateSummary(at62); got != at60+"…" {
+		t.Fatalf("62 runes must clip to 60+ellipsis, got %q", got)
+	}
+}
+
 func TestNotice_DeferredWhileAssistantStreaming(t *testing.T) {
 	tr := NewTranscript()
 	tr.Apply(shell3.Event{Kind: shell3.Token, Text: "answering out loud"}) // assistant streaming

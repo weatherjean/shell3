@@ -11,7 +11,7 @@ import (
 // applyHostReminders sets this session's standing reminders to the host-level
 // Environment and Delegation context, gated by the active agent's toggles
 // (cfg.Environment / cfg.Delegation, default off). Standing reminders are
-// injected into every turn's context and shown on the dashboard, but are NOT
+// injected into every turn's context and visible via Snapshot, but are NOT
 // persisted — they are re-assembled fresh at every prompt-assembly event
 // (session create, agent switch, config reload, /clear).
 //

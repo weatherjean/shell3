@@ -51,10 +51,10 @@ func TestCompactionCut_SnapsForwardOffOrphanToolResult(t *testing.T) {
 }
 
 func TestResolveKeepRecent(t *testing.T) {
-	if got := resolveKeepRecent(TurnConfig{CompactAt: 1000, KeepRecent: 250}); got != 250 {
+	if got := resolveKeepRecent(TurnConfig{AgentKnobs: AgentKnobs{CompactAt: 1000, KeepRecent: 250}}); got != 250 {
 		t.Fatalf("explicit = %d, want 250", got)
 	}
-	if got := resolveKeepRecent(TurnConfig{CompactAt: 1200, KeepRecent: 0}); got != 396 {
+	if got := resolveKeepRecent(TurnConfig{AgentKnobs: AgentKnobs{CompactAt: 1200, KeepRecent: 0}}); got != 396 {
 		t.Fatalf("derived = %d, want round(1200*0.33)=396", got)
 	}
 }

@@ -129,10 +129,10 @@ end)
 
 **Background jobs are out of scope for output redaction.** For `bash_bg` (and
 backgrounded custom tools) the `on_tool_result` handler sees only the "started
-job…" pointer, not the process's real stdout/stderr — that lands in
-`.shell3_project/runs/jobs/<id>.jsonl`, written directly by the detached process.
-If a background command can emit secrets, redact at the source (or don't run it in
-the background).
+job…" pointer, not the process's real stdout/stderr — that streams through the
+in-process job runtime (the `:background` modal, job events, and the completion
+notice). If a background command can emit secrets, redact at the source (or
+don't run it in the background).
 
 See [configuration.md](configuration.md#opt-in-command-gate--on_tool_call)
 for the full reference.
@@ -158,12 +158,10 @@ user's other processes and scope them accordingly.
 shell3 is file-native: there is no database. State lives in two places.
 
 **Project-local runtime state** lives in each project's `.shell3_project/`
-directory — conversation history, sessions, and background-job logs, all as plain
-JSONL:
+directory — conversation history and sessions, all as plain JSONL:
 
 - `.shell3_project/runs/<id>/messages.jsonl` — one conversation per directory
   (`meta.json` beside it holds model/status/timestamps)
-- `.shell3_project/runs/jobs/<id>.jsonl` — custom background-tool output (`<id>.status` beside it)
 
 The directory ignores itself (a self-contained `.gitignore` of `*`), so it is
 never committed. To wipe a project's entire history:

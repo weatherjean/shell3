@@ -48,8 +48,8 @@ func init() {
 			name:        "disable_safety",
 			description: "Toggle auto-allow for the command gate (skips approval prompts).",
 			run: func(s *acpSession) (string, error) {
-				off := !s.safetyOff.Load()
-				s.safetyOff.Store(off)
+				off := !s.sess.SafetyOff()
+				s.sess.SetSafetyOff(off)
 				if off {
 					return "⚠️ Command gate disabled — tool actions are now auto-allowed without prompting. Run /disable_safety again to re-enable approval prompts.", nil
 				}

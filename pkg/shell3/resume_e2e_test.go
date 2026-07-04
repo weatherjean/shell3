@@ -17,10 +17,10 @@ import (
 func fakeCfgWithStore(st *runs.Store, scripts ...fakellm.Script) func() chat.Config {
 	return func() chat.Config {
 		return chat.Config{
-			LLM:           fakellm.New(scripts...),
-			ModeLabel:     "code",
-			Store:         st,
-			ContextWindow: 4096,
+			LLM:        fakellm.New(scripts...),
+			ModeLabel:  "code",
+			Store:      st,
+			AgentKnobs: chat.AgentKnobs{ContextWindow: 4096},
 		}
 	}
 }
@@ -113,9 +113,6 @@ func TestResumeLatest_ReattachesNewest(t *testing.T) {
 	if id == "" {
 		t.Fatal("first session has no store id")
 	}
-	if _, resumed := sA.Resumed(); resumed {
-		t.Fatal("fresh session reported Resumed()=true")
-	}
 
 	// Second boot: ResumeLatest must reattach to id, not create a new row.
 	rtB := newTestRuntime(t, fakeCfgWithStore(st, fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "still 42"}}}))
@@ -126,9 +123,8 @@ func TestResumeLatest_ReattachesNewest(t *testing.T) {
 	if got := sB.sess.ID(); got != id {
 		t.Fatalf("ResumeLatest: attached to session %s, want reattach to %s", got, id)
 	}
-	msgs, resumed := sB.Resumed()
-	if !resumed || msgs == 0 {
-		t.Fatalf("Resumed() = (%d, %v), want resumed with msgs > 0", msgs, resumed)
+	if len(sB.History()) == 0 {
+		t.Fatal("reattached session reloaded no messages")
 	}
 }
 
@@ -145,7 +141,7 @@ func TestResumeLatest_NoMatchStartsFresh(t *testing.T) {
 	if s.sess.ID() == "" {
 		t.Fatal("expected a fresh non-empty session id")
 	}
-	if _, resumed := s.Resumed(); resumed {
-		t.Fatal("no prior session existed, but Resumed() reported true")
+	if len(s.History()) != 0 {
+		t.Fatal("no prior session existed, but history is non-empty")
 	}
 }

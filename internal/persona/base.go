@@ -1,12 +1,10 @@
 package persona
 
-// BasePersona returns a minimal persona suitable for library embedding.
-// No skills, no user tools, no hooks — just a short system prompt and
-// the caller-provided built-in tools (which may also be empty).
-//
-// The system prompt instructs the model that it's running inside the
-// shell3 harness as an LLM. Embedders enable tools by passing them via
-// the tools parameter or by mutating the returned Persona.
+// BasePersona returns a minimal persona: no skills, no user tools, no hooks —
+// just a short system prompt and the caller-provided built-in tools (which may
+// also be empty). Production personas are assembled from Lua config
+// (internal/luacfg); this constructor exists for tests that need a bare
+// persona without a config load.
 func BasePersona(systemPrompt string, tools []ToolDef) Persona {
 	if systemPrompt == "" {
 		systemPrompt = baseSystemPrompt

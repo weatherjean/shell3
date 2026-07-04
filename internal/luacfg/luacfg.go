@@ -73,15 +73,14 @@ type Agent struct {
 	Skills         []string
 	SkillsDisabled bool     // true only when tools = { skill = false } is explicitly set
 	Subagents      []string // names of registered subagents this agent can spawn
-	Description    string   // model-facing "when to use" (unused for top-level agents)
 	Environment    bool     // inject the host Environment system-reminder
 	Delegation     bool     // inject the host Delegation (spawn-command) system-reminder
 }
 
 // Subagent is a delegatable specialist: a non-interactive agent the model can
-// spawn as a backgrounded `shell3` process (the bash_bg delegation command).
-// Registered separately from agents (never in the Tab rotation). Description is
-// the model-facing "when to use".
+// spawn as an in-process background job via the task tool. Registered
+// separately from agents (never in the Tab rotation). Description is the
+// model-facing "when to use".
 type Subagent struct {
 	Name, Description, ModelName, Prompt string
 	// PromptCmd, if set, is a shell command whose stdout supplies Prompt;
@@ -340,6 +339,8 @@ func (c *LoadedConfig) FirstAgent() Agent {
 }
 
 // Subagents returns a copy of the registered subagents in declaration order.
+// Production reads go through SubagentDescription; this accessor exists for
+// tests asserting on declaration/dedup behavior.
 func (c *LoadedConfig) Subagents() []Subagent {
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -82,12 +82,12 @@ internal/runs/         file-native JSONL store: sessions at .shell3_project/runs
 internal/edittool/     edit_file tool implementation (Go port of opencode's str-replace)
 internal/fsx/          pluggable FileSystem interface (fsx.OS = direct disk; ACP swaps in editor-buffer backend)
 internal/acp/          ACP (Agent Client Protocol) front-end: stdio JSON-RPC server for editors + bridges
-internal/bgjobs/       background job tracking for custom bg-tools (NOT subagents or bash_bg)
 internal/notify/       Notification type (bg_done / agent_done) shared by job runtime + chat
 internal/tui/          full-screen vim-modal terminal UI (interactive + headless once)
 internal/chat/         conversation loop, tools, events, JSONL audit sink
 internal/llm/          Provider/Streamer interfaces, request params, types (+ fakellm)
 internal/persona/      runtime carrier for an agent's prompt/tools/params (data only)
+internal/strutil/      rune-safe string truncation helpers (byte-cap + rune-count) shared by runtime and front-ends
 internal/applog/       rotating app log
 
 pkg/shell3/            embeddable library API (the only public package); jobs.go hosts the in-process job runtime (subagents + bash_bg)

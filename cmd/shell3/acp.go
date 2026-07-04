@@ -23,9 +23,8 @@ func newAcpCommand() *cobra.Command {
 			"(Zed, ...) and bridges (OpenACP). All logs go to the app log; stdout carries " +
 			"only protocol messages.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			rt, err := shell3.NewRuntime(shell3.RuntimeSpec{
+			rt, err := shell3.NewRuntime(cmd.Context(), shell3.RuntimeSpec{
 				ConfigPath: configPath,
-				Context:    cmd.Context(),
 			})
 			if err != nil {
 				return err
@@ -37,8 +36,8 @@ func newAcpCommand() *cobra.Command {
 			})
 		},
 	}
-	cmd.Flags().StringVar(&configPath, "config", "", "path to shell3.lua (default: standard resolution)")
-	cmd.Flags().StringVar(&agent, "agent", "", "initial agent for new sessions (default: first declared)")
+	addConfigAgentFlags(cmd, &configPath, &agent,
+		"Initial agent for new sessions (default: first declared)")
 	return cmd
 }
 

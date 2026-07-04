@@ -70,15 +70,6 @@ type Parts struct {
 // store-open itself failed, which is non-fatal and logged).
 func (p *Parts) Store() *runs.Store { return p.st }
 
-// RunsDir returns the project's .shell3_project/runs directory path.
-func (p *Parts) RunsDir() string { return p.runsDir }
-
-// Log returns the rotating application logger.
-func (p *Parts) Log() applog.Logger { return p.log }
-
-// Root returns the runtime root working directory (the CWD passed to BuildParts).
-func (p *Parts) Root() string { return p.root }
-
 // ConfigPath returns the resolved absolute shell3.lua path that produced these
 // parts (recorded per session for resume).
 func (p *Parts) ConfigPath() string { return p.configPath }
@@ -222,20 +213,22 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 			Tools:        toolDefs,
 			Parameters:   rp,
 		},
-		ModeLabel:       a.Name,
-		ActiveSkills:    a.Skills,
-		ActiveTools:     toolNames,
-		Subagents:       a.Subagents,
-		Environment:     a.Environment,
-		Delegation:      a.Delegation,
-		CustomToolNames: customNames,
-		LLM:             client,
-		Params:          rp,
-		ModelID:         md.ModelID,
-		ContextWindow:   md.ContextWindow,
-		CompactAt:       md.CompactAt,
-		KeepRecent:      md.KeepRecent,
-		PruneAt:         md.PruneAt,
+		ModeLabel:    a.Name,
+		ActiveSkills: a.Skills,
+		ActiveTools:  toolNames,
+		LLM:          client,
+		Params:       rp,
+		ModelID:      md.ModelID,
+		AgentKnobs: chat.AgentKnobs{
+			Subagents:       a.Subagents,
+			Environment:     a.Environment,
+			Delegation:      a.Delegation,
+			CustomToolNames: customNames,
+			ContextWindow:   md.ContextWindow,
+			CompactAt:       md.CompactAt,
+			KeepRecent:      md.KeepRecent,
+			PruneAt:         md.PruneAt,
+		},
 	}, nil
 }
 
@@ -346,8 +339,8 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 		Headless:          so.Headless,
 		AgentNames:        p.AgentNames(),
 		RefreshPrompt:     func() string { return p.RefreshPromptFor(activeName) },
-		Environment:       rt.Environment,
-		Delegation:        rt.Delegation,
+		// Agent-scoped knobs (Environment, Delegation, thresholds, …) arrive via
+		// cfg.ApplyActiveAgent(rt) below.
 	}
 	// shell3.on_tool_call: config-global hook chain run before every tool.
 	if p.lc.HasToolCall() {
@@ -527,7 +520,7 @@ func ExpandConfigName(flag, homeDir string) string {
 	if flag == "" || strings.HasSuffix(flag, ".lua") {
 		return flag
 	}
-	return filepath.Join(homeDir, ".shell3", flag+".lua")
+	return paths.NewGlobal(homeDir).ConfigNamed(flag)
 }
 
 // ResolveConfigPath returns the shell3.lua to load: the explicit flag (a name
@@ -538,7 +531,7 @@ func ResolveConfigPath(flag, homeDir string) (string, error) {
 	if expanded := ExpandConfigName(flag, homeDir); expanded != "" {
 		return expanded, nil
 	}
-	global := filepath.Join(homeDir, ".shell3", "shell3.lua")
+	global := paths.NewGlobal(homeDir).ConfigFile
 	if fileExists(global) {
 		return global, nil
 	}

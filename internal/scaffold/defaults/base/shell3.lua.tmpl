@@ -14,7 +14,7 @@ local history = require("lib.skills.history")
 --   shell3.agent({ name="build", model="...", prompt_cmd="cat lib/prompts/build.md", ... })
 local self_evolve = shell3.skill({
   name = "self-evolve",
-  description = "How to safely change your own shell3.lua config and apply it live with the reload tool. A failed reload keeps the old config, so self-editing is always safe.",
+  description = "How to safely change your own shell3.lua config: edit, validate with a throwaway headless run, and the change applies on the next shell3 start. The running session is never affected by a bad edit.",
   path = "lib/skills/self-evolve.md",
 })
 

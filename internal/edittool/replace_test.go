@@ -7,7 +7,7 @@ import (
 )
 
 func TestReplaceSimpleExact(t *testing.T) {
-	got, err := Replace("hello world", "world", "Go", false)
+	got, err := replace("hello world", "world", "Go", false)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -17,28 +17,28 @@ func TestReplaceSimpleExact(t *testing.T) {
 }
 
 func TestReplaceIdenticalErrors(t *testing.T) {
-	_, err := Replace("hello", "x", "x", false)
-	if !errors.Is(err, ErrNoChange) {
-		t.Fatalf("want ErrNoChange, got %v", err)
+	_, err := replace("hello", "x", "x", false)
+	if !errors.Is(err, errNoChange) {
+		t.Fatalf("want errNoChange, got %v", err)
 	}
 }
 
 func TestReplaceNotFound(t *testing.T) {
-	_, err := Replace("hello", "missing", "x", false)
-	if !errors.Is(err, ErrNotFound) {
-		t.Fatalf("want ErrNotFound, got %v", err)
+	_, err := replace("hello", "missing", "x", false)
+	if !errors.Is(err, errNotFound) {
+		t.Fatalf("want errNotFound, got %v", err)
 	}
 }
 
 func TestReplaceMultipleMatchExact(t *testing.T) {
-	_, err := Replace("foo foo", "foo", "bar", false)
-	if !errors.Is(err, ErrMultipleMatch) {
-		t.Fatalf("want ErrMultipleMatch, got %v", err)
+	_, err := replace("foo foo", "foo", "bar", false)
+	if !errors.Is(err, errMultipleMatch) {
+		t.Fatalf("want errMultipleMatch, got %v", err)
 	}
 }
 
 func TestReplaceAllMultiple(t *testing.T) {
-	got, err := Replace("foo foo foo", "foo", "bar", true)
+	got, err := replace("foo foo foo", "foo", "bar", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,12 +57,12 @@ func TestReplaceAllExactOverlappingSelfMatch(t *testing.T) {
 		{"abab", "ab", "X", "XX"}, // adjacent matches
 	}
 	for _, c := range cases {
-		got, err := Replace(c.content, c.old, c.new, true)
+		got, err := replace(c.content, c.old, c.new, true)
 		if err != nil {
-			t.Fatalf("Replace(%q,%q): %v", c.content, c.old, err)
+			t.Fatalf("replace(%q,%q): %v", c.content, c.old, err)
 		}
 		if got != c.want {
-			t.Errorf("Replace(%q,%q,%q,true) = %q, want %q (must match strings.ReplaceAll)", c.content, c.old, c.new, got, c.want)
+			t.Errorf("replace(%q,%q,%q,true) = %q, want %q (must match strings.ReplaceAll)", c.content, c.old, c.new, got, c.want)
 		}
 	}
 }
@@ -70,7 +70,7 @@ func TestReplaceAllExactOverlappingSelfMatch(t *testing.T) {
 func TestLineTrimmedReplacerHandlesTrailingWhitespace(t *testing.T) {
 	content := "func main() {\n\treturn nil  \n}\n"
 	// model emits the line without the trailing spaces — exact-match would fail.
-	got, err := Replace(content, "func main() {\n\treturn nil\n}", "func main() { return ok }", false)
+	got, err := replace(content, "func main() {\n\treturn nil\n}", "func main() { return ok }", false)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestLineTrimmedReplacerHandlesTrailingWhitespace(t *testing.T) {
 
 func TestLineTrimmedReplacerLeadingWhitespace(t *testing.T) {
 	content := "  alpha\n  beta\n  gamma\n"
-	got, err := Replace(content, "alpha\nbeta\ngamma", "X\nY\nZ", false)
+	got, err := replace(content, "alpha\nbeta\ngamma", "X\nY\nZ", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestBlockAnchorReplacer(t *testing.T) {
 	content := "package x\n\nfunc Foo() {\n\tfmt.Println(\"hi\")\n\tfmt.Println(\"bye\")\n}\n\nfunc Bar() {}\n"
 	// middle line slightly different (extra arg) — block anchor should still match.
 	find := "func Foo() {\n\tfmt.Println(\"different\")\n}"
-	got, err := Replace(content, find, "func Foo() {}", false)
+	got, err := replace(content, find, "func Foo() {}", false)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestBlockAnchorReplacer(t *testing.T) {
 
 func TestWhitespaceNormalizedReplacer(t *testing.T) {
 	content := "if   foo  ==  bar  {"
-	got, err := Replace(content, "if foo == bar {", "if x == y {", false)
+	got, err := replace(content, "if foo == bar {", "if x == y {", false)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestIndentationFlexibleReplacer(t *testing.T) {
 	content := "func f() {\n\t\tif x {\n\t\t\treturn 1\n\t\t}\n}\n"
 	// Search uses no indent, original is double-tab indented.
 	find := "if x {\n\treturn 1\n}"
-	got, err := Replace(content, find, "if y { return 2 }", false)
+	got, err := replace(content, find, "if y { return 2 }", false)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestIndentationFlexibleReplacer(t *testing.T) {
 func TestEscapeNormalizedReplacer(t *testing.T) {
 	content := "line1\nline2\nline3"
 	// model double-escapes newlines.
-	got, err := Replace(content, `line1\nline2`, "X", false)
+	got, err := replace(content, `line1\nline2`, "X", false)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestEscapeNormalizedReplacer(t *testing.T) {
 
 func TestTrimmedBoundaryReplacer(t *testing.T) {
 	content := "package x\n\nvar y = 1\n"
-	got, err := Replace(content, "  var y = 1  ", "var z = 2", false)
+	got, err := replace(content, "  var y = 1  ", "var z = 2", false)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestContextAwareReplacer(t *testing.T) {
 	content := "func F() {\n\ta := 1\n\tb := 2\n\tc := 3\n}\n"
 	// Middle lines drift but >= 50% match.
 	find := "func F() {\n\ta := 1\n\tDIFFERENT := 99\n\tc := 3\n}"
-	got, err := Replace(content, find, "func F() {}", false)
+	got, err := replace(content, find, "func F() {}", false)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestContextAwareReplacer(t *testing.T) {
 }
 
 func TestSimpleReplacerWinsOverMultiOccurrenceForUnique(t *testing.T) {
-	got, err := Replace("alpha\nbeta\ngamma\n", "beta", "BETA", false)
+	got, err := replace("alpha\nbeta\ngamma\n", "beta", "BETA", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestReplaceAllFuzzyReplacesEveryDistinctMatch(t *testing.T) {
 	// whitespaceNormalizedReplacer matches both "foo bar" and "foo  bar" as two
 	// DISTINCT candidates. replaceAll must replace BOTH.
 	content := "foo bar\nfoo  bar\n"
-	got, err := Replace(content, "foo   bar", "X", true)
+	got, err := replace(content, "foo   bar", "X", true)
 	if err != nil {
 		t.Fatalf("Replace: %v", err)
 	}

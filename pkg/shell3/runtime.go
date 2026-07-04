@@ -2,22 +2,16 @@ package shell3
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
-	"regexp"
-	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/fsx"
 	"github.com/weatherjean/shell3/internal/llm"
-	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
@@ -26,10 +20,6 @@ import (
 type RuntimeSpec struct {
 	ConfigPath string // "" → ~/.shell3/shell3.lua
 	WorkDir    string // runtime root; "" → os.Getwd(). Sessions default here.
-	// Context, when non-nil, parents the runtime's base context: cancelling it
-	// tears down the runtime (and any in-flight session/turn) just as Close
-	// does. "" → context.Background() (lifetime bounded only by Close).
-	Context context.Context
 }
 
 // SessionOpts parameterizes one Session on a Runtime.
@@ -64,25 +54,28 @@ type SessionOpts struct {
 	Depth int
 }
 
-// HostEventKind enumerates out-of-turn runtime events.
+// HostEventKind discriminates out-of-turn runtime events.
 type HostEventKind int
 
 const (
 	// Wake signals a session's inbox gained an item while no turn was running.
 	// The host should call Session.RunQueued to react (runs a model turn).
 	Wake HostEventKind = iota
-	// Notice is a ready-to-display message for the session's chat (e.g. a cron /
-	// host-dispatch result). The host shows Text verbatim; it is NOT a turn and
-	// never touches the agent's inbox or context.
-	Notice
 )
 
-// HostEvent is one out-of-turn event for a session. Notice carries Text; Wake
-// carries only the session name.
+// String returns the event name ("wake") for logs and diagnostics.
+func (k HostEventKind) String() string {
+	if k == Wake {
+		return "wake"
+	}
+	return fmt.Sprintf("HostEventKind(%d)", int(k))
+}
+
+// HostEvent is one out-of-turn event for a session. Wake carries only the
+// session name.
 type HostEvent struct {
 	Session string
 	Kind    HostEventKind
-	Text    string
 }
 
 // Runtime hosts N sessions over one shared build. Create with NewRuntime,
@@ -107,19 +100,20 @@ type Runtime struct {
 	// drops on full so a slow consumer never stalls a running job. Not closed
 	// at Close (a late emit from an unwinding job goroutine must not panic).
 	jobEvents chan JobProgress
-	// workDir is the runtime root; subagents write audit logs under it.
+	// workDir is the runtime root (.shell3_project lives under it).
 	workDir string
 	// store is the shared file-native runs store (nil if unavailable). Used by
-	// PastSessions/SessionTurns for the dashboard's conversation history and by
+	// PastSessions/SessionMessages for front-end session lists/replay and by
 	// the job runtime's transcript reads (task_status / JobTranscript).
 	store *runs.Store
-	// ctx/cancel scope host-initiated cron dispatch subprocesses so a running
-	// cron job is cancelled (and its goroutine unblocks) when Close cancels ctx.
+	// ctx is the runtime's base context, parented by RuntimeSpec.Context;
+	// cancel fires at Close so anything scoped to the runtime's lifetime
+	// unwinds with it.
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	configPath string // captured from RuntimeSpec for Reload
-	homeDir    string // captured for Reload's BuildParts
+	configPath string // captured from RuntimeSpec for ConfigPath
+	homeDir    string // captured from construction for ConfigPath
 
 	// jobs manages in-process background jobs (command jobs and, in future tasks,
 	// subagent jobs). Owned by this Runtime; cancelled at Close.
@@ -128,46 +122,19 @@ type Runtime struct {
 	// subagentMaxDepth() applies the default of 3).
 	subagentMaxDepthVal int
 
-	// subSeq mints process-unique ids for cron dispatch transcripts (see
-	// nextSubID). Global to the runtime so concurrent cron fires never collide on
-	// a transcript filename.
-	subSeq atomic.Int64
-	// wg joins in-flight cron dispatch goroutines at Close. Add happens only
-	// under rt.mu while !closed (see trackSubagent), so it can't race wg.Wait.
-	wg sync.WaitGroup
-
 	mu       sync.Mutex
 	sessions map[string]*Session
 	nextName int
 	closed   bool
 }
 
-// nextSubID returns a process-unique id for this runtime, used as a cron
-// dispatch transcript filename stem.
-func (rt *Runtime) nextSubID() string {
-	return fmt.Sprintf("a%d", rt.subSeq.Add(1))
-}
-
-// trackSubagent starts fn as a tracked goroutine (a cron dispatch), unless the
-// runtime is already closing. Returns false if the runtime is closed (caller
-// should not have started the work). Add happens under rt.mu so it cannot race
-// Close's transition to closed + wg.Wait.
-func (rt *Runtime) trackSubagent(fn func()) bool {
-	rt.mu.Lock()
-	if rt.closed {
-		rt.mu.Unlock()
-		return false
-	}
-	rt.wg.Add(1)
-	rt.mu.Unlock()
-	go func() { defer rt.wg.Done(); fn() }()
-	return true
-}
-
-// NewRuntime loads the config and assembles the shared runtime parts.
+// NewRuntime loads the config and assembles the shared runtime parts. ctx
+// parents the runtime's base context: cancelling it tears down the runtime
+// (and any in-flight session/turn) just as Close does; pass
+// context.Background() for a lifetime bounded only by Close.
 // The Runtime must be Closed; sessions left open are closed by Close.
-func NewRuntime(spec RuntimeSpec) (*Runtime, error) {
-	parent := spec.Context
+func NewRuntime(ctx context.Context, spec RuntimeSpec) (*Runtime, error) {
+	parent := ctx
 	if parent == nil {
 		parent = context.Background()
 	}
@@ -227,13 +194,9 @@ func (rt *Runtime) Events() <-chan HostEvent { return rt.events }
 // a running job. The channel is never closed.
 func (rt *Runtime) JobEvents() <-chan JobProgress { return rt.jobEvents }
 
-// Store returns the shared canonical store (nil if unavailable).
-func (rt *Runtime) Store() *runs.Store { return rt.store }
-
 // ConfigPath returns the absolute path of the shell3.lua this runtime was built
 // from. An empty or relative spec path is resolved exactly the way construction
-// (and Reload) resolves it — ~/.shell3/shell3.lua — so the
-// result is the actual file a reload reads. Useful for self-reconfiguration
+// resolves it — ~/.shell3/shell3.lua. Useful for self-reconfiguration
 // surfaces that need to show the agent/operator which file to edit.
 func (rt *Runtime) ConfigPath() (string, error) {
 	return agentsetup.ResolveConfigPath(rt.configPath, rt.homeDir)
@@ -244,7 +207,7 @@ type SessionMeta struct {
 	ID        string `json:"id"`
 	StartedAt string `json:"started_at"`
 	EndedAt   string `json:"ended_at,omitempty"`
-	LastAt    string `json:"last_at"` // RFC3339 of newest message; falls back to start. Sort key for the dashboard.
+	LastAt    string `json:"last_at"` // RFC3339 of newest message; falls back to start. Recency sort key.
 	NumMsgs   int    `json:"num_msgs"`
 	Preview   string `json:"preview"`
 }
@@ -294,26 +257,9 @@ func previewOf(msgs []llm.Message) string {
 	return ""
 }
 
-// SessionTurns returns the stored turns of one past conversation as
-// HistoryEntry values (Role/Content only). Reads the run's messages.jsonl.
-func (rt *Runtime) SessionTurns(id string) ([]HistoryEntry, error) {
-	if rt.store == nil {
-		return nil, nil
-	}
-	msgs, err := rt.store.LoadMessages(id)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]HistoryEntry, 0, len(msgs))
-	for _, m := range msgs {
-		out = append(out, HistoryEntry{Role: string(m.Role), Content: m.Content})
-	}
-	return out, nil
-}
-
 // SessionMessages returns the full-fidelity stored messages of one past
 // conversation as HistoryEntry values — tool calls, tool results, and reasoning
-// (thinking) included. Reads the run's messages.jsonl so the dashboard's
+// (thinking) included. Reads the run's messages.jsonl so a front-end's
 // conversation replay matches the live Chat view. Returns nil if no store is
 // configured.
 func (rt *Runtime) SessionMessages(id string) ([]HistoryEntry, error) {
@@ -330,152 +276,6 @@ func (rt *Runtime) SessionMessages(id string) ([]HistoryEntry, error) {
 	}
 	return out, nil
 }
-
-// subagentIDRe constrains transcript ids to a safe charset (alphanumerics plus
-// '-'/'_'), preventing any path traversal when building the audit-file path.
-// Subagent ids are caller-chosen (the agent picks one per spawn), so the charset
-// excludes '/' and '.'.
-var subagentIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
-
-// SubagentInfo is a read-only listing of a LEGACY subprocess-subagent transcript
-// under .shell3_project/agents/<id>.jsonl. In-process subagents (spawned via the
-// `task` tool) are tracked by the job runtime and their transcript lives under
-// .shell3_project/runs/<id>/; this type only surfaces older on-disk agents/
-// transcripts (predating the in-process model).
-type SubagentInfo struct {
-	ID         string `json:"id"`               // transcript filename stem
-	Transcript string `json:"transcript"`       // path under .shell3_project/agents
-	Agent      string `json:"agent,omitempty"`  // persona, from the start event
-	Task       string `json:"task,omitempty"`   // the spawn prompt, from the start event
-	Status     string `json:"status"`           // "running" until a terminal event is seen, else "finished"
-	Result     string `json:"result,omitempty"` // last assistant message (final answer)
-	Time       string `json:"time,omitempty"`   // start timestamp (RFC3339)
-	LastAt     string `json:"last_at"`          // newest event timestamp (RFC3339); the dashboard's sort key
-}
-
-// peekTranscript reads a subagent transcript and extracts the summary fields the
-// dashboard's run cards show: agent/task/time from the `start` line, status from
-// whether a terminal (`end`/`session_end`) line is present, and result from the
-// last assistant message. Failures degrade gracefully to a "running" stub.
-func peekTranscript(path string) SubagentInfo {
-	info := SubagentInfo{Status: "running"}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return info
-	}
-	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-		if line == "" {
-			continue
-		}
-		var ev struct {
-			Kind    string `json:"kind"`
-			Input   string `json:"input"`
-			Persona string `json:"persona"`
-			TS      string `json:"ts"`
-			Text    string `json:"text"`
-		}
-		if json.Unmarshal([]byte(line), &ev) != nil {
-			continue
-		}
-		if ev.TS != "" {
-			info.LastAt = ev.TS // events are append-ordered, so the last wins
-		}
-		switch ev.Kind {
-		case "start":
-			info.Agent, info.Task, info.Time = ev.Persona, ev.Input, ev.TS
-		case "assistant_message":
-			if ev.Text != "" {
-				info.Result = ev.Text
-			}
-		case "end", "session_end":
-			info.Status = "finished"
-		}
-	}
-	return info
-}
-
-// SubagentList scans .shell3_project/agents/*.jsonl under the runtime root and returns
-// one entry per transcript (newest first by mod time). The dashboard reads
-// completed/running subagent transcripts from disk. Returns nil when the
-// directory is absent.
-func (rt *Runtime) SubagentList() ([]SubagentInfo, error) {
-	dir := paths.AgentsDir(rt.workDir)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	type row struct {
-		info SubagentInfo
-		mod  int64
-	}
-	var rows []row
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".jsonl") {
-			continue
-		}
-		id := strings.TrimSuffix(name, ".jsonl")
-		var mod int64
-		if fi, err := e.Info(); err == nil {
-			mod = fi.ModTime().UnixNano()
-		}
-		path := filepath.Join(dir, name)
-		info := peekTranscript(path)
-		info.ID, info.Transcript = id, path
-		rows = append(rows, row{info: info, mod: mod})
-	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].mod > rows[j].mod })
-	out := make([]SubagentInfo, len(rows))
-	for i, r := range rows {
-		out[i] = r.info
-	}
-	return out, nil
-}
-
-// TranscriptEvent is one lossless event from a subagent's audit log.
-type TranscriptEvent struct {
-	Kind   string `json:"kind"`
-	Text   string `json:"text,omitempty"`
-	Role   string `json:"role,omitempty"`
-	Tool   string `json:"tool,omitempty"`
-	Input  string `json:"input,omitempty"`
-	Output string `json:"output,omitempty"`
-	CallID string `json:"call_id,omitempty"`
-}
-
-// SubagentTranscript reads a subagent's audit JSONL (.shell3_project/agents/<id>.jsonl
-// under the runtime root) and returns its events. Returns nil if absent.
-func (rt *Runtime) SubagentTranscript(id string) ([]TranscriptEvent, error) {
-	if !subagentIDRe.MatchString(id) {
-		return nil, fmt.Errorf("shell3: invalid subagent id %q", id)
-	}
-	path := paths.AgentTranscript(rt.workDir, id)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var out []TranscriptEvent
-	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-		if line == "" {
-			continue
-		}
-		var ev TranscriptEvent
-		if err := json.Unmarshal([]byte(line), &ev); err != nil {
-			continue // skip malformed lines rather than failing the whole read
-		}
-		out = append(out, ev)
-	}
-	return out, nil
-}
-
-func (rt *Runtime) root() string                 { return rt.workDir }
-func (rt *Runtime) baseContext() context.Context { return rt.ctx }
 
 // subagentMaxDepth returns the maximum allowed subagent nesting depth.
 // Reads the Lua-configured value (shell3.subagents{ max_depth = N }); defaults
@@ -510,7 +310,7 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 	if rt.closed {
-		return nil, fmt.Errorf("shell3: runtime is closed")
+		return nil, ErrRuntimeClosed
 	}
 	if opts.Name == "" {
 		// Advance until we find a name not already taken by a live session.
@@ -590,15 +390,11 @@ func (rt *Runtime) Close() error {
 		rt.jobs.wait()
 	}
 	rt.cleanup()
-	// Cancel the runtime ctx so any in-flight cron dispatch subprocess is killed
-	// and its goroutine unwinds. Do NOT close rt.events: a late emit from a
-	// finishing dispatch must not panic.
+	// Cancel the runtime base ctx so anything scoped to the runtime's lifetime
+	// unwinds. Do NOT close rt.events: a late emit from an unwinding goroutine
+	// must not panic.
 	if rt.cancel != nil {
 		rt.cancel()
 	}
-	// Join in-flight cron dispatch goroutines (exec → wait → deliver Notice) so
-	// they finish before Close returns. rt.closed was set true under rt.mu above,
-	// so trackSubagent can no longer Add (no Wait race).
-	rt.wg.Wait()
 	return firstErr
 }

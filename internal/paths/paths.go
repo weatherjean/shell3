@@ -5,51 +5,46 @@ import (
 )
 
 // ProjectDirName is the per-project runtime directory created under a workdir
-// (history, inbox, jobs, subagent transcripts). The single source of this name —
+// (conversation history under runs/). The single source of this name —
 // route every path through the helpers here rather than rebuilding the literal.
 const ProjectDirName = ".shell3_project"
 
 // Global holds all paths under ~/.shell3/ (user-scoped, never in repo).
 type Global struct {
-	Root    string // ~/.shell3/
-	LogFile string // ~/.shell3/shell3.log
+	Root       string // ~/.shell3/
+	LogFile    string // ~/.shell3/shell3.log
+	ConfigFile string // ~/.shell3/shell3.lua (the default config)
 }
 
 // Local holds paths under ./.shell3_project/ (project-scoped runtime data;
 // gitignored via /.shell3_project/ in the repo root .gitignore).
 type Local struct {
-	Root  string // ./.shell3_project/
-	Runs  string // ./.shell3_project/runs/
-	Inbox string // ./.shell3_project/inbox.jsonl
+	Root string // ./.shell3_project/
+	Runs string // ./.shell3_project/runs/
 }
 
 // NewGlobal returns a Global path set rooted at homeDir/.shell3/.
 func NewGlobal(homeDir string) Global {
 	root := filepath.Join(homeDir, ".shell3")
 	return Global{
-		Root:    root,
-		LogFile: filepath.Join(root, "shell3.log"),
+		Root:       root,
+		LogFile:    filepath.Join(root, "shell3.log"),
+		ConfigFile: filepath.Join(root, "shell3.lua"),
 	}
+}
+
+// ConfigNamed returns the path of a named config: ~/.shell3/<name>.lua.
+func (g Global) ConfigNamed(name string) string {
+	return filepath.Join(g.Root, name+".lua")
 }
 
 // NewLocal returns a Local path set rooted at cwd/.shell3_project/.
 func NewLocal(cwd string) Local {
 	root := filepath.Join(cwd, ProjectDirName)
 	return Local{
-		Root:  root,
-		Runs:  filepath.Join(root, "runs"),
-		Inbox: filepath.Join(root, "inbox.jsonl"),
+		Root: root,
+		Runs: filepath.Join(root, "runs"),
 	}
-}
-
-// AgentsDir is where subagents write their audit-JSONL transcripts, under the
-// runtime workdir. The parent writes here and the dashboard reads back from it,
-// so both sides must agree — route through this helper, never hand-build it.
-func AgentsDir(workdir string) string { return filepath.Join(workdir, ProjectDirName, "agents") }
-
-// AgentTranscript returns the transcript path for a given subagent id.
-func AgentTranscript(workdir, id string) string {
-	return filepath.Join(AgentsDir(workdir), id+".jsonl")
 }
 
 // LastErrorPath is where a failed turn dumps its request/response for debugging.

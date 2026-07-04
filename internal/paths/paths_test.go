@@ -14,6 +14,12 @@ func TestGlobal(t *testing.T) {
 	if g.LogFile != "/home/user/.shell3/shell3.log" {
 		t.Fatalf("LogFile: got %q", g.LogFile)
 	}
+	if g.ConfigFile != "/home/user/.shell3/shell3.lua" {
+		t.Fatalf("ConfigFile: got %q", g.ConfigFile)
+	}
+	if got := g.ConfigNamed("code"); got != "/home/user/.shell3/code.lua" {
+		t.Fatalf("ConfigNamed: got %q", got)
+	}
 	// Compile-time check: Global must NOT have Data or DB fields.
 	// (If this file compiles, the fields are absent.)
 	_ = g
@@ -26,8 +32,5 @@ func TestLocal(t *testing.T) {
 	}
 	if l.Runs != "/work/project/.shell3_project/runs" {
 		t.Fatalf("Runs: got %q", l.Runs)
-	}
-	if l.Inbox != "/work/project/.shell3_project/inbox.jsonl" {
-		t.Fatalf("Inbox: got %q", l.Inbox)
 	}
 }

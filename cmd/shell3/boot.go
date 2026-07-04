@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/scaffold"
 )
 
@@ -47,8 +48,8 @@ func runBoot(f *bootFlags) error {
 	if err != nil {
 		return fmt.Errorf("boot: home dir: %w", err)
 	}
-	dir := filepath.Join(home, ".shell3")
-	cfgPath := filepath.Join(dir, "shell3.lua")
+	g := paths.NewGlobal(home)
+	dir, cfgPath := g.Root, g.ConfigFile
 
 	if _, err := os.Stat(cfgPath); err == nil && !f.force {
 		return fmt.Errorf("boot: %s already exists — pass --force to overwrite", cfgPath)

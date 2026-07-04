@@ -3,7 +3,6 @@ package acp
 import (
 	"context"
 	"testing"
-	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
 )
@@ -196,7 +195,4 @@ func TestPermissionRequestShape(t *testing.T) {
 		t.Errorf("TestPermissionRequestShape: permission ToolCallId = %q, want streamed tool card id %q",
 			req.ToolCall.ToolCallId, streamedID)
 	}
-
-	// Wait a moment to let any trailing events drain, then re-check.
-	time.Sleep(50 * time.Millisecond)
 }

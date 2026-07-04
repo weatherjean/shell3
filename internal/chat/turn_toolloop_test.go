@@ -242,7 +242,7 @@ func TestRunTurn_AutoCompact_Triggers(t *testing.T) {
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
 		Log:         LogOrNoop(nil),
-		CompactAt:   100,
+		AgentKnobs:  AgentKnobs{CompactAt: 100},
 	}
 
 	sess, c := newCollectorSession(SessionOpts{})
@@ -286,7 +286,7 @@ func TestRunTurn_AutoCompact_Disabled(t *testing.T) {
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
 		Log:         LogOrNoop(nil),
-		CompactAt:   0,
+		AgentKnobs:  AgentKnobs{CompactAt: 0},
 	}
 
 	sess, _ := newCollectorSession(SessionOpts{})
@@ -313,7 +313,7 @@ func TestRunTurn_AutoCompact_FirstTurnNeverCompacts(t *testing.T) {
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
 		Log:         LogOrNoop(nil),
-		CompactAt:   1,
+		AgentKnobs:  AgentKnobs{CompactAt: 1},
 	}
 
 	sess, _ := newCollectorSession(SessionOpts{})
@@ -344,7 +344,7 @@ func TestRunTurn_AutoCompact_FailSafe(t *testing.T) {
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
 		Log:         LogOrNoop(nil),
-		CompactAt:   100,
+		AgentKnobs:  AgentKnobs{CompactAt: 100},
 	}
 
 	sess, c := newCollectorSession(SessionOpts{})

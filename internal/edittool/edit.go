@@ -43,7 +43,7 @@ func EditFile(ctx context.Context, fs fsx.FileSystem, workDir, filePath, oldStri
 		case errors.Is(rerr, os.ErrNotExist):
 			oldContent, created = "", true
 		case errors.Is(rerr, fsx.ErrIsDir):
-			return Result{}, fmt.Errorf("path is a directory: %s", abs)
+			return Result{}, fmt.Errorf("path is a directory, not a file: %s", abs)
 		default:
 			return Result{}, rerr
 		}
@@ -69,17 +69,17 @@ func EditFile(ctx context.Context, fs fsx.FileSystem, workDir, filePath, oldStri
 	old := convertToLineEnding(normalizeLineEndings(oldString), ending)
 	new_ := convertToLineEnding(normalizeLineEndings(newString), ending)
 
-	updated, rerr := Replace(original, old, new_, replaceAll)
-	if errors.Is(rerr, ErrNotFound) {
+	updated, rerr := replace(original, old, new_, replaceAll)
+	if errors.Is(rerr, errNotFound) {
 		// Fallback ONLY when the search text wasn't found: if the file's native
 		// ending is CRLF but the model emitted the search/replacement against an
 		// LF-normalized version of the content, try matching on the LF-normalized
 		// original and re-coerce the output to the source's ending. We do not run
-		// this on ErrMultipleMatch (it could collapse an ambiguous match into a
-		// false unique one) or ErrNoChange.
+		// this on errMultipleMatch (it could collapse an ambiguous match into a
+		// false unique one) or errNoChange.
 		altOld := strings.ReplaceAll(old, "\r\n", "\n")
 		altNew := strings.ReplaceAll(new_, "\r\n", "\n")
-		if alt, aerr := Replace(normalized, altOld, altNew, replaceAll); aerr == nil {
+		if alt, aerr := replace(normalized, altOld, altNew, replaceAll); aerr == nil {
 			updated, rerr = convertToLineEnding(alt, ending), nil
 		}
 	}

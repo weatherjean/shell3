@@ -20,16 +20,16 @@ func resolveResumeConfig(resumeID string, flagConfig string) (string, error) {
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
-		return "", fmt.Errorf("run: resolve resume config: %w", err)
+		return "", fmt.Errorf("resume: resolve config: %w", err)
 	}
 	local := paths.NewLocal(cwd)
 	st, err := runs.Open(local.Root)
 	if err != nil {
-		return "", fmt.Errorf("run: resolve resume config: open runs: %w", err)
+		return "", fmt.Errorf("resume: resolve config: open runs: %w", err)
 	}
 	metas, err := st.ListSessions(0)
 	if err != nil {
-		return "", fmt.Errorf("run: resolve resume config: list sessions: %w", err)
+		return "", fmt.Errorf("resume: resolve config: list sessions: %w", err)
 	}
 	for _, m := range metas {
 		if m.ID == resumeID {

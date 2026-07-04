@@ -32,9 +32,8 @@ shell3.welcome(io.popen([[
 ]]):read("*a"))
 ```
 
-Because it runs at load time, `pwd` is the directory shell3 was launched from.
-Reload (`:reload` or the reload tool) re-evaluates the config, so the card
-refreshes then.
+Because it runs at load time, `pwd` is the directory shell3 was launched from;
+the card refreshes the next time the config is loaded.
 
 ## ANSI art from a file
 

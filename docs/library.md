@@ -54,7 +54,7 @@ For a personal agent that's always listening, `NewRuntime` owns one shared build
 own conversation with its own agent, working directory, and audit log:
 
 ```go
-rt, _ := shell3.NewRuntime(shell3.RuntimeSpec{WorkDir: home})
+rt, _ := shell3.NewRuntime(ctx, shell3.RuntimeSpec{WorkDir: home})
 defer rt.Close()
 
 chat, _ := rt.Session(shell3.SessionOpts{Name: "tg:1234", Headless: true})
@@ -92,26 +92,6 @@ the ACP front-end swaps in an editor-buffer backend so reads see unsaved buffers
 and writes flow through the editor. `bash` is unaffected — it always hits disk
 directly.
 
-## Reloading config in place: `Runtime.Reload`
-
-`Runtime.Reload()` re-reads the config file the runtime was built from and
-applies it without restarting the process — the host-side entry behind the
-`/reload` command. It validates first: on any error the running config is left
-untouched and nothing changes. Live sessions keep their identity and history;
-the caller must ensure no turn is in flight. Returns a `ReloadResult` (agent
-and model counts, human-readable notes).
-
-## Host-driven dispatch: `Session.Dispatch`
-
-`Session.Dispatch(agent, prompt, DispatchOpts)` runs an agent from the host —
-not from a model turn — and reports the result back into the session as an
-operator notice, without starting a hidden model turn. It's the hook for
-host-side triggers such as an external scheduler (cron). `DispatchOpts` sets
-the working directory, a label that tags the delivered result (e.g.
-`"cron:nightly"`), and `Notify`: a successful run is delivered only when
-`Notify` is true, while a failed run **always** delivers, so a quiet background
-job can never fail silently.
-
 ## Session introspection and host tools
 
 A `Session` exposes the programmatic equivalents of the slash commands:
@@ -120,7 +100,14 @@ conversation entries), `Prune(id)` (drop one message from context), `Clear`,
 `Rollback`, and `SwitchAgent(name)`. `RegisterHostTool` adds a Go-implemented
 tool (name, JSON-schema parameters, and a handler func) to the session's schema
 before the first turn — it complements Lua custom tools and dispatches through
-the same path.
+the same path. `SetSafetyOff(true)` is the host-side switch behind a
+front-end's `disable_safety` command: while on, `on_tool_call` ask verdicts
+run without prompting a human (block verdicts still block).
+
+All of the state-mutating methods return `ErrBusy` while a turn is in flight —
+drain the `Send` channel first. A `Send` on a session that was already closed
+is rejected with `ErrClosed` (as an immediate `Error` event), and
+`Runtime.Session` on a closed runtime returns `ErrRuntimeClosed`.
 
 ## Subagents
 

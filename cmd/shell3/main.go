@@ -32,16 +32,21 @@ func main() {
 		rootAgent      string
 	)
 	root.Args = cobra.ArbitraryArgs
-	root.Flags().StringVar(&rootResume, "resume", "", "Resume a stored session by id in the interactive TUI")
-	root.Flags().StringVarP(&rootConfigPath, "config", "c", "", "Config name (→ ~/.shell3/<name>.lua) or path to a *.lua file (default: ~/.shell3/shell3.lua)")
-	root.Flags().StringVar(&rootAgent, "agent", "", "Select the active agent by name (default: first declared)")
+	addConfigAgentFlags(root, &rootConfigPath, &rootAgent, "")
+	addResumeFlag(root, &rootResume)
 	root.RunE = func(cmd *cobra.Command, args []string) error {
 		cwd, err := os.Getwd()
 		if err != nil {
 			return fmt.Errorf("get working directory: %w", err)
 		}
+		// A resume without --config runs under the session's recorded config,
+		// matching `run --resume` (explicit --config always wins).
+		configPath, err := resolveResumeConfig(rootResume, rootConfigPath)
+		if err != nil {
+			return err
+		}
 		spec := shell3.Spec{
-			ConfigPath:  rootConfigPath,
+			ConfigPath:  configPath,
 			WorkDir:     cwd,
 			Agent:       rootAgent,
 			Interactive: true,

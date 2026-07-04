@@ -19,7 +19,7 @@ func TestBashBgHandler_Execute_happyPath(t *testing.T) {
 	var gotCmd string
 	cfg := ToolConfig{
 		WorkDir: wd,
-		StartBashBg: func(command, workdir string, argv []string) (string, error) {
+		StartBashBg: func(command, workdir string, argv, env []string) (string, error) {
 			gotCmd = command
 			return "bg_1", nil
 		},
@@ -65,7 +65,7 @@ func TestBashBgHandler_Execute_workdirOverride(t *testing.T) {
 	var gotWorkdir string
 	cfg := ToolConfig{
 		WorkDir: primary,
-		StartBashBg: func(command, workdir string, argv []string) (string, error) {
+		StartBashBg: func(command, workdir string, argv, env []string) (string, error) {
 			gotWorkdir = workdir
 			return "bg_2", nil
 		},
@@ -87,7 +87,7 @@ func TestBashBgUsesStartCallback(t *testing.T) {
 	var gotCmd string
 	cfg := ToolConfig{
 		WorkDir: t.TempDir(),
-		StartBashBg: func(command, workdir string, argv []string) (string, error) {
+		StartBashBg: func(command, workdir string, argv, env []string) (string, error) {
 			gotCmd = command
 			return "bg1", nil
 		},

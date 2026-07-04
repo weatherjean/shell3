@@ -29,7 +29,7 @@ func (c *LoadedConfig) nameTaken(name string) bool {
 // (N counting from 2) that no agent or subagent already claims. This makes a
 // duplicate agent/subagent declaration auto-suffix ("code", "code2", "code3")
 // instead of failing the whole config load — the first declaration keeps its
-// bare name, so existing --agent/cron references to it stay valid.
+// bare name, so existing --agent references to it stay valid.
 func (c *LoadedConfig) uniqueName(base string) string {
 	if !c.nameTaken(base) {
 		return base
@@ -77,34 +77,38 @@ func registerShell3(c *LoadedConfig) {
 	L.SetField(tbl, "background", L.NewFunction(c.luaBackground))
 }
 
+// checkPosIntField reads an optional positive-integer field from t. Absent →
+// (0, false). Present but not a positive integer → Lua error naming ctx.key.
+func checkPosIntField(L *lua.LState, t *lua.LTable, ctx, key string) (int, bool) {
+	v := t.RawGetString(key)
+	if v == lua.LNil {
+		return 0, false
+	}
+	n, ok := v.(lua.LNumber)
+	if !ok || int(n) <= 0 {
+		L.RaiseError("%s.%s must be a positive integer", ctx, key)
+	}
+	return int(n), true
+}
+
 // luaSubagents sets config-global subagent limits: shell3.subagents{ max_depth = N }.
-// max_depth must be a positive integer; it caps how deep the subagent nesting
-// may go before spawn attempts are blocked. The default (3) is applied at the
-// read site (runtime.subagentMaxDepth), not here; 0 is never stored.
+// max_depth caps how deep the subagent nesting may go before spawn attempts are
+// blocked. The default (3) is applied at the read site
+// (runtime.subagentMaxDepth), not here; 0 is never stored.
 func (c *LoadedConfig) luaSubagents(L *lua.LState) int {
-	t := L.CheckTable(1)
-	if v := t.RawGetString("max_depth"); v != lua.LNil {
-		n, ok := v.(lua.LNumber)
-		if !ok || int(n) <= 0 {
-			L.RaiseError("subagents.max_depth must be a positive integer")
-		}
-		c.SubagentMaxDepth = int(n)
+	if n, ok := checkPosIntField(L, L.CheckTable(1), "subagents", "max_depth"); ok {
+		c.SubagentMaxDepth = n
 	}
 	return 0
 }
 
 // luaBackground sets config-global background job limits: shell3.background{ max_concurrent = N }.
-// max_concurrent must be a positive integer; it caps how many background jobs
-// may run simultaneously. The default (8) is applied at the read site
-// (newJobManager), not here; 0 is never stored.
+// max_concurrent caps how many background jobs may run simultaneously. The
+// default (8) is applied at the read site (newJobManager), not here; 0 is
+// never stored.
 func (c *LoadedConfig) luaBackground(L *lua.LState) int {
-	t := L.CheckTable(1)
-	if v := t.RawGetString("max_concurrent"); v != lua.LNil {
-		n, ok := v.(lua.LNumber)
-		if !ok || int(n) <= 0 {
-			L.RaiseError("background.max_concurrent must be a positive integer")
-		}
-		c.BackgroundMaxConcurrent = int(n)
+	if n, ok := checkPosIntField(L, L.CheckTable(1), "background", "max_concurrent"); ok {
+		c.BackgroundMaxConcurrent = n
 	}
 	return 0
 }
@@ -181,9 +185,15 @@ func (c *LoadedConfig) luaSkill(L *lua.LState) int {
 		L.RaiseError("skill: name, description, and path are all required")
 	}
 	c.Skills = append(c.Skills, s)
-	// Return a handle table carrying a sentinel + the name.
+	return pushHandle(L, "__skill", s.Name)
+}
+
+// pushHandle pushes a handle table carrying sentinel → name (the reference
+// form agents use in skills={}/tools.custom={}/tools.subagents={}) and returns
+// the Lua result count.
+func pushHandle(L *lua.LState, sentinel, name string) int {
 	h := L.NewTable()
-	h.RawSetString("__skill", lua.LString(s.Name))
+	h.RawSetString(sentinel, lua.LString(name))
 	L.Push(h)
 	return 1
 }
@@ -232,10 +242,7 @@ func (c *LoadedConfig) luaTool(L *lua.LState) int {
 		}
 	}
 	c.Tools[ct.Name] = ct
-	h := L.NewTable()
-	h.RawSetString("__tool", lua.LString(ct.Name))
-	L.Push(h)
-	return 1
+	return pushHandle(L, "__tool", ct.Name)
 }
 
 // paramNameRe constrains custom-tool parameter names to lowercase identifiers.
@@ -263,19 +270,26 @@ func validateParamNames(tool string, params map[string]any) error {
 // config-GLOBAL — they apply to every agent. Multiple calls merge into the same
 // map; a later key overwrites an earlier one. Values must be strings.
 func (c *LoadedConfig) luaStubTools(L *lua.LState) int {
-	t := L.CheckTable(1)
+	forEachStringPair(L, L.CheckTable(1), "stub_tools", "strings (tool names)", "a string (redirect message)",
+		func(name, msg string) { c.StubTools[name] = msg })
+	return 0
+}
+
+// forEachStringPair iterates a Lua table asserting string keys and string
+// values, raising a Lua error (naming ctx and the expected shapes) otherwise.
+// fn receives each pair.
+func forEachStringPair(L *lua.LState, t *lua.LTable, ctx, keyWant, valWant string, fn func(k, v string)) {
 	t.ForEach(func(k, v lua.LValue) {
 		name, ok := k.(lua.LString)
 		if !ok {
-			L.RaiseError("stub_tools: keys must be strings (tool names), got %s", k.Type().String())
+			L.RaiseError("%s: keys must be %s, got %s", ctx, keyWant, k.Type().String())
 		}
-		msg, ok := v.(lua.LString)
+		val, ok := v.(lua.LString)
 		if !ok {
-			L.RaiseError("stub_tools[%q]: value must be a string (redirect message), got %s", string(name), v.Type().String())
+			L.RaiseError("%s[%q]: value must be %s, got %s", ctx, string(name), valWant, v.Type().String())
 		}
-		c.StubTools[string(name)] = string(msg)
+		fn(string(name), string(val))
 	})
-	return 0
 }
 
 // luaWelcome sets a custom TUI welcome card: shell3.welcome("...text..."). The
@@ -298,22 +312,14 @@ var themeHex = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 // unrecognized name passes through untouched. Non-string keys/values are a hard
 // error (a type mistake, not a typo).
 func (c *LoadedConfig) luaTheme(L *lua.LState) int {
-	t := L.CheckTable(1)
-	t.ForEach(func(k, v lua.LValue) {
-		name, ok := k.(lua.LString)
-		if !ok {
-			L.RaiseError("theme: keys must be strings (color tokens), got %s", k.Type().String())
-		}
-		hex, ok := v.(lua.LString)
-		if !ok {
-			L.RaiseError("theme[%q]: value must be a hex string like \"#RRGGBB\", got %s", string(name), v.Type().String())
-		}
-		if !themeHex.MatchString(string(hex)) {
-			c.warnings = append(c.warnings, fmt.Sprintf("theme[%q]: %q is not a #RRGGBB hex color, ignored", string(name), string(hex)))
-			return
-		}
-		c.Theme[string(name)] = string(hex)
-	})
+	forEachStringPair(L, L.CheckTable(1), "theme", "strings (color tokens)", "a hex string like \"#RRGGBB\"",
+		func(name, hex string) {
+			if !themeHex.MatchString(hex) {
+				c.warnings = append(c.warnings, fmt.Sprintf("theme[%q]: %q is not a #RRGGBB hex color, ignored", name, hex))
+				return
+			}
+			c.Theme[name] = hex
+		})
 	return 0
 }
 
@@ -351,6 +357,47 @@ func parseGates(tt *lua.LTable) ToolGates {
 	}
 }
 
+// toolsBlock is the parsed tools={} table, shared by agents and subagents.
+// subagentsRaw carries the raw tools.subagents value (LNil when absent) — the
+// two callers give it opposite legality (agents resolve it, subagents forbid
+// it), so interpretation stays with them.
+type toolsBlock struct {
+	gates          ToolGates
+	custom         []string
+	skillsDisabled bool
+	subagentsRaw   lua.LValue
+}
+
+// parseToolsBlock reads opts.tools for an agent or subagent declaration. ctx
+// names the declaring entity in errors ("agent"/"subagent"). Returns
+// ok=false when no tools table was declared.
+func parseToolsBlock(L *lua.LState, opts *lua.LTable, ctx string) (toolsBlock, bool) {
+	var tb toolsBlock
+	tt, isTable := opts.RawGetString("tools").(*lua.LTable)
+	if !isTable {
+		return tb, false
+	}
+	if err := checkKeys(tt, ctx+".tools", toolGateKeys); err != nil {
+		L.RaiseError("%s", err.Error())
+	}
+	tb.gates = parseGates(tt)
+	if cu, ok := tt.RawGetString("custom").(*lua.LTable); ok {
+		tb.custom = handleNames(cu, "__tool")
+	}
+	tb.skillsDisabled = tt.RawGetString("skill") == lua.LFalse
+	tb.subagentsRaw = tt.RawGetString("subagents")
+	return tb, true
+}
+
+// requireOnePromptSource raises unless at most one of prompt/prompt_cmd is
+// set. An empty prompt stays valid (a system prompt is assembled from other
+// sources); only setting BOTH is an error.
+func requireOnePromptSource(L *lua.LState, kind, name, prompt, promptCmd string) {
+	if prompt != "" && promptCmd != "" {
+		L.RaiseError("%s %q: set exactly one of prompt or prompt_cmd", kind, name)
+	}
+}
+
 // luaAgent parses name/model/prompt, skills, and the tools struct (gates + custom).
 func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 	opts := L.CheckTable(1)
@@ -366,32 +413,19 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 	if a.Name == "" {
 		L.RaiseError("agent: name is required")
 	}
-	// An empty prompt stays valid for agents (a system prompt is assembled
-	// from other sources); only setting BOTH sources is an error.
-	if a.Prompt != "" && a.PromptCmd != "" {
-		L.RaiseError("agent %q: set exactly one of prompt or prompt_cmd", a.Name)
-	}
+	requireOnePromptSource(L, "agent", a.Name, a.Prompt, a.PromptCmd)
 	// Duplicate names auto-suffix rather than failing the load (the first
 	// declaration keeps its bare name; later collisions become name2, name3…).
 	a.Name = c.uniqueName(a.Name)
 	if sk, ok := opts.RawGetString("skills").(*lua.LTable); ok {
 		a.Skills = handleNames(sk, "__skill")
 	}
-	if tt, ok := opts.RawGetString("tools").(*lua.LTable); ok {
-		if err := checkKeys(tt, "agent.tools", toolGateKeys); err != nil {
-			L.RaiseError("%s", err.Error())
-		}
-		a.Gates = parseGates(tt)
-		if cu, ok := tt.RawGetString("custom").(*lua.LTable); ok {
-			a.CustomTools = handleNames(cu, "__tool")
-		}
-		if tt.RawGetString("skill") == lua.LFalse {
-			a.SkillsDisabled = true
-		}
-		if sgv := tt.RawGetString("subagents"); sgv != lua.LNil {
-			sg, ok := sgv.(*lua.LTable)
+	if tb, ok := parseToolsBlock(L, opts, "agent"); ok {
+		a.Gates, a.CustomTools, a.SkillsDisabled = tb.gates, tb.custom, tb.skillsDisabled
+		if tb.subagentsRaw != lua.LNil {
+			sg, ok := tb.subagentsRaw.(*lua.LTable)
 			if !ok {
-				L.RaiseError("agent %q: tools.subagents must be a list of subagent handles, got %s", a.Name, sgv.Type().String())
+				L.RaiseError("agent %q: tools.subagents must be a list of subagent handles, got %s", a.Name, tb.subagentsRaw.Type().String())
 			}
 			a.Subagents = subagentHandleNames(L, sg, a.Name)
 		}
@@ -423,10 +457,7 @@ func (c *LoadedConfig) luaSubagent(L *lua.LState) int {
 	if s.Name == "" || s.Description == "" {
 		L.RaiseError("subagent: name and description are required")
 	}
-	// An empty prompt stays valid for subagents; only setting BOTH is an error.
-	if s.Prompt != "" && s.PromptCmd != "" {
-		L.RaiseError("subagent %q: set exactly one of prompt or prompt_cmd", s.Name)
-	}
+	requireOnePromptSource(L, "subagent", s.Name, s.Prompt, s.PromptCmd)
 	// Duplicate names (against any agent or subagent) auto-suffix rather than
 	// failing the load. The returned handle below carries the deduped name, so
 	// tools.subagents={handle} references still resolve.
@@ -434,26 +465,14 @@ func (c *LoadedConfig) luaSubagent(L *lua.LState) int {
 	if sk, ok := opts.RawGetString("skills").(*lua.LTable); ok {
 		s.Skills = handleNames(sk, "__skill")
 	}
-	if tt, ok := opts.RawGetString("tools").(*lua.LTable); ok {
-		if err := checkKeys(tt, "subagent.tools", toolGateKeys); err != nil {
-			L.RaiseError("%s", err.Error())
-		}
-		if _, isTable := tt.RawGetString("subagents").(*lua.LTable); isTable {
+	if tb, ok := parseToolsBlock(L, opts, "subagent"); ok {
+		if _, isTable := tb.subagentsRaw.(*lua.LTable); isTable {
 			L.RaiseError("subagent %q: a subagent may not declare its own subagents (depth limit 1)", s.Name)
 		}
-		s.Gates = parseGates(tt)
-		if cu, ok := tt.RawGetString("custom").(*lua.LTable); ok {
-			s.CustomTools = handleNames(cu, "__tool")
-		}
-		if tt.RawGetString("skill") == lua.LFalse {
-			s.SkillsDisabled = true
-		}
+		s.Gates, s.CustomTools, s.SkillsDisabled = tb.gates, tb.custom, tb.skillsDisabled
 	}
 	s.Environment = optBool(opts, "environment")
 	s.Delegation = optBool(opts, "delegation")
 	c.subagents = append(c.subagents, s)
-	h := L.NewTable()
-	h.RawSetString("__subagent", lua.LString(s.Name))
-	L.Push(h)
-	return 1
+	return pushHandle(L, "__subagent", s.Name)
 }

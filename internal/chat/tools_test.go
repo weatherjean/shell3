@@ -15,13 +15,14 @@ func newTestSession(t *testing.T) *Session {
 	return NewSession(SessionOpts{})
 }
 
-func TestHandleCompactHistoryIncludesSkillsToReread(t *testing.T) {
+func TestCompactInto_IncludesFilePointerSections(t *testing.T) {
 	sess := newTestSession(t)
 	sess.messages = []llm.Message{{Role: llm.RoleUser, Content: "old context"}}
 
 	compactInto(CompactSummary{
-		Summary: "summary",
-		Skills:  []string{"writing-plans", "/tmp/codebase-discovery.md"},
+		Summary:        "summary",
+		ImportantFiles: []string{"a.go"},
+		ReadFiles:      []string{"b.go", "c/d.go"},
 	}, nil, sess, nil, applog.Noop{}, "", "")
 	if len(sess.messages) < 1 {
 		t.Fatalf("expected at least a continuation message, got %d", len(sess.messages))
@@ -29,10 +30,8 @@ func TestHandleCompactHistoryIncludesSkillsToReread(t *testing.T) {
 
 	continuation := sess.messages[0].Content
 	for _, want := range []string{
-		"<skills-to-reread>",
-		"- writing-plans",
-		"- /tmp/codebase-discovery.md",
-		"</skills-to-reread>",
+		"<modified-files>", "- a.go", "</modified-files>",
+		"<read-files>", "- b.go", "- c/d.go", "</read-files>",
 	} {
 		if !strings.Contains(continuation, want) {
 			t.Fatalf("expected continuation to contain %q, got:\n%s", want, continuation)

@@ -148,164 +148,31 @@ shell3.agent({
 
 	// --- Turn 1: custom tool call path ---
 	t.Run("custom_tool_via_turn", func(t *testing.T) {
-		fake := fakellm.New(
-			fakellm.Script{Events: []llm.StreamEvent{
-				{ToolCall: &llm.ToolCall{ID: "1", Name: "greet", RawArgs: `{"name":"world"}`}},
-			}},
-			fakellm.Script{Events: []llm.StreamEvent{
-				{TextDelta: "done"},
-				{Usage: &llm.Usage{PromptTokens: 5, CompletionTokens: 1, TotalTokens: 6}},
-			}},
-		)
-
-		a := lc.FirstAgent()
-		customDefs := lc.CustomToolsFor(a.CustomTools)
-		toolDefs := luacfg.ToolDefs(a.Gates, customDefs)
-
-		var events []chat.Event
-		sess := chat.NewSession(chat.SessionOpts{Sink: func(ev chat.Event) {
-			events = append(events, ev)
-		}})
-		sess.Start(map[string]string{"mode": "test"})
-
-		turnCfg := chat.TurnConfig{
-			LLM:               fake,
-			Personality:       persona.BasePersona("you are a test", toolDefs),
-			StatusLine:        "test │ x",
-			WorkDir:           dir,
-			Log:               applog.Noop{},
-			ResolveCustomTool: lc.ResolveCustomCall,
-			CustomToolNames:   map[string]bool{"greet": true},
-			RunToolCall: func(ctx context.Context, name, command, argsJSON string) chat.ToolCallVerdict {
-				return bridgeVerdict(lc.RunToolCall(ctx, name, command, argsJSON))
-			},
-		}
-
-		turnCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		sess.Run(turnCtx, turnCfg, "say hi")
-		sess.End("ok")
-
-		var foundToolResult bool
-		for _, ev := range events {
-			if ev.Kind == chat.EventToolResult && strings.Contains(ev.ToolOutput, "hello, world") {
-				foundToolResult = true
-				break
-			}
-		}
-		if !foundToolResult {
-			var texts []string
-			for _, ev := range events {
-				texts = append(texts, ev.Kind.String()+"="+ev.ToolOutput)
-			}
-			t.Errorf("expected tool result with 'hello, world'; events: %v", texts)
-		}
+		events := runToolCallTurn(t, lc, dir, "say hi",
+			llm.ToolCall{ID: "1", Name: "greet", RawArgs: `{"name":"world"}`}, nil)
+		assertToolResultContains(t, events, "hello, world")
 	})
 
 	// --- Turn 2: on_tool_call blocks the dangerous bash call ---
 	t.Run("on_tool_call_blocks_via_turn", func(t *testing.T) {
-		fake := fakellm.New(
-			fakellm.Script{Events: []llm.StreamEvent{
-				{ToolCall: &llm.ToolCall{ID: "1", Name: "bash", RawArgs: `{"command":"rm -rf /"}`}},
-			}},
-			fakellm.Script{Events: []llm.StreamEvent{
-				{TextDelta: "blocked"},
-				{Usage: &llm.Usage{PromptTokens: 5, CompletionTokens: 1, TotalTokens: 6}},
-			}},
-		)
-
-		a := lc.FirstAgent()
-		customDefs := lc.CustomToolsFor(a.CustomTools)
-		toolDefs := luacfg.ToolDefs(a.Gates, customDefs)
-
-		var events []chat.Event
-		sess := chat.NewSession(chat.SessionOpts{Sink: func(ev chat.Event) {
-			events = append(events, ev)
-		}})
-		sess.Start(map[string]string{"mode": "test"})
-
-		turnCfg := chat.TurnConfig{
-			LLM:               fake,
-			Personality:       persona.BasePersona("you are a test", toolDefs),
-			StatusLine:        "test │ x",
-			WorkDir:           dir,
-			Log:               applog.Noop{},
-			ResolveCustomTool: lc.ResolveCustomCall,
-			CustomToolNames:   map[string]bool{"greet": true},
-			RunToolCall: func(ctx context.Context, name, command, argsJSON string) chat.ToolCallVerdict {
-				return bridgeVerdict(lc.RunToolCall(ctx, name, command, argsJSON))
-			},
-			Handlers: chat.NewHandlers(),
-		}
-
-		turnCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		sess.Run(turnCtx, turnCfg, "run dangerous command")
-		sess.End("ok")
-
 		// The bash handler returns "error: blocked by on_tool_call: ..." instead of
 		// executing the command.
-		var foundBlocked bool
-		for _, ev := range events {
-			if ev.Kind == chat.EventToolResult && strings.Contains(ev.ToolOutput, "blocked by on_tool_call") {
-				foundBlocked = true
-				break
-			}
-		}
-		if !foundBlocked {
-			var texts []string
-			for _, ev := range events {
-				texts = append(texts, ev.Kind.String()+"="+ev.ToolOutput)
-			}
-			t.Errorf("expected tool result blocked by on_tool_call; events: %v", texts)
-		}
+		events := runToolCallTurn(t, lc, dir, "run dangerous command",
+			llm.ToolCall{ID: "1", Name: "bash", RawArgs: `{"command":"rm -rf /"}`}, nil)
+		assertToolResultContains(t, events, "blocked by on_tool_call")
 	})
 
 	// --- Turn 3: on_tool_result redacts the model-visible bash output ---
 	// Exercises the real dispatch path (turn.go applies cfg.RunToolResult to the
 	// result before it reaches the model), not just the chain executor in isolation.
 	t.Run("on_tool_result_redacts_via_turn", func(t *testing.T) {
-		fake := fakellm.New(
-			fakellm.Script{Events: []llm.StreamEvent{
-				{ToolCall: &llm.ToolCall{ID: "1", Name: "bash", RawArgs: `{"command":"echo SECRET-TOKEN"}`}},
-			}},
-			fakellm.Script{Events: []llm.StreamEvent{
-				{TextDelta: "done"},
-				{Usage: &llm.Usage{PromptTokens: 5, CompletionTokens: 1, TotalTokens: 6}},
-			}},
-		)
-
-		a := lc.FirstAgent()
-		customDefs := lc.CustomToolsFor(a.CustomTools)
-		toolDefs := luacfg.ToolDefs(a.Gates, customDefs)
-
-		var events []chat.Event
-		sess := chat.NewSession(chat.SessionOpts{Sink: func(ev chat.Event) {
-			events = append(events, ev)
-		}})
-		sess.Start(map[string]string{"mode": "test"})
-
-		turnCfg := chat.TurnConfig{
-			LLM:               fake,
-			Personality:       persona.BasePersona("you are a test", toolDefs),
-			StatusLine:        "test │ x",
-			WorkDir:           dir,
-			Log:               applog.Noop{},
-			ResolveCustomTool: lc.ResolveCustomCall,
-			CustomToolNames:   map[string]bool{"greet": true},
-			RunToolCall: func(ctx context.Context, name, command, argsJSON string) chat.ToolCallVerdict {
-				return bridgeVerdict(lc.RunToolCall(ctx, name, command, argsJSON))
-			},
-			RunToolResult: func(ctx context.Context, name, argsJSON, output string) string {
-				return lc.RunToolResult(ctx, name, argsJSON, output)
-			},
-			Handlers: chat.NewHandlers(),
-		}
-
-		turnCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		sess.Run(turnCtx, turnCfg, "echo a secret")
-		sess.End("ok")
+		events := runToolCallTurn(t, lc, dir, "echo a secret",
+			llm.ToolCall{ID: "1", Name: "bash", RawArgs: `{"command":"echo SECRET-TOKEN"}`},
+			func(tc *chat.TurnConfig) {
+				tc.RunToolResult = func(ctx context.Context, name, argsJSON, output string) string {
+					return lc.RunToolResult(ctx, name, argsJSON, output)
+				}
+			})
 
 		var resultOut string
 		var found bool
@@ -329,125 +196,91 @@ shell3.agent({
 	// A dangerous command issued via shell_interactive must be blocked by the same
 	// denylist as bash, and must never reach the PTY runner.
 	t.Run("shell_interactive_gated_via_turn", func(t *testing.T) {
-		fake := fakellm.New(
-			fakellm.Script{Events: []llm.StreamEvent{
-				{ToolCall: &llm.ToolCall{ID: "1", Name: "shell_interactive", RawArgs: `{"command":"rm -rf /"}`}},
-			}},
-			fakellm.Script{Events: []llm.StreamEvent{
-				{TextDelta: "blocked"},
-				{Usage: &llm.Usage{PromptTokens: 5, CompletionTokens: 1, TotalTokens: 6}},
-			}},
-		)
-
-		a := lc.FirstAgent()
-		customDefs := lc.CustomToolsFor(a.CustomTools)
-		toolDefs := luacfg.ToolDefs(a.Gates, customDefs)
-
-		var events []chat.Event
-		sess := chat.NewSession(chat.SessionOpts{Sink: func(ev chat.Event) {
-			events = append(events, ev)
-		}})
-		sess.Start(map[string]string{"mode": "test"})
-
 		var ptyRan bool
-		turnCfg := chat.TurnConfig{
-			LLM:               fake,
-			Personality:       persona.BasePersona("you are a test", toolDefs),
-			StatusLine:        "test │ x",
-			WorkDir:           dir,
-			Log:               applog.Noop{},
-			ResolveCustomTool: lc.ResolveCustomCall,
-			CustomToolNames:   map[string]bool{"greet": true},
-			RunToolCall: func(ctx context.Context, name, command, argsJSON string) chat.ToolCallVerdict {
-				return bridgeVerdict(lc.RunToolCall(ctx, name, command, argsJSON))
-			},
-			ShellInteractive: func(_ context.Context, cmd, _ string) string {
-				ptyRan = true
-				return "ran: " + cmd
-			},
-			Handlers: chat.NewHandlers(),
-		}
-
-		turnCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		sess.Run(turnCtx, turnCfg, "open an interactive shell and wipe the disk")
-		sess.End("ok")
+		events := runToolCallTurn(t, lc, dir, "open an interactive shell and wipe the disk",
+			llm.ToolCall{ID: "1", Name: "shell_interactive", RawArgs: `{"command":"rm -rf /"}`},
+			func(tc *chat.TurnConfig) {
+				tc.ShellInteractive = func(_ context.Context, cmd, _ string) string {
+					ptyRan = true
+					return "ran: " + cmd
+				}
+			})
 
 		if ptyRan {
 			t.Fatal("shell_interactive ran a command the denylist must block — ungated bash path")
 		}
-		var blocked bool
-		for _, ev := range events {
-			if ev.Kind == chat.EventToolResult && strings.Contains(ev.ToolOutput, "blocked by on_tool_call") {
-				blocked = true
-			}
-		}
-		if !blocked {
-			var texts []string
-			for _, ev := range events {
-				texts = append(texts, ev.Kind.String()+"="+ev.ToolOutput)
-			}
-			t.Errorf("expected shell_interactive blocked by on_tool_call; events: %v", texts)
-		}
+		assertToolResultContains(t, events, "blocked by on_tool_call")
 	})
 
 	// --- Turn 5: on_tool_call gates a NON-bash tool (read) via the dispatch loop ---
 	// Proves the chain fires for every tool with its real name (here a read of
 	// .env, blocked by name+args), not just the bash family.
 	t.Run("non_bash_read_gated_via_turn", func(t *testing.T) {
-		fake := fakellm.New(
-			fakellm.Script{Events: []llm.StreamEvent{
-				{ToolCall: &llm.ToolCall{ID: "1", Name: "read", RawArgs: `{"path":".env"}`}},
-			}},
-			fakellm.Script{Events: []llm.StreamEvent{
-				{TextDelta: "blocked"},
-				{Usage: &llm.Usage{PromptTokens: 5, CompletionTokens: 1, TotalTokens: 6}},
-			}},
-		)
-
-		a := lc.FirstAgent()
-		customDefs := lc.CustomToolsFor(a.CustomTools)
-		toolDefs := luacfg.ToolDefs(a.Gates, customDefs)
-
-		var events []chat.Event
-		sess := chat.NewSession(chat.SessionOpts{Sink: func(ev chat.Event) {
-			events = append(events, ev)
-		}})
-		sess.Start(map[string]string{"mode": "test"})
-
-		turnCfg := chat.TurnConfig{
-			LLM:               fake,
-			Personality:       persona.BasePersona("you are a test", toolDefs),
-			StatusLine:        "test │ x",
-			WorkDir:           dir,
-			Log:               applog.Noop{},
-			ResolveCustomTool: lc.ResolveCustomCall,
-			CustomToolNames:   map[string]bool{"greet": true},
-			RunToolCall: func(ctx context.Context, name, command, argsJSON string) chat.ToolCallVerdict {
-				return bridgeVerdict(lc.RunToolCall(ctx, name, command, argsJSON))
-			},
-			Handlers: chat.NewHandlers(),
-		}
-
-		turnCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		sess.Run(turnCtx, turnCfg, "read the env file")
-		sess.End("ok")
-
-		var blocked bool
-		for _, ev := range events {
-			if ev.Kind == chat.EventToolResult && strings.Contains(ev.ToolOutput, "no reading .env") {
-				blocked = true
-			}
-		}
-		if !blocked {
-			var texts []string
-			for _, ev := range events {
-				texts = append(texts, ev.Kind.String()+"="+ev.ToolOutput)
-			}
-			t.Errorf("expected read of .env blocked by on_tool_call; events: %v", texts)
-		}
+		events := runToolCallTurn(t, lc, dir, "read the env file",
+			llm.ToolCall{ID: "1", Name: "read", RawArgs: `{"path":".env"}`}, nil)
+		assertToolResultContains(t, events, "no reading .env")
 	})
+}
+
+// runToolCallTurn drives one scripted turn against lc's loaded config: the
+// fake LLM issues tc, the dispatch loop runs it (on_tool_call chain included),
+// and a second script ends the turn. tweak, when non-nil, adjusts the
+// TurnConfig before the run (extra hooks like RunToolResult or a PTY stub).
+// Returns every event the session emitted.
+func runToolCallTurn(t *testing.T, lc *luacfg.LoadedConfig, dir, prompt string, tc llm.ToolCall, tweak func(*chat.TurnConfig)) []chat.Event {
+	t.Helper()
+	fake := fakellm.New(
+		fakellm.Script{Events: []llm.StreamEvent{{ToolCall: &tc}}},
+		fakellm.Script{Events: []llm.StreamEvent{
+			{TextDelta: "done"},
+			{Usage: &llm.Usage{PromptTokens: 5, CompletionTokens: 1, TotalTokens: 6}},
+		}},
+	)
+	a := lc.FirstAgent()
+	toolDefs := luacfg.ToolDefs(a.Gates, lc.CustomToolsFor(a.CustomTools))
+
+	var events []chat.Event
+	sess := chat.NewSession(chat.SessionOpts{Sink: func(ev chat.Event) { events = append(events, ev) }})
+	sess.Start(map[string]string{"mode": "test"})
+
+	turnCfg := chat.TurnConfig{
+		LLM:               fake,
+		Personality:       persona.BasePersona("you are a test", toolDefs),
+		StatusLine:        "test │ x",
+		WorkDir:           dir,
+		Log:               applog.Noop{},
+		ResolveCustomTool: lc.ResolveCustomCall,
+		AgentKnobs:        chat.AgentKnobs{CustomToolNames: map[string]bool{"greet": true}},
+		RunToolCall: func(ctx context.Context, name, command, argsJSON string) chat.ToolCallVerdict {
+			return bridgeVerdict(lc.RunToolCall(ctx, name, command, argsJSON))
+		},
+		Handlers: chat.NewHandlers(),
+	}
+	if tweak != nil {
+		tweak(&turnCfg)
+	}
+
+	turnCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sess.Run(turnCtx, turnCfg, prompt)
+	sess.End(chat.StatusOK)
+	return events
+}
+
+// assertToolResultContains fails unless some tool-result event's output
+// contains want; on failure it renders the full event list for debugging.
+func assertToolResultContains(t *testing.T, events []chat.Event, want string) {
+	t.Helper()
+	for _, ev := range events {
+		if ev.Kind == chat.EventToolResult && strings.Contains(ev.ToolOutput, want) {
+			return
+		}
+	}
+	var texts []string
+	for _, ev := range events {
+		texts = append(texts, ev.Kind.String()+"="+ev.ToolOutput)
+	}
+	t.Errorf("expected a tool result containing %q; events: %v", want, texts)
 }
 
 // TestLuacfgIntegration_EmptyRewriteOnNonBashFailsClosed drives the exact footgun

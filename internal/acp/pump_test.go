@@ -32,7 +32,7 @@ func buildPumpEnv(t *testing.T, luaContent string) *env {
 	}
 
 	workDir := t.TempDir()
-	rt, err := shell3.NewRuntime(shell3.RuntimeSpec{ConfigPath: luaPath, WorkDir: workDir})
+	rt, err := shell3.NewRuntime(context.Background(), shell3.RuntimeSpec{ConfigPath: luaPath, WorkDir: workDir})
 	if err != nil {
 		t.Fatalf("buildPumpEnv: NewRuntime: %v", err)
 	}
@@ -161,9 +161,8 @@ func streamScript(w http.ResponseWriter, fl http.Flusher, script string) {
 	if strings.HasPrefix(script, "tool:") {
 		rest := strings.TrimPrefix(script, "tool:")
 		toolName, toolArgs := rest, "{}"
-		if i := strings.Index(rest, ":"); i >= 0 {
-			toolName = rest[:i]
-			toolArgs = rest[i+1:]
+		if name, args, ok := strings.Cut(rest, ":"); ok {
+			toolName, toolArgs = name, args
 		}
 		chunk := map[string]any{
 			"id": "chatcmpl-test", "object": "chat.completion.chunk",

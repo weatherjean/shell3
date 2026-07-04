@@ -134,15 +134,13 @@ func (a *acpAgent) askerFor(sessionID *string) func(ctx context.Context, command
 			title = fmt.Sprintf("%s — %s", command, reason)
 		}
 
-		// /disable_safety parallel to the TUI: when the session has toggled the
-		// gate off, auto-allow without prompting the client. Looked up by id
-		// because the acpSession does not exist yet when this closure is built.
-		// The same lookup yields the real in-flight ToolCallID when available.
+		// The disable_safety auto-allow lives in the shell3.Session's Asker
+		// wrapper (Session.SetSafetyOff) — by the time this fires, the toggle
+		// has already been honored. Looked up by id because the acpSession does
+		// not exist yet when this closure is built; the lookup yields the real
+		// in-flight ToolCallID when available.
 		toolCallID := ""
 		if s := a.sessionByID(*sessionID); s != nil {
-			if s.safetyOff.Load() {
-				return true
-			}
 			toolCallID = s.liveToolCallWait(100 * time.Millisecond)
 		}
 		synthetic := toolCallID == ""
@@ -581,7 +579,13 @@ func (a *acpAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (acp
 	case turnCtx.Err() != nil || errors.Is(turnErr, context.Canceled):
 		return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonCancelled}, nil
 	case turnErr != nil:
-		return acpsdk.PromptResponse{}, acpsdk.NewInternalError(map[string]any{"error": turnErr.Error()})
+		// Append the rollback affordance when the error looks recoverable by
+		// undoing the last turn (matches the headless front-end's presentation).
+		msg := turnErr.Error()
+		if hint := shell3.RollbackHint(turnErr); hint != "" {
+			msg += " " + hint
+		}
+		return acpsdk.PromptResponse{}, acpsdk.NewInternalError(map[string]any{"error": msg})
 	}
 	return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}, nil
 }

@@ -61,7 +61,7 @@ func ExampleStart() {
 	}
 }
 
-// ExampleSession_Snapshot shows introspection: the active agent, model, tools,
+// ExampleSession_Snapshot shows introspection: the active agent, model, skills,
 // and tunable parameters, as the TUI's status line and /info render them.
 func ExampleSession_Snapshot() {
 	sess, err := shell3.Start(context.Background(), shell3.Spec{})
@@ -72,8 +72,8 @@ func ExampleSession_Snapshot() {
 
 	snap := sess.Snapshot()
 	fmt.Println(snap.Agent, snap.Model, snap.ContextWindow)
-	for _, tool := range snap.Tools {
-		fmt.Println(tool.Name, "—", tool.Description)
+	for _, p := range snap.Params {
+		fmt.Println(p.Name, "=", p.Value)
 	}
 }
 
@@ -81,7 +81,7 @@ func ExampleSession_Snapshot() {
 // agent home, multiple named sessions (e.g. one per client connection), each with
 // its own history, agent, and optional workdir.
 func ExampleNewRuntime() {
-	rt, err := shell3.NewRuntime(shell3.RuntimeSpec{WorkDir: "/home/me/assistant"})
+	rt, err := shell3.NewRuntime(context.Background(), shell3.RuntimeSpec{WorkDir: "/home/me/assistant"})
 	if err != nil {
 		panic(err)
 	}
@@ -111,5 +111,100 @@ func ExampleNewRuntime() {
 		coder.Interject("stop after 3 steps and report status")
 	}()
 	for range coder.Send(context.Background(), "make the tests pass") {
+	}
+}
+
+// ExampleRuntime_Events shows the flagship always-on loop: an idle session
+// whose inbox gains an item (a subagent finishing, an Interject) emits a Wake
+// on the runtime bus; the host reacts with RunQueued, which drains the queued
+// inbox as a fresh turn (and no-ops when there is nothing to do).
+func ExampleRuntime_Events() {
+	rt, err := shell3.NewRuntime(context.Background(), shell3.RuntimeSpec{})
+	if err != nil {
+		panic(err)
+	}
+	defer rt.Close()
+
+	sessions := map[string]*shell3.Session{}
+	s, err := rt.Session(shell3.SessionOpts{Name: "main", Headless: true})
+	if err != nil {
+		panic(err)
+	}
+	sessions[s.Name()] = s
+
+	for ev := range rt.Events() {
+		if ev.Kind != shell3.Wake {
+			continue
+		}
+		if s := sessions[ev.Session]; s != nil {
+			for e := range s.RunQueued(context.Background()) {
+				if e.Kind == shell3.Token {
+					fmt.Print(e.Text)
+				}
+			}
+		}
+	}
+}
+
+// ExampleSession_RegisterHostTool shows the host-extensibility hook: a
+// Go-implemented tool registered before the first turn, dispatched by name
+// alongside the built-ins and Lua custom tools.
+func ExampleSession_RegisterHostTool() {
+	sess, err := shell3.Start(context.Background(), shell3.Spec{})
+	if err != nil {
+		panic(err)
+	}
+	defer sess.Close()
+
+	err = sess.RegisterHostTool(shell3.HostTool{
+		Name:        "get_weather",
+		Description: "Current weather for a city.",
+		Parameters: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"city": map[string]any{"type": "string"}},
+			"required":   []string{"city"},
+		},
+		Handler: func(ctx context.Context, argsJSON string) (string, error) {
+			return `{"temp_c": 21, "sky": "clear"}`, nil
+		},
+	})
+	if err != nil {
+		panic(err)
+	}
+	for range sess.Send(context.Background(), "what's the weather in Oslo?") {
+	}
+}
+
+// ExampleSession_SetSafetyOff shows the host-side switch behind a front-end's
+// disable_safety command: while on, on_tool_call ask verdicts run without
+// prompting a human (block verdicts still block).
+func ExampleSession_SetSafetyOff() {
+	sess, err := shell3.Start(context.Background(), shell3.Spec{})
+	if err != nil {
+		panic(err)
+	}
+	defer sess.Close()
+
+	sess.SetSafetyOff(true) // e.g. the user toggled :disable_safety
+	for range sess.Send(context.Background(), "clean the build directory") {
+	}
+	sess.SetSafetyOff(false)
+}
+
+// ExampleSession_SendParts shows inbound media: a turn carrying an image the
+// model can see. A Part sets exactly one of Path (extension-routed) or Data
+// (MIME-routed); invalid parts reject the whole turn with an Error event.
+func ExampleSession_SendParts() {
+	sess, err := shell3.Start(context.Background(), shell3.Spec{})
+	if err != nil {
+		panic(err)
+	}
+	defer sess.Close()
+
+	parts := []shell3.Part{{Kind: shell3.PartImage, Path: "screenshot.png"}}
+	for ev := range sess.SendParts(context.Background(), "what's wrong in this screenshot?", parts) {
+		if ev.Kind == shell3.Token {
+			fmt.Print(ev.Text)
+		}
 	}
 }

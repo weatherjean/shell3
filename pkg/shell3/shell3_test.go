@@ -101,6 +101,54 @@ func TestSession_ID_NoStoreReportsEmpty(t *testing.T) {
 	}
 }
 
+// TestSend_AfterCloseReturnsErrClosed pins the teardown contract: a Send that
+// races session close (e.g. a Wake-driven queued drain) must be rejected with
+// ErrClosed instead of running a turn against the ended store record.
+func TestSend_AfterCloseReturnsErrClosed(t *testing.T) {
+	s := newTestSession(t, fakellm.New(), chat.Config{})
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	var got error
+	for ev := range s.Send(context.Background(), "too late") {
+		if ev.Kind == Error {
+			got = ev.Err
+		}
+	}
+	if !errors.Is(got, ErrClosed) {
+		t.Fatalf("Send after Close = %v, want ErrClosed", got)
+	}
+}
+
+// TestSetSafetyOff_AutoAllowsAsks pins the session-level disable_safety
+// toggle: with safety off, the turn's Asker allows without consulting the
+// human asker; toggled back on, the real asker is consulted again.
+func TestSetSafetyOff_AutoAllowsAsks(t *testing.T) {
+	s := newTestSession(t, fakellm.New(), chat.Config{})
+	defer s.Close()
+	askerCalled := false
+	s.asker = func(ctx context.Context, command, reason string) bool {
+		askerCalled = true
+		return false
+	}
+
+	s.SetSafetyOff(true)
+	if !s.turnConfig().Asker(context.Background(), "rm -rf /", "test") {
+		t.Fatal("safety off: ask should auto-allow")
+	}
+	if askerCalled {
+		t.Fatal("safety off: the human asker must not be consulted")
+	}
+
+	s.SetSafetyOff(false)
+	if s.turnConfig().Asker(context.Background(), "rm -rf /", "test") {
+		t.Fatal("safety on: the denying asker's verdict should stand")
+	}
+	if !askerCalled {
+		t.Fatal("safety on: the human asker should be consulted")
+	}
+}
+
 // TestSession_History_CarriesReasoning proves a live turn's reasoning reaches
 // History() (and thus the dashboard's /api/history "reasoning" field). This is
 // the Chat-tab thinking path; it is independent of resume (which doesn't persist
@@ -404,7 +452,7 @@ func TestSession_SwitchAgent_Applies(t *testing.T) {
 	cfg := chat.Config{
 		AgentNames: []string{"base", "plan"},
 		SwitchAgent: func(name string) (chat.ActiveAgent, error) {
-			return chat.ActiveAgent{LLM: newClient, ModeLabel: name, ModelID: "m2", ContextWindow: 1000}, nil
+			return chat.ActiveAgent{LLM: newClient, ModeLabel: name, ModelID: "m2", AgentKnobs: chat.AgentKnobs{ContextWindow: 1000}}, nil
 		},
 	}
 	s := newTestSession(t, client, cfg)
@@ -554,7 +602,7 @@ func newDescriberClient(specs []llm.ParamSpec, scripts ...fakellm.Script) *descr
 // session's current CustomToolNames (translate stays pure, so route does it).
 func TestRoute_SetsIsCustomTool(t *testing.T) {
 	s := newTestSession(t, fakellm.New(), chat.Config{
-		CustomToolNames: map[string]bool{"my_tool": true},
+		AgentKnobs: chat.AgentKnobs{CustomToolNames: map[string]bool{"my_tool": true}},
 	})
 	defer s.Close()
 
@@ -589,11 +637,11 @@ func TestSnapshot_PopulatesFromConfig(t *testing.T) {
 		{Name: "max_tokens", Default: "0"},
 	})
 	cfg := chat.Config{
-		ModeLabel:     "code",
-		StatusLine:    "openai │ gpt-x │ high",
-		ContextWindow: 4096,
-		ActiveSkills:  []string{"a", "b"},
-		Params:        llm.RequestParams{ReasoningEffort: "high", MaxTokens: 512},
+		ModeLabel:    "code",
+		StatusLine:   "openai │ gpt-x │ high",
+		AgentKnobs:   chat.AgentKnobs{ContextWindow: 4096},
+		ActiveSkills: []string{"a", "b"},
+		Params:       llm.RequestParams{ReasoningEffort: "high", MaxTokens: 512},
 	}
 	cfg.Personality.SystemPrompt = "be helpful"
 	cfg.Personality.Tools = []llm.ToolDefinition{{Name: "bash", Description: "run a command"}}
@@ -612,9 +660,6 @@ func TestSnapshot_PopulatesFromConfig(t *testing.T) {
 	}
 	if len(snap.Skills) != 2 || snap.Skills[0] != "a" {
 		t.Fatalf("Skills = %v", snap.Skills)
-	}
-	if len(snap.Tools) != 1 || snap.Tools[0].Name != "bash" || snap.Tools[0].Description != "run a command" {
-		t.Fatalf("Tools = %+v", snap.Tools)
 	}
 	if len(snap.Params) != 2 {
 		t.Fatalf("Params count = %d, want 2", len(snap.Params))
@@ -679,13 +724,13 @@ func TestPrune(t *testing.T) {
 		{Role: llm.RoleTool, Name: "bash", ToolCallID: "7", Content: "[tool_call_id=7]\nlots of bytes here"},
 	})
 
-	if summary, ok := s.Prune("nope"); ok {
-		t.Fatalf("Prune(unknown) ok=true summary=%q", summary)
+	if summary, err := s.Prune("nope"); err == nil {
+		t.Fatalf("Prune(unknown) err=nil summary=%q", summary)
 	}
 
-	summary, ok := s.Prune("7")
-	if !ok {
-		t.Fatalf("Prune(7) ok=false summary=%q", summary)
+	summary, err := s.Prune("7")
+	if err != nil {
+		t.Fatalf("Prune(7): %v", err)
 	}
 	if summary == "" {
 		t.Fatal("Prune returned empty summary")
@@ -850,8 +895,8 @@ func TestSession_BusyEnforcement(t *testing.T) {
 	if err := s.SwitchAgent("any"); !errors.Is(err, ErrBusy) {
 		t.Fatalf("SwitchAgent while busy: want ErrBusy, got %v", err)
 	}
-	if summary, ok := s.Prune("1"); ok || !strings.Contains(summary, ErrBusy.Error()) {
-		t.Fatalf("Prune while busy: want busy error summary, got (%q, %t)", summary, ok)
+	if _, err := s.Prune("1"); !errors.Is(err, ErrBusy) {
+		t.Fatalf("Prune while busy: want ErrBusy, got %v", err)
 	}
 
 	// Drain the in-flight turn; the gate must clear.
@@ -874,8 +919,8 @@ func TestSession_InterjectMidTurn(t *testing.T) {
 	)
 	var s *Session
 	cfg := chat.Config{
-		LLM:             client,
-		CustomToolNames: map[string]bool{"poke": true},
+		LLM:        client,
+		AgentKnobs: chat.AgentKnobs{CustomToolNames: map[string]bool{"poke": true}},
 		HostTool: func(ctx context.Context, name, args string) (string, error) {
 			s.Interject("change of plans")
 			return "ok", nil
@@ -966,14 +1011,14 @@ func TestSession_SinkStartLabel(t *testing.T) {
 }
 
 // TestSessionJobsFromManager verifies that Session.Jobs() reads from the
-// in-process job runtime rather than the old bgjobs file store.
+// in-process job runtime.
 func TestSessionJobsFromManager(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	s, err := rt.Session(SessionOpts{Name: "s1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = rt.jobs.startCommand(s, "sleep 1", t.TempDir(), []string{"sleep", "1"})
+	_, _ = rt.jobs.startCommand(s, "sleep 1", t.TempDir(), []string{"sleep", "1"}, nil)
 	jobs := s.Jobs()
 	if len(jobs) != 1 || jobs[0].Kind != JobCommand {
 		t.Fatalf("Session.Jobs = %+v, want one JobCommand", jobs)
