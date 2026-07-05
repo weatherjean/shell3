@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,7 +18,37 @@ import (
 // a two-pane overlay: a list view, and an output view for the selected job. All
 // keys route here while it is open (see handleKey).
 
-// bgLiveTailCap is the maximum byte length of m.bgOutput during a live raw-mode
+// bgModal is the :background modal's state, operated on exclusively by this
+// file (plus the mode dispatch in keys.go and the wheel routing in mouse.go).
+type bgModal struct {
+	open         bool
+	jobs         []shell3.JobInfo
+	sel          int      // selected row in the list view
+	viewID       string   // non-empty = viewing this job's output (else the list)
+	output       string   // loaded output of the viewed job (raw transcript JSONL or stdout)
+	isTranscript bool     // true ⇒ output is a subagent --out transcript (render structured)
+	scroll       int      // first visible output line in the output view
+	notice       string   // status line shown inside the modal (e.g. a kill result)
+	rows         []string // memoized rendered output rows (nil = recompute; see bgWrappedLines)
+	rowsW        int      // content width rows was rendered at (re-render on resize)
+}
+
+// bgListMaxWidth / bgOutputMaxWidth cap the modal's content width in its two
+// views; both views also shrink to 3/4 of the terminal (see modalWidth).
+const (
+	bgListMaxWidth   = 100
+	bgOutputMaxWidth = 110
+)
+
+// bgModalChromeRows is the vertical chrome the modal reserves around its body
+// (title, footer, blank separators, padding).
+const bgModalChromeRows = 8
+
+// jobRowMargin is the horizontal slack a job row reserves for the selection
+// bar and panel padding.
+const jobRowMargin = 6
+
+// bgLiveTailCap is the maximum byte length of m.bg.output during a live raw-mode
 // view. It matches the ring buffer size in jobs.go (newRingBuffer(64*1024)) so
 // unbounded growth is impossible: when exceeded, the front is trimmed to keep the
 // most-recent 64 KB — the same tail-keeping semantics the ring uses.
@@ -29,15 +60,15 @@ func (m *model) openBackground() {
 		m.notice = "no session"
 		return
 	}
-	m.bgJobs = m.cmds.Jobs()
-	m.bgSel = 0
-	m.bgViewID = ""
-	m.bgOutput = ""
-	m.bgIsTranscript = false
-	m.bgRows = nil
-	m.bgScroll = 0
-	m.bgNotice = ""
-	m.bgOpen = true
+	m.bg.jobs = m.cmds.Jobs()
+	m.bg.sel = 0
+	m.bg.viewID = ""
+	m.bg.output = ""
+	m.bg.isTranscript = false
+	m.bg.rows = nil
+	m.bg.scroll = 0
+	m.bg.notice = ""
+	m.bg.open = true
 }
 
 // loadJobOutput loads the viewed job's content into bgOutput: a subagent's
@@ -46,11 +77,11 @@ func (m *model) openBackground() {
 // which, so bgWrappedLines renders the right way.
 func (m *model) loadJobOutput(id string) {
 	if tr := m.cmds.JobTranscript(id); strings.TrimSpace(tr) != "" {
-		m.bgOutput, m.bgIsTranscript = tr, true
+		m.bg.output, m.bg.isTranscript = tr, true
 	} else {
-		m.bgOutput, m.bgIsTranscript = m.cmds.JobOutput(id), false
+		m.bg.output, m.bg.isTranscript = m.cmds.JobOutput(id), false
 	}
-	m.bgRows = nil // new content → drop the memoized rows
+	m.bg.rows = nil // new content → drop the memoized rows
 }
 
 // bgMaxScroll is the largest first-line offset that still fills the output view
@@ -67,40 +98,32 @@ func (m *model) bgMaxScroll() int {
 // recent output. It is the default when opening a job (the latest output is shown
 // first; the view is a snapshot, refreshed with r, not a continuous tail) and the
 // target of the G key.
-func (m *model) bgScrollToBottom() { m.bgScroll = m.bgMaxScroll() }
+func (m *model) bgScrollToBottom() { m.bg.scroll = m.bgMaxScroll() }
 
 // handleBackgroundWheel scrolls the modal with the mouse wheel: the output view
 // by 3 lines (clamped like j/k), the list view by moving the selection.
 func (m *model) handleBackgroundWheel(e tea.Mouse) {
-	if m.bgViewID == "" {
+	if m.bg.viewID == "" {
 		switch e.Button {
 		case tea.MouseWheelUp:
-			if m.bgSel > 0 {
-				m.bgSel--
-			}
+			m.bg.sel = max(m.bg.sel-1, 0)
 		case tea.MouseWheelDown:
-			if m.bgSel < len(m.bgJobs)-1 {
-				m.bgSel++
-			}
+			m.bg.sel = min(m.bg.sel+1, len(m.bg.jobs)-1)
 		}
 		return
 	}
 	switch e.Button {
 	case tea.MouseWheelUp:
-		if m.bgScroll -= 3; m.bgScroll < 0 {
-			m.bgScroll = 0
-		}
+		m.bg.scroll = max(m.bg.scroll-3, 0)
 	case tea.MouseWheelDown:
-		if m.bgScroll += 3; m.bgScroll > m.bgMaxScroll() {
-			m.bgScroll = m.bgMaxScroll()
-		}
+		m.bg.scroll = min(m.bg.scroll+3, m.bgMaxScroll())
 	}
 }
 
 // selectedJobID is the id of the highlighted row, or "" when the list is empty.
 func (m *model) selectedJobID() string {
-	if m.bgSel >= 0 && m.bgSel < len(m.bgJobs) {
-		return m.bgJobs[m.bgSel].ID
+	if m.bg.sel >= 0 && m.bg.sel < len(m.bg.jobs) {
+		return m.bg.jobs[m.bg.sel].ID
 	}
 	return ""
 }
@@ -108,8 +131,8 @@ func (m *model) selectedJobID() string {
 // targetJobID is the job a kill acts on: the viewed job in the output view,
 // otherwise the selected row.
 func (m *model) targetJobID() string {
-	if m.bgViewID != "" {
-		return m.bgViewID
+	if m.bg.viewID != "" {
+		return m.bg.viewID
 	}
 	return m.selectedJobID()
 }
@@ -118,29 +141,25 @@ func (m *model) targetJobID() string {
 // close it (and ctrl+c can't arm quit underneath).
 func (m *model) handleBackgroundKey(s string) (tea.Model, tea.Cmd) {
 	// Output view: esc returns to the list; j/k scroll; ctrl+x kills.
-	if m.bgViewID != "" {
+	if m.bg.viewID != "" {
 		switch s {
 		case "esc":
-			m.bgViewID = ""
-			m.bgScroll = 0
+			m.bg.viewID = ""
+			m.bg.scroll = 0
 		case "q", "ctrl+c":
-			m.bgOpen = false
+			m.bg.open = false
 		case "ctrl+x":
 			m.killTargetJob()
 		case "r":
-			m.loadJobOutput(m.bgViewID)
+			m.loadJobOutput(m.bg.viewID)
 			m.bgScrollToBottom() // live tail: refresh sticks to the bottom
-			m.bgNotice = "refreshed"
+			m.bg.notice = "refreshed"
 		case "j", "down":
-			if m.bgScroll < m.bgMaxScroll() {
-				m.bgScroll++
-			}
+			m.bg.scroll = min(m.bg.scroll+1, m.bgMaxScroll())
 		case "k", "up":
-			if m.bgScroll > 0 {
-				m.bgScroll--
-			}
+			m.bg.scroll = max(m.bg.scroll-1, 0)
 		case "g":
-			m.bgScroll = 0
+			m.bg.scroll = 0
 		case "G":
 			m.bgScrollToBottom()
 		}
@@ -149,20 +168,16 @@ func (m *model) handleBackgroundKey(s string) (tea.Model, tea.Cmd) {
 	// List view.
 	switch s {
 	case "esc", "q", "ctrl+c":
-		m.bgOpen = false
+		m.bg.open = false
 	case "j", "down":
-		if m.bgSel < len(m.bgJobs)-1 {
-			m.bgSel++
-		}
+		m.bg.sel = min(m.bg.sel+1, len(m.bg.jobs)-1)
 	case "k", "up":
-		if m.bgSel > 0 {
-			m.bgSel--
-		}
+		m.bg.sel = max(m.bg.sel-1, 0)
 	case "enter", " ":
 		if id := m.selectedJobID(); id != "" {
-			m.bgViewID = id
+			m.bg.viewID = id
 			m.loadJobOutput(id)
-			m.bgNotice = ""
+			m.bg.notice = ""
 			m.bgScrollToBottom() // open at the bottom (most recent output)
 		}
 	case "ctrl+x":
@@ -182,20 +197,14 @@ func (m *model) killTargetJob() {
 		return
 	}
 	if err := m.cmds.KillJob(id); err != nil {
-		m.bgNotice = "kill failed: " + err.Error()
+		m.bg.notice = "kill failed: " + err.Error()
 	} else {
-		m.bgNotice = "sent SIGTERM to " + id
+		m.bg.notice = "sent SIGTERM to " + id
 	}
-	out := m.bgJobs[:0]
-	for _, j := range m.bgJobs {
-		if j.ID != id {
-			out = append(out, j)
-		}
-	}
-	m.bgJobs = out
+	m.bg.jobs = slices.DeleteFunc(m.bg.jobs, func(j shell3.JobInfo) bool { return j.ID == id })
 	m.clampJobSel()
-	m.bgViewID = ""
-	m.bgScroll = 0
+	m.bg.viewID = ""
+	m.bg.scroll = 0
 }
 
 // handleJobProgress processes one event from the job-progress bus. It keeps the
@@ -208,94 +217,76 @@ func (m *model) handleJobProgress(p shell3.JobProgress) {
 	if p.Done && m.cmds != nil {
 		jobs := m.cmds.Jobs()
 		m.bgCount = countRunningJobs(jobs)
-		if m.bgOpen {
-			m.bgJobs = jobs
+		if m.bg.open {
+			m.bg.jobs = jobs
 			m.clampJobSel()
 			// If we were viewing this job in raw mode, reload its final output from
 			// the ring buffer so the view is authoritative and complete.
-			if m.bgViewID == p.JobID && !m.bgIsTranscript {
-				m.loadJobOutput(m.bgViewID)
+			if m.bg.viewID == p.JobID && !m.bg.isTranscript {
+				m.loadJobOutput(m.bg.viewID)
 			}
 		}
 		return
 	}
 	// Live-append chunk only when the modal is open, viewing this job, in raw mode.
-	if p.Chunk != "" && m.bgOpen && m.bgViewID == p.JobID && !m.bgIsTranscript {
-		m.bgOutput += p.Chunk
+	if p.Chunk != "" && m.bg.open && m.bg.viewID == p.JobID && !m.bg.isTranscript {
+		m.bg.output += p.Chunk
 		// Cap to bgLiveTailCap by trimming from the front (tail-preserving, matching
 		// the ring buffer semantics). Byte-trim is intentional — no rune/ANSI boundary
 		// logic, consistent with how the ring itself trims.
-		if len(m.bgOutput) > bgLiveTailCap {
-			m.bgOutput = m.bgOutput[len(m.bgOutput)-bgLiveTailCap:]
+		if len(m.bg.output) > bgLiveTailCap {
+			m.bg.output = m.bg.output[len(m.bg.output)-bgLiveTailCap:]
 		}
 		// Invalidate the memoized row cache so bgWrappedLines recomputes on the
 		// next render (same mechanism as loadJobOutput — nil bgRows triggers a reflow).
-		m.bgRows = nil
+		m.bg.rows = nil
 	}
 }
 
 // refreshJobs re-snapshots the live job list, clamping the selection.
 func (m *model) refreshJobs() {
-	m.bgJobs = m.cmds.Jobs()
+	m.bg.jobs = m.cmds.Jobs()
 	m.clampJobSel()
-	m.bgNotice = "refreshed"
+	m.bg.notice = "refreshed"
 }
 
 func (m *model) clampJobSel() {
-	if m.bgSel >= len(m.bgJobs) {
-		m.bgSel = len(m.bgJobs) - 1
-	}
-	if m.bgSel < 0 {
-		m.bgSel = 0
-	}
+	m.bg.sel = max(min(m.bg.sel, len(m.bg.jobs)-1), 0)
 }
 
 // bgModalHeight is the number of content rows the modal body may use, leaving
 // room for the title, footer, and a little breathing space.
 func (m *model) bgModalHeight() int {
-	h := m.height - 8
-	if h < 3 {
-		h = 3
-	}
-	return h
+	return max(m.height-bgModalChromeRows, 3)
 }
 
 // backgroundBox renders the modal — the list view, or the output view when a
 // job is selected.
 func (m *model) backgroundBox() string {
-	if m.bgViewID != "" {
+	if m.bg.viewID != "" {
 		return m.backgroundOutputBox()
 	}
-	w := m.modalWidth(m.width*3/4, 100)
+	w := m.modalWidth(m.width*3/4, bgListMaxWidth)
 	rows := []string{stBrand.Render("background jobs"), ""}
-	if len(m.bgJobs) == 0 {
+	if len(m.bg.jobs) == 0 {
 		rows = append(rows, stFgDim.Render("no background jobs"))
 	} else {
 		// Window the list around the selection so a long list never overflows.
 		maxRows := m.bgModalHeight()
 		start := 0
-		if len(m.bgJobs) > maxRows {
-			start = m.bgSel - maxRows/2
-			if start < 0 {
-				start = 0
-			}
-			if start > len(m.bgJobs)-maxRows {
-				start = len(m.bgJobs) - maxRows
-			}
+		if len(m.bg.jobs) > maxRows {
+			start = min(max(m.bg.sel-maxRows/2, 0), len(m.bg.jobs)-maxRows)
 		}
-		end := start + maxRows
-		if end > len(m.bgJobs) {
-			end = len(m.bgJobs)
-		}
+		end := min(start+maxRows, len(m.bg.jobs))
 		for i := start; i < end; i++ {
-			rows = append(rows, m.jobRow(m.bgJobs[i], i == m.bgSel, w))
+			rows = append(rows, m.jobRow(m.bg.jobs[i], i == m.bg.sel, w))
 		}
-		if len(m.bgJobs) > maxRows {
-			rows = append(rows, stDim.Render(fmt.Sprintf("  %d of %d", m.bgSel+1, len(m.bgJobs))))
+		if len(m.bg.jobs) > maxRows {
+			rows = append(rows, stDim.Render(fmt.Sprintf("  %d of %d", m.bg.sel+1, len(m.bg.jobs))))
 		}
 	}
-	if m.bgNotice != "" {
-		rows = append(rows, "", stInfo.Render(m.bgNotice))
+	if m.bg.notice != "" {
+		rows = append(rows, "", stInfo.Render(m.bg.notice))
 	}
 	rows = append(rows, "", stDim.Render("j/k move · enter view · ctrl+x kill · r refresh · esc"))
 	return bgPanel(w).Render(strings.Join(rows, "\n"))
@@ -324,28 +315,33 @@ func (m *model) jobRow(j shell3.JobInfo, selected bool, w int) string {
 
 	label := strings.Join(strings.Fields(j.Cmd), " ")
 	if j.Kind == shell3.JobSubagent {
-		label = "@subagent " + label
+		agent := j.Agent
+		if agent == "" {
+			agent = "subagent"
+		}
+		label = "@" + agent + " " + label
 	}
 	if j.Depth > 0 {
 		label = strings.Repeat("  ", j.Depth) + label + fmt.Sprintf("  (depth %d)", j.Depth)
 	}
 	// Fit the whole row (bar + meta + state + label) within the box content
-	// width, leaving margin for the selection bar and padding.
-	avail := w - lipgloss.Width(meta) - lipgloss.Width(state) - 6
-	if avail < 8 {
-		avail = 8
-	}
+	// width, leaving jobRowMargin for the selection bar and padding.
+	avail := max(w-lipgloss.Width(meta)-lipgloss.Width(state)-jobRowMargin, 8)
 	return bar + meta + state + stUserText.Render(strutil.ClipRunes(label, avail))
 }
 
-// bgOutputWidth is the wrapped content width of the output view — the modal
-// width minus the 2-col horizontal padding.
+// bgOutputBoxWidth is the output view's box width — the single source shared
+// by the render (backgroundOutputBox) and the wrap/scroll math (bgOutputWidth
+// → bgWrappedLines → bgMaxScroll). If these ever diverged, the scroll clamps
+// would desync from what is drawn.
+func (m *model) bgOutputBoxWidth() int {
+	return m.modalWidth(m.width*3/4, bgOutputMaxWidth)
+}
+
+// bgOutputWidth is the wrapped content width of the output view — the box
+// width minus bgPanel's 2-col horizontal padding.
 func (m *model) bgOutputWidth() int {
-	cw := m.modalWidth(m.width*3/4, 110) - 2
-	if cw < 1 {
-		cw = 1
-	}
-	return cw
+	return max(m.bgOutputBoxWidth()-2, 1)
 }
 
 // bgWrappedLines returns the display rows the output view scrolls over. For a
@@ -360,17 +356,17 @@ func (m *model) bgWrappedLines() []string {
 	// Invalidated by content (loadJobOutput/openBackground nil bgRows) and by a
 	// width change (resize).
 	w := m.bgOutputWidth()
-	if m.bgRows != nil && m.bgRowsW == w {
-		return m.bgRows
+	if m.bg.rows != nil && m.bg.rowsW == w {
+		return m.bg.rows
 	}
-	if m.bgIsTranscript {
-		m.bgRows = hardWrapRows(renderJobTranscript(m.bgOutput, w), w)
+	if m.bg.isTranscript {
+		m.bg.rows = hardWrapRows(renderJobTranscript(m.bg.output, w), w)
 	} else {
-		wrapped := ansi.Wrap(strings.TrimRight(m.bgOutput, "\n"), w, " ")
-		m.bgRows = strings.Split(wrapped, "\n")
+		wrapped := ansi.Wrap(strings.TrimRight(m.bg.output, "\n"), w, " ")
+		m.bg.rows = strings.Split(wrapped, "\n")
 	}
-	m.bgRowsW = w
-	return m.bgRows
+	m.bg.rowsW = w
+	return m.bg.rows
 }
 
 // hardWrapRows guarantees every row is at most w columns by hard-breaking any
@@ -389,7 +385,7 @@ func hardWrapRows(rows []string, w int) []string {
 // backgroundOutputBox renders a scrollable, soft-wrapped tail of the viewed
 // job's output.
 func (m *model) backgroundOutputBox() string {
-	w := m.modalWidth(m.width*3/4, 110)
+	w := m.bgOutputBoxWidth()
 	maxLines := m.bgModalHeight()
 	lines := m.bgWrappedLines()
 	if len(lines) == 0 || (len(lines) == 1 && lines[0] == "") {
@@ -398,19 +394,11 @@ func (m *model) backgroundOutputBox() string {
 	// Re-clamp the persisted scroll: a terminal resize changes bgMaxScroll without
 	// a keypress, and could otherwise leave bgScroll past the new bottom — a short
 	// final page until the next j/k. Clamp to the same bound the scroll keys use.
-	if maxScroll := m.bgMaxScroll(); m.bgScroll > maxScroll {
-		m.bgScroll = maxScroll
-	}
-	if m.bgScroll < 0 {
-		m.bgScroll = 0
-	}
-	scroll := m.bgScroll
-	end := scroll + maxLines
-	if end > len(lines) {
-		end = len(lines)
-	}
+	m.bg.scroll = max(min(m.bg.scroll, m.bgMaxScroll()), 0)
+	scroll := m.bg.scroll
+	end := min(scroll+maxLines, len(lines))
 
-	header := stBrand.Render("job ") + stInfo.Render(m.bgViewID)
+	header := stBrand.Render("job ") + stInfo.Render(m.bg.viewID)
 	if len(lines) > maxLines {
 		header += stDim.Render(fmt.Sprintf("  (lines %d–%d of %d)", scroll+1, end, len(lines)))
 	}
@@ -425,8 +413,8 @@ func (m *model) backgroundOutputBox() string {
 	body := make([]string, 0, end-scroll)
 	body = append(body, lines[scroll:end]...) // already wrapped to the content width
 	rows := append([]string{header, ""}, body...)
-	if m.bgNotice != "" {
-		rows = append(rows, "", ansi.Truncate(stInfo.Render(m.bgNotice), contentW, "…"))
+	if m.bg.notice != "" {
+		rows = append(rows, "", ansi.Truncate(stInfo.Render(m.bg.notice), contentW, "…"))
 	}
 	rows = append(rows, "", footer)
 	return bgPanel(w).Render(strings.Join(rows, "\n"))

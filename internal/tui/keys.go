@@ -22,7 +22,7 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	// The :background modal owns every key while open (so esc/q close it and
 	// ctrl+c can't arm quit underneath).
-	if m.bgOpen {
+	if m.bg.open {
 		return m.handleBackgroundKey(s)
 	}
 
@@ -227,16 +227,8 @@ func (m *model) jumpBlock(d int) {
 		m.vp.GotoBottom()
 		return
 	}
-	b := cur + d
-	if b < 0 {
-		b = 0
-	}
-	if b >= len(m.blockStarts) {
-		b = len(m.blockStarts) - 1
-	}
-	if b >= 0 && b < len(m.blockStarts) {
-		m.cursorLine = m.blockStarts[b]
-	}
+	b := min(max(cur+d, 0), len(m.blockStarts)-1)
+	m.cursorLine = m.blockStarts[b]
 	m.follow = false
 	m.refresh(false)
 	m.ensureLineVisible()
@@ -249,9 +241,7 @@ func (m *model) moveLine(d int) {
 	if m.cursorLine < 0 {
 		m.cursorLine = 0
 	}
-	if m.cursorLine >= m.totalLines {
-		m.cursorLine = m.totalLines - 1
-	}
+	m.cursorLine = min(m.cursorLine, m.totalLines-1)
 	m.follow = false // navigating: don't let refresh yank to the bottom
 	m.refresh(false)
 	m.ensureLineVisible()
@@ -290,7 +280,6 @@ func (m *model) cycleAgent() {
 func (m *model) applyAgent() {
 	snap := m.cmds.Snapshot()
 	m.agentName = snap.Agent
-	m.statusMsg = snap.StatusLine
 	m.modelName = snap.Model
 	m.contextWindow = snap.ContextWindow
 }

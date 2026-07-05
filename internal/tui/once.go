@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -49,10 +50,14 @@ func RunOnce(ctx context.Context, spec shell3.Spec) error {
 	}
 
 	if hadError {
-		return fmt.Errorf("turn ended with error")
+		return errTurnFailed
 	}
 	return nil
 }
+
+// errTurnFailed is the terminal error a one-shot run returns when any turn
+// event carried an error; callers can match it with errors.Is.
+var errTurnFailed = errors.New("turn ended with error")
 
 // PrintHeader writes the two-line shell3 brand banner to w, used as a uniform
 // top banner for non-interactive commands.

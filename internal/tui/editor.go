@@ -52,8 +52,19 @@ func (m *model) openEditor() tea.Cmd {
 		return nil
 	}
 	path := f.Name()
-	_, _ = f.WriteString(m.ta.Value())
-	_ = f.Close()
+	// A failed seed write is a data-loss path: the draft would open truncated
+	// in $EDITOR and saving would replace the real draft with the stub.
+	if _, err := f.WriteString(m.ta.Value()); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+		m.notice = "editor: " + err.Error()
+		return nil
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		m.notice = "editor: " + err.Error()
+		return nil
+	}
 
 	// Run via the shell so $EDITOR may carry args/quoting (e.g. `code --wait`,
 	// `"/Apps/Sublime Text/subl" -w`); $1 is the temp file path.

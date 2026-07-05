@@ -31,7 +31,7 @@ func (m *model) View() tea.View {
 		base = m.placeModal(m.confirmBox())
 	case m.helpOpen:
 		base = m.placeModal(m.helpBox())
-	case m.bgOpen:
+	case m.bg.open:
 		base = m.placeModal(m.backgroundBox())
 	case m.mode == modeCommand:
 		// The command palette floats just above the input so the typed line in
@@ -90,24 +90,12 @@ func (m *model) relayout() {
 	// Cap the input's max height to fit this terminal — leave the footer plus a
 	// few transcript rows — so a tall paste/draft can't overflow the layout and
 	// freeze input. Content beyond this scrolls inside the textarea.
-	maxIH := m.height - 2 - 3 // footer + blank spacer + at least 3 transcript rows
-	if maxIH > inputMaxRows {
-		maxIH = inputMaxRows
-	}
-	if maxIH < 1 {
-		maxIH = 1
-	}
-	m.ta.MaxHeight = maxIH
+	// footer + blank spacer + at least 3 transcript rows.
+	m.ta.MaxHeight = max(min(m.height-2-3, inputMaxRows), 1)
 	// DynamicHeight sizes the textarea itself; read it back for layout.
-	ih := m.ta.Height()
-	if ih < 1 {
-		ih = 1
-	}
+	ih := max(m.ta.Height(), 1)
 	// footer (1) + one blank spacer line above the input (1).
-	vpH := m.height - 2 - ih
-	if vpH < 1 {
-		vpH = 1
-	}
+	vpH := max(m.height-2-ih, 1)
 	m.vp.SetWidth(m.width)
 	m.vp.SetHeight(vpH)
 	m.refresh(false)
@@ -249,21 +237,9 @@ func (m *model) placeModal(box string) string {
 // modalWidth clamps a preferred modal content width to [minModalWidth,max] and
 // to what the terminal can actually fit, so a narrow window never overflows the
 // edge.
-func (m *model) modalWidth(preferred, max int) int {
-	w := preferred
-	if w < minModalWidth {
-		w = minModalWidth
-	}
-	if w > max {
-		w = max
-	}
-	if fit := m.width - 4; w > fit {
-		w = fit
-	}
-	if w < 1 {
-		w = 1
-	}
-	return w
+func (m *model) modalWidth(preferred, maxW int) int {
+	w := min(max(preferred, minModalWidth), maxW)
+	return max(min(w, m.width-4), 1)
 }
 
 // overlayAbove pastes box's lines onto base ending at row vpBottom-1 (left

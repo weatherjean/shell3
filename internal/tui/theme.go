@@ -241,18 +241,6 @@ func readableOn(bg color.Color) color.Color {
 	return cWhite
 }
 
-// contrastRatio is the WCAG contrast ratio between two colors — (L1+0.05) /
-// (L2+0.05) with L1 the lighter luminance. Ranges from 1 (identical) to 21
-// (black on white). Test-only: the palette contrast tests assert each accent
-// stays legible against its terminal background; nothing enforces it at runtime.
-func contrastRatio(a, b colorful.Color) float64 {
-	la, lb := relLuminance(a), relLuminance(b)
-	if la < lb {
-		la, lb = lb, la
-	}
-	return (la + 0.05) / (lb + 0.05)
-}
-
 // relLuminance is the WCAG relative luminance of an sRGB color: each channel is
 // linearized, then weighted by the eye's sensitivity.
 func relLuminance(c colorful.Color) float64 {

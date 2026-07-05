@@ -15,7 +15,7 @@ func (m *model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	e := msg.Mouse()
 	// The :background modal owns the mouse while open: the wheel scrolls it, and
 	// clicks/drags don't reach the (hidden) transcript underneath.
-	if m.bgOpen {
+	if m.bg.open {
 		if _, ok := msg.(tea.MouseWheelMsg); ok {
 			m.handleBackgroundWheel(e)
 		}
