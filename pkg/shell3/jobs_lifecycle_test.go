@@ -86,29 +86,18 @@ func TestSubagentCancelMidRun(t *testing.T) {
 		t.Fatalf("cancel: %v", err)
 	}
 	// finishSubagent wakes the parent when the job goroutine unwinds.
-	deadline := time.After(3 * time.Second)
-	for {
-		select {
-		case ev := <-rt.Events():
-			if ev.Kind != Wake || ev.Session != "p" {
-				continue
-			}
-			var found JobInfo
-			for _, j := range rt.jobs.list() {
-				if j.ID == id {
-					found = j
-				}
-			}
-			if !found.Done {
-				t.Fatalf("cancelled subagent not marked done: %+v", found)
-			}
-			if found.Error == "" {
-				t.Fatal("cancelled subagent reported a clean done; want an error")
-			}
-			return
-		case <-deadline:
-			t.Fatal("timeout waiting for the cancelled subagent to finish")
+	waitForWake(t, rt, "p")
+	var found JobInfo
+	for _, j := range rt.jobs.list() {
+		if j.ID == id {
+			found = j
 		}
+	}
+	if !found.Done {
+		t.Fatalf("cancelled subagent not marked done: %+v", found)
+	}
+	if found.Error == "" {
+		t.Fatal("cancelled subagent reported a clean done; want an error")
 	}
 }
 

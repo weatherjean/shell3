@@ -2,6 +2,7 @@ package shell3
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -11,7 +12,6 @@ import (
 	"github.com/weatherjean/shell3/internal/fsx"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/runs"
-	"github.com/weatherjean/shell3/internal/strutil"
 )
 
 // FileSystem is the pluggable file-I/O backend for the read and edit_file
@@ -47,6 +47,13 @@ type Spec struct {
 	// ResumeID, when non-empty, reloads that stored session's messages and
 	// continues its conversation instead of starting fresh.
 	ResumeID string
+	// ResumeLatest reattaches to the newest stored session matching this
+	// workdir+config when ResumeID is empty (falling back to a new session
+	// when none exists). See SessionOpts.ResumeLatest.
+	ResumeLatest bool
+	// FS is the file-I/O backend for the read and edit_file tools. Nil ⇒
+	// direct OS disk. See SessionOpts.FS.
+	FS FileSystem
 }
 
 // Session is a live, multi-turn conversation — the plugin equivalent of an open
@@ -63,7 +70,6 @@ type Session struct {
 	cfg      chat.Config
 	sess     *chat.Session
 	handlers map[string]chat.ToolHandler
-	cleanup  func()
 
 	// shellInteractive is Spec.ShellInteractive, threaded into every turn's
 	// TurnConfig (see turnConfig). nil keeps shell_interactive "unavailable".
@@ -94,8 +100,9 @@ type Session struct {
 	name        string
 	ownsRuntime bool
 
-	opts  SessionOpts // the SessionOpts this session was built from
-	depth int         // subagent nesting depth (0 = root user session)
+	// opts is the SessionOpts this session was built from; opts.Depth is the
+	// subagent nesting depth (0 = root user session).
+	opts SessionOpts
 
 	// closeOnce makes Close safe under concurrent invocation: a spawned
 	// subagent goroutine calls child.Close() at the same time Runtime.Close may
@@ -140,8 +147,10 @@ func Start(ctx context.Context, spec Spec) (*Session, error) {
 		Agent:            spec.Agent,
 		Headless:         !spec.Interactive,
 		ShellInteractive: spec.ShellInteractive,
+		FS:               spec.FS,
 		Asker:            spec.Asker,
 		ResumeID:         spec.ResumeID,
+		ResumeLatest:     spec.ResumeLatest,
 		// OutPath deliberately empty: Start owns the sink so the start line
 		// keeps its prompt-derived label.
 	})
@@ -180,7 +189,7 @@ func (s *Session) writeStartLine(label string) {
 // chat.Session runs in synchronous-sink mode: route translates each internal
 // event and forwards it to the current Send channel inline on the turn
 // goroutine. Split out from Start so tests can inject a fakellm-backed config.
-func newSession(cfg chat.Config, cleanup func(), opts SessionOpts) *Session {
+func newSession(cfg chat.Config, opts SessionOpts) *Session {
 	var storeID string
 	var seed []llm.Message
 	var resumedFrom string // non-empty when this session reattached to an existing run
@@ -224,7 +233,6 @@ func newSession(cfg chat.Config, cleanup func(), opts SessionOpts) *Session {
 	s := &Session{
 		cfg:      cfg,
 		handlers: chat.NewHandlers(),
-		cleanup:  cleanup,
 		// Default to a no-op so Close is safe even when Start didn't open a
 		// sink (and for tests that build a Session via newSession directly).
 		sinkCleanup: func() {},
@@ -329,10 +337,7 @@ func (s *Session) Interject(text string, parts ...Part) {
 // s.runtime under s.mu — mirroring WakeEvents — to avoid racing doClose's nil
 // of s.runtime. The lock is not held across emit.
 func (s *Session) wake() {
-	s.mu.Lock()
-	rt := s.runtime
-	s.mu.Unlock()
-	if rt != nil {
+	if rt := s.runtimeHandle(); rt != nil {
 		rt.emit(HostEvent{Session: s.name, Kind: Wake})
 	}
 }
@@ -475,11 +480,33 @@ func (s *Session) SafetyOff() bool {
 	return s.safetyOff
 }
 
+// runtimeHandle snapshots s.runtime under s.mu. Every accessor reachable from
+// outside the turn goroutine must use this instead of reading s.runtime
+// directly: doClose nils the field concurrently (under the same mutex).
+func (s *Session) runtimeHandle() *Runtime {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.runtime
+}
+
 // isBusy reports whether a turn is in flight (see Send's contract).
 func (s *Session) isBusy() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.busy
+}
+
+// withIdle runs fn while holding s.mu, with the busy gate checked inside the
+// same critical section. Send sets busy under the same mutex, so a between-
+// turns mutator that uses this can never interleave with a turn starting —
+// the ErrBusy contract is enforced, not advisory. fn must not re-lock s.mu.
+func (s *Session) withIdle(fn func() error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.busy {
+		return ErrBusy
+	}
+	return fn()
 }
 
 // ID returns the store session id (rolls on /clear; "" with no store).
@@ -498,9 +525,7 @@ func (s *Session) Name() string { return s.name }
 // no runtime (e.g. a closed session), in which case a host select on it simply
 // never fires. Multi-session hosts should use Runtime.Events() directly.
 func (s *Session) WakeEvents() <-chan HostEvent {
-	s.mu.Lock()
-	rt := s.runtime
-	s.mu.Unlock()
+	rt := s.runtimeHandle()
 	if rt == nil {
 		return nil
 	}
@@ -569,7 +594,6 @@ func (s *Session) doClose() error {
 		s.sink.WriteEnd(status)
 	}
 	s.sinkCleanup()
-	s.cleanup()
 	// Capture and nil s.runtime under s.mu so a concurrent WakeEvents() reader
 	// (a public accessor bot binaries call) never races this write. Only the
 	// field access is locked: rt.forget/rt.cleanup run after the unlock, since
@@ -583,18 +607,18 @@ func (s *Session) doClose() error {
 		rt.forget(s.name)
 		if s.ownsRuntime {
 			// Start-owned runtime: no public handle exists, so this is the only
-			// place its shared cleanup can run (calling rt.Close() here would
-			// re-enter this Close via the session registry).
-			rt.cleanup()
+			// place its shared teardown can run. Route through Runtime.Close so
+			// the full ordering applies — remaining sessions (spawned subagents)
+			// close, job goroutines are cancelled AND joined before the store
+			// closes, and the runtime ctx is cancelled. Re-entry is safe: this
+			// session was already forgotten above, and Close's own closeOnce
+			// guards a second invocation.
+			if err := rt.Close(); err != nil && endErr == nil {
+				endErr = err
+			}
 		}
 	}
 	return endErr
-}
-
-// truncatePreviewRunes clamps s to ~200 bytes on a rune boundary, appending an
-// ellipsis when cut — the short-preview budget for run-list cards.
-func truncatePreviewRunes(s string) string {
-	return strutil.Truncate(s, 200)
 }
 
 // RollbackHint returns a short suggestion to roll back the last turn when err
@@ -659,21 +683,21 @@ func (s *Session) turnConfigLocked() chat.TurnConfig {
 		tc.StartBashBg = func(command, workdir string, argv, env []string) (string, error) {
 			return rt.jobs.startCommand(parent, command, workdir, argv, env)
 		}
-		maxDepth := rt.subagentMaxDepth() // Task 5; default 3
-		allowed := cfg.Subagents          // the active agent's tools.subagents allowlist
+		maxDepth := rt.subagentMaxDepth()
+		allowed := cfg.Subagents // the active agent's tools.subagents allowlist
 		tc.StartSubagent = func(agent, prompt, desc string) (string, error) {
 			// Enforce the allowlist the delegation reminder advertises: only the
 			// names in tools.subagents may be spawned, never an arbitrary declared
 			// agent. An empty allowlist means this agent may not delegate at all.
 			if !slices.Contains(allowed, agent) {
 				if len(allowed) == 0 {
-					return "", fmt.Errorf("this agent has no subagents configured (tools.subagents is empty)")
+					return "", errors.New("this agent has no subagents configured (tools.subagents is empty)")
 				}
 				return "", fmt.Errorf("subagent_type %q is not allowed for this agent; allowed subagents: %s", agent, strings.Join(allowed, ", "))
 			}
-			depth := parent.depth + 1
+			depth := parent.opts.Depth + 1
 			if depth > maxDepth {
-				return "", fmt.Errorf("max subagent depth %d reached (this session is at depth %d)", maxDepth, parent.depth)
+				return "", fmt.Errorf("max subagent depth %d reached (this session is at depth %d)", maxDepth, parent.opts.Depth)
 			}
 			return rt.jobs.startSubagent(parent, agent, prompt, desc, depth)
 		}
@@ -694,9 +718,11 @@ func (s *Session) turnConfigLocked() chat.TurnConfig {
 // re-stamps the system prompt with a fresh timestamp. Returns ErrBusy while a
 // turn is in flight (see Send's contract).
 func (s *Session) Clear() error {
-	if s.isBusy() {
-		return ErrBusy
-	}
+	return s.withIdle(s.clearLocked)
+}
+
+// clearLocked is Clear's body; caller (withIdle) holds s.mu.
+func (s *Session) clearLocked() error {
 	s.sess.SetMessages(nil)
 	// Rotate onto a fresh store session: end the conversation just cleared (its
 	// turns were already persisted per-turn, so it becomes a finished past
@@ -723,13 +749,10 @@ func (s *Session) Clear() error {
 	}
 	if s.cfg.RefreshPrompt != nil {
 		// RefreshPrompt rebuilds the bare Lua system prompt; re-assemble the host
-		// standing reminders for the new session id. Mutate SystemPrompt and
-		// snapshot s.runtime under s.mu (guards the dashboard's Snapshot read).
-		s.mu.Lock()
+		// standing reminders for the new session id. s.mu is already held (see
+		// withIdle), guarding the dashboard's concurrent Snapshot read.
 		s.cfg.Personality.SystemPrompt = s.cfg.RefreshPrompt()
-		srt := s.runtime
-		s.mu.Unlock()
-		s.applyHostReminders(srt)
+		s.applyHostReminders(s.runtime)
 	}
 	return nil
 }
@@ -738,16 +761,17 @@ func (s *Session) Clear() error {
 // there was nothing to remove. Returns ErrBusy while a turn is in flight (see
 // Send's contract).
 func (s *Session) Rollback() (ok bool, err error) {
-	if s.isBusy() {
-		return false, ErrBusy
-	}
-	msgs := s.sess.Messages()
-	pruned := chat.PruneLastTurn(msgs)
-	if len(pruned) == len(msgs) {
-		return false, nil
-	}
-	s.sess.SetMessages(pruned)
-	return true, nil
+	err = s.withIdle(func() error {
+		msgs := s.sess.Messages()
+		pruned := chat.PruneLastTurn(msgs)
+		if len(pruned) == len(msgs) {
+			return nil
+		}
+		s.sess.SetMessages(pruned)
+		ok = true
+		return nil
+	})
+	return ok, err
 }
 
 // SwitchAgent activates the configured agent named name for subsequent Sends
@@ -758,27 +782,23 @@ func (s *Session) Rollback() (ok bool, err error) {
 // while a turn is in flight: it mutates cfg in place, which the next Send's
 // turnConfig reads (see Send's contract).
 func (s *Session) SwitchAgent(name string) error {
-	if s.isBusy() {
-		return ErrBusy
-	}
-	if s.cfg.SwitchAgent == nil {
-		return fmt.Errorf("no agents configured")
-	}
-	rt, err := s.cfg.SwitchAgent(name)
-	if err != nil {
-		return err
-	}
-	// ApplyActiveAgent swapped in the new agent's prompt + toggles
-	// (Environment/Delegation). Re-assemble the host standing reminders for the
-	// new active agent (whose toggles and allowed subagents may differ). Mutate
-	// cfg and snapshot s.runtime under s.mu — guards the dashboard's Snapshot
-	// read and avoids racing a concurrent Close's nil. Between turns by contract.
-	s.mu.Lock()
-	s.cfg.ApplyActiveAgent(rt)
-	srt := s.runtime
-	s.mu.Unlock()
-	s.applyHostReminders(srt)
-	return nil
+	return s.withIdle(func() error {
+		if s.cfg.SwitchAgent == nil {
+			return errors.New("shell3: no agents configured")
+		}
+		rt, err := s.cfg.SwitchAgent(name)
+		if err != nil {
+			return err
+		}
+		// ApplyActiveAgent swaps in the new agent's prompt + toggles
+		// (Environment/Delegation); re-assemble the host standing reminders for
+		// the new active agent (whose toggles and allowed subagents may differ).
+		// s.mu is held throughout (withIdle) — guards the dashboard's Snapshot
+		// read and a concurrent Close's nil of s.runtime.
+		s.cfg.ApplyActiveAgent(rt)
+		s.applyHostReminders(s.runtime)
+		return nil
+	})
 }
 
 // AgentNames returns the configured agent names in declaration order — the set
@@ -795,7 +815,10 @@ func (s *Session) ActiveAgent() string { return s.cfg.ModeLabel }
 //
 // Close always runs once the caller drains the returned channel: the turn
 // emits exactly one terminal event (Done, or Error on ctx cancellation), which
-// closes the inner turn channel and ends the forwarding range below.
+// closes the inner turn channel and ends the forwarding range below. A caller
+// that stops draining MUST cancel ctx — that ends the turn and unblocks the
+// forwarder below, which then discards the tail and still runs Close. An
+// abandoned channel with a live ctx would leak the session and its runtime.
 func Run(ctx context.Context, spec Spec) (<-chan Event, error) {
 	s, err := Start(ctx, spec)
 	if err != nil {
@@ -807,7 +830,16 @@ func Run(ctx context.Context, spec Spec) (<-chan Event, error) {
 		defer close(out)
 		defer s.Close()
 		for ev := range turn {
-			out <- ev
+			select {
+			case out <- ev:
+			case <-ctx.Done():
+				// Caller cancelled: the turn is unwinding (Send shares ctx), so
+				// drain its remaining events and let the deferred Close run
+				// instead of parking forever on an abandoned out channel.
+				for range turn {
+				}
+				return
+			}
 		}
 	}()
 	return out, nil

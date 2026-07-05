@@ -91,10 +91,9 @@ func (s *Session) subagentList(rt *Runtime, names []string) []subagentItem {
 	return out
 }
 
-// delegationParams carries the concrete, session-resolved values the delegation
-// section templates into its spawn command.
+// delegationParams carries the concrete, session-resolved values the
+// delegation section renders.
 type delegationParams struct {
-	WorkDir   string
 	Subagents []subagentItem
 }
 

@@ -69,8 +69,8 @@ func newHostRemindersRuntime(t *testing.T, mk func() chat.Config) *Runtime {
 
 // TestHostReminders_BothToggles: with Environment=true, Delegation=true and a
 // subagent, a fresh session carries an Environment standing reminder (mentions
-// the session id) AND a Delegation standing reminder (the absolute --inbox /
-// --parent-session spawn command), while the system prompt carries NEITHER
+// the session id) AND a Delegation standing reminder (the task-tool guidance
+// with the allowed-subagents list), while the system prompt carries NEITHER
 // host section.
 func TestHostReminders_BothToggles(t *testing.T) {
 	rt := newHostRemindersRuntime(t, hostRemindersCfg(true, true, []string{"explore"}))

@@ -325,8 +325,8 @@ func (a *acpAgent) CloseSession(_ context.Context, params acpsdk.CloseSessionReq
 
 // ListSessions maps rt.PastSessions to ACP SessionInfo records.
 //
-// UpdatedAt is the LastAt field from SessionMeta, already in RFC3339 (ISO 8601)
-// format, so it is passed directly as a *string pointer.
+// UpdatedAt is the LastAt field from SessionMeta, formatted as RFC3339
+// (ISO 8601) for the wire.
 func (a *acpAgent) ListSessions(_ context.Context, _ acpsdk.ListSessionsRequest) (acpsdk.ListSessionsResponse, error) {
 	metas, err := a.rt.PastSessions(100)
 	if err != nil {
@@ -341,9 +341,8 @@ func (a *acpAgent) ListSessions(_ context.Context, _ acpsdk.ListSessionsRequest)
 		if m.Preview != "" {
 			info.Title = acpsdk.Ptr(m.Preview)
 		}
-		if m.LastAt != "" {
-			// LastAt is already RFC3339 (= ISO 8601); cast directly to *string.
-			info.UpdatedAt = acpsdk.Ptr(m.LastAt)
+		if !m.LastAt.IsZero() {
+			info.UpdatedAt = acpsdk.Ptr(m.LastAt.Format(time.RFC3339))
 		}
 		sessions = append(sessions, info)
 	}

@@ -29,15 +29,37 @@ func TestJobManagerCommandLifecycle(t *testing.T) {
 	}
 }
 
+// waitForWake drains rt.Events() until a Wake for session name arrives (or
+// fails the test after 3s), tolerating spurious Wakes for other sessions.
+func waitForWake(t *testing.T, rt *Runtime, name string) {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case ev := <-rt.Events():
+			if ev.Kind == Wake && ev.Session == name {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("no Wake for %s (timeout 3s)", name)
+		}
+	}
+}
+
 func TestJobManagerConcurrencyCap(t *testing.T) {
 	m := newJobManager(nil, 1)
-	_, err := m.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "1"}, nil)
+	id, err := m.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "1"}, nil)
 	if err != nil {
 		t.Fatalf("first start: %v", err)
 	}
 	if _, err := m.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "1"}, nil); err == nil {
 		t.Fatal("expected cap error on second start, got nil")
 	}
+	// Don't leak the sleeping job's goroutine past the test.
+	if err := m.cancel(id); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	m.wg.Wait()
 }
 
 // TestSubagentCompletionWakesParent verifies that startSubagent runs a child
@@ -55,22 +77,9 @@ func TestSubagentCompletionWakesParent(t *testing.T) {
 		t.Fatalf("startSubagent: %v", err)
 	}
 
-	// Drain events until we see the Wake for "parent" or time out.
-	// Use a loop to tolerate any spurious Wake events for other sessions.
-	deadline := time.After(3 * time.Second)
-	for {
-		select {
-		case ev := <-rt.Events():
-			if ev.Kind == Wake && ev.Session == "parent" {
-				// Wake received; now verify transcript is non-empty.
-				if strings.TrimSpace(rt.jobs.transcript(id)) == "" {
-					t.Fatalf("transcript for job %s is empty after subagent completion", id)
-				}
-				return
-			}
-		case <-deadline:
-			t.Fatal("no Wake for parent after subagent completion (timeout 3s)")
-		}
+	waitForWake(t, rt, "parent")
+	if strings.TrimSpace(rt.jobs.transcript(id)) == "" {
+		t.Fatalf("transcript for job %s is empty after subagent completion", id)
 	}
 }
 
@@ -87,19 +96,9 @@ func TestSubagentLiveOutputBuffer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("startSubagent: %v", err)
 	}
-	deadline := time.After(3 * time.Second)
-	for {
-		select {
-		case ev := <-rt.Events():
-			if ev.Kind == Wake && ev.Session == "parent" {
-				if got := rt.jobs.output(id); !strings.Contains(got, "streamed answer") {
-					t.Fatalf("subagent live output buffer = %q, want it to contain the streamed text", got)
-				}
-				return
-			}
-		case <-deadline:
-			t.Fatal("no Wake for parent after subagent completion (timeout 3s)")
-		}
+	waitForWake(t, rt, "parent")
+	if got := rt.jobs.output(id); !strings.Contains(got, "streamed answer") {
+		t.Fatalf("subagent live output buffer = %q, want it to contain the streamed text", got)
 	}
 }
 
@@ -118,20 +117,10 @@ func TestSubagentTranscriptAfterClose(t *testing.T) {
 		t.Fatalf("startSubagent: %v", err)
 	}
 	// Wait for the Wake (child is done; job is retained with Done=true).
-	deadline := time.After(3 * time.Second)
-	for {
-		select {
-		case ev := <-rt.Events():
-			if ev.Kind == Wake && ev.Session == "p" {
-				// Job is retained in m.jobs with Done=true; transcript must still work.
-				if strings.TrimSpace(rt.jobs.transcript(id)) == "" {
-					t.Fatalf("transcript empty after job done for %s", id)
-				}
-				return
-			}
-		case <-deadline:
-			t.Fatal("timeout waiting for Wake")
-		}
+	waitForWake(t, rt, "p")
+	// Job is retained in m.jobs with Done=true; transcript must still work.
+	if strings.TrimSpace(rt.jobs.transcript(id)) == "" {
+		t.Fatalf("transcript empty after job done for %s", id)
 	}
 }
 
@@ -178,35 +167,24 @@ func TestJobManagerRetainsDoneSubagentJob(t *testing.T) {
 	}
 
 	// Wait for the Wake (child is done).
-	deadline := time.After(3 * time.Second)
-	for {
-		select {
-		case ev := <-rt.Events():
-			if ev.Kind == Wake && ev.Session == "par" {
-				// Job must still appear in list() with Done=true.
-				jobs := rt.jobs.list()
-				var found JobInfo
-				for _, j := range jobs {
-					if j.ID == id {
-						found = j
-						break
-					}
-				}
-				if found.ID == "" {
-					t.Fatalf("finished subagent job %s not found in list()", id)
-				}
-				if !found.Done {
-					t.Fatalf("finished subagent job should have Done=true, got %+v", found)
-				}
-				// transcript() must resolve via the retained job's childID.
-				if strings.TrimSpace(rt.jobs.transcript(id)) == "" {
-					t.Fatalf("transcript empty after subagent done for job %s", id)
-				}
-				return
-			}
-		case <-deadline:
-			t.Fatal("timeout waiting for Wake after subagent completion")
+	waitForWake(t, rt, "par")
+	// Job must still appear in list() with Done=true.
+	var found JobInfo
+	for _, j := range rt.jobs.list() {
+		if j.ID == id {
+			found = j
+			break
 		}
+	}
+	if found.ID == "" {
+		t.Fatalf("finished subagent job %s not found in list()", id)
+	}
+	if !found.Done {
+		t.Fatalf("finished subagent job should have Done=true, got %+v", found)
+	}
+	// transcript() must resolve via the retained job's childID.
+	if strings.TrimSpace(rt.jobs.transcript(id)) == "" {
+		t.Fatalf("transcript empty after subagent done for job %s", id)
 	}
 }
 
@@ -256,12 +234,12 @@ func TestJobManagerCancelDoneJobIsNoOp(t *testing.T) {
 func TestSubagentDepth(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
 	root, _ := rt.Session(SessionOpts{Name: "root", Depth: 0})
-	if root.depth != 0 {
-		t.Fatalf("root depth = %d, want 0", root.depth)
+	if root.opts.Depth != 0 {
+		t.Fatalf("root depth = %d, want 0", root.opts.Depth)
 	}
 	child, _ := rt.Session(SessionOpts{Name: "child", Depth: 2})
-	if child.depth != 2 {
-		t.Fatalf("child depth = %d, want 2", child.depth)
+	if child.opts.Depth != 2 {
+		t.Fatalf("child depth = %d, want 2", child.opts.Depth)
 	}
 }
 
@@ -281,7 +259,10 @@ func TestFormatJobList_ShowsRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
-	defer m.cancel(id) //nolint:errcheck
+	defer func() {
+		_ = m.cancel(id)
+		m.wg.Wait() // join the job goroutine so it doesn't outlive the test
+	}()
 	got := m.formatJobList()
 	if !strings.Contains(got, id) {
 		t.Errorf("formatJobList %q missing job id %s", got, id)
@@ -424,42 +405,31 @@ func TestSubagentErrorSurfaced(t *testing.T) {
 	if err != nil {
 		t.Fatalf("startSubagent: %v", err)
 	}
-	deadline := time.After(3 * time.Second)
-	for {
-		select {
-		case ev := <-rt.Events():
-			if ev.Kind != Wake || ev.Session != "parent" {
-				continue
-			}
-			// JobInfo carries the error.
-			var found JobInfo
-			for _, j := range rt.jobs.list() {
-				if j.ID == id {
-					found = j
-				}
-			}
-			if found.Error == "" || !strings.Contains(found.Error, "provider exploded") {
-				t.Errorf("JobInfo.Error = %q, want the turn error", found.Error)
-			}
-			// task_list shows "error", not "done".
-			if got := rt.jobs.formatJobList(); !strings.Contains(got, "error") {
-				t.Errorf("formatJobList = %q, want 'error'", got)
-			}
-			// task_status names the error.
-			got := rt.jobs.formatJobStatus(id)
-			if !strings.Contains(got, "error") || !strings.Contains(got, "provider exploded") {
-				t.Errorf("formatJobStatus = %q, want error status + message", got)
-			}
-			// The parent notice reports the failure (finishSubagent builds it via
-			// notifyAgentDone; assert the same rendering path).
-			notice := renderNotification(notifyAgentDone(id, "", "provider exploded"))
-			if !strings.Contains(notice, "error") {
-				t.Errorf("completion notice = %q, want error status", notice)
-			}
-			return
-		case <-deadline:
-			t.Fatal("no Wake for parent after failing subagent (timeout 3s)")
+	waitForWake(t, rt, "parent")
+	// JobInfo carries the error.
+	var found JobInfo
+	for _, j := range rt.jobs.list() {
+		if j.ID == id {
+			found = j
 		}
+	}
+	if found.Error == "" || !strings.Contains(found.Error, "provider exploded") {
+		t.Errorf("JobInfo.Error = %q, want the turn error", found.Error)
+	}
+	// task_list shows "error", not "done".
+	if got := rt.jobs.formatJobList(); !strings.Contains(got, "error") {
+		t.Errorf("formatJobList = %q, want 'error'", got)
+	}
+	// task_status names the error.
+	got := rt.jobs.formatJobStatus(id)
+	if !strings.Contains(got, "error") || !strings.Contains(got, "provider exploded") {
+		t.Errorf("formatJobStatus = %q, want error status + message", got)
+	}
+	// The parent notice reports the failure (finishSubagent builds it via
+	// notifyAgentDone; assert the same rendering path).
+	notice := renderNotification(notifyAgentDone(id, "", "provider exploded"))
+	if !strings.Contains(notice, "error") {
+		t.Errorf("completion notice = %q, want error status", notice)
 	}
 }
 
@@ -467,8 +437,8 @@ func TestSubagentErrorSurfaced(t *testing.T) {
 func TestFormatJobCancel_UnknownID(t *testing.T) {
 	m := newJobManager(nil, 8)
 	got := m.formatJobCancel("ghost")
-	if !strings.Contains(got, "no such job") {
-		t.Errorf("formatJobCancel unknown = %q, want 'no such job'", got)
+	if !strings.Contains(got, "no such task") {
+		t.Errorf("formatJobCancel unknown = %q, want 'no such task'", got)
 	}
 }
 
