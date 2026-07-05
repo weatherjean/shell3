@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime/debug"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -44,6 +45,24 @@ func agentVersion() string {
 	}
 	return info.Main.Version
 }
+
+// connection snapshots a.conn under a.mu. conn is set once in Run before any
+// request or pump can observe it, but every reader still snapshots through
+// here so the synchronization is explicit (and the race detector stays clean).
+// Never call blocking RPCs while holding a.mu — snapshot first.
+func (a *acpAgent) connection() *acpsdk.AgentSideConnection {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.conn
+}
+
+// listSessionsLimit caps ListSessions responses; pastSessionsProbeLimit is the
+// "effectively all" bound resumeAndRegister uses to check an id exists without
+// loading a specific session.
+const (
+	listSessionsLimit      = 100
+	pastSessionsProbeLimit = 10000
+)
 
 // sessionByID returns the acpSession for the given ACP session ID, or nil.
 func (a *acpAgent) sessionByID(id string) *acpSession {
@@ -148,10 +167,7 @@ func (a *acpAgent) askerFor(sessionID *string) func(ctx context.Context, command
 			toolCallID = fmt.Sprintf("perm-%d", seq.Add(1))
 		}
 
-		// Read conn under the lock; then release before the blocking RPC.
-		a.mu.Lock()
-		conn := a.conn
-		a.mu.Unlock()
+		conn := a.connection()
 		if conn == nil {
 			return false
 		}
@@ -214,15 +230,17 @@ func modeState(sess *shell3.Session) *acpsdk.SessionModeState {
 	}
 }
 
-// NewSession creates a new shell3 session for the ACP client.
-func (a *acpAgent) NewSession(_ context.Context, params acpsdk.NewSessionRequest) (acpsdk.NewSessionResponse, error) {
-	// idPtr is pre-allocated so askerFor can capture it before rt.Session()
-	// returns the actual session ID. The Asker cannot fire before NewSession
-	// returns, so *idPtr is always filled by the time the first tool call runs.
-	//
-	// acpFS also holds idPtr so it can lazily dereference the session ID at
-	// call time — the ID is only known after rt.Session returns, but acpFS
-	// must be constructed before that call to be passed in SessionOpts.
+// openSession opens a runtime session (fresh when resumeID is "", resuming
+// that stored run otherwise), wires the ACP asker + editor-buffer fs backend,
+// and registers the result under byID/byName. It is the single session-open
+// path shared by NewSession and resumeAndRegister, so the wiring cannot drift
+// between the two.
+//
+// idPtr is pre-allocated so askerFor and acpFS can capture it before
+// rt.Session() returns the actual session ID; it is filled immediately after.
+// No tool can run before the session is fully constructed, so the deref is
+// always valid by the time either closure fires.
+func (a *acpAgent) openSession(agent, resumeID, cwd string) (*acpSession, error) {
 	idPtr := new(string)
 	a.mu.Lock()
 	useFS := a.clientFS
@@ -233,31 +251,40 @@ func (a *acpAgent) NewSession(_ context.Context, params acpsdk.NewSessionRequest
 		fsBackend = acpFS{conn: conn, sessionID: idPtr}
 	}
 	sess, err := a.rt.Session(shell3.SessionOpts{
-		Agent:    a.opts.DefaultAgent,
-		WorkDir:  params.Cwd,
+		Agent:    agent,
+		ResumeID: resumeID,
+		WorkDir:  cwd,
 		Headless: true,
 		Asker:    a.askerFor(idPtr),
 		FS:       fsBackend,
 	})
 	if err != nil {
-		return acpsdk.NewSessionResponse{}, acpsdk.NewInternalError(err.Error())
+		return nil, err
 	}
-	*idPtr = sess.ID() // fill after creation; safe because no tool can run before this
-	id := acpsdk.SessionId(sess.ID())
-	as := newACPSession(string(id), params.Cwd, sess)
+	*idPtr = sess.ID()
+	as := newACPSession(sess.ID(), cwd, sess)
 	a.mu.Lock()
-	a.byID[string(id)] = as
+	a.byID[sess.ID()] = as
 	a.byName[sess.Name()] = as
 	a.mu.Unlock()
+	return as, nil
+}
+
+// NewSession creates a new shell3 session for the ACP client.
+func (a *acpAgent) NewSession(_ context.Context, params acpsdk.NewSessionRequest) (acpsdk.NewSessionResponse, error) {
+	as, err := a.openSession(a.opts.DefaultAgent, "", params.Cwd)
+	if err != nil {
+		return acpsdk.NewSessionResponse{}, acpsdk.NewInternalError(map[string]any{"error": err.Error()})
+	}
 	// Advertise commands AFTER this response reaches the client: the client
 	// only learns this session's id from the NewSessionResponse below, so a
 	// notification sent before it (synchronously here) references an unknown
 	// session and is dropped. The goroutine lands after the SDK writes the
 	// response; Prompt re-advertises as a guaranteed backstop.
-	go a.advertiseCommands(string(id))
+	go a.advertiseCommands(as.id)
 	return acpsdk.NewSessionResponse{
-		SessionId: id,
-		Modes:     modeState(sess),
+		SessionId: acpsdk.SessionId(as.id),
+		Modes:     modeState(as.sess),
 	}, nil
 }
 
@@ -265,26 +292,19 @@ func (a *acpAgent) NewSession(_ context.Context, params acpsdk.NewSessionRequest
 
 // Authenticate: no authentication methods are configured.
 func (a *acpAgent) Authenticate(_ context.Context, _ acpsdk.AuthenticateRequest) (acpsdk.AuthenticateResponse, error) {
-	return acpsdk.AuthenticateResponse{}, acpsdk.NewInvalidParams("no authentication methods configured")
+	return acpsdk.AuthenticateResponse{}, acpsdk.NewInvalidParams(map[string]any{"error": "no authentication methods configured"})
 }
 
 // Logout: not supported.
 func (a *acpAgent) Logout(_ context.Context, _ acpsdk.LogoutRequest) (acpsdk.LogoutResponse, error) {
-	return acpsdk.LogoutResponse{}, acpsdk.NewInvalidRequest("logout is not supported")
+	return acpsdk.LogoutResponse{}, acpsdk.NewInvalidRequest(map[string]any{"error": "logout is not supported"})
 }
 
 // Cancel calls the per-turn cancel func if one is set, then returns nil.
 // Unknown or already-idle sessions are silently ignored.
 func (a *acpAgent) Cancel(_ context.Context, params acpsdk.CancelNotification) error {
-	s := a.sessionByID(string(params.SessionId))
-	if s == nil {
-		return nil
-	}
-	s.mu.Lock()
-	cancel := s.cancelTurn
-	s.mu.Unlock()
-	if cancel != nil {
-		cancel()
+	if s := a.sessionByID(string(params.SessionId)); s != nil {
+		s.cancelActiveTurn()
 	}
 	return nil
 }
@@ -296,20 +316,13 @@ func (a *acpAgent) Cancel(_ context.Context, params acpsdk.CancelNotification) e
 // unknown session id.
 func (a *acpAgent) CloseSession(_ context.Context, params acpsdk.CloseSessionRequest) (acpsdk.CloseSessionResponse, error) {
 	id := string(params.SessionId)
-	a.mu.Lock()
-	s := a.byID[id]
-	a.mu.Unlock()
+	s := a.sessionByID(id)
 	if s == nil {
 		return acpsdk.CloseSessionResponse{}, acpsdk.NewInvalidParams(map[string]any{"sessionId": id})
 	}
 
 	// Cancel any in-flight turn before closing the session.
-	s.mu.Lock()
-	cancel := s.cancelTurn
-	s.mu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
+	s.cancelActiveTurn()
 
 	// Close the underlying shell3 session (ends the store record + releases config).
 	_ = s.sess.Close()
@@ -328,9 +341,9 @@ func (a *acpAgent) CloseSession(_ context.Context, params acpsdk.CloseSessionReq
 // UpdatedAt is the LastAt field from SessionMeta, formatted as RFC3339
 // (ISO 8601) for the wire.
 func (a *acpAgent) ListSessions(_ context.Context, _ acpsdk.ListSessionsRequest) (acpsdk.ListSessionsResponse, error) {
-	metas, err := a.rt.PastSessions(100)
+	metas, err := a.rt.PastSessions(listSessionsLimit)
 	if err != nil {
-		return acpsdk.ListSessionsResponse{}, acpsdk.NewInternalError(err.Error())
+		return acpsdk.ListSessionsResponse{}, acpsdk.NewInternalError(map[string]any{"error": err.Error()})
 	}
 	sessions := make([]acpsdk.SessionInfo, 0, len(metas))
 	for _, m := range metas {
@@ -377,23 +390,18 @@ func (a *acpAgent) ListSessions(_ context.Context, _ acpsdk.ListSessionsRequest)
 // sequentially per connection and await each response.
 func (a *acpAgent) resumeAndRegister(id, cwd string) (*acpSession, []shell3.HistoryEntry, error) {
 	// Validate: session must be known (has messages, or appears in PastSessions).
+	// A store failure is reported as such — collapsing it into "unknown session"
+	// would make a corrupt runs file look like a bogus id to the client.
 	entries, err := a.rt.SessionMessages(id)
 	if err != nil {
-		entries = nil // treat store errors as "not found" here; re-check below
+		return nil, nil, acpsdk.NewInternalError(map[string]any{"error": err.Error()})
 	}
 	if len(entries) == 0 {
-		metas, merr := a.rt.PastSessions(10000)
+		metas, merr := a.rt.PastSessions(pastSessionsProbeLimit)
 		if merr != nil {
-			return nil, nil, acpsdk.NewInternalError(merr.Error())
+			return nil, nil, acpsdk.NewInternalError(map[string]any{"error": merr.Error()})
 		}
-		found := false
-		for _, m := range metas {
-			if m.ID == id {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.ContainsFunc(metas, func(m shell3.SessionMeta) bool { return m.ID == id }) {
 			return nil, nil, acpsdk.NewInvalidParams(map[string]any{"sessionId": id})
 		}
 	}
@@ -406,33 +414,10 @@ func (a *acpAgent) resumeAndRegister(id, cwd string) (*acpSession, []shell3.Hist
 		return nil, nil, acpsdk.NewInvalidRequest(map[string]any{"error": "session already open", "sessionId": id})
 	}
 
-	// Resume the session; idPtr allows askerFor to capture the ID before rt.Session returns.
-	// acpFS holds the same idPtr so it can lazily dereference the session ID at call time.
-	idPtr := new(string)
-	a.mu.Lock()
-	useFS := a.clientFS
-	conn := a.conn
-	a.mu.Unlock()
-	var fsBackend shell3.FileSystem // nil → OS default
-	if useFS && conn != nil {
-		fsBackend = acpFS{conn: conn, sessionID: idPtr}
-	}
-	sess, err := a.rt.Session(shell3.SessionOpts{
-		ResumeID: id,
-		WorkDir:  cwd,
-		Headless: true,
-		Asker:    a.askerFor(idPtr),
-		FS:       fsBackend,
-	})
+	as, err := a.openSession("", id, cwd)
 	if err != nil {
-		return nil, nil, acpsdk.NewInternalError(err.Error())
+		return nil, nil, acpsdk.NewInternalError(map[string]any{"error": err.Error()})
 	}
-	*idPtr = sess.ID()
-	as := newACPSession(sess.ID(), cwd, sess)
-	a.mu.Lock()
-	a.byID[sess.ID()] = as
-	a.byName[sess.Name()] = as
-	a.mu.Unlock()
 	return as, entries, nil
 }
 
@@ -452,10 +437,7 @@ func (a *acpAgent) LoadSession(_ context.Context, params acpsdk.LoadSessionReque
 		return acpsdk.LoadSessionResponse{}, err
 	}
 
-	// Copy conn under the lock; release before the blocking SessionUpdate calls.
-	a.mu.Lock()
-	conn := a.conn
-	a.mu.Unlock()
+	conn := a.connection()
 
 	// Emit ALL replay updates BEFORE returning the response (the ordering guarantee).
 	if conn != nil && len(entries) > 0 {
@@ -510,12 +492,8 @@ func (a *acpAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (acp
 		if cmdErr != nil {
 			reply = "error: " + cmdErr.Error()
 		}
-		// Emit the reply as an agent message. conn is read under the lock here
-		// (never held across the blocking SessionUpdate call).
-		a.mu.Lock()
-		cmdConn := a.conn
-		a.mu.Unlock()
-		if cmdConn != nil {
+		// Emit the reply as an agent message.
+		if cmdConn := a.connection(); cmdConn != nil {
 			_ = cmdConn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
 				SessionId: acpsdk.SessionId(s.id),
 				Update:    acpsdk.UpdateAgentMessageText(reply),
@@ -524,11 +502,7 @@ func (a *acpAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (acp
 		return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}, nil
 	}
 
-	// Capture conn under the lock — it is set once in Run before any requests
-	// arrive, but the race detector requires explicit synchronization.
-	a.mu.Lock()
-	conn := a.conn
-	a.mu.Unlock()
+	conn := a.connection()
 	if conn == nil {
 		return acpsdk.PromptResponse{}, acpsdk.NewInternalError(map[string]any{"error": "no client connection"})
 	}
@@ -557,7 +531,7 @@ func (a *acpAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (acp
 			case shell3.Error:
 				turnErr = ev.Err
 			default:
-				s.forward(ctx, conn, ev, ctxWindow)
+				s.forward(conn, ev, ctxWindow)
 			}
 		}
 		if !errors.Is(turnErr, shell3.ErrBusy) {
@@ -591,7 +565,7 @@ func (a *acpAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (acp
 
 // SetSessionConfigOption: not supported.
 func (a *acpAgent) SetSessionConfigOption(_ context.Context, _ acpsdk.SetSessionConfigOptionRequest) (acpsdk.SetSessionConfigOptionResponse, error) {
-	return acpsdk.SetSessionConfigOptionResponse{}, acpsdk.NewInvalidRequest("session config options not supported")
+	return acpsdk.SetSessionConfigOptionResponse{}, acpsdk.NewInvalidRequest(map[string]any{"error": "session config options not supported"})
 }
 
 // SetSessionMode switches the active agent of an existing session to the
@@ -615,14 +589,7 @@ func (a *acpAgent) SetSessionMode(ctx context.Context, params acpsdk.SetSessionM
 	// reported as InvalidParams rather than InternalError — SwitchAgent returns
 	// a plain fmt.Errorf for unknown agents, not a distinguishable sentinel.
 	modeID := string(params.ModeId)
-	known := false
-	for _, n := range s.sess.AgentNames() {
-		if n == modeID {
-			known = true
-			break
-		}
-	}
-	if !known {
+	if !slices.Contains(s.sess.AgentNames(), modeID) {
 		return acpsdk.SetSessionModeResponse{}, acpsdk.NewInvalidParams(map[string]any{"modeId": params.ModeId})
 	}
 
@@ -633,14 +600,9 @@ func (a *acpAgent) SetSessionMode(ctx context.Context, params acpsdk.SetSessionM
 		return acpsdk.SetSessionModeResponse{}, acpsdk.NewInternalError(map[string]any{"error": err.Error()})
 	}
 
-	// Emit current_mode_update. Copy conn under the lock, release before calling
-	// SessionUpdate — mirrors the pattern in Prompt/askerFor so the race
-	// detector stays clean. Use context.Background() (consistent with forward)
-	// so a cancelled request ctx cannot drop the notification.
-	a.mu.Lock()
-	conn := a.conn
-	a.mu.Unlock()
-	if conn != nil {
+	// Emit current_mode_update. Use context.Background() (consistent with
+	// forward) so a cancelled request ctx cannot drop the notification.
+	if conn := a.connection(); conn != nil {
 		_ = conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
 			SessionId: acpsdk.SessionId(s.id),
 			Update: acpsdk.SessionUpdate{

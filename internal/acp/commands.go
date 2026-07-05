@@ -86,13 +86,10 @@ func acpAvailableCommands() []acpsdk.AvailableCommand {
 	return cmds
 }
 
-// advertiseCommands pushes an available_commands_update notification to the ACP
-// client. conn is read under a.mu then released before the blocking SessionUpdate
-// call — mirrors the lock discipline used throughout agent.go.
+// advertiseCommands pushes an available_commands_update notification to the
+// ACP client.
 func (a *acpAgent) advertiseCommands(sessionID string) {
-	a.mu.Lock()
-	conn := a.conn
-	a.mu.Unlock()
+	conn := a.connection()
 	if conn == nil {
 		return
 	}

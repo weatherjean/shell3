@@ -13,17 +13,14 @@ import (
 // notifications are valid ACP and are rendered by OpenACP + passthrough clients
 // with no turn guard.
 //
-// conn is read ONCE under a.mu at pump start into a local and used for the
-// pump's lifetime (including the goroutines it spawns). Run sets a.conn once,
-// before starting the pump, so this single synchronized read is sufficient — the
-// pump never touches the a.conn field again, keeping the race detector clean.
+// conn is snapshotted ONCE at pump start and used for the pump's lifetime
+// (including the goroutines it spawns) — Run sets a.conn once before starting
+// the pump, so the single synchronized read suffices.
 //
 // The pump returns when ctx is cancelled (Run's ctx / connection teardown) or
 // when the runtime's Events channel closes.
 func (a *acpAgent) pump(ctx context.Context) {
-	a.mu.Lock()
-	conn := a.conn
-	a.mu.Unlock()
+	conn := a.connection()
 	if conn == nil {
 		return
 	}
@@ -75,8 +72,15 @@ func (a *acpAgent) drainQueued(ctx context.Context, s *acpSession, conn *acpsdk.
 
 	ctxWindow := s.sess.Snapshot().ContextWindow
 	for ev := range s.sess.RunQueued(drainCtx) {
-		if ev.Kind != shell3.Error {
-			s.forward(ctx, conn, ev, ctxWindow)
+		if ev.Kind == shell3.Error {
+			// A failed wake-turn (e.g. an LLM error while relaying a subagent
+			// result) has no requesting Prompt to report through — surface it
+			// to the operator's log instead of dropping it on the floor.
+			if a.opts.Logger != nil && ev.Err != nil {
+				a.opts.Logger.Warn("wake-driven turn failed", "session", s.id, "error", ev.Err)
+			}
+			continue
 		}
+		s.forward(conn, ev, ctxWindow)
 	}
 }

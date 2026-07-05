@@ -13,8 +13,11 @@ import (
 // acpSession wraps a live shell3.Session with ACP session identity
 // and a per-turn cancellation handle.
 type acpSession struct {
-	id      string
-	workDir string // cwd from NewSession params (or "" for runtime default)
+	id string
+	// workDir is the cwd from NewSession params ("" for runtime default).
+	// Kept for observability (tests assert the stored cwd); production code
+	// resolves paths through the shell3 session itself.
+	workDir string
 
 	sess *shell3.Session
 
@@ -40,6 +43,17 @@ func newACPSession(id, workDir string, sess *shell3.Session) *acpSession {
 		workDir:  workDir,
 		sess:     sess,
 		turnSlot: make(chan struct{}, 1),
+	}
+}
+
+// cancelActiveTurn invokes the in-flight turn's cancel func, if any — the
+// shared teardown used by session/cancel and CloseSession.
+func (s *acpSession) cancelActiveTurn() {
+	s.mu.Lock()
+	cancel := s.cancelTurn
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 }
 
@@ -129,8 +143,9 @@ func (s *acpSession) liveToolCallWait(timeout time.Duration) string {
 // Usage events become usage_update (skipped when ctxWindow == 0).
 // All other events are mapped via updatesForEvent and sent individually.
 // Sends always use context.Background() so that a flush after turn
-// cancellation is not dropped by a cancelled ctx.
-func (s *acpSession) forward(_ context.Context, conn *acpsdk.AgentSideConnection, ev shell3.Event, ctxWindow int) {
+// cancellation is not dropped by a cancelled ctx — which is why forward takes
+// no ctx parameter.
+func (s *acpSession) forward(conn *acpsdk.AgentSideConnection, ev shell3.Event, ctxWindow int) {
 	s.noteToolEvent(ev)
 	if ev.Kind == shell3.Usage {
 		if ctxWindow == 0 {
