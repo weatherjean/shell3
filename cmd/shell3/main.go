@@ -31,7 +31,10 @@ func main() {
 		rootConfigPath string
 		rootAgent      string
 	)
-	root.Args = cobra.ArbitraryArgs
+	// NoArgs: a typo'd subcommand or a bare prompt ("shell3 fix this bug")
+	// must error, not silently open the interactive TUI and discard the input
+	// (use `shell3 run "..."` for one-shot prompts).
+	root.Args = cobra.NoArgs
 	addConfigAgentFlags(root, &rootConfigPath, &rootAgent, "")
 	addResumeFlag(root, &rootResume)
 	root.RunE = func(cmd *cobra.Command, args []string) error {

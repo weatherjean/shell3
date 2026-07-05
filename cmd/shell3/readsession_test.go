@@ -27,14 +27,7 @@ func makeRunsStore(t *testing.T) (*runs.Store, string) {
 	if err != nil {
 		t.Fatalf("runs.Open: %v", err)
 	}
-	origDir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(origDir) })
+	t.Chdir(tmpDir)
 	return st, projectRoot
 }
 
@@ -179,7 +172,10 @@ func TestReadSessionCommand_NotFound(t *testing.T) {
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
-	// A missing session returns an error (no messages.jsonl).
-	// Accept either error or empty output (the runs store returns nil for missing files).
-	_ = cmd.Execute()
+	// The command deliberately distinguishes a missing session from an empty
+	// one (LoadMessages returns nil,nil for a missing file) — pin the error.
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "no session") {
+		t.Fatalf("want a 'no session' error for an unknown id, got %v", err)
+	}
 }

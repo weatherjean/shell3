@@ -144,7 +144,6 @@ var replacers = []replacer{
 	escapeNormalizedReplacer,
 	trimmedBoundaryReplacer,
 	contextAwareReplacer,
-	multiOccurrenceReplacer,
 }
 
 // simpleReplacer yields find unchanged.
@@ -163,6 +162,7 @@ func lineTrimmedReplacer(content, find string) []string {
 	if len(searchLines) == 0 {
 		return nil
 	}
+	offsets := lineOffsets(originalLines)
 	var out []string
 	for i := 0; i <= len(originalLines)-len(searchLines); i++ {
 		matches := true
@@ -175,20 +175,24 @@ func lineTrimmedReplacer(content, find string) []string {
 		if !matches {
 			continue
 		}
-		start := 0
-		for k := 0; k < i; k++ {
-			start += len(originalLines[k]) + 1
-		}
-		end := start
-		for k := 0; k < len(searchLines); k++ {
-			end += len(originalLines[i+k])
-			if k < len(searchLines)-1 {
-				end++
-			}
-		}
+		start := offsets[i]
+		end := offsets[i+len(searchLines)] - 1 // drop the trailing newline
 		out = append(out, content[start:end])
 	}
 	return out
+}
+
+// lineOffsets returns the byte offset of each line start in the "\n"-joined
+// lines, plus one final sentinel entry one past a would-be trailing newline —
+// so the slice [offsets[i], offsets[j]-1) is lines i..j-1 without the last
+// newline. Computed once per call so candidate emission is O(1), not a
+// per-candidate rescan from line zero.
+func lineOffsets(lines []string) []int {
+	offsets := make([]int, len(lines)+1)
+	for i, l := range lines {
+		offsets[i+1] = offsets[i] + len(l) + 1
+	}
+	return offsets
 }
 
 // With multiple candidates, require ≥30% average middle-line similarity to
@@ -217,6 +221,7 @@ func blockAnchorReplacer(content, find string) []string {
 	last := strings.TrimSpace(searchLines[len(searchLines)-1])
 	searchBlockSize := len(searchLines)
 
+	offsets := lineOffsets(originalLines)
 	type cand struct{ start, end int }
 	var candidates []cand
 	for i := 0; i < len(originalLines); i++ {
@@ -234,18 +239,7 @@ func blockAnchorReplacer(content, find string) []string {
 		return nil
 	}
 	emit := func(c cand) string {
-		start := 0
-		for k := 0; k < c.start; k++ {
-			start += len(originalLines[k]) + 1
-		}
-		end := start
-		for k := c.start; k <= c.end; k++ {
-			end += len(originalLines[k])
-			if k < c.end {
-				end++
-			}
-		}
-		return content[start:end]
+		return content[offsets[c.start] : offsets[c.end+1]-1]
 	}
 
 	if len(candidates) == 1 {
@@ -380,8 +374,8 @@ func indentationFlexibleReplacer(content, find string) []string {
 	return out
 }
 
-// escapeNormalizedReplacer treats literal `\n` `\t` `\r` `\\` `\"` `\'` “ ` “ `\$`
-// in find as their unescaped forms.
+// escapeNormalizedReplacer treats the literal escape sequences \n \t \r \\
+// \" \' \` \$ (and an escaped newline) in find as their unescaped forms.
 func escapeNormalizedReplacer(content, find string) []string {
 	unescape := func(s string) string {
 		var b strings.Builder
@@ -490,24 +484,6 @@ func contextAwareReplacer(content, find string) []string {
 		}
 	}
 	return nil
-}
-
-// multiOccurrenceReplacer yields find for every exact match position so the
-// driver loop can decide based on replaceAll.
-func multiOccurrenceReplacer(content, find string) []string {
-	if find == "" {
-		return nil
-	}
-	var out []string
-	start := 0
-	for {
-		idx := strings.Index(content[start:], find)
-		if idx == -1 {
-			return out
-		}
-		out = append(out, find)
-		start += idx + len(find)
-	}
 }
 
 // levenshtein returns the edit distance between a and b. Used by

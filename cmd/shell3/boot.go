@@ -29,7 +29,9 @@ func newBootCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "boot",
 		Short: "Create a shell3 config interactively (url, model, name, key)",
-		RunE:  func(cmd *cobra.Command, args []string) error { return runBoot(f) },
+		Example: `  shell3 boot
+  shell3 boot --url https://api.openai.com/v1 --model gpt-4o --name main`,
+		RunE: func(cmd *cobra.Command, args []string) error { return runBoot(f) },
 	}
 	cmd.Flags().StringVar(&f.url, "url", "", "Base URL (OpenAI-compatible endpoint)")
 	cmd.Flags().StringVar(&f.model, "model", "", "Model tag/id")
@@ -148,6 +150,12 @@ func atomicWriteFile(path string, data []byte, mode os.FileMode) error {
 		return err
 	}
 	if err := f.Chmod(mode); err != nil {
+		_ = f.Close()
+		return err
+	}
+	// Sync before rename, or a power loss can leave the renamed file empty on
+	// some filesystems — exactly the corruption this helper promises to prevent.
+	if err := f.Sync(); err != nil {
 		_ = f.Close()
 		return err
 	}

@@ -21,17 +21,23 @@ func appendLine(path, what string, v any) error {
 	if err != nil {
 		return fmt.Errorf("runs: open %s: %w", what, err)
 	}
-	defer f.Close()
 	if _, err := f.Write(append(b, '\n')); err != nil {
+		_ = f.Close()
 		return fmt.Errorf("runs: append %s: %w", what, err)
+	}
+	// Close is the last chance to observe a flush failure on this append-only
+	// file — swallowing it would hide a full disk from the caller.
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("runs: close %s: %w", what, err)
 	}
 	return nil
 }
 
-// decodeLines unmarshals each non-empty line of a JSONL blob into T. strict
-// mode returns the first unmarshal error; lenient mode skips malformed lines
-// (a live transcript can end in a half-written tail line).
-func decodeLines[T any](raw string, strict bool) ([]T, error) {
+// decodeLines leniently unmarshals each non-empty line of a JSONL blob into
+// T, skipping malformed lines — for renderers that must tolerate a
+// still-streaming or hand-edited file. The resume path uses the stricter
+// decodeLinesTolerantTail instead.
+func decodeLines[T any](raw string) []T {
 	var out []T
 	for _, line := range strings.Split(strings.TrimRight(raw, "\n"), "\n") {
 		line = strings.TrimSpace(line)
@@ -40,10 +46,31 @@ func decodeLines[T any](raw string, strict bool) ([]T, error) {
 		}
 		var v T
 		if err := json.Unmarshal([]byte(line), &v); err != nil {
-			if strict {
-				return nil, err
-			}
 			continue
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+// decodeLinesTolerantTail decodes strictly except for the FINAL line, which
+// may be a half-written tail from a crash mid-append; a malformed tail is
+// dropped rather than failing the whole decode. Interior corruption still
+// errors. Used by the resume path (Store.LoadMessages).
+func decodeLinesTolerantTail[T any](raw string) ([]T, error) {
+	lines := strings.Split(strings.TrimRight(raw, "\n"), "\n")
+	var out []T
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var v T
+		if err := json.Unmarshal([]byte(line), &v); err != nil {
+			if i == len(lines)-1 {
+				break // half-written tail: tolerate
+			}
+			return nil, err
 		}
 		out = append(out, v)
 	}
@@ -55,6 +82,5 @@ func decodeLines[T any](raw string, strict bool) ([]T, error) {
 // must tolerate a still-streaming file; the strict counterpart is
 // Store.LoadMessages.
 func ParseMessages(raw string) []llm.Message {
-	msgs, _ := decodeLines[llm.Message](raw, false)
-	return msgs
+	return decodeLines[llm.Message](raw)
 }

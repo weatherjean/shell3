@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/weatherjean/shell3/internal/llm"
@@ -28,7 +29,18 @@ type Meta struct {
 }
 
 // Store is rooted at a project's .shell3_project/ directory.
-type Store struct{ root string }
+type Store struct {
+	root string
+
+	// touchMu guards lastTouch, the per-session debounce for AppendMessage's
+	// LastAt bump (see touchDebounce).
+	touchMu   sync.Mutex
+	lastTouch map[string]time.Time
+}
+
+// touchDebounce bounds how often AppendMessage rewrites meta.json for a
+// LastAt bump. Recency sorting doesn't need sub-second precision.
+const touchDebounce = time.Second
 
 // Open ensures root/runs/ exists and returns a Store. root is the
 // .shell3_project/ directory (not the repo root).
@@ -36,11 +48,21 @@ func Open(root string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Join(root, "runs"), 0o755); err != nil {
 		return nil, fmt.Errorf("runs: open %s: %w", root, err)
 	}
-	return &Store{root: root}, nil
+	return &Store{root: root, lastTouch: map[string]time.Time{}}, nil
 }
 
-func (s *Store) runsDir() string          { return filepath.Join(s.root, "runs") }
-func (s *Store) sessDir(id string) string { return filepath.Join(s.runsDir(), id) }
+func (s *Store) runsDir() string { return filepath.Join(s.root, "runs") }
+
+// sessDir resolves a session directory. IDs arrive from user-controlled
+// surfaces (read-session <id>, --resume), so anything that is not a plain
+// path component is rejected by mapping it to an impossible directory —
+// "../../../etc" must never escape the store.
+func (s *Store) sessDir(id string) string {
+	if id == "" || id != filepath.Base(id) {
+		return filepath.Join(s.runsDir(), "invalid-session-id")
+	}
+	return filepath.Join(s.runsDir(), id)
+}
 
 // newID is a sortable wall-clock timestamp plus a random suffix. The suffix
 // prevents collisions between sessions minted within the same nanosecond by
@@ -84,20 +106,40 @@ func (s *Store) readMeta(id string) (Meta, error) {
 	var m Meta
 	b, err := os.ReadFile(filepath.Join(s.sessDir(id), "meta.json"))
 	if err != nil {
-		return m, err
+		return m, fmt.Errorf("runs: read meta %s: %w", id, err)
 	}
-	return m, json.Unmarshal(b, &m)
+	if err := json.Unmarshal(b, &m); err != nil {
+		return m, fmt.Errorf("runs: decode meta %s: %w", id, err)
+	}
+	return m, nil
 }
 
 // AppendMessage appends one JSON-encoded message line to runs/<id>/messages.jsonl.
+// LastAt is bumped at most once per touchDebounce: this is the hot per-turn
+// write path, and a full meta read+marshal+tmp-write+rename per message would
+// quadruple its file ops for a recency stamp nobody reads at sub-second
+// resolution.
 func (s *Store) AppendMessage(id string, m llm.Message) error {
 	if err := appendLine(filepath.Join(s.sessDir(id), "messages.jsonl"), "message", m); err != nil {
 		return err
 	}
+	s.touchMu.Lock()
+	last := s.lastTouch[id]
+	now := time.Now()
+	if now.Sub(last) < touchDebounce {
+		s.touchMu.Unlock()
+		return nil
+	}
+	s.lastTouch[id] = now
+	s.touchMu.Unlock()
 	return s.TouchSession(id)
 }
 
-// LoadMessages reads runs/<id>/messages.jsonl in order.
+// LoadMessages reads runs/<id>/messages.jsonl in order. Interior lines are
+// decoded strictly (corruption there is a real fault worth surfacing), but a
+// malformed FINAL line is tolerated: a crash mid-append leaves a half-written
+// tail, and failing the whole load would make the session unresumable —
+// exactly when resume matters most.
 func (s *Store) LoadMessages(id string) ([]llm.Message, error) {
 	b, err := os.ReadFile(filepath.Join(s.sessDir(id), "messages.jsonl"))
 	if os.IsNotExist(err) {
@@ -106,7 +148,7 @@ func (s *Store) LoadMessages(id string) ([]llm.Message, error) {
 	if err != nil {
 		return nil, fmt.Errorf("runs: load messages %s: %w", id, err)
 	}
-	out, err := decodeLines[llm.Message](string(b), true)
+	out, err := decodeLinesTolerantTail[llm.Message](string(b))
 	if err != nil {
 		return nil, fmt.Errorf("runs: decode message in %s: %w", id, err)
 	}
@@ -151,6 +193,10 @@ func (s *Store) ListSessions(limit int) ([]Meta, error) {
 		if limit > 0 && len(out) >= limit {
 			break
 		}
+		// A session whose meta.json is missing or corrupt is skipped by design:
+		// listing must stay best-effort over a store the user can freely edit
+		// or delete (runs data is disposable). It becomes invisible here — and
+		// therefore unresumable via resume-latest — until the dir is removed.
 		if m, err := s.readMeta(id); err == nil {
 			out = append(out, m)
 		}
@@ -184,8 +230,7 @@ func (s *Store) LoadReminders(id string) ([]ReminderLine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("runs: load reminders %s: %w", id, err)
 	}
-	out, _ := decodeLines[ReminderLine](string(b), false)
-	return out, nil
+	return decodeLines[ReminderLine](string(b)), nil
 }
 
 // TruncateReminders removes the sidecar (used by /clear, /rollback).

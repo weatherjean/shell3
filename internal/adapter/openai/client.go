@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -36,13 +37,15 @@ type bodyTap struct {
 }
 
 func (b *bodyTap) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Reset the reasoning tap for this attempt unconditionally — its lifecycle
-	// is per-request and must not leak across requests or retries even on the
-	// (unusual) path where a request carries no body.
+	// Reset the per-attempt state unconditionally — reasoning tap AND the
+	// buffered response body. A stale resBody left over from a previous non-2xx
+	// attempt would otherwise pair with this request in LastTraffic's snapshot
+	// and actively mislead last_error.json debugging.
 	b.mu.Lock()
 	b.reasoning = ""
 	b.done = make(chan struct{})
 	b.reasoningQueue = nil
+	b.resBody = nil
 	if req.Body != nil {
 		buf, _ := io.ReadAll(req.Body)
 		req.Body = io.NopCloser(bytes.NewReader(buf))
@@ -189,21 +192,28 @@ func NewClient(baseURL, apiKey, model string) *Client {
 		oc:     openai.NewClient(opts...),
 		model:  model,
 		tap:    tap,
-		params: llm.RequestParams{ReasoningEffort: "medium", MaxTokens: 16000},
+		params: llm.RequestParams{ReasoningEffort: defaultReasoningEffort, MaxTokens: defaultMaxTokens},
 	}
 }
+
+// Default request params, declared once so the live params and the ParamSpecs
+// documentation strings cannot drift.
+const (
+	defaultReasoningEffort = "medium"
+	defaultMaxTokens       = 16000
+)
 
 func (c *Client) SetParams(p llm.RequestParams) { c.params = c.params.Merge(p) }
 func (c *Client) SetExtra(m map[string]any)     { c.extra = m }
 
 func (c *Client) ParamSpecs() []llm.ParamSpec {
 	return []llm.ParamSpec{
-		{Name: "reasoning_effort", Enum: []string{"none", "minimal", "low", "medium", "high", "xhigh"}, Default: "medium"},
+		{Name: "reasoning_effort", Enum: []string{"none", "minimal", "low", "medium", "high", "xhigh"}, Default: defaultReasoningEffort},
 		// Default "" — the adapter never sets ParallelToolCalls unless asked
 		// (nil leaves the provider's own default in effect).
 		{Name: "parallel_tool_calls", Enum: []string{"true", "false"}, Default: ""},
 		{Name: "temperature", Default: ""},
-		{Name: "max_tokens", Default: "16000"},
+		{Name: "max_tokens", Default: strconv.Itoa(defaultMaxTokens)},
 	}
 }
 
@@ -306,6 +316,9 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 		return wrapStreamErr(err)
 	}
 
+	// This early Close is load-bearing, not redundant with the deferred one:
+	// it unblocks scanReasoning's EOF so WaitReasoning below returns promptly
+	// instead of stalling until ctx cancellation.
 	_ = stream.Close()
 	if c.tap != nil {
 		// Wait for scanReasoning to finish, then drain any fragments queued

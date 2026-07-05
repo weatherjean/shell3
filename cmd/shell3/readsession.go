@@ -16,7 +16,9 @@ func newReadSessionCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "read-session <session-id>",
 		Short: "Dump a past session's full transcript in chronological order (read-only)",
-		Args:  cobra.ExactArgs(1),
+		Example: `  shell3 read-session 20260701T120000.000000000-abcd
+  ls .shell3_project/runs/   # list session ids`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
 			cwd, err := os.Getwd()

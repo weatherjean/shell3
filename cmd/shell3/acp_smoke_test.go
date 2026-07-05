@@ -76,6 +76,9 @@ shell3.agent({
 
 	// ── Step 3: start the subprocess ─────────────────────────────────────────
 	proc := exec.Command(binPath, "acp", "--config", luaPath)
+	// Run in a temp dir: the runtime roots its .shell3_project store at the
+	// process cwd, which would otherwise leak session dirs into cmd/shell3/.
+	proc.Dir = t.TempDir()
 
 	stdinPipe, err := proc.StdinPipe()
 	if err != nil {
