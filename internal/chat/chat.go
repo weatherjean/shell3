@@ -148,7 +148,7 @@ type Config struct {
 	// Nil ⇒ headless: ask degrades to deny.
 	Asker AskFunc
 	// RunToolCall runs the on_tool_call chain (config-global, nil = no hooks).
-	RunToolCall func(ctx context.Context, name, command, argsJSON string) ToolCallVerdict
+	RunToolCall func(ctx context.Context, name, command, argsJSON string, headless bool) ToolCallVerdict
 	// RunToolResult runs the on_tool_result chain (config-global, nil = none).
 	RunToolResult func(ctx context.Context, name, argsJSON, output string) string
 	// AgentNames lists configured agents in declaration order, for /agent and

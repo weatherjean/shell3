@@ -1024,3 +1024,19 @@ func TestSessionJobsFromManager(t *testing.T) {
 		t.Fatalf("Session.Jobs = %+v, want one JobCommand", jobs)
 	}
 }
+
+// TestTurnConfigHeadlessAsk: HeadlessAsk mirrors asker presence — true with no
+// asker attached (subagents, shell3 run), false when a front-end supplied one.
+func TestTurnConfigHeadlessAsk(t *testing.T) {
+	s := newTestSession(t, fakellm.New(), chat.Config{})
+	defer s.Close()
+
+	s.asker = nil
+	if !s.turnConfig().HeadlessAsk {
+		t.Fatal("no asker: want HeadlessAsk=true")
+	}
+	s.asker = func(context.Context, string, string) bool { return true }
+	if s.turnConfig().HeadlessAsk {
+		t.Fatal("asker attached: want HeadlessAsk=false")
+	}
+}

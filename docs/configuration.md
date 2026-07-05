@@ -306,6 +306,7 @@ Each handler receives a table `t`:
 | `t.name` | The **real** tool name: `"bash"`, `"bash_bg"`, `"shell_interactive"`, `"read"`, `"list_files"`, `"edit_file"`, or a custom tool's name. |
 | `t.command` | The bash command string — only for the three bash tools; **nil** for every other tool. |
 | `t.args` | Raw arguments JSON string (every tool). Gate a non-bash tool by inspecting this, e.g. a `read`/`edit_file` path. |
+| `t.headless` | `true` when no human asker is attached to the session (in-process subagents, `shell3 run`) — an `{ask=...}` verdict would auto-deny there. Independent of `:disable_safety`. See [headless degradation](#deny-prompt-confirmation-and-headless-degradation). |
 
 ### Verdict contract
 
@@ -349,6 +350,9 @@ shell3.on_tool_call(function(t)
     end
     for _, p in ipairs(ASK) do
       if p:match(t.command) then
+        -- Headless (subagent / shell3 run): an ask would auto-deny anyway,
+        -- so block with a reason the parent agent can act on.
+        if t.headless then return { block = true, reason = "needs approval; rerun interactively" } end
         return { ask = "Run?\n" .. t.command, reason = "denied" }
       end
     end
@@ -379,7 +383,9 @@ request** (see [acp.md](acp.md#permissions-on_tool_call--sessionrequest_permissi
 **Headless subagents** have no attached human, so an `{ask=...}` verdict
 is auto-denied with its `reason`; the block reason flows back to the parent agent
 in the in-process completion notice so the parent — where a human *is* attached — can decide
-how to proceed. A prompt nobody answers falls back to deny after the timeout
+how to proceed. Handlers see this ahead of time as `t.headless` and can return a
+tailored `{block=...}` (or allow a safe subset) instead of an ask that will never
+be answered. A prompt nobody answers falls back to deny after the timeout
 (`ask_timeout`, default 300 s). `{block=true}` never prompts — it blocks
 everywhere, headless or not.
 

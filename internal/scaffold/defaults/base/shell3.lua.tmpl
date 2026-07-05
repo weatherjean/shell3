@@ -61,7 +61,7 @@ shell3.model("{{.Name | luaesc}}", {
 -- before EVERY tool with the real t.name (bash, bash_bg, shell_interactive, read,
 -- list_files, edit_file, custom). t.command is the bash text for the three bash
 -- tools and NIL otherwise — so guard on t.name before matching t.command.
--- Handlers are chainable (declaration order) and receive t = { name, command, args }.
+-- Handlers are chainable (declaration order) and receive t = { name, command, args, headless }.
 -- Return one of:
 --   * nil                         → pass to the next handler / run
 --   * { command = "..." }         → rewrite the bash text, continue (bash tools only)
@@ -70,6 +70,9 @@ shell3.model("{{.Name | luaesc}}", {
 --   * { block = true, reason="" } → block (reason shown to the model)
 --   * { ask = "prompt", reason="" } → ask a human (TUI y/N prompt);
 --                                   allowed → run, declined/headless → block(reason)
+--   t.headless is true when no human is attached (subagents, shell3 run) — an
+--   ask would auto-deny there, so branch on it to block with a clearer reason
+--   (or allow a safe subset) instead of asking.
 -- Write denylists with shell3.regex (Go RE2; compiled at load). Use (?s) so .*
 -- spans multi-line commands. A handler that errors FAILS CLOSED (blocks).
 -- Example (uncomment to enable a guard):
@@ -80,7 +83,10 @@ shell3.model("{{.Name | luaesc}}", {
 -- shell3.on_tool_call(function(t)
 --   if t.name == "bash" or t.name == "bash_bg" or t.name == "shell_interactive" then
 --     for _, p in ipairs(HARD) do if p:match(t.command) then return { block = true, reason = "hard_deny" } end end
---     for _, p in ipairs(ASK)  do if p:match(t.command) then return { ask = "Run?\n" .. t.command, reason = "denied" } end end
+--     for _, p in ipairs(ASK)  do if p:match(t.command) then
+--       if t.headless then return { block = true, reason = "needs approval; rerun interactively" } end
+--       return { ask = "Run?\n" .. t.command, reason = "denied" }
+--     end end
 --   end
 --   -- non-bash tools fire too — gate them by t.name + t.args, e.g.:
 --   -- if t.name == "read" and ENV:match(t.args) then return { block = true, reason = "no .env" } end

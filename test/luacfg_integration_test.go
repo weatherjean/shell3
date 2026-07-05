@@ -111,14 +111,14 @@ shell3.agent({
 	if !lc.HasToolCall() {
 		t.Fatal("expected an on_tool_call hook to be declared")
 	}
-	v := lc.RunToolCall(ctx, "bash", "rm -rf /", "{}")
+	v := lc.RunToolCall(ctx, "bash", "rm -rf /", "{}", false)
 	if v.Action != luacfg.ActionBlock {
 		t.Error("on_tool_call should block rm -rf /")
 	}
 	if !strings.Contains(v.Reason, "dangerous") {
 		t.Errorf("on_tool_call reason should mention 'dangerous', got: %q", v.Reason)
 	}
-	v2 := lc.RunToolCall(ctx, "bash", "echo hello", "{}")
+	v2 := lc.RunToolCall(ctx, "bash", "echo hello", "{}", false)
 	if v2.Action != luacfg.ActionRun {
 		t.Errorf("on_tool_call should allow 'echo hello', got action=%v", v2.Action)
 	}
@@ -229,8 +229,8 @@ func runToolCallTurn(t *testing.T, lc *luacfg.LoadedConfig, dir, prompt string, 
 		AgentKnobs:        chat.AgentKnobs{CustomToolNames: map[string]bool{"greet": true}},
 		ToolConfig: chat.ToolConfig{
 			WorkDir: dir,
-			RunToolCall: func(ctx context.Context, name, command, argsJSON string) chat.ToolCallVerdict {
-				return agentsetup.BridgeVerdict(lc.RunToolCall(ctx, name, command, argsJSON))
+			RunToolCall: func(ctx context.Context, name, command, argsJSON string, headless bool) chat.ToolCallVerdict {
+				return agentsetup.BridgeVerdict(lc.RunToolCall(ctx, name, command, argsJSON, headless))
 			},
 		},
 		Handlers: chat.NewHandlers(),
@@ -311,8 +311,8 @@ shell3.agent({ name = "a", model = "m", prompt = "p", tools = { bash = true } })
 		Log:         applog.Noop{},
 		ToolConfig: chat.ToolConfig{
 			WorkDir: dir,
-			RunToolCall: func(ctx context.Context, name, command, argsJSON string) chat.ToolCallVerdict {
-				return agentsetup.BridgeVerdict(lc.RunToolCall(ctx, name, command, argsJSON))
+			RunToolCall: func(ctx context.Context, name, command, argsJSON string, headless bool) chat.ToolCallVerdict {
+				return agentsetup.BridgeVerdict(lc.RunToolCall(ctx, name, command, argsJSON, headless))
 			},
 		},
 		Handlers: chat.NewHandlers(),

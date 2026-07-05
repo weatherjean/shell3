@@ -76,7 +76,7 @@ When an `on_tool_call` handler in `shell3.lua` returns `{ ask = "prompt", reason
 
 Selecting **Allow** lets the command run; **Reject** (or any other outcome, including timeout or error) blocks it. `allow_always` and `reject_always` are intentionally not offered — shell3's Asker interface is a boolean (allow/deny this one call), and persistent allow/deny policy belongs in the Lua `on_tool_call` handler, not in a per-request button.
 
-A headless in-process subagent (spawned via the `task` tool) has no attached human, so an `{ask=...}` verdict is auto-denied; the block reason flows back to the parent session, where the human can decide how to proceed.
+A headless in-process subagent (spawned via the `task` tool) has no attached human, so an `{ask=...}` verdict is auto-denied; the block reason flows back to the parent session, where the human can decide how to proceed. Handlers can detect this ahead of time via `t.headless` and return a tailored `{block=...}` instead.
 
 See [configuration.md](configuration.md#opt-in-command-gate--on_tool_call) for how to write `on_tool_call` handlers.
 

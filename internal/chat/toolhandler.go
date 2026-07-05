@@ -64,6 +64,11 @@ type ToolConfig struct {
 	// Asker confirms an ask-verdict command with a human. Nil ⇒ ask degrades to
 	// deny (headless subagent path).
 	Asker AskFunc
+	// HeadlessAsk is true when no human asker is attached to the session — an
+	// ask verdict would degrade to deny. Forwarded into the on_tool_call chain
+	// as t.headless so Lua policy can branch on it. Independent of the
+	// disable_safety toggle (which affects ask resolution, not human presence).
+	HeadlessAsk bool
 	// StartBashBg launches a background shell command on the host's in-process
 	// job runtime and returns its job id. env holds extra "K=V" entries appended
 	// to the inherited environment (background custom tools inject their params
@@ -86,8 +91,9 @@ type ToolConfig struct {
 	// ask) with the real tool name. The bash family self-gates via this in their
 	// handlers (gateBash / gateInteractiveCommand); every other tool is gated in the
 	// dispatch loop via gateNonBashTool. Nil = no hooks declared (everything runs —
-	// the unsafe default). Config-global.
-	RunToolCall func(ctx context.Context, name, command, argsJSON string) ToolCallVerdict
+	// the unsafe default). Config-global. headless carries HeadlessAsk to the
+	// chain as t.headless.
+	RunToolCall func(ctx context.Context, name, command, argsJSON string, headless bool) ToolCallVerdict
 }
 
 // fs returns the configured FileSystem backend, defaulting to direct OS disk

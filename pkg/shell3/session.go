@@ -688,6 +688,9 @@ func (s *Session) turnConfigLocked() chat.TurnConfig {
 	cfg := s.cfg
 	tc := chat.NewTurnConfig(cfg, s.handlers, shellInteractive)
 	baseAsker := s.asker
+	// t.headless for the on_tool_call chain: no attached asker means an ask
+	// verdict would degrade to deny. Per-session, recomputed every turn.
+	tc.HeadlessAsk = baseAsker == nil
 	tc.Asker = func(ctx context.Context, command, reason string) bool {
 		// SafetyOff is read at ask time (not turn start) so a mid-turn
 		// disable_safety toggle applies to the very next ask.

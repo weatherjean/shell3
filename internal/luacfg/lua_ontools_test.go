@@ -49,7 +49,7 @@ func TestRunToolCallBlock(t *testing.T) {
 				return { block = true, reason = "no rm -rf" }
 			end
 		end)`)
-	v := c.RunToolCall(context.Background(), "bash", "rm -rf /tmp/x", "{}")
+	v := c.RunToolCall(context.Background(), "bash", "rm -rf /tmp/x", "{}", false)
 	if v.Action != ActionBlock || v.Reason != "no rm -rf" {
 		t.Fatalf("want block, got %+v", v)
 	}
@@ -57,7 +57,7 @@ func TestRunToolCallBlock(t *testing.T) {
 
 func TestRunToolCallPassRunsDefaultArgv(t *testing.T) {
 	c := loadOnTools(t, `shell3.on_tool_call(function(t) end)`)
-	v := c.RunToolCall(context.Background(), "bash", "ls -la", "{}")
+	v := c.RunToolCall(context.Background(), "bash", "ls -la", "{}", false)
 	if v.Action != ActionRun || len(v.Argv) != 3 || v.Argv[2] != "ls -la" {
 		t.Fatalf("want run bash -c 'ls -la', got %+v", v)
 	}
@@ -69,7 +69,7 @@ func TestRunToolCallPassRunsDefaultArgv(t *testing.T) {
 func TestRunToolCallRewriteThenRun(t *testing.T) {
 	c := loadOnTools(t, `
 		shell3.on_tool_call(function(t) return { command = "echo " .. t.command } end)`)
-	v := c.RunToolCall(context.Background(), "bash", "hi", "{}")
+	v := c.RunToolCall(context.Background(), "bash", "hi", "{}", false)
 	if v.Action != ActionRun || v.Argv[2] != "echo hi" {
 		t.Fatalf("want rewritten command, got %+v", v)
 	}
@@ -83,7 +83,7 @@ func TestRunToolCallRewriteThenRun(t *testing.T) {
 // closed on it instead of mistaking the argv shape for a pass.
 func TestRunToolCallEmptyRewriteNotPassthrough(t *testing.T) {
 	c := loadOnTools(t, `shell3.on_tool_call(function(t) return { command = "" } end)`)
-	v := c.RunToolCall(context.Background(), "bash", "hi", "{}")
+	v := c.RunToolCall(context.Background(), "bash", "hi", "{}", false)
 	if v.Action != ActionRun || len(v.Argv) != 3 || v.Argv[2] != "" {
 		t.Fatalf("want empty-command run, got %+v", v)
 	}
@@ -95,7 +95,7 @@ func TestRunToolCallEmptyRewriteNotPassthrough(t *testing.T) {
 // A terminal {argv=...} verdict is not a pass either — Passthrough stays false.
 func TestRunToolCallArgvNotPassthrough(t *testing.T) {
 	c := loadOnTools(t, `shell3.on_tool_call(function(t) return { argv = {"bash","-c",""} } end)`)
-	v := c.RunToolCall(context.Background(), "bash", "hi", "{}")
+	v := c.RunToolCall(context.Background(), "bash", "hi", "{}", false)
 	if v.Action != ActionRun || v.Passthrough {
 		t.Fatalf("an argv runner-swap must not be Passthrough, got %+v", v)
 	}
@@ -106,7 +106,7 @@ func TestRunToolCallArgvRunnerSwap(t *testing.T) {
 		shell3.on_tool_call(function(t)
 			return { argv = {"docker","exec","c","bash","-c",t.command} }
 		end)`)
-	v := c.RunToolCall(context.Background(), "bash", "ls", "{}")
+	v := c.RunToolCall(context.Background(), "bash", "ls", "{}", false)
 	if v.Action != ActionRun || v.Argv[0] != "docker" || v.Argv[5] != "ls" {
 		t.Fatalf("want runner swap, got %+v", v)
 	}
@@ -115,7 +115,7 @@ func TestRunToolCallArgvRunnerSwap(t *testing.T) {
 func TestRunToolCallAsk(t *testing.T) {
 	c := loadOnTools(t, `
 		shell3.on_tool_call(function(t) return { ask = "run "..t.command.."?", reason = "denied" } end)`)
-	v := c.RunToolCall(context.Background(), "bash", "git push", "{}")
+	v := c.RunToolCall(context.Background(), "bash", "git push", "{}", false)
 	if v.Action != ActionAsk || v.Prompt != "run git push?" || v.Reason != "denied" {
 		t.Fatalf("want ask, got %+v", v)
 	}
@@ -123,7 +123,7 @@ func TestRunToolCallAsk(t *testing.T) {
 
 func TestRunToolCallHandlerErrorFailsClosed(t *testing.T) {
 	c := loadOnTools(t, `shell3.on_tool_call(function(t) error("boom") end)`)
-	v := c.RunToolCall(context.Background(), "bash", "ls", "{}")
+	v := c.RunToolCall(context.Background(), "bash", "ls", "{}", false)
 	if v.Action != ActionBlock {
 		t.Fatalf("want fail-closed block, got %+v", v)
 	}
@@ -131,7 +131,7 @@ func TestRunToolCallHandlerErrorFailsClosed(t *testing.T) {
 
 func TestRunToolCallUnknownKeyFailsClosed(t *testing.T) {
 	c := loadOnTools(t, `shell3.on_tool_call(function(t) return { unknown = true } end)`)
-	v := c.RunToolCall(context.Background(), "bash", "ls", "{}")
+	v := c.RunToolCall(context.Background(), "bash", "ls", "{}", false)
 	if v.Action != ActionBlock {
 		t.Fatalf("want fail-closed block for unrecognized verdict key, got %+v", v)
 	}
@@ -141,7 +141,7 @@ func TestRunToolCallRewriteThenAskCarriesCommand(t *testing.T) {
 	c := loadOnTools(t, `
 		shell3.on_tool_call(function(t) return { command = "SAFE " .. t.command } end)
 		shell3.on_tool_call(function(t) return { ask = "run " .. t.command .. "?" } end)`)
-	v := c.RunToolCall(context.Background(), "bash", "orig", "{}")
+	v := c.RunToolCall(context.Background(), "bash", "orig", "{}", false)
 	if v.Action != ActionAsk {
 		t.Fatalf("want ask, got %+v", v)
 	}
@@ -190,7 +190,7 @@ func TestRunToolCallFirstTerminalShortCircuits(t *testing.T) {
 		ran_second = false
 		shell3.on_tool_call(function(t) return { block = true, reason = "first" } end)
 		shell3.on_tool_call(function(t) ran_second = true end)`)
-	v := c.RunToolCall(context.Background(), "bash", "ls", "{}")
+	v := c.RunToolCall(context.Background(), "bash", "ls", "{}", false)
 	if v.Action != ActionBlock || v.Reason != "first" {
 		t.Fatalf("want first handler's block, got %+v", v)
 	}
@@ -201,14 +201,43 @@ func TestRunToolCallFirstTerminalShortCircuits(t *testing.T) {
 
 func TestRunToolCallEmptyArgvFailsClosed(t *testing.T) {
 	c := loadOnTools(t, `shell3.on_tool_call(function(t) return { argv = {} } end)`)
-	if v := c.RunToolCall(context.Background(), "bash", "ls", "{}"); v.Action != ActionBlock {
+	if v := c.RunToolCall(context.Background(), "bash", "ls", "{}", false); v.Action != ActionBlock {
 		t.Fatalf("want fail-closed block for empty argv, got %+v", v)
 	}
 }
 
 func TestRunToolCallNonStringArgvFailsClosed(t *testing.T) {
 	c := loadOnTools(t, `shell3.on_tool_call(function(t) return { argv = {"docker", 5} } end)`)
-	if v := c.RunToolCall(context.Background(), "bash", "ls", "{}"); v.Action != ActionBlock {
+	if v := c.RunToolCall(context.Background(), "bash", "ls", "{}", false); v.Action != ActionBlock {
 		t.Fatalf("want fail-closed block for non-string argv element, got %+v", v)
+	}
+}
+
+// TestRunToolCallHeadlessField: t.headless mirrors the per-call headless bit
+// and is branchable from Lua, for bash and non-bash tools alike.
+func TestRunToolCallHeadlessField(t *testing.T) {
+	c := loadOnTools(t, `
+		shell3.on_tool_call(function(t)
+			if type(t.headless) ~= "boolean" then
+				return { block = true, reason = "headless missing" }
+			end
+			if t.headless then
+				return { block = true, reason = "headless" }
+			end
+			return nil
+		end)`)
+	ctx := context.Background()
+	for _, tool := range []struct{ name, command string }{
+		{"bash", "echo hi"},
+		{"read", ""}, // non-bash: t.command is nil, t.headless must still be set
+	} {
+		v := c.RunToolCall(ctx, tool.name, tool.command, "{}", true)
+		if v.Action != ActionBlock || v.Reason != "headless" {
+			t.Fatalf("%s headless=true: want block(headless), got %+v", tool.name, v)
+		}
+		v = c.RunToolCall(ctx, tool.name, tool.command, "{}", false)
+		if v.Action != ActionRun {
+			t.Fatalf("%s headless=false: want pass, got %+v", tool.name, v)
+		}
 	}
 }

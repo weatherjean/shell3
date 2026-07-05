@@ -35,8 +35,9 @@ type ToolCallVerdict struct {
 // the verdict. It locks the VM (gopher-lua is single-threaded) and returns fast:
 // an ask verdict defers the human prompt to the caller, so the lock is never
 // held across a human wait. FAILS CLOSED — a Lua error or malformed return
-// blocks rather than runs.
-func (c *LoadedConfig) RunToolCall(ctx context.Context, name, command, argsJSON string) ToolCallVerdict {
+// blocks rather than runs. headless reports that no human asker is attached
+// (an ask verdict would deny); exposed to handlers as t.headless.
+func (c *LoadedConfig) RunToolCall(ctx context.Context, name, command, argsJSON string, headless bool) ToolCallVerdict {
 	c.vmMu.Lock()
 	defer c.vmMu.Unlock()
 	c.L.SetContext(ctx)
@@ -49,6 +50,7 @@ func (c *LoadedConfig) RunToolCall(ctx context.Context, name, command, argsJSON 
 			c.L.SetField(t, "command", lua.LString(cmd))
 		}
 		c.L.SetField(t, "args", lua.LString(argsJSON))
+		c.L.SetField(t, "headless", lua.LBool(headless))
 		if err := c.L.CallByParam(lua.P{Fn: fn, NRet: 1, Protect: true}, t); err != nil {
 			return ToolCallVerdict{Action: ActionBlock, Reason: "on_tool_call error: " + err.Error()}
 		}

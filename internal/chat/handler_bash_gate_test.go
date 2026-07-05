@@ -15,7 +15,7 @@ func bashArgs(cmd string) json.RawMessage {
 
 func TestBashHandlerBlocks(t *testing.T) {
 	cfg := ToolConfig{
-		RunToolCall: func(ctx context.Context, name, command, argsJSON string) ToolCallVerdict {
+		RunToolCall: func(ctx context.Context, name, command, argsJSON string, _ bool) ToolCallVerdict {
 			return ToolCallVerdict{Action: ActionBlock, Reason: "nope"}
 		},
 	}
@@ -28,7 +28,7 @@ func TestBashHandlerBlocks(t *testing.T) {
 func TestBashHandlerRunnerSwap(t *testing.T) {
 	cfg := ToolConfig{
 		WorkDir: t.TempDir(),
-		RunToolCall: func(ctx context.Context, name, command, argsJSON string) ToolCallVerdict {
+		RunToolCall: func(ctx context.Context, name, command, argsJSON string, _ bool) ToolCallVerdict {
 			return ToolCallVerdict{Action: ActionRun, Argv: []string{"bash", "-c", "echo swapped"}}
 		},
 	}
@@ -42,7 +42,7 @@ func TestBashHandlerAskAllow(t *testing.T) {
 	cfg := ToolConfig{
 		WorkDir: t.TempDir(),
 		Asker:   func(ctx context.Context, cmd, reason string) bool { return true },
-		RunToolCall: func(ctx context.Context, name, command, argsJSON string) ToolCallVerdict {
+		RunToolCall: func(ctx context.Context, name, command, argsJSON string, _ bool) ToolCallVerdict {
 			return ToolCallVerdict{Action: ActionAsk, Prompt: "ok?", Reason: "denied"}
 		},
 	}
@@ -57,7 +57,7 @@ func TestBashHandlerRunnerSwapNoShellReparse(t *testing.T) {
 	sentinel := dir + "/pwned"
 	cfg := ToolConfig{
 		WorkDir: dir,
-		RunToolCall: func(ctx context.Context, name, command, argsJSON string) ToolCallVerdict {
+		RunToolCall: func(ctx context.Context, name, command, argsJSON string, _ bool) ToolCallVerdict {
 			// argv: bash -c 'echo safe' bash '; touch <sentinel>'
 			// $0=bash, $1="; touch <sentinel>" — $1 must NOT be executed.
 			return ToolCallVerdict{Action: ActionRun, Argv: []string{"bash", "-c", "echo safe", "bash", "; touch " + sentinel}}
@@ -75,7 +75,7 @@ func TestBashHandlerRunnerSwapNoShellReparse(t *testing.T) {
 func TestBashHandlerAskDeny(t *testing.T) {
 	cfg := ToolConfig{
 		Asker: func(ctx context.Context, cmd, reason string) bool { return false },
-		RunToolCall: func(ctx context.Context, name, command, argsJSON string) ToolCallVerdict {
+		RunToolCall: func(ctx context.Context, name, command, argsJSON string, _ bool) ToolCallVerdict {
 			return ToolCallVerdict{Action: ActionAsk, Prompt: "ok?", Reason: "denied"}
 		},
 	}

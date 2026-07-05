@@ -64,7 +64,7 @@ func gateBash(ctx context.Context, cfg ToolConfig, name, command, argsJSON strin
 	if cfg.RunToolCall == nil {
 		return []string{"bash", "-c", command}, "", false // no hooks: unsafe default
 	}
-	v := cfg.RunToolCall(ctx, name, command, argsJSON)
+	v := cfg.RunToolCall(ctx, name, command, argsJSON, cfg.HeadlessAsk)
 	allowed, msg := resolveGate(ctx, cfg.Asker, v)
 	if !allowed {
 		return nil, msg, true

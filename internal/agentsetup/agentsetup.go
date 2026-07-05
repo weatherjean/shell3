@@ -355,8 +355,8 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 	}
 	// shell3.on_tool_call: config-global hook chain run before every tool.
 	if p.lc.HasToolCall() {
-		cfg.RunToolCall = func(ctx context.Context, name, command, argsJSON string) chat.ToolCallVerdict {
-			return BridgeVerdict(p.lc.RunToolCall(ctx, name, command, argsJSON))
+		cfg.RunToolCall = func(ctx context.Context, name, command, argsJSON string, headless bool) chat.ToolCallVerdict {
+			return BridgeVerdict(p.lc.RunToolCall(ctx, name, command, argsJSON, headless))
 		}
 	}
 	// shell3.on_tool_result: config-global output-rewrite chain.

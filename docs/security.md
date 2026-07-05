@@ -49,6 +49,7 @@ Each handler receives a table `t` with:
 - `t.name` — the **real** tool name (`"bash"`, `"bash_bg"`, `"shell_interactive"`, `"read"`, `"list_files"`, `"edit_file"`, or a custom tool's name)
 - `t.command` — the bash command string (only for the three bash tools; **nil** otherwise)
 - `t.args` — the raw arguments JSON string (every tool)
+- `t.headless` — `true` when no human asker is attached to the session (in-process subagents, `shell3 run`); an `{ask=...}` verdict would auto-deny there, so branch on it to block with a clearer reason or allow a safe subset. Independent of `:disable_safety` (which affects ask resolution, not human presence).
 
 A handler returns one of:
 
@@ -82,6 +83,9 @@ shell3.on_tool_call(function(t)
     end
     for _, p in ipairs(ASK) do
       if p:match(t.command) then
+        -- Headless (subagent / shell3 run): an ask would auto-deny anyway,
+        -- so block with a reason the parent agent can act on.
+        if t.headless then return { block = true, reason = "needs approval; rerun interactively" } end
         return { ask = "Run?\n" .. t.command, reason = "denied" }
       end
     end
@@ -97,7 +101,9 @@ too — splitting a command across lines can't slip a fragment past a `.*` rule.
 **Headless subagents deny on `{ask=}` matches.** The TUI shows a `y/N` prompt;
 ACP clients receive a `session/request_permission` request. In-process subagents (spawned
 via the `task` tool) run headless, so an `{ask=...}` verdict is auto-denied with
-its `reason`. A prompt nobody answers falls back to deny after the timeout
+its `reason`. Handlers see this ahead of time as `t.headless` and can return a
+tailored `{block=...}` (or allow a safe subset) instead of an ask that will
+never be answered. A prompt nobody answers falls back to deny after the timeout
 (`ask_timeout`, default 300 s). `{block=true}` never prompts — it blocks
 everywhere. Ordinary reads (`cat`, `rg`, `ls`) match nothing and run, so a
 subagent explores freely without being gated.

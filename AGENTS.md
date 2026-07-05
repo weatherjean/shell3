@@ -32,7 +32,9 @@ live-tails it, and ACP renders each job as its own live-updating tool-call card
 **unsafe by default**; the single opt-in hook that gates it is
 `shell3.on_tool_call(fn)` — a chainable handler that runs before **every** tool with
 the real `t.name` (`bash`/`bash_bg`/`shell_interactive`/`read`/`list_files`/`edit_file`/custom;
-`t.command` is the bash text for the three bash tools, nil otherwise) and returns a
+`t.command` is the bash text for the three bash tools, nil otherwise; `t.headless`
+is true when no human asker is attached — subagents, `shell3 run` — so an ask
+would auto-deny) and returns a
 verdict: `nil` (run) / `{command=...}` (rewrite, continue chain — bash tools only) /
 `{argv={...}}` (runner-swap, terminal — `bash`/`bash_bg` only; fails closed for
 `shell_interactive` and non-bash) / `{block=true, reason=...}` (block) /

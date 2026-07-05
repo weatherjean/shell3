@@ -91,7 +91,7 @@ func gateInteractiveCommand(ctx context.Context, cfg ToolConfig, command, argsJS
 	if cfg.RunToolCall == nil {
 		return command, "", false // no hooks: unsafe default
 	}
-	v := cfg.RunToolCall(ctx, "shell_interactive", command, argsJSON)
+	v := cfg.RunToolCall(ctx, "shell_interactive", command, argsJSON, cfg.HeadlessAsk)
 	allowed, msg := resolveGate(ctx, cfg.Asker, v)
 	if !allowed {
 		return "", msg, true
@@ -125,7 +125,7 @@ func gateNonBashTool(ctx context.Context, cfg ToolConfig, name, argsJSON string)
 	if cfg.RunToolCall == nil {
 		return "", false // no hooks: ungated
 	}
-	v := cfg.RunToolCall(ctx, name, "", argsJSON)
+	v := cfg.RunToolCall(ctx, name, "", argsJSON, cfg.HeadlessAsk)
 	allowed, msg := resolveGate(ctx, cfg.Asker, v)
 	if !allowed {
 		return msg, true

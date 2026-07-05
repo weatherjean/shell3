@@ -4,7 +4,8 @@
 `shell3.lua`). It fires before **every** tool, and `t.name` is the real tool name.
 For sandboxing you care about the three bash tools — `bash`, `bash_bg`, and
 `shell_interactive` — so guard on them. A handler receives `t` with `t.name`,
-`t.command` (the bash command for those three tools; `nil` otherwise), and `t.args`;
+`t.command` (the bash command for those three tools; `nil` otherwise), `t.args`,
+and `t.headless` (`true` when no human is attached — subagents, `shell3 run`);
 it returns one of:
 
 - `nil` — pass (continue the chain / run)
