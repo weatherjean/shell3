@@ -15,8 +15,31 @@ import (
 )
 
 // FileSystem is the pluggable file-I/O backend for the read and edit_file
-// tools, settable per session via SessionOpts.FS. Nil ⇒ direct OS disk I/O.
-type FileSystem = fsx.FileSystem
+// tools, settable per session via SessionOpts.FS (or Spec.FS). Nil ⇒ direct
+// OS disk I/O. bash always hits the real disk regardless.
+//
+// The contract is whole-file text I/O over absolute paths — path resolution
+// (~ expansion, workdir joining) happens before a backend is called.
+// ReadTextFile must return an error satisfying errors.Is(err, os.ErrNotExist)
+// for a missing file (edit_file's create-vs-edit detection depends on it) and
+// errors.Is(err, ErrIsDir) for a directory.
+//
+// Defined here (rather than aliasing the internal implementation package) so
+// the public API carries its own browsable contract; internal backends
+// satisfy it structurally.
+type FileSystem interface {
+	ReadTextFile(ctx context.Context, absPath string) (string, error)
+	WriteTextFile(ctx context.Context, absPath, content string) error
+}
+
+// ErrIsDir is the sentinel a FileSystem's ReadTextFile returns (wrapped) when
+// the path is a directory. Custom backends return it with fmt.Errorf("...: %w",
+// shell3.ErrIsDir) or directly.
+var ErrIsDir = fsx.ErrIsDir
+
+// The internal OS backend must satisfy the public contract (they are
+// structurally identical interfaces; this pins it at compile time).
+var _ FileSystem = fsx.OS{}
 
 // Spec configures Run / Start. Prompt is used by Run only.
 type Spec struct {
@@ -77,7 +100,7 @@ type Session struct {
 
 	// fs is SessionOpts.FS, threaded into every turn's TurnConfig.FS (see
 	// turnConfig). nil keeps the OS disk backend.
-	fs fsx.FileSystem
+	fs FileSystem
 
 	// asker is Spec.Asker, threaded into every turn's TurnConfig.Asker (see
 	// turnConfig). nil keeps on_tool_call ask-verdicts denying.

@@ -10,7 +10,6 @@ import (
 
 	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/chat"
-	"github.com/weatherjean/shell3/internal/fsx"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/strutil"
@@ -41,7 +40,7 @@ type SessionOpts struct {
 	// FS is the file-I/O backend for this session's read/edit_file tools.
 	// Nil ⇒ OS disk. The ACP front-end sets this to an editor-buffer backend
 	// when the client advertises the fs capability.
-	FS fsx.FileSystem
+	FS FileSystem
 	// Asker confirms an on_tool_call ask-verdict command with a human (true = allow).
 	Asker func(ctx context.Context, command, reason string) bool
 	// ResumeID reloads a stored session's messages when non-empty.
