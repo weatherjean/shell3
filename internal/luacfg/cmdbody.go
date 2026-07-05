@@ -2,7 +2,7 @@ package luacfg
 
 import (
 	"bytes"
-	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -12,7 +12,7 @@ import (
 // directory and returns its trimmed stdout. It backs the body_cmd/prompt_cmd
 // config options: a skill body or agent/subagent prompt sourced from a shell
 // command (typically `cat some-file.md`) instead of an inline Lua string.
-// Resolution happens at load time only, hence context.Background(). The caller
+// Resolution happens once at load time, synchronously. The caller
 // passes cwd = the config directory so relative paths resolve next to
 // shell3.lua / .env / lib.
 //
@@ -20,7 +20,7 @@ import (
 // diagnosis), and empty stdout (after trimming) is also an error — an empty
 // prompt/body is never a valid resolution.
 func runBodyCmd(workdir, command string) (string, error) {
-	cmd := exec.CommandContext(context.Background(), "bash", "-c", command)
+	cmd := exec.Command("bash", "-c", command)
 	cmd.Dir = workdir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -34,7 +34,7 @@ func runBodyCmd(workdir, command string) (string, error) {
 	}
 	out := strings.TrimSpace(stdout.String())
 	if out == "" {
-		return "", fmt.Errorf("command produced no output")
+		return "", errors.New("command produced no output")
 	}
 	return out, nil
 }

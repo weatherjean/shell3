@@ -36,7 +36,7 @@ func TestSkillPathResolvesToAbs(t *testing.T) {
 local h = shell3.skill({ name="history", description="d", path="lib/skills/history.md" })
 shell3.agent({ name="code", model="m", prompt="p", skills={ h } })
 `, map[string]string{"lib/skills/history.md": "the history body\n"})
-	c, err := Load(p, filepath.Dir(p))
+	c, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestSkillMissingPathFileErrors(t *testing.T) {
 	p := writeSkillConfig(t, skillHdr+`
 shell3.skill({ name="x", description="d", path="lib/skills/nope.md" })
 `, nil)
-	if _, err := Load(p, filepath.Dir(p)); err == nil {
+	if _, err := Load(p); err == nil {
 		t.Fatal("missing skill file should fail Load")
 	}
 }
@@ -60,7 +60,7 @@ func TestSkillEmptyPathFileErrors(t *testing.T) {
 	p := writeSkillConfig(t, skillHdr+`
 shell3.skill({ name="x", description="d", path="empty.md" })
 `, map[string]string{"empty.md": "   \n"})
-	if _, err := Load(p, filepath.Dir(p)); err == nil {
+	if _, err := Load(p); err == nil {
 		t.Fatal("empty skill file should fail Load")
 	}
 }
@@ -69,7 +69,7 @@ func TestSkillNoPathErrors(t *testing.T) {
 	p := writeSkillConfig(t, skillHdr+`
 shell3.skill({ name="x", description="d" })
 `, nil)
-	if _, err := Load(p, filepath.Dir(p)); err == nil {
+	if _, err := Load(p); err == nil {
 		t.Fatal("skill with no path should error")
 	}
 }
@@ -79,7 +79,7 @@ func TestSkillIndexUsesAbsPath(t *testing.T) {
 local h = shell3.skill({ name="history", description="query sqlite", path="lib/skills/history.md" })
 shell3.agent({ name="code", model="m", prompt="BASE", skills={ h } })
 `, map[string]string{"lib/skills/history.md": "body\n"})
-	c, err := Load(p, filepath.Dir(p))
+	c, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
 	}

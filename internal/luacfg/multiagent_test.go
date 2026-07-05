@@ -26,7 +26,7 @@ func TestMultipleAgentsAccumulateFirstActive(t *testing.T) {
 shell3.agent({ name="build", model="opus",  prompt="b" })
 shell3.agent({ name="plan",  model="haiku", prompt="p" })
 `)
-	c, err := Load(p, filepath.Dir(p))
+	c, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestDuplicateAgentNameAutoSuffix(t *testing.T) {
 shell3.agent({ name="dup", model="opus", prompt="a" })
 shell3.agent({ name="dup", model="opus", prompt="b" })
 `)
-	c, err := Load(p, filepath.Dir(p))
+	c, err := Load(p)
 	if err != nil {
 		t.Fatalf("duplicate agent name should auto-suffix, not error: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestAgentModelDefaultsToFirstModel(t *testing.T) {
 	p := writeConfig(t, twoModelsHdr+`
 shell3.agent({ name="build", prompt="b" })
 `)
-	c, err := Load(p, filepath.Dir(p))
+	c, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestSingleAgentBackCompat(t *testing.T) {
 	p := writeConfig(t, twoModelsHdr+`
 shell3.agent({ name="base", model="opus", prompt="x" })
 `)
-	c, err := Load(p, filepath.Dir(p))
+	c, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ shell3.model("m", { base_url = "http://x", api_key = "k", model = "mm" })
 shell3.agent({ name = "code", model = "m", prompt = "c" })
 shell3.agent({ name = "plan", model = "m", prompt = "p" })
 `)
-	c, err := Load(p, filepath.Dir(p))
+	c, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
 	}

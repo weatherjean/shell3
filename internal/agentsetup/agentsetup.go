@@ -9,7 +9,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
+
 	"strings"
 
 	"github.com/weatherjean/shell3/internal/adapter/openai"
@@ -46,8 +46,9 @@ type Options struct {
 // shared across sessions.
 //
 // Lifetime: Parts must not be used after the cleanup returned by BuildParts has
-// run. The cleanup closes the Lua state, proxies, and log; the runs store has no
-// handle to close. Any method call after cleanup has undefined behaviour.
+// run. The cleanup closes the Lua state and the log; the runs store has no
+// handle to close and run_proxy processes are detached (never reaped here).
+// Any method call after cleanup has undefined behaviour.
 type Parts struct {
 	lc      *luacfg.LoadedConfig
 	st      *runs.Store
@@ -152,10 +153,6 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 
 	customDefs := p.lc.CustomToolsFor(a.CustomTools)
 	toolDefs := luacfg.ToolDefs(a.Gates, customDefs)
-	toolNames := make([]string, 0, len(toolDefs))
-	for _, t := range toolDefs {
-		toolNames = append(toolNames, t.Name)
-	}
 
 	// Inject the `task` tool when the agent has both the Delegation toggle and a
 	// non-empty Subagents allowlist — exactly the same gate that the per-session
@@ -165,7 +162,6 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 	// with no callable tool).
 	if a.Delegation && len(a.Subagents) > 0 {
 		toolDefs = append(toolDefs, luacfg.TaskTool, luacfg.TaskListTool, luacfg.TaskStatusTool, luacfg.TaskCancelTool)
-		toolNames = append(toolNames, luacfg.TaskTool.Name, luacfg.TaskListTool.Name, luacfg.TaskStatusTool.Name, luacfg.TaskCancelTool.Name)
 	}
 
 	// The per-session Delegation context (concrete sink/config/binary paths +
@@ -189,9 +185,9 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 	// separate, lower-precedence branch in turn.go), so a stub never shadows a
 	// real tool at dispatch time.
 	if stubs := p.lc.StubNames(); len(stubs) > 0 {
-		present := make(map[string]bool, len(toolNames))
-		for _, n := range toolNames {
-			present[n] = true
+		present := make(map[string]bool, len(toolDefs))
+		for _, t := range toolDefs {
+			present[t.Name] = true
 		}
 		for name := range stubs {
 			if present[name] {
@@ -202,8 +198,14 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 				Description: "stub: not a real tool — redirects you to bash/edit_file",
 				Parameters:  map[string]any{"type": "object", "properties": map[string]any{}},
 			})
-			toolNames = append(toolNames, name)
 		}
+	}
+
+	// toolNames is exactly toolDefs' names — derived once at the end so the
+	// two can never skew.
+	toolNames := make([]string, 0, len(toolDefs))
+	for _, t := range toolDefs {
+		toolNames = append(toolNames, t.Name)
 	}
 
 	return chat.ActiveAgent{
@@ -292,25 +294,34 @@ type SessionOptions struct {
 	OutPath  string
 }
 
-// SessionConfig derives a per-session chat.Config from the shared parts.
-// The returned config embeds per-session closures (RefreshPrompt, SwitchAgent)
-// that consult only declared config plus the session's own agent choice.
-// bridgeToolCallAction maps a luacfg verdict action to the chat package's
-// equivalent. The two enums are independent iota blocks; an explicit mapping
-// (rather than a numeric cast) keeps this security boundary correct if either is
-// ever reordered, and an unrecognized action fails closed (Block) rather than
-// silently falling through to Run.
-func bridgeToolCallAction(a luacfg.ToolCallAction) chat.ToolCallAction {
-	switch a {
+// BridgeVerdict maps a luacfg on_tool_call verdict to the chat package's
+// equivalent, field by field. The two Action enums are independent iota
+// blocks; an explicit mapping (rather than a numeric cast) keeps this security
+// boundary correct if either is ever reordered, and an unrecognized action
+// fails closed (ActionBlock) rather than silently falling through to
+// ActionRun. Exported so integration tests exercise the same bridge
+// production uses instead of hand-copying it.
+func BridgeVerdict(v luacfg.ToolCallVerdict) chat.ToolCallVerdict {
+	action := chat.ActionBlock // fail closed on any unmapped action
+	switch v.Action {
 	case luacfg.ActionRun:
-		return chat.ActionRun
+		action = chat.ActionRun
 	case luacfg.ActionAsk:
-		return chat.ActionAsk
-	default: // ActionBlock or any unmapped future action → fail closed
-		return chat.ActionBlock
+		action = chat.ActionAsk
+	}
+	return chat.ToolCallVerdict{
+		Action:      action,
+		Argv:        v.Argv,
+		Prompt:      v.Prompt,
+		Reason:      v.Reason,
+		AskTimeout:  v.AskTimeout,
+		Passthrough: v.Passthrough,
 	}
 }
 
+// SessionConfig derives a per-session chat.Config from the shared parts.
+// The returned config embeds per-session closures (RefreshPrompt, SwitchAgent)
+// that consult only declared config plus the session's own agent choice.
 func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 	workdir := so.WorkDir
 	if workdir == "" {
@@ -345,15 +356,7 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 	// shell3.on_tool_call: config-global hook chain run before every tool.
 	if p.lc.HasToolCall() {
 		cfg.RunToolCall = func(ctx context.Context, name, command, argsJSON string) chat.ToolCallVerdict {
-			v := p.lc.RunToolCall(ctx, name, command, argsJSON)
-			return chat.ToolCallVerdict{
-				Action:      bridgeToolCallAction(v.Action),
-				Argv:        v.Argv,
-				Prompt:      v.Prompt,
-				Reason:      v.Reason,
-				AskTimeout:  v.AskTimeout,
-				Passthrough: v.Passthrough,
-			}
+			return BridgeVerdict(p.lc.RunToolCall(ctx, name, command, argsJSON))
 		}
 	}
 	// shell3.on_tool_result: config-global output-rewrite chain.
@@ -380,7 +383,9 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 }
 
 // BuildParts assembles the shared runtime parts. The returned cleanup closes
-// the store, Lua state, proxies, and log; callers MUST invoke it once.
+// the Lua state and the log; callers MUST invoke it once. (The runs store has
+// no handle to close, and run_proxy processes are detached fire-and-forget —
+// see openStore and modelproxy.)
 func BuildParts(opts Options) (*Parts, func(), error) {
 	b := &builder{opts: opts}
 	noop := func() {}
@@ -466,7 +471,7 @@ func (b *builder) openLog() {
 // loadConfig loads shell3.lua. The Lua/.env workdir is the config file's
 // directory; the agent's bash cwd stays opts.CWD. These differ on purpose.
 func (b *builder) loadConfig() error {
-	lc, err := luacfg.Load(b.configPath, filepath.Dir(b.configPath))
+	lc, err := luacfg.Load(b.configPath)
 	if err != nil {
 		return err
 	}
@@ -526,9 +531,13 @@ func ExpandConfigName(flag, homeDir string) string {
 // ResolveConfigPath returns the shell3.lua to load: the explicit flag (a name
 // like "code" → ~/.shell3/code.lua, or a literal *.lua path), else the default
 // ~/.shell3/shell3.lua. It does NOT look in cwd. Returns an error when the
-// resolved file does not exist.
+// resolved file does not exist — catching a typo'd --config here, with a clear
+// message, instead of surfacing it later as a raw Lua DoFile error.
 func ResolveConfigPath(flag, homeDir string) (string, error) {
 	if expanded := ExpandConfigName(flag, homeDir); expanded != "" {
+		if !fileExists(expanded) {
+			return "", fmt.Errorf("no such config: %s — run 'shell3 boot' to create one, or check the --config name", expanded)
+		}
 		return expanded, nil
 	}
 	global := paths.NewGlobal(homeDir).ConfigFile

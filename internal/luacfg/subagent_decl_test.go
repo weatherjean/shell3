@@ -25,7 +25,7 @@ shell3.agent({
 	tools = { bash = true, subagents = { researcher } },
 })
 `)
-	c, err := Load(dir+"/shell3.lua", dir)
+	c, err := Load(dir + "/shell3.lua")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestSubagent_MissingDescriptionErrors(t *testing.T) {
 shell3.subagent({ name = "noDesc", model = "m", prompt = "p" })
 shell3.agent({ name = "code", model = "m", prompt = "c" })
 `)
-	_, err := Load(dir+"/shell3.lua", dir)
+	_, err := Load(dir + "/shell3.lua")
 	if err == nil {
 		t.Fatal("expected error for missing description")
 	}
@@ -95,7 +95,7 @@ shell3.subagent({
 })
 shell3.agent({ name = "code", model = "m", prompt = "c" })
 `)
-	_, err := Load(dir+"/shell3.lua", dir)
+	_, err := Load(dir + "/shell3.lua")
 	if err == nil {
 		t.Fatal("expected error for nested subagents")
 	}
@@ -116,7 +116,7 @@ shell3.agent({
 	tools = { subagents = { ghost } },
 })
 `)
-	_, err := Load(dir+"/shell3.lua", dir)
+	_, err := Load(dir + "/shell3.lua")
 	if err == nil {
 		t.Fatal("expected error for unknown subagent reference")
 	}
@@ -131,7 +131,7 @@ func TestSubagent_NameCollisionWithAgentAutoSuffixes(t *testing.T) {
 shell3.agent({ name = "dup", model = "m", prompt = "a" })
 shell3.subagent({ name = "dup", description = "a duplicate", model = "m", prompt = "p" })
 `)
-	c, err := Load(dir+"/shell3.lua", dir)
+	c, err := Load(dir + "/shell3.lua")
 	if err != nil {
 		t.Fatalf("agent/subagent name collision should auto-suffix, not error: %v", err)
 	}
@@ -154,7 +154,7 @@ shell3.agent({
 	tools = { bash = true, subagents = true },
 })
 `)
-	_, err := Load(dir+"/shell3.lua", dir)
+	_, err := Load(dir + "/shell3.lua")
 	if err == nil {
 		t.Fatal("expected error for non-table subagents on an agent")
 	}
@@ -174,7 +174,7 @@ shell3.agent({
 	tools = { bash = true, subagents = { "explorer" } },
 })
 `)
-	_, err := Load(dir+"/shell3.lua", dir)
+	_, err := Load(dir + "/shell3.lua")
 	if err == nil {
 		t.Fatal("expected error for bare-string subagents array element")
 	}
@@ -193,7 +193,7 @@ shell3.agent({
 	tools = { bash = true, subagents = {} },
 })
 `)
-	c, err := Load(dir+"/shell3.lua", dir)
+	c, err := Load(dir + "/shell3.lua")
 	if err != nil {
 		t.Fatalf("expected no error for empty subagents table; got: %v", err)
 	}
@@ -219,7 +219,7 @@ shell3.subagent({
 })
 shell3.agent({ name = "code", model = "m", prompt = "c" })
 `)
-	c, err := Load(dir+"/shell3.lua", dir)
+	c, err := Load(dir + "/shell3.lua")
 	if err != nil {
 		t.Fatalf("expected no error for subagents=false in subagent tools; got: %v", err)
 	}

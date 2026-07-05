@@ -160,7 +160,7 @@ func TestBootEndToEnd(t *testing.T) {
 	}
 
 	// The end-to-end payoff: the generated config loads with an empty api_key.
-	c, err := luacfg.Load(resolved, dir)
+	c, err := luacfg.Load(resolved)
 	if err != nil {
 		t.Fatalf("generated config failed to load: %v", err)
 	}

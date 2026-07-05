@@ -28,7 +28,7 @@ shell3.agent({ name="a", model="m", prompt="p", tools={} })
 	}
 	defer os.Chdir(prev)
 
-	c, err := Load(filepath.Join(dir, "shell3.lua"), dir)
+	c, err := Load(filepath.Join(dir, "shell3.lua"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestRequirePackageInit(t *testing.T) {
 require("providers")
 shell3.agent({ name="a", model="m", prompt="p", tools={} })
 `)
-	c, err := Load(filepath.Join(dir, "shell3.lua"), dir)
+	c, err := Load(filepath.Join(dir, "shell3.lua"))
 	if err != nil {
 		t.Fatal(err)
 	}

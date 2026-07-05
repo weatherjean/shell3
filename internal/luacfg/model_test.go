@@ -17,7 +17,7 @@ shell3.model("main", {
 })
 shell3.agent({ name="a", model="main", prompt="hi", tools={} })
 `)
-	c, err := Load(dir+"/shell3.lua", dir)
+	c, err := Load(dir + "/shell3.lua")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ shell3.model("proxied", {
 })
 shell3.agent({ name="a", model="proxied", prompt="hi", tools={} })
 `)
-	c, err := Load(dir+"/shell3.lua", dir)
+	c, err := Load(dir + "/shell3.lua")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ shell3.model("dup", { base_url="u", api_key="k", model="x" })
 shell3.model("dup", { base_url="u2", api_key="k2", model="x2" })
 shell3.agent({ name="a", model="dup", prompt="p", tools={} })
 `)
-	_, err := Load(dir+"/shell3.lua", dir)
+	_, err := Load(dir + "/shell3.lua")
 	if err == nil || !contains(err.Error(), `dup`) {
 		t.Fatalf("want duplicate-model error, got %v", err)
 	}
@@ -70,7 +70,7 @@ shell3.agent({ name="a", model="dup", prompt="p", tools={} })
 func TestLoadModelUnknownKey(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "shell3.lua", `shell3.model("m", { base_url="u", api_key="k", model="x", nope=1 })`)
-	_, err := Load(dir+"/shell3.lua", dir)
+	_, err := Load(dir + "/shell3.lua")
 	if err == nil || !contains(err.Error(), `unknown key "nope"`) {
 		t.Fatalf("want strict-key failure, got %v", err)
 	}
@@ -82,7 +82,7 @@ func TestAgentUnknownKey(t *testing.T) {
 shell3.model("m", { base_url="u", api_key="k", model="x" })
 shell3.agent({ name="a", model="m", prompt="p", tools={}, bogus=1 })
 `)
-	_, err := Load(dir+"/shell3.lua", dir)
+	_, err := Load(dir + "/shell3.lua")
 	if err == nil || !contains(err.Error(), `unknown key "bogus"`) {
 		t.Fatalf("want strict-key failure on agent, got %v", err)
 	}
@@ -94,7 +94,7 @@ func TestAgentToolsUnknownKey(t *testing.T) {
 shell3.model("m", { base_url="u", api_key="k", model="x" })
 shell3.agent({ name="a", model="m", prompt="p", tools={ edt=true } })
 `)
-	_, err := Load(dir+"/shell3.lua", dir)
+	_, err := Load(dir + "/shell3.lua")
 	if err == nil || !contains(err.Error(), `unknown key "edt"`) {
 		t.Fatalf("want strict-key failure on agent.tools, got %v", err)
 	}

@@ -1,7 +1,6 @@
 package luacfg
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -11,7 +10,7 @@ const toolHdr = `shell3.model("m", { base_url="http://x", api_key="k", model="id
 func loadToolCfg(t *testing.T, lua string) *LoadedConfig {
 	t.Helper()
 	p := writeConfig(t, toolHdr+lua)
-	c, err := Load(p, filepath.Dir(p))
+	c, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,14 +40,14 @@ func TestToolHandlerKeyRejected(t *testing.T) {
 	p := writeConfig(t, toolHdr+`
 shell3.tool({ name="x", description="d", handler=function() return "" end })
 `)
-	if _, err := Load(p, filepath.Dir(p)); err == nil {
+	if _, err := Load(p); err == nil {
 		t.Fatal("handler key should be rejected now")
 	}
 }
 
 func TestToolNoCommandErrors(t *testing.T) {
 	p := writeConfig(t, toolHdr+`shell3.tool({ name="x", description="d" })`)
-	if _, err := Load(p, filepath.Dir(p)); err == nil {
+	if _, err := Load(p); err == nil {
 		t.Fatal("tool without command should error")
 	}
 }
@@ -58,7 +57,7 @@ func TestToolUppercaseParamRejected(t *testing.T) {
 shell3.tool({ name="x", description="d", command="echo hi",
   parameters={ type="object", properties={ Query={ type="string" } } } })
 `)
-	if _, err := Load(p, filepath.Dir(p)); err == nil {
+	if _, err := Load(p); err == nil {
 		t.Fatal("uppercase param name should be rejected")
 	}
 }

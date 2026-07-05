@@ -112,11 +112,15 @@ func writeFile(path string, content []byte, force bool) error {
 			return fmt.Errorf("scaffold: stat %s: %w", path, err)
 		}
 	}
-	// 0700: everything scaffold writes lives under ~/.shell3, which also holds
-	// the .env secrets file — keep the whole tree user-private and consistent
-	// with bootstrap.EnsureGlobal (which creates ~/.shell3 at 0700).
+	// Directories are 0700: everything scaffold writes lives under ~/.shell3,
+	// which also holds the .env secrets file — the user-private parent gates
+	// access even though the files themselves are 0644, matching
+	// bootstrap.EnsureGlobal (which creates ~/.shell3 at 0700).
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return err
+		return fmt.Errorf("scaffold: mkdir %s: %w", filepath.Dir(path), err)
 	}
-	return os.WriteFile(path, content, 0644)
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		return fmt.Errorf("scaffold: write %s: %w", path, err)
+	}
+	return nil
 }

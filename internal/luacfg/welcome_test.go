@@ -12,7 +12,7 @@ shell3.welcome("first")
 shell3.welcome("\27[31m✦ mine ✦\27[0m")
 shell3.agent({ name="a", model="m", prompt="p", tools={ bash=true } })
 `)
-	c, err := Load(dir+"/shell3.lua", dir)
+	c, err := Load(dir + "/shell3.lua")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ shell3.model("m", { base_url="u", api_key="k", model="x" })
 shell3.welcome(io.popen("echo hello-from-cmd"):read("*a"))
 shell3.agent({ name="a", model="m", prompt="p", tools={ bash=true } })
 `)
-	c, err := Load(dir+"/shell3.lua", dir)
+	c, err := Load(dir + "/shell3.lua")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ shell3.model("m", { base_url="u", api_key="k", model="x" })
 shell3.welcome({ nope = true })
 shell3.agent({ name="a", model="m", prompt="p", tools={ bash=true } })
 `)
-	if _, err := Load(dir+"/shell3.lua", dir); err == nil {
+	if _, err := Load(dir + "/shell3.lua"); err == nil {
 		t.Fatal("expected error for non-string welcome argument, got nil")
 	}
 }

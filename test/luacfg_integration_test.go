@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
@@ -24,30 +25,6 @@ func writeTmpFile(t *testing.T, dir, name, body string) string {
 		t.Fatal(err)
 	}
 	return p
-}
-
-// bridgeVerdict mirrors agentsetup.bridgeToolCallAction: an explicit, fail-closed
-// luacfg→chat mapping (any unmapped action → Block) that carries every field,
-// including Passthrough. These integration tests wire on_tool_call through this
-// rather than a raw chat.ToolCallAction(v.Action) cast, so they exercise the same
-// fail-closed boundary — and the same Passthrough plumbing — the production bridge
-// guarantees, instead of relying on the two iota blocks happening to align.
-func bridgeVerdict(v luacfg.ToolCallVerdict) chat.ToolCallVerdict {
-	action := chat.ActionBlock // fail closed on any unmapped action
-	switch v.Action {
-	case luacfg.ActionRun:
-		action = chat.ActionRun
-	case luacfg.ActionAsk:
-		action = chat.ActionAsk
-	}
-	return chat.ToolCallVerdict{
-		Action:      action,
-		Argv:        v.Argv,
-		Prompt:      v.Prompt,
-		Reason:      v.Reason,
-		AskTimeout:  v.AskTimeout,
-		Passthrough: v.Passthrough,
-	}
 }
 
 // TestLuacfgIntegration_OnToolCallAndCustomTool loads a luacfg config and drives a
@@ -104,7 +81,7 @@ shell3.agent({
 })
 `)
 
-	lc, err := luacfg.Load(dir+"/shell3.lua", dir)
+	lc, err := luacfg.Load(dir + "/shell3.lua")
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -253,7 +230,7 @@ func runToolCallTurn(t *testing.T, lc *luacfg.LoadedConfig, dir, prompt string, 
 		ToolConfig: chat.ToolConfig{
 			WorkDir: dir,
 			RunToolCall: func(ctx context.Context, name, command, argsJSON string) chat.ToolCallVerdict {
-				return bridgeVerdict(lc.RunToolCall(ctx, name, command, argsJSON))
+				return agentsetup.BridgeVerdict(lc.RunToolCall(ctx, name, command, argsJSON))
 			},
 		},
 		Handlers: chat.NewHandlers(),
@@ -304,7 +281,7 @@ end)
 shell3.agent({ name = "a", model = "m", prompt = "p", tools = { bash = true } })
 `)
 
-	lc, err := luacfg.Load(dir+"/shell3.lua", dir)
+	lc, err := luacfg.Load(dir + "/shell3.lua")
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -335,7 +312,7 @@ shell3.agent({ name = "a", model = "m", prompt = "p", tools = { bash = true } })
 		ToolConfig: chat.ToolConfig{
 			WorkDir: dir,
 			RunToolCall: func(ctx context.Context, name, command, argsJSON string) chat.ToolCallVerdict {
-				return bridgeVerdict(lc.RunToolCall(ctx, name, command, argsJSON))
+				return agentsetup.BridgeVerdict(lc.RunToolCall(ctx, name, command, argsJSON))
 			},
 		},
 		Handlers: chat.NewHandlers(),

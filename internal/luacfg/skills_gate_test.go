@@ -15,7 +15,7 @@ local s = shell3.skill({ name="web-search", description="searches the web", path
 shell3.model("m", { base_url="u", api_key="k", model="x" })
 shell3.agent({ name="a", model="m", prompt="p", tools={ skill=false }, skills={ s } })
 `)
-	c, err := Load(dir+"/shell3.lua", dir)
+	c, err := Load(dir + "/shell3.lua")
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -46,7 +46,7 @@ local s = shell3.skill({ name="web-search", description="searches the web", path
 shell3.model("m", { base_url="u", api_key="k", model="x" })
 shell3.agent({ name="a", model="m", prompt="p", tools={}, skills={ s } })
 `)
-	c, err := Load(dir+"/shell3.lua", dir)
+	c, err := Load(dir + "/shell3.lua")
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -77,7 +77,7 @@ local s = shell3.skill({ name="web-search", description="searches the web", path
 shell3.model("m", { base_url="u", api_key="k", model="x" })
 shell3.agent({ name="a", model="m", prompt="p", tools={ skill=true }, skills={ s } })
 `)
-	c, err := Load(dir+"/shell3.lua", dir)
+	c, err := Load(dir + "/shell3.lua")
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -98,7 +98,7 @@ local s = shell3.skill({ name="s", description="d", path="s.md" })
 shell3.model("m", { base_url="u", api_key="k", model="x" })
 shell3.agent({ name="a", model="m", prompt="p", tools={ skill=false }, skills={ s } })
 `)
-	_, err := Load(dir+"/shell3.lua", dir)
+	_, err := Load(dir + "/shell3.lua")
 	if err != nil {
 		t.Fatalf("tools={skill=false} should not cause an error, got: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestBogusToolKeyStillRejected(t *testing.T) {
 shell3.model("m", { base_url="u", api_key="k", model="x" })
 shell3.agent({ name="a", model="m", prompt="p", tools={ skil=false } })
 `)
-	_, err := Load(dir+"/shell3.lua", dir)
+	_, err := Load(dir + "/shell3.lua")
 	if err == nil {
 		t.Fatal("expected unknown-key error for tools={skil=false}, got nil")
 	}

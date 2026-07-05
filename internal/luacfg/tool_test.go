@@ -13,7 +13,7 @@ local echo = shell3.tool({
 shell3.model("m", { base_url="u", api_key="k", model="x" })
 shell3.agent({ name="a", model="m", prompt="p", tools={ custom={ echo } } })
 `)
-	c, err := Load(dir+"/shell3.lua", dir)
+	c, err := Load(dir + "/shell3.lua")
 	if err != nil {
 		t.Fatal(err)
 	}
