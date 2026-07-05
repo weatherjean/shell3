@@ -12,10 +12,12 @@ func TestTruncate(t *testing.T) {
 		max  int
 		want string
 	}{
-		{"hello", 10, "hello"},       // under cap: unchanged
-		{"hello", 5, "hello"},        // exactly at cap: unchanged
-		{"hello world", 5, "hello…"}, // cut with ellipsis
-		{"héllo", 2, "h…"},           // é spans bytes 1-2: cut backs up to the rune boundary
+		{"hello", 10, "hello"},    // under cap: unchanged
+		{"hello", 5, "hello"},     // exactly at cap: unchanged
+		{"hello world", 5, "he…"}, // cut with ellipsis; result stays within max bytes
+		{"héllo", 4, "h…"},        // é spans bytes 1-2: cut backs up to the rune boundary
+		{"hello", 2, "he"},        // max below the 3-byte ellipsis: cut, no marker
+		{"hello world", 0, ""},    // max <= 0: empty
 		{"", 5, ""},
 	} {
 		if got := Truncate(tc.in, tc.max); got != tc.want {
@@ -78,9 +80,12 @@ func TestTail_RuneSafety(t *testing.T) {
 // TestTruncate_RuneSafety pins the mid-rune back-off.
 func TestTruncate_RuneSafety(t *testing.T) {
 	s := strings.Repeat("é", 100)
-	got := Truncate(s, 5) // 5 bytes lands mid-rune; must back off to 4
-	if got != strings.Repeat("é", 2)+"…" {
-		t.Errorf("Truncate = %q, want two é + ellipsis", got)
+	got := Truncate(s, 6) // ellipsis leaves 3 bytes, which lands mid-rune; must back off to 2
+	if got != "é…" {
+		t.Errorf("Truncate = %q, want one é + ellipsis", got)
+	}
+	if len(got) > 6 {
+		t.Errorf("Truncate result %d bytes, exceeds max 6", len(got))
 	}
 }
 

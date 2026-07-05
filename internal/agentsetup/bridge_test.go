@@ -7,23 +7,31 @@ import (
 	"github.com/weatherjean/shell3/internal/luacfg"
 )
 
-// bridgeToolCallAction maps across two independent iota enums on a security
-// boundary; verify every action maps correctly and an unknown action fails
-// CLOSED (Block) rather than silently running.
-func TestBridgeToolCallAction(t *testing.T) {
+// BridgeVerdict maps across two independent iota enums on a security
+// boundary; verify every action maps correctly, an unknown action fails
+// CLOSED (ActionBlock) rather than silently running, and the verdict's other
+// fields ride across intact.
+func TestBridgeVerdict(t *testing.T) {
 	for _, c := range []struct {
 		in   luacfg.ToolCallAction
 		want chat.ToolCallAction
 	}{
-		{luacfg.ActionRun, chat.Run},
-		{luacfg.ActionBlock, chat.Block},
-		{luacfg.ActionAsk, chat.Ask},
+		{luacfg.ActionRun, chat.ActionRun},
+		{luacfg.ActionBlock, chat.ActionBlock},
+		{luacfg.ActionAsk, chat.ActionAsk},
 	} {
-		if got := bridgeToolCallAction(c.in); got != c.want {
-			t.Errorf("bridgeToolCallAction(%v) = %v, want %v", c.in, got, c.want)
+		if got := BridgeVerdict(luacfg.ToolCallVerdict{Action: c.in}).Action; got != c.want {
+			t.Errorf("BridgeVerdict(%v).Action = %v, want %v", c.in, got, c.want)
 		}
 	}
-	if got := bridgeToolCallAction(luacfg.ToolCallAction(99)); got != chat.Block {
-		t.Errorf("bridgeToolCallAction(unknown) = %v, want Block (fail closed)", got)
+	if got := BridgeVerdict(luacfg.ToolCallVerdict{Action: luacfg.ToolCallAction(99)}).Action; got != chat.ActionBlock {
+		t.Errorf("BridgeVerdict(unknown).Action = %v, want ActionBlock (fail closed)", got)
+	}
+	v := BridgeVerdict(luacfg.ToolCallVerdict{
+		Action: luacfg.ActionRun, Argv: []string{"bash", "-c", "x"},
+		Prompt: "p", Reason: "r", Passthrough: true,
+	})
+	if len(v.Argv) != 3 || v.Prompt != "p" || v.Reason != "r" || !v.Passthrough {
+		t.Errorf("BridgeVerdict dropped fields: %+v", v)
 	}
 }

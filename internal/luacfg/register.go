@@ -85,7 +85,7 @@ func checkPosIntField(L *lua.LState, t *lua.LTable, ctx, key string) (int, bool)
 		return 0, false
 	}
 	n, ok := v.(lua.LNumber)
-	if !ok || int(n) <= 0 {
+	if !ok || n != lua.LNumber(int(n)) || int(n) <= 0 {
 		L.RaiseError("%s.%s must be a positive integer", ctx, key)
 	}
 	return int(n), true
@@ -123,9 +123,7 @@ var modelKeys = map[string]bool{
 func (c *LoadedConfig) luaModel(L *lua.LState) int {
 	name := L.CheckString(1)
 	opts := L.CheckTable(2)
-	if err := checkKeys(opts, "model", modelKeys); err != nil {
-		L.RaiseError("%s", err.Error())
-	}
+	mustKeys(L, opts, "model", modelKeys)
 	m := Model{
 		Name:          name,
 		BaseURL:       optStr(opts, "base_url"),
@@ -177,9 +175,7 @@ var skillKeys = map[string]bool{"name": true, "description": true, "path": true}
 
 func (c *LoadedConfig) luaSkill(L *lua.LState) int {
 	opts := L.CheckTable(1)
-	if err := checkKeys(opts, "skill", skillKeys); err != nil {
-		L.RaiseError("%s", err.Error())
-	}
+	mustKeys(L, opts, "skill", skillKeys)
 	s := Skill{Name: optStr(opts, "name"), Description: optStr(opts, "description"), Path: optStr(opts, "path")}
 	if s.Name == "" || s.Description == "" || s.Path == "" {
 		L.RaiseError("skill: name, description, and path are all required")
@@ -219,9 +215,7 @@ var toolGateKeys = map[string]bool{
 
 func (c *LoadedConfig) luaTool(L *lua.LState) int {
 	opts := L.CheckTable(1)
-	if err := checkKeys(opts, "tool", toolKeys); err != nil {
-		L.RaiseError("%s", err.Error())
-	}
+	mustKeys(L, opts, "tool", toolKeys)
 	ct := CustomTool{
 		Name:        optStr(opts, "name"),
 		Description: optStr(opts, "description"),
@@ -323,21 +317,23 @@ func (c *LoadedConfig) luaTheme(L *lua.LState) int {
 	return 0
 }
 
-// subagentHandleNames is like handleNames for the "__subagent" sentinel, but
-// fails fast (via L.RaiseError) on any array element that is not a valid
-// subagent handle instead of silently dropping it. A bare string, number, or a
-// table missing the sentinel all raise. agentName is used in the error message.
-func subagentHandleNames(L *lua.LState, list *lua.LTable, agentName string) []string {
+// handleNamesStrict reads the array part of list as handles carrying sentinel,
+// failing fast (via L.RaiseError) on any element that is not a valid handle —
+// a bare string, number, or a table missing the sentinel all raise. ctx names
+// the list in the error (e.g. `agent "code": tools.subagents`) and want names
+// the handle kind. Silent dropping is never acceptable here: a typo'd entry in
+// skills={}/tools.custom={}/tools.subagents={} would otherwise load an agent
+// quietly missing a grant.
+func handleNamesStrict(L *lua.LState, list *lua.LTable, sentinel, ctx, want string) []string {
 	var out []string
 	for i := 1; i <= list.Len(); i++ {
-		v := list.RawGetInt(i)
-		ht, ok := v.(*lua.LTable)
+		ht, ok := list.RawGetInt(i).(*lua.LTable)
 		if !ok {
-			L.RaiseError("agent %q: tools.subagents[%d] is not a subagent handle", agentName, i)
+			L.RaiseError("%s[%d] is not a %s handle", ctx, i, want)
 		}
-		s, ok := ht.RawGetString("__subagent").(lua.LString)
+		s, ok := ht.RawGetString(sentinel).(lua.LString)
 		if !ok {
-			L.RaiseError("agent %q: tools.subagents[%d] is not a subagent handle", agentName, i)
+			L.RaiseError("%s[%d] is not a %s handle", ctx, i, want)
 		}
 		out = append(out, string(s))
 	}
@@ -377,12 +373,10 @@ func parseToolsBlock(L *lua.LState, opts *lua.LTable, ctx string) (toolsBlock, b
 	if !isTable {
 		return tb, false
 	}
-	if err := checkKeys(tt, ctx+".tools", toolGateKeys); err != nil {
-		L.RaiseError("%s", err.Error())
-	}
+	mustKeys(L, tt, ctx+".tools", toolGateKeys)
 	tb.gates = parseGates(tt)
 	if cu, ok := tt.RawGetString("custom").(*lua.LTable); ok {
-		tb.custom = handleNames(cu, "__tool")
+		tb.custom = handleNamesStrict(L, cu, "__tool", ctx+".tools.custom", "tool")
 	}
 	tb.skillsDisabled = tt.RawGetString("skill") == lua.LFalse
 	tb.subagentsRaw = tt.RawGetString("subagents")
@@ -398,12 +392,41 @@ func requireOnePromptSource(L *lua.LState, kind, name, prompt, promptCmd string)
 	}
 }
 
+// agentCommon is the declaration surface agents and subagents share: skills,
+// the tools block, and the host-reminder toggles. subagentsRaw carries the raw
+// tools.subagents value (LNil when absent) for the caller to interpret —
+// agents resolve it, subagents forbid it.
+type agentCommon struct {
+	skills         []string
+	gates          ToolGates
+	custom         []string
+	skillsDisabled bool
+	subagentsRaw   lua.LValue
+	environment    bool
+	delegation     bool
+}
+
+// parseAgentCommon validates and extracts the fields agents and subagents
+// declare identically. kind/name label errors; name must already be deduped.
+func (c *LoadedConfig) parseAgentCommon(L *lua.LState, opts *lua.LTable, kind, name, prompt, promptCmd string) agentCommon {
+	requireOnePromptSource(L, kind, name, prompt, promptCmd)
+	ac := agentCommon{subagentsRaw: lua.LNil}
+	if sk, ok := opts.RawGetString("skills").(*lua.LTable); ok {
+		ac.skills = handleNamesStrict(L, sk, "__skill", fmt.Sprintf("%s %q: skills", kind, name), "skill")
+	}
+	if tb, ok := parseToolsBlock(L, opts, kind); ok {
+		ac.gates, ac.custom, ac.skillsDisabled = tb.gates, tb.custom, tb.skillsDisabled
+		ac.subagentsRaw = tb.subagentsRaw
+	}
+	ac.environment = optBool(opts, "environment")
+	ac.delegation = optBool(opts, "delegation")
+	return ac
+}
+
 // luaAgent parses name/model/prompt, skills, and the tools struct (gates + custom).
 func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 	opts := L.CheckTable(1)
-	if err := checkKeys(opts, "agent", agentKeys); err != nil {
-		L.RaiseError("%s", err.Error())
-	}
+	mustKeys(L, opts, "agent", agentKeys)
 	a := Agent{
 		Name:      optStr(opts, "name"),
 		ModelName: optStr(opts, "model"),
@@ -413,25 +436,19 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 	if a.Name == "" {
 		L.RaiseError("agent: name is required")
 	}
-	requireOnePromptSource(L, "agent", a.Name, a.Prompt, a.PromptCmd)
 	// Duplicate names auto-suffix rather than failing the load (the first
 	// declaration keeps its bare name; later collisions become name2, name3…).
 	a.Name = c.uniqueName(a.Name)
-	if sk, ok := opts.RawGetString("skills").(*lua.LTable); ok {
-		a.Skills = handleNames(sk, "__skill")
-	}
-	if tb, ok := parseToolsBlock(L, opts, "agent"); ok {
-		a.Gates, a.CustomTools, a.SkillsDisabled = tb.gates, tb.custom, tb.skillsDisabled
-		if tb.subagentsRaw != lua.LNil {
-			sg, ok := tb.subagentsRaw.(*lua.LTable)
-			if !ok {
-				L.RaiseError("agent %q: tools.subagents must be a list of subagent handles, got %s", a.Name, tb.subagentsRaw.Type().String())
-			}
-			a.Subagents = subagentHandleNames(L, sg, a.Name)
+	ac := c.parseAgentCommon(L, opts, "agent", a.Name, a.Prompt, a.PromptCmd)
+	a.Skills, a.Gates, a.CustomTools, a.SkillsDisabled = ac.skills, ac.gates, ac.custom, ac.skillsDisabled
+	a.Environment, a.Delegation = ac.environment, ac.delegation
+	if ac.subagentsRaw != lua.LNil {
+		sg, ok := ac.subagentsRaw.(*lua.LTable)
+		if !ok {
+			L.RaiseError("agent %q: tools.subagents must be a list of subagent handles, got %s", a.Name, ac.subagentsRaw.Type().String())
 		}
+		a.Subagents = handleNamesStrict(L, sg, "__subagent", fmt.Sprintf("agent %q: tools.subagents", a.Name), "subagent")
 	}
-	a.Environment = optBool(opts, "environment")
-	a.Delegation = optBool(opts, "delegation")
 	c.agents = append(c.agents, a)
 	return 0
 }
@@ -444,9 +461,7 @@ var subagentKeys = map[string]bool{
 
 func (c *LoadedConfig) luaSubagent(L *lua.LState) int {
 	opts := L.CheckTable(1)
-	if err := checkKeys(opts, "subagent", subagentKeys); err != nil {
-		L.RaiseError("%s", err.Error())
-	}
+	mustKeys(L, opts, "subagent", subagentKeys)
 	s := Subagent{
 		Name:        optStr(opts, "name"),
 		Description: optStr(opts, "description"),
@@ -457,22 +472,16 @@ func (c *LoadedConfig) luaSubagent(L *lua.LState) int {
 	if s.Name == "" || s.Description == "" {
 		L.RaiseError("subagent: name and description are required")
 	}
-	requireOnePromptSource(L, "subagent", s.Name, s.Prompt, s.PromptCmd)
 	// Duplicate names (against any agent or subagent) auto-suffix rather than
 	// failing the load. The returned handle below carries the deduped name, so
 	// tools.subagents={handle} references still resolve.
 	s.Name = c.uniqueName(s.Name)
-	if sk, ok := opts.RawGetString("skills").(*lua.LTable); ok {
-		s.Skills = handleNames(sk, "__skill")
+	ac := c.parseAgentCommon(L, opts, "subagent", s.Name, s.Prompt, s.PromptCmd)
+	if _, isTable := ac.subagentsRaw.(*lua.LTable); isTable {
+		L.RaiseError("subagent %q: a subagent may not declare its own subagents (depth limit 1)", s.Name)
 	}
-	if tb, ok := parseToolsBlock(L, opts, "subagent"); ok {
-		if _, isTable := tb.subagentsRaw.(*lua.LTable); isTable {
-			L.RaiseError("subagent %q: a subagent may not declare its own subagents (depth limit 1)", s.Name)
-		}
-		s.Gates, s.CustomTools, s.SkillsDisabled = tb.gates, tb.custom, tb.skillsDisabled
-	}
-	s.Environment = optBool(opts, "environment")
-	s.Delegation = optBool(opts, "delegation")
+	s.Skills, s.Gates, s.CustomTools, s.SkillsDisabled = ac.skills, ac.gates, ac.custom, ac.skillsDisabled
+	s.Environment, s.Delegation = ac.environment, ac.delegation
 	c.subagents = append(c.subagents, s)
 	return pushHandle(L, "__subagent", s.Name)
 }

@@ -29,6 +29,10 @@ func newRunCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "run [message]",
 		Short: "Run shell3 headlessly (prompt, subagent, or resume)",
+		Example: `  shell3 run "fix the failing test"
+  shell3 run --prompt "summarize the diff" --out audit.jsonl
+  git diff | shell3 run "review this change"
+  shell3 run --resume 20260701T120000.000000000-abcd "continue"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			input := strings.TrimSpace(f.prompt)
 			if input == "" {

@@ -6,6 +6,14 @@ import (
 	lua "github.com/yuin/gopher-lua"
 )
 
+// mustKeys is checkKeys raising the failure as a Lua error — the form every
+// table-parsing register.go call site wants.
+func mustKeys(L *lua.LState, tbl *lua.LTable, ctx string, allowed map[string]bool) {
+	if err := checkKeys(tbl, ctx, allowed); err != nil {
+		L.RaiseError("%s", err.Error())
+	}
+}
+
 // checkKeys fails if tbl has any string key not in allowed.
 func checkKeys(tbl *lua.LTable, ctx string, allowed map[string]bool) error {
 	var bad string

@@ -189,16 +189,17 @@ func stripToolIDPrefix(content string) string {
 // (mutates history; see ErrBusy), or an error naming the id when no tool
 // result with that id exists.
 func (s *Session) Prune(id string) (summary string, err error) {
-	if s.isBusy() {
-		return "", ErrBusy
-	}
-	msgs := s.sess.Messages()
-	out, ok := chat.PruneByID(id, "pruned by user", msgs)
-	if !ok {
-		return "", fmt.Errorf("shell3: no tool result with id %q", id)
-	}
-	s.sess.SetMessages(msgs)
-	return out, nil
+	err = s.withIdle(func() error {
+		msgs := s.sess.Messages()
+		out, ok := chat.PruneByID(id, "pruned by user", msgs)
+		if !ok {
+			return fmt.Errorf("shell3: no tool result with id %q", id)
+		}
+		s.sess.SetMessages(msgs)
+		summary = out
+		return nil
+	})
+	return summary, err
 }
 
 // QueueCompact requests a compaction before the next turn acts (= the TUI's
@@ -214,47 +215,43 @@ func (s *Session) QueueCompact() { s.sess.QueueCompact() }
 // the next Snapshot reflects it. Call only between turns (mutates cfg);
 // returns ErrBusy while a turn is in flight.
 func (s *Session) SetParam(name, value string) error {
-	if s.isBusy() {
-		return ErrBusy
-	}
-	describer, _ := s.cfg.LLM.(llm.ParamDescriber)
-	setter, _ := s.cfg.LLM.(llm.ParamSetter)
+	// The whole body runs under s.mu (withIdle): the busy gate, the cfg.LLM
+	// read, and the cfg mutations (Params, StatusLine) are one critical
+	// section, so neither a starting turn nor the dashboard's Snapshot read
+	// can interleave.
+	return s.withIdle(func() error {
+		describer, _ := s.cfg.LLM.(llm.ParamDescriber)
+		setter, _ := s.cfg.LLM.(llm.ParamSetter)
 
-	if describer != nil {
-		var spec *llm.ParamSpec
-		for _, sp := range describer.ParamSpecs() {
-			if sp.Name == name {
-				sp := sp
-				spec = &sp
-				break
+		if describer != nil {
+			found := false
+			for _, sp := range describer.ParamSpecs() {
+				if sp.Name == name {
+					if err := sp.Validate(value); err != nil {
+						return err
+					}
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("unknown parameter %q for this provider", name)
 			}
 		}
-		if spec == nil {
-			return fmt.Errorf("unknown parameter %q for this provider", name)
-		}
-		if err := spec.Validate(value); err != nil {
+		if err := s.cfg.Params.SetByName(name, value); err != nil {
 			return err
 		}
-	}
-	// Guard the cfg mutations (Params, StatusLine) against the dashboard's
-	// concurrent Snapshot read. The describer validation above stays unlocked
-	// (read-only; mirrors Snapshot not holding s.mu across ParamSpecs). Between
-	// turns by contract.
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.cfg.Params.SetByName(name, value); err != nil {
-		return err
-	}
-	if setter != nil {
-		setter.SetParams(s.cfg.Params)
-	}
-	if name == "reasoning_effort" {
-		prov, model := chat.SplitStatus(s.cfg.StatusLine)
-		if prov != "" && model != "" {
-			s.cfg.StatusLine = chat.FormatStatus(prov, model, s.cfg.Params.ReasoningEffort)
+		if setter != nil {
+			setter.SetParams(s.cfg.Params)
 		}
-	}
-	return nil
+		if name == "reasoning_effort" {
+			prov, model := chat.SplitStatus(s.cfg.StatusLine)
+			if prov != "" && model != "" {
+				s.cfg.StatusLine = chat.FormatStatus(prov, model, s.cfg.Params.ReasoningEffort)
+			}
+		}
+		return nil
+	})
 }
 
 // currentParamValue maps a RequestParams field to its display string for the

@@ -43,7 +43,7 @@ func ensureSelfGitignore(root string) error {
 	path := filepath.Join(root, ".gitignore")
 	b, err := os.ReadFile(path)
 	if err == nil {
-		if len(missingLines(string(b), "*")) == 0 {
+		if hasLine(string(b), "*") {
 			return nil
 		}
 	} else if !os.IsNotExist(err) {
@@ -55,39 +55,16 @@ func ensureSelfGitignore(root string) error {
 	return nil
 }
 
-// appendGitignore appends addition to the .gitignore at path, given the file's
-// current content. It guards the leading newline so the addition always starts
-// on its own line, and creates the file with mode 0644 when absent. label (e.g.
-// "global ") is interpolated into error messages.
-func appendGitignore(label, path, content, addition string) error {
-	if len(content) > 0 && !strings.HasSuffix(content, "\n") {
-		addition = "\n" + addition
-	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("bootstrap: open %sgitignore: %w", label, err)
-	}
-	defer func() { _ = f.Close() }()
-	if _, err := f.WriteString(addition); err != nil {
-		return fmt.Errorf("bootstrap: write %sgitignore: %w", label, err)
-	}
-	return nil
-}
-
-// missingLines returns the subset of want that does not already appear as a
-// whole trimmed line in content, preserving the order given in want.
-func missingLines(content string, want ...string) []string {
-	have := make(map[string]bool)
+// hasLine reports whether want appears as a whole trimmed line in content — a
+// whole-line match avoids false positives from substrings such as an archive
+// pattern or a comment mentioning the file.
+func hasLine(content, want string) bool {
 	for _, line := range strings.Split(content, "\n") {
-		have[strings.TrimSpace(line)] = true
-	}
-	var missing []string
-	for _, w := range want {
-		if !have[w] {
-			missing = append(missing, w)
+		if strings.TrimSpace(line) == want {
+			return true
 		}
 	}
-	return missing
+	return false
 }
 
 // ensureGlobalGitignore creates or updates ~/.shell3/.gitignore to ignore
@@ -101,14 +78,26 @@ func ensureGlobalGitignore(g paths.Global) error {
 	}
 	content := string(b)
 
-	// Sentinel: if the log pattern is already there as its own line, nothing
-	// to do. A whole-line match avoids false positives from substrings such
-	// as a "shell3.log.*" archive pattern or a comment mentioning the file.
-	if len(missingLines(content, "shell3.log")) == 0 {
+	// Sentinel: if the log pattern is already there as its own line, nothing to do.
+	if hasLine(content, "shell3.log") {
 		return nil
 	}
 
-	return appendGitignore("global ", path, content, globalGitignoreAddition)
+	// Append, guarding the leading newline so the addition always starts on
+	// its own line; O_CREATE covers the file being absent.
+	addition := globalGitignoreAddition
+	if len(content) > 0 && !strings.HasSuffix(content, "\n") {
+		addition = "\n" + addition
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("bootstrap: open global gitignore: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	if _, err := f.WriteString(addition); err != nil {
+		return fmt.Errorf("bootstrap: write global gitignore: %w", err)
+	}
+	return nil
 }
 
 // globalGitignoreAddition is appended to ~/.shell3/.gitignore when the log

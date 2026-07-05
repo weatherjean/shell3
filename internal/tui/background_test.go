@@ -23,8 +23,8 @@ func TestBackground_OpensListsAndCloses(t *testing.T) {
 		{ID: "bg_bbb", Cmd: "sleep 999", PID: 222},
 	}, nil)
 	m.openBackground()
-	if !m.bgOpen || len(m.bgJobs) != 2 {
-		t.Fatalf("openBackground should list jobs: open=%v n=%d", m.bgOpen, len(m.bgJobs))
+	if !m.bg.open || len(m.bg.jobs) != 2 {
+		t.Fatalf("openBackground should list jobs: open=%v n=%d", m.bg.open, len(m.bg.jobs))
 	}
 	plain := stripANSI(m.View().Content)
 	for _, want := range []string{"background jobs", "bg_aaa", "go test", "bg_bbb"} {
@@ -33,7 +33,7 @@ func TestBackground_OpensListsAndCloses(t *testing.T) {
 		}
 	}
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if m.bgOpen {
+	if m.bg.open {
 		t.Fatal("esc should close the :background modal")
 	}
 }
@@ -45,14 +45,14 @@ func TestBackground_NavigateAndViewOutput(t *testing.T) {
 	}, map[string]string{"bg_bbb": "hello from bbb\nsecond line"})
 	m.openBackground()
 	m.Update(keyRune('j')) // move selection to the second job
-	if m.bgSel != 1 {
-		t.Fatalf("j should move selection to 1, got %d", m.bgSel)
+	if m.bg.sel != 1 {
+		t.Fatalf("j should move selection to 1, got %d", m.bg.sel)
 	}
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // open its output
-	if m.bgViewID != "bg_bbb" {
-		t.Fatalf("enter should open the selected job's output, got %q", m.bgViewID)
+	if m.bg.viewID != "bg_bbb" {
+		t.Fatalf("enter should open the selected job's output, got %q", m.bg.viewID)
 	}
-	if m.bgIsTranscript {
+	if m.bg.isTranscript {
 		t.Fatal("command job output should not use the transcript branch")
 	}
 	if !strings.Contains(stripANSI(m.View().Content), "hello from bbb") {
@@ -60,8 +60,8 @@ func TestBackground_NavigateAndViewOutput(t *testing.T) {
 	}
 	// esc returns to the list rather than closing the modal.
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if m.bgViewID != "" || !m.bgOpen {
-		t.Fatalf("esc in output view should return to the list: viewID=%q open=%v", m.bgViewID, m.bgOpen)
+	if m.bg.viewID != "" || !m.bg.open {
+		t.Fatalf("esc in output view should return to the list: viewID=%q open=%v", m.bg.viewID, m.bg.open)
 	}
 }
 
@@ -76,7 +76,7 @@ func TestBackground_CtrlXKillsSelectedAndDrops(t *testing.T) {
 	if len(fc.killed) != 1 || fc.killed[0] != "bg_bbb" {
 		t.Fatalf("ctrl+x should kill the selected job, killed=%v", fc.killed)
 	}
-	for _, j := range m.bgJobs {
+	for _, j := range m.bg.jobs {
 		if j.ID == "bg_bbb" {
 			t.Fatal("a killed job should be dropped from the displayed list")
 		}
@@ -88,8 +88,8 @@ func TestBackground_KillFailureShowsNotice(t *testing.T) {
 	fc.killErr = fmt.Errorf("process gone")
 	m.openBackground()
 	m.Update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
-	if !strings.Contains(m.bgNotice, "kill failed") || !strings.Contains(m.bgNotice, "process gone") {
-		t.Fatalf("a failed kill should surface a notice, got %q", m.bgNotice)
+	if !strings.Contains(m.bg.notice, "kill failed") || !strings.Contains(m.bg.notice, "process gone") {
+		t.Fatalf("a failed kill should surface a notice, got %q", m.bg.notice)
 	}
 }
 
@@ -139,7 +139,7 @@ func TestBackground_RendersSubagentTranscript(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.openBackground()
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // open the subagent's output
-	if !m.bgIsTranscript {
+	if !m.bg.isTranscript {
 		t.Fatal("a job with a transcript should render structured, not stdout")
 	}
 	plain := stripANSI(m.View().Content)
@@ -182,17 +182,17 @@ func TestBackground_OpensAtBottomAndG(t *testing.T) {
 		map[string]string{"bg_aaa": b.String()})
 	m.openBackground()
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // opens at the bottom (most recent)
-	if m.bgScroll == 0 {
+	if m.bg.scroll == 0 {
 		t.Fatal("output view should open scrolled to the bottom for long output")
 	}
-	bottom := m.bgScroll
+	bottom := m.bg.scroll
 	m.Update(keyRune('g')) // jump to top
-	if m.bgScroll != 0 {
-		t.Fatalf("g should jump to top, got scroll=%d", m.bgScroll)
+	if m.bg.scroll != 0 {
+		t.Fatalf("g should jump to top, got scroll=%d", m.bg.scroll)
 	}
 	m.Update(keyRune('G')) // jump back to bottom
-	if m.bgScroll != bottom {
-		t.Fatalf("G should jump to bottom (%d), got %d", bottom, m.bgScroll)
+	if m.bg.scroll != bottom {
+		t.Fatalf("G should jump to bottom (%d), got %d", bottom, m.bg.scroll)
 	}
 }
 
@@ -218,8 +218,8 @@ func TestBackground_DoesNotOverScroll(t *testing.T) {
 		m.Update(keyRune('j'))
 	}
 	want := len(m.bgWrappedLines()) - m.bgModalHeight()
-	if m.bgScroll != want {
-		t.Fatalf("scroll should clamp to the last screenful: scroll=%d want=%d", m.bgScroll, want)
+	if m.bg.scroll != want {
+		t.Fatalf("scroll should clamp to the last screenful: scroll=%d want=%d", m.bg.scroll, want)
 	}
 	// The view still shows a full page of content, not one line.
 	if n := strings.Count(stripANSI(m.View().Content), "line "); n < m.bgModalHeight()-1 {
@@ -230,25 +230,25 @@ func TestBackground_DoesNotOverScroll(t *testing.T) {
 func TestBackground_MouseWheelScrolls(t *testing.T) {
 	wheel := func(b tea.MouseButton) tea.MouseWheelMsg { return tea.MouseWheelMsg{Button: b} }
 	m := longOutputModel(t)
-	atBottom := m.bgScroll
+	atBottom := m.bg.scroll
 	if atBottom == 0 {
 		t.Fatal("precondition: long output should open scrolled down")
 	}
 	m.Update(wheel(tea.MouseWheelUp)) // scroll up toward the top
-	if m.bgScroll >= atBottom {
-		t.Fatalf("wheel up should scroll up: %d (was %d)", m.bgScroll, atBottom)
+	if m.bg.scroll >= atBottom {
+		t.Fatalf("wheel up should scroll up: %d (was %d)", m.bg.scroll, atBottom)
 	}
-	up := m.bgScroll
+	up := m.bg.scroll
 	m.Update(wheel(tea.MouseWheelDown)) // scroll back down
-	if m.bgScroll <= up {
-		t.Fatalf("wheel down should scroll down: %d (was %d)", m.bgScroll, up)
+	if m.bg.scroll <= up {
+		t.Fatalf("wheel down should scroll down: %d (was %d)", m.bg.scroll, up)
 	}
 	// Wheel down also clamps — no over-scroll past the last screenful.
 	for i := 0; i < 200; i++ {
 		m.Update(wheel(tea.MouseWheelDown))
 	}
-	if want := len(m.bgWrappedLines()) - m.bgModalHeight(); m.bgScroll != want {
-		t.Fatalf("wheel down should clamp to %d, got %d", want, m.bgScroll)
+	if want := len(m.bgWrappedLines()) - m.bgModalHeight(); m.bg.scroll != want {
+		t.Fatalf("wheel down should clamp to %d, got %d", want, m.bg.scroll)
 	}
 }
 
@@ -302,8 +302,8 @@ func TestBackground_DoneSubagentTranscriptViewable(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.openBackground()
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if m.bgViewID != "sub1" {
-		t.Fatalf("enter should open the done subagent job, got %q", m.bgViewID)
+	if m.bg.viewID != "sub1" {
+		t.Fatalf("enter should open the done subagent job, got %q", m.bg.viewID)
 	}
 	plain := stripANSI(m.View().Content)
 	if !strings.Contains(plain, "done answer") {
@@ -312,7 +312,7 @@ func TestBackground_DoneSubagentTranscriptViewable(t *testing.T) {
 }
 
 // TestBackground_TickRefreshesJobListWhenOpen verifies that a bgPollTickMsg
-// while the modal is open refreshes m.bgJobs to reflect newly-finished jobs.
+// while the modal is open refreshes m.bg.jobs to reflect newly-finished jobs.
 func TestBackground_TickRefreshesJobListWhenOpen(t *testing.T) {
 	runningJob := shell3.JobInfo{ID: "bg1", Cmd: "run", PID: 1, Done: false}
 	fc := &fakeCmds{jobs: []shell3.JobInfo{runningJob}}
@@ -321,8 +321,8 @@ func TestBackground_TickRefreshesJobListWhenOpen(t *testing.T) {
 	m.openBackground()
 
 	// Initially the job is running.
-	if len(m.bgJobs) != 1 || m.bgJobs[0].Done {
-		t.Fatalf("expected one running job, got %+v", m.bgJobs)
+	if len(m.bg.jobs) != 1 || m.bg.jobs[0].Done {
+		t.Fatalf("expected one running job, got %+v", m.bg.jobs)
 	}
 
 	// Simulate the job finishing: update fc.jobs to report Done=true.
@@ -331,10 +331,10 @@ func TestBackground_TickRefreshesJobListWhenOpen(t *testing.T) {
 		{ID: "bg1", Cmd: "run", PID: 1, Done: true, Exit: &exitCode},
 	}
 
-	// Fire a bgPollTickMsg — the handler should refresh m.bgJobs.
+	// Fire a bgPollTickMsg — the handler should refresh m.bg.jobs.
 	m.Update(bgPollTickMsg{})
 
-	if len(m.bgJobs) != 1 || !m.bgJobs[0].Done {
-		t.Fatalf("after tick, bgJobs should show Done=true, got %+v", m.bgJobs)
+	if len(m.bg.jobs) != 1 || !m.bg.jobs[0].Done {
+		t.Fatalf("after tick, bgJobs should show Done=true, got %+v", m.bg.jobs)
 	}
 }

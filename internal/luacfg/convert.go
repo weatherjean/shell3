@@ -71,18 +71,6 @@ func stringList(t *lua.LTable) []string {
 	return out
 }
 
-func handleNames(list *lua.LTable, sentinel string) []string {
-	var out []string
-	list.ForEach(func(_, v lua.LValue) {
-		if ht, ok := v.(*lua.LTable); ok {
-			if s, ok := ht.RawGetString(sentinel).(lua.LString); ok {
-				out = append(out, string(s))
-			}
-		}
-	})
-	return out
-}
-
 func luaToGo(v lua.LValue) any {
 	switch x := v.(type) {
 	case lua.LString:

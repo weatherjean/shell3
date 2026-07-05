@@ -11,6 +11,27 @@ import (
 	colorful "github.com/lucasb-eyer/go-colorful"
 )
 
+// setPalette applies p for the duration of the test and restores the default
+// dark palette on cleanup — the styles are package globals, so a test that
+// forgets the restore would poison every later test.
+func setPalette(t *testing.T, p palette) {
+	t.Helper()
+	applyPalette(p)
+	t.Cleanup(func() { applyPalette(darkPalette) })
+}
+
+// contrastRatio is the WCAG contrast ratio between two colors — (L1+0.05) /
+// (L2+0.05) with L1 the lighter luminance. Ranges from 1 (identical) to 21
+// (black on white). Test-only: these tests assert each accent stays legible
+// against its terminal background; nothing enforces it at runtime.
+func contrastRatio(a, b colorful.Color) float64 {
+	la, lb := relLuminance(a), relLuminance(b)
+	if la < lb {
+		la, lb = lb, la
+	}
+	return (la + 0.05) / (lb + 0.05)
+}
+
 func TestPaletteWithOverrides(t *testing.T) {
 	red := lipgloss.Color("#FF0000")
 	dim := lipgloss.Color("#111111")

@@ -7,7 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -89,12 +89,14 @@ func walkTree(b *strings.Builder, dirAbs, relPrefix string, curDepth, maxDepth i
 		return false // unreadable dir (permissions): skip silently, like a tree walk
 	}
 	// Directories first, then files; each group alphabetical.
-	sort.SliceStable(entries, func(i, j int) bool {
-		di, dj := entries[i].IsDir(), entries[j].IsDir()
-		if di != dj {
-			return di
+	slices.SortStableFunc(entries, func(a, b os.DirEntry) int {
+		if da, db := a.IsDir(), b.IsDir(); da != db {
+			if da {
+				return -1
+			}
+			return 1
 		}
-		return entries[i].Name() < entries[j].Name()
+		return strings.Compare(a.Name(), b.Name())
 	})
 
 	indent := strings.Repeat("  ", curDepth-1)

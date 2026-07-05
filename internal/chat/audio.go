@@ -27,14 +27,14 @@ func audioExtFormat(ext string) string {
 	}
 }
 
-// loadAudioPart resolves path against workDir, validates the extension and size,
-// reads the raw bytes, and returns an input_audio ContentPart carrying the
-// base64-encoded data plus a human-readable description. Audio is not decoded or
-// transcoded — only wav and mp3 are accepted, as the wire format requires.
+// loadAudioPart resolves path against workDir (~ expands like the read tool),
+// validates the extension and size, reads the raw bytes, and returns an
+// input_audio ContentPart carrying the base64-encoded data plus a
+// human-readable description. Audio is not decoded or transcoded — only the
+// wire formats (wav, mp3, ogg) are accepted; opus-family containers report
+// as ogg.
 func loadAudioPart(path, workDir string) (llm.ContentPart, string, error) {
-	if !filepath.IsAbs(path) && workDir != "" {
-		path = filepath.Join(workDir, path)
-	}
+	path = resolveReadPath(path, workDir)
 
 	ext := strings.ToLower(filepath.Ext(path))
 	if !supportedAudioExts[ext] {
@@ -58,8 +58,8 @@ func loadAudioPart(path, workDir string) (llm.ContentPart, string, error) {
 }
 
 // audioPartFromBytes validates the size cap and wraps raw audio bytes as a
-// base64 input_audio ContentPart. format must be "wav" or "mp3" (the wire
-// formats); audio is never decoded or transcoded.
+// base64 input_audio ContentPart. format must be a wire format ("wav", "mp3",
+// or "ogg"); audio is never decoded or transcoded.
 func audioPartFromBytes(data []byte, format string) (llm.ContentPart, string, error) {
 	if len(data) == 0 {
 		return llm.ContentPart{}, "", fmt.Errorf("empty audio (0 bytes) — no %s data to attach", format)

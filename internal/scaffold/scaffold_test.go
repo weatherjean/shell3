@@ -113,7 +113,7 @@ func TestRenderedConfigLoads(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, err := luacfg.Load(filepath.Join(dir, "shell3.lua"), dir)
+	c, err := luacfg.Load(filepath.Join(dir, "shell3.lua"))
 	if err != nil {
 		t.Fatalf("rendered config failed to load with empty api_key: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestRenderBaseConfigEscapesLuaSpecials(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("MAIN_API_KEY=x\nBRAVE_API_KEY=\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	c, err := luacfg.Load(filepath.Join(dir, "shell3.lua"), dir)
+	c, err := luacfg.Load(filepath.Join(dir, "shell3.lua"))
 	if err != nil {
 		t.Fatalf("config with Lua-special inputs failed to load: %v", err)
 	}

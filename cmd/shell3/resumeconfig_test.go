@@ -42,15 +42,8 @@ func TestResolveResumeConfig(t *testing.T) {
 	seededID := seedSession(t, projectRoot, "/work/seeded", "/seeded/.shell3/shell3.lua")
 	noCfgID := seedSession(t, projectRoot, "/work/nocfg", "")
 
-	// Point os.Getwd() to tmpDir by changing working directory.
-	origDir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(origDir) })
+	// Point os.Getwd() to tmpDir.
+	t.Chdir(tmpDir)
 
 	t.Run("recorded config used", func(t *testing.T) {
 		got, err := resolveResumeConfig(seededID, "")

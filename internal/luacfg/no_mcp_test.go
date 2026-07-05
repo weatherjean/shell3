@@ -14,7 +14,7 @@ func TestMCPBuiltinRemoved(t *testing.T) {
 	if err := os.WriteFile(cfg, []byte(`shell3.mcp({ name = "x", command = "y" })`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(cfg, dir); err == nil {
+	if _, err := Load(cfg); err == nil {
 		t.Fatal("expected error: shell3.mcp should be undefined after removal")
 	}
 
@@ -25,7 +25,7 @@ shell3.agent({ name = "a", model = "m", prompt = "p", tools = { mcp = {} } })
 	if err := os.WriteFile(cfg2, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(cfg2, dir); err == nil {
+	if _, err := Load(cfg2); err == nil {
 		t.Fatal("expected error: tools.mcp should be rejected as an unknown key")
 	}
 }

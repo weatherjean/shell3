@@ -9,6 +9,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+// confirmChromeRows is confirmBox's fixed vertical chrome: header + three
+// blank separators + buttons row + footer (6 lines) plus vertical padding (2).
+const confirmChromeRows = 8
+
 // confirmReq is an on_tool_call ask routed to the TUI: the Asker (on the turn
 // goroutine) blocks on reply while the model shows a Yes/No modal.
 type confirmReq struct {
@@ -74,13 +78,7 @@ func (m *model) confirmBox() string {
 	// Content width capped so the box (content + 4-col padding) never exceeds the
 	// terminal. Every long/variable line is hard-wrapped to it — a long command,
 	// echoed into the gate's reason, otherwise overflows the screen.
-	contentW := m.modalWidth(m.width/2, 72)
-	if contentW > m.width-4 {
-		contentW = m.width - 4
-	}
-	if contentW < 1 {
-		contentW = 1
-	}
+	contentW := m.modalWidth(m.width/2, 72) // already clamped to the terminal
 	wrapLines := func(s string) []string {
 		return strings.Split(ansi.Wrap(s, contentW, " "), "\n")
 	}
@@ -89,10 +87,7 @@ func (m *model) confirmBox() string {
 	// plus vertical padding (2) = 8. The reason (short — it names the matched rule)
 	// gets up to 3 lines; the command gets the rest. Both are truncated with a
 	// "… +N more lines" marker rather than overflowing.
-	bodyBudget := m.height - 8
-	if bodyBudget < 2 {
-		bodyBudget = 2
-	}
+	bodyBudget := max(m.height-confirmChromeRows, 2)
 	var reasonKept []string
 	reasonMore := 0
 	if m.confirm.reason != "" {

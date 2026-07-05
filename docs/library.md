@@ -86,8 +86,9 @@ embedder can be too.
 
 ## Pluggable file I/O: `SessionOpts.FS`
 
-`SessionOpts.FS` accepts a `FileSystem` (re-exported from `internal/fsx`) that
-backs the session's `read` and `edit_file` tools. The default is direct disk;
+`SessionOpts.FS` (or `Spec.FS` for `Start`/`Run`) accepts a `FileSystem` — a
+two-method interface defined in `pkg/shell3` (`ReadTextFile`/`WriteTextFile`
+over absolute paths) — that backs the session's `read` and `edit_file` tools. The default is direct disk;
 the ACP front-end swaps in an editor-buffer backend so reads see unsaved buffers
 and writes flow through the editor. `bash` is unaffected — it always hits disk
 directly.

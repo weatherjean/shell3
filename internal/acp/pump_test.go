@@ -37,42 +37,7 @@ func buildPumpEnv(t *testing.T, luaContent string) *env {
 		t.Fatalf("buildPumpEnv: NewRuntime: %v", err)
 	}
 
-	agentIn, clientOut := io.Pipe()
-	clientIn, agentOut := io.Pipe()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	e := &env{
-		rt:      rt,
-		rec:     &recorder{firstUpdateCh: make(chan struct{})},
-		cancel:  cancel,
-		ready:   make(chan struct{}),
-		workDir: workDir,
-	}
-
-	go func() {
-		_ = Run(ctx, rt, agentIn, agentOut, Options{
-			DefaultAgent: "code",
-			onReady: func(a *acpAgent) {
-				e.mu.Lock()
-				e.agent = a
-				e.mu.Unlock()
-				close(e.ready)
-			},
-		})
-		_ = agentOut.Close()
-		_ = agentIn.Close()
-	}()
-
-	e.conn = acpsdk.NewClientSideConnection(e.rec, clientOut, clientIn)
-
-	t.Cleanup(func() {
-		cancel()
-		_ = clientOut.Close()
-		_ = agentOut.Close()
-		_ = rt.Close()
-	})
-
-	return e
+	return startEnv(t, rt, nil, workDir)
 }
 
 // waitForUpdateText polls the recorder up to timeout for the concatenation of

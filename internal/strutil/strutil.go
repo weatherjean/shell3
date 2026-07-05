@@ -6,17 +6,31 @@ package strutil
 
 import "unicode/utf8"
 
-// Truncate clamps s to at most max bytes, cutting on a rune boundary (never
-// mid-UTF-8-sequence) and appending an ellipsis when trimmed.
+// ellipsis marks a trimmed string; its 3 UTF-8 bytes count against the
+// caller's byte budget.
+const ellipsis = "…"
+
+// Truncate clamps s to at most max bytes — including the appended ellipsis —
+// cutting on a rune boundary (never mid-UTF-8-sequence). max <= 0 returns "".
+// When max is too small to fit the ellipsis, the string is cut without one.
 func Truncate(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
 	if len(s) <= max {
 		return s
 	}
-	cut := max
+	cut := max - len(ellipsis)
+	if cut < 0 {
+		cut = max
+	}
 	for cut > 0 && !utf8.RuneStart(s[cut]) {
 		cut--
 	}
-	return s[:cut] + "…"
+	if max < len(ellipsis) {
+		return s[:cut]
+	}
+	return s[:cut] + ellipsis
 }
 
 // Tail returns the last max bytes of s (rune-safe: the cut advances past any

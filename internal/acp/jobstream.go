@@ -14,9 +14,6 @@ import (
 // Each job gets its own tool-call card whose toolCallId IS the job id (e.g.
 // "bg1", "sub1"). The parent task tool-call remains untouched and completes
 // immediately — these cards are independent.
-//
-// conn is read ONCE under a.mu at the start (matching pump's discipline) and
-// used for the goroutine's lifetime.
 func (a *acpAgent) pumpJobs(ctx context.Context) {
 	a.pumpJobsFrom(ctx, a.rt.JobEvents())
 }
@@ -34,10 +31,11 @@ func (a *acpAgent) pumpJobs(ctx context.Context) {
 // Events whose Parent is not registered in this front-end (sessionByName
 // returns nil) are silently skipped — they belong to another connection or
 // a child session.
+//
+// conn is snapshotted ONCE at the start (matching pump's discipline) and used
+// for the goroutine's lifetime.
 func (a *acpAgent) pumpJobsFrom(ctx context.Context, ev <-chan shell3.JobProgress) {
-	a.mu.Lock()
-	conn := a.conn
-	a.mu.Unlock()
+	conn := a.connection()
 	if conn == nil {
 		return
 	}

@@ -22,6 +22,7 @@ func newAcpCommand() *cobra.Command {
 		Long: "Runs shell3 as an ACP agent: JSON-RPC 2.0 over stdin/stdout for editors " +
 			"(Zed, ...) and bridges (OpenACP). All logs go to the app log; stdout carries " +
 			"only protocol messages.",
+		Example: `  shell3 acp --config code   # as an editor's agent command`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rt, err := shell3.NewRuntime(cmd.Context(), shell3.RuntimeSpec{
 				ConfigPath: configPath,

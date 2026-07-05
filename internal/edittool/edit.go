@@ -65,11 +65,10 @@ func EditFile(ctx context.Context, fs fsx.FileSystem, workDir, filePath, oldStri
 		return Result{}, err
 	}
 	ending := detectLineEnding(original)
-	normalized := normalizeLineEndings(original)
 	old := convertToLineEnding(normalizeLineEndings(oldString), ending)
-	new_ := convertToLineEnding(normalizeLineEndings(newString), ending)
+	newStr := convertToLineEnding(normalizeLineEndings(newString), ending)
 
-	updated, rerr := replace(original, old, new_, replaceAll)
+	updated, rerr := replace(original, old, newStr, replaceAll)
 	if errors.Is(rerr, errNotFound) {
 		// Fallback ONLY when the search text wasn't found: if the file's native
 		// ending is CRLF but the model emitted the search/replacement against an
@@ -78,8 +77,8 @@ func EditFile(ctx context.Context, fs fsx.FileSystem, workDir, filePath, oldStri
 		// this on errMultipleMatch (it could collapse an ambiguous match into a
 		// false unique one) or errNoChange.
 		altOld := strings.ReplaceAll(old, "\r\n", "\n")
-		altNew := strings.ReplaceAll(new_, "\r\n", "\n")
-		if alt, aerr := replace(normalized, altOld, altNew, replaceAll); aerr == nil {
+		altNew := strings.ReplaceAll(newStr, "\r\n", "\n")
+		if alt, aerr := replace(normalizeLineEndings(original), altOld, altNew, replaceAll); aerr == nil {
 			updated, rerr = convertToLineEnding(alt, ending), nil
 		}
 	}

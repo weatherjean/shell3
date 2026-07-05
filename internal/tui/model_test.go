@@ -28,7 +28,13 @@ func closedSend(record func(string)) func(string) (<-chan shell3.Event, context.
 }
 
 func sized(send func(string) (<-chan shell3.Event, context.CancelFunc)) *model {
-	m := newModel(send, nil, "", "")
+	return sizedWith(send, nil)
+}
+
+// sizedWith is sized with an injected sessionCmds fake, for tests that need
+// Jobs()/Snapshot()/etc. wired.
+func sizedWith(send func(string) (<-chan shell3.Event, context.CancelFunc), cmds sessionCmds) *model {
+	m := newModel(send, cmds, "", "")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	return m
 }
@@ -219,8 +225,7 @@ func (f *fakeCmds) SwitchAgent(name string) error {
 
 func TestTabCyclesAgent(t *testing.T) {
 	fc := &fakeCmds{names: []string{"main", "research", "build"}, active: "main"}
-	m := newModel(closedSend(nil), fc, "main", "")
-	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m := sizedWith(closedSend(nil), fc)
 
 	m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if fc.active != "research" || m.agentName != "research" {
@@ -235,8 +240,7 @@ func TestTabCyclesAgent(t *testing.T) {
 
 func TestTabIsNoopWhileBusy(t *testing.T) {
 	fc := &fakeCmds{names: []string{"main", "research"}, active: "main"}
-	m := newModel(closedSend(nil), fc, "main", "")
-	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m := sizedWith(closedSend(nil), fc)
 	m.busy = true
 	m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if fc.active != "main" {
@@ -577,7 +581,7 @@ func TestFooterQuitArmedShowsRedBar(t *testing.T) {
 }
 
 func TestLightTerminalSwitchesToLightPalette(t *testing.T) {
-	t.Cleanup(func() { applyPalette(darkPalette) }) // restore global palette for other tests
+	setPalette(t, darkPalette)
 	m := sized(closedSend(nil))
 	if !m.isDark {
 		t.Fatal("model should default to the dark palette")
@@ -596,9 +600,8 @@ func TestLightTerminalSwitchesToLightPalette(t *testing.T) {
 // return: a background report matching the current mode must not flip the palette
 // (which would rebuild every style and re-render the whole transcript for nothing).
 func TestSameModeBackgroundReportIsNoOp(t *testing.T) {
-	t.Cleanup(func() { applyPalette(darkPalette) })
+	setPalette(t, darkPalette) // known dark baseline, matching m.isDark
 	m := sized(closedSend(nil))
-	applyPalette(darkPalette) // known dark baseline, matching m.isDark
 	if !m.isDark {
 		t.Fatal("model should default to dark")
 	}
@@ -613,7 +616,7 @@ func TestSameModeBackgroundReportIsNoOp(t *testing.T) {
 }
 
 func TestThemeOverrideSurvivesPaletteSwitch(t *testing.T) {
-	t.Cleanup(func() { applyPalette(darkPalette) }) // restore global palette for other tests
+	setPalette(t, darkPalette)
 	m := sized(closedSend(nil))
 	magenta := lipgloss.Color("#FF00FF")
 	m.themeOverride = map[string]color.Color{"primary": magenta}
@@ -814,8 +817,8 @@ func TestApplyAgentRefreshesStatusAndContext(t *testing.T) {
 	fc := &fakeCmds{active: "b", status: "openai │ gpt-b │ low"}
 	m := newModel(closedSend(nil), fc, "a", "openai │ gpt-a │ high")
 	m.applyAgent()
-	if m.agentName != "b" || m.statusMsg != "openai │ gpt-b │ low" {
-		t.Fatalf("applyAgent should refresh agent + status from the snapshot: %q / %q", m.agentName, m.statusMsg)
+	if m.agentName != "b" {
+		t.Fatalf("applyAgent should refresh the agent from the snapshot: %q", m.agentName)
 	}
 	if m.modelName != "gpt-b" {
 		t.Fatalf("footer model label should track the new agent, got %q", m.modelName)

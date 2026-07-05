@@ -31,44 +31,48 @@ const bashWaitDelay = 2 * time.Second
 
 // BashHandler executes a bash command and returns its combined stdout+stderr.
 // It respects context cancellation — callers set timeouts before invoking Execute.
-// Exit codes are not returned as errors; non-zero exit appends the error to output.
+// Exit codes are not returned as errors; a non-zero exit prefixes the output
+// with an "error: command exited N" line (matching the custom-tool path), so
+// the model — and the tool_result error flag — can tell the call failed even
+// when the command wrote nothing to stderr.
 type BashHandler struct{}
 
 func (BashHandler) Name() string { return "bash" }
 
 func (BashHandler) Execute(ctx context.Context, id string, args json.RawMessage, cfg ToolConfig) (string, error) {
-	command, timeout := parseBashArgsFull(string(args))
+	command, timeout, err := parseBashArgsFull(string(args))
+	if err != nil {
+		return "error: invalid bash arguments: " + err.Error(), nil
+	}
 	argv, blockMsg, blocked := gateBash(ctx, cfg, "bash", command, string(args))
 	if blocked {
 		return blockMsg, nil
 	}
-	out, _ := runBashCapture(ctx, argv, cfg.WorkDir, nil, timeout)
+	out, code := runBashCapture(ctx, argv, cfg.WorkDir, nil, timeout)
+	if code != 0 {
+		return fmt.Sprintf("error: command exited %d\n%s", code, out), nil
+	}
 	return out, nil
 }
 
 // gateBash runs the on_tool_call chain for a bash/bash_bg command and resolves
 // the verdict to either an argv to exec or a block message for the model. name is
 // the real tool name ("bash" or "bash_bg") so the handler sees the exact tool.
+// On allow, the verdict argv runs exactly as approved (it carries any rewrite
+// or runner-swap); an empty argv — a pure pass — defaults to bash -c command.
 func gateBash(ctx context.Context, cfg ToolConfig, name, command, argsJSON string) (argv []string, blockMsg string, blocked bool) {
 	if cfg.RunToolCall == nil {
 		return []string{"bash", "-c", command}, "", false // no hooks: unsafe default
 	}
 	v := cfg.RunToolCall(ctx, name, command, argsJSON)
-	switch v.Action {
-	case Block:
-		return nil, "error: blocked by on_tool_call: " + v.Reason, true
-	case Ask:
-		if resolveAsk(ctx, cfg.Asker, v) {
-			if len(v.Argv) > 0 {
-				return v.Argv, "", false // run exactly what was approved (carries any rewrite)
-			}
-			return []string{"bash", "-c", command}, "", false
-		}
-		return nil, "error: blocked by on_tool_call — needs human approval (" + v.Reason +
-			"). Stop and ask the human before running this.", true
-	default: // Run
+	allowed, msg := resolveGate(ctx, cfg.Asker, v)
+	if !allowed {
+		return nil, msg, true
+	}
+	if len(v.Argv) > 0 {
 		return v.Argv, "", false
 	}
+	return []string{"bash", "-c", command}, "", false
 }
 
 // runBashCapture runs argv (argv[0] with argv[1:] as args) in workdir with
@@ -140,13 +144,15 @@ func elideMiddle(out []byte, max int) string {
 
 // parseBashArgsFull extracts command and timeout. Timeout defaults to
 // DefaultBashTimeoutSeconds and is clamped to [1, MaxBashTimeoutSeconds].
-func parseBashArgsFull(raw string) (string, time.Duration) {
+// Malformed args return an error — execution paths must never fall back to
+// running the raw JSON blob as a shell command.
+func parseBashArgsFull(raw string) (string, time.Duration, error) {
 	var args struct {
 		Command        string `json:"command"`
 		TimeoutSeconds int    `json:"timeout_seconds"`
 	}
 	if err := json.Unmarshal([]byte(raw), &args); err != nil {
-		return raw, time.Duration(DefaultBashTimeoutSeconds) * time.Second
+		return "", 0, err
 	}
 	t := args.TimeoutSeconds
 	if t <= 0 {
@@ -155,13 +161,14 @@ func parseBashArgsFull(raw string) (string, time.Duration) {
 	if t > MaxBashTimeoutSeconds {
 		t = MaxBashTimeoutSeconds
 	}
-	return args.Command, time.Duration(t) * time.Second
+	return args.Command, time.Duration(t) * time.Second, nil
 }
 
-// ParseBashArgs extracts the "command" field from bash tool JSON args.
-// Takes string (not json.RawMessage) so it can be called from turn.go
-// where tc.RawArgs is a string without a type conversion. Exported so
-// the TUI render layer can format bash headers identically.
+// ParseBashArgs extracts the "command" field from bash tool JSON args,
+// falling back to the raw string when the args don't parse. DISPLAY ONLY:
+// the raw fallback makes it unsafe for execution paths (a malformed blob
+// would run as the command) — those use parseBashArgsFull. Exported so the
+// TUI render layer can format bash headers identically.
 func ParseBashArgs(raw string) string {
 	var args struct {
 		Command string `json:"command"`

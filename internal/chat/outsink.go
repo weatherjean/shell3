@@ -16,6 +16,11 @@ type OutSink struct {
 	mu  sync.Mutex
 	w   io.Writer
 	now func() time.Time
+	// onErr is invoked ONCE, on the first dropped line (marshal or write
+	// failure), so a failing audit log is observable instead of silently
+	// losing lines. Subsequent drops stay silent to avoid log spam.
+	onErr   func(error)
+	errOnce sync.Once
 }
 
 func newOutSink(w io.Writer, fixed time.Time) *OutSink {
@@ -24,6 +29,15 @@ func newOutSink(w io.Writer, fixed time.Time) *OutSink {
 		now = func() time.Time { return fixed }
 	}
 	return &OutSink{w: w, now: now}
+}
+
+// fail reports a dropped line via onErr, first occurrence only.
+func (s *OutSink) fail(err error) {
+	s.errOnce.Do(func() {
+		if s.onErr != nil {
+			s.onErr(err)
+		}
+	})
 }
 
 type outEvent struct {
@@ -42,10 +56,13 @@ func (s *OutSink) writeLocked(e outEvent) {
 	e.TS = s.now().Format(time.RFC3339Nano)
 	data, err := json.Marshal(e)
 	if err != nil {
+		s.fail(err)
 		return
 	}
 	data = append(data, '\n')
-	_, _ = s.w.Write(data)
+	if _, err := s.w.Write(data); err != nil {
+		s.fail(err)
+	}
 }
 
 // WriteStart emits the first line of the JSONL stream.
@@ -117,7 +134,10 @@ func (s *OutSink) WriteChatEvent(ev Event) {
 	}
 	b, err := json.Marshal(rec)
 	if err != nil {
+		s.fail(err)
 		return
 	}
-	_, _ = s.w.Write(append(b, '\n'))
+	if _, err := s.w.Write(append(b, '\n')); err != nil {
+		s.fail(err)
+	}
 }

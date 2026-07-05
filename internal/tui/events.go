@@ -19,10 +19,11 @@ type eventMsg struct {
 // shift advances each tick); there is no glyph spinner.
 type spinnerTickMsg struct{}
 
-// wakeMsg carries one out-of-turn HostEvent from the wake bus.
+// wakeMsg carries one out-of-turn HostEvent from the wake bus. A closed bus
+// returns a nil msg from the wait command instead (same idiom as
+// waitJobProgress), which bubbletea drops — the chain simply stops re-arming.
 type wakeMsg struct {
 	ev shell3.HostEvent
-	ok bool
 }
 
 // jobProgressMsg carries one background-job progress event from the job bus.
@@ -45,7 +46,10 @@ func waitWake(ch <-chan shell3.HostEvent) tea.Cmd {
 	}
 	return func() tea.Msg {
 		ev, ok := <-ch
-		return wakeMsg{ev: ev, ok: ok}
+		if !ok {
+			return nil // bus closed: stop re-arming
+		}
+		return wakeMsg{ev: ev}
 	}
 }
 

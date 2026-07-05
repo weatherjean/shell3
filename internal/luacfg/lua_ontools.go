@@ -37,8 +37,8 @@ type ToolCallVerdict struct {
 // held across a human wait. FAILS CLOSED — a Lua error or malformed return
 // blocks rather than runs.
 func (c *LoadedConfig) RunToolCall(ctx context.Context, name, command, argsJSON string) ToolCallVerdict {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.vmMu.Lock()
+	defer c.vmMu.Unlock()
 	c.L.SetContext(ctx)
 	cmd := command
 	rewritten := false
@@ -160,8 +160,8 @@ func (c *LoadedConfig) HasToolResult() bool { return len(c.onToolResult) > 0 }
 // tool's output, so any error or malformed return passes the current output
 // through unchanged.
 func (c *LoadedConfig) RunToolResult(ctx context.Context, name, argsJSON, output string) string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.vmMu.Lock()
+	defer c.vmMu.Unlock()
 	c.L.SetContext(ctx)
 	out := output
 	for _, fn := range c.onToolResult {

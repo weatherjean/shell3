@@ -9,7 +9,7 @@ import (
 
 // TestInitialize verifies the ACP initialize handshake:
 //   - protocolVersion is 1 (ProtocolVersionNumber) when client sends >= 1
-//   - loadSession is false (Task 8 enables it)
+//   - loadSession is advertised
 //   - PromptCapabilities: Image and Audio are true
 //   - AuthMethods is non-nil and empty
 func TestInitialize(t *testing.T) {
@@ -32,7 +32,6 @@ func TestInitialize(t *testing.T) {
 		t.Errorf("protocolVersion = %d, want %d", resp.ProtocolVersion, acpsdk.ProtocolVersionNumber)
 	}
 
-	// loadSession must be true (Task 8 implemented it).
 	if !resp.AgentCapabilities.LoadSession {
 		t.Error("loadSession = false, want true")
 	}

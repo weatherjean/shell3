@@ -154,8 +154,13 @@ type LoadedConfig struct {
 	// slice means a clean load.
 	warnings []string
 
-	L  *lua.LState
-	mu sync.Mutex
+	L *lua.LState
+	// vmMu serializes access to the Lua VM (gopher-lua is single-threaded):
+	// the on_tool_call / on_tool_result chains lock it for each run. It does
+	// NOT guard the parsed config data — models/agents/subagents/tools are
+	// immutable once Load returns, so the accessors below read them lock-free
+	// and can never block behind a slow Lua hook.
+	vmMu sync.Mutex
 }
 
 // Warnings returns the non-fatal issues collected while loading the config
@@ -169,9 +174,12 @@ func (c *LoadedConfig) Close() {
 	}
 }
 
-// Load reads shell3.lua at path; workdir is used for .env + relative paths.
-func Load(path, workdir string) (*LoadedConfig, error) {
-	env, err := loadDotEnv(filepath.Join(workdir, ".env"))
+// Load reads shell3.lua at path. Everything the config references — .env,
+// required sibling modules, skill files, prompt_cmd working dir — resolves
+// relative to path's directory, so there is no separate workdir to drift from.
+func Load(path string) (*LoadedConfig, error) {
+	cfgDir := filepath.Dir(path)
+	env, err := loadDotEnv(filepath.Join(cfgDir, ".env"))
 	if err != nil {
 		return nil, err
 	}
@@ -189,10 +197,9 @@ func Load(path, workdir string) (*LoadedConfig, error) {
 	// wherever shell3 was invoked from — not the config dir. Prepend the config
 	// dir so `require("foo")` finds foo.lua next to shell3.lua.
 	if pkg, ok := c.L.GetGlobal("package").(*lua.LTable); ok {
-		dir := filepath.Dir(path)
 		prev := lua.LVAsString(pkg.RawGetString("path"))
 		pkg.RawSetString("path", lua.LString(
-			filepath.Join(dir, "?.lua")+";"+filepath.Join(dir, "?", "init.lua")+";"+prev))
+			filepath.Join(cfgDir, "?.lua")+";"+filepath.Join(cfgDir, "?", "init.lua")+";"+prev))
 	}
 	if err := c.L.DoFile(path); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
@@ -203,7 +210,6 @@ func Load(path, workdir string) (*LoadedConfig, error) {
 	// resolve as authors expect. A failing or empty command fails the whole
 	// Load (fail-closed); since reload goes through Load, a bad prompt file can
 	// never silently swap in an empty prompt at runtime.
-	cfgDir := filepath.Dir(path)
 	// Resolve + validate skill file paths against the config dir (cfgDir): each
 	// must be a readable, non-empty regular file, caught here at load/reload
 	// rather than at turn time. The resolved absolute path is stored back so the
@@ -213,13 +219,8 @@ func Load(path, workdir string) (*LoadedConfig, error) {
 		if !filepath.IsAbs(skillPath) {
 			skillPath = filepath.Join(cfgDir, skillPath)
 		}
-		info, err := os.Stat(skillPath)
-		if err != nil {
-			return nil, fmt.Errorf("config: skill %q path %q: %w", c.Skills[i].Name, c.Skills[i].Path, err)
-		}
-		if info.IsDir() || info.Size() == 0 {
-			return nil, fmt.Errorf("config: skill %q path %q: not a non-empty file", c.Skills[i].Name, c.Skills[i].Path)
-		}
+		// One read covers every failure mode: a missing path and a directory
+		// both error here, and whitespace-only content is treated as empty.
 		data, err := os.ReadFile(skillPath)
 		if err != nil {
 			return nil, fmt.Errorf("config: skill %q path %q: %w", c.Skills[i].Name, c.Skills[i].Path, err)
@@ -230,48 +231,28 @@ func Load(path, workdir string) (*LoadedConfig, error) {
 		c.Skills[i].Path = skillPath
 	}
 	for i := range c.agents {
-		if c.agents[i].PromptCmd == "" {
-			continue
+		a := &c.agents[i]
+		if err := resolvePromptCmd(cfgDir, "agent", a.Name, a.PromptCmd, &a.Prompt); err != nil {
+			return nil, err
 		}
-		out, err := runBodyCmd(cfgDir, c.agents[i].PromptCmd)
-		if err != nil {
-			return nil, fmt.Errorf("config: agent %q prompt_cmd %q: %w", c.agents[i].Name, c.agents[i].PromptCmd, err)
-		}
-		c.agents[i].Prompt = out
 	}
 	for i := range c.subagents {
-		if c.subagents[i].PromptCmd == "" {
-			continue
+		sa := &c.subagents[i]
+		if err := resolvePromptCmd(cfgDir, "subagent", sa.Name, sa.PromptCmd, &sa.Prompt); err != nil {
+			return nil, err
 		}
-		out, err := runBodyCmd(cfgDir, c.subagents[i].PromptCmd)
-		if err != nil {
-			return nil, fmt.Errorf("config: subagent %q prompt_cmd %q: %w", c.subagents[i].Name, c.subagents[i].PromptCmd, err)
-		}
-		c.subagents[i].Prompt = out
 	}
 	if len(c.agents) == 0 {
 		return nil, fmt.Errorf("config: no shell3.agent declared")
 	}
 	for i := range c.agents {
-		if c.agents[i].ModelName == "" {
-			if len(c.Models) == 0 {
-				return nil, fmt.Errorf("config: agent %q has no model and no models are declared", c.agents[i].Name)
-			}
-			c.agents[i].ModelName = c.Models[0].Name
-		}
-		if _, ok := c.Model(c.agents[i].ModelName); !ok {
-			return nil, fmt.Errorf("config: agent %q references unknown model %q", c.agents[i].Name, c.agents[i].ModelName)
+		if err := c.resolveModelName("agent", c.agents[i].Name, &c.agents[i].ModelName); err != nil {
+			return nil, err
 		}
 	}
 	for i := range c.subagents {
-		if c.subagents[i].ModelName == "" {
-			if len(c.Models) == 0 {
-				return nil, fmt.Errorf("config: subagent %q has no model and no models are declared", c.subagents[i].Name)
-			}
-			c.subagents[i].ModelName = c.Models[0].Name
-		}
-		if _, ok := c.Model(c.subagents[i].ModelName); !ok {
-			return nil, fmt.Errorf("config: subagent %q references unknown model %q", c.subagents[i].Name, c.subagents[i].ModelName)
+		if err := c.resolveModelName("subagent", c.subagents[i].Name, &c.subagents[i].ModelName); err != nil {
+			return nil, err
 		}
 	}
 	// Validate cross-references: agent.Subagents must all resolve.
@@ -293,6 +274,36 @@ func Load(path, workdir string) (*LoadedConfig, error) {
 	return c, nil
 }
 
+// resolvePromptCmd runs a declaration's prompt_cmd (when set) with cwd=cfgDir
+// and stores its output as the prompt. kind/name label errors ("agent"/"subagent").
+func resolvePromptCmd(cfgDir, kind, name, promptCmd string, prompt *string) error {
+	if promptCmd == "" {
+		return nil
+	}
+	out, err := runBodyCmd(cfgDir, promptCmd)
+	if err != nil {
+		return fmt.Errorf("config: %s %q prompt_cmd %q: %w", kind, name, promptCmd, err)
+	}
+	*prompt = out
+	return nil
+}
+
+// resolveModelName defaults an empty model reference to the first declared
+// model and validates that the reference resolves. kind labels errors
+// ("agent"/"subagent").
+func (c *LoadedConfig) resolveModelName(kind, name string, modelName *string) error {
+	if *modelName == "" {
+		if len(c.Models) == 0 {
+			return fmt.Errorf("config: %s %q has no model and no models are declared", kind, name)
+		}
+		*modelName = c.Models[0].Name
+	}
+	if _, ok := c.Model(*modelName); !ok {
+		return fmt.Errorf("config: %s %q references unknown model %q", kind, name, *modelName)
+	}
+	return nil
+}
+
 // StubNames returns the registered stub-tool names with their redirect
 // messages. The map is config-global (not per-agent); agentsetup appends one
 // minimal tool def per entry to every agent's schema. The returned map is the
@@ -310,8 +321,6 @@ func (c *LoadedConfig) Model(name string) (Model, bool) {
 
 // Agents returns a copy of the registered agents in declaration order.
 func (c *LoadedConfig) Agents() []Agent {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	out := make([]Agent, len(c.agents))
 	copy(out, c.agents)
 	return out
@@ -320,8 +329,6 @@ func (c *LoadedConfig) Agents() []Agent {
 // AgentByName returns the declared agent with the given name. Agent selection
 // is the caller's (per-session) state — the config holds only declarations.
 func (c *LoadedConfig) AgentByName(name string) (Agent, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	for _, a := range c.agents {
 		if a.Name == name {
 			return a, true
@@ -333,8 +340,6 @@ func (c *LoadedConfig) AgentByName(name string) (Agent, bool) {
 // FirstAgent returns the first declared agent (the default when a caller
 // doesn't name one). Load guarantees at least one agent exists.
 func (c *LoadedConfig) FirstAgent() Agent {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	return c.agents[0]
 }
 
@@ -342,8 +347,6 @@ func (c *LoadedConfig) FirstAgent() Agent {
 // Production reads go through SubagentDescription; this accessor exists for
 // tests asserting on declaration/dedup behavior.
 func (c *LoadedConfig) Subagents() []Subagent {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	out := make([]Subagent, len(c.subagents))
 	copy(out, c.subagents)
 	return out
@@ -351,8 +354,6 @@ func (c *LoadedConfig) Subagents() []Subagent {
 
 // SubagentByName returns the declared subagent with the given name.
 func (c *LoadedConfig) SubagentByName(name string) (Subagent, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	for _, s := range c.subagents {
 		if s.Name == name {
 			return s, true

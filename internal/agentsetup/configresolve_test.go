@@ -3,6 +3,7 @@ package agentsetup
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -36,7 +37,10 @@ func TestResolveConfigPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A bare name resolves to ~/.shell3/<name>.lua without needing the file to exist.
+	// A bare name resolves to ~/.shell3/<name>.lua when that file exists.
+	if err := os.WriteFile(filepath.Join(shell3Dir, "code.lua"), []byte("--"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	got, err := ResolveConfigPath("code", home)
 	if err != nil {
 		t.Fatalf("name: %v", err)
@@ -45,8 +49,16 @@ func TestResolveConfigPath(t *testing.T) {
 		t.Errorf("name: got %q, want %q", got, want)
 	}
 
-	// A literal *.lua path is returned unchanged.
-	lit := "/somewhere/custom.lua"
+	// A typo'd name fails with a clear message instead of a later DoFile error.
+	if _, err := ResolveConfigPath("no-such-name", home); err == nil || !strings.Contains(err.Error(), "no such config") {
+		t.Errorf("typo'd name: want 'no such config' error, got %v", err)
+	}
+
+	// A literal *.lua path is returned unchanged (when it exists).
+	lit := filepath.Join(cwd, "custom.lua")
+	if err := os.WriteFile(lit, []byte("--"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if got, err := ResolveConfigPath(lit, home); err != nil || got != lit {
 		t.Errorf("literal path: got %q err %v, want %q", got, err, lit)
 	}

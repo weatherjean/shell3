@@ -26,7 +26,7 @@ type ContentPart struct {
 	Text        string
 	ImageURL    string // data URI ("data:image/jpeg;base64,...") or HTTPS URL
 	AudioData   string // base64-encoded raw audio bytes (input_audio)
-	AudioFormat string // "wav" | "mp3"
+	AudioFormat string // "wav" | "mp3" | "ogg"
 }
 
 // Message is one turn in a conversation.

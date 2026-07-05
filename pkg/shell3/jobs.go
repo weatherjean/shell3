@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -94,6 +94,7 @@ type bgJob struct {
 	id        string
 	kind      JobKind
 	title     string // command text or subagent description
+	agent     string // subagent jobs: the spawned agent's name ("" for commands)
 	parent    *Session
 	parentID  string
 	depth     int
@@ -136,6 +137,11 @@ func (m *jobManager) nextID(prefix string) string {
 	return fmt.Sprintf("%s%d", prefix, m.seq)
 }
 
+// capError is the shared cap-exceeded error for both job kinds.
+func (m *jobManager) capError() error {
+	return fmt.Errorf("background-job cap %d reached; wait for a job to finish", m.max)
+}
+
 // runningCount returns the number of non-finished jobs. Must be called under m.mu.
 func (m *jobManager) runningCount() int {
 	n := 0
@@ -172,10 +178,13 @@ func (m *jobManager) evictOldestDoneIfNeeded() {
 // "K=V" entries appended to the inherited environment (background custom tools
 // inject their params this way); nil inherits the environment unchanged.
 func (m *jobManager) startCommand(parent *Session, command, workdir string, argv, env []string) (string, error) {
+	if len(argv) == 0 {
+		return "", errors.New("empty command argv")
+	}
 	m.mu.Lock()
 	if m.runningCount() >= m.max {
 		m.mu.Unlock()
-		return "", fmt.Errorf("background-job cap %d reached; wait for a job to finish", m.max)
+		return "", m.capError()
 	}
 	id := m.nextID("bg")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -272,9 +281,7 @@ func (m *jobManager) finishCommand(j *bgJob, exit int) {
 	j.endedAt = time.Now()
 	m.evictOldestDoneIfNeeded()
 	m.mu.Unlock()
-	if j.cancel != nil {
-		j.cancel()
-	}
+	j.cancel() // always set before the job is published; release the ctx
 	// Command paths guard m.rt != nil because command-only tests construct
 	// newJobManager(nil, 8) to avoid a full Runtime. Subagent paths (startSubagent,
 	// finishSubagent) call m.rt unconditionally because a subagent cannot be
@@ -294,22 +301,22 @@ func (m *jobManager) list() []JobInfo {
 	out := make([]JobInfo, 0, len(m.jobs))
 	for _, j := range m.jobs {
 		out = append(out, JobInfo{
-			ID: j.id, Cmd: j.title, PID: j.pid, StartedAt: j.startedAt,
+			ID: j.id, Cmd: j.title, Agent: j.agent, PID: j.pid, StartedAt: j.startedAt,
 			Kind: j.kind, Depth: j.depth, ParentID: j.parentID,
 			Done: j.finished, Exit: j.exit, Summary: j.summary,
 			Error: j.errText, EndedAt: j.endedAt,
 		})
 	}
-	sort.Slice(out, func(i, k int) bool {
+	slices.SortFunc(out, func(a, b JobInfo) int {
 		switch {
-		case !out[i].Done && out[k].Done:
-			return true // running before done
-		case out[i].Done && !out[k].Done:
-			return false
-		case out[i].Done:
-			return out[i].EndedAt.After(out[k].EndedAt) // most recently finished first
+		case !a.Done && b.Done:
+			return -1 // running before done
+		case a.Done && !b.Done:
+			return 1
+		case a.Done:
+			return b.EndedAt.Compare(a.EndedAt) // most recently finished first
 		default:
-			return out[i].StartedAt.After(out[k].StartedAt)
+			return b.StartedAt.Compare(a.StartedAt)
 		}
 	})
 	return out
@@ -337,7 +344,7 @@ func (m *jobManager) cancel(id string) error {
 	}
 	m.mu.Unlock()
 	if j == nil {
-		return fmt.Errorf("no such job %q", id)
+		return fmt.Errorf("no such task %q", id)
 	}
 	if finished {
 		return nil // already done; cancel is a no-op
@@ -378,13 +385,13 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 	m.mu.Lock()
 	if m.runningCount() >= m.max {
 		m.mu.Unlock()
-		return "", fmt.Errorf("background-job cap %d reached; wait for a job to finish", m.max)
+		return "", m.capError()
 	}
 	id := m.nextID("sub")
 	// Create the cancel func BEFORE publishing the job so j.cancel is
-	// immutable-once-visible: cancel() and cancelAll() read j.cancel without
-	// holding the lock, which is safe only when it is written once before the
-	// job appears in m.jobs (Fix 4: j.cancel data race).
+	// immutable-once-visible: cancelAll() (and the finishers) invoke j.cancel
+	// without holding the lock, which is safe only when it is written once
+	// before the job appears in m.jobs (Fix 4: j.cancel data race).
 	ctx, cancel := context.WithCancel(context.Background())
 	// Reserve the slot atomically before releasing the lock so that two
 	// concurrent spawns at max-1 cannot both pass the cap check (TOCTOU).
@@ -399,7 +406,7 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 		},
 	}
 	j := &bgJob{
-		id: id, kind: JobSubagent, title: desc, parent: parent,
+		id: id, kind: JobSubagent, title: desc, agent: agent, parent: parent,
 		parentID: pname, depth: depth, startedAt: time.Now(),
 		cancel: cancel, out: out,
 	}
@@ -450,7 +457,7 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 			if runErr != nil {
 				errText = runErr.Error()
 			}
-			m.finishSubagent(j, trimSummary(last.String()), errText)
+			m.finishSubagent(j, strings.TrimSpace(last.String()), errText)
 			m.wg.Done()
 		}()
 		for ev := range child.Send(ctx, prompt) {
@@ -500,9 +507,7 @@ func (m *jobManager) finishSubagent(j *bgJob, summary, errText string) {
 	j.endedAt = time.Now()
 	m.evictOldestDoneIfNeeded()
 	m.mu.Unlock()
-	if j.cancel != nil {
-		j.cancel()
-	}
+	j.cancel() // always set before the job is published; release the ctx
 	m.rt.emitJob(JobProgress{
 		JobID: j.id, Parent: j.parentID,
 		Kind: JobSubagent, Title: j.title, Done: true, Summary: summary,
@@ -550,8 +555,6 @@ func parentName(s *Session) string {
 	return s.name
 }
 
-func trimSummary(s string) string { return strings.TrimSpace(s) }
-
 // formatJobList renders all jobs as a compact listing for the task_list tool.
 // Format: one line per job with id, type, status, and depth; running first.
 func (m *jobManager) formatJobList() string {
@@ -564,12 +567,16 @@ func (m *jobManager) formatJobList() string {
 	for _, j := range jobs {
 		kind := "command"
 		if j.Kind == JobSubagent {
-			kind = "@" + j.Cmd
-			if j.Cmd == "" {
+			kind = "@" + j.Agent
+			if j.Agent == "" {
 				kind = "subagent"
 			}
 		}
-		fmt.Fprintf(&b, "  %s  %s  %s  depth=%d\n", j.ID, kind, jobStatusLabel(j.Done, j.Exit, j.Error), j.Depth)
+		fmt.Fprintf(&b, "  %s  %s  %s  depth=%d", j.ID, kind, jobStatusLabel(j.Done, j.Exit, j.Error), j.Depth)
+		if j.Kind == JobSubagent && j.Cmd != "" {
+			fmt.Fprintf(&b, "  — %s", j.Cmd)
+		}
+		b.WriteString("\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -604,10 +611,12 @@ func renderTranscriptText(raw string) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// formatJobStatus renders one job's full status and a truncated result for the
-// task_status tool. Cap total output to ~4000 bytes to avoid flooding context.
+// jobStatusCap caps formatJobStatus's total output (bytes) so a huge job
+// result can't flood the model's context.
 const jobStatusCap = 4000
 
+// formatJobStatus renders one job's full status and a truncated result for the
+// task_status tool.
 func (m *jobManager) formatJobStatus(id string) string {
 	// Copy the completion fields under the lock: finishers write them under
 	// m.mu, so reading them off j after Unlock would race.
@@ -628,7 +637,7 @@ func (m *jobManager) formatJobStatus(id string) string {
 	}
 	m.mu.Unlock()
 	if j == nil {
-		return fmt.Sprintf("no such task %s", id)
+		return fmt.Sprintf("no such task %q", id)
 	}
 
 	kind := "command"

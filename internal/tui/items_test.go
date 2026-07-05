@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/charmbracelet/x/ansi"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -76,24 +77,10 @@ func TestRenderIncludesContent(t *testing.T) {
 	}
 }
 
-// stripANSI removes SGR escapes so tests assert on visible text.
-func stripANSI(s string) string {
-	var b strings.Builder
-	for i := 0; i < len(s); {
-		if s[i] == '\x1b' {
-			for i < len(s) && s[i] != 'm' {
-				i++
-			}
-			if i < len(s) {
-				i++
-			}
-			continue
-		}
-		b.WriteByte(s[i])
-		i++
-	}
-	return b.String()
-}
+// stripANSI removes ANSI escape sequences so assertions see plain text.
+// Uses the same x/ansi.Strip production code relies on (mouse.go), which
+// handles CSI/OSC sequences the old hand-rolled SGR-only loop missed.
+func stripANSI(s string) string { return ansi.Strip(s) }
 
 func TestThinkingStreamsLiveThenCollapses(t *testing.T) {
 	tr := NewTranscript()
@@ -194,8 +181,7 @@ func TestAssistantMarkdownCachedAcrossRenders(t *testing.T) {
 // cache is keyed on width+len (both unchanged here), so mdEpoch — bumped by
 // applyPalette via resetMarkdown — is what forces the re-render.
 func TestAssistantMarkdownRecolorsOnPaletteSwitch(t *testing.T) {
-	t.Cleanup(func() { applyPalette(darkPalette) })
-	applyPalette(darkPalette)
+	setPalette(t, darkPalette)
 	tr := NewTranscript()
 	tr.Apply(shell3.Event{Kind: shell3.Token, Text: "# heading"})
 	tr.Apply(shell3.Event{Kind: shell3.Done})

@@ -9,7 +9,7 @@ func loadLua(t *testing.T, body string) *LoadedConfig {
 	writeFile(t, dir, "shell3.lua", `
 shell3.model("main", { base_url="u", api_key="k", model="x" })
 `+body)
-	c, err := Load(dir+"/shell3.lua", dir)
+	c, err := Load(dir + "/shell3.lua")
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}

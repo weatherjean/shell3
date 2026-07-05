@@ -95,7 +95,7 @@ func (l *fileLogger) write(level, msg string, err error, fields []any, mirror bo
 func Open(path string, maxBytes int64, maxArchives int) (Logger, io.Closer, error) {
 	f, err := OpenFile(path, maxBytes, maxArchives)
 	if err != nil {
-		return Noop{}, io.NopCloser(nil), err
+		return Noop{}, nil, err // callers must check err before using the closer
 	}
 	lg := &fileLogger{w: f, stderr: os.Stderr}
 	return lg, f, nil

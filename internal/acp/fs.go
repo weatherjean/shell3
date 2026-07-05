@@ -68,7 +68,9 @@ func mapACPNotFound(err error) error {
 		return nil
 	}
 	if strings.Contains(strings.ToLower(err.Error()), "not found") {
-		return fmt.Errorf("%w: %v", os.ErrNotExist, err)
+		// Double-wrap: errors.Is sees os.ErrNotExist AND the original chain
+		// (e.g. errors.As on *acpsdk.RequestError) stays intact.
+		return fmt.Errorf("%w: %w", os.ErrNotExist, err)
 	}
 	return err
 }

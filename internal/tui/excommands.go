@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -199,7 +200,9 @@ func (m *model) handleCommandKey(s string) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	default:
-		if len(s) == 1 { // printable
+		// A single printable rune (multi-byte included); named keys like
+		// "tab"/"enter" are multi-rune strings and fall through.
+		if utf8.RuneCountInString(s) == 1 {
 			m.cmdline += s
 		}
 		return m, nil

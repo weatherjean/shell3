@@ -9,7 +9,7 @@ func TestSecret(t *testing.T) {
 shell3.model("m", { base_url="u", api_key=shell3.env.secret("API"), model="x" })
 shell3.agent({ name="a", model="m", prompt="p", tools={} })
 `)
-	c, err := Load(dir+"/shell3.lua", dir)
+	c, err := Load(dir + "/shell3.lua")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +23,7 @@ shell3.agent({ name="a", model="m", prompt="p", tools={} })
 func TestSecretMissing(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "shell3.lua", `shell3.env.secret("NOPE")`)
-	_, err := Load(dir+"/shell3.lua", dir)
+	_, err := Load(dir + "/shell3.lua")
 	if err == nil || !contains(err.Error(), "NOPE") {
 		t.Fatalf("want missing-secret error, got %v", err)
 	}

@@ -1,7 +1,7 @@
 package shell3
 
 import (
-	"fmt"
+	"errors"
 	"time"
 )
 
@@ -24,8 +24,12 @@ type JobProgress struct {
 // retained in-memory for the session lifetime (up to 100) so the TUI can show
 // their final output and transcript.
 type JobInfo struct {
-	ID        string
-	Cmd       string
+	ID string
+	// Cmd is the command text for command jobs and the model-supplied
+	// description for subagent jobs (whose agent name is in Agent).
+	Cmd string
+	// Agent is the spawned agent's name for subagent jobs; "" for commands.
+	Agent     string
 	PID       int
 	StartedAt time.Time
 	Kind      JobKind
@@ -42,9 +46,7 @@ type JobInfo struct {
 // single-session front-end created via Start can live-tail jobs without holding
 // a separate *Runtime handle. Returns nil when the session has no runtime.
 func (s *Session) JobEvents() <-chan JobProgress {
-	s.mu.Lock()
-	rt := s.runtime
-	s.mu.Unlock()
+	rt := s.runtimeHandle()
 	if rt == nil {
 		return nil
 	}
@@ -55,19 +57,21 @@ func (s *Session) JobEvents() <-chan JobProgress {
 // processes and in-process subagents — newest first. Returns nil when the
 // in-process job runtime is unavailable. (= the TUI's :background.)
 func (s *Session) Jobs() []JobInfo {
-	if s.runtime == nil || s.runtime.jobs == nil {
+	rt := s.runtimeHandle() // snapshot under s.mu: doClose nils s.runtime concurrently
+	if rt == nil || rt.jobs == nil {
 		return nil
 	}
-	return s.runtime.jobs.list()
+	return rt.jobs.list()
 }
 
 // JobOutput returns the in-memory output buffer of a background command job,
 // or "" when the job runtime is unavailable or the job is a subagent.
 func (s *Session) JobOutput(id string) string {
-	if s.runtime == nil || s.runtime.jobs == nil {
+	rt := s.runtimeHandle()
+	if rt == nil || rt.jobs == nil {
 		return ""
 	}
-	return s.runtime.jobs.output(id)
+	return rt.jobs.output(id)
 }
 
 // JobTranscript returns the messages.jsonl contents of a background SUBAGENT
@@ -75,10 +79,11 @@ func (s *Session) JobOutput(id string) string {
 // a command (not a subagent). The TUI's :background view renders this instead
 // of the plain stdout log when present — see JobOutput for the fallback.
 func (s *Session) JobTranscript(id string) string {
-	if s.runtime == nil || s.runtime.jobs == nil {
+	rt := s.runtimeHandle()
+	if rt == nil || rt.jobs == nil {
 		return ""
 	}
-	return s.runtime.jobs.transcript(id)
+	return rt.jobs.transcript(id)
 }
 
 // KillJob cancels one background job (= the TUI's ctrl+x in :background). For
@@ -86,8 +91,9 @@ func (s *Session) JobTranscript(id string) string {
 // the child session's context. It does not block; the job leaves the live list
 // once it exits.
 func (s *Session) KillJob(id string) error {
-	if s.runtime == nil || s.runtime.jobs == nil {
-		return fmt.Errorf("no job runtime")
+	rt := s.runtimeHandle()
+	if rt == nil || rt.jobs == nil {
+		return errors.New("shell3: no job runtime")
 	}
-	return s.runtime.jobs.cancel(id)
+	return rt.jobs.cancel(id)
 }

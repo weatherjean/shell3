@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -35,8 +34,6 @@ import (
 //	...
 //	data: {"id":"chatcmpl-test","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n
 //	data: [DONE]\n\n
-//
-// newFakeLLM builds an OpenAI-compatible SSE server for /chat/completions.
 //
 // The releaseCh parameter gates the special "block" script: the handler
 // streams one content token then blocks until releaseCh is closed or the
@@ -106,94 +103,7 @@ func newFakeLLM(t *testing.T, releaseCh chan struct{}, scripts ...string) *httpt
 			return
 		}
 
-		if strings.HasPrefix(script, "tool:") {
-			// Format: "tool:<name>:<argsJSON>"
-			rest := strings.TrimPrefix(script, "tool:")
-			colonIdx := strings.Index(rest, ":")
-			toolName, toolArgs := rest, "{}"
-			if colonIdx >= 0 {
-				toolName = rest[:colonIdx]
-				toolArgs = rest[colonIdx+1:]
-			}
-
-			// Single chunk carrying the full tool call.
-			chunk := map[string]any{
-				"id":     "chatcmpl-test",
-				"object": "chat.completion.chunk",
-				"choices": []any{
-					map[string]any{
-						"index": 0,
-						"delta": map[string]any{
-							"tool_calls": []any{
-								map[string]any{
-									"index": 0,
-									"id":    "call_0",
-									"type":  "function",
-									"function": map[string]any{
-										"name":      toolName,
-										"arguments": toolArgs,
-									},
-								},
-							},
-						},
-						"finish_reason": nil,
-					},
-				},
-			}
-			b, _ := json.Marshal(chunk)
-			writeEvent(string(b))
-
-			// Terminating chunk with finish_reason "tool_calls".
-			term := map[string]any{
-				"id":     "chatcmpl-test",
-				"object": "chat.completion.chunk",
-				"choices": []any{
-					map[string]any{
-						"index":         0,
-						"delta":         map[string]any{},
-						"finish_reason": "tool_calls",
-					},
-				},
-			}
-			bt, _ := json.Marshal(term)
-			writeEvent(string(bt))
-		} else {
-			// Plain text: split into two content-delta chunks.
-			mid := len(script) / 2
-			parts := [2]string{script[:mid], script[mid:]}
-			for _, part := range parts {
-				chunk := map[string]any{
-					"id":     "chatcmpl-test",
-					"object": "chat.completion.chunk",
-					"choices": []any{
-						map[string]any{
-							"index": 0,
-							"delta": map[string]any{
-								"content": part,
-							},
-							"finish_reason": nil,
-						},
-					},
-				}
-				b, _ := json.Marshal(chunk)
-				writeEvent(string(b))
-			}
-			// Terminating chunk with finish_reason "stop".
-			stop := map[string]any{
-				"id":     "chatcmpl-test",
-				"object": "chat.completion.chunk",
-				"choices": []any{
-					map[string]any{
-						"index":         0,
-						"delta":         map[string]any{},
-						"finish_reason": "stop",
-					},
-				},
-			}
-			bs, _ := json.Marshal(stop)
-			writeEvent(string(bs))
-		}
-		writeEvent("[DONE]")
+		streamScript(w, fl, script)
 	}))
 
 	t.Cleanup(srv.Close)
@@ -384,6 +294,52 @@ func (e *env) getAgent(t *testing.T) *acpAgent {
 	}
 }
 
+// startEnv wires an already-built Runtime behind ACP: in-process pipe pairs,
+// the Run goroutine (with onReady capture), an SDK ClientSideConnection, and
+// cleanup. It is the single wiring path shared by newTestEnvFull,
+// newTestEnvSameDir, and buildPumpEnv, so their plumbing cannot drift.
+func startEnv(t *testing.T, rt *shell3.Runtime, releaseCh chan struct{}, workDir string) *env {
+	t.Helper()
+
+	agentIn, clientOut := io.Pipe()
+	clientIn, agentOut := io.Pipe()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	e := &env{
+		rt:        rt,
+		rec:       &recorder{firstUpdateCh: make(chan struct{})},
+		cancel:    cancel,
+		ready:     make(chan struct{}),
+		releaseCh: releaseCh,
+		workDir:   workDir,
+	}
+
+	go func() {
+		_ = Run(ctx, rt, agentIn, agentOut, Options{
+			DefaultAgent: "code",
+			onReady: func(a *acpAgent) {
+				e.mu.Lock()
+				e.agent = a
+				e.mu.Unlock()
+				close(e.ready)
+			},
+		})
+		_ = agentOut.Close()
+		_ = agentIn.Close()
+	}()
+
+	e.conn = acpsdk.NewClientSideConnection(e.rec, clientOut, clientIn)
+
+	t.Cleanup(func() {
+		cancel()
+		_ = clientOut.Close()
+		_ = agentOut.Close()
+		_ = rt.Close()
+	})
+
+	return e
+}
+
 // newTestEnvFull is the internal constructor used by both newTestEnv and
 // newTestEnvWithGate. When onToolCallLua is non-empty it is appended to the
 // generated shell3.lua so tests can inject hook snippets (e.g. an on_tool_call
@@ -449,43 +405,7 @@ shell3.agent({
 		t.Fatalf("NewRuntime: %v", err)
 	}
 
-	agentIn, clientOut := io.Pipe()
-	clientIn, agentOut := io.Pipe()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	e := &env{
-		rt:        rt,
-		rec:       &recorder{firstUpdateCh: make(chan struct{})},
-		cancel:    cancel,
-		ready:     make(chan struct{}),
-		releaseCh: releaseCh,
-		workDir:   workDir,
-	}
-
-	go func() {
-		_ = Run(ctx, rt, agentIn, agentOut, Options{
-			DefaultAgent: "code",
-			onReady: func(a *acpAgent) {
-				e.mu.Lock()
-				e.agent = a
-				e.mu.Unlock()
-				close(e.ready)
-			},
-		})
-		_ = agentOut.Close()
-		_ = agentIn.Close()
-	}()
-
-	e.conn = acpsdk.NewClientSideConnection(e.rec, clientOut, clientIn)
-
-	t.Cleanup(func() {
-		cancel()
-		_ = clientOut.Close()
-		_ = agentOut.Close()
-		_ = rt.Close()
-	})
-
-	return e
+	return startEnv(t, rt, releaseCh, workDir)
 }
 
 // newTestEnv builds a complete ACP test environment:
@@ -558,41 +478,5 @@ shell3.agent({
 		t.Fatalf("newTestEnvSameDir: NewRuntime: %v", err)
 	}
 
-	agentIn, clientOut := io.Pipe()
-	clientIn, agentOut := io.Pipe()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	e := &env{
-		rt:        rt,
-		rec:       &recorder{firstUpdateCh: make(chan struct{})},
-		cancel:    cancel,
-		ready:     make(chan struct{}),
-		releaseCh: releaseCh,
-		workDir:   parent.workDir,
-	}
-
-	go func() {
-		_ = Run(ctx, rt, agentIn, agentOut, Options{
-			DefaultAgent: "code",
-			onReady: func(a *acpAgent) {
-				e.mu.Lock()
-				e.agent = a
-				e.mu.Unlock()
-				close(e.ready)
-			},
-		})
-		_ = agentOut.Close()
-		_ = agentIn.Close()
-	}()
-
-	e.conn = acpsdk.NewClientSideConnection(e.rec, clientOut, clientIn)
-
-	t.Cleanup(func() {
-		cancel()
-		_ = clientOut.Close()
-		_ = agentOut.Close()
-		_ = rt.Close()
-	})
-
-	return e
+	return startEnv(t, rt, releaseCh, parent.workDir)
 }

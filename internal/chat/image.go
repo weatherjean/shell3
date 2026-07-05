@@ -31,9 +31,7 @@ var supportedImageExts = map[string]bool{
 // image_url ContentPart whose URL is a base64 data URI, plus the source image's
 // pixel dimensions.
 func loadImagePart(path, workDir string) (llm.ContentPart, int, int, error) {
-	if !filepath.IsAbs(path) && workDir != "" {
-		path = filepath.Join(workDir, path)
-	}
+	path = resolveReadPath(path, workDir) // same ~ + relative resolution as the read tool
 
 	ext := strings.ToLower(filepath.Ext(path))
 	if !supportedImageExts[ext] {

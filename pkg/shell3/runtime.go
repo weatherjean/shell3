@@ -10,9 +10,9 @@ import (
 
 	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/chat"
-	"github.com/weatherjean/shell3/internal/fsx"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/runs"
+	"github.com/weatherjean/shell3/internal/strutil"
 )
 
 // RuntimeSpec configures a long-lived Runtime: the process-wide unit owning
@@ -40,7 +40,7 @@ type SessionOpts struct {
 	// FS is the file-I/O backend for this session's read/edit_file tools.
 	// Nil ⇒ OS disk. The ACP front-end sets this to an editor-buffer backend
 	// when the client advertises the fs capability.
-	FS fsx.FileSystem
+	FS FileSystem
 	// Asker confirms an on_tool_call ask-verdict command with a human (true = allow).
 	Asker func(ctx context.Context, command, reason string) bool
 	// ResumeID reloads a stored session's messages when non-empty.
@@ -106,17 +106,18 @@ type Runtime struct {
 	// PastSessions/SessionMessages for front-end session lists/replay and by
 	// the job runtime's transcript reads (task_status / JobTranscript).
 	store *runs.Store
-	// ctx is the runtime's base context, parented by RuntimeSpec.Context;
-	// cancel fires at Close so anything scoped to the runtime's lifetime
-	// unwinds with it.
+	// ctx is the runtime's base context, parented by the ctx given to
+	// NewRuntime. A watcher goroutine calls Close when it fires, so cancelling
+	// the parent tears the runtime down; cancel fires at Close so the watcher
+	// (and anything else scoped to the runtime's lifetime) unwinds with it.
 	ctx    context.Context
 	cancel context.CancelFunc
 
 	configPath string // captured from RuntimeSpec for ConfigPath
 	homeDir    string // captured from construction for ConfigPath
 
-	// jobs manages in-process background jobs (command jobs and, in future tasks,
-	// subagent jobs). Owned by this Runtime; cancelled at Close.
+	// jobs manages in-process background jobs (command and subagent jobs).
+	// Owned by this Runtime; cancelled at Close.
 	jobs *jobManager
 	// subagentMaxDepthVal is the configured max subagent nesting depth (0 = unset;
 	// subagentMaxDepth() applies the default of 3).
@@ -180,6 +181,13 @@ func NewRuntime(ctx context.Context, spec RuntimeSpec) (*Runtime, error) {
 		subagentMaxDepthVal: parts.SubagentMaxDepth,
 	}
 	rt.jobs = newJobManager(rt, parts.BackgroundMaxConcurrent)
+	// Implement the documented cancellation contract: cancelling the parent ctx
+	// tears the runtime down just as Close does. Close itself cancels rt.ctx,
+	// so this watcher always unwinds — the second Close is an idempotent no-op.
+	go func() {
+		<-rt.ctx.Done()
+		_ = rt.Close()
+	}()
 	return rt, nil
 }
 
@@ -202,14 +210,15 @@ func (rt *Runtime) ConfigPath() (string, error) {
 	return agentsetup.ResolveConfigPath(rt.configPath, rt.homeDir)
 }
 
-// SessionMeta summarizes one stored past conversation.
+// SessionMeta summarizes one stored past conversation. Timestamps are
+// time.Time (UTC) — front-ends own their display formatting.
 type SessionMeta struct {
-	ID        string `json:"id"`
-	StartedAt string `json:"started_at"`
-	EndedAt   string `json:"ended_at,omitempty"`
-	LastAt    string `json:"last_at"` // RFC3339 of newest message; falls back to start. Recency sort key.
-	NumMsgs   int    `json:"num_msgs"`
-	Preview   string `json:"preview"`
+	ID        string    `json:"id"`
+	StartedAt time.Time `json:"started_at"`
+	EndedAt   time.Time `json:"ended_at,omitzero"` // zero while the session is still open
+	LastAt    time.Time `json:"last_at"`           // newest message; falls back to start. Recency sort key.
+	NumMsgs   int       `json:"num_msgs"`
+	Preview   string    `json:"preview"`
 }
 
 // PastSessions lists up to limit recent stored conversations (newest first).
@@ -225,15 +234,15 @@ func (rt *Runtime) PastSessions(limit int) ([]SessionMeta, error) {
 	}
 	out := make([]SessionMeta, 0, len(rows))
 	for _, m := range rows {
-		e := SessionMeta{ID: m.ID, StartedAt: m.StartedAt.Format("2006-01-02 15:04")}
+		e := SessionMeta{ID: m.ID, StartedAt: m.StartedAt.UTC()}
 		if !m.EndedAt.IsZero() {
-			e.EndedAt = m.EndedAt.Format("2006-01-02 15:04")
+			e.EndedAt = m.EndedAt.UTC()
 		}
 		last := m.LastAt
 		if last.IsZero() {
 			last = m.StartedAt // no messages yet — sort by when it started
 		}
-		e.LastAt = last.UTC().Format(time.RFC3339)
+		e.LastAt = last.UTC()
 		// Derive the message count + a preview (newest assistant/user text) from the
 		// run's jsonl. Best-effort: a read error leaves NumMsgs 0 / Preview "".
 		if msgs, err := rt.store.LoadMessages(m.ID); err == nil {
@@ -251,7 +260,7 @@ func previewOf(msgs []llm.Message) string {
 	for i := len(msgs) - 1; i >= 0; i-- {
 		m := msgs[i]
 		if (m.Role == llm.RoleUser || m.Role == llm.RoleAssistant) && strings.TrimSpace(m.Content) != "" {
-			return truncatePreviewRunes(strings.TrimSpace(m.Content))
+			return strutil.Truncate(strings.TrimSpace(m.Content), 200) // run-list preview budget
 		}
 	}
 	return ""
@@ -331,16 +340,15 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	}
 	// Open the sink before constructing anything stateful: a failure here must
 	// not leak a partially-initialised session or a store row.
-	sink, sinkCleanup, err := chat.OpenSink(opts.OutPath)
+	sink, sinkCleanup, err := chat.OpenSink(opts.OutPath, cfg.Log)
 	if err != nil {
 		return nil, err
 	}
-	s := newSession(cfg, func() {}, opts) // shared parts are the runtime's to clean
+	s := newSession(cfg, opts) // shared parts are the runtime's to clean
 	s.shellInteractive = opts.ShellInteractive
 	s.fs = opts.FS
 	s.asker = opts.Asker
 	s.opts = opts
-	s.depth = opts.Depth
 	s.runtime, s.name = rt, opts.Name
 	s.sink, s.sinkCleanup = sink, sinkCleanup
 	// Set the per-session host standing reminders now that runtime+name are set:

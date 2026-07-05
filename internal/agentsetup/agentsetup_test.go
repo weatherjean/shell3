@@ -9,7 +9,6 @@ import (
 
 	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/chat"
-	"github.com/weatherjean/shell3/internal/luacfg"
 )
 
 // buildConfig composes the single-session path (BuildParts + a headless
@@ -590,11 +589,5 @@ func TestAgentRuntime_UnknownErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ghost") {
 		t.Errorf("error should name the unknown agent, got: %v", err)
-	}
-}
-
-func TestVerdictActionIotaAlignment(t *testing.T) {
-	if int(chat.Run) != int(luacfg.ActionRun) || int(chat.Block) != int(luacfg.ActionBlock) || int(chat.Ask) != int(luacfg.ActionAsk) {
-		t.Fatal("chat and luacfg ToolCallAction iota orders must stay aligned (agentsetup casts between them)")
 	}
 }

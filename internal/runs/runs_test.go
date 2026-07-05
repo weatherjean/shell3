@@ -67,3 +67,20 @@ func TestLatestSession(t *testing.T) {
 		t.Fatal("expected no match for /other")
 	}
 }
+
+// Session IDs arrive from user-controlled surfaces (read-session <id>,
+// --resume); a path-traversal id must never escape the store.
+func TestSessionIDPathTraversalRejected(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"../escape", "..", "a/b", "/abs"} {
+		if msgs, err := st.LoadMessages(id); err != nil || msgs != nil {
+			t.Errorf("LoadMessages(%q) = %v, %v; want nil, nil (mapped to an impossible dir)", id, msgs, err)
+		}
+		if err := st.TouchSession(id); err == nil {
+			t.Errorf("TouchSession(%q): want error, got nil", id)
+		}
+	}
+}

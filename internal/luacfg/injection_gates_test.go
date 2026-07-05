@@ -1,7 +1,6 @@
 package luacfg
 
 import (
-	"path/filepath"
 	"testing"
 )
 
@@ -13,7 +12,7 @@ shell3.agent({
 })
 shell3.agent({ name="bare", model="opus", prompt="p", tools={} })
 `)
-	c, err := Load(p, filepath.Dir(p))
+	c, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
 	}

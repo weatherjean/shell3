@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -225,10 +226,7 @@ func TestLoadUnknownSession(t *testing.T) {
 
 	// The error must be InvalidParams (-32602), not just any error.
 	var reqErr *acpsdk.RequestError
-	if rErr, ok := err.(*acpsdk.RequestError); ok {
-		reqErr = rErr
-	}
-	if reqErr == nil {
+	if !errors.As(err, &reqErr) {
 		t.Fatalf("LoadSession error is not a *RequestError: %T %v", err, err)
 	}
 	const wantCode = -32602 // JSON-RPC InvalidParams
@@ -274,8 +272,8 @@ func TestLoadOrResumeAlreadyOpenErrors(t *testing.T) {
 		if err == nil {
 			t.Fatalf("%s on already-open id: want error, got nil", name)
 		}
-		reqErr, ok := err.(*acpsdk.RequestError)
-		if !ok {
+		var reqErr *acpsdk.RequestError
+		if !errors.As(err, &reqErr) {
 			t.Fatalf("%s error is not a *RequestError: %T %v", name, err, err)
 		}
 		if reqErr.Code != wantCode {
@@ -356,11 +354,10 @@ func TestCloseSession(t *testing.T) {
 	}
 }
 
-// ── TestInitializeAfterTask8 ──────────────────────────────────────────────────
-
-// TestInitializeAfterTask8 verifies that Initialize now advertises LoadSession=true
-// and the session capabilities for List, Close, and Resume.
-func TestInitializeAfterTask8(t *testing.T) {
+// TestInitializeAdvertisesSessionCapabilities verifies that Initialize
+// advertises LoadSession=true and the session capabilities for List, Close,
+// and Resume.
+func TestInitializeAdvertisesSessionCapabilities(t *testing.T) {
 	e := newTestEnv(t)
 	ctx := context.Background()
 
@@ -373,7 +370,7 @@ func TestInitializeAfterTask8(t *testing.T) {
 	}
 
 	if !resp.AgentCapabilities.LoadSession {
-		t.Error("AgentCapabilities.LoadSession = false, want true after Task 8")
+		t.Error("AgentCapabilities.LoadSession = false, want true")
 	}
 
 	sc := resp.AgentCapabilities.SessionCapabilities

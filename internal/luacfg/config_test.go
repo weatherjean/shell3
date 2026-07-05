@@ -26,7 +26,7 @@ func mustLoadFail(t *testing.T, script string) error {
 	t.Helper()
 	dir := t.TempDir()
 	writeFile(t, dir, "shell3.lua", script)
-	_, err := Load(filepath.Join(dir, "shell3.lua"), dir)
+	_, err := Load(filepath.Join(dir, "shell3.lua"))
 	if err == nil {
 		t.Fatal("expected Load to fail, but it succeeded")
 	}

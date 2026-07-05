@@ -30,6 +30,9 @@ func TestEnsureGlobal(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(g.Root, ".env.example")); !os.IsNotExist(err) {
 		t.Fatalf("EnsureGlobal must not write .env.example; stat err = %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(g.Root, ".gitignore")); err != nil {
+		t.Fatalf("gitignore missing: %v", err)
+	}
 }
 
 func TestEnsureBootstrapEndToEnd(t *testing.T) {
@@ -158,48 +161,6 @@ func TestGlobalGitignore(t *testing.T) {
 	gi2, _ := os.ReadFile(filepath.Join(g.Root, ".gitignore"))
 	if strings.Count(string(gi2), "shell3.log") != strings.Count(content, "shell3.log") {
 		t.Error("global .gitignore duplicated entries on second EnsureGlobal call")
-	}
-}
-
-func TestEnsureGlobalDoesNotWriteConfig(t *testing.T) {
-	home := t.TempDir()
-	g := paths.NewGlobal(home)
-	if err := bootstrap.EnsureGlobal(g); err != nil {
-		t.Fatalf("EnsureGlobal: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(g.Root, "shell3.lua")); !os.IsNotExist(err) {
-		t.Fatalf("EnsureGlobal must not write shell3.lua; stat err = %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(g.Root, ".env.example")); !os.IsNotExist(err) {
-		t.Fatalf("EnsureGlobal must not write .env.example; stat err = %v", err)
-	}
-	// No data/ dir.
-	if _, err := os.Stat(filepath.Join(g.Root, "data")); !os.IsNotExist(err) {
-		t.Fatalf("EnsureGlobal must not create data/; stat err = %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(g.Root, ".gitignore")); err != nil {
-		t.Fatalf("gitignore missing: %v", err)
-	}
-}
-
-// TestEnsureProjectGitignoreIdempotent verifies that repeated EnsureProject
-// calls do not add "*" more than once to the self-ignoring .gitignore.
-func TestEnsureProjectGitignoreIdempotent(t *testing.T) {
-	tmp := t.TempDir()
-	cwd := filepath.Join(tmp, "project")
-	_ = os.MkdirAll(cwd, 0755)
-	l := paths.NewLocal(cwd)
-
-	if err := bootstrap.EnsureProject(l); err != nil {
-		t.Fatalf("EnsureProject: %v", err)
-	}
-	if err := bootstrap.EnsureProject(l); err != nil {
-		t.Fatalf("EnsureProject second: %v", err)
-	}
-
-	gi, _ := os.ReadFile(filepath.Join(l.Root, ".gitignore"))
-	if n := strings.Count(string(gi), "*"); n != 1 {
-		t.Errorf("'*' appears %d times, want 1:\n%s", n, gi)
 	}
 }
 

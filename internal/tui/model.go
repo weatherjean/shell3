@@ -93,19 +93,13 @@ type model struct {
 	renderedLines []string // flattened viewport content lines (set in refresh)
 	selExcluded   []bool   // parallel to renderedLines: meta lines excluded from select/copy
 
-	// :background modal — list, inspect, and kill background jobs (bash_bg
-	// processes and fire-and-forget subagents).
-	bgOpen         bool
-	bgJobs         []shell3.JobInfo
-	bgSel          int      // selected row in the list view
-	bgViewID       string   // non-empty = viewing this job's output (else the list)
-	bgOutput       string   // loaded output of the viewed job (raw transcript JSONL or stdout)
-	bgIsTranscript bool     // true ⇒ bgOutput is a subagent --out transcript (render structured)
-	bgScroll       int      // first visible output line in the output view
-	bgNotice       string   // status line shown inside the modal (e.g. a kill result)
-	bgRows         []string // memoized rendered output rows (nil = recompute; see bgWrappedLines)
-	bgRowsW        int      // content width bgRows was rendered at (re-render on resize)
-	bgCount        int      // live count of background jobs, shown as "bg: N" on the footer (polled)
+	// bg is the :background modal's state — list, inspect, and kill background
+	// jobs (bash_bg processes and fire-and-forget subagents). See background.go.
+	bg bgModal
+	// bgCount is the live count of running background jobs, shown as the
+	// footer's "bg: N" pill. Model-level (not modal state): it updates whether
+	// or not the modal is open.
+	bgCount int
 
 	helpOpen         bool
 	confirm          *confirmReq // pending on_tool_call ask modal (nil = none)
@@ -122,7 +116,6 @@ type model struct {
 
 	agentName     string
 	welcome       string // custom welcome card (shell3.welcome); empty = built-in
-	statusMsg     string
 	modelName     string // footer model label, from Snapshot.Model (chat.SplitStatus)
 	tokens        int
 	promptTokens  int
@@ -175,7 +168,6 @@ func newModel(send func(string) (<-chan shell3.Event, context.CancelFunc), cmds 
 		follow:    true,
 		isDark:    true, // assume dark until the terminal reports its background
 		agentName: agentName,
-		statusMsg: statusMsg,
 	}
 	// The footer's model label comes from the canonical status-line parser —
 	// applyAgent refreshes it from Snapshot.Model on agent switches.
@@ -275,11 +267,11 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.cmds != nil {
 			jobs := m.cmds.Jobs()
 			m.bgCount = countRunningJobs(jobs)
-			if m.bgOpen {
-				m.bgJobs = jobs
+			if m.bg.open {
+				m.bg.jobs = jobs
 				m.clampJobSel()
-				if m.bgViewID != "" {
-					m.loadJobOutput(m.bgViewID)
+				if m.bg.viewID != "" {
+					m.loadJobOutput(m.bg.viewID)
 				}
 			}
 		}
@@ -287,9 +279,6 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case eventMsg:
 		return m.handleEvent(msg)
 	case wakeMsg:
-		if !msg.ok {
-			return m, nil // bus closed
-		}
 		return m, tea.Batch(m.handleWake(msg.ev), waitWake(m.wakeEvents))
 	case jobProgressMsg:
 		m.handleJobProgress(shell3.JobProgress(msg))

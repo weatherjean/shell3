@@ -23,7 +23,7 @@ func (TaskStatusHandler) Execute(_ context.Context, _ string, args json.RawMessa
 		return "error: id is required", nil
 	}
 	if cfg.JobStatus == nil {
-		return fmt.Sprintf("no such task %s", p.ID), nil
+		return "error: task management is not available", nil
 	}
 	return cfg.JobStatus(p.ID), nil
 }
