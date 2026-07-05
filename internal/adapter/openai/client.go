@@ -257,6 +257,7 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 
 	toolCalls := map[int64]*llm.ToolCall{}
 	var toolCallOrder []int64
+	var leak thinkLeakFilter
 
 	for stream.Next() {
 		chunk := stream.Current()
@@ -281,7 +282,9 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 		delta := chunk.Choices[0].Delta
 
 		if delta.Content != "" {
-			onEvent(llm.StreamEvent{TextDelta: delta.Content})
+			if out := leak.filter(delta.Content); out != "" {
+				onEvent(llm.StreamEvent{TextDelta: out})
+			}
 		}
 
 		for _, tc := range delta.ToolCalls {
@@ -307,6 +310,9 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 	}
 
 	_ = stream.Close()
+	if out := leak.flush(); out != "" {
+		onEvent(llm.StreamEvent{TextDelta: out})
+	}
 	if c.tap != nil {
 		// Wait for scanReasoning to finish, then drain any fragments queued
 		// after the last content chunk, before the Done event.

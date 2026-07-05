@@ -186,17 +186,6 @@ func TestCloseStreaming_DropsWhitespaceAssistant(t *testing.T) {
 	}
 }
 
-func TestCloseStreaming_DropsLeakedThinkTag(t *testing.T) {
-	tr := NewTranscript()
-	tr.Apply(shell3.Event{Kind: shell3.Token, Text: "</think>"}) // leaked reasoning tag
-	tr.Apply(shell3.Event{Kind: shell3.ToolCall, ToolName: "bash", ToolCallID: "1", ToolInput: "ls"})
-	for _, it := range tr.items {
-		if it.Kind == ItemAssistant {
-			t.Fatal("a leaked </think> assistant block should be dropped before the tool")
-		}
-	}
-}
-
 func TestCloseStreaming_KeepsRealAssistant(t *testing.T) {
 	tr := NewTranscript()
 	tr.Apply(shell3.Event{Kind: shell3.Token, Text: "real text"})

@@ -217,13 +217,14 @@ func reminderBody(s string) string {
 func (t *Transcript) closeStreaming() {
 	t.foldOpenReasoning()
 	// Drop a streaming assistant block that carries no visible content. Models
-	// often emit a stray space/newline — or a leaked reasoning tag like </think>
-	// (MiniMax) — into content right before a tool call; glamour renders it to
-	// nothing, leaving an empty block that reads as a blank gap above the tool.
+	// often emit a stray space/newline into content right before a tool call
+	// (leaked </think> delimiters are already stripped by the openai adapter);
+	// glamour renders it to nothing, leaving an empty block that reads as a
+	// blank gap above the tool.
 	// The open assistant is always the last item (only Token appends to it, and
 	// every other event calls closeStreaming first), so it is safe to trim.
 	if t.openAssistant >= 0 && t.openAssistant == len(t.items)-1 &&
-		isBlankAssistant(t.items[t.openAssistant].Text) {
+		strings.TrimSpace(t.items[t.openAssistant].Text) == "" {
 		t.items = t.items[:t.openAssistant]
 	}
 	t.openAssistant = -1
@@ -233,16 +234,6 @@ func (t *Transcript) closeStreaming() {
 		t.items = append(t.items, t.pendingNotices...)
 		t.pendingNotices = nil
 	}
-}
-
-// isBlankAssistant reports whether assistant text has no visible content once
-// whitespace and leaked reasoning tags are removed. Such a block renders empty,
-// so it is dropped rather than shown as a gap.
-func isBlankAssistant(s string) bool {
-	for _, tag := range []string{"<think>", "</think>", "<thinking>", "</thinking>"} {
-		s = strings.ReplaceAll(s, tag, "")
-	}
-	return strings.TrimSpace(s) == ""
 }
 
 // foldOpenReasoning collapses the currently-streaming thinking block (if any)
