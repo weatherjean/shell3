@@ -13,7 +13,7 @@ import (
 // keyboard does its mode-specific thing.
 func (m *model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	e := msg.Mouse()
-	// The :background modal owns the mouse while open: the wheel scrolls it, and
+	// The background-jobs modal owns the mouse while open: the wheel scrolls it, and
 	// clicks/drags don't reach the (hidden) transcript underneath.
 	if m.bg.open {
 		if _, ok := msg.(tea.MouseWheelMsg); ok {
@@ -208,14 +208,4 @@ func (m *model) blockAtLine(line int) int {
 		}
 	}
 	return b
-}
-
-// ensureLineVisible scrolls the viewport so the cursor line is on screen.
-func (m *model) ensureLineVisible() {
-	off, h := m.vp.YOffset(), m.vp.Height()
-	if m.cursorLine < off {
-		m.vp.SetYOffset(m.cursorLine)
-	} else if m.cursorLine >= off+h {
-		m.vp.SetYOffset(m.cursorLine - h + 1)
-	}
 }

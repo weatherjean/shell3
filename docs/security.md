@@ -49,7 +49,7 @@ Each handler receives a table `t` with:
 - `t.name` — the **real** tool name (`"bash"`, `"bash_bg"`, `"shell_interactive"`, `"read"`, `"list_files"`, `"edit_file"`, or a custom tool's name)
 - `t.command` — the bash command string (only for the three bash tools; **nil** otherwise)
 - `t.args` — the raw arguments JSON string (every tool)
-- `t.headless` — `true` when no human asker is attached to the session (in-process subagents, `shell3 run`); an `{ask=...}` verdict would auto-deny there, so branch on it to block with a clearer reason or allow a safe subset. Independent of `:disable_safety` (which affects ask resolution, not human presence).
+- `t.headless` — `true` when no human asker is attached to the session (in-process subagents, `shell3 run`); an `{ask=...}` verdict would auto-deny there, so branch on it to block with a clearer reason or allow a safe subset. Independent of `disable_safety` (which affects ask resolution, not human presence).
 
 A handler returns one of:
 
@@ -136,8 +136,8 @@ end)
 **Background jobs are out of scope for output redaction.** For `bash_bg` (and
 backgrounded custom tools) the `on_tool_result` handler sees only the "started
 job…" pointer, not the process's real stdout/stderr — that streams through the
-in-process job runtime (the `:background` modal, job events, and the completion
-notice). If a background command can emit secrets, redact at the source (or
+in-process job runtime (the background modal — ctrl+p → background —, job
+events, and the completion notice). If a background command can emit secrets, redact at the source (or
 don't run it in the background).
 
 See [configuration.md](configuration.md#opt-in-command-gate--on_tool_call)

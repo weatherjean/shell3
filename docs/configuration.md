@@ -272,8 +272,8 @@ user-supplied parameter (never interpolate model text straight into a URL), and
 shape the output with `jq` so you return a clean line, not a wall of JSON.
 
 Optional fields: `background = true` (runs the command as an in-process
-background job, like `bash_bg`: it shows up in the TUI `:background` modal and
-the agent is notified with a completion notice on a later turn) and
+background job, like `bash_bg`: it shows up in the TUI's background modal (ctrl+p → background) and the
+agent is notified with a completion notice on a later turn) and
 `timeout = N` (seconds; foreground tools only). See [cookbook/lib/tools.lua](cookbook/lib/tools.lua) for a full
 template, including the `web_fetch` and `brave_search` tools the base config
 ships with.
@@ -305,7 +305,7 @@ Each handler receives a table `t`:
 | `t.name` | The **real** tool name: `"bash"`, `"bash_bg"`, `"shell_interactive"`, `"read"`, `"list_files"`, `"edit_file"`, or a custom tool's name. |
 | `t.command` | The bash command string — only for the three bash tools; **nil** for every other tool. |
 | `t.args` | Raw arguments JSON string (every tool). Gate a non-bash tool by inspecting this, e.g. a `read`/`edit_file` path. |
-| `t.headless` | `true` when no human asker is attached to the session (in-process subagents, `shell3 run`) — an `{ask=...}` verdict would auto-deny there. Independent of `:disable_safety`. See [headless degradation](#deny-prompt-confirmation-and-headless-degradation). |
+| `t.headless` | `true` when no human asker is attached to the session (in-process subagents, `shell3 run`) — an `{ask=...}` verdict would auto-deny there. Independent of `disable_safety`. See [headless degradation](#deny-prompt-confirmation-and-headless-degradation). |
 
 ### Verdict contract
 
@@ -468,10 +468,10 @@ Override individual colors with `shell3.theme` — a table of colour tokens to
 
 ```lua
 shell3.theme({
-  primary = "#EAB308", -- brand: prompt, edit_file, headings, NORMAL badge
-  green   = "#78AA78", -- bash / INSERT badge
+  primary = "#EAB308", -- brand: prompt, edit_file, headings, palette input
+  green   = "#78AA78", -- bash / safety-off "!" badge
   red     = "#DC2626", -- errors / bash_bg / ctrl-c
-  cyan    = "#5BB6C9", -- : commands, bg count
+  cyan    = "#5BB6C9", -- palette commands, bg count
   pink    = "#D98FB8", -- other tools
   reason  = "#87A58C", -- reasoning / help headers
   fg      = "#E5E7EB", -- body text

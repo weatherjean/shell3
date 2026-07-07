@@ -26,26 +26,18 @@ func (m *model) View() tea.View {
 		taView,
 		m.renderFooter(),
 	)
-	// At most one modal replaces the transcript (see modal.go); the command
-	// palette is a separate, smaller floating overlay (not a full modal) so it
-	// only takes over when no modal is open.
-	switch kind := m.currentModal(); kind {
-	case modalNone:
-		if m.mode == modeCommand {
-			// The command palette floats just above the input so the typed line
-			// in the footer stays visible.
-			base = overlayAbove(base, m.commandPalette(), m.vp.Height())
-		}
-	default:
+	// At most one modal replaces the transcript (see modal.go) — help,
+	// background, confirm, or the ctrl+p command palette.
+	if kind := m.currentModal(); kind != modalNone {
 		base = m.placeModal(m.renderModal(kind))
 	}
 	v.Content = base
 	return v
 }
 
-// refresh rebuilds the viewport content. It preserves the scroll position in
-// NORMAL (so line-scrolling and streaming don't fight); in INSERT it follows
-// the bottom when already there (or forced).
+// refresh rebuilds the viewport content. It preserves the current scroll
+// position unless forceBottom is set or follow is locked (streaming content
+// sticks to the bottom until the user scrolls away — see syncFollow).
 func (m *model) refresh(forceBottom bool) {
 	// Before any message, fill the viewport with the centered welcome card.
 	if m.tr.count() == 0 {
@@ -54,7 +46,6 @@ func (m *model) refresh(forceBottom bool) {
 		m.vp.SetContent(card)
 		m.blockStarts = nil
 		m.totalLines = 0
-		m.cursorLine = 0
 		return
 	}
 	off := m.vp.YOffset()
@@ -62,20 +53,14 @@ func (m *model) refresh(forceBottom bool) {
 	if m.hasSel {
 		selLo, selHi = m.selRange()
 	}
-	content, starts, total, excluded := m.tr.renderBlocks(m.cursorLine, m.mode == modeNormal, m.vp.Width(), selLo, selHi)
+	content, starts, total, excluded := m.tr.renderBlocks(m.vp.Width(), selLo, selHi)
 	m.blockStarts = starts
 	m.totalLines = total
 	m.renderedLines = strings.Split(content, "\n")
 	m.selExcluded = excluded
-	if m.cursorLine >= total {
-		m.cursorLine = total - 1
-	}
-	if m.cursorLine < 0 {
-		m.cursorLine = 0
-	}
 	m.vp.SetContent(content)
-	// follow locks the view to the bottom as content streams; navigation up
-	// clears it (see moveLine/jumpBlock), G re-locks it.
+	// follow locks the view to the bottom as content streams; the palette's
+	// "follow" command re-locks it after scrolling away.
 	if forceBottom || m.follow {
 		m.vp.GotoBottom()
 	} else {
@@ -147,13 +132,13 @@ func (m *model) welcomeCard() string {
 	if m.agentName != "" {
 		lines = append(lines, stUserPrompt.Render("agent")+"  "+stUserText.Render(m.agentName), "")
 	}
-	mode := func(name, desc string) string {
+	row := func(name, desc string) string {
 		return stUserPrompt.Render(fmt.Sprintf("%-8s", name)) + stFgDim.Render(desc)
 	}
 	lines = append(lines,
-		mode("INSERT", "type, enter sends  ·  esc → NORMAL"),
-		mode("NORMAL", "j/k move · click/enter folds · drag or y copies · i types"),
-		mode("COMMAND", ": commands (:clear :agent :q …)"),
+		row("type", "the input is always live — enter sends"),
+		row("ctrl+p", "command palette (agents, background jobs, …)"),
+		row("mouse", "drag selects + copies · click folds · wheel scrolls"),
 		"",
 		stDim.Render("?")+stFgDim.Render(" help")+stDim.Render("   ·   tab")+stFgDim.Render(" switch agent"),
 	)
@@ -190,21 +175,9 @@ func renderedSegs(segs []footerSeg) []string {
 // joins the rendered form for display; uiSnapshot reports the plain form —
 // both read off this one computation.
 func (m *model) buildFooter() (left, right []footerSeg) {
-	if m.mode == modeCommand {
-		txt := ":" + m.cmdline
-		return []footerSeg{{plain: txt, rendered: stModeCommand.Render(txt + "█")}}, nil
-	}
-	var modePlain, modeRendered string
-	switch m.mode {
-	case modeNormal:
-		modePlain, modeRendered = "N", stModeNormal.Render(" N ")
-	default:
-		modePlain, modeRendered = "I", stModeInsert.Render(" I ")
-	}
-	left = append(left, footerSeg{modePlain, modeRendered})
-	// Left: mode pill, then the model with its context-window fill (ctx: x%), then
-	// the transient last-action notice (primary, auto-hidden after noticeTTL), then
-	// the live turn state (quit-armed prompt / thinking shimmer).
+	// Left: the model with its context-window fill (ctx: x%), then the transient
+	// last-action notice (primary, auto-hidden after noticeTTL), then the live
+	// turn state (quit-armed prompt / thinking shimmer).
 	if model := m.modelName; model != "" {
 		// Context-window fill sits right after the model name.
 		if m.tokens > 0 && m.contextWindow > 0 {
@@ -227,11 +200,13 @@ func (m *model) buildFooter() (left, right []footerSeg) {
 		}
 	}
 
-	// Right side, left-to-right: "? help" hint (only at rest), the "!" danger pill
+	// Right side, left-to-right: "? help" and "ctrl+p commands" hints (only at
+	// rest, to declutter the footer while actively typing), the "!" danger pill
 	// when the shell is unsafe, the live subprocess count (bg: N), then the brand
 	// snail glued to the active agent badge (Tab cycles the agent).
 	if strings.TrimSpace(m.ta.Value()) == "" {
 		right = append(right, footerSeg{"? help", stDim.Render("? help")})
+		right = append(right, footerSeg{"ctrl+p commands", stDim.Render("ctrl+p commands")})
 	}
 	// "!" when the shell is unsafe: runtime :disable_safety, or on_tool_call not
 	// enabled in the lua config (unsafe by default).
@@ -254,9 +229,6 @@ func (m *model) buildFooter() (left, right []footerSeg) {
 
 func (m *model) renderFooter() string {
 	left, right := m.buildFooter()
-	if m.mode == modeCommand {
-		return left[0].rendered
-	}
 	leftStr := strings.Join(renderedSegs(left), " ")
 	rightStr := strings.Join(renderedSegs(right), "  ")
 	gap := m.width - lipgloss.Width(leftStr) - lipgloss.Width(rightStr)
@@ -279,21 +251,4 @@ func (m *model) placeModal(box string) string {
 func (m *model) modalWidth(preferred, maxW int) int {
 	w := min(max(preferred, minModalWidth), maxW)
 	return max(min(w, m.width-4), 1)
-}
-
-// overlayAbove pastes box's lines onto base ending at row vpBottom-1 (left
-// aligned), so a panel can float just above the input row.
-func overlayAbove(base, box string, vpBottom int) string {
-	bl := strings.Split(base, "\n")
-	xl := strings.Split(box, "\n")
-	start := vpBottom - len(xl)
-	if start < 0 {
-		start = 0
-	}
-	for i, line := range xl {
-		if r := start + i; r >= 0 && r < len(bl) {
-			bl[r] = line
-		}
-	}
-	return strings.Join(bl, "\n")
 }

@@ -24,9 +24,9 @@ given the `task` tool); max nesting depth is `shell3.subagents{max_depth=N}`
 tools in all — are only advertised when the agent sets `delegation = true` and
 `tools.subagents = { … }` (`bash_bg` is gated separately, by
 `tools = { bash_bg = true }`).
-The TUI `:background` modal lists running + finished jobs live; the footer `bg: N`
-pill counts running jobs. The TUI modal live-tails a unified job-progress stream
-(`rt.JobEvents()` / `Session.JobEvents()`). The shell is
+The TUI's background modal (ctrl+p → background) lists running + finished jobs
+live; the footer `bg: N` pill counts running jobs. The TUI modal live-tails a
+unified job-progress stream (`rt.JobEvents()` / `Session.JobEvents()`). The shell is
 **unsafe by default**; the single opt-in hook that gates it is
 `shell3.on_tool_call(fn)` — a chainable handler that runs before **every** tool with
 the real `t.name` (`bash`/`bash_bg`/`shell_interactive`/`read`/`list_files`/`edit_file`/custom;
@@ -79,7 +79,7 @@ internal/runs/         file-native JSONL store: sessions at .shell3_project/runs
 internal/edittool/     edit_file tool implementation (Go port of opencode's str-replace)
 internal/fsx/          direct-disk text file I/O for read/edit_file tools (plain functions, no interface)
 internal/notify/       Notification type (bg_done / agent_done) shared by job runtime + chat
-internal/tui/          full-screen vim-modal terminal UI (interactive + headless once)
+internal/tui/          full-screen terminal UI: always-live input + ctrl+p command palette (interactive + headless once)
 internal/chat/         conversation loop, tools, events, JSONL audit sink
 internal/llm/          Provider/Streamer interfaces, request params, types (+ fakellm)
 internal/persona/      runtime carrier for an agent's prompt/tools/params (data only)

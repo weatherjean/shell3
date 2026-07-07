@@ -1,5 +1,7 @@
-// Package tui is shell3's full-screen, vim-modal terminal UI, built on
-// bubbletea, bubbles, and lipgloss. Tool and reasoning roundtrips render as
+// Package tui is shell3's full-screen terminal UI, built on bubbletea,
+// bubbles, and lipgloss. The input is always live (no vim modes to switch
+// between); ctrl+p opens a command palette over every session command. Tool
+// and reasoning roundtrips render as
 // collapsible blocks in a scrollable transcript; assistant replies render as
 // markdown. The mouse is captured (cell-motion mode) for line-level transcript
 // selection with OSC 52 copy — see mouse.go; hold the terminal's usual

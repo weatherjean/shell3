@@ -8,10 +8,11 @@ import (
 
 // The screen is exactly: bottom bar (footer) + input + main area (transcript
 // viewport) + at most ONE modal on top, replacing the transcript. help
-// (helpOpen), the :background modal (bg.open), and the on_tool_call confirm
-// prompt (confirm != nil) are three independent features with their own state
-// and key handling (helpBox/modals.go, backgroundBox/background.go,
-// confirmBox/modals.go) — but they all render through modalBox below, the
+// (helpOpen), the background modal (bg.open), the on_tool_call confirm prompt
+// (confirm != nil), and the ctrl+p command palette (palette.open) are four
+// independent features with their own state and key handling
+// (helpBox/modals.go, backgroundBox/background.go, confirmBox/modals.go,
+// paletteBox/palette.go) — but they all render through modalBox below, the
 // single place that turns a list of lines into the bordered/padded box
 // placeModal then centers. No other file builds a modal's outer box.
 
@@ -25,10 +26,11 @@ const (
 	modalHelp
 	modalBackground
 	modalConfirm
+	modalPalette
 )
 
 // currentModal reports which modal is open, in priority order (matches
-// handleKey's dispatch order: confirm > help > background).
+// handleKey's dispatch order: confirm > help > background > palette).
 func (m *model) currentModal() modalKind {
 	switch {
 	case m.confirm != nil:
@@ -37,6 +39,8 @@ func (m *model) currentModal() modalKind {
 		return modalHelp
 	case m.bg.open:
 		return modalBackground
+	case m.palette.open:
+		return modalPalette
 	default:
 		return modalNone
 	}
@@ -52,15 +56,18 @@ func (m *model) renderModal(kind modalKind) string {
 		return m.helpBox()
 	case modalBackground:
 		return m.backgroundBox()
+	case modalPalette:
+		return m.paletteBox()
 	default:
 		return ""
 	}
 }
 
 // modalSelection reports the salient selected row within the open modal, for
-// the snapshot: the highlighted job row in :background, which button
-// (0=Yes/1=No) in the confirm prompt, or -1 when the open modal (or lack of
-// one) has no notion of a selection.
+// the snapshot: the highlighted job row in the background modal, which button
+// (0=Yes/1=No) in the confirm prompt, the highlighted command row in the
+// palette, or -1 when the open modal (or lack of one) has no notion of a
+// selection.
 func (m *model) modalSelection() int {
 	switch m.currentModal() {
 	case modalBackground:
@@ -70,6 +77,8 @@ func (m *model) modalSelection() int {
 			return 0
 		}
 		return 1
+	case modalPalette:
+		return m.palette.sel
 	default:
 		return -1
 	}

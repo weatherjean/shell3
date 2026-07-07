@@ -66,8 +66,8 @@ func TestRenderBlocks_HighlightsSelectedLines(t *testing.T) {
 	tr.AddUser("bravo")
 	tr.AddUser("charlie")
 	// Line 0 is the blank top margin; line 1 is the first user prompt ("alpha").
-	withSel, _, total, _ := tr.renderBlocks(-1, false, 40, 1, 1)
-	noSel, _, _, _ := tr.renderBlocks(-1, false, 40, -1, -1)
+	withSel, _, total, _ := tr.renderBlocks(40, 1, 1)
+	noSel, _, _, _ := tr.renderBlocks(40, -1, -1)
 	if total < 4 {
 		t.Fatalf("expected >=4 lines, got %d", total)
 	}
@@ -208,7 +208,7 @@ func TestReminder_RendersFoldedVisible(t *testing.T) {
 	if !it.foldable() || !it.Folded {
 		t.Fatalf("reminder should be foldable and start folded: foldable=%v folded=%v", it.foldable(), it.Folded)
 	}
-	out, _, _, _ := tr.renderBlocks(-1, false, 80, -1, -1)
+	out, _, _, _ := tr.renderBlocks(80, -1, -1)
 	if !strings.Contains(out, "reminder") {
 		t.Fatalf("reminder should render a visible indicator: %q", out)
 	}

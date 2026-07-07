@@ -13,18 +13,19 @@ package tui
 // blink phase — is deliberately excluded, so two snapshots taken back-to-back
 // with identical input are byte-for-byte equal.
 type uiState struct {
-	mode   editMode // INSERT / NORMAL / COMMAND
-	input  string   // textarea content
-	notice string   // the active last-action notice, "" if none/faded
+	input  string // textarea content
+	notice string // the active last-action notice, "" if none/faded
 
 	busy bool // a turn is in flight
 
-	scrollY int  // viewport Y-offset (NORMAL-mode scroll position)
+	scrollY int  // viewport Y-offset
 	follow  bool // viewport is locked to the bottom as content streams in
 
 	modal    modalKind // which overlay (if any) owns the screen; see modal.go
 	modalSel int       // salient selection within the open modal (bg job row,
-	// confirm's Yes=0/No=1); -1 when the open modal (or none) has no selection
+	// confirm's Yes=0/No=1, the highlighted palette row); -1 when the open modal
+	// (or none) has no selection
+	paletteQuery string // the ctrl+p palette's typed filter/input text, "" when closed
 
 	footer     []string // plain-text footer segments, left-to-right then right-to-left groups
 	blockCount int      // number of transcript blocks (m.blockStarts)
@@ -37,15 +38,15 @@ func (m *model) uiSnapshot() uiState {
 	left, right := m.buildFooter()
 	footer := append(plainSegs(left), plainSegs(right)...)
 	return uiState{
-		mode:       m.mode,
-		input:      m.ta.Value(),
-		notice:     m.activeNotice(),
-		busy:       m.busy,
-		scrollY:    m.vp.YOffset(),
-		follow:     m.follow,
-		modal:      m.currentModal(),
-		modalSel:   m.modalSelection(),
-		footer:     footer,
-		blockCount: len(m.blockStarts),
+		input:        m.ta.Value(),
+		notice:       m.activeNotice(),
+		busy:         m.busy,
+		scrollY:      m.vp.YOffset(),
+		follow:       m.follow,
+		modal:        m.currentModal(),
+		modalSel:     m.modalSelection(),
+		paletteQuery: m.palette.query,
+		footer:       footer,
+		blockCount:   len(m.blockStarts),
 	}
 }

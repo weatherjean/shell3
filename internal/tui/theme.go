@@ -25,10 +25,10 @@ type palette struct {
 
 	fg, fgDim, muted color.Color // body / secondary / chrome text
 
-	primary color.Color // brand yellow — prompt, edit_file, headings, NORMAL pill
-	green   color.Color // success — bash, INSERT pill
+	primary color.Color // brand yellow — prompt, edit_file, headings, palette input
+	green   color.Color // success — bash, safety-off "!" pill
 	red     color.Color // error / danger — bash_bg, errors, ctrl-c
-	cyan    color.Color // info — : commands, bg count
+	cyan    color.Color // info — palette commands, bg count
 	pink    color.Color // misc tools
 	reason  color.Color // reasoning / help section headers
 
@@ -88,7 +88,7 @@ var (
 	stUserText, stThinking, stReminder, stDim, stFgDim, stErr, stInfo lipgloss.Style
 	stChevron                                                         lipgloss.Style
 	stToolBash, stToolEdit, stToolBg, stToolOther                     lipgloss.Style
-	stModeNormal, stModeInsert, stModeCommand                         lipgloss.Style
+	stPaletteInput                                                    lipgloss.Style
 	stCtrlCArmed, stYolo, stBgCount, stSnail, stNotice                lipgloss.Style
 	stDiffAdd, stDiffDel, stDiffMeta                                  lipgloss.Style
 )
@@ -125,13 +125,11 @@ func applyPalette(p palette) {
 
 	// Pills: an accent as the background, with auto-contrast text so they read on
 	// a light or dark terminal alike.
-	stModeNormal = pill(cPrimary)
-	stModeInsert = pill(cGreen)
-	stModeCommand = stPrimaryBold
-	stCtrlCArmed = pill(cRed) // Ctrl+C "press again to quit" bar
-	stYolo = pill(cGreen)     // danger "!" pill (on_tool_call off)
-	stBgCount = pill(cCyan)   // live subprocess count
-	stSnail = pill(cPrimary)  // brand snail glued to the agent badge
+	stPaletteInput = stPrimaryBold // the ctrl+p palette's typed input line
+	stCtrlCArmed = pill(cRed)      // Ctrl+C "press again to quit" bar
+	stYolo = pill(cGreen)          // danger "!" pill (on_tool_call off)
+	stBgCount = pill(cCyan)        // live subprocess count
+	stSnail = pill(cPrimary)       // brand snail glued to the agent badge
 	stNotice = lipgloss.NewStyle().Foreground(cPrimary)
 
 	// edit_file diff colors (git-diff-style preview).

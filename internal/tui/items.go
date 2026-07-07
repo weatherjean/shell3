@@ -295,11 +295,10 @@ func (t *Transcript) raw(i int) string {
 }
 
 // renderBlocks renders all items to viewport content, wrapping each to width.
-// In NORMAL mode the single line at cursorLine gets a left bar (the vim cursor).
 // starts[i] is the first content line of item i; total is the line count. The
-// caller maps cursorLine→block for folding/yank and scrolls to keep the cursor
-// visible.
-func (t *Transcript) renderBlocks(cursorLine int, normal bool, w int, selLo, selHi int) (content string, starts []int, total int, excluded []bool) {
+// caller maps a mouse Y to a block (via starts) for click-to-fold and drag
+// selection.
+func (t *Transcript) renderBlocks(w int, selLo, selHi int) (content string, starts []int, total int, excluded []bool) {
 	inner := w - 2
 	if inner < 1 {
 		inner = 1
@@ -342,30 +341,26 @@ func (t *Transcript) renderBlocks(cursorLine int, normal bool, w int, selLo, sel
 			excluded = append(excluded, true)
 		}
 	}
-	// Clamp the cursor to a real line here so the bar renders on the right line
-	// in THIS frame — even on the first render after entering NORMAL, where the
-	// caller passes a sentinel (1<<30) meaning "last line" that it only clamps
-	// against the total *after* this call. Without this, the bar would be missing
-	// until the next refresh (i.e. only after the first action).
-	cur := cursorLine
-	if cur >= len(all) {
-		cur = len(all) - 1
-	}
-	if cur < 0 {
-		cur = 0
-	}
 	for idx := range all {
-		bar := "  "
-		if normal && idx == cur {
-			bar = stBar.Render("▌") + " "
-		}
 		line := all[idx]
 		if selLo <= selHi && idx >= selLo && idx <= selHi && !excluded[idx] {
 			line = reverseContent(line, inner)
 		}
-		all[idx] = bar + line
+		all[idx] = "  " + line // 2-col gutter (selectedText strips it)
 	}
 	return strings.Join(all, "\n"), starts, len(all), excluded
+}
+
+// lastIndexOfKind returns the index of the last item with kind k, or -1 if
+// none exist — used by the "copy" palette command to find the latest
+// assistant response.
+func (t *Transcript) lastIndexOfKind(k ItemKind) int {
+	for i := len(t.items) - 1; i >= 0; i-- {
+		if t.items[i].Kind == k {
+			return i
+		}
+	}
+	return -1
 }
 
 // metaExcluded reports whether a rendered line is meta chrome that mouse

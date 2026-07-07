@@ -91,12 +91,10 @@ func (m *model) handleEditorResult(msg openEditorMsg) (tea.Model, tea.Cmd) {
 	text := strings.TrimRight(msg.text, "\n")
 	// An empty save keeps the existing draft rather than silently wiping it.
 	if strings.TrimSpace(text) == "" {
-		m.mode = modeInsert
 		m.notice = "editor returned empty — draft kept"
 		return m, m.ta.Focus()
 	}
 	m.ta.SetValue(text)
-	m.mode = modeInsert
 	m.relayout()
 	m.notice = "draft loaded from editor"
 	return m, m.ta.Focus()

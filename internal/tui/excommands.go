@@ -5,16 +5,14 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
-	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 )
 
-// exCommand is one ":" command — the SINGLE source of truth for the command
-// palette, the help overlay, AND dispatch (runCommand). Adding a command here is
-// all it takes for it to be handled, completed, listed in the palette, and shown
-// in help — there are no parallel lists to keep in sync.
+// exCommand is one palette command — the SINGLE source of truth for the ctrl+p
+// command palette, the help overlay, AND dispatch (runCommand). Adding a
+// command here is all it takes for it to be filtered, run, and shown in help —
+// there are no parallel lists to keep in sync.
 type exCommand struct {
 	name    string
 	aliases []string
@@ -29,7 +27,7 @@ type exCommand struct {
 var exCommands = []exCommand{
 	{name: "!", args: "<cmd>", desc: "run a shell command (terminal handoff)", run: func(m *model, arg string) tea.Cmd {
 		if arg == "" {
-			m.cmdInfo("usage: :! <command>")
+			m.cmdInfo("usage: ! <command>")
 			return nil
 		}
 		return tea.ExecProcess(exec.Command("bash", "-c", arg), func(err error) tea.Msg {
@@ -86,7 +84,7 @@ var exCommands = []exCommand{
 		m.cmdInfo("system prompt:\n" + strings.TrimSpace(m.cmds.Snapshot().SystemPrompt))
 		return nil
 	}},
-	{name: "p", aliases: []string{"edit"}, desc: "compose the draft in $EDITOR (:edit, ctrl+o)", run: func(m *model, _ string) tea.Cmd {
+	{name: "p", aliases: []string{"edit"}, desc: "compose the draft in $EDITOR (edit, ctrl+o)", run: func(m *model, _ string) tea.Cmd {
 		return m.openEditor()
 	}},
 	{name: "agent", args: "<name>", desc: "switch agent (blank = list)", session: true, run: func(m *model, arg string) tea.Cmd {
@@ -116,13 +114,41 @@ var exCommands = []exCommand{
 		m.openBackground()
 		return nil
 	}},
+	{name: "follow", desc: "jump to the bottom and re-lock autoscroll", run: func(m *model, _ string) tea.Cmd {
+		m.follow = true
+		m.refresh(true)
+		m.vp.GotoBottom()
+		m.notice = "following"
+		return nil
+	}},
+	{name: "fold", desc: "fold every foldable block", run: func(m *model, _ string) tea.Cmd {
+		m.tr.FoldAll(true)
+		m.refresh(false)
+		m.notice = "folded all"
+		return nil
+	}},
+	{name: "unfold", desc: "unfold every foldable block", run: func(m *model, _ string) tea.Cmd {
+		m.tr.FoldAll(false)
+		m.refresh(false)
+		m.notice = "unfolded all"
+		return nil
+	}},
+	{name: "copy", desc: "copy the last assistant response to the clipboard", run: func(m *model, _ string) tea.Cmd {
+		idx := m.tr.lastIndexOfKind(ItemAssistant)
+		if idx < 0 {
+			m.notice = "no assistant response to copy"
+			return nil
+		}
+		m.notice = "copied to clipboard"
+		return copyToClipboard(m.tr.raw(idx))
+	}},
 	{name: "disable_safety", aliases: []string{"safety"}, desc: "toggle auto-allow for command gate (!)", run: func(m *model, _ string) tea.Cmd {
 		m.safetyOff = !m.safetyOff
 		if m.cmds != nil {
 			m.cmds.SetSafetyOff(m.safetyOff)
 		}
 		if m.safetyOff {
-			m.cmdInfo("command gate asks auto-allowed (!) — run :disable_safety again to re-enable")
+			m.cmdInfo("command gate asks auto-allowed (!) — run disable_safety again to re-enable")
 		} else {
 			m.cmdInfo("command gate prompts re-enabled")
 		}
@@ -148,8 +174,8 @@ func findCommand(name string) *exCommand {
 	return nil
 }
 
-// runCommand executes a ":" command by dispatching to its exCommands entry (the
-// single source of truth). Returns the entry's tea.Cmd (e.g. tea.Quit for :q).
+// runCommand executes a palette command by dispatching to its exCommands entry (the
+// single source of truth). Returns the entry's tea.Cmd (e.g. tea.Quit for "q").
 func (m *model) runCommand(line string) tea.Cmd {
 	line = strings.TrimSpace(line)
 	if line == "" {
@@ -172,90 +198,16 @@ func (m *model) runCommand(line string) tea.Cmd {
 }
 
 // cmdInfo prints a one-line result into the transcript and refreshes. Shared by
-// every ":" command handler.
+// every palette command handler.
 func (m *model) cmdInfo(s string) { m.tr.AddInfo(s); m.refresh(true) }
 
-func (m *model) handleCommandKey(s string) (tea.Model, tea.Cmd) {
-	switch s {
-	case "enter":
-		line := strings.TrimSpace(m.cmdline)
-		m.cmdline = ""
-		m.mode = modeNormal
-		return m, m.runCommand(line)
-	case "esc":
-		m.cmdline = ""
-		m.mode = modeNormal
-		m.refresh(false)
-		return m, nil
-	case "tab":
-		m.completeCommand()
-		return m, nil
-	case "backspace":
-		if m.cmdline != "" {
-			r := []rune(m.cmdline)
-			m.cmdline = string(r[:len(r)-1])
-		} else {
-			m.mode = modeNormal
-			m.refresh(false)
-		}
-		return m, nil
-	default:
-		// A single printable rune (multi-byte included); named keys like
-		// "tab"/"enter" are multi-rune strings and fall through.
-		if utf8.RuneCountInString(s) == 1 {
-			m.cmdline += s
-		}
-		return m, nil
-	}
-}
-
-// completeCommand Tab-completes the command word against the palette: a single
-// match fills it in; several extend to their longest common prefix. No-op once
-// you've started typing an argument (a space is present).
-func (m *model) completeCommand() {
-	if m.cmdline == "" || strings.Contains(m.cmdline, " ") {
-		return
-	}
-	q := strings.ToLower(m.cmdline)
-	var matches []string
-	for _, c := range exCommands {
-		if strings.HasPrefix(c.name, q) {
-			matches = append(matches, c.name)
-		}
-	}
-	switch {
-	case len(matches) == 1:
-		m.cmdline = matches[0]
-	case len(matches) > 1:
-		if lcp := longestCommonPrefix(matches); len(lcp) > len(m.cmdline) {
-			m.cmdline = lcp
-		}
-	}
-}
-
-func longestCommonPrefix(ss []string) string {
-	if len(ss) == 0 {
-		return ""
-	}
-	pre := ss[0]
-	for _, s := range ss[1:] {
-		for !strings.HasPrefix(s, pre) {
-			pre = pre[:len(pre)-1]
-			if pre == "" {
-				return ""
-			}
-		}
-	}
-	return pre
-}
-
-// commandRefLines renders the ":" command reference from exCommands, grouped
+// commandRefLines renders the command reference from exCommands, grouped
 // perLine tokens per line for the help overlay. Single source: same list the
 // palette and runCommand use.
 func commandRefLines(perLine int) []string {
 	toks := make([]string, 0, len(exCommands))
 	for _, c := range exCommands {
-		t := ":" + c.name
+		t := c.name
 		if c.args != "" {
 			t += " " + c.args
 		}
@@ -267,30 +219,4 @@ func commandRefLines(perLine int) []string {
 		lines = append(lines, " "+strings.Join(toks[i:end], "   "))
 	}
 	return lines
-}
-
-// commandPalette renders the filtered ":" command list shown in COMMAND mode.
-func (m *model) commandPalette() string {
-	key := lipgloss.NewStyle().Foreground(cPrimary).Bold(true)
-	desc := lipgloss.NewStyle().Foreground(cFgDim)
-	q := strings.ToLower(strings.TrimSpace(m.cmdline))
-	rows := []string{stBrand.Render("commands")}
-	any := false
-	for _, c := range exCommands {
-		if q != "" && !strings.HasPrefix(c.name, q) {
-			continue
-		}
-		any = true
-		label := ":" + c.name
-		if c.args != "" {
-			label += " " + c.args
-		}
-		rows = append(rows, key.Render(fmt.Sprintf(" %-16s", label))+desc.Render(c.desc))
-	}
-	if !any {
-		rows = append(rows, desc.Render(" (no match)"))
-	}
-	return lipgloss.NewStyle().
-		Padding(0, 1).
-		Render(strings.Join(rows, "\n"))
 }

@@ -17,16 +17,7 @@ import (
 // inputMaxRows caps how tall the input grows before it scrolls internally.
 const inputMaxRows = 15
 
-// editMode is the vim-style mode the TUI is in.
-type editMode int
-
-const (
-	modeInsert  editMode = iota // typing into the input
-	modeNormal                  // navigating the transcript (cursor, folds, yank)
-	modeCommand                 // ":" command line
-)
-
-// sessionCmds is the slice of *shell3.Session that : commands drive.
+// sessionCmds is the slice of *shell3.Session that palette commands drive.
 type sessionCmds interface {
 	Clear() error
 	Rollback() (bool, error)
@@ -43,7 +34,7 @@ type sessionCmds interface {
 	// Jobs lists the live background jobs (bash_bg processes + subagents);
 	// JobOutput returns the tail of one job's stdout log; JobTranscript returns a
 	// subagent's structured --out transcript ("" for a plain bash_bg job);
-	// KillJob signals one to stop. They drive the :background modal.
+	// KillJob signals one to stop. They drive the background-jobs modal.
 	Jobs() []shell3.JobInfo
 	JobOutput(id string) string
 	JobTranscript(id string) string
@@ -72,17 +63,17 @@ type model struct {
 	sessionName string
 	cmds        sessionCmds
 
-	mode          editMode
 	width, height int
 	ready         bool
 	isDark        bool                   // sensed terminal background; drives the active palette (default dark)
 	themeOverride map[string]color.Color // shell3.theme{} color overrides, applied atop the sensed palette
 
-	cursorLine  int   // NORMAL-mode line cursor (flattened content line)
 	totalLines  int   // total rendered content lines
 	blockStarts []int // first content line of each block
-	cmdline     string
-	pending     rune // multi-key prefix in NORMAL (g, z, d)
+
+	// palette is the ctrl+p command palette's state (input line + filtered,
+	// selectable exCommands list). See palette.go.
+	palette paletteModal
 
 	// Line-level mouse selection over the transcript viewport.
 	selecting     bool     // a left-button drag is in progress
@@ -93,7 +84,7 @@ type model struct {
 	renderedLines []string // flattened viewport content lines (set in refresh)
 	selExcluded   []bool   // parallel to renderedLines: meta lines excluded from select/copy
 
-	// bg is the :background modal's state — list, inspect, and kill background
+	// bg is the background-jobs modal's state — list, inspect, and kill background
 	// jobs (bash_bg processes and fire-and-forget subagents). See background.go.
 	bg bgModal
 	// bgCount is the live count of running background jobs, shown as the
@@ -164,7 +155,6 @@ func newModel(send func(string) (<-chan shell3.Event, context.CancelFunc), cmds 
 		ta:        ta,
 		send:      send,
 		cmds:      cmds,
-		mode:      modeInsert,
 		follow:    true,
 		isDark:    true, // assume dark until the terminal reports its background
 		agentName: agentName,
@@ -308,7 +298,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// input but leaves the footer/viewport stale (mangled) until the next key.
 		// Scoped to PasteMsg specifically: the catch-all below must NOT relayout,
 		// or the cursor's recurring BlinkMsg would re-render the transcript ~2x/sec.
-		if m.mode != modeInsert {
+		if m.currentModal() != modalNone {
 			return m, nil
 		}
 		var cmd tea.Cmd
@@ -326,7 +316,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh(false)
 		return m, nil
 	}
-	if m.mode == modeInsert {
+	if m.currentModal() == modalNone {
 		// Catch-all for other insert-mode messages (e.g. the cursor BlinkMsg):
 		// forward to the textarea WITHOUT relayout — see the PasteMsg case above.
 		var cmd tea.Cmd

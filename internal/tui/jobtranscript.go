@@ -9,7 +9,7 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// The :background output view renders a subagent's messages.jsonl transcript
+// The background-jobs output view renders a subagent's messages.jsonl transcript
 // (this file) when the job has one, instead of the plain stdout log. The
 // transcript carries user turns, reasoning, tool calls, tool results, and the
 // final assistant message — all of which are stored in the child session's

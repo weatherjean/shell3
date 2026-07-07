@@ -168,7 +168,7 @@ func bgPollTick() tea.Cmd {
 }
 
 // countRunningJobs counts jobs still running. Finished jobs are retained in the
-// list (so they stay viewable in the :background modal) but must NOT inflate the
+// list (so they stay viewable in the background modal) but must NOT inflate the
 // footer's "bg: N" pill, which reflects active work only.
 func countRunningJobs(jobs []shell3.JobInfo) int {
 	n := 0

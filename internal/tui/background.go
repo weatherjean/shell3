@@ -13,12 +13,12 @@ import (
 	"github.com/weatherjean/shell3/internal/strutil"
 )
 
-// The :background modal lists the live background jobs (bash_bg processes and
+// The background-jobs modal lists the live background jobs (bash_bg processes and
 // fire-and-forget subagents), lets you open one job's output, and kill it. It is
 // a two-pane overlay: a list view, and an output view for the selected job. All
 // keys route here while it is open (see handleKey).
 
-// bgModal is the :background modal's state, operated on exclusively by this
+// bgModal is the background-jobs modal's state, operated on exclusively by this
 // file (plus the mode dispatch in keys.go and the wheel routing in mouse.go).
 type bgModal struct {
 	open         bool
@@ -208,7 +208,7 @@ func (m *model) killTargetJob() {
 }
 
 // handleJobProgress processes one event from the job-progress bus. It keeps the
-// bg:N footer pill up-to-date and, when the :background modal is open and
+// bg:N footer pill up-to-date and, when the background modal is open and
 // displaying the job's raw stdout view, live-appends the chunk so the user sees
 // output stream in without pressing 'r'. Transcript views are left untouched
 // (appending raw chunk text into structured JSONL would corrupt the render).

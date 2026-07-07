@@ -37,7 +37,7 @@ func TestToolResultErrorRendersCross(t *testing.T) {
 	if !tr.items[0].ToolError {
 		t.Fatal("ToolError should flow from the event onto the item")
 	}
-	out, _, _, _ := tr.renderBlocks(-1, false, 80, -1, -1)
+	out, _, _, _ := tr.renderBlocks(80, -1, -1)
 	plain := stripANSI(out)
 	if !strings.Contains(plain, "✗") {
 		t.Fatalf("denied/errored tool result should render ✗:\n%s", plain)
@@ -65,7 +65,7 @@ func TestRenderIncludesContent(t *testing.T) {
 	tr.Apply(shell3.Event{Kind: shell3.ToolResult, ToolCallID: "1", ToolOutput: "file.go"})
 	// Unfold so input/output show; folded would only show the header.
 	tr.FoldAll(false)
-	out, starts, _, _ := tr.renderBlocks(0, false, 80, -1, -1)
+	out, starts, _, _ := tr.renderBlocks(80, -1, -1)
 	if len(starts) != tr.count() {
 		t.Fatalf("starts should have one entry per block: %d vs %d", len(starts), tr.count())
 	}
@@ -156,7 +156,7 @@ func TestAssistantMarkdownCachedAcrossRenders(t *testing.T) {
 	tr := NewTranscript()
 	tr.Apply(shell3.Event{Kind: shell3.Token, Text: "hello **world**"})
 	tr.Apply(shell3.Event{Kind: shell3.Done})
-	tr.renderBlocks(-1, false, 80, -1, -1) // populate the cache
+	tr.renderBlocks(80, -1, -1) // populate the cache
 	a := tr.items[0]
 	if a.Kind != ItemAssistant || a.mdOut == "" {
 		t.Fatalf("assistant block should have a cached render: %+v", a)
@@ -164,12 +164,12 @@ func TestAssistantMarkdownCachedAcrossRenders(t *testing.T) {
 	// Poison the cache; an unchanged (text,width) render — e.g. a scroll — must
 	// reuse it and NOT re-run glamour. This is the scroll-lag fix.
 	a.mdOut = "SENTINEL"
-	tr.renderBlocks(-1, false, 80, -1, -1)
+	tr.renderBlocks(80, -1, -1)
 	if a.mdOut != "SENTINEL" {
 		t.Fatal("scroll (same text+width) must reuse the cache, not re-render markdown")
 	}
 	// A width change must invalidate the cache.
-	tr.renderBlocks(-1, false, 100, -1, -1)
+	tr.renderBlocks(100, -1, -1)
 	if a.mdOut == "SENTINEL" {
 		t.Fatal("width change should invalidate the markdown cache")
 	}
@@ -185,7 +185,7 @@ func TestAssistantMarkdownRecolorsOnPaletteSwitch(t *testing.T) {
 	tr := NewTranscript()
 	tr.Apply(shell3.Event{Kind: shell3.Token, Text: "# heading"})
 	tr.Apply(shell3.Event{Kind: shell3.Done})
-	tr.renderBlocks(-1, false, 80, -1, -1) // render under the dark palette
+	tr.renderBlocks(80, -1, -1) // render under the dark palette
 	a := tr.items[0]
 	darkRender := a.mdOut
 	if darkRender == "" {
@@ -194,14 +194,14 @@ func TestAssistantMarkdownRecolorsOnPaletteSwitch(t *testing.T) {
 	// Same text, same width — only the palette changed. The block must re-render
 	// so its colors track the new palette.
 	applyPalette(lightPalette)
-	tr.renderBlocks(-1, false, 80, -1, -1)
+	tr.renderBlocks(80, -1, -1)
 	if a.mdOut == darkRender {
 		t.Fatal("a palette switch must recolor already-rendered assistant markdown")
 	}
 }
 
 func mustRender(tr *Transcript) string {
-	out, _, _, _ := tr.renderBlocks(-1, false, 80, -1, -1)
+	out, _, _, _ := tr.renderBlocks(80, -1, -1)
 	return out
 }
 
@@ -252,7 +252,7 @@ func TestFoldedToolShowsHeaderOnly(t *testing.T) {
 	tr := NewTranscript()
 	tr.Apply(shell3.Event{Kind: shell3.ToolCall, ToolName: "bash", ToolCallID: "1", ToolInput: "secret-input"})
 	tr.Apply(shell3.Event{Kind: shell3.ToolResult, ToolCallID: "1", ToolOutput: "secret-output"})
-	out, _, _, _ := tr.renderBlocks(0, false, 80, -1, -1)
+	out, _, _, _ := tr.renderBlocks(80, -1, -1)
 	plain := stripANSI(out)
 	if strings.Contains(plain, "secret-output") {
 		t.Fatalf("folded tool must not show output:\n%s", plain)

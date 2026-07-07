@@ -74,26 +74,25 @@ func TestSubmitSendsPromptAndAddsUserItem(t *testing.T) {
 	}
 }
 
-func TestEscEntersNormalKeepingDraft(t *testing.T) {
+// There is no vim NORMAL mode anymore: esc on the main input is a plain
+// keystroke (it only dismisses a mouse selection, handled in handleKey), and
+// the draft is untouched either way.
+func TestEscDoesNotClearDraft(t *testing.T) {
 	m := sized(closedSend(nil))
 	m.ta.SetValue("draft text")
-	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape}) // esc → NORMAL, draft kept
-	if m.mode != modeNormal {
-		t.Fatal("esc should enter NORMAL")
-	}
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.ta.Value() != "draft text" {
 		t.Fatalf("esc must NOT clear the draft, got %q", m.ta.Value())
 	}
 }
 
-func TestNormalDDClearsInput(t *testing.T) {
+// No normal mode: with an empty input, "j" (and any other plain letter) types
+// into the textarea rather than moving a line cursor or doing anything special.
+func TestPlainKeyTypesIntoEmptyInput(t *testing.T) {
 	m := sized(closedSend(nil))
-	m.ta.SetValue("draft text")
-	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape}) // → NORMAL
-	m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
-	m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
-	if m.ta.Value() != "" {
-		t.Fatalf("dd should clear the input, got %q", m.ta.Value())
+	m.Update(keyRune('j'))
+	if m.ta.Value() != "j" {
+		t.Fatalf("j with empty input should type a literal j, got %q", m.ta.Value())
 	}
 }
 
@@ -107,56 +106,20 @@ func TestEmptySubmitIsNoop(t *testing.T) {
 	}
 }
 
-func TestNormalEnterTogglesFold(t *testing.T) {
+// Folding is now mouse-only (click) or via the "fold"/"unfold" palette
+// commands — there is no NORMAL-mode Enter-to-fold.
+func TestClickTogglesFoldOnTheOnlyBlock(t *testing.T) {
 	m := sized(closedSend(nil))
 	m.tr.Apply(shell3.Event{Kind: shell3.ToolCall, ToolName: "bash", ToolCallID: "1", ToolInput: "ls"})
 	m.tr.Apply(shell3.Event{Kind: shell3.ToolResult, ToolCallID: "1", ToolOutput: "out"})
 	if !m.tr.items[0].Folded {
 		t.Fatal("tool block should start folded")
 	}
-	// Esc twice to reach NORMAL with cursor on the (only) block.
-	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape}) // → NORMAL
-	if m.mode != modeNormal {
-		t.Fatalf("expected NORMAL, got %v", m.mode)
-	}
-	m.cursorLine = 0 // cursor on the (only) tool block
-	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if m.tr.items[0].Folded {
-		t.Fatal("Enter in NORMAL should unfold the cursor block")
-	}
-}
-
-func TestNormalLineScrollAndBlockJump(t *testing.T) {
-	m := sized(closedSend(nil))
-	for i := 0; i < 40; i++ {
-		m.tr.AddUser(fmt.Sprintf("line %d", i))
-	}
-	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape}) // → NORMAL, builds blockStarts
-	if m.mode != modeNormal {
-		t.Fatal("expected NORMAL")
-	}
-	m.Update(keyRune('g'))
-	m.Update(keyRune('g')) // top
-	if m.cursorLine != 0 || m.vp.YOffset() != 0 {
-		t.Fatalf("gg should put cursor and view at top, line=%d offset=%d", m.cursorLine, m.vp.YOffset())
-	}
-	m.Update(keyRune('j')) // line cursor down
-	if m.cursorLine != 1 {
-		t.Fatalf("j should move the line cursor by one, line=%d", m.cursorLine)
-	}
-	// Pushing the cursor past the viewport must scroll the view.
-	for i := 0; i < 30; i++ {
-		m.Update(keyRune('j'))
-	}
-	if m.vp.YOffset() == 0 {
-		t.Fatal("cursor moving past the screen should scroll the view")
-	}
-	// } jumps the cursor to the next block's first line.
-	m.cursorLine = 0
 	m.refresh(false)
-	m.Update(keyRune('}'))
-	if m.cursorLine != m.blockStarts[1] {
-		t.Fatalf("} should jump to next block start: line=%d want=%d", m.cursorLine, m.blockStarts[1])
+	y := m.blockStarts[0] - m.vp.YOffset()
+	m.handleClick(y)
+	if m.tr.items[0].Folded {
+		t.Fatal("clicking a foldable block should unfold it")
 	}
 }
 
@@ -182,13 +145,12 @@ func TestInputGrowsWithNewlinesAndShrinksViewport(t *testing.T) {
 func TestHelpOverlayOpensAndCloses(t *testing.T) {
 	m := newModel(closedSend(nil), nil, "", "")
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 40}) // tall enough for the full overlay
-	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})     // → NORMAL
-	m.Update(keyRune('?'))
+	m.Update(keyRune('?'))                             // empty input → '?' opens help
 	if !m.helpOpen {
 		t.Fatal("? should open the help overlay")
 	}
 	plain := stripANSI(m.View().Content)
-	for _, want := range []string{"shell3 — keys", "NORMAL", "fold / unfold block", ":clear"} {
+	for _, want := range []string{"shell3 — keys", "ctrl+p", "clear"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("help overlay missing %q", want)
 		}
@@ -349,13 +311,13 @@ func TestFooterShowsModelAndAgentOnce(t *testing.T) {
 
 func TestCommandPaletteFilters(t *testing.T) {
 	m := sized(closedSend(nil))
-	m.mode = modeCommand
-	m.cmdline = "ag"
-	box := stripANSI(m.commandPalette())
-	if !strings.Contains(box, ":agent") || !strings.Contains(box, ":agents") {
+	m.openPalette()
+	m.palette.query = "ag"
+	box := stripANSI(m.paletteBox())
+	if !strings.Contains(box, "agent") || !strings.Contains(box, "agents") {
 		t.Fatalf("palette should list agent commands for 'ag':\n%s", box)
 	}
-	if strings.Contains(box, ":clear") {
+	if strings.Contains(box, "clear") {
 		t.Fatalf("palette should filter out non-matching commands:\n%s", box)
 	}
 }
@@ -365,7 +327,7 @@ func TestCommandPaletteFilters(t *testing.T) {
 // the next keystroke. A taller input shrinks the viewport.
 func TestPasteRecomputesLayout(t *testing.T) {
 	m := newModel(closedSend(nil), nil, "", "")
-	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24}) // mode defaults to insert
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	vpBefore := m.vp.Height()
 	m.Update(tea.PasteMsg{Content: "a\nb\nc\nd\ne\nf"})
 	if m.vp.Height() >= vpBefore {
@@ -414,18 +376,18 @@ func TestPromptMarkerOnlyWhenSingleLine(t *testing.T) {
 	}
 }
 
-// :compact is a real, handled command; it must be discoverable in the palette.
+// compact is a real, handled command; it must be discoverable in the palette.
 func TestCommandPalette_ListsCompact(t *testing.T) {
 	m := sized(closedSend(nil))
-	m.mode = modeCommand
-	m.cmdline = "comp"
-	if box := stripANSI(m.commandPalette()); !strings.Contains(box, ":compact") {
-		t.Fatalf("palette should list :compact for 'comp':\n%s", box)
+	m.openPalette()
+	m.palette.query = "comp"
+	if box := stripANSI(m.paletteBox()); !strings.Contains(box, "compact") {
+		t.Fatalf("palette should list compact for 'comp':\n%s", box)
 	}
 }
 
-// :help opens the help overlay (same as '?') rather than dumping a one-line
-// text — one help surface, no dual handling.
+// The help command opens the help overlay (same as '?') rather than dumping a
+// one-line text — one help surface, no dual handling.
 func TestHelpCommand_OpensOverlay(t *testing.T) {
 	m := sized(closedSend(nil))
 	m.runCommand("help")
@@ -441,19 +403,22 @@ func TestHelpOverlay_ListsEveryPaletteCommand(t *testing.T) {
 	m := sized(closedSend(nil))
 	box := stripANSI(m.helpBox())
 	for _, c := range exCommands {
-		if !strings.Contains(box, ":"+c.name) {
-			t.Errorf("help overlay is missing :%s (command reference must list every exCommands entry):\n%s", c.name, box)
+		if !strings.Contains(box, c.name) {
+			t.Errorf("help overlay is missing %s (command reference must list every exCommands entry):\n%s", c.name, box)
 		}
 	}
 	// Spot-check the ones that were previously missing from one list or another.
-	for _, want := range []string{":compact", ":disable_safety", ":background"} {
+	for _, want := range []string{"compact", "disable_safety", "background"} {
 		if !strings.Contains(box, want) {
 			t.Errorf("help overlay missing %s", want)
 		}
 	}
 }
 
-func TestFollowBreaksOnScrollUpAndRelocksOnG(t *testing.T) {
+// Scrolling up (mouse wheel — there is no NORMAL-mode gg/G anymore) breaks the
+// autoscroll lock; the "follow" palette command re-locks it and jumps back to
+// the bottom.
+func TestFollowBreaksOnScrollUpAndRelocksViaCommand(t *testing.T) {
 	m := sized(closedSend(nil))
 	for i := 0; i < 60; i++ {
 		m.tr.AddUser(fmt.Sprintf("line %d", i))
@@ -463,30 +428,13 @@ func TestFollowBreaksOnScrollUpAndRelocksOnG(t *testing.T) {
 	if !m.vp.AtBottom() {
 		t.Fatal("should start at the bottom")
 	}
-	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape}) // → NORMAL
-	m.Update(keyRune('g'))                         // gg → top, scrolls the view off the bottom
-	m.Update(keyRune('g'))
+	m.handleWheel(tea.Mouse{Button: tea.MouseWheelUp})
 	if m.follow {
 		t.Fatal("scrolling up should break the autoscroll lock")
 	}
-	m.Update(keyRune('G')) // shift+g → relock + bottom
+	m.runCommand("follow")
 	if !m.follow || !m.vp.AtBottom() {
-		t.Fatal("G should re-lock autoscroll and jump to the bottom")
-	}
-}
-
-func TestCloseBraceOnLastBlockJumpsToBottom(t *testing.T) {
-	m := sized(closedSend(nil))
-	for i := 0; i < 40; i++ {
-		m.tr.AddUser(fmt.Sprintf("line %d", i))
-	}
-	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape}) // → NORMAL (cursor at last block)
-	m.cursorLine = m.blockStarts[len(m.blockStarts)-1]
-	m.refresh(false)
-	m.Update(keyRune('}')) // already on last block → jump to bottom
-	if m.cursorLine != m.totalLines-1 || !m.vp.AtBottom() {
-		t.Fatalf("} on the last block should jump to the bottom: line=%d total=%d atBottom=%v",
-			m.cursorLine, m.totalLines, m.vp.AtBottom())
+		t.Fatal("the follow command should re-lock autoscroll and jump to the bottom")
 	}
 }
 
@@ -678,13 +626,9 @@ func TestViewUsesPassthroughBackground(t *testing.T) {
 
 func TestEditorResultLoadsIntoDraft(t *testing.T) {
 	m := sized(closedSend(nil))
-	m.enterNormal()
 	m.Update(openEditorMsg{text: "a big\nmulti-line prompt\n"})
 	if m.ta.Value() != "a big\nmulti-line prompt" {
 		t.Fatalf("editor result should load into the draft, got %q", m.ta.Value())
-	}
-	if m.mode != modeInsert {
-		t.Fatal("loading an edited prompt should return to INSERT")
 	}
 }
 
@@ -784,26 +728,23 @@ func TestDisableSafetyTogglesSessionAndShowsBang(t *testing.T) {
 	}
 }
 
-func TestCommandTabComplete(t *testing.T) {
+// Tab in the palette completes the currently-selected row's name into the
+// input (not a common-prefix guess across all matches).
+func TestPaletteTabCompletesSelection(t *testing.T) {
 	m := sized(closedSend(nil))
-	m.mode = modeCommand
-	// ":dis" → only disable_safety matches → full completion.
-	m.cmdline = "dis"
-	m.handleCommandKey("tab")
-	if m.cmdline != "disable_safety" {
-		t.Fatalf("tab should complete a unique match, got %q", m.cmdline)
+	m.openPalette()
+	// "dis" → only disable_safety matches → tab completes it.
+	m.palette.query = "dis"
+	m.handlePaletteKey(tea.KeyPressMsg{Code: tea.KeyTab}, "tab")
+	if m.palette.query != "disable_safety" {
+		t.Fatalf("tab should complete the sole match, got %q", m.palette.query)
 	}
-	// ":a" → agent/agents → completes to common prefix "agent".
-	m.cmdline = "a"
-	m.handleCommandKey("tab")
-	if m.cmdline != "agent" {
-		t.Fatalf("tab should extend to the common prefix, got %q", m.cmdline)
-	}
-	// Not in command position (has a space) → no-op.
-	m.cmdline = "agent fo"
-	m.handleCommandKey("tab")
-	if m.cmdline != "agent fo" {
-		t.Fatalf("tab must not touch an argument, got %q", m.cmdline)
+	// "agent" → matches agent/agents; tab completes the selected (first) row.
+	m.palette.query = "agent"
+	m.palette.sel = 0
+	m.handlePaletteKey(tea.KeyPressMsg{Code: tea.KeyTab}, "tab")
+	if m.palette.query != "agent" {
+		t.Fatalf("tab should complete the selected row's name, got %q", m.palette.query)
 	}
 }
 
