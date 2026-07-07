@@ -25,10 +25,8 @@ tools in all — are only advertised when the agent sets `delegation = true` and
 `tools.subagents = { … }` (`bash_bg` is gated separately, by
 `tools = { bash_bg = true }`).
 The TUI `:background` modal lists running + finished jobs live; the footer `bg: N`
-pill counts running jobs. Both the TUI modal and the ACP front-end consume a single
-unified job-progress stream (`rt.JobEvents()` / `Session.JobEvents()`): the TUI
-live-tails it, and ACP renders each job as its own live-updating tool-call card
-(incremental chunks → `completed`). The shell is
+pill counts running jobs. The TUI modal live-tails a unified job-progress stream
+(`rt.JobEvents()` / `Session.JobEvents()`). The shell is
 **unsafe by default**; the single opt-in hook that gates it is
 `shell3.on_tool_call(fn)` — a chainable handler that runs before **every** tool with
 the real `t.name` (`bash`/`bash_bg`/`shell_interactive`/`read`/`list_files`/`edit_file`/custom;
@@ -43,11 +41,8 @@ Denylists are written with `shell3.regex(pat):match(s)` (Go RE2; compiled at loa
 use `(?s)` so `.*` spans newlines; match the whole command so chaining can't hide a
 flagged fragment) — guard on `t.name` before matching `t.command` (nil for non-bash).
 `shell3.on_tool_result(fn)` can rewrite a tool's output (e.g. redact secrets). File
-I/O for `read` and `edit_file` goes through a pluggable `internal/fsx.FileSystem`
-backend (`fsx.OS` by default — direct disk); the ACP front-end swaps in an
-editor-buffer backend when the client advertises the `fs` capability (reads see
-unsaved buffers, writes flow through the editor), falling back to OS otherwise —
-`bash` always hits disk directly. The
+I/O for `read` and `edit_file` goes through `internal/fsx` (direct disk); `bash`
+always hits disk directly. The
 scaffold's example gate ships **commented out** — a fresh config gates nothing —
 and, once enabled, covers only the bash family, so `read`/`list_files` run
 ungated (a config choice, not a hardcoded exemption). Skills
@@ -72,7 +67,7 @@ Secrets and credentials (provider API keys, tool tokens) live in a plain `.env` 
 ## Project Layout
 
 ```
-cmd/shell3/            cobra command tree: root (interactive TUI) + run/boot/read-session/acp subcommands
+cmd/shell3/            cobra command tree: root (interactive TUI) + run/boot/read-session subcommands
 internal/agentsetup/   shared config assembly (Build → chat.Config) used by every front-end
 internal/luacfg/       Lua config loader (shell3.lua → models/agents/tools/skills, on_tool_call/stub_tools) + system-prompt assembly
 internal/bootstrap/    first-run global + project setup
@@ -82,8 +77,7 @@ internal/modelproxy/   run_proxy spawner (starts a model's proxy command on acti
 internal/paths/        global (~/.shell3/) + local (.shell3_project/) path resolution; no DB fields
 internal/runs/         file-native JSONL store: sessions at .shell3_project/runs/<id>/
 internal/edittool/     edit_file tool implementation (Go port of opencode's str-replace)
-internal/fsx/          pluggable FileSystem interface (fsx.OS = direct disk; ACP swaps in editor-buffer backend)
-internal/acp/          ACP (Agent Client Protocol) front-end: stdio JSON-RPC server for editors + bridges
+internal/fsx/          FileSystem interface for read/edit_file tool I/O (fsx.OS = direct disk)
 internal/notify/       Notification type (bg_done / agent_done) shared by job runtime + chat
 internal/tui/          full-screen vim-modal terminal UI (interactive + headless once)
 internal/chat/         conversation loop, tools, events, JSONL audit sink

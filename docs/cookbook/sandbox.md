@@ -13,7 +13,7 @@ it returns one of:
 - `{ argv = { ... } }` — exec this argv directly — this swaps the **runner**, and
   the command arrives as a single argv element, so nothing re-parses or re-quotes it
 - `{ block = true, reason = "..." }` — block
-- `{ ask = "prompt", reason = "...", ask_timeout = N }` — ask a human (TUI `y/N` or ACP `session/request_permission`);
+- `{ ask = "prompt", reason = "...", ask_timeout = N }` — ask a human (TUI `y/N`);
   allowed → run, declined/headless → block. `ask_timeout` optional (seconds, default 300).
 
 The `{ argv = { ... } }` form is what makes `on_tool_call` a real wrapper: you

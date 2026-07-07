@@ -80,21 +80,6 @@ commands. Full walkthrough in [docs/cli.md](docs/cli.md).
   library via [`pkg/shell3`](pkg/shell3) — one-shot, persistent session, or a
   multi-session runtime for an always-on bot.
 
-## ACP (editors & chat bridges)
-
-shell3 implements the [Agent Client Protocol](https://agentclientprotocol.com) —
-run it as a stdio ACP server and any ACP-capable editor or bridge (Zed, OpenACP)
-can open sessions, stream responses, switch agents, and handle permission
-requests:
-
-```sh
-shell3 acp                     # ACP server on stdin/stdout
-shell3 acp --agent plan        # start new sessions on the "plan" agent
-```
-
-See [docs/acp.md](docs/acp.md) for the quickstart, supported methods, permissions
-mapping, and known limitations.
-
 ## Documentation
 
 - **[Configuration](docs/configuration.md)** — models, agents, custom tools,
@@ -103,8 +88,6 @@ mapping, and known limitations.
   `Session`, `Runtime`, subagents.
 - **[CLI & headless](docs/cli.md)** — scripting, the `--out` audit log, the
   read-only query commands, slash commands.
-- **[ACP front-end](docs/acp.md)** — editor and bridge integration via the Agent
-  Client Protocol.
 - **[Security & data](docs/security.md)** — the threat model, secrets, and
   removing shell3's data.
 - **[Cookbook](docs/cookbook/README.md)** — drop-in recipes: extra agents,
@@ -115,7 +98,7 @@ mapping, and known limitations.
 shell3 runs model-chosen shell commands and is **unsafe by default** — a full,
 unrestricted shell with no approval prompt until you opt in. The single hook is
 `shell3.on_tool_call(fn)`: chainable, verdict-based (block / rewrite / runner-swap /
-ask a human via `y/N` in the TUI or `session/request_permission` over ACP). Denylists use
+ask a human via `y/N` in the TUI). Denylists use
 `shell3.regex` (Go RE2, compiled at load). Run it in a sandbox, container, or
 throwaway user if you need hard isolation, and read
 [docs/security.md](docs/security.md) before pointing it at anything you care

@@ -89,18 +89,6 @@ shell3 boot     # interactive: endpoint, model, name, API key → writes config
 `boot` writes `~/.shell3/shell3.lua`, the `lib/` modules, and `~/.shell3/.env`.
 See [configuration.md](configuration.md) for what it produces and how to extend it.
 
-## ACP server
-
-```sh
-shell3 acp                     # ACP server on stdin/stdout (for Zed, OpenACP, ...)
-shell3 acp --agent plan        # set the initial agent for new sessions
-shell3 acp --config ~/work.lua # use a specific config file
-```
-
-Runs shell3 as an ACP (Agent Client Protocol) stdio server. All logs go to
-`~/.shell3/shell3.log`; stdout carries only protocol messages. See
-[acp.md](acp.md) for client setup and supported methods.
-
 ## Slash commands (in-session)
 
 Inside an interactive session, type `/help` for the full list. The common ones:

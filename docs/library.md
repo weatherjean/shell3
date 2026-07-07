@@ -70,8 +70,8 @@ A long-lived host runs a single select loop over `rt.Events()`. The key ideas:
 - **Media.** Inbound images and audio ride along as `Part` attachments, exactly
   as with `SendParts`.
 
-This is the machinery behind front-ends like the ACP server (`shell3 acp`) — see
-[acp.md](acp.md).
+This is the machinery behind long-lived embedding hosts (e.g. an always-on chat
+bot front-end).
 
 ## The job-progress stream: `JobEvents`
 
@@ -80,18 +80,16 @@ This is the machinery behind front-ends like the ACP server (`shell3 acp`) — s
 `bash_bg` commands alike. Each event carries the job id, kind, and title, plus
 either an incremental rendered text `Chunk` (while the job runs) or `Done` with
 the capped result `Summary` (subagent jobs only). The TUI `:background` modal
-live-tails this stream, and the ACP front-end renders each job as its own
-live-updating tool-call card — both are built on the same channel, and an
-embedder can be too.
+live-tails this stream — it's built on the same channel an embedder can consume
+too.
 
 ## Pluggable file I/O: `SessionOpts.FS`
 
 `SessionOpts.FS` (or `Spec.FS` for `Start`/`Run`) accepts a `FileSystem` — a
 two-method interface defined in `pkg/shell3` (`ReadTextFile`/`WriteTextFile`
 over absolute paths) — that backs the session's `read` and `edit_file` tools. The default is direct disk;
-the ACP front-end swaps in an editor-buffer backend so reads see unsaved buffers
-and writes flow through the editor. `bash` is unaffected — it always hits disk
-directly.
+an embedder can swap in another backend (e.g. one backed by in-memory buffers
+instead of the OS). `bash` is unaffected — it always hits disk directly.
 
 ## Session introspection and host tools
 

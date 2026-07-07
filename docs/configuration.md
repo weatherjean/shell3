@@ -378,9 +378,7 @@ for a non-bash tool fails closed.
 ### Deny-prompt confirmation and headless degradation
 
 When a handler returns `{ask=...}`, a human must confirm. The interactive **TUI
-shows an inline `y/N` prompt**; **ACP clients receive a `session/request_permission`
-request** (see [acp.md](acp.md#permissions-on_tool_call--sessionrequest_permission)).
-**Headless subagents** have no attached human, so an `{ask=...}` verdict
+shows an inline `y/N` prompt**. **Headless subagents** have no attached human, so an `{ask=...}` verdict
 is auto-denied with its `reason`; the block reason flows back to the parent agent
 in the in-process completion notice so the parent — where a human *is* attached — can decide
 how to proceed. Handlers see this ahead of time as `t.headless` and can return a

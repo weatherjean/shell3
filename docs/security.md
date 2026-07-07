@@ -57,7 +57,7 @@ A handler returns one of:
 - `{ command = "..." }` — rewrite the bash command text; continue the chain (bash tools only — fails closed on a non-bash tool)
 - `{ argv = { ... } }` — **terminal**: exec this argv exactly (runner swap, e.g. into Docker or SSH; `bash`/`bash_bg` only)
 - `{ block = true, reason = "..." }` — **terminal**: block; `reason` is shown to the model
-- `{ ask = "prompt", reason = "...", ask_timeout = N }` — prompt a human (TUI `y/N` / ACP `session/request_permission`); allowed → run, declined or headless → block with `reason`. `ask_timeout` is optional (seconds, default 300).
+- `{ ask = "prompt", reason = "...", ask_timeout = N }` — prompt a human (TUI `y/N`); allowed → run, declined or headless → block with `reason`. `ask_timeout` is optional (seconds, default 300).
 
 A handler that raises a Lua error **fails closed** (blocks). Only `{block=true}`
 blocks via the block verdict; a returned table that contains none of the recognized
@@ -98,8 +98,8 @@ entire command, a flagged command can't hide behind a benign prefix: `echo hi; r
 -rf /` and `x=$(rm -rf /)` both match `rm\s+-rf`. With `(?s)`, `.` spans newlines
 too — splitting a command across lines can't slip a fragment past a `.*` rule.
 
-**Headless subagents deny on `{ask=}` matches.** The TUI shows a `y/N` prompt;
-ACP clients receive a `session/request_permission` request. In-process subagents (spawned
+**Headless subagents deny on `{ask=}` matches.** The TUI shows a `y/N` prompt.
+In-process subagents (spawned
 via the `task` tool) run headless, so an `{ask=...}` verdict is auto-denied with
 its `reason`. Handlers see this ahead of time as `t.headless` and can return a
 tailored `{block=...}` (or allow a safe subset) instead of an ask that will
