@@ -47,8 +47,8 @@ func handleReadTool(ctx context.Context, argsJSON, workDir string, fs fsx.FileSy
 
 	path := resolveReadPath(a.Path, workDir)
 	// All existence/type knowledge comes from the backend, not a disk pre-stat:
-	// with a non-OS backend (e.g. the ACP editor bridge) a file may exist only in
-	// an editor buffer, so stat-ing the disk first would wrongly report it missing.
+	// with a non-OS backend a file may exist only in an in-memory buffer, so
+	// stat-ing the disk first would wrongly report it missing.
 	content, err := fs.ReadTextFile(ctx, path)
 	if err != nil {
 		switch {

@@ -19,7 +19,7 @@
 // A Session runs one turn at a time. [Session.Send] streams a turn's events and
 // returns [ErrBusy] (as an Error event) if a turn is already in flight; drain
 // the channel to completion before the next Send, Clear, SwitchAgent, or Prune.
-// Name sessions on the runtime (e.g. "acp:1234") via [SessionOpts]; requesting an
+// Name sessions on the runtime (e.g. "sess:1234") via [SessionOpts]; requesting an
 // existing live name returns that session. Each session has its own agent,
 // workdir, headless flag, and audit log.
 //

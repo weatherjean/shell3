@@ -1,8 +1,7 @@
 // Package fsx defines the pluggable file-I/O backend used by the read and
-// edit_file tools. The OS backend does direct disk I/O; other backends (e.g.
-// the ACP editor bridge) route reads/writes elsewhere. It is a leaf package:
-// standard library only, so both internal/chat and internal/edittool can import
-// it without a cycle.
+// edit_file tools. The OS backend does direct disk I/O; other backends can
+// route reads/writes elsewhere. It is a leaf package: standard library only,
+// so both internal/chat and internal/edittool can import it without a cycle.
 package fsx
 
 import (

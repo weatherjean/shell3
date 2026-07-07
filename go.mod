@@ -11,7 +11,6 @@ require (
 	github.com/aymanbagabas/go-udiff v0.4.1
 	github.com/charmbracelet/ultraviolet v0.0.0-20260525132238-948f4557a654
 	github.com/charmbracelet/x/ansi v0.11.7
-	github.com/coder/acp-go-sdk v0.13.5
 	github.com/lucasb-eyer/go-colorful v1.4.0
 	github.com/openai/openai-go v1.12.0
 	github.com/spf13/cobra v1.10.2

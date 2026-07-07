@@ -24,7 +24,7 @@ type RuntimeSpec struct {
 
 // SessionOpts parameterizes one Session on a Runtime.
 type SessionOpts struct {
-	// Name keys the session on the runtime (e.g. "acp:1234"). "" gets a unique
+	// Name keys the session on the runtime (e.g. "sess:1234"). "" gets a unique
 	// generated name. Requesting an existing live name returns that session.
 	Name string
 	// Agent selects the initial agent ("" → first declared).
@@ -38,8 +38,7 @@ type SessionOpts struct {
 	// ShellInteractive runs an interactive shell command with TTY access.
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
 	// FS is the file-I/O backend for this session's read/edit_file tools.
-	// Nil ⇒ OS disk. The ACP front-end sets this to an editor-buffer backend
-	// when the client advertises the fs capability.
+	// Nil ⇒ OS disk.
 	FS FileSystem
 	// Asker confirms an on_tool_call ask-verdict command with a human (true = allow).
 	Asker func(ctx context.Context, command, reason string) bool

@@ -160,8 +160,8 @@ func TestReadTool_NoTrailingNewline(t *testing.T) {
 }
 
 // fakeReadFS is a FileSystem backend that serves files from memory only —
-// paths deliberately do not exist on disk, mimicking the ACP editor-buffer
-// backend where a file may live only in an unsaved buffer.
+// paths deliberately do not exist on disk, mimicking a non-OS backend where
+// a file may live only in an unsaved buffer.
 type fakeReadFS struct{ files map[string]string }
 
 func (f fakeReadFS) ReadTextFile(_ context.Context, absPath string) (string, error) {

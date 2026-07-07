@@ -59,7 +59,7 @@ type ToolConfig struct {
 	// WorkDir is the working directory tools should resolve paths against.
 	WorkDir string
 	// FS is the file-I/O backend for the read and edit_file tools. Nil ⇒ the
-	// OS backend (direct disk). ACP sessions inject an editor-buffer backend.
+	// OS backend (direct disk).
 	FS fsx.FileSystem
 	// Asker confirms an ask-verdict command with a human. Nil ⇒ ask degrades to
 	// deny (headless subagent path).

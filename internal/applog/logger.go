@@ -15,10 +15,10 @@ import (
 )
 
 // Rotation bounds for the shared global app log. Every opener of that file
-// (agentsetup's runtime logger, the ACP command's slog writer, ...) MUST use
-// these same constants: rotation happens at open time by renaming the path, so
-// two openers with different bounds could rotate the file out from under each
-// other's file descriptor, sending lines to an orphaned inode.
+// (e.g. agentsetup's runtime logger) MUST use these same constants: rotation
+// happens at open time by renaming the path, so two openers with different
+// bounds could rotate the file out from under each other's file descriptor,
+// sending lines to an orphaned inode.
 const (
 	// DefaultMaxBytes is the size beyond which the log is rotated at open.
 	DefaultMaxBytes = 2 * 1024 * 1024
