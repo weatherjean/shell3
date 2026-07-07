@@ -16,6 +16,16 @@ func TestFooterShowsBgCountAndNotice(t *testing.T) {
 	m.bgCount = 2
 	// A notice set through Update gets its display window stamped.
 	m.Update(shellDoneMsg{cmd: "echo hi"})
+	// The structured snapshot's footer/notice fields are plain text — no ANSI
+	// stripping needed — and independently verify the same facts the rendered
+	// footer string carries.
+	snap := m.uiSnapshot()
+	if !strings.Contains(strings.Join(snap.footer, " "), "bg: 2") {
+		t.Fatalf("snapshot footer should show the subprocess count as bg: N: %v", snap.footer)
+	}
+	if snap.notice != "! echo hi" {
+		t.Fatalf("snapshot notice should be the last-action notice, got %q", snap.notice)
+	}
 	plain := stripANSI(m.renderFooter())
 	if !strings.Contains(plain, "bg: 2") {
 		t.Fatalf("footer should show the subprocess count as bg: N:\n%s", plain)

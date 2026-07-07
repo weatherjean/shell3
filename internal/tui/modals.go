@@ -120,9 +120,7 @@ func (m *model) confirmBox() string {
 		"",
 		stDim.Render(ansi.Wrap("y/enter allow · n/esc deny · ←→ select", contentW, " ")),
 	)
-	return lipgloss.NewStyle().
-		Padding(1, 2).
-		Render(strings.Join(lines, "\n"))
+	return modalBox(lines, 1, 2, 0)
 }
 
 // helpBox renders the keybinding/command reference shown by '?'.
@@ -167,9 +165,7 @@ func (m *model) helpBox() string {
 		"",
 		desc.Render(" ctrl+c: cancel turn / quit   ·   any key: close"),
 	)
-	return lipgloss.NewStyle().
-		Padding(0, 1).
-		Render(strings.Join(lines, "\n"))
+	return modalBox(lines, 0, 1, 0)
 }
 
 // clampLines caps a wrapped block to maxLines, reserving the last line for the

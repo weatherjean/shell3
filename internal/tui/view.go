@@ -26,17 +26,18 @@ func (m *model) View() tea.View {
 		taView,
 		m.renderFooter(),
 	)
-	switch {
-	case m.confirm != nil:
-		base = m.placeModal(m.confirmBox())
-	case m.helpOpen:
-		base = m.placeModal(m.helpBox())
-	case m.bg.open:
-		base = m.placeModal(m.backgroundBox())
-	case m.mode == modeCommand:
-		// The command palette floats just above the input so the typed line in
-		// the footer stays visible.
-		base = overlayAbove(base, m.commandPalette(), m.vp.Height())
+	// At most one modal replaces the transcript (see modal.go); the command
+	// palette is a separate, smaller floating overlay (not a full modal) so it
+	// only takes over when no modal is open.
+	switch kind := m.currentModal(); kind {
+	case modalNone:
+		if m.mode == modeCommand {
+			// The command palette floats just above the input so the typed line
+			// in the footer stays visible.
+			base = overlayAbove(base, m.commandPalette(), m.vp.Height())
+		}
+	default:
+		base = m.placeModal(m.renderModal(kind))
 	}
 	v.Content = base
 	return v
@@ -161,70 +162,108 @@ func (m *model) welcomeCard() string {
 		Render(strings.Join(lines, "\n"))
 }
 
-func (m *model) renderFooter() string {
-	if m.mode == modeCommand {
-		return stModeCommand.Render(":" + m.cmdline + "█")
+// footerSeg is one visual chunk of the footer: its styled (rendered) form for
+// display, paired with the plain-text form uiSnapshot reports — computed
+// together in buildFooter so the two can never drift apart.
+type footerSeg struct {
+	plain    string
+	rendered string
+}
+
+func plainSegs(segs []footerSeg) []string {
+	out := make([]string, len(segs))
+	for i, s := range segs {
+		out[i] = s.plain
 	}
-	var mode string
+	return out
+}
+
+func renderedSegs(segs []footerSeg) []string {
+	out := make([]string, len(segs))
+	for i, s := range segs {
+		out[i] = s.rendered
+	}
+	return out
+}
+
+// buildFooter computes the footer's left and right segments. renderFooter
+// joins the rendered form for display; uiSnapshot reports the plain form —
+// both read off this one computation.
+func (m *model) buildFooter() (left, right []footerSeg) {
+	if m.mode == modeCommand {
+		txt := ":" + m.cmdline
+		return []footerSeg{{plain: txt, rendered: stModeCommand.Render(txt + "█")}}, nil
+	}
+	var modePlain, modeRendered string
 	switch m.mode {
 	case modeNormal:
-		mode = stModeNormal.Render(" N ")
+		modePlain, modeRendered = "N", stModeNormal.Render(" N ")
 	default:
-		mode = stModeInsert.Render(" I ")
+		modePlain, modeRendered = "I", stModeInsert.Render(" I ")
 	}
+	left = append(left, footerSeg{modePlain, modeRendered})
 	// Left: mode pill, then the model with its context-window fill (ctx: x%), then
 	// the transient last-action notice (primary, auto-hidden after noticeTTL), then
 	// the live turn state (quit-armed prompt / thinking shimmer).
-	left := mode
 	if model := m.modelName; model != "" {
 		// Context-window fill sits right after the model name.
 		if m.tokens > 0 && m.contextWindow > 0 {
 			model += fmt.Sprintf("  (ctx: %d%%)", m.tokens*100/m.contextWindow)
 		}
-		left += " " + stDim.Render(model)
+		left = append(left, footerSeg{model, stDim.Render(model)})
 	}
 	switch {
 	case m.quitArmed:
 		// Ctrl+C once: red middle bar telling you to press again.
-		left += " " + stCtrlCArmed.Render(" press ctrl+c again to quit ")
+		txt := "press ctrl+c again to quit"
+		left = append(left, footerSeg{txt, stCtrlCArmed.Render(" " + txt + " ")})
 	default:
 		if n := m.activeNotice(); n != "" {
-			left += " " + stNotice.Render(n)
+			left = append(left, footerSeg{n, stNotice.Render(n)})
 		}
 		if m.busy {
 			// Thinking: white text on an animated rainbow background (no spinner).
-			left += " " + rainbowBg(" thinking ", m.spinner)
+			left = append(left, footerSeg{"thinking", rainbowBg(" thinking ", m.spinner)})
 		}
 	}
 
 	// Right side, left-to-right: "? help" hint (only at rest), the "!" danger pill
 	// when the shell is unsafe, the live subprocess count (bg: N), then the brand
 	// snail glued to the active agent badge (Tab cycles the agent).
-	var seg []string
 	if strings.TrimSpace(m.ta.Value()) == "" {
-		seg = append(seg, stDim.Render("? help"))
+		right = append(right, footerSeg{"? help", stDim.Render("? help")})
 	}
 	// "!" when the shell is unsafe: runtime :disable_safety, or on_tool_call not
 	// enabled in the lua config (unsafe by default).
 	if m.safetyOff || !m.safetyConfigured {
-		seg = append(seg, stYolo.Render(" ! "))
+		right = append(right, footerSeg{"!", stYolo.Render(" ! ")})
 	}
 	if m.bgCount > 0 {
-		seg = append(seg, stBgCount.Render(fmt.Sprintf(" bg: %d ", m.bgCount)))
+		txt := fmt.Sprintf("bg: %d", m.bgCount)
+		right = append(right, footerSeg{txt, stBgCount.Render(" " + txt + " ")})
 	}
 	// Snail brand + agent badge form one visual unit (no gap between them).
-	badge := stSnail.Render(" ๑ï ")
+	badgePlain, badgeRendered := "๑ï", stSnail.Render(" ๑ï ")
 	if m.agentName != "" {
-		badge += agentBadge(m.agentName)
+		badgePlain += " " + m.agentName
+		badgeRendered += agentBadge(m.agentName)
 	}
-	seg = append(seg, badge)
+	right = append(right, footerSeg{badgePlain, badgeRendered})
+	return left, right
+}
 
-	right := strings.Join(seg, "  ")
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
-	if gap < 1 {
-		return left // no room; drop the right side rather than wrap
+func (m *model) renderFooter() string {
+	left, right := m.buildFooter()
+	if m.mode == modeCommand {
+		return left[0].rendered
 	}
-	return left + strings.Repeat(" ", gap) + right
+	leftStr := strings.Join(renderedSegs(left), " ")
+	rightStr := strings.Join(renderedSegs(right), "  ")
+	gap := m.width - lipgloss.Width(leftStr) - lipgloss.Width(rightStr)
+	if gap < 1 {
+		return leftStr // no room; drop the right side rather than wrap
+	}
+	return leftStr + strings.Repeat(" ", gap) + rightStr
 }
 
 // placeModal centers a modal box on the otherwise-blank screen, replacing the

@@ -39,6 +39,19 @@ func sizedWith(send func(string) (<-chan shell3.Event, context.CancelFunc), cmds
 	return m
 }
 
+// frame is the standard render→snapshot→inspect helper: build a model with
+// sized/sizedWith, then drive it through frame with whatever keys/messages the
+// test cares about, and assert on the returned ANSI-free plain-text screen (or
+// on m.uiSnapshot() for structured state) — no PTY required. It replaces
+// ad-hoc `stripANSI(m.View().Content)` call sites one at a time; both forms
+// coexist meanwhile.
+func frame(m *model, msgs ...tea.Msg) string {
+	for _, msg := range msgs {
+		m.Update(msg)
+	}
+	return stripANSI(m.View().Content)
+}
+
 func TestSubmitSendsPromptAndAddsUserItem(t *testing.T) {
 	var prompt string
 	sent := false

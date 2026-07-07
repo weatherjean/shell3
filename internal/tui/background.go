@@ -289,7 +289,7 @@ func (m *model) backgroundBox() string {
 		rows = append(rows, "", stInfo.Render(m.bg.notice))
 	}
 	rows = append(rows, "", stDim.Render("j/k move · enter view · ctrl+x kill · r refresh · esc"))
-	return bgPanel(w).Render(strings.Join(rows, "\n"))
+	return modalBox(rows, 0, 1, w)
 }
 
 // jobRow renders one job line: a selection bar, id, age, pid, state, and
@@ -339,7 +339,7 @@ func (m *model) bgOutputBoxWidth() int {
 }
 
 // bgOutputWidth is the wrapped content width of the output view — the box
-// width minus bgPanel's 2-col horizontal padding.
+// width minus modalBox's 2-col horizontal padding.
 func (m *model) bgOutputWidth() int {
 	return max(m.bgOutputBoxWidth()-2, 1)
 }
@@ -372,7 +372,7 @@ func (m *model) bgWrappedLines() []string {
 // hardWrapRows guarantees every row is at most w columns by hard-breaking any
 // that exceed it. The transcript markdown path (glamour) word-wraps but does NOT
 // break an over-long token — a long URL, path, or hash in a subagent's answer can
-// produce a row wider than w, which bgPanel's Width would then re-wrap into extra
+// produce a row wider than w, which modalBox's fixed Width would then re-wrap into extra
 // terminal rows, desyncing the one-row-per-element height cap and scroll math.
 func hardWrapRows(rows []string, w int) []string {
 	out := make([]string, 0, len(rows))
@@ -405,9 +405,9 @@ func (m *model) backgroundOutputBox() string {
 	footer := stDim.Render("j/k scroll · g/G top/bottom · ctrl+x kill · r refresh · esc back")
 	// Header and footer are single logical rows. Truncate them (ANSI-aware) to the
 	// content width so a terminal narrower than the footer hint can't make
-	// bgPanel.Width re-wrap them into a second row — which would consume a body
+	// modalBox's fixed Width re-wrap them into a second row — which would consume a body
 	// row and desync the height budget bgModalHeight reserves.
-	contentW := w - 2 // bgPanel's horizontal padding
+	contentW := w - 2 // modalBox's horizontal padding
 	header = ansi.Truncate(header, contentW, "…")
 	footer = ansi.Truncate(footer, contentW, "…")
 	body := make([]string, 0, end-scroll)
@@ -417,13 +417,7 @@ func (m *model) backgroundOutputBox() string {
 		rows = append(rows, "", ansi.Truncate(stInfo.Render(m.bg.notice), contentW, "…"))
 	}
 	rows = append(rows, "", footer)
-	return bgPanel(w).Render(strings.Join(rows, "\n"))
-}
-
-func bgPanel(w int) lipgloss.Style {
-	return lipgloss.NewStyle().
-		Padding(0, 1).
-		Width(w)
+	return modalBox(rows, 0, 1, w)
 }
 
 // shortAge formats a job's age compactly (e.g. "5s", "3m", "2h", "1d").

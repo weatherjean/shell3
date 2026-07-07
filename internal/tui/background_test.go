@@ -26,15 +26,22 @@ func TestBackground_OpensListsAndCloses(t *testing.T) {
 	if !m.bg.open || len(m.bg.jobs) != 2 {
 		t.Fatalf("openBackground should list jobs: open=%v n=%d", m.bg.open, len(m.bg.jobs))
 	}
-	plain := stripANSI(m.View().Content)
+	// The snapshot's modal enum/selection should agree with the raw state.
+	if snap := m.uiSnapshot(); snap.modal != modalBackground || snap.modalSel != 0 {
+		t.Fatalf("snapshot should report modalBackground with row 0 selected, got kind=%v sel=%d", snap.modal, snap.modalSel)
+	}
+	plain := frame(m)
 	for _, want := range []string{"background jobs", "bg_aaa", "go test", "bg_bbb"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("modal missing %q in:\n%s", want, plain)
 		}
 	}
-	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	frame(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.bg.open {
 		t.Fatal("esc should close the :background modal")
+	}
+	if snap := m.uiSnapshot(); snap.modal != modalNone {
+		t.Fatalf("snapshot should report modalNone once closed, got %v", snap.modal)
 	}
 }
 
