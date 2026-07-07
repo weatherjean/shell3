@@ -27,8 +27,8 @@ better are more welcome than ones that grow the footprint.
 - Keep PRs focused — one logical change each.
 - CI must be green: `gofmt` clean, `go vet` clean, race-enabled tests passing on
   Linux and macOS. Run `make test` (not bare `go test`) so concurrency-sensitive
-  code — the turn loop, `pkg/shell3` session lifecycle, the openai adapter's body
-  tap — stays race-clean.
+  code — the turn loop, `internal/shell3` session lifecycle, the openai adapter's
+  body tap — stays race-clean.
 - Add or update tests with behavior changes.
 
 ## Code style
@@ -36,9 +36,9 @@ better are more welcome than ones that grow the footprint.
 - `gofmt` is law; `go vet` must pass.
 - Doc comments explain **why**, not what. Write down any concurrency or lifecycle
   contract at the declaration (see `internal/chat/session.go`,
-  `pkg/shell3/shell3.go`).
-- `pkg/shell3` is the only public package; everything under `internal/` may
-  change freely. Think twice before widening the public surface.
+  `internal/shell3/session.go`).
+- shell3 is a TUI-first product, not an embeddable library — everything under
+  `internal/` (including `internal/shell3`) may change freely.
 - Tool failures use the typed `toolResult` path in `internal/chat`, classified in
   one place — don't introduce new string-sniffing.
 
@@ -47,8 +47,8 @@ better are more welcome than ones that grow the footprint.
 `AGENTS.md` has the package map. The short version: `cmd/shell3` is the CLI,
 `internal/agentsetup` assembles a `chat.Config` from `shell3.lua`
 (`internal/luacfg`), `internal/chat` runs turns against an OpenAI-compatible
-provider (`internal/adapter/openai`), and the `internal/tui` TUI plus the
-embeddable `pkg/shell3` are front-ends over the same core.
+provider (`internal/adapter/openai`), and `internal/tui` (built on
+`internal/shell3`'s session/runtime core) is the front-end.
 
 ## Security
 

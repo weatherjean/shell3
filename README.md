@@ -5,8 +5,7 @@ OpenAI-compatible endpoint.
 
 shell3 puts a language model in your terminal with `bash`, file editing, and
 whatever tools you define — then stays out of the way. It pipes like a Unix
-tool, embeds like a Go library, and is configured like software, not like a
-platform.
+tool and is configured like software, not like a platform.
 
 ![shell3 TUI demo](docs/tui-demo.gif)
 
@@ -76,16 +75,11 @@ commands. Full walkthrough in [docs/cli.md](docs/cli.md).
   searchable from inside a session with `rg`.
 - **Headless & auditable.** Pipe in, pipe out; `--out` streams a lossless JSONL
   log of every token, tool call, and result.
-- **Embeddable, and a runtime.** Everything the TUI does is available as a Go
-  library via [`pkg/shell3`](pkg/shell3) — one-shot, persistent session, or a
-  multi-session runtime for an always-on bot.
 
 ## Documentation
 
 - **[Configuration](docs/configuration.md)** — models, agents, custom tools,
   `on_tool_call`, `on_tool_result`, `stub_tools`, skills, proxies.
-- **[Library / runtime](docs/library.md)** — embedding `pkg/shell3`: `Run`,
-  `Session`, `Runtime`, subagents.
 - **[CLI & headless](docs/cli.md)** — scripting, the `--out` audit log, the
   read-only query commands, slash commands.
 - **[Security & data](docs/security.md)** — the threat model, secrets, and

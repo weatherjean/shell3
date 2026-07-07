@@ -12,7 +12,7 @@ lines / 50 KB) and directories with `list_files` (an indented tree; `path`,
 it runs (history is searched with `rg` over
 `.shell3_project/runs/**/*.jsonl`). A **subagent** is an **in-process background
 job** spawned via the `task` tool (`{subagent_type, prompt, description}`; returns
-immediately); the runtime (`pkg/shell3` jobManager) runs it as a child-session
+immediately); the runtime (`internal/shell3` jobManager) runs it as a child-session
 goroutine under a concurrency cap (`shell3.background{max_concurrent=N}`, default
 8) and, on completion, **wakes the parent with a capped result summary** injected
 into context — no subprocess, no inbox file, no fsnotify. `bash_bg` is a background
@@ -41,8 +41,8 @@ Denylists are written with `shell3.regex(pat):match(s)` (Go RE2; compiled at loa
 use `(?s)` so `.*` spans newlines; match the whole command so chaining can't hide a
 flagged fragment) — guard on `t.name` before matching `t.command` (nil for non-bash).
 `shell3.on_tool_result(fn)` can rewrite a tool's output (e.g. redact secrets). File
-I/O for `read` and `edit_file` goes through `internal/fsx` (direct disk); `bash`
-always hits disk directly. The
+I/O for `read` and `edit_file` goes through `internal/fsx` (plain direct-disk
+functions — no pluggable backend); `bash` always hits disk directly. The
 scaffold's example gate ships **commented out** — a fresh config gates nothing —
 and, once enabled, covers only the bash family, so `read`/`list_files` run
 ungated (a config choice, not a hardcoded exemption). Skills
@@ -77,7 +77,7 @@ internal/modelproxy/   run_proxy spawner (starts a model's proxy command on acti
 internal/paths/        global (~/.shell3/) + local (.shell3_project/) path resolution; no DB fields
 internal/runs/         file-native JSONL store: sessions at .shell3_project/runs/<id>/
 internal/edittool/     edit_file tool implementation (Go port of opencode's str-replace)
-internal/fsx/          FileSystem interface for read/edit_file tool I/O (fsx.OS = direct disk)
+internal/fsx/          direct-disk text file I/O for read/edit_file tools (plain functions, no interface)
 internal/notify/       Notification type (bg_done / agent_done) shared by job runtime + chat
 internal/tui/          full-screen vim-modal terminal UI (interactive + headless once)
 internal/chat/         conversation loop, tools, events, JSONL audit sink
@@ -85,8 +85,7 @@ internal/llm/          Provider/Streamer interfaces, request params, types (+ fa
 internal/persona/      runtime carrier for an agent's prompt/tools/params (data only)
 internal/strutil/      rune-safe string truncation helpers (byte-cap + rune-count) shared by runtime and front-ends
 internal/applog/       rotating app log
-
-pkg/shell3/            embeddable library API (the only public package); jobs.go hosts the in-process job runtime (subagents + bash_bg)
+internal/shell3/       session/runtime core consumed by the TUI; jobs.go hosts the in-process job runtime (subagents + bash_bg)
 ```
 
 ## Development

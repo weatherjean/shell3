@@ -238,8 +238,7 @@ shell3.subagents({ max_depth = 3 })        -- max subagent nesting depth (defaul
 ```
 
 The same job runtime backs `bash_bg`, which is gated separately by
-`tools = { bash_bg = true }` — not by `delegation`. See
-[library.md](library.md#subagents) for the runtime view.
+`tools = { bash_bg = true }` — not by `delegation`.
 
 ## Custom tools
 
