@@ -11,15 +11,15 @@ import (
 // that session so the host knows to run a turn.
 func TestInterject_IdleEmitsWake(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("ok"))
-	s, err := rt.Session(SessionOpts{Name: "tg:1"})
+	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	s.Interject("ping while idle")
 	select {
 	case ev := <-rt.Events():
-		if ev.Kind != Wake || ev.Session != "tg:1" {
-			t.Fatalf("want Wake for tg:1, got %+v", ev)
+		if ev.Kind != Wake || ev.Session != s.ID() {
+			t.Fatalf("want Wake for %s, got %+v", s.ID(), ev)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("idle Interject should emit Wake")
@@ -30,7 +30,7 @@ func TestInterject_IdleEmitsWake(t *testing.T) {
 // and returns an already-closed channel.
 func TestRunQueued_EmptyInboxNoTurn(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("ok"))
-	s, err := rt.Session(SessionOpts{Name: "tg:1"})
+	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestRunQueued_EmptyInboxNoTurn(t *testing.T) {
 // drains the inbox, so a follow-up RunQueued is a no-op.
 func TestRunQueued_RunsTurnFromQueuedItems(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("ok"))
-	s, err := rt.Session(SessionOpts{Name: "tg:1"})
+	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestRunQueued_RunsTurnFromQueuedItems(t *testing.T) {
 // drains the inbox itself.
 func TestRunQueued_BusyReturnsClosedChannelNoTurn(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("ok"))
-	s, err := rt.Session(SessionOpts{Name: "tg:1"})
+	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestRunQueued_BusyReturnsClosedChannelNoTurn(t *testing.T) {
 // emit a Wake — the running turn drains the inbox itself.
 func TestInterject_BusyDoesNotWake(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("ok"))
-	s, err := rt.Session(SessionOpts{Name: "tg:1"})
+	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}

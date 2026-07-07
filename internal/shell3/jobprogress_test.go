@@ -68,7 +68,7 @@ func TestEmitJobNeverBlocks(t *testing.T) {
 func TestJobProgressIntegration(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("done"))
 
-	sess, err := rt.Session(SessionOpts{Name: "parent"})
+	sess, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatalf("Session: %v", err)
 	}

@@ -150,9 +150,9 @@ func TestSetSafetyOff_AutoAllowsAsks(t *testing.T) {
 }
 
 // TestSession_History_CarriesReasoning proves a live turn's reasoning reaches
-// History() (and thus the dashboard's /api/history "reasoning" field). This is
-// the Chat-tab thinking path; it is independent of resume (which doesn't persist
-// reasoning by design).
+// the stored message history (llm.Message.ReasoningContent) — the Chat-tab
+// thinking path; it is independent of resume (which doesn't persist reasoning
+// by design).
 func TestSession_History_CarriesReasoning(t *testing.T) {
 	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{
 		{ReasoningDelta: "let me think about 42"},
@@ -164,13 +164,13 @@ func TestSession_History_CarriesReasoning(t *testing.T) {
 	for range s.Send(context.Background(), "question") {
 	}
 	var got string
-	for _, h := range s.History() {
-		if h.Role == "assistant" && h.Reasoning != "" {
-			got = h.Reasoning
+	for _, m := range s.sess.Messages() {
+		if m.Role == llm.RoleAssistant && m.ReasoningContent != "" {
+			got = m.ReasoningContent
 		}
 	}
 	if got != "let me think about 42" {
-		t.Fatalf("History() assistant reasoning = %q, want the streamed thinking text", got)
+		t.Fatalf("assistant reasoning = %q, want the streamed thinking text", got)
 	}
 }
 
@@ -684,36 +684,6 @@ func TestSnapshot_NoDescriberHasNoParams(t *testing.T) {
 	}
 }
 
-// TestHistory_StripsToolPrefix verifies History returns plain roles and strips
-// the internal "[tool_call_id=…]\n" prefix from tool-role content only.
-func TestHistory_StripsToolPrefix(t *testing.T) {
-	s := newTestSession(t, fakellm.New(), chat.Config{})
-	defer s.Close()
-	s.sess.SetMessages([]llm.Message{
-		{Role: llm.RoleUser, Content: "hello"},
-		{Role: llm.RoleAssistant, Content: "hi"},
-		{Role: llm.RoleTool, Name: "bash", ToolCallID: "1", Content: "[tool_call_id=1]\nthe output"},
-	})
-
-	h := s.History()
-	if len(h) != 3 {
-		t.Fatalf("History len = %d, want 3", len(h))
-	}
-	if h[0].Role != "user" || h[0].Content != "hello" {
-		t.Fatalf("user entry = %+v", h[0])
-	}
-	if h[1].Role != "assistant" || h[1].Content != "hi" {
-		t.Fatalf("assistant entry = %+v", h[1])
-	}
-	tool := h[2]
-	if tool.Role != "tool" || tool.Content != "the output" {
-		t.Fatalf("tool entry not prefix-stripped: %+v", tool)
-	}
-	if tool.ToolName != "bash" || tool.ToolCallID != "1" {
-		t.Fatalf("tool entry metadata = %+v", tool)
-	}
-}
-
 // TestPrune verifies Prune stubs a matching tool result (ok=true) and reports
 // ok=false for an unknown id.
 func TestPrune(t *testing.T) {
@@ -959,16 +929,16 @@ func TestSession_InterjectWhileIdle(t *testing.T) {
 	}
 }
 
-// TestSession_SinkStartLabel pins the "(session <name>)" label written by
+// TestSession_SinkStartLabel pins the "(session <label>)" line written by
 // Runtime.Session into the JSONL audit log and exercises the writeStartLine +
 // cfg.OutPath plumbing for real. It creates a runtime-hosted session with an
 // OutPath, runs one trivial fakellm turn, closes, then reads the file and
-// asserts: first line is the start event with input="(session tg:1)", last
+// asserts: first line is the start event with a "(session ...)" input, last
 // line is the end event.
 func TestSession_SinkStartLabel(t *testing.T) {
 	outFile := filepath.Join(t.TempDir(), "audit.jsonl")
 	rt := newTestRuntime(t, fakeCfg("hello"))
-	s, err := rt.Session(SessionOpts{Name: "tg:1", OutPath: outFile})
+	s, err := rt.Session(SessionOpts{OutPath: outFile})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -988,7 +958,7 @@ func TestSession_SinkStartLabel(t *testing.T) {
 		t.Fatalf("expected at least 2 lines in audit log, got %d: %q", len(lines), string(data))
 	}
 
-	// First line: start event with label "(session tg:1)".
+	// First line: start event with a "(session ...)" label.
 	var first map[string]any
 	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
 		t.Fatalf("parsing first line: %v (line=%q)", err, lines[0])
@@ -996,8 +966,8 @@ func TestSession_SinkStartLabel(t *testing.T) {
 	if got := first["kind"]; got != "start" {
 		t.Fatalf("first line kind=%q, want %q", got, "start")
 	}
-	if got := first["input"]; got != "(session tg:1)" {
-		t.Fatalf("first line input=%q, want %q", got, "(session tg:1)")
+	if got, _ := first["input"].(string); !strings.HasPrefix(got, "(session ") {
+		t.Fatalf("first line input=%q, want a \"(session ...)\" label", got)
 	}
 
 	// Last line: end event.
@@ -1014,7 +984,7 @@ func TestSession_SinkStartLabel(t *testing.T) {
 // in-process job runtime.
 func TestSessionJobsFromManager(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
-	s, err := rt.Session(SessionOpts{Name: "s1"})
+	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -14,7 +14,7 @@ import (
 // image_url parts, audio (wav, mp3, ogg, oga, opus) becomes input_audio parts.
 // It returns the part plus a short
 // human-readable description for the tool result. Consumed by the read_media
-// tool and by pkg/shell3's Part{Path: …}.
+// tool and by internal/shell3's Part{Path: …}.
 func LoadMediaPart(path, workDir string) (llm.ContentPart, string, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch {

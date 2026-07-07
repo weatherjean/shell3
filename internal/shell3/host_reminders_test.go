@@ -74,7 +74,7 @@ func newHostRemindersRuntime(t *testing.T, mk func() chat.Config) *Runtime {
 // host section.
 func TestHostReminders_BothToggles(t *testing.T) {
 	rt := newHostRemindersRuntime(t, hostRemindersCfg(true, true, []string{"explore"}))
-	s, err := rt.Session(SessionOpts{Name: "main"})
+	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestHostReminders_BothToggles(t *testing.T) {
 // TestHostReminders_BothFalse: toggles off → no standing reminders at all.
 func TestHostReminders_BothFalse(t *testing.T) {
 	rt := newHostRemindersRuntime(t, hostRemindersCfg(false, false, []string{"explore"}))
-	s, err := rt.Session(SessionOpts{Name: "main"})
+	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestHostReminders_BothFalse(t *testing.T) {
 // no subagents → the Delegation reminder is omitted.
 func TestHostReminders_DelegationTrueNoSubagents(t *testing.T) {
 	rt := newHostRemindersRuntime(t, hostRemindersCfg(false, true, nil))
-	s, err := rt.Session(SessionOpts{Name: "main"})
+	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestHostReminders_DelegationTrueNoSubagents(t *testing.T) {
 // removes the Delegation standing reminder.
 func TestHostReminders_SwitchDropsDelegation(t *testing.T) {
 	rt := newHostRemindersRuntime(t, hostRemindersCfg(true, true, []string{"explore"}))
-	s, err := rt.Session(SessionOpts{Name: "main"})
+	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}

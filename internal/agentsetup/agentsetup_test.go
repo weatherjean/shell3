@@ -124,7 +124,7 @@ func TestBuild_Agent_SelectsNamed(t *testing.T) {
 		t.Errorf("active agent = %q, want %q", cfg.ModeLabel, "second")
 	}
 	// The persona is the agent's verbatim Lua prompt; the host Environment facts
-	// now live in a standing reminder (set by pkg/shell3), NOT the system prompt.
+	// now live in a standing reminder (set by internal/shell3), NOT the system prompt.
 	if !strings.HasPrefix(cfg.Personality.SystemPrompt, "you are second") {
 		t.Errorf("system prompt = %q, want a prefix of the second agent's prompt", cfg.Personality.SystemPrompt)
 	}

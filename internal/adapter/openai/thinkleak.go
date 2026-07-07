@@ -17,8 +17,8 @@ type thinkLeakFilter struct {
 }
 
 const (
-	leakHolding = iota // start of stream: buffer while a leading tag is still possible
-	leakTrimming       // tag consumed: swallow whitespace up to the first real rune
+	leakHolding  = iota // start of stream: buffer while a leading tag is still possible
+	leakTrimming        // tag consumed: swallow whitespace up to the first real rune
 	leakPassthrough
 )
 

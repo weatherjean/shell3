@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 
 	"github.com/weatherjean/shell3/internal/applog"
-	"github.com/weatherjean/shell3/internal/fsx"
 	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/runs"
 )
@@ -58,9 +57,6 @@ type ToolConfig struct {
 	Store *runs.Store
 	// WorkDir is the working directory tools should resolve paths against.
 	WorkDir string
-	// FS is the file-I/O backend for the read and edit_file tools. Nil ⇒ the
-	// OS backend (direct disk).
-	FS fsx.FileSystem
 	// Asker confirms an ask-verdict command with a human. Nil ⇒ ask degrades to
 	// deny (headless subagent path).
 	Asker AskFunc
@@ -96,21 +92,12 @@ type ToolConfig struct {
 	RunToolCall func(ctx context.Context, name, command, argsJSON string, headless bool) ToolCallVerdict
 }
 
-// fs returns the configured FileSystem backend, defaulting to direct OS disk
-// I/O when none was injected.
-func (c ToolConfig) fs() fsx.FileSystem {
-	if c.FS != nil {
-		return c.FS
-	}
-	return fsx.OS{}
-}
-
 // TurnConfig holds all dependencies needed for one user→assistant turn. It
 // is derived from a Config per turn and passed to RunTurn (and through it to
 // each ToolHandler.Execute). Handlers should be constructed once via
 // NewHandlers and reused across turns.
 type TurnConfig struct {
-	// ToolConfig is the per-turn tool-execution state (WorkDir, Store, FS,
+	// ToolConfig is the per-turn tool-execution state (WorkDir, Store,
 	// Asker, job-runtime hooks, RunToolCall) handed to each ToolHandler.Execute.
 	// Embedded so its fields are set and read as TurnConfig fields directly and
 	// there is no per-call copy that could drift.
@@ -144,7 +131,7 @@ type TurnConfig struct {
 	// ResolveCustomTool resolves a custom-tool call to its executable form
 	// (command + env). Names in CustomToolNames route here.
 	ResolveCustomTool func(name, argsJSON string) (ResolvedTool, error)
-	// HostTool dispatches a host-registered Go tool (pkg/shell3.RegisterHostTool)
+	// HostTool dispatches a host-registered Go tool (internal/shell3.RegisterHostTool)
 	// by name, returning its result string. Tried BEFORE ResolveCustomTool so an
 	// embedding host can supply native tools (which return strings directly, not
 	// bash commands) alongside command-template tools. Nil = none registered.

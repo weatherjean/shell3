@@ -11,7 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 	colorful "github.com/lucasb-eyer/go-colorful"
 	"github.com/weatherjean/shell3/internal/chat"
-	"github.com/weatherjean/shell3/pkg/shell3"
+	"github.com/weatherjean/shell3/internal/shell3"
 )
 
 func keyRune(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Text: string(r)} }

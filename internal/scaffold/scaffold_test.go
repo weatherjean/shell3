@@ -175,7 +175,7 @@ func TestRenderedConfigLoads(t *testing.T) {
 		t.Errorf("plan agent should have no subagents, got %v", agents[1].Subagents)
 	}
 	// Each subagent the code agent may delegate to resolves to a (name,
-	// description) pair — the raw material pkg/shell3 renders into the per-session
+	// description) pair — the raw material internal/shell3 renders into the per-session
 	// Delegation context. (Delegation runs through the `task` tool as an
 	// in-process background job.)
 	for _, name := range agents[0].Subagents {

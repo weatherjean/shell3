@@ -41,7 +41,7 @@ func TestEndOfTurn_QueuedInterjectEmitsWake(t *testing.T) {
 	rt := newTestRuntime(t, func() chat.Config {
 		return chat.Config{LLM: gc, ModeLabel: "code"}
 	})
-	s, err := rt.Session(SessionOpts{Name: "tg:1"})
+	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestEndOfTurn_QueuedInterjectEmitsWake(t *testing.T) {
 	for {
 		select {
 		case ev := <-rt.Events():
-			if ev.Kind == Wake && ev.Session == "tg:1" {
+			if ev.Kind == Wake && ev.Session == s.ID() {
 				return
 			}
 		case <-deadline:
@@ -81,7 +81,7 @@ func TestEndOfTurn_QueuedInterjectEmitsWake(t *testing.T) {
 // with an empty inbox emits NO Wake.
 func TestEndOfTurn_EmptyInboxNoWake(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("ok"))
-	s, err := rt.Session(SessionOpts{Name: "tg:1"})
+	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}

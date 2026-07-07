@@ -1,5 +1,5 @@
 // Package agentsetup is the shared config assembly used by every shell3
-// front-end (the bubbletea TUI, the stdout one-shot, and the pkg/shell3 event
+// front-end (the bubbletea TUI, the stdout one-shot, and the internal/shell3 event
 // stream). It resolves paths, ensures project dirs, opens the store and log,
 // loads shell3.lua, and returns a fully-populated chat.Config — the single
 // source of truth for "what the agent is", independent of how it's driven.
@@ -114,7 +114,7 @@ func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
 	}
 	// A subagent name passed via --agent (the spawn command): resolve it from the
 	// subagent registry into a plain headless config. Whether a resolved agent
-	// gets a delegation context is decided per session (pkg/shell3) by whether it
+	// gets a delegation context is decided per session (internal/shell3) by whether it
 	// lists subagents, not by a spawn-time flag.
 	if sa, ok := p.lc.SubagentByName(name); ok {
 		return p.runtimeForAgent(subagentToAgent(sa))
@@ -156,7 +156,7 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 
 	// Inject the `task` tool when the agent has both the Delegation toggle and a
 	// non-empty Subagents allowlist — exactly the same gate that the per-session
-	// delegation reminder uses (pkg/shell3.Session.applyHostReminders →
+	// delegation reminder uses (internal/shell3.Session.applyHostReminders →
 	// delegationReminder). The tool and the reminder MUST appear together: one
 	// without the other is a bug (model has a tool with no guidance, or guidance
 	// with no callable tool).
@@ -165,7 +165,7 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 	}
 
 	// The per-session Delegation context (concrete sink/config/binary paths +
-	// the templated spawn command) is injected by pkg/shell3.Session, which can
+	// the templated spawn command) is injected by internal/shell3.Session, which can
 	// see session-level paths; a.Subagents (the allowlist) is surfaced via
 	// ActiveAgent.Subagents below so the Session knows which subagents this
 	// agent may spawn.
@@ -241,7 +241,7 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 // live on disk — all file-native, searchable with ordinary Unix tools
 // (rg/grep/cat). The result is wrapped in <system-reminder>…</system-reminder>.
 //
-// It is a package-level function (not a *Parts method) so pkg/shell3 can render
+// It is a package-level function (not a *Parts method) so internal/shell3 can render
 // it from the per-session chat.Config fields it already holds — config path,
 // runs dir, model (from the status line), and the runs session id — keeping the
 // fact wording in exactly one place.
@@ -332,7 +332,7 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 		return chat.Config{}, err
 	}
 	// activeName is the session's agent pointer, shared by the two closures
-	// below; pkg/shell3.Session.SwitchAgent is documented single-threaded
+	// below; internal/shell3.Session.SwitchAgent is documented single-threaded
 	// (between turns), so a plain pointer is sufficient.
 	activeName := rt.ModeLabel
 	cfg := chat.Config{

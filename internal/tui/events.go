@@ -6,7 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/weatherjean/shell3/pkg/shell3"
+	"github.com/weatherjean/shell3/internal/shell3"
 )
 
 type eventMsg struct {

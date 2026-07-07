@@ -14,7 +14,7 @@ import (
 // and both names land in the schema and custom-tool set.
 func TestRegisterHostTool_NameRouting(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("ok"))
-	s, err := rt.Session(SessionOpts{Name: "main"})
+	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}

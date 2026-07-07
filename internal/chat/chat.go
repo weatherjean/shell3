@@ -31,11 +31,11 @@ type AgentKnobs struct {
 	// registered in the LLM tool schema.
 	CustomToolNames map[string]bool
 	// Subagents is the active agent's allowlist of registered subagent names
-	// (its tools.subagents). pkg/shell3 renders it into the per-session
+	// (its tools.subagents). internal/shell3 renders it into the per-session
 	// Delegation context (which subagents the agent may spawn via the task tool).
 	Subagents []string
 	// Environment/Delegation are the active agent's host-reminder toggles
-	// (luacfg agent.environment / agent.delegation, default off). pkg/shell3
+	// (luacfg agent.environment / agent.delegation, default off). internal/shell3
 	// gates the standing Environment / Delegation reminders on them.
 	Environment bool
 	Delegation  bool
@@ -101,11 +101,11 @@ type Config struct {
 	// alt-screen TUI clears the stderr line before the user can read it.
 	ConfigWarnings []string
 	// Theme holds config-global TUI color overrides (token → "#RRGGBB") from
-	// shell3.theme{}. Carried here only so pkg/shell3 Snapshot can surface it to a
+	// shell3.theme{}. Carried here only so internal/shell3 Snapshot can surface it to a
 	// front-end; the chat layer itself never reads it. Agent-independent.
 	Theme map[string]string
 	// Welcome, if set, is a custom TUI welcome card (shell3.welcome). Carried only
-	// for pkg/shell3 Snapshot to surface to a front-end; the chat layer never
+	// for internal/shell3 Snapshot to surface to a front-end; the chat layer never
 	// reads it. Agent-independent.
 	Welcome string
 	// ActiveSkills lists skill names enabled for this persona.
@@ -139,7 +139,7 @@ type Config struct {
 	// fall through to the built-in handler map.
 	ResolveCustomTool func(name, argsJSON string) (ResolvedTool, error)
 	// HostTool dispatches a host-registered Go tool by name (see
-	// pkg/shell3.RegisterHostTool). Tried before ResolveCustomTool. Nil = none.
+	// internal/shell3.RegisterHostTool). Tried before ResolveCustomTool. Nil = none.
 	HostTool func(ctx context.Context, name, argsJSON string) (string, error)
 	// StubTools maps a hallucinated tool name to its redirect message (a nudge,
 	// never an error). Config-global; checked after real/custom tools.
@@ -168,7 +168,7 @@ func AgentStatusLine(rt ActiveAgent) string {
 
 // ApplyActiveAgent copies a switched agent's runtime bundle into the config:
 // model client, persona, params, tool/skill sets, context window, and the
-// derived status line. Every front-end (TUI /agent + Tab, pkg/shell3
+// derived status line. Every front-end (TUI /agent + Tab, internal/shell3
 // SwitchAgent) and the initial assembly in agentsetup route through this method,
 // so the agent-derived field copy lives in exactly one place.
 //
@@ -209,7 +209,7 @@ func NewHandlers() map[string]ToolHandler {
 
 // NewTurnConfig assembles a TurnConfig from a Config, the shared built-in
 // handler map, and the front-end's interactive-shell runner. The three
-// front-ends (TUI, stdout one-shot, embedded pkg/shell3) differ only in those
+// front-ends (TUI, stdout one-shot, embedded internal/shell3) differ only in those
 // last two arguments, so this is the single place the field copy lives.
 // shellInteractive may be nil, in which case shell_interactive tool calls
 // return an "unavailable" error.

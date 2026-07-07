@@ -13,10 +13,10 @@ import (
 	"os/exec"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/weatherjean/shell3/pkg/shell3"
+	"github.com/weatherjean/shell3/internal/shell3"
 )
 
-// RunInteractive runs the interactive chat loop on a pkg/shell3 Session and
+// RunInteractive runs the interactive chat loop on an internal/shell3 Session and
 // blocks until the user quits.
 func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 	var prog *tea.Program
@@ -102,14 +102,14 @@ func RunInteractive(ctx context.Context, spec shell3.Spec) (runErr error) {
 	// Resuming a stored conversation: the reloaded messages stay in the session;
 	// surface a marker so the user knows the context was restored.
 	if spec.ResumeID != "" {
-		m.tr.AddInfo(fmt.Sprintf("⟲ resumed conversation — %d messages in context", len(sess.History())))
+		m.tr.AddInfo(fmt.Sprintf("⟲ resumed conversation — %d messages in context", sess.MessageCount()))
 	}
 	// Out-of-turn wake bus: when a backgrounded subagent finishes (or idle
 	// steering is queued) the runtime emits a Wake for this session; drain it as
 	// a follow-up turn so the agent reacts without the user typing first.
 	m.wakeEvents = sess.WakeEvents()
 	m.jobEvents = sess.JobEvents()
-	m.sessionName = sess.Name()
+	m.sessionName = sess.ID()
 
 	prog = tea.NewProgram(m, tea.WithContext(ctx))
 	_, err = prog.Run()

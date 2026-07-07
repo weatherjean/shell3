@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/weatherjean/shell3/pkg/shell3"
+	"github.com/weatherjean/shell3/internal/shell3"
 )
 
 // writeCfg writes body as dir/shell3.lua and returns its path.

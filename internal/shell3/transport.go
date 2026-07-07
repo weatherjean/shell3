@@ -28,7 +28,7 @@ func (s *Session) injectNoticeNoWake(n notify.Notification) {
 func (s *Session) injectNotification(rt *Runtime, n notify.Notification) {
 	s.sess.InterjectNotice(renderNotification(n))
 	if !s.isBusy() {
-		rt.emit(HostEvent{Session: s.name, Kind: Wake})
+		rt.emit(HostEvent{Session: s.sess.ID(), Kind: Wake})
 	}
 }
 

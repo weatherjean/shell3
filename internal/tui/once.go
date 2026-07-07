@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/weatherjean/shell3/pkg/shell3"
+	"github.com/weatherjean/shell3/internal/shell3"
 )
 
 // RunOnce executes a single turn and streams output to stdout with no TUI. It is

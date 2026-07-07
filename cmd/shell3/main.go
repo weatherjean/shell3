@@ -9,8 +9,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/tui"
-	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
 // version is the build version, set at link time via -X main.version (the

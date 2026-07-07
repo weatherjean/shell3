@@ -4,15 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"sync"
-	"time"
 
 	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/chat"
-	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/runs"
-	"github.com/weatherjean/shell3/internal/strutil"
 )
 
 // RuntimeSpec configures a long-lived Runtime: the process-wide unit owning
@@ -24,9 +20,6 @@ type RuntimeSpec struct {
 
 // SessionOpts parameterizes one Session on a Runtime.
 type SessionOpts struct {
-	// Name keys the session on the runtime (e.g. "sess:1234"). "" gets a unique
-	// generated name. Requesting an existing live name returns that session.
-	Name string
 	// Agent selects the initial agent ("" → first declared).
 	Agent string
 	// WorkDir roots tool execution for this session ("" → runtime root).
@@ -37,9 +30,6 @@ type SessionOpts struct {
 	OutPath string
 	// ShellInteractive runs an interactive shell command with TTY access.
 	ShellInteractive func(ctx context.Context, cmd, workdir string) string
-	// FS is the file-I/O backend for this session's read/edit_file tools.
-	// Nil ⇒ OS disk.
-	FS FileSystem
 	// Asker confirms an on_tool_call ask-verdict command with a human (true = allow).
 	Asker func(ctx context.Context, command, reason string) bool
 	// ResumeID reloads a stored session's messages when non-empty.
@@ -70,8 +60,9 @@ func (k HostEventKind) String() string {
 	return fmt.Sprintf("HostEventKind(%d)", int(k))
 }
 
-// HostEvent is one out-of-turn event for a session. Wake carries only the
-// session name.
+// HostEvent is one out-of-turn event for a session. Wake carries the
+// session's store id (Session.ID()) so a host can match it against the
+// session it is watching.
 type HostEvent struct {
 	Session string
 	Kind    HostEventKind
@@ -209,82 +200,6 @@ func (rt *Runtime) ConfigPath() (string, error) {
 	return agentsetup.ResolveConfigPath(rt.configPath, rt.homeDir)
 }
 
-// SessionMeta summarizes one stored past conversation. Timestamps are
-// time.Time (UTC) — front-ends own their display formatting.
-type SessionMeta struct {
-	ID        string    `json:"id"`
-	StartedAt time.Time `json:"started_at"`
-	EndedAt   time.Time `json:"ended_at,omitzero"` // zero while the session is still open
-	LastAt    time.Time `json:"last_at"`           // newest message; falls back to start. Recency sort key.
-	NumMsgs   int       `json:"num_msgs"`
-	Preview   string    `json:"preview"`
-}
-
-// PastSessions lists up to limit recent stored conversations (newest first).
-// Returns nil if no store is configured. NumMsgs and Preview are derived from the
-// run's messages.jsonl, since the file-native meta carries only lifecycle data.
-func (rt *Runtime) PastSessions(limit int) ([]SessionMeta, error) {
-	if rt.store == nil {
-		return nil, nil
-	}
-	rows, err := rt.store.ListSessions(limit)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]SessionMeta, 0, len(rows))
-	for _, m := range rows {
-		e := SessionMeta{ID: m.ID, StartedAt: m.StartedAt.UTC()}
-		if !m.EndedAt.IsZero() {
-			e.EndedAt = m.EndedAt.UTC()
-		}
-		last := m.LastAt
-		if last.IsZero() {
-			last = m.StartedAt // no messages yet — sort by when it started
-		}
-		e.LastAt = last.UTC()
-		// Derive the message count + a preview (newest assistant/user text) from the
-		// run's jsonl. Best-effort: a read error leaves NumMsgs 0 / Preview "".
-		if msgs, err := rt.store.LoadMessages(m.ID); err == nil {
-			e.NumMsgs = len(msgs)
-			e.Preview = previewOf(msgs)
-		}
-		out = append(out, e)
-	}
-	return out, nil
-}
-
-// previewOf returns a short preview for a run-list card: the newest non-empty
-// user-or-assistant message text, truncated. Empty when there is nothing to show.
-func previewOf(msgs []llm.Message) string {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		m := msgs[i]
-		if (m.Role == llm.RoleUser || m.Role == llm.RoleAssistant) && strings.TrimSpace(m.Content) != "" {
-			return strutil.Truncate(strings.TrimSpace(m.Content), 200) // run-list preview budget
-		}
-	}
-	return ""
-}
-
-// SessionMessages returns the full-fidelity stored messages of one past
-// conversation as HistoryEntry values — tool calls, tool results, and reasoning
-// (thinking) included. Reads the run's messages.jsonl so a front-end's
-// conversation replay matches the live Chat view. Returns nil if no store is
-// configured.
-func (rt *Runtime) SessionMessages(id string) ([]HistoryEntry, error) {
-	if rt.store == nil {
-		return nil, nil
-	}
-	msgs, err := rt.store.LoadMessages(id)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]HistoryEntry, 0, len(msgs))
-	for _, m := range msgs {
-		out = append(out, messageToEntry(m))
-	}
-	return out, nil
-}
-
 // subagentMaxDepth returns the maximum allowed subagent nesting depth.
 // Reads the Lua-configured value (shell3.subagents{ max_depth = N }); defaults
 // to 3 when unset (subagentMaxDepthVal == 0).
@@ -311,28 +226,16 @@ func (rt *Runtime) emitJob(ev JobProgress) {
 	}
 }
 
-// Session returns the live session named opts.Name, creating it if necessary.
-// A closed runtime returns an error. An empty name gets a unique generated
-// name ("s<N>"). Requesting an existing live name returns that session unchanged.
+// Session creates and returns a new session on this runtime (the TUI's root
+// session, or a subagent's child session). A closed runtime returns an error.
 func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 	if rt.closed {
 		return nil, ErrRuntimeClosed
 	}
-	if opts.Name == "" {
-		// Advance until we find a name not already taken by a live session.
-		for {
-			rt.nextName++
-			opts.Name = fmt.Sprintf("s%d", rt.nextName)
-			if _, taken := rt.sessions[opts.Name]; !taken {
-				break
-			}
-		}
-	}
-	if s, ok := rt.sessions[opts.Name]; ok {
-		return s, nil
-	}
+	rt.nextName++
+	name := fmt.Sprintf("s%d", rt.nextName) // internal bookkeeping label only
 	cfg, err := rt.sessionConfig(opts)
 	if err != nil {
 		return nil, err
@@ -345,17 +248,16 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	}
 	s := newSession(cfg, opts) // shared parts are the runtime's to clean
 	s.shellInteractive = opts.ShellInteractive
-	s.fs = opts.FS
 	s.asker = opts.Asker
 	s.opts = opts
-	s.runtime, s.name = rt, opts.Name
+	s.runtime, s.name = rt, name
 	s.sink, s.sinkCleanup = sink, sinkCleanup
 	// Set the per-session host standing reminders now that runtime+name are set:
 	// the Environment + Delegation context (each gated by the active agent's
 	// toggle). No-op when both toggles are off.
 	s.applyHostReminders(rt)
-	s.writeStartLine("(session " + opts.Name + ")")
-	rt.sessions[opts.Name] = s
+	s.writeStartLine("(session " + name + ")")
+	rt.sessions[name] = s
 	// Subagent completions are injected in-process by the runtime's jobManager
 	// (finishSubagent notifies the parent directly) — nothing to launch here.
 	return s, nil

@@ -9,8 +9,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/strutil"
-	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
 // The :background modal lists the live background jobs (bash_bg processes and

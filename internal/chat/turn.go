@@ -82,7 +82,7 @@ func logStreamError(cfg TurnConfig, msgs []llm.Message, streamErr error) {
 // beforeDone, if non-nil, runs once at turn teardown immediately before the
 // single terminal event (turn_done or error) is emitted — Session.Run uses it
 // to persist history. The ordering matters: the terminal event is what embedders
-// (pkg/shell3, the TUI) treat as "turn finished, safe to mutate session state",
+// (internal/shell3, the TUI) treat as "turn finished, safe to mutate session state",
 // so any read of sess.messages in beforeDone must complete before it fires, or
 // it races a concurrent SetMessages.
 func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Message, beforeDone func()) {

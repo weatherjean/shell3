@@ -120,7 +120,7 @@ type LoadedConfig struct {
 	// is dropped with a load warning); unknown token names pass through and are
 	// filtered by the front-end that owns the palette vocabulary. The overrides sit
 	// atop the sensed light/dark palette in the TUI. Wiring: register.go (luaTheme)
-	// → agentsetup SessionConfig (chat.Config.Theme) → pkg/shell3 Snapshot.Theme →
+	// → agentsetup SessionConfig (chat.Config.Theme) → internal/shell3 Snapshot.Theme →
 	// internal/tui.
 	Theme map[string]string
 	// Welcome, if set, replaces the built-in TUI welcome card verbatim (set via

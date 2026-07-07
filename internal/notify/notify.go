@@ -1,6 +1,6 @@
 // Package notify defines the completion-notification value rendered into a
 // live agent's context when a background job or subagent finishes. Jobs run
-// in-process (pkg/shell3's job runtime), which injects the rendered
+// in-process (internal/shell3's job runtime), which injects the rendered
 // notification directly into the parent session — there is no cross-process
 // transport.
 package notify

@@ -463,7 +463,7 @@ func pruneStub(stem string, origLen int) string {
 // with a short stem stub. summary is a human-readable status string; ok is
 // false when no tool result with that id exists in the slices, so callers
 // branch on the flag instead of parsing the summary. Used by the host-side
-// /prune slash command (pkg/shell3.Session.Prune); element mutations propagate
+// /prune slash command (internal/shell3.Session.Prune); element mutations propagate
 // to the caller's slices.
 func PruneByID(toolCallID, stem string, msgSlices ...[]llm.Message) (summary string, ok bool) {
 	var target *llm.Message

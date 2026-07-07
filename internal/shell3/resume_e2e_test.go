@@ -50,7 +50,7 @@ func TestResume_CarriesPriorContext(t *testing.T) {
 
 	// First run: fresh session, one turn.
 	rtA := newTestRuntime(t, fakeCfgWithStore(st, fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "noted"}}}))
-	sA, err := rtA.Session(SessionOpts{Name: "a", WorkDir: t.TempDir()})
+	sA, err := rtA.Session(SessionOpts{WorkDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestResume_CarriesPriorContext(t *testing.T) {
 
 	// Resume: a new session bound to the same id, second turn.
 	rtB := newTestRuntime(t, fakeCfgWithStore(st, fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "it was 42"}}}))
-	sB, err := rtB.Session(SessionOpts{Name: "b", WorkDir: t.TempDir(), ResumeID: id})
+	sB, err := rtB.Session(SessionOpts{WorkDir: t.TempDir(), ResumeID: id})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestResumeLatest_ReattachesNewest(t *testing.T) {
 
 	// First boot: fresh session, one turn that persists.
 	rtA := newTestRuntime(t, fakeCfgWithStore(st, fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "noted"}}}))
-	sA, err := rtA.Session(SessionOpts{Name: "a", WorkDir: wd})
+	sA, err := rtA.Session(SessionOpts{WorkDir: wd})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,14 +116,14 @@ func TestResumeLatest_ReattachesNewest(t *testing.T) {
 
 	// Second boot: ResumeLatest must reattach to id, not create a new row.
 	rtB := newTestRuntime(t, fakeCfgWithStore(st, fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "still 42"}}}))
-	sB, err := rtB.Session(SessionOpts{Name: "b", WorkDir: wd, ResumeLatest: true})
+	sB, err := rtB.Session(SessionOpts{WorkDir: wd, ResumeLatest: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := sB.sess.ID(); got != id {
 		t.Fatalf("ResumeLatest: attached to session %s, want reattach to %s", got, id)
 	}
-	if len(sB.History()) == 0 {
+	if sB.MessageCount() == 0 {
 		t.Fatal("reattached session reloaded no messages")
 	}
 }
@@ -134,14 +134,14 @@ func TestResumeLatest_NoMatchStartsFresh(t *testing.T) {
 	st := openTestStore(t)
 
 	rt := newTestRuntime(t, fakeCfgWithStore(st, fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "hi"}}}))
-	s, err := rt.Session(SessionOpts{Name: "fresh", WorkDir: t.TempDir(), ResumeLatest: true})
+	s, err := rt.Session(SessionOpts{WorkDir: t.TempDir(), ResumeLatest: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if s.sess.ID() == "" {
 		t.Fatal("expected a fresh non-empty session id")
 	}
-	if len(s.History()) != 0 {
+	if s.MessageCount() != 0 {
 		t.Fatal("no prior session existed, but history is non-empty")
 	}
 }

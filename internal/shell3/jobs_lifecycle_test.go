@@ -27,7 +27,7 @@ func TestStartSubagent_DepthLimit(t *testing.T) {
 	rt := newTestRuntime(t, subagentCfg(fakellm.New()))
 	rt.subagentMaxDepthVal = 2
 
-	parent, err := rt.Session(SessionOpts{Name: "deep", Depth: 2})
+	parent, err := rt.Session(SessionOpts{Depth: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestStartSubagent_ConcurrencyCap(t *testing.T) {
 	rt := newTestRuntime(t, subagentCfg(block))
 	rt.jobs = newJobManager(rt, 1)
 
-	parent, err := rt.Session(SessionOpts{Name: "parent"})
+	parent, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestSubagentCancelMidRun(t *testing.T) {
 	block := fakellm.NewBlocking()
 	rt := newTestRuntime(t, subagentCfg(block))
 
-	parent, err := rt.Session(SessionOpts{Name: "p"})
+	parent, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestSubagentCancelMidRun(t *testing.T) {
 		t.Fatalf("cancel: %v", err)
 	}
 	// finishSubagent wakes the parent when the job goroutine unwinds.
-	waitForWake(t, rt, "p")
+	waitForWake(t, rt, parent)
 	var found JobInfo
 	for _, j := range rt.jobs.list() {
 		if j.ID == id {

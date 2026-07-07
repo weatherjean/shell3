@@ -12,13 +12,13 @@ import (
 )
 
 // TestSession_DashboardReadsRaceTurn pins P0: a front-end polls
-// History() and Snapshot() from net/http goroutines concurrently with a running
-// turn on the same Session. Before the fix the turn goroutine's append to
-// chat.Session.messages raced the dashboard's slice copy, and Snapshot's
-// unlocked cfg reads raced the between-turns cfg writers. The reader goroutines
-// here hammer both endpoints across the whole turn lifecycle — the user-message
-// append at turn start (before Started) and the terminal append after cancel —
-// so the race window is covered on both ends. Must be clean under -race.
+// MessageCount() and Snapshot() concurrently with a running turn on the same
+// Session. Before the fix the turn goroutine's append to chat.Session.messages
+// raced the reader's slice copy, and Snapshot's unlocked cfg reads raced the
+// between-turns cfg writers. The reader goroutines here hammer both endpoints
+// across the whole turn lifecycle — the user-message append at turn start
+// (before Started) and the terminal append after cancel — so the race window
+// is covered on both ends. Must be clean under -race.
 func TestSession_DashboardReadsRaceTurn(t *testing.T) {
 	block := fakellm.NewBlocking()
 	rt := newTestRuntime(t, func() chat.Config {
@@ -32,7 +32,7 @@ func TestSession_DashboardReadsRaceTurn(t *testing.T) {
 			},
 		}
 	})
-	s, err := rt.Session(SessionOpts{Name: "tg:1", WorkDir: rt.workDir})
+	s, err := rt.Session(SessionOpts{WorkDir: rt.workDir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestSession_DashboardReadsRaceTurn(t *testing.T) {
 				case <-stop:
 					return
 				default:
-					_ = s.History()
+					_ = s.MessageCount()
 					_ = s.Snapshot()
 				}
 			}

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weatherjean/shell3/pkg/shell3"
+	"github.com/weatherjean/shell3/internal/shell3"
 )
 
 // makeStreamModel builds a sized model with a buffered jobEvents channel and a

@@ -47,7 +47,7 @@ func classifyHandlerOutput(out string) toolResult {
 // rewriting/denylisting (the tool call itself still fires the chain by name) — the
 // model supplies only env values, never the command string.
 func dispatchCustomTool(ctx context.Context, cfg TurnConfig, name, rawArgs string) toolResult {
-	// Host-registered Go tools (pkg/shell3.RegisterHostTool) return a result
+	// Host-registered Go tools (internal/shell3.RegisterHostTool) return a result
 	// string directly, so they dispatch here without the resolve-and-exec path.
 	if cfg.HostTool != nil {
 		out, err := cfg.HostTool(ctx, name, rawArgs)

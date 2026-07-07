@@ -29,19 +29,20 @@ func TestJobManagerCommandLifecycle(t *testing.T) {
 	}
 }
 
-// waitForWake drains rt.Events() until a Wake for session name arrives (or
-// fails the test after 3s), tolerating spurious Wakes for other sessions.
-func waitForWake(t *testing.T, rt *Runtime, name string) {
+// waitForWake drains rt.Events() until a Wake for the given session arrives
+// (or fails the test after 3s), tolerating spurious Wakes for other sessions.
+func waitForWake(t *testing.T, rt *Runtime, s *Session) {
 	t.Helper()
+	id := s.ID()
 	deadline := time.After(3 * time.Second)
 	for {
 		select {
 		case ev := <-rt.Events():
-			if ev.Kind == Wake && ev.Session == name {
+			if ev.Kind == Wake && ev.Session == id {
 				return
 			}
 		case <-deadline:
-			t.Fatalf("no Wake for %s (timeout 3s)", name)
+			t.Fatalf("no Wake for session %s (timeout 3s)", id)
 		}
 	}
 }
@@ -67,7 +68,7 @@ func TestJobManagerConcurrencyCap(t *testing.T) {
 // Wake event on the runtime bus and transcript returns non-empty content.
 func TestSubagentCompletionWakesParent(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("subagent done"))
-	parent, err := rt.Session(SessionOpts{Name: "parent"})
+	parent, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatalf("parent session: %v", err)
 	}
@@ -77,7 +78,7 @@ func TestSubagentCompletionWakesParent(t *testing.T) {
 		t.Fatalf("startSubagent: %v", err)
 	}
 
-	waitForWake(t, rt, "parent")
+	waitForWake(t, rt, parent)
 	if strings.TrimSpace(rt.jobs.transcript(id)) == "" {
 		t.Fatalf("transcript for job %s is empty after subagent completion", id)
 	}
@@ -88,7 +89,7 @@ func TestSubagentCompletionWakesParent(t *testing.T) {
 // live progress before the run's messages.jsonl transcript exists on disk.
 func TestSubagentLiveOutputBuffer(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("streamed answer"))
-	parent, err := rt.Session(SessionOpts{Name: "parent"})
+	parent, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatalf("parent session: %v", err)
 	}
@@ -96,7 +97,7 @@ func TestSubagentLiveOutputBuffer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("startSubagent: %v", err)
 	}
-	waitForWake(t, rt, "parent")
+	waitForWake(t, rt, parent)
 	if got := rt.jobs.output(id); !strings.Contains(got, "streamed answer") {
 		t.Fatalf("subagent live output buffer = %q, want it to contain the streamed text", got)
 	}
@@ -108,7 +109,7 @@ func TestSubagentLiveOutputBuffer(t *testing.T) {
 // separate map.
 func TestSubagentTranscriptAfterClose(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("result text"))
-	parent, err := rt.Session(SessionOpts{Name: "p"})
+	parent, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatalf("parent: %v", err)
 	}
@@ -117,7 +118,7 @@ func TestSubagentTranscriptAfterClose(t *testing.T) {
 		t.Fatalf("startSubagent: %v", err)
 	}
 	// Wait for the Wake (child is done; job is retained with Done=true).
-	waitForWake(t, rt, "p")
+	waitForWake(t, rt, parent)
 	// Job is retained in m.jobs with Done=true; transcript must still work.
 	if strings.TrimSpace(rt.jobs.transcript(id)) == "" {
 		t.Fatalf("transcript empty after job done for %s", id)
@@ -156,7 +157,7 @@ func TestJobManagerRetainsDoneCommandJob(t *testing.T) {
 // stays in list() with Done=true, and that transcript() still resolves.
 func TestJobManagerRetainsDoneSubagentJob(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("subagent output"))
-	parent, err := rt.Session(SessionOpts{Name: "par"})
+	parent, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatalf("parent session: %v", err)
 	}
@@ -167,7 +168,7 @@ func TestJobManagerRetainsDoneSubagentJob(t *testing.T) {
 	}
 
 	// Wait for the Wake (child is done).
-	waitForWake(t, rt, "par")
+	waitForWake(t, rt, parent)
 	// Job must still appear in list() with Done=true.
 	var found JobInfo
 	for _, j := range rt.jobs.list() {
@@ -233,11 +234,11 @@ func TestJobManagerCancelDoneJobIsNoOp(t *testing.T) {
 // TestSubagentDepth verifies that Depth is propagated into the Session.
 func TestSubagentDepth(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
-	root, _ := rt.Session(SessionOpts{Name: "root", Depth: 0})
+	root, _ := rt.Session(SessionOpts{Depth: 0})
 	if root.opts.Depth != 0 {
 		t.Fatalf("root depth = %d, want 0", root.opts.Depth)
 	}
-	child, _ := rt.Session(SessionOpts{Name: "child", Depth: 2})
+	child, _ := rt.Session(SessionOpts{Depth: 2})
 	if child.opts.Depth != 2 {
 		t.Fatalf("child depth = %d, want 2", child.opts.Depth)
 	}
@@ -397,7 +398,7 @@ func TestSubagentErrorSurfaced(t *testing.T) {
 			ModeLabel: "code",
 		}
 	})
-	parent, err := rt.Session(SessionOpts{Name: "parent"})
+	parent, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatalf("parent session: %v", err)
 	}
@@ -405,7 +406,7 @@ func TestSubagentErrorSurfaced(t *testing.T) {
 	if err != nil {
 		t.Fatalf("startSubagent: %v", err)
 	}
-	waitForWake(t, rt, "parent")
+	waitForWake(t, rt, parent)
 	// JobInfo carries the error.
 	var found JobInfo
 	for _, j := range rt.jobs.list() {
@@ -464,7 +465,7 @@ func TestStartSubagentEnforcesAllowlist(t *testing.T) {
 		cfg.Subagents = []string{"explorer"}
 		return cfg
 	})
-	s, err := rt.Session(SessionOpts{Name: "root"})
+	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
@@ -483,7 +484,7 @@ func TestStartSubagentEnforcesAllowlist(t *testing.T) {
 // nothing for an empty allowlist).
 func TestStartSubagentEmptyAllowlist(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("ok"))
-	s, err := rt.Session(SessionOpts{Name: "root"})
+	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}

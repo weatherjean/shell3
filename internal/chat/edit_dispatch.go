@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/weatherjean/shell3/internal/edittool"
-	"github.com/weatherjean/shell3/internal/fsx"
 )
 
 const (
@@ -15,7 +14,7 @@ const (
 	createdFilePreviewLines = 5
 )
 
-func handleEditTool(ctx context.Context, rawArgs, workDir string, fs fsx.FileSystem) string {
+func handleEditTool(ctx context.Context, rawArgs, workDir string) string {
 	var args struct {
 		FilePath   string `json:"file_path"`
 		OldString  string `json:"old_string"`
@@ -25,7 +24,7 @@ func handleEditTool(ctx context.Context, rawArgs, workDir string, fs fsx.FileSys
 	if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
 		return fmt.Sprintf("error: bad arguments: %v", err)
 	}
-	res, err := edittool.EditFile(ctx, fs, workDir, args.FilePath, args.OldString, args.NewString, args.ReplaceAll)
+	res, err := edittool.EditFile(ctx, workDir, args.FilePath, args.OldString, args.NewString, args.ReplaceAll)
 	if err != nil {
 		return fmt.Sprintf("error: %s", err.Error())
 	}

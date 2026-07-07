@@ -27,15 +27,16 @@ type Result struct {
 // match is deleted. Line endings are preserved: if the original file is CRLF,
 // the replacement is also written CRLF.
 //
-// workDir resolves a relative filePath.
-func EditFile(ctx context.Context, fs fsx.FileSystem, workDir, filePath, oldString, newString string, replaceAll bool) (Result, error) {
+// workDir resolves a relative filePath. I/O always hits the real disk
+// (internal/fsx).
+func EditFile(ctx context.Context, workDir, filePath, oldString, newString string, replaceAll bool) (Result, error) {
 	if filePath == "" {
 		return Result{}, errors.New("file_path is required")
 	}
 	abs := resolvePath(workDir, filePath)
 
 	if oldString == "" {
-		oldContent, rerr := fs.ReadTextFile(ctx, abs)
+		oldContent, rerr := fsx.ReadTextFile(ctx, abs)
 		created := false
 		switch {
 		case rerr == nil:
@@ -47,14 +48,14 @@ func EditFile(ctx context.Context, fs fsx.FileSystem, workDir, filePath, oldStri
 		default:
 			return Result{}, rerr
 		}
-		if err := fs.WriteTextFile(ctx, abs, newString); err != nil {
+		if err := fsx.WriteTextFile(ctx, abs, newString); err != nil {
 			return Result{}, err
 		}
 		add, del := lineStats(oldContent, newString)
 		return Result{Path: abs, OldContent: oldContent, NewContent: newString, Created: created, Additions: add, Deletions: del}, nil
 	}
 
-	original, err := fs.ReadTextFile(ctx, abs)
+	original, err := fsx.ReadTextFile(ctx, abs)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Result{}, fmt.Errorf("file %s not found", abs)
@@ -85,7 +86,7 @@ func EditFile(ctx context.Context, fs fsx.FileSystem, workDir, filePath, oldStri
 	if rerr != nil {
 		return Result{}, rerr
 	}
-	if err := fs.WriteTextFile(ctx, abs, updated); err != nil {
+	if err := fsx.WriteTextFile(ctx, abs, updated); err != nil {
 		return Result{}, err
 	}
 	add, del := lineStats(original, updated)

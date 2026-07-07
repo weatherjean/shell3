@@ -9,37 +9,9 @@ import (
 	"sync"
 
 	"github.com/weatherjean/shell3/internal/chat"
-	"github.com/weatherjean/shell3/internal/fsx"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/runs"
 )
-
-// FileSystem is the pluggable file-I/O backend for the read and edit_file
-// tools, settable per session via SessionOpts.FS (or Spec.FS). Nil ⇒ direct
-// OS disk I/O. bash always hits the real disk regardless.
-//
-// The contract is whole-file text I/O over absolute paths — path resolution
-// (~ expansion, workdir joining) happens before a backend is called.
-// ReadTextFile must return an error satisfying errors.Is(err, os.ErrNotExist)
-// for a missing file (edit_file's create-vs-edit detection depends on it) and
-// errors.Is(err, ErrIsDir) for a directory.
-//
-// Defined here (rather than aliasing the internal implementation package) so
-// the public API carries its own browsable contract; internal backends
-// satisfy it structurally.
-type FileSystem interface {
-	ReadTextFile(ctx context.Context, absPath string) (string, error)
-	WriteTextFile(ctx context.Context, absPath, content string) error
-}
-
-// ErrIsDir is the sentinel a FileSystem's ReadTextFile returns (wrapped) when
-// the path is a directory. Custom backends return it with fmt.Errorf("...: %w",
-// shell3.ErrIsDir) or directly.
-var ErrIsDir = fsx.ErrIsDir
-
-// The internal OS backend must satisfy the public contract (they are
-// structurally identical interfaces; this pins it at compile time).
-var _ FileSystem = fsx.OS{}
 
 // Spec configures Run / Start. Prompt is used by Run only.
 type Spec struct {
@@ -74,9 +46,6 @@ type Spec struct {
 	// workdir+config when ResumeID is empty (falling back to a new session
 	// when none exists). See SessionOpts.ResumeLatest.
 	ResumeLatest bool
-	// FS is the file-I/O backend for the read and edit_file tools. Nil ⇒
-	// direct OS disk. See SessionOpts.FS.
-	FS FileSystem
 }
 
 // Session is a live, multi-turn conversation — the plugin equivalent of an open
@@ -98,10 +67,6 @@ type Session struct {
 	// TurnConfig (see turnConfig). nil keeps shell_interactive "unavailable".
 	shellInteractive func(ctx context.Context, cmd, workdir string) string
 
-	// fs is SessionOpts.FS, threaded into every turn's TurnConfig.FS (see
-	// turnConfig). nil keeps the OS disk backend.
-	fs FileSystem
-
 	// asker is Spec.Asker, threaded into every turn's TurnConfig.Asker (see
 	// turnConfig). nil keeps on_tool_call ask-verdicts denying.
 	asker func(ctx context.Context, command, reason string) bool
@@ -115,10 +80,12 @@ type Session struct {
 	sinkCleanup func()
 
 	// runtime and name link a runtime-hosted session back to its registry so
-	// Close deregisters it. ownsRuntime marks the single Session that Start
-	// creates over a private Runtime: its Close also tears down the shared
-	// runtime parts. Start never exposes that Runtime handle, so a competing
-	// Runtime.Close can't race the ownsRuntime cleanup.
+	// Close deregisters it. name is an internal auto-generated bookkeeping
+	// label (registry key + job-parent tracking), not a public identifier.
+	// ownsRuntime marks the single Session that Start creates over a private
+	// Runtime: its Close also tears down the shared runtime parts. Start never
+	// exposes that Runtime handle, so a competing Runtime.Close can't race the
+	// ownsRuntime cleanup.
 	runtime     *Runtime
 	name        string
 	ownsRuntime bool
@@ -166,11 +133,9 @@ func Start(ctx context.Context, spec Spec) (*Session, error) {
 		return nil, err
 	}
 	s, err := rt.Session(SessionOpts{
-		Name:             "main",
 		Agent:            spec.Agent,
 		Headless:         !spec.Interactive,
 		ShellInteractive: spec.ShellInteractive,
-		FS:               spec.FS,
 		Asker:            spec.Asker,
 		ResumeID:         spec.ResumeID,
 		ResumeLatest:     spec.ResumeLatest,
@@ -361,7 +326,7 @@ func (s *Session) Interject(text string, parts ...Part) {
 // of s.runtime. The lock is not held across emit.
 func (s *Session) wake() {
 	if rt := s.runtimeHandle(); rt != nil {
-		rt.emit(HostEvent{Session: s.name, Kind: Wake})
+		rt.emit(HostEvent{Session: s.sess.ID(), Kind: Wake})
 	}
 }
 
@@ -475,7 +440,7 @@ func (s *Session) SendParts(ctx context.Context, prompt string, parts []Part) <-
 			// avoid racing doClose's nil of s.runtime. Emitted after busy is cleared
 			// so a host's RunQueued isn't rejected as busy.
 			if rt != nil && s.sess.HasInbox() {
-				rt.emit(HostEvent{Session: s.name, Kind: Wake})
+				rt.emit(HostEvent{Session: s.sess.ID(), Kind: Wake})
 			}
 			cancel() // release the child ctx
 		}()
@@ -536,11 +501,6 @@ func (s *Session) withIdle(fn func() error) error {
 func (s *Session) ID() string {
 	return s.sess.ID()
 }
-
-// Name returns the session's registry name (the value carried in
-// HostEvent.Session on the wake bus). Start-created sessions are named "main".
-// A host filtering Events() compares HostEvent.Session against this.
-func (s *Session) Name() string { return s.name }
 
 // WakeEvents exposes the owning Runtime's out-of-turn event bus (Wake) so a
 // single-session front-end created via Start can consume wakes for this session
@@ -702,7 +662,6 @@ func (s *Session) turnConfigLocked() chat.TurnConfig {
 		}
 		return baseAsker(ctx, command, reason)
 	}
-	tc.FS = s.fs
 	if s.runtime != nil && s.runtime.jobs != nil {
 		rt := s.runtime
 		parent := s

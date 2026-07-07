@@ -7,14 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/weatherjean/shell3/internal/fsx"
 )
 
 func TestEditFileCreatesNewFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sub", "new.txt")
-	if _, err := EditFile(context.Background(), fsx.OS{}, dir, "sub/new.txt", "", "hello", false); err != nil {
+	if _, err := EditFile(context.Background(), dir, "sub/new.txt", "", "hello", false); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(path)
@@ -30,7 +28,7 @@ func TestEditFileOverwritesWhenExists(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.txt")
 	_ = os.WriteFile(path, []byte("x"), 0o644)
-	res, err := EditFile(context.Background(), fsx.OS{}, dir, "f.txt", "", "y", false)
+	res, err := EditFile(context.Background(), dir, "f.txt", "", "y", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +43,7 @@ func TestEditFileOverwritesWhenExists(t *testing.T) {
 
 func TestEditFileMissingFile(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := EditFile(context.Background(), fsx.OS{}, dir, "nope.txt", "x", "y", false); err == nil {
+	if _, err := EditFile(context.Background(), dir, "nope.txt", "x", "y", false); err == nil {
 		t.Fatal("expected error")
 	}
 }
@@ -54,7 +52,7 @@ func TestEditFileReplaces(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.txt")
 	_ = os.WriteFile(path, []byte("hello world\n"), 0o644)
-	if _, err := EditFile(context.Background(), fsx.OS{}, dir, "f.txt", "world", "Go", false); err != nil {
+	if _, err := EditFile(context.Background(), dir, "f.txt", "world", "Go", false); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(path)
@@ -68,7 +66,7 @@ func TestEditFilePreservesCRLF(t *testing.T) {
 	path := filepath.Join(dir, "f.txt")
 	_ = os.WriteFile(path, []byte("line1\r\nline2\r\n"), 0o644)
 	// model emits LF — our code should coerce to file's CRLF.
-	if _, err := EditFile(context.Background(), fsx.OS{}, dir, "f.txt", "line2", "LINE2", false); err != nil {
+	if _, err := EditFile(context.Background(), dir, "f.txt", "line2", "LINE2", false); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(path)
@@ -84,7 +82,7 @@ func TestEditFileReplaceAll(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.txt")
 	_ = os.WriteFile(path, []byte("foo foo foo"), 0o644)
-	if _, err := EditFile(context.Background(), fsx.OS{}, dir, "f.txt", "foo", "bar", true); err != nil {
+	if _, err := EditFile(context.Background(), dir, "f.txt", "foo", "bar", true); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(path)
@@ -97,7 +95,7 @@ func TestEditFileAmbiguousFails(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.txt")
 	_ = os.WriteFile(path, []byte("foo\nfoo\n"), 0o644)
-	if _, err := EditFile(context.Background(), fsx.OS{}, dir, "f.txt", "foo", "bar", false); err == nil {
+	if _, err := EditFile(context.Background(), dir, "f.txt", "foo", "bar", false); err == nil {
 		t.Fatal("expected ambiguous match error")
 	}
 }
@@ -106,7 +104,7 @@ func TestEditFilePreservesFileMode(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.sh")
 	_ = os.WriteFile(path, []byte("echo hi\n"), 0o755)
-	if _, err := EditFile(context.Background(), fsx.OS{}, dir, "f.sh", "hi", "bye", false); err != nil {
+	if _, err := EditFile(context.Background(), dir, "f.sh", "hi", "bye", false); err != nil {
 		t.Fatal(err)
 	}
 	info, _ := os.Stat(path)
@@ -128,7 +126,7 @@ func TestEditFileLFFallbackOnCRLFFile(t *testing.T) {
 	// the result must be re-coerced back to CRLF on disk.
 	find := "line1\nline2"
 	repl := "LINE1\nLINE2"
-	if _, err := EditFile(context.Background(), fsx.OS{}, dir, "f.txt", find, repl, false); err != nil {
+	if _, err := EditFile(context.Background(), dir, "f.txt", find, repl, false); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(path)
@@ -154,7 +152,7 @@ func TestLineStatsApproxFallback(t *testing.T) {
 
 func TestWriteFileCreatesDirs(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := EditFile(context.Background(), fsx.OS{}, dir, "a/b/c.txt", "", "hi", false); err != nil {
+	if _, err := EditFile(context.Background(), dir, "a/b/c.txt", "", "hi", false); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(filepath.Join(dir, "a/b/c.txt"))
@@ -168,8 +166,8 @@ func TestWriteFileCreatesDirs(t *testing.T) {
 
 func TestWriteFileOverwrites(t *testing.T) {
 	dir := t.TempDir()
-	_, _ = EditFile(context.Background(), fsx.OS{}, dir, "f.txt", "", "old", false)
-	if _, err := EditFile(context.Background(), fsx.OS{}, dir, "f.txt", "", "new", false); err != nil {
+	_, _ = EditFile(context.Background(), dir, "f.txt", "", "old", false)
+	if _, err := EditFile(context.Background(), dir, "f.txt", "", "new", false); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(filepath.Join(dir, "f.txt"))
@@ -185,7 +183,7 @@ func TestEditFile_OverwritePreservesMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Overwrite via empty oldString must keep the existing (executable) mode.
-	if _, err := EditFile(context.Background(), fsx.OS{}, dir, "script.sh", "", "new", false); err != nil {
+	if _, err := EditFile(context.Background(), dir, "script.sh", "", "new", false); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(path)
@@ -277,7 +275,7 @@ func TestEditFileOverwriteReadErrorReturned(t *testing.T) {
 	// Restore perms so t.TempDir cleanup can remove the file.
 	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
 
-	res, err := EditFile(context.Background(), fsx.OS{}, dir, "writeonly.txt", "", "new-1\nnew-2\n", false)
+	res, err := EditFile(context.Background(), dir, "writeonly.txt", "", "new-1\nnew-2\n", false)
 	if err == nil {
 		t.Fatalf("expected read error, got nil (Result=%+v)", res)
 	}

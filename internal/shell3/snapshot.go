@@ -99,88 +99,11 @@ func (s *Session) Snapshot() Snapshot {
 	return snap
 }
 
-// HistoryEntry is one stored conversation message, projected for introspection
-// (the TUI's /print). Content is already stripped of the internal
-// "[tool_call_id=…]\n" storage prefix that tool results carry. Role is the
-// plain string "user"/"assistant"/"tool"/"system".
-type HistoryEntry struct {
-	Role       string
-	Content    string
-	ToolName   string
-	ToolCallID string
-	// ToolCalls holds an assistant message's tool invocations (name + raw JSON
-	// args). Empty for non-assistant messages or assistant messages with no calls.
-	ToolCalls []ToolCallInfo
-	// Reasoning is the assistant's chain-of-thought text, when the provider
-	// emits it (reasoning_content). Empty otherwise.
-	Reasoning string
-}
-
-// ToolCallInfo is one tool invocation made by an assistant message.
-type ToolCallInfo struct {
-	ID   string
-	Name string
-	Args string // raw JSON arguments
-}
-
-// History returns the current conversation history as public HistoryEntry
-// values. Tool-role messages have their internal "[tool_call_id=…]\n" prefix
-// stripped from Content so embedders see the raw tool output. Safe to call
-// concurrently with a running turn: it reads a single locked snapshot via
-// chat.Session.HistorySnapshot (a front-end may poll it mid-turn), so a
-// concurrent compaction can't split the message slice from its reminder anchors.
-func (s *Session) History() []HistoryEntry {
-	msgs, rems := s.sess.HistorySnapshot()
-	out := make([]HistoryEntry, 0, len(msgs)+len(rems))
-	// Interleave recorded system-reminders ahead of the message index they were
-	// injected before. rems is append-ordered, so Seq is non-decreasing.
-	ri := 0
-	flush := func(upto int) {
-		for ri < len(rems) && rems[ri].Seq <= upto {
-			out = append(out, HistoryEntry{Role: "system", Content: rems[ri].Text})
-			ri++
-		}
-	}
-	for i, m := range msgs {
-		flush(i)
-		out = append(out, messageToEntry(m))
-	}
-	flush(len(msgs)) // trailing reminders (mid-turn, before the reply lands)
-	return out
-}
-
-// messageToEntry projects one internal message to the public HistoryEntry,
-// stripping the tool-result id prefix and carrying tool calls + reasoning.
-// Shared by History (live) and SessionMessages (stored replay).
-func messageToEntry(m llm.Message) HistoryEntry {
-	content := m.Content
-	if m.Role == llm.RoleTool {
-		content = stripToolIDPrefix(content)
-	}
-	calls := make([]ToolCallInfo, 0, len(m.ToolCalls))
-	for _, tc := range m.ToolCalls {
-		calls = append(calls, ToolCallInfo{ID: tc.ID, Name: tc.Name, Args: tc.RawArgs})
-	}
-	return HistoryEntry{
-		Role:       string(m.Role),
-		Content:    content,
-		ToolName:   m.Name,
-		ToolCallID: m.ToolCallID,
-		ToolCalls:  calls,
-		Reasoning:  m.ReasoningContent,
-	}
-}
-
-// stripToolIDPrefix removes the "[tool_call_id=…]\n" prefix the turn loop
-// prepends to each stored tool result's content, leaving just the raw output,
-// so the public projection in History hides the internal storage detail.
-func stripToolIDPrefix(content string) string {
-	if strings.HasPrefix(content, "[tool_call_id=") {
-		if nl := strings.IndexByte(content, '\n'); nl >= 0 {
-			return content[nl+1:]
-		}
-	}
-	return content
+// MessageCount returns the number of messages currently in the conversation
+// (e.g. for a resumed-session "N messages in context" marker). Safe to call
+// concurrently with a running turn.
+func (s *Session) MessageCount() int {
+	return len(s.sess.Messages())
 }
 
 // Prune replaces the tool result with the given tool-call id by a short stub,

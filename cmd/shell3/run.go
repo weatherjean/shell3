@@ -12,8 +12,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/tui"
-	"github.com/weatherjean/shell3/pkg/shell3"
 )
 
 type runFlags struct {
@@ -62,7 +62,7 @@ func runHeadless(ctx context.Context, f *runFlags, input string) error {
 		return fmt.Errorf("get working directory: %w", err)
 	}
 
-	// These env vars are read by external hook subprocesses, not by pkg/shell3.
+	// These env vars are read by external hook subprocesses, not by internal/shell3.
 	_ = os.Setenv("SHELL3_HEADLESS", "1")
 	if f.outPath != "" {
 		_ = os.Setenv("SHELL3_OUT", f.outPath)

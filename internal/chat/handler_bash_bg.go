@@ -7,7 +7,7 @@ import (
 )
 
 // BashBgHandler starts a background shell command on the managed in-process
-// job runtime (via cfg.StartBashBg, wired to the pkg/shell3 jobManager). The
+// job runtime (via cfg.StartBashBg, wired to the internal/shell3 jobManager). The
 // job runs as a goroutine-supervised child of the session; the agent is woken
 // with a completion notice on a later turn — there is no detached pid or log
 // path to poll.

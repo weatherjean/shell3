@@ -15,7 +15,7 @@ import (
 // interleaving where wake() observes s.runtime mid-nil.
 func TestSession_InterjectCloseRace(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("hi"))
-	s, err := rt.Session(SessionOpts{Name: "race"})
+	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -30,7 +30,7 @@ type readArgs struct {
 // line/byte cap, returning the raw file text (no line-number gutter, so the
 // model can copy substrings straight into edit_file) plus a continuation footer
 // when truncated. Binary files are refused with a redirect to read_media.
-func handleReadTool(ctx context.Context, argsJSON, workDir string, fs fsx.FileSystem) string {
+func handleReadTool(ctx context.Context, argsJSON, workDir string) string {
 	var a readArgs
 	if err := json.Unmarshal([]byte(argsJSON), &a); err != nil {
 		return "error: invalid read arguments: " + err.Error()
@@ -46,10 +46,7 @@ func handleReadTool(ctx context.Context, argsJSON, workDir string, fs fsx.FileSy
 	}
 
 	path := resolveReadPath(a.Path, workDir)
-	// All existence/type knowledge comes from the backend, not a disk pre-stat:
-	// with a non-OS backend a file may exist only in an in-memory buffer, so
-	// stat-ing the disk first would wrongly report it missing.
-	content, err := fs.ReadTextFile(ctx, path)
+	content, err := fsx.ReadTextFile(ctx, path)
 	if err != nil {
 		switch {
 		case errors.Is(err, os.ErrNotExist):
@@ -59,10 +56,8 @@ func handleReadTool(ctx context.Context, argsJSON, workDir string, fs fsx.FileSy
 		}
 		return "error: " + err.Error()
 	}
-	// Size ceiling, applied to what the backend returned: only the backend knows
-	// the file's true content (an editor buffer has no disk size to pre-stat), so
-	// the cap is on len(content) after the read. Redirect to a streaming bash
-	// extractor for anything bigger.
+	// Size ceiling, applied to the read content (post-read, not a pre-stat).
+	// Redirect to a streaming bash extractor for anything bigger.
 	if len(content) > maxReadFileBytes {
 		return fmt.Sprintf("error: %s is %d MB, exceeds the %d MB read limit; use bash (sed -n / head) to extract the part you need",
 			a.Path, len(content)/(1024*1024), maxReadFileBytes/(1024*1024))
