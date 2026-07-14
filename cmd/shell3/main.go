@@ -34,6 +34,7 @@ func main() {
 		return cmd.Help()
 	}
 	root.AddCommand(newTelegramCommand())
+	root.AddCommand(newDevCommand())
 	root.AddCommand(newBootCommand())
 
 	// Print the brand header for subcommands and --help (TTY only). Root chat
