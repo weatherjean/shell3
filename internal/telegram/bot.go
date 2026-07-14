@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/weatherjean/shell3/internal/strutil"
 	"github.com/weatherjean/shell3/internal/shell3"
+	"github.com/weatherjean/shell3/internal/strutil"
 )
 
 // Bot routes one Telegram chat to one shell3 Session.

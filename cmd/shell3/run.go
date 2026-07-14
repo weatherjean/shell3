@@ -12,8 +12,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/cli"
+	"github.com/weatherjean/shell3/internal/shell3"
 )
 
 type runFlags struct {

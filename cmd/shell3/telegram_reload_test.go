@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/cron"
-	"github.com/weatherjean/shell3/internal/telegram/web"
 	"github.com/weatherjean/shell3/internal/shell3"
+	"github.com/weatherjean/shell3/internal/telegram/web"
 )
 
 // fakeReloader stands in for *shell3.Runtime: Reload returns a scripted result,

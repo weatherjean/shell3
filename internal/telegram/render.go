@@ -6,8 +6,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/weatherjean/shell3/internal/telegram/mdhtml"
 	"github.com/weatherjean/shell3/internal/shell3"
+	"github.com/weatherjean/shell3/internal/telegram/mdhtml"
 )
 
 const tgMaxMessage = 4096
