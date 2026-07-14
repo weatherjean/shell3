@@ -55,7 +55,7 @@ local greet = shell3.tool({
 
 shell3.on_tool_call(function(t)
   -- bash family: gate the command. Guard required — t.command is nil for non-bash.
-  if t.name == "bash" or t.name == "bash_bg" or t.name == "shell_interactive" then
+  if t.name == "bash" or t.name == "bash_bg" then
     if shell3.regex([[(?s)rm\s+-rf\s+/]]):match(t.command) then
       return { block = true, reason = "dangerous" }
     end
@@ -167,26 +167,6 @@ shell3.agent({
 		if !strings.Contains(resultOut, "[redacted]") {
 			t.Errorf("expected redacted marker in tool output, got: %q", resultOut)
 		}
-	})
-
-	// --- Turn 4: shell_interactive is gated by on_tool_call (no ungated bash path) ---
-	// A dangerous command issued via shell_interactive must be blocked by the same
-	// denylist as bash, and must never reach the PTY runner.
-	t.Run("shell_interactive_gated_via_turn", func(t *testing.T) {
-		var ptyRan bool
-		events := runToolCallTurn(t, lc, dir, "open an interactive shell and wipe the disk",
-			llm.ToolCall{ID: "1", Name: "shell_interactive", RawArgs: `{"command":"rm -rf /"}`},
-			func(tc *chat.TurnConfig) {
-				tc.ShellInteractive = func(_ context.Context, cmd, _ string) string {
-					ptyRan = true
-					return "ran: " + cmd
-				}
-			})
-
-		if ptyRan {
-			t.Fatal("shell_interactive ran a command the denylist must block — ungated bash path")
-		}
-		assertToolResultContains(t, events, "blocked by on_tool_call")
 	})
 
 	// --- Turn 5: on_tool_call gates a NON-bash tool (read) via the dispatch loop ---

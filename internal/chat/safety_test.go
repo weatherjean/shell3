@@ -20,21 +20,6 @@ func TestResolveAskAllows(t *testing.T) {
 	}
 }
 
-// shell_interactive is gated through the on_tool_call chain under its real name,
-// so a denylist block applies to it too.
-func TestGateInteractiveBlocks(t *testing.T) {
-	cfg := ToolConfig{RunToolCall: func(_ context.Context, name, command, argsJSON string, _ bool) ToolCallVerdict {
-		if name != "shell_interactive" {
-			t.Errorf("shell_interactive should gate under its real name, got %q", name)
-		}
-		return ToolCallVerdict{Action: ActionBlock, Reason: "no rm"}
-	}}
-	_, msg, blocked := gateInteractiveCommand(context.Background(), cfg, "rm -rf /", "{}")
-	if !blocked || !strings.Contains(msg, "blocked by on_tool_call") {
-		t.Fatalf("want blocked, got blocked=%v msg=%q", blocked, msg)
-	}
-}
-
 // Non-bash tools fire on_tool_call too, under their real name with a nil command,
 // and a block verdict stops them.
 func TestGateNonBashToolBlocks(t *testing.T) {
@@ -108,60 +93,15 @@ func TestGateNonBashToolAskNoAskerBlocks(t *testing.T) {
 }
 
 // No hooks declared → unsafe default: the command runs verbatim.
-func TestGateInteractiveNoHooksRuns(t *testing.T) {
-	cmd, _, blocked := gateInteractiveCommand(context.Background(), ToolConfig{}, "vim", "{}")
-	if blocked || cmd != "vim" {
-		t.Fatalf("no hooks: want run vim, got blocked=%v cmd=%q", blocked, cmd)
-	}
-}
 
 // A {command=...} rewrite is honored — the PTY runs the rewritten command.
-func TestGateInteractiveRewriteRuns(t *testing.T) {
-	cfg := ToolConfig{RunToolCall: func(_ context.Context, _, command, _ string, _ bool) ToolCallVerdict {
-		return ToolCallVerdict{Action: ActionRun, Argv: []string{"bash", "-c", "safe " + command}}
-	}}
-	cmd, _, blocked := gateInteractiveCommand(context.Background(), cfg, "top", "{}")
-	if blocked || cmd != "safe top" {
-		t.Fatalf("want rewritten 'safe top', got blocked=%v cmd=%q", blocked, cmd)
-	}
-}
 
 // A runner-swap (argv) verdict can't run through the interactive PTY, so it
 // fails closed rather than silently running un-sandboxed.
-func TestGateInteractiveRunnerSwapFailsClosed(t *testing.T) {
-	cfg := ToolConfig{RunToolCall: func(_ context.Context, _, command, _ string, _ bool) ToolCallVerdict {
-		return ToolCallVerdict{Action: ActionRun, Argv: []string{"docker", "exec", "c", "bash", "-c", command}}
-	}}
-	_, msg, blocked := gateInteractiveCommand(context.Background(), cfg, "top", "{}")
-	if !blocked || !strings.Contains(msg, "runner-swap") {
-		t.Fatalf("runner-swap must fail closed for interactive, got blocked=%v msg=%q", blocked, msg)
-	}
-}
 
 // Ask with no human attached denies (and blocks).
-func TestGateInteractiveAskNoAskerBlocks(t *testing.T) {
-	cfg := ToolConfig{RunToolCall: func(_ context.Context, _, command, _ string, _ bool) ToolCallVerdict {
-		return ToolCallVerdict{Action: ActionAsk, Prompt: "ok?", Reason: "confirm", Argv: []string{"bash", "-c", command}}
-	}}
-	_, msg, blocked := gateInteractiveCommand(context.Background(), cfg, "git push", "{}")
-	if !blocked || !strings.Contains(msg, "human approval") {
-		t.Fatalf("ask with no asker must block, got blocked=%v msg=%q", blocked, msg)
-	}
-}
 
 // Ask allowed by the human runs exactly what was approved.
-func TestGateInteractiveAskAllowRuns(t *testing.T) {
-	cfg := ToolConfig{
-		RunToolCall: func(_ context.Context, _, command, _ string, _ bool) ToolCallVerdict {
-			return ToolCallVerdict{Action: ActionAsk, Prompt: "ok?", Argv: []string{"bash", "-c", command}}
-		},
-		Asker: func(context.Context, string, string) bool { return true },
-	}
-	cmd, _, blocked := gateInteractiveCommand(context.Background(), cfg, "git push", "{}")
-	if blocked || cmd != "git push" {
-		t.Fatalf("ask allow must run, got blocked=%v cmd=%q", blocked, cmd)
-	}
-}
 
 // TestGatesForwardHeadlessAsk: each gate site passes cfg.HeadlessAsk into the
 // on_tool_call chain unmodified.
@@ -181,12 +121,6 @@ func TestGatesForwardHeadlessAsk(t *testing.T) {
 		gateBash(ctx, cfg, "bash", "echo hi", "{}")
 		if got == nil || *got != headless {
 			t.Fatalf("gateBash headless=%v: chain saw %v", headless, got)
-		}
-
-		got = nil
-		gateInteractiveCommand(ctx, cfg, "echo hi", "{}")
-		if got == nil || *got != headless {
-			t.Fatalf("gateInteractiveCommand headless=%v: chain saw %v", headless, got)
 		}
 
 		got = nil

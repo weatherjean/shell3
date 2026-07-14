@@ -42,7 +42,7 @@ type ToolCallVerdict struct {
 // gate shares: ActionBlock denies with the block message, ActionAsk defers to
 // the human (deny on decline/headless), ActionRun allows. What "allow" means —
 // which argv to exec, whether a rewrite is legal — stays with each caller
-// (gateBash, gateInteractiveCommand, gateNonBashTool).
+// (gateBash, gateNonBashTool).
 func resolveGate(ctx context.Context, asker AskFunc, v ToolCallVerdict) (allowed bool, blockMsg string) {
 	switch v.Action {
 	case ActionBlock:
@@ -74,45 +74,11 @@ func resolveAsk(ctx context.Context, asker AskFunc, v ToolCallVerdict) bool {
 	return asker(askCtx, v.Prompt, v.Reason)
 }
 
-// isBashTool reports whether a tool name is one of the three bash surfaces. These
+// isBashTool reports whether a tool name is one of the two bash surfaces. These
 // self-gate inside their handlers (with command/rewrite/argv support); every other
 // tool is gated by gateNonBashTool in the dispatch loop.
 func isBashTool(name string) bool {
-	return name == "bash" || name == "bash_bg" || name == "shell_interactive"
-}
-
-// gateInteractiveCommand runs the on_tool_call chain for a shell_interactive
-// command and resolves the verdict to the command string the front-end PTY
-// runner should execute, or a block message for the model. The chain sees the
-// real tool name, t.name == "shell_interactive". block / ask / {command=...}
-// rewrite are honored; a runner-swap ({argv=...}) verdict has no interactive-PTY
-// form, so it fails closed.
-func gateInteractiveCommand(ctx context.Context, cfg ToolConfig, command, argsJSON string) (cmd, blockMsg string, blocked bool) {
-	if cfg.RunToolCall == nil {
-		return command, "", false // no hooks: unsafe default
-	}
-	v := cfg.RunToolCall(ctx, "shell_interactive", command, argsJSON, cfg.HeadlessAsk)
-	allowed, msg := resolveGate(ctx, cfg.Asker, v)
-	if !allowed {
-		return "", msg, true
-	}
-	return interactiveCmdFromArgv(v.Argv, command)
-}
-
-// interactiveCmdFromArgv extracts the command string for the PTY runner from a
-// verdict argv. A pass or {command=...} rewrite yields ["bash","-c",cmd]; any
-// other (runner-swap) argv can't be handed to the interactive TTY runner, so it
-// fails closed rather than running the command un-sandboxed.
-func interactiveCmdFromArgv(argv []string, fallback string) (cmd, blockMsg string, blocked bool) {
-	if len(argv) == 0 {
-		return fallback, "", false
-	}
-	if len(argv) == 3 && argv[0] == "bash" && argv[1] == "-c" {
-		return argv[2], "", false
-	}
-	return "", "error: blocked by on_tool_call: shell_interactive cannot run under a " +
-		"runner-swap (argv) verdict — set shell_interactive = false for this agent, or " +
-		"route the command through bash instead.", true
+	return name == "bash" || name == "bash_bg"
 }
 
 // gateNonBashTool runs the on_tool_call chain for a non-bash tool (read,

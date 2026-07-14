@@ -37,7 +37,7 @@ type Model struct {
 }
 
 type ToolGates struct {
-	Bash, BashBg, ShellInteractive, Edit, Media, Read, ListFiles bool
+	Bash, BashBg, Edit, Media, Read, ListFiles bool
 }
 
 // CustomTool is a declarative bash-command tool. The model supplies typed

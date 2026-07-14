@@ -35,7 +35,7 @@ type ToolHandler interface {
 }
 
 // funcHandler adapts a closure to the ToolHandler interface. Used for the
-// turn-scoped tools (shell_interactive, read_media) whose
+// turn-scoped tools (read_media) whose
 // implementations close over the tool loop's mutable state — see
 // turnScopedHandlers in turn.go.
 type funcHandler struct {
@@ -85,7 +85,7 @@ type ToolConfig struct {
 	CancelJob func(id string) string
 	// RunToolCall runs the shell3.on_tool_call chain (pass / rewrite / argv / block /
 	// ask) with the real tool name. The bash family self-gates via this in their
-	// handlers (gateBash / gateInteractiveCommand); every other tool is gated in the
+	// handlers (gateBash); every other tool is gated in the
 	// dispatch loop via gateNonBashTool. Nil = no hooks declared (everything runs —
 	// the unsafe default). Config-global. headless carries HeadlessAsk to the
 	// chain as t.headless.
@@ -119,15 +119,10 @@ type TurnConfig struct {
 	Handlers map[string]ToolHandler
 	// Log is the turn-scoped logger. Nil is safe via LogOrNoop.
 	Log applog.Logger
-	// Headless is true when shell3 runs as a subprocess (no human at the
-	// keyboard). turn.go drops shell_interactive and injects a system
-	// reminder when this is set.
+	// Headless is true when shell3 runs without a human at the keyboard
+	// (subagents, and any front-end that attaches no asker). turn.go injects a
+	// system reminder when this is set.
 	Headless bool
-	// ShellInteractive runs an interactive shell command with TTY access.
-	// When nil, turn.go returns an "unavailable" error string for
-	// shell_interactive tool calls. The TUI wires this to a PTY runner that
-	// releases the terminal; headless leaves it nil or stubs an error.
-	ShellInteractive func(ctx context.Context, cmd, workdir string) string
 	// ResolveCustomTool resolves a custom-tool call to its executable form
 	// (command + env). Names in CustomToolNames route here.
 	ResolveCustomTool func(name, argsJSON string) (ResolvedTool, error)

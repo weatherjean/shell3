@@ -16,22 +16,6 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// filterHeadlessTools returns tools with shell_interactive removed when
-// headless is true. Other tools pass through unchanged.
-func filterHeadlessTools(tools []llm.ToolDefinition, headless bool) []llm.ToolDefinition {
-	if !headless {
-		return tools
-	}
-	out := make([]llm.ToolDefinition, 0, len(tools))
-	for _, td := range tools {
-		if td.Name == "shell_interactive" {
-			continue
-		}
-		out = append(out, td)
-	}
-	return out
-}
-
 // headlessReminder is injected once at the start of a headless turn so the
 // model understands the environment. Adapters that block destructive tool
 // calls also append their own reasons via the existing hook path.
@@ -260,7 +244,7 @@ func assembleTurnContext(cfg TurnConfig, sess *Session, inboxSeeded bool) (allMs
 		allMsgs = injectReminder(allMsgs, r)
 	}
 
-	toolList = filterHeadlessTools(cfg.Personality.Tools, cfg.Headless)
+	toolList = cfg.Personality.Tools
 	if cfg.Headless {
 		allMsgs = injectReminder(allMsgs, headlessReminder)
 	}
@@ -335,28 +319,10 @@ type toolLoopState struct {
 
 // turnScopedHandlers builds the ToolHandlers that exist per tool loop rather
 // than in the shared NewHandlers map, because they need state beyond
-// ToolConfig: shell_interactive borrows the front-end's TTY runner, and
-// read_media collects media parts for the post-loop user message. They close
-// over st, so they are rebuilt for each executeToolCalls invocation.
+// ToolConfig: read_media collects media parts for the post-loop user message.
+// They close over st, so they are rebuilt for each executeToolCalls invocation.
 func turnScopedHandlers(cfg TurnConfig, st *toolLoopState) map[string]ToolHandler {
 	return map[string]ToolHandler{
-		"shell_interactive": funcHandler{name: "shell_interactive", fn: func(ctx context.Context, _ string, args json.RawMessage, _ ToolConfig) (string, error) {
-			if cfg.ShellInteractive == nil {
-				return "error: interactive TTY not available", nil
-			}
-			// shell_interactive runs bash too, so it is gated by the same
-			// on_tool_call chain under its real name (t.name == "shell_interactive")
-			// — otherwise it would be an ungated bash path around any denylist.
-			command, _, perr := parseBashArgsFull(string(args))
-			if perr != nil {
-				return "error: invalid shell_interactive arguments: " + perr.Error(), nil
-			}
-			cmd, blockMsg, blocked := gateInteractiveCommand(ctx, cfg.ToolConfig, command, string(args))
-			if blocked {
-				return blockMsg, nil
-			}
-			return cfg.ShellInteractive(ctx, cmd, cfg.WorkDir), nil
-		}},
 		"read_media": funcHandler{name: "read_media", fn: func(_ context.Context, _ string, args json.RawMessage, _ ToolConfig) (string, error) {
 			out, part := handleReadMedia(string(args), cfg.WorkDir)
 			if part.Type != "" {
@@ -404,10 +370,10 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 		// built-ins (custom before built-ins so a config-declared tool name
 		// always wins) — and run it through the single execute path.
 		if !invalid {
-			// on_tool_call fires before every tool. The bash family (bash, bash_bg,
-			// shell_interactive) self-gates inside its handlers, where command
-			// rewrite and runner-swap are resolved; every other tool is gated here
-			// by name/args (block / ask only — t.command is nil for them).
+			// on_tool_call fires before every tool. The bash family (bash, bash_bg)
+			// self-gates inside its handlers, where command rewrite and runner-swap
+			// are resolved; every other tool is gated here by name/args (block / ask
+			// only — t.command is nil for them).
 			gateMsg, gateBlocked := "", false
 			if !isBashTool(tc.Name) {
 				gateMsg, gateBlocked = gateNonBashTool(ctx, cfg.ToolConfig, tc.Name, tc.RawArgs)

@@ -27,12 +27,10 @@ type SessionOpts struct {
 	Agent string
 	// WorkDir roots tool execution for this session ("" → runtime root).
 	WorkDir string
-	// Headless strips shell_interactive and injects the headless reminder.
+	// Headless injects the headless reminder (no human to answer questions).
 	Headless bool
 	// OutPath, when non-empty, streams this session's JSONL audit log there.
 	OutPath string
-	// ShellInteractive runs an interactive shell command with TTY access.
-	ShellInteractive func(ctx context.Context, cmd, workdir string) string
 	// Asker confirms an on_tool_call ask-verdict command with a human (true = allow).
 	Asker func(ctx context.Context, command, reason string) bool
 	// ResumeID reloads a stored session's messages when non-empty.
@@ -272,7 +270,6 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 		return nil, err
 	}
 	s := newSession(cfg, opts) // shared parts are the runtime's to clean
-	s.shellInteractive = opts.ShellInteractive
 	s.asker = opts.Asker
 	s.opts = opts
 	s.runtime, s.name = rt, name

@@ -27,11 +27,8 @@ type Session struct {
 	sess     *chat.Session
 	handlers map[string]chat.ToolHandler
 
-	// shellInteractive is Spec.ShellInteractive, threaded into every turn's
-	// TurnConfig (see turnConfig). nil keeps shell_interactive "unavailable".
-	shellInteractive func(ctx context.Context, cmd, workdir string) string
-
-	// asker is Spec.Asker, threaded into every turn's TurnConfig.Asker (see
+	// asker is the session's on_tool_call confirm runner, threaded into every
+	// turn's TurnConfig.Asker (see
 	// turnConfig). nil keeps on_tool_call ask-verdicts denying.
 	asker func(ctx context.Context, command, reason string) bool
 
@@ -542,19 +539,9 @@ func (s *Session) turnConfig() chat.TurnConfig {
 // fresh each turn so SwitchAgent's mutations to cfg take effect on the next
 // Send. Caller must hold s.mu: cfg and the session wiring fields it reads are
 // mutated by the mu-holding between-turns methods.
-//
-// The interactive-shell runner is Spec.ShellInteractive (stored at Start). When
-// nil — the default for a headless embedder — shell_interactive tool calls
-// return an "unavailable" string instead of releasing a TTY.
 func (s *Session) turnConfigLocked() chat.TurnConfig {
-	shellInteractive := s.shellInteractive
-	if shellInteractive == nil {
-		shellInteractive = func(ctx context.Context, cmd, workdir string) string {
-			return "error: interactive TTY not available in plugin mode"
-		}
-	}
 	cfg := s.cfg
-	tc := chat.NewTurnConfig(cfg, s.handlers, shellInteractive)
+	tc := chat.NewTurnConfig(cfg, s.handlers)
 	baseAsker := s.asker
 	// t.headless for the on_tool_call chain: no attached asker means an ask
 	// verdict would degrade to deny. Per-session, recomputed every turn.

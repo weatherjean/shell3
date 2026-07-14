@@ -125,15 +125,10 @@ type Config struct {
 	// OutPath, when non-empty, opens a JSONL audit log at this path and
 	// streams every turn event into it. Independent of stdout/TUI rendering.
 	OutPath string
-	// Headless flips on subprocess-friendly behaviors: strips
-	// shell_interactive from the tool schema, injects a system-reminder
-	// explaining the constraints, and signals hooks via SHELL3_HEADLESS=1.
+	// Headless flips on subprocess-friendly behaviors: injects a
+	// system-reminder explaining the constraints (no human to answer
+	// questions) and signals hooks via SHELL3_HEADLESS=1.
 	Headless bool
-	// ShellInteractive runs an interactive shell command with TTY access and
-	// returns the result string to record as tool output. When nil, the
-	// shell_interactive tool returns an "unavailable" error string instead.
-	// The TUI sets this to a PTY runner that releases the terminal.
-	ShellInteractive func(ctx context.Context, cmd, workdir string) string
 	// ResolveCustomTool resolves a custom-tool call to its executable form
 	// (command + env). Nil means no custom tools are wired; unknown tools
 	// fall through to the built-in handler map.
@@ -207,13 +202,9 @@ func NewHandlers() map[string]ToolHandler {
 	return m
 }
 
-// NewTurnConfig assembles a TurnConfig from a Config, the shared built-in
-// handler map, and the front-end's interactive-shell runner. The three
-// front-ends (TUI, stdout one-shot, embedded internal/shell3) differ only in those
-// last two arguments, so this is the single place the field copy lives.
-// shellInteractive may be nil, in which case shell_interactive tool calls
-// return an "unavailable" error.
-func NewTurnConfig(cfg Config, handlers map[string]ToolHandler, shellInteractive func(ctx context.Context, cmd, workdir string) string) TurnConfig {
+// NewTurnConfig assembles a TurnConfig from a Config and the shared built-in
+// handler map. It is the single place the field copy from Config lives.
+func NewTurnConfig(cfg Config, handlers map[string]ToolHandler) TurnConfig {
 	return TurnConfig{
 		ToolConfig: ToolConfig{
 			Store:       cfg.Store,
@@ -233,7 +224,6 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler, shellInteractive
 		StubTools:         cfg.StubTools,
 		AgentKnobs:        cfg.AgentKnobs,
 		RunToolResult:     cfg.RunToolResult,
-		ShellInteractive:  shellInteractive,
 	}
 }
 

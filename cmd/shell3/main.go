@@ -16,8 +16,8 @@ import (
 // Makefile derives it from the latest git tag); "dev" for a plain go build.
 var version = "dev"
 
-// main wires the cobra command tree (interactive root + run/boot/
-// read-session subcommands) and executes it.
+// main wires the cobra command tree (telegram + boot subcommands; the bare
+// root prints help) and executes it.
 func main() {
 	root := &cobra.Command{
 		Use:     "shell3",

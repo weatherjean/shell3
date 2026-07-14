@@ -15,9 +15,6 @@ func ToolDefs(g ToolGates, custom []CustomTool) []llm.ToolDefinition {
 	if g.BashBg {
 		defs = append(defs, bashBgTool)
 	}
-	if g.ShellInteractive {
-		defs = append(defs, shellInteractiveTool)
-	}
 	if g.Edit {
 		defs = append(defs, editFileTool)
 	}
@@ -50,21 +47,6 @@ func (c *LoadedConfig) CustomToolsFor(names []string) []CustomTool {
 		}
 	}
 	return out
-}
-
-var shellInteractiveTool = llm.ToolDefinition{
-	Name:        "shell_interactive",
-	Description: "Run a command that requires an interactive terminal (e.g. vim, less, python REPL). The TUI hands the terminal to the process and resumes when it exits. Returns only a completion status — the command's output goes to the user's terminal and is NOT returned to you, so you cannot read or verify what it printed.",
-	Parameters: map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"command": map[string]any{
-				"type":        "string",
-				"description": "The shell command to run interactively",
-			},
-		},
-		"required": []string{"command"},
-	},
 }
 
 var bashBgTool = llm.ToolDefinition{
@@ -159,7 +141,7 @@ var TaskCancelTool = llm.ToolDefinition{
 
 var bashTool = llm.ToolDefinition{
 	Name:        "bash",
-	Description: "Execute a non-interactive shell command in the project directory. Returns combined stdout and stderr. Do not use for editors or interactive programs — use shell_interactive instead. Default timeout is 10s; pass timeout_seconds (max 600) for slower commands. To read a whole text file prefer the `read` tool.",
+	Description: "Execute a shell command in the project directory. Returns combined stdout and stderr. Non-interactive only — editors and REPLs (vim, less, python) will hang, so run them non-interactively (flags, heredocs, -c). Default timeout is 10s; pass timeout_seconds (max 600) for slower commands. To read a whole text file prefer the `read` tool.",
 	Parameters: map[string]any{
 		"type": "object",
 		"properties": map[string]any{

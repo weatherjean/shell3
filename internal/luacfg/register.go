@@ -206,7 +206,7 @@ var agentKeys = map[string]bool{
 }
 
 var toolGateKeys = map[string]bool{
-	"bash": true, "bash_bg": true, "shell_interactive": true, "edit": true,
+	"bash": true, "bash_bg": true, "edit": true,
 	"custom": true, "skill": true,
 	"media":      true,
 	"read":       true,
@@ -344,13 +344,12 @@ func handleNamesStrict(L *lua.LState, list *lua.LTable, sentinel, ctx, want stri
 // parseGates reads the boolean tool gates from a tools table.
 func parseGates(tt *lua.LTable) ToolGates {
 	return ToolGates{
-		Bash:             optBool(tt, "bash"),
-		BashBg:           optBool(tt, "bash_bg"),
-		ShellInteractive: optBool(tt, "shell_interactive"),
-		Edit:             optBool(tt, "edit"),
-		Media:            optBool(tt, "media"),
-		Read:             optBool(tt, "read"),
-		ListFiles:        optBool(tt, "list_files"),
+		Bash:      optBool(tt, "bash"),
+		BashBg:    optBool(tt, "bash_bg"),
+		Edit:      optBool(tt, "edit"),
+		Media:     optBool(tt, "media"),
+		Read:      optBool(tt, "read"),
+		ListFiles: optBool(tt, "list_files"),
 	}
 }
 

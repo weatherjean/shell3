@@ -58,7 +58,7 @@ shell3.model("{{.Name | luaesc}}", {
 -- ---------------------------------------------------------------------------
 -- UNSAFE BY DEFAULT: tools run with no restrictions. on_tool_call is the one place
 -- a model-issued action can be inspected, rewritten, routed, or blocked. It fires
--- before EVERY tool with the real t.name (bash, bash_bg, shell_interactive, read,
+-- before EVERY tool with the real t.name (bash, bash_bg, read,
 -- list_files, edit_file, custom). t.command is the bash text for the three bash
 -- tools and NIL otherwise — so guard on t.name before matching t.command.
 -- Handlers are chainable (declaration order) and receive t = { name, command, args, headless }.
@@ -66,7 +66,7 @@ shell3.model("{{.Name | luaesc}}", {
 --   * nil                         → pass to the next handler / run
 --   * { command = "..." }         → rewrite the bash text, continue (bash tools only)
 --   * { argv = {...} }            → exec this argv directly (runner swap; bash/bash_bg
---                                   only — fails closed for shell_interactive)
+-- only)
 --   * { block = true, reason="" } → block (reason shown to the model)
 --   * { ask = "prompt", reason="" } → ask a human (TUI y/N prompt);
 --                                   allowed → run, declined/headless → block(reason)
@@ -81,7 +81,7 @@ shell3.model("{{.Name | luaesc}}", {
 -- local ASK  = { re([[(?s)rm\s+-rf]]), re([[(?s)\bgit\s+push]]), re([[(?s)curl\b.*\|\s*(ba)?sh]]) }
 -- local ENV  = re([[\.env]]) -- hoisted like the lists above: compiled once at load
 -- shell3.on_tool_call(function(t)
---   if t.name == "bash" or t.name == "bash_bg" or t.name == "shell_interactive" then
+--   if t.name == "bash" or t.name == "bash_bg" then
 --     for _, p in ipairs(HARD) do if p:match(t.command) then return { block = true, reason = "hard_deny" } end end
 --     for _, p in ipairs(ASK)  do if p:match(t.command) then
 --       if t.headless then return { block = true, reason = "needs approval; rerun interactively" } end
@@ -174,7 +174,6 @@ You are an expert coding assistant inside shell3. Work autonomously as a senior 
 - Evidence, never fabrication: a "done" / "passing" / "fixed" claim must rest on output you actually saw (you ran the test, read the file). If a step fails or is blocked, say so plainly and try another way — never present plausible-looking output you didn't produce.
 
 ## Tools
-- `bash` / `shell_interactive`: prefer `bash`; use `shell_interactive` only for truly interactive programs.
 - `edit_file`: prefer over `bash` heredocs; empty `old_string` creates or overwrites the whole file.
 - `bash_bg`: long or parallel background work.
 - `web_fetch`: fetch a URL as plain text + links. `brave_search`: web search.
@@ -187,7 +186,6 @@ You are an expert coding assistant inside shell3. Work autonomously as a senior 
     bash              = true,
     read              = true,
     bash_bg           = true,
-    shell_interactive = true,
     edit              = true,
     media             = true,
     subagents         = { explorer },
