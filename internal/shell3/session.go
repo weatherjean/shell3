@@ -13,46 +13,10 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// Spec configures Run / Start. Prompt is used by Run only.
-type Spec struct {
-	Prompt     string
-	ConfigPath string // "" → ~/.shell3/shell3.lua
-	WorkDir    string // "" → os.Getwd()
-	Agent      string // "" → first declared agent; unknown name fails Start/Run
-	// Interactive flips the underlying build out of headless mode. The zero
-	// value (false) keeps headless: the
-	// shell_interactive tool is stripped from the schema and a system-reminder
-	// explains the constraint. Set true for a TUI-style front-end that can
-	// release the terminal for an interactive shell (see ShellInteractive).
-	Interactive bool
-	// OutPath, when non-empty, opens a JSONL audit log at this path. The
-	// Session owns the sink: it writes a "start" line on Start, every internal
-	// chat.Event (lossless, before public translation) during each turn, and an
-	// "end" line on Close. Independent of the public Event stream.
-	OutPath string
-	// ShellInteractive runs an interactive shell command with TTY access and
-	// returns the result string recorded as tool output. nil keeps the
-	// shell_interactive tool returning an "unavailable" string. A TUI supplies
-	// a closure that releases the terminal for the duration of the command.
-	ShellInteractive func(ctx context.Context, cmd, workdir string) string
-	// Asker confirms an on_tool_call ask-verdict command with a human and returns
-	// true to allow. A front-end supplies it (TUI prompt or equivalent). nil
-	// means no human is attached (headless), so ask degrades to deny.
-	Asker func(ctx context.Context, command, reason string) bool
-	// ResumeID, when non-empty, reloads that stored session's messages and
-	// continues its conversation instead of starting fresh.
-	ResumeID string
-	// ResumeLatest reattaches to the newest stored session matching this
-	// workdir+config when ResumeID is empty (falling back to a new session
-	// when none exists). See SessionOpts.ResumeLatest.
-	ResumeLatest bool
-}
-
-// Session is a live, multi-turn conversation — the plugin equivalent of an open
-// TUI. Obtain one via [Start] (single-session) or [Runtime.Session]
-// (multi-session host); the zero value is not usable. It streams a per-Send
-// channel of translated Events. Drain a Send channel to completion before
-// calling any between-turns method (the full list is on [ErrBusy]).
+// Session is a live, multi-turn conversation. Obtain one via [Runtime.Session];
+// the zero value is not usable. It streams a per-Send channel of translated
+// Events. Drain a Send channel to completion before calling any between-turns
+// method (the full list is on [ErrBusy]).
 //
 // The underlying chat.Session runs in synchronous-sink mode: each turn's events
 // are delivered inline on the turn goroutine, which translates them onto the
@@ -82,13 +46,8 @@ type Session struct {
 	// runtime and name link a runtime-hosted session back to its registry so
 	// Close deregisters it. name is an internal auto-generated bookkeeping
 	// label (registry key + job-parent tracking), not a public identifier.
-	// ownsRuntime marks the single Session that Start creates over a private
-	// Runtime: its Close also tears down the shared runtime parts. Start never
-	// exposes that Runtime handle, so a competing Runtime.Close can't race the
-	// ownsRuntime cleanup.
-	runtime     *Runtime
-	name        string
-	ownsRuntime bool
+	runtime *Runtime
+	name    string
 
 	// opts is the SessionOpts this session was built from; opts.Depth is the
 	// subagent nesting depth (0 = root user session).
@@ -121,45 +80,6 @@ type Session struct {
 	// front-ends' disable_safety toggle). Consulted at ask time, so a mid-turn
 	// toggle applies to the next ask.
 	safetyOff bool
-}
-
-// Start loads the config, builds a single-session Runtime, and returns its one
-// Session — the single-conversation entry point. Multi-session
-// hosts use NewRuntime + Runtime.Session directly. Closing the returned
-// Session also closes the underlying Runtime.
-func Start(ctx context.Context, spec Spec) (*Session, error) {
-	rt, err := NewRuntime(ctx, RuntimeSpec{ConfigPath: spec.ConfigPath, WorkDir: spec.WorkDir})
-	if err != nil {
-		return nil, err
-	}
-	s, err := rt.Session(SessionOpts{
-		Agent:            spec.Agent,
-		Headless:         !spec.Interactive,
-		ShellInteractive: spec.ShellInteractive,
-		Asker:            spec.Asker,
-		ResumeID:         spec.ResumeID,
-		ResumeLatest:     spec.ResumeLatest,
-		// OutPath deliberately empty: Start owns the sink so the start line
-		// keeps its prompt-derived label.
-	})
-	if err != nil {
-		rt.Close()
-		return nil, err
-	}
-	s.ownsRuntime = true
-	s.cfg.OutPath = spec.OutPath // also feeds writeStartLine's out field and introspection
-	sink, sinkCleanup, err := chat.OpenSink(spec.OutPath, s.cfg.Log)
-	if err != nil {
-		_ = s.Close() // also closes the runtime via ownsRuntime
-		return nil, err
-	}
-	s.sink, s.sinkCleanup = sink, sinkCleanup
-	label := spec.Prompt
-	if label == "" {
-		label = "(interactive)"
-	}
-	s.writeStartLine(label)
-	return s, nil
 }
 
 // writeStartLine writes the audit log's opening line for this session.
@@ -588,18 +508,6 @@ func (s *Session) doClose() error {
 	s.mu.Unlock()
 	if rt != nil {
 		rt.forget(s.name)
-		if s.ownsRuntime {
-			// Start-owned runtime: no public handle exists, so this is the only
-			// place its shared teardown can run. Route through Runtime.Close so
-			// the full ordering applies — remaining sessions (spawned subagents)
-			// close, job goroutines are cancelled AND joined before the store
-			// closes, and the runtime ctx is cancelled. Re-entry is safe: this
-			// session was already forgotten above, and Close's own closeOnce
-			// guards a second invocation.
-			if err := rt.Close(); err != nil && endErr == nil {
-				endErr = err
-			}
-		}
 	}
 	return endErr
 }
@@ -798,38 +706,3 @@ func (s *Session) ActiveAgent() string { return s.cfg.ModeLabel }
 // Name returns the session's runtime key (e.g. "telegram", or a generated
 // "sN"). Front-ends use it to label the session they attached to.
 func (s *Session) Name() string { return s.name }
-
-// Run is the one-shot convenience: Start, send spec.Prompt, stream the turn,
-// and Close when it drains. A non-nil error means startup failed.
-//
-// Close always runs once the caller drains the returned channel: the turn
-// emits exactly one terminal event (Done, or Error on ctx cancellation), which
-// closes the inner turn channel and ends the forwarding range below. A caller
-// that stops draining MUST cancel ctx — that ends the turn and unblocks the
-// forwarder below, which then discards the tail and still runs Close. An
-// abandoned channel with a live ctx would leak the session and its runtime.
-func Run(ctx context.Context, spec Spec) (<-chan Event, error) {
-	s, err := Start(ctx, spec)
-	if err != nil {
-		return nil, err
-	}
-	turn := s.Send(ctx, spec.Prompt)
-	out := make(chan Event)
-	go func() {
-		defer close(out)
-		defer s.Close()
-		for ev := range turn {
-			select {
-			case out <- ev:
-			case <-ctx.Done():
-				// Caller cancelled: the turn is unwinding (Send shares ctx), so
-				// drain its remaining events and let the deferred Close run
-				// instead of parking forever on an abandoned out channel.
-				for range turn {
-				}
-				return
-			}
-		}
-	}()
-	return out, nil
-}
