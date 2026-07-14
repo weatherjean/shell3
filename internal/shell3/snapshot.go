@@ -27,6 +27,13 @@ type ParamValue struct {
 // SwitchAgent, SetParam) and call Snapshot again to observe changes. Safe to
 // call concurrently with a running turn: cfg reads are taken under s.mu against
 // the between-turns writers (a front-end may poll it mid-turn).
+// ToolInfo names a tool exposed by the active agent and its one-line
+// description, for introspection surfaces (status tool, dashboard).
+type ToolInfo struct {
+	Name        string
+	Description string
+}
+
 type Snapshot struct {
 	Agent         string
 	Model         string
@@ -35,7 +42,10 @@ type Snapshot struct {
 	SystemPrompt  string
 	Skills        []string
 	Subagents     []string
-	Params        []ParamValue
+	// Tools lists the active agent's advertised tools (built-ins, custom, and
+	// host-registered), for introspection and front-end feature gating.
+	Tools  []ToolInfo
+	Params []ParamValue
 	// ToolHooksOn reports whether shell3.on_tool_call hooks are declared in the
 	// loaded config. When false the shell is unsafe by default, which the TUI
 	// surfaces with a standing "!" indicator.
@@ -80,6 +90,9 @@ func (s *Session) Snapshot() Snapshot {
 		Warnings:      slices.Clone(s.cfg.ConfigWarnings),
 		Theme:         maps.Clone(s.cfg.Theme),
 		Welcome:       s.cfg.Welcome,
+	}
+	for _, t := range s.cfg.Personality.Tools {
+		snap.Tools = append(snap.Tools, ToolInfo{Name: t.Name, Description: t.Description})
 	}
 	params := s.cfg.Params
 	describer, ok := s.cfg.LLM.(llm.ParamDescriber)

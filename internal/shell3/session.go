@@ -795,6 +795,10 @@ func (s *Session) AgentNames() []string { return s.cfg.AgentNames }
 // ActiveAgent returns the name of the currently active agent.
 func (s *Session) ActiveAgent() string { return s.cfg.ModeLabel }
 
+// Name returns the session's runtime key (e.g. "telegram", or a generated
+// "sN"). Front-ends use it to label the session they attached to.
+func (s *Session) Name() string { return s.name }
+
 // Run is the one-shot convenience: Start, send spec.Prompt, stream the turn,
 // and Close when it drains. A non-nil error means startup failed.
 //
