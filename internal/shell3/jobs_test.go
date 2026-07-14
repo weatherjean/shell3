@@ -73,7 +73,7 @@ func TestSubagentCompletionWakesParent(t *testing.T) {
 		t.Fatalf("parent session: %v", err)
 	}
 
-	id, err := rt.jobs.startSubagent(parent, "", "do the thing", "test task", 1)
+	id, err := rt.jobs.startSubagent(parent, "", "do the thing", "test task", 1, subagentOpts{})
 	if err != nil {
 		t.Fatalf("startSubagent: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestSubagentLiveOutputBuffer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parent session: %v", err)
 	}
-	id, err := rt.jobs.startSubagent(parent, "", "do the thing", "test task", 1)
+	id, err := rt.jobs.startSubagent(parent, "", "do the thing", "test task", 1, subagentOpts{})
 	if err != nil {
 		t.Fatalf("startSubagent: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestSubagentTranscriptAfterClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parent: %v", err)
 	}
-	id, err := rt.jobs.startSubagent(parent, "", "task", "desc", 0)
+	id, err := rt.jobs.startSubagent(parent, "", "task", "desc", 0, subagentOpts{})
 	if err != nil {
 		t.Fatalf("startSubagent: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestJobManagerRetainsDoneSubagentJob(t *testing.T) {
 		t.Fatalf("parent session: %v", err)
 	}
 
-	id, err := rt.jobs.startSubagent(parent, "", "task", "desc", 1)
+	id, err := rt.jobs.startSubagent(parent, "", "task", "desc", 1, subagentOpts{})
 	if err != nil {
 		t.Fatalf("startSubagent: %v", err)
 	}
@@ -402,7 +402,7 @@ func TestSubagentErrorSurfaced(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parent session: %v", err)
 	}
-	id, err := rt.jobs.startSubagent(parent, "", "do the thing", "failing task", 1)
+	id, err := rt.jobs.startSubagent(parent, "", "do the thing", "failing task", 1, subagentOpts{})
 	if err != nil {
 		t.Fatalf("startSubagent: %v", err)
 	}

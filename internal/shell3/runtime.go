@@ -20,6 +20,9 @@ type RuntimeSpec struct {
 
 // SessionOpts parameterizes one Session on a Runtime.
 type SessionOpts struct {
+	// Name keys the session on the runtime (e.g. "telegram"). "" gets a unique
+	// generated name. Requesting an existing live name returns that session.
+	Name string
 	// Agent selects the initial agent ("" → first declared).
 	Agent string
 	// WorkDir roots tool execution for this session ("" → runtime root).
@@ -113,6 +116,11 @@ type Runtime struct {
 	// subagentMaxDepth() applies the default of 3).
 	subagentMaxDepthVal int
 
+	// telegram + cron mirror the shell3.telegram{} config the runtime was built
+	// with (and re-derived on Reload). Read via Telegram()/Cron(). See telegram.go.
+	telegram TelegramConfig
+	cron     []CronJob
+
 	mu       sync.Mutex
 	sessions map[string]*Session
 	nextName int
@@ -169,6 +177,8 @@ func NewRuntime(ctx context.Context, spec RuntimeSpec) (*Runtime, error) {
 		cancel:              cancel,
 		sessions:            map[string]*Session{},
 		subagentMaxDepthVal: parts.SubagentMaxDepth,
+		telegram:            telegramFromParts(parts),
+		cron:                cronFromParts(parts),
 	}
 	rt.jobs = newJobManager(rt, parts.BackgroundMaxConcurrent)
 	// Implement the documented cancellation contract: cancelling the parent ctx
@@ -234,8 +244,23 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	if rt.closed {
 		return nil, ErrRuntimeClosed
 	}
-	rt.nextName++
-	name := fmt.Sprintf("s%d", rt.nextName) // internal bookkeeping label only
+	// A named session is keyed on the runtime: requesting an existing live name
+	// (e.g. the telegram host's "telegram") returns that same session so its
+	// history persists across reattach. An empty name gets a unique generated
+	// label ("sN"), skipping any already taken by a live session.
+	if opts.Name == "" {
+		for {
+			rt.nextName++
+			opts.Name = fmt.Sprintf("s%d", rt.nextName) // internal bookkeeping label only
+			if _, taken := rt.sessions[opts.Name]; !taken {
+				break
+			}
+		}
+	}
+	if s, ok := rt.sessions[opts.Name]; ok {
+		return s, nil
+	}
+	name := opts.Name
 	cfg, err := rt.sessionConfig(opts)
 	if err != nil {
 		return nil, err

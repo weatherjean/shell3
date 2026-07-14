@@ -75,6 +75,7 @@ func registerShell3(c *LoadedConfig) {
 	L.SetField(tbl, "on_tool_result", L.NewFunction(c.luaOnToolResult))
 	L.SetField(tbl, "subagents", L.NewFunction(c.luaSubagents))
 	L.SetField(tbl, "background", L.NewFunction(c.luaBackground))
+	L.SetField(tbl, "telegram", L.NewFunction(c.luaTelegram))
 }
 
 // checkPosIntField reads an optional positive-integer field from t. Absent →

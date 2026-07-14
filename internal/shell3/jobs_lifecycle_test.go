@@ -53,13 +53,13 @@ func TestStartSubagent_ConcurrencyCap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := rt.jobs.startSubagent(parent, "explorer", "task", "desc", 1)
+	id, err := rt.jobs.startSubagent(parent, "explorer", "task", "desc", 1, subagentOpts{})
 	if err != nil {
 		t.Fatalf("first startSubagent: %v", err)
 	}
 	<-block.Started // the child turn is verifiably in flight
 
-	if _, err := rt.jobs.startSubagent(parent, "explorer", "task2", "desc2", 1); err == nil ||
+	if _, err := rt.jobs.startSubagent(parent, "explorer", "task2", "desc2", 1, subagentOpts{}); err == nil ||
 		!strings.Contains(err.Error(), "cap 1 reached") {
 		t.Fatalf("second spawn at cap: want cap error, got %v", err)
 	}
@@ -76,7 +76,7 @@ func TestSubagentCancelMidRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := rt.jobs.startSubagent(parent, "explorer", "task", "desc", 1)
+	id, err := rt.jobs.startSubagent(parent, "explorer", "task", "desc", 1, subagentOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}

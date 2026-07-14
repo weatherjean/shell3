@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -103,6 +104,7 @@ type bgJob struct {
 	cancel    context.CancelFunc
 	out       *jobSink // live output: command stdout/stderr, or subagent event stream
 	childID   string   // subagent: child runs id (transcript source)
+	quiet     bool     // subagent: completion notice queues without waking the parent
 
 	// set on completion; read under jobManager.mu
 	finished bool
@@ -375,10 +377,35 @@ func (m *jobManager) cancelAll() {
 // cancelAll to ensure goroutines have fully unwound before the store closes.
 func (m *jobManager) wait() { m.wg.Wait() }
 
+// subagentOpts tunes a subagent job spawned via startSubagent.
+type subagentOpts struct {
+	workDir string // child workdir; "" → the parent session's workdir
+	quiet   bool   // true → the completion notice does not wake the parent
+}
+
+// resolveChildWorkDir picks a subagent job's workdir: the override when set (a
+// relative override joins onto the parent's effective base), else the parent's
+// own workdir. base "" means the parent runs at the runtime root, so root
+// substitutes as the join anchor.
+func resolveChildWorkDir(parentWD, override, root string) string {
+	base := parentWD
+	if base == "" {
+		base = root
+	}
+	if override == "" {
+		return parentWD // keep the parent's exact value ("" → root downstream)
+	}
+	if filepath.IsAbs(override) {
+		return override
+	}
+	return filepath.Join(base, override)
+}
+
 // startSubagent creates an in-process child session and runs prompt inside it
 // asynchronously. When the child finishes, finishSubagent injects a
-// KindAgentDone notification into the parent session and wakes it.
-func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, depth int) (string, error) {
+// KindAgentDone notification into the parent session and wakes it (unless the
+// job is quiet and finished cleanly).
+func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, depth int, o subagentOpts) (string, error) {
 	if m.rt == nil {
 		return "", fmt.Errorf("subagents require a runtime")
 	}
@@ -408,7 +435,7 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 	j := &bgJob{
 		id: id, kind: JobSubagent, title: desc, agent: agent, parent: parent,
 		parentID: pname, depth: depth, startedAt: time.Now(),
-		cancel: cancel, out: out,
+		cancel: cancel, out: out, quiet: o.quiet,
 	}
 	m.jobs[id] = j
 	m.mu.Unlock()
@@ -421,7 +448,7 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 	child, err := m.rt.Session(SessionOpts{
 		Agent:    agent,
 		Depth:    depth,
-		WorkDir:  parent.opts.WorkDir,
+		WorkDir:  resolveChildWorkDir(parent.opts.WorkDir, o.workDir, m.rt.workDir),
 		Headless: true,
 	})
 	if err != nil {
@@ -498,7 +525,14 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 // of a clean "done".
 func (m *jobManager) finishSubagent(j *bgJob, summary, errText string) {
 	if j.parent != nil {
-		j.parent.injectNotification(m.rt, notifyAgentDone(j.id, summary, errText)) // InterjectNotice + Wake
+		n := notifyAgentDone(j.id, summary, errText)
+		// quiet suppresses the wake for clean runs only: a failed job always
+		// wakes, so an unattended host (cron notify=false) still surfaces errors.
+		if j.quiet && errText == "" {
+			j.parent.injectNoticeNoWake(n) // queued for the next turn, no wake
+		} else {
+			j.parent.injectNotification(m.rt, n) // InterjectNotice + Wake
+		}
 	}
 	m.mu.Lock()
 	j.finished = true

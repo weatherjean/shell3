@@ -684,7 +684,7 @@ func (s *Session) turnConfigLocked() chat.TurnConfig {
 			if depth > maxDepth {
 				return "", fmt.Errorf("max subagent depth %d reached (this session is at depth %d)", maxDepth, parent.opts.Depth)
 			}
-			return rt.jobs.startSubagent(parent, agent, prompt, desc, depth)
+			return rt.jobs.startSubagent(parent, agent, prompt, desc, depth, subagentOpts{})
 		}
 		tc.ListJobs = func() string {
 			return rt.jobs.formatJobList()

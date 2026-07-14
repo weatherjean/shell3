@@ -78,6 +78,12 @@ func (p *Parts) ConfigPath() string { return p.configPath }
 // ModelCount returns the number of declared models.
 func (p *Parts) ModelCount() int { return len(p.lc.Models) }
 
+// Telegram returns the parsed shell3.telegram{} block (zero value if absent).
+func (p *Parts) Telegram() luacfg.TelegramConfig { return p.lc.Telegram() }
+
+// Cron returns the cron jobs declared under shell3.telegram{ cron = {...} }.
+func (p *Parts) Cron() []luacfg.CronJob { return p.lc.Cron() }
+
 // AgentNames returns declared agent names in declaration order.
 func (p *Parts) AgentNames() []string {
 	agents := p.lc.Agents()

@@ -13,6 +13,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/lucasb-eyer/go-colorful v1.4.0
 	github.com/openai/openai-go v1.12.0
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.10.2
 	github.com/yuin/gopher-lua v1.1.2
 	golang.org/x/term v0.44.0

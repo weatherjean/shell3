@@ -139,6 +139,12 @@ type LoadedConfig struct {
 	agents    []Agent
 	subagents []Subagent
 
+	// telegram holds the parsed shell3.telegram{} block (zero value if absent);
+	// cron holds the jobs declared under shell3.telegram{ cron = {...} }. Read
+	// via Telegram()/Cron(). See telegram.go.
+	telegram TelegramConfig
+	cron     []CronJob
+
 	// onToolCall is the shell3.on_tool_call handler chain (declaration order): each
 	// runs before any tool executes, with the real t.name, and returns a verdict
 	// (pass / rewrite / argv / block / ask). command/argv apply to the bash family
@@ -254,6 +260,10 @@ func Load(path string) (*LoadedConfig, error) {
 		if err := c.resolveModelName("subagent", c.subagents[i].Name, &c.subagents[i].ModelName); err != nil {
 			return nil, err
 		}
+	}
+	// Validate cron jobs (every job needs a schedule + a declared subagent).
+	if err := c.validateCron(); err != nil {
+		return nil, err
 	}
 	// Validate cross-references: agent.Subagents must all resolve.
 	for _, a := range c.agents {
