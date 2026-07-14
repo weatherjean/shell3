@@ -109,7 +109,7 @@ func TestRenderedConfigLoads(t *testing.T) {
 	}
 	// Empty MAIN_API_KEY mirrors a proxy setup (e.g. run_proxy handles auth):
 	// the config must still load — api_key is optional.
-	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("MAIN_API_KEY=\nBRAVE_API_KEY=\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("MAIN_API_KEY=\nBRAVE_API_KEY=\nTELEGRAM_BOT_TOKEN=\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -245,7 +245,7 @@ func TestRenderBaseConfigEscapesLuaSpecials(t *testing.T) {
 	if err := RenderBaseConfig(dir, v, false); err != nil {
 		t.Fatalf("RenderBaseConfig: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("MAIN_API_KEY=x\nBRAVE_API_KEY=\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("MAIN_API_KEY=x\nBRAVE_API_KEY=\nTELEGRAM_BOT_TOKEN=\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	c, err := luacfg.Load(filepath.Join(dir, "shell3.lua"))

@@ -214,3 +214,24 @@ You are the design partner inside shell3. You do NOT edit files — you investig
   skills = { brainstorming, history },
 })
 
+-- ---------------------------------------------------------------------------
+-- Telegram host  (run: shell3 telegram)
+-- ---------------------------------------------------------------------------
+-- shell3 talks to you over Telegram. The bot token lives in .env beside this
+-- file (never committed); chat_id is the single chat the bot answers. The
+-- dashboard is a Mini App served over HTTP — reach it from Telegram's menu
+-- button once you expose the addr publicly (tailscale serve / a tunnel) and set
+-- `url` to that https address.
+shell3.telegram({
+  token   = shell3.env.secret("TELEGRAM_BOT_TOKEN"),  -- TELEGRAM_BOT_TOKEN in .env
+  chat_id = "{{.ChatID | luaesc}}",
+  agent   = "code",
+  dashboard = { enabled = true, addr = "127.0.0.1:8765" },
+  -- Scheduled jobs dispatch a subagent on a cron schedule; arm with reload,
+  -- fire on demand with /run <name>:
+  -- cron = {
+  --   { name="daily", schedule="@daily", agent="explorer", notify=true,
+  --     prompt="Summarize anything noteworthy from the last day." },
+  -- },
+})
+

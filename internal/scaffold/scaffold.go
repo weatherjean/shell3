@@ -26,6 +26,7 @@ type Values struct {
 	EnvKey  string // .env key holding the API key, e.g. "MAIN_API_KEY"
 	Model   string // model tag/id
 	Proxy   string // optional run_proxy command ("" => commented out)
+	ChatID  string // Telegram chat id the bot answers ("" => placeholder comment)
 
 	// ContextWindow is the model's token budget; CompactAt is the prompt-token
 	// threshold for host-enforced auto-compaction. Both are model-specific —

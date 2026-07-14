@@ -21,6 +21,7 @@ import (
 type bootFlags struct {
 	url, model, name, key, proxy, braveKey string
 	contextWindow, compactAt               string
+	tgToken, tgChatID                      string
 	force                                  bool
 }
 
@@ -28,9 +29,10 @@ func newBootCommand() *cobra.Command {
 	f := &bootFlags{}
 	cmd := &cobra.Command{
 		Use:   "boot",
-		Short: "Create a shell3 config interactively (url, model, name, key)",
+		Short: "Create a shell3 config interactively (model + Telegram bot)",
 		Example: `  shell3 boot
-  shell3 boot --url https://api.openai.com/v1 --model gpt-4o --name main`,
+  shell3 boot --url https://api.deepseek.com/v1 --model deepseek-chat --name main \
+    --tg-token 123:ABC --tg-chat-id 8701499393`,
 		RunE: func(cmd *cobra.Command, args []string) error { return runBoot(f) },
 	}
 	cmd.Flags().StringVar(&f.url, "url", "", "Base URL (OpenAI-compatible endpoint)")
@@ -41,6 +43,8 @@ func newBootCommand() *cobra.Command {
 	cmd.Flags().StringVar(&f.contextWindow, "context-window", "", "Model context window in tokens (default 128000)")
 	cmd.Flags().StringVar(&f.compactAt, "compact-at", "", "Auto-compaction threshold in tokens (default 80% of context window)")
 	cmd.Flags().StringVar(&f.braveKey, "brave-key", "", "Optional Brave Search API key")
+	cmd.Flags().StringVar(&f.tgToken, "tg-token", "", "Telegram bot token (from @BotFather)")
+	cmd.Flags().StringVar(&f.tgChatID, "tg-chat-id", "", "Telegram chat id the bot answers")
 	cmd.Flags().BoolVar(&f.force, "force", false, "Overwrite an existing ~/.shell3/shell3.lua")
 	return cmd
 }
@@ -108,13 +112,28 @@ func runBoot(f *bootFlags) error {
 		return err
 	}
 
+	if tty {
+		fmt.Println()
+		fmt.Println("Telegram: shell3 talks to you over a bot. Create one with @BotFather")
+		fmt.Println("to get a token, and get your numeric chat id (e.g. from @userinfobot).")
+		fmt.Println("Leave blank to fill in shell3.telegram{} later.")
+	}
+	tgToken, err := value(f.tgToken, "Telegram bot token (blank to add later)", "", in, tty, false)
+	if err != nil {
+		return err
+	}
+	tgChatID, err := value(f.tgChatID, "Telegram chat id", "", in, tty, false)
+	if err != nil {
+		return err
+	}
+
 	envKey := envKeyForName(name)
 
-	envPairs := [][2]string{{envKey, key}, {"BRAVE_API_KEY", braveKey}}
+	envPairs := [][2]string{{envKey, key}, {"BRAVE_API_KEY", braveKey}, {"TELEGRAM_BOT_TOKEN", tgToken}}
 
 	if err := scaffold.RenderBaseConfig(dir, scaffold.Values{
 		Name: name, BaseURL: url, EnvKey: envKey, Model: model, Proxy: proxy,
-		ContextWindow: ctxWindow, CompactAt: compactAt,
+		ContextWindow: ctxWindow, CompactAt: compactAt, ChatID: tgChatID,
 	}, f.force); err != nil {
 		return err
 	}
@@ -210,6 +229,9 @@ func mergeEnv(existing string, kv [][2]string) string {
 		if pair[0] == "BRAVE_API_KEY" && pair[1] == "" {
 			b.WriteString("# Brave Search API key — fill in to enable the brave_search tool.\n")
 		}
+		if pair[0] == "TELEGRAM_BOT_TOKEN" && pair[1] == "" {
+			b.WriteString("# Telegram bot token from @BotFather — fill in before `shell3 telegram`.\n")
+		}
 		b.WriteString(pair[0] + "=" + pair[1] + "\n")
 	}
 	return b.String()
@@ -237,7 +259,10 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool) {
 	fmt.Println("Edit shell3.lua (and lib/) to add tools, skills, or agents —")
 	fmt.Println("recipes live in the shell3 repo under docs/cookbook/.")
 	fmt.Println()
-	fmt.Println("Run:  shell3")
+	fmt.Println("shell3 talks to you over Telegram. Make sure TELEGRAM_BOT_TOKEN is set")
+	fmt.Println("in .env and chat_id is filled in shell3.telegram{}, then run:")
+	fmt.Println()
+	fmt.Println("Run:  shell3 telegram")
 }
 
 // intValue reads a positive-integer config value: flag wins, else prompt (TTY)
