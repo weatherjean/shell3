@@ -121,7 +121,7 @@ type LoadedConfig struct {
 	// filtered by the front-end that owns the palette vocabulary. The overrides sit
 	// atop the sensed light/dark palette in the TUI. Wiring: register.go (luaTheme)
 	// → agentsetup SessionConfig (chat.Config.Theme) → internal/shell3 Snapshot.Theme →
-	// internal/tui.
+	// front-ends.
 	Theme map[string]string
 	// Welcome, if set, replaces the built-in TUI welcome card verbatim (set via
 	// shell3.welcome). Rendered raw and centered, so it may embed ANSI escapes for

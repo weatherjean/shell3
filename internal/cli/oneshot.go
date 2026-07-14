@@ -1,21 +1,23 @@
-package tui
+// Package cli holds the non-interactive front-end helpers shared by the cobra
+// subcommands (shell3 run / boot / read-session): the one-shot turn renderer
+// and the brand banner. It carries no interactive terminal machinery — the
+// interactive TUI was removed when shell3 became a Telegram-first hosted agent.
+package cli
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 
-	"charm.land/lipgloss/v2"
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
 // RunOnce executes a single turn and streams output to stdout with no TUI. It is
-// used for headless and pipeline invocations. The turn drives through
-// shell3.Run, whose channel streams public events and closes when the turn
-// drains. Returns an error if the turn ended in failure.
+// used for headless and pipeline invocations (shell3 run). The turn drives
+// through shell3.Run, whose channel streams public events and closes when the
+// turn drains. Returns an error if the turn ended in failure.
 func RunOnce(ctx context.Context, spec shell3.Spec) error {
 	events, err := shell3.Run(ctx, spec)
 	if err != nil {
@@ -58,14 +60,3 @@ func RunOnce(ctx context.Context, spec shell3.Spec) error {
 // errTurnFailed is the terminal error a one-shot run returns when any turn
 // event carried an error; callers can match it with errors.Is.
 var errTurnFailed = errors.New("turn ended with error")
-
-// PrintHeader writes the two-line shell3 brand banner to w, used as a uniform
-// top banner for non-interactive commands.
-func PrintHeader(w io.Writer) {
-	brand := lipgloss.NewStyle().Foreground(cPrimary).Bold(true)
-	dim := lipgloss.NewStyle().Foreground(cMuted)
-	sub := lipgloss.NewStyle().Foreground(cFgDim)
-	fmt.Fprintln(w, brand.Render("๑ï shell3")+"  "+dim.Render("/ˈʃɛli/"))
-	fmt.Fprintln(w, sub.Render("minimal Unix-composable coding agent"))
-	fmt.Fprintln(w)
-}

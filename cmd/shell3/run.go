@@ -13,7 +13,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/weatherjean/shell3/internal/shell3"
-	"github.com/weatherjean/shell3/internal/tui"
+	"github.com/weatherjean/shell3/internal/cli"
 )
 
 type runFlags struct {
@@ -82,5 +82,5 @@ func runHeadless(ctx context.Context, f *runFlags, input string) error {
 		OutPath:     f.outPath,
 		ResumeID:    f.resume,
 	}
-	return tui.RunOnce(ctx, spec)
+	return cli.RunOnce(ctx, spec)
 }

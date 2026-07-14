@@ -9,8 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/weatherjean/shell3/internal/shell3"
-	"github.com/weatherjean/shell3/internal/tui"
+	"github.com/weatherjean/shell3/internal/cli"
 )
 
 // version is the build version, set at link time via -X main.version (the
@@ -26,37 +25,15 @@ func main() {
 		Version: version,
 	}
 
-	var (
-		rootResume     string
-		rootConfigPath string
-		rootAgent      string
-	)
-	// NoArgs: a typo'd subcommand or a bare prompt ("shell3 fix this bug")
-	// must error, not silently open the interactive TUI and discard the input
-	// (use `shell3 run "..."` for one-shot prompts).
+	// NoArgs: a typo'd subcommand or a bare prompt ("shell3 fix this bug") must
+	// error rather than be silently swallowed. shell3 is a Telegram-first hosted
+	// agent: the bare command prints help; `shell3 telegram` runs the service,
+	// and `shell3 run "..."` handles one-shot prompts.
 	root.Args = cobra.NoArgs
-	addConfigAgentFlags(root, &rootConfigPath, &rootAgent, "")
-	addResumeFlag(root, &rootResume)
 	root.RunE = func(cmd *cobra.Command, args []string) error {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("get working directory: %w", err)
-		}
-		// A resume without --config runs under the session's recorded config,
-		// matching `run --resume` (explicit --config always wins).
-		configPath, err := resolveResumeConfig(rootResume, rootConfigPath)
-		if err != nil {
-			return err
-		}
-		spec := shell3.Spec{
-			ConfigPath:  configPath,
-			WorkDir:     cwd,
-			Agent:       rootAgent,
-			Interactive: true,
-			ResumeID:    rootResume,
-		}
-		return tui.RunInteractive(cmd.Context(), spec)
+		return cmd.Help()
 	}
+	root.AddCommand(newTelegramCommand())
 	root.AddCommand(newRunCommand())
 	root.AddCommand(newBootCommand())
 	root.AddCommand(newReadSessionCommand())
@@ -67,7 +44,7 @@ func main() {
 		if !term.IsTerminal(int(os.Stdout.Fd())) {
 			return
 		}
-		tui.PrintHeader(os.Stdout)
+		cli.PrintHeader(os.Stdout)
 	}
 	root.PersistentPreRun = func(cmd *cobra.Command, args []string) {
 		if !shouldPrintHeaderInPreRun(root, cmd) {
