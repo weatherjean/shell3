@@ -113,22 +113,6 @@ shell3.model("{{.Name | luaesc}}", {
 -- })
 
 -- ---------------------------------------------------------------------------
--- Theme (optional) — override TUI colors atop the sensed light/dark palette.
--- ---------------------------------------------------------------------------
--- The TUI senses the terminal background and adapts (no painted canvas), so text
--- stays legible on light or dark. Override any subset of tokens with #RRGGBB;
--- unknown tokens or bad hex are warned about and skipped. Config-global.
--- shell3.theme({
---   primary = "#EAB308", green = "#78AA78", red = "#DC2626", cyan = "#5BB6C9",
---   pink = "#D98FB8", reason = "#87A58C",
---   fg = "#E5E7EB", fg_dim = "#9CA3AF", muted = "#6B7280",
--- })
-
--- Replace the built-in welcome splash entirely. Rendered verbatim & centered, so
--- you can embed ANSI escapes (\27 = ESC) for terminal colors, or paste ASCII art.
--- shell3.welcome("\27[38;5;208m✦ my agent ✦\27[0m\nready when you are")
-
--- ---------------------------------------------------------------------------
 -- Subagents (delegatable specialists; not in the Tab/`/agent` rotation)
 -- ---------------------------------------------------------------------------
 local explorer = shell3.subagent({

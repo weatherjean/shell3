@@ -62,8 +62,6 @@ func registerShell3(c *LoadedConfig) {
 	L.SetField(tbl, "skill", L.NewFunction(c.luaSkill))
 	L.SetField(tbl, "tool", L.NewFunction(c.luaTool))
 	L.SetField(tbl, "stub_tools", L.NewFunction(c.luaStubTools))
-	L.SetField(tbl, "theme", L.NewFunction(c.luaTheme))
-	L.SetField(tbl, "welcome", L.NewFunction(c.luaWelcome))
 	L.SetField(tbl, "agent", L.NewFunction(c.luaAgent))
 	L.SetField(tbl, "subagent", L.NewFunction(c.luaSubagent))
 	env := L.NewTable()
@@ -285,37 +283,6 @@ func forEachStringPair(L *lua.LState, t *lua.LTable, ctx, keyWant, valWant strin
 		}
 		fn(string(name), string(val))
 	})
-}
-
-// luaWelcome sets a custom TUI welcome card: shell3.welcome("...text..."). The
-// string replaces the built-in card verbatim — centered but otherwise unstyled —
-// so it may embed ANSI escapes (e.g. "\27[38;5;208m...\27[0m") for terminal
-// colors. Config-global; a later call replaces an earlier one.
-func (c *LoadedConfig) luaWelcome(L *lua.LState) int {
-	c.Welcome = L.CheckString(1)
-	return 0
-}
-
-var themeHex = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
-
-// luaTheme registers config-global TUI color overrides from a token→hex table:
-// shell3.theme{ primary = "#EAB308", fg = "#E5E7EB" }. Overrides sit atop the
-// terminal-sensed light/dark palette. It validates only the hex *format* here (a
-// malformed value is a typo — warn and skip, don't fail the load); which token
-// names are meaningful is the front-end's business — the TUI owns the palette
-// vocabulary and warns about unknown tokens when it applies them — so an
-// unrecognized name passes through untouched. Non-string keys/values are a hard
-// error (a type mistake, not a typo).
-func (c *LoadedConfig) luaTheme(L *lua.LState) int {
-	forEachStringPair(L, L.CheckTable(1), "theme", "strings (color tokens)", "a hex string like \"#RRGGBB\"",
-		func(name, hex string) {
-			if !themeHex.MatchString(hex) {
-				c.warnings = append(c.warnings, fmt.Sprintf("theme[%q]: %q is not a #RRGGBB hex color, ignored", name, hex))
-				return
-			}
-			c.Theme[name] = hex
-		})
-	return 0
 }
 
 // handleNamesStrict reads the array part of list as handles carrying sentinel,
