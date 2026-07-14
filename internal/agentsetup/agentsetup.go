@@ -1,5 +1,5 @@
 // Package agentsetup is the shared config assembly used by every shell3
-// front-end (the bubbletea TUI, the stdout one-shot, and the internal/shell3 event
+// front-end (the Telegram bot, the dev CLIs, and the internal/shell3 event
 // stream). It resolves paths, ensures project dirs, opens the store and log,
 // loads shell3.lua, and returns a fully-populated chat.Config — the single
 // source of truth for "what the agent is", independent of how it's driven.
@@ -108,9 +108,9 @@ func (p *Parts) SubagentDescription(name string) (string, bool) {
 
 // AgentRuntime assembles the full chat runtime for the named agent: its model
 // client, persona, and tool defs. name "" uses the first declared agent. An
-// unknown non-empty name falls back to the subagent registry (so a spawned
-// `shell3 --agent <subagent>` resolves the headless subagent config); a name in
-// neither registry returns an error.
+// unknown non-empty name falls back to the subagent registry (so a subagent
+// spawned by name — via the task tool or a cron job — resolves the headless
+// subagent config); a name in neither registry returns an error.
 func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
 	if name == "" {
 		return p.runtimeForAgent(p.lc.FirstAgent())
@@ -482,7 +482,7 @@ func (b *builder) loadConfig() error {
 	b.lc = lc
 	// Surface non-fatal config issues (e.g. a removed config key that is now
 	// ignored). To both the app log and stderr: the log keeps a durable record,
-	// and stderr reaches headless/CLI runs before any TUI takes the screen.
+	// and stderr reaches headless/CLI runs directly.
 	for _, w := range lc.Warnings() {
 		b.log.Warn("config warning", "detail", w)
 		fmt.Fprintln(os.Stderr, "shell3: config warning: "+w)

@@ -23,7 +23,7 @@ const headlessReminder = "<system-reminder>\nheadless mode: no interactive shell
 
 // logStreamError writes the failing turn's messages and the last raw HTTP
 // traffic to .shell3_project/last_error.json under cfg.WorkDir, then records the
-// event in the logger at Debug level (the TUI channel shows the error to the
+// event in the logger at Debug level (the front-end channel shows the error to the
 // user, so stderr duplication is not needed here).
 func logStreamError(cfg TurnConfig, msgs []llm.Message, streamErr error) {
 	var reqBody, resBody []byte
@@ -65,14 +65,14 @@ func logStreamError(cfg TurnConfig, msgs []llm.Message, streamErr error) {
 //
 // beforeDone, if non-nil, runs once at turn teardown immediately before the
 // single terminal event (turn_done or error) is emitted — Session.Run uses it
-// to persist history. The ordering matters: the terminal event is what embedders
-// (internal/shell3, the TUI) treat as "turn finished, safe to mutate session state",
+// to persist history. The ordering matters: the terminal event is what front-ends
+// (internal/shell3) treat as "turn finished, safe to mutate session state",
 // so any read of sess.messages in beforeDone must complete before it fires, or
 // it races a concurrent SetMessages.
 func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Message, beforeDone func()) {
 	// terminalEmit holds the turn's single end event. It is emitted from the
 	// deferred closure below, after beforeDone, so persistence happens-before
-	// the done/error signal the embedder reacts to.
+	// the done/error signal the front-end reacts to.
 	var terminalEmit func()
 	defer func() {
 		if r := recover(); r != nil {

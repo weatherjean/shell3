@@ -368,7 +368,7 @@ func TestRunTurn_AutoCompact_FailSafe(t *testing.T) {
 }
 
 // TestRunTurn_CtxCancel_PreservesTypedError pins that cancellation surfaces as
-// the typed context.Canceled (not a look-alike string error), so embedders can
+// the typed context.Canceled (not a look-alike string error), so front-ends can
 // errors.Is across the internal/shell3 boundary.
 func TestRunTurn_CtxCancel_PreservesTypedError(t *testing.T) {
 	fake := fakellm.New(

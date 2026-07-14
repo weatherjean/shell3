@@ -17,26 +17,29 @@ goroutine under a concurrency cap (`shell3.background{max_concurrent=N}`, defaul
 8) and, on completion, **wakes the parent with a capped result summary** injected
 into context — no subprocess, no inbox file, no fsnotify. `bash_bg` is a background
 shell command on the same runtime (the agent is notified on a later turn; there is
-no pid / log path to poll). Delegation is **single-level** (a subagent is not
-given the `task` tool); max nesting depth is `shell3.subagents{max_depth=N}`
-(default 3). Active tasks are managed with `task_list`, `task_status <id>`, and
+no pid / log path to poll). Delegation is **single-level** — a subagent is not
+given the `task` tool (the `luacfg.Subagent` shape has no subagents field), so
+subagents can't spawn subagents; `shell3.subagents{max_depth=N}` (default 3) is a
+depth guard the in-process `task` path never actually reaches. Active tasks are
+managed with `task_list`, `task_status <id>`, and
 `task_cancel <id>` (ids like `sub1`/`bg1`); these three plus `task` itself — four
 tools in all — are only advertised when the agent sets `delegation = true` and
 `tools.subagents = { … }` (`bash_bg` is gated separately, by
 `tools = { bash_bg = true }`).
-The TUI's background modal (ctrl+p → background) lists running + finished jobs
-live; the footer `bg: N` pill counts running jobs. The TUI modal live-tails a
-unified job-progress stream (`rt.JobEvents()` / `Session.JobEvents()`). The shell is
+The Mini App dashboard's jobs/runs views list running + finished jobs (and each
+subagent's stored transcript); the job-progress stream is `rt.JobEvents()` /
+`Session.JobEvents()`. The shell is
 **unsafe by default**; the single opt-in hook that gates it is
 `shell3.on_tool_call(fn)` — a chainable handler that runs before **every** tool with
-the real `t.name` (`bash`/`bash_bg`/`shell_interactive`/`read`/`list_files`/`edit_file`/custom;
-`t.command` is the bash text for the three bash tools, nil otherwise; `t.headless`
-is true when no human asker is attached — subagents, `shell3 run` — so an ask
+the real `t.name` (`bash`/`bash_bg`/`read`/`list_files`/`edit_file`/custom;
+`t.command` is the bash text for the two bash tools, nil otherwise; `t.headless`
+is true when no human asker is attached — subagents, cron jobs — so an ask
 would auto-deny) and returns a
 verdict: `nil` (run) / `{command=...}` (rewrite, continue chain — bash tools only) /
 `{argv={...}}` (runner-swap, terminal — `bash`/`bash_bg` only; fails closed for
-`shell_interactive` and non-bash) / `{block=true, reason=...}` (block) /
-`{ask="prompt", reason=...}` (prompt a human; allow→run, decline/headless→block).
+non-bash) / `{block=true, reason=...}` (block) /
+`{ask="prompt", reason=...}` (prompt a human — over Telegram, inline Allow/Deny
+buttons; allow→run, decline/headless→block).
 Denylists are written with `shell3.regex(pat):match(s)` (Go RE2; compiled at load;
 use `(?s)` so `.*` spans newlines; match the whole command so chaining can't hide a
 flagged fragment) — guard on `t.name` before matching `t.command` (nil for non-bash).
@@ -57,6 +60,21 @@ keeping recent turns verbatim. The `prune_at` and `keep_recent` knobs are
 optional, defaulting to fractions of `compact_at`; no model-driven prune/compact
 tools.
 
+**Telegram-first.** shell3 is a hosted agent you reach over Telegram.
+`shell3 telegram` runs the bot (`internal/telegram`): one authorized chat id,
+inline Allow/Deny buttons for `on_tool_call` asks, media in/out, `/stop`
+`/reload` `/run`, an in-process cron scheduler (`internal/cron`, jobs under
+`shell3.telegram{ cron = {...} }`), and a Mini App **dashboard**
+(`internal/telegram/web`, Telegram initData auth) with status / past runs /
+subagent transcripts / jobs / cron / a read-only file explorer (`.env` and
+`ai-do-not-read.*` are redacted, never read from disk). Config lives at the root
+`~/.shell3/shell3.lua`; `shell3 boot` scaffolds it (prompting for the model, bot
+token, and chat id) and writes secrets to `~/.shell3/.env`. Two local dev
+front-ends live in `internal/cli`: `shell3 dev "…"` drives the bot's agent from
+the terminal with full verbose output (every tool call/result, reasoning, token
+usage; `--resume` continues the last session), and `shell3 dash` serves the
+dashboard locally with auth bypassed (localhost only) for troubleshooting.
+
 ## IMPORTANT: Do Not Read Credential Files
 
 Secrets and credentials (provider API keys, tool tokens) live in a plain `.env` file beside the active `shell3.lua` (e.g. `~/.shell3/.env`), read from Lua via `shell3.env.secret("KEY")`. Never read, display, or include the contents of any credential file in a response. This applies to all agents, assistants, and automated tools.
@@ -67,11 +85,11 @@ Secrets and credentials (provider API keys, tool tokens) live in a plain `.env` 
 ## Project Layout
 
 ```
-cmd/shell3/            cobra command tree: root (interactive TUI) + run/boot/read-session subcommands
+cmd/shell3/            cobra command tree: root (prints help) + telegram/dev/dash/boot subcommands
 internal/agentsetup/   shared config assembly (Build → chat.Config) used by every front-end
-internal/luacfg/       Lua config loader (shell3.lua → models/agents/tools/skills, on_tool_call/stub_tools) + system-prompt assembly
+internal/luacfg/       Lua config loader (shell3.lua → models/agents/tools/skills, telegram/cron, on_tool_call/stub_tools) + system-prompt assembly
 internal/bootstrap/    first-run global + project setup
-internal/scaffold/     embedded starter shell3.lua + .env template
+internal/scaffold/     embedded starter shell3.lua (with shell3.telegram{}) + .env template
 internal/adapter/openai/  OpenAI-compatible LLM adapter
 internal/modelproxy/   run_proxy spawner (starts a model's proxy command on activation)
 internal/paths/        global (~/.shell3/) + local (.shell3_project/) path resolution; no DB fields
@@ -79,13 +97,15 @@ internal/runs/         file-native JSONL store: sessions at .shell3_project/runs
 internal/edittool/     edit_file tool implementation (Go port of opencode's str-replace)
 internal/fsx/          direct-disk text file I/O for read/edit_file tools (plain functions, no interface)
 internal/notify/       Notification type (bg_done / agent_done) shared by job runtime + chat
-internal/tui/          full-screen terminal UI: always-live input + ctrl+p command palette (interactive + headless once)
+internal/telegram/     Telegram bot front-end (bot loop, commands, confirm buttons, media, mdhtml) + web/ (Mini App dashboard)
+internal/cron/         robfig/cron scheduler dispatching subagent jobs on Session.Dispatch
+internal/cli/          non-interactive front-end helpers: shell3 dev + dash renderers, brand banner
 internal/chat/         conversation loop, tools, events, JSONL audit sink
 internal/llm/          Provider/Streamer interfaces, request params, types (+ fakellm)
 internal/persona/      runtime carrier for an agent's prompt/tools/params (data only)
 internal/strutil/      rune-safe string truncation helpers (byte-cap + rune-count) shared by runtime and front-ends
 internal/applog/       rotating app log
-internal/shell3/       session/runtime core consumed by the TUI; jobs.go hosts the in-process job runtime (subagents + bash_bg)
+internal/shell3/       session/runtime core consumed by the front-ends; jobs.go hosts the in-process job runtime (subagents + bash_bg)
 ```
 
 ## Development

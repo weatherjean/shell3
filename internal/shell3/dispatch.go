@@ -9,8 +9,8 @@ import (
 
 // DispatchOpts tunes a host-initiated subagent job (see Session.Dispatch).
 type DispatchOpts struct {
-	// Description is the job title shown in task_list and the TUI :background
-	// modal. "" derives one from the prompt.
+	// Description is the job title shown in task_list and the dashboard's
+	// background view. "" derives one from the prompt.
 	Description string
 	// WorkDir roots the child session's tools. "" inherits this session's
 	// workdir; a relative path joins onto it (or onto the runtime root when

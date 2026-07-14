@@ -2,11 +2,11 @@
 // drives the user→assistant turn loop, dispatches tool calls, and emits a
 // stream of structured Events that observers consume.
 //
-// The package does no rendering. Presentation (TUI widgets, stdout printers,
+// The package does no rendering. Presentation (front-end views, stdout printers,
 // JSONL audit sinks) lives elsewhere and receives each Event via the
 // SessionOpts.Sink callback.
 //
-// Typical embedding flow:
+// Typical usage flow:
 //
 //	sess := chat.NewSession(chat.SessionOpts{StoreID: id, Sink: func(ev chat.Event) {
 //	    // render or log ev
@@ -20,7 +20,7 @@
 //   - NewSession constructs a Session that delivers events to SessionOpts.Sink.
 //   - Session.Run executes one user turn end-to-end, persisting to a store if
 //     one is configured.
-//   - RunTurn is the lower-level loop used by Session.Run; embedders can call
+//   - RunTurn is the lower-level loop used by Session.Run; front-ends can call
 //     it directly when they need to manage history or persistence themselves.
 //   - NewHandlers builds the built-in tool dispatch map.
 //

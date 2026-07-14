@@ -45,12 +45,12 @@ type Snapshot struct {
 	Tools  []ToolInfo
 	Params []ParamValue
 	// ToolHooksOn reports whether shell3.on_tool_call hooks are declared in the
-	// loaded config. When false the shell is unsafe by default, which the TUI
+	// loaded config. When false the shell is unsafe by default, which a front-end
 	// surfaces with a standing "!" indicator.
 	ToolHooksOn bool
 	// Warnings are non-fatal config load issues (e.g. a removed config key
-	// that is now ignored). A front-end surfaces them in-band at startup — the
-	// alt-screen TUI otherwise clears the stderr line they were printed on.
+	// that is now ignored). A front-end surfaces them in-band at startup — a web
+	// dashboard user otherwise never sees the stderr line they were printed on.
 	Warnings []string
 }
 
@@ -109,7 +109,7 @@ func (s *Session) MessageCount() int {
 }
 
 // Prune replaces the tool result with the given tool-call id by a short stub,
-// freeing its context-window space (= the TUI's /prune <id>). summary is the
+// freeing its context-window space (the prune action). summary is the
 // human-readable status string. Returns ErrBusy while a turn is in flight
 // (mutates history; see ErrBusy), or an error naming the id when no tool
 // result with that id exists.
@@ -127,8 +127,8 @@ func (s *Session) Prune(id string) (summary string, err error) {
 	return summary, err
 }
 
-// QueueCompact requests a compaction before the next turn acts (= the TUI's
-// :compact). It does not compact immediately — the next turn summarizes the
+// QueueCompact requests a compaction before the next turn acts (the compact
+// action). It does not compact immediately — the next turn summarizes the
 // conversation before the model does anything.
 func (s *Session) QueueCompact() { s.sess.QueueCompact() }
 

@@ -1,4 +1,4 @@
-// Package shell3test provides test-only helpers for exercising pkg/shell3 from
+// Package shell3test provides test-only helpers for exercising internal/shell3 from
 // other packages. It keeps the `testing` and fakellm dependencies out of the
 // production shell3 library: the helpers here import them, shell3 itself does not.
 package shell3test

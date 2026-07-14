@@ -33,7 +33,7 @@ func newTelegramCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// Same resolution rule as run/the TUI: --config name or *.lua path,
+			// Same resolution rule as the other subcommands: --config name or *.lua path,
 			// default ~/.shell3/shell3.lua. No telegram-specific config lookup.
 			resolved, err := agentsetup.ResolveConfigPath(configPath, home)
 			if err != nil {
@@ -42,7 +42,7 @@ func newTelegramCommand() *cobra.Command {
 			// Anchor the bot to its own config directory, NOT the launch cwd: the
 			// runtime root determines where runs/ + history live (runs.Open under
 			// <workdir>/.shell3_project). Tying it to the config dir keeps the bot
-			// self-contained and isolated from a TUI launched in the same shell.
+			// self-contained.
 			tgHome := filepath.Dir(resolved)
 			rt, err := shell3.NewRuntime(ctx, shell3.RuntimeSpec{ConfigPath: resolved, WorkDir: tgHome})
 			if err != nil {

@@ -86,8 +86,8 @@ type Config struct {
 	RefreshPrompt func() string
 	// WorkDir is the working directory for tool execution and error dumps.
 	WorkDir string
-	// StatusLine is the human-readable provider/model/effort line shown in
-	// the TUI and used by reminder tracking to detect model changes.
+	// StatusLine is the human-readable provider/model/effort line shown by
+	// front-ends and used by reminder tracking to detect model changes.
 	StatusLine string
 	// ModeLabel is a short tag (e.g. "chat", "code") surfaced to renderers.
 	ModeLabel string
@@ -97,8 +97,8 @@ type Config struct {
 	ConfigPath string
 	// ConfigWarnings are non-fatal config load issues (e.g. a removed config key
 	// that is now ignored). Already logged + printed to stderr at load; also
-	// carried here so an interactive front-end can surface them in-band, since an
-	// alt-screen TUI clears the stderr line before the user can read it.
+	// carried here so a front-end can surface them in-band, since a web
+	// dashboard user never sees the stderr line they were printed on.
 	ConfigWarnings []string
 	// ActiveSkills lists skill names enabled for this persona.
 	ActiveSkills []string
@@ -115,7 +115,7 @@ type Config struct {
 	// Log is the application logger. Nil is allowed; LogOrNoop wraps it.
 	Log applog.Logger
 	// OutPath, when non-empty, opens a JSONL audit log at this path and
-	// streams every turn event into it. Independent of stdout/TUI rendering.
+	// streams every turn event into it. Independent of stdout/front-end rendering.
 	OutPath string
 	// Headless flips on subprocess-friendly behaviors: injects a
 	// system-reminder explaining the constraints (no human to answer
@@ -155,7 +155,7 @@ func AgentStatusLine(rt ActiveAgent) string {
 
 // ApplyActiveAgent copies a switched agent's runtime bundle into the config:
 // model client, persona, params, tool/skill sets, context window, and the
-// derived status line. Every front-end (TUI /agent + Tab, internal/shell3
+// derived status line. Every front-end (via internal/shell3
 // SwitchAgent) and the initial assembly in agentsetup route through this method,
 // so the agent-derived field copy lives in exactly one place.
 //

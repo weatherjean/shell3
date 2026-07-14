@@ -232,7 +232,7 @@ func TestSession_ErrorPath(t *testing.T) {
 
 // TestSession_Close_ReturnsEndSessionError verifies Close surfaces the store's
 // EndSession error instead of always returning nil. The underlying store DB is
-// closed before Close runs, forcing EndSession to fail; embedders' `if err :=
+// closed before Close runs, forcing EndSession to fail; front-ends' `if err :=
 // sess.Close(); err != nil` must then see a non-nil error.
 func TestSession_Close_ReturnsEndSessionError(t *testing.T) {
 	root := t.TempDir()
@@ -244,7 +244,7 @@ func TestSession_Close_ReturnsEndSessionError(t *testing.T) {
 	s := newTestSession(t, client, chat.Config{Store: st})
 
 	// Delete the run's meta.json so EndSession (which reads meta) fails when Close
-	// runs; embedders' `if err := sess.Close(); err != nil` must then see it.
+	// runs; front-ends' `if err := sess.Close(); err != nil` must then see it.
 	if err := os.RemoveAll(filepath.Join(root, "runs", s.sess.ID())); err != nil {
 		t.Fatalf("remove run dir: %v", err)
 	}

@@ -68,8 +68,8 @@ func TestLatestSession(t *testing.T) {
 	}
 }
 
-// Session IDs arrive from user-controlled surfaces (read-session <id>,
-// --resume); a path-traversal id must never escape the store.
+// Session IDs arrive from user-controlled surfaces (the dashboard,
+// shell3 dev --resume); a path-traversal id must never escape the store.
 func TestSessionIDPathTraversalRejected(t *testing.T) {
 	st, err := Open(t.TempDir())
 	if err != nil {

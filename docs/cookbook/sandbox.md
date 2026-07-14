@@ -2,10 +2,10 @@
 
 `shell3.on_tool_call` is the policy hook (see the commented block in your
 `shell3.lua`). It fires before **every** tool, and `t.name` is the real tool name.
-For sandboxing you care about the three bash tools — `bash`, `bash_bg`, and
-`shell_interactive` — so guard on them. A handler receives `t` with `t.name`,
-`t.command` (the bash command for those three tools; `nil` otherwise), `t.args`,
-and `t.headless` (`true` when no human is attached — subagents, `shell3 run`);
+For sandboxing you care about the bash tools — `bash` and `bash_bg` — so guard
+on them. A handler receives `t` with `t.name`,
+`t.command` (the bash command for those two tools; `nil` otherwise), `t.args`,
+and `t.headless` (`true` when no human is attached — subagents, `shell3 dev`);
 it returns one of:
 
 - `nil` — pass (continue the chain / run)
@@ -13,25 +13,24 @@ it returns one of:
 - `{ argv = { ... } }` — exec this argv directly — this swaps the **runner**, and
   the command arrives as a single argv element, so nothing re-parses or re-quotes it
 - `{ block = true, reason = "..." }` — block
-- `{ ask = "prompt", reason = "...", ask_timeout = N }` — ask a human (TUI `y/N`);
-  allowed → run, declined/headless → block. `ask_timeout` optional (seconds, default 300).
+- `{ ask = "prompt", reason = "...", ask_timeout = N }` — ask a human (inline
+  Allow/Deny buttons in Telegram); allowed → run, declined/headless → block.
+  `ask_timeout` optional (seconds, default 300).
 
 The `{ argv = { ... } }` form is what makes `on_tool_call` a real wrapper: you
 choose the program that actually runs the agent's command. It applies to `bash` and
-`bash_bg`; `shell_interactive` has no argv form, so an argv verdict blocks it (see
-[Scope](#scope)).
+`bash_bg`.
 
 ## Run every command inside a container
 
 ```lua
 shell3.on_tool_call(function(t)
-  if t.name == "bash" or t.name == "bash_bg" or t.name == "shell_interactive" then
+  if t.name == "bash" or t.name == "bash_bg" then
     -- block first, if you like:
     if shell3.regex([[(?s)rm\s+-rf\s+/]]):match(t.command) then
       return { block = true, reason = "refusing rm -rf /" }
     end
-    -- then run everything inside a container (shell_interactive has no argv form,
-    -- so this blocks it — set shell_interactive = false to drop it cleanly):
+    -- then run everything inside a container:
     return { argv = {"docker", "exec", "mycontainer", "bash", "-c", t.command} }
   end
 end)
@@ -45,7 +44,7 @@ your own `yourcli run` wrapper. A `nil` return still means "run the default
 
 ```lua
 shell3.on_tool_call(function(t)
-  if t.name == "bash" or t.name == "bash_bg" or t.name == "shell_interactive" then
+  if t.name == "bash" or t.name == "bash_bg" then
     if t.command:match("^git ") then return nil end                     -- git stays local
     return { argv = {"firejail", "--quiet", "bash", "-c", t.command} }  -- rest sandboxed
   end
@@ -54,7 +53,7 @@ end)
 
 ## Scope
 
-These recipes sandbox the `bash`, `bash_bg`, and `shell_interactive` tools —
+These recipes sandbox the `bash` and `bash_bg` tools —
 including inside subagents (in-process background jobs spawned via the `task`
 tool), whose bash calls fire the same gate. `on_tool_call` also fires for `read`,
 `list_files`, `edit_file`, and custom tools — the `t.name` guard keeps your bash
@@ -64,7 +63,4 @@ command-template tool's command is your trusted author template (not model input
 it is never rewritten — but the call still fires the hook, so you can `block`/`ask` it.
 
 A malformed argv table (empty, or any non-string element) fails **closed**: the
-command is blocked, never run unwrapped. A runner swap has no interactive-PTY form,
-so a `shell_interactive` call under an `{argv=...}` policy also fails **closed**
-(blocked) — set `shell_interactive = false` for that agent if you sandbox all bash
-through a runner swap.
+command is blocked, never run unwrapped.

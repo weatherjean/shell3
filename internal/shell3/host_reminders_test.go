@@ -107,7 +107,7 @@ func TestHostReminders_BothToggles(t *testing.T) {
 		t.Errorf("system prompt must contain NEITHER host section:\n%s", prompt)
 	}
 
-	// The prompt-inspection view (TUI /prompt + dashboard Status → Prompt) reads
+	// The prompt-inspection view (the dashboard Status → Prompt) reads
 	// Snapshot().SystemPrompt, which folds in the standing reminders so the user
 	// sees the full effective context even though the authored prompt stays clean.
 	shown := s.Snapshot().SystemPrompt

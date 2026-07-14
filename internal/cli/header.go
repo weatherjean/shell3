@@ -9,7 +9,7 @@ import (
 
 // Brand banner colors, taken from the historical dark palette. The banner is
 // printed by cobra's pre-run (before any terminal-background sensing), so it
-// always rendered with the dark palette in the old TUI — these values keep that
+// always rendered with the dark palette — these values keep that
 // look identical.
 var (
 	bannerPrimary = lipgloss.Color("#EAB308") // brand yellow

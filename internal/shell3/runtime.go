@@ -234,7 +234,7 @@ func (rt *Runtime) emitJob(ev JobProgress) {
 	}
 }
 
-// Session creates and returns a new session on this runtime (the TUI's root
+// Session creates and returns a new session on this runtime (a front-end's root
 // session, or a subagent's child session). A closed runtime returns an error.
 func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	rt.mu.Lock()

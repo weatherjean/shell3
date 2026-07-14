@@ -54,7 +54,7 @@ func Open(root string) (*Store, error) {
 func (s *Store) runsDir() string { return filepath.Join(s.root, "runs") }
 
 // sessDir resolves a session directory. IDs arrive from user-controlled
-// surfaces (read-session <id>, --resume), so anything that is not a plain
+// surfaces (the dashboard, shell3 dev --resume), so anything that is not a plain
 // path component is rejected by mapping it to an impossible directory —
 // "../../../etc" must never escape the store.
 func (s *Store) sessDir(id string) string {

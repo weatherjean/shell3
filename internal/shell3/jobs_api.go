@@ -20,8 +20,8 @@ type JobProgress struct {
 }
 
 // JobInfo is the public projection of one background job (a bash_bg process or
-// a fire-and-forget subagent) for an embedder to display. Done jobs are
-// retained in-memory for the session lifetime (up to 100) so the TUI can show
+// a fire-and-forget subagent) for a front-end to display. Done jobs are
+// retained in-memory for the session lifetime (up to 100) so a front-end can show
 // their final output and transcript.
 type JobInfo struct {
 	ID string
@@ -55,7 +55,7 @@ func (s *Session) JobEvents() <-chan JobProgress {
 
 // Jobs lists the live background jobs for this session's project — bash_bg
 // processes and in-process subagents — newest first. Returns nil when the
-// in-process job runtime is unavailable. (= the TUI's :background.)
+// in-process job runtime is unavailable. (Backs the dashboard's background view.)
 func (s *Session) Jobs() []JobInfo {
 	rt := s.runtimeHandle() // snapshot under s.mu: doClose nils s.runtime concurrently
 	if rt == nil || rt.jobs == nil {
@@ -76,7 +76,7 @@ func (s *Session) JobOutput(id string) string {
 
 // JobTranscript returns the messages.jsonl contents of a background SUBAGENT
 // job's child session, or "" when the job runtime is unavailable or the job is
-// a command (not a subagent). The TUI's :background view renders this instead
+// a command (not a subagent). The dashboard's background view renders this instead
 // of the plain stdout log when present — see JobOutput for the fallback.
 func (s *Session) JobTranscript(id string) string {
 	rt := s.runtimeHandle()
@@ -86,7 +86,7 @@ func (s *Session) JobTranscript(id string) string {
 	return rt.jobs.transcript(id)
 }
 
-// KillJob cancels one background job (= the TUI's ctrl+x in :background). For
+// KillJob cancels one background job (the dashboard's cancel action). For
 // command jobs this sends a cancellation signal; for subagent jobs it cancels
 // the child session's context. It does not block; the job leaves the live list
 // once it exits.

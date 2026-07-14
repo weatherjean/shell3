@@ -25,10 +25,10 @@ func openTestStore(t *testing.T) *runs.Store {
 // turn's messages are persisted to the store *before* the turn_done event is
 // emitted.
 //
-// Why it matters: turn_done is the signal embedders (internal/shell3, the TUI) use
+// Why it matters: turn_done is the signal front-ends (internal/shell3) use
 // to decide a turn is finished and that mutating session state — Clear,
 // Rollback → SetMessages — is now safe. saveHistory reads sess.messages. If
-// turn_done fired first, an embedder reacting to it could write sess.messages
+// turn_done fired first, a front-end reacting to it could write sess.messages
 // concurrently with saveHistory's read: a data race.
 //
 // The sink is invoked synchronously inside Run, so observing turn_done from it

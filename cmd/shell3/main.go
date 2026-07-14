@@ -28,7 +28,7 @@ func main() {
 	// NoArgs: a typo'd subcommand or a bare prompt ("shell3 fix this bug") must
 	// error rather than be silently swallowed. shell3 is a Telegram-first hosted
 	// agent: the bare command prints help; `shell3 telegram` runs the service,
-	// and `shell3 run "..."` handles one-shot prompts.
+	// and `shell3 dev "..."` handles one-shot prompts.
 	root.Args = cobra.NoArgs
 	root.RunE = func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()

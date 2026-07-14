@@ -94,9 +94,9 @@ func TestGateNonBashToolAskNoAskerBlocks(t *testing.T) {
 
 // No hooks declared → unsafe default: the command runs verbatim.
 
-// A {command=...} rewrite is honored — the PTY runs the rewritten command.
+// A {command=...} rewrite is honored — the rewritten command runs.
 
-// A runner-swap (argv) verdict can't run through the interactive PTY, so it
+// A runner-swap (argv) verdict can't run through a non-bash tool, so it
 // fails closed rather than silently running un-sandboxed.
 
 // Ask with no human attached denies (and blocks).

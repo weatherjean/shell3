@@ -127,8 +127,8 @@ type TurnConfig struct {
 	// (command + env). Names in CustomToolNames route here.
 	ResolveCustomTool func(name, argsJSON string) (ResolvedTool, error)
 	// HostTool dispatches a host-registered Go tool (internal/shell3.RegisterHostTool)
-	// by name, returning its result string. Tried BEFORE ResolveCustomTool so an
-	// embedding host can supply native tools (which return strings directly, not
+	// by name, returning its result string. Tried BEFORE ResolveCustomTool so the
+	// host (internal/shell3) can supply native tools (which return strings directly, not
 	// bash commands) alongside command-template tools. Nil = none registered.
 	HostTool func(ctx context.Context, name, argsJSON string) (string, error)
 	// StubTools maps a hallucinated tool name to its redirect message (a nudge,

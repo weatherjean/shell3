@@ -10,8 +10,8 @@ import (
 	"github.com/weatherjean/shell3/internal/persona"
 )
 
-// TestRunTurn_QueuedCompact_ForcesBelowThreshold pins that QueueCompact (the TUI
-// :compact command) compacts at the next turn even though the prompt-token count
+// TestRunTurn_QueuedCompact_ForcesBelowThreshold pins that QueueCompact (a
+// front-end compact request) compacts at the next turn even though the prompt-token count
 // is far below compact_at — the user explicitly asked for it.
 func TestRunTurn_QueuedCompact_ForcesBelowThreshold(t *testing.T) {
 	fake := fakellm.New(

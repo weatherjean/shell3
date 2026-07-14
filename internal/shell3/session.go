@@ -32,8 +32,8 @@ type Session struct {
 	// turnConfig). nil keeps on_tool_call ask-verdicts denying.
 	asker func(ctx context.Context, command, reason string) bool
 
-	// sink is the JSONL audit log, opened by Start (Spec.OutPath) or
-	// Runtime.Session (SessionOpts.OutPath) when the path is non-empty.
+	// sink is the JSONL audit log, opened by Runtime.Session
+	// (SessionOpts.OutPath) when the path is non-empty.
 	// route writes every internal chat.Event to it (lossless) before
 	// translating to a public Event; Close writes the "end" line. nil when no
 	// OutPath was configured. sinkCleanup closes the underlying file.
@@ -207,8 +207,8 @@ func (s *Session) route(ev chat.Event) {
 // ("user interjected …"), letting the model course-correct mid-task; while
 // idle it queues and is drained at the start of the next turn. Interject never
 // fails, never blocks on a running turn, and is safe to call from any
-// goroutine — it is the chat-message path for front-ends (the TUI's
-// Enter-while-busy, a bot's incoming message), while Send remains the strict
+// goroutine — it is the chat-message path for front-ends (a bot's
+// incoming message), while Send remains the strict
 // turn-starting call.
 //
 // Optional parts attach media: each invalid part is dropped — Interject never
@@ -655,7 +655,7 @@ func (s *Session) Rollback() (ok bool, err error) {
 }
 
 // SwitchAgent activates the configured agent named name for subsequent Sends
-// (= the TUI's /agent <name> or Tab). Switching swaps the agent's model client,
+// (a front-end's agent-switch action). Switching swaps the agent's model client,
 // system prompt, tool set, custom-tool routing, skills, status
 // line, and context window while keeping conversation history. Returns an error
 // for an unknown agent or when the config declares no agents, and ErrBusy

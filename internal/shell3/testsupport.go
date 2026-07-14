@@ -7,9 +7,9 @@ import (
 )
 
 // RuntimeForTest builds a Runtime around a caller-supplied per-session config
-// builder, for test harnesses in other packages (see pkg/shell3/shell3test). It
+// builder, for test harnesses in other packages (see internal/shell3/shell3test). It
 // exists so those tests can inject a fake model without the production shell3
-// package importing `testing` or fakellm; it is NOT part of the stable embedding
+// package importing `testing` or fakellm; it is NOT part of the stable public
 // API. The returned Runtime owns no shared parts (cleanup is a no-op) and must be
 // Closed by the caller.
 func RuntimeForTest(workDir string, sessionConfig func(SessionOpts) (chat.Config, error)) *Runtime {

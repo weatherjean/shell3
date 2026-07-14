@@ -37,8 +37,9 @@ better are more welcome than ones that grow the footprint.
 - Doc comments explain **why**, not what. Write down any concurrency or lifecycle
   contract at the declaration (see `internal/chat/session.go`,
   `internal/shell3/session.go`).
-- shell3 is a TUI-first product, not an embeddable library — everything under
-  `internal/` (including `internal/shell3`) may change freely.
+- shell3 is a Telegram-first hosted agent (bot + Mini App dashboard), not an
+  embeddable library — everything under `internal/` (including `internal/shell3`)
+  may change freely.
 - Tool failures use the typed `toolResult` path in `internal/chat`, classified in
   one place — don't introduce new string-sniffing.
 
@@ -47,8 +48,9 @@ better are more welcome than ones that grow the footprint.
 `AGENTS.md` has the package map. The short version: `cmd/shell3` is the CLI,
 `internal/agentsetup` assembles a `chat.Config` from `shell3.lua`
 (`internal/luacfg`), `internal/chat` runs turns against an OpenAI-compatible
-provider (`internal/adapter/openai`), and `internal/tui` (built on
-`internal/shell3`'s session/runtime core) is the front-end.
+provider (`internal/adapter/openai`), and the front-ends
+(`internal/telegram` for the bot + Mini App dashboard, `internal/cli` for the
+`dev`/`dash` local CLIs) are built on `internal/shell3`'s session/runtime core.
 
 ## Security
 

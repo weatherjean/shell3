@@ -13,7 +13,7 @@ with your whole system — but it means you should treat a shell3 session the wa
 you'd treat running a script someone else wrote.
 
 The single opt-in hook is `shell3.on_tool_call(fn)` — it fires before **every** tool
-the model calls (`bash`, `bash_bg`, `shell_interactive`, `read`, `list_files`,
+the model calls (`bash`, `bash_bg`, `read`, `list_files`,
 `edit_file`, and custom tools), and is off until you call it. Your handler decides
 per tool by switching on `t.name`. See the next section for the full model. The
 scaffold config that `boot` writes ships its example gate **commented out**, so a
@@ -21,12 +21,8 @@ fresh config gates **nothing**; that example, once enabled, covers only the bash
 family, leaving `read`/`list_files`/`edit_file` ungated — a config choice you can
 change (e.g. to refuse reading a secrets file), not a hardcoded exemption.
 
-`t.command` is the bash command for the three bash tools and **nil** for everything
-else. `shell_interactive` (the TUI-only tool that hands the model your terminal for a
-PTY-backed command) is gated like the rest, with one caveat: a runner-swap
-(`{argv=...}`) verdict has no interactive-PTY form, so it **fails closed** —
-`shell_interactive` is blocked under a runner-swap policy (set
-`shell_interactive = false` for that agent if you sandbox all bash that way).
+`t.command` is the bash command for the two bash tools (`bash`, `bash_bg`) and
+**nil** for everything else.
 
 A custom command-template tool's command is your trusted author template (not model
 input), so it is never rewritten — but the tool **call** still fires the gate (by its
@@ -46,10 +42,10 @@ runs freely until you register a handler. Handlers are chainable: multiple
 
 Each handler receives a table `t` with:
 
-- `t.name` — the **real** tool name (`"bash"`, `"bash_bg"`, `"shell_interactive"`, `"read"`, `"list_files"`, `"edit_file"`, or a custom tool's name)
-- `t.command` — the bash command string (only for the three bash tools; **nil** otherwise)
+- `t.name` — the **real** tool name (`"bash"`, `"bash_bg"`, `"read"`, `"list_files"`, `"edit_file"`, or a custom tool's name)
+- `t.command` — the bash command string (only for the two bash tools; **nil** otherwise)
 - `t.args` — the raw arguments JSON string (every tool)
-- `t.headless` — `true` when no human asker is attached to the session (in-process subagents, `shell3 run`); an `{ask=...}` verdict would auto-deny there, so branch on it to block with a clearer reason or allow a safe subset. Independent of `disable_safety` (which affects ask resolution, not human presence).
+- `t.headless` — `true` when no human asker is attached to the session (in-process subagents, cron jobs); an `{ask=...}` verdict would auto-deny there, so branch on it to block with a clearer reason or allow a safe subset. Independent of `disable_safety` (which affects ask resolution, not human presence).
 
 A handler returns one of:
 
@@ -57,7 +53,7 @@ A handler returns one of:
 - `{ command = "..." }` — rewrite the bash command text; continue the chain (bash tools only — fails closed on a non-bash tool)
 - `{ argv = { ... } }` — **terminal**: exec this argv exactly (runner swap, e.g. into Docker or SSH; `bash`/`bash_bg` only)
 - `{ block = true, reason = "..." }` — **terminal**: block; `reason` is shown to the model
-- `{ ask = "prompt", reason = "...", ask_timeout = N }` — prompt a human (TUI `y/N`); allowed → run, declined or headless → block with `reason`. `ask_timeout` is optional (seconds, default 300).
+- `{ ask = "prompt", reason = "...", ask_timeout = N }` — prompt a human (inline Allow/Deny buttons in Telegram); allowed → run, declined or headless → block with `reason`. `ask_timeout` is optional (seconds, default 300).
 
 A handler that raises a Lua error **fails closed** (blocks). Only `{block=true}`
 blocks via the block verdict; a returned table that contains none of the recognized
@@ -76,14 +72,14 @@ local ASK  = { re([[(?s)rm\s+-rf]]), re([[(?s)\bgit\s+push]]), re([[(?s)curl\b.*
 
 shell3.on_tool_call(function(t)
   -- Guard required: t.command is nil for non-bash tools, so matching it without
-  -- this check would error (→ fail closed). The `or` covers all three bash tools.
-  if t.name == "bash" or t.name == "bash_bg" or t.name == "shell_interactive" then
+  -- this check would error (→ fail closed). The `or` covers both bash tools.
+  if t.name == "bash" or t.name == "bash_bg" then
     for _, p in ipairs(HARD) do
       if p:match(t.command) then return { block = true, reason = "hard_deny" } end
     end
     for _, p in ipairs(ASK) do
       if p:match(t.command) then
-        -- Headless (subagent / shell3 run): an ask would auto-deny anyway,
+        -- Headless (subagent / cron job): an ask would auto-deny anyway,
         -- so block with a reason the parent agent can act on.
         if t.headless then return { block = true, reason = "needs approval; rerun interactively" } end
         return { ask = "Run?\n" .. t.command, reason = "denied" }
@@ -98,8 +94,8 @@ entire command, a flagged command can't hide behind a benign prefix: `echo hi; r
 -rf /` and `x=$(rm -rf /)` both match `rm\s+-rf`. With `(?s)`, `.` spans newlines
 too — splitting a command across lines can't slip a fragment past a `.*` rule.
 
-**Headless subagents deny on `{ask=}` matches.** The TUI shows a `y/N` prompt.
-In-process subagents (spawned
+**Headless subagents deny on `{ask=}` matches.** The bot shows inline Allow/Deny
+buttons in the chat. In-process subagents (spawned
 via the `task` tool) run headless, so an `{ask=...}` verdict is auto-denied with
 its `reason`. Handlers see this ahead of time as `t.headless` and can return a
 tailored `{block=...}` (or allow a safe subset) instead of an ask that will
@@ -136,8 +132,8 @@ end)
 **Background jobs are out of scope for output redaction.** For `bash_bg` (and
 backgrounded custom tools) the `on_tool_result` handler sees only the "started
 job…" pointer, not the process's real stdout/stderr — that streams through the
-in-process job runtime (the background modal — ctrl+p → background —, job
-events, and the completion notice). If a background command can emit secrets, redact at the source (or
+in-process job runtime (the dashboard's jobs view, job events, and the
+completion notice). If a background command can emit secrets, redact at the source (or
 don't run it in the background).
 
 See [configuration.md](configuration.md#opt-in-command-gate--on_tool_call)

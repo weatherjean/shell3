@@ -168,7 +168,7 @@ func parseBashArgsFull(raw string) (string, time.Duration, error) {
 // falling back to the raw string when the args don't parse. DISPLAY ONLY:
 // the raw fallback makes it unsafe for execution paths (a malformed blob
 // would run as the command) — those use parseBashArgsFull. Exported so the
-// TUI render layer can format bash headers identically.
+// front-end render layer can format bash headers identically.
 func ParseBashArgs(raw string) string {
 	var args struct {
 		Command string `json:"command"`

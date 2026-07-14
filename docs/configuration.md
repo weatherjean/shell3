@@ -126,14 +126,13 @@ shell3.agent({
   model  = "main",
   prompt = [[You are a careful pair-programmer…]],
   tools  = {
-    bash              = true,
-    read              = true,   -- paged text-file reading (see below)
-    bash_bg           = true,   -- background / long-running work
-    shell_interactive = true,   -- only for truly interactive programs
-    edit              = true,   -- the edit_file tool
-    media             = true,   -- inbound/outbound images + audio
-    custom            = { my_tool },          -- Lua-defined tools (below)
-    subagents         = { explorer },         -- delegatable specialists
+    bash      = true,
+    read      = true,   -- paged text-file reading (see below)
+    bash_bg   = true,   -- background / long-running work
+    edit      = true,   -- the edit_file tool
+    media     = true,   -- inbound/outbound images + audio
+    custom    = { my_tool },          -- Lua-defined tools (below)
+    subagents = { explorer },         -- delegatable specialists
   },
   skills = { writing_plans },                 -- skill handles (below)
 })
@@ -272,7 +271,7 @@ user-supplied parameter (never interpolate model text straight into a URL), and
 shape the output with `jq` so you return a clean line, not a wall of JSON.
 
 Optional fields: `background = true` (runs the command as an in-process
-background job, like `bash_bg`: it shows up in the TUI's background modal (ctrl+p → background) and the
+background job, like `bash_bg`: it shows up in the dashboard's jobs view and the
 agent is notified with a completion notice on a later turn) and
 `timeout = N` (seconds; foreground tools only). See [cookbook/lib/tools.lua](cookbook/lib/tools.lua) for a full
 template, including the `web_fetch` and `brave_search` tools the base config
@@ -288,9 +287,9 @@ ships with.
 
 shell3 is **unsafe by default**: bash commands run with no restrictions.
 `on_tool_call` fires before **every** tool the model calls — `bash`, `bash_bg`,
-`shell_interactive`, `read`, `list_files`, `edit_file`, and custom tools — and the
+`read`, `list_files`, `edit_file`, and custom tools — and the
 handler decides per tool by switching on `t.name`. It is off until you register it;
-a fresh config gates nothing. `t.command` carries the bash command for the three
+a fresh config gates nothing. `t.command` carries the bash command for the two
 bash tools and is **nil** for everything else, so a denylist that matches
 `t.command` must first check `t.name` (see the idiom below). Handlers are
 **chainable** — multiple `on_tool_call` calls run in declaration order; the first
@@ -302,10 +301,10 @@ Each handler receives a table `t`:
 
 | Field | Description |
 |-------|-------------|
-| `t.name` | The **real** tool name: `"bash"`, `"bash_bg"`, `"shell_interactive"`, `"read"`, `"list_files"`, `"edit_file"`, or a custom tool's name. |
-| `t.command` | The bash command string — only for the three bash tools; **nil** for every other tool. |
+| `t.name` | The **real** tool name: `"bash"`, `"bash_bg"`, `"read"`, `"list_files"`, `"edit_file"`, or a custom tool's name. |
+| `t.command` | The bash command string — only for the two bash tools; **nil** for every other tool. |
 | `t.args` | Raw arguments JSON string (every tool). Gate a non-bash tool by inspecting this, e.g. a `read`/`edit_file` path. |
-| `t.headless` | `true` when no human asker is attached to the session (in-process subagents, `shell3 run`) — an `{ask=...}` verdict would auto-deny there. Independent of `disable_safety`. See [headless degradation](#deny-prompt-confirmation-and-headless-degradation). |
+| `t.headless` | `true` when no human asker is attached to the session (in-process subagents, cron jobs) — an `{ask=...}` verdict would auto-deny there. Independent of `disable_safety`. See [headless degradation](#deny-prompt-confirmation-and-headless-degradation). |
 
 ### Verdict contract
 
@@ -315,7 +314,7 @@ A handler returns one of:
 |---|---|
 | `nil` | Pass; continue to the next handler (or run). |
 | `{ command = "..." }` | Rewrite the bash command text; continue the chain. **Bash tools only** — on a non-bash tool this fails closed. |
-| `{ argv = { ... } }` | **Terminal**: exec this argv exactly (runner swap). **`bash`/`bash_bg` only** — `shell_interactive` and non-bash tools fail closed. |
+| `{ argv = { ... } }` | **Terminal**: exec this argv exactly (runner swap). **`bash`/`bash_bg` only** — non-bash tools fail closed. |
 | `{ block = true, reason = "..." }` | **Terminal**: block; `reason` is surfaced to the model. Works for any tool. |
 | `{ ask = "prompt", reason = "...", ask_timeout = N }` | Prompt a human; allowed → run, declined/headless → block with `reason`. Works for any tool. `ask_timeout` optional (seconds, default 300). |
 
@@ -343,13 +342,13 @@ local ENV  = re([[\.env]]) -- hoisted like the lists above: compiled once at loa
 shell3.on_tool_call(function(t)
   -- Gate the bash family. This guard is REQUIRED: t.command is nil for non-bash
   -- tools, so matching it without the check would error (→ fail closed).
-  if t.name == "bash" or t.name == "bash_bg" or t.name == "shell_interactive" then
+  if t.name == "bash" or t.name == "bash_bg" then
     for _, p in ipairs(HARD) do
       if p:match(t.command) then return { block = true, reason = "hard_deny" } end
     end
     for _, p in ipairs(ASK) do
       if p:match(t.command) then
-        -- Headless (subagent / shell3 run): an ask would auto-deny anyway,
+        -- Headless (subagent / cron job): an ask would auto-deny anyway,
         -- so block with a reason the parent agent can act on.
         if t.headless then return { block = true, reason = "needs approval; rerun interactively" } end
         return { ask = "Run?\n" .. t.command, reason = "denied" }
@@ -376,8 +375,8 @@ for a non-bash tool fails closed.
 
 ### Deny-prompt confirmation and headless degradation
 
-When a handler returns `{ask=...}`, a human must confirm. The interactive **TUI
-shows an inline `y/N` prompt**. **Headless subagents** have no attached human, so an `{ask=...}` verdict
+When a handler returns `{ask=...}`, a human must confirm. **The bot shows inline
+Allow/Deny buttons in the chat**. **Headless subagents and cron jobs** have no attached human, so an `{ask=...}` verdict
 is auto-denied with its `reason`; the block reason flows back to the parent agent
 in the in-process completion notice so the parent — where a human *is* attached — can decide
 how to proceed. Handlers see this ahead of time as `t.headless` and can return a
@@ -398,18 +397,15 @@ re-quotes it:
 
 ```lua
 shell3.on_tool_call(function(t)
-  -- Wrap every bash command in the container. shell_interactive has no argv form,
-  -- so listing it here blocks it (fail closed) rather than running it un-sandboxed.
-  if t.name == "bash" or t.name == "bash_bg" or t.name == "shell_interactive" then
+  -- Wrap every bash command in the container.
+  if t.name == "bash" or t.name == "bash_bg" then
     return { argv = {"docker", "exec", "mycontainer", "bash", "-c", t.command} }
   end
 end)
 ```
 
 A malformed argv table (empty, or any non-string element) fails **closed**: the
-command is blocked, never run unwrapped. A runner swap also has no interactive-PTY
-form, so a `shell_interactive` call under an `{argv=...}` policy fails **closed**
-(blocked) — or set `shell_interactive = false` for that agent. A custom
+command is blocked, never run unwrapped. A custom
 command-template tool's command is your trusted template (not model input), so it is
 never rewritten — but the tool **call** still fires `on_tool_call` (by its name, with
 `t.command` nil), so you can `block`/`ask` it. The full recipe set is in
@@ -456,62 +452,36 @@ shell3.stub_tools({
 Stubs are config-global (every agent sees them). Later keys override earlier
 ones, and a stub whose name collides with a real tool is ignored.
 
-## Theming — `shell3.theme`
+## Telegram host — `shell3.telegram`
 
-The TUI **senses the terminal background** and adapts: it never paints its own
-canvas, so backgrounds pass through, and it switches between a dark and a light
-foreground palette so text stays legible on either. Terminals that don't answer
-the background query keep the dark palette.
-
-Override individual colors with `shell3.theme` — a table of colour tokens to
-`#RRGGBB` hex values. Overrides sit on top of the sensed palette:
+shell3 runs as a Telegram bot; `shell3.telegram{}` configures it. The bot
+answers exactly one `chat_id` and runs one agent (which may spawn subagents).
 
 ```lua
-shell3.theme({
-  primary = "#EAB308", -- brand: prompt, edit_file, headings, palette input
-  green   = "#78AA78", -- bash / safety-off "!" badge
-  red     = "#DC2626", -- errors / bash_bg / ctrl-c
-  cyan    = "#5BB6C9", -- palette commands, bg count
-  pink    = "#D98FB8", -- other tools
-  reason  = "#87A58C", -- reasoning / help headers
-  fg      = "#E5E7EB", -- body text
-  fg_dim  = "#9CA3AF", -- secondary text
-  muted   = "#6B7280", -- chrome: chevrons, hints, reminders
+shell3.telegram({
+  token   = shell3.env.secret("TELEGRAM_BOT_TOKEN"),  -- from @BotFather, in .env
+  chat_id = "8701499393",                             -- the one chat the bot answers
+  agent   = "code",                                   -- "" → first declared agent
+  workdir = "/home/me/.shell3/workdir",               -- "" → the runtime root
+  dashboard = { enabled = true, addr = "127.0.0.1:8765", url = "https://…" },
+  cron = {
+    { name = "daily", schedule = "@daily", agent = "explorer", notify = true,
+      prompt = "Summarize anything noteworthy from the last day." },
+  },
 })
 ```
 
-Every token is optional — declare only the ones you want to change. An unknown
-token or a value that isn't `#RRGGBB` is skipped with a startup warning rather
-than failing the load. Overrides are config-global and apply to both the light
-and dark palette.
-
-### Custom welcome card — `shell3.welcome`
-
-The centered splash shown before your first message can be replaced entirely.
-`shell3.welcome` takes a string that is rendered **verbatim** (centered in the
-viewport), so it may embed ANSI escapes for terminal colors — use `\27` for the
-escape byte:
-
-```lua
-shell3.welcome(
-  "\27[38;5;208m✦ my agent ✦\27[0m\n" ..
-  "ready when you are"
-)
-```
-
-The content is passed through untouched, so anything your terminal understands
-works — 16-color, 256-color, or truecolor escapes, box-drawing, ASCII art. It is
-config-global; a later `shell3.welcome` call replaces an earlier one, and an
-empty string keeps the built-in card.
-
-Keep the card within the viewport: it's centered as-is, so art taller or wider
-than the window can't be centered and will clip or wrap. Size it for a small
-terminal.
-
-The string is built at config-load time by the full Lua VM, so it can come from a
-command — `shell3.welcome(io.popen("cat art.ansi"):read("*a"))`, or a `pwd` /
-`git branch` card. See [the cookbook](cookbook/welcome.md) for ready-to-copy
-recipes.
+- **`token` / `chat_id`** are required. Keep the token in `.env` and reference it
+  with `shell3.env.secret`. Only messages from `chat_id` are handled.
+- **`dashboard`** serves the Mini App over HTTP on `addr`. `url` is the public
+  `https` address you expose it at (via a tunnel / `tailscale serve`) so the
+  Telegram menu button can open the Mini App; leave it empty to reach the
+  dashboard only locally (or with `shell3 dash`).
+- **`cron`** is a flat list of jobs. Each fires a subagent (`agent` must name a
+  declared subagent) on `schedule` (a cron expression or `@daily`/`@hourly`/…).
+  `notify = true` wakes the chat with the result; `notify = false` delivers it
+  quietly for the agent's next turn. Arm a changed cron list with `/reload`; run
+  a job on demand with `/run <name>`.
 
 ## Skills
 

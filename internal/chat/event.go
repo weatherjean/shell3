@@ -95,7 +95,7 @@ func (k EventKind) String() string {
 }
 
 // Event is a single observable occurrence during a chat session. Consumers
-// (TUI, JSONL sink, embedders) receive each Event via the SessionOpts.Sink
+// (front-ends, JSONL sink) receive each Event via the SessionOpts.Sink
 // callback. Most fields are optional and only populated for certain Kinds; see
 // the EventKind constants for which fields each kind sets.
 type Event struct {
@@ -199,7 +199,7 @@ func emitUserMessage(s *Session, text string) {
 }
 
 // emitError emits the turn's terminal error event. err must be non-nil: Text
-// carries its message for display, Err carries the value itself so embedders
+// carries its message for display, Err carries the value itself so front-ends
 // can errors.Is/errors.As it.
 func emitError(s *Session, err error) {
 	emit(s, Event{Kind: EventError, Time: time.Now(), SessionID: s.id, Text: err.Error(), Err: err})
@@ -220,7 +220,7 @@ func emitAssistantReasoning(s *Session, text string) {
 
 func emitSystemReminder(s *Session, text string) {
 	// Record before emitting so the dashboard's History() can interleave the
-	// reminder as a system-role entry (the live TUI consumes the event instead).
+	// reminder as a system-role entry (a live front-end consumes the event instead).
 	s.recordReminder(text)
 	emit(s, Event{Kind: EventSystemReminder, Time: time.Now(), SessionID: s.id, Text: text})
 }

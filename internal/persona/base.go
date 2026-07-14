@@ -18,4 +18,4 @@ func BasePersona(systemPrompt string, tools []ToolDef) Persona {
 
 const baseSystemPrompt = `You are an LLM running inside the shell3 harness.
 
-Respond directly to user queries. Tools are only available if the embedding application has explicitly enabled them — if none are listed in your tool schema, do not invent tool calls.`
+Respond directly to user queries. Tools are only available if your config has explicitly enabled them — if none are listed in your tool schema, do not invent tool calls.`

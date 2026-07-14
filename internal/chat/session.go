@@ -13,7 +13,7 @@ import (
 )
 
 // Session holds the in-progress conversation history and the event stream.
-// Exported so embedders and the TUI harness can subscribe to events and read
+// Exported so front-ends and test harnesses can subscribe to events and read
 // the underlying store session id without going through internal helpers.
 type Session struct {
 	// msgMu guards the cross-goroutine append-vs-read on messages: the turn
@@ -46,7 +46,7 @@ type Session struct {
 	// (same as sess.id) so no extra lock is required.
 	persistedLen int
 
-	// forceCompact, when set via QueueCompact (e.g. the TUI :compact command),
+	// forceCompact, when set via QueueCompact (e.g. a front-end compact request),
 	// makes the next turn compact the conversation before the model acts,
 	// regardless of the token threshold. maybeCompact consumes (swaps off) the
 	// flag. Atomic because it is set from another goroutine (the front-end).
@@ -168,7 +168,7 @@ func reminderBlock(header string, items []string) string {
 // SessionOpts configures a new Session. All fields are optional.
 //
 // StoreID is the runs session id returned by runs.Store.NewSession;
-// embedders that don't use a store can leave it empty.
+// front-ends that don't use a store can leave it empty.
 // ContextWindowFor resolves a model id to its context window in tokens;
 // the reminder tracker uses it to emit context-usage reminders.
 // Sink receives every event synchronously, inline on the turn goroutine. When
@@ -324,8 +324,8 @@ func (s *Session) HistorySnapshot() ([]llm.Message, []ReminderRecord) {
 }
 
 // StandingReminders returns a copy of the host standing reminders (Environment,
-// Delegation) for display in the prompt-inspection views (the TUI /prompt
-// command and the dashboard Status → Prompt). Safe to call concurrently.
+// Delegation) for display in the prompt-inspection view (the dashboard
+// Status → Prompt). Safe to call concurrently.
 func (s *Session) StandingReminders() []string {
 	s.msgMu.RLock()
 	defer s.msgMu.RUnlock()
