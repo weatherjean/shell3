@@ -45,6 +45,14 @@ func NewServer(rt *shell3.Runtime, sess *shell3.Session, token string, chatID in
 	return s
 }
 
+// SetDevNoAuth disables initData verification: every request is accepted as the
+// configured chat. FOR LOCAL DEV ONLY (shell3 dash) — it exposes history, files,
+// and runs with no authentication, so the caller MUST bind the server to
+// localhost. Never enable it on a publicly reachable address.
+func (s *Server) SetDevNoAuth() {
+	s.validate = func(string) (int64, bool) { return s.chatID, true }
+}
+
 // SetUsage attaches a usage store so /api/status reports the last turn's tokens.
 func (s *Server) SetUsage(u *UsageStore) { s.usage = u }
 
