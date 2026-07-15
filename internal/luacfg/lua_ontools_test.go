@@ -229,7 +229,7 @@ func TestRunToolCallHeadlessField(t *testing.T) {
 	ctx := context.Background()
 	for _, tool := range []struct{ name, command string }{
 		{"bash", "echo hi"},
-		{"read", ""}, // non-bash: t.command is nil, t.headless must still be set
+		{"edit_file", ""}, // non-bash: t.command is nil, t.headless must still be set
 	} {
 		v := c.RunToolCall(ctx, tool.name, tool.command, "{}", true)
 		if v.Action != ActionBlock || v.Reason != "headless" {

@@ -57,7 +57,7 @@ func newDashCommand() *cobra.Command {
 			}
 			// Reattach to the latest session so the dashboard shows the bot's real
 			// history + runs (subagent child sessions included).
-			sess, err := rt.Session(shell3.SessionOpts{Name: "dash", Agent: tg.Agent, WorkDir: tg.WorkDir, ResumeLatest: true})
+			sess, err := rt.Session(shell3.SessionOpts{Name: "dash", WorkDir: tg.WorkDir, ResumeLatest: true})
 			if err != nil {
 				return err
 			}

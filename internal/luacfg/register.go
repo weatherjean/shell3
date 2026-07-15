@@ -27,9 +27,9 @@ func (c *LoadedConfig) nameTaken(name string) bool {
 
 // uniqueName returns base when it is free, otherwise the lowest base<N>
 // (N counting from 2) that no agent or subagent already claims. This makes a
-// duplicate agent/subagent declaration auto-suffix ("code", "code2", "code3")
+// duplicate subagent declaration auto-suffix ("explorer", "explorer2", …)
 // instead of failing the whole config load — the first declaration keeps its
-// bare name, so existing --agent references to it stay valid.
+// bare name, so existing references to it stay valid.
 func (c *LoadedConfig) uniqueName(base string) string {
 	if !c.nameTaken(base) {
 		return base
@@ -59,7 +59,6 @@ func registerShell3(c *LoadedConfig) {
 	tbl := L.NewTable()
 	L.SetGlobal("shell3", tbl)
 	L.SetField(tbl, "model", L.NewFunction(c.luaModel))
-	L.SetField(tbl, "skill", L.NewFunction(c.luaSkill))
 	L.SetField(tbl, "tool", L.NewFunction(c.luaTool))
 	L.SetField(tbl, "stub_tools", L.NewFunction(c.luaStubTools))
 	L.SetField(tbl, "agent", L.NewFunction(c.luaAgent))
@@ -71,9 +70,9 @@ func registerShell3(c *LoadedConfig) {
 	L.SetField(tbl, "regex", L.NewFunction(c.luaRegex))
 	L.SetField(tbl, "on_tool_call", L.NewFunction(c.luaOnToolCall))
 	L.SetField(tbl, "on_tool_result", L.NewFunction(c.luaOnToolResult))
-	L.SetField(tbl, "subagents", L.NewFunction(c.luaSubagents))
 	L.SetField(tbl, "background", L.NewFunction(c.luaBackground))
 	L.SetField(tbl, "telegram", L.NewFunction(c.luaTelegram))
+	L.SetField(tbl, "cron", L.NewFunction(c.luaCron))
 }
 
 // checkPosIntField reads an optional positive-integer field from t. Absent →
@@ -88,17 +87,6 @@ func checkPosIntField(L *lua.LState, t *lua.LTable, ctx, key string) (int, bool)
 		L.RaiseError("%s.%s must be a positive integer", ctx, key)
 	}
 	return int(n), true
-}
-
-// luaSubagents sets config-global subagent limits: shell3.subagents{ max_depth = N }.
-// max_depth caps how deep the subagent nesting may go before spawn attempts are
-// blocked. The default (3) is applied at the read site
-// (runtime.subagentMaxDepth), not here; 0 is never stored.
-func (c *LoadedConfig) luaSubagents(L *lua.LState) int {
-	if n, ok := checkPosIntField(L, L.CheckTable(1), "subagents", "max_depth"); ok {
-		c.SubagentMaxDepth = n
-	}
-	return 0
 }
 
 // luaBackground sets config-global background job limits: shell3.background{ max_concurrent = N }.
@@ -170,19 +158,6 @@ func (c *LoadedConfig) luaModel(L *lua.LState) int {
 	return 0
 }
 
-var skillKeys = map[string]bool{"name": true, "description": true, "path": true}
-
-func (c *LoadedConfig) luaSkill(L *lua.LState) int {
-	opts := L.CheckTable(1)
-	mustKeys(L, opts, "skill", skillKeys)
-	s := Skill{Name: optStr(opts, "name"), Description: optStr(opts, "description"), Path: optStr(opts, "path")}
-	if s.Name == "" || s.Description == "" || s.Path == "" {
-		L.RaiseError("skill: name, description, and path are all required")
-	}
-	c.Skills = append(c.Skills, s)
-	return pushHandle(L, "__skill", s.Name)
-}
-
 // pushHandle pushes a handle table carrying sentinel → name (the reference
 // form agents use in skills={}/tools.custom={}/tools.subagents={}) and returns
 // the Lua result count.
@@ -205,11 +180,9 @@ var agentKeys = map[string]bool{
 
 var toolGateKeys = map[string]bool{
 	"bash": true, "bash_bg": true, "edit": true,
-	"custom": true, "skill": true,
-	"media":      true,
-	"read":       true,
-	"list_files": true,
-	"subagents":  true,
+	"custom":    true,
+	"media":     true,
+	"subagents": true,
 }
 
 func (c *LoadedConfig) luaTool(L *lua.LState) int {
@@ -311,12 +284,10 @@ func handleNamesStrict(L *lua.LState, list *lua.LTable, sentinel, ctx, want stri
 // parseGates reads the boolean tool gates from a tools table.
 func parseGates(tt *lua.LTable) ToolGates {
 	return ToolGates{
-		Bash:      optBool(tt, "bash"),
-		BashBg:    optBool(tt, "bash_bg"),
-		Edit:      optBool(tt, "edit"),
-		Media:     optBool(tt, "media"),
-		Read:      optBool(tt, "read"),
-		ListFiles: optBool(tt, "list_files"),
+		Bash:   optBool(tt, "bash"),
+		BashBg: optBool(tt, "bash_bg"),
+		Edit:   optBool(tt, "edit"),
+		Media:  optBool(tt, "media"),
 	}
 }
 
@@ -325,10 +296,9 @@ func parseGates(tt *lua.LTable) ToolGates {
 // two callers give it opposite legality (agents resolve it, subagents forbid
 // it), so interpretation stays with them.
 type toolsBlock struct {
-	gates          ToolGates
-	custom         []string
-	skillsDisabled bool
-	subagentsRaw   lua.LValue
+	gates        ToolGates
+	custom       []string
+	subagentsRaw lua.LValue
 }
 
 // parseToolsBlock reads opts.tools for an agent or subagent declaration. ctx
@@ -345,7 +315,6 @@ func parseToolsBlock(L *lua.LState, opts *lua.LTable, ctx string) (toolsBlock, b
 	if cu, ok := tt.RawGetString("custom").(*lua.LTable); ok {
 		tb.custom = handleNamesStrict(L, cu, "__tool", ctx+".tools.custom", "tool")
 	}
-	tb.skillsDisabled = tt.RawGetString("skill") == lua.LFalse
 	tb.subagentsRaw = tt.RawGetString("subagents")
 	return tb, true
 }
@@ -359,18 +328,32 @@ func requireOnePromptSource(L *lua.LState, kind, name, prompt, promptCmd string)
 	}
 }
 
-// agentCommon is the declaration surface agents and subagents share: skills,
-// the tools block, and the host-reminder toggles. subagentsRaw carries the raw
-// tools.subagents value (LNil when absent) for the caller to interpret —
-// agents resolve it, subagents forbid it.
+// agentCommon is the declaration surface agents and subagents share: skills
+// dirs, the tools block, and the host-reminder toggles. subagentsRaw carries
+// the raw tools.subagents value (LNil when absent) for the caller to
+// interpret — agents resolve it, subagents forbid it.
 type agentCommon struct {
-	skills         []string
-	gates          ToolGates
-	custom         []string
-	skillsDisabled bool
-	subagentsRaw   lua.LValue
-	environment    bool
-	delegation     bool
+	skillDirs    []string
+	gates        ToolGates
+	custom       []string
+	subagentsRaw lua.LValue
+	environment  bool
+	delegation   bool
+}
+
+// skillDirList reads skills={} as a list of directory-path strings, raising on
+// any non-string element — a leftover pre-dir-era handle or a typo'd value
+// must fail loudly, not be dropped (the agent would quietly load skill-less).
+func skillDirList(L *lua.LState, list *lua.LTable, ctx string) []string {
+	var out []string
+	for i := 1; i <= list.Len(); i++ {
+		s, ok := list.RawGetInt(i).(lua.LString)
+		if !ok {
+			L.RaiseError("%s[%d] must be a skills directory path (a string)", ctx, i)
+		}
+		out = append(out, string(s))
+	}
+	return out
 }
 
 // parseAgentCommon validates and extracts the fields agents and subagents
@@ -379,10 +362,10 @@ func (c *LoadedConfig) parseAgentCommon(L *lua.LState, opts *lua.LTable, kind, n
 	requireOnePromptSource(L, kind, name, prompt, promptCmd)
 	ac := agentCommon{subagentsRaw: lua.LNil}
 	if sk, ok := opts.RawGetString("skills").(*lua.LTable); ok {
-		ac.skills = handleNamesStrict(L, sk, "__skill", fmt.Sprintf("%s %q: skills", kind, name), "skill")
+		ac.skillDirs = skillDirList(L, sk, fmt.Sprintf("%s %q: skills", kind, name))
 	}
 	if tb, ok := parseToolsBlock(L, opts, kind); ok {
-		ac.gates, ac.custom, ac.skillsDisabled = tb.gates, tb.custom, tb.skillsDisabled
+		ac.gates, ac.custom = tb.gates, tb.custom
 		ac.subagentsRaw = tb.subagentsRaw
 	}
 	ac.environment = optBool(opts, "environment")
@@ -403,11 +386,14 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 	if a.Name == "" {
 		L.RaiseError("agent: name is required")
 	}
-	// Duplicate names auto-suffix rather than failing the load (the first
-	// declaration keeps its bare name; later collisions become name2, name3…).
+	if len(c.agents) > 0 {
+		L.RaiseError("agent %q: only one shell3.agent may be declared — declare specialists with shell3.subagent", a.Name)
+	}
+	// A name collision with an already-declared subagent auto-suffixes so the
+	// shared agent/subagent namespace stays unambiguous.
 	a.Name = c.uniqueName(a.Name)
 	ac := c.parseAgentCommon(L, opts, "agent", a.Name, a.Prompt, a.PromptCmd)
-	a.Skills, a.Gates, a.CustomTools, a.SkillsDisabled = ac.skills, ac.gates, ac.custom, ac.skillsDisabled
+	a.SkillDirs, a.Gates, a.CustomTools = ac.skillDirs, ac.gates, ac.custom
 	a.Environment, a.Delegation = ac.environment, ac.delegation
 	if ac.subagentsRaw != lua.LNil {
 		sg, ok := ac.subagentsRaw.(*lua.LTable)
@@ -447,7 +433,7 @@ func (c *LoadedConfig) luaSubagent(L *lua.LState) int {
 	if _, isTable := ac.subagentsRaw.(*lua.LTable); isTable {
 		L.RaiseError("subagent %q: a subagent may not declare its own subagents (depth limit 1)", s.Name)
 	}
-	s.Skills, s.Gates, s.CustomTools, s.SkillsDisabled = ac.skills, ac.gates, ac.custom, ac.skillsDisabled
+	s.SkillDirs, s.Gates, s.CustomTools = ac.skillDirs, ac.gates, ac.custom
 	s.Environment, s.Delegation = ac.environment, ac.delegation
 	c.subagents = append(c.subagents, s)
 	return pushHandle(L, "__subagent", s.Name)

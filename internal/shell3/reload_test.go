@@ -38,24 +38,21 @@ func TestReloadPicksUpConfigChange(t *testing.T) {
 	}
 
 	writeReloadCfg(t, path, reloadBaseCfg+`
-shell3.agent({ name="second", model="main", prompt="p2", tools={} })
+shell3.subagent({ name="second", description="d", model="main", prompt="p2", tools={} })
 shell3.telegram({ token="tk", chat_id="42" })
 `)
 	res, err := rt.Reload()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Agents != 2 {
-		t.Fatalf("expected 2 agents after reload, got %d (notes: %v)", res.Agents, res.Notes)
+	if res.Agents != 1 {
+		t.Fatalf("expected 1 agent after reload, got %d (notes: %v)", res.Agents, res.Notes)
 	}
 	if rt.Telegram().ChatID != "42" {
 		t.Fatalf("telegram mirror not refreshed: %+v", rt.Telegram())
 	}
 	if sess.Snapshot().Agent == "" {
 		t.Fatal("live session unusable after reload")
-	}
-	if err := sess.SwitchAgent("second"); err != nil {
-		t.Fatalf("new agent not live on existing session: %v", err)
 	}
 }
 

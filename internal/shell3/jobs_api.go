@@ -33,7 +33,6 @@ type JobInfo struct {
 	PID       int
 	StartedAt time.Time
 	Kind      JobKind
-	Depth     int
 	ParentID  string
 	Done      bool      // true once the job has finished
 	Exit      *int      // command jobs: exit code (nil while running or for subagents)

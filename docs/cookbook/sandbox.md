@@ -55,8 +55,8 @@ end)
 
 These recipes sandbox the `bash` and `bash_bg` tools —
 including inside subagents (in-process background jobs spawned via the `task`
-tool), whose bash calls fire the same gate. `on_tool_call` also fires for `read`,
-`list_files`, `edit_file`, and custom tools — the `t.name` guard keeps your bash
+tool), whose bash calls fire the same gate. `on_tool_call` also fires for
+`edit_file`, `read_media`, and custom tools — the `t.name` guard keeps your bash
 sandboxing from touching them, and you can gate those separately by name + args (see
 [configuration.md](../configuration.md#opt-in-command-gate--on_tool_call)). A custom
 command-template tool's command is your trusted author template (not model input), so

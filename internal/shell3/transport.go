@@ -42,6 +42,13 @@ func (s *Session) injectNotification(rt *Runtime, n notify.Notification) {
 const agentDoneResultCap = 2000
 
 func renderNotification(n notify.Notification) string {
+	// Defense in depth: these fields carry untrusted text (command output,
+	// subagent summaries, error strings). chat.reminderBlock neutralizes again
+	// at injection time, but defang here too so no future caller of the
+	// rendered string can be tricked into emitting a forged envelope.
+	n.Preview = strutil.NeutralizeReminderTags(n.Preview)
+	n.Cmd = strutil.NeutralizeReminderTags(n.Cmd)
+	n.Status = strutil.NeutralizeReminderTags(n.Status)
 	switch n.Kind {
 	case notify.KindBgDone:
 		exit := "?"
@@ -49,11 +56,19 @@ func renderNotification(n notify.Notification) string {
 			exit = fmt.Sprintf("%d", *n.Exit)
 		}
 		msg := fmt.Sprintf("background job %s exited (code %s).", n.ID, exit)
+		if n.Status != "" {
+			// e.g. "started by subagent sub1" on the degrade path, where an
+			// orphaned job's notice is delivered to the root session instead.
+			msg += fmt.Sprintf(" (%s)", n.Status)
+		}
 		if n.Log != "" {
 			msg += fmt.Sprintf(" Output log: %s.", n.Log)
 		}
 		if n.Cmd != "" {
 			msg += fmt.Sprintf(" cmd: %s", n.Cmd)
+		}
+		if n.Preview != "" {
+			msg += fmt.Sprintf(" Output tail: %s", n.Preview)
 		}
 		return msg
 	case notify.KindAgentDone:
@@ -81,6 +96,27 @@ func renderNotification(n notify.Notification) string {
 			msg += " That result is the subagent's own summary — relay it to the user now (they have NOT seen it yet): summarize or present it in your reply."
 		} else {
 			msg += fmt.Sprintf(" It produced no final summary text; call `task_status %s` to read its output, then relay it to the user.", n.ID)
+		}
+		return msg
+	case notify.KindAgentUpdate:
+		// A follow-up from a subagent that already reported done: one of its
+		// background jobs finished afterwards, the child session ran a follow-up
+		// turn over the result, and Preview carries that turn's summary. Same
+		// relay contract and cap as agent_done: the human has NOT seen it.
+		status := n.Status
+		if status == "" {
+			status = "background job finished"
+		}
+		msg := fmt.Sprintf("subagent %s follow-up (%s).", n.ID, status)
+		if n.Preview != "" {
+			result, cut := strutil.CutRunes(n.Preview, agentDoneResultCap)
+			if cut {
+				result += fmt.Sprintf("… (truncated; call `task_status %s` for the rest)", n.ID)
+			}
+			msg += " Update: " + result
+			msg += " Relay this update to the user now (they have NOT seen it yet)."
+		} else {
+			msg += fmt.Sprintf(" It produced no summary text; call `task_status %s` to read its output, then relay it to the user.", n.ID)
 		}
 		return msg
 	default:

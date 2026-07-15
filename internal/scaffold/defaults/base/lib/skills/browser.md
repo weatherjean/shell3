@@ -1,3 +1,8 @@
+---
+name: browser
+description: Drive a real, visible Chrome to open pages, read/extract content, fill forms, click, screenshot, or print to PDF. Cross-platform via puppeteer-core over bash. Use for JS-heavy or login-gated pages that web_fetch cannot handle.
+---
+
 You can drive a real, headed Chrome window (you and the user can both watch it).
 It is a small Node helper you call with `bash`, so every action is one bounded
 command that can never hang the conversation.

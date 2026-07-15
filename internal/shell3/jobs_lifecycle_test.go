@@ -21,27 +21,6 @@ func subagentCfg(client chat.LLMClient) func() chat.Config {
 	}
 }
 
-// TestStartSubagent_DepthLimit pins the containment guard: a session already
-// at the configured max depth may not spawn deeper.
-func TestStartSubagent_DepthLimit(t *testing.T) {
-	rt := newTestRuntime(t, subagentCfg(fakellm.New()))
-	rt.subagentMaxDepthVal = 2
-
-	parent, err := rt.Session(SessionOpts{Depth: 2})
-	if err != nil {
-		t.Fatal(err)
-	}
-	tc := parent.turnConfig()
-	if _, err := tc.StartSubagent("explorer", "p", "d"); err == nil ||
-		!strings.Contains(err.Error(), "max subagent depth 2") {
-		t.Fatalf("spawn at max depth: want depth-limit error, got %v", err)
-	}
-	// No job may have been created by the refused spawn.
-	if jobs := rt.jobs.list(); len(jobs) != 0 {
-		t.Fatalf("refused spawn still created a job: %+v", jobs)
-	}
-}
-
 // TestStartSubagent_ConcurrencyCap pins the subagent slot reservation: with
 // max_concurrent=1 and one subagent running, a second spawn is refused.
 func TestStartSubagent_ConcurrencyCap(t *testing.T) {
@@ -53,13 +32,13 @@ func TestStartSubagent_ConcurrencyCap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := rt.jobs.startSubagent(parent, "explorer", "task", "desc", 1, subagentOpts{})
+	id, err := rt.jobs.startSubagent(parent, "explorer", "task", "desc", subagentOpts{})
 	if err != nil {
 		t.Fatalf("first startSubagent: %v", err)
 	}
 	<-block.Started // the child turn is verifiably in flight
 
-	if _, err := rt.jobs.startSubagent(parent, "explorer", "task2", "desc2", 1, subagentOpts{}); err == nil ||
+	if _, err := rt.jobs.startSubagent(parent, "explorer", "task2", "desc2", subagentOpts{}); err == nil ||
 		!strings.Contains(err.Error(), "cap 1 reached") {
 		t.Fatalf("second spawn at cap: want cap error, got %v", err)
 	}
@@ -76,7 +55,7 @@ func TestSubagentCancelMidRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := rt.jobs.startSubagent(parent, "explorer", "task", "desc", 1, subagentOpts{})
+	id, err := rt.jobs.startSubagent(parent, "explorer", "task", "desc", subagentOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}

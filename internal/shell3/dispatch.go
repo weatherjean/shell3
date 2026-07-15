@@ -2,7 +2,6 @@ package shell3
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/weatherjean/shell3/internal/strutil"
 )
@@ -36,15 +35,11 @@ func (s *Session) Dispatch(agent, prompt string, opts DispatchOpts) (string, err
 	if rt == nil || rt.jobs == nil {
 		return "", errors.New("dispatch: session has no runtime")
 	}
-	depth := s.opts.Depth + 1
-	if maxDepth := rt.subagentMaxDepth(); depth > maxDepth {
-		return "", fmt.Errorf("dispatch: max subagent depth %d reached (this session is at depth %d)", maxDepth, s.opts.Depth)
-	}
 	desc := opts.Description
 	if desc == "" {
 		desc = strutil.Truncate(prompt, 60)
 	}
-	return rt.jobs.startSubagent(s, agent, prompt, desc, depth, subagentOpts{
+	return rt.jobs.startSubagent(s, agent, prompt, desc, subagentOpts{
 		workDir: opts.WorkDir,
 		quiet:   !opts.Notify,
 	})

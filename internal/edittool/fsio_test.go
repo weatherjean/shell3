@@ -1,7 +1,6 @@
-package fsx
+package edittool
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,10 +10,10 @@ import (
 func TestReadWriteRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "a.txt")
-	if err := WriteTextFile(context.Background(), p, "hello\n"); err != nil {
+	if err := writeTextFile(p, "hello\n"); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	got, err := ReadTextFile(context.Background(), p)
+	got, err := readTextFile(p)
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
@@ -24,23 +23,23 @@ func TestReadWriteRoundTrip(t *testing.T) {
 }
 
 func TestReadMissingIsErrNotExist(t *testing.T) {
-	_, err := ReadTextFile(context.Background(), filepath.Join(t.TempDir(), "nope.txt"))
+	_, err := readTextFile(filepath.Join(t.TempDir(), "nope.txt"))
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("want os.ErrNotExist, got %v", err)
 	}
 }
 
 func TestReadDirIsErrIsDir(t *testing.T) {
-	_, err := ReadTextFile(context.Background(), t.TempDir())
-	if !errors.Is(err, ErrIsDir) {
-		t.Fatalf("want ErrIsDir, got %v", err)
+	_, err := readTextFile(t.TempDir())
+	if !errors.Is(err, errIsDir) {
+		t.Fatalf("want errIsDir, got %v", err)
 	}
 }
 
 func TestWriteCreatesParentDirs(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "sub/deep/a.txt")
-	if err := WriteTextFile(context.Background(), p, "x"); err != nil {
+	if err := writeTextFile(p, "x"); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	if _, err := os.Stat(p); err != nil {
@@ -54,7 +53,7 @@ func TestWritePreservesExistingMode(t *testing.T) {
 	if err := os.WriteFile(p, []byte("old"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteTextFile(context.Background(), p, "new"); err != nil {
+	if err := writeTextFile(p, "new"); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	info, _ := os.Stat(p)
@@ -66,7 +65,7 @@ func TestWritePreservesExistingMode(t *testing.T) {
 func TestWriteNewFileDefaultMode(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "new.txt")
-	if err := WriteTextFile(context.Background(), p, "x"); err != nil {
+	if err := writeTextFile(p, "x"); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	info, _ := os.Stat(p)

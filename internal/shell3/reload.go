@@ -3,6 +3,7 @@ package shell3
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/chat"
@@ -39,6 +40,18 @@ type ReloadResult struct {
 // not picked up until restart (new sessions get it). We deliberately do NOT
 // rebuild s.sess — that would drop in-memory conversation history.
 func (rt *Runtime) Reload() (ReloadResult, error) {
+	// 0. Refuse while background work is in flight: a running subagent's turn
+	// would race the config swap, and a lingering child's follow-up turn could
+	// start mid-rebuild. The user /stops (kills the turn + all jobs) or lets
+	// them finish, then reloads. Checked before the config build so the
+	// rejection is instant and side-effect free.
+	if rt.jobs != nil {
+		if ids := rt.jobs.runningJobIDs(); len(ids) > 0 {
+			return ReloadResult{}, fmt.Errorf(
+				"reload: %d background task(s) running (%s) — /stop them or let them finish, then /reload",
+				len(ids), strings.Join(ids, ", "))
+		}
+	}
 	// 1. Build + validate the new parts BEFORE touching anything.
 	homeDir := rt.homeDir
 	if homeDir == "" {
@@ -59,6 +72,16 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 	if rt.closed {
 		newCleanup()
 		return ReloadResult{}, fmt.Errorf("reload: runtime is closed")
+	}
+	// Re-check under rt.mu: a job may have started while the new parts were
+	// building. Discard the built parts and change nothing.
+	if rt.jobs != nil {
+		if ids := rt.jobs.runningJobIDs(); len(ids) > 0 {
+			newCleanup()
+			return ReloadResult{}, fmt.Errorf(
+				"reload: %d background task(s) running (%s) — /stop them or let them finish, then /reload",
+				len(ids), strings.Join(ids, ", "))
+		}
 	}
 
 	// 2. Capture per-session overrides to restore after the swap.
@@ -97,7 +120,6 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 	rt.subagentDesc = newParts.SubagentDescription
 	rt.cleanup = newCleanup
 	rt.store = newParts.Store()
-	rt.subagentMaxDepthVal = newParts.SubagentMaxDepth
 	rt.cron = cronJobs
 	rt.telegram = telegramFromParts(newParts)
 	oldCleanup()

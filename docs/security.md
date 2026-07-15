@@ -13,13 +13,13 @@ with your whole system — but it means you should treat a shell3 session the wa
 you'd treat running a script someone else wrote.
 
 The single opt-in hook is `shell3.on_tool_call(fn)` — it fires before **every** tool
-the model calls (`bash`, `bash_bg`, `read`, `list_files`,
-`edit_file`, and custom tools), and is off until you call it. Your handler decides
-per tool by switching on `t.name`. See the next section for the full model. The
-scaffold config that `boot` writes ships its example gate **commented out**, so a
-fresh config gates **nothing**; that example, once enabled, covers only the bash
-family, leaving `read`/`list_files`/`edit_file` ungated — a config choice you can
-change (e.g. to refuse reading a secrets file), not a hardcoded exemption.
+the model calls (`bash`, `bash_bg`, `edit_file`, `read_media`, and custom
+tools), and is off until you call it. Your handler decides per tool by
+switching on `t.name`. See the next section for the full model. The scaffold
+config that `boot` writes ships its example gate **commented out**, so a fresh
+config gates **nothing**; that example, once enabled, covers only the bash
+family, leaving `edit_file` ungated — a config choice you can change (e.g. to
+refuse editing a secrets file), not a hardcoded exemption.
 
 `t.command` is the bash command for the two bash tools (`bash`, `bash_bg`) and
 **nil** for everything else.
@@ -42,7 +42,7 @@ runs freely until you register a handler. Handlers are chainable: multiple
 
 Each handler receives a table `t` with:
 
-- `t.name` — the **real** tool name (`"bash"`, `"bash_bg"`, `"read"`, `"list_files"`, `"edit_file"`, or a custom tool's name)
+- `t.name` — the **real** tool name (`"bash"`, `"bash_bg"`, `"edit_file"`, `"read_media"`, or a custom tool's name)
 - `t.command` — the bash command string (only for the two bash tools; **nil** otherwise)
 - `t.args` — the raw arguments JSON string (every tool)
 - `t.headless` — `true` when no human asker is attached to the session (in-process subagents, cron jobs); an `{ask=...}` verdict would auto-deny there, so branch on it to block with a clearer reason or allow a safe subset. Independent of `disable_safety` (which affects ask resolution, not human presence).
@@ -138,6 +138,17 @@ don't run it in the background).
 
 See [configuration.md](configuration.md#opt-in-command-gate--on_tool_call)
 for the full reference.
+
+## Reminder-envelope hardening
+
+Completion notices (background jobs, subagent results) are injected into the
+agent's context inside `<system-reminder>` blocks. The untrusted text they
+carry — command output tails, a subagent's final summary — is **neutralized**
+before interpolation: any embedded `<system-reminder` / `</system-reminder`
+sequence is defanged (`&lt;`-escaped, case-insensitively), so output can't
+close the host's envelope and forge system or user text. The notice header
+also tells the model the reported content is task *output* — data, not
+instructions. This is structural, always on, and not configurable.
 
 ## Secrets
 

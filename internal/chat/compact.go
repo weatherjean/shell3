@@ -146,10 +146,10 @@ func compactNow(ctx context.Context, cfg TurnConfig, sess *Session, forced bool)
 		return
 	}
 
-	// Build the file manifest from the head we are about to discard: modified
-	// files (edit_file) and read-only files (read), deduplicated and capped.
-	modified, read := extractFileManifest(head)
-	summaryArgs := CompactSummary{Summary: summary, ImportantFiles: modified, ReadFiles: read}
+	// Build the file manifest from the head we are about to discard: files
+	// modified with edit_file, deduplicated and capped.
+	modified := extractFileManifest(head)
+	summaryArgs := CompactSummary{Summary: summary, ImportantFiles: modified}
 
 	// Rebuild history: continuation summary + verbatim tail. compactInto
 	// rewrites sess.messages in place and rolls the store session.
@@ -283,7 +283,6 @@ func compactionCut(msgs []llm.Message, keepRecent int) int {
 type CompactSummary struct {
 	Summary        string
 	ImportantFiles []string // files modified (edit_file) in the compacted head
-	ReadFiles      []string // files read (read) but not modified in the compacted head
 }
 
 // writeBulletSection appends a "<tag>\n- item\n</tag>" block to b, or nothing
@@ -349,7 +348,6 @@ func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.
 	fmt.Fprintf(&b, "<system-reminder>\nContinuation of session %s. History compacted.\nPrior session messages are in the runs directory (use the `history` skill, or read .shell3_project/runs/%s/messages.jsonl directly).\n</system-reminder>\n\n", prevSessionID, prevSessionID)
 	fmt.Fprintf(&b, "<compact-summary>\n%s\n</compact-summary>", args.Summary)
 	writeBulletSection(&b, "modified-files", args.ImportantFiles)
-	writeBulletSection(&b, "read-files", args.ReadFiles)
 
 	continuationMsg := llm.Message{Role: llm.RoleUser, Content: b.String()}
 
@@ -392,39 +390,26 @@ func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.
 // many files were touched in a long head.
 const manifestCap = 20
 
-// extractFileManifest scans the compacted head's structured tool calls for file
-// paths: edit_file.file_path -> modified, read.path -> read. A file both read
-// and modified appears only under modified. Malformed tool args are skipped.
-// Each list is capped at manifestCap, first-seen order preserved.
-func extractFileManifest(head []llm.Message) (modified, read []string) {
-	modSeen, readSeen := map[string]bool{}, map[string]bool{}
+// extractFileManifest scans the compacted head's structured tool calls for
+// files modified with edit_file (edit_file.file_path). Malformed tool args are
+// skipped. The list is capped at manifestCap, first-seen order preserved.
+func extractFileManifest(head []llm.Message) (modified []string) {
+	modSeen := map[string]bool{}
 	for _, m := range head {
 		if m.Role != llm.RoleAssistant {
 			continue
 		}
 		for _, tc := range m.ToolCalls {
-			switch tc.Name {
-			case "edit_file":
-				if p := jsonPathArg(tc.RawArgs, "file_path"); p != "" && !modSeen[p] {
-					modSeen[p] = true
-					modified = append(modified, p)
-				}
-			case "read":
-				if p := jsonPathArg(tc.RawArgs, "path"); p != "" && !readSeen[p] {
-					readSeen[p] = true
-					read = append(read, p)
-				}
+			if tc.Name != "edit_file" {
+				continue
+			}
+			if p := jsonPathArg(tc.RawArgs, "file_path"); p != "" && !modSeen[p] {
+				modSeen[p] = true
+				modified = append(modified, p)
 			}
 		}
 	}
-	// read-only = read minus modified.
-	filtered := read[:0]
-	for _, p := range read {
-		if !modSeen[p] {
-			filtered = append(filtered, p)
-		}
-	}
-	return capStrings(modified, manifestCap), capStrings(filtered, manifestCap)
+	return capStrings(modified, manifestCap)
 }
 
 // jsonPathArg returns the named string field from a tool call's raw JSON args,

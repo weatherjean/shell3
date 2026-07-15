@@ -2,26 +2,34 @@
 
 Minimal Unix-composable coding agent written in Go.
 
-**Bash-first.** The agent's verbs are `bash`, `read`, `list_files`, and
-`edit_file` (plus `read_media` — attach an image/audio file so a multimodal
-model can perceive it — when `tools = { media = true }`); text files are read
-with the `read` tool (paged, capped at 2000
-lines / 50 KB) and directories with `list_files` (an indented tree; `path`,
-`depth` default 2, `ignore` globs, no auto-filtering, 1000-entry cap) — `read` +
-`list_files` alone make a no-bash read-only agent; everything else is a command
-it runs (history is searched with `rg` over
-`.shell3_project/runs/**/*.jsonl`). A **subagent** is an **in-process background
-job** spawned via the `task` tool (`{subagent_type, prompt, description}`; returns
+**Bash-first.** The agent's verbs are `bash`, `bash_bg`, and `edit_file` (plus
+`read_media` — attach an image/audio file so a multimodal model can perceive
+it — when `tools = { media = true }`). There are NO file-read tools: reading,
+listing, and searching are bash commands (`cat`/`sed -n`, `ls`/`find`, `rg`;
+history is searched with `rg` over `.shell3_project/runs/**/*.jsonl`), and the
+scaffold ships `shell3.stub_tools` entries that redirect reflexive
+`read`/`read_file`/`grep`/`write_file` calls back to bash/edit_file. Exactly
+**one** `shell3.agent{}` may be declared (a second declaration fails the load);
+specialists are subagents. A **subagent** is an **in-process background job**
+spawned via the `task` tool (`{subagent_type, prompt, description}`; returns
 immediately); the runtime (`internal/shell3` jobManager) runs it as a child-session
 goroutine under a concurrency cap (`shell3.background{max_concurrent=N}`, default
 8) and, on completion, **wakes the parent with a capped result summary** injected
 into context — no subprocess, no inbox file, no fsnotify. `bash_bg` is a background
-shell command on the same runtime (the agent is notified on a later turn; there is
-no pid / log path to poll). Delegation is **single-level** — a subagent is not
-given the `task` tool (the `luacfg.Subagent` shape has no subagents field), so
-subagents can't spawn subagents; `shell3.subagents{max_depth=N}` (default 3) is a
-depth guard the in-process `task` path never actually reaches. Active tasks are
-managed with `task_list`, `task_status <id>`, and
+shell command on the same runtime (no pid / log path to poll): a clean exit queues
+its notice for the agent's next turn, a **nonzero exit wakes** an idle agent so
+failures surface proactively. A subagent may run `bash_bg` jobs of its own; a job
+that outlives the subagent's main turn keeps the child session open ("lingering"),
+and each completion **resumes the subagent for a follow-up turn** whose summary
+reaches the root as an `agent_update` notice (always wakes; capped at 5 follow-up
+turns per subagent, after which — or after cancel/failure — the raw job notice is
+delivered to the root instead, so a completion is never lost). `task_cancel <sub>`
+cascades to the jobs the subagent started. `Runtime.Reload` refuses while any
+background task is running (`/stop` first). Delegation is **single-level by
+construction** — a subagent is never given the `task` tool (the `luacfg.Subagent`
+shape has no subagents field), so subagents can't spawn subagents; there is no
+depth field anywhere.
+Active tasks are managed with `task_list`, `task_status <id>`, and
 `task_cancel <id>` (ids like `sub1`/`bg1`); these three plus `task` itself — four
 tools in all — are only advertised when the agent sets `delegation = true` and
 `tools.subagents = { … }` (`bash_bg` is gated separately, by
@@ -31,7 +39,7 @@ subagent's stored transcript); the job-progress stream is `rt.JobEvents()` /
 `Session.JobEvents()`. The shell is
 **unsafe by default**; the single opt-in hook that gates it is
 `shell3.on_tool_call(fn)` — a chainable handler that runs before **every** tool with
-the real `t.name` (`bash`/`bash_bg`/`read`/`list_files`/`edit_file`/custom;
+the real `t.name` (`bash`/`bash_bg`/`edit_file`/`read_media`/custom;
 `t.command` is the bash text for the two bash tools, nil otherwise; `t.headless`
 is true when no human asker is attached — subagents, cron jobs — so an ask
 would auto-deny) and returns a
@@ -43,13 +51,19 @@ buttons; allow→run, decline/headless→block).
 Denylists are written with `shell3.regex(pat):match(s)` (Go RE2; compiled at load;
 use `(?s)` so `.*` spans newlines; match the whole command so chaining can't hide a
 flagged fragment) — guard on `t.name` before matching `t.command` (nil for non-bash).
-`shell3.on_tool_result(fn)` can rewrite a tool's output (e.g. redact secrets). File
-I/O for `read` and `edit_file` goes through `internal/fsx` (plain direct-disk
-functions — no pluggable backend); `bash` always hits disk directly. The
+`shell3.on_tool_result(fn)` can rewrite a tool's output (e.g. redact secrets).
+`edit_file`'s file I/O lives in `internal/edittool` (plain direct-disk
+functions); `bash` always hits disk directly. The
 scaffold's example gate ships **commented out** — a fresh config gates nothing —
-and, once enabled, covers only the bash family, so `read`/`list_files` run
+and, once enabled, covers only the bash family, so `edit_file` runs
 ungated (a config choice, not a hardcoded exemption). Skills
-are `.md` files the agent reads with `cat` (listed by absolute path in the prompt
+are **dir-based**: an agent lists directories (`skills = { "lib/skills" }`,
+resolved against the config dir) and every flat `*.md` inside with YAML
+frontmatter (required `description`, optional `name` defaulting to the
+filename) becomes one skill — no Lua declaration, no `shell3.skill`. A missing
+dir fails the load; an invalid file is skipped with a load warning that
+`shell3 health` (strict config check) turns into a failure. The agent reads a
+skill's body with `cat` (skills are listed by absolute path in the prompt
 under `## Skills` — there is no `skill` tool), and custom tools are declarative
 bash-command templates (`shell3.tool{command=...}`, params injected as lowercase
 env vars plus a `secrets` list; no Lua `handler`) — the
@@ -63,11 +77,17 @@ tools.
 **Telegram-first.** shell3 is a hosted agent you reach over Telegram.
 `shell3 telegram` runs the bot (`internal/telegram`): one authorized chat id,
 inline Allow/Deny buttons for `on_tool_call` asks, media in/out, `/stop`
-`/reload` `/run`, an in-process cron scheduler (`internal/cron`, jobs under
-`shell3.telegram{ cron = {...} }`), and a Mini App **dashboard**
+`/reload` `/run`, an in-process cron scheduler (`internal/cron`, jobs declared
+via top-level `shell3.cron({...})`; each job dispatches a declared subagent),
+and a Mini App **dashboard**
 (`internal/telegram/web`, Telegram initData auth) with status / past runs /
 subagent transcripts / jobs / cron / a read-only file explorer (`.env` and
-`ai-do-not-read.*` are redacted, never read from disk). Config lives at the root
+`ai-do-not-read.*` are redacted, never read from disk). The dashboard gets a
+public https URL via `dashboard = { tunnel = "cloudflared tunnel --url
+http://{addr}" }` — `internal/tunnel` spawns the command detached, scrapes the
+first bare https URL from its output (log: `~/.shell3/tunnel.log`), and the bot
+auto-sets the Mini App menu button (`setChatMenuButton`); an explicit
+`dashboard.url` overrides. Config lives at the root
 `~/.shell3/shell3.lua`; `shell3 boot` scaffolds it (prompting for the model, bot
 token, and chat id) and writes secrets to `~/.shell3/.env`. Two local dev
 front-ends live in `internal/cli`: `shell3 dev "…"` drives the bot's agent from
@@ -85,18 +105,18 @@ Secrets and credentials (provider API keys, tool tokens) live in a plain `.env` 
 ## Project Layout
 
 ```
-cmd/shell3/            cobra command tree: root (prints help) + telegram/dev/dash/boot subcommands
+cmd/shell3/            cobra command tree: root (prints help) + telegram/dev/dash/boot/health subcommands
 internal/agentsetup/   shared config assembly (Build → chat.Config) used by every front-end
-internal/luacfg/       Lua config loader (shell3.lua → models/agents/tools/skills, telegram/cron, on_tool_call/stub_tools) + system-prompt assembly
+internal/luacfg/       Lua config loader (shell3.lua → model/agent/subagents/tools/skills, telegram, cron, on_tool_call/stub_tools) + system-prompt assembly
 internal/bootstrap/    first-run global + project setup
 internal/scaffold/     embedded starter shell3.lua (with shell3.telegram{}) + .env template
 internal/adapter/openai/  OpenAI-compatible LLM adapter
 internal/modelproxy/   run_proxy spawner (starts a model's proxy command on activation)
 internal/paths/        global (~/.shell3/) + local (.shell3_project/) path resolution; no DB fields
 internal/runs/         file-native JSONL store: sessions at .shell3_project/runs/<id>/
-internal/edittool/     edit_file tool implementation (Go port of opencode's str-replace)
-internal/fsx/          direct-disk text file I/O for read/edit_file tools (plain functions, no interface)
+internal/edittool/     edit_file tool implementation (Go port of opencode's str-replace) + its direct-disk file I/O
 internal/notify/       Notification type (bg_done / agent_done) shared by job runtime + chat
+internal/tunnel/       dashboard.tunnel spawner: runs the tunnel command, scrapes its https URL
 internal/telegram/     Telegram bot front-end (bot loop, commands, confirm buttons, media, mdhtml) + web/ (Mini App dashboard)
 internal/cron/         robfig/cron scheduler dispatching subagent jobs on Session.Dispatch
 internal/cli/          non-interactive front-end helpers: shell3 dev + dash renderers, brand banner

@@ -17,56 +17,45 @@ shell3.model("main", { base_url="u", api_key="k", model="x" })
 	return c
 }
 
-// Duplicate agent names auto-suffix instead of failing the load: the first
+// Duplicate subagent names auto-suffix instead of failing the load: the first
 // keeps its bare name, later collisions become name2, name3…
-func TestDuplicateAgentNameAutoSuffixes(t *testing.T) {
+func TestDuplicateSubagentNameAutoSuffixes(t *testing.T) {
 	c := loadLua(t, `
-shell3.agent({ name="code", model="main", prompt="a", tools={} })
-shell3.agent({ name="code", model="main", prompt="b", tools={} })
-shell3.agent({ name="code", model="main", prompt="c", tools={} })
+shell3.subagent({ name="helper", description="d", model="main", prompt="a", tools={} })
+shell3.subagent({ name="helper", description="d", model="main", prompt="b", tools={} })
+shell3.subagent({ name="helper", description="d", model="main", prompt="c", tools={} })
+shell3.agent({ name="code", model="main", prompt="p", tools={} })
 `)
-	got := c.AgentNames()
-	want := []string{"code", "code2", "code3"}
+	got := []string{}
+	for _, s := range c.Subagents() {
+		got = append(got, s.Name)
+	}
+	want := []string{"helper", "helper2", "helper3"}
 	if len(got) != len(want) {
-		t.Fatalf("agent names = %v, want %v", got, want)
+		t.Fatalf("subagent names = %v, want %v", got, want)
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Fatalf("agent names = %v, want %v", got, want)
+			t.Fatalf("subagent names = %v, want %v", got, want)
 		}
 	}
 }
 
-// AgentNames is a thin helper for the test above.
-func (c *LoadedConfig) AgentNames() []string {
-	out := make([]string, 0, len(c.agents))
-	for _, a := range c.Agents() {
-		out = append(out, a.Name)
-	}
-	return out
-}
-
-// Agents and subagents share one namespace, and the handle returned by
-// shell3.subagent carries the deduped name, so a colliding subagent is renamed
-// and tools.subagents={handle} still resolves to the renamed entry.
+// Agents and subagents share one namespace: an agent whose name collides with
+// an already-declared subagent is auto-suffixed away from it.
 func TestAgentSubagentNamespaceShared(t *testing.T) {
 	c := loadLua(t, `
-shell3.agent({ name="dev", model="main", prompt="a", tools={} })
 local helper = shell3.subagent({ name="dev", description="d", model="main", prompt="p", tools={} })
-shell3.agent({ name="lead", model="main", prompt="b", tools={ subagents={helper} } })
+shell3.agent({ name="dev", model="main", prompt="a", tools={ subagents={helper} } })
 `)
-	if _, ok := c.AgentByName("dev"); !ok {
-		t.Fatal(`first agent "dev" should keep its name`)
+	if _, ok := c.SubagentByName("dev"); !ok {
+		t.Fatal(`subagent "dev" should keep its name (declared first)`)
 	}
-	sa, ok := c.SubagentByName("dev2")
-	if !ok {
-		t.Fatalf(`subagent should dedup to "dev2"; subagents=%+v`, c.Subagents())
+	a := c.FirstAgent()
+	if a.Name != "dev2" {
+		t.Fatalf(`agent should dedup to "dev2", got %q`, a.Name)
 	}
-	if _, ok := c.SubagentByName("dev"); ok {
-		t.Fatal(`subagent "dev" should have been renamed away from the agent's name`)
-	}
-	lead, ok := c.AgentByName("lead")
-	if !ok || len(lead.Subagents) != 1 || lead.Subagents[0] != sa.Name {
-		t.Fatalf(`lead.Subagents should reference %q, got %+v`, sa.Name, lead.Subagents)
+	if len(a.Subagents) != 1 || a.Subagents[0] != "dev" {
+		t.Fatalf(`agent.Subagents should reference "dev", got %+v`, a.Subagents)
 	}
 }

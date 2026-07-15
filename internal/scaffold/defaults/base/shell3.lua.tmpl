@@ -4,19 +4,17 @@
 -- the shell3 repo under docs/cookbook/.
 
 local tools  = require("lib.tools")            -- { web_fetch, brave_search }
-local brainstorming = require("lib.skills.brainstorming")
-local history = require("lib.skills.history")
 
--- Tip: a skill's body lives in a file the agent reads with `cat`; declare the
--- skill with its path (resolved relative to this config's directory at load):
---   shell3.skill({ name="history", description="...", path="lib/skills/history.md" })
--- An agent's prompt can likewise come from a file via prompt_cmd:
+-- Skills are plain markdown files: every *.md in the directories an agent
+-- lists under skills={} becomes one skill. A file needs YAML frontmatter with
+-- a description (name is optional — it defaults to the filename):
+--   ---
+--   description: When and how to use this skill.
+--   ---
+--   ...the body the agent reads with `cat`...
+-- Drop a file into lib/skills/ and /reload; `shell3 health` flags files the
+-- loader had to skip. An agent's prompt can likewise come from a file:
 --   shell3.agent({ name="build", model="...", prompt_cmd="cat lib/prompts/build.md", ... })
-local self_evolve = shell3.skill({
-  name = "self-evolve",
-  description = "How to safely change your own shell3.lua config: edit, validate with a throwaway headless run, and the change applies on the next shell3 start. The running session is never affected by a bad edit.",
-  path = "lib/skills/self-evolve.md",
-})
 
 -- ---------------------------------------------------------------------------
 -- Model
@@ -58,9 +56,9 @@ shell3.model("{{.Name | luaesc}}", {
 -- ---------------------------------------------------------------------------
 -- UNSAFE BY DEFAULT: tools run with no restrictions. on_tool_call is the one place
 -- a model-issued action can be inspected, rewritten, routed, or blocked. It fires
--- before EVERY tool with the real t.name (bash, bash_bg, read,
--- list_files, edit_file, custom). t.command is the bash text for the three bash
--- tools and NIL otherwise — so guard on t.name before matching t.command.
+-- before EVERY tool with the real t.name (bash, bash_bg, edit_file, read_media,
+-- custom). t.command is the bash text for the two bash tools and NIL otherwise
+-- — so guard on t.name before matching t.command.
 -- Handlers are chainable (declaration order) and receive t = { name, command, args, headless }.
 -- Return one of:
 --   * nil                         → pass to the next handler / run
@@ -68,9 +66,9 @@ shell3.model("{{.Name | luaesc}}", {
 --   * { argv = {...} }            → exec this argv directly (runner swap; bash/bash_bg
 -- only)
 --   * { block = true, reason="" } → block (reason shown to the model)
---   * { ask = "prompt", reason="" } → ask a human (TUI y/N prompt);
+--   * { ask = "prompt", reason="" } → ask a human (Telegram Allow/Deny buttons);
 --                                   allowed → run, declined/headless → block(reason)
---   t.headless is true when no human is attached (subagents, shell3 run) — an
+--   t.headless is true when no human is attached (subagents, cron jobs) — an
 --   ask would auto-deny there, so branch on it to block with a clearer reason
 --   (or allow a safe subset) instead of asking.
 -- Write denylists with shell3.regex (Go RE2; compiled at load). Use (?s) so .*
@@ -89,49 +87,56 @@ shell3.model("{{.Name | luaesc}}", {
 --     end end
 --   end
 --   -- non-bash tools fire too — gate them by t.name + t.args, e.g.:
---   -- if t.name == "read" and ENV:match(t.args) then return { block = true, reason = "no .env" } end
+--   -- if t.name == "edit_file" and ENV:match(t.args) then return { block = true, reason = "no .env" } end
 -- end)
 
 -- Optional: rewrite a tool's OUTPUT before the model sees it (e.g. redact secrets).
--- Fires for EVERY tool; r.name is the real tool name ("bash", "read", custom, ...).
+-- Fires for EVERY tool; r.name is the real tool name ("bash", "edit_file", custom, ...).
 -- Gate on r.name only if you mean to — for redaction you usually want all output.
 -- shell3.on_tool_result(function(r)
 --   return { output = (r.output:gsub("API_KEY=%S+", "API_KEY=[redacted]")) }
 -- end)
 
 -- ---------------------------------------------------------------------------
--- Stub tools (optional) — redirect hallucinated tool calls to bash/edit_file.
+-- Stub tools — redirect hallucinated tool calls to bash/edit_file.
 -- ---------------------------------------------------------------------------
--- Models trained on other harnesses reflexively call read_file/grep/write_file.
--- Registering them as stubs returns a one-line redirect (a self-correcting nudge)
--- instead of erroring. Config-global: applies to every agent. Later keys override
--- earlier ones; a stub whose name collides with a real tool is ignored.
--- shell3.stub_tools({
---   read_file  = "Use the read tool.",
---   grep       = "Use bash: rg <pattern>.",
---   write_file = "Use edit_file (empty old_string creates/overwrites).",
--- })
+-- shell3 has no file-read tools: reading and listing go through bash. Models
+-- trained on other harnesses reflexively call read/read_file/grep/write_file;
+-- each stub returns its one-line redirect (a self-correcting nudge) instead of
+-- an error. Config-global: applies to every agent. Later keys override earlier
+-- ones; a stub whose name collides with a real tool is ignored.
+shell3.stub_tools({
+  read        = "Use bash: cat <path>, or sed -n 'START,ENDp' <path> for a slice.",
+  read_file   = "Use bash: cat <path>, or sed -n 'START,ENDp' <path> for a slice.",
+  open_file   = "Use bash: cat <path>.",
+  list_files  = "Use bash: ls <dir> or find <dir> -maxdepth 2.",
+  list_dir    = "Use bash: ls <dir>.",
+  grep        = "Use bash: rg <pattern>.",
+  search      = "Use bash: rg <pattern>.",
+  write_file  = "Use edit_file (empty old_string creates/overwrites).",
+  create_file = "Use edit_file (empty old_string creates/overwrites).",
+})
 
 -- ---------------------------------------------------------------------------
--- Subagents (delegatable specialists; not in the Tab/`/agent` rotation)
+-- Subagents (delegatable specialists the agent spawns via the task tool)
 -- ---------------------------------------------------------------------------
 local explorer = shell3.subagent({
   name        = "explorer",
   description = "Read-only investigation of the codebase — locate where/how something is implemented, summarize a subsystem, or gather context across many files. No edits.",
   model       = "{{.Name | luaesc}}",
   prompt = [[
-You are a focused code explorer. Map structure with list_files, read files with
-the read tool, and search contents with bash (rg, fd, git log). Report a concise,
-concrete answer with file:line references. You cannot edit files. Decide and
-proceed; no human is available.
+You are a focused code explorer. Map structure with ls/find, read files with
+cat/sed -n, and search contents with rg (all via bash; git log/show for
+history). Report a concise, concrete answer with file:line references. You
+cannot edit files. Decide and proceed; no human is available.
 ]],
-  -- read + list_files alone make a fully read-only agent (drop bash for a
-  -- report-only agent that can browse and read but never execute a command).
-  tools = { bash = true, read = true, list_files = true },
+  -- A read-only agent is a policy, not a tool set: gate bash in on_tool_call
+  -- to inspection-only commands (rg/cat/sed -n/ls/git log ...).
+  tools = { bash = true },
 })
 
 -- ---------------------------------------------------------------------------
--- Agents
+-- The agent (exactly one shell3.agent; specialists are subagents)
 -- ---------------------------------------------------------------------------
 shell3.agent({
   name  = "code",
@@ -146,9 +151,9 @@ You are an expert coding assistant inside shell3. Work autonomously as a senior 
 
 ## Default workflow
 - Understand the request, inspect relevant files, make minimal changes, format, validate, then summarize.
-- For non-trivial work, design first with the `plan` agent (Tab or `/agent`); implement once the design is agreed.
+- For non-trivial work, agree on the approach in chat (the `brainstorming` skill helps) before editing.
 - Bias for action on mild ambiguity; ask only for user-resolvable blockers: missing credentials, destructive operations, external account access, or unclear handling of existing user work.
-- Read before writing. Prefer targeted edits. Show file paths clearly.
+- Read before writing (bash: cat, sed -n, rg). Prefer targeted edits. Show file paths clearly.
 - Format and validate with the project's standard tools before considering work complete.
 - Commit only when explicitly asked; push only when explicitly asked. Be concise.
 
@@ -158,6 +163,7 @@ You are an expert coding assistant inside shell3. Work autonomously as a senior 
 - Evidence, never fabrication: a "done" / "passing" / "fixed" claim must rest on output you actually saw (you ran the test, read the file). If a step fails or is blocked, say so plainly and try another way — never present plausible-looking output you didn't produce.
 
 ## Tools
+- `bash` is your only reader: cat / sed -n for files, ls / find for directories, rg for search.
 - `edit_file`: prefer over `bash` heredocs; empty `old_string` creates or overwrites the whole file.
 - `bash_bg`: long or parallel background work.
 - `web_fetch`: fetch a URL as plain text + links. `brave_search`: web search.
@@ -168,70 +174,47 @@ You are an expert coding assistant inside shell3. Work autonomously as a senior 
 ]],
   tools = {
     bash              = true,
-    read              = true,
     bash_bg           = true,
     edit              = true,
     media             = true,
     subagents         = { explorer },
     custom            = { tools.web_fetch, tools.brave_search },
   },
-  skills = { self_evolve, history },
+  skills = { "lib/skills" },
 })
 
-shell3.agent({
-  name  = "plan",
-  model = "{{.Name | luaesc}}",
-  prompt = [[
-You are the design partner inside shell3. You do NOT edit files — you investigate, ask, and design. Your job is to turn rough ideas into clear, agreed designs.
-
-## How you work
-- Lead with the `brainstorming` skill: read it and follow it for any non-trivial feature, behavior change, or new component.
-- Explore the relevant code, docs, and recent commits before asking anything — ground every question in what exists.
-- Ask questions one at a time, multiple-choice when you can. Focus on purpose, constraints, and success criteria.
-- Propose 2-3 approaches with trade-offs and a recommendation. Present the design in sections and get approval as you go.
-- End by writing a saved design doc (the one file you may create), then tell the user to switch to the `code` agent (Tab or `/agent`) to implement.
-
-## Read-only — this is design, not implementation
-- You have no `edit_file`, but `bash` can still mutate. Keep every command inspection-only: `rg`, `fd`, `cat`, `sed -n`, `ls`, `git log`/`git show`/`git diff`.
-- Do NOT change state: no `>`/`>>`/`tee`/`sed -i`, no move/delete, no `git commit`/`git checkout`, no installers or builds that write. The lone exception is saving the final design doc.
-- This holds even if asked directly to edit — say so and point the user to the `code` agent.
-
-## Tools
-- `bash`: read-only investigation only (see above).
-- `web_fetch` / `brave_search`: pull in external references when a design needs them.
-
-## Context hygiene
-- Context is managed for you: shell3 auto-compacts the conversation into a summary when it crosses the model's `compact_at` token threshold. You do not prune or compact manually.
-]],
-  tools = {
-    bash    = true,
-    read    = true,
-    bash_bg = false,
-    edit    = false,
-    media   = true,
-    custom  = { tools.web_fetch, tools.brave_search },
-  },
-  skills = { brainstorming, history },
-})
 
 -- ---------------------------------------------------------------------------
 -- Telegram host  (run: shell3 telegram)
 -- ---------------------------------------------------------------------------
 -- shell3 talks to you over Telegram. The bot token lives in .env beside this
 -- file (never committed); chat_id is the single chat the bot answers. The
--- dashboard is a Mini App served over HTTP — reach it from Telegram's menu
--- button once you expose the addr publicly (tailscale serve / a tunnel) and set
--- `url` to that https address.
+-- dashboard is a Mini App served over HTTP; it needs a public https URL for
+-- your phone to reach it, and shell3 wires the chat's menu button to that URL
+-- automatically:
+--   tunnel: a command shell3 spawns at start ({addr} = the dashboard addr);
+--           the https URL it prints is picked up automatically. The default
+--           uses cloudflared — free, no account — but it must be INSTALLED
+--           (https://github.com/cloudflare/cloudflared, e.g.
+--           `brew install cloudflared` on macOS); without it the dashboard
+--           quietly stays local-only (detail in ~/.shell3/tunnel.log).
+--           Swap the command for any tunnel that prints an https URL.
+--   url:    a fixed https address you run yourself (tailscale serve, a stable
+--           tunnel). Overrides tunnel.
 shell3.telegram({
   token   = shell3.env.secret("TELEGRAM_BOT_TOKEN"),  -- TELEGRAM_BOT_TOKEN in .env
   chat_id = "{{.ChatID | luaesc}}",
-  agent   = "code",
-  dashboard = { enabled = true, addr = "127.0.0.1:8765" },
-  -- Scheduled jobs dispatch a subagent on a cron schedule; arm with reload,
-  -- fire on demand with /run <name>:
-  -- cron = {
-  --   { name="daily", schedule="@daily", agent="explorer", notify=true,
-  --     prompt="Summarize anything noteworthy from the last day." },
-  -- },
+  dashboard = {
+    enabled = true,
+    addr    = "127.0.0.1:8765",
+    tunnel  = "cloudflared tunnel --url http://{addr}",
+  },
 })
+
+-- Scheduled jobs dispatch a subagent on a cron schedule; arm with /reload,
+-- fire on demand with /run <name>:
+-- shell3.cron({
+--   { name="daily", schedule="@daily", agent="explorer", notify=true,
+--     prompt="Summarize anything noteworthy from the last day." },
+-- })
 

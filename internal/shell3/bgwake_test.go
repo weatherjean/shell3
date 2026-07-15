@@ -1,0 +1,53 @@
+package shell3
+
+import (
+	"strings"
+	"testing"
+	"time"
+)
+
+// TestFailedCommandJobWakesParent verifies that a bash_bg job exiting nonzero
+// wakes an idle parent session, so a hosted agent narrates the failure
+// proactively instead of the notice sitting queued until the next user message.
+func TestFailedCommandJobWakesParent(t *testing.T) {
+	rt := newTestRuntime(t, fakeCfg("x"))
+	parent, err := rt.Session(SessionOpts{})
+	if err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	if _, err := rt.jobs.startCommand(parent, "false", t.TempDir(), []string{"false"}, nil); err != nil {
+		t.Fatalf("startCommand: %v", err)
+	}
+	waitForWake(t, rt, parent)
+	if !parent.HasQueuedInput() {
+		t.Fatal("expected the failure notice queued in the parent inbox")
+	}
+}
+
+// TestCleanCommandJobStaysQuiet verifies a zero-exit bash_bg completion queues
+// its notice without emitting a Wake.
+func TestCleanCommandJobStaysQuiet(t *testing.T) {
+	rt := newTestRuntime(t, fakeCfg("x"))
+	parent, err := rt.Session(SessionOpts{})
+	if err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	if _, err := rt.jobs.startCommand(parent, "true", t.TempDir(), []string{"true"}, nil); err != nil {
+		t.Fatalf("startCommand: %v", err)
+	}
+	rt.jobs.wait() // job goroutine done → notice injected (or not)
+	select {
+	case ev := <-rt.Events():
+		if ev.Kind == Wake && ev.Session == parent.ID() {
+			t.Fatal("clean exit must not wake the parent")
+		}
+	case <-time.After(200 * time.Millisecond):
+	}
+	if !parent.HasQueuedInput() {
+		t.Fatal("expected the completion notice queued quietly")
+	}
+	// The queued notice should mention the job id and exit code 0.
+	if got := rt.jobs.formatJobList(); !strings.Contains(got, "done") {
+		t.Fatalf("job list = %q, want the finished job listed as done", got)
+	}
+}

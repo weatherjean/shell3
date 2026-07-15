@@ -21,43 +21,33 @@ shell3.model("opus",  { base_url="http://x", api_key="k", model="opus-id" })
 shell3.model("haiku", { base_url="http://x", api_key="k", model="haiku-id" })
 `
 
-func TestMultipleAgentsAccumulateFirstActive(t *testing.T) {
+func TestSecondAgentDeclarationErrors(t *testing.T) {
 	p := writeConfig(t, twoModelsHdr+`
 shell3.agent({ name="build", model="opus",  prompt="b" })
 shell3.agent({ name="plan",  model="haiku", prompt="p" })
+`)
+	_, err := Load(p)
+	if err == nil || !contains(err.Error(), "only one shell3.agent") {
+		t.Fatalf("second shell3.agent should fail the load, got err=%v", err)
+	}
+}
+
+func TestSingleAgentWithSubagentsLoads(t *testing.T) {
+	p := writeConfig(t, twoModelsHdr+`
+local a = shell3.subagent({ name="explorer", description="d", model="haiku", prompt="e" })
+local b = shell3.subagent({ name="tester",   description="d", model="haiku", prompt="t" })
+shell3.agent({ name="code", model="opus", prompt="c", tools={ subagents={a, b} } })
 `)
 	c, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	if got := c.FirstAgent().Name; got != "build" {
-		t.Fatalf("first agent = %q, want build (first declared)", got)
+	if c.FirstAgent().Name != "code" || len(c.Agents()) != 1 {
+		t.Fatalf("want single agent code, got %q / %d", c.FirstAgent().Name, len(c.Agents()))
 	}
-	names := []string{}
-	for _, a := range c.Agents() {
-		names = append(names, a.Name)
-	}
-	if len(names) != 2 || names[0] != "build" || names[1] != "plan" {
-		t.Fatalf("agent order = %v, want [build plan]", names)
-	}
-}
-
-func TestDuplicateAgentNameAutoSuffix(t *testing.T) {
-	p := writeConfig(t, twoModelsHdr+`
-shell3.agent({ name="dup", model="opus", prompt="a" })
-shell3.agent({ name="dup", model="opus", prompt="b" })
-`)
-	c, err := Load(p)
-	if err != nil {
-		t.Fatalf("duplicate agent name should auto-suffix, not error: %v", err)
-	}
-	defer c.Close()
-	if _, ok := c.AgentByName("dup"); !ok {
-		t.Fatal(`first "dup" agent should keep its name`)
-	}
-	if _, ok := c.AgentByName("dup2"); !ok {
-		t.Fatalf(`second "dup" agent should become "dup2"; got %v`, c.AgentNames())
+	if len(c.Subagents()) != 2 {
+		t.Fatalf("want 2 subagents, got %d", len(c.Subagents()))
 	}
 }
 
@@ -75,28 +65,12 @@ shell3.agent({ name="build", prompt="b" })
 	}
 }
 
-func TestSingleAgentBackCompat(t *testing.T) {
-	p := writeConfig(t, twoModelsHdr+`
-shell3.agent({ name="base", model="opus", prompt="x" })
-`)
-	c, err := Load(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
-	if c.FirstAgent().Name != "base" || len(c.Agents()) != 1 {
-		t.Fatalf("single-agent back-compat broken: %q / %d", c.FirstAgent().Name, len(c.Agents()))
-	}
-}
-
-// TestAgentByName_LookupAndMiss pins the name-parameterized agent lookup that
-// replaces process-global active-agent state: sessions own their agent choice.
-// Combines lookup, miss, FirstAgent-still-first, and BuildPersonaFor assertions.
+// TestAgentByName_LookupAndMiss pins the internal name lookup (agentsetup uses
+// it); only one agent can exist, so lookups hit it or miss.
 func TestAgentByName_LookupAndMiss(t *testing.T) {
 	p := writeConfig(t, `
 shell3.model("m", { base_url = "http://x", api_key = "k", model = "mm" })
 shell3.agent({ name = "code", model = "m", prompt = "c" })
-shell3.agent({ name = "plan", model = "m", prompt = "p" })
 `)
 	c, err := Load(p)
 	if err != nil {
@@ -104,20 +78,17 @@ shell3.agent({ name = "plan", model = "m", prompt = "p" })
 	}
 	defer c.Close()
 
-	a, ok := c.AgentByName("plan")
-	if !ok || a.Name != "plan" || a.Prompt != "p" {
-		t.Fatalf("AgentByName(plan) = %+v, %t", a, ok)
+	a, ok := c.AgentByName("code")
+	if !ok || a.Name != "code" || a.Prompt != "c" {
+		t.Fatalf("AgentByName(code) = %+v, %t", a, ok)
 	}
-	// Unknown name reports ok=false; no global state is mutated.
 	if _, ok := c.AgentByName("nope"); ok {
 		t.Fatal("AgentByName(nope) should report ok=false")
 	}
-	// Lookup again after miss: first agent still accessible via FirstAgent.
 	if c.FirstAgent().Name != "code" {
 		t.Fatal("FirstAgent should still be code after a failed lookup")
 	}
-	// BuildPersonaFor renders the *given* agent, independent of any global.
-	if got := c.BuildPersonaFor(a); got != "p" {
-		t.Fatalf("BuildPersonaFor(plan) = %q, want %q", got, "p")
+	if got := c.BuildPersonaFor(a); got != "c" {
+		t.Fatalf("BuildPersonaFor(code) = %q, want %q", got, "c")
 	}
 }

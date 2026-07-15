@@ -4,9 +4,7 @@ package luacfg
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 
 	lua "github.com/yuin/gopher-lua"
@@ -37,7 +35,7 @@ type Model struct {
 }
 
 type ToolGates struct {
-	Bash, BashBg, Edit, Media, Read, ListFiles bool
+	Bash, BashBg, Edit, Media bool
 }
 
 // CustomTool is a declarative bash-command tool. The model supplies typed
@@ -56,10 +54,12 @@ type CustomTool struct {
 }
 
 // Skill is a granted capability surfaced as a one-line entry in the agent's
-// ## Skills index (name + description). Body lives in the file at Path; the
-// agent reads it with `cat` when the skill applies. Path is stored relative as
-// declared, then rewritten to an absolute path during Load (see the skill
-// resolution loop) so the index can point the agent at it from any cwd.
+// ## Skills index (name + description). Skills are never declared in Lua:
+// an agent lists directories (skills = { "lib/skills" }) and each flat *.md
+// file inside — YAML frontmatter with a required description and an optional
+// name defaulting to the filename — becomes one Skill at Load (see skills.go).
+// Body lives in the file at Path (absolute once resolved); the agent reads it
+// with `cat` when the skill applies.
 type Skill struct{ Name, Description, Path string }
 
 type Agent struct {
@@ -67,12 +67,14 @@ type Agent struct {
 	// PromptCmd, if set, is a shell command whose stdout supplies Prompt; it is
 	// resolved once at load time (see Load). Empty once resolved or when Prompt
 	// was supplied inline.
-	PromptCmd      string
-	Gates          ToolGates
-	CustomTools    []string
-	Skills         []string
-	SkillsDisabled bool     // true only when tools = { skill = false } is explicitly set
-	Subagents      []string // names of registered subagents this agent can spawn
+	PromptCmd   string
+	Gates       ToolGates
+	CustomTools []string
+	// SkillDirs is the skills = { "dir", ... } list as declared; Skills is the
+	// result of scanning those dirs at Load (see resolveSkillDirs).
+	SkillDirs []string
+	Skills    []Skill
+	Subagents []string // names of registered subagents this agent can spawn
 	Environment    bool     // inject the host Environment system-reminder
 	Delegation     bool     // inject the host Delegation (spawn-command) system-reminder
 }
@@ -86,19 +88,14 @@ type Subagent struct {
 	// PromptCmd, if set, is a shell command whose stdout supplies Prompt;
 	// resolved once at load time (see Load). Empty once resolved or when Prompt
 	// was supplied inline.
-	PromptCmd      string
-	Gates          ToolGates
-	CustomTools    []string
-	Skills         []string
-	SkillsDisabled bool
-	Environment    bool // inject the host Environment system-reminder
-	Delegation     bool // inject the host Delegation (spawn-command) system-reminder
-}
-
-// SkillsActive reports whether skills are enabled: the agent has at least one
-// skill listed AND the user has not explicitly disabled them with skill=false.
-func (a Agent) SkillsActive() bool {
-	return len(a.Skills) > 0 && !a.SkillsDisabled
+	PromptCmd   string
+	Gates       ToolGates
+	CustomTools []string
+	// SkillDirs/Skills mirror the Agent fields: dirs as declared, resolved at Load.
+	SkillDirs   []string
+	Skills      []Skill
+	Environment bool // inject the host Environment system-reminder
+	Delegation  bool // inject the host Delegation (spawn-command) system-reminder
 }
 
 // LoadedConfig is the parsed result. L stays alive for the session so the
@@ -106,7 +103,6 @@ func (a Agent) SkillsActive() bool {
 type LoadedConfig struct {
 	Models  []Model
 	Tools   map[string]CustomTool
-	Skills  []Skill
 	Secrets map[string]string
 	// StubTools maps a hallucinated tool name (e.g. "read_file", "grep") to a
 	// fixed redirect message. Registered config-globally via shell3.stub_tools;
@@ -115,10 +111,6 @@ type LoadedConfig struct {
 	// See register.go (luaStubTools) and agentsetup.runtimeForAgent for the
 	// wiring (StubNames → chat.Config.StubTools).
 	StubTools map[string]string
-	// SubagentMaxDepth is the maximum allowed subagent nesting depth, set via
-	// shell3.subagents{ max_depth = N }. 0 means unset; the runtime applies the
-	// default (3) at the read site.
-	SubagentMaxDepth int
 	// BackgroundMaxConcurrent is the maximum number of concurrent background jobs,
 	// set via shell3.background{ max_concurrent = N }. 0 means unset; the runtime
 	// applies the default (8) at the read site.
@@ -128,8 +120,8 @@ type LoadedConfig struct {
 	subagents []Subagent
 
 	// telegram holds the parsed shell3.telegram{} block (zero value if absent);
-	// cron holds the jobs declared under shell3.telegram{ cron = {...} }. Read
-	// via Telegram()/Cron(). See telegram.go.
+	// cron holds the jobs declared via top-level shell3.cron{...}. Read via
+	// Telegram()/Cron(). See telegram.go / cron.go.
 	telegram TelegramConfig
 	cron     []CronJob
 
@@ -204,25 +196,25 @@ func Load(path string) (*LoadedConfig, error) {
 	// resolve as authors expect. A failing or empty command fails the whole
 	// Load (fail-closed); since reload goes through Load, a bad prompt file can
 	// never silently swap in an empty prompt at runtime.
-	// Resolve + validate skill file paths against the config dir (cfgDir): each
-	// must be a readable, non-empty regular file, caught here at load/reload
-	// rather than at turn time. The resolved absolute path is stored back so the
-	// ## Skills index can point the agent at it (BuildPersonaFor).
-	for i := range c.Skills {
-		skillPath := c.Skills[i].Path
-		if !filepath.IsAbs(skillPath) {
-			skillPath = filepath.Join(cfgDir, skillPath)
-		}
-		// One read covers every failure mode: a missing path and a directory
-		// both error here, and whitespace-only content is treated as empty.
-		data, err := os.ReadFile(skillPath)
+	// Resolve each agent's/subagent's skills dirs (skills.go): a missing dir
+	// fails the load here at load/reload time rather than at turn time; invalid
+	// skill files are skipped with a warning.
+	warn := func(w string) { c.warnings = append(c.warnings, w) }
+	for i := range c.agents {
+		a := &c.agents[i]
+		sk, err := resolveSkillDirs(cfgDir, a.SkillDirs, fmt.Sprintf("agent %q", a.Name), warn)
 		if err != nil {
-			return nil, fmt.Errorf("config: skill %q path %q: %w", c.Skills[i].Name, c.Skills[i].Path, err)
+			return nil, err
 		}
-		if len(strings.TrimSpace(string(data))) == 0 {
-			return nil, fmt.Errorf("config: skill %q path %q: file is empty", c.Skills[i].Name, c.Skills[i].Path)
+		a.Skills = sk
+	}
+	for i := range c.subagents {
+		sa := &c.subagents[i]
+		sk, err := resolveSkillDirs(cfgDir, sa.SkillDirs, fmt.Sprintf("subagent %q", sa.Name), warn)
+		if err != nil {
+			return nil, err
 		}
-		c.Skills[i].Path = skillPath
+		sa.Skills = sk
 	}
 	for i := range c.agents {
 		a := &c.agents[i]
@@ -324,8 +316,9 @@ func (c *LoadedConfig) Agents() []Agent {
 	return out
 }
 
-// AgentByName returns the declared agent with the given name. Agent selection
-// is the caller's (per-session) state — the config holds only declarations.
+// AgentByName returns the declared agent with the given name. Only one agent
+// can be declared; this lookup exists for internal plumbing that resolves an
+// agent reference by name.
 func (c *LoadedConfig) AgentByName(name string) (Agent, bool) {
 	for _, a := range c.agents {
 		if a.Name == name {

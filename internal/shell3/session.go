@@ -46,8 +46,7 @@ type Session struct {
 	runtime *Runtime
 	name    string
 
-	// opts is the SessionOpts this session was built from; opts.Depth is the
-	// subagent nesting depth (0 = root user session).
+	// opts is the SessionOpts this session was built from.
 	opts SessionOpts
 
 	// closeOnce makes Close safe under concurrent invocation: a spawned
@@ -563,7 +562,6 @@ func (s *Session) turnConfigLocked() chat.TurnConfig {
 		tc.StartBashBg = func(command, workdir string, argv, env []string) (string, error) {
 			return rt.jobs.startCommand(parent, command, workdir, argv, env)
 		}
-		maxDepth := rt.subagentMaxDepth()
 		allowed := cfg.Subagents // the active agent's tools.subagents allowlist
 		tc.StartSubagent = func(agent, prompt, desc string) (string, error) {
 			// Enforce the allowlist the delegation reminder advertises: only the
@@ -575,11 +573,10 @@ func (s *Session) turnConfigLocked() chat.TurnConfig {
 				}
 				return "", fmt.Errorf("subagent_type %q is not allowed for this agent; allowed subagents: %s", agent, strings.Join(allowed, ", "))
 			}
-			depth := parent.opts.Depth + 1
-			if depth > maxDepth {
-				return "", fmt.Errorf("max subagent depth %d reached (this session is at depth %d)", maxDepth, parent.opts.Depth)
-			}
-			return rt.jobs.startSubagent(parent, agent, prompt, desc, depth, subagentOpts{})
+			// Single-level delegation is enforced by construction: subagents are
+			// never granted the task tool, so this closure only runs on top-level
+			// sessions.
+			return rt.jobs.startSubagent(parent, agent, prompt, desc, subagentOpts{})
 		}
 		tc.ListJobs = func() string {
 			return rt.jobs.formatJobList()

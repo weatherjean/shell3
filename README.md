@@ -44,9 +44,11 @@ leans on Unix process groups. WSL works.
    `~/.shell3/.env`.
 3. `shell3 telegram` — the bot connects and answers your chat. Message it.
 
-`boot` scaffolds a `code` and a `plan` agent, a read-only `explorer` subagent,
-and a `shell3.telegram{}` block with a localhost dashboard. Full walkthrough in
-[docs/cli.md](docs/cli.md).
+`boot` scaffolds the `code` agent, a read-only `explorer` subagent, and a
+`shell3.telegram{}` block whose Mini App dashboard is tunneled with
+[cloudflared](https://github.com/cloudflare/cloudflared) by default (free, no
+account — install it, e.g. `brew install cloudflared` on macOS, or the
+dashboard stays local-only). Full walkthrough in [docs/cli.md](docs/cli.md).
 
 ## Commands
 
@@ -66,16 +68,16 @@ and a `shell3.telegram{}` block with a localhost dashboard. Full walkthrough in
 - **Any OpenAI-compatible provider.** OpenAI, Ollama, Groq, LM Studio,
   OpenRouter, Moonshot, DeepSeek — with reasoning-trace streaming where vendors
   support it, and a `run_proxy` escape hatch for endpoints that need a local shim.
-- **One Lua config.** Models, agents, system prompts, tools, skills, cron jobs,
-  and the Telegram block all live in `shell3.lua` — versionable, diffable,
-  programmable. Edit it and apply live with the `reload` tool.
-- **Bash-first, unsafe by default.** The agent acts through `bash`, `read`,
-  `list_files`, and `edit_file` — plus `read_media` for images and audio on
-  multimodal models; everything else is a command it runs (`read` +
-  `list_files` alone make a fully read-only agent that needs no shell). The
-  single opt-in hook is `shell3.on_tool_call(fn)` — chainable, verdict-based
-  (block / rewrite / runner-swap / ask a human); denylists use `shell3.regex`.
-  `read`/`list_files` are ungated by design.
+- **One Lua config.** The agent, its model, system prompt, tools, skills,
+  subagents, cron jobs, and the Telegram block all live in `shell3.lua` —
+  versionable, diffable, programmable. Edit it and apply live with the `reload`
+  tool.
+- **Bash-first, unsafe by default.** The agent acts through `bash` and
+  `edit_file` — plus `read_media` for images and audio on multimodal models;
+  reading, listing, and searching are just commands it runs (`cat`, `ls`,
+  `rg`). The single opt-in hook is `shell3.on_tool_call(fn)` — chainable,
+  verdict-based (block / rewrite / runner-swap / ask a human over Telegram);
+  denylists use `shell3.regex`.
 - **Subagents & scheduling.** Delegate work to declared subagents with the
   `task` tool (fire-and-forget in-process jobs; you're notified on completion),
   background shell commands with `bash_bg`, and run recurring prompts on a cron
@@ -87,15 +89,15 @@ and a `shell3.telegram{}` block with a localhost dashboard. Full walkthrough in
 
 ## Documentation
 
-- **[Configuration](docs/configuration.md)** — models, agents, the
-  `shell3.telegram{}` block, cron, custom tools, `on_tool_call`,
-  `on_tool_result`, `stub_tools`, skills, proxies.
-- **[CLI](docs/cli.md)** — `telegram`, `boot`, `dev`, `dash`, and the JSONL runs
-  store.
+- **[Configuration](docs/configuration.md)** — models, the agent, subagents,
+  the `shell3.telegram{}` block (dashboard + tunnel), `shell3.cron`, custom
+  tools, `on_tool_call`, `on_tool_result`, `stub_tools`, skills, proxies.
+- **[CLI](docs/cli.md)** — `telegram`, `boot`, `health`, `dev`, `dash`, and the
+  JSONL runs store.
 - **[Security & data](docs/security.md)** — the threat model, secrets, and
   removing shell3's data.
-- **[Cookbook](docs/cookbook/README.md)** — drop-in recipes: extra agents,
-  planning skills, the browser skill, proxy and sandbox setups.
+- **[Cookbook](docs/cookbook/README.md)** — drop-in recipes: extra subagents,
+  planning skills, proxy and sandbox setups.
 
 ## Security
 

@@ -73,7 +73,7 @@ func TestSubagentCompletionWakesParent(t *testing.T) {
 		t.Fatalf("parent session: %v", err)
 	}
 
-	id, err := rt.jobs.startSubagent(parent, "", "do the thing", "test task", 1, subagentOpts{})
+	id, err := rt.jobs.startSubagent(parent, "", "do the thing", "test task", subagentOpts{})
 	if err != nil {
 		t.Fatalf("startSubagent: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestSubagentLiveOutputBuffer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parent session: %v", err)
 	}
-	id, err := rt.jobs.startSubagent(parent, "", "do the thing", "test task", 1, subagentOpts{})
+	id, err := rt.jobs.startSubagent(parent, "", "do the thing", "test task", subagentOpts{})
 	if err != nil {
 		t.Fatalf("startSubagent: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestSubagentTranscriptAfterClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parent: %v", err)
 	}
-	id, err := rt.jobs.startSubagent(parent, "", "task", "desc", 0, subagentOpts{})
+	id, err := rt.jobs.startSubagent(parent, "", "task", "desc", subagentOpts{})
 	if err != nil {
 		t.Fatalf("startSubagent: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestJobManagerRetainsDoneSubagentJob(t *testing.T) {
 		t.Fatalf("parent session: %v", err)
 	}
 
-	id, err := rt.jobs.startSubagent(parent, "", "task", "desc", 1, subagentOpts{})
+	id, err := rt.jobs.startSubagent(parent, "", "task", "desc", subagentOpts{})
 	if err != nil {
 		t.Fatalf("startSubagent: %v", err)
 	}
@@ -228,19 +228,6 @@ func TestJobManagerCancelDoneJobIsNoOp(t *testing.T) {
 	m.wg.Wait() // wait for the job goroutine to finish
 	if err := m.cancel(id); err != nil {
 		t.Fatalf("cancel on done job should return nil, got %v", err)
-	}
-}
-
-// TestSubagentDepth verifies that Depth is propagated into the Session.
-func TestSubagentDepth(t *testing.T) {
-	rt := newTestRuntime(t, fakeCfg("x"))
-	root, _ := rt.Session(SessionOpts{Depth: 0})
-	if root.opts.Depth != 0 {
-		t.Fatalf("root depth = %d, want 0", root.opts.Depth)
-	}
-	child, _ := rt.Session(SessionOpts{Depth: 2})
-	if child.opts.Depth != 2 {
-		t.Fatalf("child depth = %d, want 2", child.opts.Depth)
 	}
 }
 
@@ -402,7 +389,7 @@ func TestSubagentErrorSurfaced(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parent session: %v", err)
 	}
-	id, err := rt.jobs.startSubagent(parent, "", "do the thing", "failing task", 1, subagentOpts{})
+	id, err := rt.jobs.startSubagent(parent, "", "do the thing", "failing task", subagentOpts{})
 	if err != nil {
 		t.Fatalf("startSubagent: %v", err)
 	}

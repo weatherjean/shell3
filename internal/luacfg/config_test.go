@@ -5,16 +5,12 @@ import (
 	"testing"
 )
 
-func TestSubagentAndBackgroundConfig(t *testing.T) {
+func TestBackgroundConfig(t *testing.T) {
 	cfg := mustLoad(t, `
 shell3.model("m", { base_url="u", api_key="k", model="x" })
 shell3.agent({ name="a", model="m", prompt="p", tools={ bash=true } })
-shell3.subagents{ max_depth = 4 }
 shell3.background{ max_concurrent = 3 }
 `)
-	if cfg.SubagentMaxDepth != 4 {
-		t.Fatalf("SubagentMaxDepth = %d, want 4", cfg.SubagentMaxDepth)
-	}
 	if cfg.BackgroundMaxConcurrent != 3 {
 		t.Fatalf("BackgroundMaxConcurrent = %d, want 3", cfg.BackgroundMaxConcurrent)
 	}
@@ -37,18 +33,6 @@ const minCfgHdr = `
 shell3.model("m", { base_url="u", api_key="k", model="x" })
 shell3.agent({ name="a", model="m", prompt="p" })
 `
-
-func TestSubagentsMaxDepthZeroRejects(t *testing.T) {
-	mustLoadFail(t, minCfgHdr+`shell3.subagents{ max_depth = 0 }`)
-}
-
-func TestSubagentsMaxDepthNegativeRejects(t *testing.T) {
-	mustLoadFail(t, minCfgHdr+`shell3.subagents{ max_depth = -1 }`)
-}
-
-func TestSubagentsMaxDepthStringRejects(t *testing.T) {
-	mustLoadFail(t, minCfgHdr+`shell3.subagents{ max_depth = "foo" }`)
-}
 
 func TestBackgroundMaxConcurrentZeroRejects(t *testing.T) {
 	mustLoadFail(t, minCfgHdr+`shell3.background{ max_concurrent = 0 }`)

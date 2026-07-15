@@ -24,7 +24,7 @@ func TestResolveAskAllows(t *testing.T) {
 // and a block verdict stops them.
 func TestGateNonBashToolBlocks(t *testing.T) {
 	cfg := ToolConfig{RunToolCall: func(_ context.Context, name, command, _ string, _ bool) ToolCallVerdict {
-		if name != "read" {
+		if name != "edit_file" {
 			t.Errorf("want real name read, got %q", name)
 		}
 		if command != "" {
@@ -32,7 +32,7 @@ func TestGateNonBashToolBlocks(t *testing.T) {
 		}
 		return ToolCallVerdict{Action: ActionBlock, Reason: "no reading .env"}
 	}}
-	msg, blocked := gateNonBashTool(context.Background(), cfg, "read", `{"path":".env"}`)
+	msg, blocked := gateNonBashTool(context.Background(), cfg, "edit_file", `{"path":".env"}`)
 	if !blocked || !strings.Contains(msg, "no reading .env") {
 		t.Fatalf("want blocked, got blocked=%v msg=%q", blocked, msg)
 	}
@@ -44,7 +44,7 @@ func TestGateNonBashToolPasses(t *testing.T) {
 	cfg := ToolConfig{RunToolCall: func(_ context.Context, _, _, _ string, _ bool) ToolCallVerdict {
 		return ToolCallVerdict{Action: ActionRun, Argv: []string{"bash", "-c", ""}, Passthrough: true}
 	}}
-	if msg, blocked := gateNonBashTool(context.Background(), cfg, "read", "{}"); blocked {
+	if msg, blocked := gateNonBashTool(context.Background(), cfg, "edit_file", "{}"); blocked {
 		t.Fatalf("pure-pass verdict should pass, got blocked msg=%q", msg)
 	}
 }
@@ -57,7 +57,7 @@ func TestGateNonBashToolEmptyRewriteFailsClosed(t *testing.T) {
 	cfg := ToolConfig{RunToolCall: func(_ context.Context, _, _, _ string, _ bool) ToolCallVerdict {
 		return ToolCallVerdict{Action: ActionRun, Argv: []string{"bash", "-c", ""}, Passthrough: false}
 	}}
-	msg, blocked := gateNonBashTool(context.Background(), cfg, "read", "{}")
+	msg, blocked := gateNonBashTool(context.Background(), cfg, "edit_file", "{}")
 	if !blocked || !strings.Contains(msg, "only to bash tools") {
 		t.Fatalf("empty rewrite on non-bash must fail closed, got blocked=%v msg=%q", blocked, msg)
 	}
@@ -65,7 +65,7 @@ func TestGateNonBashToolEmptyRewriteFailsClosed(t *testing.T) {
 
 // No hooks declared ⇒ non-bash tools are ungated.
 func TestGateNonBashToolNoHooksPasses(t *testing.T) {
-	if _, blocked := gateNonBashTool(context.Background(), ToolConfig{}, "read", "{}"); blocked {
+	if _, blocked := gateNonBashTool(context.Background(), ToolConfig{}, "edit_file", "{}"); blocked {
 		t.Fatal("no hooks: read must not be gated")
 	}
 }
@@ -124,7 +124,7 @@ func TestGatesForwardHeadlessAsk(t *testing.T) {
 		}
 
 		got = nil
-		gateNonBashTool(ctx, cfg, "read", "{}")
+		gateNonBashTool(ctx, cfg, "edit_file", "{}")
 		if got == nil || *got != headless {
 			t.Fatalf("gateNonBashTool headless=%v: chain saw %v", headless, got)
 		}

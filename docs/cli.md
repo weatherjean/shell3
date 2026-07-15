@@ -1,9 +1,9 @@
 # CLI reference
 
-shell3 is a hosted agent you run as a Telegram bot. The binary has four
-subcommands: `telegram` (the service), `boot` (setup), and two local
-front-ends, `dev` and `dash`, for driving and inspecting the agent from your
-terminal. The bare `shell3` command prints help.
+shell3 is a hosted agent you run as a Telegram bot. The binary has five
+subcommands: `telegram` (the service), `boot` (setup), `health` (config
+check), and two local front-ends, `dev` and `dash`, for driving and inspecting
+the agent from your terminal. The bare `shell3` command prints help.
 
 ## `shell3 telegram` — run the bot
 
@@ -19,7 +19,8 @@ declared in `shell3.telegram{}`. It also starts the Mini App dashboard (when
 The bot's runtime is anchored to the config directory, so its history and runs
 live under `~/.shell3/.shell3_project/`. In-chat commands: `/stop` (cancel the
 in-flight turn + tracked jobs), `/reload` (re-read the config and apply it
-live), `/run <job>` (fire a cron job on demand), `/status`, `/clear`,
+live — refused while background tasks are running: `/stop` them or let them
+finish first), `/run <job>` (fire a cron job on demand), `/status`, `/clear`,
 `/rollback`.
 
 | Flag | Effect |
@@ -32,13 +33,28 @@ live), `/run <job>` (fire a cron job on demand), `/status`, `/clear`,
 shell3 boot     # interactive: model endpoint + key, then bot token + chat id
 ```
 
-`boot` scaffolds `~/.shell3/shell3.lua` (a `code` + `plan` agent, a read-only
-`explorer` subagent, and a `shell3.telegram{}` block with a localhost
-dashboard), the `lib/` modules, and `~/.shell3/.env` (secrets — never commit
-it). Non-interactive flags let you script it: `--url`, `--model`, `--name`,
+`boot` scaffolds `~/.shell3/shell3.lua` (the `code` agent, a read-only
+`explorer` subagent, and a `shell3.telegram{}` block whose dashboard is exposed
+through a [cloudflared](https://github.com/cloudflare/cloudflared) tunnel by
+default — free, no account, but the binary must be installed or the dashboard
+stays local-only), the `lib/` modules, and `~/.shell3/.env` (secrets — never
+commit it). Non-interactive flags let you script it: `--url`, `--model`, `--name`,
 `--key`, `--tg-token`, `--tg-chat-id`, `--context-window`, `--compact-at`,
 `--proxy`, `--brave-key`, `--force`. See
 [configuration.md](configuration.md) for what it produces and how to extend it.
+
+## `shell3 health` — check the config
+
+```sh
+shell3 health                # checks ~/.shell3/shell3.lua
+shell3 health --config work  # checks ~/.shell3/work.lua
+```
+
+Loads the config exactly like the bot would and fails (exit 1) on anything the
+running bot only tolerates with a warning — most importantly a skill `.md` the
+loader had to skip because of missing or broken frontmatter. A clean check
+prints the active agent's shape and `OK`. Run it after editing `shell3.lua` or
+dropping a skill file into `lib/skills/`, before `/reload`.
 
 ## `shell3 dev` — drive the agent locally
 
@@ -53,13 +69,11 @@ queries and troubleshooting.
 ```sh
 shell3 dev "list the files here and summarize what this project is"
 shell3 dev --resume "now write a one-line description"   # continue the last session
-shell3 dev --agent plan "review the diff"                # override the agent
 ```
 
 | Flag | Effect |
 |------|--------|
 | `-c`, `--config <name\|path>` | Config to use (default `~/.shell3/shell3.lua`) |
-| `--agent <name>` | Agent to run (default: the `shell3.telegram{}` agent) |
 | `--resume` | Continue the latest session (multi-turn across invocations) |
 
 `dev` auto-approves `on_tool_call` ask verdicts (and prints that it did), so it

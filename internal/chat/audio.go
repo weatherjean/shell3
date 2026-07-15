@@ -27,14 +27,14 @@ func audioExtFormat(ext string) string {
 	}
 }
 
-// loadAudioPart resolves path against workDir (~ expands like the read tool),
+// loadAudioPart resolves path against workDir (~ expands),
 // validates the extension and size, reads the raw bytes, and returns an
 // input_audio ContentPart carrying the base64-encoded data plus a
 // human-readable description. Audio is not decoded or transcoded — only the
 // wire formats (wav, mp3, ogg) are accepted; opus-family containers report
 // as ogg.
 func loadAudioPart(path, workDir string) (llm.ContentPart, string, error) {
-	path = resolveReadPath(path, workDir)
+	path = resolvePath(path, workDir)
 
 	ext := strings.ToLower(filepath.Ext(path))
 	if !supportedAudioExts[ext] {

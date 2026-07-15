@@ -184,8 +184,6 @@ func NewHandlers() map[string]ToolHandler {
 		TaskStatusHandler{},
 		TaskCancelHandler{},
 		EditHandler{},
-		ReadHandler{},
-		ListFilesHandler{},
 	}
 	m := make(map[string]ToolHandler, len(handlers))
 	for _, h := range handlers {

@@ -25,7 +25,7 @@ Do NOT write code, edit files, or start implementing until you have presented a 
 
 - Write the agreed design to `docs/specs/YYYY-MM-DD-<topic>.md` (or the project's conventional spec location). Be concrete: no "TBD", no contradictions, no requirement that could be read two ways.
 - If the project is a git repo, commit the design doc.
-- Then tell the user: the design is saved at the path; switch to the `code` agent (press Tab when idle, or use `/agent`) to implement it.
+- Then tell the user the design is saved at that path, and implement it once they agree.
 
 ## Key principles
 

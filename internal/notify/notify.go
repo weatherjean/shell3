@@ -9,6 +9,10 @@ package notify
 const (
 	KindBgDone    = "bg_done"    // a background bash job finished
 	KindAgentDone = "agent_done" // a fire-and-forget subagent finished
+	// KindAgentUpdate is a follow-up from an already-"done" subagent: one of
+	// its background jobs finished after its main turn ended, the child session
+	// was resumed for a follow-up turn, and this carries that turn's summary.
+	KindAgentUpdate = "agent_update"
 )
 
 // Notification is one completion event surfaced into a live agent's context.

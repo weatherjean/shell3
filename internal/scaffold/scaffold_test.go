@@ -25,7 +25,6 @@ func TestRenderBaseConfig(t *testing.T) {
 		`shell3.env.secret("MAIN_API_KEY")`,
 		`model          = "kimi-k2.6"`,
 		`name  = "code"`,
-		`name  = "plan"`,
 		`-- run_proxy   = "npx`,
 	} {
 		if !strings.Contains(string(cfg), want) {
@@ -34,6 +33,9 @@ func TestRenderBaseConfig(t *testing.T) {
 	}
 	if !strings.Contains(string(cfg), "subagents") {
 		t.Error("rendered code agent should enable subagents")
+	}
+	if !strings.Contains(string(cfg), `tunnel  = "cloudflared tunnel --url http://{addr}"`) {
+		t.Error("rendered dashboard should default to the cloudflared tunnel")
 	}
 	if !strings.Contains(string(cfg), "shell3.subagent(") {
 		t.Error("rendered config should declare an example subagent via shell3.subagent(")
@@ -46,7 +48,8 @@ func TestRenderBaseConfig(t *testing.T) {
 	}
 	for _, p := range []string{
 		"lib/tools.lua",
-		"lib/skills/brainstorming.lua", "lib/skills/history.lua",
+		"lib/skills/brainstorming.md", "lib/skills/history.md",
+		"lib/skills/self-evolve.md", "lib/skills/browser.md",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
 			t.Errorf("missing %s: %v", p, err)
@@ -141,20 +144,32 @@ func TestRenderedConfigLoads(t *testing.T) {
 			t.Errorf("custom tool %q has an empty Command", name)
 		}
 	}
-	if len(c.Skills) != 3 {
-		t.Errorf("expected 3 skills (brainstorming, self-evolve, history), got %d", len(c.Skills))
-	}
 	agents := c.Agents()
-	if len(agents) != 2 {
-		t.Fatalf("expected 2 agents, got %d", len(agents))
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(agents))
 	}
 	if agents[0].Name != "code" {
-		t.Errorf("first agent: want %q, got %q", "code", agents[0].Name)
+		t.Errorf("agent: want %q, got %q", "code", agents[0].Name)
 	}
-	if agents[1].Name != "plan" {
-		t.Errorf("second agent: want %q, got %q", "plan", agents[1].Name)
+	// The agent's skills come from scanning lib/skills/ (dir-based, no Lua
+	// declarations); the load must be warning-free — a skipped skill file in
+	// the shipped scaffold is a bug.
+	got := map[string]bool{}
+	for _, s := range agents[0].Skills {
+		got[s.Name] = true
 	}
-	// Subagents are a separate registry, not in the Tab rotation.
+	for _, want := range []string{"brainstorming", "browser", "history", "self-evolve"} {
+		if !got[want] {
+			t.Errorf("scaffold skill %q missing from agent (got %v)", want, got)
+		}
+	}
+	if len(agents[0].Skills) != 4 {
+		t.Errorf("expected 4 scaffold skills, got %d", len(agents[0].Skills))
+	}
+	if len(c.Warnings()) != 0 {
+		t.Errorf("scaffold config loaded with warnings: %v", c.Warnings())
+	}
+	// Subagents are a separate registry.
 	subs := c.Subagents()
 	if len(subs) != 1 || subs[0].Name != "explorer" {
 		t.Fatalf("expected one registered subagent [explorer], got %v", subs)
@@ -164,15 +179,12 @@ func TestRenderedConfigLoads(t *testing.T) {
 	}
 	for _, a := range agents {
 		if a.Name == "explorer" {
-			t.Error("explorer must NOT appear in Agents()/Tab rotation")
+			t.Error("explorer must NOT appear in Agents()")
 		}
 	}
-	// The code agent opts into explorer; plan does not.
+	// The code agent opts into explorer.
 	if len(agents[0].Subagents) != 1 || agents[0].Subagents[0] != "explorer" {
 		t.Errorf("code agent Subagents = %v, want [explorer]", agents[0].Subagents)
-	}
-	if len(agents[1].Subagents) != 0 {
-		t.Errorf("plan agent should have no subagents, got %v", agents[1].Subagents)
 	}
 	// Each subagent the code agent may delegate to resolves to a (name,
 	// description) pair — the raw material internal/shell3 renders into the per-session

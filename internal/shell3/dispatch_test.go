@@ -78,20 +78,6 @@ func TestDispatchQuietDoesNotWake(t *testing.T) {
 	}
 }
 
-// A Description default is derived from the prompt, and the depth guard trips
-// at the configured maximum.
-func TestDispatchDepthGuard(t *testing.T) {
-	rt := newTestRuntime(t, fakeCfg("x"))
-	defer rt.Close()
-	sess, err := rt.Session(SessionOpts{Name: "deep", Depth: 3}) // default max depth is 3
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := sess.Dispatch("", "p", DispatchOpts{}); err == nil {
-		t.Fatal("Dispatch beyond max depth must fail")
-	}
-}
-
 // A relative dispatch workdir joins onto the parent's effective base (the old
 // Dispatch contract): parent workdir when set, else the runtime root — never
 // the process CWD.

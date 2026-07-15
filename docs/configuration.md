@@ -12,8 +12,9 @@ how shell3 finds your config in the first place.
 
 `boot` creates three things under `~/.shell3/`:
 
-- `shell3.lua` — the config: your models, agents, tools, and skills.
-- `lib/` — tools and skills as small Lua modules the config `require`s.
+- `shell3.lua` — the config: your models, the agent, subagents, tools, and skills.
+- `lib/` — tool modules the config `require`s, plus `lib/skills/` — the
+  markdown skill files the agent's `skills = { "lib/skills" }` picks up.
 - `.env` — your secrets (API keys, tokens). **Never commit this file.**
 
 ### How the config path is resolved
@@ -111,14 +112,13 @@ If a proxy is already listening, the spawn just fails to bind and the first
 request proceeds against whatever is there. See
 [cookbook/proxy.md](cookbook/proxy.md).
 
-## Agents
+## The agent
 
-An agent is a name, a model, a system prompt, and a set of tools. Declare as
-many as you like and switch between them mid-session with `Tab` (when idle) or
-`/agent` — your conversation history comes along. Names are deduplicated rather
-than rejected: agents and subagents share one namespace, so a second entry
-named `code` auto-suffixes to `code2` (then `code3`, …) while the first keeps
-its bare name.
+An agent is a name, a model, a system prompt, and a set of tools. **Exactly one
+`shell3.agent({...})` may be declared** — a second declaration fails the load.
+Specialists are [subagents](#subagents--delegation), spawned by the agent as
+background jobs; see
+[cookbook/lib/extra-agents.lua](cookbook/lib/extra-agents.lua).
 
 ```lua
 shell3.agent({
@@ -127,76 +127,34 @@ shell3.agent({
   prompt = [[You are a careful pair-programmer…]],
   tools  = {
     bash      = true,
-    read      = true,   -- paged text-file reading (see below)
     bash_bg   = true,   -- background / long-running work
     edit      = true,   -- the edit_file tool
     media     = true,   -- inbound/outbound images + audio
     custom    = { my_tool },          -- Lua-defined tools (below)
     subagents = { explorer },         -- delegatable specialists
   },
-  skills = { writing_plans },                 -- skill handles (below)
+  skills = { "lib/skills" },                  -- skill directories (below)
 })
 ```
 
-The convention that ships with `boot` is two agents: a full-access `code` agent
-and a read-only `plan` agent that investigates and designs but cannot edit —
-design with `plan`, switch to `code` to build. But it's only a convention: add a
-`review` agent, a `docs` agent, whatever fits your work. See
-[cookbook/lib/extra-agents.lua](cookbook/lib/extra-agents.lua).
-
-### The `read` tool
-
-`read = true` gives the agent a paged, text-file reader. It accepts a `path`
-(absolute or workdir-relative), an optional 1-indexed `offset` (default 1), and
-an optional `limit` in lines (default 2000). Output is raw file content — no
-line-number prefixes — so `edit_file` can exact-match strings straight from the
-output.
-
-Truncation is capped at **2000 lines or 50 KB**, whichever comes first. When
-the file is longer, a machine-readable footer tells the model exactly where to
-resume:
-
-```
-[Showing lines 1-2000 of 8421. Use offset=2001 to continue.]
-```
-
-The tool is **text-only**: binary files (detected by a ~4 KB NUL-byte / high
-non-printable scan) are refused with a redirect to `read_media` or `bash xxd`.
-Directories, missing files, and offsets past EOF are clean errors. Search still
-belongs in bash — reach for `rg` or `grep` when you want to match patterns
-across files rather than read one file's content.
-
-### The `list_files` tool
-
-`list_files = true` gives the agent a directory lister that returns an indented
-tree (directories first, suffixed `/`). It accepts a `path` (absolute or
-workdir-relative, default the project root), a `depth` (max levels to recurse,
-**default 2**), and an `ignore` list of glob patterns. A pattern without `/`
-matches the base name (`*.test.go`); with `/` it matches the path relative to the
-listed directory (`src/gen/*`).
-
-It does **no automatic filtering** — hidden and vendored files are listed unless
-you `ignore` them — so start shallow and narrow as you go: widen `depth` only
-when needed, pass a deeper `path`, or add `ignore` globs like
-`{ "node_modules", "*.lock" }`. Output is capped at **1000 entries** with a
-truncation notice; missing paths and non-directories are clean errors.
-
-Together, `read` + `list_files` make a **fully read-only agent that needs no
-bash** — it can browse the tree and read files but never execute a command. Drop
-`bash`/`edit` from such an agent's `tools` and it can still investigate and
-report (for content *search*, it would still need `bash` for `rg`/`grep`):
-
-```lua
-tools = { read = true, list_files = true }  -- browse + read, no shell
-```
+There are **no file-read tools**: the agent reads with `cat`/`sed -n`, lists
+with `ls`/`find`, and searches with `rg` — all through `bash`. The scaffold
+registers [`shell3.stub_tools`](#stub-tools) redirects so a model that
+reflexively calls `read`/`read_file`/`grep`/`write_file` gets a one-line nudge
+back to bash/edit_file instead of an error. A *read-only* agent is a policy,
+not a tool set: gate `bash` in
+[`on_tool_call`](#the-command-gate--on_tool_call) to inspection-only commands.
 
 ## Subagents & delegation
 
 A subagent is a delegatable specialist: declared with `shell3.subagent({...})`
-instead of `shell3.agent({...})`, so it never appears in the `Tab`/`/agent`
-rotation — only the agents that list it may spawn it. The shape is the same as
+instead of `shell3.agent({...})` — only an agent that lists it under
+`tools.subagents` may spawn it. The shape is the same as
 an agent's (name, model, prompt, tools) plus a `description`, which is what the
-parent model reads when deciding what to delegate:
+parent model reads when deciding what to delegate. Subagent names are
+deduplicated rather than rejected: agents and subagents share one namespace, so
+a second entry named `explorer` auto-suffixes to `explorer2` (then
+`explorer3`, …) while the first keeps its bare name.
 
 ```lua
 local explorer = shell3.subagent({
@@ -204,7 +162,7 @@ local explorer = shell3.subagent({
   description = "Read-only investigation of the codebase. No edits.",
   model       = "main",
   prompt      = [[You are a focused code explorer…]],
-  tools       = { bash = true, read = true, list_files = true },
+  tools       = { bash = true },
 })
 
 shell3.agent({
@@ -227,17 +185,30 @@ goroutine, not a subprocess — and on completion the parent is woken with a
 capped result summary injected into its context. Subagents run headless (an
 `{ask=...}` gate verdict is auto-denied; see
 [the gate section](#deny-prompt-confirmation-and-headless-degradation)), and
-delegation is single-level: a subagent is not given the `task` tool.
+delegation is single-level by construction: a subagent is never given the
+`task` tool, so it cannot spawn subagents of its own.
 
-Two optional config-global knobs cap the machinery:
+One optional config-global knob caps the machinery:
 
 ```lua
 shell3.background({ max_concurrent = 8 })  -- concurrent background jobs (default 8)
-shell3.subagents({ max_depth = 3 })        -- max subagent nesting depth (default 3)
 ```
 
 The same job runtime backs `bash_bg`, which is gated separately by
-`tools = { bash_bg = true }` — not by `delegation`.
+`tools = { bash_bg = true }` — not by `delegation`. A `bash_bg` job that exits
+**nonzero** wakes an idle agent so the failure is narrated proactively; a clean
+exit queues its notice quietly for the next turn.
+
+**Subagents and `bash_bg`.** A subagent may start background commands of its
+own. If one is still running when the subagent's main turn ends, the parent
+still gets the completion notice immediately — but the subagent's session is
+kept open in the background, and when the job finishes the subagent is
+**resumed** for a follow-up turn over the result. That turn's summary reaches
+the main agent as a follow-up notice (and wakes it). Follow-up turns are capped
+at 5 per subagent — past the cap (or after `task_cancel`), a finished job's
+raw notice is delivered straight to the main agent instead, so no completion
+is ever lost. `task_cancel <sub-id>` cascades: it also kills the background
+jobs that subagent started.
 
 ## Custom tools
 
@@ -287,7 +258,7 @@ ships with.
 
 shell3 is **unsafe by default**: bash commands run with no restrictions.
 `on_tool_call` fires before **every** tool the model calls — `bash`, `bash_bg`,
-`read`, `list_files`, `edit_file`, and custom tools — and the
+`edit_file`, `read_media`, and custom tools — and the
 handler decides per tool by switching on `t.name`. It is off until you register it;
 a fresh config gates nothing. `t.command` carries the bash command for the two
 bash tools and is **nil** for everything else, so a denylist that matches
@@ -301,9 +272,9 @@ Each handler receives a table `t`:
 
 | Field | Description |
 |-------|-------------|
-| `t.name` | The **real** tool name: `"bash"`, `"bash_bg"`, `"read"`, `"list_files"`, `"edit_file"`, or a custom tool's name. |
+| `t.name` | The **real** tool name: `"bash"`, `"bash_bg"`, `"edit_file"`, `"read_media"`, or a custom tool's name. |
 | `t.command` | The bash command string — only for the two bash tools; **nil** for every other tool. |
-| `t.args` | Raw arguments JSON string (every tool). Gate a non-bash tool by inspecting this, e.g. a `read`/`edit_file` path. |
+| `t.args` | Raw arguments JSON string (every tool). Gate a non-bash tool by inspecting this, e.g. an `edit_file` path. |
 | `t.headless` | `true` when no human asker is attached to the session (in-process subagents, cron jobs) — an `{ask=...}` verdict would auto-deny there. Independent of `disable_safety`. See [headless degradation](#deny-prompt-confirmation-and-headless-degradation). |
 
 ### Verdict contract
@@ -356,9 +327,9 @@ shell3.on_tool_call(function(t)
     end
   end
   -- Other tools fall through to nil (run). Gate them by name + args if you want,
-  -- e.g. refuse to read the secrets file:
-  if t.name == "read" and ENV:match(t.args) then
-    return { block = true, reason = "no reading .env" }
+  -- e.g. refuse to edit the secrets file:
+  if t.name == "edit_file" and ENV:match(t.args) then
+    return { block = true, reason = "no editing .env" }
   end
 end)
 ```
@@ -436,68 +407,112 @@ reaches the model, so keep redaction handlers simple and total.
 
 ## Redirecting hallucinated tools — `stub_tools`
 
-Models trained on other harnesses reflexively reach for `read_file`, `grep`, or
-`write_file`. Register those names as stubs and shell3 returns a one-line
-redirect instead of erroring — a self-correcting nudge back to bash and
-`edit_file`:
+shell3 has no file-read tools, and models trained on other harnesses
+reflexively reach for `read`, `read_file`, `grep`, or `write_file`. Register
+those names as stubs and shell3 returns a one-line redirect instead of erroring
+— a self-correcting nudge back to bash and `edit_file`:
 
 ```lua
 shell3.stub_tools({
-  read_file  = "Use the read tool.",
+  read       = "Use bash: cat <path>, or sed -n 'START,ENDp' <path> for a slice.",
+  read_file  = "Use bash: cat <path>.",
+  list_files = "Use bash: ls <dir> or find <dir> -maxdepth 2.",
   grep       = "Use bash: rg <pattern>.",
   write_file = "Use edit_file (empty old_string creates/overwrites).",
 })
 ```
 
-Stubs are config-global (every agent sees them). Later keys override earlier
-ones, and a stub whose name collides with a real tool is ignored.
+The scaffold ships this block enabled. Stubs are config-global (every agent
+sees them). Later keys override earlier ones, and a stub whose name collides
+with a real tool is ignored.
 
 ## Telegram host — `shell3.telegram`
 
 shell3 runs as a Telegram bot; `shell3.telegram{}` configures it. The bot
-answers exactly one `chat_id` and runs one agent (which may spawn subagents).
+answers exactly one `chat_id` and runs the one configured agent (which may
+spawn subagents).
 
 ```lua
 shell3.telegram({
   token   = shell3.env.secret("TELEGRAM_BOT_TOKEN"),  -- from @BotFather, in .env
   chat_id = "8701499393",                             -- the one chat the bot answers
-  agent   = "code",                                   -- "" → first declared agent
   workdir = "/home/me/.shell3/workdir",               -- "" → the runtime root
-  dashboard = { enabled = true, addr = "127.0.0.1:8765", url = "https://…" },
-  cron = {
-    { name = "daily", schedule = "@daily", agent = "explorer", notify = true,
-      prompt = "Summarize anything noteworthy from the last day." },
+  dashboard = {
+    enabled = true,
+    addr    = "127.0.0.1:8765",
+    tunnel  = "cloudflared tunnel --url http://{addr}",  -- the scaffold default (see below)
+    -- url  = "https://…",                               -- optional fixed address
   },
 })
 ```
 
 - **`token` / `chat_id`** are required. Keep the token in `.env` and reference it
   with `shell3.env.secret`. Only messages from `chat_id` are handled.
-- **`dashboard`** serves the Mini App over HTTP on `addr`. `url` is the public
-  `https` address you expose it at (via a tunnel / `tailscale serve`) so the
-  Telegram menu button can open the Mini App; leave it empty to reach the
-  dashboard only locally (or with `shell3 dash`).
-- **`cron`** is a flat list of jobs. Each fires a subagent (`agent` must name a
-  declared subagent) on `schedule` (a cron expression or `@daily`/`@hourly`/…).
-  `notify = true` wakes the chat with the result; `notify = false` delivers it
-  quietly for the agent's next turn. Arm a changed cron list with `/reload`; run
-  a job on demand with `/run <name>`.
+- **`dashboard`** serves the Mini App over HTTP on `addr`. Give it a public
+  `https` address and the bot **wires the chat's menu button to it
+  automatically** (`setChatMenuButton` — no BotFather step):
+  - **`tunnel`** is a shell command shell3 spawns detached at start, with
+    `{addr}` replaced by the dashboard addr; the first bare `https://…` URL it
+    prints is used. The scaffolded default, `cloudflared tunnel --url
+    http://{addr}`, works with zero account but requires
+    [`cloudflared`](https://github.com/cloudflare/cloudflared) to be installed
+    (e.g. `brew install cloudflared` on macOS) — swap the command for any
+    tunnel that prints an https URL, or delete the line to stay local-only.
+    Output goes to `~/.shell3/tunnel.log`; if no URL appears within 30s (e.g.
+    the binary is missing) the bot still runs and the dashboard just stays
+    local.
+  - **`url`** is a fixed public address you run yourself (a stable tunnel,
+    `tailscale serve`). It overrides `tunnel`.
+  - Leave both empty to reach the dashboard only locally (or with
+    `shell3 dash`).
+
+## Scheduled jobs — `shell3.cron`
+
+`shell3.cron({...})` is a top-level flat list of jobs. Each fires a subagent
+(`agent` must name a declared subagent) on `schedule` (a cron expression or
+`@daily`/`@hourly`/…). The scheduler runs inside `shell3 telegram`.
+
+```lua
+shell3.cron({
+  { name = "daily", schedule = "@daily", agent = "explorer", notify = true,
+    prompt = "Summarize anything noteworthy from the last day." },
+})
+```
+
+`notify = true` wakes the chat with the result; `notify = false` delivers it
+quietly for the agent's next turn. Arm a changed cron list with `/reload`; run
+a job on demand with `/run <name>`.
 
 ## Skills
 
 A skill is a plain `.md` file the agent reads with `cat` when it's relevant —
-there is no `skill` tool. You declare the skill with a name, a one-line
-description (which the agent sees and uses to decide whether to read the body),
-and a path to the markdown:
+there is no `skill` tool and no Lua declaration. An agent lists **directories**,
+and every `*.md` file inside (non-recursive) becomes one skill:
 
 ```lua
-local plans = shell3.skill({
-  name        = "writing-plans",
-  description = "Planning + approval gate before any non-trivial change.",
-  path        = "lib/skills/writing-plans.md",
+shell3.agent({
+  -- ...
+  skills = { "lib/skills" },   -- one or more dirs, resolved relative to shell3.lua
 })
--- then grant it to an agent: skills = { plans },
 ```
+
+Each skill file is industry-standard markdown with YAML frontmatter: a
+required `description` (the one-liner the agent sees and uses to decide
+whether to read the body) and an optional `name` that defaults to the
+filename:
+
+```markdown
+---
+description: Planning + approval gate before any non-trivial change.
+---
+When asked for a non-trivial change, first...
+```
+
+Adding a skill is just dropping a file into a listed dir and `/reload`-ing. A
+missing directory fails the load; a file the loader can't use — empty, no
+frontmatter, no `description`, or a duplicate name — is **skipped with a
+warning** so a stray `.md` never takes the bot down. Run `shell3 health` to
+surface those warnings as hard errors.
 
 Skills granted to an agent are listed by absolute path in its system prompt
 under `## Skills`, so the model knows they exist and when to reach for them. The
@@ -507,6 +522,6 @@ codebase discovery, and web search.
 ## Putting it together
 
 For a full example, read the base config `boot` writes —
-`~/.shell3/shell3.lua`. For drop-in additions (extra agents, more skills, the
+`~/.shell3/shell3.lua`. For drop-in additions (extra subagents, more skills, the
 browser skill, proxy and sandbox setups), see the
 [cookbook](cookbook/README.md).

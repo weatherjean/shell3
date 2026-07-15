@@ -18,6 +18,7 @@ import (
 	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/telegram"
 	"github.com/weatherjean/shell3/internal/telegram/web"
+	"github.com/weatherjean/shell3/internal/tunnel"
 )
 
 func newTelegramCommand() *cobra.Command {
@@ -59,16 +60,16 @@ func newTelegramCommand() *cobra.Command {
 				return fmt.Errorf("telegram chat_id %q is not a number: %w", tg.ChatID, err)
 			}
 
-			// The Telegram bot runs one fixed agent (it spawns subagents but does
-			// not switch agents). Agent picks it; "" → first declared. WorkDir
-			// roots its tools, defaulting to the runtime root when unset.
+			// The Telegram bot runs THE configured agent (it spawns subagents but
+			// does not switch agents). WorkDir roots its tools, defaulting to the
+			// runtime root when unset.
 			//
 			// b is declared before the session so the on_tool_call Asker closure can
 			// capture it; it is assigned just below, before any turn runs (and the
 			// Asker only fires mid-turn).
 			var b *telegram.Bot
 			sess, err := rt.Session(shell3.SessionOpts{
-				Name: "telegram", Agent: tg.Agent, WorkDir: tg.WorkDir, ResumeLatest: true,
+				Name: "telegram", WorkDir: tg.WorkDir, ResumeLatest: true,
 				Asker: func(ctx context.Context, command, reason string) bool {
 					return b.Ask(ctx, command, reason)
 				},
@@ -144,9 +145,28 @@ func newTelegramCommand() *cobra.Command {
 			// menu button is the authenticated launcher: a Mini App opened from it
 			// receives signed initData and passes auth. A reply-keyboard web_app
 			// button gets no initData, so the bar carries only command buttons.
-			if tg.Dashboard.Enabled && tg.Dashboard.URL != "" {
-				if err := client.SetMenuButton(ctx, "dash", tg.Dashboard.URL); err != nil {
-					fmt.Printf("warning: could not set menu button: %v\n", err)
+			// An explicit dashboard.url wins; otherwise a configured
+			// dashboard.tunnel is spawned and its printed https URL used.
+			if tg.Dashboard.Enabled {
+				setMenu := func(url string) {
+					if err := client.SetMenuButton(ctx, "dash", url); err != nil {
+						fmt.Printf("warning: could not set menu button: %v\n", err)
+						return
+					}
+					fmt.Printf("dashboard menu button → %s\n", url)
+				}
+				switch {
+				case tg.Dashboard.URL != "":
+					setMenu(tg.Dashboard.URL)
+				case tg.Dashboard.Tunnel != "" && tg.Dashboard.Addr != "":
+					urls := tunnel.Start(tg.Dashboard.Tunnel, tg.Dashboard.Addr, filepath.Join(tgHome, "tunnel.log"))
+					go func() {
+						if url, ok := <-urls; ok {
+							setMenu(url)
+						} else {
+							fmt.Println("warning: tunnel printed no https URL; dashboard stays local (see tunnel.log)")
+						}
+					}()
 				}
 			}
 

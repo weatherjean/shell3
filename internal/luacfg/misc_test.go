@@ -28,3 +28,19 @@ func TestSecretMissing(t *testing.T) {
 		t.Fatalf("want missing-secret error, got %v", err)
 	}
 }
+
+// TestSubagentsGlobalRemoved pins the clean break: shell3.subagents{max_depth}
+// no longer exists (single-level delegation is enforced by construction), so
+// calling it raises a nil-value error.
+func TestSubagentsGlobalRemoved(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "shell3.lua", `
+shell3.model("main", { base_url="u", api_key="k", model="x" })
+shell3.agent({ name="a", model="main", prompt="p", tools={} })
+shell3.subagents({ max_depth = 2 })
+`)
+	_, err := Load(dir + "/shell3.lua")
+	if err == nil || !contains(err.Error(), "attempt to call a non-function object") {
+		t.Fatalf("want call-error for removed shell3.subagents, got %v", err)
+	}
+}

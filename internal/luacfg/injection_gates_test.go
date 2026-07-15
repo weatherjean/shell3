@@ -10,7 +10,7 @@ shell3.agent({
   name="full", model="opus", prompt="p",
   tools={ bash=true, edit=true },
 })
-shell3.agent({ name="bare", model="opus", prompt="p", tools={} })
+local bare = shell3.subagent({ name="bare", description="d", model="opus", prompt="p", tools={} })
 `)
 	c, err := Load(p)
 	if err != nil {
@@ -18,8 +18,8 @@ shell3.agent({ name="bare", model="opus", prompt="p", tools={} })
 	}
 	defer c.Close()
 
-	agents := c.Agents()
-	full, bare := agents[0], agents[1]
+	full := c.FirstAgent()
+	bare, _ := c.SubagentByName("bare")
 
 	if !full.Gates.Bash || !full.Gates.Edit {
 		t.Fatalf("full: Bash=%v Edit=%v, want both true", full.Gates.Bash, full.Gates.Edit)

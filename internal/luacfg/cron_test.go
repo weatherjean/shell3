@@ -11,10 +11,10 @@ func TestLoadCron(t *testing.T) {
 shell3.model("main", { base_url="https://api.x/v1", api_key="k", model="m-1", context_window=1000 })
 local explorer = shell3.subagent({ name="explorer", model="main", description="d", prompt="p", tools={} })
 shell3.agent({ name="code", model="main", prompt="hi", tools={ subagents={explorer} } })
-shell3.telegram({ token="t", chat_id="1", agent="code", cron = {
+shell3.cron({
   { name="nightly", schedule="0 9 * * *", agent="explorer", prompt="summarize", notify=true },
   { schedule="@hourly", agent="explorer", prompt="check", workdir="/tmp" },
-}})
+})
 `)
 	c, err := Load(dir + "/shell3.lua")
 	if err != nil {
@@ -39,7 +39,7 @@ func TestLoadCronUnknownAgent(t *testing.T) {
 	writeFile(t, dir, "shell3.lua", `
 shell3.model("main", { base_url="https://api.x/v1", api_key="k", model="m-1", context_window=1000 })
 shell3.agent({ name="code", model="main", prompt="hi", tools={} })
-shell3.telegram({ token="t", chat_id="1", agent="code", cron = { { schedule="@daily", agent="ghost", prompt="x" } } })
+shell3.cron({ { schedule="@daily", agent="ghost", prompt="x" } })
 `)
 	_, err := Load(dir + "/shell3.lua")
 	if err == nil || !strings.Contains(err.Error(), `unknown subagent "ghost"`) {
@@ -52,7 +52,7 @@ func TestLoadCronUnknownKey(t *testing.T) {
 	writeFile(t, dir, "shell3.lua", `
 shell3.model("main", { base_url="https://api.x/v1", api_key="k", model="m-1", context_window=1000 })
 shell3.agent({ name="code", model="main", prompt="hi", tools={} })
-shell3.telegram({ token="t", chat_id="1", agent="code", cron = { { schedule="@daily", agent="code", prompt="x", nope=true } } })
+shell3.cron({ { schedule="@daily", agent="code", prompt="x", nope=true } })
 `)
 	_, err := Load(dir + "/shell3.lua")
 	if err == nil || !strings.Contains(err.Error(), `unknown key "nope"`) {
@@ -60,17 +60,17 @@ shell3.telegram({ token="t", chat_id="1", agent="code", cron = { { schedule="@da
 	}
 }
 
-// TestTopLevelCronRemoved pins the clean break: the old top-level shell3.cron
-// global no longer exists, so calling it raises a nil-value error.
-func TestTopLevelCronRemoved(t *testing.T) {
+// TestCronInsideTelegramRemoved pins the clean break: cron is top-level; a
+// cron key inside shell3.telegram{} is a strict-key error.
+func TestCronInsideTelegramRemoved(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "shell3.lua", `
 shell3.model("main", { base_url="https://api.x/v1", api_key="k", model="m-1", context_window=1000 })
 shell3.agent({ name="code", model="main", prompt="hi", tools={} })
-shell3.cron({ jobs = { { schedule="@daily", agent="code", prompt="x" } } })
+shell3.telegram({ token="t", chat_id="1", cron = { { schedule="@daily", agent="code", prompt="x" } } })
 `)
 	_, err := Load(dir + "/shell3.lua")
-	if err == nil || !strings.Contains(err.Error(), "attempt to call a non-function object") {
-		t.Fatalf("want call-error for removed shell3.cron, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), `unknown key "cron"`) {
+		t.Fatalf("want unknown-key error for telegram.cron, got %v", err)
 	}
 }

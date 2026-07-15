@@ -37,6 +37,7 @@ func main() {
 	root.AddCommand(newDevCommand())
 	root.AddCommand(newDashCommand())
 	root.AddCommand(newBootCommand())
+	root.AddCommand(newHealthCommand())
 
 	// Print the brand header for subcommands and --help (TTY only). Root chat
 	// suppresses it — it renders its own banner.

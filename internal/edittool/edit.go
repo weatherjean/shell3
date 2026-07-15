@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/aymanbagabas/go-udiff"
-	"github.com/weatherjean/shell3/internal/fsx"
 )
 
 // Result reports what an edit/write produced so callers can render stats.
@@ -27,8 +26,7 @@ type Result struct {
 // match is deleted. Line endings are preserved: if the original file is CRLF,
 // the replacement is also written CRLF.
 //
-// workDir resolves a relative filePath. I/O always hits the real disk
-// (internal/fsx).
+// workDir resolves a relative filePath. I/O always hits the real disk.
 func EditFile(ctx context.Context, workDir, filePath, oldString, newString string, replaceAll bool) (Result, error) {
 	if filePath == "" {
 		return Result{}, errors.New("file_path is required")
@@ -36,31 +34,31 @@ func EditFile(ctx context.Context, workDir, filePath, oldString, newString strin
 	abs := resolvePath(workDir, filePath)
 
 	if oldString == "" {
-		oldContent, rerr := fsx.ReadTextFile(ctx, abs)
+		oldContent, rerr := readTextFile(abs)
 		created := false
 		switch {
 		case rerr == nil:
 			created = false
 		case errors.Is(rerr, os.ErrNotExist):
 			oldContent, created = "", true
-		case errors.Is(rerr, fsx.ErrIsDir):
+		case errors.Is(rerr, errIsDir):
 			return Result{}, fmt.Errorf("path is a directory, not a file: %s", abs)
 		default:
 			return Result{}, rerr
 		}
-		if err := fsx.WriteTextFile(ctx, abs, newString); err != nil {
+		if err := writeTextFile(abs, newString); err != nil {
 			return Result{}, err
 		}
 		add, del := lineStats(oldContent, newString)
 		return Result{Path: abs, OldContent: oldContent, NewContent: newString, Created: created, Additions: add, Deletions: del}, nil
 	}
 
-	original, err := fsx.ReadTextFile(ctx, abs)
+	original, err := readTextFile(abs)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Result{}, fmt.Errorf("file %s not found", abs)
 		}
-		if errors.Is(err, fsx.ErrIsDir) {
+		if errors.Is(err, errIsDir) {
 			return Result{}, fmt.Errorf("path is a directory, not a file: %s", abs)
 		}
 		return Result{}, err
@@ -86,7 +84,7 @@ func EditFile(ctx context.Context, workDir, filePath, oldString, newString strin
 	if rerr != nil {
 		return Result{}, rerr
 	}
-	if err := fsx.WriteTextFile(ctx, abs, updated); err != nil {
+	if err := writeTextFile(abs, updated); err != nil {
 		return Result{}, err
 	}
 	add, del := lineStats(original, updated)

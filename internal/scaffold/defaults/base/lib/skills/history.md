@@ -38,10 +38,6 @@ Or print raw JSON lines with line numbers:
 
     cat -n .shell3_project/runs/<id>/messages.jsonl
 
-Use `shell3 read-session <session-id>` for a formatted chronological dump:
-
-    shell3 read-session 20060102T150405.000000000
-
 ## Subagent runs
 
 A subagent's conversation is a session like any other, stored under

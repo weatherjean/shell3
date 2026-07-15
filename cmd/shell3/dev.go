@@ -26,7 +26,6 @@ import (
 func newDevCommand() *cobra.Command {
 	var (
 		configPath string
-		agent      string
 		resume     bool
 	)
 	cmd := &cobra.Command{
@@ -56,15 +55,11 @@ func newDevCommand() *cobra.Command {
 			}
 			defer rt.Close()
 
-			// Default to the Telegram host's agent + workdir so dev exercises the
-			// exact configuration the bot runs. --agent overrides.
+			// Use the Telegram host's workdir so dev exercises the exact
+			// configuration the bot runs.
 			tg := rt.Telegram()
-			if agent == "" {
-				agent = tg.Agent
-			}
 			sess, err := rt.Session(shell3.SessionOpts{
 				Name:         "dev",
-				Agent:        agent,
 				WorkDir:      tg.WorkDir,
 				ResumeLatest: resume,
 				// A human is at the terminal: auto-approve on_tool_call ask verdicts
@@ -90,7 +85,6 @@ func newDevCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&configPath, "config", "c", "", "Config name (→ ~/.shell3/<name>.lua) or path to a *.lua file")
-	cmd.Flags().StringVar(&agent, "agent", "", "Agent to run (default: the shell3.telegram{} agent)")
 	cmd.Flags().BoolVar(&resume, "resume", false, "Continue the latest session (multi-turn across invocations)")
 	return cmd
 }

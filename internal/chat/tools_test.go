@@ -22,7 +22,6 @@ func TestCompactInto_IncludesFilePointerSections(t *testing.T) {
 	compactInto(CompactSummary{
 		Summary:        "summary",
 		ImportantFiles: []string{"a.go"},
-		ReadFiles:      []string{"b.go", "c/d.go"},
 	}, nil, sess, nil, applog.Noop{}, "", "")
 	if len(sess.messages) < 1 {
 		t.Fatalf("expected at least a continuation message, got %d", len(sess.messages))
@@ -31,7 +30,6 @@ func TestCompactInto_IncludesFilePointerSections(t *testing.T) {
 	continuation := sess.messages[0].Content
 	for _, want := range []string{
 		"<modified-files>", "- a.go", "</modified-files>",
-		"<read-files>", "- b.go", "- c/d.go", "</read-files>",
 	} {
 		if !strings.Contains(continuation, want) {
 			t.Fatalf("expected continuation to contain %q, got:\n%s", want, continuation)

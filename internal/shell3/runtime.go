@@ -40,8 +40,6 @@ type SessionOpts struct {
 	// Falls back to a new session when none exists. A front-end sets this to
 	// rejoin the live conversation rather than spawning empty sessions on restart.
 	ResumeLatest bool
-	// Depth is the subagent nesting depth; 0 for the root user session.
-	Depth int
 }
 
 // HostEventKind discriminates out-of-turn runtime events.
@@ -110,10 +108,6 @@ type Runtime struct {
 	// jobs manages in-process background jobs (command and subagent jobs).
 	// Owned by this Runtime; cancelled at Close.
 	jobs *jobManager
-	// subagentMaxDepthVal is the configured max subagent nesting depth (0 = unset;
-	// subagentMaxDepth() applies the default of 3).
-	subagentMaxDepthVal int
-
 	// telegram + cron mirror the shell3.telegram{} config the runtime was built
 	// with (and re-derived on Reload). Read via Telegram()/Cron(). See telegram.go.
 	telegram TelegramConfig
@@ -163,20 +157,19 @@ func NewRuntime(ctx context.Context, spec RuntimeSpec) (*Runtime, error) {
 				Agent: o.Agent, WorkDir: o.WorkDir, Headless: o.Headless, OutPath: o.OutPath,
 			})
 		},
-		subagentDesc:        parts.SubagentDescription,
-		cleanup:             cleanup,
-		store:               parts.Store(),
-		events:              make(chan HostEvent, 64),
-		jobEvents:           make(chan JobProgress, 256),
-		workDir:             workDir,
-		configPath:          spec.ConfigPath,
-		homeDir:             homeDir,
-		ctx:                 ctx,
-		cancel:              cancel,
-		sessions:            map[string]*Session{},
-		subagentMaxDepthVal: parts.SubagentMaxDepth,
-		telegram:            telegramFromParts(parts),
-		cron:                cronFromParts(parts),
+		subagentDesc: parts.SubagentDescription,
+		cleanup:      cleanup,
+		store:        parts.Store(),
+		events:       make(chan HostEvent, 64),
+		jobEvents:    make(chan JobProgress, 256),
+		workDir:      workDir,
+		configPath:   spec.ConfigPath,
+		homeDir:      homeDir,
+		ctx:          ctx,
+		cancel:       cancel,
+		sessions:     map[string]*Session{},
+		telegram:     telegramFromParts(parts),
+		cron:         cronFromParts(parts),
 	}
 	rt.jobs = newJobManager(rt, parts.BackgroundMaxConcurrent)
 	// Implement the documented cancellation contract: cancelling the parent ctx
@@ -206,16 +199,6 @@ func (rt *Runtime) JobEvents() <-chan JobProgress { return rt.jobEvents }
 // surfaces that need to show the agent/operator which file to edit.
 func (rt *Runtime) ConfigPath() (string, error) {
 	return agentsetup.ResolveConfigPath(rt.configPath, rt.homeDir)
-}
-
-// subagentMaxDepth returns the maximum allowed subagent nesting depth.
-// Reads the Lua-configured value (shell3.subagents{ max_depth = N }); defaults
-// to 3 when unset (subagentMaxDepthVal == 0).
-func (rt *Runtime) subagentMaxDepth() int {
-	if rt.subagentMaxDepthVal <= 0 {
-		return 3
-	}
-	return rt.subagentMaxDepthVal
 }
 
 func (rt *Runtime) emit(ev HostEvent) {

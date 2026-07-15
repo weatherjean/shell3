@@ -67,9 +67,9 @@ func TestBuild_LoadsConfig(t *testing.T) {
 	}
 }
 
-// writeTwoAgentConfig writes a config with two agents ("first", "second")
-// sharing one model, for exercising initial-agent selection.
-func writeTwoAgentConfig(t *testing.T, dir string) {
+// writeNamedAgentConfig writes a config with one agent ("first") and one
+// subagent ("helper") sharing one model, for exercising agent resolution.
+func writeNamedAgentConfig(t *testing.T, dir string) {
 	t.Helper()
 	lua := `
 shell3.model("main", {
@@ -78,8 +78,8 @@ shell3.model("main", {
   model = "test-model",
   context_window = 1000,
 })
+shell3.subagent({ name = "helper", description = "d", model = "main", prompt = "you are helper", tools = {} })
 shell3.agent({ name = "first",  model = "main", prompt = "you are first",  tools = {} })
-shell3.agent({ name = "second", model = "main", prompt = "you are second", tools = {} })
 `
 	if err := os.WriteFile(filepath.Join(dir, "shell3.lua"), []byte(lua), 0o644); err != nil {
 		t.Fatal(err)
@@ -89,9 +89,9 @@ shell3.agent({ name = "second", model = "main", prompt = "you are second", tools
 	}
 }
 
-func TestBuild_Agent_DefaultsToFirst(t *testing.T) {
+func TestBuild_Agent_DefaultsToTheAgent(t *testing.T) {
 	tmp := t.TempDir()
-	writeTwoAgentConfig(t, tmp)
+	writeNamedAgentConfig(t, tmp)
 
 	cfg, cleanup, err := buildConfig(agentsetup.Options{
 		ConfigPath: filepath.Join(tmp, "shell3.lua"),
@@ -105,28 +105,10 @@ func TestBuild_Agent_DefaultsToFirst(t *testing.T) {
 	if cfg.ModeLabel != "first" {
 		t.Errorf("default active agent = %q, want %q", cfg.ModeLabel, "first")
 	}
-}
-
-func TestBuild_Agent_SelectsNamed(t *testing.T) {
-	tmp := t.TempDir()
-	writeTwoAgentConfig(t, tmp)
-
-	cfg, cleanup, err := buildConfig(agentsetup.Options{
-		ConfigPath: filepath.Join(tmp, "shell3.lua"),
-		CWD:        tmp,
-		HomeDir:    t.TempDir(),
-	}, "second")
-	if err != nil {
-		t.Fatalf("Build: %v", err)
-	}
-	defer cleanup()
-	if cfg.ModeLabel != "second" {
-		t.Errorf("active agent = %q, want %q", cfg.ModeLabel, "second")
-	}
 	// The persona is the agent's verbatim Lua prompt; the host Environment facts
 	// now live in a standing reminder (set by internal/shell3), NOT the system prompt.
-	if !strings.HasPrefix(cfg.Personality.SystemPrompt, "you are second") {
-		t.Errorf("system prompt = %q, want a prefix of the second agent's prompt", cfg.Personality.SystemPrompt)
+	if !strings.HasPrefix(cfg.Personality.SystemPrompt, "you are first") {
+		t.Errorf("system prompt = %q, want a prefix of the agent's prompt", cfg.Personality.SystemPrompt)
 	}
 	if strings.Contains(cfg.Personality.SystemPrompt, "## Environment") {
 		t.Errorf("system prompt should NOT contain Environment section: %q", cfg.Personality.SystemPrompt)
@@ -135,7 +117,7 @@ func TestBuild_Agent_SelectsNamed(t *testing.T) {
 
 func TestBuild_Agent_UnknownErrors(t *testing.T) {
 	tmp := t.TempDir()
-	writeTwoAgentConfig(t, tmp)
+	writeNamedAgentConfig(t, tmp)
 
 	_, _, err := buildConfig(agentsetup.Options{
 		ConfigPath: filepath.Join(tmp, "shell3.lua"),
@@ -189,13 +171,13 @@ shell3.agent({ name = "tester", model = "main", prompt = "hi", tools = {} })
 	t.Fatal("run_proxy command was not spawned on model activation")
 }
 
-// twoAgentOptions writes the two-agent config ("first", "second") via
-// writeTwoAgentConfig and returns Options pointing at it, with a fresh isolated
-// HomeDir so no real ~/.shell3 is touched.
-func twoAgentOptions(t *testing.T) agentsetup.Options {
+// namedAgentOptions writes the one-agent config ("first", plus subagent
+// "helper") via writeNamedAgentConfig and returns Options pointing at it, with
+// a fresh isolated HomeDir so no real ~/.shell3 is touched.
+func namedAgentOptions(t *testing.T) agentsetup.Options {
 	t.Helper()
 	tmp := t.TempDir()
-	writeTwoAgentConfig(t, tmp)
+	writeNamedAgentConfig(t, tmp)
 	return agentsetup.Options{
 		ConfigPath: filepath.Join(tmp, "shell3.lua"),
 		CWD:        tmp,
@@ -203,11 +185,11 @@ func twoAgentOptions(t *testing.T) agentsetup.Options {
 	}
 }
 
-// TestSessionConfigs_IndependentAgentSwitch pins the phase-1 invariant: two
-// configs derived from one Parts hold independent agent state — switching one
-// never changes the other (the old global activeIdx is gone).
-func TestSessionConfigs_IndependentAgentSwitch(t *testing.T) {
-	parts, cleanup, err := agentsetup.BuildParts(twoAgentOptions(t))
+// TestSessionConfigs_Independent pins the invariant: two configs derived from
+// one Parts hold independent agent state — re-resolving one never changes the
+// other (there is no process-global active-agent state).
+func TestSessionConfigs_Independent(t *testing.T) {
+	parts, cleanup, err := agentsetup.BuildParts(namedAgentOptions(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,21 +204,21 @@ func TestSessionConfigs_IndependentAgentSwitch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rt, err := b.SwitchAgent("second")
+	rt, err := b.SwitchAgent("first")
 	if err != nil {
 		t.Fatal(err)
 	}
 	b.ApplyActiveAgent(rt)
 
 	if a.ModeLabel != "first" {
-		t.Fatalf("config A's agent changed to %q when B switched", a.ModeLabel)
+		t.Fatalf("config A's agent changed to %q when B re-resolved", a.ModeLabel)
 	}
-	if b.ModeLabel != "second" {
-		t.Fatalf("config B should be second, got %q", b.ModeLabel)
+	if b.ModeLabel != "first" {
+		t.Fatalf("config B should be first, got %q", b.ModeLabel)
 	}
-	// RefreshPrompt follows each session's own agent.
-	if a.RefreshPrompt() == b.RefreshPrompt() {
-		t.Fatal("RefreshPrompt should render different prompts for different active agents")
+	// Each config renders its own prompt independently.
+	if a.RefreshPrompt() != b.RefreshPrompt() {
+		t.Fatal("both configs run the same agent; prompts should match")
 	}
 }
 

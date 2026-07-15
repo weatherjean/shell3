@@ -59,9 +59,6 @@ type Parts struct {
 	// configPath is the resolved absolute shell3.lua that produced this Parts;
 	// recorded per session so resume can reload the right config.
 	configPath string
-	// SubagentMaxDepth mirrors LoadedConfig.SubagentMaxDepth (0 = unset; default
-	// applied at the runtime read site).
-	SubagentMaxDepth int
 	// BackgroundMaxConcurrent mirrors LoadedConfig.BackgroundMaxConcurrent (0 =
 	// unset; default applied at newJobManager).
 	BackgroundMaxConcurrent int
@@ -81,7 +78,7 @@ func (p *Parts) ModelCount() int { return len(p.lc.Models) }
 // Telegram returns the parsed shell3.telegram{} block (zero value if absent).
 func (p *Parts) Telegram() luacfg.TelegramConfig { return p.lc.Telegram() }
 
-// Cron returns the cron jobs declared under shell3.telegram{ cron = {...} }.
+// Cron returns the cron jobs declared via top-level shell3.cron{...}.
 func (p *Parts) Cron() []luacfg.CronJob { return p.lc.Cron() }
 
 // AgentNames returns declared agent names in declaration order.
@@ -138,11 +135,10 @@ func subagentToAgent(sa luacfg.Subagent) luacfg.Agent {
 		ModelName:      sa.ModelName,
 		Prompt:         sa.Prompt,
 		Gates:          sa.Gates,
-		CustomTools:    sa.CustomTools,
-		Skills:         sa.Skills,
-		SkillsDisabled: sa.SkillsDisabled,
-		Environment:    sa.Environment,
-		Delegation:     sa.Delegation,
+		CustomTools: sa.CustomTools,
+		Skills:      sa.Skills,
+		Environment: sa.Environment,
+		Delegation:  sa.Delegation,
 	}
 }
 
@@ -214,6 +210,13 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 		toolNames = append(toolNames, t.Name)
 	}
 
+	// ActiveSkills is the display list (status tool, dashboard): resolved
+	// skill names in index order.
+	skillNames := make([]string, 0, len(a.Skills))
+	for _, s := range a.Skills {
+		skillNames = append(skillNames, s.Name)
+	}
+
 	return chat.ActiveAgent{
 		Personality: persona.Persona{
 			Name:         a.Name,
@@ -222,7 +225,7 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 			Parameters:   rp,
 		},
 		ModeLabel:    a.Name,
-		ActiveSkills: a.Skills,
+		ActiveSkills: skillNames,
 		ActiveTools:  toolNames,
 		LLM:          client,
 		Params:       rp,
@@ -406,7 +409,6 @@ func BuildParts(opts Options) (*Parts, func(), error) {
 	p := &Parts{lc: b.lc, st: b.st, proxy: b.proxy,
 		log: b.log, root: b.opts.CWD, runsDir: b.l.Runs,
 		configPath:              b.configPath,
-		SubagentMaxDepth:        b.lc.SubagentMaxDepth,
 		BackgroundMaxConcurrent: b.lc.BackgroundMaxConcurrent,
 	}
 	return p, b.closeAll, nil

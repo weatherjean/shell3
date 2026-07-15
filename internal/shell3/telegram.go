@@ -6,7 +6,6 @@ import "github.com/weatherjean/shell3/internal/agentsetup"
 type TelegramConfig struct {
 	Token     string
 	ChatID    string
-	Agent     string
 	WorkDir   string
 	Dashboard DashboardConfig
 }
@@ -16,9 +15,10 @@ type DashboardConfig struct {
 	Enabled bool
 	Addr    string
 	URL     string
+	Tunnel  string
 }
 
-// CronJob mirrors one parsed cron job (shell3.telegram cron list).
+// CronJob mirrors one parsed cron job (top-level shell3.cron list).
 type CronJob struct {
 	Name     string
 	Schedule string
@@ -32,7 +32,7 @@ type CronJob struct {
 // (zero value when the config declares none).
 func (rt *Runtime) Telegram() TelegramConfig { return rt.telegram }
 
-// Cron returns the cron jobs declared under shell3.telegram{ cron = {...} }.
+// Cron returns the cron jobs declared via top-level shell3.cron{...}.
 func (rt *Runtime) Cron() []CronJob { return rt.cron }
 
 // telegramFromParts maps the agentsetup/luacfg telegram config onto the shell3
@@ -41,9 +41,10 @@ func (rt *Runtime) Cron() []CronJob { return rt.cron }
 func telegramFromParts(p *agentsetup.Parts) TelegramConfig {
 	tg := p.Telegram()
 	return TelegramConfig{
-		Token: tg.Token, ChatID: tg.ChatID, Agent: tg.Agent, WorkDir: tg.WorkDir,
+		Token: tg.Token, ChatID: tg.ChatID, WorkDir: tg.WorkDir,
 		Dashboard: DashboardConfig{
-			Enabled: tg.Dashboard.Enabled, Addr: tg.Dashboard.Addr, URL: tg.Dashboard.URL,
+			Enabled: tg.Dashboard.Enabled, Addr: tg.Dashboard.Addr,
+			URL: tg.Dashboard.URL, Tunnel: tg.Dashboard.Tunnel,
 		},
 	}
 }

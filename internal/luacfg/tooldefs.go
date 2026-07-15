@@ -21,12 +21,6 @@ func ToolDefs(g ToolGates, custom []CustomTool) []llm.ToolDefinition {
 	if g.Media {
 		defs = append(defs, readMediaTool)
 	}
-	if g.Read {
-		defs = append(defs, readTool)
-	}
-	if g.ListFiles {
-		defs = append(defs, listFilesTool)
-	}
 	for _, ct := range custom {
 		defs = append(defs, llm.ToolDefinition{
 			Name:        ct.Name,
@@ -141,7 +135,7 @@ var TaskCancelTool = llm.ToolDefinition{
 
 var bashTool = llm.ToolDefinition{
 	Name:        "bash",
-	Description: "Execute a shell command in the project directory. Returns combined stdout and stderr. Non-interactive only — editors and REPLs (vim, less, python) will hang, so run them non-interactively (flags, heredocs, -c). Default timeout is 10s; pass timeout_seconds (max 600) for slower commands. To read a whole text file prefer the `read` tool.",
+	Description: "Execute a shell command in the project directory. Returns combined stdout and stderr. Non-interactive only — editors and REPLs (vim, less, python) will hang, so run them non-interactively (flags, heredocs, -c). Default timeout is 10s; pass timeout_seconds (max 600) for slower commands. Read files with cat / sed -n / rg; list directories with ls / find.",
 	Parameters: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -162,7 +156,7 @@ var editFileTool = llm.ToolDefinition{
 	Name: "edit_file",
 	Description: "WRITE-ONLY tool. Edits a file by exact string replacement, or writes/overwrites it when old_string is empty. " +
 		"NEVER call this tool to read a file — it has no read mode and an empty new_string DELETES the matched chunk. " +
-		"To inspect a file use the `read` tool (text) or `bash` with `sed -n`/`head` for slices. To search use `bash` with `grep` or `rg`. " +
+		"To inspect a file use `bash` with `cat`/`sed -n`/`head`. To search use `bash` with `grep` or `rg`. " +
 		"Calling edit_file with empty new_string when you only wanted to read will silently delete content; this is destructive and cannot be undone. " +
 		"To create or overwrite a file pass an empty old_string and the full content as new_string. " +
 		"To delete a chunk, pass an empty new_string (intentional). " +
@@ -190,41 +184,6 @@ var readMediaTool = llm.ToolDefinition{
 		"type": "object",
 		"properties": map[string]any{
 			"path": map[string]any{"type": "string", "description": "Path to the media file (absolute or relative to the project root)."},
-		},
-		"required": []string{"path"},
-	},
-}
-
-var listFilesTool = llm.ToolDefinition{
-	Name: "list_files",
-	Description: "List a directory as an indented tree (directories first, suffixed \"/\"). " +
-		"Pairs with the read tool so a read-only agent can explore the filesystem without bash. " +
-		"Start SHALLOW: the default depth is 2 — widen `depth` only as needed, or narrow by passing a deeper `path` or `ignore` globs (e.g. [\"node_modules\", \"*.lock\"]). " +
-		"No automatic filtering: hidden and vendored files are shown unless you ignore them. " +
-		"Output is capped at 1000 entries with a truncation notice. To find files by name use bash glob/rg; to read a file use the read tool.",
-	Parameters: map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"path":   map[string]any{"type": "string", "description": "Directory to list (absolute or relative to the project root). Defaults to the project root."},
-			"depth":  map[string]any{"type": "integer", "description": "Max levels to recurse. Defaults to 2. Use 1 for just the immediate directory."},
-			"ignore": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Glob patterns to exclude. A pattern without \"/\" matches the base name (e.g. \"*.test.go\"); with \"/\" it matches the path relative to the listed directory."},
-		},
-	},
-}
-
-var readTool = llm.ToolDefinition{
-	Name: "read",
-	Description: "Read a text file with paging. Returns raw file content (no line-number prefixes). " +
-		"Output is capped at 2000 lines or 50KB, whichever comes first; when truncated the footer gives the exact offset to continue from. " +
-		"Use offset (1-indexed line) and limit to page through large files. " +
-		"This tool is for TEXT files — images/audio go through read_media; raw bytes via bash xxd. " +
-		"To search file contents use bash with rg/grep.",
-	Parameters: map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"path":   map[string]any{"type": "string", "description": "Path to the file (absolute or relative to the project root)."},
-			"offset": map[string]any{"type": "integer", "description": "1-indexed line to start from. Defaults to 1."},
-			"limit":  map[string]any{"type": "integer", "description": "Max lines to return. Defaults to 2000."},
 		},
 		"required": []string{"path"},
 	},

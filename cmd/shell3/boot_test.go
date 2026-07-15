@@ -105,8 +105,8 @@ func TestValueFlagWins(t *testing.T) {
 // TestBootEndToEnd drives the real `shell3 boot` flow against a temp HOME: it
 // asserts the cold-start redirect before boot, runs runBoot with flags (no TTY),
 // then verifies the written tree, .env (empty key + Brave placeholder, 0600),
-// that the generated config actually loads through luacfg with the code/plan
-// agents, the no-clobber guard, and that --force regenerates.
+// that the generated config actually loads through luacfg with the code
+// agent, the no-clobber guard, and that --force regenerates.
 func TestBootEndToEnd(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -125,7 +125,7 @@ func TestBootEndToEnd(t *testing.T) {
 	dir := filepath.Join(home, ".shell3")
 	for _, p := range []string{
 		"shell3.lua", "lib/tools.lua",
-		"lib/skills/brainstorming.lua", ".env",
+		"lib/skills/brainstorming.md", ".env",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
 			t.Errorf("missing %s: %v", p, err)
@@ -166,8 +166,8 @@ func TestBootEndToEnd(t *testing.T) {
 	}
 	defer c.Close()
 	agents := c.Agents()
-	if len(agents) != 2 || agents[0].Name != "code" || agents[1].Name != "plan" {
-		t.Errorf("agents = %v, want [code plan]", agentNames(agents))
+	if len(agents) != 1 || agents[0].Name != "code" {
+		t.Errorf("agents = %v, want [code]", agentNames(agents))
 	}
 
 	// No-clobber: a second boot without --force refuses.

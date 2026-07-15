@@ -37,5 +37,5 @@ A search snippet is not the full page. Do not imply you read a page you only saw
 ## Cost and context hygiene
 
 - Avoid repeatedly searching the same query; refine based on results.
-- Prune large successful tool outputs after extracting what you need.
+- Extract what you need from large outputs into a short note; do not re-fetch them (old outputs are auto-pruned for you).
 - Prefer a targeted `web_fetch` over many broad searches.

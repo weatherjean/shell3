@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -263,6 +264,17 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool) {
 	fmt.Println("in .env and chat_id is filled in shell3.telegram{}, then run:")
 	fmt.Println()
 	fmt.Println("Run:  shell3 telegram")
+	fmt.Println()
+	fmt.Println("The Mini App dashboard is exposed through a cloudflared tunnel by")
+	fmt.Println("default (free, no account) — install it so the dashboard is reachable")
+	fmt.Println("from your phone (e.g. `brew install cloudflared` on macOS):")
+	fmt.Println("  https://github.com/cloudflare/cloudflared")
+	fmt.Println("Not installed? The bot still runs; the dashboard just stays local.")
+	fmt.Println("Prefer another tunnel? Edit dashboard.tunnel/url in shell3.lua.")
+	if _, err := exec.LookPath("cloudflared"); err != nil {
+		fmt.Println()
+		fmt.Println("NOTE: cloudflared was not found on PATH on this machine.")
+	}
 }
 
 // intValue reads a positive-integer config value: flag wins, else prompt (TTY)

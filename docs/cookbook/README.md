@@ -3,23 +3,21 @@
 `shell3 boot` writes a lean, working config. This cookbook is everything it
 *doesn't* write by default — drop-in recipes you copy in when you want them.
 
-Each `lib/...` file here mirrors the base config's module layout. The pattern is
-always the same three steps:
-
-1. copy the file into `~/.shell3/lib/`,
-2. `require` it in your `shell3.lua`,
-3. wire it into an agent.
+Each `lib/...` file here mirrors the base config's module layout.
 
 A reminder on how the two extensible pieces work, since the recipes lean on both:
 
-- **Skills** are plain `.md` files the agent reads with `cat`. Each
-  `lib/skills/<name>.lua` just declares
-  `shell3.skill{ name, description, path="lib/skills/<name>.md" }`, and the actual
-  prose lives in the sibling `.md`.
+- **Skills** are plain `.md` files with YAML frontmatter (a required
+  `description`, an optional `name` defaulting to the filename) that the agent
+  reads with `cat`. Installing one is a single step: copy the `.md` into a
+  directory your agent lists under `skills = { ... }` — the scaffold's agent
+  already lists `lib/skills/`, so `~/.shell3/lib/skills/` just works. Verify
+  with `shell3 health`, then `/reload`.
 - **Custom tools** are declarative bash-command templates
-  (`shell3.tool{ command=... }`), not Lua handlers. Parameters arrive as
-  `$`-named environment variables, and declared `secrets` are exported into the
-  command's environment.
+  (`shell3.tool{ command=... }`), not Lua handlers: copy the file into
+  `~/.shell3/lib/`, `require` it in your `shell3.lua`, and wire it into an
+  agent. Parameters arrive as `$`-named environment variables, and declared
+  `secrets` are exported into the command's environment.
 
 See [../configuration.md](../configuration.md) for the full reference on models,
 agents, tools, and skills.
@@ -33,29 +31,28 @@ agents, tools, and skills.
 
 ## Usage
 
-```lua
--- in ~/.shell3/shell3.lua
-local plans   = require("lib.skills.writing-plans")
-local browser = require("lib.skills.browser")
-
--- then, in an agent:
---   skills = { plans, browser },
+```bash
+# skills: drop the .md into a granted skills dir — that's the whole install
+cp writing-plans.md ~/.shell3/lib/skills/
+shell3 health   # confirms it parsed; then /reload in the bot
 ```
 
 ## Contents
 
 **Skills** (`lib/skills/`)
 
-- `writing-plans.lua` — a planning and approval gate before non-trivial changes.
-- `executing-plans.lua` — safe execution plus a git workflow once a plan is agreed.
-- `codebase-discovery.lua` — navigating unfamiliar code and pruning context aggressively.
-- `web-search.lua` — guidance for web research with the `brave_search` / `web_fetch` tools.
+- `writing-plans.md` — a planning and approval gate before non-trivial changes.
+- `executing-plans.md` — safe execution plus a git workflow once a plan is agreed.
+- `codebase-discovery.md` — navigating unfamiliar code and pruning context aggressively.
+- `web-search.md` — guidance for web research with the `brave_search` / `web_fetch` tools.
+
+(The `browser` skill — a real, headed Chrome via puppeteer-core — ships in the
+base scaffold now, enabled by default.)
 
 **Tools and agents** (`lib/`)
 
-- `browser.lua` — drive a real, headed Chrome via puppeteer-core (the `browser` skill).
 - `tools.lua` — a custom-tool template to copy from.
-- `extra-agents.lua` — adding more agents (e.g. a read-only `review` agent).
+- `extra-agents.lua` — adding more subagents (e.g. a read-only `review` specialist).
 
 **Provider and host recipes**
 

@@ -11,7 +11,8 @@ func TestLoadTelegram(t *testing.T) {
 shell3.telegram({
   token = "bot-token",
   chat_id = "123456789",
-  dashboard = { enabled = true, addr = "127.0.0.1:8765", url = "https://h.ts.net/" },
+  dashboard = { enabled = true, addr = "127.0.0.1:8765", url = "https://h.ts.net/",
+                tunnel = "cloudflared tunnel --url http://{addr}" },
 })
 shell3.agent({ name="a", model="main", prompt="hi", tools={} })
 shell3.model("main", { base_url="https://api.x/v1", api_key="k", model="m-1", context_window=1000 })
@@ -27,6 +28,9 @@ shell3.model("main", { base_url="https://api.x/v1", api_key="k", model="m-1", co
 	}
 	if !tg.Dashboard.Enabled || tg.Dashboard.Addr != "127.0.0.1:8765" || tg.Dashboard.URL != "https://h.ts.net/" {
 		t.Fatalf("bad dashboard: %+v", tg.Dashboard)
+	}
+	if tg.Dashboard.Tunnel != "cloudflared tunnel --url http://{addr}" {
+		t.Fatalf("bad dashboard tunnel: %+v", tg.Dashboard)
 	}
 }
 
