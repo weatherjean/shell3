@@ -1,5 +1,3 @@
-//go:build unix
-
 package chat
 
 import (
@@ -75,6 +73,24 @@ func gateBash(ctx context.Context, cfg ToolConfig, name, command, argsJSON strin
 	return []string{"bash", "-c", command}, "", false
 }
 
+// ConfigureGroupKill puts cmd and its descendants in their own process group
+// and signals the whole tree (SIGTERM to the group) on cancel — bare SIGKILL
+// on the shell leaves grandchildren (e.g. node spawned by npx, a server
+// started with `&`) holding our stdio pipes. waitDelay bounds how long Wait
+// blocks on those pipes after the process exits, so a lingering grandchild
+// can't wedge the caller forever. Shared by the foreground bash tool and the
+// background job runtime (internal/shell3).
+func ConfigureGroupKill(cmd *exec.Cmd, waitDelay time.Duration) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+	}
+	cmd.WaitDelay = waitDelay
+}
+
 // runBashCapture runs argv (argv[0] with argv[1:] as args) in workdir with
 // extraEnv appended to os.Environ() (nil = inherit only), capturing combined
 // stdout+stderr, honoring timeout + cancellation. It returns the elided output
@@ -91,17 +107,7 @@ func runBashCapture(ctx context.Context, argv []string, workdir string, extraEnv
 	if len(extraEnv) > 0 {
 		c.Env = append(os.Environ(), extraEnv...)
 	}
-	// Put bash and its descendants in their own process group so we can
-	// signal the whole tree on cancel/timeout — bare SIGKILL on bash
-	// leaves grandchildren (e.g. node spawned by npx) holding our pipes.
-	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	c.Cancel = func() error {
-		if c.Process == nil {
-			return nil
-		}
-		return syscall.Kill(-c.Process.Pid, syscall.SIGTERM)
-	}
-	c.WaitDelay = bashWaitDelay
+	ConfigureGroupKill(c, bashWaitDelay)
 	var buf bytes.Buffer
 	c.Stdout = &buf
 	c.Stderr = &buf
@@ -162,19 +168,4 @@ func parseBashArgsFull(raw string) (string, time.Duration, error) {
 		t = MaxBashTimeoutSeconds
 	}
 	return args.Command, time.Duration(t) * time.Second, nil
-}
-
-// ParseBashArgs extracts the "command" field from bash tool JSON args,
-// falling back to the raw string when the args don't parse. DISPLAY ONLY:
-// the raw fallback makes it unsafe for execution paths (a malformed blob
-// would run as the command) — those use parseBashArgsFull. Exported so the
-// front-end render layer can format bash headers identically.
-func ParseBashArgs(raw string) string {
-	var args struct {
-		Command string `json:"command"`
-	}
-	if err := json.Unmarshal([]byte(raw), &args); err != nil {
-		return raw
-	}
-	return args.Command
 }

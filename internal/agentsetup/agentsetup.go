@@ -59,9 +59,6 @@ type Parts struct {
 	// configPath is the resolved absolute shell3.lua that produced this Parts;
 	// recorded per session so resume can reload the right config.
 	configPath string
-	// BackgroundMaxConcurrent mirrors LoadedConfig.BackgroundMaxConcurrent (0 =
-	// unset; default applied at newJobManager).
-	BackgroundMaxConcurrent int
 }
 
 // Store returns the file-native runs store (always opened; nil only when the
@@ -71,6 +68,10 @@ func (p *Parts) Store() *runs.Store { return p.st }
 // ConfigPath returns the resolved absolute shell3.lua path that produced these
 // parts (recorded per session for resume).
 func (p *Parts) ConfigPath() string { return p.configPath }
+
+// BackgroundMaxConcurrent returns the shell3.background{ max_concurrent = N }
+// setting (0 = unset; default applied at newJobManager).
+func (p *Parts) BackgroundMaxConcurrent() int { return p.lc.BackgroundMaxConcurrent }
 
 // ModelCount returns the number of declared models.
 func (p *Parts) ModelCount() int { return len(p.lc.Models) }
@@ -126,20 +127,11 @@ func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
 }
 
 // subagentToAgent adapts a registered subagent to the luacfg.Agent shape that
-// runtimeForAgent/BuildPersonaFor consume. Subagents is left empty (nested
-// subagents are resolved per session, not at load time). Keep in sync with
-// luacfg.Subagent's fields.
+// runtimeForAgent/BuildPersonaFor consume. The shared core copies wholesale;
+// Subagents stays empty (delegation is single-level by construction) and the
+// model-facing Description is dropped (it matters to the parent, not here).
 func subagentToAgent(sa luacfg.Subagent) luacfg.Agent {
-	return luacfg.Agent{
-		Name:           sa.Name,
-		ModelName:      sa.ModelName,
-		Prompt:         sa.Prompt,
-		Gates:          sa.Gates,
-		CustomTools: sa.CustomTools,
-		Skills:      sa.Skills,
-		Environment: sa.Environment,
-		Delegation:  sa.Delegation,
-	}
+	return luacfg.Agent{AgentCommon: sa.AgentCommon}
 }
 
 // runtimeForAgent assembles the full chat runtime for the given agent value.
@@ -222,7 +214,6 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 			Name:         a.Name,
 			SystemPrompt: prompt,
 			Tools:        toolDefs,
-			Parameters:   rp,
 		},
 		ModeLabel:    a.Name,
 		ActiveSkills: skillNames,
@@ -272,9 +263,13 @@ func EnvironmentReminder(configPath, runsDir, model, sessionID string) string {
 	if configPath != "" {
 		fmt.Fprintf(&b, "- config: `%s` (your shell3.lua; its directory holds your skills/lib — edit it via the self-evolve skill)\n", configPath)
 	}
-	b.WriteString("- history: every conversation is verbatim JSONL at `.shell3_project/runs/<id>/messages.jsonl` (one message per line; `meta.json` beside it holds model/status/timestamps)\n")
-	b.WriteString("- search history: `rg <terms> .shell3_project/runs` (ordinary ripgrep over the JSONL — no special CLI)\n")
-	b.WriteString("- background job logs: `.shell3_project/runs/jobs/<job-id>.jsonl` (stdout+stderr) with a tiny `<job-id>.status` (pid, started_at, exit code)\n")
+	// Derive the model-facing paths from paths.ProjectDirName (its single
+	// source): a renamed project dir must not leave the reminder teaching the
+	// model paths that no longer exist.
+	relRuns := paths.ProjectDirName + "/runs"
+	fmt.Fprintf(&b, "- history: every conversation is verbatim JSONL at `%s/<id>/messages.jsonl` (one message per line; `meta.json` beside it holds model/status/timestamps)\n", relRuns)
+	fmt.Fprintf(&b, "- search history: `rg <terms> %s` (ordinary ripgrep over the JSONL — no special CLI)\n", relRuns)
+	fmt.Fprintf(&b, "- background job logs: `%s/jobs/<job-id>.jsonl` (stdout+stderr) with a tiny `<job-id>.status` (pid, started_at, exit code)\n", relRuns)
 	b.WriteString("</system-reminder>")
 	return b.String()
 }
@@ -408,8 +403,7 @@ func BuildParts(opts Options) (*Parts, func(), error) {
 	b.openStore()
 	p := &Parts{lc: b.lc, st: b.st, proxy: b.proxy,
 		log: b.log, root: b.opts.CWD, runsDir: b.l.Runs,
-		configPath:              b.configPath,
-		BackgroundMaxConcurrent: b.lc.BackgroundMaxConcurrent,
+		configPath: b.configPath,
 	}
 	return p, b.closeAll, nil
 }

@@ -30,7 +30,7 @@ func TestCompactInto_ResetsReminderLog(t *testing.T) {
 	sess.reminderLog = []ReminderRecord{{Seq: 1, Text: "old reminder"}, {Seq: 3, Text: "old reminder 2"}}
 	tail := sess.messages[2:]
 
-	compactInto(CompactSummary{Summary: "did stuff"}, nil, sess, tail, applog.Noop{}, "", "")
+	compactInto(CompactSummary{Summary: "did stuff"}, nil, sess, tail, applog.Noop{}, "", "", "")
 
 	if len(sess.reminderLog) != 0 {
 		t.Fatalf("reminderLog must be reset after compaction (stale anchors break History), got %+v", sess.reminderLog)
@@ -68,7 +68,7 @@ func TestCompactInto_AbortsOnFailedRoll(t *testing.T) {
 	}
 	defer os.Chmod(runsDir, 0o755)
 
-	ok := compactInto(CompactSummary{Summary: "should not apply"}, st, sess, sess.messages[1:], applog.Noop{}, "", "")
+	ok := compactInto(CompactSummary{Summary: "should not apply"}, st, sess, sess.messages[1:], applog.Noop{}, "", "", "")
 	if ok {
 		t.Fatal("compactInto should report failure when the session roll fails")
 	}

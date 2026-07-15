@@ -44,24 +44,6 @@ func TestTail(t *testing.T) {
 	}
 }
 
-func TestClipRunes(t *testing.T) {
-	for _, tc := range []struct {
-		in   string
-		n    int
-		want string
-	}{
-		{"hello", 10, "hello"},
-		{"hello", 5, "hello"},
-		{"hello!", 5, "hell…"}, // n-1 runes + ellipsis = n runes total
-		{"héllo!", 3, "hé…"},   // rune-count, not bytes
-		{"hi", 0, "…"},         // n clamped to 1 → 0 runes + ellipsis
-	} {
-		if got := ClipRunes(tc.in, tc.n); got != tc.want {
-			t.Errorf("ClipRunes(%q, %d) = %q, want %q", tc.in, tc.n, got, tc.want)
-		}
-	}
-}
-
 // TestTail_RuneSafety pins that a byte-budget cut never lands mid-UTF-8
 // sequence for any small budget.
 func TestTail_RuneSafety(t *testing.T) {

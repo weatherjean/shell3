@@ -1,4 +1,7 @@
-// Package llm provides an OpenAI-compatible streaming LLM client.
+// Package llm holds the vendor-neutral LLM types (messages, tool definitions,
+// stream events, request params) and capability interfaces shared by the chat
+// core and the provider adapters; the OpenAI-compatible client itself lives in
+// internal/adapter/openai.
 package llm
 
 // Role identifies the author of a conversation message.

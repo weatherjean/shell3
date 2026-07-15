@@ -71,7 +71,7 @@ func newDashCommand() *cobra.Command {
 			return startDashboard(ctx, addr, srv.Handler())
 		},
 	}
-	cmd.Flags().StringVarP(&configPath, "config", "c", "", "Config name (→ ~/.shell3/<name>.lua) or path to a *.lua file")
+	addConfigFlag(cmd, &configPath)
 	cmd.Flags().StringVar(&addr, "addr", "", "Listen address (default: the config's dashboard addr, else 127.0.0.1:8765)")
 	return cmd
 }

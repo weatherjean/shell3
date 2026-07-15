@@ -120,7 +120,7 @@ func (s *Store) readMeta(id string) (Meta, error) {
 // quadruple its file ops for a recency stamp nobody reads at sub-second
 // resolution.
 func (s *Store) AppendMessage(id string, m llm.Message) error {
-	if err := appendLine(filepath.Join(s.sessDir(id), "messages.jsonl"), "message", m); err != nil {
+	if err := appendLine(s.messagesPath(id), "message", m); err != nil {
 		return err
 	}
 	s.touchMu.Lock()
@@ -141,7 +141,7 @@ func (s *Store) AppendMessage(id string, m llm.Message) error {
 // tail, and failing the whole load would make the session unresumable —
 // exactly when resume matters most.
 func (s *Store) LoadMessages(id string) ([]llm.Message, error) {
-	b, err := os.ReadFile(filepath.Join(s.sessDir(id), "messages.jsonl"))
+	b, err := os.ReadFile(s.messagesPath(id))
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -215,6 +215,10 @@ func (s *Store) remindersPath(id string) string {
 	return filepath.Join(s.sessDir(id), "reminders.jsonl")
 }
 
+func (s *Store) messagesPath(id string) string {
+	return filepath.Join(s.sessDir(id), "messages.jsonl")
+}
+
 // AppendReminder appends one reminder as a JSON line to runs/<id>/reminders.jsonl.
 func (s *Store) AppendReminder(id string, seq int, text string) error {
 	return appendLine(s.remindersPath(id), "reminder", ReminderLine{Seq: seq, Text: text})
@@ -245,7 +249,7 @@ func (s *Store) TruncateReminders(id string) error {
 // when the file is absent or unreadable. Used by jobManager.transcript to
 // surface the child session's persisted message log after completion.
 func (s *Store) Transcript(id string) string {
-	b, err := os.ReadFile(filepath.Join(s.sessDir(id), "messages.jsonl"))
+	b, err := os.ReadFile(s.messagesPath(id))
 	if err != nil {
 		return ""
 	}

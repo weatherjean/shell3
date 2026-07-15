@@ -38,8 +38,33 @@ func (s *Session) injectNotification(rt *Runtime, n notify.Notification) {
 // agentDoneResultCap bounds (in runes) how much of a subagent's final summary is
 // injected into the parent's context on completion, so a long final message can't
 // blow up the parent. The full result stays available via `task_status <id>` and
-// the :background modal transcript.
+// the dashboard's job transcript view.
 const agentDoneResultCap = 2000
+
+// renderAgentNotice renders the agent_done/agent_update notice: verb and label
+// vary; the relay contract is shared. The notice carries the subagent's own
+// summary (Preview) — the human has NOT seen it, so the reminder must tell the
+// model to RELAY it (an earlier "act on it directly" wording let the model
+// treat the task as done and stay silent, dropping the answer). The summary is
+// CAPPED so a huge final message can't blow up the parent's context; the model
+// fetches the rest with `task_status <id>`.
+func renderAgentNotice(n notify.Notification, verb, defaultStatus, label string) string {
+	status := n.Status
+	if status == "" {
+		status = defaultStatus
+	}
+	msg := fmt.Sprintf("subagent %s %s (%s).", n.ID, verb, status)
+	if n.Preview == "" {
+		return msg + fmt.Sprintf(" It produced no summary text; call `task_status %s` to read its output, then relay it to the user.", n.ID)
+	}
+	result, cut := strutil.CutRunes(n.Preview, agentDoneResultCap)
+	if cut {
+		result += fmt.Sprintf("… (truncated; call `task_status %s` for the full result)", n.ID)
+	}
+	msg += " " + label + " " + result
+	msg += " That is the subagent's own summary — relay it to the user now (they have NOT seen it yet): summarize or present it in your reply."
+	return msg
+}
 
 func renderNotification(n notify.Notification) string {
 	// Defense in depth: these fields carry untrusted text (command output,
@@ -61,9 +86,6 @@ func renderNotification(n notify.Notification) string {
 			// orphaned job's notice is delivered to the root session instead.
 			msg += fmt.Sprintf(" (%s)", n.Status)
 		}
-		if n.Log != "" {
-			msg += fmt.Sprintf(" Output log: %s.", n.Log)
-		}
 		if n.Cmd != "" {
 			msg += fmt.Sprintf(" cmd: %s", n.Cmd)
 		}
@@ -73,52 +95,16 @@ func renderNotification(n notify.Notification) string {
 		return msg
 	case notify.KindAgentDone:
 		// A subagent finished; its completion was injected in-process and the
-		// parent surfaces this on an idle wake turn with no user message. The
-		// notice carries the subagent's own result summary (Preview) — the human
-		// has NOT seen it, so the reminder must tell the model to RELAY it (an
-		// earlier "act on it directly, no need to read anything else" wording let
-		// the model treat the task as done and stay silent, dropping the answer).
-		// The summary is CAPPED here so a subagent that ends with a huge final
-		// message can't blow up the parent's context; the model fetches the rest
-		// with `task_status <id>`. n.ID is the job id (e.g. sub1), matching the
-		// task_* tools and the "started subagent sub1" spawn message.
-		status := n.Status
-		if status == "" {
-			status = "done"
-		}
-		msg := fmt.Sprintf("subagent %s finished (%s).", n.ID, status)
-		if n.Preview != "" {
-			result, cut := strutil.CutRunes(n.Preview, agentDoneResultCap)
-			if cut {
-				result += fmt.Sprintf("… (result truncated; call `task_status %s` for the full result, or open the :background modal for the transcript)", n.ID)
-			}
-			msg += " Result: " + result
-			msg += " That result is the subagent's own summary — relay it to the user now (they have NOT seen it yet): summarize or present it in your reply."
-		} else {
-			msg += fmt.Sprintf(" It produced no final summary text; call `task_status %s` to read its output, then relay it to the user.", n.ID)
-		}
-		return msg
+		// parent surfaces this on an idle wake turn with no user message. n.ID is
+		// the job id (e.g. sub1), matching the task_* tools and the "started
+		// subagent sub1" spawn message.
+		return renderAgentNotice(n, "finished", "done", "Result:")
 	case notify.KindAgentUpdate:
 		// A follow-up from a subagent that already reported done: one of its
 		// background jobs finished afterwards, the child session ran a follow-up
 		// turn over the result, and Preview carries that turn's summary. Same
-		// relay contract and cap as agent_done: the human has NOT seen it.
-		status := n.Status
-		if status == "" {
-			status = "background job finished"
-		}
-		msg := fmt.Sprintf("subagent %s follow-up (%s).", n.ID, status)
-		if n.Preview != "" {
-			result, cut := strutil.CutRunes(n.Preview, agentDoneResultCap)
-			if cut {
-				result += fmt.Sprintf("… (truncated; call `task_status %s` for the rest)", n.ID)
-			}
-			msg += " Update: " + result
-			msg += " Relay this update to the user now (they have NOT seen it yet)."
-		} else {
-			msg += fmt.Sprintf(" It produced no summary text; call `task_status %s` to read its output, then relay it to the user.", n.ID)
-		}
-		return msg
+		// relay contract and cap as agent_done.
+		return renderAgentNotice(n, "follow-up", "background job finished", "Update:")
 	default:
 		// Unknown / future kinds: deliver a generic pointer rather than dropping
 		// it, so a producer ahead of the host still gets noticed.
@@ -128,9 +114,6 @@ func renderNotification(n notify.Notification) string {
 		}
 		if n.Status != "" {
 			msg += fmt.Sprintf(" (%s)", n.Status)
-		}
-		if n.Transcript != "" {
-			msg += fmt.Sprintf(". Transcript: %s", n.Transcript)
 		}
 		if n.Preview != "" {
 			msg += fmt.Sprintf(". %s", n.Preview)

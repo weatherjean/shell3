@@ -152,26 +152,22 @@ func NewRuntime(ctx context.Context, spec RuntimeSpec) (*Runtime, error) {
 	}
 	ctx, cancel := context.WithCancel(parent)
 	rt := &Runtime{
-		sessionConfig: func(o SessionOpts) (chat.Config, error) {
-			return parts.SessionConfig(agentsetup.SessionOptions{
-				Agent: o.Agent, WorkDir: o.WorkDir, Headless: o.Headless, OutPath: o.OutPath,
-			})
-		},
-		subagentDesc: parts.SubagentDescription,
-		cleanup:      cleanup,
-		store:        parts.Store(),
-		events:       make(chan HostEvent, 64),
-		jobEvents:    make(chan JobProgress, 256),
-		workDir:      workDir,
-		configPath:   spec.ConfigPath,
-		homeDir:      homeDir,
-		ctx:          ctx,
-		cancel:       cancel,
-		sessions:     map[string]*Session{},
-		telegram:     telegramFromParts(parts),
-		cron:         cronFromParts(parts),
+		sessionConfig: sessionConfigFrom(parts),
+		subagentDesc:  parts.SubagentDescription,
+		cleanup:       cleanup,
+		store:         parts.Store(),
+		events:        make(chan HostEvent, 64),
+		jobEvents:     make(chan JobProgress, 256),
+		workDir:       workDir,
+		configPath:    spec.ConfigPath,
+		homeDir:       homeDir,
+		ctx:           ctx,
+		cancel:        cancel,
+		sessions:      map[string]*Session{},
+		telegram:      parts.Telegram(),
+		cron:          parts.Cron(),
 	}
-	rt.jobs = newJobManager(rt, parts.BackgroundMaxConcurrent)
+	rt.jobs = newJobManager(rt, parts.BackgroundMaxConcurrent())
 	// Implement the documented cancellation contract: cancelling the parent ctx
 	// tears the runtime down just as Close does. Close itself cancels rt.ctx,
 	// so this watcher always unwinds — the second Close is an idempotent no-op.

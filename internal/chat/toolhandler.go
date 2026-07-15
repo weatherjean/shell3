@@ -71,7 +71,8 @@ type ToolConfig struct {
 	// this way; bash_bg passes nil). Nil func ⇒ background jobs disabled.
 	StartBashBg func(command, workdir string, argv, env []string) (string, error)
 	// StartSubagent launches a background subagent (child session) and returns its
-	// id. It enforces the recursion depth guard and concurrency cap. Nil ⇒ subagents
+	// id. It enforces the concurrency cap; single-level delegation holds by
+	// construction (subagents are never given the task tool). Nil ⇒ subagents
 	// unavailable.
 	StartSubagent func(agent, prompt, desc string) (string, error)
 	// ListJobs returns a compact formatted list of all background jobs (running +

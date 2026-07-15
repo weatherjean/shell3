@@ -202,7 +202,7 @@ func runToolCallTurn(t *testing.T, lc *luacfg.LoadedConfig, dir, prompt string, 
 
 	turnCfg := chat.TurnConfig{
 		LLM:               fake,
-		Personality:       persona.BasePersona("you are a test", toolDefs),
+		Personality:       persona.Persona{Name: "base", SystemPrompt: "you are a test", Tools: toolDefs},
 		StatusLine:        "test │ x",
 		Log:               applog.Noop{},
 		ResolveCustomTool: lc.ResolveCustomCall,
@@ -286,7 +286,7 @@ shell3.agent({ name = "a", model = "m", prompt = "p", tools = { bash = true } })
 
 	turnCfg := chat.TurnConfig{
 		LLM:         fake,
-		Personality: persona.BasePersona("you are a test", toolDefs),
+		Personality: persona.Persona{Name: "base", SystemPrompt: "you are a test", Tools: toolDefs},
 		StatusLine:  "test │ x",
 		Log:         applog.Noop{},
 		ToolConfig: chat.ToolConfig{

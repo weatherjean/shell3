@@ -52,7 +52,7 @@ func TestTaskStatusHandler_CallsJobStatus(t *testing.T) {
 		},
 	}
 	args := json.RawMessage(`{"id":"sub1"}`)
-	out, err := TaskStatusHandler{}.Execute(context.Background(), "t", args, cfg)
+	out, err := TaskStatusHandler().Execute(context.Background(), "t", args, cfg)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestTaskStatusHandler_MissingID(t *testing.T) {
 		JobStatus: func(id string) string { return "should not be called" },
 	}
 	args := json.RawMessage(`{}`)
-	out, err := TaskStatusHandler{}.Execute(context.Background(), "t", args, cfg)
+	out, err := TaskStatusHandler().Execute(context.Background(), "t", args, cfg)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestTaskCancelHandler_CallsCancelJob(t *testing.T) {
 		},
 	}
 	args := json.RawMessage(`{"id":"sub2"}`)
-	out, err := TaskCancelHandler{}.Execute(context.Background(), "t", args, cfg)
+	out, err := TaskCancelHandler().Execute(context.Background(), "t", args, cfg)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestTaskCancelHandler_MissingID(t *testing.T) {
 		CancelJob: func(id string) string { return "should not be called" },
 	}
 	args := json.RawMessage(`{}`)
-	out, err := TaskCancelHandler{}.Execute(context.Background(), "t", args, cfg)
+	out, err := TaskCancelHandler().Execute(context.Background(), "t", args, cfg)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}

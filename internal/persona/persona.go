@@ -6,14 +6,9 @@ package persona
 
 import "github.com/weatherjean/shell3/internal/llm"
 
-// ToolDef is an alias so callers don't import llm directly.
-type ToolDef = llm.ToolDefinition
-
-// Persona holds a ready-to-use agent: system prompt, exposed tool schema, and
-// provider request parameters.
+// Persona holds a ready-to-use agent: system prompt and exposed tool schema.
 type Persona struct {
 	Name         string
 	SystemPrompt string
 	Tools        []llm.ToolDefinition
-	Parameters   llm.RequestParams
 }

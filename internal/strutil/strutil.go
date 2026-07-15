@@ -1,7 +1,7 @@
 // Package strutil holds the rune-safe string truncation helpers shared by the
 // runtime and front-ends. Byte-cap helpers (Truncate, Tail) bound storage and
-// context budgets; rune-count helpers (ClipRunes, CutRunes) bound display
-// columns and injected-summary lengths.
+// context budgets; the rune-count helper (CutRunes) bounds display columns and
+// injected-summary lengths.
 package strutil
 
 import "unicode/utf8"
@@ -48,18 +48,6 @@ func Tail(s string, max int) string {
 		cut++
 	}
 	return "…" + s[cut:]
-}
-
-// ClipRunes truncates s to at most n runes total, the last of which becomes an
-// ellipsis when s overflows. n < 1 is treated as 1.
-func ClipRunes(s string, n int) string {
-	if n < 1 {
-		n = 1
-	}
-	if r := []rune(s); len(r) > n {
-		return string(r[:n-1]) + "…"
-	}
-	return s
 }
 
 // CutRunes returns s truncated to at most n runes and whether it was cut. No

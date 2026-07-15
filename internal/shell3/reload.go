@@ -110,18 +110,13 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 
 	// 3. Swap shared state: close the OLD parts, install the new.
 	oldCleanup := rt.cleanup // closes old VM, proxies, old store handle
-	cronJobs := cronFromParts(newParts)
-	rt.sessionConfig = func(o SessionOpts) (chat.Config, error) {
-		return newParts.SessionConfig(agentsetup.SessionOptions{
-			Agent: o.Agent, WorkDir: o.WorkDir,
-			Headless: o.Headless, OutPath: o.OutPath,
-		})
-	}
+	cronJobs := newParts.Cron()
+	rt.sessionConfig = sessionConfigFrom(newParts)
 	rt.subagentDesc = newParts.SubagentDescription
 	rt.cleanup = newCleanup
 	rt.store = newParts.Store()
 	rt.cron = cronJobs
-	rt.telegram = telegramFromParts(newParts)
+	rt.telegram = newParts.Telegram()
 	oldCleanup()
 
 	// 4. Re-derive each live session in place (keep history s.sess), restore overrides.
@@ -129,7 +124,7 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 	// The job manager's concurrency cap is armed at NewRuntime and not rebuilt
 	// here (live jobs hold slots on it); surface a changed knob instead of
 	// silently ignoring it.
-	if newMax := newParts.BackgroundMaxConcurrent; rt.jobs != nil {
+	if newMax := newParts.BackgroundMaxConcurrent(); rt.jobs != nil {
 		if newMax <= 0 {
 			newMax = defaultMaxConcurrent
 		}

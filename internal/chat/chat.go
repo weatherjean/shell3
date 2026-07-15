@@ -181,8 +181,8 @@ func NewHandlers() map[string]ToolHandler {
 		BashBgHandler{},
 		TaskHandler{},
 		TaskListHandler{},
-		TaskStatusHandler{},
-		TaskCancelHandler{},
+		TaskStatusHandler(),
+		TaskCancelHandler(),
 		EditHandler{},
 	}
 	m := make(map[string]ToolHandler, len(handlers))

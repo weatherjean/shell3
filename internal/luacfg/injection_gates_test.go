@@ -53,7 +53,7 @@ func TestToolDefsGates(t *testing.T) {
 
 func TestBuildPersonaPromptOnly(t *testing.T) {
 	// No engine-injected blocks: a skill-less agent's persona is the verbatim prompt.
-	bare := &LoadedConfig{agents: []Agent{{Name: "bare", Prompt: "ONLY PROMPT"}}}
+	bare := &LoadedConfig{agents: []Agent{{AgentCommon: AgentCommon{Name: "bare", Prompt: "ONLY PROMPT"}}}}
 	if got := bare.BuildPersonaFor(bare.FirstAgent()); got != "ONLY PROMPT" {
 		t.Fatalf("bare persona should be the verbatim prompt only, got:\n%s", got)
 	}

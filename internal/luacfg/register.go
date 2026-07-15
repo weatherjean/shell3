@@ -237,7 +237,7 @@ func validateParamNames(tool string, params map[string]any) error {
 // map; a later key overwrites an earlier one. Values must be strings.
 func (c *LoadedConfig) luaStubTools(L *lua.LState) int {
 	forEachStringPair(L, L.CheckTable(1), "stub_tools", "strings (tool names)", "a string (redirect message)",
-		func(name, msg string) { c.StubTools[name] = msg })
+		func(name, msg string) { c.stubTools[name] = msg })
 	return 0
 }
 
@@ -377,12 +377,12 @@ func (c *LoadedConfig) parseAgentCommon(L *lua.LState, opts *lua.LTable, kind, n
 func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 	opts := L.CheckTable(1)
 	mustKeys(L, opts, "agent", agentKeys)
-	a := Agent{
+	a := Agent{AgentCommon: AgentCommon{
 		Name:      optStr(opts, "name"),
 		ModelName: optStr(opts, "model"),
 		Prompt:    optStr(opts, "prompt"),
 		PromptCmd: optStr(opts, "prompt_cmd"),
-	}
+	}}
 	if a.Name == "" {
 		L.RaiseError("agent: name is required")
 	}
@@ -416,11 +416,13 @@ func (c *LoadedConfig) luaSubagent(L *lua.LState) int {
 	opts := L.CheckTable(1)
 	mustKeys(L, opts, "subagent", subagentKeys)
 	s := Subagent{
-		Name:        optStr(opts, "name"),
 		Description: optStr(opts, "description"),
-		ModelName:   optStr(opts, "model"),
-		Prompt:      optStr(opts, "prompt"),
-		PromptCmd:   optStr(opts, "prompt_cmd"),
+		AgentCommon: AgentCommon{
+			Name:      optStr(opts, "name"),
+			ModelName: optStr(opts, "model"),
+			Prompt:    optStr(opts, "prompt"),
+			PromptCmd: optStr(opts, "prompt_cmd"),
+		},
 	}
 	if s.Name == "" || s.Description == "" {
 		L.RaiseError("subagent: name and description are required")

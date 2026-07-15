@@ -209,6 +209,10 @@ func NewSession(opts SessionOpts) *Session {
 	}
 	if len(opts.InitialMessages) > 0 {
 		s.messages = append(s.messages, opts.InitialMessages...)
+		// The seed comes from the store (resume): it is already on disk, so the
+		// persisted high-water mark starts past it — a re-flush would double the
+		// stored history on every resume.
+		s.persistedLen = len(opts.InitialMessages)
 	}
 	return s
 }
@@ -302,12 +306,17 @@ func (s *Session) RestoreReminders() error {
 func (s *Session) Reminders() []ReminderRecord {
 	s.msgMu.RLock()
 	defer s.msgMu.RUnlock()
+	return s.remindersLocked()
+}
+
+// remindersLocked builds the standing-first reminder snapshot. Callers hold
+// msgMu (read or write).
+func (s *Session) remindersLocked() []ReminderRecord {
 	out := make([]ReminderRecord, 0, len(s.standingReminders)+len(s.reminderLog))
 	for _, t := range s.standingReminders {
 		out = append(out, ReminderRecord{Seq: 0, Text: t})
 	}
-	out = append(out, slices.Clone(s.reminderLog)...)
-	return out
+	return append(out, slices.Clone(s.reminderLog)...)
 }
 
 // HistorySnapshot returns a consistent point-in-time copy of the conversation
@@ -323,12 +332,7 @@ func (s *Session) HistorySnapshot() ([]llm.Message, []ReminderRecord) {
 	defer s.msgMu.RUnlock()
 	msgs := make([]llm.Message, len(s.messages))
 	copy(msgs, s.messages)
-	rems := make([]ReminderRecord, 0, len(s.standingReminders)+len(s.reminderLog))
-	for _, t := range s.standingReminders {
-		rems = append(rems, ReminderRecord{Seq: 0, Text: t})
-	}
-	rems = append(rems, slices.Clone(s.reminderLog)...)
-	return msgs, rems
+	return msgs, s.remindersLocked()
 }
 
 // StandingReminders returns a copy of the host standing reminders (Environment,

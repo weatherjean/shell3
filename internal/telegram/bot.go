@@ -160,16 +160,12 @@ func withReplyContext(text, replyTo string) string {
 	if replyTo == "" {
 		return text
 	}
-	lines := strings.Split(truncate(replyTo, 1500), "\n")
+	lines := strings.Split(strutil.Truncate(replyTo, 1500), "\n")
 	for i, ln := range lines {
 		lines[i] = "> " + ln
 	}
 	return strings.Join(lines, "\n") + "\n\n" + text
 }
-
-// truncate caps s at ~n bytes with an ellipsis, never splitting a UTF-8 rune
-// (rune-unsafe slicing would send Telegram invalid text).
-func truncate(s string, n int) string { return strutil.Truncate(s, n) }
 
 // keepTyping shows the "typing…" chat action and refreshes it every 4s (the
 // action expires after ~5s) until the returned stop is called.

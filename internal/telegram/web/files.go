@@ -4,7 +4,6 @@ package web
 
 import (
 	"bytes"
-	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -79,11 +78,10 @@ func (s *Server) resolveInConfig(rel string) (string, bool) {
 // root). Directories sort before files, each alphabetical.
 func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 	rel := r.URL.Query().Get("path")
-	w.Header().Set("Content-Type", "application/json")
 
 	out := filesResp{Path: filepath.Clean("/" + rel)[1:], Entries: []fileEntry{}}
 	if s.configDir == "" {
-		_ = json.NewEncoder(w).Encode(out) // dashboard ran without a config dir
+		writeJSON(w, out) // dashboard ran without a config dir
 		return
 	}
 	dir, ok := s.resolveInConfig(rel)
@@ -113,7 +111,7 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 		}
 		return strings.ToLower(a.Name) < strings.ToLower(b.Name)
 	})
-	_ = json.NewEncoder(w).Encode(out)
+	writeJSON(w, out)
 }
 
 // handleFile returns the contents of one file under the config root
@@ -121,7 +119,6 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 // flagged rather than dumped.
 func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	rel := r.URL.Query().Get("path")
-	w.Header().Set("Content-Type", "application/json")
 
 	full, ok := s.resolveInConfig(rel)
 	if !ok {
@@ -139,7 +136,7 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	if isCredentialFile(filepath.Base(full)) {
 		out.Redacted = true
 		out.Content = "🔒 redacted — credential file (contents withheld)"
-		_ = json.NewEncoder(w).Encode(out)
+		writeJSON(w, out)
 		return
 	}
 
@@ -159,5 +156,5 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	} else {
 		out.Content = string(data)
 	}
-	_ = json.NewEncoder(w).Encode(out)
+	writeJSON(w, out)
 }

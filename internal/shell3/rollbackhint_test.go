@@ -2,7 +2,10 @@ package shell3
 
 import (
 	"errors"
+	"fmt"
 	"testing"
+
+	"github.com/weatherjean/shell3/internal/llm"
 )
 
 func TestRollbackHint(t *testing.T) {
@@ -29,5 +32,18 @@ func TestRollbackHint(t *testing.T) {
 	}
 	if RollbackHint(nil) != "" {
 		t.Error("nil err should yield no hint")
+	}
+}
+
+// The adapter wraps provider API errors in llm.StatusError; the hint must key
+// off the typed code (regardless of how the provider phrases the message).
+func TestRollbackHint_TypedStatusError(t *testing.T) {
+	badReq := &llm.StatusError{Code: 400, Err: errors.New("provider-specific phrasing with no recognizable status text")}
+	if RollbackHint(fmt.Errorf("wrapped: %w", badReq)) == "" {
+		t.Error("expected hint for typed 400")
+	}
+	unauth := &llm.StatusError{Code: 401, Err: errors.New("nope")}
+	if RollbackHint(unauth) != "" {
+		t.Error("did not expect hint for typed 401")
 	}
 }

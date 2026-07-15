@@ -79,7 +79,7 @@ func newDevCommand() *cobra.Command {
 			return cli.FollowDevJobs(ctx, os.Stdout, rt, sess, 3*time.Minute)
 		},
 	}
-	cmd.Flags().StringVarP(&configPath, "config", "c", "", "Config name (→ ~/.shell3/<name>.lua) or path to a *.lua file")
+	addConfigFlag(cmd, &configPath)
 	cmd.Flags().BoolVar(&resume, "resume", false, "Continue the latest session (multi-turn across invocations)")
 	return cmd
 }

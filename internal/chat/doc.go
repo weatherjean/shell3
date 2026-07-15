@@ -11,21 +11,19 @@
 //	sess := chat.NewSession(chat.SessionOpts{StoreID: id, Sink: func(ev chat.Event) {
 //	    // render or log ev
 //	}})
-//	sess.Start(meta)
 //	sess.Run(ctx, turnCfg, "hello")
-//	sess.End(chat.StatusOK)
 //
 // Key entry points:
 //
 //   - NewSession constructs a Session that delivers events to SessionOpts.Sink.
 //   - Session.Run executes one user turn end-to-end, persisting to a store if
 //     one is configured.
-//   - RunTurn is the lower-level loop used by Session.Run; front-ends can call
-//     it directly when they need to manage history or persistence themselves.
+//   - RunTurn is the lower-level loop used by Session.Run.
 //   - NewHandlers builds the built-in tool dispatch map.
 //
 // Concurrency: the sink is invoked synchronously on the goroutine running the
 // turn, in emit order — when Run returns, every event has been delivered. Tool
-// handlers run synchronously within the turn; background processes
-// (BashBgHandler) are the exception and are detached from the session lifecycle.
+// handlers run synchronously within the turn; background work (BashBgHandler,
+// TaskHandler) is handed to internal/shell3's in-process job runtime, which
+// supervises it and injects completion notices into later turns.
 package chat

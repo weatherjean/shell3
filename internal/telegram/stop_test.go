@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/weatherjean/shell3/internal/llm/fakellm"
 	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/shell3/shell3test"
 )
@@ -17,7 +18,7 @@ import (
 // in-flight turn (turnActive clears) and reply "stopped".
 func TestStopCancelsInFlightTurn(t *testing.T) {
 	fc := newFakeClient()
-	blk := shell3test.NewBlockingLLM()
+	blk := fakellm.NewBlocking()
 	rt := shell3test.NewRuntimeForTestClient(t, blk)
 	sess, err := rt.Session(shell3.SessionOpts{Name: "telegram", Agent: "code"})
 	if err != nil {

@@ -5,6 +5,7 @@ package telegram
 import (
 	"context"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/telegram/mdhtml"
@@ -37,9 +38,11 @@ func (b *Bot) drainTurn(ch <-chan shell3.Event) string {
 	return strings.TrimSpace(sb.String())
 }
 
-// chunk splits s into pieces no longer than max bytes, preferring newline
-// boundaries.
-func chunk(s string, max int) []string {
+// chunk splits s into pieces no longer than tgMaxMessage bytes, preferring
+// newline boundaries. Cuts land on rune boundaries — a mid-rune split would
+// send Telegram invalid UTF-8, which it rejects with a 400 (losing the chunk).
+func chunk(s string) []string {
+	const max = tgMaxMessage
 	if len(s) <= max {
 		return []string{s}
 	}
@@ -48,6 +51,9 @@ func chunk(s string, max int) []string {
 		cut := strings.LastIndex(s[:max], "\n")
 		if cut <= 0 {
 			cut = max
+			for cut > 0 && !utf8.RuneStart(s[cut]) {
+				cut--
+			}
 		}
 		out = append(out, s[:cut])
 		s = strings.TrimPrefix(s[cut:], "\n")
@@ -63,7 +69,7 @@ func (b *Bot) sendReply(ctx context.Context, text string) {
 	if text == "" {
 		text = "(no output)"
 	}
-	for _, c := range chunk(text, tgMaxMessage) {
+	for _, c := range chunk(text) {
 		// Render the agent's Markdown to Telegram-safe HTML so bold/italics/code
 		// show up. If Telegram still rejects it, fall back to the raw text.
 		html := mdhtml.ToTelegramHTML(c)

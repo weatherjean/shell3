@@ -48,6 +48,11 @@ func (s *Session) SetMessages(msgs []llm.Message) {
 	s.msgMu.Lock()
 	defer s.msgMu.Unlock()
 	s.messages = msgs
+	// Clamp the persisted high-water mark to the new (shorter) history:
+	// /clear rotates onto a fresh store session (mark must drop to 0 so the new
+	// session persists at all), and /rollback keeps the id but must flush new
+	// messages from the truncation point onward.
+	s.persistedLen = min(s.persistedLen, len(msgs))
 	// Reminder anchors index into the message slice; a /clear or /rollback that
 	// replaces history invalidates them, so drop the log rather than show stale
 	// reminders against the new conversation.

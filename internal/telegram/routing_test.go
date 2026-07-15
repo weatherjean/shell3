@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestHandleMsg_IdleSendsReply(t *testing.T) {
@@ -80,8 +81,26 @@ func TestHandleMsg_WrongChatDropped(t *testing.T) {
 
 func TestChunk_SplitsAt4096(t *testing.T) {
 	long := strings.Repeat("a", 5000)
-	chunks := chunk(long, 4096)
+	chunks := chunk(long)
 	if len(chunks) != 2 || len(chunks[0]) > 4096 {
 		t.Fatalf("bad chunking: %d chunks, first len %d", len(chunks), len(chunks[0]))
+	}
+}
+
+// A long reply with no newline near the cut must not be split mid-UTF-8-rune:
+// Telegram rejects invalid UTF-8 with a 400, silently losing the chunk.
+func TestChunk_NeverSplitsARune(t *testing.T) {
+	long := strings.Repeat("字", 3000) // 3 bytes each: 9000 bytes, no newlines; 4096 % 3 != 0 → naive cut lands mid-rune
+	for i, c := range chunk(long) {
+		if !utf8.ValidString(c) {
+			t.Fatalf("chunk %d is invalid UTF-8 (split mid-rune)", i)
+		}
+		if len(c) > 4096 {
+			t.Fatalf("chunk %d exceeds max: %d bytes", i, len(c))
+		}
+	}
+	// No content may be lost across the split.
+	if got := strings.Join(chunk(long), ""); got != long {
+		t.Fatalf("chunking lost content: %d bytes in, %d bytes out", len(long), len(got))
 	}
 }

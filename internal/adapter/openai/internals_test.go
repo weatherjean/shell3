@@ -108,9 +108,7 @@ func TestScanReasoningExtractsReasoning(t *testing.T) {
 	go tap.scanReasoning(pr, done)
 	<-done
 
-	tap.mu.Lock()
-	got := tap.reasoning
-	tap.mu.Unlock()
+	got := strings.Join(tap.drainReasoning(), "")
 	if got != "step one step two" {
 		t.Fatalf("reasoning: got %q", got)
 	}
@@ -147,9 +145,7 @@ func TestScanReasoningExtractsReasoningContent(t *testing.T) {
 	go tap.scanReasoning(pr, done)
 	<-done
 
-	tap.mu.Lock()
-	got := tap.reasoning
-	tap.mu.Unlock()
+	got := strings.Join(tap.drainReasoning(), "")
 	if got != "moonshot thinks" {
 		t.Fatalf("reasoning_content: got %q", got)
 	}
@@ -168,9 +164,7 @@ func TestScanReasoningIgnoresBadJSON(t *testing.T) {
 	go tap.scanReasoning(pr, done)
 	<-done
 
-	tap.mu.Lock()
-	got := tap.reasoning
-	tap.mu.Unlock()
+	got := strings.Join(tap.drainReasoning(), "")
 	if got != "ok" {
 		t.Fatalf("reasoning: got %q", got)
 	}
@@ -186,18 +180,12 @@ func TestWaitReasoningRespectsContextCancel(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 
-	r := tap.WaitReasoning(ctx)
-	if r != "" {
-		t.Fatalf("expected empty on cancel, got %q", r)
-	}
+	tap.WaitReasoning(ctx) // must return on ctx cancel, not hang
 }
 
 func TestWaitReasoningNilDone(t *testing.T) {
-	tap := &bodyTap{} // done is nil
-	r := tap.WaitReasoning(context.Background())
-	if r != "" {
-		t.Fatalf("expected empty for nil done, got %q", r)
-	}
+	tap := &bodyTap{}                       // done is nil
+	tap.WaitReasoning(context.Background()) // must return immediately
 }
 
 // ---- toMessages ----

@@ -13,7 +13,7 @@ type PartKind int
 
 const (
 	PartImage PartKind = iota // jpg/png/gif/webp → resized JPEG data URI
-	PartAudio                 // wav/mp3 → base64 input_audio
+	PartAudio                 // wav/mp3/ogg/opus → base64 input_audio
 )
 
 // String returns "image"/"audio" for error messages.
@@ -34,7 +34,8 @@ func (k PartKind) String() string {
 // extension and MIME is ignored. Relative paths resolve against the session
 // workdir. Size caps match read_media: 10 MB images, 25 MB audio. Images are
 // downscaled and re-encoded as JPEG; audio is passed through untranscoded
-// (wav/mp3 only — the wire formats). Images are decoded and thus
+// (wav/mp3/ogg/opus — opus-family containers report as ogg). Images are
+// decoded and thus
 // content-validated; audio bytes are trusted from the caller as-is — only the
 // MIME/Kind cross-check applies, the content is never sniffed.
 type Part struct {

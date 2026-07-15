@@ -31,18 +31,14 @@ var telegramDashboardKeys = map[string]bool{"enabled": true, "addr": true, "url"
 
 func (c *LoadedConfig) luaTelegram(L *lua.LState) int {
 	opts := L.CheckTable(1)
-	if err := checkKeys(opts, "telegram", telegramKeys); err != nil {
-		L.RaiseError("%s", err.Error())
-	}
+	mustKeys(L, opts, "telegram", telegramKeys)
 	tg := TelegramConfig{
 		Token:   optStr(opts, "token"),
 		ChatID:  optStr(opts, "chat_id"),
 		WorkDir: optStr(opts, "workdir"),
 	}
 	if d, ok := opts.RawGetString("dashboard").(*lua.LTable); ok {
-		if err := checkKeys(d, "telegram.dashboard", telegramDashboardKeys); err != nil {
-			L.RaiseError("%s", err.Error())
-		}
+		mustKeys(L, d, "telegram.dashboard", telegramDashboardKeys)
 		tg.Dashboard = DashboardConfig{
 			Enabled: optBool(d, "enabled"),
 			Addr:    optStr(d, "addr"),

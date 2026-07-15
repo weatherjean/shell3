@@ -25,7 +25,7 @@ type DispatchOpts struct {
 // Dispatch fires a fire-and-forget subagent job on the in-process job runtime —
 // the same path the task tool uses. It is the host-side entry for scheduled
 // (cron) prompts. The returned id is a normal job id (subN): the job shows up
-// in Jobs()/task_list/:background, respects the background concurrency cap,
+// in Jobs()/task_list/the dashboard, respects the background concurrency cap,
 // and injects a capped result summary into this session's context on
 // completion. Unlike the task tool, Dispatch does not enforce the agent's
 // tools.subagents allowlist — the host decides what to run; agent must name a

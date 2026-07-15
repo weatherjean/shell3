@@ -24,12 +24,11 @@ import (
 // extracts non-standard reasoning fields from SSE streams: OpenRouter's
 // "reasoning" and Moonshot/DeepSeek's "reasoning_content".
 type bodyTap struct {
-	mu        sync.Mutex
-	reqBody   []byte
-	resBody   []byte
-	reasoning string
-	done      chan struct{}
-	rt        http.RoundTripper
+	mu      sync.Mutex
+	reqBody []byte
+	resBody []byte
+	done    chan struct{}
+	rt      http.RoundTripper
 	// reasoningQueue is the incremental feed of reasoning fragments, drained by
 	// the Stream goroutine so onEvent is only ever called from that single
 	// goroutine. All access is under mu.
@@ -42,7 +41,6 @@ func (b *bodyTap) RoundTrip(req *http.Request) (*http.Response, error) {
 	// attempt would otherwise pair with this request in LastTraffic's snapshot
 	// and actively mislead last_error.json debugging.
 	b.mu.Lock()
-	b.reasoning = ""
 	b.done = make(chan struct{})
 	b.reasoningQueue = nil
 	b.resBody = nil
@@ -77,7 +75,6 @@ func (b *bodyTap) RoundTrip(req *http.Request) (*http.Response, error) {
 func (b *bodyTap) scanReasoning(r io.ReadCloser, done chan struct{}) {
 	defer func() { _ = r.Close() }()
 	defer close(done)
-	var sb strings.Builder
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
@@ -104,16 +101,12 @@ func (b *bodyTap) scanReasoning(r io.ReadCloser, done chan struct{}) {
 				frag = c.Delta.ReasoningContent
 			}
 			if frag != "" {
-				sb.WriteString(frag)
 				b.mu.Lock()
 				b.reasoningQueue = append(b.reasoningQueue, frag)
 				b.mu.Unlock()
 			}
 		}
 	}
-	b.mu.Lock()
-	b.reasoning = sb.String()
-	b.mu.Unlock()
 }
 
 func (b *bodyTap) snapshot() (req, res []byte) {
@@ -122,22 +115,19 @@ func (b *bodyTap) snapshot() (req, res []byte) {
 	return append([]byte(nil), b.reqBody...), append([]byte(nil), b.resBody...)
 }
 
-// WaitReasoning blocks until scanReasoning finishes or ctx is cancelled.
-func (b *bodyTap) WaitReasoning(ctx context.Context) string {
+// WaitReasoning blocks until scanReasoning finishes or ctx is cancelled — a
+// synchronization barrier so the final drainReasoning sees every fragment.
+func (b *bodyTap) WaitReasoning(ctx context.Context) {
 	b.mu.Lock()
 	done := b.done
 	b.mu.Unlock()
 	if done == nil {
-		return ""
+		return
 	}
 	select {
 	case <-done:
 	case <-ctx.Done():
-		return ""
 	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.reasoning
 }
 
 // drainReasoning returns and clears the reasoning fragments queued by the
@@ -355,14 +345,21 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 // wrapStreamErr maps a stream.Err() into a returned error. A mid-stream EOF
 // (the provider closed the SSE connection with no terminating event) gets a
 // clearer, actionable message; all other errors keep the generic wrap. The
-// original error is wrapped in both cases so errors.Is still works.
+// original error is wrapped in both cases so errors.Is still works, and an SDK
+// API error additionally gets an llm.StatusError shell so consumers (e.g.
+// shell3.RollbackHint) can branch on the HTTP code with errors.As.
 func wrapStreamErr(err error) error {
 	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
 		return fmt.Errorf("llm: the model stream ended early — the provider closed the connection mid-response. "+
 			"Common causes: out of credits/quota, a rate limit, or an upstream proxy/timeout. "+
 			"Check your provider balance and any ~/.shell3/proxy-*.log: %w", err)
 	}
-	return fmt.Errorf("llm: stream: %w", err)
+	wrapped := fmt.Errorf("llm: stream: %w", err)
+	var oe *openai.Error
+	if errors.As(err, &oe) {
+		return &llm.StatusError{Code: oe.StatusCode, Err: wrapped}
+	}
+	return wrapped
 }
 
 func toMessages(msgs []llm.Message) []openai.ChatCompletionMessageParamUnion {

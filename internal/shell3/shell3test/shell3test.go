@@ -1,11 +1,9 @@
 // Package shell3test provides test-only helpers for exercising internal/shell3 from
 // other packages. It keeps the `testing` and fakellm dependencies out of the
-// production shell3 library: the helpers here import them, shell3 itself does not.
+// production shell3 package: the helpers here import them, shell3 itself does not.
 package shell3test
 
 import (
-	"context"
-	"sync"
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/chat"
@@ -44,23 +42,4 @@ func newRuntime(t *testing.T, sessionConfig func(shell3.SessionOpts) (chat.Confi
 	rt := shell3.RuntimeForTest(t.TempDir(), sessionConfig)
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
-}
-
-// BlockingLLM is a chat.LLMClient whose Stream blocks until ctx is cancelled,
-// closing Started on its first call. For tests that need an in-flight turn.
-type BlockingLLM struct {
-	Started chan struct{}
-	once    sync.Once
-}
-
-// NewBlockingLLM returns a BlockingLLM with an open Started channel.
-func NewBlockingLLM() *BlockingLLM {
-	return &BlockingLLM{Started: make(chan struct{})}
-}
-
-// Stream signals Started (once) then blocks until ctx is done.
-func (b *BlockingLLM) Stream(ctx context.Context, _ []llm.Message, _ []llm.ToolDefinition, _ func(llm.StreamEvent)) error {
-	b.once.Do(func() { close(b.Started) })
-	<-ctx.Done()
-	return ctx.Err()
 }

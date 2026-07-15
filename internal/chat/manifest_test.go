@@ -36,7 +36,7 @@ func TestCompactInto_ManifestRendered(t *testing.T) {
 	compactInto(CompactSummary{
 		Summary:        "did stuff",
 		ImportantFiles: []string{"b.go"},
-	}, nil, sess, nil, applog.Noop{}, "", "")
+	}, nil, sess, nil, applog.Noop{}, "", "", "")
 
 	if len(sess.messages) < 1 {
 		t.Fatalf("expected at least a continuation message, got %d", len(sess.messages))

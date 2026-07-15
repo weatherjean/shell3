@@ -17,8 +17,8 @@ import (
 // Makefile derives it from the latest git tag); "dev" for a plain go build.
 var version = "dev"
 
-// main wires the cobra command tree (telegram + boot subcommands; the bare
-// root prints help) and executes it.
+// main wires the cobra command tree (telegram, dev, dash, boot, health; the
+// bare root prints help) and executes it.
 func main() {
 	root := &cobra.Command{
 		Use:     "shell3",
@@ -40,8 +40,7 @@ func main() {
 	root.AddCommand(newBootCommand())
 	root.AddCommand(newHealthCommand())
 
-	// Print the brand header for subcommands and --help (TTY only). Root chat
-	// suppresses it — it renders its own banner.
+	// Print the brand header for subcommands and --help (TTY only).
 	maybeHeader := func() {
 		if !term.IsTerminal(int(os.Stdout.Fd())) {
 			return
@@ -64,6 +63,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// addConfigFlag registers the shared --config/-c flag with the one canonical
+// description; every subcommand resolves it through resolveConfig.
+func addConfigFlag(cmd *cobra.Command, configPath *string) {
+	cmd.Flags().StringVarP(configPath, "config", "c", "", "Config name (→ ~/.shell3/<name>.lua) or path to a *.lua file")
 }
 
 // resolveConfig turns the shared --config flag value (a name or a *.lua path;

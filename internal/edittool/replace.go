@@ -1,5 +1,5 @@
 // Package edittool ports the opencode str-replace edit algorithm to Go:
-// 9 replacer strategies tried in order, each yielding candidate substrings of
+// replacer strategies tried in order (see replacers), each yielding candidate substrings of
 // the file content that match the requested old_string. The first replacer
 // that yields a uniquely-locatable match wins.
 //

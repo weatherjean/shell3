@@ -183,8 +183,7 @@ func splitLines(s string) []string {
 	if s == "" {
 		return nil
 	}
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	lines := strings.Split(s, "\n")
+	lines := strings.Split(normalizeLineEndings(s), "\n")
 	if n := len(lines); n > 0 && lines[n-1] == "" {
 		lines = lines[:n-1]
 	}
@@ -196,17 +195,13 @@ func splitLines(s string) []string {
 // generic tool-output truncation, this intentionally includes every hunk so
 // distant edits do not disappear from the user's view.
 func UnifiedDiff(oldContent, newContent string, contextLines int) string {
-	oldNormalized := normalizeDiffInput(oldContent)
-	newNormalized := normalizeDiffInput(newContent)
+	oldNormalized := normalizeLineEndings(oldContent)
+	newNormalized := normalizeLineEndings(newContent)
 	diff, err := udiff.ToUnified("old", "new", oldNormalized, udiff.Lines(oldNormalized, newNormalized), contextLines)
 	if err != nil {
 		return ""
 	}
 	return stripDiffFileHeaders(strings.TrimRight(diff, "\n"))
-}
-
-func normalizeDiffInput(s string) string {
-	return strings.ReplaceAll(s, "\r\n", "\n")
 }
 
 func stripDiffFileHeaders(diff string) string {

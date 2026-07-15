@@ -85,7 +85,7 @@ func TestSubagentCompletionWakesParent(t *testing.T) {
 }
 
 // TestSubagentLiveOutputBuffer verifies startSubagent mirrors the child's
-// streamed events into j.out, so the :background modal (via output()) can show
+// streamed events into j.out, so the jobs view (via output()) can show
 // live progress before the run's messages.jsonl transcript exists on disk.
 func TestSubagentLiveOutputBuffer(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("streamed answer"))

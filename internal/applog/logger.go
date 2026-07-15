@@ -91,11 +91,12 @@ func (l *fileLogger) write(level, msg string, err error, fields []any, mirror bo
 
 // Open creates a Logger that writes to path, rotating the file if it exceeds
 // maxBytes (keeping up to maxArchives archives). The caller closes the returned
-// closer when done.
+// closer when done. On error both other returns are nil — the caller decides
+// its own fallback (e.g. Noop) rather than receiving a half-usable pair.
 func Open(path string, maxBytes int64, maxArchives int) (Logger, io.Closer, error) {
 	f, err := OpenFile(path, maxBytes, maxArchives)
 	if err != nil {
-		return Noop{}, nil, err // callers must check err before using the closer
+		return nil, nil, err
 	}
 	lg := &fileLogger{w: f, stderr: os.Stderr}
 	return lg, f, nil

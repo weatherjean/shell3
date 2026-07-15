@@ -6,6 +6,8 @@ import (
 	"context"
 	"strconv"
 	"strings"
+
+	"github.com/weatherjean/shell3/internal/strutil"
 )
 
 // confirmPrefix tags the callback_data of an on_tool_call approval button so the
@@ -17,7 +19,7 @@ const confirmPrefix = "bs"
 // It returns true to allow. It is wired as the session's Asker, so it runs on
 // the turn goroutine while Run keeps consuming callbacks on its own goroutine.
 // Fail-safe: any send error or a cancelled turn returns false (deny).
-func (b *Bot) Ask(ctx context.Context, command, _ string) bool {
+func (b *Bot) Ask(ctx context.Context, command, reason string) bool {
 	b.askMu.Lock()
 	b.askSeq++
 	id := strconv.Itoa(b.askSeq)
@@ -30,7 +32,10 @@ func (b *Bot) Ask(ctx context.Context, command, _ string) bool {
 		b.askMu.Unlock()
 	}()
 
-	text := "⚠️ command gate needs approval to run:\n" + truncate(command, 600)
+	text := "⚠️ command gate needs approval to run:\n" + strutil.Truncate(command, 600)
+	if reason != "" {
+		text += "\n\n" + strutil.Truncate(reason, 300)
+	}
 	msgID, err := b.client.SendConfirm(ctx, b.chatID, text, confirmData(id, true), confirmData(id, false))
 	if err != nil {
 		return false
@@ -40,12 +45,12 @@ func (b *Bot) Ask(ctx context.Context, command, _ string) bool {
 	case <-ctx.Done():
 		// Turn cancelled (e.g. /stop) before an answer — clear the buttons with a
 		// detached context since ctx is already done.
-		_ = b.client.EditPlain(context.Background(), b.chatID, msgID, "⌛ approval cancelled:\n"+truncate(command, 600))
+		_ = b.client.EditPlain(context.Background(), b.chatID, msgID, "⌛ approval cancelled:\n"+strutil.Truncate(command, 600))
 		return false
 	case yes := <-ch:
-		outcome := "🚫 denied: " + truncate(command, 600)
+		outcome := "🚫 denied: " + strutil.Truncate(command, 600)
 		if yes {
-			outcome = "✅ allowed: " + truncate(command, 600)
+			outcome = "✅ allowed: " + strutil.Truncate(command, 600)
 		}
 		_ = b.client.EditPlain(ctx, b.chatID, msgID, outcome)
 		return yes

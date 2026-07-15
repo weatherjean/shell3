@@ -16,6 +16,7 @@ import (
 
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
@@ -155,7 +156,10 @@ func compactNow(ctx context.Context, cfg TurnConfig, sess *Session, forced bool)
 	// rewrites sess.messages in place and rolls the store session.
 	// RunTurn rebuilds its own allMsgs after maybeCompact returns.
 	prevTokens := sess.lastPromptTokens
-	if !compactInto(summaryArgs, cfg.Store, sess, tail, cfg.Log, cfg.WorkDir, cfg.ConfigPath) {
+	// Same Meta the front-ends write on a fresh session: the rolled session
+	// keeps the model recorded in its metadata.
+	_, metaModel := SplitStatus(cfg.StatusLine)
+	if !compactInto(summaryArgs, cfg.Store, sess, tail, cfg.Log, cfg.WorkDir, cfg.ConfigPath, metaModel) {
 		// The runs-session roll failed; history is untouched. Proceed on the
 		// un-compacted history without resetting the gauge or emitting a
 		// (misleading) compacted event.
@@ -310,7 +314,7 @@ func writeBulletSection(b *strings.Builder, tag string, items []string) {
 // still holds the full history would let the next saveHistory duplicate the tail
 // into it. Aborting keeps the on-disk history coherent; the caller proceeds on
 // the un-compacted history (compaction is best-effort).
-func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.Message, lg applog.Logger, workDir, configPath string) bool {
+func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.Message, lg applog.Logger, workDir, configPath, model string) bool {
 	prevSessionID := sess.id
 	// newSessionID stays prevSessionID unless the runs-session roll below
 	// succeeds; it is published into sess.id atomically with sess.messages under
@@ -324,7 +328,7 @@ func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.
 	// (not ended, still persistable) and we abort the compaction below, rather
 	// than ending a session we keep writing to and corrupting its JSONL.
 	if st != nil {
-		newID, err := st.NewSession(runs.Meta{Workdir: workDir, ConfigPath: configPath})
+		newID, err := st.NewSession(runs.Meta{Workdir: workDir, ConfigPath: configPath, Model: model})
 		if err != nil {
 			lg.Warn("start session failed during compact; skipping compaction", "error", err)
 			return false
@@ -345,7 +349,7 @@ func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.
 
 	// Build the continuation message injected at the top of the new history.
 	var b strings.Builder
-	fmt.Fprintf(&b, "<system-reminder>\nContinuation of session %s. History compacted.\nPrior session messages are in the runs directory (use the `history` skill, or read .shell3_project/runs/%s/messages.jsonl directly).\n</system-reminder>\n\n", prevSessionID, prevSessionID)
+	fmt.Fprintf(&b, "<system-reminder>\nContinuation of session %s. History compacted.\nPrior session messages are in the runs directory (use the `history` skill, or read %s/runs/%s/messages.jsonl directly).\n</system-reminder>\n\n", prevSessionID, paths.ProjectDirName, prevSessionID)
 	fmt.Fprintf(&b, "<compact-summary>\n%s\n</compact-summary>", args.Summary)
 	writeBulletSection(&b, "modified-files", args.ImportantFiles)
 

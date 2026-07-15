@@ -22,7 +22,7 @@ func TestCompactInto_IncludesFilePointerSections(t *testing.T) {
 	compactInto(CompactSummary{
 		Summary:        "summary",
 		ImportantFiles: []string{"a.go"},
-	}, nil, sess, nil, applog.Noop{}, "", "")
+	}, nil, sess, nil, applog.Noop{}, "", "", "")
 	if len(sess.messages) < 1 {
 		t.Fatalf("expected at least a continuation message, got %d", len(sess.messages))
 	}
@@ -44,7 +44,7 @@ func TestCompactInto_KeepsTail(t *testing.T) {
 		msg(llm.RoleUser, "recent-1"), msg(llm.RoleAssistant, "recent-2"),
 	}
 	tail := sess.messages[2:]
-	compactInto(CompactSummary{Summary: "did stuff"}, nil, sess, tail, applog.Noop{}, "", "")
+	compactInto(CompactSummary{Summary: "did stuff"}, nil, sess, tail, applog.Noop{}, "", "", "")
 
 	if len(sess.messages) != 3 {
 		t.Fatalf("len = %d, want 3 (continuation + 2 tail)", len(sess.messages))

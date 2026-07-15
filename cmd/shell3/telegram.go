@@ -104,21 +104,7 @@ func newTelegramCommand() *cobra.Command {
 				fmt.Printf("warning: could not set commands: %v\n", err)
 			}
 
-			var srv *web.Server
-			if tg.Dashboard.Enabled && tg.Dashboard.Addr != "" {
-				usage := web.NewUsageStore()
-				b.SetUsageRecorder(usage.Set)
-				srv = web.NewServer(rt, sess, tg.Token, chatID)
-				srv.SetUsage(usage)
-				srv.SetConfigDir(filepath.Dir(resolved)) // read-only file explorer rooted at the config folder
-				if sched != nil {
-					srv.SetCronSource(cronSource(sched))
-				}
-				go func() {
-					_ = startDashboard(ctx, tg.Dashboard.Addr, srv.Handler())
-				}()
-				fmt.Printf("dashboard on %s (expose via: tailscale serve https / proxy %s)\n", tg.Dashboard.Addr, tg.Dashboard.Addr)
-			}
+			srv := serveDashboard(ctx, rt, b, sess, sched, tg, chatID, filepath.Dir(resolved))
 
 			// /reload + reload tool: rebuild config, re-decorate the session, swap
 			// the cron scheduler. Coordination lives in reloadAndRearm (testable);
@@ -133,34 +119,7 @@ func newTelegramCommand() *cobra.Command {
 				return res, err
 			})
 
-			// Point the menu button at the dashboard Mini App (best-effort). The
-			// menu button is the authenticated launcher: a Mini App opened from it
-			// receives signed initData and passes auth. A reply-keyboard web_app
-			// button gets no initData, so the bar carries only command buttons.
-			// An explicit dashboard.url wins; otherwise a configured
-			// dashboard.tunnel is spawned and its printed https URL used.
-			if tg.Dashboard.Enabled {
-				setMenu := func(url string) {
-					if err := client.SetMenuButton(ctx, "dash", url); err != nil {
-						fmt.Printf("warning: could not set menu button: %v\n", err)
-						return
-					}
-					fmt.Printf("dashboard menu button → %s\n", url)
-				}
-				switch {
-				case tg.Dashboard.URL != "":
-					setMenu(tg.Dashboard.URL)
-				case tg.Dashboard.Tunnel != "" && tg.Dashboard.Addr != "":
-					urls := tunnel.Start(tg.Dashboard.Tunnel, tg.Dashboard.Addr, filepath.Join(tgHome, "tunnel.log"))
-					go func() {
-						if url, ok := <-urls; ok {
-							setMenu(url)
-						} else {
-							fmt.Println("warning: tunnel printed no https URL; dashboard stays local (see tunnel.log)")
-						}
-					}()
-				}
-			}
+			wireMenuButton(ctx, client, tg.Dashboard, tgHome)
 
 			// Install a persistent reply-keyboard bar above the input: one-tap
 			// slash-command buttons that auto-send their command. Best-effort.
@@ -177,7 +136,7 @@ func newTelegramCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&configPath, "config", "c", "", "Config name (→ ~/.shell3/<name>.lua) or path to a *.lua file")
+	addConfigFlag(cmd, &configPath)
 	return cmd
 }
 
@@ -235,23 +194,68 @@ func reloadAndRearm(r configReloader, b rearmBot, dash cronDashboard, disp cron.
 	ns.Start()
 	b.SetJobRunner(ns.Run)
 	if dash != nil {
-		dash.SetCronSource(cronSource(ns))
+		dash.SetCronSource(ns.Jobs)
 	}
 	return ns, res, nil
 }
 
-// cronSource adapts a scheduler to the dashboard's cron DTO provider.
-func cronSource(sched *cron.Scheduler) func() []web.CronJob {
-	return func() []web.CronJob {
-		var out []web.CronJob
-		for _, j := range sched.Jobs() {
-			out = append(out, web.CronJob{
-				Name: j.Name, Schedule: j.Schedule, Agent: j.Agent,
-				Prompt: j.Prompt, WorkDir: j.WorkDir,
-				Notify: j.Notify, LastRun: j.LastRun, LastSubID: j.LastSubID,
-			})
+// serveDashboard builds and serves the Mini App dashboard when it is enabled
+// in config, wiring the usage recorder, config-dir file explorer, and cron
+// source. Returns nil when the dashboard is disabled. Serving is best-effort:
+// listen failures are printed, not fatal.
+func serveDashboard(ctx context.Context, rt *shell3.Runtime, b *telegram.Bot, sess *shell3.Session, sched *cron.Scheduler, tg shell3.TelegramConfig, chatID int64, configDir string) *web.Server {
+	if !tg.Dashboard.Enabled || tg.Dashboard.Addr == "" {
+		return nil
+	}
+	usage := web.NewUsageStore()
+	b.SetUsageRecorder(usage.Set)
+	srv := web.NewServer(rt, sess, tg.Token, chatID)
+	srv.SetUsage(usage)
+	srv.SetConfigDir(configDir) // read-only file explorer rooted at the config folder
+	if sched != nil {
+		srv.SetCronSource(sched.Jobs)
+	}
+	go func() {
+		// Surface listen failures (port already bound, bad addr): silence here
+		// would leave the menu button and tunnel pointing at a dead port with
+		// no diagnostic.
+		if err := startDashboard(ctx, tg.Dashboard.Addr, srv.Handler()); err != nil {
+			fmt.Printf("warning: dashboard failed: %v\n", err)
 		}
-		return out
+	}()
+	fmt.Printf("dashboard on %s (expose via: tailscale serve https / proxy %s)\n", tg.Dashboard.Addr, tg.Dashboard.Addr)
+	return srv
+}
+
+// wireMenuButton points the Telegram menu button at the dashboard Mini App
+// (best-effort). The menu button is the authenticated launcher: a Mini App
+// opened from it receives signed initData and passes auth. A reply-keyboard
+// web_app button gets no initData, so the bar carries only command buttons.
+// An explicit dashboard.url wins; otherwise a configured dashboard.tunnel is
+// spawned and its printed https URL used.
+func wireMenuButton(ctx context.Context, client *telegram.BotAPIClient, dash shell3.DashboardConfig, tgHome string) {
+	if !dash.Enabled {
+		return
+	}
+	setMenu := func(url string) {
+		if err := client.SetMenuButton(ctx, "dash", url); err != nil {
+			fmt.Printf("warning: could not set menu button: %v\n", err)
+			return
+		}
+		fmt.Printf("dashboard menu button → %s\n", url)
+	}
+	switch {
+	case dash.URL != "":
+		setMenu(dash.URL)
+	case dash.Tunnel != "" && dash.Addr != "":
+		urls := tunnel.Start(dash.Tunnel, dash.Addr, filepath.Join(tgHome, "tunnel.log"))
+		go func() {
+			if url, ok := <-urls; ok {
+				setMenu(url)
+			} else {
+				fmt.Println("warning: tunnel printed no https URL; dashboard stays local (see tunnel.log)")
+			}
+		}()
 	}
 }
 

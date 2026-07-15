@@ -250,11 +250,21 @@ func (s *Session) wake() {
 // host's response to a Wake event. With an empty inbox (or a turn already in
 // flight, which will itself drain the inbox) it returns an already-closed
 // channel and starts no turn. Same ErrBusy contract as Send otherwise.
+// closedEvents returns an already-closed event channel, carrying a single
+// Error event when err is non-nil — the shape every rejected/no-op turn
+// request returns.
+func closedEvents(err error) <-chan Event {
+	ch := make(chan Event, 1)
+	if err != nil {
+		ch <- Event{Kind: Error, Err: err}
+	}
+	close(ch)
+	return ch
+}
+
 func (s *Session) RunQueued(ctx context.Context) <-chan Event {
 	if s.isBusy() || !s.sess.HasInbox() {
-		closed := make(chan Event)
-		close(closed)
-		return closed
+		return closedEvents(nil)
 	}
 	// The turn loop drains the inbox at its top (the reminder + attachments
 	// injection point), so an empty-prompt turn consumes the queued items as its
@@ -298,10 +308,7 @@ func (s *Session) Send(ctx context.Context, prompt string) <-chan Event {
 func (s *Session) SendParts(ctx context.Context, prompt string, parts []Part) <-chan Event {
 	cps, err := s.loadParts(parts)
 	if err != nil {
-		rejected := make(chan Event, 1)
-		rejected <- Event{Kind: Error, Err: err}
-		close(rejected)
-		return rejected
+		return closedEvents(err)
 	}
 	out := make(chan Event)
 	turnCtx, cancel := context.WithCancel(ctx)
@@ -314,10 +321,7 @@ func (s *Session) SendParts(ctx context.Context, prompt string, parts []Part) <-
 		}
 		s.mu.Unlock()
 		cancel()
-		rejected := make(chan Event, 1)
-		rejected <- Event{Kind: Error, Err: err}
-		close(rejected)
-		return rejected
+		return closedEvents(err)
 	}
 	s.busy = true
 	s.cur = out
@@ -519,9 +523,20 @@ func RollbackHint(err error) string {
 	if err == nil {
 		return ""
 	}
+	const hint = "This usually means the last turn left the conversation in a state the model rejects — /rollback will likely fix it."
+	// Preferred: the adapter wraps provider API errors in llm.StatusError.
+	var se *llm.StatusError
+	if errors.As(err, &se) {
+		if se.Code == 400 {
+			return hint
+		}
+		return ""
+	}
+	// Fallback for errors that lost the typed shell (e.g. proxies or paths that
+	// stringified the error).
 	s := err.Error()
 	if strings.Contains(s, "400 Bad Request") || strings.Contains(s, `"http_code":"400"`) {
-		return "This usually means the last turn left the conversation in a state the model rejects — /rollback will likely fix it."
+		return hint
 	}
 	return ""
 }

@@ -29,7 +29,7 @@ func newHealthCommand() *cobra.Command {
 			return runHealth(cmd, resolved)
 		},
 	}
-	cmd.Flags().StringVar(&configPath, "config", "", "Path to shell3.lua (default: ~/.shell3/shell3.lua)")
+	addConfigFlag(cmd, &configPath)
 	return cmd
 }
 

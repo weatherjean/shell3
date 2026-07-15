@@ -4,6 +4,7 @@ package luacfg
 
 import (
 	"fmt"
+	"maps"
 	"path/filepath"
 	"sync"
 
@@ -58,40 +59,37 @@ type CustomTool struct {
 // body at Path (absolute) with `cat` when the skill applies.
 type Skill struct{ Name, Description, Path string }
 
-type Agent struct {
+// AgentCommon holds the declaration fields agents and subagents share. Both
+// embed it, so load-time resolution (skills, prompt_cmd, model) runs over one
+// shape and downstream copiers can copy the whole core at once.
+type AgentCommon struct {
 	Name, ModelName, Prompt string
 	// PromptCmd, if set, is a shell command whose stdout supplies Prompt; it is
-	// resolved once at load time (see Load). Empty once resolved or when Prompt
-	// was supplied inline.
+	// resolved once at load time (see Load) and kept as declared.
 	PromptCmd   string
 	Gates       ToolGates
 	CustomTools []string
 	// SkillDirs is the skills = { "dir", ... } list as declared; Skills is the
 	// result of scanning those dirs at Load (see resolveSkillDirs).
-	SkillDirs []string
-	Skills    []Skill
-	Subagents []string // names of registered subagents this agent can spawn
-	Environment    bool     // inject the host Environment system-reminder
-	Delegation     bool     // inject the host Delegation (spawn-command) system-reminder
-}
-
-// Subagent is a delegatable specialist: a non-interactive agent the model can
-// spawn as an in-process background job via the task tool. Registered
-// separately from agents (never in the Tab rotation). Description is the
-// model-facing "when to use".
-type Subagent struct {
-	Name, Description, ModelName, Prompt string
-	// PromptCmd, if set, is a shell command whose stdout supplies Prompt;
-	// resolved once at load time (see Load). Empty once resolved or when Prompt
-	// was supplied inline.
-	PromptCmd   string
-	Gates       ToolGates
-	CustomTools []string
-	// SkillDirs/Skills mirror the Agent fields: dirs as declared, resolved at Load.
 	SkillDirs   []string
 	Skills      []Skill
 	Environment bool // inject the host Environment system-reminder
 	Delegation  bool // inject the host Delegation (spawn-command) system-reminder
+}
+
+type Agent struct {
+	AgentCommon
+	Subagents []string // names of registered subagents this agent can spawn
+}
+
+// Subagent is a delegatable specialist: a non-interactive agent the model can
+// spawn as an in-process background job via the task tool. Registered
+// separately from agents (never user-facing directly). Description is the
+// model-facing "when to use". No Subagents field: delegation is single-level
+// by construction.
+type Subagent struct {
+	AgentCommon
+	Description string
 }
 
 // LoadedConfig is the parsed result. L stays alive for the session so the
@@ -100,13 +98,13 @@ type LoadedConfig struct {
 	Models  []Model
 	Tools   map[string]CustomTool
 	Secrets map[string]string
-	// StubTools maps a hallucinated tool name (e.g. "read_file", "grep") to a
+	// stubTools maps a hallucinated tool name (e.g. "read_file", "grep") to a
 	// fixed redirect message. Registered config-globally via shell3.stub_tools;
 	// when the model calls such a name the chat layer returns the message
 	// verbatim (never an error), nudging the model back toward bash/edit_file.
 	// See register.go (luaStubTools) and agentsetup.runtimeForAgent for the
 	// wiring (StubNames → chat.Config.StubTools).
-	StubTools map[string]string
+	stubTools map[string]string
 	// BackgroundMaxConcurrent is the maximum number of concurrent background jobs,
 	// set via shell3.background{ max_concurrent = N }. 0 means unset; the runtime
 	// applies the default (8) at the read site.
@@ -159,13 +157,23 @@ func (c *LoadedConfig) Close() {
 // Load reads shell3.lua at path. Everything the config references — .env,
 // required sibling modules, skill files, prompt_cmd working dir — resolves
 // relative to path's directory, so there is no separate workdir to drift from.
+// Every error names the config file: with named configs (~/.shell3/<name>.lua)
+// a bare "config: ..." wouldn't say which file failed.
 func Load(path string) (*LoadedConfig, error) {
+	c, err := load(path)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return c, nil
+}
+
+func load(path string) (*LoadedConfig, error) {
 	cfgDir := filepath.Dir(path)
 	env, err := loadDotEnv(filepath.Join(cfgDir, ".env"))
 	if err != nil {
 		return nil, err
 	}
-	c := &LoadedConfig{Tools: map[string]CustomTool{}, StubTools: map[string]string{}, Secrets: env, L: lua.NewState()}
+	c := &LoadedConfig{Tools: map[string]CustomTool{}, stubTools: map[string]string{}, Secrets: env, L: lua.NewState()}
 	// The returned config owns c.L; close it only if we error out below.
 	var success bool
 	defer func() {
@@ -195,45 +203,30 @@ func Load(path string) (*LoadedConfig, error) {
 	// Resolve each agent's/subagent's skills dirs (skills.go): a missing dir
 	// fails the load here at load/reload time rather than at turn time; invalid
 	// skill files are skipped with a warning.
-	sc := newSkillScanner(cfgDir, func(w string) { c.warnings = append(c.warnings, w) })
-	for i := range c.agents {
-		a := &c.agents[i]
-		sk, err := sc.resolve(a.SkillDirs, fmt.Sprintf("agent %q", a.Name))
-		if err != nil {
-			return nil, err
-		}
-		a.Skills = sk
-	}
-	for i := range c.subagents {
-		sa := &c.subagents[i]
-		sk, err := sc.resolve(sa.SkillDirs, fmt.Sprintf("subagent %q", sa.Name))
-		if err != nil {
-			return nil, err
-		}
-		sa.Skills = sk
-	}
-	for i := range c.agents {
-		a := &c.agents[i]
-		if err := resolvePromptCmd(cfgDir, "agent", a.Name, a.PromptCmd, &a.Prompt); err != nil {
-			return nil, err
-		}
-	}
-	for i := range c.subagents {
-		sa := &c.subagents[i]
-		if err := resolvePromptCmd(cfgDir, "subagent", sa.Name, sa.PromptCmd, &sa.Prompt); err != nil {
-			return nil, err
-		}
-	}
 	if len(c.agents) == 0 {
 		return nil, fmt.Errorf("config: no shell3.agent declared")
 	}
+	sc := newSkillScanner(cfgDir, func(w string) { c.warnings = append(c.warnings, w) })
+	// Agents and subagents share AgentCommon, so one loop resolves both.
+	cores := make([]*AgentCommon, 0, len(c.agents)+len(c.subagents))
+	kinds := make([]string, 0, cap(cores))
 	for i := range c.agents {
-		if err := c.resolveModelName("agent", c.agents[i].Name, &c.agents[i].ModelName); err != nil {
-			return nil, err
-		}
+		cores, kinds = append(cores, &c.agents[i].AgentCommon), append(kinds, "agent")
 	}
 	for i := range c.subagents {
-		if err := c.resolveModelName("subagent", c.subagents[i].Name, &c.subagents[i].ModelName); err != nil {
+		cores, kinds = append(cores, &c.subagents[i].AgentCommon), append(kinds, "subagent")
+	}
+	for i, core := range cores {
+		kind := kinds[i]
+		sk, err := sc.resolve(core.SkillDirs, fmt.Sprintf("%s %q", kind, core.Name))
+		if err != nil {
+			return nil, err
+		}
+		core.Skills = sk
+		if err := resolvePromptCmd(cfgDir, kind, core.Name, core.PromptCmd, &core.Prompt); err != nil {
+			return nil, err
+		}
+		if err := c.resolveModelName(kind, core.Name, &core.ModelName); err != nil {
 			return nil, err
 		}
 	}
@@ -292,9 +285,9 @@ func (c *LoadedConfig) resolveModelName(kind, name string, modelName *string) er
 
 // StubNames returns the registered stub-tool names with their redirect
 // messages. The map is config-global (not per-agent); agentsetup appends one
-// minimal tool def per entry to every agent's schema. The returned map is the
-// live config map — read-only by convention (callers never mutate it).
-func (c *LoadedConfig) StubNames() map[string]string { return c.StubTools }
+// minimal tool def per entry to every agent's schema. The map is a defensive
+// copy: a downstream mutation can't corrupt the config for later sessions.
+func (c *LoadedConfig) StubNames() map[string]string { return maps.Clone(c.stubTools) }
 
 func (c *LoadedConfig) Model(name string) (Model, bool) {
 	for _, m := range c.Models {

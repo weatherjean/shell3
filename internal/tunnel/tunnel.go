@@ -10,7 +10,9 @@ package tunnel
 
 import (
 	"bufio"
+	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -52,7 +54,10 @@ func Start(command, addr, logPath string) <-chan string {
 	}
 	logFile, lerr := applog.OpenFile(logPath, logMaxBytes, logMaxArchives)
 	if lerr != nil {
-		logFile = nil // scan without capture rather than dropping the tunnel
+		// Scan without capture rather than dropping the tunnel — but say so:
+		// the log file is exactly where failure detail is promised to land.
+		fmt.Fprintf(os.Stderr, "warning: tunnel log %s unavailable (%v); tunnel output not captured\n", logPath, lerr)
+		logFile = nil
 	}
 	if err := cmd.Start(); err != nil {
 		if logFile != nil {
@@ -66,6 +71,10 @@ func Start(command, addr, logPath string) <-chan string {
 	var once sync.Once
 	deliver := func(u string) { once.Do(func() { ch <- u; close(ch) }) }
 	giveUp := func() { once.Do(func() { close(ch) }) }
+	// Deadline for the URL scan. AfterFunc instead of a sleeping goroutine: no
+	// goroutine is pinned for the full timeout, and a late fire is a no-op via
+	// once. The reaper stops it once the streams close.
+	timeout := time.AfterFunc(urlScanTimeout, giveUp)
 
 	var logMu sync.Mutex
 	scan := func(r io.Reader) {
@@ -96,10 +105,7 @@ func Start(command, addr, logPath string) <-chan string {
 		if logFile != nil {
 			_ = logFile.Close()
 		}
-		giveUp()
-	}()
-	go func() {
-		time.Sleep(urlScanTimeout)
+		timeout.Stop()
 		giveUp()
 	}()
 	return ch

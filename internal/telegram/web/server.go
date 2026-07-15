@@ -8,26 +8,19 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/weatherjean/shell3/internal/cron"
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
-// CronJob is the dashboard DTO for one scheduled job and its last run. Exported
-// so the host (cmd/shell3) can construct it from cron.Scheduler.Jobs().
-type CronJob struct {
-	Name      string `json:"name"`
-	Schedule  string `json:"schedule"`
-	Agent     string `json:"agent"`
-	Prompt    string `json:"prompt,omitempty"`
-	WorkDir   string `json:"work_dir,omitempty"`
-	Notify    bool   `json:"notify"`
-	LastRun   string `json:"last_run,omitempty"`
-	LastSubID string `json:"last_sub_id,omitempty"`
-}
+// CronJob is the dashboard DTO for one scheduled job and its last run — an
+// alias for cron.JobStatus (whose json tags define the /api/cron shape), so
+// the host wires cron.Scheduler.Jobs straight in with no field copier.
+type CronJob = cron.JobStatus
 
 // Server is the read-only dashboard.
 type Server struct {
 	sess      *shell3.Session
-	rt        *shell3.Runtime // used for subagent transcripts and the stream heartbeat
+	rt        *shell3.Runtime // used for the past-runs (session store) views
 	token     string
 	chatID    int64
 	usage     *UsageStore                         // nil → no usage shown
@@ -71,8 +64,7 @@ func (s *Server) handleCron(w http.ResponseWriter, r *http.Request) {
 	if out == nil {
 		out = []CronJob{}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(out)
+	writeJSON(w, out)
 }
 
 func (s *Server) Handler() http.Handler {
@@ -116,6 +108,13 @@ type toolCall struct {
 	Args string `json:"args,omitempty"`
 }
 
+// writeJSON sets the JSON Content-Type and encodes v — the tail of every API
+// handler.
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
+}
+
 type historyEntry struct {
 	Role       string     `json:"role"`
 	Content    string     `json:"content"`
@@ -126,7 +125,12 @@ type historyEntry struct {
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
-	hist := s.sess.History()
+	writeJSON(w, toEntries(s.sess.History()))
+}
+
+// toEntries maps runtime history entries onto the dashboard DTO. Shared by
+// handleHistory (live session) and handleSession (stored replay).
+func toEntries(hist []shell3.HistoryEntry) []historyEntry {
 	out := make([]historyEntry, len(hist))
 	for i, h := range hist {
 		e := historyEntry{Role: h.Role, Content: h.Content, ToolName: h.ToolName, ToolCallID: h.ToolCallID, Reasoning: h.Reasoning}
@@ -135,8 +139,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		}
 		out[i] = e
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(out)
+	return out
 }
 
 // jobResp is one background job (subagent or command) for the Jobs tab.
@@ -167,8 +170,7 @@ func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
 			Done:    j.Done, Summary: j.Summary, Error: j.Error,
 		})
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(out)
+	writeJSON(w, out)
 }
 
 type statusResp struct {
@@ -217,8 +219,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			out.Usage = &usageResp{Prompt: p, Completion: c, Total: t}
 		}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(out)
+	writeJSON(w, out)
 }
 
 // handleJob returns one job's raw transcript text (?id=<subN|bgN>): the child
@@ -233,8 +234,7 @@ func (s *Server) handleJob(w http.ResponseWriter, r *http.Request) {
 	if transcript == "" {
 		transcript = s.sess.JobOutput(id)
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"id": id, "transcript": transcript})
+	writeJSON(w, map[string]string{"id": id, "transcript": transcript})
 }
 
 // handleSessions lists past stored conversations (newest first).
@@ -247,8 +247,7 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	if sess == nil {
 		sess = []shell3.SessionMeta{}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(sess)
+	writeJSON(w, sess)
 }
 
 // handleSession returns one past conversation (?id=<n>) at full fidelity —
@@ -265,16 +264,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	out := make([]historyEntry, 0, len(msgs))
-	for _, m := range msgs {
-		e := historyEntry{Role: m.Role, Content: m.Content, ToolName: m.ToolName, ToolCallID: m.ToolCallID, Reasoning: m.Reasoning}
-		for _, c := range m.ToolCalls {
-			e.ToolCalls = append(e.ToolCalls, toolCall{ID: c.ID, Name: c.Name, Args: c.Args})
-		}
-		out = append(out, e)
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(out)
+	writeJSON(w, toEntries(msgs))
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {

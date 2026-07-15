@@ -10,9 +10,9 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
+	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/notify"
 	"github.com/weatherjean/shell3/internal/runs"
@@ -41,7 +41,8 @@ func (k JobKind) String() string {
 const defaultMaxConcurrent = 8
 
 // bgWaitDelay bounds how long cmd.Wait blocks on the stdio pipes after a
-// command job is cancelled (mirrors internal/chat's bashWaitDelay).
+// command job is cancelled (same role as internal/chat's bashWaitDelay, kept
+// slightly longer since background jobs are not on the turn's critical path).
 const bgWaitDelay = 3 * time.Second
 
 // maxDoneJobs caps how many finished jobs are retained in memory.
@@ -74,8 +75,8 @@ func (r *ringBuffer) String() string {
 
 // jobSink is an io.Writer that tees each write to a ring buffer AND calls an
 // emit callback with the chunk string. It is used as cmd.Stdout/cmd.Stderr for
-// command jobs and as the subagent event stream sink, so both the :background
-// modal and the JobEvents bus receive live output.
+// command jobs and as the subagent event stream sink, so both the dashboard
+// jobs view and the JobEvents bus receive live output.
 type jobSink struct {
 	ring *ringBuffer
 	emit func(chunk string)
@@ -244,20 +245,7 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 	}
 	cmd.Stdout = out
 	cmd.Stderr = out
-	// Put the command and its descendants in their own process group and signal
-	// the whole tree on cancel — bare SIGKILL on the shell leaves grandchildren
-	// (e.g. a server started with `&`) holding our stdout/stderr pipes.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-	}
-	// Bound how long Wait blocks on the stdio pipes after the command itself
-	// exits: without this a lingering grandchild that inherited the pipes keeps
-	// Wait (and Runtime.Close) blocked forever, leaking the concurrency slot.
-	cmd.WaitDelay = bgWaitDelay
+	chat.ConfigureGroupKill(cmd, bgWaitDelay)
 	j := &bgJob{
 		id: id, kind: JobCommand, title: command, parent: parent,
 		parentID:  parentName(parent),
@@ -352,19 +340,17 @@ func (m *jobManager) finishCommand(j *bgJob, exit int) {
 		// with its origin. Same wake-on-failure rule as root jobs.
 		root := owner.parent
 		n.Status = "started by subagent " + owner.id
-		if root == nil {
+		switch {
+		case root == nil:
 			deliver = func() {}
-		} else if exit != 0 && m.rt != nil && !m.closing {
+		case exit != 0 && m.rt != nil && !m.closing:
 			deliver = func() { root.injectNotification(m.rt, n) }
-		} else {
+		default:
 			deliver = func() { root.injectNoticeNoWake(n) }
 		}
 	}
 	ex := exit
-	j.finished = true
-	j.exit = &ex
-	j.endedAt = time.Now()
-	m.evictOldestDoneIfNeeded()
+	m.markDoneLocked(j, func(j *bgJob) { j.exit = &ex })
 	m.mu.Unlock()
 	deliver()
 	m.maybeCloseChild(owner)
@@ -697,11 +683,11 @@ func (m *jobManager) endSubagentTurn(j *bgJob, child *Session, errText string) {
 	}
 }
 
-// canFollowUpLocked reports whether subagent job S may still run follow-up
+// canFollowUpLocked reports whether subagent job sub may still run follow-up
 // turns. Must be called under m.mu.
-func (m *jobManager) canFollowUpLocked(S *bgJob) bool {
-	return S != nil && S.child != nil && !S.childClosed && !S.noFollowUps &&
-		!m.closing && S.followUps < maxFollowUps
+func (m *jobManager) canFollowUpLocked(sub *bgJob) bool {
+	return sub != nil && sub.child != nil && !sub.childClosed && !sub.noFollowUps &&
+		!m.closing && sub.followUps < maxFollowUps
 }
 
 // owningSubagentLocked resolves a command job's parent session to the subagent
@@ -735,41 +721,41 @@ func (m *jobManager) childRunningJobsLocked(sess *Session) int {
 // it repeatedly resumes the child session over its queued completion notices
 // (RunQueued) and delivers each turn's summary to the root session as an
 // agent_update notice (always waking — it's a result the user hasn't seen).
-// At most one driver runs per job (S.driver, set by the spawner under m.mu);
+// At most one driver runs per job (sub.driver, set by the spawner under m.mu);
 // the exit re-check happens under the same lock as notice injection in
 // finishCommand, so a completion can never slip between "inbox empty" and
 // "driver gone". A turn error poisons further follow-ups (the error still
 // reaches the root in the update's status).
-func (m *jobManager) runFollowUps(S *bgJob) {
+func (m *jobManager) runFollowUps(sub *bgJob) {
 	defer m.wg.Done()
 	for {
 		m.mu.Lock()
-		if !m.canFollowUpLocked(S) || !S.child.HasQueuedInput() {
-			S.driver = false
+		if !m.canFollowUpLocked(sub) || !sub.child.HasQueuedInput() {
+			sub.driver = false
 			m.mu.Unlock()
 			break
 		}
-		S.followUps++
-		child := S.child
+		sub.followUps++
+		child := sub.child
 		m.mu.Unlock()
 
-		fmt.Fprintf(S.out, "\n\n[follow-up turn: a background job finished]\n")
-		summary, runErr := consumeChildEvents(S, child.RunQueued(m.driverCtx))
+		fmt.Fprintf(sub.out, "\n\n[follow-up turn: a background job finished]\n")
+		summary, runErr := consumeChildEvents(sub, child.RunQueued(m.driverCtx))
 		n := notify.Notification{
-			Kind: notify.KindAgentUpdate, ID: S.id, Preview: summary,
+			Kind: notify.KindAgentUpdate, ID: sub.id, Preview: summary,
 			TS: time.Now().UTC().Format(time.RFC3339),
 		}
 		if runErr != nil {
 			n.Status = "error: " + strutil.Truncate(runErr.Error(), 200)
 			m.mu.Lock()
-			S.noFollowUps = true
+			sub.noFollowUps = true
 			m.mu.Unlock()
 		}
-		if S.parent != nil && m.rt != nil {
-			S.parent.injectNotification(m.rt, n)
+		if sub.parent != nil && m.rt != nil {
+			sub.parent.injectNotification(m.rt, n)
 		}
 	}
-	m.maybeCloseChild(S)
+	m.maybeCloseChild(sub)
 }
 
 // maybeCloseChild closes a lingering child session once nothing can happen to
@@ -780,28 +766,28 @@ func (m *jobManager) runFollowUps(S *bgJob) {
 // (or via the degrade path racing a poison), it starts a fresh driver instead
 // of closing, so no completion is silently dropped while follow-ups remain
 // available.
-func (m *jobManager) maybeCloseChild(S *bgJob) {
-	if S == nil {
+func (m *jobManager) maybeCloseChild(sub *bgJob) {
+	if sub == nil {
 		return
 	}
 	m.mu.Lock()
-	if S.child == nil || S.childClosed || S.driver || !S.lingering {
+	if sub.child == nil || sub.childClosed || sub.driver || !sub.lingering {
 		m.mu.Unlock()
 		return
 	}
-	if m.childRunningJobsLocked(S.child) > 0 {
+	if m.childRunningJobsLocked(sub.child) > 0 {
 		m.mu.Unlock()
 		return
 	}
-	if S.child.HasQueuedInput() && m.canFollowUpLocked(S) {
-		S.driver = true
+	if sub.child.HasQueuedInput() && m.canFollowUpLocked(sub) {
+		sub.driver = true
 		m.wg.Add(1)
-		go m.runFollowUps(S)
+		go m.runFollowUps(sub)
 		m.mu.Unlock()
 		return
 	}
-	S.childClosed = true
-	child := S.child
+	sub.childClosed = true
+	child := sub.child
 	m.mu.Unlock()
 	_ = child.Close()
 }
@@ -823,17 +809,24 @@ func (m *jobManager) finishSubagent(j *bgJob, summary, errText string) {
 		}
 	}
 	m.mu.Lock()
-	j.finished = true
-	j.summary = summary
-	j.errText = errText
-	j.endedAt = time.Now()
-	m.evictOldestDoneIfNeeded()
+	m.markDoneLocked(j, func(j *bgJob) { j.summary, j.errText = summary, errText })
 	m.mu.Unlock()
 	j.cancel() // always set before the job is published; release the ctx
 	m.rt.emitJob(JobProgress{
 		JobID: j.id, Parent: j.parentID,
 		Kind: JobSubagent, Title: j.title, Done: true, Summary: summary,
 	})
+}
+
+// markDoneLocked is the completion bookkeeping shared by finishCommand and
+// finishSubagent: mark the job finished, apply the kind-specific result fields
+// via set, stamp endedAt, and evict the oldest retained done-job if over the
+// cap. Must be called under m.mu.
+func (m *jobManager) markDoneLocked(j *bgJob, set func(*bgJob)) {
+	j.finished = true
+	set(j)
+	j.endedAt = time.Now()
+	m.evictOldestDoneIfNeeded()
 }
 
 // notifyAgentDone builds an agent_done completion notification for a subagent
@@ -977,7 +970,7 @@ func (m *jobManager) formatJobStatus(id string) string {
 		}
 		// Prefer the on-disk transcript once the run ends; while it's still
 		// running that file doesn't exist yet, so fall back to the live in-memory
-		// buffer so the model sees progress (matching the :background modal).
+		// buffer so the model sees progress (matching the dashboard jobs view).
 		// Render the transcript as readable text; the live buffer is already readable.
 		rawTranscript := m.transcript(id)
 		body, label := renderTranscriptText(rawTranscript), "transcript"

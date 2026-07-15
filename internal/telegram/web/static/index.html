@@ -95,15 +95,12 @@
   .card .agent { font-weight: 700; }
   .card .task { color: var(--text); font-size: 14px; }
   .card .preview { margin-top: 8px; font-family: var(--mono); font-size: 12px; color: var(--hint); white-space: pre-wrap; }
-  details.card > summary { list-style: none; cursor: pointer; }
-  details.card > summary::-webkit-details-marker { display: none; }
-  .card.sess, .card.run, .card.cronjob { cursor: pointer; }
+  .card.run, .card.cronjob { cursor: pointer; }
   pre.prompt {
     margin: 0; padding: 12px 14px; background: var(--sec); border-radius: 12px;
     font-family: var(--mono); font-size: 13px; line-height: 1.5;
     white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;
   }
-  .subbody { margin-top: 10px; border-top: 1px solid color-mix(in srgb, var(--hint) 18%, transparent); padding-top: 8px; }
   .back { appearance: none; border: 0; background: var(--sec); color: var(--text); font: inherit; font-weight: 600;
     padding: 6px 12px; border-radius: 8px; cursor: pointer; margin-bottom: 10px; }
   .usage { display: flex; gap: 8px; margin: 6px 0 8px; }
@@ -211,12 +208,6 @@ document.querySelectorAll("nav button").forEach(b => {
     refresh(true);
   };
 });
-
-// Shared message renderers (used by chat, subagent transcripts, past sessions).
-const bubble = (role, content) => {
-  const r = role === "user" ? "user" : role === "assistant" ? "assistant" : "system";
-  return `<div class="msg ${r}"><div class="bubble">${esc(content)}</div></div>`;
-};
 
 // ---- Chat -----------------------------------------------------------------
 function prettyJSON(s) { try { return JSON.stringify(JSON.parse(s), null, 2); } catch (e) { return s || ""; } }

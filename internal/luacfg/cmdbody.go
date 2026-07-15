@@ -9,9 +9,9 @@ import (
 )
 
 // runBodyCmd runs a command string with `bash -c` in the given working
-// directory and returns its trimmed stdout. It backs the body_cmd/prompt_cmd
-// config options: a skill body or agent/subagent prompt sourced from a shell
-// command (typically `cat some-file.md`) instead of an inline Lua string.
+// directory and returns its trimmed stdout. It backs the prompt_cmd config
+// option: an agent/subagent prompt sourced from a shell command (typically
+// `cat some-file.md`) instead of an inline Lua string.
 // Resolution happens once at load time, synchronously. The caller
 // passes cwd = the config directory so relative paths resolve next to
 // shell3.lua / .env / lib.

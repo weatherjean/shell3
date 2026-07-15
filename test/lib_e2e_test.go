@@ -38,7 +38,7 @@ func TestLibE2E_SingleTurn(t *testing.T) {
 
 	cfg := chat.TurnConfig{
 		LLM:         fake,
-		Personality: persona.BasePersona("you are a test", nil),
+		Personality: persona.Persona{Name: "base", SystemPrompt: "you are a test", Tools: nil},
 		StatusLine:  "test │ model",
 		Log:         applog.Noop{},
 	}

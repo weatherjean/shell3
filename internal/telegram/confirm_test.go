@@ -68,6 +68,24 @@ func TestBotAsk_Allow(t *testing.T) {
 	}
 }
 
+// The Lua gate's {ask="...", reason=...} text is the config author's prompt to
+// the human; the Telegram confirm message must surface it (shell3 dev already
+// does).
+func TestBotAsk_SurfacesReason(t *testing.T) {
+	fc := newFakeClient()
+	b := newConfirmBot(fc)
+
+	resCh := make(chan bool, 1)
+	go func() { resCh <- b.Ask(context.Background(), "rm -rf /data", "deletes production data") }()
+
+	conf := waitConfirm(t, fc)
+	if !strings.Contains(conf.text, "deletes production data") {
+		t.Errorf("confirm text missing the ask reason: %q", conf.text)
+	}
+	b.handleCallback(context.Background(), Callback{ID: "cbid", Data: conf.noData})
+	waitResult(t, resCh)
+}
+
 func TestBotAsk_Deny(t *testing.T) {
 	fc := newFakeClient()
 	b := newConfirmBot(fc)

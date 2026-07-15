@@ -40,9 +40,7 @@ func (c *LoadedConfig) parseCronJobs(L *lua.LState, jobsT *lua.LTable) {
 			return
 		}
 		n++
-		if err := checkKeys(jt, "cron.job", cronJobKeys); err != nil {
-			L.RaiseError("%s", err.Error())
-		}
+		mustKeys(L, jt, "cron.job", cronJobKeys)
 		job := CronJob{
 			Name:     optStr(jt, "name"),
 			Schedule: optStr(jt, "schedule"),
