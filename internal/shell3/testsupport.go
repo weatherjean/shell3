@@ -27,3 +27,8 @@ func RuntimeForTest(workDir string, sessionConfig func(SessionOpts) (chat.Config
 	rt.jobs = newJobManager(rt, 0)
 	return rt
 }
+
+// SetHeartbeatForTest installs a heartbeat config on a test runtime, arming
+// the front-ends' HEARTBEAT_OK suppression. Test-only seam, same caveats as
+// RuntimeForTest.
+func (rt *Runtime) SetHeartbeatForTest(hb *Heartbeat) { rt.heartbeat = hb }

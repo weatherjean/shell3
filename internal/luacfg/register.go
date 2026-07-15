@@ -73,6 +73,7 @@ func registerShell3(c *LoadedConfig) {
 	L.SetField(tbl, "background", L.NewFunction(c.luaBackground))
 	L.SetField(tbl, "telegram", L.NewFunction(c.luaTelegram))
 	L.SetField(tbl, "cron", L.NewFunction(c.luaCron))
+	L.SetField(tbl, "heartbeat", L.NewFunction(c.luaHeartbeat))
 }
 
 // checkPosIntField reads an optional positive-integer field from t. Absent →

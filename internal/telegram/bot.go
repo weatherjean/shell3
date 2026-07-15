@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/weatherjean/shell3/internal/heartbeat"
 	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/strutil"
 )
@@ -147,6 +148,9 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 		b.turnActive = false
 		b.mu.Unlock()
 		cancel()
+		// A user-initiated turn always answers ("" renders as "(no output)");
+		// only a stray edge sentinel is stripped.
+		reply, _ = b.stripHeartbeat(reply)
 		b.sendReply(ctx, reply)
 		b.applyPendingReload(ctx) // self-evolution: agent edited config + called reload this turn
 	}()
@@ -185,6 +189,35 @@ func (b *Bot) keepTyping(ctx context.Context) (stop func()) {
 		}
 	}()
 	return cancel
+}
+
+// Busy reports whether the session is mid-turn or has running background
+// jobs. It is the heartbeat ticker's skip signal: a tick that lands while the
+// agent is working is dropped, not queued (the next tick covers it).
+func (b *Bot) Busy() bool {
+	b.mu.Lock()
+	active := b.turnActive
+	b.mu.Unlock()
+	if active {
+		return true
+	}
+	for _, j := range b.sess.Jobs() {
+		if !j.Done {
+			return true
+		}
+	}
+	return false
+}
+
+// stripHeartbeat applies the HEARTBEAT_OK suppression when a heartbeat is
+// configured: the sentinel is stripped from the reply's edge, and drop is true
+// when nothing else remained (the turn needs no message). Without a heartbeat
+// config the reply passes through untouched.
+func (b *Bot) stripHeartbeat(reply string) (out string, drop bool) {
+	if b.rt.HeartbeatConfig() == nil {
+		return reply, false
+	}
+	return heartbeat.Strip(reply)
 }
 
 // hasTool reports whether the active agent has the named tool enabled.
@@ -251,7 +284,7 @@ func (b *Bot) runWakeTurn(ctx context.Context) {
 	b.turnActive = false
 	b.mu.Unlock()
 	cancel()
-	if reply != "" {
+	if reply, drop := b.stripHeartbeat(reply); !drop && reply != "" {
 		b.sendReply(ctx, reply)
 	}
 }

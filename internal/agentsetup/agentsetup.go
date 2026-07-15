@@ -82,6 +82,9 @@ func (p *Parts) Telegram() luacfg.TelegramConfig { return p.lc.Telegram() }
 // Cron returns the cron jobs declared via top-level shell3.cron{...}.
 func (p *Parts) Cron() []luacfg.CronJob { return p.lc.Cron() }
 
+// Heartbeat returns the parsed shell3.heartbeat{} block, nil when not declared.
+func (p *Parts) Heartbeat() *luacfg.Heartbeat { return p.lc.Heartbeat() }
+
 // AgentNames returns declared agent names in declaration order.
 func (p *Parts) AgentNames() []string {
 	agents := p.lc.Agents()

@@ -82,6 +82,9 @@ installed, or the dashboard stays local-only). Full walkthrough in
   `task` tool (fire-and-forget in-process jobs; you're notified on completion),
   background shell commands with `bash_bg`, and run recurring prompts on a cron
   schedule.
+- **Heartbeat.** `shell3.heartbeat{}` periodically hands the main session a
+  checklist while it's idle; the agent replies `HEARTBEAT_OK` when nothing
+  needs attention and the chat stays silent — you only hear real alerts.
 - **Context managed for you.** Set a `compact_at` token threshold and shell3
   auto-compacts the conversation into a summary — no model-driven prune/compact
   tools. History persists as plain JSONL under `.shell3_project/runs/` and is
@@ -90,8 +93,9 @@ installed, or the dashboard stays local-only). Full walkthrough in
 ## Documentation
 
 - **[Configuration](docs/configuration.md)** — models, the agent, subagents,
-  the `shell3.telegram{}` block (dashboard + tunnel), `shell3.cron`, custom
-  tools, `on_tool_call`, `on_tool_result`, `stub_tools`, skills, proxies.
+  the `shell3.telegram{}` block (dashboard + tunnel), `shell3.cron`,
+  `shell3.heartbeat`, custom tools, `on_tool_call`, `on_tool_result`,
+  `stub_tools`, skills, proxies.
 - **[CLI](docs/cli.md)** — `telegram`, `boot`, `health`, `dev`, `dash`, and the
   JSONL runs store.
 - **[Security & data](docs/security.md)** — the threat model, secrets, and

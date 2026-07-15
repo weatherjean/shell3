@@ -78,6 +78,13 @@ tools.
 inline Allow/Deny buttons for `on_tool_call` asks, media in/out, `/stop`
 `/reload` `/run`, an in-process cron scheduler (`internal/cron`, jobs declared
 via top-level `shell3.cron({...})`; each job dispatches a declared subagent),
+a **heartbeat** (`internal/heartbeat`, declared via top-level
+`shell3.heartbeat({every=..., checklist=..., active={from,to,tz}})`; each idle
+in-window tick Interjects the checklist prompt into the MAIN session — full
+context, unlike cron's fresh subagents — and the bot suppresses replies whose
+edge carries the `HEARTBEAT_OK` sentinel, so the chat only hears real alerts;
+busy/out-of-window ticks are skipped, `/reload` rearms, and `shell3 dev
+--heartbeat` fires one tick locally with a suppression verdict),
 and a Mini App **dashboard**
 (`internal/telegram/web`, Telegram initData auth) with status / past runs /
 subagent transcripts / jobs / cron / a read-only file explorer (`.env` and
@@ -106,7 +113,7 @@ Secrets and credentials (provider API keys, tool tokens) live in a plain `.env` 
 ```
 cmd/shell3/            cobra command tree: root (prints help) + telegram/dev/dash/boot/health subcommands
 internal/agentsetup/   shared config assembly (Build → chat.Config) used by every front-end
-internal/luacfg/       Lua config loader (shell3.lua → model/agent/subagents/tools/skills, telegram, cron, on_tool_call/stub_tools) + system-prompt assembly
+internal/luacfg/       Lua config loader (shell3.lua → model/agent/subagents/tools/skills, telegram, cron, heartbeat, on_tool_call/stub_tools) + system-prompt assembly
 internal/bootstrap/    first-run global + project setup
 internal/scaffold/     embedded starter shell3.lua (with shell3.telegram{}) + .env template
 internal/adapter/openai/  OpenAI-compatible LLM adapter
@@ -118,6 +125,7 @@ internal/notify/       Notification type (bg_done / agent_done) shared by job ru
 internal/tunnel/       dashboard.tunnel spawner: runs the tunnel command, scrapes its https URL
 internal/telegram/     Telegram bot front-end (bot loop, commands, confirm buttons, media, mdhtml) + web/ (Mini App dashboard)
 internal/cron/         robfig/cron scheduler dispatching subagent jobs on Session.Dispatch
+internal/heartbeat/    shell3.heartbeat{} engine: tick prompt, active-hours window, HEARTBEAT_OK strip, idle-skip ticker
 internal/cli/          non-interactive front-end helpers: shell3 dev + dash renderers, brand banner
 internal/chat/         conversation loop, tools, events, JSONL audit sink
 internal/llm/          Provider/Streamer interfaces, request params, types (+ fakellm)

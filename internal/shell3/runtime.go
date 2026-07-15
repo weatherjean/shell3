@@ -108,10 +108,12 @@ type Runtime struct {
 	// jobs manages in-process background jobs (command and subagent jobs).
 	// Owned by this Runtime; cancelled at Close.
 	jobs *jobManager
-	// telegram + cron mirror the shell3.telegram{} config the runtime was built
-	// with (and re-derived on Reload). Read via Telegram()/Cron(). See telegram.go.
-	telegram TelegramConfig
-	cron     []CronJob
+	// telegram + cron + heartbeat mirror the parsed config blocks the runtime
+	// was built with (and re-derived on Reload). Read via
+	// Telegram()/Cron()/HeartbeatConfig(). See telegram.go.
+	telegram  TelegramConfig
+	cron      []CronJob
+	heartbeat *Heartbeat
 
 	mu       sync.Mutex
 	sessions map[string]*Session
@@ -166,6 +168,7 @@ func NewRuntime(ctx context.Context, spec RuntimeSpec) (*Runtime, error) {
 		sessions:      map[string]*Session{},
 		telegram:      parts.Telegram(),
 		cron:          parts.Cron(),
+		heartbeat:     parts.Heartbeat(),
 	}
 	rt.jobs = newJobManager(rt, parts.BackgroundMaxConcurrent())
 	// Implement the documented cancellation contract: cancelling the parent ctx

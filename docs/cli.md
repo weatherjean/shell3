@@ -14,7 +14,8 @@ shell3 telegram -c work      # uses ~/.shell3/work.lua
 
 Loads the config, connects to Telegram, and answers the single `chat_id`
 declared in `shell3.telegram{}`. It also starts the Mini App dashboard (when
-`dashboard.enabled`), arms any cron jobs, and blocks until interrupted.
+`dashboard.enabled`), arms any cron jobs and the heartbeat (when
+`shell3.heartbeat{}` is declared), and blocks until interrupted.
 
 The bot's runtime is anchored to the config directory, so its history and runs
 live under `~/.shell3/.shell3_project/`. In-chat commands: `/stop` (cancel the
@@ -67,12 +68,14 @@ queries and troubleshooting.
 ```sh
 shell3 dev "list the files here and summarize what this project is"
 shell3 dev --resume "now write a one-line description"   # continue the last session
+shell3 dev --heartbeat                                    # fire the configured heartbeat once
 ```
 
 | Flag | Effect |
 |------|--------|
 | `-c`, `--config <name\|path>` | Config to use (default `~/.shell3/shell3.lua`) |
 | `--resume` | Continue the latest session (multi-turn across invocations) |
+| `--heartbeat` | Fire the configured `shell3.heartbeat{}` prompt once (no message argument) and print the suppression verdict — whether the bot would stay silent (`HEARTBEAT_OK`) or deliver the alert |
 
 `dev` auto-approves `on_tool_call` ask verdicts (and prints that it did), so it
 runs unattended.

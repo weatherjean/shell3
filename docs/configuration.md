@@ -476,6 +476,43 @@ shell3.cron({
 quietly for the agent's next turn. Arm a changed cron list with `/reload`; run
 a job on demand with `/run <name>`.
 
+## Heartbeat — `shell3.heartbeat`
+
+Where cron fires a **fresh, contextless subagent** at an exact time, the
+heartbeat periodically wakes the **main session** — full conversation context —
+with an open-ended "anything need attention?" checklist, and stays silent
+unless something does. Use it for standing awareness (inbox, calendar, "did
+anything break?", following up on work the agent promised); use cron for
+exact-time, isolated jobs.
+
+```lua
+shell3.heartbeat({
+  every     = "30m",                 -- required; a Go duration ("30m", "1h")
+  checklist = [[
+- anything urgent in the inbox?
+- any background work you promised earlier and haven't finished?
+]],                                  -- required; the standing orders each tick carries
+  active    = { from = "08:00", to = "23:00", tz = "Europe/Berlin" },
+  -- prompt = "...",                 -- optional preamble override (checklist is still appended)
+})
+```
+
+Mechanics: each tick that lands while the session is **idle** and inside the
+`active` window injects the checklist prompt as a queued turn (the same wake
+path background-job notices use). The prompt instructs the model to reply
+exactly `HEARTBEAT_OK` when nothing needs attention; the bot strips that
+sentinel and sends nothing, so the chat only hears real alerts. Busy or
+out-of-window ticks are **skipped, not queued** — heartbeat timing is
+approximate by design. Declaring a second `shell3.heartbeat` fails the load.
+
+- `active` is optional (omit for 24/7); `from` is inclusive, `to` exclusive,
+  both `"HH:MM"` 24h clock, and `from > to` spans midnight (`22:00`–`06:00`).
+- `tz` is an IANA zone name for the window, defaulting to the host's local
+  zone; it is validated at load time.
+- `/reload` picks up heartbeat changes (a removed block stops the ticking).
+- Test a checklist end-to-end with `shell3 dev --heartbeat`: it fires one tick
+  and prints whether the reply would be suppressed or delivered.
+
 ## Skills
 
 A skill is a plain `.md` file the agent reads with `cat` when it's relevant —

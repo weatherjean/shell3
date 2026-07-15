@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/weatherjean/shell3/internal/cron"
+	"github.com/weatherjean/shell3/internal/heartbeat"
 	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/telegram"
 	"github.com/weatherjean/shell3/internal/telegram/web"
@@ -99,6 +100,21 @@ func newTelegramCommand() *cobra.Command {
 				b.SetJobRunner(sched.Run)
 			}
 
+			// Heartbeat (shell3.heartbeat{}): periodic check-in turns on the main
+			// session. Each idle in-window tick Interjects the checklist prompt;
+			// the idle-wake runs the turn and the bot suppresses HEARTBEAT_OK
+			// replies, so the chat only hears about real alerts.
+			hbInject := func(p string) { sess.Interject(p) }
+			hbTick := rearmHeartbeat(nil, rt.HeartbeatConfig(), hbInject, b.Busy)
+			if hbTick != nil {
+				fmt.Printf("heartbeat: every %s\n", rt.HeartbeatConfig().Every)
+			}
+			defer func() {
+				if hbTick != nil {
+					hbTick.Stop()
+				}
+			}()
+
 			// Register the "/" command hints (best-effort).
 			if err := client.SetCommands(ctx, telegram.BotCommands()); err != nil {
 				fmt.Printf("warning: could not set commands: %v\n", err)
@@ -116,6 +132,9 @@ func newTelegramCommand() *cobra.Command {
 				}
 				ns, res, err := reloadAndRearm(rt, b, dash, sess, sched)
 				sched = ns
+				if err == nil {
+					hbTick = rearmHeartbeat(hbTick, rt.HeartbeatConfig(), hbInject, b.Busy)
+				}
 				return res, err
 			})
 
@@ -197,6 +216,22 @@ func reloadAndRearm(r configReloader, b rearmBot, dash cronDashboard, disp cron.
 		dash.SetCronSource(ns.Jobs)
 	}
 	return ns, res, nil
+}
+
+// rearmHeartbeat stops the old ticker (nil-safe) and arms a fresh one from
+// cfg; a nil cfg disarms and returns nil. Shared by startup (old = nil) and
+// the reload path, so a reload picks up changed heartbeat settings and a
+// removed block stops the ticking.
+func rearmHeartbeat(old *heartbeat.Ticker, cfg *shell3.Heartbeat, inject func(string), busy func() bool) *heartbeat.Ticker {
+	if old != nil {
+		old.Stop()
+	}
+	if cfg == nil {
+		return nil
+	}
+	t := heartbeat.NewTicker(*cfg, inject, busy)
+	t.Start()
+	return t
 }
 
 // serveDashboard builds and serves the Mini App dashboard when it is enabled

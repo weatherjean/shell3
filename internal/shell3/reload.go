@@ -117,6 +117,7 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 	rt.store = newParts.Store()
 	rt.cron = cronJobs
 	rt.telegram = newParts.Telegram()
+	rt.heartbeat = newParts.Heartbeat()
 	oldCleanup()
 
 	// 4. Re-derive each live session in place (keep history s.sess), restore overrides.

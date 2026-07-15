@@ -180,3 +180,18 @@ shell3.telegram({
 --     prompt="Summarize anything noteworthy from the last day." },
 -- })
 
+-- Heartbeat: a periodic check-in turn on the MAIN session (full conversation
+-- context, unlike cron's fresh subagents). Each idle tick hands the agent the
+-- checklist; it replies HEARTBEAT_OK when nothing needs attention and the bot
+-- stays silent — you only hear about real alerts. Busy or out-of-window ticks
+-- are skipped (timing is approximate; use cron for exact-time jobs). Test a
+-- checklist with: shell3 dev --heartbeat
+-- shell3.heartbeat({
+--   every     = "30m",
+--   checklist = [[
+-- - anything urgent in the inbox?
+-- - any background work you promised earlier and haven't finished?
+-- ]],
+--   active    = { from = "08:00", to = "23:00", tz = "Europe/Berlin" },
+-- })
+

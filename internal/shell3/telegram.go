@@ -14,6 +14,7 @@ type (
 	TelegramConfig  = luacfg.TelegramConfig
 	DashboardConfig = luacfg.DashboardConfig
 	CronJob         = luacfg.CronJob
+	Heartbeat       = luacfg.Heartbeat
 )
 
 // sessionConfigFrom adapts Parts.SessionConfig to the Runtime's per-session
@@ -33,3 +34,6 @@ func (rt *Runtime) Telegram() TelegramConfig { return rt.telegram }
 
 // Cron returns the cron jobs declared via top-level shell3.cron{...}.
 func (rt *Runtime) Cron() []CronJob { return rt.cron }
+
+// HeartbeatConfig returns the shell3.heartbeat{} block, nil when not declared.
+func (rt *Runtime) HeartbeatConfig() *Heartbeat { return rt.heartbeat }

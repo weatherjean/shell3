@@ -118,6 +118,9 @@ type LoadedConfig struct {
 	// Telegram()/Cron(). See telegram.go / cron.go.
 	telegram TelegramConfig
 	cron     []CronJob
+	// heartbeat holds the parsed shell3.heartbeat{} block (nil if absent).
+	// Read via Heartbeat(). See heartbeat.go.
+	heartbeat *Heartbeat
 
 	// onToolCall is the shell3.on_tool_call handler chain (declaration order): each
 	// runs before any tool executes, with the real t.name, and returns a verdict

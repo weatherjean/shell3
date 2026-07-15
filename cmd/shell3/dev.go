@@ -26,6 +26,7 @@ func newDevCommand() *cobra.Command {
 	var (
 		configPath string
 		resume     bool
+		hbFire     bool
 	)
 	cmd := &cobra.Command{
 		Use:   "dev [message]",
@@ -33,8 +34,11 @@ func newDevCommand() *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			prompt := strings.Join(args, " ")
-			if prompt == "" {
+			if prompt == "" && !hbFire {
 				return fmt.Errorf("dev: give a message, e.g. shell3 dev \"list the files here\"")
+			}
+			if prompt != "" && hbFire {
+				return fmt.Errorf("dev: --heartbeat fires the configured heartbeat prompt; drop the message argument")
 			}
 			ctx := cmd.Context()
 
@@ -71,7 +75,17 @@ func newDevCommand() *cobra.Command {
 
 			cli.PrintHeader(os.Stdout)
 			fmt.Printf("agent=%s  config=%s\n\n", sess.ActiveAgent(), resolved)
-			if err := cli.RunDevTurn(ctx, os.Stdout, sess, prompt); err != nil {
+			if hbFire {
+				// Fire the configured heartbeat once, exactly as the Telegram
+				// host's ticker would, and show the suppression verdict.
+				hb := rt.HeartbeatConfig()
+				if hb == nil {
+					return fmt.Errorf("dev: no shell3.heartbeat{} declared in %s", resolved)
+				}
+				if err := cli.RunDevHeartbeat(ctx, os.Stdout, sess, *hb); err != nil {
+					return err
+				}
+			} else if err := cli.RunDevTurn(ctx, os.Stdout, sess, prompt); err != nil {
 				return err
 			}
 			// Follow through on any subagent/bash_bg jobs the turn spawned, so dev
@@ -81,5 +95,6 @@ func newDevCommand() *cobra.Command {
 	}
 	addConfigFlag(cmd, &configPath)
 	cmd.Flags().BoolVar(&resume, "resume", false, "Continue the latest session (multi-turn across invocations)")
+	cmd.Flags().BoolVar(&hbFire, "heartbeat", false, "Fire the configured shell3.heartbeat{} prompt once and show the suppression verdict")
 	return cmd
 }
