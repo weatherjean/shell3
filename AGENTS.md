@@ -58,13 +58,12 @@ scaffold's example gate ships **commented out** — a fresh config gates nothing
 and, once enabled, covers only the bash family, so `edit_file` runs
 ungated (a config choice, not a hardcoded exemption). Skills
 are **dir-based**: an agent lists directories (`skills = { "lib/skills" }`,
-resolved against the config dir) and every flat `*.md` inside with YAML
-frontmatter (required `description`, optional `name` defaulting to the
-filename) becomes one skill — no Lua declaration, no `shell3.skill`. A missing
-dir fails the load; an invalid file is skipped with a load warning that
-`shell3 health` (strict config check) turns into a failure. The agent reads a
-skill's body with `cat` (skills are listed by absolute path in the prompt
-under `## Skills` — there is no `skill` tool), and custom tools are declarative
+resolved against the config dir) and every flat `*.md` inside with a
+frontmatter `description:` (optional `name:` defaults to the filename) is one
+skill — no Lua declaration. A missing dir fails the load; an invalid file is
+skipped with a warning that `shell3 health` turns into a failure. The agent
+reads a skill's body with `cat` (skills are indexed by absolute path in the
+prompt under `## Skills` — there is no `skill` tool), and custom tools are declarative
 bash-command templates (`shell3.tool{command=...}`, params injected as lowercase
 env vars plus a `secrets` list; no Lua `handler`) — the
 `shell3.bash`/`http`/`urlencode` helpers are gone. Context is host-managed via

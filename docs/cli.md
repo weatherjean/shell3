@@ -51,10 +51,8 @@ shell3 health --config work  # checks ~/.shell3/work.lua
 ```
 
 Loads the config exactly like the bot would and fails (exit 1) on anything the
-running bot only tolerates with a warning — most importantly a skill `.md` the
-loader had to skip because of missing or broken frontmatter. A clean check
-prints the active agent's shape and `OK`. Run it after editing `shell3.lua` or
-dropping a skill file into `lib/skills/`, before `/reload`.
+bot only tolerates with a warning — e.g. a skill `.md` skipped for broken
+frontmatter. Run it after editing `shell3.lua` or `lib/skills/`, before `/reload`.
 
 ## `shell3 dev` — drive the agent locally
 

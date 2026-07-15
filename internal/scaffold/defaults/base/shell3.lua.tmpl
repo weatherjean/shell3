@@ -5,16 +5,9 @@
 
 local tools  = require("lib.tools")            -- { web_fetch, brave_search }
 
--- Skills are plain markdown files: every *.md in the directories an agent
--- lists under skills={} becomes one skill. A file needs YAML frontmatter with
--- a description (name is optional — it defaults to the filename):
---   ---
---   description: When and how to use this skill.
---   ---
---   ...the body the agent reads with `cat`...
--- Drop a file into lib/skills/ and /reload; `shell3 health` flags files the
--- loader had to skip. An agent's prompt can likewise come from a file:
---   shell3.agent({ name="build", model="...", prompt_cmd="cat lib/prompts/build.md", ... })
+-- Skills: every *.md in the dirs an agent lists under skills={} is one skill —
+-- markdown with a frontmatter `description:`. Drop a file into lib/skills/ and
+-- /reload; `shell3 health` flags files the loader had to skip.
 
 -- ---------------------------------------------------------------------------
 -- Model

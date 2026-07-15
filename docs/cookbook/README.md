@@ -7,12 +7,10 @@ Each `lib/...` file here mirrors the base config's module layout.
 
 A reminder on how the two extensible pieces work, since the recipes lean on both:
 
-- **Skills** are plain `.md` files with YAML frontmatter (a required
-  `description`, an optional `name` defaulting to the filename) that the agent
-  reads with `cat`. Installing one is a single step: copy the `.md` into a
-  directory your agent lists under `skills = { ... }` — the scaffold's agent
-  already lists `lib/skills/`, so `~/.shell3/lib/skills/` just works. Verify
-  with `shell3 health`, then `/reload`.
+- **Skills** are `.md` files with a frontmatter `description:` that the agent
+  reads with `cat`. Installing one is a single step: copy it into
+  `~/.shell3/lib/skills/` (the scaffold's agent already lists that dir under
+  `skills = { ... }`), check `shell3 health`, then `/reload`.
 - **Custom tools** are declarative bash-command templates
   (`shell3.tool{ command=... }`), not Lua handlers: copy the file into
   `~/.shell3/lib/`, `require` it in your `shell3.lua`, and wire it into an

@@ -486,19 +486,11 @@ a job on demand with `/run <name>`.
 ## Skills
 
 A skill is a plain `.md` file the agent reads with `cat` when it's relevant —
-there is no `skill` tool and no Lua declaration. An agent lists **directories**,
-and every `*.md` file inside (non-recursive) becomes one skill:
-
-```lua
-shell3.agent({
-  -- ...
-  skills = { "lib/skills" },   -- one or more dirs, resolved relative to shell3.lua
-})
-```
-
-Each skill file is industry-standard markdown with YAML frontmatter: a
-required `description` (the one-liner the agent sees and uses to decide
-whether to read the body) and an optional `name` that defaults to the
+there is no `skill` tool and no Lua declaration. An agent lists directories
+(`skills = { "lib/skills" }`, resolved relative to `shell3.lua`), and every
+`*.md` inside (non-recursive) becomes one skill. A file is markdown with YAML
+frontmatter — a required `description` (the one-liner the agent sees and uses
+to decide whether to read the body) and an optional `name` defaulting to the
 filename:
 
 ```markdown
@@ -508,16 +500,12 @@ description: Planning + approval gate before any non-trivial change.
 When asked for a non-trivial change, first...
 ```
 
-Adding a skill is just dropping a file into a listed dir and `/reload`-ing. A
-missing directory fails the load; a file the loader can't use — empty, no
-frontmatter, no `description`, or a duplicate name — is **skipped with a
-warning** so a stray `.md` never takes the bot down. Run `shell3 health` to
-surface those warnings as hard errors.
-
-Skills granted to an agent are listed by absolute path in its system prompt
-under `## Skills`, so the model knows they exist and when to reach for them. The
-[cookbook](cookbook/) ships ready-to-use skills for planning, executing plans,
-codebase discovery, and web search.
+Adding a skill is dropping a file into a listed dir and `/reload`-ing. A
+missing directory fails the load; a file the loader can't use (no
+frontmatter/`description`, empty body, duplicate name) is skipped with a
+warning — `shell3 health` turns those warnings into hard errors. Granted
+skills are indexed by absolute path in the system prompt under `## Skills`;
+the [cookbook](cookbook/) ships ready-to-use ones.
 
 ## Putting it together
 
