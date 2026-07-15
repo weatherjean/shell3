@@ -4,11 +4,9 @@ package main
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 
-	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/luacfg"
 )
 
@@ -24,11 +22,7 @@ func newHealthCommand() *cobra.Command {
 		Short: "Check the config: load shell3.lua and fail on any warning",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return err
-			}
-			resolved, err := agentsetup.ResolveConfigPath(configPath, home)
+			resolved, err := resolveConfig(configPath)
 			if err != nil {
 				return err
 			}
@@ -39,9 +33,8 @@ func newHealthCommand() *cobra.Command {
 	return cmd
 }
 
-// runHealth loads the config at path and prints a verdict. A load error or
-// any load warning fails the check (SilenceUsage: the config is broken, not
-// the invocation).
+// runHealth loads the config at path and prints a verdict (SilenceUsage: a
+// failure means the config is broken, not the invocation).
 func runHealth(cmd *cobra.Command, path string) error {
 	cmd.SilenceUsage = true
 	out := cmd.OutOrStdout()

@@ -5,8 +5,6 @@ description: Use before any non-trivial feature, behavior change, or new compone
 
 # Brainstorming ideas into designs
 
-Turn a rough idea into a clear, agreed design through collaborative dialogue — then write it down. Do this before implementation for any non-trivial change.
-
 ## Hard gate
 
 Do NOT write code, edit files, or start implementing until you have presented a design and the user has approved it. This applies to every task regardless of how simple it looks. "Too simple to need a design" is where unexamined assumptions cost the most. The design can be three sentences for a tiny change — but present it and get a yes first.
@@ -29,8 +27,5 @@ Do NOT write code, edit files, or start implementing until you have presented a 
 
 ## Key principles
 
-- One question at a time — do not overwhelm.
 - YAGNI ruthlessly — cut features that are not needed.
-- Always explore 2-3 approaches before settling.
-- Validate incrementally — present, get approval, then move on.
 - Be willing to go back when something does not fit.

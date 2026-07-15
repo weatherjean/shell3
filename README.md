@@ -46,9 +46,9 @@ leans on Unix process groups. WSL works.
 
 `boot` scaffolds the `code` agent, a read-only `explorer` subagent, and a
 `shell3.telegram{}` block whose Mini App dashboard is tunneled with
-[cloudflared](https://github.com/cloudflare/cloudflared) by default (free, no
-account — install it, e.g. `brew install cloudflared` on macOS, or the
-dashboard stays local-only). Full walkthrough in [docs/cli.md](docs/cli.md).
+[cloudflared](https://github.com/cloudflare/cloudflared) by default (must be
+installed, or the dashboard stays local-only). Full walkthrough in
+[docs/cli.md](docs/cli.md).
 
 ## Commands
 

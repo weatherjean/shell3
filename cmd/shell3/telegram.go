@@ -6,14 +6,12 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
 	"syscall"
 
 	"github.com/spf13/cobra"
-	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/cron"
 	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/telegram"
@@ -30,13 +28,7 @@ func newTelegramCommand() *cobra.Command {
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return err
-			}
-			// Same resolution rule as the other subcommands: --config name or *.lua path,
-			// default ~/.shell3/shell3.lua. No telegram-specific config lookup.
-			resolved, err := agentsetup.ResolveConfigPath(configPath, home)
+			resolved, err := resolveConfig(configPath)
 			if err != nil {
 				return err
 			}

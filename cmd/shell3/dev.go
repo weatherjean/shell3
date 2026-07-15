@@ -12,7 +12,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/cli"
 	"github.com/weatherjean/shell3/internal/shell3"
 )
@@ -39,11 +38,7 @@ func newDevCommand() *cobra.Command {
 			}
 			ctx := cmd.Context()
 
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return err
-			}
-			resolved, err := agentsetup.ResolveConfigPath(configPath, home)
+			resolved, err := resolveConfig(configPath)
 			if err != nil {
 				return err
 			}

@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/cli"
 )
 
@@ -63,6 +64,17 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// resolveConfig turns the shared --config flag value (a name or a *.lua path;
+// "" for the default ~/.shell3/shell3.lua) into the config path every
+// subcommand loads.
+func resolveConfig(configPath string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return agentsetup.ResolveConfigPath(configPath, home)
 }
 
 func shouldPrintHeaderInPreRun(root, cmd *cobra.Command) bool {

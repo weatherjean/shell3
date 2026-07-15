@@ -159,8 +159,8 @@ func (c *LoadedConfig) luaModel(L *lua.LState) int {
 }
 
 // pushHandle pushes a handle table carrying sentinel → name (the reference
-// form agents use in skills={}/tools.custom={}/tools.subagents={}) and returns
-// the Lua result count.
+// form agents use in tools.custom={}/tools.subagents={}) and returns the Lua
+// result count.
 func pushHandle(L *lua.LState, sentinel, name string) int {
 	h := L.NewTable()
 	h.RawSetString(sentinel, lua.LString(name))
@@ -263,8 +263,8 @@ func forEachStringPair(L *lua.LState, t *lua.LTable, ctx, keyWant, valWant strin
 // a bare string, number, or a table missing the sentinel all raise. ctx names
 // the list in the error (e.g. `agent "code": tools.subagents`) and want names
 // the handle kind. Silent dropping is never acceptable here: a typo'd entry in
-// skills={}/tools.custom={}/tools.subagents={} would otherwise load an agent
-// quietly missing a grant.
+// tools.custom={}/tools.subagents={} would otherwise load an agent quietly
+// missing a grant.
 func handleNamesStrict(L *lua.LState, list *lua.LTable, sentinel, ctx, want string) []string {
 	var out []string
 	for i := 1; i <= list.Len(); i++ {

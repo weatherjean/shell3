@@ -53,13 +53,9 @@ type CustomTool struct {
 	Timeout           int
 }
 
-// Skill is a granted capability surfaced as a one-line entry in the agent's
-// ## Skills index (name + description). Skills are never declared in Lua:
-// an agent lists directories (skills = { "lib/skills" }) and each flat *.md
-// file inside — YAML frontmatter with a required description and an optional
-// name defaulting to the filename — becomes one Skill at Load (see skills.go).
-// Body lives in the file at Path (absolute once resolved); the agent reads it
-// with `cat` when the skill applies.
+// Skill is one resolved *.md from an agent's skills dirs (see skills.go),
+// surfaced as a one-line entry in the ## Skills index; the agent reads the
+// body at Path (absolute) with `cat` when the skill applies.
 type Skill struct{ Name, Description, Path string }
 
 type Agent struct {
@@ -199,10 +195,10 @@ func Load(path string) (*LoadedConfig, error) {
 	// Resolve each agent's/subagent's skills dirs (skills.go): a missing dir
 	// fails the load here at load/reload time rather than at turn time; invalid
 	// skill files are skipped with a warning.
-	warn := func(w string) { c.warnings = append(c.warnings, w) }
+	sc := newSkillScanner(cfgDir, func(w string) { c.warnings = append(c.warnings, w) })
 	for i := range c.agents {
 		a := &c.agents[i]
-		sk, err := resolveSkillDirs(cfgDir, a.SkillDirs, fmt.Sprintf("agent %q", a.Name), warn)
+		sk, err := sc.resolve(a.SkillDirs, fmt.Sprintf("agent %q", a.Name))
 		if err != nil {
 			return nil, err
 		}
@@ -210,7 +206,7 @@ func Load(path string) (*LoadedConfig, error) {
 	}
 	for i := range c.subagents {
 		sa := &c.subagents[i]
-		sk, err := resolveSkillDirs(cfgDir, sa.SkillDirs, fmt.Sprintf("subagent %q", sa.Name), warn)
+		sk, err := sc.resolve(sa.SkillDirs, fmt.Sprintf("subagent %q", sa.Name))
 		if err != nil {
 			return nil, err
 		}

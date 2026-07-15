@@ -40,11 +40,9 @@ Or print raw JSON lines with line numbers:
 
 ## Subagent runs
 
-A subagent's conversation is a session like any other, stored under
-`.shell3_project/runs/<id>/` and searchable the same way as your own history.
-
-(Live background jobs — subagents, `bash_bg`, and background custom tools — are
-inspected with the `task_list` / `task_status` tools, not files.)
+A subagent's conversation is an ordinary session under
+`.shell3_project/runs/<id>/`. (Live jobs are inspected with `task_list` /
+`task_status`, not files.)
 
 ## Rules
 

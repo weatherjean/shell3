@@ -27,25 +27,15 @@ agents, tools, and skills.
 > bash-template design and is fine for a local single-user setup; on a
 > multi-user host, treat tool secrets as readable by that user's other processes.
 
-## Usage
-
-```bash
-# skills: drop the .md into a granted skills dir — that's the whole install
-cp writing-plans.md ~/.shell3/lib/skills/
-shell3 health   # confirms it parsed; then /reload in the bot
-```
-
 ## Contents
 
-**Skills** (`lib/skills/`)
+**Skills** (`lib/skills/`; the base scaffold already ships `browser` — a real,
+headed Chrome via puppeteer-core)
 
 - `writing-plans.md` — a planning and approval gate before non-trivial changes.
 - `executing-plans.md` — safe execution plus a git workflow once a plan is agreed.
 - `codebase-discovery.md` — navigating unfamiliar code and pruning context aggressively.
 - `web-search.md` — guidance for web research with the `brave_search` / `web_fetch` tools.
-
-(The `browser` skill — a real, headed Chrome via puppeteer-core — ships in the
-base scaffold now, enabled by default.)
 
 **Tools and agents** (`lib/`)
 

@@ -4,7 +4,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/telegram/web"
 )
@@ -34,11 +32,7 @@ func newDashCommand() *cobra.Command {
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return err
-			}
-			resolved, err := agentsetup.ResolveConfigPath(configPath, home)
+			resolved, err := resolveConfig(configPath)
 			if err != nil {
 				return err
 			}

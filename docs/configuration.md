@@ -13,8 +13,7 @@ how shell3 finds your config in the first place.
 `boot` creates three things under `~/.shell3/`:
 
 - `shell3.lua` — the config: your models, the agent, subagents, tools, and skills.
-- `lib/` — tool modules the config `require`s, plus `lib/skills/` — the
-  markdown skill files the agent's `skills = { "lib/skills" }` picks up.
+- `lib/` — tool modules the config `require`s and `lib/skills/` markdown skills.
 - `.env` — your secrets (API keys, tokens). **Never commit this file.**
 
 ### How the config path is resolved
@@ -138,11 +137,9 @@ shell3.agent({
 ```
 
 There are **no file-read tools**: the agent reads with `cat`/`sed -n`, lists
-with `ls`/`find`, and searches with `rg` — all through `bash`. The scaffold
-registers [`shell3.stub_tools`](#stub-tools) redirects so a model that
-reflexively calls `read`/`read_file`/`grep`/`write_file` gets a one-line nudge
-back to bash/edit_file instead of an error. A *read-only* agent is a policy,
-not a tool set: gate `bash` in
+with `ls`/`find`, and searches with `rg` — all through `bash` (hallucinated
+`read`/`grep` calls are redirected, see [stub tools](#stub-tools)). A
+*read-only* agent is a policy, not a tool set: gate `bash` in
 [`on_tool_call`](#the-command-gate--on_tool_call) to inspection-only commands.
 
 ## Subagents & delegation
@@ -199,16 +196,12 @@ The same job runtime backs `bash_bg`, which is gated separately by
 **nonzero** wakes an idle agent so the failure is narrated proactively; a clean
 exit queues its notice quietly for the next turn.
 
-**Subagents and `bash_bg`.** A subagent may start background commands of its
-own. If one is still running when the subagent's main turn ends, the parent
-still gets the completion notice immediately — but the subagent's session is
-kept open in the background, and when the job finishes the subagent is
-**resumed** for a follow-up turn over the result. That turn's summary reaches
-the main agent as a follow-up notice (and wakes it). Follow-up turns are capped
-at 5 per subagent — past the cap (or after `task_cancel`), a finished job's
-raw notice is delivered straight to the main agent instead, so no completion
-is ever lost. `task_cancel <sub-id>` cascades: it also kills the background
-jobs that subagent started.
+**Subagents and `bash_bg`.** A subagent's still-running `bash_bg` job keeps
+its session open past its main turn; each completion **resumes** the subagent
+for a follow-up turn whose summary reaches the main agent as a notice (capped
+at 5 per subagent — past the cap, or after cancel, the raw job notice is
+delivered instead, so no completion is lost). `task_cancel <sub-id>` cascades
+to the jobs that subagent started.
 
 ## Custom tools
 

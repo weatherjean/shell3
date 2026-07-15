@@ -19,8 +19,8 @@ declared in `shell3.telegram{}`. It also starts the Mini App dashboard (when
 The bot's runtime is anchored to the config directory, so its history and runs
 live under `~/.shell3/.shell3_project/`. In-chat commands: `/stop` (cancel the
 in-flight turn + tracked jobs), `/reload` (re-read the config and apply it
-live — refused while background tasks are running: `/stop` them or let them
-finish first), `/run <job>` (fire a cron job on demand), `/status`, `/clear`,
+live — refused while background tasks are running), `/run <job>` (fire a cron
+job on demand), `/status`, `/clear`,
 `/rollback`.
 
 | Flag | Effect |
@@ -34,11 +34,11 @@ shell3 boot     # interactive: model endpoint + key, then bot token + chat id
 ```
 
 `boot` scaffolds `~/.shell3/shell3.lua` (the `code` agent, a read-only
-`explorer` subagent, and a `shell3.telegram{}` block whose dashboard is exposed
-through a [cloudflared](https://github.com/cloudflare/cloudflared) tunnel by
-default — free, no account, but the binary must be installed or the dashboard
-stays local-only), the `lib/` modules, and `~/.shell3/.env` (secrets — never
-commit it). Non-interactive flags let you script it: `--url`, `--model`, `--name`,
+`explorer` subagent, and a `shell3.telegram{}` block whose dashboard is
+tunneled with cloudflared by default — free, no account; install it from
+https://github.com/cloudflare/cloudflared or the dashboard stays local-only),
+the `lib/` modules, and `~/.shell3/.env` (secrets — never commit it).
+Non-interactive flags let you script it: `--url`, `--model`, `--name`,
 `--key`, `--tg-token`, `--tg-chat-id`, `--context-window`, `--compact-at`,
 `--proxy`, `--brave-key`, `--force`. See
 [configuration.md](configuration.md) for what it produces and how to extend it.
