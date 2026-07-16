@@ -15,7 +15,7 @@ import (
 
 func TestMergeEnvAddsMissingKeysOnly(t *testing.T) {
 	existing := "FOO=bar\nMAIN_API_KEY=old\n"
-	out := mergeEnv(existing, [][2]string{
+	out, kept := mergeEnv(existing, [][2]string{
 		{"MAIN_API_KEY", "new"},
 		{"BRAVE_API_KEY", "xyz"},
 	})
@@ -31,15 +31,38 @@ func TestMergeEnvAddsMissingKeysOnly(t *testing.T) {
 	if !strings.Contains(out, "FOO=bar") {
 		t.Errorf("must preserve unrelated keys; got:\n%s", out)
 	}
+	// The caller supplied a NEW non-empty value for an existing key: that key
+	// must be reported so boot can tell the user their --key was not applied.
+	if len(kept) != 1 || kept[0] != "MAIN_API_KEY" {
+		t.Errorf("kept = %v, want [MAIN_API_KEY]", kept)
+	}
 }
 
 func TestMergeEnvFromEmpty(t *testing.T) {
-	out := mergeEnv("", [][2]string{{"MAIN_API_KEY", "k"}, {"BRAVE_API_KEY", ""}})
+	out, kept := mergeEnv("", [][2]string{{"MAIN_API_KEY", "k"}, {"BRAVE_API_KEY", ""}})
 	if !strings.Contains(out, "MAIN_API_KEY=k") || !strings.Contains(out, "BRAVE_API_KEY=") {
 		t.Errorf("missing expected keys; got:\n%s", out)
 	}
 	if !strings.HasSuffix(out, "\n") {
 		t.Errorf("env file must end with newline; got:\n%q", out)
+	}
+	if len(kept) != 0 {
+		t.Errorf("nothing pre-existing, kept must be empty; got %v", kept)
+	}
+}
+
+// TestMergeEnvKeptOnlyForNonEmptyIncoming: an existing key with a BLANK
+// incoming value is normal re-boot behavior (nothing to apply), not worth a
+// warning — only a discarded non-empty value is reported.
+func TestMergeEnvKeptOnlyForNonEmptyIncoming(t *testing.T) {
+	_, kept := mergeEnv("MAIN_API_KEY=old\nSHELL3_WEB_SECRET=s\n", [][2]string{
+		{"MAIN_API_KEY", ""},
+		{"SHELL3_WEB_SECRET", "freshly-generated"},
+	})
+	// SHELL3_WEB_SECRET is regenerated every boot by design; it is exempt from
+	// the kept report (warning about it every re-boot would be noise).
+	if len(kept) != 0 {
+		t.Errorf("kept = %v, want [] (blank incoming + exempt web secret)", kept)
 	}
 }
 

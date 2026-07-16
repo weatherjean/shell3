@@ -154,9 +154,12 @@ func runBoot(f *bootFlags) error {
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("boot: read .env: %w", err)
 	}
-	merged := mergeEnv(string(existing), envPairs)
+	merged, kept := mergeEnv(string(existing), envPairs)
 	if err := atomicWriteFile(envPath, []byte(merged), 0o600); err != nil {
 		return fmt.Errorf("boot: write .env: %w", err)
+	}
+	for _, k := range kept {
+		fmt.Printf("note: kept the existing %s in %s — edit that file to change it\n", k, envPath)
 	}
 
 	printBootSuccess(dir, cfgPath, envPath, proxy != "")
@@ -222,8 +225,12 @@ func randomHex(n int) (string, error) {
 }
 
 // mergeEnv appends each kv pair absent from existing (existing values
-// untouched); result ends with a newline.
-func mergeEnv(existing string, kv [][2]string) string {
+// untouched); result ends with a newline. kept reports the keys whose incoming
+// value was non-empty but discarded because the key already exists — so a
+// re-boot can tell the user their freshly typed secret was NOT applied instead
+// of silently keeping the stale one. SHELL3_WEB_SECRET is exempt: boot
+// regenerates it unconditionally, so "kept existing" is its normal case.
+func mergeEnv(existing string, kv [][2]string) (merged string, kept []string) {
 	have := map[string]bool{}
 	for _, line := range strings.Split(existing, "\n") {
 		line = strings.TrimSpace(line)
@@ -244,6 +251,9 @@ func mergeEnv(existing string, kv [][2]string) string {
 	}
 	for _, pair := range kv {
 		if have[pair[0]] {
+			if pair[1] != "" && pair[0] != "SHELL3_WEB_SECRET" {
+				kept = append(kept, pair[0])
+			}
 			continue
 		}
 		if pair[0] == "BRAVE_API_KEY" && pair[1] == "" {
@@ -254,7 +264,7 @@ func mergeEnv(existing string, kv [][2]string) string {
 		}
 		b.WriteString(pair[0] + "=" + pair[1] + "\n")
 	}
-	return b.String()
+	return b.String(), kept
 }
 
 func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool) {
