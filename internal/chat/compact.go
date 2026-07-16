@@ -10,6 +10,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -91,15 +92,40 @@ func maybeCompact(ctx context.Context, cfg TurnConfig, sess *Session) {
 	}
 }
 
-// compactNow performs host-enforced auto-compaction: it summarises the head of
-// the conversation and rebuilds history as that summary plus the verbatim recent
-// tail. Called only when the prompt token count has reached compact_at. Strictly
-// best-effort — on any problem (too little history, an LLM error, an empty
-// summary) it logs when warranted and returns WITHOUT compacting, so the turn
-// proceeds on the un-compacted history. After a successful compaction
-// lastPromptTokens is reset to the rewritten history's (small) estimated size so
-// the threshold is not immediately re-tripped next turn.
+// ErrNothingToCompact is returned by CompactStandalone when there is no head
+// to summarise — the verbatim tail already covers the whole (short) history.
+var ErrNothingToCompact = errors.New("nothing to compact")
+
+// CompactStandalone runs one forced compaction outside a turn — the host-side
+// /compact command. Returns estimated prompt tokens before/after (same
+// estimator for both, so the delta is apples-to-apples). ErrNothingToCompact
+// when history is too small to have a summarisable head; any other error means
+// the summarisation call or the runs-session roll failed and history is
+// untouched. Callers must hold the session's busy gate (see
+// shell3.Session.Compact) — this mutates sess.messages like a turn would.
+func CompactStandalone(ctx context.Context, cfg TurnConfig, sess *Session) (before, after int, err error) {
+	return compactApply(ctx, cfg, sess, true)
+}
+
+// compactNow is the turn-start auto-compaction wrapper around compactApply:
+// strictly best-effort, never fails the turn — failures were already logged
+// inside compactApply, so the result is deliberately discarded.
 func compactNow(ctx context.Context, cfg TurnConfig, sess *Session, forced bool) {
+	_, _, _ = compactApply(ctx, cfg, sess, forced)
+}
+
+// compactApply performs host-enforced compaction: it summarises the head of
+// the conversation and rebuilds history as that summary plus the verbatim recent
+// tail. Reached from the auto path when the prompt token count hits compact_at,
+// and from the forced paths (queued :compact, CompactStandalone). On any problem
+// (too little history, an LLM error, an empty summary) it logs when warranted
+// and returns an error WITHOUT compacting, so callers proceed on the
+// un-compacted history. After a successful compaction lastPromptTokens is reset
+// to the rewritten history's (small) estimated size so the threshold is not
+// immediately re-tripped next turn. Returns the estimated prompt tokens before
+// and after (equal when nothing was applied).
+func compactApply(ctx context.Context, cfg TurnConfig, sess *Session, forced bool) (before, after int, err error) {
+	before = estimatePromptTokens(sess.messages)
 	// Compute the tail boundary before checking the floor: if the entire history
 	// fits within keepRecent, there is nothing left to summarise.
 	keepRecent := resolveKeepRecent(cfg)
@@ -114,7 +140,7 @@ func compactNow(ctx context.Context, cfg TurnConfig, sess *Session, forced bool)
 		// There is no head to summarise: the tail already covers everything
 		// meaningful, or the snap-forward over a trailing all-tool run consumed the
 		// whole tail (compacting here would summarize the latest turn away).
-		return
+		return before, before, ErrNothingToCompact
 	}
 	head := sess.messages[:cut]
 	// Floor check (auto path only — a forced :compact always proceeds when there
@@ -123,7 +149,7 @@ func compactNow(ctx context.Context, cfg TurnConfig, sess *Session, forced bool)
 	// what compaction should collapse, so the message-count floor alone would
 	// wrongly no-op and leave context growing unbounded.
 	if !forced && cut < compactionFloor && estimatePromptTokens(head) < compactionFloorTokens {
-		return
+		return before, before, ErrNothingToCompact
 	}
 	tail := sess.messages[cut:]
 
@@ -137,14 +163,14 @@ func compactNow(ctx context.Context, cfg TurnConfig, sess *Session, forced bool)
 	cfg.Log.Debug("auto-compaction starting", "head_msgs", len(head), "forced", forced)
 	cctx, cancel := context.WithTimeout(ctx, compactionTimeout)
 	defer cancel()
-	summary, err := streamQuiet(cctx, cfg.LLM, compactMsgs)
-	if err != nil {
-		cfg.Log.Warn("auto-compaction LLM call failed; proceeding on un-compacted history", "error", err)
-		return
+	summary, serr := streamQuiet(cctx, cfg.LLM, compactMsgs)
+	if serr != nil {
+		cfg.Log.Warn("auto-compaction LLM call failed; proceeding on un-compacted history", "error", serr)
+		return before, before, fmt.Errorf("compaction LLM call failed: %w", serr)
 	}
 	if strings.TrimSpace(summary) == "" {
 		cfg.Log.Warn("auto-compaction produced an empty summary; proceeding on un-compacted history")
-		return
+		return before, before, errors.New("compaction produced an empty summary")
 	}
 
 	// Build the file manifest from the head we are about to discard: files
@@ -163,7 +189,7 @@ func compactNow(ctx context.Context, cfg TurnConfig, sess *Session, forced bool)
 		// The runs-session roll failed; history is untouched. Proceed on the
 		// un-compacted history without resetting the gauge or emitting a
 		// (misleading) compacted event.
-		return
+		return before, before, errors.New("runs-session roll failed; history untouched")
 	}
 
 	// Reset the token gauge to the rewritten history's (small) estimate so the
@@ -178,6 +204,7 @@ func compactNow(ctx context.Context, cfg TurnConfig, sess *Session, forced bool)
 	sess.reminders.resetContextGauge()
 
 	emitCompacted(sess, prevTokens, newTokens)
+	return before, newTokens, nil
 }
 
 // pruneOldToolOutputs stubs large tool results that sit before the protected
