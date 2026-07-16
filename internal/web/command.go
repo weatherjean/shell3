@@ -3,10 +3,14 @@
 package web
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/shell3"
+	"github.com/weatherjean/shell3/internal/strutil"
 )
 
 // SetJobRunner wires /run to the host's cron scheduler; nil means no jobs.
@@ -44,6 +48,20 @@ func (d *Driver) Command(text string) string {
 			return "clear failed: " + err.Error()
 		}
 		return "🧹 cleared"
+	case "/compact":
+		// One synchronous LLM round-trip; Session.Compact holds the busy gate so
+		// an overlapping send is refused, not raced.
+		before, after, err := d.sess.Compact(context.Background())
+		switch {
+		case errors.Is(err, chat.ErrNothingToCompact):
+			return "nothing to compact"
+		case errors.Is(err, shell3.ErrBusy):
+			return "a turn is in flight — try /compact when it finishes"
+		case err != nil:
+			return "compact failed: " + err.Error()
+		}
+		return fmt.Sprintf("🗜 compacted: %s → %s tokens",
+			strutil.FormatTokens(before), strutil.FormatTokens(after))
 	case "/set":
 		if arg == "" {
 			return d.settableList()
@@ -94,6 +112,7 @@ func (d *Driver) Command(text string) string {
 const helpText = `commands:
 /help — this list
 /clear — reset the conversation
+/compact — summarize old context to free tokens
 /stop — stop the current turn and kill background jobs
 /set <name> <value> — set a model parameter (bare /set lists them)
 /rollback — undo the last turn

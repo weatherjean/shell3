@@ -26,7 +26,7 @@ func commandDriver(t *testing.T) *Driver {
 func TestCommandHelpListsEverything(t *testing.T) {
 	d := commandDriver(t)
 	help := d.Command("/help")
-	for _, c := range []string{"/help", "/clear", "/set", "/rollback", "/stop", "/run", "/reload"} {
+	for _, c := range []string{"/help", "/clear", "/compact", "/set", "/rollback", "/stop", "/run", "/reload"} {
 		if !strings.Contains(help, c) {
 			t.Errorf("/help missing %s:\n%s", c, help)
 		}
@@ -136,5 +136,29 @@ func TestCommandSetWhitespace(t *testing.T) {
 	}
 	if strings.Contains(got, "= \t") || strings.Contains(got, "=  ") {
 		t.Fatalf("value kept leading whitespace: %q", got)
+	}
+}
+
+// TestCommandCompact pins /compact end to end over the web driver: a fresh
+// session reports nothing to compact; after a few chunky turns the command
+// summarises (one quiet fakellm call) and reports the token delta.
+func TestCommandCompact(t *testing.T) {
+	d := commandDriver(t)
+
+	if got := d.Command("/compact"); !strings.Contains(got, "nothing to compact") {
+		t.Fatalf("fresh session: want 'nothing to compact', got %q", got)
+	}
+
+	// Grow history past the forced-compact tail floor (~4k tokens): three turns
+	// with ~40KB prompts. The fake runtime's scripted "ok" replies serve as both
+	// turn responses and, later, the compaction summary.
+	big := strings.Repeat("x", 40000)
+	for i := 0; i < 3; i++ {
+		for range d.sess.Send(context.Background(), big) {
+		}
+	}
+	got := d.Command("/compact")
+	if !strings.Contains(got, "compacted:") || !strings.Contains(got, "→") {
+		t.Fatalf("want a compacted delta reply, got %q", got)
 	}
 }

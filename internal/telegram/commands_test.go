@@ -82,3 +82,15 @@ func TestCommand_ReloadNoReloader(t *testing.T) {
 		t.Fatalf("expected unavailable reply, got %v", fc.sentTexts())
 	}
 }
+
+// TestCommand_CompactNothing pins the /compact wiring on a fresh session:
+// nothing to summarise yet, so the bot reports that rather than erroring.
+func TestCommand_CompactNothing(t *testing.T) {
+	fc := newFakeClient()
+	rt, sess := newFakeRuntime(t, "ok")
+	b := NewBot(fc, rt, sess, 42)
+	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/compact"})
+	if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "nothing to compact") {
+		t.Fatalf("expected 'nothing to compact' on a fresh session, got %v", fc.sentTexts())
+	}
+}

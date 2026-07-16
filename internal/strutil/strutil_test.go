@@ -79,3 +79,21 @@ func TestCutRunes(t *testing.T) {
 		t.Errorf("CutRunes(hi,3) = %q,%v", got, cut)
 	}
 }
+
+func TestFormatTokens(t *testing.T) {
+	cases := []struct {
+		in   int
+		want string
+	}{
+		{41234, "~41k"},
+		{10000, "~10k"},
+		{9500, "~9500"},
+		{950, "~950"},
+		{0, "~0"},
+	}
+	for _, c := range cases {
+		if got := FormatTokens(c.in); got != c.want {
+			t.Errorf("FormatTokens(%d) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

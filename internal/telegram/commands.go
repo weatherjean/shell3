@@ -4,10 +4,13 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/shell3"
+	"github.com/weatherjean/shell3/internal/strutil"
 )
 
 // BotCommands is the canonical command list, registered with Telegram for the
@@ -17,6 +20,7 @@ func BotCommands() []Command {
 		{"set", "Set a parameter: /set <name> <value>"},
 		{"rollback", "Undo the last turn"},
 		{"clear", "Reset the conversation"},
+		{"compact", "Summarize old context to free tokens"},
 		{"stop", "Stop the current turn"},
 		{"run", "Run a scheduled job now: /run <name>"},
 		{"reload", "Reload shell3.lua config without restarting"},
@@ -37,6 +41,22 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 			return
 		}
 		b.sendReply(ctx, "🧹 cleared")
+	case "/compact":
+		// One synchronous LLM round-trip (can take a while on a long history);
+		// Session.Compact holds the busy gate so an overlapping send is refused,
+		// not raced.
+		before, after, err := b.sess.Compact(ctx)
+		switch {
+		case errors.Is(err, chat.ErrNothingToCompact):
+			b.sendReply(ctx, "nothing to compact")
+		case errors.Is(err, shell3.ErrBusy):
+			b.sendReply(ctx, "a turn is in flight — try /compact when it finishes")
+		case err != nil:
+			b.sendReply(ctx, "compact failed: "+err.Error())
+		default:
+			b.sendReply(ctx, fmt.Sprintf("🗜 compacted: %s → %s tokens",
+				strutil.FormatTokens(before), strutil.FormatTokens(after)))
+		}
 	case "/set":
 		if arg == "" {
 			b.sendReply(ctx, b.settableList())
