@@ -77,6 +77,23 @@ room before a full compaction is required. Defaults to
 `round(compact_at * 0.6)`; set to `0` to skip this tier entirely. Ignored if
 set at or above `compact_at`.
 
+Agents and subagents can opt out of the prune tier individually:
+
+```lua
+shell3.agent({ ..., prune = false })     -- skip pruning; go straight to compact_at
+shell3.subagent({ ..., prune = false })
+```
+
+`prune = false` disables the tool-output-stubbing tier for that agent or
+subagent only — the thresholds themselves stay on the model. Omitted (or
+`true`) inherits the model's `prune_at`.
+
+Besides the automatic thresholds, the `/compact` chat command forces one
+compaction on demand (one LLM call; replies with the token delta), and
+`/clear` hard-resets the conversation — refused while background tasks are
+running, so a finishing task can never leak its result into the fresh session
+(`/stop` first, or let them finish).
+
 ### Provider-specific knobs
 
 Some providers want a non-standard request field shell3 doesn't model directly.
@@ -489,7 +506,8 @@ shell3.web({
 - **Chat**: the dashboard's Chat tab gains a send box, a Stop button, and
   Allow/Deny cards for `on_tool_call` asks. Replies arrive by polling — a
   deliberately simple fallback transport. The bot's slash commands work here
-  too (`/stop`, `/clear`, `/set`, `/rollback`, `/run <job>`, `/reload`, plus a
+  too (`/stop`, `/clear`, `/compact`, `/set`, `/rollback`, `/run <job>`,
+  `/reload`, plus a
   web-only `/help`); command replies render as ephemeral notices, not history.
 - Declared `shell3.cron` jobs keep running under `shell3 web`; the heartbeat
   does not (it's a Telegram-notification feature).

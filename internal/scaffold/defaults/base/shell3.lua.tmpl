@@ -119,6 +119,10 @@ shell3.agent({
   -- guidance + the subagents listed under tools.subagents below. Both default off.
   environment = true,
   delegation  = true,
+  -- prune: set false to skip the cheap tool-output-stubbing tier for this
+  -- agent (context goes straight to compact_at). Unset inherits the model's
+  -- prune_at. Also valid on shell3.subagent{}.
+  -- prune = false,
   prompt = [[
 You are an expert coding assistant inside shell3. Work autonomously as a senior pair-programmer: inspect, edit, test, and summarize clearly.
 

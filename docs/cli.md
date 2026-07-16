@@ -22,7 +22,9 @@ live under `~/.shell3/.shell3_project/`. In-chat commands: `/stop` (cancel the
 in-flight turn + tracked jobs), `/reload` (re-read the config and apply it
 live — refused while background tasks are running), `/run <job>` (fire a cron
 job on demand), `/set <name> <value>` (tune a model parameter; bare `/set`
-lists them), `/clear`, `/rollback`.
+lists them), `/clear` (reset the conversation — refused while background tasks
+run; `/stop` first), `/compact` (force one context compaction now; replies
+with the token delta), `/rollback`.
 
 | Flag | Effect |
 |------|--------|
@@ -93,7 +95,8 @@ by `shell3.web{ secret = … }`. Open `http://<addr>/?key=<secret>` once — the
 page stores the key and authenticates every API call with it. It resumes the
 latest stored session, so you continue the conversation the bot was having,
 and declared cron jobs keep running. The bot's slash commands work in the send
-box too — `/stop`, `/clear`, `/set`, `/rollback`, `/run <job>`, `/reload` —
+box too — `/stop`, `/clear`, `/compact`, `/set`, `/rollback`, `/run <job>`,
+`/reload` —
 plus a web-only `/help` that lists them; typing `/` pops up the command list
 (filtered as you type), and replies appear as ephemeral notices in the chat
 (they are not part of session history). Run one front-end at a
