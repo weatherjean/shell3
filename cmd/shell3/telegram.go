@@ -16,8 +16,7 @@ import (
 	"github.com/weatherjean/shell3/internal/heartbeat"
 	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/telegram"
-	"github.com/weatherjean/shell3/internal/telegram/web"
-	"github.com/weatherjean/shell3/internal/tunnel"
+	"github.com/weatherjean/shell3/internal/web"
 )
 
 func newTelegramCommand() *cobra.Command {
@@ -29,20 +28,12 @@ func newTelegramCommand() *cobra.Command {
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
-			resolved, err := resolveConfig(configPath)
-			if err != nil {
-				return err
-			}
-			// Anchor the bot to its own config directory, NOT the launch cwd: the
-			// runtime root determines where runs/ + history live (runs.Open under
-			// <workdir>/.shell3_project). Tying it to the config dir keeps the bot
-			// self-contained.
-			tgHome := filepath.Dir(resolved)
-			rt, err := shell3.NewRuntime(ctx, shell3.RuntimeSpec{ConfigPath: resolved, WorkDir: tgHome})
+			rt, resolved, err := openRuntime(ctx, configPath)
 			if err != nil {
 				return err
 			}
 			defer rt.Close()
+			tgHome := filepath.Dir(resolved)
 
 			tg := rt.Telegram()
 			if tg.Token == "" || tg.ChatID == "" {
@@ -71,17 +62,20 @@ func newTelegramCommand() *cobra.Command {
 				return err
 			}
 
-			// Scheduled jobs (shell3.telegram cron list): arm a scheduler on the main session.
-			var sched *cron.Scheduler
-			if jobs := rt.Cron(); len(jobs) > 0 {
-				sched, err = cron.New(sess, jobs)
-				if err != nil {
-					return err // fail-fast on a bad schedule
-				}
-				sched.Start()
-				defer sched.Stop() // LIFO: stops before the earlier `defer rt.Close()`
-				fmt.Printf("cron: %d job(s) scheduled\n", len(jobs))
+			// Scheduled jobs (top-level shell3.cron list): arm a scheduler on the
+			// main session.
+			sched, err := armCron(sess, rt.Cron())
+			if err != nil {
+				return err
 			}
+			// Deferred as a closure over the mutable handle: /reload swaps sched
+			// for a fresh scheduler, and it is the CURRENT one that must stop at
+			// shutdown. LIFO: stops before the earlier `defer rt.Close()`.
+			defer func() {
+				if sched != nil {
+					sched.Stop()
+				}
+			}()
 
 			client, err := telegram.NewBotAPIClient(ctx, tg.Token)
 			if err != nil {
@@ -242,14 +236,8 @@ func serveDashboard(ctx context.Context, rt *shell3.Runtime, b *telegram.Bot, se
 	if !tg.Dashboard.Enabled || tg.Dashboard.Addr == "" {
 		return nil
 	}
-	usage := web.NewUsageStore()
+	srv, usage := buildDashboard(rt, sess, web.TelegramAuth(tg.Token, chatID), configDir, sched)
 	b.SetUsageRecorder(usage.Set)
-	srv := web.NewServer(rt, sess, tg.Token, chatID)
-	srv.SetUsage(usage)
-	srv.SetConfigDir(configDir) // read-only file explorer rooted at the config folder
-	if sched != nil {
-		srv.SetCronSource(sched.Jobs)
-	}
 	go func() {
 		// Surface listen failures (port already bound, bad addr): silence here
 		// would leave the menu button and tunnel pointing at a dead port with
@@ -272,26 +260,13 @@ func wireMenuButton(ctx context.Context, client *telegram.BotAPIClient, dash she
 	if !dash.Enabled {
 		return
 	}
-	setMenu := func(url string) {
+	announcePublicURL(dash.URL, dash.Tunnel, dash.Addr, tgHome, func(url string) {
 		if err := client.SetMenuButton(ctx, "dash", url); err != nil {
 			fmt.Printf("warning: could not set menu button: %v\n", err)
 			return
 		}
 		fmt.Printf("dashboard menu button → %s\n", url)
-	}
-	switch {
-	case dash.URL != "":
-		setMenu(dash.URL)
-	case dash.Tunnel != "" && dash.Addr != "":
-		urls := tunnel.Start(dash.Tunnel, dash.Addr, filepath.Join(tgHome, "tunnel.log"))
-		go func() {
-			if url, ok := <-urls; ok {
-				setMenu(url)
-			} else {
-				fmt.Println("warning: tunnel printed no https URL; dashboard stays local (see tunnel.log)")
-			}
-		}()
-	}
+	})
 }
 
 // startDashboard runs an HTTP server on addr with the given handler, and

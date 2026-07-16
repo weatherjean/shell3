@@ -112,6 +112,7 @@ type Runtime struct {
 	// was built with (and re-derived on Reload). Read via
 	// Telegram()/Cron()/HeartbeatConfig(). See telegram.go.
 	telegram  TelegramConfig
+	web       WebConfig
 	cron      []CronJob
 	heartbeat *Heartbeat
 
@@ -167,6 +168,7 @@ func NewRuntime(ctx context.Context, spec RuntimeSpec) (*Runtime, error) {
 		cancel:        cancel,
 		sessions:      map[string]*Session{},
 		telegram:      parts.Telegram(),
+		web:           parts.Web(),
 		cron:          parts.Cron(),
 		heartbeat:     parts.Heartbeat(),
 	}

@@ -21,8 +21,8 @@ The bot's runtime is anchored to the config directory, so its history and runs
 live under `~/.shell3/.shell3_project/`. In-chat commands: `/stop` (cancel the
 in-flight turn + tracked jobs), `/reload` (re-read the config and apply it
 live — refused while background tasks are running), `/run <job>` (fire a cron
-job on demand), `/status`, `/clear`,
-`/rollback`.
+job on demand), `/set <name> <value>` (tune a model parameter; bare `/set`
+lists them), `/clear`, `/rollback`.
 
 | Flag | Effect |
 |------|--------|
@@ -79,6 +79,27 @@ shell3 dev --heartbeat                                    # fire the configured 
 
 `dev` auto-approves `on_tool_call` ask verdicts (and prints that it did), so it
 runs unattended.
+
+## `shell3 web` — run the standalone web front-end
+
+```sh
+shell3 web                        # addr + secret from shell3.web{} in the config
+shell3 web --addr 127.0.0.1:9000  # override the listen address
+```
+
+The Telegram-free fallback host: the dashboard plus a simple chat (send box,
+Stop, Allow/Deny cards for gated commands), served over plain HTTP and gated
+by `shell3.web{ secret = … }`. Open `http://<addr>/?key=<secret>` once — the
+page stores the key and authenticates every API call with it. It resumes the
+latest stored session, so you continue the conversation the bot was having,
+and declared cron jobs keep running. The bot's slash commands work in the send
+box too — `/stop`, `/clear`, `/set`, `/rollback`, `/run <job>`, `/reload` —
+plus a web-only `/help` that lists them; typing `/` pops up the command list
+(filtered as you type), and replies appear as ephemeral notices in the chat
+(they are not part of session history). Run one front-end at a
+time (`telegram` OR `web`); both own the same history. See
+[configuration.md](configuration.md#standalone-web-front-end--shell3web) for
+the config block.
 
 ## `shell3 dash` — serve the dashboard locally
 

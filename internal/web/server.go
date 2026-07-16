@@ -17,33 +17,21 @@ import (
 // the host wires cron.Scheduler.Jobs straight in with no field copier.
 type CronJob = cron.JobStatus
 
-// Server is the read-only dashboard.
+// Server is the dashboard (and, with SetChat, the chat API). Auth is
+// pluggable: TelegramAuth under the bot, TokenAuth under shell3 web, NoAuth
+// under shell3 dash.
 type Server struct {
 	sess      *shell3.Session
 	rt        *shell3.Runtime // used for the past-runs (session store) views
-	token     string
-	chatID    int64
-	usage     *UsageStore                         // nil → no usage shown
-	validate  func(initData string) (int64, bool) // seam for tests
-	cron      func() []CronJob                    // nil → no jobs
-	configDir string                              // root for the read-only file explorer; "" → disabled
+	auth      AuthFunc
+	usage     *UsageStore      // nil → no usage shown
+	cron      func() []CronJob // nil → no jobs
+	configDir string           // root for the read-only file explorer; "" → disabled
+	chat      *Driver          // nil → read-only dashboard (no chat API)
 }
 
-func NewServer(rt *shell3.Runtime, sess *shell3.Session, token string, chatID int64) *Server {
-	s := &Server{rt: rt, sess: sess, token: token, chatID: chatID}
-	s.validate = func(initData string) (int64, bool) {
-		ok, uid := verifyInitData(initData, s.token, s.chatID)
-		return uid, ok
-	}
-	return s
-}
-
-// SetDevNoAuth disables initData verification: every request is accepted as the
-// configured chat. FOR LOCAL DEV ONLY (shell3 dash) — it exposes history, files,
-// and runs with no authentication, so the caller MUST bind the server to
-// localhost. Never enable it on a publicly reachable address.
-func (s *Server) SetDevNoAuth() {
-	s.validate = func(string) (int64, bool) { return s.chatID, true }
+func NewServer(rt *shell3.Runtime, sess *shell3.Session, auth AuthFunc) *Server {
+	return &Server{rt: rt, sess: sess, auth: auth}
 }
 
 // SetUsage attaches a usage store so /api/status reports the last turn's tokens.
@@ -70,15 +58,24 @@ func (s *Server) handleCron(w http.ResponseWriter, r *http.Request) {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
-	mux.HandleFunc("/api/history", s.auth(s.handleHistory))
-	mux.HandleFunc("/api/jobs", s.auth(s.handleJobs))
-	mux.HandleFunc("/api/job", s.auth(s.handleJob))
-	mux.HandleFunc("/api/status", s.auth(s.handleStatus))
-	mux.HandleFunc("/api/sessions", s.auth(s.handleSessions))
-	mux.HandleFunc("/api/session", s.auth(s.handleSession))
-	mux.HandleFunc("/api/cron", s.auth(s.handleCron))
-	mux.HandleFunc("/api/files", s.auth(s.handleFiles))
-	mux.HandleFunc("/api/file", s.auth(s.handleFile))
+	mux.HandleFunc("/api/history", s.gated(s.handleHistory))
+	mux.HandleFunc("/api/jobs", s.gated(s.handleJobs))
+	mux.HandleFunc("/api/job", s.gated(s.handleJob))
+	mux.HandleFunc("/api/status", s.gated(s.handleStatus))
+	mux.HandleFunc("/api/sessions", s.gated(s.handleSessions))
+	mux.HandleFunc("/api/session", s.gated(s.handleSession))
+	mux.HandleFunc("/api/cron", s.gated(s.handleCron))
+	mux.HandleFunc("/api/files", s.gated(s.handleFiles))
+	mux.HandleFunc("/api/file", s.gated(s.handleFile))
+	// Chat: /api/state is always served (capability probe: chat=false without
+	// a driver); the mutating endpoints are POST-only and 404 when no driver
+	// is attached. Registered as plain paths, not "POST /path" patterns: the
+	// catch-all "/" index route would swallow other methods with a 200 before
+	// the mux's built-in 405 could kick in.
+	mux.HandleFunc("/api/state", s.gated(s.handleState))
+	mux.HandleFunc("/api/send", s.gated(s.postChat(s.handleSend)))
+	mux.HandleFunc("/api/stop", s.gated(s.postChat(s.handleStop)))
+	mux.HandleFunc("/api/ask", s.gated(s.postChat(s.handleAsk)))
 	// Vendored frontend assets (highlight.js + themes). Public, like the inline
 	// index — they carry no secrets and the file APIs above remain auth-gated.
 	if sub, err := fs.Sub(staticFS, "static"); err == nil {
@@ -87,14 +84,10 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// auth gates an endpoint on valid initData (passed as ?initData= or header).
-func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
+// gated wraps an endpoint with the server's AuthFunc.
+func (s *Server) gated(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		raw := r.Header.Get("X-Init-Data")
-		if raw == "" {
-			raw = r.URL.Query().Get("initData")
-		}
-		if _, ok := s.validate(raw); !ok {
+		if s.auth == nil || !s.auth(r) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

@@ -50,7 +50,7 @@ func TestHistory_ValidInitDataReturnsHistory(t *testing.T) {
 	for range sess.Send(context.Background(), "ping") {
 	}
 
-	srv := NewServer(rt, sess, token, chatID)
+	srv := NewServer(rt, sess, TelegramAuth(token, chatID))
 
 	// Forge a validly-signed initData for the configured chat id.
 	signed := signInitData(t, token, `{"id":8701499393,"first_name":"T"}`)
@@ -79,7 +79,7 @@ func TestStatusAndSubagents_AuthAndShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := NewServer(rt, sess, token, chatID)
+	srv := NewServer(rt, sess, TelegramAuth(token, chatID))
 	signed := signInitData(t, token, `{"id":8701499393,"first_name":"T"}`)
 
 	for _, path := range []string{"/api/status", "/api/jobs"} {
@@ -122,7 +122,7 @@ func TestNewEndpoints_AuthAndShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := NewServer(rt, sess, token, chatID)
+	srv := NewServer(rt, sess, TelegramAuth(token, chatID))
 	us := NewUsageStore()
 	us.Set(120, 30, 150)
 	srv.SetUsage(us)
@@ -171,7 +171,7 @@ func TestCron_AuthAndShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := NewServer(rt, sess, token, chatID)
+	srv := NewServer(rt, sess, TelegramAuth(token, chatID))
 	srv.SetCronSource(func() []CronJob {
 		return []CronJob{{Name: "nightly", Schedule: "0 9 * * *", Agent: "explorer", Notify: true}}
 	})
@@ -204,7 +204,7 @@ func TestHistory_WrongUserRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := NewServer(rt, sess, token, chatID)
+	srv := NewServer(rt, sess, TelegramAuth(token, chatID))
 
 	signed := signInitData(t, token, `{"id":999,"first_name":"Mallory"}`)
 

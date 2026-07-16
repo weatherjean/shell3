@@ -55,6 +55,7 @@ installed, or the dashboard stays local-only). Full walkthrough in
 | Command | What |
 |---------|------|
 | `shell3 telegram` | Run the bot + Mini App dashboard (the service). |
+| `shell3 web`      | Run the standalone web front-end (dashboard + chat, token auth) — the Telegram-free fallback. |
 | `shell3 boot`     | Scaffold the config + `.env` interactively. |
 | `shell3 dev "…"`  | Drive the bot's agent locally with full verbose output (dev / quick queries). `--resume` continues the last session. |
 | `shell3 dash`     | Serve the dashboard locally with no auth (dev / troubleshooting), bound to localhost. |
@@ -93,11 +94,11 @@ installed, or the dashboard stays local-only). Full walkthrough in
 ## Documentation
 
 - **[Configuration](docs/configuration.md)** — models, the agent, subagents,
-  the `shell3.telegram{}` block (dashboard + tunnel), `shell3.cron`,
-  `shell3.heartbeat`, custom tools, `on_tool_call`, `on_tool_result`,
-  `stub_tools`, skills, proxies.
-- **[CLI](docs/cli.md)** — `telegram`, `boot`, `health`, `dev`, `dash`, and the
-  JSONL runs store.
+  the `shell3.telegram{}` block (dashboard + tunnel), `shell3.web{}`,
+  `shell3.cron`, `shell3.heartbeat`, custom tools, `on_tool_call`,
+  `on_tool_result`, `stub_tools`, skills, proxies.
+- **[CLI](docs/cli.md)** — `telegram`, `web`, `boot`, `health`, `dev`, `dash`,
+  and the JSONL runs store.
 - **[Security & data](docs/security.md)** — the threat model, secrets, and
   removing shell3's data.
 - **[Cookbook](docs/cookbook/README.md)** — drop-in recipes: extra subagents,

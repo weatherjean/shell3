@@ -24,15 +24,15 @@ func TestSetDevNoAuth_BypassesInitData(t *testing.T) {
 	}
 
 	// Baseline: without dev-no-auth, an unsigned request is rejected.
-	srv := NewServer(rt, sess, token, chatID)
+	srv := NewServer(rt, sess, TelegramAuth(token, chatID))
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/status", nil))
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("no initData should be 401, got %d", rr.Code)
 	}
 
-	// With dev-no-auth, the same unsigned request is accepted.
-	srv.SetDevNoAuth()
+	// With NoAuth (the shell3 dash mode), the same unsigned request is accepted.
+	srv = NewServer(rt, sess, NoAuth())
 	rr = httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/status", nil))
 	if rr.Code != http.StatusOK {

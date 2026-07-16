@@ -117,6 +117,7 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 	rt.store = newParts.Store()
 	rt.cron = cronJobs
 	rt.telegram = newParts.Telegram()
+	rt.web = newParts.Web()
 	rt.heartbeat = newParts.Heartbeat()
 	oldCleanup()
 

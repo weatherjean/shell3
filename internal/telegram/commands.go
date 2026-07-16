@@ -42,16 +42,19 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 			b.sendReply(ctx, b.settableList())
 			return
 		}
-		kv := strings.SplitN(arg, " ", 2)
-		if len(kv) != 2 {
+		// Split on any whitespace run (double spaces and tabs are easy to
+		// type on mobile), keeping the raw remainder as the value.
+		name := strings.Fields(arg)[0]
+		value := strings.TrimSpace(arg[strings.Index(arg, name)+len(name):])
+		if value == "" {
 			b.sendReply(ctx, "usage: /set <name> <value>\nsend /set with no arguments to list settable parameters")
 			return
 		}
-		if err := b.sess.SetParam(kv[0], kv[1]); err != nil {
+		if err := b.sess.SetParam(name, value); err != nil {
 			b.sendReply(ctx, "set failed: "+err.Error())
 			return
 		}
-		b.sendReply(ctx, "⚙️ "+kv[0]+" = "+kv[1])
+		b.sendReply(ctx, "⚙️ "+name+" = "+value)
 	case "/rollback":
 		ok, err := b.sess.Rollback()
 		if err != nil {
@@ -64,9 +67,6 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 		}
 		b.sendReply(ctx, "↩️ rolled back")
 	case "/stop":
-		b.mu.Lock()
-		c := b.cancelTurn
-		b.mu.Unlock()
 		// Kill every running background job on the in-process runtime — commands
 		// (bash_bg) and model-spawned subagents alike are tracked jobs now.
 		killed := 0
@@ -77,6 +77,12 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 				}
 			}
 		}
+		// Snapshot the cancel func AFTER the kill loop: a turn that ends (and a
+		// queued wake turn that starts) mid-loop would leave a pre-loop snapshot
+		// cancelling an already-dead context while the fresh turn runs on.
+		b.mu.Lock()
+		c := b.cancelTurn
+		b.mu.Unlock()
 		if c != nil {
 			c() // cancels turnCtx → synchronous bash/node process groups get SIGTERM→SIGKILL
 			msg := "⏹ stopped"

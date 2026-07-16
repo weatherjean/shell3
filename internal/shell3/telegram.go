@@ -13,6 +13,7 @@ import (
 type (
 	TelegramConfig  = luacfg.TelegramConfig
 	DashboardConfig = luacfg.DashboardConfig
+	WebConfig       = luacfg.WebConfig
 	CronJob         = luacfg.CronJob
 	Heartbeat       = luacfg.Heartbeat
 )
@@ -31,6 +32,10 @@ func sessionConfigFrom(parts *agentsetup.Parts) func(SessionOpts) (chat.Config, 
 // Telegram returns the shell3.telegram{} config the Runtime was built with
 // (zero value when the config declares none).
 func (rt *Runtime) Telegram() TelegramConfig { return rt.telegram }
+
+// Web returns the shell3.web{} config the Runtime was built with (zero value
+// when the config declares none).
+func (rt *Runtime) Web() WebConfig { return rt.web }
 
 // Cron returns the cron jobs declared via top-level shell3.cron{...}.
 func (rt *Runtime) Cron() []CronJob { return rt.cron }

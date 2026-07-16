@@ -9,11 +9,11 @@ import (
 )
 
 func TestHistory_RequiresAuth(t *testing.T) {
-	s := &Server{validate: func(string) (int64, bool) { return 0, false }}
+	s := &Server{auth: func(*http.Request) bool { return false }}
 	s.sess = nil
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/history", nil)
-	s.auth(s.handleHistory)(rr, req)
+	s.gated(s.handleHistory)(rr, req)
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("want 401, got %d", rr.Code)
 	}

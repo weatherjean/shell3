@@ -6,13 +6,12 @@ import (
 	"fmt"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"syscall"
 
 	"github.com/spf13/cobra"
 
 	"github.com/weatherjean/shell3/internal/shell3"
-	"github.com/weatherjean/shell3/internal/telegram/web"
+	"github.com/weatherjean/shell3/internal/web"
 )
 
 // newDashCommand builds `shell3 dash` — serve the Mini App dashboard locally
@@ -32,23 +31,13 @@ func newDashCommand() *cobra.Command {
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
-			resolved, err := resolveConfig(configPath)
-			if err != nil {
-				return err
-			}
-			rt, err := shell3.NewRuntime(ctx, shell3.RuntimeSpec{ConfigPath: resolved, WorkDir: filepath.Dir(resolved)})
+			rt, resolved, err := openRuntime(ctx, configPath)
 			if err != nil {
 				return err
 			}
 			defer rt.Close()
 
 			tg := rt.Telegram()
-			var chatID int64
-			if tg.ChatID != "" {
-				if chatID, err = strconv.ParseInt(tg.ChatID, 10, 64); err != nil {
-					return fmt.Errorf("telegram chat_id %q is not a number: %w", tg.ChatID, err)
-				}
-			}
 			// Reattach to the latest session so the dashboard shows the bot's real
 			// history + runs (subagent child sessions included).
 			sess, err := rt.Session(shell3.SessionOpts{Name: "dash", WorkDir: tg.WorkDir, ResumeLatest: true})
@@ -56,8 +45,7 @@ func newDashCommand() *cobra.Command {
 				return err
 			}
 
-			srv := web.NewServer(rt, sess, tg.Token, chatID)
-			srv.SetDevNoAuth()
+			srv := web.NewServer(rt, sess, web.NoAuth())
 			srv.SetConfigDir(filepath.Dir(resolved))
 
 			if addr == "" {

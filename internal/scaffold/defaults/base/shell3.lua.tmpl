@@ -173,6 +173,17 @@ shell3.telegram({
   },
 })
 
+-- Standalone web front-end  (run: shell3 web) — Telegram-free fallback:
+-- the same dashboard plus a simple chat, gated by a shared secret instead of
+-- Telegram. `shell3 boot` generates SHELL3_WEB_SECRET in .env, and `shell3
+-- web` prints the ready-to-open ?key= URL at startup (rotate by editing .env).
+-- Run one front-end at a time (telegram OR web); both own the same history.
+shell3.web({
+  addr   = "127.0.0.1:8787",
+  secret = shell3.env.secret("SHELL3_WEB_SECRET"),
+  -- tunnel = "cloudflared tunnel --url http://{addr}",  -- optional public URL
+})
+
 -- Scheduled jobs dispatch a subagent on a cron schedule; arm with /reload,
 -- fire on demand with /run <name>:
 -- shell3.cron({

@@ -72,6 +72,7 @@ func registerShell3(c *LoadedConfig) {
 	L.SetField(tbl, "on_tool_result", L.NewFunction(c.luaOnToolResult))
 	L.SetField(tbl, "background", L.NewFunction(c.luaBackground))
 	L.SetField(tbl, "telegram", L.NewFunction(c.luaTelegram))
+	L.SetField(tbl, "web", L.NewFunction(c.luaWeb))
 	L.SetField(tbl, "cron", L.NewFunction(c.luaCron))
 	L.SetField(tbl, "heartbeat", L.NewFunction(c.luaHeartbeat))
 }

@@ -118,6 +118,9 @@ type LoadedConfig struct {
 	// Telegram()/Cron(). See telegram.go / cron.go.
 	telegram TelegramConfig
 	cron     []CronJob
+	// web holds the parsed top-level shell3.web{} block (zero value if
+	// absent). Read via Web(). See web.go.
+	web WebConfig
 	// heartbeat holds the parsed shell3.heartbeat{} block (nil if absent).
 	// Read via Heartbeat(). See heartbeat.go.
 	heartbeat *Heartbeat

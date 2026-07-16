@@ -459,6 +459,41 @@ shell3.telegram({
   - Leave both empty to reach the dashboard only locally (or with
     `shell3 dash`).
 
+## Standalone web front-end — `shell3.web`
+
+`shell3.web{}` configures `shell3 web`: the same dashboard plus a simple chat,
+served over plain HTTP with a shared secret instead of Telegram. It is the
+Telegram-free fallback — it resumes the latest stored session, so a
+conversation started over Telegram continues in the browser.
+
+```lua
+shell3.web({
+  addr   = "127.0.0.1:8787",
+  secret = shell3.env.secret("SHELL3_WEB_SECRET"),       -- required; keep it in .env
+  tunnel = "cloudflared tunnel --url http://{addr}",     -- optional public https URL
+  -- url = "https://…",                                  -- optional fixed address (wins over tunnel)
+})
+```
+
+- **`addr` / `secret`** are required (`shell3 web` refuses to start without
+  them — an empty secret never means "no auth"). Generate one with
+  `openssl rand -hex 24` and put it in `.env` as `SHELL3_WEB_SECRET=…`.
+- **Auth**: open `http://<addr>/?key=<secret>` once; the page stores the key
+  and sends it as an `X-Auth-Token` header from then on. Every `/api/*`
+  endpoint is gated on it (constant-time compare).
+- **`tunnel` / `url`** have the same semantics as the Telegram dashboard's
+  (tunnel command spawned at start, `{addr}` replaced, first printed
+  `https://…` used; output in `~/.shell3/tunnel.log`).
+- **Chat**: the dashboard's Chat tab gains a send box, a Stop button, and
+  Allow/Deny cards for `on_tool_call` asks. Replies arrive by polling — a
+  deliberately simple fallback transport. The bot's slash commands work here
+  too (`/stop`, `/clear`, `/set`, `/rollback`, `/run <job>`, `/reload`, plus a
+  web-only `/help`); command replies render as ephemeral notices, not history.
+- Declared `shell3.cron` jobs keep running under `shell3 web`; the heartbeat
+  does not (it's a Telegram-notification feature).
+- Run **one front-end at a time** — `shell3 telegram` and `shell3 web` own the
+  same runs store and history.
+
 ## Scheduled jobs — `shell3.cron`
 
 `shell3.cron({...})` is a top-level flat list of jobs. Each fires a subagent

@@ -20,6 +20,19 @@
     --radius: 14px;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
   }
+  /* Standalone web (no Telegram theme vars): follow the system scheme. Only
+     the fallbacks change — injected --tg-theme-* vars still win under the bot. */
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: var(--tg-theme-bg-color, #16171b);
+      --text: var(--tg-theme-text-color, #e8eaed);
+      --hint: var(--tg-theme-hint-color, #8b97a3);
+      --link: var(--tg-theme-link-color, #64a8f0);
+      --sec: var(--tg-theme-secondary-bg-color, #24262c);
+      --btn: var(--tg-theme-button-color, #2b8ef0);
+      --btn-text: var(--tg-theme-button-text-color, #fff);
+    }
+  }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { height: 100%; margin: 0; }
   body {
@@ -62,6 +75,10 @@
   .msg.user .bubble { background: var(--btn); color: var(--btn-text); border-bottom-right-radius: 4px; }
   .msg.assistant .bubble { background: var(--sec); border-bottom-left-radius: 4px; }
   .msg.system .bubble { background: transparent; color: var(--hint); font-size: 13px; font-style: italic; padding: 4px 8px; }
+  /* Ephemeral slash-command replies (web chat only) — centered meta text,
+     visually apart from both user and agent bubbles. */
+  .notice { text-align: center; color: var(--hint); font-size: 12.5px;
+    margin: 10px auto; max-width: 84%; white-space: pre-wrap; word-break: break-word; }
 
   /* Tool calls — collapsible */
   details.tool {
@@ -137,6 +154,47 @@
   .crumb { font-family: var(--mono); font-size: 12.5px; color: var(--hint); padding: 4px 2px 10px; word-break: break-all; }
 
   .err { color: #e0392b; text-align: center; padding: 30px; }
+
+  /* Web chat composer (standalone shell3 web only; hidden under the bot) */
+  #composer {
+    position: sticky; bottom: 0; background: var(--bg);
+    border-top: 1px solid color-mix(in srgb, var(--hint) 25%, transparent);
+    padding: 8px calc(8px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left));
+  }
+  #composer .bar { display: flex; gap: 8px; align-items: flex-end; }
+  #composer textarea {
+    flex: 1; resize: none; border: 0; outline: none;
+    background: var(--sec); color: var(--text);
+    font: inherit; padding: 10px 12px; border-radius: var(--radius);
+    max-height: 40vh;
+  }
+  #composer .bar button {
+    appearance: none; border: 0; cursor: pointer; flex: none;
+    width: 40px; height: 40px; border-radius: 50%;
+    background: var(--btn); color: var(--btn-text); font-size: 16px;
+  }
+  #composer #stopbtn { background: #e0392b; color: #fff; }
+  /* Slash-command popup: appears above the composer while the input is a
+     bare /prefix, filtered as you type. */
+  #cmdpop { background: var(--sec); border-radius: 12px; margin-bottom: 8px;
+    max-height: 40vh; overflow-y: auto; }
+  #cmdpop .cmd-row { display: flex; align-items: baseline; gap: 10px;
+    padding: 9px 12px; cursor: pointer; }
+  #cmdpop .cmd-row:hover { background: color-mix(in srgb, var(--hint) 14%, transparent); }
+  #cmdpop .cmd-row + .cmd-row { border-top: 1px solid color-mix(in srgb, var(--hint) 14%, transparent); }
+  #cmdpop .cname { font-family: var(--mono); font-size: 13px; font-weight: 700; white-space: nowrap; }
+  #cmdpop .cdesc { color: var(--hint); font-size: 12.5px; }
+  .ask {
+    background: var(--sec); border: 1px dashed color-mix(in srgb, #f5a623 60%, transparent);
+    border-radius: 10px; padding: 8px 12px; margin-bottom: 8px;
+  }
+  .ask .cmd { font-family: var(--mono); font-size: 12.5px; word-break: break-word; white-space: pre-wrap; }
+  .ask .why { color: var(--hint); font-size: 12.5px; margin-top: 4px; }
+  .ask .btns { display: flex; gap: 8px; margin-top: 8px; }
+  .ask .btns button { appearance: none; cursor: pointer; font: inherit; font-weight: 600; font-size: 13px;
+    padding: 6px 16px; border-radius: 8px; }
+  .ask .btns .allow { border: 0; background: var(--btn); color: var(--btn-text); }
+  .ask .btns .deny { border: 1px solid color-mix(in srgb, var(--hint) 45%, transparent); background: transparent; color: var(--text); }
 </style>
 </head>
 <body>
@@ -154,24 +212,56 @@
   <section id="files" class="view"><div class="empty">loading…</div></section>
   <section id="status" class="view"><div class="empty">loading…</div></section>
 </main>
+<footer id="composer" hidden>
+  <div id="cmdpop" hidden></div>
+  <div id="asks"></div>
+  <div class="bar">
+    <textarea id="input" rows="1" placeholder="Message shell3…"></textarea>
+    <button id="stopbtn" title="stop the running turn" hidden>■</button>
+    <button id="sendbtn" title="send">➤</button>
+  </div>
+</footer>
 
 <script>
 const tg = window.Telegram && window.Telegram.WebApp;
 if (tg) { tg.ready(); tg.expand(); }
 const initData = (tg && tg.initData) || "";
 
-// All API calls carry the Telegram initData for auth.
+// Standalone-web auth (shell3 web): ?key=<secret> is stashed once in
+// localStorage and sent as X-Auth-Token from then on, so the URL stays clean.
+(function () {
+  const u = new URL(location.href);
+  const k = u.searchParams.get("key");
+  if (k) { localStorage.setItem("shell3_key", k); u.searchParams.delete("key"); history.replaceState(null, "", u); }
+})();
+const authKey = localStorage.getItem("shell3_key") || "";
+
+// Every API call carries both credentials; the server checks the one that
+// matches its auth mode (initData under the bot, token under shell3 web).
+function authHeaders() {
+  const h = { "X-Init-Data": initData };
+  if (authKey) h["X-Auth-Token"] = authKey;
+  return h;
+}
 async function api(path) {
-  const r = await fetch(path, { headers: { "X-Init-Data": initData } });
+  const r = await fetch(path, { headers: authHeaders() });
   if (!r.ok) throw new Error("HTTP " + r.status);
   return r.json();
+}
+async function post(path, body) {
+  const r = await fetch(path, { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  const t = await r.text(); // 200 + JSON for command replies; empty for 202/200 acks
+  return t ? JSON.parse(t) : null;
 }
 const esc = s => (s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 
 // Syntax highlighting (Files viewer). Load the vendored hljs theme matching
 // Telegram's color scheme; token colors apply globally so we keep the panel's bg.
 (function () {
-  const dark = !tg || tg.colorScheme === "dark";
+  // Inside Telegram (initData present) trust the client's scheme; standalone
+  // web follows the system scheme, matching the CSS fallbacks above.
+  const dark = initData ? tg.colorScheme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
   const l = document.createElement("link");
   l.rel = "stylesheet";
   l.href = "/static/vendor/highlight/" + (dark ? "github-dark" : "github") + ".min.css";
@@ -205,6 +295,7 @@ document.querySelectorAll("nav button").forEach(b => {
     active = b.dataset.tab;
     document.querySelectorAll("nav button").forEach(x => x.classList.toggle("active", x === b));
     Object.keys(views).forEach(k => views[k].classList.toggle("active", k === active));
+    updateComposer();
     refresh(true);
   };
 });
@@ -252,7 +343,10 @@ function contentWithReminders(content, role, key) {
 // Render a history array (reasoning + bubbles + tool calls, tool results folded
 // into their call) to HTML. Shared by the live Chat tab and the Runs past-
 // conversation replay so both show the same fidelity, including thinking.
-function historyToHTML(hist) {
+// historyParts returns one HTML string per entry so the live chat can
+// interleave command notices at their anchor index.
+function historyToHTML(hist) { return historyParts(hist).join(""); }
+function historyParts(hist) {
   const results = {};
   hist.forEach(h => { if (h.role === "tool" && h.tool_call_id) results[h.tool_call_id] = h.content; });
   return hist.map((h, i) => {
@@ -268,28 +362,51 @@ function historyToHTML(hist) {
     }
     (h.tool_calls || []).forEach(tc => { html += toolBlock(tc.name, tc.args, results[tc.id], tc.id || `tool-${i}`); });
     return html;
-  }).join("");
+  });
 }
 
 let chatSig = null;
+// Ephemeral slash-command replies (web chat only). Not session history: they
+// live for the page's life, each anchored at the history index where the
+// command was issued so later messages render below them.
+let notices = [];  // { at: history index, text }
+let histLen = 0;   // history length as of the last render (notice anchor)
+const noticeHTML = n => `<div class="notice">${esc(n.text)}</div>`;
+
 function renderChat(hist) {
   // Skip DOM work entirely when nothing changed — this is what stops the
   // "scroll jacks me while idle" behavior. The signature folds in the fields
   // we actually render, so streamed tool calls/reasoning trigger a redraw.
-  const sig = hist.map(h => `${h.role}:${(h.content||"").length}:${(h.reasoning||"").length}:${(h.tool_calls||[]).length}`).join("|");
+  const sig = hist.map(h => `${h.role}:${(h.content||"").length}:${(h.reasoning||"").length}:${(h.tool_calls||[]).length}`).join("|")
+    + "‖" + notices.map(n => `${n.at}:${n.text.length}`).join("|");
   if (sig === chatSig) return;
   const firstRender = chatSig === null;
   chatSig = sig;
+  histLen = hist.length;
 
   // Only auto-scroll if the user is already pinned to the bottom.
   const pinned = firstRender || (main.scrollHeight - main.scrollTop - main.clientHeight < 80);
 
-  if (!hist.length) { views.chat.innerHTML = '<div class="empty">No messages yet.</div>'; return; }
+  if (!hist.length && !notices.length) { views.chat.innerHTML = '<div class="empty">No messages yet.</div>'; return; }
 
   // Remember which panels are open so streaming a new event never collapses them.
   const open = snapshotOpen(views.chat);
 
-  views.chat.innerHTML = historyToHTML(hist);
+  // Interleave notices at their anchor index (clamped: /clear shrinks
+  // history, and Infinity anchors to the end). Bucketed once so redraws stay
+  // O(history + notices) — renderChat runs on every attentive poll.
+  const parts = historyParts(hist);
+  const byIndex = new Map();
+  notices.forEach(n => {
+    const i = Math.min(n.at, parts.length);
+    byIndex.set(i, (byIndex.get(i) || "") + noticeHTML(n));
+  });
+  let html = "";
+  for (let i = 0; i <= parts.length; i++) {
+    html += byIndex.get(i) || "";
+    if (i < parts.length) html += parts[i];
+  }
+  views.chat.innerHTML = html;
 
   restoreOpen(views.chat, open);
   if (pinned) main.scrollTop = main.scrollHeight;
@@ -501,6 +618,143 @@ async function openFile(rel) {
   }
 }
 
+// ---- Web chat (standalone shell3 web only) ---------------------------------
+// /api/state is the capability probe + live signal: chat=true reveals the
+// composer; busy/asks drive a faster poll while a turn runs or a gate waits.
+let chatOn = false, busy = false;
+const composer = document.getElementById("composer");
+const input = document.getElementById("input");
+const sendbtn = document.getElementById("sendbtn");
+const stopbtn = document.getElementById("stopbtn");
+const asksEl = document.getElementById("asks");
+// The composer belongs to the Chat tab only, and only when a chat driver is
+// attached (standalone shell3 web; the bot Mini App is read-only). Exception:
+// pending Allow/Deny asks live inside the composer footer and block the turn
+// until answered, so they must surface on every tab.
+let hasAsks = false;
+function updateComposer() { composer.hidden = !chatOn || (active !== "chat" && !hasAsks); }
+
+async function sendMsg() {
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  autosize();
+  updateCmdpop(); // programmatic clear fires no input event
+  if (text.startsWith("/")) {
+    // Slash command: the server answers synchronously; show the reply as an
+    // ephemeral notice. /clear, /stop and /reload change history/state, so
+    // refresh both immediately.
+    // Anchor at the last rendered history index; before the first render the
+    // length is unknown, so anchor to the end (Infinity clamps in renderChat).
+    const at = chatSig === null ? Infinity : histLen;
+    try {
+      const res = await post("/api/send", { text });
+      notices.push({ at, text: (res && res.reply) || "(no reply)" });
+    } catch (e) {
+      // Surface the failure — a silent catch here reads as "command worked".
+      notices.push({ at, text: "⚠️ " + text + " failed: " + e.message });
+      input.value = text;
+      autosize(); updateCmdpop();
+    }
+    refresh(true);
+    schedState(0);
+    return;
+  }
+  try { await post("/api/send", { text }); } catch (e) { input.value = text; return; }
+  busy = true; stopbtn.hidden = false;
+  schedState(0); // the attentive state poll owns chat refreshes from here
+}
+sendbtn.onclick = sendMsg;
+input.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMsg(); } });
+function autosize() { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, innerHeight * 0.4) + "px"; }
+input.addEventListener("input", autosize);
+
+// ---- Slash-command popup ---------------------------------------------------
+// Shown while the input is a bare "/prefix" (no space yet), filtered as you
+// type. Tapping a no-argument command sends it; /set and /run fill the input.
+// Keep in sync with the command list in internal/web/command.go (helpText).
+const COMMANDS = [
+  { cmd: "/help", args: "", desc: "list the commands" },
+  { cmd: "/clear", args: "", desc: "reset the conversation" },
+  { cmd: "/stop", args: "", desc: "stop the current turn and kill background jobs" },
+  { cmd: "/set", args: "<name> <value>", desc: "set a model parameter (bare /set lists them)" },
+  { cmd: "/rollback", args: "", desc: "undo the last turn" },
+  { cmd: "/run", args: "<job>", desc: "fire a scheduled job now" },
+  { cmd: "/reload", args: "", desc: "reload shell3.lua without restarting" },
+];
+const cmdpop = document.getElementById("cmdpop");
+let cmdpopSig = ""; // last rendered hit list — skip DOM churn on plain typing
+function updateCmdpop() {
+  const m = /^\/(\S*)$/.exec(input.value);
+  const hits = m ? COMMANDS.filter(c => c.cmd.startsWith("/" + m[1])) : [];
+  const sig = hits.map(c => c.cmd).join("|");
+  if (sig === cmdpopSig) return;
+  cmdpopSig = sig;
+  cmdpop.hidden = hits.length === 0;
+  cmdpop.innerHTML = hits.map(c => `
+    <div class="cmd-row" data-cmd="${c.cmd}">
+      <span class="cname">${c.cmd}${c.args ? " " + esc(c.args) : ""}</span>
+      <span class="cdesc">${esc(c.desc)}</span>
+    </div>`).join("");
+}
+// One delegated handler bound once: rows stay tappable no matter how the
+// popup gets (re)rendered.
+cmdpop.onclick = e => {
+  const row = e.target.closest(".cmd-row");
+  if (!row) return;
+  const c = COMMANDS.find(x => x.cmd === row.dataset.cmd);
+  if (c.args) { // takes arguments: fill and let the user finish it
+    input.value = c.cmd + " ";
+    input.focus();
+    updateCmdpop(); autosize();
+  } else {      // complete command: send it right away
+    input.value = c.cmd;
+    sendMsg();
+  }
+};
+input.addEventListener("input", updateCmdpop);
+stopbtn.onclick = () => post("/api/stop").catch(() => {});
+
+let asksSig = null;
+function renderAsks(asks) {
+  const sig = (asks || []).map(a => a.id).join("|");
+  if (sig === asksSig) return; // don't rebuild (and eat taps) while unchanged
+  asksSig = sig;
+  asksEl.innerHTML = (asks || []).map(a => `
+    <div class="ask" data-id="${esc(a.id)}">
+      <div class="cmd">⚠️ ${esc(a.command)}</div>${a.reason ? `<div class="why">${esc(a.reason)}</div>` : ""}
+      <div class="btns"><button class="allow">Allow</button><button class="deny">Deny</button></div>
+    </div>`).join("");
+  asksEl.querySelectorAll(".ask").forEach(el => {
+    const id = el.dataset.id;
+    el.querySelector(".allow").onclick = () => post("/api/ask", { id, allow: true }).then(() => schedState(0)).catch(() => {});
+    el.querySelector(".deny").onclick = () => post("/api/ask", { id, allow: false }).then(() => schedState(0)).catch(() => {});
+  });
+}
+
+let stateTimer = null;
+let attentive = false; // true while a turn runs or an ask waits → fast poll, and the 4s loop yields chat to us
+function schedState(ms) { clearTimeout(stateTimer); stateTimer = setTimeout(pollState, ms); }
+async function pollState() {
+  attentive = false;
+  try {
+    const st = await api("/api/state");
+    chatOn = st.chat;
+    updateComposer();
+    if (!chatOn) return; // read-only host (bot Mini App / dash): capability is fixed for the page's life — stop polling
+    const wasBusy = busy;
+    busy = st.busy;
+    stopbtn.hidden = !busy;
+    renderAsks(st.asks);
+    hasAsks = (st.asks || []).length > 0;
+    updateComposer(); // asks force the footer visible on any tab
+    attentive = busy || wasBusy || (st.asks || []).length > 0;
+    if (attentive && active === "chat") refresh(true); // stream-ish history updates
+  } catch (e) { /* keep last state; the main loop surfaces auth errors */ }
+  schedState(attentive ? 1500 : 5000);
+}
+pollState();
+
 // ---- Poll loop ------------------------------------------------------------
 async function refresh(force) {
   try {
@@ -510,11 +764,13 @@ async function refresh(force) {
     else if (active === "cron" && force) await renderCron();
     else if (active === "files") await renderFiles(force);
   } catch (e) {
-    views[active].innerHTML = `<div class="err">⚠️ ${esc(e.message)}<br><small>open from inside Telegram to authenticate</small></div>`;
+    views[active].innerHTML = `<div class="err">⚠️ ${esc(e.message)}<br><small>open from inside Telegram — or with ?key=&lt;secret&gt; — to authenticate</small></div>`;
   }
 }
 refresh(true);
-setInterval(refresh, 4000);
+// While the state poll is attentive it owns chat refreshes (1.5s cadence) —
+// skipping chat here avoids double-fetching the full history from two loops.
+setInterval(() => { if (active === "chat" && attentive) return; refresh(); }, 4000);
 </script>
 </body>
 </html>

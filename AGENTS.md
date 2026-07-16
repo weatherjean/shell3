@@ -86,7 +86,7 @@ edge carries the `HEARTBEAT_OK` sentinel, so the chat only hears real alerts;
 busy/out-of-window ticks are skipped, `/reload` rearms, and `shell3 dev
 --heartbeat` fires one tick locally with a suppression verdict),
 and a Mini App **dashboard**
-(`internal/telegram/web`, Telegram initData auth) with status / past runs /
+(`internal/web`, Telegram initData auth) with status / past runs /
 subagent transcripts / jobs / cron / a read-only file explorer (`.env` and
 `ai-do-not-read.*` are redacted, never read from disk). The dashboard gets a
 public https URL via `dashboard = { tunnel = "cloudflared tunnel --url
@@ -100,6 +100,17 @@ front-ends live in `internal/cli`: `shell3 dev "…"` drives the bot's agent fro
 the terminal with full verbose output (every tool call/result, reasoning, token
 usage; `--resume` continues the last session), and `shell3 dash` serves the
 dashboard locally with auth bypassed (localhost only) for troubleshooting.
+`shell3 web` is the **Telegram-free fallback host**: the same dashboard plus a
+simple chat (send box, Stop, Allow/Deny ask cards, polling transport, and the
+bot's slash commands — typing `/` pops a filtered command list; replies render
+as ephemeral notices, never history), gated by
+a shared secret from `.env` (top-level `shell3.web{ addr, secret, tunnel/url }`;
+`X-Auth-Token` header / one-time `?key=` — `shell3 boot` generates
+`SHELL3_WEB_SECRET` and startup prints the ready-to-open keyed URL). It
+resumes the latest stored session
+and arms cron (not heartbeat); run one front-end at a time. The chat loop lives
+in `internal/web`'s `Driver`; the server takes a pluggable `AuthFunc`
+(initData / token / no-auth).
 
 ## IMPORTANT: Do Not Read Credential Files
 
@@ -111,9 +122,9 @@ Secrets and credentials (provider API keys, tool tokens) live in a plain `.env` 
 ## Project Layout
 
 ```
-cmd/shell3/            cobra command tree: root (prints help) + telegram/dev/dash/boot/health subcommands
+cmd/shell3/            cobra command tree: root (prints help) + telegram/web/dev/dash/boot/health subcommands
 internal/agentsetup/   shared config assembly (Build → chat.Config) used by every front-end
-internal/luacfg/       Lua config loader (shell3.lua → model/agent/subagents/tools/skills, telegram, cron, heartbeat, on_tool_call/stub_tools) + system-prompt assembly
+internal/luacfg/       Lua config loader (shell3.lua → model/agent/subagents/tools/skills, telegram, web, cron, heartbeat, on_tool_call/stub_tools) + system-prompt assembly
 internal/bootstrap/    first-run global + project setup
 internal/scaffold/     embedded starter shell3.lua (with shell3.telegram{}) + .env template
 internal/adapter/openai/  OpenAI-compatible LLM adapter
@@ -123,7 +134,8 @@ internal/runs/         file-native JSONL store: sessions at .shell3_project/runs
 internal/edittool/     edit_file tool implementation (Go port of opencode's str-replace) + its direct-disk file I/O
 internal/notify/       Notification type (bg_done / agent_done) shared by job runtime + chat
 internal/tunnel/       dashboard.tunnel spawner: runs the tunnel command, scrapes its https URL
-internal/telegram/     Telegram bot front-end (bot loop, commands, confirm buttons, media, mdhtml) + web/ (Mini App dashboard)
+internal/telegram/     Telegram bot front-end (bot loop, commands, confirm buttons, media, mdhtml)
+internal/web/          dashboard + chat API server (pluggable auth) and the shell3 web chat driver; static/ is the single-file frontend
 internal/cron/         robfig/cron scheduler dispatching subagent jobs on Session.Dispatch
 internal/heartbeat/    shell3.heartbeat{} engine: tick prompt, active-hours window, HEARTBEAT_OK strip, idle-skip ticker
 internal/cli/          non-interactive front-end helpers: shell3 dev + dash renderers, brand banner

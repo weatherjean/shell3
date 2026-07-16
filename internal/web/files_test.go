@@ -35,7 +35,7 @@ func newFilesServer(t *testing.T) (*Server, string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := NewServer(rt, sess, token, chatID)
+	srv := NewServer(rt, sess, TelegramAuth(token, chatID))
 	srv.SetConfigDir(dir)
 	signed := signInitData(t, token, `{"id":8701499393,"first_name":"T"}`)
 	return srv, signed, dir
@@ -129,7 +129,7 @@ func TestFiles_NoConfigDirEmptyListing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := NewServer(rt, sess, token, chatID) // no SetConfigDir
+	srv := NewServer(rt, sess, TelegramAuth(token, chatID)) // no SetConfigDir
 	signed := signInitData(t, token, `{"id":8701499393,"first_name":"T"}`)
 	rr := get(t, srv, signed, "/api/files")
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"entries":[]`) {

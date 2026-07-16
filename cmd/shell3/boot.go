@@ -4,6 +4,8 @@ package main
 
 import (
 	"bufio"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -130,7 +132,15 @@ func runBoot(f *bootFlags) error {
 
 	envKey := envKeyForName(name)
 
-	envPairs := [][2]string{{envKey, key}, {"BRAVE_API_KEY", braveKey}, {"TELEGRAM_BOT_TOKEN", tgToken}}
+	// The web front-end's shared secret is generated, not prompted: boot
+	// always writes SHELL3_WEB_SECRET so the scaffold's shell3.web{} block
+	// loads out of the box (mergeEnv keeps an existing value on re-boot).
+	webSecret, err := randomHex(24)
+	if err != nil {
+		return fmt.Errorf("boot: generate web secret: %w", err)
+	}
+
+	envPairs := [][2]string{{envKey, key}, {"BRAVE_API_KEY", braveKey}, {"TELEGRAM_BOT_TOKEN", tgToken}, {"SHELL3_WEB_SECRET", webSecret}}
 
 	if err := scaffold.RenderBaseConfig(dir, scaffold.Values{
 		Name: name, BaseURL: url, EnvKey: envKey, Model: model, Proxy: proxy,
@@ -202,6 +212,15 @@ func envKeyForName(name string) string {
 
 var nonAlnum = regexp.MustCompile(`[^A-Z0-9]+`)
 
+// randomHex returns n random bytes hex-encoded (2n characters).
+func randomHex(n int) (string, error) {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
 // mergeEnv appends each kv pair absent from existing (existing values
 // untouched); result ends with a newline.
 func mergeEnv(existing string, kv [][2]string) string {
@@ -264,6 +283,9 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool) {
 	fmt.Println("in .env and chat_id is filled in shell3.telegram{}, then run:")
 	fmt.Println()
 	fmt.Println("Run:  shell3 telegram")
+	fmt.Println()
+	fmt.Println("No Telegram? `shell3 web` serves the same dashboard plus a browser chat;")
+	fmt.Println("it prints a ready-to-open URL (the generated SHELL3_WEB_SECRET as ?key=).")
 	fmt.Println()
 	fmt.Println("The Mini App dashboard is exposed through a cloudflared tunnel by")
 	fmt.Println("default (free, no account) — install it so the dashboard is reachable")
