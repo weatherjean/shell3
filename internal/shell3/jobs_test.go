@@ -479,3 +479,57 @@ func TestStartSubagentEmptyAllowlist(t *testing.T) {
 		t.Fatalf("StartSubagent with empty allowlist = %v, want no-subagents error", err)
 	}
 }
+
+// TestSession_Clear_RefusesWhileTaskRunning pins /clear's boundary contract:
+// while a background task runs, Clear refuses (same shape as Reload) instead
+// of letting the task's completion notice leak into the fresh session.
+func TestSession_Clear_RefusesWhileTaskRunning(t *testing.T) {
+	rt := newTestRuntime(t, fakeCfg("ok"))
+	s, err := rt.Session(SessionOpts{})
+	if err != nil {
+		t.Fatalf("session: %v", err)
+	}
+
+	id, err := rt.jobs.startCommand(s, "sleep 5", t.TempDir(), []string{"sleep", "5"}, nil)
+	if err != nil {
+		t.Fatalf("startCommand: %v", err)
+	}
+	err = s.Clear()
+	if err == nil || !strings.Contains(err.Error(), "background task") {
+		t.Fatalf("Clear with a running task: want a 'background task(s) running' error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), id) {
+		t.Fatalf("the refusal should name the running job id %s: %v", id, err)
+	}
+
+	// Kill it; Clear must then succeed.
+	if err := rt.jobs.cancel(id); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	rt.jobs.wait()
+	if err := s.Clear(); err != nil {
+		t.Fatalf("Clear after the task ended: %v", err)
+	}
+}
+
+// TestSession_Clear_DropsQueuedNotices pins the other half of the boundary: a
+// completion notice already queued (but not yet delivered) is dropped by
+// /clear rather than surfacing inside the fresh session's context.
+func TestSession_Clear_DropsQueuedNotices(t *testing.T) {
+	rt := newTestRuntime(t, fakeCfg("ok"))
+	s, err := rt.Session(SessionOpts{})
+	if err != nil {
+		t.Fatalf("session: %v", err)
+	}
+
+	s.sess.InterjectNotice("bg1 finished before the clear")
+	if !s.HasQueuedInput() {
+		t.Fatal("expected queued input after InterjectNotice")
+	}
+	if err := s.Clear(); err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+	if s.HasQueuedInput() {
+		t.Fatal("a queued notice survived /clear — it would leak into the fresh session")
+	}
+}

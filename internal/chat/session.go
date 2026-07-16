@@ -99,6 +99,15 @@ func (s *Session) InterjectNotice(text string) {
 	s.inbox = append(s.inbox, inboxItem{text: text, notice: true})
 }
 
+// DropInbox discards every queued interjection and notice. Used by the host's
+// /clear so a completion queued just before the boundary cannot leak into the
+// fresh session. Safe to call from any goroutine.
+func (s *Session) DropInbox() {
+	s.inboxMu.Lock()
+	defer s.inboxMu.Unlock()
+	s.inbox = nil
+}
+
 // HasInbox reports whether any interjected items are queued. Safe to call from
 // any goroutine.
 func (s *Session) HasInbox() bool {

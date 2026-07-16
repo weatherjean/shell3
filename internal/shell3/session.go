@@ -648,6 +648,18 @@ func (s *Session) Clear() error {
 
 // clearLocked is Clear's body; caller (withIdle) holds s.mu.
 func (s *Session) clearLocked() error {
+	// Refuse while background work runs: a completing job would deliver its
+	// notice into the NEW session — stale work leaking across the boundary the
+	// user just drew. Same contract as Runtime.Reload; /stop is the explicit
+	// kill switch. Reading s.runtime directly is safe here (s.mu is held).
+	if s.runtime != nil && s.runtime.jobs != nil {
+		if ids := s.runtime.jobs.runningJobIDs(); len(ids) > 0 {
+			return fmt.Errorf("%d background task(s) running (%s) — /stop them or let them finish, then /clear",
+				len(ids), strings.Join(ids, ", "))
+		}
+	}
+	// Drop queued-but-undelivered notices from the conversation being cleared.
+	s.sess.DropInbox()
 	s.sess.SetMessages(nil)
 	// Rotate onto a fresh store session: end the conversation just cleared (its
 	// turns were already persisted per-turn, so it becomes a finished past

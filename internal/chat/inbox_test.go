@@ -231,3 +231,19 @@ func TestInterject_WhitespaceOnly_NoSystemReminder(t *testing.T) {
 		}
 	}
 }
+
+// TestSession_DropInbox pins the /clear drain: queued interjections and
+// notices are discarded wholesale so nothing from the cleared conversation
+// leaks into the fresh session.
+func TestSession_DropInbox(t *testing.T) {
+	sess, _ := newCollectorSession(SessionOpts{})
+	sess.Interject("steer me")
+	sess.InterjectNotice("bg1 finished")
+	if !sess.HasInbox() {
+		t.Fatal("expected a non-empty inbox after queueing")
+	}
+	sess.DropInbox()
+	if sess.HasInbox() {
+		t.Fatal("DropInbox should discard every queued item")
+	}
+}
