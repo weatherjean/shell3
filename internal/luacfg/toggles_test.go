@@ -67,3 +67,27 @@ shell3.agent({ name="a", model="m", prompt="p", tools={ `+key+`=true } })
 		}
 	}
 }
+
+// TestAgentPruneFlag pins the tri-state prune toggle on agents and subagents:
+// explicit false, explicit true, and unset (nil = inherit the model's
+// prune_at) must all survive the load distinctly.
+func TestAgentPruneFlag(t *testing.T) {
+	c := mustLoad(t, `
+shell3.model("m", { base_url="x", api_key="k", model="y", compact_at=100000 })
+shell3.agent({ name="a", model="m", prompt="p", prune=false })
+shell3.subagent({ name="s_on", description="d", model="m", prompt="p", prune=true })
+shell3.subagent({ name="s_unset", description="d", model="m", prompt="p" })
+`)
+	a, _ := c.AgentByName("a")
+	if a.Prune == nil || *a.Prune {
+		t.Errorf("agent a: want Prune=&false, got %v", a.Prune)
+	}
+	sOn, _ := c.SubagentByName("s_on")
+	if sOn.Prune == nil || !*sOn.Prune {
+		t.Errorf("subagent s_on: want Prune=&true, got %v", sOn.Prune)
+	}
+	sUnset, _ := c.SubagentByName("s_unset")
+	if sUnset.Prune != nil {
+		t.Errorf("subagent s_unset: want Prune=nil (inherit), got %v", *sUnset.Prune)
+	}
+}

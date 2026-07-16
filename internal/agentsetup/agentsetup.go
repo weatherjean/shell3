@@ -205,6 +205,15 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 		skillNames = append(skillNames, s.Name)
 	}
 
+	// prune=false zeroes the effective prune threshold for this agent/subagent;
+	// PruneAt=0 is already the disabled state downstream (chat.maybeCompact).
+	// nil/true inherit the model's prune_at — the flag can gate the stage but
+	// never invent a threshold the model doesn't declare.
+	pruneAt := md.PruneAt
+	if a.Prune != nil && !*a.Prune {
+		pruneAt = 0
+	}
+
 	return chat.ActiveAgent{
 		Personality: persona.Persona{
 			Name:         a.Name,
@@ -224,7 +233,7 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 			ContextWindow:   md.ContextWindow,
 			CompactAt:       md.CompactAt,
 			KeepRecent:      md.KeepRecent,
-			PruneAt:         md.PruneAt,
+			PruneAt:         pruneAt,
 		},
 	}, nil
 }

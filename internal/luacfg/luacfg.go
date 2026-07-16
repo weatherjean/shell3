@@ -75,6 +75,12 @@ type AgentCommon struct {
 	Skills      []Skill
 	Environment bool // inject the host Environment system-reminder
 	Delegation  bool // advertise the task/task_* tools (with a non-empty tools.subagents)
+	// Prune toggles the cheap tool-output-stubbing tier for this agent/subagent.
+	// nil (unset) inherits the model's prune_at; false skips pruning entirely
+	// (context management goes straight to compact_at); true is an explicit
+	// inherit — it cannot invent a threshold the model doesn't declare. See
+	// agentsetup.runtimeForAgent for the overlay.
+	Prune *bool
 }
 
 type Agent struct {

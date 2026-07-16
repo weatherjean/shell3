@@ -579,3 +579,56 @@ func TestAgentRuntime_UnknownErrors(t *testing.T) {
 		t.Errorf("error should name the unknown agent, got: %v", err)
 	}
 }
+
+// TestBuild_PruneFlag pins the prune=false overlay: the model's derived
+// prune_at (compact_at*0.6) is zeroed for an agent that opts out, and kept for
+// a subagent that leaves the flag unset. Thresholds stay model-level; the flag
+// only gates the stage.
+func TestBuild_PruneFlag(t *testing.T) {
+	tmp := t.TempDir()
+	lua := `
+shell3.model("main", {
+  base_url = "https://example.test/v1",
+  api_key = shell3.env.secret("TEST_KEY"),
+  model = "test-model",
+  compact_at = 100000,
+})
+shell3.agent({ name = "opted_out", model = "main", prompt = "p", prune = false })
+shell3.subagent({ name = "inheriting", description = "d", model = "main", prompt = "p" })
+`
+	if err := os.WriteFile(filepath.Join(tmp, "shell3.lua"), []byte(lua), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, ".env"), []byte("TEST_KEY=sk-test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	parts, cleanup, err := agentsetup.BuildParts(agentsetup.Options{
+		ConfigPath: filepath.Join(tmp, "shell3.lua"),
+		CWD:        tmp,
+		HomeDir:    t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("BuildParts: %v", err)
+	}
+	defer cleanup()
+
+	out, err := parts.AgentRuntime("opted_out")
+	if err != nil {
+		t.Fatalf("AgentRuntime(opted_out): %v", err)
+	}
+	if out.PruneAt != 0 {
+		t.Errorf("opted_out: PruneAt = %d, want 0 (prune=false)", out.PruneAt)
+	}
+	if out.CompactAt != 100000 {
+		t.Errorf("opted_out: CompactAt = %d, want 100000 (thresholds stay model-level)", out.CompactAt)
+	}
+
+	inh, err := parts.AgentRuntime("inheriting")
+	if err != nil {
+		t.Fatalf("AgentRuntime(inheriting): %v", err)
+	}
+	if want := 100000 * 60 / 100; inh.PruneAt != want {
+		t.Errorf("inheriting: PruneAt = %d, want %d (model default)", inh.PruneAt, want)
+	}
+}

@@ -177,7 +177,7 @@ var toolKeys = map[string]bool{
 
 var agentKeys = map[string]bool{
 	"name": true, "model": true, "prompt": true, "prompt_cmd": true, "tools": true, "skills": true,
-	"environment": true, "delegation": true,
+	"environment": true, "delegation": true, "prune": true,
 }
 
 var toolGateKeys = map[string]bool{
@@ -341,6 +341,7 @@ type agentCommon struct {
 	subagentsRaw lua.LValue
 	environment  bool
 	delegation   bool
+	prune        *bool
 }
 
 // skillDirList reads skills={} as a list of directory-path strings, raising on
@@ -372,7 +373,19 @@ func (c *LoadedConfig) parseAgentCommon(L *lua.LState, opts *lua.LTable, kind, n
 	}
 	ac.environment = optBool(opts, "environment")
 	ac.delegation = optBool(opts, "delegation")
+	ac.prune = optBoolPtr(opts, "prune")
 	return ac
+}
+
+// optBoolPtr returns the boolean at key, or nil when the key is absent (or not
+// a boolean) — for tri-state flags where "unset" must stay distinct from
+// "false" (Lua cannot express that through optBool's zero value).
+func optBoolPtr(t *lua.LTable, key string) *bool {
+	if v, ok := t.RawGetString(key).(lua.LBool); ok {
+		b := bool(v)
+		return &b
+	}
+	return nil
 }
 
 // luaAgent parses name/model/prompt, skills, and the tools struct (gates + custom).
@@ -396,7 +409,7 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 	a.Name = c.uniqueName(a.Name)
 	ac := c.parseAgentCommon(L, opts, "agent", a.Name, a.Prompt, a.PromptCmd)
 	a.SkillDirs, a.Gates, a.CustomTools = ac.skillDirs, ac.gates, ac.custom
-	a.Environment, a.Delegation = ac.environment, ac.delegation
+	a.Environment, a.Delegation, a.Prune = ac.environment, ac.delegation, ac.prune
 	if ac.subagentsRaw != lua.LNil {
 		sg, ok := ac.subagentsRaw.(*lua.LTable)
 		if !ok {
@@ -411,7 +424,7 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 var subagentKeys = map[string]bool{
 	"name": true, "description": true, "model": true, "prompt": true, "prompt_cmd": true,
 	"tools": true, "skills": true,
-	"environment": true, "delegation": true,
+	"environment": true, "delegation": true, "prune": true,
 }
 
 func (c *LoadedConfig) luaSubagent(L *lua.LState) int {
@@ -438,7 +451,7 @@ func (c *LoadedConfig) luaSubagent(L *lua.LState) int {
 		L.RaiseError("subagent %q: a subagent may not declare its own subagents (depth limit 1)", s.Name)
 	}
 	s.SkillDirs, s.Gates, s.CustomTools = ac.skillDirs, ac.gates, ac.custom
-	s.Environment, s.Delegation = ac.environment, ac.delegation
+	s.Environment, s.Delegation, s.Prune = ac.environment, ac.delegation, ac.prune
 	c.subagents = append(c.subagents, s)
 	return pushHandle(L, "__subagent", s.Name)
 }
