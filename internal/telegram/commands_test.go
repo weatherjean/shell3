@@ -6,6 +6,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/weatherjean/shell3/internal/shell3"
 )
@@ -84,13 +85,23 @@ func TestCommand_ReloadNoReloader(t *testing.T) {
 }
 
 // TestCommand_CompactNothing pins the /compact wiring on a fresh session:
-// nothing to summarise yet, so the bot reports that rather than erroring.
+// nothing to summarise yet, so the bot reports that rather than erroring. The
+// reply is asynchronous — /compact runs off the update loop under the turn
+// slot — so the test polls for it.
 func TestCommand_CompactNothing(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "ok")
 	b := NewBot(fc, rt, sess, 42)
 	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/compact"})
-	if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "nothing to compact") {
-		t.Fatalf("expected 'nothing to compact' on a fresh session, got %v", fc.sentTexts())
+	deadline := time.After(3 * time.Second)
+	for {
+		if strings.Contains(strings.Join(fc.sentTexts(), "\n"), "nothing to compact") {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("expected 'nothing to compact' on a fresh session, got %v", fc.sentTexts())
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }

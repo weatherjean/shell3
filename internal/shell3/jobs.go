@@ -173,6 +173,22 @@ func (m *jobManager) capError() error {
 }
 
 // runningCount returns the number of non-finished jobs. Must be called under m.mu.
+// errIfRunning returns the "N background task(s) running — /stop them…" error
+// naming the running job ids, or nil when idle. One home for the guard every
+// boundary-drawing operation uses (Reload, /clear): background work must not
+// straddle a config swap or a history reset. next names the command to retry
+// ("/reload", "/clear"). Safe on a nil manager (test runtimes).
+func (m *jobManager) errIfRunning(next string) error {
+	if m == nil {
+		return nil
+	}
+	if ids := m.runningJobIDs(); len(ids) > 0 {
+		return fmt.Errorf("%d background task(s) running (%s) — /stop them or let them finish, then %s",
+			len(ids), strings.Join(ids, ", "), next)
+	}
+	return nil
+}
+
 func (m *jobManager) runningCount() int {
 	n := 0
 	for _, j := range m.jobs {
@@ -349,10 +365,20 @@ func (m *jobManager) finishCommand(j *bgJob, exit int) {
 			deliver = func() { root.injectNoticeNoWake(n) }
 		}
 	}
-	ex := exit
-	m.markDoneLocked(j, func(j *bgJob) { j.exit = &ex })
+	// Deliver BEFORE markDone (mirroring finishSubagent's ordering): while the
+	// notice is in flight the job still counts as running, so /clear's
+	// running-tasks guard refuses; once the job leaves runningJobIDs the notice
+	// is guaranteed queued, and a subsequent /clear's DropInbox discards it.
+	// Delivering after markDone opens the reverse window — guard passes, then
+	// the stale notice lands in the freshly cleared session. deliver() runs
+	// outside m.mu because injectNotification takes the session mutex (lock
+	// order: session → jobs, never the reverse).
 	m.mu.Unlock()
 	deliver()
+	ex := exit
+	m.mu.Lock()
+	m.markDoneLocked(j, func(j *bgJob) { j.exit = &ex })
+	m.mu.Unlock()
 	m.maybeCloseChild(owner)
 	j.cancel() // always set before the job is published; release the ctx
 	// Command paths guard m.rt != nil because command-only tests construct

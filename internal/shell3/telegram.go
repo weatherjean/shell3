@@ -41,4 +41,11 @@ func (rt *Runtime) Web() WebConfig { return rt.web }
 func (rt *Runtime) Cron() []CronJob { return rt.cron }
 
 // HeartbeatConfig returns the shell3.heartbeat{} block, nil when not declared.
-func (rt *Runtime) HeartbeatConfig() *Heartbeat { return rt.heartbeat }
+// Locked: unlike the start-up-only accessors above, this one is read per
+// request by the dashboard's heartbeat source, which races Reload's rt.mu-held
+// write of the field.
+func (rt *Runtime) HeartbeatConfig() *Heartbeat {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return rt.heartbeat
+}

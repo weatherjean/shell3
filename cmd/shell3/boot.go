@@ -159,6 +159,13 @@ func runBoot(f *bootFlags) error {
 		return fmt.Errorf("boot: write .env: %w", err)
 	}
 	for _, k := range kept {
+		// SHELL3_WEB_SECRET is generated fresh each boot (never user-typed), so
+		// keeping the existing one is its normal case, not worth a note. Only
+		// runBoot knows which pairs came from prompts vs randomHex — the
+		// provenance filter lives here, not inside the generic mergeEnv.
+		if k == "SHELL3_WEB_SECRET" {
+			continue
+		}
 		fmt.Printf("note: kept the existing %s in %s — edit that file to change it\n", k, envPath)
 	}
 
@@ -225,11 +232,11 @@ func randomHex(n int) (string, error) {
 }
 
 // mergeEnv appends each kv pair absent from existing (existing values
-// untouched); result ends with a newline. kept reports the keys whose incoming
-// value was non-empty but discarded because the key already exists — so a
-// re-boot can tell the user their freshly typed secret was NOT applied instead
-// of silently keeping the stale one. SHELL3_WEB_SECRET is exempt: boot
-// regenerates it unconditionally, so "kept existing" is its normal case.
+// untouched); result ends with a newline. kept reports every key whose
+// incoming value was non-empty but discarded because the key already exists —
+// so a re-boot can tell the user their freshly typed secret was NOT applied
+// instead of silently keeping the stale one. Callers filter out keys they
+// generated themselves (see runBoot's SHELL3_WEB_SECRET filter).
 func mergeEnv(existing string, kv [][2]string) (merged string, kept []string) {
 	have := map[string]bool{}
 	for _, line := range strings.Split(existing, "\n") {
@@ -251,7 +258,7 @@ func mergeEnv(existing string, kv [][2]string) (merged string, kept []string) {
 	}
 	for _, pair := range kv {
 		if have[pair[0]] {
-			if pair[1] != "" && pair[0] != "SHELL3_WEB_SECRET" {
+			if pair[1] != "" {
 				kept = append(kept, pair[0])
 			}
 			continue

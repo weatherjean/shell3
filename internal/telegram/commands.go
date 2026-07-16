@@ -4,13 +4,10 @@ package telegram
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/shell3"
-	"github.com/weatherjean/shell3/internal/strutil"
 )
 
 // BotCommands is the canonical command list, registered with Telegram for the
@@ -42,21 +39,32 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 		}
 		b.sendReply(ctx, "🧹 cleared")
 	case "/compact":
-		// One synchronous LLM round-trip (can take a while on a long history);
-		// Session.Compact holds the busy gate so an overlapping send is refused,
-		// not raced.
-		before, after, err := b.sess.Compact(ctx)
-		switch {
-		case errors.Is(err, chat.ErrNothingToCompact):
-			b.sendReply(ctx, "nothing to compact")
-		case errors.Is(err, shell3.ErrBusy):
-			b.sendReply(ctx, "a turn is in flight — try /compact when it finishes")
-		case err != nil:
-			b.sendReply(ctx, "compact failed: "+err.Error())
-		default:
-			b.sendReply(ctx, fmt.Sprintf("🗜 compacted: %s → %s tokens",
-				strutil.FormatTokens(before), strutil.FormatTokens(after)))
+		// The compaction is one LLM round-trip (minutes on a long history), so it
+		// must NOT run inline on the update loop. Take the turn slot exactly like
+		// a user turn: the loop stays live, messages arriving mid-compaction are
+		// Interjected (not bounced with ErrBusy), and /stop's cancelTurn aborts
+		// the summarisation call.
+		b.mu.Lock()
+		if b.turnActive {
+			b.mu.Unlock()
+			b.sendReply(ctx, shell3.CompactReplyText(0, 0, shell3.ErrBusy))
+			return
 		}
+		cctx, cancel := context.WithCancel(ctx)
+		b.cancelTurn = cancel
+		b.turnActive = true
+		b.mu.Unlock()
+		stopTyping := b.keepTyping(ctx)
+		go func() {
+			before, after, err := b.sess.Compact(cctx)
+			stopTyping()
+			b.mu.Lock()
+			b.cancelTurn = nil
+			b.turnActive = false
+			b.mu.Unlock()
+			cancel()
+			b.sendReply(ctx, shell3.CompactReplyText(before, after, err))
+		}()
 	case "/set":
 		if arg == "" {
 			b.sendReply(ctx, b.settableList())

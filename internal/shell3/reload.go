@@ -3,7 +3,6 @@ package shell3
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/chat"
@@ -45,12 +44,8 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 	// start mid-rebuild. The user /stops (kills the turn + all jobs) or lets
 	// them finish, then reloads. Checked before the config build so the
 	// rejection is instant and side-effect free.
-	if rt.jobs != nil {
-		if ids := rt.jobs.runningJobIDs(); len(ids) > 0 {
-			return ReloadResult{}, fmt.Errorf(
-				"reload: %d background task(s) running (%s) — /stop them or let them finish, then /reload",
-				len(ids), strings.Join(ids, ", "))
-		}
+	if err := rt.jobs.errIfRunning("/reload"); err != nil {
+		return ReloadResult{}, fmt.Errorf("reload: %w", err)
 	}
 	// 1. Build + validate the new parts BEFORE touching anything.
 	homeDir := rt.homeDir
@@ -75,13 +70,9 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 	}
 	// Re-check under rt.mu: a job may have started while the new parts were
 	// building. Discard the built parts and change nothing.
-	if rt.jobs != nil {
-		if ids := rt.jobs.runningJobIDs(); len(ids) > 0 {
-			newCleanup()
-			return ReloadResult{}, fmt.Errorf(
-				"reload: %d background task(s) running (%s) — /stop them or let them finish, then /reload",
-				len(ids), strings.Join(ids, ", "))
-		}
+	if err := rt.jobs.errIfRunning("/reload"); err != nil {
+		newCleanup()
+		return ReloadResult{}, fmt.Errorf("reload: %w", err)
 	}
 
 	// 2. Capture per-session overrides to restore after the swap.

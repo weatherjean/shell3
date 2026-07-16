@@ -53,16 +53,16 @@ func TestMergeEnvFromEmpty(t *testing.T) {
 
 // TestMergeEnvKeptOnlyForNonEmptyIncoming: an existing key with a BLANK
 // incoming value is normal re-boot behavior (nothing to apply), not worth a
-// warning — only a discarded non-empty value is reported.
+// warning — only a discarded non-empty value is reported. mergeEnv itself is
+// generic: it reports ALL such keys, and runBoot filters the ones it generated
+// (SHELL3_WEB_SECRET) before printing.
 func TestMergeEnvKeptOnlyForNonEmptyIncoming(t *testing.T) {
 	_, kept := mergeEnv("MAIN_API_KEY=old\nSHELL3_WEB_SECRET=s\n", [][2]string{
 		{"MAIN_API_KEY", ""},
 		{"SHELL3_WEB_SECRET", "freshly-generated"},
 	})
-	// SHELL3_WEB_SECRET is regenerated every boot by design; it is exempt from
-	// the kept report (warning about it every re-boot would be noise).
-	if len(kept) != 0 {
-		t.Errorf("kept = %v, want [] (blank incoming + exempt web secret)", kept)
+	if len(kept) != 1 || kept[0] != "SHELL3_WEB_SECRET" {
+		t.Errorf("kept = %v, want [SHELL3_WEB_SECRET] (blank incoming dropped; provenance filtering is runBoot's job)", kept)
 	}
 }
 

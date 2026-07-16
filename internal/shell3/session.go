@@ -11,6 +11,7 @@ import (
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/runs"
+	"github.com/weatherjean/shell3/internal/strutil"
 )
 
 // Session is a live, multi-turn conversation. Obtain one via [Runtime.Session];
@@ -613,9 +614,13 @@ func (s *Session) turnConfigLocked() chat.TurnConfig {
 // when history is too small to have a summarisable head (history untouched on
 // any error). Unlike the other between-turns mutators it does NOT run under
 // withIdle — the summarisation round-trip can take minutes and must not hold
-// s.mu; instead it takes the busy gate like a turn (mirroring SendParts), so
-// Snapshot/Interject stay responsive while overlapping sends get ErrBusy.
+// s.mu; instead it takes the FULL turn lifecycle (mirroring SendParts): the
+// busy gate, plus turnCancel/turnDone registration so /stop can abort the LLM
+// call and doClose cancels+joins before ending the store session — the
+// compaction rolls the runs session, so teardown must never race it.
 func (s *Session) Compact(ctx context.Context) (before, after int, err error) {
+	cctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
 	s.mu.Lock()
 	if s.busy || s.closed {
 		err := ErrBusy
@@ -623,20 +628,49 @@ func (s *Session) Compact(ctx context.Context) (before, after int, err error) {
 			err = ErrClosed
 		}
 		s.mu.Unlock()
+		cancel()
 		return 0, 0, err
 	}
 	s.busy = true
-	// Snapshot the turn config inside the busy-gated critical section, same as
-	// SendParts: cfg mutators (SwitchAgent, SetParam, Clear) hold s.mu, so they
-	// serialize wholly before or after this compaction.
+	s.turnCancel = cancel
+	s.turnDone = done
+	// Capture the runtime under the busy gate (doClose nils it concurrently once
+	// done closes) and snapshot the turn config inside the same critical section,
+	// same as SendParts: cfg mutators (SwitchAgent, SetParam, Clear) hold s.mu,
+	// so they serialize wholly before or after this compaction.
+	rt := s.runtime
 	tc := s.turnConfigLocked()
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
 		s.busy = false
 		s.mu.Unlock()
+		close(done) // doClose may be blocked on this join; store state is final
+		// A notice queued while the busy gate was held had its Wake bounced off
+		// RunQueued's ErrBusy; re-emit exactly as SendParts' unwind does, so a
+		// completion that landed mid-compaction is never stranded.
+		if rt != nil && s.sess.HasInbox() {
+			rt.emit(HostEvent{Session: s.sess.ID(), Kind: Wake})
+		}
+		cancel() // release the child ctx
 	}()
-	return chat.CompactStandalone(ctx, tc, s.sess)
+	return chat.CompactStandalone(cctx, tc, s.sess)
+}
+
+// CompactReplyText renders a Session.Compact result as the chat reply. Both
+// front-ends (Telegram, web) send exactly this string, so the error mapping
+// and wording live in one place next to the API they describe.
+func CompactReplyText(before, after int, err error) string {
+	switch {
+	case errors.Is(err, chat.ErrNothingToCompact):
+		return "nothing to compact"
+	case errors.Is(err, ErrBusy):
+		return "a turn is in flight — try /compact when it finishes"
+	case err != nil:
+		return "compact failed: " + err.Error()
+	}
+	return fmt.Sprintf("🗜 compacted: %s → %s tokens",
+		strutil.FormatTokens(before), strutil.FormatTokens(after))
 }
 
 // Clear resets the conversation context (= /clear): drops all history and
@@ -650,12 +684,12 @@ func (s *Session) Clear() error {
 func (s *Session) clearLocked() error {
 	// Refuse while background work runs: a completing job would deliver its
 	// notice into the NEW session — stale work leaking across the boundary the
-	// user just drew. Same contract as Runtime.Reload; /stop is the explicit
-	// kill switch. Reading s.runtime directly is safe here (s.mu is held).
-	if s.runtime != nil && s.runtime.jobs != nil {
-		if ids := s.runtime.jobs.runningJobIDs(); len(ids) > 0 {
-			return fmt.Errorf("%d background task(s) running (%s) — /stop them or let them finish, then /clear",
-				len(ids), strings.Join(ids, ", "))
+	// user just drew. Same guard as Runtime.Reload (errIfRunning); /stop is the
+	// explicit kill switch. Reading s.runtime directly is safe here (s.mu is
+	// held; the helper is nil-safe for runtime-less test sessions).
+	if s.runtime != nil {
+		if err := s.runtime.jobs.errIfRunning("/clear"); err != nil {
+			return err
 		}
 	}
 	// Drop queued-but-undelivered notices from the conversation being cleared.
