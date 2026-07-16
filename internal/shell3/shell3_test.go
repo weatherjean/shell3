@@ -253,6 +253,43 @@ func TestSession_Close_ReturnsEndSessionError(t *testing.T) {
 	}
 }
 
+// TestSession_Compact_Delta pins the manual /compact path end to end at the
+// shell3 layer: a compactable history is summarised (one quiet fakellm call)
+// and the reported token estimates shrink.
+func TestSession_Compact_Delta(t *testing.T) {
+	client := fakellm.New(
+		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "SUMMARY of prior work"}}},
+	)
+	s := newTestSession(t, client, chat.Config{})
+	defer s.Close()
+
+	// Seed a large history directly: many chunky turns so the head dwarfs the
+	// preserved tail.
+	big := strings.Repeat("x", 2000)
+	msgs := make([]llm.Message, 0, 40)
+	for i := 0; i < 20; i++ {
+		msgs = append(msgs,
+			llm.Message{Role: llm.RoleUser, Content: big},
+			llm.Message{Role: llm.RoleAssistant, Content: big},
+		)
+	}
+	s.sess.SetMessages(msgs)
+
+	before, after, err := s.Compact(context.Background())
+	if err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	if after <= 0 || before <= after {
+		t.Fatalf("want before > after > 0, got before=%d after=%d", before, after)
+	}
+
+	// A fresh session has nothing to compact.
+	s.sess.SetMessages([]llm.Message{{Role: llm.RoleUser, Content: "hi"}})
+	if _, _, err := s.Compact(context.Background()); !errors.Is(err, chat.ErrNothingToCompact) {
+		t.Fatalf("Compact on tiny history: want ErrNothingToCompact, got %v", err)
+	}
+}
+
 func TestSession_Clear_ResetsHistory(t *testing.T) {
 	client := fakellm.New(
 		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "a"}}},
@@ -847,6 +884,9 @@ func TestSession_BusyEnforcement(t *testing.T) {
 	}
 	if _, err := s.Prune("1"); !errors.Is(err, ErrBusy) {
 		t.Fatalf("Prune while busy: want ErrBusy, got %v", err)
+	}
+	if _, _, err := s.Compact(context.Background()); !errors.Is(err, ErrBusy) {
+		t.Fatalf("Compact while busy: want ErrBusy, got %v", err)
 	}
 
 	// Drain the in-flight turn; the gate must clear.

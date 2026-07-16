@@ -606,6 +606,39 @@ func (s *Session) turnConfigLocked() chat.TurnConfig {
 	return tc
 }
 
+// Compact forces one context compaction now (= /compact): it summarises the
+// head of the conversation and keeps the recent tail, exactly like the
+// automatic compact_at path, and returns the estimated prompt tokens
+// before/after. ErrBusy while a turn is in flight; chat.ErrNothingToCompact
+// when history is too small to have a summarisable head (history untouched on
+// any error). Unlike the other between-turns mutators it does NOT run under
+// withIdle — the summarisation round-trip can take minutes and must not hold
+// s.mu; instead it takes the busy gate like a turn (mirroring SendParts), so
+// Snapshot/Interject stay responsive while overlapping sends get ErrBusy.
+func (s *Session) Compact(ctx context.Context) (before, after int, err error) {
+	s.mu.Lock()
+	if s.busy || s.closed {
+		err := ErrBusy
+		if s.closed {
+			err = ErrClosed
+		}
+		s.mu.Unlock()
+		return 0, 0, err
+	}
+	s.busy = true
+	// Snapshot the turn config inside the busy-gated critical section, same as
+	// SendParts: cfg mutators (SwitchAgent, SetParam, Clear) hold s.mu, so they
+	// serialize wholly before or after this compaction.
+	tc := s.turnConfigLocked()
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.busy = false
+		s.mu.Unlock()
+	}()
+	return chat.CompactStandalone(ctx, tc, s.sess)
+}
+
 // Clear resets the conversation context (= /clear): drops all history and
 // re-stamps the system prompt with a fresh timestamp. Returns ErrBusy while a
 // turn is in flight (see Send's contract).
