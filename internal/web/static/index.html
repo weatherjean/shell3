@@ -64,6 +64,7 @@
   .view.active { display: block; }
 
   .empty { color: var(--hint); text-align: center; padding: 40px 16px; font-size: 14px; }
+  .empty.inline { text-align: left; padding: 2px 0 4px; }
 
   /* Chat bubbles */
   .msg { margin: 8px 0; display: flex; }
@@ -508,6 +509,15 @@ function renderStatus(st) {
       <div class="u"><span class="n">${(u.completion||0).toLocaleString()}</span><span class="l">completion</span></div>
       <div class="u"><span class="n">${(u.total||0).toLocaleString()}</span><span class="l">total</span></div>
     </div>` : "";
+  const hb = st.heartbeat;
+  const heartbeat = `
+    <div class="section-title">Heartbeat</div>` + (hb ? `
+    <dl class="kv">
+      <dt>Every</dt><dd>${esc(hb.every)} <span class="badge ${hb.armed ? "finished" : "running"}">${hb.armed ? "armed" : "not armed by this host"}</span></dd>
+      ${hb.active_from ? `<dt>Window</dt><dd>${esc(hb.active_from)}–${esc(hb.active_to)}${hb.tz ? " " + esc(hb.tz) : ""}</dd>` : ""}
+    </dl>
+    <details class="tool"><summary><span class="chev">▸</span><span class="tname">📋 Checklist</span></summary><pre>${esc(hb.checklist)}</pre></details>` : `
+    <div class="empty inline">No heartbeat declared.</div>`);
   views.status.innerHTML = `
     <dl class="kv">
       <dt>Agent</dt><dd>${esc(st.agent)}</dd>
@@ -515,6 +525,7 @@ function renderStatus(st) {
       <dt>Context</dt><dd>${(st.context_window || 0).toLocaleString()} tokens</dd>
     </dl>
     ${usage}
+    ${heartbeat}
     <div class="section-title">Tools</div><div class="chips">${tools}</div>
     <div class="section-title">Skills</div><div class="chips">${skills}</div>
     <div class="section-title">Subagents</div><div class="chips">${subagents}</div>

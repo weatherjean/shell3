@@ -74,7 +74,7 @@ type AgentCommon struct {
 	SkillDirs   []string
 	Skills      []Skill
 	Environment bool // inject the host Environment system-reminder
-	Delegation  bool // inject the host Delegation (spawn-command) system-reminder
+	Delegation  bool // advertise the task/task_* tools (with a non-empty tools.subagents)
 }
 
 type Agent struct {

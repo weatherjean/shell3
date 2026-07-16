@@ -73,9 +73,12 @@ func announcePublicURL(url, tunnelCmd, addr, home string, onURL func(string)) {
 }
 
 // buildDashboard assembles a dashboard server with the knob set every host
-// shares: usage recording, the config-dir file explorer, and the cron source.
-// The caller adds host-specific extras (SetChat) and serves the handler.
-func buildDashboard(rt *shell3.Runtime, sess *shell3.Session, auth web.AuthFunc, configDir string, sched *cron.Scheduler) (*web.Server, *web.UsageStore) {
+// shares: usage recording, the config-dir file explorer, the cron source, and
+// the heartbeat status. hbArmed says whether this front-end actually ticks a
+// declared heartbeat (only shell3 telegram does); the source closes over the
+// runtime so a /reload's config swap shows up with no re-wiring. The caller
+// adds host-specific extras (SetChat) and serves the handler.
+func buildDashboard(rt *shell3.Runtime, sess *shell3.Session, auth web.AuthFunc, configDir string, sched *cron.Scheduler, hbArmed bool) (*web.Server, *web.UsageStore) {
 	usage := web.NewUsageStore()
 	srv := web.NewServer(rt, sess, auth)
 	srv.SetUsage(usage)
@@ -83,5 +86,8 @@ func buildDashboard(rt *shell3.Runtime, sess *shell3.Session, auth web.AuthFunc,
 	if sched != nil {
 		srv.SetCronSource(sched.Jobs)
 	}
+	srv.SetHeartbeatSource(func() *web.HeartbeatStatus {
+		return web.HeartbeatFromConfig(rt.HeartbeatConfig(), hbArmed)
+	})
 	return srv, usage
 }

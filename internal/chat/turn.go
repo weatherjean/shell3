@@ -236,7 +236,7 @@ func assembleTurnContext(cfg TurnConfig, sess *Session, inboxSeeded bool) (allMs
 	allMsgs = append(allMsgs, llm.Message{Role: llm.RoleSystem, Content: cfg.Personality.SystemPrompt})
 	allMsgs = append(allMsgs, msgs...)
 
-	// Standing reminders (host Environment/Delegation context) sit right after
+	// Standing reminders (host Environment context) sit right after
 	// the system prompt every turn. Set by SetStandingReminders and regenerated
 	// on resume — not persisted. Snapshot via the accessor (msgMu): an agent
 	// switch may replace the slice while a turn is in flight.

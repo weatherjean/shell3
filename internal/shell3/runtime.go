@@ -77,11 +77,7 @@ type Runtime struct {
 	// sessionConfig derives a per-session chat.Config; production wires
 	// agentsetup.Parts.SessionConfig, tests inject fakes.
 	sessionConfig func(SessionOpts) (chat.Config, error)
-	// subagentDesc returns a registered subagent's model-facing description (and
-	// whether it exists). The Session uses it to render the delegation context's
-	// "name: description" allowlist. nil in tests that don't exercise delegation.
-	subagentDesc func(name string) (string, bool)
-	cleanup      func()
+	cleanup       func()
 
 	// events is the out-of-turn event bus (Wake). Buffered; emit drops on full.
 	events chan HostEvent
@@ -156,7 +152,6 @@ func NewRuntime(ctx context.Context, spec RuntimeSpec) (*Runtime, error) {
 	ctx, cancel := context.WithCancel(parent)
 	rt := &Runtime{
 		sessionConfig: sessionConfigFrom(parts),
-		subagentDesc:  parts.SubagentDescription,
 		cleanup:       cleanup,
 		store:         parts.Store(),
 		events:        make(chan HostEvent, 64),
@@ -259,9 +254,9 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	s.runtime, s.name = rt, name
 	s.sink, s.sinkCleanup = sink, sinkCleanup
 	// Set the per-session host standing reminders now that runtime+name are set:
-	// the Environment + Delegation context (each gated by the active agent's
-	// toggle). No-op when both toggles are off.
-	s.applyHostReminders(rt)
+	// the Environment context (gated by the active agent's toggle). No-op when
+	// the toggle is off.
+	s.applyHostReminders()
 	s.writeStartLine("(session " + name + ")")
 	rt.sessions[name] = s
 	// Subagent completions are injected in-process by the runtime's jobManager

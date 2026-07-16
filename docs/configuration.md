@@ -164,7 +164,7 @@ local explorer = shell3.subagent({
 
 shell3.agent({
   name       = "code",
-  delegation = true,                      -- inject the task-tool guidance
+  delegation = true,                      -- advertise the task tools
   tools      = { subagents = { explorer } },  -- who this agent may spawn
   -- ...
 })
@@ -173,9 +173,11 @@ shell3.agent({
 When an agent sets **both** `delegation = true` and a non-empty
 `tools.subagents` list, shell3 advertises four tools to it — `task` (spawn one:
 `{subagent_type, prompt, description}`; returns immediately), `task_list`,
-`task_status <id>`, and `task_cancel <id>` — and injects a "Delegation"
-system reminder naming the allowed subagents. One without the other advertises
-nothing: the tool and the guidance always appear together.
+`task_status <id>`, and `task_cancel <id>`. The allowed subagents — names plus
+their `description`s — are baked into the `task` tool's own schema (an enum on
+`subagent_type`), so the model learns what it may spawn from the tool itself;
+no per-turn reminder is injected. One toggle without the other advertises
+nothing.
 
 A spawned subagent runs as an **in-process background job** — a child-session
 goroutine, not a subprocess — and on completion the parent is woken with a
@@ -545,6 +547,9 @@ approximate by design. Declaring a second `shell3.heartbeat` fails the load.
 - `tz` is an IANA zone name for the window, defaulting to the host's local
   zone; it is validated at load time.
 - `/reload` picks up heartbeat changes (a removed block stops the ticking).
+- The dashboard's Status view shows the declared heartbeat — interval, active
+  window, checklist — and whether the running front-end actually arms it
+  (only `shell3 telegram` ticks; under `shell3 web`/`dash` it shows as inert).
 - Test a checklist end-to-end with `shell3 dev --heartbeat`: it fires one tick
   and prints whether the reply would be suppressed or delivered.
 

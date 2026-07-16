@@ -47,6 +47,9 @@ func newDashCommand() *cobra.Command {
 
 			srv := web.NewServer(rt, sess, web.NoAuth())
 			srv.SetConfigDir(filepath.Dir(resolved))
+			srv.SetHeartbeatSource(func() *web.HeartbeatStatus {
+				return web.HeartbeatFromConfig(rt.HeartbeatConfig(), false)
+			})
 
 			if addr == "" {
 				addr = tg.Dashboard.Addr

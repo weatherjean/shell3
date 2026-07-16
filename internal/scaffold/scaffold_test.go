@@ -187,16 +187,16 @@ func TestRenderedConfigLoads(t *testing.T) {
 		t.Errorf("code agent Subagents = %v, want [explorer]", agents[0].Subagents)
 	}
 	// Each subagent the code agent may delegate to resolves to a (name,
-	// description) pair — the raw material internal/shell3 renders into the per-session
-	// Delegation context. (Delegation runs through the `task` tool as an
-	// in-process background job.)
+	// description) pair — the raw material baked into the task tool's
+	// subagent_type schema (luacfg.TaskToolFor). (Delegation runs through the
+	// `task` tool as an in-process background job.)
 	for _, name := range agents[0].Subagents {
 		sa, ok := c.SubagentByName(name)
 		if !ok {
 			t.Fatalf("unresolved subagent %q", name)
 		}
 		if sa.Description == "" {
-			t.Errorf("subagent %q has no description for the delegation context", name)
+			t.Errorf("subagent %q has no description for the task tool schema", name)
 		}
 	}
 }

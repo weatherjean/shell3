@@ -89,7 +89,7 @@ func newWebCommand() *cobra.Command {
 				fmt.Println("note: shell3.heartbeat{} is inert under shell3 web (heartbeat check-ins run under shell3 telegram only)")
 			}
 
-			srv, usage := buildDashboard(rt, sess, web.TokenAuth(wc.Secret), home, sched)
+			srv, usage := buildDashboard(rt, sess, web.TokenAuth(wc.Secret), home, sched, false)
 			srv.SetChat(d)
 
 			// /run + /reload: same coordinator as the bot (reloadAndRearm),

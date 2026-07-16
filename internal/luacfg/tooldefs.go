@@ -1,6 +1,8 @@
 package luacfg
 
 import (
+	"strings"
+
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
@@ -59,33 +61,53 @@ var bashBgTool = llm.ToolDefinition{
 	},
 }
 
-// TaskTool is the llm.ToolDefinition for the `task` tool: spawns a subagent
-// (child session) that runs in the background and notifies the parent on
-// completion. Exposed via luacfg so agentsetup can append it to the tool schema
-// for any agent that has delegation enabled.
-var TaskTool = llm.ToolDefinition{
-	Name: "task",
-	Description: "Spawn a subagent that runs in the background. Returns immediately — you will be notified " +
-		"of completion on a later turn. Do NOT poll for results. Use this to delegate work to a " +
-		"specialised subagent while you continue with other tasks.",
-	Parameters: map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"subagent_type": map[string]any{
-				"type":        "string",
-				"description": "The subagent type to spawn (one of the names listed in the Delegation context)",
+// SubagentRef is one allowed subagent for TaskToolFor: its name plus the
+// model-facing "when to use" description from its shell3.subagent declaration.
+type SubagentRef struct{ Name, Description string }
+
+// TaskToolFor returns the llm.ToolDefinition for the `task` tool with the
+// agent's concrete allowlist baked into the schema: subagent_type carries an
+// enum of the allowed names and its description lists what each subagent is
+// for. The schema is the single place the model learns what it may spawn — no
+// separate delegation reminder spends per-turn tokens restating it. Exposed
+// via luacfg so agentsetup can append it to the tool schema for any agent that
+// has delegation enabled.
+func TaskToolFor(subs []SubagentRef) llm.ToolDefinition {
+	names := make([]string, 0, len(subs))
+	var b strings.Builder
+	b.WriteString("The subagent type to spawn:")
+	for _, s := range subs {
+		names = append(names, s.Name)
+		b.WriteString("\n- " + s.Name)
+		if s.Description != "" {
+			b.WriteString(": " + s.Description)
+		}
+	}
+	return llm.ToolDefinition{
+		Name: "task",
+		Description: "Spawn a subagent that runs in the background. Returns immediately — you will be notified " +
+			"of completion on a later turn. Do NOT poll for results. Use this to delegate work to a " +
+			"specialised subagent while you continue with other tasks.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"subagent_type": map[string]any{
+					"type":        "string",
+					"enum":        names,
+					"description": b.String(),
+				},
+				"prompt": map[string]any{
+					"type":        "string",
+					"description": "The task prompt to send to the subagent",
+				},
+				"description": map[string]any{
+					"type":        "string",
+					"description": "A short 3-5 word label describing the task (used in completion notices)",
+				},
 			},
-			"prompt": map[string]any{
-				"type":        "string",
-				"description": "The task prompt to send to the subagent",
-			},
-			"description": map[string]any{
-				"type":        "string",
-				"description": "A short 3-5 word label describing the task (used in completion notices)",
-			},
+			"required": []string{"subagent_type", "prompt"},
 		},
-		"required": []string{"subagent_type", "prompt"},
-	},
+	}
 }
 
 // TaskListTool is the llm.ToolDefinition for task_list: lists all running and

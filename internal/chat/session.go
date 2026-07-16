@@ -23,8 +23,8 @@ type Session struct {
 	// lock-free. Kept separate from inboxMu to avoid a lock-order coupling.
 	msgMu    sync.RWMutex
 	messages []llm.Message
-	// standingReminders holds host-level "standing" reminders (Environment,
-	// Delegation context) set by SetStandingReminders. They are injected into
+	// standingReminders holds host-level "standing" reminders (e.g. the host
+	// Environment context) set by SetStandingReminders. They are injected into
 	// every turn's allMsgs and exposed via Reminders() for the dashboard, but
 	// are NOT persisted to the sidecar — they regenerate on session resume.
 	// Guarded by msgMu.
@@ -240,8 +240,8 @@ func (s *Session) SetID(id string) {
 	s.id = id
 }
 
-// SetStandingReminders replaces the host "standing" reminders (Environment,
-// Delegation) — regenerated at every prompt-assembly, so they are recorded for
+// SetStandingReminders replaces the host "standing" reminders (e.g.
+// Environment) — regenerated at every prompt-assembly, so they are recorded for
 // the dashboard but NOT persisted (resume re-assembles them fresh).
 func (s *Session) SetStandingReminders(texts []string) {
 	s.msgMu.Lock()
@@ -335,8 +335,8 @@ func (s *Session) HistorySnapshot() ([]llm.Message, []ReminderRecord) {
 	return msgs, s.remindersLocked()
 }
 
-// StandingReminders returns a copy of the host standing reminders (Environment,
-// Delegation) for display in the prompt-inspection view (the dashboard
+// StandingReminders returns a copy of the host standing reminders (e.g.
+// Environment) for display in the prompt-inspection view (the dashboard
 // Status → Prompt). Safe to call concurrently.
 func (s *Session) StandingReminders() []string {
 	s.msgMu.RLock()

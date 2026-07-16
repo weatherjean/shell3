@@ -157,9 +157,25 @@ func TestNewEndpoints_AuthAndShape(t *testing.T) {
 	if rr := get("/api/sessions"); rr.Code != http.StatusOK || strings.TrimSpace(rr.Body.String()) != "[]" {
 		t.Fatalf("sessions: got %d %q", rr.Code, rr.Body.String())
 	}
-	// Usage surfaces in status.
+	// Usage surfaces in status; no heartbeat source → no heartbeat key.
 	if rr := get("/api/status"); rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"total":150`) {
 		t.Fatalf("status usage: got %d %q", rr.Code, rr.Body.String())
+	} else if strings.Contains(rr.Body.String(), `"heartbeat"`) {
+		t.Fatalf("status without a heartbeat source must omit the key: %q", rr.Body.String())
+	}
+
+	// Heartbeat surfaces in status once a source is set.
+	srv.SetHeartbeatSource(func() *HeartbeatStatus {
+		return &HeartbeatStatus{Every: "30m0s", Checklist: "check the disks", ActiveFrom: "08:00", ActiveTo: "22:00", Armed: true}
+	})
+	rr := get("/api/status")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status with heartbeat: got %d", rr.Code)
+	}
+	for _, want := range []string{`"every":"30m0s"`, `"checklist":"check the disks"`, `"active_from":"08:00"`, `"armed":true`} {
+		if !strings.Contains(rr.Body.String(), want) {
+			t.Fatalf("status heartbeat missing %s: %q", want, rr.Body.String())
+		}
 	}
 }
 

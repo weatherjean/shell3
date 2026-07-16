@@ -63,7 +63,7 @@ func (s *Session) Snapshot() Snapshot {
 	// provider's ParamSpecs() call.
 	s.mu.Lock()
 	// The displayed prompt is the authored prompt PLUS the host standing
-	// reminders (Environment, Delegation) — they're injected into every turn but
+	// reminders (Environment) — they're injected into every turn but
 	// kept out of cfg.Personality.SystemPrompt, so the /prompt view and the
 	// dashboard Status → Prompt surface the full effective context here.
 	systemPrompt := s.cfg.Personality.SystemPrompt

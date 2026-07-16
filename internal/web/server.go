@@ -17,6 +17,34 @@ import (
 // the host wires cron.Scheduler.Jobs straight in with no field copier.
 type CronJob = cron.JobStatus
 
+// HeartbeatStatus is the dashboard DTO for the shell3.heartbeat{} block, shown
+// in the Status view. Armed reports whether the running front-end actually
+// ticks it (shell3 telegram does; shell3 web and shell3 dash do not).
+type HeartbeatStatus struct {
+	Every      string `json:"every"`
+	Checklist  string `json:"checklist"`
+	ActiveFrom string `json:"active_from,omitempty"`
+	ActiveTo   string `json:"active_to,omitempty"`
+	TZ         string `json:"tz,omitempty"`
+	Armed      bool   `json:"armed"`
+}
+
+// HeartbeatFromConfig maps the parsed shell3.heartbeat{} block onto the
+// dashboard DTO; nil in, nil out (no block declared).
+func HeartbeatFromConfig(hb *shell3.Heartbeat, armed bool) *HeartbeatStatus {
+	if hb == nil {
+		return nil
+	}
+	return &HeartbeatStatus{
+		Every:      hb.Every.String(),
+		Checklist:  hb.Checklist,
+		ActiveFrom: hb.ActiveFrom,
+		ActiveTo:   hb.ActiveTo,
+		TZ:         hb.TZ,
+		Armed:      armed,
+	}
+}
+
 // Server is the dashboard (and, with SetChat, the chat API). Auth is
 // pluggable: TelegramAuth under the bot, TokenAuth under shell3 web, NoAuth
 // under shell3 dash.
@@ -24,10 +52,11 @@ type Server struct {
 	sess      *shell3.Session
 	rt        *shell3.Runtime // used for the past-runs (session store) views
 	auth      AuthFunc
-	usage     *UsageStore      // nil → no usage shown
-	cron      func() []CronJob // nil → no jobs
-	configDir string           // root for the read-only file explorer; "" → disabled
-	chat      *Driver          // nil → read-only dashboard (no chat API)
+	usage     *UsageStore             // nil → no usage shown
+	cron      func() []CronJob        // nil → no jobs
+	heartbeat func() *HeartbeatStatus // nil → no heartbeat shown
+	configDir string                  // root for the read-only file explorer; "" → disabled
+	chat      *Driver                 // nil → read-only dashboard (no chat API)
 }
 
 func NewServer(rt *shell3.Runtime, sess *shell3.Session, auth AuthFunc) *Server {
@@ -39,6 +68,11 @@ func (s *Server) SetUsage(u *UsageStore) { s.usage = u }
 
 // SetCronSource attaches a provider of cron job statuses for /api/cron.
 func (s *Server) SetCronSource(fn func() []CronJob) { s.cron = fn }
+
+// SetHeartbeatSource attaches a provider of the heartbeat status for
+// /api/status. Re-read on every request, so a source closing over the live
+// runtime config picks up a /reload with no re-wiring.
+func (s *Server) SetHeartbeatSource(fn func() *HeartbeatStatus) { s.heartbeat = fn }
 
 // SetConfigDir roots the read-only file explorer at dir (the directory holding
 // the active shell3.lua). When unset, the file endpoints return empty listings.
@@ -176,6 +210,8 @@ type statusResp struct {
 	Params        []param    `json:"params"`
 	SystemPrompt  string     `json:"system_prompt,omitempty"`
 	Usage         *usageResp `json:"usage,omitempty"`
+
+	Heartbeat *HeartbeatStatus `json:"heartbeat,omitempty"`
 }
 
 type usageResp struct {
@@ -211,6 +247,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		if p, c, t, ok := s.usage.snapshot(); ok {
 			out.Usage = &usageResp{Prompt: p, Completion: c, Total: t}
 		}
+	}
+	if s.heartbeat != nil {
+		out.Heartbeat = s.heartbeat()
 	}
 	writeJSON(w, out)
 }

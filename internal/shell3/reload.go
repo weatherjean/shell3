@@ -112,7 +112,6 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 	oldCleanup := rt.cleanup // closes old VM, proxies, old store handle
 	cronJobs := newParts.Cron()
 	rt.sessionConfig = sessionConfigFrom(newParts)
-	rt.subagentDesc = newParts.SubagentDescription
 	rt.cleanup = newCleanup
 	rt.store = newParts.Store()
 	rt.cron = cronJobs
@@ -149,10 +148,10 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 		s.cfg = cfg
 		s.handlers = chat.NewHandlers()
 		// Re-apply the per-session host standing reminders: rt.sessionConfig
-		// rebuilt the cfg (including the Environment/Delegation toggles) from the
+		// rebuilt the cfg (including the Environment toggle) from the
 		// reloaded config. SetStandingReminders replaces the set wholesale, so a
 		// following SwitchAgent re-applying it is harmless.
-		s.applyHostReminders(rt)
+		s.applyHostReminders()
 		s.mu.Unlock()
 		// Restore active agent if it still exists, else fall back + note it.
 		if ov.agent != "" && ov.agent != s.ActiveAgent() {

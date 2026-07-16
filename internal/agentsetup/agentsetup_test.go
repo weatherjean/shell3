@@ -367,8 +367,7 @@ func subagentParts(t *testing.T) (*agentsetup.Parts, func()) {
 // TestAgentRuntime_NoSpawnTools asserts that an agent with registered subagents
 // no longer gets in-process spawn_agent/list_agents tools (subagents are now a
 // bash_bg-backgrounded shell3 described in the prompt), but still carries the
-// Subagents allowlist and that each allowed subagent resolves a description for
-// the delegation context.
+// Subagents allowlist.
 func TestAgentRuntime_NoSpawnTools(t *testing.T) {
 	p, cleanup := subagentParts(t)
 	defer cleanup()
@@ -384,13 +383,6 @@ func TestAgentRuntime_NoSpawnTools(t *testing.T) {
 	}
 	if len(rt.Subagents) != 1 || rt.Subagents[0] != "researcher" {
 		t.Errorf("AgentRuntime(\"code\").Subagents = %v, want [researcher]", rt.Subagents)
-	}
-	desc, ok := p.SubagentDescription("researcher")
-	if !ok || desc == "" {
-		t.Errorf("SubagentDescription(\"researcher\") = %q,%v; want a non-empty description", desc, ok)
-	}
-	if _, ok := p.SubagentDescription("ghost"); ok {
-		t.Error("SubagentDescription(\"ghost\") returned ok for an unregistered subagent")
 	}
 }
 
@@ -504,7 +496,9 @@ shell3.agent({ name = "code", model = "main", prompt = "you are a coder", tools 
 
 // TestAgentRuntime_TaskToolInSchema proves the invariant: the `task` tool
 // appears in an agent's schema iff it has delegation=true AND a non-empty
-// Subagents allowlist (the identical gate the delegation reminder uses).
+// Subagents allowlist — and the allowlist (names + descriptions) is baked
+// into the tool's subagent_type parameter, which is the model's only source
+// for it (there is no delegation reminder).
 func TestAgentRuntime_TaskToolInSchema(t *testing.T) {
 	// --- Agent WITH delegation=true + subagents: task + management tools must be in schema ---
 	tmp := t.TempDir()
@@ -530,6 +524,18 @@ func TestAgentRuntime_TaskToolInSchema(t *testing.T) {
 	for _, want := range []string{"task", "task_list", "task_status", "task_cancel"} {
 		if !toolSet[want] {
 			t.Errorf("agent with delegation=true + subagents should have %q in its tool schema", want)
+		}
+	}
+	for _, td := range rt.Personality.Tools {
+		if td.Name != "task" {
+			continue
+		}
+		st := td.Parameters["properties"].(map[string]any)["subagent_type"].(map[string]any)
+		if enum, _ := st["enum"].([]string); len(enum) != 1 || enum[0] != "researcher" {
+			t.Errorf("task subagent_type enum = %v, want [researcher]", st["enum"])
+		}
+		if desc, _ := st["description"].(string); !strings.Contains(desc, "researcher: investigate things") {
+			t.Errorf("task subagent_type description missing the allowlist entry:\n%s", desc)
 		}
 	}
 

@@ -31,14 +31,14 @@ type AgentKnobs struct {
 	// registered in the LLM tool schema.
 	CustomToolNames map[string]bool
 	// Subagents is the active agent's allowlist of registered subagent names
-	// (its tools.subagents). internal/shell3 renders it into the per-session
-	// Delegation context (which subagents the agent may spawn via the task tool).
+	// (its tools.subagents). internal/shell3 validates task-tool spawns
+	// against it; the schema-side listing lives in the task tool itself
+	// (luacfg.TaskToolFor).
 	Subagents []string
-	// Environment/Delegation are the active agent's host-reminder toggles
-	// (luacfg agent.environment / agent.delegation, default off). internal/shell3
-	// gates the standing Environment / Delegation reminders on them.
+	// Environment is the active agent's host-reminder toggle (luacfg
+	// agent.environment, default off). internal/shell3 gates the standing
+	// Environment reminder on it.
 	Environment bool
-	Delegation  bool
 	// ContextWindow is the active model's context window in tokens, used by
 	// the reminder tracker to emit context-usage warnings. Zero means unknown.
 	ContextWindow int

@@ -236,7 +236,7 @@ func serveDashboard(ctx context.Context, rt *shell3.Runtime, b *telegram.Bot, se
 	if !tg.Dashboard.Enabled || tg.Dashboard.Addr == "" {
 		return nil
 	}
-	srv, usage := buildDashboard(rt, sess, web.TelegramAuth(tg.Token, chatID), configDir, sched)
+	srv, usage := buildDashboard(rt, sess, web.TelegramAuth(tg.Token, chatID), configDir, sched, true)
 	b.SetUsageRecorder(usage.Set)
 	go func() {
 		// Surface listen failures (port already bound, bad addr): silence here

@@ -445,7 +445,7 @@ func TestFormatJobCancel_KnownJob(t *testing.T) {
 
 // TestStartSubagentEnforcesAllowlist verifies the task tool's StartSubagent
 // path rejects any subagent_type not in the active agent's tools.subagents
-// allowlist — the list the delegation reminder advertises.
+// allowlist — the list the task tool's schema advertises.
 func TestStartSubagentEnforcesAllowlist(t *testing.T) {
 	rt := newTestRuntime(t, func() chat.Config {
 		cfg := fakeCfg("ok")()
@@ -467,8 +467,7 @@ func TestStartSubagentEnforcesAllowlist(t *testing.T) {
 }
 
 // TestStartSubagentEmptyAllowlist verifies an agent with no tools.subagents
-// cannot spawn anything (matching the delegation reminder, which renders
-// nothing for an empty allowlist).
+// cannot spawn anything (the task tool is not even in its schema).
 func TestStartSubagentEmptyAllowlist(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("ok"))
 	s, err := rt.Session(SessionOpts{})

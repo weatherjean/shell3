@@ -98,18 +98,6 @@ func (p *Parts) AgentNames() []string {
 	return names
 }
 
-// SubagentDescription returns the model-facing "when to use" description for a
-// registered subagent, or ("", false) if no such subagent is declared. The
-// Session uses it to render the per-session delegation context (the allowed
-// subagents the active agent may spawn, each as "name: description").
-func (p *Parts) SubagentDescription(name string) (string, bool) {
-	sa, ok := p.lc.SubagentByName(name)
-	if !ok {
-		return "", false
-	}
-	return sa.Description, true
-}
-
 // AgentRuntime assembles the full chat runtime for the named agent: its model
 // client, persona, and tool defs. name "" uses the first declared agent. An
 // unknown non-empty name falls back to the subagent registry (so a subagent
@@ -124,8 +112,8 @@ func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
 	}
 	// A subagent name passed via --agent (the spawn command): resolve it from the
 	// subagent registry into a plain headless config. Whether a resolved agent
-	// gets a delegation context is decided per session (internal/shell3) by whether it
-	// lists subagents, not by a spawn-time flag.
+	// gets the task tool is decided by whether it lists subagents, not by a
+	// spawn-time flag.
 	if sa, ok := p.lc.SubagentByName(name); ok {
 		return p.runtimeForAgent(subagentToAgent(sa))
 	}
@@ -155,20 +143,22 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 	toolDefs := luacfg.ToolDefs(a.Gates, customDefs)
 
 	// Inject the `task` tool when the agent has both the Delegation toggle and a
-	// non-empty Subagents allowlist — exactly the same gate that the per-session
-	// delegation reminder uses (internal/shell3.Session.applyHostReminders →
-	// delegationReminder). The tool and the reminder MUST appear together: one
-	// without the other is a bug (model has a tool with no guidance, or guidance
-	// with no callable tool).
+	// non-empty Subagents allowlist. The allowlist (names + model-facing
+	// descriptions) is baked into the tool's schema — subagent_type carries an
+	// enum plus a per-subagent description — so the model needs no separate
+	// delegation reminder. a.Subagents is also surfaced via
+	// ActiveAgent.Subagents below so the Session can validate spawns.
 	if a.Delegation && len(a.Subagents) > 0 {
-		toolDefs = append(toolDefs, luacfg.TaskTool, luacfg.TaskListTool, luacfg.TaskStatusTool, luacfg.TaskCancelTool)
+		refs := make([]luacfg.SubagentRef, 0, len(a.Subagents))
+		for _, n := range a.Subagents {
+			desc := ""
+			if sa, ok := p.lc.SubagentByName(n); ok {
+				desc = sa.Description
+			}
+			refs = append(refs, luacfg.SubagentRef{Name: n, Description: desc})
+		}
+		toolDefs = append(toolDefs, luacfg.TaskToolFor(refs), luacfg.TaskListTool, luacfg.TaskStatusTool, luacfg.TaskCancelTool)
 	}
-
-	// The per-session Delegation context (concrete sink/config/binary paths +
-	// the templated spawn command) is injected by internal/shell3.Session, which can
-	// see session-level paths; a.Subagents (the allowlist) is surfaced via
-	// ActiveAgent.Subagents below so the Session knows which subagents this
-	// agent may spawn.
 
 	prompt := p.lc.BuildPersonaFor(a)
 
@@ -230,7 +220,6 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 		AgentKnobs: chat.AgentKnobs{
 			Subagents:       a.Subagents,
 			Environment:     a.Environment,
-			Delegation:      a.Delegation,
 			CustomToolNames: customNames,
 			ContextWindow:   md.ContextWindow,
 			CompactAt:       md.CompactAt,

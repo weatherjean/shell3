@@ -579,7 +579,7 @@ func (s *Session) turnConfigLocked() chat.TurnConfig {
 		}
 		allowed := cfg.Subagents // the active agent's tools.subagents allowlist
 		tc.StartSubagent = func(agent, prompt, desc string) (string, error) {
-			// Enforce the allowlist the delegation reminder advertises: only the
+			// Enforce the allowlist the task tool's schema advertises: only the
 			// names in tools.subagents may be spawned, never an arbitrary declared
 			// agent. An empty allowlist means this agent may not delegate at all.
 			if !slices.Contains(allowed, agent) {
@@ -644,7 +644,7 @@ func (s *Session) clearLocked() error {
 		// standing reminders for the new session id. s.mu is already held (see
 		// withIdle), guarding the dashboard's concurrent Snapshot read.
 		s.cfg.Personality.SystemPrompt = s.cfg.RefreshPrompt()
-		s.applyHostReminders(s.runtime)
+		s.applyHostReminders()
 	}
 	return nil
 }
@@ -682,13 +682,13 @@ func (s *Session) SwitchAgent(name string) error {
 		if err != nil {
 			return err
 		}
-		// ApplyActiveAgent swaps in the new agent's prompt + toggles
-		// (Environment/Delegation); re-assemble the host standing reminders for
-		// the new active agent (whose toggles and allowed subagents may differ).
+		// ApplyActiveAgent swaps in the new agent's prompt + toggles; re-assemble
+		// the host standing reminders for the new active agent (whose Environment
+		// toggle may differ).
 		// s.mu is held throughout (withIdle) — guards the dashboard's Snapshot
 		// read and a concurrent Close's nil of s.runtime.
 		s.cfg.ApplyActiveAgent(rt)
-		s.applyHostReminders(s.runtime)
+		s.applyHostReminders()
 		return nil
 	})
 }
