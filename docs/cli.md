@@ -54,13 +54,18 @@ render as ephemeral notices, not history. Run **one front-end at a time** —
 ## `shell3 boot` — set up a config
 
 ```sh
-shell3 boot     # interactive: model endpoint + key, then bot token + chat id
+shell3 boot     # interactive form: model endpoint + key, vision, bot token + chat id
 ```
 
-Scaffolds `~/.shell3/shell3.lua` (the `code` agent, a read-only `explorer`
-subagent, a `shell3.telegram{}` block with a cloudflared dashboard tunnel),
-the `lib/` modules, and `~/.shell3/.env` (secrets — never commit it).
-Scriptable via flags: `--url`, `--model`, `--name`, `--key`, `--tg-token`,
+An interactive form scaffolds `~/.shell3/shell3.lua` (the `code` agent, a
+read-only `explorer` subagent, a `shell3.telegram{}` block with a cloudflared
+dashboard tunnel), the `lib/` modules, and `~/.shell3/.env` (secrets — never
+commit it). One step asks whether the model can see images: yes wires
+`shell3.describe{}` to the main model (inbound Telegram images are captioned
+out of the box) and enables the `read_media` tool; no leaves media tooling
+off until you add a vision model.
+Scriptable via flags (any flag skips its prompt; with no TTY, unset flags take
+defaults): `--url`, `--model`, `--name`, `--key`, `--vision`, `--tg-token`,
 `--tg-chat-id`, `--context-window`, `--compact-at`, `--proxy`, `--brave-key`,
 `--force`. See [configuration.md](configuration.md).
 
@@ -84,7 +89,9 @@ their completions, and auto-approves `on_tool_call` asks (printing that it
 did) so it runs unattended.
 
 ```sh
+shell3 dev                        # no message: asks for one interactively
 shell3 dev "list the files here and summarize this project"
+shell3 dev -p "same, as a flag"   # -p/--prompt, for scripts and headless runs
 shell3 dev --resume "now write a one-line description"   # continue the last session
 shell3 dev --heartbeat   # fire the configured heartbeat once, print the suppression verdict
 ```

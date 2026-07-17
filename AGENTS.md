@@ -81,7 +81,9 @@ inline Allow/Deny buttons for `on_tool_call` asks, media in/out — optional
 voice + image capability (`internal/media`, four top-level blocks pointing at
 a `shell3.model`: `shell3.stt`/`shell3.tts` transcribe inbound voice notes and
 speak replies back per a `/voice off|inbound|always` mode, `shell3.describe`
-captions inbound images for text-only models, `shell3.imagegen` adds an
+captions inbound images before the turn — pointed at a vision model for
+text-only mains, or at the main model itself to skip a `read_media`
+round-trip (boot's default when the model has vision), `shell3.imagegen` adds an
 `image_generate` tool for the main agent AND every subagent, registered via a
 runtime session decorator (`Runtime.SetSessionDecorator`; reapplied on Reload)
 under all front-ends (`api = "openai"` or `"openrouter"`, the latter a raw
@@ -110,8 +112,10 @@ http://{addr}" }` — `internal/tunnel` spawns the command detached, scrapes the
 first bare https URL from its output (log: `~/.shell3/tunnel.log`), and the bot
 auto-sets the Mini App menu button (`setChatMenuButton`); an explicit
 `dashboard.url` overrides. Config lives at the root
-`~/.shell3/shell3.lua`; `shell3 boot` scaffolds it (prompting for the model, bot
-token, and chat id) and writes secrets to `~/.shell3/.env`. Two local dev
+`~/.shell3/shell3.lua`; `shell3 boot` scaffolds it (an interactive form: model,
+context budget, whether the model has vision — which wires `shell3.describe` +
+the media tool — bot token, and chat id) and writes secrets to
+`~/.shell3/.env`. Two local dev
 front-ends live in `internal/cli`: `shell3 dev "…"` drives the bot's agent from
 the terminal with full verbose output (every tool call/result, reasoning, token
 usage; `--resume` continues the last session), and `shell3 dash` serves the

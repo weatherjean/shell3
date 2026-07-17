@@ -3,7 +3,6 @@
 package main
 
 import (
-	"bufio"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,44 +84,47 @@ func TestEnvKeyForName(t *testing.T) {
 	}
 }
 
-// TestValueReadsVisibleLine covers the interactive read path used by every boot
-// prompt — including the API key, which now echoes (read as a normal line)
-// instead of being hidden. A long pasted token must come back intact.
-func TestValueReadsVisibleLine(t *testing.T) {
-	const pasted = "sk-proj-AbCdEf0123456789-very-long-pasted-key_value.0987654321"
-	in := bufio.NewReader(strings.NewReader(pasted + "\n"))
-	got, err := value("", "API key (blank if your proxy handles auth)", "", in, true, false)
-	if err != nil {
-		t.Fatalf("value: %v", err)
-	}
-	if got != pasted {
-		t.Fatalf("value = %q, want %q", got, pasted)
-	}
-}
+// TestCollectAnswersNonTTY covers the headless (flags-only) path: flags win,
+// blanks take defaults, model is required, int flags are validated, and the
+// vision flag flows through.
+func TestCollectAnswersNonTTY(t *testing.T) {
+	t.Run("defaults fill blanks", func(t *testing.T) {
+		a, err := collectAnswers(&bootFlags{model: "m", vision: true}, false)
+		if err != nil {
+			t.Fatalf("collectAnswers: %v", err)
+		}
+		if a.url != defaultBaseURL || a.name != "main" {
+			t.Errorf("defaults not applied: url=%q name=%q", a.url, a.name)
+		}
+		if a.ctxWindow != 128000 || a.compactAt != 102400 {
+			t.Errorf("int defaults: ctx=%d compact=%d, want 128000/102400", a.ctxWindow, a.compactAt)
+		}
+		if !a.vision {
+			t.Error("vision flag must flow through")
+		}
+	})
 
-// TestValueBlankUsesDefault: an empty line returns the default (blank key is
-// allowed — e.g. when a proxy handles auth).
-func TestValueBlankUsesDefault(t *testing.T) {
-	in := bufio.NewReader(strings.NewReader("\n"))
-	got, err := value("", "API key", "", in, true, false)
-	if err != nil {
-		t.Fatalf("value: %v", err)
-	}
-	if got != "" {
-		t.Fatalf("value = %q, want empty", got)
-	}
-}
+	t.Run("model required", func(t *testing.T) {
+		if _, err := collectAnswers(&bootFlags{}, false); err == nil {
+			t.Fatal("expected --model required error")
+		}
+	})
 
-// TestValueFlagWins: a provided flag short-circuits the prompt entirely.
-func TestValueFlagWins(t *testing.T) {
-	in := bufio.NewReader(strings.NewReader("ignored\n"))
-	got, err := value("from-flag", "API key", "", in, true, false)
-	if err != nil {
-		t.Fatalf("value: %v", err)
-	}
-	if got != "from-flag" {
-		t.Fatalf("value = %q, want from-flag", got)
-	}
+	t.Run("bad int flag rejected", func(t *testing.T) {
+		if _, err := collectAnswers(&bootFlags{model: "m", contextWindow: "lots"}, false); err == nil {
+			t.Fatal("expected positive-integer error")
+		}
+	})
+
+	t.Run("compact-at defaults to 80% of explicit window", func(t *testing.T) {
+		a, err := collectAnswers(&bootFlags{model: "m", contextWindow: "200000"}, false)
+		if err != nil {
+			t.Fatalf("collectAnswers: %v", err)
+		}
+		if a.ctxWindow != 200000 || a.compactAt != 160000 {
+			t.Errorf("ctx=%d compact=%d, want 200000/160000", a.ctxWindow, a.compactAt)
+		}
+	})
 }
 
 // TestBootEndToEnd drives the real `shell3 boot` flow against a temp HOME: it
@@ -140,7 +142,7 @@ func TestBootEndToEnd(t *testing.T) {
 		t.Fatal("expected no-config error before boot, got nil")
 	}
 
-	f := &bootFlags{url: "http://localhost:9999/v1", model: "test-model", name: "main", proxy: "echo proxy"}
+	f := &bootFlags{url: "http://localhost:9999/v1", model: "test-model", name: "main", proxy: "echo proxy", vision: true}
 	if err := runBoot(f); err != nil {
 		t.Fatalf("runBoot: %v", err)
 	}
@@ -191,6 +193,11 @@ func TestBootEndToEnd(t *testing.T) {
 	agents := c.Agents()
 	if len(agents) != 1 || agents[0].Name != "code" {
 		t.Errorf("agents = %v, want [code]", agentNames(agents))
+	}
+
+	// vision=true wires describe to the main model in the rendered config.
+	if raw, _ := os.ReadFile(resolved); !strings.Contains(string(raw), `shell3.describe{ model = "main" }`) {
+		t.Error("vision boot should wire shell3.describe to the main model")
 	}
 
 	// No-clobber: a second boot without --force refuses.

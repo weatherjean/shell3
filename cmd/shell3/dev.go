@@ -4,13 +4,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	huh "charm.land/huh/v2"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/weatherjean/shell3/internal/cli"
 	"github.com/weatherjean/shell3/internal/media"
@@ -26,6 +29,7 @@ import (
 func newDevCommand() *cobra.Command {
 	var (
 		configPath string
+		promptFlag string
 		resume     bool
 		hbFire     bool
 	)
@@ -35,11 +39,21 @@ func newDevCommand() *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			prompt := strings.Join(args, " ")
-			if prompt == "" && !hbFire {
-				return fmt.Errorf("dev: give a message, e.g. shell3 dev \"list the files here\"")
+			if prompt == "" {
+				prompt = promptFlag
+			} else if promptFlag != "" {
+				return fmt.Errorf("dev: give the message either as an argument or via -p, not both")
 			}
 			if prompt != "" && hbFire {
-				return fmt.Errorf("dev: --heartbeat fires the configured heartbeat prompt; drop the message argument")
+				return fmt.Errorf("dev: --heartbeat fires the configured heartbeat prompt; drop the message")
+			}
+			if prompt == "" && !hbFire {
+				// No message given: ask for one interactively (headless runs
+				// must pass it, e.g. shell3 dev -p "list the files here").
+				var err error
+				if prompt, err = askDevPrompt(); err != nil {
+					return err
+				}
 			}
 			ctx := cmd.Context()
 
@@ -83,7 +97,7 @@ func newDevCommand() *cobra.Command {
 				_ = media.RegisterImageTool(s, buildMediaClients(rt))
 			})
 
-			cli.PrintHeader(os.Stdout)
+			// The brand banner already printed from the root PersistentPreRun.
 			fmt.Printf("agent=%s  config=%s\n\n", sess.ActiveAgent(), resolved)
 			if hbFire {
 				// Fire the configured heartbeat once, exactly as the Telegram
@@ -104,7 +118,32 @@ func newDevCommand() *cobra.Command {
 		},
 	}
 	addConfigFlag(cmd, &configPath)
+	cmd.Flags().StringVarP(&promptFlag, "prompt", "p", "", "Message for the agent (skips the interactive prompt)")
 	cmd.Flags().BoolVar(&resume, "resume", false, "Continue the latest session (multi-turn across invocations)")
 	cmd.Flags().BoolVar(&hbFire, "heartbeat", false, "Fire the configured shell3.heartbeat{} prompt once and show the suppression verdict")
 	return cmd
+}
+
+// askDevPrompt asks for the dev message with a brand-themed huh input when no
+// argument or -p was given. Headless invocations get a pointer to -p instead.
+func askDevPrompt() (string, error) {
+	// Both ends must be a terminal: the form reads keys from stdin and renders
+	// its TUI to stdout (a piped stdout would capture control codes).
+	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
+		return "", fmt.Errorf(`dev: no message and no terminal — pass one, e.g. shell3 dev -p "list the files here"`)
+	}
+	var prompt string
+	form := huh.NewForm(huh.NewGroup(
+		huh.NewInput().Title("Message").
+			Placeholder("what should the agent do?").
+			Validate(huh.ValidateNotEmpty()).
+			Value(&prompt),
+	)).WithTheme(cli.HuhTheme())
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			return "", fmt.Errorf("dev: aborted")
+		}
+		return "", fmt.Errorf("dev: %w", err)
+	}
+	return prompt, nil
 }

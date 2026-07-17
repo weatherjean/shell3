@@ -19,7 +19,7 @@ var (
 	devCall   = lipgloss.NewStyle().Foreground(lipgloss.Color("#5BB6C9")).Bold(true)
 	devMeta   = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")) // dim meta lines
 	devErr    = lipgloss.NewStyle().Foreground(lipgloss.Color("#DC2626")).Bold(true)
-	devLabel  = lipgloss.NewStyle().Foreground(lipgloss.Color("#EAB308")).Bold(true) // brand yellow
+	devLabel  = lipgloss.NewStyle().Foreground(bannerPrimary).Bold(true) // brand yellow
 )
 
 // errDevTurnFailed is returned when any turn event carried an error.
@@ -91,10 +91,12 @@ func FollowDevJobs(ctx context.Context, w io.Writer, rt *shell3.Runtime, sess *s
 // Returns errDevTurnFailed if any event was an error.
 func renderDevEvents(w io.Writer, events <-chan shell3.Event) error {
 	// block tracks which streaming block is open so we can print a header once
-	// and a trailing newline when it ends. "" = no open block.
+	// and, when it ends, terminate the stream's last line plus a blank spacer
+	// line. "" = no open block.
 	block := ""
 	closeBlock := func() {
 		if block != "" {
+			fmt.Fprintln(w)
 			fmt.Fprintln(w)
 			block = ""
 		}
@@ -135,6 +137,7 @@ func renderDevEvents(w io.Writer, events <-chan shell3.Event) error {
 				fmt.Fprintln(w, devMeta.Render("  result:"))
 			}
 			fmt.Fprintln(w, indent(out, "    "))
+			fmt.Fprintln(w)
 		case shell3.Usage:
 			closeBlock()
 			fmt.Fprintln(w, devMeta.Render(fmt.Sprintf("· roundtrip tokens: %d prompt + %d completion = %d",

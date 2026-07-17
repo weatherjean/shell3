@@ -3,9 +3,9 @@
 package main
 
 import (
-	"bufio"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,9 +14,11 @@ import (
 	"strconv"
 	"strings"
 
+	huh "charm.land/huh/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/weatherjean/shell3/internal/cli"
 	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/scaffold"
 )
@@ -25,6 +27,8 @@ type bootFlags struct {
 	url, model, name, key, proxy, braveKey string
 	contextWindow, compactAt               string
 	tgToken, tgChatID                      string
+	vision                                 bool
+	visionSet                              bool // --vision passed explicitly (skips the form's confirm)
 	force                                  bool
 }
 
@@ -36,7 +40,10 @@ func newBootCommand() *cobra.Command {
 		Example: `  shell3 boot
   shell3 boot --url https://api.deepseek.com/v1 --model deepseek-chat --name main \
     --tg-token 123:ABC --tg-chat-id 8701499393`,
-		RunE: func(cmd *cobra.Command, args []string) error { return runBoot(f) },
+		RunE: func(cmd *cobra.Command, args []string) error {
+			f.visionSet = cmd.Flags().Changed("vision")
+			return runBoot(f)
+		},
 	}
 	cmd.Flags().StringVar(&f.url, "url", "", "Base URL (OpenAI-compatible endpoint)")
 	cmd.Flags().StringVar(&f.model, "model", "", "Model tag/id")
@@ -48,6 +55,7 @@ func newBootCommand() *cobra.Command {
 	cmd.Flags().StringVar(&f.braveKey, "brave-key", "", "Optional Brave Search API key")
 	cmd.Flags().StringVar(&f.tgToken, "tg-token", "", "Telegram bot token (from @BotFather)")
 	cmd.Flags().StringVar(&f.tgChatID, "tg-chat-id", "", "Telegram chat id the bot answers")
+	cmd.Flags().BoolVar(&f.vision, "vision", true, "Model can see images (wires shell3.describe to it and enables the media tool)")
 	cmd.Flags().BoolVar(&f.force, "force", false, "Overwrite an existing ~/.shell3/shell3.lua")
 	return cmd
 }
@@ -64,73 +72,15 @@ func runBoot(f *bootFlags) error {
 		return fmt.Errorf("boot: %s already exists — pass --force to overwrite", cfgPath)
 	}
 
-	in := bufio.NewReader(os.Stdin)
-	tty := term.IsTerminal(int(os.Stdin.Fd()))
-
-	url, err := value(f.url, "Base URL (OpenAI API compatible)", "https://api.openai.com/v1", in, tty, false)
-	if err != nil {
-		return err
-	}
-	model, err := value(f.model, "Model tag", "", in, tty, true)
-	if err != nil {
-		return err
-	}
-	name, err := value(f.name, "Name (handle for this model)", "main", in, tty, false)
-	if err != nil {
-		return err
-	}
-	key, err := value(f.key, "API key (blank if your proxy handles auth)", "", in, tty, false)
+	// The huh form needs a terminal on both ends: it reads keys from stdin and
+	// renders its TUI to stdout (a piped stdout would capture control codes).
+	tty := term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
+	a, err := collectAnswers(f, tty)
 	if err != nil {
 		return err
 	}
 
-	if tty {
-		fmt.Println()
-		fmt.Println("Context window + compaction are model-specific. Set the context window")
-		fmt.Println("to your model's real token budget; the wrong value skews context-usage")
-		fmt.Println("reminders and when shell3 auto-compacts the conversation.")
-	}
-	ctxWindow, err := intValue(f.contextWindow, "Context window (tokens)", scaffold.DefaultContextWindow, in, tty)
-	if err != nil {
-		return err
-	}
-	// Default compact threshold to 80% of the context window (headroom for the next turn).
-	compactAt, err := intValue(f.compactAt, "Auto-compact at (tokens)", ctxWindow*80/100, in, tty)
-	if err != nil {
-		return err
-	}
-
-	if tty {
-		fmt.Println()
-		fmt.Println("Local proxy? Some endpoints are a proxy you launch yourself —")
-		fmt.Println("e.g. a Codex subscription fronted by `npx ...`.")
-		fmt.Println("shell3 can auto-start it on activation (run_proxy).")
-	}
-	proxy, err := value(f.proxy, "Proxy command (blank to skip)", "", in, tty, false)
-	if err != nil {
-		return err
-	}
-	braveKey, err := value(f.braveKey, "Brave Search key (blank to add later)", "", in, tty, false)
-	if err != nil {
-		return err
-	}
-
-	if tty {
-		fmt.Println()
-		fmt.Println("Telegram: shell3 talks to you over a bot. Create one with @BotFather")
-		fmt.Println("to get a token, and get your numeric chat id (e.g. from @userinfobot).")
-		fmt.Println("Leave blank to fill in shell3.telegram{} later.")
-	}
-	tgToken, err := value(f.tgToken, "Telegram bot token (blank to add later)", "", in, tty, false)
-	if err != nil {
-		return err
-	}
-	tgChatID, err := value(f.tgChatID, "Telegram chat id", "", in, tty, false)
-	if err != nil {
-		return err
-	}
-
-	envKey := envKeyForName(name)
+	envKey := envKeyForName(a.name)
 
 	// The web front-end's shared secret is generated, not prompted: boot
 	// always writes SHELL3_WEB_SECRET so the scaffold's shell3.web{} block
@@ -140,11 +90,12 @@ func runBoot(f *bootFlags) error {
 		return fmt.Errorf("boot: generate web secret: %w", err)
 	}
 
-	envPairs := [][2]string{{envKey, key}, {"BRAVE_API_KEY", braveKey}, {"TELEGRAM_BOT_TOKEN", tgToken}, {"SHELL3_WEB_SECRET", webSecret}}
+	envPairs := [][2]string{{envKey, a.key}, {"BRAVE_API_KEY", a.braveKey}, {"TELEGRAM_BOT_TOKEN", a.tgToken}, {"SHELL3_WEB_SECRET", webSecret}}
 
 	if err := scaffold.RenderBaseConfig(dir, scaffold.Values{
-		Name: name, BaseURL: url, EnvKey: envKey, Model: model, Proxy: proxy,
-		ContextWindow: ctxWindow, CompactAt: compactAt, ChatID: tgChatID,
+		Name: a.name, BaseURL: a.url, EnvKey: envKey, Model: a.model, Proxy: a.proxy,
+		ContextWindow: a.ctxWindow, CompactAt: a.compactAt, ChatID: a.tgChatID,
+		Vision: a.vision,
 	}, f.force); err != nil {
 		return err
 	}
@@ -169,8 +120,190 @@ func runBoot(f *bootFlags) error {
 		fmt.Printf("note: kept the existing %s in %s — edit that file to change it\n", k, envPath)
 	}
 
-	printBootSuccess(dir, cfgPath, envPath, proxy != "")
+	printBootSuccess(dir, cfgPath, envPath, a.proxy != "")
 	return nil
+}
+
+// bootAnswers is the resolved configuration input: flags merged with either
+// the interactive huh form (TTY) or defaults (non-TTY).
+type bootAnswers struct {
+	url, model, name, key string
+	proxy, braveKey       string
+	tgToken, tgChatID     string
+	ctxWindow, compactAt  int
+	vision                bool
+}
+
+// collectAnswers resolves every boot input. Flags always win; on a TTY the
+// remaining fields are asked via a huh form, otherwise they take defaults
+// (model is required — boot refuses to guess it headlessly).
+func collectAnswers(f *bootFlags, tty bool) (bootAnswers, error) {
+	a := bootAnswers{
+		url: f.url, model: f.model, name: f.name, key: f.key,
+		proxy: f.proxy, braveKey: f.braveKey,
+		tgToken: f.tgToken, tgChatID: f.tgChatID,
+		vision: f.vision,
+	}
+	ctxStr, compactStr := f.contextWindow, f.compactAt
+
+	if tty {
+		if err := runBootForm(f, &a, &ctxStr, &compactStr); err != nil {
+			return a, err
+		}
+	} else if a.model == "" {
+		return a, fmt.Errorf("boot: --model required when not running in a terminal")
+	}
+	if a.url == "" {
+		a.url = defaultBaseURL
+	}
+	if a.name == "" {
+		a.name = "main"
+	}
+
+	var err error
+	if a.ctxWindow, err = positiveInt(ctxStr, scaffold.DefaultContextWindow, "context window"); err != nil {
+		return a, err
+	}
+	// Blank compact-at means the 80% default (headroom for the post-compaction turn).
+	if a.compactAt, err = positiveInt(compactStr, a.ctxWindow*80/100, "auto-compact threshold"); err != nil {
+		return a, err
+	}
+	return a, nil
+}
+
+const defaultBaseURL = "https://api.openai.com/v1"
+
+// runBootForm asks for every field not already provided as a flag, one huh
+// group per topic. It mutates a (and the two int fields' string staging) in
+// place; a Ctrl-C surfaces as a plain "aborted" error.
+func runBootForm(f *bootFlags, a *bootAnswers, ctxStr, compactStr *string) error {
+	var groups []*huh.Group
+
+	var model []huh.Field
+	if f.url == "" {
+		a.url = defaultBaseURL
+		model = append(model, huh.NewInput().Title("Base URL").
+			Description("OpenAI-compatible endpoint.").Value(&a.url))
+	}
+	if f.model == "" {
+		model = append(model, huh.NewInput().Title("Model tag").
+			Placeholder("e.g. deepseek-chat").Validate(huh.ValidateNotEmpty()).Value(&a.model))
+	}
+	if f.name == "" {
+		a.name = "main"
+		model = append(model, huh.NewInput().Title("Name").
+			Description("shell3's handle for this model.").Value(&a.name))
+	}
+	// Secrets echo visibly on purpose: boot runs on a local terminal, and a
+	// long pasted token you can't see is a truncated paste waiting to happen.
+	if f.key == "" {
+		model = append(model, huh.NewInput().Title("API key").
+			Description("Blank if your proxy handles auth.").Value(&a.key))
+	}
+	if len(model) > 0 {
+		groups = append(groups, huh.NewGroup(model...).Title("Model"))
+	}
+
+	if !f.visionSet {
+		a.vision = true
+		groups = append(groups, huh.NewGroup(
+			huh.NewConfirm().Title("Can this model see images (vision)?").
+				Description("Yes: inbound Telegram images are captioned by this model and\nthe read_media tool is enabled. No: media tooling stays off until\nyou add a vision model.").
+				Value(&a.vision),
+		).Title("Vision"))
+	}
+
+	var ctx []huh.Field
+	if f.contextWindow == "" {
+		*ctxStr = strconv.Itoa(scaffold.DefaultContextWindow)
+		ctx = append(ctx, huh.NewInput().Title("Context window (tokens)").
+			Description("Your model's real token budget — the wrong value skews\ncontext-usage reminders and auto-compaction.").
+			Validate(validatePositiveInt(false)).Value(ctxStr))
+	}
+	if f.compactAt == "" {
+		ctx = append(ctx, huh.NewInput().Title("Auto-compact at (tokens)").
+			Description("Blank = 80% of the context window.").
+			Placeholder("blank for 80%").
+			Validate(validatePositiveInt(true)).Value(compactStr))
+	}
+	if len(ctx) > 0 {
+		groups = append(groups, huh.NewGroup(ctx...).Title("Context"))
+	}
+
+	var extras []huh.Field
+	if f.proxy == "" {
+		extras = append(extras, huh.NewInput().Title("Proxy command").
+			Description("Some endpoints are a proxy you launch yourself (e.g. a Codex\nsubscription fronted by `npx ...`); shell3 auto-starts it on\nactivation. Blank to skip.").
+			Value(&a.proxy))
+	}
+	if f.braveKey == "" {
+		extras = append(extras, huh.NewInput().Title("Brave Search key").
+			Description("Enables the brave_search tool. Blank to add later.").Value(&a.braveKey))
+	}
+	if len(extras) > 0 {
+		groups = append(groups, huh.NewGroup(extras...).Title("Extras"))
+	}
+
+	var tg []huh.Field
+	if f.tgToken == "" {
+		tg = append(tg, huh.NewInput().Title("Bot token").
+			Description("From @BotFather. Blank to fill in shell3.telegram{} later.").Value(&a.tgToken))
+	}
+	if f.tgChatID == "" {
+		tg = append(tg, huh.NewInput().Title("Chat id").
+			Description("Your numeric chat id (e.g. from @userinfobot).").
+			Value(&a.tgChatID))
+	}
+	if len(tg) > 0 {
+		groups = append(groups, huh.NewGroup(tg...).
+			Title("Telegram").
+			Description("shell3 talks to you over a Telegram bot."))
+	}
+
+	if len(groups) == 0 {
+		return nil // every field came from a flag
+	}
+	if err := huh.NewForm(groups...).WithTheme(cli.HuhTheme()).Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			return fmt.Errorf("boot: aborted")
+		}
+		return fmt.Errorf("boot: %w", err)
+	}
+	return nil
+}
+
+// validatePositiveInt validates a form int field via the same parse the
+// final positiveInt pass uses; blankOK admits "" (the caller substitutes a
+// default).
+func validatePositiveInt(blankOK bool) func(string) error {
+	return func(s string) error {
+		if strings.TrimSpace(s) == "" {
+			if blankOK {
+				return nil
+			}
+			return fmt.Errorf("required")
+		}
+		if _, err := positiveInt(s, 0, "value"); err != nil {
+			return fmt.Errorf("must be a positive integer")
+		}
+		return nil
+	}
+}
+
+// positiveInt parses a staged int value: blank takes def, anything else must
+// be a positive integer (flag values arrive unvalidated by the form). The
+// single definition of "valid" for both the form validator above and the
+// final parse.
+func positiveInt(s string, def int, label string) (int, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("boot: %s must be a positive integer, got %q", label, s)
+	}
+	return n, nil
 }
 
 // atomicWriteFile writes data to path via a temp file in the same directory
@@ -314,50 +447,4 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool) {
 		fmt.Println()
 		fmt.Println("NOTE: cloudflared was not found on PATH on this machine.")
 	}
-}
-
-// intValue reads a positive-integer config value: flag wins, else prompt (TTY)
-// or def. Never required.
-func intValue(flag, label string, def int, in *bufio.Reader, tty bool) (int, error) {
-	raw, err := value(flag, label, strconv.Itoa(def), in, tty, false)
-	if err != nil {
-		return 0, err
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil || n <= 0 {
-		return 0, fmt.Errorf("boot: %s must be a positive integer, got %q", label, raw)
-	}
-	return n, nil
-}
-
-// value reads a config value: flag wins; else prompt (TTY) with optional
-// default; errors when required and unavailable.
-func value(flag, label, def string, in *bufio.Reader, tty, required bool) (string, error) {
-	if flag != "" {
-		return flag, nil
-	}
-	if !tty {
-		if required {
-			name := strings.ToLower(label)
-			if f := strings.Fields(label); len(f) > 0 {
-				name = strings.ToLower(f[0])
-			}
-			return "", fmt.Errorf("boot: --%s required when stdin is not a terminal", name)
-		}
-		return def, nil
-	}
-	prompt := label
-	if def != "" {
-		prompt += " [" + def + "]"
-	}
-	fmt.Printf("  %s: ", prompt)
-	line, err := in.ReadString('\n')
-	if err != nil && line == "" {
-		return "", err
-	}
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return def, nil
-	}
-	return line, nil
 }

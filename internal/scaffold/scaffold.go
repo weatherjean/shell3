@@ -28,6 +28,12 @@ type Values struct {
 	Proxy   string // optional run_proxy command ("" => commented out)
 	ChatID  string // Telegram chat id the bot answers ("" renders chat_id = "")
 
+	// Vision reports whether the model can see images. True wires
+	// shell3.describe{} to the main model (inbound Telegram images get
+	// captioned out of the box) and enables the agent's media tool; false
+	// renders media = false and leaves describe a commented hint.
+	Vision bool
+
 	// ContextWindow is the model's token budget; CompactAt is the prompt-token
 	// threshold for host-enforced auto-compaction. Both are model-specific —
 	// boot prompts for them. Zero values are filled by withDefaults at render.

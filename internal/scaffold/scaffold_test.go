@@ -88,6 +88,66 @@ func TestRenderBaseConfigContextWindow(t *testing.T) {
 	})
 }
 
+func TestRenderBaseConfigVision(t *testing.T) {
+	t.Run("vision wires describe to the main model and enables media", func(t *testing.T) {
+		dir := t.TempDir()
+		v := Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m", Vision: true}
+		if err := RenderBaseConfig(dir, v, false); err != nil {
+			t.Fatalf("RenderBaseConfig: %v", err)
+		}
+		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.lua"))
+		for _, want := range []string{
+			`shell3.describe{ model = "main" }`,
+			"media             = true,",
+		} {
+			if !strings.Contains(string(cfg), want) {
+				t.Errorf("shell3.lua missing %q", want)
+			}
+		}
+		if strings.Contains(string(cfg), "media             = false") {
+			t.Error("vision config must not disable the media tool")
+		}
+	})
+
+	t.Run("no vision disables media and keeps describe commented", func(t *testing.T) {
+		dir := t.TempDir()
+		v := Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m", Vision: false}
+		if err := RenderBaseConfig(dir, v, false); err != nil {
+			t.Fatalf("RenderBaseConfig: %v", err)
+		}
+		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.lua"))
+		if !strings.Contains(string(cfg), "media             = false,") {
+			t.Error("no-vision config should render media = false")
+		}
+		if !strings.Contains(string(cfg), "-- shell3.describe{") {
+			t.Error("no-vision config should keep shell3.describe as a commented hint")
+		}
+		if strings.Contains(string(cfg), "\nshell3.describe{") {
+			t.Error("no-vision config must not activate shell3.describe")
+		}
+	})
+
+	// A vision config must also load: describe references the main model.
+	t.Run("vision config loads", func(t *testing.T) {
+		dir := t.TempDir()
+		v := Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m", Vision: true}
+		if err := RenderBaseConfig(dir, v, false); err != nil {
+			t.Fatalf("RenderBaseConfig: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("MAIN_API_KEY=\nBRAVE_API_KEY=\nTELEGRAM_BOT_TOKEN=\nSHELL3_WEB_SECRET=s\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		c, err := luacfg.Load(filepath.Join(dir, "shell3.lua"))
+		if err != nil {
+			t.Fatalf("vision config failed to load: %v", err)
+		}
+		defer c.Close()
+		if len(c.Warnings()) != 0 {
+			t.Errorf("vision config loaded with warnings: %v", c.Warnings())
+		}
+	})
+}
+
 func TestRenderBaseConfigWithProxy(t *testing.T) {
 	dir := t.TempDir()
 	v := Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m", Proxy: "npx codex-proxy --port 8787"}
@@ -106,7 +166,7 @@ func TestRenderBaseConfigWithProxy(t *testing.T) {
 // shape. This is the canonical "does our default config work" test.
 func TestRenderedConfigLoads(t *testing.T) {
 	dir := t.TempDir()
-	v := Values{Name: "main", BaseURL: "http://localhost:8787/v1", EnvKey: "MAIN_API_KEY", Model: "test", Proxy: ""}
+	v := Values{Name: "main", BaseURL: "http://localhost:8787/v1", EnvKey: "MAIN_API_KEY", Model: "test", Proxy: "", Vision: true}
 	if err := RenderBaseConfig(dir, v, false); err != nil {
 		t.Fatalf("RenderBaseConfig: %v", err)
 	}

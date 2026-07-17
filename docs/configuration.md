@@ -383,9 +383,11 @@ shell3.imagegen{ model = "some-image-model", size = "1024x1024" }
   `format` defaults to `"opus"` (Telegram voice bubbles). Voice **replaces**
   the text reply; a synthesis failure falls back to text plus a `⚠️` notice.
 - **`describe{ model, prompt? }`** — captions an inbound image before the
-  turn, for a **text-only** main model (a vision model sees the photo
-  directly). Success injects `[image: <description>]`; on failure the agent
-  still sees the file path and can retry with `read_media`.
+  turn. Success injects `[image: <description>]`; on failure the agent still
+  sees the file path and can retry with `read_media`. Point it at a vision
+  model when the main model is text-only — or at the main model itself so it
+  sees a caption without a `read_media` round-trip (`shell3 boot` wires this
+  when you answer that your model has vision).
 - **`imagegen{ model, size?, api? }`** — adds an `image_generate{prompt,
   size?}` tool to **every** agent (main and subagents, under every
   front-end). `api = "openai"` (default) uses `images/generations`;

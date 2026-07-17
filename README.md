@@ -9,7 +9,7 @@ its runs, jobs, and files. It pipes like a Unix tool and is configured like
 software, not like a platform.
 
 ```sh
-shell3 boot        # asks: model + endpoint + key, Telegram bot token + chat id
+shell3 boot        # interactive form: model + endpoint + key, vision, Telegram bot token + chat id
 shell3 telegram    # start the bot — now message it from Telegram
 ```
 
@@ -31,8 +31,9 @@ shell3 leans on Unix process groups.
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) and note its token;
    get your numeric chat id (e.g. from [@userinfobot](https://t.me/userinfobot)).
-2. `shell3 boot` — answer the prompts. It writes `~/.shell3/shell3.lua`,
-   `~/.shell3/lib/`, and `~/.shell3/.env`.
+2. `shell3 boot` — fill in the form (it also asks whether your model has
+   vision, and wires image handling accordingly). It writes
+   `~/.shell3/shell3.lua`, `~/.shell3/lib/`, and `~/.shell3/.env`.
 3. `shell3 telegram` — the bot connects. Message it.
 
 `boot` scaffolds the `code` agent, a read-only `explorer` subagent, and a

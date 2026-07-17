@@ -3,9 +3,10 @@
 package main
 
 import (
-	"fmt"
+	"context"
 	"os"
 
+	"github.com/charmbracelet/fang"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
@@ -18,12 +19,12 @@ import (
 var version = "dev"
 
 // main wires the cobra command tree (telegram, web, dev, dash, boot, health;
-// the bare root prints help) and executes it.
+// the bare root prints help) and executes it through fang, which owns help,
+// usage, error, and --version styling.
 func main() {
 	root := &cobra.Command{
-		Use:     "shell3",
-		Short:   "Minimal Unix-composable coding agent",
-		Version: version,
+		Use:   "shell3",
+		Short: "Minimal Unix-composable coding agent",
 	}
 
 	// NoArgs: a typo'd subcommand or a bare prompt ("shell3 fix this bug") must
@@ -41,29 +42,53 @@ func main() {
 	root.AddCommand(newBootCommand())
 	root.AddCommand(newHealthCommand())
 
-	// Print the brand header for subcommands and --help (TTY only).
-	maybeHeader := func() {
-		if !term.IsTerminal(int(os.Stdout.Fd())) {
-			return
-		}
-		cli.PrintHeader(os.Stdout)
-	}
+	// Print the brand header (the ๑ï snail): the full two-line banner when a
+	// subcommand actually runs (PersistentPreRun), and the slim one-line logo
+	// above help pages. fang owns the help func outright — and must keep
+	// owning the out writer, since it sniffs it for terminal color support —
+	// so help invocations are detected up front from the raw args instead.
+	// Both are TTY-only.
+	tty := term.IsTerminal(int(os.Stdout.Fd()))
 	root.PersistentPreRun = func(cmd *cobra.Command, args []string) {
-		if !shouldPrintHeaderInPreRun(root, cmd) {
-			return
+		if tty && shouldPrintHeaderInPreRun(root, cmd) {
+			cli.PrintHeader(os.Stdout)
 		}
-		maybeHeader()
 	}
-	defaultHelp := root.HelpFunc()
-	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
-		maybeHeader()
-		defaultHelp(cmd, args)
-	})
+	if tty && wantsHelp(os.Args[1:]) {
+		cli.PrintLogo(os.Stdout)
+	}
 
-	if err := root.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+	// fang prints the styled error itself; the returned error only signals exit.
+	if err := fang.Execute(context.Background(), root,
+		fang.WithVersion(version),
+		fang.WithColorSchemeFunc(cli.FangColorScheme),
+	); err != nil {
 		os.Exit(1)
 	}
+}
+
+// wantsHelp reports whether the invocation renders a help page: the bare
+// root, the help subcommand, or a -h/--help token before a "--" terminator.
+// A deliberate approximation of pflag's grammar: a literal "--help" passed as
+// a flag VALUE (e.g. dev -p "--help") false-positives an extra logo line —
+// harmless, and far cheaper than re-parsing flags or wrapping fang's output
+// stream (which breaks its color detection).
+func wantsHelp(args []string) bool {
+	if len(args) == 0 {
+		return true
+	}
+	if args[0] == "help" {
+		return true
+	}
+	for _, a := range args {
+		if a == "--" {
+			break
+		}
+		if a == "-h" || a == "--help" {
+			return true
+		}
+	}
+	return false
 }
 
 // addConfigFlag registers the shared --config/-c flag with the one canonical
@@ -83,15 +108,10 @@ func resolveConfig(configPath string) (string, error) {
 	return agentsetup.ResolveConfigPath(configPath, home)
 }
 
+// shouldPrintHeaderInPreRun gates the full banner to real subcommand runs:
+// the bare root and the help command render through the logo path instead.
+// (-h/--help never reaches PersistentPreRun — cobra short-circuits to the
+// help func first.)
 func shouldPrintHeaderInPreRun(root, cmd *cobra.Command) bool {
-	if cmd == nil || cmd == root {
-		return false
-	}
-	if cmd.Name() == "help" {
-		return false
-	}
-	if f := cmd.Flags().Lookup("help"); f != nil && f.Changed {
-		return false
-	}
-	return true
+	return cmd != nil && cmd != root && cmd.Name() != "help"
 }
