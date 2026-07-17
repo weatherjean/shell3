@@ -192,30 +192,6 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 		customNames[n] = true
 	}
 
-	// Stub tools (shell3.stub_tools) are config-global: append one minimal,
-	// no-param def per stub to EVERY agent's schema so a hallucinated tool call
-	// returns a redirect instead of erroring. A stub colliding with a real tool
-	// already present is skipped (the real tool wins). Surviving stubs are NOT
-	// added to customNames: the chat layer routes them via cfg.StubTools (a
-	// separate, lower-precedence branch in turn.go), so a stub never shadows a
-	// real tool at dispatch time.
-	if stubs := p.lc.StubNames(); len(stubs) > 0 {
-		present := make(map[string]bool, len(toolDefs))
-		for _, t := range toolDefs {
-			present[t.Name] = true
-		}
-		for name := range stubs {
-			if present[name] {
-				continue // real tool wins; silently skip the colliding stub
-			}
-			toolDefs = append(toolDefs, llm.ToolDefinition{
-				Name:        name,
-				Description: "stub: not a real tool — redirects you to bash/edit_file",
-				Parameters:  map[string]any{"type": "object", "properties": map[string]any{}},
-			})
-		}
-	}
-
 	// toolNames is exactly toolDefs' names — derived once at the end so the
 	// two can never skew.
 	toolNames := make([]string, 0, len(toolDefs))
@@ -375,7 +351,6 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 		ConfigPath:        p.ConfigPath(),
 		ConfigWarnings:    p.lc.Warnings(),
 		ResolveCustomTool: p.lc.ResolveCustomCall,
-		StubTools:         p.lc.StubNames(),
 		Log:               p.log,
 		OutPath:           so.OutPath,
 		Headless:          so.Headless,

@@ -4,7 +4,6 @@ package luacfg
 
 import (
 	"fmt"
-	"maps"
 	"path/filepath"
 	"sync"
 
@@ -104,13 +103,6 @@ type LoadedConfig struct {
 	Models  []Model
 	Tools   map[string]CustomTool
 	Secrets map[string]string
-	// stubTools maps a hallucinated tool name (e.g. "read_file", "grep") to a
-	// fixed redirect message. Registered config-globally via shell3.stub_tools;
-	// when the model calls such a name the chat layer returns the message
-	// verbatim (never an error), nudging the model back toward bash/edit_file.
-	// See register.go (luaStubTools) and agentsetup.runtimeForAgent for the
-	// wiring (StubNames → chat.Config.StubTools).
-	stubTools map[string]string
 	// BackgroundMaxConcurrent is the maximum number of concurrent background jobs,
 	// set via shell3.background{ max_concurrent = N }. 0 means unset; the runtime
 	// applies the default (8) at the read site.
@@ -192,7 +184,7 @@ func load(path string) (*LoadedConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &LoadedConfig{Tools: map[string]CustomTool{}, stubTools: map[string]string{}, Secrets: env, L: lua.NewState()}
+	c := &LoadedConfig{Tools: map[string]CustomTool{}, Secrets: env, L: lua.NewState()}
 	// The returned config owns c.L; close it only if we error out below.
 	var success bool
 	defer func() {
@@ -307,12 +299,6 @@ func (c *LoadedConfig) resolveModelName(kind, name string, modelName *string) er
 	}
 	return nil
 }
-
-// StubNames returns the registered stub-tool names with their redirect
-// messages. The map is config-global (not per-agent); agentsetup appends one
-// minimal tool def per entry to every agent's schema. The map is a defensive
-// copy: a downstream mutation can't corrupt the config for later sessions.
-func (c *LoadedConfig) StubNames() map[string]string { return maps.Clone(c.stubTools) }
 
 func (c *LoadedConfig) Model(name string) (Model, bool) {
 	for _, m := range c.Models {

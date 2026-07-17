@@ -132,9 +132,6 @@ type TurnConfig struct {
 	// host (internal/shell3) can supply native tools (which return strings directly, not
 	// bash commands) alongside command-template tools. Nil = none registered.
 	HostTool func(ctx context.Context, name, argsJSON string) (string, error)
-	// StubTools maps a hallucinated tool name to its redirect message (a nudge,
-	// never an error). Checked after real/custom tools so a real tool always wins.
-	StubTools map[string]string
 	// RunToolResult runs the on_tool_result chain over a tool's output
 	// (config-global, nil = none). Its input sibling RunToolCall lives on the
 	// embedded ToolConfig because handlers self-gate with it.

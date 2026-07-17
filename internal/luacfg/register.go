@@ -60,7 +60,6 @@ func registerShell3(c *LoadedConfig) {
 	L.SetGlobal("shell3", tbl)
 	L.SetField(tbl, "model", L.NewFunction(c.luaModel))
 	L.SetField(tbl, "tool", L.NewFunction(c.luaTool))
-	L.SetField(tbl, "stub_tools", L.NewFunction(c.luaStubTools))
 	L.SetField(tbl, "agent", L.NewFunction(c.luaAgent))
 	L.SetField(tbl, "subagent", L.NewFunction(c.luaSubagent))
 	env := L.NewTable()
@@ -233,18 +232,6 @@ func validateParamNames(tool string, params map[string]any) error {
 		}
 	}
 	return nil
-}
-
-// luaStubTools registers name-only stub tools from a string→string table:
-// tool-name → redirect message. Models trained on other harnesses reflexively
-// call tools like read_file/grep/write_file; a stub returns the message verbatim
-// (a self-correcting nudge toward bash/edit_file) instead of erroring. Stubs are
-// config-GLOBAL — they apply to every agent. Multiple calls merge into the same
-// map; a later key overwrites an earlier one. Values must be strings.
-func (c *LoadedConfig) luaStubTools(L *lua.LState) int {
-	forEachStringPair(L, L.CheckTable(1), "stub_tools", "strings (tool names)", "a string (redirect message)",
-		func(name, msg string) { c.stubTools[name] = msg })
-	return 0
 }
 
 // forEachStringPair iterates a Lua table asserting string keys and string

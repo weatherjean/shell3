@@ -154,8 +154,8 @@ shell3.agent({
 ```
 
 There are **no file-read tools**: the agent reads with `cat`/`sed -n`, lists
-with `ls`/`find`, and searches with `rg` — all through `bash` (hallucinated
-`read`/`grep` calls are redirected, see [stub tools](#stub-tools)). A
+with `ls`/`find`, and searches with `rg` — all through `bash` (a hallucinated
+`read`/`grep` call gets an error that redirects it back to bash/edit_file). A
 *read-only* agent is a policy, not a tool set: gate `bash` in
 [`on_tool_call`](#the-command-gate--on_tool_call) to inspection-only commands.
 
@@ -416,27 +416,6 @@ must not destroy tool output — so they are logged and the original passes thro
 (Contrast `on_tool_call`, which fails closed: blocking is safe, silently nuking
 output is not.) The flip side: if your redactor errors, the **unredacted** output
 reaches the model, so keep redaction handlers simple and total.
-
-## Redirecting hallucinated tools — `stub_tools`
-
-shell3 has no file-read tools, and models trained on other harnesses
-reflexively reach for `read`, `read_file`, `grep`, or `write_file`. Register
-those names as stubs and shell3 returns a one-line redirect instead of erroring
-— a self-correcting nudge back to bash and `edit_file`:
-
-```lua
-shell3.stub_tools({
-  read       = "Use bash: cat <path>, or sed -n 'START,ENDp' <path> for a slice.",
-  read_file  = "Use bash: cat <path>.",
-  list_files = "Use bash: ls <dir> or find <dir> -maxdepth 2.",
-  grep       = "Use bash: rg <pattern>.",
-  write_file = "Use edit_file (empty old_string creates/overwrites).",
-})
-```
-
-The scaffold ships this block enabled. Stubs are config-global (every agent
-sees them). Later keys override earlier ones, and a stub whose name collides
-with a real tool is ignored.
 
 ## Telegram host — `shell3.telegram`
 

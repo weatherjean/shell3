@@ -104,7 +104,7 @@ installed, or the dashboard stays local-only). Full walkthrough in
   the `shell3.telegram{}` block (dashboard + tunnel), `shell3.web{}`,
   `shell3.cron`, `shell3.heartbeat`, voice & images (`shell3.stt`/`tts`/
   `describe`/`imagegen`), custom tools, `on_tool_call`, `on_tool_result`,
-  `stub_tools`, skills, proxies.
+  skills, proxies.
 - **[CLI](docs/cli.md)** — `telegram`, `web`, `boot`, `health`, `dev`, `dash`,
   and the JSONL runs store.
 - **[Security & data](docs/security.md)** — the threat model, secrets, and

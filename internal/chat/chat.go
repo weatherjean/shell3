@@ -128,9 +128,6 @@ type Config struct {
 	// HostTool dispatches a host-registered Go tool by name (see
 	// internal/shell3.RegisterHostTool). Tried before ResolveCustomTool. Nil = none.
 	HostTool func(ctx context.Context, name, argsJSON string) (string, error)
-	// StubTools maps a hallucinated tool name to its redirect message (a nudge,
-	// never an error). Config-global; checked after real/custom tools.
-	StubTools map[string]string
 	// Asker confirms ask-verdict commands with a human; supplied per-front-end.
 	// Nil ⇒ headless: ask degrades to deny.
 	Asker AskFunc
@@ -211,7 +208,6 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler) TurnConfig {
 		Headless:          cfg.Headless,
 		ResolveCustomTool: cfg.ResolveCustomTool,
 		HostTool:          cfg.HostTool,
-		StubTools:         cfg.StubTools,
 		AgentKnobs:        cfg.AgentKnobs,
 		RunToolResult:     cfg.RunToolResult,
 	}

@@ -26,6 +26,13 @@ type toolResult struct {
 func okResult(out string) toolResult  { return toolResult{output: out} }
 func errResult(out string) toolResult { return toolResult{output: out, isError: true} }
 
+// unknownToolMsg is the error for a tool call whose name nothing owns. Models
+// trained on other harnesses reflexively call read_file/grep/write_file; the
+// nudge steers them back to bash/edit_file instead of leaving them guessing.
+func unknownToolMsg(name string) string {
+	return fmt.Sprintf("error: unknown tool %q — this agent is bash-first: read/list/search with bash (cat, sed -n, ls, rg) and create or modify files with edit_file", name)
+}
+
 // classifyHandlerOutput types a built-in handler's output string. Handlers
 // report in-band failures to the model as "error: …" strings (so the text and
 // the flag can never disagree); this is the single place that convention is
@@ -62,7 +69,7 @@ func dispatchCustomTool(ctx context.Context, cfg TurnConfig, name, rawArgs strin
 		// name — fall through to the command-template path below.
 	}
 	if cfg.ResolveCustomTool == nil {
-		return errResult(fmt.Sprintf("error: unknown tool %q", name))
+		return errResult(unknownToolMsg(name))
 	}
 	rt, err := cfg.ResolveCustomTool(name, rawArgs)
 	if err != nil {

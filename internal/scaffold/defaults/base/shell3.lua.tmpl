@@ -85,25 +85,6 @@ shell3.model("{{.Name | luaesc}}", {
 -- end)
 
 -- ---------------------------------------------------------------------------
--- Stub tools — redirect hallucinated tool calls to bash/edit_file.
--- ---------------------------------------------------------------------------
--- shell3 has no file-read tools: reading and listing go through bash. Models
--- trained on other harnesses reflexively call read/read_file/grep/write_file;
--- each stub returns its one-line redirect (a self-correcting nudge) instead of
--- an error.
-shell3.stub_tools({
-  read        = "Use bash: cat <path>, or sed -n 'START,ENDp' <path> for a slice.",
-  read_file   = "Use bash: cat <path>, or sed -n 'START,ENDp' <path> for a slice.",
-  open_file   = "Use bash: cat <path>.",
-  list_files  = "Use bash: ls <dir> or find <dir> -maxdepth 2.",
-  list_dir    = "Use bash: ls <dir>.",
-  grep        = "Use bash: rg <pattern>.",
-  search      = "Use bash: rg <pattern>.",
-  write_file  = "Use edit_file (empty old_string creates/overwrites).",
-  create_file = "Use edit_file (empty old_string creates/overwrites).",
-})
-
--- ---------------------------------------------------------------------------
 -- Subagents (delegatable specialists the agent spawns via the task tool)
 -- ---------------------------------------------------------------------------
 local explorer = shell3.subagent({

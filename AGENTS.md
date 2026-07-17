@@ -8,9 +8,9 @@ model can perceive it (PDF via an OpenAI-compatible `file` part; video via a
 `video_url` part, an OpenRouter/Gemini extension plain OpenAI endpoints
 reject) — when `tools = { media = true }`). There are NO file-read tools: reading,
 listing, and searching are bash commands (`cat`/`sed -n`, `ls`/`find`, `rg`;
-history is searched with `rg` over `.shell3_project/runs/**/*.jsonl`), and the
-scaffold ships `shell3.stub_tools` entries that redirect reflexive
-`read`/`read_file`/`grep`/`write_file` calls back to bash/edit_file. Exactly
+history is searched with `rg` over `.shell3_project/runs/**/*.jsonl`), and a
+reflexive `read`/`read_file`/`grep`/`write_file` call gets an unknown-tool
+error carrying a bash-first redirect back to bash/edit_file. Exactly
 **one** `shell3.agent{}` may be declared (a second declaration fails the load);
 specialists are subagents. A **subagent** is an **in-process background job**
 spawned via the `task` tool (`{subagent_type, prompt, description}`; returns
@@ -140,7 +140,7 @@ Secrets and credentials (provider API keys, tool tokens) live in a plain `.env` 
 ```
 cmd/shell3/            cobra command tree: root (prints help) + telegram/web/dev/dash/boot/health subcommands
 internal/agentsetup/   shared config assembly (Build → chat.Config) used by every front-end
-internal/luacfg/       Lua config loader (shell3.lua → model/agent/subagents/tools/skills, telegram, web, cron, heartbeat, on_tool_call/stub_tools) + system-prompt assembly
+internal/luacfg/       Lua config loader (shell3.lua → model/agent/subagents/tools/skills, telegram, web, cron, heartbeat, on_tool_call) + system-prompt assembly
 internal/bootstrap/    first-run global + project setup
 internal/scaffold/     embedded starter shell3.lua (with shell3.telegram{}) + .env template
 internal/adapter/openai/  OpenAI-compatible LLM adapter

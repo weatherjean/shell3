@@ -101,6 +101,40 @@ func TestRunTurn_ToolRoundTrip(t *testing.T) {
 	}
 }
 
+// TestRunTurn_UnknownTool verifies a call to a name nothing owns (e.g. a
+// hallucinated read_file) comes back as a tool error carrying the bash-first
+// redirect, and the turn keeps going.
+func TestRunTurn_UnknownTool(t *testing.T) {
+	fake := fakellm.New(
+		fakellm.Script{Events: []llm.StreamEvent{
+			{ToolCall: &llm.ToolCall{ID: "x", Name: "read_file", RawArgs: `{"path":"a.txt"}`}},
+		}},
+		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}},
+	)
+	cfg := TurnConfig{
+		LLM:         fake,
+		Personality: persona.Persona{SystemPrompt: "test"},
+		Handlers:    map[string]ToolHandler{},
+		Log:         LogOrNoop(nil),
+	}
+
+	events, sess := collectTurn(t, context.Background(), cfg, "hi")
+
+	var sawErr bool
+	for _, ev := range events {
+		if ev.Kind == EventToolResult && ev.ToolName == "read_file" && ev.ToolError &&
+			strings.Contains(ev.ToolOutput, "bash-first") {
+			sawErr = true
+		}
+	}
+	if !sawErr {
+		t.Fatalf("expected bash-first unknown-tool error event, got %+v", events)
+	}
+	if !hasToolMessage(sess, "read_file", "unknown tool") {
+		t.Fatalf("expected unknown-tool message in session, got %+v", sess.messages)
+	}
+}
+
 // hasKind reports whether any event in evs has the given kind.
 func hasKind(evs []Event, k EventKind) bool {
 	for _, ev := range evs {
