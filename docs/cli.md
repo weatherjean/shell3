@@ -1,36 +1,55 @@
 # CLI reference
 
-shell3 is a hosted agent you run as a Telegram bot. The binary has five
-subcommands: `telegram` (the service), `boot` (setup), `health` (config
-check), and two local front-ends, `dev` and `dash`, for driving and inspecting
-the agent from your terminal. The bare `shell3` command prints help.
+Six subcommands: `telegram` (the service), `web` (the Telegram-free fallback
+host), `boot` (setup), `health` (config check), and two local dev front-ends,
+`dev` and `dash`. Bare `shell3` prints help.
+
+Every subcommand takes `-c`/`--config <name|path>`: a name resolves to
+`~/.shell3/<name>.lua`, a `*.lua` value is a literal path, and the default is
+`~/.shell3/shell3.lua`. The working directory is never consulted.
 
 ## `shell3 telegram` — run the bot
 
 ```sh
-shell3 telegram              # uses ~/.shell3/shell3.lua
-shell3 telegram -c work      # uses ~/.shell3/work.lua
+shell3 telegram              # ~/.shell3/shell3.lua
+shell3 telegram -c work      # ~/.shell3/work.lua
 ```
 
-Loads the config, connects to Telegram, and answers the single `chat_id`
-declared in `shell3.telegram{}`. It also starts the Mini App dashboard (when
-`dashboard.enabled`), arms any cron jobs and the heartbeat (when
-`shell3.heartbeat{}` is declared), and blocks until interrupted.
+Loads the config, connects to Telegram, and answers the single `chat_id` from
+`shell3.telegram{}`. Also starts the Mini App dashboard (when
+`dashboard.enabled`), arms cron jobs and the heartbeat, and blocks until
+interrupted. The runtime is anchored to the config directory, so history lives
+under `~/.shell3/.shell3_project/`.
 
-The bot's runtime is anchored to the config directory, so its history and runs
-live under `~/.shell3/.shell3_project/`. In-chat commands: `/stop` (cancel the
-in-flight turn + tracked jobs), `/reload` (re-read the config and apply it
-live — refused while background tasks are running), `/run <job>` (fire a cron
-job on demand), `/set <name> <value>` (tune a model parameter; bare `/set`
-lists them), `/clear` (reset the conversation — refused while background tasks
-run; `/stop` first), `/compact` (force one context compaction now; replies
-with the token delta), `/rollback`, `/voice [off|inbound|always]` (when
-`shell3.tts{}` is configured — bare `/voice` shows a menu of the current mode;
-the choice persists across restarts, in `~/.shell3/voice_mode.json`).
+In-chat commands:
 
-| Flag | Effect |
-|------|--------|
-| `-c`, `--config <name\|path>` | Config name (→ `~/.shell3/<name>.lua`) or a path to a `*.lua` file (default `~/.shell3/shell3.lua`) |
+| Command | Effect |
+|---------|--------|
+| `/stop` | Cancel the in-flight turn and kill background jobs. |
+| `/reload` | Re-read the config and apply it live. Refused while background tasks run. |
+| `/run <job>` | Fire a cron job now. |
+| `/set <name> <value>` | Tune a model parameter; bare `/set` lists them. |
+| `/clear` | Reset the conversation. Refused while background tasks run (`/stop` first). |
+| `/compact` | Force one context compaction; replies with the token delta. |
+| `/rollback` | Undo the last turn. |
+| `/voice [off\|inbound\|always]` | Voice-reply mode (needs `shell3.tts{}`); bare `/voice` shows a menu. Persists in `~/.shell3/voice_mode.json`. |
+
+## `shell3 web` — standalone web front-end
+
+```sh
+shell3 web                        # addr + secret from shell3.web{}
+shell3 web --addr 127.0.0.1:9000  # override the listen address
+```
+
+The dashboard plus a simple chat (send box, Stop, Allow/Deny cards), served
+over plain HTTP and gated by `shell3.web{ secret = … }`. Open
+`http://<addr>/?key=<secret>` once — the page stores the key for every API
+call. It resumes the latest stored session (a conversation started over
+Telegram continues in the browser) and keeps cron jobs running; the heartbeat
+does not tick here. All slash commands above work in the send box, plus a
+web-only `/help`; typing `/` pops a filtered command list, and command replies
+render as ephemeral notices, not history. Run **one front-end at a time** —
+`telegram` and `web` own the same runs store.
 
 ## `shell3 boot` — set up a config
 
@@ -38,73 +57,37 @@ the choice persists across restarts, in `~/.shell3/voice_mode.json`).
 shell3 boot     # interactive: model endpoint + key, then bot token + chat id
 ```
 
-`boot` scaffolds `~/.shell3/shell3.lua` (the `code` agent, a read-only
-`explorer` subagent, and a `shell3.telegram{}` block whose dashboard is
-tunneled with cloudflared by default — free, no account; install it from
-https://github.com/cloudflare/cloudflared or the dashboard stays local-only),
+Scaffolds `~/.shell3/shell3.lua` (the `code` agent, a read-only `explorer`
+subagent, a `shell3.telegram{}` block with a cloudflared dashboard tunnel),
 the `lib/` modules, and `~/.shell3/.env` (secrets — never commit it).
-Non-interactive flags let you script it: `--url`, `--model`, `--name`,
-`--key`, `--tg-token`, `--tg-chat-id`, `--context-window`, `--compact-at`,
-`--proxy`, `--brave-key`, `--force`. See
-[configuration.md](configuration.md) for what it produces and how to extend it.
+Scriptable via flags: `--url`, `--model`, `--name`, `--key`, `--tg-token`,
+`--tg-chat-id`, `--context-window`, `--compact-at`, `--proxy`, `--brave-key`,
+`--force`. See [configuration.md](configuration.md).
 
 ## `shell3 health` — check the config
 
 ```sh
-shell3 health                # checks ~/.shell3/shell3.lua
-shell3 health --config work  # checks ~/.shell3/work.lua
+shell3 health                # ~/.shell3/shell3.lua
+shell3 health --config work
 ```
 
 Loads the config exactly like the bot would and fails (exit 1) on anything the
-bot only tolerates with a warning — e.g. a skill `.md` skipped for broken
-frontmatter. Run it after editing `shell3.lua` or `lib/skills/`, before `/reload`.
+bot only warns about — e.g. a skill `.md` skipped for broken frontmatter. Run
+it after editing `shell3.lua` or `lib/skills/`, before `/reload`.
 
 ## `shell3 dev` — drive the agent locally
 
-`dev` runs the bot's config + agent from your terminal and prints **everything**
-a chat surface hides: reasoning, the streamed reply, every tool call with its
-raw arguments, untruncated tool results, per-roundtrip and total token usage. It
-also follows any subagent/`bash_bg` jobs the turn spawns and renders their
-completion, so async delegation is fully visible. It exists to drive and polish
-the agent without going through Telegram; it's also handy for quick local
-queries and troubleshooting.
+Runs the bot's config + agent from your terminal and prints everything a chat
+surface hides: reasoning, every tool call with raw args, untruncated results,
+token usage. It follows subagent/`bash_bg` jobs the turn spawned and renders
+their completions, and auto-approves `on_tool_call` asks (printing that it
+did) so it runs unattended.
 
 ```sh
-shell3 dev "list the files here and summarize what this project is"
+shell3 dev "list the files here and summarize this project"
 shell3 dev --resume "now write a one-line description"   # continue the last session
-shell3 dev --heartbeat                                    # fire the configured heartbeat once
+shell3 dev --heartbeat   # fire the configured heartbeat once, print the suppression verdict
 ```
-
-| Flag | Effect |
-|------|--------|
-| `-c`, `--config <name\|path>` | Config to use (default `~/.shell3/shell3.lua`) |
-| `--resume` | Continue the latest session (multi-turn across invocations) |
-| `--heartbeat` | Fire the configured `shell3.heartbeat{}` prompt once (no message argument) and print the suppression verdict — whether the bot would stay silent (`HEARTBEAT_OK`) or deliver the alert |
-
-`dev` auto-approves `on_tool_call` ask verdicts (and prints that it did), so it
-runs unattended.
-
-## `shell3 web` — run the standalone web front-end
-
-```sh
-shell3 web                        # addr + secret from shell3.web{} in the config
-shell3 web --addr 127.0.0.1:9000  # override the listen address
-```
-
-The Telegram-free fallback host: the dashboard plus a simple chat (send box,
-Stop, Allow/Deny cards for gated commands), served over plain HTTP and gated
-by `shell3.web{ secret = … }`. Open `http://<addr>/?key=<secret>` once — the
-page stores the key and authenticates every API call with it. It resumes the
-latest stored session, so you continue the conversation the bot was having,
-and declared cron jobs keep running. The bot's slash commands work in the send
-box too — `/stop`, `/clear`, `/compact`, `/set`, `/rollback`, `/run <job>`,
-`/reload` —
-plus a web-only `/help` that lists them; typing `/` pops up the command list
-(filtered as you type), and replies appear as ephemeral notices in the chat
-(they are not part of session history). Run one front-end at a
-time (`telegram` OR `web`); both own the same history. See
-[configuration.md](configuration.md#standalone-web-front-end--shell3web) for
-the config block.
 
 ## `shell3 dash` — serve the dashboard locally
 
@@ -113,30 +96,27 @@ shell3 dash                       # http://127.0.0.1:8765, no auth
 shell3 dash --addr 127.0.0.1:9000
 ```
 
-Serves the Mini App dashboard against the live config's runtime with initData
-verification **bypassed**, so every endpoint is browsable/curlable without
-Telegram. It reattaches to the latest session, so the Runs tab shows the bot's
-real history and subagent transcripts. Because auth is off it exposes history
-and files, so it binds to localhost only; the file explorer still redacts `.env`
-and `ai-do-not-read.*`.
+Serves the Mini App dashboard with auth **bypassed**, so every endpoint is
+browsable/curlable without Telegram. Reattaches to the latest session (the
+Runs tab shows real history and subagent transcripts). Because auth is off it
+binds to localhost only; the file explorer still redacts `.env`.
 
 ## Reading your history
 
-Conversation history lives as plain JSONL under `.shell3_project/runs/` in the
-config directory (`~/.shell3/.shell3_project/runs/` for the bot). Query it with
-standard Unix tools:
+Conversation history is plain JSONL under the config directory's
+`.shell3_project/runs/`:
 
 ```sh
 rg -n "JWT|expiry" ~/.shell3/.shell3_project/runs   # full-text search all sessions
 ls -lt ~/.shell3/.shell3_project/runs/              # sessions, newest first
-cat ~/.shell3/.shell3_project/runs/<id>/meta.json   # a session's metadata
+cat ~/.shell3/.shell3_project/runs/<id>/meta.json   # one session's metadata
 ```
 
-The agent searches its own past conversations the same way (via the `history`
-skill), using `bash` with `rg` — no special tool needed. The dashboard's Runs
-tab renders the same data (each subagent run has its own stored transcript).
+The agent searches its own past the same way (`rg` over the JSONL, via the
+`history` skill). The dashboard's Runs tab renders the same data; each
+subagent run has its own stored transcript.
 
 ## Platform support
 
-shell3 targets Unix-like systems — Linux and macOS. Windows is **not** supported:
-it leans on Unix process groups. WSL works.
+Unix-like systems only — Linux and macOS (WSL works). Windows is not
+supported: shell3 leans on Unix process groups.

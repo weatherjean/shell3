@@ -57,9 +57,13 @@ shell3.model("{{.Name | luaesc}}", {
 -- text for bash/bash_bg and NIL otherwise — guard on t.name first. Return nil
 -- (run), { command = "..." } (rewrite, bash only), { argv = {...} } (runner
 -- swap, bash only), { block = true, reason="" }, or { ask = "prompt",
--- reason="" } (Telegram Allow/Deny; declined or headless → block). Denylists
--- use shell3.regex (Go RE2, (?s) so .* spans newlines); a handler that errors
--- FAILS CLOSED. Full reference: docs/configuration.md.
+-- reason="" } (Allow/Deny in Telegram or the web chat; declined → block).
+-- t.headless is true when no human can answer an ask — subagents and cron
+-- jobs always run headless, so an { ask = ... } there auto-denies with its
+-- reason; branch on t.headless to block with a clearer message instead (see
+-- the example). Denylists use shell3.regex (Go RE2, (?s) so .* spans
+-- newlines); a handler that errors FAILS CLOSED. Full reference:
+-- docs/configuration.md.
 -- Example (uncomment to enable a guard):
 -- local re   = shell3.regex
 -- local HARD = { re([[(?s)rm\s+-rf\s+/]]), re([[(?s)mkfs]]), re([[(?s)dd\s+if=]]) }

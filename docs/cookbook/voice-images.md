@@ -4,7 +4,7 @@ Four optional top-level blocks — `shell3.stt`, `shell3.tts`, `shell3.describe`
 `shell3.imagegen` — each point at a `shell3.model` by name. None are declared
 by the base scaffold; the block below is a commented-out starting point at
 the bottom of the model section in `shell3.lua`. Full reference:
-[configuration.md](../configuration.md#voice--images--shell3stt--shell3tts--shell3describe--shell3imagegen).
+[configuration.md](../configuration.md#voice--images--shell3stt--tts--describe--imagegen).
 
 ## Groq quickstart (one free key, STT + TTS)
 

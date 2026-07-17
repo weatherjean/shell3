@@ -48,9 +48,10 @@ better are more welcome than ones that grow the footprint.
 `AGENTS.md` has the package map. The short version: `cmd/shell3` is the CLI,
 `internal/agentsetup` assembles a `chat.Config` from `shell3.lua`
 (`internal/luacfg`), `internal/chat` runs turns against an OpenAI-compatible
-provider (`internal/adapter/openai`), and the front-ends
-(`internal/telegram` for the bot + Mini App dashboard, `internal/cli` for the
-`dev`/`dash` local CLIs) are built on `internal/shell3`'s session/runtime core.
+provider (`internal/adapter/openai`), and the front-ends (`internal/telegram`
+for the bot, `internal/web` for the dashboard + web chat, `internal/cli` for
+the `dev`/`dash` local CLIs) are built on `internal/shell3`'s session/runtime
+core.
 
 ## Security
 
