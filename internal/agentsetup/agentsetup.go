@@ -242,9 +242,8 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 // EnvironmentReminder renders the host-injected Environment standing reminder
 // (no longer part of the system prompt). It exposes the agent's own config path
 // (so any front-end can resolve its config dir without a tool), the active model
-// and this session's id, and where conversation history and background-job logs
-// live on disk — all file-native, searchable with ordinary Unix tools
-// (rg/grep/cat). The result is wrapped in <system-reminder>…</system-reminder>.
+// and this session's id, and where conversation history lives on disk — all
+// file-native, searchable with ordinary Unix tools (rg/grep/cat). The result is wrapped in <system-reminder>…</system-reminder>.
 //
 // It is a package-level function (not a *Parts method) so internal/shell3 can render
 // it from the per-session chat.Config fields it already holds — config path,
@@ -274,7 +273,7 @@ func EnvironmentReminder(configPath, runsDir, model, sessionID string) string {
 	relRuns := paths.ProjectDirName + "/runs"
 	fmt.Fprintf(&b, "- history: every conversation is verbatim JSONL at `%s/<id>/messages.jsonl` (one message per line; `meta.json` beside it holds model/status/timestamps)\n", relRuns)
 	fmt.Fprintf(&b, "- search history: `rg <terms> %s` (ordinary ripgrep over the JSONL — no special CLI)\n", relRuns)
-	fmt.Fprintf(&b, "- background job logs: `%s/jobs/<job-id>.jsonl` (stdout+stderr) with a tiny `<job-id>.status` (pid, started_at, exit code)\n", relRuns)
+	fmt.Fprintf(&b, "- subagent transcripts are ordinary sessions under `%s` too (one dir per child session)\n", relRuns)
 	b.WriteString("</system-reminder>")
 	return b.String()
 }
@@ -480,9 +479,9 @@ func (b *builder) loadConfig() error {
 		return err
 	}
 	b.lc = lc
-	// Surface non-fatal config issues (e.g. a removed config key that is now
-	// ignored). To both the app log and stderr: the log keeps a durable record,
-	// and stderr reaches headless/CLI runs directly.
+	// Surface non-fatal config issues (e.g. a skipped invalid skill file). To
+	// both the app log and stderr: the log keeps a durable record, and stderr
+	// reaches headless/CLI runs directly.
 	for _, w := range lc.Warnings() {
 		b.log.Warn("config warning", "detail", w)
 		fmt.Fprintln(os.Stderr, "shell3: config warning: "+w)

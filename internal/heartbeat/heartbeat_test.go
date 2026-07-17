@@ -108,7 +108,6 @@ func TestStrip(t *testing.T) {
 type tickerHarness struct {
 	mu       sync.Mutex
 	injected []string
-	busy     bool
 	now      time.Time
 }
 

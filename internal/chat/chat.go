@@ -95,10 +95,10 @@ type Config struct {
 	// if unknown. Recorded per session so resume can reload the right
 	// config. Agent-independent: set once at assembly, survives agent switches.
 	ConfigPath string
-	// ConfigWarnings are non-fatal config load issues (e.g. a removed config key
-	// that is now ignored). Already logged + printed to stderr at load; also
-	// carried here so a front-end can surface them in-band, since a web
-	// dashboard user never sees the stderr line they were printed on.
+	// ConfigWarnings are non-fatal config load issues (e.g. a skipped invalid
+	// skill file). Already logged + printed to stderr at load; also carried
+	// here so a front-end can surface them in-band, since a web dashboard user
+	// never sees the stderr line they were printed on.
 	ConfigWarnings []string
 	// ActiveSkills lists skill names enabled for this persona.
 	ActiveSkills []string

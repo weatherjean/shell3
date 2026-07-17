@@ -309,13 +309,13 @@ func TestEnvironmentReminder(t *testing.T) {
 		"- config: `/c/shell3.lua`",
 		".shell3_project/runs/<id>/messages.jsonl",
 		"rg <terms> .shell3_project/runs",
-		".shell3_project/runs/jobs/",
+		"subagent transcripts are ordinary sessions",
 	} {
 		if !strings.Contains(rem, want) {
 			t.Errorf("Environment reminder missing %q:\n%s", want, rem)
 		}
 	}
-	for _, gone := range []string{"shell3 fts", "shell3 list-projects", "shell3 read-session", "project_uuid"} {
+	for _, gone := range []string{"shell3 fts", "shell3 list-projects", "shell3 read-session", "project_uuid", "runs/jobs"} {
 		if strings.Contains(rem, gone) {
 			t.Errorf("Environment reminder still advertises retired %q:\n%s", gone, rem)
 		}

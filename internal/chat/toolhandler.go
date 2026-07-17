@@ -27,8 +27,9 @@ type ResolvedTool struct {
 // back to the model as the tool result; non-nil errors are surfaced to the
 // user but the returned string is still recorded.
 //
-// User tools (YAML-defined) use a separate dispatch path and do not
-// implement this interface.
+// Custom tools (Lua-declared command templates) and host-registered Go tools
+// use a separate dispatch path (dispatchCustomTool) and do not implement this
+// interface.
 type ToolHandler interface {
 	Name() string
 	Execute(ctx context.Context, id string, args json.RawMessage, cfg ToolConfig) (string, error)

@@ -101,9 +101,9 @@ func (b *Bot) preflightText(ctx context.Context, saved []savedFile) string {
 	return strings.Join(lines, "\n")
 }
 
-// preflight combines preflightScan + preflightText into the pre-Task-9 shape:
-// kept for tests (and any caller that doesn't need the two halves split
-// across the update-loop boundary). Not used by handleMsg — see bot.go.
+// preflight combines preflightScan + preflightText, for callers that don't
+// need the two halves split across the update-loop boundary (currently the
+// tests). handleMsg calls the halves separately — see bot.go.
 func (b *Bot) preflight(ctx context.Context, saved []savedFile) (injected string, hadVoice bool) {
 	return b.preflightText(ctx, saved), preflightScan(saved)
 }

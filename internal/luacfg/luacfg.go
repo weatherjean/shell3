@@ -140,9 +140,9 @@ type LoadedConfig struct {
 	onToolResult []*lua.LFunction
 
 	// warnings accumulates non-fatal config issues found at load time (e.g. a
-	// removed key that is now silently ignored, or a gate that gates nothing). The
-	// caller drains them via Warnings() and decides how to surface them; an empty
-	// slice means a clean load.
+	// skipped invalid skill file, or a duplicate skill name). The caller drains
+	// them via Warnings() and decides how to surface them; an empty slice means
+	// a clean load.
 	warnings []string
 
 	L *lua.LState
@@ -155,8 +155,8 @@ type LoadedConfig struct {
 }
 
 // Warnings returns the non-fatal issues collected while loading the config
-// (ignored deprecated keys, an enabled gate with no patterns, …). Empty on a
-// clean load. Surfacing them is the caller's choice; the config still loaded.
+// (skipped invalid skill files, duplicate skill names, …). Empty on a clean
+// load. Surfacing them is the caller's choice; the config still loaded.
 func (c *LoadedConfig) Warnings() []string { return c.warnings }
 
 func (c *LoadedConfig) Close() {

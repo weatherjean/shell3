@@ -125,7 +125,7 @@ var TaskListTool = llm.ToolDefinition{
 // status and a truncated result (transcript tail for subagents, output for commands).
 var TaskStatusTool = llm.ToolDefinition{
 	Name:        "task_status",
-	Description: "Get the status and result of a single background task by id (e.g. sub1, bg1). Returns status, type, depth, and a truncated result.",
+	Description: "Get the status and result of a single background task by id (e.g. sub1, bg1). Returns status, type, and a truncated result.",
 	Parameters: map[string]any{
 		"type": "object",
 		"properties": map[string]any{

@@ -3,7 +3,7 @@ package chat
 // Host-managed context compaction and pruning: the two-tier token-threshold
 // system (prune_at stubs old tool outputs cheaply; compact_at summarizes the
 // head while keeping recent turns verbatim), the manual /prune and forced
-// :compact paths, and the token-estimate helpers they share. RunTurn calls
+// /compact paths, and the token-estimate helpers they share. RunTurn calls
 // maybeCompact at turn start; everything here is best-effort and never fails
 // the user's turn.
 
@@ -38,7 +38,7 @@ const compactionFloorTokens = 4096
 const keepRecentFraction = 33 // percent
 
 // minKeepRecent floors the verbatim tail (in estimated tokens) when keep_recent
-// resolves to 0 — e.g. a forced :compact while auto-compaction is off
+// resolves to 0 — e.g. a forced /compact while auto-compaction is off
 // (compact_at=0). Without it the tail would be empty and the entire
 // conversation, including the latest turn, would be summarized away.
 const minKeepRecent = 4096
@@ -77,7 +77,7 @@ const compactionInstruction = "You are compacting a long coding-assistant conver
 // lastPromptTokens is 0 on the first turn, so the first turn never compacts or
 // prunes.
 func maybeCompact(ctx context.Context, cfg TurnConfig, sess *Session) {
-	// A queued :compact forces a compaction regardless of the threshold (and even
+	// A queued /compact forces a compaction regardless of the threshold (and even
 	// when auto-compaction is disabled). Swap clears the request atomically.
 	forced := sess.forceCompact.Swap(false)
 	if !forced && cfg.CompactAt <= 0 {
@@ -117,7 +117,7 @@ func compactNow(ctx context.Context, cfg TurnConfig, sess *Session, forced bool)
 // compactApply performs host-enforced compaction: it summarises the head of
 // the conversation and rebuilds history as that summary plus the verbatim recent
 // tail. Reached from the auto path when the prompt token count hits compact_at,
-// and from the forced paths (queued :compact, CompactStandalone). On any problem
+// and from the forced paths (queued /compact, CompactStandalone). On any problem
 // (too little history, an LLM error, an empty summary) it logs when warranted
 // and returns an error WITHOUT compacting, so callers proceed on the
 // un-compacted history. After a successful compaction lastPromptTokens is reset
@@ -130,7 +130,7 @@ func compactApply(ctx context.Context, cfg TurnConfig, sess *Session, forced boo
 	// fits within keepRecent, there is nothing left to summarise.
 	keepRecent := resolveKeepRecent(cfg)
 	if keepRecent <= 0 {
-		// A forced :compact can reach here with compact_at=0 (auto-compaction
+		// A forced /compact can reach here with compact_at=0 (auto-compaction
 		// off), which makes resolveKeepRecent return 0. Floor the tail so a forced
 		// compaction never summarizes away the most recent turns.
 		keepRecent = minKeepRecent
@@ -143,7 +143,7 @@ func compactApply(ctx context.Context, cfg TurnConfig, sess *Session, forced boo
 		return before, before, ErrNothingToCompact
 	}
 	head := sess.messages[:cut]
-	// Floor check (auto path only — a forced :compact always proceeds when there
+	// Floor check (auto path only — a forced /compact always proceeds when there
 	// is a head). Skip only when the head is BOTH few messages AND few tokens: a
 	// short head with many tokens (a couple of giant tool results) is exactly
 	// what compaction should collapse, so the message-count floor alone would

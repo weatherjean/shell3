@@ -553,7 +553,7 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 	// Create the cancel func BEFORE publishing the job so j.cancel is
 	// immutable-once-visible: cancelAll() (and the finishers) invoke j.cancel
 	// without holding the lock, which is safe only when it is written once
-	// before the job appears in m.jobs (Fix 4: j.cancel data race).
+	// before the job appears in m.jobs.
 	ctx, cancel := context.WithCancel(context.Background())
 	// Reserve the slot atomically before releasing the lock so that two
 	// concurrent spawns at max-1 cannot both pass the cap check (TOCTOU).

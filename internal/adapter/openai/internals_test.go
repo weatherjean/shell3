@@ -349,7 +349,7 @@ func TestToMessages_MixedParts(t *testing.T) {
 	if textIdx == -1 || imageIdx == -1 || audioIdx == -1 || videoIdx == -1 {
 		t.Fatalf("not all parts found in: %s", s)
 	}
-	if !(textIdx < imageIdx && imageIdx < audioIdx && audioIdx < videoIdx) {
+	if textIdx >= imageIdx || imageIdx >= audioIdx || audioIdx >= videoIdx {
 		t.Fatalf("part order not preserved. textIdx=%d imageIdx=%d audioIdx=%d videoIdx=%d", textIdx, imageIdx, audioIdx, videoIdx)
 	}
 

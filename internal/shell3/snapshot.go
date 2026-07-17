@@ -48,9 +48,9 @@ type Snapshot struct {
 	// loaded config. When false the shell is unsafe by default, which a front-end
 	// surfaces with a standing "!" indicator.
 	ToolHooksOn bool
-	// Warnings are non-fatal config load issues (e.g. a removed config key
-	// that is now ignored). A front-end surfaces them in-band at startup — a web
-	// dashboard user otherwise never sees the stderr line they were printed on.
+	// Warnings are non-fatal config load issues (e.g. a skipped invalid skill
+	// file). A front-end surfaces them in-band at startup — a web dashboard
+	// user otherwise never sees the stderr line they were printed on.
 	Warnings []string
 }
 

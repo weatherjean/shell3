@@ -359,21 +359,18 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 		}
 
 		emitToolCall(sess, tc.ID, tc.Name, tc.RawArgs)
-		// Every tool call dispatches directly: there is no guard engine or approval
-		// flow. The only policy surface is shell3.on_tool_call, which fires before
-		// every tool — the bash family self-gates in its handlers (command rewrite /
-		// runner-swap there); all other tools are gated by name/args just below.
 		res, invalid := validateCall(toolSchemas, tc)
 		// If validation failed, res already carries the typed reason and we skip
-		// dispatch. Otherwise resolve a handler —
-		// turn-scoped first, then the custom dispatchers, then the shared
-		// built-ins (custom before built-ins so a config-declared tool name
-		// always wins) — and run it through the single execute path.
+		// dispatch. Otherwise gate, then resolve a handler — turn-scoped first,
+		// then the custom dispatchers, then the shared built-ins (custom before
+		// built-ins so a config-declared tool name always wins) — and run it
+		// through the single execute path.
 		if !invalid {
-			// on_tool_call fires before every tool. The bash family (bash, bash_bg)
-			// self-gates inside its handlers, where command rewrite and runner-swap
-			// are resolved; every other tool is gated here by name/args (block / ask
-			// only — t.command is nil for them).
+			// shell3.on_tool_call is the only policy surface, and it fires before
+			// every tool. The bash family (bash, bash_bg) self-gates inside its
+			// handlers, where command rewrite and runner-swap are resolved; every
+			// other tool is gated here by name/args (block / ask only — t.command
+			// is nil for them).
 			gateMsg, gateBlocked := "", false
 			if !isBashTool(tc.Name) {
 				gateMsg, gateBlocked = gateNonBashTool(ctx, cfg.ToolConfig, tc.Name, tc.RawArgs)

@@ -134,7 +134,7 @@ func (c *LoadedConfig) luaModel(L *lua.LState) int {
 	// nonsensical (compaction would never reduce context). Clamp to half of
 	// compact_at so the head always has room to summarise.
 	if m.CompactAt > 0 && m.KeepRecent >= m.CompactAt {
-		m.KeepRecent = m.CompactAt / 2 // round(compact_at*0.5); tail must stay below trigger
+		m.KeepRecent = m.CompactAt / 2
 	}
 	// prune_at defaults to round(compact_at*0.6) so the cheap-prune tier is on by
 	// default, sitting below the compaction trigger. An explicit 0 disables it; an
@@ -232,23 +232,6 @@ func validateParamNames(tool string, params map[string]any) error {
 		}
 	}
 	return nil
-}
-
-// forEachStringPair iterates a Lua table asserting string keys and string
-// values, raising a Lua error (naming ctx and the expected shapes) otherwise.
-// fn receives each pair.
-func forEachStringPair(L *lua.LState, t *lua.LTable, ctx, keyWant, valWant string, fn func(k, v string)) {
-	t.ForEach(func(k, v lua.LValue) {
-		name, ok := k.(lua.LString)
-		if !ok {
-			L.RaiseError("%s: keys must be %s, got %s", ctx, keyWant, k.Type().String())
-		}
-		val, ok := v.(lua.LString)
-		if !ok {
-			L.RaiseError("%s[%q]: value must be %s, got %s", ctx, string(name), valWant, v.Type().String())
-		}
-		fn(string(name), string(val))
-	})
 }
 
 // handleNamesStrict reads the array part of list as handles carrying sentinel,

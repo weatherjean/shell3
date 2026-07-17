@@ -33,11 +33,9 @@ func (b *Bot) deliverReply(ctx context.Context, reply string, hadVoice bool) {
 		return
 	}
 
-	mode := "off"
+	mode := b.media.TTSMode
 	if b.voiceMode != nil {
 		mode = b.voiceMode.Get(b.media.TTSMode)
-	} else {
-		mode = b.media.TTSMode
 	}
 
 	speak := mode == "always" || (mode == "inbound" && hadVoice)
@@ -54,9 +52,7 @@ func (b *Bot) deliverReply(ctx context.Context, reply string, hadVoice bool) {
 		}
 		return
 	}
-	if sp.Path != "" {
-		defer os.Remove(sp.Path)
-	}
+	defer os.Remove(sp.Path)
 	data, err := os.ReadFile(sp.Path)
 	if err != nil {
 		b.sendReply(ctx, reply)

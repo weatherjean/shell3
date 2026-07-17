@@ -356,7 +356,7 @@ func (rt *Runtime) Close() error {
 		}
 	}
 	// Cancel and join all in-process background job goroutines BEFORE the store
-	// closes so no goroutine can write to a closed store (Fix 3: write-after-close).
+	// closes so no goroutine can write to a closed store.
 	if rt.jobs != nil {
 		rt.jobs.cancelAll()
 		rt.jobs.wait()

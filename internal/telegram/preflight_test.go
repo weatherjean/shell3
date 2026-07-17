@@ -241,7 +241,7 @@ func TestPreflight_VoiceAndImage_LineOrdering(t *testing.T) {
 	if transcriptIdx == -1 || imageIdx == -1 || noteIdx == -1 {
 		t.Fatalf("expected all three segments present, got %q", injected)
 	}
-	if !(transcriptIdx < imageIdx && imageIdx < noteIdx) {
+	if transcriptIdx >= imageIdx || imageIdx >= noteIdx {
 		t.Fatalf("want transcript < image < note ordering, got %q", injected)
 	}
 }
