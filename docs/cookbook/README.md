@@ -47,3 +47,4 @@ headed Chrome via puppeteer-core)
 - `models.md` — provider-specific request params via `extra` (e.g. MiniMax M3 `reasoning_split`).
 - `proxy.md` — `run_proxy` recipes (Codex via npx, litellm).
 - `sandbox.md` — sandbox or route bash via `on_tool_call` argv verdicts (docker, ssh, firejail).
+- `voice-images.md` — voice notes + image describe/generate over Telegram, a Groq quickstart for one free key covering STT + TTS.

@@ -69,6 +69,31 @@ func (p *Parts) Store() *runs.Store { return p.st }
 // parts (recorded per session for resume).
 func (p *Parts) ConfigPath() string { return p.configPath }
 
+// MediaConfig is the read-only slice of shell3.lua that internal/media needs
+// to resolve its four capabilities (STT/TTS/Describe/Imagegen) and their
+// models. It mirrors media.Config's method set so *luacfg.LoadedConfig
+// satisfies both structurally, without agentsetup importing media (media
+// cannot live under agentsetup itself, since it depends on internal/shell3,
+// which agentsetup is built from) or media importing agentsetup.
+type MediaConfig interface {
+	STT() *luacfg.STTConfig
+	TTS() *luacfg.TTSConfig
+	Describe() *luacfg.DescribeConfig
+	Imagegen() *luacfg.ImagegenConfig
+	Model(name string) (luacfg.Model, bool)
+}
+
+// MediaConfig returns the narrow media-config view of the shell3.lua this
+// Parts was built from, for host code building media.Clients (e.g.
+// media.New(p.MediaConfig(), p.EnsureProxy)).
+func (p *Parts) MediaConfig() MediaConfig { return p.lc }
+
+// EnsureProxy starts (or no-ops if already running) the run_proxy command for
+// a named model, mirroring AgentRuntime's own proxy-spawn call. Exposed as a
+// pass-through so host code can pass it directly as the ensureProxy func
+// media.New expects, without reaching into the unexported proxy field.
+func (p *Parts) EnsureProxy(name, command string) { p.proxy.Ensure(name, command) }
+
 // BackgroundMaxConcurrent returns the shell3.background{ max_concurrent = N }
 // setting (0 = unset; default applied at newJobManager).
 func (p *Parts) BackgroundMaxConcurrent() int { return p.lc.BackgroundMaxConcurrent }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -14,6 +15,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/weatherjean/shell3/internal/cron"
 	"github.com/weatherjean/shell3/internal/heartbeat"
+	"github.com/weatherjean/shell3/internal/media"
+	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/telegram"
 	"github.com/weatherjean/shell3/internal/web"
@@ -89,6 +92,22 @@ func newTelegramCommand() *cobra.Command {
 			}
 			b.SetWorkDir(workDir)
 
+			// Media (STT/describe/TTS/imagegen): built from the runtime's current
+			// config and wired at boot; the reload closure below rebuilds it from
+			// the freshly reloaded config and re-wires it. The session decorator
+			// registers image_generate on EVERY session — the main one (already
+			// live: SetSessionDecorator applies to existing sessions) and each
+			// subagent child at spawn — and Runtime.Reload re-applies it, so no
+			// separate image-tool resync is needed.
+			voiceModeStore, err := newVoiceModeStore()
+			if err != nil {
+				return err
+			}
+			b.SetMedia(buildMediaClients(rt), voiceModeStore)
+			rt.SetSessionDecorator(func(s *shell3.Session) {
+				_ = media.RegisterImageTool(s, buildMediaClients(rt))
+			})
+
 			// Wire /run <job> to the scheduler's manual fire (no-op if no cron).
 			if sched != nil {
 				b.SetJobRunner(sched.Run)
@@ -124,7 +143,8 @@ func newTelegramCommand() *cobra.Command {
 				if srv != nil { // avoid a non-nil interface wrapping a nil *web.Server
 					dash = srv
 				}
-				ns, res, err := reloadAndRearm(rt, b, dash, sess, sched)
+				resyncMedia := func() { b.SetMedia(buildMediaClients(rt), voiceModeStore) }
+				ns, res, err := reloadAndRearm(rt, b, dash, sess, sched, resyncMedia)
 				sched = ns
 				if err == nil {
 					hbTick = rearmHeartbeat(hbTick, rt.HeartbeatConfig(), hbInject, b.Busy)
@@ -153,6 +173,27 @@ func newTelegramCommand() *cobra.Command {
 	return cmd
 }
 
+// buildMediaClients resolves rt's current shell3.stt/tts/describe/imagegen
+// blocks into a fresh media.Clients, spawning each capability's run_proxy (at
+// most once, on first use) via the runtime's shared proxy Spawner. Called at
+// boot and again on every reload (the config may have changed which media
+// blocks are declared, or their models).
+func buildMediaClients(rt *shell3.Runtime) *media.Clients {
+	p := rt.Parts()
+	return media.New(p.MediaConfig(), p.EnsureProxy)
+}
+
+// newVoiceModeStore opens the per-chat inbound-voice-reply mode file at
+// ~/.shell3/voice_mode.json (the global root, independent of which config or
+// workdir this process was started with).
+func newVoiceModeStore() (*media.ModeStore, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve home directory: %w", err)
+	}
+	return &media.ModeStore{Path: filepath.Join(paths.NewGlobal(home).Root, "voice_mode.json")}, nil
+}
+
 // configReloader, rearmBot, and cronDashboard are the narrow slices of
 // *shell3.Runtime, *telegram.Bot, and *web.Server that reloadAndRearm needs,
 // keeping the reload-coordination logic unit-testable with fakes.
@@ -177,10 +218,19 @@ type cronDashboard interface {
 // any error; dash may be nil when no dashboard runs. On failure the old
 // scheduler is left running and returned unchanged, so a bad config never tears
 // down a working schedule.
-func reloadAndRearm(r configReloader, b rearmBot, dash cronDashboard, disp cron.Dispatcher, old *cron.Scheduler) (*cron.Scheduler, shell3.ReloadResult, error) {
+// resyncMedia, when non-nil, is called after a successful Reload: it rebuilds
+// the host's media.Clients from the freshly reloaded config and re-wires them
+// (SetMedia for the Telegram bot's STT/TTS/describe; the web driver has no
+// media wiring of its own and passes nil). The image_generate host tool needs
+// no resync here — Runtime.Reload re-applies the session decorator that
+// registers it.
+func reloadAndRearm(r configReloader, b rearmBot, dash cronDashboard, disp cron.Dispatcher, old *cron.Scheduler, resyncMedia func()) (*cron.Scheduler, shell3.ReloadResult, error) {
 	res, err := r.Reload()
 	if err != nil {
 		return old, res, err
+	}
+	if resyncMedia != nil {
+		resyncMedia()
 	}
 	b.RedecorateSession() // re-apply host tools dropped by reload
 	jobs := r.Cron()

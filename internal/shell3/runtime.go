@@ -112,10 +112,25 @@ type Runtime struct {
 	cron      []CronJob
 	heartbeat *Heartbeat
 
+	// parts is the shared config assembly this Runtime was (re)built from.
+	// Swapped alongside the other fields at Reload; read via Parts() by host
+	// code that needs config-derived resources Runtime doesn't otherwise
+	// expose (e.g. rebuilding media.Clients from LoadedConfig + EnsureProxy).
+	parts *agentsetup.Parts
+
 	mu       sync.Mutex
 	sessions map[string]*Session
 	nextName int
 	closed   bool
+
+	// decorate, when set (SetSessionDecorator), runs for every session this
+	// runtime creates — main and subagent children alike — and again for every
+	// live session after a Reload (which rebuilds session configs, dropping
+	// previously registered host tools). Front-ends use it to register host
+	// tools (e.g. image_generate) uniformly instead of decorating only their
+	// own main session. Always invoked OUTSIDE rt.mu: decorators call back
+	// into locked Runtime methods (rt.Parts()).
+	decorate func(*Session)
 }
 
 // NewRuntime loads the config and assembles the shared runtime parts. ctx
@@ -166,6 +181,7 @@ func NewRuntime(ctx context.Context, spec RuntimeSpec) (*Runtime, error) {
 		web:           parts.Web(),
 		cron:          parts.Cron(),
 		heartbeat:     parts.Heartbeat(),
+		parts:         parts,
 	}
 	rt.jobs = newJobManager(rt, parts.BackgroundMaxConcurrent())
 	// Implement the documented cancellation contract: cancelling the parent ctx
@@ -213,9 +229,47 @@ func (rt *Runtime) emitJob(ev JobProgress) {
 	}
 }
 
+// SetSessionDecorator installs fn to run for every session this runtime
+// creates from now on (main and subagent children alike), for every session
+// already live (so boot order doesn't matter), and for every live session
+// after a Reload (which rebuilds session configs, dropping previously
+// registered host tools). Front-ends use it to register host tools —
+// image_generate in particular — uniformly across all sessions. fn runs
+// outside rt.mu, so it may call locked Runtime methods (rt.Parts()); it must
+// only be installed while sessions are idle (same contract as
+// RegisterHostTool). Installing a new decorator replaces the previous one.
+func (rt *Runtime) SetSessionDecorator(fn func(*Session)) {
+	rt.mu.Lock()
+	rt.decorate = fn
+	live := make([]*Session, 0, len(rt.sessions))
+	for _, s := range rt.sessions {
+		live = append(live, s)
+	}
+	rt.mu.Unlock()
+	if fn == nil {
+		return
+	}
+	for _, s := range live {
+		fn(s)
+	}
+}
+
 // Session creates and returns a new session on this runtime (a front-end's root
 // session, or a subagent's child session). A closed runtime returns an error.
 func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
+	// Registered before rt.mu.Lock so it runs AFTER the deferred unlock (LIFO):
+	// the decorator must run outside rt.mu (it calls locked Runtime methods),
+	// and only for a session this call actually created (not the early return
+	// of an existing live name, which was decorated when it was created).
+	var created *Session
+	defer func() {
+		if created == nil {
+			return
+		}
+		if dec := rt.decorateFn(); dec != nil {
+			dec(created)
+		}
+	}()
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 	if rt.closed {
@@ -259,9 +313,17 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	s.applyHostReminders()
 	s.writeStartLine("(session " + name + ")")
 	rt.sessions[name] = s
+	created = s // decorated by the deferred hook, after rt.mu releases
 	// Subagent completions are injected in-process by the runtime's jobManager
 	// (finishSubagent notifies the parent directly) — nothing to launch here.
 	return s, nil
+}
+
+// decorateFn returns the current session decorator under rt.mu.
+func (rt *Runtime) decorateFn() func(*Session) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return rt.decorate
 }
 
 // forget removes a closed session from the registry. Called by Session.Close.

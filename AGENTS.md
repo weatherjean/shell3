@@ -3,8 +3,10 @@
 Minimal Unix-composable coding agent written in Go.
 
 **Bash-first.** The agent's verbs are `bash`, `bash_bg`, and `edit_file` (plus
-`read_media` — attach an image/audio file so a multimodal model can perceive
-it — when `tools = { media = true }`). There are NO file-read tools: reading,
+`read_media` — attach an image, audio, PDF, or video file so a multimodal
+model can perceive it (PDF via an OpenAI-compatible `file` part; video via a
+`video_url` part, an OpenRouter/Gemini extension plain OpenAI endpoints
+reject) — when `tools = { media = true }`). There are NO file-read tools: reading,
 listing, and searching are bash commands (`cat`/`sed -n`, `ls`/`find`, `rg`;
 history is searched with `rg` over `.shell3_project/runs/**/*.jsonl`), and the
 scaffold ships `shell3.stub_tools` entries that redirect reflexive
@@ -75,7 +77,21 @@ tools.
 
 **Telegram-first.** shell3 is a hosted agent you reach over Telegram.
 `shell3 telegram` runs the bot (`internal/telegram`): one authorized chat id,
-inline Allow/Deny buttons for `on_tool_call` asks, media in/out, `/stop`
+inline Allow/Deny buttons for `on_tool_call` asks, media in/out — optional
+voice + image capability (`internal/media`, four top-level blocks pointing at
+a `shell3.model`: `shell3.stt`/`shell3.tts` transcribe inbound voice notes and
+speak replies back per a `/voice off|inbound|always` mode, `shell3.describe`
+captions inbound images for text-only models, `shell3.imagegen` adds an
+`image_generate` tool for the main agent AND every subagent, registered via a
+runtime session decorator (`Runtime.SetSessionDecorator`; reapplied on Reload)
+under all front-ends (`api = "openai"` or `"openrouter"`, the latter a raw
+chat-completions POST with `modalities=["image","text"]`, OpenRouter's
+image-output dialect — its dedicated `/api/v1/images` endpoint is avoided
+because it pre-authorizes worst-case cost and 402s low balances); all media —
+inbound Telegram uploads (`tg-*`) and generated images (`img-*`) — is stored
+under `~/.shell3/media/` so every file keeps a durable path (TTS audio
+excepted: sent and deleted); restriction policy is `on_tool_call`, not a
+tools={} key) — `/stop`
 `/reload` `/run`, an in-process cron scheduler (`internal/cron`, jobs declared
 via top-level `shell3.cron({...})`; each job dispatches a declared subagent),
 a **heartbeat** (`internal/heartbeat`, declared via top-level
@@ -134,6 +150,7 @@ internal/runs/         file-native JSONL store: sessions at .shell3_project/runs
 internal/edittool/     edit_file tool implementation (Go port of opencode's str-replace) + its direct-disk file I/O
 internal/notify/       Notification type (bg_done / agent_done) shared by job runtime + chat
 internal/tunnel/       dashboard.tunnel spawner: runs the tunnel command, scrapes its https URL
+internal/media/        shell3.stt/tts/describe/imagegen clients (transcribe, speak, describe, generate) + the /voice mode store
 internal/telegram/     Telegram bot front-end (bot loop, commands, confirm buttons, media, mdhtml)
 internal/web/          dashboard + chat API server (pluggable auth) and the shell3 web chat driver; static/ is the single-file frontend
 internal/cron/         robfig/cron scheduler dispatching subagent jobs on Session.Dispatch

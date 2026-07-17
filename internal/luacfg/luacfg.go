@@ -131,6 +131,13 @@ type LoadedConfig struct {
 	// Read via Heartbeat(). See heartbeat.go.
 	heartbeat *Heartbeat
 
+	// stt/tts/describe/imagegen hold the parsed media config blocks (nil if
+	// absent). Read via STT()/TTS()/Describe()/Imagegen(). See media.go.
+	stt      *STTConfig
+	tts      *TTSConfig
+	describe *DescribeConfig
+	imagegen *ImagegenConfig
+
 	// onToolCall is the shell3.on_tool_call handler chain (declaration order): each
 	// runs before any tool executes, with the real t.name, and returns a verdict
 	// (pass / rewrite / argv / block / ask). command/argv apply to the bash family
@@ -241,6 +248,12 @@ func load(path string) (*LoadedConfig, error) {
 		if err := c.resolveModelName(kind, core.Name, &core.ModelName); err != nil {
 			return nil, err
 		}
+	}
+	// Validate media block model references (stt/tts/describe/imagegen): each
+	// must name a declared shell3.model. Runs post-parse so declaration order
+	// between a media block and its model never matters.
+	if err := c.validateMediaRefs(); err != nil {
+		return nil, err
 	}
 	// Validate cron jobs (every job needs a schedule + a declared subagent).
 	if err := c.validateCron(); err != nil {

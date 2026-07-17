@@ -31,8 +31,10 @@ type ReloadResult struct {
 //     handle) and every swappable Runtime field is replaced.
 //   - In place: live sessions keep their identity and history (s.sess); only
 //     s.cfg + s.handlers are rebuilt. Active agent + /set params are restored
-//     best-effort. Host-registered tools are NOT restored here — the host
-//     re-applies them after Reload returns (they are not engine state).
+//     best-effort. Decorator-registered host tools (SetSessionDecorator, e.g.
+//     image_generate) ARE re-applied here; tools a host registered directly
+//     (the bot's send/reload/status) are not — the host re-applies those
+//     after Reload returns (they are not engine state).
 //
 // NOTE: the kept s.sess was built with a ContextWindowFor closure over the OLD
 // cfg.ContextWindow, so a changed context_window for an already-live session is
@@ -47,6 +49,20 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 	if err := rt.jobs.errIfRunning("/reload"); err != nil {
 		return ReloadResult{}, fmt.Errorf("reload: %w", err)
 	}
+	// Registered before rt.mu.Lock so it runs AFTER the deferred unlock (LIFO):
+	// a successful reload rebuilt every live session's cfg, dropping decorator-
+	// registered host tools (image_generate); re-apply the decorator outside
+	// rt.mu (it calls locked Runtime methods such as Parts()).
+	var redecorate []*Session
+	defer func() {
+		dec := rt.decorateFn()
+		if dec == nil {
+			return
+		}
+		for _, s := range redecorate {
+			dec(s)
+		}
+	}()
 	// 1. Build + validate the new parts BEFORE touching anything.
 	homeDir := rt.homeDir
 	if homeDir == "" {
@@ -109,6 +125,7 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 	rt.telegram = newParts.Telegram()
 	rt.web = newParts.Web()
 	rt.heartbeat = newParts.Heartbeat()
+	rt.parts = newParts
 	oldCleanup()
 
 	// 4. Re-derive each live session in place (keep history s.sess), restore overrides.
@@ -154,6 +171,7 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 		for name, val := range ov.params {
 			_ = s.SetParam(name, val) // silently skip params the new model lacks
 		}
+		redecorate = append(redecorate, s)
 	}
 
 	res := ReloadResult{

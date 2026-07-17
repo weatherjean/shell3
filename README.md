@@ -66,6 +66,12 @@ installed, or the dashboard stays local-only). Full walkthrough in
   for gated commands; media in and out; `/stop`, `/reload`, `/run`. A Mini App
   dashboard shows status, past runs, background jobs, cron, and a read-only file
   explorer (with `.env` redacted).
+- **Voice and images (optional).** Declare `shell3.stt{}`/`shell3.tts{}` and
+  voice notes are transcribed in and spoken back out (`/voice` picks the
+  mode); `shell3.describe{}` captions images for text-only models;
+  `shell3.imagegen{}` adds an `image_generate` tool (`api = "openai"` or
+  `"openrouter"`). One free Groq key covers speech in and out. See
+  [configuration.md](docs/configuration.md#voice--images--shell3stt--shell3tts--shell3describe--shell3imagegen).
 - **Any OpenAI-compatible provider.** OpenAI, Ollama, Groq, LM Studio,
   OpenRouter, Moonshot, DeepSeek — with reasoning-trace streaming where vendors
   support it, and a `run_proxy` escape hatch for endpoints that need a local shim.
@@ -74,7 +80,8 @@ installed, or the dashboard stays local-only). Full walkthrough in
   versionable, diffable, programmable. Edit it and apply live with the `reload`
   tool.
 - **Bash-first, unsafe by default.** The agent acts through `bash` and
-  `edit_file` — plus `read_media` for images and audio on multimodal models;
+  `edit_file` — plus `read_media` for images, audio, PDFs, and video on
+  multimodal models;
   reading, listing, and searching are just commands it runs (`cat`, `ls`,
   `rg`). The single opt-in hook is `shell3.on_tool_call(fn)` — chainable,
   verdict-based (block / rewrite / runner-swap / ask a human over Telegram);
@@ -95,8 +102,9 @@ installed, or the dashboard stays local-only). Full walkthrough in
 
 - **[Configuration](docs/configuration.md)** — models, the agent, subagents,
   the `shell3.telegram{}` block (dashboard + tunnel), `shell3.web{}`,
-  `shell3.cron`, `shell3.heartbeat`, custom tools, `on_tool_call`,
-  `on_tool_result`, `stub_tools`, skills, proxies.
+  `shell3.cron`, `shell3.heartbeat`, voice & images (`shell3.stt`/`tts`/
+  `describe`/`imagegen`), custom tools, `on_tool_call`, `on_tool_result`,
+  `stub_tools`, skills, proxies.
 - **[CLI](docs/cli.md)** — `telegram`, `web`, `boot`, `health`, `dev`, `dash`,
   and the JSONL runs store.
 - **[Security & data](docs/security.md)** — the threat model, secrets, and

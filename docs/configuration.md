@@ -145,7 +145,7 @@ shell3.agent({
     bash      = true,
     bash_bg   = true,   -- background / long-running work
     edit      = true,   -- the edit_file tool
-    media     = true,   -- inbound/outbound images + audio
+    media     = true,   -- read_media: images, audio, PDFs, video (+ outbound voice/image via the media blocks below)
     custom    = { my_tool },          -- Lua-defined tools (below)
     subagents = { explorer },         -- delegatable specialists
   },
@@ -513,6 +513,143 @@ shell3.web({
   does not (it's a Telegram-notification feature).
 - Run **one front-end at a time** — `shell3 telegram` and `shell3 web` own the
   same runs store and history.
+
+## Voice & images — `shell3.stt` / `shell3.tts` / `shell3.describe` / `shell3.imagegen`
+
+Four optional top-level blocks add voice and image capability, each pointing
+at a `shell3.model` by name (declaration order doesn't matter — the reference
+is resolved after the whole file loads). Everything runs over the same
+OpenAI-compatible surface as the rest of shell3:
+`audio/transcriptions`, `audio/speech`, chat completions with an image part,
+and `images/generations` — except `imagegen` with `api = "openrouter"`, which
+generates through chat completions with `modalities=["image","text"]`,
+OpenRouter's image-output dialect (see below).
+
+```lua
+shell3.stt{ model = "groq-whisper" }                       -- voice notes → text
+shell3.tts{ model = "groq-tts", voice = "Fritz-PlayAI", mode = "inbound" }
+shell3.describe{ model = "some-vision-model" }              -- only if your main model can't see images
+shell3.imagegen{ model = "some-image-model", size = "1024x1024" }
+```
+
+Each may be declared **once**; a second declaration fails the load, same as
+`shell3.agent`.
+
+- **`shell3.stt{ model, language?, echo? }`** — speech-to-text. Every inbound
+  Telegram voice note is transcribed before the model turn runs and the
+  transcript is injected as quoted text, so the agent sees it like a normal
+  message. `language` is an optional hint passed to the transcription
+  endpoint. `echo` (default `true`) also sends the transcript back to the
+  chat as a `📝 "…"` message, so you can see what was heard. A transcription
+  failure sends the provider error to the chat as a `⚠️` notice.
+- **`shell3.tts{ model, voice?, mode?, format? }`** — text-to-speech for
+  outbound replies. `mode` is `"off"`, `"inbound"` (default — reply with voice
+  only when the turn started from a voice note), or `"always"`. `format`
+  (default `"opus"`) is the synthesized audio codec. `voice` is passed through
+  to the endpoint (provider-specific voice name). Voice **replaces** the text
+  reply, it's never sent in addition. The `/voice off|inbound|always` chat
+  command overrides `mode` at runtime (persisted to
+  `~/.shell3/voice_mode.json`, so it survives a restart); bare `/voice` shows
+  a menu with the current mode. A synthesis failure falls back to the plain
+  text reply plus a `⚠️` notice carrying the error.
+- **`shell3.describe{ model, prompt? }`** — captions an inbound image before
+  the model turn runs, for a **text-only** main model that can't see the
+  image itself (a vision-capable main model doesn't need this — it already
+  gets the image directly via `read_media`/inline attachment). `prompt`
+  (default `"Describe the image."`) is the instruction sent with the image.
+  Success injects `[image: <description>]` into the turn; on failure the
+  agent still sees the file path (so it can retry with `read_media`) and the
+  error is sent to the chat as a `⚠️` notice.
+- **`shell3.imagegen{ model, size?, api? }`** — image generation. `size`
+  (default `"1024x1024"`) is the requested output dimensions, overridable per
+  call. `api` selects the wire shape used to talk to the model's `base_url`:
+  `"openai"` (default) uses the OpenAI SDK's `Images.Generate`
+  (`images/generations`); `"openrouter"` instead POSTs a raw chat-completions
+  request with `modalities=["image","text"]` — the dialect OpenRouter's
+  image-output models speak — and reads the generated image off the reply
+  message as a base64 data URL. (OpenRouter also has a dedicated
+  `/api/v1/images` endpoint, but it pre-authorizes the request's worst-case
+  token cost — around $2 for a Gemini image model — and returns 402 on any
+  lower balance; the chat route charges only actual usage, ~$0.03/image.)
+  `size` is ignored on the `"openrouter"` shape (the chat route has no size
+  parameter), and the saved file's extension follows the returned media type
+  (png/jpg/webp), not a fixed `.png`. When declared, **every agent gets an
+  `image_generate{prompt, size?}` tool** — the main agent and each subagent —
+  under every front-end (`shell3 telegram`, `shell3 web`, `shell3 dev`).
+  Generated files are saved to `~/.shell3/media/` and the tool returns the
+  path. Under Telegram, the main agent then delivers the file with
+  `send_media_telegram{path=..., kind="photo"}`; a subagent (which has no
+  send tool) is told to include the path in its report instead, so the main
+  agent can deliver it from the completion notice. To keep some agent from
+  generating, gate it like any other tool:
+
+  ```lua
+  shell3.on_tool_call(function(t)
+    if t.name == "image_generate" and t.headless then
+      return { block = true, reason = "no imagegen from background jobs" }
+    end
+  end)
+  ```
+
+  Note: this is image generation only — OpenRouter's video-generation
+  endpoint (`/api/v1/videos`) is an async job API with a different shape and
+  is not wired up (a known follow-up, not a current feature).
+
+**Media storage.** Everything the agent has seen or made lives in
+`~/.shell3/media/`: inbound Telegram attachments (`tg-*` files) and generated
+images (`img-*` files) alike, so every media file keeps a stable path that
+survives reboots and OS temp cleaning — re-readable with `read_media`,
+re-sendable with `send_media_telegram`, browsable from the dashboard's file
+explorer. The one exception is synthesized TTS audio, which is sent to the
+chat and deleted immediately. The folder grows until you prune it; shell3
+does no automatic cleanup.
+
+### `read_media`'s modalities
+
+`read_media` (advertised when the agent sets `tools = { media = true }`) loads
+a file from disk and attaches it as a user-message part on the next step, so a
+capable model can perceive it. Supported files, by modality:
+
+- **Images** (`.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`) — an image content
+  part; needs a vision-capable model.
+- **Audio** (`.wav`, `.mp3`, `.ogg`/`.opus`, `.oga`) — an input-audio content part;
+  needs an audio-capable model.
+- **PDFs** (`.pdf`, ≤20 MB) — an OpenAI-compatible `file` content part
+  (base64 `file_data`); this works on both OpenAI and OpenRouter endpoints.
+- **Video** (`.mp4`, `.webm`, `.mov`, ≤40 MB) — a `video_url` content part
+  (base64 data URI). This is an **OpenRouter/Gemini extension** to the
+  chat-completions dialect, not part of vanilla OpenAI — plain OpenAI
+  endpoints reject it, so video input needs a model/provider that accepts
+  `video_url` parts.
+
+### `send_media_telegram`'s `kind` param
+
+`send_media_telegram` is registered only under `shell3 telegram` (there is no
+web equivalent). It takes an optional `kind`: `"photo"`, `"voice"`, `"audio"`,
+`"video"`, or `"document"` (default). `"voice"` requires a `.ogg`/`.opus`
+file; `"video"` requires an `.mp4`/`.webm`/`.mov` file (subject to the same
+50 MB global send cap as every other kind). `"photo"` is recompressed by
+Telegram to roughly 1280px — use `"document"` when you need pixel-exact
+delivery (e.g. a screenshot with fine text).
+
+### Groq quickstart (one free key, STT + TTS)
+
+Groq's free tier serves both an OpenAI-compatible transcription and a
+text-to-speech model, so one key covers voice in and out:
+
+```lua
+shell3.model("groq-whisper", { base_url = "https://api.groq.com/openai/v1",
+  api_key = shell3.env.secret("GROQ_API_KEY"), model = "whisper-large-v3-turbo" })
+shell3.model("groq-tts", { base_url = "https://api.groq.com/openai/v1",
+  api_key = shell3.env.secret("GROQ_API_KEY"), model = "playai-tts" })
+
+shell3.stt{ model = "groq-whisper" }
+shell3.tts{ model = "groq-tts", voice = "Fritz-PlayAI", mode = "inbound" }
+```
+
+Add `GROQ_API_KEY=...` to `.env`. `shell3 boot` scaffolds this block
+commented out at the bottom of the model section — uncomment and fill in a
+key to turn it on, then `/reload`.
 
 ## Scheduled jobs — `shell3.cron`
 

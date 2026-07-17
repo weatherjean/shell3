@@ -21,6 +21,11 @@ const (
 	ContentPartTypeText       ContentPartType = "text"
 	ContentPartTypeImageURL   ContentPartType = "image_url"   // data URI or HTTPS URL
 	ContentPartTypeInputAudio ContentPartType = "input_audio" // base64 wav/mp3
+	ContentPartTypeFile       ContentPartType = "file"        // OpenAI-compatible file part (PDF), base64 file_data
+	// ContentPartTypeVideoURL is an OpenRouter/Gemini-style extension of the
+	// OpenAI chat-completions dialect (not part of the vanilla OpenAI API):
+	// a "video_url" part carrying a data URI or HTTPS URL.
+	ContentPartTypeVideoURL ContentPartType = "video_url"
 )
 
 // ContentPart is one element of a multimodal user message.
@@ -30,6 +35,9 @@ type ContentPart struct {
 	ImageURL    string // data URI ("data:image/jpeg;base64,...") or HTTPS URL
 	AudioData   string // base64-encoded raw audio bytes (input_audio)
 	AudioFormat string // "wav" | "mp3" | "ogg"
+	FileData    string // data URI ("data:application/pdf;base64,...") (file)
+	FileName    string // filename (file)
+	VideoURL    string // data URI ("data:video/mp4;base64,...") or HTTPS URL (video_url)
 }
 
 // Message is one turn in a conversation.

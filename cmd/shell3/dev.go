@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/weatherjean/shell3/internal/cli"
+	"github.com/weatherjean/shell3/internal/media"
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
@@ -72,6 +73,15 @@ func newDevCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+
+			// Register the image_generate host tool on this session and any
+			// subagent children it spawns (a no-op when no shell3.imagegen{} is
+			// declared) so dev drives the same tool set the Telegram and web
+			// hosts run. No SetMedia equivalent: dev is text-only (no inbound
+			// voice notes or photos to transcribe/describe).
+			rt.SetSessionDecorator(func(s *shell3.Session) {
+				_ = media.RegisterImageTool(s, buildMediaClients(rt))
+			})
 
 			cli.PrintHeader(os.Stdout)
 			fmt.Printf("agent=%s  config=%s\n\n", sess.ActiveAgent(), resolved)

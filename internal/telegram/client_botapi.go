@@ -296,3 +296,66 @@ func (c *BotAPIClient) SendDocument(ctx context.Context, chatID int64, filename 
 	})
 	return err
 }
+
+// SendPhoto uploads an image to the chat with an optional caption.
+func (c *BotAPIClient) SendPhoto(ctx context.Context, chatID int64, filename string, data []byte, caption string) error {
+	_, err := c.b.SendPhoto(ctx, &bot.SendPhotoParams{
+		ChatID:  chatID,
+		Photo:   &models.InputFileUpload{Filename: filename, Data: bytes.NewReader(data)},
+		Caption: caption,
+	})
+	return err
+}
+
+// SendVoice uploads a voice note to the chat with an optional caption. The
+// upload is given a fixed filename since SendVoiceParams takes no filename
+// field of its own.
+func (c *BotAPIClient) SendVoice(ctx context.Context, chatID int64, data []byte, caption string) error {
+	_, err := c.b.SendVoice(ctx, &bot.SendVoiceParams{
+		ChatID:  chatID,
+		Voice:   &models.InputFileUpload{Filename: "voice.ogg", Data: bytes.NewReader(data)},
+		Caption: caption,
+	})
+	return err
+}
+
+// SendAudio uploads a music/audio file to the chat with an optional caption.
+func (c *BotAPIClient) SendAudio(ctx context.Context, chatID int64, filename string, data []byte, caption string) error {
+	_, err := c.b.SendAudio(ctx, &bot.SendAudioParams{
+		ChatID:  chatID,
+		Audio:   &models.InputFileUpload{Filename: filename, Data: bytes.NewReader(data)},
+		Caption: caption,
+	})
+	return err
+}
+
+// SendVideo uploads a video file to the chat with an optional caption.
+func (c *BotAPIClient) SendVideo(ctx context.Context, chatID int64, filename string, data []byte, caption string) error {
+	_, err := c.b.SendVideo(ctx, &bot.SendVideoParams{
+		ChatID:  chatID,
+		Video:   &models.InputFileUpload{Filename: filename, Data: bytes.NewReader(data)},
+		Caption: caption,
+	})
+	return err
+}
+
+// SendMenu posts text with one row of inline buttons, one per option; a
+// press's Data is delivered via the Callbacks channel. Returns the sent
+// message id.
+func (c *BotAPIClient) SendMenu(ctx context.Context, chatID int64, text string, options []MenuOption) (int, error) {
+	row := make([]models.InlineKeyboardButton, len(options))
+	for i, o := range options {
+		row[i] = models.InlineKeyboardButton{Text: o.Label, CallbackData: o.Data}
+	}
+	m, err := c.b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID: chatID,
+		Text:   text,
+		ReplyMarkup: models.InlineKeyboardMarkup{
+			InlineKeyboard: [][]models.InlineKeyboardButton{row},
+		},
+	})
+	if err != nil {
+		return 0, err
+	}
+	return m.ID, nil
+}

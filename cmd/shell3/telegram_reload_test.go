@@ -67,7 +67,7 @@ func TestReloadAndRearm_ArmsNewScheduler(t *testing.T) {
 	b := &fakeBot{}
 	d := &fakeDash{}
 
-	ns, _, err := reloadAndRearm(r, b, d, fakeDispatcher{}, nil)
+	ns, _, err := reloadAndRearm(r, b, d, fakeDispatcher{}, nil, nil)
 	if err != nil {
 		t.Fatalf("reloadAndRearm: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestReloadAndRearm_NoJobsClearsSchedule(t *testing.T) {
 	b := &fakeBot{}
 	d := &fakeDash{}
 
-	ns, _, err := reloadAndRearm(r, b, d, fakeDispatcher{}, old)
+	ns, _, err := reloadAndRearm(r, b, d, fakeDispatcher{}, old, nil)
 	if err != nil {
 		t.Fatalf("reloadAndRearm: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestReloadAndRearm_ReloadErrorKeepsOldSchedule(t *testing.T) {
 	b := &fakeBot{}
 	d := &fakeDash{}
 
-	ns, _, err := reloadAndRearm(r, b, d, fakeDispatcher{}, old)
+	ns, _, err := reloadAndRearm(r, b, d, fakeDispatcher{}, old, nil)
 	if err == nil {
 		t.Fatal("expected reload error")
 	}
@@ -156,7 +156,7 @@ func TestReloadAndRearm_NilDashboard(t *testing.T) {
 	r := &fakeReloader{jobs: []shell3.CronJob{{Name: "j", Schedule: "@every 1h", Agent: "explorer", Prompt: "p"}}}
 	b := &fakeBot{}
 
-	ns, _, err := reloadAndRearm(r, b, nil, fakeDispatcher{}, nil)
+	ns, _, err := reloadAndRearm(r, b, nil, fakeDispatcher{}, nil, nil)
 	if err != nil {
 		t.Fatalf("reloadAndRearm: %v", err)
 	}
@@ -168,6 +168,48 @@ func TestReloadAndRearm_NilDashboard(t *testing.T) {
 		t.Errorf("SetJobRunner set=%d nil=%v, want set=1 nil=false", b.runnerSet, b.runnerNil)
 	}
 }
+
+// TestReloadAndRearm_ResyncMediaRunsBeforeRedecorate pins the ordering
+// SetMedia's contract depends on: resyncMedia (which rebuilds media.Clients
+// from the freshly reloaded config) must run strictly before
+// RedecorateSession (which would otherwise drop a stale image_generate tool
+// registration without a fresh one to replace it).
+func TestReloadAndRearm_ResyncMediaRunsBeforeRedecorate(t *testing.T) {
+	r := &fakeReloader{}
+	b := &orderingBot{}
+	resyncMedia := func() { b.order = append(b.order, "resync") }
+
+	if _, _, err := reloadAndRearm(r, b, nil, fakeDispatcher{}, nil, resyncMedia); err != nil {
+		t.Fatalf("reloadAndRearm: %v", err)
+	}
+	want := []string{"resync", "redecorate"}
+	if len(b.order) != len(want) || b.order[0] != want[0] || b.order[1] != want[1] {
+		t.Errorf("call order = %v, want %v", b.order, want)
+	}
+}
+
+// TestReloadAndRearm_NilResyncMediaIsOptional pins that a nil resyncMedia
+// (the web host, which needs no wiring beyond RedecorateSession's own
+// image-tool no-op path) is tolerated.
+func TestReloadAndRearm_NilResyncMediaIsOptional(t *testing.T) {
+	r := &fakeReloader{}
+	b := &fakeBot{}
+	if _, _, err := reloadAndRearm(r, b, nil, fakeDispatcher{}, nil, nil); err != nil {
+		t.Fatalf("reloadAndRearm: %v", err)
+	}
+	if b.redecorated != 1 {
+		t.Errorf("RedecorateSession called %d times, want 1", b.redecorated)
+	}
+}
+
+// orderingBot records the call order of RedecorateSession relative to an
+// external resyncMedia closure appending to the same slice.
+type orderingBot struct {
+	order []string
+}
+
+func (b *orderingBot) RedecorateSession()                      { b.order = append(b.order, "redecorate") }
+func (b *orderingBot) SetJobRunner(fn func(name string) error) {}
 
 // A malformed-but-non-empty schedule passes config validation (validateCron
 // doesn't parse expressions) and fails only at cron.New. The old scheduler
@@ -184,7 +226,7 @@ func TestReloadAndRearm_BadScheduleKeepsOldSchedule(t *testing.T) {
 	b := &fakeBot{}
 	d := &fakeDash{}
 
-	ns, _, err := reloadAndRearm(r, b, d, fakeDispatcher{}, old)
+	ns, _, err := reloadAndRearm(r, b, d, fakeDispatcher{}, old, nil)
 	if err == nil {
 		t.Fatal("expected cron.New parse error")
 	}

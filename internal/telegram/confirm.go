@@ -81,8 +81,7 @@ func (b *Bot) consumeCallbacks(ctx context.Context) {
 // immediately and this (single-threaded) drain loop isn't gated on Telegram
 // latency. A press for an unknown/answered id is a harmless no-op.
 func (b *Bot) handleCallback(ctx context.Context, cb Callback) {
-	id, yes, ok := parseConfirmData(cb.Data)
-	if ok {
+	if id, yes, ok := parseConfirmData(cb.Data); ok {
 		b.askMu.Lock()
 		ch := b.pending[id]
 		b.askMu.Unlock()
@@ -92,6 +91,8 @@ func (b *Bot) handleCallback(ctx context.Context, cb Callback) {
 			default: // already answered; ignore a double-tap
 			}
 		}
+	} else if mode, ok := parseVoiceModeData(cb.Data); ok {
+		b.handleVoiceCallback(ctx, mode)
 	}
 	// Ack every callback (even unrelated keyboards) so the button's spinner stops.
 	_ = b.client.AnswerCallback(ctx, cb.ID)

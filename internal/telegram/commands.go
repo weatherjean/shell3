@@ -21,6 +21,7 @@ func BotCommands() []Command {
 		{"stop", "Stop the current turn"},
 		{"run", "Run a scheduled job now: /run <name>"},
 		{"reload", "Reload shell3.lua config without restarting"},
+		{"voice", "Voice replies: /voice off|inbound|always"},
 	}
 }
 
@@ -144,6 +145,8 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 		// runReload takes the turn slot (and Reload fail-fasts on a busy
 		// session), so a /reload during a live turn is refused, not raced.
 		b.runReload(ctx)
+	case "/voice":
+		b.handleVoiceCommand(ctx, arg)
 	default:
 		b.sendReply(ctx, "unknown command: "+cmd)
 	}

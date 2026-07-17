@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/weatherjean/shell3/internal/media"
 )
 
 // savedFile is one attachment written to disk for the agent to inspect.
@@ -17,17 +19,23 @@ type savedFile struct {
 	Path string
 }
 
-// saveAttachments writes each downloaded attachment to a temp file under
-// $TMPDIR/shell3-telegram and returns the saved-file metadata. Files that fail
-// to write are skipped.
-func saveAttachments(media []Media) []savedFile {
-	if len(media) == 0 {
+// saveAttachments writes each downloaded attachment to shell3's durable
+// media directory (~/.shell3/media — see media.Dir) and returns the
+// saved-file metadata, so every file the user has sent keeps a stable path
+// the agent can re-read or re-send later. The tg-* prefix distinguishes
+// uploads from img-* generated files. Files that fail to write are skipped.
+func saveAttachments(files []Media) []savedFile {
+	if len(files) == 0 {
 		return nil
 	}
-	dir := filepath.Join(os.TempDir(), "shell3-telegram")
-	_ = os.MkdirAll(dir, 0o755)
+	dir, err := media.Dir()
+	if err != nil {
+		// Fall back to the old temp location rather than dropping the files.
+		dir = filepath.Join(os.TempDir(), "shell3-telegram")
+		_ = os.MkdirAll(dir, 0o755)
+	}
 	var out []savedFile
-	for _, m := range media {
+	for _, m := range files {
 		ext := filepath.Ext(m.Filename)
 		f, err := os.CreateTemp(dir, "tg-*"+ext)
 		if err != nil {

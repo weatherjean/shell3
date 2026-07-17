@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/heartbeat"
+	"github.com/weatherjean/shell3/internal/media"
 	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/strutil"
 )
@@ -22,13 +23,18 @@ type Bot struct {
 
 	workDir string // resolves relative paths for send_media_telegram
 
-	mu         sync.Mutex         // guards cancelTurn + turnActive
-	cancelTurn context.CancelFunc // non-nil while a turn runs
-	turnActive bool               // true from turn start until its goroutine ends
+	mu           sync.Mutex         // guards cancelTurn + turnActive + turnHadVoice
+	cancelTurn   context.CancelFunc // non-nil while a turn runs
+	turnActive   bool               // true from turn start until its goroutine ends
+	turnHadVoice bool               // true when the in-flight turn included (or was steered by) an audio/ attachment
 
-	askMu   sync.Mutex           // guards pending + askSeq
-	pending map[string]chan bool // on_tool_call Ask id → answer channel
-	askSeq  int                  // monotonic id source for Ask
+	media     *media.Clients   // STT/describe/TTS/imagegen capabilities; nil when unconfigured
+	voiceMode *media.ModeStore // per-chat inbound-voice-reply mode; nil when unconfigured
+
+	askMu          sync.Mutex           // guards pending + askSeq + voiceMenuMsgID
+	pending        map[string]chan bool // on_tool_call Ask id → answer channel
+	askSeq         int                  // monotonic id source for Ask
+	voiceMenuMsgID int                  // msgID of the most recent /voice menu, for its "vm|" callback edit
 
 	// onUsage, if set, receives each completed turn's token totals (per turn,
 	// not accumulated). Wired by the host to a dashboard usage store.
@@ -47,6 +53,18 @@ func (b *Bot) SetJobRunner(fn func(name string) error) { b.runJob = fn }
 
 // SetReloader wires /reload (and the reload tool) to the host's reload coordinator.
 func (b *Bot) SetReloader(fn func() (shell3.ReloadResult, error)) { b.reload = fn }
+
+// SetMedia wires the bot's STT/describe/TTS capabilities and the per-chat
+// inbound-voice-reply mode override. The host MUST call it at boot and again
+// after every Runtime.Reload so transcription/description/speech use the
+// fresh config. The image_generate host tool is NOT registered here — the
+// host installs it via Runtime.SetSessionDecorator, which covers the main
+// session, every subagent child session, and post-reload re-application
+// uniformly.
+func (b *Bot) SetMedia(c *media.Clients, modeStore *media.ModeStore) {
+	b.media = c
+	b.voiceMode = modeStore
+}
 
 // decorateSession (re)applies the bot's host-level session customizations:
 // the host tools. Must be called after NewBot AND after every Runtime.Reload
@@ -104,43 +122,74 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 		b.handleCommand(ctx, m) // defined in commands.go
 		return
 	}
-	// Transform any attachments into a text note: save the files to /tmp and
-	// tell the agent where they are + which tool to use. We never forward media
-	// bytes into the model — the agent ingests files itself with its own tools.
+	// Save attachments to /tmp — fast, local, no network — and compute hadVoice
+	// from their MIME types (also fast). The slow half (Transcribe/Describe,
+	// preflight.go's preflightText) never runs on this loop: it's deferred into
+	// the turn or interject goroutine below, so a hung media endpoint can never
+	// stall Bot.Run's update loop (and /stop stays servicable).
 	text := strings.TrimSpace(m.Text)
-	if note := attachmentNote(saveAttachments(m.Media), b.hasTool("read_media")); note != "" {
-		if text != "" {
-			text += "\n\n" + note
-		} else {
-			text = note
+	saved := saveAttachments(m.Media)
+	hadVoice := preflightScan(saved)
+	if len(saved) == 0 {
+		if len(m.Media) > 0 && text == "" {
+			b.sendReply(ctx, "⚠️ couldn't save that attachment.")
+			return
 		}
-	} else if len(m.Media) > 0 && text == "" {
-		b.sendReply(ctx, "⚠️ couldn't save that attachment.")
-		return
+		if text == "" {
+			return // nothing actionable
+		}
 	}
-	if text == "" {
-		return // nothing actionable
+	// composeText runs preflightText (network) then applies the same
+	// text-vs-injected composition and reply-quote wrapping handleMsg used to
+	// do inline. Whenever saved is empty, preflightText is a no-op (no lines,
+	// no note) so this degrades to plain withReplyContext(text, ...).
+	composeText := func(pctx context.Context) string {
+		out := text
+		if injected := b.preflightText(pctx, saved); injected != "" {
+			if out != "" {
+				out += "\n\n" + injected
+			} else {
+				out = injected
+			}
+		}
+		return withReplyContext(out, m.ReplyTo)
 	}
-	// If this is a Telegram reply/quote, prepend the quoted message so the model
-	// sees the context the user is responding to.
-	text = withReplyContext(text, m.ReplyTo)
+
 	// turnActive is the authoritative "a turn is running" signal. If one is
 	// already in flight, steer it via Interject (never blocks) instead of
 	// starting a second turn.
 	b.mu.Lock()
 	if b.turnActive {
+		if hadVoice {
+			b.turnHadVoice = true // a voice interjection counts for inbound TTS mode too
+		}
 		b.mu.Unlock()
-		b.sess.Interject(text) // steer the running turn; never blocks
+		// Preflight's network calls must not run on the update loop even for the
+		// interject path: run them on their own goroutine, timed out against the
+		// bot's lifetime ctx (not the running turn's turnCtx — Interject itself
+		// never blocks the running turn).
+		go func() {
+			pctx, pcancel := context.WithTimeout(ctx, preflightTimeout)
+			defer pcancel()
+			b.sess.Interject(composeText(pctx))
+		}()
 		return
 	}
 	turnCtx, cancel := context.WithCancel(ctx)
 	b.cancelTurn = cancel
 	b.turnActive = true
+	b.turnHadVoice = hadVoice
 	b.mu.Unlock()
 
 	stopTyping := b.keepTyping(ctx)
-	ch := b.sess.Send(turnCtx, text)
 	go func() {
+		// Preflight runs first, inside the turn goroutine, under turnCtx: /stop's
+		// cancelTurn aborts a hung transcription/description just like it aborts
+		// the model call, and the timeout bounds it independently of /stop.
+		pctx, pcancel := context.WithTimeout(turnCtx, preflightTimeout)
+		finalText := composeText(pctx)
+		pcancel()
+		ch := b.sess.Send(turnCtx, finalText)
 		reply := b.drainTurn(ch)
 		stopTyping()
 		b.mu.Lock()
@@ -151,7 +200,10 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 		// A user-initiated turn always answers ("" renders as "(no output)");
 		// only a stray edge sentinel is stripped.
 		reply, _ = b.stripHeartbeat(reply)
-		b.sendReply(ctx, reply)
+		b.mu.Lock()
+		turnVoice := b.turnHadVoice
+		b.mu.Unlock()
+		b.deliverReply(ctx, reply, turnVoice)
 		b.applyPendingReload(ctx) // self-evolution: agent edited config + called reload this turn
 	}()
 }

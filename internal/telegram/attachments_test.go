@@ -4,9 +4,23 @@ package telegram
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestSaveAttachmentsUsesMediaDir(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SHELL3_MEDIA_DIR", dir)
+	saved := saveAttachments([]Media{{Bytes: []byte("x"), MIME: "image/png", Filename: "a.png"}})
+	if len(saved) != 1 {
+		t.Fatalf("want 1 saved, got %d", len(saved))
+	}
+	t.Cleanup(func() { _ = os.Remove(saved[0].Path) })
+	if filepath.Dir(saved[0].Path) != dir {
+		t.Fatalf("saved to %q, want under media dir %q", saved[0].Path, dir)
+	}
+}
 
 func TestSaveAttachments_WritesFiles(t *testing.T) {
 	saved := saveAttachments([]Media{

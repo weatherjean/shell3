@@ -80,8 +80,46 @@ func TestMediaPartFromBytes_Audio(t *testing.T) {
 
 // TestMediaPartFromBytes_UnsupportedMIME: anything else errors with guidance.
 func TestMediaPartFromBytes_UnsupportedMIME(t *testing.T) {
-	if _, _, err := MediaPartFromBytes([]byte("x"), "video/mp4"); err == nil || !strings.Contains(err.Error(), "unsupported MIME") {
+	if _, _, err := MediaPartFromBytes([]byte("x"), "application/zip"); err == nil || !strings.Contains(err.Error(), "unsupported MIME") {
 		t.Fatalf("want unsupported-MIME error, got %v", err)
+	}
+}
+
+// TestMediaPartFromBytes_PDF: application/pdf maps to a "file" ContentPart
+// with a synthesized filename (the bytes-based path has no path to derive
+// one from).
+func TestMediaPartFromBytes_PDF(t *testing.T) {
+	part, desc, err := MediaPartFromBytes(tinyPDF, "application/pdf")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if part.Type != llm.ContentPartTypeFile || !strings.HasPrefix(part.FileData, "data:application/pdf;base64,") {
+		t.Fatalf("part = %+v", part)
+	}
+	if part.FileName != "file.pdf" {
+		t.Fatalf("filename = %q, want synthesized file.pdf", part.FileName)
+	}
+	if !strings.Contains(desc, "pdf file.pdf") {
+		t.Fatalf("desc = %q", desc)
+	}
+}
+
+// TestMediaPartFromBytes_Video: every accepted video MIME maps to a video_url
+// data-URI part carrying the base64 of the input, untranscoded.
+func TestMediaPartFromBytes_Video(t *testing.T) {
+	raw := []byte("fake video payload")
+	for _, mime := range []string{"video/mp4", "video/webm", "video/quicktime"} {
+		part, desc, err := MediaPartFromBytes(raw, mime)
+		if err != nil {
+			t.Fatalf("%s: %v", mime, err)
+		}
+		want := "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(raw)
+		if part.Type != llm.ContentPartTypeVideoURL || part.VideoURL != want {
+			t.Fatalf("%s: part = %+v, want VideoURL %q", mime, part, want)
+		}
+		if !strings.Contains(desc, mime) {
+			t.Fatalf("%s: desc = %q", mime, desc)
+		}
 	}
 }
 

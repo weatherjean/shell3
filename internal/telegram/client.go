@@ -33,6 +33,14 @@ type Callback struct {
 	Data string
 }
 
+// MenuOption is one inline-keyboard button in a SendMenu row: Label is the
+// button text, Data is the callback_data returned via the Callbacks channel
+// when the button is pressed.
+type MenuOption struct {
+	Label string
+	Data  string
+}
+
 // tgClient is the transport surface the Bot depends on. The real impl wraps
 // github.com/go-telegram/bot; tests inject a fake.
 type tgClient interface {
@@ -48,6 +56,17 @@ type tgClient interface {
 	Typing(ctx context.Context, chatID int64) error
 	// SendDocument uploads a file to the chat with an optional caption.
 	SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string) error
+	// SendPhoto uploads an image to the chat with an optional caption.
+	SendPhoto(ctx context.Context, chatID int64, filename string, data []byte, caption string) error
+	// SendVoice uploads a voice note (ogg/opus) to the chat with an optional caption.
+	SendVoice(ctx context.Context, chatID int64, data []byte, caption string) error
+	// SendAudio uploads a music/audio file to the chat with an optional caption.
+	SendAudio(ctx context.Context, chatID int64, filename string, data []byte, caption string) error
+	// SendVideo uploads a video file to the chat with an optional caption.
+	SendVideo(ctx context.Context, chatID int64, filename string, data []byte, caption string) error
+	// SendMenu posts text with one row of inline buttons; each option's Data is
+	// returned via the Callbacks channel when pressed. Returns the sent message id.
+	SendMenu(ctx context.Context, chatID int64, text string, options []MenuOption) (msgID int, err error)
 	// SendConfirm posts text with two inline buttons (Allow/Deny) carrying the
 	// given callback_data, and returns the sent message id so it can be edited
 	// when the choice is made.

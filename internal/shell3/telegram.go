@@ -49,3 +49,14 @@ func (rt *Runtime) HeartbeatConfig() *Heartbeat {
 	defer rt.mu.Unlock()
 	return rt.heartbeat
 }
+
+// Parts returns the runtime's current shared config assembly, for host code
+// that needs config-derived resources Runtime doesn't otherwise expose (e.g.
+// building media.Clients from LoadedConfig + EnsureProxy — the media package
+// can't be a Runtime dependency since it depends on internal/shell3 itself).
+// Locked: races Reload's mu-held swap, same as HeartbeatConfig above.
+func (rt *Runtime) Parts() *agentsetup.Parts {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return rt.parts
+}

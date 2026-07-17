@@ -36,6 +36,19 @@ shell3.model("{{.Name | luaesc}}", {
 {{else}}  -- run_proxy   = "npx @some/codex-proxy --port 8787",
 {{end}}})
 
+-- Media (optional): voice notes in/out, image describe/generate — all
+-- OpenAI-compatible. One free Groq key covers STT + TTS.
+-- shell3.model("groq-whisper", { base_url = "https://api.groq.com/openai/v1",
+--   api_key = shell3.env.secret("GROQ_API_KEY"), model = "whisper-large-v3-turbo" })
+-- shell3.model("groq-tts", { base_url = "https://api.groq.com/openai/v1",
+--   api_key = shell3.env.secret("GROQ_API_KEY"), model = "playai-tts" })
+-- shell3.stt{ model = "groq-whisper" }              -- voice notes → text
+-- shell3.tts{ model = "groq-tts", voice = "Fritz-PlayAI", mode = "inbound" }
+-- shell3.describe{ model = "some-vision-model" }    -- only if your main model can't see images
+-- shell3.imagegen{ model = "some-image-model", size = "1024x1024" }
+--   (for OpenRouter image models add api = "openrouter"; every agent and
+--    subagent gets the image_generate tool, files land in ~/.shell3/media/)
+
 -- ---------------------------------------------------------------------------
 -- Command gate — shell3.on_tool_call (YOUR ONLY POLICY GATE)
 -- ---------------------------------------------------------------------------

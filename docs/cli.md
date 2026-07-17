@@ -24,7 +24,9 @@ live — refused while background tasks are running), `/run <job>` (fire a cron
 job on demand), `/set <name> <value>` (tune a model parameter; bare `/set`
 lists them), `/clear` (reset the conversation — refused while background tasks
 run; `/stop` first), `/compact` (force one context compaction now; replies
-with the token delta), `/rollback`.
+with the token delta), `/rollback`, `/voice [off|inbound|always]` (when
+`shell3.tts{}` is configured — bare `/voice` shows a menu of the current mode;
+the choice persists across restarts, in `~/.shell3/voice_mode.json`).
 
 | Flag | Effect |
 |------|--------|

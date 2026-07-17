@@ -278,6 +278,13 @@ func (s *Session) RunQueued(ctx context.Context) <-chan Event {
 // turn that consumes them.
 func (s *Session) HasQueuedInput() bool { return s.sess.HasInbox() }
 
+// Headless reports whether this session runs without a human attached
+// (subagent children, cron jobs). Host-tool registrars use it to tailor
+// tool instructions — e.g. image_generate tells a headless session to report
+// the saved path instead of naming send_media_telegram, which only the main
+// chat session has.
+func (s *Session) Headless() bool { return s.opts.Headless }
+
 // Send runs one turn for prompt and returns a channel of that turn's events,
 // closed when the turn ends (the deferred close(out) below always runs).
 // Channel close is the authoritative end-of-turn signal: a terminal Done/Error

@@ -23,6 +23,51 @@ type fakeClient struct {
 	confirms []sentConfirm
 	edits    []sentEdit
 	answered []string
+	photos   []sentPhoto
+	voices   []sentVoice
+	audios   []sentAudio
+	videos   []sentVideo
+	menus    []sentMenu
+
+	failPhoto error
+	failVoice error
+	failAudio error
+	failVideo error
+	failMenu  error
+}
+
+type sentPhoto struct {
+	chatID   int64
+	filename string
+	data     []byte
+	caption  string
+}
+
+type sentVoice struct {
+	chatID  int64
+	data    []byte
+	caption string
+}
+
+type sentAudio struct {
+	chatID   int64
+	filename string
+	data     []byte
+	caption  string
+}
+
+type sentVideo struct {
+	chatID   int64
+	filename string
+	data     []byte
+	caption  string
+}
+
+type sentMenu struct {
+	msgID   int
+	chatID  int64
+	text    string
+	options []MenuOption
 }
 
 type sentConfirm struct {
@@ -117,6 +162,57 @@ func (f *fakeClient) SendDocument(ctx context.Context, chatID int64, filename st
 	defer f.mu.Unlock()
 	f.docs = append(f.docs, sentDoc{chatID: chatID, filename: filename, data: data, caption: caption})
 	return nil
+}
+
+func (f *fakeClient) SendPhoto(ctx context.Context, chatID int64, filename string, data []byte, caption string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failPhoto != nil {
+		return f.failPhoto
+	}
+	f.photos = append(f.photos, sentPhoto{chatID: chatID, filename: filename, data: data, caption: caption})
+	return nil
+}
+
+func (f *fakeClient) SendVoice(ctx context.Context, chatID int64, data []byte, caption string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failVoice != nil {
+		return f.failVoice
+	}
+	f.voices = append(f.voices, sentVoice{chatID: chatID, data: data, caption: caption})
+	return nil
+}
+
+func (f *fakeClient) SendAudio(ctx context.Context, chatID int64, filename string, data []byte, caption string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failAudio != nil {
+		return f.failAudio
+	}
+	f.audios = append(f.audios, sentAudio{chatID: chatID, filename: filename, data: data, caption: caption})
+	return nil
+}
+
+func (f *fakeClient) SendVideo(ctx context.Context, chatID int64, filename string, data []byte, caption string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failVideo != nil {
+		return f.failVideo
+	}
+	f.videos = append(f.videos, sentVideo{chatID: chatID, filename: filename, data: data, caption: caption})
+	return nil
+}
+
+func (f *fakeClient) SendMenu(ctx context.Context, chatID int64, text string, options []MenuOption) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failMenu != nil {
+		return 0, f.failMenu
+	}
+	f.next++
+	f.menus = append(f.menus, sentMenu{msgID: f.next, chatID: chatID, text: text, options: options})
+	return f.next, nil
 }
 
 func (f *fakeClient) lastDoc() (sentDoc, bool) {

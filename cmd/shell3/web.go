@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/weatherjean/shell3/internal/media"
 	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/web"
 )
@@ -70,6 +71,16 @@ func newWebCommand() *cobra.Command {
 			}
 			d = web.NewDriver(ctx, rt, sess)
 
+			// Register the image_generate host tool on every session — the main
+			// one just created and each subagent child at spawn (a no-op when no
+			// shell3.imagegen{} is declared, per media.RegisterImageTool);
+			// Runtime.Reload re-applies it. Web has no TTS/STT surface of its own
+			// (no send_media_telegram / voice replies), so unlike the bot there
+			// is no SetMedia equivalent to wire.
+			rt.SetSessionDecorator(func(s *shell3.Session) {
+				_ = media.RegisterImageTool(s, buildMediaClients(rt))
+			})
+
 			// Scheduled jobs keep running while web is the active host; a
 			// declared heartbeat does not (it is a Telegram-notification
 			// feature), which deserves a line rather than silence.
@@ -101,7 +112,9 @@ func newWebCommand() *cobra.Command {
 				d.SetJobRunner(sched.Run)
 			}
 			d.SetReloader(func() (shell3.ReloadResult, error) {
-				ns, res, err := reloadAndRearm(rt, webRearm{d}, srv, sess, sched)
+				// No media resync needed: Runtime.Reload re-applies the session
+				// decorator, which re-registers image_generate with fresh clients.
+				ns, res, err := reloadAndRearm(rt, webRearm{d}, srv, sess, sched, nil)
 				sched = ns
 				return res, err
 			})

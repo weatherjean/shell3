@@ -228,3 +228,56 @@ shell3.agent({ name = "code", model = "m", prompt = "c" })
 		t.Fatal("SubagentByName(worker) returned ok=false; subagent was not registered")
 	}
 }
+
+// TestSubagent_MediaGateGrantsReadMedia pins the guarantee that
+// tools = { media = true } works for subagents exactly as for agents: the
+// read_media tool definition is advertised when set and absent when not.
+func TestSubagent_MediaGateGrantsReadMedia(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "shell3.lua", minModelHdr+`
+local seer = shell3.subagent({
+	name = "seer",
+	description = "looks at media",
+	model = "m",
+	prompt = "you look",
+	tools = { bash = true, media = true },
+})
+local blind = shell3.subagent({
+	name = "blind",
+	description = "text only",
+	model = "m",
+	prompt = "you read",
+	tools = { bash = true },
+})
+shell3.agent({
+	name = "code",
+	model = "m",
+	prompt = "c",
+	tools = { subagents = { seer, blind } },
+})
+`)
+	c, err := Load(dir + "/shell3.lua")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	has := func(name string) bool {
+		sa, ok := c.SubagentByName(name)
+		if !ok {
+			t.Fatalf("subagent %q not registered", name)
+		}
+		for _, td := range ToolDefs(sa.Gates, nil) {
+			if td.Name == "read_media" {
+				return true
+			}
+		}
+		return false
+	}
+	if !has("seer") {
+		t.Error("subagent with tools={media=true} must advertise read_media")
+	}
+	if has("blind") {
+		t.Error("subagent without media gate must not advertise read_media")
+	}
+}
