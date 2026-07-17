@@ -103,8 +103,8 @@ busy/out-of-window ticks are skipped, `/reload` rearms, and `shell3 dev
 --heartbeat` fires one tick locally with a suppression verdict),
 and a Mini App **dashboard**
 (`internal/web`, Telegram initData auth) with status / past runs /
-subagent transcripts / jobs / cron / a read-only file explorer (`.env` and
-`ai-do-not-read.*` are redacted, never read from disk). The dashboard gets a
+subagent transcripts / jobs / cron / a read-only file explorer (`.env` is
+redacted, never read from disk). The dashboard gets a
 public https URL via `dashboard = { tunnel = "cloudflared tunnel --url
 http://{addr}" }` — `internal/tunnel` spawns the command detached, scrapes the
 first bare https URL from its output (log: `~/.shell3/tunnel.log`), and the bot
@@ -133,7 +133,6 @@ in `internal/web`'s `Driver`; the server takes a pluggable `AuthFunc`
 Secrets and credentials (provider API keys, tool tokens) live in a plain `.env` file beside the active `shell3.lua` (e.g. `~/.shell3/.env`), read from Lua via `shell3.env.secret("KEY")`. Never read, display, or include the contents of any credential file in a response. This applies to all agents, assistants, and automated tools.
 
 - `.env` beside `shell3.lua` (e.g. `~/.shell3/.env`) — provider API keys, base URLs, tool secrets
-- any legacy `ai-do-not-read.*` files, if present — treat the same way
 
 ## Project Layout
 

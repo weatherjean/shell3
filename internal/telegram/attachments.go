@@ -30,9 +30,9 @@ func saveAttachments(files []Media) []savedFile {
 	}
 	dir, err := media.Dir()
 	if err != nil {
-		// Fall back to the old temp location rather than dropping the files.
-		dir = filepath.Join(os.TempDir(), "shell3-telegram")
-		_ = os.MkdirAll(dir, 0o755)
+		// No durable media dir (home unresolvable): the files are dropped and
+		// handleMsg tells the user nothing could be saved.
+		return nil
 	}
 	var out []savedFile
 	for _, m := range files {

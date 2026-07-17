@@ -143,7 +143,6 @@ func TestGlobalGitignore(t *testing.T) {
 		t.Errorf("global .gitignore must not contain data/:\n%s", content)
 	}
 	for _, want := range []string{
-		"ai-do-not-read.*",
 		".env",
 		"shell3.log",
 		"shell3.log.*",

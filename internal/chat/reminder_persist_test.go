@@ -11,12 +11,12 @@ func TestReminderPersistAndRestore(t *testing.T) {
 	st, _ := runs.Open(t.TempDir() + "/shell3_project")
 	id, _ := st.NewSession(runs.Meta{Workdir: "/w", ConfigPath: "/c"})
 
-	s := NewSession(SessionOpts{Store: st, ID: id})
+	s := NewSession(SessionOpts{Store: st, StoreID: id})
 	s.append(llm.Message{Role: llm.RoleUser, Content: "hi"})
 	emitSystemReminder(s, "<system-reminder>subagent x finished</system-reminder>")
 
 	// A fresh session for the same id restores the reminder from the sidecar.
-	s2 := NewSession(SessionOpts{Store: st, ID: id})
+	s2 := NewSession(SessionOpts{Store: st, StoreID: id})
 	if err := s2.RestoreReminders(); err != nil {
 		t.Fatalf("RestoreReminders: %v", err)
 	}

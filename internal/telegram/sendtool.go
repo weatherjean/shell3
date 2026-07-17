@@ -102,7 +102,7 @@ func (b *Bot) sendMediaHandler(ctx context.Context, argsJSON string) (string, er
 		path = filepath.Join(b.workDir, path)
 	}
 	base := filepath.Base(path)
-	if lower := strings.ToLower(base); lower == ".env" || strings.HasPrefix(lower, "ai-do-not-read") {
+	if strings.ToLower(base) == ".env" {
 		return "error: refusing to send a credentials file", nil
 	}
 	info, err := os.Stat(path)

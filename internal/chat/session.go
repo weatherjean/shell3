@@ -197,21 +197,16 @@ type SessionOpts struct {
 	// InitialMessages seeds the conversation when resuming a stored session.
 	// Applied verbatim as the starting in-memory history before the first turn.
 	InitialMessages []llm.Message
-	// Store and ID wire sidecar persistence for reminders. When Store is non-nil
-	// and ID is non-empty, recordReminder appends to runs/<ID>/reminders.jsonl
+	// Store wires sidecar persistence for reminders. When Store is non-nil and
+	// StoreID is non-empty, recordReminder appends to runs/<id>/reminders.jsonl
 	// and RestoreReminders reloads it on resume.
 	Store *runs.Store
-	ID    string
 }
 
 // NewSession constructs a Session that delivers events to opts.Sink. A nil Sink
 // installs a no-op so emits are always safe. Other fields are optional.
 func NewSession(opts SessionOpts) *Session {
-	id := opts.StoreID
-	if id == "" {
-		id = opts.ID
-	}
-	s := &Session{id: id, store: opts.Store, sink: opts.Sink}
+	s := &Session{id: opts.StoreID, store: opts.Store, sink: opts.Sink}
 	s.reminders.contextWindowFor = opts.ContextWindowFor
 	if s.sink == nil {
 		s.sink = func(Event) {}

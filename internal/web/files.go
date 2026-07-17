@@ -42,10 +42,9 @@ type fileResp struct {
 
 // isCredentialFile reports whether a base name is a secrets file whose contents
 // must never be sent to the browser. Mirrors the guard in sendtool.go: the
-// `.env` beside shell3.lua and any legacy ai-do-not-read.* file.
+// `.env` beside shell3.lua.
 func isCredentialFile(base string) bool {
-	lower := strings.ToLower(base)
-	return lower == ".env" || strings.HasPrefix(lower, "ai-do-not-read")
+	return strings.ToLower(base) == ".env"
 }
 
 // resolveInConfig maps a browser-supplied relative path to an absolute path

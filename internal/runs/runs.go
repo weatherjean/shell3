@@ -24,7 +24,7 @@ type Meta struct {
 	Status     string    `json:"status"` // "live" | "ended"
 	ParentID   string    `json:"parent_id,omitempty"`
 	StartedAt  time.Time `json:"started_at"`
-	EndedAt    time.Time `json:"ended_at,omitempty"`
+	EndedAt    time.Time `json:"ended_at,omitzero"`
 	LastAt     time.Time `json:"last_at"`
 }
 
@@ -183,7 +183,7 @@ func (s *Store) ListSessions(limit int) ([]Meta, error) {
 	}
 	var ids []string
 	for _, e := range ents {
-		if e.IsDir() && e.Name() != "jobs" {
+		if e.IsDir() {
 			ids = append(ids, e.Name())
 		}
 	}

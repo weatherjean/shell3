@@ -574,7 +574,7 @@ function cronDetail(j) {
 // ---- Files (read-only explorer of the config folder) ----------------------
 // Navigates the directory holding the active shell3.lua. Tapping a folder
 // descends; tapping a file opens its contents on a back-able subpage. Secrets
-// (.env, ai-do-not-read.*) are listed but their contents are redacted server-side.
+// (.env) are listed but their contents are redacted server-side.
 let filePath = "";    // current directory, relative to the config root ("" = root)
 let fileSel = null;   // relative path of the open file, or null
 let filesSig = null;

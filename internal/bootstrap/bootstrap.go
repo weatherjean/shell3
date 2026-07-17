@@ -36,9 +36,9 @@ func EnsureProject(l paths.Local) error {
 }
 
 // ensureSelfGitignore writes a .gitignore containing "*" at root so the entire
-// .shell3_project/ folder is ignored from within (the original ./.shell3/ '*'
-// pattern). Self-contained: an enclosing repo needs no entry of its own.
-// Idempotent — skips the write when "*" is already present.
+// .shell3_project/ folder is ignored from within. Self-contained: an enclosing
+// repo needs no entry of its own. Idempotent — skips the write when "*" is
+// already present.
 func ensureSelfGitignore(root string) error {
 	path := filepath.Join(root, ".gitignore")
 	b, err := os.ReadFile(path)
@@ -104,7 +104,6 @@ func ensureGlobalGitignore(g paths.Global) error {
 // sentinel is absent. Covers credentials, secrets, and all log files
 // (current + rotated archives shell3.log.1 through shell3.log.N).
 const globalGitignoreAddition = `# shell3 — never commit these even in a dotfiles repo
-ai-do-not-read.*
 .env
 shell3.log
 shell3.log.*
