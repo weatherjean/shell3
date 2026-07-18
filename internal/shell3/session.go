@@ -185,10 +185,10 @@ func (s *Session) route(ev chat.Event) {
 	if !ok {
 		return
 	}
-	// IsCustomTool can't be resolved in the pure translate (it has no config);
-	// resolve it here against the session's current agent custom-tool set.
-	if pub.Kind == ToolCall && s.cfg.CustomToolNames[pub.ToolName] {
-		pub.IsCustomTool = true
+	// IsHostTool can't be resolved in the pure translate (it has no config);
+	// resolve it here against the session-registered host-tool set.
+	if pub.Kind == ToolCall && s.cfg.HostToolNames[pub.ToolName] {
+		pub.IsHostTool = true
 	}
 	s.mu.Lock()
 	cur, done := s.cur, s.curDone
@@ -754,7 +754,7 @@ func (s *Session) Rollback() (ok bool, err error) {
 
 // SwitchAgent activates the configured agent named name for subsequent Sends
 // (a front-end's agent-switch action). Switching swaps the agent's model client,
-// system prompt, tool set, custom-tool routing, skills, status
+// system prompt, tool set, host-tool routing, skills, status
 // line, and context window while keeping conversation history. Returns an error
 // for an unknown agent or when the config declares no agents, and ErrBusy
 // while a turn is in flight: it mutates cfg in place, which the next Send's

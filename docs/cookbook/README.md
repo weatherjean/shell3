@@ -9,13 +9,11 @@ The two extensible pieces, in one breath:
 - **Skills** are `.md` files with a frontmatter `description:` that the agent
   reads with `cat`. Install: copy into `~/.shell3/lib/skills/` (the scaffold
   agent already lists that dir), check `shell3 health`, `/reload`.
-- **Custom tools** are declarative bash-command templates
-  (`shell3.tool{ command=… }`), not Lua handlers. Install: copy into
-  `~/.shell3/lib/`, `require` it from `shell3.lua`, wire it into the agent.
-  Parameters arrive as `$`-named env vars; declared `secrets` are exported
-  into the command's environment (see the
-  [secrets note](../configuration.md#custom-tools) before using them on a
-  shared host).
+- **Scripts** are the extension mechanism: reusable glue lives in
+  `~/.shell3/lib/bin/` and runs through `bash`; a script that needs an API
+  key reads it from `.env` itself at point of use. The scaffold's
+  `scripting` skill teaches the pattern (see
+  [Scripts & secrets](../configuration.md#scripts--secrets)).
 
 Full reference: [../configuration.md](../configuration.md).
 
@@ -27,15 +25,15 @@ Chrome via puppeteer-core)
 - `writing-plans.md` — a planning + approval gate before non-trivial changes.
 - `executing-plans.md` — safe execution and a git workflow once a plan is agreed.
 - `codebase-discovery.md` — navigating unfamiliar code, pruning context aggressively.
-- `web-search.md` — web research with the `brave_search` / `web_fetch` tools.
+- `web-search.md` — web research via `brave-search` / `web-fetch` wrapper scripts.
 
 **Tools and agents** (`lib/`)
 
-- `tools.lua` — a custom-tool template to copy from.
 - `extra-agents.lua` — more subagents (e.g. a read-only `review` specialist).
 
 **Provider and host recipes**
 
+- `mcp.md` — MCP servers: stdio + HTTP recipes, allow-lists, gating.
 - `models.md` — provider-specific request params via `extra`.
 - `proxy.md` — `run_proxy` recipes (Codex via npx, litellm).
 - `sandbox.md` — sandbox/route bash via `on_tool_call` argv verdicts.

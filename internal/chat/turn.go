@@ -381,8 +381,8 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 				var handler ToolHandler
 				if h, ok := turnScoped[tc.Name]; ok {
 					handler = h
-				} else if cfg.CustomToolNames[tc.Name] {
-					res = dispatchCustomTool(ctx, cfg, tc.Name, tc.RawArgs)
+				} else if cfg.HostToolNames[tc.Name] {
+					res = dispatchHostTool(ctx, cfg, tc.Name, tc.RawArgs)
 				} else if h, ok := cfg.Handlers[tc.Name]; ok {
 					handler = h
 				} else {

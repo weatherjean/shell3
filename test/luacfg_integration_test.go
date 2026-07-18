@@ -27,30 +27,17 @@ func writeTmpFile(t *testing.T, dir, name, body string) string {
 	return p
 }
 
-// TestLuacfgIntegration_OnToolCallAndCustomTool loads a luacfg config and drives a
-// full chat turn through the chat turn loop using fakellm. It asserts:
-//   - A custom (bash command-template) tool call runs its command with the
-//     declared param exported into the env and returns the command's stdout.
-//   - A bash call with a dangerous command is blocked by shell3.on_tool_call
-//     (the gate engine) before it ever executes.
-func TestLuacfgIntegration_OnToolCallAndCustomTool(t *testing.T) {
+// TestLuacfgIntegration_OnToolCallHooks loads a luacfg config and drives full
+// chat turns through the turn loop using fakellm, asserting the
+// shell3.on_tool_call/on_tool_result chains fire on the real dispatch path
+// (block, redact, non-bash gating).
+func TestLuacfgIntegration_OnToolCallHooks(t *testing.T) {
 	dir := t.TempDir()
 	writeTmpFile(t, dir, "shell3.lua", `
 shell3.model("m", {
   base_url = "https://api.example.com/v1",
   api_key  = "sk-test",
   model    = "x",
-})
-
-local greet = shell3.tool({
-  name        = "greet",
-  description = "Say hello to a name.",
-  parameters  = {
-    type       = "object",
-    properties = { name = { type = "string" } },
-    required   = { "name" },
-  },
-  command = [[printf 'hello, %s' "$name"]],
 })
 
 shell3.on_tool_call(function(t)
@@ -75,8 +62,7 @@ shell3.agent({
   model = "m",
   prompt = "you are a test agent",
   tools = {
-    bash   = true,
-    custom = { greet },
+    bash = true,
   },
 })
 `)
@@ -88,24 +74,6 @@ shell3.agent({
 	defer lc.Close()
 
 	ctx := context.Background()
-
-	// Resolution: greet should export name=test into the env for its command.
-	rc, err := lc.ResolveCustomCall("greet", `{"name":"test"}`)
-	if err != nil {
-		t.Fatalf("ResolveCustomCall: %v", err)
-	}
-	if rc.Command != `printf 'hello, %s' "$name"` {
-		t.Errorf("ResolveCustomCall command: got %q", rc.Command)
-	}
-	var sawName bool
-	for _, e := range rc.Env {
-		if e == "name=test" {
-			sawName = true
-		}
-	}
-	if !sawName {
-		t.Errorf("ResolveCustomCall env missing name=test: %v", rc.Env)
-	}
 
 	// on_tool_call closure: rm -rf / should be blocked, echo allowed.
 	if !lc.HasToolCall() {
@@ -123,14 +91,7 @@ shell3.agent({
 		t.Errorf("on_tool_call should allow 'echo hello', got action=%v", v2.Action)
 	}
 
-	// --- Turn 1: custom tool call path ---
-	t.Run("custom_tool_via_turn", func(t *testing.T) {
-		events := runToolCallTurn(t, lc, dir, "say hi",
-			llm.ToolCall{ID: "1", Name: "greet", RawArgs: `{"name":"world"}`}, nil)
-		assertToolResultContains(t, events, "hello, world")
-	})
-
-	// --- Turn 2: on_tool_call blocks the dangerous bash call ---
+	// --- Turn 1: on_tool_call blocks the dangerous bash call ---
 	t.Run("on_tool_call_blocks_via_turn", func(t *testing.T) {
 		// The bash handler returns "error: blocked by on_tool_call: ..." instead of
 		// executing the command.
@@ -194,19 +155,17 @@ func runToolCallTurn(t *testing.T, lc *luacfg.LoadedConfig, dir, prompt string, 
 		}},
 	)
 	a := lc.FirstAgent()
-	toolDefs := luacfg.ToolDefs(a.Gates, lc.CustomToolsFor(a.CustomTools))
+	toolDefs := luacfg.ToolDefs(a.Gates)
 
 	var events []chat.Event
 	sess := chat.NewSession(chat.SessionOpts{Sink: func(ev chat.Event) { events = append(events, ev) }})
 	sess.Start(map[string]string{"mode": "test"})
 
 	turnCfg := chat.TurnConfig{
-		LLM:               fake,
-		Personality:       persona.Persona{Name: "base", SystemPrompt: "you are a test", Tools: toolDefs},
-		StatusLine:        "test │ x",
-		Log:               applog.Noop{},
-		ResolveCustomTool: lc.ResolveCustomCall,
-		AgentKnobs:        chat.AgentKnobs{CustomToolNames: map[string]bool{"greet": true}},
+		LLM:         fake,
+		Personality: persona.Persona{Name: "base", SystemPrompt: "you are a test", Tools: toolDefs},
+		StatusLine:  "test │ x",
+		Log:         applog.Noop{},
 		ToolConfig: chat.ToolConfig{
 			WorkDir: dir,
 			RunToolCall: func(ctx context.Context, name, command, argsJSON string, headless bool) chat.ToolCallVerdict {
@@ -278,7 +237,7 @@ shell3.agent({ name = "a", model = "m", prompt = "p", tools = { bash = true } })
 	)
 
 	a := lc.FirstAgent()
-	toolDefs := luacfg.ToolDefs(a.Gates, lc.CustomToolsFor(a.CustomTools))
+	toolDefs := luacfg.ToolDefs(a.Gates)
 
 	var events []chat.Event
 	sess := chat.NewSession(chat.SessionOpts{Sink: func(ev chat.Event) { events = append(events, ev) }})

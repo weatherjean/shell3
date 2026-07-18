@@ -82,7 +82,7 @@ func isBashTool(name string) bool {
 }
 
 // gateNonBashTool runs the on_tool_call chain for a non-bash tool (edit_file,
-// read_media, custom tools, …) before it dispatches.
+// read_media, host tools, …) before it dispatches.
 // The chain sees the real t.name and a nil t.command (only bash tools carry a
 // command), so handlers gate these by t.name / t.args. Only nil / block / ask are
 // meaningful here: a {command=...} or {argv=...} verdict can't apply to a non-bash

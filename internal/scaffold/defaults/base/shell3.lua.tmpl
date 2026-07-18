@@ -2,8 +2,6 @@
 -- live in the shell3 repo under docs/cookbook/.
 -- Secrets live in .env beside this file (never commit it).
 
-local tools  = require("lib.tools")            -- { web_fetch, brave_search }
-
 -- Skills: every *.md in the dirs an agent lists under skills={} is one skill —
 -- markdown with a frontmatter `description:`. Drop a file into lib/skills/ and
 -- /reload; `shell3 health` flags files the loader had to skip.
@@ -53,6 +51,23 @@ shell3.describe{ model = "{{.Name | luaesc}}" }
 --   (for OpenRouter image models add api = "openrouter"; every agent and
 --    subagent gets the image_generate tool, files land in ~/.shell3/media/)
 
+-- MCP servers (optional): tools-only client, stdio + streamable HTTP. Declare
+-- once here, then opt in per agent with tools = { mcp = {"github"} } (or
+-- "all"); omitted = no MCP tools. Names surface as mcp_<server>_<tool> and
+-- pass through on_tool_call like any tool (t.command is nil — gate on t.name).
+-- `shell3 health` checks every server; docs: docs/configuration.md.
+-- shell3.mcp({
+--   github = {
+--     command = { "github-mcp-server", "stdio" },
+--     env     = { GITHUB_TOKEN = shell3.env.secret("GITHUB_TOKEN") },
+--   },
+--   linear  = {
+--     url     = "https://mcp.linear.app/mcp",
+--     headers = { Authorization = "Bearer " .. shell3.env.secret("LINEAR_KEY") },
+--     allow   = { "search_issues", "get_issue" },
+--   },
+-- })
+
 -- ---------------------------------------------------------------------------
 -- Command gate — shell3.on_tool_call (YOUR ONLY POLICY GATE)
 -- ---------------------------------------------------------------------------
@@ -80,13 +95,16 @@ shell3.describe{ model = "{{.Name | luaesc}}" }
 --       if t.headless then return { block = true, reason = "needs approval; rerun interactively" } end
 --       return { ask = "Run?\n" .. t.command, reason = "denied" }
 --     end end
+--     -- keep secrets out of the conversation: scripts read .env at point of
+--     -- use (see the scripting skill); the model must not read it directly.
+--     if ENV:match(t.command) then return { block = true, reason = "read secrets via a lib/bin script, not directly (scripting skill)" } end
 --   end
 --   -- non-bash tools fire too — gate them by t.name + t.args, e.g.:
 --   -- if t.name == "edit_file" and ENV:match(t.args) then return { block = true, reason = "no .env" } end
 -- end)
 
 -- Optional: rewrite a tool's OUTPUT before the model sees it (e.g. redact secrets).
--- Fires for EVERY tool; r.name is the real tool name ("bash", "edit_file", custom, ...).
+-- Fires for EVERY tool; r.name is the real tool name ("bash", "edit_file", image_generate, ...).
 -- Gate on r.name only if you mean to — for redaction you usually want all output.
 -- shell3.on_tool_result(function(r)
 --   return { output = (r.output:gsub("API_KEY=%S+", "API_KEY=[redacted]")) }
@@ -158,7 +176,6 @@ You are an expert coding assistant inside shell3. Work autonomously as a senior 
     media             = false,
 {{end}}
     subagents         = { explorer },
-    custom            = { tools.web_fetch, tools.brave_search },
   },
   skills = { "lib/skills" },
 })

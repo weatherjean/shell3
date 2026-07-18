@@ -10,8 +10,8 @@ import (
 
 // TestRegisterHostTool_NameRouting pins the closure-chaining in RegisterHostTool:
 // two registered tools each route to their own handler, an unknown name returns
-// an ErrHostToolNotFound-wrapped error (so dispatchCustomTool can fall through),
-// and both names land in the schema and custom-tool set.
+// an ErrHostToolNotFound-wrapped error (so dispatchHostTool surfaces the unknown-tool error),
+// and both names land in the schema and host-tool set.
 func TestRegisterHostTool_NameRouting(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("ok"))
 	s, err := rt.Session(SessionOpts{})
@@ -46,8 +46,8 @@ func TestRegisterHostTool_NameRouting(t *testing.T) {
 	}
 
 	for _, name := range []string{"alpha", "beta"} {
-		if !s.cfg.CustomToolNames[name] {
-			t.Errorf("CustomToolNames missing %q", name)
+		if !s.cfg.HostToolNames[name] {
+			t.Errorf("HostToolNames missing %q", name)
 		}
 		found := false
 		for _, td := range s.cfg.Personality.Tools {

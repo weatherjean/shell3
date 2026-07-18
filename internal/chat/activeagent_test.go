@@ -24,8 +24,8 @@ func TestApplyActiveAgentCopiesAllAgentFields(t *testing.T) {
 		Params:       llm.RequestParams{ReasoningEffort: "high"},
 		ModelID:      "gpt-x",
 		AgentKnobs: AgentKnobs{
-			CustomToolNames: map[string]bool{"foo": true},
-			ContextWindow:   128000,
+			HostToolNames: map[string]bool{"foo": true},
+			ContextWindow: 128000,
 		},
 	}
 
@@ -49,8 +49,8 @@ func TestApplyActiveAgentCopiesAllAgentFields(t *testing.T) {
 	if len(cfg.ActiveTools) != 1 || cfg.ActiveTools[0] != "bash" {
 		t.Errorf("ActiveTools not copied: %v", cfg.ActiveTools)
 	}
-	if !cfg.CustomToolNames["foo"] {
-		t.Errorf("CustomToolNames not copied: %v", cfg.CustomToolNames)
+	if !cfg.HostToolNames["foo"] {
+		t.Errorf("HostToolNames not copied: %v", cfg.HostToolNames)
 	}
 	if want := "plan │ gpt-x"; cfg.StatusLine != want {
 		t.Errorf("StatusLine = %q, want %q", cfg.StatusLine, want)

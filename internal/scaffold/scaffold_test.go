@@ -47,9 +47,9 @@ func TestRenderBaseConfig(t *testing.T) {
 		t.Errorf("shell3.lua still contains an unrendered template delimiter")
 	}
 	for _, p := range []string{
-		"lib/tools.lua",
 		"lib/skills/brainstorming.md", "lib/skills/history.md",
 		"lib/skills/self-evolve.md", "lib/skills/browser.md",
+		"lib/skills/scripting.md",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
 			t.Errorf("missing %s: %v", p, err)
@@ -185,25 +185,6 @@ func TestRenderedConfigLoads(t *testing.T) {
 	if len(c.Models) < 1 {
 		t.Errorf("expected >= 1 model, got %d", len(c.Models))
 	}
-	if len(c.Tools) != 2 {
-		t.Errorf("expected 2 tools (web_fetch, brave_search), got %d", len(c.Tools))
-	}
-	// Both base tools are bash command templates (no Lua handler): each must
-	// register with a non-empty Command.
-	cmds := map[string]string{}
-	for _, tl := range c.Tools {
-		cmds[tl.Name] = tl.Command
-	}
-	for _, name := range []string{"web_fetch", "brave_search"} {
-		cmd, ok := cmds[name]
-		if !ok {
-			t.Errorf("custom tool %q not registered", name)
-			continue
-		}
-		if strings.TrimSpace(cmd) == "" {
-			t.Errorf("custom tool %q has an empty Command", name)
-		}
-	}
 	agents := c.Agents()
 	if len(agents) != 1 {
 		t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -218,13 +199,13 @@ func TestRenderedConfigLoads(t *testing.T) {
 	for _, s := range agents[0].Skills {
 		got[s.Name] = true
 	}
-	for _, want := range []string{"brainstorming", "browser", "history", "self-evolve"} {
+	for _, want := range []string{"brainstorming", "browser", "history", "self-evolve", "scripting"} {
 		if !got[want] {
 			t.Errorf("scaffold skill %q missing from agent (got %v)", want, got)
 		}
 	}
-	if len(agents[0].Skills) != 4 {
-		t.Errorf("expected 4 scaffold skills, got %d", len(agents[0].Skills))
+	if len(agents[0].Skills) != 5 {
+		t.Errorf("expected 5 scaffold skills, got %d", len(agents[0].Skills))
 	}
 	if len(c.Warnings()) != 0 {
 		t.Errorf("scaffold config loaded with warnings: %v", c.Warnings())

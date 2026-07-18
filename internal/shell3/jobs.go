@@ -228,7 +228,7 @@ func (m *jobManager) evictOldestDoneIfNeeded() {
 }
 
 // startCommand launches argv as a managed background job. env holds extra
-// "K=V" entries appended to the inherited environment (background custom tools
+// "K=V" entries appended to the inherited environment (bash_bg jobs
 // inject their params this way); nil inherits the environment unchanged.
 func (m *jobManager) startCommand(parent *Session, command, workdir string, argv, env []string) (string, error) {
 	if len(argv) == 0 {

@@ -7,9 +7,8 @@ import (
 )
 
 // ToolDefs returns the llm.ToolDefinition schema list for an agent: each
-// built-in tool whose gate is enabled (bash, edit, …), plus one definition per
-// custom tool.
-func ToolDefs(g ToolGates, custom []CustomTool) []llm.ToolDefinition {
+// built-in tool whose gate is enabled (bash, edit, …).
+func ToolDefs(g ToolGates) []llm.ToolDefinition {
 	defs := []llm.ToolDefinition{}
 	if g.Bash {
 		defs = append(defs, bashTool)
@@ -23,26 +22,7 @@ func ToolDefs(g ToolGates, custom []CustomTool) []llm.ToolDefinition {
 	if g.Media {
 		defs = append(defs, readMediaTool)
 	}
-	for _, ct := range custom {
-		defs = append(defs, llm.ToolDefinition{
-			Name:        ct.Name,
-			Description: ct.Description,
-			Parameters:  ct.Parameters,
-		})
-	}
 	return defs
-}
-
-// CustomToolsFor returns the CustomTool values for the agent's allowlist, in
-// allowlist order. Unknown names are skipped.
-func (c *LoadedConfig) CustomToolsFor(names []string) []CustomTool {
-	out := make([]CustomTool, 0, len(names))
-	for _, n := range names {
-		if ct, ok := c.Tools[n]; ok {
-			out = append(out, ct)
-		}
-	}
-	return out
 }
 
 var bashBgTool = llm.ToolDefinition{

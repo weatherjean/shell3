@@ -9,17 +9,6 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// ResolvedTool is a custom-tool call reduced to an executable form: the bash
-// command, the env to run it with (declared params + secrets), and dispatch
-// knobs. Produced by agentsetup (via luacfg.ResolveCustomCall) and run by
-// dispatchCustomTool.
-type ResolvedTool struct {
-	Command    string
-	Env        []string
-	Background bool
-	Timeout    int
-}
-
 // ToolHandler is the interface for built-in tool implementations. Each
 // built-in tool (bash, edit_file, bash_bg, etc.) implements this.
 // Name returns the canonical tool name used in the JSON schema and lookup
@@ -27,9 +16,8 @@ type ResolvedTool struct {
 // back to the model as the tool result; non-nil errors are surfaced to the
 // user but the returned string is still recorded.
 //
-// Custom tools (Lua-declared command templates) and host-registered Go tools
-// use a separate dispatch path (dispatchCustomTool) and do not implement this
-// interface.
+// Host-registered Go tools use a separate dispatch path (dispatchHostTool)
+// and do not implement this interface.
 type ToolHandler interface {
 	Name() string
 	Execute(ctx context.Context, id string, args json.RawMessage, cfg ToolConfig) (string, error)
@@ -68,8 +56,8 @@ type ToolConfig struct {
 	HeadlessAsk bool
 	// StartBashBg launches a background shell command on the host's in-process
 	// job runtime and returns its job id. env holds extra "K=V" entries appended
-	// to the inherited environment (background custom tools inject their params
-	// this way; bash_bg passes nil). Nil func ⇒ background jobs disabled.
+	// to the inherited environment (bash_bg passes nil). Nil func ⇒ background
+	// jobs disabled.
 	StartBashBg func(command, workdir string, argv, env []string) (string, error)
 	// StartSubagent launches a background subagent (child session) and returns its
 	// id. It enforces the concurrency cap; single-level delegation holds by
@@ -125,19 +113,15 @@ type TurnConfig struct {
 	// (subagents, and any front-end that attaches no asker). turn.go injects a
 	// system reminder when this is set.
 	Headless bool
-	// ResolveCustomTool resolves a custom-tool call to its executable form
-	// (command + env). Names in CustomToolNames route here.
-	ResolveCustomTool func(name, argsJSON string) (ResolvedTool, error)
 	// HostTool dispatches a host-registered Go tool (internal/shell3.RegisterHostTool)
-	// by name, returning its result string. Tried BEFORE ResolveCustomTool so the
-	// host (internal/shell3) can supply native tools (which return strings directly, not
-	// bash commands) alongside command-template tools. Nil = none registered.
+	// by name, returning its result string. Names in HostToolNames route here.
+	// Nil = none registered.
 	HostTool func(ctx context.Context, name, argsJSON string) (string, error)
 	// RunToolResult runs the on_tool_result chain over a tool's output
 	// (config-global, nil = none). Its input sibling RunToolCall lives on the
 	// embedded ToolConfig because handlers self-gate with it.
 	RunToolResult func(ctx context.Context, name, argsJSON, output string) string
 	// AgentKnobs are the agent-scoped runtime knobs (compaction thresholds,
-	// custom-tool routing, …), forwarded wholesale from Config by NewTurnConfig.
+	// host-tool routing, …), forwarded wholesale from Config by NewTurnConfig.
 	AgentKnobs
 }

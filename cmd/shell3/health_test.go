@@ -68,6 +68,29 @@ func TestHealthFailsOnSkippedSkill(t *testing.T) {
 	}
 }
 
+func TestHealthFailsOnDownMCPServer(t *testing.T) {
+	dir := t.TempDir()
+	lua := `
+shell3.model("m", { base_url="http://x", api_key="k", model="id" })
+shell3.agent({ name="code", model="m", prompt="p", tools={ mcp="all" } })
+shell3.mcp({ dead = { command={ "/nonexistent-mcp-server-xyz" }, timeout=2 } })
+`
+	p := filepath.Join(dir, "shell3.lua")
+	if err := os.WriteFile(p, []byte(lua), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runHealthAt(t, p)
+	if err == nil {
+		t.Fatalf("down MCP server must fail health:\n%s", out)
+	}
+	if !strings.Contains(out, "dead") {
+		t.Fatalf("output should name the down server:\n%s", out)
+	}
+	if strings.Contains(out, "OK") {
+		t.Fatalf("failing health must not print OK:\n%s", out)
+	}
+}
+
 func TestHealthFailsOnLoadError(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "shell3.lua")

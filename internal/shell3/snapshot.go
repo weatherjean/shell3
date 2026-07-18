@@ -52,6 +52,9 @@ type Snapshot struct {
 	// file). A front-end surfaces them in-band at startup — a web dashboard
 	// user otherwise never sees the stderr line they were printed on.
 	Warnings []string
+	// MCP lists every declared MCP server's live health (nil when no
+	// shell3.mcp{} block is declared).
+	MCP []chat.MCPServerStatus
 }
 
 // Snapshot returns the current agent state (see Snapshot). Params is populated
@@ -85,7 +88,13 @@ func (s *Session) Snapshot() Snapshot {
 	}
 	params := s.cfg.Params
 	describer, ok := s.cfg.LLM.(llm.ParamDescriber)
+	mcpStatus := s.cfg.MCPStatus
 	s.mu.Unlock()
+
+	// Outside s.mu: the status closure locks the MCP manager's own mutexes.
+	if mcpStatus != nil {
+		snap.MCP = mcpStatus()
+	}
 
 	_, snap.Model = chat.SplitStatus(snap.StatusLine)
 	if ok {

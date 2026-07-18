@@ -267,7 +267,7 @@ shell3.agent({
 		if !ok {
 			t.Fatalf("subagent %q not registered", name)
 		}
-		for _, td := range ToolDefs(sa.Gates, nil) {
+		for _, td := range ToolDefs(sa.Gates) {
 			if td.Name == "read_media" {
 				return true
 			}

@@ -125,8 +125,8 @@ func renderDevEvents(w io.Writer, events <-chan shell3.Event) error {
 		case shell3.ToolCall:
 			closeBlock()
 			tag := "tool"
-			if ev.IsCustomTool {
-				tag = "custom-tool"
+			if ev.IsHostTool {
+				tag = "host-tool"
 			}
 			fmt.Fprintln(w, devCall.Render("→ "+ev.ToolName)+devMeta.Render(" ["+tag+"] "+oneLine(ev.ToolInput)))
 		case shell3.ToolResult:

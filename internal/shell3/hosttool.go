@@ -10,8 +10,7 @@ import (
 )
 
 // HostTool is a Go-implemented tool the host registers on a Session so the
-// model can call it (e.g. a front-end action like sending a file). It
-// complements Lua custom tools; dispatch routes through the same path.
+// model can call it (e.g. media's image_generate).
 type HostTool struct {
 	Name        string
 	Description string
@@ -37,10 +36,10 @@ func (s *Session) RegisterHostTool(t HostTool) error {
 	s.cfg.Personality.Tools = append(s.cfg.Personality.Tools, llm.ToolDefinition{
 		Name: t.Name, Description: t.Description, Parameters: t.Parameters,
 	})
-	if s.cfg.CustomToolNames == nil {
-		s.cfg.CustomToolNames = map[string]bool{}
+	if s.cfg.HostToolNames == nil {
+		s.cfg.HostToolNames = map[string]bool{}
 	}
-	s.cfg.CustomToolNames[t.Name] = true
+	s.cfg.HostToolNames[t.Name] = true
 	prev := s.cfg.HostTool
 	name, handler := t.Name, t.Handler
 	s.cfg.HostTool = func(ctx context.Context, called, argsJSON string) (string, error) {

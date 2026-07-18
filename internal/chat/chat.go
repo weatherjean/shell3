@@ -26,10 +26,10 @@ type LLMClient = llm.Streamer
 // Adding a knob here flows through all three automatically — no per-field
 // copy lines to forget.
 type AgentKnobs struct {
-	// CustomToolNames is the set of tool names routed to the custom-tool
-	// dispatcher (HostTool/ResolveCustomTool). Entries must match the names
-	// registered in the LLM tool schema.
-	CustomToolNames map[string]bool
+	// HostToolNames is the set of tool names routed to the host-tool
+	// dispatcher (HostTool). Entries must match the names registered in the
+	// LLM tool schema.
+	HostToolNames map[string]bool
 	// Subagents is the active agent's allowlist of registered subagent names
 	// (its tools.subagents). internal/shell3 validates task-tool spawns
 	// against it; the schema-side listing lives in the task tool itself
@@ -105,7 +105,7 @@ type Config struct {
 	// ActiveTools lists tool names enabled for this agent.
 	ActiveTools []string
 	// AgentKnobs are the agent-scoped runtime knobs (context window,
-	// compaction thresholds, reminder toggles, custom-tool routing), copied
+	// compaction thresholds, reminder toggles, host-tool routing), copied
 	// wholesale from the active agent by ApplyActiveAgent so they follow
 	// agent switches.
 	AgentKnobs
@@ -121,13 +121,13 @@ type Config struct {
 	// system-reminder explaining the constraints (no human to answer
 	// questions) and signals hooks via SHELL3_HEADLESS=1.
 	Headless bool
-	// ResolveCustomTool resolves a custom-tool call to its executable form
-	// (command + env). Nil means no custom tools are wired; unknown tools
-	// fall through to the built-in handler map.
-	ResolveCustomTool func(name, argsJSON string) (ResolvedTool, error)
 	// HostTool dispatches a host-registered Go tool by name (see
-	// internal/shell3.RegisterHostTool). Tried before ResolveCustomTool. Nil = none.
+	// internal/shell3.RegisterHostTool). Nil = none.
 	HostTool func(ctx context.Context, name, argsJSON string) (string, error)
+	// MCPStatus reports the declared MCP servers' live health (nil when no
+	// shell3.mcp{} block is declared). Agent-independent: set once at
+	// assembly, surfaced by Snapshot for the status tool and dashboard.
+	MCPStatus func() []MCPServerStatus
 	// Asker confirms ask-verdict commands with a human; supplied per-front-end.
 	// Nil ⇒ headless: ask degrades to deny.
 	Asker AskFunc
@@ -141,6 +141,16 @@ type Config struct {
 	// SwitchAgent activates the agent with the given name and returns its full
 	// runtime bundle. Nil disables agent switching.
 	SwitchAgent func(name string) (ActiveAgent, error)
+}
+
+// MCPServerStatus is one declared MCP server's health, mirrored from
+// internal/mcp (chat stays independent of the MCP client; agentsetup
+// converts).
+type MCPServerStatus struct {
+	Name      string
+	Up        bool
+	ToolCount int
+	Err       string
 }
 
 // AgentStatusLine renders the status line for a switched-in agent: the agent
@@ -199,17 +209,16 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler) TurnConfig {
 			Asker:       cfg.Asker,
 			RunToolCall: cfg.RunToolCall,
 		},
-		LLM:               cfg.LLM,
-		Personality:       cfg.Personality,
-		StatusLine:        cfg.StatusLine,
-		ConfigPath:        cfg.ConfigPath,
-		Handlers:          handlers,
-		Log:               LogOrNoop(cfg.Log),
-		Headless:          cfg.Headless,
-		ResolveCustomTool: cfg.ResolveCustomTool,
-		HostTool:          cfg.HostTool,
-		AgentKnobs:        cfg.AgentKnobs,
-		RunToolResult:     cfg.RunToolResult,
+		LLM:           cfg.LLM,
+		Personality:   cfg.Personality,
+		StatusLine:    cfg.StatusLine,
+		ConfigPath:    cfg.ConfigPath,
+		Handlers:      handlers,
+		Log:           LogOrNoop(cfg.Log),
+		Headless:      cfg.Headless,
+		HostTool:      cfg.HostTool,
+		AgentKnobs:    cfg.AgentKnobs,
+		RunToolResult: cfg.RunToolResult,
 	}
 }
 

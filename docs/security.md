@@ -11,7 +11,8 @@ with your whole system — but treat a session the way you'd treat running a
 script someone else wrote.
 
 The single opt-in hook is `shell3.on_tool_call(fn)`. It fires before **every**
-tool (`bash`, `bash_bg`, `edit_file`, `read_media`, custom tools) and returns
+tool (`bash`, `bash_bg`, `edit_file`, `read_media`, MCP tools as
+`mcp_<server>_<tool>`, host tools like `image_generate`) and returns
 a verdict: pass, rewrite, runner-swap, block, or ask a human (inline
 Allow/Deny buttons in Telegram). The scaffold ships its example gate
 **commented out** — a fresh config gates nothing — and, once enabled, that
@@ -37,10 +38,6 @@ user account.** `on_tool_call` is a policy hook, not a security boundary.
   flows back to the parent agent in the completion notice). Handlers see
   `t.headless` and can return a tailored `{block=…}` instead. Unanswered asks
   deny after the timeout (default 300 s). `{block=true}` never prompts.
-- **Custom tools' commands are trusted.** A command-template tool's command
-  is your authored template, never rewritten by the gate — but the *call*
-  still fires it by name, so you can block/ask it. Bake sandboxing into the
-  template itself.
 - **It's a guardrail, not a boundary.** A determined model can phrase a
   destructive command your regexes don't catch. Pair with real isolation for
   anything that must not escape.
@@ -74,10 +71,16 @@ Secrets live in a plain-text `.env` beside `shell3.lua`, read from Lua via
 - **Never read or display credential files** — this applies to you and to the
   agent (the system prompt says so; the dashboard and `send_media_telegram`
   refuse `.env` outright).
-- Declared custom-tool `secrets` ride the command's **process environment**.
-  On a shared host, same-user processes can read it
-  (`/proc/<pid>/environ`) — fine single-user; on a multi-user box, treat
-  tool secrets as readable by anything that user runs.
+- **Scripts read secrets at point of use.** The scaffold's `scripting` skill
+  teaches the pattern: a wrapper script under `~/.shell3/lib/bin/` reads the
+  one key it needs from `.env` (`grep '^KEY=' ~/.shell3/.env | cut -d= -f2-`)
+  inside its own process, so the secret never appears in the conversation, a
+  command string, or the agent's environment. Enforce the perimeter with the
+  gate example's `.env` deny (block commands whose text touches `.env`) and
+  an `on_tool_result` redactor as backstop. On a multi-user box the usual
+  caveat applies: a process's environment and arguments are readable by
+  same-user processes, so treat secrets as readable by anything that user
+  runs.
 
 ## Where data lives, and how to remove it
 

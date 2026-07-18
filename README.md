@@ -78,6 +78,12 @@ shell3 leans on Unix process groups.
   single opt-in gate is `shell3.on_tool_call(fn)` — chainable, verdict-based
   (block / rewrite / runner-swap / ask a human over Telegram); denylists use
   `shell3.regex`.
+- **MCP servers (tools only).** `shell3.mcp{}` connects stdio or streamable
+  HTTP servers on the official Go SDK; agents opt in per server
+  (`tools = { mcp = {"github"} }`), tools surface as `mcp_<server>_<tool>`,
+  and calls pass through the same `on_tool_call` gate. `shell3 health` and
+  the dashboard report each server's state. No OAuth — remote auth is a
+  bearer header from `.env`.
 - **Subagents & scheduling.** Delegate to declared subagents with the `task`
   tool (fire-and-forget in-process jobs, completion notices), background
   commands with `bash_bg`, recurring prompts with `shell3.cron`.
@@ -91,8 +97,8 @@ shell3 leans on Unix process groups.
 ## Documentation
 
 - **[Configuration](docs/configuration.md)** — models, agent, subagents,
-  Telegram/web blocks, cron, heartbeat, voice & images, custom tools,
-  `on_tool_call`/`on_tool_result`, skills.
+  Telegram/web blocks, cron, heartbeat, voice & images, scripts & secrets,
+  MCP servers, `on_tool_call`/`on_tool_result`, skills.
 - **[CLI](docs/cli.md)** — every subcommand and the JSONL runs store.
 - **[Security & data](docs/security.md)** — threat model, secrets, wiping data.
 - **[Cookbook](docs/cookbook/README.md)** — drop-in recipes: subagents,

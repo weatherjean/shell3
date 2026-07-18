@@ -149,8 +149,8 @@ func TestBootEndToEnd(t *testing.T) {
 
 	dir := filepath.Join(home, ".shell3")
 	for _, p := range []string{
-		"shell3.lua", "lib/tools.lua",
-		"lib/skills/brainstorming.md", ".env",
+		"shell3.lua",
+		"lib/skills/brainstorming.md", "lib/skills/scripting.md", ".env",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
 			t.Errorf("missing %s: %v", p, err)

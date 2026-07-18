@@ -40,8 +40,7 @@ end)
 
 These recipes cover `bash`/`bash_bg` everywhere they run — including inside
 subagents, whose calls fire the same gate. The `t.name` guard keeps your
-sandboxing off `edit_file`, `read_media`, and custom tools; gate those
-separately by name + args. A custom tool's command is your trusted template
-(never rewritten), but its *call* still fires the hook, so you can
-block/ask it. A malformed argv (empty, or any non-string element) fails
-**closed** — blocked, never run unwrapped.
+sandboxing off `edit_file`, `read_media`, and host tools like
+`image_generate`; gate those separately by name + args. A malformed argv
+(empty, or any non-string element) fails **closed** — blocked, never run
+unwrapped.

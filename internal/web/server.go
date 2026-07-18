@@ -212,6 +212,14 @@ type statusResp struct {
 	Usage         *usageResp `json:"usage,omitempty"`
 
 	Heartbeat *HeartbeatStatus `json:"heartbeat,omitempty"`
+	MCP       []mcpStatus      `json:"mcp,omitempty"`
+}
+
+type mcpStatus struct {
+	Name      string `json:"name"`
+	Up        bool   `json:"up"`
+	ToolCount int    `json:"tool_count"`
+	Err       string `json:"err,omitempty"`
 }
 
 type usageResp struct {
@@ -250,6 +258,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.heartbeat != nil {
 		out.Heartbeat = s.heartbeat()
+	}
+	for _, m := range snap.MCP {
+		out.MCP = append(out.MCP, mcpStatus{Name: m.Name, Up: m.Up, ToolCount: m.ToolCount, Err: m.Err})
 	}
 	writeJSON(w, out)
 }

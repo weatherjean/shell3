@@ -18,6 +18,7 @@ import (
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/luacfg"
+	"github.com/weatherjean/shell3/internal/mcp"
 	"github.com/weatherjean/shell3/internal/modelproxy"
 	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/persona"
@@ -59,6 +60,22 @@ type Parts struct {
 	// configPath is the resolved absolute shell3.lua that produced this Parts;
 	// recorded per session so resume can reload the right config.
 	configPath string
+	// mcp is the connected MCP server manager (nil when no shell3.mcp{} block
+	// is declared). Its Close rides the BuildParts closer stack, so /reload
+	// tears down old servers and connects fresh ones automatically. mcpWarns
+	// holds connect-time warnings (down servers, tool-name collisions),
+	// surfaced beside the Lua config warnings.
+	mcp      *mcp.Manager
+	mcpWarns []string
+}
+
+// MCPStatus reports every declared MCP server's health (nil when no
+// shell3.mcp{} block is declared) — for `shell3 health` and the dashboard.
+func (p *Parts) MCPStatus() []mcp.ServerStatus {
+	if p.mcp == nil {
+		return nil
+	}
+	return p.mcp.Status()
 }
 
 // Store returns the file-native runs store (always opened; nil only when the
@@ -164,8 +181,7 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 	p.proxy.Ensure(md.Name, md.RunProxy)
 	client, rp := buildClient(md)
 
-	customDefs := p.lc.CustomToolsFor(a.CustomTools)
-	toolDefs := luacfg.ToolDefs(a.Gates, customDefs)
+	toolDefs := luacfg.ToolDefs(a.Gates)
 
 	// Inject the `task` tool when the agent has both the Delegation toggle and a
 	// non-empty Subagents allowlist. The allowlist (names + model-facing
@@ -185,12 +201,22 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 		toolDefs = append(toolDefs, luacfg.TaskToolFor(refs), luacfg.TaskListTool, luacfg.TaskStatusTool, luacfg.TaskCancelTool)
 	}
 
-	prompt := p.lc.BuildPersonaFor(a)
-
-	customNames := make(map[string]bool, len(a.CustomTools))
-	for _, n := range a.CustomTools {
-		customNames[n] = true
+	// Append the opted-in MCP servers' tool defs (tools.mcp) and route their
+	// names to the host-tool dispatcher. The map is fresh per call: session
+	// RegisterHostTool (image_generate etc.) mutates it later.
+	var hostNames map[string]bool
+	if p.mcp != nil && (a.MCPAll || len(a.MCP) > 0) {
+		mcpDefs := p.mcp.Tools(a.MCP, a.MCPAll)
+		if len(mcpDefs) > 0 {
+			toolDefs = append(toolDefs, mcpDefs...)
+			hostNames = make(map[string]bool, len(mcpDefs))
+			for _, d := range mcpDefs {
+				hostNames[d.Name] = true
+			}
+		}
 	}
+
+	prompt := p.lc.BuildPersonaFor(a)
 
 	// toolNames is exactly toolDefs' names — derived once at the end so the
 	// two can never skew.
@@ -228,13 +254,13 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 		Params:       rp,
 		ModelID:      md.ModelID,
 		AgentKnobs: chat.AgentKnobs{
-			Subagents:       a.Subagents,
-			Environment:     a.Environment,
-			CustomToolNames: customNames,
-			ContextWindow:   md.ContextWindow,
-			CompactAt:       md.CompactAt,
-			KeepRecent:      md.KeepRecent,
-			PruneAt:         pruneAt,
+			HostToolNames: hostNames,
+			Subagents:     a.Subagents,
+			Environment:   a.Environment,
+			ContextWindow: md.ContextWindow,
+			CompactAt:     md.CompactAt,
+			KeepRecent:    md.KeepRecent,
+			PruneAt:       pruneAt,
 		},
 	}, nil
 }
@@ -344,19 +370,38 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 	// (between turns), so a plain pointer is sufficient.
 	activeName := rt.ModeLabel
 	cfg := chat.Config{
-		Store:             p.st,
-		RunsDir:           p.runsDir,
-		WorkDir:           workdir,
-		ConfigPath:        p.ConfigPath(),
-		ConfigWarnings:    p.lc.Warnings(),
-		ResolveCustomTool: p.lc.ResolveCustomCall,
-		Log:               p.log,
-		OutPath:           so.OutPath,
-		Headless:          so.Headless,
-		AgentNames:        p.AgentNames(),
-		RefreshPrompt:     func() string { return p.RefreshPromptFor(activeName) },
+		Store:          p.st,
+		RunsDir:        p.runsDir,
+		WorkDir:        workdir,
+		ConfigPath:     p.ConfigPath(),
+		ConfigWarnings: append(append([]string{}, p.lc.Warnings()...), p.mcpWarns...),
+		Log:            p.log,
+		OutPath:        so.OutPath,
+		Headless:       so.Headless,
+		AgentNames:     p.AgentNames(),
+		RefreshPrompt:  func() string { return p.RefreshPromptFor(activeName) },
 		// Agent-scoped knobs (Environment, Delegation, thresholds, …) arrive via
 		// cfg.ApplyActiveAgent(rt) below.
+	}
+	// MCP dispatch: the base of the session's host-tool chain. Session-level
+	// RegisterHostTool calls (image_generate, the bot's send/status) compose on
+	// top of it, falling through here for names they don't own; unowned names
+	// end in the chat layer's unknown-tool handling via ErrHostToolNotFound.
+	if mgr := p.mcp; mgr != nil {
+		cfg.HostTool = func(ctx context.Context, name, argsJSON string) (string, error) {
+			if mgr.Owns(name) {
+				return mgr.Call(ctx, name, argsJSON)
+			}
+			return "", fmt.Errorf("%w: %q", chat.ErrHostToolNotFound, name)
+		}
+		cfg.MCPStatus = func() []chat.MCPServerStatus {
+			sts := mgr.Status()
+			out := make([]chat.MCPServerStatus, 0, len(sts))
+			for _, st := range sts {
+				out = append(out, chat.MCPServerStatus{Name: st.Name, Up: st.Up, ToolCount: st.ToolCount, Err: st.Err})
+			}
+			return out
+		}
 	}
 	// shell3.on_tool_call: config-global hook chain run before every tool.
 	if p.lc.HasToolCall() {
@@ -403,10 +448,12 @@ func BuildParts(opts Options) (*Parts, func(), error) {
 		b.closeAll()
 		return nil, noop, err
 	}
+	b.connectMCP()
 	b.openStore()
 	p := &Parts{lc: b.lc, st: b.st, proxy: b.proxy,
 		log: b.log, root: b.opts.CWD, runsDir: b.l.Runs,
 		configPath: b.configPath,
+		mcp:        b.mcp, mcpWarns: b.mcpWarns,
 	}
 	return p, b.closeAll, nil
 }
@@ -423,10 +470,12 @@ type builder struct {
 	g          paths.Global
 	l          paths.Local
 
-	log   applog.Logger
-	lc    *luacfg.LoadedConfig
-	st    *runs.Store
-	proxy *modelproxy.Spawner
+	log      applog.Logger
+	lc       *luacfg.LoadedConfig
+	st       *runs.Store
+	proxy    *modelproxy.Spawner
+	mcp      *mcp.Manager
+	mcpWarns []string
 
 	closers []func() // LIFO teardown stack
 }
@@ -488,6 +537,25 @@ func (b *builder) loadConfig() error {
 	}
 	b.closers = append(b.closers, func() { lc.Close() })
 	return nil
+}
+
+// connectMCP builds + connects the MCP server manager when shell3.mcp{} is
+// declared. Synchronous by design (servers dial in parallel, each under its
+// own timeout): tool defs become plain static config, and a hosted bot does
+// not care about a few seconds at startup/reload. A down server is a warning,
+// never a build failure; its tools are absent until the next reload.
+func (b *builder) connectMCP() {
+	servers := b.lc.MCPServers()
+	if len(servers) == 0 {
+		return
+	}
+	b.mcp = mcp.New(servers, b.log)
+	b.closers = append(b.closers, b.mcp.Close)
+	b.mcpWarns = b.mcp.Connect(context.Background())
+	for _, w := range b.mcpWarns {
+		b.log.Warn("mcp warning", "detail", w)
+		fmt.Fprintln(os.Stderr, "shell3: mcp warning: "+w)
+	}
 }
 
 // openStore opens the file-native runs store unconditionally: it always persists

@@ -31,12 +31,12 @@ local bare = shell3.subagent({ name="bare", description="d", model="opus", promp
 }
 
 func TestToolDefsGates(t *testing.T) {
-	bare := ToolDefs(ToolGates{}, nil)
+	bare := ToolDefs(ToolGates{})
 	if len(bare) != 0 {
 		t.Fatalf("bare gates should yield 0 tool defs, got %d: %v", len(bare), bare)
 	}
 
-	with := ToolDefs(ToolGates{Bash: true, Edit: true}, nil)
+	with := ToolDefs(ToolGates{Bash: true, Edit: true})
 	names := make(map[string]bool, len(with))
 	for _, d := range with {
 		names[d.Name] = true
@@ -45,7 +45,7 @@ func TestToolDefsGates(t *testing.T) {
 		t.Fatalf("Bash+Edit gates should expose both tools, got %v", names)
 	}
 
-	onlyBash := ToolDefs(ToolGates{Bash: true}, nil)
+	onlyBash := ToolDefs(ToolGates{Bash: true})
 	if len(onlyBash) != 1 || onlyBash[0].Name != "bash" {
 		t.Fatalf("Bash-only gate should yield exactly bash, got %v", onlyBash)
 	}

@@ -98,7 +98,6 @@ shell3.agent({
     bash_bg   = true,          -- background / long-running commands
     edit      = true,          -- the edit_file tool
     media     = true,          -- read_media: images, audio, PDFs, video
-    custom    = { my_tool },   -- Lua-declared tools (below)
     subagents = { explorer },  -- delegatable specialists
   },
   skills = { "lib/skills" },   -- skill directories (below)
@@ -163,51 +162,81 @@ started. One config-global knob caps it all:
 shell3.background({ max_concurrent = 8 })  -- concurrent background jobs (default 8)
 ```
 
-## Custom tools
+## Scripts & secrets
 
-A custom tool is **not** a Lua function — it's a bash command template.
-Declared parameters arrive in the command's environment as lowercase
-`$`-named variables; declared `secrets` are exported too (and stay out of the
-command string). Stdout is what the model sees.
+There is no custom-tool declaration: reusable glue is a **script** the agent
+runs through `bash`, documented by a skill when it needs one. The scaffold
+ships a `scripting` skill that teaches the pattern — reusable scripts live in
+`~/.shell3/lib/bin/`, and a script that needs an API key reads it from
+`~/.shell3/.env` itself, at point of use:
+
+```bash
+key="$(grep '^WEATHER_API_KEY=' ~/.shell3/.env | cut -d= -f2-)"
+```
+
+The secret enters exactly one process for exactly one call and never appears
+in the conversation. Pair it with the gate example's `.env` deny (block
+commands that read `.env` directly) and, if you like, an
+[`on_tool_result`](#rewriting-output--on_tool_result) redaction as backstop.
+More in [security.md](security.md).
+
+## MCP servers — `shell3.mcp`
+
+For tools that live behind the [Model Context Protocol](https://modelcontextprotocol.io),
+shell3 ships a tools-only MCP client (official Go SDK): stdio and streamable
+HTTP transports, no OAuth/resources/prompts (a remote server that needs auth
+takes a bearer header from `.env`). Declare servers once, top-level; each
+agent or subagent opts in via `tools.mcp`:
 
 ```lua
-local weather = shell3.tool({
-  name        = "weather",
-  description = "Current weather for a city.",
-  parameters  = {
-    type       = "object",
-    properties = { city = { type = "string", description = "City name." } },
-    required   = { "city" },
+shell3.mcp({
+  github = {
+    command = { "github-mcp-server", "stdio" },            -- stdio: argv list
+    env     = { GITHUB_TOKEN = shell3.env.secret("GITHUB_TOKEN") },
   },
-  secrets = { "WEATHER_API_KEY" },           -- exported as $WEATHER_API_KEY
-  command = [[
-curl -sf -G "https://api.example.com/v1/current" \
-  -H "Authorization: Bearer $WEATHER_API_KEY" \
-  --data-urlencode "q=$city" \
-| jq -r '.location.name + ": " + (.current.temp_c|tostring) + "°C"'
-]],
+  linear = {
+    url     = "https://mcp.linear.app/mcp",                -- streamable HTTP
+    headers = { Authorization = "Bearer " .. shell3.env.secret("LINEAR_KEY") },
+    timeout = 30,                       -- seconds, connect + per call (default 10)
+    allow   = { "search_issues", "get_issue" },  -- or deny = {...} (not both)
+  },
+})
+
+shell3.agent({    -- opt in per agent/subagent; omitted = NO MCP tools
+  -- ...
+  tools = { bash = true, mcp = { "github", "linear" } },   -- or mcp = "all"
 })
 ```
 
-Two habits keep tools safe: `curl --data-urlencode` for any model-supplied
-parameter (never interpolate model text into a URL), and shape output with
-`jq` so the model gets a clean line, not a JSON wall.
+Servers connect at startup (and on `/reload`), in parallel, each under its
+own timeout; their tools join the opted-in agents' tool lists as
+`mcp_<server>_<tool>` (`mcp_github_search_issues`). A server that is down
+loads as a **warning** — the bot still starts, that server's tools are just
+absent until the next reload — while `shell3 health` treats it as a failure
+and reports each server's state. The dashboard's Status view lists every
+server (up/down, tool count, last error). At call time a dead server gets one
+automatic reconnect; if that fails too the model sees the error as tool
+output and adapts — a broken server never kills a turn.
 
-Optional fields: `background = true` (runs as an in-process background job,
-like `bash_bg` — dashboard jobs view, completion notice on a later turn) and
-`timeout = N` (seconds, foreground only). Full template in
-[cookbook/lib/tools.lua](cookbook/lib/tools.lua).
+MCP calls flow through the same [`on_tool_call`](#the-command-gate--on_tool_call)
+chain as everything else: `t.name` is the prefixed tool name and `t.command`
+is nil, so gate them by name —
 
-> **Secrets note:** declared `secrets` ride the command's process environment.
-> On a shared host, same-user processes can read it (`/proc/<pid>/environ`).
-> Fine single-user; on a multi-user box, treat tool secrets as readable by
-> anything that user runs. More in [security.md](security.md).
+```lua
+shell3.on_tool_call(function(t)
+  if shell3.regex([[^mcp_github_]]):match(t.name or "") then
+    if t.headless then return { block = true, reason = "needs approval" } end
+    return { ask = "Call " .. t.name .. "?", reason = "denied" }
+  end
+end)
+```
 
 ## The command gate — `on_tool_call`
 
 shell3 is **unsafe by default**: nothing is gated until you register a
 handler. `shell3.on_tool_call(fn)` fires before **every** tool — `bash`,
-`bash_bg`, `edit_file`, `read_media`, and custom tools — and your handler
+`bash_bg`, `edit_file`, `read_media`, and host tools like `image_generate` —
+and your handler
 decides per tool by switching on `t.name`. Handlers are **chainable**:
 declaration order, first terminal verdict wins.
 
@@ -215,7 +244,7 @@ Each handler receives a table `t`:
 
 | Field | Description |
 |-------|-------------|
-| `t.name` | The real tool name: `"bash"`, `"bash_bg"`, `"edit_file"`, `"read_media"`, or a custom tool's name. |
+| `t.name` | The real tool name: `"bash"`, `"bash_bg"`, `"edit_file"`, `"read_media"`, or a host tool's name (`"image_generate"`). |
 | `t.command` | The bash command string — the two bash tools only; **nil** for every other tool. |
 | `t.args` | Raw arguments JSON (every tool). Gate non-bash tools by inspecting this. |
 | `t.headless` | `true` when no human is attached (subagents, cron jobs) — an `{ask=…}` verdict would auto-deny. |
@@ -286,9 +315,7 @@ shell3.on_tool_call(function(t)
 end)
 ```
 
-A malformed argv (empty, or any non-string element) fails **closed**. A
-custom tool's command is your trusted template, never rewritten — but the
-tool **call** still fires the gate by name, so you can `block`/`ask` it.
+A malformed argv (empty, or any non-string element) fails **closed**.
 Recipes in [cookbook/sandbox.md](cookbook/sandbox.md).
 
 ### Tool-result rewriting — `on_tool_result`
@@ -305,8 +332,7 @@ end)
 
 Errors here fail **open** — a broken rewriter must not destroy tool output —
 so a throwing redactor lets the unredacted output through. Keep redactors
-simple and total. Background jobs (`bash_bg`, backgrounded custom tools) are
-out of scope: the hook sees only the "started job…" pointer, not the
+simple and total. Background jobs (`bash_bg`) are out of scope: the hook sees only the "started job…" pointer, not the
 process's streamed output — redact at the source if a background command can
 emit secrets.
 

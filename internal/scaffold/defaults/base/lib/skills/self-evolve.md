@@ -26,8 +26,8 @@ Choose the highest (least-footprint) rung that correctly solves the problem:
        ---
        When greeting, use the user's name if you know it...
 
-3. Add a declarative custom tool (`shell3.tool{command=...}`) — only when a
-   bash-command template with injected params is genuinely reusable.
+3. Add a wrapper script under `~/.shell3/lib/bin/` (see the scripting skill) —
+   when a bash workflow or a secret-using API call is genuinely reusable.
 4. Add or adjust an agent / subagent — when the work needs its own prompt,
    toolset, or an isolated context to delegate to.
 5. A Go/core change — last resort; it needs a rebuild. Describe what's needed

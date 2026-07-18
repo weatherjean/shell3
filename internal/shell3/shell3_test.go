@@ -695,11 +695,11 @@ func newDescriberClient(specs []llm.ParamSpec, scripts ...fakellm.Script) *descr
 	return &describerClient{Client: fakellm.New(scripts...), specs: specs}
 }
 
-// TestRoute_SetsIsCustomTool verifies route resolves IsCustomTool against the
-// session's current CustomToolNames (translate stays pure, so route does it).
-func TestRoute_SetsIsCustomTool(t *testing.T) {
+// TestRoute_SetsIsHostTool verifies route resolves IsHostTool against the
+// session's current HostToolNames (translate stays pure, so route does it).
+func TestRoute_SetsIsHostTool(t *testing.T) {
 	s := newTestSession(t, fakellm.New(), chat.Config{
-		AgentKnobs: chat.AgentKnobs{CustomToolNames: map[string]bool{"my_tool": true}},
+		AgentKnobs: chat.AgentKnobs{HostToolNames: map[string]bool{"my_tool": true}},
 	})
 	defer s.Close()
 
@@ -714,14 +714,14 @@ func TestRoute_SetsIsCustomTool(t *testing.T) {
 	s.route(chat.Event{Kind: chat.EventToolCall, ToolName: "bash", ToolCallID: "2"})
 
 	custom := <-got
-	if custom.Kind != ToolCall || custom.ToolName != "my_tool" || !custom.IsCustomTool {
-		t.Fatalf("custom tool event = %+v, want IsCustomTool=true", custom)
+	if custom.Kind != ToolCall || custom.ToolName != "my_tool" || !custom.IsHostTool {
+		t.Fatalf("host tool event = %+v, want IsHostTool=true", custom)
 	}
 	if custom.ToolCallID != "1" {
 		t.Fatalf("ToolCallID = %q, want 1", custom.ToolCallID)
 	}
 	builtin := <-got
-	if builtin.IsCustomTool {
+	if builtin.IsHostTool {
 		t.Fatalf("builtin tool wrongly flagged custom: %+v", builtin)
 	}
 }
@@ -990,7 +990,7 @@ func TestSession_InterjectMidTurn(t *testing.T) {
 	var s *Session
 	cfg := chat.Config{
 		LLM:        client,
-		AgentKnobs: chat.AgentKnobs{CustomToolNames: map[string]bool{"poke": true}},
+		AgentKnobs: chat.AgentKnobs{HostToolNames: map[string]bool{"poke": true}},
 		HostTool: func(ctx context.Context, name, args string) (string, error) {
 			s.Interject("change of plans")
 			return "ok", nil

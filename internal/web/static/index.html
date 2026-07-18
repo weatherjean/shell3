@@ -128,6 +128,7 @@
   .badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 8px; text-transform: uppercase; letter-spacing: .03em; }
   .badge.running { background: #f5a623; color: #1a1a1a; }
   .badge.finished { background: #34c759; color: #06280f; }
+  .badge.failed { background: #ff3b30; color: #2b0605; }
 
   /* Status view */
   .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 6px 0 16px; }
@@ -518,6 +519,11 @@ function renderStatus(st) {
     </dl>
     <details class="tool"><summary><span class="chev">▸</span><span class="tname">📋 Checklist</span></summary><pre>${esc(hb.checklist)}</pre></details>` : `
     <div class="empty inline">No heartbeat declared.</div>`);
+  const mcp = (st.mcp || []).length ? `
+    <div class="section-title">MCP servers</div>
+    <dl class="kv">${st.mcp.map(m => `
+      <dt>${esc(m.name)}</dt><dd><span class="badge ${m.up ? "finished" : "failed"}">${m.up ? "up" : "down"}</span> ${m.up ? `${m.tool_count} tool${m.tool_count === 1 ? "" : "s"}` : esc(m.err || "")}</dd>`).join("")}
+    </dl>` : "";
   views.status.innerHTML = `
     <dl class="kv">
       <dt>Agent</dt><dd>${esc(st.agent)}</dd>
@@ -526,6 +532,7 @@ function renderStatus(st) {
     </dl>
     ${usage}
     ${heartbeat}
+    ${mcp}
     <div class="section-title">Tools</div><div class="chips">${tools}</div>
     <div class="section-title">Skills</div><div class="chips">${skills}</div>
     <div class="section-title">Subagents</div><div class="chips">${subagents}</div>

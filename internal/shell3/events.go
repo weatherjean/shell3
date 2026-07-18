@@ -13,7 +13,7 @@ type EventKind int
 const (
 	Token          EventKind = iota // assistant text         → Text
 	Reasoning                       // thinking text           → Text
-	ToolCall                        // tool started            → ToolName, ToolCallID, ToolInput, IsCustomTool
+	ToolCall                        // tool started            → ToolName, ToolCallID, ToolInput, IsHostTool
 	ToolResult                      // tool finished           → ToolName, ToolCallID, ToolOutput
 	SystemReminder                  // injected reminder block → Text
 	Compacted                       // auto-compaction occurred → Text + post-compaction PromptTokens/TotalTokens estimate
@@ -60,8 +60,8 @@ type Event struct {
 	ToolCallID       string // ToolCall, ToolResult (links a call to its result)
 	ToolInput        string // ToolCall (raw JSON args)
 	ToolOutput       string // ToolResult
-	ToolError        bool   // ToolResult — the tool reported an error (an on_tool_call denial, a dispatch/validation failure, or a custom tool's non-zero exit; bash builtin exit codes are not classified)
-	IsCustomTool     bool   // ToolCall (resolved against the active agent's custom-tool set)
+	ToolError        bool   // ToolResult — the tool reported an error (an on_tool_call denial, a dispatch/validation failure, or a host tool failure; bash builtin exit codes are not classified)
+	IsHostTool       bool   // ToolCall (resolved against the active agent's host-tool set)
 	PromptTokens     int    // Usage, Done
 	CompletionTokens int    // Usage, Done
 	TotalTokens      int    // Usage, Done
@@ -72,7 +72,7 @@ type Event struct {
 // internal event has no public equivalent (session lifecycle, echoed user
 // message, post-stream assistant message).
 //
-// translate is pure: it does NOT resolve Event.IsCustomTool, which depends on
+// translate is pure: it does NOT resolve Event.IsHostTool, which depends on
 // the session's current agent config. route sets that field after translate
 // (see route), so this stays a config-free, table-testable mapping.
 func translate(ev chat.Event) (Event, bool) {

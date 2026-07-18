@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/weatherjean/shell3/internal/luacfg"
+	"github.com/weatherjean/shell3/internal/mcp"
 )
 
 // newHealthCommand builds `shell3 health` — a strict, read-only config check.
@@ -54,6 +55,26 @@ func runHealth(cmd *cobra.Command, path string) error {
 	a := lc.FirstAgent()
 	fmt.Fprintf(out, "agent: %s (model %s, %d skills, %d subagents)\n",
 		a.Name, a.ModelName, len(a.Skills), len(a.Subagents))
+	// Connect every declared MCP server, exactly like the bot would at
+	// startup. The running bot tolerates a down server (warning, tools
+	// absent); health is the strict view, so any down server fails here.
+	if servers := lc.MCPServers(); len(servers) > 0 {
+		m := mcp.New(servers, nil)
+		defer m.Close()
+		m.Connect(cmd.Context())
+		down := 0
+		for _, st := range m.Status() {
+			if st.Up {
+				fmt.Fprintf(out, "mcp %s: ok (%d tools)\n", st.Name, st.ToolCount)
+			} else {
+				down++
+				fmt.Fprintf(out, "mcp %s: down: %s\n", st.Name, st.Err)
+			}
+		}
+		if down > 0 {
+			return fmt.Errorf("health: %d MCP server(s) down", down)
+		}
+	}
 	fmt.Fprintln(out, "OK")
 	return nil
 }

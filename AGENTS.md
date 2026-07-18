@@ -65,10 +65,25 @@ frontmatter `description:` (optional `name:` defaults to the filename) is one
 skill — no Lua declaration. A missing dir fails the load; an invalid file is
 skipped with a warning that `shell3 health` turns into a failure. The agent
 reads a skill's body with `cat` (skills are indexed by absolute path in the
-prompt under `## Skills` — there is no `skill` tool), and custom tools are declarative
-bash-command templates (`shell3.tool{command=...}`, params injected as lowercase
-env vars plus a `secrets` list; no Lua `handler`) — the
-`shell3.bash`/`http`/`urlencode` helpers are gone. Context is host-managed via
+prompt under `## Skills` — there is no `skill` tool). There is **no custom-tool
+declaration**: reusable glue is a wrapper script (canonically
+`~/.shell3/lib/bin/`) run through bash, documented by the scaffold's
+`scripting` skill; a script that needs a secret reads the one key it needs
+from `.env` itself at point of use, so secrets never enter the conversation
+or the agent environment. External tool servers come in over **MCP**
+(`internal/mcp`, official go-sdk, tools only — stdio + streamable HTTP, no
+OAuth/resources/prompts/SSE): top-level `shell3.mcp{ name = {command={...},
+env={...}} | {url=..., headers={...}} }` (per-server `timeout`, `allow`/`deny`
+tool filters), opted into per agent/subagent via `tools.mcp = {"name", ...}`
+or `"all"` (omitted = none). Servers connect synchronously in BuildParts
+(parallel, per-server timeout; down server = warning + tools absent, never a
+build failure; the Manager's Close rides the Parts closer stack so /reload
+reconnects fresh). Tools surface as `mcp_<server>_<tool>` in the opted
+personas' tool lists and dispatch through the session HostTool path; calls
+get one reconnect retry, then the error returns as tool-result text (never
+fatal to a turn). `on_tool_call` sees them like any tool (`t.name` prefixed,
+`t.command` nil). `shell3 health` connects and fails on any down server; the
+dashboard Status view lists per-server state. Context is host-managed via
 two token thresholds: `prune_at` cheaply stubs old tool outputs (no LLM call),
 and `compact_at` triggers tail-preserving compaction — summarizing the head while
 keeping recent turns verbatim. The `prune_at` and `keep_recent` knobs are
@@ -154,6 +169,7 @@ internal/edittool/     edit_file tool implementation (Go port of opencode's str-
 internal/notify/       Notification type (bg_done / agent_done) shared by job runtime + chat
 internal/tunnel/       dashboard.tunnel spawner: runs the tunnel command, scrapes its https URL
 internal/media/        shell3.stt/tts/describe/imagegen clients (transcribe, speak, describe, generate) + the /voice mode store
+internal/mcp/          MCP client (official go-sdk): Manager connects shell3.mcp{} servers, lists tools, dispatches mcp_* calls
 internal/telegram/     Telegram bot front-end (bot loop, commands, confirm buttons, media, mdhtml)
 internal/web/          dashboard + chat API server (pluggable auth) and the shell3 web chat driver; static/ is the single-file frontend
 internal/cron/         robfig/cron scheduler dispatching subagent jobs on Session.Dispatch

@@ -30,7 +30,7 @@ const bashWaitDelay = 2 * time.Second
 // BashHandler executes a bash command and returns its combined stdout+stderr.
 // It respects context cancellation — callers set timeouts before invoking Execute.
 // Exit codes are not returned as errors; a non-zero exit prefixes the output
-// with an "error: command exited N" line (matching the custom-tool path), so
+// with an "error: command exited N" line (one convention shared by every dispatch path), so
 // the model — and the tool_result error flag — can tell the call failed even
 // when the command wrote nothing to stderr.
 type BashHandler struct{}

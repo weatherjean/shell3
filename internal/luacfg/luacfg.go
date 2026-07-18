@@ -38,21 +38,6 @@ type ToolGates struct {
 	Bash, BashBg, Edit, Media bool
 }
 
-// CustomTool is a declarative bash-command tool. The model supplies typed
-// parameters (validated against Parameters); at call time each declared param is
-// exported into the command's environment by its (lowercase) name and the
-// command (a bash template) runs with that env. Secrets names each .env key to
-// also export — kept out of the command string. Background dispatches via
-// bash_bg instead of blocking. There is no Lua handler.
-type CustomTool struct {
-	Name, Description string
-	Parameters        map[string]any
-	Command           string
-	Secrets           []string
-	Background        bool
-	Timeout           int
-}
-
 // Skill is one resolved *.md from an agent's skills dirs (see skills.go),
 // surfaced as a one-line entry in the ## Skills index; the agent reads the
 // body at Path (absolute) with `cat` when the skill applies.
@@ -65,15 +50,19 @@ type AgentCommon struct {
 	Name, ModelName, Prompt string
 	// PromptCmd, if set, is a shell command whose stdout supplies Prompt; it is
 	// resolved once at load time (see Load) and kept as declared.
-	PromptCmd   string
-	Gates       ToolGates
-	CustomTools []string
+	PromptCmd string
+	Gates     ToolGates
 	// SkillDirs is the skills = { "dir", ... } list as declared; Skills is the
 	// result of scanning those dirs at Load (see resolveSkillDirs).
 	SkillDirs   []string
 	Skills      []Skill
 	Environment bool // inject the host Environment system-reminder
 	Delegation  bool // advertise the task/task_* tools (with a non-empty tools.subagents)
+	// MCP is the tools.mcp opt-in: the declared shell3.mcp{} server names whose
+	// tools this agent/subagent gets. MCPAll is the `tools.mcp = "all"` form.
+	// Both empty/false (the default) means no MCP tools.
+	MCP    []string
+	MCPAll bool
 	// Prune toggles the cheap tool-output-stubbing tier for this agent/subagent.
 	// nil (unset) inherits the model's prune_at; false skips pruning entirely
 	// (context management goes straight to compact_at); true is an explicit
@@ -101,7 +90,6 @@ type Subagent struct {
 // on_tool_call hooks can run; callers MUST call Close when done.
 type LoadedConfig struct {
 	Models  []Model
-	Tools   map[string]CustomTool
 	Secrets map[string]string
 	// BackgroundMaxConcurrent is the maximum number of concurrent background jobs,
 	// set via shell3.background{ max_concurrent = N }. 0 means unset; the runtime
@@ -110,6 +98,11 @@ type LoadedConfig struct {
 
 	agents    []Agent
 	subagents []Subagent
+
+	// mcpServers holds the parsed top-level shell3.mcp{} block (sorted by
+	// name); mcpDeclared guards against a second block. Read via MCPServers().
+	mcpServers  []MCPServer
+	mcpDeclared bool
 
 	// telegram holds the parsed shell3.telegram{} block (zero value if absent);
 	// cron holds the jobs declared via top-level shell3.cron{...}. Read via
@@ -184,7 +177,7 @@ func load(path string) (*LoadedConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &LoadedConfig{Tools: map[string]CustomTool{}, Secrets: env, L: lua.NewState()}
+	c := &LoadedConfig{Secrets: env, L: lua.NewState()}
 	// The returned config owns c.L; close it only if we error out below.
 	var success bool
 	defer func() {
@@ -249,6 +242,10 @@ func load(path string) (*LoadedConfig, error) {
 	}
 	// Validate cron jobs (every job needs a schedule + a declared subagent).
 	if err := c.validateCron(); err != nil {
+		return nil, err
+	}
+	// Validate tools.mcp references against the declared shell3.mcp{} servers.
+	if err := c.validateMCPRefs(); err != nil {
 		return nil, err
 	}
 	// Validate cross-references: agent.Subagents must all resolve.

@@ -2,7 +2,6 @@ package luacfg
 
 import (
 	"fmt"
-	"regexp"
 	"strconv"
 
 	lua "github.com/yuin/gopher-lua"
@@ -59,7 +58,6 @@ func registerShell3(c *LoadedConfig) {
 	tbl := L.NewTable()
 	L.SetGlobal("shell3", tbl)
 	L.SetField(tbl, "model", L.NewFunction(c.luaModel))
-	L.SetField(tbl, "tool", L.NewFunction(c.luaTool))
 	L.SetField(tbl, "agent", L.NewFunction(c.luaAgent))
 	L.SetField(tbl, "subagent", L.NewFunction(c.luaSubagent))
 	env := L.NewTable()
@@ -70,6 +68,7 @@ func registerShell3(c *LoadedConfig) {
 	L.SetField(tbl, "on_tool_call", L.NewFunction(c.luaOnToolCall))
 	L.SetField(tbl, "on_tool_result", L.NewFunction(c.luaOnToolResult))
 	L.SetField(tbl, "background", L.NewFunction(c.luaBackground))
+	L.SetField(tbl, "mcp", L.NewFunction(c.luaMCP))
 	L.SetField(tbl, "telegram", L.NewFunction(c.luaTelegram))
 	L.SetField(tbl, "web", L.NewFunction(c.luaWeb))
 	L.SetField(tbl, "cron", L.NewFunction(c.luaCron))
@@ -164,18 +163,12 @@ func (c *LoadedConfig) luaModel(L *lua.LState) int {
 }
 
 // pushHandle pushes a handle table carrying sentinel → name (the reference
-// form agents use in tools.custom={}/tools.subagents={}) and returns the Lua
-// result count.
+// form agents use in tools.subagents={}) and returns the Lua result count.
 func pushHandle(L *lua.LState, sentinel, name string) int {
 	h := L.NewTable()
 	h.RawSetString(sentinel, lua.LString(name))
 	L.Push(h)
 	return 1
-}
-
-var toolKeys = map[string]bool{
-	"name": true, "description": true, "parameters": true,
-	"command": true, "secrets": true, "background": true, "timeout": true,
 }
 
 var agentKeys = map[string]bool{
@@ -185,53 +178,9 @@ var agentKeys = map[string]bool{
 
 var toolGateKeys = map[string]bool{
 	"bash": true, "bash_bg": true, "edit": true,
-	"custom":    true,
 	"media":     true,
 	"subagents": true,
-}
-
-func (c *LoadedConfig) luaTool(L *lua.LState) int {
-	opts := L.CheckTable(1)
-	mustKeys(L, opts, "tool", toolKeys)
-	ct := CustomTool{
-		Name:        optStr(opts, "name"),
-		Description: optStr(opts, "description"),
-		Command:     optStr(opts, "command"),
-		Background:  optBool(opts, "background"),
-		Timeout:     optInt(opts, "timeout"),
-	}
-	if ct.Name == "" || ct.Description == "" || ct.Command == "" {
-		L.RaiseError("tool: name, description, and command are all required")
-	}
-	if sec, ok := opts.RawGetString("secrets").(*lua.LTable); ok {
-		ct.Secrets = stringList(sec)
-	}
-	if p, ok := opts.RawGetString("parameters").(*lua.LTable); ok {
-		ct.Parameters = tableToMap(p)
-		if err := validateParamNames(ct.Name, ct.Parameters); err != nil {
-			L.RaiseError("%s", err.Error())
-		}
-	}
-	c.Tools[ct.Name] = ct
-	return pushHandle(L, "__tool", ct.Name)
-}
-
-// paramNameRe constrains custom-tool parameter names to lowercase identifiers.
-// Params are exported into the command env by their bare name; secrets and
-// standard env vars are uppercase by convention, so a lowercase rule guarantees
-// a param can never clobber PATH/HOME/IFS or collide with a declared secret.
-var paramNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
-
-// validateParamNames rejects any declared parameter property whose name is not
-// a lowercase identifier. params is the tool's JSON-schema map.
-func validateParamNames(tool string, params map[string]any) error {
-	props, _ := params["properties"].(map[string]any)
-	for name := range props {
-		if !paramNameRe.MatchString(name) {
-			return fmt.Errorf("tool %q: parameter %q must be a lowercase identifier ([a-z][a-z0-9_]*)", tool, name)
-		}
-	}
-	return nil
+	"mcp":       true,
 }
 
 // handleNamesStrict reads the array part of list as handles carrying sentinel,
@@ -273,8 +222,8 @@ func parseGates(tt *lua.LTable) ToolGates {
 // it), so interpretation stays with them.
 type toolsBlock struct {
 	gates        ToolGates
-	custom       []string
 	subagentsRaw lua.LValue
+	mcpRaw       lua.LValue
 }
 
 // parseToolsBlock reads opts.tools for an agent or subagent declaration. ctx
@@ -288,10 +237,8 @@ func parseToolsBlock(L *lua.LState, opts *lua.LTable, ctx string) (toolsBlock, b
 	}
 	mustKeys(L, tt, ctx+".tools", toolGateKeys)
 	tb.gates = parseGates(tt)
-	if cu, ok := tt.RawGetString("custom").(*lua.LTable); ok {
-		tb.custom = handleNamesStrict(L, cu, "__tool", ctx+".tools.custom", "tool")
-	}
 	tb.subagentsRaw = tt.RawGetString("subagents")
+	tb.mcpRaw = tt.RawGetString("mcp")
 	return tb, true
 }
 
@@ -311,8 +258,9 @@ func requireOnePromptSource(L *lua.LState, kind, name, prompt, promptCmd string)
 type agentCommon struct {
 	skillDirs    []string
 	gates        ToolGates
-	custom       []string
 	subagentsRaw lua.LValue
+	mcp          []string
+	mcpAll       bool
 	environment  bool
 	delegation   bool
 	prune        *bool
@@ -342,8 +290,9 @@ func (c *LoadedConfig) parseAgentCommon(L *lua.LState, opts *lua.LTable, kind, n
 		ac.skillDirs = skillDirList(L, sk, fmt.Sprintf("%s %q: skills", kind, name))
 	}
 	if tb, ok := parseToolsBlock(L, opts, kind); ok {
-		ac.gates, ac.custom = tb.gates, tb.custom
+		ac.gates = tb.gates
 		ac.subagentsRaw = tb.subagentsRaw
+		ac.mcp, ac.mcpAll = parseToolsMCP(L, tb.mcpRaw, fmt.Sprintf("%s %q", kind, name))
 	}
 	ac.environment = optBool(opts, "environment")
 	ac.delegation = optBool(opts, "delegation")
@@ -382,7 +331,8 @@ func (c *LoadedConfig) luaAgent(L *lua.LState) int {
 	// shared agent/subagent namespace stays unambiguous.
 	a.Name = c.uniqueName(a.Name)
 	ac := c.parseAgentCommon(L, opts, "agent", a.Name, a.Prompt, a.PromptCmd)
-	a.SkillDirs, a.Gates, a.CustomTools = ac.skillDirs, ac.gates, ac.custom
+	a.SkillDirs, a.Gates = ac.skillDirs, ac.gates
+	a.MCP, a.MCPAll = ac.mcp, ac.mcpAll
 	a.Environment, a.Delegation, a.Prune = ac.environment, ac.delegation, ac.prune
 	if ac.subagentsRaw != lua.LNil {
 		sg, ok := ac.subagentsRaw.(*lua.LTable)
@@ -424,7 +374,8 @@ func (c *LoadedConfig) luaSubagent(L *lua.LState) int {
 	if _, isTable := ac.subagentsRaw.(*lua.LTable); isTable {
 		L.RaiseError("subagent %q: a subagent may not declare its own subagents (depth limit 1)", s.Name)
 	}
-	s.SkillDirs, s.Gates, s.CustomTools = ac.skillDirs, ac.gates, ac.custom
+	s.SkillDirs, s.Gates = ac.skillDirs, ac.gates
+	s.MCP, s.MCPAll = ac.mcp, ac.mcpAll
 	s.Environment, s.Delegation, s.Prune = ac.environment, ac.delegation, ac.prune
 	c.subagents = append(c.subagents, s)
 	return pushHandle(L, "__subagent", s.Name)
