@@ -245,7 +245,12 @@ func (c *LoadedConfig) RunToolCall(ctx context.Context, agentName, name, command
 	switch {
 	case v.Block:
 		return ToolCallVerdict{Action: ActionBlock, Reason: v.Reason}
-	case len(v.Argv) > 0:
+	case v.Argv != nil:
+		// A present but malformed argv fails closed — never falls through to
+		// run the original command unwrapped (the documented safety promise).
+		if len(v.Argv) == 0 {
+			return ToolCallVerdict{Action: ActionBlock, Reason: "tool-call hook error: argv is empty"}
+		}
 		if slices.Contains(v.Argv, "") {
 			return ToolCallVerdict{Action: ActionBlock, Reason: "tool-call hook error: argv contains an empty element"}
 		}

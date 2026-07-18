@@ -14,7 +14,7 @@ func TestTaskListHandler_CallsListJobs(t *testing.T) {
 	cfg := ToolConfig{
 		ListJobs: func() string {
 			called = true
-			return "background tasks:\n  sub1  subagent  done  depth=1"
+			return "background tasks:\n  sub1  subagent  done"
 		},
 	}
 	out, err := TaskListHandler{}.Execute(context.Background(), "t", nil, cfg)
@@ -48,7 +48,7 @@ func TestTaskStatusHandler_CallsJobStatus(t *testing.T) {
 	cfg := ToolConfig{
 		JobStatus: func(id string) string {
 			gotID = id
-			return "task sub1: done (subagent, depth 1)"
+			return "task sub1: done (subagent)"
 		},
 	}
 	args := json.RawMessage(`{"id":"sub1"}`)

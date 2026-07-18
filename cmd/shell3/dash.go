@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os/signal"
 	"path/filepath"
 	"syscall"
@@ -57,6 +58,15 @@ func newDashCommand() *cobra.Command {
 			if addr == "" {
 				addr = "127.0.0.1:8765"
 			}
+			// dash serves with NO auth, so it must never face the network. The
+			// bind address can come from the shared dashboard.addr (which the
+			// tunneled Telegram dashboard may set to 0.0.0.0); refuse anything
+			// that isn't loopback rather than silently exposing history + files.
+			if !isLoopbackBind(addr) {
+				return fmt.Errorf("shell3 dash is unauthenticated and localhost-only, "+
+					"but %q is not a loopback address — pass --addr 127.0.0.1:PORT (the "+
+					"authenticated `shell3 web`/`shell3 telegram` front-ends are the ones meant to face the network)", addr)
+			}
 			fmt.Printf("shell3 dash: serving the dashboard on http://%s  (NO AUTH — localhost only)\n", addr)
 			fmt.Printf("  config: %s\n  API:    /api/{status,sessions,session,jobs,job,history,cron,files,file}\n", resolved)
 			return startDashboard(ctx, addr, srv.Handler())
@@ -65,4 +75,22 @@ func newDashCommand() *cobra.Command {
 	addConfigFlag(cmd, &configDir)
 	cmd.Flags().StringVar(&addr, "addr", "", "Listen address (default: the config's dashboard addr, else 127.0.0.1:8765)")
 	return cmd
+}
+
+// isLoopbackBind reports whether addr (a host:port listen address) binds only
+// the loopback interface. A bare-port (":8765"), a wildcard ("0.0.0.0"/"::"),
+// or any routable IP binds beyond loopback and is rejected for the no-auth dash.
+func isLoopbackBind(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "" {
+		return false // ":port" listens on all interfaces
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

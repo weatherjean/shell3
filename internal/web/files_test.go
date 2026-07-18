@@ -15,7 +15,7 @@ import (
 )
 
 // newFilesServer builds a dashboard server rooted at a temp config dir seeded
-// with a representative config layout (shell3.lua, a secrets .env, a skills
+// with a representative config layout (shell3.yaml, a secrets .env, a skills
 // subdir), and returns the server plus a signed-initData query string.
 func newFilesServer(t *testing.T) (*Server, string, string) {
 	t.Helper()
@@ -23,7 +23,7 @@ func newFilesServer(t *testing.T) (*Server, string, string) {
 	const chatID int64 = 8701499393
 
 	dir := t.TempDir()
-	mustWrite(t, filepath.Join(dir, "shell3.lua"), "shell3.model{ name = \"code\" }\n")
+	mustWrite(t, filepath.Join(dir, "shell3.yaml"), "models:\n  code: { model: code }\n")
 	mustWrite(t, filepath.Join(dir, ".env"), "OPENAI_API_KEY=sk-supersecret\n")
 	if err := os.Mkdir(filepath.Join(dir, "skills"), 0o755); err != nil {
 		t.Fatal(err)
@@ -48,9 +48,24 @@ func mustWrite(t *testing.T, path, body string) {
 	}
 }
 
+func TestIsCredentialFile(t *testing.T) {
+	redacted := []string{".env", ".ENV", ".env.local", ".env.production", ".Env.Backup"}
+	for _, n := range redacted {
+		if !isCredentialFile(n) {
+			t.Errorf("%q should be treated as a credential file", n)
+		}
+	}
+	plain := []string{"env", "shell3.yaml", ".environment.md", "agent.md", "dotenv.txt"}
+	for _, n := range plain {
+		if isCredentialFile(n) {
+			t.Errorf("%q should NOT be treated as a credential file", n)
+		}
+	}
+}
+
 func TestFiles_AuthRequired(t *testing.T) {
 	srv, _, _ := newFilesServer(t)
-	for _, p := range []string{"/api/files", "/api/file?path=shell3.lua"} {
+	for _, p := range []string{"/api/files", "/api/file?path=shell3.yaml"} {
 		rr := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, p, nil))
 		if rr.Code != http.StatusUnauthorized {
@@ -70,7 +85,7 @@ func TestFiles_ListRootDirsFirst(t *testing.T) {
 	if !strings.Contains(body, `"name":"skills"`) || !strings.Contains(body, `"dir":true`) {
 		t.Fatalf("listing missing skills dir: %s", body)
 	}
-	if iDir, iFile := strings.Index(body, `"name":"skills"`), strings.Index(body, `"name":"shell3.lua"`); iDir > iFile {
+	if iDir, iFile := strings.Index(body, `"name":"skills"`), strings.Index(body, `"name":"shell3.yaml"`); iDir > iFile {
 		t.Fatalf("dirs should sort before files: %s", body)
 	}
 	// The .env is listed but flagged redacted (size of contents not its concern).
@@ -81,11 +96,11 @@ func TestFiles_ListRootDirsFirst(t *testing.T) {
 
 func TestFiles_ReadNormalFile(t *testing.T) {
 	srv, signed, _ := newFilesServer(t)
-	rr := get(t, srv, signed, "/api/file?path=shell3.lua")
+	rr := get(t, srv, signed, "/api/file?path=shell3.yaml")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("want 200, got %d (%s)", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "shell3.model") {
+	if !strings.Contains(rr.Body.String(), "models:") {
 		t.Fatalf("file content missing: %s", rr.Body.String())
 	}
 }

@@ -9,7 +9,7 @@ Go (version pinned in `go.mod`) is the only requirement.
 ```sh
 make build     # build ./shell3
 make test      # go test -race ./...
-make lint      # gofmt drift check + go vet (what CI enforces)
+make lint      # gofmt drift check + go vet + golangci-lint (what CI enforces)
 ```
 
 The test suite is hermetic: temp `HOME`, a fake LLM provider

@@ -255,11 +255,13 @@ func streamQuiet(ctx context.Context, client LLMClient, msgs []llm.Message) (str
 // histories register on the prune/compaction thresholds at all.
 const mediaPartTokens = 1000
 
-// msgTokens approximates one message's token cost as (content + tool-call
-// argument bytes + content-part text bytes) / 4, plus a flat estimate per
-// media part.
+// msgTokens approximates one message's token cost as (content + reasoning +
+// tool-call argument bytes + content-part text bytes) / 4, plus a flat estimate
+// per media part. Reasoning content is counted because the adapter re-sends it
+// to the provider (see llm.Message.ReasoningContent), so it occupies real
+// prompt tokens the tail-sizing walk must not under-count.
 func msgTokens(m llm.Message) int {
-	n := len(m.Content)
+	n := len(m.Content) + len(m.ReasoningContent)
 	for _, tc := range m.ToolCalls {
 		n += len(tc.RawArgs)
 	}
@@ -404,10 +406,10 @@ func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.
 	// rather than the pre-compaction blob. flushMessages above wrote the OUTGOING
 	// session; this writes the incoming one.
 	if rolled {
-		flushMessages(st, lg, newSessionID, newMsgs)
-		// The new session's messages are now persisted; advance the high-water
-		// mark so the next saveHistory doesn't re-flush them.
-		sess.persistedLen = len(newMsgs)
+		// Advance the high-water mark only past what actually reached disk; a
+		// partial flush (e.g. full disk) leaves the rest for the next saveHistory
+		// rather than skipping it.
+		sess.persistedLen = flushMessages(st, lg, newSessionID, newMsgs)
 	} else {
 		// No store configured: nothing was persisted, so start the high-water
 		// mark fresh.

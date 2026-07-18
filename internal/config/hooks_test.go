@@ -82,6 +82,21 @@ func TestHookRewriteAndArgv(t *testing.T) {
 	}
 }
 
+// A present-but-malformed argv (empty array, or an empty element) fails
+// closed — it must block, never fall through to run the command unwrapped.
+func TestHookMalformedArgvBlocks(t *testing.T) {
+	for name, script := range map[string]string{
+		"empty-array":   `echo '{"argv": []}'`,
+		"empty-element": `echo '{"argv": ["docker", ""]}'`,
+	} {
+		c := hookCfg(t, map[string]string{"tool-call.sh": script})
+		v := c.RunToolCall(context.Background(), "agent", "bash", "danger", "{}", false)
+		if v.Action != ActionBlock || !strings.Contains(v.Reason, "hook error") {
+			t.Fatalf("%s: expected block, got %+v", name, v)
+		}
+	}
+}
+
 func TestHookReadsPayload(t *testing.T) {
 	// The script blocks with the command it saw — round-trips stdin JSON.
 	script := `

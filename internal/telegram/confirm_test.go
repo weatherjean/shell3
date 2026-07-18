@@ -68,7 +68,7 @@ func TestBotAsk_Allow(t *testing.T) {
 	}
 }
 
-// The Lua gate's {ask="...", reason=...} text is the config author's prompt to
+// The hook gate's {ask="...", reason=...} text is the config author's prompt to
 // the human; the Telegram confirm message must surface it (shell3 dev already
 // does).
 func TestBotAsk_SurfacesReason(t *testing.T) {

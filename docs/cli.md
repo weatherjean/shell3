@@ -4,9 +4,9 @@ Six subcommands: `telegram` (the service), `web` (the Telegram-free fallback
 host), `boot` (setup), `health` (config check), and two local dev front-ends,
 `dev` and `dash`. Bare `shell3` prints help.
 
-Every subcommand takes `-c`/`--config <dir>`: a path to a config directory
-(`shell3.yaml`, `agent.md`, …); the default is `~/.shell3`. The working
-directory is never consulted.
+Every subcommand except `boot` takes `-c`/`--config <dir>`: a path to a config
+directory (`shell3.yaml`, `agent.md`, …); the default is `~/.shell3`. The
+working directory is never consulted. (`boot` always scaffolds `~/.shell3`.)
 
 ## `shell3 telegram` — run the bot
 
@@ -109,7 +109,9 @@ shell3 dash --addr 127.0.0.1:9000
 Serves the Mini App dashboard with auth **bypassed**, so every endpoint is
 browsable/curlable without Telegram. Reattaches to the latest session (the
 Runs tab shows real history and subagent transcripts). Because auth is off it
-binds to localhost only; the file explorer still redacts `.env`.
+refuses any non-loopback bind address (it must never face the network — use the
+authenticated `shell3 web`/`shell3 telegram` for that); the file explorer still
+redacts `.env` files (`.env`, `.env.local`, …).
 
 ## Reading your history
 

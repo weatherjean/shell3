@@ -14,6 +14,8 @@ func TestToTelegramHTML(t *testing.T) {
 		{"inline code", "`x`", "<code>x</code>"},
 		{"strikethrough", "~~x~~", "<s>x</s>"},
 		{"link", "[t](http://u)", `<a href="http://u">t</a>`},
+		{"quote in href stays well-formed", `[t](http://u/a"b)`, `<a href="http://u/a&quot;b">t</a>`},
+		{"quote in prose stays literal", `say "hi"`, `say "hi"`},
 		{"heading becomes bold", "# Title", "<b>Title</b>"},
 		{"escape special chars", "a < b & c > d", "a &lt; b &amp; c &gt; d"},
 		{"bullet list", "- one\n- two", "• one\n• two"},

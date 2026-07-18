@@ -1,8 +1,7 @@
 /shell3
-/shell3-acp
 /bin/
 ai-do-not-read.*
-# ./.shell3_project/ is runtime data — runs, inbox, sockets — never committed.
+# ./.shell3_project/ is runtime data — runs + subagent transcripts — never committed.
 /.shell3_project/
 
 # AI dev-process artifacts (kept local, not shipped publicly)

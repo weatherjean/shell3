@@ -231,9 +231,9 @@ func TestSession_ErrorPath(t *testing.T) {
 }
 
 // TestSession_Close_ReturnsEndSessionError verifies Close surfaces the store's
-// EndSession error instead of always returning nil. The underlying store DB is
-// closed before Close runs, forcing EndSession to fail; front-ends' `if err :=
-// sess.Close(); err != nil` must then see a non-nil error.
+// EndSession error instead of always returning nil. The run's meta.json is
+// removed before Close runs, forcing EndSession (which reads meta) to fail;
+// front-ends' `if err := sess.Close(); err != nil` must then see a non-nil error.
 func TestSession_Close_ReturnsEndSessionError(t *testing.T) {
 	root := t.TempDir()
 	st, err := runs.Open(root)

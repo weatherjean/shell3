@@ -75,7 +75,7 @@ func (r *renderer) renderNode(n ast.Node) {
 		lang := string(n.Language(r.source))
 		r.sb.WriteString("<pre><code")
 		if lang != "" {
-			r.sb.WriteString(` class="language-` + escape(lang) + `"`)
+			r.sb.WriteString(` class="language-` + escapeAttr(lang) + `"`)
 		}
 		r.sb.WriteString(">")
 		r.writeLines(n)
@@ -109,12 +109,12 @@ func (r *renderer) renderNode(n ast.Node) {
 		}
 		r.sb.WriteString("</code>")
 	case *ast.Link:
-		r.sb.WriteString(`<a href="` + escape(string(n.Destination)) + `">`)
+		r.sb.WriteString(`<a href="` + escapeAttr(string(n.Destination)) + `">`)
 		r.renderChildren(n)
 		r.sb.WriteString("</a>")
 	case *ast.AutoLink:
 		url := string(n.URL(r.source))
-		r.sb.WriteString(`<a href="` + escape(url) + `">` + escape(url) + "</a>")
+		r.sb.WriteString(`<a href="` + escapeAttr(url) + `">` + escape(url) + "</a>")
 	case *ast.Text:
 		r.sb.WriteString(escape(string(n.Segment.Value(r.source))))
 		if n.SoftLineBreak() || n.HardLineBreak() {
@@ -154,10 +154,18 @@ func (r *renderer) writeLines(n ast.Node) {
 	}
 }
 
-// escape replaces the three characters Telegram requires escaping in HTML.
+// escape replaces the three characters Telegram requires escaping in HTML text.
 func escape(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")
 	s = strings.ReplaceAll(s, "<", "&lt;")
 	s = strings.ReplaceAll(s, ">", "&gt;")
 	return s
+}
+
+// escapeAttr escapes a value destined for a double-quoted attribute (a link
+// href, a code-fence language class). On top of the text escapes it also
+// neutralizes " so a quote in the value cannot terminate the attribute early
+// and produce malformed markup that Telegram would reject with a 400.
+func escapeAttr(s string) string {
+	return strings.ReplaceAll(escape(s), `"`, "&quot;")
 }

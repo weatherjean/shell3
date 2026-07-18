@@ -128,6 +128,7 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 				Workdir:   cfg.WorkDir,
 				ConfigDir: cfg.ConfigDir,
 				Model:     metaModel,
+				ParentID:  opts.ParentID,
 			}); err == nil {
 				storeID = id
 			} else {

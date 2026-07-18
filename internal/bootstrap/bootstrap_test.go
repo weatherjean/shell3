@@ -30,8 +30,16 @@ func TestEnsureGlobal(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(g.Root, ".env.example")); !os.IsNotExist(err) {
 		t.Fatalf("EnsureGlobal must not write .env.example; stat err = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(g.Root, ".gitignore")); err != nil {
+	gi, err := os.ReadFile(filepath.Join(g.Root, ".gitignore"))
+	if err != nil {
 		t.Fatalf("gitignore missing: %v", err)
+	}
+	// Secrets and every log the runtime writes must be ignored so a dotfiles-
+	// tracked ~/.shell3 can never commit them.
+	for _, want := range []string{".env", "shell3.log", "proxy-*.log", "tunnel.log"} {
+		if !strings.Contains(string(gi), want) {
+			t.Fatalf("global .gitignore missing %q:\n%s", want, gi)
+		}
 	}
 }
 

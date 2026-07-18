@@ -10,7 +10,7 @@ import (
 )
 
 // EnsureGlobal creates ~/.shell3/ and the global .gitignore if missing. It does
-// not write any shell3.lua — config is created explicitly via `shell3 boot`.
+// not write the config — that is created explicitly via `shell3 boot`.
 func EnsureGlobal(g paths.Global) error {
 	if err := os.MkdirAll(g.Root, 0700); err != nil {
 		return fmt.Errorf("bootstrap: mkdir %s: %w", g.Root, err)
@@ -108,4 +108,5 @@ const globalGitignoreAddition = `# shell3 — never commit these even in a dotfi
 shell3.log
 shell3.log.*
 proxy-*.log
+tunnel.log
 `

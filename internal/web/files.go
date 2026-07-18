@@ -42,9 +42,11 @@ type fileResp struct {
 
 // isCredentialFile reports whether a base name is a secrets file whose contents
 // must never be sent to the browser. Mirrors the guard in sendtool.go: the
-// `.env` beside shell3.yaml.
+// `.env` beside shell3.yaml, plus dotenv siblings (`.env.local`,
+// `.env.production`, …) operators commonly create.
 func isCredentialFile(base string) bool {
-	return strings.ToLower(base) == ".env"
+	b := strings.ToLower(base)
+	return b == ".env" || strings.HasPrefix(b, ".env.")
 }
 
 // resolveInConfig maps a browser-supplied relative path to an absolute path

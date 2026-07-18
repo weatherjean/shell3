@@ -73,7 +73,8 @@ YAML as `env:KEY`:
 - **Never commit `.env`.** The shipped `.gitignore` excludes it.
 - **Never read or display credential files** — this applies to you and to the
   agent (the system prompt says so; the dashboard and `send_media_telegram`
-  refuse `.env` outright).
+  refuse `.env` and its dotenv siblings — `.env.local`, `.env.production`, … —
+  outright).
 - **Scripts read secrets at point of use.** The scaffold's `scripting` skill
   teaches the pattern: a wrapper script under `~/.shell3/lib/bin/` reads the
   one key it needs from `.env` (`grep '^KEY=' ~/.shell3/.env | cut -d= -f2-`)

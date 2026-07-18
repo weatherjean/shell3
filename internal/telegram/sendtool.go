@@ -102,7 +102,9 @@ func (b *Bot) sendMediaHandler(ctx context.Context, argsJSON string) (string, er
 		path = filepath.Join(b.workDir, path)
 	}
 	base := filepath.Base(path)
-	if strings.ToLower(base) == ".env" {
+	// Refuse the `.env` beside shell3.yaml and dotenv siblings (.env.local, …);
+	// mirrors isCredentialFile in internal/web/files.go.
+	if lb := strings.ToLower(base); lb == ".env" || strings.HasPrefix(lb, ".env.") {
 		return "error: refusing to send a credentials file", nil
 	}
 	info, err := os.Stat(path)

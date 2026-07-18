@@ -99,7 +99,6 @@ type bgJob struct {
 	agent     string // subagent jobs: the spawned agent's name ("" for commands)
 	parent    *Session
 	parentID  string
-	pid       int
 	startedAt time.Time
 	cancel    context.CancelFunc
 	out       *jobSink // live output: command stdout/stderr, or subagent event stream
@@ -277,9 +276,6 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 		cancel()
 		return "", err
 	}
-	m.mu.Lock()
-	j.pid = cmd.Process.Pid
-	m.mu.Unlock()
 
 	m.wg.Add(1)
 	go func() {
@@ -400,7 +396,7 @@ func (m *jobManager) list() []JobInfo {
 	out := make([]JobInfo, 0, len(m.jobs))
 	for _, j := range m.jobs {
 		out = append(out, JobInfo{
-			ID: j.id, Cmd: j.title, Agent: j.agent, PID: j.pid, StartedAt: j.startedAt,
+			ID: j.id, Cmd: j.title, Agent: j.agent, StartedAt: j.startedAt,
 			Kind: j.kind, ParentID: j.parentID,
 			Done: j.finished, Exit: j.exit, Summary: j.summary,
 			Error: j.errText, EndedAt: j.endedAt,
@@ -584,6 +580,10 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 		Agent:    agent,
 		WorkDir:  resolveChildWorkDir(parent.opts.WorkDir, o.workDir, m.rt.workDir),
 		Headless: true,
+		// Mark the child so resume-latest never reattaches a front-end to this
+		// subagent transcript on restart (it shares the parent's workdir+config
+		// and sorts newer).
+		ParentID: parent.sess.ID(),
 	})
 	if err != nil {
 		m.mu.Lock()

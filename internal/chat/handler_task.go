@@ -29,7 +29,7 @@ func (TaskHandler) Execute(ctx context.Context, id string, args json.RawMessage,
 	}
 	subID, err := cfg.StartSubagent(p.SubagentType, p.Prompt, p.Description)
 	if err != nil {
-		return "error: " + err.Error(), nil // surfaced to the model (depth/cap/unknown agent)
+		return "error: " + err.Error(), nil // surfaced to the model (cap/unknown agent)
 	}
 	return fmt.Sprintf("started subagent %s (@%s). You'll be notified when it finishes; keep working, don't poll.", subID, p.SubagentType), nil
 }

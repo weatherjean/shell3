@@ -523,18 +523,23 @@ func saveHistory(st *runs.Store, lg applog.Logger, sess *Session, sessionID stri
 		// Shouldn't happen, but guard against it.
 		return
 	}
-	flushMessages(st, lg, sessionID, sess.messages[sess.persistedLen:])
-	sess.persistedLen = len(sess.messages)
+	sess.persistedLen += flushMessages(st, lg, sessionID, sess.messages[sess.persistedLen:])
 }
 
 // flushMessages appends each message in msgs to the runs store (one JSONL line
-// per message, append-only). Best-effort: write failures are logged, not fatal.
-// Shared by saveHistory (end of turn) and compactInto (flushing the incoming
-// compacted session).
-func flushMessages(st *runs.Store, lg applog.Logger, sessionID string, msgs []llm.Message) {
-	for _, m := range msgs {
+// per message, append-only) and returns how many were persisted. Best-effort:
+// a write failure is logged, not fatal — but it STOPS the flush and the count
+// reflects only the contiguous persisted prefix, so the caller advances its
+// high-water mark no further than what actually reached disk. Continuing past a
+// failure would let the high-water mark skip an unwritten message, permanently
+// losing it (and orphaning a tool_call from its result). The unwritten tail is
+// retried on the next flush. Shared by saveHistory and compactInto.
+func flushMessages(st *runs.Store, lg applog.Logger, sessionID string, msgs []llm.Message) int {
+	for i, m := range msgs {
 		if err := st.AppendMessage(sessionID, m); err != nil {
 			lg.Warn("append message failed", "session_id", sessionID, "error", err)
+			return i
 		}
 	}
+	return len(msgs)
 }

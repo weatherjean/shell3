@@ -97,8 +97,8 @@ func TestCommandReload(t *testing.T) {
 	if !strings.Contains(got, "✅ reloaded — 1 agents, 2 models, 3 jobs") || !strings.Contains(got, "note") {
 		t.Fatalf("reload reply: %q", got)
 	}
-	d.SetReloader(func() (shell3.ReloadResult, error) { return shell3.ReloadResult{}, errors.New("bad lua") })
-	if got := d.Command("/reload"); !strings.Contains(got, "reload failed: bad lua") {
+	d.SetReloader(func() (shell3.ReloadResult, error) { return shell3.ReloadResult{}, errors.New("bad config") })
+	if got := d.Command("/reload"); !strings.Contains(got, "reload failed: bad config") {
 		t.Fatalf("reload failure: %q", got)
 	}
 }

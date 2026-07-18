@@ -49,6 +49,8 @@ models:
     context_window: 128000         # the model's REAL token budget
     compact_at: 100000             # auto-compact threshold; 0 = off
     # reasoning: medium            # if the model supports reasoning effort
+    # temperature: 0.7             # omitted = leave the provider default
+    # max_tokens: 4096             # cap on a single reply; omitted = adapter default
 ```
 
 Set `context_window` to the model's actual budget — a wrong number skews the
@@ -397,9 +399,9 @@ media:
 ```
 
 - **`stt: { model, language?, echo? }`** — every inbound voice note is
-  transcribed before the turn runs and injected as quoted text. `echo`
-  (default `true`) also sends a `📝 "…"` transcript to the chat. Failures
-  surface as `⚠️` notices.
+  transcribed before the turn runs and injected as quoted text. Set
+  `echo: true` to also send a `📝 "…"` transcript to the chat (default
+  `false`). Failures surface as `⚠️` notices.
 - **`tts: { model, voice?, mode?, format? }`** — speaks outbound replies.
   `mode`: `off`, `inbound` (default — voice reply only to a voice message),
   `always`; overridable at runtime with `/voice` (persisted). `format`
@@ -456,12 +458,14 @@ body as its prompt. The scheduler runs inside `shell3 telegram` and
 schedule: "@daily"
 agent: explorer
 notify: true
+# workdir: /some/path   # optional; defaults to the config dir
 ---
 Summarize anything noteworthy from the last day.
 ```
 
 `notify: true` wakes the chat with the result; `false` queues it quietly for
-the agent's next turn (failures always wake). `/reload` arms changed files;
+the agent's next turn (failures always wake). `workdir` sets the job's working
+directory (default: the config dir). `/reload` arms changed files;
 `/run <name>` fires a job on demand.
 
 ## Heartbeat — `heartbeat.md`

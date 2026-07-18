@@ -29,6 +29,10 @@ type SessionOpts struct {
 	WorkDir string
 	// Headless injects the headless reminder (no human to answer questions).
 	Headless bool
+	// ParentID marks this as a subagent child of the given runs session. It is
+	// recorded in the child's meta so resume-latest skips it (a child must never
+	// become the session a front-end reattaches to on restart).
+	ParentID string
 	// OutPath, when non-empty, streams this session's JSONL audit log there.
 	OutPath string
 	// Asker confirms an on_tool_call ask-verdict command with a human (true = allow).

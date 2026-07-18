@@ -14,6 +14,24 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
+// TestMsgTokens_CountsReasoning: the adapter re-sends assistant
+// ReasoningContent to the provider, so it occupies real prompt tokens. If
+// msgTokens omitted it, the tail-sizing walk would under-count reasoning-heavy
+// assistant turns and over-preserve the verbatim tail past compact_at.
+func TestMsgTokens_CountsReasoning(t *testing.T) {
+	plain := llm.Message{Role: llm.RoleAssistant, Content: "hello there"}
+	withReasoning := plain
+	withReasoning.ReasoningContent = strings.Repeat("x", 400)
+	if got := msgTokens(withReasoning); got <= msgTokens(plain) {
+		t.Fatalf("reasoning content must raise the estimate: plain=%d withReasoning=%d",
+			msgTokens(plain), got)
+	}
+	// ~400 reasoning bytes ≈ 100 tokens on top of the content estimate.
+	if got, want := msgTokens(withReasoning)-msgTokens(plain), 400/4; got != want {
+		t.Fatalf("reasoning token delta = %d, want %d", got, want)
+	}
+}
+
 // TestCompactInto_ResetsReminderLog: compaction rewrites history to a short
 // continuation+tail, so the reminderLog anchors (which index the pre-compaction
 // message slice) are stale. They must be dropped — exactly as SetMessages does —

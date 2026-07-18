@@ -245,14 +245,18 @@ func TestSendMediaTool_RefusesEnv(t *testing.T) {
 	b := NewBot(fc, rt, sess, 42)
 	dir := t.TempDir()
 	b.SetWorkDir(dir)
-	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("SECRET=x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	out, _ := b.sendMediaHandler(context.Background(), `{"path":".env"}`)
-	if !strings.Contains(out, "refusing") {
-		t.Fatalf("expected refusal for .env, got %q", out)
-	}
-	if _, ok := fc.lastDoc(); ok {
-		t.Fatal(".env must not be sent")
+	// Both the plain `.env` and dotenv siblings (.env.production, …) must be
+	// refused — they all hold secrets.
+	for _, name := range []string{".env", ".env.production"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("SECRET=x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		out, _ := b.sendMediaHandler(context.Background(), `{"path":"`+name+`"}`)
+		if !strings.Contains(out, "refusing") {
+			t.Fatalf("expected refusal for %s, got %q", name, out)
+		}
+		if _, ok := fc.lastDoc(); ok {
+			t.Fatalf("%s must not be sent", name)
+		}
 	}
 }

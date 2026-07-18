@@ -31,7 +31,6 @@ type JobInfo struct {
 	Cmd string
 	// Agent is the spawned agent's name for subagent jobs; "" for commands.
 	Agent     string
-	PID       int
 	StartedAt time.Time
 	Kind      JobKind
 	ParentID  string

@@ -1,6 +1,7 @@
 package runs
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,47 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
+// healTornTail repairs a crash-left partial record before an append. A write
+// cut off mid-way (power loss, SIGKILL) leaves a record with no terminating
+// newline; if the next append landed after it via O_APPEND, the two would fuse
+// into one line, and once a further complete line followed, that fused interior
+// line would fail the whole-session strict decode — silently dropping ALL
+// history. Truncating the unterminated tail back to the last complete line
+// keeps the append on a clean record boundary. The common case (file already
+// ends in a newline) is a stat + single-byte read; the full read + truncate
+// only runs on the rare torn tail. Safe because each session file has a single
+// writer (its turn goroutine).
+func healTornTail(path string) error {
+	f, err := os.OpenFile(path, os.O_RDWR, 0o644)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // appendLine's O_CREATE will make it
+		}
+		return err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if info.Size() == 0 {
+		return nil
+	}
+	last := make([]byte, 1)
+	if _, err := f.ReadAt(last, info.Size()-1); err != nil {
+		return err
+	}
+	if last[0] == '\n' {
+		return nil // clean boundary — the normal path
+	}
+	data := make([]byte, info.Size())
+	if _, err := f.ReadAt(data, 0); err != nil {
+		return err
+	}
+	keep := int64(bytes.LastIndexByte(data, '\n') + 1) // 0 when there is no newline at all
+	return f.Truncate(keep)
+}
+
 // appendLine marshals v and appends it as a single JSON line to path,
 // creating the file when missing. what names the record kind in errors
 // ("message", "reminder").
@@ -16,6 +58,10 @@ func appendLine(path, what string, v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("runs: marshal %s: %w", what, err)
+	}
+	// Heal any crash-left partial tail so O_APPEND lands on a clean boundary.
+	if err := healTornTail(path); err != nil {
+		return fmt.Errorf("runs: repair %s: %w", what, err)
 	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {

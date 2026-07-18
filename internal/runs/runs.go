@@ -265,6 +265,13 @@ func (s *Store) LatestSession(workdir, configDir string) (string, bool, error) {
 		return "", false, err
 	}
 	for _, m := range metas {
+		// Skip subagent child sessions: they share the parent's workdir+config
+		// and sort newer (spawned mid-run), so without this a front-end restart
+		// would reattach to a subagent transcript instead of the real
+		// conversation. resume-latest only ever rejoins a top-level session.
+		if m.ParentID != "" {
+			continue
+		}
 		if m.Workdir == workdir && m.ConfigDir == configDir {
 			return m.ID, true, nil
 		}

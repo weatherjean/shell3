@@ -128,6 +128,46 @@ func TestResumeLatest_ReattachesNewest(t *testing.T) {
 	}
 }
 
+// TestResumeLatest_SkipsSubagentChild proves that a subagent child session —
+// which shares the parent's workdir and is created (newer) mid-run — is never
+// the target of a resume-latest restart. Without the ParentID guard the newer
+// child would win and the front-end would reattach to the subagent transcript,
+// silently replacing the user's conversation.
+func TestResumeLatest_SkipsSubagentChild(t *testing.T) {
+	st := openTestStore(t)
+	wd := t.TempDir()
+
+	// Main front-end session with one persisted turn.
+	rtA := newTestRuntime(t, fakeCfgWithStore(st, fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "noted"}}}))
+	sMain, err := rtA.Session(SessionOpts{WorkDir: wd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range sMain.Send(context.Background(), "remember 42") {
+	}
+	mainID := sMain.sess.ID()
+
+	// A subagent child: same workdir, ParentID set, created after (newer id).
+	sChild, err := rtA.Session(SessionOpts{WorkDir: wd, Headless: true, ParentID: mainID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sChild.sess.ID() == mainID || sChild.sess.ID() == "" {
+		t.Fatalf("child session id %q must be distinct from main %q", sChild.sess.ID(), mainID)
+	}
+
+	// Restart with ResumeLatest: must rejoin the main session, skipping the
+	// newer child.
+	rtB := newTestRuntime(t, fakeCfgWithStore(st, fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "still 42"}}}))
+	sB, err := rtB.Session(SessionOpts{WorkDir: wd, ResumeLatest: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sB.sess.ID(); got != mainID {
+		t.Fatalf("ResumeLatest attached to %s, want the main session %s (not the subagent child)", got, mainID)
+	}
+}
+
 // TestResumeLatest_NoMatchStartsFresh verifies ResumeLatest falls back to a new
 // session when nothing matches the workdir.
 func TestResumeLatest_NoMatchStartsFresh(t *testing.T) {
