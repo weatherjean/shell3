@@ -21,8 +21,8 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/weatherjean/shell3/internal/applog"
+	"github.com/weatherjean/shell3/internal/config"
 	"github.com/weatherjean/shell3/internal/llm"
-	"github.com/weatherjean/shell3/internal/luacfg"
 )
 
 const defaultTimeout = 10 * time.Second
@@ -42,13 +42,13 @@ type ServerStatus struct {
 
 // dialFunc opens a transport for a server; swapped in tests for in-memory
 // transports. Called on initial connect and again on each renewal.
-type dialFunc func(ctx context.Context, s luacfg.MCPServer) (sdk.Transport, error)
+type dialFunc func(ctx context.Context, s config.MCPServer) (sdk.Transport, error)
 
 // serverConn is one declared server's live state. mu serializes connect,
 // renewal, and calls for this server (MCP stdio sessions are sequential
 // anyway; HTTP servers rarely benefit from parallel calls from one agent).
 type serverConn struct {
-	cfg     luacfg.MCPServer
+	cfg     config.MCPServer
 	mu      sync.Mutex
 	sess    *sdk.ClientSession
 	tools   []*sdk.Tool // post allow/deny filter
@@ -78,7 +78,7 @@ type toolRoute struct {
 }
 
 // New builds a Manager for the declared servers. Call Connect before use.
-func New(servers []luacfg.MCPServer, log applog.Logger) *Manager {
+func New(servers []config.MCPServer, log applog.Logger) *Manager {
 	if log == nil {
 		log = applog.Noop{}
 	}
@@ -91,7 +91,7 @@ func New(servers []luacfg.MCPServer, log applog.Logger) *Manager {
 }
 
 // defaultDial builds the real transport for a server declaration.
-func defaultDial(_ context.Context, s luacfg.MCPServer) (sdk.Transport, error) {
+func defaultDial(_ context.Context, s config.MCPServer) (sdk.Transport, error) {
 	if len(s.Command) > 0 {
 		cmd := exec.Command(s.Command[0], s.Command[1:]...)
 		cmd.Env = append(os.Environ(), envList(s.Env)...)

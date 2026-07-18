@@ -24,9 +24,11 @@ func newGenerateClients(t *testing.T, url, size string) *Clients {
 	t.Helper()
 	t.Setenv("SHELL3_MEDIA_DIR", t.TempDir()) // keep test output out of ~/.shell3/media
 	return newTestClients(t, `
-shell3.model("m", { base_url = "`+url+`", api_key = "k", model = "img-x" })
-shell3.imagegen{ model = "m", size = "`+size+`" }
-`+baseAgent, nil)
+models:
+  m: { base_url: "`+url+`", api_key: k, model: img-x }
+media:
+  imagegen: { model: m, size: "`+size+`" }
+`, nil)
 }
 
 // newGenerateClientsOpenRouter is newGenerateClients but declares
@@ -35,9 +37,11 @@ func newGenerateClientsOpenRouter(t *testing.T, url, size string) *Clients {
 	t.Helper()
 	t.Setenv("SHELL3_MEDIA_DIR", t.TempDir()) // keep test output out of ~/.shell3/media
 	return newTestClients(t, `
-shell3.model("m", { base_url = "`+url+`", api_key = "k", model = "img-x" })
-shell3.imagegen{ model = "m", size = "`+size+`", api = "openrouter" }
-`+baseAgent, nil)
+models:
+  m: { base_url: "`+url+`", api_key: k, model: img-x }
+media:
+  imagegen: { model: m, size: "`+size+`", api: openrouter }
+`, nil)
 }
 
 // testPNGBytes returns the encoded bytes of a tiny 2x2 PNG.
@@ -290,9 +294,7 @@ func TestGenerateOpenRouterNoImages(t *testing.T) {
 }
 
 func TestGenerateNilWhenUnconfigured(t *testing.T) {
-	c := newTestClients(t, `
-shell3.model("m", { base_url = "http://x", model = "id" })
-`+baseAgent, nil)
+	c := newTestClients(t, modelOnlyYAML("http://x"), nil)
 	if c.Generate != nil {
 		t.Fatal("want nil Generate when shell3.imagegen is absent")
 	}

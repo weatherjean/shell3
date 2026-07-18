@@ -12,24 +12,27 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weatherjean/shell3/internal/luacfg"
+	"github.com/weatherjean/shell3/internal/config"
 )
 
-// newTestClients writes script (with a minimal shell3.agent{} so luacfg.Load
-// accepts it) plus an empty .env to a temp dir, loads it, and returns
-// New(cfg, ensureProxy). ensureProxy defaults to a no-op recorder when nil.
-func newTestClients(t *testing.T, script string, ensureProxy func(name, command string)) *Clients {
+// newTestClients writes yamlText as shell3.yaml (plus a minimal agent.md and
+// an empty .env so config.Load accepts the tree), loads it, and returns
+// New(cfg, ensureProxy). ensureProxy defaults to a no-op when nil.
+func newTestClients(t *testing.T, yamlText string, ensureProxy func(name, command string)) *Clients {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "shell3.lua"), []byte(script), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "shell3.yaml"), []byte(yamlText), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agent.md"), []byte("---\nmodel: m\n---\nhi\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, ".env"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := luacfg.Load(filepath.Join(dir, "shell3.lua"))
+	cfg, err := config.Load(dir)
 	if err != nil {
-		t.Fatalf("luacfg.Load: %v", err)
+		t.Fatalf("config.Load: %v", err)
 	}
 	t.Cleanup(cfg.Close)
 	if ensureProxy == nil {
@@ -38,20 +41,22 @@ func newTestClients(t *testing.T, script string, ensureProxy func(name, command 
 	return New(cfg, ensureProxy)
 }
 
-// baseAgent is the minimal shell3.agent{} block every test config needs
-// (luacfg.Load fails without exactly one).
-const baseAgent = `
-shell3.agent({ name="code", model="m", prompt="hi", tools={} })
-`
+// modelOnlyYAML declares just the model "m" — for tests asserting a media
+// client is nil when its block is absent.
+func modelOnlyYAML(url string) string {
+	return "models:\n  m: { base_url: \"" + url + "\", model: id }\n"
+}
 
 // newTranscribeClients loads a config declaring a model at url and an stt
 // block referencing it.
 func newTranscribeClients(t *testing.T, url string) *Clients {
 	t.Helper()
 	return newTestClients(t, `
-shell3.model("m", { base_url = "`+url+`", api_key = "k", model = "whisper-x" })
-shell3.stt{ model = "m", language = "en" }
-`+baseAgent, nil)
+models:
+  m: { base_url: "`+url+`", api_key: k, model: whisper-x }
+media:
+  stt: { model: m, language: en }
+`, nil)
 }
 
 func TestTranscribeWireShape(t *testing.T) {
@@ -98,9 +103,7 @@ func TestTranscribeWireShape(t *testing.T) {
 }
 
 func TestTranscribeNilWhenUnconfigured(t *testing.T) {
-	c := newTestClients(t, `
-shell3.model("m", { base_url = "http://x", model = "id" })
-`+baseAgent, nil)
+	c := newTestClients(t, modelOnlyYAML("http://x"), nil)
 	if c.Transcribe != nil {
 		t.Fatal("want nil Transcribe when shell3.stt is absent")
 	}
@@ -125,9 +128,11 @@ func TestTranscribeProxyEnsured(t *testing.T) {
 
 	var gotName, gotCmd string
 	c := newTestClients(t, `
-shell3.model("m", { base_url = "`+srv.URL+`", model = "whisper-x", run_proxy = "run-me" })
-shell3.stt{ model = "m" }
-`+baseAgent, func(name, command string) {
+models:
+  m: { base_url: "`+srv.URL+`", model: whisper-x, run_proxy: run-me }
+media:
+  stt: { model: m }
+`, func(name, command string) {
 		gotName, gotCmd = name, command
 	})
 

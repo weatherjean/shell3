@@ -75,7 +75,7 @@ func (s *Server) SetCronSource(fn func() []CronJob) { s.cron = fn }
 func (s *Server) SetHeartbeatSource(fn func() *HeartbeatStatus) { s.heartbeat = fn }
 
 // SetConfigDir roots the read-only file explorer at dir (the directory holding
-// the active shell3.lua). When unset, the file endpoints return empty listings.
+// the active shell3.yaml). When unset, the file endpoints return empty listings.
 func (s *Server) SetConfigDir(dir string) { s.configDir = dir }
 
 func (s *Server) handleCron(w http.ResponseWriter, r *http.Request) {

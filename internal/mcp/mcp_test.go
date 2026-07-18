@@ -9,7 +9,7 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/weatherjean/shell3/internal/applog"
-	"github.com/weatherjean/shell3/internal/luacfg"
+	"github.com/weatherjean/shell3/internal/config"
 )
 
 // fakeServer builds an in-process SDK server exposing the given tools, each
@@ -48,7 +48,7 @@ func textHandler(out string) sdk.ToolHandler {
 	}
 }
 
-func (f *fakeServer) dial(ctx context.Context, _ luacfg.MCPServer) (sdk.Transport, error) {
+func (f *fakeServer) dial(ctx context.Context, _ config.MCPServer) (sdk.Transport, error) {
 	ct, st := sdk.NewInMemoryTransports()
 	ss, err := f.srv.Connect(ctx, st, nil)
 	if err != nil {
@@ -71,7 +71,7 @@ func (f *fakeServer) killSessions() {
 	f.sessions = nil
 }
 
-func newTestManager(t *testing.T, servers []luacfg.MCPServer, dial dialFunc) *Manager {
+func newTestManager(t *testing.T, servers []config.MCPServer, dial dialFunc) *Manager {
 	t.Helper()
 	m := New(servers, applog.Noop{})
 	m.dial = dial
@@ -84,7 +84,7 @@ func TestConnectListAndToolDefs(t *testing.T) {
 		"search": textHandler("found"),
 		"get":    textHandler("got"),
 	})
-	m := newTestManager(t, []luacfg.MCPServer{{Name: "github", URL: "x"}}, fs.dial)
+	m := newTestManager(t, []config.MCPServer{{Name: "github", URL: "x"}}, fs.dial)
 	warns := m.Connect(context.Background())
 	if len(warns) != 0 {
 		t.Fatalf("unexpected warnings: %v", warns)
@@ -117,7 +117,7 @@ func TestAllowDenyFilter(t *testing.T) {
 		"search": textHandler("found"),
 		"del":    textHandler("deleted"),
 	})
-	allow := newTestManager(t, []luacfg.MCPServer{{Name: "g", URL: "x", Allow: []string{"search"}}}, fs.dial)
+	allow := newTestManager(t, []config.MCPServer{{Name: "g", URL: "x", Allow: []string{"search"}}}, fs.dial)
 	allow.Connect(context.Background())
 	if defs := allow.Tools(nil, true); len(defs) != 1 || defs[0].Name != "mcp_g_search" {
 		t.Errorf("allow filter wrong: %v", defs)
@@ -125,7 +125,7 @@ func TestAllowDenyFilter(t *testing.T) {
 	if !allow.Owns("mcp_g_search") || allow.Owns("mcp_g_del") {
 		t.Error("Owns must reflect the allow filter")
 	}
-	deny := newTestManager(t, []luacfg.MCPServer{{Name: "g", URL: "x", Deny: []string{"del"}}}, fs.dial)
+	deny := newTestManager(t, []config.MCPServer{{Name: "g", URL: "x", Deny: []string{"del"}}}, fs.dial)
 	deny.Connect(context.Background())
 	if defs := deny.Tools(nil, true); len(defs) != 1 || defs[0].Name != "mcp_g_search" {
 		t.Errorf("deny filter wrong: %v", defs)
@@ -143,7 +143,7 @@ func TestCallHappyPath(t *testing.T) {
 			&sdk.TextContent{Text: "second"},
 		}}, nil
 	}})
-	m := newTestManager(t, []luacfg.MCPServer{{Name: "g", URL: "x"}}, fs.dial)
+	m := newTestManager(t, []config.MCPServer{{Name: "g", URL: "x"}}, fs.dial)
 	m.Connect(context.Background())
 	out, err := m.Call(context.Background(), "mcp_g_echo", `{"msg":"hi"}`)
 	if err != nil {
@@ -160,7 +160,7 @@ func TestListToolsPagination(t *testing.T) {
 	fs := newFakeServerOpts("gh", &sdk.ServerOptions{PageSize: 1}, map[string]sdk.ToolHandler{
 		"a": textHandler("a"), "b": textHandler("b"), "c": textHandler("c"),
 	})
-	m := newTestManager(t, []luacfg.MCPServer{{Name: "g", URL: "x"}}, fs.dial)
+	m := newTestManager(t, []config.MCPServer{{Name: "g", URL: "x"}}, fs.dial)
 	if warns := m.Connect(context.Background()); len(warns) > 0 {
 		t.Fatalf("warns: %v", warns)
 	}
@@ -176,7 +176,7 @@ func TestCallStructuredContentOnly(t *testing.T) {
 	fs := newFakeServer("gh", map[string]sdk.ToolHandler{"stats": func(ctx context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
 		return &sdk.CallToolResult{StructuredContent: map[string]any{"count": 42}}, nil
 	}})
-	m := newTestManager(t, []luacfg.MCPServer{{Name: "g", URL: "x"}}, fs.dial)
+	m := newTestManager(t, []config.MCPServer{{Name: "g", URL: "x"}}, fs.dial)
 	m.Connect(context.Background())
 	out, err := m.Call(context.Background(), "mcp_g_stats", `{}`)
 	if err != nil {
@@ -191,7 +191,7 @@ func TestCallToolError(t *testing.T) {
 	fs := newFakeServer("gh", map[string]sdk.ToolHandler{"bad": func(ctx context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
 		return &sdk.CallToolResult{IsError: true, Content: []sdk.Content{&sdk.TextContent{Text: "boom"}}}, nil
 	}})
-	m := newTestManager(t, []luacfg.MCPServer{{Name: "g", URL: "x"}}, fs.dial)
+	m := newTestManager(t, []config.MCPServer{{Name: "g", URL: "x"}}, fs.dial)
 	m.Connect(context.Background())
 	out, err := m.Call(context.Background(), "mcp_g_bad", `{}`)
 	if err != nil {
@@ -204,7 +204,7 @@ func TestCallToolError(t *testing.T) {
 
 func TestCallUnknownTool(t *testing.T) {
 	fs := newFakeServer("gh", map[string]sdk.ToolHandler{"echo": textHandler("e")})
-	m := newTestManager(t, []luacfg.MCPServer{{Name: "g", URL: "x"}}, fs.dial)
+	m := newTestManager(t, []config.MCPServer{{Name: "g", URL: "x"}}, fs.dial)
 	m.Connect(context.Background())
 	if _, err := m.Call(context.Background(), "mcp_g_nope", `{}`); err == nil {
 		t.Error("unknown tool must return a Go error")
@@ -216,7 +216,7 @@ func TestCallUnknownTool(t *testing.T) {
 
 func TestReconnectOnce(t *testing.T) {
 	fs := newFakeServer("gh", map[string]sdk.ToolHandler{"echo": textHandler("ok")})
-	m := newTestManager(t, []luacfg.MCPServer{{Name: "g", URL: "x"}}, fs.dial)
+	m := newTestManager(t, []config.MCPServer{{Name: "g", URL: "x"}}, fs.dial)
 	m.Connect(context.Background())
 	if out, err := m.Call(context.Background(), "mcp_g_echo", `{}`); err != nil || out != "ok" {
 		t.Fatalf("first call: %q %v", out, err)
@@ -235,10 +235,10 @@ func TestReconnectOnce(t *testing.T) {
 }
 
 func TestDownServerIsWarningNotError(t *testing.T) {
-	badDial := func(ctx context.Context, s luacfg.MCPServer) (sdk.Transport, error) {
+	badDial := func(ctx context.Context, s config.MCPServer) (sdk.Transport, error) {
 		return nil, context.DeadlineExceeded
 	}
-	m := newTestManager(t, []luacfg.MCPServer{{Name: "dead", URL: "x", TimeoutSecs: 1}}, badDial)
+	m := newTestManager(t, []config.MCPServer{{Name: "dead", URL: "x", TimeoutSecs: 1}}, badDial)
 	warns := m.Connect(context.Background())
 	if len(warns) != 1 || !strings.Contains(warns[0], "dead") {
 		t.Fatalf("want one warning naming the server, got %v", warns)
@@ -254,7 +254,7 @@ func TestDownServerIsWarningNotError(t *testing.T) {
 
 func TestStatus(t *testing.T) {
 	fs := newFakeServer("gh", map[string]sdk.ToolHandler{"a": textHandler("x"), "b": textHandler("y")})
-	m := newTestManager(t, []luacfg.MCPServer{{Name: "g", URL: "x"}}, fs.dial)
+	m := newTestManager(t, []config.MCPServer{{Name: "g", URL: "x"}}, fs.dial)
 	m.Connect(context.Background())
 	st := m.Status()
 	if len(st) != 1 || !st[0].Up || st[0].ToolCount != 2 || st[0].Name != "g" {

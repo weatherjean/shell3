@@ -1,6 +1,8 @@
 package runs
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/llm"
@@ -12,7 +14,7 @@ func TestSessionRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	id, err := s.NewSession(Meta{Workdir: "/w", ConfigPath: "/c", Model: "m"})
+	id, err := s.NewSession(Meta{Workdir: "/w", ConfigDir: "/c", Model: "m"})
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
@@ -33,7 +35,7 @@ func TestSessionRoundTrip(t *testing.T) {
 
 func TestRemindersSidecar(t *testing.T) {
 	s, _ := Open(t.TempDir() + "/shell3_project")
-	id, _ := s.NewSession(Meta{Workdir: "/w", ConfigPath: "/c"})
+	id, _ := s.NewSession(Meta{Workdir: "/w", ConfigDir: "/c"})
 	if err := s.AppendReminder(id, 1, "<system-reminder>a</system-reminder>"); err != nil {
 		t.Fatalf("AppendReminder: %v", err)
 	}
@@ -57,8 +59,8 @@ func TestRemindersSidecar(t *testing.T) {
 
 func TestLatestSession(t *testing.T) {
 	s, _ := Open(t.TempDir() + "/.shell3_project")
-	_, _ = s.NewSession(Meta{Workdir: "/w", ConfigPath: "/c"})
-	id2, _ := s.NewSession(Meta{Workdir: "/w", ConfigPath: "/c"})
+	_, _ = s.NewSession(Meta{Workdir: "/w", ConfigDir: "/c"})
+	id2, _ := s.NewSession(Meta{Workdir: "/w", ConfigDir: "/c"})
 	got, found, err := s.LatestSession("/w", "/c")
 	if err != nil || !found || got != id2 {
 		t.Fatalf("LatestSession got=%q found=%v err=%v want=%q", got, found, err, id2)
@@ -71,11 +73,18 @@ func TestLatestSession(t *testing.T) {
 // Session IDs arrive from user-controlled surfaces (the dashboard,
 // shell3 dev --resume); a path-traversal id must never escape the store.
 func TestSessionIDPathTraversalRejected(t *testing.T) {
-	st, err := Open(t.TempDir())
+	root := t.TempDir()
+	st, err := Open(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"../escape", "..", "a/b", "/abs"} {
+	// Plant a readable messages.jsonl one level above runs/ so an id of ".."
+	// (filepath.Base("..") == "..") would actually find something to leak.
+	if err := os.WriteFile(filepath.Join(root, "messages.jsonl"),
+		[]byte(`{"role":"user","content":"secret"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"../escape", "..", ".", "a/b", "/abs"} {
 		if msgs, err := st.LoadMessages(id); err != nil || msgs != nil {
 			t.Errorf("LoadMessages(%q) = %v, %v; want nil, nil (mapped to an impossible dir)", id, msgs, err)
 		}

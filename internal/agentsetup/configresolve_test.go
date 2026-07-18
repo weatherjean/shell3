@@ -7,29 +7,7 @@ import (
 	"testing"
 )
 
-func TestExpandConfigName(t *testing.T) {
-	home := "/home/u"
-	cases := []struct {
-		name string
-		flag string
-		want string
-	}{
-		{"empty passes through", "", ""},
-		{"bare name resolves under ~/.shell3", "code", filepath.Join(home, ".shell3", "code.lua")},
-		{"another bare name", "work", filepath.Join(home, ".shell3", "work.lua")},
-		{"value ending in .lua is a literal path", "/abs/path/shell3.lua", "/abs/path/shell3.lua"},
-		{"relative .lua path stays literal", "./foo.lua", "./foo.lua"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := ExpandConfigName(tc.flag, home); got != tc.want {
-				t.Errorf("ExpandConfigName(%q) = %q, want %q", tc.flag, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestResolveConfigPath(t *testing.T) {
+func TestResolveConfigDir(t *testing.T) {
 	home := t.TempDir()
 	cwd := t.TempDir()
 	shell3Dir := filepath.Join(home, ".shell3")
@@ -37,46 +15,42 @@ func TestResolveConfigPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A bare name resolves to ~/.shell3/<name>.lua when that file exists.
-	if err := os.WriteFile(filepath.Join(shell3Dir, "code.lua"), []byte("--"), 0o644); err != nil {
+	// An explicit dir with shell3.yaml resolves to itself.
+	explicit := t.TempDir()
+	if err := os.WriteFile(filepath.Join(explicit, "shell3.yaml"), []byte("models: {}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := ResolveConfigPath("code", home)
-	if err != nil {
-		t.Fatalf("name: %v", err)
-	}
-	if want := filepath.Join(shell3Dir, "code.lua"); got != want {
-		t.Errorf("name: got %q, want %q", got, want)
+	if got, err := ResolveConfigDir(explicit, home); err != nil || got != explicit {
+		t.Errorf("explicit dir: got %q err %v, want %q", got, err, explicit)
 	}
 
-	// A typo'd name fails with a clear message instead of a later DoFile error.
-	if _, err := ResolveConfigPath("no-such-name", home); err == nil || !strings.Contains(err.Error(), "no such config") {
-		t.Errorf("typo'd name: want 'no such config' error, got %v", err)
+	// A dir without shell3.yaml fails with a clear message.
+	if _, err := ResolveConfigDir(t.TempDir(), home); err == nil || !strings.Contains(err.Error(), "shell3 boot") {
+		t.Errorf("empty dir: want boot hint, got %v", err)
 	}
 
-	// A literal *.lua path is returned unchanged (when it exists).
-	lit := filepath.Join(cwd, "custom.lua")
-	if err := os.WriteFile(lit, []byte("--"), 0o644); err != nil {
+	// A dir carrying only a legacy shell3.lua gets the migration message.
+	legacy := t.TempDir()
+	if err := os.WriteFile(filepath.Join(legacy, "shell3.lua"), []byte("--"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := ResolveConfigPath(lit, home); err != nil || got != lit {
-		t.Errorf("literal path: got %q err %v, want %q", got, err, lit)
+	if _, err := ResolveConfigDir(legacy, home); err == nil || !strings.Contains(err.Error(), "no longer read") {
+		t.Errorf("legacy: want migration error, got %v", err)
 	}
 
-	// A project-local ./shell3.lua must NOT be picked up anymore.
-	if err := os.WriteFile(filepath.Join(cwd, "shell3.lua"), []byte("--"), 0o644); err != nil {
+	// A project-local config tree must NOT be picked up for an empty flag.
+	if err := os.WriteFile(filepath.Join(cwd, "shell3.yaml"), []byte("models: {}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ResolveConfigPath("", home); err == nil {
-		t.Error("empty flag: expected error (cwd shell3.lua must be ignored, ~/.shell3/shell3.lua absent)")
+	if _, err := ResolveConfigDir("", home); err == nil {
+		t.Error("empty flag: expected error (cwd tree must be ignored, ~/.shell3 empty)")
 	}
 
-	// With ~/.shell3/shell3.lua present, empty flag resolves to it.
-	global := filepath.Join(shell3Dir, "shell3.lua")
-	if err := os.WriteFile(global, []byte("--"), 0o644); err != nil {
+	// With ~/.shell3/shell3.yaml present, empty flag resolves to ~/.shell3.
+	if err := os.WriteFile(filepath.Join(shell3Dir, "shell3.yaml"), []byte("models: {}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := ResolveConfigPath("", home); err != nil || got != global {
-		t.Errorf("default: got %q err %v, want %q", got, err, global)
+	if got, err := ResolveConfigDir("", home); err != nil || got != shell3Dir {
+		t.Errorf("default: got %q err %v, want %q", got, err, shell3Dir)
 	}
 }

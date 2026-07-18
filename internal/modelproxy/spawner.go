@@ -2,7 +2,7 @@
 
 // Package modelproxy lazily brings up a model's proxy command.
 //
-// A model may declare a `run_proxy` shell command in shell3.lua. The first time
+// A model may declare a `run_proxy` shell command in shell3.yaml. The first time
 // an agent activates that model, Spawner runs the command once — detached, in
 // its own process group, fire-and-forget. The OS port bind acts as the mutex: a
 // command spawned while a proxy is already listening simply fails to bind and

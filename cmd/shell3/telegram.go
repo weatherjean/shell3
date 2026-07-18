@@ -23,7 +23,7 @@ import (
 )
 
 func newTelegramCommand() *cobra.Command {
-	var configPath string
+	var configDir string
 	cmd := &cobra.Command{
 		Use:   "telegram",
 		Short: "Run the personal Telegram bot front-end",
@@ -31,7 +31,7 @@ func newTelegramCommand() *cobra.Command {
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
-			rt, resolved, err := openRuntime(ctx, configPath)
+			rt, resolved, err := openRuntime(ctx, configDir)
 			if err != nil {
 				return err
 			}
@@ -40,7 +40,7 @@ func newTelegramCommand() *cobra.Command {
 
 			tg := rt.Telegram()
 			if tg.Token == "" || tg.ChatID == "" {
-				return fmt.Errorf("no telegram config: add shell3.telegram{ token=..., chat_id=... } to shell3.lua")
+				return fmt.Errorf("no telegram config: add a telegram: block (token, chat_id) to shell3.yaml")
 			}
 			chatID, err := strconv.ParseInt(tg.ChatID, 10, 64)
 			if err != nil {
@@ -169,7 +169,7 @@ func newTelegramCommand() *cobra.Command {
 			return nil
 		},
 	}
-	addConfigFlag(cmd, &configPath)
+	addConfigFlag(cmd, &configDir)
 	return cmd
 }
 

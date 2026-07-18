@@ -4,21 +4,20 @@ Six subcommands: `telegram` (the service), `web` (the Telegram-free fallback
 host), `boot` (setup), `health` (config check), and two local dev front-ends,
 `dev` and `dash`. Bare `shell3` prints help.
 
-Every subcommand takes `-c`/`--config <name|path>`: a name resolves to
-`~/.shell3/<name>.lua`, a `*.lua` value is a literal path, and the default is
-`~/.shell3/shell3.lua`. The working directory is never consulted.
+Every subcommand takes `-c`/`--config <dir>`: a path to a config directory
+(`shell3.yaml`, `agent.md`, …); the default is `~/.shell3`. The working
+directory is never consulted.
 
 ## `shell3 telegram` — run the bot
 
 ```sh
-shell3 telegram              # ~/.shell3/shell3.lua
-shell3 telegram -c work      # ~/.shell3/work.lua
+shell3 telegram              # ~/.shell3
+shell3 telegram -c ~/work-bot
 ```
 
 Loads the config, connects to Telegram, and answers the single `chat_id` from
-`shell3.telegram{}`. Also starts the Mini App dashboard (when
-`dashboard.enabled`), arms cron jobs and the heartbeat, and blocks until
-interrupted. The runtime is anchored to the config directory, so history lives
+the `telegram:` block. Also starts the Mini App dashboard, arms cron jobs and
+the heartbeat, and blocks until interrupted. The runtime is anchored to the config directory, so history lives
 under `~/.shell3/.shell3_project/`.
 
 In-chat commands:
@@ -32,17 +31,17 @@ In-chat commands:
 | `/clear` | Reset the conversation. Refused while background tasks run (`/stop` first). |
 | `/compact` | Force one context compaction; replies with the token delta. |
 | `/rollback` | Undo the last turn. |
-| `/voice [off\|inbound\|always]` | Voice-reply mode (needs `shell3.tts{}`); bare `/voice` shows a menu. Persists in `~/.shell3/voice_mode.json`. |
+| `/voice [off\|inbound\|always]` | Voice-reply mode (needs `media.tts`); bare `/voice` shows a menu. Persists in `~/.shell3/voice_mode.json`. |
 
 ## `shell3 web` — standalone web front-end
 
 ```sh
-shell3 web                        # addr + secret from shell3.web{}
+shell3 web                        # addr + secret from the web: block
 shell3 web --addr 127.0.0.1:9000  # override the listen address
 ```
 
 The dashboard plus a simple chat (send box, Stop, Allow/Deny cards), served
-over plain HTTP and gated by `shell3.web{ secret = … }`. Open
+over plain HTTP and gated by the `web:` block's secret. Open
 `http://<addr>/?key=<secret>` once — the page stores the key for every API
 call. It resumes the latest stored session (a conversation started over
 Telegram continues in the browser) and keeps cron jobs running; the heartbeat
@@ -57,36 +56,40 @@ render as ephemeral notices, not history. Run **one front-end at a time** —
 shell3 boot     # interactive form: model endpoint + key, vision, bot token + chat id
 ```
 
-An interactive form scaffolds `~/.shell3/shell3.lua` (the `code` agent, a
-read-only `explorer` subagent, a `shell3.telegram{}` block with a cloudflared
-dashboard tunnel), the `lib/` modules, and `~/.shell3/.env` (secrets — never
-commit it). One step asks whether the model can see images: yes wires
-`shell3.describe{}` to the main model (inbound Telegram images are captioned
-out of the box) and enables the `read_media` tool; no leaves media tooling
-off until you add a vision model.
+An interactive form scaffolds the config tree under `~/.shell3/`:
+`shell3.yaml` (models + `telegram:` with a cloudflared dashboard tunnel),
+`agent.md`, a read-only `agents/explorer.md` subagent, `skills/`, commented
+`hooks/*.tool-call.sh` gate scripts, and `.env` (secrets — never commit it).
+One step asks whether the model can see images: yes wires `media.describe` to
+the main model (inbound Telegram images are captioned out of the box) and
+enables the `read_media` tool; no leaves media tooling off until you add a
+vision model.
 Scriptable via flags (any flag skips its prompt; with no TTY, unset flags take
 defaults): `--url`, `--model`, `--name`, `--key`, `--vision`, `--tg-token`,
-`--tg-chat-id`, `--context-window`, `--compact-at`, `--proxy`, `--brave-key`,
-`--force`. See [configuration.md](configuration.md).
+`--tg-chat-id`, `--context-window`, `--compact-at`, `--proxy`, `--force`.
+See [configuration.md](configuration.md).
 
 ## `shell3 health` — check the config
 
 ```sh
-shell3 health                # ~/.shell3/shell3.lua
-shell3 health --config work
+shell3 health                # ~/.shell3
+shell3 health --config ~/work-bot
 ```
 
 Loads the config exactly like the bot would and fails (exit 1) on anything the
-bot only warns about — e.g. a skill `.md` skipped for broken frontmatter. Run
-it after editing `shell3.lua` or `lib/skills/`, before `/reload`.
+bot only warns about — a skill `.md` skipped for broken frontmatter, a hook
+file naming no subagent. It also dry-runs every hook script with a probe
+payload (a script error fails health; a strict gate that blocks the probe
+passes) and connects every MCP server. Run it after editing the config tree,
+before `/reload`.
 
 ## `shell3 dev` — drive the agent locally
 
 Runs the bot's config + agent from your terminal and prints everything a chat
 surface hides: reasoning, every tool call with raw args, untruncated results,
 token usage. It follows subagent/`bash_bg` jobs the turn spawned and renders
-their completions, and auto-approves `on_tool_call` asks (printing that it
-did) so it runs unattended.
+their completions, and auto-approves hook asks (printing that it did) so it
+runs unattended.
 
 ```sh
 shell3 dev                        # no message: asks for one interactively

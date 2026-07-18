@@ -24,7 +24,7 @@ import (
 // front-end at a time — both `shell3 telegram` and `shell3 web` own the same
 // runs store.
 func newWebCommand() *cobra.Command {
-	var configPath, addr string
+	var configDir, addr string
 	cmd := &cobra.Command{
 		Use:   "web",
 		Short: "Run the standalone web front-end (dashboard + chat, token auth)",
@@ -33,7 +33,7 @@ func newWebCommand() *cobra.Command {
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
-			rt, resolved, err := openRuntime(ctx, configPath)
+			rt, resolved, err := openRuntime(ctx, configDir)
 			if err != nil {
 				return err
 			}
@@ -45,7 +45,7 @@ func newWebCommand() *cobra.Command {
 				wc.Addr = addr
 			}
 			if wc.Addr == "" {
-				return fmt.Errorf("no web config: add shell3.web{ addr = ..., secret = shell3.env.secret(...) } to shell3.lua")
+				return fmt.Errorf("no web config: add a web: block (addr, secret: env:SHELL3_WEB_SECRET) to shell3.yaml")
 			}
 			if wc.Secret == "" {
 				return fmt.Errorf("shell3.web: secret is required (an empty secret must never mean \"no auth\") — set secret = shell3.env.secret(\"SHELL3_WEB_SECRET\")")
@@ -135,7 +135,7 @@ func newWebCommand() *cobra.Command {
 			return startDashboard(ctx, wc.Addr, srv.Handler())
 		},
 	}
-	addConfigFlag(cmd, &configPath)
+	addConfigFlag(cmd, &configDir)
 	cmd.Flags().StringVar(&addr, "addr", "", "Listen address (overrides shell3.web.addr)")
 	return cmd
 }

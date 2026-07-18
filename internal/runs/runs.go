@@ -17,15 +17,15 @@ import (
 
 // Meta is the per-session metadata written to runs/<id>/meta.json.
 type Meta struct {
-	ID         string    `json:"id"`
-	Workdir    string    `json:"workdir"`
-	ConfigPath string    `json:"config_path"`
-	Model      string    `json:"model"`
-	Status     string    `json:"status"` // "live" | "ended"
-	ParentID   string    `json:"parent_id,omitempty"`
-	StartedAt  time.Time `json:"started_at"`
-	EndedAt    time.Time `json:"ended_at,omitzero"`
-	LastAt     time.Time `json:"last_at"`
+	ID        string    `json:"id"`
+	Workdir   string    `json:"workdir"`
+	ConfigDir string    `json:"config_dir"`
+	Model     string    `json:"model"`
+	Status    string    `json:"status"` // "live" | "ended"
+	ParentID  string    `json:"parent_id,omitempty"`
+	StartedAt time.Time `json:"started_at"`
+	EndedAt   time.Time `json:"ended_at,omitzero"`
+	LastAt    time.Time `json:"last_at"`
 }
 
 // Store is rooted at a project's .shell3_project/ directory.
@@ -58,7 +58,9 @@ func (s *Store) runsDir() string { return filepath.Join(s.root, "runs") }
 // path component is rejected by mapping it to an impossible directory —
 // "../../../etc" must never escape the store.
 func (s *Store) sessDir(id string) string {
-	if id == "" || id != filepath.Base(id) {
+	// filepath.Base is a no-op on "." and "..", so they need their own check
+	// — ".." would otherwise resolve to the store root's parent.
+	if id == "" || id == "." || id == ".." || id != filepath.Base(id) {
 		return filepath.Join(s.runsDir(), "invalid-session-id")
 	}
 	return filepath.Join(s.runsDir(), id)
@@ -256,14 +258,14 @@ func (s *Store) Transcript(id string) string {
 	return string(b)
 }
 
-// LatestSession returns the newest session ID matching workdir+configPath.
-func (s *Store) LatestSession(workdir, configPath string) (string, bool, error) {
+// LatestSession returns the newest session ID matching workdir+configDir.
+func (s *Store) LatestSession(workdir, configDir string) (string, bool, error) {
 	metas, err := s.ListSessions(0)
 	if err != nil {
 		return "", false, err
 	}
 	for _, m := range metas {
-		if m.Workdir == workdir && m.ConfigPath == configPath {
+		if m.Workdir == workdir && m.ConfigDir == configDir {
 			return m.ID, true, nil
 		}
 	}

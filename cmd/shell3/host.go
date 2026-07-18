@@ -19,16 +19,16 @@ import (
 // knob set) live in exactly one place.
 
 // openRuntime resolves the --config value and builds a Runtime anchored to
-// the config's directory — the runtime root determines where runs/ + history
+// the config directory — the runtime root determines where runs/ + history
 // live (runs.Open under <workdir>/.shell3_project), so tying it to the config
-// dir keeps a hosted agent self-contained. Returns the resolved config path;
-// its Dir is the host's home.
-func openRuntime(ctx context.Context, configPath string) (*shell3.Runtime, string, error) {
-	resolved, err := resolveConfig(configPath)
+// dir keeps a hosted agent self-contained. Returns the resolved config dir,
+// the host's home.
+func openRuntime(ctx context.Context, configDir string) (*shell3.Runtime, string, error) {
+	resolved, err := resolveConfig(configDir)
 	if err != nil {
 		return nil, "", err
 	}
-	rt, err := shell3.NewRuntime(ctx, shell3.RuntimeSpec{ConfigPath: resolved, WorkDir: filepath.Dir(resolved)})
+	rt, err := shell3.NewRuntime(ctx, shell3.RuntimeSpec{ConfigDir: resolved, WorkDir: resolved})
 	if err != nil {
 		return nil, "", err
 	}

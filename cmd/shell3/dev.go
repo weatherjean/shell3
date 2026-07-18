@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -28,7 +27,7 @@ import (
 // the latest session so successive invocations form one conversation.
 func newDevCommand() *cobra.Command {
 	var (
-		configPath string
+		configDir  string
 		promptFlag string
 		resume     bool
 		hbFire     bool
@@ -57,13 +56,13 @@ func newDevCommand() *cobra.Command {
 			}
 			ctx := cmd.Context()
 
-			resolved, err := resolveConfig(configPath)
+			resolved, err := resolveConfig(configDir)
 			if err != nil {
 				return err
 			}
 			// Anchor the runtime to the config dir, exactly like `shell3 telegram`,
 			// so dev shares the bot's runs store + workdir and sees the same state.
-			rt, err := shell3.NewRuntime(ctx, shell3.RuntimeSpec{ConfigPath: resolved, WorkDir: filepath.Dir(resolved)})
+			rt, err := shell3.NewRuntime(ctx, shell3.RuntimeSpec{ConfigDir: resolved, WorkDir: resolved})
 			if err != nil {
 				return err
 			}
@@ -117,7 +116,7 @@ func newDevCommand() *cobra.Command {
 			return cli.FollowDevJobs(ctx, os.Stdout, rt, sess, 3*time.Minute)
 		},
 	}
-	addConfigFlag(cmd, &configPath)
+	addConfigFlag(cmd, &configDir)
 	cmd.Flags().StringVarP(&promptFlag, "prompt", "p", "", "Message for the agent (skips the interactive prompt)")
 	cmd.Flags().BoolVar(&resume, "resume", false, "Continue the latest session (multi-turn across invocations)")
 	cmd.Flags().BoolVar(&hbFire, "heartbeat", false, "Fire the configured shell3.heartbeat{} prompt once and show the suppression verdict")

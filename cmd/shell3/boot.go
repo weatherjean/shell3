@@ -24,12 +24,12 @@ import (
 )
 
 type bootFlags struct {
-	url, model, name, key, proxy, braveKey string
-	contextWindow, compactAt               string
-	tgToken, tgChatID                      string
-	vision                                 bool
-	visionSet                              bool // --vision passed explicitly (skips the form's confirm)
-	force                                  bool
+	url, model, name, key, proxy string
+	contextWindow, compactAt     string
+	tgToken, tgChatID            string
+	vision                       bool
+	visionSet                    bool // --vision passed explicitly (skips the form's confirm)
+	force                        bool
 }
 
 func newBootCommand() *cobra.Command {
@@ -52,11 +52,10 @@ func newBootCommand() *cobra.Command {
 	cmd.Flags().StringVar(&f.proxy, "proxy", "", "Optional run_proxy command")
 	cmd.Flags().StringVar(&f.contextWindow, "context-window", "", "Model context window in tokens (default 128000)")
 	cmd.Flags().StringVar(&f.compactAt, "compact-at", "", "Auto-compaction threshold in tokens (default 80% of context window)")
-	cmd.Flags().StringVar(&f.braveKey, "brave-key", "", "Optional Brave Search API key")
 	cmd.Flags().StringVar(&f.tgToken, "tg-token", "", "Telegram bot token (from @BotFather)")
 	cmd.Flags().StringVar(&f.tgChatID, "tg-chat-id", "", "Telegram chat id the bot answers")
-	cmd.Flags().BoolVar(&f.vision, "vision", true, "Model can see images (wires shell3.describe to it and enables the media tool)")
-	cmd.Flags().BoolVar(&f.force, "force", false, "Overwrite an existing ~/.shell3/shell3.lua")
+	cmd.Flags().BoolVar(&f.vision, "vision", true, "Model can see images (wires media.describe to it and enables the media tool)")
+	cmd.Flags().BoolVar(&f.force, "force", false, "Overwrite an existing ~/.shell3 config (shell3.yaml, agent.md, ...)")
 	return cmd
 }
 
@@ -66,7 +65,8 @@ func runBoot(f *bootFlags) error {
 		return fmt.Errorf("boot: home dir: %w", err)
 	}
 	g := paths.NewGlobal(home)
-	dir, cfgPath := g.Root, g.ConfigFile
+	dir := g.Root
+	cfgPath := filepath.Join(dir, "shell3.yaml")
 
 	if _, err := os.Stat(cfgPath); err == nil && !f.force {
 		return fmt.Errorf("boot: %s already exists — pass --force to overwrite", cfgPath)
@@ -90,7 +90,7 @@ func runBoot(f *bootFlags) error {
 		return fmt.Errorf("boot: generate web secret: %w", err)
 	}
 
-	envPairs := [][2]string{{envKey, a.key}, {"BRAVE_API_KEY", a.braveKey}, {"TELEGRAM_BOT_TOKEN", a.tgToken}, {"SHELL3_WEB_SECRET", webSecret}}
+	envPairs := [][2]string{{envKey, a.key}, {"TELEGRAM_BOT_TOKEN", a.tgToken}, {"SHELL3_WEB_SECRET", webSecret}}
 
 	if err := scaffold.RenderBaseConfig(dir, scaffold.Values{
 		Name: a.name, BaseURL: a.url, EnvKey: envKey, Model: a.model, Proxy: a.proxy,
@@ -128,7 +128,7 @@ func runBoot(f *bootFlags) error {
 // the interactive huh form (TTY) or defaults (non-TTY).
 type bootAnswers struct {
 	url, model, name, key string
-	proxy, braveKey       string
+	proxy                 string
 	tgToken, tgChatID     string
 	ctxWindow, compactAt  int
 	vision                bool
@@ -140,7 +140,7 @@ type bootAnswers struct {
 func collectAnswers(f *bootFlags, tty bool) (bootAnswers, error) {
 	a := bootAnswers{
 		url: f.url, model: f.model, name: f.name, key: f.key,
-		proxy: f.proxy, braveKey: f.braveKey,
+		proxy:   f.proxy,
 		tgToken: f.tgToken, tgChatID: f.tgChatID,
 		vision: f.vision,
 	}
@@ -236,10 +236,6 @@ func runBootForm(f *bootFlags, a *bootAnswers, ctxStr, compactStr *string) error
 			Description("Some endpoints are a proxy you launch yourself (e.g. a Codex\nsubscription fronted by `npx ...`); shell3 auto-starts it on\nactivation. Blank to skip.").
 			Value(&a.proxy))
 	}
-	if f.braveKey == "" {
-		extras = append(extras, huh.NewInput().Title("Brave Search key").
-			Description("Enables the brave_search tool. Blank to add later.").Value(&a.braveKey))
-	}
 	if len(extras) > 0 {
 		groups = append(groups, huh.NewGroup(extras...).Title("Extras"))
 	}
@@ -247,7 +243,7 @@ func runBootForm(f *bootFlags, a *bootAnswers, ctxStr, compactStr *string) error
 	var tg []huh.Field
 	if f.tgToken == "" {
 		tg = append(tg, huh.NewInput().Title("Bot token").
-			Description("From @BotFather. Blank to fill in shell3.telegram{} later.").Value(&a.tgToken))
+			Description("From @BotFather. Blank to fill into shell3.yaml later.").Value(&a.tgToken))
 	}
 	if f.tgChatID == "" {
 		tg = append(tg, huh.NewInput().Title("Chat id").
@@ -396,9 +392,6 @@ func mergeEnv(existing string, kv [][2]string) (merged string, kept []string) {
 			}
 			continue
 		}
-		if pair[0] == "BRAVE_API_KEY" && pair[1] == "" {
-			b.WriteString("# Brave Search API key — fill in to enable the brave_search tool.\n")
-		}
 		if pair[0] == "TELEGRAM_BOT_TOKEN" && pair[1] == "" {
 			b.WriteString("# Telegram bot token from @BotFather — fill in before `shell3 telegram`.\n")
 		}
@@ -409,9 +402,9 @@ func mergeEnv(existing string, kv [][2]string) (merged string, kept []string) {
 
 func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool) {
 	fmt.Println()
-	fmt.Println("shell3 is configured.")
-	fmt.Printf("  config:  %s\n", cfgPath)
-	fmt.Printf("  modules: %s\n", filepath.Join(dir, "lib"))
+	fmt.Println("shell3 is configured. Your config is the directory itself:")
+	fmt.Printf("  wiring:  %s\n", cfgPath)
+	fmt.Printf("  agent:   %s  (+ agents/, skills/, hooks/)\n", filepath.Join(dir, "agent.md"))
 	fmt.Printf("  secrets: %s  (never commit this)\n", envPath)
 	if proxyWired {
 		fmt.Println("  proxy:   run_proxy wired — shell3 starts it when the model is first used.")
@@ -421,16 +414,16 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool) {
 	}
 	fmt.Println()
 	fmt.Printf("Take a minute to open %s and look it over —\n", cfgPath)
-	fmt.Println("the model block (context_window, compact_at) and the bash safety hook")
-	fmt.Println("are worth a glance before your first run. Some models also need a")
-	fmt.Println("provider-specific `extra = { ... }` field (e.g. MiniMax wants")
-	fmt.Println("reasoning_split = true) — there's a commented example in the model block.")
+	fmt.Println("the model block (context_window, compact_at) is worth a glance, and")
+	fmt.Println("hooks/tool-call.sh is your command gate (it ships permissive with a")
+	fmt.Println("commented example). Some models also need a provider-specific")
+	fmt.Println("`extra: { ... }` field (e.g. MiniMax wants reasoning_split: true).")
 	fmt.Println()
-	fmt.Println("Edit shell3.lua (and lib/) to add tools, skills, or agents —")
-	fmt.Println("recipes live in the shell3 repo under docs/cookbook/.")
+	fmt.Println("Edit agent.md for the prompt, drop skills into skills/, add subagents")
+	fmt.Println("as agents/<name>.md — recipes live in the repo under docs/cookbook/.")
 	fmt.Println()
 	fmt.Println("shell3 talks to you over Telegram. Make sure TELEGRAM_BOT_TOKEN is set")
-	fmt.Println("in .env and chat_id is filled in shell3.telegram{}, then run:")
+	fmt.Println("in .env and chat_id is filled in shell3.yaml, then run:")
 	fmt.Println()
 	fmt.Println("Run:  shell3 telegram")
 	fmt.Println()
@@ -442,7 +435,7 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool) {
 	fmt.Println("from your phone (e.g. `brew install cloudflared` on macOS):")
 	fmt.Println("  https://github.com/cloudflare/cloudflared")
 	fmt.Println("Not installed? The bot still runs; the dashboard just stays local.")
-	fmt.Println("Prefer another tunnel? Edit dashboard.tunnel/url in shell3.lua.")
+	fmt.Println("Prefer another tunnel? Edit telegram.dashboard.tunnel/url in shell3.yaml.")
 	if _, err := exec.LookPath("cloudflared"); err != nil {
 		fmt.Println()
 		fmt.Println("NOTE: cloudflared was not found on PATH on this machine.")

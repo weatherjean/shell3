@@ -108,7 +108,7 @@ const helpText = `commands:
 /set <name> <value> — set a model parameter (bare /set lists them)
 /rollback — undo the last turn
 /run <job> — fire a scheduled job now
-/reload — reload shell3.lua without restarting`
+/reload — reload the config without restarting`
 
 // stopAll cancels the running turn (if any) and kills every live background
 // job — commands and subagents alike — mirroring the bot's /stop.

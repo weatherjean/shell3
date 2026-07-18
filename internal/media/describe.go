@@ -10,15 +10,15 @@ import (
 	"github.com/openai/openai-go"
 
 	"github.com/weatherjean/shell3/internal/chat"
+	"github.com/weatherjean/shell3/internal/config"
 	"github.com/weatherjean/shell3/internal/llm"
-	"github.com/weatherjean/shell3/internal/luacfg"
 )
 
 // newDescriber builds Clients.Describe for cfg, resolving its client (and, on
 // first use, spawning cfg's model's run_proxy) via sdk. It reuses
 // chat.LoadMediaPart for image loading/resizing, so Describe accepts the same
 // image types (and 10 MB cap) as the read_media tool.
-func newDescriber(sdk sdkFn, cfg luacfg.DescribeConfig) func(context.Context, string) (string, error) {
+func newDescriber(sdk sdkFn, cfg config.DescribeConfig) func(context.Context, string) (string, error) {
 	return func(ctx context.Context, path string) (string, error) {
 		part, _, err := chat.LoadMediaPart(path, "")
 		if err != nil {

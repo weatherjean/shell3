@@ -50,8 +50,8 @@ type ToolConfig struct {
 	// deny (headless subagent path).
 	Asker AskFunc
 	// HeadlessAsk is true when no human asker is attached to the session — an
-	// ask verdict would degrade to deny. Forwarded into the on_tool_call chain
-	// as t.headless so Lua policy can branch on it. Independent of the
+	// ask verdict would degrade to deny. Forwarded to the tool-call hook
+	// as .headless so the gate script can branch on it. Independent of the
 	// disable_safety toggle (which affects ask resolution, not human presence).
 	HeadlessAsk bool
 	// StartBashBg launches a background shell command on the host's in-process
@@ -100,10 +100,10 @@ type TurnConfig struct {
 	// StatusLine is the current provider/model/effort string; used for
 	// reminder tracking.
 	StatusLine string
-	// ConfigPath is the resolved shell3.lua path, threaded into new store
+	// ConfigDir is the resolved config directory, threaded into new store
 	// sessions (notably the compaction rollover, which starts a session deep in
 	// the turn loop). '' if unknown.
-	ConfigPath string
+	ConfigDir string
 	// Handlers maps tool name to built-in implementation. Built once via
 	// NewHandlers and shared across turns.
 	Handlers map[string]ToolHandler

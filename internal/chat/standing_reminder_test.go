@@ -9,7 +9,7 @@ import (
 
 func TestStandingRemindersNotPersisted(t *testing.T) {
 	st, _ := runs.Open(t.TempDir() + "/shell3_project")
-	id, _ := st.NewSession(runs.Meta{Workdir: "/w", ConfigPath: "/c"})
+	id, _ := st.NewSession(runs.Meta{Workdir: "/w", ConfigDir: "/c"})
 	s := NewSession(SessionOpts{Store: st, StoreID: id})
 
 	s.SetStandingReminders([]string{"<system-reminder>env</system-reminder>"})

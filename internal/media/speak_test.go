@@ -19,9 +19,11 @@ import (
 func newSpeakClients(t *testing.T, url, format string) *Clients {
 	t.Helper()
 	return newTestClients(t, `
-shell3.model("m", { base_url = "`+url+`", api_key = "k", model = "tts-x" })
-shell3.tts{ model = "m", voice = "alloy", format = "`+format+`" }
-`+baseAgent, nil)
+models:
+  m: { base_url: "`+url+`", api_key: k, model: tts-x }
+media:
+  tts: { model: m, voice: alloy, format: "`+format+`" }
+`, nil)
 }
 
 func TestSpeakWireShape(t *testing.T) {
@@ -217,9 +219,7 @@ func TestCapSpeechText(t *testing.T) {
 }
 
 func TestSpeakNilWhenUnconfigured(t *testing.T) {
-	c := newTestClients(t, `
-shell3.model("m", { base_url = "http://x", model = "id" })
-`+baseAgent, nil)
+	c := newTestClients(t, modelOnlyYAML("http://x"), nil)
 	if c.Speak != nil {
 		t.Fatal("want nil Speak when shell3.tts is absent")
 	}

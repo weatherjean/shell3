@@ -12,26 +12,28 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// writeHealthConfig writes a minimal loadable config with one skills dir and
-// returns the shell3.lua path.
-func writeHealthConfig(t *testing.T, skillBody string) string {
+const healthYAML = "models:\n  m: { base_url: \"http://x\", api_key: k, model: id }\n"
+const healthAgent = "---\nmodel: m\n---\np\n"
+
+// writeHealthTree writes a minimal loadable config tree (plus extra files)
+// and returns the directory.
+func writeHealthTree(t *testing.T, extra map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "lib", "skills"), 0o755); err != nil {
-		t.Fatal(err)
+	files := map[string]string{"shell3.yaml": healthYAML, "agent.md": healthAgent}
+	for k, v := range extra {
+		files[k] = v
 	}
-	if err := os.WriteFile(filepath.Join(dir, "lib", "skills", "probe.md"), []byte(skillBody), 0o644); err != nil {
-		t.Fatal(err)
+	for name, body := range files {
+		p := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
-	lua := `
-shell3.model("m", { base_url="http://x", api_key="k", model="id" })
-shell3.agent({ name="code", model="m", prompt="p", skills={ "lib/skills" } })
-`
-	p := filepath.Join(dir, "shell3.lua")
-	if err := os.WriteFile(p, []byte(lua), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return p
+	return dir
 }
 
 func runHealthAt(t *testing.T, cfg string) (string, error) {
@@ -44,7 +46,7 @@ func runHealthAt(t *testing.T, cfg string) (string, error) {
 }
 
 func TestHealthOK(t *testing.T) {
-	cfg := writeHealthConfig(t, "---\ndescription: a valid probe skill\n---\nbody\n")
+	cfg := writeHealthTree(t, map[string]string{"skills/probe.md": "---\ndescription: a valid probe skill\n---\nbody\n"})
 	out, err := runHealthAt(t, cfg)
 	if err != nil {
 		t.Fatalf("healthy config should pass: %v\n%s", err, out)
@@ -55,7 +57,7 @@ func TestHealthOK(t *testing.T) {
 }
 
 func TestHealthFailsOnSkippedSkill(t *testing.T) {
-	cfg := writeHealthConfig(t, "no frontmatter here\n")
+	cfg := writeHealthTree(t, map[string]string{"skills/probe.md": "no frontmatter here\n"})
 	out, err := runHealthAt(t, cfg)
 	if err == nil {
 		t.Fatalf("config with a skipped skill must fail health:\n%s", out)
@@ -69,17 +71,11 @@ func TestHealthFailsOnSkippedSkill(t *testing.T) {
 }
 
 func TestHealthFailsOnDownMCPServer(t *testing.T) {
-	dir := t.TempDir()
-	lua := `
-shell3.model("m", { base_url="http://x", api_key="k", model="id" })
-shell3.agent({ name="code", model="m", prompt="p", tools={ mcp="all" } })
-shell3.mcp({ dead = { command={ "/nonexistent-mcp-server-xyz" }, timeout=2 } })
-`
-	p := filepath.Join(dir, "shell3.lua")
-	if err := os.WriteFile(p, []byte(lua), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	out, err := runHealthAt(t, p)
+	cfg := writeHealthTree(t, map[string]string{
+		"shell3.yaml": healthYAML + "mcp:\n  dead: { command: [\"/nonexistent-mcp-server-xyz\"], timeout: 2 }\n",
+		"agent.md":    "---\nmodel: m\nmcp: all\n---\np\n",
+	})
+	out, err := runHealthAt(t, cfg)
 	if err == nil {
 		t.Fatalf("down MCP server must fail health:\n%s", out)
 	}
@@ -92,12 +88,30 @@ shell3.mcp({ dead = { command={ "/nonexistent-mcp-server-xyz" }, timeout=2 } })
 }
 
 func TestHealthFailsOnLoadError(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "shell3.lua")
-	if err := os.WriteFile(p, []byte("this is not lua ("), 0o644); err != nil {
-		t.Fatal(err)
+	cfg := writeHealthTree(t, map[string]string{"shell3.yaml": "models: [broken\n"})
+	if _, err := runHealthAt(t, cfg); err == nil {
+		t.Fatal("broken yaml must fail health")
 	}
-	if _, err := runHealthAt(t, p); err == nil {
-		t.Fatal("broken lua must fail health")
+}
+
+func TestHealthFailsOnBrokenHook(t *testing.T) {
+	cfg := writeHealthTree(t, map[string]string{"hooks/tool-call.sh": "echo not-json\n"})
+	out, err := runHealthAt(t, cfg)
+	if err == nil {
+		t.Fatalf("broken hook must fail health:\n%s", out)
+	}
+	if !strings.Contains(out, "hook") {
+		t.Fatalf("output should name the hook:\n%s", out)
+	}
+}
+
+func TestHealthOKWithStrictHook(t *testing.T) {
+	// A hook that deliberately blocks everything is a valid (strict) gate.
+	cfg := writeHealthTree(t, map[string]string{
+		"hooks/tool-call.sh": `printf '{"block": true, "reason": "locked down"}'` + "\n",
+	})
+	out, err := runHealthAt(t, cfg)
+	if err != nil {
+		t.Fatalf("strict hook should pass health: %v\n%s", err, out)
 	}
 }

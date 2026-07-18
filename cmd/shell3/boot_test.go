@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/agentsetup"
-	"github.com/weatherjean/shell3/internal/luacfg"
+	"github.com/weatherjean/shell3/internal/config"
 )
 
 func TestMergeEnvAddsMissingKeysOnly(t *testing.T) {
@@ -130,15 +130,15 @@ func TestCollectAnswersNonTTY(t *testing.T) {
 // TestBootEndToEnd drives the real `shell3 boot` flow against a temp HOME: it
 // asserts the cold-start redirect before boot, runs runBoot with flags (no TTY),
 // then verifies the written tree, .env (empty key + Brave placeholder, 0600),
-// that the generated config actually loads through luacfg with the code
-// agent, the no-clobber guard, and that --force regenerates.
+// that the generated config tree actually loads through internal/config,
+// the no-clobber guard, and that --force regenerates.
 func TestBootEndToEnd(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Cold start: no config anywhere -> ResolveConfigPath must fail (the message
-	// that points the user at `shell3 boot`). The temp HOME has no shell3.lua yet.
-	if _, err := agentsetup.ResolveConfigPath("", home); err == nil {
+	// Cold start: no config anywhere -> ResolveConfigDir must fail (the message
+	// that points the user at `shell3 boot`). The temp HOME has no config yet.
+	if _, err := agentsetup.ResolveConfigDir("", home); err == nil {
 		t.Fatal("expected no-config error before boot, got nil")
 	}
 
@@ -149,15 +149,16 @@ func TestBootEndToEnd(t *testing.T) {
 
 	dir := filepath.Join(home, ".shell3")
 	for _, p := range []string{
-		"shell3.lua",
-		"lib/skills/brainstorming.md", "lib/skills/scripting.md", ".env",
+		"shell3.yaml", "agent.md", "agents/explorer.md",
+		"hooks/tool-call.sh", "hooks/explorer.tool-call.sh",
+		"skills/brainstorming.md", "skills/scripting.md", ".env",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
 			t.Errorf("missing %s: %v", p, err)
 		}
 	}
 
-	// .env: empty model key (proxy handles auth) + Brave placeholder, mode 0600.
+	// .env: empty model key (proxy handles auth), mode 0600.
 	envPath := filepath.Join(dir, ".env")
 	env, err := os.ReadFile(envPath)
 	if err != nil {
@@ -166,9 +167,6 @@ func TestBootEndToEnd(t *testing.T) {
 	if !strings.Contains(string(env), "MAIN_API_KEY=") {
 		t.Errorf(".env missing MAIN_API_KEY line:\n%s", env)
 	}
-	if !strings.Contains(string(env), "BRAVE_API_KEY=") {
-		t.Errorf(".env missing BRAVE_API_KEY placeholder:\n%s", env)
-	}
 	if fi, err := os.Stat(envPath); err != nil {
 		t.Fatal(err)
 	} else if fi.Mode().Perm() != 0o600 {
@@ -176,28 +174,27 @@ func TestBootEndToEnd(t *testing.T) {
 	}
 
 	// After boot, config resolution finds the home config.
-	resolved, err := agentsetup.ResolveConfigPath("", home)
+	resolved, err := agentsetup.ResolveConfigDir("", home)
 	if err != nil {
-		t.Fatalf("ResolveConfigPath after boot: %v", err)
+		t.Fatalf("ResolveConfigDir after boot: %v", err)
 	}
-	if resolved != filepath.Join(dir, "shell3.lua") {
-		t.Errorf("resolved = %q, want home shell3.lua", resolved)
+	if resolved != dir {
+		t.Errorf("resolved = %q, want %q", resolved, dir)
 	}
 
 	// The end-to-end payoff: the generated config loads with an empty api_key.
-	c, err := luacfg.Load(resolved)
+	c, err := config.Load(resolved)
 	if err != nil {
 		t.Fatalf("generated config failed to load: %v", err)
 	}
 	defer c.Close()
-	agents := c.Agents()
-	if len(agents) != 1 || agents[0].Name != "code" {
-		t.Errorf("agents = %v, want [code]", agentNames(agents))
+	if c.FirstAgent().Name != "agent" {
+		t.Errorf("agent = %q, want %q", c.FirstAgent().Name, "agent")
 	}
 
 	// vision=true wires describe to the main model in the rendered config.
-	if raw, _ := os.ReadFile(resolved); !strings.Contains(string(raw), `shell3.describe{ model = "main" }`) {
-		t.Error("vision boot should wire shell3.describe to the main model")
+	if c.Describe() == nil || c.Describe().ModelRef != "main" {
+		t.Errorf("vision boot should wire media.describe to the main model, got %+v", c.Describe())
 	}
 
 	// No-clobber: a second boot without --force refuses.
@@ -211,16 +208,8 @@ func TestBootEndToEnd(t *testing.T) {
 	if err := runBoot(f); err != nil {
 		t.Fatalf("force runBoot: %v", err)
 	}
-	cfg, _ := os.ReadFile(resolved)
-	if !strings.Contains(string(cfg), `model          = "changed-model"`) {
+	cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
+	if !strings.Contains(string(cfg), `model: "changed-model"`) {
 		t.Errorf("--force did not regenerate the model; got:\n%s", cfg)
 	}
-}
-
-func agentNames(agents []luacfg.Agent) []string {
-	out := make([]string, len(agents))
-	for i, a := range agents {
-		out[i] = a.Name
-	}
-	return out
 }

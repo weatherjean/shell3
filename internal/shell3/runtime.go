@@ -12,10 +12,10 @@ import (
 )
 
 // RuntimeSpec configures a long-lived Runtime: the process-wide unit owning
-// the config (Lua state), store, proxy spawner, and log.
+// the loaded config, store, proxy spawner, and log.
 type RuntimeSpec struct {
-	ConfigPath string // "" → ~/.shell3/shell3.lua
-	WorkDir    string // runtime root; "" → os.Getwd(). Sessions default here.
+	ConfigDir string // "" → ~/.shell3/
+	WorkDir   string // runtime root; "" → os.Getwd(). Sessions default here.
 }
 
 // SessionOpts parameterizes one Session on a Runtime.
@@ -98,8 +98,8 @@ type Runtime struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	configPath string // captured from RuntimeSpec for ConfigPath
-	homeDir    string // captured from construction for ConfigPath
+	configDir string // captured from RuntimeSpec for ConfigDir
+	homeDir   string // captured from construction for ConfigDir
 
 	// jobs manages in-process background jobs (command and subagent jobs).
 	// Owned by this Runtime; cancelled at Close.
@@ -159,7 +159,7 @@ func NewRuntime(ctx context.Context, spec RuntimeSpec) (*Runtime, error) {
 		return nil, fmt.Errorf("get home directory: %w", err)
 	}
 	parts, cleanup, err := agentsetup.BuildParts(agentsetup.Options{
-		ConfigPath: spec.ConfigPath, CWD: workDir, HomeDir: homeDir,
+		ConfigDir: spec.ConfigDir, CWD: workDir, HomeDir: homeDir,
 	})
 	if err != nil {
 		return nil, err
@@ -172,7 +172,7 @@ func NewRuntime(ctx context.Context, spec RuntimeSpec) (*Runtime, error) {
 		events:        make(chan HostEvent, 64),
 		jobEvents:     make(chan JobProgress, 256),
 		workDir:       workDir,
-		configPath:    spec.ConfigPath,
+		configDir:     spec.ConfigDir,
 		homeDir:       homeDir,
 		ctx:           ctx,
 		cancel:        cancel,
@@ -205,12 +205,12 @@ func (rt *Runtime) Events() <-chan HostEvent { return rt.events }
 // a running job. The channel is never closed.
 func (rt *Runtime) JobEvents() <-chan JobProgress { return rt.jobEvents }
 
-// ConfigPath returns the absolute path of the shell3.lua this runtime was built
+// ConfigDir returns the absolute path of the config directory this runtime was built
 // from. An empty or relative spec path is resolved exactly the way construction
-// resolves it — ~/.shell3/shell3.lua. Useful for self-reconfiguration
+// resolves it — ~/.shell3/. Useful for self-reconfiguration
 // surfaces that need to show the agent/operator which file to edit.
-func (rt *Runtime) ConfigPath() (string, error) {
-	return agentsetup.ResolveConfigPath(rt.configPath, rt.homeDir)
+func (rt *Runtime) ConfigDir() (string, error) {
+	return agentsetup.ResolveConfigDir(rt.configDir, rt.homeDir)
 }
 
 func (rt *Runtime) emit(ev HostEvent) {

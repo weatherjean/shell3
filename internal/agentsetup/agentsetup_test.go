@@ -11,9 +11,58 @@ import (
 	"github.com/weatherjean/shell3/internal/chat"
 )
 
+// writeTree writes a config tree into dir: the given files plus a default
+// .env (TEST_KEY) unless the map carries one.
+func writeTree(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+	if _, ok := files[".env"]; !ok {
+		if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("TEST_KEY=sk-test\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, body := range files {
+		p := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+const minimalYAML = `models:
+  main:
+    base_url: https://example.test/v1
+    api_key: env:TEST_KEY
+    model: test-model
+    context_window: 1000
+`
+
+// writeMinimalConfig writes a tree Build can load: one model referencing an
+// env-injected key, and an agent.md selecting it.
+func writeMinimalConfig(t *testing.T, dir string) {
+	t.Helper()
+	writeTree(t, dir, map[string]string{
+		"shell3.yaml": minimalYAML,
+		"agent.md":    "---\nmodel: main\n---\nyou are a tester\n",
+	})
+}
+
+// writeSubagentConfig writes a tree with a registered subagent ("researcher")
+// beside the main agent.
+func writeSubagentConfig(t *testing.T, dir string) {
+	t.Helper()
+	writeTree(t, dir, map[string]string{
+		"shell3.yaml":          minimalYAML,
+		"agent.md":             "---\nmodel: main\ntools: [bash]\n---\nyou are a coder\n",
+		"agents/researcher.md": "---\ndescription: investigate things\ntools: [bash]\n---\nyou are a researcher\n",
+	})
+}
+
 // buildConfig composes the single-session path (BuildParts + a headless
-// SessionConfig) the tests below exercise. agent "" selects the first declared
-// agent. The production front-ends compose these two phases inline.
+// SessionConfig) the tests below exercise. agent "" selects the main agent.
+// The production front-ends compose these two phases inline.
 func buildConfig(opts agentsetup.Options, agent string) (chat.Config, func(), error) {
 	parts, cleanup, err := agentsetup.BuildParts(opts)
 	if err != nil {
@@ -32,9 +81,9 @@ func buildConfig(opts agentsetup.Options, agent string) (chat.Config, func(), er
 func TestBuild_MissingConfig_Errors(t *testing.T) {
 	tmp := t.TempDir()
 	_, _, err := buildConfig(agentsetup.Options{
-		ConfigPath: filepath.Join(tmp, "shell3.lua"),
-		CWD:        tmp,
-		HomeDir:    tmp,
+		ConfigDir: tmp,
+		CWD:       tmp,
+		HomeDir:   tmp,
 	}, "")
 	if err == nil {
 		t.Fatal("expected error for missing config, got nil")
@@ -47,9 +96,9 @@ func TestBuild_LoadsConfig(t *testing.T) {
 	writeMinimalConfig(t, tmp)
 
 	cfg, cleanup, err := buildConfig(agentsetup.Options{
-		ConfigPath: filepath.Join(tmp, "shell3.lua"),
-		CWD:        tmp,
-		HomeDir:    home,
+		ConfigDir: tmp,
+		CWD:       tmp,
+		HomeDir:   home,
 	}, "")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -67,47 +116,25 @@ func TestBuild_LoadsConfig(t *testing.T) {
 	}
 }
 
-// writeNamedAgentConfig writes a config with one agent ("first") and one
-// subagent ("helper") sharing one model, for exercising agent resolution.
-func writeNamedAgentConfig(t *testing.T, dir string) {
-	t.Helper()
-	lua := `
-shell3.model("main", {
-  base_url = "https://example.test/v1",
-  api_key = shell3.env.secret("TEST_KEY"),
-  model = "test-model",
-  context_window = 1000,
-})
-shell3.subagent({ name = "helper", description = "d", model = "main", prompt = "you are helper", tools = {} })
-shell3.agent({ name = "first",  model = "main", prompt = "you are first",  tools = {} })
-`
-	if err := os.WriteFile(filepath.Join(dir, "shell3.lua"), []byte(lua), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("TEST_KEY=sk-test\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestBuild_Agent_DefaultsToTheAgent(t *testing.T) {
 	tmp := t.TempDir()
-	writeNamedAgentConfig(t, tmp)
+	writeSubagentConfig(t, tmp)
 
 	cfg, cleanup, err := buildConfig(agentsetup.Options{
-		ConfigPath: filepath.Join(tmp, "shell3.lua"),
-		CWD:        tmp,
-		HomeDir:    t.TempDir(),
+		ConfigDir: tmp,
+		CWD:       tmp,
+		HomeDir:   t.TempDir(),
 	}, "")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 	defer cleanup()
-	if cfg.ModeLabel != "first" {
-		t.Errorf("default active agent = %q, want %q", cfg.ModeLabel, "first")
+	if cfg.ModeLabel != "agent" {
+		t.Errorf("default active agent = %q, want %q", cfg.ModeLabel, "agent")
 	}
-	// The persona is the agent's verbatim Lua prompt; the host Environment facts
-	// now live in a standing reminder (set by internal/shell3), NOT the system prompt.
-	if !strings.HasPrefix(cfg.Personality.SystemPrompt, "you are first") {
+	// The persona is the agent.md body verbatim; the host Environment facts
+	// live in a standing reminder (set by internal/shell3), NOT the system prompt.
+	if !strings.HasPrefix(cfg.Personality.SystemPrompt, "you are a coder") {
 		t.Errorf("system prompt = %q, want a prefix of the agent's prompt", cfg.Personality.SystemPrompt)
 	}
 	if strings.Contains(cfg.Personality.SystemPrompt, "## Environment") {
@@ -117,12 +144,12 @@ func TestBuild_Agent_DefaultsToTheAgent(t *testing.T) {
 
 func TestBuild_Agent_UnknownErrors(t *testing.T) {
 	tmp := t.TempDir()
-	writeNamedAgentConfig(t, tmp)
+	writeSubagentConfig(t, tmp)
 
 	_, _, err := buildConfig(agentsetup.Options{
-		ConfigPath: filepath.Join(tmp, "shell3.lua"),
-		CWD:        tmp,
-		HomeDir:    t.TempDir(),
+		ConfigDir: tmp,
+		CWD:       tmp,
+		HomeDir:   t.TempDir(),
 	}, "nope")
 	if err == nil {
 		t.Fatal("expected error for unknown agent, got nil")
@@ -135,26 +162,21 @@ func TestBuild_Agent_UnknownErrors(t *testing.T) {
 func TestBuild_RunProxy_SpawnsOnActivation(t *testing.T) {
 	tmp := t.TempDir()
 	marker := filepath.Join(tmp, "proxy-started")
-	lua := `
-shell3.model("main", {
-  base_url = "http://localhost:8787/v1",
-  api_key = shell3.env.secret("TEST_KEY"),
-  model = "test-model",
-  run_proxy = "touch ` + marker + `",
-})
-shell3.agent({ name = "tester", model = "main", prompt = "hi", tools = {} })
-`
-	if err := os.WriteFile(filepath.Join(tmp, "shell3.lua"), []byte(lua), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(tmp, ".env"), []byte("TEST_KEY=sk-test\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeTree(t, tmp, map[string]string{
+		"shell3.yaml": `models:
+  main:
+    base_url: http://localhost:8787/v1
+    api_key: env:TEST_KEY
+    model: test-model
+    run_proxy: "touch ` + marker + `"
+`,
+		"agent.md": "---\nmodel: main\n---\nhi\n",
+	})
 
 	_, cleanup, err := buildConfig(agentsetup.Options{
-		ConfigPath: filepath.Join(tmp, "shell3.lua"),
-		CWD:        tmp,
-		HomeDir:    t.TempDir(),
+		ConfigDir: tmp,
+		CWD:       tmp,
+		HomeDir:   t.TempDir(),
 	}, "")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -171,28 +193,27 @@ shell3.agent({ name = "tester", model = "main", prompt = "hi", tools = {} })
 	t.Fatal("run_proxy command was not spawned on model activation")
 }
 
-// namedAgentOptions writes the one-agent config ("first", plus subagent
-// "helper") via writeNamedAgentConfig and returns Options pointing at it, with
-// a fresh isolated HomeDir so no real ~/.shell3 is touched.
-func namedAgentOptions(t *testing.T) agentsetup.Options {
+// subagentParts builds Parts from writeSubagentConfig in a fresh temp dir.
+func subagentParts(t *testing.T) (*agentsetup.Parts, func()) {
 	t.Helper()
 	tmp := t.TempDir()
-	writeNamedAgentConfig(t, tmp)
-	return agentsetup.Options{
-		ConfigPath: filepath.Join(tmp, "shell3.lua"),
-		CWD:        tmp,
-		HomeDir:    t.TempDir(),
+	writeSubagentConfig(t, tmp)
+	parts, cleanup, err := agentsetup.BuildParts(agentsetup.Options{
+		ConfigDir: tmp,
+		CWD:       tmp,
+		HomeDir:   t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("BuildParts: %v", err)
 	}
+	return parts, cleanup
 }
 
 // TestSessionConfigs_Independent pins the invariant: two configs derived from
 // one Parts hold independent agent state — re-resolving one never changes the
 // other (there is no process-global active-agent state).
 func TestSessionConfigs_Independent(t *testing.T) {
-	parts, cleanup, err := agentsetup.BuildParts(namedAgentOptions(t))
-	if err != nil {
-		t.Fatal(err)
-	}
+	parts, cleanup := subagentParts(t)
 	defer cleanup()
 
 	a, err := parts.SessionConfig(agentsetup.SessionOptions{})
@@ -204,86 +225,53 @@ func TestSessionConfigs_Independent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rt, err := b.SwitchAgent("first")
+	rt, err := b.SwitchAgent("researcher")
 	if err != nil {
 		t.Fatal(err)
 	}
 	b.ApplyActiveAgent(rt)
 
-	if a.ModeLabel != "first" {
+	if a.ModeLabel != "agent" {
 		t.Fatalf("config A's agent changed to %q when B re-resolved", a.ModeLabel)
 	}
-	if b.ModeLabel != "first" {
-		t.Fatalf("config B should be first, got %q", b.ModeLabel)
-	}
-	// Each config renders its own prompt independently.
-	if a.RefreshPrompt() != b.RefreshPrompt() {
-		t.Fatal("both configs run the same agent; prompts should match")
-	}
-}
-
-// writeMinimalConfig writes a shell3.lua + .env that Build can load: one model
-// referencing an env-injected key, and one agent selecting it. The Lua surface
-// matches internal/luacfg's loader: shell3.model("name", {base_url, api_key,
-// model, ...}) and shell3.agent({name, model, prompt, tools}). The .env sits
-// beside the lua so shell3.env.secret resolves (Load reads .env from the config
-// file's directory).
-func writeMinimalConfig(t *testing.T, dir string) {
-	t.Helper()
-	lua := `
-shell3.model("main", {
-  base_url = "https://example.test/v1",
-  api_key = shell3.env.secret("TEST_KEY"),
-  model = "test-model",
-  context_window = 1000,
-})
-shell3.agent({ name = "tester", model = "main", prompt = "you are a tester", tools = {} })
-`
-	if err := os.WriteFile(filepath.Join(dir, "shell3.lua"), []byte(lua), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("TEST_KEY=sk-test\n"), 0o600); err != nil {
-		t.Fatal(err)
+	if b.ModeLabel != "researcher" {
+		t.Fatalf("config B should be researcher, got %q", b.ModeLabel)
 	}
 }
 
 // TestBuild_MalformedConfig_Errors characterizes the post-log-open error path:
-// a present but syntactically invalid shell3.lua resolves (so the log opens),
-// then luacfg.Load fails — Build must surface the error.
+// a present but invalid shell3.yaml resolves (so the log opens), then
+// config.Load fails — Build must surface the error.
 func TestBuild_MalformedConfig_Errors(t *testing.T) {
 	tmp := t.TempDir()
 	home := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmp, "shell3.lua"), []byte("this is ((( not valid lua\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(tmp, ".env"), []byte("TEST_KEY=sk-test\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeTree(t, tmp, map[string]string{
+		"shell3.yaml": "models: [not, a, map\n",
+		"agent.md":    "---\nmodel: main\n---\nhi\n",
+	})
 
 	_, _, err := buildConfig(agentsetup.Options{
-		ConfigPath: filepath.Join(tmp, "shell3.lua"),
-		CWD:        tmp,
-		HomeDir:    home,
+		ConfigDir: tmp,
+		CWD:       tmp,
+		HomeDir:   home,
 	}, "")
 	if err == nil {
 		t.Fatal("expected error for malformed config, got nil")
 	}
 }
 
-// TestBuild_AlwaysOpensStore characterizes the store-open path: history is no
-// longer gated — the store is opened unconditionally so the conversation always
-// persists (saveHistory) and the agent can read it back via the `history` skill.
-// A plain minimal config (no history gate; the gate no longer exists) must still
-// come up with cfg.Store != nil, and cleanup must close it without panicking.
+// TestBuild_AlwaysOpensStore characterizes the store-open path: the store is
+// opened unconditionally so the conversation always persists (saveHistory) and
+// the agent can read it back with rg/cat.
 func TestBuild_AlwaysOpensStore(t *testing.T) {
 	tmp := t.TempDir()
 	home := t.TempDir()
 	writeMinimalConfig(t, tmp)
 
 	cfg, cleanup, err := buildConfig(agentsetup.Options{
-		ConfigPath: filepath.Join(tmp, "shell3.lua"),
-		CWD:        tmp,
-		HomeDir:    home,
+		ConfigDir: tmp,
+		CWD:       tmp,
+		HomeDir:   home,
 	}, "")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -291,22 +279,22 @@ func TestBuild_AlwaysOpensStore(t *testing.T) {
 	if cfg.Store == nil {
 		t.Fatal("expected store to be opened unconditionally, got nil")
 	}
-	cleanup() // closes store + lua + log; must not panic
+	cleanup() // closes store + config + log; must not panic
 }
 
 // TestEnvironmentReminder asserts the host Environment standing reminder (no
-// longer part of the system prompt) carries the model, session id, config path,
+// longer part of the system prompt) carries the model, session id, config dir,
 // the JSONL runs layout and the ripgrep search recipe — and none of the retired
 // CLIs/UUID — all wrapped in a <system-reminder> envelope.
 func TestEnvironmentReminder(t *testing.T) {
-	rem := agentsetup.EnvironmentReminder("/c/shell3.lua", "/root/.shell3_project/runs", "gpt-x", "sess-42")
+	rem := agentsetup.EnvironmentReminder("/c", "/root/.shell3_project/runs", "gpt-x", "sess-42")
 	if !strings.HasPrefix(rem, "<system-reminder>") || !strings.HasSuffix(rem, "</system-reminder>") {
 		t.Fatalf("reminder not wrapped in <system-reminder>:\n%s", rem)
 	}
 	for _, want := range []string{
 		"- model: gpt-x",
 		"- session id: sess-42",
-		"- config: `/c/shell3.lua`",
+		"- config: `/c`",
 		".shell3_project/runs/<id>/messages.jsonl",
 		"rg <terms> .shell3_project/runs",
 		"subagent transcripts are ordinary sessions",
@@ -321,75 +309,15 @@ func TestEnvironmentReminder(t *testing.T) {
 		}
 	}
 	// Empty runs dir → no reminder (never advertise an unusable path).
-	if got := agentsetup.EnvironmentReminder("/c/shell3.lua", "", "gpt-x", "sess-42"); got != "" {
+	if got := agentsetup.EnvironmentReminder("/c", "", "gpt-x", "sess-42"); got != "" {
 		t.Errorf("EnvironmentReminder with empty runsDir = %q, want empty", got)
 	}
 }
 
-// writeSubagentConfig writes a config with a registered subagent ("researcher")
-// and an agent ("code") that lists it, plus the required .env.
-func writeSubagentConfig(t *testing.T, dir string) {
-	t.Helper()
-	lua := `
-shell3.model("main", {
-  base_url = "https://example.test/v1",
-  api_key = shell3.env.secret("TEST_KEY"),
-  model = "test-model",
-  context_window = 1000,
-})
-local r = shell3.subagent({ name = "researcher", description = "investigate things", model = "main", prompt = "you are a researcher", tools = { bash = true } })
-shell3.agent({ name = "code", model = "main", prompt = "you are a coder", tools = { bash = true, subagents = { r } } })
-`
-	if err := os.WriteFile(filepath.Join(dir, "shell3.lua"), []byte(lua), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("TEST_KEY=sk-test\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// subagentParts builds Parts from writeSubagentConfig in a fresh temp dir.
-func subagentParts(t *testing.T) (*agentsetup.Parts, func()) {
-	t.Helper()
-	tmp := t.TempDir()
-	writeSubagentConfig(t, tmp)
-	parts, cleanup, err := agentsetup.BuildParts(agentsetup.Options{
-		ConfigPath: filepath.Join(tmp, "shell3.lua"),
-		CWD:        tmp,
-		HomeDir:    t.TempDir(),
-	})
-	if err != nil {
-		t.Fatalf("BuildParts: %v", err)
-	}
-	return parts, cleanup
-}
-
-// TestAgentRuntime_NoSpawnTools asserts that an agent with registered subagents
-// no longer gets in-process spawn_agent/list_agents tools (subagents are now a
-// bash_bg-backgrounded shell3 described in the prompt), but still carries the
-// Subagents allowlist.
-func TestAgentRuntime_NoSpawnTools(t *testing.T) {
-	p, cleanup := subagentParts(t)
-	defer cleanup()
-
-	rt, err := p.AgentRuntime("code")
-	if err != nil {
-		t.Fatalf("AgentRuntime: %v", err)
-	}
-	for _, td := range rt.Personality.Tools {
-		if td.Name == "spawn_agent" || td.Name == "list_agents" {
-			t.Errorf("unexpected in-process tool %q — spawn machinery was removed", td.Name)
-		}
-	}
-	if len(rt.Subagents) != 1 || rt.Subagents[0] != "researcher" {
-		t.Errorf("AgentRuntime(\"code\").Subagents = %v, want [researcher]", rt.Subagents)
-	}
-}
-
 // TestAgentRuntime_SubagentResolvesAsAgent asserts that a registered subagent
-// name passed to AgentRuntime (the `shell3 --agent <subagent>` spawn path)
-// resolves the subagent's own config — correct name, and an empty Subagents
-// bundle (depth limit 1 — a subagent declares none).
+// name passed to AgentRuntime (the task-tool spawn path) resolves the
+// subagent's own config — correct name, and an empty Subagents bundle
+// (delegation is single-level by construction).
 func TestAgentRuntime_SubagentResolvesAsAgent(t *testing.T) {
 	p, cleanup := subagentParts(t)
 	defer cleanup()
@@ -405,37 +333,12 @@ func TestAgentRuntime_SubagentResolvesAsAgent(t *testing.T) {
 		t.Errorf("Personality.Name = %q, want %q", srt.Personality.Name, "researcher")
 	}
 	if len(srt.Subagents) != 0 {
-		t.Errorf("AgentRuntime(\"researcher\").Subagents = %v, want empty (depth limit 1)", srt.Subagents)
+		t.Errorf("AgentRuntime(\"researcher\").Subagents = %v, want empty (single-level)", srt.Subagents)
 	}
-}
-
-// TestAgentRuntime_NoSubagentsNoSpawnTool asserts that an agent with no
-// Subagents list gets neither spawn_agent nor list_agents in its schema.
-func TestAgentRuntime_NoSubagentsNoSpawnTool(t *testing.T) {
-	tmp := t.TempDir()
-	writeMinimalConfig(t, tmp)
-	parts, cleanup, err := agentsetup.BuildParts(agentsetup.Options{
-		ConfigPath: filepath.Join(tmp, "shell3.lua"),
-		CWD:        tmp,
-		HomeDir:    t.TempDir(),
-	})
-	if err != nil {
-		t.Fatalf("BuildParts: %v", err)
-	}
-	defer cleanup()
-
-	rt, err := parts.AgentRuntime("tester")
-	if err != nil {
-		t.Fatalf("AgentRuntime: %v", err)
-	}
-	for _, td := range rt.Personality.Tools {
-		if td.Name == "spawn_agent" || td.Name == "list_agents" {
-			t.Errorf("unexpected tool %q in agent with no subagents", td.Name)
-		}
-	}
-	for _, n := range rt.ActiveTools {
-		if n == "spawn_agent" || n == "list_agents" {
-			t.Errorf("unexpected active tool %q in agent with no subagents", n)
+	// A subagent never gets the task family.
+	for _, td := range srt.Personality.Tools {
+		if td.Name == "task" {
+			t.Error("subagent runtime must not carry the task tool")
 		}
 	}
 }
@@ -472,50 +375,19 @@ func TestRefreshPromptFor_Subagent(t *testing.T) {
 	}
 }
 
-// writeSubagentConfigWithDelegation writes a config with an agent that has both
-// a subagent allowlist AND delegation=true, so the `task` tool gate fires.
-func writeSubagentConfigWithDelegation(t *testing.T, dir string) {
-	t.Helper()
-	lua := `
-shell3.model("main", {
-  base_url = "https://example.test/v1",
-  api_key = shell3.env.secret("TEST_KEY"),
-  model = "test-model",
-  context_window = 1000,
-})
-local r = shell3.subagent({ name = "researcher", description = "investigate things", model = "main", prompt = "you are a researcher", tools = { bash = true } })
-shell3.agent({ name = "code", model = "main", prompt = "you are a coder", tools = { bash = true, subagents = { r } }, delegation = true })
-`
-	if err := os.WriteFile(filepath.Join(dir, "shell3.lua"), []byte(lua), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("TEST_KEY=sk-test\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // TestAgentRuntime_TaskToolInSchema proves the invariant: the `task` tool
-// appears in an agent's schema iff it has delegation=true AND a non-empty
-// Subagents allowlist — and the allowlist (names + descriptions) is baked
-// into the tool's subagent_type parameter, which is the model's only source
-// for it (there is no delegation reminder).
+// appears in the main agent's schema iff agents/ is non-empty (delegation is
+// inferred, there is no toggle) — and the allowlist (names + descriptions) is
+// baked into the tool's subagent_type parameter, which is the model's only
+// source for it.
 func TestAgentRuntime_TaskToolInSchema(t *testing.T) {
-	// --- Agent WITH delegation=true + subagents: task + management tools must be in schema ---
-	tmp := t.TempDir()
-	writeSubagentConfigWithDelegation(t, tmp)
-	parts, cleanup, err := agentsetup.BuildParts(agentsetup.Options{
-		ConfigPath: filepath.Join(tmp, "shell3.lua"),
-		CWD:        tmp,
-		HomeDir:    t.TempDir(),
-	})
-	if err != nil {
-		t.Fatalf("BuildParts: %v", err)
-	}
+	// --- Tree WITH agents/: task + management tools must be in schema ---
+	p, cleanup := subagentParts(t)
 	defer cleanup()
 
-	rt, err := parts.AgentRuntime("code")
+	rt, err := p.AgentRuntime("agent")
 	if err != nil {
-		t.Fatalf("AgentRuntime(code): %v", err)
+		t.Fatalf("AgentRuntime(agent): %v", err)
 	}
 	toolSet := make(map[string]bool)
 	for _, td := range rt.Personality.Tools {
@@ -523,7 +395,7 @@ func TestAgentRuntime_TaskToolInSchema(t *testing.T) {
 	}
 	for _, want := range []string{"task", "task_list", "task_status", "task_cancel"} {
 		if !toolSet[want] {
-			t.Errorf("agent with delegation=true + subagents should have %q in its tool schema", want)
+			t.Errorf("agent with subagents should have %q in its tool schema", want)
 		}
 	}
 	for _, td := range rt.Personality.Tools {
@@ -539,22 +411,22 @@ func TestAgentRuntime_TaskToolInSchema(t *testing.T) {
 		}
 	}
 
-	// --- Agent WITHOUT subagents (minimal config): management tools must NOT be in schema ---
+	// --- Tree WITHOUT agents/: management tools must NOT be in schema ---
 	tmp2 := t.TempDir()
 	writeMinimalConfig(t, tmp2)
 	parts2, cleanup2, err := agentsetup.BuildParts(agentsetup.Options{
-		ConfigPath: filepath.Join(tmp2, "shell3.lua"),
-		CWD:        tmp2,
-		HomeDir:    t.TempDir(),
+		ConfigDir: tmp2,
+		CWD:       tmp2,
+		HomeDir:   t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("BuildParts2: %v", err)
 	}
 	defer cleanup2()
 
-	rt2, err := parts2.AgentRuntime("tester")
+	rt2, err := parts2.AgentRuntime("agent")
 	if err != nil {
-		t.Fatalf("AgentRuntime2(tester): %v", err)
+		t.Fatalf("AgentRuntime2(agent): %v", err)
 	}
 	for _, td := range rt2.Personality.Tools {
 		for _, mgmt := range []string{"task", "task_list", "task_status", "task_cancel"} {
@@ -586,42 +458,37 @@ func TestAgentRuntime_UnknownErrors(t *testing.T) {
 // only gates the stage.
 func TestBuild_PruneFlag(t *testing.T) {
 	tmp := t.TempDir()
-	lua := `
-shell3.model("main", {
-  base_url = "https://example.test/v1",
-  api_key = shell3.env.secret("TEST_KEY"),
-  model = "test-model",
-  compact_at = 100000,
-})
-shell3.agent({ name = "opted_out", model = "main", prompt = "p", prune = false })
-shell3.subagent({ name = "inheriting", description = "d", model = "main", prompt = "p" })
-`
-	if err := os.WriteFile(filepath.Join(tmp, "shell3.lua"), []byte(lua), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(tmp, ".env"), []byte("TEST_KEY=sk-test\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeTree(t, tmp, map[string]string{
+		"shell3.yaml": `models:
+  main:
+    base_url: https://example.test/v1
+    api_key: env:TEST_KEY
+    model: test-model
+    compact_at: 100000
+`,
+		"agent.md":             "---\nmodel: main\nprune: false\n---\np\n",
+		"agents/inheriting.md": "---\ndescription: d\n---\np\n",
+	})
 
 	parts, cleanup, err := agentsetup.BuildParts(agentsetup.Options{
-		ConfigPath: filepath.Join(tmp, "shell3.lua"),
-		CWD:        tmp,
-		HomeDir:    t.TempDir(),
+		ConfigDir: tmp,
+		CWD:       tmp,
+		HomeDir:   t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("BuildParts: %v", err)
 	}
 	defer cleanup()
 
-	out, err := parts.AgentRuntime("opted_out")
+	out, err := parts.AgentRuntime("agent")
 	if err != nil {
-		t.Fatalf("AgentRuntime(opted_out): %v", err)
+		t.Fatalf("AgentRuntime(agent): %v", err)
 	}
 	if out.PruneAt != 0 {
-		t.Errorf("opted_out: PruneAt = %d, want 0 (prune=false)", out.PruneAt)
+		t.Errorf("agent: PruneAt = %d, want 0 (prune=false)", out.PruneAt)
 	}
 	if out.CompactAt != 100000 {
-		t.Errorf("opted_out: CompactAt = %d, want 100000 (thresholds stay model-level)", out.CompactAt)
+		t.Errorf("agent: CompactAt = %d, want 100000 (thresholds stay model-level)", out.CompactAt)
 	}
 
 	inh, err := parts.AgentRuntime("inheriting")

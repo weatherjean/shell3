@@ -9,11 +9,6 @@ import (
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
-const reloadBaseCfg = `
-shell3.model("main", { base_url="https://api.x/v1", api_key="k", model="m-1", context_window=1000 })
-shell3.agent({ name="code", model="main", prompt="hi", tools={} })
-`
-
 func writeReloadCfg(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -25,9 +20,8 @@ func writeReloadCfg(t *testing.T, path, content string) {
 // live sessions keep running, and the telegram/cron mirrors refresh.
 func TestReloadPicksUpConfigChange(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "shell3.lua")
-	writeReloadCfg(t, path, reloadBaseCfg)
-	rt, err := shell3.NewRuntime(context.Background(), shell3.RuntimeSpec{ConfigPath: path, WorkDir: dir})
+	writeBaseTree(t, dir, nil)
+	rt, err := shell3.NewRuntime(context.Background(), shell3.RuntimeSpec{ConfigDir: dir, WorkDir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,10 +31,10 @@ func TestReloadPicksUpConfigChange(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writeReloadCfg(t, path, reloadBaseCfg+`
-shell3.subagent({ name="second", description="d", model="main", prompt="p2", tools={} })
-shell3.telegram({ token="tk", chat_id="42" })
-`)
+	writeTreeFiles(t, dir, map[string]string{
+		"shell3.yaml":      baseYAML + "telegram:\n  token: tk\n  chat_id: \"42\"\n",
+		"agents/second.md": "---\ndescription: d\n---\np2\n",
+	})
 	res, err := rt.Reload()
 	if err != nil {
 		t.Fatal(err)
@@ -60,9 +54,8 @@ shell3.telegram({ token="tk", chat_id="42" })
 // runtime (and its sessions) keep the previous config.
 func TestReloadRejectsBrokenConfigAndKeepsRunning(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "shell3.lua")
-	writeReloadCfg(t, path, reloadBaseCfg)
-	rt, err := shell3.NewRuntime(context.Background(), shell3.RuntimeSpec{ConfigPath: path, WorkDir: dir})
+	writeBaseTree(t, dir, nil)
+	rt, err := shell3.NewRuntime(context.Background(), shell3.RuntimeSpec{ConfigDir: dir, WorkDir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +65,7 @@ func TestReloadRejectsBrokenConfigAndKeepsRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writeReloadCfg(t, path, "this is not lua (")
+	writeReloadCfg(t, filepath.Join(dir, "shell3.yaml"), "models: [not, a, map")
 	if _, err := rt.Reload(); err == nil {
 		t.Fatal("Reload must fail on a broken config")
 	}
@@ -87,9 +80,8 @@ func TestReloadRejectsBrokenConfigAndKeepsRunning(t *testing.T) {
 // every /reload.
 func TestReloadReappliesSessionDecorator(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "shell3.lua")
-	writeReloadCfg(t, path, reloadBaseCfg)
-	rt, err := shell3.NewRuntime(context.Background(), shell3.RuntimeSpec{ConfigPath: path, WorkDir: dir})
+	writeBaseTree(t, dir, nil)
+	rt, err := shell3.NewRuntime(context.Background(), shell3.RuntimeSpec{ConfigDir: dir, WorkDir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}

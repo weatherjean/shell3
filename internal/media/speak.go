@@ -12,7 +12,7 @@ import (
 
 	"github.com/openai/openai-go"
 
-	"github.com/weatherjean/shell3/internal/luacfg"
+	"github.com/weatherjean/shell3/internal/config"
 )
 
 // maxSpeechRunes is the largest input Speak will send for synthesis (a
@@ -75,7 +75,7 @@ func speechExt(format string) string {
 
 // newSpeaker builds Clients.Speak for cfg, resolving its client (and, on
 // first use, spawning cfg's model's run_proxy) via sdk.
-func newSpeaker(sdk sdkFn, cfg luacfg.TTSConfig) func(context.Context, string) (Speech, error) {
+func newSpeaker(sdk sdkFn, cfg config.TTSConfig) func(context.Context, string) (Speech, error) {
 	return func(ctx context.Context, text string) (Speech, error) {
 		stripped := strings.TrimSpace(StripMarkdownForSpeech(text))
 		if stripped == "" {

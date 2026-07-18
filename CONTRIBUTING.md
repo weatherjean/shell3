@@ -46,8 +46,8 @@ better are more welcome than ones that grow the footprint.
 ## Architecture orientation
 
 `AGENTS.md` has the package map. The short version: `cmd/shell3` is the CLI,
-`internal/agentsetup` assembles a `chat.Config` from `shell3.lua`
-(`internal/luacfg`), `internal/chat` runs turns against an OpenAI-compatible
+`internal/agentsetup` assembles a `chat.Config` from the config directory
+(`internal/config`), `internal/chat` runs turns against an OpenAI-compatible
 provider (`internal/adapter/openai`), and the front-ends (`internal/telegram`
 for the bot, `internal/web` for the dashboard + web chat, `internal/cli` for
 the `dev`/`dash` local CLIs) are built on `internal/shell3`'s session/runtime
@@ -55,7 +55,7 @@ core.
 
 ## Security
 
-Never read or commit credential files (`.env` beside `shell3.lua`). shell3 is
+Never read or commit credential files (`.env` beside `shell3.yaml`). shell3 is
 unsafe by default — model-chosen commands run with full shell access, gated only
-by the optional `shell3.on_tool_call` hook. Report vulnerabilities via GitHub
+by the optional per-agent hook scripts (`hooks/*.sh`). Report vulnerabilities via GitHub
 Security Advisories.

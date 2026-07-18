@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/chat"
-	"github.com/weatherjean/shell3/internal/luacfg"
+	"github.com/weatherjean/shell3/internal/config"
 )
 
 // BridgeVerdict maps across two independent iota enums on a security
@@ -13,22 +13,22 @@ import (
 // fields ride across intact.
 func TestBridgeVerdict(t *testing.T) {
 	for _, c := range []struct {
-		in   luacfg.ToolCallAction
+		in   config.ToolCallAction
 		want chat.ToolCallAction
 	}{
-		{luacfg.ActionRun, chat.ActionRun},
-		{luacfg.ActionBlock, chat.ActionBlock},
-		{luacfg.ActionAsk, chat.ActionAsk},
+		{config.ActionRun, chat.ActionRun},
+		{config.ActionBlock, chat.ActionBlock},
+		{config.ActionAsk, chat.ActionAsk},
 	} {
-		if got := BridgeVerdict(luacfg.ToolCallVerdict{Action: c.in}).Action; got != c.want {
+		if got := BridgeVerdict(config.ToolCallVerdict{Action: c.in}).Action; got != c.want {
 			t.Errorf("BridgeVerdict(%v).Action = %v, want %v", c.in, got, c.want)
 		}
 	}
-	if got := BridgeVerdict(luacfg.ToolCallVerdict{Action: luacfg.ToolCallAction(99)}).Action; got != chat.ActionBlock {
+	if got := BridgeVerdict(config.ToolCallVerdict{Action: config.ToolCallAction(99)}).Action; got != chat.ActionBlock {
 		t.Errorf("BridgeVerdict(unknown).Action = %v, want ActionBlock (fail closed)", got)
 	}
-	v := BridgeVerdict(luacfg.ToolCallVerdict{
-		Action: luacfg.ActionRun, Argv: []string{"bash", "-c", "x"},
+	v := BridgeVerdict(config.ToolCallVerdict{
+		Action: config.ActionRun, Argv: []string{"bash", "-c", "x"},
 		Prompt: "p", Reason: "r", Passthrough: true,
 	})
 	if len(v.Argv) != 3 || v.Prompt != "p" || v.Reason != "r" || !v.Passthrough {

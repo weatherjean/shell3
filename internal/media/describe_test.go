@@ -22,9 +22,11 @@ import (
 func newDescribeClients(t *testing.T, url, prompt string) *Clients {
 	t.Helper()
 	return newTestClients(t, `
-shell3.model("m", { base_url = "`+url+`", api_key = "k", model = "vision-x" })
-shell3.describe{ model = "m", prompt = "`+prompt+`" }
-`+baseAgent, nil)
+models:
+  m: { base_url: "`+url+`", api_key: k, model: vision-x }
+media:
+  describe: { model: m, prompt: "`+prompt+`" }
+`, nil)
 }
 
 // writeTestPNG encodes a tiny 2x2 image.NRGBA as a real PNG file at path, so
@@ -135,9 +137,7 @@ func TestDescribeBadFile(t *testing.T) {
 }
 
 func TestDescribeNilWhenUnconfigured(t *testing.T) {
-	c := newTestClients(t, `
-shell3.model("m", { base_url = "http://x", model = "id" })
-`+baseAgent, nil)
+	c := newTestClients(t, modelOnlyYAML("http://x"), nil)
 	if c.Describe != nil {
 		t.Fatal("want nil Describe when shell3.describe is absent")
 	}

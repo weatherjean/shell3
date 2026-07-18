@@ -93,19 +93,18 @@ func wantsHelp(args []string) bool {
 
 // addConfigFlag registers the shared --config/-c flag with the one canonical
 // description; every subcommand resolves it through resolveConfig.
-func addConfigFlag(cmd *cobra.Command, configPath *string) {
-	cmd.Flags().StringVarP(configPath, "config", "c", "", "Config name (→ ~/.shell3/<name>.lua) or path to a *.lua file")
+func addConfigFlag(cmd *cobra.Command, configDir *string) {
+	cmd.Flags().StringVarP(configDir, "config", "c", "", "Path to the config directory containing shell3.yaml (default ~/.shell3)")
 }
 
-// resolveConfig turns the shared --config flag value (a name or a *.lua path;
-// "" for the default ~/.shell3/shell3.lua) into the config path every
-// subcommand loads.
-func resolveConfig(configPath string) (string, error) {
+// resolveConfig turns the shared --config flag value (a directory path; "" for
+// the default ~/.shell3) into the config directory every subcommand loads.
+func resolveConfig(configDir string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return agentsetup.ResolveConfigPath(configPath, home)
+	return agentsetup.ResolveConfigDir(configDir, home)
 }
 
 // shouldPrintHeaderInPreRun gates the full banner to real subcommand runs:

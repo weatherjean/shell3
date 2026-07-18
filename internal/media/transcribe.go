@@ -11,7 +11,7 @@ import (
 
 	"github.com/openai/openai-go"
 
-	"github.com/weatherjean/shell3/internal/luacfg"
+	"github.com/weatherjean/shell3/internal/config"
 )
 
 // maxAudioBytes is the largest audio file Transcribe will upload (OpenAI's
@@ -44,7 +44,7 @@ func validateAudioPath(path string, size int64) (mime string, err error) {
 
 // newTranscriber builds Clients.Transcribe for cfg, resolving its client
 // (and, on first use, spawning cfg's model's run_proxy) via sdk.
-func newTranscriber(sdk sdkFn, cfg luacfg.STTConfig) func(context.Context, string) (string, error) {
+func newTranscriber(sdk sdkFn, cfg config.STTConfig) func(context.Context, string) (string, error) {
 	return func(ctx context.Context, path string) (string, error) {
 		info, err := os.Stat(path)
 		if err != nil {

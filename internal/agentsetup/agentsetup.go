@@ -1,7 +1,7 @@
 // Package agentsetup is the shared config assembly used by every shell3
 // front-end (the Telegram bot, the dev CLIs, and the internal/shell3 event
 // stream). It resolves paths, ensures project dirs, opens the store and log,
-// loads shell3.lua, and returns a fully-populated chat.Config — the single
+// loads the config directory, and returns a fully-populated chat.Config — the single
 // source of truth for "what the agent is", independent of how it's driven.
 package agentsetup
 
@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"strings"
 
@@ -16,8 +17,8 @@ import (
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/bootstrap"
 	"github.com/weatherjean/shell3/internal/chat"
+	"github.com/weatherjean/shell3/internal/config"
 	"github.com/weatherjean/shell3/internal/llm"
-	"github.com/weatherjean/shell3/internal/luacfg"
 	"github.com/weatherjean/shell3/internal/mcp"
 	"github.com/weatherjean/shell3/internal/modelproxy"
 	"github.com/weatherjean/shell3/internal/paths"
@@ -30,9 +31,9 @@ import (
 // (front-ends pass os.Getwd()/os.UserHomeDir()). Per-session concerns (agent,
 // headless, out path) live in SessionOptions.
 type Options struct {
-	ConfigPath string // "" triggers default resolution (ResolveConfigPath)
-	CWD        string
-	HomeDir    string
+	ConfigDir string // "" triggers default resolution (ResolveConfigDir)
+	CWD       string
+	HomeDir   string
 }
 
 // Parts is the session-independent runtime assembly: everything one process
@@ -40,37 +41,37 @@ type Options struct {
 // via SessionConfig.
 //
 // Concurrency: all exported methods are safe for concurrent use by multiple
-// sessions. The Lua VM (luacfg.LoadedConfig) serialises access with a mutex,
+// sessions. The loaded config (config.LoadedConfig) is immutable after load,
 // the file-native runs store appends each line with a single O_APPEND write
 // (safe for concurrent callers), the proxy spawner is mutex-guarded internally,
 // and AgentRuntime builds a fresh LLM client per call, so no client state is
 // shared across sessions.
 //
 // Lifetime: Parts must not be used after the cleanup returned by BuildParts has
-// run. The cleanup closes the Lua state and the log; the runs store has no
+// run. The cleanup closes MCP connections and the log; the runs store has no
 // handle to close and run_proxy processes are detached (never reaped here).
 // Any method call after cleanup has undefined behaviour.
 type Parts struct {
-	lc      *luacfg.LoadedConfig
+	lc      *config.LoadedConfig
 	st      *runs.Store
 	proxy   *modelproxy.Spawner
 	log     applog.Logger
 	root    string // runtime root workdir (Options.CWD)
 	runsDir string // absolute path to .shell3_project/runs (for chat.Config.RunsDir + the Environment section)
-	// configPath is the resolved absolute shell3.lua that produced this Parts;
+	// configDir is the resolved absolute config directory that produced this Parts;
 	// recorded per session so resume can reload the right config.
-	configPath string
-	// mcp is the connected MCP server manager (nil when no shell3.mcp{} block
+	configDir string
+	// mcp is the connected MCP server manager (nil when no mcp: block
 	// is declared). Its Close rides the BuildParts closer stack, so /reload
 	// tears down old servers and connects fresh ones automatically. mcpWarns
 	// holds connect-time warnings (down servers, tool-name collisions),
-	// surfaced beside the Lua config warnings.
+	// surfaced beside the config warnings.
 	mcp      *mcp.Manager
 	mcpWarns []string
 }
 
 // MCPStatus reports every declared MCP server's health (nil when no
-// shell3.mcp{} block is declared) — for `shell3 health` and the dashboard.
+// mcp: block is declared) — for `shell3 health` and the dashboard.
 func (p *Parts) MCPStatus() []mcp.ServerStatus {
 	if p.mcp == nil {
 		return nil
@@ -82,25 +83,25 @@ func (p *Parts) MCPStatus() []mcp.ServerStatus {
 // store-open itself failed, which is non-fatal and logged).
 func (p *Parts) Store() *runs.Store { return p.st }
 
-// ConfigPath returns the resolved absolute shell3.lua path that produced these
+// ConfigDir returns the resolved absolute config directory that produced these
 // parts (recorded per session for resume).
-func (p *Parts) ConfigPath() string { return p.configPath }
+func (p *Parts) ConfigDir() string { return p.configDir }
 
-// MediaConfig is the read-only slice of shell3.lua that internal/media needs
+// MediaConfig is the read-only slice of the config that internal/media needs
 // to resolve its four capabilities (STT/TTS/Describe/Imagegen) and their
-// models. It mirrors media.Config's method set so *luacfg.LoadedConfig
+// models. It mirrors media.Config's method set so *config.LoadedConfig
 // satisfies both structurally, without agentsetup importing media (media
 // cannot live under agentsetup itself, since it depends on internal/shell3,
 // which agentsetup is built from) or media importing agentsetup.
 type MediaConfig interface {
-	STT() *luacfg.STTConfig
-	TTS() *luacfg.TTSConfig
-	Describe() *luacfg.DescribeConfig
-	Imagegen() *luacfg.ImagegenConfig
-	Model(name string) (luacfg.Model, bool)
+	STT() *config.STTConfig
+	TTS() *config.TTSConfig
+	Describe() *config.DescribeConfig
+	Imagegen() *config.ImagegenConfig
+	Model(name string) (config.Model, bool)
 }
 
-// MediaConfig returns the narrow media-config view of the shell3.lua this
+// MediaConfig returns the narrow media-config view of the config this
 // Parts was built from, for host code building media.Clients (e.g.
 // media.New(p.MediaConfig(), p.EnsureProxy)).
 func (p *Parts) MediaConfig() MediaConfig { return p.lc }
@@ -119,16 +120,16 @@ func (p *Parts) BackgroundMaxConcurrent() int { return p.lc.BackgroundMaxConcurr
 func (p *Parts) ModelCount() int { return len(p.lc.Models) }
 
 // Telegram returns the parsed shell3.telegram{} block (zero value if absent).
-func (p *Parts) Telegram() luacfg.TelegramConfig { return p.lc.Telegram() }
+func (p *Parts) Telegram() config.TelegramConfig { return p.lc.Telegram() }
 
 // Web returns the parsed top-level shell3.web{} block (zero value if absent).
-func (p *Parts) Web() luacfg.WebConfig { return p.lc.Web() }
+func (p *Parts) Web() config.WebConfig { return p.lc.Web() }
 
 // Cron returns the cron jobs declared via top-level shell3.cron{...}.
-func (p *Parts) Cron() []luacfg.CronJob { return p.lc.Cron() }
+func (p *Parts) Cron() []config.CronJob { return p.lc.Cron() }
 
 // Heartbeat returns the parsed shell3.heartbeat{} block, nil when not declared.
-func (p *Parts) Heartbeat() *luacfg.Heartbeat { return p.lc.Heartbeat() }
+func (p *Parts) Heartbeat() *config.Heartbeat { return p.lc.Heartbeat() }
 
 // AgentNames returns declared agent names in declaration order.
 func (p *Parts) AgentNames() []string {
@@ -162,18 +163,18 @@ func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
 	return chat.ActiveAgent{}, fmt.Errorf("unknown agent %q", name)
 }
 
-// subagentToAgent adapts a registered subagent to the luacfg.Agent shape that
+// subagentToAgent adapts a registered subagent to the config.Agent shape that
 // runtimeForAgent/BuildPersonaFor consume. The shared core copies wholesale;
 // Subagents stays empty (delegation is single-level by construction) and the
 // model-facing Description is dropped (it matters to the parent, not here).
-func subagentToAgent(sa luacfg.Subagent) luacfg.Agent {
-	return luacfg.Agent{AgentCommon: sa.AgentCommon}
+func subagentToAgent(sa config.Subagent) config.Agent {
+	return config.Agent{AgentCommon: sa.AgentCommon}
 }
 
 // runtimeForAgent assembles the full chat runtime for the given agent value.
 // It is the common implementation shared by the agent and subagent resolution
 // paths in AgentRuntime.
-func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
+func (p *Parts) runtimeForAgent(a config.Agent) (chat.ActiveAgent, error) {
 	md, ok := p.lc.Model(a.ModelName)
 	if !ok {
 		return chat.ActiveAgent{}, fmt.Errorf("agent %q references unknown model %q", a.Name, a.ModelName)
@@ -181,24 +182,25 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 	p.proxy.Ensure(md.Name, md.RunProxy)
 	client, rp := buildClient(md)
 
-	toolDefs := luacfg.ToolDefs(a.Gates)
+	toolDefs := config.ToolDefs(a.Gates)
 
-	// Inject the `task` tool when the agent has both the Delegation toggle and a
-	// non-empty Subagents allowlist. The allowlist (names + model-facing
-	// descriptions) is baked into the tool's schema — subagent_type carries an
-	// enum plus a per-subagent description — so the model needs no separate
-	// delegation reminder. a.Subagents is also surfaced via
-	// ActiveAgent.Subagents below so the Session can validate spawns.
-	if a.Delegation && len(a.Subagents) > 0 {
-		refs := make([]luacfg.SubagentRef, 0, len(a.Subagents))
+	// Inject the `task` tool when the agent has a non-empty Subagents list —
+	// delegation is inferred from agents/ being non-empty, there is no toggle.
+	// The allowlist (names + model-facing descriptions) is baked into the
+	// tool's schema — subagent_type carries an enum plus a per-subagent
+	// description — so the model needs no separate delegation reminder.
+	// a.Subagents is also surfaced via ActiveAgent.Subagents below so the
+	// Session can validate spawns.
+	if len(a.Subagents) > 0 {
+		refs := make([]config.SubagentRef, 0, len(a.Subagents))
 		for _, n := range a.Subagents {
 			desc := ""
 			if sa, ok := p.lc.SubagentByName(n); ok {
 				desc = sa.Description
 			}
-			refs = append(refs, luacfg.SubagentRef{Name: n, Description: desc})
+			refs = append(refs, config.SubagentRef{Name: n, Description: desc})
 		}
-		toolDefs = append(toolDefs, luacfg.TaskToolFor(refs), luacfg.TaskListTool, luacfg.TaskStatusTool, luacfg.TaskCancelTool)
+		toolDefs = append(toolDefs, config.TaskToolFor(refs), config.TaskListTool, config.TaskStatusTool, config.TaskCancelTool)
 	}
 
 	// Append the opted-in MCP servers' tool defs (tools.mcp) and route their
@@ -256,7 +258,7 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 		AgentKnobs: chat.AgentKnobs{
 			HostToolNames: hostNames,
 			Subagents:     a.Subagents,
-			Environment:   a.Environment,
+			Environment:   true,
 			ContextWindow: md.ContextWindow,
 			CompactAt:     md.CompactAt,
 			KeepRecent:    md.KeepRecent,
@@ -278,7 +280,7 @@ func (p *Parts) runtimeForAgent(a luacfg.Agent) (chat.ActiveAgent, error) {
 //
 // Returns "" when runsDir is empty (store-open failed), so the reminder never
 // advertises a path the agent cannot use.
-func EnvironmentReminder(configPath, runsDir, model, sessionID string) string {
+func EnvironmentReminder(configDir, runsDir, model, sessionID string) string {
 	if runsDir == "" {
 		return ""
 	}
@@ -290,8 +292,8 @@ func EnvironmentReminder(configPath, runsDir, model, sessionID string) string {
 	if sessionID != "" {
 		fmt.Fprintf(&b, "- session id: %s\n", sessionID)
 	}
-	if configPath != "" {
-		fmt.Fprintf(&b, "- config: `%s` (your shell3.lua; its directory holds your skills/lib — edit it via the self-evolve skill)\n", configPath)
+	if configDir != "" {
+		fmt.Fprintf(&b, "- config: `%s` (your config directory: shell3.yaml, agent.md, skills/, hooks/ — edit it via the self-evolve skill)\n", configDir)
 	}
 	// Derive the model-facing paths from paths.ProjectDirName (its single
 	// source): a renamed project dir must not leave the reminder teaching the
@@ -328,19 +330,19 @@ type SessionOptions struct {
 	OutPath  string
 }
 
-// BridgeVerdict maps a luacfg on_tool_call verdict to the chat package's
+// BridgeVerdict maps a config tool-call hook verdict to the chat package's
 // equivalent, field by field. The two Action enums are independent iota
 // blocks; an explicit mapping (rather than a numeric cast) keeps this security
 // boundary correct if either is ever reordered, and an unrecognized action
 // fails closed (ActionBlock) rather than silently falling through to
 // ActionRun. Exported so integration tests exercise the same bridge
 // production uses instead of hand-copying it.
-func BridgeVerdict(v luacfg.ToolCallVerdict) chat.ToolCallVerdict {
+func BridgeVerdict(v config.ToolCallVerdict) chat.ToolCallVerdict {
 	action := chat.ActionBlock // fail closed on any unmapped action
 	switch v.Action {
-	case luacfg.ActionRun:
+	case config.ActionRun:
 		action = chat.ActionRun
-	case luacfg.ActionAsk:
+	case config.ActionAsk:
 		action = chat.ActionAsk
 	}
 	return chat.ToolCallVerdict{
@@ -373,7 +375,7 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 		Store:          p.st,
 		RunsDir:        p.runsDir,
 		WorkDir:        workdir,
-		ConfigPath:     p.ConfigPath(),
+		ConfigDir:      p.ConfigDir(),
 		ConfigWarnings: append(append([]string{}, p.lc.Warnings()...), p.mcpWarns...),
 		Log:            p.log,
 		OutPath:        so.OutPath,
@@ -403,16 +405,19 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 			return out
 		}
 	}
-	// shell3.on_tool_call: config-global hook chain run before every tool.
+	// hooks/*.tool-call.sh: the per-agent gate script run before every tool.
+	// The closures capture activeName so a /agent switch re-targets the
+	// session to the new agent's hook (each agent is governed by its own
+	// script or none — no fallback).
 	if p.lc.HasToolCall() {
 		cfg.RunToolCall = func(ctx context.Context, name, command, argsJSON string, headless bool) chat.ToolCallVerdict {
-			return BridgeVerdict(p.lc.RunToolCall(ctx, name, command, argsJSON, headless))
+			return BridgeVerdict(p.lc.RunToolCall(ctx, activeName, name, command, argsJSON, headless))
 		}
 	}
-	// shell3.on_tool_result: config-global output-rewrite chain.
+	// hooks/*.tool-result.sh: the per-agent output-rewrite script.
 	if p.lc.HasToolResult() {
 		cfg.RunToolResult = func(ctx context.Context, name, argsJSON, output string) string {
-			return p.lc.RunToolResult(ctx, name, argsJSON, output)
+			return p.lc.RunToolResult(ctx, activeName, name, argsJSON, output)
 		}
 	}
 	cfg.SwitchAgent = func(name string) (chat.ActiveAgent, error) {
@@ -433,7 +438,7 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 }
 
 // BuildParts assembles the shared runtime parts. The returned cleanup closes
-// the Lua state and the log; callers MUST invoke it once. (The runs store has
+// MCP connections and the log; callers MUST invoke it once. (The runs store has
 // no handle to close, and run_proxy processes are detached fire-and-forget —
 // see openStore and modelproxy.)
 func BuildParts(opts Options) (*Parts, func(), error) {
@@ -452,8 +457,8 @@ func BuildParts(opts Options) (*Parts, func(), error) {
 	b.openStore()
 	p := &Parts{lc: b.lc, st: b.st, proxy: b.proxy,
 		log: b.log, root: b.opts.CWD, runsDir: b.l.Runs,
-		configPath: b.configPath,
-		mcp:        b.mcp, mcpWarns: b.mcpWarns,
+		configDir: b.configDir,
+		mcp:       b.mcp, mcpWarns: b.mcpWarns,
 	}
 	return p, b.closeAll, nil
 }
@@ -466,12 +471,12 @@ func BuildParts(opts Options) (*Parts, func(), error) {
 type builder struct {
 	opts Options
 
-	configPath string
-	g          paths.Global
-	l          paths.Local
+	configDir string
+	g         paths.Global
+	l         paths.Local
 
 	log      applog.Logger
-	lc       *luacfg.LoadedConfig
+	lc       *config.LoadedConfig
 	st       *runs.Store
 	proxy    *modelproxy.Spawner
 	mcp      *mcp.Manager
@@ -491,11 +496,11 @@ func (b *builder) closeAll() {
 // ensures the global root + project runtime directories exist. The project
 // identity is now the directory itself (.shell3_project/), so there is no UUID.
 func (b *builder) resolvePaths() error {
-	configPath, err := ResolveConfigPath(b.opts.ConfigPath, b.opts.HomeDir)
+	configDir, err := ResolveConfigDir(b.opts.ConfigDir, b.opts.HomeDir)
 	if err != nil {
 		return err
 	}
-	b.configPath = configPath
+	b.configDir = configDir
 	b.g = paths.NewGlobal(b.opts.HomeDir)
 	b.l = paths.NewLocal(b.opts.CWD)
 	if err := bootstrap.EnsureGlobal(b.g); err != nil {
@@ -520,10 +525,10 @@ func (b *builder) openLog() {
 	b.closers = append(b.closers, func() { _ = logCloser.Close() })
 }
 
-// loadConfig loads shell3.lua. The Lua/.env workdir is the config file's
+// loadConfig loads the config directory. Hooks and .env resolve against that
 // directory; the agent's bash cwd stays opts.CWD. These differ on purpose.
 func (b *builder) loadConfig() error {
-	lc, err := luacfg.Load(b.configPath)
+	lc, err := config.Load(b.configDir)
 	if err != nil {
 		return err
 	}
@@ -539,7 +544,7 @@ func (b *builder) loadConfig() error {
 	return nil
 }
 
-// connectMCP builds + connects the MCP server manager when shell3.mcp{} is
+// connectMCP builds + connects the MCP server manager when an mcp: block is
 // declared. Synchronous by design (servers dial in parallel, each under its
 // own timeout): tool defs become plain static config, and a hosted bot does
 // not care about a few seconds at startup/reload. A down server is a warning,
@@ -573,7 +578,7 @@ func (b *builder) openStore() {
 
 // buildClient constructs a streaming client plus its request params from a
 // configured model. Reused for the initial client and on each agent switch.
-func buildClient(md luacfg.Model) (chat.LLMClient, llm.RequestParams) {
+func buildClient(md config.Model) (chat.LLMClient, llm.RequestParams) {
 	cl := openai.NewClient(md.BaseURL, md.APIKey, md.ModelID)
 	rp := llm.RequestParams{
 		ReasoningEffort: md.Reasoning,
@@ -587,35 +592,24 @@ func buildClient(md luacfg.Model) (chat.LLMClient, llm.RequestParams) {
 	return cl, rp
 }
 
-// ExpandConfigName turns a raw --config flag value into a config path. A value
-// ending in ".lua" is a literal path (returned unchanged); any other non-empty
-// value is a name resolved to ~/.shell3/<name>.lua; an empty value is returned
-// as-is (the caller applies its own default). This is the single rule every
-// front-end and CLI uses so name-vs-path resolution stays consistent.
-func ExpandConfigName(flag, homeDir string) string {
-	if flag == "" || strings.HasSuffix(flag, ".lua") {
-		return flag
+// ResolveConfigDir returns the config directory to load: the explicit flag (a
+// literal directory path), else the default ~/.shell3. It does NOT look in
+// cwd. Returns an error when the resolved directory has no shell3.yaml —
+// catching a typo'd --config here, with a clear message (including the
+// migration hint when only a legacy shell3.lua is present), instead of
+// surfacing it later as a raw load error.
+func ResolveConfigDir(flag, homeDir string) (string, error) {
+	dir := flag
+	if dir == "" {
+		dir = paths.NewGlobal(homeDir).Root
 	}
-	return paths.NewGlobal(homeDir).ConfigNamed(flag)
-}
-
-// ResolveConfigPath returns the shell3.lua to load: the explicit flag (a name
-// like "code" → ~/.shell3/code.lua, or a literal *.lua path), else the default
-// ~/.shell3/shell3.lua. It does NOT look in cwd. Returns an error when the
-// resolved file does not exist — catching a typo'd --config here, with a clear
-// message, instead of surfacing it later as a raw Lua DoFile error.
-func ResolveConfigPath(flag, homeDir string) (string, error) {
-	if expanded := ExpandConfigName(flag, homeDir); expanded != "" {
-		if !fileExists(expanded) {
-			return "", fmt.Errorf("no such config: %s — run 'shell3 boot' to create one, or check the --config name", expanded)
-		}
-		return expanded, nil
+	if fileExists(filepath.Join(dir, "shell3.yaml")) {
+		return dir, nil
 	}
-	global := paths.NewGlobal(homeDir).ConfigFile
-	if fileExists(global) {
-		return global, nil
+	if fileExists(filepath.Join(dir, "shell3.lua")) {
+		return "", fmt.Errorf("%s: shell3 now uses a config directory (shell3.yaml) — re-run 'shell3 boot'; shell3.lua is no longer read", dir)
 	}
-	return "", fmt.Errorf("no shell3.lua found — run 'shell3 boot' to create one (or pass --config)")
+	return "", fmt.Errorf("no shell3.yaml in %s — run 'shell3 boot' to create one (or pass --config <dir>)", dir)
 }
 
 func fileExists(p string) bool {

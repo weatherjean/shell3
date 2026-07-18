@@ -87,7 +87,7 @@ func voiceModeOptions() []MenuOption {
 // handleVoiceCommand implements /voice (bare → menu; /voice <mode> → set).
 func (b *Bot) handleVoiceCommand(ctx context.Context, arg string) {
 	if b.media == nil || b.media.Speak == nil {
-		b.sendReply(ctx, "TTS is not configured — declare shell3.tts{} in shell3.lua")
+		b.sendReply(ctx, "TTS is not configured — add a media.tts block to shell3.yaml")
 		return
 	}
 	arg = strings.TrimSpace(arg)

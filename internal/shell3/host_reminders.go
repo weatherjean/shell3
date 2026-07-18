@@ -15,12 +15,12 @@ import (
 // These are host-injected facts that depend on SESSION-level values the system
 // prompt can't carry — the resolved config path, this session's id, and the
 // active model — so they live as standing reminders rather than in the
-// Lua-authored system prompt. SetStandingReminders replaces the set wholesale,
+// config-authored system prompt. SetStandingReminders replaces the set wholesale,
 // so this is naturally idempotent across re-runs (no prompt-splicing / strip
 // step is needed).
 //
 // Delegation needs no reminder: the allowed-subagents list (names +
-// descriptions) is baked into the `task` tool's schema (luacfg.TaskToolFor),
+// descriptions) is baked into the `task` tool's schema (config.TaskToolFor),
 // so the tool advertises itself.
 func (s *Session) applyHostReminders() {
 	var rems []string
@@ -38,5 +38,5 @@ func (s *Session) applyHostReminders() {
 // stays in one place. Returns "" when no runs dir is resolvable.
 func (s *Session) envReminder() string {
 	_, model := chat.SplitStatus(s.cfg.StatusLine)
-	return agentsetup.EnvironmentReminder(s.cfg.ConfigPath, s.cfg.RunsDir, model, s.sess.ID())
+	return agentsetup.EnvironmentReminder(s.cfg.ConfigDir, s.cfg.RunsDir, model, s.sess.ID())
 }

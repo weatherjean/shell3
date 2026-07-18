@@ -104,7 +104,7 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 		// instead of spawning a fresh run each boot.
 		resumeID := opts.ResumeID
 		if resumeID == "" && opts.ResumeLatest {
-			if id, found, err := cfg.Store.LatestSession(cfg.WorkDir, cfg.ConfigPath); err != nil {
+			if id, found, err := cfg.Store.LatestSession(cfg.WorkDir, cfg.ConfigDir); err != nil {
 				chat.LogOrNoop(cfg.Log).Warn("resume-latest lookup failed", "error", err)
 			} else if found {
 				resumeID = id
@@ -125,9 +125,9 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 			// observable rather than vanishing.
 			_, metaModel := chat.SplitStatus(cfg.StatusLine)
 			if id, err := cfg.Store.NewSession(runs.Meta{
-				Workdir:    cfg.WorkDir,
-				ConfigPath: cfg.ConfigPath,
-				Model:      metaModel,
+				Workdir:   cfg.WorkDir,
+				ConfigDir: cfg.ConfigDir,
+				Model:     metaModel,
 			}); err == nil {
 				storeID = id
 			} else {
@@ -716,9 +716,9 @@ func (s *Session) clearLocked() error {
 		}
 		_, clearModel := chat.SplitStatus(s.cfg.StatusLine)
 		if id, err := s.cfg.Store.NewSession(runs.Meta{
-			Workdir:    s.cfg.WorkDir,
-			ConfigPath: s.cfg.ConfigPath,
-			Model:      clearModel,
+			Workdir:   s.cfg.WorkDir,
+			ConfigDir: s.cfg.ConfigDir,
+			Model:     clearModel,
 		}); err == nil {
 			s.sess.SetID(id)
 		} else {
@@ -726,7 +726,7 @@ func (s *Session) clearLocked() error {
 		}
 	}
 	if s.cfg.RefreshPrompt != nil {
-		// RefreshPrompt rebuilds the bare Lua system prompt; re-assemble the host
+		// RefreshPrompt rebuilds the bare configured system prompt; re-assemble the host
 		// standing reminders for the new session id. s.mu is already held (see
 		// withIdle), guarding the dashboard's concurrent Snapshot read.
 		s.cfg.Personality.SystemPrompt = s.cfg.RefreshPrompt()

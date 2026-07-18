@@ -33,11 +33,11 @@ type AgentKnobs struct {
 	// Subagents is the active agent's allowlist of registered subagent names
 	// (its tools.subagents). internal/shell3 validates task-tool spawns
 	// against it; the schema-side listing lives in the task tool itself
-	// (luacfg.TaskToolFor).
+	// (config.TaskToolFor).
 	Subagents []string
-	// Environment is the active agent's host-reminder toggle (luacfg
-	// agent.environment, default off). internal/shell3 gates the standing
-	// Environment reminder on it.
+	// Environment is the active agent's host-reminder toggle (set by
+	// agentsetup). internal/shell3 gates the standing Environment reminder
+	// on it.
 	Environment bool
 	// ContextWindow is the active model's context window in tokens, used by
 	// the reminder tracker to emit context-usage warnings. Zero means unknown.
@@ -91,10 +91,10 @@ type Config struct {
 	StatusLine string
 	// ModeLabel is a short tag (e.g. "chat", "code") surfaced to renderers.
 	ModeLabel string
-	// ConfigPath is the resolved absolute shell3.lua path for this session; ''
+	// ConfigDir is the resolved absolute config directory for this session; ''
 	// if unknown. Recorded per session so resume can reload the right
 	// config. Agent-independent: set once at assembly, survives agent switches.
-	ConfigPath string
+	ConfigDir string
 	// ConfigWarnings are non-fatal config load issues (e.g. a skipped invalid
 	// skill file). Already logged + printed to stderr at load; also carried
 	// here so a front-end can surface them in-band, since a web dashboard user
@@ -167,7 +167,7 @@ func AgentStatusLine(rt ActiveAgent) string {
 // so the agent-derived field copy lives in exactly one place.
 //
 // It deliberately does NOT touch agent-independent fields (Store, WorkDir,
-// ConfigPath, AgentNames, SwitchAgent, OutPath, Headless, Log, RefreshPrompt,
+// ConfigDir, AgentNames, SwitchAgent, OutPath, Headless, Log, RefreshPrompt,
 // RunToolCall): those are set once at assembly and survive switches.
 func (c *Config) ApplyActiveAgent(rt ActiveAgent) {
 	c.LLM = rt.LLM
@@ -212,7 +212,7 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler) TurnConfig {
 		LLM:           cfg.LLM,
 		Personality:   cfg.Personality,
 		StatusLine:    cfg.StatusLine,
-		ConfigPath:    cfg.ConfigPath,
+		ConfigDir:     cfg.ConfigDir,
 		Handlers:      handlers,
 		Log:           LogOrNoop(cfg.Log),
 		Headless:      cfg.Headless,

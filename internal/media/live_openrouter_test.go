@@ -45,13 +45,13 @@ func TestLiveOpenRouterDescribe(t *testing.T) {
 		t.Skip("OPENROUTER_API_KEY not set")
 	}
 	script := `
-shell3.model("m", {
-  base_url = "https://openrouter.ai/api/v1",
-  api_key = "` + key + `",
-  model = "openai/gpt-4o-mini",
-})
-shell3.describe({ model = "m" })
-shell3.agent({ name="code", model="m", prompt="hi", tools={} })
+models:
+  m:
+    base_url: https://openrouter.ai/api/v1
+    api_key: "` + key + `"
+    model: openai/gpt-4o-mini
+media:
+  describe: { model: m }
 `
 	c := newTestClients(t, script, nil)
 	if c.Describe == nil {
@@ -84,19 +84,18 @@ func TestLiveOpenRouterSpeakTranscribeRoundtrip(t *testing.T) {
 		t.Skip("OPENROUTER_API_KEY not set")
 	}
 	script := `
-shell3.model("or-tts", {
-  base_url = "https://openrouter.ai/api/v1",
-  api_key = "` + key + `",
-  model = "hexgrad/kokoro-82m",
-})
-shell3.model("or-stt", {
-  base_url = "https://openrouter.ai/api/v1",
-  api_key = "` + key + `",
-  model = "openai/whisper-1",
-})
-shell3.tts({ model = "or-tts", voice = "af_bella", format = "mp3" })
-shell3.stt({ model = "or-stt", language = "en" })
-shell3.agent({ name="code", model="or-tts", prompt="hi", tools={} })
+models:
+  m:
+    base_url: https://openrouter.ai/api/v1
+    api_key: "` + key + `"
+    model: hexgrad/kokoro-82m
+  or-stt:
+    base_url: https://openrouter.ai/api/v1
+    api_key: "` + key + `"
+    model: openai/whisper-1
+media:
+  tts: { model: m, voice: af_bella, format: mp3 }
+  stt: { model: or-stt, language: en }
 `
 	c := newTestClients(t, script, nil)
 	if c.Speak == nil || c.Transcribe == nil {
@@ -143,13 +142,13 @@ func TestLiveOpenRouterGenerateImage(t *testing.T) {
 		t.Skip("OPENROUTER_API_KEY not set")
 	}
 	script := `
-shell3.model("or-img", {
-  base_url = "https://openrouter.ai/api/v1",
-  api_key = "` + key + `",
-  model = "google/gemini-3.1-flash-lite-image",
-})
-shell3.imagegen({ model = "or-img", api = "openrouter" })
-shell3.agent({ name="code", model="or-img", prompt="hi", tools={} })
+models:
+  m:
+    base_url: https://openrouter.ai/api/v1
+    api_key: "` + key + `"
+    model: google/gemini-3.1-flash-lite-image
+media:
+  imagegen: { model: m, api: openrouter }
 `
 	c := newTestClients(t, script, nil)
 	if c.Generate == nil {

@@ -38,7 +38,7 @@ func hostRemindersCfg(env bool) func() chat.Config {
 			LLM:        fakellm.New(fakellm.Script{}),
 			ModeLabel:  "code",
 			StatusLine: "openai │ gpt-x",
-			ConfigPath: "/cfg/shell3.lua",
+			ConfigDir:  "/cfg",
 			RunsDir:    "/root/.shell3_project/runs",
 			AgentKnobs: chat.AgentKnobs{Environment: env},
 			AgentNames: []string{"code"},
@@ -51,7 +51,7 @@ func hostRemindersCfg(env bool) func() chat.Config {
 func newHostRemindersRuntime(t *testing.T, mk func() chat.Config) *Runtime {
 	t.Helper()
 	rt := newTestRuntime(t, mk)
-	rt.configPath = "/cfg/shell3.lua" // ExpandConfigName returns *.lua verbatim
+	rt.configDir = "/cfg"
 	return rt
 }
 

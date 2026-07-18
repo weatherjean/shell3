@@ -7,10 +7,10 @@ already listening, the spawn just fails to bind and the first request decides.
 
 ## Codex subscription via npx
 
-    run_proxy = "npx @some/codex-proxy --port 8787",
-    base_url  = "http://localhost:8787/v1",
+    run_proxy: "npx @some/codex-proxy --port 8787"
+    base_url: http://localhost:8787/v1
 
 ## litellm
 
-    run_proxy = "litellm --config ~/.shell3/litellm.yaml --port 8787",
-    base_url  = "http://localhost:8787/v1",
+    run_proxy: "litellm --config ~/.shell3/litellm.yaml --port 8787"
+    base_url: http://localhost:8787/v1

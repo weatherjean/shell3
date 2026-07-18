@@ -15,7 +15,7 @@ import (
 
 	"github.com/openai/openai-go"
 
-	"github.com/weatherjean/shell3/internal/luacfg"
+	"github.com/weatherjean/shell3/internal/config"
 )
 
 // extForMediaType maps an OpenRouter-style image media_type to the file
@@ -72,7 +72,7 @@ func writeImageFile(data []byte, ext string) (string, error) {
 // also has a dedicated /api/v1/images endpoint, but it pre-authorizes the
 // request's worst-case token cost — ~$2 for a Gemini image model — and 402s
 // on any lower balance; the chat route only charges actual usage.)
-func newGenerator(sdk sdkFn, cfg luacfg.ImagegenConfig) func(context.Context, string, string) (string, error) {
+func newGenerator(sdk sdkFn, cfg config.ImagegenConfig) func(context.Context, string, string) (string, error) {
 	if cfg.API == "openrouter" {
 		return newOpenRouterGenerator(sdk, cfg)
 	}
@@ -135,10 +135,10 @@ func splitImageDataURL(url string) (mediaType, b64 string) {
 // openai-go SDK (whose chat types don't carry the modalities request field or
 // the images reply field). The size argument is ignored — the chat route has
 // no size parameter. The client returned by sdk is unused here — only the
-// resolved luacfg.Model (base URL, API key, model id) matters — but sdk is
+// resolved config.Model (base URL, API key, model id) matters — but sdk is
 // still called so the shared sdkOnce/once machinery spawns the model's
 // run_proxy exactly once on first use, same as every other capability.
-func newOpenRouterGenerator(sdk sdkFn, cfg luacfg.ImagegenConfig) func(context.Context, string, string) (string, error) {
+func newOpenRouterGenerator(sdk sdkFn, cfg config.ImagegenConfig) func(context.Context, string, string) (string, error) {
 	return func(ctx context.Context, prompt, _ string) (string, error) {
 		_, m := sdk(cfg.ModelRef)
 

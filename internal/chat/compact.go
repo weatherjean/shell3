@@ -185,7 +185,7 @@ func compactApply(ctx context.Context, cfg TurnConfig, sess *Session, forced boo
 	// Same Meta the front-ends write on a fresh session: the rolled session
 	// keeps the model recorded in its metadata.
 	_, metaModel := SplitStatus(cfg.StatusLine)
-	if !compactInto(summaryArgs, cfg.Store, sess, tail, cfg.Log, cfg.WorkDir, cfg.ConfigPath, metaModel) {
+	if !compactInto(summaryArgs, cfg.Store, sess, tail, cfg.Log, cfg.WorkDir, cfg.ConfigDir, metaModel) {
 		// The runs-session roll failed; history is untouched. Proceed on the
 		// un-compacted history without resetting the gauge or emitting a
 		// (misleading) compacted event.
@@ -341,7 +341,7 @@ func writeBulletSection(b *strings.Builder, tag string, items []string) {
 // still holds the full history would let the next saveHistory duplicate the tail
 // into it. Aborting keeps the on-disk history coherent; the caller proceeds on
 // the un-compacted history (compaction is best-effort).
-func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.Message, lg applog.Logger, workDir, configPath, model string) bool {
+func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.Message, lg applog.Logger, workDir, configDir, model string) bool {
 	prevSessionID := sess.id
 	// newSessionID stays prevSessionID unless the runs-session roll below
 	// succeeds; it is published into sess.id atomically with sess.messages under
@@ -355,7 +355,7 @@ func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.
 	// (not ended, still persistable) and we abort the compaction below, rather
 	// than ending a session we keep writing to and corrupting its JSONL.
 	if st != nil {
-		newID, err := st.NewSession(runs.Meta{Workdir: workDir, ConfigPath: configPath, Model: model})
+		newID, err := st.NewSession(runs.Meta{Workdir: workDir, ConfigDir: configDir, Model: model})
 		if err != nil {
 			lg.Warn("start session failed during compact; skipping compaction", "error", err)
 			return false

@@ -1,29 +1,32 @@
 # MCP servers
 
-Recipes for `shell3.mcp{}` — the tools-only MCP client (stdio + streamable
+Recipes for the `mcp:` block — the tools-only MCP client (stdio + streamable
 HTTP, official Go SDK). Reference:
-[../configuration.md#mcp-servers--shell3mcp](../configuration.md#mcp-servers--shell3mcp).
+[../configuration.md#mcp-servers](../configuration.md#mcp-servers).
 
 ## GitHub over stdio, key from `.env`
 
 Install the server binary (`brew install github-mcp-server` or grab a
-release), put `GITHUB_TOKEN=ghp_…` in `~/.shell3/.env`, then:
+release), put `GITHUB_TOKEN=ghp_…` in `~/.shell3/.env`, then in `shell3.yaml`:
 
-```lua
-shell3.mcp({
-  github = {
-    command = { "github-mcp-server", "stdio" },
-    env     = { GITHUB_PERSONAL_ACCESS_TOKEN = shell3.env.secret("GITHUB_TOKEN") },
-    -- Trim the surface: this server ships dozens of tools, and every one
-    -- costs schema tokens each turn. Allow only what you use.
-    allow   = { "search_issues", "get_issue", "list_pull_requests", "get_pull_request" },
-  },
-})
+```yaml
+mcp:
+  github:
+    command: [github-mcp-server, stdio]
+    env: { GITHUB_PERSONAL_ACCESS_TOKEN: env:GITHUB_TOKEN }
+    # Trim the surface: this server ships dozens of tools, and every one
+    # costs schema tokens each turn. Allow only what you use.
+    allow: [search_issues, get_issue, list_pull_requests, get_pull_request]
+```
 
-shell3.agent({
-  -- ...
-  tools = { bash = true, edit = true, mcp = { "github" } },
-})
+and opt the agent in (`agent.md` frontmatter):
+
+```markdown
+---
+model: main
+tools: [bash, edit]
+mcp: [github]
+---
 ```
 
 The secret goes into the server child's environment only — it never appears
@@ -31,14 +34,12 @@ in the conversation or the agent's own environment.
 
 ## A remote server over streamable HTTP
 
-```lua
-shell3.mcp({
-  linear = {
-    url     = "https://mcp.linear.app/mcp",
-    headers = { Authorization = "Bearer " .. shell3.env.secret("LINEAR_API_KEY") },
-    timeout = 30,
-  },
-})
+```yaml
+mcp:
+  linear:
+    url: https://mcp.linear.app/mcp
+    headers: { Authorization: "Bearer env:LINEAR_API_KEY" }
+    timeout: 30
 ```
 
 There is no OAuth flow: if the service only does OAuth, mint a long-lived
@@ -48,10 +49,10 @@ token in its settings UI and paste that into `.env`.
 
 Anything on npm runs without installing:
 
-```lua
-shell3.mcp({
-  everything = { command = { "npx", "-y", "@modelcontextprotocol/server-everything" } },
-})
+```yaml
+mcp:
+  everything:
+    command: [npx, -y, "@modelcontextprotocol/server-everything"]
 ```
 
 First connect pays the npx download; raise `timeout` if the default 10s is
@@ -59,17 +60,23 @@ too tight on a cold cache.
 
 ## Gate MCP calls like any other tool
 
-MCP tools hit the `on_tool_call` chain with `t.name = "mcp_<server>_<tool>"`
-and `t.command = nil`:
+MCP tools hit the tool-call hook with `name` = `mcp_<server>_<tool>` and
+`command` null — gate them by name in `hooks/tool-call.sh`:
 
-```lua
-local MCP_WRITE = shell3.regex([[^mcp_github_(create|update|delete|merge)]])
-shell3.on_tool_call(function(t)
-  if MCP_WRITE:match(t.name) then
-    if t.headless then return { block = true, reason = "write needs approval; rerun interactively" } end
-    return { ask = "GitHub write:\n" .. t.name .. "\n" .. t.args, reason = "denied" }
-  end
-end)
+```bash
+in=$(cat)
+name=$(printf '%s' "$in" | jq -r .name)
+headless=$(printf '%s' "$in" | jq -r .headless)
+case "$name" in
+  mcp_github_create*|mcp_github_update*|mcp_github_delete*|mcp_github_merge*)
+    if [ "$headless" = "true" ]; then
+      printf '{"block": true, "reason": "write needs approval; rerun interactively"}'
+    else
+      printf '{"ask": "GitHub write:\n%s", "reason": "denied"}' "$name"
+    fi
+    exit 0 ;;
+esac
+exit 0
 ```
 
 ## Checking and troubleshooting

@@ -10,47 +10,50 @@ built-in allowlist**. That's the point of a bash-first agent — it composes
 with your whole system — but treat a session the way you'd treat running a
 script someone else wrote.
 
-The single opt-in hook is `shell3.on_tool_call(fn)`. It fires before **every**
-tool (`bash`, `bash_bg`, `edit_file`, `read_media`, MCP tools as
-`mcp_<server>_<tool>`, host tools like `image_generate`) and returns
-a verdict: pass, rewrite, runner-swap, block, or ask a human (inline
-Allow/Deny buttons in Telegram). The scaffold ships its example gate
-**commented out** — a fresh config gates nothing — and, once enabled, that
-example covers only the bash family, leaving `edit_file` ungated (a config
-choice, not a hardcoded exemption). The full verdict contract, `t` fields,
-and denylist idiom are in
-[configuration.md](configuration.md#the-command-gate--on_tool_call).
+The opt-in gate is a bash hook script per agent: `hooks/tool-call.sh` for
+the main agent, `hooks/<name>.tool-call.sh` for subagent `<name>` — no
+fallback between them, so each agent is governed by exactly one script or
+none. The script runs before **every** tool (`bash`, `bash_bg`, `edit_file`,
+`read_media`, MCP tools as `mcp_<server>_<tool>`, host tools like
+`image_generate`) with the call as JSON on stdin, and prints a verdict: pass,
+rewrite, runner-swap, block, or ask a human (inline Allow/Deny buttons in
+Telegram). The scaffold ships its example gate **commented out** — a fresh
+config gates nothing — and, once enabled, that example covers only the bash
+family, leaving `edit_file` ungated (a config choice, not a hardcoded
+exemption). The full verdict contract and payload fields are in
+[configuration.md](configuration.md#the-command-gate--hookssh).
 
 **If you need hard isolation, run shell3 in a container, VM, or throwaway
-user account.** `on_tool_call` is a policy hook, not a security boundary.
+user account.** The hook is a policy gate, not a security boundary.
 
 ## What the gate does and doesn't guarantee
 
-- **Fails closed.** A handler that raises a Lua error blocks. A returned
-  table with no recognized verdict key blocks. A malformed `argv` (empty, or
-  a non-string element) blocks — never runs unwrapped.
-- **Whole-command matching closes the chaining hole.** Denylists
-  (`shell3.regex`, Go RE2, compiled at config load) match the entire
-  `t.command`, so `echo hi; rm -rf /` and `x=$(rm -rf /)` both hit
-  `rm\s+-rf`; with `(?s)`, newline-splitting can't slip past `.*` either.
+- **Fails closed.** A script that exits nonzero, prints malformed JSON, or
+  times out (10 s) blocks. A malformed `argv` (empty, or an empty element)
+  blocks — never runs unwrapped.
+- **Match the whole command.** Write patterns against the entire `command`
+  string, so `echo hi; rm -rf /` and `x=$(rm -rf /)` still hit an `rm -rf`
+  pattern — chaining can't hide a flagged fragment.
 - **Headless sessions deny on ask.** Subagents and cron jobs have no human
-  attached, so an `{ask=…}` verdict auto-denies with its `reason` (which
-  flows back to the parent agent in the completion notice). Handlers see
-  `t.headless` and can return a tailored `{block=…}` instead. Unanswered asks
-  deny after the timeout (default 300 s). `{block=true}` never prompts.
+  attached, so an ask verdict auto-denies with its `reason` (which flows back
+  to the parent agent in the completion notice). Scripts see `headless` in
+  the payload and can print a tailored block instead. Unanswered asks deny
+  after the timeout (default 300 s). A block verdict never prompts.
+- **Per-agent, no inheritance.** A subagent with no hook file runs ungated —
+  the main agent's script never applies to it. Give every subagent its own
+  script (even a strict three-line allowlist) if it must be constrained.
 - **It's a guardrail, not a boundary.** A determined model can phrase a
   destructive command your regexes don't catch. Pair with real isolation for
   anything that must not escape.
 
-## Output redaction — `on_tool_result`
+## Output redaction — `tool-result.sh`
 
-`shell3.on_tool_result(fn)` runs after every tool; return `{ output = "…" }`
-to replace what the model sees (e.g. redact secrets). Errors here fail
-**open** — a broken rewriter must not destroy tool output — so a throwing
-redactor lets the *unredacted* output through: keep redactors simple and
-total. Background jobs are out of scope — the hook sees only the "started
-job…" pointer, not the streamed output — so redact at the source if a
-background command can emit secrets.
+`hooks/tool-result.sh` (and `hooks/<name>.tool-result.sh`) runs after every
+tool; print `{"output": "…"}` to replace what the model sees (e.g. redact
+secrets). A failing redactor fails **closed**: the output is replaced by an
+error notice, never passed through unredacted. Background jobs are out of
+scope — the hook sees only the "started job…" pointer, not the streamed
+output — so redact at the source if a background command can emit secrets.
 
 ## Reminder-envelope hardening
 
@@ -64,8 +67,8 @@ Structural, always on, not configurable.
 
 ## Secrets
 
-Secrets live in a plain-text `.env` beside `shell3.lua`, read from Lua via
-`shell3.env.secret("KEY")`:
+Secrets live in a plain-text `.env` beside `shell3.yaml`, referenced from
+YAML as `env:KEY`:
 
 - **Never commit `.env`.** The shipped `.gitignore` excludes it.
 - **Never read or display credential files** — this applies to you and to the
@@ -77,7 +80,7 @@ Secrets live in a plain-text `.env` beside `shell3.lua`, read from Lua via
   inside its own process, so the secret never appears in the conversation, a
   command string, or the agent's environment. Enforce the perimeter with the
   gate example's `.env` deny (block commands whose text touches `.env`) and
-  an `on_tool_result` redactor as backstop. On a multi-user box the usual
+  a `tool-result.sh` redactor as backstop. On a multi-user box the usual
   caveat applies: a process's environment and arguments are readable by
   same-user processes, so treat secrets as readable by anything that user
   runs.

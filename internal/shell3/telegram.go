@@ -3,19 +3,19 @@ package shell3
 import (
 	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/chat"
-	"github.com/weatherjean/shell3/internal/luacfg"
+	"github.com/weatherjean/shell3/internal/config"
 )
 
 // TelegramConfig, DashboardConfig, and CronJob are the parsed config blocks as
-// luacfg produces them. Aliases (not mirrors): the Runtime hands the parsed
-// values straight through, so a field added in luacfg is immediately visible
+// internal/config produces them. Aliases (not mirrors): the Runtime hands the parsed
+// values straight through, so a field added in internal/config is immediately visible
 // here — no hand-written copier to forget.
 type (
-	TelegramConfig  = luacfg.TelegramConfig
-	DashboardConfig = luacfg.DashboardConfig
-	WebConfig       = luacfg.WebConfig
-	CronJob         = luacfg.CronJob
-	Heartbeat       = luacfg.Heartbeat
+	TelegramConfig  = config.TelegramConfig
+	DashboardConfig = config.DashboardConfig
+	WebConfig       = config.WebConfig
+	CronJob         = config.CronJob
+	Heartbeat       = config.Heartbeat
 )
 
 // sessionConfigFrom adapts Parts.SessionConfig to the Runtime's per-session

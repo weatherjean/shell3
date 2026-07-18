@@ -1,6 +1,6 @@
 // Package persona holds the slim runtime carrier for an agent's system
 // prompt, tool schema, and request parameters. Loading and templating live in
-// internal/luacfg; this package is just the data structure that the chat
+// internal/config; this package is just the data structure that the chat
 // session and front-ends read from.
 package persona
 

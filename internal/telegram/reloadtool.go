@@ -9,12 +9,12 @@ import (
 )
 
 // registerReloadTool gives the agent a `reload` tool to apply its own edits to
-// shell3.lua. It records a pending reload and returns immediately; the host
+// the config. It records a pending reload and returns immediately; the host
 // applies it at end-of-turn (a mid-turn reload would tear down the running turn).
 func (b *Bot) registerReloadTool() {
 	_ = b.sess.RegisterHostTool(shell3.HostTool{
 		Name: "reload",
-		Description: "Apply your edits to shell3.lua by reloading the config. " +
+		Description: "Apply your edits to the config directory by reloading the config. " +
 			"Edit the file first (add/modify a model, agent, tool, skill, or cron job), then call this. " +
 			"The reload is validated and applied after this turn ends; if the file is invalid the old config keeps running and you'll see the error.",
 		Parameters: map[string]any{"type": "object", "properties": map[string]any{}},

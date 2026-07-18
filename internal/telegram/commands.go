@@ -19,7 +19,7 @@ func BotCommands() []Command {
 		{"compact", "Summarize old context to free tokens"},
 		{"stop", "Stop the current turn"},
 		{"run", "Run a scheduled job now: /run <name>"},
-		{"reload", "Reload shell3.lua config without restarting"},
+		{"reload", "Reload the config without restarting"},
 		{"voice", "Voice replies: /voice off|inbound|always"},
 	}
 }

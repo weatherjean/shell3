@@ -21,7 +21,7 @@ type ReloadResult struct {
 // for self-reconfiguration (the /reload command and the agent reload tool).
 //
 // Contract:
-//   - Validate first: a new Parts is built from the file (BuildParts → luacfg
+//   - Validate first: a new Parts is built from the config dir (BuildParts → config
 //     validation). On ANY error the new Parts is discarded and the running
 //     config is left untouched — Reload returns the error and changes nothing.
 //   - Idle only: the CALLER must ensure no live session has a turn in flight
@@ -69,7 +69,7 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 		homeDir, _ = os.UserHomeDir()
 	}
 	newParts, newCleanup, err := agentsetup.BuildParts(agentsetup.Options{
-		ConfigPath: rt.configPath, CWD: rt.workDir, HomeDir: homeDir,
+		ConfigDir: rt.configDir, CWD: rt.workDir, HomeDir: homeDir,
 	})
 	if err != nil {
 		if newCleanup != nil {
@@ -101,7 +101,7 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 	for _, s := range rt.sessions {
 		// Enforce the idle-only contract here rather than trusting every caller:
 		// swapping s.cfg under a live turn would race the turn's config reads and
-		// close the Lua VM under an active hook. Fail before touching anything.
+		// swap the config under an active hook. Fail before touching anything.
 		if s.isBusy() {
 			newCleanup()
 			return ReloadResult{}, fmt.Errorf("reload: session %q has a turn in flight", s.name)

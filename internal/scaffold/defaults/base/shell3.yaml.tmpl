@@ -1,0 +1,99 @@
+# shell3.yaml — wiring, written by `shell3 boot`. Edit freely; recipes live in
+# the shell3 repo under docs/cookbook/. Secrets live in .env beside this file
+# (never commit it) and are referenced as env:KEY_NAME.
+#
+# The rest of the config is files in this directory:
+#   agent.md           the agent (frontmatter + prompt)
+#   agents/<name>.md   subagents the agent can spawn via the task tool
+#   skills/<name>.md   skills (markdown with a frontmatter description)
+#   hooks/*.sh         tool-call/-result gate scripts (see hooks/tool-call.sh)
+#   cron/<name>.md     scheduled jobs; heartbeat.md — periodic check-ins
+
+models:
+  {{.Name | yamlkey}}:
+    base_url: {{.BaseURL | yamlstr}}
+    api_key: env:{{.EnvKey}}          # {{.EnvKey}} in .env
+    model: {{.Model | yamlstr}}
+    # context_window: your model's real token budget (wrong values skew
+    # context-usage reminders and compaction).
+    context_window: {{.ContextWindow}}
+    # compact_at: prompt-token threshold for host-enforced auto-compaction —
+    # shell3 summarizes the head and keeps a verbatim recent tail. 0/unset = off.
+    compact_at: {{.CompactAt}}
+    # keep_recent: verbatim tail kept across a compaction (default ~compact_at*0.33).
+    # keep_recent: 30000
+    # prune_at: lower threshold; cheaply stubs old tool outputs, no LLM call
+    # (default ~compact_at*0.6; 0 disables).
+    # prune_at: 60000
+    # reasoning: medium              # if your model supports reasoning effort
+    # extra: { reasoning_split: true }  # provider-specific knobs, sent verbatim
+    # run_proxy: a shell command auto-started the first time an agent uses this
+    # model — a local proxy in front of base_url. Log: ~/.shell3/proxy-<name>.log.
+{{if .Proxy}}    run_proxy: {{.Proxy | yamlstr}}
+{{else}}    # run_proxy: "npx @some/codex-proxy --port 8787"
+{{end}}
+# Media (optional): voice notes in/out, image describe/generate — all
+# OpenAI-compatible. One free Groq key covers STT + TTS.
+#  groq-whisper:
+#    base_url: https://api.groq.com/openai/v1
+#    api_key: env:GROQ_API_KEY
+#    model: whisper-large-v3-turbo
+
+{{if .Vision}}media:
+  # Inbound Telegram images are captioned by the main model (it has vision), so
+  # the agent sees "[image: …]" immediately, no read_media round-trip. Point
+  # this at a cheaper vision model later if you like.
+  describe: { model: {{.Name | yamlkey}} }
+  # stt: { model: groq-whisper }              # voice notes → text
+  # tts: { model: groq-tts, voice: Fritz-PlayAI, mode: inbound }
+  # imagegen: { model: some-image-model, size: 1024x1024 }
+  #   (for OpenRouter image models add api: openrouter; every agent and
+  #    subagent gets the image_generate tool, files land in ~/.shell3/media/)
+{{else}}# media:
+#   describe: { model: some-vision-model }    # caption inbound images
+#   stt: { model: groq-whisper }              # voice notes → text
+#   tts: { model: groq-tts, voice: Fritz-PlayAI, mode: inbound }
+#   imagegen: { model: some-image-model, size: 1024x1024 }
+#     (for OpenRouter image models add api: openrouter; every agent and
+#      subagent gets the image_generate tool, files land in ~/.shell3/media/)
+{{end}}
+
+# MCP servers (optional): tools-only client, stdio + streamable HTTP. Declare
+# once here, then opt in per agent in its frontmatter: mcp: [github] (or
+# mcp: all); omitted = no MCP tools. Names surface as mcp_<server>_<tool> and
+# pass through the tool-call hook like any tool (command is null — gate on name).
+# `shell3 health` checks every server; docs: docs/configuration.md.
+# mcp:
+#   github:
+#     command: [github-mcp-server, stdio]
+#     env: { GITHUB_TOKEN: env:GITHUB_TOKEN }
+#   linear:
+#     url: https://mcp.linear.app/mcp
+#     headers: { Authorization: "Bearer env:LINEAR_KEY" }
+#     allow: [search_issues, get_issue]
+
+# ---------------------------------------------------------------------------
+# Telegram host  (run: shell3 telegram)
+# ---------------------------------------------------------------------------
+# chat_id is the single chat the bot answers. The dashboard Mini App needs a
+# public https URL; shell3 wires the chat's menu button to it automatically:
+#   tunnel: a command spawned at start ({addr} = dashboard addr) whose printed
+#           https URL is picked up. cloudflared must be installed, or the
+#           dashboard stays local-only (see ~/.shell3/tunnel.log).
+#   url:    a fixed https address you run yourself; overrides tunnel.
+telegram:
+  token: env:TELEGRAM_BOT_TOKEN       # TELEGRAM_BOT_TOKEN in .env
+  chat_id: {{.ChatID | yamlstr}}
+  dashboard:
+    addr: 127.0.0.1:8765
+    tunnel: "cloudflared tunnel --url http://{addr}"
+
+# Standalone web front-end  (run: shell3 web) — Telegram-free fallback:
+# the same dashboard plus a simple chat, gated by a shared secret instead of
+# Telegram. `shell3 boot` generates SHELL3_WEB_SECRET in .env, and `shell3
+# web` prints the ready-to-open ?key= URL at startup (rotate by editing .env).
+# Run one front-end at a time (telegram OR web); both own the same history.
+web:
+  addr: 127.0.0.1:8787
+  secret: env:SHELL3_WEB_SECRET
+  # tunnel: "cloudflared tunnel --url http://{addr}"   # optional public URL

@@ -14,7 +14,6 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/telegram-mini-apps/init-data-golang v1.5.0
 	github.com/yuin/goldmark v1.8.2
-	github.com/yuin/gopher-lua v1.1.2
 	golang.org/x/image v0.44.0
 	golang.org/x/term v0.44.0
 	gopkg.in/yaml.v3 v3.0.1

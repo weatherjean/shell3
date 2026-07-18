@@ -12,11 +12,11 @@ import (
 
 // registerStatusTool gives the agent a `status` tool reporting where its config
 // lives and what is currently active, the orientation a self-editing agent needs
-// before changing shell3.lua and calling reload. Telegram-only host tool.
+// before changing the config and calling reload. Telegram-only host tool.
 func (b *Bot) registerStatusTool() {
 	_ = b.sess.RegisterHostTool(shell3.HostTool{
 		Name: "status",
-		Description: "Report your runtime status: the absolute path of the shell3.lua " +
+		Description: "Report your runtime status: the absolute path of the config directory " +
 			"config file you can edit, your active agent and the agents available, the " +
 			"model, the working directory, and any scheduled cron jobs. Call this to find " +
 			"your config file before editing it (see the self-evolve skill).",
@@ -28,7 +28,7 @@ func (b *Bot) registerStatusTool() {
 func (b *Bot) statusToolHandler(ctx context.Context, argsJSON string) (string, error) {
 	var sb strings.Builder
 
-	cfgPath, err := b.rt.ConfigPath()
+	cfgPath, err := b.rt.ConfigDir()
 	if err != nil {
 		cfgPath = "(could not resolve — run 'shell3 boot'?)"
 	}

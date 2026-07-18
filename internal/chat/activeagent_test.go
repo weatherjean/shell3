@@ -11,7 +11,7 @@ func TestApplyActiveAgentCopiesAllAgentFields(t *testing.T) {
 	// Seed with agent-independent fields that must survive a switch unchanged.
 	cfg := Config{
 		WorkDir:    "/work",
-		ConfigPath: "/cfg/shell3.lua",
+		ConfigDir:  "/cfg/shell3.lua",
 		AgentNames: []string{"build", "plan"},
 		Headless:   true,
 	}
@@ -57,7 +57,7 @@ func TestApplyActiveAgentCopiesAllAgentFields(t *testing.T) {
 	}
 
 	// Agent-independent fields must be untouched by a switch.
-	if cfg.WorkDir != "/work" || cfg.ConfigPath != "/cfg/shell3.lua" || !cfg.Headless {
+	if cfg.WorkDir != "/work" || cfg.ConfigDir != "/cfg/shell3.lua" || !cfg.Headless {
 		t.Errorf("switch clobbered agent-independent fields: %+v", cfg)
 	}
 	if len(cfg.AgentNames) != 2 {

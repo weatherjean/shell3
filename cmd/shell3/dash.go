@@ -22,7 +22,7 @@ import (
 // only: with auth off it exposes history + files, so it must never face the
 // network.
 func newDashCommand() *cobra.Command {
-	var configPath, addr string
+	var configDir, addr string
 	cmd := &cobra.Command{
 		Use:   "dash",
 		Short: "Serve the dashboard locally with NO auth (dev/troubleshooting)",
@@ -31,7 +31,7 @@ func newDashCommand() *cobra.Command {
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
-			rt, resolved, err := openRuntime(ctx, configPath)
+			rt, resolved, err := openRuntime(ctx, configDir)
 			if err != nil {
 				return err
 			}
@@ -62,7 +62,7 @@ func newDashCommand() *cobra.Command {
 			return startDashboard(ctx, addr, srv.Handler())
 		},
 	}
-	addConfigFlag(cmd, &configPath)
+	addConfigFlag(cmd, &configDir)
 	cmd.Flags().StringVar(&addr, "addr", "", "Listen address (default: the config's dashboard addr, else 127.0.0.1:8765)")
 	return cmd
 }

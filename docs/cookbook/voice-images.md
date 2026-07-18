@@ -1,30 +1,35 @@
 # Voice + images over Telegram
 
-Four optional top-level blocks — `shell3.stt`, `shell3.tts`, `shell3.describe`,
-`shell3.imagegen` — each point at a `shell3.model` by name. None are declared
-by the base scaffold; the block below is a commented-out starting point at
-the bottom of the model section in `shell3.lua`. Full reference:
-[configuration.md](../configuration.md#voice--images--shell3stt--tts--describe--imagegen).
+Four optional blocks under `media:` in `shell3.yaml` — `stt`, `tts`,
+`describe`, `imagegen` — each point at a model by name. The scaffold ships
+them as commented hints. Full reference:
+[configuration.md](../configuration.md#voice--images--media).
 
 ## Groq quickstart (one free key, STT + TTS)
 
 Groq's free tier serves an OpenAI-compatible transcription model and a
 text-to-speech model, so one key covers voice in and out:
 
-```lua
-shell3.model("groq-whisper", { base_url = "https://api.groq.com/openai/v1",
-  api_key = shell3.env.secret("GROQ_API_KEY"), model = "whisper-large-v3-turbo" })
-shell3.model("groq-tts", { base_url = "https://api.groq.com/openai/v1",
-  api_key = shell3.env.secret("GROQ_API_KEY"), model = "playai-tts" })
+```yaml
+models:
+  groq-whisper:
+    base_url: https://api.groq.com/openai/v1
+    api_key: env:GROQ_API_KEY
+    model: whisper-large-v3-turbo
+  groq-tts:
+    base_url: https://api.groq.com/openai/v1
+    api_key: env:GROQ_API_KEY
+    model: playai-tts
 
-shell3.stt{ model = "groq-whisper" }                              -- voice notes → text
-shell3.tts{ model = "groq-tts", voice = "Fritz-PlayAI", mode = "inbound" }
+media:
+  stt: { model: groq-whisper }                    # voice notes → text
+  tts: { model: groq-tts, voice: Fritz-PlayAI, mode: inbound }
 ```
 
 Add `GROQ_API_KEY=...` to `.env`, `/reload`, and send the bot a voice note —
-it replies with a `📝 "…"` transcript, runs the turn, and (because `mode =
-"inbound"`) speaks the reply back as a voice note. Switch modes any time with
-`/voice off|inbound|always`.
+it replies with a `📝 "…"` transcript, runs the turn, and (because
+`mode: inbound`) speaks the reply back as a voice note. Switch modes any time
+with `/voice off|inbound|always`.
 
 ## OpenRouter variant (one key for STT + TTS + describe)
 
@@ -34,29 +39,41 @@ image `describe` fallback. One caveat: OpenRouter's TTS emits `mp3`/`pcm`
 only (no opus), so spoken replies arrive as audio files rather than round
 Telegram voice bubbles:
 
-```lua
-shell3.model("or-whisper", { base_url = "https://openrouter.ai/api/v1",
-  api_key = shell3.env.secret("OPENROUTER_API_KEY"), model = "openai/whisper-1" })
-shell3.model("or-tts", { base_url = "https://openrouter.ai/api/v1",
-  api_key = shell3.env.secret("OPENROUTER_API_KEY"), model = "hexgrad/kokoro-82m" })
-shell3.model("or-vision", { base_url = "https://openrouter.ai/api/v1",
-  api_key = shell3.env.secret("OPENROUTER_API_KEY"), model = "openai/gpt-4o-mini" })
+```yaml
+models:
+  or-whisper:
+    base_url: https://openrouter.ai/api/v1
+    api_key: env:OPENROUTER_API_KEY
+    model: openai/whisper-1
+  or-tts:
+    base_url: https://openrouter.ai/api/v1
+    api_key: env:OPENROUTER_API_KEY
+    model: hexgrad/kokoro-82m
+  or-vision:
+    base_url: https://openrouter.ai/api/v1
+    api_key: env:OPENROUTER_API_KEY
+    model: openai/gpt-4o-mini
 
-shell3.stt{ model = "or-whisper" }
-shell3.tts{ model = "or-tts", voice = "af_bella", format = "mp3", mode = "inbound" }
-shell3.describe{ model = "or-vision" }   -- only if your main model can't see images
+media:
+  stt: { model: or-whisper }
+  tts: { model: or-tts, voice: af_bella, format: mp3, mode: inbound }
+  describe: { model: or-vision }   # only if your main model can't see images
 ```
 
 OpenRouter doesn't serve the OpenAI `images/generations` shape — its image
 models generate through chat completions with `modalities=["image","text"]`.
-`shell3.imagegen{}` speaks that dialect via `api = "openrouter"` — no need
-for a different provider:
+`media.imagegen` speaks that dialect via `api: openrouter` — no need for a
+different provider:
 
-```lua
-shell3.model("or-image", { base_url = "https://openrouter.ai/api/v1",
-  api_key = shell3.env.secret("OPENROUTER_API_KEY"), model = "google/gemini-2.5-flash-image" })
+```yaml
+models:
+  or-image:
+    base_url: https://openrouter.ai/api/v1
+    api_key: env:OPENROUTER_API_KEY
+    model: google/gemini-2.5-flash-image
 
-shell3.imagegen{ model = "or-image", api = "openrouter" }
+media:
+  imagegen: { model: or-image, api: openrouter }
 ```
 
 The image comes back base64 on the reply message, and the saved file's
@@ -70,9 +87,10 @@ wired up — not a current feature.)
 
 ## Images: describe in, generate out
 
-```lua
-shell3.describe{ model = "some-vision-model" }   -- only if your main model can't see images
-shell3.imagegen{ model = "some-image-model", size = "1024x1024" }
+```yaml
+media:
+  describe: { model: some-vision-model }   # only if your main model can't see images
+  imagegen: { model: some-image-model, size: 1024x1024 }
 ```
 
 `describe` is only useful for a **text-only** main model — a vision-capable
@@ -81,9 +99,9 @@ every agent: the main agent **and each subagent** get an
 `image_generate{prompt, size?}` tool under every front-end (telegram, web,
 dev). It saves the image to `~/.shell3/media/` and returns the path; a
 subagent is told to include the path in its report so the main agent can
-deliver it. Want to keep a subagent from generating? Gate it in
-`shell3.on_tool_call` like any other tool (`t.name == "image_generate"`,
-`t.headless` is true for subagents and cron jobs).
+deliver it. Want to keep a subagent from generating? Gate it in that
+subagent's hook script like any other tool (`name` is `image_generate`;
+`headless` is true for subagents and cron jobs).
 
 All media — inbound Telegram uploads (`tg-*`) and generated images (`img-*`)
 — lives in `~/.shell3/media/`, so everything the agent has seen or made keeps
@@ -102,7 +120,7 @@ a screenshot with small text.
 
 ## Reading PDFs and video: `read_media`
 
-`read_media` (needs `tools = { media = true }`) also accepts PDFs (`.pdf`, up
+`read_media` (needs `media` in the agent's `tools`) also accepts PDFs (`.pdf`, up
 to 20 MB) and video (`.mp4`/`.webm`/`.mov`, up to 40 MB), alongside the usual
 images and audio. PDFs go over an OpenAI-compatible `file` content part, so
 they work against OpenAI or OpenRouter alike. Video goes over a `video_url`

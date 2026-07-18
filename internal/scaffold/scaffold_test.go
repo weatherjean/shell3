@@ -6,8 +6,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weatherjean/shell3/internal/luacfg"
+	"github.com/weatherjean/shell3/internal/config"
 )
+
+// writeEnv writes the .env the rendered config references (empty values are
+// fine — api_key is optional under a proxy setup).
+func writeEnv(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("MAIN_API_KEY=\nTELEGRAM_BOT_TOKEN=\nSHELL3_WEB_SECRET=s\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestRenderBaseConfig(t *testing.T) {
 	dir := t.TempDir()
@@ -15,41 +24,37 @@ func TestRenderBaseConfig(t *testing.T) {
 	if err := RenderBaseConfig(dir, v, false); err != nil {
 		t.Fatalf("RenderBaseConfig: %v", err)
 	}
-	cfg, err := os.ReadFile(filepath.Join(dir, "shell3.lua"))
+	cfg, err := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
 	if err != nil {
-		t.Fatalf("read shell3.lua: %v", err)
+		t.Fatalf("read shell3.yaml: %v", err)
 	}
 	for _, want := range []string{
-		`shell3.model("main"`,
-		`base_url       = "http://localhost:8787/v1"`,
-		`shell3.env.secret("MAIN_API_KEY")`,
-		`model          = "kimi-k2.6"`,
-		`name  = "code"`,
-		`-- run_proxy   = "npx`,
+		"  main:",
+		`base_url: "http://localhost:8787/v1"`,
+		"api_key: env:MAIN_API_KEY",
+		`model: "kimi-k2.6"`,
+		`# run_proxy: "npx`,
+		`tunnel: "cloudflared tunnel --url http://{addr}"`,
 	} {
 		if !strings.Contains(string(cfg), want) {
-			t.Errorf("shell3.lua missing %q", want)
+			t.Errorf("shell3.yaml missing %q", want)
 		}
 	}
-	if !strings.Contains(string(cfg), "subagents") {
-		t.Error("rendered code agent should enable subagents")
-	}
-	if !strings.Contains(string(cfg), `tunnel  = "cloudflared tunnel --url http://{addr}"`) {
-		t.Error("rendered dashboard should default to the cloudflared tunnel")
-	}
-	if !strings.Contains(string(cfg), "shell3.subagent(") {
-		t.Error("rendered config should declare an example subagent via shell3.subagent(")
-	}
-	if !strings.Contains(string(cfg), "shell3.on_tool_call") {
-		t.Error("rendered config should document the shell3.on_tool_call command gate")
-	}
 	if strings.Contains(string(cfg), "{{") {
-		t.Errorf("shell3.lua still contains an unrendered template delimiter")
+		t.Errorf("shell3.yaml still contains an unrendered template delimiter")
+	}
+	agentMD, err := os.ReadFile(filepath.Join(dir, "agent.md"))
+	if err != nil {
+		t.Fatalf("read agent.md: %v", err)
+	}
+	if !strings.Contains(string(agentMD), "model: main") {
+		t.Error("agent.md frontmatter should reference the model")
 	}
 	for _, p := range []string{
-		"lib/skills/brainstorming.md", "lib/skills/history.md",
-		"lib/skills/self-evolve.md", "lib/skills/browser.md",
-		"lib/skills/scripting.md",
+		"agents/explorer.md",
+		"hooks/tool-call.sh", "hooks/explorer.tool-call.sh",
+		"skills/brainstorming.md", "skills/history.md",
+		"skills/self-evolve.md", "skills/browser.md", "skills/scripting.md",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
 			t.Errorf("missing %s: %v", p, err)
@@ -64,10 +69,10 @@ func TestRenderBaseConfigContextWindow(t *testing.T) {
 		if err := RenderBaseConfig(dir, v, false); err != nil {
 			t.Fatalf("RenderBaseConfig: %v", err)
 		}
-		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.lua"))
-		for _, want := range []string{"context_window = 200000", "compact_at     = 150000"} {
+		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
+		for _, want := range []string{"context_window: 200000", "compact_at: 150000"} {
 			if !strings.Contains(string(cfg), want) {
-				t.Errorf("shell3.lua missing %q", want)
+				t.Errorf("shell3.yaml missing %q", want)
 			}
 		}
 	})
@@ -78,11 +83,11 @@ func TestRenderBaseConfigContextWindow(t *testing.T) {
 		if err := RenderBaseConfig(dir, v, false); err != nil {
 			t.Fatalf("RenderBaseConfig: %v", err)
 		}
-		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.lua"))
+		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
 		// DefaultContextWindow (128000) and 80% of it (102400).
-		for _, want := range []string{"context_window = 128000", "compact_at     = 102400"} {
+		for _, want := range []string{"context_window: 128000", "compact_at: 102400"} {
 			if !strings.Contains(string(cfg), want) {
-				t.Errorf("shell3.lua missing defaulted %q", want)
+				t.Errorf("shell3.yaml missing defaulted %q", want)
 			}
 		}
 	})
@@ -95,17 +100,13 @@ func TestRenderBaseConfigVision(t *testing.T) {
 		if err := RenderBaseConfig(dir, v, false); err != nil {
 			t.Fatalf("RenderBaseConfig: %v", err)
 		}
-		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.lua"))
-		for _, want := range []string{
-			`shell3.describe{ model = "main" }`,
-			"media             = true,",
-		} {
-			if !strings.Contains(string(cfg), want) {
-				t.Errorf("shell3.lua missing %q", want)
-			}
+		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
+		if !strings.Contains(string(cfg), "describe: { model: main }") {
+			t.Error("vision config should wire media.describe to the main model")
 		}
-		if strings.Contains(string(cfg), "media             = false") {
-			t.Error("vision config must not disable the media tool")
+		agentMD, _ := os.ReadFile(filepath.Join(dir, "agent.md"))
+		if !strings.Contains(string(agentMD), "tools: [bash, bash_bg, edit, media]") {
+			t.Error("vision agent.md should enable the media tool")
 		}
 	})
 
@@ -115,15 +116,13 @@ func TestRenderBaseConfigVision(t *testing.T) {
 		if err := RenderBaseConfig(dir, v, false); err != nil {
 			t.Fatalf("RenderBaseConfig: %v", err)
 		}
-		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.lua"))
-		if !strings.Contains(string(cfg), "media             = false,") {
-			t.Error("no-vision config should render media = false")
+		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
+		if !strings.Contains(string(cfg), "#   describe: { model: some-vision-model }") {
+			t.Error("no-vision config should keep media.describe as a commented hint")
 		}
-		if !strings.Contains(string(cfg), "-- shell3.describe{") {
-			t.Error("no-vision config should keep shell3.describe as a commented hint")
-		}
-		if strings.Contains(string(cfg), "\nshell3.describe{") {
-			t.Error("no-vision config must not activate shell3.describe")
+		agentMD, _ := os.ReadFile(filepath.Join(dir, "agent.md"))
+		if !strings.Contains(string(agentMD), "tools: [bash, bash_bg, edit]") {
+			t.Error("no-vision agent.md should not enable the media tool")
 		}
 	})
 
@@ -134,16 +133,17 @@ func TestRenderBaseConfigVision(t *testing.T) {
 		if err := RenderBaseConfig(dir, v, false); err != nil {
 			t.Fatalf("RenderBaseConfig: %v", err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("MAIN_API_KEY=\nBRAVE_API_KEY=\nTELEGRAM_BOT_TOKEN=\nSHELL3_WEB_SECRET=s\n"), 0600); err != nil {
-			t.Fatal(err)
-		}
-		c, err := luacfg.Load(filepath.Join(dir, "shell3.lua"))
+		writeEnv(t, dir)
+		c, err := config.Load(dir)
 		if err != nil {
 			t.Fatalf("vision config failed to load: %v", err)
 		}
 		defer c.Close()
 		if len(c.Warnings()) != 0 {
 			t.Errorf("vision config loaded with warnings: %v", c.Warnings())
+		}
+		if c.Describe() == nil || c.Describe().ModelRef != "main" {
+			t.Errorf("describe = %+v, want model main", c.Describe())
 		}
 	})
 }
@@ -154,15 +154,15 @@ func TestRenderBaseConfigWithProxy(t *testing.T) {
 	if err := RenderBaseConfig(dir, v, false); err != nil {
 		t.Fatalf("RenderBaseConfig: %v", err)
 	}
-	cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.lua"))
-	if !strings.Contains(string(cfg), `run_proxy      = "npx codex-proxy --port 8787"`) {
-		t.Errorf("proxy not wired into shell3.lua:\n%s", cfg)
+	cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
+	if !strings.Contains(string(cfg), `run_proxy: "npx codex-proxy --port 8787"`) {
+		t.Errorf("proxy not wired into shell3.yaml:\n%s", cfg)
 	}
 }
 
 // TestRenderedConfigLoads renders the base config, supplies the .env secrets it
-// references, and loads it through the real luacfg loader — verifying the
-// shipped template + lib modules parse and produce the expected agent/tool/skill
+// references, and loads it through the real config loader — verifying the
+// shipped templates + files parse and produce the expected agent/tool/skill
 // shape. This is the canonical "does our default config work" test.
 func TestRenderedConfigLoads(t *testing.T) {
 	dir := t.TempDir()
@@ -172,11 +172,9 @@ func TestRenderedConfigLoads(t *testing.T) {
 	}
 	// Empty MAIN_API_KEY mirrors a proxy setup (e.g. run_proxy handles auth):
 	// the config must still load — api_key is optional.
-	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("MAIN_API_KEY=\nBRAVE_API_KEY=\nTELEGRAM_BOT_TOKEN=\nSHELL3_WEB_SECRET=s\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	writeEnv(t, dir)
 
-	c, err := luacfg.Load(filepath.Join(dir, "shell3.lua"))
+	c, err := config.Load(dir)
 	if err != nil {
 		t.Fatalf("rendered config failed to load with empty api_key: %v", err)
 	}
@@ -185,18 +183,14 @@ func TestRenderedConfigLoads(t *testing.T) {
 	if len(c.Models) < 1 {
 		t.Errorf("expected >= 1 model, got %d", len(c.Models))
 	}
-	agents := c.Agents()
-	if len(agents) != 1 {
-		t.Fatalf("expected 1 agent, got %d", len(agents))
+	a := c.FirstAgent()
+	if a.Name != "agent" {
+		t.Errorf("agent: want %q, got %q", "agent", a.Name)
 	}
-	if agents[0].Name != "code" {
-		t.Errorf("agent: want %q, got %q", "code", agents[0].Name)
-	}
-	// The agent's skills come from scanning lib/skills/ (dir-based, no Lua
-	// declarations); the load must be warning-free — a skipped skill file in
-	// the shipped scaffold is a bug.
+	// The agent's skills come from scanning skills/; the load must be
+	// warning-free — a skipped skill file in the shipped scaffold is a bug.
 	got := map[string]bool{}
-	for _, s := range agents[0].Skills {
+	for _, s := range a.Skills {
 		got[s.Name] = true
 	}
 	for _, want := range []string{"brainstorming", "browser", "history", "self-evolve", "scripting"} {
@@ -204,34 +198,22 @@ func TestRenderedConfigLoads(t *testing.T) {
 			t.Errorf("scaffold skill %q missing from agent (got %v)", want, got)
 		}
 	}
-	if len(agents[0].Skills) != 5 {
-		t.Errorf("expected 5 scaffold skills, got %d", len(agents[0].Skills))
+	if len(a.Skills) != 5 {
+		t.Errorf("expected 5 scaffold skills, got %d", len(a.Skills))
 	}
 	if len(c.Warnings()) != 0 {
 		t.Errorf("scaffold config loaded with warnings: %v", c.Warnings())
 	}
-	// Subagents are a separate registry.
+	// Subagents are a separate registry; the shipped tree registers explorer,
+	// and the main agent's allowlist is inferred from agents/.
 	subs := c.Subagents()
 	if len(subs) != 1 || subs[0].Name != "explorer" {
 		t.Fatalf("expected one registered subagent [explorer], got %v", subs)
 	}
-	if _, ok := c.SubagentByName("explorer"); !ok {
-		t.Error("explorer must be in the subagent registry")
+	if len(a.Subagents) != 1 || a.Subagents[0] != "explorer" {
+		t.Errorf("agent Subagents = %v, want [explorer]", a.Subagents)
 	}
-	for _, a := range agents {
-		if a.Name == "explorer" {
-			t.Error("explorer must NOT appear in Agents()")
-		}
-	}
-	// The code agent opts into explorer.
-	if len(agents[0].Subagents) != 1 || agents[0].Subagents[0] != "explorer" {
-		t.Errorf("code agent Subagents = %v, want [explorer]", agents[0].Subagents)
-	}
-	// Each subagent the code agent may delegate to resolves to a (name,
-	// description) pair — the raw material baked into the task tool's
-	// subagent_type schema (luacfg.TaskToolFor). (Delegation runs through the
-	// `task` tool as an in-process background job.)
-	for _, name := range agents[0].Subagents {
+	for _, name := range a.Subagents {
 		sa, ok := c.SubagentByName(name)
 		if !ok {
 			t.Fatalf("unresolved subagent %q", name)
@@ -239,6 +221,10 @@ func TestRenderedConfigLoads(t *testing.T) {
 		if sa.Description == "" {
 			t.Errorf("subagent %q has no description for the task tool schema", name)
 		}
+	}
+	// The shipped hooks are discovered (both scripts are no-op exit 0 gates).
+	if !c.HasToolCall() {
+		t.Error("scaffold hooks/tool-call.sh not discovered")
 	}
 }
 
@@ -248,16 +234,16 @@ func TestRenderBaseConfigDoesNotClobber(t *testing.T) {
 	if err := RenderBaseConfig(dir, v, false); err != nil {
 		t.Fatalf("first render: %v", err)
 	}
-	cfgPath := filepath.Join(dir, "shell3.lua")
-	if err := os.WriteFile(cfgPath, []byte("-- user edited\n"), 0644); err != nil {
+	cfgPath := filepath.Join(dir, "shell3.yaml")
+	if err := os.WriteFile(cfgPath, []byte("# user edited\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := RenderBaseConfig(dir, v, false); err != nil {
 		t.Fatalf("second render: %v", err)
 	}
 	got, _ := os.ReadFile(cfgPath)
-	if string(got) != "-- user edited\n" {
-		t.Errorf("RenderBaseConfig clobbered an existing shell3.lua")
+	if string(got) != "# user edited\n" {
+		t.Errorf("RenderBaseConfig clobbered an existing shell3.yaml")
 	}
 }
 
@@ -267,43 +253,41 @@ func TestRenderBaseConfigForceOverwrites(t *testing.T) {
 	if err := RenderBaseConfig(dir, v, false); err != nil {
 		t.Fatalf("first render: %v", err)
 	}
-	cfgPath := filepath.Join(dir, "shell3.lua")
-	if err := os.WriteFile(cfgPath, []byte("-- stale\n"), 0644); err != nil {
+	cfgPath := filepath.Join(dir, "shell3.yaml")
+	if err := os.WriteFile(cfgPath, []byte("# stale\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := RenderBaseConfig(dir, v, true); err != nil {
 		t.Fatalf("force render: %v", err)
 	}
 	got, _ := os.ReadFile(cfgPath)
-	if string(got) == "-- stale\n" {
-		t.Error("force=true did not overwrite shell3.lua")
+	if string(got) == "# stale\n" {
+		t.Error("force=true did not overwrite shell3.yaml")
 	}
-	if !strings.Contains(string(got), `shell3.model("main"`) {
+	if !strings.Contains(string(got), "base_url:") {
 		t.Errorf("force render did not regenerate config; got:\n%s", got)
 	}
 }
 
-// TestRenderBaseConfigEscapesLuaSpecials ensures inputs containing Lua string
+// TestRenderBaseConfigEscapesYAMLSpecials ensures inputs containing YAML
 // metacharacters (a quote, a backslash) produce a config that still parses,
-// rather than a literal that closes early or an invalid escape.
-func TestRenderBaseConfigEscapesLuaSpecials(t *testing.T) {
+// rather than a scalar that closes early.
+func TestRenderBaseConfigEscapesYAMLSpecials(t *testing.T) {
 	dir := t.TempDir()
 	v := Values{
 		Name:    "main",
-		BaseURL: `http://x/v1"]] end --`, // a quote + bracket that would break a raw literal
+		BaseURL: `http://x/v1" oops: [`, // a quote + YAML specials
 		EnvKey:  "MAIN_API_KEY",
-		Model:   `weird\model`,     // a backslash → invalid Lua escape if unescaped
+		Model:   `weird\model`,     // a backslash
 		Proxy:   `sh -c "echo hi"`, // quotes in a proxy command
 	}
 	if err := RenderBaseConfig(dir, v, false); err != nil {
 		t.Fatalf("RenderBaseConfig: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("MAIN_API_KEY=x\nBRAVE_API_KEY=\nTELEGRAM_BOT_TOKEN=\nSHELL3_WEB_SECRET=s\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	c, err := luacfg.Load(filepath.Join(dir, "shell3.lua"))
+	writeEnv(t, dir)
+	c, err := config.Load(dir)
 	if err != nil {
-		t.Fatalf("config with Lua-special inputs failed to load: %v", err)
+		t.Fatalf("config with YAML-special inputs failed to load: %v", err)
 	}
 	defer c.Close()
 	// The raw (unescaped) values must round-trip into the loaded model.
@@ -313,5 +297,8 @@ func TestRenderBaseConfigEscapesLuaSpecials(t *testing.T) {
 	}
 	if m.ModelID != v.Model {
 		t.Errorf("model = %q, want %q", m.ModelID, v.Model)
+	}
+	if m.RunProxy != v.Proxy {
+		t.Errorf("run_proxy = %q, want %q", m.RunProxy, v.Proxy)
 	}
 }

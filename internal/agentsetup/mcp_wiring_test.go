@@ -13,22 +13,35 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func writeConfig(t *testing.T, body string) (configPath, cwd, home string) {
+// writeMCPTree writes a config tree into ~/.shell3 under a temp home:
+// wiringYAML (the model + the given mcp/agent frontmatter pieces) as
+// shell3.yaml, agent.md with the given frontmatter mcp opt-in, and optionally
+// a subagent.
+func writeMCPTree(t *testing.T, yamlText, agentMD string, extra map[string]string) (configDir, cwd, home string) {
 	t.Helper()
 	home = t.TempDir()
 	cwd = t.TempDir()
-	dir := filepath.Join(home, ".shell3")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	configDir = filepath.Join(home, ".shell3")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	configPath = filepath.Join(dir, "shell3.lua")
-	if err := os.WriteFile(configPath, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
+	files := map[string]string{"shell3.yaml": yamlText, "agent.md": agentMD}
+	for k, v := range extra {
+		files[k] = v
 	}
-	return configPath, cwd, home
+	for name, body := range files {
+		fp := filepath.Join(configDir, name)
+		if err := os.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fp, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return configDir, cwd, home
 }
 
-const wiringBase = `shell3.model("m", { base_url = "http://x/v1", api_key = "k", model = "z" })` + "\n"
+const wiringBase = "models:\n  m: { base_url: \"http://x/v1\", api_key: k, model: z }\n"
 
 func TestMCPWiringLiveServer(t *testing.T) {
 	srv := sdk.NewServer(&sdk.Implementation{Name: "fake"}, nil)
@@ -42,12 +55,11 @@ func TestMCPWiringLiveServer(t *testing.T) {
 	hs := httptest.NewServer(sdk.NewStreamableHTTPHandler(func(r *http.Request) *sdk.Server { return srv }, nil))
 	t.Cleanup(hs.Close)
 
-	body := wiringBase + fmt.Sprintf(`shell3.mcp({ fake = { url = %q } })
-shell3.agent({ name = "a", model = "m", prompt = "p", tools = { bash = true, mcp = "all" } })
-shell3.subagent({ name = "s", description = "d", model = "m", prompt = "p" })
-`, hs.URL)
-	configPath, cwd, home := writeConfig(t, body)
-	p, cleanup, err := BuildParts(Options{ConfigPath: configPath, CWD: cwd, HomeDir: home})
+	yamlText := wiringBase + fmt.Sprintf("mcp:\n  fake: { url: %q }\n", hs.URL)
+	configDir, cwd, home := writeMCPTree(t, yamlText,
+		"---\nmodel: m\ntools: [bash]\nmcp: all\n---\np\n",
+		map[string]string{"agents/s.md": "---\ndescription: d\n---\np\n"})
+	p, cleanup, err := BuildParts(Options{ConfigDir: configDir, CWD: cwd, HomeDir: home})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,11 +131,9 @@ shell3.subagent({ name = "s", description = "d", model = "m", prompt = "p" })
 }
 
 func TestMCPWiringDownServer(t *testing.T) {
-	body := wiringBase + `shell3.mcp({ dead = { command = { "/nonexistent-mcp-server-xyz" }, timeout = 2 } })
-shell3.agent({ name = "a", model = "m", prompt = "p", tools = { mcp = "all" } })
-`
-	configPath, cwd, home := writeConfig(t, body)
-	p, cleanup, err := BuildParts(Options{ConfigPath: configPath, CWD: cwd, HomeDir: home})
+	yamlText := wiringBase + "mcp:\n  dead: { command: [\"/nonexistent-mcp-server-xyz\"], timeout: 2 }\n"
+	configDir, cwd, home := writeMCPTree(t, yamlText, "---\nmodel: m\nmcp: all\n---\np\n", nil)
+	p, cleanup, err := BuildParts(Options{ConfigDir: configDir, CWD: cwd, HomeDir: home})
 	if err != nil {
 		t.Fatalf("down server must not fail the build: %v", err)
 	}
@@ -155,9 +165,8 @@ shell3.agent({ name = "a", model = "m", prompt = "p", tools = { mcp = "all" } })
 }
 
 func TestMCPWiringAbsent(t *testing.T) {
-	body := wiringBase + `shell3.agent({ name = "a", model = "m", prompt = "p" })`
-	configPath, cwd, home := writeConfig(t, body)
-	p, cleanup, err := BuildParts(Options{ConfigPath: configPath, CWD: cwd, HomeDir: home})
+	configDir, cwd, home := writeMCPTree(t, wiringBase, "---\nmodel: m\n---\np\n", nil)
+	p, cleanup, err := BuildParts(Options{ConfigDir: configDir, CWD: cwd, HomeDir: home})
 	if err != nil {
 		t.Fatal(err)
 	}

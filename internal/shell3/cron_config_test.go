@@ -2,8 +2,6 @@ package shell3_test
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/shell3"
@@ -11,18 +9,12 @@ import (
 
 func TestRuntime_CronConfig(t *testing.T) {
 	dir := t.TempDir()
-	cfg := `
-shell3.model("main", { base_url="https://api.x/v1", api_key="k", model="m-1", context_window=1000 })
-local explorer = shell3.subagent({ name="explorer", model="main", description="d", prompt="p", tools={} })
-shell3.agent({ name="code", model="main", prompt="hi", tools={ subagents={explorer} } })
-shell3.telegram({ token="t", chat_id="1" })
-shell3.cron({ { name="n", schedule="@daily", agent="explorer", prompt="go", notify=false } })
-`
-	path := filepath.Join(dir, "shell3.lua")
-	if err := os.WriteFile(path, []byte(cfg), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	rt, err := shell3.NewRuntime(context.Background(), shell3.RuntimeSpec{ConfigPath: path, WorkDir: dir})
+	writeBaseTree(t, dir, map[string]string{
+		"shell3.yaml":        baseYAML + "telegram:\n  token: t\n  chat_id: \"1\"\n",
+		"agents/explorer.md": "---\ndescription: d\n---\np\n",
+		"cron/n.md":          "---\nschedule: \"@daily\"\nagent: explorer\n---\ngo\n",
+	})
+	rt, err := shell3.NewRuntime(context.Background(), shell3.RuntimeSpec{ConfigDir: dir, WorkDir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
