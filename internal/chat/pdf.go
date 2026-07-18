@@ -3,7 +3,6 @@ package chat
 import (
 	"encoding/base64"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -19,22 +18,11 @@ var supportedPDFExts = map[string]bool{".pdf": true}
 // carrying a base64 data-URI (file_data) plus a human-readable description.
 // The PDF is never parsed or decoded — only its bytes are attached.
 func loadPDFPart(path, workDir string) (llm.ContentPart, string, error) {
-	path = resolvePath(path, workDir)
-
-	info, err := os.Stat(path)
+	raw, resolved, err := readMediaFile(path, workDir, "pdf", maxPDFBytes)
 	if err != nil {
-		return llm.ContentPart{}, "", fmt.Errorf("cannot read %q: %w", path, err)
+		return llm.ContentPart{}, "", err
 	}
-	if info.Size() > maxPDFBytes {
-		return llm.ContentPart{}, "", fmt.Errorf("pdf too large (%d MB, max 20 MB)", info.Size()>>20)
-	}
-
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return llm.ContentPart{}, "", fmt.Errorf("cannot read %q: %w", path, err)
-	}
-
-	return pdfPartFromBytes(raw, filepath.Base(path))
+	return pdfPartFromBytes(raw, filepath.Base(resolved))
 }
 
 // pdfPartFromBytes validates the size cap and wraps raw PDF bytes as a
@@ -42,7 +30,7 @@ func loadPDFPart(path, workDir string) (llm.ContentPart, string, error) {
 // no path to derive one from), "file.pdf" is synthesized.
 func pdfPartFromBytes(data []byte, filename string) (llm.ContentPart, string, error) {
 	if len(data) > maxPDFBytes {
-		return llm.ContentPart{}, "", fmt.Errorf("pdf too large (%d MB, max 20 MB)", len(data)>>20)
+		return llm.ContentPart{}, "", mediaTooLarge("pdf", int64(len(data)), maxPDFBytes)
 	}
 	if strings.TrimSpace(filename) == "" {
 		filename = "file.pdf"

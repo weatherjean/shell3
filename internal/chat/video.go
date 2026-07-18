@@ -3,7 +3,6 @@ package chat
 import (
 	"encoding/base64"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -38,25 +37,15 @@ func videoExtMIME(ext string) string {
 // base64 data URI plus a human-readable description. Video is never decoded
 // or transcoded.
 func loadVideoPart(path, workDir string) (llm.ContentPart, string, error) {
-	path = resolvePath(path, workDir)
-
 	ext := strings.ToLower(filepath.Ext(path))
 	mime := videoExtMIME(ext)
 	if mime == "" {
 		return llm.ContentPart{}, "", fmt.Errorf("unsupported video type %q — use mp4, webm, or mov", ext)
 	}
 
-	info, err := os.Stat(path)
+	raw, _, err := readMediaFile(path, workDir, "video", maxVideoBytes)
 	if err != nil {
-		return llm.ContentPart{}, "", fmt.Errorf("cannot read %q: %w", path, err)
-	}
-	if info.Size() > maxVideoBytes {
-		return llm.ContentPart{}, "", fmt.Errorf("video too large (%d MB, max 40 MB)", info.Size()>>20)
-	}
-
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return llm.ContentPart{}, "", fmt.Errorf("cannot read %q: %w", path, err)
+		return llm.ContentPart{}, "", err
 	}
 
 	return videoPartFromBytes(raw, mime)
@@ -70,7 +59,7 @@ func videoPartFromBytes(data []byte, mime string) (llm.ContentPart, string, erro
 		return llm.ContentPart{}, "", fmt.Errorf("empty video (0 bytes) — no %s data to attach", mime)
 	}
 	if len(data) > maxVideoBytes {
-		return llm.ContentPart{}, "", fmt.Errorf("video too large (%d MB, max 40 MB)", len(data)>>20)
+		return llm.ContentPart{}, "", mediaTooLarge("video", int64(len(data)), maxVideoBytes)
 	}
 	desc := fmt.Sprintf("%s video, %.1f MB", mime, float64(len(data))/(1<<20))
 	return llm.ContentPart{

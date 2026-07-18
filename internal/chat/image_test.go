@@ -39,12 +39,12 @@ func TestLoadImagePart_ReturnsDimensions(t *testing.T) {
 	tmp := t.TempDir()
 	imgPath := filepath.Join(tmp, "shot.png")
 	writePNG(t, imgPath) // makePNG is 4x4
-	part, w, h, err := loadImagePart(imgPath, "")
+	part, desc, err := loadImagePart(imgPath, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if w != 4 || h != 4 {
-		t.Errorf("dims = %dx%d, want 4x4", w, h)
+	if desc != "image 4x4" {
+		t.Errorf("desc = %q, want %q", desc, "image 4x4")
 	}
 	if part.Type != llm.ContentPartTypeImageURL {
 		t.Errorf("part type = %q", part.Type)

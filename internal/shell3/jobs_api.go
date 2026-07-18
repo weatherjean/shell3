@@ -1,6 +1,7 @@
 package shell3
 
 import (
+	"context"
 	"errors"
 	"time"
 )
@@ -95,4 +96,33 @@ func (s *Session) KillJob(id string) error {
 		return errors.New("shell3: no job runtime")
 	}
 	return rt.jobs.cancel(id)
+}
+
+// KillRunningJobs kills every live background job on the session — commands
+// and subagents alike — and reports how many were killed. The shared half of
+// the front-ends' /stop (see StopAll).
+func (s *Session) KillRunningJobs() (killed int) {
+	for _, j := range s.Jobs() {
+		if !j.Done {
+			if err := s.KillJob(j.ID); err == nil {
+				killed++
+			}
+		}
+	}
+	return killed
+}
+
+// StopAll is the shared body of the front-ends' /stop: kill every live
+// background job, then cancel the running turn (if any), and render the reply.
+// snapshotCancel must return the front-end's current turn-cancel func under
+// its own lock. It is called AFTER the kill loop on purpose — a turn that ends
+// (and a queued wake turn that starts) mid-loop would leave a pre-loop
+// snapshot cancelling an already-dead context while the fresh turn runs on.
+func StopAll(sess *Session, snapshotCancel func() context.CancelFunc) string {
+	killed := sess.KillRunningJobs()
+	c := snapshotCancel()
+	if c != nil {
+		c() // cancels turnCtx → synchronous bash/node process groups get SIGTERM→SIGKILL
+	}
+	return StopReplyText(c != nil, killed)
 }

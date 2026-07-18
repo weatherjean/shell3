@@ -3,7 +3,6 @@ package chat
 import (
 	"encoding/base64"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -34,24 +33,14 @@ func audioExtFormat(ext string) string {
 // wire formats (wav, mp3, ogg) are accepted; opus-family containers report
 // as ogg.
 func loadAudioPart(path, workDir string) (llm.ContentPart, string, error) {
-	path = resolvePath(path, workDir)
-
 	ext := strings.ToLower(filepath.Ext(path))
 	if !supportedAudioExts[ext] {
 		return llm.ContentPart{}, "", fmt.Errorf("unsupported audio type %q — use wav, mp3, or ogg/opus", ext)
 	}
 
-	info, err := os.Stat(path)
+	raw, _, err := readMediaFile(path, workDir, "audio", maxAudioBytes)
 	if err != nil {
-		return llm.ContentPart{}, "", fmt.Errorf("cannot read %q: %w", path, err)
-	}
-	if info.Size() > maxAudioBytes {
-		return llm.ContentPart{}, "", fmt.Errorf("audio too large (%d MB, max 25 MB)", info.Size()>>20)
-	}
-
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return llm.ContentPart{}, "", fmt.Errorf("cannot read %q: %w", path, err)
+		return llm.ContentPart{}, "", err
 	}
 
 	return audioPartFromBytes(raw, audioExtFormat(strings.TrimPrefix(ext, ".")))
@@ -65,7 +54,7 @@ func audioPartFromBytes(data []byte, format string) (llm.ContentPart, string, er
 		return llm.ContentPart{}, "", fmt.Errorf("empty audio (0 bytes) — no %s data to attach", format)
 	}
 	if len(data) > maxAudioBytes {
-		return llm.ContentPart{}, "", fmt.Errorf("audio too large (%d MB, max 25 MB)", len(data)>>20)
+		return llm.ContentPart{}, "", mediaTooLarge("audio", int64(len(data)), maxAudioBytes)
 	}
 	desc := fmt.Sprintf("%s audio, %.1f MB", format, float64(len(data))/(1<<20))
 	return llm.ContentPart{

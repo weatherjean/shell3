@@ -61,11 +61,7 @@ func (b *Bot) runReload(ctx context.Context) {
 	b.mu.Lock()
 	b.turnActive = false
 	b.mu.Unlock()
-	if err != nil {
-		b.sendReply(ctx, "❌ reload failed: "+err.Error())
-	} else {
-		b.sendReply(ctx, formatReload(res))
-	}
+	b.sendReply(ctx, shell3.ReloadReplyText(res, err))
 	// A message or wake that arrived during the reload was queued (Interject) or
 	// dropped against the held slot; run it now rather than stranding it.
 	if b.sess.HasQueuedInput() {

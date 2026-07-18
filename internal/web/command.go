@@ -3,7 +3,7 @@
 package web
 
 import (
-	"fmt"
+	"context"
 	"strings"
 
 	"github.com/weatherjean/shell3/internal/shell3"
@@ -58,14 +58,11 @@ func (d *Driver) Command(text string) string {
 		return shell3.CompactReplyText(before, after, err)
 	case "/set":
 		if arg == "" {
-			return d.settableList()
+			return shell3.SettableListText(d.sess.Snapshot().Params)
 		}
-		// Split on any whitespace run (double spaces and tabs are easy to
-		// type on mobile), keeping the raw remainder as the value.
-		name := strings.Fields(arg)[0]
-		value := strings.TrimSpace(arg[strings.Index(arg, name)+len(name):])
-		if value == "" {
-			return "usage: /set <name> <value>\nsend /set with no arguments to list settable parameters"
+		name, value, ok := shell3.ParseSetArgs(arg)
+		if !ok {
+			return shell3.SetUsageText
 		}
 		if err := d.sess.SetParam(name, value); err != nil {
 			return "set failed: " + err.Error()
@@ -116,33 +113,11 @@ const helpText = `commands:
 // stopAll cancels the running turn (if any) and kills every live background
 // job — commands and subagents alike — mirroring the bot's /stop.
 func (d *Driver) stopAll() string {
-	killed := 0
-	for _, j := range d.sess.Jobs() {
-		if !j.Done {
-			if err := d.sess.KillJob(j.ID); err == nil {
-				killed++
-			}
-		}
-	}
-	// Snapshot the cancel func AFTER the kill loop: a turn that ends (and a
-	// queued wake turn that starts) while jobs are being killed would leave a
-	// pre-loop snapshot cancelling an already-dead context — reporting
-	// "stopped" while the fresh turn keeps running.
-	d.mu.Lock()
-	c := d.cancelTurn
-	d.mu.Unlock()
-	if c != nil {
-		c()
-		msg := "⏹ stopped"
-		if killed > 0 {
-			msg += fmt.Sprintf(" — killed %d background job(s)", killed)
-		}
-		return msg
-	}
-	if killed > 0 {
-		return fmt.Sprintf("⏹ no turn running — killed %d background job(s)", killed)
-	}
-	return "nothing running"
+	return shell3.StopAll(d.sess, func() context.CancelFunc {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		return d.cancelTurn
+	})
 }
 
 // runReload performs a config reload while holding the turn slot, so no send
@@ -171,38 +146,5 @@ func (d *Driver) runReload() string {
 			}()
 		}
 	}
-	if err != nil {
-		return "❌ reload failed: " + err.Error()
-	}
-	msg := fmt.Sprintf("✅ reloaded — %d agents, %d models, %d jobs", res.Agents, res.Models, res.Jobs)
-	if len(res.Notes) > 0 {
-		msg += "\n• " + strings.Join(res.Notes, "\n• ")
-	}
-	return msg
-}
-
-// settableList renders the agent's tunable parameters with their current value
-// (falling back to the provider default) and allowed values, for a bare /set.
-func (d *Driver) settableList() string {
-	params := d.sess.Snapshot().Params
-	if len(params) == 0 {
-		return "no settable parameters for this model"
-	}
-	var sb strings.Builder
-	sb.WriteString("⚙️ settable parameters — /set <name> <value>:\n")
-	for _, p := range params {
-		val := p.Value
-		switch {
-		case val == "" && p.Default != "":
-			val = p.Default + " (default)"
-		case val == "":
-			val = "unset"
-		}
-		sb.WriteString("• " + p.Name + " = " + val)
-		if len(p.Enum) > 0 {
-			sb.WriteString(" [" + strings.Join(p.Enum, " | ") + "]")
-		}
-		sb.WriteString("\n")
-	}
-	return sb.String()
+	return shell3.ReloadReplyText(res, err)
 }

@@ -4,7 +4,6 @@ package telegram
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/weatherjean/shell3/internal/shell3"
@@ -68,15 +67,12 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 		}()
 	case "/set":
 		if arg == "" {
-			b.sendReply(ctx, b.settableList())
+			b.sendReply(ctx, shell3.SettableListText(b.sess.Snapshot().Params))
 			return
 		}
-		// Split on any whitespace run (double spaces and tabs are easy to
-		// type on mobile), keeping the raw remainder as the value.
-		name := strings.Fields(arg)[0]
-		value := strings.TrimSpace(arg[strings.Index(arg, name)+len(name):])
-		if value == "" {
-			b.sendReply(ctx, "usage: /set <name> <value>\nsend /set with no arguments to list settable parameters")
+		name, value, ok := shell3.ParseSetArgs(arg)
+		if !ok {
+			b.sendReply(ctx, shell3.SetUsageText)
 			return
 		}
 		if err := b.sess.SetParam(name, value); err != nil {
@@ -96,36 +92,11 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 		}
 		b.sendReply(ctx, "↩️ rolled back")
 	case "/stop":
-		// Kill every running background job on the in-process runtime — commands
-		// (bash_bg) and model-spawned subagents alike are tracked jobs now.
-		killed := 0
-		for _, j := range b.sess.Jobs() {
-			if !j.Done {
-				if err := b.sess.KillJob(j.ID); err == nil {
-					killed++
-				}
-			}
-		}
-		// Snapshot the cancel func AFTER the kill loop: a turn that ends (and a
-		// queued wake turn that starts) mid-loop would leave a pre-loop snapshot
-		// cancelling an already-dead context while the fresh turn runs on.
-		b.mu.Lock()
-		c := b.cancelTurn
-		b.mu.Unlock()
-		if c != nil {
-			c() // cancels turnCtx → synchronous bash/node process groups get SIGTERM→SIGKILL
-			msg := "⏹ stopped"
-			if killed > 0 {
-				msg += fmt.Sprintf(" — killed %d background job(s)", killed)
-			}
-			b.sendReply(ctx, msg)
-			return
-		}
-		if killed > 0 {
-			b.sendReply(ctx, fmt.Sprintf("⏹ no turn running — killed %d background job(s)", killed))
-			return
-		}
-		b.sendReply(ctx, "nothing running")
+		b.sendReply(ctx, shell3.StopAll(b.sess, func() context.CancelFunc {
+			b.mu.Lock()
+			defer b.mu.Unlock()
+			return b.cancelTurn
+		}))
 	case "/run":
 		if b.runJob == nil {
 			b.sendReply(ctx, "no scheduled jobs configured")
@@ -150,39 +121,4 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 	default:
 		b.sendReply(ctx, "unknown command: "+cmd)
 	}
-}
-
-// formatReload renders a ReloadResult as a chat reply.
-func formatReload(r shell3.ReloadResult) string {
-	msg := fmt.Sprintf("✅ reloaded — %d agents, %d models, %d jobs", r.Agents, r.Models, r.Jobs)
-	if len(r.Notes) > 0 {
-		msg += "\n• " + strings.Join(r.Notes, "\n• ")
-	}
-	return msg
-}
-
-// settableList renders the agent's tunable parameters with their current value
-// (falling back to the provider default) and allowed values, for a bare /set.
-func (b *Bot) settableList() string {
-	params := b.sess.Snapshot().Params
-	if len(params) == 0 {
-		return "no settable parameters for this model"
-	}
-	var sb strings.Builder
-	sb.WriteString("⚙️ settable parameters — /set <name> <value>:\n")
-	for _, p := range params {
-		val := p.Value
-		switch {
-		case val == "" && p.Default != "":
-			val = p.Default + " (default)"
-		case val == "":
-			val = "unset"
-		}
-		sb.WriteString("• " + p.Name + " = " + val)
-		if len(p.Enum) > 0 {
-			sb.WriteString(" [" + strings.Join(p.Enum, " | ") + "]")
-		}
-		sb.WriteString("\n")
-	}
-	return sb.String()
 }

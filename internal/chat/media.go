@@ -20,11 +20,7 @@ func LoadMediaPart(path, workDir string) (llm.ContentPart, string, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch {
 	case supportedImageExts[ext]:
-		part, w, h, err := loadImagePart(path, workDir)
-		if err != nil {
-			return llm.ContentPart{}, "", err
-		}
-		return part, fmt.Sprintf("image %dx%d", w, h), nil
+		return loadImagePart(path, workDir)
 	case supportedAudioExts[ext]:
 		return loadAudioPart(path, workDir)
 	case supportedPDFExts[ext]:
