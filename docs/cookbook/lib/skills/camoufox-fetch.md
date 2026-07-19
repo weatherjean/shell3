@@ -20,8 +20,10 @@ python is older, don't fight it — ask the user whether to install
 env and use its interpreter everywhere below:
 
 ```bash
-uv venv --python 3.12 ~/.shell3/lib/camoufox-env
+uv venv --seed --python 3.12 ~/.shell3/lib/camoufox-env
 ```
+
+(`--seed` matters — without it the env has no pip.)
 
 Also confirm the user is OK with the download — the browser is ~1.2 GB on
 disk. Then:
@@ -54,8 +56,8 @@ with Camoufox(headless=True, humanize=True) as browser:
 ## Usage
 
 ```bash
-camoufox-fetch "https://protected.example.com/article"
-camoufox-fetch "https://app.example.com/docs" "main"   # scope to a selector
+~/.shell3/lib/bin/camoufox-fetch "https://protected.example.com/article"
+~/.shell3/lib/bin/camoufox-fetch "https://app.example.com/docs" "main"   # scope to a selector
 ```
 
 - Pass a CSS selector to skip nav/footer noise; output is capped at 20k

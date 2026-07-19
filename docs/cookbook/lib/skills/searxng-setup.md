@@ -62,7 +62,7 @@ curl -fsS --max-time 20 -G "http://localhost:8888/search" \
 ## 4. Verify
 
 ```bash
-searxng-search "test query" 3
+~/.shell3/lib/bin/searxng-search "test query" 3
 ```
 
 Real results back = done. (First query after container start can take ~10s;

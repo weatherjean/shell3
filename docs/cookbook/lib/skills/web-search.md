@@ -41,7 +41,7 @@ curl -sfL --max-time 15 "$url" \
 
 ## Keep retrieval small by default
 
-- Simple lookup / verify one fact: `brave-search "query" 3`.
+- Simple lookup / verify one fact: `~/.shell3/lib/bin/brave-search "query" 3`.
 - Normal research: count 5-10.
 - Broad discovery: raise count gradually, and `web-fetch` the most promising
   results rather than searching repeatedly.

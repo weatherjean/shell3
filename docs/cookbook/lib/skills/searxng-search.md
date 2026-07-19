@@ -13,8 +13,8 @@ Google/Brave/Startpage/DDG.
 ## Usage
 
 ```bash
-searxng-search "query" 3     # quick lookup / verify one fact
-searxng-search "query" 10    # normal research
+~/.shell3/lib/bin/searxng-search "query" 3     # quick lookup / verify one fact
+~/.shell3/lib/bin/searxng-search "query" 10    # normal research
 ```
 
 - Narrow with inline bangs in the query: `!news`, `!it`, or a specific
