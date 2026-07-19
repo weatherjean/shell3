@@ -31,7 +31,7 @@ func brandLine() string {
 func PrintHeader(w io.Writer) {
 	sub := lipgloss.NewStyle().Foreground(bannerFgDim)
 	fmt.Fprintln(w, brandLine())
-	fmt.Fprintln(w, sub.Render("minimal Unix-composable coding agent"))
+	fmt.Fprintln(w, sub.Render("minimal Unix-composable personal agent"))
 	fmt.Fprintln(w)
 }
 

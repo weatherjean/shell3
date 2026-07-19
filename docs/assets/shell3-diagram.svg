@@ -1,0 +1,139 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1200" role="img"
+     aria-label="Diagram: you chat with shell3 over Telegram; the shell3 binary gates every tool call, runs an LLM agent with bash and edit tools; it works your shell, subagents and MCP servers; everything is configured by one folder of plain files.">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8C97AD"/>
+    </marker>
+    <marker id="arrB" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2AABEE"/>
+    </marker>
+    <marker id="arrG" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6FCF7C"/>
+    </marker>
+  </defs>
+
+  <style>
+    text{font-family:ui-monospace,"SF Mono","JetBrains Mono","Cascadia Code",Menlo,Consolas,monospace;fill:#E9EEF6;}
+    .h1{font-size:58px;font-weight:700;}
+    .tag{font-size:24px;fill:#8C97AD;}
+    .ct{font-size:24px;font-weight:700;}
+    .b{font-size:20px;}
+    .bb{font-size:19px;}
+    .m{font-size:18px;fill:#8C97AD;}
+    .s{font-size:16px;fill:#8C97AD;}
+    .xs{font-size:14px;fill:#8C97AD;}
+    .chip{font-size:19px;font-weight:600;}
+    .lbl{font-size:17px;fill:#8C97AD;letter-spacing:.06em;}
+    .card{fill:#161E30;stroke:#2C3A56;stroke-width:2;}
+    .sub{fill:#121A2B;stroke:#2C3A56;stroke-width:1.5;}
+    .wire{stroke:#8C97AD;stroke-width:2.5;fill:none;}
+  </style>
+
+  <rect width="1600" height="1200" fill="#0D1320"/>
+
+  <!-- title -->
+  <g transform="translate(64,108) scale(0.252)"><g fill="#EAB308"><path d="M37.64453125 0.0Q27.3125 0.0 21.5625 -6.91796875Q16.171875 -13.296875 16.171875 -23.8984375V-76.90625Q16.171875 -90.47265625 26.50390625 -99.27734375Q34.5 -106.10546875 48.96484375 -106.10546875H49.953125Q50.3125 -106.10546875 50.4921875 -106.015625H107.90234375Q108.890625 -106.10546875 109.609375 -106.10546875Q123.8046875 -106.10546875 131.890625 -99.3671875Q142.04296875 -90.83203125 142.04296875 -76.90625V-13.8359375Q142.04296875 -2.42578125 140.96484375 4.22265625Q137.55078125 25.42578125 115.44921875 30.63671875Q107.36328125 32.5234375 99.1875 32.5234375Q94.24609375 32.5234375 92.62890625 32.25390625V15.2734375Q93.52734375 15.36328125 94.06640625 15.36328125Q107.00390625 15.36328125 107.00390625 2.42578125Q107.00390625 1.70703125 106.9140625 0.224609375Q106.82421875 -1.2578125 106.82421875 -1.9765625V-70.34765625Q106.82421875 -79.87109375 100.4453125 -83.46484375Q95.86328125 -86.0703125 89.03515625 -86.0703125H71.515625Q62.08203125 -86.0703125 58.0390625 -83.5546875Q51.5703125 -79.51171875 51.5703125 -70.34765625V-29.6484375Q51.5703125 -19.49609375 61.6328125 -19.49609375Q64.8671875 -19.49609375 65.765625 -20.03515625V-54.625H91.1015625V-19.9453125Q91.1015625 -9.8828125 86.33984375 -5.66015625Q80.05078125 0.0 71.515625 0.0Z"/><g transform="translate(158.4,0)"><path d="M19.2265625 0.0V-134.2265625H57.5V0.0ZM0.0 -153.2734375V-176.9921875H22.4609375V-153.2734375ZM54.17578125 -153.2734375V-176.9921875H76.63671875V-153.2734375Z"/></g></g></g><text x="140" y="108" class="h1" fill="#EAB308">shell3</text>
+  <text x="420" y="108" class="tag">— your personal agent in Telegram</text>
+  <line x1="64" y1="140" x2="1536" y2="140" stroke="#2C3A56" stroke-width="2"/>
+
+  <!-- ===== left: Telegram ===== -->
+  <rect x="64" y="210" width="340" height="500" rx="14" class="card"/>
+  <text x="88" y="252" class="ct">you</text>
+  <text x="88" y="280" class="m">Telegram, phone or desktop</text>
+
+  <!-- telegram logo -->
+  <g transform="translate(234,382)">
+    <circle r="54" fill="#fff"/>
+    <g transform="translate(-54,-54) scale(4.5)">
+      <path fill="#2AABEE" fill-rule="evenodd" d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+    </g>
+  </g>
+
+  <!-- chat bubbles -->
+  <rect x="118" y="472" width="262" height="46" rx="12" fill="#1E2A44"/>
+  <text x="134" y="502" class="bb">fix the failing tests</text>
+  <rect x="88" y="534" width="262" height="46" rx="12" fill="#173049"/>
+  <text x="104" y="564" class="bb" fill="#BEE3F8">done — tests green ✓</text>
+  <text x="88" y="626" class="m">voice &amp; photos work too;</text>
+  <text x="88" y="652" class="m">a Mini App dashboard shows</text>
+  <text x="88" y="678" class="m">runs, jobs and files</text>
+
+  <!-- wires left<->center -->
+  <line x1="404" y1="392" x2="566" y2="392" class="wire" stroke="#2AABEE" marker-end="url(#arrB)"/>
+  <text x="420" y="374" class="xs" fill="#2AABEE">text·voice·pics</text>
+  <line x1="566" y1="482" x2="404" y2="482" class="wire" marker-end="url(#arr)"/>
+  <text x="420" y="522" class="xs">replies · asks</text>
+
+  <!-- ===== center: shell3 ===== -->
+  <rect x="570" y="210" width="460" height="500" rx="14" class="card"/>
+  <text x="594" y="252" class="ct">shell3</text>
+  <text x="594" y="280" class="m">one Go binary on your box</text>
+
+  <text x="594" y="322" class="lbl">WAKES ON</text>
+  <rect x="594" y="336" width="188" height="38" rx="19" class="sub"/>
+  <text x="614" y="362" class="chip" fill="#8C97AD">your message</text>
+  <rect x="794" y="336" width="88" height="38" rx="19" class="sub"/>
+  <text x="814" y="362" class="chip" fill="#8C97AD">cron</text>
+  <rect x="894" y="336" width="118" height="38" rx="19" class="sub"/>
+  <text x="908" y="362" class="chip" fill="#8C97AD">heartbeat</text>
+
+  <!-- hook gate -->
+  <rect x="594" y="402" width="412" height="80" rx="10" fill="#121A2B" stroke="#E5B567" stroke-width="2"/>
+  <text x="614" y="434" class="chip" fill="#E5B567">hook gate — tool-call.sh</text>
+  <text x="614" y="462" class="s">allow · rewrite · ask you · block</text>
+
+  <line x1="800" y1="482" x2="800" y2="506" class="wire" marker-end="url(#arr)"/>
+
+  <!-- agent -->
+  <rect x="594" y="510" width="412" height="76" rx="10" class="sub"/>
+  <text x="614" y="542" class="chip">the agent — your LLM</text>
+  <text x="614" y="570" class="s">OpenAI-compatible · loops until done</text>
+
+  <line x1="800" y1="586" x2="800" y2="610" class="wire" marker-end="url(#arr)"/>
+
+  <!-- tools -->
+  <rect x="594" y="614" width="412" height="70" rx="10" fill="#121A2B" stroke="#6FCF7C" stroke-width="2"/>
+  <text x="614" y="646" class="chip" fill="#6FCF7C">bash · bash_bg · edit_file</text>
+  <text x="614" y="672" class="s">no read tools — the shell does that</text>
+
+  <!-- wire center->right -->
+  <line x1="1030" y1="450" x2="1186" y2="450" class="wire" stroke="#6FCF7C" marker-end="url(#arrG)"/>
+  <text x="1058" y="432" class="xs" fill="#6FCF7C">acts on</text>
+
+  <!-- ===== right: reach ===== -->
+  <text x="1190" y="252" class="lbl">WHAT IT REACHES</text>
+  <rect x="1190" y="270" width="346" height="128" rx="14" class="card"/>
+  <text x="1214" y="310" class="ct" style="font-size:22px">your shell &amp; files</text>
+  <text x="1214" y="340" class="m">git, make, rg, curl —</text>
+  <text x="1214" y="366" class="m">the whole Unix toolbox</text>
+
+  <rect x="1190" y="418" width="346" height="128" rx="14" class="card"/>
+  <text x="1214" y="458" class="ct" style="font-size:22px">subagents &amp; jobs</text>
+  <text x="1214" y="488" class="m">parallel workers in the</text>
+  <text x="1214" y="514" class="m">background; failures wake it</text>
+
+  <rect x="1190" y="566" width="346" height="128" rx="14" class="card"/>
+  <text x="1214" y="606" class="ct" style="font-size:22px">MCP servers</text>
+  <text x="1214" y="636" class="m">extra tools over</text>
+  <text x="1214" y="662" class="m">stdio or HTTP</text>
+
+  <!-- wire config->center -->
+  <line x1="800" y1="826" x2="800" y2="714" class="wire" marker-end="url(#arr)"/>
+  <text x="820" y="782" class="s">declares all of it — edit any time, /reload</text>
+
+  <!-- ===== bottom: config folder ===== -->
+  <rect x="64" y="830" width="1472" height="300" rx="14" class="card"/>
+  <text x="88" y="874" class="ct">~/.shell3/</text>
+  <text x="242" y="874" class="m">— the whole setup is one folder of plain files</text>
+
+  <g class="b">
+    <text x="104" y="936" fill="#2AABEE">shell3.yaml</text>   <text x="104" y="964" class="s">models &amp; wiring</text>
+    <text x="104" y="1020" fill="#2AABEE">.env</text>          <text x="104" y="1048" class="s">secrets, never in chat</text>
+    <text x="464" y="936" fill="#6FCF7C">agent.md</text>       <text x="464" y="964" class="s">the agent's prompt</text>
+    <text x="464" y="1020" fill="#6FCF7C">agents/*.md</text>   <text x="464" y="1048" class="s">subagent personas</text>
+    <text x="824" y="936" fill="#6FCF7C">skills/*.md</text>    <text x="824" y="964" class="s">reusable know-how</text>
+    <text x="824" y="1020" fill="#6FCF7C">cron/*.md</text>     <text x="824" y="1048" class="s">scheduled prompts</text>
+    <text x="1184" y="936" fill="#6FCF7C">heartbeat.md</text>  <text x="1184" y="964" class="s">periodic check-ins</text>
+    <text x="1184" y="1020" fill="#E5B567">hooks/*.sh</text>   <text x="1184" y="1048" class="s">your safety gates</text>
+  </g>
+</svg>

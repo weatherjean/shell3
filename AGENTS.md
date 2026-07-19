@@ -1,6 +1,6 @@
 # shell3
 
-Minimal Unix-composable coding agent written in Go.
+Minimal Unix-composable personal agent written in Go.
 
 **Declarative config.** The config is a **directory** (default `~/.shell3/`),
 loaded by `internal/config` — four rules: YAML wires it, markdown prompts it,

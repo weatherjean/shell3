@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 450" role="img"
+     aria-label="shell3 banner: the yellow snail mark, the shell3 wordmark, pronounced shelly, your shell on Telegram — minimal Unix-composable personal agent.">
+  <style>
+    text{font-family:ui-monospace,"SF Mono","JetBrains Mono","Cascadia Code",Menlo,Consolas,monospace;}
+  </style>
+  <rect width="1600" height="450" fill="#0B0F17"/>
+
+  <!-- speck stars -->
+  <g fill="#E9EEF6">
+    <circle cx="120" cy="60"  r="1.6" opacity=".35"/>
+    <circle cx="510" cy="38"  r="1.2" opacity=".25"/>
+    <circle cx="905" cy="70"  r="1.4" opacity=".3"/>
+    <circle cx="1495" cy="52" r="1.6" opacity=".35"/>
+    <circle cx="1310" cy="150" r="1.2" opacity=".22"/>
+    <circle cx="70"  cy="330" r="1.4" opacity=".3"/>
+    <circle cx="480" cy="405" r="1.2" opacity=".22"/>
+    <circle cx="1010" cy="400" r="1.6" opacity=".3"/>
+    <circle cx="1555" cy="330" r="1.2" opacity=".25"/>
+  </g>
+  <g fill="#EAB308">
+    <circle cx="340" cy="48"  r="1.6" opacity=".4"/>
+    <circle cx="1210" cy="55" r="1.4" opacity=".35"/>
+    <circle cx="1440" cy="395" r="1.6" opacity=".35"/>
+    <circle cx="200" cy="400" r="1.3" opacity=".3"/>
+  </g>
+
+  <!-- snail mark: the two brand glyphs -->
+  <circle cx="295" cy="230" r="185" fill="#EAB308" opacity=".055"/>
+  <circle cx="295" cy="230" r="120" fill="#EAB308" opacity=".05"/>
+  <g transform="translate(177.5,308)"><g fill="#EAB308"><path d="M37.64453125 0.0Q27.3125 0.0 21.5625 -6.91796875Q16.171875 -13.296875 16.171875 -23.8984375V-76.90625Q16.171875 -90.47265625 26.50390625 -99.27734375Q34.5 -106.10546875 48.96484375 -106.10546875H49.953125Q50.3125 -106.10546875 50.4921875 -106.015625H107.90234375Q108.890625 -106.10546875 109.609375 -106.10546875Q123.8046875 -106.10546875 131.890625 -99.3671875Q142.04296875 -90.83203125 142.04296875 -76.90625V-13.8359375Q142.04296875 -2.42578125 140.96484375 4.22265625Q137.55078125 25.42578125 115.44921875 30.63671875Q107.36328125 32.5234375 99.1875 32.5234375Q94.24609375 32.5234375 92.62890625 32.25390625V15.2734375Q93.52734375 15.36328125 94.06640625 15.36328125Q107.00390625 15.36328125 107.00390625 2.42578125Q107.00390625 1.70703125 106.9140625 0.224609375Q106.82421875 -1.2578125 106.82421875 -1.9765625V-70.34765625Q106.82421875 -79.87109375 100.4453125 -83.46484375Q95.86328125 -86.0703125 89.03515625 -86.0703125H71.515625Q62.08203125 -86.0703125 58.0390625 -83.5546875Q51.5703125 -79.51171875 51.5703125 -70.34765625V-29.6484375Q51.5703125 -19.49609375 61.6328125 -19.49609375Q64.8671875 -19.49609375 65.765625 -20.03515625V-54.625H91.1015625V-19.9453125Q91.1015625 -9.8828125 86.33984375 -5.66015625Q80.05078125 0.0 71.515625 0.0Z"/><g transform="translate(158.4,0)"><path d="M19.2265625 0.0V-134.2265625H57.5V0.0ZM0.0 -153.2734375V-176.9921875H22.4609375V-153.2734375ZM54.17578125 -153.2734375V-176.9921875H76.63671875V-153.2734375Z"/></g></g></g>
+
+  <!-- wordmark -->
+  <text x="565" y="212" font-size="112" font-weight="700" fill="#F4F7FC">shell3</text>
+  <text x="570" y="278" font-size="30" font-weight="700" fill="#EAB308"
+        letter-spacing="3">/ˈʃɛli/ — YOUR SHELL, ON TELEGRAM</text>
+  <text x="570" y="334" font-size="27" fill="#9CA3AF">minimal Unix-composable personal agent.</text>
+</svg>

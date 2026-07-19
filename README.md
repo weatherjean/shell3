@@ -1,6 +1,8 @@
-# ๑ï shell3 /'ʃɛli/
+<p align="center">
+  <img src="docs/assets/shell3-banner.svg" alt="๑ï shell3 /ˈʃɛli/ — your shell, on Telegram — minimal Unix-composable personal agent" width="100%">
+</p>
 
-A minimal, Unix-composable coding agent you run as a personal **Telegram bot**.
+A minimal, Unix-composable personal agent you run as a **Telegram bot**.
 One binary, one config directory of YAML + markdown, any OpenAI-compatible
 endpoint.
 
@@ -13,6 +15,12 @@ software, not like a platform.
 shell3 boot        # interactive form: model + endpoint + key, vision, Telegram bot token + chat id
 shell3 telegram    # start the bot — now message it from Telegram
 ```
+
+## How it works
+
+<p align="center">
+  <img src="docs/assets/shell3-diagram.svg" alt="Diagram: you chat with shell3 over Telegram; the shell3 binary gates every tool call through your hook script, runs an LLM agent with bash and edit tools against your shell, subagents and MCP servers; everything is declared by one folder of plain files under ~/.shell3/" width="100%">
+</p>
 
 ## Install
 

@@ -24,7 +24,7 @@ var version = "dev"
 func main() {
 	root := &cobra.Command{
 		Use:   "shell3",
-		Short: "Minimal Unix-composable coding agent",
+		Short: "Minimal Unix-composable personal agent",
 	}
 
 	// NoArgs: a typo'd subcommand or a bare prompt ("shell3 fix this bug") must
