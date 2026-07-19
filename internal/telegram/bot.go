@@ -32,7 +32,7 @@ type Bot struct {
 	voiceMode *media.ModeStore // per-chat inbound-voice-reply mode; nil when unconfigured
 
 	askMu          sync.Mutex           // guards pending + askSeq + voiceMenuMsgID
-	pending        map[string]chan bool // on_tool_call Ask id → answer channel
+	pending        map[string]chan bool // tool-call hook Ask id → answer channel
 	askSeq         int                  // monotonic id source for Ask
 	voiceMenuMsgID int                  // msgID of the most recent /voice menu, for its "vm|" callback edit
 

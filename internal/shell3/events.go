@@ -60,7 +60,7 @@ type Event struct {
 	ToolCallID       string // ToolCall, ToolResult (links a call to its result)
 	ToolInput        string // ToolCall (raw JSON args)
 	ToolOutput       string // ToolResult
-	ToolError        bool   // ToolResult — the tool reported an error (an on_tool_call denial, a dispatch/validation failure, or a host tool failure; bash builtin exit codes are not classified)
+	ToolError        bool   // ToolResult — the tool reported an error (a tool-call hook denial, a dispatch/validation failure, or a host tool failure; bash builtin exit codes are not classified)
 	IsHostTool       bool   // ToolCall (resolved against the active agent's host-tool set)
 	PromptTokens     int    // Usage, Done
 	CompletionTokens int    // Usage, Done

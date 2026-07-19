@@ -22,12 +22,13 @@ models:
     model: playai-tts
 
 media:
-  stt: { model: groq-whisper }                    # voice notes → text
+  stt: { model: groq-whisper, echo: true }        # voice notes → text
   tts: { model: groq-tts, voice: Fritz-PlayAI, mode: inbound }
 ```
 
 Add `GROQ_API_KEY=...` to `.env`, `/reload`, and send the bot a voice note —
-it replies with a `📝 "…"` transcript, runs the turn, and (because
+it replies with a `📝 "…"` transcript (`echo: true`; omit it to transcribe
+silently), runs the turn, and (because
 `mode: inbound`) speaks the reply back as a voice note. Switch modes any time
 with `/voice off|inbound|always`.
 

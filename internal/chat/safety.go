@@ -7,14 +7,14 @@ import (
 
 // AskFunc asks a human to approve command (reason explains why it was gated).
 // Front-ends supply it (an interactive approval prompt). Nil means no human is
-// attached (headless subagent) — on_tool_call then denies instead of asking.
+// attached (headless subagent) — the tool-call hook then denies instead of asking.
 type AskFunc func(ctx context.Context, command, reason string) bool
 
 // DefaultAskTimeout bounds how long an ask verdict waits for a human before it
 // falls back to deny. Applied when a handler's ask verdict sets no ask_timeout.
 const DefaultAskTimeout = 5 * time.Minute
 
-// ToolCallAction is the disposition of an on_tool_call chain run.
+// ToolCallAction is the disposition of a tool-call hook chain run.
 type ToolCallAction int
 
 const (
@@ -23,7 +23,7 @@ const (
 	ActionAsk
 )
 
-// ToolCallVerdict is the result of the on_tool_call chain for one invocation.
+// ToolCallVerdict is the result of the tool-call hook chain for one invocation.
 type ToolCallVerdict struct {
 	Action     ToolCallAction
 	Argv       []string      // Run: exec exactly this
@@ -46,12 +46,12 @@ type ToolCallVerdict struct {
 func resolveGate(ctx context.Context, asker AskFunc, v ToolCallVerdict) (allowed bool, blockMsg string) {
 	switch v.Action {
 	case ActionBlock:
-		return false, "error: blocked by on_tool_call: " + v.Reason
+		return false, "error: blocked by tool-call hook: " + v.Reason
 	case ActionAsk:
 		if resolveAsk(ctx, asker, v) {
 			return true, ""
 		}
-		return false, "error: blocked by on_tool_call — needs human approval (" + v.Reason +
+		return false, "error: blocked by tool-call hook — needs human approval (" + v.Reason +
 			"). Stop and ask the human before running this."
 	default: // ActionRun
 		return true, ""
@@ -81,7 +81,7 @@ func isBashTool(name string) bool {
 	return name == "bash" || name == "bash_bg"
 }
 
-// gateNonBashTool runs the on_tool_call chain for a non-bash tool (edit_file,
+// gateNonBashTool runs the tool-call hook chain for a non-bash tool (edit_file,
 // read_media, host tools, …) before it dispatches.
 // The chain sees the real t.name and a nil t.command (only bash tools carry a
 // command), so handlers gate these by t.name / t.args. Only nil / block / ask are
@@ -102,7 +102,7 @@ func gateNonBashTool(ctx context.Context, cfg ToolConfig, name, argsJSON string)
 	// shape — is bash-only and fails closed here. (An ask-approved call is
 	// exempt: the human explicitly approved this exact invocation.)
 	if v.Action == ActionRun && !v.Passthrough {
-		return "error: blocked by on_tool_call: a {command=...} or {argv=...} verdict " +
+		return "error: blocked by tool-call hook: a {command=...} or {argv=...} verdict " +
 			"applies only to bash tools, not " + name + ".", true
 	}
 	return "", false

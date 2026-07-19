@@ -20,7 +20,7 @@ func TestBashHandlerBlocks(t *testing.T) {
 		},
 	}
 	out, _ := BashHandler{}.Execute(context.Background(), "1", bashArgs("rm -rf /"), cfg)
-	if !strings.Contains(out, "blocked by on_tool_call") {
+	if !strings.Contains(out, "blocked by tool-call hook") {
 		t.Fatalf("want block message, got %q", out)
 	}
 }

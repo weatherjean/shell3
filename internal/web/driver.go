@@ -14,7 +14,7 @@ import (
 // Driver runs the conversation loop for the standalone web front-end (shell3
 // web): it starts turns for POST /api/send (interjecting when one is already
 // running), runs queued wake turns (subagent/cron/bg completions), and parks
-// on_tool_call asks for the browser to answer. Replies need no delivery path —
+// tool-call hook asks for the browser to answer. Replies need no delivery path —
 // they land in session history, which the page polls. It mirrors
 // telegram.Bot's turn slot; extracting a shared driver is deliberate future
 // work.
@@ -47,7 +47,7 @@ type Driver struct {
 	onUsage func(prompt, completion, total int)
 }
 
-// Ask is one pending on_tool_call approval, waiting for POST /api/ask.
+// Ask is one pending tool-call hook approval, waiting for POST /api/ask.
 type Ask struct {
 	ID      string `json:"id"`
 	Command string `json:"command"`

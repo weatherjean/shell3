@@ -53,7 +53,7 @@ func (BashHandler) Execute(ctx context.Context, id string, args json.RawMessage,
 	return out, nil
 }
 
-// gateBash runs the on_tool_call chain for a bash/bash_bg command and resolves
+// gateBash runs the tool-call hook chain for a bash/bash_bg command and resolves
 // the verdict to either an argv to exec or a block message for the model. name is
 // the real tool name ("bash" or "bash_bg") so the handler sees the exact tool.
 // On allow, the verdict argv runs exactly as approved (it carries any rewrite

@@ -95,7 +95,7 @@ fi
 	t.Run("tool_call_blocks_via_turn", func(t *testing.T) {
 		events := runToolCallTurn(t, lc, dir, "run dangerous command",
 			llm.ToolCall{ID: "1", Name: "bash", RawArgs: `{"command":"rm -rf /"}`}, nil)
-		assertToolResultContains(t, events, "blocked by on_tool_call")
+		assertToolResultContains(t, events, "blocked by tool-call hook")
 	})
 
 	// --- Turn 2: the tool-result hook redacts the model-visible bash output ---

@@ -366,7 +366,7 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 		// built-ins so a config-declared tool name always wins) — and run it
 		// through the single execute path.
 		if !invalid {
-			// shell3.on_tool_call is the only policy surface, and it fires before
+			// The tool-call hook is the only policy surface, and it fires before
 			// every tool. The bash family (bash, bash_bg) self-gates inside its
 			// handlers, where command rewrite and runner-swap are resolved; every
 			// other tool is gated here by name/args (block / ask only — t.command

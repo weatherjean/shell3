@@ -51,7 +51,7 @@ func newTelegramCommand() *cobra.Command {
 			// does not switch agents). WorkDir roots its tools, defaulting to the
 			// runtime root when unset.
 			//
-			// b is declared before the session so the on_tool_call Asker closure can
+			// b is declared before the session so the tool-call hook Asker closure can
 			// capture it; it is assigned just below, before any turn runs (and the
 			// Asker only fires mid-turn).
 			var b *telegram.Bot

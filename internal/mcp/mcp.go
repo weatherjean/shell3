@@ -28,7 +28,7 @@ import (
 const defaultTimeout = 10 * time.Second
 
 // ToolPrefix + "<server>_<tool>" is the model-facing name of every MCP tool.
-// on_tool_call gates match on it (t.name), so the prefix is part of the
+// tool-call hook gates match on it (t.name), so the prefix is part of the
 // public config surface — never change it casually.
 const ToolPrefix = "mcp_"
 

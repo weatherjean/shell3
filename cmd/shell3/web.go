@@ -48,7 +48,7 @@ func newWebCommand() *cobra.Command {
 				return fmt.Errorf("no web config: add a web: block (addr, secret: env:SHELL3_WEB_SECRET) to shell3.yaml")
 			}
 			if wc.Secret == "" {
-				return fmt.Errorf("shell3.web: secret is required (an empty secret must never mean \"no auth\") — set secret = shell3.env.secret(\"SHELL3_WEB_SECRET\")")
+				return fmt.Errorf("shell3.web: secret is required (an empty secret must never mean \"no auth\") — set secret: env:SHELL3_WEB_SECRET in the web: block")
 			}
 
 			// Match the bot's session identity: the runs store keys the latest

@@ -28,9 +28,9 @@ type Session struct {
 	sess     *chat.Session
 	handlers map[string]chat.ToolHandler
 
-	// asker is the session's on_tool_call confirm runner, threaded into every
+	// asker is the session's tool-call hook confirm runner, threaded into every
 	// turn's TurnConfig.Asker (see
-	// turnConfig). nil keeps on_tool_call ask-verdicts denying.
+	// turnConfig). nil keeps tool-call hook ask-verdicts denying.
 	asker func(ctx context.Context, command, reason string) bool
 
 	// sink is the JSONL audit log, opened by Runtime.Session
@@ -73,7 +73,7 @@ type Session struct {
 	// racing session teardown) is rejected with ErrClosed instead of running a
 	// turn against the ended store record.
 	closed bool
-	// safetyOff auto-allows on_tool_call ask verdicts without prompting (the
+	// safetyOff auto-allows tool-call hook ask verdicts without prompting (the
 	// front-ends' disable_safety toggle). Consulted at ask time, so a mid-turn
 	// toggle applies to the next ask.
 	safetyOff bool
@@ -379,7 +379,7 @@ func (s *Session) SendParts(ctx context.Context, prompt string, parts []Part) <-
 	return out
 }
 
-// SetSafetyOff toggles auto-allowing on_tool_call ask verdicts for this
+// SetSafetyOff toggles auto-allowing tool-call hook ask verdicts for this
 // session — the host-side switch behind the front-ends' disable_safety
 // command. While on, an ask verdict runs without prompting a human; block
 // verdicts are unaffected. Off by default; takes effect immediately,
@@ -566,7 +566,7 @@ func (s *Session) turnConfigLocked() chat.TurnConfig {
 	cfg := s.cfg
 	tc := chat.NewTurnConfig(cfg, s.handlers)
 	baseAsker := s.asker
-	// t.headless for the on_tool_call chain: no attached asker means an ask
+	// t.headless for the tool-call hook chain: no attached asker means an ask
 	// verdict would degrade to deny. Per-session, recomputed every turn.
 	tc.HeadlessAsk = baseAsker == nil
 	tc.Asker = func(ctx context.Context, command, reason string) bool {

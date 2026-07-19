@@ -75,7 +75,7 @@ func newDevCommand() *cobra.Command {
 				Name:         "dev",
 				WorkDir:      tg.WorkDir,
 				ResumeLatest: resume,
-				// A human is at the terminal: auto-approve on_tool_call ask verdicts
+				// A human is at the terminal: auto-approve tool-call hook ask verdicts
 				// (and say so) so dev runs unattended but stays transparent about
 				// what a gate would have prompted.
 				Asker: func(_ context.Context, command, reason string) bool {

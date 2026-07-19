@@ -44,7 +44,7 @@ type Snapshot struct {
 	// host-registered), for introspection and front-end feature gating.
 	Tools  []ToolInfo
 	Params []ParamValue
-	// ToolHooksOn reports whether shell3.on_tool_call hooks are declared in the
+	// ToolHooksOn reports whether tool-call hook scripts are declared in the
 	// loaded config. When false the shell is unsafe by default, which a front-end
 	// surfaces with a standing "!" indicator.
 	ToolHooksOn bool

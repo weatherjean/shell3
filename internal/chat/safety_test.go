@@ -20,7 +20,7 @@ func TestResolveAskAllows(t *testing.T) {
 	}
 }
 
-// Non-bash tools fire on_tool_call too, under their real name with a nil command,
+// Non-bash tools fire the tool-call hook too, under their real name with a nil command,
 // and a block verdict stops them.
 func TestGateNonBashToolBlocks(t *testing.T) {
 	cfg := ToolConfig{RunToolCall: func(_ context.Context, name, command, _ string, _ bool) ToolCallVerdict {
@@ -104,7 +104,7 @@ func TestGateNonBashToolAskNoAskerBlocks(t *testing.T) {
 // Ask allowed by the human runs exactly what was approved.
 
 // TestGatesForwardHeadlessAsk: each gate site passes cfg.HeadlessAsk into the
-// on_tool_call chain unmodified.
+// tool-call hook chain unmodified.
 func TestGatesForwardHeadlessAsk(t *testing.T) {
 	for _, headless := range []bool{true, false} {
 		var got *bool

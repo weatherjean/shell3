@@ -73,7 +73,7 @@ type ToolConfig struct {
 	// CancelJob cancels a running job and returns a short confirmation or error
 	// for the task_cancel tool. Nil ⇒ task management unavailable.
 	CancelJob func(id string) string
-	// RunToolCall runs the shell3.on_tool_call chain (pass / rewrite / argv / block /
+	// RunToolCall runs the tool-call hook chain (pass / rewrite / argv / block /
 	// ask) with the real tool name. The bash family self-gates via this in their
 	// handlers (gateBash); every other tool is gated in the
 	// dispatch loop via gateNonBashTool. Nil = no hooks declared (everything runs —

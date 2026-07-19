@@ -10,11 +10,11 @@ import (
 	"github.com/weatherjean/shell3/internal/strutil"
 )
 
-// confirmPrefix tags the callback_data of an on_tool_call approval button so the
+// confirmPrefix tags the callback_data of a tool-call hook approval button so the
 // callback handler can tell it apart from any other inline keyboard.
 const confirmPrefix = "bs"
 
-// Ask presents an on_tool_call approval request as an inline keyboard with
+// Ask presents a tool-call hook approval request as an inline keyboard with
 // Allow/Deny buttons and blocks until the user taps one (or ctx is cancelled).
 // It returns true to allow. It is wired as the session's Asker, so it runs on
 // the turn goroutine while Run keeps consuming callbacks on its own goroutine.
