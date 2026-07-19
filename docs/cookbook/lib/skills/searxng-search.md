@@ -7,7 +7,7 @@ description: Keyless web search via the local SearXNG instance — aggregated re
 
 Use this skill when a task needs current information, external facts, or
 source-grounded answers. Searches go through the self-hosted SearXNG
-instance on `localhost:8888` — keyless, private, aggregated across
+instance on `localhost:47821` — keyless, private, aggregated across
 Google/Brave/Startpage/DDG.
 
 ## Usage
@@ -33,7 +33,7 @@ Google/Brave/Startpage/DDG.
   per-engine failures self-heal after a cooldown.
 - Empty results / connection refused → check the instance:
   `docker ps | grep searxng`, `docker logs searxng --tail 20`, and
-  `curl -s 'http://localhost:8888/search?q=test&format=json' | head -c 300`.
+  `curl -s 'http://localhost:47821/search?q=test&format=json' | head -c 300`.
   A stopped container restarts with
   `cd ~/.shell3/lib/searxng && docker compose up -d`.
 - If the instance was never set up (no `~/.shell3/lib/searxng/`), tell the

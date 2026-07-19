@@ -41,7 +41,7 @@ echo "SEARXNG_SECRET=$(openssl rand -hex 32)" > .env
 docker compose up -d
 ```
 
-The compose file binds to `127.0.0.1:8888` only, enables the JSON API, and
+The compose file binds to `127.0.0.1:47821` only, enables the JSON API, and
 disables the bot-limiter (safe on localhost).
 
 ## 3. Install the wrapper script
@@ -53,7 +53,7 @@ disables the bot-limiter (safe on localhost).
 # searxng-search <query> [count] — titles, URLs, snippets from local SearXNG
 set -euo pipefail
 q="${1:?usage: searxng-search <query> [count]}"; n="${2:-5}"
-curl -fsS --max-time 20 -G "http://localhost:8888/search" \
+curl -fsS --max-time 20 -G "http://localhost:47821/search" \
   --data-urlencode "q=${q}" --data-urlencode "format=json" \
 | jq -r --argjson n "$n" \
   '.results[:$n][] | .title + "\n  " + .url + "\n  " + (.content // "") + "\n"'

@@ -1,57 +1,44 @@
 ---
 name: camoufox-fetch
-description: Fetch bot-protected or JS-heavy pages as rendered text via Camoufox, an anti-detect Firefox. Use when plain curl/web-fetch gets blocked (Cloudflare, DataDome) or returns an empty JS shell
+description: Fetch bot-protected or JS-heavy pages as rendered text via Camoufox, an anti-detect Firefox in a one-shot docker container. Use when plain curl/web-fetch gets blocked (Cloudflare, DataDome) or returns an empty JS shell
 ---
 
 # Camoufox Fetch Skill
 
 Camoufox is a hardened Firefox fork (fingerprints patched at the C++ level,
 driven through Playwright) that reads pages plain HTTP fetching can't:
-Cloudflare-walled docs, JS-rendered apps, sites that 403 curl. Reach for it
-only after a normal fetch fails — it's a full browser per call, so it is
-slow (~5-15s) and heavy.
+Cloudflare-walled docs, JS-rendered apps, sites that 403 curl. It runs as a
+one-shot docker container per fetch — no host python, fresh fingerprint
+every call. Reach for it only after a normal fetch fails: each call boots a
+full browser (~15-30s) inside a ~2 GB image.
 
 ## Setup (once)
 
-**Prerequisite: Python 3.10+.** Check first: `python3 -V`. If the system
-python is older, don't fight it — ask the user whether to install
-[uv](https://docs.astral.sh/uv/) (one command, no root:
-`curl -LsSf https://astral.sh/uv/install.sh | sh`), then create a dedicated
-env and use its interpreter everywhere below:
+**Prerequisite: docker.** Check first: `command -v docker && docker info
+>/dev/null 2>&1 && echo ok`. If missing, stop and tell the user what to
+install (Docker Desktop or OrbStack on macOS, the distro package on Linux).
+
+Fetch the image sources and build (the build downloads the browser, so it
+takes a few minutes and ~2 GB of image):
 
 ```bash
-uv venv --seed --python 3.12 ~/.shell3/lib/camoufox-env
+base=https://raw.githubusercontent.com/weatherjean/shell3/main/docs/cookbook
+mkdir -p ~/.shell3/lib/camoufox
+curl -fsS "$base/lib/camoufox/Dockerfile" -o ~/.shell3/lib/camoufox/Dockerfile
+curl -fsS "$base/lib/camoufox/fetch.py"   -o ~/.shell3/lib/camoufox/fetch.py
+docker build -t shell3-camoufox ~/.shell3/lib/camoufox
 ```
 
-(`--seed` matters — without it the env has no pip.)
-
-Also confirm the user is OK with the download — the browser is ~1.2 GB on
-disk. Then:
+Wrapper — `~/.shell3/lib/bin/camoufox-fetch`, `chmod +x`:
 
 ```bash
-~/.shell3/lib/camoufox-env/bin/pip install -U "camoufox[geoip]"   # or plain pip if python3 >= 3.10
-~/.shell3/lib/camoufox-env/bin/python -m camoufox fetch
-```
-
-Wrapper script — `~/.shell3/lib/bin/camoufox-fetch` (create and `chmod +x`
-if missing):
-
-```python
-#!/usr/bin/env python3
+#!/usr/bin/env bash
 # camoufox-fetch <url> [selector] — rendered page text via anti-detect Firefox
-# shebang: point at the interpreter that has camoufox installed
-# (e.g. ~/.shell3/lib/camoufox-env/bin/python if you made the uv env above)
-import sys
-from camoufox.sync_api import Camoufox
-
-url = sys.argv[1] if len(sys.argv) > 1 else sys.exit("usage: camoufox-fetch <url> [selector]")
-sel = sys.argv[2] if len(sys.argv) > 2 else "body"
-with Camoufox(headless=True, humanize=True) as browser:
-    page = browser.new_page()
-    page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-    page.wait_for_timeout(2_500)  # let JS challenges / hydration settle
-    print(page.inner_text(sel)[:20_000])
+exec docker run --rm shell3-camoufox "$@"
 ```
+
+Verify: `~/.shell3/lib/bin/camoufox-fetch "https://example.com"` should
+print the page text.
 
 ## Usage
 
@@ -65,19 +52,21 @@ with Camoufox(headless=True, humanize=True) as browser:
 - Escalation ladder: `web-fetch` (curl) → this script → the browser skill
   (headed Chrome) when you need clicks, forms, or a login session.
 - A blocked page usually shows challenge text ("Verifying you are
-  human…") — retry once; persistent walls from a datacenter IP need a
-  residential proxy (`Camoufox(proxy={...}, geoip=True)` derives locale and
-  timezone from the proxy IP).
+  human…") — retry once (each run is a fresh fingerprint); persistent walls
+  from a datacenter IP need a residential proxy (add
+  `proxy={...}, geoip=True` to `fetch.py`'s `Camoufox(...)` — geoip derives
+  locale and timezone from the proxy IP).
 
 ## Notes
 
-- Linux servers: `headless="virtual"` runs it head-fully under Xvfb
-  (`apt install xvfb`) — noticeably stealthier than plain headless.
-- Each call launches a fresh browser (fresh fingerprint, no state). For many
-  fetches in one task there is an experimental
-  `python -m camoufox server` websocket mode any Playwright client can
-  connect to, but the one-shot script is the reliable default.
+- Each call is an ephemeral container: fresh fingerprint, no state, no
+  idle RAM between fetches.
+- Update occasionally (fingerprint/browser fixes ship upstream):
+  `docker build --no-cache -t shell3-camoufox ~/.shell3/lib/camoufox`.
+- No docker on this host? There is a pip route: with Python 3.10+ (or
+  `uv venv --seed --python 3.12 <env>`), `pip install -U "camoufox[geoip]"`,
+  `python -m camoufox fetch` (~1 GB into the user cache), then run
+  `fetch.py` with that interpreter.
 - Project status (July 2026): actively maintained again after a 2025 gap —
-  Clover Labs took over maintenance, current builds track Firefox 152, and
-  the PyPI package is `camoufox` 0.5.x. Update with
-  `pip install -U "camoufox[geoip]" && python -m camoufox fetch`.
+  Clover Labs took over, current builds track Firefox 152, PyPI package
+  `camoufox` 0.5.x.

@@ -39,7 +39,7 @@ already ships `browser` — headed Chrome via puppeteer-core)
 - `searxng-search.md` — keyless web search via that instance (the permanent skill).
 - `camoufox-fetch.md` — fetch bot-protected / JS-heavy pages with Camoufox (anti-detect Firefox).
 
-**Compose bundles** (`lib/searxng/` here → your `~/.shell3/lib/searxng/`)
+**Docker bundles** (`lib/<name>/` here → your `~/.shell3/lib/<name>/`)
 
 - `searxng/` — ready-to-go `docker-compose.yml` + `settings.yml` for the
   local search instance: JSON API on, bot-limiter off, localhost-only.
@@ -51,6 +51,9 @@ already ships `browser` — headed Chrome via puppeteer-core)
   curl -fsS "$base/lib/searxng/docker-compose.yml" -o ~/.shell3/lib/searxng/docker-compose.yml
   curl -fsS "$base/lib/searxng/settings.yml" -o ~/.shell3/lib/searxng/settings.yml
   ```
+
+- `camoufox/` — `Dockerfile` + `fetch.py` for the one-shot anti-bot fetcher
+  image used by the `camoufox-fetch` skill (install lines in the skill).
 
 **Subagents** (`lib/agents/` here → your `~/.shell3/agents/`)
 
