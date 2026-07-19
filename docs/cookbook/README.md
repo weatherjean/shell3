@@ -15,6 +15,15 @@ The two extensible pieces, in one breath:
   `scripting` skill teaches the pattern (see
   [Scripts & secrets](../configuration.md#scripts--secrets)).
 
+Install without a checkout: every file here is fetchable raw (the scaffold's
+`cookbook` skill teaches the agent this, so you can just ask your bot for a
+capability and it can install the recipe itself):
+
+```bash
+base=https://raw.githubusercontent.com/weatherjean/shell3/main/docs/cookbook
+curl -fsS "$base/lib/skills/web-search.md" -o ~/.shell3/skills/web-search.md
+```
+
 Full reference: [../configuration.md](../configuration.md).
 
 ## Contents
@@ -26,6 +35,22 @@ already ships `browser` — headed Chrome via puppeteer-core)
 - `executing-plans.md` — safe execution and a git workflow once a plan is agreed.
 - `codebase-discovery.md` — navigating unfamiliar code, pruning context aggressively.
 - `web-search.md` — web research via `brave-search` / `web-fetch` wrapper scripts.
+- `searxng-setup.md` — one-time setup of the local SearXNG instance; delete after it's done.
+- `searxng-search.md` — keyless web search via that instance (the permanent skill).
+- `camoufox-fetch.md` — fetch bot-protected / JS-heavy pages with Camoufox (anti-detect Firefox).
+
+**Compose bundles** (`lib/searxng/` here → your `~/.shell3/lib/searxng/`)
+
+- `searxng/` — ready-to-go `docker-compose.yml` + `settings.yml` for the
+  local search instance: JSON API on, bot-limiter off, localhost-only.
+  Install:
+
+  ```bash
+  base=https://raw.githubusercontent.com/weatherjean/shell3/main/docs/cookbook
+  mkdir -p ~/.shell3/lib/searxng
+  curl -fsS "$base/lib/searxng/docker-compose.yml" -o ~/.shell3/lib/searxng/docker-compose.yml
+  curl -fsS "$base/lib/searxng/settings.yml" -o ~/.shell3/lib/searxng/settings.yml
+  ```
 
 **Subagents** (`lib/agents/` here → your `~/.shell3/agents/`)
 

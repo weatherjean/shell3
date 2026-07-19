@@ -1,0 +1,13 @@
+# Minimal SearXNG override for a single-user localhost instance.
+# - json format enables the API (off by default: format=json would 403)
+# - limiter/public_instance off so curl isn't bot-blocked; safe because the
+#   compose file binds the port to 127.0.0.1 only
+# The secret key comes from the SEARXNG_SECRET env var (see compose file).
+use_default_settings: true
+server:
+  limiter: false
+  public_instance: false
+search:
+  formats:
+    - html
+    - json
