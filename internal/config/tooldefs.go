@@ -36,6 +36,7 @@ var bashBgTool = llm.ToolDefinition{
 		"properties": map[string]any{
 			"command": map[string]any{"type": "string", "description": "The shell command to run in the background"},
 			"workdir": map[string]any{"type": "string", "description": "Working directory; defaults to the project root"},
+			"force_wake": map[string]any{"type": "boolean", "description": "When true, wake the agent immediately on completion even if the command succeeds (by default only failures wake; clean exits queue for the next turn)"},
 		},
 		"required": []string{"command"},
 	},
@@ -137,7 +138,7 @@ var TaskCancelTool = llm.ToolDefinition{
 
 var bashTool = llm.ToolDefinition{
 	Name:        "bash",
-	Description: "Execute a shell command in the project directory. Returns combined stdout and stderr. Non-interactive only — editors and REPLs (vim, less, python) will hang, so run them non-interactively (flags, heredocs, -c). Default timeout is 10s; pass timeout_seconds (max 600) for slower commands. Read files with cat / sed -n / rg; list directories with ls / find.",
+	Description: "Execute a shell command in the project directory. Returns combined stdout and stderr. Non-interactive only — editors and REPLs (vim, less, python) will hang, so run them non-interactively (flags, heredocs, -c). Default timeout is 10s; pass timeout_seconds (max 120) for slower commands. A foreground call blocks your whole turn — run anything slower than ~2 minutes via bash_bg instead (force_wake:true if you need the result promptly). Read files with cat / sed -n / rg; list directories with ls / find.",
 	Parameters: map[string]any{
 		"type": "object",
 		"properties": map[string]any{

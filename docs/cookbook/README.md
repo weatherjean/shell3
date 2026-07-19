@@ -39,6 +39,15 @@ already ships `browser` — headed Chrome via puppeteer-core)
 - `searxng-search.md` — keyless web search via that instance (the permanent skill).
 - `camoufox-fetch.md` — fetch bot-protected / JS-heavy pages with Camoufox (anti-detect Firefox).
 
+**Coding-agent skills** (same dir; each drives a coding agent installed on
+the machine — the scaffold's `coding-agent` stub tells the bot to bring you
+here and let you pick; delete the stub once one of these lands)
+
+- `claude-code.md` — delegate implementation work to Claude Code (`claude -p`).
+- `codex.md` — the same pattern for the OpenAI Codex CLI (`codex exec`, sandbox levels).
+- `opencode.md` — the same pattern for opencode (`opencode run`; run mode auto-approves everything).
+- `pi.md` — the same pattern for pi (`pi -p`; minimal by design, **no sandbox at all**).
+
 **Docker bundles** (`lib/<name>/` here → your `~/.shell3/lib/<name>/`)
 
 - `searxng/` — ready-to-go `docker-compose.yml` + `settings.yml` for the

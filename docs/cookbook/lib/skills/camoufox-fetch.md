@@ -49,8 +49,11 @@ print the page text.
 
 - Pass a CSS selector to skip nav/footer noise; output is capped at 20k
   chars — refine the selector rather than raising the cap.
-- Escalation ladder: `web-fetch` (curl) → this script → the browser skill
-  (headed Chrome) when you need clicks, forms, or a login session.
+- **Typical workflow:** `searxng-search` to find results → `camoufox-fetch`
+  to read the actual pages (works where curl gets blocked).
+- Escalation ladder: `web-fetch` (curl) → `camoufox-fetch` (anti-detect FF)
+  → the **browser skill** (headed Chrome) when you need clicks, forms, or
+  a login session.
 - A blocked page usually shows challenge text ("Verifying you are
   human…") — retry once (each run is a fresh fingerprint); persistent walls
   from a datacenter IP need a residential proxy (add

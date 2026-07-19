@@ -394,6 +394,53 @@ func TestToMessagesAssistantReasoningContentEchoed(t *testing.T) {
 	}
 }
 
+// A thinking-mode conversation (any assistant message carrying reasoning)
+// must serialize reasoning_content on EVERY assistant message, empty string
+// included: DeepSeek's thinking mode 400s a tool-call round whose assistant
+// message lacks the field ("reasoning_content … must be passed back").
+func TestToMessagesThinkingModeEchoesEmptyReasoning(t *testing.T) {
+	msgs := []llm.Message{
+		{
+			Role:             llm.RoleAssistant,
+			ReasoningContent: "thought about it",
+			ToolCalls:        []llm.ToolCall{{ID: "1", Name: "bash", RawArgs: `{}`}},
+		},
+		{Role: llm.RoleTool, Content: "ok", ToolCallID: "1"},
+		{
+			Role:      llm.RoleAssistant, // hop that emitted no reasoning
+			ToolCalls: []llm.ToolCall{{ID: "2", Name: "edit_file", RawArgs: `{}`}},
+		},
+	}
+	out := toMessages(msgs)
+	raw, err := out[2].MarshalJSON()
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"reasoning_content":""`) {
+		t.Fatalf("empty reasoning_content not echoed in thinking mode: %s", raw)
+	}
+}
+
+// Without any reasoning in the history the vendor extension must stay off the
+// wire entirely — strict providers (api.openai.com) reject unknown fields.
+func TestToMessagesNoReasoningNoField(t *testing.T) {
+	msgs := []llm.Message{
+		{
+			Role:      llm.RoleAssistant,
+			Content:   "plain",
+			ToolCalls: []llm.ToolCall{{ID: "1", Name: "bash", RawArgs: `{}`}},
+		},
+	}
+	out := toMessages(msgs)
+	raw, err := out[0].MarshalJSON()
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(raw), "reasoning_content") {
+		t.Fatalf("reasoning_content leaked into non-thinking conversation: %s", raw)
+	}
+}
+
 func TestToMessagesToolResult(t *testing.T) {
 	msgs := []llm.Message{
 		{Role: llm.RoleTool, Content: "output", ToolCallID: "tc1"},

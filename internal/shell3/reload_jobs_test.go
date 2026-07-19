@@ -14,7 +14,7 @@ func TestReloadRefusesWhileJobsRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
-	id, err := rt.jobs.startCommand(parent, "sleep", t.TempDir(), []string{"sleep", "30"}, nil)
+	id, err := rt.jobs.startCommand(parent, "sleep", t.TempDir(), []string{"sleep", "30"}, nil, false)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}

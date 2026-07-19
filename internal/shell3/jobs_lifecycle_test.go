@@ -85,7 +85,7 @@ func TestSubagentCancelMidRun(t *testing.T) {
 // return — no hang, no write-after-close on the store. Run under -race.
 func TestRuntimeClose_JoinsLiveCommandJob(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
-	if _, err := rt.jobs.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "30"}, nil); err != nil {
+	if _, err := rt.jobs.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "30"}, nil, false); err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
 

@@ -6,12 +6,15 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"time"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+
+	"github.com/weatherjean/shell3/internal/applog"
 )
 
 const maxMediaBytes = 25 * 1024 * 1024 // 25 MB
@@ -21,16 +24,39 @@ const maxMediaBytes = 25 * 1024 * 1024 // 25 MB
 var mediaHTTPClient = &http.Client{Timeout: 60 * time.Second}
 
 type BotAPIClient struct {
-	b   *bot.Bot
-	out chan Msg
-	cb  chan Callback
+	b      *bot.Bot
+	out    chan Msg
+	cb     chan Callback
+	log    applog.Logger
+	health *pollHealth
 }
 
 // NewBotAPIClient builds the real Telegram transport. token comes from config
-// (rt.Telegram().Token) — never print it.
-func NewBotAPIClient(ctx context.Context, token string) (*BotAPIClient, error) {
-	c := &BotAPIClient{out: make(chan Msg, 32), cb: make(chan Callback, 64)}
-	b, err := bot.New(token, bot.WithDefaultHandler(c.onUpdate))
+// (rt.Telegram().Token) — never print it. lg records transport errors
+// (getUpdates failures during a network outage) in the app log; nil is
+// allowed and logs nowhere.
+func NewBotAPIClient(ctx context.Context, token string, lg applog.Logger) (*BotAPIClient, error) {
+	if lg == nil {
+		lg = applog.Noop{}
+	}
+	c := &BotAPIClient{
+		out: make(chan Msg, 32), cb: make(chan Callback, 64),
+		log: lg, health: newPollHealth(),
+	}
+	b, err := bot.New(token,
+		bot.WithDefaultHandler(c.onUpdate),
+		// The library retries failed polls forever on its own; this handler
+		// only makes outages visible. Throttled so a long network drop is a
+		// handful of log lines, not thousands.
+		bot.WithErrorsHandler(func(err error) {
+			if errors.Is(err, context.Canceled) {
+				return // clean shutdown aborting the pending poll, not an outage
+			}
+			if logNow, fails := c.health.fail(); logNow {
+				c.log.Warn("telegram transport error (bot keeps retrying)", "error", err, "errors_this_outage", fails)
+			}
+		}),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -40,6 +66,11 @@ func NewBotAPIClient(ctx context.Context, token string) (*BotAPIClient, error) {
 }
 
 func (c *BotAPIClient) onUpdate(ctx context.Context, b *bot.Bot, u *models.Update) {
+	// An update arriving proves the poll loop is healthy again; close out any
+	// outage the errors handler recorded.
+	if recovered, outage, fails := c.health.ok(); recovered {
+		c.log.Warn("telegram transport recovered", "outage", outage.Round(time.Second).String(), "errors", fails)
+	}
 	// Inline-keyboard button presses (tool-call hook approval) arrive as callback
 	// queries, not messages. Route them to the callback channel and stop.
 	if u.CallbackQuery != nil {

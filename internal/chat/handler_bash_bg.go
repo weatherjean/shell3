@@ -17,8 +17,9 @@ func (BashBgHandler) Name() string { return "bash_bg" }
 
 func (BashBgHandler) Execute(ctx context.Context, id string, args json.RawMessage, cfg ToolConfig) (string, error) {
 	var p struct {
-		Command string `json:"command"`
-		Workdir string `json:"workdir"`
+		Command   string `json:"command"`
+		Workdir   string `json:"workdir"`
+		ForceWake bool   `json:"force_wake"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("bash_bg: invalid args: %w", err)
@@ -37,7 +38,7 @@ func (BashBgHandler) Execute(ctx context.Context, id string, args json.RawMessag
 	if wd == "" {
 		wd = cfg.WorkDir
 	}
-	jobID, err := cfg.StartBashBg(p.Command, wd, argv, nil)
+	jobID, err := cfg.StartBashBg(p.Command, wd, argv, nil, p.ForceWake)
 	if err != nil {
 		return "", fmt.Errorf("bash_bg: %w", err)
 	}

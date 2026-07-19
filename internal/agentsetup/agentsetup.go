@@ -83,6 +83,9 @@ func (p *Parts) MCPStatus() []mcp.ServerStatus {
 // store-open itself failed, which is non-fatal and logged).
 func (p *Parts) Store() *runs.Store { return p.st }
 
+// Log returns the application logger (never nil once BuildParts succeeded).
+func (p *Parts) Log() applog.Logger { return p.log }
+
 // ConfigDir returns the resolved absolute config directory that produced these
 // parts (recorded per session for resume).
 func (p *Parts) ConfigDir() string { return p.configDir }

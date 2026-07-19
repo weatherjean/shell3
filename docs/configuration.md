@@ -160,7 +160,9 @@ never gets the `task` tool.
 
 `bash_bg` runs on the same job runtime but is gated separately by `bash_bg`
 in `tools`. A nonzero exit **wakes** an idle agent so failures surface
-proactively; a clean exit queues its notice for the next turn. A subagent's
+proactively; a clean exit queues its notice for the next turn — unless the
+call set `force_wake: true`, which makes clean completions wake too (for
+jobs whose result the agent wants to act on immediately). A subagent's
 still-running `bash_bg` job keeps its session open past its main turn; each
 completion resumes the subagent for a follow-up turn whose summary reaches the
 main agent as a notice (capped at 5 per subagent — past the cap, or after

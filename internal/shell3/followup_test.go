@@ -109,7 +109,7 @@ func TestSubagentLingersAndRunsFollowUp(t *testing.T) {
 	if child == nil {
 		t.Fatal("child session not recorded on the job")
 	}
-	if _, err := rt.jobs.startCommand(child, "sleep", t.TempDir(), []string{"sleep", "0.3"}, nil); err != nil {
+	if _, err := rt.jobs.startCommand(child, "sleep", t.TempDir(), []string{"sleep", "0.3"}, nil, false); err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
 
@@ -167,7 +167,7 @@ func TestCancelSubagentCascades(t *testing.T) {
 	rt.jobs.mu.Lock()
 	child := rt.jobs.jobs[id].child
 	rt.jobs.mu.Unlock()
-	jobID, err := rt.jobs.startCommand(child, "sleep", t.TempDir(), []string{"sleep", "30"}, nil)
+	jobID, err := rt.jobs.startCommand(child, "sleep", t.TempDir(), []string{"sleep", "30"}, nil, false)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestOrphanJobDegradesToRoot(t *testing.T) {
 	child := rt.jobs.jobs[id].child
 	rt.jobs.jobs[id].noFollowUps = true // poison: no follow-up turns
 	rt.jobs.mu.Unlock()
-	if _, err := rt.jobs.startCommand(child, "sleep", t.TempDir(), []string{"sleep", "0.3"}, nil); err != nil {
+	if _, err := rt.jobs.startCommand(child, "sleep", t.TempDir(), []string{"sleep", "0.3"}, nil, false); err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
 	close(g.Release)

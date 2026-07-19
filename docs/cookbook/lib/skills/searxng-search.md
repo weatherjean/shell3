@@ -21,8 +21,11 @@ Google/Brave/Startpage/DDG.
   engine (`!go` Google, `!ddg`). Extra API params (`time_range=day|month|year`,
   `language=en`, `categories=…`) can be added to the wrapper's curl as
   `--data-urlencode` args.
-- A snippet is not the page. Fetch the promising URLs (the `web-fetch`
-  script, or the browser skill for JS-heavy pages) before quoting details.
+- **A snippet is not the page.** Always fetch full pages before quoting details.
+  Escalation ladder:
+  1. `web-fetch` (plain curl) — works for most sites
+  2. `camoufox-fetch` — for Cloudflare/DataDome/JS-heavy pages
+  3. **browser skill** (headed Chrome) — for login-gated or interactive pages
 - Prefer official docs and primary sources; cross-check important claims;
   refine queries instead of repeating them.
 

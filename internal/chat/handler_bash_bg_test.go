@@ -19,7 +19,7 @@ func TestBashBgHandler_Execute_happyPath(t *testing.T) {
 	var gotCmd string
 	cfg := ToolConfig{
 		WorkDir: wd,
-		StartBashBg: func(command, workdir string, argv, env []string) (string, error) {
+		StartBashBg: func(command, workdir string, argv, env []string, forceWake bool) (string, error) {
 			gotCmd = command
 			return "bg_1", nil
 		},
@@ -65,7 +65,7 @@ func TestBashBgHandler_Execute_workdirOverride(t *testing.T) {
 	var gotWorkdir string
 	cfg := ToolConfig{
 		WorkDir: primary,
-		StartBashBg: func(command, workdir string, argv, env []string) (string, error) {
+		StartBashBg: func(command, workdir string, argv, env []string, forceWake bool) (string, error) {
 			gotWorkdir = workdir
 			return "bg_2", nil
 		},
@@ -83,11 +83,34 @@ func TestBashBgHandler_Execute_workdirOverride(t *testing.T) {
 	}
 }
 
+func TestBashBgHandler_Execute_forceWake(t *testing.T) {
+	var gotForceWake bool
+	cfg := ToolConfig{
+		WorkDir: t.TempDir(),
+		StartBashBg: func(command, workdir string, argv, env []string, forceWake bool) (string, error) {
+			gotForceWake = forceWake
+			return "bg_3", nil
+		},
+	}
+	if _, err := (BashBgHandler{}).Execute(context.Background(), "1", json.RawMessage(`{"command":"true","force_wake":true}`), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if !gotForceWake {
+		t.Fatal("force_wake=true did not reach the start callback")
+	}
+	if _, err := (BashBgHandler{}).Execute(context.Background(), "1", json.RawMessage(`{"command":"true"}`), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if gotForceWake {
+		t.Fatal("force_wake should default to false when omitted")
+	}
+}
+
 func TestBashBgUsesStartCallback(t *testing.T) {
 	var gotCmd string
 	cfg := ToolConfig{
 		WorkDir: t.TempDir(),
-		StartBashBg: func(command, workdir string, argv, env []string) (string, error) {
+		StartBashBg: func(command, workdir string, argv, env []string, forceWake bool) (string, error) {
 			gotCmd = command
 			return "bg1", nil
 		},

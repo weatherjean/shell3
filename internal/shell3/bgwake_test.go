@@ -15,12 +15,30 @@ func TestFailedCommandJobWakesParent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
-	if _, err := rt.jobs.startCommand(parent, "false", t.TempDir(), []string{"false"}, nil); err != nil {
+	if _, err := rt.jobs.startCommand(parent, "false", t.TempDir(), []string{"false"}, nil, false); err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
 	waitForWake(t, rt, parent)
 	if !parent.HasQueuedInput() {
 		t.Fatal("expected the failure notice queued in the parent inbox")
+	}
+}
+
+// TestForceWakeCommandJobWakesParentOnCleanExit verifies that a bash_bg job
+// started with force_wake wakes the parent even when it exits 0, taking the
+// same injectNotification path a failure does.
+func TestForceWakeCommandJobWakesParentOnCleanExit(t *testing.T) {
+	rt := newTestRuntime(t, fakeCfg("x"))
+	parent, err := rt.Session(SessionOpts{})
+	if err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	if _, err := rt.jobs.startCommand(parent, "true", t.TempDir(), []string{"true"}, nil, true); err != nil {
+		t.Fatalf("startCommand: %v", err)
+	}
+	waitForWake(t, rt, parent)
+	if !parent.HasQueuedInput() {
+		t.Fatal("expected the completion notice queued in the parent inbox")
 	}
 }
 
@@ -32,7 +50,7 @@ func TestCleanCommandJobStaysQuiet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
-	if _, err := rt.jobs.startCommand(parent, "true", t.TempDir(), []string{"true"}, nil); err != nil {
+	if _, err := rt.jobs.startCommand(parent, "true", t.TempDir(), []string{"true"}, nil, false); err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
 	rt.jobs.wait() // job goroutine done → notice injected (or not)

@@ -80,7 +80,7 @@ func newTelegramCommand() *cobra.Command {
 				}
 			}()
 
-			client, err := telegram.NewBotAPIClient(ctx, tg.Token)
+			client, err := telegram.NewBotAPIClient(ctx, tg.Token, rt.Parts().Log())
 			if err != nil {
 				return err
 			}

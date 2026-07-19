@@ -77,6 +77,19 @@ func TestBashHandler_Execute_timeout(t *testing.T) {
 	}
 }
 
+// A foreground bash call blocks the whole turn, so the requested timeout must
+// clamp to MaxBashTimeoutSeconds — the model cannot buy back the old 10-minute
+// wedge by passing a huge timeout_seconds.
+func TestParseBashArgsClampsTimeout(t *testing.T) {
+	_, timeout, err := parseBashArgsFull(`{"command":"sleep 1","timeout_seconds":600}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Duration(MaxBashTimeoutSeconds) * time.Second; timeout != want {
+		t.Fatalf("timeout not clamped: got %s, want %s", timeout, want)
+	}
+}
+
 // Grandchild that inherits stdout would hang Run() forever without WaitDelay
 // because the bytes.Buffer copy goroutine waits on a pipe the dead bash
 // child no longer holds but the surviving grandchild still does.

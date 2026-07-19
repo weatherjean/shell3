@@ -434,6 +434,20 @@ func rawContentParts(parts []llm.ContentPart) []any {
 }
 
 func toMessages(msgs []llm.Message) []openai.ChatCompletionMessageParamUnion {
+	// Thinking mode is a conversation-level property: once any assistant
+	// message carries reasoning, thinking providers (DeepSeek) require the
+	// reasoning_content field on EVERY assistant message passed back — a
+	// tool-call hop that happened to emit no reasoning still needs the field
+	// (empty), or the next request 400s with "reasoning_content … must be
+	// passed back to the API". Conversations with no reasoning anywhere keep
+	// the vendor extension off the wire so strict providers stay happy.
+	thinking := false
+	for _, m := range msgs {
+		if m.Role == llm.RoleAssistant && m.ReasoningContent != "" {
+			thinking = true
+			break
+		}
+	}
 	out := make([]openai.ChatCompletionMessageParamUnion, 0, len(msgs))
 	for _, m := range msgs {
 		switch m.Role {
@@ -501,7 +515,7 @@ func toMessages(msgs []llm.Message) []openai.ChatCompletionMessageParamUnion {
 			// The SDK has no field for the reasoning_content vendor extension
 			// (see llm.Message.ReasoningContent); inject via SetExtraFields so
 			// it survives MarshalJSON.
-			if m.ReasoningContent != "" {
+			if thinking {
 				asst.SetExtraFields(map[string]any{"reasoning_content": m.ReasoningContent})
 			}
 			out = append(out, openai.ChatCompletionMessageParamUnion{OfAssistant: &asst})

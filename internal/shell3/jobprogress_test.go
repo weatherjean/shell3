@@ -73,7 +73,7 @@ func TestJobProgressIntegration(t *testing.T) {
 		t.Fatalf("Session: %v", err)
 	}
 
-	id, err := rt.jobs.startCommand(sess, "echo hello", t.TempDir(), []string{"echo", "hello"}, nil)
+	id, err := rt.jobs.startCommand(sess, "echo hello", t.TempDir(), []string{"echo", "hello"}, nil, false)
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}

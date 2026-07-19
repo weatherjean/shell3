@@ -1088,7 +1088,7 @@ func TestSessionJobsFromManager(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = rt.jobs.startCommand(s, "sleep 1", t.TempDir(), []string{"sleep", "1"}, nil)
+	_, _ = rt.jobs.startCommand(s, "sleep 1", t.TempDir(), []string{"sleep", "1"}, nil, false)
 	jobs := s.Jobs()
 	if len(jobs) != 1 || jobs[0].Kind != JobCommand {
 		t.Fatalf("Session.Jobs = %+v, want one JobCommand", jobs)
