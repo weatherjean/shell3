@@ -34,8 +34,8 @@ var bashBgTool = llm.ToolDefinition{
 	Parameters: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"command": map[string]any{"type": "string", "description": "The shell command to run in the background"},
-			"workdir": map[string]any{"type": "string", "description": "Working directory; defaults to the project root"},
+			"command":    map[string]any{"type": "string", "description": "The shell command to run in the background"},
+			"workdir":    map[string]any{"type": "string", "description": "Working directory; defaults to the project root"},
 			"force_wake": map[string]any{"type": "boolean", "description": "When true, wake the agent immediately on completion even if the command succeeds (by default only failures wake; clean exits queue for the next turn)"},
 		},
 		"required": []string{"command"},
