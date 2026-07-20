@@ -151,7 +151,7 @@ func TestBootEndToEnd(t *testing.T) {
 	for _, p := range []string{
 		"shell3.yaml", "agent.md", "agents/explorer.md",
 		"hooks/tool-call.sh", "hooks/explorer.tool-call.sh",
-		"skills/brainstorming.md", "skills/scripting.md", ".env",
+		"skills/planning.md", "skills/scripting.md", ".env",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
 			t.Errorf("missing %s: %v", p, err)

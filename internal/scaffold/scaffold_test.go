@@ -53,7 +53,7 @@ func TestRenderBaseConfig(t *testing.T) {
 	for _, p := range []string{
 		"agents/explorer.md",
 		"hooks/tool-call.sh", "hooks/explorer.tool-call.sh",
-		"skills/brainstorming.md", "skills/history.md",
+		"skills/planning.md", "skills/history.md",
 		"skills/self-evolve.md", "skills/browser.md", "skills/scripting.md",
 		"skills/cookbook.md",
 	} {
@@ -194,7 +194,7 @@ func TestRenderedConfigLoads(t *testing.T) {
 	for _, s := range a.Skills {
 		got[s.Name] = true
 	}
-	for _, want := range []string{"brainstorming", "browser", "coding-agent", "cookbook", "history", "self-evolve", "scripting"} {
+	for _, want := range []string{"planning", "browser", "coding-agent", "cookbook", "history", "self-evolve", "scripting"} {
 		if !got[want] {
 			t.Errorf("scaffold skill %q missing from agent (got %v)", want, got)
 		}

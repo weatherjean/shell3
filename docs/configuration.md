@@ -117,7 +117,7 @@ system prompt. There is exactly one agent because there is exactly one
 model: main
 tools: [bash, bash_bg, edit, media]
 ---
-You are a careful pair-programmer…
+You are a personal assistant running inside shell3…
 ```
 
 Frontmatter keys: `model` (required), `tools` (any of `bash`, `bash_bg`,
