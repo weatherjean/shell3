@@ -1,11 +1,13 @@
 ---
 name: executing-plans
-description: Execute approved plans with safe git workflow, scoped commits, and validation
+description: Git workflow for executing an approved plan that touches a repo — protect user work, feature branches, scoped commits, validation
 ---
 
-# Executing Plans Skill
+# Executing Plans in a Git Repo
 
-Use this skill after a plan has been written and approved. This skill includes the git workflow; do not use a separate git skill.
+Use this skill when an approved plan (see your `planning` skill) touches a
+git repository. It covers the git side; the plan file and approval gate come
+from `planning`.
 
 ## Preflight: protect user work
 
@@ -48,7 +50,7 @@ Branch naming: use a short descriptive branch name such as `feat/help-rendering`
 
 If the plan and reality diverge:
 
-- Minor mismatch: adapt narrowly and report the adjustment.
+- Minor mismatch: adapt narrowly and report the adjustment; note it in the plan file.
 - Major mismatch, new risk, or scope increase: pause and ask before proceeding.
 
 ## Validation rules
@@ -59,7 +61,7 @@ If the plan and reality diverge:
 
 ## Completion checklist
 
-- Planned scope completed.
+- Planned scope completed; plan status footer updated.
 - Working tree state reviewed.
 - Relevant commits created if approved.
 - Required validation passed or blockers reported.

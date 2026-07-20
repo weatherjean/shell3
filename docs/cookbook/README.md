@@ -31,8 +31,8 @@ Full reference: [../configuration.md](../configuration.md).
 **Skills** (`lib/skills/` here → your `~/.shell3/skills/`; the scaffold
 already ships `browser` — headed Chrome via puppeteer-core)
 
-- `writing-plans.md` — a planning + approval gate before non-trivial changes.
-- `executing-plans.md` — safe execution and a git workflow once a plan is agreed.
+- `executing-plans.md` — git workflow for approved plans that touch a repo
+  (the plan + approval gate itself is built in: the scaffold's `planning` skill).
 - `codebase-discovery.md` — navigating unfamiliar code, pruning context aggressively.
 - `web-search.md` — web research via `brave-search` / `web-fetch` wrapper scripts.
 - `searxng-setup.md` — one-time setup of the local SearXNG instance; delete after it's done.
