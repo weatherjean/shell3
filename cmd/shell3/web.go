@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -38,7 +37,9 @@ func newWebCommand() *cobra.Command {
 				return err
 			}
 			defer rt.Close()
-			home := filepath.Dir(resolved)
+			// resolved IS the config directory (~/.shell3): file-explorer
+			// root and tunnel.log anchor here.
+			home := resolved
 
 			wc := rt.Web()
 			if addr != "" {

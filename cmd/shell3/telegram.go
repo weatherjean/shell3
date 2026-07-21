@@ -36,7 +36,9 @@ func newTelegramCommand() *cobra.Command {
 				return err
 			}
 			defer rt.Close()
-			tgHome := filepath.Dir(resolved)
+			// resolved IS the config directory (~/.shell3): workdir default,
+			// file-explorer root, and tunnel.log all anchor here.
+			tgHome := resolved
 
 			tg := rt.Telegram()
 			if tg.Token == "" || tg.ChatID == "" {
@@ -133,7 +135,7 @@ func newTelegramCommand() *cobra.Command {
 				fmt.Printf("warning: could not set commands: %v\n", err)
 			}
 
-			srv := serveDashboard(ctx, rt, b, sess, sched, tg, chatID, filepath.Dir(resolved))
+			srv := serveDashboard(ctx, rt, b, sess, sched, tg, chatID, tgHome)
 
 			// /reload + reload tool: rebuild config, re-decorate the session, swap
 			// the cron scheduler. Coordination lives in reloadAndRearm (testable);

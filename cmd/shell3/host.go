@@ -5,7 +5,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"path/filepath"
+	"time"
 
 	"github.com/weatherjean/shell3/internal/cron"
 	"github.com/weatherjean/shell3/internal/shell3"
@@ -56,6 +58,12 @@ func armCron(disp cron.Dispatcher, jobs []shell3.CronJob) (*cron.Scheduler, erro
 // by addr) and the first https URL it prints is delivered asynchronously.
 // No-op when neither is configured; a tunnel that prints no URL warns and
 // stays local.
+//
+// A tunnel-printed URL is probed until it actually serves before it is
+// announced: a quick tunnel's fresh hostname can take a while to route at the
+// edge (Cloudflare answers 530 until then), and announcing early points the
+// Mini App menu button at a URL that opens as a blank error page. An explicit
+// url is assumed stable and announced immediately.
 func announcePublicURL(url, tunnelCmd, addr, home string, onURL func(string)) {
 	switch {
 	case url != "":
@@ -63,12 +71,37 @@ func announcePublicURL(url, tunnelCmd, addr, home string, onURL func(string)) {
 	case tunnelCmd != "" && addr != "":
 		urls := tunnel.Start(tunnelCmd, addr, filepath.Join(home, "tunnel.log"))
 		go func() {
-			if u, ok := <-urls; ok {
-				onURL(u)
-			} else {
+			u, ok := <-urls
+			if !ok {
 				fmt.Println("warning: tunnel printed no https URL; staying local (see tunnel.log)")
+				return
 			}
+			waitURLServes(u, 3*time.Minute)
+			onURL(u)
 		}()
+	}
+}
+
+// waitURLServes polls u until it answers with any non-edge-error HTTP status
+// (< 500) or the deadline passes; either way the caller proceeds — this only
+// delays the announcement, it never blocks it forever. Status codes are enough:
+// an auth challenge (401/404) still proves the tunnel routes to us.
+func waitURLServes(u string, deadline time.Duration) {
+	client := &http.Client{Timeout: 5 * time.Second}
+	end := time.Now().Add(deadline)
+	for {
+		resp, err := client.Get(u)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode < 500 {
+				return
+			}
+		}
+		if time.Now().After(end) {
+			fmt.Printf("warning: %s still not serving after %s; announcing anyway (see tunnel.log)\n", u, deadline)
+			return
+		}
+		time.Sleep(3 * time.Second)
 	}
 }
 

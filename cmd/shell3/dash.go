@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -47,7 +46,7 @@ func newDashCommand() *cobra.Command {
 			}
 
 			srv := web.NewServer(rt, sess, web.NoAuth())
-			srv.SetConfigDir(filepath.Dir(resolved))
+			srv.SetConfigDir(resolved)
 			srv.SetHeartbeatSource(func() *web.HeartbeatStatus {
 				return web.HeartbeatFromConfig(rt.HeartbeatConfig(), false)
 			})
