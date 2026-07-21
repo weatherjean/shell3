@@ -30,6 +30,7 @@ type bootFlags struct {
 	vision                       bool
 	visionSet                    bool // --vision passed explicitly (skips the form's confirm)
 	force                        bool
+	show                         bool // print the post-boot summary and exit
 }
 
 func newBootCommand() *cobra.Command {
@@ -41,6 +42,9 @@ func newBootCommand() *cobra.Command {
   shell3 boot --url https://api.deepseek.com/v1 --model deepseek-chat --name main \
     --tg-token 123:ABC --tg-chat-id 8701499393`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if f.show {
+				return showBootSuccess()
+			}
 			f.visionSet = cmd.Flags().Changed("vision")
 			return runBoot(f)
 		},
@@ -56,6 +60,7 @@ func newBootCommand() *cobra.Command {
 	cmd.Flags().StringVar(&f.tgChatID, "tg-chat-id", "", "Telegram chat id the bot answers")
 	cmd.Flags().BoolVar(&f.vision, "vision", true, "Model can see images (wires media.describe to it and enables the media tool)")
 	cmd.Flags().BoolVar(&f.force, "force", false, "Overwrite an existing ~/.shell3 config (shell3.yaml, agent.md, ...)")
+	cmd.Flags().BoolVar(&f.show, "show", false, "Print the post-boot summary for the existing config and exit (changes nothing)")
 	return cmd
 }
 
@@ -120,7 +125,51 @@ func runBoot(f *bootFlags) error {
 		fmt.Printf("note: kept the existing %s in %s — edit that file to change it\n", k, envPath)
 	}
 
-	printBootSuccess(dir, cfgPath, envPath, a.proxy != "")
+	// Gently offer the dashboard tunnel binary when missing (opt-in, no sudo,
+	// every failure non-fatal) — before the service step so a started service
+	// finds it.
+	offerCloudflared(tty)
+
+	// Offer to install the bot as a systemd user service (Linux + TTY only).
+	// Startable only when the Telegram wiring is complete — an enabled unit
+	// with no token would just crash-loop.
+	svc := offerSystemdService(tty, dir, home, a.tgToken != "" && a.tgChatID != "")
+
+	printBootSuccess(dir, cfgPath, envPath, a.proxy != "", svc)
+	return nil
+}
+
+// showBootSuccess reprints the post-boot summary for the existing config —
+// the same message boot ends on, re-derived from what's on disk (nothing is
+// written or asked). Handy after the original ran off the top of the terminal.
+func showBootSuccess() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("boot: home dir: %w", err)
+	}
+	dir := paths.NewGlobal(home).Root
+	cfgPath := filepath.Join(dir, "shell3.yaml")
+	yaml, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return fmt.Errorf("boot --show: no config at %s — run `shell3 boot` first", cfgPath)
+	}
+
+	// Re-derive the two message variants from disk: an uncommented run_proxy
+	// line means a proxy is wired; an installed unit file means the service
+	// step succeeded on this machine.
+	proxyWired := false
+	for _, line := range strings.Split(string(yaml), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "run_proxy:") {
+			proxyWired = true
+			break
+		}
+	}
+	svc := serviceNotOffered
+	if _, err := os.Stat(filepath.Join(home, ".config", "systemd", "user", serviceUnitName)); err == nil {
+		svc = serviceEnabled
+	}
+
+	printBootSuccess(dir, cfgPath, filepath.Join(dir, ".env"), proxyWired, svc)
 	return nil
 }
 
@@ -400,44 +449,88 @@ func mergeEnv(existing string, kv [][2]string) (merged string, kept []string) {
 	return b.String(), kept
 }
 
-func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool) {
-	fmt.Println()
-	fmt.Println("shell3 is configured. Your config is the directory itself:")
-	fmt.Printf("  wiring:  %s\n", cfgPath)
-	fmt.Printf("  agent:   %s  (+ agents/, skills/, hooks/)\n", filepath.Join(dir, "agent.md"))
-	fmt.Printf("  secrets: %s  (never commit this)\n", envPath)
+func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool, svc serviceState) {
+	var b strings.Builder
+	w := func(format string, args ...any) { fmt.Fprintf(&b, format+"\n", args...) }
+
+	w("# shell3 is configured")
+	w("")
+	w("Your config is the directory itself:")
+	w("")
+	w("- **wiring** — `%s`", cfgPath)
+	w("- **agent** — `%s` + `agents/`, `skills/`, `hooks/`", filepath.Join(dir, "agent.md"))
+	w("- **secrets** — `%s` (never commit this)", envPath)
 	if proxyWired {
-		fmt.Println("  proxy:   run_proxy wired — shell3 starts it when the model is first used.")
-	} else {
-		fmt.Println("  proxy:   none. If your endpoint is a proxy you launch (e.g. a Codex")
-		fmt.Println("           subscription via `npx ...`), add run_proxy to the model block.")
+		w("- **proxy** — `run_proxy` wired; started when the model is first used")
 	}
-	fmt.Println()
-	fmt.Printf("Take a minute to open %s and look it over —\n", cfgPath)
-	fmt.Println("the model block (context_window, compact_at) is worth a glance, and")
-	fmt.Println("hooks/tool-call.sh is your command gate (it ships permissive with a")
-	fmt.Println("commented example). Some models also need a provider-specific")
-	fmt.Println("`extra: { ... }` field (e.g. MiniMax wants reasoning_split: true).")
-	fmt.Println()
-	fmt.Println("Edit agent.md for the prompt, drop skills into skills/, add subagents")
-	fmt.Println("as agents/<name>.md — recipes live in the repo under docs/cookbook/.")
-	fmt.Println()
-	fmt.Println("shell3 talks to you over Telegram. Make sure TELEGRAM_BOT_TOKEN is set")
-	fmt.Println("in .env and chat_id is filled in shell3.yaml, then run:")
-	fmt.Println()
-	fmt.Println("Run:  shell3 telegram")
-	fmt.Println()
-	fmt.Println("No Telegram? `shell3 web` serves the same dashboard plus a browser chat;")
-	fmt.Println("it prints a ready-to-open URL (the generated SHELL3_WEB_SECRET as ?key=).")
-	fmt.Println()
-	fmt.Println("The Mini App dashboard is exposed through a cloudflared tunnel by")
-	fmt.Println("default (free, no account) — install it so the dashboard is reachable")
-	fmt.Println("from your phone (e.g. `brew install cloudflared` on macOS):")
-	fmt.Println("  https://github.com/cloudflare/cloudflared")
-	fmt.Println("Not installed? The bot still runs; the dashboard just stays local.")
-	fmt.Println("Prefer another tunnel? Edit telegram.dashboard.tunnel/url in shell3.yaml.")
+	w("")
+	w("Worth a glance before first run: the model block (`context_window`,")
+	w("`compact_at`), and `hooks/tool-call.sh` — your command gate (ships")
+	w("permissive, with a commented example). Some providers need an")
+	w("`extra: { ... }` field (e.g. MiniMax wants `reasoning_split: true`).")
+	w("")
+	w("Edit `agent.md` for the prompt, drop skills into `skills/`, add subagents")
+	w("as `agents/<name>.md` — recipes live in the repo under `docs/cookbook/`.")
+	w("")
+
+	switch svc {
+	case serviceEnabled:
+		w("## Run it")
+		w("")
+		w("Installed as a **systemd user service** — running now and on every boot:")
+		w("")
+		w("```")
+		w("systemctl --user status %s   # state + recent log", serviceUnitName)
+		w("journalctl --user -u %s -f   # follow the log", serviceUnitName)
+		w("```")
+		w("")
+		w("**Sleep caveat:** a user service can't stop the machine from")
+		w("suspending. On a laptop, the bot is gone while the lid is closed —")
+		w("disable sleep (GNOME: Settings → Power; or logind's")
+		w("`HandleLidSwitch=ignore`) or host shell3 on an always-on box.")
+	case serviceFailed:
+		w("## Run it")
+		w("")
+		w("Service setup didn't finish (see the warning above) — start manually:")
+		w("")
+		w("```")
+		w("shell3 telegram")
+		w("```")
+	default:
+		w("## Run it")
+		w("")
+		w("shell3 talks to you over Telegram. With `TELEGRAM_BOT_TOKEN` in `.env`")
+		w("and `chat_id` in `shell3.yaml`:")
+		w("")
+		w("```")
+		w("shell3 telegram")
+		w("```")
+		w("")
+		w("No Telegram? `shell3 web` serves the same dashboard plus a browser")
+		w("chat and prints a ready-to-open URL (`SHELL3_WEB_SECRET` as `?key=`).")
+	}
+
+	w("")
+	w("**Try it without Telegram first:** `shell3 dev \"hi\"` drives the same")
+	w("agent from this terminal with full verbose output — every tool call,")
+	w("result, and token count (`--resume` continues the last session). The")
+	w("fastest way to check the config works and watch what the agent does.")
+	w("")
+	w("## Dashboard")
+	w("")
+	w("The Mini App dashboard is exposed through a **cloudflared** quick tunnel")
+	w("by default (free, no account) so it's reachable from your phone.")
 	if _, err := exec.LookPath("cloudflared"); err != nil {
-		fmt.Println()
-		fmt.Println("NOTE: cloudflared was not found on PATH on this machine.")
+		w("")
+		w("`cloudflared` is **not on PATH** on this machine — install it")
+		w("(<https://github.com/cloudflare/cloudflared>) or the dashboard stays")
+		w("local. Another tunnel or a fixed address works too:")
+		w("`telegram.dashboard.tunnel` / `url` in `shell3.yaml`.")
+	} else {
+		w("Prefer another tunnel or a fixed address? Edit")
+		w("`telegram.dashboard.tunnel` / `url` in `shell3.yaml`.")
 	}
+
+	fmt.Println()
+	fmt.Print(cli.RenderMarkdown(b.String()))
 }
