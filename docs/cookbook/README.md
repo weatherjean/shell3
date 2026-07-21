@@ -17,7 +17,8 @@ The two extensible pieces, in one breath:
 
 Install without a checkout: every file here is fetchable raw (the scaffold's
 `cookbook` skill teaches the agent this, so you can just ask your bot for a
-capability and it can install the recipe itself):
+capability and it can install the recipe itself — after telling you what the
+recipe would install and getting your yes):
 
 ```bash
 base=https://raw.githubusercontent.com/weatherjean/shell3/main/docs/cookbook

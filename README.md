@@ -36,6 +36,29 @@ Installs the right prebuilt binary to `~/.local/bin` (make sure it's on your
 Unix-like systems only (Linux, macOS — WSL works). Windows is not supported:
 shell3 leans on Unix process groups.
 
+## Update
+
+Updating is the install command again — it fetches the latest release and
+overwrites the binary in `~/.local/bin`; your config (`~/.shell3/`) and
+history are untouched:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/weatherjean/shell3/main/install.sh | sh
+```
+
+A running bot keeps executing the old binary until restarted:
+
+```sh
+systemctl --user restart shell3-telegram.service   # running as a service (boot offers this)
+# otherwise: stop the running `shell3 telegram` and start it again
+```
+
+`shell3 --version` confirms what you're on. To pin a specific release:
+`curl -fsSL … | VERSION=vX.Y.Z sh` (or grab it from the
+[releases page](https://github.com/weatherjean/shell3/releases)). If you
+installed via `go install`, update the same way:
+`go install github.com/weatherjean/shell3/cmd/shell3@latest`.
+
 ## Quickstart
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) and note its token;

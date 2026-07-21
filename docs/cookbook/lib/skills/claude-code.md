@@ -87,9 +87,9 @@ In the shell3 codebase at ~/code/agents/shell3:
 
 1. Find where bash_bg's argument schema is defined (look in internal/chat/ 
    or internal/llm/ for tool definitions)
-2. Add an optional boolean parameter "force_wake" defaulting to false
+2. Add an optional boolean parameter "quiet" defaulting to false
 3. Plumb it through to internal/shell3/jobs.go's finishCommand so that 
-   when force_wake=true, even exit-0 jobs inject a Wake event
+   when quiet=true, exit-0 jobs queue their notice instead of waking
 4. Update any related types or callers
 5. Build: go build -o shell3 .
 6. Return a summary of what you changed
@@ -136,26 +136,24 @@ plausible but is incomplete.
 background tasks that might need elevated permissions. For read-only
 research, no special flag is needed.
 
-### The force_wake parameter
+### The quiet parameter
 
-`bash_bg` accepts an optional `force_wake` boolean. Use it to get notified
-immediately on clean (exit 0) completions:
+`bash_bg` wakes you on completion by default. Pass `quiet: true` to keep
+routine long runs from interrupting:
 
-| `force_wake` | Exit 0 (clean) | Nonzero exit |
+| `quiet` | Exit 0 (clean) | Nonzero exit |
 |---|---|---|
-| `false` (default) | Queued silently — arrives on your next turn | Wakes you immediately |
-| `true` | Wakes you immediately | Wakes you immediately |
+| `false` (default) | Wakes you immediately | Wakes you immediately |
+| `true` | Queued silently — arrives on your next turn | Wakes you immediately |
 
 ```json
 bash_bg {
-  command: "cd ~/code/agents/shell3 && claude -p 'task' --output-format text --permission-mode acceptEdits",
-  force_wake: true
+  command: "cd ~/code/agents/shell3 && claude -p 'task' --output-format text --permission-mode acceptEdits"
 }
 ```
 
-Defaults to `false` to keep the chat quiet during routine long tasks. Set
-to `true` when you need to react as soon as the task finishes, regardless
-of success/failure.
+Use `quiet: true` for runs whose completion needs no immediate reaction;
+failures wake you either way.
 
 ---
 
@@ -179,7 +177,7 @@ return. Works best when the tasks don't depend on each other.
 ## Follow-ups with --continue
 
 ```bash
-cd ~/code/agents/shell3 && claude --continue -p "now also add tests for the force_wake parameter"
+cd ~/code/agents/shell3 && claude --continue -p "now also add tests for the quiet parameter"
 ```
 
 This continues the **most recent Claude Code session** in that directory,

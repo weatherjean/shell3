@@ -159,10 +159,11 @@ auto-denies), and delegation is single-level by construction — a subagent
 never gets the `task` tool.
 
 `bash_bg` runs on the same job runtime but is gated separately by `bash_bg`
-in `tools`. A nonzero exit **wakes** an idle agent so failures surface
-proactively; a clean exit queues its notice for the next turn — unless the
-call set `force_wake: true`, which makes clean completions wake too (for
-jobs whose result the agent wants to act on immediately). A subagent's
+in `tools`. Completion **wakes** an idle agent with a notice carrying an
+output tail, so results and failures surface proactively — unless the call
+set `quiet: true`, which queues clean exits for the agent's next turn
+instead (for servers, watchers, and side jobs whose completion needs no
+immediate action; failures still wake). A subagent's
 still-running `bash_bg` job keeps its session open past its main turn; each
 completion resumes the subagent for a follow-up turn whose summary reaches the
 main agent as a notice (capped at 5 per subagent — past the cap, or after
@@ -365,6 +366,15 @@ with a local-only dashboard. The default needs
 [`cloudflared`](https://github.com/cloudflare/cloudflared) installed — swap in
 any tunnel that prints an https URL, set a fixed `url` (a stable tunnel,
 `tailscale serve`), or delete both to stay local.
+
+A tunnel-printed URL is probed until it actually serves before the menu
+button is pointed at it (a fresh quick-tunnel hostname can take a little
+while to route). Note that a quick tunnel mints a **new hostname on every
+restart**, and Telegram clients cache the menu-button URL for a few minutes —
+so right after a bot restart the Mini App can open the previous, now-dead
+address. If restarts are routine (e.g. running under systemd), prefer a
+stable address: a named cloudflared tunnel, `tailscale serve`, or any fixed
+`url` — then restarts never invalidate the button.
 
 ## Standalone web front-end — `web:`
 

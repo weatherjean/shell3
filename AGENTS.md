@@ -35,10 +35,10 @@ runtime (`internal/shell3` jobManager) runs it as a child-session goroutine
 under a concurrency cap (`background.max_concurrent`, default 8) and, on
 completion, **wakes the parent with a capped result summary** injected into
 context — no subprocess, no inbox file, no fsnotify. `bash_bg` is a background
-shell command on the same runtime (no pid / log path to poll): a clean exit
-queues its notice for the agent's next turn (`force_wake: true` opts a job
-into waking on clean exit too), a **nonzero exit wakes** an idle
-agent so failures surface proactively. Foreground `bash` is capped at 120s
+shell command on the same runtime (no pid / log path to poll): completion
+**wakes** an idle agent with a notice carrying an output tail (`quiet: true`
+opts a job into queueing clean exits for the next turn instead — servers,
+watchers; nonzero exits always wake so failures surface proactively). Foreground `bash` is capped at 120s
 (`timeout_seconds`) precisely because it blocks the turn — longer work
 belongs in `bash_bg`. A subagent may run `bash_bg` jobs of
 its own; a job that outlives the subagent's main turn keeps the child session

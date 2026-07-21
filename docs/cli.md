@@ -64,9 +64,25 @@ One step asks whether the model can see images: yes wires `media.describe` to
 the main model (inbound Telegram images are captioned out of the box) and
 enables the `read_media` tool; no leaves media tooling off until you add a
 vision model.
+When [`cloudflared`](https://github.com/cloudflare/cloudflared) is missing,
+boot gently offers to install it (the dashboard tunnel): Homebrew when
+present, otherwise the official release binary into `~/.local/bin` — opt-in,
+no sudo, and declining or a failed download just leaves the dashboard
+local-only.
+
+On Linux with systemd, a final step offers to install the bot as a **systemd
+user service** (`shell3-telegram.service`): the unit is written to
+`~/.config/systemd/user/`, enabled, lingering is turned on
+(`loginctl enable-linger`, so the bot runs without an active login and starts
+at boot), and — when the Telegram wiring is complete — started immediately.
+Caveat spelled out at the end of boot too: a user service cannot prevent the
+machine from **sleeping**; on a laptop, disable suspend (or host shell3 on an
+always-on box) or the bot is gone while the lid is closed.
 Scriptable via flags (any flag skips its prompt; with no TTY, unset flags take
 defaults): `--url`, `--model`, `--name`, `--key`, `--vision`, `--tg-token`,
 `--tg-chat-id`, `--context-window`, `--compact-at`, `--proxy`, `--force`.
+`shell3 boot --show` reprints the post-boot summary for the existing config
+(paths, how to run, dashboard notes) without writing or asking anything.
 See [configuration.md](configuration.md).
 
 ## `shell3 health` — check the config

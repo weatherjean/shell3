@@ -1,12 +1,14 @@
 ---
 name: cookbook
-description: Install ready-made capabilities from the shell3 cookbook — web search, anti-bot browsing, review subagents, MCP/proxy/sandbox recipes. Use when the user asks for a capability you don't have, before writing a new skill from scratch
+description: Ready-made capabilities from the shell3 cookbook — web search, anti-bot browsing, review subagents, MCP/proxy/sandbox recipes. Check here FIRST whenever the user asks to set up, add, or use any capability you don't already have, before designing a solution or writing a skill from scratch
 ---
 
 The shell3 repo ships a cookbook of drop-in recipes — skills, subagents, and
-compose bundles you can install into this config. Before building a new
-capability yourself (see the self-evolve skill), check whether a recipe
-already exists.
+compose bundles you can install into this config. When the user asks for a
+capability you don't have ("set up web search", "can you browse X", "add a
+reviewer"), your FIRST move is this index — before asking scoping questions,
+before designing anything yourself (see the self-evolve skill for genuinely
+new capabilities).
 
 ## Browse the index
 
@@ -16,6 +18,15 @@ curl -fsS https://raw.githubusercontent.com/weatherjean/shell3/main/docs/cookboo
 
 Each entry says what it does and where its files live; entries carry their
 own install commands where extra files are needed.
+
+## Before installing: confirm
+
+Installing a recipe changes this config and can pull in real infrastructure.
+Once you've found the recipe, tell the user in one short message what it
+would install — the files, and any services it stands up (docker images,
+containers, ports, disk) — and get a yes before fetching anything. The user
+asking "can you do X?" is a question, not an install order. Skip the ask only
+when they've already named the recipe and told you to install it.
 
 ## Install a recipe
 

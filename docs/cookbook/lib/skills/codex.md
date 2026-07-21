@@ -46,13 +46,13 @@ run anything non-trivial via `bash_bg`:
 
 ```json
 bash_bg {
-  command: "cd /path/to/project && codex exec --sandbox workspace-write 'task'",
-  force_wake: true
+  command: "cd /path/to/project && codex exec --sandbox workspace-write 'task'"
 }
 ```
 
-`force_wake: true` wakes you the moment it finishes even on success;
-default false queues clean completions for your next turn.
+Completion wakes you with the result. For a run whose finish needs no
+immediate action, add `quiet: true` to queue clean exits for your next
+turn instead (failures still wake you).
 
 ## Follow-ups
 
