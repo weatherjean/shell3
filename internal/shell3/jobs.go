@@ -103,8 +103,7 @@ type bgJob struct {
 	cancel    context.CancelFunc
 	out       *jobSink // live output: command stdout/stderr, or subagent event stream
 	childID   string   // subagent: child runs id (transcript source)
-	quiet     bool     // subagent: completion notice queues without waking the parent
-	forceWake bool     // command: wake the parent even on a clean (exit 0) completion
+	quiet     bool     // completion notice queues without waking the parent (commands: quiet:true; subagents: quiet spawn)
 
 	// Subagent keep-open lifecycle (all guarded by jobManager.mu). A subagent
 	// that ends its main turn with bash_bg jobs still running is reported done
@@ -230,8 +229,9 @@ func (m *jobManager) evictOldestDoneIfNeeded() {
 // startCommand launches argv as a managed background job. env holds extra
 // "K=V" entries appended to the inherited environment (bash_bg jobs
 // inject their params this way); nil inherits the environment unchanged.
-// forceWake makes even a clean exit wake the parent (see finishCommand).
-func (m *jobManager) startCommand(parent *Session, command, workdir string, argv, env []string, forceWake bool) (string, error) {
+// quiet makes a clean exit queue its notice without waking the parent (see
+// finishCommand); failures wake regardless.
+func (m *jobManager) startCommand(parent *Session, command, workdir string, argv, env []string, quiet bool) (string, error) {
 	if len(argv) == 0 {
 		return "", errors.New("empty command argv")
 	}
@@ -267,7 +267,7 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 		id: id, kind: JobCommand, title: command, parent: parent,
 		parentID:  parentName(parent),
 		startedAt: time.Now(), cancel: cancel, out: out,
-		forceWake: forceWake,
+		quiet: quiet,
 	}
 	m.jobs[id] = j
 	m.mu.Unlock()
@@ -309,19 +309,25 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 // done, and retains it for post-completion inspection.
 //
 // Routing depends on who started the job:
-//   - Root session: a clean exit queues quietly (the agent sees it on its next
-//     turn) unless the job opted in with force_wake; a nonzero exit always
-//     WAKES an idle parent so failures surface proactively on a hosted
-//     (Telegram) agent.
+//   - Root session: completion WAKES an idle parent so results surface
+//     proactively on a hosted (Telegram) agent. A job started with quiet:true
+//     queues a clean exit for the agent's next turn instead; a nonzero exit
+//     always wakes so failures are never silent.
 //   - Subagent child session: the notice is injected into the still-open child
 //     and a follow-up driver resumes it (see runFollowUps) — unless follow-ups
 //     are unavailable (child closed, cap reached, poisoned, runtime closing),
 //     in which case the DEGRADE PATH delivers the raw notice to the root
 //     session so a completion is never lost.
+//
+// bgNoticeTailCap bounds (in bytes) the output tail carried by a bg_done
+// completion notice. Large enough that a typical fetch/build result is usable
+// directly; the notice points at `task_status <id>` for the rest.
+const bgNoticeTailCap = 1500
+
 func (m *jobManager) finishCommand(j *bgJob, exit int) {
 	outStr := j.out.String()
 	e := exit
-	n := notifyBg(j.id, j.title, &e, strutil.Tail(outStr, 400))
+	n := notifyBg(j.id, j.title, &e, strutil.Tail(outStr, bgNoticeTailCap))
 
 	m.mu.Lock()
 	owner := m.owningSubagentLocked(j.parent)
@@ -330,10 +336,10 @@ func (m *jobManager) finishCommand(j *bgJob, exit int) {
 	case j.parent == nil:
 		deliver = func() {}
 	case owner == nil:
-		// Root-session job: wake on failure (or when the job asked to force_wake
-		// its completion), queue quietly on success.
+		// Root-session job: wake on completion by default; a quiet job queues
+		// its clean exit for the next turn (failures wake regardless).
 		parent := j.parent
-		if (exit != 0 || j.forceWake) && m.rt != nil {
+		if (exit != 0 || !j.quiet) && m.rt != nil {
 			deliver = func() { parent.injectNotification(m.rt, n) }
 		} else {
 			deliver = func() { parent.injectNoticeNoWake(n) }
@@ -354,13 +360,13 @@ func (m *jobManager) finishCommand(j *bgJob, exit int) {
 		deliver = func() {}
 	default:
 		// Degrade path: deliver the raw notice to the root session, labeled
-		// with its origin. Same wake-on-failure rule as root jobs.
+		// with its origin. Same wake rule as root jobs.
 		root := owner.parent
 		n.Status = "started by subagent " + owner.id
 		switch {
 		case root == nil:
 			deliver = func() {}
-		case (exit != 0 || j.forceWake) && m.rt != nil && !m.closing:
+		case (exit != 0 || !j.quiet) && m.rt != nil && !m.closing:
 			deliver = func() { root.injectNotification(m.rt, n) }
 		default:
 			deliver = func() { root.injectNoticeNoWake(n) }

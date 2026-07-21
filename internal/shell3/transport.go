@@ -91,6 +91,7 @@ func renderNotification(n notify.Notification) string {
 		}
 		if n.Preview != "" {
 			msg += fmt.Sprintf(" Output tail: %s", n.Preview)
+			msg += fmt.Sprintf("\n(tail only — call `task_status %s` for more of the output)", n.ID)
 		}
 		return msg
 	case notify.KindAgentDone:

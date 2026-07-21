@@ -56,10 +56,10 @@ type ToolConfig struct {
 	HeadlessAsk bool
 	// StartBashBg launches a background shell command on the host's in-process
 	// job runtime and returns its job id. env holds extra "K=V" entries appended
-	// to the inherited environment (bash_bg passes nil). forceWake makes even a
-	// clean exit wake the agent (by default only failures wake). Nil func ⇒
-	// background jobs disabled.
-	StartBashBg func(command, workdir string, argv, env []string, forceWake bool) (string, error)
+	// to the inherited environment (bash_bg passes nil). quiet makes a clean
+	// exit queue its completion notice for the agent's next turn instead of
+	// waking it (failures always wake). Nil func ⇒ background jobs disabled.
+	StartBashBg func(command, workdir string, argv, env []string, quiet bool) (string, error)
 	// StartSubagent launches a background subagent (child session) and returns its
 	// id. It enforces the concurrency cap; single-level delegation holds by
 	// construction (subagents are never given the task tool). Nil ⇒ subagents

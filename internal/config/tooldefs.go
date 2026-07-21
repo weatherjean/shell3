@@ -28,15 +28,15 @@ func ToolDefs(g ToolGates) []llm.ToolDefinition {
 var bashBgTool = llm.ToolDefinition{
 	Name: "bash_bg",
 	Description: "Start a shell command in the background on the in-process runtime and return a job id immediately. " +
-		"Use this for long-running servers, watchers, or any command that should not block the turn. " +
-		"The host notifies you of completion on a later turn — do not poll. " +
-		"There is no pid, no status file, and no log path; job management is host-side.",
+		"Use this for long-running work or servers — anything that should not block the turn. " +
+		"When the job finishes you are woken with a completion notice carrying an output tail — do not poll. " +
+		"There is no pid and no log path; use task_status <id> to read more of a finished job's output.",
 	Parameters: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"command":    map[string]any{"type": "string", "description": "The shell command to run in the background"},
-			"workdir":    map[string]any{"type": "string", "description": "Working directory; defaults to the project root"},
-			"force_wake": map[string]any{"type": "boolean", "description": "When true, wake the agent immediately on completion even if the command succeeds (by default only failures wake; clean exits queue for the next turn)"},
+			"command": map[string]any{"type": "string", "description": "The shell command to run in the background"},
+			"workdir": map[string]any{"type": "string", "description": "Working directory; defaults to the project root"},
+			"quiet":   map[string]any{"type": "boolean", "description": "When true, a clean exit queues its notice for your next turn instead of waking you (failures still wake). Use for servers, watchers, and side jobs whose completion needs no immediate action"},
 		},
 		"required": []string{"command"},
 	},
@@ -138,7 +138,7 @@ var TaskCancelTool = llm.ToolDefinition{
 
 var bashTool = llm.ToolDefinition{
 	Name:        "bash",
-	Description: "Execute a shell command in the project directory. Returns combined stdout and stderr. Non-interactive only — editors and REPLs (vim, less, python) will hang, so run them non-interactively (flags, heredocs, -c). Default timeout is 10s; pass timeout_seconds (max 120) for slower commands. A foreground call blocks your whole turn — run anything slower than ~2 minutes via bash_bg instead (force_wake:true if you need the result promptly). Read files with cat / sed -n / rg; list directories with ls / find.",
+	Description: "Execute a shell command in the project directory. Returns combined stdout and stderr. Non-interactive only — editors and REPLs (vim, less, python) will hang, so run them non-interactively (flags, heredocs, -c). Default timeout is 10s; pass timeout_seconds (max 120) for slower commands. A foreground call blocks your whole turn — run anything slower than ~2 minutes via bash_bg instead (it wakes you with the result when done). Read files with cat / sed -n / rg; list directories with ls / find.",
 	Parameters: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
