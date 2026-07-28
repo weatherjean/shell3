@@ -120,7 +120,9 @@ func (ti *threadIndex) appendLocked(rec *threadRecord) {
 		return
 	}
 	if b, err := json.Marshal(rec); err == nil {
-		ti.f.Write(append(b, '\n'))
+		// A failed append loses one index line, never the conversation; the
+		// thread is rebuilt as unnamed on the next turn.
+		_, _ = ti.f.Write(append(b, '\n'))
 	}
 }
 

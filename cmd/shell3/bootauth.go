@@ -142,7 +142,7 @@ func askTOTPEnrolment(tty bool, account string, out io.Writer) (string, error) {
 	fmt.Fprintf(out, "\nOr enter the secret by hand: %s\n", secret)
 	fmt.Fprintln(out, "Then press enter — the code is asked for at every login.")
 	if tty {
-		fmt.Fscanln(os.Stdin)
+		_, _ = fmt.Fscanln(os.Stdin) // any input (or EOF) means "continue"
 	}
 	return secret, nil
 }
