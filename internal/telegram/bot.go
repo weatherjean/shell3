@@ -228,10 +228,6 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 		b.handleCommand(ctx, m) // defined in commands.go
 		return
 	}
-	// Save attachments to the durable media dir — fast, local, no network — and
-	// compute hadVoice from their MIME types (also fast). The slow half
-	// (Transcribe/Describe, preflightText) runs inside the turn goroutine, never
-	// on this loop.
 	// A reply to a message the thread index doesn't know (a courtesy notice, a
 	// cron post, a pre-index message) cannot be continued. The INTERFACE says
 	// so with a fixed notice — no session, no model call, no guessing at
@@ -246,6 +242,10 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 		}
 	}
 
+	// Save attachments to the durable media dir — fast, local, no network — and
+	// compute hadVoice from their MIME types (also fast). The slow half
+	// (Transcribe/Describe, preflightText) runs inside the turn goroutine, never
+	// on this loop.
 	text := strings.TrimSpace(m.Text)
 	saved := saveAttachments(m.Media)
 	hadVoice := preflightScan(saved)
