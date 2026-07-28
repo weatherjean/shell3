@@ -7,7 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
+
+	"github.com/weatherjean/shell3/internal/strutil"
 )
 
 // maxEntry caps one rendered entry (a tool's arguments, a job's output, a
@@ -21,11 +22,9 @@ func truncate(s string) string {
 	if len(s) <= maxEntry {
 		return s
 	}
-	cut := s[:maxEntry]
-	for len(cut) > 0 && !utf8.ValidString(cut) {
-		cut = cut[:len(cut)-1]
-	}
-	return cut + truncMark
+	// strutil.Truncate appends its own "…"; swap that for this package's marker,
+	// which reads as prose in a document rather than as a glyph mid-line.
+	return strings.TrimSuffix(strutil.Truncate(s, maxEntry), "…") + truncMark
 }
 
 // fence wraps body in a code fence long enough to survive backticks in the
@@ -67,9 +66,9 @@ func stamp(t time.Time) string {
 // oneLine flattens text to a single line for list rows.
 func oneLine(s string, max int) string {
 	s = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(s, "\r", " "), "\n", " "))
-	if utf8.RuneCountInString(s) <= max {
-		return s
+	cut, trimmed := strutil.CutRunes(s, max)
+	if trimmed {
+		return cut + "…"
 	}
-	r := []rune(s)
-	return string(r[:max]) + "…"
+	return cut
 }
