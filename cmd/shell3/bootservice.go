@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	huh "charm.land/huh/v2"
 )
@@ -112,5 +113,33 @@ func offerSystemdService(tty bool, configDir, home string, start bool) serviceSt
 			return serviceFailed
 		}
 	}
+	if start && !waitServiceActive(runSystemctl, 6, func() { time.Sleep(500 * time.Millisecond) }) {
+		fmt.Printf("warning: %s was started but is not running — check the log:\n", serviceUnitName)
+		fmt.Printf("  journalctl --user -u %s -n 20\n", serviceUnitName)
+		fmt.Println("A common cause: another process (an older shell3?) already holds the port.")
+		return serviceFailed
+	}
 	return serviceEnabled
+}
+
+// runSystemctl is the real command runner behind waitServiceActive.
+func runSystemctl(argv ...string) (string, error) {
+	out, err := exec.Command(argv[0], argv[1:]...).CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
+// waitServiceActive polls `systemctl --user is-active` until the unit reports
+// active, giving a crash-looping unit (port already taken, bad binary) time
+// to show itself instead of telling the user the service is running.
+func waitServiceActive(run func(argv ...string) (string, error), tries int, sleep func()) bool {
+	for i := 0; i < tries; i++ {
+		if i > 0 {
+			sleep()
+		}
+		state, _ := run("systemctl", "--user", "is-active", serviceUnitName)
+		if state == "active" {
+			return true
+		}
+	}
+	return false
 }
