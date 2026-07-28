@@ -81,6 +81,14 @@ func (b *Bot) consumeCallbacks(ctx context.Context) {
 // immediately and this (single-threaded) drain loop isn't gated on Telegram
 // latency. A press for an unknown/answered id is a harmless no-op.
 func (b *Bot) handleCallback(ctx context.Context, cb Callback) {
+	if cb.ChatID != b.chatID {
+		// Unauthorized: drop silently, exactly as handleMsg drops a message from
+		// another chat. A gate ask or /voice menu posted into a shared chat must
+		// not be answerable by anyone but the operator — the buttons carry a
+		// trivially guessable callback_data, so the chat is the only boundary.
+		// Not even acknowledged: an ack is a reply to a stranger.
+		return
+	}
 	if id, yes, ok := parseConfirmData(cb.Data); ok {
 		b.askMu.Lock()
 		ch := b.pending[id]

@@ -29,10 +29,14 @@ type Command struct {
 
 // Callback is an inline-keyboard button press, normalized from a Telegram
 // callback query. ID acknowledges the press (stops the button spinner); Data is
-// the pressed button's callback_data, which routes it to a pending Ask.
+// the pressed button's callback_data, which routes it to a pending Ask. ChatID
+// is the chat the pressed message lives in, so the same chat_id authorization
+// that filters inbound messages applies to button presses (0 when the press
+// carries no message, which never authorizes).
 type Callback struct {
-	ID   string
-	Data string
+	ChatID int64
+	ID     string
+	Data   string
 }
 
 // MenuOption is one inline-keyboard button in a SendMenu row: Label is the

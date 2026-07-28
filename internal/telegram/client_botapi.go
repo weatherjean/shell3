@@ -75,8 +75,15 @@ func (c *BotAPIClient) onUpdate(ctx context.Context, b *bot.Bot, u *models.Updat
 	// Inline-keyboard button presses (tool-call hook approval) arrive as callback
 	// queries, not messages. Route them to the callback channel and stop.
 	if u.CallbackQuery != nil {
+		// Carry the pressed message's chat so the Bot can apply the same chat_id
+		// filter it applies to inbound messages. An inaccessible/absent message
+		// leaves it 0, which authorizes nothing.
+		var cbChat int64
+		if msg := u.CallbackQuery.Message.Message; msg != nil {
+			cbChat = msg.Chat.ID
+		}
 		select {
-		case c.cb <- Callback{ID: u.CallbackQuery.ID, Data: u.CallbackQuery.Data}:
+		case c.cb <- Callback{ChatID: cbChat, ID: u.CallbackQuery.ID, Data: u.CallbackQuery.Data}:
 		default:
 			// Buffer full (64 deep): drop the press. The waiting Ask then resolves
 			// via its tool-call hook ask-timeout → deny, which is the fail-safe

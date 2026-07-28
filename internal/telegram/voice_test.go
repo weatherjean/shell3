@@ -374,7 +374,7 @@ func TestVoiceCallback_SetsModeAndEditsMenu(t *testing.T) {
 		t.Fatalf("setup: 'off' option not found in menu")
 	}
 
-	b.handleCallback(context.Background(), Callback{ID: "cb1", Data: offData})
+	b.handleCallback(context.Background(), Callback{ChatID: 42, ID: "cb1", Data: offData})
 
 	if got := store.Get("inbound"); got != "off" {
 		t.Fatalf("want persisted mode 'off', got %q", got)

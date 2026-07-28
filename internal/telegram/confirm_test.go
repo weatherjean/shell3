@@ -55,7 +55,7 @@ func TestBotAsk_Allow(t *testing.T) {
 	if !strings.Contains(conf.text, "ls -la") {
 		t.Errorf("confirm text missing command: %q", conf.text)
 	}
-	b.handleCallback(context.Background(), Callback{ID: "cbid", Data: conf.yesData})
+	b.handleCallback(context.Background(), Callback{ChatID: 1, ID: "cbid", Data: conf.yesData})
 
 	if !waitResult(t, resCh) {
 		t.Fatal("Ask returned false, want true (allowed)")
@@ -82,7 +82,7 @@ func TestBotAsk_SurfacesReason(t *testing.T) {
 	if !strings.Contains(conf.text, "deletes production data") {
 		t.Errorf("confirm text missing the ask reason: %q", conf.text)
 	}
-	b.handleCallback(context.Background(), Callback{ID: "cbid", Data: conf.noData})
+	b.handleCallback(context.Background(), Callback{ChatID: 1, ID: "cbid", Data: conf.noData})
 	waitResult(t, resCh)
 }
 
@@ -94,7 +94,7 @@ func TestBotAsk_Deny(t *testing.T) {
 	go func() { resCh <- b.Ask(context.Background(), "rm -rf x", "reason") }()
 
 	conf := waitConfirm(t, fc)
-	b.handleCallback(context.Background(), Callback{ID: "cbid", Data: conf.noData})
+	b.handleCallback(context.Background(), Callback{ChatID: 1, ID: "cbid", Data: conf.noData})
 
 	if waitResult(t, resCh) {
 		t.Fatal("Ask returned true, want false (denied)")
@@ -130,13 +130,13 @@ func TestBotAsk_DoubleTapIsNoOp(t *testing.T) {
 	go func() { resCh <- b.Ask(context.Background(), "ls -la", "reason") }()
 
 	conf := waitConfirm(t, fc)
-	b.handleCallback(context.Background(), Callback{ID: "cb1", Data: conf.yesData})
+	b.handleCallback(context.Background(), Callback{ChatID: 1, ID: "cb1", Data: conf.yesData})
 	if !waitResult(t, resCh) {
 		t.Fatal("first tap should allow")
 	}
 	// Second tap after the Ask already returned (pending entry deleted): no panic.
-	b.handleCallback(context.Background(), Callback{ID: "cb2", Data: conf.yesData})
-	b.handleCallback(context.Background(), Callback{ID: "cb3", Data: conf.noData})
+	b.handleCallback(context.Background(), Callback{ChatID: 1, ID: "cb2", Data: conf.yesData})
+	b.handleCallback(context.Background(), Callback{ChatID: 1, ID: "cb3", Data: conf.noData})
 }
 
 // Two concurrent pending approvals must stay distinct: each resolves only to its
@@ -158,8 +158,8 @@ func TestBotAsk_ConcurrentPendingStayDistinct(t *testing.T) {
 	}
 
 	// Resolve in reverse order: deny TWO, allow ONE.
-	b.handleCallback(context.Background(), Callback{ID: "a", Data: conf2.noData})
-	b.handleCallback(context.Background(), Callback{ID: "b", Data: conf1.yesData})
+	b.handleCallback(context.Background(), Callback{ChatID: 1, ID: "a", Data: conf2.noData})
+	b.handleCallback(context.Background(), Callback{ChatID: 1, ID: "b", Data: conf1.yesData})
 
 	if waitResult(t, res2) {
 		t.Fatal("ask TWO should be denied")
@@ -213,4 +213,35 @@ func containsSubstr(list []string, sub string) bool {
 		}
 	}
 	return false
+}
+
+// The chat_id boundary is the whole access model, and it must hold on the
+// callback path too: inbound MESSAGES from another chat are dropped
+// (handleMsg), so a button press from another chat — an Allow on a command
+// gate posted into a shared group — must be dropped as well.
+func TestHandleCallback_ForeignChatCannotAnswer(t *testing.T) {
+	fc := newFakeClient()
+	b := newConfirmBot(fc) // chatID 1
+
+	resCh := make(chan bool, 1)
+	go func() { resCh <- b.Ask(context.Background(), "rm -rf ~/work", "destructive") }()
+
+	conf := waitConfirm(t, fc)
+	// A colleague in the same group taps Allow. Their chat id is not ours.
+	b.handleCallback(context.Background(), Callback{ChatID: 999, ID: "intruder", Data: conf.yesData})
+
+	select {
+	case got := <-resCh:
+		t.Fatalf("Ask resolved from a foreign chat (returned %v), want it still pending", got)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if len(fc.answered) != 0 {
+		t.Errorf("a foreign press must not be acknowledged, got %v", fc.answered)
+	}
+
+	// The owner's press still works.
+	b.handleCallback(context.Background(), Callback{ChatID: 1, ID: "owner", Data: conf.yesData})
+	if !waitResult(t, resCh) {
+		t.Fatal("the authorized press must still allow")
+	}
 }

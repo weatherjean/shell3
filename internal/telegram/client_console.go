@@ -217,7 +217,7 @@ func (c *ConsoleClient) SendMenu(_ context.Context, _ int64, text string, option
 // It enqueues the Deny callback so the waiting Ask unblocks with a denial.
 func (c *ConsoleClient) SendConfirm(_ context.Context, _ int64, text, _, noData string) (int, error) {
 	id := c.emit(0, "confirm", text+" — auto-denied (console mode)")
-	go func() { c.cb <- Callback{ID: strconv.Itoa(id), Data: noData} }()
+	go func() { c.cb <- Callback{ChatID: c.chatID, ID: strconv.Itoa(id), Data: noData} }()
 	return id, nil
 }
 
