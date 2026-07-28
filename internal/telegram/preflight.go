@@ -67,28 +67,31 @@ func preflightScan(saved []savedFile) (hadVoice bool) {
 // Bot.Run): it makes blocking network calls. It always runs on a turn or
 // interject goroutine, both of which pass an already-timeout-wrapped ctx.
 func (b *Bot) preflightText(ctx context.Context, saved []savedFile, sess *shell3.Session) string {
+	// One snapshot for the whole preflight: a reload landing mid-loop must not
+	// transcribe with one config and describe with another.
+	caps, _ := b.mediaCaps()
 	var lines []string
 	for _, s := range saved {
 		switch {
 		case strings.HasPrefix(s.MIME, "audio/"):
-			if b.media == nil || b.media.Transcribe == nil {
+			if caps == nil || caps.Transcribe == nil {
 				continue
 			}
-			transcript, err := b.media.Transcribe(ctx, s.Path)
+			transcript, err := caps.Transcribe(ctx, s.Path)
 			if err != nil {
 				lines = append(lines, "[voice note could not be transcribed]")
 				b.mediaNotice(ctx, "voice transcription failed", err)
 				continue
 			}
 			lines = append(lines, `"`+transcript+`"`)
-			if b.media.STTEcho {
+			if caps.STTEcho {
 				b.sendReply(ctx, `📝 "`+transcript+`"`)
 			}
 		case strings.HasPrefix(s.MIME, "image/"):
-			if b.media == nil || b.media.Describe == nil {
+			if caps == nil || caps.Describe == nil {
 				continue
 			}
-			desc, err := b.media.Describe(ctx, s.Path)
+			desc, err := caps.Describe(ctx, s.Path)
 			if err != nil {
 				b.mediaNotice(ctx, "image description failed", err)
 				continue

@@ -26,17 +26,25 @@ func (b *Bot) reloadToolHandler(ctx context.Context, argsJSON string) (string, e
 	if b.reload == nil {
 		return "error: reload is not available", nil
 	}
+	// Written on the SESSION's turn goroutine, read on the bot's — under b.mu
+	// like the rest of the mutable wiring rather than leaning on the event
+	// channel's happens-before.
+	b.mu.Lock()
 	b.pendingReload = true
+	b.mu.Unlock()
 	return "reload scheduled; it will be validated and applied when this turn ends", nil
 }
 
 // applyPendingReload runs a deferred reload if one was requested during the turn
 // that just finished. Called at end-of-turn (session idle). Pushes the result.
 func (b *Bot) applyPendingReload(ctx context.Context) {
-	if !b.pendingReload {
+	b.mu.Lock()
+	pending := b.pendingReload
+	b.pendingReload = false
+	b.mu.Unlock()
+	if !pending {
 		return
 	}
-	b.pendingReload = false
 	b.runReload(ctx)
 }
 

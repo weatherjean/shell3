@@ -51,7 +51,8 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 			b.sendReply(ctx, "nothing is running")
 		}
 	case "/run":
-		if b.runJob == nil {
+		run := b.jobRunner()
+		if run == nil {
 			b.sendReply(ctx, "no scheduled jobs configured")
 			return
 		}
@@ -60,7 +61,7 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 			b.sendReply(ctx, "usage: /run `<job>`")
 			return
 		}
-		if err := b.runJob(name); err != nil {
+		if err := run(name); err != nil {
 			b.sendReply(ctx, "run failed: "+err.Error())
 			return
 		}

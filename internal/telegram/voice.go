@@ -30,14 +30,15 @@ func (b *Bot) deliverReply(ctx context.Context, reply string, hadVoice bool, ses
 		b.postReply(ctx, sess, replyTo, reply)
 		return
 	}
-	if b.media == nil || b.media.Speak == nil {
+	caps, modeStore := b.mediaCaps()
+	if caps == nil || caps.Speak == nil {
 		b.postReply(ctx, sess, replyTo, reply)
 		return
 	}
 
-	mode := b.media.TTSMode
-	if b.voiceMode != nil {
-		mode = b.voiceMode.Get(b.media.TTSMode)
+	mode := caps.TTSMode
+	if modeStore != nil {
+		mode = modeStore.Get(caps.TTSMode)
 	}
 
 	speak := mode == "always" || (mode == "inbound" && hadVoice)
@@ -46,7 +47,7 @@ func (b *Bot) deliverReply(ctx context.Context, reply string, hadVoice bool, ses
 		return
 	}
 
-	sp, err := b.media.Speak(ctx, reply)
+	sp, err := caps.Speak(ctx, reply)
 	if err != nil || sp.Path == "" {
 		b.postReply(ctx, sess, replyTo, reply)
 		if err != nil {
@@ -88,15 +89,16 @@ func voiceModeOptions() []MenuOption {
 
 // handleVoiceCommand implements /voice (bare → menu; /voice <mode> → set).
 func (b *Bot) handleVoiceCommand(ctx context.Context, arg string) {
-	if b.media == nil || b.media.Speak == nil {
+	caps, modeStore := b.mediaCaps()
+	if caps == nil || caps.Speak == nil {
 		b.sendReply(ctx, "TTS is not configured — add a media.tts block to shell3.yaml")
 		return
 	}
 	arg = strings.TrimSpace(arg)
 	if arg == "" {
-		mode := b.media.TTSMode
-		if b.voiceMode != nil {
-			mode = b.voiceMode.Get(b.media.TTSMode)
+		mode := caps.TTSMode
+		if modeStore != nil {
+			mode = modeStore.Get(caps.TTSMode)
 		}
 		msgID, err := b.client.SendMenu(ctx, b.chatID, voiceMenuText(mode), voiceModeOptions())
 		if err != nil {
@@ -108,11 +110,11 @@ func (b *Bot) handleVoiceCommand(ctx context.Context, arg string) {
 		b.askMu.Unlock()
 		return
 	}
-	if b.voiceMode == nil {
+	if modeStore == nil {
 		b.sendReply(ctx, "voice mode can't be persisted — no mode store configured")
 		return
 	}
-	if err := b.voiceMode.Set(arg); err != nil {
+	if err := modeStore.Set(arg); err != nil {
 		b.sendReply(ctx, "usage: /voice off|inbound|always")
 		return
 	}
@@ -122,10 +124,11 @@ func (b *Bot) handleVoiceCommand(ctx context.Context, arg string) {
 // handleVoiceCallback handles a "vm|<mode>" menu button press: persists the
 // mode and edits the menu message in place to reflect it.
 func (b *Bot) handleVoiceCallback(ctx context.Context, mode string) {
-	if b.voiceMode == nil {
+	_, modeStore := b.mediaCaps()
+	if modeStore == nil {
 		return
 	}
-	if err := b.voiceMode.Set(mode); err != nil {
+	if err := modeStore.Set(mode); err != nil {
 		return
 	}
 	b.askMu.Lock()

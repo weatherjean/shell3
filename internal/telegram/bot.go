@@ -93,8 +93,21 @@ func NewBot(client tgClient, rt *shell3.Runtime, chatID int64, threads *ThreadIn
 	}
 }
 
-// SetJobRunner wires /run <job> to the scheduler's manual fire.
-func (b *Bot) SetJobRunner(fn func(name string) error) { b.runJob = fn }
+// SetJobRunner wires /run <job> to the scheduler's manual fire. Written from
+// the reload path (which can run on a turn goroutine) and read by /run on the
+// update loop, so it goes through b.mu like the rest of the mutable wiring.
+func (b *Bot) SetJobRunner(fn func(name string) error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.runJob = fn
+}
+
+// jobRunner returns the current /run handler (nil when no scheduler is armed).
+func (b *Bot) jobRunner() func(name string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.runJob
+}
 
 // SetReloader wires /reload (and the reload tool) to the host's reload coordinator.
 func (b *Bot) SetReloader(fn func() (shell3.ReloadResult, error)) { b.reload = fn }
@@ -132,9 +145,25 @@ func (b *Bot) SetCronLastRuns(fn func() map[string]time.Time) { b.cronLastRuns =
 // config. The image_generate host tool is NOT registered here — the host
 // installs it via Runtime.SetSessionDecorator, which covers every session and
 // post-reload re-application uniformly.
+//
+// Both fields go through b.mu: a reload writes them from whichever goroutine
+// called it (the agent's reload tool applies at end of turn, after the turn
+// slot is released), while the update loop reads them in /voice and a turn
+// goroutine reads them in preflight/deliverReply.
 func (b *Bot) SetMedia(c *MediaCaps, modeStore *ModeStore) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.media = c
 	b.voiceMode = modeStore
+}
+
+// mediaCaps returns the current media capabilities and voice-mode store as one
+// consistent pair — SetMedia publishes them together, so readers must take them
+// together.
+func (b *Bot) mediaCaps() (*MediaCaps, *ModeStore) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.media, b.voiceMode
 }
 
 // SetWorkDir sets the directory used to resolve relative paths passed to
