@@ -18,21 +18,3 @@ func TestReloadReplyText(t *testing.T) {
 		t.Errorf("notes: %q, want %q", got, want)
 	}
 }
-
-func TestStopReplyText(t *testing.T) {
-	tests := []struct {
-		cancelled bool
-		killed    int
-		want      string
-	}{
-		{true, 2, "⏹ stopped — killed 2 background job(s)"},
-		{true, 0, "⏹ stopped"},
-		{false, 3, "⏹ no turn running — killed 3 background job(s)"},
-		{false, 0, "nothing running"},
-	}
-	for _, tc := range tests {
-		if got := StopReplyText(tc.cancelled, tc.killed); got != tc.want {
-			t.Errorf("StopReplyText(%v, %d) = %q, want %q", tc.cancelled, tc.killed, got, tc.want)
-		}
-	}
-}

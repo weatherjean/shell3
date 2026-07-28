@@ -19,18 +19,3 @@ func ReloadReplyText(res ReloadResult, err error) string {
 	}
 	return msg
 }
-
-// StopReplyText renders a /stop outcome: whether a running turn was cancelled
-// and how many background jobs were killed.
-func StopReplyText(cancelled bool, killed int) string {
-	switch {
-	case cancelled && killed > 0:
-		return fmt.Sprintf("\u23f9 stopped \u2014 killed %d background job(s)", killed)
-	case cancelled:
-		return "\u23f9 stopped"
-	case killed > 0:
-		return fmt.Sprintf("\u23f9 no turn running \u2014 killed %d background job(s)", killed)
-	default:
-		return "nothing running"
-	}
-}

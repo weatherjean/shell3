@@ -92,8 +92,8 @@ type Runtime struct {
 	// workDir is the runtime root (.shell3_project lives under it).
 	workDir string
 	// store is the shared file-native runs store (nil if unavailable). Used by
-	// PastSessions/SessionMessages for front-end session lists/replay and by
-	// the job runtime's transcript reads (task_status / JobTranscript).
+	// the job runtime's transcript reads (task_status / JobTranscript); the
+	// front-end reads it directly (internal/render) for session lists/replay.
 	store *runs.Store
 	// ctx is the runtime's base context, parented by the ctx given to
 	// NewRuntime. A watcher goroutine calls Close when it fires, so cancelling
