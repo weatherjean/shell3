@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/shell3-banner.svg" alt="๑ï shell3 /ˈʃɛli/ — your shell, in your browser — minimal Unix-composable personal agent" width="100%">
+  <img src="docs/assets/shell3-banner.svg" alt="๑ï shell3 /ˈʃɛli/ — your shell, in your pocket — minimal Unix-composable personal agent" width="100%">
 </p>
 
 A minimal, Unix-composable personal agent you run **on your own box** and
@@ -19,7 +19,7 @@ shell3 telegram    # connects the bot and listens — message it
 ## How it works
 
 <p align="center">
-  <img src="docs/assets/shell3-diagram.svg" alt="Diagram: you chat with shell3 in a browser; every tool call passes your hook gate before the agent acts through bash and edit on your shell; the agent delegates to project managers, subagents and cron jobs; every background completion is triaged by the notifier into a bell notification, a wake of the agent, or silence" width="100%">
+  <img src="docs/assets/shell3-diagram.svg" alt="Diagram: you message shell3 on Telegram; every tool call passes your hook gate before the agent acts through bash and edit on your shell; the agent delegates to project managers, subagents and cron jobs; every background completion is triaged by the notifier into a chat message, a wake of the agent, or silence" width="100%">
 </p>
 
 ## Install
