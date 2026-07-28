@@ -96,6 +96,34 @@ func TestParseYAMLUnknownKey(t *testing.T) {
 	}
 }
 
+// A strict-decode failure is the first thing a 0.2.x upgrader with a `web:`
+// block meets, so it must name shell3.yaml's own blocks — not the Go types
+// behind them.
+func TestParseYAMLUnknownKeyNamesConfigNotGoTypes(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{"top level", "web:\n  password: x\n", "shell3.yaml"},
+		{"telegram block", "models:\n  m:\n    base_url: u\n    model: x\ntelegram:\n  dashboard: {}\n", "telegram:"},
+		{"media sub-block", "models:\n  m:\n    base_url: u\n    model: x\nmedia:\n  stt:\n    bogus: 1\n", "media.stt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseY(t, tc.yaml, nil)
+			if err == nil {
+				t.Fatal("expected an unknown-key error")
+			}
+			if strings.Contains(err.Error(), "config.yaml") {
+				t.Errorf("error leaks an internal Go type: %v", err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error should name %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
 func TestParseYAMLNoModels(t *testing.T) {
 	if _, err := parseY(t, "telegram: { chat_id: \"1\" }\n", nil); err == nil || !strings.Contains(err.Error(), "no models") {
 		t.Fatalf("err = %v", err)

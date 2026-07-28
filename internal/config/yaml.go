@@ -92,6 +92,37 @@ type yamlBackground struct {
 
 var mcpNameRE = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
+// yamlTypeNames maps the wire structs onto the shell3.yaml blocks they decode,
+// so a strict-decode failure reads as config rather than as Go.
+var yamlTypeNames = map[string]string{
+	"yamlFile":       "shell3.yaml",
+	"yamlModel":      "a models: entry",
+	"yamlTelegram":   "the telegram: block",
+	"yamlMCP":        "an mcp: server",
+	"yamlMedia":      "the media: block",
+	"yamlSTT":        "media.stt",
+	"yamlTTS":        "media.tts",
+	"yamlDescribe":   "media.describe",
+	"yamlImagegen":   "media.imagegen",
+	"yamlBackground": "the background: block",
+}
+
+var yamlTypeRE = regexp.MustCompile(`type config\.(\w+)`)
+
+// humanizeYAMLTypes rewrites go-yaml's "field web not found in type
+// config.yamlFile" into the block name the user actually wrote. The strict
+// unknown-key failure is the most likely error a 0.2.x upgrader sees (their
+// `web:` block), and "config.yamlFile" means nothing to them.
+func humanizeYAMLTypes(msg string) string {
+	return yamlTypeRE.ReplaceAllStringFunc(msg, func(m string) string {
+		name := yamlTypeRE.FindStringSubmatch(m)[1]
+		if label, ok := yamlTypeNames[name]; ok {
+			return label
+		}
+		return "shell3.yaml"
+	})
+}
+
 // parseYAML strict-decodes shell3.yaml, resolves env: references from
 // secrets, and fills the wiring fields of c.
 func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
@@ -99,7 +130,7 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(&f); err != nil {
-		return fmt.Errorf("shell3.yaml: %w", err)
+		return fmt.Errorf("shell3.yaml: %s", humanizeYAMLTypes(err.Error()))
 	}
 	if err := resolveEnvRefs(&f, secrets); err != nil {
 		return fmt.Errorf("shell3.yaml: %w", err)
