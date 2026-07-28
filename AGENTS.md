@@ -164,10 +164,10 @@ Context is host-managed via two token thresholds: `prune_at` cheaply stubs
 old tool outputs (no LLM call), and `compact_at` triggers tail-preserving
 compaction — summarizing the head while keeping recent turns verbatim. The
 `prune_at` and `keep_recent` knobs are optional, defaulting to fractions of
-`compact_at`; no model-driven prune/compact tools. `Session.Compact` forces
-one (skipping the threshold, capping the verbatim tail at the floor rather
-than the configured fraction) but no front-end currently calls it — there is
-no `/compact` command.
+`compact_at`; no model-driven prune/compact tools. There is no `/compact`
+command and no forced-compaction entry point on `shell3.Session`: a
+conversation the model has wedged is cleared by starting a new one, which on
+this front-end is sending a message without replying to a thread.
 
 **Telegram-first.** shell3 is a personal agent you reach in one Telegram chat.
 `shell3 telegram` runs everything (`internal/telegram`): the agent, the bot,

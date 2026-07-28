@@ -578,56 +578,6 @@ func (s *Session) turnConfigLocked() chat.TurnConfig {
 	return tc
 }
 
-// Compact forces one context compaction now (= /compact): it summarises the
-// head of the conversation and keeps the recent tail, exactly like the
-// automatic compact_at path, and returns the estimated prompt tokens
-// before/after. ErrBusy while a turn is in flight; chat.ErrNothingToCompact
-// when history is too small to have a summarisable head (history untouched on
-// any error). Unlike the other between-turns mutators it does NOT run under
-// withIdle — the summarisation round-trip can take minutes and must not hold
-// s.mu; instead it takes the FULL turn lifecycle (mirroring SendParts): the
-// busy gate, plus turnCancel/turnDone registration so /stop can abort the LLM
-// call and doClose cancels+joins before ending the store session — the
-// compaction rolls the runs session, so teardown must never race it.
-func (s *Session) Compact(ctx context.Context) (before, after int, err error) {
-	cctx, cancel := context.WithCancel(ctx)
-	done := make(chan struct{})
-	s.mu.Lock()
-	if s.busy || s.closed {
-		err := ErrBusy
-		if s.closed {
-			err = ErrClosed
-		}
-		s.mu.Unlock()
-		cancel()
-		return 0, 0, err
-	}
-	s.busy = true
-	s.turnCancel = cancel
-	s.turnDone = done
-	// Capture the runtime under the busy gate (doClose nils it concurrently once
-	// done closes) and snapshot the turn config inside the same critical section,
-	// same as SendParts: cfg mutators (SwitchAgent, SetParam, Clear) hold s.mu,
-	// so they serialize wholly before or after this compaction.
-	rt := s.runtime
-	tc := s.turnConfigLocked()
-	s.mu.Unlock()
-	defer func() {
-		s.mu.Lock()
-		s.busy = false
-		s.mu.Unlock()
-		close(done) // doClose may be blocked on this join; store state is final
-		// A notice queued while the busy gate was held had its Wake bounced off
-		// RunQueued's ErrBusy; re-emit exactly as SendParts' unwind does, so a
-		// completion that landed mid-compaction is never stranded.
-		if rt != nil && s.sess.HasInbox() {
-			rt.emit(HostEvent{Session: s.sess.ID(), Kind: Wake})
-		}
-		cancel() // release the child ctx
-	}()
-	return chat.CompactStandalone(cctx, tc, s.sess)
-}
-
 // SwitchAgent activates the configured agent named name for subsequent Sends
 // (a front-end's agent-switch action). Switching swaps the agent's model client,
 // system prompt, tool set, host-tool routing, skills, status
