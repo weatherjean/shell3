@@ -35,7 +35,6 @@
   <line x1="404" y1="300" x2="560" y2="300" stroke="#a8790a" stroke-width="2" marker-end="url(#ay)"/>
   <text x="482" y="282" font-family="IT" font-size="17" font-weight="600" letter-spacing="2.55" fill="#56667a" text-anchor="middle">TEXT · VOICE</text>
   <line x1="560" y1="372" x2="404" y2="372" stroke="#4a5a6b" stroke-width="2" marker-end="url(#a)"/>
-  <text x="482" y="404" font-family="IT" font-size="17" font-weight="600" letter-spacing="2.55" fill="#56667a" text-anchor="middle">REPLIES · ASKS</text>
   <text x="564" y="200" font-family="IT" font-size="17" font-weight="600" letter-spacing="2.55" fill="#56667a" text-anchor="start">THE SHELL3 BINARY</text>
   <rect x="564" y="214" width="440" height="380" rx="3" fill="#dee3e6" stroke="#c9d1d6" stroke-width="1.5"/>
   <rect x="588" y="240" width="392" height="58" rx="3" fill="#e8eced" stroke="#7a5c05" stroke-width="1.5"/>
