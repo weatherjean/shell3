@@ -6,12 +6,10 @@ A minimal, Unix-composable personal agent you run as a **web app on your own
 box**. One binary, one config directory of YAML + markdown, any
 OpenAI-compatible endpoint.
 
-**You're the director.** The one agent you message is your single point of
-contact: it triages every request, handles the small things itself, and
-delegates the real work to project managers and subagents. It runs `bash`,
-edits files, schedules work, and serves a browser interface for talking to
-it, watching its background work, and browsing its config. It pipes like a
-Unix tool and is configured like software, not like a platform.
+The one agent you message is your single point of contact: it triages every
+request, handles small things itself, and delegates the rest to project
+managers and subagents. It runs `bash`, edits files, schedules work, and
+serves a browser interface for chat, background jobs, and config.
 
 ```sh
 shell3 boot        # interactive form: model + endpoint + key, vision, workdir
