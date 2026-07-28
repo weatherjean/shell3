@@ -2,18 +2,18 @@
   <img src="docs/assets/shell3-banner.svg" alt="๑ï shell3 /ˈʃɛli/ — your shell, in your browser — minimal Unix-composable personal agent" width="100%">
 </p>
 
-A minimal, Unix-composable personal agent you run as a **web app on your own
-box**. One binary, one config directory of YAML + markdown, any
-OpenAI-compatible endpoint.
+A minimal, Unix-composable personal agent you run **on your own box** and
+reach over **Telegram**. One binary, one config directory of YAML + markdown,
+any OpenAI-compatible endpoint.
 
 The one agent you message is your single point of contact: it triages every
 request, handles small things itself, and delegates the rest to project
 managers and subagents. It runs `bash`, edits files, schedules work, and
-serves a browser interface for chat, background jobs, and config.
+answers in one Telegram chat — yours.
 
 ```sh
-shell3 boot        # interactive form: model + endpoint + key, vision, workdir
-shell3 serve       # http://127.0.0.1:8765 — open it and start talking
+shell3 boot        # interactive form: model + endpoint + key, vision, bot token, workdir
+shell3 telegram    # connects the bot and listens — message it
 ```
 
 ## How it works
@@ -39,46 +39,52 @@ shell3 leans on Unix process groups.
 ## Update
 
 Run the install command again — it overwrites the binary; your config
-(`~/.shell3/`) and history are untouched. A running server keeps executing
+(`~/.shell3/`) and history are untouched. A running bot keeps executing
 the old binary until restarted (`systemctl --user restart shell3.service`
-when running as a service, otherwise restart `shell3 serve`).
+when running as a service, otherwise restart `shell3 telegram`).
 `shell3 --version` confirms what you're on; pin a release with
 `curl -fsSL … | VERSION=vX.Y.Z sh`. If you installed via `go install`,
 update the same way.
 
+**Breaking:** the web interface is gone and `web:` is no longer a known key, so a config carrying one fails the strict load. Replace the block
+with `telegram: {token, chat_id, workdir}` (see
+[docs/configuration.md](docs/configuration.md#telegram--telegram)), or re-run
+`shell3 boot --force`, which rewrites the scaffolded files.
+
 ## Quickstart
 
-1. `shell3 boot` — fill in the form. It writes the config tree under
+1. Get a bot token from [@BotFather](https://t.me/BotFather) and your numeric
+   chat id from [@userinfobot](https://t.me/userinfobot).
+2. `shell3 boot` — fill in the form (model endpoint + key, vision, context
+   budget, the token and chat id, workdir). It writes the config tree under
    `~/.shell3/` (`shell3.yaml`, `agent.md`, `notifier.md`, `memory.md`,
-   `agents/`, `skills/`, `cron/`, `hooks/`, `.env`) and asks for the password
-   the interface requires, optionally with an authenticator second factor.
-2. `shell3 serve` — open <http://127.0.0.1:8765> and start talking.
+   `agents/`, `skills/`, `cron/`, `hooks/`, `.env`). On Linux with systemd it
+   offers to install and start a user service.
+3. `shell3 telegram` — the bot greets the chat and listens.
 
-For access from elsewhere, `web.tunnel` (or `shell3 serve --tunnel`, a
-cloudflared quick tunnel) starts a tunnel and prints the public URL. What is
-behind that login is a shell on the machine, so an authenticated proxy or
-private network in front is still worth having. Full walkthrough in
+Nothing is exposed: shell3 makes outbound connections to Telegram, so there is
+no port to open and no tunnel to run. The bot answers exactly one `chat_id`;
+messages from anywhere else are ignored. Full walkthrough in
 [docs/cli.md](docs/cli.md).
 
 ## Commands
 
 | Command | What |
 |---------|------|
-| `shell3 serve`    | Run the agent + web interface + cron (the service). |
+| `shell3 telegram` | Run the bot front-end + cron (the service). |
 | `shell3 boot`     | Scaffold the config + `.env` interactively. |
 | `shell3 project new` | Scaffold a `projects/<name>/` config dir (brief + manager). |
 | `shell3 health`   | Load the config strictly; fail on any warning. |
-| `shell3 url`      | Print where the interface is reachable (tunnel URL when one runs). |
 | `shell3 ask "…"`  | Ask the agent locally, full verbose output; no message = an interactive multi-turn loop; `-p` for headless scripting; `--resume` continues the last session. |
 
 Every subcommand takes `--config/-c` to point at a different config directory.
 
 ## Features
 
-- **A browser interface, served by the binary** — chat (with voice), live
-  background jobs, cron, full session replays, status, and a read-only file
-  explorer. Gated commands raise an Allow/Deny modal; web push reaches you
-  with the tab closed.
+- **A Telegram bot as the front-end** — one chat, one agent. Every message
+  starts a fresh thread; replying to one of its messages continues that
+  thread's session. `/status`, `/jobs`, `/job`, `/cancel`, `/cron`, `/runs`,
+  `/run`, `/reload`, `/stop`, `/voice` are answered without a model call.
 - **Bash-first, gated by a script you own** — the agent acts through `bash`
   and `edit_file`; a per-agent hook script allows, rewrites, asks, or blocks
   every tool call. Fail-closed, and armed out of the box.
@@ -90,21 +96,24 @@ Every subcommand takes `--config/-c` to point at a different config directory.
   reloadable live; the gate scripts and `.env` stay the operator's.
 - **Subagents & scheduling** — fire-and-forget `task` delegation, `bash_bg`
   background commands, `cron/*.md` schedules. A notifier triages every
-  completion: bell, wake the agent, or silence; failures always surface.
+  completion: post it to the chat, wake the agent, or stay silent; failures
+  always surface.
 - **Any OpenAI-compatible provider** — OpenAI, Ollama, Groq, LM Studio,
   OpenRouter, Moonshot, DeepSeek, …
 - **MCP servers** — stdio or streamable HTTP, opt-in per agent, gated like
   every other tool.
-- **Voice and images (optional)** — dictation, read-aloud, and an
-  `image_generate` tool; one free Groq key covers speech both ways
+- **Voice and images (optional)** — voice notes are transcribed, replies can
+  come back spoken (`/voice`), inbound photos are captioned, and
+  `image_generate` sends its result to the chat; one free Groq key covers
+  speech both ways
   ([docs/cookbook/voice-images.md](docs/cookbook/voice-images.md)).
-- **Context managed for you** — auto-compaction past a threshold (announced
-  in the bell); history is plain JSONL you can `rg`.
+- **Context managed for you** — auto-compaction past a threshold; history is
+  plain JSONL you can `rg`.
 
 ## Documentation
 
 - **[Configuration](docs/configuration.md)** — the config directory: models,
-  agent, subagents, projects, the web block, cron, voice & images,
+  agent, subagents, projects, the telegram block, cron, voice & images,
   scripts & secrets, MCP servers, hook scripts, skills.
 - **[CLI](docs/cli.md)** — every subcommand and the JSONL runs store.
 - **[Security & data](docs/security.md)** — threat model, secrets, wiping data.
@@ -118,11 +127,11 @@ shell3 gives the model a full, unrestricted shell, limited only by the
 credentials, system paths, unread remote code (`curl … | sh`), publishing,
 force-pushes, and anything that would kill shell3 itself are refused, while
 ordinary work runs untouched. Read it and tune it to your deployment.
-`shell3 serve` requires a password (plus an optional authenticator code), but
-whoever logs in gets that same shell — the gate script, not the login, is
-what limits what can happen. Keep an authenticated proxy or private network
-in front when exposing it, use a container, VM, or throwaway user for hard
-isolation, and read [docs/security.md](docs/security.md) first. Report
+The bot answers one `chat_id` and the token lives in `.env`, so access control
+is Telegram's: whoever controls that chat — or that token — has that shell.
+The gate script, not the chat, is what limits what can happen. Use a
+container, VM, or throwaway user for hard isolation, and read
+[docs/security.md](docs/security.md) first. Report
 vulnerabilities via
 [GitHub Security Advisories](https://github.com/weatherjean/shell3/security/advisories).
 
