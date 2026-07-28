@@ -88,12 +88,21 @@ func (c *BotAPIClient) onUpdate(ctx context.Context, b *bot.Bot, u *models.Updat
 		return
 	}
 	m := u.Message
-	msg := Msg{ChatID: m.Chat.ID, ID: m.ID, Text: m.Text, ReplyTo: replyContext(m)}
+	msg := normalizeMessage(m)
+	msg.Media = resolveMedia(ctx, c, m)
+	c.out <- msg
+}
+
+// normalizeMessage projects a Telegram message onto the transport-agnostic Msg,
+// minus its attachments (resolveMedia fills those in — it needs the network).
+// Telegram puts the words of a MEDIA message in Caption, not Text, so a photo
+// sent with "translate this" has an empty Text; the caption is the message.
+func normalizeMessage(m *models.Message) Msg {
+	msg := Msg{ChatID: m.Chat.ID, ID: m.ID, Text: cmp.Or(m.Text, m.Caption), ReplyTo: replyContext(m)}
 	if r := m.ReplyToMessage; r != nil {
 		msg.ReplyToID = r.ID
 	}
-	msg.Media = resolveMedia(ctx, c, m)
-	c.out <- msg
+	return msg
 }
 
 // replyContext returns the text the message is replying to, for model context.
