@@ -34,8 +34,10 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 	if len(fields) == 0 { // e.g. "/" followed only by whitespace
 		return
 	}
-	cmd := fields[0]
-	arg := strings.TrimSpace(strings.TrimPrefix(m.Text, cmd))
+	arg := strings.TrimSpace(strings.TrimPrefix(m.Text, fields[0]))
+	// Telegram appends "@yourbot" to a command typed in a group (and some
+	// clients do so after an autocomplete tap), so route on the bare verb.
+	cmd, _, _ := strings.Cut(fields[0], "@")
 	switch cmd {
 	case "/stop":
 		// Turn-only: cancel the active main turn. Background jobs are NEVER killed

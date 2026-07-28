@@ -393,3 +393,20 @@ func TestRunsCommand_UnknownID(t *testing.T) {
 		t.Fatalf("expected the no-such-run error text, got %v", fc.sentTexts())
 	}
 }
+
+// Telegram appends "@yourbot" to a command typed in a group (and some clients
+// do it after an autocomplete tap in a private chat), so the suffix must be
+// stripped before routing.
+func TestCommand_BotnameSuffixIsStripped(t *testing.T) {
+	fc := newFakeClient()
+	rt, _ := newFakeRuntime(t, "ok")
+	b := newBot(t, fc, rt)
+	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/reload@my_shell3_bot"})
+	joined := strings.Join(fc.sentTexts(), "\n")
+	if strings.Contains(joined, "unknown command") {
+		t.Fatalf("/reload@botname must route to /reload, got %v", fc.sentTexts())
+	}
+	if !strings.Contains(joined, "reload not available") {
+		t.Fatalf("expected the /reload reply, got %v", fc.sentTexts())
+	}
+}
