@@ -38,6 +38,7 @@ func TestBootSuccessMessage(t *testing.T) {
 		"shell3 ask",                  // the local ask mode must be advertised
 		serviceUnitName,               // service management commands
 		"Sleep caveat",                // laptop-suspend warning
+		"http://127.0.0.1:8765",       // where to reach the running service
 	} {
 		if !strings.Contains(svcOn, want) {
 			t.Errorf("service-enabled message missing %q", want)
