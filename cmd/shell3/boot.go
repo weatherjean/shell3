@@ -29,6 +29,7 @@ type bootFlags struct {
 	visionSet                    bool // --vision passed explicitly (skips the form's confirm)
 	force                        bool
 	show                         bool // print the post-boot summary and exit
+	service                      bool // (re)install + restart the systemd unit and exit
 }
 
 func newBootCommand() *cobra.Command {
@@ -42,6 +43,9 @@ func newBootCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if f.show {
 				return showBootSuccess()
+			}
+			if f.service {
+				return reinstallService()
 			}
 			f.visionSet = cmd.Flags().Changed("vision")
 			return runBoot(f)
@@ -58,6 +62,7 @@ func newBootCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&f.vision, "vision", true, "Model can see images (wires media.describe to it and enables the media tool)")
 	cmd.Flags().BoolVar(&f.force, "force", false, "Overwrite an existing ~/.shell3 config (shell3.yaml, agent.md, ...)")
 	cmd.Flags().BoolVar(&f.show, "show", false, "Print the post-boot summary for the existing config and exit (changes nothing)")
+	cmd.Flags().BoolVar(&f.service, "service", false, "(Re)install and restart the systemd user service for the existing config, then exit")
 	return cmd
 }
 
@@ -98,10 +103,14 @@ func runBoot(f *bootFlags) error {
 
 	envPairs := append([][2]string{{envKey, a.key}}, webEnvPairs(webPassword, totpSecret)...)
 
+	// Ask before rendering so the answer lands in the scaffolded config;
+	// installs cloudflared when needed (opt-in, no sudo, failures non-fatal).
+	wireTunnel := askTunnel(tty)
+
 	if err := scaffold.RenderBaseConfig(dir, scaffold.Values{
 		Name: a.name, BaseURL: a.url, EnvKey: envKey, Model: a.model, Proxy: a.proxy,
 		ContextWindow: a.ctxWindow, CompactAt: a.compactAt, WorkDir: a.workDir,
-		Vision: a.vision,
+		Vision: a.vision, Tunnel: wireTunnel, TOTP: totpSecret != "",
 	}, f.force); err != nil {
 		return err
 	}
@@ -119,18 +128,13 @@ func runBoot(f *bootFlags) error {
 		fmt.Printf("note: kept the existing %s in %s — edit that file to change it\n", k, envPath)
 	}
 
-	// Gently offer the tunnel binary when missing (opt-in, no sudo,
-	// every failure non-fatal) — before the service step so a started service
-	// finds it.
-	offerCloudflared(tty)
-
 	// Offer to install shell3 as a systemd user service (Linux + TTY only).
 	// The unit is startable as soon as the config exists, since boot has just
 	// written the password serve requires.
 	svc := offerSystemdService(tty, dir, home, true)
 
 	printWebCredentials(webPassword, totpSecret, envPath)
-	printBootSuccess(dir, cfgPath, envPath, a.proxy != "", svc)
+	printBootSuccess(dir, cfgPath, envPath, a.proxy != "", wireTunnel, svc)
 	return nil
 }
 
@@ -163,8 +167,15 @@ func showBootSuccess() error {
 	if _, err := os.Stat(filepath.Join(home, ".config", "systemd", "user", serviceUnitName)); err == nil {
 		svc = serviceEnabled
 	}
+	tunnelWired := false
+	for _, line := range strings.Split(string(yaml), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "tunnel:") {
+			tunnelWired = true
+			break
+		}
+	}
 
-	printBootSuccess(dir, cfgPath, filepath.Join(dir, ".env"), proxyWired, svc)
+	printBootSuccess(dir, cfgPath, filepath.Join(dir, ".env"), proxyWired, tunnelWired, svc)
 	return nil
 }
 
@@ -424,7 +435,7 @@ func mergeEnv(existing string, kv [][2]string) (merged string, kept []string) {
 	return b.String(), kept
 }
 
-func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool, svc serviceState) {
+func printBootSuccess(dir, cfgPath, envPath string, proxyWired, tunnelWired bool, svc serviceState) {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format+"\n", args...) }
 
@@ -497,19 +508,30 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool, svc service
 	w("")
 	w("## Reaching it from elsewhere")
 	w("")
-	w("`shell3 serve` binds loopback and asks for the password you just set. To")
-	w("use it from your phone, give it a public https address — a **cloudflared**")
-	w("quick tunnel (free, no account) is the easy path. Remember what is behind")
-	w("that login: a session is a shell on this machine, so an authenticated")
-	w("proxy in front of it is still worth having.")
-	if _, err := exec.LookPath("cloudflared"); err != nil {
+	if tunnelWired {
+		w("`web.tunnel` is wired: every `shell3 serve` start opens a cloudflared")
+		w("quick tunnel and prints its public https URL — that URL is what you")
+		w("open on your phone. It changes on each restart; find the current one")
+		w("in the serve output (as a service: `journalctl --user -u %s`)", serviceUnitName)
+		w("or `~/.shell3/tunnel.log`. For a fixed address set `web.url`.")
 		w("")
-		w("`cloudflared` is **not on PATH** here — install it")
-		w("(<https://github.com/cloudflare/cloudflared>), or use another tunnel")
-		w("or a fixed address: `web.tunnel` / `web.url` in `shell3.yaml`.")
+		w("Behind that URL is your login — and a shell on this machine. An")
+		w("authenticated proxy in front of it is still worth having.")
 	} else {
-		w("")
-		w("Set `web.tunnel` (or a fixed `web.url`) in `shell3.yaml`.")
+		w("`shell3 serve` binds loopback and asks for the password you just set. To")
+		w("use it from your phone, give it a public https address — a **cloudflared**")
+		w("quick tunnel (free, no account) is the easy path. Remember what is behind")
+		w("that login: a session is a shell on this machine, so an authenticated")
+		w("proxy in front of it is still worth having.")
+		if _, err := exec.LookPath("cloudflared"); err != nil {
+			w("")
+			w("`cloudflared` is **not on PATH** here — install it")
+			w("(<https://github.com/cloudflare/cloudflared>), or use another tunnel")
+			w("or a fixed address: `web.tunnel` / `web.url` in `shell3.yaml`.")
+		} else {
+			w("")
+			w("Set `web.tunnel` (or a fixed `web.url`) in `shell3.yaml`.")
+		}
 	}
 
 	fmt.Println()

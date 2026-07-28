@@ -11,6 +11,8 @@ import (
 	"time"
 
 	huh "charm.land/huh/v2"
+
+	"github.com/weatherjean/shell3/internal/paths"
 )
 
 // serviceState describes what the boot-time systemd step did, for the final
@@ -79,7 +81,14 @@ func offerSystemdService(tty bool, configDir, home string, start bool) serviceSt
 	if err != nil || !install {
 		return serviceDeclined
 	}
+	return installSystemdService(configDir, home, start)
+}
 
+// installSystemdService writes the unit for this binary, enables it (plus
+// linger), and optionally (re)starts it, verifying it actually came up.
+// It never asks; `boot --service` calls it directly to repair or refresh an
+// installation without redoing the whole boot.
+func installSystemdService(configDir, home string, start bool) serviceState {
 	bin, err := os.Executable()
 	if err != nil {
 		fmt.Printf("warning: service setup skipped — cannot resolve the shell3 binary path: %v\n", err)
@@ -120,6 +129,30 @@ func offerSystemdService(tty bool, configDir, home string, start bool) serviceSt
 		return serviceFailed
 	}
 	return serviceEnabled
+}
+
+// reinstallService is `shell3 boot --service`: rewrite the unit for the
+// current binary and config, enable it, restart it, and verify it is
+// running — the repair path when the unit points at a stale binary or an
+// old process held the port. Touches nothing else boot writes.
+func reinstallService() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("boot --service: home dir: %w", err)
+	}
+	dir := paths.NewGlobal(home).Root
+	cfgPath := filepath.Join(dir, "shell3.yaml")
+	if _, err := os.Stat(cfgPath); err != nil {
+		return fmt.Errorf("boot --service: no config at %s — run `shell3 boot` first", cfgPath)
+	}
+	if !systemdAvailable() {
+		return fmt.Errorf("boot --service: no systemd user instance here")
+	}
+	if installSystemdService(dir, home, true) != serviceEnabled {
+		return fmt.Errorf("boot --service: service setup failed (see warnings above)")
+	}
+	fmt.Printf("%s reinstalled and running — open http://127.0.0.1:8765\n", serviceUnitName)
+	return nil
 }
 
 // runSystemctl is the real command runner behind waitServiceActive.

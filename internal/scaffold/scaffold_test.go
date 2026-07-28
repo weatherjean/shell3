@@ -45,6 +45,15 @@ func TestRenderBaseConfig(t *testing.T) {
 	if strings.Contains(string(cfg), "{{") {
 		t.Errorf("shell3.yaml still contains an unrendered template delimiter")
 	}
+	// TOTP and Tunnel default off: both lines stay commented hints.
+	for _, want := range []string{
+		"# totp_secret: env:SHELL3_WEB_TOTP_SECRET",
+		`# tunnel: "cloudflared tunnel --url http://{addr}"`,
+	} {
+		if !strings.Contains(string(cfg), want) {
+			t.Errorf("shell3.yaml missing commented hint %q", want)
+		}
+	}
 	agentMD, err := os.ReadFile(filepath.Join(dir, "agent.md"))
 	if err != nil {
 		t.Fatalf("read agent.md: %v", err)
@@ -73,6 +82,30 @@ func TestRenderBaseConfig(t *testing.T) {
 	} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
 			t.Errorf("missing %s: %v", p, err)
+		}
+	}
+}
+
+// TestRenderBaseConfigTOTPAndTunnel verifies enrolment answers become live
+// config: enrolled TOTP and an accepted tunnel must render uncommented, or
+// the secret sits unused in .env and the login never asks for a code.
+func TestRenderBaseConfigTOTPAndTunnel(t *testing.T) {
+	dir := t.TempDir()
+	v := Values{Name: "main", BaseURL: "http://localhost:1/v1", EnvKey: "K", Model: "m",
+		TOTP: true, Tunnel: true}
+	if err := RenderBaseConfig(dir, v, false); err != nil {
+		t.Fatalf("RenderBaseConfig: %v", err)
+	}
+	cfg, err := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
+	if err != nil {
+		t.Fatalf("read shell3.yaml: %v", err)
+	}
+	for _, want := range []string{
+		"\n  totp_secret: env:SHELL3_WEB_TOTP_SECRET",
+		"\n  tunnel: \"cloudflared tunnel --url http://{addr}\"",
+	} {
+		if !strings.Contains(string(cfg), want) {
+			t.Errorf("shell3.yaml missing live line %q", want)
 		}
 	}
 }

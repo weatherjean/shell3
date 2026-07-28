@@ -100,8 +100,8 @@ web:
   workdir: {{.WorkDir | yamlstr}}
   addr: 127.0.0.1:8765
   password: env:SHELL3_WEB_PASSWORD
-  # totp_secret: env:SHELL3_WEB_TOTP_SECRET
-  # tunnel: "cloudflared tunnel --url http://{addr}"
+  {{if .TOTP}}totp_secret: env:SHELL3_WEB_TOTP_SECRET{{else}}# totp_secret: env:SHELL3_WEB_TOTP_SECRET{{end}}
+  {{if .Tunnel}}tunnel: "cloudflared tunnel --url http://{addr}"{{else}}# tunnel: "cloudflared tunnel --url http://{addr}"{{end}}
 
 # runs_keep_days: how long a finished session's runs/<id>/ dir is kept before
 # `shell3 serve` sweeps it at startup; 0 keeps everything forever (default 30).

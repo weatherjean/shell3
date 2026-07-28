@@ -342,7 +342,14 @@ already-gone sessions, printing `janitor: removed N runs, M thread entries`
 
 `shell3 boot` scaffolds the config tree (an interactive form: model, context
 budget, whether the model has vision — which wires `media.describe` + the media
-tool — and the agent's workdir) and writes secrets to `~/.shell3/.env`.
+tool — and the agent's workdir) and writes secrets to `~/.shell3/.env`; TTY-only
+offers then wire what was accepted into the rendered yaml (TOTP enrolment →
+`web.totp_secret`, phone access → `web.tunnel` quick tunnel, installing
+cloudflared if needed) and install the systemd user service, verified via
+is-active polling so a crash-loop is reported, not claimed as running.
+`shell3 boot --service` re-runs just the service step against the existing
+config (the repair path); `--show` reprints the finale, rendered to the
+terminal's own background.
 `shell3 ask "…"` is the terminal front-end (`internal/cli`): it drives the same
 agent with full verbose output (every tool call/result, reasoning, token usage;
 no message = an interactive multi-turn loop; `-p` for headless; `--resume`

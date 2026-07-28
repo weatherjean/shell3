@@ -19,37 +19,35 @@ import (
 	huh "charm.land/huh/v2"
 )
 
-// offerCloudflared gently offers to install cloudflared when it's missing:
-// web.tunnel uses it to give the interface a public https URL, but shell3 runs
-// fine without one — so this is strictly opt-in (TTY only), never uses sudo,
-// and every failure mode is a shrug plus a pointer, not an error. Declining or
-// failing leaves boot's work fully intact.
-func offerCloudflared(tty bool) {
+// askTunnel asks (TTY only) whether to wire web.tunnel to a cloudflared quick
+// tunnel so the interface is reachable from a phone, installing cloudflared
+// first when it's missing. Returns whether the tunnel should be wired into
+// the scaffolded config; every failure mode degrades to "stay local".
+func askTunnel(tty bool) bool {
 	if !tty {
-		return
+		return false
 	}
-	if _, err := exec.LookPath("cloudflared"); err == nil {
-		return // already installed
-	}
-	install := true
+	wire := true
 	err := huh.NewForm(huh.NewGroup(
 		huh.NewConfirm().
-			Title("Install cloudflared so you can reach shell3 from your phone?").
-			Description("Optional. It gives the web interface a public https URL\n" +
-				"(free, no account). One binary into ~/.local/bin — no sudo,\n" +
-				"nothing else touched. Skipping is fine: shell3 just stays local,\n" +
-				"and you can install it any time later.").
-			Value(&install),
+			Title("Reach shell3 from your phone? (cloudflared quick tunnel)").
+			Description("Wires web.tunnel so serve starts the tunnel and prints a\n" +
+				"public https URL (free, no account; the URL changes on each\n" +
+				"restart). Behind that URL is your login — and a shell on this\n" +
+				"machine. Declining keeps shell3 local; edit web.tunnel later.").
+			Value(&wire),
 	)).Run()
-	if err != nil || !install {
-		fmt.Println("no problem — shell3 stays local. cloudflared can be added any time:")
-		fmt.Println("  https://github.com/cloudflare/cloudflared")
-		return
+	if err != nil || !wire {
+		return false
 	}
-	if err := installCloudflared(); err != nil {
-		fmt.Printf("that didn't work out (%v) — no harm done, shell3 stays local.\n", err)
-		fmt.Println("Manual install: https://github.com/cloudflare/cloudflared")
+	if _, err := exec.LookPath("cloudflared"); err != nil {
+		if err := installCloudflared(); err != nil {
+			fmt.Printf("cloudflared install failed (%v) — staying local; web.tunnel is a\n", err)
+			fmt.Println("commented hint in shell3.yaml once you have a tunnel binary.")
+			return false
+		}
 	}
+	return true
 }
 
 // installCloudflared installs cloudflared the least intrusive way available:

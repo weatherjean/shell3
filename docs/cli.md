@@ -188,26 +188,36 @@ until you add a vision model. Another asks where the agent's shell should run
 password** — required, 16 characters minimum, with a generated suggestion you
 can accept as-is; it is printed once at the end, so save it. A following step
 offers a **second factor**, printing a QR code to scan with an authenticator
-app; losing that phone is not a lockout, since the secret is a line in `.env`
-you can delete.
-When [`cloudflared`](https://github.com/cloudflare/cloudflared) is missing,
-boot gently offers to install it (the easy way to expose the interface):
-Homebrew when present, otherwise the official release binary into
-`~/.local/bin` — opt-in, no sudo, and declining or a failed download just
-leaves shell3 reachable on loopback only.
+app; enrolling wires `web.totp_secret` so the login asks for the code. Losing
+that phone is not a lockout, since the secret is a line in `.env` you can
+delete.
+Another step asks whether to reach shell3 **from your phone**: accepting
+wires `web.tunnel` to a
+[cloudflared](https://github.com/cloudflare/cloudflared) quick tunnel
+(installing cloudflared first when missing — Homebrew when present, otherwise
+the official release binary into `~/.local/bin`; opt-in, no sudo). Every
+`serve` start then opens the tunnel and prints its public https URL (it
+changes per restart; also in `~/.shell3/tunnel.log` and the service journal).
+Declining or a failed install just leaves shell3 reachable on loopback only.
 
 On Linux with systemd, a final step offers to install shell3 as a **systemd
 user service** (`shell3.service`, running `shell3 serve`): the unit is written
 to `~/.config/systemd/user/`, enabled, lingering is turned on
 (`loginctl enable-linger`, so it runs without an active login and starts at
-boot), and started immediately.
+boot), started immediately, and verified: boot polls the unit and reports a
+crash-loop (e.g. another process already on the port) instead of claiming
+success.
 Caveat spelled out at the end of boot too: a user service cannot prevent the
 machine from **sleeping**; on a laptop, disable suspend (or host shell3 on an
 always-on box) or the agent is gone while the lid is closed.
+`shell3 boot --service` re-runs just this step against the existing config —
+the repair path after updating the binary or when the unit points at a stale
+one; it rewrites the unit, restarts it, and verifies it came up.
 Scriptable via flags (any flag skips its prompt; with no TTY, unset flags take
 defaults, except `--model`, which headless boot requires): `--url`, `--model`,
 `--name`, `--key`, `--vision`, `--workdir`, `--context-window`,
-`--compact-at`, `--proxy`, `--force`.
+`--compact-at`, `--proxy`, `--force`. (The tunnel, TOTP, and service offers
+are TTY-only; headless boot skips them.)
 `shell3 boot --show` reprints the post-boot summary for the existing config
 (paths, how to run, how to expose it) without writing or asking anything.
 See [configuration.md](configuration.md).
