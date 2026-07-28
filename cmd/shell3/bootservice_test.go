@@ -3,8 +3,11 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/weatherjean/shell3/internal/config"
 )
 
 // TestServiceUnitRunsTheBot pins what the installed unit actually starts: the
@@ -52,4 +55,37 @@ func TestWaitServiceActive(t *testing.T) {
 	if sleeps == 0 {
 		t.Error("polling never slept between tries")
 	}
+}
+
+// TestServiceStartDiagnosisReusesTelegramCheck pins the diagnosis on the
+// front-end's own refusal: a boot that deferred the token writes a config
+// `shell3 telegram` will not start on, and the service failure must say the
+// same thing the front-end would, not a second guess at it.
+func TestServiceStartDiagnosisReusesTelegramCheck(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	f := &bootFlags{url: "http://localhost:9999/v1", model: "test-model", name: "main"}
+	if err := runBoot(f); err != nil {
+		t.Fatalf("runBoot: %v", err)
+	}
+	dir := filepath.Join(home, ".shell3")
+
+	got := serviceStartDiagnosis(dir)
+	_, err := telegramChatID(mustLoadTelegram(t, dir))
+	if err == nil {
+		t.Fatal("a boot with no token should leave the telegram wiring incomplete")
+	}
+	if !strings.Contains(got, err.Error()) {
+		t.Errorf("diagnosis = %q, want it to carry the front-end's own refusal %q", got, err)
+	}
+}
+
+func mustLoadTelegram(t *testing.T, dir string) config.TelegramConfig {
+	t.Helper()
+	c, err := config.Load(dir)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	defer c.Close()
+	return c.Telegram()
 }

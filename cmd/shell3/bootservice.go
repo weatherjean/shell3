@@ -12,6 +12,7 @@ import (
 
 	huh "charm.land/huh/v2"
 
+	"github.com/weatherjean/shell3/internal/config"
 	"github.com/weatherjean/shell3/internal/paths"
 )
 
@@ -126,17 +127,32 @@ func installSystemdService(configDir, home string, start bool) serviceState {
 	if start && !waitServiceActive(runSystemctl, 6, func() { time.Sleep(500 * time.Millisecond) }) {
 		fmt.Printf("warning: %s was started but is not running — check the log:\n", serviceUnitName)
 		fmt.Printf("  journalctl --user -u %s -n 20\n", serviceUnitName)
-		fmt.Println("Common causes: telegram.token or telegram.chat_id is blank (`shell3 health` names it),")
-		fmt.Println("or a second shell3 is already long-polling the same bot (Telegram 409 Conflict).")
+		fmt.Println(serviceStartDiagnosis(configDir))
 		return serviceFailed
 	}
 	return serviceEnabled
 }
 
+// serviceStartDiagnosis names why the unit came up and died, reusing the
+// front-end's own validation rather than restating it: `shell3 telegram`
+// refuses to start on exactly what telegramChatID rejects, so its message is
+// the accurate one. With the telegram wiring intact, the remaining common
+// cause is a second shell3 long-polling the same bot.
+func serviceStartDiagnosis(configDir string) string {
+	lc, err := config.Load(configDir)
+	if err != nil {
+		return "Common cause: the config no longer loads — run `shell3 health` for the reason."
+	}
+	if _, err := telegramChatID(lc.Telegram()); err != nil {
+		return "Common cause: " + err.Error()
+	}
+	return "Common cause: a second shell3 is already long-polling the same bot (Telegram 409 Conflict)."
+}
+
 // reinstallService is `shell3 boot --service`: rewrite the unit for the
 // current binary and config, enable it, restart it, and verify it is
-// running — the repair path when the unit points at a stale binary or an
-// old process held the port. Touches nothing else boot writes.
+// running — the repair path when the unit points at a stale binary or the
+// previous install failed. Touches nothing else boot writes.
 func reinstallService() error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -165,8 +181,9 @@ func runSystemctl(argv ...string) (string, error) {
 }
 
 // waitServiceActive polls `systemctl --user is-active` until the unit reports
-// active, giving a crash-looping unit (port already taken, bad binary) time
-// to show itself instead of telling the user the service is running.
+// active, giving a crash-looping unit (blank telegram wiring, a bot another
+// process is already polling, a bad binary) time to show itself instead of
+// telling the user the service is running.
 func waitServiceActive(run func(argv ...string) (string, error), tries int, sleep func()) bool {
 	for i := 0; i < tries; i++ {
 		if i > 0 {

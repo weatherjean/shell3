@@ -98,10 +98,10 @@ type TelegramConfig struct {
 	// apart from "front-end declared but unusable" — the second is a config
 	// error worth failing `shell3 health` over, the first is not.
 	Present bool
-	// Token is the bot API token, secret-substituted from .env. Empty means
-	// the telegram: block is absent or declares no token — the front-end
-	// refuses to start rather than failing the load, so a config with no
-	// telegram front-end still loads.
+	// Token is the bot API token, secret-substituted from .env. Empty means a
+	// declared block left it blank (Present is the absence signal): `shell3
+	// boot` writes exactly that when the user defers the token, so the load
+	// succeeds and the front-end refuses to start instead.
 	Token   string
 	ChatID  string
 	WorkDir string
