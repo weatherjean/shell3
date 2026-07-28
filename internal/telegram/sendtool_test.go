@@ -10,6 +10,46 @@ import (
 	"testing"
 )
 
+// sendMarkdownDoc is the shared delivery path for every render.* command
+// output: small views go inline (through sendReply), large ones become a
+// document named by the caller plus a capped text summary.
+func TestSendMarkdownDoc_InlineWhenSmall(t *testing.T) {
+	fc := newFakeClient()
+	rt, _ := newFakeRuntime(t, "ok")
+	b := newBot(t, fc, rt)
+
+	b.sendMarkdownDoc(context.Background(), "status.md", "# shell3 status\n\nall good")
+
+	if _, ok := fc.lastDoc(); ok {
+		t.Fatal("a small markdown view must not be sent as a document")
+	}
+	all := strings.Join(fc.sentTexts(), "\n")
+	if !strings.Contains(all, "all good") {
+		t.Fatalf("expected the markdown sent inline, got %v", fc.sentTexts())
+	}
+}
+
+func TestSendMarkdownDoc_DocumentWhenLarge(t *testing.T) {
+	fc := newFakeClient()
+	rt, _ := newFakeRuntime(t, "ok")
+	b := newBot(t, fc, rt)
+
+	big := "# status.md\n\n" + strings.Repeat("x", 4000)
+	b.sendMarkdownDoc(context.Background(), "status.md", big)
+
+	doc, ok := fc.lastDoc()
+	if !ok || doc.filename != "status.md" || string(doc.data) != big {
+		t.Fatalf("expected the full markdown sent as status.md, got %+v ok=%v", doc, ok)
+	}
+	all := strings.Join(fc.sentTexts(), "\n")
+	if all == "" {
+		t.Fatal("expected a text summary alongside the document")
+	}
+	if len(all) > 400 {
+		t.Fatalf("summary must be <=400 chars, got %d: %q", len(all), all)
+	}
+}
+
 func TestSendMediaTool_RegisteredAndSends(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")

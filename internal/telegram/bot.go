@@ -65,8 +65,20 @@ type Bot struct {
 	reload        func() (shell3.ReloadResult, error) // performs a full config reload; nil if unset
 	pendingReload bool                                // set by the reload tool mid-turn; applied at end-of-turn
 
-	listJobs  func() string         // renders running background tasks for /jobs; nil if unwired
 	cancelJob func(id string) error // cancels one task for /cancel <id>; nil if unwired
+
+	// jobsList and jobTranscript back /jobs and /job <id>: jobsList is the
+	// runtime-wide background-job snapshot render.Jobs/render.JobDetail need
+	// (shell3.Session.Jobs() reports the whole job runtime, not one session's
+	// share — the wiring closure supplies it via any convenient live session);
+	// jobTranscript looks up one job's captured output/transcript by id. Either
+	// may be nil.
+	jobsList      func() []shell3.JobInfo
+	jobTranscript func(id string) string
+
+	runsRoot     string                      // project dir holding runs/ (Parts.RunsRoot()); "" disables /runs
+	version      string                      // shell3 version string, reported by /status
+	cronLastRuns func() map[string]time.Time // cron job name -> last run time, for /cron; nil renders "never"
 }
 
 // NewBot wires a Bot. It holds no session — sessions are created per message
@@ -94,14 +106,32 @@ func (b *Bot) SetJobRunner(fn func(name string) error) { b.runJob = fn }
 // SetReloader wires /reload (and the reload tool) to the host's reload coordinator.
 func (b *Bot) SetReloader(fn func() (shell3.ReloadResult, error)) { b.reload = fn }
 
-// SetJobControl wires /jobs and /cancel <id> to the runtime's background-job
-// surface: list renders the running tasks (id/kind/label/elapsed), cancel
+// SetJobControl wires /cancel <id> to the runtime's background-job cancel —
 // tears one down (cascading to a subagent's own bash_bg children, same as the
-// agent's task_cancel tool). The zero-token path for a
-// phone-only user to kill a runaway job.
-func (b *Bot) SetJobControl(list func() string, cancel func(id string) error) {
-	b.listJobs, b.cancelJob = list, cancel
+// agent's task_cancel tool). The zero-token path for a phone-only user to
+// kill a runaway job.
+func (b *Bot) SetJobControl(cancel func(id string) error) { b.cancelJob = cancel }
+
+// SetJobsSource wires /jobs and /job <id> to the runtime's background-job
+// list (render.Jobs) and per-job transcript/output lookup (render.JobDetail).
+// A nil list disables both commands ("job control not available"); a nil
+// transcript still renders /job <id> detail, just with no Output section.
+func (b *Bot) SetJobsSource(list func() []shell3.JobInfo, transcript func(id string) string) {
+	b.jobsList, b.jobTranscript = list, transcript
 }
+
+// SetRunsRoot sets the project directory holding runs/ (Parts.RunsRoot()), so
+// /runs and /runs <id> can list/replay stored sessions via
+// render.RunsList/RunReplay. "" (the zero value) disables both.
+func (b *Bot) SetRunsRoot(root string) { b.runsRoot = root }
+
+// SetVersion sets the shell3 version string /status reports via render.Status.
+func (b *Bot) SetVersion(v string) { b.version = v }
+
+// SetCronLastRuns wires /cron's "last run" column to the scheduler's run
+// history, keyed by job name. nil (or a job missing from the returned map)
+// renders as "never".
+func (b *Bot) SetCronLastRuns(fn func() map[string]time.Time) { b.cronLastRuns = fn }
 
 // SetMedia wires the bot's STT/describe/TTS capabilities and the per-chat
 // inbound-voice-reply mode override. The host MUST call it at boot and again
@@ -632,6 +662,18 @@ func (b *Bot) StartFreshTurn(note string) {
 	b.live[sess.ID()] = sess
 	b.mu.Unlock()
 	sess.NotifyText(note)
+}
+
+// anyLiveSession returns some live session for host code that wants one but
+// doesn't care which — e.g. /status's render.Status snapshot. Returns nil
+// when nothing is live; callers must tolerate that (render.Status does).
+func (b *Bot) anyLiveSession() *shell3.Session {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, s := range b.live {
+		return s
+	}
+	return nil
 }
 
 // hasTool reports whether sess's active agent has the named tool enabled.

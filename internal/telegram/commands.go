@@ -4,7 +4,12 @@ package telegram
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"time"
+
+	"github.com/weatherjean/shell3/internal/render"
+	"github.com/weatherjean/shell3/internal/shell3"
 )
 
 // BotCommands is the canonical command list, registered with Telegram for the
@@ -13,8 +18,12 @@ func BotCommands() []Command {
 	return []Command{
 		{"stop", "Stop the current turn"},
 		{"run", "Run a scheduled job now: /run <name>"},
+		{"status", "Show runtime status"},
 		{"jobs", "List running background tasks"},
+		{"job", "Show one job's detail: /job <id>"},
 		{"cancel", "Cancel a background task: /cancel <id>"},
+		{"cron", "List scheduled cron jobs"},
+		{"runs", "List stored runs, or replay one: /runs [id]"},
 		{"reload", "Reload the config without restarting"},
 		{"voice", "Voice replies: /voice off|inbound|always"},
 	}
@@ -56,19 +65,64 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 			return
 		}
 		b.sendReply(ctx, "▶️ fired job "+name)
+	case "/status":
+		b.sendMarkdownDoc(ctx, "status.md", render.Status(b.anyLiveSession(), b.rt, b.version))
 	case "/jobs":
 		// Deterministic, zero-token job control from the phone: lists running
 		// subagents and bash_bg commands. Natural-language "what's running?"
 		// still works via the agent's task_list tool; this is the direct path.
-		if b.listJobs == nil {
+		if b.jobsList == nil {
 			b.sendReply(ctx, "job control not available")
 			return
 		}
-		if out := b.listJobs(); out != "" {
-			b.sendReply(ctx, out)
-		} else {
-			b.sendReply(ctx, "no background jobs running")
+		b.sendMarkdownDoc(ctx, "jobs.md", render.Jobs(b.jobsList()))
+	case "/job":
+		if b.jobsList == nil {
+			b.sendReply(ctx, "job control not available")
+			return
 		}
+		id := strings.TrimSpace(arg)
+		if id == "" {
+			b.sendReply(ctx, "usage: /job `<id>`")
+			return
+		}
+		info, ok := findJob(b.jobsList(), id)
+		if !ok {
+			b.sendReply(ctx, fmt.Sprintf("no such job %q", id))
+			return
+		}
+		var transcript string
+		if b.jobTranscript != nil {
+			transcript = b.jobTranscript(id)
+		}
+		b.sendMarkdownDoc(ctx, "job-"+id+".md", render.JobDetail(info, transcript))
+	case "/cron":
+		var lastRuns map[string]time.Time
+		if b.cronLastRuns != nil {
+			lastRuns = b.cronLastRuns()
+		}
+		b.sendMarkdownDoc(ctx, "cron.md", render.Cron(b.rt.Cron(), lastRuns))
+	case "/runs":
+		if b.runsRoot == "" {
+			b.sendReply(ctx, "runs not available")
+			return
+		}
+		id := strings.TrimSpace(arg)
+		if id == "" {
+			out, err := render.RunsList(b.runsRoot, 20)
+			if err != nil {
+				b.sendReply(ctx, "⚠️ "+err.Error())
+				return
+			}
+			b.sendMarkdownDoc(ctx, "runs.md", out)
+			return
+		}
+		out, err := render.RunReplay(b.runsRoot, id)
+		if err != nil {
+			b.sendReply(ctx, "⚠️ "+err.Error())
+			return
+		}
+		b.sendMarkdownDoc(ctx, "run-"+id+".md", out)
 	case "/cancel":
 		if b.cancelJob == nil {
 			b.sendReply(ctx, "job control not available")
@@ -93,4 +147,14 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 	default:
 		b.sendReply(ctx, "unknown command: "+cmd)
 	}
+}
+
+// findJob returns the job matching id from jobs, if any.
+func findJob(jobs []shell3.JobInfo, id string) (shell3.JobInfo, bool) {
+	for _, j := range jobs {
+		if j.ID == id {
+			return j, true
+		}
+	}
+	return shell3.JobInfo{}, false
 }

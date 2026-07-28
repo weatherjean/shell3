@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
@@ -96,36 +99,98 @@ func TestCommand_UnknownDropped(t *testing.T) {
 	}
 }
 
-// /jobs lists whatever the wired list closure renders — the bot does no
-// formatting of its own, it just relays the runtime's job-control surface.
+// /jobs renders the render.Jobs view over whatever the jobs-source closure
+// returns — the bot does no formatting of its own beyond the shared
+// render/document delivery path.
 func TestJobsCommandListsRunning(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
-	b.SetJobControl(func() string {
-		return "sub1  subagent  do the thing  2m14s"
-	}, func(id string) error { return nil })
+	b.SetJobsSource(func() []shell3.JobInfo {
+		return []shell3.JobInfo{{ID: "sub1", Kind: shell3.JobSubagent, Agent: "explorer", Cmd: "do the thing"}}
+	}, nil)
 
 	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/jobs"})
 	all := strings.Join(fc.sentTexts(), "\n")
-	if !strings.Contains(all, "sub1") || !strings.Contains(all, "2m14s") {
+	if !strings.Contains(all, "sub1") || !strings.Contains(all, "explorer") {
 		t.Fatalf("expected the listing to be relayed, got %v", fc.sentTexts())
 	}
 }
 
-// /jobs with nothing running relays the empty-state text.
+// /jobs with nothing running relays render.Jobs' empty-state text.
 func TestJobsCommandEmpty(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
-	b.SetJobControl(func() string {
-		return "no background jobs running"
-	}, func(id string) error { return nil })
+	b.SetJobsSource(func() []shell3.JobInfo { return nil }, nil)
 
 	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/jobs"})
 	all := strings.Join(fc.sentTexts(), "\n")
-	if !strings.Contains(all, "no background jobs running") {
+	if !strings.Contains(all, "No background jobs") {
 		t.Fatalf("expected the empty-state reply, got %v", fc.sentTexts())
+	}
+}
+
+// /jobs with no source wired says so rather than silently rendering nothing.
+func TestJobsCommandNoSource(t *testing.T) {
+	fc := newFakeClient()
+	rt, _ := newFakeRuntime(t, "ok")
+	b := newBot(t, fc, rt)
+
+	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/jobs"})
+	all := strings.Join(fc.sentTexts(), "\n")
+	if !strings.Contains(all, "job control not available") {
+		t.Fatalf("expected unavailable reply, got %v", fc.sentTexts())
+	}
+}
+
+// /job <id> renders render.JobDetail for a matching job, including its
+// transcript.
+func TestJobDetailCommand(t *testing.T) {
+	fc := newFakeClient()
+	rt, _ := newFakeRuntime(t, "ok")
+	b := newBot(t, fc, rt)
+	b.SetJobsSource(func() []shell3.JobInfo {
+		return []shell3.JobInfo{{ID: "sub1", Kind: shell3.JobSubagent, Agent: "explorer", Cmd: "do the thing"}}
+	}, func(id string) string { return "transcript for " + id })
+
+	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/job sub1"})
+	all := strings.Join(fc.sentTexts(), "\n")
+	if !strings.Contains(all, "sub1") || !strings.Contains(all, "transcript for sub1") {
+		t.Fatalf("expected job detail rendered, got %v", fc.sentTexts())
+	}
+}
+
+// /job with an id that matches no job says so instead of rendering a blank
+// detail view.
+func TestJobDetailCommandUnknownID(t *testing.T) {
+	fc := newFakeClient()
+	rt, _ := newFakeRuntime(t, "ok")
+	b := newBot(t, fc, rt)
+	b.SetJobsSource(func() []shell3.JobInfo { return nil }, nil)
+
+	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/job bogus"})
+	all := strings.Join(fc.sentTexts(), "\n")
+	if !strings.Contains(all, `no such job "bogus"`) {
+		t.Fatalf("expected a no-such-job reply, got %v", fc.sentTexts())
+	}
+}
+
+// /job with no argument replies with usage instead of scanning the job list.
+func TestJobDetailCommandMissingArg(t *testing.T) {
+	fc := newFakeClient()
+	rt, _ := newFakeRuntime(t, "ok")
+	b := newBot(t, fc, rt)
+	called := false
+	b.SetJobsSource(func() []shell3.JobInfo { called = true; return nil }, nil)
+
+	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/job"})
+	if called {
+		t.Fatal("the jobs source must not be consulted with no id")
+	}
+	all := strings.Join(fc.sentTexts(), "\n")
+	if !strings.Contains(all, "usage: /job") {
+		t.Fatalf("expected the usage reply, got %v", fc.sentTexts())
 	}
 }
 
@@ -135,7 +200,7 @@ func TestCancelCommandOK(t *testing.T) {
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
 	cancelled := ""
-	b.SetJobControl(func() string { return "" }, func(id string) error {
+	b.SetJobControl(func(id string) error {
 		cancelled = id
 		return nil
 	})
@@ -156,7 +221,7 @@ func TestCancelCommandUnknownID(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
-	b.SetJobControl(func() string { return "" }, func(id string) error {
+	b.SetJobControl(func(id string) error {
 		return fmt.Errorf("no such task %q", id)
 	})
 
@@ -173,7 +238,7 @@ func TestCancelCommandMissingArg(t *testing.T) {
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
 	called := false
-	b.SetJobControl(func() string { return "" }, func(id string) error {
+	b.SetJobControl(func(id string) error {
 		called = true
 		return nil
 	})
@@ -185,5 +250,146 @@ func TestCancelCommandMissingArg(t *testing.T) {
 	all := strings.Join(fc.sentTexts(), "\n")
 	if !strings.Contains(all, "usage: /cancel") {
 		t.Fatalf("expected the usage reply, got %v", fc.sentTexts())
+	}
+}
+
+// /status renders render.Status inline when it's small — nil session (no
+// live chat session) and a wired version are enough for a document.
+func TestStatusCommand_InlineWhenSmall(t *testing.T) {
+	fc := newFakeClient()
+	rt, _ := newFakeRuntime(t, "ok")
+	b := newBot(t, fc, rt)
+	b.SetVersion("v0.2.0-test")
+
+	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/status"})
+	all := strings.Join(fc.sentTexts(), "\n")
+	if !strings.Contains(all, "shell3 status") || !strings.Contains(all, "v0.2.0-test") {
+		t.Fatalf("expected status text inline, got %v", fc.sentTexts())
+	}
+	if _, ok := fc.lastDoc(); ok {
+		t.Fatal("a small status view must not be sent as a document")
+	}
+}
+
+// /cron with nothing declared relays render.Cron's empty-state text.
+func TestCronCommand_Empty(t *testing.T) {
+	fc := newFakeClient()
+	rt, _ := newFakeRuntime(t, "ok")
+	b := newBot(t, fc, rt)
+
+	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/cron"})
+	all := strings.Join(fc.sentTexts(), "\n")
+	if !strings.Contains(all, "No cron jobs") {
+		t.Fatalf("expected the empty-state cron reply, got %v", fc.sentTexts())
+	}
+}
+
+// /cron renders the runtime's declared jobs plus the wired last-run history.
+func TestCronCommand_RendersJobs(t *testing.T) {
+	fc := newFakeClient()
+	rt, _ := newFakeRuntime(t, "ok")
+	rt.SetCronForTest([]shell3.CronJob{
+		{Name: "nightly", Schedule: "0 3 * * *", Agent: "explorer", Prompt: "sweep the logs"},
+	})
+	b := newBot(t, fc, rt)
+	when := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	b.SetCronLastRuns(func() map[string]time.Time { return map[string]time.Time{"nightly": when} })
+
+	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/cron"})
+	all := strings.Join(fc.sentTexts(), "\n")
+	if !strings.Contains(all, "nightly") || !strings.Contains(all, "sweep the logs") || !strings.Contains(all, "2026-07-20") {
+		t.Fatalf("expected the cron job and last-run time rendered, got %v", fc.sentTexts())
+	}
+}
+
+// /runs with no runs root wired says so.
+func TestRunsCommand_NotConfigured(t *testing.T) {
+	fc := newFakeClient()
+	rt, _ := newFakeRuntime(t, "ok")
+	b := newBot(t, fc, rt)
+
+	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/runs"})
+	all := strings.Join(fc.sentTexts(), "\n")
+	if !strings.Contains(all, "runs not available") {
+		t.Fatalf("expected unavailable reply, got %v", fc.sentTexts())
+	}
+}
+
+// /runs with no id lists the 20 newest stored sessions via render.RunsList.
+func TestRunsCommand_ListsNewest(t *testing.T) {
+	fc := newFakeClient()
+	rt, _ := newFakeRuntime(t, "ok")
+	b := newBot(t, fc, rt)
+
+	root := t.TempDir()
+	st, err := runs.Open(root)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	id, err := st.NewSession(runs.Meta{Workdir: "/tmp/work", Model: "kimi-k2"})
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	if err := st.AppendMessage(id, llm.Message{Role: llm.RoleUser, Content: "hello there"}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	b.SetRunsRoot(root)
+
+	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/runs"})
+	all := strings.Join(fc.sentTexts(), "\n")
+	if !strings.Contains(all, id) || !strings.Contains(all, "hello there") {
+		t.Fatalf("expected the stored run listed, got %v", fc.sentTexts())
+	}
+}
+
+// /runs <id> replays one stored session in full; when the rendered replay
+// blows past the inline threshold it is sent as a run-<id>.md document plus a
+// capped summary.
+func TestRunsCommand_ReplaysOneAsDocumentWhenLarge(t *testing.T) {
+	fc := newFakeClient()
+	rt, _ := newFakeRuntime(t, "ok")
+	b := newBot(t, fc, rt)
+
+	root := t.TempDir()
+	st, err := runs.Open(root)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	id, err := st.NewSession(runs.Meta{Workdir: "/tmp/work", Model: "kimi-k2"})
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	if err := st.AppendMessage(id, llm.Message{Role: llm.RoleUser, Content: strings.Repeat("x", 5000)}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	b.SetRunsRoot(root)
+
+	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/runs " + id})
+	doc, ok := fc.lastDoc()
+	if !ok || doc.filename != "run-"+id+".md" {
+		t.Fatalf("expected a run-%s.md document, got %+v ok=%v", id, doc, ok)
+	}
+	all := strings.Join(fc.sentTexts(), "\n")
+	if all == "" || len(all) > 400 {
+		t.Fatalf("expected a capped text summary alongside the document, got %d bytes", len(all))
+	}
+}
+
+// /runs <id> with an unknown id surfaces render.RunReplay's error text.
+func TestRunsCommand_UnknownID(t *testing.T) {
+	fc := newFakeClient()
+	rt, _ := newFakeRuntime(t, "ok")
+	b := newBot(t, fc, rt)
+
+	root := t.TempDir()
+	if _, err := runs.Open(root); err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	b.SetRunsRoot(root)
+
+	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/runs bogus"})
+	all := strings.Join(fc.sentTexts(), "\n")
+	if !strings.Contains(all, "no such run") {
+		t.Fatalf("expected the no-such-run error text, got %v", fc.sentTexts())
 	}
 }

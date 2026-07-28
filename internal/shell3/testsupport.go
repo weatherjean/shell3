@@ -37,3 +37,11 @@ func (rt *Runtime) SetWebForTest(web WebConfig) {
 	defer rt.mu.Unlock()
 	rt.web = web
 }
+
+// SetCronForTest replaces the runtime's declared cron jobs, for tests that
+// need Cron() to return something without loading a real config directory.
+func (rt *Runtime) SetCronForTest(jobs []CronJob) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	rt.cron = jobs
+}
