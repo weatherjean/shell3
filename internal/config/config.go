@@ -108,6 +108,18 @@ type WebConfig struct {
 	TOTPSecret string
 }
 
+// TelegramConfig is the parsed `telegram:` block: the bot's credentials and
+// where the agent's shell runs.
+type TelegramConfig struct {
+	// Token is the bot API token, secret-substituted from .env like
+	// web.Password. Empty means the telegram: block is absent or declares no
+	// token — the front-end refuses to start rather than failing the load, so
+	// a config with no telegram front-end still loads.
+	Token   string
+	ChatID  string
+	WorkDir string
+}
+
 // CronJob is one parsed cron/<name>.md job.
 type CronJob struct {
 	Name     string
@@ -176,6 +188,7 @@ type LoadedConfig struct {
 
 	mcpServers []MCPServer
 	web        WebConfig
+	telegram   TelegramConfig
 	cron       []CronJob
 
 	stt      *STTConfig
@@ -262,6 +275,9 @@ func (c *LoadedConfig) Notifier() *Notifier { return c.notifier }
 
 // Web returns the parsed `web:` block (zero value if absent).
 func (c *LoadedConfig) Web() WebConfig { return c.web }
+
+// Telegram returns the parsed `telegram:` block (zero value if absent).
+func (c *LoadedConfig) Telegram() TelegramConfig { return c.telegram }
 
 // Cron returns the parsed cron/ jobs in filename order.
 func (c *LoadedConfig) Cron() []CronJob { return c.cron }

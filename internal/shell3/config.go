@@ -11,8 +11,9 @@ import (
 // values straight through, so a field added in internal/config is immediately visible
 // here — no hand-written copier to forget.
 type (
-	WebConfig = config.WebConfig
-	CronJob   = config.CronJob
+	WebConfig      = config.WebConfig
+	TelegramConfig = config.TelegramConfig
+	CronJob        = config.CronJob
 )
 
 // sessionConfigFrom adapts Parts.SessionConfig to the Runtime's per-session
@@ -34,6 +35,15 @@ func (rt *Runtime) Web() WebConfig {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 	return rt.web
+}
+
+// Telegram returns the telegram: config the Runtime currently holds (zero
+// value when the config declares none). Locked for the same reason as Web:
+// Reload swaps it under rt.mu while the front-end reads it.
+func (rt *Runtime) Telegram() TelegramConfig {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return rt.telegram
 }
 
 // Cron returns the jobs declared as cron/<name>.md files.

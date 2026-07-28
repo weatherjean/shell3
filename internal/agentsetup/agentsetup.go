@@ -125,6 +125,9 @@ func (p *Parts) ModelCount() int { return len(p.lc.Models) }
 // Web returns the parsed web: block (zero value if absent).
 func (p *Parts) Web() config.WebConfig { return p.lc.Web() }
 
+// Telegram returns the parsed telegram: block (zero value if absent).
+func (p *Parts) Telegram() config.TelegramConfig { return p.lc.Telegram() }
+
 // Cron returns the jobs declared as cron/<name>.md files.
 func (p *Parts) Cron() []config.CronJob { return p.lc.Cron() }
 

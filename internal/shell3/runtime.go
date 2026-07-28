@@ -108,10 +108,12 @@ type Runtime struct {
 	// jobs manages in-process background jobs (command and subagent jobs).
 	// Owned by this Runtime; cancelled at Close.
 	jobs *jobManager
-	// web + cron mirror the parsed config blocks the runtime was built
-	// with (and re-derived on Reload). Read via Web()/Cron(). See config.go.
-	web  WebConfig
-	cron []CronJob
+	// web + telegram + cron mirror the parsed config blocks the runtime was
+	// built with (and re-derived on Reload). Read via Web()/Telegram()/Cron().
+	// See config.go.
+	web      WebConfig
+	telegram TelegramConfig
+	cron     []CronJob
 
 	// parts is the shared config assembly this Runtime was (re)built from.
 	// Swapped alongside the other fields at Reload; read via Parts() by host
@@ -194,6 +196,7 @@ func NewRuntime(ctx context.Context, spec RuntimeSpec) (*Runtime, error) {
 		cancel:        cancel,
 		sessions:      map[string]*Session{},
 		web:           parts.Web(),
+		telegram:      parts.Telegram(),
 		cron:          parts.Cron(),
 		parts:         parts,
 	}
