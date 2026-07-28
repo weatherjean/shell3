@@ -126,7 +126,8 @@ func installSystemdService(configDir, home string, start bool) serviceState {
 	if start && !waitServiceActive(runSystemctl, 6, func() { time.Sleep(500 * time.Millisecond) }) {
 		fmt.Printf("warning: %s was started but is not running — check the log:\n", serviceUnitName)
 		fmt.Printf("  journalctl --user -u %s -n 20\n", serviceUnitName)
-		fmt.Println("A common cause: another process (an older shell3?) already holds the port.")
+		fmt.Println("Common causes: telegram.token or telegram.chat_id is blank (`shell3 health` names it),")
+		fmt.Println("or a second shell3 is already long-polling the same bot (Telegram 409 Conflict).")
 		return serviceFailed
 	}
 	return serviceEnabled

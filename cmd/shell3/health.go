@@ -68,6 +68,19 @@ func runHealth(cmd *cobra.Command, path string) error {
 	} else {
 		fmt.Fprintln(out, "notifier: absent — background completions post raw (add notifier.md to triage them)")
 	}
+	// The telegram front-end's own start-up check, run here rather than found
+	// out at `shell3 telegram`: health is documented as THE config check, and a
+	// block boot wrote with blank fields loads cleanly but refuses to start. An
+	// ABSENT block is not an error — an `shell3 ask`-only config is legitimate —
+	// but say so, the way an absent notifier is reported.
+	if tg := lc.Telegram(); !tg.Present {
+		fmt.Fprintln(out, "telegram: absent — the bot front-end is unwired (add a telegram: block to run `shell3 telegram`)")
+	} else if chatID, err := telegramChatID(tg); err != nil {
+		fmt.Fprintf(out, "telegram: %v\n", err)
+		return fmt.Errorf("health: %w", err)
+	} else {
+		fmt.Fprintf(out, "telegram: chat %d\n", chatID)
+	}
 	// One line per Chain of Command project: name, the repo its manager works
 	// in, and the manager's model + skill count (the manager registers as a
 	// subagent under the project name).

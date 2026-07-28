@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/weatherjean/shell3/internal/config"
 	"github.com/weatherjean/shell3/internal/cron"
 	"github.com/weatherjean/shell3/internal/media"
 	"github.com/weatherjean/shell3/internal/paths"
@@ -54,13 +55,8 @@ func newTelegramCommand() *cobra.Command {
 			var chatID int64
 			if console {
 				chatID = telegram.ConsoleChatID
-			} else {
-				if tg.Token == "" || tg.ChatID == "" {
-					return fmt.Errorf("no telegram config: add a telegram: block (token, chat_id) to shell3.yaml")
-				}
-				if chatID, err = strconv.ParseInt(tg.ChatID, 10, 64); err != nil {
-					return fmt.Errorf("telegram chat_id %q is not a number: %w", tg.ChatID, err)
-				}
+			} else if chatID, err = telegramChatID(tg); err != nil {
+				return err
 			}
 
 			// The agent's shell runs in telegram.workdir; the config dir is the
@@ -235,6 +231,28 @@ func newTelegramCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&console, "console", false,
 		"dev transport: run the bot loop over stdin/stdout instead of Telegram (headless event testing)")
 	return cmd
+}
+
+// telegramChatID validates the `telegram:` block the way the front-end needs it
+// and returns the parsed chat id. Every failure names the field at fault: the
+// block is almost always PRESENT (shell3 boot always writes one, blank fields
+// included) and the user's actual problem is one empty field — telling them to
+// add a block they are looking at is the wrong diagnosis. Shared with
+// `shell3 health`, so the check and the message are the same in both places.
+func telegramChatID(tg config.TelegramConfig) (int64, error) {
+	switch {
+	case !tg.Present:
+		return 0, fmt.Errorf("no telegram: block in shell3.yaml — add one (token, chat_id), or run `shell3 boot` to write it")
+	case tg.Token == "":
+		return 0, fmt.Errorf("telegram.token is empty — put your @BotFather token in the .env beside shell3.yaml")
+	case tg.ChatID == "":
+		return 0, fmt.Errorf("telegram.chat_id is empty — set it in shell3.yaml to the one chat the bot answers (@userinfobot prints yours)")
+	}
+	id, err := strconv.ParseInt(tg.ChatID, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("telegram.chat_id %q is not a number", tg.ChatID)
+	}
+	return id, nil
 }
 
 // jobTranscriptOf builds the per-job transcript lookup /job <id> renders: a

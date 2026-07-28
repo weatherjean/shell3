@@ -93,6 +93,11 @@ type Subagent struct {
 // TelegramConfig is the parsed `telegram:` block: the bot's credentials and
 // where the agent's shell runs.
 type TelegramConfig struct {
+	// Present reports whether a telegram: block was declared at all. It tells
+	// "no front-end configured" (legitimate for an `shell3 ask`-only config)
+	// apart from "front-end declared but unusable" — the second is a config
+	// error worth failing `shell3 health` over, the first is not.
+	Present bool
 	// Token is the bot API token, secret-substituted from .env. Empty means
 	// the telegram: block is absent or declares no token — the front-end
 	// refuses to start rather than failing the load, so a config with no

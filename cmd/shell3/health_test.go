@@ -159,3 +159,55 @@ func TestHealthOKWithStrictHook(t *testing.T) {
 		t.Fatalf("strict hook should pass health: %v\n%s", err, out)
 	}
 }
+
+// `shell3 health` is documented as THE config check, so a telegram block the
+// front-end would refuse to start on must fail here rather than printing OK.
+func TestHealthFailsOnIncompleteTelegramBlock(t *testing.T) {
+	cases := map[string]string{
+		"no token":       "telegram:\n  token: \"\"\n  chat_id: \"8701499393\"\n",
+		"no chat_id":     "telegram:\n  token: \"123:ABC\"\n  chat_id: \"\"\n",
+		"bad chat_id":    "telegram:\n  token: \"123:ABC\"\n  chat_id: \"not-a-number\"\n",
+		"both are blank": "telegram:\n  token: \"\"\n  chat_id: \"\"\n",
+	}
+	for name, block := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := writeHealthTree(t, map[string]string{"shell3.yaml": healthYAML + block})
+			out, err := runHealthAt(t, cfg)
+			if err == nil {
+				t.Fatalf("an unusable telegram block must fail health:\n%s", out)
+			}
+			if !strings.Contains(out, "telegram") {
+				t.Fatalf("output should name the telegram problem:\n%s", out)
+			}
+			if strings.Contains(out, "OK") {
+				t.Fatalf("failing health must not print OK:\n%s", out)
+			}
+		})
+	}
+}
+
+func TestHealthOKWithCompleteTelegramBlock(t *testing.T) {
+	cfg := writeHealthTree(t, map[string]string{
+		"shell3.yaml": healthYAML + "telegram:\n  token: \"123:ABC\"\n  chat_id: \"8701499393\"\n",
+	})
+	out, err := runHealthAt(t, cfg)
+	if err != nil {
+		t.Fatalf("a complete telegram block should pass: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "telegram: chat 8701499393") {
+		t.Fatalf("output should report the wired chat:\n%s", out)
+	}
+}
+
+// No telegram block at all is legitimate (an `shell3 ask`-only config), so it
+// reports the consequence the way an absent notifier does, without failing.
+func TestHealthReportsAbsentTelegramWithoutFailing(t *testing.T) {
+	cfg := writeHealthTree(t, nil)
+	out, err := runHealthAt(t, cfg)
+	if err != nil {
+		t.Fatalf("a config with no telegram block should still pass: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "telegram: absent") {
+		t.Fatalf("output should say the telegram front-end is unwired:\n%s", out)
+	}
+}

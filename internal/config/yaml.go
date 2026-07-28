@@ -148,7 +148,7 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 		})
 	}
 	if tc := f.Telegram; tc != nil {
-		c.telegram = TelegramConfig{Token: tc.Token, ChatID: tc.ChatID, WorkDir: tc.WorkDir}
+		c.telegram = TelegramConfig{Present: true, Token: tc.Token, ChatID: tc.ChatID, WorkDir: tc.WorkDir}
 	}
 	mcpNames := make([]string, 0, len(f.MCP))
 	for name := range f.MCP {
