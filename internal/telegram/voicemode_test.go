@@ -131,3 +131,32 @@ func TestModeStoreFilePermissions(t *testing.T) {
 		t.Errorf("File permissions: got %o, want %o", info.Mode().Perm(), 0o644)
 	}
 }
+
+// TestModeStoreSetIsAtomic pins the temp-file+rename write: a read-only
+// existing file is replaced (os.WriteFile would fail with EACCES), and no
+// temp file survives the write.
+func TestModeStoreSetIsAtomic(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mode.json")
+	if err := os.WriteFile(path, []byte(`{"mode":"off"}`), 0o400); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	s := &ModeStore{Path: path}
+	if err := s.Set("always"); err != nil {
+		t.Fatalf("Set over a read-only file: %v", err)
+	}
+	if got := s.Get("inbound"); got != "always" {
+		t.Errorf("Get after Set: got %q, want %q", got, "always")
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	for _, e := range entries {
+		if e.Name() != "mode.json" {
+			t.Errorf("leftover file after Set: %q", e.Name())
+		}
+	}
+}

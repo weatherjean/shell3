@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // ModeStore persists the runtime /voice override. Zero value = no file, no override.
@@ -63,16 +64,45 @@ func (s *ModeStore) Set(mode string) error {
 		return fmt.Errorf("ModeStore.Set: invalid mode %q (must be off, inbound, or always)", mode)
 	}
 
-	// Marshal to JSON
 	data, err := json.Marshal(map[string]string{"mode": mode})
 	if err != nil {
 		return fmt.Errorf("ModeStore.Set: marshal failed: %w", err)
 	}
 
-	// Write file with 0o644 permissions
-	if err := os.WriteFile(s.Path, data, 0o644); err != nil {
+	if err := atomicWrite(s.Path, data, 0o644); err != nil {
 		return fmt.Errorf("ModeStore.Set: write failed: %w", err)
 	}
 
 	return nil
+}
+
+// atomicWrite writes data to path via a temp file in the same directory
+// followed by a rename, so a crash mid-write leaves either the old contents or
+// the new ones — never a truncated file Get would have to fall back over.
+// Mirrors cmd/shell3's atomicWriteFile, which is in package main.
+func atomicWrite(path string, data []byte, mode os.FileMode) error {
+	f, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer func() { _ = os.Remove(tmp) }()
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Chmod(mode); err != nil {
+		_ = f.Close()
+		return err
+	}
+	// Sync before rename, or a power loss can leave the renamed file empty on
+	// some filesystems — exactly the corruption this is here to prevent.
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
