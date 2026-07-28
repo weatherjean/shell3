@@ -114,11 +114,11 @@ func New(cfg Config, ensureProxy func(name, command string)) *Clients {
 	return c
 }
 
-// Dir returns shell3's durable media directory — where browser uploads,
+// Dir returns shell3's durable media directory — where inbound attachments,
 // generated images, and cached speech are stored, so every media file the
 // agent has seen or made keeps a stable path that survives reboots and OS
-// temp cleaning (re-readable with read_media, servable at /api/media/,
-// findable from history). Default ~/.shell3/media; $SHELL3_MEDIA_DIR
+// temp cleaning (re-readable with read_media, sendable with
+// send_media_telegram, findable from history). Default ~/.shell3/media; $SHELL3_MEDIA_DIR
 // overrides (tests point it at a TempDir). Created on demand.
 func Dir() (string, error) {
 	dir := os.Getenv("SHELL3_MEDIA_DIR")
