@@ -11,19 +11,19 @@
   <!-- snail mark -->
   <circle cx="285" cy="215" r="175" fill="#eab308" opacity=".065"/>
   <circle cx="285" cy="215" r="112" fill="#eab308" opacity=".05"/>
-  <g transform="translate(167.5,293)"><g fill="#eab308"><g transform="scale(0.15,-0.15)"><path transform="translate(0,0)" d="M610 223Q542 235 501.5 288.0Q461 341 461 410Q461 488 516.0 543.0Q571 598 649 598Q731 598 788.5 540.0Q846 482 846 397Q846 215 748.5 99.5Q651 -16 496 -16Q342 -16 234.5 113.0Q127 242 127 434Q127 647 278.5 785.5Q430 924 647 924Q865 924 1016.0 785.5Q1167 647 1167 432Q1167 213 1071 0H864V10Q920 89 954.5 205.0Q989 321 989 432Q989 580 893.0 670.0Q797 760 647 760Q498 760 400.5 669.5Q303 579 303 434Q303 313 360.0 230.0Q417 147 496 147Q587 147 610 223ZM653 334Q684 334 706.5 355.5Q729 377 729 408Q729 440 707.0 462.5Q685 485 653 485Q622 485 600.0 462.5Q578 440 578 408Q578 377 600.0 355.5Q622 334 653 334Z"/><path transform="translate(1192,0)" d="M328 0H140V1117H328ZM506 1304H317V1499H506ZM151 1304H-38V1499H151Z"/></g></g></g>
+  <g transform="translate(148,326)"><g fill="#eab308"><g transform="scale(0.15,-0.15)"><path transform="translate(0,0)" d="M610 223Q542 235 501.5 288.0Q461 341 461 410Q461 488 516.0 543.0Q571 598 649 598Q731 598 788.5 540.0Q846 482 846 397Q846 215 748.5 99.5Q651 -16 496 -16Q342 -16 234.5 113.0Q127 242 127 434Q127 647 278.5 785.5Q430 924 647 924Q865 924 1016.0 785.5Q1167 647 1167 432Q1167 213 1071 0H864V10Q920 89 954.5 205.0Q989 321 989 432Q989 580 893.0 670.0Q797 760 647 760Q498 760 400.5 669.5Q303 579 303 434Q303 313 360.0 230.0Q417 147 496 147Q587 147 610 223ZM653 334Q684 334 706.5 355.5Q729 377 729 408Q729 440 707.0 462.5Q685 485 653 485Q622 485 600.0 462.5Q578 440 578 408Q578 377 600.0 355.5Q622 334 653 334Z"/><path transform="translate(1192,0)" d="M328 0H140V1117H328ZM506 1304H317V1499H506ZM151 1304H-38V1499H151Z"/></g></g></g>
 
   <!-- tracked caps corner label -->
-  <text x="558" y="118" font-family="IT" font-size="19" font-weight="600"
-        letter-spacing="2.85" fill="#56667a">PERSONAL AGENT · RUN LOG · <tspan font-family="ITX">/ˈʃɛli/</tspan></text>
+  <text x="558" y="88" font-family="IT" font-size="19" font-weight="600"
+        letter-spacing="2.85" fill="#56667a">PERSONAL AGENT · <tspan font-family="ITX">/ˈʃɛli/</tspan></text>
 
   <!-- wordmark -->
-  <text x="552" y="238" font-family="NR" font-size="128" font-weight="600" fill="#16222e">shell3</text>
+  <text x="552" y="208" font-family="NR" font-size="128" font-weight="600" fill="#16222e">shell3</text>
 
   <!-- the marker swipe: the one live thing -->
-  <g fill="#eab308" fill-opacity="0.85"><rect x="550" y="274" width="521" height="52"/><rect x="554" y="272" width="519" height="56"/></g>
-  <text x="568" y="313" font-family="IT" font-size="36" font-weight="600" fill="#16222e">your shell, in your browser</text>
+  <g fill="#eab308" fill-opacity="0.85"><rect x="550" y="244" width="521" height="52"/><rect x="554" y="242" width="519" height="56"/></g>
+  <text x="568" y="283" font-family="IT" font-size="36" font-weight="600" fill="#16222e">your shell, in your browser</text>
 
-  <text x="558" y="378" font-family="NRi" font-size="29" font-style="italic"
+  <text x="558" y="348" font-family="NRi" font-size="29" font-style="italic"
         fill="#4a5a6b">minimal Unix-composable personal agent.</text>
 </svg>
