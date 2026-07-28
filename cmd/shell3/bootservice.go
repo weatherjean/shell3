@@ -41,7 +41,7 @@ const serviceUnitName = "shell3.service"
 // serviceUnit renders the systemd user unit for `shell3 telegram`.
 // Restart=always + linger (enabled separately) is what makes shell3 survive
 // crashes, logouts, and reboots. PATH includes the usual user bin dirs so
-// tunnel/docker helpers the agent shells out to are found.
+// docker/git helpers the agent shells out to are found.
 func serviceUnit(bin, configDir, home string) string {
 	return fmt.Sprintf(`[Unit]
 Description=shell3 agent + Telegram bot

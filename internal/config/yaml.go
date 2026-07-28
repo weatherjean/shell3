@@ -14,7 +14,6 @@ import (
 // (KnownFields): an unknown key anywhere is a load error.
 type yamlFile struct {
 	Models       map[string]yamlModel `yaml:"models"`
-	Web          *yamlWeb             `yaml:"web"`
 	Telegram     *yamlTelegram        `yaml:"telegram"`
 	MCP          map[string]yamlMCP   `yaml:"mcp"`
 	Media        *yamlMedia           `yaml:"media"`
@@ -37,20 +36,9 @@ type yamlModel struct {
 	RunProxy      string         `yaml:"run_proxy"`
 }
 
-// yamlWeb is the `web:` block: where the agent's shell runs, and how the
-// interface is served.
-type yamlWeb struct {
-	WorkDir    string `yaml:"workdir"`
-	Addr       string `yaml:"addr"`
-	URL        string `yaml:"url"`
-	Tunnel     string `yaml:"tunnel"`
-	Password   string `yaml:"password"`
-	TOTPSecret string `yaml:"totp_secret"`
-}
-
 // yamlTelegram is the `telegram:` block: the front-end's bot credentials and
-// where the agent's shell runs. Token is a secret like web.password, resolved
-// from .env via an env:KEY reference.
+// where the agent's shell runs. Token is a secret resolved from .env via an
+// env:KEY reference.
 type yamlTelegram struct {
 	Token   string `yaml:"token"`
 	ChatID  string `yaml:"chat_id"`
@@ -158,10 +146,6 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 			Reasoning: m.Reasoning, MaxTokens: m.MaxTokens,
 			Temperature: m.Temperature, Extra: m.Extra, RunProxy: m.RunProxy,
 		})
-	}
-	if wc := f.Web; wc != nil {
-		c.web = WebConfig{WorkDir: wc.WorkDir, Addr: wc.Addr, URL: wc.URL, Tunnel: wc.Tunnel, Password: wc.Password,
-			TOTPSecret: wc.TOTPSecret}
 	}
 	if tc := f.Telegram; tc != nil {
 		c.telegram = TelegramConfig{Token: tc.Token, ChatID: tc.ChatID, WorkDir: tc.WorkDir}

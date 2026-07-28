@@ -125,23 +125,6 @@ func runHealth(cmd *cobra.Command, path string) error {
 			return fmt.Errorf("health: %d MCP server(s) down", down)
 		}
 	}
-	// The web interface authenticates with web.password, and `shell3 serve`
-	// refuses to start without one. health is the strict view, so report it
-	// here rather than letting the operator discover it at startup.
-	web := lc.Web()
-	if err := requireWebPassword(web); err != nil {
-		fmt.Fprintln(out, "web: no password — serve will refuse to start")
-		return fmt.Errorf("health: web.password is not set (.env %s)", envWebPassword)
-	}
-	factors := "password"
-	if web.TOTPSecret != "" {
-		factors = "password + TOTP"
-	}
-	fmt.Fprintf(out, "web: auth armed (%s)\n", factors)
-	if warning := weakPasswordWarning(web); warning != "" {
-		fmt.Fprintln(out, strings.TrimSpace(warning))
-		return fmt.Errorf("health: web password is shorter than %d characters", minPasswordLength)
-	}
 
 	fmt.Fprintln(out, "OK")
 	return nil

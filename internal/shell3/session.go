@@ -657,6 +657,6 @@ func (s *Session) SwitchAgent(name string) error {
 // ActiveAgent returns the name of the currently active agent.
 func (s *Session) ActiveAgent() string { return s.cfg.ModeLabel }
 
-// Name returns the session's runtime key (e.g. "web-<thread>", or a generated
+// Name returns the session's runtime key (e.g. "tg-<chat>", or a generated
 // "sN"). Front-ends use it to label the session they attached to.
 func (s *Session) Name() string { return s.name }

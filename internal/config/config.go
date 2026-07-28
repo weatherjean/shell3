@@ -90,31 +90,13 @@ type Subagent struct {
 	Workdir string
 }
 
-// WebConfig is the parsed `web:` block: where the agent's shell runs, and how
-// the interface is served. Tunnel, if set, is a shell command spawned at
-// startup ({addr} replaced by Addr) whose output is scanned for a public https
-// URL; URL, if set, is the fixed public address and wins over a scanned one.
-type WebConfig struct {
-	WorkDir string
-	Addr    string
-	URL     string
-	Tunnel  string
-	// Password gates the whole interface. Empty is a `shell3 serve` refusal
-	// rather than a load error: `shell3 ask` serves nothing and must stay
-	// usable, so a config with no password still loads.
-	Password string
-	// TOTPSecret, when set, adds a second factor: the password alone stops
-	// being a session. Opt-in by its presence — there is no toggle.
-	TOTPSecret string
-}
-
 // TelegramConfig is the parsed `telegram:` block: the bot's credentials and
 // where the agent's shell runs.
 type TelegramConfig struct {
-	// Token is the bot API token, secret-substituted from .env like
-	// web.Password. Empty means the telegram: block is absent or declares no
-	// token — the front-end refuses to start rather than failing the load, so
-	// a config with no telegram front-end still loads.
+	// Token is the bot API token, secret-substituted from .env. Empty means
+	// the telegram: block is absent or declares no token — the front-end
+	// refuses to start rather than failing the load, so a config with no
+	// telegram front-end still loads.
 	Token   string
 	ChatID  string
 	WorkDir string
@@ -177,7 +159,7 @@ type LoadedConfig struct {
 
 	// RunsKeepDays is `runs_keep_days`: how long the janitor keeps a
 	// runs/<id>/ dir (by its newest file's mtime) before sweeping it at
-	// `shell3 serve` startup. Always populated at load — default 30; an
+	// `shell3 telegram` startup. Always populated at load — default 30; an
 	// explicit 0 means keep forever (the sweep is skipped entirely).
 	RunsKeepDays int
 
@@ -187,7 +169,6 @@ type LoadedConfig struct {
 	projects  []Project
 
 	mcpServers []MCPServer
-	web        WebConfig
 	telegram   TelegramConfig
 	cron       []CronJob
 
@@ -272,9 +253,6 @@ func (c *LoadedConfig) SubagentByName(name string) (Subagent, bool) {
 // Notifier returns the parsed notifier.md persona, nil when the file is
 // absent (the host then posts every background completion raw).
 func (c *LoadedConfig) Notifier() *Notifier { return c.notifier }
-
-// Web returns the parsed `web:` block (zero value if absent).
-func (c *LoadedConfig) Web() WebConfig { return c.web }
 
 // Telegram returns the parsed `telegram:` block (zero value if absent).
 func (c *LoadedConfig) Telegram() TelegramConfig { return c.telegram }

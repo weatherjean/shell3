@@ -12,10 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// A healthy config is one that can actually be served, so the fixture carries a
-// web password like a real one does (see TestHealthFailsWithoutAWebPassword).
-const healthYAML = "models:\n  m: { base_url: \"http://x\", api_key: k, model: id }\n" +
-	"web: { password: sixteen-characters-long }\n"
+const healthYAML = "models:\n  m: { base_url: \"http://x\", api_key: k, model: id }\n"
 const healthAgent = "---\nmodel: m\n---\np\n"
 
 // writeHealthTree writes a minimal loadable config tree (plus extra files)
@@ -160,22 +157,5 @@ func TestHealthOKWithStrictHook(t *testing.T) {
 	out, err := runHealthAt(t, cfg)
 	if err != nil {
 		t.Fatalf("strict hook should pass health: %v\n%s", err, out)
-	}
-}
-
-// health is the strict view of a config, and a config with no web password
-// cannot be served at all — `shell3 serve` refuses it. Reporting that here is
-// the difference between finding out now and finding out when you try to start.
-func TestHealthFailsWithoutAWebPassword(t *testing.T) {
-	dir := writeHealthTree(t, map[string]string{
-		"shell3.yaml": "models:\n  m: { base_url: \"http://x\", api_key: k, model: id }\n",
-	})
-
-	out, err := runHealthAt(t, dir)
-	if err == nil {
-		t.Fatalf("health passed a config that cannot be served; output:\n%s", out)
-	}
-	if !strings.Contains(err.Error()+out, "web.password") {
-		t.Errorf("failure does not name the missing key:\n%s\n%v", out, err)
 	}
 }

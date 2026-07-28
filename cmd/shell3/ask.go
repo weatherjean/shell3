@@ -28,9 +28,9 @@ var errAskAborted = errors.New("ask: aborted")
 func askResumeHint() string { return "↩ continue this conversation: shell3 ask --resume" }
 
 // newAskCommand builds `shell3 ask` — a local driver for the same config +
-// agent the web interface runs, printing full verbose output (reply, every tool
+// agent the Telegram bot runs, printing full verbose output (reply, every tool
 // call + args, untruncated tool results, reasoning, token usage). It exists to
-// drive and polish the agent without a browser; it is also handy
+// drive and polish the agent without Telegram; it is also handy
 // for quick local queries and troubleshooting. With no message it opens an
 // interactive multi-turn chat in this terminal; --resume continues the latest
 // session so successive invocations form one conversation.
@@ -71,7 +71,7 @@ func newAskCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// Anchor the runtime to the config dir, exactly like `shell3 serve`,
+			// Anchor the runtime to the config dir, exactly like `shell3 telegram`,
 			// so ask shares the bot's runs store + workdir and sees the same state.
 			rt, err := shell3.NewRuntime(ctx, shell3.RuntimeSpec{ConfigDir: resolved, WorkDir: resolved})
 			if err != nil {
@@ -94,7 +94,7 @@ func newAskCommand() *cobra.Command {
 
 			// Sessions run in the config dir (the runtime root), the same
 			// default the hosts use. ask is host-agnostic: it reads nothing
-			// from the web block.
+			// from the telegram block.
 			sess, err := rt.Session(shell3.SessionOpts{
 				Name:         "ask",
 				WorkDir:      resolved,
@@ -107,8 +107,8 @@ func newAskCommand() *cobra.Command {
 
 			// Register the image_generate host tool on this session and any
 			// subagent children it spawns (a no-op when no media.imagegen: is
-			// declared) so ask drives the same tool set the web
-			// hosts run. No SetMedia equivalent: ask is text-only (no inbound
+			// declared) so ask drives the same tool set the bot
+			// host runs. No SetMedia equivalent: ask is text-only (no inbound
 			// voice notes or photos to transcribe/describe).
 			rt.SetSessionDecorator(func(s *shell3.Session) {
 				_ = media.RegisterImageTool(s, buildMediaClients(rt))
@@ -125,7 +125,7 @@ func newAskCommand() *cobra.Command {
 					return err
 				}
 				// Follow through on any subagent/bash_bg jobs the turn spawned, so
-				// ask shows their results the way the web host's wake loop would.
+				// ask shows their results the way the bot host's wake loop would.
 				// This blocks until those in-process jobs complete (SIGINT to quit):
 				// a -p run must never exit at turn end and silently kill in-flight work.
 				if err := cli.FollowAskJobs(ctx, os.Stdout, rt, sess); err != nil {

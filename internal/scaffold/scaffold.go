@@ -41,16 +41,6 @@ type Values struct {
 	// env:TELEGRAM_TOKEN and lives in .env, like every other secret.
 	ChatID string
 
-	// TOTP wires web.totp_secret to the .env key boot writes on enrolment;
-	// false leaves the line as a commented hint. Without it the secret sits
-	// unused in .env and the login never asks for a code.
-	TOTP bool
-
-	// Tunnel wires web.tunnel to a cloudflared quick tunnel, giving the
-	// interface a public https URL whenever serve runs; false leaves the
-	// line as a commented hint.
-	Tunnel bool
-
 	// Vision reports whether the model can see images. True wires
 	// media.describe to the main model (uploaded images get captioned out of
 	// the box) and enables the agent's media tool; false leaves both as

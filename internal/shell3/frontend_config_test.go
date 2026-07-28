@@ -7,13 +7,12 @@ import (
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
-func TestRuntime_WebConfig(t *testing.T) {
+func TestRuntime_TelegramConfig(t *testing.T) {
 	dir := t.TempDir()
 	writeBaseTree(t, dir, map[string]string{
-		"shell3.yaml": baseYAML + `web:
+		"shell3.yaml": baseYAML + `telegram:
   workdir: /tmp/agent
-  addr: "127.0.0.1:8765"
-  url: "https://h.ts.net/"
+  chat_id: "8701499393"
 `,
 	})
 	rt, err := shell3.NewRuntime(context.Background(), shell3.RuntimeSpec{ConfigDir: dir, WorkDir: dir})
@@ -22,8 +21,8 @@ func TestRuntime_WebConfig(t *testing.T) {
 	}
 	defer rt.Close()
 
-	web := rt.Web()
-	if web.WorkDir != "/tmp/agent" || web.Addr != "127.0.0.1:8765" || web.URL != "https://h.ts.net/" {
-		t.Fatalf("bad web config: %+v", web)
+	tg := rt.Telegram()
+	if tg.WorkDir != "/tmp/agent" || tg.ChatID != "8701499393" {
+		t.Fatalf("bad telegram config: %+v", tg)
 	}
 }

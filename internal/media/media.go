@@ -31,8 +31,8 @@ type Config interface {
 }
 
 // Speech is a synthesized-audio result from Clients.Speak: the path to the
-// written audio file. The caller owns it (the web front-end caches it under
-// the media dir and serves it back; see webui.ttsCache).
+// written audio file. The caller owns it (the front-end caches it under
+// the media dir and serves it back; see the front-end's TTS cache).
 type Speech struct {
 	Path string
 }
@@ -136,7 +136,7 @@ func Dir() (string, error) {
 }
 
 // outDir returns shell3's transient media scratch directory, now used only
-// for freshly synthesized TTS audio, before the web front-end's cache moves
+// for freshly synthesized TTS audio, before the front-end's cache moves
 // it into Dir() under a content hash. Generated images go straight to Dir().
 func outDir() (string, error) {
 	dir := filepath.Join(os.TempDir(), "shell3-media")

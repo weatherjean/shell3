@@ -61,7 +61,7 @@ func Open(root string) (*Store, error) {
 func (s *Store) runsDir() string { return filepath.Join(s.root, "runs") }
 
 // sessDir resolves a session directory. IDs arrive from user-controlled
-// surfaces (the web API, shell3 ask --resume), so anything that is not a plain
+// surfaces (the bot's views, shell3 ask --resume), so anything that is not a plain
 // path component is rejected by mapping it to an impossible directory —
 // "../../../etc" must never escape the store.
 func (s *Store) sessDir(id string) string {

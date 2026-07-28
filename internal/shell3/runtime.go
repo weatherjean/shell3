@@ -108,10 +108,9 @@ type Runtime struct {
 	// jobs manages in-process background jobs (command and subagent jobs).
 	// Owned by this Runtime; cancelled at Close.
 	jobs *jobManager
-	// web + telegram + cron mirror the parsed config blocks the runtime was
-	// built with (and re-derived on Reload). Read via Web()/Telegram()/Cron().
+	// telegram + cron mirror the parsed config blocks the runtime was built
+	// with (and re-derived on Reload). Read via Telegram()/Cron().
 	// See config.go.
-	web      WebConfig
 	telegram TelegramConfig
 	cron     []CronJob
 
@@ -195,7 +194,6 @@ func NewRuntime(ctx context.Context, spec RuntimeSpec) (*Runtime, error) {
 		ctx:           ctx,
 		cancel:        cancel,
 		sessions:      map[string]*Session{},
-		web:           parts.Web(),
 		telegram:      parts.Telegram(),
 		cron:          parts.Cron(),
 		parts:         parts,
@@ -293,7 +291,7 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 		return nil, ErrRuntimeClosed
 	}
 	// A named session is keyed on the runtime: requesting an existing live name
-	// (e.g. the web host's "web-<thread>") returns that same session so its
+	// (e.g. the bot's "tg-<chat>") returns that same session so its
 	// history persists across reattach. An empty name gets a unique generated
 	// label ("sN"), skipping any already taken by a live session.
 	if opts.Name == "" {

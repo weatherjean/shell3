@@ -4,8 +4,8 @@
 // override to disk. Zero value (Path="") means no file, no override.
 //
 // This used to live in internal/media as media.ModeStore. It is a Telegram
-// front-end concern — the web UI has no /voice command — so the revival keeps
-// it here rather than pushing it back into the shared media package.
+// front-end concern, so it lives here rather than in the shared media
+// package.
 package telegram
 
 import (

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -92,30 +91,13 @@ func runBoot(f *bootFlags) error {
 
 	envKey := envKeyForName(a.name)
 
-	// The interface's own credentials. Asked for here rather than defaulted,
-	// because `shell3 serve` refuses to start without a password: a fresh config
-	// has to arrive with one.
-	webPassword, err := askWebPassword(tty)
-	if err != nil {
-		return err
-	}
-	totpSecret, err := askTOTPEnrolment(tty, a.name, os.Stdout)
-	if err != nil {
-		return err
-	}
-
-	envPairs := append([][2]string{{envKey, a.key}, {envTelegramToken, a.tgToken}},
-		webEnvPairs(webPassword, totpSecret)...)
-
-	// Ask before rendering so the answer lands in the scaffolded config;
-	// installs cloudflared when needed (opt-in, no sudo, failures non-fatal).
-	wireTunnel := askTunnel(tty)
+	envPairs := [][2]string{{envKey, a.key}, {envTelegramToken, a.tgToken}}
 
 	if err := scaffold.RenderBaseConfig(dir, scaffold.Values{
 		Name: a.name, BaseURL: a.url, EnvKey: envKey, Model: a.model, Proxy: a.proxy,
 		ContextWindow: a.ctxWindow, CompactAt: a.compactAt, WorkDir: a.workDir,
 		ChatID: a.tgChatID,
-		Vision: a.vision, Tunnel: wireTunnel, TOTP: totpSecret != "",
+		Vision: a.vision,
 	}, f.force); err != nil {
 		return err
 	}
@@ -138,8 +120,7 @@ func runBoot(f *bootFlags) error {
 	// with no token would just crash-loop.
 	svc := offerSystemdService(tty, dir, home, a.tgToken != "" && a.tgChatID != "")
 
-	printWebCredentials(webPassword, totpSecret, envPath)
-	printBootSuccess(dir, cfgPath, envPath, a.proxy != "", wireTunnel, svc)
+	printBootSuccess(dir, cfgPath, envPath, a.proxy != "", svc)
 	return nil
 }
 
@@ -172,15 +153,7 @@ func showBootSuccess() error {
 	if _, err := os.Stat(filepath.Join(home, ".config", "systemd", "user", serviceUnitName)); err == nil {
 		svc = serviceEnabled
 	}
-	tunnelWired := false
-	for _, line := range strings.Split(string(yaml), "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "tunnel:") {
-			tunnelWired = true
-			break
-		}
-	}
-
-	printBootSuccess(dir, cfgPath, filepath.Join(dir, ".env"), proxyWired, tunnelWired, svc)
+	printBootSuccess(dir, cfgPath, filepath.Join(dir, ".env"), proxyWired, svc)
 	return nil
 }
 
@@ -490,7 +463,7 @@ func mergeEnv(existing string, kv [][2]string) (merged string, kept []string) {
 	return b.String(), kept
 }
 
-func printBootSuccess(dir, cfgPath, envPath string, proxyWired, tunnelWired bool, svc serviceState) {
+func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool, svc serviceState) {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format+"\n", args...) }
 
@@ -564,31 +537,9 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired, tunnelWired bool
 	w("")
 	w("## Reaching it from elsewhere")
 	w("")
-	if tunnelWired {
-		w("`web.tunnel` is wired: every `shell3 serve` start opens a cloudflared")
-		w("quick tunnel — **`shell3 url`** prints the public https URL to open on")
-		w("your phone (it changes on each restart; also in the serve output,")
-		w("`journalctl --user -u %s`, and `~/.shell3/tunnel.log`).", serviceUnitName)
-		w("For a fixed address set `web.url`.")
-		w("")
-		w("Behind that URL is your login — and a shell on this machine. An")
-		w("authenticated proxy in front of it is still worth having.")
-	} else {
-		w("`shell3 serve` binds loopback and asks for the password you just set. To")
-		w("use it from your phone, give it a public https address — a **cloudflared**")
-		w("quick tunnel (free, no account) is the easy path. Remember what is behind")
-		w("that login: a session is a shell on this machine, so an authenticated")
-		w("proxy in front of it is still worth having.")
-		if _, err := exec.LookPath("cloudflared"); err != nil {
-			w("")
-			w("`cloudflared` is **not on PATH** here — install it")
-			w("(<https://github.com/cloudflare/cloudflared>), or use another tunnel")
-			w("or a fixed address: `web.tunnel` / `web.url` in `shell3.yaml`.")
-		} else {
-			w("")
-			w("Set `web.tunnel` (or a fixed `web.url`) in `shell3.yaml`.")
-		}
-	}
+	w("Nothing to expose: Telegram already reaches your phone, so shell3 stays")
+	w("on this machine and talks out through the bot.")
+	w("")
 
 	fmt.Println()
 	fmt.Print(cli.RenderMarkdown(b.String()))

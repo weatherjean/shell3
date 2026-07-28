@@ -2,7 +2,7 @@ package config
 
 import "testing"
 
-// The telegram token is a secret like the web password: it lives in .env and
+// The telegram token is a secret like every other: it lives in .env and
 // reaches the YAML as an env: reference.
 func TestParseYAMLTelegram(t *testing.T) {
 	c, err := parseY(t, "models:\n  m:\n    base_url: u\n    model: x\ntelegram:\n  token: env:TELEGRAM_TOKEN\n  chat_id: \"8701499393\"\n",

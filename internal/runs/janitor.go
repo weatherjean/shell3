@@ -21,8 +21,9 @@ import (
 // appended to is never swept out from under a live turn.
 //
 // Returns the ids of the removed sessions. runs deliberately knows nothing
-// about the web thread index; a caller that also wants to drop thread entries
-// pointing at a removed session does so itself (see webui.PruneThreadIndex),
+// about the front-end thread index; a caller that also wants to drop thread entries
+// pointing at a removed session does so itself (the front-end's thread-index
+// pruning),
 // keeping the two packages decoupled.
 //
 // Sweep is per-dir fail-open: a dir whose mtime can't be read or whose

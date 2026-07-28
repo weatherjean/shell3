@@ -135,7 +135,7 @@ func (b *Bot) sendMediaHandler(ctx context.Context, argsJSON string) (string, er
 	}
 	base := filepath.Base(path)
 	// Refuse the `.env` beside shell3.yaml and dotenv siblings (.env.local, …);
-	// mirrors isCredentialFile in internal/web/files.go.
+	// mirrors the credential-file guard the config loader applies.
 	if lb := strings.ToLower(base); lb == ".env" || strings.HasPrefix(lb, ".env.") {
 		return "error: refusing to send a credentials file", nil
 	}

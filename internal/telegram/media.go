@@ -1,10 +1,9 @@
 //go:build unix
 
 // media.go bundles the runtime's media capabilities with the two shell3.yaml
-// defaults the Telegram front-end reads but *media.Clients no longer carries
-// (it dropped STTEcho/TTSMode/Speech.VoiceCompatible when the web UI became
-// the only front-end). The bot keeps them here rather than pushing
-// Telegram-shaped fields back into the shared media package.
+// defaults the Telegram front-end reads but *media.Clients does not carry
+// (STTEcho/TTSMode/Speech.VoiceCompatible). The bot keeps them here rather
+// than pushing Telegram-shaped fields back into the shared media package.
 package telegram
 
 import (
