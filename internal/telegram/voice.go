@@ -26,30 +26,27 @@ const voiceModePrefix = "vm"
 // plain b.sendReply so the reply is never lost; a Speak (synthesis) failure
 // additionally sends its error to the chat as a ⚠️ notice.
 func (b *Bot) deliverReply(ctx context.Context, reply string, hadVoice bool, sess *shell3.Session, replyTo int) {
+	asText := func() { b.postReply(ctx, sess, replyTo, reply) }
 	if reply == "" {
-		b.postReply(ctx, sess, replyTo, reply)
+		asText()
 		return
 	}
 	caps, modeStore := b.mediaCaps()
 	if caps == nil || caps.Speak == nil {
-		b.postReply(ctx, sess, replyTo, reply)
+		asText()
 		return
 	}
 
-	mode := caps.TTSMode
-	if modeStore != nil {
-		mode = modeStore.Get(caps.TTSMode)
-	}
-
+	mode := resolvedVoiceMode(caps, modeStore)
 	speak := mode == "always" || (mode == "inbound" && hadVoice)
 	if !speak {
-		b.postReply(ctx, sess, replyTo, reply)
+		asText()
 		return
 	}
 
 	sp, err := caps.Speak(ctx, reply)
 	if err != nil || sp.Path == "" {
-		b.postReply(ctx, sess, replyTo, reply)
+		asText()
 		if err != nil {
 			b.mediaNotice(ctx, "voice reply failed, sent as text", err)
 		}
@@ -58,19 +55,28 @@ func (b *Bot) deliverReply(ctx context.Context, reply string, hadVoice bool, ses
 	defer os.Remove(sp.Path)
 	data, err := os.ReadFile(sp.Path)
 	if err != nil {
-		b.postReply(ctx, sess, replyTo, reply)
+		asText()
 		return
 	}
 
 	if voiceCompatible(sp.Path) {
 		if err := b.client.SendVoice(ctx, b.chatID, data, ""); err != nil {
-			b.postReply(ctx, sess, replyTo, reply)
+			asText()
 		}
 		return
 	}
 	if err := b.client.SendAudio(ctx, b.chatID, filepath.Base(sp.Path), data, ""); err != nil {
-		b.postReply(ctx, sess, replyTo, reply)
+		asText()
 	}
+}
+
+// resolvedVoiceMode is the effective mode: the persisted /voice override when
+// there is a store to hold one, otherwise the configured media.tts default.
+func resolvedVoiceMode(caps *MediaCaps, modeStore *ModeStore) string {
+	if modeStore == nil {
+		return caps.TTSMode
+	}
+	return modeStore.Get(caps.TTSMode)
 }
 
 // voiceMenuText renders the /voice bare menu's message body for the given mode.
@@ -96,11 +102,7 @@ func (b *Bot) handleVoiceCommand(ctx context.Context, arg string) {
 	}
 	arg = strings.TrimSpace(arg)
 	if arg == "" {
-		mode := caps.TTSMode
-		if modeStore != nil {
-			mode = modeStore.Get(caps.TTSMode)
-		}
-		msgID, err := b.client.SendMenu(ctx, b.chatID, voiceMenuText(mode), voiceModeOptions())
+		msgID, err := b.client.SendMenu(ctx, b.chatID, voiceMenuText(resolvedVoiceMode(caps, modeStore)), voiceModeOptions())
 		if err != nil {
 			b.sendReply(ctx, "failed to send voice menu: "+err.Error())
 			return
@@ -118,7 +120,7 @@ func (b *Bot) handleVoiceCommand(ctx context.Context, arg string) {
 		b.sendReply(ctx, "usage: /voice off|inbound|always")
 		return
 	}
-	b.sendReply(ctx, "🔊 voice replies: "+arg)
+	b.sendReply(ctx, voiceMenuText(arg))
 }
 
 // handleVoiceCallback handles a "vm|<mode>" menu button press: persists the

@@ -20,9 +20,9 @@ type ModeStore struct {
 	Path string
 }
 
-// Get returns the persisted override if valid, otherwise configDefault.
-// If the file doesn't exist or is corrupted, configDefault is returned
-// without error.
+// Get returns the persisted override, falling back to configDefault for every
+// failure — missing file, unreadable, corrupt, or a mode this build does not
+// know. A /voice override is a preference, never a reason to fail a turn.
 func (s *ModeStore) Get(configDefault string) string {
 	if s.Path == "" {
 		return configDefault
@@ -30,7 +30,6 @@ func (s *ModeStore) Get(configDefault string) string {
 
 	data, err := os.ReadFile(s.Path)
 	if err != nil {
-		// File doesn't exist or is unreadable; return default.
 		return configDefault
 	}
 
@@ -38,17 +37,18 @@ func (s *ModeStore) Get(configDefault string) string {
 		Mode string `json:"mode"`
 	}
 	if err := json.Unmarshal(data, &m); err != nil {
-		// Corrupted/unparseable file; return default, never error.
 		return configDefault
 	}
-
-	// Validate the mode field is one of the allowed values
-	if m.Mode == "off" || m.Mode == "inbound" || m.Mode == "always" {
-		return m.Mode
+	if !validMode(m.Mode) {
+		return configDefault
 	}
+	return m.Mode
+}
 
-	// Invalid mode stored in file; return default.
-	return configDefault
+// validMode reports whether mode is one the front-end understands. Get treats
+// anything else as no override; Set refuses to persist it.
+func validMode(mode string) bool {
+	return mode == "off" || mode == "inbound" || mode == "always"
 }
 
 // Set validates mode (must be "off", "inbound", or "always") and writes
@@ -58,9 +58,7 @@ func (s *ModeStore) Set(mode string) error {
 	if s.Path == "" {
 		return fmt.Errorf("ModeStore.Set: empty Path")
 	}
-
-	// Validate mode is one of the allowed values
-	if mode != "off" && mode != "inbound" && mode != "always" {
+	if !validMode(mode) {
 		return fmt.Errorf("ModeStore.Set: invalid mode %q (must be off, inbound, or always)", mode)
 	}
 
