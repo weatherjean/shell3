@@ -397,7 +397,7 @@ func TestContract8_IdleSessionRetired(t *testing.T) {
 }
 
 // Case 8b: an adopted (pinned) session — the persistent cron dispatch parent —
-// survives retirement, so it stays live for the dashboard's job/runs views
+// survives retirement, so it stays live for the /jobs and /runs views
 // (and never has its store record ended out from under future cron dispatches).
 // Its cron completions are delivered by the notifier/CompletionHost, so it is never woken and
 // runs no turn of its own; the invariant that survives is only that retirement
