@@ -175,9 +175,12 @@ and cron. There is **no listener** — the process long-polls the Bot API
 outbound, so there is no port, no login, no tunnel. The `telegram:` block in
 `shell3.yaml` is `token` (an `env:TELEGRAM_TOKEN` reference like every other
 secret), `chat_id` (the single chat the bot answers — updates from anywhere
-else are dropped before a turn starts, and that IS the access model), and
-`workdir` (the agent's shell; default = the config dir). Missing token or
-chat_id, or a non-numeric chat_id, refuses to start. The transport is an
+else are dropped before a turn starts, messages in `handleMsg` and
+inline-button callbacks in `handleCallback` alike, and that IS the access
+model), and `workdir` (the agent's shell; default = the config dir). Missing
+token or chat_id, or a non-numeric chat_id, refuses to start — naming the
+field at fault, and `shell3 health` fails on the same check (an absent
+`telegram:` block is reported, not failed: an `ask`-only config is legitimate). The transport is an
 interface (`client.go`): `client_botapi.go` wraps go-telegram/bot,
 `client_console.go` drives the same bot loop over stdin/stdout for
 `shell3 telegram --console` (headless event testing, no credentials, no
@@ -202,8 +205,9 @@ chunk to the thread's anchor, and records every sent message id so the anchor
 advances (a reply to the bot's own latest message resumes the same session).
 `drainTurn` treats only the FINAL assistant segment as the reply — text before
 a tool call is progress narration — and errors always surface. Markdown is
-converted for Telegram by `mdhtml`. Idle sessions retire past a cap, except one
-with running jobs.
+converted for Telegram by `mdhtml`. A session retires (and Closes) as soon as
+it goes idle at the end of its own turn — there is no warm-session pool — except
+one with running jobs or queued input, which stays open to receive them.
 
 **Commands are host-answered** (`commands.go`, no model call, zero tokens):
 `/stop` (cancel the turn; background jobs keep running), `/run <job>`,

@@ -104,7 +104,7 @@ Every subcommand takes `--config/-c` to point at a different config directory.
   every other tool.
 - **Voice and images (optional)** — voice notes are transcribed, replies can
   come back spoken (`/voice`), inbound photos are captioned, and
-  `image_generate` sends its result to the chat; one free Groq key covers
+  `image_generate` saves an image the agent then sends to the chat; one free Groq key covers
   speech both ways
   ([docs/cookbook/voice-images.md](docs/cookbook/voice-images.md)).
 - **Context managed for you** — auto-compaction past a threshold; history is

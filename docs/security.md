@@ -41,8 +41,11 @@ access model is two secrets:
   revoke it with `/revoke` in [@BotFather](https://t.me/BotFather) if it leaks,
   and restart with the new one.
 - **`telegram.chat_id`** is the only chat the bot answers. Updates from any
-  other chat are dropped before a turn starts, so a stranger who finds your bot
-  gets nothing back.
+  other chat are dropped before a turn starts — messages *and* inline-button
+  presses (a gate approval, the `/voice` menu) alike — so a stranger who finds
+  your bot gets nothing back. Point it at your own private chat: it accepts a
+  group id, and then every member of that group holds the shell described
+  below, including the Allow button on a gate `ask`.
 
 **Whoever controls that chat controls a shell** on the machine running shell3 —
 the agent's first verb is `bash`. That includes anyone with access to your
@@ -61,8 +64,9 @@ agent quotes from your machine: file contents, command output, a `/status` dump
 of the effective system prompt, a `/runs` replay of a stored session. Treat the
 chat as a third-party log of everything the agent says.
 
-Approvals inherit all of this: whoever holds that chat taps the Allow/Deny
-buttons on a gate `ask`. No answer means denial — a cancelled turn, a send
+Approvals inherit all of this: whoever holds that chat — anyone with a seat in
+it, if you pointed `chat_id` at a group — taps the Allow/Deny buttons on a gate
+`ask`. No answer means denial — a cancelled turn, a send
 failure, or the timeout all deny, and a headless caller (subagent, cron) denies
 immediately.
 

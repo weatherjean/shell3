@@ -62,7 +62,7 @@ message cap.
 | Command | What |
 |---------|------|
 | `/stop` | Cancel the running turn. Background jobs are **not** killed — they keep running and still report back. |
-| `/status` | Version, config dir, agent + model, context window and messages in context, whether the command gate is armed, model params, tool descriptions, subagents, skills, MCP server health, cron jobs, projects, config warnings, and the effective system prompt. Reports the live session; with none it prints just version and config dir. |
+| `/status` | Version, config dir, agent + model, context window and messages in context, whether the command gate is armed, model params, tool descriptions, subagents, skills, MCP server health, cron jobs, projects, config warnings, and the effective system prompt. Reports whichever session is live — on an idle bot that is the headless cron dispatch parent, which shows `0` messages in context. |
 | `/jobs` | Running and finished background work: id, kind, label, status, elapsed, exit code. |
 | `/job <id>` | One job plus its output — a subagent's stored transcript, or a command's captured stdout. |
 | `/cancel <id>` | Cancel a job; cancelling a subagent cascades to the jobs it started. |
@@ -181,7 +181,11 @@ payload (a script error fails health; a strict gate that blocks the probe
 passes) and connects every MCP server. It validates every `projects/<name>/`
 (brief frontmatter, an existing workdir, a manager whose name doesn't collide)
 and prints one line per project, and says so when `notifier.md` is absent
-(background completions then post raw). Run it after editing the config tree,
+(background completions then post raw). It runs the Telegram front-end's own
+start-up check too, so a `telegram:` block `shell3 telegram` would refuse —
+a blank `token` or `chat_id`, a non-numeric `chat_id` — fails here, naming the
+field; no `telegram:` block at all is reported but not failed, since an
+`shell3 ask`-only config is legitimate. Run it after editing the config tree,
 before reloading.
 
 ## `shell3 ask` — drive the agent locally

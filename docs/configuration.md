@@ -490,9 +490,10 @@ and `shell3 health` don't need it.
 There is no listener, no login and no tunnel: shell3 long-polls Telegram
 outbound. Access control is the pair of secrets — the **token**, which is the
 bot, and the **`chat_id`**, which is the only chat it will answer. Updates from
-any other chat are dropped before a turn starts, so a stranger who finds your
-bot gets nothing. Get your numeric id from
-[@userinfobot](https://t.me/userinfobot).
+any other chat — messages and inline-button presses alike — are dropped before a
+turn starts, so a stranger who finds your bot gets nothing. Get your numeric id
+from [@userinfobot](https://t.me/userinfobot); use your own private chat, since
+a group id makes every member of that group an operator.
 
 Whoever controls that chat controls a shell on this machine, and so does anyone
 holding the token. Keep it in `.env`, revoke it with `/revoke` in @BotFather if
