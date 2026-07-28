@@ -497,14 +497,15 @@ func (s *Session) doClose() error {
 // 5xx), where rewriting history would not help. Front-ends append it to the
 // error they show.
 //
-// The suggested remedies are the ones that actually exist: /compact rewrites
-// the head of the conversation into a summary, and a new conversation starts
-// clean. (This used to name a /rollback command, which no front-end has.)
+// The suggested remedy is the one that actually exists on every front-end:
+// starting a new conversation. (Earlier versions named /rollback and then
+// /compact — neither is a command any front-end has; on the Telegram bot a new
+// conversation is simply a message that replies to nothing.)
 func RecoveryHint(err error) string {
 	if err == nil {
 		return ""
 	}
-	const hint = "This usually means the last turn left the conversation in a state the model rejects — /compact (which rewrites the history into a summary) or starting a new conversation will normally clear it."
+	const hint = "This usually means the last turn left the conversation in a state the model rejects — starting a new conversation (send a message without replying to a thread) normally clears it."
 	// Preferred: the adapter wraps provider API errors in llm.StatusError.
 	var se *llm.StatusError
 	if errors.As(err, &se) {
