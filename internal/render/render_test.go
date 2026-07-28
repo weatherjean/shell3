@@ -110,6 +110,22 @@ func TestRunReplayUnknownID(t *testing.T) {
 	}
 }
 
+// TestRunReplayRejectsTraversalIDs pins the id validator: "." and ".." survive
+// filepath.Base unchanged, so the Base equality check alone lets them through
+// to a Stat that succeeds on the runs root itself.
+func TestRunReplayRejectsTraversalIDs(t *testing.T) {
+	root, _ := fixtureRun(t)
+	for _, id := range []string{".", "..", "../runs"} {
+		_, err := render.RunReplay(root, id)
+		if err == nil {
+			t.Fatalf("RunReplay(%q): expected an invalid-id error", id)
+		}
+		if !strings.Contains(err.Error(), "invalid run id") {
+			t.Errorf("RunReplay(%q): want an invalid-id error, got %v", id, err)
+		}
+	}
+}
+
 func TestRunsList(t *testing.T) {
 	root, id := fixtureRun(t)
 	out, err := render.RunsList(root, 10)

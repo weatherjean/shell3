@@ -52,7 +52,9 @@ func RunsList(root string, limit int) (string, error) {
 // RunReplay renders one stored session at full fidelity: user prompts,
 // reasoning, tool calls with their arguments, tool results, assistant text.
 func RunReplay(root, id string) (string, error) {
-	if id == "" || id != filepath.Base(id) {
+	// filepath.Base leaves "." and ".." unchanged, so the equality check alone
+	// admits both — and Stat then succeeds on the runs root itself.
+	if id == "" || id == "." || id == ".." || id != filepath.Base(id) {
 		return "", fmt.Errorf("render: invalid run id %q", id)
 	}
 	if info, err := os.Stat(filepath.Join(root, "runs", id)); err != nil || !info.IsDir() {
