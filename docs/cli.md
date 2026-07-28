@@ -1,9 +1,9 @@
 # CLI reference
 
-Five subcommands: `serve` (the service — agent + web interface + cron),
+Six subcommands: `serve` (the service — agent + web interface + cron),
 `boot` (setup), `project` (scaffold a Chain of Command project), `health`
-(config check), and `ask` (a local driver for the agent). Bare `shell3`
-prints help.
+(config check), `ask` (a local driver for the agent), and `url` (where the
+interface is reachable). Bare `shell3` prints help.
 
 Every subcommand except `boot` takes `-c`/`--config <dir>`: a path to a config
 directory (`shell3.yaml`, `agent.md`, …); the default is `~/.shell3`. The
@@ -246,6 +246,19 @@ for dispatch.
 The command is designed for the agent to drive from a `bash` call — its `-h`
 output is the contract the agent reads before invoking it. See
 [configuration.md](configuration.md#projects--projects).
+
+## `shell3 url` — where is the interface?
+
+```sh
+shell3 url        # https://abc.trycloudflare.com, or http://127.0.0.1:8765
+```
+
+Prints the most public address the config yields: a fixed `web.url` if set,
+otherwise the last tunnel-scraped URL (`~/.shell3/tunnel.url`, written each
+time `web.tunnel` comes up), otherwise the local listen address. Caveats —
+like a quick-tunnel URL going stale on restart — go to stderr, so
+`$(shell3 url)` in a script captures just the URL. `boot --service` prints
+the same URL after restarting the service.
 
 ## `shell3 health` — check the config
 

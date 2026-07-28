@@ -148,10 +148,25 @@ func reinstallService() error {
 	if !systemdAvailable() {
 		return fmt.Errorf("boot --service: no systemd user instance here")
 	}
+	started := time.Now()
 	if installSystemdService(dir, home, true) != serviceEnabled {
 		return fmt.Errorf("boot --service: service setup failed (see warnings above)")
 	}
-	fmt.Printf("%s reinstalled and running — open http://127.0.0.1:8765\n", serviceUnitName)
+	fixedURL, tunnelWired, addr, _ := webWiring(dir)
+	fmt.Printf("%s reinstalled and running — open http://%s\n", serviceUnitName, addr)
+	switch {
+	case fixedURL != "":
+		fmt.Printf("public URL: %s\n", fixedURL)
+	case tunnelWired:
+		// Hold on briefly for the freshly minted public URL so nobody has
+		// to dig it out of the journal.
+		fmt.Println("waiting for the tunnel URL …")
+		if u := waitTunnelURL(dir, started, 45*time.Second); u != "" {
+			fmt.Printf("public URL (phone): %s\n", u)
+		} else {
+			fmt.Println("no tunnel URL yet — `shell3 url` prints it once the tunnel is up")
+		}
+	}
 	return nil
 }
 

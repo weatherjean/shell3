@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -36,9 +37,15 @@ const (
 // a delimiter, or end-of-line (the scanner appends a space so EOL matches).
 var bareURLRe = regexp.MustCompile(`https://[A-Za-z0-9][A-Za-z0-9.-]*(?::\d+)?/?[\s|"')\]>]`)
 
+// URLFileName is the file (beside the tunnel log) holding the last scraped
+// public URL, so front-ends that didn't spawn the tunnel — `shell3 url`,
+// `boot --service` — can show where the interface is reachable.
+const URLFileName = "tunnel.url"
+
 // Start spawns command (with every "{addr}" replaced by addr) detached, tees
 // its combined output to logPath, and returns a channel that delivers the
-// first bare https URL found in the output. The channel is closed without a
+// first bare https URL found in the output. The scraped URL is also written
+// to URLFileName beside logPath. The channel is closed without a
 // value if the process's output ends or urlScanTimeout passes without one.
 // Errors are never returned — a broken tunnel must not stop the bot.
 func Start(command, addr, logPath string) <-chan string {
@@ -69,7 +76,16 @@ func Start(command, addr, logPath string) <-chan string {
 	}
 
 	var once sync.Once
-	deliver := func(u string) { once.Do(func() { ch <- u; close(ch) }) }
+	deliver := func(u string) {
+		once.Do(func() {
+			// Best-effort: the URL file is a convenience for `shell3 url`
+			// and boot --service; the channel is the real delivery.
+			urlPath := filepath.Join(filepath.Dir(logPath), URLFileName)
+			_ = os.WriteFile(urlPath, []byte(u+"\n"), 0o600)
+			ch <- u
+			close(ch)
+		})
+	}
 	giveUp := func() { once.Do(func() { close(ch) }) }
 	// Deadline for the URL scan. AfterFunc instead of a sleeping goroutine: no
 	// goroutine is pinned for the full timeout, and a late fire is a no-op via

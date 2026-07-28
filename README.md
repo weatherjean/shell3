@@ -68,6 +68,7 @@ private network in front is still worth having. Full walkthrough in
 | `shell3 boot`     | Scaffold the config + `.env` interactively. |
 | `shell3 project new` | Scaffold a `projects/<name>/` config dir (brief + manager). |
 | `shell3 health`   | Load the config strictly; fail on any warning. |
+| `shell3 url`      | Print where the interface is reachable (tunnel URL when one runs). |
 | `shell3 ask "…"`  | Ask the agent locally, full verbose output; no message = an interactive multi-turn loop; `-p` for headless scripting; `--resume` continues the last session. |
 
 Every subcommand takes `--config/-c` to point at a different config directory.

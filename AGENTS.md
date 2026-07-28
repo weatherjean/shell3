@@ -354,7 +354,10 @@ terminal's own background.
 agent with full verbose output (every tool call/result, reasoning, token usage;
 no message = an interactive multi-turn loop; `-p` for headless; `--resume`
 continues the latest session; host-agnostic — reads nothing from the `web:`
-block). `serve`, `ask`, `boot`, `project`, and `health` are the whole command
+block). `shell3 url` prints where the interface is reachable — a fixed
+`web.url`, else the last tunnel-scraped URL (persisted to
+`~/.shell3/tunnel.url` by `internal/tunnel`), else the local address.
+`serve`, `ask`, `boot`, `project`, `health`, and `url` are the whole command
 tree — there is no Telegram front-end and no separate dashboard command.
 
 ## IMPORTANT: Do Not Read Credential Files
