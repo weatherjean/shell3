@@ -38,7 +38,7 @@ func (s *Session) injectNotification(rt *Runtime, n notify.Notification) {
 // agentDoneResultCap bounds (in runes) how much of a subagent's final summary is
 // injected into the parent's context on completion, so a long final message can't
 // blow up the parent. The full result stays available via `task_status <id>` and
-// the dashboard's job transcript view.
+// the Jobs view's transcript panel.
 const agentDoneResultCap = 2000
 
 // renderAgentNotice renders the agent_done/agent_update notice: verb and label

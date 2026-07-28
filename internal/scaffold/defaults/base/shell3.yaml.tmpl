@@ -7,7 +7,11 @@
 #   agents/<name>.md   subagents the agent can spawn via the task tool
 #   skills/<name>.md   skills (markdown with a frontmatter description)
 #   hooks/*.sh         tool-call/-result gate scripts (see hooks/tool-call.sh)
-#   cron/<name>.md     scheduled jobs; heartbeat.md — periodic check-ins
+#   cron/<name>.md     scheduled jobs (results are triaged by notifier.md —
+#                      see cron/checklist.md.example)
+#   notifier.md        triage persona for background completions: decides
+#                      per result whether to message you, wake the agent,
+#                      or stay silent
 
 models:
   {{.Name | yamlkey}}:
@@ -32,7 +36,7 @@ models:
 {{if .Proxy}}    run_proxy: {{.Proxy | yamlstr}}
 {{else}}    # run_proxy: "npx @some/codex-proxy --port 8787"
 {{end}}
-# Media (optional): voice notes in/out, image describe/generate — all
+# Media (optional): dictation in, spoken replies out, image describe/generate — all
 # OpenAI-compatible. One free Groq key covers STT + TTS.
 #  groq-whisper:
 #    base_url: https://api.groq.com/openai/v1
@@ -40,19 +44,19 @@ models:
 #    model: whisper-large-v3-turbo
 
 {{if .Vision}}media:
-  # Inbound Telegram images are captioned by the main model (it has vision), so
-  # the agent sees "[image: …]" immediately, no read_media round-trip. Point
-  # this at a cheaper vision model later if you like.
+  # Images are captioned by the main model (it has vision) instead of a
+  # separate one. Point this at a cheaper vision model later if you like.
+  # Either way, read_media lets the agent open an image file itself.
   describe: { model: {{.Name | yamlkey}} }
-  # stt: { model: groq-whisper }              # voice notes → text
-  # tts: { model: groq-tts, voice: Fritz-PlayAI, mode: inbound }
+  # stt: { model: groq-whisper }              # dictation → text
+  # tts: { model: groq-tts, voice: Fritz-PlayAI }
   # imagegen: { model: some-image-model, size: 1024x1024 }
   #   (for OpenRouter image models add api: openrouter; every agent and
   #    subagent gets the image_generate tool, files land in ~/.shell3/media/)
 {{else}}# media:
 #   describe: { model: some-vision-model }    # caption inbound images
-#   stt: { model: groq-whisper }              # voice notes → text
-#   tts: { model: groq-tts, voice: Fritz-PlayAI, mode: inbound }
+#   stt: { model: groq-whisper }              # dictation → text
+#   tts: { model: groq-tts, voice: Fritz-PlayAI }
 #   imagegen: { model: some-image-model, size: 1024x1024 }
 #     (for OpenRouter image models add api: openrouter; every agent and
 #      subagent gets the image_generate tool, files land in ~/.shell3/media/)
@@ -73,27 +77,32 @@ models:
 #     allow: [search_issues, get_issue]
 
 # ---------------------------------------------------------------------------
-# Telegram host  (run: shell3 telegram)
+# Web interface  (run: shell3 serve)
 # ---------------------------------------------------------------------------
-# chat_id is the single chat the bot answers. The dashboard Mini App needs a
-# public https URL; shell3 wires the chat's menu button to it automatically:
-#   tunnel: a command spawned at start ({addr} = dashboard addr) whose printed
-#           https URL is picked up. cloudflared must be installed, or the
-#           dashboard stays local-only (see ~/.shell3/tunnel.log).
+# workdir is where the agent's shell runs. addr is the listen address.
+#
+# password is required: serve refuses to start without one, because reaching
+# this interface means reaching a shell — the agent's first verb is bash. It is
+# read from .env like every other secret. Change it there; changing it logs out
+# every browser.
+#
+# totp_secret is optional and adds a second factor, so a leaked password alone
+# is not a session. `shell3 boot` offers to enrol; lose the phone and you delete
+# the key from .env and restart.
+#
+# To reach it from elsewhere:
+#   tunnel: a command spawned at start ({addr} = the listen address) whose
+#           printed https URL is picked up (see ~/.shell3/tunnel.log).
 #   url:    a fixed https address you run yourself; overrides tunnel.
-telegram:
-  token: env:TELEGRAM_BOT_TOKEN       # TELEGRAM_BOT_TOKEN in .env
-  chat_id: {{.ChatID | yamlstr}}
-  dashboard:
-    addr: 127.0.0.1:8765
-    tunnel: "cloudflared tunnel --url http://{addr}"
-
-# Standalone web front-end  (run: shell3 web) — Telegram-free fallback:
-# the same dashboard plus a simple chat, gated by a shared secret instead of
-# Telegram. `shell3 boot` generates SHELL3_WEB_SECRET in .env, and `shell3
-# web` prints the ready-to-open ?key= URL at startup (rotate by editing .env).
-# Run one front-end at a time (telegram OR web); both own the same history.
+# A tunnel puts a shell on the internet behind this password. Proxy-level auth
+# (Cloudflare Access, Tailscale) in front of it is still worth having.
 web:
-  addr: 127.0.0.1:8787
-  secret: env:SHELL3_WEB_SECRET
-  # tunnel: "cloudflared tunnel --url http://{addr}"   # optional public URL
+  workdir: {{.WorkDir | yamlstr}}
+  addr: 127.0.0.1:8765
+  password: env:SHELL3_WEB_PASSWORD
+  # totp_secret: env:SHELL3_WEB_TOTP_SECRET
+  # tunnel: "cloudflared tunnel --url http://{addr}"
+
+# runs_keep_days: how long a finished session's runs/<id>/ dir is kept before
+# `shell3 serve` sweeps it at startup; 0 keeps everything forever (default 30).
+# runs_keep_days: 30

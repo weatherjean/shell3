@@ -21,14 +21,14 @@ type ParamValue struct {
 }
 
 // ToolInfo names a tool exposed by the active agent and its one-line
-// description, for introspection surfaces (status tool, dashboard).
+// description, for the Status view.
 type ToolInfo struct {
 	Name        string
 	Description string
 }
 
 // Snapshot is a read-only view of the session's current agent state: everything
-// the status tool and dashboard need. It is a point-in-time copy; mutate the
+// the Status view needs. It is a point-in-time copy; mutate the
 // Session (e.g. SwitchAgent, SetParam) and call Snapshot again to observe
 // changes. Safe to call concurrently with a running turn: cfg reads are taken
 // under s.mu against the between-turns writers (a front-end may poll it mid-turn).
@@ -49,11 +49,11 @@ type Snapshot struct {
 	// surfaces with a standing "!" indicator.
 	ToolHooksOn bool
 	// Warnings are non-fatal config load issues (e.g. a skipped invalid skill
-	// file). A front-end surfaces them in-band at startup — a web dashboard
+	// file). A front-end surfaces them in-band at startup — a browser
 	// user otherwise never sees the stderr line they were printed on.
 	Warnings []string
 	// MCP lists every declared MCP server's live health (nil when no
-	// shell3.mcp{} block is declared).
+	// mcp: block is declared).
 	MCP []chat.MCPServerStatus
 }
 
@@ -68,7 +68,7 @@ func (s *Session) Snapshot() Snapshot {
 	// The displayed prompt is the authored prompt PLUS the host standing
 	// reminders (Environment) — they're injected into every turn but
 	// kept out of cfg.Personality.SystemPrompt, so the /prompt view and the
-	// dashboard Status → Prompt surface the full effective context here.
+	// Status view's prompt panel surface the full effective context here.
 	systemPrompt := s.cfg.Personality.SystemPrompt
 	if rems := s.sess.StandingReminders(); len(rems) > 0 {
 		systemPrompt += "\n\n## Host reminders (injected each turn — not part of the authored prompt above)\n\n" + strings.Join(rems, "\n\n")
@@ -117,30 +117,6 @@ func (s *Session) MessageCount() int {
 	return len(s.sess.Messages())
 }
 
-// Prune replaces the tool result with the given tool-call id by a short stub,
-// freeing its context-window space (the prune action). summary is the
-// human-readable status string. Returns ErrBusy while a turn is in flight
-// (mutates history; see ErrBusy), or an error naming the id when no tool
-// result with that id exists.
-func (s *Session) Prune(id string) (summary string, err error) {
-	err = s.withIdle(func() error {
-		msgs := s.sess.Messages()
-		out, ok := chat.PruneByID(id, "pruned by user", msgs)
-		if !ok {
-			return fmt.Errorf("shell3: no tool result with id %q", id)
-		}
-		s.sess.SetMessages(msgs)
-		summary = out
-		return nil
-	})
-	return summary, err
-}
-
-// QueueCompact requests a compaction before the next turn acts (the compact
-// action). It does not compact immediately — the next turn summarizes the
-// conversation before the model does anything.
-func (s *Session) QueueCompact() { s.sess.QueueCompact() }
-
 // SetParam sets a tunable provider parameter for subsequent turns. When the
 // active provider implements
 // llm.ParamDescriber the value is validated against that param's spec first;
@@ -151,7 +127,7 @@ func (s *Session) QueueCompact() { s.sess.QueueCompact() }
 func (s *Session) SetParam(name, value string) error {
 	// The whole body runs under s.mu (withIdle): the busy gate, the cfg.LLM
 	// read, and the cfg mutations (Params, StatusLine) are one critical
-	// section, so neither a starting turn nor the dashboard's Snapshot read
+	// section, so neither a starting turn nor a concurrent Snapshot read
 	// can interleave.
 	return s.withIdle(func() error {
 		describer, _ := s.cfg.LLM.(llm.ParamDescriber)

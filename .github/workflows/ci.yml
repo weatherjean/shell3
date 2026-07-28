@@ -53,3 +53,23 @@ jobs:
           go-version-file: go.mod
       - name: make build
         run: make build
+
+  test-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: node availability check
+        id: node
+        run: |
+          if command -v node >/dev/null 2>&1; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::node not available — skipping dashboard smoke test"
+          fi
+      - name: make test-web
+        if: steps.node.outputs.available == 'true'
+        run: make test-web

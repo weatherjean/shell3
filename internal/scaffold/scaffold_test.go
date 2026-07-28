@@ -10,10 +10,12 @@ import (
 )
 
 // writeEnv writes the .env the rendered config references (empty values are
-// fine — api_key is optional under a proxy setup).
+// fine — api_key is optional under a proxy setup), including the web password
+// the template requires and `shell3 boot` always writes.
 func writeEnv(t *testing.T, dir string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("MAIN_API_KEY=\nTELEGRAM_BOT_TOKEN=\nSHELL3_WEB_SECRET=s\n"), 0600); err != nil {
+	body := "MAIN_API_KEY=\nSHELL3_WEB_PASSWORD=sixteen-characters-long\n"
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(body), 0600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -49,6 +51,18 @@ func TestRenderBaseConfig(t *testing.T) {
 	}
 	if !strings.Contains(string(agentMD), "model: main") {
 		t.Error("agent.md frontmatter should reference the model")
+	}
+	// The notifier persona ships with boot: model = the main model, body = the
+	// default triage policy.
+	notifierMD, err := os.ReadFile(filepath.Join(dir, "notifier.md"))
+	if err != nil {
+		t.Fatalf("read notifier.md: %v", err)
+	}
+	if !strings.Contains(string(notifierMD), "model: main") {
+		t.Error("notifier.md frontmatter should reference the model")
+	}
+	if !strings.Contains(string(notifierMD), "send") || !strings.Contains(string(notifierMD), "wake") {
+		t.Error("notifier.md body should describe the send/wake verdicts")
 	}
 	for _, p := range []string{
 		"agents/explorer.md",
@@ -301,5 +315,25 @@ func TestRenderBaseConfigEscapesYAMLSpecials(t *testing.T) {
 	}
 	if m.RunProxy != v.Proxy {
 		t.Errorf("run_proxy = %q, want %q", m.RunProxy, v.Proxy)
+	}
+}
+
+// A scaffolded config must be servable, which means it must reference the
+// password key: `shell3 serve` refuses to start without one, so a fresh boot
+// that omitted this line would produce a config that cannot run.
+func TestBaseConfigWiresTheWebPassword(t *testing.T) {
+	dir := t.TempDir()
+	if err := RenderBaseConfig(dir, Values{
+		Name: "main", BaseURL: "http://x", EnvKey: "K", Model: "m",
+		ContextWindow: 100000, CompactAt: 80000, WorkDir: dir,
+	}, false); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "password: env:SHELL3_WEB_PASSWORD") {
+		t.Errorf("shell3.yaml does not wire the web password:\n%s", body)
 	}
 }

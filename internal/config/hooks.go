@@ -57,7 +57,7 @@ func (b *cappedBuffer) String() string { return b.buf.String() }
 // (subagent <name>). Any other *.sh — including a <name> matching no
 // subagent — produces a warning (`shell3 health` fails on it). A missing
 // hooks/ dir means no hooks.
-func discoverHooks(dir string, subagents []Subagent, warn func(string)) (hookSet, error) {
+func discoverHooks(dir string, subagents []Subagent, hasNotifier bool, warn func(string)) (hookSet, error) {
 	hs := hookSet{call: map[string]string{}, result: map[string]string{}}
 	hooksDir := filepath.Join(dir, "hooks")
 	entries, err := os.ReadDir(hooksDir)
@@ -70,6 +70,11 @@ func discoverHooks(dir string, subagents []Subagent, warn func(string)) (hookSet
 	known := map[string]bool{}
 	for _, sa := range subagents {
 		known[sa.Name] = true
+	}
+	// The notifier persona is hookable like any subagent
+	// (hooks/notifier.tool-call.sh) once notifier.md exists.
+	if hasNotifier {
+		known["notifier"] = true
 	}
 	for _, e := range entries {
 		name := e.Name()
@@ -126,18 +131,6 @@ func (c *LoadedConfig) HasToolResult() bool { return len(c.hooks.result) > 0 }
 // ("" if none). Exposed for `shell3 health` to dry-run each hook.
 func (c *LoadedConfig) ToolCallHookFor(agentName string) string {
 	return c.hooks.call[c.hookKey(agentName)]
-}
-
-// HookPaths returns every discovered hook script path (both kinds, all
-// agents), for health checks and status displays.
-func (c *LoadedConfig) HookPaths() []string {
-	var out []string
-	for _, m := range []map[string]string{c.hooks.call, c.hooks.result} {
-		for _, p := range m {
-			out = append(out, p)
-		}
-	}
-	return out
 }
 
 type ToolCallAction int

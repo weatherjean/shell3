@@ -31,7 +31,7 @@ type AgentKnobs struct {
 	// LLM tool schema.
 	HostToolNames map[string]bool
 	// Subagents is the active agent's allowlist of registered subagent names
-	// (its tools.subagents). internal/shell3 validates task-tool spawns
+	// (the agents/ registry). internal/shell3 validates task-tool spawns
 	// against it; the schema-side listing lives in the task tool itself
 	// (config.TaskToolFor).
 	Subagents []string
@@ -97,7 +97,7 @@ type Config struct {
 	ConfigDir string
 	// ConfigWarnings are non-fatal config load issues (e.g. a skipped invalid
 	// skill file). Already logged + printed to stderr at load; also carried
-	// here so a front-end can surface them in-band, since a web dashboard user
+	// here so a front-end can surface them in-band, since a browser user
 	// never sees the stderr line they were printed on.
 	ConfigWarnings []string
 	// ActiveSkills lists skill names enabled for this persona.
@@ -125,8 +125,8 @@ type Config struct {
 	// internal/shell3.RegisterHostTool). Nil = none.
 	HostTool func(ctx context.Context, name, argsJSON string) (string, error)
 	// MCPStatus reports the declared MCP servers' live health (nil when no
-	// shell3.mcp{} block is declared). Agent-independent: set once at
-	// assembly, surfaced by Snapshot for the status tool and dashboard.
+	// mcp: block is declared). Agent-independent: set once at
+	// assembly, surfaced by Snapshot for the Status view.
 	MCPStatus func() []MCPServerStatus
 	// Asker confirms ask-verdict commands with a human; supplied per-front-end.
 	// Nil ⇒ headless: ask degrades to deny.
@@ -191,6 +191,8 @@ func NewHandlers() map[string]ToolHandler {
 		TaskStatusHandler(),
 		TaskCancelHandler(),
 		EditHandler{},
+		ReadHandler{},
+		ListFilesHandler{},
 	}
 	m := make(map[string]ToolHandler, len(handlers))
 	for _, h := range handlers {
@@ -257,16 +259,4 @@ func LogOrNoop(l applog.Logger) applog.Logger {
 		return l
 	}
 	return applog.Noop{}
-}
-
-// PruneLastTurn returns messages truncated to remove the last user message
-// and everything after it. Used by /rollback to back out the most recent
-// exchange. Returns messages unchanged when no user message is present.
-func PruneLastTurn(messages []llm.Message) []llm.Message {
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == llm.RoleUser {
-			return messages[:i]
-		}
-	}
-	return messages
 }

@@ -13,7 +13,7 @@ func TestStandingRemindersNotPersisted(t *testing.T) {
 	s := NewSession(SessionOpts{Store: st, StoreID: id})
 
 	s.SetStandingReminders([]string{"<system-reminder>env</system-reminder>"})
-	// Shown to the dashboard…
+	// Shown to the prompt-inspection view…
 	if got := s.Reminders(); len(got) != 1 || !strings.Contains(got[0].Text, "env") {
 		t.Fatalf("standing reminder not in reminderLog: %+v", got)
 	}

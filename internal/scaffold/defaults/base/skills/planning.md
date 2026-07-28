@@ -64,7 +64,7 @@ don't interrogate for its own sake.
 ## 3. Approval
 
 Tell the user the plan is at its path and summarize it in a few lines in
-chat (they can also open it in the dashboard file explorer). Then wait.
+chat (they can also open it in the interface's Files view). Then wait.
 
 - Explicit yes → set **Status: approved**, execute, and report with evidence.
 - Requested changes → revise the same file, re-share, wait again.

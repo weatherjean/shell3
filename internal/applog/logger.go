@@ -1,7 +1,7 @@
 // Package applog provides rotating file + stderr structured logging.
 //
-// Debug lines go to the log file only; Warn and Error are mirrored to stderr
-// so users see actionable messages in their terminal. Open rotates the file
+// Debug and Info lines go to the log file only; Warn and Error are mirrored to
+// stderr so users see actionable messages in their terminal. Open rotates the file
 // when it exceeds a size bound, keeping a bounded number of archives.
 package applog
 
@@ -30,6 +30,10 @@ const (
 // pairs: logger.Warn("msg", "key", val, "key2", val2).
 type Logger interface {
 	Debug(msg string, fields ...any)
+	// Info records something worth keeping but not worth interrupting for —
+	// notably the security audit trail (who signed in, from where). Separate
+	// from Debug so those lines are findable among the diagnostic noise.
+	Info(msg string, fields ...any)
 	Warn(msg string, fields ...any)
 	Error(msg string, err error, fields ...any)
 }
@@ -38,6 +42,7 @@ type Logger interface {
 type Noop struct{}
 
 func (Noop) Debug(string, ...any)        {}
+func (Noop) Info(string, ...any)         {}
 func (Noop) Warn(string, ...any)         {}
 func (Noop) Error(string, error, ...any) {}
 
@@ -50,6 +55,10 @@ type fileLogger struct {
 
 func (l *fileLogger) Debug(msg string, fields ...any) {
 	l.write("DEBUG", msg, nil, fields, false)
+}
+
+func (l *fileLogger) Info(msg string, fields ...any) {
+	l.write("INFO", msg, nil, fields, false)
 }
 
 func (l *fileLogger) Warn(msg string, fields ...any) {

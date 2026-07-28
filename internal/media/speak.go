@@ -63,9 +63,9 @@ func capSpeechText(s string) string {
 	return string(r[:maxSpeechRunes]) + "… (truncated)"
 }
 
-// speechExt returns the output file extension for a shell3.tts{} format:
-// opus is muxed into an .ogg container (Telegram voice bubbles expect Ogg
-// Opus), every other format keeps its name as the extension.
+// speechExt returns the output file extension for a media.tts format: opus is
+// muxed into an .ogg container, every other format keeps its name as the
+// extension.
 func speechExt(format string) string {
 	if format == "opus" || format == "ogg" {
 		return ".ogg"
@@ -114,9 +114,6 @@ func newSpeaker(sdk sdkFn, cfg config.TTSConfig) func(context.Context, string) (
 			return Speech{}, fmt.Errorf("media: writing speech file: %w", err)
 		}
 
-		return Speech{
-			Path:            f.Name(),
-			VoiceCompatible: cfg.Format == "opus" || cfg.Format == "ogg",
-		}, nil
+		return Speech{Path: f.Name()}, nil
 	}
 }

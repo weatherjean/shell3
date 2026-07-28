@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,35 +116,6 @@ func TestSend_AfterCloseReturnsErrClosed(t *testing.T) {
 	}
 	if !errors.Is(got, ErrClosed) {
 		t.Fatalf("Send after Close = %v, want ErrClosed", got)
-	}
-}
-
-// TestSetSafetyOff_AutoAllowsAsks pins the session-level disable_safety
-// toggle: with safety off, the turn's Asker allows without consulting the
-// human asker; toggled back on, the real asker is consulted again.
-func TestSetSafetyOff_AutoAllowsAsks(t *testing.T) {
-	s := newTestSession(t, fakellm.New(), chat.Config{})
-	defer s.Close()
-	askerCalled := false
-	s.asker = func(ctx context.Context, command, reason string) bool {
-		askerCalled = true
-		return false
-	}
-
-	s.SetSafetyOff(true)
-	if !s.turnConfig().Asker(context.Background(), "rm -rf /", "test") {
-		t.Fatal("safety off: ask should auto-allow")
-	}
-	if askerCalled {
-		t.Fatal("safety off: the human asker must not be consulted")
-	}
-
-	s.SetSafetyOff(false)
-	if s.turnConfig().Asker(context.Background(), "rm -rf /", "test") {
-		t.Fatal("safety on: the denying asker's verdict should stand")
-	}
-	if !askerCalled {
-		t.Fatal("safety on: the human asker should be consulted")
 	}
 }
 
@@ -370,77 +340,6 @@ func TestSession_Compact_WakesStrandedNotice(t *testing.T) {
 	waitForWake(t, rt, s)
 }
 
-func TestSession_Clear_ResetsHistory(t *testing.T) {
-	client := fakellm.New(
-		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "a"}}},
-		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "b"}}},
-	)
-	s := newTestSession(t, client, chat.Config{})
-	defer s.Close()
-
-	for range s.Send(context.Background(), "first") {
-	}
-	if len(s.sess.Messages()) == 0 {
-		t.Fatal("expected history after first turn")
-	}
-	s.Clear()
-	if got := len(s.sess.Messages()); got != 0 {
-		t.Fatalf("after Clear: %d messages, want 0", got)
-	}
-}
-
-// TestSession_Clear_RotatesStoreSession verifies /clear ends the current store
-// session (so it becomes a finished past conversation that retains its history)
-// and opens a fresh one that later turns record under — rather than leaving the
-// same open session lingering at the top of the dashboard's Runs list.
-func TestSession_Clear_RotatesStoreSession(t *testing.T) {
-	st, err := runs.Open(t.TempDir())
-	if err != nil {
-		t.Fatalf("runs.Open: %v", err)
-	}
-	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "a"}}})
-	s := newTestSession(t, client, chat.Config{Store: st})
-	defer s.Close()
-
-	old := s.sess.ID()
-	if old == "" {
-		t.Fatal("expected a non-empty store session id after start")
-	}
-	for range s.Send(context.Background(), "first") {
-	}
-
-	if err := s.Clear(); err != nil {
-		t.Fatalf("Clear: %v", err)
-	}
-
-	// Clear must rotate onto a new, non-empty session id.
-	if got := s.sess.ID(); got == old || got == "" {
-		t.Fatalf("after Clear: session id = %q, want a fresh non-empty id (old=%q)", got, old)
-	}
-
-	// The old session must be ended and keep its persisted history.
-	sessions, err := st.ListSessions(10)
-	if err != nil {
-		t.Fatalf("ListSessions: %v", err)
-	}
-	var found bool
-	for _, m := range sessions {
-		if m.ID != old {
-			continue
-		}
-		found = true
-		if m.EndedAt.IsZero() {
-			t.Fatalf("old session %s not ended after Clear", old)
-		}
-		if msgs, err := st.LoadMessages(old); err != nil || len(msgs) == 0 {
-			t.Fatalf("old session %s lost its history on Clear (len=%d err=%v)", old, len(msgs), err)
-		}
-	}
-	if !found {
-		t.Fatalf("old session %s not listed after Clear", old)
-	}
-}
-
 func TestAuditSink_EndStatusReflectsError(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "audit.jsonl")
@@ -477,54 +376,6 @@ func TestAuditSink_EndStatusReflectsError(t *testing.T) {
 	}
 	if endStatus != "error" {
 		t.Fatalf("audit end status = %q after an errored turn, want %q", endStatus, "error")
-	}
-}
-
-func TestSession_Clear_RefreshesPrompt(t *testing.T) {
-	client := fakellm.New()
-	calls := 0
-	cfg := chat.Config{RefreshPrompt: func() string {
-		calls++
-		return fmt.Sprintf("refreshed-%d", calls)
-	}}
-	cfg.Personality.SystemPrompt = "original"
-	s := newTestSession(t, client, cfg)
-	defer s.Close()
-
-	s.Clear()
-	if got := s.cfg.Personality.SystemPrompt; got != "refreshed-1" {
-		t.Fatalf("after Clear: SystemPrompt = %q, want %q", got, "refreshed-1")
-	}
-}
-
-func TestSession_Clear_NilRefreshIsNoop(t *testing.T) {
-	client := fakellm.New()
-	cfg := chat.Config{} // RefreshPrompt nil
-	cfg.Personality.SystemPrompt = "frozen"
-	s := newTestSession(t, client, cfg)
-	defer s.Close()
-
-	s.Clear()
-	if got := s.cfg.Personality.SystemPrompt; got != "frozen" {
-		t.Fatalf("after Clear with nil RefreshPrompt: SystemPrompt = %q, want %q", got, "frozen")
-	}
-}
-
-func TestSession_Rollback(t *testing.T) {
-	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "x"}}})
-	s := newTestSession(t, client, chat.Config{})
-	defer s.Close()
-
-	if ok, err := s.Rollback(); ok || err != nil {
-		t.Fatalf("Rollback on empty history should return (false, nil); got (%t, %v)", ok, err)
-	}
-	for range s.Send(context.Background(), "hi") {
-	}
-	if ok, err := s.Rollback(); !ok || err != nil {
-		t.Fatalf("Rollback after a turn should return (true, nil); got (%t, %v)", ok, err)
-	}
-	if got := len(s.sess.Messages()); got != 0 {
-		t.Fatalf("after Rollback: %d messages, want 0", got)
 	}
 }
 
@@ -781,37 +632,6 @@ func TestSnapshot_NoDescriberHasNoParams(t *testing.T) {
 	}
 }
 
-// TestPrune verifies Prune stubs a matching tool result (ok=true) and reports
-// ok=false for an unknown id.
-func TestPrune(t *testing.T) {
-	s := newTestSession(t, fakellm.New(), chat.Config{})
-	defer s.Close()
-	s.sess.SetMessages([]llm.Message{
-		{Role: llm.RoleUser, Content: "do it"},
-		{Role: llm.RoleTool, Name: "bash", ToolCallID: "7", Content: "[tool_call_id=7]\nlots of bytes here"},
-	})
-
-	if summary, err := s.Prune("nope"); err == nil {
-		t.Fatalf("Prune(unknown) err=nil summary=%q", summary)
-	}
-
-	summary, err := s.Prune("7")
-	if err != nil {
-		t.Fatalf("Prune(7): %v", err)
-	}
-	if summary == "" {
-		t.Fatal("Prune returned empty summary")
-	}
-	// The stored tool result must now be the short stub, not the original.
-	for _, m := range s.sess.Messages() {
-		if m.Role == llm.RoleTool && m.ToolCallID == "7" {
-			if !strings.Contains(m.Content, "pruned by user") {
-				t.Fatalf("tool result not stubbed: %q", m.Content)
-			}
-		}
-	}
-}
-
 // TestSetParam verifies the validate → SetByName → SetParams path, the
 // reasoning_effort status-line refresh, and error cases.
 func TestSetParam(t *testing.T) {
@@ -953,28 +773,22 @@ func TestSession_BusyEnforcement(t *testing.T) {
 		t.Fatalf("overlapping Send: want exactly one ErrBusy Error event, got %+v", rejected)
 	}
 
-	if err := s.Clear(); !errors.Is(err, ErrBusy) {
-		t.Fatalf("Clear while busy: want ErrBusy, got %v", err)
-	}
-	if _, err := s.Rollback(); !errors.Is(err, ErrBusy) {
-		t.Fatalf("Rollback while busy: want ErrBusy, got %v", err)
-	}
 	if err := s.SwitchAgent("any"); !errors.Is(err, ErrBusy) {
 		t.Fatalf("SwitchAgent while busy: want ErrBusy, got %v", err)
 	}
-	if _, err := s.Prune("1"); !errors.Is(err, ErrBusy) {
-		t.Fatalf("Prune while busy: want ErrBusy, got %v", err)
-	}
 	if _, _, err := s.Compact(context.Background()); !errors.Is(err, ErrBusy) {
 		t.Fatalf("Compact while busy: want ErrBusy, got %v", err)
+	}
+	if err := s.SetParam("reasoning_effort", "low"); !errors.Is(err, ErrBusy) {
+		t.Fatalf("SetParam while busy: want ErrBusy, got %v", err)
 	}
 
 	// Drain the in-flight turn; the gate must clear.
 	cancel()
 	for range out {
 	}
-	if err := s.Clear(); err != nil {
-		t.Fatalf("Clear after drain should succeed, got %v", err)
+	if _, _, err := s.Compact(context.Background()); errors.Is(err, ErrBusy) {
+		t.Fatal("the busy gate did not clear after the turn drained")
 	}
 }
 
@@ -1088,7 +902,7 @@ func TestSessionJobsFromManager(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = rt.jobs.startCommand(s, "sleep 1", t.TempDir(), []string{"sleep", "1"}, nil, false)
+	_, _ = rt.jobs.startCommand(s, "sleep 1", t.TempDir(), []string{"sleep", "1"}, nil, false, "")
 	jobs := s.Jobs()
 	if len(jobs) != 1 || jobs[0].Kind != JobCommand {
 		t.Fatalf("Session.Jobs = %+v, want one JobCommand", jobs)

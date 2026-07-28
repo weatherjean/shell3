@@ -13,12 +13,12 @@ import (
 // yamlFile is the wire schema of shell3.yaml. Decoding is strict
 // (KnownFields): an unknown key anywhere is a load error.
 type yamlFile struct {
-	Models     map[string]yamlModel `yaml:"models"`
-	Telegram   *yamlTelegram        `yaml:"telegram"`
-	Web        *yamlWeb             `yaml:"web"`
-	MCP        map[string]yamlMCP   `yaml:"mcp"`
-	Media      *yamlMedia           `yaml:"media"`
-	Background *yamlBackground      `yaml:"background"`
+	Models       map[string]yamlModel `yaml:"models"`
+	Web          *yamlWeb             `yaml:"web"`
+	MCP          map[string]yamlMCP   `yaml:"mcp"`
+	Media        *yamlMedia           `yaml:"media"`
+	Background   *yamlBackground      `yaml:"background"`
+	RunsKeepDays *int                 `yaml:"runs_keep_days"` // nil = default 30; 0 = keep forever
 }
 
 type yamlModel struct {
@@ -36,25 +36,15 @@ type yamlModel struct {
 	RunProxy      string         `yaml:"run_proxy"`
 }
 
-type yamlTelegram struct {
-	Token     string         `yaml:"token"`
-	ChatID    string         `yaml:"chat_id"`
-	WorkDir   string         `yaml:"workdir"`
-	Dashboard *yamlDashboard `yaml:"dashboard"`
-}
-
-type yamlDashboard struct {
-	Enabled *bool  `yaml:"enabled"`
-	Addr    string `yaml:"addr"`
-	URL     string `yaml:"url"`
-	Tunnel  string `yaml:"tunnel"`
-}
-
+// yamlWeb is the `web:` block: where the agent's shell runs, and how the
+// interface is served.
 type yamlWeb struct {
-	Addr   string `yaml:"addr"`
-	Secret string `yaml:"secret"`
-	URL    string `yaml:"url"`
-	Tunnel string `yaml:"tunnel"`
+	WorkDir    string `yaml:"workdir"`
+	Addr       string `yaml:"addr"`
+	URL        string `yaml:"url"`
+	Tunnel     string `yaml:"tunnel"`
+	Password   string `yaml:"password"`
+	TOTPSecret string `yaml:"totp_secret"`
 }
 
 type yamlMCP struct {
@@ -159,18 +149,9 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 			Temperature: m.Temperature, Extra: m.Extra, RunProxy: m.RunProxy,
 		})
 	}
-	if t := f.Telegram; t != nil {
-		c.telegram = TelegramConfig{Token: t.Token, ChatID: t.ChatID, WorkDir: t.WorkDir}
-		if d := t.Dashboard; d != nil {
-			enabled := true
-			if d.Enabled != nil {
-				enabled = *d.Enabled
-			}
-			c.telegram.Dashboard = DashboardConfig{Enabled: enabled, Addr: d.Addr, URL: d.URL, Tunnel: d.Tunnel}
-		}
-	}
-	if w := f.Web; w != nil {
-		c.web = WebConfig{Addr: w.Addr, Secret: w.Secret, URL: w.URL, Tunnel: w.Tunnel}
+	if wc := f.Web; wc != nil {
+		c.web = WebConfig{WorkDir: wc.WorkDir, Addr: wc.Addr, URL: wc.URL, Tunnel: wc.Tunnel, Password: wc.Password,
+			TOTPSecret: wc.TOTPSecret}
 	}
 	mcpNames := make([]string, 0, len(f.MCP))
 	for name := range f.MCP {
@@ -211,7 +192,7 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 			if mode != "off" && mode != "inbound" && mode != "always" {
 				return fmt.Errorf("shell3.yaml: media.tts mode %q must be off, inbound, or always", tt.Mode)
 			}
-			// opus keeps replies Telegram-voice-note compatible by default.
+			// opus is small and widely playable in the browser; the default.
 			format := tt.Format
 			if format == "" {
 				format = "opus"
@@ -248,6 +229,12 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 	}
 	if b := f.Background; b != nil {
 		c.BackgroundMaxConcurrent = b.MaxConcurrent
+	}
+	// runs_keep_days defaults to 30 (unset); an explicit 0 means keep
+	// forever, so the default can't be expressed as a bare int default.
+	c.RunsKeepDays = 30
+	if f.RunsKeepDays != nil {
+		c.RunsKeepDays = *f.RunsKeepDays
 	}
 	return nil
 }

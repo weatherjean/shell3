@@ -11,7 +11,6 @@ import (
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/runs"
-	"github.com/weatherjean/shell3/internal/strutil"
 )
 
 // Session is a live, multi-turn conversation. Obtain one via [Runtime.Session];
@@ -73,10 +72,6 @@ type Session struct {
 	// racing session teardown) is rejected with ErrClosed instead of running a
 	// turn against the ended store record.
 	closed bool
-	// safetyOff auto-allows tool-call hook ask verdicts without prompting (the
-	// front-ends' disable_safety toggle). Consulted at ask time, so a mid-turn
-	// toggle applies to the next ask.
-	safetyOff bool
 }
 
 // writeStartLine writes the audit log's opening line for this session.
@@ -97,6 +92,7 @@ func (s *Session) writeStartLine(label string) {
 func newSession(cfg chat.Config, opts SessionOpts) *Session {
 	var storeID string
 	var seed []llm.Message
+	var seedTokens int     // persisted provider-reported prompt tokens for a resumed session
 	var resumedFrom string // non-empty when this session reattached to an existing run
 	if cfg.Store != nil {
 		// Reattach to the newest matching session when asked (and no explicit
@@ -119,6 +115,10 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 			} else {
 				chat.LogOrNoop(cfg.Log).Warn("resume load failed", "session_id", resumeID, "error", err)
 			}
+			// Restore the accurate context gauge persisted for this session so the
+			// first resumed turn's prune/compaction fires (0 = old session with no
+			// persisted count; chat.NewSession then falls back to the estimate).
+			seedTokens = cfg.Store.LastPromptTokens(resumeID)
 		default:
 			// Fresh run. Best-effort: a failed NewSession leaves storeID "" (no
 			// persistence), logged at Warn so the silent non-persistence is
@@ -144,11 +144,12 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 		sinkCleanup: func() {},
 	}
 	s.sess = chat.NewSession(chat.SessionOpts{
-		StoreID:          storeID,
-		InitialMessages:  seed,
-		ContextWindowFor: func(string) int { return cfg.ContextWindow },
-		Sink:             s.route,
-		Store:            cfg.Store,
+		StoreID:             storeID,
+		InitialMessages:     seed,
+		InitialPromptTokens: seedTokens,
+		ContextWindowFor:    func(string) int { return cfg.ContextWindow },
+		Sink:                s.route,
+		Store:               cfg.Store,
 	})
 	if resumedFrom != "" {
 		if err := s.sess.RestoreReminders(); err != nil {
@@ -280,10 +281,9 @@ func (s *Session) RunQueued(ctx context.Context) <-chan Event {
 func (s *Session) HasQueuedInput() bool { return s.sess.HasInbox() }
 
 // Headless reports whether this session runs without a human attached
-// (subagent children, cron jobs). Host-tool registrars use it to tailor
-// tool instructions — e.g. image_generate tells a headless session to report
-// the saved path instead of naming send_media_telegram, which only the main
-// chat session has.
+// (subagent children, cron jobs). Host-tool registrars use it to tailor tool
+// instructions — e.g. image_generate tells a headless session to report the
+// saved path, since only a live chat session can show the image to a user.
 func (s *Session) Headless() bool { return s.opts.Headless }
 
 // Send runs one turn for prompt and returns a channel of that turn's events,
@@ -379,24 +379,6 @@ func (s *Session) SendParts(ctx context.Context, prompt string, parts []Part) <-
 	return out
 }
 
-// SetSafetyOff toggles auto-allowing tool-call hook ask verdicts for this
-// session — the host-side switch behind the front-ends' disable_safety
-// command. While on, an ask verdict runs without prompting a human; block
-// verdicts are unaffected. Off by default; takes effect immediately,
-// including for asks fired later in an in-flight turn.
-func (s *Session) SetSafetyOff(off bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.safetyOff = off
-}
-
-// SafetyOff reports whether ask verdicts are currently auto-allowed.
-func (s *Session) SafetyOff() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.safetyOff
-}
-
 // runtimeHandle snapshots s.runtime under s.mu. Every accessor reachable from
 // outside the turn goroutine must use this instead of reading s.runtime
 // directly: doClose nils the field concurrently (under the same mutex).
@@ -429,19 +411,6 @@ func (s *Session) withIdle(fn func() error) error {
 // ID returns the store session id (rolls on /clear; "" with no store).
 func (s *Session) ID() string {
 	return s.sess.ID()
-}
-
-// WakeEvents exposes the owning Runtime's out-of-turn event bus (Wake) so a
-// single-session front-end created via Start can consume wakes for this session
-// without holding a separate *Runtime handle. Returns nil when the session has
-// no runtime (e.g. a closed session), in which case a host select on it simply
-// never fires. Multi-session hosts should use Runtime.Events() directly.
-func (s *Session) WakeEvents() <-chan HostEvent {
-	rt := s.runtimeHandle()
-	if rt == nil {
-		return nil
-	}
-	return rt.Events()
 }
 
 // Close ends the conversation: cancels any in-flight turn, waits for it to
@@ -521,18 +490,21 @@ func (s *Session) doClose() error {
 	return endErr
 }
 
-// RollbackHint returns a short suggestion to roll back the last turn when err
-// looks like a provider HTTP 400 (Bad Request) — which usually means the last
-// turn left the conversation in a state the model rejects (e.g. a bad tool
-// message or unsupported content), and undoing it recovers. Returns "" for
-// other errors (auth 401, rate-limit 429, network, 5xx), where rollback would
-// not help. Front-ends append it to the error they show, naming their own
-// /rollback command.
-func RollbackHint(err error) string {
+// RecoveryHint returns a short suggestion when err looks like a provider HTTP
+// 400 (Bad Request) — which usually means the last turn left the conversation
+// in a state the model rejects (e.g. a bad tool message or unsupported
+// content). Returns "" for other errors (auth 401, rate-limit 429, network,
+// 5xx), where rewriting history would not help. Front-ends append it to the
+// error they show.
+//
+// The suggested remedies are the ones that actually exist: /compact rewrites
+// the head of the conversation into a summary, and a new conversation starts
+// clean. (This used to name a /rollback command, which no front-end has.)
+func RecoveryHint(err error) string {
 	if err == nil {
 		return ""
 	}
-	const hint = "This usually means the last turn left the conversation in a state the model rejects — /rollback will likely fix it."
+	const hint = "This usually means the last turn left the conversation in a state the model rejects — /compact (which rewrites the history into a summary) or starting a new conversation will normally clear it."
 	// Preferred: the adapter wraps provider API errors in llm.StatusError.
 	var se *llm.StatusError
 	if errors.As(err, &se) {
@@ -565,42 +537,32 @@ func (s *Session) turnConfig() chat.TurnConfig {
 func (s *Session) turnConfigLocked() chat.TurnConfig {
 	cfg := s.cfg
 	tc := chat.NewTurnConfig(cfg, s.handlers)
-	baseAsker := s.asker
-	// t.headless for the tool-call hook chain: no attached asker means an ask
-	// verdict would degrade to deny. Per-session, recomputed every turn.
-	tc.HeadlessAsk = baseAsker == nil
-	tc.Asker = func(ctx context.Context, command, reason string) bool {
-		// SafetyOff is read at ask time (not turn start) so a mid-turn
-		// disable_safety toggle applies to the very next ask.
-		if s.SafetyOff() {
-			return true
-		}
-		if baseAsker == nil {
-			return false // no human available: ask degrades to deny
-		}
-		return baseAsker(ctx, command, reason)
-	}
+	// The session's asker IS the turn's asker: a nil one means no human is
+	// attached, which chat's resolveAsk already degrades to deny. HeadlessAsk
+	// carries the same fact to the hook chain as t.headless.
+	tc.Asker = s.asker
+	tc.HeadlessAsk = s.asker == nil
 	if s.runtime != nil && s.runtime.jobs != nil {
 		rt := s.runtime
 		parent := s
-		tc.StartBashBg = func(command, workdir string, argv, env []string, quiet bool) (string, error) {
-			return rt.jobs.startCommand(parent, command, workdir, argv, env, quiet)
+		tc.StartBashBg = func(command, workdir string, argv, env []string, direct bool, note string) (string, error) {
+			return rt.jobs.startCommand(parent, command, workdir, argv, env, direct, note)
 		}
-		allowed := cfg.Subagents // the active agent's tools.subagents allowlist
-		tc.StartSubagent = func(agent, prompt, desc string) (string, error) {
+		allowed := cfg.Subagents // the active agent's registered-subagent allowlist
+		tc.StartSubagent = func(agent, prompt, desc string, direct bool, note string) (string, error) {
 			// Enforce the allowlist the task tool's schema advertises: only the
-			// names in tools.subagents may be spawned, never an arbitrary declared
+			// registered subagent names may be spawned, never an arbitrary declared
 			// agent. An empty allowlist means this agent may not delegate at all.
 			if !slices.Contains(allowed, agent) {
 				if len(allowed) == 0 {
-					return "", errors.New("this agent has no subagents configured (tools.subagents is empty)")
+					return "", errors.New("this agent has no subagents configured (agents/ is empty)")
 				}
 				return "", fmt.Errorf("subagent_type %q is not allowed for this agent; allowed subagents: %s", agent, strings.Join(allowed, ", "))
 			}
 			// Single-level delegation is enforced by construction: subagents are
 			// never granted the task tool, so this closure only runs on top-level
 			// sessions.
-			return rt.jobs.startSubagent(parent, agent, prompt, desc, subagentOpts{})
+			return rt.jobs.startSubagent(parent, agent, prompt, desc, subagentOpts{direct: direct, note: note})
 		}
 		tc.ListJobs = func() string {
 			return rt.jobs.formatJobList()
@@ -665,94 +627,6 @@ func (s *Session) Compact(ctx context.Context) (before, after int, err error) {
 	return chat.CompactStandalone(cctx, tc, s.sess)
 }
 
-// CompactReplyText renders a Session.Compact result as the chat reply. Both
-// front-ends (Telegram, web) send exactly this string, so the error mapping
-// and wording live in one place next to the API they describe.
-func CompactReplyText(before, after int, err error) string {
-	switch {
-	case errors.Is(err, chat.ErrNothingToCompact):
-		return "nothing to compact"
-	case errors.Is(err, ErrBusy):
-		return "a turn is in flight — try /compact when it finishes"
-	case err != nil:
-		return "compact failed: " + err.Error()
-	}
-	return fmt.Sprintf("🗜 compacted: %s → %s tokens",
-		strutil.FormatTokens(before), strutil.FormatTokens(after))
-}
-
-// Clear resets the conversation context (= /clear): drops all history and
-// re-stamps the system prompt with a fresh timestamp. Returns ErrBusy while a
-// turn is in flight (see Send's contract).
-func (s *Session) Clear() error {
-	return s.withIdle(s.clearLocked)
-}
-
-// clearLocked is Clear's body; caller (withIdle) holds s.mu.
-func (s *Session) clearLocked() error {
-	// Refuse while background work runs: a completing job would deliver its
-	// notice into the NEW session — stale work leaking across the boundary the
-	// user just drew. Same guard as Runtime.Reload (errIfRunning); /stop is the
-	// explicit kill switch. Reading s.runtime directly is safe here (s.mu is
-	// held; the helper is nil-safe for runtime-less test sessions).
-	if s.runtime != nil {
-		if err := s.runtime.jobs.errIfRunning("/clear"); err != nil {
-			return err
-		}
-	}
-	// Drop queued-but-undelivered notices from the conversation being cleared.
-	s.sess.DropInbox()
-	s.sess.SetMessages(nil)
-	// Rotate onto a fresh store session: end the conversation just cleared (its
-	// turns were already persisted per-turn, so it becomes a finished past
-	// session) and open a new row that subsequent turns record under. Without
-	// this, /clear only empties the in-memory buffer and the open session lingers
-	// at the top of the dashboard's Runs list. Best-effort — a store hiccup logs
-	// and leaves the live id untouched rather than dropping persistence.
-	if s.cfg.Store != nil {
-		if old := s.sess.ID(); old != "" {
-			if err := s.cfg.Store.EndSession(old); err != nil {
-				chat.LogOrNoop(s.cfg.Log).Warn("clear: end session failed", "session_id", old, "error", err)
-			}
-		}
-		_, clearModel := chat.SplitStatus(s.cfg.StatusLine)
-		if id, err := s.cfg.Store.NewSession(runs.Meta{
-			Workdir:   s.cfg.WorkDir,
-			ConfigDir: s.cfg.ConfigDir,
-			Model:     clearModel,
-		}); err == nil {
-			s.sess.SetID(id)
-		} else {
-			chat.LogOrNoop(s.cfg.Log).Warn("clear: start session failed", "error", err)
-		}
-	}
-	if s.cfg.RefreshPrompt != nil {
-		// RefreshPrompt rebuilds the bare configured system prompt; re-assemble the host
-		// standing reminders for the new session id. s.mu is already held (see
-		// withIdle), guarding the dashboard's concurrent Snapshot read.
-		s.cfg.Personality.SystemPrompt = s.cfg.RefreshPrompt()
-		s.applyHostReminders()
-	}
-	return nil
-}
-
-// Rollback drops the last turn from context (= /rollback). ok is false when
-// there was nothing to remove. Returns ErrBusy while a turn is in flight (see
-// Send's contract).
-func (s *Session) Rollback() (ok bool, err error) {
-	err = s.withIdle(func() error {
-		msgs := s.sess.Messages()
-		pruned := chat.PruneLastTurn(msgs)
-		if len(pruned) == len(msgs) {
-			return nil
-		}
-		s.sess.SetMessages(pruned)
-		ok = true
-		return nil
-	})
-	return ok, err
-}
-
 // SwitchAgent activates the configured agent named name for subsequent Sends
 // (a front-end's agent-switch action). Switching swaps the agent's model client,
 // system prompt, tool set, host-tool routing, skills, status
@@ -772,7 +646,7 @@ func (s *Session) SwitchAgent(name string) error {
 		// ApplyActiveAgent swaps in the new agent's prompt + toggles; re-assemble
 		// the host standing reminders for the new active agent (whose Environment
 		// toggle may differ).
-		// s.mu is held throughout (withIdle) — guards the dashboard's Snapshot
+		// s.mu is held throughout (withIdle) — guards a concurrent Snapshot
 		// read and a concurrent Close's nil of s.runtime.
 		s.cfg.ApplyActiveAgent(rt)
 		s.applyHostReminders()
@@ -780,15 +654,9 @@ func (s *Session) SwitchAgent(name string) error {
 	})
 }
 
-// AgentNames returns the configured agent names in declaration order — the set
-// SwitchAgent accepts. A caller can cycle (Tab-style) by finding ActiveAgent in
-// this list and switching to the next entry. Empty or single-element means no
-// switching is available.
-func (s *Session) AgentNames() []string { return s.cfg.AgentNames }
-
 // ActiveAgent returns the name of the currently active agent.
 func (s *Session) ActiveAgent() string { return s.cfg.ModeLabel }
 
-// Name returns the session's runtime key (e.g. "telegram", or a generated
+// Name returns the session's runtime key (e.g. "web-<thread>", or a generated
 // "sN"). Front-ends use it to label the session they attached to.
 func (s *Session) Name() string { return s.name }

@@ -9,7 +9,7 @@ import (
 )
 
 // hostReminderText concatenates a session's standing+logged reminder texts so a
-// test can assert over the whole set the dashboard/turn loop would inject.
+// test can assert over the whole set the turn loop would inject.
 func hostReminderText(s *Session) string {
 	var b strings.Builder
 	for _, r := range s.sess.Reminders() {
@@ -82,7 +82,7 @@ func TestHostReminders_Environment(t *testing.T) {
 		t.Errorf("system prompt must not contain the host Environment section:\n%s", prompt)
 	}
 
-	// The prompt-inspection view (the dashboard Status → Prompt) reads
+	// The prompt-inspection view (the Status view's prompt panel) reads
 	// Snapshot().SystemPrompt, which folds in the standing reminders so the user
 	// sees the full effective context even though the authored prompt stays clean.
 	shown := s.Snapshot().SystemPrompt

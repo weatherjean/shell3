@@ -10,7 +10,7 @@ import (
 
 // The session rolled by compaction must carry the same metadata as any fresh
 // session — including the model. Dropping it makes compaction-rolled runs
-// show no model in the dashboard and store.
+// show no model in the Runs view and store.
 func TestCompactInto_NewSessionKeepsModelMeta(t *testing.T) {
 	st, err := runs.Open(t.TempDir())
 	if err != nil {

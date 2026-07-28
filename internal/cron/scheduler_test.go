@@ -11,21 +11,23 @@ import (
 )
 
 type fakeDispatcher struct {
-	mu    sync.Mutex
-	calls []shell3.CronJob
+	mu       sync.Mutex
+	calls    []shell3.CronJob
+	lastOpts shell3.DispatchOpts
 }
 
 func (f *fakeDispatcher) Dispatch(agent, prompt string, opts shell3.DispatchOpts) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.calls = append(f.calls, shell3.CronJob{Agent: agent, Prompt: prompt, WorkDir: opts.WorkDir, Name: opts.Description, Notify: opts.Notify})
+	f.calls = append(f.calls, shell3.CronJob{Agent: agent, Prompt: prompt, WorkDir: opts.WorkDir, Name: opts.Description, Direct: opts.Direct})
+	f.lastOpts = opts
 	return "subX", nil
 }
 func (f *fakeDispatcher) count() int { f.mu.Lock(); defer f.mu.Unlock(); return len(f.calls) }
 
 func TestScheduler_FireDispatches(t *testing.T) {
 	fd := &fakeDispatcher{}
-	jobs := []shell3.CronJob{{Name: "j1", Schedule: "@every 1s", Agent: "explorer", Prompt: "go", Notify: true}}
+	jobs := []shell3.CronJob{{Name: "j1", Schedule: "@every 1s", Agent: "explorer", Prompt: "go", Direct: true}}
 	s, err := New(fd, jobs)
 	if err != nil {
 		t.Fatal(err)
@@ -35,11 +37,16 @@ func TestScheduler_FireDispatches(t *testing.T) {
 		t.Fatalf("want 1 dispatch, got %d", fd.count())
 	}
 	got := fd.calls[0]
-	if got.Agent != "explorer" || got.Prompt != "go" || got.Name != "cron:j1" || !got.Notify {
+	if got.Agent != "explorer" || got.Prompt != "go" || got.Name != "cron:j1" || !got.Direct {
 		t.Fatalf("bad dispatch args: %+v", got)
 	}
+	// The dispatch carries the cron job name so the runtime routes ⏰ posts
+	// and the ownerless wake path.
+	if fd.lastOpts.CronJob != "j1" {
+		t.Fatalf("CronJob = %q, want j1", fd.lastOpts.CronJob)
+	}
 	js := s.Jobs()
-	if len(js) != 1 || js[0].Name != "j1" || js[0].LastSubID != "subX" {
+	if len(js) != 1 || js[0].Name != "j1" || js[0].LastSubID != "subX" || !js[0].Direct {
 		t.Fatalf("bad job status: %+v", js)
 	}
 }

@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/runs"
@@ -25,7 +24,7 @@ type Session struct {
 	messages []llm.Message
 	// standingReminders holds host-level "standing" reminders (e.g. the host
 	// Environment context) set by SetStandingReminders. They are injected into
-	// every turn's allMsgs and exposed via Reminders() for the dashboard, but
+	// every turn's allMsgs and exposed via Reminders(), but
 	// are NOT persisted to the sidecar — they regenerate on session resume.
 	// Guarded by msgMu.
 	standingReminders []string
@@ -34,7 +33,7 @@ type Session struct {
 	nextToolCallID int
 	reminders      reminderTracker
 	// reminderLog records each emitted <system-reminder> with the message index
-	// it precedes (the assistant reply it was injected ahead of), so the dashboard
+	// it precedes (the assistant reply it was injected ahead of), so a reader
 	// can interleave reminders into History() as system-role entries. Live-only
 	// (in-memory); not persisted. Guarded by msgMu.
 	reminderLog      []ReminderRecord
@@ -46,12 +45,6 @@ type Session struct {
 	// compactInto after the session roll. Touched only on the turn goroutine
 	// (same as sess.id) so no extra lock is required.
 	persistedLen int
-
-	// forceCompact, when set via QueueCompact (e.g. a front-end compact request),
-	// makes the next turn compact the conversation before the model acts,
-	// regardless of the token threshold. maybeCompact consumes (swaps off) the
-	// flag. Atomic because it is set from another goroutine (the front-end).
-	forceCompact atomic.Bool
 
 	// sink receives every event synchronously, inline on the goroutine that
 	// runs the turn. There is no channel and no teardown: once Run returns,
@@ -97,15 +90,6 @@ func (s *Session) InterjectNotice(text string) {
 	s.inboxMu.Lock()
 	defer s.inboxMu.Unlock()
 	s.inbox = append(s.inbox, inboxItem{text: text, notice: true})
-}
-
-// DropInbox discards every queued interjection and notice. Used by the host's
-// /clear so a completion queued just before the boundary cannot leak into the
-// fresh session. Safe to call from any goroutine.
-func (s *Session) DropInbox() {
-	s.inboxMu.Lock()
-	defer s.inboxMu.Unlock()
-	s.inbox = nil
 }
 
 // HasInbox reports whether any interjected items are queued. Safe to call from
@@ -197,6 +181,14 @@ type SessionOpts struct {
 	// InitialMessages seeds the conversation when resuming a stored session.
 	// Applied verbatim as the starting in-memory history before the first turn.
 	InitialMessages []llm.Message
+	// InitialPromptTokens seeds lastPromptTokens on resume with the provider-
+	// reported count persisted for the stored session. It restores the accurate
+	// context gauge so the first resumed turn's prune/compaction decision uses
+	// the real token count rather than the chars/4 estimate (which grossly
+	// underestimates token-dense content). Zero — the default and the value for
+	// sessions stored before the count was persisted — makes NewSession fall
+	// back to the estimate over InitialMessages.
+	InitialPromptTokens int
 	// Store wires sidecar persistence for reminders. When Store is non-nil and
 	// StoreID is non-empty, recordReminder appends to runs/<id>/reminders.jsonl
 	// and RestoreReminders reloads it on resume.
@@ -217,6 +209,15 @@ func NewSession(opts SessionOpts) *Session {
 		// persisted high-water mark starts past it — a re-flush would double the
 		// stored history on every resume.
 		s.persistedLen = len(opts.InitialMessages)
+		// Restore the context gauge so the first resumed turn's prune/compaction
+		// decision uses the provider-reported count. Fall back to the estimate
+		// only when no count was persisted (old sessions) — better an
+		// underestimate than a zero gauge that never trips the thresholds.
+		if opts.InitialPromptTokens > 0 {
+			s.lastPromptTokens = opts.InitialPromptTokens
+		} else {
+			s.lastPromptTokens = estimatePromptTokens(s.messages)
+		}
 	}
 	return s
 }
@@ -230,14 +231,9 @@ func (s *Session) ID() string {
 	return s.id
 }
 
-// QueueCompact requests that the next turn compact the conversation before the
-// model acts, regardless of the token threshold. Safe to call from any
-// goroutine; maybeCompact consumes the request at the next turn start.
-func (s *Session) QueueCompact() { s.forceCompact.Store(true) }
-
 // SetID swaps the runs session id. Used by Session.Clear to rotate onto a fresh
 // session so subsequent turns persist under the new conversation. Guarded by
-// msgMu because the dashboard's History() reader pairs id with the message slice.
+// msgMu because History() reader pairs id with the message slice.
 func (s *Session) SetID(id string) {
 	s.msgMu.Lock()
 	defer s.msgMu.Unlock()
@@ -246,7 +242,7 @@ func (s *Session) SetID(id string) {
 
 // SetStandingReminders replaces the host "standing" reminders (e.g.
 // Environment) — regenerated at every prompt-assembly, so they are recorded for
-// the dashboard but NOT persisted (resume re-assembles them fresh).
+// replay but NOT persisted (resume re-assembles them fresh).
 func (s *Session) SetStandingReminders(texts []string) {
 	s.msgMu.Lock()
 	s.standingReminders = append(s.standingReminders[:0], texts...)
@@ -260,18 +256,18 @@ func (s *Session) append(m llm.Message) {
 }
 
 // ReminderRecord is one emitted system-reminder, anchored to the message index
-// it precedes (the assistant reply it was injected ahead of). The dashboard
+// it precedes (the assistant reply it was injected ahead of). A reader
 // uses Seq to interleave it into the rendered history.
 type ReminderRecord struct {
 	Seq  int
 	Text string
 }
 
-// recordReminder logs a system-reminder for dashboard display, anchored before
+// recordReminder logs a system-reminder for replay, anchored before
 // the next message to be appended. Called from emitSystemReminder (turn
 // goroutine only). The in-memory append is done under msgMu; the sidecar write
 // is done AFTER releasing the lock so a slow disk (fsync stall, NFS) can't block
-// the dashboard's concurrent readers (History/Messages/Reminders/ID) behind the
+// concurrent readers (History/Messages/Reminders/ID) behind the
 // held write lock. Single-writer (turn goroutine), so the persisted order still
 // matches the in-memory order.
 func (s *Session) recordReminder(text string) {
@@ -328,7 +324,7 @@ func (s *Session) remindersLocked() []ReminderRecord {
 // anchored at Seq 0, then the logged ones), taken under a SINGLE msgMu read
 // lock. compactInto swaps sess.messages and clears sess.reminderLog atomically
 // under that same lock; taking both here in one acquisition prevents a reader
-// (the dashboard's History()) from pairing a post-compaction message slice with
+// (History()) from pairing a post-compaction message slice with
 // pre-compaction reminder anchors. Mirrors Messages()+Reminders() but without
 // the split-lock window between them.
 func (s *Session) HistorySnapshot() ([]llm.Message, []ReminderRecord) {
@@ -340,8 +336,8 @@ func (s *Session) HistorySnapshot() ([]llm.Message, []ReminderRecord) {
 }
 
 // StandingReminders returns a copy of the host standing reminders (e.g.
-// Environment) for display in the prompt-inspection view (the dashboard
-// Status → Prompt). Safe to call concurrently.
+// Environment) for display in the prompt-inspection view (the Status
+// view's prompt panel). Safe to call concurrently.
 func (s *Session) StandingReminders() []string {
 	s.msgMu.RLock()
 	defer s.msgMu.RUnlock()

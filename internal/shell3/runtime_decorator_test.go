@@ -64,7 +64,7 @@ func TestSessionDecorator_AppliesToExistingSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Decorator set AFTER the session exists (telegram boot order) must still
+	// Decorator set AFTER the session exists (the usual boot order) must still
 	// reach it.
 	rt.SetSessionDecorator(func(s *Session) {
 		_ = s.RegisterHostTool(dummyTool("image_generate"))

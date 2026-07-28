@@ -33,8 +33,8 @@ func TestImageToolHandlerHeadlessSaysReport(t *testing.T) {
 		t.Fatalf("RegisterImageTool: %v", err)
 	}
 	tool := r.tools[0]
-	if strings.Contains(tool.Description, "send_media_telegram") {
-		t.Errorf("headless description mentions send_media_telegram: %q", tool.Description)
+	if strings.Contains(tool.Description, "/api/media/") {
+		t.Errorf("headless description tells a subagent to show the image: %q", tool.Description)
 	}
 	out, err := tool.Handler(context.Background(), `{"prompt":"a cat"}`)
 	if err != nil {
@@ -43,8 +43,8 @@ func TestImageToolHandlerHeadlessSaysReport(t *testing.T) {
 	if !strings.Contains(out, "/tmp/shell3-media/img-abc.png") || !strings.Contains(out, "final report") {
 		t.Errorf("headless result should point at the path and say to report it, got %q", out)
 	}
-	if strings.Contains(out, "send_media_telegram") {
-		t.Errorf("headless result mentions send_media_telegram (subagents don't have it): %q", out)
+	if strings.Contains(out, "/api/media/") {
+		t.Errorf("headless result tells a subagent to show the image (it has no user): %q", out)
 	}
 }
 
@@ -125,11 +125,10 @@ func TestImageToolHandler(t *testing.T) {
 	if !strings.Contains(out, "/tmp/shell3-media/img-abc.png") {
 		t.Errorf("result missing path: %q", out)
 	}
-	if !strings.Contains(out, "send_media_telegram") {
-		t.Errorf("result missing send_media_telegram hint: %q", out)
-	}
-	if !strings.Contains(out, `kind="photo"`) {
-		t.Errorf("result missing kind=\"photo\" hint: %q", out)
+	// The main agent is told how to actually show it: a markdown image
+	// pointing at the route that serves the media dir.
+	if !strings.Contains(out, "![](/api/media/img-abc.png)") {
+		t.Errorf("result missing the markdown-image hint: %q", out)
 	}
 
 	// Empty prompt.

@@ -14,7 +14,7 @@ import (
 func TestJobManagerCommandLifecycle(t *testing.T) {
 	m := newJobManager(nil, 8)
 	// echo writes to the in-memory buffer and exits; no parent notice in this unit test.
-	id, err := m.startCommand(nil, "echo hi", t.TempDir(), []string{"echo", "hi"}, nil, false)
+	id, err := m.startCommand(nil, "echo hi", t.TempDir(), []string{"echo", "hi"}, nil, false, "")
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -49,11 +49,11 @@ func waitForWake(t *testing.T, rt *Runtime, s *Session) {
 
 func TestJobManagerConcurrencyCap(t *testing.T) {
 	m := newJobManager(nil, 1)
-	id, err := m.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "1"}, nil, false)
+	id, err := m.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "1"}, nil, false, "")
 	if err != nil {
 		t.Fatalf("first start: %v", err)
 	}
-	if _, err := m.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "1"}, nil, false); err == nil {
+	if _, err := m.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "1"}, nil, false, ""); err == nil {
 		t.Fatal("expected cap error on second start, got nil")
 	}
 	// Don't leak the sleeping job's goroutine past the test.
@@ -129,7 +129,7 @@ func TestSubagentTranscriptAfterClose(t *testing.T) {
 // in list() with Done=true, and that output() returns the captured output.
 func TestJobManagerRetainsDoneCommandJob(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "echo retained", t.TempDir(), []string{"echo", "retained"}, nil, false)
+	id, err := m.startCommand(nil, "echo retained", t.TempDir(), []string{"echo", "retained"}, nil, false, "")
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestJobManagerDoneCap(t *testing.T) {
 
 	// Start and let maxDoneJobs+1 command jobs finish.
 	for i := 0; i < maxDoneJobs+1; i++ {
-		_, err := m.startCommand(nil, "echo x", t.TempDir(), []string{"echo", "x"}, nil, false)
+		_, err := m.startCommand(nil, "echo x", t.TempDir(), []string{"echo", "x"}, nil, false, "")
 		if err != nil {
 			t.Fatalf("startCommand %d: %v", i, err)
 		}
@@ -221,7 +221,7 @@ func TestJobManagerDoneCap(t *testing.T) {
 // returns nil and does not panic.
 func TestJobManagerCancelDoneJobIsNoOp(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "echo done", t.TempDir(), []string{"echo", "done"}, nil, false)
+	id, err := m.startCommand(nil, "echo done", t.TempDir(), []string{"echo", "done"}, nil, false, "")
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestFormatJobList_Empty(t *testing.T) {
 // TestFormatJobList_ShowsRunning verifies a running command job appears with status "running".
 func TestFormatJobList_ShowsRunning(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "sleep 60", t.TempDir(), []string{"sleep", "60"}, nil, false)
+	id, err := m.startCommand(nil, "sleep 60", t.TempDir(), []string{"sleep", "60"}, nil, false, "")
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestFormatJobStatus_UnknownID(t *testing.T) {
 // TestFormatJobStatus_Truncates verifies that a large output is capped.
 func TestFormatJobStatus_Truncates(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "echo x", t.TempDir(), []string{"echo", "x"}, nil, false)
+	id, err := m.startCommand(nil, "echo x", t.TempDir(), []string{"echo", "x"}, nil, false, "")
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -326,7 +326,7 @@ func TestAppendCappedTail_Truncates(t *testing.T) {
 // (not collapsed to 1) in list() and the task_list rendering.
 func TestCommandRealExitCode(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "exit 7", t.TempDir(), []string{"sh", "-c", "exit 7"}, nil, false)
+	id, err := m.startCommand(nil, "exit 7", t.TempDir(), []string{"sh", "-c", "exit 7"}, nil, false, "")
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -349,7 +349,7 @@ func TestCommandRealExitCode(t *testing.T) {
 // the pipe wait, so wg.Wait returns promptly (this used to hang forever).
 func TestCommandCancelWithLingeringGrandchild(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "orphan", t.TempDir(), []string{"bash", "-c", "sleep 60 & echo started"}, nil, false)
+	id, err := m.startCommand(nil, "orphan", t.TempDir(), []string{"bash", "-c", "sleep 60 & echo started"}, nil, false, "")
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -433,7 +433,7 @@ func TestFormatJobCancel_UnknownID(t *testing.T) {
 // TestFormatJobCancel_KnownJob returns "cancelled task <id>".
 func TestFormatJobCancel_KnownJob(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "sleep 60", t.TempDir(), []string{"sleep", "60"}, nil, false)
+	id, err := m.startCommand(nil, "sleep 60", t.TempDir(), []string{"sleep", "60"}, nil, false, "")
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -444,7 +444,7 @@ func TestFormatJobCancel_KnownJob(t *testing.T) {
 }
 
 // TestStartSubagentEnforcesAllowlist verifies the task tool's StartSubagent
-// path rejects any subagent_type not in the active agent's tools.subagents
+// path rejects any subagent_type not in the active agent's registered-subagent
 // allowlist — the list the task tool's schema advertises.
 func TestStartSubagentEnforcesAllowlist(t *testing.T) {
 	rt := newTestRuntime(t, func() chat.Config {
@@ -457,16 +457,16 @@ func TestStartSubagentEnforcesAllowlist(t *testing.T) {
 		t.Fatalf("session: %v", err)
 	}
 	tc := s.turnConfig()
-	if _, err := tc.StartSubagent("privileged", "p", "d"); err == nil ||
+	if _, err := tc.StartSubagent("privileged", "p", "d", false, ""); err == nil ||
 		!strings.Contains(err.Error(), "not allowed") || !strings.Contains(err.Error(), "explorer") {
 		t.Fatalf("StartSubagent off-list = %v, want not-allowed error naming the allowlist", err)
 	}
-	if _, err := tc.StartSubagent("explorer", "p", "d"); err != nil {
+	if _, err := tc.StartSubagent("explorer", "p", "d", false, ""); err != nil {
 		t.Fatalf("StartSubagent allowed name rejected: %v", err)
 	}
 }
 
-// TestStartSubagentEmptyAllowlist verifies an agent with no tools.subagents
+// TestStartSubagentEmptyAllowlist verifies an agent with no registered subagents
 // cannot spawn anything (the task tool is not even in its schema).
 func TestStartSubagentEmptyAllowlist(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("ok"))
@@ -474,62 +474,8 @@ func TestStartSubagentEmptyAllowlist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
-	if _, err := s.turnConfig().StartSubagent("anything", "p", "d"); err == nil ||
+	if _, err := s.turnConfig().StartSubagent("anything", "p", "d", false, ""); err == nil ||
 		!strings.Contains(err.Error(), "no subagents") {
 		t.Fatalf("StartSubagent with empty allowlist = %v, want no-subagents error", err)
-	}
-}
-
-// TestSession_Clear_RefusesWhileTaskRunning pins /clear's boundary contract:
-// while a background task runs, Clear refuses (same shape as Reload) instead
-// of letting the task's completion notice leak into the fresh session.
-func TestSession_Clear_RefusesWhileTaskRunning(t *testing.T) {
-	rt := newTestRuntime(t, fakeCfg("ok"))
-	s, err := rt.Session(SessionOpts{})
-	if err != nil {
-		t.Fatalf("session: %v", err)
-	}
-
-	id, err := rt.jobs.startCommand(s, "sleep 5", t.TempDir(), []string{"sleep", "5"}, nil, false)
-	if err != nil {
-		t.Fatalf("startCommand: %v", err)
-	}
-	err = s.Clear()
-	if err == nil || !strings.Contains(err.Error(), "background task") {
-		t.Fatalf("Clear with a running task: want a 'background task(s) running' error, got %v", err)
-	}
-	if !strings.Contains(err.Error(), id) {
-		t.Fatalf("the refusal should name the running job id %s: %v", id, err)
-	}
-
-	// Kill it; Clear must then succeed.
-	if err := rt.jobs.cancel(id); err != nil {
-		t.Fatalf("cancel: %v", err)
-	}
-	rt.jobs.wait()
-	if err := s.Clear(); err != nil {
-		t.Fatalf("Clear after the task ended: %v", err)
-	}
-}
-
-// TestSession_Clear_DropsQueuedNotices pins the other half of the boundary: a
-// completion notice already queued (but not yet delivered) is dropped by
-// /clear rather than surfacing inside the fresh session's context.
-func TestSession_Clear_DropsQueuedNotices(t *testing.T) {
-	rt := newTestRuntime(t, fakeCfg("ok"))
-	s, err := rt.Session(SessionOpts{})
-	if err != nil {
-		t.Fatalf("session: %v", err)
-	}
-
-	s.sess.InterjectNotice("bg1 finished before the clear")
-	if !s.HasQueuedInput() {
-		t.Fatal("expected queued input after InterjectNotice")
-	}
-	if err := s.Clear(); err != nil {
-		t.Fatalf("Clear: %v", err)
-	}
-	if s.HasQueuedInput() {
-		t.Fatal("a queued notice survived /clear — it would leak into the fresh session")
 	}
 }

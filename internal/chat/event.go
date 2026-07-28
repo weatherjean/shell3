@@ -219,7 +219,7 @@ func emitAssistantReasoning(s *Session, text string) {
 }
 
 func emitSystemReminder(s *Session, text string) {
-	// Record before emitting so the dashboard's History() can interleave the
+	// Record before emitting so History() can interleave the
 	// reminder as a system-role entry (a live front-end consumes the event instead).
 	s.recordReminder(text)
 	emit(s, Event{Kind: EventSystemReminder, Time: time.Now(), SessionID: s.id, Text: text})

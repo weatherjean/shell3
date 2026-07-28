@@ -1,5 +1,5 @@
 // Package agentsetup is the shared config assembly used by every shell3
-// front-end (the Telegram bot, the dev CLIs, and the internal/shell3 event
+// front-end (`shell3 serve`, `shell3 ask`, and the internal/shell3 event
 // stream). It resolves paths, ensures project dirs, opens the store and log,
 // loads the config directory, and returns a fully-populated chat.Config — the single
 // source of truth for "what the agent is", independent of how it's driven.
@@ -71,7 +71,7 @@ type Parts struct {
 }
 
 // MCPStatus reports every declared MCP server's health (nil when no
-// mcp: block is declared) — for `shell3 health` and the dashboard.
+// mcp: block is declared) — for `shell3 health` and the Status view.
 func (p *Parts) MCPStatus() []mcp.ServerStatus {
 	if p.mcp == nil {
 		return nil
@@ -115,24 +115,29 @@ func (p *Parts) MediaConfig() MediaConfig { return p.lc }
 // media.New expects, without reaching into the unexported proxy field.
 func (p *Parts) EnsureProxy(name, command string) { p.proxy.Ensure(name, command) }
 
-// BackgroundMaxConcurrent returns the shell3.background{ max_concurrent = N }
+// BackgroundMaxConcurrent returns the `background.max_concurrent`
 // setting (0 = unset; default applied at newJobManager).
 func (p *Parts) BackgroundMaxConcurrent() int { return p.lc.BackgroundMaxConcurrent }
 
 // ModelCount returns the number of declared models.
 func (p *Parts) ModelCount() int { return len(p.lc.Models) }
 
-// Telegram returns the parsed shell3.telegram{} block (zero value if absent).
-func (p *Parts) Telegram() config.TelegramConfig { return p.lc.Telegram() }
-
-// Web returns the parsed top-level shell3.web{} block (zero value if absent).
+// Web returns the parsed web: block (zero value if absent).
 func (p *Parts) Web() config.WebConfig { return p.lc.Web() }
 
-// Cron returns the cron jobs declared via top-level shell3.cron{...}.
+// Cron returns the jobs declared as cron/<name>.md files.
 func (p *Parts) Cron() []config.CronJob { return p.lc.Cron() }
 
-// Heartbeat returns the parsed shell3.heartbeat{} block, nil when not declared.
-func (p *Parts) Heartbeat() *config.Heartbeat { return p.lc.Heartbeat() }
+// RunsKeepDays returns `runs_keep_days` (always populated at load — default
+// 30; 0 = keep forever). Read by the runs janitor at `shell3 serve` startup.
+func (p *Parts) RunsKeepDays() int { return p.lc.RunsKeepDays }
+
+// RunsRoot returns the .shell3_project directory the runs Store was opened
+// against (runs.Open's root param) — the same root the runs janitor's Sweep
+// expects. Derived from runsDir (.../.shell3_project/runs) rather than
+// storing it separately, since Store already keys off exactly this
+// relationship (see runs.Store.runsDir).
+func (p *Parts) RunsRoot() string { return filepath.Dir(p.runsDir) }
 
 // AgentNames returns declared agent names in declaration order.
 func (p *Parts) AgentNames() []string {
@@ -143,6 +148,16 @@ func (p *Parts) AgentNames() []string {
 	}
 	return names
 }
+
+// Subagents returns the registered subagents (name, description, model) in
+// filename order — what a front-end needs to show the delegation roster.
+func (p *Parts) Subagents() []config.Subagent { return p.lc.Subagents() }
+
+// Projects returns the loaded Chain of Command projects in directory order.
+func (p *Parts) Projects() []config.Project { return p.lc.Projects() }
+
+// Skills returns the main agent's skill index (subagents carry none).
+func (p *Parts) Skills() []config.Skill { return p.lc.FirstAgent().Skills }
 
 // AgentRuntime assembles the full chat runtime for the named agent: its model
 // client, persona, and tool defs. name "" uses the first declared agent. An
@@ -156,6 +171,18 @@ func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
 	if a, ok := p.lc.AgentByName(name); ok {
 		return p.runtimeForAgent(a)
 	}
+	// The reserved triage persona (notifier.md). Its toolset is fixed here —
+	// the structured read-only pair; send/wake are session host tools the job
+	// runtime registers per triage turn.
+	if name == "notifier" {
+		n := p.lc.Notifier()
+		if n == nil {
+			return chat.ActiveAgent{}, fmt.Errorf("no notifier.md configured")
+		}
+		a := config.Agent{AgentCommon: n.AgentCommon}
+		a.Gates = config.ToolGates{Read: true, List: true}
+		return p.runtimeForAgent(a)
+	}
 	// A subagent name passed via --agent (the spawn command): resolve it from the
 	// subagent registry into a plain headless config. Whether a resolved agent
 	// gets the task tool is decided by whether it lists subagents, not by a
@@ -164,6 +191,21 @@ func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
 		return p.runtimeForAgent(subagentToAgent(sa))
 	}
 	return chat.ActiveAgent{}, fmt.Errorf("unknown agent %q", name)
+}
+
+// HasNotifier reports whether the config declares a notifier.md triage
+// persona. False = the host posts every background completion raw.
+func (p *Parts) HasNotifier() bool { return p.lc.Notifier() != nil }
+
+// SubagentWorkdir returns the declared working directory for a subagent —
+// non-empty only for project managers, whose shell runs in the project's
+// workdir. "" means "inherit the spawner's workdir" (the default for
+// ordinary subagents).
+func (p *Parts) SubagentWorkdir(name string) string {
+	if sa, ok := p.lc.SubagentByName(name); ok {
+		return sa.Workdir
+	}
+	return ""
 }
 
 // subagentToAgent adapts a registered subagent to the config.Agent shape that
@@ -206,7 +248,7 @@ func (p *Parts) runtimeForAgent(a config.Agent) (chat.ActiveAgent, error) {
 		toolDefs = append(toolDefs, config.TaskToolFor(refs), config.TaskListTool, config.TaskStatusTool, config.TaskCancelTool)
 	}
 
-	// Append the opted-in MCP servers' tool defs (tools.mcp) and route their
+	// Append the opted-in MCP servers' tool defs (the mcp: frontmatter) and route their
 	// names to the host-tool dispatcher. The map is fresh per call: session
 	// RegisterHostTool (image_generate etc.) mutates it later.
 	var hostNames map[string]bool
@@ -230,7 +272,7 @@ func (p *Parts) runtimeForAgent(a config.Agent) (chat.ActiveAgent, error) {
 		toolNames = append(toolNames, t.Name)
 	}
 
-	// ActiveSkills is the display list (status tool, dashboard): resolved
+	// ActiveSkills is the display list (the Status view): resolved
 	// skill names in index order.
 	skillNames := make([]string, 0, len(a.Skills))
 	for _, s := range a.Skills {
@@ -598,9 +640,8 @@ func buildClient(md config.Model) (chat.LLMClient, llm.RequestParams) {
 // ResolveConfigDir returns the config directory to load: the explicit flag (a
 // literal directory path), else the default ~/.shell3. It does NOT look in
 // cwd. Returns an error when the resolved directory has no shell3.yaml —
-// catching a typo'd --config here, with a clear message (including the
-// migration hint when only a legacy shell3.lua is present), instead of
-// surfacing it later as a raw load error.
+// catching a typo'd --config here, with a clear message, instead of surfacing
+// it later as a raw load error.
 func ResolveConfigDir(flag, homeDir string) (string, error) {
 	dir := flag
 	if dir == "" {
@@ -608,9 +649,6 @@ func ResolveConfigDir(flag, homeDir string) (string, error) {
 	}
 	if fileExists(filepath.Join(dir, "shell3.yaml")) {
 		return dir, nil
-	}
-	if fileExists(filepath.Join(dir, "shell3.lua")) {
-		return "", fmt.Errorf("%s: shell3 now uses a config directory (shell3.yaml) — re-run 'shell3 boot'; shell3.lua is no longer read", dir)
 	}
 	return "", fmt.Errorf("no shell3.yaml in %s — run 'shell3 boot' to create one (or pass --config <dir>)", dir)
 }

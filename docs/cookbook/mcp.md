@@ -72,7 +72,7 @@ case "$name" in
     if [ "$headless" = "true" ]; then
       printf '{"block": true, "reason": "write needs approval; rerun interactively"}'
     else
-      printf '{"ask": "GitHub write:\n%s", "reason": "denied"}' "$name"
+      jq -cn --arg name "$name" '{ask: ("GitHub write:\n" + $name), reason: "denied"}'
     fi
     exit 0 ;;
 esac
@@ -83,9 +83,9 @@ exit 0
 
 - `shell3 health` connects every declared server and fails on any that is
   down, printing per-server tool counts.
-- The dashboard's **Status** view lists each server: up/down, tool count,
+- The interface's **Status** view lists each server: up/down, tool count,
   last error.
-- A server that is down at startup is a warning, not a failure — the bot
-  runs, that server's tools are absent until the next `/reload`.
+- A server that is down at startup is a warning, not a failure — shell3
+  runs, that server's tools are absent until the next reload.
 - A server that dies mid-session gets one automatic reconnect at the next
   call; after that the model sees the error text as tool output.

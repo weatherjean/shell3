@@ -20,10 +20,10 @@ import (
 )
 
 // offerCloudflared gently offers to install cloudflared when it's missing:
-// the scaffold's dashboard tunnel uses it, but the bot runs fine without —
-// so this is strictly opt-in (TTY only), never uses sudo, and every failure
-// mode is a shrug plus a pointer, not an error. Declining or failing leaves
-// boot's work fully intact.
+// web.tunnel uses it to give the interface a public https URL, but shell3 runs
+// fine without one — so this is strictly opt-in (TTY only), never uses sudo,
+// and every failure mode is a shrug plus a pointer, not an error. Declining or
+// failing leaves boot's work fully intact.
 func offerCloudflared(tty bool) {
 	if !tty {
 		return
@@ -34,20 +34,20 @@ func offerCloudflared(tty bool) {
 	install := true
 	err := huh.NewForm(huh.NewGroup(
 		huh.NewConfirm().
-			Title("Install cloudflared so the dashboard reaches your phone?").
-			Description("Optional. It tunnels the Mini App dashboard (free, no account).\n" +
-				"One binary into ~/.local/bin — no sudo, nothing else touched.\n" +
-				"Skipping is fine: the dashboard just stays local, and you can\n" +
-				"install it any time later.").
+			Title("Install cloudflared so you can reach shell3 from your phone?").
+			Description("Optional. It gives the web interface a public https URL\n" +
+				"(free, no account). One binary into ~/.local/bin — no sudo,\n" +
+				"nothing else touched. Skipping is fine: shell3 just stays local,\n" +
+				"and you can install it any time later.").
 			Value(&install),
 	)).Run()
 	if err != nil || !install {
-		fmt.Println("no problem — the dashboard stays local. cloudflared can be added any time:")
+		fmt.Println("no problem — shell3 stays local. cloudflared can be added any time:")
 		fmt.Println("  https://github.com/cloudflare/cloudflared")
 		return
 	}
 	if err := installCloudflared(); err != nil {
-		fmt.Printf("that didn't work out (%v) — no harm done, the dashboard stays local.\n", err)
+		fmt.Printf("that didn't work out (%v) — no harm done, shell3 stays local.\n", err)
 		fmt.Println("Manual install: https://github.com/cloudflare/cloudflared")
 	}
 }

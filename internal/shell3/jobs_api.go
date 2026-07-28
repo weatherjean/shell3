@@ -1,7 +1,6 @@
 package shell3
 
 import (
-	"context"
 	"errors"
 	"time"
 )
@@ -39,6 +38,14 @@ type JobInfo struct {
 	Summary   string    // subagent jobs: final assistant text (empty for command jobs)
 	Error     string    // subagent jobs: last turn error ("" = clean run)
 	EndedAt   time.Time // zero while running
+	// ChildOpen is true for a subagent job whose child session is still open —
+	// either still running its main turn, or lingering after Done=true to run
+	// follow-up turns for a bash_bg that outlived the turn (see bgJob.lingering /
+	// jobManager.runningJobIDs). A caller that wants to know whether a subagent
+	// job can still produce more output (an agent_update notice, more job
+	// events) must check this rather than Done alone: Done flips true at
+	// main-turn end even while the child lingers. Always false for command jobs.
+	ChildOpen bool
 }
 
 // JobEvents exposes the owning Runtime's background-job progress stream so a
@@ -54,7 +61,7 @@ func (s *Session) JobEvents() <-chan JobProgress {
 
 // Jobs lists the live background jobs for this session's project — bash_bg
 // processes and in-process subagents — newest first. Returns nil when the
-// in-process job runtime is unavailable. (Backs the dashboard's background view.)
+// in-process job runtime is unavailable. (Backs the Jobs view.)
 func (s *Session) Jobs() []JobInfo {
 	rt := s.runtimeHandle() // snapshot under s.mu: doClose nils s.runtime concurrently
 	if rt == nil || rt.jobs == nil {
@@ -75,7 +82,7 @@ func (s *Session) JobOutput(id string) string {
 
 // JobTranscript returns the messages.jsonl contents of a background SUBAGENT
 // job's child session, or "" when the job runtime is unavailable or the job is
-// a command (not a subagent). The dashboard's background view renders this instead
+// a command (not a subagent). The Jobs view renders this instead
 // of the plain stdout log when present — see JobOutput for the fallback.
 func (s *Session) JobTranscript(id string) string {
 	rt := s.runtimeHandle()
@@ -85,7 +92,7 @@ func (s *Session) JobTranscript(id string) string {
 	return rt.jobs.transcript(id)
 }
 
-// KillJob cancels one background job (the dashboard's cancel action). For
+// KillJob cancels one background job (the Jobs view's cancel action). For
 // command jobs this sends a cancellation signal; for subagent jobs it cancels
 // the child session's context. It does not block; the job leaves the live list
 // once it exits.
@@ -109,19 +116,4 @@ func (s *Session) KillRunningJobs() (killed int) {
 		}
 	}
 	return killed
-}
-
-// StopAll is the shared body of the front-ends' /stop: kill every live
-// background job, then cancel the running turn (if any), and render the reply.
-// snapshotCancel must return the front-end's current turn-cancel func under
-// its own lock. It is called AFTER the kill loop on purpose — a turn that ends
-// (and a queued wake turn that starts) mid-loop would leave a pre-loop
-// snapshot cancelling an already-dead context while the fresh turn runs on.
-func StopAll(sess *Session, snapshotCancel func() context.CancelFunc) string {
-	killed := sess.KillRunningJobs()
-	c := snapshotCancel()
-	if c != nil {
-		c() // cancels turnCtx → synchronous bash/node process groups get SIGTERM→SIGKILL
-	}
-	return StopReplyText(c != nil, killed)
 }

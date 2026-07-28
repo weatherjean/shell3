@@ -73,7 +73,7 @@ an empty result set right after boot usually just needs one retry.)
 Tell the user setup is complete and that this skill is now redundant:
 
 ```bash
-rm ~/.shell3/skills/searxng-setup.md   # then /reload
+rm ~/.shell3/skills/searxng-setup.md   # then reload
 ```
 
 The `searxng-search` skill carries the day-to-day usage and

@@ -70,12 +70,10 @@ func TestSpeakWireShape(t *testing.T) {
 	if string(b) != "AUDIO" {
 		t.Errorf("contents = %q, want AUDIO", string(b))
 	}
-	if !sp.VoiceCompatible {
-		t.Error("VoiceCompatible = false, want true for opus")
-	}
 }
 
-func TestSpeakMp3NotVoiceCompatible(t *testing.T) {
+// mp3 keeps its own extension rather than being muxed into .ogg.
+func TestSpeakMp3Extension(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("AUDIO"))
@@ -89,9 +87,6 @@ func TestSpeakMp3NotVoiceCompatible(t *testing.T) {
 	}
 	if filepath.Ext(sp.Path) != ".mp3" {
 		t.Errorf("ext = %s, want .mp3", filepath.Ext(sp.Path))
-	}
-	if sp.VoiceCompatible {
-		t.Error("VoiceCompatible = true, want false for mp3")
 	}
 }
 

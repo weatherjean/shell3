@@ -10,7 +10,7 @@ import (
 func TestRuntime_CronConfig(t *testing.T) {
 	dir := t.TempDir()
 	writeBaseTree(t, dir, map[string]string{
-		"shell3.yaml":        baseYAML + "telegram:\n  token: t\n  chat_id: \"1\"\n",
+		"shell3.yaml":        baseYAML + "web:\n  addr: \"127.0.0.1:8765\"\n",
 		"agents/explorer.md": "---\ndescription: d\n---\np\n",
 		"cron/n.md":          "---\nschedule: \"@daily\"\nagent: explorer\n---\ngo\n",
 	})
@@ -20,7 +20,7 @@ func TestRuntime_CronConfig(t *testing.T) {
 	}
 	defer rt.Close()
 	jobs := rt.Cron()
-	if len(jobs) != 1 || jobs[0].Name != "n" || jobs[0].Agent != "explorer" || jobs[0].Notify {
+	if len(jobs) != 1 || jobs[0].Name != "n" || jobs[0].Agent != "explorer" {
 		t.Fatalf("bad cron config: %+v", jobs)
 	}
 }

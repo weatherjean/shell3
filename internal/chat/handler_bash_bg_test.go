@@ -19,7 +19,7 @@ func TestBashBgHandler_Execute_happyPath(t *testing.T) {
 	var gotCmd string
 	cfg := ToolConfig{
 		WorkDir: wd,
-		StartBashBg: func(command, workdir string, argv, env []string, quiet bool) (string, error) {
+		StartBashBg: func(command, workdir string, argv, env []string, direct bool, note string) (string, error) {
 			gotCmd = command
 			return "bg_1", nil
 		},
@@ -65,7 +65,7 @@ func TestBashBgHandler_Execute_workdirOverride(t *testing.T) {
 	var gotWorkdir string
 	cfg := ToolConfig{
 		WorkDir: primary,
-		StartBashBg: func(command, workdir string, argv, env []string, quiet bool) (string, error) {
+		StartBashBg: func(command, workdir string, argv, env []string, direct bool, note string) (string, error) {
 			gotWorkdir = workdir
 			return "bg_2", nil
 		},
@@ -83,26 +83,27 @@ func TestBashBgHandler_Execute_workdirOverride(t *testing.T) {
 	}
 }
 
-func TestBashBgHandler_Execute_quiet(t *testing.T) {
-	var gotQuiet bool
+func TestBashBgHandler_Execute_directAndNote(t *testing.T) {
+	var gotDirect bool
+	var gotNote string
 	cfg := ToolConfig{
 		WorkDir: t.TempDir(),
-		StartBashBg: func(command, workdir string, argv, env []string, quiet bool) (string, error) {
-			gotQuiet = quiet
+		StartBashBg: func(command, workdir string, argv, env []string, direct bool, note string) (string, error) {
+			gotDirect, gotNote = direct, note
 			return "bg_3", nil
 		},
 	}
-	if _, err := (BashBgHandler{}).Execute(context.Background(), "1", json.RawMessage(`{"command":"true","quiet":true}`), cfg); err != nil {
+	if _, err := (BashBgHandler{}).Execute(context.Background(), "1", json.RawMessage(`{"command":"true","direct":true,"note":"user waiting"}`), cfg); err != nil {
 		t.Fatal(err)
 	}
-	if !gotQuiet {
-		t.Fatal("quiet=true did not reach the start callback")
+	if !gotDirect || gotNote != "user waiting" {
+		t.Fatalf("direct/note did not reach the start callback: %v %q", gotDirect, gotNote)
 	}
 	if _, err := (BashBgHandler{}).Execute(context.Background(), "1", json.RawMessage(`{"command":"true"}`), cfg); err != nil {
 		t.Fatal(err)
 	}
-	if gotQuiet {
-		t.Fatal("quiet should default to false when omitted")
+	if gotDirect {
+		t.Fatal("direct should default to false when omitted")
 	}
 }
 
@@ -110,7 +111,7 @@ func TestBashBgUsesStartCallback(t *testing.T) {
 	var gotCmd string
 	cfg := ToolConfig{
 		WorkDir: t.TempDir(),
-		StartBashBg: func(command, workdir string, argv, env []string, quiet bool) (string, error) {
+		StartBashBg: func(command, workdir string, argv, env []string, direct bool, note string) (string, error) {
 			gotCmd = command
 			return "bg1", nil
 		},

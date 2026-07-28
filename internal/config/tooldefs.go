@@ -22,28 +22,66 @@ func ToolDefs(g ToolGates) []llm.ToolDefinition {
 	if g.Media {
 		defs = append(defs, readMediaTool)
 	}
+	if g.Read {
+		defs = append(defs, readTool)
+	}
+	if g.List {
+		defs = append(defs, listFilesTool)
+	}
 	return defs
+}
+
+var readTool = llm.ToolDefinition{
+	Name: "read",
+	Description: "Read a text file with optional offset/limit paging. Returns the raw file text " +
+		"(no line numbers) so substrings can be pasted straight into edit_file. Binary files are " +
+		"refused (use read_media for images/audio). Large output is truncated with a continuation footer.",
+	Parameters: map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"path":   map[string]any{"type": "string", "description": "File path (absolute, ~/, or relative to the working directory)"},
+			"offset": map[string]any{"type": "integer", "description": "1-indexed first line to return (default 1)"},
+			"limit":  map[string]any{"type": "integer", "description": "Max lines to return (default 2000)"},
+		},
+		"required": []string{"path"},
+	},
+}
+
+var listFilesTool = llm.ToolDefinition{
+	Name: "list_files",
+	Description: "List a directory as an indented tree (directories first, suffixed /). No automatic " +
+		"filtering — use ignore globs to exclude entries, depth to widen or narrow (default 2).",
+	Parameters: map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"path":   map[string]any{"type": "string", "description": "Directory path (default: the working directory)"},
+			"depth":  map[string]any{"type": "integer", "description": "Recursion depth (default 2)"},
+			"ignore": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Glob patterns to exclude (base name, or root-relative when the pattern contains /)"},
+		},
+	},
 }
 
 var bashBgTool = llm.ToolDefinition{
 	Name: "bash_bg",
 	Description: "Start a shell command in the background on the in-process runtime and return a job id immediately. " +
 		"Use this for long-running work or servers — anything that should not block the turn. " +
-		"When the job finishes you are woken with a completion notice carrying an output tail — do not poll. " +
-		"There is no pid and no log path; use task_status <id> to read more of a finished job's output.",
+		"On completion the notifier triages the result; set direct:true when the user is waiting on it " +
+		"so the result comes straight back to you instead. Do not poll — use task_status <id> only to " +
+		"read more of a finished job's output.",
 	Parameters: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"command": map[string]any{"type": "string", "description": "The shell command to run in the background"},
 			"workdir": map[string]any{"type": "string", "description": "Working directory; defaults to the project root"},
-			"quiet":   map[string]any{"type": "boolean", "description": "When true, a clean exit queues its notice for your next turn instead of waking you (failures still wake). Use for servers, watchers, and side jobs whose completion needs no immediate action"},
+			"direct":  map[string]any{"type": "boolean", "description": "Skip the notifier and wake YOU with the completion. Set it when the user asked for this work and is waiting on the result"},
+			"note":    map[string]any{"type": "string", "description": "Context for the notifier's triage (e.g. what this job is for and whether anyone is waiting). Ignored when direct is true"},
 		},
 		"required": []string{"command"},
 	},
 }
 
 // SubagentRef is one allowed subagent for TaskToolFor: its name plus the
-// model-facing "when to use" description from its shell3.subagent declaration.
+// model-facing "when to use" description from its agents/<name>.md declaration.
 type SubagentRef struct{ Name, Description string }
 
 // TaskToolFor returns the llm.ToolDefinition for the `task` tool with the
@@ -66,9 +104,10 @@ func TaskToolFor(subs []SubagentRef) llm.ToolDefinition {
 	}
 	return llm.ToolDefinition{
 		Name: "task",
-		Description: "Spawn a subagent that runs in the background. Returns immediately — you will be notified " +
-			"of completion on a later turn. Do NOT poll for results. Use this to delegate work to a " +
-			"specialised subagent while you continue with other tasks.",
+		Description: "Spawn a subagent that runs in the background. Returns immediately — the notifier triages " +
+			"its completion (set direct:true when the user is waiting, so the result comes straight back " +
+			"to you). Do NOT poll for results. Use this to delegate work to a specialised subagent while " +
+			"you continue with other tasks. Brief it like a contract — vague prompts produce misaimed work.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -79,11 +118,19 @@ func TaskToolFor(subs []SubagentRef) llm.ToolDefinition {
 				},
 				"prompt": map[string]any{
 					"type":        "string",
-					"description": "The task prompt to send to the subagent",
+					"description": "The task brief for the subagent: objective, expected outcome and output format, and boundaries (what is out of scope)",
 				},
 				"description": map[string]any{
 					"type":        "string",
 					"description": "A short 3-5 word label describing the task (used in completion notices)",
+				},
+				"direct": map[string]any{
+					"type":        "boolean",
+					"description": "Skip the notifier and wake YOU with the result. Set it when the user asked for this work and is waiting on it",
+				},
+				"note": map[string]any{
+					"type":        "string",
+					"description": "Context for the notifier's triage (what this task is for, whether anyone is waiting). Ignored when direct is true",
 				},
 			},
 			"required": []string{"subagent_type", "prompt"},
@@ -148,7 +195,7 @@ var bashTool = llm.ToolDefinition{
 			},
 			"timeout_seconds": map[string]any{
 				"type":        "integer",
-				"description": "Max seconds before the command is killed. Defaults to 10. Clamped to [1, 600].",
+				"description": "Max seconds before the command is killed. Defaults to 10. Clamped to [1, 120].",
 			},
 		},
 		"required": []string{"command"},

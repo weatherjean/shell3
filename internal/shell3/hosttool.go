@@ -25,7 +25,7 @@ func (s *Session) RegisterHostTool(t HostTool) error {
 	if t.Name == "" || t.Handler == nil {
 		return errors.New("shell3: host tool requires a Name and Handler")
 	}
-	// Guard the cfg mutations against the dashboard's concurrent Snapshot read
+	// Guard the cfg mutations against a concurrent Snapshot read (the Status view polls it)
 	// (reads Personality.Tools under s.mu). Between turns by contract, enforced
 	// by the busy check below.
 	s.mu.Lock()

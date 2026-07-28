@@ -12,7 +12,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const healthYAML = "models:\n  m: { base_url: \"http://x\", api_key: k, model: id }\n"
+// A healthy config is one that can actually be served, so the fixture carries a
+// web password like a real one does (see TestHealthFailsWithoutAWebPassword).
+const healthYAML = "models:\n  m: { base_url: \"http://x\", api_key: k, model: id }\n" +
+	"web: { password: sixteen-characters-long }\n"
 const healthAgent = "---\nmodel: m\n---\np\n"
 
 // writeHealthTree writes a minimal loadable config tree (plus extra files)
@@ -70,6 +73,50 @@ func TestHealthFailsOnSkippedSkill(t *testing.T) {
 	}
 }
 
+func TestHealthListsProject(t *testing.T) {
+	work := t.TempDir()
+	cfg := writeHealthTree(t, map[string]string{
+		"projects/site/project.md":       "---\ndescription: the site\nworkdir: " + work + "\n---\nBrief.\n",
+		"projects/site/manager.md":       "---\ndescription: manages the site\n---\nYou are the site manager.\n",
+		"projects/site/skills/deploy.md": "---\ndescription: deploys the site\n---\nRun make deploy.\n",
+	})
+	out, err := runHealthAt(t, cfg)
+	if err != nil {
+		t.Fatalf("config with a valid project should pass: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "project: site") {
+		t.Fatalf("output should name the project:\n%s", out)
+	}
+	if !strings.Contains(out, work) {
+		t.Fatalf("output should show the workdir:\n%s", out)
+	}
+	if !strings.Contains(out, "model m") || !strings.Contains(out, "1 skills") {
+		t.Fatalf("output should show manager model and skill count:\n%s", out)
+	}
+	if !strings.Contains(out, "OK") {
+		t.Fatalf("valid project must still print OK:\n%s", out)
+	}
+}
+
+func TestHealthFailsOnProjectSkill(t *testing.T) {
+	work := t.TempDir()
+	cfg := writeHealthTree(t, map[string]string{
+		"projects/site/project.md":    "---\ndescription: the site\nworkdir: " + work + "\n---\nBrief.\n",
+		"projects/site/manager.md":    "---\ndescription: manages the site\n---\nbody\n",
+		"projects/site/skills/bad.md": "no frontmatter here\n",
+	})
+	out, err := runHealthAt(t, cfg)
+	if err == nil {
+		t.Fatalf("project with a skipped skill must fail health:\n%s", out)
+	}
+	if !strings.Contains(out, "bad.md") {
+		t.Fatalf("output should name the skipped file:\n%s", out)
+	}
+	if strings.Contains(out, "OK") {
+		t.Fatalf("failing health must not print OK:\n%s", out)
+	}
+}
+
 func TestHealthFailsOnDownMCPServer(t *testing.T) {
 	cfg := writeHealthTree(t, map[string]string{
 		"shell3.yaml": healthYAML + "mcp:\n  dead: { command: [\"/nonexistent-mcp-server-xyz\"], timeout: 2 }\n",
@@ -113,5 +160,22 @@ func TestHealthOKWithStrictHook(t *testing.T) {
 	out, err := runHealthAt(t, cfg)
 	if err != nil {
 		t.Fatalf("strict hook should pass health: %v\n%s", err, out)
+	}
+}
+
+// health is the strict view of a config, and a config with no web password
+// cannot be served at all — `shell3 serve` refuses it. Reporting that here is
+// the difference between finding out now and finding out when you try to start.
+func TestHealthFailsWithoutAWebPassword(t *testing.T) {
+	dir := writeHealthTree(t, map[string]string{
+		"shell3.yaml": "models:\n  m: { base_url: \"http://x\", api_key: k, model: id }\n",
+	})
+
+	out, err := runHealthAt(t, dir)
+	if err == nil {
+		t.Fatalf("health passed a config that cannot be served; output:\n%s", out)
+	}
+	if !strings.Contains(err.Error()+out, "web.password") {
+		t.Errorf("failure does not name the missing key:\n%s\n%v", out, err)
 	}
 }

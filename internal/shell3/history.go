@@ -9,7 +9,7 @@ import (
 )
 
 // HistoryEntry is one stored conversation message, projected for introspection
-// (the dashboard's conversation view / replay). Content is already stripped of
+// (the Runs view's transcript). Content is already stripped of
 // the internal "[tool_call_id=…]\n" storage prefix that tool results carry.
 // Role is the plain string "user"/"assistant"/"tool"/"system".
 type HistoryEntry struct {
@@ -92,8 +92,8 @@ func stripToolIDPrefix(content string) string {
 	return content
 }
 
-// SessionMeta is one stored session's metadata, for the dashboard's session
-// list (Runs tab). LastAt is the recency sort key.
+// SessionMeta is one stored session's metadata, for the Runs
+// view. LastAt is the recency sort key.
 type SessionMeta struct {
 	ID        string    `json:"id"`
 	StartedAt time.Time `json:"started_at"`
@@ -104,7 +104,7 @@ type SessionMeta struct {
 }
 
 // PastSessions returns up to limit stored sessions, newest first, for the
-// dashboard's session list. nil when the runtime has no store.
+// Runs view. nil when the runtime has no store.
 func (rt *Runtime) PastSessions(limit int) ([]SessionMeta, error) {
 	if rt.store == nil {
 		return nil, nil
@@ -136,7 +136,7 @@ func (rt *Runtime) PastSessions(limit int) ([]SessionMeta, error) {
 }
 
 // SessionMessages returns a stored session's messages as HistoryEntry values,
-// for the dashboard's conversation replay. nil when the runtime has no store.
+// for the Runs view's transcript. nil when the runtime has no store.
 func (rt *Runtime) SessionMessages(id string) ([]HistoryEntry, error) {
 	if rt.store == nil {
 		return nil, nil

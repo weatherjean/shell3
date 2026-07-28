@@ -36,7 +36,7 @@ func TestMsgTokens_CountsReasoning(t *testing.T) {
 // continuation+tail, so the reminderLog anchors (which index the pre-compaction
 // message slice) are stale. They must be dropped — exactly as SetMessages does —
 // or History()'s non-decreasing-Seq interleave silently hides every later
-// reminder from the dashboard.
+// reminder from any reader.
 func TestCompactInto_ResetsReminderLog(t *testing.T) {
 	sess := NewSession(SessionOpts{})
 	sess.messages = []llm.Message{
@@ -124,12 +124,12 @@ func TestRunTurn_QueuedCompact_FewLargeMessages(t *testing.T) {
 	}
 	sess.messages = append(sess.messages, llm.Message{Role: llm.RoleAssistant, Content: "LATEST_TAIL_MARKER"})
 	sess.lastPromptTokens = 50000
-	sess.QueueCompact()
 
-	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "q"}, nil)
-
+	if _, _, err := CompactStandalone(context.Background(), cfg, sess); err != nil {
+		t.Fatalf("CompactStandalone: %v", err)
+	}
 	if !hasKind(c.all(), EventCompacted) {
-		t.Fatal("forced :compact must compact a few-but-huge-message history")
+		t.Fatal("a forced /compact must compact a few-but-huge-message history")
 	}
 	if !msgsContain(sess.messages, "SUMMARY of the head") {
 		t.Fatalf("forced compact should inject the head summary: %+v", sess.messages)
@@ -159,7 +159,7 @@ func TestCompactNow_ResetsContextGauge(t *testing.T) {
 	sess.reminders.lastContextPct = 80
 	sess.reminders.lastTokens = 90000
 
-	compactNow(context.Background(), cfg, sess, true)
+	compactNow(context.Background(), cfg, sess)
 
 	if sess.reminders.lastContextPct != 0 || sess.reminders.lastTokens != 0 {
 		t.Fatalf("context gauge must reset after compaction, got pct=%d tokens=%d",

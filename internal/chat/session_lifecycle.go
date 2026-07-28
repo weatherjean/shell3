@@ -42,20 +42,18 @@ func (s *Session) Messages() []llm.Message {
 	return out
 }
 
-// SetMessages replaces the conversation history. Used by slash commands like
-// /clear and /rollback that mutate session state from outside the package.
+// SetMessages replaces the conversation history wholesale. The write-side
+// counterpart of Messages(); used to seed a session's history.
 func (s *Session) SetMessages(msgs []llm.Message) {
 	s.msgMu.Lock()
 	defer s.msgMu.Unlock()
 	s.messages = msgs
-	// Clamp the persisted high-water mark to the new (shorter) history:
-	// /clear rotates onto a fresh store session (mark must drop to 0 so the new
-	// session persists at all), and /rollback keeps the id but must flush new
-	// messages from the truncation point onward.
+	// Clamp the persisted high-water mark to the new (possibly shorter)
+	// history, so the next flush writes from the right point.
 	s.persistedLen = min(s.persistedLen, len(msgs))
-	// Reminder anchors index into the message slice; a /clear or /rollback that
-	// replaces history invalidates them, so drop the log rather than show stale
-	// reminders against the new conversation.
+	// Reminder anchors index into the message slice, so replacing history
+	// invalidates them: drop the log rather than show stale reminders against
+	// the new conversation, and clear the sidecar that mirrors it.
 	s.reminderLog = nil
 	if s.store != nil && s.id != "" {
 		_ = s.store.TruncateReminders(s.id)

@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 450" role="img"
-     aria-label="shell3 banner: the yellow snail mark, the shell3 wordmark, pronounced shelly, your shell on Telegram — minimal Unix-composable personal agent.">
+     aria-label="shell3 banner: the yellow snail mark, the shell3 wordmark, pronounced shelly, your shell in your browser — minimal Unix-composable personal agent.">
   <style>
     text{font-family:ui-monospace,"SF Mono","JetBrains Mono","Cascadia Code",Menlo,Consolas,monospace;}
   </style>
@@ -32,6 +32,6 @@
   <!-- wordmark -->
   <text x="565" y="212" font-size="112" font-weight="700" fill="#F4F7FC">shell3</text>
   <text x="570" y="278" font-size="30" font-weight="700" fill="#EAB308"
-        letter-spacing="3">/ˈʃɛli/ — YOUR SHELL, ON TELEGRAM</text>
+        letter-spacing="3">/ˈʃɛli/ — YOUR SHELL, IN YOUR BROWSER</text>
   <text x="570" y="334" font-size="27" fill="#9CA3AF">minimal Unix-composable personal agent.</text>
 </svg>

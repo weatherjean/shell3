@@ -52,16 +52,14 @@ func TestMergeEnvFromEmpty(t *testing.T) {
 
 // TestMergeEnvKeptOnlyForNonEmptyIncoming: an existing key with a BLANK
 // incoming value is normal re-boot behavior (nothing to apply), not worth a
-// warning — only a discarded non-empty value is reported. mergeEnv itself is
-// generic: it reports ALL such keys, and runBoot filters the ones it generated
-// (SHELL3_WEB_SECRET) before printing.
+// warning — only a discarded non-empty value is reported.
 func TestMergeEnvKeptOnlyForNonEmptyIncoming(t *testing.T) {
-	_, kept := mergeEnv("MAIN_API_KEY=old\nSHELL3_WEB_SECRET=s\n", [][2]string{
+	_, kept := mergeEnv("MAIN_API_KEY=old\nGROQ_API_KEY=t\n", [][2]string{
 		{"MAIN_API_KEY", ""},
-		{"SHELL3_WEB_SECRET", "freshly-generated"},
+		{"GROQ_API_KEY", "freshly-typed"},
 	})
-	if len(kept) != 1 || kept[0] != "SHELL3_WEB_SECRET" {
-		t.Errorf("kept = %v, want [SHELL3_WEB_SECRET] (blank incoming dropped; provenance filtering is runBoot's job)", kept)
+	if len(kept) != 1 || kept[0] != "GROQ_API_KEY" {
+		t.Errorf("kept = %v, want [GROQ_API_KEY] (blank incoming dropped)", kept)
 	}
 }
 
@@ -211,5 +209,82 @@ func TestBootEndToEnd(t *testing.T) {
 	cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
 	if !strings.Contains(string(cfg), `model: "changed-model"`) {
 		t.Errorf("--force did not regenerate the model; got:\n%s", cfg)
+	}
+}
+
+// boot is where a fresh install gets its password, and 16 characters is the
+// floor because this password guards a shell.
+func TestValidateWebPassword(t *testing.T) {
+	if err := validateWebPassword(""); err == nil {
+		t.Error("an empty password was accepted")
+	}
+	if err := validateWebPassword("short"); err == nil {
+		t.Error("a 5-character password was accepted")
+	}
+	if err := validateWebPassword(strings.Repeat("x", minPasswordLength)); err != nil {
+		t.Errorf("a %d-character password was refused: %v", minPasswordLength, err)
+	}
+}
+
+// The generated option has to clear the bar it sets, and not repeat itself.
+func TestGenerateWebPassword(t *testing.T) {
+	first, err := generateWebPassword()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateWebPassword(first); err != nil {
+		t.Errorf("the generated password fails our own validator: %v", err)
+	}
+	second, err := generateWebPassword()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Error("two generated passwords are identical")
+	}
+}
+
+// Enrolment gives the authenticator app a secret, and the operator a URI to
+// scan. The URI has to name shell3 so the code is identifiable in the app.
+func TestNewTOTPEnrolment(t *testing.T) {
+	secret, uri, err := newTOTPEnrolment("agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secret == "" {
+		t.Error("no secret generated")
+	}
+	if !strings.HasPrefix(uri, "otpauth://totp/") {
+		t.Errorf("uri = %q, want an otpauth:// URI", uri)
+	}
+	if !strings.Contains(uri, "shell3") {
+		t.Errorf("uri = %q, want shell3 as the issuer", uri)
+	}
+}
+
+// The two secrets have to land in .env under the names shell3.yaml references,
+// or the config resolves to nothing and serve refuses to start.
+func TestWebEnvPairsCarryBothSecrets(t *testing.T) {
+	pairs := webEnvPairs("a-long-enough-password", "TOTPSECRET")
+
+	got := map[string]string{}
+	for _, p := range pairs {
+		got[p[0]] = p[1]
+	}
+	if got[envWebPassword] != "a-long-enough-password" {
+		t.Errorf("%s = %q", envWebPassword, got[envWebPassword])
+	}
+	if got[envWebTOTP] != "TOTPSECRET" {
+		t.Errorf("%s = %q", envWebTOTP, got[envWebTOTP])
+	}
+}
+
+// No second factor means no key: an empty SHELL3_WEB_TOTP_SECRET= line in .env
+// would read as "configured" to anyone looking at the file.
+func TestWebEnvPairsOmitTOTPWhenNotEnrolled(t *testing.T) {
+	for _, p := range webEnvPairs("a-long-enough-password", "") {
+		if p[0] == envWebTOTP {
+			t.Errorf("%s written with no enrolment", envWebTOTP)
+		}
 	}
 }

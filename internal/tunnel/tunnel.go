@@ -1,11 +1,11 @@
 //go:build unix
 
 // Package tunnel spawns a user-configured tunnel command in front of the
-// dashboard (shell3.telegram dashboard.tunnel) and scrapes its output for the
-// public https URL, so the host can wire the Telegram Mini App menu button
-// automatically. Spawn style matches internal/modelproxy: detached process
-// group, fire-and-forget, never fatal — the dashboard just stays local if the
-// tunnel never yields a URL. Failure detail lands in the tunnel log file.
+// interface (the web.tunnel setting) and scrapes its output for the public
+// https URL, so `shell3 serve` can print it. Spawn style matches
+// internal/modelproxy: detached process group, fire-and-forget, never fatal —
+// the interface just stays local if the tunnel never yields a URL. Failure
+// detail lands in the tunnel log file.
 package tunnel
 
 import (

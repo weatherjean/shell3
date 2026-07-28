@@ -117,7 +117,7 @@ func TestMCPWiringLiveServer(t *testing.T) {
 	}
 
 	// Status reports the server up with one tool — via Parts and via the
-	// session config's dashboard closure.
+	// session config's status closure.
 	st := p.MCPStatus()
 	if len(st) != 1 || !st[0].Up || st[0].ToolCount != 1 {
 		t.Errorf("bad MCPStatus: %+v", st)
@@ -172,7 +172,7 @@ func TestMCPWiringAbsent(t *testing.T) {
 	}
 	t.Cleanup(cleanup)
 	if p.MCPStatus() != nil {
-		t.Error("no shell3.mcp{} must mean nil status")
+		t.Error("no mcp: block must mean nil status")
 	}
 	cfg, err := p.SessionConfig(SessionOptions{})
 	if err != nil {

@@ -1,6 +1,7 @@
 package shell3
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -23,16 +24,16 @@ func waitDispatchDone(t *testing.T, s *Session, id string) {
 }
 
 // Dispatch fires a host-initiated subagent job on the normal job runtime: it
-// gets a subN id, and with Notify:true its completion notice queues into the
+// gets a subN id, and with Direct:true its completion notice queues into the
 // session (Wake path) so the host can RunQueued a narrating turn.
-func TestDispatchRunsSubagentJobAndWakes(t *testing.T) {
+func TestDispatchDirectWakesSession(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("subagent done"))
 	defer rt.Close()
 	sess, err := rt.Session(SessionOpts{Name: "disp"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := sess.Dispatch("", "do the thing", DispatchOpts{Description: "cron:test", Notify: true})
+	id, err := sess.Dispatch("", "do the thing", DispatchOpts{Description: "direct:test", Direct: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +42,7 @@ func TestDispatchRunsSubagentJobAndWakes(t *testing.T) {
 	}
 	waitForWake(t, rt, sess)
 	if !sess.HasQueuedInput() {
-		t.Fatal("Notify:true must queue a completion notice for the session")
+		t.Fatal("Direct:true must queue a completion notice for the session")
 	}
 	found := false
 	for _, j := range sess.Jobs() {
@@ -54,27 +55,37 @@ func TestDispatchRunsSubagentJobAndWakes(t *testing.T) {
 	}
 }
 
-// Notify:false must deliver the notice quietly: the result is queued for the
-// agent's next turn but no Wake fires, so an idle chat stays silent.
-func TestDispatchQuietDoesNotWake(t *testing.T) {
-	rt := newTestRuntime(t, fakeCfg("quiet result"))
+// A default (non-direct) cron dispatch routes through the CompletionHost — in
+// degraded mode (no notifier.md) as a raw post carrying its cron origin — and
+// never wakes the dispatch parent.
+func TestDispatchCronRoutesToHost(t *testing.T) {
+	rt := newTestRuntime(t, fakeCfg("cron result"))
 	defer rt.Close()
-	sess, err := rt.Session(SessionOpts{Name: "quiet"})
+	host := &fakeHost{}
+	rt.SetCompletionHost(host)
+	sess, err := rt.Session(SessionOpts{Name: "cron", Headless: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := sess.Dispatch("", "do the thing", DispatchOpts{Notify: false})
+	id, err := sess.Dispatch("", "do the thing", DispatchOpts{Description: "cron:test", CronJob: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	waitDispatchDone(t, sess, id)
+	waitFor(t, "host post", func() bool { posts, _, _ := host.snapshot(); return len(posts) >= 1 })
+	posts, _, _ := host.snapshot()
+	if !strings.Contains(posts[0], "cron=test") {
+		t.Fatalf("post = %q, want cron origin", posts[0])
+	}
 	select {
 	case ev := <-rt.Events():
-		t.Fatalf("unexpected host event for quiet dispatch: %+v", ev)
+		if ev.Kind == Wake && ev.Session == sess.ID() {
+			t.Fatalf("cron dispatch woke its pinned parent: %+v", ev)
+		}
 	case <-time.After(300 * time.Millisecond):
 	}
-	if !sess.HasQueuedInput() {
-		t.Fatal("quiet dispatch must still queue the notice for the next turn")
+	if sess.HasQueuedInput() {
+		t.Fatal("cron dispatch must not queue a notice on the pinned parent")
 	}
 }
 

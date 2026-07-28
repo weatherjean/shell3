@@ -16,14 +16,14 @@ type Dispatcher interface {
 	Dispatch(agent, prompt string, opts shell3.DispatchOpts) (string, error)
 }
 
-// JobStatus is a job plus its most recent run, for the dashboard.
+// JobStatus is a job plus its most recent run, for the Cron view.
 type JobStatus struct {
 	Name      string `json:"name"`
 	Schedule  string `json:"schedule"`
 	Agent     string `json:"agent"`
 	Prompt    string `json:"prompt,omitempty"`
 	WorkDir   string `json:"work_dir,omitempty"`
-	Notify    bool   `json:"notify"`
+	Direct    bool   `json:"direct"`
 	LastRun   string `json:"last_run,omitempty"` // RFC3339, "" if never
 	LastSubID string `json:"last_sub_id,omitempty"`
 }
@@ -39,7 +39,10 @@ type Scheduler struct {
 }
 
 // New validates every schedule and arms an entry per job. Returns an error if
-// any schedule is malformed (fail-fast at startup).
+// any schedule is malformed (fail-fast at startup). Completion delivery is
+// entirely the job runtime's: each fire is a Dispatch whose result routes
+// through the notifier (or, with direct: true, straight to a fresh main-agent
+// turn) — the scheduler carries no notification callback.
 func New(disp Dispatcher, jobs []shell3.CronJob) (*Scheduler, error) {
 	s := &Scheduler{
 		disp: disp,
@@ -50,7 +53,7 @@ func New(disp Dispatcher, jobs []shell3.CronJob) (*Scheduler, error) {
 	}
 	for _, j := range jobs {
 		job := j // capture
-		s.last[job.Name] = JobStatus{Name: job.Name, Schedule: job.Schedule, Agent: job.Agent, Prompt: job.Prompt, WorkDir: job.WorkDir, Notify: job.Notify}
+		s.last[job.Name] = JobStatus{Name: job.Name, Schedule: job.Schedule, Agent: job.Agent, Prompt: job.Prompt, WorkDir: job.WorkDir, Direct: job.Direct}
 		// Overlapping fires are allowed: each tick is a fresh subagent (no
 		// SkipIfStillRunning wrapper).
 		if _, err := s.c.AddFunc(job.Schedule, func() { s.fire(job) }); err != nil {
@@ -62,9 +65,14 @@ func New(disp Dispatcher, jobs []shell3.CronJob) (*Scheduler, error) {
 
 // fire dispatches one job and records its run status.
 func (s *Scheduler) fire(j shell3.CronJob) {
-	id, err := s.disp.Dispatch(j.Agent, j.Prompt, shell3.DispatchOpts{
-		WorkDir: j.WorkDir, Description: "cron:" + j.Name, Notify: j.Notify,
-	})
+	opts := shell3.DispatchOpts{
+		WorkDir: j.WorkDir, Description: "cron:" + j.Name,
+		CronJob: j.Name, Direct: j.Direct,
+		// The job prompt rides along as triage context: the notifier judges a
+		// result far better knowing what the job was created to do.
+		Note: "this is the cron job's standing prompt: " + j.Prompt,
+	}
+	id, err := s.disp.Dispatch(j.Agent, j.Prompt, opts)
 	s.mu.Lock()
 	st := s.last[j.Name]
 	st.LastRun = s.now().UTC().Format(time.RFC3339)
@@ -91,7 +99,7 @@ func (s *Scheduler) Run(name string) error {
 	return fmt.Errorf("no job named %q", name)
 }
 
-// Jobs returns each configured job with its last run, for the dashboard.
+// Jobs returns each configured job with its last run, for the Cron view.
 func (s *Scheduler) Jobs() []JobStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()

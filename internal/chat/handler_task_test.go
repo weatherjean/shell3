@@ -10,7 +10,7 @@ import (
 func TestTaskToolStartsSubagent(t *testing.T) {
 	var gotAgent, gotPrompt string
 	cfg := ToolConfig{
-		StartSubagent: func(agent, prompt, desc string) (string, error) {
+		StartSubagent: func(agent, prompt, desc string, direct bool, note string) (string, error) {
 			gotAgent, gotPrompt = agent, prompt
 			return "sub1", nil
 		},

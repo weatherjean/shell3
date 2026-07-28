@@ -26,15 +26,10 @@ const fullYAML = `models:
     base_url: https://api.groq.com/openai/v1
     api_key: k2
     model: whisper-large-v3-turbo
-telegram:
-  token: env:TG_TOKEN
-  chat_id: "42"
-  dashboard:
-    addr: 127.0.0.1:8765
-    tunnel: cloudflared tunnel --url http://{addr}
 web:
-  addr: 127.0.0.1:8787
-  secret: env:WEB_SECRET
+  workdir: /tmp/agent
+  addr: 127.0.0.1:8765
+  tunnel: cloudflared tunnel --url http://{addr}
 mcp:
   linear:
     url: https://mcp.linear.app/mcp
@@ -51,8 +46,8 @@ background:
 `
 
 var fullSecrets = map[string]string{
-	"DEEPSEEK_API_KEY": "sk-1", "TG_TOKEN": "tok", "WEB_SECRET": "ws",
-	"LINEAR_KEY": "lk", "GH": "gh",
+	"DEEPSEEK_API_KEY": "sk-1",
+	"LINEAR_KEY":       "lk", "GH": "gh",
 }
 
 func TestParseYAMLFull(t *testing.T) {
@@ -70,10 +65,7 @@ func TestParseYAMLFull(t *testing.T) {
 	if m.Extra["reasoning_split"] != true {
 		t.Fatalf("extra = %+v", m.Extra)
 	}
-	if tg := c.Telegram(); tg.Token != "tok" || tg.ChatID != "42" || !tg.Dashboard.Enabled || tg.Dashboard.Addr != "127.0.0.1:8765" {
-		t.Fatalf("telegram = %+v", tg)
-	}
-	if w := c.Web(); w.Secret != "ws" {
+	if w := c.Web(); w.Addr != "127.0.0.1:8765" || w.WorkDir != "/tmp/agent" {
 		t.Fatalf("web = %+v", w)
 	}
 	servers := c.MCPServers()
@@ -106,7 +98,7 @@ func TestParseYAMLUnknownKey(t *testing.T) {
 }
 
 func TestParseYAMLNoModels(t *testing.T) {
-	if _, err := parseY(t, "web: { addr: x, secret: s }\n", nil); err == nil || !strings.Contains(err.Error(), "no models") {
+	if _, err := parseY(t, "web: { addr: \":8765\" }\n", nil); err == nil || !strings.Contains(err.Error(), "no models") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -249,5 +241,18 @@ func TestParseYAMLImagegenDefaultsAndValidation(t *testing.T) {
 	y = "models:\n  m:\n    base_url: u\n    model: x\nmedia:\n  imagegen: { model: m, api: openroutre }\n"
 	if _, err := parseY(t, y, nil); err == nil || !strings.Contains(err.Error(), "must be openai or openrouter") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// The web password is a secret like any other: it lives in .env and reaches the
+// YAML as an env: reference, so shell3.yaml stays safe to read and to share.
+func TestParseYAMLWebPassword(t *testing.T) {
+	c, err := parseY(t, "models:\n  m:\n    base_url: u\n    model: x\nweb:\n  password: env:SHELL3_WEB_PASSWORD\n",
+		map[string]string{"SHELL3_WEB_PASSWORD": "correct-horse-battery-staple"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Web().Password != "correct-horse-battery-staple" {
+		t.Errorf("Web().Password = %q, want the resolved secret", c.Web().Password)
 	}
 }

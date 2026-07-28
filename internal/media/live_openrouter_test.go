@@ -111,9 +111,6 @@ media:
 		t.Fatalf("Speak: %v", err)
 	}
 	defer os.Remove(sp.Path)
-	if sp.VoiceCompatible {
-		t.Errorf("mp3 output reported VoiceCompatible=true")
-	}
 	info, err := os.Stat(sp.Path)
 	if err != nil || info.Size() < 1024 {
 		t.Fatalf("synthesized file suspicious: %v (size=%d)", err, info.Size())

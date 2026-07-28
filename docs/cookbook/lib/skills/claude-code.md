@@ -136,15 +136,15 @@ plausible but is incomplete.
 background tasks that might need elevated permissions. For read-only
 research, no special flag is needed.
 
-### The quiet parameter
+### The direct parameter
 
-`bash_bg` wakes you on completion by default. Pass `quiet: true` to keep
-routine long runs from interrupting:
+`bash_bg` completions go to the notifier, which decides whether you hear about
+them. Pass `direct: true` when the user is waiting on this particular run:
 
-| `quiet` | Exit 0 (clean) | Nonzero exit |
+| `direct` | Clean exit | Nonzero exit |
 |---|---|---|
-| `false` (default) | Wakes you immediately | Wakes you immediately |
-| `true` | Queued silently — arrives on your next turn | Wakes you immediately |
+| `false` (default) | The notifier triages it — you may or may not be woken | Always surfaces |
+| `true` | Wakes you with the result | Wakes you with the result |
 
 ```json
 bash_bg {
@@ -152,8 +152,8 @@ bash_bg {
 }
 ```
 
-Use `quiet: true` for runs whose completion needs no immediate reaction;
-failures wake you either way.
+Leave `direct` off for runs whose completion needs no immediate reaction; the
+notifier still surfaces failures either way.
 
 ---
 

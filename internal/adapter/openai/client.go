@@ -347,7 +347,7 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 // clearer, actionable message; all other errors keep the generic wrap. The
 // original error is wrapped in both cases so errors.Is still works, and an SDK
 // API error additionally gets an llm.StatusError shell so consumers (e.g.
-// shell3.RollbackHint) can branch on the HTTP code with errors.As.
+// shell3.RecoveryHint) can branch on the HTTP code with errors.As.
 func wrapStreamErr(err error) error {
 	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
 		return fmt.Errorf("llm: the model stream ended early — the provider closed the connection mid-response. "+

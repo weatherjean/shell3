@@ -32,7 +32,7 @@ const defaultTimeout = 10 * time.Second
 // public config surface — never change it casually.
 const ToolPrefix = "mcp_"
 
-// ServerStatus is one server's health for `shell3 health` and the dashboard.
+// ServerStatus is one server's health for `shell3 health` and the Status view.
 type ServerStatus struct {
 	Name      string `json:"name"`
 	Up        bool   `json:"up"`
@@ -233,7 +233,7 @@ func filterTools(tools []*sdk.Tool, allow, deny []string) []*sdk.Tool {
 }
 
 // Tools returns the llm tool definitions for the opted-in servers (names from
-// the agent's tools.mcp; all=true means every declared server). Down servers
+// the agent's mcp: frontmatter; all=true means every declared server). Down servers
 // contribute nothing.
 func (m *Manager) Tools(serverNames []string, all bool) []llm.ToolDefinition {
 	m.mu.RLock()

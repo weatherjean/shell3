@@ -1,11 +1,9 @@
 // Package config loads the shell3 config directory: shell3.yaml (wiring) +
 // agent.md / agents/*.md (prompts with frontmatter) + skills/ + cron/ +
-// heartbeat.md + per-agent hooks/*.sh. Prose lives in markdown files, wiring
+// per-agent hooks/*.sh. Prose lives in markdown files, wiring
 // lives in YAML, presence of a file enables its feature, and policy is a bash
 // hook script — there is no embedded config language.
 package config
-
-import "time"
 
 // Model is one declared model under shell3.yaml `models:`.
 type Model struct {
@@ -33,7 +31,7 @@ type Model struct {
 }
 
 type ToolGates struct {
-	Bash, BashBg, Edit, Media bool
+	Bash, BashBg, Edit, Media, Read, List bool
 }
 
 // Skill is one resolved *.md from the skills/ dir, surfaced as a one-line
@@ -49,6 +47,13 @@ type AgentCommon struct {
 	// Skills is the scan of the config dir's skills/ (main agent only;
 	// subagents carry none).
 	Skills []Skill
+	// Context is the main agent's `context:` frontmatter: config-dir-relative
+	// paths (globs allowed) whose contents are read AT SESSION CREATION and
+	// appended to the system prompt under `## Context`. Raw entries only —
+	// resolution is late-bound (see ResolveContextFiles / BuildPersonaFor) so a
+	// fresh turn always sees the current file. Main agent only; a subagent
+	// declaring it is a load error.
+	Context []string
 	// MCP is the `mcp:` frontmatter opt-in: the shell3.yaml mcp server names
 	// whose tools this agent gets. MCPAll is the `mcp: all` form. Both
 	// empty/false (the default) means no MCP tools.
@@ -64,6 +69,11 @@ type AgentCommon struct {
 type Agent struct {
 	AgentCommon
 	Subagents []string
+	// ProjectsBrief is the contents of projects.md beside shell3.yaml (""
+	// when absent): the standing Chain of Command portfolio brief, appended
+	// verbatim to the end of the main agent's system prompt. Subagents never
+	// carry one.
+	ProjectsBrief string
 }
 
 // Subagent is a delegatable specialist (one agents/*.md): a non-interactive
@@ -73,35 +83,29 @@ type Agent struct {
 type Subagent struct {
 	AgentCommon
 	Description string
+	// Workdir is where the manager's shell runs — set only for project
+	// managers (a projects/<name>/ manager.md, where it is the real repo the
+	// manager works in, elsewhere on disk). Empty for ordinary subagents,
+	// which inherit the host's working directory.
+	Workdir string
 }
 
-// TelegramConfig is the parsed `telegram:` block.
-type TelegramConfig struct {
-	Token     string
-	ChatID    string
-	WorkDir   string
-	Dashboard DashboardConfig
-}
-
-// DashboardConfig is the `telegram.dashboard:` block. Tunnel, if set, is a
-// shell command spawned at bot start ({addr} replaced by Addr) whose output is
-// scanned for the dashboard's public https URL; URL, if set, is the fixed
-// public address and wins over a scanned one.
-type DashboardConfig struct {
-	Enabled bool
+// WebConfig is the parsed `web:` block: where the agent's shell runs, and how
+// the interface is served. Tunnel, if set, is a shell command spawned at
+// startup ({addr} replaced by Addr) whose output is scanned for a public https
+// URL; URL, if set, is the fixed public address and wins over a scanned one.
+type WebConfig struct {
+	WorkDir string
 	Addr    string
 	URL     string
 	Tunnel  string
-}
-
-// WebConfig is the parsed `web:` block — the standalone web front-end
-// (shell3 web): the dashboard plus chat, served over plain HTTP with token
-// auth instead of Telegram initData.
-type WebConfig struct {
-	Addr   string
-	Secret string
-	URL    string
-	Tunnel string
+	// Password gates the whole interface. Empty is a `shell3 serve` refusal
+	// rather than a load error: `shell3 ask` serves nothing and must stay
+	// usable, so a config with no password still loads.
+	Password string
+	// TOTPSecret, when set, adds a second factor: the password alone stops
+	// being a session. Opt-in by its presence — there is no toggle.
+	TOTPSecret string
 }
 
 // CronJob is one parsed cron/<name>.md job.
@@ -111,27 +115,14 @@ type CronJob struct {
 	Agent    string
 	Prompt   string
 	WorkDir  string
-	Notify   bool
+	// Direct skips the notifier: the completion is delivered straight to the
+	// main agent (a fresh session turn) instead of being triaged.
+	Direct bool
 }
 
-// Heartbeat is the parsed heartbeat.md: a periodic check-in turn injected
-// into the main session while it is idle. Checklist is the standing orders
-// (the file body); the model replies HEARTBEAT_OK when nothing needs
-// attention and the host suppresses the message.
-type Heartbeat struct {
-	Every     time.Duration
-	Checklist string
-	Prompt    string // preamble override; "" = built-in default
-	// ActiveFrom/ActiveTo bound ticking to a daily window ("HH:MM", from
-	// inclusive, to exclusive; from > to spans midnight). Both empty = 24/7.
-	ActiveFrom string
-	ActiveTo   string
-	TZ         string // IANA zone for the window; "" = host-local
-}
-
-// STTConfig is the `media.stt:` block: speech-to-text for inbound voice
-// messages. Echo controls whether the transcript is echoed back to the user
-// before the model turn runs.
+// STTConfig is the `media.stt:` block: speech-to-text for recordings the
+// browser sends. Echo controls whether the transcript is echoed back to the
+// user before the model turn runs.
 type STTConfig struct {
 	ModelRef, Language string
 	Echo               bool
@@ -172,14 +163,20 @@ type LoadedConfig struct {
 	// the default (8) at the read site.
 	BackgroundMaxConcurrent int
 
+	// RunsKeepDays is `runs_keep_days`: how long the janitor keeps a
+	// runs/<id>/ dir (by its newest file's mtime) before sweeping it at
+	// `shell3 serve` startup. Always populated at load — default 30; an
+	// explicit 0 means keep forever (the sweep is skipped entirely).
+	RunsKeepDays int
+
 	agent     Agent
+	notifier  *Notifier
 	subagents []Subagent
+	projects  []Project
 
 	mcpServers []MCPServer
-	telegram   TelegramConfig
 	web        WebConfig
 	cron       []CronJob
-	heartbeat  *Heartbeat
 
 	stt      *STTConfig
 	tts      *TTSConfig
@@ -241,7 +238,15 @@ func (c *LoadedConfig) Subagents() []Subagent {
 	return out
 }
 
-// SubagentByName returns the subagent declared by agents/<name>.md.
+// Projects returns the loaded Chain of Command projects in directory order.
+func (c *LoadedConfig) Projects() []Project {
+	out := make([]Project, len(c.projects))
+	copy(out, c.projects)
+	return out
+}
+
+// SubagentByName returns the subagent for name — declared by agents/<name>.md
+// or a project manager (projects/<name>/manager.md).
 func (c *LoadedConfig) SubagentByName(name string) (Subagent, bool) {
 	for _, s := range c.subagents {
 		if s.Name == name {
@@ -251,17 +256,15 @@ func (c *LoadedConfig) SubagentByName(name string) (Subagent, bool) {
 	return Subagent{}, false
 }
 
-// Telegram returns the parsed `telegram:` block (zero value if absent).
-func (c *LoadedConfig) Telegram() TelegramConfig { return c.telegram }
+// Notifier returns the parsed notifier.md persona, nil when the file is
+// absent (the host then posts every background completion raw).
+func (c *LoadedConfig) Notifier() *Notifier { return c.notifier }
 
 // Web returns the parsed `web:` block (zero value if absent).
 func (c *LoadedConfig) Web() WebConfig { return c.web }
 
 // Cron returns the parsed cron/ jobs in filename order.
 func (c *LoadedConfig) Cron() []CronJob { return c.cron }
-
-// Heartbeat returns the parsed heartbeat.md, nil when absent.
-func (c *LoadedConfig) Heartbeat() *Heartbeat { return c.heartbeat }
 
 // STT returns the parsed media.stt block, nil when not declared.
 func (c *LoadedConfig) STT() *STTConfig { return c.stt }

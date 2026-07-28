@@ -16,15 +16,121 @@ fallback between them, so each agent is governed by exactly one script or
 none. The script runs before **every** tool (`bash`, `bash_bg`, `edit_file`,
 `read_media`, MCP tools as `mcp_<server>_<tool>`, host tools like
 `image_generate`) with the call as JSON on stdin, and prints a verdict: pass,
-rewrite, runner-swap, block, or ask a human (inline Allow/Deny buttons in
-Telegram). The scaffold ships its example gate **commented out** — a fresh
-config gates nothing — and, once enabled, that example covers only the bash
-family, leaving `edit_file` ungated (a config choice, not a hardcoded
-exemption). The full verdict contract and payload fields are in
+rewrite, runner-swap, block, or ask a human (an Allow/Deny modal in the
+browser). **The scaffold ships an armed gate**, not a commented-out example: a
+fresh config already refuses credential reads, system-path writes, unread
+remote code (`curl … | sh`), publishing, force-pushes, commands that would kill
+shell3 itself, and edits to the gate scripts. Everything else runs untouched,
+because a harness that mostly runs unattended has to be able to do the work it
+is given. It never asks: with nobody at the browser an ask is a denial that
+first parks the turn, so every rule decides immediately. Read
+`hooks/tool-call.sh` — it is a short bash script, and the reasoning is in its
+comments. The full verdict contract and payload fields are in
 [configuration.md](configuration.md#the-command-gate--hookssh).
 
 **If you need hard isolation, run shell3 in a container, VM, or throwaway
 user account.** The hook is a policy gate, not a security boundary.
+
+## The web interface
+
+`shell3 serve` requires a password. It refuses to start without one, and
+`shell3 health` fails on a config that lacks it, because what sits behind this
+login is not a document store: `/api/chat` is the agent, and the agent's first
+verb is `bash` on the machine serving the page. Also behind it — every stored
+transcript (`/api/runs/{id}`, `/api/jobs/{id}`), the config-file and media
+readers, the effective system prompt (`/api/status`), firing a scheduled job by
+hand (`/api/cron/{name}/run`), the approval answers, and reloading the config.
+
+**Every route is gated.** The only things reachable without a session are
+`POST /api/login` and the static files that draw the login screen — the app
+bundle, which is this repository's published front-end and carries no secrets.
+That is enforced structurally rather than by vigilance: routes are declared in
+one table that records whether each is public, and a test walks that table
+asserting every private route refuses an unauthenticated request. An endpoint
+added without deciding its status defaults to private — fail-closed — and the
+test holds it there.
+
+### What protects the password
+
+- **Length.** 16 characters minimum, enforced by `shell3 boot`, warned about by
+  `serve`. Longer is better; `boot` offers to generate one.
+- **A second factor**, if you set `web.totp_secret`: the password alone then is
+  not a session. Codes are single-use inside their window.
+- **Escalating delay** on failed attempts — not a lockout, which would let
+  anyone who can reach the login route hold it closed against you.
+- **An audit trail.** Every attempt, successful or not, goes to the app log with
+  its IP and user-agent.
+- **A notification on every successful login**, in the bell and over web push.
+  Assume this is how you would learn that someone else is in.
+
+### What it does not protect against
+
+An attacker who authenticates *is* you, as far as the agent is concerned. There
+is no privilege tier below "shell". The remaining line of defence is the
+[command gate](#unsafe-by-default) — `hooks/tool-call.sh` — which the scaffold
+ships armed, but it is yours to tune — read it and widen or tighten it for the
+work this deployment does. If this interface is exposed, that script is the
+difference between a session and an unconditional shell.
+
+Sessions are server-side: a random token whose hash is stored in
+`<config>/.shell3_project/web_sessions.json` (mode `0600`), 7-day sliding
+expiry. Signing out revokes that session rather than only clearing the cookie.
+**Changing `SHELL3_WEB_PASSWORD` invalidates every session** — the honest
+response to "I think someone got in" — and deleting the file does the same.
+
+**Keep auth in front anyway.** A password in the app is not the industry answer
+to exposing a tool like this; an identity-aware proxy is — Cloudflare Access on
+a named tunnel, Tailscale, Authelia, a private network — and it is what gives
+you SSO and hardware 2FA. This feature means a leaked URL is no longer a public
+shell. It does not mean the interface wants to face the internet naked.
+
+**A tunnel is one keystroke away.** `shell3 serve --tunnel` (no value) starts a
+cloudflared quick tunnel, `--tunnel "<command>"` overrides `web.tunnel`, and
+`web.tunnel` does the same at every start; `--no-tunnel` stays local. A tunnel
+hands the interface a public https hostname, so from that moment the password is
+the boundary — which is what serve says when one starts. A non-loopback bind
+over plain http is worse and warns louder: the password and the session cookie
+cross the network in clear, so use https (a tunnel) or a TLS-terminating proxy.
+
+Approvals inherit all of this: whoever holds a logged-in page answers the
+Allow/Deny modals. No browser attached means nobody answers, and an ask denies
+at its timeout.
+
+Push endpoints are gated like everything else, so registering a subscription,
+reading the public VAPID key, or firing a test notification all require a
+session.
+
+## Push notifications — what is stored
+
+Turning on push in the notification bell puts two files in the state directory
+(`<config>/.shell3_project/`, alongside the runs):
+
+- `web_push_keys.json` — the install's VAPID keypair, generated on first start
+  and written mode `0600`. The **private key signs every push from this
+  install**; anyone holding it can send notifications your subscribed browsers
+  will trust. It is not a config file to copy between machines or commit.
+- `web_push_subs.json` — one entry per subscribed browser: the push service's
+  endpoint URL and that browser's `p256dh`/`auth` keys. Those are capabilities
+  to deliver notifications to that device, so the file is a small tracking
+  surface as well as a delivery list.
+
+Contents travel to a third party by design: delivery goes through the browser
+vendor's push service (Google, Mozilla, Apple), which sees the encrypted
+payload and the timing of every notification. Notification bodies are the bell
+text, truncated to 300 characters — job labels, notifier posts, cron results —
+so anything the notifier says out loud leaves the box. Payloads are encrypted
+to the subscription's keys, but treat the fact and rhythm of notifications as
+visible to the push service.
+
+Revoking: turn the toggle off (unsubscribes the browser and drops the server's
+copy), or delete `web_push_subs.json` to forget every browser. Deleting
+`web_push_keys.json` rotates the identity — a fresh keypair is generated on
+the next start and every existing subscription stops working. Subscriptions a
+push service reports as gone (`404`/`410`) are pruned automatically.
+
+The service worker at `/sw.js` caches nothing — it exists only to show
+notifications and focus an open tab — so there is no stale-asset store to
+clear after an upgrade.
 
 ## What the gate does and doesn't guarantee
 
@@ -37,8 +143,9 @@ user account.** The hook is a policy gate, not a security boundary.
 - **Headless sessions deny on ask.** Subagents and cron jobs have no human
   attached, so an ask verdict auto-denies with its `reason` (which flows back
   to the parent agent in the completion notice). Scripts see `headless` in
-  the payload and can print a tailored block instead. Unanswered asks deny
-  after the timeout (default 300 s). A block verdict never prompts.
+  the payload and can print a tailored block instead. Unanswered asks deny:
+  the browser modal gives up after 2 minutes, an ask with no browser attached
+  denies immediately, and `ask_timeout` (default 300 s) is the outer bound. A block verdict never prompts.
 - **Per-agent, no inheritance.** A subagent with no hook file runs ungated —
   the main agent's script never applies to it. Give every subagent its own
   script (even a strict three-line allowlist) if it must be constrained.
@@ -72,9 +179,9 @@ YAML as `env:KEY`:
 
 - **Never commit `.env`.** The shipped `.gitignore` excludes it.
 - **Never read or display credential files** — this applies to you and to the
-  agent (the system prompt says so; the dashboard and `send_media_telegram`
-  refuse `.env` and its dotenv siblings — `.env.local`, `.env.production`, … —
-  outright).
+  agent (the system prompt says so; the interface's Files view refuses `.env`
+  and its dotenv siblings — `.env.local`, `.env.production`, … — outright,
+  listing them without ever opening them).
 - **Scripts read secrets at point of use.** The scaffold's `scripting` skill
   teaches the pattern: a wrapper script under `~/.shell3/lib/bin/` reads the
   one key it needs from `.env` (`grep '^KEY=' ~/.shell3/.env | cut -d= -f2-`)
@@ -90,13 +197,18 @@ YAML as `env:KEY`:
 
 shell3 is file-native — no database.
 
-- **Per-project runtime state**: `.shell3_project/` under the workdir —
-  conversation history as JSONL (`runs/<id>/messages.jsonl` + `meta.json`).
-  The directory ignores itself (a self-contained `.gitignore` of `*`).
-  Wipe it: `rm -rf .shell3_project`.
-- **Global state**: `~/.shell3/` — your config, `.env`, the app log, proxy
-  and tunnel logs, and `media/` (Telegram uploads + generated images). No
-  conversation history. Wipe everything: `rm -rf ~/.shell3`.
+- **Runtime state**: `.shell3_project/`, kept beside `shell3.yaml` (default
+  install: `~/.shell3/.shell3_project/`) — conversation history as JSONL
+  (`runs/<id>/messages.jsonl` + `meta.json`), the browser thread→session
+  index (`web_threads.jsonl`), the hashed login sessions
+  (`web_sessions.json`, `0600`), and, once push is used, `web_push_keys.json`
+  (the VAPID private key, `0600`) and `web_push_subs.json` (subscribed
+  browsers). The directory ignores itself (a self-contained `.gitignore` of
+  `*`). Wipe it — every transcript and login session:
+  `rm -rf ~/.shell3/.shell3_project`.
+- **The rest of `~/.shell3/`**: your config, `.env`, the app log, proxy and
+  tunnel logs, and `media/` (dictated recordings, uploads, generated images,
+  cached speech). Wipe everything: `rm -rf ~/.shell3`.
 
 ## Reporting vulnerabilities
 

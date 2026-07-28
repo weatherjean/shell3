@@ -29,15 +29,6 @@ func TestResolveConfigDir(t *testing.T) {
 		t.Errorf("empty dir: want boot hint, got %v", err)
 	}
 
-	// A dir carrying only a legacy shell3.lua gets the migration message.
-	legacy := t.TempDir()
-	if err := os.WriteFile(filepath.Join(legacy, "shell3.lua"), []byte("--"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ResolveConfigDir(legacy, home); err == nil || !strings.Contains(err.Error(), "no longer read") {
-		t.Errorf("legacy: want migration error, got %v", err)
-	}
-
 	// A project-local config tree must NOT be picked up for an empty flag.
 	if err := os.WriteFile(filepath.Join(cwd, "shell3.yaml"), []byte("models: {}"), 0o644); err != nil {
 		t.Fatal(err)

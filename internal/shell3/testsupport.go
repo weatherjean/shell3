@@ -28,7 +28,12 @@ func RuntimeForTest(workDir string, sessionConfig func(SessionOpts) (chat.Config
 	return rt
 }
 
-// SetHeartbeatForTest installs a heartbeat config on a test runtime, arming
-// the front-ends' HEARTBEAT_OK suppression. Test-only seam, same caveats as
-// RuntimeForTest.
-func (rt *Runtime) SetHeartbeatForTest(hb *Heartbeat) { rt.heartbeat = hb }
+// SetWebForTest replaces the runtime's `web:` block. The front-end reads its
+// password from here — deliberately, so a /reload picks up a changed one — and
+// a test exercising authentication needs some way to supply it. Like
+// RuntimeForTest, this is for test harnesses in other packages, not public API.
+func (rt *Runtime) SetWebForTest(web WebConfig) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	rt.web = web
+}

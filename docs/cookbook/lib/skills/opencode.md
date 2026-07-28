@@ -51,9 +51,9 @@ bash_bg {
 }
 ```
 
-Completion wakes you with the result. For a run whose finish needs no
-immediate action, add `quiet: true` to queue clean exits for your next
-turn instead (failures still wake you).
+The completion goes to the notifier, which decides whether you hear about it.
+Add `direct: true` when the user is waiting on this run and wants the result
+back immediately (failures surface either way).
 
 ## Follow-ups
 

@@ -8,7 +8,7 @@ The two extensible pieces, in one breath:
 
 - **Skills** are `.md` files with a frontmatter `description:` that the agent
   reads with `cat`. Install: copy into `~/.shell3/skills/`, check
-  `shell3 health`, `/reload`.
+  `shell3 health`, reload.
 - **Scripts** are the extension mechanism: reusable glue lives in
   `~/.shell3/lib/bin/` and runs through `bash`; a script that needs an API
   key reads it from `.env` itself at point of use. The scaffold's
@@ -16,7 +16,7 @@ The two extensible pieces, in one breath:
   [Scripts & secrets](../configuration.md#scripts--secrets)).
 
 Install without a checkout: every file here is fetchable raw (the scaffold's
-`cookbook` skill teaches the agent this, so you can just ask your bot for a
+`cookbook` skill teaches the agent this, so you can just ask your agent for a
 capability and it can install the recipe itself — after telling you what the
 recipe would install and getting your yes):
 
@@ -41,7 +41,7 @@ already ships `browser` — headed Chrome via puppeteer-core)
 - `camoufox-fetch.md` — fetch bot-protected / JS-heavy pages with Camoufox (anti-detect Firefox).
 
 **Coding-agent skills** (same dir; each drives a coding agent installed on
-the machine — the scaffold's `coding-agent` stub tells the bot to bring you
+the machine — the scaffold's `coding-agent` stub tells the agent to bring you
 here and let you pick; delete the stub once one of these lands)
 
 - `claude-code.md` — delegate implementation work to Claude Code (`claude -p`).
@@ -67,8 +67,9 @@ here and let you pick; delete the stub once one of these lands)
 
 **Subagents** (`lib/agents/` here → your `~/.shell3/agents/`)
 
-- `review.md` — a read-only review specialist; copying the file in IS the
-  registration (the task tool picks it up on `/reload`).
+- `review.md` — a review specialist instructed never to edit (a hook
+  allowlist makes that enforced, like the scaffold's `explorer`); copying the
+  file in IS the registration (the task tool picks it up on the next reload).
 
 **Provider and host recipes**
 
@@ -76,4 +77,4 @@ here and let you pick; delete the stub once one of these lands)
 - `models.md` — provider-specific request params via `extra`.
 - `proxy.md` — `run_proxy` recipes (Codex via npx, litellm).
 - `sandbox.md` — sandbox/route bash via hook argv verdicts.
-- `voice-images.md` — voice + images over Telegram; Groq and OpenRouter quickstarts.
+- `voice-images.md` — voice + images; Groq and OpenRouter quickstarts.

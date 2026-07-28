@@ -74,17 +74,17 @@ const compactionInstruction = "You are compacting a long coding-assistant conver
 // any problem it logs and proceeds on the un-compacted history (compactNow does
 // make one synchronous summarisation round-trip, so it is not instantaneous).
 //
+// An explicit /compact does NOT come through here — it is CompactStandalone,
+// run between turns by the front-end. This is the automatic tier only.
+//
 // lastPromptTokens is 0 on the first turn, so the first turn never compacts or
 // prunes.
 func maybeCompact(ctx context.Context, cfg TurnConfig, sess *Session) {
-	// A queued /compact forces a compaction regardless of the threshold (and even
-	// when auto-compaction is disabled). Swap clears the request atomically.
-	forced := sess.forceCompact.Swap(false)
-	if !forced && cfg.CompactAt <= 0 {
+	if cfg.CompactAt <= 0 {
 		return
 	}
-	if forced || sess.lastPromptTokens >= cfg.CompactAt {
-		compactNow(ctx, cfg, sess, forced)
+	if sess.lastPromptTokens >= cfg.CompactAt {
+		compactNow(ctx, cfg, sess)
 		return
 	}
 	if cfg.PruneAt > 0 && sess.lastPromptTokens >= cfg.PruneAt {
@@ -110,8 +110,8 @@ func CompactStandalone(ctx context.Context, cfg TurnConfig, sess *Session) (befo
 // compactNow is the turn-start auto-compaction wrapper around compactApply:
 // strictly best-effort, never fails the turn — failures were already logged
 // inside compactApply, so the result is deliberately discarded.
-func compactNow(ctx context.Context, cfg TurnConfig, sess *Session, forced bool) {
-	_, _, _ = compactApply(ctx, cfg, sess, forced)
+func compactNow(ctx context.Context, cfg TurnConfig, sess *Session) {
+	_, _, _ = compactApply(ctx, cfg, sess, false)
 }
 
 // compactApply performs host-enforced compaction: it summarises the head of
@@ -129,6 +129,16 @@ func compactApply(ctx context.Context, cfg TurnConfig, sess *Session, forced boo
 	// Compute the tail boundary before checking the floor: if the entire history
 	// fits within keepRecent, there is nothing left to summarise.
 	keepRecent := resolveKeepRecent(cfg)
+	if forced && keepRecent > minKeepRecent {
+		// Someone asked for space NOW. The automatic tail is a fraction of
+		// compact_at — tens of thousands of tokens on a large window — so a
+		// forced compaction sized that way refuses ("nothing to compact")
+		// through the whole range where you would actually type /compact.
+		// Narrow the tail to the floor: recent turns stay verbatim, the rest
+		// becomes summary. Never widened, so a deliberately small keep_recent
+		// is still honoured.
+		keepRecent = minKeepRecent
+	}
 	if keepRecent <= 0 {
 		// A forced /compact can reach here with compact_at=0 (auto-compaction
 		// off), which makes resolveKeepRecent return 0. Floor the tail so a forced
@@ -385,8 +395,8 @@ func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.
 	continuationMsg := llm.Message{Role: llm.RoleUser, Content: b.String()}
 
 	// Build the rewritten history in a local, then publish it under msgMu: this
-	// runs on the turn goroutine but replaces the slice the dashboard's
-	// Messages() reader may be copying concurrently (see Session.msgMu).
+	// runs on the turn goroutine but replaces the slice a concurrent
+	// Messages() reader may be copying (see Session.msgMu).
 	newMsgs := make([]llm.Message, 0, 1+len(tail))
 	newMsgs = append(newMsgs, continuationMsg)
 	newMsgs = append(newMsgs, tail...)
@@ -396,7 +406,7 @@ func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.
 	// Reminder anchors index the pre-compaction message slice; the rewrite
 	// invalidates them. Drop the log exactly as SetMessages does — stale high-Seq
 	// anchors otherwise break History()'s non-decreasing-Seq interleave and
-	// silently hide every later reminder from the dashboard. The new runs session
+	// silently hide every later reminder from any reader. The new runs session
 	// has its own (empty) reminder sidecar, so no truncation is needed.
 	sess.reminderLog = nil
 	sess.msgMu.Unlock()
@@ -471,50 +481,7 @@ func capStrings(s []string, n int) []string {
 // making pruneOldToolOutputs naturally idempotent without a separate flag.
 const pruneMinBytes = 2048
 
-// pruneStub is the placeholder a pruned tool result is replaced with. Shared by
-// the manual /prune command (PruneByID) and the automatic prune pass.
+// pruneStub is the placeholder a pruned tool result is replaced with.
 func pruneStub(stem string, origLen int) string {
 	return fmt.Sprintf("[%s — original was %d bytes]", stem, origLen)
-}
-
-// PruneByID replaces the tool result with the given id in any of the slices
-// with a short stem stub. summary is a human-readable status string; ok is
-// false when no tool result with that id exists in the slices, so callers
-// branch on the flag instead of parsing the summary. Used by the host-side
-// /prune slash command (internal/shell3.Session.Prune); element mutations propagate
-// to the caller's slices.
-func PruneByID(toolCallID, stem string, msgSlices ...[]llm.Message) (summary string, ok bool) {
-	var target *llm.Message
-	var name string
-	for _, msgs := range msgSlices {
-		for i := range msgs {
-			if msgs[i].Role == llm.RoleTool && msgs[i].ToolCallID == toolCallID {
-				target = &msgs[i]
-				name = msgs[i].Name
-				break
-			}
-		}
-		if target != nil {
-			break
-		}
-	}
-	if target == nil {
-		return fmt.Sprintf("error: no tool result with id %q in conversation", toolCallID), false
-	}
-
-	content := target.Content
-	stub := pruneStub(stem, len(content))
-	count := 0
-	for _, msgs := range msgSlices {
-		for i := range msgs {
-			if msgs[i].Role == llm.RoleTool && msgs[i].ToolCallID == toolCallID {
-				msgs[i].Content = stub
-				count++
-			}
-		}
-	}
-	if count == 0 {
-		return "error: failed to update message content", false
-	}
-	return fmt.Sprintf("Pruned result of %s (id=%s): freed %d bytes", name, toolCallID, len(content)-len(stub)), true
 }

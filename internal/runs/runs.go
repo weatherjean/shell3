@@ -26,6 +26,13 @@ type Meta struct {
 	StartedAt time.Time `json:"started_at"`
 	EndedAt   time.Time `json:"ended_at,omitzero"`
 	LastAt    time.Time `json:"last_at"`
+	// LastPromptTokens is the provider-reported prompt-token count from the most
+	// recent turn. Persisted so a resume restores the accurate context gauge
+	// instead of re-deriving it with the chars/4 estimate (which underestimates
+	// token-dense content, letting the prompt overflow the model window without
+	// ever tripping prune/compaction). Zero on old sessions written before this
+	// field existed; resume then falls back to the estimate.
+	LastPromptTokens int `json:"last_prompt_tokens,omitempty"`
 }
 
 // Store is rooted at a project's .shell3_project/ directory.
@@ -54,7 +61,7 @@ func Open(root string) (*Store, error) {
 func (s *Store) runsDir() string { return filepath.Join(s.root, "runs") }
 
 // sessDir resolves a session directory. IDs arrive from user-controlled
-// surfaces (the dashboard, shell3 dev --resume), so anything that is not a plain
+// surfaces (the web API, shell3 ask --resume), so anything that is not a plain
 // path component is rejected by mapping it to an impossible directory —
 // "../../../etc" must never escape the store.
 func (s *Store) sessDir(id string) string {
@@ -64,6 +71,23 @@ func (s *Store) sessDir(id string) string {
 		return filepath.Join(s.runsDir(), "invalid-session-id")
 	}
 	return filepath.Join(s.runsDir(), id)
+}
+
+// JobLogPath returns the on-disk log path for a background job owned by
+// session id — runs/<id>/jobs/<jobID>.log — creating the jobs/ dir so the
+// caller can open the file directly. Returns "" when the dir cannot be
+// created (the caller then simply keeps no on-disk log). The whole jobs/
+// subtree rides the run dir's lifecycle: the janitor's RemoveAll sweeps it
+// with the session.
+func (s *Store) JobLogPath(id, jobID string) string {
+	if jobID == "" || jobID != filepath.Base(jobID) {
+		return ""
+	}
+	dir := filepath.Join(s.sessDir(id), "jobs")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return ""
+	}
+	return filepath.Join(dir, jobID+".log")
 }
 
 // newID is a sortable wall-clock timestamp plus a random suffix. The suffix
@@ -167,6 +191,34 @@ func (s *Store) EndSession(id string) error {
 	return s.writeMeta(m)
 }
 
+// SetLastPromptTokens records the provider-reported prompt-token count for the
+// session (see Meta.LastPromptTokens) so a later resume restores the accurate
+// context gauge. Read-modify-write of meta.json; a no-op when the value is
+// unchanged so the hot per-turn persist path doesn't rewrite meta needlessly.
+func (s *Store) SetLastPromptTokens(id string, n int) error {
+	m, err := s.readMeta(id)
+	if err != nil {
+		return err
+	}
+	if m.LastPromptTokens == n {
+		return nil
+	}
+	m.LastPromptTokens = n
+	return s.writeMeta(m)
+}
+
+// LastPromptTokens returns the persisted provider-reported prompt-token count
+// for the session, or 0 when the session is unknown, its meta is unreadable, or
+// it predates the field. Callers treat 0 as "no persisted value" and fall back
+// to the estimate.
+func (s *Store) LastPromptTokens(id string) int {
+	m, err := s.readMeta(id)
+	if err != nil {
+		return 0
+	}
+	return m.LastPromptTokens
+}
+
 // TouchSession bumps LastAt.
 func (s *Store) TouchSession(id string) error {
 	m, err := s.readMeta(id)
@@ -239,7 +291,8 @@ func (s *Store) LoadReminders(id string) ([]ReminderLine, error) {
 	return decodeLines[ReminderLine](string(b)), nil
 }
 
-// TruncateReminders removes the sidecar (used by /clear, /rollback).
+// TruncateReminders removes the reminder sidecar, for a session whose history
+// has been replaced (see chat.Session.SetMessages).
 func (s *Store) TruncateReminders(id string) error {
 	if err := os.Remove(s.remindersPath(id)); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("runs: truncate reminders: %w", err)

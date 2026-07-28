@@ -1,0 +1,29 @@
+<!--
+Example "checklist" cron job. Rename this file to checklist.md to activate it
+(any cron/*.md is loaded and armed; a .example file is ignored).
+
+Frontmatter:
+  schedule  robfig/cron syntax: "@every 30m", "@daily", or a 5-field spec like
+            "*/30 8-22 * * *" (every 30 min, 8am-10pm — active hours only).
+  agent     a subagent from agents/ to run the checklist (here: explorer).
+  direct    true skips the notifier: the result is handed straight to the
+            main agent as a fresh turn. Leave it off for report-style jobs —
+            the notifier (notifier.md) then decides per run whether the
+            result is worth a message, and stays silent when it isn't.
+            Failures always surface either way.
+
+The body is the prompt. Write it to report findings plainly; the notifier
+silences runs with nothing worth saying, so no sentinel is needed.
+-->
+---
+schedule: "@every 30m"
+agent: explorer
+---
+Periodic check-in. Work through the checklist with your tools. Each run is a
+fresh conversation — if a check must not repeat, track its state in a file.
+
+Checklist:
+- Anything urgent in the inbox or on disk that needs my human?
+
+If something needs attention, reply with a concise alert and nothing else.
+If nothing does, say briefly that all is quiet.

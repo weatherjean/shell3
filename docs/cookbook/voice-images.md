@@ -1,8 +1,9 @@
-# Voice + images over Telegram
+# Voice + images
 
 Four optional blocks under `media:` in `shell3.yaml` — `stt`, `tts`,
 `describe`, `imagegen` — each point at a model by name. The scaffold ships
-them as commented hints. Full reference:
+them as commented hints (except `describe`, which boot writes live when you
+answer that your model has vision). Full reference:
 [configuration.md](../configuration.md#voice--images--media).
 
 ## Groq quickstart (one free key, STT + TTS)
@@ -22,23 +23,22 @@ models:
     model: playai-tts
 
 media:
-  stt: { model: groq-whisper, echo: true }        # voice notes → text
-  tts: { model: groq-tts, voice: Fritz-PlayAI, mode: inbound }
+  stt: { model: groq-whisper }                    # dictation → text
+  tts: { model: groq-tts, voice: Fritz-PlayAI }
 ```
 
-Add `GROQ_API_KEY=...` to `.env`, `/reload`, and send the bot a voice note —
-it replies with a `📝 "…"` transcript (`echo: true`; omit it to transcribe
-silently), runs the turn, and (because
-`mode: inbound`) speaks the reply back as a voice note. Switch modes any time
-with `/voice off|inbound|always`.
+Add `GROQ_API_KEY=...` to `.env`, reload, and reopen the interface: the
+composer's microphone records a message and fills in the transcript for you to
+edit before sending, and the read-aloud control on a reply speaks it back.
+Without these two blocks both controls fall back to the browser's own Web
+Speech APIs.
 
 ## OpenRouter variant (one key for STT + TTS + describe)
 
 OpenRouter also serves OpenAI-compatible `/audio/transcriptions` and
 `/audio/speech`, so a single OpenRouter key covers voice in/out **and** the
 image `describe` fallback. One caveat: OpenRouter's TTS emits `mp3`/`pcm`
-only (no opus), so spoken replies arrive as audio files rather than round
-Telegram voice bubbles:
+only (no opus) — fine in a browser, which plays whatever comes back:
 
 ```yaml
 models:
@@ -57,7 +57,7 @@ models:
 
 media:
   stt: { model: or-whisper }
-  tts: { model: or-tts, voice: af_bella, format: mp3, mode: inbound }
+  tts: { model: or-tts, voice: af_bella, format: mp3 }
   describe: { model: or-vision }   # only if your main model can't see images
 ```
 
@@ -94,30 +94,24 @@ media:
   imagegen: { model: some-image-model, size: 1024x1024 }
 ```
 
-`describe` is only useful for a **text-only** main model — a vision-capable
-one already sees an inbound photo directly. `imagegen` is one declaration,
-every agent: the main agent **and each subagent** get an
-`image_generate{prompt, size?}` tool under every front-end (telegram, web,
-dev). It saves the image to `~/.shell3/media/` and returns the path; a
-subagent is told to include the path in its report so the main agent can
-deliver it. Want to keep a subagent from generating? Gate it in that
-subagent's hook script like any other tool (`name` is `image_generate`;
-`headless` is true for subagents and cron jobs).
+`describe` captions an image before a turn, for a **text-only** main model —
+a vision-capable one reads the file itself with `read_media`. `imagegen` is
+one declaration, every agent: the main agent **and each subagent** get an
+`image_generate{prompt, size?}` tool. It saves the image to `~/.shell3/media/`
+and returns the path; the main agent is told to show it by writing a markdown
+image at its `/api/media/<file>` URL, and a subagent to include the path in
+its report so the main agent can deliver it. Want to keep a subagent from
+generating? Gate it in that subagent's hook script like any other tool
+(`name` is `image_generate`; `headless` is true for subagents and cron jobs).
 
-All media — inbound Telegram uploads (`tg-*`) and generated images (`img-*`)
-— lives in `~/.shell3/media/`, so everything the agent has seen or made keeps
-a stable path: re-readable with `read_media`, re-sendable, browsable from the
-dashboard file explorer. It grows until you prune it. (Synthesized voice
-replies are the exception — sent and deleted immediately.)
-
-## Delivering files back: `kind`
-
-Under Telegram, `send_media_telegram` (registered whenever the bot runs, e.g.
-to hand back a generated image) takes an optional `kind`: `"photo"`
-(Telegram recompresses to ~1280px), `"voice"` (`.ogg`/`.opus` only), `"audio"`,
-`"video"` (`.mp4`/`.webm`/`.mov` only), or `"document"` (default — pixel-exact,
-no recompression). Use `"document"` for anything where fidelity matters, e.g.
-a screenshot with small text.
+All media — dictated recordings (`web-*`), uploads (`up-*`), generated images
+(`img-*`), and synthesized speech (`tts-*`, cached so replaying a reply costs
+nothing) — lives in `~/.shell3/media/`, so everything the agent has made or
+heard keeps a stable path: re-readable with `read_media`, servable to the
+browser at `/api/media/<file>`, and browsable in the interface's **Files**
+view, which carries the media folder as a second root beside the config tree
+(newest first, images and audio previewed inline). It grows until you prune
+it.
 
 ## Reading PDFs and video: `read_media`
 

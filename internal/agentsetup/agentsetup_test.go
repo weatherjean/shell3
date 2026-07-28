@@ -239,6 +239,57 @@ func TestSessionConfigs_Independent(t *testing.T) {
 	}
 }
 
+// TestSessionConfig_ContextReadPerSession pins the fresh-turn contract:
+// context files are read at session-config build, so an edit landing between
+// two sessions is visible to the second without a reload. The first session's
+// already-rendered prompt keeps the old body.
+func TestSessionConfig_ContextReadPerSession(t *testing.T) {
+	tmp := t.TempDir()
+	writeTree(t, tmp, map[string]string{
+		"shell3.yaml": minimalYAML,
+		"agent.md":    "---\nmodel: main\ncontext: [memory.md]\n---\nyou are a tester\n",
+		"memory.md":   "MEMORY-V1",
+	})
+	parts, cleanup, err := agentsetup.BuildParts(agentsetup.Options{
+		ConfigDir: tmp,
+		CWD:       tmp,
+		HomeDir:   t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("BuildParts: %v", err)
+	}
+	defer cleanup()
+
+	cfg1, err := parts.SessionConfig(agentsetup.SessionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"## Context", "### memory.md", "MEMORY-V1"} {
+		if !strings.Contains(cfg1.Personality.SystemPrompt, want) {
+			t.Fatalf("first session prompt missing %q:\n%s", want, cfg1.Personality.SystemPrompt)
+		}
+	}
+
+	// Edit the brain, then build a second session — it must see the new body.
+	if err := os.WriteFile(filepath.Join(tmp, "memory.md"), []byte("MEMORY-V2"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg2, err := parts.SessionConfig(agentsetup.SessionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(cfg2.Personality.SystemPrompt, "MEMORY-V2") {
+		t.Errorf("second session prompt missing rewritten body:\n%s", cfg2.Personality.SystemPrompt)
+	}
+	if strings.Contains(cfg2.Personality.SystemPrompt, "MEMORY-V1") {
+		t.Errorf("second session prompt still carries the stale body:\n%s", cfg2.Personality.SystemPrompt)
+	}
+	// The first session captured the old body at build time.
+	if !strings.Contains(cfg1.Personality.SystemPrompt, "MEMORY-V1") {
+		t.Errorf("first session prompt should retain the old body:\n%s", cfg1.Personality.SystemPrompt)
+	}
+}
+
 // TestBuild_MalformedConfig_Errors characterizes the post-log-open error path:
 // a present but invalid shell3.yaml resolves (so the log opens), then
 // config.Load fails — Build must surface the error.
@@ -497,5 +548,39 @@ func TestBuild_PruneFlag(t *testing.T) {
 	}
 	if want := 100000 * 60 / 100; inh.PruneAt != want {
 		t.Errorf("inheriting: PruneAt = %d, want %d (model default)", inh.PruneAt, want)
+	}
+}
+
+// TestSubagentWorkdir asserts Parts.SubagentWorkdir returns a project manager's
+// declared workdir, and "" for ordinary subagents and unknown names — the seam
+// that lets startSubagent run a manager's shell in the project repo.
+func TestSubagentWorkdir(t *testing.T) {
+	tmp := t.TempDir()
+	work := t.TempDir()
+	writeTree(t, tmp, map[string]string{
+		"shell3.yaml":              minimalYAML,
+		"agent.md":                 "---\nmodel: main\ntools: [bash]\n---\nyou are a coder\n",
+		"agents/explorer.md":       "---\ndescription: explores things\ntools: [bash]\n---\nyou are an explorer\n",
+		"projects/site/project.md": "---\ndescription: my site\nworkdir: " + work + "\n---\nBrief.\n",
+		"projects/site/manager.md": "---\ndescription: manages site\n---\nYou are the site manager.\n",
+	})
+	parts, cleanup, err := agentsetup.BuildParts(agentsetup.Options{
+		ConfigDir: tmp,
+		CWD:       tmp,
+		HomeDir:   t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("BuildParts: %v", err)
+	}
+	defer cleanup()
+
+	if got := parts.SubagentWorkdir("site"); got != work {
+		t.Errorf("SubagentWorkdir(\"site\") = %q, want %q (project workdir)", got, work)
+	}
+	if got := parts.SubagentWorkdir("explorer"); got != "" {
+		t.Errorf("SubagentWorkdir(\"explorer\") = %q, want \"\" (ordinary subagent inherits)", got)
+	}
+	if got := parts.SubagentWorkdir("nope"); got != "" {
+		t.Errorf("SubagentWorkdir(\"nope\") = %q, want \"\" (unknown name)", got)
 	}
 }

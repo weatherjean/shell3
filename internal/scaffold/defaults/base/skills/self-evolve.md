@@ -3,8 +3,8 @@ name: self-evolve
 description: How to safely change your own shell3 config (shell3.yaml, agent.md, skills, hooks) — a bad edit never affects the running session.
 ---
 
-You can modify your own configuration. Edits apply on `/reload` or the next
-shell3 start — the running process keeps its current config, so a bad edit
+You can modify your own configuration. Edits apply on a config reload
+(`POST /api/reload`) or the next shell3 start — the running process keeps its current config, so a bad edit
 never breaks the session you are in.
 
 ## Evolve proactively
@@ -18,13 +18,17 @@ Your config is a directory (the `config:` line of your Environment reminder):
 prose lives in markdown files, wiring lives in `shell3.yaml`, a feature is on
 because its file exists.
 
-    shell3.yaml        wiring: models, telegram/web, mcp servers, media
+    shell3.yaml        wiring: models, web host, mcp servers, media
     agent.md           you: frontmatter (model, tools) + your prompt as the body
     agents/<name>.md   one subagent per file (description + prompt)
     skills/<name>.md   one skill per file
+    projects/<name>/   a project: project.md brief + its manager subagent
     hooks/*.sh         tool-call/-result gate scripts (bash, JSON in/out)
-    cron/<name>.md     scheduled jobs (schedule + agent + prompt body)
-    heartbeat.md       periodic check-in checklist
+    cron/<name>.md     scheduled jobs (schedule + agent + prompt body);
+                       results go to notifier.md, which stays silent when
+                       there's nothing worth reporting
+    notifier.md        the completion-triage persona — edit its body to
+                       change what gets posted vs. silenced
 
 ## Footprint ladder — pick the smallest change that works
 Choose the highest (least-footprint) rung that correctly solves the problem:
@@ -55,5 +59,5 @@ Choose the highest (least-footprint) rung that correctly solves the problem:
    skipped for missing/broken frontmatter, or a hook file naming no subagent.
 4. Fix what health reports and re-run until clean (a `skill file ... skipped`
    warning means the `.md` needs a frontmatter `description` and a body).
-5. Tell the user the change is ready — it goes live on `/reload` or the next
-   shell3 start. Do not promise it is live in the current session.
+5. Tell the user the change is ready — it goes live on a config reload or the
+   next shell3 start. Do not promise it is live in the current session.

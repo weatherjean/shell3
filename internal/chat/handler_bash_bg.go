@@ -7,10 +7,11 @@ import (
 )
 
 // BashBgHandler starts a background shell command on the managed in-process
-// job runtime (via cfg.StartBashBg, wired to the internal/shell3 jobManager). The
-// job runs as a goroutine-supervised child of the session; completion wakes an
-// idle agent with a notice (quiet:true queues clean exits for the next turn
-// instead) — there is no detached pid or log path to poll.
+// job runtime (via cfg.StartBashBg, wired to the internal/shell3 jobManager).
+// The job runs as a goroutine-supervised child of the session; on completion
+// the notifier triages the result (direct:true skips triage and delivers the
+// notice straight back to this session) — there is no detached pid or log
+// path to poll.
 type BashBgHandler struct{}
 
 func (BashBgHandler) Name() string { return "bash_bg" }
@@ -19,7 +20,8 @@ func (BashBgHandler) Execute(ctx context.Context, id string, args json.RawMessag
 	var p struct {
 		Command string `json:"command"`
 		Workdir string `json:"workdir"`
-		Quiet   bool   `json:"quiet"`
+		Direct  bool   `json:"direct"`
+		Note    string `json:"note"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("bash_bg: invalid args: %w", err)
@@ -38,12 +40,12 @@ func (BashBgHandler) Execute(ctx context.Context, id string, args json.RawMessag
 	if wd == "" {
 		wd = cfg.WorkDir
 	}
-	jobID, err := cfg.StartBashBg(p.Command, wd, argv, nil, p.Quiet)
+	jobID, err := cfg.StartBashBg(p.Command, wd, argv, nil, p.Direct, p.Note)
 	if err != nil {
 		return "", fmt.Errorf("bash_bg: %w", err)
 	}
-	if p.Quiet {
-		return fmt.Sprintf("started background job %s (quiet)\nA clean exit queues its notice for your next turn; a failure wakes you. Do not poll.", jobID), nil
+	if p.Direct {
+		return fmt.Sprintf("started background job %s (direct)\nYou'll be woken with its completion notice. Do not poll.", jobID), nil
 	}
-	return fmt.Sprintf("started background job %s\nYou'll be woken with a completion notice when it finishes. Do not poll.", jobID), nil
+	return fmt.Sprintf("started background job %s\nThe notifier will triage its completion (you may or may not hear back). Do not poll.", jobID), nil
 }

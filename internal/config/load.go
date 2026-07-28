@@ -8,7 +8,7 @@ import (
 )
 
 // Load reads the config directory dir: shell3.yaml (required) + .env +
-// agent.md (required) + agents/*.md + skills/*.md + cron/*.md + heartbeat.md
+// agent.md (required) + agents/*.md + skills/*.md + cron/*.md
 // + hooks/*.sh. Absent optional pieces disable their features. Every error
 // names the file that caused it.
 func Load(dir string) (*LoadedConfig, error) {
@@ -28,9 +28,6 @@ func load(dir string) (*LoadedConfig, error) {
 	data, err := os.ReadFile(yamlPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			if _, lerr := os.Stat(filepath.Join(dir, "shell3.lua")); lerr == nil {
-				return nil, fmt.Errorf("shell3 now uses a config directory (shell3.yaml) — re-run 'shell3 boot'; shell3.lua is no longer read")
-			}
 			return nil, fmt.Errorf("no shell3.yaml — run 'shell3 boot' to create one")
 		}
 		return nil, err
@@ -57,10 +54,40 @@ func load(dir string) (*LoadedConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	// context: literal entries must exist (strict); a zero-match glob is legal
+	// but warns. Contents are read late (per session), NOT here.
+	if err := validateContextEntries(dir, c.agent.Context, warn); err != nil {
+		return nil, err
+	}
+
+	// notifier.md — the background-completion triage persona (optional; absent
+	// = the host posts every completion raw).
+	if nd, err := os.ReadFile(filepath.Join(dir, "notifier.md")); err == nil {
+		n, err := parseNotifierFile(nd)
+		if err != nil {
+			return nil, err
+		}
+		c.notifier = &n
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
 
 	// agents/*.md — subagents, filename order. Presence = registered;
 	// delegation is on iff at least one exists.
 	if err := c.loadSubagents(dir); err != nil {
+		return nil, err
+	}
+	// projects/<name>/ — each registers its manager as a subagent under the
+	// project name (flat namespace with agents/), so it must land before the
+	// names collection and the later cron/hook cross-ref checks.
+	if err := c.loadProjects(dir, warn); err != nil {
+		return nil, err
+	}
+	// projects.md — the standing portfolio brief, appended verbatim to the end
+	// of the main agent's system prompt when present.
+	if pb, err := os.ReadFile(filepath.Join(dir, "projects.md")); err == nil {
+		c.agent.ProjectsBrief = strings.TrimSpace(string(pb))
+	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
 	names := make([]string, 0, len(c.subagents))
@@ -76,21 +103,13 @@ func load(dir string) (*LoadedConfig, error) {
 	}
 	c.agent.Skills = skills
 
-	// cron/*.md + heartbeat.md.
+	// cron/*.md — scheduled prompts, one file per job.
 	if err := c.loadCron(dir); err != nil {
-		return nil, err
-	}
-	hbData, err := os.ReadFile(filepath.Join(dir, "heartbeat.md"))
-	if err == nil {
-		if c.heartbeat, err = parseHeartbeatFile(hbData); err != nil {
-			return nil, err
-		}
-	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
 
 	// hooks/*.sh.
-	if c.hooks, err = discoverHooks(dir, c.subagents, warn); err != nil {
+	if c.hooks, err = discoverHooks(dir, c.subagents, c.notifier != nil, warn); err != nil {
 		return nil, fmt.Errorf("hooks: %w", err)
 	}
 
@@ -125,7 +144,7 @@ func load(dir string) (*LoadedConfig, error) {
 	}
 	for _, job := range c.cron {
 		if _, ok := c.SubagentByName(job.Agent); !ok {
-			return nil, fmt.Errorf("cron/%s.md: unknown agent %q (must be a subagent from agents/)", job.Name, job.Agent)
+			return nil, fmt.Errorf("cron/%s.md: unknown agent %q (must be a subagent from agents/ or a project manager)", job.Name, job.Agent)
 		}
 	}
 	return c, nil
@@ -135,6 +154,9 @@ func load(dir string) (*LoadedConfig, error) {
 // for validation loops.
 func (c *LoadedConfig) cores() []AgentCommon {
 	out := []AgentCommon{c.agent.AgentCommon}
+	if c.notifier != nil {
+		out = append(out, c.notifier.AgentCommon)
+	}
 	for _, sa := range c.subagents {
 		out = append(out, sa.AgentCommon)
 	}
@@ -171,10 +193,14 @@ func (c *LoadedConfig) loadSubagents(dir string) error {
 		name := strings.TrimSuffix(e.Name(), ".md")
 		// "agent" is the main agent's fixed name; a subagent shadowing it
 		// would silently win every name lookup (hooks, task dispatch).
+		// "notifier" is likewise reserved for the triage persona (notifier.md).
 		if name == "agent" {
 			return fmt.Errorf("agents/agent.md: the name \"agent\" is reserved for the main agent (agent.md) — rename the file")
 		}
-		sa, err := parseSubagentFile(data, name, c.agent.ModelName)
+		if name == "notifier" {
+			return fmt.Errorf("agents/notifier.md: the name \"notifier\" is reserved for the triage persona (notifier.md beside shell3.yaml) — rename the file")
+		}
+		sa, err := parseSubagentFile(data, name, c.agent.ModelName, "agents/"+name+".md")
 		if err != nil {
 			return err
 		}

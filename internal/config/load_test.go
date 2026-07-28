@@ -23,7 +23,6 @@ func TestLoadFullTree(t *testing.T) {
 		"agents/writer.md":   "---\ndescription: writes\ntools: [bash, edit]\n---\nWrite.\n",
 		"skills/history.md":  "---\ndescription: search history\n---\nUse rg.\n",
 		"cron/daily.md":      "---\nschedule: \"@daily\"\nagent: explorer\n---\nDo the rounds.\n",
-		"heartbeat.md":       "---\nevery: 30m\n---\n- anything urgent?\n",
 	})
 	a := c.FirstAgent()
 	if a.Name != "agent" || a.ModelName != "m1" {
@@ -41,20 +40,58 @@ func TestLoadFullTree(t *testing.T) {
 	if len(c.Cron()) != 1 || c.Cron()[0].Agent != "explorer" {
 		t.Fatalf("cron = %+v", c.Cron())
 	}
-	if c.Heartbeat() == nil {
-		t.Fatal("heartbeat missing")
+	if len(c.Warnings()) != 0 {
+		t.Fatalf("warnings = %v", c.Warnings())
+	}
+}
+
+func TestLoad_ContextLiteralMissingErrors(t *testing.T) {
+	// A literal (non-glob) context entry that does not exist fails the load —
+	// strict tradition, same as any other dangling reference.
+	msg := loadErr(t, map[string]string{
+		"agent.md": "---\nmodel: m1\ncontext: [memory.md]\n---\nbody\n",
+	})
+	if !strings.Contains(msg, "memory.md") || !strings.Contains(msg, "context") {
+		t.Fatalf("want a context/memory.md load error, got %q", msg)
+	}
+}
+
+func TestLoad_ContextGlobEmptyOK(t *testing.T) {
+	// A glob matching zero files is legal (the dir may fill later); the load
+	// succeeds but records a warning shell3 health hardens into a failure.
+	c := mustLoad(t, map[string]string{
+		"agent.md": "---\nmodel: m1\ncontext: [notes/*.md]\n---\nbody\n",
+	})
+	if got := c.FirstAgent().Context; len(got) != 1 || got[0] != "notes/*.md" {
+		t.Fatalf("agent.Context = %v, want [notes/*.md]", got)
+	}
+	if len(c.Warnings()) == 0 {
+		t.Fatalf("zero-match context glob should produce a warning, got none")
+	}
+}
+
+func TestLoad_ContextLiteralPresent(t *testing.T) {
+	// A literal entry that exists loads clean and is retained verbatim.
+	c := mustLoad(t, map[string]string{
+		"agent.md":  "---\nmodel: m1\ncontext: [memory.md]\n---\nbody\n",
+		"memory.md": "# Memory\n",
+	})
+	if got := c.FirstAgent().Context; len(got) != 1 || got[0] != "memory.md" {
+		t.Fatalf("agent.Context = %v, want [memory.md]", got)
 	}
 	if len(c.Warnings()) != 0 {
 		t.Fatalf("warnings = %v", c.Warnings())
 	}
 }
 
-func TestLoadMigrationError(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "shell3.lua", "-- old config\n")
-	_, err := Load(dir)
-	if err == nil || !strings.Contains(err.Error(), "shell3 boot") {
-		t.Fatalf("err = %v", err)
+func TestLoad_SubagentContextRejected(t *testing.T) {
+	// context: is a main-agent-only key; a subagent (agents/*.md) declaring it
+	// fails the load.
+	msg := loadErr(t, map[string]string{
+		"agents/x.md": "---\ndescription: d\ncontext: [memory.md]\n---\nbody\n",
+	})
+	if !strings.Contains(msg, "context") {
+		t.Fatalf("want a subagent-context rejection, got %q", msg)
 	}
 }
 
@@ -85,6 +122,47 @@ func TestLoadCrossRefErrors(t *testing.T) {
 		"agent.md": "---\nmodel: m1\nmcp: [ghost]\n---\nbody\n",
 	}); !strings.Contains(msg, "mcp server") {
 		t.Fatalf("msg = %q", msg)
+	}
+}
+
+func TestLoadReadListFilesTools(t *testing.T) {
+	// An agent opting into read + list_files loads with both gates set, and
+	// ToolDefs surfaces both tool definitions.
+	c := mustLoad(t, map[string]string{
+		"agent.md": "---\nmodel: m1\ntools: [read, list_files]\n---\nRead-only agent.\n",
+	})
+	a := c.FirstAgent()
+	if !a.Gates.Read || !a.Gates.List {
+		t.Fatalf("gates = %+v, want Read and List set", a.Gates)
+	}
+	defs := ToolDefs(a.Gates)
+	var haveRead, haveList bool
+	for _, d := range defs {
+		switch d.Name {
+		case "read":
+			haveRead = true
+		case "list_files":
+			haveList = true
+		}
+	}
+	if !haveRead || !haveList {
+		t.Fatalf("ToolDefs = %+v, want read and list_files", defs)
+	}
+}
+
+func TestLoadUnknownToolNamesValidList(t *testing.T) {
+	// A misspelled tool token fails the load and the error names the full valid
+	// list, including read and list_files.
+	msg := loadErr(t, map[string]string{
+		"agent.md": "---\nmodel: m1\ntools: [reed]\n---\nOops.\n",
+	})
+	if !strings.Contains(msg, `unknown tool "reed"`) {
+		t.Fatalf("msg = %q", msg)
+	}
+	for _, want := range []string{"bash", "bash_bg", "edit", "media", "read", "list_files"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error should name %q in the valid list, got %q", want, msg)
+		}
 	}
 }
 

@@ -17,6 +17,11 @@ type agentFrontmatter struct {
 	MCP         stringOrList `yaml:"mcp"`
 	Description string       `yaml:"description"`
 	Prune       *bool        `yaml:"prune"`
+	// Context is the main-agent-only list of config-dir-relative files (globs
+	// allowed) prepended to every fresh session's prompt. It lives on the shared
+	// struct so the strict decode accepts it, but parseSubagentFile rejects a
+	// non-empty value the same way parseMainAgent rejects a description.
+	Context []string `yaml:"context"`
 }
 
 // stringOrList decodes a YAML value that is either a scalar string or a list
@@ -53,7 +58,7 @@ func parseAgentFile(data []byte, name, label string) (AgentCommon, string, error
 	if strings.TrimSpace(body) == "" {
 		return AgentCommon{}, "", fmt.Errorf("%s: no prompt body after frontmatter", label)
 	}
-	core := AgentCommon{Name: name, ModelName: fm.Model, Prompt: body, Prune: fm.Prune}
+	core := AgentCommon{Name: name, ModelName: fm.Model, Prompt: body, Prune: fm.Prune, Context: fm.Context}
 	for _, tool := range fm.Tools {
 		switch tool {
 		case "bash":
@@ -64,8 +69,12 @@ func parseAgentFile(data []byte, name, label string) (AgentCommon, string, error
 			core.Gates.Edit = true
 		case "media":
 			core.Gates.Media = true
+		case "read":
+			core.Gates.Read = true
+		case "list_files":
+			core.Gates.List = true
 		default:
-			return AgentCommon{}, "", fmt.Errorf("%s: unknown tool %q (valid: bash, bash_bg, edit, media)", label, tool)
+			return AgentCommon{}, "", fmt.Errorf("%s: unknown tool %q (valid: bash, bash_bg, edit, media, read, list_files)", label, tool)
 		}
 	}
 	switch {
@@ -99,16 +108,21 @@ func parseMainAgent(data []byte) (Agent, error) {
 	return Agent{AgentCommon: core}, nil
 }
 
-// parseSubagentFile parses one agents/<name>.md. description is required (the
-// task tool routes on it); model defaults to the main agent's.
-func parseSubagentFile(data []byte, name, mainModel string) (Subagent, error) {
-	label := "agents/" + name + ".md"
+// parseSubagentFile parses one subagent definition — an agents/<name>.md or a
+// Chain of Command project's projects/<name>/manager.md. description is
+// required (the task tool routes on it); model defaults to the main agent's.
+// label names the file in errors (the two sources live in different dirs).
+func parseSubagentFile(data []byte, name, mainModel, label string) (Subagent, error) {
 	core, desc, err := parseAgentFile(data, name, label)
 	if err != nil {
 		return Subagent{}, err
 	}
 	if desc == "" {
 		return Subagent{}, fmt.Errorf("%s: frontmatter needs a description (the task tool routes on it)", label)
+	}
+	// context: is main-agent-only (like skills — subagents carry none).
+	if len(core.Context) > 0 {
+		return Subagent{}, fmt.Errorf("%s: context is only valid on the main agent (agent.md)", label)
 	}
 	if core.ModelName == "" {
 		core.ModelName = mainModel

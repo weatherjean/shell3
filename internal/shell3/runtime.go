@@ -20,7 +20,7 @@ type RuntimeSpec struct {
 
 // SessionOpts parameterizes one Session on a Runtime.
 type SessionOpts struct {
-	// Name keys the session on the runtime (e.g. "telegram"). "" gets a unique
+	// Name keys the session on the runtime (e.g. "cron"). "" gets a unique
 	// generated name. Requesting an existing live name returns that session.
 	Name string
 	// Agent selects the initial agent ("" → first declared).
@@ -108,13 +108,10 @@ type Runtime struct {
 	// jobs manages in-process background jobs (command and subagent jobs).
 	// Owned by this Runtime; cancelled at Close.
 	jobs *jobManager
-	// telegram + cron + heartbeat mirror the parsed config blocks the runtime
-	// was built with (and re-derived on Reload). Read via
-	// Telegram()/Cron()/HeartbeatConfig(). See telegram.go.
-	telegram  TelegramConfig
-	web       WebConfig
-	cron      []CronJob
-	heartbeat *Heartbeat
+	// web + cron mirror the parsed config blocks the runtime was built
+	// with (and re-derived on Reload). Read via Web()/Cron(). See config.go.
+	web  WebConfig
+	cron []CronJob
 
 	// parts is the shared config assembly this Runtime was (re)built from.
 	// Swapped alongside the other fields at Reload; read via Parts() by host
@@ -122,10 +119,25 @@ type Runtime struct {
 	// expose (e.g. rebuilding media.Clients from LoadedConfig + EnsureProxy).
 	parts *agentsetup.Parts
 
+	// parkedClosers holds old-generation Parts teardown funcs deferred past a
+	// Reload that happened while background work was live: a running job (or a
+	// lingering subagent child) may still hold the old generation's store/MCP
+	// handles, so closing them mid-flight would break it. Each is drained
+	// exactly once (drainParkedClosers) when the job manager reports zero
+	// running tasks — from a job completion or from Close. Guarded by mu.
+	parkedClosers []func()
+
 	mu       sync.Mutex
 	sessions map[string]*Session
 	nextName int
 	closed   bool
+
+	// completionH is the front-end delivery surface for background
+	// completions (SetCompletionHost). nil = library fallback (raw notice to
+	// the owning session). forceNotifier is a test seam: in-package tests set
+	// it to route dispatchCompletion through triage without real Parts.
+	completionH   CompletionHost
+	forceNotifier bool
 
 	// decorate, when set (SetSessionDecorator), runs for every session this
 	// runtime creates — main and subagent children alike — and again for every
@@ -181,10 +193,8 @@ func NewRuntime(ctx context.Context, spec RuntimeSpec) (*Runtime, error) {
 		ctx:           ctx,
 		cancel:        cancel,
 		sessions:      map[string]*Session{},
-		telegram:      parts.Telegram(),
 		web:           parts.Web(),
 		cron:          parts.Cron(),
-		heartbeat:     parts.Heartbeat(),
 		parts:         parts,
 	}
 	rt.jobs = newJobManager(rt, parts.BackgroundMaxConcurrent())
@@ -280,7 +290,7 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 		return nil, ErrRuntimeClosed
 	}
 	// A named session is keyed on the runtime: requesting an existing live name
-	// (e.g. the telegram host's "telegram") returns that same session so its
+	// (e.g. the web host's "web-<thread>") returns that same session so its
 	// history persists across reattach. An empty name gets a unique generated
 	// label ("sN"), skipping any already taken by a live session.
 	if opts.Name == "" {
@@ -321,6 +331,26 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	// Subagent completions are injected in-process by the runtime's jobManager
 	// (finishSubagent notifies the parent directly) — nothing to launch here.
 	return s, nil
+}
+
+// drainParkedClosers runs (once) any old-generation Parts teardown funcs a
+// Reload deferred, provided no background work remains that could still be
+// using an old generation. Called from every job completion / child-session
+// close and from Close. A benign no-op when nothing is parked or a job is
+// still live: the next completion re-checks. The running-jobs check happens
+// before rt.mu is taken (runningJobIDs locks the job manager) so the two locks
+// are never nested here.
+func (rt *Runtime) drainParkedClosers() {
+	if rt.jobs != nil && (len(rt.jobs.runningJobIDs()) > 0 || rt.jobs.hasActiveTriage()) {
+		return
+	}
+	rt.mu.Lock()
+	closers := rt.parkedClosers
+	rt.parkedClosers = nil
+	rt.mu.Unlock()
+	for _, c := range closers {
+		c()
+	}
 }
 
 // decorateFn returns the current session decorator under rt.mu.
@@ -364,6 +394,16 @@ func (rt *Runtime) Close() error {
 	if rt.jobs != nil {
 		rt.jobs.cancelAll()
 		rt.jobs.wait()
+	}
+	// All jobs have unwound, so any old-generation closers a Reload parked can
+	// run now (before the current generation's cleanup). Drain directly rather
+	// than via drainParkedClosers: teardown is unconditional here.
+	rt.mu.Lock()
+	parked := rt.parkedClosers
+	rt.parkedClosers = nil
+	rt.mu.Unlock()
+	for _, c := range parked {
+		c()
 	}
 	rt.cleanup()
 	// Cancel the runtime base ctx so anything scoped to the runtime's lifetime

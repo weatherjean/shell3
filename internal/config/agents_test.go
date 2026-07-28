@@ -40,7 +40,7 @@ func TestParseMainAgentErrors(t *testing.T) {
 }
 
 func TestParseSubagent(t *testing.T) {
-	sa, err := parseSubagentFile([]byte("---\ndescription: Explores code.\ntools: [bash]\nmcp: [github]\n---\nYou explore.\n"), "explorer", "main-model")
+	sa, err := parseSubagentFile([]byte("---\ndescription: Explores code.\ntools: [bash]\nmcp: [github]\n---\nYou explore.\n"), "explorer", "main-model", "agents/explorer.md")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestParseSubagent(t *testing.T) {
 }
 
 func TestParseSubagentModelOverride(t *testing.T) {
-	sa, err := parseSubagentFile([]byte("---\nmodel: other\ndescription: d\n---\nbody\n"), "x", "main")
+	sa, err := parseSubagentFile([]byte("---\nmodel: other\ndescription: d\n---\nbody\n"), "x", "main", "agents/x.md")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestParseSubagentModelOverride(t *testing.T) {
 }
 
 func TestParseSubagentNeedsDescription(t *testing.T) {
-	_, err := parseSubagentFile([]byte("---\ntools: [bash]\n---\nbody\n"), "x", "m")
+	_, err := parseSubagentFile([]byte("---\ntools: [bash]\n---\nbody\n"), "x", "m", "agents/x.md")
 	if err == nil || !strings.Contains(err.Error(), "description") {
 		t.Fatalf("err = %v", err)
 	}

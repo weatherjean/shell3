@@ -33,15 +33,15 @@ func systemdAvailable() bool {
 	return err == nil
 }
 
-const serviceUnitName = "shell3-telegram.service"
+const serviceUnitName = "shell3.service"
 
-// serviceUnit renders the systemd user unit for `shell3 telegram`.
-// Restart=always + linger (enabled separately) is what makes the bot survive
+// serviceUnit renders the systemd user unit for `shell3 serve`.
+// Restart=always + linger (enabled separately) is what makes shell3 survive
 // crashes, logouts, and reboots. PATH includes the usual user bin dirs so
 // tunnel/docker helpers the agent shells out to are found.
 func serviceUnit(bin, configDir, home string) string {
 	return fmt.Sprintf(`[Unit]
-Description=shell3 Telegram bot front-end
+Description=shell3 agent + web interface
 After=network-online.target
 Wants=network-online.target
 StartLimitBurst=5
@@ -49,7 +49,7 @@ StartLimitIntervalSec=60
 
 [Service]
 Type=simple
-ExecStart=%s telegram --config %s
+ExecStart=%s serve --config %s
 Restart=always
 RestartSec=5
 Environment=HOME=%s
@@ -60,12 +60,10 @@ WantedBy=default.target
 `, bin, configDir, home, home, home)
 }
 
-// offerSystemdService asks (TTY + systemd only) whether to run `shell3
-// telegram` as a systemd user service, and sets it up on yes: unit file,
-// daemon-reload, enable, linger. start says whether the config is complete
-// enough to start it immediately (Telegram token + chat id present) — an
-// incomplete config is enabled but not started, so it can't crash-loop.
-// Failures are reported, never fatal: boot's config work is already done.
+// offerSystemdService asks (TTY + systemd only) whether to run `shell3 serve`
+// as a systemd user service, and sets it up on yes: unit file, daemon-reload,
+// enable, linger. start says whether to start it immediately as well as enable
+// it. Failures are reported, never fatal: boot's config work is already done.
 func offerSystemdService(tty bool, configDir, home string, start bool) serviceState {
 	if !tty || !systemdAvailable() {
 		return serviceNotOffered

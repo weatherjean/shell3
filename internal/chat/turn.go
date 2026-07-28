@@ -524,6 +524,15 @@ func saveHistory(st *runs.Store, lg applog.Logger, sess *Session, sessionID stri
 		return
 	}
 	sess.persistedLen += flushMessages(st, lg, sessionID, sess.messages[sess.persistedLen:])
+	// Persist the provider-reported prompt-token count alongside the messages so
+	// a resume restores the accurate context gauge (not the chars/4 estimate) and
+	// the first resumed turn's prune/compaction fires. Best-effort like the flush
+	// above; a no-op when the count is unchanged.
+	if sess.lastPromptTokens > 0 {
+		if err := st.SetLastPromptTokens(sessionID, sess.lastPromptTokens); err != nil {
+			lg.Warn("persist prompt tokens failed", "session_id", sessionID, "error", err)
+		}
+	}
 }
 
 // flushMessages appends each message in msgs to the runs store (one JSONL line

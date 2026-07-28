@@ -30,12 +30,11 @@ type Config interface {
 	Model(name string) (config.Model, bool)
 }
 
-// Speech is a synthesized-audio result from Clients.Speak.
+// Speech is a synthesized-audio result from Clients.Speak: the path to the
+// written audio file. The caller owns it (the web front-end caches it under
+// the media dir and serves it back; see webui.ttsCache).
 type Speech struct {
 	Path string
-	// VoiceCompatible is true when Path's codec (opus/ogg) can be sent as a
-	// Telegram voice bubble rather than a plain audio document.
-	VoiceCompatible bool
 }
 
 // Clients holds shell3's media capabilities, each wired to the model its
@@ -48,14 +47,8 @@ type Clients struct {
 	Describe   func(ctx context.Context, path string) (string, error)
 	Generate   func(ctx context.Context, prompt, size string) (string, error)
 
-	// STTEcho mirrors media.stt echo: whether the transcript is echoed
-	// back to the chat before the model turn runs.
-	STTEcho bool
-	// TTSMode mirrors media.tts mode: the configured default
-	// ("off"/"inbound"/"always") for when outbound replies are synthesized.
-	TTSMode string
-	// GenSize mirrors shell3.imagegen{}.size: the default requested
-	// dimensions for Generate when a caller doesn't override it.
+	// GenSize mirrors media.imagegen size: the default requested dimensions
+	// for Generate when a caller doesn't override it.
 	GenSize string
 }
 
@@ -94,14 +87,12 @@ func New(cfg Config, ensureProxy func(name, command string)) *Clients {
 	}
 
 	if s := cfg.STT(); s != nil {
-		c.STTEcho = s.Echo
 		var once sync.Once
 		c.Transcribe = newTranscriber(func(ref string) (openai.Client, config.Model) {
 			return sdkOnce(&once, ensureProxy, sdk, ref)
 		}, *s)
 	}
 	if t := cfg.TTS(); t != nil {
-		c.TTSMode = t.Mode
 		var once sync.Once
 		c.Speak = newSpeaker(func(ref string) (openai.Client, config.Model) {
 			return sdkOnce(&once, ensureProxy, sdk, ref)
@@ -123,13 +114,12 @@ func New(cfg Config, ensureProxy func(name, command string)) *Clients {
 	return c
 }
 
-// Dir returns shell3's durable media directory — where generated images and
-// inbound Telegram attachments are stored, so every media file the agent has
-// seen or made keeps a stable path that survives reboots and OS temp
-// cleaning (re-readable with read_media, re-sendable, findable from
-// history). Default ~/.shell3/media; $SHELL3_MEDIA_DIR overrides (tests
-// point it at a TempDir). Created on demand. Synthesized TTS audio does NOT
-// live here — it is sent and deleted in the same breath (see outDir).
+// Dir returns shell3's durable media directory — where browser uploads,
+// generated images, and cached speech are stored, so every media file the
+// agent has seen or made keeps a stable path that survives reboots and OS
+// temp cleaning (re-readable with read_media, servable at /api/media/,
+// findable from history). Default ~/.shell3/media; $SHELL3_MEDIA_DIR
+// overrides (tests point it at a TempDir). Created on demand.
 func Dir() (string, error) {
 	dir := os.Getenv("SHELL3_MEDIA_DIR")
 	if dir == "" {
@@ -146,8 +136,8 @@ func Dir() (string, error) {
 }
 
 // outDir returns shell3's transient media scratch directory, now used only
-// for synthesized TTS audio (sent to the chat and deleted immediately —
-// durable storage would be noise). Generated images go to Dir() instead.
+// for freshly synthesized TTS audio, before the web front-end's cache moves
+// it into Dir() under a content hash. Generated images go straight to Dir().
 func outDir() (string, error) {
 	dir := filepath.Join(os.TempDir(), "shell3-media")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
