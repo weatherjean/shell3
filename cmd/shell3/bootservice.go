@@ -38,13 +38,13 @@ func systemdAvailable() bool {
 
 const serviceUnitName = "shell3.service"
 
-// serviceUnit renders the systemd user unit for `shell3 serve`.
+// serviceUnit renders the systemd user unit for `shell3 telegram`.
 // Restart=always + linger (enabled separately) is what makes shell3 survive
 // crashes, logouts, and reboots. PATH includes the usual user bin dirs so
 // tunnel/docker helpers the agent shells out to are found.
 func serviceUnit(bin, configDir, home string) string {
 	return fmt.Sprintf(`[Unit]
-Description=shell3 agent + web interface
+Description=shell3 agent + Telegram bot
 After=network-online.target
 Wants=network-online.target
 StartLimitBurst=5
@@ -52,7 +52,7 @@ StartLimitIntervalSec=60
 
 [Service]
 Type=simple
-ExecStart=%s serve --config %s
+ExecStart=%s telegram --config %s
 Restart=always
 RestartSec=5
 Environment=HOME=%s
@@ -63,8 +63,9 @@ WantedBy=default.target
 `, bin, configDir, home, home, home)
 }
 
-// offerSystemdService asks (TTY + systemd only) whether to run `shell3 serve`
-// as a systemd user service, and sets it up on yes: unit file, daemon-reload,
+// offerSystemdService asks (TTY + systemd only) whether to run
+// `shell3 telegram` as a systemd user service, and sets it up on yes: unit
+// file, daemon-reload,
 // enable, linger. start says whether to start it immediately as well as enable
 // it. Failures are reported, never fatal: boot's config work is already done.
 func offerSystemdService(tty bool, configDir, home string, start bool) serviceState {
@@ -148,25 +149,11 @@ func reinstallService() error {
 	if !systemdAvailable() {
 		return fmt.Errorf("boot --service: no systemd user instance here")
 	}
-	started := time.Now()
 	if installSystemdService(dir, home, true) != serviceEnabled {
 		return fmt.Errorf("boot --service: service setup failed (see warnings above)")
 	}
-	fixedURL, tunnelWired, addr, _ := webWiring(dir)
-	fmt.Printf("%s reinstalled and running — open http://%s\n", serviceUnitName, addr)
-	switch {
-	case fixedURL != "":
-		fmt.Printf("public URL: %s\n", fixedURL)
-	case tunnelWired:
-		// Hold on briefly for the freshly minted public URL so nobody has
-		// to dig it out of the journal.
-		fmt.Println("waiting for the tunnel URL …")
-		if u := waitTunnelURL(dir, started, 45*time.Second); u != "" {
-			fmt.Printf("public URL (phone): %s\n", u)
-		} else {
-			fmt.Println("no tunnel URL yet — `shell3 url` prints it once the tunnel is up")
-		}
-	}
+	fmt.Printf("%s reinstalled and running — message your bot on Telegram\n", serviceUnitName)
+	fmt.Printf("  journalctl --user -u %s -f   # follow the log\n", serviceUnitName)
 	return nil
 }
 

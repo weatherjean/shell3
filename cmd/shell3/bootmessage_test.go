@@ -38,18 +38,18 @@ func TestBootSuccessMessage(t *testing.T) {
 		"shell3 ask",                  // the local ask mode must be advertised
 		serviceUnitName,               // service management commands
 		"Sleep caveat",                // laptop-suspend warning
-		"http://127.0.0.1:8765",       // where to reach the running service
+		"Telegram",                    // where to reach the running bot
 	} {
 		if !strings.Contains(svcOn, want) {
 			t.Errorf("service-enabled message missing %q", want)
 		}
 	}
-	if strings.Contains(svcOn, "shell3 serve\n") {
+	if strings.Contains(svcOn, "shell3 telegram\n") {
 		t.Error("service-enabled message should not tell the user to start the bot manually")
 	}
 
 	svcOff := captureBootSuccess(t, false, serviceDeclined)
-	for _, want := range []string{"shell3 serve", "shell3 ask"} {
+	for _, want := range []string{"shell3 telegram", "shell3 ask"} {
 		if !strings.Contains(svcOff, want) {
 			t.Errorf("no-service message missing %q", want)
 		}

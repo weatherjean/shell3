@@ -77,6 +77,18 @@ models:
 #     allow: [search_issues, get_issue]
 
 # ---------------------------------------------------------------------------
+# Telegram bot  (run: shell3 telegram)
+# ---------------------------------------------------------------------------
+# token is read from .env like every other secret — get one from @BotFather.
+# chat_id is the single chat the bot answers (yours; @userinfobot prints it):
+# messages from anywhere else are ignored, which is the whole access model.
+# workdir is where the agent's shell runs; blank uses this config directory.
+telegram:
+  token: env:TELEGRAM_TOKEN           # TELEGRAM_TOKEN in .env
+  chat_id: {{.ChatID | yamlstr}}
+  workdir: {{.WorkDir | yamlstr}}
+
+# ---------------------------------------------------------------------------
 # Web interface  (run: shell3 serve)
 # ---------------------------------------------------------------------------
 # workdir is where the agent's shell runs. addr is the listen address.

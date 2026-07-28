@@ -114,6 +114,25 @@ func TestCollectAnswersNonTTY(t *testing.T) {
 		}
 	})
 
+	// A chat id reaches shell3.yaml verbatim and is parsed as an int64 by the
+	// front-end at startup, far from where it was typed — so boot rejects a
+	// non-numeric one here, and lets a blank through (fill it in later).
+	t.Run("chat id validated", func(t *testing.T) {
+		if _, err := collectAnswers(&bootFlags{model: "m", tgChatID: "@me"}, false); err == nil {
+			t.Fatal("expected a non-numeric chat id to be rejected")
+		}
+		a, err := collectAnswers(&bootFlags{model: "m", tgChatID: " 8701499393 "}, false)
+		if err != nil {
+			t.Fatalf("collectAnswers: %v", err)
+		}
+		if a.tgChatID != "8701499393" {
+			t.Errorf("chat id = %q, want it trimmed to 8701499393", a.tgChatID)
+		}
+		if _, err := collectAnswers(&bootFlags{model: "m"}, false); err != nil {
+			t.Fatalf("a blank chat id must be allowed: %v", err)
+		}
+	})
+
 	t.Run("compact-at defaults to 80% of explicit window", func(t *testing.T) {
 		a, err := collectAnswers(&bootFlags{model: "m", contextWindow: "200000"}, false)
 		if err != nil {
@@ -164,6 +183,11 @@ func TestBootEndToEnd(t *testing.T) {
 	}
 	if !strings.Contains(string(env), "MAIN_API_KEY=") {
 		t.Errorf(".env missing MAIN_API_KEY line:\n%s", env)
+	}
+	// The token key is always written, even blank: the config references it, so
+	// a missing key is a load error rather than an empty-token startup refusal.
+	if !strings.Contains(string(env), envTelegramToken+"=") {
+		t.Errorf(".env missing %s line:\n%s", envTelegramToken, env)
 	}
 	if fi, err := os.Stat(envPath); err != nil {
 		t.Fatal(err)

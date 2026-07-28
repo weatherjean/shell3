@@ -18,8 +18,7 @@ const tgMaxMessage = 4096
 // tool call is progress narration ("Let me check…"), so each ToolCall resets
 // the segment (keeping the last non-empty one as a fallback for turns that end
 // on a tool call). Errors always surface, appended after the reply. Channel
-// close is the authoritative end-of-turn signal. The Done event carries the
-// turn's cumulative token totals, which it reports to onUsage (if set).
+// close is the authoritative end-of-turn signal.
 func (b *Bot) drainTurn(ch <-chan shell3.Event) string {
 	var seg strings.Builder // current assistant segment
 	var last string         // last non-empty completed segment
@@ -39,10 +38,6 @@ func (b *Bot) drainTurn(ch <-chan shell3.Event) string {
 				if h := shell3.RecoveryHint(ev.Err); h != "" {
 					errs.WriteString("\n💡 " + h)
 				}
-			}
-		case shell3.Done:
-			if b.onUsage != nil {
-				b.onUsage(ev.PromptTokens, ev.CompletionTokens, ev.TotalTokens)
 			}
 		}
 	}

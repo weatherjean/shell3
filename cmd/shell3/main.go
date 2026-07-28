@@ -36,6 +36,7 @@ func main() {
 		return cmd.Help()
 	}
 	root.AddCommand(newServeCommand())
+	root.AddCommand(newTelegramCommand())
 	root.AddCommand(newAskCommand())
 	root.AddCommand(newBootCommand())
 	root.AddCommand(newProjectCommand())

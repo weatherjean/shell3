@@ -2,7 +2,24 @@
 
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+// TestServiceUnitRunsTheBot pins what the installed unit actually starts: the
+// Telegram front-end, against the config dir boot just wrote. A unit pointing
+// at another command is the difference between a bot that answers and one that
+// crash-loops in the journal.
+func TestServiceUnitRunsTheBot(t *testing.T) {
+	unit := serviceUnit("/usr/local/bin/shell3", "/home/u/.shell3", "/home/u")
+	if !strings.Contains(unit, "ExecStart=/usr/local/bin/shell3 telegram --config /home/u/.shell3") {
+		t.Errorf("unit does not start the telegram front-end:\n%s", unit)
+	}
+	if !strings.Contains(unit, "Restart=always") {
+		t.Errorf("unit does not restart on crash:\n%s", unit)
+	}
+}
 
 // TestWaitServiceActive covers the three shapes: immediately active, active
 // after a few polls, and never active (a crash-looping unit must not be

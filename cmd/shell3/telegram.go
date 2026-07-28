@@ -1,0 +1,357 @@
+//go:build unix
+
+package main
+
+import (
+	"fmt"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strconv"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/weatherjean/shell3/internal/cron"
+	"github.com/weatherjean/shell3/internal/media"
+	"github.com/weatherjean/shell3/internal/paths"
+	"github.com/weatherjean/shell3/internal/runs"
+	"github.com/weatherjean/shell3/internal/shell3"
+	"github.com/weatherjean/shell3/internal/telegram"
+)
+
+// newTelegramCommand builds `shell3 telegram` — the personal bot front-end.
+// One chat, one agent: every inbound message runs its own session (a fresh
+// one, or the thread's session when the message is a Telegram reply), cron
+// fires from a hidden dispatch parent, and background completions come back
+// through the notifier.
+//
+// --console swaps the Telegram transport for stdin/stdout, driving the same
+// bot loop with no credentials and no network.
+func newTelegramCommand() *cobra.Command {
+	var configDir string
+	var console bool
+	cmd := &cobra.Command{
+		Use:   "telegram",
+		Short: "Run the personal Telegram bot front-end",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+			defer stop()
+
+			rt, resolved, err := openRuntime(ctx, configDir)
+			if err != nil {
+				return err
+			}
+			defer rt.Close()
+
+			tg := rt.Telegram()
+
+			// Console mode needs no Telegram credentials — it drives the same
+			// bot loop over stdin/stdout with a fixed dummy chat id.
+			var chatID int64
+			if console {
+				chatID = telegram.ConsoleChatID
+			} else {
+				if tg.Token == "" || tg.ChatID == "" {
+					return fmt.Errorf("no telegram config: add a telegram: block (token, chat_id) to shell3.yaml")
+				}
+				if chatID, err = strconv.ParseInt(tg.ChatID, 10, 64); err != nil {
+					return fmt.Errorf("telegram chat_id %q is not a number: %w", tg.ChatID, err)
+				}
+			}
+
+			// The agent's shell runs in telegram.workdir; the config dir is the
+			// fallback, so a hosted agent stays self-contained.
+			workDir := tg.WorkDir
+			if workDir == "" {
+				workDir = resolved
+			}
+
+			// Runs janitor: start-time only, never on `shell3 ask`. Sweeps
+			// runs/<id>/ dirs past runs_keep_days (0 = keep forever) and, in the
+			// same pass, drops thread-index entries pointing at sessions that no
+			// longer exist — whether just swept or already gone (deleted by hand,
+			// an older crash). Must run before NewThreadIndex opens that file for
+			// the live process below.
+			runsRoot := rt.Parts().RunsRoot()
+			threadsPath := filepath.Join(runsRoot, "telegram_threads.jsonl")
+			removedRuns, err := runs.Sweep(runsRoot,
+				time.Duration(rt.Parts().RunsKeepDays())*24*time.Hour, time.Now())
+			if err != nil {
+				// Fail-open: Sweep skipped whatever it couldn't remove and kept
+				// going. Leftover run dirs are cosmetic, never worth refusing to
+				// start the bot over.
+				fmt.Printf("warning: janitor: %v\n", err)
+			}
+			removedThreads, err := telegram.PruneThreadIndex(threadsPath,
+				sessionExistsUnder(runsRoot, removedRuns))
+			if err != nil {
+				return fmt.Errorf("runs janitor: prune thread index: %w", err)
+			}
+			if len(removedRuns) > 0 || removedThreads > 0 {
+				fmt.Printf("janitor: removed %d runs, %d thread entries\n",
+					len(removedRuns), removedThreads)
+			}
+
+			// Fresh-turn model: the bot holds NO long-lived session. Each inbound
+			// message runs in its own session (fresh, or the thread's session on a
+			// Telegram reply); the thread index maps message ids → session ids and
+			// lives for the whole process (kept across /reload).
+			threads, err := telegram.NewThreadIndex(threadsPath)
+			if err != nil {
+				return err
+			}
+
+			// Transport: the real Telegram bot API, or (--console) a stdin/stdout
+			// dev transport driving the same bot loop headlessly. apiClient stays
+			// nil in console mode and the Telegram-only side effects are skipped.
+			var apiClient *telegram.BotAPIClient
+			var b *telegram.Bot
+			if console {
+				b = telegram.NewBot(
+					telegram.NewConsoleClient(os.Stdin, os.Stdout, chatID), rt, chatID, threads)
+			} else {
+				if apiClient, err = telegram.NewBotAPIClient(ctx, tg.Token, rt.Parts().Log()); err != nil {
+					return err
+				}
+				b = telegram.NewBot(apiClient, rt, chatID, threads)
+			}
+			b.SetWorkDir(workDir) // resolves send_media_telegram relative paths
+			b.SetVersion(version)
+			b.SetRunsRoot(runsRoot)
+
+			// Media (STT/describe/TTS/imagegen): built from the runtime's current
+			// config and re-built by the reload closure below. The session
+			// decorator registers image_generate on EVERY session and, for main
+			// chat sessions (not the headless subagent children), the bot's host
+			// tools. Runtime.Reload re-applies the decorator, so both survive a
+			// reload with no separate resync.
+			voiceModeStore, err := newVoiceModeStore()
+			if err != nil {
+				return err
+			}
+			b.SetMedia(buildMediaCaps(rt), voiceModeStore)
+			rt.SetSessionDecorator(func(s *shell3.Session) {
+				_ = media.RegisterImageTool(s, buildMediaClients(rt))
+				if !s.Headless() { // main chat sessions only, not subagent children
+					b.DecorateChatSession(s)
+				}
+			})
+
+			// Background completions (bash_bg, subagents, cron) route through the
+			// notifier via the bot's CompletionHost: send verdicts post ⏰/🔔
+			// messages, wake verdicts resume the owning thread or start a fresh
+			// main-agent turn.
+			rt.SetCompletionHost(b)
+
+			// Cron dispatches subagents, which need SOME parent session. One
+			// hidden session is the dispatch parent; it runs no turns of its own
+			// (the notifier owns delivery). Adopted so it is never retired and its
+			// jobs keep resolving.
+			cronSess, err := rt.Session(shell3.SessionOpts{
+				Name: "cron", WorkDir: workDir, Headless: true,
+			})
+			if err != nil {
+				return err
+			}
+			b.AdoptSession(cronSess)
+
+			// /jobs, /job <id> and /cancel <id>: Session.Jobs reports the WHOLE job
+			// runtime, not one session's share, so the pinned cron session is as
+			// good a window as any. Cancel reuses jobManager's cascade (task_cancel
+			// semantics).
+			b.SetJobsSource(cronSess.Jobs, jobTranscriptOf(cronSess))
+			b.SetJobControl(cronSess.KillJob)
+
+			sched, err := armCron(cronSess, rt.Cron())
+			if err != nil {
+				return err
+			}
+			// A closure over the mutable handle: /reload swaps sched for a fresh
+			// scheduler, and it is the CURRENT one that must stop at shutdown.
+			// LIFO: this runs before the earlier `defer rt.Close()`.
+			var schedMu sync.Mutex
+			currentSched := func() *cron.Scheduler {
+				schedMu.Lock()
+				defer schedMu.Unlock()
+				return sched
+			}
+			defer func() {
+				if s := currentSched(); s != nil {
+					s.Stop()
+				}
+			}()
+			if sched != nil {
+				b.SetJobRunner(sched.Run) // /run <job>
+			}
+			// /cron's "last run" column reads the live scheduler's history.
+			b.SetCronLastRuns(func() map[string]time.Time { return cronLastRuns(currentSched()) })
+
+			// /reload + the reload tool: rebuild config, swap the cron scheduler,
+			// re-wire media. The bot's host tools and image_generate need no
+			// re-registration — Runtime.Reload re-applies the session decorator.
+			b.SetReloader(func() (shell3.ReloadResult, error) {
+				ns, res, err := reloadAndRearm(rt, b, cronSess, currentSched(),
+					func() { b.SetMedia(buildMediaCaps(rt), voiceModeStore) })
+				schedMu.Lock()
+				sched = ns
+				schedMu.Unlock()
+				return res, err
+			})
+
+			if console {
+				fmt.Println("shell3 telegram --console: reading events from stdin " +
+					"(plain line = fresh message, \"@<id> text\" = reply, \"/…\" = command, EOF quits)")
+			} else {
+				// Register the "/" command hints (best-effort).
+				if err := apiClient.SetCommands(ctx, telegram.BotCommands()); err != nil {
+					fmt.Printf("warning: could not set commands: %v\n", err)
+				}
+				// The menu button persists on Telegram's side; one set by an older
+				// build would keep opening a dead web_app URL.
+				if err := apiClient.ClearMenuButton(ctx); err != nil {
+					fmt.Printf("warning: could not clear menu button: %v\n", err)
+				}
+				// Greet the chat; the ReplyKeyboardRemove markup also tears down any
+				// persistent reply-keyboard bar left by an older build (commands
+				// live in the "/" menu instead). Best-effort.
+				banner := "๑ï shell3 online — your personal agent, at your pace\n\n" +
+					"Every message starts a fresh thread; reply to any of my messages to continue its thread. " +
+					"/status shows what's wired, /jobs what's running, /stop halts the current turn, " +
+					"/reload applies config changes."
+				if err := apiClient.SendRemovingKeyboard(ctx, chatID, banner); err != nil {
+					fmt.Printf("warning: could not send the greeting: %v\n", err)
+				}
+				fmt.Printf("shell3 telegram: listening for chat %d\n  config: %s\n", chatID, resolved)
+			}
+			b.Run(ctx)
+			return nil
+		},
+	}
+	addConfigFlag(cmd, &configDir)
+	cmd.Flags().BoolVar(&console, "console", false,
+		"dev transport: run the bot loop over stdin/stdout instead of Telegram (headless event testing)")
+	return cmd
+}
+
+// jobTranscriptOf builds the per-job transcript lookup /job <id> renders: a
+// subagent job's transcript is its child session's, a bash_bg job's is its
+// captured output. Unknown ids render with no Output section.
+func jobTranscriptOf(sess *shell3.Session) func(id string) string {
+	return func(id string) string {
+		for _, j := range sess.Jobs() {
+			if j.ID != id {
+				continue
+			}
+			if j.Kind == shell3.JobSubagent {
+				return sess.JobTranscript(id)
+			}
+			return sess.JobOutput(id)
+		}
+		return ""
+	}
+}
+
+// cronLastRuns projects the scheduler's per-job status onto the name → last-run
+// map /cron renders. A nil scheduler (no jobs) or an unparsable/never-run entry
+// simply contributes nothing, which renders as "never".
+func cronLastRuns(sched *cron.Scheduler) map[string]time.Time {
+	if sched == nil {
+		return nil
+	}
+	out := map[string]time.Time{}
+	for _, j := range sched.Jobs() {
+		if j.LastRun == "" {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339, j.LastRun)
+		if err != nil {
+			continue
+		}
+		out[j.Name] = t
+	}
+	return out
+}
+
+// buildMediaCaps bundles the runtime's media clients with the two shell3.yaml
+// defaults the bot reads directly (media.stt.echo, media.tts.mode). Rebuilt on
+// every reload, since the config may have changed either.
+func buildMediaCaps(rt *shell3.Runtime) *telegram.MediaCaps {
+	caps := &telegram.MediaCaps{Clients: *buildMediaClients(rt)}
+	cfg := rt.Parts().MediaConfig()
+	if stt := cfg.STT(); stt != nil {
+		caps.STTEcho = stt.Echo
+	}
+	if tts := cfg.TTS(); tts != nil {
+		caps.TTSMode = tts.Mode
+	}
+	return caps
+}
+
+// newVoiceModeStore opens the per-chat inbound-voice-reply mode file at
+// ~/.shell3/voice_mode.json (the global root, independent of which config or
+// workdir this process was started with).
+func newVoiceModeStore() (*telegram.ModeStore, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve home directory: %w", err)
+	}
+	return &telegram.ModeStore{Path: filepath.Join(paths.NewGlobal(home).Root, "voice_mode.json")}, nil
+}
+
+// configReloader and rearmBot are the narrow slices of *shell3.Runtime and
+// *telegram.Bot that reloadAndRearm needs, keeping the reload-coordination
+// logic unit-testable with fakes.
+type configReloader interface {
+	Reload() (shell3.ReloadResult, error)
+	Cron() []shell3.CronJob
+}
+
+type rearmBot interface {
+	SetJobRunner(func(name string) error)
+}
+
+// reloadAndRearm performs a /reload: rebuild config, then stop the old cron
+// scheduler and arm a fresh one from the reloaded jobs (rewiring the bot's
+// /run handler). Returns the new scheduler (nil when no jobs), the reload
+// result, and any error. On failure the old scheduler is left running and
+// returned unchanged, so a bad config never tears down a working schedule.
+//
+// The bot's host tools (send_media_telegram, reload, status) and image_generate
+// need no explicit re-registration: they are installed via the session
+// decorator, which Runtime.Reload re-applies to every live session.
+// resyncMedia, when non-nil, is called after a successful Reload to rebuild the
+// bot's media capabilities from the freshly reloaded config.
+func reloadAndRearm(r configReloader, b rearmBot, disp cron.Dispatcher, old *cron.Scheduler, resyncMedia func()) (*cron.Scheduler, shell3.ReloadResult, error) {
+	res, err := r.Reload()
+	if err != nil {
+		return old, res, err
+	}
+	if resyncMedia != nil {
+		resyncMedia()
+	}
+	jobs := r.Cron()
+	if len(jobs) == 0 {
+		if old != nil {
+			old.Stop()
+		}
+		b.SetJobRunner(nil)
+		return nil, res, nil
+	}
+	// Build (and thereby parse) the new scheduler BEFORE stopping the old one:
+	// a malformed schedule surfaces only here, and must not tear down a working
+	// schedule.
+	ns, err := cron.New(disp, jobs)
+	if err != nil {
+		return old, res, err
+	}
+	if old != nil {
+		old.Stop()
+	}
+	ns.Start()
+	b.SetJobRunner(ns.Run)
+	return ns, res, nil
+}

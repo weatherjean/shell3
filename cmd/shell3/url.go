@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -96,23 +95,4 @@ func resolvePublicURL(dir string) (url, note string, err error) {
 		return "http://" + addr, "(tunnel wired but no URL scraped yet — is the server running?)", nil
 	}
 	return "http://" + addr, "", nil
-}
-
-// waitTunnelURL polls for a tunnel.url written after since, returning it or
-// "" when the deadline passes — a quick tunnel takes a few seconds to mint
-// its hostname after the service starts.
-func waitTunnelURL(dir string, since time.Time, deadline time.Duration) string {
-	path := filepath.Join(dir, tunnel.URLFileName)
-	end := time.Now().Add(deadline)
-	for time.Now().Before(end) {
-		if st, err := os.Stat(path); err == nil && st.ModTime().After(since) {
-			if b, err := os.ReadFile(path); err == nil {
-				if u := strings.TrimSpace(string(b)); u != "" {
-					return u
-				}
-			}
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	return ""
 }

@@ -135,20 +135,3 @@ func TestWakeTurn_OrdinarySessionPostsVerbatim(t *testing.T) {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "CRON_OK")
 	})
 }
-
-// TestBotBusy pins the busy signal: mid-turn the bot reports busy.
-func TestBotBusy(t *testing.T) {
-	fc := newFakeClient()
-	rt, sess := newFakeRuntime(t, "hi")
-	b := newBot(t, fc, rt)
-	b.AdoptSession(sess)
-	if b.Busy() {
-		t.Fatal("fresh bot must not be busy")
-	}
-	b.mu.Lock()
-	b.turnActive = true
-	b.mu.Unlock()
-	if !b.Busy() {
-		t.Fatal("bot with an active turn must be busy")
-	}
-}

@@ -57,10 +57,6 @@ type Bot struct {
 	askSeq         int                  // monotonic id source for Ask
 	voiceMenuMsgID int                  // msgID of the most recent /voice menu, for its "vm|" callback edit
 
-	// onUsage, if set, receives each completed turn's token totals (per turn,
-	// not accumulated). Wired by the host to a usage store.
-	onUsage func(prompt, completion, total int)
-
 	runJob        func(name string) error             // fires a cron job by name; nil if no scheduler
 	reload        func() (shell3.ReloadResult, error) // performs a full config reload; nil if unset
 	pendingReload bool                                // set by the reload tool mid-turn; applied at end-of-turn
@@ -96,9 +92,6 @@ func NewBot(client tgClient, rt *shell3.Runtime, chatID int64, threads *ThreadIn
 		pinned:  make(map[string]bool),
 	}
 }
-
-// SetUsageRecorder registers a callback invoked with each turn's token totals.
-func (b *Bot) SetUsageRecorder(fn func(prompt, completion, total int)) { b.onUsage = fn }
 
 // SetJobRunner wires /run <job> to the scheduler's manual fire.
 func (b *Bot) SetJobRunner(fn func(name string) error) { b.runJob = fn }
@@ -564,27 +557,6 @@ func (b *Bot) keepTyping(ctx context.Context) (stop func()) {
 		}
 	}()
 	return cancel
-}
-
-// Busy reports whether a main turn is in flight or any live session has a
-// running background job.
-func (b *Bot) Busy() bool {
-	b.mu.Lock()
-	if b.turnActive {
-		b.mu.Unlock()
-		return true
-	}
-	live := make([]*shell3.Session, 0, len(b.live))
-	for _, s := range b.live {
-		live = append(live, s)
-	}
-	b.mu.Unlock()
-	for _, s := range live {
-		if b.sessionHasRunningJob(s) {
-			return true
-		}
-	}
-	return false
 }
 
 // The Bot implements shell3.CompletionHost: the notifier's send verdicts land

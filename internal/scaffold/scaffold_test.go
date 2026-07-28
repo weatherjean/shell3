@@ -14,7 +14,7 @@ import (
 // the template requires and `shell3 boot` always writes.
 func writeEnv(t *testing.T, dir string) {
 	t.Helper()
-	body := "MAIN_API_KEY=\nSHELL3_WEB_PASSWORD=sixteen-characters-long\n"
+	body := "MAIN_API_KEY=\nTELEGRAM_TOKEN=\nSHELL3_WEB_PASSWORD=sixteen-characters-long\n"
 	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(body), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -348,6 +348,45 @@ func TestRenderBaseConfigEscapesYAMLSpecials(t *testing.T) {
 	}
 	if m.RunProxy != v.Proxy {
 		t.Errorf("run_proxy = %q, want %q", m.RunProxy, v.Proxy)
+	}
+}
+
+// A scaffolded config must be runnable as the Telegram front-end: the token is
+// always an env: reference (secrets never land in shell3.yaml) and the chat id
+// boot collected has to survive into the file, or the bot answers nobody.
+func TestBaseConfigWiresTelegram(t *testing.T) {
+	dir := t.TempDir()
+	if err := RenderBaseConfig(dir, Values{
+		Name: "main", BaseURL: "http://x", EnvKey: "MAIN_API_KEY", Model: "m",
+		ContextWindow: 100000, CompactAt: 80000, WorkDir: dir,
+		ChatID: "8701499393",
+	}, false); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"telegram:",
+		"token: env:TELEGRAM_TOKEN",
+		`chat_id: "8701499393"`,
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("shell3.yaml missing %q:\n%s", want, body)
+		}
+	}
+
+	writeEnv(t, dir)
+	lc, err := config.Load(dir)
+	if err != nil {
+		t.Fatalf("telegram config failed to load: %v", err)
+	}
+	if got := lc.Telegram().ChatID; got != "8701499393" {
+		t.Errorf("chat_id = %q, want 8701499393", got)
+	}
+	if got := lc.Telegram().WorkDir; got != dir {
+		t.Errorf("workdir = %q, want %q", got, dir)
 	}
 }
 
