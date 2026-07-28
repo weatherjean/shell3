@@ -1,0 +1,56 @@
+//go:build unix
+
+package telegram
+
+import (
+	"path/filepath"
+	"testing"
+
+	"github.com/weatherjean/shell3/internal/shell3"
+	"github.com/weatherjean/shell3/internal/shell3/shell3test"
+)
+
+// newFakeRuntime builds a real Runtime backed by a fakellm that always replies
+// with replyText, plus one convenience chat session. It uses the public test
+// seam in pkg/shell3. Most bot tests want the runtime and build their own
+// sessions (fresh-turn model), but handler-level tests take the session too.
+func newFakeRuntime(t *testing.T, replyText string) (*shell3.Runtime, *shell3.Session) {
+	t.Helper()
+	rt := shell3test.NewRuntimeForTest(t, replyText)
+	sess, err := rt.Session(shell3.SessionOpts{Name: "telegram", Agent: "code"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rt, sess
+}
+
+// mkThreads builds a throwaway persistent thread index under t.TempDir.
+func mkThreads(t *testing.T) *ThreadIndex {
+	t.Helper()
+	ti, err := NewThreadIndex(filepath.Join(t.TempDir(), "threads.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ti
+}
+
+// newBot builds a Bot over rt with a throwaway thread index (chat 42) — the
+// fresh-turn Bot holds no session of its own.
+func newBot(t *testing.T, fc *fakeClient, rt *shell3.Runtime) *Bot {
+	t.Helper()
+	return NewBot(fc, rt, 42, mkThreads(t))
+}
+
+// decoratedSession creates a main chat session on rt and registers the bot's
+// host tools on it, mirroring what the runtime session decorator does in
+// production. Handler-level tests use it to exercise a tool the way a live turn
+// would see it.
+func decoratedSession(t *testing.T, b *Bot, rt *shell3.Runtime) *shell3.Session {
+	t.Helper()
+	sess, err := rt.Session(shell3.SessionOpts{Agent: "code"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.DecorateChatSession(sess)
+	return sess
+}
