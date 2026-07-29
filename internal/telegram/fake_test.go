@@ -32,6 +32,7 @@ type fakeClient struct {
 
 	failReply error // when set, reply sends behave as a deleted target (fall back to plain)
 
+	failDoc   error
 	failPhoto error
 	failVoice error
 	failAudio error
@@ -168,11 +169,23 @@ func (f *fakeClient) editTexts() []string {
 	return out
 }
 
-func (f *fakeClient) SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string) error {
+// reset clears everything the fake has recorded, so a test can assert on just
+// the traffic after a setup step.
+func (f *fakeClient) reset() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.sent, f.html, f.docs, f.replies = nil, nil, nil, nil
+}
+
+func (f *fakeClient) SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failDoc != nil {
+		return 0, f.failDoc
+	}
 	f.docs = append(f.docs, sentDoc{chatID: chatID, filename: filename, data: data, caption: caption})
-	return nil
+	f.next++
+	return f.next, nil
 }
 
 func (f *fakeClient) SendPhoto(ctx context.Context, chatID int64, filename string, data []byte, caption string) error {

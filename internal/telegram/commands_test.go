@@ -315,30 +315,113 @@ func TestRunsCommand_NotConfigured(t *testing.T) {
 	}
 }
 
-// /runs with no id lists the 20 newest stored sessions via render.RunsList.
-func TestRunsCommand_ListsNewest(t *testing.T) {
-	fc := newFakeClient()
-	rt, _ := newFakeRuntime(t, "ok")
-	b := newBot(t, fc, rt)
-
+// seedRuns stores n minimal sessions under a fresh root and wires it into b,
+// returning the root and ids oldest-first.
+func seedRuns(t *testing.T, b *Bot, n int) (string, []string) {
+	t.Helper()
 	root := t.TempDir()
 	st, err := runs.Open(root)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	id, err := st.NewSession(runs.Meta{Workdir: "/tmp/work", Model: "kimi-k2"})
-	if err != nil {
-		t.Fatalf("new session: %v", err)
-	}
-	if err := st.AppendMessage(id, llm.Message{Role: llm.RoleUser, Content: "hello there"}); err != nil {
-		t.Fatalf("append: %v", err)
+	ids := make([]string, n)
+	for i := range ids {
+		id, err := st.NewSession(runs.Meta{Workdir: "/tmp/work", Model: "kimi-k2"})
+		if err != nil {
+			t.Fatalf("new session: %v", err)
+		}
+		if err := st.AppendMessage(id, llm.Message{Role: llm.RoleUser, Content: fmt.Sprintf("prompt %d", i)}); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+		ids[i] = id
 	}
 	b.SetRunsRoot(root)
+	return root, ids
+}
+
+// /runs with no arg posts page 1 inline: tappable /run_N entries, newest
+// first, with a paging footer.
+func TestRunsCommand_ListsPageOne(t *testing.T) {
+	fc := newFakeClient()
+	rt, _ := newFakeRuntime(t, "ok")
+	b := newBot(t, fc, rt)
+	seedRuns(t, b, 10)
 
 	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/runs"})
 	all := strings.Join(fc.sentTexts(), "\n")
-	if !strings.Contains(all, id) || !strings.Contains(all, "hello there") {
-		t.Fatalf("expected the stored run listed, got %v", fc.sentTexts())
+	for _, want := range []string{"/run_1", "/run_8", "prompt 9", "page 1/2", "/runs 2"} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("page 1 missing %q, got %v", want, fc.sentTexts())
+		}
+	}
+	if strings.Contains(all, "/run_9") {
+		t.Fatalf("page 1 leaked a page-2 entry: %v", fc.sentTexts())
+	}
+	if _, ok := fc.lastDoc(); ok {
+		t.Fatal("the runs page must be an inline message, not a document — commands in documents aren't tappable")
+	}
+}
+
+// /runs 2 shows the second page.
+func TestRunsCommand_PageTwo(t *testing.T) {
+	fc := newFakeClient()
+	rt, _ := newFakeRuntime(t, "ok")
+	b := newBot(t, fc, rt)
+	seedRuns(t, b, 10)
+
+	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/runs 2"})
+	all := strings.Join(fc.sentTexts(), "\n")
+	for _, want := range []string{"/run_9", "/run_10", "page 2/2"} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("page 2 missing %q, got %v", want, fc.sentTexts())
+		}
+	}
+}
+
+// A page past the end answers with the valid range instead of an empty page.
+func TestRunsCommand_PagePastEnd(t *testing.T) {
+	fc := newFakeClient()
+	rt, _ := newFakeRuntime(t, "ok")
+	b := newBot(t, fc, rt)
+	seedRuns(t, b, 3)
+
+	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/runs 7"})
+	all := strings.Join(fc.sentTexts(), "\n")
+	if !strings.Contains(all, "page 7 of 1") || !strings.Contains(all, "/runs 1 is the last") {
+		t.Fatalf("expected the out-of-range reply, got %v", fc.sentTexts())
+	}
+}
+
+// Tapping /run_N after /runs replays that run via the stored index — /run_1 is
+// the newest. An @botname suffix (autocomplete/group taps) routes the same.
+func TestRunTap_ReplaysIndexedRun(t *testing.T) {
+	fc := newFakeClient()
+	rt, _ := newFakeRuntime(t, "ok")
+	b := newBot(t, fc, rt)
+	_, ids := seedRuns(t, b, 3)
+
+	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/runs"})
+	fc.reset()
+	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/run_1@shellibot"})
+	all := strings.Join(fc.sentTexts(), "\n")
+	newest := ids[len(ids)-1]
+	if !strings.Contains(all, newest) || !strings.Contains(all, "prompt 2") {
+		t.Fatalf("expected /run_1 to replay newest run %s, got %v", newest, fc.sentTexts())
+	}
+}
+
+// A tap with no stored index (bot restarted, or /runs never rendered) errors
+// cleanly — it must never open a re-derived guess.
+func TestRunTap_StaleIndex(t *testing.T) {
+	fc := newFakeClient()
+	rt, _ := newFakeRuntime(t, "ok")
+	b := newBot(t, fc, rt)
+	seedRuns(t, b, 3)
+
+	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/run_2"})
+	all := strings.Join(fc.sentTexts(), "\n")
+	if !strings.Contains(all, "run /runs again") {
+		t.Fatalf("expected the stale-index reply, got %v", fc.sentTexts())
 	}
 }
 

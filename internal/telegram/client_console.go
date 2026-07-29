@@ -179,9 +179,8 @@ func (c *ConsoleClient) SendHTMLReply(_ context.Context, _ int64, html string, r
 
 func (c *ConsoleClient) Typing(_ context.Context, _ int64) error { return nil }
 
-func (c *ConsoleClient) SendDocument(_ context.Context, _ int64, filename string, _ []byte, caption string) error {
-	c.mark("[media document %s] %s", filename, caption)
-	return nil
+func (c *ConsoleClient) SendDocument(_ context.Context, _ int64, filename string, _ []byte, caption string) (int, error) {
+	return c.emit(0, "document "+filename, caption), nil
 }
 
 func (c *ConsoleClient) SendPhoto(_ context.Context, _ int64, filename string, _ []byte, caption string) error {

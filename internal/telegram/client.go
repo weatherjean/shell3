@@ -67,8 +67,9 @@ type tgClient interface {
 	SendHTMLReply(ctx context.Context, chatID int64, html string, replyTo int) (msgID int, err error)
 	// Typing shows the "typing…" chat action.
 	Typing(ctx context.Context, chatID int64) error
-	// SendDocument uploads a file to the chat with an optional caption.
-	SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string) error
+	// SendDocument uploads a file to the chat with an optional caption,
+	// returning the sent message id so thread anchors can advance onto it.
+	SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string) (msgID int, err error)
 	// SendPhoto uploads an image to the chat with an optional caption.
 	SendPhoto(ctx context.Context, chatID int64, filename string, data []byte, caption string) error
 	// SendVoice uploads a voice note (ogg/opus) to the chat with an optional caption.

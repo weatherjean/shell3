@@ -5,6 +5,7 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,7 +24,7 @@ func BotCommands() []Command {
 		{"job", "Show one job's detail: /job <id>"},
 		{"cancel", "Cancel a background task: /cancel <id>"},
 		{"cron", "List scheduled cron jobs"},
-		{"runs", "List stored runs, or replay one: /runs [id]"},
+		{"runs", "List runs (tap /run_N to replay): /runs [page|id]"},
 		{"reload", "Reload the config without restarting"},
 		{"voice", "Voice replies: /voice off|inbound|always"},
 	}
@@ -38,6 +39,12 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 	// Telegram appends "@yourbot" to a command typed in a group (and some
 	// clients do so after an autocomplete tap), so route on the bare verb.
 	cmd, _, _ := strings.Cut(fields[0], "@")
+	// /run_N taps (rendered by the /runs listing) are dynamic commands, routed
+	// by prefix before the static switch.
+	if n, ok := strings.CutPrefix(cmd, "/run_"); ok {
+		b.handleRunTap(ctx, n)
+		return
+	}
 	switch cmd {
 	case "/stop":
 		// Turn-only: cancel the active main turn. Background jobs are NEVER killed
@@ -110,22 +117,31 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 			b.sendReply(ctx, "runs not available")
 			return
 		}
-		id := strings.TrimSpace(arg)
-		if id == "" {
-			out, err := render.RunsList(b.runsRoot, 20)
+		a := strings.TrimSpace(arg)
+		if page, isPage := pageArg(a); isPage {
+			// The page goes out as an inline message, never a document:
+			// Telegram only linkifies /run_N commands in message text.
+			md, index, total, err := render.RunsPage(b.runsRoot, page, runsPageSize)
 			if err != nil {
 				b.sendReply(ctx, "⚠️ "+err.Error())
 				return
 			}
-			b.sendMarkdownDoc(ctx, "runs.md", out)
+			if md == "" {
+				b.sendReply(ctx, fmt.Sprintf("page %d of %d — /runs %d is the last", page, total, total))
+				return
+			}
+			b.mu.Lock()
+			b.runIndex = index
+			b.mu.Unlock()
+			b.sendReply(ctx, md)
 			return
 		}
-		out, err := render.RunReplay(b.runsRoot, id)
+		out, err := render.RunReplay(b.runsRoot, a)
 		if err != nil {
 			b.sendReply(ctx, "⚠️ "+err.Error())
 			return
 		}
-		b.sendMarkdownDoc(ctx, "run-"+id+".md", out)
+		b.sendMarkdownDoc(ctx, "run-"+a+".md", out)
 	case "/cancel":
 		if b.cancelJob == nil {
 			b.sendReply(ctx, "job control not available")
@@ -150,6 +166,49 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 	default:
 		b.sendReply(ctx, "unknown command: "+cmd)
 	}
+}
+
+// runsPageSize is how many runs one /runs page lists — small enough that the
+// page always fits one inline message even with 60-rune prompt snippets.
+const runsPageSize = 8
+
+// pageArg reports whether a /runs argument selects a page: "" is page 1 and a
+// positive integer is that page. Anything else (run ids contain 'T', '.', '-')
+// is not a page and falls through to the replay path.
+func pageArg(s string) (int, bool) {
+	if s == "" {
+		return 1, true
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 1 {
+		return 0, false
+	}
+	return n, true
+}
+
+// handleRunTap resolves a tapped /run_N against the map the last /runs render
+// stored — never against a re-derived listing, so a stale tap (bot restarted,
+// listing since re-rendered) errors instead of opening the wrong run.
+func (b *Bot) handleRunTap(ctx context.Context, arg string) {
+	nStr, _, _ := strings.Cut(arg, "@") // handleCommand cut fields[0] at "@" already; belt and braces
+	n, err := strconv.Atoi(nStr)
+	if err != nil || n < 1 {
+		b.sendReply(ctx, "unknown command: /run_"+nStr)
+		return
+	}
+	b.mu.Lock()
+	id, ok := b.runIndex[n]
+	b.mu.Unlock()
+	if !ok {
+		b.sendReply(ctx, "index not found — run /runs again")
+		return
+	}
+	out, err := render.RunReplay(b.runsRoot, id)
+	if err != nil {
+		b.sendReply(ctx, "⚠️ "+err.Error())
+		return
+	}
+	b.sendMarkdownDoc(ctx, "run-"+id+".md", out)
 }
 
 // findJob returns the job matching id from jobs, if any.

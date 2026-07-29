@@ -72,7 +72,12 @@ type Bot struct {
 	jobsList      func() []shell3.JobInfo
 	jobTranscript func(id string) string
 
-	runsRoot     string                      // project dir holding runs/ (Parts.RunsRoot()); "" disables /runs
+	runsRoot string // project dir holding runs/ (Parts.RunsRoot()); "" disables /runs
+	// runIndex maps a /run_N tap index → run id, written whole by the last
+	// /runs render (guarded by b.mu). Taps resolve ONLY against this map —
+	// never a re-derived listing — so a stale tap errors instead of opening
+	// the wrong run. Empty until /runs is first rendered; lost on restart.
+	runIndex     map[int]string
 	version      string                      // shell3 version string, reported by /status
 	cronLastRuns func() map[string]time.Time // cron job name -> last run time, for /cron; nil renders "never"
 }

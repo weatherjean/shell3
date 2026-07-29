@@ -35,7 +35,7 @@ func (b *Bot) sendMarkdownDoc(ctx context.Context, name, md string) {
 		b.sendReply(ctx, md)
 		return
 	}
-	if err := b.client.SendDocument(ctx, b.chatID, name, []byte(md), ""); err != nil {
+	if _, err := b.client.SendDocument(ctx, b.chatID, name, []byte(md), ""); err != nil {
 		b.sendReply(ctx, "⚠️ failed to send "+name+": "+err.Error())
 		return
 	}
@@ -170,7 +170,7 @@ func (b *Bot) sendMediaHandler(ctx context.Context, argsJSON string) (string, er
 	case "video":
 		err = b.client.SendVideo(ctx, b.chatID, base, data, args.Caption)
 	default:
-		err = b.client.SendDocument(ctx, b.chatID, base, data, args.Caption)
+		_, err = b.client.SendDocument(ctx, b.chatID, base, data, args.Caption)
 	}
 	if err != nil {
 		return "error: failed to send: " + err.Error(), nil

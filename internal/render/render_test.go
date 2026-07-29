@@ -2,6 +2,7 @@ package render_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -126,27 +127,97 @@ func TestRunReplayRejectsTraversalIDs(t *testing.T) {
 	}
 }
 
-func TestRunsList(t *testing.T) {
-	root, id := fixtureRun(t)
-	out, err := render.RunsList(root, 10)
+// fixtureRuns writes n minimal sessions and returns (root, ids oldest-first).
+func fixtureRuns(t *testing.T, n int) (string, []string) {
+	t.Helper()
+	root := t.TempDir()
+	st, err := runs.Open(root)
 	if err != nil {
-		t.Fatalf("RunsList: %v", err)
+		t.Fatalf("open store: %v", err)
 	}
-	if !strings.Contains(out, id) {
-		t.Errorf("listing missing run id %q:\n%s", id, out)
+	ids := make([]string, n)
+	for i := range ids {
+		id, err := st.NewSession(runs.Meta{Workdir: "/tmp/work", Model: "kimi-k2"})
+		if err != nil {
+			t.Fatalf("new session: %v", err)
+		}
+		if err := st.AppendMessage(id, llm.Message{Role: llm.RoleUser, Content: fmt.Sprintf("prompt %d", i)}); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+		ids[i] = id
 	}
-	if !strings.Contains(out, "count the go files") {
-		t.Errorf("listing missing preview:\n%s", out)
+	return root, ids
+}
+
+func TestRunsPage(t *testing.T) {
+	root, ids := fixtureRuns(t, 10)
+	md, index, total, err := render.RunsPage(root, 1, 4)
+	if err != nil {
+		t.Fatalf("RunsPage: %v", err)
+	}
+	if total != 3 {
+		t.Errorf("want 3 pages of 4 over 10 runs, got %d", total)
+	}
+	for _, want := range []string{"/run_1", "/run_4", "prompt 9", "page 1/3", "/runs 2"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("page 1 missing %q:\n%s", want, md)
+		}
+	}
+	if strings.Contains(md, "/run_5") {
+		t.Errorf("page 1 leaked a page-2 entry:\n%s", md)
+	}
+	// The index always covers the FULL listing, newest first.
+	if len(index) != 10 {
+		t.Fatalf("want a 10-entry index, got %d", len(index))
+	}
+	if index[1] != ids[9] {
+		t.Errorf("index 1 should be the newest run %s, got %s", ids[9], index[1])
+	}
+	if index[10] != ids[0] {
+		t.Errorf("index 10 should be the oldest run %s, got %s", ids[0], index[10])
+	}
+
+	md2, _, _, err := render.RunsPage(root, 2, 4)
+	if err != nil {
+		t.Fatalf("RunsPage page 2: %v", err)
+	}
+	for _, want := range []string{"/run_5", "/run_8", "page 2/3"} {
+		if !strings.Contains(md2, want) {
+			t.Errorf("page 2 missing %q:\n%s", want, md2)
+		}
 	}
 }
 
-func TestRunsListEmpty(t *testing.T) {
-	out, err := render.RunsList(t.TempDir(), 10)
+func TestRunsPagePastEnd(t *testing.T) {
+	root, _ := fixtureRuns(t, 3)
+	md, _, total, err := render.RunsPage(root, 4, 4)
 	if err != nil {
-		t.Fatalf("RunsList: %v", err)
+		t.Fatalf("RunsPage: %v", err)
 	}
-	if !strings.Contains(strings.ToLower(out), "no runs") {
-		t.Errorf("expected an empty-state line:\n%s", out)
+	if md != "" || total != 1 {
+		t.Errorf("past-end page: want md==\"\" total==1, got total=%d md:\n%s", total, md)
+	}
+}
+
+func TestRunsPageEmpty(t *testing.T) {
+	md, _, total, err := render.RunsPage(t.TempDir(), 1, 8)
+	if err != nil {
+		t.Fatalf("RunsPage: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(md), "no runs") {
+		t.Errorf("expected an empty-state line:\n%s", md)
+	}
+	if total != 1 {
+		t.Errorf("empty store should report 1 page, got %d", total)
+	}
+}
+
+func TestRunsPageInvalid(t *testing.T) {
+	if _, _, _, err := render.RunsPage(t.TempDir(), 0, 8); err == nil {
+		t.Error("page 0: expected an error")
+	}
+	if _, _, _, err := render.RunsPage(t.TempDir(), 1, 0); err == nil {
+		t.Error("size 0: expected an error")
 	}
 }
 

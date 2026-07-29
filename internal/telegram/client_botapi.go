@@ -356,13 +356,16 @@ func (c *BotAPIClient) SetCommands(ctx context.Context, cmds []Command) error {
 }
 
 // SendDocument uploads a file to the chat as a document.
-func (c *BotAPIClient) SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string) error {
-	_, err := c.b.SendDocument(ctx, &bot.SendDocumentParams{
+func (c *BotAPIClient) SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string) (int, error) {
+	m, err := c.b.SendDocument(ctx, &bot.SendDocumentParams{
 		ChatID:   chatID,
 		Document: &models.InputFileUpload{Filename: filename, Data: bytes.NewReader(data)},
 		Caption:  caption,
 	})
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return m.ID, nil
 }
 
 // SendPhoto uploads an image to the chat with an optional caption.

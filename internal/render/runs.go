@@ -10,43 +10,52 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// RunsList renders stored sessions newest first — conversations, subagent
-// children, cron runs alike. root is the project dir holding runs/ (the value
-// of Parts.RunsRoot()). limit <= 0 lists everything.
-func RunsList(root string, limit int) (string, error) {
+// RunsPage renders one page of stored sessions newest first as a compact
+// inline listing whose entries are tappable /run_N commands (kept out of any
+// document: Telegram only linkifies commands in message text), plus the FULL
+// listing's N→id map (1 = newest) for the caller to resolve taps against.
+// page is 1-based; a page past the end returns md == "" with totalPages set.
+// root is the project dir holding runs/ (the value of Parts.RunsRoot()).
+func RunsPage(root string, page, size int) (string, map[int]string, int, error) {
+	if page < 1 || size < 1 {
+		return "", nil, 0, fmt.Errorf("render: invalid page %d (size %d)", page, size)
+	}
 	st, err := runs.Open(root)
 	if err != nil {
-		return "", err
+		return "", nil, 0, err
 	}
-	metas, err := st.ListSessions(limit)
+	metas, err := st.ListSessions(0)
 	if err != nil {
-		return "", err
+		return "", nil, 0, err
 	}
-
-	var b strings.Builder
-	b.WriteString("# Runs\n\n")
+	index := make(map[int]string, len(metas))
+	for i, m := range metas {
+		index[i+1] = m.ID
+	}
 	if len(metas) == 0 {
-		b.WriteString("_No runs stored._\n")
-		return b.String(), nil
+		return "_No runs stored._", index, 1, nil
 	}
-	for _, m := range metas {
-		msgs, _ := st.LoadMessages(m.ID)
-		fmt.Fprintf(&b, "## `%s`\n\n", m.ID)
-		field(&b, "started", stamp(m.StartedAt))
-		field(&b, "last activity", stamp(m.LastAt))
-		field(&b, "status", m.Status)
-		field(&b, "model", m.Model)
-		field(&b, "workdir", m.Workdir)
-		if m.ParentID != "" {
-			field(&b, "child of", m.ParentID)
-		}
-		field(&b, "messages", fmt.Sprintf("%d", len(msgs)))
-		if p := firstPrompt(msgs); p != "" {
-			field(&b, "prompt", oneLine(p, 160))
+	totalPages := (len(metas) + size - 1) / size
+	if page > totalPages {
+		return "", index, totalPages, nil
+	}
+	lo := (page - 1) * size
+	hi := min(lo+size, len(metas))
+	var b strings.Builder
+	for i, m := range metas[lo:hi] {
+		fmt.Fprintf(&b, "/run_%d · %s · %s", lo+i+1, stamp(m.StartedAt), m.Status)
+		if msgs, err := st.LoadMessages(m.ID); err == nil {
+			if p := firstPrompt(msgs); p != "" {
+				b.WriteString(" · " + oneLine(p, 60))
+			}
 		}
 		b.WriteString("\n")
 	}
-	return b.String(), nil
+	fmt.Fprintf(&b, "\npage %d/%d", page, totalPages)
+	if page < totalPages {
+		fmt.Fprintf(&b, " — /runs %d for older", page+1)
+	}
+	return b.String(), index, totalPages, nil
 }
 
 // RunReplay renders one stored session at full fidelity: user prompts,
