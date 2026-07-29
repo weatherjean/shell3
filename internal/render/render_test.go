@@ -188,6 +188,34 @@ func TestRunsPage(t *testing.T) {
 	}
 }
 
+// Sessions that never stored a message (the hidden cron dispatch parent,
+// crash leftovers) are invisible to the listing: no entry, no index number —
+// there is nothing to replay in them.
+func TestRunsPageSkipsEmptySessions(t *testing.T) {
+	root, ids := fixtureRuns(t, 2)
+	st, err := runs.Open(root)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if _, err := st.NewSession(runs.Meta{Workdir: "/w", Model: "m"}); err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+
+	md, index, total, err := render.RunsPage(root, 1, 8)
+	if err != nil {
+		t.Fatalf("RunsPage: %v", err)
+	}
+	if total != 1 || len(index) != 2 {
+		t.Fatalf("want the empty session skipped (1 page, 2 indexed), got total=%d index=%d", total, len(index))
+	}
+	if strings.Contains(md, "/run_3") {
+		t.Fatalf("empty session leaked into the listing:\n%s", md)
+	}
+	if index[1] != ids[1] {
+		t.Errorf("index 1 should be the newest NON-empty run %s, got %s", ids[1], index[1])
+	}
+}
+
 func TestRunsPagePastEnd(t *testing.T) {
 	root, _ := fixtureRuns(t, 3)
 	md, _, total, err := render.RunsPage(root, 4, 4)

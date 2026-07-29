@@ -115,3 +115,100 @@ func TestSessionIDPathTraversalRejected(t *testing.T) {
 		}
 	}
 }
+
+// A session that never stored a message leaves no trace: ending it removes
+// the whole run dir instead of writing an "ended" meta for an empty shell —
+// the pinned cron dispatch parent and console startups would otherwise litter
+// the store with one meta-only dir per process start.
+func TestEndSessionRemovesEmptySession(t *testing.T) {
+	root := t.TempDir()
+	st, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := st.NewSession(Meta{Workdir: "/w", Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.EndSession(id); err != nil {
+		t.Fatalf("EndSession: %v", err)
+	}
+	if _, err := os.Stat(st.sessDir(id)); !os.IsNotExist(err) {
+		t.Fatalf("empty session dir should be removed, stat: %v", err)
+	}
+}
+
+// A session with messages ends normally — dir kept, status flipped.
+func TestEndSessionKeepsStoredConversation(t *testing.T) {
+	root := t.TempDir()
+	st, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := st.NewSession(Meta{Workdir: "/w", Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendMessage(id, llm.Message{Role: llm.RoleUser, Content: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.EndSession(id); err != nil {
+		t.Fatalf("EndSession: %v", err)
+	}
+	m, err := st.readMeta(id)
+	if err != nil {
+		t.Fatalf("meta should survive: %v", err)
+	}
+	if m.Status != "ended" {
+		t.Fatalf("status = %q, want ended", m.Status)
+	}
+}
+
+// A message-less session that still holds a job log is NOT empty — a lingering
+// bash_bg's teed output under jobs/ is worth keeping.
+func TestEndSessionKeepsJobLogs(t *testing.T) {
+	root := t.TempDir()
+	st, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := st.NewSession(Meta{Workdir: "/w", Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(st.sessDir(id), "jobs", "bg1.log")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(logPath, []byte("out"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.EndSession(id); err != nil {
+		t.Fatalf("EndSession: %v", err)
+	}
+	if _, err := os.Stat(logPath); err != nil {
+		t.Fatalf("job log should survive: %v", err)
+	}
+}
+
+// HasMessages is the cheap "worth listing" probe the /runs renderer uses.
+func TestHasMessages(t *testing.T) {
+	root := t.TempDir()
+	st, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := st.NewSession(Meta{Workdir: "/w", Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.HasMessages(id) {
+		t.Fatal("fresh session must report no messages")
+	}
+	if err := st.AppendMessage(id, llm.Message{Role: llm.RoleUser, Content: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if !st.HasMessages(id) {
+		t.Fatal("session with a stored message must report true")
+	}
+}

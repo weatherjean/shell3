@@ -183,12 +183,26 @@ func (s *Store) LoadMessages(id string) ([]llm.Message, error) {
 
 // EndSession marks the session ended.
 func (s *Store) EndSession(id string) error {
+	// A session that stored nothing — no message, no job log — leaves no
+	// trace: remove the dir instead of writing an "ended" meta for an empty
+	// shell. The pinned cron dispatch parent (one per bot start) and aborted
+	// front-end sessions would otherwise litter the store.
+	if metaOnly(s.sessDir(id)) {
+		return os.RemoveAll(s.sessDir(id))
+	}
 	m, err := s.readMeta(id)
 	if err != nil {
 		return err
 	}
 	m.Status, m.EndedAt, m.LastAt = "ended", time.Now().UTC(), time.Now().UTC()
 	return s.writeMeta(m)
+}
+
+// HasMessages reports whether the session has stored at least one message —
+// the cheap "worth listing/replaying" probe (a stat, not a load).
+func (s *Store) HasMessages(id string) bool {
+	info, err := os.Stat(s.messagesPath(id))
+	return err == nil && info.Size() > 0
 }
 
 // SetLastPromptTokens records the provider-reported prompt-token count for the

@@ -24,9 +24,18 @@ func RunsPage(root string, page, size int) (string, map[int]string, int, error) 
 	if err != nil {
 		return "", nil, 0, err
 	}
-	metas, err := st.ListSessions(0)
+	all, err := st.ListSessions(0)
 	if err != nil {
 		return "", nil, 0, err
+	}
+	// Message-less sessions (the hidden cron dispatch parent, crash leftovers
+	// the janitor hasn't reaped yet) are invisible: nothing to replay, so no
+	// entry and no index number.
+	metas := all[:0]
+	for _, m := range all {
+		if st.HasMessages(m.ID) {
+			metas = append(metas, m)
+		}
 	}
 	index := make(map[int]string, len(metas))
 	for i, m := range metas {
