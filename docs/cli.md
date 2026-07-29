@@ -55,9 +55,10 @@ bot loop with no credentials and no network: a plain line is a fresh message,
 ### Commands
 
 Answered by the bot itself — no model call, no tokens. `/status`, `/jobs`,
-`/job`, `/cron` and `/runs` render markdown, sent inline when small and as a
-`.md` document (plus a short summary) when it would blow past Telegram's
-message cap.
+`/job`, `/cron` and a `/run_N` replay render markdown, sent inline when small
+and as a `.md` document (plus a short summary) when it would blow past
+Telegram's message cap. The `/runs` listing is always inline — its entries are
+tappable commands, and Telegram only linkifies those in message text.
 
 | Command | What |
 |---------|------|
@@ -68,7 +69,7 @@ message cap.
 | `/cancel <id>` | Cancel a job; cancelling a subagent cascades to the jobs it started. |
 | `/cron` | Declared cron jobs: schedule, agent, workdir, `direct`, the full prompt, and the last run. |
 | `/run <name>` | Fire a scheduled job now. |
-| `/runs` / `/runs <id>` | The 20 newest stored sessions, or one replayed in full — tool calls with arguments, results, and reasoning. |
+| `/runs [page\|id]` | Stored sessions, newest first, 8 per page — each entry a tappable `/run_N` that replays that run in full (tool calls with arguments, results, and reasoning). `/runs 2` pages older; `/runs <id>` replays by id directly. |
 | `/reload` | Re-read the config and apply it live. Takes the turn slot, so it is refused rather than raced while a turn runs. |
 | `/voice off\|inbound\|always` | Whether replies come back spoken (needs `media.tts`). Bare `/voice` opens a three-button menu. The choice persists in `~/.shell3/voice_mode.json`. |
 
@@ -234,8 +235,8 @@ cat ~/.shell3/.shell3_project/runs/<id>/meta.json   # one session's metadata
 ```
 
 The agent searches its own past the same way (`rg` over the JSONL, via the
-`history` skill); each subagent run has its own stored transcript. `/runs` and
-`/runs <id>` read the same store — every session, including subagent children,
+`history` skill); each subagent run has its own stored transcript. The `/runs`
+pages and `/run_N` replays read the same store — every session, including subagent children,
 cron runs and `shell3 ask` sessions, with tool calls, arguments, results and
 reasoning. Old sessions are swept at `shell3 telegram` startup — see
 [`runs_keep_days`](configuration.md#the-runs-janitor--runs_keep_days).

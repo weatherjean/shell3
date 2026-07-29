@@ -200,9 +200,11 @@ answers that it can't be resumed rather than silently starting a new one.
 Exactly one main-agent turn runs at a time (a turn slot in `bot.go`); a message
 arriving mid-turn gets "a turn is running … this message is disregarded" and
 is dropped, never queued — the running turn is never steered. `postReply`
-chunks the reply at Telegram's message cap on rune boundaries, replies each
-chunk to the thread's anchor, and records every sent message id so the anchor
-advances (a reply to the bot's own latest message resumes the same session).
+chunks the reply at Telegram's message cap on rune boundaries and replies each
+chunk to the thread's anchor, capped at `replyMaxChunks` (2) bubbles — a longer
+reply posts its first chunk plus the full text as a `reply.md` document — and
+records every sent message id so the anchor advances (a reply to the bot's own
+latest message resumes the same session).
 `drainTurn` treats only the FINAL assistant segment as the reply — text before
 a tool call is progress narration — and errors always surface. Markdown is
 converted for Telegram by `mdhtml`. A session retires (and Closes) as soon as
@@ -211,11 +213,16 @@ one with running jobs or queued input, which stays open to receive them.
 
 **Commands are host-answered** (`commands.go`, no model call, zero tokens):
 `/stop` (cancel the turn; background jobs keep running), `/run <job>`,
-`/status`, `/jobs`, `/job <id>`, `/cancel <id>`, `/cron`, `/runs [id]`,
+`/status`, `/jobs`, `/job <id>`, `/cancel <id>`, `/cron`, `/runs [page|id]`
+(paginated inline listing, 8 per page, each entry a tappable `/run_N` that
+replays that run — taps resolve only against the map the last render stored,
+so a stale index errors instead of opening the wrong run),
 `/reload`, `/voice off|inbound|always`. The dash views are rendered as markdown
-by `internal/render` (`Status`, `Jobs`, `JobDetail`, `Cron`, `RunsList`,
+by `internal/render` (`Status`, `Jobs`, `JobDetail`, `Cron`, `RunsPage`,
 `RunReplay`) and delivered by `sendMarkdownDoc`: inline when under
-`mdInlineThreshold`, otherwise as a `.md` document plus a capped text summary.
+`mdInlineThreshold`, otherwise as a `.md` document plus a capped text summary
+(the `/runs` listing is always inline — Telegram only linkifies commands in
+message text).
 `/reload` takes the turn slot, so it is refused rather than raced.
 
 Three **host tools** ride the session decorator (`Runtime.SetSessionDecorator`,
