@@ -95,25 +95,45 @@ func (b *Bot) sendReply(ctx context.Context, text string) {
 // is recorded against sess so the thread's anchor advances and follow-up wakes
 // reply to the latest message. replyTo == 0 (the adopted cron session with no
 // inbound message) posts plain.
+// replyMaxChunks caps how many chat bubbles one reply may occupy. A longer
+// reply posts its first chunk plus the full text as a reply.md document — the
+// chat stays readable and the phone gets one ping, not twenty-five.
+const replyMaxChunks = 2
+
 func (b *Bot) postReply(ctx context.Context, sess *shell3.Session, replyTo int, text string) {
 	if text == "" {
 		text = "(no output)"
 	}
-	for _, c := range chunk(text) {
-		html := mdhtml.ToTelegramHTML(c)
-		var id int
-		var err error
-		if replyTo != 0 {
-			if id, err = b.client.SendHTMLReply(ctx, b.chatID, html, replyTo); err != nil {
-				id, _ = b.client.SendReply(ctx, b.chatID, c, replyTo)
-			}
-		} else {
-			if id, err = b.client.SendHTML(ctx, b.chatID, html); err != nil {
-				id, _ = b.client.Send(ctx, b.chatID, c)
-			}
+	chunks := chunk(text)
+	if len(chunks) > replyMaxChunks {
+		b.postChunk(ctx, sess, replyTo, chunks[0])
+		if id, err := b.client.SendDocument(ctx, b.chatID, "reply.md", []byte(text), "full reply"); err == nil {
+			b.recordSent(sess, id)
+			return
 		}
-		b.recordSent(sess, id)
+		chunks = chunks[1:] // document failed: degrade to posting the rest
 	}
+	for _, c := range chunks {
+		b.postChunk(ctx, sess, replyTo, c)
+	}
+}
+
+// postChunk posts one chunk through the HTML→plain fallback path and records
+// the sent id.
+func (b *Bot) postChunk(ctx context.Context, sess *shell3.Session, replyTo int, c string) {
+	html := mdhtml.ToTelegramHTML(c)
+	var id int
+	var err error
+	if replyTo != 0 {
+		if id, err = b.client.SendHTMLReply(ctx, b.chatID, html, replyTo); err != nil {
+			id, _ = b.client.SendReply(ctx, b.chatID, c, replyTo)
+		}
+	} else {
+		if id, err = b.client.SendHTML(ctx, b.chatID, html); err != nil {
+			id, _ = b.client.Send(ctx, b.chatID, c)
+		}
+	}
+	b.recordSent(sess, id)
 }
 
 // recordSent advances a thread's anchor to a message the bot just sent, so a
