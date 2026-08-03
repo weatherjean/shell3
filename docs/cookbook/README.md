@@ -2,23 +2,22 @@
 
 `shell3 boot` writes a lean, working config. This cookbook is everything it
 *doesn't* write — drop-in recipes you copy in when you want them. Each
-`lib/...` file mirrors the base config's module layout.
+`lib/...` file mirrors the base config's layout.
 
-The two extensible pieces, in one breath:
+Two extension mechanisms:
 
-- **Skills** are `.md` files with a frontmatter `description:` that the agent
+- **Skills** — `.md` files with a frontmatter `description:` that the agent
   reads with `cat`. Install: copy into `~/.shell3/skills/`, check
   `shell3 health`, reload.
-- **Scripts** are the extension mechanism: reusable glue lives in
-  `~/.shell3/lib/bin/` and runs through `bash`; a script that needs an API
-  key reads it from `.env` itself at point of use. The scaffold's
-  `scripting` skill teaches the pattern (see
-  [Scripts & secrets](../configuration.md#scripts--secrets)).
+- **Scripts** — reusable glue in `~/.shell3/lib/bin/`, run through `bash`; a
+  script that needs an API key reads it from `.env` itself at point of use.
+  The scaffold's `scripting` skill teaches the pattern
+  ([Scripts & secrets](../configuration.md#scripts--secrets)).
 
-Install without a checkout: every file here is fetchable raw (the scaffold's
-`cookbook` skill teaches the agent this, so you can just ask your agent for a
-capability and it can install the recipe itself — after telling you what the
-recipe would install and getting your yes):
+Every file here is fetchable raw, no checkout needed. The scaffold's
+`cookbook` skill teaches the agent this, so you can ask your agent for a
+capability and it can install the recipe itself (after telling you what it
+would install and getting your yes):
 
 ```bash
 base=https://raw.githubusercontent.com/weatherjean/shell3/main/docs/cookbook
@@ -41,8 +40,8 @@ already ships `browser` — headed Chrome via puppeteer-core)
 - `camoufox-fetch.md` — fetch bot-protected / JS-heavy pages with Camoufox (anti-detect Firefox).
 
 **Coding-agent skills** (same dir; each drives a coding agent installed on
-the machine — the scaffold's `coding-agent` stub tells the agent to bring you
-here and let you pick; delete the stub once one of these lands)
+the machine. The scaffold's `coding-agent` stub points the agent here so you
+can pick one; delete the stub once one of these lands.)
 
 - `claude-code.md` — delegate implementation work to Claude Code (`claude -p`).
 - `codex.md` — the same pattern for the OpenAI Codex CLI (`codex exec`, sandbox levels).
@@ -74,7 +73,5 @@ here and let you pick; delete the stub once one of these lands)
 **Provider and host recipes**
 
 - `mcp.md` — MCP servers: stdio + HTTP recipes, allow-lists, gating.
-- `models.md` — provider-specific request params via `extra`.
-- `proxy.md` — `run_proxy` recipes (Codex via npx, litellm).
 - `sandbox.md` — sandbox/route bash via hook argv verdicts.
 - `voice-images.md` — voice + images; Groq and OpenRouter quickstarts.

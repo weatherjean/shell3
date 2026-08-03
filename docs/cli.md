@@ -19,20 +19,18 @@ shell3 telegram --console          # dev transport: the same bot loop over stdin
 ```
 
 Loads the config, connects to the Telegram Bot API, arms cron jobs, and runs
-the [runs janitor](configuration.md#the-runs-janitor--runs_keep_days) once —
+the [runs janitor](configuration.md#the-runs-janitor--runs_keep_days) once,
 then long-polls until interrupted. It needs `telegram.token` and
 `telegram.chat_id`; without them it refuses to start. The runtime is anchored
 to the config directory, so history lives under
 `~/.shell3/.shell3_project/`. The agent's shell runs in `telegram.workdir`
 (default: the config dir).
 
-At startup it registers the `/` command menu with Telegram, clears any menu
-button an older build left behind, and greets the chat — so a bot that came up
-says so in the chat itself, not only on stderr.
+At startup it registers the `/` command menu with Telegram and greets the
+chat, so you can see there that the bot came up.
 
-**Nothing listens.** shell3 makes outbound connections only; there is no port,
-no login, no tunnel. Access control is the `chat_id`: updates from any other
-chat are dropped before a turn starts. See
+**Nothing listens.** shell3 makes outbound connections only; access control
+is the token and the `chat_id` — see
 [Security](security.md#the-telegram-boundary).
 
 **Threads and turns.** Every inbound message starts its **own** session. To
@@ -41,12 +39,13 @@ message→session map persists in
 `~/.shell3/.shell3_project/telegram_threads.jsonl`, so threads survive a
 restart (sessions the janitor swept answer that they can't be resumed). One
 main-agent turn runs at a time: a message sent while a turn is running is
-answered with a note and disregarded, not queued — `/stop` and reply to your
-last prompt to steer instead. Background jobs (subagents, `bash_bg`, cron) run
-independently and come back through the
-[notifier](configuration.md#the-notifier--notifiermd): a post lands in the chat
-(🔔, or ⏰ for a cron origin), a wake runs another turn — in the owning thread
-when its session is still live, otherwise as a fresh replyable message.
+answered with a note and disregarded, not queued; `/stop` and reply to your
+last prompt to steer instead. Background jobs (subagents, `bash_bg`, cron)
+run independently and come back through the
+[notifier](configuration.md#the-notifier--notifiermd): a post lands in the
+chat (🔔, or ⏰ for a cron origin), a wake runs another turn in the owning
+thread when its session is still live, otherwise as a fresh replyable
+message.
 
 `--console` swaps the Telegram transport for stdin/stdout and drives the same
 bot loop with no credentials and no network: a plain line is a fresh message,
@@ -54,47 +53,34 @@ bot loop with no credentials and no network: a plain line is a fresh message,
 
 ### Commands
 
-Answered by the bot itself — no model call, no tokens. `/status`, `/jobs`,
+Answered by the bot itself: no model call, no tokens. `/status`, `/jobs`,
 `/job`, `/cron` and a `/run_N` replay render markdown, sent inline when small
 and as a `.md` document (plus a short summary) when it would blow past
-Telegram's message cap. The `/runs` listing is always inline — its entries are
+Telegram's message cap. The `/runs` listing is always inline; its entries are
 tappable commands, and Telegram only linkifies those in message text.
 
 | Command | What |
 |---------|------|
 | `/stop` | Cancel the running turn. Background jobs are **not** killed — they keep running and still report back. |
-| `/status` | Version, config dir, agent + model, context window and messages in context, whether the command gate is armed, model params, tool descriptions, subagents, skills, MCP server health, cron jobs, projects, config warnings, and the effective system prompt. Reports whichever session is live — on an idle bot that is the headless cron dispatch parent, which shows `0` messages in context. |
+| `/status` | Version, config dir, agent + model + params, context usage, whether the gate is armed, tools, subagents, skills, MCP health, cron jobs, projects, warnings, and the effective system prompt. Reports the live session (on an idle bot, the headless cron parent — `0` messages). |
 | `/jobs` | Running and finished background work: id, kind, label, status, elapsed, exit code. |
 | `/job <id>` | One job plus its output — a subagent's stored transcript, or a command's captured stdout. |
 | `/cancel <id>` | Cancel a job; cancelling a subagent cascades to the jobs it started. |
 | `/cron` | Declared cron jobs: schedule, agent, workdir, `direct`, the full prompt, and the last run. |
 | `/run <name>` | Fire a scheduled job now. |
-| `/runs [page\|id]` | Stored sessions, newest first, 8 per page — each entry a tappable `/run_N` that replays that run in full (tool calls with arguments, results, and reasoning). `/runs 2` pages older; `/runs <id>` replays by id directly. |
+| `/runs [page\|id]` | Stored sessions, newest first, 8 per page; each entry a tappable `/run_N` that replays that run in full (tool calls with arguments, results, and reasoning). `/runs 2` pages older; `/runs <id>` replays by id directly. |
 | `/reload` | Re-read the config and apply it live. Takes the turn slot, so it is refused rather than raced while a turn runs. |
 | `/voice off\|inbound\|always` | Whether replies come back spoken (needs `media.tts`). Bare `/voice` opens a three-button menu. The choice persists in `~/.shell3/voice_mode.json`. |
 
-### Attachments and media
+### Attachments, media, approvals
 
-Every file you send is saved to `~/.shell3/media/` as `tg-*` and its path is
-put in the prompt, so the agent can re-open it later. Before the turn runs:
-a **voice note** is transcribed through `media.stt` and the transcript injected
-(echoed back to the chat when `media.stt.echo` is set), and a **photo** is
-captioned through `media.describe` and injected as `[image: …]`. A failure at
-either step surfaces in the chat as a ⚠️ line and the turn still runs with the
-file path. See [Voice & images](configuration.md#voice--images--media).
-
-Going the other way, the agent has a `send_media_telegram` tool: it pushes a
-local file to the chat as a `photo`, `voice`, `audio`, `video`, or `document`
-(the default), refusing a kind the file's extension or size can't satisfy.
-`image_generate`
-saves to `~/.shell3/media/` and the agent delivers the file with that tool.
-
-### Approvals
-
-A hook script's `ask` verdict posts the command and reason with **Allow** /
-**Deny** inline buttons and parks the turn until one is tapped. Fail-safe: a
-send failure, a cancelled turn, or a timeout all deny. Subagents and cron jobs
-are headless, so an `ask` there denies immediately.
+Files you send are saved under `~/.shell3/media/`; voice notes and photos are
+transcribed/captioned before the turn when `media:` is configured, and the
+agent sends files back with `send_media_telegram` — see
+[Voice & images](configuration.md#voice--images--media). A hook script's
+`ask` verdict posts Allow/Deny buttons and parks the turn until one is
+tapped; no answer denies — see the
+[command gate](configuration.md#the-command-gate--hookssh).
 
 ## `shell3 serve` — the agent over stdio JSONL
 
@@ -136,22 +122,20 @@ id** (your numeric id — [@userinfobot](https://t.me/userinfobot) prints it);
 and where the agent's shell should run (`telegram.workdir`; blank = the config
 dir). The token goes to `.env` as `TELEGRAM_TOKEN`, referenced from
 `shell3.yaml` as `env:TELEGRAM_TOKEN` like every other secret; both fields may
-be left blank and filled in later. Secrets echo visibly — boot runs on your own
-terminal, and a paste you can't see is a truncated paste waiting to happen.
+be left blank and filled in later. Secrets echo visibly, so you can see that a
+paste landed intact.
 
 On Linux with systemd, and only when the token and chat id are both set, a
 final step offers to install shell3 as a **systemd user service**
 (`shell3.service`, running `shell3 telegram`): the unit is written to
 `~/.config/systemd/user/`, enabled, lingering is turned on
 (`loginctl enable-linger`, so it runs without an active login and starts at
-boot), started immediately, and verified — boot polls the unit and reports a
-crash-loop instead of claiming success.
-Caveat spelled out at the end of boot too: a user service cannot prevent the
-machine from **sleeping**; on a laptop, disable suspend (or host shell3 on an
-always-on box) or the bot is gone while the lid is closed.
-`shell3 boot --service` re-runs just this step against the existing config —
-the repair path after updating the binary or when the unit points at a stale
-one; it rewrites the unit, restarts it, and verifies it came up.
+boot), started, and verified — boot polls the unit and reports a crash-loop
+instead of claiming success. One caveat: a user service can't keep the
+machine awake; on a laptop, disable suspend or host shell3 on an always-on
+box. `shell3 boot --service` re-runs just this step against the existing
+config — the repair path after updating the binary; it rewrites the unit,
+restarts it, and verifies it came up.
 
 Scriptable via flags (any flag skips its prompt; with no TTY, unset flags take
 defaults, except `--model`, which headless boot requires): `--url`, `--model`,
@@ -180,10 +164,9 @@ shell3 project new api  --workdir ~/code/api  --copy-skills site
 - `--copy-skills <name>` — seed `skills/` by copying an existing project's.
 
 It writes `projects/<name>/project.md`, `projects/<name>/manager.md`, and an
-empty `skills/`, and prints the created paths. `ls`/`cat` see the project
-immediately; a `/reload` or a restart registers the manager for dispatch.
-The command is designed for the agent to drive from a `bash` call — its `-h`
-output is the contract the agent reads before invoking it. See
+empty `skills/`, and prints the created paths. A `/reload` or a restart
+registers the manager for dispatch. The command is designed for the agent to
+drive from a `bash` call — its `-h` output is the contract. See
 [configuration.md](configuration.md#projects--projects).
 
 ## `shell3 health` — check the config
@@ -193,26 +176,24 @@ shell3 health                # ~/.shell3
 shell3 health --config ~/work-agent
 ```
 
-Loads the config exactly like the bot would and fails (exit 1) on anything the
-running bot only warns about — a skill `.md` skipped for broken frontmatter, a
-hook file naming no subagent. It also dry-runs every hook script with a probe
-payload (a script error fails health; a strict gate that blocks the probe
-passes) and connects every MCP server. It validates every `projects/<name>/`
-(brief frontmatter, an existing workdir, a manager whose name doesn't collide)
-and prints one line per project, and says so when `notifier.md` is absent
-(background completions then post raw). It runs the Telegram front-end's own
-start-up check too, so a `telegram:` block `shell3 telegram` would refuse —
-a blank `token` or `chat_id`, a non-numeric `chat_id` — fails here, naming the
-field; no `telegram:` block at all is reported but not failed, since an
-`shell3 ask`-only config is legitimate. Run it after editing the config tree,
-before reloading.
+Loads the config exactly like the bot would and fails (exit 1) on anything
+the running bot only warns about — a skill `.md` skipped for broken
+frontmatter, a hook file naming no subagent. It also dry-runs every hook
+script with a probe payload (a script error fails health; a strict gate that
+blocks the probe passes), connects every MCP server, validates every
+`projects/<name>/`, and notes when `notifier.md` is absent (background
+completions then post raw). A `telegram:` block `shell3 telegram` would
+refuse — blank `token` or `chat_id`, a non-numeric `chat_id` — fails here,
+naming the field; no `telegram:` block at all is reported but not failed,
+since an `ask`-only config is legitimate. Run it after editing the config
+tree, before reloading.
 
 ## `shell3 ask` — drive the agent locally
 
 Runs the same config + agent from your terminal and prints everything the chat
 hides: reasoning, every tool call with raw args, untruncated results, token
 usage. It follows subagent/`bash_bg` jobs the turn spawned and renders their
-completions. `ask` is host-agnostic — it reads nothing from the `telegram:`
+completions. `ask` is host-agnostic: it reads nothing from the `telegram:`
 block (its session runs in the config dir) and shares the same runs store, so
 the bot and `ask` see each other's history.
 
@@ -220,8 +201,8 @@ the bot and `ask` see each other's history.
 a tool-call hook `ask` verdict prompts you on the terminal with the reason and
 command and reads a `y/N` answer — anything but an explicit yes denies. With
 `-p` (scripted) or no TTY there is no human to ask, so the run is **headless**:
-the hook payload's `headless` flag is true and every `ask` verdict auto-**denies**
-(matching the hooks contract — a headless ask never silently runs).
+the hook payload's `headless` flag is true and every `ask` verdict
+auto-**denies**; a headless ask never silently runs.
 
 ```sh
 shell3 ask                        # no message: opens an interactive multi-turn chat
@@ -237,7 +218,7 @@ ctrl+c. A headless invocation (no TTY) must pass a message via an argument or
 
 **Background jobs and `-p`.** When a turn spawns a subagent or `bash_bg` job,
 `ask` stays alive after the turn ends and waits for those in-process jobs to
-complete, rendering each completion's wake turn — so a scripted `ask -p` run
+complete, rendering each completion's wake turn, so a scripted `ask -p` run
 never exits at turn end and silently kills in-flight work. The wait has no
 timeout; press ctrl+c (SIGINT) to quit while jobs are still running.
 
@@ -253,13 +234,8 @@ cat ~/.shell3/.shell3_project/runs/<id>/meta.json   # one session's metadata
 ```
 
 The agent searches its own past the same way (`rg` over the JSONL, via the
-`history` skill); each subagent run has its own stored transcript. The `/runs`
-pages and `/run_N` replays read the same store — every session, including subagent children,
-cron runs and `shell3 ask` sessions, with tool calls, arguments, results and
-reasoning. Old sessions are swept at `shell3 telegram` startup — see
+`history` skill); each subagent run has its own stored transcript. The
+`/runs` pages and `/run_N` replays read the same store: every session,
+including subagent children, cron runs and `shell3 ask` sessions, with tool
+calls, arguments, results and reasoning. Old sessions are swept at `shell3 telegram` startup — see
 [`runs_keep_days`](configuration.md#the-runs-janitor--runs_keep_days).
-
-## Platform support
-
-Unix-like systems only — Linux and macOS (WSL works). Windows is not
-supported: shell3 leans on Unix process groups.

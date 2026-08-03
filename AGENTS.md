@@ -2,6 +2,12 @@
 
 Minimal Unix-composable personal agent written in Go.
 
+> This file is the repo's standing context for coding agents (`CLAUDE.md`
+> symlinks here). It is written for models, not people: dense, exhaustive,
+> and kept in lockstep with the code, because shell3 is developed largely by
+> the kind of agent it is. Humans want [README.md](README.md) and
+> [docs/](docs/).
+
 **Declarative config.** The config is a **directory** (default `~/.shell3/`),
 loaded by `internal/config` — four rules: YAML wires it, markdown prompts it,
 files enable it, one bash script gates it. `shell3.yaml` holds wiring only

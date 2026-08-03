@@ -6,9 +6,9 @@ cron — over newline-delimited JSON on stdin/stdout instead of the Telegram
 Bot API. Your front-end (a Discord bridge, a custom dashboard backend, a test
 harness) spawns the process and translates.
 
-There is no port, no listener, and no auth: possessing the subprocess's stdio
-is the access model, the exact parallel of `chat_id`. A remote front-end needs
-its own relay; that is deliberately out of scope.
+There is no port, no listener, and no auth: owning the subprocess's stdio is
+the access model, the parallel of Telegram's `chat_id`. A remote front-end
+needs its own relay; that is deliberately out of scope.
 
 ```
 your-frontend ──spawn──▶ shell3 serve
@@ -17,15 +17,16 @@ your-frontend ──spawn──▶ shell3 serve
 ```
 
 Running serve *alongside* `shell3 telegram` as a second window onto the same
-agent is not supported — run two processes with two config dirs instead (two
-agents with the same brain). Serve keeps its own thread index
-(`serve_threads.jsonl`), so the two front-ends' histories never cross-resolve.
+agent is not supported — run two processes with two config dirs instead.
+Serve keeps its own thread index (`serve_threads.jsonl`), so the two
+front-ends' histories never cross-resolve.
 
 ## Framing
 
 - One JSON object per line, both directions, UTF-8.
 - Every object carries `"type"`. Unknown types and malformed lines are
-  logged to stderr and ignored — additive protocol growth won't break you.
+  logged to stderr and ignored, so additive protocol growth won't break a
+  front-end.
 - stdin EOF (or SIGINT/SIGTERM) shuts the agent down cleanly.
 - stderr is the diagnostic channel (startup notes, skipped input); everything
   chat-shaped is a stdout event.
