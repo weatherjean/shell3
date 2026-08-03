@@ -5,6 +5,7 @@ package telegram
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -68,20 +69,20 @@ type sentVideo struct {
 }
 
 type sentMenu struct {
-	msgID   int
+	msgID   string
 	chatID  int64
 	text    string
 	options []MenuOption
 }
 
 type sentConfirm struct {
-	msgID           int
+	msgID           string
 	text            string
 	yesData, noData string
 }
 
 type sentEdit struct {
-	msgID int
+	msgID string
 	text  string
 }
 
@@ -98,9 +99,9 @@ type sentMsg struct {
 }
 
 type sentReply struct {
-	msgID   int
+	msgID   string
 	chatID  int64
-	replyTo int
+	replyTo string
 	text    string
 	html    bool
 }
@@ -113,15 +114,16 @@ func (f *fakeClient) Updates(ctx context.Context) <-chan Msg { return f.in }
 
 func (f *fakeClient) Callbacks(ctx context.Context) <-chan Callback { return f.cb }
 
-func (f *fakeClient) SendConfirm(ctx context.Context, chatID int64, text, yesData, noData string) (int, error) {
+func (f *fakeClient) SendConfirm(ctx context.Context, chatID int64, text, yesData, noData string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.next++
-	f.confirms = append(f.confirms, sentConfirm{msgID: f.next, text: text, yesData: yesData, noData: noData})
-	return f.next, nil
+	id := strconv.Itoa(f.next)
+	f.confirms = append(f.confirms, sentConfirm{msgID: id, text: text, yesData: yesData, noData: noData})
+	return id, nil
 }
 
-func (f *fakeClient) EditPlain(ctx context.Context, chatID int64, msgID int, text string) error {
+func (f *fakeClient) EditPlain(ctx context.Context, chatID int64, msgID string, text string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.edits = append(f.edits, sentEdit{msgID: msgID, text: text})
@@ -177,15 +179,15 @@ func (f *fakeClient) reset() {
 	f.sent, f.html, f.docs, f.replies = nil, nil, nil, nil
 }
 
-func (f *fakeClient) SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string) (int, error) {
+func (f *fakeClient) SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failDoc != nil {
-		return 0, f.failDoc
+		return "", f.failDoc
 	}
 	f.docs = append(f.docs, sentDoc{chatID: chatID, filename: filename, data: data, caption: caption})
 	f.next++
-	return f.next, nil
+	return strconv.Itoa(f.next), nil
 }
 
 func (f *fakeClient) SendPhoto(ctx context.Context, chatID int64, filename string, data []byte, caption string) error {
@@ -228,15 +230,16 @@ func (f *fakeClient) SendVideo(ctx context.Context, chatID int64, filename strin
 	return nil
 }
 
-func (f *fakeClient) SendMenu(ctx context.Context, chatID int64, text string, options []MenuOption) (int, error) {
+func (f *fakeClient) SendMenu(ctx context.Context, chatID int64, text string, options []MenuOption) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failMenu != nil {
-		return 0, f.failMenu
+		return "", f.failMenu
 	}
 	f.next++
-	f.menus = append(f.menus, sentMenu{msgID: f.next, chatID: chatID, text: text, options: options})
-	return f.next, nil
+	id := strconv.Itoa(f.next)
+	f.menus = append(f.menus, sentMenu{msgID: id, chatID: chatID, text: text, options: options})
+	return id, nil
 }
 
 func (f *fakeClient) lastDoc() (sentDoc, bool) {
@@ -248,41 +251,42 @@ func (f *fakeClient) lastDoc() (sentDoc, bool) {
 	return f.docs[len(f.docs)-1], true
 }
 
-func (f *fakeClient) Send(ctx context.Context, chatID int64, text string) (int, error) {
+func (f *fakeClient) Send(ctx context.Context, chatID int64, text string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.next++
 	f.sent = append(f.sent, sentMsg{chatID: chatID, text: text})
-	return f.next, nil
+	return strconv.Itoa(f.next), nil
 }
-func (f *fakeClient) SendHTML(ctx context.Context, chatID int64, html string) (int, error) {
+func (f *fakeClient) SendHTML(ctx context.Context, chatID int64, html string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failHTML {
-		return 0, errFakeHTML
+		return "", errFakeHTML
 	}
 	f.next++
 	f.html = append(f.html, html)
-	return f.next, nil
+	return strconv.Itoa(f.next), nil
 }
 
 // SendReply records a plain threaded reply. failReply simulates a deleted
 // target: the reply degrades to a plain Send (replyTo cleared), mirroring the
 // real client's fallback.
-func (f *fakeClient) SendReply(ctx context.Context, chatID int64, text string, replyTo int) (int, error) {
+func (f *fakeClient) SendReply(ctx context.Context, chatID int64, text string, replyTo string) (string, error) {
 	if f.failReply != nil {
 		return f.Send(ctx, chatID, text)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.next++
-	f.replies = append(f.replies, sentReply{msgID: f.next, chatID: chatID, replyTo: replyTo, text: text})
-	return f.next, nil
+	id := strconv.Itoa(f.next)
+	f.replies = append(f.replies, sentReply{msgID: id, chatID: chatID, replyTo: replyTo, text: text})
+	return id, nil
 }
 
-func (f *fakeClient) SendHTMLReply(ctx context.Context, chatID int64, html string, replyTo int) (int, error) {
+func (f *fakeClient) SendHTMLReply(ctx context.Context, chatID int64, html string, replyTo string) (string, error) {
 	if f.failHTML {
-		return 0, errFakeHTML
+		return "", errFakeHTML
 	}
 	if f.failReply != nil {
 		return f.SendHTML(ctx, chatID, html)
@@ -290,8 +294,9 @@ func (f *fakeClient) SendHTMLReply(ctx context.Context, chatID int64, html strin
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.next++
-	f.replies = append(f.replies, sentReply{msgID: f.next, chatID: chatID, replyTo: replyTo, text: html, html: true})
-	return f.next, nil
+	id := strconv.Itoa(f.next)
+	f.replies = append(f.replies, sentReply{msgID: id, chatID: chatID, replyTo: replyTo, text: html, html: true})
+	return id, nil
 }
 
 // lastReply returns the most recent threaded reply, or ok=false if none.
@@ -314,10 +319,10 @@ func (f *fakeClient) sentReplies() []sentReply {
 }
 
 // lastSentID returns the message id of the most recent send of any kind.
-func (f *fakeClient) lastSentID() int {
+func (f *fakeClient) lastSentID() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.next
+	return strconv.Itoa(f.next)
 }
 
 func (f *fakeClient) htmlTexts() []string {

@@ -67,17 +67,17 @@ func TestContract1_FreshSessionThreadsReply(t *testing.T) {
 	rt := storeRuntime(t, "fresh reply")
 	b := newBot(t, fc, rt)
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: 100, Text: "hi"})
+	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "100", Text: "hi"})
 
 	waitFor(t, func() bool {
 		r, ok := fc.lastReply()
 		return ok && strings.Contains(r.text, "fresh reply")
 	})
 	r, _ := fc.lastReply()
-	if r.replyTo != 100 {
-		t.Fatalf("reply must thread to inbound message 100, got replyTo=%d", r.replyTo)
+	if r.replyTo != "100" {
+		t.Fatalf("reply must thread to inbound message 100, got replyTo=%s", r.replyTo)
 	}
-	id, ok := b.threads.Lookup(100)
+	id, ok := b.threads.Lookup("100")
 	if !ok || id == "" {
 		t.Fatal("inbound message must be recorded in the thread index")
 	}
@@ -93,20 +93,20 @@ func TestContract2_ReplyResumesMappedSession(t *testing.T) {
 	rt := storeRuntime(t, "r")
 	b := newBot(t, fc, rt)
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: 100, Text: "first"})
+	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "100", Text: "first"})
 	if !waitForReply(t, fc, "r") {
 		t.Fatal("first turn produced no reply")
 	}
-	first, ok := b.threads.Lookup(100)
+	first, ok := b.threads.Lookup("100")
 	if !ok {
 		t.Fatal("first message was not recorded")
 	}
 	// Let the idle session retire so the reply exercises the ResumeID path.
 	waitFor(t, func() bool { b.mu.Lock(); n := len(b.live); b.mu.Unlock(); return n == 0 })
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: 101, ReplyToID: 100, Text: "second"})
-	waitFor(t, func() bool { _, ok := b.threads.Lookup(101); return ok })
-	second, _ := b.threads.Lookup(101)
+	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "101", ReplyToID: "100", Text: "second"})
+	waitFor(t, func() bool { _, ok := b.threads.Lookup("101"); return ok })
+	second, _ := b.threads.Lookup("101")
 	if second != first {
 		t.Fatalf("a reply to a recorded message must resume the same session: first=%s second=%s", first, second)
 	}
@@ -122,13 +122,13 @@ func TestContract3_UnknownReplyGetsCantContinueNotice(t *testing.T) {
 	b := newBot(t, fc, rt)
 
 	b.handleMsg(context.Background(), Msg{
-		ChatID: 42, ID: 102, ReplyToID: 999, ReplyTo: "QUOTED SNIPPET", Text: "can you pick up from here?",
+		ChatID: 42, ID: "102", ReplyToID: "999", ReplyTo: "QUOTED SNIPPET", Text: "can you pick up from here?",
 	})
 	waitFor(t, func() bool {
 		r, ok := fc.lastReply()
-		return ok && r.replyTo == 102 && strings.Contains(r.text, "can't continue")
+		return ok && r.replyTo == "102" && strings.Contains(r.text, "can't continue")
 	})
-	if _, ok := b.threads.Lookup(102); ok {
+	if _, ok := b.threads.Lookup("102"); ok {
 		t.Fatal("an unknown-reply message must not create or record a session")
 	}
 	if len(rec.CallsSnapshot()) != 0 {
@@ -144,21 +144,21 @@ func TestContract4_MidTurnMessageCourtesyDropped(t *testing.T) {
 	rt := shell3test.NewRuntimeForTestClient(t, blk)
 	b := newBot(t, fc, rt)
 
-	go b.handleMsg(context.Background(), Msg{ChatID: 42, ID: 1, Text: "work"})
+	go b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "work"})
 	select {
 	case <-blk.Started:
 	case <-time.After(2 * time.Second):
 		t.Fatal("first turn never started")
 	}
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: 2, Text: "steer"})
+	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "2", Text: "steer"})
 
 	waitFor(t, func() bool {
 		r, ok := fc.lastReply()
-		return ok && r.replyTo == 2 &&
+		return ok && r.replyTo == "2" &&
 			strings.Contains(r.text, "a turn is running") && strings.Contains(r.text, "/stop")
 	})
-	if _, ok := b.threads.Lookup(2); ok {
+	if _, ok := b.threads.Lookup("2"); ok {
 		t.Fatal("a dropped mid-turn message must not create or record a session")
 	}
 
@@ -173,7 +173,7 @@ func TestContract5_StopCancelsTurnKeepsJobs(t *testing.T) {
 	rt := shell3test.NewRuntimeForTestClient(t, blk)
 	b := newBot(t, fc, rt)
 
-	go b.handleMsg(context.Background(), Msg{ChatID: 42, ID: 1, Text: "work"})
+	go b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "work"})
 	select {
 	case <-blk.Started:
 	case <-time.After(2 * time.Second):
@@ -254,7 +254,7 @@ func TestFixWave_RetireHoldsSlotSoConcurrentWakeIsNotAborted(t *testing.T) {
 	}
 	b.AdoptSession(sess)
 	b.mu.Lock()
-	b.lastMsg[sess.ID()] = 500
+	b.lastMsg[sess.ID()] = "500"
 	b.mu.Unlock()
 
 	ctx, cancelCtx := context.WithCancel(context.Background())
@@ -288,7 +288,7 @@ func TestFixWave_RetireHoldsSlotSoConcurrentWakeIsNotAborted(t *testing.T) {
 	// the session survived retirement and the wake was not aborted mid-flight.
 	waitFor(t, func() bool {
 		r, ok := fc.lastReply()
-		return ok && r.replyTo == 500 && strings.Contains(r.text, "wake reply")
+		return ok && r.replyTo == "500" && strings.Contains(r.text, "wake reply")
 	})
 }
 
@@ -306,7 +306,7 @@ func TestContract6_RunningJobKeepsSessionLiveAndWakeReplies(t *testing.T) {
 	}
 	b.AdoptSession(sess)
 	b.mu.Lock()
-	b.lastMsg[sess.ID()] = 200
+	b.lastMsg[sess.ID()] = "200"
 	b.mu.Unlock()
 
 	// Start a background subagent job that stays running (headless → blocking).
@@ -335,7 +335,7 @@ func TestContract6_RunningJobKeepsSessionLiveAndWakeReplies(t *testing.T) {
 
 	waitFor(t, func() bool {
 		r, ok := fc.lastReply()
-		return ok && r.replyTo == 200 && strings.Contains(r.text, "job narrated")
+		return ok && r.replyTo == "200" && strings.Contains(r.text, "job narrated")
 	})
 }
 
@@ -352,7 +352,7 @@ func TestContract7_WakeMidTurnQueuesThenDrains(t *testing.T) {
 	}
 	b.AdoptSession(sess)
 	b.mu.Lock()
-	b.lastMsg[sess.ID()] = 300
+	b.lastMsg[sess.ID()] = "300"
 	b.turnActive = true // simulate a turn holding the slot
 	b.mu.Unlock()
 
@@ -374,7 +374,7 @@ func TestContract7_WakeMidTurnQueuesThenDrains(t *testing.T) {
 
 	waitFor(t, func() bool {
 		r, ok := fc.lastReply()
-		return ok && r.replyTo == 300 && strings.Contains(r.text, "queued reply")
+		return ok && r.replyTo == "300" && strings.Contains(r.text, "queued reply")
 	})
 }
 
@@ -385,7 +385,7 @@ func TestContract8_IdleSessionRetired(t *testing.T) {
 	rt := storeRuntime(t, "done")
 	b := newBot(t, fc, rt)
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: 400, Text: "hi"})
+	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "400", Text: "hi"})
 	if !waitForReply(t, fc, "done") {
 		t.Fatal("turn produced no reply")
 	}

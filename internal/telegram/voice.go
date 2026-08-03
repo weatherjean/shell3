@@ -25,7 +25,7 @@ const voiceModePrefix = "vm"
 // Speak, reading the synthesized file, or the send itself) falls back to the
 // plain b.sendReply so the reply is never lost; a Speak (synthesis) failure
 // additionally sends its error to the chat as a ⚠️ notice.
-func (b *Bot) deliverReply(ctx context.Context, reply string, hadVoice bool, sess *shell3.Session, replyTo int) {
+func (b *Bot) deliverReply(ctx context.Context, reply string, hadVoice bool, sess *shell3.Session, replyTo string) {
 	asText := func() { b.postReply(ctx, sess, replyTo, reply) }
 	if reply == "" {
 		asText()
@@ -136,7 +136,7 @@ func (b *Bot) handleVoiceCallback(ctx context.Context, mode string) {
 	b.askMu.Lock()
 	msgID := b.voiceMenuMsgID
 	b.askMu.Unlock()
-	if msgID != 0 {
+	if msgID != "" {
 		_ = b.client.EditPlain(ctx, b.chatID, msgID, voiceMenuText(mode))
 	}
 }

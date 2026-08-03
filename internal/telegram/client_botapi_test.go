@@ -27,7 +27,7 @@ func TestNormalizeMessage_CaptionIsTheText(t *testing.T) {
 	if got.Text != "translate this into English" {
 		t.Fatalf("Text = %q, want the caption", got.Text)
 	}
-	if got.ChatID != 42 || got.ID != 7 {
+	if got.ChatID != 42 || got.ID != "7" {
 		t.Fatalf("unexpected envelope: %+v", got)
 	}
 }

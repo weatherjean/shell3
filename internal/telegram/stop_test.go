@@ -21,7 +21,7 @@ func TestStopCancelsInFlightTurn(t *testing.T) {
 	rt := shell3test.NewRuntimeForTestClient(t, blk)
 	b := newBot(t, fc, rt)
 
-	go b.handleMsg(context.Background(), Msg{ChatID: 42, ID: 1, Text: "do work"})
+	go b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "do work"})
 
 	// Wait for the turn to be in flight (proves handleMsg launched it).
 	select {
