@@ -30,7 +30,14 @@ func openThreads(rt *shell3.Runtime, surface string) *telegram.ThreadIndex {
 		fmt.Printf("janitor: removed %d runs, %d thread entries\n",
 			len(removedRuns), removedThreads)
 	}
-	return telegram.NewThreadIndex(rt.Parts().Store(), surface)
+	// The store is resolved per call: /reload swaps Parts generations and the
+	// parked old generation closes its database handle when it drains.
+	return telegram.NewThreadIndex(func() *runs.Store {
+		if p := rt.Parts(); p != nil {
+			return p.Store()
+		}
+		return nil
+	}, surface)
 }
 
 // wireHost performs the transport-independent bot wiring shared by

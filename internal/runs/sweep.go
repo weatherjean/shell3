@@ -2,6 +2,8 @@ package runs
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -85,7 +87,35 @@ func Sweep(root string, keep time.Duration, now time.Time) (removedIDs []string,
 		return ids, threadsDropped, fmt.Errorf("runs: sweep threads: %w", err)
 	}
 	n, _ := res.RowsAffected()
+
+	s.sweepOrphanDirs(now)
 	return ids, threadsDropped + int(n), nil
+}
+
+// sweepOrphanDirs removes runs/<id>/ directories with no session row —
+// pre-database JSONL leftovers and crash debris. Grace-windowed so a dir a
+// live process created moments ago (a job log ahead of its first write)
+// survives; best-effort per dir.
+func (s *Store) sweepOrphanDirs(now time.Time) {
+	dir := filepath.Join(s.root, "runs")
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range ents {
+		if !e.IsDir() {
+			continue
+		}
+		var one int
+		if err := s.db.QueryRow(
+			`SELECT 1 FROM sessions WHERE id=?`, e.Name()).Scan(&one); err == nil {
+			continue // live session's job-log dir
+		}
+		if info, err := e.Info(); err != nil || info.ModTime().After(now.Add(-emptyKeep)) {
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(dir, e.Name()))
+	}
 }
 
 func scanIDs(rows interface {

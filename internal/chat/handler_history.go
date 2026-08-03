@@ -51,7 +51,12 @@ func historySearch(cfg ToolConfig, a historyArgs) string {
 	}
 	hits, err := cfg.Store.Search(a.Query, limit)
 	if err != nil {
-		return "history search failed: " + err.Error()
+		// A query that isn't valid FTS5 syntax (stray quote, leading dash)
+		// still deserves an answer: retry it as one literal phrase.
+		quoted := `"` + strings.ReplaceAll(a.Query, `"`, `""`) + `"`
+		if hits, err = cfg.Store.Search(quoted, limit); err != nil {
+			return "history search failed: " + err.Error()
+		}
 	}
 	if len(hits) == 0 {
 		return "no matches"

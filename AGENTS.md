@@ -16,7 +16,7 @@ strict decode — unknown keys fail the load; secrets referenced as `env:KEY`,
 substring-substituted from the sibling `.env`, unknown key = load error).
 Everything with a prompt is markdown-with-frontmatter: `agent.md` (THE agent —
 exactly one because there is exactly one file; frontmatter `model` (required),
-`tools: [bash, bash_bg, edit, media, read, list_files]`, `mcp`, `prune`,
+`tools: [bash, bash_bg, edit, media, read, list_files, history]`, `mcp`, `prune`,
 `context` (main-agent-only: a list of config-dir-relative paths, globs
 allowed, read fresh at session creation — so every fresh turn sees current
 file contents, not a load-time snapshot — into a `## Context` prompt section,
@@ -49,13 +49,17 @@ model can perceive it (PDF via an OpenAI-compatible `file` part; video via a
 `video_url` part, an OpenRouter/Gemini extension plain OpenAI endpoints
 reject) — when `media` is in the agent's `tools`). The main agent is bash-first
 by default: reading, listing, and searching are bash commands (`cat`/`sed -n`,
-`ls`/`find`, `rg`; history is searched with `rg` over
-`.shell3_project/runs/**/*.jsonl`), and a reflexive
+`ls`/`find`, `rg`), and a reflexive
 `read_file`/`grep`/`write_file` call gets an unknown-tool error carrying a
 bash-first redirect back to bash/edit_file. Structured `read` and `list_files`
 tools exist as an opt-in (`tools: [read, list_files]`, typically for a
 subagent on a smaller model); left out of `tools`, those names hit the same
-redirect. Specialists are subagents. A **subagent** is an **in-process background job** spawned via the
+redirect. `history` (opt-in via `tools`, on the scaffold's main agent by
+default) recalls past conversations from the runs store: `{query}` is
+ranked FTS5 search over user+assistant text across ALL sessions (tool
+output is not indexed; a syntax-invalid query is retried as one quoted
+phrase), `{session, around, limit}` reads the transcript around a hit;
+read-only, store-nil-safe, handled by `chat.HistoryHandler`. Specialists are subagents. A **subagent** is an **in-process background job** spawned via the
 `task` tool (`{subagent_type, prompt, description}`; returns immediately); the
 runtime (`internal/shell3` jobManager) runs it as a child-session goroutine
 under a concurrency cap (`background.max_concurrent`, default 8) — no
@@ -199,9 +203,10 @@ the chat.
 The turn model is **fresh-turn, thread-scoped**: the bot holds NO long-lived
 session. Every inbound message runs in its own runtime session; a Telegram
 *reply* resumes the session recorded for that message id in the persistent
-thread index (`.shell3_project/telegram_threads.jsonl`, `threads.go` —
-append-only JSONL, in-memory map authoritative, torn tails healed, pruned at
-startup by the janitor pass). Replying to a message whose session is gone
+thread index (the runs store's `threads` table, surface-namespaced
+"telegram"/"serve"; `threads.go` — in-memory map authoritative for the
+process, store writes best-effort, and the store is resolved per call so a
+/reload generation swap never leaves the index on a closed handle). Replying to a message whose session is gone
 answers that it can't be resumed rather than silently starting a new one.
 Exactly one main-agent turn runs at a time (a turn slot in `bot.go`); a message
 arriving mid-turn gets "a turn is running … this message is disregarded" and
@@ -285,12 +290,12 @@ prompt as the triage note (`DispatchOpts.Note` — the judge knows what the job
 is FOR); a failed run always surfaces as `⚠️ <job> failed: <error>`).
 
 A **runs janitor** runs once at `shell3 telegram` startup (never on `ask`):
-`runs_keep_days` (top-level `shell3.yaml` key, default 30, `0` = keep forever)
-deletes `runs/<id>/` dirs whose newest-file mtime is past the cutoff and
-rewrites `telegram_threads.jsonl` dropping entries pointing at deleted or
-already-gone sessions, printing `janitor: removed N runs, M thread entries`
-(silent when both are zero). It must run before the live `ThreadIndex` opens
-that file.
+`runs_keep_days` (top-level `shell3.yaml` key, default 0 = keep forever)
+deletes sessions whose `last_at` is past the cutoff — rows, FTS entries,
+thread entries, and job-log dirs together — plus empty crash leftovers and
+orphaned `runs/<id>/` dirs (pre-database leftovers), printing `janitor:
+removed N runs, M thread entries` (silent when both are zero). SQL in
+`runs.Sweep`, on its own connection.
 
 `shell3 boot` scaffolds the config tree (an interactive form: model, vision —
 which wires `media.describe` + the media tool — context budget, an optional
@@ -317,7 +322,7 @@ newline-delimited JSON on stdin/stdout (`internal/telegram/client_jsonl.go`,
 a third tgClient beside the Bot API and console transports; docs/serve.md is
 the wire reference). Message ids are opaque strings end to end (the Telegram
 client stringifies the API's ints), so a front-end's own ids thread natively;
-serve keeps its own `serve_threads.jsonl`; markdown goes on the wire (the
+serve keeps its own thread surface in the runs store; markdown goes on the wire (the
 JSONL client's SendHTML returns ErrNoHTML, steering the bot's fallback to the
 plain path); media crosses as file paths, outbound spooled under
 `.shell3_project/serve_out/`. Running serve ALONGSIDE telegram is unsupported by design —
@@ -343,8 +348,8 @@ internal/bootstrap/    first-run global + project setup
 internal/scaffold/     embedded starter config tree (defaults/base + defaults/project for `shell3 project new`) + boot/project rendering
 internal/adapter/openai/  OpenAI-compatible LLM adapter
 internal/modelproxy/   run_proxy spawner (starts a model's proxy command on activation)
-internal/paths/        global (~/.shell3/) + local (.shell3_project/) path resolution; no DB fields
-internal/runs/         file-native JSONL store: sessions at .shell3_project/runs/<id>/; janitor.go sweeps runs_keep_days at telegram startup
+internal/paths/        global (~/.shell3/) + local (.shell3_project/) path resolution
+internal/runs/         SQLite runs store (modernc.org/sqlite, pure Go): sessions/messages/reminders/threads + FTS5 index in .shell3_project/shell3.db; job logs stay files under runs/<id>/jobs/; sweep.go is the startup janitor
 internal/edittool/     edit_file tool implementation (Go port of opencode's str-replace) + its direct-disk file I/O
 internal/notify/       Notification type (bg_done / agent_done) shared by job runtime + chat
 internal/media/        media.stt/tts/describe/imagegen clients (transcribe, speak, describe, generate)

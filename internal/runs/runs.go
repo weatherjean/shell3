@@ -315,7 +315,7 @@ func (s *Store) deleteSessions(ids []string) error {
 		return fmt.Errorf("runs: delete sessions: %w", err)
 	}
 	for _, id := range ids {
-		_ = os.RemoveAll(s.jobsDir(id)) // best-effort; logs are disposable
+		_ = os.RemoveAll(s.runDir(id)) // best-effort; job logs are disposable
 	}
 	return nil
 }
@@ -339,14 +339,23 @@ func (s *Store) JobLogPath(id, jobID string) string {
 	return filepath.Join(dir, jobID+".log")
 }
 
-// jobsDir resolves a session's job-log directory. IDs arrive from
-// user-controlled surfaces, so anything that is not a plain path component is
-// rejected — "../../../etc" must never escape the store.
-func (s *Store) jobsDir(id string) string {
+// runDir resolves a session's on-disk directory (job logs only — the
+// conversation lives in the database). IDs arrive from user-controlled
+// surfaces, so anything that is not a plain path component is rejected —
+// "../../../etc" must never escape the store.
+func (s *Store) runDir(id string) string {
 	if id == "" || id == "." || id == ".." || id != filepath.Base(id) {
 		return ""
 	}
-	return filepath.Join(s.root, "runs", id, "jobs")
+	return filepath.Join(s.root, "runs", id)
+}
+
+func (s *Store) jobsDir(id string) string {
+	d := s.runDir(id)
+	if d == "" {
+		return ""
+	}
+	return filepath.Join(d, "jobs")
 }
 
 func hasJobLogs(dir string) bool {

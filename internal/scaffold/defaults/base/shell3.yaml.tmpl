@@ -88,6 +88,7 @@ telegram:
   chat_id: {{.ChatID | yamlstr}}
   workdir: {{.WorkDir | yamlstr}}
 
-# runs_keep_days: how long a finished session's runs/<id>/ dir is kept before
-# `shell3 telegram` sweeps it at startup; 0 keeps everything forever (default 30).
+# runs_keep_days: how long stored sessions are kept before `shell3 telegram`
+# sweeps them at startup. Default 0: keep everything forever (the history
+# tool searches all of it).
 # runs_keep_days: 30

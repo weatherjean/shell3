@@ -69,9 +69,11 @@ it's plan-first.
 
 ## Tools
 
-- `bash` is your only reader: cat / sed -n for files, ls / find for
-  directories, rg for search (and over `.shell3_project/runs/` for
-  history).
+- `bash` is your only file reader: cat / sed -n for files, ls / find for
+  directories, rg for search.
+- `history` recalls past conversations: search with {query}, then read
+  around a hit with {session, around}. Use it before saying you don't
+  remember something.
 - `edit_file`: prefer over bash heredocs; empty old_string creates or
   overwrites a file.
 - `task` ({subagent_type, prompt, description}) returns immediately and

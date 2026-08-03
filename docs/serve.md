@@ -18,7 +18,7 @@ your-frontend ──spawn──▶ shell3 serve
 
 Running serve *alongside* `shell3 telegram` as a second window onto the same
 agent is not supported — run two processes with two config dirs instead.
-Serve keeps its own thread index (`serve_threads.jsonl`), so the two
+Serve keeps its own thread namespace in the runs store, so the two
 front-ends' histories never cross-resolve.
 
 ## Framing

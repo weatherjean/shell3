@@ -10,14 +10,14 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-func testStore(t *testing.T) *runs.Store {
+func testStore(t *testing.T) func() *runs.Store {
 	t.Helper()
 	st, err := runs.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	return st
+	return func() *runs.Store { return st }
 }
 
 func TestThreadIndexRoundtrip(t *testing.T) {

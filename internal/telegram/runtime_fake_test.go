@@ -32,7 +32,7 @@ func mkThreads(t *testing.T) *ThreadIndex {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	return NewThreadIndex(st, "telegram")
+	return NewThreadIndex(func() *runs.Store { return st }, "telegram")
 }
 
 // newBot builds a Bot over rt with a throwaway thread index (chat 42) — the
