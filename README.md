@@ -72,6 +72,7 @@ messages from anywhere else are ignored. Full walkthrough in
 | Command | What |
 |---------|------|
 | `shell3 telegram` | Run the bot front-end + cron (the service). |
+| `shell3 serve`   | Same agent over stdio JSONL, for a bring-your-own front-end ([protocol](docs/serve.md)). |
 | `shell3 boot`     | Scaffold the config + `.env` interactively. |
 | `shell3 project new` | Scaffold a `projects/<name>/` config dir (brief + manager). |
 | `shell3 health`   | Load the config strictly; fail on any warning. |
@@ -116,6 +117,8 @@ Every subcommand takes `--config/-c` to point at a different config directory.
   agent, subagents, projects, the telegram block, cron, voice & images,
   scripts & secrets, MCP servers, hook scripts, skills.
 - **[CLI](docs/cli.md)** — every subcommand and the JSONL runs store.
+- **[Serve protocol](docs/serve.md)** — the stdio JSONL wire format for
+  bring-your-own front-ends.
 - **[Security & data](docs/security.md)** — threat model, secrets, wiping data.
 - **[Cookbook](docs/cookbook/README.md)** — drop-in recipes: subagents,
   skills, proxies, sandboxes.

@@ -304,8 +304,18 @@ no message = an interactive multi-turn loop; `-p` for headless; `--resume`
 continues the latest session; host-agnostic — reads nothing from the
 `telegram:` block, and installs no CompletionHost, so its verbose view sees
 every completion raw).
-`telegram`, `ask`, `boot`, `project`, and `health` are the whole command tree —
-there is no web interface, no dashboard command, and no `url` command.
+`telegram`, `serve`, `ask`, `boot`, `project`, and `health` are the whole
+command tree — there is no web interface, no dashboard command, and no `url`
+command. `shell3 serve` is the BYO front-end seam: the same bot loop over
+newline-delimited JSON on stdin/stdout (`internal/telegram/client_jsonl.go`,
+a third tgClient beside the Bot API and console transports; docs/serve.md is
+the wire reference). Message ids are opaque strings end to end (the Telegram
+client stringifies the API's ints), so a front-end's own ids thread natively;
+serve keeps its own `serve_threads.jsonl`; markdown goes on the wire (the
+JSONL client's SendHTML returns ErrNoHTML, steering the bot's fallback to the
+plain path); media crosses as file paths, outbound spooled under
+`.shell3_project/serve_out/`. Running serve ALONGSIDE telegram is unsupported by design —
+run two processes with two config dirs instead.
 
 ## IMPORTANT: Do Not Read Credential Files
 
@@ -320,7 +330,7 @@ assistants, and automated tools.
 ## Project Layout
 
 ```
-cmd/shell3/            cobra command tree: root (prints help) + telegram/ask/boot/project/health subcommands
+cmd/shell3/            cobra command tree: root (prints help) + telegram/serve/ask/boot/project/health subcommands
 internal/agentsetup/   shared config assembly (BuildParts → chat.Config) used by every front-end
 internal/config/       config-directory loader (shell3.yaml + agent/notifier/subagent/project/skill/cron markdown + hooks/*.sh) + system-prompt assembly
 internal/bootstrap/    first-run global + project setup
@@ -333,7 +343,7 @@ internal/edittool/     edit_file tool implementation (Go port of opencode's str-
 internal/notify/       Notification type (bg_done / agent_done) shared by job runtime + chat
 internal/media/        media.stt/tts/describe/imagegen clients (transcribe, speak, describe, generate)
 internal/mcp/          MCP client (official go-sdk): Manager connects mcp: servers, lists tools, dispatches mcp_* calls
-internal/telegram/     the Telegram front-end: bot loop + transports, turn slot, thread index, host commands + tools, approval keyboard, media preflight, completion delivery
+internal/telegram/     the chat front-end: bot loop + transports (Bot API, console, serve's stdio JSONL), turn slot, thread index, host commands + tools, approval keyboard, media preflight, completion delivery
 internal/render/       markdown renderers for the dash views (/status, /jobs, /job, /cron, /runs) shared by the bot
 internal/cron/         robfig/cron scheduler dispatching subagent jobs on Session.Dispatch
 internal/cli/          terminal front-end helpers: shell3 ask renderers, brand banner
