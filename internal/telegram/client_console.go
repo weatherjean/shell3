@@ -104,12 +104,12 @@ func (c *ConsoleClient) readLoop(ctx context.Context) {
 // parseLine turns one stdin line into an inbound Msg, assigning it a fresh id.
 // "@<id> text" becomes a reply to <id>; anything else is a plain/command message.
 func (c *ConsoleClient) parseLine(line string) Msg {
-	m := Msg{ChatID: c.chatID, ID: c.nextID()}
+	m := Msg{ChatID: c.chatID, ID: strconv.Itoa(c.nextID())}
 	if strings.HasPrefix(line, "@") {
 		rest := line[1:]
 		idStr, text, _ := strings.Cut(rest, " ")
-		if replyTo, err := strconv.Atoi(idStr); err == nil {
-			m.ReplyToID = replyTo
+		if idStr != "" {
+			m.ReplyToID = idStr
 			m.Text = strings.TrimSpace(text)
 			return m
 		}
@@ -127,22 +127,22 @@ func (c *ConsoleClient) nextID() int {
 }
 
 // emit prints one outbound message under the write lock, assigning it an id.
-// replyTo != 0 renders the "↩#<replyto>" thread marker; tag (e.g. "menu") is an
+// replyTo != "" renders the "↩#<replyto>" thread marker; tag (e.g. "menu") is an
 // optional extra label after the id.
-func (c *ConsoleClient) emit(replyTo int, tag, text string) int {
+func (c *ConsoleClient) emit(replyTo string, tag, text string) string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.seq++
-	id := c.seq
+	id := strconv.Itoa(c.seq)
 	switch {
-	case tag != "" && replyTo != 0:
-		fmt.Fprintf(c.out, "[#%d %s ↩#%d] %s\n", id, tag, replyTo, text)
+	case tag != "" && replyTo != "":
+		fmt.Fprintf(c.out, "[#%s %s ↩#%s] %s\n", id, tag, replyTo, text)
 	case tag != "":
-		fmt.Fprintf(c.out, "[#%d %s] %s\n", id, tag, text)
-	case replyTo != 0:
-		fmt.Fprintf(c.out, "[#%d ↩#%d] %s\n", id, replyTo, text)
+		fmt.Fprintf(c.out, "[#%s %s] %s\n", id, tag, text)
+	case replyTo != "":
+		fmt.Fprintf(c.out, "[#%s ↩#%s] %s\n", id, replyTo, text)
 	default:
-		fmt.Fprintf(c.out, "[#%d] %s\n", id, text)
+		fmt.Fprintf(c.out, "[#%s] %s\n", id, text)
 	}
 	if f, ok := c.out.(flusher); ok {
 		_ = f.Flush()
@@ -161,26 +161,26 @@ func (c *ConsoleClient) mark(format string, args ...any) {
 	}
 }
 
-func (c *ConsoleClient) Send(_ context.Context, _ int64, text string) (int, error) {
-	return c.emit(0, "", text), nil
+func (c *ConsoleClient) Send(_ context.Context, _ int64, text string) (string, error) {
+	return c.emit("", "", text), nil
 }
 
-func (c *ConsoleClient) SendHTML(_ context.Context, _ int64, html string) (int, error) {
-	return c.emit(0, "", html), nil
+func (c *ConsoleClient) SendHTML(_ context.Context, _ int64, html string) (string, error) {
+	return c.emit("", "", html), nil
 }
 
-func (c *ConsoleClient) SendReply(_ context.Context, _ int64, text string, replyTo int) (int, error) {
+func (c *ConsoleClient) SendReply(_ context.Context, _ int64, text string, replyTo string) (string, error) {
 	return c.emit(replyTo, "", text), nil
 }
 
-func (c *ConsoleClient) SendHTMLReply(_ context.Context, _ int64, html string, replyTo int) (int, error) {
+func (c *ConsoleClient) SendHTMLReply(_ context.Context, _ int64, html string, replyTo string) (string, error) {
 	return c.emit(replyTo, "", html), nil
 }
 
 func (c *ConsoleClient) Typing(_ context.Context, _ int64) error { return nil }
 
-func (c *ConsoleClient) SendDocument(_ context.Context, _ int64, filename string, _ []byte, caption string) (int, error) {
-	return c.emit(0, "document "+filename, caption), nil
+func (c *ConsoleClient) SendDocument(_ context.Context, _ int64, filename string, _ []byte, caption string) (string, error) {
+	return c.emit("", "document "+filename, caption), nil
 }
 
 func (c *ConsoleClient) SendPhoto(_ context.Context, _ int64, filename string, _ []byte, caption string) error {
@@ -203,25 +203,25 @@ func (c *ConsoleClient) SendVideo(_ context.Context, _ int64, filename string, _
 	return nil
 }
 
-func (c *ConsoleClient) SendMenu(_ context.Context, _ int64, text string, options []MenuOption) (int, error) {
+func (c *ConsoleClient) SendMenu(_ context.Context, _ int64, text string, options []MenuOption) (string, error) {
 	labels := make([]string, len(options))
 	for i, o := range options {
 		labels[i] = o.Label
 	}
-	return c.emit(0, "menu", text+" {"+strings.Join(labels, " | ")+"}"), nil
+	return c.emit("", "menu", text+" {"+strings.Join(labels, " | ")+"}"), nil
 }
 
 // SendConfirm prints the approval prompt and auto-denies: a single stdin reader
 // serves inbound messages, so reading a separate y/n answer here would fight it.
 // It enqueues the Deny callback so the waiting Ask unblocks with a denial.
-func (c *ConsoleClient) SendConfirm(_ context.Context, _ int64, text, _, noData string) (int, error) {
-	id := c.emit(0, "confirm", text+" — auto-denied (console mode)")
-	go func() { c.cb <- Callback{ChatID: c.chatID, ID: strconv.Itoa(id), Data: noData} }()
+func (c *ConsoleClient) SendConfirm(_ context.Context, _ int64, text, _, noData string) (string, error) {
+	id := c.emit("", "confirm", text+" — auto-denied (console mode)")
+	go func() { c.cb <- Callback{ChatID: c.chatID, ID: id, Data: noData} }()
 	return id, nil
 }
 
-func (c *ConsoleClient) EditPlain(_ context.Context, _ int64, msgID int, text string) error {
-	c.mark("[edit #%d] %s", msgID, text)
+func (c *ConsoleClient) EditPlain(_ context.Context, _ int64, msgID string, text string) error {
+	c.mark("[edit #%s] %s", msgID, text)
 	return nil
 }
 

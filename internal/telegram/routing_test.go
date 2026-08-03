@@ -16,7 +16,7 @@ func TestHandleMsg_IdleSendsReply(t *testing.T) {
 	b := newBot(t, fc, rt)
 
 	ctx := context.Background()
-	b.handleMsg(ctx, Msg{ChatID: 42, ID: 1, Text: "hi"})
+	b.handleMsg(ctx, Msg{ChatID: 42, ID: "1", Text: "hi"})
 
 	if !waitForReply(t, fc, "hello from agent") {
 		t.Fatalf("expected agent reply, got: %q", strings.Join(fc.sentTexts(), "\n"))

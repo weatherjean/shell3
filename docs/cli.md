@@ -96,6 +96,24 @@ A hook script's `ask` verdict posts the command and reason with **Allow** /
 send failure, a cancelled turn, or a timeout all deny. Subagents and cron jobs
 are headless, so an `ask` there denies immediately.
 
+## `shell3 serve` — the agent over stdio JSONL
+
+Runs the same bot loop as `shell3 telegram` — fresh-turn threading, host
+commands, hook approvals, completion delivery, cron — but the transport is
+newline-delimited JSON on stdin/stdout. This is the bring-your-own front-end
+seam: a Discord bridge or a custom dashboard backend spawns `shell3 serve`
+and translates its own surface to the wire events. No Telegram credentials
+are needed (`telegram.workdir` is still honored when present); there is no
+port and no listener — owning the process's stdio is the access model.
+
+Serve keeps its own thread index (`serve_threads.jsonl`), swept by the same
+runs janitor at startup. See **[the protocol reference](serve.md)** for the
+full event vocabulary.
+
+```sh
+printf '%s\n' '{"type":"message","text":"/status"}' | shell3 serve
+```
+
 ## `shell3 boot` — set up a config
 
 ```sh

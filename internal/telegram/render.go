@@ -93,14 +93,14 @@ func (b *Bot) sendReply(ctx context.Context, text string) {
 // postReply posts a thread's turn reply, chunked. When replyTo != 0 each chunk
 // is a Telegram reply to it (threading the conversation); every sent message id
 // is recorded against sess so the thread's anchor advances and follow-up wakes
-// reply to the latest message. replyTo == 0 (the adopted cron session with no
+// reply to the latest message. replyTo == "" (the adopted cron session with no
 // inbound message) posts plain.
 // replyMaxChunks caps how many chat bubbles one reply may occupy. A longer
 // reply posts its first chunk plus the full text as a reply.md document — the
 // chat stays readable and the phone gets one ping, not twenty-five.
 const replyMaxChunks = 2
 
-func (b *Bot) postReply(ctx context.Context, sess *shell3.Session, replyTo int, text string) {
+func (b *Bot) postReply(ctx context.Context, sess *shell3.Session, replyTo string, text string) {
 	if text == "" {
 		text = "(no output)"
 	}
@@ -120,11 +120,11 @@ func (b *Bot) postReply(ctx context.Context, sess *shell3.Session, replyTo int, 
 
 // postChunk posts one chunk through the HTML→plain fallback path and records
 // the sent id.
-func (b *Bot) postChunk(ctx context.Context, sess *shell3.Session, replyTo int, c string) {
+func (b *Bot) postChunk(ctx context.Context, sess *shell3.Session, replyTo string, c string) {
 	html := mdhtml.ToTelegramHTML(c)
-	var id int
+	var id string
 	var err error
-	if replyTo != 0 {
+	if replyTo != "" {
 		if id, err = b.client.SendHTMLReply(ctx, b.chatID, html, replyTo); err != nil {
 			id, _ = b.client.SendReply(ctx, b.chatID, c, replyTo)
 		}
@@ -140,8 +140,8 @@ func (b *Bot) postChunk(ctx context.Context, sess *shell3.Session, replyTo int, 
 // user reply to the bot's own message resumes the same session and a follow-up
 // wake replies to the latest message. No-op for an adopted/plain session or a
 // failed send.
-func (b *Bot) recordSent(sess *shell3.Session, msgID int) {
-	if sess == nil || msgID == 0 {
+func (b *Bot) recordSent(sess *shell3.Session, msgID string) {
+	if sess == nil || msgID == "" {
 		return
 	}
 	b.threads.Record(msgID, sess.ID())

@@ -39,7 +39,7 @@ type Bot struct {
 	live map[string]*shell3.Session
 	// lastMsg maps a store-session id → the thread's latest Telegram message id,
 	// so a wake-turn reply posts into the right thread.
-	lastMsg map[string]int
+	lastMsg map[string]string
 	// wakeQueue holds session ids whose Wake arrived while the turn slot was
 	// taken; drained FIFO after each turn (startNextWake).
 	wakeQueue []string
@@ -55,7 +55,7 @@ type Bot struct {
 	askMu          sync.Mutex           // guards pending + askSeq + voiceMenuMsgID
 	pending        map[string]chan bool // tool-call hook Ask id → answer channel
 	askSeq         int                  // monotonic id source for Ask
-	voiceMenuMsgID int                  // msgID of the most recent /voice menu, for its "vm|" callback edit
+	voiceMenuMsgID string               // msgID of the most recent /voice menu, for its "vm|" callback edit
 
 	runJob        func(name string) error             // fires a cron job by name; nil if no scheduler
 	reload        func() (shell3.ReloadResult, error) // performs a full config reload; nil if unset
@@ -93,7 +93,7 @@ func NewBot(client tgClient, rt *shell3.Runtime, chatID int64, threads *ThreadIn
 		threads: threads,
 		pending: make(map[string]chan bool),
 		live:    make(map[string]*shell3.Session),
-		lastMsg: make(map[string]int),
+		lastMsg: make(map[string]string),
 		pinned:  make(map[string]bool),
 	}
 }
@@ -237,7 +237,7 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 	// cron post, a pre-index message) cannot be continued. The INTERFACE says
 	// so with a fixed notice — no session, no model call, no guessing at
 	// context that no longer exists.
-	if m.ReplyToID != 0 {
+	if m.ReplyToID != "" {
 		if _, ok := b.threads.Lookup(m.ReplyToID); !ok {
 			go func() {
 				_, _ = b.client.SendReply(ctx, b.chatID,
@@ -335,7 +335,7 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 // reach here — handleMsg answers them with a fixed can't-continue notice. The
 // chosen session is recorded against m.ID as the thread anchor and marked live.
 func (b *Bot) sessionFor(m Msg) (*shell3.Session, error) {
-	if m.ReplyToID != 0 {
+	if m.ReplyToID != "" {
 		if id, ok := b.threads.Lookup(m.ReplyToID); ok {
 			b.mu.Lock()
 			s, isLive := b.live[id]
@@ -364,7 +364,7 @@ func (b *Bot) sessionFor(m Msg) (*shell3.Session, error) {
 
 // track records the message↔session mapping (thread anchor) and marks the
 // session live.
-func (b *Bot) track(s *shell3.Session, msgID int) {
+func (b *Bot) track(s *shell3.Session, msgID string) {
 	b.threads.Record(msgID, s.ID())
 	b.mu.Lock()
 	b.live[s.ID()] = s
@@ -373,7 +373,7 @@ func (b *Bot) track(s *shell3.Session, msgID int) {
 }
 
 // sendCourtesy replies to a mid-turn message explaining it was disregarded.
-func (b *Bot) sendCourtesy(ctx context.Context, msgID int) {
+func (b *Bot) sendCourtesy(ctx context.Context, msgID string) {
 	_, _ = b.client.SendReply(ctx, b.chatID,
 		"⏳ a turn is running — wait for it to finish, or /stop and reply to your last prompt to steer. This message is disregarded.",
 		msgID)
@@ -547,7 +547,7 @@ func (b *Bot) takeSlotLocked(ctx context.Context) (context.Context, context.Canc
 // ordinary threaded sessions (a subagent/bash_bg completion) run a wake turn;
 // the pinned cron session is never woken — its completions post directly (see
 // PostCompletion's cronJob branch).
-func (b *Bot) runWakeTurn(ctx, turnCtx context.Context, sess *shell3.Session, replyTo int) {
+func (b *Bot) runWakeTurn(ctx, turnCtx context.Context, sess *shell3.Session, replyTo string) {
 	stopTyping := b.keepTyping(ctx)
 	reply := b.drainTurn(sess.RunQueued(turnCtx))
 	stopTyping()
@@ -619,7 +619,7 @@ func (b *Bot) PostCompletion(cronJob, ownerID, text string) {
 		text = "🔔 " + text
 	}
 	var sess *shell3.Session
-	var replyTo int
+	var replyTo string
 	b.mu.Lock()
 	if s, ok := b.live[ownerID]; ok && ownerID != "" && !b.pinned[ownerID] {
 		sess, replyTo = s, b.lastMsg[ownerID]
@@ -627,7 +627,7 @@ func (b *Bot) PostCompletion(cronJob, ownerID, text string) {
 	b.mu.Unlock()
 	go func() {
 		ctx := context.Background()
-		if sess != nil && replyTo != 0 {
+		if sess != nil && replyTo != "" {
 			b.postReply(ctx, sess, replyTo, text)
 			return
 		}

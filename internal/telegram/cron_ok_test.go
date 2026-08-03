@@ -46,13 +46,13 @@ func TestPostCompletion_ThreadsIntoLiveOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := newBot(t, fc, rt)
-	b.track(sess, 41) // live + anchored at message 41
+	b.track(sess, "41") // live + anchored at message 41
 
 	b.PostCompletion("", sess.ID(), "build done")
 
 	waitFor(t, func() bool {
 		for _, m := range fc.sentReplies() {
-			if m.replyTo == 41 && strings.Contains(m.text, "build done") {
+			if m.replyTo == "41" && strings.Contains(m.text, "build done") {
 				return true
 			}
 		}

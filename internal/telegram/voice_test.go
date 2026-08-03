@@ -35,7 +35,7 @@ func TestDeliverReply_ModeAlwaysSendsVoice(t *testing.T) {
 		TTSMode: "always",
 	}, nil)
 
-	b.deliverReply(context.Background(), "hello there", false, nil, 0)
+	b.deliverReply(context.Background(), "hello there", false, nil, "")
 
 	if len(fc.voices) != 1 {
 		t.Fatalf("want 1 voice sent, got %d", len(fc.voices))
@@ -59,7 +59,7 @@ func TestDeliverReply_CleansSynthesizedFileAfterSendVoice(t *testing.T) {
 		TTSMode: "always",
 	}, nil)
 
-	b.deliverReply(context.Background(), "hello there", false, nil, 0)
+	b.deliverReply(context.Background(), "hello there", false, nil, "")
 
 	if _, err := os.Stat(filePath); err == nil {
 		t.Fatalf("want synthesized file to be cleaned up, but it still exists at %s", filePath)
@@ -81,7 +81,7 @@ func TestDeliverReply_SendVoiceFailsFallsBackToText(t *testing.T) {
 		TTSMode: "always",
 	}, nil)
 
-	b.deliverReply(context.Background(), "fallback text", false, nil, 0)
+	b.deliverReply(context.Background(), "fallback text", false, nil, "")
 
 	if len(fc.voices) != 0 {
 		t.Fatalf("want no voice sent when SendVoice fails, got %d", len(fc.voices))
@@ -104,7 +104,7 @@ func TestDeliverReply_SendAudioFailsFallsBackToText(t *testing.T) {
 		TTSMode: "always",
 	}, nil)
 
-	b.deliverReply(context.Background(), "fallback text", false, nil, 0)
+	b.deliverReply(context.Background(), "fallback text", false, nil, "")
 
 	if len(fc.audios) != 0 {
 		t.Fatalf("want no audio sent when SendAudio fails, got %d", len(fc.audios))
@@ -128,7 +128,7 @@ func TestDeliverReply_ModeInboundWithVoiceSendsVoice(t *testing.T) {
 		TTSMode: "inbound",
 	}, nil)
 
-	b.deliverReply(context.Background(), "hi", true, nil, 0)
+	b.deliverReply(context.Background(), "hi", true, nil, "")
 
 	if len(fc.voices) != 1 {
 		t.Fatalf("want 1 voice sent, got %d", len(fc.voices))
@@ -152,7 +152,7 @@ func TestDeliverReply_ModeInboundWithoutVoiceSendsText(t *testing.T) {
 		TTSMode: "inbound",
 	}, nil)
 
-	b.deliverReply(context.Background(), "hi", false, nil, 0)
+	b.deliverReply(context.Background(), "hi", false, nil, "")
 
 	if len(fc.voices) != 0 {
 		t.Fatalf("want no voice sent, got %d", len(fc.voices))
@@ -179,7 +179,7 @@ func TestDeliverReply_ModeOffSendsText(t *testing.T) {
 		TTSMode: "off",
 	}, nil)
 
-	b.deliverReply(context.Background(), "hi", true, nil, 0)
+	b.deliverReply(context.Background(), "hi", true, nil, "")
 
 	if len(fc.voices) != 0 || calls != 0 {
 		t.Fatalf("mode=off must never speak, got voices=%d calls=%d", len(fc.voices), calls)
@@ -201,7 +201,7 @@ func TestDeliverReply_SpeakErrorFallsBackToText(t *testing.T) {
 		TTSMode: "always",
 	}, nil)
 
-	b.deliverReply(context.Background(), "hi", false, nil, 0)
+	b.deliverReply(context.Background(), "hi", false, nil, "")
 
 	if len(fc.voices) != 0 {
 		t.Fatalf("want no voice on Speak error, got %d", len(fc.voices))
@@ -233,7 +233,7 @@ func TestDeliverReply_Mp3SendsAudio(t *testing.T) {
 		TTSMode: "always",
 	}, nil)
 
-	b.deliverReply(context.Background(), "hi", false, nil, 0)
+	b.deliverReply(context.Background(), "hi", false, nil, "")
 
 	if len(fc.audios) != 1 {
 		t.Fatalf("want 1 audio sent, got %d", len(fc.audios))
@@ -260,7 +260,7 @@ func TestDeliverReply_EmptyReplyNeverSpeaks(t *testing.T) {
 		TTSMode: "always",
 	}, nil)
 
-	b.deliverReply(context.Background(), "", false, nil, 0)
+	b.deliverReply(context.Background(), "", false, nil, "")
 
 	if calls != 0 {
 		t.Fatalf("want Speak never called for an empty reply, got %d", calls)

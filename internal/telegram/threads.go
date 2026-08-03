@@ -10,20 +10,20 @@ import (
 	"sync"
 )
 
-// ThreadIndex is a persistent map from Telegram message_id to session id,
-// backed by an append-only JSONL file (one `{"m":123,"s":"<id>"}` line per
+// ThreadIndex is a persistent map from transport message id to session id,
+// backed by an append-only JSONL file (one `{"m":"123","s":"<id>"}` line per
 // record, the runs-store convention). The in-memory map is authoritative;
 // disk writes are best-effort — a write error is silently ignored and the
 // map is always updated, so a failed append never loses an in-flight thread.
 type ThreadIndex struct {
 	path string
 	mu   sync.Mutex
-	m    map[int]string
+	m    map[string]string
 	f    *os.File
 }
 
 type threadLine struct {
-	M int    `json:"m"`
+	M string `json:"m"`
 	S string `json:"s"`
 }
 
@@ -31,7 +31,7 @@ type threadLine struct {
 // line left by a crash mid-append) and keeps the file open for O_APPEND
 // writes.
 func NewThreadIndex(path string) (*ThreadIndex, error) {
-	ti := &ThreadIndex{path: path, m: make(map[int]string)}
+	ti := &ThreadIndex{path: path, m: make(map[string]string)}
 
 	// Read existing content, skipping any malformed line (a torn final
 	// fragment decodes to an error and is dropped).
@@ -40,7 +40,7 @@ func NewThreadIndex(path string) (*ThreadIndex, error) {
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for sc.Scan() {
 			var l threadLine
-			if json.Unmarshal(sc.Bytes(), &l) == nil && l.S != "" {
+			if json.Unmarshal(sc.Bytes(), &l) == nil && l.S != "" && l.M != "" {
 				ti.m[l.M] = l.S
 			}
 		}
@@ -65,7 +65,7 @@ func NewThreadIndex(path string) (*ThreadIndex, error) {
 
 // Record maps msgID to sessionID, appending one JSONL line (best-effort) and
 // updating the in-memory map (always).
-func (ti *ThreadIndex) Record(msgID int, sessionID string) {
+func (ti *ThreadIndex) Record(msgID, sessionID string) {
 	ti.mu.Lock()
 	defer ti.mu.Unlock()
 	ti.m[msgID] = sessionID
@@ -170,7 +170,7 @@ func PruneThreadIndex(path string, sessionExists func(id string) bool) (removed 
 }
 
 // Lookup returns the session id recorded for msgID, if any.
-func (ti *ThreadIndex) Lookup(msgID int) (string, bool) {
+func (ti *ThreadIndex) Lookup(msgID string) (string, bool) {
 	ti.mu.Lock()
 	defer ti.mu.Unlock()
 	s, ok := ti.m[msgID]

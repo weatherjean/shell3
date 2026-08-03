@@ -17,7 +17,7 @@ func TestPostReplyCapsChunksWithDocumentOverflow(t *testing.T) {
 	b := newBot(t, fc, rt)
 
 	long := strings.Repeat("line of reply text\n", 900) // ≫ 2·4096 bytes
-	b.postReply(context.Background(), sess, 7, long)
+	b.postReply(context.Background(), sess, "7", long)
 
 	if got := len(fc.replies); got != 1 {
 		t.Fatalf("want exactly 1 chat bubble, got %d", got)
@@ -32,7 +32,7 @@ func TestPostReplyCapsChunksWithDocumentOverflow(t *testing.T) {
 	b.mu.Lock()
 	anchor := b.lastMsg[sess.ID()]
 	b.mu.Unlock()
-	if anchor == 0 {
+	if anchor == "" {
 		t.Fatal("expected the thread anchor recorded")
 	}
 }
@@ -43,7 +43,7 @@ func TestPostReplyShortStaysInline(t *testing.T) {
 	rt, sess := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
 
-	b.postReply(context.Background(), sess, 7, "short reply")
+	b.postReply(context.Background(), sess, "7", "short reply")
 	if len(fc.replies) != 1 {
 		t.Fatalf("want 1 bubble, got %d", len(fc.replies))
 	}
@@ -61,7 +61,7 @@ func TestPostReplyDocFailureFallsBackToChunks(t *testing.T) {
 	b := newBot(t, fc, rt)
 
 	long := strings.Repeat("line of reply text\n", 900)
-	b.postReply(context.Background(), sess, 7, long)
+	b.postReply(context.Background(), sess, "7", long)
 
 	all := ""
 	for _, r := range fc.replies {

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -105,9 +106,9 @@ func (c *BotAPIClient) onUpdate(ctx context.Context, b *bot.Bot, u *models.Updat
 // Telegram puts the words of a MEDIA message in Caption, not Text, so a photo
 // sent with "translate this" has an empty Text; the caption is the message.
 func normalizeMessage(m *models.Message) Msg {
-	msg := Msg{ChatID: m.Chat.ID, ID: m.ID, Text: cmp.Or(m.Text, m.Caption), ReplyTo: replyContext(m)}
+	msg := Msg{ChatID: m.Chat.ID, ID: strconv.Itoa(m.ID), Text: cmp.Or(m.Text, m.Caption), ReplyTo: replyContext(m)}
 	if r := m.ReplyToMessage; r != nil {
-		msg.ReplyToID = r.ID
+		msg.ReplyToID = strconv.Itoa(r.ID)
 	}
 	return msg
 }
@@ -197,30 +198,30 @@ func (c *BotAPIClient) Updates(ctx context.Context) <-chan Msg { return c.out }
 
 // Send posts a plain-text message. ParseMode is omitted; this is the safe
 // fallback path when SendHTML is rejected.
-func (c *BotAPIClient) Send(ctx context.Context, chatID int64, text string) (int, error) {
+func (c *BotAPIClient) Send(ctx context.Context, chatID int64, text string) (string, error) {
 	m, err := c.b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: chatID,
 		Text:   text,
 	})
 	if err != nil {
-		return 0, err
+		return "", err
 	}
-	return m.ID, nil
+	return strconv.Itoa(m.ID), nil
 }
 
 // SendHTML posts a message with parse_mode=HTML so the agent's formatting
 // (bold, italics, code, links) renders. Telegram rejects malformed HTML with a
 // 400, so callers fall back to Send on error.
-func (c *BotAPIClient) SendHTML(ctx context.Context, chatID int64, html string) (int, error) {
+func (c *BotAPIClient) SendHTML(ctx context.Context, chatID int64, html string) (string, error) {
 	m, err := c.b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:    chatID,
 		Text:      html,
 		ParseMode: models.ParseModeHTML,
 	})
 	if err != nil {
-		return 0, err
+		return "", err
 	}
-	return m.ID, nil
+	return strconv.Itoa(m.ID), nil
 }
 
 // replyNotFound reports whether err is Telegram's "message to be replied not
@@ -232,38 +233,46 @@ func replyNotFound(err error) bool {
 
 // SendReply posts plain text as a reply to replyTo. On a deleted reply target
 // it retries as a plain Send so a thread whose anchor vanished never fails.
-func (c *BotAPIClient) SendReply(ctx context.Context, chatID int64, text string, replyTo int) (int, error) {
+func (c *BotAPIClient) SendReply(ctx context.Context, chatID int64, text string, replyTo string) (string, error) {
+	rid, err := strconv.Atoi(replyTo)
+	if err != nil {
+		return c.Send(ctx, chatID, text) // non-numeric anchor (foreign transport): plain send
+	}
 	m, err := c.b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          chatID,
 		Text:            text,
-		ReplyParameters: &models.ReplyParameters{MessageID: replyTo},
+		ReplyParameters: &models.ReplyParameters{MessageID: rid},
 	})
 	if replyNotFound(err) {
 		return c.Send(ctx, chatID, text)
 	}
 	if err != nil {
-		return 0, err
+		return "", err
 	}
-	return m.ID, nil
+	return strconv.Itoa(m.ID), nil
 }
 
 // SendHTMLReply is SendReply with parse_mode=HTML. On a deleted reply target it
 // falls back to a plain (HTML) Send; callers fall back to SendReply on an HTML
 // rejection.
-func (c *BotAPIClient) SendHTMLReply(ctx context.Context, chatID int64, html string, replyTo int) (int, error) {
+func (c *BotAPIClient) SendHTMLReply(ctx context.Context, chatID int64, html string, replyTo string) (string, error) {
+	rid, err := strconv.Atoi(replyTo)
+	if err != nil {
+		return c.SendHTML(ctx, chatID, html)
+	}
 	m, err := c.b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          chatID,
 		Text:            html,
 		ParseMode:       models.ParseModeHTML,
-		ReplyParameters: &models.ReplyParameters{MessageID: replyTo},
+		ReplyParameters: &models.ReplyParameters{MessageID: rid},
 	})
 	if replyNotFound(err) {
 		return c.SendHTML(ctx, chatID, html)
 	}
 	if err != nil {
-		return 0, err
+		return "", err
 	}
-	return m.ID, nil
+	return strconv.Itoa(m.ID), nil
 }
 
 // Callbacks returns the inline-keyboard button-press channel. The channel lives
@@ -275,7 +284,7 @@ func (c *BotAPIClient) Callbacks(_ context.Context) <-chan Callback { return c.c
 // SendConfirm posts text with a single row of two inline buttons — "✅ Allow"
 // (yesData) and "🚫 Deny" (noData) — and returns the sent message id. Plain
 // text (no parse mode) so an arbitrary command string can't break formatting.
-func (c *BotAPIClient) SendConfirm(ctx context.Context, chatID int64, text, yesData, noData string) (int, error) {
+func (c *BotAPIClient) SendConfirm(ctx context.Context, chatID int64, text, yesData, noData string) (string, error) {
 	m, err := c.b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: chatID,
 		Text:   text,
@@ -287,17 +296,21 @@ func (c *BotAPIClient) SendConfirm(ctx context.Context, chatID int64, text, yesD
 		},
 	})
 	if err != nil {
-		return 0, err
+		return "", err
 	}
-	return m.ID, nil
+	return strconv.Itoa(m.ID), nil
 }
 
 // EditPlain replaces a message's text and removes its inline keyboard (omitting
 // ReplyMarkup on editMessageText clears it), so the confirm buttons disappear.
-func (c *BotAPIClient) EditPlain(ctx context.Context, chatID int64, msgID int, text string) error {
-	_, err := c.b.EditMessageText(ctx, &bot.EditMessageTextParams{
+func (c *BotAPIClient) EditPlain(ctx context.Context, chatID int64, msgID string, text string) error {
+	mid, err := strconv.Atoi(msgID)
+	if err != nil {
+		return err
+	}
+	_, err = c.b.EditMessageText(ctx, &bot.EditMessageTextParams{
 		ChatID:    chatID,
-		MessageID: msgID,
+		MessageID: mid,
 		Text:      text,
 	})
 	return err
@@ -356,16 +369,16 @@ func (c *BotAPIClient) SetCommands(ctx context.Context, cmds []Command) error {
 }
 
 // SendDocument uploads a file to the chat as a document.
-func (c *BotAPIClient) SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string) (int, error) {
+func (c *BotAPIClient) SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string) (string, error) {
 	m, err := c.b.SendDocument(ctx, &bot.SendDocumentParams{
 		ChatID:   chatID,
 		Document: &models.InputFileUpload{Filename: filename, Data: bytes.NewReader(data)},
 		Caption:  caption,
 	})
 	if err != nil {
-		return 0, err
+		return "", err
 	}
-	return m.ID, nil
+	return strconv.Itoa(m.ID), nil
 }
 
 // SendPhoto uploads an image to the chat with an optional caption.
@@ -413,7 +426,7 @@ func (c *BotAPIClient) SendVideo(ctx context.Context, chatID int64, filename str
 // SendMenu posts text with one row of inline buttons, one per option; a
 // press's Data is delivered via the Callbacks channel. Returns the sent
 // message id.
-func (c *BotAPIClient) SendMenu(ctx context.Context, chatID int64, text string, options []MenuOption) (int, error) {
+func (c *BotAPIClient) SendMenu(ctx context.Context, chatID int64, text string, options []MenuOption) (string, error) {
 	row := make([]models.InlineKeyboardButton, len(options))
 	for i, o := range options {
 		row[i] = models.InlineKeyboardButton{Text: o.Label, CallbackData: o.Data}
@@ -426,7 +439,7 @@ func (c *BotAPIClient) SendMenu(ctx context.Context, chatID int64, text string, 
 		},
 	})
 	if err != nil {
-		return 0, err
+		return "", err
 	}
-	return m.ID, nil
+	return strconv.Itoa(m.ID), nil
 }

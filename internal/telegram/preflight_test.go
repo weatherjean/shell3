@@ -250,7 +250,7 @@ func TestHandleMsg_VoiceSetsTurnHadVoice(t *testing.T) {
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: 1, Media: []Media{
+	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Media: []Media{
 		{Bytes: []byte("OggS-fake"), MIME: "audio/ogg", Filename: "voice.ogg"},
 	}})
 
