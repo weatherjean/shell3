@@ -132,3 +132,79 @@ func TestJSONLIntegrationCompletionPosts(t *testing.T) {
 		return ok
 	})
 }
+
+// TestJSONLIntegrationConfirmRoundTrip exercises the approval flow over the
+// wire end to end: a hook-style Ask parks its goroutine, the confirm event
+// appears on stdout, the front-end answers by writing a callback line to
+// stdin, and the running bot loop's callback consumer unblocks the Ask —
+// followed by the ack (spinner-stop) and the edit replacing the confirm text.
+func TestJSONLIntegrationConfirmRoundTrip(t *testing.T) {
+	rt, _ := newFakeRuntime(t, "unused")
+	pr, pw := io.Pipe()
+	out := &syncBuffer{}
+	jc := NewJSONLClient(pr, out, ConsoleChatID, t.TempDir())
+	b := NewBot(jc, rt, ConsoleChatID, mkThreads(t))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { b.Run(ctx); close(done) }()
+
+	// The session Asker calls exactly this under a hook {ask: …} verdict.
+	resCh := make(chan bool, 1)
+	go func() { resCh <- b.Ask(ctx, "rm -rf ./scratch", "hook wants approval") }()
+
+	// The confirm event reaches the wire with the command, the reason, and
+	// distinct yes/no callback data.
+	var confirm map[string]any
+	waitFor(t, func() bool {
+		var ok bool
+		confirm, ok = eventWhere(jsonlEvents(t, out), func(e map[string]any) bool {
+			return e["type"] == "confirm"
+		})
+		return ok
+	})
+	text, _ := confirm["text"].(string)
+	if !strings.Contains(text, "rm -rf ./scratch") || !strings.Contains(text, "hook wants approval") {
+		t.Fatalf("confirm text = %q, want command and reason", text)
+	}
+	yes, _ := confirm["yes"].(string)
+	no, _ := confirm["no"].(string)
+	if yes == "" || no == "" || yes == no {
+		t.Fatalf("confirm callback data malformed: yes=%q no=%q", yes, no)
+	}
+
+	// The front-end presses Allow: a callback line on stdin.
+	if _, err := io.WriteString(pw, `{"type":"callback","id":"press-1","data":"`+yes+`"}`+"\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case allowed := <-resCh:
+		if !allowed {
+			t.Fatal("Ask returned false after the Allow press")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Ask did not unblock from the wire callback")
+	}
+
+	// The press is acknowledged and the confirm is edited (buttons gone).
+	waitFor(t, func() bool {
+		evs := jsonlEvents(t, out)
+		_, acked := eventWhere(evs, func(e map[string]any) bool {
+			return e["type"] == "ack" && e["callback_id"] == "press-1"
+		})
+		_, edited := eventWhere(evs, func(e map[string]any) bool {
+			s, _ := e["text"].(string)
+			return e["type"] == "edit" && e["id"] == confirm["id"] && strings.Contains(s, "allowed")
+		})
+		return acked && edited
+	})
+
+	_ = pw.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Bot.Run did not return after EOF")
+	}
+}
