@@ -26,8 +26,8 @@ type Media struct {
 
 // Command is one bot command shown in Telegram's "/" autocomplete menu.
 type Command struct {
-	Command     string // without leading slash, e.g. "clear"
-	Description string
+	Command     string `json:"command"` // without leading slash, e.g. "clear"
+	Description string `json:"description"`
 }
 
 // Callback is an inline-keyboard button press, normalized from a Telegram
@@ -46,8 +46,8 @@ type Callback struct {
 // button text, Data is the callback_data returned via the Callbacks channel
 // when the button is pressed.
 type MenuOption struct {
-	Label string
-	Data  string
+	Label string `json:"label"`
+	Data  string `json:"data"`
 }
 
 // tgClient is the transport surface the Bot depends on. The real impl wraps
