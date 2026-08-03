@@ -156,14 +156,15 @@ YAML as `env:KEY`:
 
 ## Where data lives, and how to remove it
 
-shell3 is file-native; there is no database.
-
 - **Runtime state**: `.shell3_project/`, kept beside `shell3.yaml` (default
-  install: `~/.shell3/.shell3_project/`) — conversation history as JSONL
-  (`runs/<id>/messages.jsonl` + `meta.json`) and the Telegram
-  message→session index (`telegram_threads.jsonl`). The directory ignores
-  itself (a self-contained `.gitignore` of `*`). Wipe every transcript with
-  `rm -rf ~/.shell3/.shell3_project`.
+  install: `~/.shell3/.shell3_project/`) — one SQLite database
+  (`shell3.db`: every conversation, the full-text index, the front-end
+  thread indexes) plus background-job logs as plain files under
+  `runs/<id>/jobs/`. History is kept forever by default
+  ([`runs_keep_days`](configuration.md#the-runs-janitor--runs_keep_days)
+  bounds it). The directory ignores itself (a self-contained `.gitignore`
+  of `*`). Wipe every transcript with `rm -rf ~/.shell3/.shell3_project`;
+  back up by copying the directory while shell3 is stopped.
 - **The rest of `~/.shell3/`**: your config, `.env`, the app log, proxy logs,
   the `/voice` override (`voice_mode.json`), and `media/` (everything sent to
   the bot, generated images, cached speech). Wipe everything with

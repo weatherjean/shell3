@@ -3,21 +3,26 @@
 package telegram
 
 import (
-	"os"
-	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
+
+	"github.com/weatherjean/shell3/internal/runs"
 )
 
-func TestThreadIndexRoundtrip(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "threads.jsonl")
-	idx, err := NewThreadIndex(path)
+func testStore(t *testing.T) func() *runs.Store {
+	t.Helper()
+	st, err := runs.Open(t.TempDir())
 	if err != nil {
-		t.Fatalf("NewThreadIndex: %v", err)
+		t.Fatal(err)
 	}
-	idx.Record("123", "sess-abc")
+	t.Cleanup(func() { _ = st.Close() })
+	return func() *runs.Store { return st }
+}
 
+func TestThreadIndexRoundtrip(t *testing.T) {
+	idx := NewThreadIndex(testStore(t), "telegram")
+	idx.Record("123", "sess-abc")
 	got, ok := idx.Lookup("123")
 	if !ok || got != "sess-abc" {
 		t.Fatalf("Lookup(123) = %q, %v; want sess-abc, true", got, ok)
@@ -25,133 +30,48 @@ func TestThreadIndexRoundtrip(t *testing.T) {
 }
 
 func TestThreadIndexPersistence(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "threads.jsonl")
-	idx, err := NewThreadIndex(path)
-	if err != nil {
-		t.Fatalf("NewThreadIndex: %v", err)
-	}
+	st := testStore(t)
+	idx := NewThreadIndex(st, "telegram")
 	idx.Record("1", "s1")
 	idx.Record("2", "s2")
 
-	idx2, err := NewThreadIndex(path)
-	if err != nil {
-		t.Fatalf("reopen: %v", err)
-	}
+	// A second index over the same store (as after a restart) sees the map.
+	idx2 := NewThreadIndex(st, "telegram")
 	for _, tc := range []struct {
 		id   string
 		want string
 	}{{"1", "s1"}, {"2", "s2"}} {
 		got, ok := idx2.Lookup(tc.id)
 		if !ok || got != tc.want {
-			t.Fatalf("after reopen Lookup(%s) = %q, %v; want %s, true", tc.id, got, ok, tc.want)
+			t.Fatalf("Lookup(%s) = %q, %v; want %s, true", tc.id, got, ok, tc.want)
 		}
 	}
 }
 
 func TestThreadIndexUnknown(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "threads.jsonl")
-	idx, err := NewThreadIndex(path)
-	if err != nil {
-		t.Fatalf("NewThreadIndex: %v", err)
-	}
+	idx := NewThreadIndex(testStore(t), "telegram")
 	if got, ok := idx.Lookup("999"); ok {
 		t.Fatalf("Lookup(999) = %q, true; want _, false", got)
 	}
 }
 
-func TestThreadIndexTornFinalLine(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "threads.jsonl")
-	// A valid line followed by a torn fragment (crash mid-append).
-	if err := os.WriteFile(path, []byte(`{"m":"7","s":"good"}`+"\n"+`{"m":"9",`), 0o644); err != nil {
-		t.Fatalf("seed: %v", err)
+// Two front-end surfaces over one store never cross-resolve each other's ids.
+func TestThreadIndexSurfaceIsolation(t *testing.T) {
+	st := testStore(t)
+	tg := NewThreadIndex(st, "telegram")
+	sv := NewThreadIndex(st, "serve")
+	tg.Record("7", "tg-sess")
+	sv.Record("7", "serve-sess")
+	if got, _ := tg.Lookup("7"); got != "tg-sess" {
+		t.Fatalf("telegram Lookup(7) = %q", got)
 	}
-	idx, err := NewThreadIndex(path)
-	if err != nil {
-		t.Fatalf("NewThreadIndex: %v", err)
-	}
-	if got, ok := idx.Lookup("7"); !ok || got != "good" {
-		t.Fatalf("Lookup(7) = %q, %v; want good, true", got, ok)
-	}
-	if _, ok := idx.Lookup("9"); ok {
-		t.Fatalf("Lookup(9) should be absent (torn line)")
-	}
-	// New records should still persist cleanly after the torn tail.
-	idx.Record("11", "eleven")
-	idx2, err := NewThreadIndex(path)
-	if err != nil {
-		t.Fatalf("reopen: %v", err)
-	}
-	if got, ok := idx2.Lookup("11"); !ok || got != "eleven" {
-		t.Fatalf("after reopen Lookup(11) = %q, %v; want eleven, true", got, ok)
-	}
-	if got, ok := idx2.Lookup("7"); !ok || got != "good" {
-		t.Fatalf("after reopen Lookup(7) = %q, %v; want good, true", got, ok)
-	}
-}
-
-func TestPruneThreadIndexDropsDeadKeepsLive(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "threads.jsonl")
-	if err := os.WriteFile(path, []byte(
-		`{"m":"1","s":"live-1"}`+"\n"+
-			`{"m":"2","s":"dead-1"}`+"\n"+
-			`{"m":"3","s":"live-2"}`+"\n"), 0o644); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	live := map[string]bool{"live-1": true, "live-2": true}
-	removed, err := PruneThreadIndex(path, func(id string) bool { return live[id] })
-	if err != nil {
-		t.Fatalf("PruneThreadIndex: %v", err)
-	}
-	if removed != 1 {
-		t.Fatalf("removed = %d, want 1", removed)
-	}
-
-	idx, err := NewThreadIndex(path)
-	if err != nil {
-		t.Fatalf("reopen: %v", err)
-	}
-	if got, ok := idx.Lookup("1"); !ok || got != "live-1" {
-		t.Fatalf("Lookup(1) = %q, %v; want live-1, true", got, ok)
-	}
-	if got, ok := idx.Lookup("3"); !ok || got != "live-2" {
-		t.Fatalf("Lookup(3) = %q, %v; want live-2, true", got, ok)
-	}
-	if _, ok := idx.Lookup("2"); ok {
-		t.Fatalf("Lookup(2) should be dropped (dead-1 no longer exists)")
-	}
-}
-
-func TestPruneThreadIndexNoDeadIsNoOp(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "threads.jsonl")
-	if err := os.WriteFile(path, []byte(`{"m":"1","s":"live-1"}`+"\n"), 0o644); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	removed, err := PruneThreadIndex(path, func(id string) bool { return true })
-	if err != nil {
-		t.Fatalf("PruneThreadIndex: %v", err)
-	}
-	if removed != 0 {
-		t.Fatalf("removed = %d, want 0", removed)
-	}
-}
-
-func TestPruneThreadIndexMissingFileNoOp(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "nope.jsonl")
-	removed, err := PruneThreadIndex(path, func(id string) bool { return true })
-	if err != nil {
-		t.Fatalf("PruneThreadIndex on missing file: %v", err)
-	}
-	if removed != 0 {
-		t.Fatalf("removed = %d, want 0", removed)
+	if got, _ := sv.Lookup("7"); got != "serve-sess" {
+		t.Fatalf("serve Lookup(7) = %q", got)
 	}
 }
 
 func TestThreadIndexConcurrentRecord(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "threads.jsonl")
-	idx, err := NewThreadIndex(path)
-	if err != nil {
-		t.Fatalf("NewThreadIndex: %v", err)
-	}
+	idx := NewThreadIndex(testStore(t), "telegram")
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)

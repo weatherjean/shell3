@@ -31,7 +31,7 @@ type Model struct {
 }
 
 type ToolGates struct {
-	Bash, BashBg, Edit, Media, Read, List bool
+	Bash, BashBg, Edit, Media, Read, List, History bool
 }
 
 // Skill is one resolved *.md from the skills/ dir, surfaced as a one-line
@@ -163,9 +163,8 @@ type LoadedConfig struct {
 	BackgroundMaxConcurrent int
 
 	// RunsKeepDays is `runs_keep_days`: how long the janitor keeps a
-	// runs/<id>/ dir (by its newest file's mtime) before sweeping it at
-	// `shell3 telegram` startup. Always populated at load — default 30; an
-	// explicit 0 means keep forever (the sweep is skipped entirely).
+	// session (by its last activity) before sweeping it at `shell3 telegram`
+	// startup. Always populated at load — default 0, keep forever.
 	RunsKeepDays int
 
 	agent     Agent

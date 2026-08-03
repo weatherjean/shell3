@@ -17,7 +17,6 @@ import (
 
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/llm"
-	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
@@ -389,7 +388,7 @@ func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.
 
 	// Build the continuation message injected at the top of the new history.
 	var b strings.Builder
-	fmt.Fprintf(&b, "<system-reminder>\nContinuation of session %s. History compacted.\nPrior session messages are in the runs directory (use the `history` skill, or read %s/runs/%s/messages.jsonl directly).\n</system-reminder>\n\n", prevSessionID, paths.ProjectDirName, prevSessionID)
+	fmt.Fprintf(&b, "<system-reminder>\nContinuation of session %s. History compacted.\nRecall the prior session with the history tool: {\"session\": \"%s\"}.\n</system-reminder>\n\n", prevSessionID, prevSessionID)
 	fmt.Fprintf(&b, "<compact-summary>\n%s\n</compact-summary>", args.Summary)
 	writeBulletSection(&b, "modified-files", args.ImportantFiles)
 

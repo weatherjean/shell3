@@ -91,7 +91,7 @@ type Runtime struct {
 	jobEvents chan JobProgress
 	// workDir is the runtime root (.shell3_project lives under it).
 	workDir string
-	// store is the shared file-native runs store (nil if unavailable). Used by
+	// store is the shared runs store (nil if unavailable). Used by
 	// the job runtime's transcript reads (task_status / JobTranscript); the
 	// front-end reads it directly (internal/render) for session lists/replay.
 	store *runs.Store

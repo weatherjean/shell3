@@ -18,7 +18,7 @@ type yamlFile struct {
 	MCP          map[string]yamlMCP   `yaml:"mcp"`
 	Media        *yamlMedia           `yaml:"media"`
 	Background   *yamlBackground      `yaml:"background"`
-	RunsKeepDays *int                 `yaml:"runs_keep_days"` // nil = default 30; 0 = keep forever
+	RunsKeepDays *int                 `yaml:"runs_keep_days"` // nil = default 0 (keep forever)
 }
 
 type yamlModel struct {
@@ -258,9 +258,9 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 	if b := f.Background; b != nil {
 		c.BackgroundMaxConcurrent = b.MaxConcurrent
 	}
-	// runs_keep_days defaults to 30 (unset); an explicit 0 means keep
-	// forever, so the default can't be expressed as a bare int default.
-	c.RunsKeepDays = 30
+	// runs_keep_days defaults to 0, keep forever: history is one database
+	// row per message now, and recall through the history tool is the point.
+	c.RunsKeepDays = 0
 	if f.RunsKeepDays != nil {
 		c.RunsKeepDays = *f.RunsKeepDays
 	}

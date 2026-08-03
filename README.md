@@ -82,13 +82,16 @@ Every subcommand takes `--config/-c` to point at a different config directory.
 - **Voice and images (optional)**: voice notes transcribed, replies spoken
   (`/voice`), photos captioned, images generated and sent back
   ([recipes](docs/cookbook/voice-images.md)).
+- **Total recall**: every conversation is stored in one SQLite file, kept
+  forever by default, and the agent's `history` tool full-text-searches all
+  of it — reference something from months ago and it finds it.
 
 ## Documentation
 
 - **[Configuration](docs/configuration.md)**: the config directory — models,
   agent, subagents, projects, telegram, cron, voice & images, secrets, MCP,
   hooks, skills.
-- **[CLI](docs/cli.md)**: every subcommand and the JSONL runs store.
+- **[CLI](docs/cli.md)**: every subcommand and the stored-history views.
 - **[Serve protocol](docs/serve.md)**: the stdio JSONL wire format for
   bring-your-own front-ends.
 - **[Security & data](docs/security.md)**: threat model, secrets, wiping data.

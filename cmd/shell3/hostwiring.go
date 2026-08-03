@@ -4,7 +4,6 @@ package main
 
 import (
 	"fmt"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -15,32 +14,30 @@ import (
 	"github.com/weatherjean/shell3/internal/telegram"
 )
 
-// openThreads runs the runs janitor for one front-end's thread index and opens
-// it. Start-time only, never on `shell3 ask`: it sweeps runs/<id>/ dirs past
-// runs_keep_days (0 = keep forever) and, in the same pass, drops thread-index
-// entries pointing at sessions that no longer exist — whether just swept or
-// already gone (deleted by hand, an older crash). Must run before
-// NewThreadIndex opens that file for the live process.
-func openThreads(rt *shell3.Runtime, threadsFile string) (*telegram.ThreadIndex, error) {
-	runsRoot := rt.Parts().RunsRoot()
-	threadsPath := filepath.Join(runsRoot, threadsFile)
-	removedRuns, err := runs.Sweep(runsRoot,
+// openThreads runs the runs janitor and returns one front-end's thread
+// index. Start-time only, never on `shell3 ask`: it sweeps sessions past
+// runs_keep_days (0 = keep forever) and, in the same pass, drops thread
+// entries pointing at sessions that no longer exist.
+func openThreads(rt *shell3.Runtime, surface string) *telegram.ThreadIndex {
+	removedRuns, removedThreads, err := runs.Sweep(rt.Parts().RunsRoot(),
 		time.Duration(rt.Parts().RunsKeepDays())*24*time.Hour, time.Now())
 	if err != nil {
-		// Fail-open: Sweep skipped whatever it couldn't remove and kept going.
-		// Leftover run dirs are cosmetic, never worth refusing to start over.
+		// Fail-open: a janitor fault is cosmetic, never worth refusing to
+		// start over.
 		fmt.Printf("warning: janitor: %v\n", err)
-	}
-	removedThreads, err := telegram.PruneThreadIndex(threadsPath,
-		sessionExistsUnder(runsRoot, removedRuns))
-	if err != nil {
-		return nil, fmt.Errorf("runs janitor: prune thread index: %w", err)
 	}
 	if len(removedRuns) > 0 || removedThreads > 0 {
 		fmt.Printf("janitor: removed %d runs, %d thread entries\n",
 			len(removedRuns), removedThreads)
 	}
-	return telegram.NewThreadIndex(threadsPath)
+	// The store is resolved per call: /reload swaps Parts generations and the
+	// parked old generation closes its database handle when it drains.
+	return telegram.NewThreadIndex(func() *runs.Store {
+		if p := rt.Parts(); p != nil {
+			return p.Store()
+		}
+		return nil
+	}, surface)
 }
 
 // wireHost performs the transport-independent bot wiring shared by

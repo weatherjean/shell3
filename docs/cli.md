@@ -35,8 +35,7 @@ is the token and the `chat_id` — see
 
 **Threads and turns.** Every inbound message starts its **own** session. To
 continue one, use Telegram's reply on any message in that thread — the
-message→session map persists in
-`~/.shell3/.shell3_project/telegram_threads.jsonl`, so threads survive a
+message→session map persists in the runs store, so threads survive a
 restart (sessions the janitor swept answer that they can't be resumed). One
 main-agent turn runs at a time: a message sent while a turn is running is
 answered with a note and disregarded, not queued; `/stop` and reply to your
@@ -92,9 +91,9 @@ and translates its own surface to the wire events. No Telegram credentials
 are needed (`telegram.workdir` is still honored when present); there is no
 port and no listener — owning the process's stdio is the access model.
 
-Serve keeps its own thread index (`serve_threads.jsonl`), swept by the same
-runs janitor at startup. See **[the protocol reference](serve.md)** for the
-full event vocabulary.
+Serve keeps its own thread namespace in the runs store, so its ids and
+Telegram's never cross-resolve. See **[the protocol reference](serve.md)**
+for the full event vocabulary.
 
 ```sh
 printf '%s\n' '{"type":"message","text":"/status"}' | shell3 serve
@@ -224,18 +223,25 @@ timeout; press ctrl+c (SIGINT) to quit while jobs are still running.
 
 ## Reading your history
 
-Conversation history is plain JSONL under the config directory's
-`.shell3_project/runs/`:
+Conversation history lives in one SQLite database,
+`~/.shell3/.shell3_project/shell3.db`, with full-text search over every
+user and assistant message. Query it read-only with the `sqlite3` CLI:
 
 ```sh
-rg -n "JWT|expiry" ~/.shell3/.shell3_project/runs   # full-text search all sessions
-ls -lt ~/.shell3/.shell3_project/runs/              # sessions, newest first
-cat ~/.shell3/.shell3_project/runs/<id>/meta.json   # one session's metadata
+sqlite3 -readonly ~/.shell3/.shell3_project/shell3.db \
+  "SELECT session_id, seq, snippet(messages_fts,0,'[',']','…',16)
+   FROM messages_fts WHERE messages_fts MATCH 'JWT OR expiry'
+   ORDER BY rank LIMIT 10"
+sqlite3 -readonly ~/.shell3/.shell3_project/shell3.db \
+  "SELECT id, model, status, last_at FROM sessions ORDER BY id DESC LIMIT 20"
 ```
 
-The agent searches its own past the same way (`rg` over the JSONL, via the
-`history` skill); each subagent run has its own stored transcript. The
-`/runs` pages and `/run_N` replays read the same store: every session,
-including subagent children, cron runs and `shell3 ask` sessions, with tool
-calls, arguments, results and reasoning. Old sessions are swept at `shell3 telegram` startup — see
-[`runs_keep_days`](configuration.md#the-runs-janitor--runs_keep_days).
+The agent searches its own past with the built-in `history` tool (see
+[configuration.md](configuration.md#the-history-tool)); a `bash_bg` job's
+full output is a plain file at
+`.shell3_project/runs/<session>/jobs/<job>.log`. The `/runs` pages and
+`/run_N` replays read the same store: every session, including subagent
+children, cron runs and `shell3 ask` sessions, with tool calls, arguments,
+results and reasoning. History is kept forever by default — see
+[`runs_keep_days`](configuration.md#the-runs-janitor--runs_keep_days) to
+bound it.

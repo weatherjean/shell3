@@ -122,15 +122,15 @@ specialists are [subagents](#subagents--delegation).
 ```markdown
 ---
 model: main
-tools: [bash, bash_bg, edit, media]
+tools: [bash, bash_bg, edit, media, history]
 context: [memory.md]
 ---
 You are a personal assistant running inside shell3…
 ```
 
 Frontmatter keys: `model` (required), `tools` (any of `bash`, `bash_bg`,
-`edit`, `media`, `read`, `list_files`), `mcp` (see [MCP](#mcp-servers)),
-`prune`, `context` (see below).
+`edit`, `media`, `read`, `list_files`, `history`), `mcp` (see
+[MCP](#mcp-servers)), `prune`, `context` (see below).
 
 ### Giving the agent a memory — `context:`
 
@@ -166,6 +166,21 @@ better with structured file tools (typically a subagent on a smaller model);
 list them in `tools` to enable them. A read-only agent is a policy, not a
 tool set: gate `bash` in its [hook script](#the-command-gate--hookssh).
 
+### The history tool
+
+`history` in `tools` gives an agent recall over the whole runs store: every
+conversation ever stored, across all sessions, full-text-indexed (FTS5,
+user and assistant text only — tool output is not indexed). Two calls:
+
+- `{"query": "certificate renewal"}` — ranked search across all sessions;
+  bare words AND together, `"quoted phrases"` match exactly, `OR`/`NOT`/
+  `prefix*` work.
+- `{"session": "<id>", "around": <seq>}` — read the transcript around a hit.
+
+Read-only by construction, and it goes through the tool-call hook like
+everything else (`name` is `history`, `command` null). The scaffold enables
+it on the main agent; subagents get it only if their frontmatter says so.
+
 ## Subagents & delegation
 
 A subagent is a delegatable specialist: one file in `agents/`. The filename
@@ -195,8 +210,9 @@ auto-denies), and delegation is single-level: a subagent never gets the
 
 `bash_bg` runs on the same job runtime, enabled separately by `bash_bg` in
 `tools`. Completions are triaged by the
-[notifier](#the-notifier--notifiermd), and recorded in runs/ and the jobs
-list whatever it decides. Both `task` and `bash_bg` accept two extra args:
+[notifier](#the-notifier--notifiermd), and recorded in the runs store and
+the jobs list whatever it decides. Both `task` and `bash_bg` accept two
+extra args:
 
 - `direct: true` skips the notifier: the spawning agent is woken with the
   completion notice. The right choice when the user asked for the work and is
@@ -592,20 +608,22 @@ you can audit why something was silenced. Tune the policy by editing
 
 ## The runs janitor — `runs_keep_days`
 
-Every thread and background job gets its own `runs/<id>/` directory. An
-optional top-level `shell3.yaml` key bounds the pile:
+History is kept **forever by default** — it's one database, and the history
+tool's recall is the point. An optional top-level `shell3.yaml` key bounds
+it:
 
 ```yaml
-runs_keep_days: 30   # default 30; 0 = keep forever
+runs_keep_days: 30   # default 0 = keep forever
 ```
 
 At `shell3 telegram` startup (before the bot connects, never on
-`shell3 ask`) a sweep deletes `runs/<id>/` directories whose newest file is
-older than the cutoff, then rewrites `telegram_threads.jsonl` to drop entries
-pointing at sessions that no longer exist. It prints one line, `janitor:
-removed N runs, M thread entries` (silent when both are zero). Fail-open per
-directory: a dir the sweep can't read or remove is reported as a warning and
-skipped — the bot still starts. Start-time only; no daemon, no timers.
+`shell3 ask`) a sweep deletes sessions whose last activity is older than the
+cutoff — their messages, search-index entries, thread entries, and job-log
+files together — plus empty crash leftovers and orphaned `runs/<id>/`
+directories from older versions. It prints one line, `janitor: removed N
+runs, M thread entries` (silent when both are zero), and a janitor fault is
+a warning, never a reason to refuse startup. Start-time only; no daemon, no
+timers.
 
 ## Skills — `skills/`
 
