@@ -3,9 +3,9 @@
 package telegram
 
 import (
-	"path/filepath"
 	"testing"
 
+	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/shell3/shell3test"
 )
@@ -27,11 +27,12 @@ func newFakeRuntime(t *testing.T, replyText string) (*shell3.Runtime, *shell3.Se
 // mkThreads builds a throwaway persistent thread index under t.TempDir.
 func mkThreads(t *testing.T) *ThreadIndex {
 	t.Helper()
-	ti, err := NewThreadIndex(filepath.Join(t.TempDir(), "threads.jsonl"))
+	st, err := runs.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ti
+	t.Cleanup(func() { _ = st.Close() })
+	return NewThreadIndex(st, "telegram")
 }
 
 // newBot builds a Bot over rt with a throwaway thread index (chat 42) — the

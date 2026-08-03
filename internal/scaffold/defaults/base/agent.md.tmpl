@@ -1,8 +1,8 @@
 ---
 model: {{.Name | yamlkey}}
-{{if .Vision}}tools: [bash, bash_bg, edit, media]
+{{if .Vision}}tools: [bash, bash_bg, edit, media, history]
 {{else}}# media: read_media needs a multimodal model — add it if you switch.
-tools: [bash, bash_bg, edit]
+tools: [bash, bash_bg, edit, history]
 {{end}}# context: files (globs ok) read fresh into every session's prompt.
 context: [memory.md]
 ---

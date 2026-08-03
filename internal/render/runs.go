@@ -2,7 +2,6 @@ package render
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -24,6 +23,7 @@ func RunsPage(root string, page, size int) (string, map[int]string, int, error) 
 	if err != nil {
 		return "", nil, 0, err
 	}
+	defer st.Close()
 	all, err := st.ListSessions(0)
 	if err != nil {
 		return "", nil, 0, err
@@ -71,16 +71,17 @@ func RunsPage(root string, page, size int) (string, map[int]string, int, error) 
 // reasoning, tool calls with their arguments, tool results, assistant text.
 func RunReplay(root, id string) (string, error) {
 	// filepath.Base leaves "." and ".." unchanged, so the equality check alone
-	// admits both — and Stat then succeeds on the runs root itself.
+	// would admit both.
 	if id == "" || id == "." || id == ".." || id != filepath.Base(id) {
 		return "", fmt.Errorf("render: invalid run id %q", id)
-	}
-	if info, err := os.Stat(filepath.Join(root, "runs", id)); err != nil || !info.IsDir() {
-		return "", fmt.Errorf("render: no such run %q", id)
 	}
 	st, err := runs.Open(root)
 	if err != nil {
 		return "", err
+	}
+	defer st.Close()
+	if !st.HasMessages(id) {
+		return "", fmt.Errorf("render: no such run %q", id)
 	}
 	msgs, err := st.LoadMessages(id)
 	if err != nil {

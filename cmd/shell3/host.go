@@ -5,8 +5,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/weatherjean/shell3/internal/cron"
 	"github.com/weatherjean/shell3/internal/media"
@@ -48,24 +46,6 @@ func armCron(disp cron.Dispatcher, jobs []shell3.CronJob) (*cron.Scheduler, erro
 	sched.Start()
 	fmt.Printf("cron: %d job(s) scheduled\n", len(jobs))
 	return sched, nil
-}
-
-// sessionExistsUnder builds the sessionExists predicate the front-end's thread
-// index pruning needs: a session id is gone if runs.Sweep just removed it, or if its
-// runs/<id>/ dir isn't there for any other reason (deleted by hand, an older
-// crash) — either way its thread entry is stale and gets dropped.
-func sessionExistsUnder(runsRoot string, justRemoved []string) func(id string) bool {
-	removed := make(map[string]bool, len(justRemoved))
-	for _, id := range justRemoved {
-		removed[id] = true
-	}
-	return func(id string) bool {
-		if removed[id] {
-			return false
-		}
-		_, err := os.Stat(filepath.Join(runsRoot, "runs", id))
-		return err == nil
-	}
 }
 
 // buildMediaClients resolves the four media capabilities (STT/TTS/describe/

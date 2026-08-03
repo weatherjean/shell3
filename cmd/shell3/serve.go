@@ -50,10 +50,7 @@ func newServeCommand() *cobra.Command {
 
 			// Serve keeps its own thread index beside telegram's: the id spaces
 			// are different transports' and must not cross-resolve.
-			threads, err := openThreads(rt, "serve_threads.jsonl")
-			if err != nil {
-				return err
-			}
+			threads := openThreads(rt, "serve")
 
 			jc := telegram.NewJSONLClient(os.Stdin, os.Stdout, telegram.ConsoleChatID,
 				filepath.Join(rt.Parts().RunsRoot(), "serve_out"))

@@ -201,9 +201,9 @@ func TestSession_ErrorPath(t *testing.T) {
 }
 
 // TestSession_Close_ReturnsEndSessionError verifies Close surfaces the store's
-// EndSession error instead of always returning nil. The run's meta.json is
-// removed before Close runs, forcing EndSession (which reads meta) to fail;
-// front-ends' `if err := sess.Close(); err != nil` must then see a non-nil error.
+// EndSession error instead of always returning nil. The store's database is
+// closed before Close runs, forcing EndSession to fail; front-ends'
+// `if err := sess.Close(); err != nil` must then see a non-nil error.
 func TestSession_Close_ReturnsEndSessionError(t *testing.T) {
 	root := t.TempDir()
 	st, err := runs.Open(root)
@@ -213,10 +213,9 @@ func TestSession_Close_ReturnsEndSessionError(t *testing.T) {
 	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "x"}}})
 	s := newTestSession(t, client, chat.Config{Store: st})
 
-	// Delete the run's meta.json so EndSession (which reads meta) fails when Close
-	// runs; front-ends' `if err := sess.Close(); err != nil` must then see it.
-	if err := os.RemoveAll(filepath.Join(root, "runs", s.sess.ID())); err != nil {
-		t.Fatalf("remove run dir: %v", err)
+	// Close the store's database so EndSession fails when Close runs.
+	if err := st.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
 	}
 	if err := s.Close(); err == nil {
 		t.Fatal("Close returned nil; expected the EndSession error to be surfaced")

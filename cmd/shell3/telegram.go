@@ -68,10 +68,7 @@ func newTelegramCommand() *cobra.Command {
 			// Telegram reply); the thread index maps message ids → session ids and
 			// lives for the whole process (kept across /reload). openThreads runs
 			// the runs janitor first.
-			threads, err := openThreads(rt, "telegram_threads.jsonl")
-			if err != nil {
-				return err
-			}
+			threads := openThreads(rt, "telegram")
 
 			// Transport: the real Telegram bot API, or (--console) a stdin/stdout
 			// dev transport driving the same bot loop headlessly. apiClient stays

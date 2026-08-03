@@ -1,21 +1,18 @@
-// Package runs is the file-native store: per-project JSONL under .shell3_project/.
 package runs
 
 import (
-	"crypto/rand"
-	"encoding/hex"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
-	"sync"
+	"strings"
 	"time"
 
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
-// Meta is the per-session metadata written to runs/<id>/meta.json.
+// Meta is the per-session metadata (one row in the sessions table).
 type Meta struct {
 	ID        string    `json:"id"`
 	Workdir   string    `json:"workdir"`
@@ -35,241 +32,177 @@ type Meta struct {
 	LastPromptTokens int `json:"last_prompt_tokens,omitempty"`
 }
 
-// Store is rooted at a project's .shell3_project/ directory.
-type Store struct {
-	root string
-
-	// touchMu guards lastTouch, the per-session debounce for AppendMessage's
-	// LastAt bump (see touchDebounce).
-	touchMu   sync.Mutex
-	lastTouch map[string]time.Time
-}
-
-// touchDebounce bounds how often AppendMessage rewrites meta.json for a
-// LastAt bump. Recency sorting doesn't need sub-second precision.
-const touchDebounce = time.Second
-
-// Open ensures root/runs/ exists and returns a Store. root is the
-// .shell3_project/ directory (not the repo root).
-func Open(root string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Join(root, "runs"), 0o755); err != nil {
-		return nil, fmt.Errorf("runs: open %s: %w", root, err)
-	}
-	return &Store{root: root, lastTouch: map[string]time.Time{}}, nil
-}
-
-func (s *Store) runsDir() string { return filepath.Join(s.root, "runs") }
-
-// sessDir resolves a session directory. IDs arrive from user-controlled
-// surfaces (the bot's views, shell3 ask --resume), so anything that is not a plain
-// path component is rejected by mapping it to an impossible directory —
-// "../../../etc" must never escape the store.
-func (s *Store) sessDir(id string) string {
-	// filepath.Base is a no-op on "." and "..", so they need their own check
-	// — ".." would otherwise resolve to the store root's parent.
-	if id == "" || id == "." || id == ".." || id != filepath.Base(id) {
-		return filepath.Join(s.runsDir(), "invalid-session-id")
-	}
-	return filepath.Join(s.runsDir(), id)
-}
-
-// JobLogPath returns the on-disk log path for a background job owned by
-// session id — runs/<id>/jobs/<jobID>.log — creating the jobs/ dir so the
-// caller can open the file directly. Returns "" when the dir cannot be
-// created (the caller then simply keeps no on-disk log). The whole jobs/
-// subtree rides the run dir's lifecycle: the janitor's RemoveAll sweeps it
-// with the session.
-func (s *Store) JobLogPath(id, jobID string) string {
-	if jobID == "" || jobID != filepath.Base(jobID) {
-		return ""
-	}
-	dir := filepath.Join(s.sessDir(id), "jobs")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return ""
-	}
-	return filepath.Join(dir, jobID+".log")
-}
-
-// newID is a sortable wall-clock timestamp plus a random suffix. The suffix
-// prevents collisions between sessions minted within the same nanosecond by
-// concurrent subagent processes, which would otherwise share a runs/<id>/ dir
-// and clobber each other's meta.json.
-func newID() string {
-	var b [4]byte
-	_, _ = rand.Read(b[:]) // on the astronomically unlikely error, fall back to timestamp-only
-	return time.Now().UTC().Format("20060102T150405.000000000") + "-" + hex.EncodeToString(b[:])
-}
-
-// NewSession mints an ID, creates runs/<id>/, writes meta.json, returns the ID.
+// NewSession mints an ID, inserts the session row, and returns the ID.
 func (s *Store) NewSession(m Meta) (string, error) {
 	id := newID()
-	dir := s.sessDir(id)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("runs: new session: %w", err)
-	}
 	now := time.Now().UTC()
-	m.ID, m.Status, m.StartedAt, m.LastAt = id, "live", now, now
-	if err := s.writeMeta(m); err != nil {
-		return "", err
+	_, err := s.db.Exec(`INSERT INTO sessions
+		(id, workdir, config_dir, model, status, parent_id, started_at, last_at, last_prompt_tokens)
+		VALUES (?,?,?,?,?,?,?,?,?)`,
+		id, m.Workdir, m.ConfigDir, m.Model, "live", m.ParentID,
+		encTime(now), encTime(now), m.LastPromptTokens)
+	if err != nil {
+		return "", fmt.Errorf("runs: new session: %w", err)
 	}
 	return id, nil
 }
 
-func (s *Store) writeMeta(m Meta) error {
-	b, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return fmt.Errorf("runs: marshal meta: %w", err)
-	}
-	// Atomic replace so a concurrent ListSessions never reads a half-written file.
-	tmp := filepath.Join(s.sessDir(m.ID), "meta.json.tmp")
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return fmt.Errorf("runs: write meta: %w", err)
-	}
-	return os.Rename(tmp, filepath.Join(s.sessDir(m.ID), "meta.json"))
-}
-
-func (s *Store) readMeta(id string) (Meta, error) {
-	var m Meta
-	b, err := os.ReadFile(filepath.Join(s.sessDir(id), "meta.json"))
-	if err != nil {
-		return m, fmt.Errorf("runs: read meta %s: %w", id, err)
-	}
-	if err := json.Unmarshal(b, &m); err != nil {
-		return m, fmt.Errorf("runs: decode meta %s: %w", id, err)
-	}
-	return m, nil
-}
-
-// AppendMessage appends one JSON-encoded message line to runs/<id>/messages.jsonl.
-// LastAt is bumped at most once per touchDebounce: this is the hot per-turn
-// write path, and a full meta read+marshal+tmp-write+rename per message would
-// quadruple its file ops for a recency stamp nobody reads at sub-second
-// resolution.
+// AppendMessage appends one message to the session, bumps its recency, and
+// indexes any searchable text. One transaction; crash-safe by construction.
 func (s *Store) AppendMessage(id string, m llm.Message) error {
-	if err := appendLine(s.messagesPath(id), "message", m); err != nil {
-		return err
+	b, err := json.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("runs: marshal message: %w", err)
 	}
-	s.touchMu.Lock()
-	last := s.lastTouch[id]
-	now := time.Now()
-	if now.Sub(last) < touchDebounce {
-		s.touchMu.Unlock()
-		return nil
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("runs: append message: %w", err)
 	}
-	s.lastTouch[id] = now
-	s.touchMu.Unlock()
-	return s.TouchSession(id)
+	defer func() { _ = tx.Rollback() }()
+	var seq int
+	if err := tx.QueryRow(
+		`SELECT COALESCE(MAX(seq),-1)+1 FROM messages WHERE session_id=?`, id,
+	).Scan(&seq); err != nil {
+		return fmt.Errorf("runs: append message: %w", err)
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO messages (session_id, seq, json) VALUES (?,?,?)`, id, seq, string(b),
+	); err != nil {
+		return fmt.Errorf("runs: append message: %w", err)
+	}
+	if text := searchableText(m); text != "" {
+		if _, err := tx.Exec(
+			`INSERT INTO messages_fts (text, session_id, seq, role) VALUES (?,?,?,?)`,
+			text, id, seq, string(m.Role),
+		); err != nil {
+			return fmt.Errorf("runs: index message: %w", err)
+		}
+	}
+	if _, err := tx.Exec(
+		`UPDATE sessions SET last_at=? WHERE id=?`, encTime(time.Now()), id,
+	); err != nil {
+		return fmt.Errorf("runs: append message: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("runs: append message: %w", err)
+	}
+	return nil
 }
 
-// LoadMessages reads runs/<id>/messages.jsonl in order. Interior lines are
-// decoded strictly (corruption there is a real fault worth surfacing), but a
-// malformed FINAL line is tolerated: a crash mid-append leaves a half-written
-// tail, and failing the whole load would make the session unresumable —
-// exactly when resume matters most.
+// LoadMessages reads the session's messages in order.
 func (s *Store) LoadMessages(id string) ([]llm.Message, error) {
-	b, err := os.ReadFile(s.messagesPath(id))
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
+	rows, err := s.db.Query(
+		`SELECT json FROM messages WHERE session_id=? ORDER BY seq`, id)
 	if err != nil {
 		return nil, fmt.Errorf("runs: load messages %s: %w", id, err)
 	}
-	out, err := decodeLinesTolerantTail[llm.Message](string(b))
-	if err != nil {
-		return nil, fmt.Errorf("runs: decode message in %s: %w", id, err)
+	defer rows.Close()
+	var out []llm.Message
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, fmt.Errorf("runs: load messages %s: %w", id, err)
+		}
+		var m llm.Message
+		if err := json.Unmarshal([]byte(raw), &m); err != nil {
+			return nil, fmt.Errorf("runs: decode message in %s: %w", id, err)
+		}
+		out = append(out, m)
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
-// EndSession marks the session ended.
+// EndSession marks the session ended. A session that stored nothing — no
+// message, no job log — leaves no trace: its row is deleted instead, so the
+// pinned cron dispatch parent and aborted front-end sessions don't litter the
+// store.
 func (s *Store) EndSession(id string) error {
-	// A session that stored nothing — no message, no job log — leaves no
-	// trace: remove the dir instead of writing an "ended" meta for an empty
-	// shell. The pinned cron dispatch parent (one per bot start) and aborted
-	// front-end sessions would otherwise litter the store.
-	if metaOnly(s.sessDir(id)) {
-		return os.RemoveAll(s.sessDir(id))
+	if !s.HasMessages(id) && !hasJobLogs(s.jobsDir(id)) {
+		return s.deleteSessions([]string{id})
 	}
-	m, err := s.readMeta(id)
+	now := encTime(time.Now())
+	_, err := s.db.Exec(
+		`UPDATE sessions SET status='ended', ended_at=?, last_at=? WHERE id=?`, now, now, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("runs: end session: %w", err)
 	}
-	m.Status, m.EndedAt, m.LastAt = "ended", time.Now().UTC(), time.Now().UTC()
-	return s.writeMeta(m)
+	return nil
 }
 
 // HasMessages reports whether the session has stored at least one message —
-// the cheap "worth listing/replaying" probe (a stat, not a load).
+// the cheap "worth listing/replaying" probe.
 func (s *Store) HasMessages(id string) bool {
-	info, err := os.Stat(s.messagesPath(id))
-	return err == nil && info.Size() > 0
+	var one int
+	err := s.db.QueryRow(
+		`SELECT 1 FROM messages WHERE session_id=? LIMIT 1`, id).Scan(&one)
+	return err == nil
 }
 
 // SetLastPromptTokens records the provider-reported prompt-token count for the
 // session (see Meta.LastPromptTokens) so a later resume restores the accurate
-// context gauge. Read-modify-write of meta.json; a no-op when the value is
-// unchanged so the hot per-turn persist path doesn't rewrite meta needlessly.
+// context gauge.
 func (s *Store) SetLastPromptTokens(id string, n int) error {
-	m, err := s.readMeta(id)
+	_, err := s.db.Exec(
+		`UPDATE sessions SET last_prompt_tokens=? WHERE id=? AND last_prompt_tokens<>?`, n, id, n)
 	if err != nil {
-		return err
+		return fmt.Errorf("runs: set last prompt tokens: %w", err)
 	}
-	if m.LastPromptTokens == n {
-		return nil
-	}
-	m.LastPromptTokens = n
-	return s.writeMeta(m)
+	return nil
 }
 
 // LastPromptTokens returns the persisted provider-reported prompt-token count
-// for the session, or 0 when the session is unknown, its meta is unreadable, or
-// it predates the field. Callers treat 0 as "no persisted value" and fall back
-// to the estimate.
+// for the session, or 0 when the session is unknown or predates the field.
+// Callers treat 0 as "no persisted value" and fall back to the estimate.
 func (s *Store) LastPromptTokens(id string) int {
-	m, err := s.readMeta(id)
-	if err != nil {
+	var n int
+	if err := s.db.QueryRow(
+		`SELECT last_prompt_tokens FROM sessions WHERE id=?`, id).Scan(&n); err != nil {
 		return 0
 	}
-	return m.LastPromptTokens
+	return n
 }
 
-// TouchSession bumps LastAt.
+// TouchSession bumps LastAt. Unknown session ids error.
 func (s *Store) TouchSession(id string) error {
-	m, err := s.readMeta(id)
+	res, err := s.db.Exec(
+		`UPDATE sessions SET last_at=? WHERE id=?`, encTime(time.Now()), id)
 	if err != nil {
-		return err
+		return fmt.Errorf("runs: touch session: %w", err)
 	}
-	m.LastAt = time.Now().UTC()
-	return s.writeMeta(m)
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("runs: touch session: unknown session %q", id)
+	}
+	return nil
 }
 
 // ListSessions returns metas newest-first (by ID, which sorts chronologically).
 func (s *Store) ListSessions(limit int) ([]Meta, error) {
-	ents, err := os.ReadDir(s.runsDir())
+	q := `SELECT id, workdir, config_dir, model, status, parent_id,
+		started_at, ended_at, last_at, last_prompt_tokens
+		FROM sessions ORDER BY id DESC`
+	var rows *sql.Rows
+	var err error
+	if limit > 0 {
+		rows, err = s.db.Query(q+` LIMIT ?`, limit)
+	} else {
+		rows, err = s.db.Query(q)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("runs: list: %w", err)
 	}
-	var ids []string
-	for _, e := range ents {
-		if e.IsDir() {
-			ids = append(ids, e.Name())
-		}
-	}
-	sort.Sort(sort.Reverse(sort.StringSlice(ids)))
+	defer rows.Close()
 	var out []Meta
-	for _, id := range ids {
-		if limit > 0 && len(out) >= limit {
-			break
+	for rows.Next() {
+		var m Meta
+		var started, ended, last string
+		if err := rows.Scan(&m.ID, &m.Workdir, &m.ConfigDir, &m.Model, &m.Status,
+			&m.ParentID, &started, &ended, &last, &m.LastPromptTokens); err != nil {
+			return nil, fmt.Errorf("runs: list: %w", err)
 		}
-		// A session whose meta.json is missing or corrupt is skipped by design:
-		// listing must stay best-effort over a store the user can freely edit
-		// or delete (runs data is disposable). It becomes invisible here — and
-		// therefore unresumable via resume-latest — until the dir is removed.
-		if m, err := s.readMeta(id); err == nil {
-			out = append(out, m)
-		}
+		m.StartedAt, m.EndedAt, m.LastAt = decTime(started), decTime(ended), decTime(last)
+		out = append(out, m)
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
 // ReminderLine is one persisted system-reminder, anchored to the message index
@@ -279,69 +212,147 @@ type ReminderLine struct {
 	Text string `json:"text"`
 }
 
-func (s *Store) remindersPath(id string) string {
-	return filepath.Join(s.sessDir(id), "reminders.jsonl")
-}
-
-func (s *Store) messagesPath(id string) string {
-	return filepath.Join(s.sessDir(id), "messages.jsonl")
-}
-
-// AppendReminder appends one reminder as a JSON line to runs/<id>/reminders.jsonl.
+// AppendReminder stores one reminder for the session.
 func (s *Store) AppendReminder(id string, seq int, text string) error {
-	return appendLine(s.remindersPath(id), "reminder", ReminderLine{Seq: seq, Text: text})
+	if _, err := s.db.Exec(
+		`INSERT INTO reminders (session_id, seq, text) VALUES (?,?,?)`, id, seq, text); err != nil {
+		return fmt.Errorf("runs: append reminder: %w", err)
+	}
+	return nil
 }
 
-// LoadReminders reads runs/<id>/reminders.jsonl in order. Missing file → (nil,nil).
-// Malformed lines are skipped, never fatal.
+// LoadReminders reads the session's reminders in insertion order.
 func (s *Store) LoadReminders(id string) ([]ReminderLine, error) {
-	b, err := os.ReadFile(s.remindersPath(id))
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
+	rows, err := s.db.Query(
+		`SELECT seq, text FROM reminders WHERE session_id=? ORDER BY rowid`, id)
 	if err != nil {
 		return nil, fmt.Errorf("runs: load reminders %s: %w", id, err)
 	}
-	return decodeLines[ReminderLine](string(b)), nil
+	defer rows.Close()
+	var out []ReminderLine
+	for rows.Next() {
+		var r ReminderLine
+		if err := rows.Scan(&r.Seq, &r.Text); err != nil {
+			return nil, fmt.Errorf("runs: load reminders %s: %w", id, err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
-// TruncateReminders removes the reminder sidecar, for a session whose history
-// has been replaced (see chat.Session.SetMessages).
+// TruncateReminders removes the session's reminders, for a session whose
+// history has been replaced (see chat.Session.SetMessages).
 func (s *Store) TruncateReminders(id string) error {
-	if err := os.Remove(s.remindersPath(id)); err != nil && !os.IsNotExist(err) {
+	if _, err := s.db.Exec(`DELETE FROM reminders WHERE session_id=?`, id); err != nil {
 		return fmt.Errorf("runs: truncate reminders: %w", err)
 	}
 	return nil
 }
 
-// Transcript returns the raw contents of runs/<id>/messages.jsonl, or ""
-// when the file is absent or unreadable. Used by jobManager.transcript to
-// surface the child session's persisted message log after completion.
+// Transcript returns the session's messages as a JSONL blob (one message per
+// line — the wire format ParseMessages reads), or "" when the session is
+// unknown or empty. Used by jobManager.transcript to surface a child
+// session's message log after completion.
 func (s *Store) Transcript(id string) string {
-	b, err := os.ReadFile(s.messagesPath(id))
+	rows, err := s.db.Query(
+		`SELECT json FROM messages WHERE session_id=? ORDER BY seq`, id)
 	if err != nil {
 		return ""
 	}
-	return string(b)
+	defer rows.Close()
+	var b strings.Builder
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return ""
+		}
+		b.WriteString(raw)
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
 
-// LatestSession returns the newest session ID matching workdir+configDir.
+// LatestSession returns the newest top-level session ID matching
+// workdir+configDir. Subagent child sessions are skipped: they share the
+// parent's workdir+config and sort newer, and resume-latest must only ever
+// rejoin a top-level conversation.
 func (s *Store) LatestSession(workdir, configDir string) (string, bool, error) {
-	metas, err := s.ListSessions(0)
+	var id string
+	err := s.db.QueryRow(`SELECT id FROM sessions
+		WHERE parent_id='' AND workdir=? AND config_dir=?
+		ORDER BY id DESC LIMIT 1`, workdir, configDir).Scan(&id)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
 	if err != nil {
-		return "", false, err
+		return "", false, fmt.Errorf("runs: latest session: %w", err)
 	}
-	for _, m := range metas {
-		// Skip subagent child sessions: they share the parent's workdir+config
-		// and sort newer (spawned mid-run), so without this a front-end restart
-		// would reattach to a subagent transcript instead of the real
-		// conversation. resume-latest only ever rejoins a top-level session.
-		if m.ParentID != "" {
-			continue
-		}
-		if m.Workdir == workdir && m.ConfigDir == configDir {
-			return m.ID, true, nil
+	return id, true, nil
+}
+
+// deleteSessions removes the given sessions' rows (messages, reminders,
+// thread entries, FTS entries) and their on-disk job-log dirs.
+func (s *Store) deleteSessions(ids []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("runs: delete sessions: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, id := range ids {
+		for _, q := range []string{
+			`DELETE FROM messages WHERE session_id=?`,
+			`DELETE FROM messages_fts WHERE session_id=?`,
+			`DELETE FROM reminders WHERE session_id=?`,
+			`DELETE FROM threads WHERE session_id=?`,
+			`DELETE FROM sessions WHERE id=?`,
+		} {
+			if _, err := tx.Exec(q, id); err != nil {
+				return fmt.Errorf("runs: delete session %s: %w", id, err)
+			}
 		}
 	}
-	return "", false, nil
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("runs: delete sessions: %w", err)
+	}
+	for _, id := range ids {
+		_ = os.RemoveAll(s.jobsDir(id)) // best-effort; logs are disposable
+	}
+	return nil
+}
+
+// JobLogPath returns the on-disk log path for a background job owned by
+// session id — runs/<id>/jobs/<jobID>.log — creating the dir so the caller
+// can open the file directly. Job logs stay plain files (not database rows)
+// so the notifier's read tool can open them by path. Returns "" when the dir
+// cannot be created (the caller then simply keeps no on-disk log).
+func (s *Store) JobLogPath(id, jobID string) string {
+	if jobID == "" || jobID != filepath.Base(jobID) {
+		return ""
+	}
+	dir := s.jobsDir(id)
+	if dir == "" {
+		return ""
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return ""
+	}
+	return filepath.Join(dir, jobID+".log")
+}
+
+// jobsDir resolves a session's job-log directory. IDs arrive from
+// user-controlled surfaces, so anything that is not a plain path component is
+// rejected — "../../../etc" must never escape the store.
+func (s *Store) jobsDir(id string) string {
+	if id == "" || id == "." || id == ".." || id != filepath.Base(id) {
+		return ""
+	}
+	return filepath.Join(s.root, "runs", id, "jobs")
+}
+
+func hasJobLogs(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	ents, err := os.ReadDir(dir)
+	return err == nil && len(ents) > 0
 }
