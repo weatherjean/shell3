@@ -1,5 +1,5 @@
 // Package agentsetup is the shared config assembly used by every shell3
-// front-end (`shell3 serve`, `shell3 ask`, and the internal/shell3 event
+// front-end (`shell3 telegram`, `shell3 ask`, and the internal/shell3 event
 // stream). It resolves paths, ensures project dirs, opens the store and log,
 // loads the config directory, and returns a fully-populated chat.Config — the single
 // source of truth for "what the agent is", independent of how it's driven.
@@ -122,14 +122,14 @@ func (p *Parts) BackgroundMaxConcurrent() int { return p.lc.BackgroundMaxConcurr
 // ModelCount returns the number of declared models.
 func (p *Parts) ModelCount() int { return len(p.lc.Models) }
 
-// Web returns the parsed web: block (zero value if absent).
-func (p *Parts) Web() config.WebConfig { return p.lc.Web() }
+// Telegram returns the parsed telegram: block (zero value if absent).
+func (p *Parts) Telegram() config.TelegramConfig { return p.lc.Telegram() }
 
 // Cron returns the jobs declared as cron/<name>.md files.
 func (p *Parts) Cron() []config.CronJob { return p.lc.Cron() }
 
 // RunsKeepDays returns `runs_keep_days` (always populated at load — default
-// 30; 0 = keep forever). Read by the runs janitor at `shell3 serve` startup.
+// 30; 0 = keep forever). Read by the runs janitor at `shell3 telegram` startup.
 func (p *Parts) RunsKeepDays() int { return p.lc.RunsKeepDays }
 
 // RunsRoot returns the .shell3_project directory the runs Store was opened

@@ -29,9 +29,5 @@ cover.out
 # stray scratch dir — never commit
 asfd/
 
-# jsdom smoke test devDependencies (internal/web/static) — package-lock.json
-# IS committed so `make test-web` / CI get reproducible installs.
-/internal/web/static/node_modules/
-
 # subagent-driven-development scratch
 .superpowers/

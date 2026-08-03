@@ -6,13 +6,13 @@ import (
 	"github.com/weatherjean/shell3/internal/config"
 )
 
-// WebConfig and CronJob are the parsed config blocks as
+// TelegramConfig and CronJob are the parsed config blocks as
 // internal/config produces them. Aliases (not mirrors): the Runtime hands the parsed
 // values straight through, so a field added in internal/config is immediately visible
 // here — no hand-written copier to forget.
 type (
-	WebConfig = config.WebConfig
-	CronJob   = config.CronJob
+	TelegramConfig = config.TelegramConfig
+	CronJob        = config.CronJob
 )
 
 // sessionConfigFrom adapts Parts.SessionConfig to the Runtime's per-session
@@ -26,14 +26,15 @@ func sessionConfigFrom(parts *agentsetup.Parts) func(SessionOpts) (chat.Config, 
 	}
 }
 
-// Web returns the web: config the Runtime currently holds (zero value when the
-// config declares none). Locked because Reload swaps it under rt.mu while the
-// front-end reads it: the web password is read on every gated request, so an
-// unsynchronised read here is a race the reload path would eventually lose.
-func (rt *Runtime) Web() WebConfig {
+// Telegram returns the telegram: config the Runtime currently holds (zero
+// value when the config declares none). Locked because Reload swaps it under
+// rt.mu while the front-end reads it: the bot token and chat id are read as
+// the bot starts, so an unsynchronised read is a race the reload path would
+// eventually lose.
+func (rt *Runtime) Telegram() TelegramConfig {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
-	return rt.web
+	return rt.telegram
 }
 
 // Cron returns the jobs declared as cron/<name>.md files.

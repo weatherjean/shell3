@@ -114,6 +114,25 @@ func TestCollectAnswersNonTTY(t *testing.T) {
 		}
 	})
 
+	// A chat id reaches shell3.yaml verbatim and is parsed as an int64 by the
+	// front-end at startup, far from where it was typed — so boot rejects a
+	// non-numeric one here, and lets a blank through (fill it in later).
+	t.Run("chat id validated", func(t *testing.T) {
+		if _, err := collectAnswers(&bootFlags{model: "m", tgChatID: "@me"}, false); err == nil {
+			t.Fatal("expected a non-numeric chat id to be rejected")
+		}
+		a, err := collectAnswers(&bootFlags{model: "m", tgChatID: " 8701499393 "}, false)
+		if err != nil {
+			t.Fatalf("collectAnswers: %v", err)
+		}
+		if a.tgChatID != "8701499393" {
+			t.Errorf("chat id = %q, want it trimmed to 8701499393", a.tgChatID)
+		}
+		if _, err := collectAnswers(&bootFlags{model: "m"}, false); err != nil {
+			t.Fatalf("a blank chat id must be allowed: %v", err)
+		}
+	})
+
 	t.Run("compact-at defaults to 80% of explicit window", func(t *testing.T) {
 		a, err := collectAnswers(&bootFlags{model: "m", contextWindow: "200000"}, false)
 		if err != nil {
@@ -165,6 +184,11 @@ func TestBootEndToEnd(t *testing.T) {
 	if !strings.Contains(string(env), "MAIN_API_KEY=") {
 		t.Errorf(".env missing MAIN_API_KEY line:\n%s", env)
 	}
+	// The token key is always written, even blank: the config references it, so
+	// a missing key is a load error rather than an empty-token startup refusal.
+	if !strings.Contains(string(env), envTelegramToken+"=") {
+		t.Errorf(".env missing %s line:\n%s", envTelegramToken, env)
+	}
 	if fi, err := os.Stat(envPath); err != nil {
 		t.Fatal(err)
 	} else if fi.Mode().Perm() != 0o600 {
@@ -209,82 +233,5 @@ func TestBootEndToEnd(t *testing.T) {
 	cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
 	if !strings.Contains(string(cfg), `model: "changed-model"`) {
 		t.Errorf("--force did not regenerate the model; got:\n%s", cfg)
-	}
-}
-
-// boot is where a fresh install gets its password, and 16 characters is the
-// floor because this password guards a shell.
-func TestValidateWebPassword(t *testing.T) {
-	if err := validateWebPassword(""); err == nil {
-		t.Error("an empty password was accepted")
-	}
-	if err := validateWebPassword("short"); err == nil {
-		t.Error("a 5-character password was accepted")
-	}
-	if err := validateWebPassword(strings.Repeat("x", minPasswordLength)); err != nil {
-		t.Errorf("a %d-character password was refused: %v", minPasswordLength, err)
-	}
-}
-
-// The generated option has to clear the bar it sets, and not repeat itself.
-func TestGenerateWebPassword(t *testing.T) {
-	first, err := generateWebPassword()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := validateWebPassword(first); err != nil {
-		t.Errorf("the generated password fails our own validator: %v", err)
-	}
-	second, err := generateWebPassword()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first == second {
-		t.Error("two generated passwords are identical")
-	}
-}
-
-// Enrolment gives the authenticator app a secret, and the operator a URI to
-// scan. The URI has to name shell3 so the code is identifiable in the app.
-func TestNewTOTPEnrolment(t *testing.T) {
-	secret, uri, err := newTOTPEnrolment("agent")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if secret == "" {
-		t.Error("no secret generated")
-	}
-	if !strings.HasPrefix(uri, "otpauth://totp/") {
-		t.Errorf("uri = %q, want an otpauth:// URI", uri)
-	}
-	if !strings.Contains(uri, "shell3") {
-		t.Errorf("uri = %q, want shell3 as the issuer", uri)
-	}
-}
-
-// The two secrets have to land in .env under the names shell3.yaml references,
-// or the config resolves to nothing and serve refuses to start.
-func TestWebEnvPairsCarryBothSecrets(t *testing.T) {
-	pairs := webEnvPairs("a-long-enough-password", "TOTPSECRET")
-
-	got := map[string]string{}
-	for _, p := range pairs {
-		got[p[0]] = p[1]
-	}
-	if got[envWebPassword] != "a-long-enough-password" {
-		t.Errorf("%s = %q", envWebPassword, got[envWebPassword])
-	}
-	if got[envWebTOTP] != "TOTPSECRET" {
-		t.Errorf("%s = %q", envWebTOTP, got[envWebTOTP])
-	}
-}
-
-// No second factor means no key: an empty SHELL3_WEB_TOTP_SECRET= line in .env
-// would read as "configured" to anyone looking at the file.
-func TestWebEnvPairsOmitTOTPWhenNotEnrolled(t *testing.T) {
-	for _, p := range webEnvPairs("a-long-enough-password", "") {
-		if p[0] == envWebTOTP {
-			t.Errorf("%s written with no enrolment", envWebTOTP)
-		}
 	}
 }

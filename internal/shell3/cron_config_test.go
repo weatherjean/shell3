@@ -10,7 +10,7 @@ import (
 func TestRuntime_CronConfig(t *testing.T) {
 	dir := t.TempDir()
 	writeBaseTree(t, dir, map[string]string{
-		"shell3.yaml":        baseYAML + "web:\n  addr: \"127.0.0.1:8765\"\n",
+		"shell3.yaml":        baseYAML,
 		"agents/explorer.md": "---\ndescription: d\n---\np\n",
 		"cron/n.md":          "---\nschedule: \"@daily\"\nagent: explorer\n---\ngo\n",
 	})

@@ -17,7 +17,7 @@ func writeReloadCfg(t *testing.T, path, content string) {
 }
 
 // Reload re-reads the config file and applies it in place: new agents appear,
-// live sessions keep running, and the web/cron mirrors refresh.
+// live sessions keep running, and the telegram/cron mirrors refresh.
 func TestReloadPicksUpConfigChange(t *testing.T) {
 	dir := t.TempDir()
 	writeBaseTree(t, dir, nil)
@@ -32,7 +32,7 @@ func TestReloadPicksUpConfigChange(t *testing.T) {
 	}
 
 	writeTreeFiles(t, dir, map[string]string{
-		"shell3.yaml":      baseYAML + "web:\n  addr: \"127.0.0.1:8765\"\n",
+		"shell3.yaml":      baseYAML + "telegram:\n  chat_id: \"8701499393\"\n",
 		"agents/second.md": "---\ndescription: d\n---\np2\n",
 	})
 	res, err := rt.Reload()
@@ -42,8 +42,8 @@ func TestReloadPicksUpConfigChange(t *testing.T) {
 	if res.Agents != 1 {
 		t.Fatalf("expected 1 agent after reload, got %d (notes: %v)", res.Agents, res.Notes)
 	}
-	if rt.Web().Addr != "127.0.0.1:8765" {
-		t.Fatalf("web config mirror not refreshed: %+v", rt.Web())
+	if rt.Telegram().ChatID != "8701499393" {
+		t.Fatalf("telegram config mirror not refreshed: %+v", rt.Telegram())
 	}
 	if sess.Snapshot().Agent == "" {
 		t.Fatal("live session unusable after reload")

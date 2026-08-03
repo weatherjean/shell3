@@ -101,8 +101,9 @@ var ErrNothingToCompact = errors.New("nothing to compact")
 // estimator for both, so the delta is apples-to-apples). ErrNothingToCompact
 // when history is too small to have a summarisable head; any other error means
 // the summarisation call or the runs-session roll failed and history is
-// untouched. Callers must hold the session's busy gate (see
-// shell3.Session.Compact) — this mutates sess.messages like a turn would.
+// untouched. Callers must hold the session's busy gate — this mutates
+// sess.messages exactly like a turn would, so it must never run concurrently
+// with one.
 func CompactStandalone(ctx context.Context, cfg TurnConfig, sess *Session) (before, after int, err error) {
 	return compactApply(ctx, cfg, sess, true)
 }

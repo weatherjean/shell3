@@ -3,6 +3,7 @@ package shell3
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/llm"
@@ -45,5 +46,23 @@ func TestRecoveryHint_TypedStatusError(t *testing.T) {
 	unauth := &llm.StatusError{Code: 401, Err: errors.New("nope")}
 	if RecoveryHint(unauth) != "" {
 		t.Error("did not expect hint for typed 401")
+	}
+}
+
+// The hint reaches the user through the Telegram bot and `shell3 ask`, neither
+// of which has a /compact command — naming one sends them looking for a
+// command that does not exist. Starting a new conversation is the remedy that
+// is actually available (on Telegram it is the default: send a message without
+// replying to a thread).
+func TestRecoveryHint_NamesNoCompactCommand(t *testing.T) {
+	h := RecoveryHint(errors.New("400 Bad Request"))
+	if h == "" {
+		t.Fatal("setup: expected a hint for a 400")
+	}
+	if strings.Contains(h, "/compact") {
+		t.Errorf("hint must not name a command no front-end has: %q", h)
+	}
+	if !strings.Contains(h, "new conversation") {
+		t.Errorf("hint should point at starting a new conversation: %q", h)
 	}
 }

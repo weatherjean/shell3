@@ -44,6 +44,7 @@ func TestSweepKeepsFreshDir(t *testing.T) {
 	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
 	fresh := now.Add(-1 * time.Hour)
 	touchFile(t, filepath.Join(root, "runs", "fresh-sess", "meta.json"), fresh)
+	touchFile(t, filepath.Join(root, "runs", "fresh-sess", "messages.jsonl"), fresh)
 
 	removed, err := Sweep(root, 30*24*time.Hour, now)
 	if err != nil {
@@ -62,6 +63,7 @@ func TestSweepKeepZeroIsNoOp(t *testing.T) {
 	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
 	old := now.Add(-365 * 24 * time.Hour)
 	touchFile(t, filepath.Join(root, "runs", "ancient-sess", "meta.json"), old)
+	touchFile(t, filepath.Join(root, "runs", "ancient-sess", "messages.jsonl"), old)
 
 	removed, err := Sweep(root, 0, now)
 	if err != nil {
@@ -72,6 +74,50 @@ func TestSweepKeepZeroIsNoOp(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "runs", "ancient-sess")); err != nil {
 		t.Fatalf("ancient-sess dir should still exist with keep=0: %v", err)
+	}
+}
+
+// A meta-only dir — a session that never stored a message, a job log, or
+// anything else — is trash, not history: it is swept once past the short
+// empty-grace even when runs_keep_days keeps real history forever (keep=0).
+func TestSweepRemovesStaleEmptySession(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	stale := now.Add(-2 * time.Hour)
+	touchFile(t, filepath.Join(root, "runs", "empty-sess", "meta.json"), stale)
+
+	for _, keep := range []time.Duration{0, 30 * 24 * time.Hour} {
+		touchFile(t, filepath.Join(root, "runs", "empty-sess", "meta.json"), stale)
+		removed, err := Sweep(root, keep, now)
+		if err != nil {
+			t.Fatalf("Sweep(keep=%v): %v", keep, err)
+		}
+		if len(removed) != 1 || removed[0] != "empty-sess" {
+			t.Fatalf("Sweep(keep=%v) removed = %v, want [empty-sess]", keep, removed)
+		}
+		if _, err := os.Stat(filepath.Join(root, "runs", "empty-sess")); !os.IsNotExist(err) {
+			t.Fatalf("empty-sess should be gone, stat: %v", err)
+		}
+	}
+}
+
+// A meta-only dir inside the grace window is kept: it may be a session another
+// live process (shell3 ask, the bot's own cron parent) opened moments ago.
+func TestSweepKeepsRecentEmptySession(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	recent := now.Add(-10 * time.Minute)
+	touchFile(t, filepath.Join(root, "runs", "young-empty", "meta.json"), recent)
+
+	removed, err := Sweep(root, 30*24*time.Hour, now)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(removed) != 0 {
+		t.Fatalf("removed = %v, want none", removed)
+	}
+	if _, err := os.Stat(filepath.Join(root, "runs", "young-empty")); err != nil {
+		t.Fatalf("young empty session should survive the grace window: %v", err)
 	}
 }
 

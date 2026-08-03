@@ -11,8 +11,9 @@ import (
 // Sweep deletes runs/<id>/ directories under root (the .shell3_project dir —
 // the same root Open takes) whose newest-file mtime is older than
 // now.Add(-keep). keep<=0 is a deliberate "keep forever" (the shell3.yaml
-// runs_keep_days: 0 case), not an instant-expiry edge case: Sweep returns
-// immediately with no directory walk at all.
+// runs_keep_days: 0 case), not an instant-expiry edge case — no session with
+// stored content is ever removed then. Meta-only trash dirs (see metaOnly)
+// are swept past their grace window regardless of keep.
 //
 // Age is the NEWEST mtime among the files inside a run dir, not the dir's own
 // mtime (which some filesystems never bump on a nested write) and not any one
@@ -21,8 +22,9 @@ import (
 // appended to is never swept out from under a live turn.
 //
 // Returns the ids of the removed sessions. runs deliberately knows nothing
-// about the web thread index; a caller that also wants to drop thread entries
-// pointing at a removed session does so itself (see webui.PruneThreadIndex),
+// about the front-end thread index; a caller that also wants to drop thread entries
+// pointing at a removed session does so itself (the front-end's thread-index
+// pruning),
 // keeping the two packages decoupled.
 //
 // Sweep is per-dir fail-open: a dir whose mtime can't be read or whose
@@ -32,9 +34,6 @@ import (
 // ids WERE removed, purely for the caller to report; a non-nil error here
 // does not mean removedIDs is incomplete or wrong.
 func Sweep(root string, keep time.Duration, now time.Time) (removedIDs []string, err error) {
-	if keep <= 0 {
-		return nil, nil
-	}
 	dir := filepath.Join(root, "runs")
 	ents, err := os.ReadDir(dir)
 	if err != nil {
@@ -44,6 +43,7 @@ func Sweep(root string, keep time.Duration, now time.Time) (removedIDs []string,
 		return nil, fmt.Errorf("runs: sweep %s: %w", dir, err)
 	}
 	cutoff := now.Add(-keep)
+	emptyCutoff := now.Add(-emptyKeep)
 	var firstErr error
 	for _, e := range ents {
 		if !e.IsDir() {
@@ -58,7 +58,13 @@ func Sweep(root string, keep time.Duration, now time.Time) (removedIDs []string,
 			}
 			continue
 		}
-		if newest.Before(cutoff) {
+		expired := keep > 0 && newest.Before(cutoff)
+		// A meta-only dir is trash, not history: EndSession removes one at
+		// clean shutdown, this catches crash leftovers — regardless of keep
+		// (keep<=0 preserves history forever, not trash). The grace window
+		// spares a session another live process opened moments ago.
+		trash := newest.Before(emptyCutoff) && metaOnly(sessDir)
+		if expired || trash {
 			if rerr := os.RemoveAll(sessDir); rerr != nil {
 				if firstErr == nil {
 					firstErr = fmt.Errorf("runs: sweep remove %s: %w", sessDir, rerr)
@@ -69,6 +75,26 @@ func Sweep(root string, keep time.Duration, now time.Time) (removedIDs []string,
 		}
 	}
 	return removedIDs, firstErr
+}
+
+// emptyKeep is how long a meta-only session dir survives before Sweep treats
+// it as abandoned trash rather than a session some live process just opened.
+const emptyKeep = time.Hour
+
+// metaOnly reports whether the session dir holds nothing but its meta.json
+// (and a possible torn meta.json.tmp) — no messages, no job logs, nothing
+// worth keeping. A missing or unreadable dir reports false (leave it alone).
+func metaOnly(dir string) bool {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range ents {
+		if n := e.Name(); n != "meta.json" && n != "meta.json.tmp" {
+			return false
+		}
+	}
+	return true
 }
 
 // newestMtime returns the latest mtime among all regular files under dir

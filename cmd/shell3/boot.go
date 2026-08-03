@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -24,6 +23,7 @@ import (
 type bootFlags struct {
 	url, model, name, key, proxy string
 	contextWindow, compactAt     string
+	tgToken, tgChatID            string
 	workDir                      string
 	vision                       bool
 	visionSet                    bool // --vision passed explicitly (skips the form's confirm)
@@ -36,10 +36,10 @@ func newBootCommand() *cobra.Command {
 	f := &bootFlags{}
 	cmd := &cobra.Command{
 		Use:   "boot",
-		Short: "Create a shell3 config interactively (model + web interface)",
+		Short: "Create a shell3 config interactively (model + Telegram bot)",
 		Example: `  shell3 boot
   shell3 boot --url https://api.deepseek.com/v1 --model deepseek-chat --name main \
-    --workdir ~/work`,
+    --tg-token 123:ABC --tg-chat-id 8701499393 --workdir ~/work`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if f.show {
 				return showBootSuccess()
@@ -58,6 +58,8 @@ func newBootCommand() *cobra.Command {
 	cmd.Flags().StringVar(&f.proxy, "proxy", "", "Optional run_proxy command")
 	cmd.Flags().StringVar(&f.contextWindow, "context-window", "", "Model context window in tokens (default 128000)")
 	cmd.Flags().StringVar(&f.compactAt, "compact-at", "", "Auto-compaction threshold in tokens (default 80% of context window)")
+	cmd.Flags().StringVar(&f.tgToken, "tg-token", "", "Telegram bot token (from @BotFather)")
+	cmd.Flags().StringVar(&f.tgChatID, "tg-chat-id", "", "Telegram chat id the bot answers")
 	cmd.Flags().StringVar(&f.workDir, "workdir", "", "Where the agent's shell runs (default: the config dir)")
 	cmd.Flags().BoolVar(&f.vision, "vision", true, "Model can see images (wires media.describe to it and enables the media tool)")
 	cmd.Flags().BoolVar(&f.force, "force", false, "Overwrite an existing ~/.shell3 config (shell3.yaml, agent.md, ...)")
@@ -89,28 +91,13 @@ func runBoot(f *bootFlags) error {
 
 	envKey := envKeyForName(a.name)
 
-	// The interface's own credentials. Asked for here rather than defaulted,
-	// because `shell3 serve` refuses to start without a password: a fresh config
-	// has to arrive with one.
-	webPassword, err := askWebPassword(tty)
-	if err != nil {
-		return err
-	}
-	totpSecret, err := askTOTPEnrolment(tty, a.name, os.Stdout)
-	if err != nil {
-		return err
-	}
-
-	envPairs := append([][2]string{{envKey, a.key}}, webEnvPairs(webPassword, totpSecret)...)
-
-	// Ask before rendering so the answer lands in the scaffolded config;
-	// installs cloudflared when needed (opt-in, no sudo, failures non-fatal).
-	wireTunnel := askTunnel(tty)
+	envPairs := [][2]string{{envKey, a.key}, {envTelegramToken, a.tgToken}}
 
 	if err := scaffold.RenderBaseConfig(dir, scaffold.Values{
 		Name: a.name, BaseURL: a.url, EnvKey: envKey, Model: a.model, Proxy: a.proxy,
 		ContextWindow: a.ctxWindow, CompactAt: a.compactAt, WorkDir: a.workDir,
-		Vision: a.vision, Tunnel: wireTunnel, TOTP: totpSecret != "",
+		ChatID: a.tgChatID,
+		Vision: a.vision,
 	}, f.force); err != nil {
 		return err
 	}
@@ -129,12 +116,11 @@ func runBoot(f *bootFlags) error {
 	}
 
 	// Offer to install shell3 as a systemd user service (Linux + TTY only).
-	// The unit is startable as soon as the config exists, since boot has just
-	// written the password serve requires.
-	svc := offerSystemdService(tty, dir, home, true)
+	// Startable only when the Telegram wiring is complete — an enabled unit
+	// with no token would just crash-loop.
+	svc := offerSystemdService(tty, dir, home, a.tgToken != "" && a.tgChatID != "")
 
-	printWebCredentials(webPassword, totpSecret, envPath)
-	printBootSuccess(dir, cfgPath, envPath, a.proxy != "", wireTunnel, svc)
+	printBootSuccess(dir, cfgPath, envPath, a.proxy != "", svc)
 	return nil
 }
 
@@ -167,15 +153,7 @@ func showBootSuccess() error {
 	if _, err := os.Stat(filepath.Join(home, ".config", "systemd", "user", serviceUnitName)); err == nil {
 		svc = serviceEnabled
 	}
-	tunnelWired := false
-	for _, line := range strings.Split(string(yaml), "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "tunnel:") {
-			tunnelWired = true
-			break
-		}
-	}
-
-	printBootSuccess(dir, cfgPath, filepath.Join(dir, ".env"), proxyWired, tunnelWired, svc)
+	printBootSuccess(dir, cfgPath, filepath.Join(dir, ".env"), proxyWired, svc)
 	return nil
 }
 
@@ -184,6 +162,7 @@ func showBootSuccess() error {
 type bootAnswers struct {
 	url, model, name, key string
 	proxy                 string
+	tgToken, tgChatID     string
 	workDir               string
 	ctxWindow, compactAt  int
 	vision                bool
@@ -195,9 +174,11 @@ type bootAnswers struct {
 func collectAnswers(f *bootFlags, tty bool) (bootAnswers, error) {
 	a := bootAnswers{
 		url: f.url, model: f.model, name: f.name, key: f.key,
-		proxy:   f.proxy,
-		workDir: f.workDir,
-		vision:  f.vision,
+		proxy:    f.proxy,
+		tgToken:  f.tgToken,
+		tgChatID: f.tgChatID,
+		workDir:  f.workDir,
+		vision:   f.vision,
 	}
 	ctxStr, compactStr := f.contextWindow, f.compactAt
 
@@ -213,6 +194,12 @@ func collectAnswers(f *bootFlags, tty bool) (bootAnswers, error) {
 	}
 	if a.name == "" {
 		a.name = "main"
+	}
+	// A flag-supplied chat id skipped the form's validator; catch it here so a
+	// bad value never reaches shell3.yaml.
+	a.tgChatID = strings.TrimSpace(a.tgChatID)
+	if err := validateChatID(a.tgChatID); err != nil {
+		return a, fmt.Errorf("boot: chat id %q: %w", a.tgChatID, err)
 	}
 
 	var err error
@@ -295,13 +282,32 @@ func runBootForm(f *bootFlags, a *bootAnswers, ctxStr, compactStr *string) error
 		groups = append(groups, huh.NewGroup(extras...).Title("Extras"))
 	}
 
+	// Secrets echo visibly here too: a bot token is long, and a paste you
+	// cannot see is a truncated paste waiting to happen.
+	var tg []huh.Field
+	if f.tgToken == "" {
+		tg = append(tg, huh.NewInput().Title("Bot token").
+			Description("From @BotFather. Blank to fill into .env later.").Value(&a.tgToken))
+	}
+	if f.tgChatID == "" {
+		tg = append(tg, huh.NewInput().Title("Chat id").
+			Description("Your numeric chat id (e.g. from @userinfobot).").
+			Validate(validateChatID).
+			Value(&a.tgChatID))
+	}
+	if len(tg) > 0 {
+		groups = append(groups, huh.NewGroup(tg...).
+			Title("Telegram").
+			Description("shell3 talks to you over a Telegram bot."))
+	}
+
 	if f.workDir == "" {
 		groups = append(groups, huh.NewGroup(
 			huh.NewInput().Title("Working directory").
 				Description("Where the agent's shell runs. Blank uses the config dir.").
 				Value(&a.workDir),
-		).Title("Web interface").
-			Description("You reach shell3 in a browser: `shell3 serve`."))
+		).Title("Agent").
+			Description("Where the agent works when nothing else says otherwise."))
 	}
 
 	if len(groups) == 0 {
@@ -312,6 +318,25 @@ func runBootForm(f *bootFlags, a *bootAnswers, ctxStr, compactStr *string) error
 			return fmt.Errorf("boot: aborted")
 		}
 		return fmt.Errorf("boot: %w", err)
+	}
+	return nil
+}
+
+// envTelegramToken is the .env key holding the bot token, referenced from
+// shell3.yaml as `telegram.token: env:TELEGRAM_TOKEN` like every other secret.
+const envTelegramToken = "TELEGRAM_TOKEN"
+
+// validateChatID keeps a mistyped chat id out of shell3.yaml: the front-end
+// parses it as an int64 and refuses to start otherwise, and that failure lands
+// far from where the value was typed. Blank is allowed — it's the "fill it in
+// later" answer.
+func validateChatID(s string) error {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	if _, err := strconv.ParseInt(s, 10, 64); err != nil {
+		return fmt.Errorf("a chat id is a number (e.g. 8701499393)")
 	}
 	return nil
 }
@@ -430,12 +455,15 @@ func mergeEnv(existing string, kv [][2]string) (merged string, kept []string) {
 			}
 			continue
 		}
+		if pair[0] == envTelegramToken && pair[1] == "" {
+			b.WriteString("# Telegram bot token from @BotFather — fill in before `shell3 telegram`.\n")
+		}
 		b.WriteString(pair[0] + "=" + pair[1] + "\n")
 	}
 	return b.String(), kept
 }
 
-func printBootSuccess(dir, cfgPath, envPath string, proxyWired, tunnelWired bool, svc serviceState) {
+func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool, svc serviceState) {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format+"\n", args...) }
 
@@ -469,7 +497,7 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired, tunnelWired bool
 		w("")
 		w("Installed as a **systemd user service** — running now and on every boot.")
 		w("")
-		w("**Open <http://127.0.0.1:8765>** and log in with the password you just set.")
+		w("**Message your bot on Telegram** — it is already listening.")
 		w("")
 		w("```")
 		w("systemctl --user status %s   # state + recent log", serviceUnitName)
@@ -486,18 +514,19 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired, tunnelWired bool
 		w("Service setup didn't finish (see the warning above) — start manually:")
 		w("")
 		w("```")
-		w("shell3 serve")
+		w("shell3 telegram")
 		w("```")
 	default:
 		w("## Run it")
 		w("")
-		w("shell3 lives in your browser:")
+		w("shell3 talks to you over Telegram. With `%s` in `.env` and", envTelegramToken)
+		w("`chat_id` in `shell3.yaml`:")
 		w("")
 		w("```")
-		w("shell3 serve")
+		w("shell3 telegram")
 		w("```")
 		w("")
-		w("Then open <http://127.0.0.1:8765>.")
+		w("Then message your bot.")
 	}
 
 	w("")
@@ -508,31 +537,9 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired, tunnelWired bool
 	w("")
 	w("## Reaching it from elsewhere")
 	w("")
-	if tunnelWired {
-		w("`web.tunnel` is wired: every `shell3 serve` start opens a cloudflared")
-		w("quick tunnel — **`shell3 url`** prints the public https URL to open on")
-		w("your phone (it changes on each restart; also in the serve output,")
-		w("`journalctl --user -u %s`, and `~/.shell3/tunnel.log`).", serviceUnitName)
-		w("For a fixed address set `web.url`.")
-		w("")
-		w("Behind that URL is your login — and a shell on this machine. An")
-		w("authenticated proxy in front of it is still worth having.")
-	} else {
-		w("`shell3 serve` binds loopback and asks for the password you just set. To")
-		w("use it from your phone, give it a public https address — a **cloudflared**")
-		w("quick tunnel (free, no account) is the easy path. Remember what is behind")
-		w("that login: a session is a shell on this machine, so an authenticated")
-		w("proxy in front of it is still worth having.")
-		if _, err := exec.LookPath("cloudflared"); err != nil {
-			w("")
-			w("`cloudflared` is **not on PATH** here — install it")
-			w("(<https://github.com/cloudflare/cloudflared>), or use another tunnel")
-			w("or a fixed address: `web.tunnel` / `web.url` in `shell3.yaml`.")
-		} else {
-			w("")
-			w("Set `web.tunnel` (or a fixed `web.url`) in `shell3.yaml`.")
-		}
-	}
+	w("Nothing to expose: Telegram already reaches your phone, so shell3 stays")
+	w("on this machine and talks out through the bot.")
+	w("")
 
 	fmt.Println()
 	fmt.Print(cli.RenderMarkdown(b.String()))

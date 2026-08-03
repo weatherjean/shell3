@@ -77,32 +77,17 @@ models:
 #     allow: [search_issues, get_issue]
 
 # ---------------------------------------------------------------------------
-# Web interface  (run: shell3 serve)
+# Telegram bot  (run: shell3 telegram)
 # ---------------------------------------------------------------------------
-# workdir is where the agent's shell runs. addr is the listen address.
-#
-# password is required: serve refuses to start without one, because reaching
-# this interface means reaching a shell — the agent's first verb is bash. It is
-# read from .env like every other secret. Change it there; changing it logs out
-# every browser.
-#
-# totp_secret is optional and adds a second factor, so a leaked password alone
-# is not a session. `shell3 boot` offers to enrol; lose the phone and you delete
-# the key from .env and restart.
-#
-# To reach it from elsewhere:
-#   tunnel: a command spawned at start ({addr} = the listen address) whose
-#           printed https URL is picked up (see ~/.shell3/tunnel.log).
-#   url:    a fixed https address you run yourself; overrides tunnel.
-# A tunnel puts a shell on the internet behind this password. Proxy-level auth
-# (Cloudflare Access, Tailscale) in front of it is still worth having.
-web:
+# token is read from .env like every other secret — get one from @BotFather.
+# chat_id is the single chat the bot answers (yours; @userinfobot prints it):
+# messages from anywhere else are ignored, which is the whole access model.
+# workdir is where the agent's shell runs; blank uses this config directory.
+telegram:
+  token: env:TELEGRAM_TOKEN           # TELEGRAM_TOKEN in .env
+  chat_id: {{.ChatID | yamlstr}}
   workdir: {{.WorkDir | yamlstr}}
-  addr: 127.0.0.1:8765
-  password: env:SHELL3_WEB_PASSWORD
-  {{if .TOTP}}totp_secret: env:SHELL3_WEB_TOTP_SECRET{{else}}# totp_secret: env:SHELL3_WEB_TOTP_SECRET{{end}}
-  {{if .Tunnel}}tunnel: "cloudflared tunnel --url http://{addr}"{{else}}# tunnel: "cloudflared tunnel --url http://{addr}"{{end}}
 
 # runs_keep_days: how long a finished session's runs/<id>/ dir is kept before
-# `shell3 serve` sweeps it at startup; 0 keeps everything forever (default 30).
+# `shell3 telegram` sweeps it at startup; 0 keeps everything forever (default 30).
 # runs_keep_days: 30

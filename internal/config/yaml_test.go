@@ -26,10 +26,9 @@ const fullYAML = `models:
     base_url: https://api.groq.com/openai/v1
     api_key: k2
     model: whisper-large-v3-turbo
-web:
+telegram:
   workdir: /tmp/agent
-  addr: 127.0.0.1:8765
-  tunnel: cloudflared tunnel --url http://{addr}
+  chat_id: "8701499393"
 mcp:
   linear:
     url: https://mcp.linear.app/mcp
@@ -65,8 +64,8 @@ func TestParseYAMLFull(t *testing.T) {
 	if m.Extra["reasoning_split"] != true {
 		t.Fatalf("extra = %+v", m.Extra)
 	}
-	if w := c.Web(); w.Addr != "127.0.0.1:8765" || w.WorkDir != "/tmp/agent" {
-		t.Fatalf("web = %+v", w)
+	if tg := c.Telegram(); tg.ChatID != "8701499393" || tg.WorkDir != "/tmp/agent" {
+		t.Fatalf("telegram = %+v", tg)
 	}
 	servers := c.MCPServers()
 	if len(servers) != 2 || servers[0].Name != "github" || servers[1].Name != "linear" {
@@ -97,8 +96,36 @@ func TestParseYAMLUnknownKey(t *testing.T) {
 	}
 }
 
+// A strict-decode failure is the first thing a 0.2.x upgrader with a `web:`
+// block meets, so it must name shell3.yaml's own blocks — not the Go types
+// behind them.
+func TestParseYAMLUnknownKeyNamesConfigNotGoTypes(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{"top level", "web:\n  password: x\n", "shell3.yaml"},
+		{"telegram block", "models:\n  m:\n    base_url: u\n    model: x\ntelegram:\n  dashboard: {}\n", "telegram:"},
+		{"media sub-block", "models:\n  m:\n    base_url: u\n    model: x\nmedia:\n  stt:\n    bogus: 1\n", "media.stt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseY(t, tc.yaml, nil)
+			if err == nil {
+				t.Fatal("expected an unknown-key error")
+			}
+			if strings.Contains(err.Error(), "config.yaml") {
+				t.Errorf("error leaks an internal Go type: %v", err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error should name %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
 func TestParseYAMLNoModels(t *testing.T) {
-	if _, err := parseY(t, "web: { addr: \":8765\" }\n", nil); err == nil || !strings.Contains(err.Error(), "no models") {
+	if _, err := parseY(t, "telegram: { chat_id: \"1\" }\n", nil); err == nil || !strings.Contains(err.Error(), "no models") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -241,18 +268,5 @@ func TestParseYAMLImagegenDefaultsAndValidation(t *testing.T) {
 	y = "models:\n  m:\n    base_url: u\n    model: x\nmedia:\n  imagegen: { model: m, api: openroutre }\n"
 	if _, err := parseY(t, y, nil); err == nil || !strings.Contains(err.Error(), "must be openai or openrouter") {
 		t.Fatalf("err = %v", err)
-	}
-}
-
-// The web password is a secret like any other: it lives in .env and reaches the
-// YAML as an env: reference, so shell3.yaml stays safe to read and to share.
-func TestParseYAMLWebPassword(t *testing.T) {
-	c, err := parseY(t, "models:\n  m:\n    base_url: u\n    model: x\nweb:\n  password: env:SHELL3_WEB_PASSWORD\n",
-		map[string]string{"SHELL3_WEB_PASSWORD": "correct-horse-battery-staple"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.Web().Password != "correct-horse-battery-staple" {
-		t.Errorf("Web().Password = %q, want the resolved secret", c.Web().Password)
 	}
 }

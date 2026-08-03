@@ -209,9 +209,10 @@ func (s *Session) route(ev chat.Event) {
 // ("user interjected …"), letting the model course-correct mid-task; while
 // idle it queues and is drained at the start of the next turn. Interject never
 // fails, never blocks on a running turn, and is safe to call from any
-// goroutine — it is the chat-message path for front-ends (a bot's
-// incoming message), while Send remains the strict
-// turn-starting call.
+// goroutine, while Send remains the strict turn-starting call. No front-end
+// steers a running turn today — the Telegram bot courtesy-drops a mid-turn
+// message and `shell3 ask` is single-threaded — so this is the queue-input
+// path the runtime's own wake/completion tests drive.
 //
 // Optional parts attach media: each invalid part is dropped — Interject never
 // fails — and a bracketed "[attachment dropped: <error>]" note is appended to
@@ -497,14 +498,15 @@ func (s *Session) doClose() error {
 // 5xx), where rewriting history would not help. Front-ends append it to the
 // error they show.
 //
-// The suggested remedies are the ones that actually exist: /compact rewrites
-// the head of the conversation into a summary, and a new conversation starts
-// clean. (This used to name a /rollback command, which no front-end has.)
+// The suggested remedy is the one that actually exists on every front-end:
+// starting a new conversation. (Earlier versions named /rollback and then
+// /compact — neither is a command any front-end has; on the Telegram bot a new
+// conversation is simply a message that replies to nothing.)
 func RecoveryHint(err error) string {
 	if err == nil {
 		return ""
 	}
-	const hint = "This usually means the last turn left the conversation in a state the model rejects — /compact (which rewrites the history into a summary) or starting a new conversation will normally clear it."
+	const hint = "This usually means the last turn left the conversation in a state the model rejects — starting a new conversation (send a message without replying to a thread) normally clears it."
 	// Preferred: the adapter wraps provider API errors in llm.StatusError.
 	var se *llm.StatusError
 	if errors.As(err, &se) {
@@ -577,56 +579,6 @@ func (s *Session) turnConfigLocked() chat.TurnConfig {
 	return tc
 }
 
-// Compact forces one context compaction now (= /compact): it summarises the
-// head of the conversation and keeps the recent tail, exactly like the
-// automatic compact_at path, and returns the estimated prompt tokens
-// before/after. ErrBusy while a turn is in flight; chat.ErrNothingToCompact
-// when history is too small to have a summarisable head (history untouched on
-// any error). Unlike the other between-turns mutators it does NOT run under
-// withIdle — the summarisation round-trip can take minutes and must not hold
-// s.mu; instead it takes the FULL turn lifecycle (mirroring SendParts): the
-// busy gate, plus turnCancel/turnDone registration so /stop can abort the LLM
-// call and doClose cancels+joins before ending the store session — the
-// compaction rolls the runs session, so teardown must never race it.
-func (s *Session) Compact(ctx context.Context) (before, after int, err error) {
-	cctx, cancel := context.WithCancel(ctx)
-	done := make(chan struct{})
-	s.mu.Lock()
-	if s.busy || s.closed {
-		err := ErrBusy
-		if s.closed {
-			err = ErrClosed
-		}
-		s.mu.Unlock()
-		cancel()
-		return 0, 0, err
-	}
-	s.busy = true
-	s.turnCancel = cancel
-	s.turnDone = done
-	// Capture the runtime under the busy gate (doClose nils it concurrently once
-	// done closes) and snapshot the turn config inside the same critical section,
-	// same as SendParts: cfg mutators (SwitchAgent, SetParam, Clear) hold s.mu,
-	// so they serialize wholly before or after this compaction.
-	rt := s.runtime
-	tc := s.turnConfigLocked()
-	s.mu.Unlock()
-	defer func() {
-		s.mu.Lock()
-		s.busy = false
-		s.mu.Unlock()
-		close(done) // doClose may be blocked on this join; store state is final
-		// A notice queued while the busy gate was held had its Wake bounced off
-		// RunQueued's ErrBusy; re-emit exactly as SendParts' unwind does, so a
-		// completion that landed mid-compaction is never stranded.
-		if rt != nil && s.sess.HasInbox() {
-			rt.emit(HostEvent{Session: s.sess.ID(), Kind: Wake})
-		}
-		cancel() // release the child ctx
-	}()
-	return chat.CompactStandalone(cctx, tc, s.sess)
-}
-
 // SwitchAgent activates the configured agent named name for subsequent Sends
 // (a front-end's agent-switch action). Switching swaps the agent's model client,
 // system prompt, tool set, host-tool routing, skills, status
@@ -657,6 +609,6 @@ func (s *Session) SwitchAgent(name string) error {
 // ActiveAgent returns the name of the currently active agent.
 func (s *Session) ActiveAgent() string { return s.cfg.ModeLabel }
 
-// Name returns the session's runtime key (e.g. "web-<thread>", or a generated
+// Name returns the session's runtime key (e.g. "tg-<chat>", or a generated
 // "sN"). Front-ends use it to label the session they attached to.
 func (s *Session) Name() string { return s.name }

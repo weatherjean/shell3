@@ -92,7 +92,7 @@ func (s *Session) JobTranscript(id string) string {
 	return rt.jobs.transcript(id)
 }
 
-// KillJob cancels one background job (the Jobs view's cancel action). For
+// KillJob cancels one background job (the front-end's /cancel <id>). For
 // command jobs this sends a cancellation signal; for subagent jobs it cancels
 // the child session's context. It does not block; the job leaves the live list
 // once it exits.
@@ -102,18 +102,4 @@ func (s *Session) KillJob(id string) error {
 		return errors.New("shell3: no job runtime")
 	}
 	return rt.jobs.cancel(id)
-}
-
-// KillRunningJobs kills every live background job on the session — commands
-// and subagents alike — and reports how many were killed. The shared half of
-// the front-ends' /stop (see StopAll).
-func (s *Session) KillRunningJobs() (killed int) {
-	for _, j := range s.Jobs() {
-		if !j.Done {
-			if err := s.KillJob(j.ID); err == nil {
-				killed++
-			}
-		}
-	}
-	return killed
 }
