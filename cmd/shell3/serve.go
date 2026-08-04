@@ -123,7 +123,7 @@ func newServeCommand() *cobra.Command {
 			// server opens that file for the live process.
 			runsRoot := rt.Parts().RunsRoot()
 			threadsPath := filepath.Join(runsRoot, "web_threads.jsonl")
-			removedRuns, err := runs.Sweep(runsRoot,
+			removedRuns, threadsDropped, err := runs.Sweep(runsRoot,
 				time.Duration(rt.Parts().RunsKeepDays())*24*time.Hour, time.Now())
 			if err != nil {
 				// Fail-open: Sweep skipped whatever it couldn't remove and kept
@@ -136,6 +136,7 @@ func newServeCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("runs janitor: prune thread index: %w", err)
 			}
+			removedThreads += threadsDropped
 			if len(removedRuns) > 0 || removedThreads > 0 {
 				fmt.Printf("janitor: removed %d runs, %d thread entries\n",
 					len(removedRuns), removedThreads)
