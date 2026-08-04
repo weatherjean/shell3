@@ -48,10 +48,15 @@ pick it up. `shell3 --version` shows what you're on. Pin a release with
    `~/.shell3/` and asks for the password the interface requires, optionally
    with an authenticator second factor.
 2. Run `shell3 serve`, open <http://127.0.0.1:8765>, and start talking.
+3. Want it on your phone? `tailscale serve --bg 8765 && shell3 serve` —
+   a stable https URL on your [tailnet](https://tailscale.com) (free), and
+   nothing on the public internet.
 
 `shell3 serve` binds loopback. Keeping it running and reaching it from
 elsewhere are yours to set up — [docs/deploying.md](docs/deploying.md) has the
-few lines each takes; the full walkthrough is in [docs/cli.md](docs/cli.md).
+few lines each takes (a service is one paste,
+[cookbook/service.md](docs/cookbook/service.md)); the full walkthrough is in
+[docs/cli.md](docs/cli.md).
 
 ## Commands
 

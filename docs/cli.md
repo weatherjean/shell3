@@ -37,9 +37,10 @@ that plain http carries the password in clear. And a password is not a reason to
 drop a proxy that authenticates in its own right — see
 [Security](security.md#the-web-interface).
 
-**Exposure is yours.** shell3 starts nothing on your behalf: put it behind a
-reverse proxy, Tailscale, or an SSH forward, and set `web.url` when the
-address is stable — [deploying.md](deploying.md). serve prints a fixed
+**Exposure is yours.** shell3 starts nothing on your behalf: put it behind
+Tailscale (`tailscale serve --bg 8765` — the recommended default), an SSH
+forward, or a reverse proxy, and set `web.url` when the address is stable —
+[deploying.md](deploying.md) has the ranking. serve prints a fixed
 `web.url` at start, so the address you hand out is in the log; from that
 moment the login password is the boundary, and a session is a shell.
 

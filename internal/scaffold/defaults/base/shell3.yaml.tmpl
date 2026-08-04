@@ -90,10 +90,10 @@ models:
 # is not a session. `shell3 boot` offers to enrol; lose the phone and you delete
 # the key from .env and restart.
 #
-# To reach it from elsewhere:
-#   url: a fixed https address you run yourself (a reverse proxy, Tailscale,
-#        SSH port forwarding, ...) — exposing the interface beyond this machine
-#        is yours to set up. Options: docs/deploying.md in the repo.
+# To reach it from elsewhere (`tailscale serve --bg 8765` is the recommended
+# default — private, stable https; docs/deploying.md in the repo has the rest):
+#   url: the fixed https address you serve it on (e.g. the ts.net URL) —
+#        informational, exposing the interface is yours to set up.
 web:
   workdir: {{.WorkDir | yamlstr}}
   addr: 127.0.0.1:8765

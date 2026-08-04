@@ -352,9 +352,11 @@ budget, whether the model has vision — which wires `media.describe` + the medi
 tool — the agent's workdir, and the interface password) and writes secrets to
 `~/.shell3/.env`; one TTY-only offer wires TOTP enrolment → `web.totp_secret`.
 It installs **nothing** and exposes **nothing**: the finale prints the local
-URL and points at `docs/deploying.md` (or the agent) for keeping it up and
-reaching it. `--show` reprints that finale, rendered to the terminal's own
-background.
+URL, the one-line tailnet start (`tailscale serve --bg 8765 && shell3
+serve`), on Linux a copy-paste systemd-unit + `tailscale serve` block, and
+points at `docs/deploying.md` (or the agent) for the rest — it only ever
+*prints*; running any of it is the operator's. `--show` reprints that
+finale, rendered to the terminal's own background.
 `shell3 ask "…"` is the terminal front-end (`internal/cli`): it drives the same
 agent with full verbose output (every tool call/result, reasoning, token usage;
 no message = an interactive multi-turn loop; `-p` for headless; `--resume`
