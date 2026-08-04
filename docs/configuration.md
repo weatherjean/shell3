@@ -531,8 +531,11 @@ code cannot be used twice inside its window.
 SHELL3_WEB_TOTP_SECRET=…
 ```
 
-Lose the phone and there is no lockout to recover from: the secret is a line in
-a file on your own machine, so delete it and restart.
+Said no at boot, or need a fresh secret? `shell3 boot --totp` re-runs just
+this step against the existing config — new secret, new QR, old
+authenticator entries stale. Lose the phone and there is no lockout to
+recover from: the secret is a line in a file on your own machine, so delete
+it and restart.
 
 **None of this replaces auth in front.** A login is a shell, so an
 identity-aware proxy (Cloudflare Access, Tailscale, Authelia) is still worth

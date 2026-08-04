@@ -87,8 +87,8 @@ models:
 # every browser.
 #
 # totp_secret is optional and adds a second factor, so a leaked password alone
-# is not a session. `shell3 boot` offers to enrol; lose the phone and you delete
-# the key from .env and restart.
+# is not a session. `shell3 boot` offers to enrol; `shell3 boot --totp` enrols
+# or resets later; lose the phone and you delete the key from .env and restart.
 #
 # To reach it from elsewhere (`tailscale serve --bg 8765` is the recommended
 # default — private, stable https; docs/deploying.md in the repo has the rest):

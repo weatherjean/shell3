@@ -181,8 +181,10 @@ until you add a vision model. Another asks where the agent's shell should run
 password** — required, 16 characters minimum, with a generated suggestion you
 can accept as-is; it is printed once at the end, so save it. A following step
 offers a **second factor**, printing a QR code to scan with an authenticator
-app; enrolling wires `web.totp_secret` so the login asks for the code. Losing
-that phone is not a lockout, since the secret is a line in `.env` you can
+app; enrolling wires `web.totp_secret` so the login asks for the code.
+Declined it, or lost the phone? `shell3 boot --totp` enrols or resets any
+time (a fresh secret and QR against the existing config); and losing the
+phone is never a lockout, since the secret is a line in `.env` you can
 delete.
 
 boot installs nothing and exposes nothing: it configures shell3 and stops

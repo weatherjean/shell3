@@ -350,7 +350,9 @@ already-gone sessions, printing `janitor: removed N runs, M thread entries`
 `shell3 boot` scaffolds the config tree (an interactive form: model, context
 budget, whether the model has vision — which wires `media.describe` + the media
 tool — the agent's workdir, and the interface password) and writes secrets to
-`~/.shell3/.env`; one TTY-only offer wires TOTP enrolment → `web.totp_secret`.
+`~/.shell3/.env`; one TTY-only offer wires TOTP enrolment → `web.totp_secret`
+(`boot --totp` re-runs just that step later — enrol after declining, or reset
+with a fresh secret; removal stays manual: delete the key from `.env`).
 It installs **nothing** and exposes **nothing**: the finale prints the local
 URL, the one-line tailnet start (`tailscale serve --bg 8765 && shell3
 serve`), on Linux a copy-paste systemd-unit + `tailscale serve` block, and

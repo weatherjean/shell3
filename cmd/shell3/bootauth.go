@@ -124,6 +124,7 @@ func askTOTPEnrolment(tty bool, account string, out io.Writer) (string, error) {
 		huh.NewConfirm().
 			Title("Add a second factor (an authenticator-app code)?").
 			Description("A leaked or guessed password then is not enough to get in.\n" +
+				"Not now? `shell3 boot --totp` enrols (or resets) any time.\n" +
 				"Lost your phone? Delete the secret from .env and restart.").
 			Value(&enrol),
 	).Title("Two-factor")).WithTheme(cli.HuhTheme()).Run(); err != nil {
@@ -137,14 +138,20 @@ func askTOTPEnrolment(tty bool, account string, out io.Writer) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	fmt.Fprintln(out, "\nScan this with your authenticator app:")
-	qrterminal.GenerateHalfBlock(uri, qrterminal.L, out)
-	fmt.Fprintf(out, "\nOr enter the secret by hand: %s\n", secret)
-	fmt.Fprintln(out, "Then press enter — the code is asked for at every login.")
+	printTOTPEnrolment(secret, uri, out)
 	if tty {
 		_, _ = fmt.Fscanln(os.Stdin) // any input (or EOF) means "continue"
 	}
 	return secret, nil
+}
+
+// printTOTPEnrolment shows the QR code and manual secret for a fresh
+// enrolment — shared by the boot offer and `boot --totp`.
+func printTOTPEnrolment(secret, uri string, out io.Writer) {
+	fmt.Fprintln(out, "\nScan this with your authenticator app:")
+	qrterminal.GenerateHalfBlock(uri, qrterminal.L, out)
+	fmt.Fprintf(out, "\nOr enter the secret by hand: %s\n", secret)
+	fmt.Fprintln(out, "Then press enter — the code is asked for at every login.")
 }
 
 // printWebCredentials shows what was just written, because a generated password

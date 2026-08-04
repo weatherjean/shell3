@@ -29,6 +29,7 @@ type bootFlags struct {
 	visionSet                    bool // --vision passed explicitly (skips the form's confirm)
 	force                        bool
 	show                         bool // print the post-boot summary and exit
+	totp                         bool // enrol/reset the second factor and exit
 }
 
 func newBootCommand() *cobra.Command {
@@ -42,6 +43,9 @@ func newBootCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if f.show {
 				return showBootSuccess()
+			}
+			if f.totp {
+				return runTOTPEnrol()
 			}
 			f.visionSet = cmd.Flags().Changed("vision")
 			return runBoot(f)
@@ -58,6 +62,7 @@ func newBootCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&f.vision, "vision", true, "Model can see images (wires media.describe to it and enables the media tool)")
 	cmd.Flags().BoolVar(&f.force, "force", false, "Overwrite an existing ~/.shell3 config (shell3.yaml, agent.md, ...)")
 	cmd.Flags().BoolVar(&f.show, "show", false, "Print the post-boot summary for the existing config and exit (changes nothing)")
+	cmd.Flags().BoolVar(&f.totp, "totp", false, "Enrol or reset the authenticator second factor for the existing config and exit")
 	return cmd
 }
 
