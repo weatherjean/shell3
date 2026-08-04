@@ -151,7 +151,7 @@ func TestRenderBaseConfigVision(t *testing.T) {
 			t.Error("vision config should wire media.describe to the main model")
 		}
 		agentMD, _ := os.ReadFile(filepath.Join(dir, "agent.md"))
-		if !strings.Contains(string(agentMD), "tools: [bash, bash_bg, edit, media]") {
+		if !strings.Contains(string(agentMD), "tools: [bash, bash_bg, edit, media, history]") {
 			t.Error("vision agent.md should enable the media tool")
 		}
 	})
@@ -167,7 +167,7 @@ func TestRenderBaseConfigVision(t *testing.T) {
 			t.Error("no-vision config should keep media.describe as a commented hint")
 		}
 		agentMD, _ := os.ReadFile(filepath.Join(dir, "agent.md"))
-		if !strings.Contains(string(agentMD), "tools: [bash, bash_bg, edit]") {
+		if !strings.Contains(string(agentMD), "tools: [bash, bash_bg, edit, history]") {
 			t.Error("no-vision agent.md should not enable the media tool")
 		}
 	})

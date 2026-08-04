@@ -87,13 +87,13 @@ models:
 # every browser.
 #
 # totp_secret is optional and adds a second factor, so a leaked password alone
-# is not a session. `shell3 boot` offers to enrol; lose the phone and you delete
-# the key from .env and restart.
+# is not a session. `shell3 boot` offers to enrol; `shell3 boot --totp` enrols
+# or resets later; lose the phone and you delete the key from .env and restart.
 #
-# To reach it from elsewhere:
-#   url: a fixed https address you run yourself (a reverse proxy, Tailscale,
-#        SSH port forwarding, ...) — exposing the interface beyond this machine
-#        is yours to set up. Options: docs/deploying.md in the repo.
+# To reach it from elsewhere (`tailscale serve --bg 8765` is the recommended
+# default — private, stable https; docs/deploying.md in the repo has the rest):
+#   url: the fixed https address you serve it on (e.g. the ts.net URL) —
+#        informational, exposing the interface is yours to set up.
 web:
   workdir: {{.WorkDir | yamlstr}}
   addr: 127.0.0.1:8765
@@ -101,6 +101,6 @@ web:
   {{if .TOTP}}totp_secret: env:SHELL3_WEB_TOTP_SECRET{{else}}# totp_secret: env:SHELL3_WEB_TOTP_SECRET{{end}}
   # url: https://shell3.example.com
 
-# runs_keep_days: how long a finished session's runs/<id>/ dir is kept before
+# runs_keep_days: how long a finished session is kept in the runs store before
 # `shell3 serve` sweeps it at startup; 0 keeps everything forever (default 30).
 # runs_keep_days: 30

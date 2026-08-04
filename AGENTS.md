@@ -16,7 +16,7 @@ strict decode — unknown keys fail the load; secrets referenced as `env:KEY`,
 substring-substituted from the sibling `.env`, unknown key = load error).
 Everything with a prompt is markdown-with-frontmatter: `agent.md` (THE agent —
 exactly one because there is exactly one file; frontmatter `model` (required),
-`tools: [bash, bash_bg, edit, media, read, list_files]`, `mcp`, `prune`,
+`tools: [bash, bash_bg, edit, media, read, list_files, history]`, `mcp`, `prune`,
 `context` (main-agent-only: a list of config-dir-relative paths, globs
 allowed, read fresh at session creation — so every fresh turn sees current
 file contents, not a load-time snapshot — into a `## Context` prompt section,
@@ -49,13 +49,17 @@ model can perceive it (PDF via an OpenAI-compatible `file` part; video via a
 `video_url` part, an OpenRouter/Gemini extension plain OpenAI endpoints
 reject) — when `media` is in the agent's `tools`). The main agent is bash-first
 by default: reading, listing, and searching are bash commands (`cat`/`sed -n`,
-`ls`/`find`, `rg`; history is searched with `rg` over
-`.shell3_project/runs/**/*.jsonl`), and a reflexive
+`ls`/`find`, `rg`), and a reflexive
 `read_file`/`grep`/`write_file` call gets an unknown-tool error carrying a
 bash-first redirect back to bash/edit_file. Structured `read` and `list_files`
 tools exist as an opt-in (`tools: [read, list_files]`, typically for a
 subagent on a smaller model); left out of `tools`, those names hit the same
-redirect. Specialists are subagents. A **subagent** is an **in-process background job** spawned via the
+redirect. `history` (opt-in via `tools`, on the scaffold's main agent by
+default) recalls past conversations from the runs store: `{query}` is
+ranked FTS5 search over user+assistant text across ALL sessions (tool
+output is not indexed; a syntax-invalid query is retried as one quoted
+phrase), `{session, around, limit}` reads the transcript around a hit;
+read-only, store-nil-safe, handled by `chat.HistoryHandler`. Specialists are subagents. A **subagent** is an **in-process background job** spawned via the
 `task` tool (`{subagent_type, prompt, description}`; returns immediately); the
 runtime (`internal/shell3` jobManager) runs it as a child-session goroutine
 under a concurrency cap (`background.max_concurrent`, default 8) — no
@@ -288,8 +292,13 @@ another host — so the toggle in the bell explains itself rather than failing
 silently.
 
 Chat is **thread-scoped**: a browser thread maps to a shell3 session through a
-persistent index (`.shell3_project/web_threads.jsonl`), so a thread continues
-its conversation across turns and process restarts; sessions stay resident
+persistent index (the runs store's `threads` table, surface-namespaced "web",
+carrying the browser-facing title/preview/created_at/updated_at/deleted
+metadata on top of the plain msg_id→session_id mapping the other surfaces use;
+`internal/webui/threads.go` — in-memory map authoritative for the process,
+store writes best-effort, and the store is resolved per call so a /reload
+generation swap never leaves the index on a closed handle), so a thread
+continues its conversation across turns and process restarts; sessions stay resident
 between turns and the oldest idle one retires past `keepLiveSessions` (a
 session with running jobs is never retired — its jobs would lose their
 parent). One main-agent turn runs at a time: a message arriving mid-turn is
@@ -329,7 +338,12 @@ durable path (TTS audio included, cached as `tts-*`) and is served back at
 `/api/media/<name>`; the agent shows a generated image by writing
 `![](/api/media/<file>)`. Restriction policy is the hook script, not a tools
 list. When no media model is configured the UI falls back to the browser's own
-Web Speech APIs, so dictation still works.
+Web Speech APIs, so dictation still works. `send_file` (`internal/webui/sendtool.go`)
+is a sibling host tool on the same decorator: `{path, name?}` stages any local
+file into `~/.shell3/media/` (as `sent-*`) and returns the `/api/media/` link
+to show, refusing `.env`/dotenv siblings, directories, and files over 50 MB;
+it is skipped for a headless session, since there is no chat to hand a link
+to.
 
 An in-process cron scheduler (`internal/cron`, jobs are `cron/<name>.md`
 files; each job dispatches its declared agent — a subagent from `agents/`, or
@@ -340,29 +354,44 @@ notifier event carrying the job name (`DispatchOpts.CronJob`) and the job's
 prompt as the triage note (`DispatchOpts.Note` — the judge knows what the job
 is FOR); a failed run always surfaces as `⚠️ <job> failed: <error>`).
 
+Sessions, messages, reminders, and every surface's thread index live in **one
+SQLite database** (`internal/runs`, modernc.org/sqlite — pure Go, no cgo):
+`.shell3_project/shell3.db`, with an FTS5 index over user+assistant message
+text backing the `history` tool. Job logs stay plain files under
+`runs/<session>/jobs/<id>.log`. The schema is stamped with `PRAGMA
+user_version`; a database whose stamp doesn't match the running binary is
+**deleted and recreated empty**, with one loud stderr line — shell3 data is
+disposable by design, so there are no migrations.
+
 A **runs janitor** runs once at `shell3 serve` startup (never on `ask`):
 `runs_keep_days` (top-level `shell3.yaml` key, default 30, `0` = keep forever)
-deletes `runs/<id>/` dirs whose newest-file mtime is past the cutoff and
-rewrites `web_threads.jsonl` dropping entries pointing at deleted or
-already-gone sessions, printing `janitor: removed N runs, M thread entries`
-(silent when both are zero).
+deletes sessions whose `last_at` is past the cutoff — rows, FTS entries,
+thread entries, and job-log dirs together — plus empty crash leftovers and
+orphaned `runs/<id>/` dirs (pre-database leftovers), printing `janitor:
+removed N runs, M thread entries` (silent when both are zero). SQL in
+`runs.Sweep`, on its own connection (the runtime's store is already open by
+then — the sweep does not need it closed), before the server listens.
 
 `shell3 boot` scaffolds the config tree (an interactive form: model, context
 budget, whether the model has vision — which wires `media.describe` + the media
 tool — the agent's workdir, and the interface password) and writes secrets to
-`~/.shell3/.env`; one TTY-only offer wires TOTP enrolment → `web.totp_secret`.
+`~/.shell3/.env`; one TTY-only offer wires TOTP enrolment → `web.totp_secret`
+(`boot --totp` re-runs just that step later — enrol after declining, or reset
+with a fresh secret; removal stays manual: delete the key from `.env`).
 It installs **nothing** and exposes **nothing**: the finale prints the local
-URL and points at `docs/deploying.md` (or the agent) for keeping it up and
-reaching it. `--show` reprints that finale, rendered to the terminal's own
-background.
+URL, the one-line tailnet start (`tailscale serve --bg 8765 && shell3
+serve`), on Linux a copy-paste systemd-unit + `tailscale serve` block, and
+points at `docs/deploying.md` (or the agent) for the rest — it only ever
+*prints*; running any of it is the operator's. `--show` reprints that
+finale, rendered to the terminal's own background.
 `shell3 ask "…"` is the terminal front-end (`internal/cli`): it drives the same
 agent with full verbose output (every tool call/result, reasoning, token usage;
 no message = an interactive multi-turn loop; `-p` for headless; `--resume`
 continues the latest session; host-agnostic — reads nothing from the `web:`
 block).
 `serve`, `ask`, `boot`, `project`, and `health` are the whole command tree —
-there is no Telegram front-end, no separate dashboard command, and no command
-that exposes or supervises the process.
+there is no separate dashboard command and no command that exposes or
+supervises the process.
 
 ## IMPORTANT: Do Not Read Credential Files
 
@@ -384,8 +413,8 @@ internal/bootstrap/    first-run global + project setup
 internal/scaffold/     embedded starter config tree (defaults/base + defaults/project for `shell3 project new`) + boot/project rendering
 internal/adapter/openai/  OpenAI-compatible LLM adapter
 internal/modelproxy/   run_proxy spawner (starts a model's proxy command on activation)
-internal/paths/        global (~/.shell3/) + local (.shell3_project/) path resolution; no DB fields
-internal/runs/         file-native JSONL store: sessions at .shell3_project/runs/<id>/; janitor.go sweeps runs_keep_days at serve startup
+internal/paths/        global (~/.shell3/) + local (.shell3_project/) path resolution
+internal/runs/         SQLite runs store (modernc.org/sqlite, pure Go): sessions/messages/reminders/threads + FTS5 index in .shell3_project/shell3.db; job logs stay files under runs/<id>/jobs/; sweep.go is the startup janitor
 internal/edittool/     edit_file tool implementation (Go port of opencode's str-replace) + its direct-disk file I/O
 internal/notify/       Notification type (bg_done / agent_done) shared by job runtime + chat
 internal/media/        media.stt/tts/describe/imagegen clients (transcribe, speak, describe, generate)

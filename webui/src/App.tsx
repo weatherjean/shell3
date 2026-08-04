@@ -338,12 +338,16 @@ const ToolBar: FC<{
 
 const ThreadPanel: FC<{
   controls: ThreadControls;
+  // No thread reads as active while a subpage (Jobs/Cron/Runs/Status/Files)
+  // is open — the highlight belongs to Chat, not to whichever conversation
+  // was last open there.
+  view: View;
   collapsed?: boolean;
   onOpenChat?: () => void;
-}> = ({ controls, collapsed, onOpenChat }) => (
+}> = ({ controls, view, collapsed, onOpenChat }) => (
   <ThreadList
     threads={controls.threads}
-    activeId={controls.activeId}
+    activeId={view === "chat" ? controls.activeId : ""}
     collapsed={collapsed}
     onSelect={(id) => {
       controls.select(id);
@@ -391,9 +395,7 @@ const Sidebar: FC<{
               shell3
             </h1>
           </div>
-          <p className="text-ink-3 mt-1.5 font-mono text-[9.5px]">
-            run log · {live ? `${agent.name} · ${agent.model}` : "mock backend"}
-          </p>
+          <p className="text-ink-3 mt-1.5 font-mono text-[9.5px]">{agent.model}</p>
         </div>
       )}
 
@@ -402,6 +404,7 @@ const Sidebar: FC<{
       <div className="min-h-0 flex-1 overflow-hidden">
         <ThreadPanel
           controls={controls}
+          view={view}
           collapsed={collapsed}
           onOpenChat={() => onSelect("chat")}
         />
@@ -437,7 +440,7 @@ const MobileSidebar: FC<{
         <Logo />
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
-        <ThreadPanel controls={controls} onOpenChat={() => onSelect("chat")} />
+        <ThreadPanel controls={controls} view={view} onOpenChat={() => onSelect("chat")} />
       </div>
       <ToolBar view={view} onSelect={onSelect} />
     </SheetContent>

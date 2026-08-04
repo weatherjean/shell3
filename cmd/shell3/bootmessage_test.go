@@ -5,6 +5,7 @@ package main
 import (
 	"io"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -42,6 +43,19 @@ func TestBootSuccessMessage(t *testing.T) {
 	} {
 		if !strings.Contains(base, want) {
 			t.Errorf("boot success message missing %q", want)
+		}
+	}
+	// On Linux the finale carries the one-paste service+tailnet block, with
+	// the systemd %h specifier intact (not eaten by the Printf helper).
+	if runtime.GOOS == "linux" {
+		for _, want := range []string{
+			"systemctl --user enable --now shell3",
+			"tailscale serve --bg 8765",
+			"ExecStart=%h/.local/bin/shell3 serve",
+		} {
+			if !strings.Contains(base, want) {
+				t.Errorf("boot success message missing %q", want)
+			}
 		}
 	}
 }

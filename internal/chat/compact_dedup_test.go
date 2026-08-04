@@ -12,7 +12,7 @@ import (
 // re-append messages that were already persisted by prior saveHistory calls.
 //
 // Before the fix, compactInto flushed the FULL sess.messages slice to the
-// outgoing session's messages.jsonl. Since saveHistory already appended those
+// outgoing session's stored transcript. Since saveHistory already appended those
 // same messages across prior turns, every message got duplicated in the
 // append-only JSONL file.
 //

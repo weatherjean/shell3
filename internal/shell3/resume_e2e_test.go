@@ -11,7 +11,7 @@ import (
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// fakeCfgWithStore mirrors fakeCfg but wires a shared file-native runs Store so
+// fakeCfgWithStore mirrors fakeCfg but wires a shared SQLite runs Store so
 // turns persist their message stream. ContextWindow is set because newSession's
 // ContextWindowFor closure (and the turn's reminder accounting) reads it.
 func fakeCfgWithStore(st *runs.Store, scripts ...fakellm.Script) func() chat.Config {
@@ -25,7 +25,7 @@ func fakeCfgWithStore(st *runs.Store, scripts ...fakellm.Script) func() chat.Con
 	}
 }
 
-// openTestStore opens a fresh file-native runs store rooted in a temp dir.
+// openTestStore opens a fresh SQLite runs store rooted in a temp dir.
 func openTestStore(t *testing.T) *runs.Store {
 	t.Helper()
 	st, err := runs.Open(t.TempDir())

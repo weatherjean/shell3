@@ -42,14 +42,14 @@ type Options struct {
 //
 // Concurrency: all exported methods are safe for concurrent use by multiple
 // sessions. The loaded config (config.LoadedConfig) is immutable after load,
-// the file-native runs store appends each line with a single O_APPEND write
-// (safe for concurrent callers), the proxy spawner is mutex-guarded internally,
+// the runs store serializes writes through its database handle (safe for
+// concurrent callers), the proxy spawner is mutex-guarded internally,
 // and AgentRuntime builds a fresh LLM client per call, so no client state is
 // shared across sessions.
 //
 // Lifetime: Parts must not be used after the cleanup returned by BuildParts has
-// run. The cleanup closes MCP connections and the log; the runs store has no
-// handle to close and run_proxy processes are detached (never reaped here).
+// run. The cleanup closes MCP connections, the runs store's database handle,
+// and the log; run_proxy processes are detached (never reaped here).
 // Any method call after cleanup has undefined behaviour.
 type Parts struct {
 	lc      *config.LoadedConfig
@@ -79,7 +79,7 @@ func (p *Parts) MCPStatus() []mcp.ServerStatus {
 	return p.mcp.Status()
 }
 
-// Store returns the file-native runs store (always opened; nil only when the
+// Store returns the runs store (always opened; nil only when the
 // store-open itself failed, which is non-fatal and logged).
 func (p *Parts) Store() *runs.Store { return p.st }
 
@@ -315,8 +315,9 @@ func (p *Parts) runtimeForAgent(a config.Agent) (chat.ActiveAgent, error) {
 // EnvironmentReminder renders the host-injected Environment standing reminder
 // (no longer part of the system prompt). It exposes the agent's own config path
 // (so any front-end can resolve its config dir without a tool), the active model
-// and this session's id, and where conversation history lives on disk — all
-// file-native, searchable with ordinary Unix tools (rg/grep/cat). The result is wrapped in <system-reminder>…</system-reminder>.
+// and this session's id, and where conversation history lives — the SQLite
+// runs store the history tool searches. The result is wrapped in
+// <system-reminder>…</system-reminder>.
 //
 // It is a package-level function (not a *Parts method) so internal/shell3 can render
 // it from the per-session chat.Config fields it already holds — config path,
@@ -343,10 +344,8 @@ func EnvironmentReminder(configDir, runsDir, model, sessionID string) string {
 	// Derive the model-facing paths from paths.ProjectDirName (its single
 	// source): a renamed project dir must not leave the reminder teaching the
 	// model paths that no longer exist.
-	relRuns := paths.ProjectDirName + "/runs"
-	fmt.Fprintf(&b, "- history: every conversation is verbatim JSONL at `%s/<id>/messages.jsonl` (one message per line; `meta.json` beside it holds model/status/timestamps)\n", relRuns)
-	fmt.Fprintf(&b, "- search history: `rg <terms> %s` (ordinary ripgrep over the JSONL — no special CLI)\n", relRuns)
-	fmt.Fprintf(&b, "- subagent transcripts are ordinary sessions under `%s` too (one dir per child session)\n", relRuns)
+	fmt.Fprintf(&b, "- history: every conversation (subagent runs included) is stored in `%s/shell3.db`; recall past sessions with the history tool when you have it (search, then read around a hit)\n", paths.ProjectDirName)
+	fmt.Fprintf(&b, "- background job logs: `%s/runs/<session>/jobs/<job>.log` (plain files)\n", paths.ProjectDirName)
 	b.WriteString("</system-reminder>")
 	return b.String()
 }
@@ -483,9 +482,8 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 }
 
 // BuildParts assembles the shared runtime parts. The returned cleanup closes
-// MCP connections and the log; callers MUST invoke it once. (The runs store has
-// no handle to close, and run_proxy processes are detached fire-and-forget —
-// see openStore and modelproxy.)
+// MCP connections, the runs store, and the log; callers MUST invoke it once.
+// (run_proxy processes are detached fire-and-forget — see modelproxy.)
 func BuildParts(opts Options) (*Parts, func(), error) {
 	b := &builder{opts: opts}
 	noop := func() {}
@@ -608,14 +606,15 @@ func (b *builder) connectMCP() {
 	}
 }
 
-// openStore opens the file-native runs store unconditionally: it always persists
-// the conversation (saveHistory) and the agent reads it back out-of-process with
-// rg/cat over the JSONL. Non-fatal: a failure warns and proceeds with a nil store
-// (persistence and history reads silently degrade). The store has no handle to
-// close — runs.Store is stateless over the filesystem.
+// openStore opens the runs store (the per-project SQLite database)
+// unconditionally: it always persists the conversation, and the history tool
+// reads it back. Non-fatal: a failure warns and proceeds with a nil store
+// (persistence and history silently degrade). The database handle rides the
+// closer stack so a reload's parked old generation releases it.
 func (b *builder) openStore() {
 	if s, e := runs.Open(b.l.Root); e == nil {
 		b.st = s
+		b.closers = append(b.closers, func() { _ = s.Close() })
 	} else {
 		b.log.Warn("open store failed — history unavailable", "error", e)
 	}

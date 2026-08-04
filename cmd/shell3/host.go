@@ -6,8 +6,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"os"
-	"path/filepath"
 
 	"github.com/weatherjean/shell3/internal/cron"
 	"github.com/weatherjean/shell3/internal/media"
@@ -57,24 +55,6 @@ func armCron(disp cron.Dispatcher, jobs []shell3.CronJob) (*cron.Scheduler, erro
 func announcePublicURL(url string, onURL func(url string, serving bool)) {
 	if url != "" {
 		onURL(url, true) // a fixed URL is the operator's promise; don't second-guess it
-	}
-}
-
-// sessionExistsUnder builds the sessionExists predicate webui.PruneThreadIndex
-// needs: a session id is gone if runs.Sweep just removed it, or if its
-// runs/<id>/ dir isn't there for any other reason (deleted by hand, an older
-// crash) — either way its thread entry is stale and gets dropped.
-func sessionExistsUnder(runsRoot string, justRemoved []string) func(id string) bool {
-	removed := make(map[string]bool, len(justRemoved))
-	for _, id := range justRemoved {
-		removed[id] = true
-	}
-	return func(id string) bool {
-		if removed[id] {
-			return false
-		}
-		_, err := os.Stat(filepath.Join(runsRoot, "runs", id))
-		return err == nil
 	}
 }
 

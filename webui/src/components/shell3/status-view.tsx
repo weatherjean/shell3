@@ -128,9 +128,7 @@ export const StatusView: FC = () => {
     );
   }
 
-  const { agent, usage } = status;
-  const contextUsed =
-    usage && agent.contextWindow ? usage.prompt / agent.contextWindow : null;
+  const { agent } = status;
 
   return (
     <Page
@@ -167,7 +165,8 @@ export const StatusView: FC = () => {
       <Section title="The agent" aside={status.configDir}>
         <div className="flex flex-col">
           <Pair k="Name">{agent.name}</Pair>
-          <Pair k="Model">{agent.status || agent.model}</Pair>
+          <Pair k="Model">{agent.model}</Pair>
+          {agent.status ? <Pair k="Status">{agent.status}</Pair> : null}
           {agent.contextWindow ? (
             <Pair k="Context window">
               {agent.contextWindow.toLocaleString()} tokens
@@ -199,39 +198,6 @@ export const StatusView: FC = () => {
           {agent.tools.length === 0 && <Chip>no tools</Chip>}
         </div>
       </Section>
-
-      {usage && (
-        <Section title="Context" aside="last turn">
-          {contextUsed !== null && (
-            <div className="mt-3">
-              <div className="bg-rule-2 h-[5px] overflow-hidden rounded-[3px]">
-                <div
-                  className={cn(
-                    "h-full rounded-[3px]",
-                    contextUsed > 0.85 ? "bg-fail" : "bg-mark-fill",
-                  )}
-                  style={{ width: `${Math.min(100, contextUsed * 100)}%` }}
-                />
-              </div>
-              <div className="text-ink-3 mt-2 flex justify-between font-mono text-[9.5px]">
-                <span>
-                  {usage.prompt.toLocaleString()} of{" "}
-                  {agent.contextWindow?.toLocaleString()}
-                </span>
-                <span className="tabular-nums">
-                  {Math.round(contextUsed * 100)}% used
-                </span>
-              </div>
-            </div>
-          )}
-          <div className="mt-2 flex flex-col">
-            <Pair k="Sent">
-              {usage.prompt.toLocaleString()} in · {usage.completion.toLocaleString()} out
-            </Pair>
-            <Pair k="Total">{usage.total.toLocaleString()}</Pair>
-          </div>
-        </Section>
-      )}
 
       {status.warnings.length > 0 && (
         <Section title="Noted at load" count={status.warnings.length}>
@@ -292,6 +258,7 @@ export const StatusView: FC = () => {
               <Entry
                 key={server.name}
                 name={server.name}
+                detail={server.error}
                 trailing={`${server.tools} tools`}
               />
             ) : (
@@ -322,28 +289,37 @@ export const StatusView: FC = () => {
         )}
       </Section>
 
-      {status.params.length > 0 && (
-        <Section title="Parameters" count={status.params.length}>
+      <Section title="Parameters" count={status.params.length}>
+        {status.params.length === 0 ? (
+          <Empty>provider defaults (not reported by this adapter)</Empty>
+        ) : (
           <div className="flex flex-col">
             {status.params.map((param) => (
-              <Pair key={param.name} k={param.name}>
-                {param.value ? (
-                  param.value
-                ) : param.default ? (
-                  <>
-                    {param.default}
-                    <span className="text-ink-3 ml-1.5 text-[9px] uppercase">
-                      default
-                    </span>
-                  </>
-                ) : (
-                  "—"
-                )}
-              </Pair>
+              <div key={param.name}>
+                <Pair k={param.name}>
+                  {param.value ? (
+                    param.value
+                  ) : param.default ? (
+                    <>
+                      {param.default}
+                      <span className="text-ink-3 ml-1.5 text-[9px] uppercase">
+                        default
+                      </span>
+                    </>
+                  ) : (
+                    "—"
+                  )}
+                </Pair>
+                {param.enum && param.enum.length > 0 ? (
+                  <p className="text-ink-3 -mt-1 mb-1 text-[10.5px]">
+                    allowed: {param.enum.join(" · ")}
+                  </p>
+                ) : null}
+              </div>
             ))}
           </div>
-        </Section>
-      )}
+        )}
+      </Section>
 
       {status.systemPrompt && (
         <Section

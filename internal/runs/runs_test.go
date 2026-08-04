@@ -2,7 +2,6 @@ package runs
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -92,26 +91,136 @@ func TestLatestSessionSkipsChildSessions(t *testing.T) {
 	}
 }
 
-// Session IDs arrive from user-controlled surfaces (the web API,
-// shell3 ask --resume); a path-traversal id must never escape the store.
+// findMeta returns the session's meta, or false when it no longer exists.
+func findMeta(t *testing.T, st *Store, id string) (Meta, bool) {
+	t.Helper()
+	metas, err := st.ListSessions(0)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	for _, m := range metas {
+		if m.ID == id {
+			return m, true
+		}
+	}
+	return Meta{}, false
+}
+
+// Session IDs arrive from user-controlled surfaces (shell3 ask --resume, the
+// bot's views); a path-traversal id must never leak anything or escape onto
+// the filesystem via job-log paths.
 func TestSessionIDPathTraversalRejected(t *testing.T) {
 	root := t.TempDir()
 	st, err := Open(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Plant a readable messages.jsonl one level above runs/ so an id of ".."
-	// (filepath.Base("..") == "..") would actually find something to leak.
-	if err := os.WriteFile(filepath.Join(root, "messages.jsonl"),
-		[]byte(`{"role":"user","content":"secret"}`+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	for _, id := range []string{"../escape", "..", ".", "a/b", "/abs"} {
 		if msgs, err := st.LoadMessages(id); err != nil || msgs != nil {
-			t.Errorf("LoadMessages(%q) = %v, %v; want nil, nil (mapped to an impossible dir)", id, msgs, err)
+			t.Errorf("LoadMessages(%q) = %v, %v; want nil, nil", id, msgs, err)
 		}
 		if err := st.TouchSession(id); err == nil {
 			t.Errorf("TouchSession(%q): want error, got nil", id)
 		}
+		if p := st.JobLogPath(id, "bg1"); p != "" {
+			t.Errorf("JobLogPath(%q) = %q; want empty", id, p)
+		}
+	}
+}
+
+// A session that never stored a message leaves no trace: ending it deletes
+// its row instead of writing an "ended" record for an empty shell — the
+// pinned cron dispatch parent and console startups would otherwise litter
+// the store with one row per process start.
+func TestEndSessionRemovesEmptySession(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := st.NewSession(Meta{Workdir: "/w", Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.EndSession(id); err != nil {
+		t.Fatalf("EndSession: %v", err)
+	}
+	if _, ok := findMeta(t, st, id); ok {
+		t.Fatal("empty session should be removed")
+	}
+}
+
+// A session with messages ends normally — row kept, status flipped.
+func TestEndSessionKeepsStoredConversation(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := st.NewSession(Meta{Workdir: "/w", Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendMessage(id, llm.Message{Role: llm.RoleUser, Content: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.EndSession(id); err != nil {
+		t.Fatalf("EndSession: %v", err)
+	}
+	m, ok := findMeta(t, st, id)
+	if !ok {
+		t.Fatal("session with messages should survive EndSession")
+	}
+	if m.Status != "ended" {
+		t.Fatalf("status = %q, want ended", m.Status)
+	}
+}
+
+// A message-less session that still holds a job log is NOT empty — a lingering
+// bash_bg's teed output is worth keeping.
+func TestEndSessionKeepsJobLogs(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := st.NewSession(Meta{Workdir: "/w", Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	logPath := st.JobLogPath(id, "bg1")
+	if logPath == "" {
+		t.Fatal("JobLogPath empty")
+	}
+	if err := os.WriteFile(logPath, []byte("out"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.EndSession(id); err != nil {
+		t.Fatalf("EndSession: %v", err)
+	}
+	if _, ok := findMeta(t, st, id); !ok {
+		t.Fatal("session with a job log should survive EndSession")
+	}
+	if _, err := os.Stat(logPath); err != nil {
+		t.Fatalf("job log should survive: %v", err)
+	}
+}
+
+// HasMessages is the cheap "worth listing" probe the /runs renderer uses.
+func TestHasMessages(t *testing.T) {
+	root := t.TempDir()
+	st, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := st.NewSession(Meta{Workdir: "/w", Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.HasMessages(id) {
+		t.Fatal("fresh session must report no messages")
+	}
+	if err := st.AppendMessage(id, llm.Message{Role: llm.RoleUser, Content: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if !st.HasMessages(id) {
+		t.Fatal("session with a stored message must report true")
 	}
 }

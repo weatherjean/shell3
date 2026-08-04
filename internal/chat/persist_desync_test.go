@@ -10,7 +10,7 @@ import (
 
 // A resumed session seeds InitialMessages that are ALREADY on disk. The first
 // post-resume saveHistory must flush only the messages appended since, not
-// re-write the seeded history (which would double messages.jsonl on every
+// re-write the seeded history (which would double the stored transcript on every
 // restart, compounding across restarts).
 func TestSaveHistory_AfterResume_DoesNotReflushSeed(t *testing.T) {
 	st, err := runs.Open(t.TempDir())

@@ -3,127 +3,92 @@
 package webui
 
 import (
-	"bufio"
-	"bytes"
-	"encoding/json"
-	"os"
 	"sort"
-	"strings"
 	"sync"
 	"time"
+
+	"github.com/weatherjean/shell3/internal/runs"
 )
+
+// webSurface namespaces the web front-end's rows in the store's shared
+// threads table, so its ids never cross-resolve with another surface's.
+const webSurface = "web"
 
 // threadIndex is the durable record of every conversation the browser has
 // started: which shell3 session backs it, what it is called, and whether it
 // has been archived.
 //
-// Backed by an append-only JSONL file (the runs-store convention), replayed
-// last-write-wins on load. The in-memory map is authoritative; disk writes are
-// best-effort, so a failed append never loses an in-flight thread.
+// The in-memory map is authoritative for the process; the runs store carries
+// it across restarts (surface "web"). store is resolved per call, not
+// captured once, so a /reload that swaps generations never leaves the index
+// writing to a closed database handle; a nil store (or a failed store call)
+// degrades to memory-only for the rest of the process's life — a lost write
+// loses one thread's durability, never the live conversation.
 type threadIndex struct {
-	path string
-	mu   sync.Mutex
-	m    map[string]*threadRecord
-	f    *os.File
+	store func() *runs.Store
+	mu    sync.Mutex
+	m     map[string]*threadRecord
 }
 
 // threadRecord is one conversation. Title is empty until the user renames it —
 // the interface shows the creation time instead, which says more about an
 // untouched thread than a generic label would.
 type threadRecord struct {
-	ID        string `json:"t"`
-	SessionID string `json:"s"`
-	Title     string `json:"title,omitempty"`
+	ID        string
+	SessionID string
+	Title     string
 	// Preview is the opening of the first thing asked in this thread. It names
 	// the conversation until the user renames it — what was asked identifies a
 	// thread far better than when it started.
-	Preview string `json:"preview,omitempty"`
-	Created string `json:"created,omitempty"`
-	Updated string `json:"updated,omitempty"`
-	// Deleted tombstones a thread: the line stays (the log is append-only) but
-	// the thread is gone from every listing.
-	Deleted bool `json:"deleted,omitempty"`
+	Preview string
+	Created string
+	Updated string
+	// Deleted tombstones a thread: the row stays in the store but the thread
+	// is gone from every listing.
+	Deleted bool
 }
 
-func newThreadIndex(path string) (*threadIndex, error) {
-	ti := &threadIndex{path: path, m: make(map[string]*threadRecord)}
+// newThreadIndex builds the thread index for the web front-end, preloading
+// whatever the store already knows (a previous process's threads). store may
+// be nil (the test harness, a runtime with no config Parts) — that degrades
+// to an empty, memory-only index rather than failing.
+func newThreadIndex(store func() *runs.Store) *threadIndex {
+	if store == nil {
+		store = func() *runs.Store { return nil }
+	}
+	ti := &threadIndex{store: store, m: make(map[string]*threadRecord)}
 
-	if r, err := os.Open(path); err == nil {
-		sc := bufio.NewScanner(r)
-		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		for sc.Scan() {
-			var rec threadRecord
-			// A malformed line (a crash mid-append) is skipped, matching the
-			// torn-tail tolerance below.
-			if json.Unmarshal(sc.Bytes(), &rec) != nil || rec.ID == "" {
-				continue
-			}
-			merged := rec
-			// Later lines patch earlier ones: a rename writes no session id,
-			// so carry forward whatever the previous record knew.
-			if prev, ok := ti.m[rec.ID]; ok {
-				if merged.SessionID == "" {
-					merged.SessionID = prev.SessionID
-				}
-				if merged.Created == "" {
-					merged.Created = prev.Created
-				}
-				if merged.Preview == "" {
-					merged.Preview = prev.Preview
-				}
-			}
-			// Records written before threads carried timestamps still know
-			// their session id, whose runs-store prefix is a creation time.
-			if merged.Created == "" {
-				merged.Created = timeFromSessionID(merged.SessionID)
-			}
-			if merged.Updated == "" {
-				merged.Updated = merged.Created
-			}
-			ti.m[rec.ID] = &merged
+	st := store()
+	if st == nil {
+		return ti
+	}
+	metas, err := st.ThreadListMeta(webSurface)
+	if err != nil {
+		// A read failure just starts empty; nothing durable is lost, and the
+		// next write retries against the store.
+		return ti
+	}
+	for _, m := range metas {
+		ti.m[m.ID] = &threadRecord{
+			ID: m.ID, SessionID: m.SessionID, Title: m.Title, Preview: m.Preview,
+			Created: m.Created, Updated: m.Updated, Deleted: m.Deleted,
 		}
-		r.Close()
-	} else if !os.IsNotExist(err) {
-		return nil, err
 	}
-
-	if err := healTornTail(path); err != nil {
-		return nil, err
-	}
-
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0o644)
-	if err != nil {
-		return nil, err
-	}
-	ti.f = f
-	return ti, nil
+	return ti
 }
 
-// timeFromSessionID recovers a creation time from a runs-store session id
-// ("20260725T181054.874072000-a308418b"). Returns "" when the id has another
-// shape, which just leaves the thread without a timestamp.
-func timeFromSessionID(id string) string {
-	stamp, _, ok := strings.Cut(id, ".")
-	if !ok {
-		return ""
-	}
-	t, err := time.ParseInLocation("20060102T150405", stamp, time.Local)
-	if err != nil {
-		return ""
-	}
-	return t.UTC().Format(time.RFC3339)
-}
-
-// appendLocked writes one record. Caller holds ti.mu.
-func (ti *threadIndex) appendLocked(rec *threadRecord) {
-	if ti.f == nil {
+// persistLocked writes one record to the store. Caller holds ti.mu. Best
+// effort: a failure here is not surfaced, matching every other front-end's
+// thread-index pattern of best-effort persistence.
+func (ti *threadIndex) persistLocked(rec *threadRecord) {
+	st := ti.store()
+	if st == nil {
 		return
 	}
-	if b, err := json.Marshal(rec); err == nil {
-		// A failed append loses one index line, never the conversation; the
-		// thread is rebuilt as unnamed on the next turn.
-		_, _ = ti.f.Write(append(b, '\n'))
-	}
+	_ = st.ThreadUpsertMeta(webSurface, runs.ThreadMeta{
+		ID: rec.ID, SessionID: rec.SessionID, Title: rec.Title, Preview: rec.Preview,
+		Created: rec.Created, Updated: rec.Updated, Deleted: rec.Deleted,
+	})
 }
 
 // record maps threadID to sessionID, creating the thread on first sight and
@@ -140,8 +105,8 @@ func (ti *threadIndex) record(threadID, sessionID, preview string) {
 		rec = &threadRecord{ID: threadID, Created: now}
 		ti.m[threadID] = rec
 	}
-	// Nothing changed but the clock, and the clock is not worth a line per turn
-	// unless the session or a full minute moved.
+	// Nothing changed but the clock, and the clock is not worth a write per
+	// turn unless the session or a full minute moved.
 	unchanged := rec.SessionID == sessionID && rec.Updated != "" &&
 		rec.Updated[:len(rec.Updated)-3] == now[:len(now)-3]
 
@@ -150,12 +115,12 @@ func (ti *threadIndex) record(threadID, sessionID, preview string) {
 	rec.Deleted = false
 	if rec.Preview == "" && preview != "" {
 		rec.Preview = preview
-		unchanged = false // a new preview is worth a line
+		unchanged = false // a new preview is worth a write
 	}
 	if unchanged {
 		return
 	}
-	ti.appendLocked(rec)
+	ti.persistLocked(rec)
 }
 
 // lookup returns the session id backing a thread.
@@ -212,7 +177,7 @@ func (ti *threadIndex) rename(threadID, title string) (threadRecord, bool) {
 		return threadRecord{}, false
 	}
 	rec.Title = title
-	ti.appendLocked(rec)
+	ti.persistLocked(rec)
 	return *rec, true
 }
 
@@ -227,121 +192,6 @@ func (ti *threadIndex) remove(threadID string) bool {
 		return false
 	}
 	rec.Deleted = true
-	ti.appendLocked(rec)
+	ti.persistLocked(rec)
 	return true
-}
-
-func (ti *threadIndex) close() error {
-	ti.mu.Lock()
-	defer ti.mu.Unlock()
-	if ti.f == nil {
-		return nil
-	}
-	err := ti.f.Close()
-	ti.f = nil
-	return err
-}
-
-// healTornTail truncates an unterminated final line (a crash-left partial
-// append) back to the last complete record, so a following O_APPEND write
-// starts on a clean boundary. A file already ending in a newline is untouched.
-func healTornTail(path string) error {
-	f, err := os.OpenFile(path, os.O_RDWR, 0o644)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	if info.Size() == 0 {
-		return nil
-	}
-	last := make([]byte, 1)
-	if _, err := f.ReadAt(last, info.Size()-1); err != nil {
-		return err
-	}
-	if last[0] == '\n' {
-		return nil
-	}
-	data := make([]byte, info.Size())
-	if _, err := f.ReadAt(data, 0); err != nil {
-		return err
-	}
-	return f.Truncate(int64(bytes.LastIndexByte(data, '\n') + 1))
-}
-
-// PruneThreadIndex rewrites the JSONL file at path, dropping every thread
-// whose session no longer exists per sessionExists, and reports how many were
-// dropped. Runs once at startup as the other half of the runs janitor sweep
-// (see runs.Sweep), before newThreadIndex opens the live file.
-//
-// Rewriting also compacts the log: each surviving thread ends up as one line
-// rather than one per update.
-func PruneThreadIndex(path string, sessionExists func(id string) bool) (removed int, err error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 0, nil
-		}
-		return 0, err
-	}
-
-	latest := map[string]threadRecord{}
-	var order []string
-	sc := bufio.NewScanner(bytes.NewReader(b))
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		var rec threadRecord
-		if json.Unmarshal(sc.Bytes(), &rec) != nil || rec.ID == "" {
-			continue
-		}
-		prev, seen := latest[rec.ID]
-		if !seen {
-			order = append(order, rec.ID)
-		} else {
-			if rec.SessionID == "" {
-				rec.SessionID = prev.SessionID
-			}
-			if rec.Created == "" {
-				rec.Created = prev.Created
-			}
-			if rec.Preview == "" {
-				rec.Preview = prev.Preview
-			}
-		}
-		latest[rec.ID] = rec
-	}
-
-	var kept []threadRecord
-	for _, id := range order {
-		rec := latest[id]
-		if rec.Deleted || (rec.SessionID != "" && !sessionExists(rec.SessionID)) {
-			removed++
-			continue
-		}
-		kept = append(kept, rec)
-	}
-	if removed == 0 && len(kept) == len(order) {
-		return 0, nil
-	}
-
-	var buf bytes.Buffer
-	for _, rec := range kept {
-		lb, err := json.Marshal(rec)
-		if err != nil {
-			return 0, err
-		}
-		buf.Write(lb)
-		buf.WriteByte('\n')
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, buf.Bytes(), 0o644); err != nil {
-		return 0, err
-	}
-	return removed, os.Rename(tmp, path)
 }

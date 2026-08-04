@@ -335,8 +335,8 @@ func TestBuild_AlwaysOpensStore(t *testing.T) {
 
 // TestEnvironmentReminder asserts the host Environment standing reminder (no
 // longer part of the system prompt) carries the model, session id, config dir,
-// the JSONL runs layout and the ripgrep search recipe — and none of the retired
-// CLIs/UUID — all wrapped in a <system-reminder> envelope.
+// the database path and the history-tool recall pointer — and none of the
+// retired CLIs/UUID — all wrapped in a <system-reminder> envelope.
 func TestEnvironmentReminder(t *testing.T) {
 	rem := agentsetup.EnvironmentReminder("/c", "/root/.shell3_project/runs", "gpt-x", "sess-42")
 	if !strings.HasPrefix(rem, "<system-reminder>") || !strings.HasSuffix(rem, "</system-reminder>") {
@@ -346,9 +346,9 @@ func TestEnvironmentReminder(t *testing.T) {
 		"- model: gpt-x",
 		"- session id: sess-42",
 		"- config: `/c`",
-		".shell3_project/runs/<id>/messages.jsonl",
-		"rg <terms> .shell3_project/runs",
-		"subagent transcripts are ordinary sessions",
+		".shell3_project/shell3.db",
+		"history tool",
+		".shell3_project/runs/<session>/jobs/<job>.log",
 	} {
 		if !strings.Contains(rem, want) {
 			t.Errorf("Environment reminder missing %q:\n%s", want, rem)

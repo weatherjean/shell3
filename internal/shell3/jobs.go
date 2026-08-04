@@ -741,8 +741,8 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 }
 
 // consumeChildEvents drains one child-session turn's event stream, mirroring
-// it into j.out so the Jobs view can show live progress (the
-// messages.jsonl transcript is not written until the run ends). It returns the
+// it into j.out so the Jobs view can show live progress (the child's stored
+// transcript is not readable until the run ends). It returns the
 // turn's final assistant text and the last error seen (nil for a clean turn).
 // Shared by the subagent's main turn and its follow-up turns.
 func consumeChildEvents(j *bgJob, events <-chan Event) (summary string, runErr error) {
@@ -1031,8 +1031,8 @@ func notifyAgentDone(id, summary, errText string) notify.Notification {
 	return n
 }
 
-// transcript returns the child session's messages.jsonl from the runs store,
-// or "" when unavailable. Works both while the job is active and after it
+// transcript returns the child session's stored transcript from the runs
+// store (JSONL, one llm.Message per line), or "" when unavailable. Works both while the job is active and after it
 // finishes (the job is retained in m.jobs with its childID intact).
 func (m *jobManager) transcript(id string) string {
 	m.mu.Lock()
@@ -1081,8 +1081,8 @@ func (m *jobManager) formatJobList() string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// renderTranscriptText converts a messages.jsonl blob (one llm.Message JSON
-// record per line) into human-readable plain text for the task_status tool.
+// renderTranscriptText converts a stored transcript blob (one llm.Message JSON
+// record per line, as Store.Transcript emits) into human-readable plain text for the task_status tool.
 // System and unparseable lines are skipped. Tool-call messages list the called
 // tool name; tool-result messages show a one-line label so the model knows a
 // result arrived without the full output; assistant and user text is emitted as

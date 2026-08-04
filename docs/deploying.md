@@ -32,13 +32,24 @@ here prevents the machine from sleeping.
 
 ## Reach it from elsewhere
 
-The login is the only thing between whoever finds the URL and a shell,
-so prefer exposure that authenticates in its own right:
+The login is the only thing between whoever finds the URL and a shell, so
+the ranking matters: prefer exposure that never puts the login on the
+public internet at all.
 
-- Tailscale: `tailscale serve 8765` — reachable from your devices only.
-- Cloudflare quick tunnel: `cloudflared tunnel --url http://127.0.0.1:8765`
-  (prints a public https URL; anyone who finds it gets a login page).
-- SSH: `ssh -L 8765:127.0.0.1:8765 host` from the machine you're on.
+1. Tailscale (recommended): `tailscale serve --bg 8765` — https, a stable
+   `https://<machine>.<tailnet>.ts.net` URL, reachable from your devices
+   only, survives reboots on its own. Free for personal use. No service
+   required: `tailscale serve --bg 8765 && shell3 serve` is a complete
+   exposed setup in one line (`--bg` configures and returns).
+2. SSH: `ssh -L 8765:127.0.0.1:8765 host` from the machine you're on.
+3. Public tunnel (last resort): `cloudflared tunnel --url
+   http://127.0.0.1:8765` prints a public https URL — anyone who finds it
+   gets your login page, which is then the entire security boundary. If
+   you go this way, turn on the second factor first (`shell3 boot --totp`):
+   a leaked or guessed password alone then is not a session.
+
+The full serve-as-a-service recipe (Tailscale primary, public tunnel as
+the labeled fallback) is [cookbook/service.md](cookbook/service.md).
 
 If the address is stable, set `web.url` so shell3 knows its public name.
 Plain http past localhost sends the password in clear — always https.

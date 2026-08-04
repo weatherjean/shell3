@@ -37,15 +37,16 @@ that plain http carries the password in clear. And a password is not a reason to
 drop a proxy that authenticates in its own right — see
 [Security](security.md#the-web-interface).
 
-**Exposure is yours.** shell3 starts nothing on your behalf: put it behind a
-reverse proxy, Tailscale, or an SSH forward, and set `web.url` when the
-address is stable — [deploying.md](deploying.md). serve prints a fixed
+**Exposure is yours.** shell3 starts nothing on your behalf: put it behind
+Tailscale (`tailscale serve --bg 8765` — the recommended default), an SSH
+forward, or a reverse proxy, and set `web.url` when the address is stable —
+[deploying.md](deploying.md) has the ranking. serve prints a fixed
 `web.url` at start, so the address you hand out is in the log; from that
 moment the login password is the boundary, and a session is a shell.
 
 **Threads and turns.** Each browser thread is its own session; the
-thread→session map persists in
-`~/.shell3/.shell3_project/web_threads.jsonl`, so threads survive a restart
+thread→session map persists in the runs store
+(`~/.shell3/.shell3_project/shell3.db`), so threads survive a restart
 (sessions the janitor swept start clean). One main-agent turn runs at a time —
 a message sent while a turn is running is refused with a note in the stream
 rather than queued. Background jobs (subagents, `bash_bg`, cron) run
@@ -180,8 +181,10 @@ until you add a vision model. Another asks where the agent's shell should run
 password** — required, 16 characters minimum, with a generated suggestion you
 can accept as-is; it is printed once at the end, so save it. A following step
 offers a **second factor**, printing a QR code to scan with an authenticator
-app; enrolling wires `web.totp_secret` so the login asks for the code. Losing
-that phone is not a lockout, since the secret is a line in `.env` you can
+app; enrolling wires `web.totp_secret` so the login asks for the code.
+Declined it, or lost the phone? `shell3 boot --totp` enrols or resets any
+time (a fresh secret and QR against the existing config); and losing the
+phone is never a lockout, since the secret is a line in `.env` you can
 delete.
 
 boot installs nothing and exposes nothing: it configures shell3 and stops
@@ -275,21 +278,27 @@ timeout; press ctrl+c (SIGINT) to quit while jobs are still running.
 
 ## Reading your history
 
-Conversation history is plain JSONL under the config directory's
-`.shell3_project/runs/`:
+Every session — browser threads, subagent children, cron runs, `shell3 ask`
+— is stored in one SQLite database under the config directory:
+`.shell3_project/shell3.db`. It holds the sessions, their messages, the
+thread indexes, and an FTS5 full-text index over what you and the agent said.
+
+The interface's **Runs** view is the way to read it: every session with tool
+calls, arguments, results and reasoning. The agent reads its own past through
+the [`history` tool](configuration.md#recalling-past-conversations--the-history-tool) — full-text search,
+then the transcript around a hit.
+
+To poke at it yourself, any SQLite client works (the schema is not an API and
+can change between releases):
 
 ```sh
-rg -n "JWT|expiry" ~/.shell3/.shell3_project/runs   # full-text search all sessions
-ls -lt ~/.shell3/.shell3_project/runs/              # sessions, newest first
-cat ~/.shell3/.shell3_project/runs/<id>/meta.json   # one session's metadata
+sqlite3 ~/.shell3/.shell3_project/shell3.db \
+  "SELECT id, last_at FROM sessions ORDER BY last_at DESC LIMIT 10"
 ```
 
-The agent searches its own past the same way (`rg` over the JSONL, via the
-`history` skill); each subagent run has its own stored transcript. The
-interface's **Runs** view reads the same store — every session, including
-subagent children, cron runs and `shell3 ask` sessions, with tool calls,
-arguments, results and reasoning. Old
-sessions are swept at `shell3 serve` startup — see
+A `bash_bg` job's raw output stays a plain file:
+`.shell3_project/runs/<session-id>/jobs/<job-id>.log`. Old sessions are swept
+at `shell3 serve` startup — see
 [`runs_keep_days`](configuration.md#the-runs-janitor--runs_keep_days).
 
 ## Platform support

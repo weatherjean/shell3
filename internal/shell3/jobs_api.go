@@ -80,7 +80,7 @@ func (s *Session) JobOutput(id string) string {
 	return rt.jobs.output(id)
 }
 
-// JobTranscript returns the messages.jsonl contents of a background SUBAGENT
+// JobTranscript returns the stored transcript of a background SUBAGENT
 // job's child session, or "" when the job runtime is unavailable or the job is
 // a command (not a subagent). The Jobs view renders this instead
 // of the plain stdout log when present — see JobOutput for the fallback.

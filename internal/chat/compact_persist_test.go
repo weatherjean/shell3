@@ -10,7 +10,7 @@ import (
 
 // TestSaveHistory_AfterCompaction verifies that saveHistory correctly persists
 // this turn's new user message and assistant reply to the NEW session's
-// messages.jsonl even when maybeCompact has already run and reset sess.messages
+// the store even when maybeCompact has already run and reset sess.messages
 // to a short continuation (persistedLen=2, len(messages)=2 post-compaction).
 //
 // The bug: the old saveHistory used a stale `from` parameter captured before

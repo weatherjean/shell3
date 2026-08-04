@@ -1,8 +1,8 @@
 // Web push: notifications that arrive when the tab is closed.
 //
-// Push needs a secure context, so this works on localhost and over an https
-// tunnel but not over plain http to another machine — the UI says so rather
-// than offering a toggle that silently cannot work.
+// Push needs a secure context, so this works on localhost and over https
+// (Tailscale, a TLS proxy) but not over plain http to another machine — the
+// UI says so rather than offering a toggle that silently cannot work.
 
 export type PushState =
   | "unsupported" // no service worker / push API, or an insecure origin

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -28,6 +29,7 @@ type bootFlags struct {
 	visionSet                    bool // --vision passed explicitly (skips the form's confirm)
 	force                        bool
 	show                         bool // print the post-boot summary and exit
+	totp                         bool // enrol/reset the second factor and exit
 }
 
 func newBootCommand() *cobra.Command {
@@ -41,6 +43,9 @@ func newBootCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if f.show {
 				return showBootSuccess()
+			}
+			if f.totp {
+				return runTOTPEnrol()
 			}
 			f.visionSet = cmd.Flags().Changed("vision")
 			return runBoot(f)
@@ -57,6 +62,7 @@ func newBootCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&f.vision, "vision", true, "Model can see images (wires media.describe to it and enables the media tool)")
 	cmd.Flags().BoolVar(&f.force, "force", false, "Overwrite an existing ~/.shell3 config (shell3.yaml, agent.md, ...)")
 	cmd.Flags().BoolVar(&f.show, "show", false, "Print the post-boot summary for the existing config and exit (changes nothing)")
+	cmd.Flags().BoolVar(&f.totp, "totp", false, "Enrol or reset the authenticator second factor for the existing config and exit")
 	return cmd
 }
 
@@ -444,7 +450,14 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool) {
 	w("shell3 serve")
 	w("```")
 	w("")
-	w("Then open <http://127.0.0.1:8765>.")
+	w("Then open <http://127.0.0.1:8765>. To have it on your phone too,")
+	w("chain [Tailscale](https://tailscale.com) (free) in front:")
+	w("")
+	w("```")
+	w("tailscale serve --bg 8765 && shell3 serve")
+	w("```")
+	w("")
+	w("— same server, plus a stable https URL on your tailnet.")
 
 	w("")
 	w("**Prefer the terminal?** `shell3 ask \"hi\"` drives the same agent with")
@@ -455,8 +468,34 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool) {
 	w("## Keeping it up, and reaching it")
 	w("")
 	w("`shell3 serve` binds loopback and asks for the password you just set.")
-	w("Running it as a service and exposing it beyond this machine are yours")
-	w("to set up — see `docs/deploying.md` in the repo, or ask the agent.")
+	if runtime.GOOS == "linux" {
+		w("One paste makes that permanent — a service on your tailnet:")
+		w("")
+		w("```bash")
+		w("mkdir -p ~/.config/systemd/user && cat > ~/.config/systemd/user/shell3.service <<'EOF'")
+		w("[Unit]")
+		w("Description=shell3")
+		w("[Service]")
+		w("ExecStart=%%h/.local/bin/shell3 serve")
+		w("Restart=always")
+		w("RestartSec=5")
+		w("[Install]")
+		w("WantedBy=default.target")
+		w("EOF")
+		w(`systemctl --user enable --now shell3 && loginctl enable-linger "$USER" && tailscale serve --bg 8765`)
+		w("```")
+		w("")
+		w("`tailscale serve` prints your stable https URL — put it in `web.url`.")
+		w("More (other init systems): `docs/deploying.md`, or ask the agent.")
+	} else {
+		w("Running it as a service and exposing it beyond this machine are yours")
+		w("to set up — see `docs/deploying.md` in the repo, or ask the agent.")
+	}
+	w("")
+	w("**Need it from a device you can't put on the tailnet?** A public quick")
+	w("tunnel works from anywhere: `cloudflared tunnel --url http://127.0.0.1:8765`.")
+	w("That URL is on the open internet and the login is the whole boundary —")
+	w("turn on the second factor first: `shell3 boot --totp`.")
 
 	fmt.Println()
 	fmt.Print(cli.RenderMarkdown(b.String()))

@@ -74,8 +74,8 @@ type Config struct {
 	// purely in-memory.
 	Store *runs.Store
 	// RunsDir is the project's .shell3_project/runs directory path, shown in
-	// the system prompt's Environment section (history is searched with rg
-	// over it).
+	// the system prompt's Environment section (job logs live under it; past
+	// conversations are recalled with the history tool, backed by the store).
 	RunsDir string
 	// Personality is the loaded persona (system prompt, allowed tools).
 	Personality persona.Persona
@@ -193,6 +193,7 @@ func NewHandlers() map[string]ToolHandler {
 		EditHandler{},
 		ReadHandler{},
 		ListFilesHandler{},
+		HistoryHandler{},
 	}
 	m := make(map[string]ToolHandler, len(handlers))
 	for _, h := range handlers {
