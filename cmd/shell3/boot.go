@@ -29,7 +29,6 @@ type bootFlags struct {
 	visionSet                    bool // --vision passed explicitly (skips the form's confirm)
 	force                        bool
 	show                         bool // print the post-boot summary and exit
-	service                      bool // (re)install + restart the systemd unit and exit
 }
 
 func newBootCommand() *cobra.Command {
@@ -43,9 +42,6 @@ func newBootCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if f.show {
 				return showBootSuccess()
-			}
-			if f.service {
-				return reinstallService()
 			}
 			f.visionSet = cmd.Flags().Changed("vision")
 			return runBoot(f)
@@ -62,7 +58,6 @@ func newBootCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&f.vision, "vision", true, "Model can see images (wires media.describe to it and enables the media tool)")
 	cmd.Flags().BoolVar(&f.force, "force", false, "Overwrite an existing ~/.shell3 config (shell3.yaml, agent.md, ...)")
 	cmd.Flags().BoolVar(&f.show, "show", false, "Print the post-boot summary for the existing config and exit (changes nothing)")
-	cmd.Flags().BoolVar(&f.service, "service", false, "(Re)install and restart the systemd user service for the existing config, then exit")
 	return cmd
 }
 
@@ -128,13 +123,8 @@ func runBoot(f *bootFlags) error {
 		fmt.Printf("note: kept the existing %s in %s — edit that file to change it\n", k, envPath)
 	}
 
-	// Offer to install shell3 as a systemd user service (Linux + TTY only).
-	// The unit is startable as soon as the config exists, since boot has just
-	// written the password serve requires.
-	svc := offerSystemdService(tty, dir, home, true)
-
 	printWebCredentials(webPassword, totpSecret, envPath)
-	printBootSuccess(dir, cfgPath, envPath, a.proxy != "", wireTunnel, svc)
+	printBootSuccess(dir, cfgPath, envPath, a.proxy != "", wireTunnel)
 	return nil
 }
 
@@ -163,10 +153,6 @@ func showBootSuccess() error {
 			break
 		}
 	}
-	svc := serviceNotOffered
-	if _, err := os.Stat(filepath.Join(home, ".config", "systemd", "user", serviceUnitName)); err == nil {
-		svc = serviceEnabled
-	}
 	tunnelWired := false
 	for _, line := range strings.Split(string(yaml), "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "tunnel:") {
@@ -175,7 +161,7 @@ func showBootSuccess() error {
 		}
 	}
 
-	printBootSuccess(dir, cfgPath, filepath.Join(dir, ".env"), proxyWired, tunnelWired, svc)
+	printBootSuccess(dir, cfgPath, filepath.Join(dir, ".env"), proxyWired, tunnelWired)
 	return nil
 }
 
@@ -435,7 +421,7 @@ func mergeEnv(existing string, kv [][2]string) (merged string, kept []string) {
 	return b.String(), kept
 }
 
-func printBootSuccess(dir, cfgPath, envPath string, proxyWired, tunnelWired bool, svc serviceState) {
+func printBootSuccess(dir, cfgPath, envPath string, proxyWired, tunnelWired bool) {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format+"\n", args...) }
 
@@ -463,42 +449,15 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired, tunnelWired bool
 	w("contact routes each project's work to its manager. Reload after adding one.")
 	w("")
 
-	switch svc {
-	case serviceEnabled:
-		w("## Run it")
-		w("")
-		w("Installed as a **systemd user service** — running now and on every boot.")
-		w("")
-		w("**Open <http://127.0.0.1:8765>** and log in with the password you just set.")
-		w("")
-		w("```")
-		w("systemctl --user status %s   # state + recent log", serviceUnitName)
-		w("journalctl --user -u %s -f   # follow the log", serviceUnitName)
-		w("```")
-		w("")
-		w("**Sleep caveat:** a user service can't stop the machine from")
-		w("suspending. On a laptop, the bot is gone while the lid is closed —")
-		w("disable sleep (GNOME: Settings → Power; or logind's")
-		w("`HandleLidSwitch=ignore`) or host shell3 on an always-on box.")
-	case serviceFailed:
-		w("## Run it")
-		w("")
-		w("Service setup didn't finish (see the warning above) — start manually:")
-		w("")
-		w("```")
-		w("shell3 serve")
-		w("```")
-	default:
-		w("## Run it")
-		w("")
-		w("shell3 lives in your browser:")
-		w("")
-		w("```")
-		w("shell3 serve")
-		w("```")
-		w("")
-		w("Then open <http://127.0.0.1:8765>.")
-	}
+	w("## Run it")
+	w("")
+	w("shell3 lives in your browser:")
+	w("")
+	w("```")
+	w("shell3 serve")
+	w("```")
+	w("")
+	w("Then open <http://127.0.0.1:8765>.")
 
 	w("")
 	w("**Prefer the terminal?** `shell3 ask \"hi\"` drives the same agent with")
@@ -511,8 +470,8 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired, tunnelWired bool
 	if tunnelWired {
 		w("`web.tunnel` is wired: every `shell3 serve` start opens a cloudflared")
 		w("quick tunnel — **`shell3 url`** prints the public https URL to open on")
-		w("your phone (it changes on each restart; also in the serve output,")
-		w("`journalctl --user -u %s`, and `~/.shell3/tunnel.log`).", serviceUnitName)
+		w("your phone (it changes on each restart; also in the serve output and")
+		w("`~/.shell3/tunnel.log`).")
 		w("For a fixed address set `web.url`.")
 		w("")
 		w("Behind that URL is your login — and a shell on this machine. An")

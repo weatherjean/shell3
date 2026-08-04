@@ -146,7 +146,6 @@ func downloadCloudflared() error {
 	fmt.Printf("cloudflared installed to %s\n", dest)
 	if !strings.Contains(":"+os.Getenv("PATH")+":", ":"+binDir+":") {
 		fmt.Printf("note: %s is not on your PATH — add it so `cloudflared` resolves in your shell.\n", binDir)
-		fmt.Println("(the systemd unit boot writes already includes it)")
 	}
 	return nil
 }
