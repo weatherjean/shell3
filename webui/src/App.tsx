@@ -395,9 +395,7 @@ const Sidebar: FC<{
               shell3
             </h1>
           </div>
-          <p className="text-ink-3 mt-1.5 font-mono text-[9.5px]">
-            run log · {live ? `${agent.name} · ${agent.model}` : "mock backend"}
-          </p>
+          <p className="text-ink-3 mt-1.5 font-mono text-[9.5px]">{agent.model}</p>
         </div>
       )}
 
