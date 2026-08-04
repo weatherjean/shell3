@@ -49,7 +49,8 @@ func (s *Store) Close() error {
 }
 
 // DBPath returns the on-disk path of the store's database, for read-only
-// access by external tools (the history skill's sqlite3 queries).
+// inspection by external tools. The schema is not an API: it changes without
+// ceremony (see schemaVersion), so nothing in shell3 should read it this way.
 func (s *Store) DBPath() string { return filepath.Join(s.root, DBFile) }
 
 // schemaVersion is stamped into the database via `PRAGMA user_version` once

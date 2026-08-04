@@ -116,11 +116,14 @@ func newServeCommand() *cobra.Command {
 				workDir = resolved
 			}
 
-			// Runs janitor: start-time only. Sweeps runs/<id>/ dirs past
-			// runs_keep_days (0 = keep forever) and drops thread-index rows
-			// (every surface, "web" included) pointing at sessions that no
-			// longer exist. Must run before the server opens the store for the
-			// live process.
+			// Runs janitor: start-time only. Deletes sessions whose last
+			// activity is past runs_keep_days (0 = keep forever) — rows, FTS
+			// entries, job-log dirs — and drops thread-index rows (every
+			// surface, "web" included) pointing at sessions that no longer
+			// exist. Runs on its own connection: openRuntime has already
+			// opened the runtime's store above, so this is a second connection
+			// to the same database, not a handoff. Before the server listens,
+			// so a browser never sees rows the sweep is about to remove.
 			runsRoot := rt.Parts().RunsRoot()
 			removedRuns, threadsDropped, err := runs.Sweep(runsRoot,
 				time.Duration(rt.Parts().RunsKeepDays())*24*time.Hour, time.Now())

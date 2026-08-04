@@ -364,7 +364,8 @@ deletes sessions whose `last_at` is past the cutoff — rows, FTS entries,
 thread entries, and job-log dirs together — plus empty crash leftovers and
 orphaned `runs/<id>/` dirs (pre-database leftovers), printing `janitor:
 removed N runs, M thread entries` (silent when both are zero). SQL in
-`runs.Sweep`, on its own connection, before the server opens the live store.
+`runs.Sweep`, on its own connection (the runtime's store is already open by
+then — the sweep does not need it closed), before the server listens.
 
 `shell3 boot` scaffolds the config tree (an interactive form: model, context
 budget, whether the model has vision — which wires `media.describe` + the media
