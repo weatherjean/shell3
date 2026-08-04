@@ -108,5 +108,4 @@ const globalGitignoreAddition = `# shell3 — never commit these even in a dotfi
 shell3.log
 shell3.log.*
 proxy-*.log
-tunnel.log
 `

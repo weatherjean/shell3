@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -98,14 +97,10 @@ func runBoot(f *bootFlags) error {
 
 	envPairs := append([][2]string{{envKey, a.key}}, webEnvPairs(webPassword, totpSecret)...)
 
-	// Ask before rendering so the answer lands in the scaffolded config;
-	// installs cloudflared when needed (opt-in, no sudo, failures non-fatal).
-	wireTunnel := askTunnel(tty)
-
 	if err := scaffold.RenderBaseConfig(dir, scaffold.Values{
 		Name: a.name, BaseURL: a.url, EnvKey: envKey, Model: a.model, Proxy: a.proxy,
 		ContextWindow: a.ctxWindow, CompactAt: a.compactAt, WorkDir: a.workDir,
-		Vision: a.vision, Tunnel: wireTunnel, TOTP: totpSecret != "",
+		Vision: a.vision, TOTP: totpSecret != "",
 	}, f.force); err != nil {
 		return err
 	}
@@ -124,7 +119,7 @@ func runBoot(f *bootFlags) error {
 	}
 
 	printWebCredentials(webPassword, totpSecret, envPath)
-	printBootSuccess(dir, cfgPath, envPath, a.proxy != "", wireTunnel)
+	printBootSuccess(dir, cfgPath, envPath, a.proxy != "")
 	return nil
 }
 
@@ -153,15 +148,7 @@ func showBootSuccess() error {
 			break
 		}
 	}
-	tunnelWired := false
-	for _, line := range strings.Split(string(yaml), "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "tunnel:") {
-			tunnelWired = true
-			break
-		}
-	}
-
-	printBootSuccess(dir, cfgPath, filepath.Join(dir, ".env"), proxyWired, tunnelWired)
+	printBootSuccess(dir, cfgPath, filepath.Join(dir, ".env"), proxyWired)
 	return nil
 }
 
@@ -421,7 +408,7 @@ func mergeEnv(existing string, kv [][2]string) (merged string, kept []string) {
 	return b.String(), kept
 }
 
-func printBootSuccess(dir, cfgPath, envPath string, proxyWired, tunnelWired bool) {
+func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool) {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format+"\n", args...) }
 
@@ -467,31 +454,10 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired, tunnelWired bool
 	w("")
 	w("## Reaching it from elsewhere")
 	w("")
-	if tunnelWired {
-		w("`web.tunnel` is wired: every `shell3 serve` start opens a cloudflared")
-		w("quick tunnel — **`shell3 url`** prints the public https URL to open on")
-		w("your phone (it changes on each restart; also in the serve output and")
-		w("`~/.shell3/tunnel.log`).")
-		w("For a fixed address set `web.url`.")
-		w("")
-		w("Behind that URL is your login — and a shell on this machine. An")
-		w("authenticated proxy in front of it is still worth having.")
-	} else {
-		w("`shell3 serve` binds loopback and asks for the password you just set. To")
-		w("use it from your phone, give it a public https address — a **cloudflared**")
-		w("quick tunnel (free, no account) is the easy path. Remember what is behind")
-		w("that login: a session is a shell on this machine, so an authenticated")
-		w("proxy in front of it is still worth having.")
-		if _, err := exec.LookPath("cloudflared"); err != nil {
-			w("")
-			w("`cloudflared` is **not on PATH** here — install it")
-			w("(<https://github.com/cloudflare/cloudflared>), or use another tunnel")
-			w("or a fixed address: `web.tunnel` / `web.url` in `shell3.yaml`.")
-		} else {
-			w("")
-			w("Set `web.tunnel` (or a fixed `web.url`) in `shell3.yaml`.")
-		}
-	}
+	w("`shell3 serve` binds loopback and asks for the password you just set.")
+	w("Exposing it beyond this machine is yours to set up — a reverse proxy,")
+	w("Tailscale, or SSH port forwarding all work; set a fixed `web.url` in")
+	w("`shell3.yaml` once you have one. See the deployment docs for options.")
 
 	fmt.Println()
 	fmt.Print(cli.RenderMarkdown(b.String()))

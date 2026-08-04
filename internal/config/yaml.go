@@ -42,7 +42,6 @@ type yamlWeb struct {
 	WorkDir    string `yaml:"workdir"`
 	Addr       string `yaml:"addr"`
 	URL        string `yaml:"url"`
-	Tunnel     string `yaml:"tunnel"`
 	Password   string `yaml:"password"`
 	TOTPSecret string `yaml:"totp_secret"`
 }
@@ -150,7 +149,7 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 		})
 	}
 	if wc := f.Web; wc != nil {
-		c.web = WebConfig{WorkDir: wc.WorkDir, Addr: wc.Addr, URL: wc.URL, Tunnel: wc.Tunnel, Password: wc.Password,
+		c.web = WebConfig{WorkDir: wc.WorkDir, Addr: wc.Addr, URL: wc.URL, Password: wc.Password,
 			TOTPSecret: wc.TOTPSecret}
 	}
 	mcpNames := make([]string, 0, len(f.MCP))

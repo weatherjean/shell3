@@ -91,14 +91,12 @@ type Subagent struct {
 }
 
 // WebConfig is the parsed `web:` block: where the agent's shell runs, and how
-// the interface is served. Tunnel, if set, is a shell command spawned at
-// startup ({addr} replaced by Addr) whose output is scanned for a public https
-// URL; URL, if set, is the fixed public address and wins over a scanned one.
+// the interface is served. URL, if set, is the fixed public address to
+// announce; exposing the interface beyond that is the operator's own concern.
 type WebConfig struct {
 	WorkDir string
 	Addr    string
 	URL     string
-	Tunnel  string
 	// Password gates the whole interface. Empty is a `shell3 serve` refusal
 	// rather than a load error: `shell3 ask` serves nothing and must stay
 	// usable, so a config with no password still loads.

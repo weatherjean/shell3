@@ -72,13 +72,14 @@ func weakPasswordWarning(web shell3.WebConfig) string {
 }
 
 // cleartextWarning flags a network-facing bind with no TLS, where the password
-// and the session cookie travel in clear. A tunnel (https) is the usual answer.
+// and the session cookie travel in clear. Putting TLS in front (a reverse
+// proxy, a fixed web.url behind one) is the usual answer.
 func cleartextWarning(addr string) string {
 	if isLoopbackBind(addr) {
 		return ""
 	}
 	return "  warning: this address faces the network over plain http — the password and " +
-		"session cookie cross it in clear. Use a tunnel (https) or a TLS-terminating proxy"
+		"session cookie cross it in clear. Put a TLS-terminating proxy in front"
 }
 
 // newServeCommand builds `shell3 serve` — the web interface, and the only
@@ -88,8 +89,7 @@ func cleartextWarning(addr string) string {
 // TOTP when configured), but a login is a shell, so exposing it still argues
 // for a proxy that authenticates in its own right.
 func newServeCommand() *cobra.Command {
-	var configDir, addr, tunnel string
-	var noTunnel bool
+	var configDir, addr string
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Run the agent and serve the web interface",
@@ -191,31 +191,12 @@ func newServeCommand() *cobra.Command {
 				fmt.Printf("  note: password only. Set %s in .env for a second factor\n", envWebTOTP)
 			}
 
-			// An optional tunnel gives the interface a public https URL. The
-			// command is spawned detached and its first https URL is printed
-			// once it actually serves.
-			//
-			// A public URL puts a shell on the internet behind one password, so
+			// A fixed web.url announces the interface's public address. A
+			// public URL puts a shell on the internet behind one password, so
 			// say what that means at the moment it becomes reachable.
 			web := rt.Web()
-			tunnelCmd := web.Tunnel
-			if tunnel != "" {
-				tunnelCmd = tunnel
-			}
-			if noTunnel {
-				tunnelCmd = ""
-			}
-			if tunnelCmd != "" {
-				fmt.Println("  note: a tunnel makes this reachable from the internet. The login " +
-					"password is then the boundary, and a session is a shell — proxy-level auth " +
-					"(Cloudflare Access, Tailscale) is still worth having in front")
-			}
-			announcePublicURL(web.URL, tunnelCmd, addr, resolved, func(url string, serving bool) {
-				if serving {
-					fmt.Printf("public URL: %s\n", url)
-					return
-				}
-				fmt.Printf("public URL: %s (not answering yet — see tunnel.log)\n", url)
+			announcePublicURL(web.URL, func(url string, serving bool) {
+				fmt.Printf("public URL: %s\n", url)
 			})
 
 			return startServer(ctx, addr, srv.Handler())
@@ -224,19 +205,8 @@ func newServeCommand() *cobra.Command {
 	addConfigFlag(cmd, &configDir)
 	cmd.Flags().StringVar(&addr, "addr", "",
 		"Listen address (default: web.addr, else 127.0.0.1:8765)")
-	cmd.Flags().StringVar(&tunnel, "tunnel", "",
-		"Tunnel command to expose the interface ({addr} is substituted); "+
-			"empty string uses web.tunnel. Pass the flag with no value to use the "+
-			"cloudflared quick tunnel")
-	cmd.Flags().Lookup("tunnel").NoOptDefVal = defaultTunnelCommand
-	cmd.Flags().BoolVar(&noTunnel, "no-tunnel", false,
-		"Ignore web.tunnel and stay local")
 	return cmd
 }
-
-// defaultTunnelCommand is what `--tunnel` with no value runs: a cloudflared
-// quick tunnel, which needs no account and prints its https URL on startup.
-const defaultTunnelCommand = "cloudflared tunnel --url http://{addr}"
 
 // startServer serves h until ctx ends, then shuts down gracefully. Streaming
 // endpoints hold connections open, so the drain window is short and the

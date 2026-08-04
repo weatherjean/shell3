@@ -29,7 +29,6 @@ const fullYAML = `models:
 web:
   workdir: /tmp/agent
   addr: 127.0.0.1:8765
-  tunnel: cloudflared tunnel --url http://{addr}
 mcp:
   linear:
     url: https://mcp.linear.app/mcp

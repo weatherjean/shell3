@@ -91,17 +91,15 @@ models:
 # the key from .env and restart.
 #
 # To reach it from elsewhere:
-#   tunnel: a command spawned at start ({addr} = the listen address) whose
-#           printed https URL is picked up (see ~/.shell3/tunnel.log).
-#   url:    a fixed https address you run yourself; overrides tunnel.
-# A tunnel puts a shell on the internet behind this password. Proxy-level auth
-# (Cloudflare Access, Tailscale) in front of it is still worth having.
+#   url: a fixed https address you run yourself (a reverse proxy, Tailscale,
+#        SSH port forwarding, ...) — exposing the interface beyond this machine is
+#        yours to set up. See the deployment docs for options.
 web:
   workdir: {{.WorkDir | yamlstr}}
   addr: 127.0.0.1:8765
   password: env:SHELL3_WEB_PASSWORD
   {{if .TOTP}}totp_secret: env:SHELL3_WEB_TOTP_SECRET{{else}}# totp_secret: env:SHELL3_WEB_TOTP_SECRET{{end}}
-  {{if .Tunnel}}tunnel: "cloudflared tunnel --url http://{addr}"{{else}}# tunnel: "cloudflared tunnel --url http://{addr}"{{end}}
+  # url: https://shell3.example.com
 
 # runs_keep_days: how long a finished session's runs/<id>/ dir is kept before
 # `shell3 serve` sweeps it at startup; 0 keeps everything forever (default 30).

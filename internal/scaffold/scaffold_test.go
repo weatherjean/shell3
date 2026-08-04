@@ -36,7 +36,7 @@ func TestRenderBaseConfig(t *testing.T) {
 		"api_key: env:MAIN_API_KEY",
 		`model: "kimi-k2.6"`,
 		`# run_proxy: "npx`,
-		`tunnel: "cloudflared tunnel --url http://{addr}"`,
+		"# url: https://shell3.example.com",
 	} {
 		if !strings.Contains(string(cfg), want) {
 			t.Errorf("shell3.yaml missing %q", want)
@@ -45,10 +45,9 @@ func TestRenderBaseConfig(t *testing.T) {
 	if strings.Contains(string(cfg), "{{") {
 		t.Errorf("shell3.yaml still contains an unrendered template delimiter")
 	}
-	// TOTP and Tunnel default off: both lines stay commented hints.
+	// TOTP defaults off: the line stays a commented hint.
 	for _, want := range []string{
 		"# totp_secret: env:SHELL3_WEB_TOTP_SECRET",
-		`# tunnel: "cloudflared tunnel --url http://{addr}"`,
 	} {
 		if !strings.Contains(string(cfg), want) {
 			t.Errorf("shell3.yaml missing commented hint %q", want)
@@ -86,13 +85,13 @@ func TestRenderBaseConfig(t *testing.T) {
 	}
 }
 
-// TestRenderBaseConfigTOTPAndTunnel verifies enrolment answers become live
-// config: enrolled TOTP and an accepted tunnel must render uncommented, or
-// the secret sits unused in .env and the login never asks for a code.
-func TestRenderBaseConfigTOTPAndTunnel(t *testing.T) {
+// TestRenderBaseConfigTOTP verifies an enrolment answer becomes live config:
+// enrolled TOTP must render uncommented, or the secret sits unused in .env
+// and the login never asks for a code.
+func TestRenderBaseConfigTOTP(t *testing.T) {
 	dir := t.TempDir()
 	v := Values{Name: "main", BaseURL: "http://localhost:1/v1", EnvKey: "K", Model: "m",
-		TOTP: true, Tunnel: true}
+		TOTP: true}
 	if err := RenderBaseConfig(dir, v, false); err != nil {
 		t.Fatalf("RenderBaseConfig: %v", err)
 	}
@@ -102,7 +101,6 @@ func TestRenderBaseConfigTOTPAndTunnel(t *testing.T) {
 	}
 	for _, want := range []string{
 		"\n  totp_secret: env:SHELL3_WEB_TOTP_SECRET",
-		"\n  tunnel: \"cloudflared tunnel --url http://{addr}\"",
 	} {
 		if !strings.Contains(string(cfg), want) {
 			t.Errorf("shell3.yaml missing live line %q", want)
