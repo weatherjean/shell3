@@ -201,9 +201,9 @@ func TestSession_ErrorPath(t *testing.T) {
 }
 
 // TestSession_Close_ReturnsEndSessionError verifies Close surfaces the store's
-// EndSession error instead of always returning nil. The store's database is
-// closed before Close runs, forcing EndSession to fail; front-ends'
-// `if err := sess.Close(); err != nil` must then see a non-nil error.
+// EndSession error instead of always returning nil. The run's meta.json is
+// removed before Close runs, forcing EndSession (which reads meta) to fail;
+// front-ends' `if err := sess.Close(); err != nil` must then see a non-nil error.
 func TestSession_Close_ReturnsEndSessionError(t *testing.T) {
 	root := t.TempDir()
 	st, err := runs.Open(root)
@@ -213,13 +213,131 @@ func TestSession_Close_ReturnsEndSessionError(t *testing.T) {
 	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "x"}}})
 	s := newTestSession(t, client, chat.Config{Store: st})
 
-	// Close the store's database so EndSession fails when Close runs.
-	if err := st.Close(); err != nil {
-		t.Fatalf("close store: %v", err)
+	// Delete the run's meta.json so EndSession (which reads meta) fails when Close
+	// runs; front-ends' `if err := sess.Close(); err != nil` must then see it.
+	if err := os.RemoveAll(filepath.Join(root, "runs", s.sess.ID())); err != nil {
+		t.Fatalf("remove run dir: %v", err)
 	}
 	if err := s.Close(); err == nil {
 		t.Fatal("Close returned nil; expected the EndSession error to be surfaced")
 	}
+}
+
+// TestSession_Compact_Delta pins the manual /compact path end to end at the
+// shell3 layer: a compactable history is summarised (one quiet fakellm call)
+// and the reported token estimates shrink.
+func TestSession_Compact_Delta(t *testing.T) {
+	client := fakellm.New(
+		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "SUMMARY of prior work"}}},
+	)
+	s := newTestSession(t, client, chat.Config{})
+	defer s.Close()
+
+	// Seed a large history directly: many chunky turns so the head dwarfs the
+	// preserved tail.
+	big := strings.Repeat("x", 2000)
+	msgs := make([]llm.Message, 0, 40)
+	for i := 0; i < 20; i++ {
+		msgs = append(msgs,
+			llm.Message{Role: llm.RoleUser, Content: big},
+			llm.Message{Role: llm.RoleAssistant, Content: big},
+		)
+	}
+	s.sess.SetMessages(msgs)
+
+	before, after, err := s.Compact(context.Background())
+	if err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	if after <= 0 || before <= after {
+		t.Fatalf("want before > after > 0, got before=%d after=%d", before, after)
+	}
+
+	// A fresh session has nothing to compact.
+	s.sess.SetMessages([]llm.Message{{Role: llm.RoleUser, Content: "hi"}})
+	if _, _, err := s.Compact(context.Background()); !errors.Is(err, chat.ErrNothingToCompact) {
+		t.Fatalf("Compact on tiny history: want ErrNothingToCompact, got %v", err)
+	}
+}
+
+// TestSession_Compact_CloseCancelsAndJoins pins the teardown contract: an
+// in-flight compaction registers turnCancel/turnDone like a turn, so Close
+// cancels the LLM call and joins before ending the store session — never
+// racing compactInto's store roll.
+func TestSession_Compact_CloseCancelsAndJoins(t *testing.T) {
+	client := &blockingClient{entered: make(chan struct{}), returned: make(chan struct{})}
+	s := newTestSession(t, client, chat.Config{})
+
+	big := strings.Repeat("x", 2000)
+	msgs := make([]llm.Message, 0, 40)
+	for i := 0; i < 20; i++ {
+		msgs = append(msgs,
+			llm.Message{Role: llm.RoleUser, Content: big},
+			llm.Message{Role: llm.RoleAssistant, Content: big},
+		)
+	}
+	s.sess.SetMessages(msgs)
+
+	compactErr := make(chan error, 1)
+	go func() {
+		_, _, err := s.Compact(context.Background())
+		compactErr <- err
+	}()
+	<-client.entered // the summarisation call is now in flight
+
+	// Close must cancel the compaction's context and join it before returning.
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	select {
+	case <-client.returned:
+	default:
+		t.Fatal("Close returned while the compaction LLM call was still in flight")
+	}
+	if err := <-compactErr; err == nil {
+		t.Fatal("cancelled compaction should report an error, got nil")
+	}
+	if len(s.sess.Messages()) != len(msgs) {
+		t.Fatal("a cancelled compaction must leave history untouched")
+	}
+}
+
+// TestSession_Compact_WakesStrandedNotice pins the unwind contract Compact
+// shares with Send: a notice queued while the busy gate was held must re-emit
+// a Wake when the gate clears, or an unattended host never delivers it.
+func TestSession_Compact_WakesStrandedNotice(t *testing.T) {
+	client := &blockingClient{entered: make(chan struct{}), returned: make(chan struct{})}
+	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: client, ModeLabel: "code", AgentNames: []string{"code"}} })
+	s, err := rt.Session(SessionOpts{})
+	if err != nil {
+		t.Fatalf("session: %v", err)
+	}
+
+	big := strings.Repeat("x", 2000)
+	msgs := make([]llm.Message, 0, 40)
+	for i := 0; i < 20; i++ {
+		msgs = append(msgs,
+			llm.Message{Role: llm.RoleUser, Content: big},
+			llm.Message{Role: llm.RoleAssistant, Content: big},
+		)
+	}
+	s.sess.SetMessages(msgs)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	compactDone := make(chan struct{})
+	go func() {
+		_, _, _ = s.Compact(ctx)
+		close(compactDone)
+	}()
+	<-client.entered
+	// A completion notice lands mid-compaction; its own Wake (if any) would
+	// bounce off the busy gate.
+	s.sess.InterjectNotice("bg1 finished mid-compaction")
+	cancel() // end the compaction
+	<-compactDone
+
+	// Compact's unwind must have re-emitted a Wake for the queued notice.
+	waitForWake(t, rt, s)
 }
 
 func TestAuditSink_EndStatusReflectsError(t *testing.T) {
@@ -658,6 +776,9 @@ func TestSession_BusyEnforcement(t *testing.T) {
 	if err := s.SwitchAgent("any"); !errors.Is(err, ErrBusy) {
 		t.Fatalf("SwitchAgent while busy: want ErrBusy, got %v", err)
 	}
+	if _, _, err := s.Compact(context.Background()); !errors.Is(err, ErrBusy) {
+		t.Fatalf("Compact while busy: want ErrBusy, got %v", err)
+	}
 	if err := s.SetParam("reasoning_effort", "low"); !errors.Is(err, ErrBusy) {
 		t.Fatalf("SetParam while busy: want ErrBusy, got %v", err)
 	}
@@ -666,7 +787,7 @@ func TestSession_BusyEnforcement(t *testing.T) {
 	cancel()
 	for range out {
 	}
-	if err := s.SetParam("reasoning_effort", "low"); errors.Is(err, ErrBusy) {
+	if _, _, err := s.Compact(context.Background()); errors.Is(err, ErrBusy) {
 		t.Fatal("the busy gate did not clear after the turn drained")
 	}
 }

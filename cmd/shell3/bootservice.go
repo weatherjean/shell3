@@ -12,7 +12,6 @@ import (
 
 	huh "charm.land/huh/v2"
 
-	"github.com/weatherjean/shell3/internal/config"
 	"github.com/weatherjean/shell3/internal/paths"
 )
 
@@ -39,13 +38,13 @@ func systemdAvailable() bool {
 
 const serviceUnitName = "shell3.service"
 
-// serviceUnit renders the systemd user unit for `shell3 telegram`.
+// serviceUnit renders the systemd user unit for `shell3 serve`.
 // Restart=always + linger (enabled separately) is what makes shell3 survive
 // crashes, logouts, and reboots. PATH includes the usual user bin dirs so
-// docker/git helpers the agent shells out to are found.
+// tunnel/docker helpers the agent shells out to are found.
 func serviceUnit(bin, configDir, home string) string {
 	return fmt.Sprintf(`[Unit]
-Description=shell3 agent + Telegram bot
+Description=shell3 agent + web interface
 After=network-online.target
 Wants=network-online.target
 StartLimitBurst=5
@@ -53,7 +52,7 @@ StartLimitIntervalSec=60
 
 [Service]
 Type=simple
-ExecStart=%s telegram --config %s
+ExecStart=%s serve --config %s
 Restart=always
 RestartSec=5
 Environment=HOME=%s
@@ -64,9 +63,8 @@ WantedBy=default.target
 `, bin, configDir, home, home, home)
 }
 
-// offerSystemdService asks (TTY + systemd only) whether to run
-// `shell3 telegram` as a systemd user service, and sets it up on yes: unit
-// file, daemon-reload,
+// offerSystemdService asks (TTY + systemd only) whether to run `shell3 serve`
+// as a systemd user service, and sets it up on yes: unit file, daemon-reload,
 // enable, linger. start says whether to start it immediately as well as enable
 // it. Failures are reported, never fatal: boot's config work is already done.
 func offerSystemdService(tty bool, configDir, home string, start bool) serviceState {
@@ -127,32 +125,16 @@ func installSystemdService(configDir, home string, start bool) serviceState {
 	if start && !waitServiceActive(runSystemctl, 6, func() { time.Sleep(500 * time.Millisecond) }) {
 		fmt.Printf("warning: %s was started but is not running — check the log:\n", serviceUnitName)
 		fmt.Printf("  journalctl --user -u %s -n 20\n", serviceUnitName)
-		fmt.Println(serviceStartDiagnosis(configDir))
+		fmt.Println("A common cause: another process (an older shell3?) already holds the port.")
 		return serviceFailed
 	}
 	return serviceEnabled
 }
 
-// serviceStartDiagnosis names why the unit came up and died, reusing the
-// front-end's own validation rather than restating it: `shell3 telegram`
-// refuses to start on exactly what telegramChatID rejects, so its message is
-// the accurate one. With the telegram wiring intact, the remaining common
-// cause is a second shell3 long-polling the same bot.
-func serviceStartDiagnosis(configDir string) string {
-	lc, err := config.Load(configDir)
-	if err != nil {
-		return "Common cause: the config no longer loads — run `shell3 health` for the reason."
-	}
-	if _, err := telegramChatID(lc.Telegram()); err != nil {
-		return "Common cause: " + err.Error()
-	}
-	return "Common cause: a second shell3 is already long-polling the same bot (Telegram 409 Conflict)."
-}
-
 // reinstallService is `shell3 boot --service`: rewrite the unit for the
 // current binary and config, enable it, restart it, and verify it is
-// running — the repair path when the unit points at a stale binary or the
-// previous install failed. Touches nothing else boot writes.
+// running — the repair path when the unit points at a stale binary or an
+// old process held the port. Touches nothing else boot writes.
 func reinstallService() error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -166,11 +148,25 @@ func reinstallService() error {
 	if !systemdAvailable() {
 		return fmt.Errorf("boot --service: no systemd user instance here")
 	}
+	started := time.Now()
 	if installSystemdService(dir, home, true) != serviceEnabled {
 		return fmt.Errorf("boot --service: service setup failed (see warnings above)")
 	}
-	fmt.Printf("%s reinstalled and running — message your bot on Telegram\n", serviceUnitName)
-	fmt.Printf("  journalctl --user -u %s -f   # follow the log\n", serviceUnitName)
+	fixedURL, tunnelWired, addr, _ := webWiring(dir)
+	fmt.Printf("%s reinstalled and running — open http://%s\n", serviceUnitName, addr)
+	switch {
+	case fixedURL != "":
+		fmt.Printf("public URL: %s\n", fixedURL)
+	case tunnelWired:
+		// Hold on briefly for the freshly minted public URL so nobody has
+		// to dig it out of the journal.
+		fmt.Println("waiting for the tunnel URL …")
+		if u := waitTunnelURL(dir, started, 45*time.Second); u != "" {
+			fmt.Printf("public URL (phone): %s\n", u)
+		} else {
+			fmt.Println("no tunnel URL yet — `shell3 url` prints it once the tunnel is up")
+		}
+	}
 	return nil
 }
 
@@ -181,9 +177,8 @@ func runSystemctl(argv ...string) (string, error) {
 }
 
 // waitServiceActive polls `systemctl --user is-active` until the unit reports
-// active, giving a crash-looping unit (blank telegram wiring, a bot another
-// process is already polling, a bad binary) time to show itself instead of
-// telling the user the service is running.
+// active, giving a crash-looping unit (port already taken, bad binary) time
+// to show itself instead of telling the user the service is running.
 func waitServiceActive(run func(argv ...string) (string, error), tries int, sleep func()) bool {
 	for i := 0; i < tries; i++ {
 		if i > 0 {

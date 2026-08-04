@@ -1,0 +1,500 @@
+/* Self-hosted, because `go install` builds this into the binary and the binary
+   has to work with no network. Newsreader and Inter Tight are variable fonts
+   (one file covers the whole weight range); IBM Plex Mono ships per weight, so
+   only the two weights the interface actually sets are pulled in. */
+@import "@fontsource-variable/newsreader/index.css";
+@import "@fontsource-variable/newsreader/wght-italic.css";
+@import "@fontsource-variable/inter-tight/index.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "tw-shimmer";
+
+@custom-variant data-open (&:where([data-state="open"], [data-open]:not([data-open="false"])));
+@custom-variant data-closed (&:where([data-state="closed"], [data-closed]:not([data-closed="false"])));
+
+@theme inline {
+  @keyframes collapsible-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto));
+    }
+  }
+  @keyframes collapsible-up {
+    from {
+      height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto));
+    }
+    to {
+      height: 0;
+    }
+  }
+}
+
+@custom-variant dark (&:is(.dark *));
+
+/* ====================================================================
+   PAPER TRAIL
+
+   shell3 stores every session as JSONL — an audit trail. So the interface
+   IS that trail, set as a printed document, in two stocks: paper (default)
+   and a cyanotype (`.dark`). Pale lines on prussian blue is what an actual
+   blueprint is, and the dark stock is not the light one inverted — the
+   ruling changes which side of the ground it sits on, and the serif changes
+   weight.
+
+   Six page types share four devices: the ruled section head, the dotted
+   leader, the hanging figure column, and the marker. The marker is the
+   signature and it only ever marks what is live.
+
+   The stock tokens below are the canonical set; the shadcn/assistant-ui
+   names are mapped onto them, so components that were never touched still
+   pick up the right stock.
+   ==================================================================== */
+
+@theme inline {
+  --font-sans: "Inter Tight Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Newsreader Variable", Georgia, "Times New Roman", serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* the document's own vocabulary */
+  --color-linen: var(--linen);
+  --color-linen-2: var(--linen-2);
+  --color-grid: var(--grid);
+  --color-rule: var(--rule);
+  --color-rule-2: var(--rule-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-hi: var(--ink-hi);
+  --color-ink-doc: var(--ink-doc);
+  --color-lift: var(--lift);
+  --color-lift-2: var(--lift-2);
+  --color-mark: var(--mark);
+  --color-mark-fill: var(--mark-fill);
+  --color-swipe: var(--swipe);
+  --color-gold: var(--gold);
+  --color-pip: var(--pip);
+  --color-ok: var(--ok);
+  --color-fail: var(--fail);
+
+  /* the names the existing components already reach for */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 1px);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 2px);
+  --animate-shimmer: shimmer-sweep var(--shimmer-duration, 1000ms) linear infinite both;
+  @keyframes shimmer-sweep {
+    from {
+      background-position: 150% 0;
+    }
+    to {
+      background-position: -100% 0;
+    }
+  }
+}
+
+/* -------------------------------------------------------- paper (default) */
+
+:root {
+  /* A document has hairlines, not rounded panels. 3px is the most a corner
+     softens anywhere in the interface. */
+  --radius: 3px;
+
+  --linen: #e8eced;
+  --linen-2: #dee3e6;
+  /* The ruling is matched by contrast RATIO against its own ground (~1.06:1),
+     not by picking a plausible grey per stock. Any stronger and it stops being
+     stock texture and becomes graph paper you are meant to look at. */
+  --grid: #e1e6e8;
+  --rule: #b2bdc4;
+  --rule-2: #c9d1d6;
+  --ink: #16222e;
+  --ink-2: #4a5a6b;
+  --ink-3: #56667a; /* 4.9:1 — it carries 9px text */
+  --ink-hi: #000000;
+  --ink-doc: #1d2a36;
+  --doc-weight: 400; /* on paper the serif needs no help */
+  --tint: rgb(22 34 46 / 7%);
+  --lift: #e0e6e9;
+  --lift-2: #d7dee2;
+  --swipe: #16222e;
+  --mark-fill: #eab308;
+  --pip: #a8790a; /* 3.3:1 — a graphical indicator, not text */
+  --gold: #7a5c05; /* #eab308 as 9px ink is unreadable here */
+  --ok: #2f6b4f;
+  --fail: #a8322a;
+  --cast: 0 14px 34px rgb(30 44 58 / 18%);
+  --cast-2: 0 22px 50px rgb(30 44 58 / 24%);
+  --scrim: rgb(60 72 82 / 42%);
+
+  color-scheme: light;
+
+  /* --- the mapped names ------------------------------------------------- */
+  --background: var(--linen);
+  --foreground: var(--ink);
+  --card: var(--linen-2);
+  --card-foreground: var(--ink);
+  --popover: var(--linen-2);
+  --popover-foreground: var(--ink);
+  --primary: var(--mark-fill);
+  --primary-foreground: var(--swipe);
+  --secondary: var(--linen-2);
+  --secondary-foreground: var(--ink);
+  --muted: var(--linen-2);
+  --muted-foreground: var(--ink-3);
+  --accent: var(--lift);
+  --accent-foreground: var(--ink);
+  --destructive: var(--fail);
+  --border: var(--rule-2);
+  --input: var(--rule);
+  --ring: var(--gold);
+  --sidebar: var(--linen-2);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--mark-fill);
+  --sidebar-primary-foreground: var(--swipe);
+  --sidebar-accent: var(--lift);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--rule);
+  --sidebar-ring: var(--gold);
+  --chart-1: #7a5c05;
+  --chart-2: #2f6b4f;
+  --chart-3: #3f4f7a;
+  --chart-4: #a8322a;
+  --chart-5: #4a5a6b;
+}
+
+/* ------------------------------------------------------------- cyanotype */
+
+.dark {
+  --linen: #081420;
+  --linen-2: #050d16;
+  --grid: #0d1c29; /* lighter than its ground, as a real cyanotype is */
+  --rule: #1a2c3e;
+  --rule-2: #132433;
+  --ink: #dbe6f0;
+  --ink-2: #9bb0c4;
+  --ink-3: #6d8499;
+  --ink-hi: #ffffff;
+  --ink-doc: #dfe9f2;
+  --doc-weight: 450; /* the serif needs weight on the dyed ground */
+  --tint: rgb(255 255 255 / 6%);
+  --lift: #0c1a27;
+  --lift-2: #10202e;
+  --swipe: #14202c;
+  --mark-fill: #eab308;
+  --pip: #eab308;
+  --gold: #eab308;
+  --ok: #5fbf95;
+  --fail: #ef8078;
+  --cast: 0 18px 44px rgb(0 0 0 / 55%);
+  --cast-2: 0 26px 60px rgb(0 0 0 / 60%);
+  --scrim: rgb(2 7 12 / 72%);
+
+  color-scheme: dark;
+}
+
+/* The marker is stock-independent on purpose: it is one device and has to look
+   like one thing in both prints, so it sits outside both stock blocks. */
+:root,
+.dark {
+  --mark: #eab308d9;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-size: 13px;
+  }
+
+  /* Tailwind v4 resets buttons to `cursor: default`. Everything the interface
+     renders as a button is something you click, so put the pointer back rather
+     than repeating a utility class on every one. */
+  button:not(:disabled),
+  [role="button"]:not(:disabled),
+  summary {
+    cursor: pointer;
+  }
+}
+
+/* ====================================================================
+   THE FOUR DEVICES
+
+   Cross-cutting enough to live here rather than in any one component: the
+   ruling, the tracked label, the dotted leader, the marker, and the serif
+   reading column. Everything else is composed from Tailwind utilities in
+   the components themselves.
+   ==================================================================== */
+
+/* The stock's own texture. Applied to the app shell, not to panels. */
+.sheet-bg {
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 26px 26px;
+  background-position: -1px -1px;
+}
+
+/* The mark's face, pinned.
+   The snail is two glyphs borrowed from other scripts, and their shapes differ
+   enough between typefaces that inheriting the interface font redraws the logo.
+   Tahoma is what it was designed in, so it is named explicitly and never
+   follows --font-sans or --font-mono. */
+.mark-face {
+  font-family: Tahoma, Geneva, Verdana, sans-serif;
+}
+
+/* A drawn label: tracked caps, the way a form field is titled. */
+.cap {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* The dotted leader — used wherever a name on the left owes a figure on the
+   right. The document's one ornament, and it earns its place by carrying the
+   eye across a gap. */
+.leader {
+  flex: 1;
+  min-width: 14px;
+  margin: 0 3px 4px;
+  border-bottom: 1px dotted var(--rule);
+}
+
+/* The marker: one stroke, identical in both stocks. Near-solid, covering the
+   whole line-box, carrying dark ink, with uneven side bleed so it stays a
+   hand-drawn stroke rather than a UI chip.
+
+   A highlighter on paper would sit at x-height and let ascenders ride above
+   it. On the dyed ground that geometry strands the tops of the glyphs on blue
+   in dark ink and reads as a redaction bar, so dark needs the full box — and
+   a signature that changes shape between prints is two signatures. Ink lands
+   at 6.4:1 on the cyanotype and 8.8:1 on paper. */
+.swiped {
+  color: var(--swipe);
+  font-weight: 600;
+  background: var(--mark);
+  box-shadow:
+    -4px 0 0 var(--mark),
+    3px 0 0 var(--mark),
+    0 2px 0 var(--mark),
+    0 -2px 0 var(--mark);
+}
+
+/* The agent's reply is the document itself: a real serif reading column, not
+   a chat bubble. The weight comes from the stock. */
+.doc {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  font-weight: var(--doc-weight);
+  line-height: 1.64;
+  color: var(--ink-doc);
+}
+.doc > :last-child {
+  margin-bottom: 0;
+}
+.doc p,
+.doc ul,
+.doc ol,
+.doc pre,
+.doc blockquote,
+.doc table {
+  margin-bottom: 13px;
+}
+.doc strong {
+  font-weight: 650;
+  color: var(--ink-hi);
+}
+.doc em {
+  font-style: italic;
+}
+.doc h1,
+.doc h2,
+.doc h3,
+.doc h4 {
+  font-weight: 600;
+  color: var(--ink);
+  margin: 20px 0 9px;
+  line-height: 1.25;
+}
+.doc h1 { font-size: 22px; }
+.doc h2 { font-size: 19px; }
+.doc h3 { font-size: 17px; }
+.doc h4 { font-size: 16px; }
+.doc > :first-child {
+  margin-top: 0;
+}
+.doc ul,
+.doc ol {
+  padding-left: 20px;
+}
+.doc li {
+  margin-bottom: 6px;
+}
+.doc li::marker {
+  color: var(--ink-3);
+}
+.doc a {
+  color: var(--ink);
+  text-decoration: none;
+  border-bottom: 1px solid var(--rule);
+}
+.doc a:hover {
+  border-bottom-color: var(--ink-3);
+}
+.doc blockquote {
+  border-left: 2px solid var(--rule);
+  padding-left: 15px;
+  font-style: italic;
+  color: var(--ink-2);
+}
+.doc hr {
+  border: 0;
+  border-top: 1px solid var(--rule-2);
+  margin: 20px 0;
+}
+/* Inline code stays in the mono at the serif's own size, so a name in a
+   sentence does not shrink out of the line. */
+.doc :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--tint);
+  border-radius: var(--radius);
+  padding: 1px 4px;
+}
+.doc pre {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--ink-2);
+  border-left: 2px solid var(--rule);
+  padding: 2px 0 2px 15px;
+  overflow-x: auto;
+}
+.doc pre code {
+  font-family: inherit;
+  background: none;
+  padding: 0;
+}
+.doc table {
+  border-collapse: collapse;
+  font-size: 13.5px;
+  font-family: var(--font-sans);
+}
+.doc th {
+  text-align: left;
+  border-bottom: 1px solid var(--ink-3);
+  padding: 5px 12px 5px 0;
+  font-weight: 600;
+  font-size: 12px;
+}
+.doc td {
+  border-bottom: 1px solid var(--rule-2);
+  padding: 6px 12px 6px 0;
+  color: var(--ink-2);
+}
+
+/* ====================================================================
+   Syntax highlighting (highlight.js token classes).
+
+   Restrained to three accents plus the ink tiers. A rainbow code block on
+   a printed document reads as pasted in from somewhere else; these hues sit
+   inside the stock's own palette and shift with it.
+   ==================================================================== */
+
+.hljs-comment,
+.hljs-quote {
+  color: var(--ink-3);
+  font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-doctag,
+.hljs-formula,
+.hljs-built_in,
+.hljs-class .hljs-title {
+  color: light-dark(#3f4f7a, #9db4e0);
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-attribute,
+.hljs-meta .hljs-string {
+  color: var(--ok);
+}
+.hljs-number,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-type,
+.hljs-selector-class,
+.hljs-selector-attr,
+.hljs-selector-pseudo {
+  color: light-dark(#7a5c05, #d8b64a);
+}
+.hljs-title,
+.hljs-section,
+.hljs-name,
+.hljs-selector-id,
+.hljs-title.class_,
+.hljs-title.function_ {
+  color: var(--ink);
+  font-weight: 500;
+}
+.hljs-attr,
+.hljs-property,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link,
+.hljs-meta {
+  color: var(--ink-2);
+}
+.hljs-deletion {
+  color: var(--fail);
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 600;
+}

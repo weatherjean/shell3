@@ -2,6 +2,8 @@ package chat
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -76,11 +78,13 @@ func TestCompactInto_AbortsOnFailedRoll(t *testing.T) {
 	}
 	sess.messages = orig
 
-	// Make NewSession fail: close the store's database so the roll's insert
-	// is denied.
-	if err := st.Close(); err != nil {
-		t.Fatalf("close store: %v", err)
+	// Make NewSession fail: the runs/ dir is read-only, so MkdirAll for a fresh
+	// session subdir is denied. (The existing session subdir keeps its own perms.)
+	runsDir := filepath.Join(dir, "runs")
+	if err := os.Chmod(runsDir, 0o500); err != nil {
+		t.Fatalf("chmod: %v", err)
 	}
+	defer os.Chmod(runsDir, 0o755)
 
 	ok := compactInto(CompactSummary{Summary: "should not apply"}, st, sess, sess.messages[1:], applog.Noop{}, "", "", "")
 	if ok {

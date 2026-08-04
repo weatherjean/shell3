@@ -31,8 +31,8 @@ type Config interface {
 }
 
 // Speech is a synthesized-audio result from Clients.Speak: the path to the
-// written audio file. The caller owns it (the front-end caches it under
-// the media dir and serves it back; see the front-end's TTS cache).
+// written audio file. The caller owns it (the web front-end caches it under
+// the media dir and serves it back; see webui.ttsCache).
 type Speech struct {
 	Path string
 }
@@ -114,11 +114,11 @@ func New(cfg Config, ensureProxy func(name, command string)) *Clients {
 	return c
 }
 
-// Dir returns shell3's durable media directory — where inbound attachments,
+// Dir returns shell3's durable media directory — where browser uploads,
 // generated images, and cached speech are stored, so every media file the
 // agent has seen or made keeps a stable path that survives reboots and OS
-// temp cleaning (re-readable with read_media, sendable with
-// send_media_telegram, findable from history). Default ~/.shell3/media; $SHELL3_MEDIA_DIR
+// temp cleaning (re-readable with read_media, servable at /api/media/,
+// findable from history). Default ~/.shell3/media; $SHELL3_MEDIA_DIR
 // overrides (tests point it at a TempDir). Created on demand.
 func Dir() (string, error) {
 	dir := os.Getenv("SHELL3_MEDIA_DIR")
@@ -136,7 +136,7 @@ func Dir() (string, error) {
 }
 
 // outDir returns shell3's transient media scratch directory, now used only
-// for freshly synthesized TTS audio, before the front-end's cache moves
+// for freshly synthesized TTS audio, before the web front-end's cache moves
 // it into Dir() under a content hash. Generated images go straight to Dir().
 func outDir() (string, error) {
 	dir := filepath.Join(os.TempDir(), "shell3-media")

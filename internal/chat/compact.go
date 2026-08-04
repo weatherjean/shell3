@@ -17,6 +17,7 @@ import (
 
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
@@ -100,9 +101,8 @@ var ErrNothingToCompact = errors.New("nothing to compact")
 // estimator for both, so the delta is apples-to-apples). ErrNothingToCompact
 // when history is too small to have a summarisable head; any other error means
 // the summarisation call or the runs-session roll failed and history is
-// untouched. Callers must hold the session's busy gate — this mutates
-// sess.messages exactly like a turn would, so it must never run concurrently
-// with one.
+// untouched. Callers must hold the session's busy gate (see
+// shell3.Session.Compact) — this mutates sess.messages like a turn would.
 func CompactStandalone(ctx context.Context, cfg TurnConfig, sess *Session) (before, after int, err error) {
 	return compactApply(ctx, cfg, sess, true)
 }
@@ -388,7 +388,7 @@ func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.
 
 	// Build the continuation message injected at the top of the new history.
 	var b strings.Builder
-	fmt.Fprintf(&b, "<system-reminder>\nContinuation of session %s. History compacted.\nRecall the prior session with the history tool: {\"session\": \"%s\"}.\n</system-reminder>\n\n", prevSessionID, prevSessionID)
+	fmt.Fprintf(&b, "<system-reminder>\nContinuation of session %s. History compacted.\nPrior session messages are in the runs directory (use the `history` skill, or read %s/runs/%s/messages.jsonl directly).\n</system-reminder>\n\n", prevSessionID, paths.ProjectDirName, prevSessionID)
 	fmt.Fprintf(&b, "<compact-summary>\n%s\n</compact-summary>", args.Summary)
 	writeBulletSection(&b, "modified-files", args.ImportantFiles)
 

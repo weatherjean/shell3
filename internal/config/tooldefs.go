@@ -28,9 +28,6 @@ func ToolDefs(g ToolGates) []llm.ToolDefinition {
 	if g.List {
 		defs = append(defs, listFilesTool)
 	}
-	if g.History {
-		defs = append(defs, historyTool)
-	}
 	return defs
 }
 
@@ -60,22 +57,6 @@ var listFilesTool = llm.ToolDefinition{
 			"path":   map[string]any{"type": "string", "description": "Directory path (default: the working directory)"},
 			"depth":  map[string]any{"type": "integer", "description": "Recursion depth (default 2)"},
 			"ignore": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Glob patterns to exclude (base name, or root-relative when the pattern contains /)"},
-		},
-	},
-}
-
-var historyTool = llm.ToolDefinition{
-	Name: "history",
-	Description: "Search past conversations, or read a stored session's transcript. Full-text search " +
-		"covers what you and the user said in every stored session (tool output is not indexed). " +
-		"Typical flow: search with query, then read around a hit with session (+ around). Read-only.",
-	Parameters: map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"query":   map[string]any{"type": "string", "description": "FTS5 search: bare words AND together, \"quoted phrases\" match exactly, OR/NOT/prefix* work. Omit when reading a session."},
-			"session": map[string]any{"type": "string", "description": "Session id to read instead of searching"},
-			"around":  map[string]any{"type": "integer", "description": "With session: center the excerpt on this message seq (default: the start)"},
-			"limit":   map[string]any{"type": "integer", "description": "Max search hits or messages to return (default 10 hits / 20 messages)"},
 		},
 	},
 }

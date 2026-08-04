@@ -28,7 +28,7 @@ type reloadState struct {
 	parts         *agentsetup.Parts // nil in unit tests
 	store         *runs.Store       // new generation's runs store
 	cron          []CronJob         // new cron jobs (armed by the host)
-	telegram      TelegramConfig    // new telegram mirror
+	web           WebConfig         // new web mirror
 	maxConcurrent int               // background.max_concurrent (0 = default)
 	agents        int               // agent count for the result
 	models        int               // model count for the result
@@ -82,7 +82,7 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 		parts:         newParts,
 		store:         newParts.Store(),
 		cron:          newParts.Cron(),
-		telegram:      newParts.Telegram(),
+		web:           newParts.Web(),
 		maxConcurrent: newParts.BackgroundMaxConcurrent(),
 		agents:        len(newParts.AgentNames()),
 		models:        newParts.ModelCount(),
@@ -153,7 +153,7 @@ func (rt *Runtime) applyReload(st reloadState) (ReloadResult, error) {
 	rt.cleanup = st.cleanup
 	rt.store = st.store
 	rt.cron = st.cron
-	rt.telegram = st.telegram
+	rt.web = st.web
 	rt.parts = st.parts
 	// A running job (or lingering subagent child, or in-flight notifier triage
 	// turn — which runs on a session built from the OLD sessionConfig) still

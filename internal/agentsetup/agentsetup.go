@@ -1,5 +1,5 @@
 // Package agentsetup is the shared config assembly used by every shell3
-// front-end (`shell3 telegram`, `shell3 ask`, and the internal/shell3 event
+// front-end (`shell3 serve`, `shell3 ask`, and the internal/shell3 event
 // stream). It resolves paths, ensures project dirs, opens the store and log,
 // loads the config directory, and returns a fully-populated chat.Config — the single
 // source of truth for "what the agent is", independent of how it's driven.
@@ -42,14 +42,14 @@ type Options struct {
 //
 // Concurrency: all exported methods are safe for concurrent use by multiple
 // sessions. The loaded config (config.LoadedConfig) is immutable after load,
-// the runs store serializes writes through its database handle (safe for
-// concurrent callers), the proxy spawner is mutex-guarded internally,
+// the file-native runs store appends each line with a single O_APPEND write
+// (safe for concurrent callers), the proxy spawner is mutex-guarded internally,
 // and AgentRuntime builds a fresh LLM client per call, so no client state is
 // shared across sessions.
 //
 // Lifetime: Parts must not be used after the cleanup returned by BuildParts has
-// run. The cleanup closes MCP connections, the runs store's database handle,
-// and the log; run_proxy processes are detached (never reaped here).
+// run. The cleanup closes MCP connections and the log; the runs store has no
+// handle to close and run_proxy processes are detached (never reaped here).
 // Any method call after cleanup has undefined behaviour.
 type Parts struct {
 	lc      *config.LoadedConfig
@@ -79,7 +79,7 @@ func (p *Parts) MCPStatus() []mcp.ServerStatus {
 	return p.mcp.Status()
 }
 
-// Store returns the runs store (always opened; nil only when the
+// Store returns the file-native runs store (always opened; nil only when the
 // store-open itself failed, which is non-fatal and logged).
 func (p *Parts) Store() *runs.Store { return p.st }
 
@@ -122,21 +122,21 @@ func (p *Parts) BackgroundMaxConcurrent() int { return p.lc.BackgroundMaxConcurr
 // ModelCount returns the number of declared models.
 func (p *Parts) ModelCount() int { return len(p.lc.Models) }
 
-// Telegram returns the parsed telegram: block (zero value if absent).
-func (p *Parts) Telegram() config.TelegramConfig { return p.lc.Telegram() }
+// Web returns the parsed web: block (zero value if absent).
+func (p *Parts) Web() config.WebConfig { return p.lc.Web() }
 
 // Cron returns the jobs declared as cron/<name>.md files.
 func (p *Parts) Cron() []config.CronJob { return p.lc.Cron() }
 
 // RunsKeepDays returns `runs_keep_days` (always populated at load — default
-// 0, keep forever). Read by the runs janitor at `shell3 telegram` startup.
+// 30; 0 = keep forever). Read by the runs janitor at `shell3 serve` startup.
 func (p *Parts) RunsKeepDays() int { return p.lc.RunsKeepDays }
 
 // RunsRoot returns the .shell3_project directory the runs Store was opened
 // against (runs.Open's root param) — the same root the runs janitor's Sweep
 // expects. Derived from runsDir (.../.shell3_project/runs) rather than
 // storing it separately, since Store already keys off exactly this
-// relationship.
+// relationship (see runs.Store.runsDir).
 func (p *Parts) RunsRoot() string { return filepath.Dir(p.runsDir) }
 
 // AgentNames returns declared agent names in declaration order.
@@ -315,9 +315,8 @@ func (p *Parts) runtimeForAgent(a config.Agent) (chat.ActiveAgent, error) {
 // EnvironmentReminder renders the host-injected Environment standing reminder
 // (no longer part of the system prompt). It exposes the agent's own config path
 // (so any front-end can resolve its config dir without a tool), the active model
-// and this session's id, and where conversation history lives — the SQLite
-// runs store the history tool searches. The result is wrapped in
-// <system-reminder>…</system-reminder>.
+// and this session's id, and where conversation history lives on disk — all
+// file-native, searchable with ordinary Unix tools (rg/grep/cat). The result is wrapped in <system-reminder>…</system-reminder>.
 //
 // It is a package-level function (not a *Parts method) so internal/shell3 can render
 // it from the per-session chat.Config fields it already holds — config path,
@@ -344,8 +343,10 @@ func EnvironmentReminder(configDir, runsDir, model, sessionID string) string {
 	// Derive the model-facing paths from paths.ProjectDirName (its single
 	// source): a renamed project dir must not leave the reminder teaching the
 	// model paths that no longer exist.
-	fmt.Fprintf(&b, "- history: every conversation (subagent runs included) is stored in `%s/shell3.db`; recall past sessions with the history tool when you have it (search, then read around a hit)\n", paths.ProjectDirName)
-	fmt.Fprintf(&b, "- background job logs: `%s/runs/<session>/jobs/<job>.log` (plain files)\n", paths.ProjectDirName)
+	relRuns := paths.ProjectDirName + "/runs"
+	fmt.Fprintf(&b, "- history: every conversation is verbatim JSONL at `%s/<id>/messages.jsonl` (one message per line; `meta.json` beside it holds model/status/timestamps)\n", relRuns)
+	fmt.Fprintf(&b, "- search history: `rg <terms> %s` (ordinary ripgrep over the JSONL — no special CLI)\n", relRuns)
+	fmt.Fprintf(&b, "- subagent transcripts are ordinary sessions under `%s` too (one dir per child session)\n", relRuns)
 	b.WriteString("</system-reminder>")
 	return b.String()
 }
@@ -607,15 +608,14 @@ func (b *builder) connectMCP() {
 	}
 }
 
-// openStore opens the runs store (the per-project SQLite database)
-// unconditionally: it always persists the conversation, and the history tool
-// reads it back. Non-fatal: a failure warns and proceeds with a nil store
-// (persistence and history silently degrade). The database handle rides the
-// closer stack so a reload's parked old generation releases it.
+// openStore opens the file-native runs store unconditionally: it always persists
+// the conversation (saveHistory) and the agent reads it back out-of-process with
+// rg/cat over the JSONL. Non-fatal: a failure warns and proceeds with a nil store
+// (persistence and history reads silently degrade). The store has no handle to
+// close — runs.Store is stateless over the filesystem.
 func (b *builder) openStore() {
 	if s, e := runs.Open(b.l.Root); e == nil {
 		b.st = s
-		b.closers = append(b.closers, func() { _ = s.Close() })
 	} else {
 		b.log.Warn("open store failed — history unavailable", "error", e)
 	}

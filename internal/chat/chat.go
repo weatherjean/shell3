@@ -193,7 +193,6 @@ func NewHandlers() map[string]ToolHandler {
 		EditHandler{},
 		ReadHandler{},
 		ListFilesHandler{},
-		HistoryHandler{},
 	}
 	m := make(map[string]ToolHandler, len(handlers))
 	for _, h := range handlers {

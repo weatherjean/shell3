@@ -40,7 +40,7 @@ func RunAskTurn(ctx context.Context, w io.Writer, sess *shell3.Session, prompt s
 	return renderAskEvents(w, sess.Send(ctx, prompt))
 }
 
-// FollowAskJobs mirrors the bot host's wake loop for a one-shot `shell3 ask`
+// FollowAskJobs mirrors the web host's wake loop for a one-shot `shell3 ask`
 // run: after the turn ends, while the session has a running background
 // job (a spawned subagent or bash_bg) or a queued completion notice, it renders
 // the wake turn the host would run to narrate each result. It KEEPS THE PROCESS
@@ -57,7 +57,7 @@ func RunAskTurn(ctx context.Context, w io.Writer, sess *shell3.Session, prompt s
 // runtime's library fallback delivers every completion's raw notice straight
 // to the owning session, so this loop sees and narrates everything — the
 // verbose debugging view. The notifier's triage behavior is exercised on the
-// real bot loop (`shell3 telegram`), not here.
+// real serve loop (`shell3 serve`), not here.
 func FollowAskJobs(ctx context.Context, w io.Writer, rt *shell3.Runtime, sess *shell3.Session) error {
 	announced := 0 // running count last printed, so the waiting note isn't repeated per progress event
 	for {

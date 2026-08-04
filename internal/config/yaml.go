@@ -14,11 +14,11 @@ import (
 // (KnownFields): an unknown key anywhere is a load error.
 type yamlFile struct {
 	Models       map[string]yamlModel `yaml:"models"`
-	Telegram     *yamlTelegram        `yaml:"telegram"`
+	Web          *yamlWeb             `yaml:"web"`
 	MCP          map[string]yamlMCP   `yaml:"mcp"`
 	Media        *yamlMedia           `yaml:"media"`
 	Background   *yamlBackground      `yaml:"background"`
-	RunsKeepDays *int                 `yaml:"runs_keep_days"` // nil = default 0 (keep forever)
+	RunsKeepDays *int                 `yaml:"runs_keep_days"` // nil = default 30; 0 = keep forever
 }
 
 type yamlModel struct {
@@ -36,13 +36,15 @@ type yamlModel struct {
 	RunProxy      string         `yaml:"run_proxy"`
 }
 
-// yamlTelegram is the `telegram:` block: the front-end's bot credentials and
-// where the agent's shell runs. Token is a secret resolved from .env via an
-// env:KEY reference.
-type yamlTelegram struct {
-	Token   string `yaml:"token"`
-	ChatID  string `yaml:"chat_id"`
-	WorkDir string `yaml:"workdir"`
+// yamlWeb is the `web:` block: where the agent's shell runs, and how the
+// interface is served.
+type yamlWeb struct {
+	WorkDir    string `yaml:"workdir"`
+	Addr       string `yaml:"addr"`
+	URL        string `yaml:"url"`
+	Tunnel     string `yaml:"tunnel"`
+	Password   string `yaml:"password"`
+	TOTPSecret string `yaml:"totp_secret"`
 }
 
 type yamlMCP struct {
@@ -92,37 +94,6 @@ type yamlBackground struct {
 
 var mcpNameRE = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
-// yamlTypeNames maps the wire structs onto the shell3.yaml blocks they decode,
-// so a strict-decode failure reads as config rather than as Go.
-var yamlTypeNames = map[string]string{
-	"yamlFile":       "shell3.yaml",
-	"yamlModel":      "a models: entry",
-	"yamlTelegram":   "the telegram: block",
-	"yamlMCP":        "an mcp: server",
-	"yamlMedia":      "the media: block",
-	"yamlSTT":        "media.stt",
-	"yamlTTS":        "media.tts",
-	"yamlDescribe":   "media.describe",
-	"yamlImagegen":   "media.imagegen",
-	"yamlBackground": "the background: block",
-}
-
-var yamlTypeRE = regexp.MustCompile(`type config\.(\w+)`)
-
-// humanizeYAMLTypes rewrites go-yaml's "field web not found in type
-// config.yamlFile" into the block name the user actually wrote. The strict
-// unknown-key failure is the most likely error a 0.2.x upgrader sees (their
-// `web:` block), and "config.yamlFile" means nothing to them.
-func humanizeYAMLTypes(msg string) string {
-	return yamlTypeRE.ReplaceAllStringFunc(msg, func(m string) string {
-		name := yamlTypeRE.FindStringSubmatch(m)[1]
-		if label, ok := yamlTypeNames[name]; ok {
-			return label
-		}
-		return "shell3.yaml"
-	})
-}
-
 // parseYAML strict-decodes shell3.yaml, resolves env: references from
 // secrets, and fills the wiring fields of c.
 func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
@@ -130,7 +101,7 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(&f); err != nil {
-		return fmt.Errorf("shell3.yaml: %s", humanizeYAMLTypes(err.Error()))
+		return fmt.Errorf("shell3.yaml: %w", err)
 	}
 	if err := resolveEnvRefs(&f, secrets); err != nil {
 		return fmt.Errorf("shell3.yaml: %w", err)
@@ -178,8 +149,9 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 			Temperature: m.Temperature, Extra: m.Extra, RunProxy: m.RunProxy,
 		})
 	}
-	if tc := f.Telegram; tc != nil {
-		c.telegram = TelegramConfig{Present: true, Token: tc.Token, ChatID: tc.ChatID, WorkDir: tc.WorkDir}
+	if wc := f.Web; wc != nil {
+		c.web = WebConfig{WorkDir: wc.WorkDir, Addr: wc.Addr, URL: wc.URL, Tunnel: wc.Tunnel, Password: wc.Password,
+			TOTPSecret: wc.TOTPSecret}
 	}
 	mcpNames := make([]string, 0, len(f.MCP))
 	for name := range f.MCP {
@@ -258,9 +230,9 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 	if b := f.Background; b != nil {
 		c.BackgroundMaxConcurrent = b.MaxConcurrent
 	}
-	// runs_keep_days defaults to 0, keep forever: history is one database
-	// row per message now, and recall through the history tool is the point.
-	c.RunsKeepDays = 0
+	// runs_keep_days defaults to 30 (unset); an explicit 0 means keep
+	// forever, so the default can't be expressed as a bare int default.
+	c.RunsKeepDays = 30
 	if f.RunsKeepDays != nil {
 		c.RunsKeepDays = *f.RunsKeepDays
 	}

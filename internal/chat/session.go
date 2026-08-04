@@ -319,6 +319,22 @@ func (s *Session) remindersLocked() []ReminderRecord {
 	return append(out, slices.Clone(s.reminderLog)...)
 }
 
+// HistorySnapshot returns a consistent point-in-time copy of the conversation
+// messages together with the recorded reminders (standing reminders first,
+// anchored at Seq 0, then the logged ones), taken under a SINGLE msgMu read
+// lock. compactInto swaps sess.messages and clears sess.reminderLog atomically
+// under that same lock; taking both here in one acquisition prevents a reader
+// (History()) from pairing a post-compaction message slice with
+// pre-compaction reminder anchors. Mirrors Messages()+Reminders() but without
+// the split-lock window between them.
+func (s *Session) HistorySnapshot() ([]llm.Message, []ReminderRecord) {
+	s.msgMu.RLock()
+	defer s.msgMu.RUnlock()
+	msgs := make([]llm.Message, len(s.messages))
+	copy(msgs, s.messages)
+	return msgs, s.remindersLocked()
+}
+
 // StandingReminders returns a copy of the host standing reminders (e.g.
 // Environment) for display in the prompt-inspection view (the Status
 // view's prompt panel). Safe to call concurrently.

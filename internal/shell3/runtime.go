@@ -91,9 +91,9 @@ type Runtime struct {
 	jobEvents chan JobProgress
 	// workDir is the runtime root (.shell3_project lives under it).
 	workDir string
-	// store is the shared runs store (nil if unavailable). Used by
-	// the job runtime's transcript reads (task_status / JobTranscript); the
-	// front-end reads it directly (internal/render) for session lists/replay.
+	// store is the shared file-native runs store (nil if unavailable). Used by
+	// PastSessions/SessionMessages for front-end session lists/replay and by
+	// the job runtime's transcript reads (task_status / JobTranscript).
 	store *runs.Store
 	// ctx is the runtime's base context, parented by the ctx given to
 	// NewRuntime. A watcher goroutine calls Close when it fires, so cancelling
@@ -108,11 +108,10 @@ type Runtime struct {
 	// jobs manages in-process background jobs (command and subagent jobs).
 	// Owned by this Runtime; cancelled at Close.
 	jobs *jobManager
-	// telegram + cron mirror the parsed config blocks the runtime was built
-	// with (and re-derived on Reload). Read via Telegram()/Cron().
-	// See config.go.
-	telegram TelegramConfig
-	cron     []CronJob
+	// web + cron mirror the parsed config blocks the runtime was built
+	// with (and re-derived on Reload). Read via Web()/Cron(). See config.go.
+	web  WebConfig
+	cron []CronJob
 
 	// parts is the shared config assembly this Runtime was (re)built from.
 	// Swapped alongside the other fields at Reload; read via Parts() by host
@@ -194,7 +193,7 @@ func NewRuntime(ctx context.Context, spec RuntimeSpec) (*Runtime, error) {
 		ctx:           ctx,
 		cancel:        cancel,
 		sessions:      map[string]*Session{},
-		telegram:      parts.Telegram(),
+		web:           parts.Web(),
 		cron:          parts.Cron(),
 		parts:         parts,
 	}
@@ -291,7 +290,7 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 		return nil, ErrRuntimeClosed
 	}
 	// A named session is keyed on the runtime: requesting an existing live name
-	// (e.g. the bot's "tg-<chat>") returns that same session so its
+	// (e.g. the web host's "web-<thread>") returns that same session so its
 	// history persists across reattach. An empty name gets a unique generated
 	// label ("sN"), skipping any already taken by a live session.
 	if opts.Name == "" {

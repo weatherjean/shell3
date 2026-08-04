@@ -1,6 +1,8 @@
 package chat
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/applog"
@@ -49,9 +51,10 @@ func TestFlushMessages_StopsAtFirstFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}
-	// Close the store's database so every append fails.
-	if err := st.Close(); err != nil {
-		t.Fatalf("close store: %v", err)
+	// Remove the session's run directory so every append fails (the file can't
+	// be created in a missing directory).
+	if err := os.RemoveAll(filepath.Join(root, "runs", id)); err != nil {
+		t.Fatalf("remove run dir: %v", err)
 	}
 	msgs := []llm.Message{{Role: llm.RoleUser, Content: "a"}, {Role: llm.RoleUser, Content: "b"}}
 	if n := flushMessages(st, applog.Noop{}, id, msgs); n != 0 {

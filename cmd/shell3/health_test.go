@@ -12,7 +12,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const healthYAML = "models:\n  m: { base_url: \"http://x\", api_key: k, model: id }\n"
+// A healthy config is one that can actually be served, so the fixture carries a
+// web password like a real one does (see TestHealthFailsWithoutAWebPassword).
+const healthYAML = "models:\n  m: { base_url: \"http://x\", api_key: k, model: id }\n" +
+	"web: { password: sixteen-characters-long }\n"
 const healthAgent = "---\nmodel: m\n---\np\n"
 
 // writeHealthTree writes a minimal loadable config tree (plus extra files)
@@ -160,54 +163,19 @@ func TestHealthOKWithStrictHook(t *testing.T) {
 	}
 }
 
-// `shell3 health` is documented as THE config check, so a telegram block the
-// front-end would refuse to start on must fail here rather than printing OK.
-func TestHealthFailsOnIncompleteTelegramBlock(t *testing.T) {
-	cases := map[string]string{
-		"no token":       "telegram:\n  token: \"\"\n  chat_id: \"8701499393\"\n",
-		"no chat_id":     "telegram:\n  token: \"123:ABC\"\n  chat_id: \"\"\n",
-		"bad chat_id":    "telegram:\n  token: \"123:ABC\"\n  chat_id: \"not-a-number\"\n",
-		"both are blank": "telegram:\n  token: \"\"\n  chat_id: \"\"\n",
-	}
-	for name, block := range cases {
-		t.Run(name, func(t *testing.T) {
-			cfg := writeHealthTree(t, map[string]string{"shell3.yaml": healthYAML + block})
-			out, err := runHealthAt(t, cfg)
-			if err == nil {
-				t.Fatalf("an unusable telegram block must fail health:\n%s", out)
-			}
-			if !strings.Contains(out, "telegram") {
-				t.Fatalf("output should name the telegram problem:\n%s", out)
-			}
-			if strings.Contains(out, "OK") {
-				t.Fatalf("failing health must not print OK:\n%s", out)
-			}
-		})
-	}
-}
-
-func TestHealthOKWithCompleteTelegramBlock(t *testing.T) {
-	cfg := writeHealthTree(t, map[string]string{
-		"shell3.yaml": healthYAML + "telegram:\n  token: \"123:ABC\"\n  chat_id: \"8701499393\"\n",
+// health is the strict view of a config, and a config with no web password
+// cannot be served at all — `shell3 serve` refuses it. Reporting that here is
+// the difference between finding out now and finding out when you try to start.
+func TestHealthFailsWithoutAWebPassword(t *testing.T) {
+	dir := writeHealthTree(t, map[string]string{
+		"shell3.yaml": "models:\n  m: { base_url: \"http://x\", api_key: k, model: id }\n",
 	})
-	out, err := runHealthAt(t, cfg)
-	if err != nil {
-		t.Fatalf("a complete telegram block should pass: %v\n%s", err, out)
-	}
-	if !strings.Contains(out, "telegram: chat 8701499393") {
-		t.Fatalf("output should report the wired chat:\n%s", out)
-	}
-}
 
-// No telegram block at all is legitimate (an `shell3 ask`-only config), so it
-// reports the consequence the way an absent notifier does, without failing.
-func TestHealthReportsAbsentTelegramWithoutFailing(t *testing.T) {
-	cfg := writeHealthTree(t, nil)
-	out, err := runHealthAt(t, cfg)
-	if err != nil {
-		t.Fatalf("a config with no telegram block should still pass: %v\n%s", err, out)
+	out, err := runHealthAt(t, dir)
+	if err == nil {
+		t.Fatalf("health passed a config that cannot be served; output:\n%s", out)
 	}
-	if !strings.Contains(out, "telegram: absent") {
-		t.Fatalf("output should say the telegram front-end is unwired:\n%s", out)
+	if !strings.Contains(err.Error()+out, "web.password") {
+		t.Errorf("failure does not name the missing key:\n%s\n%v", out, err)
 	}
 }
