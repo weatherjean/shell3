@@ -445,7 +445,9 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool) {
 	w("shell3 serve")
 	w("```")
 	w("")
-	w("Then open <http://127.0.0.1:8765>.")
+	w("Then open <http://127.0.0.1:8765>. To reach it from your phone right")
+	w("away, `tailscale serve --bg 8765` in another terminal puts it on your")
+	w("tailnet at a stable https URL ([Tailscale](https://tailscale.com) is free).")
 
 	w("")
 	w("**Prefer the terminal?** `shell3 ask \"hi\"` drives the same agent with")
@@ -457,7 +459,7 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool) {
 	w("")
 	w("`shell3 serve` binds loopback and asks for the password you just set.")
 	if runtime.GOOS == "linux" {
-		w("One paste makes it a service on your tailnet ([Tailscale](https://tailscale.com) is free):")
+		w("One paste makes that permanent — a service on your tailnet:")
 		w("")
 		w("```bash")
 		w("mkdir -p ~/.config/systemd/user && cat > ~/.config/systemd/user/shell3.service <<'EOF'")
