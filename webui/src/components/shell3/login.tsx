@@ -82,7 +82,7 @@ export const LoginScreen: FC<{ onSignedIn: () => void }> = ({ onSignedIn }) => {
             <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
             <span>
               This connection is not encrypted, so the password crosses the
-              network in clear. Use an https tunnel or a TLS proxy.
+              network in clear. Serve it over https — Tailscale or a TLS proxy.
             </span>
           </p>
         )}

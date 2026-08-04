@@ -189,16 +189,16 @@ function ReasoningTrigger({
         data-slot="reasoning-trigger-label"
         className="aui-reasoning-trigger-label-wrapper border-rule relative inline-block shrink-0 border-b border-dotted tabular-nums"
       >
-        <span>thought{durationText || " for a moment"}</span>
         {active ? (
           <span
-            aria-hidden
             data-slot="reasoning-trigger-shimmer"
-            className="aui-reasoning-trigger-shimmer shimmer pointer-events-none absolute inset-0 motion-reduce:animate-none"
+            className="aui-reasoning-trigger-shimmer shimmer pointer-events-none motion-reduce:animate-none"
           >
             Reasoning{durationText}
           </span>
-        ) : null}
+        ) : (
+          <span>thought{durationText || " for a moment"}</span>
+        )}
       </span>
       {preview ? (
         <span

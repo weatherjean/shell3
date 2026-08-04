@@ -391,11 +391,7 @@ const ReasoningBlock: FC<{
   });
 
   return (
-    <ReasoningRoot
-      variant="ghost"
-      defaultOpen={running}
-      className="border-rule mb-4 border-l-2 pl-4"
-    >
+    <ReasoningRoot variant="ghost" className="border-rule mb-4 border-l-2 pl-4">
       <ReasoningTrigger active={running} preview={preview} />
       <ReasoningContent aria-busy={running}>
         {/* No label indent: the card's own padding is the margin, and the
