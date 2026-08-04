@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -118,11 +117,11 @@ func newServeCommand() *cobra.Command {
 			}
 
 			// Runs janitor: start-time only. Sweeps runs/<id>/ dirs past
-			// runs_keep_days (0 = keep forever) and drops thread-index entries
-			// pointing at sessions that no longer exist. Must run before the
-			// server opens that file for the live process.
+			// runs_keep_days (0 = keep forever) and drops thread-index rows
+			// (every surface, "web" included) pointing at sessions that no
+			// longer exist. Must run before the server opens the store for the
+			// live process.
 			runsRoot := rt.Parts().RunsRoot()
-			threadsPath := filepath.Join(runsRoot, "web_threads.jsonl")
 			removedRuns, threadsDropped, err := runs.Sweep(runsRoot,
 				time.Duration(rt.Parts().RunsKeepDays())*24*time.Hour, time.Now())
 			if err != nil {
@@ -131,23 +130,16 @@ func newServeCommand() *cobra.Command {
 				// start over.
 				fmt.Printf("warning: janitor: %v\n", err)
 			}
-			removedThreads, err := webui.PruneThreadIndex(threadsPath,
-				sessionExistsUnder(runsRoot, removedRuns))
-			if err != nil {
-				return fmt.Errorf("runs janitor: prune thread index: %w", err)
-			}
-			removedThreads += threadsDropped
-			if len(removedRuns) > 0 || removedThreads > 0 {
+			if len(removedRuns) > 0 || threadsDropped > 0 {
 				fmt.Printf("janitor: removed %d runs, %d thread entries\n",
-					len(removedRuns), removedThreads)
+					len(removedRuns), threadsDropped)
 			}
 
 			srv, err := webui.New(webui.Options{
-				Runtime:     rt,
-				WorkDir:     workDir,
-				ConfigDir:   resolved,
-				Version:     version,
-				ThreadsPath: threadsPath,
+				Runtime:   rt,
+				WorkDir:   workDir,
+				ConfigDir: resolved,
+				Version:   version,
 			})
 			if err != nil {
 				return err

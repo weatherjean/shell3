@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -23,11 +22,11 @@ func newTestServer(t *testing.T, reply string) *Server {
 	rt := shell3test.NewRuntimeForTest(t, reply)
 
 	srv, err := New(Options{
-		Runtime:     rt,
-		WorkDir:     dir,
-		ConfigDir:   dir,
-		Version:     "test",
-		ThreadsPath: filepath.Join(dir, "threads.jsonl"),
+		Runtime:   rt,
+		WorkDir:   dir,
+		ConfigDir: dir,
+		Version:   "test",
+		StateDir:  dir,
 	})
 	if err != nil {
 		t.Fatal(err)

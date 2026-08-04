@@ -15,6 +15,7 @@ import (
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/cron"
 	"github.com/weatherjean/shell3/internal/media"
+	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
@@ -79,9 +80,14 @@ type Options struct {
 	WorkDir   string // where the agent's shell runs
 	ConfigDir string // the config root the Files view exposes
 	Version   string
-	// ThreadsPath is the JSONL file mapping browser threads to sessions.
-	// Defaults to <ConfigDir>/.shell3_project/web_threads.jsonl.
-	ThreadsPath string
+	// StateDir holds webui's own on-disk state (browser login sessions, push
+	// keys) that isn't part of the runs store. Defaults to
+	// <ConfigDir>/.shell3_project.
+	StateDir string
+	// Store, if set, backs the thread index directly instead of resolving it
+	// from Runtime on every call — for tests, where the runtime has no config
+	// Parts and so no store of its own.
+	Store *runs.Store
 }
 
 // New builds the front-end and wires it into the runtime: it installs itself
@@ -90,16 +96,24 @@ func New(opts Options) (*Server, error) {
 	if opts.Runtime == nil {
 		return nil, fmt.Errorf("webui: nil runtime")
 	}
-	threadsPath := opts.ThreadsPath
-	if threadsPath == "" {
-		threadsPath = filepath.Join(opts.ConfigDir, ".shell3_project", "web_threads.jsonl")
-	}
-	threads, err := newThreadIndex(threadsPath)
-	if err != nil {
-		return nil, fmt.Errorf("webui: thread index: %w", err)
+	stateDir := opts.StateDir
+	if stateDir == "" {
+		stateDir = filepath.Join(opts.ConfigDir, ".shell3_project")
 	}
 
-	sessions, err := newSessionStore(filepath.Dir(threadsPath))
+	rt := opts.Runtime
+	storeFn := func() *runs.Store {
+		if opts.Store != nil {
+			return opts.Store
+		}
+		if parts := rt.Parts(); parts != nil {
+			return parts.Store()
+		}
+		return nil
+	}
+	threads := newThreadIndex(storeFn)
+
+	sessions, err := newSessionStore(stateDir)
 	if err != nil {
 		return nil, fmt.Errorf("webui: session store: %w", err)
 	}
@@ -123,7 +137,7 @@ func New(opts Options) (*Server, error) {
 
 	// Push is a bonus channel: if its keys cannot be written, notifications
 	// still reach an open tab, so a failure here is a warning not an error.
-	if push, err := newPusher(filepath.Dir(threadsPath)); err != nil {
+	if push, err := newPusher(stateDir); err != nil {
 		s.log.Warn("webui: web push unavailable", "error", err.Error())
 	} else {
 		s.push = push
@@ -143,8 +157,10 @@ func (s *Server) Start(ctx context.Context) {
 	s.runWorker(ctx)
 }
 
-// Close releases the thread index. The runtime is the caller's to close.
-func (s *Server) Close() error { return s.threads.close() }
+// Close is a no-op: the thread index no longer owns a file handle (it writes
+// through the runs store, which the runtime closes). Kept so callers don't
+// need to know that changed.
+func (s *Server) Close() error { return nil }
 
 // runtimeLogger returns the runtime's logger, or a discard logger for a
 // runtime built without config Parts (the test harness).

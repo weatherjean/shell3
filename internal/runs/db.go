@@ -100,6 +100,11 @@ CREATE TABLE IF NOT EXISTS threads (
 	surface    TEXT NOT NULL,
 	msg_id     TEXT NOT NULL,
 	session_id TEXT NOT NULL,
+	title      TEXT NOT NULL DEFAULT '',
+	preview    TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL DEFAULT '',
+	updated_at TEXT NOT NULL DEFAULT '',
+	deleted    INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (surface, msg_id)
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(

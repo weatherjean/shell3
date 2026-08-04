@@ -3,31 +3,41 @@
 package webui
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/weatherjean/shell3/internal/runs"
 )
 
-func TestThreadIndexPersistsAcrossReopen(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "threads.jsonl")
-
-	ti, err := newThreadIndex(path)
+// openTestStore opens a runs store rooted at a temp dir, for tests that want
+// to exercise the thread index against a real database.
+func openTestStore(t *testing.T) *runs.Store {
+	t.Helper()
+	st, err := runs.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = st.Close() })
+	return st
+}
+
+// fixedStore returns a resolver that always answers st, mimicking a runtime
+// generation that never reloads.
+func fixedStore(st *runs.Store) func() *runs.Store {
+	return func() *runs.Store { return st }
+}
+
+func TestThreadIndexPersistsAcrossReopen(t *testing.T) {
+	st := openTestStore(t)
+
+	ti := newThreadIndex(fixedStore(st))
 	ti.record("thread-a", "sess-1", "")
 	ti.record("thread-b", "sess-2", "")
-	if err := ti.close(); err != nil {
-		t.Fatal(err)
-	}
 
-	reopened, err := newThreadIndex(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reopened.close()
+	// A fresh index against the same store simulates a process restart: the
+	// in-memory map starts empty and is rebuilt entirely from the store.
+	reopened := newThreadIndex(fixedStore(st))
 
 	if got, ok := reopened.lookup("thread-a"); !ok || got != "sess-1" {
 		t.Errorf("lookup(thread-a) = %q, %v; want sess-1, true", got, ok)
@@ -40,145 +50,96 @@ func TestThreadIndexPersistsAcrossReopen(t *testing.T) {
 	}
 }
 
-// Re-recording the same pair every turn must not grow the file.
-func TestThreadIndexSkipsRedundantWrites(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "threads.jsonl")
-	ti, err := newThreadIndex(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ti.close()
+// A nil store degrades to memory-only: the index still works within the
+// process, it just has nothing to reload from a restart.
+func TestThreadIndexWorksWithNilStore(t *testing.T) {
+	ti := newThreadIndex(nil)
+	ti.record("thread-a", "sess-1", "hello")
 
-	for range 10 {
-		ti.record("thread-a", "sess-1", "")
+	if got, ok := ti.lookup("thread-a"); !ok || got != "sess-1" {
+		t.Errorf("lookup(thread-a) = %q, %v; want sess-1, true", got, ok)
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if lines := strings.Count(strings.TrimSpace(string(data)), "\n") + 1; lines != 1 {
-		t.Errorf("file has %d lines, want 1", lines)
+	if list := ti.list(); len(list) != 1 {
+		t.Errorf("list has %d entries, want 1", len(list))
 	}
 }
 
-// A crash mid-append leaves a partial final line; reopening must drop it and
-// land the next write on a clean record boundary.
-func TestThreadIndexHealsTornTail(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "threads.jsonl")
-	torn := `{"t":"thread-a","s":"sess-1"}` + "\n" + `{"t":"thread-b","s":"se`
-	if err := os.WriteFile(path, []byte(torn), 0o644); err != nil {
-		t.Fatal(err)
+func TestThreadIndexResolvesStorePerCall(t *testing.T) {
+	st1 := openTestStore(t)
+	st2 := openTestStore(t)
+
+	calls := 0
+	current := st1
+	resolver := func() *runs.Store {
+		calls++
+		return current
 	}
 
-	ti, err := newThreadIndex(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := ti.lookup("thread-b"); ok {
-		t.Error("the torn record should not load")
-	}
-	ti.record("thread-c", "sess-3", "")
-	ti.close()
+	ti := newThreadIndex(resolver)
+	ti.record("thread-a", "sess-1", "")
 
-	reopened, err := newThreadIndex(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reopened.close()
+	// Swap the generation, as a /reload would: subsequent writes must land on
+	// the new store, never the closed one.
+	current = st2
+	ti.record("thread-b", "sess-2", "")
 
-	if got, ok := reopened.lookup("thread-c"); !ok || got != "sess-3" {
-		t.Errorf("the write after a torn tail was lost: %q, %v", got, ok)
+	if calls == 0 {
+		t.Fatal("resolver was never called")
 	}
-	if got, ok := reopened.lookup("thread-a"); !ok || got != "sess-1" {
-		t.Errorf("the intact record was lost: %q, %v", got, ok)
+	if _, ok := st1.ThreadLookup(webSurface, "thread-b"); ok {
+		t.Error("a write after the generation swap should not land on the old store")
+	}
+	if got, ok := st2.ThreadLookup(webSurface, "thread-b"); !ok || got != "sess-2" {
+		t.Errorf("st2.ThreadLookup(thread-b) = %q, %v; want sess-2, true", got, ok)
 	}
 }
 
-func TestPruneThreadIndexDropsDeadSessions(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "threads.jsonl")
-	ti, err := newThreadIndex(path)
+// A dead thread — one whose session Sweep has removed — disappears once
+// Sweep runs. There is no webui-specific pruning any more: the shared
+// runs.Sweep already drops thread rows whose session id no longer exists,
+// for every surface.
+func TestPruneDeadThreadsViaSweep(t *testing.T) {
+	root := t.TempDir()
+	st, err := runs.Open(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ti.record("keep", "sess-live", "")
-	ti.record("drop", "sess-swept", "")
-	ti.close()
+	t.Cleanup(func() { _ = st.Close() })
 
-	removed, err := PruneThreadIndex(path, func(id string) bool { return id == "sess-live" })
+	liveID, err := st.NewSession(runs.Meta{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if removed != 1 {
-		t.Errorf("removed = %d, want 1", removed)
-	}
 
-	reopened, err := newThreadIndex(path)
-	if err != nil {
+	ti := newThreadIndex(fixedStore(st))
+	ti.record("keep", liveID, "")
+	ti.record("drop", "sess-never-existed", "")
+
+	if _, _, err := runs.Sweep(root, 0, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	defer reopened.close()
 
+	reopened := newThreadIndex(fixedStore(st))
 	if _, ok := reopened.lookup("drop"); ok {
-		t.Error("the swept session's thread should be gone")
+		t.Error("the thread pointing at a nonexistent session should be gone")
 	}
-	if _, ok := reopened.lookup("keep"); !ok {
-		t.Error("the live session's thread should survive")
-	}
-}
-
-// Nothing to drop means no rewrite at all — no torn-tail risk from a pointless
-// write.
-func TestPruneThreadIndexNoopKeepsFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "threads.jsonl")
-	ti, _ := newThreadIndex(path)
-	ti.record("keep", "sess-live", "")
-	ti.close()
-
-	before, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	removed, err := PruneThreadIndex(path, func(string) bool { return true })
-	if err != nil || removed != 0 {
-		t.Fatalf("removed = %d, err = %v; want 0, nil", removed, err)
-	}
-	after, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(before) != string(after) {
-		t.Error("a no-op prune rewrote the file")
-	}
-}
-
-func TestPruneThreadIndexMissingFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "absent.jsonl")
-	removed, err := PruneThreadIndex(path, func(string) bool { return true })
-	if err != nil || removed != 0 {
-		t.Errorf("removed = %d, err = %v; want 0, nil", removed, err)
+	if got, ok := reopened.lookup("keep"); !ok || got != liveID {
+		t.Errorf("keep's thread should survive: got %q, %v", got, ok)
 	}
 }
 
 // A rename must survive a restart, and must not lose the session mapping —
-// a rename record carries no session id of its own.
+// a rename writes no session id of its own.
 func TestThreadIndexRenameSurvivesReopen(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "threads.jsonl")
-	ti, err := newThreadIndex(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := openTestStore(t)
+
+	ti := newThreadIndex(fixedStore(st))
 	ti.record("t1", "sess-1", "")
 	if _, ok := ti.rename("t1", "Deploy notes"); !ok {
 		t.Fatal("rename should find the thread")
 	}
-	ti.close()
 
-	reopened, err := newThreadIndex(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reopened.close()
-
+	reopened := newThreadIndex(fixedStore(st))
 	rec, ok := reopened.get("t1")
 	if !ok || rec.Title != "Deploy notes" {
 		t.Errorf("record = %+v, want the renamed thread", rec)
@@ -189,13 +150,11 @@ func TestThreadIndexRenameSurvivesReopen(t *testing.T) {
 }
 
 // A deleted thread disappears from the listing and stays gone across a
-// restart, even though the log is append-only.
+// restart, even though the store keeps the tombstoned row.
 func TestThreadIndexDeleteIsPermanent(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "threads.jsonl")
-	ti, err := newThreadIndex(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := openTestStore(t)
+
+	ti := newThreadIndex(fixedStore(st))
 	ti.record("gone", "sess-1", "")
 	if !ti.remove("gone") {
 		t.Fatal("remove should report success")
@@ -203,61 +162,17 @@ func TestThreadIndexDeleteIsPermanent(t *testing.T) {
 	if len(ti.list()) != 0 {
 		t.Error("a deleted thread should not appear in the listing")
 	}
-	ti.close()
 
-	reopened, err := newThreadIndex(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reopened.close()
+	reopened := newThreadIndex(fixedStore(st))
 	if _, ok := reopened.get("gone"); ok {
 		t.Error("a deleted thread came back after a restart")
 	}
 }
 
-// Threads written before they carried timestamps still know their session id,
-// whose runs-store prefix is a creation time.
-func TestThreadIndexBackfillsTimeFromSessionID(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "threads.jsonl")
-	legacy := `{"t":"old","s":"20260725T181054.874072000-a308418b"}` + "\n"
-	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	ti, err := newThreadIndex(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ti.close()
-
-	rec, ok := ti.get("old")
-	if !ok {
-		t.Fatal("the legacy record should load")
-	}
-	if !strings.HasPrefix(rec.Created, "2026-07-25T") {
-		t.Errorf("created = %q, want a time recovered from the session id", rec.Created)
-	}
-	if rec.Updated == "" {
-		t.Error("updated should fall back to created")
-	}
-}
-
-func TestTimeFromSessionIDIgnoresOtherShapes(t *testing.T) {
-	for _, id := range []string{"", "not-a-session", "web-t1", "20261340T999999.0-x"} {
-		if got := timeFromSessionID(id); got != "" {
-			t.Errorf("timeFromSessionID(%q) = %q, want empty", id, got)
-		}
-	}
-}
-
 // The listing is newest-activity-first, which is the order the sidebar shows.
 func TestThreadIndexListsNewestFirst(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "threads.jsonl")
-	ti, err := newThreadIndex(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ti.close()
+	st := openTestStore(t)
+	ti := newThreadIndex(fixedStore(st))
 
 	ti.record("older", "sess-1", "")
 	time.Sleep(1100 * time.Millisecond) // the stamp has second resolution
@@ -272,11 +187,8 @@ func TestThreadIndexListsNewestFirst(t *testing.T) {
 // A thread is named by what was first asked in it. The first preview wins:
 // renaming the conversation on every message would make the list unstable.
 func TestThreadPreviewIsSetOnceFromTheFirstMessage(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "threads.jsonl")
-	ti, err := newThreadIndex(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := openTestStore(t)
+	ti := newThreadIndex(fixedStore(st))
 
 	ti.record("t1", "sess-1", "plan the migration")
 	ti.record("t1", "sess-1", "and now something else")
@@ -286,12 +198,7 @@ func TestThreadPreviewIsSetOnceFromTheFirstMessage(t *testing.T) {
 		t.Errorf("preview = %q, want the first message", rec.Preview)
 	}
 
-	ti.close()
-	reopened, err := newThreadIndex(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reopened.close()
+	reopened := newThreadIndex(fixedStore(st))
 	if rec, _ := reopened.get("t1"); rec.Preview != "plan the migration" {
 		t.Errorf("preview = %q after restart, want it preserved", rec.Preview)
 	}
@@ -299,21 +206,13 @@ func TestThreadPreviewIsSetOnceFromTheFirstMessage(t *testing.T) {
 
 // A rename writes no preview of its own; it must not erase the one there.
 func TestRenameKeepsThePreview(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "threads.jsonl")
-	ti, err := newThreadIndex(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := openTestStore(t)
+	ti := newThreadIndex(fixedStore(st))
+
 	ti.record("t1", "sess-1", "plan the migration")
 	ti.rename("t1", "Migration")
-	ti.close()
 
-	reopened, err := newThreadIndex(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reopened.close()
-
+	reopened := newThreadIndex(fixedStore(st))
 	rec, _ := reopened.get("t1")
 	if rec.Title != "Migration" || rec.Preview != "plan the migration" {
 		t.Errorf("record = %+v, want both the name and the preview", rec)
