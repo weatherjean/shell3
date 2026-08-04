@@ -38,8 +38,9 @@ public internet at all.
 
 1. Tailscale (recommended): `tailscale serve --bg 8765` — https, a stable
    `https://<machine>.<tailnet>.ts.net` URL, reachable from your devices
-   only, survives reboots on its own. Free for personal use. Works with a
-   plain `shell3 serve` in a terminal — no service required.
+   only, survives reboots on its own. Free for personal use. No service
+   required: `tailscale serve --bg 8765 && shell3 serve` is a complete
+   exposed setup in one line (`--bg` configures and returns).
 2. SSH: `ssh -L 8765:127.0.0.1:8765 host` from the machine you're on.
 3. Public tunnel (last resort): `cloudflared tunnel --url
    http://127.0.0.1:8765` prints a public https URL — anyone who finds it
