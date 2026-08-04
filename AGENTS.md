@@ -338,7 +338,12 @@ durable path (TTS audio included, cached as `tts-*`) and is served back at
 `/api/media/<name>`; the agent shows a generated image by writing
 `![](/api/media/<file>)`. Restriction policy is the hook script, not a tools
 list. When no media model is configured the UI falls back to the browser's own
-Web Speech APIs, so dictation still works.
+Web Speech APIs, so dictation still works. `send_file` (`internal/webui/sendtool.go`)
+is a sibling host tool on the same decorator: `{path, name?}` stages any local
+file into `~/.shell3/media/` (as `sent-*`) and returns the `/api/media/` link
+to show, refusing `.env`/dotenv siblings, directories, and files over 50 MB;
+it is skipped for a headless session, since there is no chat to hand a link
+to.
 
 An in-process cron scheduler (`internal/cron`, jobs are `cron/<name>.md`
 files; each job dispatches its declared agent — a subagent from `agents/`, or

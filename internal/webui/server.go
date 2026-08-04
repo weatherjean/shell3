@@ -206,6 +206,9 @@ func (s *Server) resync() {
 		if err := media.RegisterImageTool(sess, clients); err != nil {
 			s.log.Error("webui: image tool", err)
 		}
+		if err := RegisterSendFileTool(sess, s.workDir); err != nil {
+			s.log.Error("webui: send_file tool", err)
+		}
 	})
 }
 

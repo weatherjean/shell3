@@ -637,8 +637,19 @@ media:
   deliver. Gate it like any tool (`name == "image_generate"` in the hook
   payload).
 
+**`send_file`** (webui only; registered for the main agent and every
+non-headless session — never a subagent or cron job, which have no chat to
+deliver into) hands the user any local file: `{path, name?}` copies the file
+into `~/.shell3/media/` under a unique `sent-*` name and returns a ready-made
+link — `![](/api/media/<file>)` for images, `[<name>](/api/media/<file>)`
+otherwise. It resolves a relative `path` against the agent's workdir and
+refuses `.env`/dotenv siblings, directories, and files over 50 MB, all as
+`error: …` tool-result text. No configuration needed; it's always available
+where a chat exists to receive the link.
+
 **Media storage.** Dictated recordings (`web-*`), uploads (`up-*`), generated
-images (`img-*`), and synthesized speech (`tts-*`) live in `~/.shell3/media/`
+images (`img-*`), sent files (`sent-*`), and synthesized speech (`tts-*`) live
+in `~/.shell3/media/`
 — stable paths that survive reboots, re-readable with `read_media`, and
 servable to the browser at `/api/media/<file>`. The folder grows until you
 prune it — the interface's **Files** view
