@@ -641,11 +641,15 @@ media:
 non-headless session — never a subagent or cron job, which have no chat to
 deliver into) hands the user any local file: `{path, name?}` copies the file
 into `~/.shell3/media/` under a unique `sent-*` name and returns a ready-made
-link — `![](/api/media/<file>)` for images, `[<name>](/api/media/<file>)`
-otherwise. It resolves a relative `path` against the agent's workdir and
-refuses `.env`/dotenv siblings, directories, and files over 50 MB, all as
-`error: …` tool-result text. No configuration needed; it's always available
-where a chat exists to receive the link.
+link — `![<name>](/api/media/<file>)` for images (`name` becomes the alt
+text, defaulting to the file's base name), `[<name>](/api/media/<file>)`
+otherwise. It resolves a relative `path` against the agent's workdir,
+resolves symlinks before touching the file, and refuses `.env`/dotenv
+siblings (checked on both the requested name and the symlink-resolved
+target — a symlink can't launder a credentials file under a clean-looking
+name), directories, and files over 50 MB, all as `error: …` tool-result
+text. No configuration needed; it's always available where a chat exists to
+receive the link.
 
 **Media storage.** Dictated recordings (`web-*`), uploads (`up-*`), generated
 images (`img-*`), sent files (`sent-*`), and synthesized speech (`tts-*`) live

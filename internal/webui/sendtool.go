@@ -75,12 +75,27 @@ func newSendFileHandler(workDir string) func(ctx context.Context, argsJSON strin
 		base := filepath.Base(path)
 
 		// Refuse the `.env` beside shell3.yaml and dotenv siblings (.env.local,
-		// …); mirrors the credential-file guard the config loader applies.
-		if lb := strings.ToLower(base); lb == ".env" || strings.HasPrefix(lb, ".env.") {
+		// …); mirrors the credential-file guard the config loader applies. This
+		// check on the unresolved name catches the obvious case, but a symlink
+		// can point anywhere — resolved below, and checked again there, before
+		// anything is read.
+		if isDotenvName(base) {
 			return "error: refusing to send a credentials file", nil
 		}
 
-		info, err := os.Stat(path)
+		// Resolve symlinks before doing anything that reads the file: os.Stat
+		// and os.Open both follow them, so a symlink whose own name is clean
+		// (e.g. report.txt -> ~/.shell3/.env) would otherwise sail past the
+		// check above and stage the real target into the served media dir.
+		resolved, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			return "error: cannot read file: " + err.Error(), nil
+		}
+		if isDotenvName(filepath.Base(resolved)) {
+			return "error: refusing to send a credentials file", nil
+		}
+
+		info, err := os.Stat(resolved)
 		if err != nil {
 			return "error: cannot read file: " + err.Error(), nil
 		}
@@ -91,7 +106,7 @@ func newSendFileHandler(workDir string) func(ctx context.Context, argsJSON strin
 			return fmt.Sprintf("error: file too large (%d MB, max %d MB)", info.Size()>>20, maxSendFileBytes>>20), nil
 		}
 
-		staged, err := stageMediaFile(path, base)
+		staged, err := stageMediaFile(resolved, base)
 		if err != nil {
 			return "error: " + err.Error(), nil
 		}
@@ -101,7 +116,7 @@ func newSendFileHandler(workDir string) func(ctx context.Context, argsJSON strin
 			name = base
 		}
 		if isImageExt(filepath.Ext(base)) {
-			return fmt.Sprintf("sent %s — show it with ![](/api/media/%s)", base, staged), nil
+			return fmt.Sprintf("sent %s — show it with ![%s](/api/media/%s)", base, name, staged), nil
 		}
 		return fmt.Sprintf("sent %s — give the user this link: [%s](/api/media/%s)", base, name, staged), nil
 	}
@@ -135,6 +150,14 @@ func stageMediaFile(src, base string) (string, error) {
 		return "", err
 	}
 	return staged, nil
+}
+
+// isDotenvName reports whether base (a file's base name, any case) is `.env`
+// or a dotenv sibling like `.env.local` — the credential-file guard applied
+// to both the requested path and its symlink-resolved target.
+func isDotenvName(base string) bool {
+	lb := strings.ToLower(base)
+	return lb == ".env" || strings.HasPrefix(lb, ".env.")
 }
 
 // isImageExt reports whether ext (with leading dot, any case) names an image

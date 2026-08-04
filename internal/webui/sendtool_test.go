@@ -119,8 +119,17 @@ func TestSendFileHandlerImageLink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Handler: %v", err)
 	}
-	if !strings.Contains(out, "![](/api/media/") {
+	if !strings.Contains(out, "![pic.png](/api/media/") {
 		t.Errorf("out = %q, want a markdown image link for an image file", out)
+	}
+
+	// A custom name becomes the image's alt text too.
+	out2, err := handler(context.Background(), `{"path":"pic.png","name":"Q3 chart"}`)
+	if err != nil {
+		t.Fatalf("Handler: %v", err)
+	}
+	if !strings.Contains(out2, "![Q3 chart](/api/media/") {
+		t.Errorf("out = %q, want the custom name as the image alt text", out2)
 	}
 }
 
@@ -159,6 +168,84 @@ func TestSendFileHandlerRefusesDotenv(t *testing.T) {
 	}
 	if !strings.HasPrefix(out2, "error:") || !strings.Contains(out2, "credentials") {
 		t.Errorf("out = %q, want a credentials-file refusal", out2)
+	}
+}
+
+func TestSendFileHandlerRefusesSymlinkedDotenv(t *testing.T) {
+	mediaDir := t.TempDir()
+	t.Setenv("SHELL3_MEDIA_DIR", mediaDir)
+
+	configDir := t.TempDir()
+	envPath := filepath.Join(configDir, ".env")
+	if err := os.WriteFile(envPath, []byte("SECRET_MARKER=do-not-leak"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := t.TempDir()
+	link := filepath.Join(workDir, "report.txt")
+	if err := os.Symlink(envPath, link); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &fakeRegistrar{}
+	if err := RegisterSendFileTool(r, workDir); err != nil {
+		t.Fatalf("RegisterSendFileTool: %v", err)
+	}
+	handler := r.tools[0].Handler
+
+	out, err := handler(context.Background(), `{"path":"report.txt"}`)
+	if err != nil {
+		t.Fatalf("Handler: %v", err)
+	}
+	if !strings.HasPrefix(out, "error:") || !strings.Contains(out, "credentials") {
+		t.Errorf("out = %q, want a credentials-file refusal for a symlink pointing at .env", out)
+	}
+
+	ents, err := os.ReadDir(mediaDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ents) != 0 {
+		t.Fatalf("want nothing staged into the media dir, got %v", ents)
+	}
+}
+
+func TestSendFileHandlerRefusesSymlinkedDotenvSibling(t *testing.T) {
+	mediaDir := t.TempDir()
+	t.Setenv("SHELL3_MEDIA_DIR", mediaDir)
+
+	configDir := t.TempDir()
+	envPath := filepath.Join(configDir, ".env.local")
+	if err := os.WriteFile(envPath, []byte("SECRET_MARKER=do-not-leak"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := t.TempDir()
+	link := filepath.Join(workDir, "notes.txt")
+	if err := os.Symlink(envPath, link); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &fakeRegistrar{}
+	if err := RegisterSendFileTool(r, workDir); err != nil {
+		t.Fatalf("RegisterSendFileTool: %v", err)
+	}
+	handler := r.tools[0].Handler
+
+	out, err := handler(context.Background(), `{"path":"notes.txt"}`)
+	if err != nil {
+		t.Fatalf("Handler: %v", err)
+	}
+	if !strings.HasPrefix(out, "error:") || !strings.Contains(out, "credentials") {
+		t.Errorf("out = %q, want a credentials-file refusal for a symlink pointing at .env.local", out)
+	}
+
+	ents, err := os.ReadDir(mediaDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ents) != 0 {
+		t.Fatalf("want nothing staged into the media dir, got %v", ents)
 	}
 }
 
