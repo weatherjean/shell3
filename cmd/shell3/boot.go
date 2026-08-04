@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -455,8 +456,29 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool) {
 	w("## Keeping it up, and reaching it")
 	w("")
 	w("`shell3 serve` binds loopback and asks for the password you just set.")
-	w("Running it as a service and exposing it beyond this machine are yours")
-	w("to set up — see `docs/deploying.md` in the repo, or ask the agent.")
+	if runtime.GOOS == "linux" {
+		w("One paste makes it a service on your tailnet ([Tailscale](https://tailscale.com) is free):")
+		w("")
+		w("```bash")
+		w("mkdir -p ~/.config/systemd/user && cat > ~/.config/systemd/user/shell3.service <<'EOF'")
+		w("[Unit]")
+		w("Description=shell3")
+		w("[Service]")
+		w("ExecStart=%%h/.local/bin/shell3 serve")
+		w("Restart=always")
+		w("RestartSec=5")
+		w("[Install]")
+		w("WantedBy=default.target")
+		w("EOF")
+		w(`systemctl --user enable --now shell3 && loginctl enable-linger "$USER" && tailscale serve --bg 8765`)
+		w("```")
+		w("")
+		w("`tailscale serve` prints your stable https URL — put it in `web.url`.")
+		w("More (public tunnels, other init systems): `docs/deploying.md`, or ask the agent.")
+	} else {
+		w("Running it as a service and exposing it beyond this machine are yours")
+		w("to set up — see `docs/deploying.md` in the repo, or ask the agent.")
+	}
 
 	fmt.Println()
 	fmt.Print(cli.RenderMarkdown(b.String()))

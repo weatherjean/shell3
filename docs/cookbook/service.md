@@ -5,19 +5,21 @@ tailnet with `tailscale serve`. Nothing public, stable https URL, and only
 one unit to manage — tailscaled is already a system service and `--bg`
 serve config survives reboots. Tailscale's personal plan is free.
 
-    # ~/.config/systemd/user/shell3.service
-    [Unit]
-    Description=shell3
-    [Service]
-    ExecStart=%h/.local/bin/shell3 serve
-    Restart=always
-    RestartSec=5
-    [Install]
-    WantedBy=default.target
+One paste does all of it — unit, enable, linger, tailnet:
 
-    systemctl --user enable --now shell3
-    loginctl enable-linger $USER
-    tailscale serve --bg 8765
+```bash
+mkdir -p ~/.config/systemd/user && cat > ~/.config/systemd/user/shell3.service <<'EOF'
+[Unit]
+Description=shell3
+[Service]
+ExecStart=%h/.local/bin/shell3 serve
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=default.target
+EOF
+systemctl --user enable --now shell3 && loginctl enable-linger "$USER" && tailscale serve --bg 8765
+```
 
 `tailscale serve` prints the URL — `https://<machine>.<tailnet>.ts.net`
 (it will ask once to enable HTTPS certs for the tailnet). Put that in
