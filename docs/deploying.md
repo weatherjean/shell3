@@ -40,6 +40,9 @@ so prefer exposure that authenticates in its own right:
   (prints a public https URL; anyone who finds it gets a login page).
 - SSH: `ssh -L 8765:127.0.0.1:8765 host` from the machine you're on.
 
+To run shell3 and a tunnel together as services, see
+[cookbook/service.md](cookbook/service.md).
+
 If the address is stable, set `web.url` so shell3 knows its public name.
 Plain http past localhost sends the password in clear — always https.
 Web push also needs https (or localhost), so it follows the same rule.

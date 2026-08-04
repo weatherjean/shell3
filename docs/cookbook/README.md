@@ -72,6 +72,7 @@ can pick one; delete the stub once one of these lands.)
 
 **Provider and host recipes**
 
+- `service.md` — shell3 + a cloudflared tunnel as systemd user services.
 - `mcp.md` — MCP servers: stdio + HTTP recipes, allow-lists, gating.
 - `sandbox.md` — sandbox/route bash via hook argv verdicts.
 - `voice-images.md` — voice + images; Groq and OpenRouter quickstarts.
