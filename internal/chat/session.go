@@ -40,8 +40,8 @@ type Session struct {
 	lastPromptTokens int         // accurate token count from most recent streamOnce response
 	id               string      // runs session id; "" if no store configured
 	store            *runs.Store // optional; nil → no sidecar persistence
-	// persistedLen is the count of sess.messages already written to the current
-	// sess.id's messages.jsonl. Updated by saveHistory after each flush and by
+	// persistedLen is the count of sess.messages already written to the runs
+	// store under the current sess.id. Updated by saveHistory after each flush and by
 	// compactInto after the session roll. Touched only on the turn goroutine
 	// (same as sess.id) so no extra lock is required.
 	persistedLen int

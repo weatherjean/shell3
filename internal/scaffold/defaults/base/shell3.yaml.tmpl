@@ -101,6 +101,6 @@ web:
   {{if .TOTP}}totp_secret: env:SHELL3_WEB_TOTP_SECRET{{else}}# totp_secret: env:SHELL3_WEB_TOTP_SECRET{{end}}
   # url: https://shell3.example.com
 
-# runs_keep_days: how long a finished session's runs/<id>/ dir is kept before
+# runs_keep_days: how long a finished session is kept in the runs store before
 # `shell3 serve` sweeps it at startup; 0 keeps everything forever (default 30).
 # runs_keep_days: 30

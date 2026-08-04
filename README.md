@@ -84,7 +84,8 @@ Every subcommand takes `--config/-c` to point at a different config directory.
   every completion, and failures always surface.
 - **One config directory, four rules.** YAML wires it, markdown prompts it,
   files enable it, one bash script gates it. Versionable, diffable, reloadable
-  live; history is plain JSONL you can `rg`.
+  live. Conversation history lands in one SQLite file the agent can search
+  itself with the `history` tool.
 - **Any OpenAI-compatible provider**: OpenAI, Ollama, Groq, LM Studio,
   OpenRouter, DeepSeek, and friends. MCP servers too, opt-in per agent and
   gated like every other tool.
@@ -97,7 +98,7 @@ Every subcommand takes `--config/-c` to point at a different config directory.
 - **[Configuration](docs/configuration.md)**: the config directory — models,
   agent, subagents, projects, the web block, cron, voice & images, secrets,
   MCP, hooks, skills.
-- **[CLI](docs/cli.md)**: every subcommand and the JSONL runs store.
+- **[CLI](docs/cli.md)**: every subcommand and the SQLite runs store.
 - **[Deploying](docs/deploying.md)**: keeping serve running, and reaching it
   from elsewhere.
 - **[Security & data](docs/security.md)**: threat model, secrets, wiping data.

@@ -17,7 +17,7 @@ and it gets a yes first.
 Investigate read-only until you could defend every step of the plan:
 
 - Look at what actually exists: the files, the state, the service, the
-  history (`rg` over past runs if this came up before).
+  history (the `history` tool if this came up before).
 - Check `memory.md` and `projects.md` for decisions and pitfalls already
   recorded.
 - Note what you could NOT verify — unknowns belong in the plan, not under it.

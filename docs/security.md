@@ -219,12 +219,14 @@ YAML as `env:KEY`:
 
 ## Where data lives, and how to remove it
 
-shell3 is file-native — no database.
+Your config is files; the conversation history is one SQLite database beside
+it. Both are yours, on your disk, and both are removed with `rm`.
 
 - **Runtime state**: `.shell3_project/`, kept beside `shell3.yaml` (default
-  install: `~/.shell3/.shell3_project/`) — conversation history as JSONL
-  (`runs/<id>/messages.jsonl` + `meta.json`), the browser thread→session
-  index (`web_threads.jsonl`), the hashed login sessions
+  install: `~/.shell3/.shell3_project/`) — the runs store
+  (`shell3.db`: every session's transcript, its full-text index, and the
+  browser thread→session index — plus SQLite's `-wal`/`-shm` siblings),
+  background-job output logs (`runs/<id>/jobs/<job>.log`), the hashed login sessions
   (`web_sessions.json`, `0600`), and, once push is used, `web_push_keys.json`
   (the VAPID private key, `0600`) and `web_push_subs.json` (subscribed
   browsers). The directory ignores itself (a self-contained `.gitignore` of

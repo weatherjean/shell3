@@ -129,14 +129,14 @@ system prompt. There is exactly one agent because there is exactly one
 ```markdown
 ---
 model: main
-tools: [bash, bash_bg, edit, media]
+tools: [bash, bash_bg, edit, media, history]
 context: [memory.md]
 ---
 You are a personal assistant running inside shell3…
 ```
 
 Frontmatter keys: `model` (required), `tools` (any of `bash`, `bash_bg`,
-`edit`, `media`, `read`, `list_files`), `mcp` (see [MCP](#mcp-servers)),
+`edit`, `media`, `read`, `list_files`, `history`), `mcp` (see [MCP](#mcp-servers)),
 `prune`, `context` (see below).
 
 ### Giving the agent a memory — `context:`
@@ -180,6 +180,24 @@ a smaller model) — list them in `tools` to turn them on; leave them out and
 the bash-first redirect stands. A read-only agent is a policy, not a tool set:
 gate `bash` in its [hook script](#the-command-gate--hookssh).
 
+### Recalling past conversations — the `history` tool
+
+`history` in `tools` (the scaffold puts it on the main agent) lets the agent
+read its own past out of the [runs store](#the-runs-store--shell3db) instead
+of only the current thread:
+
+- `{"query": "certificate renewal"}` — ranked full-text search over what you
+  and the agent said, across **every** stored session, browser threads and
+  cron runs alike. FTS5 syntax: bare words AND together, `"quoted phrases"`
+  match exactly, `OR`/`NOT`/`prefix*` work; a malformed query is retried as
+  one quoted phrase rather than erroring. Tool output is not indexed — search
+  for what was said *about* a thing, not for raw command output.
+- `{"session": "<id>", "around": 41}` — read the transcript around a hit.
+
+The tool is read-only, and it is the whole interface: the agent never writes
+to the database. Leave `history` out of `tools` and the name hits the same
+unknown-tool redirect as `read_file`.
+
 ## Subagents & delegation
 
 A subagent is a delegatable specialist: one file in `agents/`. The filename is
@@ -215,7 +233,7 @@ in `tools`. **Completion delivery is the notifier's** (see
 [The notifier](#the-notifier--notifiermd)): each finished job — bash_bg,
 subagent, or cron run — becomes one small triage turn that decides whether
 the result is posted to you, handed to the main agent, or stays silent
-(recorded in runs/ and the jobs list either way). Both `task` and `bash_bg`
+(recorded in the runs store and the jobs list either way). Both `task` and `bash_bg`
 accept two extra args:
 
 - `direct: true` skips the notifier — the spawning agent is woken with the
@@ -724,25 +742,43 @@ you can audit exactly why something was silenced — and tune the policy by
 editing `notifier.md`, which the main agent can do itself when you tell it
 "stop pinging me about backups".
 
+## The runs store — `shell3.db`
+
+Every session — browser threads, subagents, cron runs, `shell3 ask` — is
+stored in one SQLite database beside `shell3.yaml`:
+`.shell3_project/shell3.db`. It holds the sessions and their messages, each
+front-end's thread→session index, and an FTS5 full-text index over user and
+assistant text (the index the [`history` tool](#recalling-past-conversations--the-history-tool) searches;
+tool output is deliberately not indexed). It is pure Go — no cgo, no
+external SQLite. A background job's raw output stays a plain file under
+`.shell3_project/runs/<session>/jobs/<id>.log`.
+
+The database carries a schema version. If it doesn't match the binary you are
+running, the file is **deleted and recreated empty**, with one line on stderr
+saying so. shell3 data is disposable by design: there are no migrations, and
+a version skew never leaves you on a half-understood schema. Keep anything
+you actually care about outside the store.
+
 ## The runs janitor — `runs_keep_days`
 
-Every thread — and every background job the notifier runs a turn over — gets
-its own `runs/<id>/` directory, so history multiplies quickly. An optional top-level `shell3.yaml` key bounds it:
+Every thread — and every background job the notifier runs a turn over — is a
+stored session, so history multiplies quickly. An optional top-level
+`shell3.yaml` key bounds it:
 
 ```yaml
 runs_keep_days: 30   # default 30; 0 = keep forever
 ```
 
 At `shell3 serve` startup — before the server listens, never on
-`shell3 ask` — a sweep deletes `runs/<id>/` directories whose newest file is
-older than the cutoff, then rewrites `web_threads.jsonl` to drop entries
-pointing at sessions that no longer exist (whether just swept or already
-gone by other means). It prints one line, `janitor: removed N runs, M thread
-entries` (silent when both are zero). Fail-open per directory: a dir the
-sweep can't read or remove is skipped, not fatal — it's reported as a
-`warning: janitor: …` line and the server still starts; one bad `runs/<id>/`
-is cosmetic hygiene, never a reason to refuse startup. Start-time only — no
-daemon, no timers.
+`shell3 ask` — a sweep deletes sessions whose last activity is older than the
+cutoff, taking their messages, FTS entries, thread-index rows and job-log
+directories with them. It also removes empty crash leftovers, thread entries
+pointing at sessions that are gone by any other means, and orphaned
+`runs/<id>/` directories left by older builds. It prints one line, `janitor:
+removed N runs, M thread entries` (silent when both are zero). Fail-open: a
+sweep error is reported as a `warning: janitor: …` line and the server still
+starts — stale rows are cosmetic hygiene, never a reason to refuse startup.
+Start-time only — no daemon, no timers.
 
 ## Skills — `skills/`
 
