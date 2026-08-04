@@ -1,16 +1,33 @@
-# Serve + tunnel as services
+# Serve as a service, reachable from your devices
 
-Two systemd user units: shell3, and a cloudflared quick tunnel in front of
-it. ([deploying.md](../deploying.md) has the shell3 unit alone.)
+The recommended shape: shell3 as a systemd user unit, exposed over your
+tailnet with `tailscale serve`. Nothing public, stable https URL, and only
+one unit to manage — tailscaled is already a system service and `--bg`
+serve config survives reboots. Tailscale's personal plan is free.
 
     # ~/.config/systemd/user/shell3.service
     [Unit]
     Description=shell3
     [Service]
     ExecStart=%h/.local/bin/shell3 serve
-    Restart=on-failure
+    Restart=always
+    RestartSec=5
     [Install]
     WantedBy=default.target
+
+    systemctl --user enable --now shell3
+    loginctl enable-linger $USER
+    tailscale serve --bg 8765
+
+`tailscale serve` prints the URL — `https://<machine>.<tailnet>.ts.net`
+(it will ask once to enable HTTPS certs for the tailnet). Put that in
+`web.url`, open it on any device signed into your tailnet, done.
+
+## Public internet (last resort)
+
+If a device genuinely can't join the tailnet, a cloudflared tunnel as a
+second unit puts a public URL in front — anyone who finds it gets your
+login page, so keep TOTP on:
 
     # ~/.config/systemd/user/shell3-tunnel.service
     [Unit]
@@ -18,18 +35,12 @@ it. ([deploying.md](../deploying.md) has the shell3 unit alone.)
     After=shell3.service
     [Service]
     ExecStart=/usr/local/bin/cloudflared tunnel --url http://127.0.0.1:8765
-    Restart=on-failure
+    Restart=always
+    RestartSec=5
     [Install]
     WantedBy=default.target
 
-    systemctl --user enable --now shell3 shell3-tunnel
-    loginctl enable-linger $USER
-
-A quick tunnel mints a new URL on every restart; read it from the journal:
-
-    journalctl --user -u shell3-tunnel | grep -o 'https://.*trycloudflare.com' | tail -1
-
-For a stable address, use a [named tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
-(same unit, `ExecStart=cloudflared tunnel run <name>`) and set `web.url` to
-its hostname. Remember what a tunnel is: a shell on the public internet
-behind one login — Cloudflare Access in front of it is worth having.
+A quick tunnel mints a new URL each restart; read it with
+`journalctl --user -u shell3-tunnel | grep -o 'https://.*trycloudflare.com' | tail -1`.
+For a stable hostname use a [named tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
+(`ExecStart=cloudflared tunnel run <name>`) and set `web.url`.
