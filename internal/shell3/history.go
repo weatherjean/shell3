@@ -125,7 +125,7 @@ func (rt *Runtime) PastSessions(limit int) ([]SessionMeta, error) {
 		}
 		e.LastAt = last.UTC()
 		// Derive the message count + a preview (newest assistant/user text) from
-		// the run's jsonl. Best-effort: a read error leaves NumMsgs 0 / Preview "".
+		// the store's transcript. Best-effort: a read error leaves NumMsgs 0 / Preview "".
 		if msgs, err := rt.store.LoadMessages(m.ID); err == nil {
 			e.NumMsgs = len(msgs)
 			e.Preview = previewOf(msgs)

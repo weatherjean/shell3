@@ -1,9 +1,9 @@
 package runs
 
-// The front-end thread indexes (Telegram message id → session id, the serve
-// transport's equivalent, and the web front-end's browser thread id) live in
-// the same database as the sessions they point at. surface namespaces the
-// front-ends ("telegram", "serve", "web") so their ids never cross-resolve.
+// The front-end thread indexes (each front-end's own message/thread id →
+// session id) live in the same database as the sessions they point at.
+// surface namespaces the front-ends (e.g. "web") so their ids never
+// cross-resolve.
 
 // ThreadRecord maps msgID to sessionID for the given surface. Last write
 // wins; a failed write is reported but the caller may treat it as

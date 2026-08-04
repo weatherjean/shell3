@@ -190,8 +190,8 @@ type SessionOpts struct {
 	// back to the estimate over InitialMessages.
 	InitialPromptTokens int
 	// Store wires sidecar persistence for reminders. When Store is non-nil and
-	// StoreID is non-empty, recordReminder appends to runs/<id>/reminders.jsonl
-	// and RestoreReminders reloads it on resume.
+	// StoreID is non-empty, recordReminder writes to the store's reminders
+	// table and RestoreReminders reloads from it on resume.
 	Store *runs.Store
 }
 

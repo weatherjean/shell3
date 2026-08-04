@@ -482,9 +482,8 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 }
 
 // BuildParts assembles the shared runtime parts. The returned cleanup closes
-// MCP connections and the log; callers MUST invoke it once. (The runs store has
-// no handle to close, and run_proxy processes are detached fire-and-forget —
-// see openStore and modelproxy.)
+// MCP connections, the runs store, and the log; callers MUST invoke it once.
+// (run_proxy processes are detached fire-and-forget — see modelproxy.)
 func BuildParts(opts Options) (*Parts, func(), error) {
 	b := &builder{opts: opts}
 	noop := func() {}

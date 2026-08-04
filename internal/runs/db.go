@@ -117,7 +117,7 @@ func openDB(path string) (*sql.DB, error) {
 	// A non-fresh database whose version doesn't match: recreate rather than
 	// limp along on a shape this binary doesn't fully write.
 	fmt.Fprintf(os.Stderr,
-		"runs store: schema v%d != v%d — recreated %s (shell3 data is disposable by design)\n",
+		"runs store: schema v%d != v%d — recreating %s (shell3 data is disposable by design)\n",
 		version, schemaVersion, path)
 	if err := db.Close(); err != nil {
 		return nil, err

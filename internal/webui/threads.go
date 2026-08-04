@@ -78,8 +78,8 @@ func newThreadIndex(store func() *runs.Store) *threadIndex {
 }
 
 // persistLocked writes one record to the store. Caller holds ti.mu. Best
-// effort: a failure here is not surfaced, matching ThreadIndex's pattern in
-// internal/telegram.
+// effort: a failure here is not surfaced, matching every other front-end's
+// thread-index pattern of best-effort persistence.
 func (ti *threadIndex) persistLocked(rec *threadRecord) {
 	st := ti.store()
 	if st == nil {

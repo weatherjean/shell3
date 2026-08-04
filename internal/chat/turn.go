@@ -535,8 +535,8 @@ func saveHistory(st *runs.Store, lg applog.Logger, sess *Session, sessionID stri
 	}
 }
 
-// flushMessages appends each message in msgs to the runs store (one JSONL line
-// per message, append-only) and returns how many were persisted. Best-effort:
+// flushMessages appends each message in msgs to the runs store (one row per
+// message, append-only) and returns how many were persisted. Best-effort:
 // a write failure is logged, not fatal — but it STOPS the flush and the count
 // reflects only the contiguous persisted prefix, so the caller advances its
 // high-water mark no further than what actually reached disk. Continuing past a

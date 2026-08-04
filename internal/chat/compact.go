@@ -219,7 +219,7 @@ func compactApply(ctx context.Context, cfg TurnConfig, sess *Session, forced boo
 // pruneOldToolOutputs stubs large tool results that sit before the protected
 // recent tail, with no LLM call. It is the cheap first tier of context relief;
 // only the manual /prune and full compaction persist — this mutates the
-// in-memory slice only (the append-only JSONL keeps originals). Idempotent: a
+// in-memory slice only (the append-only store keeps originals). Idempotent: a
 // stub is far below pruneMinBytes, so re-running skips it.
 func pruneOldToolOutputs(cfg TurnConfig, sess *Session) {
 	cut := compactionCut(sess.messages, resolveKeepRecent(cfg))
@@ -348,10 +348,10 @@ func writeBulletSection(b *strings.Builder, tag string, items []string) {
 //
 // Returns true when the compaction was applied. It returns false WITHOUT
 // touching the in-memory history when the runs-session roll fails (e.g. a full
-// disk): rewriting memory to the short slice while the outgoing session's JSONL
-// still holds the full history would let the next saveHistory duplicate the tail
-// into it. Aborting keeps the on-disk history coherent; the caller proceeds on
-// the un-compacted history (compaction is best-effort).
+// disk): rewriting memory to the short slice while the outgoing session's store
+// record still holds the full history would let the next saveHistory duplicate
+// the tail into it. Aborting keeps the on-disk history coherent; the caller
+// proceeds on the un-compacted history (compaction is best-effort).
 func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.Message, lg applog.Logger, workDir, configDir, model string) bool {
 	prevSessionID := sess.id
 	// newSessionID stays prevSessionID unless the runs-session roll below
@@ -364,7 +364,7 @@ func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.
 	// the NEW session FIRST: only if that succeeds do we flush and end the
 	// outgoing one. A failed NewSession then leaves the outgoing session intact
 	// (not ended, still persistable) and we abort the compaction below, rather
-	// than ending a session we keep writing to and corrupting its JSONL.
+	// than ending a session we keep writing to and corrupting its stored history.
 	if st != nil {
 		newID, err := st.NewSession(runs.Meta{Workdir: workDir, ConfigDir: configDir, Model: model})
 		if err != nil {
@@ -373,8 +373,8 @@ func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.
 		}
 		// Flush only the unsaved tail of the outgoing session. Messages
 		// 0..persistedLen-1 were already written by prior saveHistory calls;
-		// re-flushing the full slice would duplicate those lines in the
-		// append-only JSONL file. A guard mirrors saveHistory's own guard.
+		// re-flushing the full slice would duplicate those rows in the
+		// append-only store. A guard mirrors saveHistory's own guard.
 		if sess.persistedLen <= len(sess.messages) {
 			flushMessages(st, lg, prevSessionID, sess.messages[sess.persistedLen:])
 		}
