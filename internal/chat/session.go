@@ -281,6 +281,18 @@ func (s *Session) recordReminder(text string) {
 	}
 }
 
+// SetStore swaps the sidecar persistence handle. Called on a /reload
+// generation swap: the session keeps its history and store id, but must
+// write reminders through the NEW generation's handle — the old one is
+// closed once the parked generation drains. Guarded by msgMu because
+// recordReminder reads s.store under the same lock. SetStore(nil) is legal;
+// recordReminder already nil-checks before writing.
+func (s *Session) SetStore(store *runs.Store) {
+	s.msgMu.Lock()
+	s.store = store
+	s.msgMu.Unlock()
+}
+
 // RestoreReminders reloads reminderLog from the persisted sidecar (resume path).
 func (s *Session) RestoreReminders() error {
 	if s.store == nil || s.id == "" {

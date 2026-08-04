@@ -20,6 +20,7 @@ import (
 	"github.com/weatherjean/shell3/internal/config"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/mcp"
+	"github.com/weatherjean/shell3/internal/mediadir"
 	"github.com/weatherjean/shell3/internal/modelproxy"
 	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/persona"
@@ -131,6 +132,11 @@ func (p *Parts) Cron() []config.CronJob { return p.lc.Cron() }
 // RunsKeepDays returns `runs_keep_days` (always populated at load — default
 // 30; 0 = keep forever). Read by the runs janitor at `shell3 serve` startup.
 func (p *Parts) RunsKeepDays() int { return p.lc.RunsKeepDays }
+
+// MediaKeepDays returns `media_keep_days` (always populated at load —
+// default 0 = keep forever). Read by the media janitor at `shell3 serve`
+// startup.
+func (p *Parts) MediaKeepDays() int { return p.lc.MediaKeepDays }
 
 // RunsRoot returns the .shell3_project directory the runs Store was opened
 // against (runs.Open's root param) — the same root the runs janitor's Sweep
@@ -544,6 +550,7 @@ func (b *builder) resolvePaths() error {
 		return err
 	}
 	b.configDir = configDir
+	mediadir.SetBaseDir(configDir)
 	b.g = paths.NewGlobal(b.opts.HomeDir)
 	b.l = paths.NewLocal(b.opts.CWD)
 	if err := bootstrap.EnsureGlobal(b.g); err != nil {
@@ -617,6 +624,7 @@ func (b *builder) openStore() {
 		b.closers = append(b.closers, func() { _ = s.Close() })
 	} else {
 		b.log.Warn("open store failed — history unavailable", "error", e)
+		fmt.Fprintln(os.Stderr, "shell3: warning: open store failed — conversations will not persist and history is unavailable: "+e.Error())
 	}
 }
 

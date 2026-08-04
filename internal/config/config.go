@@ -167,6 +167,13 @@ type LoadedConfig struct {
 	// explicit 0 means keep forever (the sweep is skipped entirely).
 	RunsKeepDays int
 
+	// MediaKeepDays is `media_keep_days`: how long the janitor keeps a file
+	// under the media dir (uploads, generated images, TTS cache, send_file
+	// stagings) before sweeping it at `shell3 serve` startup. Always
+	// populated at load — default 0 = keep forever: delivered files and
+	// uploads are user data, so deletion is opt-in rather than assumed.
+	MediaKeepDays int
+
 	agent     Agent
 	notifier  *Notifier
 	subagents []Subagent

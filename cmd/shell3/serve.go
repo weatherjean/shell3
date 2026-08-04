@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/weatherjean/shell3/internal/media"
 	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/webui"
@@ -138,6 +139,25 @@ func newServeCommand() *cobra.Command {
 					len(removedRuns), threadsDropped)
 			}
 
+			// Media janitor: same start-time-only shape, gated by
+			// media_keep_days (default 0 = keep forever, so this is opt-in).
+			// Uploads, generated images, TTS cache, and send_file stagings
+			// are user data; deletion only happens if the operator asked for
+			// it.
+			if keep := rt.Parts().MediaKeepDays(); keep > 0 {
+				if mdir, merr := media.Dir(); merr != nil {
+					fmt.Printf("warning: media janitor: %v\n", merr)
+				} else {
+					removedMedia, merr := media.Sweep(mdir, time.Duration(keep)*24*time.Hour, time.Now())
+					if merr != nil {
+						fmt.Printf("warning: media janitor: %v\n", merr)
+					}
+					if removedMedia > 0 {
+						fmt.Printf("janitor: removed %d media files\n", removedMedia)
+					}
+				}
+			}
+
 			srv, err := webui.New(webui.Options{
 				Runtime:   rt,
 				WorkDir:   workDir,
@@ -192,7 +212,7 @@ func newServeCommand() *cobra.Command {
 			// public URL puts a shell on the internet behind one password, so
 			// say what that means at the moment it becomes reachable.
 			web := rt.Web()
-			announcePublicURL(web.URL, func(url string, serving bool) {
+			announcePublicURL(web.URL, func(url string) {
 				fmt.Printf("public URL: %s\n", url)
 			})
 

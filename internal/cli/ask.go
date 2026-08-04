@@ -16,7 +16,7 @@ import (
 var (
 	askReason = lipgloss.NewStyle().Foreground(lipgloss.Color("#87A58C")) // reasoning — muted green
 	askCall   = lipgloss.NewStyle().Foreground(lipgloss.Color("#5BB6C9")).Bold(true)
-	askMeta   = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")) // dim meta lines
+	askMeta   = lipgloss.NewStyle().Foreground(bannerMuted) // dim meta lines
 	askErr    = lipgloss.NewStyle().Foreground(lipgloss.Color("#DC2626")).Bold(true)
 	askLabel  = lipgloss.NewStyle().Foreground(bannerPrimary).Bold(true) // brand yellow
 )

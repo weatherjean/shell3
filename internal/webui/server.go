@@ -111,7 +111,8 @@ func New(opts Options) (*Server, error) {
 		}
 		return nil
 	}
-	threads := newThreadIndex(storeFn)
+	log := runtimeLogger(opts.Runtime)
+	threads := newThreadIndex(storeFn, log.Warn)
 
 	sessions, err := newSessionStore(stateDir)
 	if err != nil {
@@ -125,7 +126,7 @@ func New(opts Options) (*Server, error) {
 		configDir: opts.ConfigDir,
 		version:   opts.Version,
 		started:   time.Now(),
-		log:       runtimeLogger(opts.Runtime),
+		log:       log,
 		hub:       h,
 		asks:      newAsks(h),
 		threads:   threads,
@@ -206,7 +207,7 @@ func (s *Server) resync() {
 		if err := media.RegisterImageTool(sess, clients); err != nil {
 			s.log.Error("webui: image tool", err)
 		}
-		if err := RegisterSendFileTool(sess, s.workDir); err != nil {
+		if err := RegisterSendFileTool(sess, s.workDir, s.configDir); err != nil {
 			s.log.Error("webui: send_file tool", err)
 		}
 	})

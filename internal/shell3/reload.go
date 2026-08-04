@@ -193,6 +193,10 @@ func (rt *Runtime) applyReload(st reloadState) (ReloadResult, error) {
 		// own locking) — safe to run inside the critical section.
 		s.mu.Lock()
 		s.cfg = cfg
+		// The chat session survives the swap (it IS the history) but its sidecar
+		// store handle is the old generation's, which closes when the parked
+		// cleanup drains — repoint reminders at the new generation's store.
+		s.sess.SetStore(st.store)
 		s.handlers = chat.NewHandlers()
 		// Re-apply the per-session host standing reminders: rt.sessionConfig
 		// rebuilt the cfg (including the Environment toggle) from the

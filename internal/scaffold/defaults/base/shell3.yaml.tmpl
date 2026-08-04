@@ -104,3 +104,8 @@ web:
 # runs_keep_days: how long a finished session is kept in the runs store before
 # `shell3 serve` sweeps it at startup; 0 keeps everything forever (default 30).
 # runs_keep_days: 30
+
+# media_keep_days: how long a file under ~/.shell3/media/ (uploads, generated
+# images, cached TTS audio) is kept before `shell3 serve` sweeps it at
+# startup; 0 keeps everything forever (default 0).
+# media_keep_days: 30

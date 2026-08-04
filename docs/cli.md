@@ -40,8 +40,8 @@ drop a proxy that authenticates in its own right — see
 **Exposure is yours.** shell3 starts nothing on your behalf: put it behind
 Tailscale (`tailscale serve --bg 8765` — the recommended default), an SSH
 forward, or a reverse proxy, and set `web.url` when the address is stable —
-[deploying.md](deploying.md) has the ranking. serve prints a fixed
-`web.url` at start, so the address you hand out is in the log; from that
+[deploying.md](deploying.md) has the ranking. `serve` prints a fixed
+`web.url` at start, so the address you hand out is on stdout; from that
 moment the login password is the boundary, and a session is a shell.
 
 **Threads and turns.** Each browser thread is its own session; the
@@ -89,8 +89,8 @@ just as well:
 | `POST /api/reload` | Re-read the config and apply it live. `409` while a turn is in flight. |
 | `POST /api/stt` | Transcribe an uploaded recording (multipart `audio`) via `media.stt`. `501` when unconfigured. |
 | `POST /api/tts` | Speak `{"text": …}` via `media.tts`, returning audio. `501` when unconfigured. |
-| `GET /api/media` | List `~/.shell3/media/` — uploads and generated images, newest first. |
-| `GET /api/media/{name}` | Serve a file from `~/.shell3/media/` — how generated images render inline. Flat by construction: any path separator is refused. |
+| `GET /api/media` | List the media dir (`<configDir>/media`, `~/.shell3/media/` by default) — uploads and generated images, newest first. |
+| `GET /api/media/{name}` | Serve a file from the media dir — how generated images render inline. Flat by construction: any path separator is refused. |
 
 ### The interface
 
@@ -136,8 +136,11 @@ redacted `.env`. See `webui/README.md` for how that is put together.
   config edits live. Refreshes itself.
 - **Files** — two read-only roots: **config**, a walk of the config directory
   (`.env` and its siblings are listed but never opened; binary and oversized
-  files are labelled rather than dumped), and **media**, the contents of
-  `~/.shell3/media/` newest-first, with inline previews for images and audio.
+  files are labelled rather than dumped), and **media**, the contents of the
+  media dir (`<configDir>/media`, `~/.shell3/media/` by default —
+  [configuration.md](configuration.md#the-media-janitor--media_keep_days)
+  covers the `$SHELL3_MEDIA_DIR` override) newest-first, with inline previews
+  for images and audio.
 - **Notifications** — the bell is fed by `/api/events`: notifier posts, cron
   results, job-failure alerts, and a note when the conversation was compacted
   to fit the context window. The server keeps the 50 most recent and replays

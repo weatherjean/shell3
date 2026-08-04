@@ -26,8 +26,13 @@ const webSurface = "web"
 // loses one thread's durability, never the live conversation.
 type threadIndex struct {
 	store func() *runs.Store
+	warn  func(msg string, args ...any)
 	mu    sync.Mutex
 	m     map[string]*threadRecord
+
+	// warnOnce keeps a chronically failing store to one persist warning per
+	// process — diagnosis without log spam on every turn.
+	warnOnce sync.Once
 }
 
 // threadRecord is one conversation. Title is empty until the user renames it —
@@ -51,12 +56,17 @@ type threadRecord struct {
 // newThreadIndex builds the thread index for the web front-end, preloading
 // whatever the store already knows (a previous process's threads). store may
 // be nil (the test harness, a runtime with no config Parts) — that degrades
-// to an empty, memory-only index rather than failing.
-func newThreadIndex(store func() *runs.Store) *threadIndex {
+// to an empty, memory-only index rather than failing. warn reports non-fatal
+// failures (a nil warn is a no-op — the test harness and any caller that
+// doesn't care about diagnostics need not supply one).
+func newThreadIndex(store func() *runs.Store, warn func(msg string, args ...any)) *threadIndex {
 	if store == nil {
 		store = func() *runs.Store { return nil }
 	}
-	ti := &threadIndex{store: store, m: make(map[string]*threadRecord)}
+	if warn == nil {
+		warn = func(string, ...any) {}
+	}
+	ti := &threadIndex{store: store, warn: warn, m: make(map[string]*threadRecord)}
 
 	st := store()
 	if st == nil {
@@ -65,7 +75,9 @@ func newThreadIndex(store func() *runs.Store) *threadIndex {
 	metas, err := st.ThreadListMeta(webSurface)
 	if err != nil {
 		// A read failure just starts empty; nothing durable is lost, and the
-		// next write retries against the store.
+		// next write retries against the store. This runs once (at
+		// construction), so it warns directly rather than through warnOnce.
+		ti.warn("webui: thread index load failed — starting empty", "error", err.Error())
 		return ti
 	}
 	for _, m := range metas {
@@ -78,16 +90,33 @@ func newThreadIndex(store func() *runs.Store) *threadIndex {
 }
 
 // persistLocked writes one record to the store. Caller holds ti.mu. Best
-// effort: a failure here is not surfaced, matching every other front-end's
-// thread-index pattern of best-effort persistence.
-func (ti *threadIndex) persistLocked(rec *threadRecord) {
+// effort: persistence stays best-effort (behavior on failure is unchanged).
+// It returns the store error, if any, rather than warning itself — logging
+// while ti.mu is held would serialize every thread-index caller behind a
+// log write; see warnPersistFailure, which callers invoke after releasing
+// the lock.
+func (ti *threadIndex) persistLocked(rec *threadRecord) error {
 	st := ti.store()
 	if st == nil {
-		return
+		return nil
 	}
-	_ = st.ThreadUpsertMeta(webSurface, runs.ThreadMeta{
+	return st.ThreadUpsertMeta(webSurface, runs.ThreadMeta{
 		ID: rec.ID, SessionID: rec.SessionID, Title: rec.Title, Preview: rec.Preview,
 		Created: rec.Created, Updated: rec.Updated, Deleted: rec.Deleted,
+	})
+}
+
+// warnPersistFailure reports a persistLocked failure. Best effort:
+// persistence stays best-effort (behavior on failure is unchanged), but a
+// chronically failing store used to mean an empty sidebar after restart
+// with zero diagnostic, so a failure warns — once per process, not once per
+// write. Called with ti.mu already released.
+func (ti *threadIndex) warnPersistFailure(err error) {
+	if err == nil {
+		return
+	}
+	ti.warnOnce.Do(func() {
+		ti.warn("webui: thread index persist failed (sidebar will not survive restart)", "error", err.Error())
 	})
 }
 
@@ -97,30 +126,33 @@ func (ti *threadIndex) persistLocked(rec *threadRecord) {
 func (ti *threadIndex) record(threadID, sessionID, preview string) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	ti.mu.Lock()
-	defer ti.mu.Unlock()
+	perr := func() error {
+		ti.mu.Lock()
+		defer ti.mu.Unlock()
 
-	rec, ok := ti.m[threadID]
-	if !ok {
-		rec = &threadRecord{ID: threadID, Created: now}
-		ti.m[threadID] = rec
-	}
-	// Nothing changed but the clock, and the clock is not worth a write per
-	// turn unless the session or a full minute moved.
-	unchanged := rec.SessionID == sessionID && rec.Updated != "" &&
-		rec.Updated[:len(rec.Updated)-3] == now[:len(now)-3]
+		rec, ok := ti.m[threadID]
+		if !ok {
+			rec = &threadRecord{ID: threadID, Created: now}
+			ti.m[threadID] = rec
+		}
+		// Nothing changed but the clock, and the clock is not worth a write
+		// per turn unless the session or a full minute moved.
+		unchanged := rec.SessionID == sessionID && rec.Updated != "" &&
+			rec.Updated[:len(rec.Updated)-3] == now[:len(now)-3]
 
-	rec.SessionID = sessionID
-	rec.Updated = now
-	rec.Deleted = false
-	if rec.Preview == "" && preview != "" {
-		rec.Preview = preview
-		unchanged = false // a new preview is worth a write
-	}
-	if unchanged {
-		return
-	}
-	ti.persistLocked(rec)
+		rec.SessionID = sessionID
+		rec.Updated = now
+		rec.Deleted = false
+		if rec.Preview == "" && preview != "" {
+			rec.Preview = preview
+			unchanged = false // a new preview is worth a write
+		}
+		if unchanged {
+			return nil
+		}
+		return ti.persistLocked(rec)
+	}()
+	ti.warnPersistFailure(perr)
 }
 
 // lookup returns the session id backing a thread.
@@ -169,29 +201,40 @@ func (ti *threadIndex) list() []threadRecord {
 // rename renames a thread. An empty name clears it, so the preview names the
 // conversation again rather than leaving it nameless.
 func (ti *threadIndex) rename(threadID, title string) (threadRecord, bool) {
-	ti.mu.Lock()
-	defer ti.mu.Unlock()
+	var out threadRecord
+	var ok bool
+	perr := func() error {
+		ti.mu.Lock()
+		defer ti.mu.Unlock()
 
-	rec, ok := ti.m[threadID]
-	if !ok || rec.Deleted {
-		return threadRecord{}, false
-	}
-	rec.Title = title
-	ti.persistLocked(rec)
-	return *rec, true
+		rec, found := ti.m[threadID]
+		if !found || rec.Deleted {
+			return nil
+		}
+		rec.Title = title
+		out, ok = *rec, true
+		return ti.persistLocked(rec)
+	}()
+	ti.warnPersistFailure(perr)
+	return out, ok
 }
 
 // remove tombstones a thread. The underlying session and its runs dir are left
 // alone — the janitor sweeps those on its own schedule.
 func (ti *threadIndex) remove(threadID string) bool {
-	ti.mu.Lock()
-	defer ti.mu.Unlock()
+	var removed bool
+	perr := func() error {
+		ti.mu.Lock()
+		defer ti.mu.Unlock()
 
-	rec, ok := ti.m[threadID]
-	if !ok || rec.Deleted {
-		return false
-	}
-	rec.Deleted = true
-	ti.persistLocked(rec)
-	return true
+		rec, ok := ti.m[threadID]
+		if !ok || rec.Deleted {
+			return nil
+		}
+		rec.Deleted = true
+		removed = true
+		return ti.persistLocked(rec)
+	}()
+	ti.warnPersistFailure(perr)
+	return removed
 }

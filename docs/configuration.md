@@ -594,6 +594,10 @@ non-loopback `addr`.
 Four optional blocks under `media:`, each pointing at a model by name. All
 speak the same OpenAI-compatible surface: `audio/transcriptions`,
 `audio/speech`, chat completions with an image part, `images/generations`.
+Everything below lands in the media dir, `<configDir>/media` —
+`~/.shell3/media/` for the default config dir — overridable with
+`$SHELL3_MEDIA_DIR` (see [The media janitor](#the-media-janitor--media_keep_days)
+for that variable's precedence).
 
 ```yaml
 media:
@@ -604,24 +608,24 @@ media:
 ```
 
 - **`stt: { model, language? }`** — backs `POST /api/stt`, the composer's
-  dictation button: the recording is stored under
-  `~/.shell3/media/` (as `web-*`) and transcribed into the composer, which you
-  edit before sending. Transcription failures surface as an error on that
-  request, not a turn. (`echo:` is still accepted but inert — the transcript
-  lands in the composer, where you can already see it.)
+  dictation button: the recording is stored in the media dir (as `web-*`) and
+  transcribed into the composer, which you edit before sending.
+  Transcription failures surface as an error on that request, not a turn.
+  (`echo:` is still accepted but inert — the transcript lands in the
+  composer, where you can already see it.)
 - **`tts: { model, voice?, format? }`** — backs `POST /api/tts`, the read-aloud
   button on a reply. `voice` and `format` are passed to the model; synthesized
-  audio is cached under `~/.shell3/media/` (as `tts-*`) and served back, so
+  audio is cached in the media dir (as `tts-*`) and served back, so
   replaying a reply costs nothing. Without `tts` the browser's own speech
-  synthesis is used instead. (`mode:` is still accepted but inert — the browser
-  reads a reply aloud when you ask it to; a value other than
+  synthesis is used instead. (`mode:` is still accepted but inert — the
+  browser reads a reply aloud when you ask it to; a value other than
   `off`/`inbound`/`always` still fails the load.)
 - **`describe: { model, prompt? }`** — captions an attached image before the
   turn, injecting `[image: <description>]`. Point it at a vision model when the
   main model is text-only — or at the main model itself (`shell3 boot` wires
   this when you answer that your model has vision). Every upload is stored
-  under `~/.shell3/media/` (as `up-*`) and its path goes into the prompt, so
-  the agent can re-open it later with `read_media` either way. Without
+  in the media dir (as `up-*`) and its path goes into the prompt, so the
+  agent can re-open it later with `read_media` either way. Without
   `describe`, an attached image is passed to the model as a multimodal part
   instead of a caption.
 - **`imagegen: { model, size?, api? }`** — adds an `image_generate{prompt,
@@ -631,7 +635,7 @@ media:
   dialect — and reads the image off the reply (its dedicated `/api/v1/images`
   endpoint pre-authorizes worst-case cost, ~$2, and 402s low balances; the
   chat route charges actual usage, ~$0.03/image; `size` is ignored on this
-  shape). Generated files land in `~/.shell3/media/` and the tool returns the
+  shape). Generated files land in the media dir and the tool returns the
   path; the main agent shows one by writing a markdown image at its
   `/api/media/<file>` URL, while a subagent reports the path for the parent to
   deliver. Gate it like any tool (`name == "image_generate"` in the hook
@@ -640,23 +644,30 @@ media:
 **`send_file`** (webui only; registered for the main agent and every
 non-headless session — never a subagent or cron job, which have no chat to
 deliver into) hands the user any local file: `{path, name?}` copies the file
-into `~/.shell3/media/` under a unique `sent-*` name and returns a ready-made
+into the media dir under a unique `sent-*` name and returns a ready-made
 link — `![<name>](/api/media/<file>)` for images (`name` becomes the alt
 text, defaulting to the file's base name), `[<name>](/api/media/<file>)`
-otherwise. It resolves a relative `path` against the agent's workdir,
-resolves symlinks before touching the file, and refuses `.env`/dotenv
-siblings (checked on both the requested name and the symlink-resolved
-target — a symlink can't launder a credentials file under a clean-looking
-name), directories, and files over 50 MB, all as `error: …` tool-result
-text. No configuration needed; it's always available where a chat exists to
-receive the link.
+otherwise. It resolves a relative `path` against the agent's workdir and
+resolves symlinks before touching the file, refusing: `.env`/dotenv siblings
+(checked on both the requested name and the symlink-resolved target — a
+symlink can't launder a credentials file under a clean-looking name);
+anything inside the config directory, since it's already visible in the
+Files view — except the media dir itself, its own staging area, and even
+that exemption is withdrawn if `$SHELL3_MEDIA_DIR` is pointed at or above
+the config dir; anything hardlinked to a file anywhere in the config tree,
+by inode rather than by name, which is what stops a hardlink under an
+innocent-looking name; non-regular files (directories, FIFOs, devices); and
+files over 50 MB, bounded at copy time rather than trusted from a pre-copy
+stat. The file is opened `O_NOFOLLOW|O_NONBLOCK` and every check from there
+runs against the opened descriptor, not the path. All refusals come back as
+`error: …` tool-result text. No configuration needed; it's always available
+where a chat exists to receive the link.
 
 **Media storage.** Dictated recordings (`web-*`), uploads (`up-*`), generated
 images (`img-*`), sent files (`sent-*`), and synthesized speech (`tts-*`) live
-in `~/.shell3/media/`
-— stable paths that survive reboots, re-readable with `read_media`, and
-servable to the browser at `/api/media/<file>`. The folder grows until you
-prune it — the interface's **Files** view
+in the media dir — stable paths that survive reboots, re-readable with
+`read_media`, and servable to the browser at `/api/media/<file>`. The folder
+grows until you prune it — the interface's **Files** view
 has it as a second root beside the config tree (`GET /api/media`), newest
 first, with inline image and audio previews, so a generated image stays
 reachable long after its chat message has scrolled away.
@@ -772,7 +783,10 @@ The database carries a schema version. If it doesn't match the binary you are
 running, the file is **deleted and recreated empty**, with one line on stderr
 saying so. shell3 data is disposable by design: there are no migrations, and
 a version skew never leaves you on a half-understood schema. Keep anything
-you actually care about outside the store.
+you actually care about outside the store. A corrupted version stamp that
+happens to land within the valid range (e.g. a genuine `2` misread as `1`) is
+indistinguishable from an actual older schema, so that database is recreated
+empty too — the data is not recoverable.
 
 ## The runs janitor — `runs_keep_days`
 
@@ -784,6 +798,16 @@ stored session, so history multiplies quickly. An optional top-level
 runs_keep_days: 30   # default 30; 0 = keep forever
 ```
 
+Both `runs_keep_days` and `media_keep_days` are validated at config load:
+negative values are a load error (use `0` for keep-forever, not a negative
+number), and either key above 36500 (100 years) is also a load error — that
+bound exists because the janitor's arithmetic is
+`time.Duration(days) * 24 * time.Hour`, which overflows int64 nanoseconds
+around 106751 days and can wrap into a small *positive* duration, silently
+turning "keep basically forever" into "delete almost everything" on the next
+sweep. 36500 is nowhere near that wraparound and is already an absurd
+retention window.
+
 At `shell3 serve` startup — before the server listens, never on
 `shell3 ask` — a sweep deletes sessions whose last activity is older than the
 cutoff, taking their messages, FTS entries, thread-index rows and job-log
@@ -794,6 +818,35 @@ removed N runs, M thread entries` (silent when both are zero). Fail-open: a
 sweep error is reported as a `warning: janitor: …` line and the server still
 starts — stale rows are cosmetic hygiene, never a reason to refuse startup.
 Start-time only — no daemon, no timers.
+
+## The media janitor — `media_keep_days`
+
+The media dir (`~/.shell3/media/` by default) accumulates browser uploads,
+generated images, cached TTS audio, and `send_file` stagings, and nothing
+removes them on its own. An optional top-level `shell3.yaml` key bounds it:
+
+```yaml
+media_keep_days: 0   # default 0 = keep forever
+```
+
+Unlike `runs_keep_days`, the default is keep-forever: delivered files and
+uploads are user data, so deletion is opt-in. When set, `shell3 serve`
+deletes files in the media dir whose mtime is older than N days at startup,
+before the server listens. It prints `janitor: removed N media files`
+(silent when zero) and is fail-open like the runs janitor. Note that once a
+file is swept, any `/api/media/<file>` link to it in an old transcript goes
+dead. Start-time only — no daemon, no timers.
+
+The media dir this sweep points at is resolved by `internal/mediadir`:
+normally it's derived from `--config`/the active config dir, but the
+`SHELL3_MEDIA_DIR` environment variable, if set, overrides that unconditionally
+— it outranks `--config`. This exists for tests, is not itself a
+`shell3.yaml` key, and is undocumented anywhere else, but production code
+reads it too. Since this is a *deleting* operation once `media_keep_days` is
+set, be deliberate about that variable: an errant `SHELL3_MEDIA_DIR` pointed
+at an unrelated directory (or a symlinked media dir, which the sweep follows)
+means `media_keep_days` deletes old files there instead of in your actual
+media store.
 
 ## Skills — `skills/`
 

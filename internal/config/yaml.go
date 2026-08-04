@@ -13,12 +13,13 @@ import (
 // yamlFile is the wire schema of shell3.yaml. Decoding is strict
 // (KnownFields): an unknown key anywhere is a load error.
 type yamlFile struct {
-	Models       map[string]yamlModel `yaml:"models"`
-	Web          *yamlWeb             `yaml:"web"`
-	MCP          map[string]yamlMCP   `yaml:"mcp"`
-	Media        *yamlMedia           `yaml:"media"`
-	Background   *yamlBackground      `yaml:"background"`
-	RunsKeepDays *int                 `yaml:"runs_keep_days"` // nil = default 30; 0 = keep forever
+	Models        map[string]yamlModel `yaml:"models"`
+	Web           *yamlWeb             `yaml:"web"`
+	MCP           map[string]yamlMCP   `yaml:"mcp"`
+	Media         *yamlMedia           `yaml:"media"`
+	Background    *yamlBackground      `yaml:"background"`
+	RunsKeepDays  *int                 `yaml:"runs_keep_days"`  // nil = default 30; 0 = keep forever
+	MediaKeepDays *int                 `yaml:"media_keep_days"` // nil = default 0 = keep forever
 }
 
 type yamlModel struct {
@@ -234,6 +235,40 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 	c.RunsKeepDays = 30
 	if f.RunsKeepDays != nil {
 		c.RunsKeepDays = *f.RunsKeepDays
+	}
+	if err := validateKeepDays("runs_keep_days", c.RunsKeepDays); err != nil {
+		return err
+	}
+	// media_keep_days defaults to 0 = keep forever: delivered files and
+	// uploads are user data, so deletion is opt-in rather than assumed.
+	c.MediaKeepDays = 0
+	if f.MediaKeepDays != nil {
+		c.MediaKeepDays = *f.MediaKeepDays
+	}
+	if err := validateKeepDays("media_keep_days", c.MediaKeepDays); err != nil {
+		return err
+	}
+	return nil
+}
+
+// maxKeepDays bounds runs_keep_days/media_keep_days at load time. Both
+// values eventually feed `time.Duration(days) * 24 * time.Hour`, which
+// overflows int64 nanoseconds past ~106751 days and can wrap around to a
+// small POSITIVE duration — silently inverting "keep basically forever"
+// into "delete almost everything" the next time the janitor runs. 100 years
+// is nowhere near that wraparound and is already an absurd retention
+// window, so anything above it is almost certainly a fat-finger, not intent.
+const maxKeepDays = 36500
+
+// validateKeepDays rejects a keep-days value that is negative (silently
+// meaning "keep forever" is confusing when the janitor's own zero already
+// means that) or large enough to risk the overflow above.
+func validateKeepDays(key string, days int) error {
+	if days < 0 {
+		return fmt.Errorf("shell3.yaml: %s must not be negative (use 0 to keep forever); got %d", key, days)
+	}
+	if days > maxKeepDays {
+		return fmt.Errorf("shell3.yaml: %s is too large (max %d days); got %d", key, maxKeepDays, days)
 	}
 	return nil
 }

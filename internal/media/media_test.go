@@ -34,3 +34,31 @@ func TestDirDefaultUnderHome(t *testing.T) {
 		t.Fatalf("Dir() must create the directory: %v", err)
 	}
 }
+
+func TestDirFollowsSetBaseDir(t *testing.T) {
+	t.Setenv("SHELL3_MEDIA_DIR", "")
+	cfg := t.TempDir()
+	SetBaseDir(cfg)
+	t.Cleanup(func() { SetBaseDir("") })
+	got, err := Dir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(cfg, "media"); got != want {
+		t.Fatalf("Dir() = %q, want %q", got, want)
+	}
+}
+
+func TestDirEnvBeatsSetBaseDir(t *testing.T) {
+	want := t.TempDir()
+	t.Setenv("SHELL3_MEDIA_DIR", want)
+	SetBaseDir(t.TempDir())
+	t.Cleanup(func() { SetBaseDir("") })
+	got, err := Dir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("Dir() = %q, want %q", got, want)
+	}
+}

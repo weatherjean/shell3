@@ -52,9 +52,9 @@ func armCron(disp cron.Dispatcher, jobs []shell3.CronJob) (*cron.Scheduler, erro
 // announcePublicURL delivers the host's public https URL to onURL when one
 // is configured. No-op otherwise — exposure beyond the fixed url is the
 // operator's own concern (reverse proxy, tailscale, SSH port forwarding, ...).
-func announcePublicURL(url string, onURL func(url string, serving bool)) {
+func announcePublicURL(url string, onURL func(url string)) {
 	if url != "" {
-		onURL(url, true) // a fixed URL is the operator's promise; don't second-guess it
+		onURL(url) // a fixed URL is the operator's promise; don't second-guess it
 	}
 }
 

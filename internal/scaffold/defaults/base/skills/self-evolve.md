@@ -20,7 +20,8 @@ because its file exists.
 
     agent.md           you: frontmatter (model, tools, context) + your prompt
     memory.md          durable notes, read fresh into every session's prompt
-    projects.md        your standing portfolio brief
+    projects.md        your standing portfolio brief (created by `shell3
+                       project new`, so it may not exist yet)
     agents/<name>.md   one subagent per file (description + prompt)
     skills/<name>.md   one skill per file
     projects/<name>/   a project: project.md brief + its manager subagent
@@ -29,7 +30,8 @@ because its file exists.
                        there's nothing worth reporting
     notifier.md        the completion-triage persona — edit its body to
                        change what gets posted vs. silenced
-    lib/bin/           your reusable wrapper scripts (see the scripting skill)
+    lib/bin/           your reusable wrapper scripts (see the scripting
+                       skill; created on first use, not scaffolded up front)
 
 ## Not yours to edit
 - `shell3.yaml` (models, the `web:` block, mcp servers, media) and

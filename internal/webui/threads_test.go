@@ -31,13 +31,13 @@ func fixedStore(st *runs.Store) func() *runs.Store {
 func TestThreadIndexPersistsAcrossReopen(t *testing.T) {
 	st := openTestStore(t)
 
-	ti := newThreadIndex(fixedStore(st))
+	ti := newThreadIndex(fixedStore(st), nil)
 	ti.record("thread-a", "sess-1", "")
 	ti.record("thread-b", "sess-2", "")
 
 	// A fresh index against the same store simulates a process restart: the
 	// in-memory map starts empty and is rebuilt entirely from the store.
-	reopened := newThreadIndex(fixedStore(st))
+	reopened := newThreadIndex(fixedStore(st), nil)
 
 	if got, ok := reopened.lookup("thread-a"); !ok || got != "sess-1" {
 		t.Errorf("lookup(thread-a) = %q, %v; want sess-1, true", got, ok)
@@ -53,7 +53,7 @@ func TestThreadIndexPersistsAcrossReopen(t *testing.T) {
 // A nil store degrades to memory-only: the index still works within the
 // process, it just has nothing to reload from a restart.
 func TestThreadIndexWorksWithNilStore(t *testing.T) {
-	ti := newThreadIndex(nil)
+	ti := newThreadIndex(nil, nil)
 	ti.record("thread-a", "sess-1", "hello")
 
 	if got, ok := ti.lookup("thread-a"); !ok || got != "sess-1" {
@@ -75,7 +75,7 @@ func TestThreadIndexResolvesStorePerCall(t *testing.T) {
 		return current
 	}
 
-	ti := newThreadIndex(resolver)
+	ti := newThreadIndex(resolver, nil)
 	ti.record("thread-a", "sess-1", "")
 
 	// Swap the generation, as a /reload would: subsequent writes must land on
@@ -111,7 +111,7 @@ func TestPruneDeadThreadsViaSweep(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ti := newThreadIndex(fixedStore(st))
+	ti := newThreadIndex(fixedStore(st), nil)
 	ti.record("keep", liveID, "")
 	ti.record("drop", "sess-never-existed", "")
 
@@ -119,7 +119,7 @@ func TestPruneDeadThreadsViaSweep(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened := newThreadIndex(fixedStore(st))
+	reopened := newThreadIndex(fixedStore(st), nil)
 	if _, ok := reopened.lookup("drop"); ok {
 		t.Error("the thread pointing at a nonexistent session should be gone")
 	}
@@ -133,13 +133,13 @@ func TestPruneDeadThreadsViaSweep(t *testing.T) {
 func TestThreadIndexRenameSurvivesReopen(t *testing.T) {
 	st := openTestStore(t)
 
-	ti := newThreadIndex(fixedStore(st))
+	ti := newThreadIndex(fixedStore(st), nil)
 	ti.record("t1", "sess-1", "")
 	if _, ok := ti.rename("t1", "Deploy notes"); !ok {
 		t.Fatal("rename should find the thread")
 	}
 
-	reopened := newThreadIndex(fixedStore(st))
+	reopened := newThreadIndex(fixedStore(st), nil)
 	rec, ok := reopened.get("t1")
 	if !ok || rec.Title != "Deploy notes" {
 		t.Errorf("record = %+v, want the renamed thread", rec)
@@ -154,7 +154,7 @@ func TestThreadIndexRenameSurvivesReopen(t *testing.T) {
 func TestThreadIndexDeleteIsPermanent(t *testing.T) {
 	st := openTestStore(t)
 
-	ti := newThreadIndex(fixedStore(st))
+	ti := newThreadIndex(fixedStore(st), nil)
 	ti.record("gone", "sess-1", "")
 	if !ti.remove("gone") {
 		t.Fatal("remove should report success")
@@ -163,7 +163,7 @@ func TestThreadIndexDeleteIsPermanent(t *testing.T) {
 		t.Error("a deleted thread should not appear in the listing")
 	}
 
-	reopened := newThreadIndex(fixedStore(st))
+	reopened := newThreadIndex(fixedStore(st), nil)
 	if _, ok := reopened.get("gone"); ok {
 		t.Error("a deleted thread came back after a restart")
 	}
@@ -172,7 +172,7 @@ func TestThreadIndexDeleteIsPermanent(t *testing.T) {
 // The listing is newest-activity-first, which is the order the sidebar shows.
 func TestThreadIndexListsNewestFirst(t *testing.T) {
 	st := openTestStore(t)
-	ti := newThreadIndex(fixedStore(st))
+	ti := newThreadIndex(fixedStore(st), nil)
 
 	ti.record("older", "sess-1", "")
 	time.Sleep(1100 * time.Millisecond) // the stamp has second resolution
@@ -188,7 +188,7 @@ func TestThreadIndexListsNewestFirst(t *testing.T) {
 // renaming the conversation on every message would make the list unstable.
 func TestThreadPreviewIsSetOnceFromTheFirstMessage(t *testing.T) {
 	st := openTestStore(t)
-	ti := newThreadIndex(fixedStore(st))
+	ti := newThreadIndex(fixedStore(st), nil)
 
 	ti.record("t1", "sess-1", "plan the migration")
 	ti.record("t1", "sess-1", "and now something else")
@@ -198,7 +198,7 @@ func TestThreadPreviewIsSetOnceFromTheFirstMessage(t *testing.T) {
 		t.Errorf("preview = %q, want the first message", rec.Preview)
 	}
 
-	reopened := newThreadIndex(fixedStore(st))
+	reopened := newThreadIndex(fixedStore(st), nil)
 	if rec, _ := reopened.get("t1"); rec.Preview != "plan the migration" {
 		t.Errorf("preview = %q after restart, want it preserved", rec.Preview)
 	}
@@ -207,12 +207,12 @@ func TestThreadPreviewIsSetOnceFromTheFirstMessage(t *testing.T) {
 // A rename writes no preview of its own; it must not erase the one there.
 func TestRenameKeepsThePreview(t *testing.T) {
 	st := openTestStore(t)
-	ti := newThreadIndex(fixedStore(st))
+	ti := newThreadIndex(fixedStore(st), nil)
 
 	ti.record("t1", "sess-1", "plan the migration")
 	ti.rename("t1", "Migration")
 
-	reopened := newThreadIndex(fixedStore(st))
+	reopened := newThreadIndex(fixedStore(st), nil)
 	rec, _ := reopened.get("t1")
 	if rec.Title != "Migration" || rec.Preview != "plan the migration" {
 		t.Errorf("record = %+v, want both the name and the preview", rec)
@@ -237,5 +237,21 @@ func TestPreviewOfShortensAtAWordBoundary(t *testing.T) {
 	// Short prompts pass through whole, with whitespace tidied.
 	if got := previewOf("  hi   there \n"); got != "hi there" {
 		t.Errorf("previewOf() = %q, want %q", got, "hi there")
+	}
+}
+
+func TestThreadIndexWarnsOnceOnPersistFailure(t *testing.T) {
+	dir := t.TempDir()
+	st, err := runs.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var warns int
+	ti := newThreadIndex(func() *runs.Store { return st }, func(string, ...any) { warns++ })
+	st.Close() // every write now fails
+	ti.record("t1", "s1", "hello")
+	ti.record("t2", "s2", "again")
+	if warns != 1 {
+		t.Fatalf("warns = %d, want exactly 1 (warn-once)", warns)
 	}
 }

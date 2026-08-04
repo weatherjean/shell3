@@ -85,6 +85,63 @@ func TestParseYAMLFull(t *testing.T) {
 	}
 }
 
+func TestParseYAMLMediaKeepDaysDefault(t *testing.T) {
+	c, err := parseY(t, fullYAML, fullSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.MediaKeepDays != 0 {
+		t.Fatalf("MediaKeepDays default = %d, want 0 (keep forever)", c.MediaKeepDays)
+	}
+}
+
+func TestParseYAMLKeepDaysRejectsNegative(t *testing.T) {
+	for _, key := range []string{"runs_keep_days", "media_keep_days"} {
+		_, err := parseY(t, fullYAML+key+": -1\n", fullSecrets)
+		if err == nil {
+			t.Fatalf("%s: -1: want load error, got nil", key)
+		}
+		if !strings.Contains(err.Error(), key) {
+			t.Fatalf("%s: -1: error %q doesn't name the key", key, err)
+		}
+	}
+}
+
+func TestParseYAMLKeepDaysRejectsOverflowRisk(t *testing.T) {
+	// 213504 days is the reviewer's repro: time.Duration(days)*24*time.Hour
+	// overflows int64 nanoseconds and wraps around to a small POSITIVE
+	// duration (~25 minutes), silently inverting "keep basically forever"
+	// into "delete almost everything". Must be rejected at load, well below
+	// where the wraparound happens.
+	for _, key := range []string{"runs_keep_days", "media_keep_days"} {
+		_, err := parseY(t, fullYAML+key+": 213504\n", fullSecrets)
+		if err == nil {
+			t.Fatalf("%s: 213504: want load error, got nil", key)
+		}
+		if !strings.Contains(err.Error(), key) {
+			t.Fatalf("%s: 213504: error %q doesn't name the key", key, err)
+		}
+	}
+}
+
+func TestParseYAMLKeepDaysAllowsReasonableValues(t *testing.T) {
+	c, err := parseY(t, fullYAML+"runs_keep_days: 30\nmedia_keep_days: 7\n", fullSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.RunsKeepDays != 30 || c.MediaKeepDays != 7 {
+		t.Fatalf("RunsKeepDays=%d MediaKeepDays=%d, want 30/7", c.RunsKeepDays, c.MediaKeepDays)
+	}
+	// 0 (keep forever) must still be allowed explicitly.
+	c, err = parseY(t, fullYAML+"runs_keep_days: 0\n", fullSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.RunsKeepDays != 0 {
+		t.Fatalf("RunsKeepDays = %d, want 0", c.RunsKeepDays)
+	}
+}
+
 func TestParseYAMLUnknownKey(t *testing.T) {
 	_, err := parseY(t, "models:\n  m:\n    base_url: u\n    model: x\n    bogus: 1\n", nil)
 	if err == nil || !strings.Contains(err.Error(), "bogus") {

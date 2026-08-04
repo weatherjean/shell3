@@ -11,7 +11,8 @@ Minimal Unix-composable personal agent written in Go.
 **Declarative config.** The config is a **directory** (default `~/.shell3/`),
 loaded by `internal/config` — four rules: YAML wires it, markdown prompts it,
 files enable it, one bash script gates it. `shell3.yaml` holds wiring only
-(`models:`, `web:`, `mcp:`, `media:`, `background:`, `runs_keep_days`;
+(`models:`, `web:`, `mcp:`, `media:`, `background:`, `runs_keep_days`,
+`media_keep_days`;
 strict decode — unknown keys fail the load; secrets referenced as `env:KEY`,
 substring-substituted from the sibling `.env`, unknown key = load error).
 Everything with a prompt is markdown-with-frontmatter: `agent.md` (THE agent —
@@ -59,8 +60,9 @@ default) recalls past conversations from the runs store: `{query}` is
 ranked FTS5 search over user+assistant text across ALL sessions (tool
 output is not indexed; a syntax-invalid query is retried as one quoted
 phrase), `{session, around, limit}` reads the transcript around a hit;
-read-only, store-nil-safe, handled by `chat.HistoryHandler`. Specialists are subagents. A **subagent** is an **in-process background job** spawned via the
-`task` tool (`{subagent_type, prompt, description}`; returns immediately); the
+read-only, store-nil-safe, handled by `chat.HistoryHandler`. Specialists are
+subagents. A **subagent** is an **in-process background job** spawned via
+the `task` tool (`{subagent_type, prompt, description}`; returns immediately); the
 runtime (`internal/shell3` jobManager) runs it as a child-session goroutine
 under a concurrency cap (`background.max_concurrent`, default 8) — no
 subprocess, no inbox file, no fsnotify. `bash_bg` is a background shell
@@ -97,8 +99,9 @@ turn** whose summary is triaged like any completion (direct jobs deliver it
 to the root as an `agent_update` notice; capped at 5 follow-up turns per
 subagent, after which — or after cancel/failure — the raw job event is
 triaged instead, so a completion is never lost). `task_cancel <sub>`
-cascades to the jobs the subagent started. `Runtime.Reload` no longer refuses while background work is
-running: it always proceeds — idle front-end sessions swap onto the new
+cascades to the jobs the subagent started. `Runtime.Reload` no longer
+refuses while background work is running: it always proceeds — idle
+front-end sessions swap onto the new
 Parts in place, while a subagent child session or a still-running `bash_bg`
 job keeps the Parts (store/MCP handles) it was built with; the old
 generation's teardown is deferred ("parked") and runs once every such job
@@ -115,7 +118,8 @@ IS the registration, there is no toggle and no allowlist key.
 `GET /api/jobs` lists running + finished jobs and `/api/jobs/<id>/cancel`
 cancels one; the job-progress stream is `rt.JobEvents()` /
 `Session.JobEvents()`. Note `Session.Jobs()` reports the whole job runtime,
-not one session's share — filter by `JobInfo.ParentID` for per-session work. The shell is **unrestricted except by the hook**;
+not one session's share — filter by `JobInfo.ParentID` for per-session
+work. The shell is **unrestricted except by the hook**;
 the opt-in gate is a **per-agent bash hook script**: `hooks/tool-call.sh`
 governs the main agent, `hooks/<name>.tool-call.sh` governs subagent `<name>`
 — no fallback, no chaining; an agent with no script runs ungated (a `<name>`
@@ -212,16 +216,18 @@ does not log anyone out. Each record carries a fingerprint of the password it
 was created under: changing `SHELL3_WEB_PASSWORD` invalidates every session,
 which is what makes "I think I was breached" actionable. Cookie is `HttpOnly`,
 `SameSite=Lax` (Strict would drop the cookie when the interface's URL is
-opened from a messenger), `Secure` whenever the request arrived over https. Failed logins
-get an escalating global delay (no lockout — that would let anyone hold the
+opened from a messenger), `Secure` whenever the request arrived over
+https. Failed logins get an escalating global delay (no lockout — that
+would let anyone hold the
 login closed, and TOTP already covers guessing), every attempt is logged with
 IP and user-agent, and every success raises a bell + push notification, since
 that notice is how a breach gets noticed at all. TOTP codes are single-use
 within their window. `shell3 boot` asks for the password (16-character floor,
 offers a generated one) and offers TOTP enrolment with a QR code in the
 terminal; losing the phone is not a lockout because the secret is a line in
-`.env` on your own machine. The interface is built with **assistant-ui** (React, `webui/`), built by
-`make webui` into `internal/webui/dist` and embedded in the binary — the
+`.env` on your own machine. The interface is built with **assistant-ui**
+(React, `webui/`), built by `make webui` into `internal/webui/dist` and
+embedded in the binary — the
 staged build is committed because `go install` cannot run npm. It is **set as a
 printed document**, the run log it already is: two stocks (paper, and a
 cyanotype for dark), Newsreader over Inter Tight over IBM Plex Mono — all
@@ -275,8 +281,8 @@ usage with a context-fill bar, and whether the command gate is armed); and a
 read-only **Files** explorer over two roots — the config dir (`.env` is
 redacted, never read from disk; reads report `redacted`/`binary`/`truncated`)
 and the media dir (uploads and generated images, newest first, with inline
-previews). Plus a notification bell, a light/dark toggle, and voice. Chat is pinned in
-the sidebar; the five operational views sit under an always-visible
+previews). Plus a notification bell, a light/dark toggle, and voice. Chat
+is pinned in the sidebar; the five operational views sit under an always-visible
 "Elsewhere" group at its foot. The operational views poll while the
 tab is visible; sample data appears only when there is no backend at all, never
 in place of a live one that failed.
@@ -315,11 +321,11 @@ throughout — no browser attached, a cancelled turn, or a timeout all deny.
 **Completion delivery** is the notifier's, unchanged; the front-end supplies
 `CompletionHost` (`internal/webui/completion.go`): a `send` verdict becomes a
 notification in the bell (the 50 most recent are replayed to a browser on
-connect, so closing the tab does not lose them), a `wake` verdict runs another turn — the owning
-session if still live, a fresh one otherwise — through the same single-turn
-gate, so a cron result never runs concurrently with someone typing. Wake and
-session retirement share one lock, so a note lands or the session retires,
-never both.
+connect, so closing the tab does not lose them), a `wake` verdict runs
+another turn — the owning session if still live, a fresh one otherwise —
+through the same single-turn gate, so a cron result never runs concurrently
+with someone typing. Wake and session retirement share one lock, so a note
+lands or the session retires, never both.
 
 **Media** (`internal/media`, four blocks under `media:` in `shell3.yaml`, each
 pointing at a model): `stt` transcribes browser recordings (`POST /api/stt`;
@@ -333,17 +339,29 @@ runtime session decorator (`Runtime.SetSessionDecorator`; reapplied on Reload)
 `modalities=["image","text"]`, OpenRouter's image-output dialect — its
 dedicated `/api/v1/images` endpoint is avoided because it pre-authorizes
 worst-case cost and 402s low balances). All media — uploads and generated
-images (`img-*`) — is stored under `~/.shell3/media/` so every file keeps a
-durable path (TTS audio included, cached as `tts-*`) and is served back at
-`/api/media/<name>`; the agent shows a generated image by writing
-`![](/api/media/<file>)`. Restriction policy is the hook script, not a tools
-list. When no media model is configured the UI falls back to the browser's own
-Web Speech APIs, so dictation still works. `send_file` (`internal/webui/sendtool.go`)
-is a sibling host tool on the same decorator: `{path, name?}` stages any local
-file into `~/.shell3/media/` (as `sent-*`) and returns the `/api/media/` link
-to show, refusing `.env`/dotenv siblings, directories, and files over 50 MB;
-it is skipped for a headless session, since there is no chat to hand a link
-to.
+images (`img-*`) — is stored under `<configDir>/media` (`internal/mediadir`;
+which IS `~/.shell3/media` for the default config dir; `$SHELL3_MEDIA_DIR`
+overrides) so every file keeps a durable path (TTS audio included, cached
+as `tts-*`) and is served back at `/api/media/<name>`; the agent shows a
+generated image by writing `![](/api/media/<file>)`. Restriction policy is
+the hook script, not a tools list. When no media model is configured the UI
+falls back to the browser's own Web Speech APIs, so dictation still works.
+`send_file` (`internal/webui/sendtool.go`) is a sibling host tool on the
+same decorator: `{path, name?}` stages any local file into the media dir
+(as `sent-*`) and returns the `/api/media/` link to show. Defense in depth,
+in order: it refuses dotenv-shaped names (the requested name and its
+symlink-resolved target); refuses anything resolving inside the config
+directory, media dir exempted (catches a symlink into the config tree; the
+exemption itself is refused if `$SHELL3_MEDIA_DIR` has been pointed at or
+above the config dir, since that would otherwise exempt the whole tree);
+opens with `O_NOFOLLOW|O_NONBLOCK` and validates the opened fd, not the
+path, refusing non-regular files (FIFOs, devices, sockets); compares the
+fd's `(dev, ino)` against every regular file anywhere in the config tree,
+which is what actually closes the hardlink route (a hardlink's resolved
+path lies outside the config dir by construction, but shares the inode);
+and bounds the copy again at write time rather than trusting the pre-copy
+`Stat`, which can be stale. It is skipped for a headless session, since
+there is no chat to hand a link to.
 
 An in-process cron scheduler (`internal/cron`, jobs are `cron/<name>.md`
 files; each job dispatches its declared agent — a subagent from `agents/`, or
@@ -371,6 +389,12 @@ orphaned `runs/<id>/` dirs (pre-database leftovers), printing `janitor:
 removed N runs, M thread entries` (silent when both are zero). SQL in
 `runs.Sweep`, on its own connection (the runtime's store is already open by
 then — the sweep does not need it closed), before the server listens.
+A sibling **media janitor** runs the same start-time-only shape, gated by
+`media_keep_days` (top-level `shell3.yaml` key, default 0 = keep forever, so
+this is opt-in): deletes regular files in the media dir past the cutoff —
+uploads, generated images, TTS cache, and `send_file` stagings alike, since
+none are distinguished from each other by the sweep. An old `/api/media/`
+link goes dead once its file is swept.
 
 `shell3 boot` scaffolds the config tree (an interactive form: model, context
 budget, whether the model has vision — which wires `media.describe` + the media
@@ -401,7 +425,8 @@ referenced from YAML as `env:KEY`. Never read, display, or include the
 contents of any credential file in a response. This applies to all agents,
 assistants, and automated tools.
 
-- `.env` beside `shell3.yaml` (e.g. `~/.shell3/.env`) — provider API keys, base URLs, tool secrets
+- `.env` beside `shell3.yaml` (e.g. `~/.shell3/.env`) — provider API keys,
+  base URLs, tool secrets
 
 ## Project Layout
 
@@ -418,6 +443,7 @@ internal/runs/         SQLite runs store (modernc.org/sqlite, pure Go): sessions
 internal/edittool/     edit_file tool implementation (Go port of opencode's str-replace) + its direct-disk file I/O
 internal/notify/       Notification type (bg_done / agent_done) shared by job runtime + chat
 internal/media/        media.stt/tts/describe/imagegen clients (transcribe, speak, describe, generate)
+internal/mediadir/     resolves the media dir (<configDir>/media, $SHELL3_MEDIA_DIR overrides); split out of internal/media to break an import cycle (agentsetup → media → shell3 → agentsetup) and to stay free of the unix build tag
 internal/mcp/          MCP client (official go-sdk): Manager connects mcp: servers, lists tools, dispatches mcp_* calls
 internal/webui/        the web front-end: HTTP API, SSE chat bridge, turn gate, thread index, command gate, completion delivery; dist/ is the embedded build of webui/
 webui/                 the interface itself (React + assistant-ui + Vite); `make webui` builds it into internal/webui/dist

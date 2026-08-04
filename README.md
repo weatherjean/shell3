@@ -86,6 +86,9 @@ Every subcommand takes `--config/-c` to point at a different config directory.
   files enable it, one bash script gates it. Versionable, diffable, reloadable
   live. Conversation history lands in one SQLite file the agent can search
   itself with the `history` tool.
+- **Automatic context compaction.** Long sessions summarize their own head
+  and keep a verbatim tail, so a conversation you keep returning to doesn't
+  run out of room.
 - **Any OpenAI-compatible provider**: OpenAI, Ollama, Groq, LM Studio,
   OpenRouter, DeepSeek, and friends. MCP servers too, opt-in per agent and
   gated like every other tool.
@@ -111,8 +114,9 @@ The model gets a full shell, limited only by the `hooks/tool-call.sh` gate,
 which ships armed. `shell3 serve` requires a password (plus an optional
 authenticator code), but whoever logs in gets that same shell — the gate
 script, not the login, is what limits what can happen; use a container or VM
-for hard isolation. shell3 phones home to nothing: its only outbound
-connections are the endpoints in your config. No telemetry, no update checks.
+for hard isolation. shell3 phones home to nothing: outbound connections go
+only to the model/media endpoints in your config, plus the browser's push
+service when you enable web push. No telemetry, no update checks.
 Threat model in [docs/security.md](docs/security.md); report vulnerabilities
 via [GitHub Security Advisories](https://github.com/weatherjean/shell3/security/advisories).
 
