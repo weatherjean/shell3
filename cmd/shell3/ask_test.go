@@ -11,6 +11,23 @@ import (
 	huh "charm.land/huh/v2"
 )
 
+// TestEchoPrompt verifies the interactive-only re-echo of the sent message:
+// huh's input form clears its own line on submit, so without this the user's
+// message never appears in the terminal transcript. Only askPrompt's TTY call
+// sites use it — argv/-p mode is unchanged, since the shell already echoed
+// the command line.
+func TestEchoPrompt(t *testing.T) {
+	var w strings.Builder
+	echoPrompt(&w, "list the files here")
+	got := w.String()
+	if !strings.Contains(got, "list the files here") {
+		t.Errorf("echoPrompt should contain the sent message; got %q", got)
+	}
+	if !strings.Contains(got, "you") {
+		t.Errorf("echoPrompt should label the line as the user's own message; got %q", got)
+	}
+}
+
 // TestAskResumeHint pins the exact resume line printed on exit — it is the
 // user's only pointer back into the conversation, so its wording (and the
 // `shell3 ask --resume` invocation) is load-bearing.

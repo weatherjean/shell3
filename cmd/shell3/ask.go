@@ -64,6 +64,7 @@ func newAskCommand() *cobra.Command {
 					}
 					return err
 				}
+				echoPrompt(os.Stdout, prompt)
 			}
 			ctx := cmd.Context()
 
@@ -143,6 +144,7 @@ func newAskCommand() *cobra.Command {
 				}
 				prompt = next
 				fmt.Println()
+				echoPrompt(os.Stdout, prompt)
 			}
 			fmt.Println("\n" + askResumeHint())
 			return nil
@@ -182,6 +184,15 @@ func confirmAsk(_ context.Context, r io.Reader, w io.Writer, command, reason str
 	default:
 		return false
 	}
+}
+
+// echoPrompt writes back the message the interactive huh form just collected.
+// The form clears its own input line on submit, so without this the user's
+// own message never appears anywhere in the terminal transcript — only the
+// interactive TTY path needs it (askPrompt's caller): argv/-p mode is
+// unchanged because the shell already echoed the command line.
+func echoPrompt(w io.Writer, msg string) {
+	fmt.Fprintln(w, cli.Meta("you › ")+msg)
 }
 
 // askPrompt asks for the message with a brand-themed huh input when no argument
