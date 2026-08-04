@@ -5,7 +5,7 @@ BIN := shell3
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: build run install test test-webui webui lint fmt clean
+.PHONY: build run install test test-web webui lint fmt clean
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/$(BIN)
@@ -29,7 +29,7 @@ test:
 	@go tool cover -func=cover.out | tail -1
 
 # Type-check and lint the web interface (the Go suite does not cover it).
-test-webui:
+test-web:
 	cd webui && npm ci --silent && npm run build && npm run lint
 
 # Mirrors CI: formatting drift fails the build, then static analysis
