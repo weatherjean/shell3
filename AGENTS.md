@@ -2,6 +2,12 @@
 
 Minimal Unix-composable personal agent written in Go.
 
+> This file is the repo's standing context for coding agents (`CLAUDE.md`
+> symlinks here). It is written for models, not people: dense, exhaustive,
+> and kept in lockstep with the code, because shell3 is developed largely by
+> the kind of agent it is. Humans want [README.md](README.md) and
+> [docs/](docs/).
+
 **Declarative config.** The config is a **directory** (default `~/.shell3/`),
 loaded by `internal/config` — four rules: YAML wires it, markdown prompts it,
 files enable it, one bash script gates it. `shell3.yaml` holds wiring only
@@ -178,14 +184,15 @@ cron. It binds `127.0.0.1:8765` by default (`web.addr`) and **authenticates**:
 on it; a `web.password: env:SHELL3_WEB_PASSWORD` reference like every other
 secret) is exchanged at a login screen for a server-side session, and the
 optional `web.totp_secret` adds a second factor so a leaked password alone is
-not a session. Auth is **not** a reason to skip a proxy: a login here is a
-shell, so reaching it from elsewhere still argues for a tunnel or reverse proxy
-that authenticates in its own right, wired via `web.tunnel` (e.g. `cloudflared
-tunnel --url http://{addr}`; `internal/tunnel` spawns it detached and scrapes
-the first https URL, log `~/.shell3/tunnel.log`) or a fixed `web.url`.
-`--tunnel` overrides that command (bare, it uses the cloudflared quick tunnel)
-and `--no-tunnel` ignores it; starting a tunnel says what it exposes, and a
-network-facing bind with no https warns that the password crosses in clear.
+not a session. **Exposure is the operator's**: shell3 binds `web.addr` and
+does nothing else — it exposes nothing beyond that bind and supervises
+nothing. `web.url` is the one exposure-related key and it is purely
+informational (the address the operator actually serves it on; `serve` prints
+it at start via `announcePublicURL`, nothing depends on it). A network-facing
+bind with no https warns that the password and cookie cross in clear and
+points at `docs/deploying.md`, which is where every "how do I keep it running
+/ reach it from my phone" answer lives. Auth is **not** a reason to skip a
+proxy: a login here is a shell.
 
 Authentication lives in `internal/webui/auth.go` + `sessions.go`. Every route
 is declared in one table (`Server.routes()`) carrying a `public` flag, so a new
@@ -200,8 +207,8 @@ pruned at load), 7-day sliding expiry renewed in place on use, so a restart
 does not log anyone out. Each record carries a fingerprint of the password it
 was created under: changing `SHELL3_WEB_PASSWORD` invalidates every session,
 which is what makes "I think I was breached" actionable. Cookie is `HttpOnly`,
-`SameSite=Lax` (Strict would drop the cookie when the tunnel URL is opened from
-a messenger), `Secure` whenever the request arrived over https. Failed logins
+`SameSite=Lax` (Strict would drop the cookie when the interface's URL is
+opened from a messenger), `Secure` whenever the request arrived over https. Failed logins
 get an escalating global delay (no lockout — that would let anyone hold the
 login closed, and TOTP already covers guessing), every attempt is logged with
 IP and user-agent, and every success raises a bell + push notification, since
@@ -276,7 +283,7 @@ no tab open. A VAPID keypair is generated once into
 `web_push_subs.json`; `/sw.js` (which caches nothing on purpose) shows the
 notification and focuses an existing tab on click. Every bell notification is
 pushed too, and an endpoint the push service reports gone (404/410) is pruned.
-Push needs a secure context — localhost or an https tunnel, never plain http to
+Push needs a secure context — localhost or proxied https, never plain http to
 another host — so the toggle in the bell explains itself rather than failing
 silently.
 
@@ -342,23 +349,20 @@ already-gone sessions, printing `janitor: removed N runs, M thread entries`
 
 `shell3 boot` scaffolds the config tree (an interactive form: model, context
 budget, whether the model has vision — which wires `media.describe` + the media
-tool — and the agent's workdir) and writes secrets to `~/.shell3/.env`; TTY-only
-offers then wire what was accepted into the rendered yaml (TOTP enrolment →
-`web.totp_secret`, phone access → `web.tunnel` quick tunnel, installing
-cloudflared if needed) and install the systemd user service, verified via
-is-active polling so a crash-loop is reported, not claimed as running.
-`shell3 boot --service` re-runs just the service step against the existing
-config (the repair path); `--show` reprints the finale, rendered to the
-terminal's own background.
+tool — the agent's workdir, and the interface password) and writes secrets to
+`~/.shell3/.env`; one TTY-only offer wires TOTP enrolment → `web.totp_secret`.
+It installs **nothing** and exposes **nothing**: the finale prints the local
+URL and points at `docs/deploying.md` (or the agent) for keeping it up and
+reaching it. `--show` reprints that finale, rendered to the terminal's own
+background.
 `shell3 ask "…"` is the terminal front-end (`internal/cli`): it drives the same
 agent with full verbose output (every tool call/result, reasoning, token usage;
 no message = an interactive multi-turn loop; `-p` for headless; `--resume`
 continues the latest session; host-agnostic — reads nothing from the `web:`
-block). `shell3 url` prints where the interface is reachable — a fixed
-`web.url`, else the last tunnel-scraped URL (persisted to
-`~/.shell3/tunnel.url` by `internal/tunnel`), else the local address.
-`serve`, `ask`, `boot`, `project`, `health`, and `url` are the whole command
-tree — there is no Telegram front-end and no separate dashboard command.
+block).
+`serve`, `ask`, `boot`, `project`, and `health` are the whole command tree —
+there is no Telegram front-end, no separate dashboard command, and no command
+that exposes or supervises the process.
 
 ## IMPORTANT: Do Not Read Credential Files
 
@@ -384,7 +388,6 @@ internal/paths/        global (~/.shell3/) + local (.shell3_project/) path resol
 internal/runs/         file-native JSONL store: sessions at .shell3_project/runs/<id>/; janitor.go sweeps runs_keep_days at serve startup
 internal/edittool/     edit_file tool implementation (Go port of opencode's str-replace) + its direct-disk file I/O
 internal/notify/       Notification type (bg_done / agent_done) shared by job runtime + chat
-internal/tunnel/       web.tunnel spawner: runs the tunnel command, scrapes its https URL
 internal/media/        media.stt/tts/describe/imagegen clients (transcribe, speak, describe, generate)
 internal/mcp/          MCP client (official go-sdk): Manager connects mcp: servers, lists tools, dispatches mcp_* calls
 internal/webui/        the web front-end: HTTP API, SSE chat bridge, turn gate, thread index, command gate, completion delivery; dist/ is the embedded build of webui/

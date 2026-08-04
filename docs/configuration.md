@@ -102,8 +102,7 @@ Keys in `extra` are injected verbatim into the top-level request JSON:
     extra: { provider: { order: [anthropic] } }      # OpenRouter routing (nesting works)
 ```
 
-Only set it when needed — strict endpoints reject unknown fields. More in
-[cookbook/models.md](cookbook/models.md).
+Only set it when needed — strict endpoints reject unknown fields.
 
 ### Local proxies — `run_proxy`
 
@@ -486,8 +485,7 @@ web:
   addr: 127.0.0.1:8765              # listen address (default 127.0.0.1:8765)
   password: env:SHELL3_WEB_PASSWORD # REQUIRED — serve refuses to start without it
   # totp_secret: env:SHELL3_WEB_TOTP_SECRET   # optional second factor
-  # tunnel: "cloudflared tunnel --url http://{addr}"   # public URL, spawned at start
-  # url: https://…                                     # fixed address (wins over tunnel)
+  # url: https://…                            # the public address you serve it on
 ```
 
 ### Authentication — `web.password`
@@ -542,24 +540,13 @@ having when the interface is exposed — that is defence in depth, and it is wha
 gives you SSO and hardware 2FA. A non-loopback `addr` over plain http starts
 anyway, with a warning: the password and cookie cross the network in clear.
 
-`tunnel` is a shell command spawned detached at start (`{addr}` substituted);
-the first bare `https://…` URL it prints is used, its output goes to
-`~/.shell3/tunnel.log`, and the URL is probed until it actually serves before
-being printed (a fresh quick-tunnel hostname can take a little while to
-route). If no URL appears, shell3 still runs on `addr`. The example needs
-[`cloudflared`](https://github.com/cloudflare/cloudflared) installed — swap in
-any tunnel that prints an https URL, set a fixed `url` (a stable tunnel,
-`tailscale serve`), or leave both out to stay local. A quick tunnel mints a
-**new hostname on every restart**; if restarts are routine (e.g. under
-systemd), prefer a stable address so bookmarks keep working.
+### Public address — `web.url`
 
-`shell3 serve` can override both keys for one run:
-[`--tunnel`](cli.md#shell3-serve--run-the-agent-and-its-web-interface) with no
-value runs the cloudflared quick tunnel, `--tunnel "<command>"` replaces
-`tunnel`, and `--no-tunnel` ignores it and stays local. Whichever way a tunnel
-gets started, serve prints a note that it is now reachable from the internet:
-the login password becomes the boundary, and a session is a shell, so
-proxy-level auth in front is still worth having.
+`url` is informational: the address the interface is actually reachable at,
+once you serve it on one. `shell3 serve` prints it at start and nothing else
+depends on it — shell3 does not open, proxy, or verify that address. Getting
+the interface onto it is yours ([deploying.md](deploying.md)); leave `url` out
+to stay local.
 
 ### Push notifications
 
@@ -576,9 +563,10 @@ push service reports as gone (`404`/`410`) are dropped automatically, so an
 uninstalled or expired registration doesn't fail forever; the browser side
 unsubscribes through `DELETE /api/push/subscribe`.
 
-Push requires a **secure context**, so it works on `localhost` and over an
-https tunnel but not over plain http to another host — one more reason to run
-with `tunnel`/`url` rather than a bare non-loopback `addr`.
+Push requires a **secure context**, so it works on `localhost` and over https
+but not over plain http to another host — one more reason to expose the
+interface over https ([deploying.md](deploying.md)) rather than binding a bare
+non-loopback `addr`.
 
 ## Voice & images — `media:`
 
@@ -642,7 +630,8 @@ reachable long after its chat message has scrolled away.
 (`.wav/.mp3/.ogg/.opus/.oga`, audio models), PDFs (`.pdf` ≤ 20 MB, an
 OpenAI-compatible `file` part — works on OpenAI and OpenRouter), and video
 (`.mp4/.webm/.mov` ≤ 40 MB, a `video_url` part — an OpenRouter/Gemini
-extension plain OpenAI endpoints reject).
+extension plain OpenAI endpoints reject; OpenRouter also wants at least $1.00
+of balance on any request carrying video, whatever it actually costs).
 
 Provider recipes — a one-key Groq quickstart for STT+TTS, the OpenRouter
 variant — live in [cookbook/voice-images.md](cookbook/voice-images.md).
@@ -776,5 +765,5 @@ carry no skills; put a subagent's standing instructions in its prompt body.
 ## Putting it together
 
 Read the tree `boot` writes (`~/.shell3/`) for a full example; the
-[cookbook](cookbook/README.md) has drop-in extras — subagents, skills, proxy
+[cookbook](cookbook/README.md) has drop-in extras — subagents, skills, MCP
 and sandbox setups. Validate any edit with `shell3 health` before reloading.

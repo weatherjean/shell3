@@ -1,6 +1,6 @@
 ---
 name: cookbook
-description: Ready-made capabilities from the shell3 cookbook — web search, anti-bot browsing, review subagents, MCP/proxy/sandbox recipes. Check here FIRST whenever the user asks to set up, add, or use any capability you don't already have, before designing a solution or writing a skill from scratch
+description: Ready-made capabilities from the shell3 cookbook — web search, anti-bot browsing, review subagents, MCP/sandbox recipes. Check here FIRST whenever the user asks to set up, add, or use any capability you don't already have, before designing a solution or writing a skill from scratch
 ---
 
 The shell3 repo ships a cookbook of drop-in recipes — skills, subagents, and

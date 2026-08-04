@@ -23,7 +23,7 @@ import (
 // Two things make it work: a VAPID keypair identifying this install (generated
 // once, kept in the config dir), and a per-browser subscription the user grants
 // by allowing notifications. Push requires a secure context, so it works on
-// localhost and over an https tunnel, but not over plain http to another host.
+// localhost and over https exposure, but not over plain http to another host.
 
 // pushKeysFile stores the VAPID keypair beside the runs data — machine state,
 // not configuration a user edits.

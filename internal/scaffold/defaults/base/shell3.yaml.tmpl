@@ -92,8 +92,8 @@ models:
 #
 # To reach it from elsewhere:
 #   url: a fixed https address you run yourself (a reverse proxy, Tailscale,
-#        SSH port forwarding, ...) — exposing the interface beyond this machine is
-#        yours to set up. See the deployment docs for options.
+#        SSH port forwarding, ...) — exposing the interface beyond this machine
+#        is yours to set up. Options: docs/deploying.md in the repo.
 web:
   workdir: {{.WorkDir | yamlstr}}
   addr: 127.0.0.1:8765

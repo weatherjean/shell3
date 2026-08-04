@@ -1,9 +1,9 @@
 # CLI reference
 
-Six subcommands: `serve` (the service — agent + web interface + cron),
+Five subcommands: `serve` (the service — agent + web interface + cron),
 `boot` (setup), `project` (scaffold a Chain of Command project), `health`
-(config check), `ask` (a local driver for the agent), and `url` (where the
-interface is reachable). Bare `shell3` prints help.
+(config check), and `ask` (a local driver for the agent). Bare `shell3`
+prints help.
 
 Every subcommand except `boot` takes `-c`/`--config <dir>`: a path to a config
 directory (`shell3.yaml`, `agent.md`, …); the default is `~/.shell3`. The
@@ -17,9 +17,6 @@ installed build.
 shell3 serve                       # ~/.shell3, http://127.0.0.1:8765
 shell3 serve -c ~/work-agent
 shell3 serve --addr 127.0.0.1:9000 # overrides web.addr
-shell3 serve --tunnel              # cloudflared quick tunnel, no config needed
-shell3 serve --tunnel "ngrok http {addr}"   # overrides web.tunnel
-shell3 serve --no-tunnel           # ignore web.tunnel, stay local
 ```
 
 Loads the config, serves the single-page app (embedded in the binary) and its
@@ -38,18 +35,13 @@ secrets — see
 `127.0.0.1:8765` by default; a non-loopback `--addr`/`web.addr` starts but warns
 that plain http carries the password in clear. And a password is not a reason to
 drop a proxy that authenticates in its own right — see
-[Security](security.md#the-web-interface). `web.tunnel` spawns a tunnel command
-and prints its public URL once it answers (`web.url` pins a fixed one).
+[Security](security.md#the-web-interface).
 
-**Tunnel flags.** `--tunnel` with no value runs the cloudflared quick tunnel
-(`cloudflared tunnel --url http://{addr}`) — the one-keystroke way to reach the
-agent from a phone, and what `boot` offers to install cloudflared for.
-`--tunnel "<command>"` overrides `web.tunnel` for this run (`{addr}` is
-substituted the same way), and `--no-tunnel` ignores `web.tunnel` and stays
-local. Whenever a tunnel is active — from the flag or the config — serve prints
-a note that the interface is now reachable from the internet, that the login
-password is the boundary, and that a session is a shell. It means it: keep
-access control in front as well.
+**Exposure is yours.** shell3 starts nothing on your behalf: put it behind a
+reverse proxy, Tailscale, or an SSH forward, and set `web.url` when the
+address is stable — [deploying.md](deploying.md). serve prints a fixed
+`web.url` at start, so the address you hand out is in the log; from that
+moment the login password is the boundary, and a session is a shell.
 
 **Threads and turns.** Each browser thread is its own session; the
 thread→session map persists in
@@ -158,8 +150,8 @@ redacted `.env`. See `webui/README.md` for how that is put together.
   phone's lock screen. A service worker at `/sw.js` handles delivery and
   click-to-focus (it caches nothing — the app is served by the binary and
   updated by restarting it). Push needs a **secure context**: it works on
-  `localhost` and over an https tunnel, but not over plain http to another
-  host, and the toggle says so instead of appearing broken. No configuration —
+  `localhost` and over https, but not over plain http to another host, and the
+  toggle says so instead of appearing broken. No configuration —
   the keypair is generated on first start; see
   [configuration.md](configuration.md#push-notifications).
 - **Approvals** — a hook `ask` verdict raises a modal with the reason and the
@@ -191,35 +183,18 @@ offers a **second factor**, printing a QR code to scan with an authenticator
 app; enrolling wires `web.totp_secret` so the login asks for the code. Losing
 that phone is not a lockout, since the secret is a line in `.env` you can
 delete.
-Another step asks whether to reach shell3 **from your phone**: accepting
-wires `web.tunnel` to a
-[cloudflared](https://github.com/cloudflare/cloudflared) quick tunnel
-(installing cloudflared first when missing — Homebrew when present, otherwise
-the official release binary into `~/.local/bin`; opt-in, no sudo). Every
-`serve` start then opens the tunnel and prints its public https URL (it
-changes per restart; also in `~/.shell3/tunnel.log` and the service journal).
-Declining or a failed install just leaves shell3 reachable on loopback only.
 
-On Linux with systemd, a final step offers to install shell3 as a **systemd
-user service** (`shell3.service`, running `shell3 serve`): the unit is written
-to `~/.config/systemd/user/`, enabled, lingering is turned on
-(`loginctl enable-linger`, so it runs without an active login and starts at
-boot), started immediately, and verified: boot polls the unit and reports a
-crash-loop (e.g. another process already on the port) instead of claiming
-success.
-Caveat spelled out at the end of boot too: a user service cannot prevent the
-machine from **sleeping**; on a laptop, disable suspend (or host shell3 on an
-always-on box) or the agent is gone while the lid is closed.
-`shell3 boot --service` re-runs just this step against the existing config —
-the repair path after updating the binary or when the unit points at a stale
-one; it rewrites the unit, restarts it, and verifies it came up.
+boot installs nothing and exposes nothing: it configures shell3 and stops
+there. Its closing note says as much, and points at
+[deploying.md](deploying.md) for keeping `serve` running and reaching it from
+elsewhere.
 Scriptable via flags (any flag skips its prompt; with no TTY, unset flags take
 defaults, except `--model`, which headless boot requires): `--url`, `--model`,
 `--name`, `--key`, `--vision`, `--workdir`, `--context-window`,
-`--compact-at`, `--proxy`, `--force`. (The tunnel, TOTP, and service offers
-are TTY-only; headless boot skips them.)
+`--compact-at`, `--proxy`, `--force`. (The TOTP offer is TTY-only; headless
+boot skips it.)
 `shell3 boot --show` reprints the post-boot summary for the existing config
-(paths, how to run, how to expose it) without writing or asking anything.
+without writing or asking anything.
 See [configuration.md](configuration.md).
 
 ## `shell3 project new` — scaffold a project
@@ -246,19 +221,6 @@ for dispatch.
 The command is designed for the agent to drive from a `bash` call — its `-h`
 output is the contract the agent reads before invoking it. See
 [configuration.md](configuration.md#projects--projects).
-
-## `shell3 url` — where is the interface?
-
-```sh
-shell3 url        # https://abc.trycloudflare.com, or http://127.0.0.1:8765
-```
-
-Prints the most public address the config yields: a fixed `web.url` if set,
-otherwise the last tunnel-scraped URL (`~/.shell3/tunnel.url`, written each
-time `web.tunnel` comes up), otherwise the local listen address. Caveats —
-like a quick-tunnel URL going stale on restart — go to stderr, so
-`$(shell3 url)` in a script captures just the URL. `boot --service` prints
-the same URL after restarting the service.
 
 ## `shell3 health` — check the config
 

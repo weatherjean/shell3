@@ -6,30 +6,59 @@ threat model, the one safety hook, secrets, and how to remove shell3's data.
 ## Unsafe by default
 
 shell3 gives the model a full, unrestricted shell: **no approval prompt, no
-built-in allowlist**. That's the point of a bash-first agent — it composes
-with your whole system — but treat a session the way you'd treat running a
-script someone else wrote.
+built-in allowlist**. That's the point of a bash-first agent, it composes with
+your whole system. Treat a session the way you'd treat running a script
+someone else wrote.
 
-The opt-in gate is a bash hook script per agent: `hooks/tool-call.sh` for
-the main agent, `hooks/<name>.tool-call.sh` for subagent `<name>` — no
-fallback between them, so each agent is governed by exactly one script or
-none. The script runs before **every** tool (`bash`, `bash_bg`, `edit_file`,
+The opt-in gate is a bash hook script per agent: `hooks/tool-call.sh` for the
+main agent, `hooks/<name>.tool-call.sh` for subagent `<name>`. There is no
+fallback between them; each agent is governed by exactly one script or none.
+The script runs before **every** tool (`bash`, `bash_bg`, `edit_file`,
 `read_media`, MCP tools as `mcp_<server>_<tool>`, host tools like
 `image_generate`) with the call as JSON on stdin, and prints a verdict: pass,
 rewrite, runner-swap, block, or ask a human (an Allow/Deny modal in the
-browser). **The scaffold ships an armed gate**, not a commented-out example: a
-fresh config already refuses credential reads, system-path writes, unread
-remote code (`curl … | sh`), publishing, force-pushes, commands that would kill
-shell3 itself, and edits to the gate scripts. Everything else runs untouched,
-because a harness that mostly runs unattended has to be able to do the work it
-is given. It never asks: with nobody at the browser an ask is a denial that
-first parks the turn, so every rule decides immediately. Read
-`hooks/tool-call.sh` — it is a short bash script, and the reasoning is in its
-comments. The full verdict contract and payload fields are in
+browser). The full verdict contract and payload fields are in
 [configuration.md](configuration.md#the-command-gate--hookssh).
 
 **If you need hard isolation, run shell3 in a container, VM, or throwaway
 user account.** The hook is a policy gate, not a security boundary.
+
+## The armed scaffold gate
+
+A fresh config ships with the gate armed, not as a commented-out example.
+What `hooks/tool-call.sh` refuses, and why:
+
+- **Credentials** (`.env`, `~/.ssh`, `~/.aws`, `~/.config/gh`, …): blocked
+  for read and write, by every tool. A `lib/bin` script reads the one key it
+  needs at point of use.
+- **The gate itself** and `shell3.yaml`: readable, not writable. Otherwise
+  "ask the operator to lift this" has an obvious shortcut.
+- **System paths** (`/etc`, `/usr/bin`, `/System`, `~/Library`): writes
+  blocked. `/usr/local` and `/opt` are allowed, since installing a tool is
+  ordinary work.
+- **Destruction**: `rm -rf /`, `mkfs`, fork bombs, and anything that stops
+  shell3 itself.
+- **Unread remote code**: `curl … | sh`, `base64 -d | sh` and friends.
+- **Publishing**: `npm publish`, `gh release create`, force-pushes. Plain
+  `git push` is allowed; it's normal work and recoverable.
+- **Everything else runs.** A denylist, deliberately: an allowlist makes
+  every new project a refusal until someone edits the file, which is how
+  gates get turned off.
+
+It never asks. shell3 mostly runs unattended, where an unanswered ask parks
+the turn and then denies anyway, so every rule decides immediately, and each
+refusal tells the model to raise the block with the operator rather than
+route around it. The script is short bash with the reasoning in its comments;
+read it and tune it to your deployment.
+
+## Network surface
+
+shell3's inbound surface is one listener, `web.addr`, and it is
+[authenticated](#the-web-interface). Outbound, it connects to the endpoints
+named in your config: model `base_url`s, `media:` models, MCP servers, and —
+once push is on — the browser vendor's push service. That is the whole list.
+No telemetry, no crash reporting, no update check. (The agent's own shell
+commands can of course reach anything the gate lets them.)
 
 ## The web interface
 
@@ -79,18 +108,17 @@ expiry. Signing out revokes that session rather than only clearing the cookie.
 response to "I think someone got in" — and deleting the file does the same.
 
 **Keep auth in front anyway.** A password in the app is not the industry answer
-to exposing a tool like this; an identity-aware proxy is — Cloudflare Access on
-a named tunnel, Tailscale, Authelia, a private network — and it is what gives
-you SSO and hardware 2FA. This feature means a leaked URL is no longer a public
-shell. It does not mean the interface wants to face the internet naked.
+to exposing a tool like this; an identity-aware proxy is — Cloudflare Access,
+Tailscale, Authelia, a private network — and it is what gives you SSO and
+hardware 2FA. This feature means a leaked URL is no longer a public shell. It
+does not mean the interface wants to face the internet naked.
 
-**A tunnel is one keystroke away.** `shell3 serve --tunnel` (no value) starts a
-cloudflared quick tunnel, `--tunnel "<command>"` overrides `web.tunnel`, and
-`web.tunnel` does the same at every start; `--no-tunnel` stays local. A tunnel
-hands the interface a public https hostname, so from that moment the password is
-the boundary — which is what serve says when one starts. A non-loopback bind
-over plain http is worse and warns louder: the password and the session cookie
-cross the network in clear, so use https (a tunnel) or a TLS-terminating proxy.
+**Exposure is yours, and shell3 does none of it.** It binds `web.addr` and
+stops there; how the interface becomes reachable is a decision you make
+([deploying.md](deploying.md)). Whatever you choose, the moment it answers
+from outside the box the password is the boundary. A non-loopback bind over
+plain http is the bad case and warns at start: the password and the session
+cookie cross the network in clear, so terminate TLS in front of it.
 
 Approvals inherit all of this: whoever holds a logged-in page answers the
 Allow/Deny modals. No browser attached means nobody answers, and an ask denies
@@ -178,20 +206,16 @@ Secrets live in a plain-text `.env` beside `shell3.yaml`, referenced from
 YAML as `env:KEY`:
 
 - **Never commit `.env`.** The shipped `.gitignore` excludes it.
-- **Never read or display credential files** — this applies to you and to the
-  agent (the system prompt says so; the interface's Files view refuses `.env`
-  and its dotenv siblings — `.env.local`, `.env.production`, … — outright,
-  listing them without ever opening them).
-- **Scripts read secrets at point of use.** The scaffold's `scripting` skill
-  teaches the pattern: a wrapper script under `~/.shell3/lib/bin/` reads the
-  one key it needs from `.env` (`grep '^KEY=' ~/.shell3/.env | cut -d= -f2-`)
-  inside its own process, so the secret never appears in the conversation, a
-  command string, or the agent's environment. Enforce the perimeter with the
-  gate example's `.env` deny (block commands whose text touches `.env`) and
-  a `tool-result.sh` redactor as backstop. On a multi-user box the usual
-  caveat applies: a process's environment and arguments are readable by
-  same-user processes, so treat secrets as readable by anything that user
-  runs.
+- **Never read or display credential files.** This applies to you and to the
+  agent: the system prompt says so, the scaffold's gate blocks commands whose
+  text touches `.env`, and the interface's Files view lists `.env` and its
+  dotenv siblings (`.env.local`, `.env.production`, …) without ever opening
+  them.
+- **Scripts read secrets at point of use.** The pattern, with the gate deny
+  and `tool-result.sh` redaction as backstops, is in
+  [configuration.md](configuration.md#scripts--secrets). On a multi-user box
+  the usual caveat applies: a process's environment and arguments are
+  readable by same-user processes.
 
 ## Where data lives, and how to remove it
 
@@ -206,8 +230,8 @@ shell3 is file-native — no database.
   browsers). The directory ignores itself (a self-contained `.gitignore` of
   `*`). Wipe it — every transcript and login session:
   `rm -rf ~/.shell3/.shell3_project`.
-- **The rest of `~/.shell3/`**: your config, `.env`, the app log, proxy and
-  tunnel logs, and `media/` (dictated recordings, uploads, generated images,
+- **The rest of `~/.shell3/`**: your config, `.env`, the app log, proxy logs,
+  and `media/` (dictated recordings, uploads, generated images,
   cached speech). Wipe everything: `rm -rf ~/.shell3`.
 
 ## Reporting vulnerabilities

@@ -72,14 +72,15 @@ func weakPasswordWarning(web shell3.WebConfig) string {
 }
 
 // cleartextWarning flags a network-facing bind with no TLS, where the password
-// and the session cookie travel in clear. Putting TLS in front (a reverse
-// proxy, a fixed web.url behind one) is the usual answer.
+// and the session cookie travel in clear. Exposure is the operator's, so the
+// warning points at the deployment docs rather than prescribing one answer.
 func cleartextWarning(addr string) string {
 	if isLoopbackBind(addr) {
 		return ""
 	}
 	return "  warning: this address faces the network over plain http — the password and " +
-		"session cookie cross it in clear. Put a TLS-terminating proxy in front"
+		"session cookie cross it in clear. Use https exposure or a TLS-terminating " +
+		"proxy (docs/deploying.md)"
 }
 
 // newServeCommand builds `shell3 serve` — the web interface, and the only

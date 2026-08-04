@@ -261,7 +261,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 // isHTTPS reports whether the browser's connection is encrypted, including the
-// tunnel case where TLS terminates upstream and says so in a header.
+// proxied case where TLS terminates upstream and says so in a header.
 func isHTTPS(r *http.Request) bool {
 	if r.TLS != nil {
 		return true

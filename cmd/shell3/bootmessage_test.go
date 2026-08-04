@@ -38,7 +38,7 @@ func TestBootSuccessMessage(t *testing.T) {
 		"shell3 ask",                  // the local ask mode must be advertised
 		"shell3 serve",                // how to run the interface
 		"http://127.0.0.1:8765",       // where to reach it
-		"web.url",                     // exposure beyond loopback is user-owned
+		"docs/deploying.md",           // service + exposure are user-owned, and documented there
 	} {
 		if !strings.Contains(base, want) {
 			t.Errorf("boot success message missing %q", want)
