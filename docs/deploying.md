@@ -44,7 +44,9 @@ public internet at all.
 2. SSH: `ssh -L 8765:127.0.0.1:8765 host` from the machine you're on.
 3. Public tunnel (last resort): `cloudflared tunnel --url
    http://127.0.0.1:8765` prints a public https URL — anyone who finds it
-   gets your login page, which is then the entire security boundary.
+   gets your login page, which is then the entire security boundary. If
+   you go this way, turn on the second factor first (`shell3 boot --totp`):
+   a leaked or guessed password alone then is not a session.
 
 The full serve-as-a-service recipe (Tailscale primary, public tunnel as
 the labeled fallback) is [cookbook/service.md](cookbook/service.md).

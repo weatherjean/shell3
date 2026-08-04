@@ -486,11 +486,16 @@ func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool) {
 		w("```")
 		w("")
 		w("`tailscale serve` prints your stable https URL — put it in `web.url`.")
-		w("More (public tunnels, other init systems): `docs/deploying.md`, or ask the agent.")
+		w("More (other init systems): `docs/deploying.md`, or ask the agent.")
 	} else {
 		w("Running it as a service and exposing it beyond this machine are yours")
 		w("to set up — see `docs/deploying.md` in the repo, or ask the agent.")
 	}
+	w("")
+	w("**Need it from a device you can't put on the tailnet?** A public quick")
+	w("tunnel works from anywhere: `cloudflared tunnel --url http://127.0.0.1:8765`.")
+	w("That URL is on the open internet and the login is the whole boundary —")
+	w("turn on the second factor first: `shell3 boot --totp`.")
 
 	fmt.Println()
 	fmt.Print(cli.RenderMarkdown(b.String()))

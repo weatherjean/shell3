@@ -29,7 +29,7 @@ systemctl --user enable --now shell3 && loginctl enable-linger "$USER" && tailsc
 
 If a device genuinely can't join the tailnet, a cloudflared tunnel as a
 second unit puts a public URL in front — anyone who finds it gets your
-login page, so keep TOTP on:
+login page, so keep TOTP on (`shell3 boot --totp` enrols):
 
     # ~/.config/systemd/user/shell3-tunnel.service
     [Unit]
