@@ -13,8 +13,8 @@ func TestSetEnvKey(t *testing.T) {
 	}{
 		{"append to empty", "", "SHELL3_WEB_TOTP_SECRET=NEW\n"},
 		{"append keeps others",
-			"TELEGRAM=x\n",
-			"TELEGRAM=x\nSHELL3_WEB_TOTP_SECRET=NEW\n"},
+			"OTHERVAR=x\n",
+			"OTHERVAR=x\nSHELL3_WEB_TOTP_SECRET=NEW\n"},
 		{"replace in place",
 			"A=1\nSHELL3_WEB_TOTP_SECRET=OLD\nB=2\n",
 			"A=1\nSHELL3_WEB_TOTP_SECRET=NEW\nB=2\n"},

@@ -67,10 +67,10 @@ func TestSearchIndexesTextParts(t *testing.T) {
 // Threads: record, overwrite, lookup, and surface isolation.
 func TestThreadRecordLookup(t *testing.T) {
 	st, _ := Open(t.TempDir())
-	if err := st.ThreadRecord("telegram", "42", "sess-a"); err != nil {
+	if err := st.ThreadRecord("web", "42", "sess-a"); err != nil {
 		t.Fatal(err)
 	}
-	if got, ok := st.ThreadLookup("telegram", "42"); !ok || got != "sess-a" {
+	if got, ok := st.ThreadLookup("web", "42"); !ok || got != "sess-a" {
 		t.Fatalf("Lookup = %q, %v", got, ok)
 	}
 	// Same msg id on another surface stays invisible.
@@ -78,10 +78,10 @@ func TestThreadRecordLookup(t *testing.T) {
 		t.Fatal("surface isolation broken")
 	}
 	// Re-record overwrites (the anchor advances as a thread continues).
-	if err := st.ThreadRecord("telegram", "42", "sess-b"); err != nil {
+	if err := st.ThreadRecord("web", "42", "sess-b"); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := st.ThreadLookup("telegram", "42"); got != "sess-b" {
+	if got, _ := st.ThreadLookup("web", "42"); got != "sess-b" {
 		t.Fatalf("overwrite failed: %q", got)
 	}
 }
@@ -94,7 +94,7 @@ func TestReopenPersists(t *testing.T) {
 	if err := st.AppendMessage(id, llm.Message{Role: llm.RoleUser, Content: "hello there"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.ThreadRecord("telegram", "7", id); err != nil {
+	if err := st.ThreadRecord("web", "7", id); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Close(); err != nil {
@@ -109,7 +109,7 @@ func TestReopenPersists(t *testing.T) {
 	if err != nil || len(msgs) != 1 || msgs[0].Content != "hello there" {
 		t.Fatalf("messages lost across reopen: %v %v", msgs, err)
 	}
-	if got, ok := st2.ThreadLookup("telegram", "7"); !ok || got != id {
+	if got, ok := st2.ThreadLookup("web", "7"); !ok || got != id {
 		t.Fatalf("thread lost across reopen: %q %v", got, ok)
 	}
 	if hits, _ := st2.Search("hello", 5); len(hits) != 1 {
@@ -128,7 +128,7 @@ func TestSweep(t *testing.T) {
 		if err := st.AppendMessage(id, llm.Message{Role: llm.RoleUser, Content: "searchable words"}); err != nil {
 			t.Fatal(err)
 		}
-		if err := st.ThreadRecord("telegram", "m-"+id, id); err != nil {
+		if err := st.ThreadRecord("web", "m-"+id, id); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -158,10 +158,10 @@ func TestSweep(t *testing.T) {
 	if _, ok := findMeta(t, st2, newID_); !ok {
 		t.Fatal("recent session was swept")
 	}
-	if _, ok := st2.ThreadLookup("telegram", "m-"+oldID); ok {
+	if _, ok := st2.ThreadLookup("web", "m-"+oldID); ok {
 		t.Fatal("stale thread entry survived")
 	}
-	if _, ok := st2.ThreadLookup("telegram", "m-"+newID_); !ok {
+	if _, ok := st2.ThreadLookup("web", "m-"+newID_); !ok {
 		t.Fatal("live thread entry was dropped")
 	}
 	// The swept session's text must be gone from the index too.

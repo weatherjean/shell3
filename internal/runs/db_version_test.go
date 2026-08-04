@@ -34,8 +34,8 @@ func TestOpen_FreshDBIsStampedAndWorks(t *testing.T) {
 	}
 }
 
-// TestOpen_RecreatesAMismatchedDB builds a v1-shaped database — the shape
-// backup/telegram-0.3.2 shipped: sessions/messages/reminders/messages_fts and
+// TestOpen_RecreatesAMismatchedDB builds a v1-shaped database — the original
+// shape: sessions/messages/reminders/messages_fts and
 // a threads table with only surface/msg_id/session_id, and no user_version
 // ever stamped (so it reads back as 0, but WITH tables present — the thing
 // that distinguishes it from a truly fresh, empty file). Open must recreate
@@ -75,27 +75,27 @@ func TestOpen_RecreatesAMismatchedDB(t *testing.T) {
 	}
 }
 
-// TestOpen_TelegramSurfaceStillWorksOnFreshDB: ThreadRecord/ThreadLookup —
-// the interface telegram's ThreadIndex uses — are unaffected by the new
-// columns on a fresh v2 database.
-func TestOpen_TelegramSurfaceStillWorksOnFreshDB(t *testing.T) {
+// TestOpen_SimpleSurfaceStillWorksOnFreshDB: ThreadRecord/ThreadLookup — the
+// simpler interface a plain front-end's ThreadIndex uses — are unaffected by
+// the new columns on a fresh v2 database.
+func TestOpen_SimpleSurfaceStillWorksOnFreshDB(t *testing.T) {
 	st, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer st.Close()
 
-	if err := st.ThreadRecord("telegram", "msg-1", "sess-1"); err != nil {
+	if err := st.ThreadRecord("web", "msg-1", "sess-1"); err != nil {
 		t.Fatalf("ThreadRecord: %v", err)
 	}
-	got, ok := st.ThreadLookup("telegram", "msg-1")
+	got, ok := st.ThreadLookup("web", "msg-1")
 	if !ok || got != "sess-1" {
-		t.Errorf("ThreadLookup(telegram, msg-1) = %q, %v; want sess-1, true", got, ok)
+		t.Errorf("ThreadLookup(web, msg-1) = %q, %v; want sess-1, true", got, ok)
 	}
 }
 
-// buildV1DB writes a database at path in the shape backup/telegram-0.3.2
-// shipped — no title/preview/created_at/updated_at/deleted columns on
+// buildV1DB writes a database at path in the original shape shipped — no
+// title/preview/created_at/updated_at/deleted columns on
 // threads, and no user_version ever stamped — with one row in threads so a
 // recreate is observable.
 func buildV1DB(t *testing.T, path string) {

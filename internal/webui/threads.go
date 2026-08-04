@@ -11,7 +11,7 @@ import (
 )
 
 // webSurface namespaces the web front-end's rows in the store's shared
-// threads table, so its ids never cross-resolve with telegram's or serve's.
+// threads table, so its ids never cross-resolve with another surface's.
 const webSurface = "web"
 
 // threadIndex is the durable record of every conversation the browser has

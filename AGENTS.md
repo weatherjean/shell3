@@ -385,8 +385,8 @@ no message = an interactive multi-turn loop; `-p` for headless; `--resume`
 continues the latest session; host-agnostic — reads nothing from the `web:`
 block).
 `serve`, `ask`, `boot`, `project`, and `health` are the whole command tree —
-there is no Telegram front-end, no separate dashboard command, and no command
-that exposes or supervises the process.
+there is no separate dashboard command and no command that exposes or
+supervises the process.
 
 ## IMPORTANT: Do Not Read Credential Files
 

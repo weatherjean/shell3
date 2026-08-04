@@ -59,7 +59,7 @@ func (s *Store) DBPath() string { return filepath.Join(s.root, DBFile) }
 // new NOT NULL DEFAULT column is fine either way, but this repo bumps on any
 // shape change rather than trying to judge compatibility case by case).
 //
-//  1. the shape `backup/telegram-0.3.2` shipped (sessions/messages/reminders/
+//  1. the original shape shipped (sessions/messages/reminders/
 //     threads(surface,msg_id,session_id)/messages_fts) — never stamped a
 //     version itself, so a v1 database reads back as user_version 0 with
 //     tables already present.
@@ -146,7 +146,7 @@ func openDB(path string) (*sql.DB, error) {
 // openRaw opens the database file with the store's connection pragmas, doing
 // no schema work of its own.
 func openRaw(path string) (*sql.DB, error) {
-	// WAL for multi-process readers (shell3 telegram and shell3 ask can run
+	// WAL for multi-process readers (shell3 serve and shell3 ask can run
 	// concurrently over one store), busy_timeout so a brief writer overlap
 	// waits instead of erroring.
 	dsn := "file:" + url.PathEscape(path) +
