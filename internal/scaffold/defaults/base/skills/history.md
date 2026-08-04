@@ -1,51 +1,29 @@
 ---
 name: history
-description: Search and read past conversations and background job logs via the file-native runs store (read-only).
+description: Recall past conversations with the history tool — full-text search over everything you and the user have said, across all stored sessions.
 ---
 
-# History — search and read past conversations
+# History — recall past conversations
 
-shell3 persists every conversation as plain JSONL files under
-`.shell3_project/runs/<session-id>/messages.jsonl`, one JSON object per line.
-Session IDs are sortable timestamp strings (e.g. `20060102T150405.000000000`).
+Everything you and the user have said, in every stored session, is
+full-text-searchable through the `history` tool. Use it whenever the user
+references something from before ("that certificate thing we fixed", "what
+did I ask you last week"), before saying you don't remember.
 
-## Searching history
+## Search, then read around the hit
 
-Use `rg` (ripgrep) to search across all sessions:
+    history {"query": "certificate renewal"}
+    history {"session": "<id from a hit>", "around": 41}
 
-    rg -n "JWT|expiry" .shell3_project/runs        # OR: alternation, not the word "OR"
-    rg -n "context window" .shell3_project/runs
-    rg -in "compact" .shell3_project/runs          # case-insensitive
+Query syntax (FTS5): bare words AND together, "quoted phrases" match
+exactly, `OR` / `NOT` / `prefix*` work. Search covers user and assistant
+text only — tool output is not indexed, so search for what was *said about*
+a thing, not for raw command output.
 
-Output shows `<path>:<line>:<json-line>`. Extract the session id from the path
-(the directory component after `runs/`).
+## Notes
 
-## Listing sessions
-
-    ls -lt .shell3_project/runs/                   # newest directories first
-    cat .shell3_project/runs/<id>/meta.json        # session metadata (workdir, model, status)
-
-The `meta.json` fields: `id`, `workdir`, `config_path`, `model`, `status`
-(`live` or `ended`), `parent_id` (set for subagents), `started_at`, `last_at`,
-`ended_at` (set once the session ends).
-
-## Reading a full session
-
-    cat .shell3_project/runs/<id>/messages.jsonl \
-      | jq -r '.role + ": " + (.content // "")'
-
-Or print raw JSON lines with line numbers:
-
-    cat -n .shell3_project/runs/<id>/messages.jsonl
-
-## Subagent runs
-
-A subagent's conversation is an ordinary session under
-`.shell3_project/runs/<id>/`. (Live jobs are inspected with `task_list` /
-`task_status`, not files.)
-
-## Rules
-
-- READ-ONLY always; do not modify any file under `.shell3_project/runs/`.
-- Pull only what you need; sessions can be large — pipe through `head`/`tail`/`jq`.
+- Sessions are stored in `.shell3_project/shell3.db` (SQLite). The history
+  tool is the interface; treat the database itself as off-limits for writes.
+- A `bash_bg` job's full output is a plain file:
+  `.shell3_project/runs/<session-id>/jobs/<job-id>.log` — `cat`/`tail` it.
 - Cite what you find by session id so the user can follow up.

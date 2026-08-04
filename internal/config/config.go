@@ -31,7 +31,7 @@ type Model struct {
 }
 
 type ToolGates struct {
-	Bash, BashBg, Edit, Media, Read, List bool
+	Bash, BashBg, Edit, Media, Read, List, History bool
 }
 
 // Skill is one resolved *.md from the skills/ dir, surfaced as a one-line

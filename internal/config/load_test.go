@@ -126,27 +126,29 @@ func TestLoadCrossRefErrors(t *testing.T) {
 }
 
 func TestLoadReadListFilesTools(t *testing.T) {
-	// An agent opting into read + list_files loads with both gates set, and
-	// ToolDefs surfaces both tool definitions.
+	// An agent opting into read + list_files + history loads with all three
+	// gates set, and ToolDefs surfaces all three tool definitions.
 	c := mustLoad(t, map[string]string{
-		"agent.md": "---\nmodel: m1\ntools: [read, list_files]\n---\nRead-only agent.\n",
+		"agent.md": "---\nmodel: m1\ntools: [read, list_files, history]\n---\nRead-only agent.\n",
 	})
 	a := c.FirstAgent()
-	if !a.Gates.Read || !a.Gates.List {
-		t.Fatalf("gates = %+v, want Read and List set", a.Gates)
+	if !a.Gates.Read || !a.Gates.List || !a.Gates.History {
+		t.Fatalf("gates = %+v, want Read, List, and History set", a.Gates)
 	}
 	defs := ToolDefs(a.Gates)
-	var haveRead, haveList bool
+	var haveRead, haveList, haveHistory bool
 	for _, d := range defs {
 		switch d.Name {
 		case "read":
 			haveRead = true
 		case "list_files":
 			haveList = true
+		case "history":
+			haveHistory = true
 		}
 	}
-	if !haveRead || !haveList {
-		t.Fatalf("ToolDefs = %+v, want read and list_files", defs)
+	if !haveRead || !haveList || !haveHistory {
+		t.Fatalf("ToolDefs = %+v, want read, list_files, and history", defs)
 	}
 }
 
@@ -159,7 +161,7 @@ func TestLoadUnknownToolNamesValidList(t *testing.T) {
 	if !strings.Contains(msg, `unknown tool "reed"`) {
 		t.Fatalf("msg = %q", msg)
 	}
-	for _, want := range []string{"bash", "bash_bg", "edit", "media", "read", "list_files"} {
+	for _, want := range []string{"bash", "bash_bg", "edit", "media", "read", "list_files", "history"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("error should name %q in the valid list, got %q", want, msg)
 		}

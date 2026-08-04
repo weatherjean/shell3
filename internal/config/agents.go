@@ -73,8 +73,10 @@ func parseAgentFile(data []byte, name, label string) (AgentCommon, string, error
 			core.Gates.Read = true
 		case "list_files":
 			core.Gates.List = true
+		case "history":
+			core.Gates.History = true
 		default:
-			return AgentCommon{}, "", fmt.Errorf("%s: unknown tool %q (valid: bash, bash_bg, edit, media, read, list_files)", label, tool)
+			return AgentCommon{}, "", fmt.Errorf("%s: unknown tool %q (valid: bash, bash_bg, edit, media, read, list_files, history)", label, tool)
 		}
 	}
 	switch {
