@@ -48,8 +48,8 @@ way into `~/.shell3/lib/...`.
 
 1. Skim what you installed (`cat` it) so you know what it does.
 2. `shell3 health` — a malformed skill surfaces here.
-3. Tell the user to reload the config (or do it if you can) — new files load
-   then.
+3. Ask the user to reload the config — the Status view's **Reload config**
+   button; new files load then. You cannot reload yourself.
 4. If a recipe needs secrets or services (API keys, docker), its own setup
    section walks you through it — follow it with the user, don't guess.
 

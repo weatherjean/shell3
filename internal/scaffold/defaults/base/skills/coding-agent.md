@@ -22,7 +22,7 @@ When such a task comes up:
    user decides, don't pick silently. A missing CLI is the user's call
    too (they may want to install one).
 4. Install the chosen recipe per the cookbook skill, `shell3 health`,
-   then reload the config.
+   then ask the user to reload the config (Status view → Reload config).
 5. **Delete this file** once a real coding-agent skill has landed —
    `rm skills/coding-agent.md` in the config dir — so this stale routing
    note stops cluttering your skill index.
