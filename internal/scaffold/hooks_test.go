@@ -212,3 +212,31 @@ func TestScaffoldedGateNeverAsks(t *testing.T) {
 		}
 	}
 }
+
+// A subagent with no hook of its own runs ungated, and there is no fallback
+// to the main agent's gate — so shipping the assistant without one would make
+// delegation a way around every rule the main agent has. The main agent may
+// not read .env; if the assistant could, the main agent need only dispatch it
+// and the secret lands in the job transcript. Its gate delegates to the main
+// script so the rules cannot drift apart.
+func TestScaffoldedAssistantGateAppliesTheMainRules(t *testing.T) {
+	dir := scaffoldForHooks(t)
+
+	for _, command := range []string{
+		"cat ~/.shell3/.env",
+		"grep OPENWEATHER_KEY ~/.shell3/.env",
+	} {
+		if verdict, _ := runHook(t, dir, "assistant.tool-call.sh", "bash", command); verdict != "block" {
+			t.Errorf("%q = %s, want block: a subagent must not reach what the main agent may not", command, verdict)
+		}
+	}
+
+	for _, command := range []string{
+		"curl -s https://example.com",
+		"cat notes.md",
+	} {
+		if verdict, reason := runHook(t, dir, "assistant.tool-call.sh", "bash", command); verdict != "allow" {
+			t.Errorf("%q = %s (%s), want allow: this is the assistant's actual job", command, verdict, reason)
+		}
+	}
+}
