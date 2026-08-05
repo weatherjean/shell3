@@ -210,10 +210,10 @@ names are reserved.
 
 ```markdown
 ---
-description: Read-only investigation of the codebase. No edits.
+description: Use for substantial, self-contained work you can hand off whole.
 tools: [bash]
 ---
-You are a focused code explorer…
+You are a general-purpose assistant…
 ```
 
 `model` is optional (defaults to the main agent's). With at least one
@@ -374,9 +374,9 @@ exactly one script per kind, or none:
   dispatches it). A subagent with no hook file runs **ungated**; the main
   hook never applies to it.
 
-The split keeps each script trivial: the explorer's gate is a three-line
-"allow rg/cat/ls, block the rest" instead of one shared script branching on
-agent identity. A hook file whose `<name>` matches no subagent is a warning
+The split keeps each script trivial: a read-only subagent's gate can be a
+short allowlist instead of one shared script branching on agent identity.
+A hook file whose `<name>` matches no subagent is a warning
 (`shell3 health` fails on it — it's usually a typo). The interface's Status
 view states which of the two it is, in as many words: **command gate armed**,
 or **command gate off** when the main agent has no `hooks/tool-call.sh`.
@@ -696,7 +696,7 @@ from a hidden, pinned `cron` parent session.
 ```markdown
 ---
 schedule: "@daily"
-agent: explorer
+agent: assistant
 # direct: true          # optional; skip the notifier (see below)
 # workdir: /some/path   # optional; defaults to the config dir
 ---

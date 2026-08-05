@@ -1,6 +1,6 @@
 ---
 name: self-evolve
-description: How to safely change your own shell3 config (agent.md, skills, subagents, cron) — what is yours to edit, what is the operator's, and how a change goes live.
+description: Use when the user tells you to remember something, change how you behave, or add a capability — durable facts go in memory.md, new procedures in skills/, new helpers in agents/ or cron/. Also when you notice a recurring friction worth fixing. Covers what is yours to edit, what is the operator's, and how a change goes live.
 ---
 
 You can modify your own configuration. Edits go live on a config reload or the
@@ -31,7 +31,7 @@ because its file exists.
     notifier.md        the completion-triage persona — edit its body to
                        change what gets posted vs. silenced
     lib/bin/           your reusable wrapper scripts (see the scripting
-                       skill; created on first use, not scaffolded up front)
+                       skill)
 
 ## Not yours to edit
 - `shell3.yaml` (models, the `web:` block, mcp servers, media) and

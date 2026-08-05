@@ -5,7 +5,7 @@ Example "checklist" cron job. Rename this file to checklist.md to activate it
 Frontmatter:
   schedule  robfig/cron syntax: "@every 30m", "@daily", or a 5-field spec like
             "*/30 8-22 * * *" (every 30 min, 8am-10pm — active hours only).
-  agent     a subagent from agents/ to run the checklist (here: explorer).
+  agent     a subagent from agents/ to run the checklist (here: assistant).
   direct    true skips the notifier: the result is handed straight to the
             main agent as a fresh turn. Leave it off for report-style jobs —
             the notifier (notifier.md) then decides per run whether the
@@ -17,7 +17,7 @@ silences runs with nothing worth saying, so no sentinel is needed.
 -->
 ---
 schedule: "@every 30m"
-agent: explorer
+agent: assistant
 ---
 Periodic check-in. Work through the checklist with your tools. Each run is a
 fresh conversation — if a check must not repeat, track its state in a file.

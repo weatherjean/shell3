@@ -173,7 +173,7 @@ shell3 boot     # interactive form: model endpoint + key, vision, workdir
 
 An interactive form scaffolds the config tree under `~/.shell3/`:
 `shell3.yaml` (models + a `web:` block bound to loopback), `agent.md`, a
-read-only `agents/explorer.md` subagent, `skills/`, **armed**
+general-purpose `agents/assistant.md` subagent, `skills/`, **armed**
 `hooks/*.tool-call.sh` gate scripts (credentials, system paths, unread remote
 code, publishing and force-pushes refused; ordinary work untouched), and `.env`
 (secrets — never commit it).

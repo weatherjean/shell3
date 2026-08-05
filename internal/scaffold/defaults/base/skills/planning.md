@@ -19,7 +19,8 @@ Investigate read-only until you could defend every step of the plan:
 - Look at what actually exists: the files, the state, the service, the
   history (the `history` tool if this came up before).
 - Check `memory.md` and `projects.md` for decisions and pitfalls already
-  recorded.
+  recorded (projects.md is created by `shell3 project new`, so it may not
+  exist yet).
 - Note what you could NOT verify — unknowns belong in the plan, not under it.
 - If the request itself is ambiguous, ask one question at a time in chat
   before writing anything; prefer multiple choice.
@@ -73,5 +74,5 @@ chat (they can also open it in the interface's Files view). Then wait.
 ## 4. Afterwards
 
 - Update the status footer: `done <date>` (or `abandoned` — say why).
-- Record durable outcomes in `projects.md` / `memory.md` as usual; the plan
-  file stays as the audit trail.
+- Record durable outcomes in `memory.md` (and `projects.md`, if you have
+  one) as usual; the plan file stays as the audit trail.

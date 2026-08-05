@@ -17,9 +17,16 @@ import (
 // runHook feeds one tool call to a scaffolded hook and returns its verdict.
 func runHook(t *testing.T, dir, script, tool, command string) (verdict, reason string) {
 	t.Helper()
+	return runHookArgs(t, dir, script, tool, command, "{}")
+}
+
+// runHookArgs is runHook with an explicit args JSON, for tools (edit_file)
+// whose relevant field lives in args rather than command.
+func runHookArgs(t *testing.T, dir, script, tool, command, argsJSON string) (verdict, reason string) {
+	t.Helper()
 
 	payload, err := json.Marshal(map[string]any{
-		"name": tool, "command": command, "args": "{}", "headless": true,
+		"name": tool, "command": command, "args": argsJSON, "headless": true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -122,6 +129,74 @@ func TestScaffoldedGateBlocksTheDangerousCases(t *testing.T) {
 	}
 }
 
+// The credential rule must judge the right field for the right tool: a bash
+// command's actual text, or another tool's TARGET PATH — never a file body
+// that merely mentions .env in passing. That distinction is what makes the
+// scripting skill's documented pattern (a lib/bin wrapper that greps the one
+// key it needs out of .env at point of use) actually usable, while a direct
+// read/write/delete of the credential file itself, by any route, still
+// refuses.
+func TestScaffoldedGateCredentialRuleJudgesTheRightField(t *testing.T) {
+	dir := scaffoldForHooks(t)
+
+	envGrep := `key="$(grep '^OPENWEATHER_KEY=' ~/.shell3/.env | cut -d= -f2-)"`
+
+	// Writing a lib/bin wrapper whose BODY greps .env is the harness's
+	// documented, intended way to use a secret — it must be allowed.
+	t.Run("edit_file writing a lib/bin script that greps .env is allowed", func(t *testing.T) {
+		argsJSON, err := json.Marshal(map[string]any{
+			"path":       "/tmp/lib/bin/weather",
+			"old_string": "",
+			"new_string": envGrep,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		verdict, reason := runHookArgs(t, dir, "tool-call.sh", "edit_file", "", string(argsJSON))
+		if verdict != "allow" {
+			t.Errorf("edit_file writing lib/bin body = %s (%s), want allow", verdict, reason)
+		}
+	})
+
+	t.Run("bash heredoc writing a lib/bin script that greps .env is allowed", func(t *testing.T) {
+		command := "cat > /tmp/lib/bin/weather <<'SH'\n" + envGrep + "\nSH"
+		verdict, reason := runHook(t, dir, "tool-call.sh", "bash", command)
+		if verdict != "allow" {
+			t.Errorf("bash heredoc writing lib/bin body = %s (%s), want allow", verdict, reason)
+		}
+	})
+
+	// But the credential file itself is still off limits, by any route.
+	t.Run("edit_file targeting .env directly is still blocked", func(t *testing.T) {
+		argsJSON, err := json.Marshal(map[string]any{
+			"path":       "~/.shell3/.env",
+			"old_string": "OLD=1",
+			"new_string": "NEW=1",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		verdict, reason := runHookArgs(t, dir, "tool-call.sh", "edit_file", "", string(argsJSON))
+		if verdict != "block" {
+			t.Errorf("edit_file targeting .env = %s, want block (%s)", verdict, reason)
+		}
+	})
+
+	for command, what := range map[string]string{
+		"echo x > ~/.shell3/.env":             "redirecting into .env",
+		"rm ~/.shell3/.env":                   "deleting .env",
+		"mv secret .env":                      "moving a file onto .env",
+		"sort <<EOF > ~/.shell3/.env\nx\nEOF": "a redirect placed AFTER a heredoc operator, which the read-side prefix truncation alone would miss",
+	} {
+		t.Run(what, func(t *testing.T) {
+			verdict, _ := runHook(t, dir, "tool-call.sh", "bash", command)
+			if verdict != "block" {
+				t.Errorf("%q = %s, want block (%s)", command, verdict, what)
+			}
+		})
+	}
+}
+
 // Nothing may ask. Unattended — which is most of the time — an ask parks the
 // turn until it times out and then denies anyway, so it is a slow block that
 // also holds the single-turn gate.
@@ -134,37 +209,6 @@ func TestScaffoldedGateNeverAsks(t *testing.T) {
 	} {
 		if verdict, _ := runHook(t, dir, "tool-call.sh", "bash", command); verdict == "ask" {
 			t.Errorf("%q asks; an autonomous deployment has nobody to answer", command)
-		}
-	}
-}
-
-// The explorer subagent is described as read-only. Its gate is what makes that
-// true — and what stops it being used to reach around the main agent's rules.
-func TestScaffoldedExplorerGateIsReadOnly(t *testing.T) {
-	dir := scaffoldForHooks(t)
-
-	for _, command := range []string{
-		"ls -la ./internal", "rg 'func New' .", "cat ./AGENTS.md",
-		"sed -n '1,40p' ./AGENTS.md", "git log --oneline -10",
-	} {
-		if verdict, reason := runHook(t, dir, "explorer.tool-call.sh", "bash", command); verdict != "allow" {
-			t.Errorf("%q = %s (%s), want allow: this is explorer's actual job", command, verdict, reason)
-		}
-	}
-
-	for _, command := range []string{
-		"echo x > /tmp/out", "rm -rf ./build", "sed -i '' s/a/b/ ./x.go",
-		"git push origin main", "cat ~/.shell3/.env", "ls | xargs rm",
-	} {
-		verdict, reason := runHook(t, dir, "explorer.tool-call.sh", "bash", command)
-		if verdict != "block" {
-			t.Errorf("%q = %s, want block: explorer must be read-only in fact", command, verdict)
-			continue
-		}
-		// A subagent has no operator to ask, so its refusals must send the
-		// problem up to the main agent rather than invite another attempt.
-		if !strings.Contains(strings.ToLower(reason), "main agent") {
-			t.Errorf("%q refused without telling it to hand up: %s", command, reason)
 		}
 	}
 }

@@ -73,8 +73,8 @@ func TestRenderBaseConfig(t *testing.T) {
 		t.Error("notifier.md body should describe the send/wake verdicts")
 	}
 	for _, p := range []string{
-		"agents/explorer.md",
-		"hooks/tool-call.sh", "hooks/explorer.tool-call.sh",
+		"agents/assistant.md",
+		"hooks/tool-call.sh",
 		"skills/planning.md", "skills/history.md",
 		"skills/self-evolve.md", "skills/browser.md", "skills/scripting.md",
 		"skills/cookbook.md", "skills/find-skills.md", "skills/writing-code.md",
@@ -251,14 +251,14 @@ func TestRenderedConfigLoads(t *testing.T) {
 	if len(c.Warnings()) != 0 {
 		t.Errorf("scaffold config loaded with warnings: %v", c.Warnings())
 	}
-	// Subagents are a separate registry; the shipped tree registers explorer,
+	// Subagents are a separate registry; the shipped tree registers assistant,
 	// and the main agent's allowlist is inferred from agents/.
 	subs := c.Subagents()
-	if len(subs) != 1 || subs[0].Name != "explorer" {
-		t.Fatalf("expected one registered subagent [explorer], got %v", subs)
+	if len(subs) != 1 || subs[0].Name != "assistant" {
+		t.Fatalf("expected one registered subagent [assistant], got %v", subs)
 	}
-	if len(a.Subagents) != 1 || a.Subagents[0] != "explorer" {
-		t.Errorf("agent Subagents = %v, want [explorer]", a.Subagents)
+	if len(a.Subagents) != 1 || a.Subagents[0] != "assistant" {
+		t.Errorf("agent Subagents = %v, want [assistant]", a.Subagents)
 	}
 	for _, name := range a.Subagents {
 		sa, ok := c.SubagentByName(name)

@@ -147,8 +147,8 @@ func TestBootEndToEnd(t *testing.T) {
 
 	dir := filepath.Join(home, ".shell3")
 	for _, p := range []string{
-		"shell3.yaml", "agent.md", "agents/explorer.md",
-		"hooks/tool-call.sh", "hooks/explorer.tool-call.sh",
+		"shell3.yaml", "agent.md", "agents/assistant.md",
+		"hooks/tool-call.sh",
 		"skills/planning.md", "skills/scripting.md", ".env",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {

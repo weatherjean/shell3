@@ -145,9 +145,7 @@ refused; everything else runs. They never ask — shell3 mostly runs unattended,
 where an ask parks the turn until it times out and denies anyway — and every
 refusal instructs the model not to work around it but to raise it with the
 operator (a subagent's refusal tells it to stop and hand up to the main agent
-instead). `explorer` gets an allowlist gate, which is what makes "read-only"
-true in fact rather than only in its description, and closes the delegate-the-
-forbidden-thing route around the main gate.
+instead).
 
 `edit_file`'s file I/O lives in `internal/edittool` (plain direct-disk
 functions); `bash` always hits disk directly. Skills are **dir-based**: every

@@ -1,12 +1,12 @@
 ---
 name: find-skills
-description: Use when a task needs a capability you don't have a skill for — search the public skill catalog on demand instead of guessing or carrying more prompt lines than you need.
+description: Use when you need a procedure you don't have and the cookbook has nothing for it — search a ~2000-entry public skill catalog on demand rather than carrying more prompt lines. Read-and-use by default; adopting one permanently needs the user's yes.
 ---
 
 # Find a skill, don't carry one
 
-shell3 ships almost no skills on purpose: every loaded skill costs a line in
-your system prompt on every turn. When a task needs a procedure you don't
+Every loaded skill costs a line in your system prompt on every turn, so
+shell3 ships a small set up front. When a task needs a procedure you don't
 have, search a public catalog on demand instead.
 
 ## Ask first

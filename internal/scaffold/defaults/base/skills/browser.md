@@ -1,6 +1,6 @@
 ---
 name: browser
-description: Drive a real, visible Chrome to open pages, read/extract content, fill forms, click, screenshot, or print to PDF. Cross-platform via puppeteer-core over bash. Use for JS-heavy or login-gated pages that web_fetch cannot handle.
+description: Read a web page, or drive one — open a URL and extract its text, fill forms, click through, screenshot, or print to PDF, in a real visible Chrome. Use whenever a task needs the content of a page — plain curl for static pages, this for anything JS-rendered, login-gated, or interactive.
 ---
 
 You can drive a real, headed Chrome window (you and the user can both watch it).

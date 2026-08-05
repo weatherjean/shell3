@@ -80,14 +80,46 @@ haystack="$cmd$args"
 
 # ------------------------------------------------------------ credentials
 #
-# Blocked for read as well as write, for every tool. A script in lib/bin reads
-# the one key it needs at point of use (scripting skill), so the agent never
-# needs these contents in conversation.
-case "$haystack" in
+# Blocked for read as well as write — but judged against the right field, not
+# a merged blob. A bash command is judged by its command text; any other tool
+# (edit_file) is judged by its TARGET PATH argument only, never the file body
+# it's writing. That distinction is what lets a lib/bin script read the one
+# key it needs at point of use (scripting skill) — its body mentions .env,
+# its path does not — while `edit_file` onto ~/.shell3/.env itself, or a
+# shell command that cats/greps/redirects into one, still refuses.
+case "$name" in
+  bash|bash_bg)
+    # A heredoc BODY is data being written into some other file, not a live
+    # read/write of any path that happens to appear inside it — the
+    # scripting skill's documented pattern is exactly `cat > lib/bin/foo
+    # <<'SH' ... grep KEY ~/.shell3/.env ... SH`, and that must not trip
+    # this rule. Judge only the command text up to the first heredoc marker
+    # (a redirect naming the credential file itself, e.g. `cat > ~/.shell3/.env
+    # <<EOF`, still appears there and still blocks).
+    env_subject="${cmd%%<<*}"
+    ;;
+  *) env_subject=$(printf '%s' "$args" | jq -r '.path // empty' 2>/dev/null) ;;
+esac
+case "$env_subject" in
   *.env.example*|*.env.sample*) ;;
-  *"/.env"*|*" .env"*|*'"'.env*)
+  .env|*"/.env"*|*" .env"*|*'"'.env*)
     block "the agent must not read or write .env — have a lib/bin script read the one key it needs at point of use (scripting skill)" ;;
 esac
+
+# The read-side check above deliberately looks only before a heredoc marker,
+# so it can miss a redirect that comes AFTER one (`sort <<EOF > ~/.shell3/.env`
+# is valid bash, and the target would be truncated away). A write target is
+# unambiguous wherever it sits, so run it against the FULL, untruncated
+# command — heredoc or not, this doesn't need to know. A heredoc body that
+# happens to contain a literal `> ~/.shell3/.env` line is a false positive
+# this accepts: the failure mode is a refusal, not a leaked or clobbered
+# secret.
+if [ "$name" = bash ] || [ "$name" = bash_bg ]; then
+  if printf '%s\n' "$cmd" | grep -Eq '>{1,2}[[:space:]]*[^|;&[:space:]]*\.env([[:space:]]|$)' ||
+     printf '%s\n' "$cmd" | grep -Eq '(^|[|;&[:space:]])(rm|mv|cp)[[:space:]][^|;&]*\.env([[:space:]]|$)'; then
+    block "the agent must not read or write .env — have a lib/bin script read the one key it needs at point of use (scripting skill)"
+  fi
+fi
 
 case "$haystack" in
   *"/.ssh/"*|*"/.ssh "*|*"/.aws/"*|*"/.gnupg/"*|*"/.kube/"*|*"/.docker/config.json"*|\

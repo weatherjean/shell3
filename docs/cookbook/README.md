@@ -67,8 +67,8 @@ scaffold's own `writing-code` skill for in-line TDD work.)
 **Subagents** (`lib/agents/` here → your `~/.shell3/agents/`)
 
 - `review.md` — a review specialist instructed never to edit (a hook
-  allowlist makes that enforced, like the scaffold's `explorer`); copying the
-  file in IS the registration (the task tool picks it up on the next reload).
+  allowlist makes that enforced); copying the file in IS the registration
+  (the task tool picks it up on the next reload).
 
 **Provider and host recipes**
 
