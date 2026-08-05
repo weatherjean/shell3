@@ -39,9 +39,9 @@ already ships `browser` — headed Chrome via puppeteer-core)
 - `searxng-search.md` — keyless web search via that instance (the permanent skill).
 - `camoufox-fetch.md` — fetch bot-protected / JS-heavy pages with Camoufox (anti-detect Firefox).
 
-**Coding-agent skills** (same dir; each drives a coding agent installed on
-the machine. The scaffold's `coding-agent` stub points the agent here so you
-can pick one; delete the stub once one of these lands.)
+**Coding-agent skills** (same dir; each delegates implementation work to a
+full coding agent CLI installed on the machine, as an alternative to the
+scaffold's own `writing-code` skill for in-line TDD work.)
 
 - `claude-code.md` — delegate implementation work to Claude Code (`claude -p`).
 - `codex.md` — the same pattern for the OpenAI Codex CLI (`codex exec`, sandbox levels).

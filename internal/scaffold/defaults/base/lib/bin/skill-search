@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+# skill-search <query>          — literal, case-insensitive search of the
+#                                  public skill catalog; prints Skill | Risk |
+#                                  Source | Description, capped at 40 rows
+# skill-search --show <name>    — print the URL of one skill's SKILL.md
+#
+# Caches https://github.com/sickn33/agentic-awesome-skills's CATALOG.md
+# (~2000 skills, MIT) under ~/.shell3/lib/cache/, re-fetching when missing
+# or older than 7 days. The resolved commit SHA is pinned in a sidecar file
+# so the cache is reproducible and its provenance is reportable.
+set -euo pipefail
+
+repo="sickn33/agentic-awesome-skills"
+cache_dir="${HOME}/.shell3/lib/cache"
+catalog="${cache_dir}/CATALOG.md"
+sha_file="${cache_dir}/CATALOG.sha"
+max_age_days=7
+
+usage() {
+  echo "usage: skill-search <query>" >&2
+  echo "       skill-search --show <skill-name>" >&2
+  exit 2
+}
+
+stale() {
+  [ ! -f "$catalog" ] && return 0
+  [ ! -f "$sha_file" ] && return 0
+  local age_days
+  age_days=$(( ( $(date +%s) - $(date -r "$catalog" +%s 2>/dev/null || echo 0) ) / 86400 ))
+  [ "$age_days" -ge "$max_age_days" ]
+}
+
+refresh_catalog() {
+  mkdir -p "$cache_dir"
+  local commit_json sha
+  commit_json="$(mktemp)"
+  if ! curl -fsS --max-time 15 "https://api.github.com/repos/${repo}/commits/main" -o "$commit_json"; then
+    rm -f "$commit_json"
+    echo "skill-search: catalog unavailable (network error resolving main)" >&2
+    return 1
+  fi
+  # GitHub always serializes "sha" as the commit object's first field, so
+  # the first "sha": "<hex>" occurrence anywhere in the response — whatever
+  # line it lands on, pretty-printed or single-line — is the top-level
+  # commit sha. Extracted with grep -o (not a greedy sed s/.*X.*/X/), which
+  # only ever emits the matched substring itself, so it can't walk past
+  # that first occurrence to a later one (a tree or parent commit) the way
+  # a greedy .* would on a single-line body.
+  sha="$(grep -oE '"sha": *"[a-f0-9]{40}"' "$commit_json" | head -n1 | grep -oE '[a-f0-9]{40}')"
+  rm -f "$commit_json"
+  [ -n "$sha" ] || { echo "skill-search: catalog unavailable (could not resolve main SHA)" >&2; return 1; }
+
+  local tmp
+  tmp="$(mktemp)"
+  if ! curl -fsS --max-time 30 \
+      "https://raw.githubusercontent.com/${repo}/${sha}/CATALOG.md" -o "$tmp"; then
+    rm -f "$tmp"
+    echo "skill-search: catalog unavailable (fetch failed)" >&2
+    return 1
+  fi
+  mv "$tmp" "$catalog"
+  echo "$sha" > "$sha_file"
+}
+
+ensure_catalog() {
+  if stale; then
+    refresh_catalog || {
+      [ -f "$catalog" ] || exit 1
+      echo "skill-search: using stale cache (refresh failed)" >&2
+    }
+  fi
+}
+
+[ $# -ge 1 ] || usage
+
+if [ "$1" = "--show" ]; then
+  [ $# -eq 2 ] || usage
+  name="$2"
+  ensure_catalog
+  sha="$(cat "$sha_file" 2>/dev/null || echo main)"
+  url="https://raw.githubusercontent.com/${repo}/${sha}/skills/${name}/SKILL.md"
+  echo "$url"
+  curl -fsS --max-time 15 "$url" || {
+    echo "skill-search: could not fetch $url (check the name with a search first)" >&2
+    exit 1
+  }
+  exit 0
+fi
+
+query="$1"
+ensure_catalog
+sha="$(cat "$sha_file" 2>/dev/null || echo unknown)"
+echo "catalog: sickn33/agentic-awesome-skills @ ${sha}"
+
+# Literal substring match, case-insensitive — not a regex. -F so a query
+# containing regex metacharacters (e.g. "[") searches for itself instead of
+# erroring or over-matching.
+matches="$(grep -F -i -- "$query" "$catalog" | grep '^|' | grep -v '^| Skill | Description' | grep -v '^| --- ' || true)"
+total=$(printf '%s\n' "$matches" | grep -c '^|' || true)
+if [ -z "$matches" ] || [ "$total" -eq 0 ]; then
+  echo "0 matches for: $query"
+  exit 0
+fi
+
+# Cap what actually reaches the caller: the catalog is ~2000 rows and a
+# broad query can match hundreds. Never dump the whole table — the same
+# rule the find-skills skill applies to the catalog file itself.
+max_rows=40
+desc_width=80
+
+echo "Skill | Risk | Source | Description"
+# Split on | and take Risk/Source from the END of the row (NF-4/NF-3, with
+# Tags, Triggers, and the trailing empty field after them), not from fixed
+# offsets. A handful of real rows escape a literal "|" inside Description
+# as "\|" — markdown's own escape, which -F'|' still splits on since it
+# doesn't know about backslash-escaping — so counting from the front would
+# silently hand Risk a Description fragment and blank Source on those
+# rows. Counting from the end is immune to that: however many extra
+# fields the Description contributes, Tags/Triggers/trailing-empty are
+# still the last three. A row that doesn't end in the expected empty
+# trailing field is one we can't confidently parse at all — say so rather
+# than print a confident wrong answer.
+printf '%s\n' "$matches" | head -n "$max_rows" | awk -F'|' -v w="$desc_width" '
+  function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+  {
+    skill = trim($2)
+    if (NF < 8 || trim($NF) != "") {
+      printf "%s — unparsed row\n", (skill == "" ? "(unknown)" : skill)
+      next
+    }
+    risk = trim($(NF-4)); source = trim($(NF-3))
+    desc = ""
+    for (i = 3; i <= NF-5; i++) desc = (desc == "" ? $i : desc "|" $i)
+    gsub(/\\\|/, "|", desc)
+    desc = trim(desc)
+    if (length(desc) > w) desc = substr(desc, 1, w) "..."
+    printf "%s | %s | %s | %s\n", skill, risk, source, desc
+  }'
+echo "---"
+if [ "$total" -gt "$max_rows" ]; then
+  echo "showing first ${max_rows} of ${total} matches for: $query — narrow the query"
+else
+  echo "${total} match(es) for: $query"
+fi

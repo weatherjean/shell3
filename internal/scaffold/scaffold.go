@@ -98,7 +98,14 @@ func RenderBaseConfig(dir string, v Values, force bool) error {
 			}
 			content, rel = rendered, strings.TrimSuffix(rel, ".tmpl")
 		}
-		return writeFile(filepath.Join(dir, rel), content, force)
+		// go:embed drops unix permission bits, so a shipped wrapper script
+		// (lib/bin/<name>, run directly by path per the scripting skill)
+		// needs its executable bit restored explicitly.
+		mode := os.FileMode(0644)
+		if strings.HasPrefix(rel, "lib/bin/") {
+			mode = 0755
+		}
+		return writeFile(filepath.Join(dir, rel), content, mode, force)
 	})
 }
 
@@ -181,7 +188,7 @@ func RenderProject(dir string, v ProjectValues, copySkillsFrom string) error {
 			}
 			content, rel = rendered, strings.TrimSuffix(rel, ".tmpl")
 		}
-		return writeFile(filepath.Join(root, rel), content, true)
+		return writeFile(filepath.Join(root, rel), content, 0644, true)
 	})
 	if err != nil {
 		return err
@@ -205,7 +212,7 @@ func RenderProject(dir string, v ProjectValues, copySkillsFrom string) error {
 			if err != nil {
 				return fmt.Errorf("scaffold: copy-skills read %s: %w", e.Name(), err)
 			}
-			if err := writeFile(filepath.Join(root, "skills", e.Name()), content, true); err != nil {
+			if err := writeFile(filepath.Join(root, "skills", e.Name()), content, 0644, true); err != nil {
 				return err
 			}
 		}
@@ -215,7 +222,7 @@ func RenderProject(dir string, v ProjectValues, copySkillsFrom string) error {
 
 // writeFile writes content to path. When force is false it skips an existing
 // file (idempotent re-run); when true it overwrites.
-func writeFile(path string, content []byte, force bool) error {
+func writeFile(path string, content []byte, mode os.FileMode, force bool) error {
 	if !force {
 		if _, err := os.Stat(path); err == nil {
 			return nil
@@ -225,12 +232,13 @@ func writeFile(path string, content []byte, force bool) error {
 	}
 	// Directories are 0700: everything scaffold writes lives under ~/.shell3,
 	// which also holds the .env secrets file — the user-private parent gates
-	// access even though the files themselves are 0644, matching
-	// bootstrap.EnsureGlobal (which creates ~/.shell3 at 0700).
+	// access even though the files themselves are 0644 (0755 for lib/bin/
+	// scripts), matching bootstrap.EnsureGlobal (which creates ~/.shell3 at
+	// 0700).
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return fmt.Errorf("scaffold: mkdir %s: %w", filepath.Dir(path), err)
 	}
-	if err := os.WriteFile(path, content, 0644); err != nil {
+	if err := os.WriteFile(path, content, mode); err != nil {
 		return fmt.Errorf("scaffold: write %s: %w", path, err)
 	}
 	return nil
