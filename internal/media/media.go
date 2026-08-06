@@ -32,8 +32,8 @@ type Config interface {
 }
 
 // Speech is a synthesized-audio result from Clients.Speak: the path to the
-// written audio file. The caller owns it (the web front-end caches it under
-// the media dir and serves it back; see webui.ttsCache).
+// written audio file. The caller owns it (the telegram front-end sends it as
+// a voice note; cached files live under the media dir as tts-*).
 type Speech struct {
 	Path string
 }
@@ -115,31 +115,21 @@ func New(cfg Config, ensureProxy func(name, command string)) *Clients {
 	return c
 }
 
-// SetBaseDir points Dir() at <configDir>/media. Empty resets to the
-// ~/.shell3/media default. Called from agentsetup.BuildParts (directly
-// against internal/mediadir — see that package's doc comment for why) so a
-// scratch --config run stages media beside its own config, not in $HOME.
-// Re-exported here so this package's existing callers keep using
-// media.SetBaseDir/media.Dir.
-func SetBaseDir(configDir string) {
-	mediadir.SetBaseDir(configDir)
-}
-
-// Dir returns shell3's durable media directory — where browser uploads,
+// Dir returns shell3's durable media directory — where attachments,
 // generated images, and cached speech are stored, so every media file the
 // agent has seen or made keeps a stable path that survives reboots and OS
-// temp cleaning (re-readable with read_media, servable at /api/media/,
+// temp cleaning (re-readable with read_media, re-sendable to the chat,
 // findable from history). Default <configDir>/media (which is
-// ~/.shell3/media for the default config dir, see SetBaseDir);
+// ~/.shell3/media for the default config dir, see mediadir.SetBaseDir);
 // $SHELL3_MEDIA_DIR overrides (tests point it at a TempDir). Created on
 // demand.
 func Dir() (string, error) {
 	return mediadir.Dir()
 }
 
-// outDir returns shell3's transient media scratch directory, now used only
-// for freshly synthesized TTS audio, before the web front-end's cache moves
-// it into Dir() under a content hash. Generated images go straight to Dir().
+// outDir returns shell3's transient media scratch directory, used for
+// freshly synthesized TTS audio before the front-end caches it into Dir()
+// under a content hash. Generated images go straight to Dir().
 func outDir() (string, error) {
 	dir := filepath.Join(os.TempDir(), "shell3-media")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

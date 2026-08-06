@@ -21,14 +21,14 @@ type ParamValue struct {
 }
 
 // ToolInfo names a tool exposed by the active agent and its one-line
-// description, for the Status view.
+// description, for /status.
 type ToolInfo struct {
 	Name        string
 	Description string
 }
 
 // Snapshot is a read-only view of the session's current agent state: everything
-// the Status view needs. It is a point-in-time copy; mutate the
+// /status needs. It is a point-in-time copy; mutate the
 // Session (e.g. SwitchAgent, SetParam) and call Snapshot again to observe
 // changes. Safe to call concurrently with a running turn: cfg reads are taken
 // under s.mu against the between-turns writers (a front-end may poll it mid-turn).
@@ -49,7 +49,7 @@ type Snapshot struct {
 	// surfaces with a standing "!" indicator.
 	ToolHooksOn bool
 	// Warnings are non-fatal config load issues (e.g. a skipped invalid skill
-	// file). A front-end surfaces them in-band at startup — a browser
+	// file). A front-end surfaces them in-band at startup — a chat
 	// user otherwise never sees the stderr line they were printed on.
 	Warnings []string
 	// MCP lists every declared MCP server's live health (nil when no
@@ -68,7 +68,7 @@ func (s *Session) Snapshot() Snapshot {
 	// The displayed prompt is the authored prompt PLUS the host standing
 	// reminders (Environment) — they're injected into every turn but
 	// kept out of cfg.Personality.SystemPrompt, so the /prompt view and the
-	// Status view's prompt panel surface the full effective context here.
+	// /status's prompt dump surface the full effective context here.
 	systemPrompt := s.cfg.Personality.SystemPrompt
 	if rems := s.sess.StandingReminders(); len(rems) > 0 {
 		systemPrompt += "\n\n## Host reminders (injected each turn — not part of the authored prompt above)\n\n" + strings.Join(rems, "\n\n")

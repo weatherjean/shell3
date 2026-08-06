@@ -90,20 +90,21 @@ type Subagent struct {
 	Workdir string
 }
 
-// WebConfig is the parsed `web:` block: where the agent's shell runs, and how
-// the interface is served. URL, if set, is the fixed public address to
-// announce; exposing the interface beyond that is the operator's own concern.
-type WebConfig struct {
+// TelegramConfig is the parsed `telegram:` block: the bot's credentials and
+// where the agent's shell runs.
+type TelegramConfig struct {
+	// Present reports whether a telegram: block was declared at all. It tells
+	// "no front-end configured" (legitimate for an `shell3 ask`-only config)
+	// apart from "front-end declared but unusable" — the second is a config
+	// error worth failing `shell3 health` over, the first is not.
+	Present bool
+	// Token is the bot API token, secret-substituted from .env. Empty means a
+	// declared block left it blank (Present is the absence signal): `shell3
+	// boot` writes exactly that when the user defers the token, so the load
+	// succeeds and the front-end refuses to start instead.
+	Token   string
+	ChatID  string
 	WorkDir string
-	Addr    string
-	URL     string
-	// Password gates the whole interface. Empty is a `shell3 serve` refusal
-	// rather than a load error: `shell3 ask` serves nothing and must stay
-	// usable, so a config with no password still loads.
-	Password string
-	// TOTPSecret, when set, adds a second factor: the password alone stops
-	// being a session. Opt-in by its presence — there is no toggle.
-	TOTPSecret string
 }
 
 // CronJob is one parsed cron/<name>.md job.
@@ -118,9 +119,9 @@ type CronJob struct {
 	Direct bool
 }
 
-// STTConfig is the `media.stt:` block: speech-to-text for recordings the
-// browser sends. Echo controls whether the transcript is echoed back to the
-// user before the model turn runs.
+// STTConfig is the `media.stt:` block: speech-to-text for inbound voice
+// notes. Echo controls whether the transcript is echoed back to the user
+// before the model turn runs.
 type STTConfig struct {
 	ModelRef, Language string
 	Echo               bool
@@ -161,17 +162,17 @@ type LoadedConfig struct {
 	// the default (8) at the read site.
 	BackgroundMaxConcurrent int
 
-	// RunsKeepDays is `runs_keep_days`: how long the janitor keeps a
-	// runs/<id>/ dir (by its newest file's mtime) before sweeping it at
-	// `shell3 serve` startup. Always populated at load — default 30; an
-	// explicit 0 means keep forever (the sweep is skipped entirely).
+	// RunsKeepDays is `runs_keep_days`: how long the janitor keeps a stored
+	// session (by its `last_at`) before sweeping it at `shell3 telegram`
+	// startup. Always populated at load — default 30; an explicit 0 means
+	// keep forever (the sweep is skipped entirely).
 	RunsKeepDays int
 
 	// MediaKeepDays is `media_keep_days`: how long the janitor keeps a file
-	// under the media dir (uploads, generated images, TTS cache, send_file
-	// stagings) before sweeping it at `shell3 serve` startup. Always
-	// populated at load — default 0 = keep forever: delivered files and
-	// uploads are user data, so deletion is opt-in rather than assumed.
+	// under the media dir (attachments, generated images, TTS cache) before
+	// sweeping it at `shell3 telegram` startup. Always populated at load —
+	// default 0 = keep forever: delivered files and attachments are user
+	// data, so deletion is opt-in rather than assumed.
 	MediaKeepDays int
 
 	agent     Agent
@@ -180,7 +181,7 @@ type LoadedConfig struct {
 	projects  []Project
 
 	mcpServers []MCPServer
-	web        WebConfig
+	telegram   TelegramConfig
 	cron       []CronJob
 
 	stt      *STTConfig
@@ -265,8 +266,8 @@ func (c *LoadedConfig) SubagentByName(name string) (Subagent, bool) {
 // absent (the host then posts every background completion raw).
 func (c *LoadedConfig) Notifier() *Notifier { return c.notifier }
 
-// Web returns the parsed `web:` block (zero value if absent).
-func (c *LoadedConfig) Web() WebConfig { return c.web }
+// Telegram returns the parsed `telegram:` block (zero value if absent).
+func (c *LoadedConfig) Telegram() TelegramConfig { return c.telegram }
 
 // Cron returns the parsed cron/ jobs in filename order.
 func (c *LoadedConfig) Cron() []CronJob { return c.cron }

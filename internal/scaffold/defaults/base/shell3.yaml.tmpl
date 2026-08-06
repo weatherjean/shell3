@@ -77,35 +77,23 @@ models:
 #     allow: [search_issues, get_issue]
 
 # ---------------------------------------------------------------------------
-# Web interface  (run: shell3 serve)
+# Telegram bot  (run: shell3 telegram)
 # ---------------------------------------------------------------------------
-# workdir is where the agent's shell runs. addr is the listen address.
-#
-# password is required: serve refuses to start without one, because reaching
-# this interface means reaching a shell — the agent's first verb is bash. It is
-# read from .env like every other secret. Change it there; changing it logs out
-# every browser.
-#
-# totp_secret is optional and adds a second factor, so a leaked password alone
-# is not a session. `shell3 boot` offers to enrol; `shell3 boot --totp` enrols
-# or resets later; lose the phone and you delete the key from .env and restart.
-#
-# To reach it from elsewhere (`tailscale serve --bg 8765` is the recommended
-# default — private, stable https; docs/deploying.md in the repo has the rest):
-#   url: the fixed https address you serve it on (e.g. the ts.net URL) —
-#        informational, exposing the interface is yours to set up.
-web:
+# token is read from .env like every other secret — get one from @BotFather.
+# chat_id is the single chat the bot answers (yours; @userinfobot prints it):
+# messages from anywhere else are ignored, which is the whole access model.
+# workdir is where the agent's shell runs; blank uses this config directory.
+telegram:
+  token: env:TELEGRAM_TOKEN           # TELEGRAM_TOKEN in .env
+  chat_id: {{.ChatID | yamlstr}}
   workdir: {{.WorkDir | yamlstr}}
-  addr: 127.0.0.1:8765
-  password: env:SHELL3_WEB_PASSWORD
-  {{if .TOTP}}totp_secret: env:SHELL3_WEB_TOTP_SECRET{{else}}# totp_secret: env:SHELL3_WEB_TOTP_SECRET{{end}}
-  # url: https://shell3.example.com
 
 # runs_keep_days: how long a finished session is kept in the runs store before
-# `shell3 serve` sweeps it at startup; 0 keeps everything forever (default 30).
+# `shell3 telegram` sweeps it at startup; 0 keeps everything forever
+# (default 30). The history tool searches everything that is kept.
 # runs_keep_days: 30
 
 # media_keep_days: how long a file under ~/.shell3/media/ (uploads, generated
-# images, cached TTS audio) is kept before `shell3 serve` sweeps it at
+# images, cached TTS audio) is kept before `shell3 telegram` sweeps it at
 # startup; 0 keeps everything forever (default 0).
 # media_keep_days: 30

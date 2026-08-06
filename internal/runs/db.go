@@ -64,8 +64,8 @@ func (s *Store) DBPath() string { return filepath.Join(s.root, DBFile) }
 //     threads(surface,msg_id,session_id)/messages_fts) — never stamped a
 //     version itself, so a v1 database reads back as user_version 0 with
 //     tables already present.
-//  2. adds threads.title/preview/created_at/updated_at/deleted for webui's
-//     richer thread metadata (see internal/webui/threads.go).
+//  2. adds threads.title/preview/created_at/updated_at/deleted so a surface
+//     can carry richer thread metadata (see ThreadMeta in threads.go).
 const schemaVersion = 2
 
 // openDB opens path, applying the schema fresh or recreating the file

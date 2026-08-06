@@ -9,7 +9,7 @@ import (
 )
 
 // HistoryEntry is one stored conversation message, projected for introspection
-// (the Runs view's transcript). Content is already stripped of
+// (a stored-run replay). Content is already stripped of
 // the internal "[tool_call_id=…]\n" storage prefix that tool results carry.
 // Role is the plain string "user"/"assistant"/"tool"/"system".
 type HistoryEntry struct {
@@ -104,7 +104,7 @@ type SessionMeta struct {
 }
 
 // PastSessions returns up to limit stored sessions, newest first, for the
-// Runs view. nil when the runtime has no store.
+// stored-run replays (/runs). nil when the runtime has no store.
 func (rt *Runtime) PastSessions(limit int) ([]SessionMeta, error) {
 	if rt.store == nil {
 		return nil, nil
@@ -136,7 +136,7 @@ func (rt *Runtime) PastSessions(limit int) ([]SessionMeta, error) {
 }
 
 // SessionMessages returns a stored session's messages as HistoryEntry values,
-// for the Runs view's transcript. nil when the runtime has no store.
+// for a stored-run replay (/run_N). nil when the runtime has no store.
 func (rt *Runtime) SessionMessages(id string) ([]HistoryEntry, error) {
 	if rt.store == nil {
 		return nil, nil

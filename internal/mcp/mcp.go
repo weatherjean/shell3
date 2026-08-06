@@ -32,7 +32,7 @@ const defaultTimeout = 10 * time.Second
 // public config surface — never change it casually.
 const ToolPrefix = "mcp_"
 
-// ServerStatus is one server's health for `shell3 health` and the Status view.
+// ServerStatus is one server's health for `shell3 health` and /status.
 type ServerStatus struct {
 	Name      string `json:"name"`
 	Up        bool   `json:"up"`

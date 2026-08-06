@@ -28,7 +28,7 @@ func (s *Store) ThreadLookup(surface, msgID string) (string, bool) {
 	return id, true
 }
 
-// ThreadMeta is one thread's full record, for surfaces (webui) that carry
+// ThreadMeta is one thread's full record, for surfaces that carry
 // a title/preview/timestamps/tombstone on top of the plain msgID→sessionID
 // mapping ThreadRecord/ThreadLookup give the simpler surfaces.
 type ThreadMeta struct {

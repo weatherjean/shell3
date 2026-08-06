@@ -61,7 +61,7 @@ func (s *Session) JobEvents() <-chan JobProgress {
 
 // Jobs lists the live background jobs for this session's project — bash_bg
 // processes and in-process subagents — newest first. Returns nil when the
-// in-process job runtime is unavailable. (Backs the Jobs view.)
+// in-process job runtime is unavailable. (Backs /jobs.)
 func (s *Session) Jobs() []JobInfo {
 	rt := s.runtimeHandle() // snapshot under s.mu: doClose nils s.runtime concurrently
 	if rt == nil || rt.jobs == nil {
@@ -82,7 +82,7 @@ func (s *Session) JobOutput(id string) string {
 
 // JobTranscript returns the stored transcript of a background SUBAGENT
 // job's child session, or "" when the job runtime is unavailable or the job is
-// a command (not a subagent). The Jobs view renders this instead
+// a command (not a subagent). /job <id> renders this instead
 // of the plain stdout log when present — see JobOutput for the fallback.
 func (s *Session) JobTranscript(id string) string {
 	rt := s.runtimeHandle()
@@ -92,7 +92,7 @@ func (s *Session) JobTranscript(id string) string {
 	return rt.jobs.transcript(id)
 }
 
-// KillJob cancels one background job (the Jobs view's cancel action). For
+// KillJob cancels one background job (/cancel <id>). For
 // command jobs this sends a cancellation signal; for subagent jobs it cancels
 // the child session's context. It does not block; the job leaves the live list
 // once it exits.
@@ -106,7 +106,7 @@ func (s *Session) KillJob(id string) error {
 
 // KillRunningJobs kills every live background job on the session — commands
 // and subagents alike — and reports how many were killed. The shared half of
-// the front-ends' /stop (see StopAll).
+// the front-ends' /stop.
 func (s *Session) KillRunningJobs() (killed int) {
 	for _, j := range s.Jobs() {
 		if !j.Done {

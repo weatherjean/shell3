@@ -8,7 +8,7 @@ import (
 
 // DispatchOpts tunes a host-initiated subagent job (see Session.Dispatch).
 type DispatchOpts struct {
-	// Description is the job title shown in task_list and the Jobs view. "" derives one from the prompt.
+	// Description is the job title shown in task_list and /jobs. "" derives one from the prompt.
 	Description string
 	// WorkDir roots the child session's tools. "" inherits this session's
 	// workdir; a relative path joins onto it (or onto the runtime root when
@@ -30,7 +30,7 @@ type DispatchOpts struct {
 // Dispatch fires a fire-and-forget subagent job on the in-process job runtime —
 // the same path the task tool uses. It is the host-side entry for scheduled
 // (cron) prompts. The returned id is a normal job id (subN): the job shows up
-// in Jobs()/task_list/the Jobs view, respects the background concurrency cap,
+// in Jobs()/task_list//jobs, respects the background concurrency cap,
 // and injects a capped result summary into this session's context on
 // completion. Unlike the task tool, Dispatch does not enforce the agent's
 // registered-subagent allowlist — the host decides what to run; agent must name a

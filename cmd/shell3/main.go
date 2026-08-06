@@ -18,7 +18,8 @@ import (
 // Makefile derives it from the latest git tag); "dev" for a plain go build.
 var version = "dev"
 
-// main wires the cobra command tree (serve, ask, boot, project, health;
+// main wires the cobra command tree (telegram, serve, ask, boot, project,
+// health;
 // the bare root prints help) and executes it through fang, which owns help,
 // usage, error, and --version styling.
 func main() {
@@ -28,13 +29,14 @@ func main() {
 	}
 
 	// NoArgs: a typo'd subcommand or a bare prompt ("shell3 fix this bug") must
-	// error rather than be silently swallowed. shell3 is a web-first hosted
-	// agent: the bare command prints help; `shell3 serve` runs the service,
-	// and `shell3 ask "..."` handles one-shot prompts.
+	// error rather than be silently swallowed. shell3 is a Telegram-first
+	// hosted agent: the bare command prints help; `shell3 telegram` runs the
+	// bot, and `shell3 ask "..."` handles one-shot prompts.
 	root.Args = cobra.NoArgs
 	root.RunE = func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
 	}
+	root.AddCommand(newTelegramCommand())
 	root.AddCommand(newServeCommand())
 	root.AddCommand(newAskCommand())
 	root.AddCommand(newBootCommand())

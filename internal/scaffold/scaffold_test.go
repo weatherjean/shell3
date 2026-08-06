@@ -10,11 +10,11 @@ import (
 )
 
 // writeEnv writes the .env the rendered config references (empty values are
-// fine — api_key is optional under a proxy setup), including the web password
-// the template requires and `shell3 boot` always writes.
+// fine — api_key is optional under a proxy setup), matching exactly the keys
+// `shell3 boot` writes.
 func writeEnv(t *testing.T, dir string) {
 	t.Helper()
-	body := "MAIN_API_KEY=\nSHELL3_WEB_PASSWORD=sixteen-characters-long\n"
+	body := "MAIN_API_KEY=\nTELEGRAM_TOKEN=\n"
 	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(body), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestRenderBaseConfig(t *testing.T) {
 		"api_key: env:MAIN_API_KEY",
 		`model: "kimi-k2.6"`,
 		`# run_proxy: "npx`,
-		"# url: https://shell3.example.com",
+		"token: env:TELEGRAM_TOKEN",
 	} {
 		if !strings.Contains(string(cfg), want) {
 			t.Errorf("shell3.yaml missing %q", want)
@@ -44,14 +44,6 @@ func TestRenderBaseConfig(t *testing.T) {
 	}
 	if strings.Contains(string(cfg), "{{") {
 		t.Errorf("shell3.yaml still contains an unrendered template delimiter")
-	}
-	// TOTP defaults off: the line stays a commented hint.
-	for _, want := range []string{
-		"# totp_secret: env:SHELL3_WEB_TOTP_SECRET",
-	} {
-		if !strings.Contains(string(cfg), want) {
-			t.Errorf("shell3.yaml missing commented hint %q", want)
-		}
 	}
 	agentMD, err := os.ReadFile(filepath.Join(dir, "agent.md"))
 	if err != nil {
@@ -86,13 +78,12 @@ func TestRenderBaseConfig(t *testing.T) {
 	}
 }
 
-// TestRenderBaseConfigTOTP verifies an enrolment answer becomes live config:
-// enrolled TOTP must render uncommented, or the secret sits unused in .env
-// and the login never asks for a code.
-func TestRenderBaseConfigTOTP(t *testing.T) {
+// TestRenderBaseConfigChatID verifies the boot answer becomes live config: the
+// chat id renders quoted into the telegram block (or empty when deferred).
+func TestRenderBaseConfigChatID(t *testing.T) {
 	dir := t.TempDir()
 	v := Values{Name: "main", BaseURL: "http://localhost:1/v1", EnvKey: "K", Model: "m",
-		TOTP: true}
+		ChatID: "123456789"}
 	if err := RenderBaseConfig(dir, v, false); err != nil {
 		t.Fatalf("RenderBaseConfig: %v", err)
 	}
@@ -100,12 +91,8 @@ func TestRenderBaseConfigTOTP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read shell3.yaml: %v", err)
 	}
-	for _, want := range []string{
-		"\n  totp_secret: env:SHELL3_WEB_TOTP_SECRET",
-	} {
-		if !strings.Contains(string(cfg), want) {
-			t.Errorf("shell3.yaml missing live line %q", want)
-		}
+	if !strings.Contains(string(cfg), `chat_id: "123456789"`) {
+		t.Errorf("shell3.yaml missing quoted chat_id; got:\n%s", cfg)
 	}
 }
 
@@ -350,10 +337,10 @@ func TestRenderBaseConfigEscapesYAMLSpecials(t *testing.T) {
 	}
 }
 
-// A scaffolded config must be servable, which means it must reference the
-// password key: `shell3 serve` refuses to start without one, so a fresh boot
-// that omitted this line would produce a config that cannot run.
-func TestBaseConfigWiresTheWebPassword(t *testing.T) {
+// A scaffolded config must be runnable, which means it must reference the
+// bot token key: the telegram block resolves env:TELEGRAM_TOKEN at load, so a
+// fresh boot that omitted this line would produce a config that cannot run.
+func TestBaseConfigWiresTheBotToken(t *testing.T) {
 	dir := t.TempDir()
 	if err := RenderBaseConfig(dir, Values{
 		Name: "main", BaseURL: "http://x", EnvKey: "K", Model: "m",
@@ -365,7 +352,7 @@ func TestBaseConfigWiresTheWebPassword(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(body), "password: env:SHELL3_WEB_PASSWORD") {
-		t.Errorf("shell3.yaml does not wire the web password:\n%s", body)
+	if !strings.Contains(string(body), "token: env:TELEGRAM_TOKEN") {
+		t.Errorf("shell3.yaml does not wire the bot token:\n%s", body)
 	}
 }

@@ -3,9 +3,11 @@ name: self-evolve
 description: Use when the user tells you to remember something, change how you behave, or add a capability — durable facts go in memory.md, new procedures in skills/, new helpers in agents/ or cron/. Also when you notice a recurring friction worth fixing. Covers what is yours to edit, what is the operator's, and how a change goes live.
 ---
 
-You can modify your own configuration. Edits go live on a config reload or the
-next shell3 start — the running process keeps the config it was built with, so
-a bad edit never breaks the session you are in.
+You can modify your own configuration. Edits apply when the config is reloaded
+— call your `reload` tool, which validates the config and applies it when the
+current turn ends (the user can also send `/reload`) — or at the next shell3
+start. The running process keeps its current config until then, so a bad edit
+never breaks the session you are in.
 
 ## Evolve proactively
 Improving yourself is part of the job, not a special request. When you hit a
@@ -34,15 +36,14 @@ because its file exists.
                        skill)
 
 ## Not yours to edit
-- `shell3.yaml` (models, the `web:` block, mcp servers, media) and
+- `shell3.yaml` (models, the `telegram:` block, mcp servers, media) and
   `hooks/*.sh` (the tool-call gate) belong to the operator. The gate refuses
   your writes to both — you may read them to explain your own rules. When one
   of them needs to change, say exactly what and why, and let the user do it.
 - `.env` holds the secrets those files reference as `env:KEY` — never read it.
   A script reads the one key it needs at point of use (scripting skill).
-- The web password and the optional second factor live in `.env`;
-  `shell3 boot --totp` enrols or resets the factor, and it is the user's
-  command to run. How this interface is reached from elsewhere is the user's
+- The bot token lives in `.env` (`TELEGRAM_TOKEN`); revoking or rotating it
+  is the user's move (@BotFather). Running shell3 as a service is the user's
   setup too (`docs/deploying.md` in the shell3 repo) — shell3 exposes nothing
   by itself.
 - The runs store (`.shell3_project/shell3.db`) is data, not config. Recall past
@@ -77,7 +78,6 @@ Choose the highest (least-footprint) rung that correctly solves the problem:
    skipped for missing/broken frontmatter, or a hook file naming no subagent.
 4. Fix what health reports and re-run until clean (a `skill file ... skipped`
    warning means the `.md` needs a frontmatter `description` and a body).
-5. Tell the user the change is ready and ask them to reload: the Status view
-   has a **Reload config** button. You cannot reload yourself — a reload is
-   refused while a turn is running, which is exactly the turn you are in. Do
-   not claim the change is live in the current session.
+5. Apply it: call `reload` (it takes effect when this turn ends) and tell the
+   user what changed. Do not promise it is live in the current session — it
+   goes live on the reload, or at the next shell3 start.

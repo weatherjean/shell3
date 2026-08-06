@@ -11,7 +11,7 @@ Minimal Unix-composable personal agent written in Go.
 **Declarative config.** The config is a **directory** (default `~/.shell3/`),
 loaded by `internal/config` — four rules: YAML wires it, markdown prompts it,
 files enable it, one bash script gates it. `shell3.yaml` holds wiring only
-(`models:`, `web:`, `mcp:`, `media:`, `background:`, `runs_keep_days`,
+(`models:`, `telegram:`, `mcp:`, `media:`, `background:`, `runs_keep_days`,
 `media_keep_days`;
 strict decode — unknown keys fail the load; secrets referenced as `env:KEY`,
 substring-substituted from the sibling `.env`, unknown key = load error).
@@ -39,9 +39,10 @@ appended verbatim to the main agent's system prompt),
 frontmatter `model` only, tools/mcp/context rejected, body = triage policy;
 "notifier" is reserved in `agents/` like "agent"; absent file = degraded
 mode, every completion posts raw), `cron/<name>.md` (frontmatter
-`schedule`/`agent`/`direct`; body = prompt; `agent` names either a subagent
-from `agents/` or a project's `manager.md`, which then runs in that
-project's workdir). There is no Lua anywhere, and no migration shims: an
+`schedule`/`agent`/`direct`/`workdir`; body = prompt; `agent` names either a
+subagent from `agents/` or a project's `manager.md`, which then runs in that
+project's workdir — an explicit `workdir` overrides even a manager's).
+There is no Lua anywhere, and no migration shims: an
 unknown key is simply an unknown-key load error.
 
 **Bash-first.** The agent's verbs are `bash`, `bash_bg`, and `edit_file` (plus
@@ -115,9 +116,8 @@ field anywhere. Delegation itself is **inferred**: the four task-family tools
 `sub1`/`bg1`) are advertised iff `agents/` is non-empty — a file in `agents/`
 IS the registration, there is no toggle and no allowlist key.
 
-`GET /api/jobs` lists running + finished jobs and `/api/jobs/<id>/cancel`
-cancels one; the job-progress stream is `rt.JobEvents()` /
-`Session.JobEvents()`. Note `Session.Jobs()` reports the whole job runtime,
+`/jobs` lists running + finished jobs and `/cancel <id>` cancels one; the
+job-progress stream is `rt.JobEvents()` / `Session.JobEvents()`. Note `Session.Jobs()` reports the whole job runtime,
 not one session's share — filter by `JobInfo.ParentID` for per-session
 work. The shell is **unrestricted except by the hook**;
 the opt-in gate is a **per-agent bash hook script**: `hooks/tool-call.sh`
@@ -131,7 +131,7 @@ subagents, cron — so an ask auto-denies)}` — and prints a verdict: empty/`{}
 (run) / `{"command": …}` (rewrite — bash tools only) / `{"argv": […]}`
 (runner-swap — bash tools only; fails closed for non-bash) /
 `{"block": true, "reason": …}` / `{"ask": "prompt", "reason": …}` (human
-prompt — an Allow/Deny modal in the browser; decline/headless → block).
+prompt — Allow/Deny buttons in the chat; decline/headless → block).
 Precedence when several keys are set: block > argv > ask > command. Nonzero
 exit, malformed JSON, or timeout **fails closed**. `hooks/tool-result.sh` /
 `hooks/<name>.tool-result.sh` can rewrite a tool's output (e.g. redact
@@ -172,194 +172,119 @@ get one reconnect retry, then the error returns as tool-result text (never
 fatal to a turn). The hook sees them like any tool (`name` prefixed,
 `command` null). `shell3 health` connects and fails on any down server, and
 dry-runs every hook script with a probe payload (script error = failure; a
-deliberate block is fine); the Status view lists per-server state.
+deliberate block is fine); `/status` lists per-server state.
 Context is host-managed via two token thresholds: `prune_at` cheaply stubs
 old tool outputs (no LLM call), and `compact_at` triggers tail-preserving
 compaction — summarizing the head while keeping recent turns verbatim. The
 `prune_at` and `keep_recent` knobs are optional, defaulting to fractions of
-`compact_at`; no model-driven prune/compact tools. A *forced* compaction (the
-web UI's `/compact`) skips the threshold and caps the verbatim tail at the
-floor rather than the configured fraction — the automatic tail is a slice of a
-large window, so a forced compaction sized that way would refuse as "nothing to
-compact" across the whole range where anyone would ask for one.
+`compact_at`; no model-driven prune/compact tools. A *forced* compaction
+(`Session.Compact` / `chat.CompactStandalone`) skips the threshold and caps the
+verbatim tail at the floor rather than the configured fraction — the automatic
+tail is a slice of a large window, so a forced compaction sized that way would
+refuse as "nothing to compact" across the whole range where anyone would ask
+for one. It is a runtime seam with no front-end command bound to it: the bot
+compacts automatically and `/status` reports usage.
 
-**Web-first.** shell3 is a hosted agent you reach in a browser. `shell3 serve`
-runs everything (`internal/webui`): the agent, the single-page interface, and
-cron. It binds `127.0.0.1:8765` by default (`web.addr`) and **authenticates**:
-`web.password` (required — `serve` refuses to start without it, `health` fails
-on it; a `web.password: env:SHELL3_WEB_PASSWORD` reference like every other
-secret) is exchanged at a login screen for a server-side session, and the
-optional `web.totp_secret` adds a second factor so a leaked password alone is
-not a session. **Exposure is the operator's**: shell3 binds `web.addr` and
-does nothing else — it exposes nothing beyond that bind and supervises
-nothing. `web.url` is the one exposure-related key and it is purely
-informational (the address the operator actually serves it on; `serve` prints
-it at start via `announcePublicURL`, nothing depends on it). A network-facing
-bind with no https warns that the password and cookie cross in clear and
-points at `docs/deploying.md`, which is where every "how do I keep it running
-/ reach it from my phone" answer lives. Auth is **not** a reason to skip a
-proxy: a login here is a shell.
+**Telegram-first.** shell3 is a personal agent you reach in one Telegram chat.
+`shell3 telegram` runs everything (`internal/telegram`): the agent, the bot,
+and cron. There is **no listener** — the process long-polls the Bot API
+outbound, so there is no port, no login, no tunnel. The `telegram:` block in
+`shell3.yaml` is `token` (an `env:TELEGRAM_TOKEN` reference like every other
+secret), `chat_id` (the single chat the bot answers — updates from anywhere
+else are dropped before a turn starts, messages in `handleMsg` and
+inline-button callbacks in `handleCallback` alike, and that IS the access
+model), and `workdir` (the agent's shell; default = the config dir). Missing
+token or chat_id, or a non-numeric chat_id, refuses to start — naming the
+field at fault, and `shell3 health` fails on the same check (an absent
+`telegram:` block is reported, not failed: an `ask`-only config is legitimate). The transport is an
+interface (`client.go`): `client_botapi.go` wraps go-telegram/bot,
+`client_console.go` drives the same bot loop over stdin/stdout for
+`shell3 telegram --console` (headless event testing, no credentials, no
+network). `pollhealth.go` records getUpdates/send failures into the app log
+with throttled repeats and a recovery line, so a transport outage is visible
+after the fact. At startup the host registers the `/` command menu
+(`BotCommands`), clears any menu button an older build left behind, and greets
+the chat.
 
-Authentication lives in `internal/webui/auth.go` + `sessions.go`. Every route
-is declared in one table (`Server.routes()`) carrying a `public` flag, so a new
-endpoint has to state its status to compile and `auth_test` walks that same
-table asserting every private route 401s unauthenticated — the guarantee is
-structural, not a list someone maintains. Exactly two things are public: `POST
-/api/login`, and the static shell (`index.html`, `/assets/*`, the icons) that
-draws the login screen; `/sw.js` is gated by an exact pattern that beats the
-catch-all. Sessions are opaque 32-byte tokens whose SHA-256 hashes live in
-`.shell3_project/web_sessions.json` (0600, atomic replace, expired entries
-pruned at load), 7-day sliding expiry renewed in place on use, so a restart
-does not log anyone out. Each record carries a fingerprint of the password it
-was created under: changing `SHELL3_WEB_PASSWORD` invalidates every session,
-which is what makes "I think I was breached" actionable. Cookie is `HttpOnly`,
-`SameSite=Lax` (Strict would drop the cookie when the interface's URL is
-opened from a messenger), `Secure` whenever the request arrived over
-https. Failed logins get an escalating global delay (no lockout — that
-would let anyone hold the
-login closed, and TOTP already covers guessing), every attempt is logged with
-IP and user-agent, and every success raises a bell + push notification, since
-that notice is how a breach gets noticed at all. TOTP codes are single-use
-within their window. `shell3 boot` asks for the password (16-character floor,
-offers a generated one) and offers TOTP enrolment with a QR code in the
-terminal; losing the phone is not a lockout because the secret is a line in
-`.env` on your own machine. The interface is built with **assistant-ui**
-(React, `webui/`), built by `make webui` into `internal/webui/dist` and
-embedded in the binary — the
-staged build is committed because `go install` cannot run npm. It is **set as a
-printed document**, the run log it already is: two stocks (paper, and a
-cyanotype for dark), Newsreader over Inter Tight over IBM Plex Mono — all
-self-hosted, since the binary must work offline — and four shared devices (the
-ruled section head, the dotted leader, the hanging figure column, and the
-marker). The yellow is the marker and marks only what is live. Tokens and the
-devices live in `webui/src/index.css`; the shadcn names are mapped onto them so
-untouched components still pick up the right stock.
+The turn model is **fresh-turn, thread-scoped**: the bot holds NO long-lived
+session. Every inbound message runs in its own runtime session; a Telegram
+*reply* resumes the session recorded for that message id in the persistent
+thread index (the runs store's `threads` table, surface-namespaced
+"telegram"/"serve"; `threads.go` — in-memory map authoritative for the
+process, store writes best-effort, and the store is resolved per call so a
+/reload generation swap never leaves the index on a closed handle). Replying to a message whose session is gone
+answers that it can't be resumed rather than silently starting a new one.
+Exactly one main-agent turn runs at a time (a turn slot in `bot.go`); a message
+arriving mid-turn gets "a turn is running … this message is disregarded" and
+is dropped, never queued — the running turn is never steered. `postReply`
+chunks the reply at Telegram's message cap on rune boundaries and replies each
+chunk to the thread's anchor, capped at `replyMaxChunks` (2) bubbles — a longer
+reply posts its first chunk plus the full text as a `reply.md` document — and
+records every sent message id so the anchor advances (a reply to the bot's own
+latest message resumes the same session).
+`drainTurn` treats only the FINAL assistant segment as the reply — text before
+a tool call is progress narration — and errors always surface. Markdown is
+converted for Telegram by `mdhtml`. A session retires (and Closes) as soon as
+it goes idle at the end of its own turn — there is no warm-session pool — except
+one with running jobs or queued input, which stays open to receive them.
 
-The browser talks to the agent over `POST /api/chat`, which streams the turn
-as SSE in the AI SDK **UI message stream** dialect (`internal/webui/stream.go`
-bridges `shell3.Event` → protocol chunks: text and reasoning arrive as
-delta blocks bracketed by start/end, a tool call closes the open text block
-and emits `tool-input-available` / `tool-output-available`, and channel close —
-not a terminal `Done` event — is the authoritative end of turn). Host
-narration (retries, compaction, usage) is dropped from the chat and stays in
-the logs. A message that is exactly a **slash command** is answered by the
-server without the model ever seeing it (`internal/webui/command.go`; typing
-`/` in the composer opens the menu): `/compact` summarises the conversation's
-head and reports the tokens freed, running the same forced compaction as the
-`compact_at` threshold but narrowing the verbatim tail to the floor, since
-someone asking for space now is below that threshold by definition. A request
-names its conversation with `threadId`, NOT the AI SDK's `id` — the client
-library mints that per runtime. Stop is `POST /api/stop`, not an aborted
-request: the turn ends server-side, its jobs are killed, and the stream closes
-properly (unfinished tool calls are answered "stopped before it finished", a
-cancelled turn reads as `_Stopped._` rather than `context canceled`), where a
-browser-side abort would strand the last tool call looking like it was waiting
-on the user. `/api/events` is the server-push channel (notifications + approval
-requests, and live job progress); the rest is introspection:
-`/api/capabilities`, `/api/status`, `/api/threads[/{id}[/messages]]`,
-`/api/jobs[/{id}[/cancel]]`, `/api/cron[/{name}/run]`, `/api/runs[/{id}]`,
-`/api/files`, `/api/files/content`, `/api/media[/{name}]`, `/api/stop`,
-`/api/reload`, `/api/stt`, `/api/tts`, `/api/push[/subscribe|/test]`, plus
-`/api/login` and `/api/logout`. The browser gates itself the same way: an auth
-probe runs before the chat mounts, and any 401 — including the events stream
-failing to open — returns it to the login screen. A 401 is deliberately told
-apart from "no backend at all", because sample data standing in for a live
-server that merely wants a login is the one thing this UI must not do.
+**Commands are host-answered** (`commands.go`, no model call, zero tokens):
+`/stop` (cancel the turn; background jobs keep running), `/run <job>`,
+`/status`, `/jobs`, `/job <id>`, `/cancel <id>`, `/cron`, `/runs [page|id]`
+(paginated inline listing, 8 per page, each entry a tappable `/run_N` that
+replays that run — taps resolve only against the map the last render stored,
+so a stale index errors instead of opening the wrong run),
+`/reload`, `/voice off|inbound|always`. The dash views are rendered as markdown
+by `internal/render` (`Status`, `Jobs`, `JobDetail`, `Cron`, `RunsPage`,
+`RunReplay`) and delivered by `sendMarkdownDoc`: inline when under
+`mdInlineThreshold`, otherwise as a `.md` document plus a capped text summary
+(the `/runs` listing is always inline — Telegram only linkifies commands in
+message text).
+`/reload` takes the turn slot, so it is refused rather than raced.
 
-The UI has six views. **Chat**; **Jobs** (running and finished background work,
-live output tail, a subagent's transcript or a command's captured stdout, exit
-code, cancel); **Cron** (each job's schedule, workdir, direct-vs-notifier
-delivery, full prompt, last run, a Run now button firing `Scheduler.Run`, and a
-link into the job that last executed it); **Runs** (every stored session —
-conversations, subagent children, cron runs, `shell3 ask` sessions — replayed
-at full fidelity with tool calls, arguments, results, and reasoning, which the
-chat view deliberately omits); **Status** (the effective system prompt, model
-params, config warnings, context window, tool descriptions, last-turn token
-usage with a context-fill bar, and whether the command gate is armed); and a
-read-only **Files** explorer over two roots — the config dir (`.env` is
-redacted, never read from disk; reads report `redacted`/`binary`/`truncated`)
-and the media dir (uploads and generated images, newest first, with inline
-previews). Plus a notification bell, a light/dark toggle, and voice. Chat
-is pinned in the sidebar; the five operational views sit under an always-visible
-"Elsewhere" group at its foot. The operational views poll while the
-tab is visible; sample data appears only when there is no backend at all, never
-in place of a live one that failed.
+Three **host tools** ride the session decorator (`Runtime.SetSessionDecorator`,
+re-applied by `Runtime.Reload`; `DecorateChatSession` skips headless subagent
+children): `send_media_telegram` (push a local file to the chat as
+photo/voice/audio/video/document, validating extension and size per kind, and
+refusing `.env` and its dotenv siblings), `status`, and `reload` (records a
+pending reload and returns; the host applies it at end-of-turn, since a
+mid-turn reload would tear down the running turn). `image_generate` is
+registered on EVERY session, headless children included.
 
-**Web push** (`internal/webui/push.go`) carries notifications to a browser with
-no tab open. A VAPID keypair is generated once into
-`.shell3_project/web_push_keys.json` (0600) and per-browser subscriptions into
-`web_push_subs.json`; `/sw.js` (which caches nothing on purpose) shows the
-notification and focuses an existing tab on click. Every bell notification is
-pushed too, and an endpoint the push service reports gone (404/410) is pruned.
-Push needs a secure context — localhost or proxied https, never plain http to
-another host — so the toggle in the bell explains itself rather than failing
-silently.
+The **command gate** is an inline keyboard: a hook `ask` verdict posts the
+command and reason with Allow/Deny buttons and blocks the turn goroutine inside
+`Ask` until a callback arrives. Callbacks drain on their own bot-lifetime
+goroutine, so a press is delivered while the turn goroutine is parked.
+Fail-safe throughout — send error, cancelled turn, or timeout all deny; a
+headless caller (subagent, cron) denies immediately.
 
-Chat is **thread-scoped**: a browser thread maps to a shell3 session through a
-persistent index (the runs store's `threads` table, surface-namespaced "web",
-carrying the browser-facing title/preview/created_at/updated_at/deleted
-metadata on top of the plain msg_id→session_id mapping the other surfaces use;
-`internal/webui/threads.go` — in-memory map authoritative for the process,
-store writes best-effort, and the store is resolved per call so a /reload
-generation swap never leaves the index on a closed handle), so a thread
-continues its conversation across turns and process restarts; sessions stay resident
-between turns and the oldest idle one retires past `keepLiveSessions` (a
-session with running jobs is never retired — its jobs would lose their
-parent). One main-agent turn runs at a time: a message arriving mid-turn is
-refused with an error chunk rather than queued, and the running turn is never
-steered. A job that finishes *during* a turn wakes the session and its
-follow-up is appended to the same reply (bounded by `maxWakeDrains`).
-
-The **command gate** is a modal: a hook script's `ask` verdict publishes an
-approval request over `/api/events`, the turn parks inside `asks.Ask` until
-`POST /api/asks/{id}` answers it, and still-parked requests replay to every
-new subscriber so reloading the page never strands a turn. Fail-safe
-throughout — no browser attached, a cancelled turn, or a timeout all deny.
-
-**Completion delivery** is the notifier's, unchanged; the front-end supplies
-`CompletionHost` (`internal/webui/completion.go`): a `send` verdict becomes a
-notification in the bell (the 50 most recent are replayed to a browser on
-connect, so closing the tab does not lose them), a `wake` verdict runs
-another turn — the owning session if still live, a fresh one otherwise —
-through the same single-turn gate, so a cron result never runs concurrently
-with someone typing. Wake and session retirement share one lock, so a note
-lands or the session retires, never both.
+**Completion delivery** is the notifier's, unchanged; the bot is the
+`CompletionHost` (`bot.go`): `PostCompletion` posts `⏰ <job>: …` for a cron
+origin and `🔔 …` otherwise, threaded into the owning session's chat thread
+when one is live; `WakeOwner` resumes a live owner under the same turn slot
+(its liveness check pairs with the retire lock, so a note lands or the session
+retires, never both); `StartFreshTurn` runs a fresh main-agent session over the
+note and replies as a new replyable thread.
 
 **Media** (`internal/media`, four blocks under `media:` in `shell3.yaml`, each
-pointing at a model): `stt` transcribes browser recordings (`POST /api/stt`;
-the UI records with MediaRecorder), `tts` speaks replies (`POST /api/tts`),
-`describe` captions uploaded images before the turn — pointed at a vision
-model for text-only mains, or at the main model itself to skip a `read_media`
-round-trip (boot's default when the model has vision) — and `imagegen` adds an
-`image_generate` tool for the main agent AND every subagent, registered via a
-runtime session decorator (`Runtime.SetSessionDecorator`; reapplied on Reload)
-(`api: openai` or `openrouter`, the latter a raw chat-completions POST with
-`modalities=["image","text"]`, OpenRouter's image-output dialect — its
-dedicated `/api/v1/images` endpoint is avoided because it pre-authorizes
-worst-case cost and 402s low balances). All media — uploads and generated
-images (`img-*`) — is stored under `<configDir>/media` (`internal/mediadir`;
-which IS `~/.shell3/media` for the default config dir; `$SHELL3_MEDIA_DIR`
-overrides) so every file keeps a durable path (TTS audio included, cached
-as `tts-*`) and is served back at `/api/media/<name>`; the agent shows a
-generated image by writing `![](/api/media/<file>)`. Restriction policy is
-the hook script, not a tools list. When no media model is configured the UI
-falls back to the browser's own Web Speech APIs, so dictation still works.
-`send_file` (`internal/webui/sendtool.go`) is a sibling host tool on the
-same decorator: `{path, name?}` stages any local file into the media dir
-(as `sent-*`) and returns the `/api/media/` link to show. Defense in depth,
-in order: it refuses dotenv-shaped names (the requested name and its
-symlink-resolved target); refuses anything resolving inside the config
-directory, media dir exempted (catches a symlink into the config tree; the
-exemption itself is refused if `$SHELL3_MEDIA_DIR` has been pointed at or
-above the config dir, since that would otherwise exempt the whole tree);
-opens with `O_NOFOLLOW|O_NONBLOCK` and validates the opened fd, not the
-path, refusing non-regular files (FIFOs, devices, sockets); compares the
-fd's `(dev, ino)` against every regular file anywhere in the config tree,
-which is what actually closes the hardlink route (a hardlink's resolved
-path lies outside the config dir by construction, but shares the inode);
-and bounds the copy again at write time rather than trusting the pre-copy
-`Stat`, which can be stale. It is skipped for a headless session, since
-there is no chat to hand a link to.
+pointing at a model): a turn's attachments are saved to `~/.shell3/media/` as
+`tg-*` (`attachments.go`) and their paths always go into the prompt. Before the
+turn, `preflight.go` transcribes an inbound voice note via `stt` (injecting the
+transcript; `stt.echo` also posts it back to the chat) and captions an inbound
+photo via `describe` (injecting `[image: …]`) — the fast local scan runs on the
+update loop, the network half only on a turn goroutine under
+`preflightTimeout`, and any failure becomes a compact ⚠️ chat notice while the
+turn still runs with the file path. `deliverReply` (`voice.go`) is the single
+reply exit for a user turn: per the resolved voice mode (`tts.mode`, overridden
+by `/voice` and persisted to `~/.shell3/voice_mode.json` by `ModeStore`) it
+speaks the reply *instead of* posting text — as a voice bubble when the
+synthesized container is ogg/opus, an audio file otherwise — and falls back to
+text on any failure. `imagegen` adds `image_generate` (`api: openai` or
+`openrouter`, the latter a raw chat-completions POST with
+`modalities=["image","text"]` — its dedicated `/api/v1/images` endpoint is
+avoided because it pre-authorizes worst-case cost and 402s low balances); the
+agent delivers the result with `send_media_telegram`. Restriction policy is the
+hook script, not a tools list.
 
 An in-process cron scheduler (`internal/cron`, jobs are `cron/<name>.md`
 files; each job dispatches its declared agent — a subagent from `agents/`, or
@@ -379,45 +304,50 @@ user_version`; a database whose stamp doesn't match the running binary is
 **deleted and recreated empty**, with one loud stderr line — shell3 data is
 disposable by design, so there are no migrations.
 
-A **runs janitor** runs once at `shell3 serve` startup (never on `ask`):
-`runs_keep_days` (top-level `shell3.yaml` key, default 30, `0` = keep forever)
-deletes sessions whose `last_at` is past the cutoff — rows, FTS entries,
-thread entries, and job-log dirs together — plus empty crash leftovers and
-orphaned `runs/<id>/` dirs (pre-database leftovers), printing `janitor:
-removed N runs, M thread entries` (silent when both are zero). SQL in
-`runs.Sweep`, on its own connection (the runtime's store is already open by
-then — the sweep does not need it closed), before the server listens.
-A sibling **media janitor** runs the same start-time-only shape, gated by
-`media_keep_days` (top-level `shell3.yaml` key, default 0 = keep forever, so
-this is opt-in): deletes regular files in the media dir past the cutoff —
-uploads, generated images, TTS cache, and `send_file` stagings alike, since
-none are distinguished from each other by the sweep. An old `/api/media/`
-link goes dead once its file is swept.
+A **runs janitor** runs once at `shell3 telegram`/`shell3 serve` startup
+(never on `ask`): `runs_keep_days` (top-level `shell3.yaml` key, default 30,
+`0` = keep forever) deletes sessions whose `last_at` is past the cutoff —
+rows, FTS entries, thread entries, and job-log dirs together — plus empty
+crash leftovers and orphaned `runs/<id>/` dirs (pre-database leftovers),
+printing `janitor: removed N runs, M thread entries` (silent when both are
+zero). SQL in `runs.Sweep`, on its own connection (the runtime's store is
+already open by then — the sweep does not need it closed), before the bot
+starts polling. A sibling **media janitor** runs the same start-time-only
+shape, gated by `media_keep_days` (top-level `shell3.yaml` key, default 0 =
+keep forever, so this is opt-in): deletes regular files in the media dir past
+the cutoff — attachments, generated images, and TTS cache alike, since none
+are distinguished from each other by the sweep. A swept file's stored path in
+an old transcript no longer resolves.
 
-`shell3 boot` scaffolds the config tree (an interactive form: model, context
-budget, whether the model has vision — which wires `media.describe` + the media
-tool — the agent's workdir, and the interface password) and writes secrets to
-`~/.shell3/.env`; one TTY-only offer wires TOTP enrolment → `web.totp_secret`,
-armed only after one code from the scanned entry verifies (blank cancels;
-`boot --totp` re-runs just that step later — enrol after declining, or reset
-with a fresh secret, again written only post-verification; removal stays
-manual: delete the key from `.env`). A re-boot over an `.env` that already
-holds `SHELL3_WEB_PASSWORD`/`SHELL3_WEB_TOTP_SECRET` keeps them, says so
-before any ceremony, and never prints a password or QR it will not apply.
-It installs **nothing** and exposes **nothing**: the finale prints the local
-URL, the one-line tailnet start (`tailscale serve --bg 8765 && shell3
-serve`), on Linux a copy-paste systemd-unit + `tailscale serve` block, and
-points at `docs/deploying.md` (or the agent) for the rest — it only ever
-*prints*; running any of it is the operator's. `--show` reprints that
-finale, rendered to the terminal's own background.
+`shell3 boot` scaffolds the config tree (an interactive form: model, vision —
+which wires `media.describe` + the media tool — context budget, an optional
+proxy command, the Telegram bot token + chat id, and the agent's workdir) and
+writes secrets to `~/.shell3/.env` (the token as `TELEGRAM_TOKEN`, referenced
+from the rendered yaml as `env:TELEGRAM_TOKEN`; both Telegram fields may be
+left blank and filled in later, and a non-numeric chat id is rejected at the
+form). It installs **nothing** and exposes **nothing**: the finale prints how
+to run the bot and points at `docs/deploying.md` (or the agent) for service
+management — it only ever *prints*; running any of it is the operator's.
+`--show` reprints that finale, rendered to the terminal's own background.
 `shell3 ask "…"` is the terminal front-end (`internal/cli`): it drives the same
 agent with full verbose output (every tool call/result, reasoning, token usage;
 no message = an interactive multi-turn loop; `-p` for headless; `--resume`
-continues the latest session; host-agnostic — reads nothing from the `web:`
-block).
-`serve`, `ask`, `boot`, `project`, and `health` are the whole command tree —
-there is no separate dashboard command and no command that exposes or
-supervises the process.
+continues the latest session; host-agnostic — reads nothing from the
+`telegram:` block, and installs no CompletionHost, so its verbose view sees
+every completion raw).
+`telegram`, `serve`, `ask`, `boot`, `project`, and `health` are the whole
+command tree — there is no web interface, no dashboard command, and no
+command that exposes or supervises the process. `shell3 serve` is the BYO
+front-end seam: the same bot loop over newline-delimited JSON on stdin/stdout
+(`internal/telegram/client_jsonl.go`, a third tgClient beside the Bot API and
+console transports; docs/serve.md is the wire reference). Message ids are
+opaque strings end to end (the Telegram client stringifies the API's ints),
+so a front-end's own ids thread natively; serve keeps its own thread surface
+in the runs store; markdown goes on the wire (the JSONL client's SendHTML
+returns ErrNoHTML, steering the bot's fallback to the plain path); media
+crosses as file paths, outbound spooled under `.shell3_project/serve_out/`.
+Running serve ALONGSIDE telegram is unsupported by design — run two processes
+with two config dirs instead.
 
 ## IMPORTANT: Do Not Read Credential Files
 
@@ -433,7 +363,7 @@ assistants, and automated tools.
 ## Project Layout
 
 ```
-cmd/shell3/            cobra command tree: root (prints help) + serve/ask/boot/project/health subcommands
+cmd/shell3/            cobra command tree: root (prints help) + telegram/serve/ask/boot/project/health subcommands
 internal/agentsetup/   shared config assembly (BuildParts → chat.Config) used by every front-end
 internal/config/       config-directory loader (shell3.yaml + agent/notifier/subagent/project/skill/cron markdown + hooks/*.sh) + system-prompt assembly
 internal/bootstrap/    first-run global + project setup
@@ -447,8 +377,8 @@ internal/notify/       Notification type (bg_done / agent_done) shared by job ru
 internal/media/        media.stt/tts/describe/imagegen clients (transcribe, speak, describe, generate)
 internal/mediadir/     resolves the media dir (<configDir>/media, $SHELL3_MEDIA_DIR overrides); split out of internal/media to break an import cycle (agentsetup → media → shell3 → agentsetup) and to stay free of the unix build tag
 internal/mcp/          MCP client (official go-sdk): Manager connects mcp: servers, lists tools, dispatches mcp_* calls
-internal/webui/        the web front-end: HTTP API, SSE chat bridge, turn gate, thread index, command gate, completion delivery; dist/ is the embedded build of webui/
-webui/                 the interface itself (React + assistant-ui + Vite); `make webui` builds it into internal/webui/dist
+internal/telegram/     the chat front-end: bot loop + transports (Bot API, console, serve's stdio JSONL), turn slot, thread index, host commands + tools, approval keyboard, media preflight, completion delivery
+internal/render/       markdown renderers for the dash views (/status, /jobs, /job, /cron, /runs) shared by the bot
 internal/cron/         robfig/cron scheduler dispatching subagent jobs on Session.Dispatch
 internal/cli/          terminal front-end helpers: shell3 ask renderers, brand banner
 internal/chat/         conversation loop, tools, events, JSONL audit sink
@@ -463,14 +393,13 @@ internal/shell3/       session/runtime core consumed by the front-ends; jobs.go 
 
 ```bash
 make build      # go build ./cmd/shell3
-make webui      # build the interface (webui/) into internal/webui/dist — commit the result
 make install    # go install ./cmd/shell3
+make lint       # gofmt + go vet + golangci-lint
 go test ./...   # run all tests
 ```
 
-The staged `internal/webui/dist` is committed: `go install` cannot run npm, so
-a binary built from a clean checkout must already carry the interface. Re-run
-`make webui` (and commit the result) whenever `webui/src` changes.
+`shell3 telegram --console` drives the whole bot loop over stdin/stdout with no
+credentials and no network — the way to exercise the front-end by hand.
 
 ## AI artifacts are not committed
 

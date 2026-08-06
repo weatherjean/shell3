@@ -5,14 +5,13 @@ package main
 import (
 	"context"
 	"fmt"
-	"net"
 
 	"github.com/weatherjean/shell3/internal/cron"
 	"github.com/weatherjean/shell3/internal/media"
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
-// Shared wiring for the hosted front-ends (serve, ask). Each helper is small
+// Shared wiring for the hosted front-ends (telegram, serve, ask). Each helper is small
 // on purpose: the commands stay readable top-to-bottom while the invariants
 // (config-dir anchoring, cron fail-fast) live in exactly one place.
 
@@ -49,15 +48,6 @@ func armCron(disp cron.Dispatcher, jobs []shell3.CronJob) (*cron.Scheduler, erro
 	return sched, nil
 }
 
-// announcePublicURL delivers the host's public https URL to onURL when one
-// is configured. No-op otherwise — exposure beyond the fixed url is the
-// operator's own concern (reverse proxy, tailscale, SSH port forwarding, ...).
-func announcePublicURL(url string, onURL func(url string)) {
-	if url != "" {
-		onURL(url) // a fixed URL is the operator's promise; don't second-guess it
-	}
-}
-
 // buildMediaClients resolves the four media capabilities (STT/TTS/describe/
 // imagegen) from the runtime's current config, starting each model's run_proxy
 // (at most once, on first use) via the runtime's shared proxy Spawner. Called
@@ -66,23 +56,4 @@ func announcePublicURL(url string, onURL func(url string)) {
 func buildMediaClients(rt *shell3.Runtime) *media.Clients {
 	p := rt.Parts()
 	return media.New(p.MediaConfig(), p.EnsureProxy)
-}
-
-// isLoopbackBind reports whether addr (a host:port listen address) binds only
-// the loopback interface. A bare port (":8765") or a wildcard ("0.0.0.0"/"::")
-// faces the network. The interface authenticates, but plain http carries the
-// password and session cookie in clear, so callers warn.
-func isLoopbackBind(addr string) bool {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		return false
-	}
-	if host == "" {
-		return false // ":port" listens on all interfaces
-	}
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }

@@ -102,6 +102,25 @@ func TestCollectAnswersNonTTY(t *testing.T) {
 		}
 	})
 
+	// A chat id reaches shell3.yaml verbatim and is parsed as an int64 by the
+	// front-end at startup, far from where it was typed — so boot rejects a
+	// non-numeric one here, and lets a blank through (fill it in later).
+	t.Run("chat id validated", func(t *testing.T) {
+		if _, err := collectAnswers(&bootFlags{model: "m", tgChatID: "@me"}, false); err == nil {
+			t.Fatal("expected a non-numeric chat id to be rejected")
+		}
+		a, err := collectAnswers(&bootFlags{model: "m", tgChatID: " 123456789 "}, false)
+		if err != nil {
+			t.Fatalf("collectAnswers: %v", err)
+		}
+		if a.tgChatID != "123456789" {
+			t.Errorf("chat id = %q, want it trimmed to 123456789", a.tgChatID)
+		}
+		if _, err := collectAnswers(&bootFlags{model: "m"}, false); err != nil {
+			t.Fatalf("a blank chat id must be allowed: %v", err)
+		}
+	})
+
 	t.Run("model required", func(t *testing.T) {
 		if _, err := collectAnswers(&bootFlags{}, false); err == nil {
 			t.Fatal("expected --model required error")
@@ -165,6 +184,11 @@ func TestBootEndToEnd(t *testing.T) {
 	if !strings.Contains(string(env), "MAIN_API_KEY=") {
 		t.Errorf(".env missing MAIN_API_KEY line:\n%s", env)
 	}
+	// The token key is always written, even blank: the config references it, so
+	// a missing key is a load error rather than an empty-token startup refusal.
+	if !strings.Contains(string(env), envTelegramToken+"=") {
+		t.Errorf(".env missing %s line:\n%s", envTelegramToken, env)
+	}
 	if fi, err := os.Stat(envPath); err != nil {
 		t.Fatal(err)
 	} else if fi.Mode().Perm() != 0o600 {
@@ -212,79 +236,52 @@ func TestBootEndToEnd(t *testing.T) {
 	}
 }
 
-// boot is where a fresh install gets its password, and 16 characters is the
-// floor because this password guards a shell.
-func TestValidateWebPassword(t *testing.T) {
-	if err := validateWebPassword(""); err == nil {
-		t.Error("an empty password was accepted")
+// A first boot that defers the bot token writes `TELEGRAM_TOKEN=` — a key
+// that exists but holds nothing. A later `boot --force --tg-token …` must
+// FILL that line, not treat it as an existing credential worth keeping:
+// keeping it discards the typed token and then reports it as kept, leaving
+// the user with a config that refuses to start and a note saying otherwise.
+func TestMergeEnvFillsBlankValueInsteadOfKeepingIt(t *testing.T) {
+	existing := "MAIN_API_KEY=\n# Telegram bot token from @BotFather — fill in before `shell3 telegram`.\nTELEGRAM_TOKEN=\n"
+	out, kept := mergeEnv(existing, [][2]string{
+		{"MAIN_API_KEY", "sk-new"},
+		{envTelegramToken, "123:ABC"},
+	})
+	if !strings.Contains(out, "TELEGRAM_TOKEN=123:ABC") {
+		t.Errorf("a freshly typed token must fill the blank line; got:\n%s", out)
 	}
-	if err := validateWebPassword("short"); err == nil {
-		t.Error("a 5-character password was accepted")
+	if !strings.Contains(out, "MAIN_API_KEY=sk-new") {
+		t.Errorf("a freshly typed key must fill the blank line; got:\n%s", out)
 	}
-	if err := validateWebPassword(strings.Repeat("x", minPasswordLength)); err != nil {
-		t.Errorf("a %d-character password was refused: %v", minPasswordLength, err)
+	if strings.Count(out, "TELEGRAM_TOKEN=") != 1 {
+		t.Errorf("filling must happen in place, not append a duplicate key; got:\n%s", out)
 	}
-}
-
-// The generated option has to clear the bar it sets, and not repeat itself.
-func TestGenerateWebPassword(t *testing.T) {
-	first, err := generateWebPassword()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := validateWebPassword(first); err != nil {
-		t.Errorf("the generated password fails our own validator: %v", err)
-	}
-	second, err := generateWebPassword()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first == second {
-		t.Error("two generated passwords are identical")
+	if len(kept) != 0 {
+		t.Errorf("kept = %v, want empty — nothing was discarded", kept)
 	}
 }
 
-// Enrolment gives the authenticator app a secret, and the operator a URI to
-// scan. The URI has to name shell3 so the code is identifiable in the app.
-func TestNewTOTPEnrolment(t *testing.T) {
-	secret, uri, err := newTOTPEnrolment("agent")
-	if err != nil {
-		t.Fatal(err)
+// The inverse still holds: a key with a REAL value is never overwritten, and
+// the discard is reported so the user knows their new value was not applied.
+func TestMergeEnvStillKeepsNonEmptyExisting(t *testing.T) {
+	out, kept := mergeEnv("TELEGRAM_TOKEN=999:OLD\n", [][2]string{{envTelegramToken, "123:NEW"}})
+	if !strings.Contains(out, "TELEGRAM_TOKEN=999:OLD") || strings.Contains(out, "123:NEW") {
+		t.Errorf("an existing token must survive; got:\n%s", out)
 	}
-	if secret == "" {
-		t.Error("no secret generated")
-	}
-	if !strings.HasPrefix(uri, "otpauth://totp/") {
-		t.Errorf("uri = %q, want an otpauth:// URI", uri)
-	}
-	if !strings.Contains(uri, "shell3") {
-		t.Errorf("uri = %q, want shell3 as the issuer", uri)
+	if len(kept) != 1 || kept[0] != envTelegramToken {
+		t.Errorf("kept = %v, want [%s]", kept, envTelegramToken)
 	}
 }
 
-// The two secrets have to land in .env under the names shell3.yaml references,
-// or the config resolves to nothing and serve refuses to start.
-func TestWebEnvPairsCarryBothSecrets(t *testing.T) {
-	pairs := webEnvPairs("a-long-enough-password", "TOTPSECRET")
-
-	got := map[string]string{}
-	for _, p := range pairs {
-		got[p[0]] = p[1]
+// A blank token writes the fill-it-in-later comment; a supplied one must not
+// (a comment telling the user to fill in a line that is already filled).
+func TestMergeEnvTokenCommentOnlyWhenBlank(t *testing.T) {
+	blank, _ := mergeEnv("", [][2]string{{envTelegramToken, ""}})
+	if !strings.Contains(blank, "BotFather") {
+		t.Errorf("a deferred token should carry the fill-it-in hint; got:\n%s", blank)
 	}
-	if got[envWebPassword] != "a-long-enough-password" {
-		t.Errorf("%s = %q", envWebPassword, got[envWebPassword])
-	}
-	if got[envWebTOTP] != "TOTPSECRET" {
-		t.Errorf("%s = %q", envWebTOTP, got[envWebTOTP])
-	}
-}
-
-// No second factor means no key: an empty SHELL3_WEB_TOTP_SECRET= line in .env
-// would read as "configured" to anyone looking at the file.
-func TestWebEnvPairsOmitTOTPWhenNotEnrolled(t *testing.T) {
-	for _, p := range webEnvPairs("a-long-enough-password", "") {
-		if p[0] == envWebTOTP {
-			t.Errorf("%s written with no enrolment", envWebTOTP)
-		}
+	supplied, _ := mergeEnv("", [][2]string{{envTelegramToken, "123:ABC"}})
+	if strings.Contains(supplied, "BotFather") {
+		t.Errorf("a supplied token needs no fill-it-in hint; got:\n%s", supplied)
 	}
 }

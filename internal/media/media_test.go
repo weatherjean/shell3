@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/weatherjean/shell3/internal/mediadir"
 )
 
 func TestDirEnvOverride(t *testing.T) {
@@ -38,8 +40,8 @@ func TestDirDefaultUnderHome(t *testing.T) {
 func TestDirFollowsSetBaseDir(t *testing.T) {
 	t.Setenv("SHELL3_MEDIA_DIR", "")
 	cfg := t.TempDir()
-	SetBaseDir(cfg)
-	t.Cleanup(func() { SetBaseDir("") })
+	mediadir.SetBaseDir(cfg)
+	t.Cleanup(func() { mediadir.SetBaseDir("") })
 	got, err := Dir()
 	if err != nil {
 		t.Fatal(err)
@@ -52,8 +54,8 @@ func TestDirFollowsSetBaseDir(t *testing.T) {
 func TestDirEnvBeatsSetBaseDir(t *testing.T) {
 	want := t.TempDir()
 	t.Setenv("SHELL3_MEDIA_DIR", want)
-	SetBaseDir(t.TempDir())
-	t.Cleanup(func() { SetBaseDir("") })
+	mediadir.SetBaseDir(t.TempDir())
+	t.Cleanup(func() { mediadir.SetBaseDir("") })
 	got, err := Dir()
 	if err != nil {
 		t.Fatal(err)

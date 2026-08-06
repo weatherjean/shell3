@@ -28,9 +28,9 @@ var errAskAborted = errors.New("ask: aborted")
 func askResumeHint() string { return "↩ continue this conversation: shell3 ask --resume" }
 
 // newAskCommand builds `shell3 ask` — a local driver for the same config +
-// agent the web interface runs, printing full verbose output (reply, every tool
+// agent the bot runs, printing full verbose output (reply, every tool
 // call + args, untruncated tool results, reasoning, token usage). It exists to
-// drive and polish the agent without a browser; it is also handy
+// drive and polish the agent without a Telegram chat; it is also handy
 // for quick local queries and troubleshooting. With no message it opens an
 // interactive multi-turn chat in this terminal; --resume continues the latest
 // session so successive invocations form one conversation.
