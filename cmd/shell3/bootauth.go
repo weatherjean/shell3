@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"os"
 	"strings"
 
 	huh "charm.land/huh/v2"
@@ -69,13 +68,17 @@ func newTOTPEnrolment(account string) (secret, uri string, err error) {
 	return key.Secret(), key.URL(), nil
 }
 
-// webEnvPairs is what boot writes to .env for the interface. An absent second
-// factor writes no key at all: an empty SHELL3_WEB_TOTP_SECRET= line would read
-// as enrolled to anyone looking at the file.
+// webEnvPairs is what boot writes to .env for the interface. An empty value
+// writes no key at all: a blank SHELL3_WEB_TOTP_SECRET= line would read as
+// enrolled to anyone looking at the file, and a blank password means the
+// existing .env entry is being kept.
 func webEnvPairs(password, totpSecret string) [][2]string {
-	pairs := [][2]string{{envWebPassword, password}}
+	var pairs [][2]string
+	if password != "" {
+		pairs = append(pairs, [2]string{envWebPassword, password})
+	}
 	if totpSecret != "" {
-		pairs = append(pairs, [][2]string{{envWebTOTP, totpSecret}}...)
+		pairs = append(pairs, [2]string{envWebTOTP, totpSecret})
 	}
 	return pairs
 }
@@ -139,10 +142,50 @@ func askTOTPEnrolment(tty bool, account string, out io.Writer) (string, error) {
 		return "", err
 	}
 	printTOTPEnrolment(secret, uri, out)
-	if tty {
-		_, _ = fmt.Fscanln(os.Stdin) // any input (or EOF) means "continue"
+	verified, err := verifyTOTPEnrolment(secret)
+	if err != nil {
+		return "", err
+	}
+	if !verified {
+		fmt.Fprintln(out, "\nEnrolment cancelled — no second factor. `shell3 boot --totp` enrols any time.")
+		return "", nil
 	}
 	return secret, nil
+}
+
+// totpCodeValidator validates one enrolment-confirmation code against secret.
+// Blank is accepted — it is the "cancel enrolment" escape — and whitespace is
+// tolerated because codes get typed off a phone screen.
+func totpCodeValidator(secret string) func(string) error {
+	return func(code string) error {
+		code = strings.TrimSpace(code)
+		if code == "" {
+			return nil
+		}
+		if !totp.Validate(code, secret) {
+			return fmt.Errorf("that code does not match — wait for the app's next one and try again")
+		}
+		return nil
+	}
+}
+
+// verifyTOTPEnrolment asks for one code from the freshly scanned entry and
+// reports whether it verified. This is what catches a mis-scan, a stale
+// authenticator entry, or a skewed clock at enrolment time — before the
+// factor is armed — instead of at the login screen with no better error than
+// "that did not work". Blank input cancels (returns false, nil).
+func verifyTOTPEnrolment(secret string) (bool, error) {
+	code := ""
+	if err := huh.NewForm(huh.NewGroup(
+		huh.NewInput().
+			Title("Enter the 6-digit code your app shows now").
+			Description("Confirms the scan before the second factor is armed.\nLeave blank to cancel enrolment.").
+			Validate(totpCodeValidator(secret)).
+			Value(&code),
+	).Title("Verify")).WithTheme(cli.HuhTheme()).Run(); err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(code) != "", nil
 }
 
 // printTOTPEnrolment shows the QR code and manual secret for a fresh
@@ -151,15 +194,18 @@ func printTOTPEnrolment(secret, uri string, out io.Writer) {
 	fmt.Fprintln(out, "\nScan this with your authenticator app:")
 	qrterminal.GenerateHalfBlock(uri, qrterminal.L, out)
 	fmt.Fprintf(out, "\nOr enter the secret by hand: %s\n", secret)
-	fmt.Fprintln(out, "Then press enter — the code is asked for at every login.")
+	fmt.Fprintln(out, "Then type the code it shows to confirm — the code is asked for at every login.")
 }
 
 // printWebCredentials shows what was just written, because a generated password
 // exists nowhere else yet. Printed once, to a terminal the operator is already
-// looking at — never logged.
+// looking at — never logged. An empty value was kept from .env, announced when
+// the decision was made — nothing to show here.
 func printWebCredentials(password, totpSecret, envPath string) {
-	fmt.Printf("\nInterface password: %s\n", password)
-	fmt.Printf("  Save it now — it is stored only in %s\n", envPath)
+	if password != "" {
+		fmt.Printf("\nInterface password: %s\n", password)
+		fmt.Printf("  Save it now — it is stored only in %s\n", envPath)
+	}
 	if totpSecret != "" {
 		fmt.Println("  Second factor: on. Lost the phone? Delete " + envWebTOTP + " from .env and restart")
 	}

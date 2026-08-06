@@ -397,9 +397,13 @@ link goes dead once its file is swept.
 `shell3 boot` scaffolds the config tree (an interactive form: model, context
 budget, whether the model has vision — which wires `media.describe` + the media
 tool — the agent's workdir, and the interface password) and writes secrets to
-`~/.shell3/.env`; one TTY-only offer wires TOTP enrolment → `web.totp_secret`
-(`boot --totp` re-runs just that step later — enrol after declining, or reset
-with a fresh secret; removal stays manual: delete the key from `.env`).
+`~/.shell3/.env`; one TTY-only offer wires TOTP enrolment → `web.totp_secret`,
+armed only after one code from the scanned entry verifies (blank cancels;
+`boot --totp` re-runs just that step later — enrol after declining, or reset
+with a fresh secret, again written only post-verification; removal stays
+manual: delete the key from `.env`). A re-boot over an `.env` that already
+holds `SHELL3_WEB_PASSWORD`/`SHELL3_WEB_TOTP_SECRET` keeps them, says so
+before any ceremony, and never prints a password or QR it will not apply.
 It installs **nothing** and exposes **nothing**: the finale prints the local
 URL, the one-line tailnet start (`tailscale serve --bg 8765 && shell3
 serve`), on Linux a copy-paste systemd-unit + `tailscale serve` block, and

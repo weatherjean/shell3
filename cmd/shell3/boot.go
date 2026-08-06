@@ -89,15 +89,30 @@ func runBoot(f *bootFlags) error {
 
 	envKey := envKeyForName(a.name)
 
+	// What .env already holds decides what boot asks for — BEFORE any
+	// credential ceremony. Asking for a password it will not apply, or showing
+	// a QR for a secret it will then discard in favour of the existing one,
+	// is a lockout: the screen says one credential while .env keeps another.
+	envPath := filepath.Join(dir, ".env")
+	existing, err := os.ReadFile(envPath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("boot: read .env: %w", err)
+	}
+	haveEnv := envKeySet(string(existing))
+
 	// The interface's own credentials. Asked for here rather than defaulted,
 	// because `shell3 serve` refuses to start without a password: a fresh config
-	// has to arrive with one.
-	webPassword, err := askWebPassword(tty)
-	if err != nil {
+	// has to arrive with one. An existing entry is kept, said out loud, and not
+	// asked for again.
+	var webPassword, totpSecret string
+	if haveEnv[envWebPassword] {
+		fmt.Printf("Interface password: keeping the existing %s in %s\n", envWebPassword, envPath)
+	} else if webPassword, err = askWebPassword(tty); err != nil {
 		return err
 	}
-	totpSecret, err := askTOTPEnrolment(tty, a.name, os.Stdout)
-	if err != nil {
+	if haveEnv[envWebTOTP] {
+		fmt.Println("Second factor: keeping the existing enrolment (`shell3 boot --totp` re-enrols)")
+	} else if totpSecret, err = askTOTPEnrolment(tty, filepath.Base(dir), os.Stdout); err != nil {
 		return err
 	}
 
@@ -106,16 +121,11 @@ func runBoot(f *bootFlags) error {
 	if err := scaffold.RenderBaseConfig(dir, scaffold.Values{
 		Name: a.name, BaseURL: a.url, EnvKey: envKey, Model: a.model, Proxy: a.proxy,
 		ContextWindow: a.ctxWindow, CompactAt: a.compactAt, WorkDir: a.workDir,
-		Vision: a.vision, TOTP: totpSecret != "",
+		Vision: a.vision, TOTP: totpSecret != "" || haveEnv[envWebTOTP],
 	}, f.force); err != nil {
 		return err
 	}
 
-	envPath := filepath.Join(dir, ".env")
-	existing, err := os.ReadFile(envPath)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("boot: read .env: %w", err)
-	}
 	merged, kept := mergeEnv(string(existing), envPairs)
 	if err := atomicWriteFile(envPath, []byte(merged), 0o600); err != nil {
 		return fmt.Errorf("boot: write .env: %w", err)
@@ -384,16 +394,7 @@ var nonAlnum = regexp.MustCompile(`[^A-Z0-9]+`)
 // so a re-boot can tell the user their freshly typed secret was NOT applied
 // instead of silently keeping the stale one.
 func mergeEnv(existing string, kv [][2]string) (merged string, kept []string) {
-	have := map[string]bool{}
-	for _, line := range strings.Split(existing, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		if k, _, ok := strings.Cut(line, "="); ok {
-			have[strings.TrimSpace(strings.TrimPrefix(k, "export "))] = true
-		}
-	}
+	have := envKeySet(existing)
 	var b strings.Builder
 	b.WriteString(existing)
 	if existing != "" && !strings.HasSuffix(existing, "\n") {
@@ -412,6 +413,22 @@ func mergeEnv(existing string, kv [][2]string) (merged string, kept []string) {
 		b.WriteString(pair[0] + "=" + pair[1] + "\n")
 	}
 	return b.String(), kept
+}
+
+// envKeySet reports which keys an .env file already defines. Comment and
+// malformed lines are skipped; an `export KEY=…` line counts as KEY.
+func envKeySet(existing string) map[string]bool {
+	have := map[string]bool{}
+	for _, line := range strings.Split(existing, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if k, _, ok := strings.Cut(line, "="); ok {
+			have[strings.TrimSpace(strings.TrimPrefix(k, "export "))] = true
+		}
+	}
+	return have
 }
 
 func printBootSuccess(dir, cfgPath, envPath string, proxyWired bool) {

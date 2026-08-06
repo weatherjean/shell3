@@ -84,7 +84,9 @@ test holds it there.
 - **Length.** 16 characters minimum, enforced by `shell3 boot`, warned about by
   `serve`. Longer is better; `boot` offers to generate one.
 - **A second factor**, if you set `web.totp_secret`: the password alone then is
-  not a session. Codes are single-use inside their window.
+  not a session. Codes are single-use inside their window. Enrolment
+  (`shell3 boot` / `boot --totp`) arms the factor only after one code from
+  the scanned entry verifies, so a mis-scan cannot lock you out.
 - **Escalating delay** on failed attempts — not a lockout, which would let
   anyone who can reach the login route hold it closed against you.
 - **An audit trail.** Every attempt, successful or not, goes to the app log with

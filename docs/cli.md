@@ -184,11 +184,16 @@ until you add a vision model. Another asks where the agent's shell should run
 password** — required, 16 characters minimum, with a generated suggestion you
 can accept as-is; it is printed once at the end, so save it. A following step
 offers a **second factor**, printing a QR code to scan with an authenticator
-app; enrolling wires `web.totp_secret` so the login asks for the code.
-Declined it, or lost the phone? `shell3 boot --totp` enrols or resets any
-time (a fresh secret and QR against the existing config); and losing the
-phone is never a lockout, since the secret is a line in `.env` you can
-delete.
+app; enrolment is confirmed by typing one code from the scanned entry
+(blank cancels), and only then wires `web.totp_secret` so the login asks
+for the code. Declined it, or lost the phone? `shell3 boot --totp` enrols
+or resets any time (a fresh secret and QR against the existing config,
+written only after a code verifies); and losing the phone is never a
+lockout, since the secret is a line in `.env` you can delete.
+
+Re-running boot over a config whose `.env` already holds the interface
+password or TOTP secret keeps them and says so up front — it never asks
+for, prints, or shows a QR for a credential it is not going to apply.
 
 boot installs nothing and exposes nothing: it configures shell3 and stops
 there. Its closing note says as much, and points at

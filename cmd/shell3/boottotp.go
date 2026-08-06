@@ -44,9 +44,22 @@ func runTOTPEnrol() error {
 		return err
 	}
 
+	// The yaml edit is computed up front so a config this can't handle fails
+	// before the QR ceremony, but nothing is WRITTEN until a code from the
+	// scanned entry verifies: an unconfirmed secret on disk is a lockout.
 	yamlOut, err := activateTOTPLine(string(yamlText))
 	if err != nil {
 		return err
+	}
+
+	printTOTPEnrolment(secret, uri, os.Stdout)
+	verified, err := verifyTOTPEnrolment(secret)
+	if err != nil {
+		return err
+	}
+	if !verified {
+		fmt.Println("\nCancelled — nothing changed.")
+		return nil
 	}
 
 	envPath := filepath.Join(dir, ".env")
@@ -63,7 +76,6 @@ func runTOTPEnrol() error {
 		}
 	}
 
-	printTOTPEnrolment(secret, uri, os.Stdout)
 	fmt.Println("\nSecond factor is on: any previous authenticator entry is now stale.")
 	fmt.Println("Restart `shell3 serve` to apply. Lost phone? Delete " + envWebTOTP + " from .env and restart.")
 	return nil
