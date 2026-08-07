@@ -26,7 +26,9 @@ user account.** The hook is a policy gate, not a security boundary.
 ## The armed scaffold gate
 
 A fresh config ships with the gate armed, not as a commented-out example.
-What `hooks/tool-call.sh` refuses, and why:
+The shipped script needs `jq` on the PATH; without it, it refuses every tool
+call (naming the cure) rather than running unchecked — install jq and the
+gate judges normally. What `hooks/tool-call.sh` refuses, and why:
 
 - **Credentials** (`.env`, `~/.ssh`, `~/.aws`, `~/.config/gh`, …): blocked
   for read and write, by every tool. A `lib/bin` script reads the one key it

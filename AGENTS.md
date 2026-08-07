@@ -266,7 +266,9 @@ on the user. The turn's lifetime is its OWN, not the request's
 (`internal/webui/attach.go`): every protocol chunk lands in a per-turn
 `turnBroker` buffer and fans out to attached readers, the POST response being
 merely the first — a phone locking its screen (which kills the fetch within
-seconds) no longer kills the turn. `GET /api/chat/stream?thread=…` re-attaches:
+seconds) no longer kills the turn. The buffer holds the turn's whole stream
+in memory until the turn ends (then drops) — fine at single-operator scale,
+known and accepted rather than capped. `GET /api/chat/stream?thread=…` re-attaches:
 the whole turn replays, then follows live; 204 when nothing is running. The
 client resumes via the AI SDK's `resumeStream()` on conversation mount, on
 `visibilitychange`, and on `online` (the latter two only from the error
