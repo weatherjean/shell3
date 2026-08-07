@@ -23,7 +23,7 @@ Periodic check-in. Work through the checklist with your tools. Each run is a
 fresh conversation — if a check must not repeat, track its state in a file.
 
 Checklist:
-- Anything urgent in the inbox or on disk that needs my human?
+- Anything urgent on disk or in the running jobs that needs my human?
 
 If something needs attention, reply with a concise alert and nothing else.
 If nothing does, say briefly that all is quiet.

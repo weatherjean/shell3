@@ -35,6 +35,15 @@
 
 set -uo pipefail
 
+# The rules below read the payload with jq. Without jq every field parses to
+# empty, no rule matches, and the gate would silently allow EVERYTHING — a
+# gate that cannot read its input must refuse, not wave through. Builtins
+# only here, so this holds even on a minimal PATH.
+if ! command -v jq >/dev/null 2>&1; then
+  printf '{"block": true, "reason": "hooks/tool-call.sh needs jq to read the tool payload; without it the gate cannot judge anything and refuses everything. Install jq (or edit the hook) and try again."}'
+  exit 0
+fi
+
 # ------------------------------------------------------- what is off limits
 #
 # CONFIG_DIR is where shell3 keeps this config — the hook's own working

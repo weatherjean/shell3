@@ -12,7 +12,7 @@ import (
 // scanSkillDir reads the skills/ directory: every flat *.md that parses
 // becomes a Skill (filename order). An invalid file — empty, no frontmatter,
 // no description, empty body — is skipped with a warning so a stray .md never
-// takes the bot down (`shell3 health` hardens those warnings into failures).
+// takes the server down (`shell3 health` hardens those warnings into failures).
 // A missing dir yields no skills: presence of the dir is what enables the
 // feature. A later file reusing an already-taken name is skipped with a
 // warning: the ## Skills index must never carry two entries for one name.

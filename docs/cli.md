@@ -49,7 +49,12 @@ thread→session map persists in the runs store
 (`~/.shell3/.shell3_project/shell3.db`), so threads survive a restart
 (sessions the janitor swept start clean). One main-agent turn runs at a time —
 a message sent while a turn is running is refused with a note in the stream
-rather than queued. Background jobs (subagents, `bash_bg`, cron) run
+rather than queued. A running turn belongs to the server, not to the
+connection that started it: closing the tab or locking the phone does not
+kill it. The app re-attaches on its own — when the conversation opens, when
+the tab becomes visible again, or when the network comes back — and the
+server replays the turn so far, then follows it live. `POST /api/stop` is
+still the way to end a turn early. Background jobs (subagents, `bash_bg`, cron) run
 independently and come back through the [notifier](configuration.md#the-notifier--notifiermd):
 a post lands in the notification bell, a wake runs another turn (in the owning
 thread when it is still live, otherwise a fresh one).
@@ -62,8 +67,9 @@ just as well:
 | Endpoint | What |
 |----------|------|
 | `POST /api/chat` | Run one turn, streamed as SSE in the AI SDK "UI message stream" dialect. Body: `{id, messages}`; only the newest user message is read (shell3 keeps its own history). |
+| `GET /api/chat/stream?thread={id}` | Re-attach to the running turn: the whole turn replays, then follows live. `204` when nothing is running. |
 | `GET /api/events` | SSE push stream: notifications and approval requests. Parked asks are replayed on connect. |
-| `POST /api/login` | Exchange the password (+ TOTP code when enrolled) for a session cookie. The one API route that needs no session. |
+| `POST /api/login` | Exchange the password (+ TOTP code when enrolled) for a session cookie. The one API route that needs no session. A refused code is diagnosed in the app log — reused, wrong, or minted by a drifted clock — while the browser hears nothing. |
 | `POST /api/logout` | Revoke the current session server-side. |
 | `POST /api/asks/{id}` | Answer a gate approval: `{"allow": true}` or `{"allow": false}`. |
 | `GET /api/threads` | List conversations (`?archived=true` for the archive). |
@@ -94,10 +100,11 @@ just as well:
 
 ### The interface
 
-Six views, plus the approval modal and the notification bell. The sidebar pins
-**Chat** and puts the five operational views (Jobs, Cron, Runs, Status, Files)
-behind one collapsible **Tools** group, which opens itself when one of them is
-showing.
+Six views, plus the approval modal and the notification bell. The sidebar is
+the conversation index; the five operational views (Jobs, Cron, Runs, Status,
+Files) sit at its foot under **Elsewhere** — an icon rail when the sidebar is
+collapsed — with **Sign out** as the last entry, behind a confirmation
+(signing out revokes the session server-side).
 
 It is set as a printed document — the run log it actually is. Two stocks:
 paper, and a cyanotype for the dark theme. Six page types share four devices
@@ -242,7 +249,9 @@ shell3 health --config ~/work-agent
 
 Loads the config exactly like `serve` would and fails (exit 1) on anything the
 server only warns about — a skill `.md` skipped for broken frontmatter, a hook
-file naming no subagent, a missing `web.password` or one under 16 characters
+file naming no subagent, a missing `web.password` or one under 16 characters,
+or a `web.totp_secret` that cannot mint a code — that one is a guaranteed
+lockout, so it fails here instead of at the login screen
 (it prints the auth mode: password, or password + TOTP). It also dry-runs every hook script with a probe
 payload (a script error fails health; a strict gate that blocks the probe
 passes) and connects every MCP server. It also validates every

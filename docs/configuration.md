@@ -555,6 +555,15 @@ authenticator entries stale. Lose the phone and there is no lockout to
 recover from: the secret is a line in a file on your own machine, so delete
 it and restart.
 
+Refusals diagnose themselves instead of failing mute. Every enrolment is a
+new secret, so the authenticator label carries its minting time — a stale
+entry from an earlier enrolment is visibly stale, and the enrolment prompt
+says so after repeated misses. A code that matches at a wider clock offset is
+named as drift (at the enrolment prompt, and in the app log for logins —
+never widening what is accepted), and `shell3 health` fails outright on a
+secret that cannot mint a code, which would otherwise be a guaranteed
+lockout.
+
 **None of this replaces auth in front.** A login is a shell, so an
 identity-aware proxy (Cloudflare Access, Tailscale, Authelia) is still worth
 having when the interface is exposed — that is defence in depth, and it is what
@@ -865,7 +874,10 @@ When asked for a non-trivial change, first...
 
 Adding a skill = drop a file in `skills/` + a reload. An unusable file (no
 frontmatter/description, empty body, duplicate name) is skipped with a
-warning — `shell3 health` hardens those into errors. Granted skills are
+warning — `shell3 health` hardens those into errors. The scaffold ships a
+`find-skills` skill backed by `lib/bin/skill-search`: when the agent lacks a
+procedure, it searches a catalog of installable skills instead of improvising
+— the current answer to "teach it something new". Granted skills are
 indexed by absolute path in the system prompt under `## Skills`. Subagents
 carry no skills; put a subagent's standing instructions in its prompt body.
 

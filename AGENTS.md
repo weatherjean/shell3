@@ -79,13 +79,15 @@ a failed job left silent posts `⚠️ <label> failed: …` anyway; at most one
 wake per completion; triage turns timebox at 60s and degrade to a raw post
 on error/timeout; no `notifier.md` → every completion posts raw. Delivery
 lands through a front-end `CompletionHost`
-(`Runtime.SetCompletionHost`: `PostCompletion` (⏰ for cron origins, 🔔
-otherwise; threaded+anchored into the owning session's chat thread when one
-is live), `WakeOwner` (queue+wake a live owner; its liveness check pairs
-with the bot's retire lock so notes never land in a closing session),
-`StartFreshTurn` (no owner — cron, orphans: a fresh main-agent session runs
-over the note and replies as a new replyable thread, serialized FIFO on the
-single-turn gate)); with no host installed (library/tests, `shell3 ask`)
+(`Runtime.SetCompletionHost`, web half in `internal/webui/completion.go`:
+`PostCompletion` becomes a bell notification — kind `cron` for cron origins,
+`alert` for the ⚠️ failure floor, `note` otherwise — carrying the owning
+thread's id when one exists; `WakeOwner` queues+wakes a live owner, its
+liveness check paired under one lock with session retirement so a note lands
+or the session retires, never both; `StartFreshTurn` (no owner — cron,
+orphans) runs the note in a fresh main-agent session on the background
+worker, through the same single-turn gate as the browser's own turns); with
+no host installed (library/tests, `shell3 ask`)
 the raw notice goes straight to the owning session — ask deliberately stays
 in that mode so its verbose view sees everything. `direct: true` (bash_bg
 arg, task arg, cron frontmatter) skips triage: the owner wakes with the

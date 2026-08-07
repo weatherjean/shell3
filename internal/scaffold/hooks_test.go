@@ -240,3 +240,30 @@ func TestScaffoldedAssistantGateAppliesTheMainRules(t *testing.T) {
 		}
 	}
 }
+
+// A machine without jq must refuse everything, not allow everything: the
+// rules parse the payload with jq, and an unparsed payload matches no rule —
+// without the guard, the default case would wave every call through.
+func TestScaffoldedGateFailsClosedWithoutJq(t *testing.T) {
+	dir := scaffoldForHooks(t)
+	noJq := t.TempDir() // a PATH containing nothing at all
+
+	cmd := exec.Command("bash", filepath.Join(dir, "hooks", "tool-call.sh"))
+	cmd.Stdin = strings.NewReader(`{"name":"bash","command":"echo hi","args":"{}","headless":true}`)
+	cmd.Dir = dir
+	cmd.Env = []string{"PATH=" + noJq, "HOME=" + dir}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("gate exited non-zero without jq: %v\n%s", err, out)
+	}
+	var got struct {
+		Block  bool   `json:"block"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(out))), &got); err != nil {
+		t.Fatalf("gate printed non-JSON without jq: %s", out)
+	}
+	if !got.Block || !strings.Contains(got.Reason, "jq") {
+		t.Fatalf("without jq the gate must block and name jq, got: %s", out)
+	}
+}

@@ -15,8 +15,8 @@ import (
 )
 
 // newHealthCommand builds `shell3 health` — a strict, read-only config check.
-// It loads the config directory exactly like the bot would and reports every problem the
-// running bot tolerates leniently: warnings such as a skipped skill file
+// It loads the config directory exactly like the server would and reports every problem the
+// running server tolerates leniently: warnings such as a skipped skill file
 // (bad/missing frontmatter) fail the check here, so `shell3 health` is the
 // place to look when something silently didn't take effect.
 func newHealthCommand() *cobra.Command {
@@ -106,8 +106,8 @@ func runHealth(cmd *cobra.Command, path string) error {
 	if brokenHooks > 0 {
 		return fmt.Errorf("health: %d broken hook script(s)", brokenHooks)
 	}
-	// Connect every declared MCP server, exactly like the bot would at
-	// startup. The running bot tolerates a down server (warning, tools
+	// Connect every declared MCP server, exactly like the server would at
+	// startup. The running server tolerates a down server (warning, tools
 	// absent); health is the strict view, so any down server fails here.
 	if servers := lc.MCPServers(); len(servers) > 0 {
 		m := mcp.New(servers, nil)

@@ -11,7 +11,7 @@ to project managers and subagents. It runs `bash`, edits files, and schedules
 work; the binary serves the browser interface you do all of it from.
 
 ```sh
-shell3 boot        # interactive form: model + endpoint + key, vision, workdir
+shell3 boot        # interactive form: model + endpoint + key, password, workdir
 shell3 serve       # http://127.0.0.1:8765 — open it and start talking
 ```
 
@@ -68,14 +68,16 @@ few lines each takes (a service is one paste,
 | `shell3 health`   | Load the config strictly; fail on any warning. |
 | `shell3 ask "…"`  | Ask the agent locally with full verbose output; no message = interactive loop; `-p` for scripting; `--resume` continues the last session. |
 
-Every subcommand takes `--config/-c` to point at a different config directory.
+`serve`, `ask`, `health`, and `project new` take `--config/-c` to point at a
+different config directory; `boot` always writes `~/.shell3`.
 
 ## Features
 
 - **A browser interface, served by the binary.** Chat with voice, live
   background jobs, cron, full session replays, status, and a read-only file
   explorer. Gated commands raise an Allow/Deny modal; web push reaches you
-  with the tab closed.
+  with the tab closed. A running turn survives the connection: lock the
+  phone, come back, and the stream re-attaches and replays.
 - **Bash-first, gated by a script you own.** The agent acts through `bash`
   and `edit_file`; a per-agent hook script allows, rewrites, asks, or blocks
   every tool call. Fail-closed, armed out of the box.
