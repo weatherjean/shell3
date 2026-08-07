@@ -5,6 +5,7 @@ package main
 import (
 	"io"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -30,18 +31,31 @@ func captureBootSuccess(t *testing.T) string {
 }
 
 // TestBootSuccessMessage verifies the rendered success message carries the
-// load-bearing pointers for running the bot.
+// load-bearing pointers for reaching the interface.
 func TestBootSuccessMessage(t *testing.T) {
 	base := captureBootSuccess(t)
 	for _, want := range []string{
 		"/home/u/.shell3/shell3.yaml", // config paths
 		"shell3 ask",                  // the local ask mode must be advertised
-		"shell3 telegram",             // how to run the front-end
-		"TELEGRAM_TOKEN",              // where the token lives
-		"docs/deploying.md",           // service management is user-owned, and documented there
+		"shell3 serve",                // how to run the interface
+		"http://127.0.0.1:8765",       // where to reach it
+		"docs/deploying.md",           // service + exposure are user-owned, and documented there
 	} {
 		if !strings.Contains(base, want) {
 			t.Errorf("boot success message missing %q", want)
+		}
+	}
+	// On Linux the finale carries the one-paste service+tailnet block, with
+	// the systemd %h specifier intact (not eaten by the Printf helper).
+	if runtime.GOOS == "linux" {
+		for _, want := range []string{
+			"systemctl --user enable --now shell3",
+			"tailscale serve --bg 8765",
+			"ExecStart=%h/.local/bin/shell3 serve",
+		} {
+			if !strings.Contains(base, want) {
+				t.Errorf("boot success message missing %q", want)
+			}
 		}
 	}
 }

@@ -3,7 +3,6 @@ package shell3
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/chat"
@@ -29,7 +28,7 @@ type reloadState struct {
 	parts         *agentsetup.Parts // nil in unit tests
 	store         *runs.Store       // new generation's runs store
 	cron          []CronJob         // new cron jobs (armed by the host)
-	telegram      TelegramConfig    // new telegram mirror
+	web           WebConfig         // new web mirror
 	maxConcurrent int               // background.max_concurrent (0 = default)
 	agents        int               // agent count for the result
 	models        int               // model count for the result
@@ -83,7 +82,7 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 		parts:         newParts,
 		store:         newParts.Store(),
 		cron:          newParts.Cron(),
-		telegram:      newParts.Telegram(),
+		web:           newParts.Web(),
 		maxConcurrent: newParts.BackgroundMaxConcurrent(),
 		agents:        len(newParts.AgentNames()),
 		models:        newParts.ModelCount(),
@@ -154,7 +153,7 @@ func (rt *Runtime) applyReload(st reloadState) (ReloadResult, error) {
 	rt.cleanup = st.cleanup
 	rt.store = st.store
 	rt.cron = st.cron
-	rt.telegram = st.telegram
+	rt.web = st.web
 	rt.parts = st.parts
 	// A running job (or lingering subagent child, or in-flight notifier triage
 	// turn — which runs on a session built from the OLD sessionConfig) still
@@ -188,7 +187,7 @@ func (rt *Runtime) applyReload(st reloadState) (ReloadResult, error) {
 			notes = append(notes, fmt.Sprintf("session %q: re-derive failed: %v", s.name, err))
 			continue
 		}
-		// Swap under s.mu: Snapshot() (/status) reads s.cfg under
+		// Swap under s.mu: Snapshot() (the Status view) reads s.cfg under
 		// s.mu from other goroutines, so an unlocked assignment is a torn-read
 		// race. applyHostReminders only reads s.cfg + calls the chat layer (its
 		// own locking) — safe to run inside the critical section.
@@ -224,18 +223,4 @@ func (rt *Runtime) applyReload(st reloadState) (ReloadResult, error) {
 		Jobs:   len(st.cron),
 		Notes:  notes,
 	}, nil
-}
-
-// ReloadReplyText renders a reload coordinator's result as the chat reply —
-// the wording lives here, next to ReloadResult, so every front-end says the
-// same thing.
-func ReloadReplyText(res ReloadResult, err error) string {
-	if err != nil {
-		return "❌ reload failed: " + err.Error()
-	}
-	msg := fmt.Sprintf("✅ reloaded — %d agents, %d models, %d jobs", res.Agents, res.Models, res.Jobs)
-	if len(res.Notes) > 0 {
-		msg += "\n• " + strings.Join(res.Notes, "\n• ")
-	}
-	return msg
 }

@@ -15,7 +15,7 @@ rules:
 
 ```
 ~/.shell3/
-  shell3.yaml            # wiring: models, telegram, mcp, media, background, runs_keep_days
+  shell3.yaml            # wiring: models, web, mcp, media, background, runs_keep_days
   .env                   # secrets — never commit this file
   agent.md               # THE agent: frontmatter (model, tools, context) + prompt body
   notifier.md            # the completion-triage persona (optional; see Notifier)
@@ -78,11 +78,19 @@ The agent (and any subagent) can skip the prune tier individually with
 omitted/`true` inherits).
 
 Compaction is host-managed and there are no model-driven prune/compact tools.
-Each chat thread is its own session, so long histories only build up in a
-thread you keep replying into; a session that does grow crosses `compact_at`
-and compacts on its own. It happens silently — `/status` shows the current
-context usage, and `shell3 ask`'s verbose output narrates each compaction as
-it runs.
+Each browser thread is its own session, so long histories only build up in a
+thread you keep returning to; a session that does grow crosses `compact_at` and
+compacts on its own. A compaction posts a notification to the bell ("context
+compacted") — it discards part of the conversation, so the later "why did you
+forget that" has a visible answer.
+
+You can also compact on demand: send **`/compact`** in the chat (type `/` for
+the menu). It runs the same summarise-the-head, keep-the-recent-turns
+compaction and replies with what it freed — "Compacted: about 42.1k tokens →
+6.3k tokens". Asked for deliberately, it keeps a smaller verbatim tail than the
+automatic path, which is sized as a fraction of `compact_at`; otherwise it
+would answer "nothing to compact yet" every time you were below the threshold,
+which is exactly when you would ask.
 
 ### Provider-specific knobs — `extra`
 
@@ -179,7 +187,7 @@ read its own past out of the [runs store](#the-runs-store--shell3db) instead
 of only the current thread:
 
 - `{"query": "certificate renewal"}` — ranked full-text search over what you
-  and the agent said, across **every** stored session, chat threads and
+  and the agent said, across **every** stored session, browser threads and
   cron runs alike. FTS5 syntax: bare words AND together, `"quoted phrases"`
   match exactly, `OR`/`NOT`/`prefix*` work; a malformed query is retried as
   one quoted phrase rather than erroring. Tool output is not indexed — search
@@ -289,8 +297,8 @@ it also appends an index line to `projects.md`. That file is the agent's
 standing project index — its body is injected into the main agent's system
 prompt (after the skills index, before any `## Context` section) so, in every
 new thread, the agent knows which projects exist
-and which manager owns each. Register a new manager for dispatch with `/reload`
-or a restart; `shell3 health` validates and lists every
+and which manager owns each. Register a new manager for dispatch with a reload
+(`POST /api/reload`) or a restart; `shell3 health` validates and lists every
 project.
 
 ## Scripts & secrets
@@ -344,8 +352,8 @@ own timeout; their tools join the opted-in agents' tool lists as
 `mcp_<server>_<tool>` (`mcp_github_search_issues`). A server that is down
 loads as a **warning** — shell3 still starts, that server's tools are just
 absent until the next reload — while `shell3 health` treats it as a failure
-and reports each server's state. `/status` lists every server (up/down,
-tool count, last error). At call time a dead server gets one
+and reports each server's state. The interface's Status view lists every
+server (up/down, tool count, last error). At call time a dead server gets one
 automatic reconnect; if that fails too the model sees the error as tool
 output and adapts — a broken server never kills a turn.
 
@@ -369,9 +377,9 @@ exactly one script per kind, or none:
 The split keeps each script trivial: a read-only subagent's gate can be a
 short allowlist instead of one shared script branching on agent identity.
 A hook file whose `<name>` matches no subagent is a warning
-(`shell3 health` fails on it — it's usually a typo). `/status` states which
-of the two it is, in as many words: **command gate armed**, or **command
-gate off** when the main agent has no `hooks/tool-call.sh`.
+(`shell3 health` fails on it — it's usually a typo). The interface's Status
+view states which of the two it is, in as many words: **command gate armed**,
+or **command gate off** when the main agent has no `hooks/tool-call.sh`.
 
 Every tool call — `bash`, `bash_bg`, `edit_file`, `read_media`, host tools
 like `image_generate`, and `mcp_*` — runs the governing script as
@@ -394,7 +402,7 @@ The script prints a verdict to stdout:
 |--------|--------|
 | empty or `{}` | Run. |
 | `{"block": true, "reason": "…"}` | Block; `reason` goes to the model. Any tool. |
-| `{"ask": "prompt", "reason": "…", "ask_timeout": N}` | Ask a human (Allow/Deny buttons in the chat); declined/headless/timeout → block. Any tool. `ask_timeout` bounds the wait (default 300 s). |
+| `{"ask": "prompt", "reason": "…", "ask_timeout": N}` | Ask a human (an Allow/Deny modal in the browser); declined/headless/timeout → block. Any tool. The modal gives up after 2 min (instantly with no browser attached); `ask_timeout` tightens the outer bound (default 300 s). |
 | `{"command": "…"}` | Rewrite the bash command. Bash tools only — fails closed elsewhere. |
 | `{"argv": ["…"]}` | Exec exactly this argv (runner swap). `bash`/`bash_bg` only. |
 
@@ -485,35 +493,101 @@ are out of scope: the hook sees only the "started job…" pointer, not the
 process's streamed output — redact at the source if a background command can
 emit secrets.
 
-## Telegram — `telegram:`
+## Web host — `web:`
 
-The bot's credentials, the one chat it answers, and where the agent's shell
-runs.
+Where `shell3 serve` listens, and where the agent's shell runs.
 
 ```yaml
-telegram:
-  token: env:TELEGRAM_TOKEN         # TELEGRAM_TOKEN in .env, from @BotFather
-  chat_id: "123456789"             # the single chat the bot answers
+web:
   workdir: /home/me/.shell3/workdir # optional; default = the config dir
+  addr: 127.0.0.1:8765              # listen address (default 127.0.0.1:8765)
+  password: env:SHELL3_WEB_PASSWORD # REQUIRED — serve refuses to start without it
+  # totp_secret: env:SHELL3_WEB_TOTP_SECRET   # optional second factor
+  # url: https://…                            # the public address you serve it on
 ```
 
-`shell3 telegram` refuses to start without `token` and `chat_id`, and a
-non-numeric `chat_id` fails at startup. Loading a config without the block
-still succeeds — `shell3 ask` and `shell3 health` don't need it.
+### Authentication — `web.password`
 
-There is no listener, no login, no tunnel: shell3 long-polls Telegram
-outbound, and access control is the token plus the one `chat_id` it answers.
-Whoever controls that chat — or the token — controls a shell on this
-machine. The threat model is in
-[security.md](security.md#the-telegram-boundary).
+**Required.** `shell3 serve` refuses to start without it and `shell3 health`
+fails on it, because reaching this interface means reaching a shell: the agent's
+first verb is `bash`, unsandboxed unless you arm a
+[hook](#command-gating--hookstool-callsh). Loading a config without one still
+succeeds — `shell3 ask` serves nothing and stays usable — so the check is at
+serve time, not load time.
 
-### What `/reload` does and doesn't pick up
+Like every other secret it lives in `.env` and is referenced as `env:KEY`:
 
-`/reload` (and the agent's own `reload` tool) re-reads the config directory
-and applies it live: prompts, models, subagents, projects, skills, cron jobs,
-MCP servers, and the `media:` blocks. It does **not** re-apply the
-front-end's own wiring — a changed `telegram.chat_id` or `telegram.workdir`
-takes effect at the next `shell3 telegram` start.
+```
+SHELL3_WEB_PASSWORD=at-least-sixteen-characters
+```
+
+Sixteen characters is the floor `shell3 boot` enforces, and `serve` warns below
+it. `boot` offers a generated password; it is printed once, so save it.
+
+Logging in exchanges the password for a session cookie (`HttpOnly`,
+`SameSite=Lax`, `Secure` over https). Sessions are stored server-side as hashes
+in `<config>/.shell3_project/web_sessions.json` (mode `0600`) and last 7 days,
+renewed as you use them — restarting `serve` does not log you out. **Changing
+the password logs out every browser**, which is what makes it a real response to
+a suspected breach. Deleting that file does the same.
+
+Failed logins get an escalating delay rather than a lockout: a lockout would let
+anyone who can reach the login route hold it closed against you. Every attempt
+is written to the app log with its IP and user-agent, and **every successful
+login raises a notification** in the bell and over web push — that notice is
+how you would find out someone else got in.
+
+### Second factor — `web.totp_secret`
+
+Optional, and on simply by being set. With it, the password alone is not a
+session: login also asks for the six-digit code from an authenticator app, and a
+code cannot be used twice inside its window.
+
+`shell3 boot` offers enrolment and prints a QR code to scan, writing:
+
+```
+SHELL3_WEB_TOTP_SECRET=…
+```
+
+Said no at boot, or need a fresh secret? `shell3 boot --totp` re-runs just
+this step against the existing config — new secret, new QR, old
+authenticator entries stale. Lose the phone and there is no lockout to
+recover from: the secret is a line in a file on your own machine, so delete
+it and restart.
+
+**None of this replaces auth in front.** A login is a shell, so an
+identity-aware proxy (Cloudflare Access, Tailscale, Authelia) is still worth
+having when the interface is exposed — that is defence in depth, and it is what
+gives you SSO and hardware 2FA. A non-loopback `addr` over plain http starts
+anyway, with a warning: the password and cookie cross the network in clear.
+
+### Public address — `web.url`
+
+`url` is informational: the address the interface is actually reachable at,
+once you serve it on one. `shell3 serve` prints it at start and nothing else
+depends on it — shell3 does not open, proxy, or verify that address. Getting
+the interface onto it is yours ([deploying.md](deploying.md)); leave `url` out
+to stay local.
+
+### Push notifications
+
+Nothing to configure: on first start `shell3 serve` generates a VAPID keypair
+into `<config>/.shell3_project/web_push_keys.json` (mode `0600`) — the identity
+this install presents to push services — and stores per-browser subscriptions
+beside it in `web_push_subs.json`. If the keypair can't be written, push is
+simply off; notifications still reach an open tab.
+
+Turning it on is per browser, from the notification bell: a toggle requests
+permission, subscribes, and registers with the server, and a **Test** button
+confirms the path. Every bell notification is then pushed too. Subscriptions a
+push service reports as gone (`404`/`410`) are dropped automatically, so an
+uninstalled or expired registration doesn't fail forever; the browser side
+unsubscribes through `DELETE /api/push/subscribe`.
+
+Push requires a **secure context**, so it works on `localhost` and over https
+but not over plain http to another host — one more reason to expose the
+interface over https ([deploying.md](deploying.md)) rather than binding a bare
+non-loopback `addr`.
 
 ## Voice & images — `media:`
 
@@ -527,32 +601,34 @@ for that variable's precedence).
 
 ```yaml
 media:
-  stt: { model: groq-whisper, echo: true }        # voice notes → text
-  tts: { model: groq-tts, voice: Fritz-PlayAI, mode: inbound }
+  stt: { model: groq-whisper }                    # dictation → text
+  tts: { model: groq-tts, voice: Fritz-PlayAI }
   describe: { model: some-vision-model }          # for text-only main models
   imagegen: { model: some-image-model, size: 1024x1024 }
 ```
 
-- **`stt: { model, language?, echo? }`** transcribes an inbound voice note
-  before the turn and injects the transcript as the message. The recording is
-  stored in the media dir (as `tg-*`) and its path goes into the prompt too.
-  `echo: true` also posts the transcript back to the chat. A failure injects
-  a could-not-transcribe marker and posts a ⚠️ notice; the turn still runs.
-- **`tts: { model, voice?, format?, mode? }`** speaks the reply instead of
-  posting it as text. `mode` is the default: `off`, `inbound` (speak only
-  when the message came in as a voice note), or `always`; `/voice` overrides
-  it at runtime and the override persists in `~/.shell3/voice_mode.json`.
-  `voice` and `format` are passed to the model; an `opus`/`ogg` result is
-  sent as a Telegram voice bubble, anything else as an audio file.
-  Synthesized audio is cached in the media dir (as `tts-*`). Any failure
-  falls back to text, so a reply is never lost.
-- **`describe: { model, prompt? }`** captions an inbound photo before the
-  turn, injecting `[image: <description>]`. Point it at a vision model when
-  the main model is text-only, or at the main model itself (`shell3 boot`
-  wires this when you say your model has vision). Every file you send is
-  stored in the media dir and its path goes into the prompt, so the agent
-  can re-open it later with `read_media` either way.
-- **`imagegen: { model, size?, api? }`** adds an `image_generate{prompt,
+- **`stt: { model, language? }`** — backs `POST /api/stt`, the composer's
+  dictation button: the recording is stored in the media dir (as `web-*`) and
+  transcribed into the composer, which you edit before sending.
+  Transcription failures surface as an error on that request, not a turn.
+  (`echo:` is still accepted but inert — the transcript lands in the
+  composer, where you can already see it.)
+- **`tts: { model, voice?, format? }`** — backs `POST /api/tts`, the read-aloud
+  button on a reply. `voice` and `format` are passed to the model; synthesized
+  audio is cached in the media dir (as `tts-*`) and served back, so
+  replaying a reply costs nothing. Without `tts` the browser's own speech
+  synthesis is used instead. (`mode:` is still accepted but inert — the
+  browser reads a reply aloud when you ask it to; a value other than
+  `off`/`inbound`/`always` still fails the load.)
+- **`describe: { model, prompt? }`** — captions an attached image before the
+  turn, injecting `[image: <description>]`. Point it at a vision model when the
+  main model is text-only — or at the main model itself (`shell3 boot` wires
+  this when you answer that your model has vision). Every upload is stored
+  in the media dir (as `up-*`) and its path goes into the prompt, so the
+  agent can re-open it later with `read_media` either way. Without
+  `describe`, an attached image is passed to the model as a multimodal part
+  instead of a caption.
+- **`imagegen: { model, size?, api? }`** — adds an `image_generate{prompt,
   size?}` tool to **every** agent (main and subagents). `api: openai`
   (default) uses `images/generations`; `openrouter` POSTs a chat-completions
   request with `modalities=["image","text"]` — OpenRouter's image-output
@@ -560,16 +636,41 @@ media:
   endpoint pre-authorizes worst-case cost, ~$2, and 402s low balances; the
   chat route charges actual usage, ~$0.03/image; `size` is ignored on this
   shape). Generated files land in the media dir and the tool returns the
-  path; the main agent delivers it with `send_media_telegram` (kind
-  `photo`), while a subagent reports the path for the parent to send. Gate
-  it like any tool (`name == "image_generate"` in the hook payload).
+  path; the main agent shows one by writing a markdown image at its
+  `/api/media/<file>` URL, while a subagent reports the path for the parent to
+  deliver. Gate it like any tool (`name == "image_generate"` in the hook
+  payload).
 
-**Media storage.** Everything you send the bot (`tg-*`), generated images
-(`img-*`), and synthesized speech (`tts-*`) live in the media dir — stable
-paths, re-readable with `read_media` and re-sendable with
-`send_media_telegram` long after the message has scrolled away. The folder
-grows until you prune it or set
-[`media_keep_days`](#the-media-janitor--media_keep_days).
+**`send_file`** (webui only; registered for the main agent and every
+non-headless session — never a subagent or cron job, which have no chat to
+deliver into) hands the user any local file: `{path, name?}` copies the file
+into the media dir under a unique `sent-*` name and returns a ready-made
+link — `![<name>](/api/media/<file>)` for images (`name` becomes the alt
+text, defaulting to the file's base name), `[<name>](/api/media/<file>)`
+otherwise. It resolves a relative `path` against the agent's workdir and
+resolves symlinks before touching the file, refusing: `.env`/dotenv siblings
+(checked on both the requested name and the symlink-resolved target — a
+symlink can't launder a credentials file under a clean-looking name);
+anything inside the config directory, since it's already visible in the
+Files view — except the media dir itself, its own staging area, and even
+that exemption is withdrawn if `$SHELL3_MEDIA_DIR` is pointed at or above
+the config dir; anything hardlinked to a file anywhere in the config tree,
+by inode rather than by name, which is what stops a hardlink under an
+innocent-looking name; non-regular files (directories, FIFOs, devices); and
+files over 50 MB, bounded at copy time rather than trusted from a pre-copy
+stat. The file is opened `O_NOFOLLOW|O_NONBLOCK` and every check from there
+runs against the opened descriptor, not the path. All refusals come back as
+`error: …` tool-result text. No configuration needed; it's always available
+where a chat exists to receive the link.
+
+**Media storage.** Dictated recordings (`web-*`), uploads (`up-*`), generated
+images (`img-*`), sent files (`sent-*`), and synthesized speech (`tts-*`) live
+in the media dir — stable paths that survive reboots, re-readable with
+`read_media`, and servable to the browser at `/api/media/<file>`. The folder
+grows until you prune it — the interface's **Files** view
+has it as a second root beside the config tree (`GET /api/media`), newest
+first, with inline image and audio previews, so a generated image stays
+reachable long after its chat message has scrolled away.
 
 **`read_media` modalities** (needs `media` in the agent's `tools`): images
 (`.jpg/.jpeg/.png/.gif/.webp`, vision models), audio
@@ -589,7 +690,7 @@ on `schedule` (cron expression or `@daily`/`@hourly`/…), with the body as its
 prompt. `agent` names either a subagent from `agents/` or a project's
 `manager.md` — a project's cron job runs its manager in that project's
 workdir, so a scheduled job can dispatch straight into a project's standing
-context. The scheduler runs inside `shell3 telegram`, dispatching each job
+context. The scheduler runs inside `shell3 serve`, dispatching each job
 from a hidden, pinned `cron` parent session.
 
 ```markdown
@@ -604,22 +705,25 @@ Summarize anything noteworthy from the last day.
 
 A cron run's result goes to the **notifier** (see
 [The notifier](#the-notifier--notifiermd)), which decides per run whether to
-post it — a ⏰ message titled with the job name — or stay silent. A periodic checklist therefore only speaks up when something needs
+post it — a notification titled with the job name, in the bell — or stay
+silent. A periodic checklist therefore only speaks up when something needs
 attention: write its prompt to report findings plainly, and the notifier
 silences the all-quiet runs (no sentinel needed). A failed run always
 surfaces as an alert, whatever the notifier does.
 
 `direct: true` skips the notifier: the result is handed straight to the main
 agent as a **fresh main-agent turn** in a new thread, and what the agent says
-comes back as a replyable message — for jobs whose results should be
+comes back as a notification linked to it — for jobs whose results should be
 acted on, not just reported. `workdir` sets the job's working directory; the
 default is the dispatched agent's own — a project manager runs in its
 project's `workdir`, everything else in the config dir — and setting it
 overrides even a manager's. A reload arms changed files.
 
-`/cron` lists every job with its schedule, agent, workdir, `direct` flag,
-full prompt, and last run; `/run <name>` fires one by hand — the result
-travels the usual notifier route, exactly as a scheduled firing would.
+The interface's **Cron** view lists every job with its schedule, agent,
+workdir, `direct` flag and full prompt, shows when it last ran and links to
+the job that run started, and has a **Run now** button
+(`POST /api/cron/{name}/run`) that fires one by hand — the result travels the
+usual notifier route, exactly as a scheduled firing would.
 
 The scaffold ships a checklist example as `cron/checklist.md.example` —
 rename it to `checklist.md` (drop the `.example`) and reload to activate it.
@@ -642,12 +746,16 @@ title, exit status, output tail, the spawner's `note:` — for cron runs, the
 job's own prompt, so the judge knows what the job is *for* — and the on-disk
 output path) with a fixed toolset: `read` and `list_files` to inspect
 further, plus two verdict tools — `send {text}` posts a notification to you
-(⏰ and titled with the job's name for cron origins, 🔔 otherwise, threaded
-into the owning chat thread when one is live), and `wake {note}` hands the
+(titled with the cron job's name for cron origins, `agent` otherwise, and
+linked to the owning thread when one is live), and `wake {note}` hands the
 result to the main agent (resuming the owning session, or running it in a
-fresh thread when there is none, whose reply arrives as another replyable
-message). Ending the turn without calling either means **silent**: the
+fresh thread when there is none, whose reply arrives as another
+notification). Ending the turn without calling either means **silent**: the
 result stays in the run's stored transcript, and nothing else happens.
+
+Posted notifications persist: the server keeps the 50 most recent and replays
+them to a browser when it connects, so completions that landed while the tab
+was closed are still in the bell when you come back.
 
 The hard rules live in the host, not the prompt: a failed job the notifier
 leaves silent posts a `<label> failed: <error>` alert anyway; one completion can
@@ -662,7 +770,7 @@ editing `notifier.md`, which the main agent can do itself when you tell it
 
 ## The runs store — `shell3.db`
 
-Every session — chat threads, subagents, cron runs, `shell3 ask` — is
+Every session — browser threads, subagents, cron runs, `shell3 ask` — is
 stored in one SQLite database beside `shell3.yaml`:
 `.shell3_project/shell3.db`. It holds the sessions and their messages, each
 front-end's thread→session index, and an FTS5 full-text index over user and
@@ -700,21 +808,21 @@ turning "keep basically forever" into "delete almost everything" on the next
 sweep. 36500 is nowhere near that wraparound and is already an absurd
 retention window.
 
-At `shell3 telegram` startup — before the bot starts polling, never on
+At `shell3 serve` startup — before the server listens, never on
 `shell3 ask` — a sweep deletes sessions whose last activity is older than the
 cutoff, taking their messages, FTS entries, thread-index rows and job-log
 directories with them. It also removes empty crash leftovers, thread entries
 pointing at sessions that are gone by any other means, and orphaned
 `runs/<id>/` directories left by older builds. It prints one line, `janitor:
 removed N runs, M thread entries` (silent when both are zero). Fail-open: a
-sweep error is reported as a `warning: janitor: …` line and the bot still
+sweep error is reported as a `warning: janitor: …` line and the server still
 starts — stale rows are cosmetic hygiene, never a reason to refuse startup.
 Start-time only — no daemon, no timers.
 
 ## The media janitor — `media_keep_days`
 
-The media dir (`~/.shell3/media/` by default) accumulates everything you
-send the bot, generated images, and cached TTS audio, and nothing
+The media dir (`~/.shell3/media/` by default) accumulates browser uploads,
+generated images, cached TTS audio, and `send_file` stagings, and nothing
 removes them on its own. An optional top-level `shell3.yaml` key bounds it:
 
 ```yaml
@@ -722,12 +830,12 @@ media_keep_days: 0   # default 0 = keep forever
 ```
 
 Unlike `runs_keep_days`, the default is keep-forever: delivered files and
-uploads are user data, so deletion is opt-in. When set, `shell3 telegram`
+uploads are user data, so deletion is opt-in. When set, `shell3 serve`
 deletes files in the media dir whose mtime is older than N days at startup,
-before the bot starts polling. It prints `janitor: removed N media files`
+before the server listens. It prints `janitor: removed N media files`
 (silent when zero) and is fail-open like the runs janitor. Note that once a
-file is swept, a `read_media` or `send_media_telegram` of its stored path in
-an old transcript fails. Start-time only — no daemon, no timers.
+file is swept, any `/api/media/<file>` link to it in an old transcript goes
+dead. Start-time only — no daemon, no timers.
 
 The media dir this sweep points at is resolved by `internal/mediadir`:
 normally it's derived from `--config`/the active config dir, but the

@@ -1,9 +1,9 @@
 # Deploying
 
-`shell3 telegram` connects outbound to Telegram and listens on nothing, so
-there is no port to expose and no URL to protect — deploying is only
-**keeping the process running**. Ask an agent to walk you through any of
-this; it's a few lines.
+`shell3 serve` binds `web.addr` (default `127.0.0.1:8765`) and refuses to
+start without `web.password`. Everything past that — keeping it running,
+and reaching it from elsewhere — is yours. Ask an agent to walk you
+through any of these; each is a few lines.
 
 ## Keep it running
 
@@ -13,7 +13,7 @@ systemd (Linux):
     [Unit]
     Description=shell3
     [Service]
-    ExecStart=%h/.local/bin/shell3 telegram
+    ExecStart=%h/.local/bin/shell3 serve
     Restart=on-failure
     [Install]
     WantedBy=default.target
@@ -23,18 +23,34 @@ systemd (Linux):
 
 `ExecStart` is where `install.sh` puts the binary (`~/.local/bin`, or
 `$PREFIX`); add `--config <dir>` to pin a config directory other than
-`~/.shell3`. Restart the unit after an update — a running bot keeps
+`~/.shell3`. Restart the unit after an update — a running server keeps
 executing the old binary.
 
 launchd (macOS), runit, or a tmux session all work the same way: run
-`shell3 telegram`, restart it when it dies. On a laptop, note that nothing
-here prevents the machine from sleeping — the bot is gone while the lid is
-closed; disable suspend or host shell3 on an always-on box.
+`shell3 serve`, restart it when it dies. On a laptop, note that nothing
+here prevents the machine from sleeping.
 
-The full recipe is [cookbook/service.md](cookbook/service.md).
+## Reach it from elsewhere
 
-## Reaching it from elsewhere
+The login is the only thing between whoever finds the URL and a shell, so
+the ranking matters: prefer exposure that never puts the login on the
+public internet at all.
 
-Nothing to do: Telegram already reaches every device you're signed into.
-Access control is the bot token plus the one `chat_id` the bot answers —
-see [security.md](security.md#the-telegram-boundary).
+1. Tailscale (recommended): `tailscale serve --bg 8765` — https, a stable
+   `https://<machine>.<tailnet>.ts.net` URL, reachable from your devices
+   only, survives reboots on its own. Free for personal use. No service
+   required: `tailscale serve --bg 8765 && shell3 serve` is a complete
+   exposed setup in one line (`--bg` configures and returns).
+2. SSH: `ssh -L 8765:127.0.0.1:8765 host` from the machine you're on.
+3. Public tunnel (last resort): `cloudflared tunnel --url
+   http://127.0.0.1:8765` prints a public https URL — anyone who finds it
+   gets your login page, which is then the entire security boundary. If
+   you go this way, turn on the second factor first (`shell3 boot --totp`):
+   a leaked or guessed password alone then is not a session.
+
+The full serve-as-a-service recipe (Tailscale primary, public tunnel as
+the labeled fallback) is [cookbook/service.md](cookbook/service.md).
+
+If the address is stable, set `web.url` so shell3 knows its public name.
+Plain http past localhost sends the password in clear — always https.
+Web push also needs https (or localhost), so it follows the same rule.

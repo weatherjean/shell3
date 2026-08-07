@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/weatherjean/shell3/internal/shell3"
@@ -30,7 +31,7 @@ func RegisterImageTool(sess hostToolRegistrar, c *Clients) error {
 		return nil
 	}
 	headless := sess.Headless()
-	deliver := "deliver it to the user with the send_media_telegram tool (kind: photo) if you have it, otherwise report the file path."
+	deliver := "show it to the user by writing a markdown image whose src is the file's /api/media/ URL, e.g. ![](/api/media/img-123.png)."
 	if headless {
 		deliver = "include it in your final report so the requester can deliver it."
 	}
@@ -78,6 +79,6 @@ func newImageGenerateHandler(c *Clients, headless bool) func(ctx context.Context
 		if headless {
 			return fmt.Sprintf("generated image at %s — include this path in your final report so the requester can deliver it", path), nil
 		}
-		return fmt.Sprintf("generated image saved at %s — send it with send_media_telegram (kind: photo), or report this path", path), nil
+		return fmt.Sprintf("generated image at %s — show it with ![](/api/media/%s)", path, filepath.Base(path)), nil
 	}
 }

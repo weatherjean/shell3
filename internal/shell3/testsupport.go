@@ -28,10 +28,12 @@ func RuntimeForTest(workDir string, sessionConfig func(SessionOpts) (chat.Config
 	return rt
 }
 
-// SetCronForTest replaces the runtime's declared cron jobs, for tests that
-// need Cron() to return something without loading a real config directory.
-func (rt *Runtime) SetCronForTest(jobs []CronJob) {
+// SetWebForTest replaces the runtime's `web:` block. The front-end reads its
+// password from here — deliberately, so a /reload picks up a changed one — and
+// a test exercising authentication needs some way to supply it. Like
+// RuntimeForTest, this is for test harnesses in other packages, not public API.
+func (rt *Runtime) SetWebForTest(web WebConfig) {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
-	rt.cron = jobs
+	rt.web = web
 }

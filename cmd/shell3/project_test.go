@@ -23,8 +23,9 @@ func setupProjectConfig(t *testing.T) string {
 	}, false); err != nil {
 		t.Fatalf("RenderBaseConfig: %v", err)
 	}
-	// .env carries exactly the keys `shell3 boot` writes.
-	env := "MAIN_API_KEY=\nTELEGRAM_TOKEN=\n"
+	// The rendered shell3.yaml references the web password, so .env carries it
+	// exactly as `shell3 boot` writes it.
+	env := "MAIN_API_KEY=\nSHELL3_WEB_PASSWORD=sixteen-characters-long\n"
 	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(env), 0o600); err != nil {
 		t.Fatalf("write .env: %v", err)
 	}

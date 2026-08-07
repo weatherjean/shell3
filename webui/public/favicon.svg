@@ -1,0 +1,22 @@
+<!-- The mark, at tab size.
+
+     Tahoma for the same reason the interface pins it (see .mark-face in
+     src/index.css): the snail is two borrowed glyphs whose shapes differ
+     enough between faces that another font redraws the logo.
+
+     Centred by measurement, not by eye. Two things make this glyph resist the
+     usual approach: `text-anchor="middle"` centres on the ADVANCE width, which
+     here is narrower than the ink, and the ink box is far taller than it looks
+     (24px at font-size 20). So the text is anchored at its start and placed
+     with explicit coordinates that centre the measured ink box in the square:
+
+       ink 20.74 x 24.00, sitting 20.00 above its own baseline
+       x = (32 - 20.74) / 2         = 5.63
+       y = (32 - 24.00) / 2 + 20.00 = 24.00
+
+     At font-size 26 the ink was 31.5px tall in a 32px square — overflowing the
+     top and riding low, which is what read as off-centre. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <text x="5.63" y="24" font-family="Tahoma,Geneva,Verdana,sans-serif"
+        font-size="20" font-weight="700" fill="#EAB308">๑ï</text>
+</svg>

@@ -27,18 +27,18 @@ media:
   tts: { model: groq-tts, voice: Fritz-PlayAI }
 ```
 
-Add `GROQ_API_KEY=...` to `.env` and `/reload`: a voice note you send is
-transcribed and becomes the message, and `/voice inbound` (or `always`) makes
-the reply come back as a voice note. Without `stt`, a voice note is only saved
-to disk; without `tts`, replies stay text.
+Add `GROQ_API_KEY=...` to `.env`, reload, and reopen the interface: the
+composer's microphone records a message and fills in the transcript for you to
+edit before sending, and the read-aloud control on a reply speaks it back.
+Without these two blocks both controls fall back to the browser's own Web
+Speech APIs.
 
 ## OpenRouter variant (one key for STT + TTS + describe)
 
 OpenRouter also serves OpenAI-compatible `/audio/transcriptions` and
 `/audio/speech`, so a single OpenRouter key covers voice in/out **and** the
 image `describe` fallback. One caveat: OpenRouter's TTS emits `mp3`/`pcm`
-only (no opus), so a spoken reply arrives as an audio file rather than a
-Telegram voice bubble:
+only (no opus) — fine in a browser, which plays whatever comes back:
 
 ```yaml
 models:
@@ -57,7 +57,7 @@ models:
 
 media:
   stt: { model: or-whisper }
-  tts: { model: or-tts, voice: af_bella, format: mp3, mode: inbound }
+  tts: { model: or-tts, voice: af_bella, format: mp3 }
   describe: { model: or-vision }   # only if your main model can't see images
 ```
 

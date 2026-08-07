@@ -17,7 +17,7 @@
 # ---------------------------------------------------------------------------
 # THIS GATE NEVER ASKS. It is a fence, not a prompt.
 #
-# This harness runs ~95% autonomously: nobody is at the chat when most tool
+# This harness runs ~95% autonomously: nobody is at the browser when most tool
 # calls happen. In that setting an `ask` is not a question, it is a DENIAL WITH
 # A DELAY — the turn parks until the ask times out, then denies anyway. A block
 # reaches the agent instantly, carrying a reason it can act on: pick another

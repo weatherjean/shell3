@@ -125,7 +125,7 @@ func (w *cappedFileWriter) Close() {
 
 // jobSink is an io.Writer that tees each write to a ring buffer AND calls an
 // emit callback with the chunk string. It is used as cmd.Stdout/cmd.Stderr for
-// command jobs and as the subagent event stream sink, so both /jobs
+// command jobs and as the subagent event stream sink, so both the Jobs view
 // and the JobEvents bus receive live output. file, when non-nil,
 // additionally persists the (capped) output to the job's on-disk log.
 type jobSink struct {
@@ -741,7 +741,7 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 }
 
 // consumeChildEvents drains one child-session turn's event stream, mirroring
-// it into j.out so /job <id> can show live progress (the child's stored
+// it into j.out so the Jobs view can show live progress (the child's stored
 // transcript is not readable until the run ends). It returns the
 // turn's final assistant text and the last error seen (nil for a clean turn).
 // Shared by the subagent's main turn and its follow-up turns.
@@ -1155,7 +1155,7 @@ func (m *jobManager) formatJobStatus(id string) string {
 		}
 		// Prefer the on-disk transcript once the run ends; while it's still
 		// running that file doesn't exist yet, so fall back to the live in-memory
-		// buffer so the model sees progress (matching /job <id>).
+		// buffer so the model sees progress (matching the Jobs view).
 		// Render the transcript as readable text; the live buffer is already readable.
 		rawTranscript := m.transcript(id)
 		body, label := renderTranscriptText(rawTranscript), "transcript"

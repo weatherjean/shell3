@@ -72,7 +72,8 @@ scaffold's own `writing-code` skill for in-line TDD work.)
 
 **Provider and host recipes**
 
-- `service.md` — run the bot as a service: a systemd user unit, one paste.
+- `service.md` — serve as a service: systemd unit + `tailscale serve`
+  (cloudflared as the public-internet fallback).
 - `mcp.md` — MCP servers: stdio + HTTP recipes, allow-lists, gating.
 - `sandbox.md` — sandbox/route bash via hook argv verdicts.
 - `voice-images.md` — voice + images; Groq and OpenRouter quickstarts.

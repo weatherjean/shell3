@@ -125,20 +125,22 @@ func runHealth(cmd *cobra.Command, path string) error {
 			return fmt.Errorf("health: %d MCP server(s) down", down)
 		}
 	}
-	// The telegram front-end's own start-up check, run here rather than found
-	// out at `shell3 telegram`: health is documented as THE config check, and a
-	// block boot wrote with blank fields loads cleanly but refuses to start. An
-	// ABSENT block is not an error — an `shell3 ask`-only config is legitimate —
-	// but say so, the way an absent notifier is reported. Deliberately LAST: a
-	// blank chat id is a state boot itself writes ("fill it in later"), and it
-	// must never hide the hook and MCP diagnostics above.
-	if tg := lc.Telegram(); !tg.Present {
-		fmt.Fprintln(out, "telegram: absent — the bot front-end is unwired (add a telegram: block to run `shell3 telegram`)")
-	} else if chatID, err := telegramChatID(tg); err != nil {
-		fmt.Fprintf(out, "telegram: %v\n", err)
-		return fmt.Errorf("health: %w", err)
-	} else {
-		fmt.Fprintf(out, "telegram: chat %d\n", chatID)
+	// The web interface authenticates with web.password, and `shell3 serve`
+	// refuses to start without one. health is the strict view, so report it
+	// here rather than letting the operator discover it at startup.
+	web := lc.Web()
+	if err := requireWebPassword(web); err != nil {
+		fmt.Fprintln(out, "web: no password — serve will refuse to start")
+		return fmt.Errorf("health: web.password is not set (.env %s)", envWebPassword)
+	}
+	factors := "password"
+	if web.TOTPSecret != "" {
+		factors = "password + TOTP"
+	}
+	fmt.Fprintf(out, "web: auth armed (%s)\n", factors)
+	if warning := weakPasswordWarning(web); warning != "" {
+		fmt.Fprintln(out, strings.TrimSpace(warning))
+		return fmt.Errorf("health: web password is shorter than %d characters", minPasswordLength)
 	}
 
 	fmt.Fprintln(out, "OK")

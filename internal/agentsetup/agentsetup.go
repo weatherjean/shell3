@@ -1,5 +1,5 @@
 // Package agentsetup is the shared config assembly used by every shell3
-// front-end (`shell3 telegram`, `shell3 serve`, `shell3 ask`, and the internal/shell3 event
+// front-end (`shell3 serve`, `shell3 ask`, and the internal/shell3 event
 // stream). It resolves paths, ensures project dirs, opens the store and log,
 // loads the config directory, and returns a fully-populated chat.Config — the single
 // source of truth for "what the agent is", independent of how it's driven.
@@ -72,7 +72,7 @@ type Parts struct {
 }
 
 // MCPStatus reports every declared MCP server's health (nil when no
-// mcp: block is declared) — for `shell3 health` and /status.
+// mcp: block is declared) — for `shell3 health` and the Status view.
 func (p *Parts) MCPStatus() []mcp.ServerStatus {
 	if p.mcp == nil {
 		return nil
@@ -123,18 +123,18 @@ func (p *Parts) BackgroundMaxConcurrent() int { return p.lc.BackgroundMaxConcurr
 // ModelCount returns the number of declared models.
 func (p *Parts) ModelCount() int { return len(p.lc.Models) }
 
-// Telegram returns the parsed telegram: block (zero value if absent).
-func (p *Parts) Telegram() config.TelegramConfig { return p.lc.Telegram() }
+// Web returns the parsed web: block (zero value if absent).
+func (p *Parts) Web() config.WebConfig { return p.lc.Web() }
 
 // Cron returns the jobs declared as cron/<name>.md files.
 func (p *Parts) Cron() []config.CronJob { return p.lc.Cron() }
 
 // RunsKeepDays returns `runs_keep_days` (always populated at load — default
-// 30; 0 = keep forever). Read by the runs janitor at `shell3 telegram` startup.
+// 30; 0 = keep forever). Read by the runs janitor at `shell3 serve` startup.
 func (p *Parts) RunsKeepDays() int { return p.lc.RunsKeepDays }
 
 // MediaKeepDays returns `media_keep_days` (always populated at load —
-// default 0 = keep forever). Read by the media janitor at `shell3 telegram`
+// default 0 = keep forever). Read by the media janitor at `shell3 serve`
 // startup.
 func (p *Parts) MediaKeepDays() int { return p.lc.MediaKeepDays }
 
@@ -278,7 +278,7 @@ func (p *Parts) runtimeForAgent(a config.Agent) (chat.ActiveAgent, error) {
 		toolNames = append(toolNames, t.Name)
 	}
 
-	// ActiveSkills is the display list (/status): resolved
+	// ActiveSkills is the display list (the Status view): resolved
 	// skill names in index order.
 	skillNames := make([]string, 0, len(a.Skills))
 	for _, s := range a.Skills {

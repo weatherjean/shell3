@@ -97,7 +97,7 @@ type Config struct {
 	ConfigDir string
 	// ConfigWarnings are non-fatal config load issues (e.g. a skipped invalid
 	// skill file). Already logged + printed to stderr at load; also carried
-	// here so a front-end can surface them in-band, since a chat user
+	// here so a front-end can surface them in-band, since a browser user
 	// never sees the stderr line they were printed on.
 	ConfigWarnings []string
 	// ActiveSkills lists skill names enabled for this persona.
@@ -126,7 +126,7 @@ type Config struct {
 	HostTool func(ctx context.Context, name, argsJSON string) (string, error)
 	// MCPStatus reports the declared MCP servers' live health (nil when no
 	// mcp: block is declared). Agent-independent: set once at
-	// assembly, surfaced by Snapshot for /status.
+	// assembly, surfaced by Snapshot for the Status view.
 	MCPStatus func() []MCPServerStatus
 	// Asker confirms ask-verdict commands with a human; supplied per-front-end.
 	// Nil ⇒ headless: ask degrades to deny.
