@@ -285,9 +285,29 @@ const ChatRuntime: FC<{
     }
     const retry = () => {
       if (document.visibilityState !== "visible") return;
-      if (chatRef.current.status !== "error") return;
-      chatRef.current.clearError();
-      resume();
+      const current = chatRef.current;
+      if (current.status !== "error") return;
+      current.clearError();
+      // The replay re-delivers the whole turn, and the SDK reuses a trailing
+      // assistant message as the streaming target without clearing its parts
+      // — resuming over the partial message from before the disconnect would
+      // render everything before the cut twice. Drop it; the replay (or the
+      // transcript, when the turn already finished) carries the whole truth.
+      const msgs = current.messages;
+      if (msgs.length > 0 && msgs[msgs.length - 1].role === "assistant") {
+        current.setMessages(msgs.slice(0, -1));
+      }
+      void chatRef.current
+        .resumeStream()
+        .then(() => {
+          // 204: the turn ended while we were away — nothing streamed back,
+          // so the reply now lives only in the persisted transcript.
+          if (chatRef.current.status !== "ready") return;
+          return loadThreadMessages(threadId).then((stored) => {
+            if (chatRef.current.status === "ready") chatRef.current.setMessages(stored);
+          });
+        })
+        .catch(() => {});
     };
     document.addEventListener("visibilitychange", retry);
     window.addEventListener("online", retry);

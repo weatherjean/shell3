@@ -268,9 +268,13 @@ seconds) no longer kills the turn. `GET /api/chat/stream?thread=…` re-attaches
 the whole turn replays, then follows live; 204 when nothing is running. The
 client resumes via the AI SDK's `resumeStream()` on conversation mount, on
 `visibilitychange`, and on `online` (the latter two only from the error
-state). Mid-turn, a reloaded page renders the replay without its
-not-yet-persisted user message — the view is exact again once the turn ends
-and persists. What keeps a detached turn accountable: `/api/stop` still
+state); before resuming from error it drops the trailing partial assistant
+message — the SDK streams into a trailing assistant message without clearing
+it, so resuming over the partial would render everything before the cut
+twice — and a 204 (turn ended while away) refetches the transcript instead.
+Mid-turn, a reloaded page renders the replay without its not-yet-persisted
+user message (it can attach beneath the previous reply's bubble) — the view
+is exact again once the turn ends and persists. What keeps a detached turn accountable: `/api/stop` still
 cancels it, Status shows the slot taken, and the buffer drops at turn end. `/api/events` is the server-push channel (notifications + approval
 requests, and live job progress); the rest is introspection:
 `/api/capabilities`, `/api/status`, `/api/threads[/{id}[/messages]]`,
