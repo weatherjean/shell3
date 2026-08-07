@@ -15,6 +15,7 @@ import {
   ListTodoIcon,
   LogOutIcon,
   MenuIcon,
+  RotateCwIcon,
   PanelLeftIcon,
   PencilIcon,
 } from "lucide-react";
@@ -27,7 +28,7 @@ import {
   type FC,
   type ReactNode,
 } from "react";
-import { Thread } from "@/components/shell3/chat";
+import { ReconnectContext, Thread } from "@/components/shell3/chat";
 import { LoginScreen } from "@/components/shell3/login";
 import { AskDialog } from "@/components/shell3/ask-dialog";
 import { FilesView } from "@/components/shell3/files-view";
@@ -271,56 +272,83 @@ const ChatRuntime: FC<{
   // 204 makes it a no-op otherwise), the tab becoming visible again, and the
   // network coming back — the latter two only when the stream actually died.
   //
-  // The effect keys on the CONVERSATION, not on `chat`: useChat returns a
+  // The effects key on the CONVERSATION, not on `chat`: useChat returns a
   // fresh object every render, and an effect keyed on it re-fires per render
   // — a resume-request storm. The ref always points at the current object.
   const chatRef = useRef(chat);
   chatRef.current = chat;
+  // Automatic recoveries since the stream last ran. Capped: a server that is
+  // actually down turns each attempt into a fresh error, and an uncapped
+  // loop would hammer it. The manual Reconnect button bypasses the cap.
+  const recoverTries = useRef(0);
+
+  const recover = useCallback(() => {
+    const current = chatRef.current;
+    if (current.status !== "error") return;
+    current.clearError();
+    // The replay re-delivers the whole turn, and the SDK reuses a trailing
+    // assistant message as the streaming target without clearing its parts
+    // — resuming over the partial message from before the disconnect would
+    // render everything before the cut twice. Drop it; the replay (or the
+    // transcript, when the turn already finished) carries the whole truth.
+    const msgs = current.messages;
+    if (msgs.length > 0 && msgs[msgs.length - 1].role === "assistant") {
+      current.setMessages(msgs.slice(0, -1));
+    }
+    void chatRef.current
+      .resumeStream()
+      .then(() => {
+        // 204: the turn ended while we were away — nothing streamed back,
+        // so the reply now lives only in the persisted transcript.
+        if (chatRef.current.status !== "ready") return;
+        return loadThreadMessages(threadId).then((stored) => {
+          if (chatRef.current.status === "ready") chatRef.current.setMessages(stored);
+        });
+      })
+      .catch(() => {});
+  }, [threadId]);
+
   useEffect(() => {
     if (!live) return;
-    const resume = () => void chatRef.current.resumeStream().catch(() => {});
     // A healthy stream must not be interrupted: resume only from rest.
     if (chatRef.current.status === "ready" || chatRef.current.status === "error") {
-      resume();
+      void chatRef.current.resumeStream().catch(() => {});
     }
-    const retry = () => {
-      if (document.visibilityState !== "visible") return;
-      const current = chatRef.current;
-      if (current.status !== "error") return;
-      current.clearError();
-      // The replay re-delivers the whole turn, and the SDK reuses a trailing
-      // assistant message as the streaming target without clearing its parts
-      // — resuming over the partial message from before the disconnect would
-      // render everything before the cut twice. Drop it; the replay (or the
-      // transcript, when the turn already finished) carries the whole truth.
-      const msgs = current.messages;
-      if (msgs.length > 0 && msgs[msgs.length - 1].role === "assistant") {
-        current.setMessages(msgs.slice(0, -1));
-      }
-      void chatRef.current
-        .resumeStream()
-        .then(() => {
-          // 204: the turn ended while we were away — nothing streamed back,
-          // so the reply now lives only in the persisted transcript.
-          if (chatRef.current.status !== "ready") return;
-          return loadThreadMessages(threadId).then((stored) => {
-            if (chatRef.current.status === "ready") chatRef.current.setMessages(stored);
-          });
-        })
-        .catch(() => {});
+    const onWake = () => {
+      if (document.visibilityState === "visible") recover();
     };
-    document.addEventListener("visibilitychange", retry);
-    window.addEventListener("online", retry);
+    document.addEventListener("visibilitychange", onWake);
+    window.addEventListener("online", onWake);
     return () => {
-      document.removeEventListener("visibilitychange", retry);
-      window.removeEventListener("online", retry);
+      document.removeEventListener("visibilitychange", onWake);
+      window.removeEventListener("online", onWake);
     };
-  }, [threadId, live]);
+  }, [threadId, live, recover]);
+
+  // The wake events are not enough on their own: unlocking a phone fires
+  // visibilitychange BEFORE the dead fetch reports its error, so the handler
+  // sees a healthy status, does nothing, and the error then sits there with
+  // no further trigger. Watching the status itself closes that race.
+  const status = chat.status;
+  useEffect(() => {
+    if (status === "streaming" || status === "submitted") {
+      recoverTries.current = 0;
+      return;
+    }
+    if (!live || status !== "error") return;
+    if (document.visibilityState !== "visible") return;
+    if (recoverTries.current >= 3) return;
+    recoverTries.current += 1;
+    const t = setTimeout(recover, 600);
+    return () => clearTimeout(t);
+  }, [status, live, recover]);
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <TurnWatcher onTurnEnd={onTurnEnd} />
-      <Thread />
+      <ReconnectContext.Provider value={live ? recover : null}>
+        <Thread />
+      </ReconnectContext.Provider>
     </AssistantRuntimeProvider>
   );
 };
@@ -493,27 +521,37 @@ const MobileSidebar: FC<{
   view: View;
   onSelect: (view: View) => void;
   controls: ThreadControls;
-}> = ({ view, onSelect, controls }) => (
-  <Sheet>
-    <SheetTrigger
-      render={
-        <Button variant="ghost" size="icon" className="size-8 shrink-0 md:hidden">
-          <MenuIcon className="size-[17px]" />
-          <span className="sr-only">Open menu</span>
-        </Button>
-      }
-    />
-    <SheetContent side="left" className="bg-sidebar border-rule flex w-70 flex-col p-0">
-      <div className="shrink-0 px-5 pt-4 pb-3.5">
-        <Logo />
-      </div>
-      <div className="min-h-0 flex-1 overflow-hidden">
-        <ThreadPanel controls={controls} view={view} onOpenChat={() => onSelect("chat")} />
-      </div>
-      <ToolBar view={view} onSelect={onSelect} />
-    </SheetContent>
-  </Sheet>
-);
+}> = ({ view, onSelect, controls }) => {
+  // Controlled so a selection can close the sheet itself: picking a
+  // conversation or a view IS the exit — leaving the sheet open on top of
+  // what was just picked forces a second, pointless gesture.
+  const [open, setOpen] = useState(false);
+  const pick = (next: View) => {
+    setOpen(false);
+    onSelect(next);
+  };
+  return (
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetTrigger
+        render={
+          <Button variant="ghost" size="icon" className="size-8 shrink-0 md:hidden">
+            <MenuIcon className="size-[17px]" />
+            <span className="sr-only">Open menu</span>
+          </Button>
+        }
+      />
+      <SheetContent side="left" className="bg-sidebar border-rule flex w-70 flex-col p-0">
+        <div className="shrink-0 px-5 pt-4 pb-3.5">
+          <Logo />
+        </div>
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <ThreadPanel controls={controls} view={view} onOpenChat={() => pick("chat")} />
+        </div>
+        <ToolBar view={view} onSelect={pick} />
+      </SheetContent>
+    </Sheet>
+  );
+};
 
 const Header: FC<{
   view: View;
@@ -539,6 +577,16 @@ const Header: FC<{
 
     <div className="ml-auto flex items-center gap-0.5">
       <NotificationBell />
+      <TooltipIconButton
+        variant="ghost"
+        size="icon"
+        tooltip="Refresh the page"
+        side="bottom"
+        className="size-7"
+        onClick={() => window.location.reload()}
+      >
+        <RotateCwIcon className="size-[17px]" />
+      </TooltipIconButton>
       <ThemeToggle />
     </div>
   </header>
@@ -729,8 +777,11 @@ const SignOutRow: FC<{ collapsed?: boolean }> = ({ collapsed }) => {
           onClick={() => setOpen(true)}
           className="text-ink-2 hover:text-ink mt-1 flex w-full items-baseline gap-2.5 py-0.5 text-[12.5px] transition-colors"
         >
-          <span className="text-ink-3 flex w-6 items-center font-mono">
-            <LogOutIcon className="size-[11px]" />
+          {/* The icon stands where the roman folio stands, so it takes the
+              folio's optical position: inline on the text baseline, nudged
+              onto it the way the numerals' caps sit. */}
+          <span className="text-ink-3 w-6 font-mono text-[9.5px] tracking-[.04em]">
+            <LogOutIcon className="inline-block size-[11px] translate-y-[1.5px]" />
           </span>
           Sign out
         </button>

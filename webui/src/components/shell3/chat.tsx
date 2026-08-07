@@ -59,7 +59,7 @@ import {
   VolumeXIcon,
   SquareIcon,
 } from "lucide-react";
-import { useState, type FC, type ReactNode } from "react";
+import { createContext, useContext, useState, type FC, type ReactNode } from "react";
 import { stopTurn } from "@/lib/api";
 import { useCapabilities } from "@/lib/capabilities";
 import { useVoiceStatus, VOICE_LABELS } from "@/lib/voice-status";
@@ -337,11 +337,29 @@ const StopTurnButton: FC = () => {
   );
 };
 
+/**
+ * ReconnectContext carries the app shell's stream-recovery routine into the
+ * error box: re-attach to the running turn (or fetch the finished reply).
+ * null on the mock backend, where there is nothing to reconnect to.
+ */
+export const ReconnectContext = createContext<(() => void) | null>(null);
+
 const MessageError: FC = () => {
+  const reconnect = useContext(ReconnectContext);
   return (
     <MessagePrimitive.Error>
       <ErrorPrimitive.Root className="aui-message-error-root border-destructive bg-destructive/10 text-destructive dark:bg-destructive/5 mt-2 rounded-md border p-3 text-sm dark:text-red-200">
         <ErrorPrimitive.Message className="aui-message-error-message line-clamp-2" />
+        {reconnect ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-2"
+            onClick={reconnect}
+          >
+            Reconnect
+          </Button>
+        ) : null}
       </ErrorPrimitive.Root>
     </MessagePrimitive.Error>
   );
