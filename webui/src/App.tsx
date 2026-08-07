@@ -40,6 +40,14 @@ import { ThemeToggle } from "@/components/shell3/theme-toggle";
 import { ThreadList } from "@/components/shell3/thread-list";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { checkSession, logout, setUnauthorizedHandler } from "@/lib/api";
 import { CapabilitiesProvider, useCapabilities } from "@/lib/capabilities";
@@ -343,6 +351,7 @@ const ToolBar: FC<{
           {item.icon}
         </button>
       ))}
+      <SignOutRow collapsed />
     </nav>
   ) : (
     <nav aria-label="Tools" className="border-rule shrink-0 border-t px-5 py-3.5">
@@ -371,6 +380,7 @@ const ToolBar: FC<{
           </button>
         );
       })}
+      <SignOutRow />
     </nav>
   );
 
@@ -510,7 +520,6 @@ const Header: FC<{
     <div className="ml-auto flex items-center gap-0.5">
       <NotificationBell />
       <ThemeToggle />
-      <SignOutButton />
     </div>
   </header>
 );
@@ -669,26 +678,62 @@ const Workspace: FC = () => {
  * Signs out: revokes the session server-side, not just in this browser. A
  * cookie dropped locally would still be a working credential anywhere else it
  * had been copied.
+ *
+ * Lives at the bottom of the sidebar, last after the tool views, and always
+ * behind a confirmation — signing out ends in a login screen, and on a phone
+ * an accidental tap would do that mid-thought.
  */
-const SignOutButton: FC = () => {
+const SignOutRow: FC<{ collapsed?: boolean }> = ({ collapsed }) => {
   const { live } = useCapabilities();
+  const [open, setOpen] = useState(false);
   if (!live) return null; // nothing to sign out of on the mock backend
 
+  const signOut = () => {
+    void logout()
+      .catch(() => undefined)
+      .then(() => window.location.reload());
+  };
+
   return (
-    <TooltipIconButton
-      variant="ghost"
-      size="icon"
-      tooltip="Sign out"
-      side="bottom"
-      className="size-7"
-      onClick={() => {
-        void logout()
-          .catch(() => undefined)
-          .then(() => window.location.reload());
-      }}
-    >
-      <LogOutIcon className="size-[17px]" />
-    </TooltipIconButton>
+    <>
+      {collapsed ? (
+        <button
+          onClick={() => setOpen(true)}
+          title="Sign out"
+          className="hover:bg-lift text-ink-3 flex flex-col items-center py-2 transition-colors"
+        >
+          <LogOutIcon className="size-[15px]" />
+        </button>
+      ) : (
+        <button
+          onClick={() => setOpen(true)}
+          className="text-ink-2 hover:text-ink mt-1 flex w-full items-baseline gap-2.5 py-0.5 text-[12.5px] transition-colors"
+        >
+          <span className="text-ink-3 flex w-6 items-center font-mono">
+            <LogOutIcon className="size-[11px]" />
+          </span>
+          Sign out
+        </button>
+      )}
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Sign out?</DialogTitle>
+            <DialogDescription>
+              This revokes the session on the server. Signing back in takes the
+              password — and the authenticator code, where one is set.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={signOut}>Sign out</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 };
 
