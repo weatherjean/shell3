@@ -240,7 +240,11 @@ function ReasoningContent({
       )}
       {...props}
     >
-      <ReasoningFade side="top" />
+      {/* The fades exist for the preview: streaming text pinned to the bottom
+          slides under the top edge, and more is coming below. An expanded
+          block sits at scrollTop 0 — a top fade there just erases the first
+          line of the thought. */}
+      {isPreview ? <ReasoningFade side="top" /> : null}
       {children}
       {isPreview ? <ReasoningFade /> : null}
     </CollapsibleContent>
