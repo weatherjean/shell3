@@ -3,6 +3,9 @@
 package main
 
 import (
+	"net/url"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,6 +46,61 @@ func TestTOTPCodeValidator(t *testing.T) {
 	}
 	if err := validate("  " + code + " "); err != nil {
 		t.Errorf("surrounding whitespace must be tolerated: %v", err)
+	}
+}
+
+func TestEnrolmentLabelCarriesTheMintingTime(t *testing.T) {
+	_, uri, err := newTOTPEnrolment("test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := url.PathUnescape(uri)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`test \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}`).MatchString(decoded) {
+		t.Errorf("account label must carry the minting time so a stale entry is distinguishable, got %q", decoded)
+	}
+}
+
+func TestTOTPCodeValidatorDiagnosesRepeatedFailures(t *testing.T) {
+	secret, _, err := newTOTPEnrolment("test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate := totpCodeValidator(secret)
+
+	first := validate("000000")
+	if first == nil || !strings.Contains(first.Error(), "does not match") {
+		t.Errorf("first failure keeps the plain message, got %v", first)
+	}
+	second := validate("000001")
+	if second == nil || !strings.Contains(second.Error(), "delete") {
+		t.Errorf("repeated failure must point at the stale-entry cause, got %v", second)
+	}
+	code, err := totp.GenerateCode(secret, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validate(code); err != nil {
+		t.Errorf("a right code must still verify after failures: %v", err)
+	}
+	if err := validate(""); err != nil {
+		t.Errorf("blank (cancel) must still be accepted: %v", err)
+	}
+}
+
+func TestTOTPCodeValidatorNamesClockDrift(t *testing.T) {
+	secret, _, err := newTOTPEnrolment("test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, err := totp.GenerateCode(secret, time.Now().Add(3*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := totpCodeValidator(secret)(code); err == nil || !strings.Contains(err.Error(), "clock") {
+		t.Errorf("a drifted code must be named as clock drift, got %v", err)
 	}
 }
 

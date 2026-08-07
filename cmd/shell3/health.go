@@ -11,6 +11,7 @@ import (
 
 	"github.com/weatherjean/shell3/internal/config"
 	"github.com/weatherjean/shell3/internal/mcp"
+	"github.com/weatherjean/shell3/internal/totpdiag"
 )
 
 // newHealthCommand builds `shell3 health` — a strict, read-only config check.
@@ -135,6 +136,12 @@ func runHealth(cmd *cobra.Command, path string) error {
 	}
 	factors := "password"
 	if web.TOTPSecret != "" {
+		// A secret that cannot mint a code is a lockout, not a second factor:
+		// the login screen would demand a code no authenticator can produce.
+		if err := totpdiag.CheckSecret(web.TOTPSecret); err != nil {
+			fmt.Fprintf(out, "web: totp_secret is unusable — every login would be refused: %s\n", err)
+			return fmt.Errorf("health: web.totp_secret cannot mint a code (.env %s)", envWebTOTP)
+		}
 		factors = "password + TOTP"
 	}
 	fmt.Fprintf(out, "web: auth armed (%s)\n", factors)

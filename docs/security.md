@@ -86,7 +86,13 @@ test holds it there.
 - **A second factor**, if you set `web.totp_secret`: the password alone then is
   not a session. Codes are single-use inside their window. Enrolment
   (`shell3 boot` / `boot --totp`) arms the factor only after one code from
-  the scanned entry verifies, so a mis-scan cannot lock you out.
+  the scanned entry verifies, so a mis-scan cannot lock you out. Each
+  enrolment labels its authenticator entry with the minting time, so a stale
+  entry from an earlier enrolment is distinguishable from the live one.
+  Refused codes are diagnosed, never widened: a code that matches at a larger
+  clock offset is named as drift (at the enrolment prompt, and in the server
+  log for logins), and `shell3 health` fails on a secret that cannot mint a
+  code.
 - **Escalating delay** on failed attempts — not a lockout, which would let
   anyone who can reach the login route hold it closed against you.
 - **An audit trail.** Every attempt, successful or not, goes to the app log with

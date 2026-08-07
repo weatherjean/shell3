@@ -163,6 +163,43 @@ func TestHealthOKWithStrictHook(t *testing.T) {
 	}
 }
 
+// A totp_secret that cannot mint a code is a guaranteed lockout: the login
+// screen would ask for a code no authenticator can produce. health is where
+// that surfaces, not the login screen.
+func TestHealthFailsOnACorruptTOTPSecret(t *testing.T) {
+	dir := writeHealthTree(t, map[string]string{
+		"shell3.yaml": healthYAML[:strings.LastIndex(healthYAML, "}")] +
+			", totp_secret: \"not!base32@at#all\" }\n",
+	})
+
+	out, err := runHealthAt(t, dir)
+	if err == nil {
+		t.Fatalf("health passed a totp_secret that locks the operator out:\n%s", out)
+	}
+	if !strings.Contains(err.Error()+out, "totp") {
+		t.Errorf("failure does not name the secret:\n%s\n%v", out, err)
+	}
+}
+
+func TestHealthOKWithAValidTOTPSecret(t *testing.T) {
+	secret, _, err := newTOTPEnrolment("health-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := writeHealthTree(t, map[string]string{
+		"shell3.yaml": healthYAML[:strings.LastIndex(healthYAML, "}")] +
+			", totp_secret: \"" + secret + "\" }\n",
+	})
+
+	out, err := runHealthAt(t, dir)
+	if err != nil {
+		t.Fatalf("a valid secret should pass: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "password + TOTP") {
+		t.Errorf("output should report both factors:\n%s", out)
+	}
+}
+
 // health is the strict view of a config, and a config with no web password
 // cannot be served at all — `shell3 serve` refuses it. Reporting that here is
 // the difference between finding out now and finding out when you try to start.

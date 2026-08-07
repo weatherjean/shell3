@@ -16,6 +16,7 @@ package webui
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -23,6 +24,8 @@ import (
 	"time"
 
 	"github.com/pquerna/otp/totp"
+
+	"github.com/weatherjean/shell3/internal/totpdiag"
 )
 
 const sessionCookie = "shell3_session"
@@ -156,8 +159,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			s.denyLogin(w, r, "code required", true)
 			return
 		}
-		if !s.acceptCode(secret, req.Code) {
-			s.denyLogin(w, r, "wrong or reused code", false)
+		if ok, reason := s.acceptCode(secret, req.Code); !ok {
+			s.denyLogin(w, r, reason, false)
 			return
 		}
 	}
@@ -228,18 +231,24 @@ func (s *Server) denyLogin(w http.ResponseWriter, r *http.Request, reason string
 }
 
 // acceptCode validates a TOTP code and burns it, so a code observed in flight
-// cannot be used again inside its 30-second window.
-func (s *Server) acceptCode(secret, code string) bool {
+// cannot be used again inside its 30-second window. A refusal carries its
+// reason for the log — reused, wrong, or minted by a drifted clock are
+// different operator problems — while the client keeps hearing nothing: the
+// probe diagnoses, it never widens what is accepted.
+func (s *Server) acceptCode(secret, code string) (bool, string) {
 	s.auth.mu.Lock()
 	defer s.auth.mu.Unlock()
 	if code == s.auth.lastCode {
-		return false
+		return false, "reused code"
 	}
 	if !totp.Validate(code, secret) {
-		return false
+		if offset, drifted := totpdiag.SkewProbe(secret, code, time.Now()); drifted {
+			return false, fmt.Sprintf("code minted about %s from this clock — likely clock drift", offset)
+		}
+		return false, "wrong code"
 	}
 	s.auth.lastCode = code
-	return true
+	return true, ""
 }
 
 // handleLogout revokes this browser's session and clears its cookie.

@@ -15,12 +15,14 @@ import (
 	"io"
 	"math/big"
 	"strings"
+	"time"
 
 	huh "charm.land/huh/v2"
 	"github.com/mdp/qrterminal/v3"
 	"github.com/pquerna/otp/totp"
 
 	"github.com/weatherjean/shell3/internal/cli"
+	"github.com/weatherjean/shell3/internal/totpdiag"
 )
 
 // passwordAlphabet is unambiguous by design: a password read off a terminal and
@@ -60,8 +62,16 @@ func generateWebPassword() (string, error) {
 
 // newTOTPEnrolment mints a second-factor secret and the otpauth:// URI an
 // authenticator app scans.
+//
+// The account label carries the minting time. Every enrolment is a NEW
+// secret, and an authenticator that already holds an identically-named entry
+// (a previous boot, an earlier install) can collide the scan into it — the
+// operator then reads codes off the stale entry, which can never match, and
+// nothing on either side says why. A label unique per run makes the fresh
+// entry unmistakable and leaves any stale twin visibly stale.
 func newTOTPEnrolment(account string) (secret, uri string, err error) {
-	key, err := totp.Generate(totp.GenerateOpts{Issuer: "shell3", AccountName: account})
+	label := account + " " + time.Now().Format("2006-01-02 15:04:05")
+	key, err := totp.Generate(totp.GenerateOpts{Issuer: "shell3", AccountName: label})
 	if err != nil {
 		return "", "", err
 	}
@@ -156,16 +166,29 @@ func askTOTPEnrolment(tty bool, account string, out io.Writer) (string, error) {
 // totpCodeValidator validates one enrolment-confirmation code against secret.
 // Blank is accepted — it is the "cancel enrolment" escape — and whitespace is
 // tolerated because codes get typed off a phone screen.
+//
+// A rejection diagnoses itself: a code that validates at a wider clock offset
+// names the drift, and repeated failures name the other cause that "wait for
+// the next code" can never cure — codes read off a stale authenticator entry
+// from an earlier enrolment. Diagnosis only; nothing here widens acceptance.
 func totpCodeValidator(secret string) func(string) error {
+	failures := 0
 	return func(code string) error {
 		code = strings.TrimSpace(code)
 		if code == "" {
 			return nil
 		}
-		if !totp.Validate(code, secret) {
-			return fmt.Errorf("that code does not match — wait for the app's next one and try again")
+		if totp.Validate(code, secret) {
+			return nil
 		}
-		return nil
+		if offset, drifted := totpdiag.SkewProbe(secret, code, time.Now()); drifted {
+			return fmt.Errorf("that code is minted about %s away from this machine's clock — sync the phone's or this machine's time and try the next code", offset)
+		}
+		failures++
+		if failures >= 2 {
+			return fmt.Errorf("still no match — a code from an entry the app already had can never match this enrolment: delete every shell3 entry in the app, rescan THIS QR, and use the new entry's code")
+		}
+		return fmt.Errorf("that code does not match — wait for the app's next one and try again")
 	}
 }
 

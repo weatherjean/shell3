@@ -237,6 +237,35 @@ func TestLoginRejectsAReplayedTOTPCode(t *testing.T) {
 	}
 }
 
+// A refusal must diagnose itself in the log: reused, plain wrong, and
+// clock-drifted codes are different operator problems with different cures.
+// The reason never reaches the client — the route stays a non-oracle.
+func TestAcceptCodeNamesTheRefusal(t *testing.T) {
+	secret := newTOTPSecret(t)
+	srv := newAuthServer(t, secret)
+
+	code, err := totp.GenerateCode(secret, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := srv.acceptCode(secret, code); !ok {
+		t.Fatal("the current code must be accepted")
+	}
+	if ok, reason := srv.acceptCode(secret, code); ok || !strings.Contains(reason, "reused") {
+		t.Errorf("replay must refuse as reused, got ok=%v reason=%q", ok, reason)
+	}
+	if ok, reason := srv.acceptCode(secret, "000000"); ok || reason == "" {
+		t.Errorf("a wrong code must refuse with a reason, got ok=%v reason=%q", ok, reason)
+	}
+	drifted, err := totp.GenerateCode(secret, time.Now().Add(3*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, reason := srv.acceptCode(secret, drifted); ok || !strings.Contains(reason, "clock") {
+		t.Errorf("a drifted code must name the drift, got ok=%v reason=%q", ok, reason)
+	}
+}
+
 // The login route must not be an oracle: a wrong password and a wrong code look
 // identical, so probing cannot reveal that a password was correct.
 func TestLoginFailuresAreIndistinguishable(t *testing.T) {

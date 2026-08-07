@@ -220,7 +220,13 @@ would let anyone hold the
 login closed, and TOTP already covers guessing), every attempt is logged with
 IP and user-agent, and every success raises a bell + push notification, since
 that notice is how a breach gets noticed at all. TOTP codes are single-use
-within their window. `shell3 boot` asks for the password (16-character floor,
+within their window; a refused code is diagnosed, never widened —
+`internal/totpdiag` probes a rejected code at wider clock offsets so the
+enrolment prompt and the login log can name drift, distinguish a reused from
+a wrong code, and `shell3 health` fails on a `totp_secret` that cannot mint a
+code. Each enrolment stamps its authenticator label with the minting time
+(`shell3: <dir> <timestamp>`) because every enrolment is a fresh secret and
+an identically-named stale entry silently poisons the scan. `shell3 boot` asks for the password (16-character floor,
 offers a generated one) and offers TOTP enrolment with a QR code in the
 terminal; losing the phone is not a lockout because the secret is a line in
 `.env` on your own machine. The interface is built with **assistant-ui**
