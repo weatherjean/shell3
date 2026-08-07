@@ -137,75 +137,99 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stream, ok := newStreamWriter(w)
+	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
-	stream.start(newMessageID(req.thread()))
-	defer stream.finish()
+	messageID := newMessageID(req.thread())
 
 	// One main-agent turn at a time, matching the runtime's own contract. A
 	// message that arrives mid-turn is refused rather than queued: the running
 	// turn is never steered from here.
 	//
-	// The turn's context is the request's, so a closed tab or a navigation
-	// cancels the turn. That is deliberate: a turn nobody can see is a turn
-	// nobody can stop, and it would hold the single slot indefinitely.
-	// Background jobs it already started keep running and report through the
-	// notifier, which is where long work belongs anyway.
-	turnCtx, cancel, taken := s.takeTurn(r.Context())
+	// The turn's context is its own, NOT the request's: a phone that locks its
+	// screen kills the connection within seconds, and that must not kill the
+	// turn. What keeps a detached turn accountable: /api/stop still cancels
+	// it, Status shows the slot taken, and a client that comes back
+	// re-attaches to the live stream (attach.go).
+	turnCtx, cancel, taken := s.takeTurn(context.Background())
 	if !taken {
-		stream.errorText("A turn is already running. Stop it before sending another message.")
-		return
-	}
-	defer s.releaseTurn()
-	defer cancel()
-
-	sess, err := s.sessionFor(req.thread())
-	if err != nil {
-		stream.errorText("Could not open a session: " + err.Error())
-		return
-	}
-	// Recorded here rather than in sessionFor: a thread exists once something
-	// is said in it. Opening Status, which needs a session to read the agent's
-	// shape, must not put an empty conversation in the list.
-	s.recordThread(req.thread(), sess, previewOf(prompt))
-	s.setTurnSession(sess)
-
-	// A slash command acts on the conversation instead of continuing it, and is
-	// answered here — it never reaches the model.
-	if !msg.hasFiles() && s.runCommand(turnCtx, stream, sess, prompt) {
-		return
-	}
-
-	// Attachments are stored before the turn so they keep a durable path, then
-	// captioned if a describe model is configured. What the model actually
-	// receives is decided in sessionParts.
-	uploads, notes := s.saveUploads(msg.Parts)
-	uploads = s.describeUploads(turnCtx, uploads)
-	prompt = promptWithUploads(prompt, uploads, notes)
-
-	usage, failed := pumpUsage(stream,
-		sess.SendParts(turnCtx, prompt, sessionParts(uploads)), s.turnNotice)
-	s.recordUsage(usage)
-	if failed {
-		return
-	}
-
-	// A background job that finished during the turn queued a note and woke the
-	// session; run those follow-ups into the same reply so the user sees them
-	// without sending another message.
-	for i := 0; i < maxWakeDrains; i++ {
-		if turnCtx.Err() != nil || stream.broken() || !sess.HasQueuedInput() {
+		stream, ok := newStreamWriter(w)
+		if !ok {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 			return
 		}
-		usage, failed := pumpUsage(stream, sess.RunQueued(turnCtx), s.turnNotice)
+		stream.start(messageID)
+		stream.errorText("A turn is already running. Stop it before sending another message.")
+		stream.finish()
+		return
+	}
+
+	// The turn writes into a broker; this response is merely its first
+	// reader. The goroutine owns the turn end to end — it must not touch the
+	// ResponseWriter, which dies with the request.
+	broker := newTurnBroker()
+	s.setAttachable(req.thread(), broker)
+	stream := newBrokeredStream(broker)
+
+	go func() {
+		defer s.clearAttachable(broker)
+		defer broker.done() // idempotent backstop under stream.finish
+		defer s.releaseTurn()
+		defer cancel()
+		defer stream.finish()
+		stream.start(messageID)
+
+		sess, err := s.sessionFor(req.thread())
+		if err != nil {
+			stream.errorText("Could not open a session: " + err.Error())
+			return
+		}
+		// Recorded here rather than in sessionFor: a thread exists once
+		// something is said in it. Opening Status, which needs a session to
+		// read the agent's shape, must not put an empty conversation in the
+		// list.
+		s.recordThread(req.thread(), sess, previewOf(prompt))
+		s.setTurnSession(sess)
+
+		// A slash command acts on the conversation instead of continuing it,
+		// and is answered here — it never reaches the model.
+		if !msg.hasFiles() && s.runCommand(turnCtx, stream, sess, prompt) {
+			return
+		}
+
+		// Attachments are stored before the turn so they keep a durable path,
+		// then captioned if a describe model is configured. What the model
+		// actually receives is decided in sessionParts.
+		uploads, notes := s.saveUploads(msg.Parts)
+		uploads = s.describeUploads(turnCtx, uploads)
+		prompt = promptWithUploads(prompt, uploads, notes)
+
+		usage, failed := pumpUsage(stream,
+			sess.SendParts(turnCtx, prompt, sessionParts(uploads)), s.turnNotice)
 		s.recordUsage(usage)
 		if failed {
 			return
 		}
-	}
+
+		// A background job that finished during the turn queued a note and
+		// woke the session; run those follow-ups into the same reply so the
+		// user sees them without sending another message.
+		for i := 0; i < maxWakeDrains; i++ {
+			if turnCtx.Err() != nil || !sess.HasQueuedInput() {
+				return
+			}
+			usage, failed := pumpUsage(stream, sess.RunQueued(turnCtx), s.turnNotice)
+			s.recordUsage(usage)
+			if failed {
+				return
+			}
+		}
+	}()
+
+	writeSSEHeaders(w, flusher)
+	broker.serve(r.Context(), w, flusher)
 }
 
 // takeTurn claims the single turn slot. The returned context is cancelled by

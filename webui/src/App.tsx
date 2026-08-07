@@ -228,6 +228,11 @@ const ChatRuntime: FC<{
         // Which conversation this is, sent as its own field rather than relying
         // on the request's `id` — see the note on the runtime below.
         body: { threadId },
+        // Where resumeStream() reconnects: the server replays the running
+        // turn from its start, or answers 204 when nothing is running.
+        prepareReconnectToStreamRequest: () => ({
+          api: `/api/chat/stream?thread=${encodeURIComponent(threadId)}`,
+        }),
         // Without a backend the transport streams a canned reply instead.
         ...(live ? {} : { fetch: mockChatFetch }),
       }),
@@ -250,6 +255,39 @@ const ChatRuntime: FC<{
   // same user message forever.
   const chat = useChat({ id: threadId, messages: initial, transport });
   const runtime = useAISDKRuntime(chat, { adapters });
+
+  // Reconnect-and-replay. A phone that locks its screen kills the SSE fetch
+  // while the server keeps running the turn; resumeStream() re-attaches and
+  // the server replays the turn so far. Three triggers: opening the
+  // conversation (a reload mid-turn, or switching back to a busy thread —
+  // 204 makes it a no-op otherwise), the tab becoming visible again, and the
+  // network coming back — the latter two only when the stream actually died.
+  //
+  // The effect keys on the CONVERSATION, not on `chat`: useChat returns a
+  // fresh object every render, and an effect keyed on it re-fires per render
+  // — a resume-request storm. The ref always points at the current object.
+  const chatRef = useRef(chat);
+  chatRef.current = chat;
+  useEffect(() => {
+    if (!live) return;
+    const resume = () => void chatRef.current.resumeStream().catch(() => {});
+    // A healthy stream must not be interrupted: resume only from rest.
+    if (chatRef.current.status === "ready" || chatRef.current.status === "error") {
+      resume();
+    }
+    const retry = () => {
+      if (document.visibilityState !== "visible") return;
+      if (chatRef.current.status !== "error") return;
+      chatRef.current.clearError();
+      resume();
+    };
+    document.addEventListener("visibilitychange", retry);
+    window.addEventListener("online", retry);
+    return () => {
+      document.removeEventListener("visibilitychange", retry);
+      window.removeEventListener("online", retry);
+    };
+  }, [threadId, live]);
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>

@@ -260,7 +260,18 @@ request: the turn ends server-side, its jobs are killed, and the stream closes
 properly (unfinished tool calls are answered "stopped before it finished", a
 cancelled turn reads as `_Stopped._` rather than `context canceled`), where a
 browser-side abort would strand the last tool call looking like it was waiting
-on the user. `/api/events` is the server-push channel (notifications + approval
+on the user. The turn's lifetime is its OWN, not the request's
+(`internal/webui/attach.go`): every protocol chunk lands in a per-turn
+`turnBroker` buffer and fans out to attached readers, the POST response being
+merely the first — a phone locking its screen (which kills the fetch within
+seconds) no longer kills the turn. `GET /api/chat/stream?thread=…` re-attaches:
+the whole turn replays, then follows live; 204 when nothing is running. The
+client resumes via the AI SDK's `resumeStream()` on conversation mount, on
+`visibilitychange`, and on `online` (the latter two only from the error
+state). Mid-turn, a reloaded page renders the replay without its
+not-yet-persisted user message — the view is exact again once the turn ends
+and persists. What keeps a detached turn accountable: `/api/stop` still
+cancels it, Status shows the slot taken, and the buffer drops at turn end. `/api/events` is the server-push channel (notifications + approval
 requests, and live job progress); the rest is introspection:
 `/api/capabilities`, `/api/status`, `/api/threads[/{id}[/messages]]`,
 `/api/jobs[/{id}[/cancel]]`, `/api/cron[/{name}/run]`, `/api/runs[/{id}]`,

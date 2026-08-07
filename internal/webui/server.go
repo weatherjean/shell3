@@ -62,6 +62,10 @@ type Server struct {
 	usage      *usageResp
 	turnActive bool
 	cancelTurn context.CancelFunc
+	// attachable is the running turn's chunk broker, published so a client
+	// that lost its connection can re-attach (see attach.go).
+	attachable       *turnBroker
+	attachableThread string
 	// turnSession is the session the running turn belongs to, tracked apart
 	// from recentSess so a concurrent read request cannot misdirect /api/stop.
 	turnSession *shell3.Session
@@ -236,6 +240,7 @@ func (s *Server) routes() []route {
 
 		// Conversation
 		{pattern: "/api/chat", handler: s.handleChat},
+		{pattern: "/api/chat/stream", handler: s.handleChatAttach},
 		{pattern: "/api/events", handler: s.handleEvents},
 		{pattern: "/api/asks/", handler: s.handleAskAnswer},
 		{pattern: "/api/stop", handler: s.handleStop},

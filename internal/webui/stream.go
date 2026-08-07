@@ -23,8 +23,7 @@ import (
 // open text block and the next token opens a fresh one, which is what makes
 // the client render prose, then the tool, then more prose.
 type streamWriter struct {
-	w       http.ResponseWriter
-	flusher http.Flusher
+	sink chunkSink
 
 	mu       sync.Mutex
 	blocks   int    // block id counter
@@ -38,11 +37,19 @@ type streamWriter struct {
 	failed    bool
 }
 
-func newStreamWriter(w http.ResponseWriter) (*streamWriter, bool) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		return nil, false
-	}
+// chunkSink is where a streamWriter's protocol chunks land: straight onto an
+// HTTP response for a stream with exactly one reader, or into a turnBroker
+// when the turn must outlive — and be re-attachable by — its readers.
+type chunkSink interface {
+	// writeChunk takes one marshaled protocol chunk. An error marks the
+	// writer failed, which stops all further output.
+	writeChunk(payload []byte) error
+	// done ends the stream (the [DONE] marker, or closing the broker).
+	done()
+}
+
+// writeSSEHeaders starts an SSE response the AI SDK client accepts.
+func writeSSEHeaders(w http.ResponseWriter, flusher http.Flusher) {
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream")
 	h.Set("Cache-Control", "no-cache")
@@ -53,8 +60,40 @@ func newStreamWriter(w http.ResponseWriter) (*streamWriter, bool) {
 	h.Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
+}
 
-	return &streamWriter{w: w, flusher: flusher}, true
+// httpSink writes chunks straight to one HTTP response.
+type httpSink struct {
+	w       http.ResponseWriter
+	flusher http.Flusher
+}
+
+func (h *httpSink) writeChunk(payload []byte) error {
+	if _, err := fmt.Fprintf(h.w, "data: %s\n\n", payload); err != nil {
+		return err
+	}
+	h.flusher.Flush()
+	return nil
+}
+
+func (h *httpSink) done() {
+	fmt.Fprint(h.w, "data: [DONE]\n\n")
+	h.flusher.Flush()
+}
+
+func newStreamWriter(w http.ResponseWriter) (*streamWriter, bool) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		return nil, false
+	}
+	writeSSEHeaders(w, flusher)
+	return &streamWriter{sink: &httpSink{w: w, flusher: flusher}}, true
+}
+
+// newBrokeredStream is a streamWriter whose chunks land in a turnBroker, for
+// a turn that must keep producing after its first reader is gone.
+func newBrokeredStream(b *turnBroker) *streamWriter {
+	return &streamWriter{sink: b}
 }
 
 // chunk writes one protocol chunk. Write errors mark the stream failed so the
@@ -69,11 +108,9 @@ func (s *streamWriter) chunk(v any) {
 	if s.failed {
 		return
 	}
-	if _, err := fmt.Fprintf(s.w, "data: %s\n\n", b); err != nil {
+	if err := s.sink.writeChunk(b); err != nil {
 		s.failed = true
-		return
 	}
-	s.flusher.Flush()
 }
 
 func (s *streamWriter) broken() bool {
@@ -199,8 +236,7 @@ func (s *streamWriter) finish() {
 	if s.failed {
 		return
 	}
-	fmt.Fprint(s.w, "data: [DONE]\n\n")
-	s.flusher.Flush()
+	s.sink.done()
 }
 
 // turnUsage is a turn's token count, as reported by the provider.
