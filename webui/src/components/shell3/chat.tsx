@@ -120,6 +120,11 @@ export const Thread: FC = () => {
     >
       <ThreadPrimitive.Viewport
         turnAnchor="top"
+        // Off by default under turnAnchor="top" (the framework's "focused
+        // reading" pairing), deliberately re-enabled: a reader who scrolls
+        // to the bottom mid-stream wants to STAY there and follow. The top
+        // anchor still places each new turn; this only governs following.
+        autoScroll
         data-slot="aui_thread-viewport"
         className={cn(
           "relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll scroll-smooth px-4 pt-7 md:px-7",
