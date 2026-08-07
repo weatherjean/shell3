@@ -205,8 +205,21 @@ const ThreadWelcome: FC = () => {
 };
 
 const Composer: FC = () => {
+  // On a phone, sending ends the typing: drop the keyboard so the reply gets
+  // the screen. Desktop keeps its focus for the next message. The blur waits
+  // a tick so the primitive reads the input before the field loses focus.
+  const dismissKeyboard = () => {
+    if (!window.matchMedia("(pointer: coarse)").matches) return;
+    setTimeout(() => {
+      const el = document.activeElement;
+      if (el instanceof HTMLElement) el.blur();
+    }, 0);
+  };
   return (
-    <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
+    <ComposerPrimitive.Root
+      onSubmit={dismissKeyboard}
+      className="aui-composer-root relative flex w-full flex-col"
+    >
       {/* The trigger root has to enclose the input as well as the popover:
           the input is what notices the "/" and opens it. */}
       <ComposerPrimitive.Unstable_TriggerPopoverRoot>
