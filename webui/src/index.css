@@ -341,6 +341,11 @@
 .doc table {
   margin-bottom: 13px;
 }
+/* Inside its scroll wrapper the table's own margin would push the horizontal
+   scrollbar below the table edge — the wrapper owns the spacing there. */
+.doc .aui-md-table-wrap table {
+  margin-bottom: 0;
+}
 .doc strong {
   font-weight: 650;
   color: var(--ink-hi);

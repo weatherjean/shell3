@@ -249,8 +249,13 @@ bridges `shell3.Event` → protocol chunks: text and reasoning arrive as
 delta blocks bracketed by start/end, a tool call closes the open text block
 and emits `tool-input-available` / `tool-output-available`, and channel close —
 not a terminal `Done` event — is the authoritative end of turn). Host
-narration (retries, compaction, usage) is dropped from the chat and stays in
-the logs. A message that is exactly a **slash command** is answered by the
+narration streams too, in the protocol's own channels for it: a retry or
+compaction becomes a **transient** `data-notice` part (shown as a status line
+above the composer while the turn runs, never entering the message history —
+compaction still also rings the bell, retries still log), and token usage
+becomes `message-metadata` (`metadata.usage`, the shape assistant-ui's
+`useThreadTokenUsage` reads — rendered as a small figure line under the
+composer, live-session only since transcripts don't persist metadata). A message that is exactly a **slash command** is answered by the
 server without the model ever seeing it (`internal/webui/command.go`; typing
 `/` in the composer opens the menu): `/compact` summarises the conversation's
 head and reports the tokens freed, running the same forced compaction as the

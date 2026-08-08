@@ -85,14 +85,16 @@ cheaper setting: history stays append-only between compactions, so every turn
 is a cache hit up to the newest message, and the only cache reset you pay is
 compaction itself. The Status view's "Last turn" line reports the cache-hit
 share when the provider does, which is how you check what your endpoint
-actually delivers.
+actually delivers; the chat shows the same figures live as a small line under
+the composer after each turn.
 
 Compaction is host-managed and there are no model-driven prune/compact tools.
 Each browser thread is its own session, so long histories only build up in a
 thread you keep returning to; a session that does grow crosses `compact_at` and
 compacts on its own. A compaction posts a notification to the bell ("context
-compacted") — it discards part of the conversation, so the later "why did you
-forget that" has a visible answer.
+compacted") and shows a status line in the chat while the turn runs — it
+discards part of the conversation, so the later "why did you forget that" has
+a visible answer.
 
 You can also compact on demand: send **`/compact`** in the chat (type `/` for
 the menu). It runs the same summarise-the-head, keep-the-recent-turns

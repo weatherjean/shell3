@@ -187,6 +187,31 @@ func (s *streamWriter) toolResult(id, output string, isError bool) {
 	s.chunk(map[string]any{"type": "tool-output-available", "toolCallId": id, "output": output})
 }
 
+// notice streams host narration (a retry, a compaction) as a transient data
+// part: delivered to the client's onData handler for live display, never
+// added to the message history. Emitted without closing the open block —
+// a notice is an aside, not a break in the reply.
+func (s *streamWriter) notice(kind, text string) {
+	s.chunk(map[string]any{
+		"type": "data-notice", "transient": true,
+		"data": map[string]any{"kind": kind, "text": text},
+	})
+}
+
+// usageMetadata streams the turn's token totals as message metadata, the
+// shape assistant-ui's useThreadTokenUsage reads (message.metadata.usage).
+func (s *streamWriter) usageMetadata(u turnUsage) {
+	s.chunk(map[string]any{
+		"type": "message-metadata",
+		"messageMetadata": map[string]any{"usage": map[string]any{
+			"inputTokens":       u.Prompt,
+			"outputTokens":      u.Completion,
+			"totalTokens":       u.Total,
+			"cachedInputTokens": u.Cached,
+		}},
+	})
+}
+
 func (s *streamWriter) errorText(text string) {
 	s.closeBlock()
 	s.chunk(map[string]any{"type": "error", "errorText": text})
@@ -316,10 +341,12 @@ func pumpUsage(
 		case shell3.Compacted:
 			// The conversation was just summarized to fit the context window —
 			// consequential enough that silently doing it is the wrong call.
+			s.notice("compacted", ev.Text)
 			if onNotice != nil {
 				onNotice("compacted", ev.Text)
 			}
 		case shell3.Retry:
+			s.notice("retry", ev.Text)
 			if onNotice != nil {
 				onNotice("retry", ev.Text)
 			}
@@ -336,6 +363,10 @@ func pumpUsage(
 					Total:      ev.TotalTokens,
 					Cached:     ev.CachedTokens,
 				}
+				// Streamed too: the chat shows the turn's cost in place via
+				// message metadata. Each update overwrites the last, so the
+				// final Done totals win.
+				s.usageMetadata(usage)
 			}
 		}
 	}

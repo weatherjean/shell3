@@ -171,13 +171,17 @@ const defaultComponents = memoizeMarkdownComponents({
     <hr className={cn("aui-md-hr border-muted-foreground/20 my-3", className)} {...props} />
   ),
   table: ({ className, ...props }) => (
-    <table
-      className={cn(
-        "aui-md-table my-3 w-full border-separate border-spacing-0 overflow-y-auto",
-        className,
-      )}
-      {...props}
-    />
+    // A table box cannot scroll itself: a wide table would push past the
+    // message column instead. The wrapper owns the horizontal scroll.
+    <div className="aui-md-table-wrap my-3 w-full overflow-x-auto">
+      <table
+        className={cn(
+          "aui-md-table w-full border-separate border-spacing-0",
+          className,
+        )}
+        {...props}
+      />
+    </div>
   ),
   th: ({ className, ...props }) => (
     <th

@@ -192,18 +192,67 @@ func TestPumpSurfacesTurnErrors(t *testing.T) {
 	}
 }
 
-// Host narration (retries, compaction, usage) belongs in the logs and the
-// Runs view, not in a chat bubble.
-func TestPumpDropsHostNarration(t *testing.T) {
+// Host narration (retries, compaction) streams as TRANSIENT data parts: the
+// protocol's channel for status the user should see live but that must never
+// enter the message history. System reminders stay out of the chat entirely.
+func TestPumpStreamsHostNarrationAsTransientData(t *testing.T) {
 	body, _ := drain(t, []shell3.Event{
-		{Kind: shell3.Retry, Text: "retrying"},
-		{Kind: shell3.Compacted, Text: "compacted"},
+		{Kind: shell3.Retry, Text: "attempt 2"},
+		{Kind: shell3.Compacted, Text: "summarized 40 messages"},
 		{Kind: shell3.SystemReminder, Text: "reminder"},
-		{Kind: shell3.Usage, TotalTokens: 10},
-		{Kind: shell3.Done, TotalTokens: 10},
 	})
-	if got := types(chunks(t, body)); strings.Join(got, ",") != "finish" {
-		t.Errorf("chunk types = %v, want only finish", got)
+
+	var notices []map[string]any
+	for _, c := range chunks(t, body) {
+		if c["type"] == "data-notice" {
+			notices = append(notices, c)
+		}
+	}
+	if len(notices) != 2 {
+		t.Fatalf("data-notice count = %d, want 2 (retry + compacted)", len(notices))
+	}
+	for _, n := range notices {
+		if n["transient"] != true {
+			t.Errorf("notice %v must be transient, or it pollutes the transcript", n)
+		}
+		data, ok := n["data"].(map[string]any)
+		if !ok {
+			t.Fatalf("notice data = %#v, want an object", n["data"])
+		}
+		if data["kind"] != "retry" && data["kind"] != "compacted" {
+			t.Errorf("notice kind = %v, want retry or compacted", data["kind"])
+		}
+	}
+	if strings.Contains(body, "reminder") {
+		t.Error("system reminders must not reach the chat stream")
+	}
+}
+
+// Token usage streams as message metadata, the protocol's per-message facts
+// channel — assistant-ui's useThreadTokenUsage reads message.metadata.usage.
+// Done carries the final totals and must win over interim Usage events.
+func TestPumpEmitsUsageAsMessageMetadata(t *testing.T) {
+	body, _ := drain(t, []shell3.Event{
+		{Kind: shell3.Usage, PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7},
+		{Kind: shell3.Done, PromptTokens: 100, CompletionTokens: 25, TotalTokens: 125, CachedTokens: 80},
+	})
+
+	var last map[string]any
+	for _, c := range chunks(t, body) {
+		if c["type"] == "message-metadata" {
+			last = c
+		}
+	}
+	if last == nil {
+		t.Fatal("no message-metadata chunk in the stream")
+	}
+	usage, ok := last["messageMetadata"].(map[string]any)["usage"].(map[string]any)
+	if !ok {
+		t.Fatalf("messageMetadata = %#v, want {usage: {...}}", last["messageMetadata"])
+	}
+	if usage["inputTokens"] != float64(100) || usage["outputTokens"] != float64(25) ||
+		usage["totalTokens"] != float64(125) || usage["cachedInputTokens"] != float64(80) {
+		t.Errorf("usage = %#v, want the Done event's totals", usage)
 	}
 }
 

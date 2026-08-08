@@ -28,7 +28,12 @@ import {
   type FC,
   type ReactNode,
 } from "react";
-import { ReconnectContext, Thread } from "@/components/shell3/chat";
+import {
+  ReconnectContext,
+  Thread,
+  TurnNoticeContext,
+  type TurnNotice,
+} from "@/components/shell3/chat";
 import { LoginScreen } from "@/components/shell3/login";
 import { AskDialog } from "@/components/shell3/ask-dialog";
 import { FilesView } from "@/components/shell3/files-view";
@@ -262,7 +267,25 @@ const ChatRuntime: FC<{
   // it, so the condition "assistant message complete with tool results" is true
   // at the end of any tool-using turn — and re-submitting there replays the
   // same user message forever.
-  const chat = useChat({ id: threadId, messages: initial, transport });
+  // Host narration streamed as transient data parts — a provider retry, a
+  // compaction. Transient parts never enter the message history; onData is
+  // the only place they surface, so the state here is all there is.
+  const [notice, setNotice] = useState<TurnNotice | null>(null);
+  const onData = useCallback((part: { type: string; data?: unknown }) => {
+    if (part.type !== "data-notice") return;
+    const data = part.data as { kind?: string; text?: string } | undefined;
+    if (data?.kind) setNotice({ kind: data.kind, text: data.text ?? "" });
+  }, []);
+
+  const chat = useChat({
+    id: threadId,
+    messages: initial,
+    transport,
+    // Batches message-update renders. Matters most on reconnect, where the
+    // server replays the whole turn so far as one burst.
+    throttle: 50,
+    onData,
+  });
   const runtime = useAISDKRuntime(chat, { adapters });
 
   // Reconnect-and-replay. A phone that locks its screen kills the SSE fetch
@@ -361,6 +384,9 @@ const ChatRuntime: FC<{
       setReconnecting(false);
       return;
     }
+    // The turn is over — whatever the host was narrating (a retry, a
+    // compaction) has resolved with it.
+    setNotice(null);
     if (!live || status !== "error") return;
     if (document.visibilityState !== "visible") return;
     if (recoverTries.current >= 3) return;
@@ -378,7 +404,9 @@ const ChatRuntime: FC<{
     <AssistantRuntimeProvider runtime={runtime}>
       <TurnWatcher onTurnEnd={onTurnEnd} />
       <ReconnectContext.Provider value={reconnectState}>
-        <Thread />
+        <TurnNoticeContext.Provider value={notice}>
+          <Thread />
+        </TurnNoticeContext.Provider>
       </ReconnectContext.Provider>
     </AssistantRuntimeProvider>
   );

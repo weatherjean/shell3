@@ -60,6 +60,7 @@ import {
   SquareIcon,
 } from "lucide-react";
 import { createContext, useContext, useState, type FC, type ReactNode } from "react";
+import { useThreadTokenUsage } from "@assistant-ui/react-ai-sdk";
 import { stopTurn } from "@/lib/api";
 import { useCapabilities } from "@/lib/capabilities";
 import { useVoiceStatus, VOICE_LABELS } from "@/lib/voice-status";
@@ -158,7 +159,9 @@ export const Thread: FC = () => {
         >
           <ThreadScrollToBottom />
           <ReconnectingIndicator />
+          <TurnNoticeIndicator />
           <Composer />
+          <UsageLine />
         </ThreadPrimitive.ViewportFooter>
       </ThreadPrimitive.Viewport>
 
@@ -368,6 +371,37 @@ export const ReconnectContext = createContext<{
   reconnecting: boolean;
 } | null>(null);
 
+/**
+ * Host narration for the running turn, streamed as transient data parts —
+ * a provider call being retried, the conversation being compacted. Transient
+ * parts never enter the message history, so this context is their only
+ * surface; the app shell clears it when the turn ends.
+ */
+export type TurnNotice = { kind: string; text: string };
+export const TurnNoticeContext = createContext<TurnNotice | null>(null);
+
+const NOTICE_LABELS: Record<string, string> = {
+  retry: "Provider hiccup — retrying",
+  compacted: "Context compacted — older turns summarized",
+};
+
+const TurnNoticeIndicator: FC = () => {
+  const notice = useContext(TurnNoticeContext);
+  if (!notice) return null;
+  const label = NOTICE_LABELS[notice.kind] ?? notice.kind;
+  return (
+    <div className="fade-in animate-in self-center duration-300" role="status">
+      <span className="text-ink-3 inline-flex max-w-full items-center gap-2 text-xs">
+        <DotMatrix state="connecting" aria-hidden />
+        <span className="truncate">
+          {label}
+          {notice.text ? ` · ${notice.text}` : ""}
+        </span>
+      </span>
+    </div>
+  );
+};
+
 const MessageError: FC = () => {
   const reconnect = useContext(ReconnectContext);
   return (
@@ -409,6 +443,28 @@ const ReconnectingIndicator: FC = () => {
         <DotMatrix state="connecting" aria-hidden />
         Reconnecting — recovering the reply…
       </span>
+    </div>
+  );
+};
+
+/**
+ * The turn's cost, hung under the composer like a folio line. Read from the
+ * latest assistant message's streamed metadata (the same figures Status
+ * reports); absent until a turn in this session has carried usage, and gone
+ * again on a plain transcript reload — a live readout, not a ledger.
+ */
+const UsageLine: FC = () => {
+  const usage = useThreadTokenUsage();
+  if (!usage?.totalTokens) return null;
+  const cached =
+    usage.cachedInputTokens && usage.inputTokens
+      ? ` · ${Math.round((usage.cachedInputTokens / usage.inputTokens) * 100)}% cached`
+      : "";
+  return (
+    <div className="text-ink-3 self-center font-mono text-[9.5px] tracking-[.04em]">
+      {(usage.inputTokens ?? 0).toLocaleString()} +{" "}
+      {(usage.outputTokens ?? 0).toLocaleString()} tokens
+      {cached}
     </div>
   );
 };
