@@ -24,11 +24,11 @@ import (
 
 // notification is one entry in the bell, matching the browser's shape.
 type notification struct {
-	ID       string `json:"id"`
-	Kind     string `json:"kind"` // "note" | "cron" | "alert"
-	Title    string `json:"title"`
-	Body     string `json:"body"`
-	At       string `json:"at"`
+	ID    string `json:"id"`
+	Kind  string `json:"kind"` // "note" | "cron" | "alert"
+	Title string `json:"title"`
+	Body  string `json:"body"`
+	At    string `json:"at"`
 	// Read is computed against the seen marker at replay time, so a page
 	// reload does not resurrect a badge the user already cleared.
 	Read     bool   `json:"read"`
