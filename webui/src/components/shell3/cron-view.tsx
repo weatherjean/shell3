@@ -22,7 +22,10 @@ import { useCapabilities } from "@/lib/capabilities";
 // that is what you scan a timetable by — and each job's prompt is its brief,
 // set in the serif italic, since the prompt is what the job actually IS.
 
-const SLOT = "grid-cols-[112px_1fr_auto]";
+// The timetable's three columns need the width of a desk. On a phone the row
+// stacks: schedule, then the entry, then the run controls as a footer line —
+// three narrow columns would crush the brief into a sliver.
+const SLOT = "grid-cols-1 gap-y-2 sm:grid-cols-[112px_1fr_auto]";
 
 export const CronView: FC<{ onOpenJob: (jobId: string) => void }> = ({ onOpenJob }) => {
   const { live } = useCapabilities();
@@ -111,16 +114,19 @@ export const CronView: FC<{ onOpenJob: (jobId: string) => void }> = ({ onOpenJob
                   {entry.direct ? "direct delivery" : "notifier triage"}
                   {entry.workdir ? ` · ${entry.workdir}` : ""}
                 </span>
+                {/* No `block` beside the clamp: line-clamp IS a display value
+                    (-webkit-box), and a competing `display: block` would win
+                    or lose by stylesheet order — silently unclamping. */}
                 {entry.prompt && (
-                  <span className="doc border-rule text-ink-2 mt-2.5 block border-l-2 pl-3 text-[13px] italic">
-                    {entry.prompt.length > 180
-                      ? `${entry.prompt.slice(0, 180).trimEnd()}…`
+                  <span className="doc border-rule text-ink-2 mt-2.5 line-clamp-3 border-l-2 pl-3 text-[13px] italic">
+                    {entry.prompt.length > 240
+                      ? `${entry.prompt.slice(0, 240).trimEnd()}…`
                       : entry.prompt}
                   </span>
                 )}
               </button>
 
-              <span className="flex flex-col items-end gap-2">
+              <span className="flex flex-row items-center justify-between gap-2 sm:flex-col sm:items-end">
                 <Figure className="text-[9.5px] whitespace-nowrap">
                   {entry.lastRun ? `ran ${relativeTime(entry.lastRun)}` : "never run"}
                 </Figure>

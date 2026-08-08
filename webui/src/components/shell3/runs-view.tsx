@@ -17,12 +17,13 @@ import { useCapabilities } from "@/lib/capabilities";
 
 const ARCH = "grid-cols-[136px_1fr_auto]";
 
-export const RunsView: FC = () => {
+export const RunsView: FC<{ focus?: string | null }> = ({ focus }) => {
   const { live } = useCapabilities();
   const [runs, setRuns] = useState<Run[]>([]);
   const [truncated, setTruncated] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  // A notification's "See the run" arrives with the run already chosen.
+  const [selected, setSelected] = useState<string | null>(focus ?? null);
 
   const refresh = useCallback(() => {
     if (!live) return;

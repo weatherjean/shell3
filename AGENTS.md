@@ -82,7 +82,10 @@ lands through a front-end `CompletionHost`
 (`Runtime.SetCompletionHost`, web half in `internal/webui/completion.go`:
 `PostCompletion` becomes a bell notification — kind `cron` for cron origins,
 `alert` for the ⚠️ failure floor, `note` otherwise — carrying the owning
-thread's id when one exists; `WakeOwner` queues+wakes a live owner, its
+thread's id when one exists, plus the job id and the child session's run id
+(the bell renders these as a "See the run"/"See the job"/"Open the
+conversation" link into the Runs/Jobs/Chat view, preferring the stored run
+since it outlives a restart); `WakeOwner` queues+wakes a live owner, its
 liveness check paired under one lock with session retirement so a note lands
 or the session retires, never both; `StartFreshTurn` (no owner — cron,
 orphans) runs the note in a fresh main-agent session on the background
@@ -432,7 +435,10 @@ hidden pinned "cron" parent session that is the dispatch parent + the jobs/runs
 source but runs NO turns of its own and is never woken; a run's result is a
 notifier event carrying the job name (`DispatchOpts.CronJob`) and the job's
 prompt as the triage note (`DispatchOpts.Note` — the judge knows what the job
-is FOR); a failed run always surfaces as `⚠️ <job> failed: <error>`). The
+is FOR); the cron triage prompt sets silence as the default — a job's brief
+reads as a standing "report X, Y, Z" order, so the host instruction says a
+tick that found nothing new stays silent even when its output restates the
+brief; a failed run always surfaces as `⚠️ <job> failed: <error>`). The
 scheduler is armed at `serve` start AND re-armed on every successful reload
 (`SetReloadHook` in serve.go → `rearmCron` in host.go): a `cron/` file added
 after startup fires once /reload — or the agent's queued `reload` — arms it,

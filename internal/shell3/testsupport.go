@@ -4,7 +4,14 @@ import (
 	"context"
 
 	"github.com/weatherjean/shell3/internal/chat"
+	"github.com/weatherjean/shell3/internal/runs"
 )
+
+// SetStoreForTest wires a runs store into a test runtime, so tests exercise
+// the same persistence path the production runtime gets from its Parts.
+func (rt *Runtime) SetStoreForTest(st *runs.Store) {
+	rt.store = st
+}
 
 // RuntimeForTest builds a Runtime around a caller-supplied per-session config
 // builder, for test harnesses in other packages (see internal/shell3/shell3test). It

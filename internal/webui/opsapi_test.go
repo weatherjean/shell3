@@ -152,6 +152,29 @@ func TestRunsListIsNeverNull(t *testing.T) {
 	}
 }
 
+// A stored session must be readable even when it never wrote a job log: the
+// existence check has to ask the store, not stat a runs/<id>/ directory —
+// that dir only exists once a bash_bg job logs into it, so checking the disk
+// 404s nearly every run the list itself serves.
+func TestRunTranscriptServesSessionsWithoutJobLogs(t *testing.T) {
+	srv := newTestServer(t, "ok")
+	postChat(t, srv, "t-runs", "hello")
+
+	sessions, err := srv.rt.PastSessions(10)
+	if err != nil || len(sessions) == 0 {
+		t.Fatalf("PastSessions = %v, %v; want the chat's session", sessions, err)
+	}
+
+	rec := httptest.NewRecorder()
+	srv.handleRunTranscript(rec, sessions[0].ID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 — a stored run must not 404", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "hello") {
+		t.Errorf("transcript should carry the message: %s", rec.Body.String())
+	}
+}
+
 func TestRunTranscriptRejectsUnknownRun(t *testing.T) {
 	srv := newTestServer(t, "ok")
 	rec := httptest.NewRecorder()
@@ -250,8 +273,8 @@ func TestRetryDoesNotReachTheBell(t *testing.T) {
 func TestNotificationsAreReplayable(t *testing.T) {
 	srv := newTestServer(t, "ok")
 
-	srv.PostCompletion("", "", "first")
-	srv.PostCompletion("", "", "second")
+	srv.PostCompletion(shell3.CompletionPost{CronJob: "", OwnerID: "", Text: "first"})
+	srv.PostCompletion(shell3.CompletionPost{CronJob: "", OwnerID: "", Text: "second"})
 
 	recent := srv.recentNotices()
 	if len(recent) != 2 {
@@ -268,7 +291,7 @@ func TestNotificationsAreReplayable(t *testing.T) {
 func TestNotificationBufferIsBounded(t *testing.T) {
 	srv := newTestServer(t, "ok")
 	for i := 0; i < recentNotifications+25; i++ {
-		srv.PostCompletion("", "", "note")
+		srv.PostCompletion(shell3.CompletionPost{CronJob: "", OwnerID: "", Text: "note"})
 	}
 	if got := len(srv.recentNotices()); got != recentNotifications {
 		t.Errorf("buffer holds %d, want it capped at %d", got, recentNotifications)

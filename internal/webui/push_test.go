@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/media"
+	"github.com/weatherjean/shell3/internal/shell3"
 )
 
 // The VAPID keypair identifies this install to push services. It is generated
@@ -181,7 +182,7 @@ func TestNotificationsWorkWithoutPush(t *testing.T) {
 	events, cancel := srv.hub.subscribe()
 	defer cancel()
 
-	srv.PostCompletion("", "", "still delivered")
+	srv.PostCompletion(shell3.CompletionPost{CronJob: "", OwnerID: "", Text: "still delivered"})
 
 	select {
 	case ev := <-events:

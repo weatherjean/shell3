@@ -9,6 +9,7 @@ import (
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
+	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
@@ -36,10 +37,27 @@ func NewRuntimeForTestClient(t *testing.T, client chat.LLMClient) *shell3.Runtim
 	})
 }
 
-// newRuntime builds the runtime via shell3.RuntimeForTest and registers cleanup.
+// newRuntime builds the runtime via shell3.RuntimeForTest and registers
+// cleanup. Sessions persist into a real runs store in the temp dir, so tests
+// exercise the same history/runs paths the production runtime does.
 func newRuntime(t *testing.T, sessionConfig func(shell3.SessionOpts) (chat.Config, error)) *shell3.Runtime {
 	t.Helper()
-	rt := shell3.RuntimeForTest(t.TempDir(), sessionConfig)
-	t.Cleanup(func() { _ = rt.Close() })
+	dir := t.TempDir()
+	store, err := runs.Open(dir)
+	if err != nil {
+		t.Fatalf("open runs store: %v", err)
+	}
+	rt := shell3.RuntimeForTest(dir, func(o shell3.SessionOpts) (chat.Config, error) {
+		cfg, err := sessionConfig(o)
+		if err == nil && cfg.Store == nil {
+			cfg.Store = store
+		}
+		return cfg, err
+	})
+	rt.SetStoreForTest(store)
+	t.Cleanup(func() {
+		_ = rt.Close()
+		_ = store.Close()
+	})
 	return rt
 }

@@ -131,6 +131,14 @@ func (s *Store) EndSession(id string) error {
 
 // HasMessages reports whether the session has stored at least one message —
 // the cheap "worth listing/replaying" probe.
+// SessionExists reports whether a session row with this id is stored.
+func (s *Store) SessionExists(id string) bool {
+	var one int
+	err := s.db.QueryRow(
+		`SELECT 1 FROM sessions WHERE id=? LIMIT 1`, id).Scan(&one)
+	return err == nil
+}
+
 func (s *Store) HasMessages(id string) bool {
 	var one int
 	err := s.db.QueryRow(

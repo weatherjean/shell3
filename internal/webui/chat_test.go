@@ -276,7 +276,10 @@ func TestPostCompletionPublishesANotification(t *testing.T) {
 	events, cancel := srv.hub.subscribe()
 	defer cancel()
 
-	srv.PostCompletion("nightly", "", "3 PRs need review")
+	srv.PostCompletion(shell3.CompletionPost{
+		CronJob: "nightly", Text: "3 PRs need review",
+		JobID: "sub4", RunID: "run-abc",
+	})
 
 	select {
 	case ev := <-events:
@@ -293,6 +296,10 @@ func TestPostCompletionPublishesANotification(t *testing.T) {
 		if n.ID == "" || n.At == "" {
 			t.Error("a notification needs an id and a timestamp")
 		}
+		// The way INTO the work rides along: the job and its stored run.
+		if n.JobID != "sub4" || n.RunID != "run-abc" {
+			t.Errorf("notification = %+v, want jobId sub4 and runId run-abc", n)
+		}
 	default:
 		t.Fatal("no notification was published")
 	}
@@ -305,7 +312,7 @@ func TestPostCompletionMarksFailuresAsAlerts(t *testing.T) {
 	events, cancel := srv.hub.subscribe()
 	defer cancel()
 
-	srv.PostCompletion("", "", "⚠️ backup.sh failed: exit 2")
+	srv.PostCompletion(shell3.CompletionPost{CronJob: "", OwnerID: "", Text: "⚠️ backup.sh failed: exit 2"})
 
 	ev := <-events
 	var n notification

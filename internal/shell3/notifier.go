@@ -84,6 +84,7 @@ type CompletionEvent struct {
 	Detail  string // on-disk path with the full output ("" = none)
 	Elapsed time.Duration
 	OwnerID string // owning root session's store id ("" when gone/cron)
+	RunID   string // subagent/cron: the child session's store id ("" for commands)
 
 	// notice is the pre-built raw notification for the non-triage paths:
 	// host-nil owner delivery, degraded (no notifier.md) posts, and the
@@ -94,6 +95,14 @@ type CompletionEvent struct {
 	// CompletionHost.WakeOwner so the front-end can check liveness under its
 	// own lock.
 	owner *Session
+}
+
+// post builds the user-facing post for this event carrying its provenance.
+func (e CompletionEvent) post(text string) CompletionPost {
+	return CompletionPost{
+		CronJob: e.CronJob, OwnerID: e.OwnerID,
+		JobID: e.JobID, RunID: e.RunID, Text: text,
+	}
 }
 
 // Failed reports whether the underlying job failed (nonzero exit or a run
@@ -114,14 +123,26 @@ func (e CompletionEvent) label() string {
 	return fmt.Sprintf("%s (%s)", e.JobID, title)
 }
 
+// CompletionPost is one user-facing completion post: the text plus where it
+// came from, so the front-end can offer a way INTO the work — the job, the
+// stored run — instead of a bare notice.
+type CompletionPost struct {
+	CronJob string // cron job name ("" for non-cron)
+	OwnerID string // owning root session's store id ("" when gone/cron)
+	JobID   string // background job id (bg3/sub2; "" when unknown)
+	RunID   string // stored child-session id ("" for bash_bg commands)
+	Text    string
+}
+
 // CompletionHost is the front-end delivery surface a Runtime host plugs in via
 // SetCompletionHost. All methods may be called from job-runtime goroutines.
 type CompletionHost interface {
-	// PostCompletion posts text to the user. cronJob != "" marks a cron
-	// origin (the host prefixes "⏰ <cronJob>:"), otherwise "🔔". ownerID,
+	// PostCompletion posts p.Text to the user. p.CronJob != "" marks a cron
+	// origin (the host prefixes "⏰ <cronJob>:"), otherwise "🔔". p.OwnerID,
 	// when it names a live threaded session, lets the host thread+anchor the
-	// post; "" (or an unknown id) posts standalone.
-	PostCompletion(cronJob, ownerID, text string)
+	// post; "" (or an unknown id) posts standalone. JobID/RunID, when set,
+	// let the host link the post to the job and its stored run.
+	PostCompletion(p CompletionPost)
 	// WakeOwner delivers note into the owning session (queue + wake) iff the
 	// host still considers ownerID live, returning false when it is gone —
 	// the caller then falls back to StartFreshTurn. Hosts implement the
@@ -193,6 +214,7 @@ func subagentEvent(j *bgJob, summary, errText string) CompletionEvent {
 	ev := CompletionEvent{
 		Kind: EvSubagent, JobID: j.id, Title: j.title, Agent: j.agent,
 		CronJob: j.cronJob, ErrText: errText, Tail: tail, Note: j.note,
+		RunID:   j.childID,
 		Elapsed: time.Since(j.startedAt),
 		notice:  notifyAgentDone(j.id, summary, errText),
 	}
@@ -211,6 +233,7 @@ func followUpEvent(sub *bgJob, n notify.Notification, summary, errText string) C
 	ev := CompletionEvent{
 		Kind: EvFollowUp, JobID: sub.id, Title: sub.title, Agent: sub.agent,
 		CronJob: sub.cronJob, ErrText: errText, Tail: tail, Note: sub.note,
+		RunID:   sub.childID,
 		Elapsed: time.Since(sub.startedAt),
 		notice:  n,
 	}
@@ -256,7 +279,7 @@ func (m *jobManager) dispatchCompletion(ev CompletionEvent) {
 	}
 	if !m.rt.notifierAvailable() {
 		// Degraded mode: no notifier.md — post everything raw, zero tokens.
-		host.PostCompletion(ev.CronJob, ev.OwnerID, renderNotification(ev.notice))
+		host.PostCompletion(ev.post(renderNotification(ev.notice)))
 		return
 	}
 	m.mu.Lock()
@@ -315,7 +338,7 @@ func (m *jobManager) runTriage(host CompletionHost, ev CompletionEvent) {
 			if already {
 				return "already sent — at most one send per completion", nil
 			}
-			host.PostCompletion(ev.CronJob, ev.OwnerID, p.Text)
+			host.PostCompletion(ev.post(p.Text))
 			return "sent", nil
 		},
 	})
@@ -379,9 +402,9 @@ func (m *jobManager) applyTriageFloor(host CompletionHost, ev CompletionEvent, d
 	}
 	switch {
 	case ev.Failed():
-		host.PostCompletion(ev.CronJob, ev.OwnerID, floorText(ev))
+		host.PostCompletion(ev.post(floorText(ev)))
 	case runErr != nil:
-		host.PostCompletion(ev.CronJob, ev.OwnerID, renderNotification(ev.notice))
+		host.PostCompletion(ev.post(renderNotification(ev.notice)))
 	}
 }
 
@@ -444,6 +467,16 @@ func renderCompletionEvent(ev CompletionEvent) string {
 	}
 	if ev.Detail != "" {
 		fmt.Fprintf(&b, "full output: %s (inspect with the read tool if the tail is not enough)\n", ev.Detail)
+	}
+	if ev.Kind == EvCron {
+		// The note above is the job's standing brief, and briefs are written
+		// as reporting orders ("report the count, list the results") — read
+		// literally, that turns every routine tick into a notification.
+		b.WriteString("\nThis is a scheduled job's routine tick, and silence is its default. " +
+			"The note is the job's standing brief: send only when this run's output " +
+			"carries something the brief exists to surface — a fresh result, a change, " +
+			"a failure. A tick that found nothing new (no changes, empty queue, " +
+			"nothing fresh) stays silent, even when its output restates the brief.\n")
 	}
 	b.WriteString("\nRespond by calling AT MOST one of:\n" +
 		"- send {text}: post a short message to the user now.\n" +

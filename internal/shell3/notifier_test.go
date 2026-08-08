@@ -20,10 +20,10 @@ type fakeHost struct {
 	wakeOK bool
 }
 
-func (h *fakeHost) PostCompletion(cronJob, ownerID, text string) {
+func (h *fakeHost) PostCompletion(p CompletionPost) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.posts = append(h.posts, "cron="+cronJob+" owner="+ownerID+" "+text)
+	h.posts = append(h.posts, "cron="+p.CronJob+" owner="+p.OwnerID+" "+p.Text)
 }
 
 func (h *fakeHost) WakeOwner(ownerID, note string) bool {
@@ -257,6 +257,25 @@ func TestTriageTimeoutViaClose(t *testing.T) {
 	posts, _, _ := host.snapshot()
 	if len(posts) != 0 {
 		t.Fatalf("shutdown must not post, got %v", posts)
+	}
+}
+
+// A cron tick's triage prompt must set silence as the default: the job's
+// prompt rides along as the note, and a note full of "report X, Y, Z" reads
+// as a standing order to send — which made every routine tick a notification.
+func TestRenderCompletionEventTellsCronTicksToDefaultSilent(t *testing.T) {
+	ev := cleanEvent()
+	ev.Kind = EvCron
+	ev.CronJob = "leads"
+	out := renderCompletionEvent(ev)
+	if !strings.Contains(out, "nothing new") {
+		t.Fatalf("cron triage prompt must call out the nothing-new-stays-silent rule: %q", out)
+	}
+
+	// Non-cron events must not carry the cron framing.
+	plain := renderCompletionEvent(cleanEvent())
+	if strings.Contains(plain, "nothing new") {
+		t.Fatalf("non-cron triage prompt picked up the cron rule: %q", plain)
 	}
 }
 

@@ -37,7 +37,10 @@ import {
 import { LoginScreen } from "@/components/shell3/login";
 import { AskDialog } from "@/components/shell3/ask-dialog";
 import { FilesView } from "@/components/shell3/files-view";
-import { NotificationBell } from "@/components/shell3/notification-bell";
+import {
+  NotificationBell,
+  type NotificationTarget,
+} from "@/components/shell3/notification-bell";
 import { CronView } from "@/components/shell3/cron-view";
 import { JobsView } from "@/components/shell3/jobs-view";
 import { RunsView } from "@/components/shell3/runs-view";
@@ -618,7 +621,8 @@ const Header: FC<{
   collapsed: boolean;
   onToggleSidebar: () => void;
   controls: ThreadControls;
-}> = ({ view, onSelect, collapsed, onToggleSidebar, controls }) => (
+  onOpenNotification: (target: NotificationTarget) => void;
+}> = ({ view, onSelect, collapsed, onToggleSidebar, controls, onOpenNotification }) => (
   <header className="flex h-12 shrink-0 items-center gap-2 px-4">
     <MobileSidebar view={view} onSelect={onSelect} controls={controls} />
     <TooltipIconButton
@@ -635,7 +639,7 @@ const Header: FC<{
     {view === "chat" ? <ChatTitle controls={controls} /> : <PageHeading view={view} />}
 
     <div className="ml-auto flex items-center gap-0.5">
-      <NotificationBell />
+      <NotificationBell onOpen={onOpenNotification} />
       <TooltipIconButton
         variant="ghost"
         size="icon"
@@ -739,8 +743,31 @@ const Workspace: FC = () => {
   const [collapsed, setCollapsed] = useState(false);
   // Set when Cron sends the user to a specific job ("see what it did").
   const [jobFocus, setJobFocus] = useState<string | null>(null);
+  // Set when a notification sends the user to a specific stored run.
+  const [runFocus, setRunFocus] = useState<string | null>(null);
   const { live } = useCapabilities();
   const controls = useThreads();
+
+  // A notification's link: into the stored run, the live job, or the chat.
+  const openNotification = useCallback(
+    (target: NotificationTarget) => {
+      switch (target.kind) {
+        case "run":
+          setRunFocus(target.id);
+          setView("runs");
+          break;
+        case "job":
+          setJobFocus(target.id);
+          setView("jobs");
+          break;
+        case "thread":
+          controls.select(target.id);
+          setView("chat");
+          break;
+      }
+    },
+    [controls],
+  );
 
   return (
     <HeadingProvider>
@@ -753,6 +780,7 @@ const Workspace: FC = () => {
             view={view}
             onSelect={(next) => {
               if (next !== "jobs") setJobFocus(null);
+              if (next !== "runs") setRunFocus(null);
               setView(next);
             }}
             collapsed={collapsed}
@@ -764,11 +792,13 @@ const Workspace: FC = () => {
               view={view}
               onSelect={(next) => {
                 if (next !== "jobs") setJobFocus(null);
+                if (next !== "runs") setRunFocus(null);
                 setView(next);
               }}
               collapsed={collapsed}
               onToggleSidebar={() => setCollapsed(!collapsed)}
               controls={controls}
+              onOpenNotification={openNotification}
             />
             <main className="min-h-0 flex-1 overflow-hidden">
               {/* Kept mounted across view switches so a running turn is never
@@ -790,7 +820,7 @@ const Workspace: FC = () => {
                   }}
                 />
               )}
-              {view === "runs" && <RunsView />}
+              {view === "runs" && <RunsView key={runFocus ?? "runs"} focus={runFocus} />}
               {view === "status" && <StatusView />}
               {view === "files" && <FilesView />}
             </main>

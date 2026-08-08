@@ -24,6 +24,10 @@ export type Notification = {
   read: boolean;
   /** Set when the notification came from a chat thread the user can open. */
   threadId?: string;
+  /** Set when the notification came from a background job (Jobs view). */
+  jobId?: string;
+  /** Set when the work left a stored session (Runs view transcript). */
+  runId?: string;
 };
 
 /** One write from a running background job. */

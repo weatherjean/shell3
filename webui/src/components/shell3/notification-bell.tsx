@@ -22,11 +22,44 @@ const KindIcon: FC<{ kind: Notification["kind"] }> = ({ kind }) => {
   return <BellIcon className="size-4 shrink-0" />;
 };
 
-export const NotificationBell: FC = () => {
+/**
+ * Where a notification can take you: its stored run first (durable, full
+ * transcript), the live job second (bash_bg has no run), the chat thread last.
+ */
+export type NotificationTarget =
+  | { kind: "run"; id: string }
+  | { kind: "job"; id: string }
+  | { kind: "thread"; id: string };
+
+const targetOf = (n: Notification): NotificationTarget | null => {
+  if (n.runId) return { kind: "run", id: n.runId };
+  if (n.jobId) return { kind: "job", id: n.jobId };
+  if (n.threadId) return { kind: "thread", id: n.threadId };
+  return null;
+};
+
+const TARGET_LABEL: Record<NotificationTarget["kind"], string> = {
+  run: "See the run",
+  job: "See the job",
+  thread: "Open the conversation",
+};
+
+export const NotificationBell: FC<{
+  onOpen?: (target: NotificationTarget) => void;
+}> = ({ onOpen }) => {
   const { notifications, unreadCount, markAllRead, dismiss, clearAll } = useEvents();
+  // Controlled so following a link can close the sheet: the view it opened
+  // is the point, and a popover left over it forces a second gesture.
+  const [open, setOpen] = useState(false);
 
   return (
-    <Popover onOpenChange={(open) => open && markAllRead()}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (next) markAllRead();
+      }}
+    >
       <PopoverTrigger
         render={
           <TooltipIconButton
@@ -97,6 +130,22 @@ export const NotificationBell: FC = () => {
                   <p className="text-muted-foreground mt-0.5 text-sm wrap-break-word">
                     {item.body}
                   </p>
+                  {(() => {
+                    const target = onOpen ? targetOf(item) : null;
+                    if (!target) return null;
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOpen(false);
+                          onOpen?.(target);
+                        }}
+                        className="text-ink-2 hover:text-gold border-rule hover:border-gold mt-1.5 border-b border-dotted text-[12px]"
+                      >
+                        {TARGET_LABEL[target.kind]}
+                      </button>
+                    );
+                  })()}
                 </div>
                 {/* Always visible — a hover-only control does not exist on a
                     phone, and this list is read on phones. */}

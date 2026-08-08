@@ -135,6 +135,12 @@ func (rt *Runtime) PastSessions(limit int) ([]SessionMeta, error) {
 	return out, nil
 }
 
+// SessionExists reports whether the store holds a session with this id.
+// false when the runtime has no store.
+func (rt *Runtime) SessionExists(id string) bool {
+	return rt.store != nil && rt.store.SessionExists(id)
+}
+
 // SessionMessages returns a stored session's messages as HistoryEntry values,
 // for the Runs view's transcript. nil when the runtime has no store.
 func (rt *Runtime) SessionMessages(id string) ([]HistoryEntry, error) {

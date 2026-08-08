@@ -33,6 +33,10 @@ type notification struct {
 	// reload does not resurrect a badge the user already cleared.
 	Read     bool   `json:"read"`
 	ThreadID string `json:"threadId,omitempty"`
+	// JobID/RunID link a completion post back to the work: the background job
+	// (Jobs view) and its stored session (Runs view).
+	JobID string `json:"jobId,omitempty"`
+	RunID string `json:"runId,omitempty"`
 
 	// seq orders the buffer for the seen marker; not sent to the browser.
 	seq int
@@ -47,15 +51,16 @@ type task struct {
 
 // PostCompletion surfaces a completion the notifier chose to show the user.
 // Never runs a turn.
-func (s *Server) PostCompletion(cronJob, ownerID, text string) {
+func (s *Server) PostCompletion(p shell3.CompletionPost) {
+	text := p.Text
 	if strings.TrimSpace(text) == "" {
 		text = "(no output)"
 	}
 
 	kind, title := "note", "agent"
 	switch {
-	case cronJob != "":
-		kind, title = "cron", cronJob
+	case p.CronJob != "":
+		kind, title = "cron", p.CronJob
 	case strings.HasPrefix(text, "⚠️"):
 		// The runtime's failure floor already marked this one.
 		kind, title = "alert", "job failed"
@@ -66,7 +71,9 @@ func (s *Server) PostCompletion(cronJob, ownerID, text string) {
 		Kind:     kind,
 		Title:    title,
 		Body:     text,
-		ThreadID: s.threadForSession(ownerID),
+		ThreadID: s.threadForSession(p.OwnerID),
+		JobID:    p.JobID,
+		RunID:    p.RunID,
 	})
 }
 

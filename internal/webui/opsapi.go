@@ -4,8 +4,6 @@ package webui
 
 import (
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -273,14 +271,11 @@ func (s *Server) handleRunTranscript(w http.ResponseWriter, id string) {
 	writeJSON(w, map[string]any{"id": id, "entries": out})
 }
 
-// runExists reports whether a run id names a real directory in the run store.
+// runExists reports whether a run id names a stored session. Asked of the
+// store, not the disk: a runs/<id>/ directory exists only once a job logs
+// into it, so a disk check would 404 nearly every run the list serves.
 func (s *Server) runExists(id string) bool {
-	parts := s.rt.Parts()
-	if parts == nil || id == "" || strings.ContainsAny(id, `/\`) {
-		return false
-	}
-	info, err := os.Stat(filepath.Join(parts.RunsRoot(), "runs", id))
-	return err == nil && info.IsDir()
+	return id != "" && s.rt.SessionExists(id)
 }
 
 // routeRuns dispatches /api/runs/{id} and /api/runs/{id}/... .
