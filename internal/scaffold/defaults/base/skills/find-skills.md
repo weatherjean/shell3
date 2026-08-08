@@ -57,9 +57,9 @@ will not load at all. So:
 1. Write `skills/<name>.md` in your config dir with a `description:` that
    states when to reach for it, then the body, adapted to shell3's own
    conventions (see below).
-2. Tell the user plainly: this takes effect after they reload the config
-   (Status view → Reload config, or the next `shell3 serve`), and it costs
-   one line in every future prompt from now on.
+2. Call the `reload` tool so it takes effect (queued for when this turn
+   ends), and tell the user plainly that the skill costs one line in every
+   future prompt from now on.
 3. `shell3 health` before telling them it's ready — it fails on a skill
    file with missing/broken frontmatter.
 

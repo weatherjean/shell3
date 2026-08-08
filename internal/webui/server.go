@@ -46,9 +46,22 @@ type Server struct {
 	// media is rebuilt on reload; guarded by mu.
 	media *media.Clients
 	// tts caches spoken replies on disk; rebuilt with media on reload.
-	tts        *ttsCache
+	tts *ttsCache
+	// cronSource/runCron come from the live scheduler and are swapped by
+	// SetCronSource on every reload (guarded by mu): a cron/ file added
+	// after startup must start firing once /reload arms it.
 	cronSource func() []cron.JobStatus
 	runCron    func(name string) error
+	// reloadHook runs after every successful config reload — the host wires
+	// re-arming work that lives outside this package here (the cron
+	// scheduler). Its error is appended to the reload's reply.
+	reloadHook func() error
+	// applyReloadFn performs the reload; s.applyReload in production, stubbed
+	// in tests (whose runtimes have no config dir to re-read).
+	applyReloadFn func() (string, bool)
+	// pendingReload is set by the agent's reload tool mid-turn and applied
+	// once the turn ends (a reload cannot run under a busy turn).
+	pendingReload bool
 
 	mu         sync.Mutex
 	live       map[string]*shell3.Session // thread id → session
@@ -70,6 +83,10 @@ type Server struct {
 	// from recentSess so a concurrent read request cannot misdirect /api/stop.
 	turnSession *shell3.Session
 	notifySeq   int
+	// notifySeen is the seq of the newest notification the user has seen
+	// (opening the bell marks everything seen); replayed entries at or below
+	// it come back read, so a reload does not resurrect the badge.
+	notifySeen int
 
 	// sessions are the logged-in browsers; auth holds the login route's
 	// failure backoff and TOTP replay guard. Both outlive a /reload: a config
@@ -148,6 +165,7 @@ func New(opts Options) (*Server, error) {
 		s.push = push
 	}
 
+	s.applyReloadFn = s.applyReload
 	s.resync()
 	opts.Runtime.SetCompletionHost(s)
 	return s, nil
@@ -214,6 +232,12 @@ func (s *Server) resync() {
 		if err := RegisterSendFileTool(sess, s.workDir, s.configDir); err != nil {
 			s.log.Error("webui: send_file tool", err)
 		}
+		if err := RegisterReloadTool(sess, s.queueReload); err != nil {
+			s.log.Error("webui: reload tool", err)
+		}
+		if err := RegisterStatusTool(sess, s.statusDigest); err != nil {
+			s.log.Error("webui: status tool", err)
+		}
 	})
 }
 
@@ -244,6 +268,11 @@ func (s *Server) routes() []route {
 		{pattern: "/api/events", handler: s.handleEvents},
 		{pattern: "/api/asks/", handler: s.handleAskAnswer},
 		{pattern: "/api/stop", handler: s.handleStop},
+
+		// The bell's read state, kept server-side so a page reload does not
+		// resurrect a badge the user already cleared.
+		{pattern: "/api/notifications/seen", handler: s.handleNoticesSeen},
+		{pattern: "/api/notifications/dismiss", handler: s.handleNoticeDismiss},
 
 		// Conversations
 		{pattern: "/api/threads", handler: s.handleThreads},

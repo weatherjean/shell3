@@ -241,12 +241,16 @@ func (s *streamWriter) finish() {
 
 // turnUsage is a turn's token count, as reported by the provider.
 type turnUsage struct {
-	Prompt, Completion, Total int
+	Prompt, Completion, Total, Cached int
 }
 
 // pumpUsage translates one turn's events onto the stream and reports the
 // turn's token totals, which the chat stream drops but the Status view
-// reports. It returns when the event channel closes — the authoritative
+// reports. errText is the last provider failure's message ("" for a clean or
+// merely cancelled turn) so the caller can leave durable evidence of a turn
+// that died — a browser attached at the moment of failure sees the error
+// chunk, but one that reconnects later finds only a transcript with no reply.
+// It returns when the event channel closes — the authoritative
 // end-of-turn signal, since a terminal Done/Error event is best-effort and may
 // be dropped when a turn is cancelled.
 //
@@ -260,7 +264,7 @@ func pumpUsage(
 	s *streamWriter,
 	events <-chan shell3.Event,
 	onNotice func(kind, text string),
-) (usage turnUsage, sawError bool) {
+) (usage turnUsage, errText string) {
 	synthetic := 0
 	lastCall := ""
 
@@ -291,17 +295,20 @@ func pumpUsage(
 			}
 			s.toolResult(id, ev.ToolOutput, ev.ToolError)
 		case shell3.Error:
-			// A cancelled turn is not a failure — someone pressed stop. Say so
-			// in the reply instead of showing them "context canceled" in red.
+			// A cancelled turn is not a failure — someone pressed stop. Say
+			// so in the reply instead of showing them "context canceled" in
+			// red. "by you" because the run history shows a bare "Stopped."
+			// being read as the AGENT deciding to stop ("Why stop?") — the
+			// only path here is the interface's own Stop.
 			if errors.Is(ev.Err, context.Canceled) {
-				s.delta("text", "\n\n_Stopped._")
+				s.delta("text", "\n\n_Stopped by you._")
 				continue
 			}
-			sawError = true
 			text := "the turn failed"
 			if ev.Err != nil {
 				text = ev.Err.Error()
 			}
+			errText = text
 			if hint := shell3.RecoveryHint(ev.Err); hint != "" {
 				text += "\n\n" + hint
 			}
@@ -327,9 +334,10 @@ func pumpUsage(
 					Prompt:     ev.PromptTokens,
 					Completion: ev.CompletionTokens,
 					Total:      ev.TotalTokens,
+					Cached:     ev.CachedTokens,
 				}
 			}
 		}
 	}
-	return usage, sawError
+	return usage, errText
 }

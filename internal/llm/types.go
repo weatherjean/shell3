@@ -75,6 +75,10 @@ type Usage struct {
 	PromptTokens     int
 	CompletionTokens int
 	TotalTokens      int
+	// CachedTokens is how much of PromptTokens the provider served from its
+	// prompt cache (usage.prompt_tokens_details.cached_tokens); 0 when the
+	// provider doesn't report it.
+	CachedTokens int
 }
 
 // RetryNotice describes a transient request failure that is about to be

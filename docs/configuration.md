@@ -77,6 +77,16 @@ The agent (and any subagent) can skip the prune tier individually with
 `prune: false` in its frontmatter (the thresholds stay on the model;
 omitted/`true` inherits).
 
+**Prune vs. prompt caching.** Pruning rewrites history, and a rewritten
+message invalidates the provider's prefix cache from that point on — the next
+request re-reads the whole suffix at the full input price instead of the
+cached one. On a provider with good prompt caching, `prune_at: 0` can be the
+cheaper setting: history stays append-only between compactions, so every turn
+is a cache hit up to the newest message, and the only cache reset you pay is
+compaction itself. The Status view's "Last turn" line reports the cache-hit
+share when the provider does, which is how you check what your endpoint
+actually delivers.
+
 Compaction is host-managed and there are no model-driven prune/compact tools.
 Each browser thread is its own session, so long histories only build up in a
 thread you keep returning to; a session that does grow crosses `compact_at` and
@@ -671,6 +681,23 @@ stat. The file is opened `O_NOFOLLOW|O_NONBLOCK` and every check from there
 runs against the opened descriptor, not the path. All refusals come back as
 `error: …` tool-result text. No configuration needed; it's always available
 where a chat exists to receive the link.
+
+**`reload`** (webui only; main agent, never a subagent or cron job) queues a
+config reload that runs the moment the current turn ends — a reload cannot
+run inside the very turn that asks for it. The result lands in the
+notification bell, success or failure. This is what lets the agent edit its
+own config (add a subagent, a cron job, a skill) and apply it in one
+conversation; a reload re-arms the cron scheduler too, so a job the agent
+just wrote starts firing without a restart.
+
+**`status`** (webui only; same registration rules) reports the agent's own
+live condition as text: config warnings, whether the command gate and the
+cron scheduler are armed (each job with its last run — including the
+"declared but not armed" state that means nothing fires), background-job
+slots, MCP server health, the last turn's token usage with its cache-hit
+share, and recent alerts. It reads the running process where `shell3 health`
+validates the files on disk — the tool the agent should reach for first when
+the installation itself seems wrong.
 
 **Media storage.** Dictated recordings (`web-*`), uploads (`up-*`), generated
 images (`img-*`), sent files (`sent-*`), and synthesized speech (`tts-*`) live

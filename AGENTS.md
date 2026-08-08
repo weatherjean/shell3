@@ -260,7 +260,8 @@ names its conversation with `threadId`, NOT the AI SDK's `id` — the client
 library mints that per runtime. Stop is `POST /api/stop`, not an aborted
 request: the turn ends server-side, its jobs are killed, and the stream closes
 properly (unfinished tool calls are answered "stopped before it finished", a
-cancelled turn reads as `_Stopped._` rather than `context canceled`), where a
+cancelled turn reads as `_Stopped by you._` rather than `context canceled` —
+"by you" because a bare "Stopped." was read as the agent deciding to stop), where a
 browser-side abort would strand the last tool call looking like it was waiting
 on the user. The turn's lifetime is its OWN, not the request's
 (`internal/webui/attach.go`): every protocol chunk lands in a per-turn
@@ -276,6 +277,13 @@ state); before resuming from error it drops the trailing partial assistant
 message — the SDK streams into a trailing assistant message without clearing
 it, so resuming over the partial would render everything before the cut
 twice — and a 204 (turn ended while away) refetches the transcript instead.
+While a resume is in flight and nothing has streamed back yet the thread
+shows a "Reconnecting — recovering the reply…" line above the composer
+(`ReconnectContext` carries `{recover, reconnecting}`); its fade-in is
+delayed so the idle-thread 204 never flashes it, it clears the moment
+content flows (the resume promise only settles at the END of the followed
+turn, so status is the signal), and the dropped partial message is restored
+if the resume never connects — the partial is all there is then.
 Mid-turn, a reloaded page renders the replay without its not-yet-persisted
 user message (it can attach beneath the previous reply's bubble) — the view
 is exact again once the turn ends and persists. What keeps a detached turn accountable: `/api/stop` still
@@ -284,7 +292,11 @@ requests, and live job progress); the rest is introspection:
 `/api/capabilities`, `/api/status`, `/api/threads[/{id}[/messages]]`,
 `/api/jobs[/{id}[/cancel]]`, `/api/cron[/{name}/run]`, `/api/runs[/{id}]`,
 `/api/files`, `/api/files/content`, `/api/media[/{name}]`, `/api/stop`,
-`/api/reload`, `/api/stt`, `/api/tts`, `/api/push[/subscribe|/test]`, plus
+`/api/reload`, `/api/notifications/seen`, `/api/notifications/dismiss`
+(the bell's read/dismiss state is SERVER-side — opening the bell posts seen,
+replayed entries carry `read`, dismiss takes `{id}` or `{all: true}` — so a
+page reload resurrects neither the badge nor a dismissed entry),
+`/api/stt`, `/api/tts`, `/api/push[/subscribe|/test]`, plus
 `/api/login` and `/api/logout`. The browser gates itself the same way: an auth
 probe runs before the chat mounts, and any 401 — including the events stream
 failing to open — returns it to the login screen. A 401 is deliberately told
@@ -299,8 +311,11 @@ link into the job that last executed it); **Runs** (every stored session —
 conversations, subagent children, cron runs, `shell3 ask` sessions — replayed
 at full fidelity with tool calls, arguments, results, and reasoning, which the
 chat view deliberately omits); **Status** (the effective system prompt, model
-params, config warnings, context window, tool descriptions, last-turn token
-usage with a context-fill bar, and whether the command gate is armed); and a
+params, config warnings, context window, tool descriptions, a "Last turn"
+line — prompt + completion tokens, the prompt's cache-hit share when the
+provider reports one (`usage.cached`, threaded from
+`prompt_tokens_details.cached_tokens`), and %-of-window — and whether the
+command gate is armed); and a
 read-only **Files** explorer over two roots — the config dir (`.env` is
 redacted, never read from disk; reads report `redacted`/`binary`/`truncated`)
 and the media dir (uploads and generated images, newest first, with inline
@@ -348,7 +363,12 @@ connect, so closing the tab does not lose them), a `wake` verdict runs
 another turn — the owning session if still live, a fresh one otherwise —
 through the same single-turn gate, so a cron result never runs concurrently
 with someone typing. Wake and session retirement share one lock, so a note
-lands or the session retires, never both.
+lands or the session retires, never both. A chat turn that dies on a
+provider error (retries exhausted; a cancelled turn is not a failure) also
+posts an `alert` notification with the error and the owning thread id
+(`alertTurnFailure`) — the error chunk reaches whoever is attached at that
+moment, but a browser that reconnects later gets a 204 and a transcript
+with no reply, and without the bell entry the death is unprovable.
 
 **Media** (`internal/media`, four blocks under `media:` in `shell3.yaml`, each
 pointing at a model): `stt` transcribes browser recordings (`POST /api/stt`;
@@ -384,7 +404,21 @@ which is what actually closes the hardlink route (a hardlink's resolved
 path lies outside the config dir by construction, but shares the inode);
 and bounds the copy again at write time rather than trusting the pre-copy
 `Stat`, which can be stale. It is skipped for a headless session, since
-there is no chat to hand a link to.
+there is no chat to hand a link to. `reload` (`internal/webui/reloadtool.go`)
+is a third host tool on the decorator, also headless-skipped: it QUEUES a
+config reload — a reload cannot run under the busy turn that asks for it —
+which applies the moment the turn ends (deferred first in the turn
+goroutine, after the slot frees; the background worker's turns drain it
+too) and posts its result to the bell either way, so the agent can edit its
+own config and arm it without anyone touching the Reload button. `status`
+(`internal/webui/statustool.go`) is a fourth, same rules: the agent's own
+live condition as text — config warnings, gate + cron armed state (naming
+"declared but not armed" explicitly), job slots, MCP health, last-turn
+usage with cache-hit share, recent alerts — rendered from the same
+`buildStatus()` the Status endpoint serves, so the view and the tool never
+disagree. It reads the running process where `shell3 health` validates
+files; the scaffold prompt tells the agent to check it FIRST when the
+installation seems wrong.
 
 An in-process cron scheduler (`internal/cron`, jobs are `cron/<name>.md`
 files; each job dispatches its declared agent — a subagent from `agents/`, or
@@ -393,7 +427,14 @@ hidden pinned "cron" parent session that is the dispatch parent + the jobs/runs
 source but runs NO turns of its own and is never woken; a run's result is a
 notifier event carrying the job name (`DispatchOpts.CronJob`) and the job's
 prompt as the triage note (`DispatchOpts.Note` — the judge knows what the job
-is FOR); a failed run always surfaces as `⚠️ <job> failed: <error>`).
+is FOR); a failed run always surfaces as `⚠️ <job> failed: <error>`). The
+scheduler is armed at `serve` start AND re-armed on every successful reload
+(`SetReloadHook` in serve.go → `rearmCron` in host.go): a `cron/` file added
+after startup fires once /reload — or the agent's queued `reload` — arms it,
+zero→some included; the new scheduler is armed before the old one stops, so
+a malformed schedule fails the re-arm and leaves the previous jobs running
+(the error rides the reload reply); an emptied `cron/` disarms
+(`SetCronSource(nil)`).
 
 Sessions, messages, reminders, and every surface's thread index live in **one
 SQLite database** (`internal/runs`, modernc.org/sqlite — pure Go, no cgo):
@@ -434,7 +475,15 @@ URL, the one-line tailnet start (`tailscale serve --bg 8765 && shell3
 serve`), on Linux a copy-paste systemd-unit + `tailscale serve` block, and
 points at `docs/deploying.md` (or the agent) for the rest — it only ever
 *prints*; running any of it is the operator's. `--show` reprints that
-finale, rendered to the terminal's own background.
+finale, rendered to the terminal's own background. `--prompts` refreshes
+the scaffold's prompt files in an existing install (agent.md body,
+notifier.md body, `agents/`, scaffold-shipped `skills/`) after an upgrade:
+frontmatter wiring, shell3.yaml, .env, hooks, cron, projects, memory, and
+user-authored skills are untouched; replaced files back up to
+`.backup/prompts-<ts>/`; the Vision prompt variant is inferred from whether
+the install's own agent.md tools include `media`; a reload applies it
+(`runPromptRefresh` in cmd/shell3/bootprompts.go, rendered by
+`scaffold.PromptFiles`).
 `shell3 ask "…"` is the terminal front-end (`internal/cli`): it drives the same
 agent with full verbose output (every tool call/result, reasoning, token usage;
 no message = an interactive multi-turn loop; `-p` for headless; `--resume`

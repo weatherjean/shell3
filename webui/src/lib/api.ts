@@ -148,7 +148,7 @@ export type StatusReport = {
   gateArmed: boolean;
   systemPrompt?: string;
   params: Param[];
-  usage?: { prompt: number; completion: number; total: number };
+  usage?: { prompt: number; completion: number; total: number; cached?: number };
   agent: {
     name: string;
     model: string;

@@ -49,6 +49,22 @@ func armCron(disp cron.Dispatcher, jobs []shell3.CronJob) (*cron.Scheduler, erro
 	return sched, nil
 }
 
+// rearmCron rebuilds the scheduler from the (re-loaded) job list: the new one
+// is armed first, and only then is the old one stopped, so a bad schedule in
+// a new cron/ file leaves the previous jobs running rather than killing
+// everything. Returns the scheduler now in charge — nil when jobs is empty,
+// the old one (still running) on error.
+func rearmCron(disp cron.Dispatcher, jobs []shell3.CronJob, old *cron.Scheduler) (*cron.Scheduler, error) {
+	next, err := armCron(disp, jobs)
+	if err != nil {
+		return old, err
+	}
+	if old != nil {
+		old.Stop()
+	}
+	return next, nil
+}
+
 // announcePublicURL delivers the host's public https URL to onURL when one
 // is configured. No-op otherwise — exposure beyond the fixed url is the
 // operator's own concern (reverse proxy, tailscale, SSH port forwarding, ...).

@@ -3,6 +3,8 @@ package chat
 import (
 	"errors"
 	"testing"
+
+	"github.com/weatherjean/shell3/internal/llm"
 )
 
 func TestEmitAssistantTokenAndMessage(t *testing.T) {
@@ -48,13 +50,16 @@ func TestEmitError(t *testing.T) {
 
 func TestEmitUsage(t *testing.T) {
 	s, c := newCollectorSession(SessionOpts{})
-	emitUsage(s, 100, 50, 150)
+	emitUsage(s, llm.Usage{PromptTokens: 100, CompletionTokens: 50, TotalTokens: 150, CachedTokens: 80})
 	got := c.all()
 	if len(got) != 1 || got[0].Kind != EventUsage {
 		t.Fatalf("usage event missing: %+v", got)
 	}
 	if got[0].Usage == nil || got[0].Usage.PromptTokens != 100 || got[0].Usage.CompletionTokens != 50 || got[0].Usage.TotalTokens != 150 {
 		t.Errorf("usage data: %+v", got[0].Usage)
+	}
+	if got[0].Usage.CachedTokens != 80 {
+		t.Errorf("cached tokens must ride along: %+v", got[0].Usage)
 	}
 }
 
@@ -78,7 +83,7 @@ func TestEmitSystemReminder(t *testing.T) {
 
 func TestEmitTurnDone(t *testing.T) {
 	s, c := newCollectorSession(SessionOpts{})
-	emitTurnDone(s, 10, 20, 30)
+	emitTurnDone(s, llm.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30})
 	got := c.all()
 	if len(got) != 1 || got[0].Kind != EventTurnDone {
 		t.Fatalf("turn_done event missing: %+v", got)
@@ -99,7 +104,7 @@ func TestSinkDeliversEveryEventInOrder(t *testing.T) {
 	for range n {
 		emitAssistantToken(s, "x")
 	}
-	emitTurnDone(s, 1, 2, 3)
+	emitTurnDone(s, llm.Usage{PromptTokens: 1, CompletionTokens: 2, TotalTokens: 3})
 	got := c.all()
 	if len(got) != n+1 {
 		t.Fatalf("delivered %d events, want %d (no drops)", len(got), n+1)

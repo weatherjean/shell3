@@ -1,4 +1,5 @@
 import { useCallback, useState, type FC, type ReactNode } from "react";
+import { RotateCwIcon } from "lucide-react";
 import { fetchStatus, reloadConfig, type StatusReport } from "@/lib/api";
 import { useCapabilities } from "@/lib/capabilities";
 import { Button } from "@/components/ui/button";
@@ -50,6 +51,7 @@ const SAMPLE: StatusReport = {
   cron: [],
   mcp: [],
   jobs: { running: 0, capacity: 8 },
+  usage: { prompt: 84210, completion: 1650, total: 85860, cached: 71400 },
 };
 
 /** A named thing with a description and a figure: a subagent, a skill, a job. */
@@ -100,6 +102,7 @@ export const StatusView: FC = () => {
   const [status, setStatus] = useState<StatusReport | null>(live ? null : SAMPLE);
   const [error, setError] = useState<string | null>(null);
   const [reloadResult, setReloadResult] = useState<string | null>(null);
+  const [reloading, setReloading] = useState(false);
 
   const refresh = useCallback(() => {
     if (!live) return;
@@ -143,17 +146,25 @@ export const StatusView: FC = () => {
         .join(" · ")}
       actions={
         live ? (
+          // Set as a real control, not a ghost label: reloading the config is
+          // an action with consequences, and it should read as pressable.
           <Button
-            variant="ghost"
+            variant="outline"
             size="sm"
-            onClick={() =>
+            disabled={reloading}
+            onClick={() => {
+              setReloading(true);
               void reloadConfig()
                 .then((res) => setReloadResult(res.result))
                 .catch((err) => setReloadResult(String(err)))
-                .finally(refresh)
-            }
+                .finally(() => {
+                  setReloading(false);
+                  refresh();
+                });
+            }}
           >
-            Reload config
+            <RotateCwIcon className={cn("size-3.5", reloading && "animate-spin")} />
+            {reloading ? "Reloading…" : "Reload config"}
           </Button>
         ) : undefined
       }
@@ -170,6 +181,22 @@ export const StatusView: FC = () => {
           {agent.contextWindow ? (
             <Pair k="Context window">
               {agent.contextWindow.toLocaleString()} tokens
+            </Pair>
+          ) : null}
+          {/* What the last turn actually cost — and how much of its prompt the
+              provider served from cache, which is how you tell the cache is
+              landing at all. */}
+          {status.usage ? (
+            <Pair k="Last turn">
+              {status.usage.prompt.toLocaleString()} prompt
+              {status.usage.cached
+                ? ` (${Math.round((status.usage.cached / status.usage.prompt) * 100)}% cached)`
+                : ""}
+              {" + "}
+              {status.usage.completion.toLocaleString()} completion
+              {agent.contextWindow
+                ? ` · ${Math.round((status.usage.prompt / agent.contextWindow) * 100)}% of window`
+                : ""}
             </Pair>
           ) : null}
           {/* The gate decides whether the shell is guarded. It is the first thing

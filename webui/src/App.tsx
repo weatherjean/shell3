@@ -281,6 +281,11 @@ const ChatRuntime: FC<{
   // actually down turns each attempt into a fresh error, and an uncapped
   // loop would hammer it. The manual Reconnect button bypasses the cap.
   const recoverTries = useRef(0);
+  // True while a resume is in flight and nothing has streamed back yet. The
+  // recovery can take seconds (the server replays the whole turn), during
+  // which the dropped partial reply would otherwise read as the answer
+  // simply missing — this is what the "Reconnecting" indicator watches.
+  const [reconnecting, setReconnecting] = useState(false);
 
   const recover = useCallback(() => {
     const current = chatRef.current;
@@ -291,10 +296,13 @@ const ChatRuntime: FC<{
     // — resuming over the partial message from before the disconnect would
     // render everything before the cut twice. Drop it; the replay (or the
     // transcript, when the turn already finished) carries the whole truth.
-    const msgs = current.messages;
-    if (msgs.length > 0 && msgs[msgs.length - 1].role === "assistant") {
-      current.setMessages(msgs.slice(0, -1));
+    // Kept as a snapshot first: if the resume itself fails (server gone),
+    // the partial reply is all there is and it goes back.
+    const snapshot = current.messages;
+    if (snapshot.length > 0 && snapshot[snapshot.length - 1].role === "assistant") {
+      current.setMessages(snapshot.slice(0, -1));
     }
+    setReconnecting(true);
     void chatRef.current
       .resumeStream()
       .then(() => {
@@ -305,14 +313,29 @@ const ChatRuntime: FC<{
           if (chatRef.current.status === "ready") chatRef.current.setMessages(stored);
         });
       })
-      .catch(() => {});
+      .catch(() => {
+        // The resume never connected. Restore the partial reply rather than
+        // leaving the conversation looking like nothing was ever said.
+        if (chatRef.current.status !== "streaming") {
+          chatRef.current.setMessages(snapshot);
+        }
+      })
+      .finally(() => setReconnecting(false));
   }, [threadId]);
 
   useEffect(() => {
     if (!live) return;
-    // A healthy stream must not be interrupted: resume only from rest.
+    // A healthy stream must not be interrupted: resume only from rest. The
+    // indicator runs here too — a page reloaded mid-turn shows the replay
+    // arriving rather than a conversation with its answer missing. (The
+    // idle case 204s in milliseconds; the indicator's fade-in delay keeps
+    // that invisible.)
     if (chatRef.current.status === "ready" || chatRef.current.status === "error") {
-      void chatRef.current.resumeStream().catch(() => {});
+      setReconnecting(true);
+      void chatRef.current
+        .resumeStream()
+        .catch(() => {})
+        .finally(() => setReconnecting(false));
     }
     const onWake = () => {
       if (document.visibilityState === "visible") recover();
@@ -333,6 +356,9 @@ const ChatRuntime: FC<{
   useEffect(() => {
     if (status === "streaming" || status === "submitted") {
       recoverTries.current = 0;
+      // Content is flowing again — the resume promise only settles at the
+      // END of the followed turn, so the indicator is cleared from here.
+      setReconnecting(false);
       return;
     }
     if (!live || status !== "error") return;
@@ -343,10 +369,15 @@ const ChatRuntime: FC<{
     return () => clearTimeout(t);
   }, [status, live, recover]);
 
+  const reconnectState = useMemo(
+    () => (live ? { recover, reconnecting } : null),
+    [live, recover, reconnecting],
+  );
+
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <TurnWatcher onTurnEnd={onTurnEnd} />
-      <ReconnectContext.Provider value={live ? recover : null}>
+      <ReconnectContext.Provider value={reconnectState}>
         <Thread />
       </ReconnectContext.Provider>
     </AssistantRuntimeProvider>
@@ -775,13 +806,14 @@ const SignOutRow: FC<{ collapsed?: boolean }> = ({ collapsed }) => {
       ) : (
         <button
           onClick={() => setOpen(true)}
-          className="text-ink-2 hover:text-ink mt-1 flex w-full items-baseline gap-2.5 py-0.5 text-[12.5px] transition-colors"
+          className="text-ink-2 hover:text-ink mt-1 flex w-full items-center gap-2.5 py-0.5 text-[12.5px] transition-colors"
         >
-          {/* The icon stands where the roman folio stands, so it takes the
-              folio's optical position: inline on the text baseline, nudged
-              onto it the way the numerals' caps sit. */}
-          <span className="text-ink-3 w-6 font-mono text-[9.5px] tracking-[.04em]">
-            <LogOutIcon className="inline-block size-[11px] translate-y-[1.5px]" />
+          {/* The icon stands where the roman folio stands. The folio rows are
+              baseline-aligned type; an icon has no baseline to share, so this
+              row centers instead — a nudge onto the baseline never lands the
+              same on every screen. */}
+          <span className="text-ink-3 flex w-6 justify-center">
+            <LogOutIcon className="size-[11px]" />
           </span>
           Sign out
         </button>
@@ -834,9 +866,14 @@ const AuthGate: FC<{ children: ReactNode }> = ({ children }) => {
   }, [probe]);
 
   if (state === "checking") {
-    // Deliberately blank: a spinner here flashes on every load, and the check is
-    // one local request.
-    return <div className="bg-background min-h-dvh" />;
+    // The same splash index.html paints before the bundle arrives, so the
+    // hand-off from static page to app is seamless — one breathing mark on
+    // the stock, never a white flash or an empty sheet.
+    return (
+      <div className="bg-background flex min-h-dvh items-center justify-center">
+        <Mark className="animate-pulse text-[32px]" />
+      </div>
+    );
   }
   if (state === "login") {
     return <LoginScreen onSignedIn={probe} />;

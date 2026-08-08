@@ -123,6 +123,13 @@ func TestSetCronSourceWiresBothListAndRun(t *testing.T) {
 		t.Fatal("SetCronSource must wire the listing AND the manual fire")
 	}
 
+	// A reload that removed the last cron/ file disarms with nil.
+	srv.SetCronSource(nil)
+	if src, run := srv.cronFuncs(); src != nil || run != nil {
+		t.Fatal("SetCronSource(nil) must disarm both")
+	}
+	srv.SetCronSource(sched)
+
 	rec := httptest.NewRecorder()
 	srv.handleCron(rec, httptest.NewRequest(http.MethodGet, "/api/cron", nil))
 	body := rec.Body.String()

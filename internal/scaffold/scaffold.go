@@ -109,6 +109,46 @@ func RenderBaseConfig(dir string, v Values, force bool) error {
 	})
 }
 
+// PromptFiles renders just the prompt-bearing files of the base scaffold —
+// agent.md, notifier.md, agents/*, skills/* — keyed by config-dir-relative
+// path. `shell3 boot --prompts` uses it to refresh an existing install's
+// prompts without touching wiring (shell3.yaml, .env, hooks, cron, lib,
+// memory, projects).
+func PromptFiles(v Values) (map[string][]byte, error) {
+	v = v.withDefaults()
+	out := map[string][]byte{}
+	err := fs.WalkDir(baseFS, baseRoot, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(baseRoot, p)
+		if err != nil {
+			return err
+		}
+		bare := strings.TrimSuffix(rel, ".tmpl")
+		isPrompt := bare == "agent.md" || bare == "notifier.md" ||
+			strings.HasPrefix(rel, "agents/") || strings.HasPrefix(rel, "skills/")
+		if !isPrompt {
+			return nil
+		}
+		content, err := baseFS.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		if strings.HasSuffix(rel, ".tmpl") {
+			if content, err = renderTemplate(rel, content, v); err != nil {
+				return err
+			}
+		}
+		out[bare] = content
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // renderTemplate executes one embedded template with data.
 func renderTemplate(name string, tmpl []byte, data any) ([]byte, error) {
 	t, err := template.New(name).Funcs(template.FuncMap{

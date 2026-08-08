@@ -54,6 +54,7 @@ type EventsContextValue = {
   connected: boolean;
   markAllRead: () => void;
   dismiss: (id: string) => void;
+  clearAll: () => void;
   answerAsk: (id: string, allow: boolean) => void;
 };
 
@@ -105,9 +106,11 @@ export const EventsProvider: FC<{ children: ReactNode }> = ({ children }) => {
       const incoming = JSON.parse((event as MessageEvent).data) as Notification;
       setNotifications((current) => {
         // The server replays recent notifications on connect, so a reconnect
-        // must not double them up.
+        // must not double them up. Replayed entries carry their server-side
+        // read state, which is what keeps the badge cleared across reloads;
+        // live ones arrive read: false.
         if (current.some((n) => n.id === incoming.id)) return current;
-        return [{ ...incoming, read: false }, ...current];
+        return [{ ...incoming, read: incoming.read ?? false }, ...current];
       });
     });
 
@@ -152,15 +155,32 @@ export const EventsProvider: FC<{ children: ReactNode }> = ({ children }) => {
     return () => source.close();
   }, []);
 
-  const markAllRead = useCallback(
-    () => setNotifications((c) => c.map((n) => ({ ...n, read: true }))),
-    [],
-  );
+  // Read state and dismissals go to the server too: the replay on the next
+  // connect is what the bell shows after a page reload, and a badge that
+  // resurrects itself teaches people to ignore it. Both are fire-and-forget —
+  // on the mock backend the request just 404s.
+  const markAllRead = useCallback(() => {
+    setNotifications((c) => c.map((n) => ({ ...n, read: true })));
+    void fetch("/api/notifications/seen", { method: "POST" }).catch(() => {});
+  }, []);
 
-  const dismiss = useCallback(
-    (id: string) => setNotifications((c) => c.filter((n) => n.id !== id)),
-    [],
-  );
+  const dismiss = useCallback((id: string) => {
+    setNotifications((c) => c.filter((n) => n.id !== id));
+    void fetch("/api/notifications/dismiss", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id }),
+    }).catch(() => {});
+  }, []);
+
+  const clearAll = useCallback(() => {
+    setNotifications([]);
+    void fetch("/api/notifications/dismiss", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ all: true }),
+    }).catch(() => {});
+  }, []);
 
   const answerAsk = useCallback((id: string, allow: boolean) => {
     setAsks((current) => current.filter((ask) => ask.id !== id));
@@ -182,9 +202,10 @@ export const EventsProvider: FC<{ children: ReactNode }> = ({ children }) => {
       connected,
       markAllRead,
       dismiss,
+      clearAll,
       answerAsk,
     }),
-    [notifications, asks, jobProgress, connected, markAllRead, dismiss, answerAsk],
+    [notifications, asks, jobProgress, connected, markAllRead, dismiss, clearAll, answerAsk],
   );
 
   return <EventsContext value={value}>{children}</EventsContext>;

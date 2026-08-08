@@ -29,7 +29,13 @@ type notification struct {
 	Title    string `json:"title"`
 	Body     string `json:"body"`
 	At       string `json:"at"`
+	// Read is computed against the seen marker at replay time, so a page
+	// reload does not resurrect a badge the user already cleared.
+	Read     bool   `json:"read"`
 	ThreadID string `json:"threadId,omitempty"`
+
+	// seq orders the buffer for the seen marker; not sent to the browser.
+	seq int
 }
 
 // task is one unit of out-of-turn work for the background worker.
@@ -136,6 +142,19 @@ func (s *Server) turnNotice(kind, text string) {
 	}
 }
 
+// alertTurnFailure leaves durable evidence of a turn that died on a provider
+// error. The error chunk reaches whoever is attached at that moment, but a
+// browser that reconnects later gets a 204 and a transcript with no reply —
+// without this, the failure is invisible after the fact.
+func (s *Server) alertTurnFailure(threadID, errText string) {
+	s.publishNotification(notification{
+		Kind:     "alert",
+		Title:    "turn failed",
+		Body:     strutil.Truncate(errText, 500),
+		ThreadID: threadID,
+	})
+}
+
 // jobProgress is one write from a running background job, pushed to the
 // browser so a job can be watched rather than waited on.
 type jobProgress struct {
@@ -185,6 +204,7 @@ func (s *Server) runTask(ctx context.Context, t task) {
 	if !ok {
 		return
 	}
+	defer s.runPendingReload() // after releaseTurn: a queued reload needs the slot free
 	defer s.releaseTurn()
 	defer cancel()
 
@@ -262,8 +282,9 @@ const recentNotifications = 50
 // a completion that arrived while the tab was closed is still worth seeing.
 func (s *Server) publishNotification(n notification) {
 	s.mu.Lock()
+	s.notifySeq++
+	n.seq = s.notifySeq
 	if n.ID == "" {
-		s.notifySeq++
 		n.ID = fmt.Sprintf("n%d-%d", time.Now().Unix(), s.notifySeq)
 	}
 	if n.At == "" {
@@ -281,13 +302,46 @@ func (s *Server) publishNotification(n notification) {
 	s.pushNotification(n)
 }
 
-// recentNotices returns the replay buffer, oldest first.
+// recentNotices returns the replay buffer, oldest first, each entry stamped
+// read/unread against the seen marker.
 func (s *Server) recentNotices() []notification {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]notification, len(s.recent))
 	copy(out, s.recent)
+	for i := range out {
+		out[i].Read = out[i].seq <= s.notifySeen
+	}
 	return out
+}
+
+// markNoticesSeen moves the seen marker to the newest notification: the
+// badge stays cleared across page reloads (the replay stamps read=true).
+// In-memory like the buffer itself — a process restart clears both together.
+func (s *Server) markNoticesSeen() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.notifySeen = s.notifySeq
+}
+
+// clearNotices empties the replay buffer and marks everything seen.
+func (s *Server) clearNotices() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.recent = nil
+	s.notifySeen = s.notifySeq
+}
+
+// dismissNotice removes one entry from the replay buffer for good.
+func (s *Server) dismissNotice(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, n := range s.recent {
+		if n.ID == id {
+			s.recent = append(s.recent[:i], s.recent[i+1:]...)
+			return
+		}
+	}
 }
 
 // threadForSession reverse-maps a session id to the browser thread showing it.

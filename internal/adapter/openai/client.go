@@ -273,6 +273,7 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 				PromptTokens:     int(u.PromptTokens),
 				CompletionTokens: int(u.CompletionTokens),
 				TotalTokens:      int(u.TotalTokens),
+				CachedTokens:     int(u.PromptTokensDetails.CachedTokens),
 			}})
 		}
 

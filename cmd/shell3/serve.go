@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -183,9 +184,31 @@ func newServeCommand() *cobra.Command {
 				return err
 			}
 			if sched != nil {
-				defer sched.Stop()
 				srv.SetCronSource(sched)
 			}
+			// The scheduler is rebuilt on every reload: a cron/ file added
+			// (or edited, or removed) after startup must take effect without
+			// a restart. cronMu serializes the swap — the Reload button and
+			// the agent's queued reload can race.
+			var cronMu sync.Mutex
+			defer func() {
+				cronMu.Lock()
+				defer cronMu.Unlock()
+				if sched != nil {
+					sched.Stop()
+				}
+			}()
+			srv.SetReloadHook(func() error {
+				cronMu.Lock()
+				defer cronMu.Unlock()
+				next, err := rearmCron(cronSess, rt.Cron(), sched)
+				if err != nil {
+					return fmt.Errorf("cron not re-armed (previous jobs still scheduled): %w", err)
+				}
+				sched = next
+				srv.SetCronSource(next) // nil clears: the last cron/ file was removed
+				return nil
+			})
 
 			// The worker runs out-of-turn work: cron results and job completions
 			// the notifier chose to wake on.

@@ -174,6 +174,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	stream := newBrokeredStream(broker)
 
 	go func() {
+		// Deferred first so it runs after everything below — a reload the
+		// agent queued mid-turn needs the turn slot free before it applies.
+		defer s.runPendingReload()
 		defer s.clearAttachable(broker)
 		defer broker.done() // idempotent backstop under stream.finish
 		defer s.releaseTurn()
@@ -206,10 +209,11 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		uploads = s.describeUploads(turnCtx, uploads)
 		prompt = promptWithUploads(prompt, uploads, notes)
 
-		usage, failed := pumpUsage(stream,
+		usage, errText := pumpUsage(stream,
 			sess.SendParts(turnCtx, prompt, sessionParts(uploads)), s.turnNotice)
 		s.recordUsage(usage)
-		if failed {
+		if errText != "" {
+			s.alertTurnFailure(req.thread(), errText)
 			return
 		}
 
@@ -220,9 +224,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			if turnCtx.Err() != nil || !sess.HasQueuedInput() {
 				return
 			}
-			usage, failed := pumpUsage(stream, sess.RunQueued(turnCtx), s.turnNotice)
+			usage, errText := pumpUsage(stream, sess.RunQueued(turnCtx), s.turnNotice)
 			s.recordUsage(usage)
-			if failed {
+			if errText != "" {
+				s.alertTurnFailure(req.thread(), errText)
 				return
 			}
 		}

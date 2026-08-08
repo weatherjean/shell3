@@ -51,9 +51,9 @@ func drain(t *testing.T, events []shell3.Event) (string, bool) {
 		ch <- ev
 	}
 	close(ch)
-	_, sawError := pumpUsage(stream, ch, nil)
+	_, errText := pumpUsage(stream, ch, nil)
 	stream.finish()
-	return rec.Body.String(), sawError
+	return rec.Body.String(), errText != ""
 }
 
 func TestPumpBracketsTextDeltas(t *testing.T) {

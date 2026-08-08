@@ -112,8 +112,9 @@ func (s *Server) handleCron(w http.ResponseWriter, _ *http.Request) {
 	// The live scheduler knows what has actually run; without one (no jobs
 	// declared) fall back to the declared list so the view still explains
 	// itself.
-	if s.cronSource != nil {
-		for _, job := range s.cronSource() {
+	source, _ := s.cronFuncs()
+	if source != nil {
+		for _, job := range source() {
 			out = append(out, cronJobResp{
 				Name: job.Name, Schedule: job.Schedule, Agent: job.Agent,
 				Prompt: job.Prompt, WorkDir: job.WorkDir, Direct: job.Direct,
@@ -128,7 +129,7 @@ func (s *Server) handleCron(w http.ResponseWriter, _ *http.Request) {
 			})
 		}
 	}
-	writeJSON(w, map[string]any{"jobs": out, "armed": s.cronSource != nil})
+	writeJSON(w, map[string]any{"jobs": out, "armed": source != nil})
 }
 
 // handleCronRun fires a scheduled job now. The result travels the usual route —
@@ -138,11 +139,12 @@ func (s *Server) handleCronRun(w http.ResponseWriter, r *http.Request, name stri
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if s.runCron == nil {
+	_, run := s.cronFuncs()
+	if run == nil {
 		http.Error(w, "no cron scheduler is armed", http.StatusConflict)
 		return
 	}
-	if err := s.runCron(name); err != nil {
+	if err := run(name); err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
@@ -150,13 +152,25 @@ func (s *Server) handleCronRun(w http.ResponseWriter, r *http.Request, name stri
 }
 
 // SetCronSource wires the live scheduler in: its job list for the Cron view,
-// and its manual fire for the run button.
+// and its manual fire for the run button. nil disarms both — a reload that
+// removed the last cron/ file leaves nothing to list or fire.
 func (s *Server) SetCronSource(sched *cron.Scheduler) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if sched == nil {
+		s.cronSource, s.runCron = nil, nil
 		return
 	}
 	s.cronSource = sched.Jobs
 	s.runCron = sched.Run
+}
+
+// cronFuncs reads the scheduler wiring under the lock — it is swapped on
+// every reload, racing the HTTP handlers that call it.
+func (s *Server) cronFuncs() (func() []cron.JobStatus, func(name string) error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cronSource, s.runCron
 }
 
 // ---------------------------------------------------------------------- runs

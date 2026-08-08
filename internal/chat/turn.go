@@ -106,7 +106,7 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 
 	allMsgs, toolList, toolSchemas, skip := assembleTurnContext(cfg, sess, inboxSeeded)
 	if skip {
-		terminalEmit = func() { emitTurnDone(sess, 0, 0, 0) }
+		terminalEmit = func() { emitTurnDone(sess, llm.Usage{}) }
 		return
 	}
 
@@ -115,7 +115,7 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		text, reasoning, toolCalls, usage, err := streamOnce(ctx, cfg.LLM, allMsgs, toolList, sess)
 		if usage != (llm.Usage{}) {
 			totalUsage = addUsage(totalUsage, usage)
-			emitUsage(sess, totalUsage.PromptTokens, totalUsage.CompletionTokens, totalUsage.TotalTokens)
+			emitUsage(sess, totalUsage)
 		}
 		if usage.PromptTokens > 0 {
 			sess.lastPromptTokens = usage.PromptTokens
@@ -158,7 +158,7 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 
 		if len(toolCalls) == 0 {
 			u := totalUsage
-			terminalEmit = func() { emitTurnDone(sess, u.PromptTokens, u.CompletionTokens, u.TotalTokens) }
+			terminalEmit = func() { emitTurnDone(sess, u) }
 			return
 		}
 
@@ -495,14 +495,15 @@ func addUsage(a, b llm.Usage) llm.Usage {
 	// A follow-up round may stream completion tokens but omit the prompt count
 	// (PromptTokens=0); keep the last known prompt count rather than zeroing the
 	// reported prompt/total for that round.
-	prompt := b.PromptTokens
+	prompt, cached := b.PromptTokens, b.CachedTokens
 	if prompt == 0 {
-		prompt = a.PromptTokens
+		prompt, cached = a.PromptTokens, a.CachedTokens
 	}
 	return llm.Usage{
 		PromptTokens:     prompt,
 		CompletionTokens: completion,
 		TotalTokens:      prompt + completion,
+		CachedTokens:     cached,
 	}
 }
 

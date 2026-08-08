@@ -157,6 +157,7 @@ export const Thread: FC = () => {
           )}
         >
           <ThreadScrollToBottom />
+          <ReconnectingIndicator />
           <Composer />
         </ThreadPrimitive.ViewportFooter>
       </ThreadPrimitive.Viewport>
@@ -356,11 +357,16 @@ const StopTurnButton: FC = () => {
 };
 
 /**
- * ReconnectContext carries the app shell's stream-recovery routine into the
- * error box: re-attach to the running turn (or fetch the finished reply).
- * null on the mock backend, where there is nothing to reconnect to.
+ * ReconnectContext carries the app shell's stream-recovery state into the
+ * thread: `recover` re-attaches to the running turn (or fetches the finished
+ * reply), `reconnecting` is true while that recovery is in flight and nothing
+ * has streamed back yet. null on the mock backend, where there is nothing to
+ * reconnect to.
  */
-export const ReconnectContext = createContext<(() => void) | null>(null);
+export const ReconnectContext = createContext<{
+  recover: () => void;
+  reconnecting: boolean;
+} | null>(null);
 
 const MessageError: FC = () => {
   const reconnect = useContext(ReconnectContext);
@@ -373,13 +379,37 @@ const MessageError: FC = () => {
             variant="outline"
             size="sm"
             className="mt-2"
-            onClick={reconnect}
+            onClick={reconnect.recover}
           >
             Reconnect
           </Button>
         ) : null}
       </ErrorPrimitive.Root>
     </MessagePrimitive.Error>
+  );
+};
+
+/**
+ * What a recovery looks like while it runs. The reconnect can take seconds —
+ * the server replays the whole turn — and the partial reply is dropped before
+ * it starts, so without this line the conversation reads as an answer that
+ * simply never came. The fade-in delay keeps the routine idle-thread 204
+ * (milliseconds) from flashing it on every conversation open.
+ */
+const ReconnectingIndicator: FC = () => {
+  const reconnect = useContext(ReconnectContext);
+  if (!reconnect?.reconnecting) return null;
+  return (
+    <div
+      className="fade-in animate-in fill-mode-both self-center duration-300"
+      style={{ animationDelay: "400ms" }}
+      role="status"
+    >
+      <span className="text-ink-3 inline-flex items-center gap-2 text-xs">
+        <DotMatrix state="connecting" aria-hidden />
+        Reconnecting — recovering the reply…
+      </span>
+    </div>
   );
 };
 

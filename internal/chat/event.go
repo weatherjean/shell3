@@ -143,6 +143,9 @@ type EventUsageData struct {
 	CompletionTokens int
 	// TotalTokens is PromptTokens + CompletionTokens, as reported.
 	TotalTokens int
+	// CachedTokens is the cache-hit share of PromptTokens, when the provider
+	// reports one (0 otherwise).
+	CachedTokens int
 }
 
 func emitSessionStart(s *Session, meta map[string]string) {
@@ -205,12 +208,12 @@ func emitError(s *Session, err error) {
 	emit(s, Event{Kind: EventError, Time: time.Now(), SessionID: s.id, Text: err.Error(), Err: err})
 }
 
-func emitUsage(s *Session, prompt, completion, total int) {
+func emitUsage(s *Session, u llm.Usage) {
 	emit(s, Event{
 		Kind:      EventUsage,
 		Time:      time.Now(),
 		SessionID: s.id,
-		Usage:     &EventUsageData{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total},
+		Usage:     &EventUsageData{PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, TotalTokens: u.TotalTokens, CachedTokens: u.CachedTokens},
 	})
 }
 
@@ -244,12 +247,12 @@ func emitRetry(s *Session, n *llm.RetryNotice) {
 	emit(s, Event{Kind: EventRetry, Time: time.Now(), SessionID: s.id, Text: text})
 }
 
-func emitTurnDone(s *Session, prompt, completion, total int) {
+func emitTurnDone(s *Session, u llm.Usage) {
 	emit(s, Event{
 		Kind:      EventTurnDone,
 		Time:      time.Now(),
 		SessionID: s.id,
-		Usage:     &EventUsageData{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total},
+		Usage:     &EventUsageData{PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, TotalTokens: u.TotalTokens, CachedTokens: u.CachedTokens},
 	})
 }
 

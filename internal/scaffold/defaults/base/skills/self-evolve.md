@@ -77,7 +77,7 @@ Choose the highest (least-footprint) rung that correctly solves the problem:
    skipped for missing/broken frontmatter, or a hook file naming no subagent.
 4. Fix what health reports and re-run until clean (a `skill file ... skipped`
    warning means the `.md` needs a frontmatter `description` and a body).
-5. Tell the user the change is ready and ask them to reload: the Status view
-   has a **Reload config** button. You cannot reload yourself — a reload is
-   refused while a turn is running, which is exactly the turn you are in. Do
-   not claim the change is live in the current session.
+5. Call the `reload` tool. A reload cannot run inside the turn that asks for
+   it, so the tool queues one for the moment this turn ends; the result
+   lands in the notification bell. Do not claim the change is live in the
+   current turn — it applies to the next one.

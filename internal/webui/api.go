@@ -57,6 +57,9 @@ type usageResp struct {
 	Prompt     int `json:"prompt"`
 	Completion int `json:"completion"`
 	Total      int `json:"total"`
+	// Cached is the cache-hit share of Prompt (0 when the provider doesn't
+	// report prompt caching) — how you tell whether the cache is landing.
+	Cached int `json:"cached,omitempty"`
 }
 
 type modelResp struct {
@@ -148,6 +151,12 @@ type jobsSummary struct {
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, s.buildStatus())
+}
+
+// buildStatus assembles the full status report — shared by the Status view's
+// endpoint and the agent's own `status` tool, so both always agree.
+func (s *Server) buildStatus() statusResp {
 	snap := s.snapshot()
 	parts := s.rt.Parts()
 
@@ -177,9 +186,28 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		MCP:       []mcpResp{},
 	}
 
+	// Cron next-run times come from the live scheduler when one is armed;
+	// otherwise fall back to the declared jobs so the view is never empty.
+	// Before the parts check: cron state comes from the runtime and the
+	// scheduler, not from parts, and the agent's status digest needs it even
+	// on a runtime without config parts (the test harness).
+	if source, _ := s.cronFuncs(); source != nil {
+		for _, job := range source() {
+			resp.Cron = append(resp.Cron, cronResp{
+				Name: job.Name, Schedule: job.Schedule,
+				Agent: job.Agent, Last: job.LastRun,
+			})
+		}
+	} else {
+		for _, job := range s.rt.Cron() {
+			resp.Cron = append(resp.Cron, cronResp{
+				Name: job.Name, Schedule: job.Schedule, Agent: job.Agent,
+			})
+		}
+	}
+
 	if parts == nil {
-		writeJSON(w, resp)
-		return
+		return resp
 	}
 	resp.Jobs.Capacity = parts.BackgroundMaxConcurrent()
 
@@ -205,24 +233,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		})
 	}
 
-	// Cron next-run times come from the live scheduler when one is armed;
-	// otherwise fall back to the declared jobs so the view is never empty.
-	if s.cronSource != nil {
-		for _, job := range s.cronSource() {
-			resp.Cron = append(resp.Cron, cronResp{
-				Name: job.Name, Schedule: job.Schedule,
-				Agent: job.Agent, Last: job.LastRun,
-			})
-		}
-	} else {
-		for _, job := range s.rt.Cron() {
-			resp.Cron = append(resp.Cron, cronResp{
-				Name: job.Name, Schedule: job.Schedule, Agent: job.Agent,
-			})
-		}
-	}
-
-	writeJSON(w, resp)
+	return resp
 }
 
 func describeTools(snap shell3.Snapshot) []toolResp {
@@ -294,13 +305,64 @@ func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "a turn is running", http.StatusConflict)
 		return
 	}
+	result, _ := s.applyReloadFn()
+	writeJSON(w, map[string]string{"result": result})
+}
+
+// applyReload reloads the config and re-wires everything a reload
+// invalidates: the media clients and session decorator (resync) and, through
+// reloadHook, host-side machinery like the cron scheduler. Shared by the
+// Reload button and the agent's own queued reload.
+func (s *Server) applyReload() (result string, ok bool) {
 	res, err := s.rt.Reload()
 	if err != nil {
-		writeJSON(w, map[string]string{"result": shell3.ReloadReplyText(res, err)})
-		return
+		return shell3.ReloadReplyText(res, err), false
 	}
 	s.resync()
-	writeJSON(w, map[string]string{"result": shell3.ReloadReplyText(res, nil)})
+	if s.reloadHook != nil {
+		if herr := s.reloadHook(); herr != nil {
+			return shell3.ReloadReplyText(res, nil) + "\n⚠️ " + herr.Error(), false
+		}
+	}
+	return shell3.ReloadReplyText(res, nil), true
+}
+
+// SetReloadHook installs the host's post-reload re-arm step. Called once at
+// startup, before Start.
+func (s *Server) SetReloadHook(hook func() error) { s.reloadHook = hook }
+
+// handleNoticesSeen marks every notification seen — the bell was opened.
+func (s *Server) handleNoticesSeen(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	s.markNoticesSeen()
+	writeJSON(w, map[string]bool{"ok": true})
+}
+
+// handleNoticeDismiss removes notifications from the replay buffer — one
+// ({"id": …}) or every one ({"all": true}). Dismissed is gone — a reload
+// will not bring it back.
+func (s *Server) handleNoticeDismiss(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		ID  string `json:"id"`
+		All bool   `json:"all"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || (req.ID == "" && !req.All) {
+		http.Error(w, "an id (or all: true) is required", http.StatusBadRequest)
+		return
+	}
+	if req.All {
+		s.clearNotices()
+	} else {
+		s.dismissNotice(req.ID)
+	}
+	writeJSON(w, map[string]bool{"ok": true})
 }
 
 // recordUsage remembers a turn's token count. A turn that reported nothing
@@ -312,7 +374,7 @@ func (s *Server) recordUsage(u turnUsage) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.usage = &usageResp{Prompt: u.Prompt, Completion: u.Completion, Total: u.Total}
+	s.usage = &usageResp{Prompt: u.Prompt, Completion: u.Completion, Total: u.Total, Cached: u.Cached}
 }
 
 func (s *Server) lastUsage() *usageResp {

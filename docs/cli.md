@@ -92,6 +92,8 @@ just as well:
 | `DELETE /api/push/subscribe` | Forget a subscription: `{"endpoint": …}`. |
 | `POST /api/push/test` | Send a test notification to every subscribed browser. `409` when nothing is subscribed. |
 | `POST /api/stop` | Cancel the running turn and the background jobs that session started. |
+| `POST /api/notifications/seen` | Mark every notification read (opening the bell does this). Server-side, so a page reload keeps the badge cleared. |
+| `POST /api/notifications/dismiss` | Remove one notification (`{"id": …}`) or all of them (`{"all": true}`) from the replay buffer. |
 | `POST /api/reload` | Re-read the config and apply it live. `409` while a turn is in flight. |
 | `POST /api/stt` | Transcribe an uploaded recording (multipart `audio`) via `media.stt`. `501` when unconfigured. |
 | `POST /api/tts` | Speak `{"text": …}` via `media.tts`, returning audio. `501` when unconfigured. |
@@ -137,10 +139,12 @@ redacted `.env`. See `webui/README.md` for how that is put together.
 - **Status** — the same data as `/api/status`: the agent, its tools (hover a
   tool for its description), the effective system prompt (collapsed), model
   parameters with values and defaults, context window and the last turn's
-  token usage against it, config load warnings, subagents, projects, skills,
-  cron jobs, MCP server health, job counts, and whether the **command gate**
-  is armed or the shell is running ungated. A Reload config button applies
-  config edits live. Refreshes itself.
+  token usage against it — including how much of the prompt the provider
+  served from its cache, when it reports that — config load warnings,
+  subagents, projects, skills, cron jobs, MCP server health, job counts, and
+  whether the **command gate** is armed or the shell is running ungated. A
+  Reload config button applies config edits live. Refreshes itself. (The
+  agent can read the same report itself with its `status` tool.)
 - **Files** — two read-only roots: **config**, a walk of the config directory
   (`.env` and its siblings are listed but never opened; binary and oversized
   files are labelled rather than dumped), and **media**, the contents of the
@@ -149,11 +153,16 @@ redacted `.env`. See `webui/README.md` for how that is put together.
   covers the `$SHELL3_MEDIA_DIR` override) newest-first, with inline previews
   for images and audio.
 - **Notifications** — the bell is fed by `/api/events`: notifier posts, cron
-  results, job-failure alerts, and a note when the conversation was compacted
+  results, job-failure alerts, an alert when a chat turn dies on a provider
+  error (the durable evidence, since a browser reconnecting later finds only
+  a transcript with no reply), and a note when the conversation was compacted
   to fit the context window. The server keeps the 50 most recent and replays
   them when a browser connects, so background work that finished while the
-  tab was closed is still there when you come back. (Provider retries are not
-  notifications — they go to the app log.)
+  tab was closed is still there when you come back. Read state and
+  dismissals are server-side too: opening the bell clears the badge for
+  good, each entry has a dismiss ✕, and **Clear all** empties the list — a
+  page reload brings back neither the badge nor what was dismissed.
+  (Provider retries are not notifications — they go to the app log.)
 - **Push** — a toggle in the bell asks the browser for notification permission,
   subscribes, and registers that subscription with the server; a **Test**
   button then sends one through the whole path. Once it is on, everything the
@@ -213,6 +222,13 @@ defaults, except `--model`, which headless boot requires): `--url`, `--model`,
 boot skips it.)
 `shell3 boot --show` reprints the post-boot summary for the existing config
 without writing or asking anything.
+`shell3 boot --prompts` refreshes the scaffold's prompt files in an existing
+config — agent.md's body, notifier.md's body, `agents/`, and the scaffold's
+own `skills/` — after a shell3 upgrade, without re-booting: wiring stays put
+(both files' frontmatter, `shell3.yaml`, `.env`, hooks, cron, projects,
+memory, and any skill the scaffold doesn't ship), every replaced file is
+backed up under `.backup/prompts-<timestamp>/` first, and a reload applies
+the result.
 See [configuration.md](configuration.md).
 
 ## `shell3 project new` — scaffold a project

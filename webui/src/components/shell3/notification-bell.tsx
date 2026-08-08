@@ -23,7 +23,7 @@ const KindIcon: FC<{ kind: Notification["kind"] }> = ({ kind }) => {
 };
 
 export const NotificationBell: FC = () => {
-  const { notifications, unreadCount, markAllRead, dismiss } = useEvents();
+  const { notifications, unreadCount, markAllRead, dismiss, clearAll } = useEvents();
 
   return (
     <Popover onOpenChange={(open) => open && markAllRead()}>
@@ -56,9 +56,16 @@ export const NotificationBell: FC = () => {
       <PopoverContent align="end" sideOffset={8} className="w-88 p-0">
         <div className="flex items-center justify-between border-b px-3 py-2">
           <span className="text-sm font-medium">Notifications</span>
-          <span className="text-muted-foreground text-xs">
-            {notifications.length === 0 ? "" : `${notifications.length} recent`}
-          </span>
+          {notifications.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={clearAll}
+              className="text-muted-foreground hover:text-foreground h-6 px-2 text-xs"
+            >
+              Clear all
+            </Button>
+          )}
         </div>
 
         <PushToggle />
@@ -91,12 +98,14 @@ export const NotificationBell: FC = () => {
                     {item.body}
                   </p>
                 </div>
+                {/* Always visible — a hover-only control does not exist on a
+                    phone, and this list is read on phones. */}
                 <Button
                   variant="ghost"
                   size="icon"
                   aria-label={`Dismiss ${item.title}`}
                   onClick={() => dismiss(item.id)}
-                  className="size-6 shrink-0 opacity-0 transition-opacity group-hover/notification:opacity-100"
+                  className="size-6 shrink-0 opacity-50 transition-opacity hover:opacity-100 group-hover/notification:opacity-100"
                 >
                   <XIcon className="size-3.5" />
                 </Button>

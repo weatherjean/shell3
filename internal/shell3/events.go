@@ -65,6 +65,7 @@ type Event struct {
 	PromptTokens     int    // Usage, Done
 	CompletionTokens int    // Usage, Done
 	TotalTokens      int    // Usage, Done
+	CachedTokens     int    // Usage, Done — cache-hit share of PromptTokens (0 if unreported)
 	Err              error  // Error
 }
 
@@ -114,6 +115,7 @@ func usageEvent(k EventKind, ev chat.Event) Event {
 		e.PromptTokens = ev.Usage.PromptTokens
 		e.CompletionTokens = ev.Usage.CompletionTokens
 		e.TotalTokens = ev.Usage.TotalTokens
+		e.CachedTokens = ev.Usage.CachedTokens
 	}
 	return e
 }
