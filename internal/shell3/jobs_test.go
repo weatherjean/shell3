@@ -269,6 +269,29 @@ func TestFormatJobStatus_UnknownID(t *testing.T) {
 	}
 }
 
+// Polling a still-running job is the one thing models keep doing despite the
+// start message saying not to: status → "running" → status → … burns the turn
+// and blocks the queue while the wake would have delivered the result. The
+// first check is legitimate (progress, on the user's ask); repeats on the SAME
+// running job get a hard instruction to end the turn instead.
+func TestFormatJobStatus_RepeatPollsGetToldToStop(t *testing.T) {
+	m := newJobManager(nil, 8)
+	id, err := m.startCommand(nil, "sleep 30", t.TempDir(), []string{"sleep", "30"}, nil, false, "")
+	if err != nil {
+		t.Fatalf("startCommand: %v", err)
+	}
+	defer func() { _ = m.cancel(id) }()
+
+	first := m.formatJobStatus(id)
+	if strings.Contains(first, "end your turn") {
+		t.Errorf("first status check must stay plain, got %q", first)
+	}
+	second := m.formatJobStatus(id)
+	if !strings.Contains(second, "end your turn") {
+		t.Errorf("repeat poll of a running job must instruct to stop, got %q", second)
+	}
+}
+
 // TestFormatJobStatus_Truncates verifies that a large output is capped.
 func TestFormatJobStatus_Truncates(t *testing.T) {
 	m := newJobManager(nil, 8)

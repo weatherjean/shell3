@@ -44,8 +44,19 @@ func (BashBgHandler) Execute(ctx context.Context, id string, args json.RawMessag
 	if err != nil {
 		return "", fmt.Errorf("bash_bg: %w", err)
 	}
+	// The mechanism is spelled out because "do not poll" alone does not hold:
+	// a model that thinks ending the turn abandons the user will sit in a
+	// task_status/sleep loop unless told the wake is how the answer arrives.
 	if p.Direct {
-		return fmt.Sprintf("started background job %s (direct)\nYou'll be woken with its completion notice. Do not poll.", jobID), nil
+		return fmt.Sprintf("started background job %s (direct)\n"+
+			"Its completion notice will wake you: it extends this reply if the job finishes "+
+			"before your turn ends, and arrives as a new message otherwise — so finish what "+
+			"else you have, tell the user the job is running, and END YOUR TURN. "+
+			"Do not poll task_status and do not sleep-and-recheck in bash; waiting in-turn "+
+			"blocks the conversation without making the job faster.", jobID), nil
 	}
-	return fmt.Sprintf("started background job %s\nThe notifier will triage its completion (you may or may not hear back). Do not poll.", jobID), nil
+	return fmt.Sprintf("started background job %s\n"+
+		"The notifier will triage its completion (you may or may not hear back; failures always surface). "+
+		"Do not poll — finish your turn; if the user is waiting on this result, "+
+		"you should have set direct:true instead.", jobID), nil
 }

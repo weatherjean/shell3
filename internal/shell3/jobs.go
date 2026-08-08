@@ -176,6 +176,7 @@ type bgJob struct {
 	// reaches the root as an agent_update notice.
 	child       *Session // subagent: the child session handle (nil for commands)
 	childClosed bool     // child.Close() has run; follow-ups degrade to raw notices
+	statusPolls int      // task_status checks while running — repeats get told to stop polling
 	lingering   bool     // main turn ended, child kept open for live bg jobs
 	driver      bool     // a follow-up driver goroutine is active for this job
 	followUps   int      // follow-up turns run so far (capped at maxFollowUps)
@@ -1128,11 +1129,16 @@ func (m *jobManager) formatJobStatus(id string) string {
 		exit     *int
 		summary  string
 		errText  string
+		polls    int
 	)
 	if j != nil {
 		jKind = j.kind
 		finished, exit = j.finished, j.exit
 		summary, errText = j.summary, j.errText
+		if !finished {
+			j.statusPolls++
+			polls = j.statusPolls
+		}
 	}
 	m.mu.Unlock()
 	if j == nil {
@@ -1171,6 +1177,16 @@ func (m *jobManager) formatJobStatus(id string) string {
 		if logPath != "" {
 			fmt.Fprintf(&b, "\nfull output: %s", logPath)
 		}
+	}
+	// A second status check on the same still-running job is a poll loop
+	// forming: checking cannot finish the work, and the loop burns the turn
+	// the wake mechanism exists to free. Deterministic host text, because the
+	// start message's "do not poll" alone demonstrably does not hold.
+	if !finished && polls >= 2 {
+		fmt.Fprintf(&b, "\nStill running, and you have now checked %d times — polling cannot finish it. "+
+			"Stop checking and end your turn (reply to the user; say the job is running). "+
+			"Its completion will wake you: as part of this reply if it finishes before the turn ends, "+
+			"as a new message otherwise. Do not sleep-and-recheck in bash either.", polls)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

@@ -85,8 +85,10 @@ var bashBgTool = llm.ToolDefinition{
 	Description: "Start a shell command in the background on the in-process runtime and return a job id immediately. " +
 		"Use this for long-running work or servers — anything that should not block the turn. " +
 		"On completion the notifier triages the result; set direct:true when the user is waiting on it " +
-		"so the result comes straight back to you instead. Do not poll — use task_status <id> only to " +
-		"read more of a finished job's output.",
+		"so the result comes straight back to you instead. The completion WAKES you — mid-turn into this " +
+		"same reply if the job is quick, as a new message after your turn ends otherwise — so start it, " +
+		"say it's running, and end your turn. Never wait in-turn: no task_status loops, no sleep-and-recheck " +
+		"in bash. task_status <id> is for reading a finished job's output or answering a user's how's-it-going.",
 	Parameters: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -125,8 +127,11 @@ func TaskToolFor(subs []SubagentRef) llm.ToolDefinition {
 		Name: "task",
 		Description: "Spawn a subagent that runs in the background. Returns immediately — the notifier triages " +
 			"its completion (set direct:true when the user is waiting, so the result comes straight back " +
-			"to you). Do NOT poll for results. Use this to delegate work to a specialised subagent while " +
-			"you continue with other tasks. Brief it like a contract — vague prompts produce misaimed work.",
+			"to you). The completion WAKES you — mid-turn into this same reply if it's quick, as a new " +
+			"message after your turn ends otherwise — so dispatch, say it's running, and end your turn. " +
+			"Never wait in-turn: no task_status loops, no sleep-and-recheck. Use this to delegate work to " +
+			"a specialised subagent while you continue with other tasks. Brief it like a contract — vague " +
+			"prompts produce misaimed work.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

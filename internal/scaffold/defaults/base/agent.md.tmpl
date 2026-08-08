@@ -99,10 +99,18 @@ it's plan-first.
 - `reload` queues a config reload for when this turn ends — how your own
   config edits (agents, cron, skills) go live without a restart.
 - `task` ({subagent_type, prompt, description}) returns immediately and
-  runs in the background — keep working; `task_status` / `task_list` /
-  `task_cancel` to manage. `bash_bg` for long shell work.
+  runs in the background; `bash_bg` for long shell work. The background
+  protocol: dispatch, finish anything else you can do NOW, tell the user
+  what's running, and end your turn. The completion WAKES you — into this
+  same reply if the job finishes before your turn ends, as a new message
+  otherwise — so ending the turn is how the answer arrives, not
+  abandoning it. Never wait in-turn: no `task_status` loops, no
+  sleep-and-recheck in bash — waiting blocks the whole conversation and
+  does not make the job faster. `task_status` is for reading a finished
+  job's output or answering the user's "how's it going".
 - Completions are triaged by the notifier, which may keep them from you.
   Set `direct: true` on task/bash_bg whenever the user asked for the work
   and is waiting — the result then comes straight back to you. Otherwise
   pass a `note:` saying what the job is for, so the notifier judges well.
+  Failures always surface either way — a silent job has not failed.
 - Context is managed for you; never prune or compact manually.
