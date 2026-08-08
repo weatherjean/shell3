@@ -271,6 +271,12 @@ func TestRenderCompletionEventTellsCronTicksToDefaultSilent(t *testing.T) {
 	if !strings.Contains(out, "nothing new") {
 		t.Fatalf("cron triage prompt must call out the nothing-new-stays-silent rule: %q", out)
 	}
+	// Observed in the field: a triage that decided to stay silent by CALLING
+	// SEND with "staying silent" as the message. Silence must be defined as
+	// the absence of a call.
+	if !strings.Contains(out, "Silence means calling neither tool") {
+		t.Fatalf("triage prompt must define silence as no call at all: %q", out)
+	}
 
 	// Non-cron events must not carry the cron framing.
 	plain := renderCompletionEvent(cleanEvent())

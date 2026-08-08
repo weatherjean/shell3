@@ -482,6 +482,7 @@ func renderCompletionEvent(ev CompletionEvent) string {
 		"- send {text}: post a short message to the user now.\n" +
 		"- wake {note}: hand the result to the main agent to act on or relay.\n" +
 		"Or call neither to stay silent (a routine result nobody is waiting on). " +
+		"Silence means calling neither tool — never send a message announcing that you are staying silent. " +
 		"Failures you leave silent are posted automatically, so never send a bare failure restatement.")
 	return b.String()
 }

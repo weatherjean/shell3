@@ -66,11 +66,22 @@ func TestSubagentCancelMidRun(t *testing.T) {
 	}
 	// finishSubagent wakes the parent when the job goroutine unwinds.
 	waitForWake(t, rt, parent)
+	// The wake is delivered BEFORE the job is marked done (deliberate: while
+	// the notice is in flight the job must still count as running, so /clear's
+	// running-tasks guard refuses). The wake therefore proves delivery, not
+	// completion — poll for the flag instead of asserting it instantly.
 	var found JobInfo
-	for _, j := range rt.jobs.list() {
-		if j.ID == id {
-			found = j
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		for _, j := range rt.jobs.list() {
+			if j.ID == id {
+				found = j
+			}
 		}
+		if found.Done || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	if !found.Done {
 		t.Fatalf("cancelled subagent not marked done: %+v", found)
