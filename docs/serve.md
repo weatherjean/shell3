@@ -1,7 +1,7 @@
 # `shell3 serve` — the bring-your-own front-end protocol
 
 `shell3 serve` runs the same agent as `shell3 telegram` — same fresh-turn
-threading, host commands, hook approvals, notifier completion delivery, and
+threading, host commands, completion-mail delivery, and
 cron — over newline-delimited JSON on stdin/stdout instead of the Telegram
 Bot API. Your front-end (a Discord bridge, a custom dashboard backend, a test
 harness) spawns the process and translates.
@@ -44,8 +44,10 @@ mapping persists on disk, so replies keep working across agent restarts.
 Replying to an id the agent doesn't know gets a fixed "can't continue from
 that message" send, never a silent new session.
 
-Exactly one turn runs at a time. A `message` arriving mid-turn gets a
-courtesy "a turn is running" reply and is dropped, never queued.
+Exactly one turn runs at a time, but sending always succeeds: a `message`
+arriving mid-turn queues silently and drains after the turn ends. Queued
+replies into one thread drain as a single batched turn anchored at the
+newest message; a fresh message is its own thread and its own turn.
 
 ## Handshake
 
@@ -92,17 +94,16 @@ the agent. But it means a bridge that lets a remote user choose the path
 reads on this machine. Copy inbound files into a directory you own and pass
 your own path.
 
-`callback` answers a `confirm` or `menu` event: `data` is the pressed
-option's data string, `id` is your id for the press (echoed in the `ack`).
+`callback` answers a `menu` event: `data` is the pressed option's data
+string, `id` is your id for the press (echoed in the `ack`).
 
 ## Agent → client events
 
 ```json
 {"type":"send","id":"a…-7","reply_to_id":"m1","text":"reply **markdown**"}
 {"type":"media","id":"a…-8","kind":"document","path":"…/serve_out/f…-reply.md","filename":"reply.md","caption":"full reply"}
-{"type":"menu","id":"a…-9","text":"runs 1/3","options":[{"label":"…","data":"…"}]}
-{"type":"confirm","id":"a…-10","text":"Run `rm -rf …`?","yes":"…","no":"…"}
-{"type":"edit","id":"a…-10","text":"✅ allowed"}
+{"type":"menu","id":"a…-9","text":"🔊 voice replies: off","options":[{"label":"…","data":"…"}]}
+{"type":"edit","id":"a…-9","text":"🔊 voice replies: always"}
 {"type":"typing"}
 {"type":"ack","callback_id":"cb1"}
 ```
@@ -117,10 +118,9 @@ option's data string, `id` is your id for the press (echoed in the `ack`).
   `.shell3_project/serve_out/`). `kind` is
   `photo|voice|audio|video|document`. Only `document` carries an `id`
   (documents advance the thread anchor).
-- `confirm` — a hook `ask` verdict: present Allow/Deny, answer with a
-  `callback` whose `data` is the `yes` or `no` string. No answer = the ask's
-  fail-safe timeout denies. `edit` then replaces the confirm's text.
-- `menu` — a button row (`/runs` paging, `/voice`); answer like a confirm.
+- `menu` — a button row (`/runs` paging, `/voice`): answer with a `callback`
+  whose `data` is the pressed option's data string. An `edit` may then
+  replace the menu message's text (e.g. `/voice` showing the chosen mode).
 - `edit` — replace the text of a previously sent message (safe to ignore if
   your surface can't edit).
 - `typing` — the "typing…" action, refreshed every few seconds during a

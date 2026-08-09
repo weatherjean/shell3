@@ -38,14 +38,16 @@ is the token and the `chat_id` — see
 continue one, use Telegram's reply on any message in that thread — the
 message→session map persists in the runs store, so threads survive a
 restart (sessions the janitor swept answer that they can't be resumed). One
-main-agent turn runs at a time: a message sent while a turn is running is
-answered with a note and disregarded, not queued; `/stop` and reply to your
-last prompt to steer instead. Background jobs (subagents, `bash_bg`, cron)
-run independently and come back through the
-[notifier](configuration.md#the-notifier--notifiermd): a post lands in the
-chat (🔔, or ⏰ for a cron origin), a wake runs another turn in the owning
-thread when its session is still live, otherwise as a fresh replyable
-message.
+main-agent turn runs at a time, but sending always succeeds: a message sent
+while a turn is running queues silently and drains after the turn ends.
+Queued replies into the same thread drain as **one** batched turn, anchored
+at the newest message; a fresh (non-reply) message is its own thread and its
+own turn. `/inbox` shows what's queued; `/stop` cancels the running turn.
+Background jobs (subagents, `bash_bg`, cron) run independently and come back
+as [completion mail](configuration.md#completion-mail): a failure or a
+`direct` result posts to the chat (🔔, or ⏰ for a cron origin); everything
+else wakes the agent quietly, and it messages you — via its `mail_user`
+tool — only when the result warrants it.
 
 `--console` swaps the Telegram transport for stdin/stdout and drives the same
 bot loop with no credentials and no network: a plain line is a fresh message,
@@ -62,6 +64,7 @@ tappable commands, and Telegram only linkifies those in message text.
 | Command | What |
 |---------|------|
 | `/stop` | Cancel the running turn. Background jobs are **not** killed — they keep running and still report back. |
+| `/inbox` | The queued state: your pending messages, and agent mail waiting in sessions. |
 | `/status` | Version, config dir, agent + model + params, context usage, whether the gate is armed, tools, subagents, skills, MCP health, cron jobs, projects, warnings, and the effective system prompt. Reports the live session (on an idle bot, the headless cron parent — `0` messages). |
 | `/jobs` | Running and finished background work: id, kind, label, status, elapsed, exit code. |
 | `/job <id>` | One job plus its output — a subagent's stored transcript, or a command's captured stdout. |
@@ -72,20 +75,17 @@ tappable commands, and Telegram only linkifies those in message text.
 | `/reload` | Re-read the config and apply it live. Takes the turn slot, so it is refused rather than raced while a turn runs. |
 | `/voice off\|inbound\|always` | Whether replies come back spoken (needs `media.tts`). Bare `/voice` opens a three-button menu. The choice persists in `~/.shell3/voice_mode.json`. |
 
-### Attachments, media, approvals
+### Attachments and media
 
 Files you send are saved under `~/.shell3/media/`; voice notes and photos are
 transcribed/captioned before the turn when `media:` is configured, and the
 agent sends files back with `send_media_telegram` — see
-[Voice & images](configuration.md#voice--images--media). A hook script's
-`ask` verdict posts Allow/Deny buttons and parks the turn until one is
-tapped; no answer denies — see the
-[command gate](configuration.md#the-command-gate--hookssh).
+[Voice & images](configuration.md#voice--images--media).
 
 ## `shell3 serve` — the agent over stdio JSONL
 
 Runs the same bot loop as `shell3 telegram` — fresh-turn threading, host
-commands, hook approvals, completion delivery, cron — but the transport is
+commands, completion mail, cron — but the transport is
 newline-delimited JSON on stdin/stdout. This is the bring-your-own front-end
 seam: a Discord bridge or a custom dashboard backend spawns `shell3 serve`
 and translates its own surface to the wire events. No Telegram credentials
@@ -171,9 +171,8 @@ Loads the config exactly like the bot would and fails (exit 1) on anything
 the running bot only warns about — a skill `.md` skipped for broken
 frontmatter, a hook file naming no subagent. It also dry-runs every hook
 script with a probe payload (a script error fails health; a strict gate that
-blocks the probe passes), connects every MCP server, validates every
-`projects/<name>/`, and notes when `notifier.md` is absent (background
-completions then post raw). A `telegram:` block `shell3 telegram` would
+blocks the probe passes), connects every MCP server, and validates every
+`projects/<name>/`. A `telegram:` block `shell3 telegram` would
 refuse — blank `token` or `chat_id`, a non-numeric `chat_id` — fails here,
 naming the field; no `telegram:` block at all is reported but not failed,
 since an `ask`-only config is legitimate. Run it after editing the config
@@ -188,12 +187,11 @@ completions. `ask` is host-agnostic: it reads nothing from the `telegram:`
 block (its session runs in the config dir) and shares the same runs store, so
 the bot and `ask` see each other's history.
 
-**Hook approval asks.** In an interactive terminal (no `-p`, a TTY attached),
-a tool-call hook `ask` verdict prompts you on the terminal with the reason and
-command and reads a `y/N` answer — anything but an explicit yes denies. With
-`-p` (scripted) or no TTY there is no human to ask, so the run is **headless**:
-the hook payload's `headless` flag is true and every `ask` verdict
-auto-**denies**; a headless ask never silently runs.
+**Headless runs.** With `-p` (scripted) or no TTY there is no human attached,
+so the run is **headless**: hook scripts see `headless: true` in their
+payload and can gate accordingly. There is no approval prompt in either mode
+— a hook allows, rewrites, runner-swaps, or blocks, and that's the whole
+vocabulary.
 
 ```sh
 shell3 ask                        # no message: opens an interactive multi-turn chat
@@ -209,7 +207,7 @@ ctrl+c. A headless invocation (no TTY) must pass a message via an argument or
 
 **Background jobs and `-p`.** When a turn spawns a subagent or `bash_bg` job,
 `ask` stays alive after the turn ends and waits for those in-process jobs to
-complete, rendering each completion's wake turn, so a scripted `ask -p` run
+complete, rendering each completion's mail turn, so a scripted `ask -p` run
 never exits at turn end and silently kills in-flight work. The wait has no
 timeout; press ctrl+c (SIGINT) to quit while jobs are still running.
 

@@ -35,15 +35,14 @@ subagent namespace so a name collision or the reserved "agent" is a load
 error; `projects.md` beside `shell3.yaml` is the standing portfolio brief,
 appended verbatim to the main agent's system prompt),
 `skills/<name>.md` (skills — main agent only, subagents carry none),
-`notifier.md` (the reserved background-completion triage persona — optional;
-frontmatter `model` only, tools/mcp/context rejected, body = triage policy;
-"notifier" is reserved in `agents/` like "agent"; absent file = degraded
-mode, every completion posts raw), `cron/<name>.md` (frontmatter
+`cron/<name>.md` (frontmatter
 `schedule`/`agent`/`direct`/`workdir`; body = prompt; `agent` names either a
 subagent from `agents/` or a project's `manager.md`, which then runs in that
 project's workdir — an explicit `workdir` overrides even a manager's).
 There is no Lua anywhere, and no migration shims: an
-unknown key is simply an unknown-key load error.
+unknown key is simply an unknown-key load error. (`notifier.md`, the old
+triage persona, is gone with the mail model — a leftover file loads with a
+warning naming the removal.)
 
 **Bash-first.** The agent's verbs are `bash`, `bash_bg`, and `edit_file` (plus
 `read_media` — attach an image, audio, PDF, or video file so a multimodal
@@ -69,37 +68,36 @@ under a concurrency cap (`background.max_concurrent`, default 8) — no
 subprocess, no inbox file, no fsnotify. `bash_bg` is a background shell
 command on the same runtime; its full output also tees to
 `runs/<session>/jobs/<id>.log` (1 MiB cap, janitor-swept). **Completion
-delivery is unified through the notifier** (`internal/shell3/notifier.go`):
-every finished job — bash_bg, subagent, follow-up, cron — becomes a
-`CompletionEvent` and, unless spawned with `direct: true`, runs one small
-headless triage turn of the `notifier.md` persona (fixed tools: `read`,
-`list_files`, and the verdict pair `send {text}` → post to the user /
-`wake {note}` → deliver to the main agent; calling neither = silent). The
-spawner can pass `note: "…"` as triage context. Hard rules are host code:
-a failed job left silent posts `⚠️ <label> failed: …` anyway; at most one
-wake per completion; triage turns timebox at 60s and degrade to a raw post
-on error/timeout; no `notifier.md` → every completion posts raw. Delivery
-lands through a front-end `CompletionHost`
+delivery is mail** (`internal/shell3/completion.go`): every finished job —
+bash_bg, subagent, follow-up, cron — becomes a `CompletionEvent` and routes
+deterministically, no triage turn, no judge model. Failed: the ⚠️ floor
+post always reaches the user, and a live owning session is additionally
+mailed (woken) so the agent can react — but an ownerless failure (cron)
+stops at the post, never burning a main-model turn per broken tick.
+`direct: true` (bash_bg arg, task arg, cron frontmatter): the raw result
+posts straight to the user, and the owning session gets the notice queued
+WITHOUT a wake — the next turn has it in context without spending one now.
+Default: the completion is **mail to the agent** — `WakeOwner` queues+wakes
+the owning session, or `StartFreshTurn` runs a fresh main-agent session
+when none is live (cron, orphans). These mail turns are QUIET: their reply
+posts nowhere; the agent reaches the user only via the `mail_user` host
+tool. The spawner can pass `note: "…"` as context carried into the mail.
+Delivery lands through a front-end `CompletionHost`
 (`Runtime.SetCompletionHost`: `PostCompletion` (⏰ for cron origins, 🔔
 otherwise; threaded+anchored into the owning session's chat thread when one
-is live), `WakeOwner` (queue+wake a live owner; its liveness check pairs
-with the bot's retire lock so notes never land in a closing session),
-`StartFreshTurn` (no owner — cron, orphans: a fresh main-agent session runs
-over the note and replies as a new replyable thread, serialized FIFO on the
-single-turn gate)); with no host installed (library/tests, `shell3 ask`)
-the raw notice goes straight to the owning session — ask deliberately stays
-in that mode so its verbose view sees everything. `direct: true` (bash_bg
-arg, task arg, cron frontmatter) skips triage: the owner wakes with the
-notice (cron: a fresh main-agent turn, since the pinned cron parent runs no
-turns). Foreground `bash` is capped at 120s
+is live), `WakeOwner` (its liveness check pairs with the bot's retire lock
+so mail never lands in a closing session), `StartFreshTurn` (serialized
+FIFO on the single-turn gate)); with no host installed (library/tests,
+`shell3 ask`) the raw notice goes straight to the owning session — ask
+deliberately stays in that mode so its verbose view sees everything.
+Foreground `bash` is capped at 120s
 (`timeout_seconds`) precisely because it blocks the turn — longer work
 belongs in `bash_bg`. A subagent may run `bash_bg` jobs of
 its own; a job that outlives the subagent's main turn keeps the child session
 open ("lingering"), and each completion **resumes the subagent for a follow-up
-turn** whose summary is triaged like any completion (direct jobs deliver it
-to the root as an `agent_update` notice; capped at 5 follow-up turns per
-subagent, after which — or after cancel/failure — the raw job event is
-triaged instead, so a completion is never lost). `task_cancel <sub>`
+turn** whose summary routes like any completion mail (capped at 5 follow-up
+turns per subagent, after which — or after cancel/failure — the raw job
+event routes instead, so a completion is never lost). `task_cancel <sub>`
 cascades to the jobs the subagent started. `Runtime.Reload` no longer
 refuses while background work is running: it always proceeds — idle
 front-end sessions swap onto the new
@@ -126,14 +124,15 @@ governs the main agent, `hooks/<name>.tool-call.sh` governs subagent `<name>`
 matching no subagent is a warning; `shell3 health` fails on it). The script
 runs before **every** tool as `bash <path>` (cwd = config dir, 10s timeout)
 with JSON on stdin — `{"name", "command" (bash text for the two bash tools,
-null otherwise), "args", "headless" (true when no human asker is attached —
-subagents, cron — so an ask auto-denies)}` — and prints a verdict: empty/`{}`
+null otherwise), "args", "headless" (true when no human is attached —
+subagents, cron)}` — and prints a verdict: empty/`{}`
 (run) / `{"command": …}` (rewrite — bash tools only) / `{"argv": […]}`
 (runner-swap — bash tools only; fails closed for non-bash) /
-`{"block": true, "reason": …}` / `{"ask": "prompt", "reason": …}` (human
-prompt — Allow/Deny buttons in the chat; decline/headless → block).
-Precedence when several keys are set: block > argv > ask > command. Nonzero
-exit, malformed JSON, or timeout **fails closed**. `hooks/tool-result.sh` /
+`{"block": true, "reason": …}`. There is NO ask verdict: shell3 runs
+unattended, where an ask is a denial with a delay — a legacy hook printing
+`{"ask": …}` fails closed with a reason naming the removal, never silently
+allows. Precedence when several keys are set: block > argv > command.
+Nonzero exit, malformed JSON, or timeout **fails closed**. `hooks/tool-result.sh` /
 `hooks/<name>.tool-result.sh` can rewrite a tool's output (e.g. redact
 secrets): stdin `{"name","args","output"}`, stdout `{"output": …}`; a failure
 here also fails closed (output replaced by an error notice, never passed
@@ -214,9 +213,15 @@ thread index (the runs store's `threads` table, surface-namespaced
 process, store writes best-effort, and the store is resolved per call so a
 /reload generation swap never leaves the index on a closed handle). Replying to a message whose session is gone
 answers that it can't be resumed rather than silently starting a new one.
-Exactly one main-agent turn runs at a time (a turn slot in `bot.go`); a message
-arriving mid-turn gets "a turn is running … this message is disregarded" and
-is dropped, never queued — the running turn is never steered. `postReply`
+Exactly one main-agent turn runs at a time (a turn slot in `bot.go`); sending
+always succeeds — a message arriving mid-turn queues silently (`mailQueue`)
+and drains once the turn ends, the running turn never steered. Queued
+replies into the SAME thread drain as one batch turn (grouped through the
+thread index, so a retired thread's replies still batch and resume it),
+anchored at the newest message; a fresh message is its own thread and its
+own turn. `/inbox` renders the queued state — the user's pending mail,
+wake-queued sessions, live sessions holding undrained agent mail — with
+zero tokens. `postReply`
 chunks the reply at Telegram's message cap on rune boundaries and replies each
 chunk to the thread's anchor, capped at `replyMaxChunks` (2) bubbles — a longer
 reply posts its first chunk plus the full text as a `reply.md` document — and
@@ -242,29 +247,29 @@ by `internal/render` (`Status`, `Jobs`, `JobDetail`, `Cron`, `RunsPage`,
 message text).
 `/reload` takes the turn slot, so it is refused rather than raced.
 
-Three **host tools** ride the session decorator (`Runtime.SetSessionDecorator`,
+Four **host tools** ride the session decorator (`Runtime.SetSessionDecorator`,
 re-applied by `Runtime.Reload`; `DecorateChatSession` skips headless subagent
 children): `send_media_telegram` (push a local file to the chat as
 photo/voice/audio/video/document, validating extension and size per kind, and
-refusing `.env` and its dotenv siblings), `status`, and `reload` (records a
-pending reload and returns; the host applies it at end-of-turn, since a
-mid-turn reload would tear down the running turn). `image_generate` is
-registered on EVERY session, headless children included.
+refusing `.env` and its dotenv siblings), `mail_user` (`{text}` — the agent's
+one way to reach the user from a quiet mail turn; threads into the session's
+conversation when an anchor exists, otherwise starts a fresh replyable
+thread, and records the sent id so replying to agent mail continues that
+session), `status`, and `reload` (records a pending reload and returns; the
+host applies it at end-of-turn, since a mid-turn reload would tear down the
+running turn). `image_generate` is registered on EVERY session, headless
+children included.
 
-The **command gate** is an inline keyboard: a hook `ask` verdict posts the
-command and reason with Allow/Deny buttons and blocks the turn goroutine inside
-`Ask` until a callback arrives. Callbacks drain on their own bot-lifetime
-goroutine, so a press is delivered while the turn goroutine is parked.
-Fail-safe throughout — send error, cancelled turn, or timeout all deny; a
-headless caller (subagent, cron) denies immediately.
-
-**Completion delivery** is the notifier's, unchanged; the bot is the
-`CompletionHost` (`bot.go`): `PostCompletion` posts `⏰ <job>: …` for a cron
-origin and `🔔 …` otherwise, threaded into the owning session's chat thread
-when one is live; `WakeOwner` resumes a live owner under the same turn slot
-(its liveness check pairs with the retire lock, so a note lands or the session
-retires, never both); `StartFreshTurn` runs a fresh main-agent session over the
-note and replies as a new replyable thread.
+**Completion delivery** is mail (see internal/shell3/completion.go above);
+the bot is the `CompletionHost` (`bot.go`): `PostCompletion` posts
+`⏰ <job>: …` for a cron origin (direct cron, ⚠️ floors) and `🔔 …`
+otherwise, threaded into the owning session's chat thread when one is live;
+`WakeOwner` resumes a live owner under the same turn slot (its liveness
+check pairs with the retire lock, so mail lands or the session retires,
+never both); `StartFreshTurn` runs a fresh main-agent session over the
+mail. Wake turns are QUIET — `runWakeTurn` posts nothing; `mail_user` is
+the only exit. Callbacks (the `/voice` menu) drain on their own
+bot-lifetime goroutine (`callbacks.go`).
 
 **Media** (`internal/media`, four blocks under `media:` in `shell3.yaml`, each
 pointing at a model): a turn's attachments are saved to `~/.shell3/media/` as
@@ -290,10 +295,12 @@ An in-process cron scheduler (`internal/cron`, jobs are `cron/<name>.md`
 files; each job dispatches its declared agent — a subagent from `agents/`, or
 a project's `manager.md`, which then runs in that project's workdir — from a
 hidden pinned "cron" parent session that is the dispatch parent + the jobs/runs
-source but runs NO turns of its own and is never woken; a run's result is a
-notifier event carrying the job name (`DispatchOpts.CronJob`) and the job's
-prompt as the triage note (`DispatchOpts.Note` — the judge knows what the job
-is FOR); a failed run always surfaces as `⚠️ <job> failed: <error>`).
+source but runs NO turns of its own and is never woken; a run's result is
+completion mail carrying the job name (`DispatchOpts.CronJob`) and the job's
+prompt as context (`DispatchOpts.Note` — the agent knows what the job is FOR):
+by default a fresh quiet main-agent turn that mails the user only when
+warranted, with `direct: true` a raw ⏰ post costing no agent turn; a failed
+run always surfaces as `⚠️ <job> failed: <error>` and spends no turn).
 
 Sessions, messages, reminders, and every surface's thread index live in **one
 SQLite database** (`internal/runs`, modernc.org/sqlite — pure Go, no cgo):
@@ -329,6 +336,14 @@ form). It installs **nothing** and exposes **nothing**: the finale prints how
 to run the bot and points at `docs/deploying.md` (or the agent) for service
 management — it only ever *prints*; running any of it is the operator's.
 `--show` reprints that finale, rendered to the terminal's own background.
+`--prompts` refreshes the scaffold's prompt files in an existing install
+(agent.md body, `agents/`, scaffold-shipped `skills/`) after an upgrade:
+frontmatter wiring, shell3.yaml, .env, hooks, cron, projects, memory, and
+user-authored skills are untouched; replaced files back up to
+`.backup/prompts-<ts>/`; the Vision prompt variant is inferred from whether
+the install's own agent.md tools include `media`; a reload applies it
+(`runPromptRefresh` in cmd/shell3/bootprompts.go, rendered by
+`scaffold.PromptFiles`).
 `shell3 ask "…"` is the terminal front-end (`internal/cli`): it drives the same
 agent with full verbose output (every tool call/result, reasoning, token usage;
 no message = an interactive multi-turn loop; `-p` for headless; `--resume`
@@ -365,7 +380,7 @@ assistants, and automated tools.
 ```
 cmd/shell3/            cobra command tree: root (prints help) + telegram/serve/ask/boot/project/health subcommands
 internal/agentsetup/   shared config assembly (BuildParts → chat.Config) used by every front-end
-internal/config/       config-directory loader (shell3.yaml + agent/notifier/subagent/project/skill/cron markdown + hooks/*.sh) + system-prompt assembly
+internal/config/       config-directory loader (shell3.yaml + agent/subagent/project/skill/cron markdown + hooks/*.sh) + system-prompt assembly
 internal/bootstrap/    first-run global + project setup
 internal/scaffold/     embedded starter config tree (defaults/base + defaults/project for `shell3 project new`) + boot/project rendering
 internal/adapter/openai/  OpenAI-compatible LLM adapter
@@ -386,7 +401,7 @@ internal/llm/          Provider/Streamer interfaces, request params, types (+ fa
 internal/persona/      runtime carrier for an agent's prompt/tools/params (data only)
 internal/strutil/      rune-safe string truncation helpers (byte-cap + rune-count) shared by runtime and front-ends
 internal/applog/       rotating app log
-internal/shell3/       session/runtime core consumed by the front-ends; jobs.go hosts the in-process job runtime (subagents + bash_bg); notifier.go is the completion-triage funnel (CompletionEvent/CompletionHost)
+internal/shell3/       session/runtime core consumed by the front-ends; jobs.go hosts the in-process job runtime (subagents + bash_bg); completion.go is the deterministic mail router (CompletionEvent/CompletionHost)
 ```
 
 ## Development

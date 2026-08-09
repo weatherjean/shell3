@@ -1,4 +1,0 @@
-{
-  "type": "module",
-  "main": "../dist/react-shim/index.js"
-}

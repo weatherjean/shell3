@@ -18,7 +18,7 @@ shell3 telegram    # connects the bot and listens; message it
 ## How it works
 
 <p align="center">
-  <img src="docs/assets/shell3-diagram.svg" alt="Diagram: you message shell3 on Telegram; every tool call passes your hook gate before the agent acts through bash and edit on your shell; the agent delegates to project managers, subagents and cron jobs; every background completion is triaged by the notifier into a chat message, a wake of the agent, or silence" width="100%">
+  <img src="docs/assets/shell3-diagram.svg" alt="Diagram: you message shell3 on Telegram; every tool call passes your hook gate before the agent acts through bash and edit on your shell; the agent delegates to project managers, subagents and cron jobs; every background completion arrives as mail — failures and direct results post to the chat, the rest wakes the agent, which messages you only when it matters" width="100%">
 </p>
 
 ## Install
@@ -72,11 +72,12 @@ Every subcommand takes `--config/-c` to point at a different config directory.
 ## Features
 
 - **Bash-first, gated by a script you own.** The agent acts through `bash`
-  and `edit_file`; a per-agent hook script allows, rewrites, asks, or blocks
-  every tool call. Fail-closed, armed out of the box.
+  and `edit_file`; a per-agent hook script allows, rewrites, runner-swaps, or
+  blocks every tool call. Fail-closed, armed out of the box.
 - **Chain of command.** The agent delegates to project managers, subagents,
-  `bash_bg` background jobs, and `cron/*.md` schedules; a notifier triages
-  every completion, and failures always surface.
+  `bash_bg` background jobs, and `cron/*.md` schedules; completions arrive as
+  mail — the agent hears about finished background work and messages you only
+  when it matters, and failures always surface.
 - **One config directory, four rules.** YAML wires it, markdown prompts it,
   files enable it, one bash script gates it. Versionable, diffable, reloadable
   live.

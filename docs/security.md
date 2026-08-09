@@ -16,7 +16,7 @@ fallback between them; each agent is governed by exactly one script or none.
 The script runs before **every** tool (`bash`, `bash_bg`, `edit_file`,
 `read_media`, MCP tools as `mcp_<server>_<tool>`, host tools like
 `image_generate`) with the call as JSON on stdin, and prints a verdict: pass,
-rewrite, runner-swap, block, or ask a human (Allow/Deny buttons in the chat).
+rewrite, runner-swap, or block — there is no ask verdict and no approval flow.
 The full verdict contract and payload fields are in
 [configuration.md](configuration.md#the-command-gate--hookssh).
 
@@ -45,11 +45,10 @@ What `hooks/tool-call.sh` refuses, and why:
   every new project a refusal until someone edits the file, which is how
   gates get turned off.
 
-It never asks. shell3 mostly runs unattended, where an unanswered ask parks
-the turn and then denies anyway, so every rule decides immediately, and each
-refusal tells the model to raise the block with the operator rather than
-route around it. The script is short bash with the reasoning in its comments;
-read it and tune it to your deployment.
+Every rule decides immediately — there is no ask verdict or approval prompt
+to park a turn on — and each refusal tells the model to raise the block with
+the operator rather than route around it. The script is short bash with the
+reasoning in its comments; read it and tune it to your deployment.
 
 ## Network surface
 
@@ -73,8 +72,7 @@ access model is two secrets:
   other chat, inline-button presses included, are dropped before a turn
   starts, so a stranger who finds your bot gets nothing back. Point it at
   your own private chat: it accepts a group id, and then every member of
-  that group holds the shell described below, including the Allow button on
-  a gate `ask`.
+  that group holds the shell described below.
 
 **Whoever controls that chat controls a shell** on the machine running
 shell3. That includes anyone with access to your Telegram account, and any
@@ -92,10 +90,8 @@ anything the agent quotes from your machine: file contents, command output, a
 `/status` dump of the system prompt, a `/runs` replay of a stored session.
 Treat the chat as a third-party log of everything the agent says.
 
-Approvals inherit all of this: whoever holds that chat taps the Allow/Deny
-buttons on a gate `ask`. No answer means denial: a cancelled turn, a send
-failure, or the timeout all deny, and a headless caller (subagent, cron)
-denies immediately.
+There is no approval flow to fall back on: whoever holds that chat **is**
+the operator — the `chat_id` allowlist is the whole access model.
 
 ## What the gate does and doesn't guarantee
 
@@ -105,12 +101,10 @@ denies immediately.
 - **Match the whole command.** Write patterns against the entire `command`
   string, so `echo hi; rm -rf /` and `x=$(rm -rf /)` still hit an `rm -rf`
   pattern. Chaining can't hide a flagged fragment.
-- **Headless sessions deny on ask.** Subagents and cron jobs have no human
-  attached, so an ask verdict auto-denies with its `reason` (which flows back
-  to the parent agent in the completion notice). Scripts see `headless` in
-  the payload and can print a tailored block instead. Unanswered asks deny:
-  `ask_timeout` (default 300 s) bounds the wait, and a send failure or a
-  cancelled turn denies immediately. A block verdict never prompts.
+- **Headless sessions are flagged.** Subagents and cron jobs have no human
+  attached; hooks see `headless: true` in the payload and can print a
+  tailored block for them. A block's `reason` flows back to the agent (and,
+  from a subagent, to its parent in the completion mail).
 - **Per-agent, no inheritance.** A subagent with no hook file runs ungated;
   the main agent's script never applies to it. Give every subagent its own
   script (even a strict three-line allowlist) if it must be constrained.

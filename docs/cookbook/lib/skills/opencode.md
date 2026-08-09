@@ -51,9 +51,10 @@ bash_bg {
 }
 ```
 
-The completion goes to the notifier, which decides whether you hear about it.
-Add `direct: true` when the user is waiting on this run and wants the result
-back immediately (failures surface either way).
+The completion comes back to you as mail: you wake with the result in a
+quiet turn, and you tell the user (via `mail_user`) only if it matters. Add
+`direct: true` when the user is waiting on this run and wants the raw result
+posted immediately (failures surface either way).
 
 ## Follow-ups
 

@@ -18,7 +18,6 @@ rules:
   shell3.yaml            # wiring: models, telegram, mcp, media, background, runs_keep_days
   .env                   # secrets — never commit this file
   agent.md               # THE agent: frontmatter (model, tools, context) + prompt body
-  notifier.md            # the completion-triage persona (optional; see Notifier)
   memory.md              # a context: file the scaffold wires in by default
   agents/<name>.md       # subagents; the file IS the registration
   projects/<name>/       # a project: project.md brief + manager.md subagent (+ skills/)
@@ -197,8 +196,7 @@ its name; the file is the registration — the main agent can spawn every
 subagent in the directory, and the `task` tools appear automatically as soon
 as any subagent exists — a file in `agents/`, or a project's manager (no
 toggle). `description` is required: it's what the main model reads when
-deciding to delegate. `agent.md` and `notifier.md` are illegal here — both
-names are reserved.
+deciding to delegate. `agent.md` is illegal here — the name is reserved.
 
 ```markdown
 ---
@@ -216,33 +214,34 @@ description}`; returns immediately), `task_list`, `task_status <id>`,
 spent.
 
 A spawned subagent is an **in-process background job** (a child-session
-goroutine, not a subprocess). Subagents run headless (an `ask` gate verdict
-auto-denies), and delegation is single-level by construction — a subagent
-never gets the `task` tool.
+goroutine, not a subprocess). Subagents run headless (their hook scripts see
+`headless: true`), and delegation is single-level by construction — a
+subagent never gets the `task` tool.
 
 `bash_bg` runs on the same job runtime but is gated separately by `bash_bg`
-in `tools`. **Completion delivery is the notifier's** (see
-[The notifier](#the-notifier--notifiermd)): each finished job — bash_bg,
-subagent, or cron run — becomes one small triage turn that decides whether
-the result is posted to you, handed to the main agent, or stays silent
-(recorded in the runs store and the jobs list either way). Both `task` and `bash_bg`
-accept two extra args:
+in `tools`. **Completions arrive as mail** (see
+[Completion mail](#completion-mail)): each finished job — bash_bg, subagent,
+or cron run — wakes the spawning agent with the result in a quiet turn, and
+you hear about it only if the agent mails you (failures always post; the
+result is recorded in the runs store and the jobs list either way). Both
+`task` and `bash_bg` accept two extra args:
 
-- `direct: true` skips the notifier — the spawning agent is woken with the
-  completion notice, the right choice when the user asked for the work and
-  is waiting on it;
-- `note: "…"` rides along as triage context ("the user is waiting on this")
-  for jobs the notifier judges.
+- `direct: true` — the raw result posts straight to the chat (🔔), costing
+  no agent turn; the spawning session gets the notice queued for its next
+  turn instead of a wake. The right choice when you asked for the work and
+  just want the output;
+- `note: "…"` rides along in the completion mail as context ("the user is
+  waiting on this").
 
 A bash_bg job's full output is persisted to
 `.shell3_project/runs/<session>/jobs/<id>.log` (capped at 1 MiB, swept with
-its run) so the notifier and `task_status` can read past the in-memory tail.
+its run) so the agent and `task_status` can read past the in-memory tail.
 
 A subagent's still-running `bash_bg` job keeps its session open past its
 main turn; each completion resumes the subagent for a follow-up turn whose
-summary is triaged like any completion — or, for a `direct` job, delivered
-straight to the main agent (capped at 5 follow-ups per subagent — past the
-cap, or after cancel, the raw job event is triaged instead, so no completion
+summary arrives as completion mail like any other — or, for a `direct` job,
+posts raw (capped at 5 follow-ups per subagent — past the
+cap, or after cancel, the raw job event is mailed instead, so no completion
 is lost). `task_cancel <sub-id>` cascades to the jobs that subagent started.
 One global knob caps it all:
 
@@ -281,7 +280,7 @@ memory goes in sibling files in this folder.
 **named after the project** and run with its shell in the project's `workdir`
 (not the config dir). Managers join the same flat subagent namespace as
 `agents/`, so a project name that collides with a subagent — or the reserved
-names `agent` and `notifier` — is a load error. Per-project `skills/` reach only that manager;
+name `agent` — is a load error. Per-project `skills/` reach only that manager;
 global `skills/` stay main-agent-only.
 
 Scaffold a project with [`shell3 project new`](cli.md#shell3-project-new--scaffold-a-project);
@@ -386,7 +385,7 @@ like `image_generate`, and `mcp_*` — runs the governing script as
 | `name` | The real tool name: `"bash"`, `"bash_bg"`, `"edit_file"`, `"read_media"`, `"image_generate"`, `"mcp_…"`. |
 | `command` | The bash command string — the two bash tools only; **null** for every other tool. |
 | `args` | Raw arguments JSON (every tool). Gate non-bash tools by inspecting this. |
-| `headless` | `true` when no human is attached (subagents, cron jobs) — an ask verdict would auto-deny. |
+| `headless` | `true` when no human is attached (subagents, cron jobs, scripted `shell3 ask -p`). |
 
 The script prints a verdict to stdout:
 
@@ -394,13 +393,15 @@ The script prints a verdict to stdout:
 |--------|--------|
 | empty or `{}` | Run. |
 | `{"block": true, "reason": "…"}` | Block; `reason` goes to the model. Any tool. |
-| `{"ask": "prompt", "reason": "…", "ask_timeout": N}` | Ask a human (Allow/Deny buttons in the chat); declined/headless/timeout → block. Any tool. `ask_timeout` bounds the wait (default 300 s). |
 | `{"command": "…"}` | Rewrite the bash command. Bash tools only — fails closed elsewhere. |
 | `{"argv": ["…"]}` | Exec exactly this argv (runner swap). `bash`/`bash_bg` only. |
 
-A script that exits nonzero, prints malformed JSON, or runs past 10 s **fails
-closed** (blocks, with the failure as the reason). The script's cwd is the
-config directory. Compose everything in the one script; there is no chain.
+When several keys are set, precedence is block > argv > command. A script
+that exits nonzero, prints malformed JSON, or runs past 10 s **fails
+closed** (blocks, with the failure as the reason). A legacy `{"ask": …}`
+verdict also fails closed, with a reason naming the removal — it never
+silently allows. The script's cwd is the config directory. Compose
+everything in the one script; there is no chain.
 
 The scaffold ships `hooks/tool-call.sh` armed. Its shape, and the reasoning
 behind it, in one line each:
@@ -423,9 +424,8 @@ behind it, in one line each:
   new project is a refusal until someone edits this file, which is how gates
   get switched off entirely.
 
-It never asks. shell3 usually runs unattended, and an unanswered ask parks the
-turn until it times out and then denies anyway — so every rule decides at once,
-and each refusal tells the model not to route around it but to raise it with
+Every rule decides at once — there is no ask verdict or approval flow — and
+each refusal tells the model not to route around it but to raise it with
 the operator. `jq` makes the JSON handling clean:
 
 ```bash
@@ -436,8 +436,8 @@ if [ "$name" = "bash" ] || [ "$name" = "bash_bg" ]; then
   case "$cmd" in
     *'rm -rf /'*|*mkfs*|*'dd if='*)
       printf '{"block": true, "reason": "hard_deny"}'; exit 0 ;;
-    *'git push'*)
-      printf '{"ask": "Run?\n%s", "reason": "denied"}' "$cmd"; exit 0 ;;
+    *'git push --force'*)
+      printf '{"block": true, "reason": "force-push refused; raise it with the operator"}'; exit 0 ;;
     *.env*)
       printf '{"block": true, "reason": "read secrets via a lib/bin script (scripting skill)"}'; exit 0 ;;
   esac
@@ -596,69 +596,66 @@ from a hidden, pinned `cron` parent session.
 ---
 schedule: "@daily"
 agent: assistant
-# direct: true          # optional; skip the notifier (see below)
+# direct: true          # optional; post the raw result (see below)
 # workdir: /some/path   # optional; defaults to the config dir
 ---
 Summarize anything noteworthy from the last day.
 ```
 
-A cron run's result goes to the **notifier** (see
-[The notifier](#the-notifier--notifiermd)), which decides per run whether to
-post it — a ⏰ message titled with the job name — or stay silent. A periodic checklist therefore only speaks up when something needs
-attention: write its prompt to report findings plainly, and the notifier
-silences the all-quiet runs (no sentinel needed). A failed run always
-surfaces as an alert, whatever the notifier does.
+A cron run's result arrives as **mail to the main agent** (see
+[Completion mail](#completion-mail)): a fresh quiet turn reads it, with the
+job's prompt riding along as context so the agent knows what the job is
+*for*, and it mails you — a ⏰ message titled with the job name — only when
+the run carries something worth saying. A periodic checklist therefore only
+speaks up when something needs attention: write its prompt to report
+findings plainly, and the quiet runs stay quiet (no sentinel needed). A
+failed run always surfaces as a ⚠️ alert and never spends an agent turn.
 
-`direct: true` skips the notifier: the result is handed straight to the main
-agent as a **fresh main-agent turn** in a new thread, and what the agent says
-comes back as a replyable message — for jobs whose results should be
-acted on, not just reported. `workdir` sets the job's working directory; the
+`direct: true` skips the agent: the raw result posts straight to the chat as
+a ⏰ message, costing no agent turn — for jobs whose output should be
+reported verbatim, not judged. `workdir` sets the job's working directory; the
 default is the dispatched agent's own — a project manager runs in its
 project's `workdir`, everything else in the config dir — and setting it
 overrides even a manager's. A reload arms changed files.
 
 `/cron` lists every job with its schedule, agent, workdir, `direct` flag,
 full prompt, and last run; `/run <name>` fires one by hand — the result
-travels the usual notifier route, exactly as a scheduled firing would.
+travels the usual mail route, exactly as a scheduled firing would.
 
 The scaffold ships a checklist example as `cron/checklist.md.example` —
 rename it to `checklist.md` (drop the `.example`) and reload to activate it.
 
-## The notifier — `notifier.md`
+## Completion mail
 
 Every background completion — a `bash_bg` exit, a subagent's result, a
-lingering follow-up, a cron run — funnels through one reserved persona:
-`notifier.md` beside `agent.md`.
+lingering follow-up, a cron run — is **mail**, routed deterministically by
+the host. No triage persona, no judging turn; three rules:
 
-```markdown
----
-model: mini            # any declared model; a small one is ideal
----
-You are the notifier … (the triage policy, in plain prose)
-```
+- **Failures always surface.** A failed job posts `⚠️ <label> failed: …` to
+  the chat, unconditionally. If the owning session is still live it is also
+  woken with the mail so the agent can react; an ownerless failure (a broken
+  cron job, say) stops at the post — no agent turn is spent per broken tick.
+- **`direct: true`** (bash_bg arg, task arg, cron frontmatter) posts the
+  **raw result** straight to the chat — ⏰-prefixed for cron, 🔔 otherwise —
+  costing no agent turn. The owning session gets the notice queued, without
+  a wake, so its next turn has it in context.
+- **Everything else is mail to the agent.** The owning session is woken with
+  the completion (a fresh main-agent session runs it when no owner is live —
+  cron results, orphans), carrying the spawner's `note:` — for cron runs,
+  the job's own prompt, so the agent knows what the job is *for*. These mail
+  turns are **quiet**: the reply text is not delivered anywhere, and the
+  agent reaches you only by calling its `mail_user {text}` tool. Silence is
+  the natural default — the agent simply doesn't mail.
 
-Per completion it runs one small headless turn over the event (kind, job id,
-title, exit status, output tail, the spawner's `note:` — for cron runs, the
-job's own prompt, so the judge knows what the job is *for* — and the on-disk
-output path) with a fixed toolset: `read` and `list_files` to inspect
-further, plus two verdict tools — `send {text}` posts a notification to you
-(⏰ and titled with the job's name for cron origins, 🔔 otherwise, threaded
-into the owning chat thread when one is live), and `wake {note}` hands the
-result to the main agent (resuming the owning session, or running it in a
-fresh thread when there is none, whose reply arrives as another replyable
-message). Ending the turn without calling either means **silent**: the
-result stays in the run's stored transcript, and nothing else happens.
+`mail_user` is a host tool on every main chat session, and the agent's only
+way to reach you from a quiet turn. Its message threads into the session's
+conversation when a thread anchor exists, otherwise it posts a fresh message
+you can reply to; the sent message id is recorded in the thread index, so
+replying to agent mail continues that same conversation.
 
-The hard rules live in the host, not the prompt: a failed job the notifier
-leaves silent posts a `<label> failed: <error>` alert anyway; one completion can
-trigger at most one wake; a triage turn is timeboxed (60s) and degrades to a
-raw post on error or timeout; and with **no `notifier.md` at all, every
-completion posts raw** — deterministic, zero tokens (`shell3 health` points
-this out). The notifier is hookable like any agent
-(`hooks/notifier.tool-call.sh`) and its turns are ordinary stored runs, so
-you can audit exactly why something was silenced — and tune the policy by
-editing `notifier.md`, which the main agent can do itself when you tell it
-"stop pinging me about backups".
+Mail turns are ordinary stored runs, so `/runs` shows exactly what the agent
+did with each completion. A leftover `notifier.md` from an older install
+loads with a warning saying it is no longer used — delete the file.
 
 ## The runs store — `shell3.db`
 
@@ -682,8 +679,8 @@ empty too — the data is not recoverable.
 
 ## The runs janitor — `runs_keep_days`
 
-Every thread — and every background job the notifier runs a turn over — is a
-stored session, so history multiplies quickly. An optional top-level
+Every thread — and every background job — is a stored session, so history
+multiplies quickly. An optional top-level
 `shell3.yaml` key bounds it:
 
 ```yaml

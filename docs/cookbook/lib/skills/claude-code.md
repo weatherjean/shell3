@@ -138,13 +138,13 @@ research, no special flag is needed.
 
 ### The direct parameter
 
-`bash_bg` completions go to the notifier, which decides whether you hear about
-them. Pass `direct: true` when the user is waiting on this particular run:
+`bash_bg` completions come back to you as mail. Pass `direct: true` when the
+user is waiting on this particular run and wants the raw output:
 
 | `direct` | Clean exit | Nonzero exit |
 |---|---|---|
-| `false` (default) | The notifier triages it — you may or may not be woken | Always surfaces |
-| `true` | Wakes you with the result | Wakes you with the result |
+| `false` (default) | Wakes you quietly with the result — `mail_user` the user only if it matters | Always surfaces to the user, and wakes you |
+| `true` | Raw result posts to the user's chat; the notice is queued for your next turn | Always surfaces to the user, and wakes you if your session is live |
 
 ```json
 bash_bg {
@@ -152,8 +152,8 @@ bash_bg {
 }
 ```
 
-Leave `direct` off for runs whose completion needs no immediate reaction; the
-notifier still surfaces failures either way.
+Leave `direct` off for runs whose completion needs no immediate reaction;
+failures still surface either way.
 
 ---
 

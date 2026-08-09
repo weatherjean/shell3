@@ -61,19 +61,15 @@ too tight on a cold cache.
 ## Gate MCP calls like any other tool
 
 MCP tools hit the tool-call hook with `name` = `mcp_<server>_<tool>` and
-`command` null — gate them by name in `hooks/tool-call.sh`:
+`command` null — gate them by name in `hooks/tool-call.sh`. Here, reads run
+and writes are refused:
 
 ```bash
 in=$(cat)
 name=$(printf '%s' "$in" | jq -r .name)
-headless=$(printf '%s' "$in" | jq -r .headless)
 case "$name" in
   mcp_github_create*|mcp_github_update*|mcp_github_delete*|mcp_github_merge*)
-    if [ "$headless" = "true" ]; then
-      printf '{"block": true, "reason": "write needs approval; rerun interactively"}'
-    else
-      jq -cn --arg name "$name" '{ask: ("GitHub write:\n" + $name), reason: "denied"}'
-    fi
+    printf '{"block": true, "reason": "GitHub writes are blocked; raise it with the operator"}'
     exit 0 ;;
 esac
 exit 0
