@@ -575,10 +575,9 @@ func (b *Bot) dispatchWake(ctx context.Context, id string) {
 		return
 	}
 	turnCtx, cancel := b.takeSlotLocked(ctx)
-	replyTo := b.lastMsg[id]
 	b.mu.Unlock()
 	go func() {
-		b.runWakeTurn(ctx, turnCtx, sess, replyTo)
+		b.runWakeTurn(turnCtx, sess)
 		b.afterTurn(ctx, sess, cancel)
 	}()
 }
@@ -592,12 +591,11 @@ func (b *Bot) startNextWake(ctx context.Context) {
 		return
 	}
 	var sess *shell3.Session
-	var id string
 	for len(b.wakeQueue) > 0 {
 		cand := b.wakeQueue[0]
 		b.wakeQueue = b.wakeQueue[1:]
 		if s, ok := b.live[cand]; ok {
-			sess, id = s, cand
+			sess = s
 			break
 		}
 	}
@@ -606,10 +604,9 @@ func (b *Bot) startNextWake(ctx context.Context) {
 		return
 	}
 	turnCtx, cancel := b.takeSlotLocked(ctx)
-	replyTo := b.lastMsg[id]
 	b.mu.Unlock()
 	go func() {
-		b.runWakeTurn(ctx, turnCtx, sess, replyTo)
+		b.runWakeTurn(turnCtx, sess)
 		b.afterTurn(ctx, sess, cancel)
 	}()
 }
@@ -634,7 +631,7 @@ func (b *Bot) takeSlotLocked(ctx context.Context) (context.Context, context.Canc
 // ordinary threaded sessions (a subagent/bash_bg completion) and fresh
 // StartFreshTurn sessions run wake turns; the pinned cron session is never
 // woken.
-func (b *Bot) runWakeTurn(ctx, turnCtx context.Context, sess *shell3.Session, _ string) {
+func (b *Bot) runWakeTurn(turnCtx context.Context, sess *shell3.Session) {
 	_ = b.drainTurn(sess.RunQueued(turnCtx))
 }
 

@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"strconv"
-	"strings"
 	"sync"
 )
 
@@ -135,29 +134,6 @@ func (f *fakeClient) AnswerCallback(ctx context.Context, callbackID string) erro
 	defer f.mu.Unlock()
 	f.answered = append(f.answered, callbackID)
 	return nil
-}
-
-// lastConfirm returns the most recent inline-confirm sent, or ok=false if none.
-func (f *fakeClient) lastConfirm() (sentConfirm, bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if len(f.confirms) == 0 {
-		return sentConfirm{}, false
-	}
-	return f.confirms[len(f.confirms)-1], true
-}
-
-// confirmMatching returns the most recent inline-confirm whose text contains
-// sub, or ok=false if none. Lets a test pick out one of several pending asks.
-func (f *fakeClient) confirmMatching(sub string) (sentConfirm, bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for i := len(f.confirms) - 1; i >= 0; i-- {
-		if strings.Contains(f.confirms[i].text, sub) {
-			return f.confirms[i], true
-		}
-	}
-	return sentConfirm{}, false
 }
 
 // editTexts returns every edit's text in order.
