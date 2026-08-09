@@ -3,98 +3,32 @@
 package main
 
 import (
-	"context"
 	"fmt"
-	"io"
-	"net/http"
+	"os"
 	"os/signal"
-	"sync"
+	"path/filepath"
 	"syscall"
-	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/weatherjean/shell3/internal/media"
-	"github.com/weatherjean/shell3/internal/runs"
-	"github.com/weatherjean/shell3/internal/shell3"
-	"github.com/weatherjean/shell3/internal/webui"
+	"github.com/weatherjean/shell3/internal/telegram"
 )
 
-// Names of the two .env keys the interface authenticates with. Referenced from
-// shell3.yaml as `web.password: env:SHELL3_WEB_PASSWORD`, so the secrets stay
-// in .env like every other one.
-const (
-	envWebPassword = "SHELL3_WEB_PASSWORD"
-	envWebTOTP     = "SHELL3_WEB_TOTP_SECRET"
-)
-
-// minPasswordLength is what boot enforces and serve warns below. Sixteen rather
-// than the conventional eight because a login here is a shell, so the password
-// has to survive a guessing budget from anyone who finds the URL.
-const minPasswordLength = 16
-
-// requireWebPassword refuses to serve an unauthenticated interface. This is a
-// hard error, not a warning: reaching the port is arbitrary command execution
-// on this machine, so there is no configuration where starting without a
-// password is the helpful thing to do.
+// newServeCommand builds `shell3 serve` — the BYO front-end seam. It runs the
+// exact same bot loop as `shell3 telegram` (fresh-turn threading, host
+// commands, hook asks, notifier completion delivery, cron), but the transport
+// is newline-delimited JSON over stdin/stdout: a Discord bridge, a custom
+// dashboard backend, or a test harness spawns this process and translates.
+// docs/serve.md is the wire reference.
 //
-// The config LOAD deliberately still succeeds without one — `shell3 ask` serves
-// nothing and must stay usable — which is why the check lives here.
-func requireWebPassword(web shell3.WebConfig) error {
-	if web.Password != "" {
-		return nil
-	}
-	// One line: the error renderer collapses newlines into a paragraph, so the
-	// step-by-step belongs in printWebPasswordHelp, not in here.
-	return fmt.Errorf("web.password is not set, and the interface hands a shell to whoever reaches it"+
-		" (set web.password: env:%s, and %s in .env)", envWebPassword, envWebPassword)
-}
-
-// printWebPasswordHelp spells out the fix, in a shape the error renderer cannot
-// reflow into a single paragraph.
-func printWebPasswordHelp(out io.Writer) {
-	fmt.Fprintf(out, "\nThe web interface needs a password before it can be served.\n\n"+
-		"  In shell3.yaml, under web:\n    password: env:%s\n\n"+
-		"  In %s beside it:\n    %s=<at least %d characters>\n\n"+
-		"Reaching this interface means reaching a shell — the agent runs bash on this\n"+
-		"machine — so there is no unauthenticated mode to fall back to.\n\n",
-		envWebPassword, ".env", envWebPassword, minPasswordLength)
-}
-
-// weakPasswordWarning flags a password too short for what it guards. Not a
-// refusal: an operator whose config already works should not be locked out of
-// their own machine by an upgrade.
-func weakPasswordWarning(web shell3.WebConfig) string {
-	if web.Password == "" || len([]rune(web.Password)) >= minPasswordLength {
-		return ""
-	}
-	return fmt.Sprintf("  warning: the web password is shorter than %d characters, and it is the only "+
-		"thing between whoever finds this URL and a shell", minPasswordLength)
-}
-
-// cleartextWarning flags a network-facing bind with no TLS, where the password
-// and the session cookie travel in clear. Exposure is the operator's, so the
-// warning points at the deployment docs rather than prescribing one answer.
-func cleartextWarning(addr string) string {
-	if isLoopbackBind(addr) {
-		return ""
-	}
-	return "  warning: this address faces the network over plain http — the password and " +
-		"session cookie cross it in clear. Use https exposure or a TLS-terminating " +
-		"proxy (docs/deploying.md)"
-}
-
-// newServeCommand builds `shell3 serve` — the web interface, and the only
-// hosted front-end. It runs the agent, serves the app, and schedules cron.
-//
-// Bound to loopback by default. The interface authenticates (a password, plus
-// TOTP when configured), but a login is a shell, so exposing it still argues
-// for a proxy that authenticates in its own right.
+// No Telegram credentials are required — possessing the process's stdio IS
+// the access model, the exact parallel of chat_id. There is no port and no
+// listener.
 func newServeCommand() *cobra.Command {
-	var configDir, addr string
+	var configDir string
 	cmd := &cobra.Command{
 		Use:   "serve",
-		Short: "Run the agent and serve the web interface",
+		Short: "Run the agent over stdio JSONL for a bring-your-own front-end",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
@@ -106,168 +40,44 @@ func newServeCommand() *cobra.Command {
 			}
 			defer rt.Close()
 
-			// Before anything else: an interface with no password is a shell
-			// on an open port.
-			if err := requireWebPassword(rt.Web()); err != nil {
-				printWebPasswordHelp(cmd.OutOrStdout())
-				return err
-			}
-
-			workDir := rt.Web().WorkDir
+			// The agent's shell runs in telegram.workdir when set (the block is
+			// wiring shared by both front-ends); the config dir is the fallback.
+			// Token and chat_id are NOT read — an absent telegram: block is fine.
+			workDir := rt.Telegram().WorkDir
 			if workDir == "" {
 				workDir = resolved
 			}
 
-			// Runs janitor: start-time only. Deletes sessions whose last
-			// activity is past runs_keep_days (0 = keep forever) — rows, FTS
-			// entries, job-log dirs — and drops thread-index rows (every
-			// surface, "web" included) pointing at sessions that no longer
-			// exist. Runs on its own connection: openRuntime has already
-			// opened the runtime's store above, so this is a second connection
-			// to the same database, not a handoff. Before the server listens,
-			// so a browser never sees rows the sweep is about to remove.
-			runsRoot := rt.Parts().RunsRoot()
-			removedRuns, threadsDropped, err := runs.Sweep(runsRoot,
-				time.Duration(rt.Parts().RunsKeepDays())*24*time.Hour, time.Now())
-			if err != nil {
-				// Fail-open: Sweep skipped whatever it couldn't remove and kept
-				// going. Leftover run dirs are cosmetic, never worth refusing to
-				// start over.
-				fmt.Printf("warning: janitor: %v\n", err)
-			}
-			if len(removedRuns) > 0 || threadsDropped > 0 {
-				fmt.Printf("janitor: removed %d runs, %d thread entries\n",
-					len(removedRuns), threadsDropped)
-			}
+			// Serve keeps its own thread index beside telegram's: the id spaces
+			// are different transports' and must not cross-resolve.
+			threads := openThreads(rt, "serve")
 
-			// Media janitor: same start-time-only shape, gated by
-			// media_keep_days (default 0 = keep forever, so this is opt-in).
-			// Uploads, generated images, TTS cache, and send_file stagings
-			// are user data; deletion only happens if the operator asked for
-			// it.
-			if keep := rt.Parts().MediaKeepDays(); keep > 0 {
-				if mdir, merr := media.Dir(); merr != nil {
-					fmt.Printf("warning: media janitor: %v\n", merr)
-				} else {
-					removedMedia, merr := media.Sweep(mdir, time.Duration(keep)*24*time.Hour, time.Now())
-					if merr != nil {
-						fmt.Printf("warning: media janitor: %v\n", merr)
-					}
-					if removedMedia > 0 {
-						fmt.Printf("janitor: removed %d media files\n", removedMedia)
-					}
-				}
+			jc := telegram.NewJSONLClient(os.Stdin, os.Stdout, telegram.ConsoleChatID,
+				filepath.Join(rt.Parts().RunsRoot(), "serve_out"))
+			jc.Logf = func(format string, a ...any) {
+				fmt.Fprintf(os.Stderr, format+"\n", a...)
 			}
+			b := telegram.NewBot(jc, rt, telegram.ConsoleChatID, threads)
 
-			srv, err := webui.New(webui.Options{
-				Runtime:   rt,
-				WorkDir:   workDir,
-				ConfigDir: resolved,
-				Version:   version,
-			})
+			stopSched, err := wireHost(b, rt, workDir)
 			if err != nil {
 				return err
 			}
-			defer srv.Close()
+			defer stopSched()
 
-			// Cron dispatches subagents, which need SOME parent session. One
-			// hidden session is the dispatch parent; it runs no turns of its own
-			// (the notifier owns delivery).
-			cronSess, err := rt.Session(shell3.SessionOpts{
-				Name: "cron", WorkDir: workDir, Headless: true,
-			})
-			if err != nil {
-				return err
+			// Handshake first (protocol version + the host-answered command
+			// menu), then the greeting as an ordinary send event.
+			jc.EmitHello(telegram.BotCommands())
+			if _, err := jc.Send(ctx, telegram.ConsoleChatID,
+				"๑ï shell3 online — send a message event to start a thread; reply_to_id continues one."); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not send the greeting: %v\n", err)
 			}
-			sched, err := armCron(cronSess, rt.Cron())
-			if err != nil {
-				return err
-			}
-			if sched != nil {
-				srv.SetCronSource(sched)
-			}
-			// The scheduler is rebuilt on every reload: a cron/ file added
-			// (or edited, or removed) after startup must take effect without
-			// a restart. cronMu serializes the swap — the Reload button and
-			// the agent's queued reload can race.
-			var cronMu sync.Mutex
-			defer func() {
-				cronMu.Lock()
-				defer cronMu.Unlock()
-				if sched != nil {
-					sched.Stop()
-				}
-			}()
-			srv.SetReloadHook(func() error {
-				cronMu.Lock()
-				defer cronMu.Unlock()
-				next, err := rearmCron(cronSess, rt.Cron(), sched)
-				if err != nil {
-					return fmt.Errorf("cron not re-armed (previous jobs still scheduled): %w", err)
-				}
-				sched = next
-				srv.SetCronSource(next) // nil clears: the last cron/ file was removed
-				return nil
-			})
+			fmt.Fprintf(os.Stderr, "shell3 serve: JSONL on stdio\n  config: %s\n", resolved)
 
-			// The worker runs out-of-turn work: cron results and job completions
-			// the notifier chose to wake on.
-			go srv.Start(ctx)
-
-			if addr == "" {
-				addr = rt.Web().Addr
-			}
-			if addr == "" {
-				addr = "127.0.0.1:8765"
-			}
-			fmt.Printf("shell3: http://%s\n  config: %s\n", addr, resolved)
-			if warning := cleartextWarning(addr); warning != "" {
-				fmt.Println(warning)
-			}
-			if warning := weakPasswordWarning(rt.Web()); warning != "" {
-				fmt.Println(warning)
-			}
-			if rt.Web().TOTPSecret == "" {
-				fmt.Printf("  note: password only. Set %s in .env for a second factor\n", envWebTOTP)
-			}
-
-			// A fixed web.url announces the interface's public address. A
-			// public URL puts a shell on the internet behind one password, so
-			// say what that means at the moment it becomes reachable.
-			web := rt.Web()
-			announcePublicURL(web.URL, func(url string) {
-				fmt.Printf("public URL: %s\n", url)
-			})
-
-			return startServer(ctx, addr, srv.Handler())
+			b.Run(ctx)
+			return nil
 		},
 	}
 	addConfigFlag(cmd, &configDir)
-	cmd.Flags().StringVar(&addr, "addr", "",
-		"Listen address (default: web.addr, else 127.0.0.1:8765)")
 	return cmd
-}
-
-// startServer serves h until ctx ends, then shuts down gracefully. Streaming
-// endpoints hold connections open, so the drain window is short and the
-// deferred cancel releases it either way.
-func startServer(ctx context.Context, addr string, h http.Handler) error {
-	srv := &http.Server{Addr: addr, Handler: h}
-	errs := make(chan error, 1)
-	go func() {
-		err := srv.ListenAndServe()
-		if err == http.ErrServerClosed {
-			err = nil
-		}
-		errs <- err
-	}()
-
-	select {
-	case err := <-errs:
-		return err
-	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		return srv.Shutdown(shutdownCtx)
-	}
 }

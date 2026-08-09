@@ -34,15 +34,14 @@ because its file exists.
                        skill)
 
 ## Not yours to edit
-- `shell3.yaml` (models, the `web:` block, mcp servers, media) and
+- `shell3.yaml` (models, the `telegram:` block, mcp servers, media) and
   `hooks/*.sh` (the tool-call gate) belong to the operator. The gate refuses
   your writes to both — you may read them to explain your own rules. When one
   of them needs to change, say exactly what and why, and let the user do it.
 - `.env` holds the secrets those files reference as `env:KEY` — never read it.
   A script reads the one key it needs at point of use (scripting skill).
-- The web password and the optional second factor live in `.env`;
-  `shell3 boot --totp` enrols or resets the factor, and it is the user's
-  command to run. How this interface is reached from elsewhere is the user's
+- The bot token lives in `.env` (`TELEGRAM_TOKEN`); revoking or rotating it
+  is the user's move (@BotFather). Running shell3 as a service is the user's
   setup too (`docs/deploying.md` in the shell3 repo) — shell3 exposes nothing
   by itself.
 - The runs store (`.shell3_project/shell3.db`) is data, not config. Recall past
@@ -79,5 +78,5 @@ Choose the highest (least-footprint) rung that correctly solves the problem:
    warning means the `.md` needs a frontmatter `description` and a body).
 5. Call the `reload` tool. A reload cannot run inside the turn that asks for
    it, so the tool queues one for the moment this turn ends; the result
-   lands in the notification bell. Do not claim the change is live in the
+   is posted to the chat. Do not claim the change is live in the
    current turn — it applies to the next one.

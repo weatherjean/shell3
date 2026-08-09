@@ -1,0 +1,2 @@
+import { ExternalStoreAdapter, ExternalStoreMessageConverter, ExternalStoreThreadData, ExternalStoreThreadListAdapter } from "@assistant-ui/core";
+export type { ExternalStoreAdapter, ExternalStoreMessageConverter, ExternalStoreThreadData, ExternalStoreThreadListAdapter };

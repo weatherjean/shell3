@@ -35,10 +35,11 @@ type Values struct {
 	Proxy   string // optional run_proxy command ("" => commented out)
 	WorkDir string // where the agent's shell runs ("" renders an empty workdir)
 
-	// TOTP wires web.totp_secret to the .env key boot writes on enrolment;
-	// false leaves the line as a commented hint. Without it the secret sits
-	// unused in .env and the login never asks for a code.
-	TOTP bool
+	// ChatID is the Telegram chat the bot answers ("" renders an empty
+	// chat_id — the front-end refuses to start until it is filled in). The
+	// token itself is never templated: it is always referenced as
+	// env:TELEGRAM_TOKEN and lives in .env, like every other secret.
+	ChatID string
 
 	// Vision reports whether the model can see images. True wires
 	// media.describe to the main model (uploaded images get captioned out of

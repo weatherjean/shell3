@@ -1,0 +1,2 @@
+import { AttachmentRuntimePath, ComposerRuntimePath, MessagePartRuntimePath, MessageRuntimePath, ThreadListItemRuntimePath, ThreadRuntimePath } from "@assistant-ui/core";
+export type { AttachmentRuntimePath, ComposerRuntimePath, MessagePartRuntimePath, MessageRuntimePath, ThreadListItemRuntimePath, ThreadRuntimePath };

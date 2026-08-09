@@ -49,8 +49,7 @@ way into `~/.shell3/lib/...`.
 1. Skim what you installed (`cat` it) so you know what it does.
 2. `shell3 health` — a malformed skill surfaces here.
 3. Call the `reload` tool — it queues a config reload that runs when this
-   turn ends; new files load then. The result lands in the notification
-   bell.
+   turn ends; new files load then. The result is posted to the chat.
 4. If a recipe needs secrets or services (API keys, docker), its own setup
    section walks you through it — follow it with the user, don't guess.
 

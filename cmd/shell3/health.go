@@ -11,12 +11,11 @@ import (
 
 	"github.com/weatherjean/shell3/internal/config"
 	"github.com/weatherjean/shell3/internal/mcp"
-	"github.com/weatherjean/shell3/internal/totpdiag"
 )
 
 // newHealthCommand builds `shell3 health` — a strict, read-only config check.
-// It loads the config directory exactly like the server would and reports every problem the
-// running server tolerates leniently: warnings such as a skipped skill file
+// It loads the config directory exactly like the bot would and reports every problem the
+// running bot tolerates leniently: warnings such as a skipped skill file
 // (bad/missing frontmatter) fail the check here, so `shell3 health` is the
 // place to look when something silently didn't take effect.
 func newHealthCommand() *cobra.Command {
@@ -106,8 +105,8 @@ func runHealth(cmd *cobra.Command, path string) error {
 	if brokenHooks > 0 {
 		return fmt.Errorf("health: %d broken hook script(s)", brokenHooks)
 	}
-	// Connect every declared MCP server, exactly like the server would at
-	// startup. The running server tolerates a down server (warning, tools
+	// Connect every declared MCP server, exactly like the bot would at
+	// startup. The running bot tolerates a down server (warning, tools
 	// absent); health is the strict view, so any down server fails here.
 	if servers := lc.MCPServers(); len(servers) > 0 {
 		m := mcp.New(servers, nil)
@@ -126,28 +125,20 @@ func runHealth(cmd *cobra.Command, path string) error {
 			return fmt.Errorf("health: %d MCP server(s) down", down)
 		}
 	}
-	// The web interface authenticates with web.password, and `shell3 serve`
-	// refuses to start without one. health is the strict view, so report it
-	// here rather than letting the operator discover it at startup.
-	web := lc.Web()
-	if err := requireWebPassword(web); err != nil {
-		fmt.Fprintln(out, "web: no password — serve will refuse to start")
-		return fmt.Errorf("health: web.password is not set (.env %s)", envWebPassword)
-	}
-	factors := "password"
-	if web.TOTPSecret != "" {
-		// A secret that cannot mint a code is a lockout, not a second factor:
-		// the login screen would demand a code no authenticator can produce.
-		if err := totpdiag.CheckSecret(web.TOTPSecret); err != nil {
-			fmt.Fprintf(out, "web: totp_secret is unusable — every login would be refused: %s\n", err)
-			return fmt.Errorf("health: web.totp_secret cannot mint a code (.env %s)", envWebTOTP)
-		}
-		factors = "password + TOTP"
-	}
-	fmt.Fprintf(out, "web: auth armed (%s)\n", factors)
-	if warning := weakPasswordWarning(web); warning != "" {
-		fmt.Fprintln(out, strings.TrimSpace(warning))
-		return fmt.Errorf("health: web password is shorter than %d characters", minPasswordLength)
+	// The telegram front-end's own start-up check, run here rather than found
+	// out at `shell3 telegram`: health is documented as THE config check, and a
+	// block boot wrote with blank fields loads cleanly but refuses to start. An
+	// ABSENT block is not an error — an `shell3 ask`-only config is legitimate —
+	// but say so, the way an absent notifier is reported. Deliberately LAST: a
+	// blank chat id is a state boot itself writes ("fill it in later"), and it
+	// must never hide the hook and MCP diagnostics above.
+	if tg := lc.Telegram(); !tg.Present {
+		fmt.Fprintln(out, "telegram: absent — the bot front-end is unwired (add a telegram: block to run `shell3 telegram`)")
+	} else if chatID, err := telegramChatID(tg); err != nil {
+		fmt.Fprintf(out, "telegram: %v\n", err)
+		return fmt.Errorf("health: %w", err)
+	} else {
+		fmt.Fprintf(out, "telegram: chat %d\n", chatID)
 	}
 
 	fmt.Fprintln(out, "OK")

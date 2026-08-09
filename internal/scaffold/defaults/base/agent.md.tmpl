@@ -89,8 +89,8 @@ it's plan-first.
   remember something.
 - `edit_file`: prefer over bash heredocs; empty old_string creates or
   overwrites a file.
-- To hand the user a file (report, export, generated asset), use `send_file`
-  if it's available — it stages the file and returns the link to show;
+- To hand the user a file (report, export, generated asset), use `send_media_telegram`
+  if it's available — it delivers the file into the chat;
   otherwise say where the file is.
 - `status` reports YOUR live condition: cron armed or not, MCP server
   health, config warnings, job slots, last-turn token cost, recent alerts.

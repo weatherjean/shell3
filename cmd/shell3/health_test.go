@@ -12,10 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// A healthy config is one that can actually be served, so the fixture carries a
-// web password like a real one does (see TestHealthFailsWithoutAWebPassword).
-const healthYAML = "models:\n  m: { base_url: \"http://x\", api_key: k, model: id }\n" +
-	"web: { password: sixteen-characters-long }\n"
+const healthYAML = "models:\n  m: { base_url: \"http://x\", api_key: k, model: id }\n"
 const healthAgent = "---\nmodel: m\n---\np\n"
 
 // writeHealthTree writes a minimal loadable config tree (plus extra files)
@@ -163,56 +160,71 @@ func TestHealthOKWithStrictHook(t *testing.T) {
 	}
 }
 
-// A totp_secret that cannot mint a code is a guaranteed lockout: the login
-// screen would ask for a code no authenticator can produce. health is where
-// that surfaces, not the login screen.
-func TestHealthFailsOnACorruptTOTPSecret(t *testing.T) {
-	dir := writeHealthTree(t, map[string]string{
-		"shell3.yaml": healthYAML[:strings.LastIndex(healthYAML, "}")] +
-			", totp_secret: \"not!base32@at#all\" }\n",
-	})
-
-	out, err := runHealthAt(t, dir)
-	if err == nil {
-		t.Fatalf("health passed a totp_secret that locks the operator out:\n%s", out)
+// `shell3 health` is documented as THE config check, so a telegram block the
+// front-end would refuse to start on must fail here rather than printing OK.
+func TestHealthFailsOnIncompleteTelegramBlock(t *testing.T) {
+	cases := map[string]string{
+		"no token":       "telegram:\n  token: \"\"\n  chat_id: \"123456789\"\n",
+		"no chat_id":     "telegram:\n  token: \"123:ABC\"\n  chat_id: \"\"\n",
+		"bad chat_id":    "telegram:\n  token: \"123:ABC\"\n  chat_id: \"not-a-number\"\n",
+		"both are blank": "telegram:\n  token: \"\"\n  chat_id: \"\"\n",
 	}
-	if !strings.Contains(err.Error()+out, "totp") {
-		t.Errorf("failure does not name the secret:\n%s\n%v", out, err)
-	}
-}
-
-func TestHealthOKWithAValidTOTPSecret(t *testing.T) {
-	secret, _, err := newTOTPEnrolment("health-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := writeHealthTree(t, map[string]string{
-		"shell3.yaml": healthYAML[:strings.LastIndex(healthYAML, "}")] +
-			", totp_secret: \"" + secret + "\" }\n",
-	})
-
-	out, err := runHealthAt(t, dir)
-	if err != nil {
-		t.Fatalf("a valid secret should pass: %v\n%s", err, out)
-	}
-	if !strings.Contains(out, "password + TOTP") {
-		t.Errorf("output should report both factors:\n%s", out)
+	for name, block := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := writeHealthTree(t, map[string]string{"shell3.yaml": healthYAML + block})
+			out, err := runHealthAt(t, cfg)
+			if err == nil {
+				t.Fatalf("an unusable telegram block must fail health:\n%s", out)
+			}
+			if !strings.Contains(out, "telegram") {
+				t.Fatalf("output should name the telegram problem:\n%s", out)
+			}
+			if strings.Contains(out, "OK") {
+				t.Fatalf("failing health must not print OK:\n%s", out)
+			}
+		})
 	}
 }
 
-// health is the strict view of a config, and a config with no web password
-// cannot be served at all — `shell3 serve` refuses it. Reporting that here is
-// the difference between finding out now and finding out when you try to start.
-func TestHealthFailsWithoutAWebPassword(t *testing.T) {
-	dir := writeHealthTree(t, map[string]string{
-		"shell3.yaml": "models:\n  m: { base_url: \"http://x\", api_key: k, model: id }\n",
+func TestHealthOKWithCompleteTelegramBlock(t *testing.T) {
+	cfg := writeHealthTree(t, map[string]string{
+		"shell3.yaml": healthYAML + "telegram:\n  token: \"123:ABC\"\n  chat_id: \"123456789\"\n",
 	})
-
-	out, err := runHealthAt(t, dir)
-	if err == nil {
-		t.Fatalf("health passed a config that cannot be served; output:\n%s", out)
+	out, err := runHealthAt(t, cfg)
+	if err != nil {
+		t.Fatalf("a complete telegram block should pass: %v\n%s", err, out)
 	}
-	if !strings.Contains(err.Error()+out, "web.password") {
-		t.Errorf("failure does not name the missing key:\n%s\n%v", out, err)
+	if !strings.Contains(out, "telegram: chat 123456789") {
+		t.Fatalf("output should report the wired chat:\n%s", out)
+	}
+}
+
+// No telegram block at all is legitimate (an `shell3 ask`-only config), so it
+// reports the consequence the way an absent notifier does, without failing.
+func TestHealthReportsAbsentTelegramWithoutFailing(t *testing.T) {
+	cfg := writeHealthTree(t, nil)
+	out, err := runHealthAt(t, cfg)
+	if err != nil {
+		t.Fatalf("a config with no telegram block should still pass: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "telegram: absent") {
+		t.Fatalf("output should say the telegram front-end is unwired:\n%s", out)
+	}
+}
+
+// The telegram check runs LAST on purpose: a blank chat_id is a state `boot`
+// itself writes ("fill it in later"), and failing early would hide the hook
+// and MCP diagnostics — the expensive checks someone runs health FOR.
+func TestHealthBrokenTelegramDoesNotHideHookDiagnostics(t *testing.T) {
+	cfg := writeHealthTree(t, map[string]string{
+		"shell3.yaml":        healthYAML + "telegram:\n  token: \"123:ABC\"\n  chat_id: \"\"\n",
+		"hooks/tool-call.sh": "echo not-json\n",
+	})
+	out, err := runHealthAt(t, cfg)
+	if err == nil {
+		t.Fatalf("a broken hook must fail health:\n%s", out)
+	}
+	if !strings.Contains(out, "hook") {
+		t.Errorf("the hook diagnostic must print even with an unusable telegram block:\n%s", out)
 	}
 }

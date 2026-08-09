@@ -1,0 +1,45 @@
+//#region src/core/object/ObjectStreamAccumulator.ts
+var ObjectStreamAccumulator = class ObjectStreamAccumulator {
+	_state;
+	constructor(initialValue = null) {
+		this._state = initialValue;
+	}
+	get state() {
+		return this._state;
+	}
+	append(ops) {
+		this._state = ops.reduce((state, op) => ObjectStreamAccumulator.apply(state, op), this._state);
+	}
+	static apply(state, op) {
+		const type = op.type;
+		switch (type) {
+			case "set": return ObjectStreamAccumulator.updatePath(state, op.path, () => op.value);
+			case "append-text": return ObjectStreamAccumulator.updatePath(state, op.path, (current) => {
+				if (typeof current !== "string") throw new Error(`Expected string at path [${op.path.join(", ")}]`);
+				return current + op.value;
+			});
+			default: throw new Error(`Invalid operation type: ${type}`);
+		}
+	}
+	static updatePath(state, path, updater) {
+		if (path.length === 0) return updater(state);
+		state ??= {};
+		if (typeof state !== "object") throw new Error(`Invalid path: [${path.join(", ")}]`);
+		const [key, ...rest] = path;
+		if (Array.isArray(state)) {
+			const idx = Number(key);
+			if (Number.isNaN(idx)) throw new Error(`Expected array index at [${path.join(", ")}]`);
+			if (idx > state.length || idx < 0) throw new Error(`Insert array index out of bounds`);
+			const nextState = [...state];
+			nextState[idx] = ObjectStreamAccumulator.updatePath(nextState[idx], rest, updater);
+			return nextState;
+		}
+		const nextState = { ...state };
+		nextState[key] = ObjectStreamAccumulator.updatePath(nextState[key], rest, updater);
+		return nextState;
+	}
+};
+//#endregion
+export { ObjectStreamAccumulator };
+
+//# sourceMappingURL=ObjectStreamAccumulator.js.map

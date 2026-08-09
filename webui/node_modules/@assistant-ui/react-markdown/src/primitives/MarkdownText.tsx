@@ -1,0 +1,186 @@
+"use client";
+
+import {
+  INTERNAL,
+  type SmoothOptions,
+  useMessagePartText,
+} from "@assistant-ui/react";
+import {
+  type ComponentRef,
+  type ElementType,
+  type FC,
+  forwardRef,
+  type ForwardRefExoticComponent,
+  type RefAttributes,
+  useDeferredValue,
+  useMemo,
+  type ComponentPropsWithoutRef,
+  type ComponentType,
+} from "react";
+import ReactMarkdown, { type Options } from "react-markdown";
+import type {
+  SyntaxHighlighterProps,
+  CodeHeaderProps,
+} from "../overrides/types";
+import { PreOverride } from "../overrides/PreOverride";
+import {
+  DefaultPre,
+  DefaultCode,
+  DefaultCodeBlockContent,
+  DefaultCodeHeader,
+} from "../overrides/defaultComponents";
+import { useCallbackRef } from "@radix-ui/react-use-callback-ref";
+import { CodeOverride } from "../overrides/CodeOverride";
+import type { Primitive } from "@radix-ui/react-primitive";
+import classNames from "classnames";
+
+const { useSmooth, useSmoothStatus, withSmoothContextProvider } = INTERNAL;
+
+type MarkdownTextPrimitiveElement = ComponentRef<typeof Primitive.div>;
+type PrimitiveDivProps = ComponentPropsWithoutRef<typeof Primitive.div>;
+
+export type MarkdownTextPrimitiveProps = Omit<
+  Options,
+  "components" | "children"
+> & {
+  className?: string | undefined;
+  containerProps?: Omit<PrimitiveDivProps, "children" | "asChild"> | undefined;
+  containerComponent?: ElementType | undefined;
+  components?:
+    | (NonNullable<Options["components"]> & {
+        SyntaxHighlighter?: ComponentType<SyntaxHighlighterProps> | undefined;
+        CodeHeader?: ComponentType<CodeHeaderProps> | undefined;
+      })
+    | undefined;
+  /**
+   * Language-specific component overrides.
+   * @example { mermaid: { SyntaxHighlighter: MermaidDiagram } }
+   */
+  componentsByLanguage?:
+    | Record<
+        string,
+        {
+          CodeHeader?: ComponentType<CodeHeaderProps> | undefined;
+          SyntaxHighlighter?: ComponentType<SyntaxHighlighterProps> | undefined;
+        }
+      >
+    | undefined;
+  /**
+   * Whether to enable smooth text streaming animation.
+   * When enabled, text appears with a typing effect as it streams in.
+   * Pass a `SmoothOptions` object to tune the reveal rate.
+   * Auto-disables under `prefers-reduced-motion: reduce`.
+   * @default true
+   */
+  smooth?: boolean | SmoothOptions | undefined;
+  /**
+   * Defers markdown parsing and rendering to a lower priority via React's
+   * `useDeferredValue`, so urgent work (typing, scrolling) is not blocked by
+   * re-parsing the growing message on every streamed token. Intermediate
+   * streaming states may be skipped under load; the final text always renders.
+   *
+   * @default false
+   */
+  defer?: boolean | undefined;
+  /**
+   * Function to transform text before markdown processing.
+   */
+  preprocess?: (text: string) => string;
+};
+
+const MarkdownTextInner: FC<MarkdownTextPrimitiveProps> = ({
+  components: userComponents,
+  componentsByLanguage,
+  smooth = true,
+  defer = false,
+  preprocess,
+  ...rest
+}) => {
+  const messagePartText = useMessagePartText();
+
+  const processedMessagePart = useMemo(() => {
+    if (!preprocess) return messagePartText;
+
+    return {
+      ...messagePartText,
+      text: preprocess(messagePartText.text),
+    };
+  }, [messagePartText, preprocess]);
+
+  const { text } = useSmooth(processedMessagePart, smooth);
+
+  const deferredText = useDeferredValue(text);
+  const resolvedText = defer ? deferredText : text;
+
+  const {
+    pre = DefaultPre,
+    code = DefaultCode,
+    SyntaxHighlighter = DefaultCodeBlockContent,
+    CodeHeader = DefaultCodeHeader,
+  } = userComponents ?? {};
+  const useCodeOverrideComponents = useMemo(() => {
+    return {
+      Pre: pre,
+      Code: code,
+      SyntaxHighlighter,
+      CodeHeader,
+    };
+  }, [pre, code, SyntaxHighlighter, CodeHeader]);
+  const CodeComponent = useCallbackRef((props) => (
+    <CodeOverride
+      components={useCodeOverrideComponents}
+      componentsByLanguage={componentsByLanguage}
+      {...props}
+    />
+  ));
+
+  const components: Options["components"] = useMemo(() => {
+    const { pre, code, SyntaxHighlighter, CodeHeader, ...componentsRest } =
+      userComponents ?? {};
+    return {
+      ...componentsRest,
+      pre: PreOverride,
+      code: CodeComponent,
+    };
+  }, [CodeComponent, userComponents]);
+
+  return (
+    <ReactMarkdown components={components} {...rest}>
+      {resolvedText}
+    </ReactMarkdown>
+  );
+};
+
+const MarkdownTextPrimitiveImpl: ForwardRefExoticComponent<MarkdownTextPrimitiveProps> &
+  RefAttributes<MarkdownTextPrimitiveElement> = forwardRef<
+  MarkdownTextPrimitiveElement,
+  MarkdownTextPrimitiveProps
+>(
+  (
+    {
+      className,
+      containerProps,
+      containerComponent: Container = "div",
+      ...rest
+    },
+    forwardedRef,
+  ) => {
+    const status = useSmoothStatus();
+    return (
+      <Container
+        data-status={status.type}
+        {...containerProps}
+        className={classNames(className, containerProps?.className)}
+        ref={forwardedRef}
+      >
+        <MarkdownTextInner {...rest}></MarkdownTextInner>
+      </Container>
+    );
+  },
+);
+
+MarkdownTextPrimitiveImpl.displayName = "MarkdownTextPrimitive";
+
+export const MarkdownTextPrimitive = withSmoothContextProvider(
+  MarkdownTextPrimitiveImpl,
+);
