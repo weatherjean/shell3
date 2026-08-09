@@ -193,3 +193,37 @@ func TestInboxCommand(t *testing.T) {
 	b.mailQueue = nil
 	b.mu.Unlock()
 }
+
+// An identical repeated mail_user send is refused — one message, then a hard
+// stop a looping model can't talk itself past.
+func TestMailUserRefusesIdenticalRepeat(t *testing.T) {
+	fc := newFakeClient()
+	rt := storeRuntime(t, "unused")
+	b := newBot(t, fc, rt)
+	sess := decoratedSession(t, b, rt)
+	h := b.mailUserHandler(sess)
+
+	if out, err := h(context.Background(), `{"text":"JOB LANDED"}`); err != nil || out != "mailed" {
+		t.Fatalf("first send: %q, %v", out, err)
+	}
+	out, err := h(context.Background(), `{"text":"JOB LANDED"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "already mailed") {
+		t.Fatalf("repeat should be refused with guidance, got %q", out)
+	}
+	sent := 0
+	for _, txt := range fc.sentTexts() {
+		if strings.Contains(txt, "JOB LANDED") {
+			sent++
+		}
+	}
+	if sent != 1 {
+		t.Fatalf("chat got %d copies, want 1", sent)
+	}
+	// A DIFFERENT message still goes through.
+	if out, err := h(context.Background(), `{"text":"second, different"}`); err != nil || out != "mailed" {
+		t.Fatalf("different send: %q, %v", out, err)
+	}
+}

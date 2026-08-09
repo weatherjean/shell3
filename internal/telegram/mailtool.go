@@ -24,7 +24,8 @@ func (b *Bot) registerMailTool(sess *shell3.Session) {
 			"result) this is the ONLY way to reach the user — the turn's reply text is not " +
 			"delivered. Threads into the current conversation when one exists, otherwise starts " +
 			"a new thread the user can reply to. Mail what the user needs to see; a routine " +
-			"result nobody is waiting on needs no mail.",
+			"result nobody is waiting on needs no mail. Send AT MOST ONE message per " +
+			"completion, then end the turn — never repeat a message you already sent.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -46,10 +47,20 @@ func (b *Bot) mailUserHandler(sess *shell3.Session) func(ctx context.Context, ar
 		if err := json.Unmarshal([]byte(argsJSON), &p); err != nil || strings.TrimSpace(p.Text) == "" {
 			return "", fmt.Errorf("mail_user needs a non-empty text")
 		}
+		text := strings.TrimSpace(p.Text)
+		// A looping model re-sends the same mail over and over (observed live:
+		// four identical sends in one quiet turn). An identical repeat is
+		// answered with guidance instead of another chat message — a hard stop
+		// the model can't talk itself past.
 		b.mu.Lock()
+		if b.lastMailed[sess.ID()] == text {
+			b.mu.Unlock()
+			return "already mailed exactly this — the user has it. Do not send it again; end the turn.", nil
+		}
+		b.lastMailed[sess.ID()] = text
 		replyTo := b.lastMsg[sess.ID()]
 		b.mu.Unlock()
-		b.postReply(ctx, sess, replyTo, p.Text)
+		b.postReply(ctx, sess, replyTo, text)
 		return "mailed", nil
 	}
 }

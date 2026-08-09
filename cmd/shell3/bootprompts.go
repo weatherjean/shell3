@@ -102,7 +102,7 @@ func runPromptRefresh(dir string, now time.Time) error {
 	if updated > 0 {
 		fmt.Printf("previous versions: %s\n", backupDir)
 	}
-	fmt.Println("apply with a reload (Status → Reload config, or ask the agent to `reload`)")
+	fmt.Println("apply with a reload (send /reload, or ask the agent to `reload`)")
 	return nil
 }
 

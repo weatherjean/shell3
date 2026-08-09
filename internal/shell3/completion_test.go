@@ -214,3 +214,26 @@ func TestMailTextDefangs(t *testing.T) {
 		t.Fatalf("mail text should name mail_user:\n%s", out)
 	}
 }
+
+// Direct posts use the user-facing rendering — never the agent-facing notice
+// text ("relay it to the user", "call task_status").
+func TestDirectTextIsUserFacing(t *testing.T) {
+	rt := newTestRuntime(t, fakeCfg("hi"))
+	host := &fakeHost{}
+	rt.SetCompletionHost(host)
+	ev := cleanEvent()
+	ev.Direct = true
+	rt.jobs.dispatchCompletion(ev)
+	posts, _, _ := host.snapshot()
+	if len(posts) != 1 {
+		t.Fatalf("posts = %v", posts)
+	}
+	for _, leak := range []string{"task_status", "relay", "NOT seen"} {
+		if strings.Contains(posts[0], leak) {
+			t.Fatalf("direct post leaks agent-facing text %q: %q", leak, posts[0])
+		}
+	}
+	if !strings.Contains(posts[0], "hi") || !strings.Contains(posts[0], "bg1") {
+		t.Fatalf("direct post should carry the label and tail, got %q", posts[0])
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	huh "charm.land/huh/v2"
 	"github.com/spf13/cobra"
@@ -29,6 +30,7 @@ type bootFlags struct {
 	visionSet                    bool // --vision passed explicitly (skips the form's confirm)
 	force                        bool
 	show                         bool // print the post-boot summary and exit
+	prompts                      bool // refresh scaffold prompt files and exit
 }
 
 func newBootCommand() *cobra.Command {
@@ -42,6 +44,13 @@ func newBootCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if f.show {
 				return showBootSuccess()
+			}
+			if f.prompts {
+				home, err := os.UserHomeDir()
+				if err != nil {
+					return fmt.Errorf("boot: home dir: %w", err)
+				}
+				return runPromptRefresh(paths.NewGlobal(home).Root, time.Now())
 			}
 			f.visionSet = cmd.Flags().Changed("vision")
 			return runBoot(f)
@@ -60,6 +69,8 @@ func newBootCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&f.vision, "vision", true, "Model can see images (wires media.describe to it and enables the media tool)")
 	cmd.Flags().BoolVar(&f.force, "force", false, "Overwrite an existing ~/.shell3 config (shell3.yaml, agent.md, ...)")
 	cmd.Flags().BoolVar(&f.show, "show", false, "Print the post-boot summary for the existing config and exit (changes nothing)")
+	cmd.Flags().BoolVar(&f.prompts, "prompts", false,
+		"Refresh the scaffold's prompt files (agent.md body, agents/, skills/) in an existing config, backing up replaced files to .backup/")
 	return cmd
 }
 

@@ -275,8 +275,10 @@ func (m *jobManager) dispatchCompletion(ev CompletionEvent) {
 	if ev.Direct {
 		// The spawner said the user is waiting: post the raw result now, and
 		// queue it on the owning session (no wake) so the agent's next turn
-		// has it in context without spending one here.
-		host.PostCompletion(ev.post(renderNotification(ev.notice)))
+		// has it in context without spending one here. The post uses the
+		// user-facing rendering — the notice text is written FOR the agent
+		// ("relay this", "call task_status") and must not leak into the chat.
+		host.PostCompletion(ev.post(directText(ev)))
 		if ev.owner != nil {
 			ev.owner.injectNoticeNoWake(ev.notice)
 		}
@@ -287,6 +289,25 @@ func (m *jobManager) dispatchCompletion(ev CompletionEvent) {
 	if ev.OwnerID == "" || !host.WakeOwner(ev.OwnerID, note) {
 		host.StartFreshTurn(note)
 	}
+}
+
+// directText renders a direct completion for the USER's chat: what ran and
+// its output tail — none of the agent-facing instructions the queued notice
+// carries. Cron posts get the job name from the host's ⏰ prefix, so they
+// lead with the result itself.
+func directText(ev CompletionEvent) string {
+	tail := strings.TrimSpace(ev.Tail)
+	if ev.CronJob != "" {
+		if tail == "" {
+			return "done (no output)"
+		}
+		return strutil.Tail(tail, 1500)
+	}
+	head := ev.label() + " finished"
+	if tail == "" {
+		return head + " (no output)"
+	}
+	return head + ":\n" + strutil.Tail(tail, 1500)
 }
 
 // floorErrCap bounds the error text carried by a failure-floor post.

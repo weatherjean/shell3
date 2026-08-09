@@ -47,6 +47,9 @@ type Bot struct {
 	// lastMsg maps a store-session id → the thread's latest Telegram message id,
 	// so a wake-turn reply posts into the right thread.
 	lastMsg map[string]string
+	// lastMailed maps a store-session id → the last mail_user text it sent,
+	// so an identical repeat (a looping model) is refused instead of posted.
+	lastMailed map[string]string
 	// wakeQueue holds session ids whose Wake arrived while the turn slot was
 	// taken; drained FIFO after each turn (startNextWork).
 	wakeQueue []string
@@ -97,13 +100,14 @@ type Bot struct {
 // (constructed once by the host and kept across /reload).
 func NewBot(client tgClient, rt *shell3.Runtime, chatID int64, threads *ThreadIndex) *Bot {
 	return &Bot{
-		client:  client,
-		rt:      rt,
-		chatID:  chatID,
-		threads: threads,
-		live:    make(map[string]*shell3.Session),
-		lastMsg: make(map[string]string),
-		pinned:  make(map[string]bool),
+		client:     client,
+		rt:         rt,
+		chatID:     chatID,
+		threads:    threads,
+		live:       make(map[string]*shell3.Session),
+		lastMsg:    make(map[string]string),
+		lastMailed: make(map[string]string),
+		pinned:     make(map[string]bool),
 	}
 }
 
@@ -515,6 +519,7 @@ func (b *Bot) retireOrKeep(sess *shell3.Session) {
 	}
 	delete(b.live, sess.ID())
 	delete(b.lastMsg, sess.ID())
+	delete(b.lastMailed, sess.ID())
 	b.mu.Unlock()
 	_ = sess.Close()
 }
