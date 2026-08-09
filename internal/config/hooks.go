@@ -138,16 +138,13 @@ type ToolCallAction int
 const (
 	ActionRun ToolCallAction = iota
 	ActionBlock
-	ActionAsk
 )
 
 // ToolCallVerdict is the result of running an agent's tool-call hook.
 type ToolCallVerdict struct {
-	Action     ToolCallAction
-	Argv       []string      // ActionRun: exec exactly this
-	Prompt     string        // ActionAsk: human prompt
-	Reason     string        // ActionBlock reason, or ActionAsk deny-reason
-	AskTimeout time.Duration // ActionAsk: 0 = caller default
+	Action ToolCallAction
+	Argv   []string // ActionRun: exec exactly this
+	Reason string   // ActionBlock reason
 	// Passthrough is true only on ActionRun when the hook expressed no
 	// command/argv opinion — no hook for this agent, or an empty/{} verdict.
 	// It lets the non-bash gate distinguish "hook didn't touch this" (allow)
@@ -157,14 +154,17 @@ type ToolCallVerdict struct {
 }
 
 // hookVerdict is the JSON a tool-call hook prints to stdout. Precedence when
-// several keys are set: block > argv > ask > command (the safe outcome wins).
+// several keys are set: block > argv > command (the safe outcome wins).
+// Ask is parsed only to fail closed: the ask verdict was removed with the
+// mail-model redesign (shell3 runs unattended; an ask is a denial with a
+// delay), and a legacy hook still printing one must block loudly rather than
+// silently degrade to an allow.
 type hookVerdict struct {
-	Block      bool     `json:"block"`
-	Reason     string   `json:"reason"`
-	Argv       []string `json:"argv"`
-	Ask        string   `json:"ask"`
-	AskTimeout float64  `json:"ask_timeout"` // seconds
-	Command    *string  `json:"command"`
+	Block   bool     `json:"block"`
+	Reason  string   `json:"reason"`
+	Argv    []string `json:"argv"`
+	Ask     string   `json:"ask"`
+	Command *string  `json:"command"`
 }
 
 // runHook executes one hook script as `bash <path>` with payload on stdin and
@@ -211,8 +211,8 @@ type toolCallPayload struct {
 // RunToolCall runs the tool-call hook governing agentName for one tool
 // invocation and returns the verdict. No hook for that agent → a passthrough
 // run. FAILS CLOSED — a script error, malformed verdict JSON, or timeout
-// blocks rather than runs. headless reports that no human asker is attached
-// (an ask verdict would deny); exposed to the script as .headless.
+// blocks rather than runs. headless reports that no human is attached
+// (subagents, cron); exposed to the script as .headless.
 func (c *LoadedConfig) RunToolCall(ctx context.Context, agentName, name, command, argsJSON string, headless bool) ToolCallVerdict {
 	passArgv := []string{"bash", "-c", command}
 	path := c.hooks.call[c.hookKey(agentName)]
@@ -249,13 +249,8 @@ func (c *LoadedConfig) RunToolCall(ctx context.Context, agentName, name, command
 		}
 		return ToolCallVerdict{Action: ActionRun, Argv: v.Argv}
 	case v.Ask != "":
-		cmd := command
-		if v.Command != nil {
-			cmd = *v.Command
-		}
-		return ToolCallVerdict{Action: ActionAsk, Prompt: v.Ask, Reason: v.Reason,
-			Argv:       []string{"bash", "-c", cmd},
-			AskTimeout: time.Duration(v.AskTimeout * float64(time.Second))}
+		return ToolCallVerdict{Action: ActionBlock, Reason: "tool-call hook error: the ask verdict " +
+			"no longer exists (hooks allow, block, or rewrite); update the hook to use block"}
 	case v.Command != nil:
 		return ToolCallVerdict{Action: ActionRun, Argv: []string{"bash", "-c", *v.Command}}
 	}

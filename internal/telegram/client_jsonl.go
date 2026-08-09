@@ -45,7 +45,7 @@ var ErrNoHTML = errors.New("jsonl transport carries markdown, not HTML")
 // Malformed lines and unknown types are logged and ignored (forward compat);
 // EOF closes the inbound channel, which stops Bot.Run — clean shutdown.
 //
-// Outbound: hello, send, media, menu, confirm, edit, typing, ack — each one
+// Outbound: hello, send, media, menu, edit, typing, ack — each one
 // line, mutex-serialized. Message ids are opaque strings: inbound ids are the
 // client's own (assigned "c<boot>-<n>" when omitted), outbound ids are
 // "a<boot>-<n>" where boot is the process start time, keeping agent ids unique
@@ -309,16 +309,6 @@ func (c *JSONLClient) SendVideo(_ context.Context, _ int64, filename string, dat
 func (c *JSONLClient) SendMenu(_ context.Context, _ int64, text string, options []MenuOption) (string, error) {
 	id := c.nextID("a")
 	c.emit(jsonlOutEvent{Type: "menu", ID: id, Text: text, Options: options})
-	return id, nil
-}
-
-// SendConfirm emits the approval request; the front-end answers with a
-// callback line carrying yesData or noData. Unlike console mode there is no
-// auto-deny — the Ask's own fail-safe timeout still applies, so a silent
-// front-end denies eventually.
-func (c *JSONLClient) SendConfirm(_ context.Context, _ int64, text, yesData, noData string) (string, error) {
-	id := c.nextID("a")
-	c.emit(jsonlOutEvent{Type: "confirm", ID: id, Text: text, Yes: yesData, No: noData})
 	return id, nil
 }
 

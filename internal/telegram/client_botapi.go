@@ -281,26 +281,6 @@ func (c *BotAPIClient) SendHTMLReply(ctx context.Context, chatID int64, html str
 // reading on their own ctx (see consumeCallbacks).
 func (c *BotAPIClient) Callbacks(_ context.Context) <-chan Callback { return c.cb }
 
-// SendConfirm posts text with a single row of two inline buttons — "✅ Allow"
-// (yesData) and "🚫 Deny" (noData) — and returns the sent message id. Plain
-// text (no parse mode) so an arbitrary command string can't break formatting.
-func (c *BotAPIClient) SendConfirm(ctx context.Context, chatID int64, text, yesData, noData string) (string, error) {
-	m, err := c.b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID: chatID,
-		Text:   text,
-		ReplyMarkup: models.InlineKeyboardMarkup{
-			InlineKeyboard: [][]models.InlineKeyboardButton{{
-				{Text: "✅ Allow", CallbackData: yesData},
-				{Text: "🚫 Deny", CallbackData: noData},
-			}},
-		},
-	})
-	if err != nil {
-		return "", err
-	}
-	return strconv.Itoa(m.ID), nil
-}
-
 // EditPlain replaces a message's text and removes its inline keyboard (omitting
 // ReplyMarkup on editMessageText clears it), so the confirm buttons disappear.
 func (c *BotAPIClient) EditPlain(ctx context.Context, chatID int64, msgID string, text string) error {

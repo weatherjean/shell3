@@ -27,11 +27,6 @@ type Session struct {
 	sess     *chat.Session
 	handlers map[string]chat.ToolHandler
 
-	// asker is the session's tool-call hook confirm runner, threaded into every
-	// turn's TurnConfig.Asker (see
-	// turnConfig). nil keeps tool-call hook ask-verdicts denying.
-	asker func(ctx context.Context, command, reason string) bool
-
 	// sink is the JSONL audit log, opened by Runtime.Session
 	// (SessionOpts.OutPath) when the path is non-empty.
 	// route writes every internal chat.Event to it (lossless) before
@@ -537,11 +532,6 @@ func (s *Session) turnConfig() chat.TurnConfig {
 func (s *Session) turnConfigLocked() chat.TurnConfig {
 	cfg := s.cfg
 	tc := chat.NewTurnConfig(cfg, s.handlers)
-	// The session's asker IS the turn's asker: a nil one means no human is
-	// attached, which chat's resolveAsk already degrades to deny. HeadlessAsk
-	// carries the same fact to the hook chain as t.headless.
-	tc.Asker = s.asker
-	tc.HeadlessAsk = s.asker == nil
 	if s.runtime != nil && s.runtime.jobs != nil {
 		rt := s.runtime
 		parent := s

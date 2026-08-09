@@ -55,17 +55,16 @@ func TestHookBlock(t *testing.T) {
 	}
 }
 
-func TestHookAsk(t *testing.T) {
+// A legacy ask verdict fails closed: the key no longer exists, and a hook
+// still printing it must block loudly rather than silently allow.
+func TestHookAskFailsClosed(t *testing.T) {
 	c := hookCfg(t, map[string]string{"tool-call.sh": `echo '{"ask": "Run?", "reason": "denied", "ask_timeout": 30}'`})
 	v := c.RunToolCall(context.Background(), "agent", "bash", "git push", "{}", false)
-	if v.Action != ActionAsk || v.Prompt != "Run?" || v.Reason != "denied" {
+	if v.Action != ActionBlock {
 		t.Fatalf("verdict = %+v", v)
 	}
-	if v.AskTimeout != 30*time.Second {
-		t.Fatalf("ask_timeout = %v", v.AskTimeout)
-	}
-	if v.Argv[2] != "git push" {
-		t.Fatalf("argv = %v", v.Argv)
+	if !strings.Contains(v.Reason, "ask verdict") {
+		t.Fatalf("reason should explain the ask verdict is gone, got %q", v.Reason)
 	}
 }
 

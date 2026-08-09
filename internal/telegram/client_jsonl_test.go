@@ -190,40 +190,6 @@ func TestJSONLMediaKinds(t *testing.T) {
 	}
 }
 
-func TestJSONLMenuConfirmEditAckTyping(t *testing.T) {
-	c, out := newTestJSONL(t, "")
-	ctx := context.Background()
-	mid, _ := c.SendMenu(ctx, ConsoleChatID, "pick", []MenuOption{{Label: "a", Data: "d-a"}})
-	cid, _ := c.SendConfirm(ctx, ConsoleChatID, "run rm?", "y-data", "n-data")
-	_ = c.EditPlain(ctx, ConsoleChatID, cid, "done")
-	_ = c.AnswerCallback(ctx, "cb1")
-	_ = c.Typing(ctx, ConsoleChatID)
-
-	evs := decodeLines(t, out)
-	if len(evs) != 5 {
-		t.Fatalf("want 5 events, got %v", evs)
-	}
-	if evs[0]["type"] != "menu" || evs[0]["id"] != mid || evs[0]["text"] != "pick" {
-		t.Fatalf("menu = %v", evs[0])
-	}
-	opts, _ := evs[0]["options"].([]any)
-	if len(opts) != 1 || opts[0].(map[string]any)["data"] != "d-a" {
-		t.Fatalf("menu options = %v", evs[0]["options"])
-	}
-	if evs[1]["type"] != "confirm" || evs[1]["id"] != cid || evs[1]["yes"] != "y-data" || evs[1]["no"] != "n-data" {
-		t.Fatalf("confirm = %v", evs[1])
-	}
-	if evs[2]["type"] != "edit" || evs[2]["id"] != cid || evs[2]["text"] != "done" {
-		t.Fatalf("edit = %v", evs[2])
-	}
-	if evs[3]["type"] != "ack" || evs[3]["callback_id"] != "cb1" {
-		t.Fatalf("ack = %v", evs[3])
-	}
-	if evs[4]["type"] != "typing" {
-		t.Fatalf("typing = %v", evs[4])
-	}
-}
-
 func TestJSONLHello(t *testing.T) {
 	c, out := newTestJSONL(t, "")
 	c.EmitHello([]Command{{Command: "status", Description: "show status"}})

@@ -84,10 +84,6 @@ type tgClient interface {
 	// SendMenu posts text with one row of inline buttons; each option's Data is
 	// returned via the Callbacks channel when pressed. Returns the sent message id.
 	SendMenu(ctx context.Context, chatID int64, text string, options []MenuOption) (msgID string, err error)
-	// SendConfirm posts text with two inline buttons (Allow/Deny) carrying the
-	// given callback_data, and returns the sent message id so it can be edited
-	// when the choice is made.
-	SendConfirm(ctx context.Context, chatID int64, text, yesData, noData string) (msgID string, err error)
 	// EditPlain replaces a message's text and removes its inline keyboard. Used
 	// to make the confirm buttons disappear once a choice is made.
 	EditPlain(ctx context.Context, chatID int64, msgID string, text string) error

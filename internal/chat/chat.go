@@ -128,9 +128,6 @@ type Config struct {
 	// mcp: block is declared). Agent-independent: set once at
 	// assembly, surfaced by Snapshot for the Status view.
 	MCPStatus func() []MCPServerStatus
-	// Asker confirms ask-verdict commands with a human; supplied per-front-end.
-	// Nil ⇒ headless: ask degrades to deny.
-	Asker AskFunc
 	// RunToolCall runs the tool-call hook chain (config-global, nil = no hooks).
 	RunToolCall func(ctx context.Context, name, command, argsJSON string, headless bool) ToolCallVerdict
 	// RunToolResult runs the on_tool_result chain (config-global, nil = none).
@@ -209,7 +206,7 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler) TurnConfig {
 		ToolConfig: ToolConfig{
 			Store:       cfg.Store,
 			WorkDir:     cfg.WorkDir,
-			Asker:       cfg.Asker,
+			Headless:    cfg.Headless,
 			RunToolCall: cfg.RunToolCall,
 		},
 		LLM:           cfg.LLM,
@@ -218,7 +215,6 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler) TurnConfig {
 		ConfigDir:     cfg.ConfigDir,
 		Handlers:      handlers,
 		Log:           LogOrNoop(cfg.Log),
-		Headless:      cfg.Headless,
 		HostTool:      cfg.HostTool,
 		AgentKnobs:    cfg.AgentKnobs,
 		RunToolResult: cfg.RunToolResult,

@@ -38,20 +38,6 @@ func TestBashHandlerRunnerSwap(t *testing.T) {
 	}
 }
 
-func TestBashHandlerAskAllow(t *testing.T) {
-	cfg := ToolConfig{
-		WorkDir: t.TempDir(),
-		Asker:   func(ctx context.Context, cmd, reason string) bool { return true },
-		RunToolCall: func(ctx context.Context, name, command, argsJSON string, _ bool) ToolCallVerdict {
-			return ToolCallVerdict{Action: ActionAsk, Prompt: "ok?", Reason: "denied"}
-		},
-	}
-	out, _ := BashHandler{}.Execute(context.Background(), "1", bashArgs("echo hi"), cfg)
-	if !strings.Contains(out, "hi") {
-		t.Fatalf("ask-allowed command should run, got %q", out)
-	}
-}
-
 func TestBashHandlerRunnerSwapNoShellReparse(t *testing.T) {
 	dir := t.TempDir()
 	sentinel := dir + "/pwned"
@@ -69,18 +55,5 @@ func TestBashHandlerRunnerSwapNoShellReparse(t *testing.T) {
 	}
 	if _, err := os.Stat(sentinel); err == nil {
 		t.Fatal("argv payload was shell-re-parsed and executed — runner-swap is not positional")
-	}
-}
-
-func TestBashHandlerAskDeny(t *testing.T) {
-	cfg := ToolConfig{
-		Asker: func(ctx context.Context, cmd, reason string) bool { return false },
-		RunToolCall: func(ctx context.Context, name, command, argsJSON string, _ bool) ToolCallVerdict {
-			return ToolCallVerdict{Action: ActionAsk, Prompt: "ok?", Reason: "denied"}
-		},
-	}
-	out, _ := BashHandler{}.Execute(context.Background(), "1", bashArgs("echo hi"), cfg)
-	if !strings.Contains(out, "needs human approval") {
-		t.Fatalf("ask-denied command should block, got %q", out)
 	}
 }

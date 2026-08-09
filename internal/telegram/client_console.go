@@ -34,7 +34,7 @@ const ConsoleChatID int64 = 1
 // Outbound (stdout, one line per message):
 //   - "[#<id>] text"            → a plain/HTML send (HTML is printed raw, unrendered)
 //   - "[#<id> ↩#<replyto>] text" → a threaded reply
-//   - "[#<id> menu] …" / "[#<id> confirm] …" / "[#<id> webapp] …" for those sends
+//   - "[#<id> menu] …" for menu sends
 //   - "[media …]" markers for document/photo/voice/audio/video uploads (no-ops)
 //
 // Message ids come from one monotonic counter shared by inbound and outbound
@@ -209,15 +209,6 @@ func (c *ConsoleClient) SendMenu(_ context.Context, _ int64, text string, option
 		labels[i] = o.Label
 	}
 	return c.emit("", "menu", text+" {"+strings.Join(labels, " | ")+"}"), nil
-}
-
-// SendConfirm prints the approval prompt and auto-denies: a single stdin reader
-// serves inbound messages, so reading a separate y/n answer here would fight it.
-// It enqueues the Deny callback so the waiting Ask unblocks with a denial.
-func (c *ConsoleClient) SendConfirm(_ context.Context, _ int64, text, _, noData string) (string, error) {
-	id := c.emit("", "confirm", text+" — auto-denied (console mode)")
-	go func() { c.cb <- Callback{ChatID: c.chatID, ID: id, Data: noData} }()
-	return id, nil
 }
 
 func (c *ConsoleClient) EditPlain(_ context.Context, _ int64, msgID string, text string) error {

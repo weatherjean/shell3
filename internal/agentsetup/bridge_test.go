@@ -18,7 +18,6 @@ func TestBridgeVerdict(t *testing.T) {
 	}{
 		{config.ActionRun, chat.ActionRun},
 		{config.ActionBlock, chat.ActionBlock},
-		{config.ActionAsk, chat.ActionAsk},
 	} {
 		if got := BridgeVerdict(config.ToolCallVerdict{Action: c.in}).Action; got != c.want {
 			t.Errorf("BridgeVerdict(%v).Action = %v, want %v", c.in, got, c.want)
@@ -29,9 +28,9 @@ func TestBridgeVerdict(t *testing.T) {
 	}
 	v := BridgeVerdict(config.ToolCallVerdict{
 		Action: config.ActionRun, Argv: []string{"bash", "-c", "x"},
-		Prompt: "p", Reason: "r", Passthrough: true,
+		Reason: "r", Passthrough: true,
 	})
-	if len(v.Argv) != 3 || v.Prompt != "p" || v.Reason != "r" || !v.Passthrough {
+	if len(v.Argv) != 3 || v.Reason != "r" || !v.Passthrough {
 		t.Errorf("BridgeVerdict dropped fields: %+v", v)
 	}
 }

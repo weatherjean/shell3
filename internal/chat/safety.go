@@ -2,17 +2,7 @@ package chat
 
 import (
 	"context"
-	"time"
 )
-
-// AskFunc asks a human to approve command (reason explains why it was gated).
-// Front-ends supply it (an interactive approval prompt). Nil means no human is
-// attached (headless subagent) — the tool-call hook then denies instead of asking.
-type AskFunc func(ctx context.Context, command, reason string) bool
-
-// DefaultAskTimeout bounds how long an ask verdict waits for a human before it
-// falls back to deny. Applied when a handler's ask verdict sets no ask_timeout.
-const DefaultAskTimeout = 5 * time.Minute
 
 // ToolCallAction is the disposition of a tool-call hook chain run.
 type ToolCallAction int
@@ -20,16 +10,13 @@ type ToolCallAction int
 const (
 	ActionRun ToolCallAction = iota
 	ActionBlock
-	ActionAsk
 )
 
 // ToolCallVerdict is the result of the tool-call hook chain for one invocation.
 type ToolCallVerdict struct {
-	Action     ToolCallAction
-	Argv       []string      // Run: exec exactly this
-	Prompt     string        // Ask: human prompt
-	Reason     string        // Block reason / Ask deny-reason
-	AskTimeout time.Duration // Ask: 0 = DefaultAskTimeout
+	Action ToolCallAction
+	Argv   []string // Run: exec exactly this
+	Reason string   // Block reason
 	// Passthrough is true on Run only when no handler produced a command/argv
 	// verdict (a pure fall-through). gateNonBashTool allows a non-bash tool only
 	// when this is set: an actual {command=...}/{argv=...} verdict has no meaning
@@ -39,39 +26,14 @@ type ToolCallVerdict struct {
 }
 
 // resolveGate maps a verdict's disposition to allow/deny, the part every tool
-// gate shares: ActionBlock denies with the block message, ActionAsk defers to
-// the human (deny on decline/headless), ActionRun allows. What "allow" means —
-// which argv to exec, whether a rewrite is legal — stays with each caller
-// (gateBash, gateNonBashTool).
-func resolveGate(ctx context.Context, asker AskFunc, v ToolCallVerdict) (allowed bool, blockMsg string) {
-	switch v.Action {
-	case ActionBlock:
+// gate shares: ActionBlock denies with the block message, ActionRun allows.
+// What "allow" means — which argv to exec, whether a rewrite is legal — stays
+// with each caller (gateBash, gateNonBashTool).
+func resolveGate(v ToolCallVerdict) (allowed bool, blockMsg string) {
+	if v.Action == ActionBlock {
 		return false, "error: blocked by tool-call hook: " + v.Reason
-	case ActionAsk:
-		if resolveAsk(ctx, asker, v) {
-			return true, ""
-		}
-		return false, "error: blocked by tool-call hook — needs human approval (" + v.Reason +
-			"). Stop and ask the human before running this."
-	default: // ActionRun
-		return true, ""
 	}
-}
-
-// resolveAsk presents an Ask verdict to the human via asker, bounded by the
-// verdict's timeout (or DefaultAskTimeout). With no asker (headless) it denies.
-// Returns true to allow the command to run.
-func resolveAsk(ctx context.Context, asker AskFunc, v ToolCallVerdict) bool {
-	if asker == nil {
-		return false
-	}
-	d := v.AskTimeout
-	if d <= 0 {
-		d = DefaultAskTimeout
-	}
-	askCtx, cancel := context.WithTimeout(ctx, d)
-	defer cancel()
-	return asker(askCtx, v.Prompt, v.Reason)
+	return true, ""
 }
 
 // isBashTool reports whether a tool name is one of the two bash surfaces. These
@@ -91,8 +53,8 @@ func gateNonBashTool(ctx context.Context, cfg ToolConfig, name, argsJSON string)
 	if cfg.RunToolCall == nil {
 		return "", false // no hooks: ungated
 	}
-	v := cfg.RunToolCall(ctx, name, "", argsJSON, cfg.HeadlessAsk)
-	allowed, msg := resolveGate(ctx, cfg.Asker, v)
+	v := cfg.RunToolCall(ctx, name, "", argsJSON, cfg.Headless)
+	allowed, msg := resolveGate(v)
 	if !allowed {
 		return msg, true
 	}

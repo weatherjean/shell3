@@ -57,10 +57,8 @@ type Bot struct {
 	media     *MediaCaps // STT/describe/TTS/imagegen capabilities; nil when unconfigured
 	voiceMode *ModeStore // per-chat inbound-voice-reply mode; nil when unconfigured
 
-	askMu          sync.Mutex           // guards pending + askSeq + voiceMenuMsgID
-	pending        map[string]chan bool // tool-call hook Ask id → answer channel
-	askSeq         int                  // monotonic id source for Ask
-	voiceMenuMsgID string               // msgID of the most recent /voice menu, for its "vm|" callback edit
+	askMu          sync.Mutex // guards voiceMenuMsgID (historical name; the ask keyboard is gone)
+	voiceMenuMsgID string     // msgID of the most recent /voice menu, for its "vm|" callback edit
 
 	runJob        func(name string) error             // fires a cron job by name; nil if no scheduler
 	reload        func() (shell3.ReloadResult, error) // performs a full config reload; nil if unset
@@ -96,7 +94,6 @@ func NewBot(client tgClient, rt *shell3.Runtime, chatID int64, threads *ThreadIn
 		rt:      rt,
 		chatID:  chatID,
 		threads: threads,
-		pending: make(map[string]chan bool),
 		live:    make(map[string]*shell3.Session),
 		lastMsg: make(map[string]string),
 		pinned:  make(map[string]bool),
@@ -205,14 +202,6 @@ func (b *Bot) AdoptSession(s *shell3.Session) {
 	b.live[s.ID()] = s
 	b.pinned[s.ID()] = true
 	b.mu.Unlock()
-}
-
-// askFunc returns the session Asker: it routes a tool-call hook ask verdict to
-// the chat's inline Allow/Deny buttons.
-func (b *Bot) askFunc() func(ctx context.Context, command, reason string) bool {
-	return func(ctx context.Context, command, reason string) bool {
-		return b.Ask(ctx, command, reason)
-	}
 }
 
 // Run consumes inbound messages and the wake bus until ctx is cancelled.
@@ -355,7 +344,7 @@ func (b *Bot) sessionFor(m Msg) (*shell3.Session, error) {
 				return s, nil
 			}
 			s, err := b.rt.Session(shell3.SessionOpts{
-				ResumeID: id, WorkDir: b.workDir, Asker: b.askFunc(),
+				ResumeID: id, WorkDir: b.workDir,
 			})
 			if err != nil {
 				return nil, err
@@ -364,7 +353,7 @@ func (b *Bot) sessionFor(m Msg) (*shell3.Session, error) {
 			return s, nil
 		}
 	}
-	s, err := b.rt.Session(shell3.SessionOpts{WorkDir: b.workDir, Asker: b.askFunc()})
+	s, err := b.rt.Session(shell3.SessionOpts{WorkDir: b.workDir})
 	if err != nil {
 		return nil, err
 	}
@@ -669,7 +658,7 @@ func (b *Bot) WakeOwner(ownerID, note string) bool {
 // one-turn-at-a-time slot (queueing FIFO behind an active turn, never
 // dropped), and its reply posts as a new replyable thread.
 func (b *Bot) StartFreshTurn(note string) {
-	sess, err := b.rt.Session(shell3.SessionOpts{WorkDir: b.workDir, Asker: b.askFunc()})
+	sess, err := b.rt.Session(shell3.SessionOpts{WorkDir: b.workDir})
 	if err != nil {
 		// Degrade to a raw post rather than dropping the completion.
 		go b.sendReply(context.Background(), "🔔 "+note)

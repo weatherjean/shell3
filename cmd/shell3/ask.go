@@ -3,8 +3,6 @@
 package main
 
 import (
-	"bufio"
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -80,27 +78,16 @@ func newAskCommand() *cobra.Command {
 			}
 			defer rt.Close()
 
-			// A tool-call hook ask verdict needs a human to decide. Attach an
-			// interactive y/n terminal prompt only when a human is plausibly present
-			// (no -p, and a TTY on both stdin — to read the answer — and stderr — to
-			// show the prompt). With -p (scripted) or no TTY there is no human, so
-			// attach NO asker: the Session treats the ask as headless and auto-DENIES
-			// (AGENTS.md hooks contract), and the hook payload's headless flag is true.
-			var asker func(context.Context, string, string) bool
-			if interactiveAsk(promptFlag != "", term.IsTerminal(int(os.Stdin.Fd())), term.IsTerminal(int(os.Stderr.Fd()))) {
-				asker = func(ctx context.Context, command, reason string) bool {
-					return confirmAsk(ctx, os.Stdin, os.Stderr, command, reason)
-				}
-			}
-
 			// Sessions run in the config dir (the runtime root), the same
 			// default the hosts use. ask is host-agnostic: it reads nothing
-			// from the web block.
+			// from the telegram block. Headless when scripted (-p) or without
+			// a TTY on both ends — the hook payload's headless flag says so.
+			headless := !interactiveTTY(promptFlag != "", term.IsTerminal(int(os.Stdin.Fd())), term.IsTerminal(int(os.Stderr.Fd())))
 			sess, err := rt.Session(shell3.SessionOpts{
 				Name:         "ask",
 				WorkDir:      resolved,
 				ResumeLatest: resume,
-				Asker:        asker,
+				Headless:     headless,
 			})
 			if err != nil {
 				return err
@@ -156,34 +143,12 @@ func newAskCommand() *cobra.Command {
 	return cmd
 }
 
-// interactiveAsk reports whether `ask` should attach an interactive terminal
-// confirm prompt for tool-call hook ask verdicts. It returns false — meaning no
-// asker, so the Session auto-denies the ask headlessly — with -p (scripted) or
-// without a TTY on both ends (piped stdin, no human to prompt). Pure so the
-// wiring is unit-testable without a real runtime or terminal.
-func interactiveAsk(scripted, stdinTTY, stderrTTY bool) bool {
+// interactiveTTY reports whether `ask` has a human plausibly at the terminal:
+// not scripted (-p) and a TTY on both stdin and stderr. Its inverse is the
+// session's Headless flag, which the tool-call hook payload sees as
+// .headless. Pure so the wiring is unit-testable without a real terminal.
+func interactiveTTY(scripted, stdinTTY, stderrTTY bool) bool {
 	return !scripted && stdinTTY && stderrTTY
-}
-
-// confirmAsk prompts a human at the terminal to allow or deny a tool-call hook
-// ask verdict, showing the reason and command so the decision is informed, then
-// reading a y/n line from r (the prompt is written to w). It replaces ask's old
-// blind auto-approve: anything but an explicit yes — including EOF / no input —
-// denies. r and w are injectable so the prompt is testable; the command wires
-// os.Stdin and os.Stderr (verbose turn output owns stdout).
-func confirmAsk(_ context.Context, r io.Reader, w io.Writer, command, reason string) bool {
-	fmt.Fprintf(w, "\n[hook ask] %s\n", reason)
-	if command != "" {
-		fmt.Fprintf(w, "  command: %s\n", command)
-	}
-	fmt.Fprint(w, "  allow this tool call? [y/N] ")
-	line, _ := bufio.NewReader(r).ReadString('\n')
-	switch strings.ToLower(strings.TrimSpace(line)) {
-	case "y", "yes":
-		return true
-	default:
-		return false
-	}
 }
 
 // echoPrompt writes back the message the interactive huh form just collected.

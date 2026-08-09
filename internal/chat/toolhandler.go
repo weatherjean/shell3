@@ -46,14 +46,11 @@ type ToolConfig struct {
 	Store *runs.Store
 	// WorkDir is the working directory tools should resolve paths against.
 	WorkDir string
-	// Asker confirms an ask-verdict command with a human. Nil ⇒ ask degrades to
-	// deny (headless subagent path).
-	Asker AskFunc
-	// HeadlessAsk is true when no human asker is attached to the session — an
-	// ask verdict would degrade to deny. Forwarded to the tool-call hook
-	// as .headless so the gate script can branch on it. Independent of the
-	// disable_safety toggle (which affects ask resolution, not human presence).
-	HeadlessAsk bool
+	// Headless is true when shell3 runs without a human at the keyboard
+	// (subagents, cron dispatches). Forwarded to the tool-call hook as
+	// .headless so the gate script can branch on it; turn.go injects a
+	// system reminder when it is set.
+	Headless bool
 	// StartBashBg launches a background shell command on the host's in-process
 	// job runtime and returns its job id. env holds extra "K=V" entries appended
 	// to the inherited environment (bash_bg passes nil). direct skips the
@@ -75,11 +72,11 @@ type ToolConfig struct {
 	// CancelJob cancels a running job and returns a short confirmation or error
 	// for the task_cancel tool. Nil ⇒ task management unavailable.
 	CancelJob func(id string) string
-	// RunToolCall runs the tool-call hook chain (pass / rewrite / argv / block /
-	// ask) with the real tool name. The bash family self-gates via this in their
-	// handlers (gateBash); every other tool is gated in the
+	// RunToolCall runs the tool-call hook chain (pass / rewrite / argv /
+	// block) with the real tool name. The bash family self-gates via this in
+	// their handlers (gateBash); every other tool is gated in the
 	// dispatch loop via gateNonBashTool. Nil = no hooks declared (everything runs —
-	// the unsafe default). Config-global. headless carries HeadlessAsk to the
+	// the unsafe default). Config-global. headless carries Headless to the
 	// chain as t.headless.
 	RunToolCall func(ctx context.Context, name, command, argsJSON string, headless bool) ToolCallVerdict
 }
@@ -90,7 +87,7 @@ type ToolConfig struct {
 // NewHandlers and reused across turns.
 type TurnConfig struct {
 	// ToolConfig is the per-turn tool-execution state (WorkDir, Store,
-	// Asker, job-runtime hooks, RunToolCall) handed to each ToolHandler.Execute.
+	// job-runtime hooks, RunToolCall) handed to each ToolHandler.Execute.
 	// Embedded so its fields are set and read as TurnConfig fields directly and
 	// there is no per-call copy that could drift.
 	ToolConfig
@@ -111,10 +108,6 @@ type TurnConfig struct {
 	Handlers map[string]ToolHandler
 	// Log is the turn-scoped logger. Nil is safe via LogOrNoop.
 	Log applog.Logger
-	// Headless is true when shell3 runs without a human at the keyboard
-	// (subagents, and any front-end that attaches no asker). turn.go injects a
-	// system reminder when this is set.
-	Headless bool
 	// HostTool dispatches a host-registered Go tool (internal/shell3.RegisterHostTool)
 	// by name, returning its result string. Names in HostToolNames route here.
 	// Nil = none registered.

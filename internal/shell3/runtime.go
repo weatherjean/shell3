@@ -35,8 +35,6 @@ type SessionOpts struct {
 	ParentID string
 	// OutPath, when non-empty, streams this session's JSONL audit log there.
 	OutPath string
-	// Asker confirms a tool-call hook ask-verdict command with a human (true = allow).
-	Asker func(ctx context.Context, command, reason string) bool
 	// ResumeID reloads a stored session's messages when non-empty.
 	ResumeID string
 	// ResumeLatest reattaches to the newest stored session matching this
@@ -317,7 +315,6 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 		return nil, err
 	}
 	s := newSession(cfg, opts) // shared parts are the runtime's to clean
-	s.asker = opts.Asker
 	s.opts = opts
 	s.runtime, s.name = rt, name
 	s.sink, s.sinkCleanup = sink, sinkCleanup

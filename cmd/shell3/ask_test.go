@@ -3,7 +3,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -70,41 +69,8 @@ func TestInteractiveAsk(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := interactiveAsk(c.scripted, c.stdinTTY, c.stderrTTY); got != c.want {
-				t.Errorf("interactiveAsk(%v,%v,%v) = %v, want %v", c.scripted, c.stdinTTY, c.stderrTTY, got, c.want)
-			}
-		})
-	}
-}
-
-// TestConfirmAsk verifies the interactive y/n prompt: only an explicit yes
-// allows; everything else — including EOF / empty input — denies, and the
-// reason and command are surfaced so the human decides informed.
-func TestConfirmAsk(t *testing.T) {
-	cases := []struct {
-		name, input string
-		want        bool
-	}{
-		{"y", "y\n", true},
-		{"yes", "yes\n", true},
-		{"uppercase Y", "Y\n", true},
-		{"n", "n\n", false},
-		{"blank", "\n", false},
-		{"eof no input", "", false},
-		{"other", "maybe\n", false},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			var w strings.Builder
-			got := confirmAsk(context.Background(), strings.NewReader(c.input), &w, "rm -rf /tmp/x", "destructive command")
-			if got != c.want {
-				t.Errorf("confirmAsk(%q) = %v, want %v", c.input, got, c.want)
-			}
-			if !strings.Contains(w.String(), "destructive command") {
-				t.Errorf("prompt should surface the reason; got %q", w.String())
-			}
-			if !strings.Contains(w.String(), "rm -rf /tmp/x") {
-				t.Errorf("prompt should surface the command; got %q", w.String())
+			if got := interactiveTTY(c.scripted, c.stdinTTY, c.stderrTTY); got != c.want {
+				t.Errorf("interactiveTTY(%v,%v,%v) = %v, want %v", c.scripted, c.stdinTTY, c.stderrTTY, got, c.want)
 			}
 		})
 	}

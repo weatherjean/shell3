@@ -908,18 +908,17 @@ func TestSessionJobsFromManager(t *testing.T) {
 	}
 }
 
-// TestTurnConfigHeadlessAsk: HeadlessAsk mirrors asker presence — true with no
-// asker attached (subagents, shell3 run), false when a front-end supplied one.
-func TestTurnConfigHeadlessAsk(t *testing.T) {
+// TestTurnConfigHeadless: the hook payload's headless flag mirrors
+// SessionOpts.Headless — true for subagents/cron dispatches, false for a
+// front-end session with a human behind it.
+func TestTurnConfigHeadless(t *testing.T) {
 	s := newTestSession(t, fakellm.New(), chat.Config{})
 	defer s.Close()
-
-	s.asker = nil
-	if !s.turnConfig().HeadlessAsk {
-		t.Fatal("no asker: want HeadlessAsk=true")
+	if s.turnConfig().Headless {
+		t.Fatal("default session: want Headless=false")
 	}
-	s.asker = func(context.Context, string, string) bool { return true }
-	if s.turnConfig().HeadlessAsk {
-		t.Fatal("asker attached: want HeadlessAsk=false")
+	s.cfg.Headless = true
+	if !s.turnConfig().Headless {
+		t.Fatal("headless config: want Headless=true")
 	}
 }

@@ -44,27 +44,6 @@ func TestConsoleOutboundFormatting(t *testing.T) {
 	}
 }
 
-func TestConsoleConfirmAutoDenies(t *testing.T) {
-	var out bytes.Buffer
-	c := NewConsoleClient(strings.NewReader(""), &out, ConsoleChatID)
-	id, err := c.SendConfirm(context.Background(), ConsoleChatID, "run rm -rf?", "bs:1:y", "bs:1:n")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out.String(), "auto-denied") {
-		t.Fatalf("confirm not marked auto-denied: %q", out.String())
-	}
-	// The Deny callback is enqueued so the waiting Ask unblocks with a denial.
-	select {
-	case cb := <-c.Callbacks(context.Background()):
-		if cb.Data != "bs:1:n" || cb.ID != id {
-			t.Fatalf("deny callback = %+v, want Data=bs:1:n ID=%s", cb, id)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("no auto-deny callback enqueued")
-	}
-}
-
 func TestConsoleMediaAndMenuMarkers(t *testing.T) {
 	var out bytes.Buffer
 	c := NewConsoleClient(strings.NewReader(""), &out, ConsoleChatID)

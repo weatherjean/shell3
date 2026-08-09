@@ -389,18 +389,13 @@ type SessionOptions struct {
 // production uses instead of hand-copying it.
 func BridgeVerdict(v config.ToolCallVerdict) chat.ToolCallVerdict {
 	action := chat.ActionBlock // fail closed on any unmapped action
-	switch v.Action {
-	case config.ActionRun:
+	if v.Action == config.ActionRun {
 		action = chat.ActionRun
-	case config.ActionAsk:
-		action = chat.ActionAsk
 	}
 	return chat.ToolCallVerdict{
 		Action:      action,
 		Argv:        v.Argv,
-		Prompt:      v.Prompt,
 		Reason:      v.Reason,
-		AskTimeout:  v.AskTimeout,
 		Passthrough: v.Passthrough,
 	}
 }
