@@ -331,7 +331,7 @@ func (s *Store) deleteSessions(ids []string) error {
 // JobLogPath returns the on-disk log path for a background job owned by
 // session id — runs/<id>/jobs/<jobID>.log — creating the dir so the caller
 // can open the file directly. Job logs stay plain files (not database rows)
-// so the notifier's read tool can open them by path. Returns "" when the dir
+// so the completion mail can point at them by path. Returns "" when the dir
 // cannot be created (the caller then simply keeps no on-disk log).
 func (s *Store) JobLogPath(id, jobID string) string {
 	if jobID == "" || jobID != filepath.Base(jobID) {

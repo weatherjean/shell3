@@ -282,7 +282,7 @@ func (c *BotAPIClient) SendHTMLReply(ctx context.Context, chatID int64, html str
 func (c *BotAPIClient) Callbacks(_ context.Context) <-chan Callback { return c.cb }
 
 // EditPlain replaces a message's text and removes its inline keyboard (omitting
-// ReplyMarkup on editMessageText clears it), so the confirm buttons disappear.
+// ReplyMarkup on editMessageText clears it), so stale inline buttons disappear.
 func (c *BotAPIClient) EditPlain(ctx context.Context, chatID int64, msgID string, text string) error {
 	mid, err := strconv.Atoi(msgID)
 	if err != nil {

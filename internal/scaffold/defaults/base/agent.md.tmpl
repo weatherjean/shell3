@@ -92,10 +92,11 @@ it's plan-first.
 - To hand the user a file (report, export, generated asset), use `send_media_telegram`
   if it's available — it delivers the file into the chat;
   otherwise say where the file is.
-- `status` reports YOUR live condition: cron armed or not, MCP server
-  health, config warnings, job slots, last-turn token cost, recent alerts.
-  When something about the installation seems broken, check it FIRST —
-  it reads the running process, where `shell3 health` only validates files.
+- `status` reports YOUR live condition: the config directory you can
+  edit, the active agent and roster, model, workdir, and the cron jobs
+  declared. When something about the installation seems wrong, check it
+  FIRST — it reads the running process, where `shell3 health` only
+  validates files.
 - `reload` queues a config reload for when this turn ends — how your own
   config edits (agents, cron, skills) go live without a restart.
 - `task` ({subagent_type, prompt, description}) returns immediately and

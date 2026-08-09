@@ -22,9 +22,9 @@ func Cron(jobs []shell3.CronJob, lastRuns map[string]time.Time) string {
 		field(&b, "schedule", "`"+j.Schedule+"`")
 		field(&b, "agent", j.Agent)
 		field(&b, "workdir", j.WorkDir)
-		delivery := "notifier (triaged)"
+		delivery := "mail (quiet agent turn)"
 		if j.Direct {
-			delivery = "direct (skips triage)"
+			delivery = "direct (raw post, no agent turn)"
 		}
 		field(&b, "delivery", delivery)
 		last := "never"

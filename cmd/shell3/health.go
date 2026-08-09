@@ -119,7 +119,7 @@ func runHealth(cmd *cobra.Command, path string) error {
 	// out at `shell3 telegram`: health is documented as THE config check, and a
 	// block boot wrote with blank fields loads cleanly but refuses to start. An
 	// ABSENT block is not an error — an `shell3 ask`-only config is legitimate —
-	// but say so, the way an absent notifier is reported. Deliberately LAST: a
+	// but say so. Deliberately LAST: a
 	// blank chat id is a state boot itself writes ("fill it in later"), and it
 	// must never hide the hook and MCP diagnostics above.
 	if tg := lc.Telegram(); !tg.Present {

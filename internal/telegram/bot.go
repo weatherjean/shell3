@@ -57,8 +57,8 @@ type Bot struct {
 	mailQueue []inMail
 	// pinned holds store-session ids that must never be retired (AdoptSession).
 	// The persistent "cron" dispatch parent is pinned so its jobs and runs keep
-	// resolving; cron completions no longer wake it (they post directly — see
-	// PostCompletion's cronJob branch), so it never runs a turn of its own.
+	// resolving; cron completion mail never wakes it (it runs as a fresh quiet
+	// turn via StartFreshTurn), so it never runs a turn of its own.
 	pinned map[string]bool
 
 	media     *MediaCaps // STT/describe/TTS/imagegen capabilities; nil when unconfigured
@@ -503,7 +503,7 @@ func (b *Bot) retireOrKeep(sess *shell3.Session) {
 		return
 	}
 	// The inbox re-check and the live-map delete form ONE b.mu critical
-	// section, pairing with WakeOwner's locked deliver: either the notifier's
+	// section, pairing with WakeOwner's locked deliver: either the completion
 	// note queues first (we keep the session; its Wake drains it) or the
 	// delete lands first (WakeOwner sees the session gone and starts a fresh
 	// turn instead). Without the shared lock a note could queue into a session
@@ -670,7 +670,7 @@ func (b *Bot) keepTyping(ctx context.Context) (stop func()) {
 	return cancel
 }
 
-// The Bot implements shell3.CompletionHost: the notifier's send verdicts land
+// The Bot implements shell3.CompletionHost: floor/direct completion posts land
 // as ⏰/🔔 chat posts (threaded into the owning conversation when one is
 // live), wake verdicts resume the owning session or start a fresh main-agent
 // turn. All three methods are invoked on job-runtime goroutines, so network
@@ -731,7 +731,7 @@ func (b *Bot) WakeOwner(ownerID, note string) bool {
 }
 
 // StartFreshTurn runs a fresh main-agent session over note — a completion with
-// no live owner (cron results the notifier judged wake-worthy, orphans). The
+// no live owner (cron results, orphans). The
 // turn goes through the normal wake machinery, so it serializes on the
 // one-turn-at-a-time slot (queueing FIFO behind an active turn, never
 // dropped), and its reply posts as a new replyable thread.

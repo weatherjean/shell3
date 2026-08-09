@@ -16,7 +16,7 @@ import (
 
 // newServeCommand builds `shell3 serve` — the BYO front-end seam. It runs the
 // exact same bot loop as `shell3 telegram` (fresh-turn threading, host
-// commands, hook asks, notifier completion delivery, cron), but the transport
+// commands, mail-routed completion delivery, cron), but the transport
 // is newline-delimited JSON over stdin/stdout: a Discord bridge, a custom
 // dashboard backend, or a test harness spawns this process and translates.
 // docs/serve.md is the wire reference.

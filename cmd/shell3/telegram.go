@@ -25,7 +25,7 @@ import (
 // One chat, one agent: every inbound message runs its own session (a fresh
 // one, or the thread's session when the message is a Telegram reply), cron
 // fires from a hidden dispatch parent, and background completions come back
-// through the notifier.
+// as mail.
 //
 // --console swaps the Telegram transport for stdin/stdout, driving the same
 // bot loop with no credentials and no network.

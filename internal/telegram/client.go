@@ -85,7 +85,7 @@ type tgClient interface {
 	// returned via the Callbacks channel when pressed. Returns the sent message id.
 	SendMenu(ctx context.Context, chatID int64, text string, options []MenuOption) (msgID string, err error)
 	// EditPlain replaces a message's text and removes its inline keyboard. Used
-	// to make the confirm buttons disappear once a choice is made.
+	// to clear an inline keyboard once a choice is made (the /voice menu).
 	EditPlain(ctx context.Context, chatID int64, msgID string, text string) error
 	// AnswerCallback acknowledges a callback query, stopping the button's spinner.
 	AnswerCallback(ctx context.Context, callbackID string) error

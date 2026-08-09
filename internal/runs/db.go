@@ -2,7 +2,7 @@
 // .shell3_project/shell3.db holding sessions, messages, reminders, the
 // front-end thread indexes, and a full-text index over the conversation.
 // Background job logs stay plain files beside it (runs/<id>/jobs/) so the
-// notifier's read tool can open them by path.
+// completion mail can point at them by path.
 package runs
 
 import (

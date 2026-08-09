@@ -5,23 +5,22 @@
 # the working directory:
 #   stdin:  {"name":"bash","command":"…","args":"{…}","headless":false}
 #           command is the bash text for bash/bash_bg and null otherwise —
-#           check name first. headless is true when no human can answer an
-#           ask (subagents, cron).
+#           check name first. headless is true when no human is attached
+#           (subagents, cron).
 #   stdout: {}                                   run (empty output = run too)
 #           {"block": true, "reason": "…"}       block
-#           {"ask": "prompt", "reason": "…"}     Allow/Deny buttons in the chat
 #           {"command": "…"}                     rewrite (bash tools only)
 #           {"argv": ["…"]}                      runner swap (bash tools only)
 # A nonzero exit, bad JSON, or 10s timeout BLOCKS the call (fails closed).
+# (There is no ask verdict: shell3 runs unattended, where a question is a
+# denial with a delay — a hook printing {"ask": …} fails closed.)
 #
 # ---------------------------------------------------------------------------
 # THIS GATE NEVER ASKS. It is a fence, not a prompt.
 #
 # This harness runs ~95% autonomously: nobody is at the chat when most tool
-# calls happen. In that setting an `ask` is not a question, it is a DENIAL WITH
-# A DELAY — the turn parks until the ask times out, then denies anyway. A block
-# reaches the agent instantly, carrying a reason it can act on: pick another
-# path, report back, leave it for the operator.
+# calls happen. A block reaches the agent instantly, carrying a reason it can
+# act on: pick another path, report back, leave it for the operator.
 #
 # So every rule here resolves to run or refuse, immediately. Inside the fence
 # the agent works unsupervised and untouched. Outside it, no.

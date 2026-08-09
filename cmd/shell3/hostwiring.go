@@ -102,15 +102,15 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 		}
 	})
 
-	// Background completions (bash_bg, subagents, cron) route through the
-	// notifier via the bot's CompletionHost: send verdicts post ⏰/🔔
-	// messages, wake verdicts resume the owning thread or start a fresh
-	// main-agent turn.
+	// Background completions (bash_bg, subagents, cron) route as mail via
+	// the bot's CompletionHost: floor/direct posts land as ⏰/🔔 messages,
+	// default mail resumes the owning thread — or starts a fresh main-agent
+	// turn — quietly (mail_user is the way back to the chat).
 	rt.SetCompletionHost(b)
 
 	// Cron dispatches subagents, which need SOME parent session. One hidden
-	// session is the dispatch parent; it runs no turns of its own (the
-	// notifier owns delivery). Adopted so it is never retired and its jobs
+	// session is the dispatch parent; it runs no turns of its own (results
+	// route as completion mail). Adopted so it is never retired and its jobs
 	// keep resolving.
 	cronSess, err := rt.Session(shell3.SessionOpts{
 		Name: "cron", WorkDir: workDir, Headless: true,

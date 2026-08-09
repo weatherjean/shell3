@@ -83,7 +83,7 @@ exit 0
 
 - `shell3 health` connects every declared server and fails on any that is
   down, printing per-server tool counts.
-- The interface's **Status** view lists each server: up/down, tool count,
+- `/status` lists each server: up/down, tool count,
   last error.
 - A server that is down at startup is a warning, not a failure — shell3
   runs, that server's tools are absent until the next reload.

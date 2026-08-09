@@ -41,8 +41,8 @@ type Scheduler struct {
 // New validates every schedule and arms an entry per job. Returns an error if
 // any schedule is malformed (fail-fast at startup). Completion delivery is
 // entirely the job runtime's: each fire is a Dispatch whose result routes
-// through the notifier (or, with direct: true, straight to a fresh main-agent
-// turn) — the scheduler carries no notification callback.
+// as mail to the main agent (or, with direct: true, as a raw post to the
+// user) — the scheduler carries no notification callback.
 func New(disp Dispatcher, jobs []shell3.CronJob) (*Scheduler, error) {
 	s := &Scheduler{
 		disp: disp,
@@ -68,7 +68,7 @@ func (s *Scheduler) fire(j shell3.CronJob) {
 	opts := shell3.DispatchOpts{
 		WorkDir: j.WorkDir, Description: "cron:" + j.Name,
 		CronJob: j.Name, Direct: j.Direct,
-		// The job prompt rides along as triage context: the notifier judges a
+		// The job prompt rides along as context: the agent judges a
 		// result far better knowing what the job was created to do.
 		Note: "this is the cron job's standing prompt: " + j.Prompt,
 	}

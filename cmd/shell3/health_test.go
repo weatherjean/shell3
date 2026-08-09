@@ -200,7 +200,7 @@ func TestHealthOKWithCompleteTelegramBlock(t *testing.T) {
 }
 
 // No telegram block at all is legitimate (an `shell3 ask`-only config), so it
-// reports the consequence the way an absent notifier does, without failing.
+// reports the consequence plainly, without failing.
 func TestHealthReportsAbsentTelegramWithoutFailing(t *testing.T) {
 	cfg := writeHealthTree(t, nil)
 	out, err := runHealthAt(t, cfg)

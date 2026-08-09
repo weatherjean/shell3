@@ -314,7 +314,7 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 	}
 	// Best-effort on-disk log beside the parent session's transcript, so the
 	// full output (up to the cap) survives the in-memory ring for the
-	// notifier's read tool and task_status.
+	// completion mail and task_status.
 	var logPath string
 	if parent != nil && m.rt != nil && m.rt.store != nil {
 		if sid := parent.sess.ID(); sid != "" {
@@ -434,7 +434,7 @@ func (m *jobManager) finishCommand(j *bgJob, exit int) {
 		deliver = func() {}
 	default:
 		// Orphaned child-owned job (follow-ups exhausted / poisoned / child
-		// closed): a plain notifier event labeled with its origin, threaded at
+		// closed): a plain completion event labeled with its origin, threaded at
 		// the subagent's root session so a wake verdict lands somewhere sane.
 		n.Status = "started by subagent " + owner.id
 		ev := commandEvent(j, n, exit, owner.parent)
@@ -598,8 +598,8 @@ func (m *jobManager) runningJobIDs() []string {
 // subagentOpts tunes a subagent job spawned via startSubagent.
 type subagentOpts struct {
 	workDir string // child workdir; "" → the parent session's workdir
-	direct  bool   // skip the notifier; deliver the result straight to the owner
-	note    string // triage context for the notifier ("" = none)
+	direct  bool   // post the raw result straight to the user (no agent turn)
+	note    string // context carried into the completion mail ("" = none)
 	cronJob string // cron dispatches: the job name ("" for task-tool spawns)
 }
 
@@ -624,7 +624,7 @@ func resolveChildWorkDir(parentWD, override, root string) string {
 // startSubagent creates an in-process child session and runs prompt inside it
 // asynchronously. When the child finishes, finishSubagent routes the result:
 // direct jobs wake the parent with a KindAgentDone notice; everything else
-// goes to the notifier for triage.
+// routes as completion mail.
 func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, o subagentOpts) (string, error) {
 	if m.rt == nil {
 		return "", fmt.Errorf("subagents require a runtime")
@@ -850,7 +850,7 @@ func (m *jobManager) childRunningJobsLocked(sess *Session) int {
 // it repeatedly resumes the child session over its queued completion notices
 // (RunQueued) and routes each turn's summary like any completion — direct
 // jobs wake the root with an agent_update notice; everything else goes to the
-// notifier as an EvFollowUp event.
+// mail router as an EvFollowUp event.
 // At most one driver runs per job (sub.driver, set by the spawner under m.mu);
 // the exit re-check happens under the same lock as notice injection in
 // finishCommand, so a completion can never slip between "inbox empty" and
@@ -940,7 +940,7 @@ func (m *jobManager) maybeCloseChild(sub *bgJob) {
 // Routing: direct jobs wake the parent with a KindAgentDone notice (cron
 // direct jobs, whose pinned parent never runs turns, hand the result to a
 // fresh main-agent turn via the CompletionHost instead); everything else is a
-// notifier event.
+// completion event through the mail router.
 func (m *jobManager) finishSubagent(j *bgJob, summary, errText string) {
 	if j.parent != nil {
 		m.dispatchCompletion(subagentEvent(j, summary, errText))

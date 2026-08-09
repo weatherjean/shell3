@@ -39,9 +39,9 @@ const ConsoleChatID int64 = 1
 //
 // Message ids come from one monotonic counter shared by inbound and outbound
 // (mirroring Telegram's single message_id space), so a script can reply to any
-// printed "[#<id>]" to continue that thread. Hook approval asks (SendConfirm)
-// auto-deny with a printed notice — reading a y/n answer would fight the single
-// stdin reader loop, so console mode denies gated tool calls.
+// printed "[#<id>]" to continue that thread. Inline menus (SendMenu) print
+// their option labels; presses are not readable from the single stdin loop,
+// so a menu is display-only in console mode.
 type ConsoleClient struct {
 	in     chan Msg
 	cb     chan Callback
