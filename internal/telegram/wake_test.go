@@ -4,11 +4,10 @@ package telegram
 
 import (
 	"context"
-	"strings"
 	"testing"
 )
 
-func TestConsumeWakes_PushesResult(t *testing.T) {
+func TestConsumeWakes_RunsQuietTurn(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "woke up and ran")
 	b := newBot(t, fc, rt)
@@ -18,10 +17,16 @@ func TestConsumeWakes_PushesResult(t *testing.T) {
 	defer cancel()
 	go b.consumeWakes(ctx)
 
-	// Interject on an idle session queues input and emits a Wake.
+	// Interject on an idle session queues input and emits a Wake; the mail
+	// turn runs quietly — the queued input drains, nothing posts.
 	sess.Interject("scheduled job result")
 
 	waitFor(t, func() bool {
-		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "woke up and ran")
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return !b.turnActive && !sess.HasQueuedInput()
 	})
+	if texts := fc.sentTexts(); len(texts) != 0 {
+		t.Fatalf("a wake (mail) turn must post nothing, got %v", texts)
+	}
 }

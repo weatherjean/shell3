@@ -20,6 +20,7 @@ func BotCommands() []Command {
 		{"stop", "Stop the current turn"},
 		{"run", "Run a scheduled job now: /run <name>"},
 		{"status", "Show runtime status"},
+		{"inbox", "Show queued mail (yours and the agent's)"},
 		{"jobs", "List running background tasks"},
 		{"job", "Show one job's detail: /job <id>"},
 		{"cancel", "Cancel a background task: /cancel <id>"},
@@ -77,6 +78,8 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 		b.sendReply(ctx, "▶️ fired job "+name)
 	case "/status":
 		b.sendMarkdownDoc(ctx, "status.md", render.Status(b.anyLiveSession(), b.rt, b.version))
+	case "/inbox":
+		b.sendReply(ctx, b.renderInbox())
 	case "/jobs":
 		// Deterministic, zero-token job control from the phone: lists running
 		// subagents and bash_bg commands. Natural-language "what's running?"

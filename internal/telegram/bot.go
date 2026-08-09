@@ -13,12 +13,14 @@ import (
 	"github.com/weatherjean/shell3/internal/strutil"
 )
 
-// Bot routes one Telegram chat to the shell3 runtime under a fresh-turn,
-// chain-of-command model: every inbound message runs in its OWN runtime session
-// (a fresh one, or the thread's session when the message is a Telegram reply),
-// exactly one main-agent turn runs at a time, and background-job completions
-// wake the session that owns them and post their narration back into that
-// thread. There is no single long-lived "telegram" session.
+// Bot routes one Telegram chat to the shell3 runtime under the mail model:
+// every inbound message runs in its OWN runtime session (a fresh one for a new
+// message, the thread's session when it is a Telegram reply), exactly one
+// main-agent turn runs at a time, sending always succeeds (mid-turn mail
+// queues; replies into one thread drain as one batch turn), and
+// background-job completions arrive as quiet mail turns whose only path to
+// the user is the mail_user tool. There is no single long-lived "telegram"
+// session.
 type Bot struct {
 	client tgClient
 	rt     *shell3.Runtime
@@ -46,8 +48,13 @@ type Bot struct {
 	// so a wake-turn reply posts into the right thread.
 	lastMsg map[string]string
 	// wakeQueue holds session ids whose Wake arrived while the turn slot was
-	// taken; drained FIFO after each turn (startNextWake).
+	// taken; drained FIFO after each turn (startNextWork).
 	wakeQueue []string
+	// mailQueue holds user messages that arrived while the turn slot was
+	// taken. Sending always succeeds — mail waits its turn. Drained FIFO
+	// after each turn, before wakes (the user outranks background mail);
+	// consecutive replies into one thread drain as a single batch turn.
+	mailQueue []inMail
 	// pinned holds store-session ids that must never be retired (AdoptSession).
 	// The persistent "cron" dispatch parent is pinned so its jobs and runs keep
 	// resolving; cron completions no longer wake it (they post directly — see
@@ -188,6 +195,7 @@ func (b *Bot) SetConfigDir(dir string) { b.configDir = dir }
 // a reload — gets the tools; subagent children (Headless) are skipped there.
 func (b *Bot) DecorateChatSession(s *shell3.Session) {
 	b.registerSendTool(s)
+	b.registerMailTool(s)
 	b.registerReloadTool(s)
 	b.registerStatusTool(s)
 }
@@ -219,6 +227,15 @@ func (b *Bot) Run(ctx context.Context) {
 			b.handleMsg(ctx, m)
 		}
 	}
+}
+
+// inMail is one received user message, attachments already saved, waiting for
+// (or entering) its turn.
+type inMail struct {
+	m        Msg
+	text     string
+	saved    []savedFile
+	hadVoice bool
 }
 
 // handleMsg routes one inbound message. It runs on the single update loop, so
@@ -263,69 +280,93 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 		}
 	}
 
-	// One main-agent turn at a time, globally. A message arriving mid-turn gets a
-	// courtesy reply and is dropped — the running turn is never steered, and no
-	// session is created or touched.
+	mail := inMail{m: m, text: text, saved: saved, hadVoice: hadVoice}
+
+	// One main-agent turn at a time, globally. Mail semantics: sending always
+	// succeeds — a message arriving mid-turn queues and is drained after the
+	// running turn ends (replies into one thread drain as one batch turn).
 	b.mu.Lock()
 	if b.turnActive {
+		b.mailQueue = append(b.mailQueue, mail)
 		b.mu.Unlock()
-		go b.sendCourtesy(ctx, m.ID)
 		return
 	}
 	// Take the turn slot before resolving the session so a wake landing during
 	// session creation queues instead of racing onto the slot.
-	turnCtx, cancel := context.WithCancel(ctx)
-	b.cancelTurn = cancel
-	b.turnActive = true
+	turnCtx, cancel := b.takeSlotLocked(ctx)
 	b.turnHadVoice = hadVoice
 	b.mu.Unlock()
 
-	sess, err := b.sessionFor(m)
+	go b.runUserTurn(ctx, turnCtx, cancel, []inMail{mail})
+}
+
+// runUserTurn runs one user-initiated turn over batch (one message, or several
+// queued replies into the same thread). The turn slot is held on entry; this
+// goroutine owns delivery, retirement, slot release, and starting the next
+// queued work.
+func (b *Bot) runUserTurn(ctx, turnCtx context.Context, cancel context.CancelFunc, batch []inMail) {
+	head, last := batch[0], batch[len(batch)-1]
+	sess, err := b.sessionFor(head.m)
 	if err != nil {
 		b.releaseSlot(cancel)
 		b.sendReply(ctx, "⚠️ could not start a session: "+err.Error())
-		// A wake queued against the held slot during the failed creation would
+		// Work queued against the held slot during the failed creation would
 		// otherwise wait for the next event — drain it now.
-		b.startNextWake(ctx)
+		b.startNextWork(ctx)
 		return
 	}
+	if last.m.ID != head.m.ID {
+		b.track(sess, last.m.ID) // the reply anchors at the newest message
+	}
+
+	hadVoice := false
+	for _, mail := range batch {
+		if mail.hadVoice {
+			hadVoice = true
+		}
+	}
+	b.mu.Lock()
+	b.turnHadVoice = hadVoice
+	b.mu.Unlock()
 
 	composeText := func(pctx context.Context) string {
-		out := text
-		if injected := b.preflightText(pctx, saved, sess); injected != "" {
-			if out != "" {
-				out += "\n\n" + injected
-			} else {
-				out = injected
+		parts := make([]string, 0, len(batch))
+		for _, mail := range batch {
+			out := mail.text
+			if injected := b.preflightText(pctx, mail.saved, sess); injected != "" {
+				if out != "" {
+					out += "\n\n" + injected
+				} else {
+					out = injected
+				}
 			}
+			parts = append(parts, withReplyContext(out, mail.m.ReplyTo))
 		}
-		return withReplyContext(out, m.ReplyTo)
+		return strings.Join(parts, "\n\n")
 	}
 
 	stopTyping := b.keepTyping(ctx)
-	go func() {
-		// Preflight runs first, inside the turn goroutine, under turnCtx: /stop's
-		// cancelTurn aborts a hung transcription/description just like the model
-		// call, and the timeout bounds it independently of /stop.
-		pctx, pcancel := context.WithTimeout(turnCtx, preflightTimeout)
-		finalText := composeText(pctx)
-		pcancel()
-		reply := b.drainTurn(sess.Send(turnCtx, finalText))
-		stopTyping()
-		b.mu.Lock()
-		turnVoice := b.turnHadVoice
-		b.mu.Unlock()
-		// A user-initiated turn always answers ("" renders as "(no output)").
-		// The turn slot is held through delivery AND retirement: while it is held
-		// no other goroutine can claim this session (a mid-delivery user message is
-		// courtesy-dropped, a Wake queues, startNextWake waits), so retireOrKeep can
-		// decide to Close an idle session with no concurrent turn to abort. Only
-		// then is the slot released.
-		b.deliverReply(ctx, reply, turnVoice, sess, m.ID)
-		b.retireAndRelease(sess, cancel)
-		b.applyPendingReload(ctx) // self-evolution: agent edited config + called reload this turn (needs a free slot)
-		b.startNextWake(ctx)
-	}()
+	// Preflight runs first, inside the turn goroutine, under turnCtx: /stop's
+	// cancelTurn aborts a hung transcription/description just like the model
+	// call, and the timeout bounds it independently of /stop.
+	pctx, pcancel := context.WithTimeout(turnCtx, preflightTimeout)
+	finalText := composeText(pctx)
+	pcancel()
+	reply := b.drainTurn(sess.Send(turnCtx, finalText))
+	stopTyping()
+	b.mu.Lock()
+	turnVoice := b.turnHadVoice
+	b.mu.Unlock()
+	// A user-initiated turn always answers ("" renders as "(no output)").
+	// The turn slot is held through delivery AND retirement: while it is held
+	// no other goroutine can claim this session (a mid-delivery user message
+	// queues, a Wake queues, startNextWork waits), so retireOrKeep can decide
+	// to Close an idle session with no concurrent turn to abort. Only then is
+	// the slot released.
+	b.deliverReply(ctx, reply, turnVoice, sess, last.m.ID)
+	b.retireAndRelease(sess, cancel)
+	b.applyPendingReload(ctx) // self-evolution: agent edited config + called reload this turn (needs a free slot)
+	b.startNextWork(ctx)
 }
 
 // sessionFor resolves the session an inbound message runs in: a Telegram reply
@@ -371,20 +412,60 @@ func (b *Bot) track(s *shell3.Session, msgID string) {
 	b.mu.Unlock()
 }
 
-// sendCourtesy replies to a mid-turn message explaining it was disregarded.
-func (b *Bot) sendCourtesy(ctx context.Context, msgID string) {
-	_, _ = b.client.SendReply(ctx, b.chatID,
-		"⏳ a turn is running — wait for it to finish, or /stop and reply to your last prompt to steer. This message is disregarded.",
-		msgID)
-}
-
 // afterTurn runs the end-of-turn housekeeping for a wake turn: retire the
 // session (while the slot is still held), release the slot, then start the next
-// queued wake turn (if any). Entry REQUIRES the turn slot still held — retiring
-// before releasing it is what closes the retire-vs-new-turn race.
+// queued work (user mail first, then wakes). Entry REQUIRES the turn slot still
+// held — retiring before releasing it is what closes the retire-vs-new-turn
+// race.
 func (b *Bot) afterTurn(ctx context.Context, sess *shell3.Session, cancel context.CancelFunc) {
 	b.retireAndRelease(sess, cancel)
+	b.startNextWork(ctx)
+}
+
+// startNextWork starts the next queued unit once the slot is free: queued user
+// mail first (the user outranks background mail), then queued wakes.
+func (b *Bot) startNextWork(ctx context.Context) {
+	if b.drainNextMail(ctx) {
+		return
+	}
 	b.startNextWake(ctx)
+}
+
+// drainNextMail pops the oldest queued user message — plus, when it is a reply,
+// every other queued reply into the same thread — and runs the batch as one
+// user turn. Returns false when the queue is empty or a turn is already
+// running. Grouping resolves thread identity through the persistent thread
+// index (not live-session pointers), so replies into a retired thread still
+// batch correctly and resume it via sessionFor's ResumeID path.
+func (b *Bot) drainNextMail(ctx context.Context) bool {
+	b.mu.Lock()
+	if b.turnActive || len(b.mailQueue) == 0 {
+		b.mu.Unlock()
+		return false
+	}
+	head := b.mailQueue[0]
+	rest := b.mailQueue[1:]
+	batch := []inMail{head}
+	if head.m.ReplyToID != "" {
+		if want, ok := b.threads.Lookup(head.m.ReplyToID); ok {
+			kept := rest[:0]
+			for _, mail := range rest {
+				if mail.m.ReplyToID != "" {
+					if got, ok := b.threads.Lookup(mail.m.ReplyToID); ok && got == want {
+						batch = append(batch, mail)
+						continue
+					}
+				}
+				kept = append(kept, mail)
+			}
+			rest = kept
+		}
+	}
+	b.mailQueue = append([]inMail{}, rest...)
+	turnCtx, cancel := b.takeSlotLocked(ctx)
+	b.mu.Unlock()
+	go b.runUserTurn(ctx, turnCtx, cancel, batch)
+	return true
 }
 
 // retireAndRelease retires sess and then releases the turn slot, in that order.
@@ -538,21 +619,18 @@ func (b *Bot) takeSlotLocked(ctx context.Context) (context.Context, context.Canc
 	return turnCtx, cancel
 }
 
-// runWakeTurn runs one queued follow-up turn on sess and posts its reply into
-// the thread (replyTo, or plain when there is none). The turn slot is held on
-// entry and stays held on return — the caller's afterTurn retires the session
-// and releases the slot, in that order, so the slot spans delivery + retirement
-// (see retireAndRelease). /stop can cancel it via the shared turn slot. Only
-// ordinary threaded sessions (a subagent/bash_bg completion) run a wake turn;
-// the pinned cron session is never woken — its completions post directly (see
-// PostCompletion's cronJob branch).
-func (b *Bot) runWakeTurn(ctx, turnCtx context.Context, sess *shell3.Session, replyTo string) {
-	stopTyping := b.keepTyping(ctx)
-	reply := b.drainTurn(sess.RunQueued(turnCtx))
-	stopTyping()
-	if reply != "" {
-		b.postReply(ctx, sess, replyTo, reply)
-	}
+// runWakeTurn runs one queued mail turn on sess — QUIETLY. The turn's reply is
+// not posted anywhere: background mail (a completion, a cron result) reaches
+// the user only when the agent sends it with mail_user. The transcript still
+// persists in the runs store. The turn slot is held on entry and stays held on
+// return — the caller's afterTurn retires the session and releases the slot,
+// in that order, so the slot spans the turn + retirement (see
+// retireAndRelease). /stop can cancel it via the shared turn slot. Only
+// ordinary threaded sessions (a subagent/bash_bg completion) and fresh
+// StartFreshTurn sessions run wake turns; the pinned cron session is never
+// woken.
+func (b *Bot) runWakeTurn(ctx, turnCtx context.Context, sess *shell3.Session, _ string) {
+	_ = b.drainTurn(sess.RunQueued(turnCtx))
 }
 
 // withReplyContext prepends the replied-to message as a capped markdown
@@ -668,6 +746,53 @@ func (b *Bot) StartFreshTurn(note string) {
 	b.live[sess.ID()] = sess
 	b.mu.Unlock()
 	sess.NotifyText(note)
+}
+
+// renderInbox reports what is queued while (or since) a turn runs: the user's
+// pending mail, wake-queued sessions, and live sessions holding undrained
+// agent mail. Zero-token, deterministic — the /inbox command.
+func (b *Bot) renderInbox() string {
+	b.mu.Lock()
+	mail := append([]inMail{}, b.mailQueue...)
+	wakes := append([]string{}, b.wakeQueue...)
+	var pending []string
+	for id, s := range b.live {
+		if !b.pinned[id] && s.HasQueuedInput() {
+			pending = append(pending, id)
+		}
+	}
+	active := b.turnActive
+	b.mu.Unlock()
+
+	var sb strings.Builder
+	sb.WriteString("📥 inbox\n")
+	if len(mail) == 0 && len(wakes) == 0 && len(pending) == 0 {
+		if active {
+			return "📥 inbox empty — a turn is running, nothing queued behind it"
+		}
+		return "📥 inbox empty"
+	}
+	for _, m := range mail {
+		label := "new thread"
+		if m.m.ReplyToID != "" {
+			label = "reply"
+		}
+		text := strings.TrimSpace(m.text)
+		if text == "" {
+			text = "(attachment)"
+		}
+		fmt.Fprintf(&sb, "· from you (%s): %s\n", label, strutil.Truncate(text, 80))
+	}
+	for _, id := range wakes {
+		fmt.Fprintf(&sb, "· agent mail queued for its turn (session %s)\n", strutil.Truncate(id, 24))
+	}
+	for _, id := range pending {
+		if contains(wakes, id) {
+			continue
+		}
+		fmt.Fprintf(&sb, "· agent mail waiting in session %s\n", strutil.Truncate(id, 24))
+	}
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 // anyLiveSession returns some live session for host code that wants one but

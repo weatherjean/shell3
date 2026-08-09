@@ -90,10 +90,10 @@ func TestWakeOwner_LiveAndGone(t *testing.T) {
 	}
 }
 
-// TestStartFreshTurn_RunsAndPostsThread pins the ownerless wake: a fresh
-// main-agent session runs over the note and its reply posts as a new
-// replyable thread.
-func TestStartFreshTurn_RunsAndPostsThread(t *testing.T) {
+// TestStartFreshTurn_RunsQuietly pins the ownerless mail: a fresh main-agent
+// session runs over the note QUIETLY — its reply posts nowhere (mail_user is
+// the only way out of such a turn), and the session goes back to idle.
+func TestStartFreshTurn_RunsQuietly(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "fresh turn reply")
 	b := newBot(t, fc, rt)
@@ -104,20 +104,20 @@ func TestStartFreshTurn_RunsAndPostsThread(t *testing.T) {
 
 	b.StartFreshTurn("cron job \"nightly\" finished. result: all clear")
 
+	// The turn runs and ends with nothing posted.
 	waitFor(t, func() bool {
-		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "fresh turn reply")
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return !b.turnActive && len(b.wakeQueue) == 0
 	})
-	// The reply is recorded as a thread anchor so the user can reply to it.
-	waitFor(t, func() bool {
-		_, ok := b.threads.Lookup(fc.lastSentID())
-		return ok
-	})
+	if texts := fc.sentTexts(); len(texts) != 0 {
+		t.Fatalf("a fresh mail turn must post nothing, got %v", texts)
+	}
 }
 
-// TestWakeTurn_OrdinarySessionPostsVerbatim pins that an ordinary threaded
-// session's wake turn posts its narration verbatim — no sentinel stripping of
-// any kind applies to normal replies.
-func TestWakeTurn_OrdinarySessionPostsVerbatim(t *testing.T) {
+// TestWakeTurn_OrdinarySessionRunsQuietly pins that an ordinary threaded
+// session's wake turn runs quietly: the queued mail drains, nothing posts.
+func TestWakeTurn_OrdinarySessionRunsQuietly(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "CRON_OK")
 	b := newBot(t, fc, rt)
@@ -132,6 +132,11 @@ func TestWakeTurn_OrdinarySessionPostsVerbatim(t *testing.T) {
 
 	sess.Interject("anything")
 	waitFor(t, func() bool {
-		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "CRON_OK")
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return !b.turnActive && !sess.HasQueuedInput()
 	})
+	if texts := fc.sentTexts(); len(texts) != 0 {
+		t.Fatalf("a wake (mail) turn must post nothing, got %v", texts)
+	}
 }

@@ -1,0 +1,55 @@
+//go:build unix
+
+package telegram
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"github.com/weatherjean/shell3/internal/shell3"
+)
+
+// registerMailTool adds the mail_user host tool to a chat session: the
+// agent's one way to reach the user from a quiet turn (background mail, cron
+// results). The message threads into the session's conversation when a thread
+// anchor exists; otherwise it lands as a fresh message the user can reply to
+// — postReply records the sent id in the thread index either way, so a reply
+// to it continues this session.
+func (b *Bot) registerMailTool(sess *shell3.Session) {
+	_ = sess.RegisterHostTool(shell3.HostTool{
+		Name: "mail_user",
+		Description: "Send a message to the user's chat. In a quiet turn (background mail, a cron " +
+			"result) this is the ONLY way to reach the user — the turn's reply text is not " +
+			"delivered. Threads into the current conversation when one exists, otherwise starts " +
+			"a new thread the user can reply to. Mail what the user needs to see; a routine " +
+			"result nobody is waiting on needs no mail.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"text": map[string]any{"type": "string", "description": "The message, verbatim (markdown ok)."},
+			},
+			"required": []string{"text"},
+		},
+		Handler: b.mailUserHandler(sess),
+	})
+}
+
+// mailUserHandler is mail_user's implementation for one session, split out so
+// tests can drive it the way a live turn would.
+func (b *Bot) mailUserHandler(sess *shell3.Session) func(ctx context.Context, argsJSON string) (string, error) {
+	return func(ctx context.Context, argsJSON string) (string, error) {
+		var p struct {
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &p); err != nil || strings.TrimSpace(p.Text) == "" {
+			return "", fmt.Errorf("mail_user needs a non-empty text")
+		}
+		b.mu.Lock()
+		replyTo := b.lastMsg[sess.ID()]
+		b.mu.Unlock()
+		b.postReply(ctx, sess, replyTo, p.Text)
+		return "mailed", nil
+	}
+}

@@ -136,9 +136,10 @@ func TestContract3_UnknownReplyGetsCantContinueNotice(t *testing.T) {
 	}
 }
 
-// Case 4: a message arriving mid-turn gets a courtesy reply and is dropped — no
-// session is created or recorded for it. One main-agent turn at a time.
-func TestContract4_MidTurnMessageCourtesyDropped(t *testing.T) {
+// Case 4 (mail model): a message arriving mid-turn QUEUES — sending always
+// succeeds, nothing is posted back, no session is created yet; the mail waits
+// its turn. One main-agent turn at a time.
+func TestContract4_MidTurnMessageQueues(t *testing.T) {
 	fc := newFakeClient()
 	blk := fakellm.NewBlocking()
 	rt := shell3test.NewRuntimeForTestClient(t, blk)
@@ -153,16 +154,24 @@ func TestContract4_MidTurnMessageCourtesyDropped(t *testing.T) {
 
 	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "2", Text: "steer"})
 
-	waitFor(t, func() bool {
-		r, ok := fc.lastReply()
-		return ok && r.replyTo == "2" &&
-			strings.Contains(r.text, "a turn is running") && strings.Contains(r.text, "/stop")
-	})
+	b.mu.Lock()
+	queued := len(b.mailQueue)
+	b.mu.Unlock()
+	if queued != 1 {
+		t.Fatalf("mailQueue = %d, want the mid-turn message queued", queued)
+	}
+	if r, ok := fc.lastReply(); ok {
+		t.Fatalf("queueing must be silent, got reply %q", r.text)
+	}
 	if _, ok := b.threads.Lookup("2"); ok {
-		t.Fatal("a dropped mid-turn message must not create or record a session")
+		t.Fatal("a queued message must not create or record a session yet")
 	}
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/stop"}) // unwind
+	// Unwind without running the queued mail into the blocking client.
+	b.mu.Lock()
+	b.mailQueue = nil
+	b.mu.Unlock()
+	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/stop"})
 }
 
 // Case 5: /stop mid-turn cancels the active turn but never kills background
@@ -284,18 +293,24 @@ func TestFixWave_RetireHoldsSlotSoConcurrentWakeIsNotAborted(t *testing.T) {
 	// queued input) then release the slot then drain the queued wake.
 	b.afterTurn(ctx, sess, cancel)
 
-	// The queued wake turn ran and posted its reply to the thread anchor — proof
-	// the session survived retirement and the wake was not aborted mid-flight.
+	// The queued wake turn ran (quietly — mail turns post nothing): its input
+	// drained and the slot came free — proof the session survived retirement
+	// and the wake was not aborted mid-flight.
 	waitFor(t, func() bool {
-		r, ok := fc.lastReply()
-		return ok && r.replyTo == "500" && strings.Contains(r.text, "wake reply")
+		b.mu.Lock()
+		active := b.turnActive
+		b.mu.Unlock()
+		return !active && !sess.HasQueuedInput()
 	})
+	if _, ok := fc.lastReply(); ok {
+		t.Fatal("a wake (mail) turn must not post its reply")
+	}
 }
 
 // Case 6: a session with a running background job stays live after its turn (it
-// is not Closed), and a Wake for it while idle runs a follow-up turn that posts
-// its reply into that thread's latest message.
-func TestContract6_RunningJobKeepsSessionLiveAndWakeReplies(t *testing.T) {
+// is not Closed), and a Wake for it while idle runs a quiet follow-up turn
+// that drains the queued mail.
+func TestContract6_RunningJobKeepsSessionLiveAndWakeRuns(t *testing.T) {
 	fc := newFakeClient()
 	rt, blk := splitRuntime(t, "job narrated")
 	b := newBot(t, fc, rt)
@@ -333,10 +348,16 @@ func TestContract6_RunningJobKeepsSessionLiveAndWakeReplies(t *testing.T) {
 	go b.consumeWakes(ctx)
 	sess.Interject("bg result landed") // queues input + emits a Wake
 
+	// The wake turn runs quietly: the queued input drains, nothing posts.
 	waitFor(t, func() bool {
-		r, ok := fc.lastReply()
-		return ok && r.replyTo == "200" && strings.Contains(r.text, "job narrated")
+		b.mu.Lock()
+		active := b.turnActive
+		b.mu.Unlock()
+		return !active && !sess.HasQueuedInput()
 	})
+	if r, ok := fc.lastReply(); ok {
+		t.Fatalf("a wake (mail) turn must not post, got %q", r.text)
+	}
 }
 
 // Case 7: a Wake arriving mid-turn is queued (not run), and the queue drains
@@ -366,16 +387,20 @@ func TestContract7_WakeMidTurnQueuesThenDrains(t *testing.T) {
 		t.Fatal("a Wake arriving mid-turn must land in the wake queue")
 	}
 
-	// The turn finishes: the queue drains and the wake turn runs.
+	// The turn finishes: the queue drains and the wake turn runs (quietly).
 	b.mu.Lock()
 	b.turnActive = false
 	b.mu.Unlock()
-	b.startNextWake(context.Background())
+	b.startNextWork(context.Background())
 
 	waitFor(t, func() bool {
-		r, ok := fc.lastReply()
-		return ok && r.replyTo == "300" && strings.Contains(r.text, "queued reply")
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return !b.turnActive && len(b.wakeQueue) == 0 && !sess.HasQueuedInput()
 	})
+	if r, ok := fc.lastReply(); ok {
+		t.Fatalf("a wake (mail) turn must not post, got %q", r.text)
+	}
 }
 
 // Case 8: a turn ending with no running jobs and an empty inbox closes and

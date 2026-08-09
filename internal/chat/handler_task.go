@@ -41,7 +41,7 @@ func (TaskHandler) Execute(ctx context.Context, id string, args json.RawMessage,
 			"and do not sleep-and-recheck in bash.", subID, p.SubagentType), nil
 	}
 	return fmt.Sprintf("started subagent %s (@%s).\n"+
-		"The notifier will triage its completion (failures always surface). Do not poll — "+
+		"Its completion will arrive as mail when it lands (failures always surface). Do not poll — "+
 		"finish your turn; if the user is waiting on this result, you should have set "+
 		"direct:true instead.", subID, p.SubagentType), nil
 }

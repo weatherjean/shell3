@@ -74,7 +74,7 @@ func (r *ringBuffer) String() string {
 }
 
 // jobLogMaxBytes caps a command job's on-disk output log (see cappedFileWriter):
-// enough to hold a full build/fetch result for the notifier's read tool without
+// enough to hold a full build/fetch result for a later read without
 // letting a runaway job fill the disk. The in-memory ring keeps the TAIL; the
 // log keeps the HEAD up to the cap.
 const jobLogMaxBytes = 1 << 20 // 1 MiB
@@ -158,12 +158,13 @@ type bgJob struct {
 	cancel    context.CancelFunc
 	out       *jobSink // live output: command stdout/stderr, or subagent event stream
 	childID   string   // subagent: child runs id (transcript source)
-	// direct skips the notifier: the completion notice is delivered straight
-	// to the owning session (wake), never triaged. Set from the bash_bg/task
-	// tool's direct:true arg or a cron job's direct: frontmatter.
+	// direct posts the raw result straight to the user on completion — no
+	// agent turn (the notice still queues on the owner, unwoken). Set from
+	// the bash_bg/task tool's direct:true arg or a cron job's direct:
+	// frontmatter.
 	direct bool
-	// note is the spawner's optional intent hint for the notifier's triage
-	// ("the user is waiting on this"). Carried into the CompletionEvent.
+	// note is the spawner's optional intent hint, carried into the
+	// completion mail ("the user is waiting on this").
 	note string
 	// cronJob is the cron job name for cron-dispatched subagents ("" for
 	// everything else). Routes the ⏰ post prefix and the ownerless wake path.
@@ -184,8 +185,8 @@ type bgJob struct {
 
 	// logPath is the command job's on-disk output log
 	// (runs/<parent-session>/jobs/<id>.log), "" when no store/parent was
-	// available at start. Written once in startCommand; the notifier's read
-	// tool and task_status point at it.
+	// available at start. Written once in startCommand; the completion mail
+	// and task_status point at it.
 	logPath string
 
 	// set on completion; read under jobManager.mu
@@ -206,7 +207,7 @@ type jobManager struct {
 
 	// closing (guarded by mu) is set by cancelAll: no new follow-up drivers
 	// start, and in-flight completions take the degrade path. driverCtx bounds
-	// every follow-up turn AND every notifier triage turn so Close can abort
+	// every follow-up turn so Close can abort
 	// them promptly.
 	closing      bool
 	driverCtx    context.Context
@@ -285,8 +286,8 @@ func (m *jobManager) evictOldestDoneIfNeeded() {
 // startCommand launches argv as a managed background job. env holds extra
 // "K=V" entries appended to the inherited environment (bash_bg jobs
 // inject their params this way); nil inherits the environment unchanged.
-// direct skips the notifier and wakes the owner with the completion notice;
-// note is triage context for the notifier (see finishCommand).
+// direct posts the raw result straight to the user on completion; note is
+// context carried into the completion mail (see finishCommand).
 func (m *jobManager) startCommand(parent *Session, command, workdir string, argv, env []string, direct bool, note string) (string, error) {
 	if len(argv) == 0 {
 		return "", errors.New("empty command argv")

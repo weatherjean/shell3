@@ -84,18 +84,18 @@ var bashBgTool = llm.ToolDefinition{
 	Name: "bash_bg",
 	Description: "Start a shell command in the background on the in-process runtime and return a job id immediately. " +
 		"Use this for long-running work or servers — anything that should not block the turn. " +
-		"On completion the notifier triages the result; set direct:true when the user is waiting on it " +
-		"so the result comes straight back to you instead. The completion WAKES you — mid-turn into this " +
-		"same reply if the job is quick, as a new message after your turn ends otherwise — so start it, " +
-		"say it's running, and end your turn. Never wait in-turn: no task_status loops, no sleep-and-recheck " +
+		"The completion arrives as MAIL — mid-turn into this same reply if the job is quick, as a quiet " +
+		"follow-up turn otherwise (reach the user from it with mail_user) — so start it, say it's running, " +
+		"and end your turn. Set direct:true to have the raw result posted straight to the chat instead, " +
+		"with no follow-up turn. Never wait in-turn: no task_status loops, no sleep-and-recheck " +
 		"in bash. task_status <id> is for reading a finished job's output or answering a user's how's-it-going.",
 	Parameters: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"command": map[string]any{"type": "string", "description": "The shell command to run in the background"},
 			"workdir": map[string]any{"type": "string", "description": "Working directory; defaults to the project root"},
-			"direct":  map[string]any{"type": "boolean", "description": "Skip the notifier and wake YOU with the completion. Set it when the user asked for this work and is waiting on the result"},
-			"note":    map[string]any{"type": "string", "description": "Context for the notifier's triage (e.g. what this job is for and whether anyone is waiting). Ignored when direct is true"},
+			"direct":  map[string]any{"type": "boolean", "description": "Post the raw result straight to the chat when it finishes (no follow-up turn). Set it when the user asked for this work and is waiting on the output itself"},
+			"note":    map[string]any{"type": "string", "description": "Context carried into the completion mail (what this job is for, whether anyone is waiting). Ignored when direct is true"},
 		},
 		"required": []string{"command"},
 	},
@@ -125,13 +125,13 @@ func TaskToolFor(subs []SubagentRef) llm.ToolDefinition {
 	}
 	return llm.ToolDefinition{
 		Name: "task",
-		Description: "Spawn a subagent that runs in the background. Returns immediately — the notifier triages " +
-			"its completion (set direct:true when the user is waiting, so the result comes straight back " +
-			"to you). The completion WAKES you — mid-turn into this same reply if it's quick, as a new " +
-			"message after your turn ends otherwise — so dispatch, say it's running, and end your turn. " +
-			"Never wait in-turn: no task_status loops, no sleep-and-recheck. Use this to delegate work to " +
-			"a specialised subagent while you continue with other tasks. Brief it like a contract — vague " +
-			"prompts produce misaimed work.",
+		Description: "Spawn a subagent that runs in the background. Returns immediately — the completion " +
+			"arrives as MAIL: mid-turn into this same reply if it's quick, as a quiet follow-up turn " +
+			"otherwise (reach the user from it with mail_user). Set direct:true to have the raw result " +
+			"posted straight to the chat instead, with no follow-up turn. Dispatch, say it's running, and " +
+			"end your turn. Never wait in-turn: no task_status loops, no sleep-and-recheck. Use this to " +
+			"delegate work to a specialised subagent while you continue with other tasks. Brief it like a " +
+			"contract — vague prompts produce misaimed work.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -150,11 +150,11 @@ func TaskToolFor(subs []SubagentRef) llm.ToolDefinition {
 				},
 				"direct": map[string]any{
 					"type":        "boolean",
-					"description": "Skip the notifier and wake YOU with the result. Set it when the user asked for this work and is waiting on it",
+					"description": "Post the raw result straight to the chat when it finishes (no follow-up turn). Set it when the user asked for this work and is waiting on the output itself",
 				},
 				"note": map[string]any{
 					"type":        "string",
-					"description": "Context for the notifier's triage (what this task is for, whether anyone is waiting). Ignored when direct is true",
+					"description": "Context carried into the completion mail (what this task is for, whether anyone is waiting). Ignored when direct is true",
 				},
 			},
 			"required": []string{"subagent_type", "prompt"},

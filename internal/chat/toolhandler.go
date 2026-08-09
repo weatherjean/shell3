@@ -53,9 +53,9 @@ type ToolConfig struct {
 	Headless bool
 	// StartBashBg launches a background shell command on the host's in-process
 	// job runtime and returns its job id. env holds extra "K=V" entries appended
-	// to the inherited environment (bash_bg passes nil). direct skips the
-	// notifier: the completion is delivered straight back to this session.
-	// note is optional context for the notifier's triage ("the user is waiting
+	// to the inherited environment (bash_bg passes nil). direct posts the raw
+	// result straight to the user on completion (no follow-up turn). note is
+	// optional context carried into the completion mail ("the user is waiting
 	// on this"). Nil func ⇒ background jobs disabled.
 	StartBashBg func(command, workdir string, argv, env []string, direct bool, note string) (string, error)
 	// StartSubagent launches a background subagent (child session) and returns its

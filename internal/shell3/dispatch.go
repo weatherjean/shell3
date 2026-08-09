@@ -14,16 +14,16 @@ type DispatchOpts struct {
 	// workdir; a relative path joins onto it (or onto the runtime root when
 	// this session runs there).
 	WorkDir string
-	// Direct skips the notifier: the completion is delivered straight to the
-	// main agent (for a cron dispatch: a fresh main-agent turn via the
-	// CompletionHost) instead of being triaged.
+	// Direct posts the raw result straight to the user — no agent turn is
+	// spent on it. Default (false): the completion arrives as mail to the
+	// main agent (for a cron dispatch: a fresh quiet turn).
 	Direct bool
 	// CronJob names the cron job this dispatch runs ("" for non-cron
 	// dispatches). It routes the ⏰ post prefix and the ownerless wake path.
 	CronJob string
-	// Note is triage context handed to the notifier with the completion —
-	// for cron, the job's prompt, so the judge knows what the job is FOR,
-	// not just what it said.
+	// Note is context carried into the completion mail — for cron, the
+	// job's prompt, so the agent knows what the job is FOR, not just what
+	// it said.
 	Note string
 }
 
