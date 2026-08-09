@@ -211,11 +211,6 @@ type jobManager struct {
 	closing      bool
 	driverCtx    context.Context
 	driverCancel context.CancelFunc
-
-	// triages counts in-flight notifier triage turns (guarded by mu). They are
-	// not entries in m.jobs, but drainParkedClosers must treat them as live
-	// work on the current Parts generation.
-	triages int
 }
 
 func newJobManager(rt *Runtime, maxConcurrent int) *jobManager {
@@ -387,17 +382,15 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 // finishCommand delivers a command job's completion, marks the job done, and
 // retains it for post-completion inspection.
 //
-// Routing depends on who started the job and its direct flag:
-//   - Root session, direct:true: the notice WAKES the owner (the old
-//     always-wake behavior, chosen by the spawner because it wants the
-//     result back).
-//   - Root session, default: the completion goes to the notifier for triage
-//     (dispatchCompletion) — send / wake / silent, with the failure floor.
+// Routing depends on who started the job:
+//   - Root session: one CompletionEvent through dispatchCompletion — the
+//     deterministic mail router (floor post on failure, raw post for direct,
+//     agent mail otherwise; see completion.go).
 //   - Subagent child session: the notice is injected into the still-open child
 //     and a follow-up driver resumes it (see runFollowUps) — unless follow-ups
 //     are unavailable (child closed, cap reached, poisoned, runtime closing),
-//     in which case the job is an ORPHAN: a plain notifier event labeled with
-//     its origin, threaded at the subagent's root session.
+//     in which case the job is an ORPHAN: a plain completion event labeled
+//     with its origin, threaded at the subagent's root session.
 //
 // bgNoticeTailCap bounds (in bytes) the output tail carried by a bg_done
 // completion notice. Large enough that a typical fetch/build result is usable
@@ -420,18 +413,10 @@ func (m *jobManager) finishCommand(j *bgJob, exit int) {
 	case j.parent == nil:
 		deliver = func() {}
 	case owner == nil:
-		// Root-session job.
-		parent := j.parent
-		if j.direct {
-			if m.rt != nil && !m.closing {
-				deliver = func() { parent.injectNotification(m.rt, n) }
-			} else {
-				deliver = func() { parent.injectNoticeNoWake(n) }
-			}
-		} else {
-			ev := commandEvent(j, n, exit, parent)
-			deliver = func() { m.dispatchCompletion(ev) }
-		}
+		// Root-session job: one deterministic router for direct and default
+		// alike (commandEvent carries j.direct).
+		ev := commandEvent(j, n, exit, j.parent)
+		deliver = func() { m.dispatchCompletion(ev) }
 	case m.canFollowUpLocked(owner):
 		// Child-owned job with follow-ups available: inject into the child (no
 		// wake — nothing consumes child wakes) and ensure a driver is running.
@@ -902,23 +887,7 @@ func (m *jobManager) runFollowUps(sub *bgJob) {
 		if errText != "" {
 			n.Status = "error: " + errText
 		}
-		switch {
-		case sub.direct && sub.cronJob == "":
-			// direct job: the follow-up result goes straight back to the owner,
-			// like its main result did.
-			sub.parent.injectNotification(m.rt, n)
-		case sub.direct:
-			// direct cron follow-up: fresh main-agent turn, same as its main
-			// result (the pinned cron parent never runs turns).
-			text := fmt.Sprintf("cron job %q follow-up. %s", sub.cronJob, renderNotification(n))
-			if host := m.rt.completionHost(); host != nil && !m.isClosing() {
-				host.StartFreshTurn(text)
-			} else {
-				sub.parent.injectNoticeNoWake(n)
-			}
-		default:
-			m.dispatchCompletion(followUpEvent(sub, n, summary, errText))
-		}
+		m.dispatchCompletion(followUpEvent(sub, n, summary, errText))
 	}
 	m.maybeCloseChild(sub)
 }
@@ -972,22 +941,7 @@ func (m *jobManager) maybeCloseChild(sub *bgJob) {
 // fresh main-agent turn via the CompletionHost instead); everything else is a
 // notifier event.
 func (m *jobManager) finishSubagent(j *bgJob, summary, errText string) {
-	switch {
-	case j.parent == nil:
-	case j.direct && j.cronJob == "":
-		j.parent.injectNotification(m.rt, notifyAgentDone(j.id, summary, errText)) // InterjectNotice + Wake
-	case j.direct:
-		// direct cron: the pinned cron parent never runs turns — deliver
-		// straight to a fresh main-agent turn. Without a host (library
-		// embedding), queue on the parent so the result is at least stored.
-		n := notifyAgentDone(j.id, summary, errText)
-		text := fmt.Sprintf("cron job %q finished. %s", j.cronJob, renderNotification(n))
-		if host := m.rt.completionHost(); host != nil && !m.isClosing() {
-			host.StartFreshTurn(text)
-		} else {
-			j.parent.injectNoticeNoWake(n)
-		}
-	default:
+	if j.parent != nil {
 		m.dispatchCompletion(subagentEvent(j, summary, errText))
 	}
 	m.mu.Lock()

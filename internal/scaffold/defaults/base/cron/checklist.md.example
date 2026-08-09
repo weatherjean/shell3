@@ -6,14 +6,14 @@ Frontmatter:
   schedule  robfig/cron syntax: "@every 30m", "@daily", or a 5-field spec like
             "*/30 8-22 * * *" (every 30 min, 8am-10pm — active hours only).
   agent     a subagent from agents/ to run the checklist (here: assistant).
-  direct    true skips the notifier: the result is handed straight to the
-            main agent as a fresh turn. Leave it off for report-style jobs —
-            the notifier (notifier.md) then decides per run whether the
-            result is worth a message, and stays silent when it isn't.
-            Failures always surface either way.
+  direct    true posts the run's raw result straight to the chat, costing
+            no agent turn. Leave it off for report-style jobs — the result
+            then arrives as mail to the main agent, which messages you only
+            when this run carries something worth saying. Failures always
+            surface either way.
 
-The body is the prompt. Write it to report findings plainly; the notifier
-silences runs with nothing worth saying, so no sentinel is needed.
+The body is the prompt. Write it to report findings plainly; the agent
+stays silent on runs with nothing worth saying, so no sentinel is needed.
 -->
 ---
 schedule: "@every 30m"

@@ -16,7 +16,7 @@ import (
 )
 
 // `shell3 boot --prompts` refreshes the scaffold-owned prompt files of an
-// EXISTING install — agent.md's body, notifier.md's body, agents/*, skills/*
+// EXISTING install — agent.md's body, agents/*, skills/*
 // — without a re-boot: wiring stays untouched (shell3.yaml, .env, hooks,
 // cron, projects, memory.md, and both files' frontmatter), and every file
 // that changes is backed up first under <configDir>/.backup/prompts-<ts>/.
@@ -62,10 +62,10 @@ func runPromptRefresh(dir string, now time.Time) error {
 		old, readErr := os.ReadFile(target)
 		exists := readErr == nil
 
-		// agent.md and notifier.md carry the install's wiring in their
+		// agent.md carries the install's wiring in its
 		// frontmatter (model, tools, context files) — keep it verbatim and
 		// take only the scaffold's new body.
-		if exists && (rel == "agent.md" || rel == "notifier.md") {
+		if exists && rel == "agent.md" {
 			oldFM, _, okOld := splitFrontmatter(old)
 			_, newBody, okNew := splitFrontmatter(content)
 			if okOld && okNew {

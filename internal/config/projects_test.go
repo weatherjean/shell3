@@ -129,18 +129,6 @@ func TestProjectsReservedName(t *testing.T) {
 	}
 }
 
-// TestProjectsReservedNotifier: a project named "notifier" is a load error —
-// its manager would register as subagent "notifier", which AgentRuntime
-// resolves to the reserved triage persona before consulting the subagent
-// registry, leaving the manager silently unreachable.
-func TestProjectsReservedNotifier(t *testing.T) {
-	work := t.TempDir()
-	msg := loadErr(t, projectFiles("notifier", work, nil))
-	if !strings.Contains(msg, "projects/notifier") || !strings.Contains(msg, "reserved") {
-		t.Fatalf("reserved-notifier error = %q", msg)
-	}
-}
-
 // TestProjectsBrief: projects.md beside shell3.yaml is carried on the main
 // agent and appended to the very end of its rendered persona.
 func TestProjectsBrief(t *testing.T) {

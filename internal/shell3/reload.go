@@ -155,12 +155,10 @@ func (rt *Runtime) applyReload(st reloadState) (ReloadResult, error) {
 	rt.cron = st.cron
 	rt.telegram = st.telegram
 	rt.parts = st.parts
-	// A running job (or lingering subagent child, or in-flight notifier triage
-	// turn — which runs on a session built from the OLD sessionConfig) still
-	// holds the old generation's store/MCP handles — defer its teardown until
-	// they drain (drainParkedClosers, from job/triage completion). Nothing
-	// running → close now.
-	if rt.jobs != nil && (len(rt.jobs.runningJobIDs()) > 0 || rt.jobs.hasActiveTriage()) {
+	// A running job (or lingering subagent child) still holds the old
+	// generation's store/MCP handles — defer its teardown until they drain
+	// (drainParkedClosers, from job completion). Nothing running → close now.
+	if rt.jobs != nil && len(rt.jobs.runningJobIDs()) > 0 {
 		rt.parkedClosers = append(rt.parkedClosers, oldCleanup)
 	} else {
 		oldCleanup()

@@ -132,10 +132,8 @@ type Runtime struct {
 
 	// completionH is the front-end delivery surface for background
 	// completions (SetCompletionHost). nil = library fallback (raw notice to
-	// the owning session). forceNotifier is a test seam: in-package tests set
-	// it to route dispatchCompletion through triage without real Parts.
-	completionH   CompletionHost
-	forceNotifier bool
+	// the owning session).
+	completionH CompletionHost
 
 	// decorate, when set (SetSessionDecorator), runs for every session this
 	// runtime creates — main and subagent children alike — and again for every
@@ -338,7 +336,7 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 // before rt.mu is taken (runningJobIDs locks the job manager) so the two locks
 // are never nested here.
 func (rt *Runtime) drainParkedClosers() {
-	if rt.jobs != nil && (len(rt.jobs.runningJobIDs()) > 0 || rt.jobs.hasActiveTriage()) {
+	if rt.jobs != nil && len(rt.jobs.runningJobIDs()) > 0 {
 		return
 	}
 	rt.mu.Lock()

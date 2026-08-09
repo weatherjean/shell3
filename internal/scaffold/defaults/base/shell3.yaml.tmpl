@@ -7,11 +7,9 @@
 #   agents/<name>.md   subagents the agent can spawn via the task tool
 #   skills/<name>.md   skills (markdown with a frontmatter description)
 #   hooks/*.sh         tool-call/-result gate scripts (see hooks/tool-call.sh)
-#   cron/<name>.md     scheduled jobs (results are triaged by notifier.md —
+#   cron/<name>.md     scheduled jobs (results arrive as mail to the agent,
+#                      which messages you only when warranted —
 #                      see cron/checklist.md.example)
-#   notifier.md        triage persona for background completions: decides
-#                      per result whether to message you, wake the agent,
-#                      or stay silent
 
 models:
   {{.Name | yamlkey}}:

@@ -61,13 +61,6 @@ func runHealth(cmd *cobra.Command, path string) error {
 	a := lc.FirstAgent()
 	fmt.Fprintf(out, "agent: %s (model %s, %d skills, %d subagents)\n",
 		a.Name, a.ModelName, len(a.Skills), len(a.Subagents))
-	// The notifier is optional but its absence changes behavior (every
-	// background completion posts raw); say so rather than silently degrading.
-	if n := lc.Notifier(); n != nil {
-		fmt.Fprintf(out, "notifier: model %s\n", n.ModelName)
-	} else {
-		fmt.Fprintln(out, "notifier: absent — background completions post raw (add notifier.md to triage them)")
-	}
 	// One line per Chain of Command project: name, the repo its manager works
 	// in, and the manager's model + skill count (the manager registers as a
 	// subagent under the project name).
@@ -82,9 +75,6 @@ func runHealth(cmd *cobra.Command, path string) error {
 	// broken script and fails health. A deliberate block/ask on the probe is
 	// fine: the gate is just strict.
 	agents := append([]string{a.Name}, a.Subagents...)
-	if lc.Notifier() != nil {
-		agents = append(agents, "notifier")
-	}
 	brokenHooks := 0
 	for _, name := range agents {
 		if lc.ToolCallHookFor(name) == "" {

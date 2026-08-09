@@ -177,18 +177,6 @@ func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
 	if a, ok := p.lc.AgentByName(name); ok {
 		return p.runtimeForAgent(a)
 	}
-	// The reserved triage persona (notifier.md). Its toolset is fixed here —
-	// the structured read-only pair; send/wake are session host tools the job
-	// runtime registers per triage turn.
-	if name == "notifier" {
-		n := p.lc.Notifier()
-		if n == nil {
-			return chat.ActiveAgent{}, fmt.Errorf("no notifier.md configured")
-		}
-		a := config.Agent{AgentCommon: n.AgentCommon}
-		a.Gates = config.ToolGates{Read: true, List: true}
-		return p.runtimeForAgent(a)
-	}
 	// A subagent name passed via --agent (the spawn command): resolve it from the
 	// subagent registry into a plain headless config. Whether a resolved agent
 	// gets the task tool is decided by whether it lists subagents, not by a
@@ -198,10 +186,6 @@ func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
 	}
 	return chat.ActiveAgent{}, fmt.Errorf("unknown agent %q", name)
 }
-
-// HasNotifier reports whether the config declares a notifier.md triage
-// persona. False = the host posts every background completion raw.
-func (p *Parts) HasNotifier() bool { return p.lc.Notifier() != nil }
 
 // SubagentWorkdir returns the declared working directory for a subagent —
 // non-empty only for project managers, whose shell runs in the project's

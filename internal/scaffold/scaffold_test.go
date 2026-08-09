@@ -52,18 +52,6 @@ func TestRenderBaseConfig(t *testing.T) {
 	if !strings.Contains(string(agentMD), "model: main") {
 		t.Error("agent.md frontmatter should reference the model")
 	}
-	// The notifier persona ships with boot: model = the main model, body = the
-	// default triage policy.
-	notifierMD, err := os.ReadFile(filepath.Join(dir, "notifier.md"))
-	if err != nil {
-		t.Fatalf("read notifier.md: %v", err)
-	}
-	if !strings.Contains(string(notifierMD), "model: main") {
-		t.Error("notifier.md frontmatter should reference the model")
-	}
-	if !strings.Contains(string(notifierMD), "send") || !strings.Contains(string(notifierMD), "wake") {
-		t.Error("notifier.md body should describe the send/wake verdicts")
-	}
 	for _, p := range []string{
 		"agents/assistant.md",
 		"hooks/tool-call.sh",

@@ -60,16 +60,11 @@ func load(dir string) (*LoadedConfig, error) {
 		return nil, err
 	}
 
-	// notifier.md — the background-completion triage persona (optional; absent
-	// = the host posts every completion raw).
-	if nd, err := os.ReadFile(filepath.Join(dir, "notifier.md")); err == nil {
-		n, err := parseNotifierFile(nd)
-		if err != nil {
-			return nil, err
-		}
-		c.notifier = &n
-	} else if !os.IsNotExist(err) {
-		return nil, err
+	// notifier.md — the old triage persona, removed with the mail redesign
+	// (completions route deterministically; see internal/shell3/completion.go).
+	// A leftover file is dead config worth surfacing, not an error.
+	if _, err := os.Stat(filepath.Join(dir, "notifier.md")); err == nil {
+		warn("notifier.md is no longer used — completions are delivered as mail; delete the file")
 	}
 
 	// agents/*.md — subagents, filename order. Presence = registered;
@@ -109,7 +104,7 @@ func load(dir string) (*LoadedConfig, error) {
 	}
 
 	// hooks/*.sh.
-	if c.hooks, err = discoverHooks(dir, c.subagents, c.notifier != nil, warn); err != nil {
+	if c.hooks, err = discoverHooks(dir, c.subagents, warn); err != nil {
 		return nil, fmt.Errorf("hooks: %w", err)
 	}
 
@@ -154,9 +149,6 @@ func load(dir string) (*LoadedConfig, error) {
 // for validation loops.
 func (c *LoadedConfig) cores() []AgentCommon {
 	out := []AgentCommon{c.agent.AgentCommon}
-	if c.notifier != nil {
-		out = append(out, c.notifier.AgentCommon)
-	}
 	for _, sa := range c.subagents {
 		out = append(out, sa.AgentCommon)
 	}
@@ -193,12 +185,8 @@ func (c *LoadedConfig) loadSubagents(dir string) error {
 		name := strings.TrimSuffix(e.Name(), ".md")
 		// "agent" is the main agent's fixed name; a subagent shadowing it
 		// would silently win every name lookup (hooks, task dispatch).
-		// "notifier" is likewise reserved for the triage persona (notifier.md).
 		if name == "agent" {
 			return fmt.Errorf("agents/agent.md: the name \"agent\" is reserved for the main agent (agent.md) — rename the file")
-		}
-		if name == "notifier" {
-			return fmt.Errorf("agents/notifier.md: the name \"notifier\" is reserved for the triage persona (notifier.md beside shell3.yaml) — rename the file")
 		}
 		sa, err := parseSubagentFile(data, name, c.agent.ModelName, "agents/"+name+".md")
 		if err != nil {

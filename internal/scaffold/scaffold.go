@@ -111,7 +111,7 @@ func RenderBaseConfig(dir string, v Values, force bool) error {
 }
 
 // PromptFiles renders just the prompt-bearing files of the base scaffold —
-// agent.md, notifier.md, agents/*, skills/* — keyed by config-dir-relative
+// agent.md, agents/*, skills/* — keyed by config-dir-relative
 // path. `shell3 boot --prompts` uses it to refresh an existing install's
 // prompts without touching wiring (shell3.yaml, .env, hooks, cron, lib,
 // memory, projects).
@@ -127,7 +127,7 @@ func PromptFiles(v Values) (map[string][]byte, error) {
 			return err
 		}
 		bare := strings.TrimSuffix(rel, ".tmpl")
-		isPrompt := bare == "agent.md" || bare == "notifier.md" ||
+		isPrompt := bare == "agent.md" ||
 			strings.HasPrefix(rel, "agents/") || strings.HasPrefix(rel, "skills/")
 		if !isPrompt {
 			return nil

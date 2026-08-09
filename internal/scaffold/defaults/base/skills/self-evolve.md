@@ -26,10 +26,8 @@ because its file exists.
     skills/<name>.md   one skill per file
     projects/<name>/   a project: project.md brief + its manager subagent
     cron/<name>.md     scheduled jobs (schedule + agent + prompt body);
-                       results go to notifier.md, which stays silent when
-                       there's nothing worth reporting
-    notifier.md        the completion-triage persona — edit its body to
-                       change what gets posted vs. silenced
+                       results arrive to you as mail — you decide what
+                       reaches the user (mail_user) and what stays quiet
     lib/bin/           your reusable wrapper scripts (see the scripting
                        skill)
 

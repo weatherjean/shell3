@@ -26,13 +26,12 @@ func assertNoWakeFor(t *testing.T, rt *Runtime, s *Session, d time.Duration) {
 	}
 }
 
-// TestCronSubagentFollowUpPostsViaHost is the lingering-cron behavior on the
-// notifier path: a cron dispatch spawns a subagent that starts a bash_bg
-// outliving its main turn. In degraded mode (host set, no notifier.md) the
-// main turn's result posts raw through the CompletionHost with its cron
-// origin, and the later follow-up turn's summary posts the same way — the
-// pinned parent is never woken.
-func TestCronSubagentFollowUpPostsViaHost(t *testing.T) {
+// TestCronSubagentFollowUpMailsAgent is the lingering-cron behavior on the
+// mail path: a cron dispatch spawns a subagent that starts a bash_bg
+// outliving its main turn. The main turn's result arrives as agent mail (a
+// fresh quiet turn — cron has no live owner), and the later follow-up turn's
+// summary rides the same route — the pinned parent is never woken.
+func TestCronSubagentFollowUpMailsAgent(t *testing.T) {
 	g := newGatedLLM("main answer", "follow-up answer")
 	rt := newTestRuntime(t, func() chat.Config {
 		return chat.Config{LLM: g, ModeLabel: "code"}
@@ -63,23 +62,23 @@ func TestCronSubagentFollowUpPostsViaHost(t *testing.T) {
 
 	close(g.Release) // main turn completes now
 
-	// The main turn's result posts through the host with cron routing.
-	waitFor(t, "main-turn post", func() bool { posts, _, _ := host.snapshot(); return len(posts) >= 1 })
-	posts, _, _ := host.snapshot()
-	if !strings.Contains(posts[0], "cron=followup") || !strings.Contains(posts[0], "main answer") {
-		t.Fatalf("main-turn post = %q", posts[0])
+	// The main turn's result arrives as agent mail carrying the cron origin.
+	waitFor(t, "main-turn mail", func() bool { _, _, fresh := host.snapshot(); return len(fresh) >= 1 })
+	_, _, fresh := host.snapshot()
+	if !strings.Contains(fresh[0], "followup") || !strings.Contains(fresh[0], "main answer") {
+		t.Fatalf("main-turn mail = %q", fresh[0])
 	}
 
-	// The lingering job finishes → a follow-up turn runs → its summary posts
-	// the same way, never a wake.
+	// The lingering job finishes → a follow-up turn runs → its summary rides
+	// the same mail route, never a wake of the pinned parent.
 	waitFor(t, "one follow-up turn", func() bool {
 		_, _, _, fu, _ := jobSnapshot(rt.jobs, id)
 		return fu == 1
 	})
-	waitFor(t, "follow-up post", func() bool { posts, _, _ := host.snapshot(); return len(posts) >= 2 })
-	posts, _, _ = host.snapshot()
-	if !strings.Contains(posts[1], "cron=followup") || !strings.Contains(posts[1], "follow-up answer") {
-		t.Fatalf("follow-up post = %q", posts[1])
+	waitFor(t, "follow-up mail", func() bool { _, _, fresh := host.snapshot(); return len(fresh) >= 2 })
+	_, _, fresh = host.snapshot()
+	if !strings.Contains(fresh[1], "followup") || !strings.Contains(fresh[1], "follow-up answer") {
+		t.Fatalf("follow-up mail = %q", fresh[1])
 	}
 	waitFor(t, "child closed after follow-up", func() bool {
 		_, closed, driver, _, _ := jobSnapshot(rt.jobs, id)
@@ -90,11 +89,12 @@ func TestCronSubagentFollowUpPostsViaHost(t *testing.T) {
 	assertNoWakeFor(t, rt, parent, 200*time.Millisecond)
 }
 
-// TestCronSubagentOrphanPostsViaHost covers the orphan path: when follow-ups
-// are unavailable (poisoned), a lingering bash_bg completion posts through the
-// CompletionHost as a cron-labeled event carrying its subagent origin — the
-// parent is never woken.
-func TestCronSubagentOrphanPostsViaHost(t *testing.T) {
+// TestCronSubagentOrphanFloors covers the orphan path: when follow-ups are
+// unavailable (poisoned), the lingering bash_bg is cascade-cancelled at the
+// main turn's end, so its completion arrives FAILED — and a failure is never
+// silent: the ⚠️ floor posts with the cron label. The pinned parent is never
+// woken, and no fresh agent turn is spent on an ownerless failure.
+func TestCronSubagentOrphanFloors(t *testing.T) {
 	g := newGatedLLM("main answer")
 	rt := newTestRuntime(t, func() chat.Config {
 		return chat.Config{LLM: g, ModeLabel: "code"}
@@ -121,18 +121,22 @@ func TestCronSubagentOrphanPostsViaHost(t *testing.T) {
 	}
 	close(g.Release)
 
-	// Main-turn result posts via the host.
-	waitFor(t, "main-turn post", func() bool { posts, _, _ := host.snapshot(); return len(posts) >= 1 })
+	// Main-turn result arrives as agent mail.
+	waitFor(t, "main-turn mail", func() bool { _, _, fresh := host.snapshot(); return len(fresh) >= 1 })
 
-	// The poisoned job's completion takes the orphan path → a second post
-	// labeled with its subagent origin (no follow-up turn ever runs).
-	waitFor(t, "orphan post", func() bool {
+	// The poisoned job is cascade-cancelled → its completion is a failure →
+	// the ⚠️ floor posts with the cron label (no follow-up turn ever runs,
+	// and no fresh turn is spent on it).
+	waitFor(t, "orphan floor post", func() bool {
 		posts, _, _ := host.snapshot()
-		if len(posts) < 2 {
+		if len(posts) < 1 {
 			return false
 		}
-		return strings.Contains(posts[1], "started by subagent "+id)
+		return strings.Contains(posts[0], "⚠️") && strings.Contains(posts[0], "cron=degrade")
 	})
+	if _, _, fresh := host.snapshot(); len(fresh) != 1 {
+		t.Fatalf("fresh = %v, want only the main-turn mail", fresh)
+	}
 	_, _, _, followUps, _ := jobSnapshot(rt.jobs, id)
 	if followUps != 0 {
 		t.Fatalf("poisoned cron subagent ran %d follow-up turns, want 0", followUps)

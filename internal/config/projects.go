@@ -54,9 +54,6 @@ func (c *LoadedConfig) loadProjects(dir string, warn func(string)) error {
 		if name == "agent" {
 			return fmt.Errorf("%s: the name \"agent\" is reserved for the main agent — rename the project", label)
 		}
-		if name == "notifier" {
-			return fmt.Errorf("%s: the name \"notifier\" is reserved for the triage persona (notifier.md beside shell3.yaml) — rename the project", label)
-		}
 		if _, taken := c.SubagentByName(name); taken {
 			return fmt.Errorf("%s: name collides with agents/%s.md — project managers and subagents share one namespace", label, name)
 		}

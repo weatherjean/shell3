@@ -114,8 +114,9 @@ type CronJob struct {
 	Agent    string
 	Prompt   string
 	WorkDir  string
-	// Direct skips the notifier: the completion is delivered straight to the
-	// main agent (a fresh session turn) instead of being triaged.
+	// Direct posts the run's raw result straight to the user, skipping the
+	// default agent-mail turn. The cost valve: a default cron tick wakes the
+	// main model to judge its result; a direct one costs no tokens at all.
 	Direct bool
 }
 
@@ -176,7 +177,6 @@ type LoadedConfig struct {
 	MediaKeepDays int
 
 	agent     Agent
-	notifier  *Notifier
 	subagents []Subagent
 	projects  []Project
 
@@ -261,10 +261,6 @@ func (c *LoadedConfig) SubagentByName(name string) (Subagent, bool) {
 	}
 	return Subagent{}, false
 }
-
-// Notifier returns the parsed notifier.md persona, nil when the file is
-// absent (the host then posts every background completion raw).
-func (c *LoadedConfig) Notifier() *Notifier { return c.notifier }
 
 // Telegram returns the parsed `telegram:` block (zero value if absent).
 func (c *LoadedConfig) Telegram() TelegramConfig { return c.telegram }

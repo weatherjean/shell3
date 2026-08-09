@@ -55,9 +55,9 @@ func TestDispatchDirectWakesSession(t *testing.T) {
 	}
 }
 
-// A default (non-direct) cron dispatch routes through the CompletionHost — in
-// degraded mode (no notifier.md) as a raw post carrying its cron origin — and
-// never wakes the dispatch parent.
+// A default (non-direct) cron dispatch is mail to the agent: a fresh quiet
+// turn carrying its cron origin — never a post, never a wake of the dispatch
+// parent.
 func TestDispatchCronRoutesToHost(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("cron result"))
 	defer rt.Close()
@@ -72,10 +72,13 @@ func TestDispatchCronRoutesToHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitDispatchDone(t, sess, id)
-	waitFor(t, "host post", func() bool { posts, _, _ := host.snapshot(); return len(posts) >= 1 })
-	posts, _, _ := host.snapshot()
-	if !strings.Contains(posts[0], "cron=test") {
-		t.Fatalf("post = %q, want cron origin", posts[0])
+	waitFor(t, "agent mail", func() bool { _, _, fresh := host.snapshot(); return len(fresh) >= 1 })
+	_, _, fresh := host.snapshot()
+	if !strings.Contains(fresh[0], "cron job: test") {
+		t.Fatalf("mail = %q, want cron origin", fresh[0])
+	}
+	if posts, _, _ := host.snapshot(); len(posts) != 0 {
+		t.Fatalf("posts = %v, want none", posts)
 	}
 	select {
 	case ev := <-rt.Events():

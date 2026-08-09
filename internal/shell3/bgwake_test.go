@@ -3,7 +3,6 @@ package shell3
 import (
 	"strings"
 	"testing"
-	"time"
 )
 
 // TestFailedCommandJobWakesParent verifies that a bash_bg job exiting nonzero
@@ -42,12 +41,13 @@ func TestCleanCommandJobWakesParent(t *testing.T) {
 	}
 }
 
-// TestDirectCommandJobWakesParent verifies direct:true always wakes the owner
-// with the notice — clean exit or not — bypassing the notifier entirely.
-func TestDirectCommandJobWakesParent(t *testing.T) {
+// TestDirectCommandJobPostsRaw verifies direct:true posts the raw result to
+// the user and queues the notice on the owner WITHOUT waking it — the user is
+// already served; the agent sees it next turn.
+func TestDirectCommandJobPostsRaw(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
-	host := &fakeHost{}
-	rt.SetCompletionHost(host) // must NOT be consulted for a direct job
+	host := &fakeHost{wakeOK: true}
+	rt.SetCompletionHost(host)
 	parent, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatalf("session: %v", err)
@@ -55,21 +55,22 @@ func TestDirectCommandJobWakesParent(t *testing.T) {
 	if _, err := rt.jobs.startCommand(parent, "true", t.TempDir(), []string{"true"}, nil, true, ""); err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
-	waitForWake(t, rt, parent)
-	if !parent.HasQueuedInput() {
-		t.Fatal("expected the completion notice queued in the parent inbox")
+	rt.jobs.wait()
+	waitFor(t, "raw post", func() bool { posts, _, _ := host.snapshot(); return len(posts) == 1 })
+	if _, wakes, fresh := host.snapshot(); len(wakes)+len(fresh) != 0 {
+		t.Fatalf("direct job must not run an agent turn, got wakes=%v fresh=%v", wakes, fresh)
 	}
-	if posts, wakes, fresh := host.snapshot(); len(posts)+len(wakes)+len(fresh) != 0 {
-		t.Fatalf("direct job must bypass the CompletionHost, got posts=%v wakes=%v fresh=%v", posts, wakes, fresh)
+	if !parent.HasQueuedInput() {
+		t.Fatal("expected the notice queued (no wake) in the parent inbox")
 	}
 }
 
-// TestDefaultCommandJobPostsViaHost verifies the degraded-mode default: with a
-// CompletionHost set and no notifier.md, a clean bash_bg completion posts raw
-// through the host and the parent is not woken.
-func TestDefaultCommandJobPostsViaHost(t *testing.T) {
+// TestDefaultCommandJobMailsOwner verifies the default with a host installed:
+// a clean bash_bg completion is mail to the agent — WakeOwner carries it, and
+// nothing posts to the user.
+func TestDefaultCommandJobMailsOwner(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
-	host := &fakeHost{}
+	host := &fakeHost{wakeOK: true}
 	rt.SetCompletionHost(host)
 	parent, err := rt.Session(SessionOpts{})
 	if err != nil {
@@ -79,16 +80,9 @@ func TestDefaultCommandJobPostsViaHost(t *testing.T) {
 		t.Fatalf("startCommand: %v", err)
 	}
 	rt.jobs.wait()
-	waitFor(t, "raw post", func() bool { posts, _, _ := host.snapshot(); return len(posts) == 1 })
-	select {
-	case ev := <-rt.Events():
-		if ev.Kind == Wake && ev.Session == parent.ID() {
-			t.Fatal("default (triaged) completion must not wake the parent directly")
-		}
-	case <-time.After(200 * time.Millisecond):
-	}
-	if parent.HasQueuedInput() {
-		t.Fatal("no notice should queue on the parent for a host-posted completion")
+	waitFor(t, "owner mail", func() bool { _, wakes, _ := host.snapshot(); return len(wakes) == 1 })
+	if posts, _, fresh := host.snapshot(); len(posts)+len(fresh) != 0 {
+		t.Fatalf("default completion must not post or start fresh turns, got posts=%v fresh=%v", posts, fresh)
 	}
 	if got := rt.jobs.formatJobList(); !strings.Contains(got, "done") {
 		t.Fatalf("job list = %q, want the finished job listed as done", got)
