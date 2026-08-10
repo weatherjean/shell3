@@ -36,10 +36,11 @@ func TestPostCompletion_BellPrefix(t *testing.T) {
 	})
 }
 
-// TestPostCompletion_ThreadsIntoConversation pins the threaded post: when the
-// conversation exists and has an anchor, the 🔔 post lands as a reply onto it
-// and advances the anchor.
-func TestPostCompletion_ThreadsIntoConversation(t *testing.T) {
+// TestPostCompletion_PlainPostAdvancesAnchor pins the background post shape:
+// 🔔 posts are plain messages (never Telegram replies — a quote header on
+// every completion is noise in the one conversation) and still advance the
+// anchor via recordSent.
+func TestPostCompletion_PlainPostAdvancesAnchor(t *testing.T) {
 	fc := newFakeClient()
 	rt := storeRuntime(t, "unused") // real store → stable session ids
 	sess, err := rt.Session(shell3.SessionOpts{})
@@ -55,14 +56,14 @@ func TestPostCompletion_ThreadsIntoConversation(t *testing.T) {
 	b.PostCompletion(shell3.CompletionPost{OwnerID: sess.ID(), Text: "build done"})
 
 	waitFor(t, func() bool {
-		for _, m := range fc.sentReplies() {
-			if m.replyTo == "41" && strings.Contains(m.text, "build done") {
-				return true
-			}
-		}
-		return false
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "build done")
 	})
-	// The sent message advanced the conversation anchor.
+	for _, m := range fc.sentReplies() {
+		if strings.Contains(m.text, "build done") {
+			t.Fatalf("a completion post must be a plain message, not a reply (got reply to %q)", m.replyTo)
+		}
+	}
+	// The sent message still advanced the conversation anchor.
 	b.mu.Lock()
 	anchor := b.mainAnchor
 	b.mu.Unlock()
@@ -176,12 +177,12 @@ func TestWakeTurn_NoReplySentinelStaysSilent(t *testing.T) {
 	}
 }
 
-// Quiet mode hushes wake-turn agent mail (silent send); off rings.
-func TestWakeTurn_QuietSendsSilent(t *testing.T) {
+// Agent mail is ALWAYS silent (no ping, /quiet or not — mail is not a page)
+// and always a plain message, never a Telegram reply.
+func TestWakeTurn_MailAlwaysSilentAndPlain(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "hushed news")
 	b := newBot(t, fc, rt)
-	setQuiet(t, b, true)
 	b.mu.Lock()
 	b.main = sess
 	b.mu.Unlock()
@@ -195,7 +196,12 @@ func TestWakeTurn_QuietSendsSilent(t *testing.T) {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "✉️ hushed news")
 	})
 	if !fc.lastSilent() {
-		t.Error("quiet on: wake-turn mail should be silent")
+		t.Error("wake-turn mail must always be silent")
+	}
+	for _, m := range fc.sentReplies() {
+		if strings.Contains(m.text, "hushed news") {
+			t.Fatalf("agent mail must be a plain message, not a reply (got reply to %q)", m.replyTo)
+		}
 	}
 }
 

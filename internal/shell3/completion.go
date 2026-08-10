@@ -401,9 +401,10 @@ func mailText(ev CompletionEvent) string {
 	if ev.Detail != "" {
 		fmt.Fprintf(&b, "full output: %s\n", ev.Detail)
 	}
-	b.WriteString("\nThis turn's reply is posted to the user's chat as ✉️ agent mail. " +
-		"Reply with exactly NO_REPLY to stay silent — do that for a routine result " +
-		"nobody is waiting on, and whenever the conversation above shows the user " +
-		"already has this information.")
+	b.WriteString("\nEVERY word of this turn's reply is posted to the user's chat as ✉️ agent " +
+		"mail. To stay silent, reply with exactly NO_REPLY and nothing else — never " +
+		"narrate that you are staying silent (\"routine tick, no message needed\" would " +
+		"itself be sent). Stay silent for a routine result nobody is waiting on, and " +
+		"whenever the conversation above shows the user already has this information.")
 	return b.String()
 }

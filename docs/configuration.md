@@ -657,9 +657,9 @@ The ✉️ prefix marks agent-initiated mail, so bare chat text always means a
 direct reply to something you sent. Agent mail threads into the session's
 conversation when a thread anchor exists, otherwise it posts a fresh
 message; either way it is part of the one conversation, and anything you
-type next continues it. `/quiet on` delivers these background
-posts (⏰/🔔/✉️) without a notification ping; replies to your own messages
-and ⚠️ failures always ring.
+type next continues it. ✉️ agent mail always arrives without a
+notification ping — mail is not a page; `/quiet on` extends that to ⏰/🔔
+posts. Replies to your own messages and ⚠️ failures always ring.
 
 Mail turns are ordinary stored runs, so `/runs` shows exactly what the agent
 did with each completion. A leftover `notifier.md` from an older install

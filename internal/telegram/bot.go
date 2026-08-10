@@ -734,14 +734,11 @@ func (b *Bot) runWakeTurn(ctx, turnCtx context.Context, sess *shell3.Session) {
 	if errText != "" {
 		reply += "\n" + errText
 	}
-	b.mu.Lock()
-	replyTo := b.mainAnchor
-	b.mu.Unlock()
-	var opts []SendOpt
-	if b.isQuiet() {
-		opts = append(opts, SendOpt{Silent: true})
-	}
-	b.postReply(ctx, sess, replyTo, "✉️ "+reply, opts...)
+	// Agent mail is ALWAYS silent and never a Telegram reply: it is mail, not
+	// a page — a background thought must not ring a sleeping phone (⚠️
+	// failure posts are the ones that ring), and a quote header on every ✉️
+	// reads as noise in the one conversation.
+	b.postReply(ctx, sess, "", "✉️ "+reply, SendOpt{Silent: true})
 }
 
 // withReplyContext prepends the replied-to message as a capped markdown
@@ -813,13 +810,17 @@ func (b *Bot) PostCompletion(p shell3.CompletionPost) {
 	if b.isQuiet() && !failure {
 		opts = append(opts, SendOpt{Silent: true})
 	}
+	// Background posts are plain messages, never Telegram replies — with ONE
+	// conversation there is nothing to disambiguate, and a quote header on
+	// every ⏰/🔔 reads as noise. recordSent still advances the anchor so a
+	// steer-catchup can thread to something sensible.
 	b.mu.Lock()
-	sess, replyTo := b.main, b.mainAnchor
+	sess := b.main
 	b.mu.Unlock()
 	go func() {
 		ctx := context.Background()
-		if sess != nil && replyTo != "" {
-			b.postReply(ctx, sess, replyTo, text, opts...)
+		if sess != nil {
+			b.postReply(ctx, sess, "", text, opts...)
 			return
 		}
 		b.sendReply(ctx, text, opts...)

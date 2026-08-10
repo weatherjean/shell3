@@ -259,10 +259,11 @@ fresh conversation; refused mid-turn), `/run <job>`,
 replays that run — taps resolve only against the map the last render stored,
 so a stale index errors instead of opening the wrong run),
 `/reload`, `/voice off|inbound|always`, `/quiet on|off` (persisted to
-`~/.shell3/quiet_mode.json` by `QuietStore`: agent-initiated posts — ⏰
-cron, 🔔 completions, ✉️ agent mail — send with Telegram
-`disable_notification`, arriving without a ping; replies to the user's own
-messages and ⚠️ failures always ring; the flag rides a variadic
+`~/.shell3/quiet_mode.json` by `QuietStore`: ⏰ cron and 🔔 completion posts
+send with Telegram `disable_notification`, arriving without a ping; ✉️
+agent mail is ALWAYS silent regardless of the toggle (mail is not a page);
+replies to the user's own messages and ⚠️ failures always ring; the flag
+rides a variadic
 `SendOpt{Silent}` on the tgClient send methods, rendered by the console
 transport as a 🔕 tag and by the JSONL transport as `"silent":true`). The dash views are rendered as markdown
 by `internal/render` (`Status`, `Jobs`, `JobDetail`, `Cron`, `RunsPage`,
@@ -289,8 +290,8 @@ iff the owner IS the current main conversation; `StartFreshTurn` is the
 catch-all that queues the note into the main conversation (creating it on
 demand) — cron results, orphans, and jobs outliving a `/new` all land there,
 so a completion is never lost. A wake turn's reply is the agent speaking:
-`runWakeTurn` posts it ✉️-prefixed (threaded to the conversation anchor,
-silent under /quiet, strict final-segment — no narration fallback), and
+`runWakeTurn` posts it ✉️-prefixed (ALWAYS silent, a plain message — never
+a Telegram reply; strict final-segment — no narration fallback), and
 NO_REPLY/empty keeps the turn silent; there is no mail_user tool (removed:
 two exits meant the same answer could send twice). The wake is UPGRADED to
 a POSTED turn (`runPostedQueuedTurn`) when the inbox holds user steering
@@ -326,8 +327,9 @@ hidden pinned "cron" parent session that is the dispatch parent + the jobs/runs
 source but runs NO turns of its own and is never woken; a run's result is
 completion mail carrying the job name (`DispatchOpts.CronJob`) and the job's
 prompt as context (`DispatchOpts.Note` — the agent knows what the job is FOR):
-by default a fresh quiet main-agent turn that mails the user only when
-warranted, with `direct: true` a raw ⏰ post costing no agent turn; a failed
+by default a fresh main-agent turn whose reply posts as ✉️ agent mail only
+when warranted (NO_REPLY stays silent), with `direct: true` a raw ⏰ post
+costing no agent turn; a failed
 run always surfaces as `⚠️ <job> failed: <error>` and spends no turn).
 
 Sessions, messages, reminders, and every surface's thread index live in **one

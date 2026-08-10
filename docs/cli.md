@@ -55,8 +55,9 @@ else wakes the agent, whose reply reaches you as ✉️ agent mail — only when
 the result warrants it (it stays silent otherwise). Every message you
 didn't directly cause carries a marker (⏰ cron, 🔔 completion, ⚠️ failure,
 ✉️ agent mail); bare text is always a direct reply to something you sent.
-`/quiet on` delivers the marked posts without a notification ping — replies
-to you and ⚠️ failures always ring.
+✉️ agent mail always arrives without a
+notification ping (mail is not a page); `/quiet on` extends that to ⏰/🔔
+posts too. Replies to you and ⚠️ failures always ring.
 
 `--console` swaps the Telegram transport for stdin/stdout and drives the same
 bot loop with no credentials and no network: a plain line is a fresh message,
@@ -85,7 +86,7 @@ tappable commands, and Telegram only linkifies those in message text.
 | `/runs [page\|id]` | Stored sessions, newest first, 8 per page; each entry a tappable `/run_N` that replays that run in full (tool calls with arguments, results, and reasoning). `/runs 2` pages older; `/runs <id>` replays by id directly. |
 | `/reload` | Re-read the config and apply it live. Takes the turn slot, so it is refused rather than raced while a turn runs. |
 | `/voice off\|inbound\|always` | Whether replies come back spoken (needs `media.tts`). Bare `/voice` opens a three-button menu. The choice persists in `~/.shell3/voice_mode.json`. |
-| `/quiet on\|off` | Deliver background posts (⏰/🔔/✉️) silently — no notification ping; replies to you and ⚠️ failures always ring. Bare `/quiet` reports the state, which persists in `~/.shell3/quiet_mode.json`. |
+| `/quiet on\|off` | Deliver ⏰/🔔 background posts silently — no notification ping (✉️ agent mail is always silent); replies to you and ⚠️ failures always ring. Bare `/quiet` reports the state, which persists in `~/.shell3/quiet_mode.json`. |
 
 ### Attachments and media
 
