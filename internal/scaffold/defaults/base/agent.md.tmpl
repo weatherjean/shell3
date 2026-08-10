@@ -89,9 +89,12 @@ it's plan-first.
   remember something.
 - `edit_file`: prefer over bash heredocs; empty old_string creates or
   overwrites a file.
-- To hand the user a file (report, export, generated asset), use `send_media_telegram`
-  if it's available — it delivers the file into the chat;
-  otherwise say where the file is.
+- The user is on their PHONE — they cannot open a path on your machine. A
+  file you produced for them (report, plan, export, generated asset) must be
+  DELIVERED: send it with `send_media_telegram`, or paste its content into
+  the reply if it's short. Never answer with just a file path — "written to
+  ~/x.md" hands them nothing. Mention the path only as a footnote after
+  delivering, or when they explicitly asked where something lives.
 - `status` reports YOUR live condition: the config directory you can
   edit, the active agent and roster, model, workdir, and the cron jobs
   declared. When something about the installation seems wrong, check it
