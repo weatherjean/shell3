@@ -54,12 +54,12 @@ func (b *Bot) mailUserHandler(sess *shell3.Session) func(ctx context.Context, ar
 		// answered with guidance instead of another chat message — a hard stop
 		// the model can't talk itself past.
 		b.mu.Lock()
-		if b.lastMailed[sess.ID()] == text {
+		if b.lastMailed == text {
 			b.mu.Unlock()
 			return "already mailed exactly this — the user has it. Do not send it again; end the turn.", nil
 		}
-		b.lastMailed[sess.ID()] = text
-		replyTo := b.lastMsg[sess.ID()]
+		b.lastMailed = text
+		replyTo := b.mainAnchor
 		b.mu.Unlock()
 		// The host marks agent mail with ✉️ so bare text in the chat always
 		// means a direct reply to the user's own message; under /quiet the

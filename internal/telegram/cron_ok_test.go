@@ -36,10 +36,10 @@ func TestPostCompletion_BellPrefix(t *testing.T) {
 	})
 }
 
-// TestPostCompletion_ThreadsIntoLiveOwner pins the threaded post: when ownerID
-// names a live session with a thread anchor, the 🔔 post is a reply into that
-// thread and advances the anchor (a user reply to it continues the session).
-func TestPostCompletion_ThreadsIntoLiveOwner(t *testing.T) {
+// TestPostCompletion_ThreadsIntoConversation pins the threaded post: when the
+// conversation exists and has an anchor, the 🔔 post lands as a reply onto it
+// and advances the anchor.
+func TestPostCompletion_ThreadsIntoConversation(t *testing.T) {
 	fc := newFakeClient()
 	rt := storeRuntime(t, "unused") // real store → stable session ids
 	sess, err := rt.Session(shell3.SessionOpts{})
@@ -47,7 +47,10 @@ func TestPostCompletion_ThreadsIntoLiveOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := newBot(t, fc, rt)
-	b.track(sess, "41") // live + anchored at message 41
+	b.mu.Lock()
+	b.main = sess
+	b.mu.Unlock()
+	b.setAnchor("41")
 
 	b.PostCompletion(shell3.CompletionPost{OwnerID: sess.ID(), Text: "build done"})
 
@@ -59,24 +62,28 @@ func TestPostCompletion_ThreadsIntoLiveOwner(t *testing.T) {
 		}
 		return false
 	})
-	// The sent message advanced the thread anchor.
-	if id, ok := b.threads.Lookup(fc.lastSentID()); !ok || id != sess.ID() {
-		t.Fatalf("sent post not recorded as thread anchor (id=%v ok=%v)", id, ok)
+	// The sent message advanced the conversation anchor.
+	b.mu.Lock()
+	anchor := b.mainAnchor
+	b.mu.Unlock()
+	if anchor != fc.lastSentID() {
+		t.Fatalf("anchor = %q, want the sent post id %q", anchor, fc.lastSentID())
 	}
 }
 
-// TestWakeOwner_LiveAndGone pins WakeOwner's contract: a live session gets the
-// note queued (true); an unknown or pinned session returns false.
-func TestWakeOwner_LiveAndGone(t *testing.T) {
+// TestWakeOwner_MainAndForeign pins WakeOwner's contract: the current main
+// conversation gets the note queued (true); anything else — an unknown id,
+// the cron parent — returns false, sending the router to StartFreshTurn.
+func TestWakeOwner_MainAndForeign(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "unused")
 	b := newBot(t, fc, rt)
 	b.mu.Lock()
-	b.live[sess.ID()] = sess
+	b.main = sess
 	b.mu.Unlock()
 
 	if !b.WakeOwner(sess.ID(), "note for the agent") {
-		t.Fatal("live session must accept the wake")
+		t.Fatal("the main conversation must accept the wake")
 	}
 	if !sess.HasQueuedInput() {
 		t.Fatal("wake note not queued on the session")
@@ -84,16 +91,20 @@ func TestWakeOwner_LiveAndGone(t *testing.T) {
 	if b.WakeOwner("no-such-session", "n") {
 		t.Fatal("unknown owner must return false")
 	}
-	// Pinned (cron parent) sessions never take wakes.
-	b.AdoptSession(sess)
-	if b.WakeOwner(sess.ID(), "n") {
-		t.Fatal("pinned session must return false")
+	// The cron parent never takes wakes even when adopted.
+	cron, err := rt.Session(shell3.SessionOpts{Name: "cron", Headless: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.AdoptSession(cron)
+	if b.WakeOwner(cron.ID(), "n") {
+		t.Fatal("cron parent must return false")
 	}
 }
 
-// TestStartFreshTurn_RunsQuietly pins the ownerless mail: a fresh main-agent
-// session runs over the note QUIETLY — its reply posts nowhere (mail_user is
-// the only way out of such a turn), and the session goes back to idle.
+// TestStartFreshTurn_RunsQuietly pins the catch-all mail: the note queues
+// into the main conversation (created on demand) and runs a QUIET turn — its
+// reply posts nowhere (mail_user is the only way out of such a turn).
 func TestStartFreshTurn_RunsQuietly(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "fresh turn reply")
@@ -105,26 +116,25 @@ func TestStartFreshTurn_RunsQuietly(t *testing.T) {
 
 	b.StartFreshTurn("cron job \"nightly\" finished. result: all clear")
 
-	// The turn runs and ends with nothing posted.
+	// The turn runs on the (freshly created) main conversation with nothing posted.
 	waitFor(t, func() bool {
 		b.mu.Lock()
 		defer b.mu.Unlock()
-		return !b.turnActive && len(b.wakeQueue) == 0
+		return b.main != nil && !b.turnActive && !b.main.HasQueuedInput()
 	})
 	if texts := fc.sentTexts(); len(texts) != 0 {
 		t.Fatalf("a fresh mail turn must post nothing, got %v", texts)
 	}
 }
 
-// TestWakeTurn_OrdinarySessionRunsQuietly pins that an ordinary threaded
-// session's wake turn runs quietly: the queued mail drains, nothing posts.
-func TestWakeTurn_OrdinarySessionRunsQuietly(t *testing.T) {
+// TestWakeTurn_MainSessionRunsQuietly pins that the conversation's wake turn
+// runs quietly: the queued mail drains, nothing posts.
+func TestWakeTurn_MainSessionRunsQuietly(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "CRON_OK")
 	b := newBot(t, fc, rt)
-	// Live but not adopted → treated as an ordinary threaded session.
 	b.mu.Lock()
-	b.live[sess.ID()] = sess
+	b.main = sess
 	b.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())

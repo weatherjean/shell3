@@ -28,14 +28,6 @@ func (s *Store) ThreadLookup(surface, msgID string) (string, bool) {
 	return id, true
 }
 
-// ThreadAny reports whether any thread entry exists on surface.
-func (s *Store) ThreadAny(surface string) bool {
-	var one int
-	err := s.db.QueryRow(`SELECT 1 FROM threads WHERE surface=? LIMIT 1`,
-		surface).Scan(&one)
-	return err == nil
-}
-
 // ThreadMeta is one thread's full record, for surfaces (webui) that carry
 // a title/preview/timestamps/tombstone on top of the plain msgID→sessionID
 // mapping ThreadRecord/ThreadLookup give the simpler surfaces.

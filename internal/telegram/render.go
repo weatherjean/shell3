@@ -136,16 +136,12 @@ func (b *Bot) postChunk(ctx context.Context, sess *shell3.Session, replyTo strin
 	b.recordSent(sess, id)
 }
 
-// recordSent advances a thread's anchor to a message the bot just sent, so a
-// user reply to the bot's own message resumes the same session and a follow-up
-// wake replies to the latest message. No-op for an adopted/plain session or a
-// failed send.
+// recordSent advances the conversation's anchor to a message the bot just
+// sent, so agent mail and completion posts thread onto the latest message.
+// No-op for a failed send.
 func (b *Bot) recordSent(sess *shell3.Session, msgID string) {
 	if sess == nil || msgID == "" {
 		return
 	}
-	b.threads.Record(msgID, sess.ID())
-	b.mu.Lock()
-	b.lastMsg[sess.ID()] = msgID
-	b.mu.Unlock()
+	b.setAnchor(msgID)
 }

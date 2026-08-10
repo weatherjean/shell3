@@ -30,10 +30,10 @@ func TestPostReplyCapsChunksWithDocumentOverflow(t *testing.T) {
 		t.Fatal("the document must carry the FULL reply text")
 	}
 	b.mu.Lock()
-	anchor := b.lastMsg[sess.ID()]
+	anchor := b.mainAnchor
 	b.mu.Unlock()
 	if anchor == "" {
-		t.Fatal("expected the thread anchor recorded")
+		t.Fatal("expected the conversation anchor recorded")
 	}
 }
 

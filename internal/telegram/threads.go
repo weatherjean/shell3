@@ -44,18 +44,22 @@ func (ti *ThreadIndex) Record(msgID, sessionID string) {
 	}
 }
 
-// Any reports whether ANY conversation exists on this surface — in memory or
-// persisted by an earlier process. The thread-choice ask keys off it: with no
-// history there is nothing the user could have meant to continue.
-func (ti *ThreadIndex) Any() bool {
-	ti.mu.Lock()
-	n := len(ti.m)
-	ti.mu.Unlock()
-	if n > 0 {
-		return true
+// currentSessionKey is the reserved msg_id under which the surface's ONE
+// long-lived conversation records its session id — the marker a restart
+// resumes from.
+const currentSessionKey = "current-session"
+
+// SetCurrent records id as the surface's current conversation session.
+func (ti *ThreadIndex) SetCurrent(id string) { ti.Record(currentSessionKey, id) }
+
+// Current returns the persisted current-conversation session id, if any —
+// an empty recorded id (a /new that cleared the marker) reads as absent.
+func (ti *ThreadIndex) Current() (string, bool) {
+	id, ok := ti.Lookup(currentSessionKey)
+	if !ok || id == "" {
+		return "", false
 	}
-	st := ti.store()
-	return st != nil && st.ThreadAny(ti.surface)
+	return id, true
 }
 
 // Lookup returns the session id recorded for msgID, if any: the in-memory

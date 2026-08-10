@@ -37,12 +37,6 @@ func (b *Bot) handleCallback(ctx context.Context, cb Callback) {
 	if mode, ok := parseVoiceModeData(cb.Data); ok {
 		b.handleVoiceCallback(ctx, mode)
 	}
-	switch cb.Data {
-	case threadAskNewData:
-		b.resolveThreadAsk(ctx, true)
-	case threadAskCancelData:
-		b.resolveThreadAsk(ctx, false)
-	}
 	// Ack every callback (even unrelated keyboards) so the button's spinner stops.
 	_ = b.client.AnswerCallback(ctx, cb.ID)
 }

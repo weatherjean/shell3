@@ -11,7 +11,9 @@ func TestConsumeWakes_RunsQuietTurn(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "woke up and ran")
 	b := newBot(t, fc, rt)
-	b.AdoptSession(sess) // a wake is honored only for a live (adopted/threaded) session
+	b.mu.Lock()
+	b.main = sess // a wake is honored only for the main conversation
+	b.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -59,10 +59,10 @@ func splitRuntime(t *testing.T, reply string) (*shell3.Runtime, *fakellm.Blockin
 	return rt, blk
 }
 
-// Case 1: a non-reply message on an idle bot creates a fresh session, runs the
-// turn, and posts the reply as a Telegram reply to the inbound message; both
-// the inbound id and the sent reply id are recorded in the thread index.
-func TestContract1_FreshSessionThreadsReply(t *testing.T) {
+// Contract 1: a message on an idle bot creates THE conversation, runs the
+// turn, posts the reply threaded to the inbound message, and persists the
+// session id as the current-conversation marker.
+func TestContract1_FirstMessageStartsTheConversation(t *testing.T) {
 	fc := newFakeClient()
 	rt := storeRuntime(t, "fresh reply")
 	b := newBot(t, fc, rt)
@@ -77,18 +77,19 @@ func TestContract1_FreshSessionThreadsReply(t *testing.T) {
 	if r.replyTo != "100" {
 		t.Fatalf("reply must thread to inbound message 100, got replyTo=%s", r.replyTo)
 	}
-	id, ok := b.threads.Lookup("100")
-	if !ok || id == "" {
-		t.Fatal("inbound message must be recorded in the thread index")
+	main := b.mainIfLive()
+	if main == nil {
+		t.Fatal("no main session after the first turn")
 	}
-	if _, ok := b.threads.Lookup(r.msgID); !ok {
-		t.Fatal("the bot's own reply must be recorded too (advances the thread anchor)")
+	if id, ok := b.current.Current(); !ok || id != main.ID() {
+		t.Fatalf("current marker = %q,%v want %q", id, ok, main.ID())
 	}
 }
 
-// Case 2: a reply to a recorded message resumes THAT thread's session (same
-// store id), not a fresh one.
-func TestContract2_ReplyResumesMappedSession(t *testing.T) {
+// Contract 2 (the core of the model): a SECOND bare message — no Telegram
+// reply, no buttons — continues the SAME session. Typing without replying
+// never forks the conversation.
+func TestContract2_BareMessageContinuesTheConversation(t *testing.T) {
 	fc := newFakeClient()
 	rt := storeRuntime(t, "r")
 	b := newBot(t, fc, rt)
@@ -97,48 +98,52 @@ func TestContract2_ReplyResumesMappedSession(t *testing.T) {
 	if !waitForReply(t, fc, "r") {
 		t.Fatal("first turn produced no reply")
 	}
-	first, ok := b.threads.Lookup("100")
-	if !ok {
-		t.Fatal("first message was not recorded")
-	}
-	// Let the idle session retire so the reply exercises the ResumeID path.
-	waitFor(t, func() bool { b.mu.Lock(); n := len(b.live); b.mu.Unlock(); return n == 0 })
+	first := b.mainIfLive().ID()
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "101", ReplyToID: "100", Text: "second"})
-	waitFor(t, func() bool { _, ok := b.threads.Lookup("101"); return ok })
-	second, _ := b.threads.Lookup("101")
-	if second != first {
-		t.Fatalf("a reply to a recorded message must resume the same session: first=%s second=%s", first, second)
+	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "101", Text: "yes please"})
+	waitFor(t, func() bool { return len(fc.sentReplies()) >= 2 })
+	if got := b.mainIfLive().ID(); got != first {
+		t.Fatalf("bare message forked the conversation: first=%s second=%s", first, got)
 	}
 }
 
-// Case 3: a reply to an UNKNOWN message id (a courtesy notice, a status line,
-// a pre-index message) is answered by the INTERFACE with a fixed can't-continue
-// notice — no session, no model call, no guessing at lost context.
-func TestContract3_UnknownReplyGetsCantContinueNotice(t *testing.T) {
+// Contract 3: a Telegram reply — even to a message the bot never recorded —
+// also continues the conversation, and the quoted text reaches the model as
+// context. Replies are context hints, not session switches.
+func TestContract3_ReplyAddsQuotedContext(t *testing.T) {
 	fc := newFakeClient()
-	rec := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
+	rec := fakellm.New(
+		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "one"}}},
+		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "two"}}},
+	)
 	rt := storeRuntimeClient(t, rec)
 	b := newBot(t, fc, rt)
 
-	b.handleMsg(context.Background(), Msg{
-		ChatID: 42, ID: "102", ReplyToID: "999", ReplyTo: "QUOTED SNIPPET", Text: "can you pick up from here?",
-	})
-	waitFor(t, func() bool {
-		r, ok := fc.lastReply()
-		return ok && r.replyTo == "102" && strings.Contains(r.text, "can't continue")
-	})
-	if _, ok := b.threads.Lookup("102"); ok {
-		t.Fatal("an unknown-reply message must not create or record a session")
+	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "start"})
+	if !waitForReply(t, fc, "one") {
+		t.Fatal("first turn produced no reply")
 	}
-	if len(rec.CallsSnapshot()) != 0 {
-		t.Fatal("an unknown-reply message must not reach the model")
+	first := b.mainIfLive().ID()
+
+	b.handleMsg(context.Background(), Msg{
+		ChatID: 42, ID: "2", ReplyToID: "999", ReplyTo: "QUOTED SNIPPET", Text: "pick up from here",
+	})
+	if !waitForReply(t, fc, "two") {
+		t.Fatal("reply turn produced no reply")
+	}
+	if got := b.mainIfLive().ID(); got != first {
+		t.Fatalf("a reply forked the conversation: first=%s second=%s", first, got)
+	}
+	calls := rec.CallsSnapshot()
+	last := calls[len(calls)-1].Msgs[len(calls[len(calls)-1].Msgs)-1]
+	if !strings.Contains(last.Content, "> QUOTED SNIPPET") {
+		t.Fatalf("quoted reply context missing from the model prompt: %q", last.Content)
 	}
 }
 
-// Case 4 (mail model): a message arriving mid-turn QUEUES — sending always
-// succeeds, nothing is posted back, no session is created yet; the mail waits
-// its turn. One main-agent turn at a time.
+// Contract 4 (mail model): a message arriving mid-turn QUEUES — sending
+// always succeeds, nothing is posted back; the mail drains into the same
+// conversation after the turn. One main-agent turn at a time.
 func TestContract4_MidTurnMessageQueues(t *testing.T) {
 	fc := newFakeClient()
 	blk := fakellm.NewBlocking()
@@ -152,10 +157,7 @@ func TestContract4_MidTurnMessageQueues(t *testing.T) {
 		t.Fatal("first turn never started")
 	}
 
-	// A bare mid-turn message first passes the thread-choice ask; resolving
-	// it as a new thread queues silently behind the running turn.
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "2", Text: "steer"})
-	b.resolveThreadAsk(context.Background(), true)
+	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "2", Text: "and this"})
 
 	b.mu.Lock()
 	queued := len(b.mailQueue)
@@ -166,9 +168,6 @@ func TestContract4_MidTurnMessageQueues(t *testing.T) {
 	if r, ok := fc.lastReply(); ok {
 		t.Fatalf("queueing must be silent, got reply %q", r.text)
 	}
-	if _, ok := b.threads.Lookup("2"); ok {
-		t.Fatal("a queued message must not create or record a session yet")
-	}
 
 	// Unwind without running the queued mail into the blocking client.
 	b.mu.Lock()
@@ -177,8 +176,8 @@ func TestContract4_MidTurnMessageQueues(t *testing.T) {
 	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/stop"})
 }
 
-// Case 5: /stop mid-turn cancels the active turn but never kills background
-// jobs; the reply says so.
+// Contract 5: /stop mid-turn cancels the active turn but never kills
+// background jobs; the reply says so.
 func TestContract5_StopCancelsTurnKeepsJobs(t *testing.T) {
 	fc := newFakeClient()
 	blk := fakellm.NewBlocking()
@@ -201,10 +200,8 @@ func TestContract5_StopCancelsTurnKeepsJobs(t *testing.T) {
 	}
 }
 
-// Fix wave (Finding 2): /stop cancels the main turn but must NOT cancel a
-// background job. Dispatch a real blocking subagent (like TestContract6), take
-// the turn slot to stand in for an in-flight main turn, /stop it, and assert the
-// job is still running afterward.
+// Contract 5b: /stop cancels the main turn but must NOT cancel a background
+// job.
 func TestContract5_StopKeepsBackgroundJobsRunning(t *testing.T) {
 	fc := newFakeClient()
 	rt, blk := splitRuntime(t, "done")
@@ -226,8 +223,6 @@ func TestContract5_StopKeepsBackgroundJobsRunning(t *testing.T) {
 		t.Fatal("background job never started")
 	}
 
-	// Stand in for an in-flight main turn holding the slot, so /stop has a turn to
-	// cancel.
 	ctx := context.Background()
 	b.mu.Lock()
 	_, cancel := b.takeSlotLocked(ctx)
@@ -240,157 +235,40 @@ func TestContract5_StopKeepsBackgroundJobsRunning(t *testing.T) {
 	if !strings.Contains(all, "stopped the turn") || !strings.Contains(all, "background jobs keep running") {
 		t.Fatalf("stop reply must state background jobs keep running, got %v", fc.sentTexts())
 	}
-	// The job survives /stop: its child session runs on its own ctx, untouched by
-	// the main turn's cancellation. Give any errant cancellation a moment to land.
 	waitFor(t, func() bool { return true })
 	if !b.sessionHasRunningJob(sess) {
 		t.Fatal("/stop must not cancel a background job — it should still be running")
 	}
 }
 
-// Fix wave (Finding 1): the turn slot is held through delivery AND retirement,
-// so a Wake arriving while a turn finishes queues (it cannot start a second turn
-// racing the retire), retireOrKeep KEEPS the session (it has the queued input
-// the wake will drain), and the queued wake turn runs only after the slot is
-// released — on a session that was never Closed out from under it. Under the old
-// early-release ordering the wake turn could claim the session and then be
-// aborted by the retiring turn's Close; this pins that closed.
-func TestFixWave_RetireHoldsSlotSoConcurrentWakeIsNotAborted(t *testing.T) {
-	fc := newFakeClient()
-	rt, _ := newFakeRuntime(t, "wake reply")
-	b := newBot(t, fc, rt)
-
-	sess, err := rt.Session(shell3.SessionOpts{Agent: "code"})
-	if err != nil {
-		t.Fatalf("Session: %v", err)
-	}
-	b.AdoptSession(sess)
-	b.mu.Lock()
-	b.lastMsg[sess.ID()] = "500"
-	b.mu.Unlock()
-
-	ctx, cancelCtx := context.WithCancel(context.Background())
-	defer cancelCtx()
-
-	// Turn A takes the slot and has finished its model call — the point at which
-	// the OLD code released the slot early, before retiring.
-	b.mu.Lock()
-	_, cancel := b.takeSlotLocked(ctx)
-	b.mu.Unlock()
-
-	// A Wake for the SAME session arrives while turn A still holds the slot: it
-	// must land in the wake queue, not start a second turn.
-	go b.consumeWakes(ctx)
-	sess.Interject("bg result landed") // queues input + emits a Wake
-	waitFor(t, func() bool {
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		return contains(b.wakeQueue, sess.ID())
-	})
-	// While the slot is held no wake turn may have run: no reply is posted yet.
-	if _, ok := fc.lastReply(); ok {
-		t.Fatal("a wake turn started while turn A held the slot — the slot must serialize turns")
-	}
-
-	// Turn A runs its end-of-turn tail: retire (must KEEP — the session has the
-	// queued input) then release the slot then drain the queued wake.
-	b.afterTurn(ctx, sess, cancel)
-
-	// The queued wake turn ran (quietly — mail turns post nothing): its input
-	// drained and the slot came free — proof the session survived retirement
-	// and the wake was not aborted mid-flight.
-	waitFor(t, func() bool {
-		b.mu.Lock()
-		active := b.turnActive
-		b.mu.Unlock()
-		return !active && !sess.HasQueuedInput()
-	})
-	if _, ok := fc.lastReply(); ok {
-		t.Fatal("a wake (mail) turn must not post its reply")
-	}
-}
-
-// Case 6: a session with a running background job stays live after its turn (it
-// is not Closed), and a Wake for it while idle runs a quiet follow-up turn
-// that drains the queued mail.
-func TestContract6_RunningJobKeepsSessionLiveAndWakeRuns(t *testing.T) {
-	fc := newFakeClient()
-	rt, blk := splitRuntime(t, "job narrated")
-	b := newBot(t, fc, rt)
-
-	sess, err := rt.Session(shell3.SessionOpts{Agent: "code"})
-	if err != nil {
-		t.Fatalf("Session: %v", err)
-	}
-	b.AdoptSession(sess)
-	b.mu.Lock()
-	b.lastMsg[sess.ID()] = "200"
-	b.mu.Unlock()
-
-	// Start a background subagent job that stays running (headless → blocking).
-	if _, err := sess.Dispatch("", "bg work", shell3.DispatchOpts{Direct: true}); err != nil {
-		t.Fatalf("Dispatch: %v", err)
-	}
-	select {
-	case <-blk.Started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("background job never started")
-	}
-
-	// retireOrKeep must KEEP a session that has a running job.
-	b.retireOrKeep(sess)
-	b.mu.Lock()
-	_, stillLive := b.live[sess.ID()]
-	b.mu.Unlock()
-	if !stillLive {
-		t.Fatal("a session with a running job must stay live, not be closed")
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go b.consumeWakes(ctx)
-	sess.Interject("bg result landed") // queues input + emits a Wake
-
-	// The wake turn runs quietly: the queued input drains, nothing posts.
-	waitFor(t, func() bool {
-		b.mu.Lock()
-		active := b.turnActive
-		b.mu.Unlock()
-		return !active && !sess.HasQueuedInput()
-	})
-	if r, ok := fc.lastReply(); ok {
-		t.Fatalf("a wake (mail) turn must not post, got %q", r.text)
-	}
-}
-
-// Case 7: a Wake arriving mid-turn is queued (not run), and the queue drains
-// after the turn finishes.
-func TestContract7_WakeMidTurnQueuesThenDrains(t *testing.T) {
+// Contract 6: a Wake for the main conversation arriving mid-turn marks
+// pending (not a second turn), and drains as a quiet mail turn after the slot
+// frees.
+func TestContract6_WakeMidTurnPendsThenDrains(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "queued reply")
 	b := newBot(t, fc, rt)
 
-	sess, err := rt.Session(shell3.SessionOpts{Agent: "code"})
-	if err != nil {
-		t.Fatalf("Session: %v", err)
+	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "start"})
+	if !waitForReply(t, fc, "queued reply") {
+		t.Fatal("first turn produced no reply")
 	}
-	b.AdoptSession(sess)
+	sess := b.mainIfLive()
+
 	b.mu.Lock()
-	b.lastMsg[sess.ID()] = "300"
 	b.turnActive = true // simulate a turn holding the slot
 	b.mu.Unlock()
 
 	sess.Interject("bg result") // queue input for the wake turn to drain
-
 	b.dispatchWake(context.Background(), sess.ID())
 	b.mu.Lock()
-	queued := contains(b.wakeQueue, sess.ID())
+	pending := b.wakePending
 	b.mu.Unlock()
-	if !queued {
-		t.Fatal("a Wake arriving mid-turn must land in the wake queue")
+	if !pending {
+		t.Fatal("a Wake arriving mid-turn must mark wakePending")
 	}
 
-	// The turn finishes: the queue drains and the wake turn runs (quietly).
+	before := len(fc.sentReplies())
 	b.mu.Lock()
 	b.turnActive = false
 	b.mu.Unlock()
@@ -399,55 +277,103 @@ func TestContract7_WakeMidTurnQueuesThenDrains(t *testing.T) {
 	waitFor(t, func() bool {
 		b.mu.Lock()
 		defer b.mu.Unlock()
-		return !b.turnActive && len(b.wakeQueue) == 0 && !sess.HasQueuedInput()
+		return !b.turnActive && !b.wakePending && !sess.HasQueuedInput()
 	})
-	if r, ok := fc.lastReply(); ok {
-		t.Fatalf("a wake (mail) turn must not post, got %q", r.text)
+	if len(fc.sentReplies()) != before {
+		t.Fatal("a wake (mail) turn must not post its reply")
 	}
 }
 
-// Case 8: a turn ending with no running jobs and an empty inbox closes and
-// forgets the session (dropped from live + lastMsg).
-func TestContract8_IdleSessionRetired(t *testing.T) {
-	fc := newFakeClient()
-	rt := storeRuntime(t, "done")
-	b := newBot(t, fc, rt)
-
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "400", Text: "hi"})
-	if !waitForReply(t, fc, "done") {
-		t.Fatal("turn produced no reply")
-	}
-	waitFor(t, func() bool {
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		return len(b.live) == 0 && len(b.lastMsg) == 0
-	})
-}
-
-// Case 8b: an adopted (pinned) session — the persistent cron dispatch parent —
-// survives retirement, so it stays live for the /jobs and /runs views
-// (and never has its store record ended out from under future cron dispatches).
-// Its cron completions are delivered by the notifier/CompletionHost, so it is never woken and
-// runs no turn of its own; the invariant that survives is only that retirement
-// keeps it.
-func TestPinnedAdoptedSessionSurvivesRetirement(t *testing.T) {
+// Contract 7: a Wake for anything that is NOT the main conversation (the cron
+// parent, a /new'd-away session) is dropped — no turn, no post.
+func TestContract7_ForeignWakeDropped(t *testing.T) {
 	fc := newFakeClient()
 	rt := storeRuntime(t, "unused")
 	b := newBot(t, fc, rt)
 
-	sess, err := rt.Session(shell3.SessionOpts{Name: "cron", Headless: true})
+	cron, err := rt.Session(shell3.SessionOpts{Name: "cron", Headless: true})
 	if err != nil {
 		t.Fatalf("Session: %v", err)
 	}
-	b.AdoptSession(sess) // pins the session
+	b.AdoptSession(cron)
 
-	// retireOrKeep on a fully-idle pinned session must KEEP it (not Close it).
-	b.retireOrKeep(sess)
-
+	b.dispatchWake(context.Background(), cron.ID())
 	b.mu.Lock()
-	_, stillLive := b.live[sess.ID()]
+	active, pending := b.turnActive, b.wakePending
 	b.mu.Unlock()
-	if !stillLive {
-		t.Fatal("an adopted (pinned) session must survive retirement, not be closed")
+	if active || pending {
+		t.Fatal("a wake for the cron parent must be dropped, not run or pended")
+	}
+}
+
+// Contract 8: /new detaches the conversation — the next message runs in a
+// fresh session, and the marker moves with it.
+func TestContract8_NewStartsFreshConversation(t *testing.T) {
+	fc := newFakeClient()
+	rt := storeRuntime(t, "r")
+	b := newBot(t, fc, rt)
+
+	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "first"})
+	if !waitForReply(t, fc, "r") {
+		t.Fatal("first turn produced no reply")
+	}
+	first := b.mainIfLive().ID()
+
+	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/new"})
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "fresh conversation")
+	})
+	if b.mainIfLive() != nil {
+		t.Fatal("/new must detach the main session")
+	}
+
+	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "2", Text: "second"})
+	waitFor(t, func() bool { return b.mainIfLive() != nil })
+	second := b.mainIfLive().ID()
+	if second == first {
+		t.Fatal("/new must start a fresh session")
+	}
+	if id, _ := b.current.Current(); id != second {
+		t.Fatalf("current marker = %q, want the new session %q", id, second)
+	}
+}
+
+// Contract 9: a restart resumes the SAME conversation — a second Bot over the
+// same store picks up the persisted current marker.
+func TestContract9_RestartResumesTheConversation(t *testing.T) {
+	fc := newFakeClient()
+	st, err := runs.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := fakellm.New(
+		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "one"}}},
+		fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "two"}}},
+	)
+	rt := shell3.RuntimeForTest(t.TempDir(), func(o shell3.SessionOpts) (chat.Config, error) {
+		return chat.Config{
+			LLM: client, ModeLabel: "code", AgentNames: []string{"code"},
+			Headless: o.Headless, Store: st,
+			AgentKnobs: chat.AgentKnobs{ContextWindow: 4096},
+		}, nil
+	})
+	t.Cleanup(func() { _ = rt.Close() })
+	threads := NewThreadIndex(func() *runs.Store { return st }, "telegram")
+
+	b1 := NewBot(fc, rt, 42, threads)
+	b1.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "hello"})
+	if !waitForReply(t, fc, "one") {
+		t.Fatal("first bot produced no reply")
+	}
+	first := b1.mainIfLive().ID()
+
+	// "Restart": a fresh Bot over the same store and marker.
+	b2 := NewBot(fc, rt, 42, threads)
+	b2.handleMsg(context.Background(), Msg{ChatID: 42, ID: "2", Text: "still there?"})
+	if !waitForReply(t, fc, "two") {
+		t.Fatal("second bot produced no reply")
+	}
+	if got := b2.mainIfLive().ID(); got != first {
+		t.Fatalf("restart must resume the conversation: first=%s resumed=%s", first, got)
 	}
 }

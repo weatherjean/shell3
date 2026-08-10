@@ -18,6 +18,7 @@ import (
 func BotCommands() []Command {
 	return []Command{
 		{"stop", "Stop the current turn"},
+		{"new", "Start a fresh conversation (the old one stays in /runs)"},
 		{"run", "Run a scheduled job now: /run <name>"},
 		{"status", "Show runtime status"},
 		{"inbox", "Show queued mail (yours and the agent's)"},
@@ -173,9 +174,36 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 		b.handleVoiceCommand(ctx, arg)
 	case "/quiet":
 		b.handleQuietCommand(ctx, arg)
+	case "/new":
+		b.handleNewCommand(ctx)
 	default:
 		b.sendReply(ctx, "unknown command: "+cmd)
 	}
+}
+
+// handleNewCommand starts a fresh conversation: the current main session is
+// detached (and Closed when it has no running jobs — jobs keep running and
+// their completions re-route to the new conversation), the current-marker is
+// cleared, and the next message lazily creates the replacement. Refused while
+// a turn is running — /stop first.
+func (b *Bot) handleNewCommand(ctx context.Context) {
+	b.mu.Lock()
+	if b.turnActive {
+		b.mu.Unlock()
+		b.sendReply(ctx, "⚠️ a turn is running — /stop it first, then /new")
+		return
+	}
+	old := b.main
+	b.main = nil
+	b.mainAnchor = ""
+	b.lastMailed = ""
+	b.wakePending = false
+	b.mu.Unlock()
+	if old != nil && !b.sessionHasRunningJob(old) {
+		_ = old.Close()
+	}
+	b.current.SetCurrent("") // next message starts fresh; SetCurrent("") clears
+	b.sendReply(ctx, "🧵 fresh conversation — the old one stays in /runs and history")
 }
 
 // handleQuietCommand reports or sets the /quiet toggle: quiet on sends

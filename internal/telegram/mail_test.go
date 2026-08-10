@@ -89,10 +89,8 @@ func TestMailQueueDrainsAfterTurn(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("first turn never started")
 	}
-	// Arrives mid-turn as a bare message: passes the thread ask (resolved as
-	// a new thread), then queues silently.
+	// Arrives mid-turn: queues silently.
 	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "2", Text: "two"})
-	b.resolveThreadAsk(context.Background(), true)
 	close(g.Release)
 
 	waitFor(t, func() bool {
@@ -163,11 +161,12 @@ func TestMailUserToolPostsAndThreads(t *testing.T) {
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "heads up")
 	})
-	// The sent message is a thread anchor for this session.
-	id := fc.lastSentID()
-	got, ok := b.threads.Lookup(id)
-	if !ok || got != sess.ID() {
-		t.Fatalf("thread lookup(%q) = %q,%v want %q", id, got, ok, sess.ID())
+	// The sent message advanced the conversation anchor.
+	b.mu.Lock()
+	anchor := b.mainAnchor
+	b.mu.Unlock()
+	if anchor != fc.lastSentID() {
+		t.Fatalf("anchor = %q, want the sent mail id %q", anchor, fc.lastSentID())
 	}
 }
 
