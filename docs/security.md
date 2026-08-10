@@ -160,7 +160,8 @@ YAML as `env:KEY`:
   of `*`). Wipe every transcript with `rm -rf ~/.shell3/.shell3_project`;
   back up by copying the directory while shell3 is stopped.
 - **The rest of `~/.shell3/`**: your config, `.env`, the app log, proxy logs,
-  the `/voice` override (`voice_mode.json`), and `media/` (everything sent to
+  the `/voice` and `/quiet` overrides (`voice_mode.json`, `quiet_mode.json`),
+  and `media/` (everything sent to
   the bot, generated images, cached speech). Wipe everything with
   `rm -rf ~/.shell3`.
 

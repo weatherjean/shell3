@@ -239,7 +239,13 @@ one with running jobs or queued input, which stays open to receive them.
 (paginated inline listing, 8 per page, each entry a tappable `/run_N` that
 replays that run — taps resolve only against the map the last render stored,
 so a stale index errors instead of opening the wrong run),
-`/reload`, `/voice off|inbound|always`. The dash views are rendered as markdown
+`/reload`, `/voice off|inbound|always`, `/quiet on|off` (persisted to
+`~/.shell3/quiet_mode.json` by `QuietStore`: agent-initiated posts — ⏰
+cron, 🔔 completions, ✉️ agent mail — send with Telegram
+`disable_notification`, arriving without a ping; replies to the user's own
+messages and ⚠️ failures always ring; the flag rides a variadic
+`SendOpt{Silent}` on the tgClient send methods, rendered by the console
+transport as a 🔕 tag and by the JSONL transport as `"silent":true`). The dash views are rendered as markdown
 by `internal/render` (`Status`, `Jobs`, `JobDetail`, `Cron`, `RunsPage`,
 `RunReplay`) and delivered by `sendMarkdownDoc`: inline when under
 `mdInlineThreshold`, otherwise as a `.md` document plus a capped text summary
@@ -252,10 +258,11 @@ re-applied by `Runtime.Reload`; `DecorateChatSession` skips headless subagent
 children): `send_media_telegram` (push a local file to the chat as
 photo/voice/audio/video/document, validating extension and size per kind, and
 refusing `.env` and its dotenv siblings), `mail_user` (`{text}` — the agent's
-one way to reach the user from a quiet mail turn; threads into the session's
-conversation when an anchor exists, otherwise starts a fresh replyable
-thread, and records the sent id so replying to agent mail continues that
-session), `status`, and `reload` (records a pending reload and returns; the
+one way to reach the user from a quiet mail turn; the host posts it
+✉️-prefixed, so bare chat text stays reserved for direct replies to the
+user; threads into the session's conversation when an anchor exists,
+otherwise starts a fresh replyable thread, and records the sent id so
+replying to agent mail continues that session), `status`, and `reload` (records a pending reload and returns; the
 host applies it at end-of-turn, since a mid-turn reload would tear down the
 running turn). `image_generate` is registered on EVERY session, headless
 children included.

@@ -112,8 +112,10 @@ string, `id` is your id for the press (echoed in the `ack`).
   Telegram's HTML never appears on the wire. `reply_to_id` threads it; you
   can reply to its `id` to continue the conversation. Long replies chunk at
   4096 bytes, capped at 2 bubbles + a `reply.md` document, exactly as on
-  Telegram. Background-completion posts (`🔔 …`, `⏰ <job>: …`) are ordinary
-  `send` events.
+  Telegram. Background-completion posts (`🔔 …`, `⏰ <job>: …`) and agent
+  mail (`✉️ …`) are ordinary `send` events; under `/quiet` they (and their
+  `media` documents) carry `"silent": true`, which a front-end should honor
+  by not ringing.
 - `media` — a file, by local path (spooled under
   `.shell3_project/serve_out/`). `kind` is
   `photo|voice|audio|video|document`. Only `document` carries an `id`

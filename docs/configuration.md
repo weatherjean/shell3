@@ -648,10 +648,14 @@ the host. No triage persona, no judging turn; three rules:
   the natural default — the agent simply doesn't mail.
 
 `mail_user` is a host tool on every main chat session, and the agent's only
-way to reach you from a quiet turn. Its message threads into the session's
-conversation when a thread anchor exists, otherwise it posts a fresh message
-you can reply to; the sent message id is recorded in the thread index, so
-replying to agent mail continues that same conversation.
+way to reach you from a quiet turn. The host prefixes the posted message
+with ✉️, so bare chat text always means a direct reply to something you
+sent. Its message threads into the session's conversation when a thread
+anchor exists, otherwise it posts a fresh message you can reply to; the sent
+message id is recorded in the thread index, so replying to agent mail
+continues that same conversation. `/quiet on` delivers these background
+posts (⏰/🔔/✉️) without a notification ping; replies to your own messages
+and ⚠️ failures always ring.
 
 Mail turns are ordinary stored runs, so `/runs` shows exactly what the agent
 did with each completion. A leftover `notifier.md` from an older install
