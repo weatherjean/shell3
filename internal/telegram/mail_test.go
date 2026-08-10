@@ -176,3 +176,23 @@ func TestInboxCommand(t *testing.T) {
 	b.mailQueue = nil
 	b.mu.Unlock()
 }
+
+// A model that over-generalizes the wake-turn NO_REPLY sentinel into a USER
+// turn must not post the literal string — it degrades to the empty-reply
+// placeholder instead.
+func TestDeliverReplyNoReplySentinelNotPosted(t *testing.T) {
+	fc := newFakeClient()
+	rt := storeRuntime(t, "unused")
+	b := newBot(t, fc, rt)
+	sess := decoratedSession(t, b, rt)
+
+	b.deliverReply(context.Background(), "NO_REPLY.", false, sess, "")
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "(no output)")
+	})
+	for _, txt := range fc.sentTexts() {
+		if strings.Contains(txt, "NO_REPLY") {
+			t.Fatalf("the sentinel leaked into the chat: %q", txt)
+		}
+	}
+}

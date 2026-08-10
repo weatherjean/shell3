@@ -723,9 +723,16 @@ func isNoReply(reply string) bool {
 // sessions (a subagent/bash_bg completion) and fresh StartFreshTurn sessions
 // run wake turns; the pinned cron session is never woken.
 func (b *Bot) runWakeTurn(ctx, turnCtx context.Context, sess *shell3.Session) {
-	reply := b.drainTurn(sess.RunQueued(turnCtx), false)
+	reply, errText := b.drainTurn(sess.RunQueued(turnCtx), false)
+	// A wake turn with nothing to say stays silent even when its provider
+	// hiccuped — the turn error is in the transcript (/runs), and posting it
+	// would make every flaky tick ring the chat. Errors ride along only when
+	// the agent was going to speak anyway.
 	if isNoReply(reply) {
 		return
+	}
+	if errText != "" {
+		reply += "\n" + errText
 	}
 	b.mu.Lock()
 	replyTo := b.mainAnchor

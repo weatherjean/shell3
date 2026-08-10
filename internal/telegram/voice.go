@@ -26,6 +26,11 @@ const voiceModePrefix = "vm"
 // plain b.sendReply so the reply is never lost; a Speak (synthesis) failure
 // additionally sends its error to the chat as a ⚠️ notice.
 func (b *Bot) deliverReply(ctx context.Context, reply string, hadVoice bool, sess *shell3.Session, replyTo string) {
+	// The NO_REPLY sentinel belongs to wake turns; a model over-generalizing
+	// it into a user turn must not post the literal string as its answer.
+	if isNoReply(reply) {
+		reply = ""
+	}
 	asText := func() { b.postReply(ctx, sess, replyTo, reply) }
 	if reply == "" {
 		asText()

@@ -22,9 +22,11 @@ const tgMaxMessage = 4000
 // a fallback for turns that end on a tool call — user turns want it (the user
 // should get SOMETHING); wake turns pass false, where an empty final segment
 // means silence and a stale fragment must not post as agent mail. Errors
-// always surface, appended after the reply. Channel close is the
+// return separately so the caller decides whether they surface (a wake turn
+// that has nothing to say stays silent even when its provider hiccuped —
+// otherwise every flaky cron wake posts ✉️ ⚠️ noise). Channel close is the
 // authoritative end-of-turn signal.
-func (b *Bot) drainTurn(ch <-chan shell3.Event, narrationFallback bool) string {
+func (b *Bot) drainTurn(ch <-chan shell3.Event, narrationFallback bool) (reply, errText string) {
 	var seg strings.Builder // current assistant segment
 	var last string         // last non-empty completed segment
 	var errs strings.Builder
@@ -46,11 +48,11 @@ func (b *Bot) drainTurn(ch <-chan shell3.Event, narrationFallback bool) string {
 			}
 		}
 	}
-	reply := strings.TrimSpace(seg.String())
+	reply = strings.TrimSpace(seg.String())
 	if reply == "" && narrationFallback {
 		reply = last
 	}
-	return strings.TrimSpace(reply + errs.String())
+	return reply, strings.TrimSpace(errs.String())
 }
 
 // utf16Len is the length Telegram bills a string at: UTF-16 code units
