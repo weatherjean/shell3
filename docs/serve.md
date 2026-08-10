@@ -120,9 +120,15 @@ string, `id` is your id for the press (echoed in the `ack`).
   `.shell3_project/serve_out/`). `kind` is
   `photo|voice|audio|video|document`. Only `document` carries an `id`
   (documents advance the thread anchor).
-- `menu` — a button row (`/runs` paging, `/voice`): answer with a `callback`
-  whose `data` is the pressed option's data string. An `edit` may then
-  replace the menu message's text (e.g. `/voice` showing the chosen mode).
+- `menu` — a button row (`/runs` paging, `/voice`, the thread-choice ask):
+  answer with a `callback` whose `data` is the pressed option's data string.
+  An `edit` may then replace the menu message's text (e.g. `/voice` showing
+  the chosen mode). Note the **thread-choice ask**: a bare `message` (no
+  `reply_to_id`, once any conversation exists) does not run immediately —
+  it produces a menu with data `nt|new` / `nt|cancel` and holds the message
+  until your `callback` answers, or 60 s pass and it runs as a new thread.
+  A front-end that always threads its messages (`reply_to_id` set) never
+  sees the ask.
 - `edit` — replace the text of a previously sent message (safe to ignore if
   your surface can't edit).
 - `typing` — the "typing…" action, refreshed every few seconds during a
