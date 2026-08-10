@@ -97,7 +97,7 @@ func newTelegramCommand() *cobra.Command {
 
 			if console {
 				fmt.Println("shell3 telegram --console: reading events from stdin " +
-					"(plain line = fresh message, \"@<id> text\" = reply, \"/…\" = command, EOF quits)")
+					"(a line continues the conversation, \"@<id> text\" quotes a message, \"/…\" = command, EOF quits)")
 			} else {
 				// Register the "/" command hints (best-effort).
 				if err := apiClient.SetCommands(ctx, telegram.BotCommands()); err != nil {
@@ -112,9 +112,9 @@ func newTelegramCommand() *cobra.Command {
 				// persistent reply-keyboard bar left by an older build (commands
 				// live in the "/" menu instead). Best-effort.
 				banner := "๑ï shell3 online — your personal agent, at your pace\n\n" +
-					"Every message starts a fresh thread; reply to any of my messages to continue its thread. " +
-					"/status shows what's wired, /jobs what's running, /stop halts the current turn, " +
-					"/reload applies config changes."
+					"Just type — every message continues our one conversation, and a restart picks it " +
+					"up where we left off. /new starts a fresh one, /status shows what's wired, " +
+					"/jobs what's running, /stop halts the current turn, /reload applies config changes."
 				if err := apiClient.SendRemovingKeyboard(ctx, chatID, banner); err != nil {
 					fmt.Printf("warning: could not send the greeting: %v\n", err)
 				}

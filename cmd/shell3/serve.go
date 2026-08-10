@@ -48,7 +48,7 @@ func newServeCommand() *cobra.Command {
 				workDir = resolved
 			}
 
-			// Serve keeps its own thread index beside telegram's: the id spaces
+			// Serve keeps its own current-conversation marker beside telegram's: the id spaces
 			// are different transports' and must not cross-resolve.
 			threads := openThreads(rt, "serve")
 
