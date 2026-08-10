@@ -188,11 +188,22 @@ func commandEvent(j *bgJob, n notify.Notification, exit int, owner *Session) Com
 	return ev
 }
 
+// capSummary head-caps an agent-written summary for the completion event,
+// marking the cut so a truncated capture never ends mid-word with no signal
+// (the full result stays readable via task_status / the run transcript).
+func capSummary(summary string) string {
+	head, cut := strutil.CutRunes(summary, agentDoneResultCap)
+	if cut {
+		head += "…"
+	}
+	return head
+}
+
 // subagentEvent builds the completion event for a finished subagent (task tool
 // or cron dispatch). Cron events carry no owner: the pinned cron parent never
 // runs turns, so agent mail starts a fresh main-agent turn instead.
 func subagentEvent(j *bgJob, summary, errText string) CompletionEvent {
-	tail, _ := strutil.CutRunes(summary, agentDoneResultCap)
+	tail := capSummary(summary)
 	ev := CompletionEvent{
 		Kind: EvSubagent, JobID: j.id, Title: j.title, Agent: j.agent,
 		CronJob: j.cronJob, ErrText: errText, Tail: tail, Note: j.note,
@@ -212,7 +223,7 @@ func subagentEvent(j *bgJob, summary, errText string) CompletionEvent {
 // followUpEvent builds the completion event for one lingering-subagent
 // follow-up turn's result. Same owner rule as subagentEvent.
 func followUpEvent(sub *bgJob, n notify.Notification, summary, errText string) CompletionEvent {
-	tail, _ := strutil.CutRunes(summary, agentDoneResultCap)
+	tail := capSummary(summary)
 	ev := CompletionEvent{
 		Kind: EvFollowUp, JobID: sub.id, Title: sub.title, Agent: sub.agent,
 		CronJob: sub.cronJob, ErrText: errText, Tail: tail, Note: sub.note,

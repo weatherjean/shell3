@@ -324,7 +324,11 @@ A **runs janitor** runs once at `shell3 telegram`/`shell3 serve` startup
 rows, FTS entries, thread entries, and job-log dirs together — plus empty
 crash leftovers and orphaned `runs/<id>/` dirs (pre-database leftovers),
 printing `janitor: removed N runs, M thread entries` (silent when both are
-zero). SQL in `runs.Sweep`, on its own connection (the runtime's store is
+zero). The empty-trash rule spares dispatch parents (a session other rows
+name as `parent_id` — the pinned cron parent is always message-less), and
+stale `status='live'` rows past the grace hour flip to `ended` (nothing
+from a previous process can still be live at startup; recent ones may be a
+concurrent `ask`). SQL in `runs.Sweep`, on its own connection (the runtime's store is
 already open by then — the sweep does not need it closed), before the bot
 starts polling. A sibling **media janitor** runs the same start-time-only
 shape, gated by `media_keep_days` (top-level `shell3.yaml` key, default 0 =

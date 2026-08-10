@@ -4,6 +4,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
@@ -257,5 +258,21 @@ func TestDirectTextTruncationDirection(t *testing.T) {
 	bg := CompletionEvent{Kind: EvBashBg, JobID: "bg1", Title: "make test", Tail: long}
 	if out := directText(bg); !strings.Contains(out, "FINAL words.") {
 		t.Fatalf("bash_bg direct post lost its output tail: %q", out[len(out)-80:])
+	}
+}
+
+// The whole chain, capture → direct post: a summary longer than the capture
+// cap posts with its lead intact and a visible truncation marker at the end —
+// never the mid-word middle window observed live.
+func TestDirectTextThroughCaptureKeepsLeadAndMarksCut(t *testing.T) {
+	long := "LEAD sentence first." + strings.Repeat(" filler", 600)
+	j := &bgJob{id: "sub1", title: "research", agent: "assistant", direct: true, startedAt: time.Now()}
+	ev := subagentEvent(j, long, "")
+	out := directText(ev)
+	if !strings.Contains(out, "LEAD sentence first.") {
+		t.Fatalf("lost the lead: %q", out[:80])
+	}
+	if !strings.HasSuffix(out, "…") {
+		t.Fatalf("truncated capture posts with no marker: %q", out[len(out)-40:])
 	}
 }
