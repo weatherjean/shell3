@@ -167,15 +167,24 @@ func TestJobManagerRetainsDoneSubagentJob(t *testing.T) {
 		t.Fatalf("startSubagent: %v", err)
 	}
 
-	// Wait for the Wake (child is done).
+	// Wait for the Wake (child is done). The job record flips Done on the job
+	// goroutine, which the Wake does not strictly order against — poll briefly
+	// rather than asserting the first snapshot.
 	waitForWake(t, rt, parent)
-	// Job must still appear in list() with Done=true.
 	var found JobInfo
-	for _, j := range rt.jobs.list() {
-		if j.ID == id {
-			found = j
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		found = JobInfo{}
+		for _, j := range rt.jobs.list() {
+			if j.ID == id {
+				found = j
+				break
+			}
+		}
+		if found.Done || time.Now().After(deadline) {
 			break
 		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	if found.ID == "" {
 		t.Fatalf("finished subagent job %s not found in list()", id)
