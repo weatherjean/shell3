@@ -64,8 +64,9 @@ type Bot struct {
 	// turn via StartFreshTurn), so it never runs a turn of its own.
 	pinned map[string]bool
 
-	media     *MediaCaps // STT/describe/TTS/imagegen capabilities; nil when unconfigured
-	voiceMode *ModeStore // per-chat inbound-voice-reply mode; nil when unconfigured
+	media     *MediaCaps  // STT/describe/TTS/imagegen capabilities; nil when unconfigured
+	voiceMode *ModeStore  // per-chat inbound-voice-reply mode; nil when unconfigured
+	quietMode *QuietStore // the /quiet toggle's store; nil = never quiet
 
 	askMu          sync.Mutex // guards voiceMenuMsgID (historical name; the ask keyboard is gone)
 	voiceMenuMsgID string     // msgID of the most recent /voice menu, for its "vm|" callback edit
@@ -173,6 +174,24 @@ func (b *Bot) SetMedia(c *MediaCaps, modeStore *ModeStore) {
 	defer b.mu.Unlock()
 	b.media = c
 	b.voiceMode = modeStore
+}
+
+// SetQuiet installs the /quiet toggle's store. Nil (or an unset path) means
+// quiet can never turn on — every post rings.
+func (b *Bot) SetQuiet(s *QuietStore) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.quietMode = s
+}
+
+// isQuiet reports whether the /quiet toggle is on. Agent-initiated posts
+// (⏰/🔔/✉️) send silently under it; replies to the user's own messages and
+// ⚠️ failures always ring.
+func (b *Bot) isQuiet() bool {
+	b.mu.Lock()
+	s := b.quietMode
+	b.mu.Unlock()
+	return s.Get() // nil-safe: a nil store reads as off
 }
 
 // mediaCaps returns the current media capabilities and voice-mode store as one

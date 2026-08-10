@@ -237,6 +237,14 @@ func (f *fakeClient) Send(ctx context.Context, chatID int64, text string, opts .
 	f.silent = append(f.silent, sendSilent(opts))
 	return strconv.Itoa(f.next), nil
 }
+
+// lastSilent reports whether the most recent text/document send was silent.
+func (f *fakeClient) lastSilent() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.silent) > 0 && f.silent[len(f.silent)-1]
+}
+
 func (f *fakeClient) SendHTML(ctx context.Context, chatID int64, html string, opts ...SendOpt) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

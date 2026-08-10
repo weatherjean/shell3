@@ -13,8 +13,9 @@ import (
 
 // registerMailTool adds the mail_user host tool to a chat session: the
 // agent's one way to reach the user from a quiet turn (background mail, cron
-// results). The message threads into the session's conversation when a thread
-// anchor exists; otherwise it lands as a fresh message the user can reply to
+// results). The host prefixes the posted message with ✉️ — bare chat text
+// stays reserved for direct replies to the user. The message threads into the
+// session's conversation when a thread anchor exists; otherwise it lands as a fresh message the user can reply to
 // — postReply records the sent id in the thread index either way, so a reply
 // to it continues this session.
 func (b *Bot) registerMailTool(sess *shell3.Session) {
@@ -60,7 +61,14 @@ func (b *Bot) mailUserHandler(sess *shell3.Session) func(ctx context.Context, ar
 		b.lastMailed[sess.ID()] = text
 		replyTo := b.lastMsg[sess.ID()]
 		b.mu.Unlock()
-		b.postReply(ctx, sess, replyTo, text)
+		// The host marks agent mail with ✉️ so bare text in the chat always
+		// means a direct reply to the user's own message; under /quiet the
+		// send arrives without a ping.
+		var opts []SendOpt
+		if b.isQuiet() {
+			opts = append(opts, SendOpt{Silent: true})
+		}
+		b.postReply(ctx, sess, replyTo, "✉️ "+text, opts...)
 		return "mailed", nil
 	}
 }

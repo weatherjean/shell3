@@ -100,37 +100,37 @@ func (b *Bot) sendReply(ctx context.Context, text string) {
 // chat stays readable and the phone gets one ping, not twenty-five.
 const replyMaxChunks = 2
 
-func (b *Bot) postReply(ctx context.Context, sess *shell3.Session, replyTo string, text string) {
+func (b *Bot) postReply(ctx context.Context, sess *shell3.Session, replyTo string, text string, opts ...SendOpt) {
 	if text == "" {
 		text = "(no output)"
 	}
 	chunks := chunk(text)
 	if len(chunks) > replyMaxChunks {
-		b.postChunk(ctx, sess, replyTo, chunks[0])
-		if id, err := b.client.SendDocument(ctx, b.chatID, "reply.md", []byte(text), "full reply"); err == nil {
+		b.postChunk(ctx, sess, replyTo, chunks[0], opts...)
+		if id, err := b.client.SendDocument(ctx, b.chatID, "reply.md", []byte(text), "full reply", opts...); err == nil {
 			b.recordSent(sess, id)
 			return
 		}
 		chunks = chunks[1:] // document failed: degrade to posting the rest
 	}
 	for _, c := range chunks {
-		b.postChunk(ctx, sess, replyTo, c)
+		b.postChunk(ctx, sess, replyTo, c, opts...)
 	}
 }
 
 // postChunk posts one chunk through the HTML→plain fallback path and records
 // the sent id.
-func (b *Bot) postChunk(ctx context.Context, sess *shell3.Session, replyTo string, c string) {
+func (b *Bot) postChunk(ctx context.Context, sess *shell3.Session, replyTo string, c string, opts ...SendOpt) {
 	html := mdhtml.ToTelegramHTML(c)
 	var id string
 	var err error
 	if replyTo != "" {
-		if id, err = b.client.SendHTMLReply(ctx, b.chatID, html, replyTo); err != nil {
-			id, _ = b.client.SendReply(ctx, b.chatID, c, replyTo)
+		if id, err = b.client.SendHTMLReply(ctx, b.chatID, html, replyTo, opts...); err != nil {
+			id, _ = b.client.SendReply(ctx, b.chatID, c, replyTo, opts...)
 		}
 	} else {
-		if id, err = b.client.SendHTML(ctx, b.chatID, html); err != nil {
-			id, _ = b.client.Send(ctx, b.chatID, c)
+		if id, err = b.client.SendHTML(ctx, b.chatID, html, opts...); err != nil {
+			id, _ = b.client.Send(ctx, b.chatID, c, opts...)
 		}
 	}
 	b.recordSent(sess, id)

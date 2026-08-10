@@ -4,6 +4,7 @@ package telegram
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -225,5 +226,64 @@ func TestMailUserRefusesIdenticalRepeat(t *testing.T) {
 	// A DIFFERENT message still goes through.
 	if out, err := h(context.Background(), `{"text":"second, different"}`); err != nil || out != "mailed" {
 		t.Fatalf("different send: %q, %v", out, err)
+	}
+}
+
+// mail_user posts carry the ✉️ prefix — bare text in the chat always means a
+// direct reply to the user's own message. The dedupe guard compares raw text,
+// so the same text twice is still refused.
+func TestMailUserEnvelopePrefix(t *testing.T) {
+	fc := newFakeClient()
+	rt := storeRuntime(t, "unused")
+	b := newBot(t, fc, rt)
+	sess := decoratedSession(t, b, rt)
+	h := b.mailUserHandler(sess)
+
+	if out, err := h(context.Background(), `{"text":"backup done"}`); err != nil || out != "mailed" {
+		t.Fatalf("first send: %q, %v", out, err)
+	}
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "✉️ backup done")
+	})
+	out, err := h(context.Background(), `{"text":"backup done"}`)
+	if err != nil || out == "mailed" {
+		t.Fatalf("repeat send: %q, %v — want the already-mailed guidance", out, err)
+	}
+}
+
+// Quiet mode hushes agent mail; off (the default) rings.
+func TestMailUserQuietSendsSilent(t *testing.T) {
+	fc := newFakeClient()
+	rt := storeRuntime(t, "unused")
+	b := newBot(t, fc, rt)
+	sess := decoratedSession(t, b, rt)
+	h := b.mailUserHandler(sess)
+
+	qs := &QuietStore{Path: filepath.Join(t.TempDir(), "quiet_mode.json")}
+	b.SetQuiet(qs)
+	if err := qs.Set(true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h(context.Background(), `{"text":"hushed news"}`); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "hushed news")
+	})
+	if !fc.lastSilent() {
+		t.Error("quiet on: mail_user send should be silent")
+	}
+
+	if err := qs.Set(false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h(context.Background(), `{"text":"loud news"}`); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "loud news")
+	})
+	if fc.lastSilent() {
+		t.Error("quiet off: mail_user send should ring")
 	}
 }
