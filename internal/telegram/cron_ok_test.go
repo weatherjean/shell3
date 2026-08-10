@@ -182,6 +182,16 @@ func TestPostCompletion_QuietSilencesButFailuresRing(t *testing.T) {
 	if fc.lastSilent() {
 		t.Error("⚠️ failure post must ring even under quiet")
 	}
+
+	// A cron-origin failure takes the ⏰ prefix branch but must STILL ring:
+	// the failure check reads the raw text before the prefix switch rewrites it.
+	b.PostCompletion(shell3.CompletionPost{CronJob: "weekly", Text: "⚠️ weekly failed: exit 2"})
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "⚠️ weekly failed")
+	})
+	if fc.lastSilent() {
+		t.Error("cron-origin ⚠️ failure must ring even under quiet")
+	}
 }
 
 // Quiet off (the default): completion posts ring.
