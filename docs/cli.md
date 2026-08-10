@@ -34,20 +34,16 @@ chat, so you can see there that the bot came up.
 is the token and the `chat_id` — see
 [Security](security.md#the-telegram-boundary).
 
-**Threads and turns.** Every inbound message starts its **own** session. To
-continue one, use Telegram's reply on any message in that thread — the
-message→session map persists in the runs store, so threads survive a
-restart (sessions the janitor swept answer that they can't be resumed). One
-main-agent turn runs at a time, but sending always succeeds: a message sent
-while a turn is running queues silently and drains after the turn ends.
-Queued replies into the same thread drain as **one** batched turn, anchored
-at the newest message. A bare (non-reply) message first gets a
-**thread-choice ask** — "Start a new thread?" with 🧵 New thread / Cancel
-buttons — because typing without replying is the easiest way to
-accidentally fork a fresh context: tap New thread (or wait 60 s, which
-does the same) and it runs as its own conversation; Cancel drops it so you
-can reply to a message instead and continue that thread. The very first
-conversation skips the ask. `/inbox` shows what's queued; `/stop` cancels the running turn.
+**One conversation.** Every message you send continues the **same**
+long-lived conversation — just type; no replying, no threading rules. A
+Telegram reply adds the quoted text as context for the agent but never
+switches conversations. `/new` starts a fresh one (the old conversation
+stays in `/runs` and the agent's searchable history); a restart resumes
+where you left off, and automatic compaction keeps the context bounded
+however long it runs. One main-agent turn runs at a time, but sending
+always succeeds: messages sent while a turn is running queue silently and
+drain as one batched turn after it ends. `/inbox` shows what's queued;
+`/stop` cancels the running turn.
 Background jobs (subagents, `bash_bg`, cron) run independently and come back
 as [completion mail](configuration.md#completion-mail): a failure or a
 `direct` result posts to the chat (🔔, or ⏰ for a cron origin); everything
@@ -60,9 +56,8 @@ to you and ⚠️ failures always ring.
 
 `--console` swaps the Telegram transport for stdin/stdout and drives the same
 bot loop with no credentials and no network: a plain line is a fresh message,
-`@<id> text` is a reply into that thread, `/…` is a command, `&<data>`
-answers an inline menu by its callback data (e.g. `&nt|new` for the
-thread-choice ask), EOF quits.
+`@<id> text` is a reply quoting that message, `/…` is a command, `&<data>`
+answers an inline menu by its callback data, EOF quits.
 
 ### Commands
 
@@ -75,6 +70,7 @@ tappable commands, and Telegram only linkifies those in message text.
 | Command | What |
 |---------|------|
 | `/stop` | Cancel the running turn. Background jobs are **not** killed — they keep running and still report back. |
+| `/new` | Start a fresh conversation. The old one stays in `/runs` and the history index; running jobs keep going and report into the new conversation. Refused mid-turn (`/stop` first). |
 | `/inbox` | The queued state: your pending messages, and agent mail waiting in sessions. |
 | `/status` | Version, config dir, agent + model + params, context usage, whether the gate is armed, tools, subagents, skills, MCP health, cron jobs, projects, warnings, and the effective system prompt. Reports the live session (on an idle bot, the headless cron parent — `0` messages). |
 | `/jobs` | Running and finished background work: id, kind, label, status, elapsed, exit code. |

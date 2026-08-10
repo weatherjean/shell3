@@ -77,9 +77,9 @@ The agent (and any subagent) can skip the prune tier individually with
 omitted/`true` inherits).
 
 Compaction is host-managed and there are no model-driven prune/compact tools.
-Each chat thread is its own session, so long histories only build up in a
-thread you keep replying into; a session that does grow crosses `compact_at`
-and compacts on its own. It happens silently — `/status` shows the current
+The Telegram front-end runs ONE long-lived conversation, so its history
+grows steadily; when it crosses `compact_at` it compacts on its own, keeping
+the conversation viable indefinitely. It happens silently — `/status` shows the current
 context usage, and `shell3 ask`'s verbose output narrates each compaction as
 it runs.
 
@@ -607,7 +607,7 @@ Summarize anything noteworthy from the last day.
 ```
 
 A cron run's result arrives as **mail to the main agent** (see
-[Completion mail](#completion-mail)): a fresh quiet turn reads it, with the
+[Completion mail](#completion-mail)): a quiet turn of the main conversation reads it, with the
 job's prompt riding along as context so the agent knows what the job is
 *for*, and it mails you — a ⏰ message titled with the job name — only when
 the run carries something worth saying. A periodic checklist therefore only
@@ -643,9 +643,9 @@ the host. No triage persona, no judging turn; three rules:
   **raw result** straight to the chat — ⏰-prefixed for cron, 🔔 otherwise —
   costing no agent turn. The owning session gets the notice queued, without
   a wake, so its next turn has it in context.
-- **Everything else is mail to the agent.** The owning session is woken with
-  the completion (a fresh main-agent session runs it when no owner is live —
-  cron results, orphans), carrying the spawner's `note:` — for cron runs,
+- **Everything else is mail to the agent.** The completion queues into the
+  main conversation and wakes it (whichever session spawned the job — cron
+  results and orphans land there too), carrying the spawner's `note:` — for cron runs,
   the job's own prompt, so the agent knows what the job is *for*. These mail
   turns are **quiet**: the reply text is not delivered anywhere, and the
   agent reaches you only by calling its `mail_user {text}` tool. Silence is
@@ -655,9 +655,8 @@ the host. No triage persona, no judging turn; three rules:
 way to reach you from a quiet turn. The host prefixes the posted message
 with ✉️, so bare chat text always means a direct reply to something you
 sent. Its message threads into the session's conversation when a thread
-anchor exists, otherwise it posts a fresh message you can reply to; the sent
-message id is recorded in the thread index, so replying to agent mail
-continues that same conversation. `/quiet on` delivers these background
+anchor exists, otherwise it posts a fresh message; either way it is part of
+the one conversation, and anything you type next continues it. `/quiet on` delivers these background
 posts (⏰/🔔/✉️) without a notification ping; replies to your own messages
 and ⚠️ failures always ring.
 

@@ -18,8 +18,8 @@ your-frontend ──spawn──▶ shell3 serve
 
 Running serve *alongside* `shell3 telegram` as a second window onto the same
 agent is not supported — run two processes with two config dirs instead.
-Serve keeps its own thread namespace in the runs store, so the two
-front-ends' histories never cross-resolve.
+Serve keeps its own current-conversation marker in the runs store, so the
+two front-ends' conversations never cross-resolve.
 
 ## Framing
 
@@ -37,17 +37,16 @@ Ids are opaque strings. Your inbound messages carry your own ids (Discord
 snowflakes work as-is); if you omit one, the agent assigns it. Outbound
 events carry agent-assigned ids (`a<boot>-<n>`, unique across restarts).
 
-Threading follows the Telegram model: a `message` with no `reply_to_id`
-starts a fresh conversation (its own agent session); `reply_to_id` naming any
-earlier message id — yours or the agent's — continues that conversation. The
-mapping persists on disk, so replies keep working across agent restarts.
-Replying to an id the agent doesn't know gets a fixed "can't continue from
-that message" send, never a silent new session.
+Conversation follows the Telegram model: there is ONE long-lived
+conversation that every `message` continues, whether or not it carries
+`reply_to_id` — a reply's quoted `reply_to` text is injected as context for
+the agent, never a conversation switch. The `/new` command starts a fresh
+conversation; the current session id persists on disk, so a restart resumes
+where it left off.
 
 Exactly one turn runs at a time, but sending always succeeds: a `message`
-arriving mid-turn queues silently and drains after the turn ends. Queued
-replies into one thread drain as a single batched turn anchored at the
-newest message; a fresh message is its own thread and its own turn.
+arriving mid-turn queues silently and the backlog drains as one batched
+turn after the turn ends, anchored at the newest message.
 
 ## Handshake
 
@@ -120,15 +119,9 @@ string, `id` is your id for the press (echoed in the `ack`).
   `.shell3_project/serve_out/`). `kind` is
   `photo|voice|audio|video|document`. Only `document` carries an `id`
   (documents advance the thread anchor).
-- `menu` — a button row (`/runs` paging, `/voice`, the thread-choice ask):
-  answer with a `callback` whose `data` is the pressed option's data string.
-  An `edit` may then replace the menu message's text (e.g. `/voice` showing
-  the chosen mode). Note the **thread-choice ask**: a bare `message` (no
-  `reply_to_id`, once any conversation exists) does not run immediately —
-  it produces a menu with data `nt|new` / `nt|cancel` and holds the message
-  until your `callback` answers, or 60 s pass and it runs as a new thread.
-  A front-end that always threads its messages (`reply_to_id` set) never
-  sees the ask.
+- `menu` — a button row (`/runs` paging, `/voice`): answer with a `callback`
+  whose `data` is the pressed option's data string. An `edit` may then
+  replace the menu message's text (e.g. `/voice` showing the chosen mode).
 - `edit` — replace the text of a previously sent message (safe to ignore if
   your surface can't edit).
 - `typing` — the "typing…" action, refreshed every few seconds during a

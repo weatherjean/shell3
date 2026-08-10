@@ -205,42 +205,36 @@ after the fact. At startup the host registers the `/` command menu
 (`BotCommands`), clears any menu button an older build left behind, and greets
 the chat.
 
-The turn model is **fresh-turn, thread-scoped**: the bot holds NO long-lived
-session. Every inbound message runs in its own runtime session; a Telegram
-*reply* resumes the session recorded for that message id in the persistent
-thread index (the runs store's `threads` table, surface-namespaced
-"telegram"/"serve"; `threads.go` — in-memory map authoritative for the
-process, store writes best-effort, and the store is resolved per call so a
-/reload generation swap never leaves the index on a closed handle). Replying to a message whose session is gone
-answers that it can't be resumed rather than silently starting a new one.
-Exactly one main-agent turn runs at a time (a turn slot in `bot.go`); sending
-always succeeds — a message arriving mid-turn queues silently (`mailQueue`)
-and drains once the turn ends, the running turn never steered. Queued
-replies into the SAME thread drain as one batch turn (grouped through the
-thread index, so a retired thread's replies still batch and resume it),
-anchored at the newest message. A bare (non-reply) message is gated by the
-**thread-choice ask** (`threadask.go`): a 🧵 New thread / Cancel inline
-menu (`nt|new` / `nt|cancel` callback data) parks the message —
-subsequent bare messages join the held batch — until a tap or the 60s
-timer (`threadAskTimeout`) runs it as a new thread; Cancel drops it (the
-user replies to a message instead). Skipped when `ThreadIndex.Any()` is
-false (first conversation ever); replies and /commands never ask; the
-console transport answers menus with an `&<data>` input line. `/inbox` renders the queued state — the user's pending mail,
-wake-queued sessions, live sessions holding undrained agent mail — with
-zero tokens. `postReply`
+The turn model is **one conversation**: the bot holds ONE long-lived main
+session that every message — bare or reply — continues. A Telegram reply is a
+context hint (the quoted text is injected as a capped blockquote,
+`withReplyContext`), never a session switch; `/new` is the only way to start
+over (old conversation stays in `/runs` and the history index). The current
+session id persists in the runs store's `threads` table under the reserved
+key `current-session` (surface-namespaced "telegram"/"serve";
+`ThreadIndex.SetCurrent`/`Current` in `threads.go` — store resolved per call
+so a /reload generation swap never leaves the marker on a closed handle), so
+a restart resumes the same conversation (`mainSession`, falling back to a
+fresh session when the marker is absent or swept). The session never retires;
+host-managed compaction keeps its context bounded. Exactly one main-agent
+turn runs at a time (a turn slot in `bot.go`); sending always succeeds — a
+message arriving mid-turn queues silently (`mailQueue`) and the WHOLE backlog
+drains as one batch turn (it is all the same conversation), anchored at the
+newest message; the running turn is never steered. `/inbox` renders the
+queued state — the user's pending mail plus waiting agent mail — with zero
+tokens. `postReply`
 chunks the reply at Telegram's message cap on rune boundaries and replies each
-chunk to the thread's anchor, capped at `replyMaxChunks` (2) bubbles — a longer
-reply posts its first chunk plus the full text as a `reply.md` document — and
-records every sent message id so the anchor advances (a reply to the bot's own
-latest message resumes the same session).
+chunk to the conversation's anchor, capped at `replyMaxChunks` (2) bubbles — a
+longer reply posts its first chunk plus the full text as a `reply.md` document
+— and records every sent message id so the anchor advances.
 `drainTurn` treats only the FINAL assistant segment as the reply — text before
 a tool call is progress narration — and errors always surface. Markdown is
-converted for Telegram by `mdhtml`. A session retires (and Closes) as soon as
-it goes idle at the end of its own turn — there is no warm-session pool — except
-one with running jobs or queued input, which stays open to receive them.
+converted for Telegram by `mdhtml`. The console transport answers inline menus
+(the /voice keyboard) with an `&<data>` input line.
 
 **Commands are host-answered** (`commands.go`, no model call, zero tokens):
-`/stop` (cancel the turn; background jobs keep running), `/run <job>`,
+`/stop` (cancel the turn; background jobs keep running), `/new` (start a
+fresh conversation; refused mid-turn), `/run <job>`,
 `/status`, `/jobs`, `/job <id>`, `/cancel <id>`, `/cron`, `/runs [page|id]`
 (paginated inline listing, 8 per page, each entry a tappable `/run_N` that
 replays that run — taps resolve only against the map the last render stored,
@@ -276,13 +270,13 @@ children included.
 **Completion delivery** is mail (see internal/shell3/completion.go above);
 the bot is the `CompletionHost` (`bot.go`): `PostCompletion` posts
 `⏰ <job>: …` for a cron origin (direct cron, ⚠️ floors) and `🔔 …`
-otherwise, threaded into the owning session's chat thread when one is live;
-`WakeOwner` resumes a live owner under the same turn slot (its liveness
-check pairs with the retire lock, so mail lands or the session retires,
-never both); `StartFreshTurn` runs a fresh main-agent session over the
-mail. Wake turns are QUIET — `runWakeTurn` posts nothing; `mail_user` is
-the only exit. Callbacks (the `/voice` menu) drain on their own
-bot-lifetime goroutine (`callbacks.go`).
+otherwise, threaded onto the conversation's anchor; `WakeOwner` queues+wakes
+iff the owner IS the current main conversation; `StartFreshTurn` is the
+catch-all that queues the note into the main conversation (creating it on
+demand) — cron results, orphans, and jobs outliving a `/new` all land there,
+so a completion is never lost. Wake turns are QUIET — `runWakeTurn` posts
+nothing; `mail_user` is the only exit. Callbacks (the `/voice` menu) drain
+on their own bot-lifetime goroutine (`callbacks.go`).
 
 **Media** (`internal/media`, four blocks under `media:` in `shell3.yaml`, each
 pointing at a model): a turn's attachments are saved to `~/.shell3/media/` as
