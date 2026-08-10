@@ -50,6 +50,12 @@ type Bot struct {
 	// mainAnchor is the conversation's latest chat message id — replies and
 	// agent mail thread onto it.
 	mainAnchor string
+	// steerAnchor is the newest STEERED user message id, held separately so
+	// the running turn's own reply (recordSent advances mainAnchor to the
+	// bot's sent message) can't clobber it — the steer-catchup reply must
+	// thread to the user's message. Consumed (cleared) when a catch-up turn
+	// starts.
+	steerAnchor string
 	// mailed holds every mail_user text sent this turn: an identical repeat
 	// (a looping model) is refused instead of posted, and the turn's reply is
 	// suppressed when it duplicates a mail the user already has.
@@ -353,6 +359,7 @@ func (b *Bot) dispatchMail(ctx context.Context, batch []inMail) {
 		if !hasMedia && !b.turnQuiet && b.main != nil {
 			sess := b.main
 			b.mainAnchor = batch[len(batch)-1].m.ID
+			b.steerAnchor = b.mainAnchor
 			b.mu.Unlock()
 			parts := make([]string, 0, len(batch))
 			for _, mail := range batch {
@@ -528,11 +535,23 @@ func (b *Bot) startSteerCatchup(ctx context.Context) bool {
 		return false
 	}
 	sess := b.main
-	anchor := b.mainAnchor
+	anchor := b.takeSteerAnchorLocked()
 	turnCtx, cancel := b.takeSlotLocked(ctx)
 	b.mu.Unlock()
 	go b.runPostedQueuedTurn(ctx, turnCtx, cancel, sess, anchor)
 	return true
+}
+
+// takeSteerAnchorLocked consumes the pending steer anchor — the newest
+// steered user message id — falling back to the conversation anchor when no
+// steer recorded one. Caller must hold b.mu.
+func (b *Bot) takeSteerAnchorLocked() string {
+	anchor := b.steerAnchor
+	b.steerAnchor = ""
+	if anchor == "" {
+		anchor = b.mainAnchor
+	}
+	return anchor
 }
 
 // drainNextMail drains the WHOLE queued-mail backlog as one batch turn — it
@@ -616,7 +635,7 @@ func (b *Bot) dispatchWake(ctx context.Context, id string) {
 	// user spoke (perhaps a steer that raced the previous turn's end), so the
 	// reply must be delivered — RunQueued drains notices alongside it.
 	if sess.HasQueuedSteer() {
-		anchor := b.mainAnchor
+		anchor := b.takeSteerAnchorLocked()
 		turnCtx, cancel := b.takeSlotLocked(ctx)
 		b.mu.Unlock()
 		go b.runPostedQueuedTurn(ctx, turnCtx, cancel, sess, anchor)
@@ -659,7 +678,7 @@ func (b *Bot) startNextWake(ctx context.Context) {
 		return // already drained by the turn that just ran
 	}
 	if sess.HasQueuedSteer() {
-		anchor := b.mainAnchor
+		anchor := b.takeSteerAnchorLocked()
 		turnCtx, cancel := b.takeSlotLocked(ctx)
 		b.mu.Unlock()
 		go b.runPostedQueuedTurn(ctx, turnCtx, cancel, sess, anchor)

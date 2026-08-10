@@ -130,13 +130,20 @@ func TestMailQueueBatchesRepliesIntoOneTurn(t *testing.T) {
 		return ok && r.replyTo == "3" && strings.Contains(r.text, "batched reply")
 	})
 	// One batch turn: the model saw both queued messages in one call (call 2).
+	// Depending on timing they arrive as the batch turn's user message (queue
+	// path) or as an injected steer block (steer path) — either way, ONE extra
+	// model call carries both.
 	calls := g.inner.CallsSnapshot()
 	if len(calls) != 2 {
 		t.Fatalf("model calls = %d, want 2 (first turn + one batch)", len(calls))
 	}
-	last := calls[1].Msgs[len(calls[1].Msgs)-1]
-	if !strings.Contains(last.Content, "also this") || !strings.Contains(last.Content, "and this") {
-		t.Fatalf("batch turn input missing a queued mail: %q", last.Content)
+	var all strings.Builder
+	for _, m := range calls[1].Msgs {
+		all.WriteString(m.Content)
+		all.WriteString("\n")
+	}
+	if !strings.Contains(all.String(), "also this") || !strings.Contains(all.String(), "and this") {
+		t.Fatalf("batch turn input missing a queued mail:\n%s", all.String())
 	}
 }
 
