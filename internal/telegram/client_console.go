@@ -92,6 +92,17 @@ func (c *ConsoleClient) readLoop(ctx context.Context) {
 		if strings.TrimSpace(line) == "" {
 			continue // blank line: nothing actionable
 		}
+		// "&<data>" answers an inline menu (a button tap): the console has no
+		// buttons, so the callback_data is typed — e.g. "&nt|new" for the
+		// thread-choice ask.
+		if data := strings.TrimPrefix(line, "&"); data != line && strings.TrimSpace(data) != "" {
+			select {
+			case c.cb <- Callback{ChatID: c.chatID, ID: "console", Data: strings.TrimSpace(data)}:
+			case <-ctx.Done():
+				return
+			}
+			continue
+		}
 		msg := c.parseLine(line)
 		select {
 		case c.in <- msg:

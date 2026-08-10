@@ -89,8 +89,10 @@ func TestMailQueueDrainsAfterTurn(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("first turn never started")
 	}
-	// Arrives mid-turn: queues silently.
+	// Arrives mid-turn as a bare message: passes the thread ask (resolved as
+	// a new thread), then queues silently.
 	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "2", Text: "two"})
+	b.resolveThreadAsk(context.Background(), true)
 	close(g.Release)
 
 	waitFor(t, func() bool {

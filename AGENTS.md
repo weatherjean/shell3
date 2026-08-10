@@ -218,8 +218,14 @@ always succeeds — a message arriving mid-turn queues silently (`mailQueue`)
 and drains once the turn ends, the running turn never steered. Queued
 replies into the SAME thread drain as one batch turn (grouped through the
 thread index, so a retired thread's replies still batch and resume it),
-anchored at the newest message; a fresh message is its own thread and its
-own turn. `/inbox` renders the queued state — the user's pending mail,
+anchored at the newest message. A bare (non-reply) message is gated by the
+**thread-choice ask** (`threadask.go`): a 🧵 New thread / Cancel inline
+menu (`nt|new` / `nt|cancel` callback data) parks the message —
+subsequent bare messages join the held batch — until a tap or the 60s
+timer (`threadAskTimeout`) runs it as a new thread; Cancel drops it (the
+user replies to a message instead). Skipped when `ThreadIndex.Any()` is
+false (first conversation ever); replies and /commands never ask; the
+console transport answers menus with an `&<data>` input line. `/inbox` renders the queued state — the user's pending mail,
 wake-queued sessions, live sessions holding undrained agent mail — with
 zero tokens. `postReply`
 chunks the reply at Telegram's message cap on rune boundaries and replies each

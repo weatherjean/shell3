@@ -152,7 +152,10 @@ func TestContract4_MidTurnMessageQueues(t *testing.T) {
 		t.Fatal("first turn never started")
 	}
 
+	// A bare mid-turn message first passes the thread-choice ask; resolving
+	// it as a new thread queues silently behind the running turn.
 	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "2", Text: "steer"})
+	b.resolveThreadAsk(context.Background(), true)
 
 	b.mu.Lock()
 	queued := len(b.mailQueue)

@@ -352,3 +352,10 @@ func (f *fakeClient) plainTexts() []string {
 	}
 	return out
 }
+
+// menusSnapshot returns the recorded SendMenu posts.
+func (f *fakeClient) menusSnapshot() []sentMenu {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]sentMenu{}, f.menus...)
+}

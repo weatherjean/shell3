@@ -148,3 +148,23 @@ func TestConsole_SilentTag(t *testing.T) {
 		t.Fatalf("plain send carries 🔕 tag: %s", out.String())
 	}
 }
+
+// "&<data>" lines are button taps: they land on the Callbacks channel, not as
+// messages — the console's way of answering an inline menu.
+func TestConsoleCallbackLine(t *testing.T) {
+	var out bytes.Buffer
+	c := NewConsoleClient(strings.NewReader("&nt|new\n"), &out, ConsoleChatID)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	msgs := c.Updates(ctx)
+	select {
+	case cb := <-c.Callbacks(ctx):
+		if cb.Data != "nt|new" || cb.ChatID != ConsoleChatID {
+			t.Fatalf("callback = %+v", cb)
+		}
+	case m := <-msgs:
+		t.Fatalf("tap line parsed as a message: %+v", m)
+	case <-ctx.Done():
+		t.Fatal("no callback arrived")
+	}
+}

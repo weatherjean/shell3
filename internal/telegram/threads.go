@@ -44,6 +44,20 @@ func (ti *ThreadIndex) Record(msgID, sessionID string) {
 	}
 }
 
+// Any reports whether ANY conversation exists on this surface — in memory or
+// persisted by an earlier process. The thread-choice ask keys off it: with no
+// history there is nothing the user could have meant to continue.
+func (ti *ThreadIndex) Any() bool {
+	ti.mu.Lock()
+	n := len(ti.m)
+	ti.mu.Unlock()
+	if n > 0 {
+		return true
+	}
+	st := ti.store()
+	return st != nil && st.ThreadAny(ti.surface)
+}
+
 // Lookup returns the session id recorded for msgID, if any: the in-memory
 // map first, then the store (entries persisted by an earlier process).
 func (ti *ThreadIndex) Lookup(msgID string) (string, bool) {

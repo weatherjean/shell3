@@ -41,8 +41,13 @@ restart (sessions the janitor swept answer that they can't be resumed). One
 main-agent turn runs at a time, but sending always succeeds: a message sent
 while a turn is running queues silently and drains after the turn ends.
 Queued replies into the same thread drain as **one** batched turn, anchored
-at the newest message; a fresh (non-reply) message is its own thread and its
-own turn. `/inbox` shows what's queued; `/stop` cancels the running turn.
+at the newest message. A bare (non-reply) message first gets a
+**thread-choice ask** — "Start a new thread?" with 🧵 New thread / Cancel
+buttons — because typing without replying is the easiest way to
+accidentally fork a fresh context: tap New thread (or wait 60 s, which
+does the same) and it runs as its own conversation; Cancel drops it so you
+can reply to a message instead and continue that thread. The very first
+conversation skips the ask. `/inbox` shows what's queued; `/stop` cancels the running turn.
 Background jobs (subagents, `bash_bg`, cron) run independently and come back
 as [completion mail](configuration.md#completion-mail): a failure or a
 `direct` result posts to the chat (🔔, or ⏰ for a cron origin); everything
@@ -55,7 +60,9 @@ to you and ⚠️ failures always ring.
 
 `--console` swaps the Telegram transport for stdin/stdout and drives the same
 bot loop with no credentials and no network: a plain line is a fresh message,
-`@<id> text` is a reply into that thread, `/…` is a command, EOF quits.
+`@<id> text` is a reply into that thread, `/…` is a command, `&<data>`
+answers an inline menu by its callback data (e.g. `&nt|new` for the
+thread-choice ask), EOF quits.
 
 ### Commands
 

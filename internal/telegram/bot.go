@@ -64,6 +64,14 @@ type Bot struct {
 	// turn via StartFreshTurn), so it never runs a turn of its own.
 	pinned map[string]bool
 
+	// heldMail is the bare-message batch parked behind the thread-choice ask
+	// (threadask.go); heldMenuID is the ask's button message, heldTimer the
+	// no-tap fallback. All under b.mu.
+	heldMail         []inMail
+	heldMenuID       string
+	heldTimer        *time.Timer
+	threadAskTimeout time.Duration // 0 = threadAskDefaultTimeout; tests shorten it
+
 	media     *MediaCaps  // STT/describe/TTS/imagegen capabilities; nil when unconfigured
 	voiceMode *ModeStore  // per-chat inbound-voice-reply mode; nil when unconfigured
 	quietMode *QuietStore // the /quiet toggle's store; nil = never quiet
@@ -304,6 +312,13 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 	}
 
 	mail := inMail{m: m, text: text, saved: saved, hadVoice: hadVoice}
+
+	// A bare message may first need the thread-choice ask (threadask.go): it
+	// parks there until the user picks New thread / Cancel or the timer runs
+	// it as new. Replies thread explicitly and never ask.
+	if m.ReplyToID == "" && b.maybeHoldForThreadAsk(ctx, mail) {
+		return
+	}
 
 	// One main-agent turn at a time, globally. Mail semantics: sending always
 	// succeeds — a message arriving mid-turn queues and is drained after the
