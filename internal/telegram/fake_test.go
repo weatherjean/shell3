@@ -29,6 +29,7 @@ type fakeClient struct {
 	videos   []sentVideo
 	menus    []sentMenu
 	replies  []sentReply
+	silent   []bool // one entry per text/document send, true when SendOpt.Silent
 
 	failReply error // when set, reply sends behave as a deleted target (fall back to plain)
 
@@ -155,13 +156,14 @@ func (f *fakeClient) reset() {
 	f.sent, f.html, f.docs, f.replies = nil, nil, nil, nil
 }
 
-func (f *fakeClient) SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string) (string, error) {
+func (f *fakeClient) SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string, opts ...SendOpt) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failDoc != nil {
 		return "", f.failDoc
 	}
 	f.docs = append(f.docs, sentDoc{chatID: chatID, filename: filename, data: data, caption: caption})
+	f.silent = append(f.silent, sendSilent(opts))
 	f.next++
 	return strconv.Itoa(f.next), nil
 }
@@ -227,14 +229,15 @@ func (f *fakeClient) lastDoc() (sentDoc, bool) {
 	return f.docs[len(f.docs)-1], true
 }
 
-func (f *fakeClient) Send(ctx context.Context, chatID int64, text string) (string, error) {
+func (f *fakeClient) Send(ctx context.Context, chatID int64, text string, opts ...SendOpt) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.next++
 	f.sent = append(f.sent, sentMsg{chatID: chatID, text: text})
+	f.silent = append(f.silent, sendSilent(opts))
 	return strconv.Itoa(f.next), nil
 }
-func (f *fakeClient) SendHTML(ctx context.Context, chatID int64, html string) (string, error) {
+func (f *fakeClient) SendHTML(ctx context.Context, chatID int64, html string, opts ...SendOpt) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failHTML {
@@ -242,36 +245,39 @@ func (f *fakeClient) SendHTML(ctx context.Context, chatID int64, html string) (s
 	}
 	f.next++
 	f.html = append(f.html, html)
+	f.silent = append(f.silent, sendSilent(opts))
 	return strconv.Itoa(f.next), nil
 }
 
 // SendReply records a plain threaded reply. failReply simulates a deleted
 // target: the reply degrades to a plain Send (replyTo cleared), mirroring the
 // real client's fallback.
-func (f *fakeClient) SendReply(ctx context.Context, chatID int64, text string, replyTo string) (string, error) {
+func (f *fakeClient) SendReply(ctx context.Context, chatID int64, text string, replyTo string, opts ...SendOpt) (string, error) {
 	if f.failReply != nil {
-		return f.Send(ctx, chatID, text)
+		return f.Send(ctx, chatID, text, opts...)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.next++
 	id := strconv.Itoa(f.next)
 	f.replies = append(f.replies, sentReply{msgID: id, chatID: chatID, replyTo: replyTo, text: text})
+	f.silent = append(f.silent, sendSilent(opts))
 	return id, nil
 }
 
-func (f *fakeClient) SendHTMLReply(ctx context.Context, chatID int64, html string, replyTo string) (string, error) {
+func (f *fakeClient) SendHTMLReply(ctx context.Context, chatID int64, html string, replyTo string, opts ...SendOpt) (string, error) {
 	if f.failHTML {
 		return "", errFakeHTML
 	}
 	if f.failReply != nil {
-		return f.SendHTML(ctx, chatID, html)
+		return f.SendHTML(ctx, chatID, html, opts...)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.next++
 	id := strconv.Itoa(f.next)
 	f.replies = append(f.replies, sentReply{msgID: id, chatID: chatID, replyTo: replyTo, text: html, html: true})
+	f.silent = append(f.silent, sendSilent(opts))
 	return id, nil
 }
 

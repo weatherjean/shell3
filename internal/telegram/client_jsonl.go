@@ -117,6 +117,7 @@ type jsonlOutEvent struct {
 	Filename   string       `json:"filename,omitempty"`
 	Caption    string       `json:"caption,omitempty"`
 	Options    []MenuOption `json:"options,omitempty"`
+	Silent     bool         `json:"silent,omitempty"`
 	Yes        string       `json:"yes,omitempty"`
 	No         string       `json:"no,omitempty"`
 	CallbackID string       `json:"callback_id,omitempty"`
@@ -231,25 +232,25 @@ func (c *JSONLClient) EmitHello(commands []Command) {
 	c.emit(jsonlOutEvent{Type: "hello", Protocol: jsonlProtocol, Commands: commands})
 }
 
-func (c *JSONLClient) Send(_ context.Context, _ int64, text string) (string, error) {
+func (c *JSONLClient) Send(_ context.Context, _ int64, text string, opts ...SendOpt) (string, error) {
 	id := c.nextID("a")
-	c.emit(jsonlOutEvent{Type: "send", ID: id, Text: text})
+	c.emit(jsonlOutEvent{Type: "send", ID: id, Text: text, Silent: sendSilent(opts)})
 	return id, nil
 }
 
 // SendHTML never emits: the bot's HTML→plain fallback re-sends through
 // Send/SendReply with the original markdown, which is what belongs on the wire.
-func (c *JSONLClient) SendHTML(_ context.Context, _ int64, _ string) (string, error) {
+func (c *JSONLClient) SendHTML(_ context.Context, _ int64, _ string, _ ...SendOpt) (string, error) {
 	return "", ErrNoHTML
 }
 
-func (c *JSONLClient) SendReply(_ context.Context, _ int64, text string, replyTo string) (string, error) {
+func (c *JSONLClient) SendReply(_ context.Context, _ int64, text string, replyTo string, opts ...SendOpt) (string, error) {
 	id := c.nextID("a")
-	c.emit(jsonlOutEvent{Type: "send", ID: id, ReplyToID: replyTo, Text: text})
+	c.emit(jsonlOutEvent{Type: "send", ID: id, ReplyToID: replyTo, Text: text, Silent: sendSilent(opts)})
 	return id, nil
 }
 
-func (c *JSONLClient) SendHTMLReply(_ context.Context, _ int64, _ string, _ string) (string, error) {
+func (c *JSONLClient) SendHTMLReply(_ context.Context, _ int64, _ string, _ string, _ ...SendOpt) (string, error) {
 	return "", ErrNoHTML
 }
 
@@ -273,37 +274,37 @@ func (c *JSONLClient) spoolFile(filename string, data []byte) (string, error) {
 
 // sendMedia spools one outbound file and emits its media event. id may be ""
 // (only document sends carry an id — the seam returns one only there).
-func (c *JSONLClient) sendMedia(id, kind, filename string, data []byte, caption string) error {
+func (c *JSONLClient) sendMedia(id, kind, filename string, data []byte, caption string, silent bool) error {
 	path, err := c.spoolFile(filename, data)
 	if err != nil {
 		return err
 	}
-	c.emit(jsonlOutEvent{Type: "media", ID: id, Kind: kind, Path: path, Filename: filepath.Base(filename), Caption: caption})
+	c.emit(jsonlOutEvent{Type: "media", ID: id, Kind: kind, Path: path, Filename: filepath.Base(filename), Caption: caption, Silent: silent})
 	return nil
 }
 
-func (c *JSONLClient) SendDocument(_ context.Context, _ int64, filename string, data []byte, caption string) (string, error) {
+func (c *JSONLClient) SendDocument(_ context.Context, _ int64, filename string, data []byte, caption string, opts ...SendOpt) (string, error) {
 	id := c.nextID("a")
-	if err := c.sendMedia(id, "document", filename, data, caption); err != nil {
+	if err := c.sendMedia(id, "document", filename, data, caption, sendSilent(opts)); err != nil {
 		return "", err
 	}
 	return id, nil
 }
 
 func (c *JSONLClient) SendPhoto(_ context.Context, _ int64, filename string, data []byte, caption string) error {
-	return c.sendMedia("", "photo", filename, data, caption)
+	return c.sendMedia("", "photo", filename, data, caption, false)
 }
 
 func (c *JSONLClient) SendVoice(_ context.Context, _ int64, data []byte, caption string) error {
-	return c.sendMedia("", "voice", "voice.ogg", data, caption)
+	return c.sendMedia("", "voice", "voice.ogg", data, caption, false)
 }
 
 func (c *JSONLClient) SendAudio(_ context.Context, _ int64, filename string, data []byte, caption string) error {
-	return c.sendMedia("", "audio", filename, data, caption)
+	return c.sendMedia("", "audio", filename, data, caption, false)
 }
 
 func (c *JSONLClient) SendVideo(_ context.Context, _ int64, filename string, data []byte, caption string) error {
-	return c.sendMedia("", "video", filename, data, caption)
+	return c.sendMedia("", "video", filename, data, caption, false)
 }
 
 func (c *JSONLClient) SendMenu(_ context.Context, _ int64, text string, options []MenuOption) (string, error) {

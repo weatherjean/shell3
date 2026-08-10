@@ -198,10 +198,11 @@ func (c *BotAPIClient) Updates(ctx context.Context) <-chan Msg { return c.out }
 
 // Send posts a plain-text message. ParseMode is omitted; this is the safe
 // fallback path when SendHTML is rejected.
-func (c *BotAPIClient) Send(ctx context.Context, chatID int64, text string) (string, error) {
+func (c *BotAPIClient) Send(ctx context.Context, chatID int64, text string, opts ...SendOpt) (string, error) {
 	m, err := c.b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID: chatID,
-		Text:   text,
+		ChatID:              chatID,
+		Text:                text,
+		DisableNotification: sendSilent(opts),
 	})
 	if err != nil {
 		return "", err
@@ -212,11 +213,12 @@ func (c *BotAPIClient) Send(ctx context.Context, chatID int64, text string) (str
 // SendHTML posts a message with parse_mode=HTML so the agent's formatting
 // (bold, italics, code, links) renders. Telegram rejects malformed HTML with a
 // 400, so callers fall back to Send on error.
-func (c *BotAPIClient) SendHTML(ctx context.Context, chatID int64, html string) (string, error) {
+func (c *BotAPIClient) SendHTML(ctx context.Context, chatID int64, html string, opts ...SendOpt) (string, error) {
 	m, err := c.b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:    chatID,
-		Text:      html,
-		ParseMode: models.ParseModeHTML,
+		ChatID:              chatID,
+		Text:                html,
+		ParseMode:           models.ParseModeHTML,
+		DisableNotification: sendSilent(opts),
 	})
 	if err != nil {
 		return "", err
@@ -233,18 +235,19 @@ func replyNotFound(err error) bool {
 
 // SendReply posts plain text as a reply to replyTo. On a deleted reply target
 // it retries as a plain Send so a thread whose anchor vanished never fails.
-func (c *BotAPIClient) SendReply(ctx context.Context, chatID int64, text string, replyTo string) (string, error) {
+func (c *BotAPIClient) SendReply(ctx context.Context, chatID int64, text string, replyTo string, opts ...SendOpt) (string, error) {
 	rid, err := strconv.Atoi(replyTo)
 	if err != nil {
-		return c.Send(ctx, chatID, text) // non-numeric anchor (foreign transport): plain send
+		return c.Send(ctx, chatID, text, opts...) // non-numeric anchor (foreign transport): plain send
 	}
 	m, err := c.b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:          chatID,
-		Text:            text,
-		ReplyParameters: &models.ReplyParameters{MessageID: rid},
+		ChatID:              chatID,
+		Text:                text,
+		ReplyParameters:     &models.ReplyParameters{MessageID: rid},
+		DisableNotification: sendSilent(opts),
 	})
 	if replyNotFound(err) {
-		return c.Send(ctx, chatID, text)
+		return c.Send(ctx, chatID, text, opts...)
 	}
 	if err != nil {
 		return "", err
@@ -255,19 +258,20 @@ func (c *BotAPIClient) SendReply(ctx context.Context, chatID int64, text string,
 // SendHTMLReply is SendReply with parse_mode=HTML. On a deleted reply target it
 // falls back to a plain (HTML) Send; callers fall back to SendReply on an HTML
 // rejection.
-func (c *BotAPIClient) SendHTMLReply(ctx context.Context, chatID int64, html string, replyTo string) (string, error) {
+func (c *BotAPIClient) SendHTMLReply(ctx context.Context, chatID int64, html string, replyTo string, opts ...SendOpt) (string, error) {
 	rid, err := strconv.Atoi(replyTo)
 	if err != nil {
-		return c.SendHTML(ctx, chatID, html)
+		return c.SendHTML(ctx, chatID, html, opts...)
 	}
 	m, err := c.b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:          chatID,
-		Text:            html,
-		ParseMode:       models.ParseModeHTML,
-		ReplyParameters: &models.ReplyParameters{MessageID: rid},
+		ChatID:              chatID,
+		Text:                html,
+		ParseMode:           models.ParseModeHTML,
+		ReplyParameters:     &models.ReplyParameters{MessageID: rid},
+		DisableNotification: sendSilent(opts),
 	})
 	if replyNotFound(err) {
-		return c.SendHTML(ctx, chatID, html)
+		return c.SendHTML(ctx, chatID, html, opts...)
 	}
 	if err != nil {
 		return "", err
@@ -349,11 +353,12 @@ func (c *BotAPIClient) SetCommands(ctx context.Context, cmds []Command) error {
 }
 
 // SendDocument uploads a file to the chat as a document.
-func (c *BotAPIClient) SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string) (string, error) {
+func (c *BotAPIClient) SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string, opts ...SendOpt) (string, error) {
 	m, err := c.b.SendDocument(ctx, &bot.SendDocumentParams{
-		ChatID:   chatID,
-		Document: &models.InputFileUpload{Filename: filename, Data: bytes.NewReader(data)},
-		Caption:  caption,
+		ChatID:              chatID,
+		Document:            &models.InputFileUpload{Filename: filename, Data: bytes.NewReader(data)},
+		Caption:             caption,
+		DisableNotification: sendSilent(opts),
 	})
 	if err != nil {
 		return "", err

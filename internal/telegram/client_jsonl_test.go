@@ -202,3 +202,26 @@ func TestJSONLHello(t *testing.T) {
 		t.Fatalf("hello commands = %v", evs[0]["commands"])
 	}
 }
+
+// A silent send crosses the wire as "silent":true; a normal send omits the
+// field entirely (omitempty), so front-ends that don't know it see no change.
+func TestJSONL_SilentField(t *testing.T) {
+	c, out := newTestJSONL(t, "")
+	ctx := context.Background()
+
+	if _, err := c.Send(ctx, ConsoleChatID, "hushed", SendOpt{Silent: true}); err != nil {
+		t.Fatal(err)
+	}
+	evs := decodeLines(t, out)
+	if len(evs) != 1 || evs[0]["silent"] != true {
+		t.Fatalf("silent send: want one frame with silent=true, got %v", evs)
+	}
+
+	out.Reset()
+	if _, err := c.SendReply(ctx, ConsoleChatID, "loud", "m1"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), `"silent"`) {
+		t.Fatalf("plain send leaked a silent field: %s", out.String())
+	}
+}

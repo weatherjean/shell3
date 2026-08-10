@@ -161,26 +161,39 @@ func (c *ConsoleClient) mark(format string, args ...any) {
 	}
 }
 
-func (c *ConsoleClient) Send(_ context.Context, _ int64, text string) (string, error) {
-	return c.emit("", "", text), nil
+// silentTag renders a send's options as an emit tag: silent sends carry 🔕 so
+// console runs (and their tests) can see what the real transport would hush.
+func silentTag(opts []SendOpt) string {
+	if sendSilent(opts) {
+		return "🔕"
+	}
+	return ""
 }
 
-func (c *ConsoleClient) SendHTML(_ context.Context, _ int64, html string) (string, error) {
-	return c.emit("", "", html), nil
+func (c *ConsoleClient) Send(_ context.Context, _ int64, text string, opts ...SendOpt) (string, error) {
+	return c.emit("", silentTag(opts), text), nil
 }
 
-func (c *ConsoleClient) SendReply(_ context.Context, _ int64, text string, replyTo string) (string, error) {
-	return c.emit(replyTo, "", text), nil
+func (c *ConsoleClient) SendHTML(_ context.Context, _ int64, html string, opts ...SendOpt) (string, error) {
+	return c.emit("", silentTag(opts), html), nil
 }
 
-func (c *ConsoleClient) SendHTMLReply(_ context.Context, _ int64, html string, replyTo string) (string, error) {
-	return c.emit(replyTo, "", html), nil
+func (c *ConsoleClient) SendReply(_ context.Context, _ int64, text string, replyTo string, opts ...SendOpt) (string, error) {
+	return c.emit(replyTo, silentTag(opts), text), nil
+}
+
+func (c *ConsoleClient) SendHTMLReply(_ context.Context, _ int64, html string, replyTo string, opts ...SendOpt) (string, error) {
+	return c.emit(replyTo, silentTag(opts), html), nil
 }
 
 func (c *ConsoleClient) Typing(_ context.Context, _ int64) error { return nil }
 
-func (c *ConsoleClient) SendDocument(_ context.Context, _ int64, filename string, _ []byte, caption string) (string, error) {
-	return c.emit("", "document "+filename, caption), nil
+func (c *ConsoleClient) SendDocument(_ context.Context, _ int64, filename string, _ []byte, caption string, opts ...SendOpt) (string, error) {
+	tag := "document " + filename
+	if s := silentTag(opts); s != "" {
+		tag = s + " " + tag
+	}
+	return c.emit("", tag, caption), nil
 }
 
 func (c *ConsoleClient) SendPhoto(_ context.Context, _ int64, filename string, _ []byte, caption string) error {

@@ -127,3 +127,24 @@ func drainMsgs(t *testing.T, ch <-chan Msg, n int) []Msg {
 	}
 	return got
 }
+
+// A silent send is visible in the console rendering as a 🔕 tag.
+func TestConsole_SilentTag(t *testing.T) {
+	var out bytes.Buffer
+	c := NewConsoleClient(strings.NewReader(""), &out, ConsoleChatID)
+	ctx := context.Background()
+
+	if _, err := c.Send(ctx, ConsoleChatID, "hushed", SendOpt{Silent: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "🔕") {
+		t.Fatalf("silent send missing 🔕 tag: %s", out.String())
+	}
+	out.Reset()
+	if _, err := c.Send(ctx, ConsoleChatID, "loud"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "🔕") {
+		t.Fatalf("plain send carries 🔕 tag: %s", out.String())
+	}
+}
