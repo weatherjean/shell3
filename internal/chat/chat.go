@@ -79,10 +79,11 @@ type Config struct {
 	RunsDir string
 	// Personality is the loaded persona (system prompt, allowed tools).
 	Personality persona.Persona
-	// RefreshPrompt rebuilds the system prompt with current runtime data
-	// (notably a fresh timestamp). /clear calls it when starting a new
-	// conversation so a long-lived process doesn't carry a stale boot-time clock
-	// into a fresh context. Nil leaves the prompt frozen at construction.
+	// RefreshPrompt rebuilds the system prompt with current runtime data —
+	// context files re-read from disk, a fresh timestamp. Called at the start
+	// of EVERY turn (assembleTurnContext) so a long-lived conversation tracks
+	// current file contents instead of a session-creation snapshot. Nil
+	// leaves the prompt frozen at construction.
 	RefreshPrompt func() string
 	// WorkDir is the working directory for tool execution and error dumps.
 	WorkDir string
@@ -211,6 +212,7 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler) TurnConfig {
 		},
 		LLM:           cfg.LLM,
 		Personality:   cfg.Personality,
+		RefreshPrompt: cfg.RefreshPrompt,
 		StatusLine:    cfg.StatusLine,
 		ConfigDir:     cfg.ConfigDir,
 		Handlers:      handlers,

@@ -19,8 +19,10 @@ Everything with a prompt is markdown-with-frontmatter: `agent.md` (THE agent —
 exactly one because there is exactly one file; frontmatter `model` (required),
 `tools: [bash, bash_bg, edit, media, read, list_files, history]`, `mcp`, `prune`,
 `context` (main-agent-only: a list of config-dir-relative paths, globs
-allowed, read fresh at session creation — so every fresh turn sees current
-file contents, not a load-time snapshot — into a `## Context` prompt section,
+allowed, re-read at every turn start (`RefreshPrompt`, wired through
+`TurnConfig` into `assembleTurnContext`) — so even the long-lived Telegram
+conversation sees current file contents, never a session-creation
+snapshot — into a `## Context` prompt section,
 one `### <path>` sub-section per file; a missing literal entry is a load
 error, a zero-match glob is legal (`shell3 health` warns), a file that
 vanishes between load and session build gets a one-line

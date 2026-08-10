@@ -96,6 +96,12 @@ type TurnConfig struct {
 	// Personality is the persona whose system prompt and tool allow-list
 	// drive this turn.
 	Personality persona.Persona
+	// RefreshPrompt re-renders the system prompt from current config state
+	// (context files, timestamp). Non-nil on config-dir sessions: called at
+	// turn start so a long-lived session sees current file contents, not a
+	// session-creation snapshot. Nil (tests, bare configs) keeps
+	// Personality.SystemPrompt.
+	RefreshPrompt func() string
 	// StatusLine is the current provider/model/effort string; used for
 	// reminder tracking.
 	StatusLine string

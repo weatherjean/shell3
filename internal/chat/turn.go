@@ -232,8 +232,19 @@ func injectAndEmit(sess *Session, allMsgs *[]llm.Message, r string, appendToLast
 func assembleTurnContext(cfg TurnConfig, sess *Session, inboxSeeded bool) (allMsgs []llm.Message, toolList []llm.ToolDefinition, toolSchemas map[string]map[string]any, skip bool) {
 	msgs := sess.messages
 
+	// The system prompt is re-rendered per turn when the config wires a
+	// refresher: context files (agent.md frontmatter `context:`) and the
+	// prompt's timestamp track the disk NOW, not the session-creation
+	// snapshot — a long-lived conversation would otherwise serve stale
+	// context until /new or a restart.
+	sysPrompt := cfg.Personality.SystemPrompt
+	if cfg.RefreshPrompt != nil {
+		if s := cfg.RefreshPrompt(); s != "" {
+			sysPrompt = s
+		}
+	}
 	allMsgs = make([]llm.Message, 0, len(msgs)+1)
-	allMsgs = append(allMsgs, llm.Message{Role: llm.RoleSystem, Content: cfg.Personality.SystemPrompt})
+	allMsgs = append(allMsgs, llm.Message{Role: llm.RoleSystem, Content: sysPrompt})
 	allMsgs = append(allMsgs, msgs...)
 
 	// Standing reminders (host Environment context) sit right after

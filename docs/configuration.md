@@ -144,9 +144,10 @@ context: [memory.md, notes/*.md]
 - Each file's contents are appended to the system prompt under a `## Context`
   heading, one `### <path>` sub-section per file — the agent knows exactly
   where to `edit_file` to update its own brain.
-- Files are read **fresh at session creation**, not at config load: edit
-  `memory.md` in one thread and the very next message sees the change, no
-  reload needed.
+- Files are re-read **at every turn**, not at config load or session
+  creation: edit `memory.md` (or have the agent edit it) and the very next
+  message sees the change — even in the one long-lived Telegram
+  conversation, no reload needed.
 - A literal (non-glob) entry that doesn't exist fails config load, same as
   any other strict-decode error. A glob matching zero files is legal —
   `shell3 health` warns about it. A file that disappears between load and a
