@@ -4,6 +4,7 @@ package telegram
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -138,5 +139,61 @@ func TestWakeTurn_OrdinarySessionRunsQuietly(t *testing.T) {
 	})
 	if texts := fc.sentTexts(); len(texts) != 0 {
 		t.Fatalf("a wake (mail) turn must post nothing, got %v", texts)
+	}
+}
+
+// setQuiet flips the bot's /quiet toggle through a real store.
+func setQuiet(t *testing.T, b *Bot, on bool) *QuietStore {
+	t.Helper()
+	qs := &QuietStore{Path: filepath.Join(t.TempDir(), "quiet_mode.json")}
+	b.SetQuiet(qs)
+	if err := qs.Set(on); err != nil {
+		t.Fatal(err)
+	}
+	return qs
+}
+
+// Quiet on: ⏰ and 🔔 posts arrive silently; ⚠️ failure posts always ring.
+func TestPostCompletion_QuietSilencesButFailuresRing(t *testing.T) {
+	fc := newFakeClient()
+	b := newBot(t, fc, storeRuntime(t, "unused"))
+	setQuiet(t, b, true)
+
+	b.PostCompletion(shell3.CompletionPost{CronJob: "nightly", Text: "all well"})
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "⏰ nightly: all well")
+	})
+	if !fc.lastSilent() {
+		t.Error("quiet cron post should be silent")
+	}
+
+	b.PostCompletion(shell3.CompletionPost{Text: "the fetch finished"})
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "🔔 the fetch finished")
+	})
+	if !fc.lastSilent() {
+		t.Error("quiet 🔔 post should be silent")
+	}
+
+	b.PostCompletion(shell3.CompletionPost{Text: "⚠️ nightly failed: exit 1"})
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "⚠️ nightly failed")
+	})
+	if fc.lastSilent() {
+		t.Error("⚠️ failure post must ring even under quiet")
+	}
+}
+
+// Quiet off (the default): completion posts ring.
+func TestPostCompletion_DefaultRings(t *testing.T) {
+	fc := newFakeClient()
+	b := newBot(t, fc, storeRuntime(t, "unused"))
+
+	b.PostCompletion(shell3.CompletionPost{CronJob: "nightly", Text: "all well"})
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "⏰ nightly: all well")
+	})
+	if fc.lastSilent() {
+		t.Error("default cron post should ring")
 	}
 }

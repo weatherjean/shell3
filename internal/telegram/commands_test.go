@@ -5,6 +5,7 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -491,5 +492,43 @@ func TestCommand_BotnameSuffixIsStripped(t *testing.T) {
 	}
 	if !strings.Contains(joined, "reload not available") {
 		t.Fatalf("expected the /reload reply, got %v", fc.sentTexts())
+	}
+}
+
+// /quiet reports and flips the persisted toggle; junk gets usage.
+func TestQuietCommand(t *testing.T) {
+	fc := newFakeClient()
+	b := newBot(t, fc, storeRuntime(t, "unused"))
+	qs := &QuietStore{Path: filepath.Join(t.TempDir(), "quiet_mode.json")}
+	b.SetQuiet(qs)
+	ctx := context.Background()
+
+	b.handleCommand(ctx, Msg{ChatID: 42, Text: "/quiet"})
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "quiet is off")
+	})
+
+	b.handleCommand(ctx, Msg{ChatID: 42, Text: "/quiet on"})
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "quiet is on")
+	})
+	if !qs.Get() {
+		t.Error("/quiet on did not persist")
+	}
+
+	b.handleCommand(ctx, Msg{ChatID: 42, Text: "/quiet off"})
+	waitFor(t, func() bool {
+		return strings.Count(strings.Join(fc.sentTexts(), "\n"), "quiet is off") >= 2
+	})
+	if qs.Get() {
+		t.Error("/quiet off did not persist")
+	}
+
+	b.handleCommand(ctx, Msg{ChatID: 42, Text: "/quiet sideways"})
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "usage: /quiet on|off")
+	})
+	if qs.Get() {
+		t.Error("junk arg flipped the store")
 	}
 }

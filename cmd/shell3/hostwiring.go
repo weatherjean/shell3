@@ -95,6 +95,12 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 		return nil, err
 	}
 	b.SetMedia(buildMediaCaps(rt), voiceModeStore)
+	// The /quiet toggle: persisted beside voice_mode.json, read per send.
+	quietStore, err := newQuietStore()
+	if err != nil {
+		return nil, err
+	}
+	b.SetQuiet(quietStore)
 	rt.SetSessionDecorator(func(s *shell3.Session) {
 		_ = media.RegisterImageTool(s, buildMediaClients(rt))
 		if !s.Headless() { // main chat sessions only, not subagent children

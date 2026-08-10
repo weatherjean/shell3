@@ -224,6 +224,16 @@ func newVoiceModeStore() (*telegram.ModeStore, error) {
 	return &telegram.ModeStore{Path: filepath.Join(paths.NewGlobal(home).Root, "voice_mode.json")}, nil
 }
 
+// newQuietStore opens the /quiet toggle's file at ~/.shell3/quiet_mode.json,
+// beside voice_mode.json.
+func newQuietStore() (*telegram.QuietStore, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve home directory: %w", err)
+	}
+	return &telegram.QuietStore{Path: filepath.Join(paths.NewGlobal(home).Root, "quiet_mode.json")}, nil
+}
+
 // configReloader and rearmBot are the narrow slices of *shell3.Runtime and
 // *telegram.Bot that reloadAndRearm needs, keeping the reload-coordination
 // logic unit-testable with fakes.

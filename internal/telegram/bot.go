@@ -709,13 +709,20 @@ func (b *Bot) PostCompletion(p shell3.CompletionPost) {
 	if strings.TrimSpace(text) == "" {
 		text = "(no output)"
 	}
+	failure := strings.HasPrefix(text, "⚠️")
 	switch {
 	case cronJob != "":
 		text = fmt.Sprintf("⏰ %s: %s", cronJob, text)
-	case strings.HasPrefix(text, "⚠️"):
+	case failure:
 		// The runtime's failure-floor text carries its own marker.
 	default:
 		text = "🔔 " + text
+	}
+	// Under /quiet, background posts arrive without a ping — except failures,
+	// which always ring.
+	var opts []SendOpt
+	if b.isQuiet() && !failure {
+		opts = append(opts, SendOpt{Silent: true})
 	}
 	var sess *shell3.Session
 	var replyTo string
@@ -727,10 +734,10 @@ func (b *Bot) PostCompletion(p shell3.CompletionPost) {
 	go func() {
 		ctx := context.Background()
 		if sess != nil && replyTo != "" {
-			b.postReply(ctx, sess, replyTo, text)
+			b.postReply(ctx, sess, replyTo, text, opts...)
 			return
 		}
-		b.sendReply(ctx, text)
+		b.sendReply(ctx, text, opts...)
 	}()
 }
 
@@ -760,7 +767,11 @@ func (b *Bot) StartFreshTurn(note string) {
 	sess, err := b.rt.Session(shell3.SessionOpts{WorkDir: b.workDir})
 	if err != nil {
 		// Degrade to a raw post rather than dropping the completion.
-		go b.sendReply(context.Background(), "🔔 "+note)
+		var opts []SendOpt
+		if b.isQuiet() {
+			opts = append(opts, SendOpt{Silent: true})
+		}
+		go b.sendReply(context.Background(), "🔔 "+note, opts...)
 		return
 	}
 	b.mu.Lock()

@@ -76,7 +76,7 @@ func chunk(s string) []string {
 
 // sendReply posts text to the chat, chunked and unthreaded. Used for notices
 // (errors, acks, media captions) that are not a thread's turn reply.
-func (b *Bot) sendReply(ctx context.Context, text string) {
+func (b *Bot) sendReply(ctx context.Context, text string, opts ...SendOpt) {
 	if text == "" {
 		text = "(no output)"
 	}
@@ -84,8 +84,8 @@ func (b *Bot) sendReply(ctx context.Context, text string) {
 		// Render the agent's Markdown to Telegram-safe HTML so bold/italics/code
 		// show up. If Telegram still rejects it, fall back to the raw text.
 		html := mdhtml.ToTelegramHTML(c)
-		if _, err := b.client.SendHTML(ctx, b.chatID, html); err != nil {
-			_, _ = b.client.Send(ctx, b.chatID, c)
+		if _, err := b.client.SendHTML(ctx, b.chatID, html, opts...); err != nil {
+			_, _ = b.client.Send(ctx, b.chatID, c, opts...)
 		}
 	}
 }

@@ -28,6 +28,7 @@ func BotCommands() []Command {
 		{"runs", "List runs (tap /run_N to replay): /runs [page|id]"},
 		{"reload", "Reload the config without restarting"},
 		{"voice", "Voice replies: /voice off|inbound|always"},
+		{"quiet", "Hush background posts: /quiet on|off"},
 	}
 }
 
@@ -77,7 +78,11 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 		}
 		b.sendReply(ctx, "▶️ fired job "+name)
 	case "/status":
-		b.sendMarkdownDoc(ctx, "status.md", render.Status(b.anyLiveSession(), b.rt, b.version))
+		status := render.Status(b.anyLiveSession(), b.rt, b.version)
+		if b.isQuiet() {
+			status += "\n- quiet: on (background posts don't ping)"
+		}
+		b.sendMarkdownDoc(ctx, "status.md", status)
 	case "/inbox":
 		b.sendReply(ctx, b.renderInbox())
 	case "/jobs":
@@ -166,8 +171,41 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 		b.runReload(ctx)
 	case "/voice":
 		b.handleVoiceCommand(ctx, arg)
+	case "/quiet":
+		b.handleQuietCommand(ctx, arg)
 	default:
 		b.sendReply(ctx, "unknown command: "+cmd)
+	}
+}
+
+// handleQuietCommand reports or sets the /quiet toggle: quiet on sends
+// agent-initiated posts (⏰/🔔/✉️) without a notification ping; replies to
+// the user's own messages and ⚠️ failures always ring.
+func (b *Bot) handleQuietCommand(ctx context.Context, arg string) {
+	state := func() string {
+		if b.isQuiet() {
+			return "🔕 quiet is on — background posts arrive without a ping."
+		}
+		return "🔔 quiet is off — every post rings."
+	}
+	switch arg {
+	case "":
+		b.sendReply(ctx, state())
+	case "on", "off":
+		b.mu.Lock()
+		store := b.quietMode
+		b.mu.Unlock()
+		if store == nil || store.Path == "" {
+			b.sendReply(ctx, "⚠️ quiet mode has nowhere to persist (no store configured).")
+			return
+		}
+		if err := store.Set(arg == "on"); err != nil {
+			b.sendReply(ctx, "⚠️ "+err.Error())
+			return
+		}
+		b.sendReply(ctx, state())
+	default:
+		b.sendReply(ctx, "usage: /quiet on|off")
 	}
 }
 
