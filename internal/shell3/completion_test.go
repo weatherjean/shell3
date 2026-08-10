@@ -276,3 +276,17 @@ func TestDirectTextThroughCaptureKeepsLeadAndMarksCut(t *testing.T) {
 		t.Fatalf("truncated capture posts with no marker: %q", out[len(out)-40:])
 	}
 }
+
+// A job label is one readable line: a multi-line heredoc command must never
+// dump its body into a chat post's label (observed live: a python <<'PYEOF'
+// script as the ⚠️/🔔 label).
+func TestLabelCollapsesMultilineCommands(t *testing.T) {
+	ev := CompletionEvent{JobID: "bg5", Title: "cd ~/x && python3 <<'PYEOF' 2>&1\nimport json, os\nfrom pathlib import Path\nPYEOF"}
+	got := ev.label()
+	if strings.Contains(got, "\n") {
+		t.Fatalf("label carries newlines: %q", got)
+	}
+	if !strings.Contains(got, "bg5") || !strings.Contains(got, "python3") {
+		t.Fatalf("label lost its identity: %q", got)
+	}
+}

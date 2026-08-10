@@ -103,11 +103,13 @@ func (e CompletionEvent) Failed() bool {
 }
 
 // label names the event in floor posts: the cron job name, or "bg3 (title)".
+// A command title is collapsed to one whitespace-normalized line — a heredoc
+// script must never dump its body into a chat post's label.
 func (e CompletionEvent) label() string {
 	if e.CronJob != "" {
 		return e.CronJob
 	}
-	title := strutil.Truncate(e.Title, 80)
+	title := strutil.Truncate(strings.Join(strings.Fields(e.Title), " "), 80)
 	if title == "" {
 		return e.JobID
 	}
