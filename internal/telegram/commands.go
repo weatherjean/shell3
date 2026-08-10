@@ -193,16 +193,24 @@ func (b *Bot) handleNewCommand(ctx context.Context) {
 		b.sendReply(ctx, "⚠️ a turn is running — /stop it first, then /new")
 		return
 	}
+	b.mu.Unlock()
+	// Clear the marker BEFORE detaching: a completion's StartFreshTurn racing
+	// this would otherwise see main==nil with the old marker still set and
+	// resurrect the conversation being detached.
+	b.current.SetCurrent("")
+	b.mu.Lock()
 	old := b.main
 	b.main = nil
 	b.mainAnchor = ""
 	b.lastMailed = ""
 	b.wakePending = false
 	b.mu.Unlock()
-	if old != nil && !b.sessionHasRunningJob(old) {
+	// Close only a fully-idle old session: running jobs keep it open (their
+	// completions re-route to the new conversation), and undrained agent mail
+	// stays inspectable in /runs instead of being torn down undelivered.
+	if old != nil && !b.sessionHasRunningJob(old) && !old.HasQueuedInput() {
 		_ = old.Close()
 	}
-	b.current.SetCurrent("") // next message starts fresh; SetCurrent("") clears
 	b.sendReply(ctx, "🧵 fresh conversation — the old one stays in /runs and history")
 }
 

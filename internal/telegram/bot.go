@@ -557,6 +557,10 @@ func (b *Bot) takeSlotLocked(ctx context.Context) (context.Context, context.Canc
 	b.cancelTurn = cancel
 	b.turnActive = true
 	b.turnHadVoice = false
+	// The mail_user dedupe guards against a looping model WITHIN a turn —
+	// reset per turn, or a cron job legitimately mailing the same text on
+	// consecutive runs would be silently suppressed.
+	b.lastMailed = ""
 	return turnCtx, cancel
 }
 

@@ -288,3 +288,35 @@ func TestMailUserQuietSendsSilent(t *testing.T) {
 		t.Error("quiet off: mail_user send should ring")
 	}
 }
+
+// The mail_user dedupe is per-turn, not per-process: the same text mailed in
+// two different turns (a cron job with the same finding on consecutive runs)
+// delivers both times.
+func TestMailUserDedupeResetsPerTurn(t *testing.T) {
+	fc := newFakeClient()
+	rt := storeRuntime(t, "unused")
+	b := newBot(t, fc, rt)
+	sess := decoratedSession(t, b, rt)
+	h := b.mailUserHandler(sess)
+
+	if out, err := h(context.Background(), `{"text":"queue empty — refill seeds"}`); err != nil || out != "mailed" {
+		t.Fatalf("first turn send: %q, %v", out, err)
+	}
+	// A new turn starts: the guard resets.
+	b.mu.Lock()
+	_, cancel := b.takeSlotLocked(context.Background())
+	b.mu.Unlock()
+	b.releaseSlot(cancel)
+	if out, err := h(context.Background(), `{"text":"queue empty — refill seeds"}`); err != nil || out != "mailed" {
+		t.Fatalf("second turn send suppressed: %q, %v", out, err)
+	}
+	count := 0
+	for _, txt := range fc.sentTexts() {
+		if strings.Contains(txt, "refill seeds") {
+			count++
+		}
+	}
+	if count != 2 {
+		t.Fatalf("chat got %d copies, want 2 (one per turn)", count)
+	}
+}
