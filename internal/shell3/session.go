@@ -275,6 +275,10 @@ func (s *Session) RunQueued(ctx context.Context) <-chan Event {
 // turn that consumes them.
 func (s *Session) HasQueuedInput() bool { return s.sess.HasInbox() }
 
+// HasQueuedSteer reports whether queued USER steering (not host notices) is
+// waiting — see chat.Session.HasSteer.
+func (s *Session) HasQueuedSteer() bool { return s.sess.HasSteer() }
+
 // Headless reports whether this session runs without a human attached
 // (subagent children, cron jobs). Host-tool registrars use it to tailor tool
 // instructions — e.g. image_generate tells a headless session to report the

@@ -59,6 +59,13 @@ type Bot struct {
 	// taken. Sending always succeeds — mail waits its turn; the whole queue
 	// drains as one batch turn (it is all the same conversation).
 	mailQueue []inMail
+	// burst buffers text messages for a short debounce window so Telegram's
+	// split-message fragments (a long message arrives as several updates)
+	// merge into ONE turn instead of one turn plus steers. burstTimer fires
+	// the flush; debounce overrides the default window (tests shorten it).
+	burst      []inMail
+	burstTimer *time.Timer
+	debounce   time.Duration
 	// cronID is the adopted cron dispatch parent's session id — the jobs/runs
 	// source that never runs turns and is never the main conversation.
 	cronID string
@@ -286,12 +293,73 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 
 	mail := inMail{m: m, text: text, saved: saved, hadVoice: hadVoice}
 
-	// One main-agent turn at a time, globally. Mail semantics: sending always
-	// succeeds — a message arriving mid-turn queues and is drained after the
-	// running turn ends (replies into one thread drain as one batch turn).
+	// Text messages ride a short debounce window first: Telegram splits a
+	// long message into several updates arriving back to back, and the burst
+	// merges them into ONE turn. Media messages flush the pending burst and
+	// dispatch immediately (their preflight belongs on a turn goroutine).
+	if len(saved) == 0 {
+		b.mu.Lock()
+		b.burst = append(b.burst, mail)
+		if b.burstTimer == nil {
+			window := b.debounce
+			if window <= 0 {
+				window = burstWindow
+			}
+			b.burstTimer = time.AfterFunc(window, func() { b.flushBurst(ctx) })
+		}
+		b.mu.Unlock()
+		return
+	}
+	b.flushBurst(ctx)
+	b.dispatchMail(ctx, []inMail{mail})
+}
+
+// burstWindow is the default text-message debounce.
+const burstWindow = 400 * time.Millisecond
+
+// flushBurst dispatches the buffered text burst, if any.
+func (b *Bot) flushBurst(ctx context.Context) {
+	b.mu.Lock()
+	batch := b.burst
+	if b.burstTimer != nil {
+		b.burstTimer.Stop()
+	}
+	b.burst, b.burstTimer = nil, nil
+	b.mu.Unlock()
+	if len(batch) > 0 {
+		b.dispatchMail(ctx, batch)
+	}
+}
+
+// dispatchMail routes a message batch: mid-turn TEXT steers the running turn
+// (injected at the next round boundary — "stop, wrong file" redirects work in
+// flight instead of waiting behind it; a steer landing after the final
+// boundary is answered by startNextWork's catch-up turn), media queues, and
+// an idle bot runs the batch as one user turn.
+func (b *Bot) dispatchMail(ctx context.Context, batch []inMail) {
+	if len(batch) == 0 {
+		return
+	}
+	hasMedia := false
+	hadVoice := false
+	for _, mail := range batch {
+		hasMedia = hasMedia || len(mail.saved) > 0
+		hadVoice = hadVoice || mail.hadVoice
+	}
 	b.mu.Lock()
 	if b.turnActive {
-		b.mailQueue = append(b.mailQueue, mail)
+		if !hasMedia && b.main != nil {
+			sess := b.main
+			b.mainAnchor = batch[len(batch)-1].m.ID
+			b.mu.Unlock()
+			parts := make([]string, 0, len(batch))
+			for _, mail := range batch {
+				parts = append(parts, withReplyContext(mail.text, mail.m.ReplyTo))
+			}
+			sess.Interject(strings.Join(parts, "\n\n"))
+			return
+		}
+		b.mailQueue = append(b.mailQueue, batch...)
 		b.mu.Unlock()
 		return
 	}
@@ -301,7 +369,7 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 	b.turnHadVoice = hadVoice
 	b.mu.Unlock()
 
-	go b.runUserTurn(ctx, turnCtx, cancel, []inMail{mail})
+	go b.runUserTurn(ctx, turnCtx, cancel, batch)
 }
 
 // runUserTurn runs one user-initiated turn over batch (one message, or the
@@ -353,7 +421,7 @@ func (b *Bot) runUserTurn(ctx, turnCtx context.Context, cancel context.CancelFun
 	pctx, pcancel := context.WithTimeout(turnCtx, preflightTimeout)
 	finalText := composeText(pctx)
 	pcancel()
-	reply := b.drainTurn(sess.Send(turnCtx, finalText))
+	reply, _ := b.drainTurnProgress(ctx, sess.Send(turnCtx, finalText))
 	stopTyping()
 	b.mu.Lock()
 	turnVoice := b.turnHadVoice
@@ -435,12 +503,42 @@ func (b *Bot) afterTurn(ctx context.Context, cancel context.CancelFunc) {
 }
 
 // startNextWork starts the next queued unit once the slot is free: queued user
-// mail first (the user outranks background mail), then queued wakes.
+// mail first (the user outranks background mail), then a steer catch-up (a
+// steer that missed its turn's last round boundary still gets an answered
+// turn), then pending wakes.
 func (b *Bot) startNextWork(ctx context.Context) {
 	if b.drainNextMail(ctx) {
 		return
 	}
+	if b.startSteerCatchup(ctx) {
+		return
+	}
 	b.startNextWake(ctx)
+}
+
+// startSteerCatchup runs a POSTED turn over user steering that landed in the
+// session inbox after the previous turn's final round boundary. Unlike a wake
+// (quiet) turn, its reply is delivered — the queued text is the user talking.
+func (b *Bot) startSteerCatchup(ctx context.Context) bool {
+	b.mu.Lock()
+	if b.turnActive || b.main == nil || !b.main.HasQueuedSteer() {
+		b.mu.Unlock()
+		return false
+	}
+	sess := b.main
+	anchor := b.mainAnchor
+	turnCtx, cancel := b.takeSlotLocked(ctx)
+	b.mu.Unlock()
+	go func() {
+		stopTyping := b.keepTyping(ctx)
+		reply, _ := b.drainTurnProgress(ctx, sess.RunQueued(turnCtx))
+		stopTyping()
+		b.deliverReply(ctx, reply, false, sess, anchor)
+		b.releaseSlot(cancel)
+		b.applyPendingReload(ctx)
+		b.startNextWork(ctx)
+	}()
+	return true
 }
 
 // drainNextMail drains the WHOLE queued-mail backlog as one batch turn — it

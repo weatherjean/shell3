@@ -123,7 +123,10 @@ string, `id` is your id for the press (echoed in the `ack`).
   whose `data` is the pressed option's data string. An `edit` may then
   replace the menu message's text (e.g. `/voice` showing the chosen mode).
 - `edit` — replace the text of a previously sent message (safe to ignore if
-  your surface can't edit).
+  your surface can't edit). The turn progress bubble arrives as a silent
+  `send` followed by `edit`s.
+- `delete` — remove a previously sent message by `id` (the progress bubble
+  cleaning itself up after a finished turn; safe to ignore).
 - `typing` — the "typing…" action, refreshed every few seconds during a
   turn. Ignorable.
 - `ack` — acknowledges a `callback` (Telegram's spinner-stop). Ignorable.

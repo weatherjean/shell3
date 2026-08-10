@@ -185,6 +185,11 @@ func TestInboxCommand(t *testing.T) {
 	b.turnActive = true
 	b.mu.Unlock()
 	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "9", Text: "later please"})
+	waitFor(t, func() bool {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return len(b.mailQueue) == 1
+	})
 	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/inbox"})
 	waitFor(t, func() bool {
 		all := strings.Join(fc.sentTexts(), "\n")

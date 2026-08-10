@@ -102,6 +102,10 @@ type tgClient interface {
 	// SendMenu posts text with one row of inline buttons; each option's Data is
 	// returned via the Callbacks channel when pressed. Returns the sent message id.
 	SendMenu(ctx context.Context, chatID int64, text string, options []MenuOption) (msgID string, err error)
+	// DeleteMessage removes a sent message (the progress bubble's cleanup).
+	// Best-effort: an already-deleted or too-old message is not an error the
+	// caller can act on.
+	DeleteMessage(ctx context.Context, chatID int64, msgID string) error
 	// EditPlain replaces a message's text and removes its inline keyboard. Used
 	// to clear an inline keyboard once a choice is made (the /voice menu).
 	EditPlain(ctx context.Context, chatID int64, msgID string, text string) error

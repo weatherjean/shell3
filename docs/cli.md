@@ -41,9 +41,13 @@ switches conversations. `/new` starts a fresh one (the old conversation
 stays in `/runs` and the agent's searchable history); a restart resumes
 where you left off, and automatic compaction keeps the context bounded
 however long it runs. One main-agent turn runs at a time, but sending
-always succeeds: messages sent while a turn is running queue silently and
-drain as one batched turn after it ends. `/inbox` shows what's queued;
-`/stop` cancels the running turn.
+always succeeds — and a **text message sent mid-turn steers the running
+turn**: the agent sees it at its next step, so "stop, wrong file" redirects
+work in flight (messages with attachments queue and run after). While the
+agent works you see a **progress bubble** — one message listing the tools
+it's running, updating in place — which deletes itself once the answer
+arrives (it stays behind only when the turn failed, as a breadcrumb).
+`/inbox` shows what's queued; `/stop` cancels the running turn.
 Background jobs (subagents, `bash_bg`, cron) run independently and come back
 as [completion mail](configuration.md#completion-mail): a failure or a
 `direct` result posts to the chat (🔔, or ⏰ for a cron origin); everything

@@ -4,6 +4,7 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -67,5 +68,41 @@ func TestCaptionedPhoto_ReachesTurnPrompt(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "translate this into English") {
 		t.Fatalf("caption must reach the turn prompt, got %q", prompt)
+	}
+}
+
+// withSendRetry retries transient network failures and gives up immediately
+// on API rejections and cancelled contexts.
+func TestWithSendRetry(t *testing.T) {
+	calls := 0
+	out, err := withSendRetry(context.Background(), func() (string, error) {
+		calls++
+		if calls < 3 {
+			return "", errors.New("read tcp: connection reset by peer")
+		}
+		return "sent", nil
+	})
+	if err != nil || out != "sent" || calls != 3 {
+		t.Fatalf("out=%q err=%v calls=%d", out, err, calls)
+	}
+
+	calls = 0
+	_, err = withSendRetry(context.Background(), func() (string, error) {
+		calls++
+		return "", errors.New("Bad Request: message is too long")
+	})
+	if err == nil || calls != 1 {
+		t.Fatalf("API rejection must not retry: err=%v calls=%d", err, calls)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	calls = 0
+	_, err = withSendRetry(ctx, func() (string, error) {
+		calls++
+		return "", errors.New("dial tcp: i/o timeout")
+	})
+	if err == nil || calls != 1 {
+		t.Fatalf("cancelled ctx must stop retries: err=%v calls=%d", err, calls)
 	}
 }

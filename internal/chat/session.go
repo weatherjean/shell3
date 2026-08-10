@@ -100,6 +100,21 @@ func (s *Session) HasInbox() bool {
 	return len(s.inbox) > 0
 }
 
+// HasSteer reports whether USER steering (not host notices) is queued — a
+// front-end uses it to catch a steer that landed after a turn's final round
+// boundary, so the user's message still gets an answered turn instead of
+// silently riding a later quiet one. Safe to call from any goroutine.
+func (s *Session) HasSteer() bool {
+	s.inboxMu.Lock()
+	defer s.inboxMu.Unlock()
+	for _, it := range s.inbox {
+		if !it.notice {
+			return true
+		}
+	}
+	return false
+}
+
 // drainInbox removes queued interjections, returning user-steering texts and
 // host-notification texts separately (each in arrival order, feeding
 // reminderBlock) plus the flattened media parts (steering only — notices carry

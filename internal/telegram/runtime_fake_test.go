@@ -4,6 +4,7 @@ package telegram
 
 import (
 	"testing"
+	"time"
 
 	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/shell3"
@@ -39,7 +40,9 @@ func mkThreads(t *testing.T) *ThreadIndex {
 // fresh-turn Bot holds no session of its own.
 func newBot(t *testing.T, fc *fakeClient, rt *shell3.Runtime) *Bot {
 	t.Helper()
-	return NewBot(fc, rt, 42, mkThreads(t))
+	b := NewBot(fc, rt, 42, mkThreads(t))
+	b.debounce = time.Millisecond // tests don't wait out the real burst window
+	return b
 }
 
 // decoratedSession creates a main chat session on rt and registers the bot's

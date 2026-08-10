@@ -29,6 +29,7 @@ type fakeClient struct {
 	videos   []sentVideo
 	menus    []sentMenu
 	replies  []sentReply
+	deleted  []string
 	silent   []bool // one entry per text/document send, true when SendOpt.Silent
 
 	failReply error // when set, reply sends behave as a deleted target (fall back to plain)
@@ -128,6 +129,20 @@ func (f *fakeClient) EditPlain(ctx context.Context, chatID int64, msgID string, 
 	defer f.mu.Unlock()
 	f.edits = append(f.edits, sentEdit{msgID: msgID, text: text})
 	return nil
+}
+
+func (f *fakeClient) DeleteMessage(ctx context.Context, chatID int64, msgID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deleted = append(f.deleted, msgID)
+	return nil
+}
+
+// deletedSnapshot returns the ids deleted so far.
+func (f *fakeClient) deletedSnapshot() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string{}, f.deleted...)
 }
 
 func (f *fakeClient) AnswerCallback(ctx context.Context, callbackID string) error {

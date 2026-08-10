@@ -141,10 +141,10 @@ func TestContract3_ReplyAddsQuotedContext(t *testing.T) {
 	}
 }
 
-// Contract 4 (mail model): a message arriving mid-turn QUEUES — sending
-// always succeeds, nothing is posted back; the mail drains into the same
-// conversation after the turn. One main-agent turn at a time.
-func TestContract4_MidTurnMessageQueues(t *testing.T) {
+// Contract 4 (steering): a TEXT message arriving mid-turn STEERS the running
+// turn — injected into the session inbox for the next round boundary, never
+// parked behind the turn. Nothing posts; the anchor advances to it.
+func TestContract4_MidTurnTextSteers(t *testing.T) {
 	fc := newFakeClient()
 	blk := fakellm.NewBlocking()
 	rt := shell3test.NewRuntimeForTestClient(t, blk)
@@ -157,23 +157,82 @@ func TestContract4_MidTurnMessageQueues(t *testing.T) {
 		t.Fatal("first turn never started")
 	}
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "2", Text: "and this"})
+	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "2", Text: "stop — wrong file"})
 
+	sess := b.mainIfLive()
+	if sess == nil {
+		t.Fatal("no main session mid-turn")
+	}
+	waitFor(t, func() bool { return sess.HasQueuedSteer() })
 	b.mu.Lock()
 	queued := len(b.mailQueue)
+	anchor := b.mainAnchor
 	b.mu.Unlock()
-	if queued != 1 {
-		t.Fatalf("mailQueue = %d, want the mid-turn message queued", queued)
+	if queued != 0 {
+		t.Fatalf("steered text must not also queue (mailQueue=%d)", queued)
+	}
+	if anchor != "2" {
+		t.Fatalf("anchor = %q, want the steering message id", anchor)
 	}
 	if r, ok := fc.lastReply(); ok {
-		t.Fatalf("queueing must be silent, got reply %q", r.text)
+		t.Fatalf("steering must be silent, got reply %q", r.text)
+	}
+	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/stop"})
+}
+
+// Contract 4b: a mid-turn message CARRYING MEDIA queues (its preflight needs a
+// turn goroutine) and drains after the turn.
+func TestContract4_MidTurnMediaQueues(t *testing.T) {
+	fc := newFakeClient()
+	blk := fakellm.NewBlocking()
+	rt := shell3test.NewRuntimeForTestClient(t, blk)
+	b := newBot(t, fc, rt)
+
+	go b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "work"})
+	select {
+	case <-blk.Started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first turn never started")
 	}
 
-	// Unwind without running the queued mail into the blocking client.
+	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "2", Text: "look at this",
+		Media: []Media{{Bytes: []byte("img"), MIME: "image/jpeg", Filename: "x.jpg"}}})
+
+	waitFor(t, func() bool {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return len(b.mailQueue) == 1
+	})
 	b.mu.Lock()
 	b.mailQueue = nil
 	b.mu.Unlock()
 	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/stop"})
+}
+
+// Contract 4c: a steer that lands AFTER the turn's final round boundary is
+// caught up by its own POSTED turn — never silently absorbed into a later
+// quiet turn.
+func TestContract4_SteerCatchupPostsReply(t *testing.T) {
+	fc := newFakeClient()
+	rt := storeRuntime(t, "caught up")
+	b := newBot(t, fc, rt)
+
+	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "start"})
+	if !waitForReply(t, fc, "caught up") {
+		t.Fatal("first turn produced no reply")
+	}
+	sess := b.mainIfLive()
+
+	// Simulate the missed-boundary steer: it sits in the inbox with no turn
+	// running.
+	sess.Interject("also do this")
+	before := len(fc.sentReplies())
+	b.startNextWork(context.Background())
+
+	waitFor(t, func() bool { return len(fc.sentReplies()) > before })
+	if sess.HasQueuedSteer() {
+		t.Fatal("catch-up turn must drain the queued steer")
+	}
 }
 
 // Contract 5: /stop mid-turn cancels the active turn but never kills
@@ -259,7 +318,7 @@ func TestContract6_WakeMidTurnPendsThenDrains(t *testing.T) {
 	b.turnActive = true // simulate a turn holding the slot
 	b.mu.Unlock()
 
-	sess.Interject("bg result") // queue input for the wake turn to drain
+	sess.NotifyText("bg result") // agent mail (a notice), NOT user steering
 	b.dispatchWake(context.Background(), sess.ID())
 	b.mu.Lock()
 	pending := b.wakePending
@@ -375,5 +434,30 @@ func TestContract9_RestartResumesTheConversation(t *testing.T) {
 	}
 	if got := b2.mainIfLive().ID(); got != first {
 		t.Fatalf("restart must resume the conversation: first=%s resumed=%s", first, got)
+	}
+}
+
+// Contract 10 (debounce): text fragments arriving back to back — Telegram
+// splits long messages into several updates — merge into ONE turn.
+func TestContract10_BurstMergesIntoOneTurn(t *testing.T) {
+	fc := newFakeClient()
+	rec := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "merged"}}})
+	rt := storeRuntimeClient(t, rec)
+	b := newBot(t, fc, rt)
+	b.debounce = 60 * time.Millisecond
+
+	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "part one"})
+	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "2", Text: "part two"})
+
+	if !waitForReply(t, fc, "merged") {
+		t.Fatal("burst never ran")
+	}
+	calls := rec.CallsSnapshot()
+	if len(calls) != 1 {
+		t.Fatalf("model calls = %d, want 1 (fragments merged)", len(calls))
+	}
+	last := calls[0].Msgs[len(calls[0].Msgs)-1]
+	if !strings.Contains(last.Content, "part one") || !strings.Contains(last.Content, "part two") {
+		t.Fatalf("merged turn missing a fragment: %q", last.Content)
 	}
 }

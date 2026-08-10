@@ -61,3 +61,28 @@ func TestDrainTurnAppendsErrors(t *testing.T) {
 type errFake string
 
 func (e errFake) Error() string { return string(e) }
+
+// chunk budgets in UTF-16 code units, Telegram's actual accounting: emoji
+// (astral plane) count double, so a 3000-emoji string is 6000 units and must
+// split even though it is only 3000 runes.
+func TestChunkCountsUTF16(t *testing.T) {
+	emoji := strings.Repeat("🚀", 3000)
+	parts := chunk(emoji)
+	if len(parts) < 2 {
+		t.Fatalf("6000 UTF-16 units must split, got %d chunk(s)", len(parts))
+	}
+	for i, p := range parts {
+		if utf16Len(p) > tgMaxMessage {
+			t.Fatalf("chunk %d is %d UTF-16 units (cap %d)", i, utf16Len(p), tgMaxMessage)
+		}
+		for _, r := range p {
+			if r == 0xFFFD {
+				t.Fatalf("chunk %d contains a broken rune", i)
+			}
+		}
+	}
+	// ASCII within budget stays whole.
+	if got := chunk(strings.Repeat("a", tgMaxMessage)); len(got) != 1 {
+		t.Fatalf("ASCII at exactly the cap must stay one chunk, got %d", len(got))
+	}
+}

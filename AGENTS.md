@@ -201,7 +201,9 @@ interface (`client.go`): `client_botapi.go` wraps go-telegram/bot,
 `shell3 telegram --console` (headless event testing, no credentials, no
 network). `pollhealth.go` records getUpdates/send failures into the app log
 with throttled repeats and a recovery line, so a transport outage is visible
-after the fact. At startup the host registers the `/` command menu
+after the fact; outbound sends retry transient network failures on a short
+backoff (`withSendRetry`, ~4.5s of patience) and never retry API
+rejections. At startup the host registers the `/` command menu
 (`BotCommands`), clears any menu button an older build left behind, and greets
 the chat.
 
@@ -220,11 +222,25 @@ host-managed compaction keeps its context bounded. Exactly one main-agent
 turn runs at a time (a turn slot in `bot.go`); sending always succeeds — a
 message arriving mid-turn queues silently (`mailQueue`) and the WHOLE backlog
 drains as one batch turn (it is all the same conversation), anchored at the
-newest message; the running turn is never steered. `/inbox` renders the
+newest message. A TEXT message arriving mid-turn STEERS the running turn —
+injected at the next round boundary via `chat.Session.Interject`
+(`dispatchMail`); a steer landing after the final boundary is answered by
+`startSteerCatchup`'s own POSTED turn (`chat.Session.HasSteer` /
+`shell3.Session.HasQueuedSteer`), so it is never silently absorbed; media
+messages queue instead (preflight needs a turn goroutine). Inbound text
+rides a 400ms debounce (`burstWindow`, `b.debounce` in tests) merging
+Telegram's split-message fragments into one turn. `/inbox` renders the
 queued state — the user's pending mail plus waiting agent mail — with zero
-tokens. `postReply`
-chunks the reply at Telegram's message cap on rune boundaries and replies each
-chunk to the conversation's anchor, capped at `replyMaxChunks` (2) bubbles — a
+tokens. During a user turn the bot renders tool activity as ONE
+self-editing **progress bubble** (`progress.go`: posted silently on the
+first ToolCall, edits throttled at 1.5s, last 6 lines shown, one-line
+tool summaries) that is DELETED after a clean turn and kept as a
+breadcrumb after an error; wake turns show no bubble. `DeleteMessage`
+joins the tgClient surface (console renders `[delete #id]`, serve emits a
+`delete` event). `postReply`
+chunks the reply at 4000 **UTF-16 code units** (Telegram's real accounting —
+emoji count double; `utf16Len`/`chunk` in render.go) on rune boundaries and
+replies each chunk to the conversation's anchor, capped at `replyMaxChunks` (2) bubbles — a
 longer reply posts its first chunk plus the full text as a `reply.md` document
 — and records every sent message id so the anchor advances.
 `drainTurn` treats only the FINAL assistant segment as the reply — text before

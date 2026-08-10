@@ -90,13 +90,16 @@ func TestChunk_SplitsAt4096(t *testing.T) {
 // A long reply with no newline near the cut must not be split mid-UTF-8-rune:
 // Telegram rejects invalid UTF-8 with a 400, silently losing the chunk.
 func TestChunk_NeverSplitsARune(t *testing.T) {
-	long := strings.Repeat("字", 3000) // 3 bytes each: 9000 bytes, no newlines; 4096 % 3 != 0 → naive cut lands mid-rune
+	// 3 bytes each but ONE UTF-16 unit each: 3000 units fits a single
+	// message even at 9000 bytes — Telegram bills units, not bytes. A longer
+	// run must split on rune boundaries, never mid-rune.
+	long := strings.Repeat("字", 4500)
 	for i, c := range chunk(long) {
 		if !utf8.ValidString(c) {
 			t.Fatalf("chunk %d is invalid UTF-8 (split mid-rune)", i)
 		}
-		if len(c) > 4096 {
-			t.Fatalf("chunk %d exceeds max: %d bytes", i, len(c))
+		if utf16Len(c) > tgMaxMessage {
+			t.Fatalf("chunk %d exceeds max: %d UTF-16 units", i, utf16Len(c))
 		}
 	}
 	// No content may be lost across the split.

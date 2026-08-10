@@ -5,13 +5,15 @@ package telegram
 import (
 	"context"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/telegram/mdhtml"
 )
 
-const tgMaxMessage = 4096
+// tgMaxMessage is the chunking budget in UTF-16 code units — the unit
+// Telegram actually counts (its hard cap is 4096; 4000 leaves headroom for
+// the HTML entities mdhtml adds).
+const tgMaxMessage = 4000
 
 // drainTurn consumes a turn's event channel and returns the assistant text.
 // Only the turn's FINAL assistant message is the reply: text emitted before a
@@ -48,22 +50,46 @@ func (b *Bot) drainTurn(ch <-chan shell3.Event) string {
 	return strings.TrimSpace(reply + errs.String())
 }
 
-// chunk splits s into pieces no longer than tgMaxMessage bytes, preferring
-// newline boundaries. Cuts land on rune boundaries — a mid-rune split would
-// send Telegram invalid UTF-8, which it rejects with a 400 (losing the chunk).
+// utf16Len is the length Telegram bills a string at: UTF-16 code units
+// (astral-plane runes — emoji — count double).
+func utf16Len(s string) int {
+	n := 0
+	for _, r := range s {
+		if r > 0xFFFF {
+			n += 2
+		} else {
+			n++
+		}
+	}
+	return n
+}
+
+// chunk splits s into pieces no longer than tgMaxMessage UTF-16 code units —
+// the unit Telegram actually enforces its 4096 cap in (byte or rune counting
+// under-splits emoji/CJK text and loses the chunk to a 400) — preferring
+// newline boundaries and never cutting mid-rune.
 func chunk(s string) []string {
-	const max = tgMaxMessage
-	if len(s) <= max {
+	if utf16Len(s) <= tgMaxMessage {
 		return []string{s}
 	}
 	var out []string
-	for len(s) > max {
-		cut := strings.LastIndex(s[:max], "\n")
-		if cut <= 0 {
-			cut = max
-			for cut > 0 && !utf8.RuneStart(s[cut]) {
-				cut--
+	for utf16Len(s) > tgMaxMessage {
+		// Find the byte offset where the UTF-16 budget runs out.
+		budget, cut := tgMaxMessage, len(s)
+		for i, r := range s {
+			w := 1
+			if r > 0xFFFF {
+				w = 2
 			}
+			if budget < w {
+				cut = i
+				break
+			}
+			budget -= w
+		}
+		// Prefer the last newline inside the window.
+		if nl := strings.LastIndex(s[:cut], "\n"); nl > 0 {
+			cut = nl
 		}
 		out = append(out, s[:cut])
 		s = strings.TrimPrefix(s[cut:], "\n")

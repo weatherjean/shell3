@@ -254,6 +254,13 @@ func (c *JSONLClient) SendHTMLReply(_ context.Context, _ int64, _ string, _ stri
 	return "", ErrNoHTML
 }
 
+// DeleteMessage emits a delete event; a front-end that can't delete may
+// ignore it.
+func (c *JSONLClient) DeleteMessage(_ context.Context, _ int64, msgID string) error {
+	c.emit(jsonlOutEvent{Type: "delete", ID: msgID})
+	return nil
+}
+
 func (c *JSONLClient) Typing(_ context.Context, _ int64) error {
 	c.emit(jsonlOutEvent{Type: "typing"})
 	return nil

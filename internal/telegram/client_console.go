@@ -240,6 +240,11 @@ func (c *ConsoleClient) EditPlain(_ context.Context, _ int64, msgID string, text
 	return nil
 }
 
+func (c *ConsoleClient) DeleteMessage(_ context.Context, _ int64, msgID string) error {
+	c.mark("[delete #%s]", msgID)
+	return nil
+}
+
 func (c *ConsoleClient) AnswerCallback(_ context.Context, _ string) error { return nil }
 
 func (c *ConsoleClient) Callbacks(_ context.Context) <-chan Callback { return c.cb }

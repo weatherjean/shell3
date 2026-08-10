@@ -196,13 +196,59 @@ func (c *BotAPIClient) downloadFile(ctx context.Context, fileID, mime, filename 
 // Updates delivers normalized inbound messages until ctx is cancelled.
 func (c *BotAPIClient) Updates(ctx context.Context) <-chan Msg { return c.out }
 
+// transientSendErr reports whether a send failure is worth retrying: network
+// interruptions and server-side hiccups, never Telegram API rejections (a 400
+// retried is a 400 again). 429s retry too — the throttle asks for patience.
+func transientSendErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false // the caller gave up; retrying past it delivers zombies
+	}
+	msg := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"timeout", "connection", "reset", "eof", "temporarily",
+		"429", "too many requests", "500", "502", "503", "504", "gateway",
+	} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// sendBackoff is the retry schedule for transient outbound failures: a chat
+// message is worth ~4.5s of patience before it is reported lost.
+var sendBackoff = []time.Duration{300 * time.Millisecond, 1200 * time.Millisecond, 3 * time.Second}
+
+// withSendRetry runs send, retrying transient failures on the backoff
+// schedule. Returns the first non-transient error or the last failure.
+func withSendRetry[T any](ctx context.Context, send func() (T, error)) (T, error) {
+	out, err := send()
+	for _, wait := range sendBackoff {
+		if err == nil || !transientSendErr(err) {
+			return out, err
+		}
+		select {
+		case <-time.After(wait):
+		case <-ctx.Done():
+			return out, err
+		}
+		out, err = send()
+	}
+	return out, err
+}
+
 // Send posts a plain-text message. ParseMode is omitted; this is the safe
 // fallback path when SendHTML is rejected.
 func (c *BotAPIClient) Send(ctx context.Context, chatID int64, text string, opts ...SendOpt) (string, error) {
-	m, err := c.b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:              chatID,
-		Text:                text,
-		DisableNotification: sendSilent(opts),
+	m, err := withSendRetry(ctx, func() (*models.Message, error) {
+		return c.b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:              chatID,
+			Text:                text,
+			DisableNotification: sendSilent(opts),
+		})
 	})
 	if err != nil {
 		return "", err
@@ -214,11 +260,13 @@ func (c *BotAPIClient) Send(ctx context.Context, chatID int64, text string, opts
 // (bold, italics, code, links) renders. Telegram rejects malformed HTML with a
 // 400, so callers fall back to Send on error.
 func (c *BotAPIClient) SendHTML(ctx context.Context, chatID int64, html string, opts ...SendOpt) (string, error) {
-	m, err := c.b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:              chatID,
-		Text:                html,
-		ParseMode:           models.ParseModeHTML,
-		DisableNotification: sendSilent(opts),
+	m, err := withSendRetry(ctx, func() (*models.Message, error) {
+		return c.b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:              chatID,
+			Text:                html,
+			ParseMode:           models.ParseModeHTML,
+			DisableNotification: sendSilent(opts),
+		})
 	})
 	if err != nil {
 		return "", err
@@ -240,11 +288,13 @@ func (c *BotAPIClient) SendReply(ctx context.Context, chatID int64, text string,
 	if err != nil {
 		return c.Send(ctx, chatID, text, opts...) // non-numeric anchor (foreign transport): plain send
 	}
-	m, err := c.b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:              chatID,
-		Text:                text,
-		ReplyParameters:     &models.ReplyParameters{MessageID: rid},
-		DisableNotification: sendSilent(opts),
+	m, err := withSendRetry(ctx, func() (*models.Message, error) {
+		return c.b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:              chatID,
+			Text:                text,
+			ReplyParameters:     &models.ReplyParameters{MessageID: rid},
+			DisableNotification: sendSilent(opts),
+		})
 	})
 	if replyNotFound(err) {
 		return c.Send(ctx, chatID, text, opts...)
@@ -263,12 +313,14 @@ func (c *BotAPIClient) SendHTMLReply(ctx context.Context, chatID int64, html str
 	if err != nil {
 		return c.SendHTML(ctx, chatID, html, opts...)
 	}
-	m, err := c.b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:              chatID,
-		Text:                html,
-		ParseMode:           models.ParseModeHTML,
-		ReplyParameters:     &models.ReplyParameters{MessageID: rid},
-		DisableNotification: sendSilent(opts),
+	m, err := withSendRetry(ctx, func() (*models.Message, error) {
+		return c.b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:              chatID,
+			Text:                html,
+			ParseMode:           models.ParseModeHTML,
+			ReplyParameters:     &models.ReplyParameters{MessageID: rid},
+			DisableNotification: sendSilent(opts),
+		})
 	})
 	if replyNotFound(err) {
 		return c.SendHTML(ctx, chatID, html, opts...)
@@ -277,6 +329,17 @@ func (c *BotAPIClient) SendHTMLReply(ctx context.Context, chatID int64, html str
 		return "", err
 	}
 	return strconv.Itoa(m.ID), nil
+}
+
+// DeleteMessage removes a sent message by id (non-numeric ids are foreign and
+// ignored).
+func (c *BotAPIClient) DeleteMessage(ctx context.Context, chatID int64, msgID string) error {
+	id, err := strconv.Atoi(msgID)
+	if err != nil {
+		return nil
+	}
+	_, err = c.b.DeleteMessage(ctx, &bot.DeleteMessageParams{ChatID: chatID, MessageID: id})
+	return err
 }
 
 // Callbacks returns the inline-keyboard button-press channel. The channel lives
@@ -354,11 +417,13 @@ func (c *BotAPIClient) SetCommands(ctx context.Context, cmds []Command) error {
 
 // SendDocument uploads a file to the chat as a document.
 func (c *BotAPIClient) SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string, opts ...SendOpt) (string, error) {
-	m, err := c.b.SendDocument(ctx, &bot.SendDocumentParams{
-		ChatID:              chatID,
-		Document:            &models.InputFileUpload{Filename: filename, Data: bytes.NewReader(data)},
-		Caption:             caption,
-		DisableNotification: sendSilent(opts),
+	m, err := withSendRetry(ctx, func() (*models.Message, error) {
+		return c.b.SendDocument(ctx, &bot.SendDocumentParams{
+			ChatID:              chatID,
+			Document:            &models.InputFileUpload{Filename: filename, Data: bytes.NewReader(data)},
+			Caption:             caption,
+			DisableNotification: sendSilent(opts),
+		})
 	})
 	if err != nil {
 		return "", err
