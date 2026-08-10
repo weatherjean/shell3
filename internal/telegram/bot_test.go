@@ -461,3 +461,58 @@ func TestContract10_BurstMergesIntoOneTurn(t *testing.T) {
 		t.Fatalf("merged turn missing a fragment: %q", last.Content)
 	}
 }
+
+// Contract 11: a text arriving during a QUIET (wake) turn must NOT steer into
+// it — the quiet turn's reply posts nowhere, so the user's message would be
+// silently absorbed. It queues instead and runs as its own posted turn.
+func TestContract11_TextDuringQuietTurnQueues(t *testing.T) {
+	fc := newFakeClient()
+	rt := storeRuntime(t, "answered")
+	b := newBot(t, fc, rt)
+
+	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "start"})
+	if !waitForReply(t, fc, "answered") {
+		t.Fatal("first turn produced no reply")
+	}
+
+	b.mu.Lock()
+	b.turnActive = true
+	b.turnQuiet = true // simulate a wake turn holding the slot
+	b.mu.Unlock()
+
+	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "2", Text: "are you there?"})
+	waitFor(t, func() bool {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return len(b.mailQueue) == 1
+	})
+	if b.mainIfLive().HasQueuedSteer() {
+		t.Fatal("text must not steer a quiet turn")
+	}
+	b.mu.Lock()
+	b.turnActive, b.turnQuiet, b.mailQueue = false, false, nil
+	b.mu.Unlock()
+}
+
+// Contract 12: a Wake that finds queued USER steering runs a POSTED turn —
+// the steer that raced a turn's end still gets its answer delivered.
+func TestContract12_WakeWithSteerPostsReply(t *testing.T) {
+	fc := newFakeClient()
+	rt := storeRuntime(t, "steered answer")
+	b := newBot(t, fc, rt)
+
+	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "start"})
+	if !waitForReply(t, fc, "steered answer") {
+		t.Fatal("first turn produced no reply")
+	}
+	sess := b.mainIfLive()
+	before := len(fc.sentReplies())
+
+	sess.Interject("and one more thing") // user steering, landed post-turn
+	b.dispatchWake(context.Background(), sess.ID())
+
+	waitFor(t, func() bool { return len(fc.sentReplies()) > before })
+	if sess.HasQueuedSteer() {
+		t.Fatal("posted wake turn must drain the steer")
+	}
+}

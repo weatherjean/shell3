@@ -21,7 +21,7 @@ func TestConsumeWakes_RunsQuietTurn(t *testing.T) {
 
 	// Interject on an idle session queues input and emits a Wake; the mail
 	// turn runs quietly — the queued input drains, nothing posts.
-	sess.Interject("scheduled job result")
+	sess.NotifyText("scheduled job result")
 
 	waitFor(t, func() bool {
 		b.mu.Lock()

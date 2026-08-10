@@ -291,7 +291,11 @@ iff the owner IS the current main conversation; `StartFreshTurn` is the
 catch-all that queues the note into the main conversation (creating it on
 demand) — cron results, orphans, and jobs outliving a `/new` all land there,
 so a completion is never lost. Wake turns are QUIET — `runWakeTurn` posts
-nothing; `mail_user` is the only exit. Callbacks (the `/voice` menu) drain
+nothing; `mail_user` is the only exit — UNLESS the inbox holds user steering
+(`HasQueuedSteer`), which upgrades the wake to a POSTED turn
+(`runPostedQueuedTurn`) so a steer racing a turn's end still gets its answer;
+text arriving DURING a quiet turn queues rather than steering into it
+(`turnQuiet`). Callbacks (the `/voice` menu) drain
 on their own bot-lifetime goroutine (`callbacks.go`).
 
 **Media** (`internal/media`, four blocks under `media:` in `shell3.yaml`, each

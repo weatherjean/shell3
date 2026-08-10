@@ -41,6 +41,7 @@ type Bot struct {
 	cancelTurn   context.CancelFunc // non-nil while a turn runs (main turn only — never a job)
 	turnActive   bool               // true from turn start until its goroutine ends
 	turnHadVoice bool               // true when the in-flight turn was initiated by an audio/ attachment
+	turnQuiet    bool               // true while a QUIET (wake/mail) turn holds the slot — steering must not target it
 
 	// main is THE conversation: one long-lived session every message
 	// continues, resumed across restarts via the current marker and replaced
@@ -348,7 +349,7 @@ func (b *Bot) dispatchMail(ctx context.Context, batch []inMail) {
 	}
 	b.mu.Lock()
 	if b.turnActive {
-		if !hasMedia && b.main != nil {
+		if !hasMedia && !b.turnQuiet && b.main != nil {
 			sess := b.main
 			b.mainAnchor = batch[len(batch)-1].m.ID
 			b.mu.Unlock()
@@ -529,15 +530,7 @@ func (b *Bot) startSteerCatchup(ctx context.Context) bool {
 	anchor := b.mainAnchor
 	turnCtx, cancel := b.takeSlotLocked(ctx)
 	b.mu.Unlock()
-	go func() {
-		stopTyping := b.keepTyping(ctx)
-		reply, _ := b.drainTurnProgress(ctx, sess.RunQueued(turnCtx))
-		stopTyping()
-		b.deliverReply(ctx, reply, false, sess, anchor)
-		b.releaseSlot(cancel)
-		b.applyPendingReload(ctx)
-		b.startNextWork(ctx)
-	}()
+	go b.runPostedQueuedTurn(ctx, turnCtx, cancel, sess, anchor)
 	return true
 }
 
@@ -618,7 +611,18 @@ func (b *Bot) dispatchWake(ctx context.Context, id string) {
 		b.mu.Unlock()
 		return
 	}
+	// User steering in the inbox upgrades the wake to a POSTED turn: the
+	// user spoke (perhaps a steer that raced the previous turn's end), so the
+	// reply must be delivered — RunQueued drains notices alongside it.
+	if sess.HasQueuedSteer() {
+		anchor := b.mainAnchor
+		turnCtx, cancel := b.takeSlotLocked(ctx)
+		b.mu.Unlock()
+		go b.runPostedQueuedTurn(ctx, turnCtx, cancel, sess, anchor)
+		return
+	}
 	turnCtx, cancel := b.takeSlotLocked(ctx)
+	b.turnQuiet = true
 	b.mu.Unlock()
 	go func() {
 		b.runWakeTurn(turnCtx, sess)
@@ -626,8 +630,21 @@ func (b *Bot) dispatchWake(ctx context.Context, id string) {
 	}()
 }
 
+// runPostedQueuedTurn is startSteerCatchup's turn body: drain the session
+// inbox and DELIVER the reply (the queued input includes the user speaking).
+func (b *Bot) runPostedQueuedTurn(ctx, turnCtx context.Context, cancel context.CancelFunc, sess *shell3.Session, anchor string) {
+	stopTyping := b.keepTyping(ctx)
+	reply, _ := b.drainTurnProgress(ctx, sess.RunQueued(turnCtx))
+	stopTyping()
+	b.deliverReply(ctx, reply, false, sess, anchor)
+	b.releaseSlot(cancel)
+	b.applyPendingReload(ctx)
+	b.startNextWork(ctx)
+}
+
 // startNextWake runs a pending wake turn on the main session if the slot is
-// free. Called after every turn ends.
+// free. Called after every turn ends. Queued user steering upgrades it to a
+// posted turn (see dispatchWake).
 func (b *Bot) startNextWake(ctx context.Context) {
 	b.mu.Lock()
 	if b.turnActive || !b.wakePending || b.main == nil {
@@ -640,7 +657,15 @@ func (b *Bot) startNextWake(ctx context.Context) {
 		b.mu.Unlock()
 		return // already drained by the turn that just ran
 	}
+	if sess.HasQueuedSteer() {
+		anchor := b.mainAnchor
+		turnCtx, cancel := b.takeSlotLocked(ctx)
+		b.mu.Unlock()
+		go b.runPostedQueuedTurn(ctx, turnCtx, cancel, sess, anchor)
+		return
+	}
 	turnCtx, cancel := b.takeSlotLocked(ctx)
+	b.turnQuiet = true
 	b.mu.Unlock()
 	go func() {
 		b.runWakeTurn(turnCtx, sess)
@@ -654,6 +679,7 @@ func (b *Bot) takeSlotLocked(ctx context.Context) (context.Context, context.Canc
 	turnCtx, cancel := context.WithCancel(ctx)
 	b.cancelTurn = cancel
 	b.turnActive = true
+	b.turnQuiet = false
 	b.turnHadVoice = false
 	// The mail_user dedupe guards against a looping model WITHIN a turn —
 	// reset per turn, or a cron job legitimately mailing the same text on

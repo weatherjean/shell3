@@ -141,7 +141,7 @@ func TestWakeTurn_MainSessionRunsQuietly(t *testing.T) {
 	defer cancel()
 	go b.consumeWakes(ctx)
 
-	sess.Interject("anything")
+	sess.NotifyText("anything")
 	waitFor(t, func() bool {
 		b.mu.Lock()
 		defer b.mu.Unlock()
