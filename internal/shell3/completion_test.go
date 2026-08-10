@@ -237,3 +237,25 @@ func TestDirectTextIsUserFacing(t *testing.T) {
 		t.Fatalf("direct post should carry the label and tail, got %q", posts[0])
 	}
 }
+
+// A direct agent result keeps the HEAD of the summary: the model leads with
+// the point, so tail-keeping (right for shell output) would amputate the lead
+// sentence AND — stacked on the head-capped capture — the ending too,
+// posting a middle window with both ends cut (observed live). bash_bg output
+// keeps tail semantics: the end of a log is the signal.
+func TestDirectTextTruncationDirection(t *testing.T) {
+	long := "LEAD sentence first." + strings.Repeat(" filler filler filler", 200) + " FINAL words."
+	sub := CompletionEvent{Kind: EvSubagent, JobID: "sub1", Title: "research", Tail: long}
+	out := directText(sub)
+	if !strings.Contains(out, "LEAD sentence first.") {
+		t.Fatalf("subagent direct post lost its lead sentence: %q", out[:80])
+	}
+	cron := CompletionEvent{Kind: EvCron, CronJob: "nightly", Tail: long}
+	if out := directText(cron); !strings.Contains(out, "LEAD sentence first.") {
+		t.Fatalf("cron direct post lost its lead sentence: %q", out[:80])
+	}
+	bg := CompletionEvent{Kind: EvBashBg, JobID: "bg1", Title: "make test", Tail: long}
+	if out := directText(bg); !strings.Contains(out, "FINAL words.") {
+		t.Fatalf("bash_bg direct post lost its output tail: %q", out[len(out)-80:])
+	}
+}

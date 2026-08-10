@@ -291,23 +291,51 @@ func (m *jobManager) dispatchCompletion(ev CompletionEvent) {
 	}
 }
 
+// directBodyCap bounds a direct post's result text (runes for agent
+// summaries, bytes for command tails). Sized above agentDoneResultCap so an
+// agent summary that survived capture posts whole — the front-end chunks
+// long messages anyway.
+const directBodyCap = 2500
+
 // directText renders a direct completion for the USER's chat: what ran and
-// its output tail — none of the agent-facing instructions the queued notice
+// its result — none of the agent-facing instructions the queued notice
 // carries. Cron posts get the job name from the host's ⏰ prefix, so they
 // lead with the result itself.
+//
+// Truncation direction follows what produced the text: a command's output is
+// read from the END (the exit lines are the signal), an agent-written summary
+// from the START (the model leads with the point). Getting this wrong stacked
+// on the head-capped capture (agentDoneResultCap) posted a middle window with
+// BOTH ends amputated — observed live on a long subagent report.
 func directText(ev CompletionEvent) string {
-	tail := strings.TrimSpace(ev.Tail)
+	body := directBody(ev)
 	if ev.CronJob != "" {
-		if tail == "" {
+		if body == "" {
 			return "done (no output)"
 		}
-		return strutil.Tail(tail, 1500)
+		return body
 	}
 	head := ev.label() + " finished"
-	if tail == "" {
+	if body == "" {
 		return head + " (no output)"
 	}
-	return head + ":\n" + strutil.Tail(tail, 1500)
+	return head + ":\n" + body
+}
+
+// directBody applies the kind-appropriate cap to the event's result text.
+func directBody(ev CompletionEvent) string {
+	tail := strings.TrimSpace(ev.Tail)
+	if tail == "" {
+		return ""
+	}
+	if ev.Kind == EvBashBg {
+		return strutil.Tail(tail, directBodyCap)
+	}
+	head, cut := strutil.CutRunes(tail, directBodyCap)
+	if cut {
+		head += "…"
+	}
+	return head
 }
 
 // floorErrCap bounds the error text carried by a failure-floor post.

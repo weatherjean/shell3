@@ -42,10 +42,14 @@ func Sweep(root string, keep time.Duration, now time.Time) (removedIDs []string,
 	}
 	// Trash: sessions with no messages and no job log, past the grace window —
 	// crash leftovers EndSession never got to clean up. Removed regardless of
-	// keep (keep<=0 preserves history forever, not trash).
+	// keep (keep<=0 preserves history forever, not trash). Dispatch parents
+	// are spared: the pinned cron parent runs no turns, so it is always
+	// message-less — deleting it would dangle its children's parent_id.
 	rows, err := s.db.Query(`SELECT id FROM sessions
 		WHERE last_at < ? AND NOT EXISTS
-			(SELECT 1 FROM messages WHERE messages.session_id = sessions.id)`,
+			(SELECT 1 FROM messages WHERE messages.session_id = sessions.id)
+		AND NOT EXISTS
+			(SELECT 1 FROM sessions c WHERE c.parent_id = sessions.id)`,
 		encTime(now.Add(-emptyKeep)))
 	if err != nil {
 		return nil, 0, fmt.Errorf("runs: sweep: %w", err)
@@ -77,6 +81,16 @@ func Sweep(root string, keep time.Duration, now time.Time) (removedIDs []string,
 		if err := s.deleteSessions(ids); err != nil {
 			return nil, 0, err
 		}
+	}
+
+	// Stale "live" rows: Sweep runs at process start, when nothing from a
+	// previous run can still be live — flip leftovers past the grace window
+	// to ended (recent ones may belong to a concurrent `shell3 ask`).
+	if _, err := s.db.Exec(
+		`UPDATE sessions SET status='ended', ended_at=last_at
+		 WHERE status='live' AND last_at < ?`,
+		encTime(now.Add(-emptyKeep))); err != nil {
+		return ids, threadsDropped, fmt.Errorf("runs: sweep live: %w", err)
 	}
 
 	// Stale thread entries: sessions gone by any other means (the database

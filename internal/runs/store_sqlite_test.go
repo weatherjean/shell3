@@ -1,6 +1,7 @@
 package runs
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -194,5 +195,78 @@ func TestSweepKeepForever(t *testing.T) {
 	}
 	if len(removed) != 1 || removed[0] != trash {
 		t.Fatalf("removed = %v, want only the trash session %s", removed, trash)
+	}
+}
+
+// The empty-trash rule spares dispatch parents: a session other sessions
+// name as parent_id (the pinned cron parent runs no turns, so it is always
+// message-less and always "live") must survive the sweep, or its children's
+// lineage dangles. A plain aged empty session still goes.
+func TestSweepSparesDispatchParents(t *testing.T) {
+	root := t.TempDir()
+	st, _ := Open(root)
+	parentID, _ := st.NewSession(Meta{Workdir: "/w"})
+	childID, _ := st.NewSession(Meta{Workdir: "/w", ParentID: parentID})
+	if err := st.AppendMessage(childID, llm.Message{Role: llm.RoleUser, Content: "tick"}); err != nil {
+		t.Fatal(err)
+	}
+	orphanID, _ := st.NewSession(Meta{Workdir: "/w"})
+	old := encTime(time.Now().Add(-2 * time.Hour))
+	for _, id := range []string{parentID, orphanID} {
+		if _, err := st.db.Exec(`UPDATE sessions SET last_at=? WHERE id=?`, old, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st.Close()
+
+	removed, _, err := Sweep(root, 30*24*time.Hour, time.Now())
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if slices.Contains(removed, parentID) {
+		t.Error("sweep removed a dispatch parent still referenced by a child")
+	}
+	if !slices.Contains(removed, orphanID) {
+		t.Error("sweep kept a plain aged empty session")
+	}
+}
+
+// Stale "live" rows are unclean-shutdown leftovers: Sweep runs at process
+// start, when nothing from a previous run can still be live. Rows past the
+// grace window flip to ended; recent ones (a concurrent `shell3 ask`) stay.
+func TestSweepEndsStaleLiveSessions(t *testing.T) {
+	root := t.TempDir()
+	st, _ := Open(root)
+	staleID, _ := st.NewSession(Meta{Workdir: "/w"})
+	if err := st.AppendMessage(staleID, llm.Message{Role: llm.RoleUser, Content: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	freshID, _ := st.NewSession(Meta{Workdir: "/w"})
+	if err := st.AppendMessage(freshID, llm.Message{Role: llm.RoleUser, Content: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.Exec(`UPDATE sessions SET last_at=? WHERE id=?`,
+		encTime(time.Now().Add(-2*time.Hour)), staleID); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	if _, _, err := Sweep(root, 30*24*time.Hour, time.Now()); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	st, _ = Open(root)
+	defer st.Close()
+	var status string
+	if err := st.db.QueryRow(`SELECT status FROM sessions WHERE id=?`, staleID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "ended" {
+		t.Errorf("stale live session status = %q, want ended", status)
+	}
+	if err := st.db.QueryRow(`SELECT status FROM sessions WHERE id=?`, freshID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "live" {
+		t.Errorf("recent live session status = %q, want live (may be another process's)", status)
 	}
 }

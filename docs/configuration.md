@@ -590,7 +590,11 @@ prompt. `agent` names either a subagent from `agents/` or a project's
 `manager.md` — a project's cron job runs its manager in that project's
 workdir, so a scheduled job can dispatch straight into a project's standing
 context. The scheduler runs inside `shell3 telegram`, dispatching each job
-from a hidden, pinned `cron` parent session.
+from a hidden, pinned `cron` parent session. Interval schedules
+(`@every 30m`) count from when the scheduler arms, and a `/reload` or
+restart re-arms it — so the tick after one lands a full interval later,
+which can look like a skipped run. Cron *expressions* (`*/30 * * * *`)
+fire on wall-clock times and don't shift.
 
 ```markdown
 ---

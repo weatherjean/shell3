@@ -264,6 +264,7 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 
 		if c.tap != nil {
 			for _, frag := range c.tap.drainReasoning() {
+				leak.reasoningSeen = true // arms the glued-tail net (thinkleak.go)
 				onEvent(llm.StreamEvent{ReasoningDelta: frag})
 			}
 		}

@@ -14,7 +14,18 @@ import "strings"
 type thinkLeakFilter struct {
 	state int // holding → trimming → passthrough
 	buf   string
+	// reasoningSeen widens the net: when the stream also carried a split
+	// reasoning field, a "</think>" near the very start of content is the
+	// provider's reasoning tail bleeding over (observed live as
+	// "state.</think>" opening a message), so everything through the tag is
+	// dropped. Without a reasoning stream only the bare leading tag matches —
+	// a message that legitimately MENTIONS the tag early stays intact.
+	reasoningSeen bool
 }
+
+// leakScanCap is how far (bytes, after leading whitespace) into the content a
+// glued "</think>" still counts as reasoning bleed-over when reasoningSeen.
+const leakScanCap = 64
 
 const (
 	leakHolding  = iota // start of stream: buffer while a leading tag is still possible
@@ -40,6 +51,22 @@ func (f *thinkLeakFilter) filter(delta string) string {
 	}
 	f.buf += delta
 	trimmed := strings.TrimLeft(f.buf, " \t\r\n")
+	if f.reasoningSeen {
+		// Wider net: scan the opening window for the tag anywhere, not just
+		// at position zero.
+		if i := strings.Index(trimmed, leakedTag); i >= 0 && i <= leakScanCap {
+			f.state = leakTrimming
+			f.buf = ""
+			return f.filter(trimmed[i+len(leakedTag):])
+		}
+		if len(trimmed) > leakScanCap+len(leakedTag) {
+			f.state = leakPassthrough
+			out := f.buf
+			f.buf = ""
+			return out
+		}
+		return "" // window not exhausted — keep holding (flush releases at EOS)
+	}
 	switch {
 	case strings.HasPrefix(trimmed, leakedTag):
 		f.state = leakTrimming
