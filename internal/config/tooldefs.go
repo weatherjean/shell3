@@ -84,8 +84,8 @@ var bashBgTool = llm.ToolDefinition{
 	Name: "bash_bg",
 	Description: "Start a shell command in the background on the in-process runtime and return a job id immediately. " +
 		"Use this for long-running work or servers — anything that should not block the turn. " +
-		"The completion arrives as MAIL — mid-turn into this same reply if the job is quick, as a quiet " +
-		"follow-up turn otherwise (reach the user from it with mail_user) — so start it, say it's running, " +
+		"The completion arrives as MAIL — mid-turn into this same reply if the job is quick, as a " +
+		"follow-up turn otherwise (whose reply reaches the user as ✉️ agent mail; NO_REPLY for silence) — so start it, say it's running, " +
 		"and end your turn. Set direct:true to have the raw result posted straight to the chat instead, " +
 		"with no follow-up turn. Never wait in-turn: no task_status loops, no sleep-and-recheck " +
 		"in bash. task_status <id> is for reading a finished job's output or answering a user's how's-it-going.",
@@ -126,8 +126,8 @@ func TaskToolFor(subs []SubagentRef) llm.ToolDefinition {
 	return llm.ToolDefinition{
 		Name: "task",
 		Description: "Spawn a subagent that runs in the background. Returns immediately — the completion " +
-			"arrives as MAIL: mid-turn into this same reply if it's quick, as a quiet follow-up turn " +
-			"otherwise (reach the user from it with mail_user). Set direct:true to have the raw result " +
+			"arrives as MAIL: mid-turn into this same reply if it's quick, as a follow-up turn " +
+			"otherwise (whose reply reaches the user as ✉️ agent mail; NO_REPLY for silence). Set direct:true to have the raw result " +
 			"posted straight to the chat instead, with no follow-up turn. Dispatch, say it's running, and " +
 			"end your turn. Never wait in-turn: no task_status loops, no sleep-and-recheck. Use this to " +
 			"delegate work to a specialised subagent while you continue with other tasks. Brief it like a " +

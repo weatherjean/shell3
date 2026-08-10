@@ -143,7 +143,7 @@ user is waiting on this particular run and wants the raw output:
 
 | `direct` | Clean exit | Nonzero exit |
 |---|---|---|
-| `false` (default) | Wakes you quietly with the result — `mail_user` the user only if it matters | Always surfaces to the user, and wakes you |
+| `false` (default) | Wakes you with the result — your reply posts as ✉️ agent mail, `NO_REPLY` stays silent | Always surfaces to the user, and wakes you |
 | `true` | Raw result posts to the user's chat; the notice is queued for your next turn | Always surfaces to the user, and wakes you if your session is live |
 
 ```json

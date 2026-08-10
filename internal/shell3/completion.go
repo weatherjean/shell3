@@ -30,8 +30,8 @@ func (m *jobManager) isClosing() bool {
 //     wake, so the next turn has it in context without spending one now.
 //   - default: the completion is mail TO THE AGENT — the owning session is
 //     woken with it, or a fresh main-agent session runs it when no owner is
-//     live (cron, orphans). These turns are quiet: reaching the user from one
-//     takes the mail_user tool.
+//     live (cron, orphans). The wake turn's reply posts to the user as ✉️
+//     agent mail; the model replies NO_REPLY to stay silent.
 
 // CompletionKind discriminates what finished.
 type CompletionKind int
@@ -140,8 +140,8 @@ type CompletionHost interface {
 	// host still considers ownerID live, returning false when it is gone —
 	// the caller then falls back to StartFreshTurn. Hosts implement the
 	// liveness check and delivery under their own lock (Session.NotifyText is
-	// the delivery primitive). The resulting turn is QUIET — its reply is not
-	// posted; the agent reaches the user via mail_user.
+	// the delivery primitive). The resulting wake turn's reply posts to the
+	// user as ✉️ agent mail unless the model replies NO_REPLY.
 	WakeOwner(ownerID, note string) bool
 	// StartFreshTurn runs a fresh main-agent turn over note (a completion
 	// with no live owner — cron, orphans). Implementations must serialize on
@@ -401,8 +401,9 @@ func mailText(ev CompletionEvent) string {
 	if ev.Detail != "" {
 		fmt.Fprintf(&b, "full output: %s\n", ev.Detail)
 	}
-	b.WriteString("\nThis turn is quiet — its reply is not shown to anyone. " +
-		"If the user should hear about this, send it with mail_user; " +
-		"a routine result nobody is waiting on needs no mail at all.")
+	b.WriteString("\nThis turn's reply is posted to the user's chat as ✉️ agent mail. " +
+		"Reply with exactly NO_REPLY to stay silent — do that for a routine result " +
+		"nobody is waiting on, and whenever the conversation above shows the user " +
+		"already has this information.")
 	return b.String()
 }

@@ -18,10 +18,13 @@ const tgMaxMessage = 4000
 // drainTurn consumes a turn's event channel and returns the assistant text.
 // Only the turn's FINAL assistant message is the reply: text emitted before a
 // tool call is progress narration ("Let me check…"), so each ToolCall resets
-// the segment (keeping the last non-empty one as a fallback for turns that end
-// on a tool call). Errors always surface, appended after the reply. Channel
-// close is the authoritative end-of-turn signal.
-func (b *Bot) drainTurn(ch <-chan shell3.Event) string {
+// the segment. narrationFallback keeps the last non-empty pre-tool segment as
+// a fallback for turns that end on a tool call — user turns want it (the user
+// should get SOMETHING); wake turns pass false, where an empty final segment
+// means silence and a stale fragment must not post as agent mail. Errors
+// always surface, appended after the reply. Channel close is the
+// authoritative end-of-turn signal.
+func (b *Bot) drainTurn(ch <-chan shell3.Event, narrationFallback bool) string {
 	var seg strings.Builder // current assistant segment
 	var last string         // last non-empty completed segment
 	var errs strings.Builder
@@ -44,7 +47,7 @@ func (b *Bot) drainTurn(ch <-chan shell3.Event) string {
 		}
 	}
 	reply := strings.TrimSpace(seg.String())
-	if reply == "" {
+	if reply == "" && narrationFallback {
 		reply = last
 	}
 	return strings.TrimSpace(reply + errs.String())

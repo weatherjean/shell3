@@ -51,8 +51,9 @@ bash_bg {
 }
 ```
 
-The completion comes back to you as mail: you wake with the result in a
-quiet turn, and you tell the user (via `mail_user`) only if it matters. Add
+The completion comes back to you as mail: you wake with the result, and
+your reply posts to the user as ✉️ agent mail — reply `NO_REPLY` when it
+doesn't matter (routine results, or they already know). Add
 `direct: true` when the user is waiting on this run and wants the raw result
 posted immediately (failures surface either way).
 

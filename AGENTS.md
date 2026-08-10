@@ -81,9 +81,10 @@ posts straight to the user, and the owning session gets the notice queued
 WITHOUT a wake — the next turn has it in context without spending one now.
 Default: the completion is **mail to the agent** — `WakeOwner` queues+wakes
 the owning session, or `StartFreshTurn` runs a fresh main-agent session
-when none is live (cron, orphans). These mail turns are QUIET: their reply
-posts nowhere; the agent reaches the user only via the `mail_user` host
-tool. The spawner can pass `note: "…"` as context carried into the mail.
+when none is live (cron, orphans). A mail turn's reply posts to the user
+as ✉️ agent mail — one channel, no separate tool — unless the model
+replies NO_REPLY (matched leniently: `isNoReply`), which keeps the turn
+silent. The spawner can pass `note: "…"` as context carried into the mail.
 Delivery lands through a front-end `CompletionHost`
 (`Runtime.SetCompletionHost`: `PostCompletion` (⏰ for cron origins, 🔔
 otherwise; threaded+anchored into the owning session's chat thread when one
@@ -271,16 +272,11 @@ by `internal/render` (`Status`, `Jobs`, `JobDetail`, `Cron`, `RunsPage`,
 message text).
 `/reload` takes the turn slot, so it is refused rather than raced.
 
-Four **host tools** ride the session decorator (`Runtime.SetSessionDecorator`,
+Three **host tools** ride the session decorator (`Runtime.SetSessionDecorator`,
 re-applied by `Runtime.Reload`; `DecorateChatSession` skips headless subagent
 children): `send_media_telegram` (push a local file to the chat as
 photo/voice/audio/video/document, validating extension and size per kind, and
-refusing `.env` and its dotenv siblings), `mail_user` (`{text}` — the agent's
-one way to reach the user from a quiet mail turn; the host posts it
-✉️-prefixed, so bare chat text stays reserved for direct replies to the
-user; threads into the session's conversation when an anchor exists,
-otherwise starts a fresh replyable thread, and records the sent id so
-replying to agent mail continues that session), `status`, and `reload` (records a pending reload and returns; the
+refusing `.env` and its dotenv siblings), `status`, and `reload` (records a pending reload and returns; the
 host applies it at end-of-turn, since a mid-turn reload would tear down the
 running turn). `image_generate` is registered on EVERY session, headless
 children included.
@@ -292,11 +288,14 @@ otherwise, threaded onto the conversation's anchor; `WakeOwner` queues+wakes
 iff the owner IS the current main conversation; `StartFreshTurn` is the
 catch-all that queues the note into the main conversation (creating it on
 demand) — cron results, orphans, and jobs outliving a `/new` all land there,
-so a completion is never lost. Wake turns are QUIET — `runWakeTurn` posts
-nothing; `mail_user` is the only exit — UNLESS the inbox holds user steering
-(`HasQueuedSteer`), which upgrades the wake to a POSTED turn
-(`runPostedQueuedTurn`) so a steer racing a turn's end still gets its answer;
-text arriving DURING a quiet turn queues rather than steering into it
+so a completion is never lost. A wake turn's reply is the agent speaking:
+`runWakeTurn` posts it ✉️-prefixed (threaded to the conversation anchor,
+silent under /quiet, strict final-segment — no narration fallback), and
+NO_REPLY/empty keeps the turn silent; there is no mail_user tool (removed:
+two exits meant the same answer could send twice). The wake is UPGRADED to
+a POSTED turn (`runPostedQueuedTurn`) when the inbox holds user steering
+(`HasQueuedSteer`), so a steer racing a turn's end still gets its answer;
+text arriving DURING a wake turn queues rather than steering into it
 (`turnQuiet`). Callbacks (the `/voice` menu) drain
 on their own bot-lifetime goroutine (`callbacks.go`).
 

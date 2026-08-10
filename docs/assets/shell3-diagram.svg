@@ -83,8 +83,8 @@
   <text x="1044" y="750" font-family="IT" font-size="19" font-weight="600" fill="#a8790a">failed or direct</text>
   <text x="1224" y="750" font-family="ITr" font-size="17" fill="#56667a" text-anchor="start">— a ⚠️/🔔 post in the chat</text>
   <text x="1044" y="802" font-family="IT" font-size="19" font-weight="600" fill="#16222e">everything else</text>
-  <text x="1182" y="802" font-family="ITr" font-size="17" fill="#56667a" text-anchor="start">— mails the agent, quietly</text>
-  <text x="1044" y="854" font-family="IT" font-size="19" font-weight="600" fill="#56667a">mail_user</text>
-  <text x="1126" y="854" font-family="ITr" font-size="17" fill="#56667a" text-anchor="start">— how the agent reaches you from a quiet turn</text>
+  <text x="1182" y="802" font-family="ITr" font-size="17" fill="#56667a" text-anchor="start">— mails the agent; its reply arrives as ✉️</text>
+  <text x="1044" y="854" font-family="IT" font-size="19" font-weight="600" fill="#56667a">NO_REPLY</text>
+  <text x="1126" y="854" font-family="ITr" font-size="17" fill="#56667a" text-anchor="start">— how the agent stays silent on routine mail</text>
   <text x="96" y="898" font-family="ITr" font-size="17" fill="#56667a" text-anchor="start">so a periodic checklist only speaks up when something needs attention</text>
 </svg>

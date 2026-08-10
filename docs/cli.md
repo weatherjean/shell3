@@ -51,8 +51,8 @@ arrives (it stays behind only when the turn failed, as a breadcrumb).
 Background jobs (subagents, `bash_bg`, cron) run independently and come back
 as [completion mail](configuration.md#completion-mail): a failure or a
 `direct` result posts to the chat (🔔, or ⏰ for a cron origin); everything
-else wakes the agent quietly, and it messages you — via its `mail_user`
-tool, prefixed ✉️ — only when the result warrants it. Every message you
+else wakes the agent, whose reply reaches you as ✉️ agent mail — only when
+the result warrants it (it stays silent otherwise). Every message you
 didn't directly cause carries a marker (⏰ cron, 🔔 completion, ⚠️ failure,
 ✉️ agent mail); bare text is always a direct reply to something you sent.
 `/quiet on` delivers the marked posts without a notification ping — replies

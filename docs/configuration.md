@@ -222,8 +222,8 @@ subagent never gets the `task` tool.
 `bash_bg` runs on the same job runtime but is gated separately by `bash_bg`
 in `tools`. **Completions arrive as mail** (see
 [Completion mail](#completion-mail)): each finished job — bash_bg, subagent,
-or cron run — wakes the spawning agent with the result in a quiet turn, and
-you hear about it only if the agent mails you (failures always post; the
+or cron run — wakes the spawning agent with the result, and its reply
+reaches you as ✉️ agent mail only when worth saying (failures always post; the
 result is recorded in the runs store and the jobs list either way). Both
 `task` and `bash_bg` accept two extra args:
 
@@ -608,10 +608,10 @@ Summarize anything noteworthy from the last day.
 ```
 
 A cron run's result arrives as **mail to the main agent** (see
-[Completion mail](#completion-mail)): a quiet turn of the main conversation reads it, with the
+[Completion mail](#completion-mail)): a turn of the main conversation reads it, with the
 job's prompt riding along as context so the agent knows what the job is
-*for*, and it mails you — a ⏰ message titled with the job name — only when
-the run carries something worth saying. A periodic checklist therefore only
+*for*, and its reply reaches you as ✉️ agent mail only when the run carries
+something worth saying (NO_REPLY stays silent). A periodic checklist therefore only
 speaks up when something needs attention: write its prompt to report
 findings plainly, and the quiet runs stay quiet (no sentinel needed). A
 failed run always surfaces as a ⚠️ alert and never spends an agent turn.
@@ -647,17 +647,17 @@ the host. No triage persona, no judging turn; three rules:
 - **Everything else is mail to the agent.** The completion queues into the
   main conversation and wakes it (whichever session spawned the job — cron
   results and orphans land there too), carrying the spawner's `note:` — for cron runs,
-  the job's own prompt, so the agent knows what the job is *for*. These mail
-  turns are **quiet**: the reply text is not delivered anywhere, and the
-  agent reaches you only by calling its `mail_user {text}` tool. Silence is
-  the natural default — the agent simply doesn't mail.
+  the job's own prompt, so the agent knows what the job is *for*. The mail
+  turn's reply posts to the chat as **✉️ agent mail** — one channel, no
+  separate tool — unless the agent replies `NO_REPLY`, which keeps the turn
+  silent. Silence is the expected answer for routine results, and for
+  anything the conversation shows you were already told.
 
-`mail_user` is a host tool on every main chat session, and the agent's only
-way to reach you from a quiet turn. The host prefixes the posted message
-with ✉️, so bare chat text always means a direct reply to something you
-sent. Its message threads into the session's conversation when a thread
-anchor exists, otherwise it posts a fresh message; either way it is part of
-the one conversation, and anything you type next continues it. `/quiet on` delivers these background
+The ✉️ prefix marks agent-initiated mail, so bare chat text always means a
+direct reply to something you sent. Agent mail threads into the session's
+conversation when a thread anchor exists, otherwise it posts a fresh
+message; either way it is part of the one conversation, and anything you
+type next continues it. `/quiet on` delivers these background
 posts (⏰/🔔/✉️) without a notification ping; replies to your own messages
 and ⚠️ failures always ring.
 

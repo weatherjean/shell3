@@ -102,10 +102,10 @@ func TestWakeOwner_MainAndForeign(t *testing.T) {
 	}
 }
 
-// TestStartFreshTurn_RunsQuietly pins the catch-all mail: the note queues
-// into the main conversation (created on demand) and runs a QUIET turn — its
-// reply posts nowhere (mail_user is the only way out of such a turn).
-func TestStartFreshTurn_RunsQuietly(t *testing.T) {
+// TestStartFreshTurn_PostsReplyAsMail pins the catch-all mail: the note
+// queues into the main conversation (created on demand) and the turn's reply
+// posts to the user as ✉️ agent mail — one channel, no separate tool.
+func TestStartFreshTurn_PostsReplyAsMail(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "fresh turn reply")
 	b := newBot(t, fc, rt)
@@ -116,20 +116,19 @@ func TestStartFreshTurn_RunsQuietly(t *testing.T) {
 
 	b.StartFreshTurn("cron job \"nightly\" finished. result: all clear")
 
-	// The turn runs on the (freshly created) main conversation with nothing posted.
 	waitFor(t, func() bool {
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		return b.main != nil && !b.turnActive && !b.main.HasQueuedInput()
 	})
-	if texts := fc.sentTexts(); len(texts) != 0 {
-		t.Fatalf("a fresh mail turn must post nothing, got %v", texts)
-	}
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "✉️ fresh turn reply")
+	})
 }
 
-// TestWakeTurn_MainSessionRunsQuietly pins that the conversation's wake turn
-// runs quietly: the queued mail drains, nothing posts.
-func TestWakeTurn_MainSessionRunsQuietly(t *testing.T) {
+// TestWakeTurn_MainSessionPostsMail pins that the conversation's wake turn
+// delivers its reply as ✉️ agent mail once the queued mail drains.
+func TestWakeTurn_MainSessionPostsMail(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "CRON_OK")
 	b := newBot(t, fc, rt)
@@ -147,8 +146,56 @@ func TestWakeTurn_MainSessionRunsQuietly(t *testing.T) {
 		defer b.mu.Unlock()
 		return !b.turnActive && !sess.HasQueuedInput()
 	})
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "✉️ CRON_OK")
+	})
+}
+
+// TestWakeTurn_NoReplySentinelStaysSilent pins the silence path: a wake turn
+// whose reply is NO_REPLY (however punctuated) posts nothing.
+func TestWakeTurn_NoReplySentinelStaysSilent(t *testing.T) {
+	fc := newFakeClient()
+	rt, sess := newFakeRuntime(t, "NO_REPLY.")
+	b := newBot(t, fc, rt)
+	b.mu.Lock()
+	b.main = sess
+	b.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go b.consumeWakes(ctx)
+
+	sess.NotifyText("routine tick, nothing to say")
+	waitFor(t, func() bool {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return !b.turnActive && !sess.HasQueuedInput()
+	})
 	if texts := fc.sentTexts(); len(texts) != 0 {
-		t.Fatalf("a wake (mail) turn must post nothing, got %v", texts)
+		t.Fatalf("NO_REPLY wake turn must post nothing, got %v", texts)
+	}
+}
+
+// Quiet mode hushes wake-turn agent mail (silent send); off rings.
+func TestWakeTurn_QuietSendsSilent(t *testing.T) {
+	fc := newFakeClient()
+	rt, sess := newFakeRuntime(t, "hushed news")
+	b := newBot(t, fc, rt)
+	setQuiet(t, b, true)
+	b.mu.Lock()
+	b.main = sess
+	b.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go b.consumeWakes(ctx)
+
+	sess.NotifyText("bg done")
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "✉️ hushed news")
+	})
+	if !fc.lastSilent() {
+		t.Error("quiet on: wake-turn mail should be silent")
 	}
 }
 

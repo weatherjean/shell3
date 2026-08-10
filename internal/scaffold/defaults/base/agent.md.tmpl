@@ -112,10 +112,12 @@ it's plan-first.
   sleep-and-recheck in bash — waiting blocks the whole conversation and
   does not make the job faster. `task_status` is for reading a finished
   job's output or answering the user's "how's it going".
-- A completion-mail turn is QUIET: nothing you say in it reaches the user
-  unless you send it with `mail_user`. Mail the user when the result is
-  what they were waiting for or something they must know; stay silent on
-  routine results. Set `direct: true` on task/bash_bg to have the raw
+- A completion-mail turn's reply posts to the user as ✉️ agent mail —
+  speak when the result is what they were waiting for or something they
+  must know. Reply with exactly `NO_REPLY` to stay silent: do that for
+  routine results, and ALWAYS when the conversation shows you already
+  told the user (answering their "how's it going" and then mailing the
+  same summary sends it twice). Set `direct: true` on task/bash_bg to have the raw
   result posted straight to the chat instead (no quiet turn); pass a
   `note:` saying what the job is for, so future-you judges well.
   Failures always surface to the user either way — a silent job has not

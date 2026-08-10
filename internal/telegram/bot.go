@@ -20,7 +20,8 @@ import (
 // restart resumes the same conversation. Exactly one main-agent turn runs at
 // a time; sending always succeeds (mid-turn mail queues and drains as one
 // batch turn). Background-job completions queue into the SAME conversation as
-// quiet mail turns whose only path to the user is the mail_user tool.
+// mail turns whose reply posts to the user as ✉️ agent mail — one channel;
+// the model replies NO_REPLY to stay silent.
 type Bot struct {
 	client tgClient
 	rt     *shell3.Runtime
@@ -56,10 +57,6 @@ type Bot struct {
 	// thread to the user's message. Consumed (cleared) when a catch-up turn
 	// starts.
 	steerAnchor string
-	// mailed holds every mail_user text sent this turn: an identical repeat
-	// (a looping model) is refused instead of posted, and the turn's reply is
-	// suppressed when it duplicates a mail the user already has.
-	mailed []string
 	// wakePending marks a Wake that arrived while the turn slot was taken;
 	// drained after each turn (startNextWork).
 	wakePending bool
@@ -230,7 +227,6 @@ func (b *Bot) SetConfigDir(dir string) { b.configDir = dir }
 // a reload — gets the tools; subagent children (Headless) are skipped there.
 func (b *Bot) DecorateChatSession(s *shell3.Session) {
 	b.registerSendTool(s)
-	b.registerMailTool(s)
 	b.registerReloadTool(s)
 	b.registerStatusTool(s)
 }
@@ -645,7 +641,7 @@ func (b *Bot) dispatchWake(ctx context.Context, id string) {
 	b.turnQuiet = true
 	b.mu.Unlock()
 	go func() {
-		b.runWakeTurn(turnCtx, sess)
+		b.runWakeTurn(ctx, turnCtx, sess)
 		b.afterTurn(ctx, cancel)
 	}()
 }
@@ -688,7 +684,7 @@ func (b *Bot) startNextWake(ctx context.Context) {
 	b.turnQuiet = true
 	b.mu.Unlock()
 	go func() {
-		b.runWakeTurn(turnCtx, sess)
+		b.runWakeTurn(ctx, turnCtx, sess)
 		b.afterTurn(ctx, cancel)
 	}()
 }
@@ -701,25 +697,44 @@ func (b *Bot) takeSlotLocked(ctx context.Context) (context.Context, context.Canc
 	b.turnActive = true
 	b.turnQuiet = false
 	b.turnHadVoice = false
-	// The mail_user dedupe guards against a looping model WITHIN a turn —
-	// reset per turn, or a cron job legitimately mailing the same text on
-	// consecutive runs would be silently suppressed.
-	b.mailed = nil
 	return turnCtx, cancel
 }
 
-// runWakeTurn runs one queued mail turn on sess — QUIETLY. The turn's reply is
-// not posted anywhere: background mail (a completion, a cron result) reaches
-// the user only when the agent sends it with mail_user. The transcript still
-// persists in the runs store. The turn slot is held on entry and stays held on
-// return — the caller's afterTurn retires the session and releases the slot,
-// in that order, so the slot spans the turn + retirement (see
-// retireAndRelease). /stop can cancel it via the shared turn slot. Only
-// ordinary threaded sessions (a subagent/bash_bg completion) and fresh
-// StartFreshTurn sessions run wake turns; the pinned cron session is never
-// woken.
-func (b *Bot) runWakeTurn(turnCtx context.Context, sess *shell3.Session) {
-	_ = b.drainTurn(sess.RunQueued(turnCtx))
+// noReplySentinel is what the model replies on a wake turn to stay silent.
+// Matched leniently (case-insensitive, surrounding punctuation stripped) —
+// a model that appends a period must not accidentally post "NO_REPLY.".
+const noReplySentinel = "NO_REPLY"
+
+// isNoReply reports whether reply is the silence sentinel (or empty).
+func isNoReply(reply string) bool {
+	reply = strings.Trim(strings.TrimSpace(reply), ".!`\"' \n")
+	return reply == "" || strings.EqualFold(reply, noReplySentinel)
+}
+
+// runWakeTurn runs one queued mail turn on sess. Its reply is the agent
+// speaking to the user and posts ✉️-prefixed — ONE channel, so the agent can
+// never send the same answer twice through two exits. NO_REPLY (or an empty
+// final segment — no narration fallback here: a wake turn that ends on a tool
+// call said nothing) keeps the turn silent. Under /quiet the post arrives
+// without a ping. The turn slot is held on entry and stays held on return —
+// the caller's afterTurn retires the session and releases the slot, in that
+// order, so the slot spans the turn + retirement (see retireAndRelease).
+// /stop can cancel it via the shared turn slot. Only ordinary threaded
+// sessions (a subagent/bash_bg completion) and fresh StartFreshTurn sessions
+// run wake turns; the pinned cron session is never woken.
+func (b *Bot) runWakeTurn(ctx, turnCtx context.Context, sess *shell3.Session) {
+	reply := b.drainTurn(sess.RunQueued(turnCtx), false)
+	if isNoReply(reply) {
+		return
+	}
+	b.mu.Lock()
+	replyTo := b.mainAnchor
+	b.mu.Unlock()
+	var opts []SendOpt
+	if b.isQuiet() {
+		opts = append(opts, SendOpt{Silent: true})
+	}
+	b.postReply(ctx, sess, replyTo, "✉️ "+reply, opts...)
 }
 
 // withReplyContext prepends the replied-to message as a capped markdown

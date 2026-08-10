@@ -327,7 +327,6 @@ func TestContract6_WakeMidTurnPendsThenDrains(t *testing.T) {
 		t.Fatal("a Wake arriving mid-turn must mark wakePending")
 	}
 
-	before := len(fc.sentReplies())
 	b.mu.Lock()
 	b.turnActive = false
 	b.mu.Unlock()
@@ -338,9 +337,10 @@ func TestContract6_WakeMidTurnPendsThenDrains(t *testing.T) {
 		defer b.mu.Unlock()
 		return !b.turnActive && !b.wakePending && !sess.HasQueuedInput()
 	})
-	if len(fc.sentReplies()) != before {
-		t.Fatal("a wake (mail) turn must not post its reply")
-	}
+	// The wake turn's reply reaches the user as ✉️ agent mail — one channel.
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "✉️ queued reply")
+	})
 }
 
 // Contract 7: a Wake for anything that is NOT the main conversation (the cron

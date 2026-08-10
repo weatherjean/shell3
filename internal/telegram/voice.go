@@ -26,18 +26,8 @@ const voiceModePrefix = "vm"
 // plain b.sendReply so the reply is never lost; a Speak (synthesis) failure
 // additionally sends its error to the chat as a ⚠️ notice.
 func (b *Bot) deliverReply(ctx context.Context, reply string, hadVoice bool, sess *shell3.Session, replyTo string) {
-	// A reply the user already received as agent mail is not delivered again
-	// (text OR voice) — a model that mails its answer and then repeats it as
-	// its final text would otherwise double-post. Likewise an empty reply
-	// after a mail is a finished turn, not "(no output)".
-	if b.mailedExactly(reply) {
-		return
-	}
 	asText := func() { b.postReply(ctx, sess, replyTo, reply) }
 	if reply == "" {
-		if b.anyMailedThisTurn() {
-			return
-		}
 		asText()
 		return
 	}

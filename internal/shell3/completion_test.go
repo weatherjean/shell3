@@ -80,8 +80,8 @@ func TestCleanCompletionMailsOwner(t *testing.T) {
 	if len(wakes) != 1 || !strings.Contains(wakes[0], "sess-1") || !strings.Contains(wakes[0], "bg1") {
 		t.Fatalf("wakes = %v", wakes)
 	}
-	if !strings.Contains(wakes[0], "mail_user") {
-		t.Fatalf("agent mail should explain the quiet-turn contract, got %q", wakes[0])
+	if !strings.Contains(wakes[0], "NO_REPLY") {
+		t.Fatalf("agent mail should explain the mail-turn contract, got %q", wakes[0])
 	}
 }
 
@@ -211,8 +211,8 @@ func TestMailTextDefangs(t *testing.T) {
 	if strings.Contains(out, "<system-reminder>") {
 		t.Fatalf("mail text carries a live reminder tag:\n%s", out)
 	}
-	if !strings.Contains(out, "mail_user") {
-		t.Fatalf("mail text should name mail_user:\n%s", out)
+	if !strings.Contains(out, "NO_REPLY") {
+		t.Fatalf("mail text should explain the silence sentinel:\n%s", out)
 	}
 }
 

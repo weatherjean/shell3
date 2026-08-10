@@ -161,11 +161,7 @@ func (b *Bot) drainTurnProgress(ctx context.Context, ch <-chan shell3.Event) (re
 		}
 	}
 	reply = strings.TrimSpace(seg.String())
-	if reply == "" && !b.anyMailedThisTurn() {
-		// The pre-tool narration fallback exists for models that narrate and
-		// then end on a tool call. When the turn already reached the user via
-		// mail_user, that narration is stale scratch text — posting it after
-		// the mail is how one-word fragments end up in the chat.
+	if reply == "" {
 		reply = last
 	}
 	reply += errs.String()
