@@ -50,9 +50,10 @@ type Bot struct {
 	// mainAnchor is the conversation's latest chat message id — replies and
 	// agent mail thread onto it.
 	mainAnchor string
-	// lastMailed is the last mail_user text sent, so an identical repeat (a
-	// looping model) is refused instead of posted.
-	lastMailed string
+	// mailed holds every mail_user text sent this turn: an identical repeat
+	// (a looping model) is refused instead of posted, and the turn's reply is
+	// suppressed when it duplicates a mail the user already has.
+	mailed []string
 	// wakePending marks a Wake that arrived while the turn slot was taken;
 	// drained after each turn (startNextWork).
 	wakePending bool
@@ -684,7 +685,7 @@ func (b *Bot) takeSlotLocked(ctx context.Context) (context.Context, context.Canc
 	// The mail_user dedupe guards against a looping model WITHIN a turn —
 	// reset per turn, or a cron job legitimately mailing the same text on
 	// consecutive runs would be silently suppressed.
-	b.lastMailed = ""
+	b.mailed = nil
 	return turnCtx, cancel
 }
 

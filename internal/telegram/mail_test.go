@@ -325,3 +325,86 @@ func TestMailUserDedupeResetsPerTurn(t *testing.T) {
 		t.Fatalf("chat got %d copies, want 2 (one per turn)", count)
 	}
 }
+
+// A reply that duplicates a text already delivered via mail_user is NOT
+// posted again — a model that mails its answer and then repeats it as its
+// final segment would otherwise double-post. A different reply still posts.
+func TestReplyDuplicatingMailIsSuppressed(t *testing.T) {
+	fc := newFakeClient()
+	rt := storeRuntime(t, "unused")
+	b := newBot(t, fc, rt)
+	sess := decoratedSession(t, b, rt)
+	h := b.mailUserHandler(sess)
+
+	if _, err := h(context.Background(), `{"text":"the answer, in full"}`); err != nil {
+		t.Fatal(err)
+	}
+	before := len(fc.sentTexts())
+	b.deliverReply(context.Background(), "the answer, in full", false, sess, "")
+	if got := len(fc.sentTexts()); got != before {
+		t.Fatalf("duplicate reply posted: %v", fc.sentTexts()[before:])
+	}
+	b.deliverReply(context.Background(), "something else entirely", false, sess, "")
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "something else entirely")
+	})
+}
+
+// An EMPTY reply after a mail went out is a finished turn, not "(no output)".
+// With no mail sent, the empty reply still posts the honest placeholder.
+func TestEmptyReplyAfterMailIsSilent(t *testing.T) {
+	fc := newFakeClient()
+	rt := storeRuntime(t, "unused")
+	b := newBot(t, fc, rt)
+	sess := decoratedSession(t, b, rt)
+	h := b.mailUserHandler(sess)
+
+	if _, err := h(context.Background(), `{"text":"report mailed separately"}`); err != nil {
+		t.Fatal(err)
+	}
+	before := len(fc.sentTexts())
+	b.deliverReply(context.Background(), "", false, sess, "")
+	if got := len(fc.sentTexts()); got != before {
+		t.Fatalf("empty reply after mail posted: %v", fc.sentTexts()[before:])
+	}
+	// New turn, nothing mailed: empty reply keeps the placeholder.
+	b.mu.Lock()
+	_, cancel := b.takeSlotLocked(context.Background())
+	b.mu.Unlock()
+	b.releaseSlot(cancel)
+	b.deliverReply(context.Background(), "", false, sess, "")
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "(no output)")
+	})
+}
+
+// The pre-tool narration fallback is suppressed once mail_user delivered the
+// turn — posting stale scratch fragments ("body.") after the mail is how
+// one-word junk lands in the chat. With no mail, the fallback still applies.
+func TestNarrationFallbackSuppressedAfterMail(t *testing.T) {
+	fc := newFakeClient()
+	rt := storeRuntime(t, "unused")
+	b := newBot(t, fc, rt)
+	sess := decoratedSession(t, b, rt)
+
+	feed := func() <-chan shell3.Event {
+		ch := make(chan shell3.Event, 4)
+		ch <- shell3.Event{Kind: shell3.Token, Text: "body."}
+		ch <- shell3.Event{Kind: shell3.ToolCall, ToolName: "bash", ToolInput: `{"command":"true"}`}
+		ch <- shell3.Event{Kind: shell3.ToolResult, ToolName: "bash"}
+		close(ch)
+		return ch
+	}
+	// No mail this turn: the narration fallback applies.
+	if reply, _ := b.drainTurnProgress(context.Background(), feed()); reply != "body." {
+		t.Fatalf("no-mail fallback reply = %q, want %q", reply, "body.")
+	}
+	// Mail went out: the stale fragment is dropped.
+	h := b.mailUserHandler(sess)
+	if _, err := h(context.Background(), `{"text":"real answer via mail"}`); err != nil {
+		t.Fatal(err)
+	}
+	if reply, _ := b.drainTurnProgress(context.Background(), feed()); reply != "" {
+		t.Fatalf("post-mail fallback reply = %q, want empty", reply)
+	}
+}

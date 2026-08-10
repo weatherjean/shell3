@@ -202,7 +202,7 @@ func (b *Bot) handleNewCommand(ctx context.Context) {
 	old := b.main
 	b.main = nil
 	b.mainAnchor = ""
-	b.lastMailed = ""
+	b.mailed = nil
 	b.wakePending = false
 	b.mu.Unlock()
 	// Close only a fully-idle old session: running jobs keep it open (their

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/weatherjean/shell3/internal/shell3"
@@ -26,7 +27,9 @@ func (b *Bot) registerMailTool(sess *shell3.Session) {
 			"delivered. Threads into the current conversation when one exists, otherwise starts " +
 			"a new thread the user can reply to. Mail what the user needs to see; a routine " +
 			"result nobody is waiting on needs no mail. Send AT MOST ONE message per " +
-			"completion, then end the turn — never repeat a message you already sent.",
+			"completion, then end the turn — never repeat a message you already sent. In a " +
+			"normal user turn your reply text IS delivered — never send your reply through " +
+			"mail_user as well.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -36,6 +39,27 @@ func (b *Bot) registerMailTool(sess *shell3.Session) {
 		},
 		Handler: b.mailUserHandler(sess),
 	})
+}
+
+// anyMailedThisTurn reports whether the in-flight turn sent any agent mail.
+func (b *Bot) anyMailedThisTurn() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.mailed) > 0
+}
+
+// mailedExactly reports whether the in-flight turn already mailed exactly
+// text (trimmed). Used to suppress a reply that duplicates a mail the user
+// already has — a model that mails its answer and then repeats it as the
+// turn's final text would otherwise post the same message twice.
+func (b *Bot) mailedExactly(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return slices.Contains(b.mailed, text)
 }
 
 // mailUserHandler is mail_user's implementation for one session, split out so
@@ -54,11 +78,11 @@ func (b *Bot) mailUserHandler(sess *shell3.Session) func(ctx context.Context, ar
 		// answered with guidance instead of another chat message — a hard stop
 		// the model can't talk itself past.
 		b.mu.Lock()
-		if b.lastMailed == text {
+		if slices.Contains(b.mailed, text) {
 			b.mu.Unlock()
 			return "already mailed exactly this — the user has it. Do not send it again; end the turn.", nil
 		}
-		b.lastMailed = text
+		b.mailed = append(b.mailed, text)
 		replyTo := b.mainAnchor
 		b.mu.Unlock()
 		// The host marks agent mail with ✉️ so bare text in the chat always
