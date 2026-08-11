@@ -270,3 +270,35 @@ func TestPostCompletion_DefaultRings(t *testing.T) {
 		t.Error("default cron post should ring")
 	}
 }
+
+// An agent mail identical to the previous one is dropped host-side — a
+// narration-looping model must not fill the chat with copies. Changed text
+// still posts.
+func TestWakeTurn_IdenticalMailDroppedOnce(t *testing.T) {
+	fc := newFakeClient()
+	rt, sess := newFakeRuntime(t, "same old news")
+	b := newBot(t, fc, rt)
+	b.mu.Lock()
+	b.main = sess
+	b.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go b.consumeWakes(ctx)
+
+	sess.NotifyText("tick one")
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "✉️ same old news")
+	})
+	before := len(fc.sentTexts())
+
+	sess.NotifyText("tick two") // fake replies the identical text again
+	waitFor(t, func() bool {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return !b.turnActive && !sess.HasQueuedInput()
+	})
+	if got := len(fc.sentTexts()); got != before {
+		t.Fatalf("identical repeat mail must be dropped, extra posts: %v", fc.sentTexts()[before:])
+	}
+}

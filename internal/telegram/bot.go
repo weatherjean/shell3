@@ -57,6 +57,11 @@ type Bot struct {
 	// thread to the user's message. Consumed (cleared) when a catch-up turn
 	// starts.
 	steerAnchor string
+	// lastAgentMail is the previous ✉️ wake-turn post, so an identical repeat
+	// is dropped host-side (observed live: one cron narration posted 14×
+	// overnight, byte-identical). A repeat carries no information; a changed
+	// situation produces changed text. Cleared by /new.
+	lastAgentMail string
 	// wakePending marks a Wake that arrived while the turn slot was taken;
 	// drained after each turn (startNextWork).
 	wakePending bool
@@ -734,6 +739,16 @@ func (b *Bot) runWakeTurn(ctx, turnCtx context.Context, sess *shell3.Session) {
 	if errText != "" {
 		reply += "\n" + errText
 	}
+	// A mail identical to the previous one is dropped: a repeat carries no
+	// information (a changed situation produces changed text), and a model
+	// stuck in a narration loop must not fill the chat with copies.
+	b.mu.Lock()
+	if reply == b.lastAgentMail {
+		b.mu.Unlock()
+		return
+	}
+	b.lastAgentMail = reply
+	b.mu.Unlock()
 	// Agent mail is ALWAYS silent and never a Telegram reply: it is mail, not
 	// a page — a background thought must not ring a sleeping phone (⚠️
 	// failure posts are the ones that ring), and a quote header on every ✉️
