@@ -135,12 +135,24 @@ func TestProjectNewWorkdirValidation(t *testing.T) {
 		t.Error("non-existent workdir should error")
 	}
 
-	// Missing --workdir is a usage error at the cobra layer.
-	cmd := newProjectCommand()
-	cmd.SetArgs([]string{"new", "site", "--config", dir})
-	cmd.SetOut(&strings.Builder{})
-	cmd.SetErr(&strings.Builder{})
-	if err := cmd.Execute(); err == nil {
-		t.Error("missing --workdir should be a usage error")
+	// Omitted --workdir defaults to <config>/.workdirs/<name>/, created.
+	var out strings.Builder
+	f2 := &projectFlags{configDir: dir}
+	if err := runProjectNew(&out, "site", f2); err != nil {
+		t.Fatalf("default workdir: %v", err)
+	}
+	want := filepath.Join(dir, ".workdirs", "site")
+	if info, err := os.Stat(want); err != nil || !info.IsDir() {
+		t.Fatalf("default workdir %q not created: %v", want, err)
+	}
+	if !strings.Contains(out.String(), want) {
+		t.Fatalf("output should name the workdir, got:\n%s", out.String())
+	}
+	pm, err := os.ReadFile(filepath.Join(dir, "projects", "site", "project.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(pm), want) {
+		t.Fatalf("project.md should record the default workdir, got:\n%s", pm)
 	}
 }

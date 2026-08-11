@@ -41,7 +41,9 @@ back, the output format, and the boundaries — what is out of scope. Vague
 briefs come back as duplicated or misaimed work.
 
 New project? `shell3 project new -h` shows the contract; after creating,
-call the `reload` tool so it registers.
+call the `reload` tool so it registers. Let the command place the workdir
+(`.workdirs/<name>/` under the config dir) unless the work lives in an
+existing directory — never invent data folders in the user's home.
 
 ## Report like an operator
 

@@ -158,11 +158,14 @@ workdir. `shell3 project new` scaffolds one, then appends an index line to
 `projects.md`.
 
 ```sh
-shell3 project new site --workdir ~/code/site --description "marketing site"
-shell3 project new api  --workdir ~/code/api  --copy-skills site
+shell3 project new site --description "marketing site"          # workdir: ~/.shell3/.workdirs/site/, created
+shell3 project new api  --workdir ~/code/api  --copy-skills site  # existing directory (a repo checkout)
 ```
 
-- `--workdir` (required) — the directory the manager's shell runs in; must
+- `--workdir` — the directory the manager's shell runs in. Omitted, it
+  defaults to **`.workdirs/<name>/` under the config dir, created for you** —
+  one predictable home for project data. Pass it only when the project must
+  live in a pre-existing directory (a repo checkout); an explicit path must
   already exist.
 - `--description` — short project description (default `"<name> project"`).
 - `--copy-skills <name>` — seed `skills/` by copying an existing project's.

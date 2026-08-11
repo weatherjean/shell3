@@ -265,6 +265,9 @@ projects/site/
 
 `project.md`'s frontmatter is strict — `description` and `workdir` are both
 required, and `workdir` (a `~/` is expanded) must be an existing directory.
+`shell3 project new` fills it in for you: omitted `--workdir` defaults to
+`.workdirs/<name>/` under the config dir (created by the command), so project
+data gets one predictable home instead of ad-hoc folders around `~`.
 The body is the brief the manager reads when it opens the project:
 
 ```markdown
