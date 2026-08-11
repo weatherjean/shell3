@@ -302,3 +302,40 @@ func TestWakeTurn_IdenticalMailDroppedOnce(t *testing.T) {
 		t.Fatalf("identical repeat mail must be dropped, extra posts: %v", fc.sentTexts()[before:])
 	}
 }
+
+// Corrupt output — raw tool-call template markup — never posts as an update
+// (report turns) and is replaced by a notice in user turns.
+func TestToolMarkupNeverReachesChat(t *testing.T) {
+	corrupt := "]<]minimax[>[<tool_call>\nbash: git show 9cc4ffc\n</tool_call>"
+	fc := newFakeClient()
+	rt, sess := newFakeRuntime(t, corrupt)
+	b := newBot(t, fc, rt)
+	b.mu.Lock()
+	b.main = sess
+	b.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go b.consumeWakes(ctx)
+
+	sess.NotifyText("tick")
+	waitFor(t, func() bool {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return !b.turnActive && !sess.HasQueuedInput()
+	})
+	if texts := fc.sentTexts(); len(texts) != 0 {
+		t.Fatalf("corrupt report reply must post nothing, got %v", texts)
+	}
+
+	// User turn: the notice posts, the markup does not.
+	b.deliverReply(context.Background(), corrupt, false, sess, "")
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "malformed output")
+	})
+	for _, txt := range fc.sentTexts() {
+		if strings.Contains(txt, "<tool_call") {
+			t.Fatalf("raw markup leaked into the chat: %q", txt)
+		}
+	}
+}

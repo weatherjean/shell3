@@ -31,6 +31,12 @@ func (b *Bot) deliverReply(ctx context.Context, reply string, hadVoice bool, ses
 	if isNoReply(reply) {
 		reply = ""
 	}
+	// A corrupt reply (raw tool-call markup — the provider failed to parse
+	// its own template) is replaced by a short notice: the user learns the
+	// turn misfired instead of staring at protocol garbage.
+	if containsToolMarkup(reply) {
+		reply = malformedReplyNotice
+	}
 	asText := func() { b.postReply(ctx, sess, replyTo, reply) }
 	if reply == "" {
 		asText()

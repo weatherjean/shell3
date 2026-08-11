@@ -725,6 +725,18 @@ func isNoReply(reply string) bool {
 	return up == noReplySentinel || (len(up) >= 4 && strings.HasSuffix(noReplySentinel, up))
 }
 
+// containsToolMarkup reports whether text carries raw tool-call template
+// markup — the <tool_call> wrapper several open-model chat templates use
+// (MiniMax, Qwen, GLM). No legitimate reply contains it: its presence means
+// the provider failed to parse its own template and the model's tool call
+// arrived as text. Such a reply is corrupt output, not an answer.
+func containsToolMarkup(text string) bool {
+	return strings.Contains(text, "<tool_call")
+}
+
+// malformedReplyNotice is what a user turn posts in place of a corrupt reply.
+const malformedReplyNotice = "⚠️ the model produced malformed output (raw tool-call markup) — reply suppressed; /runs has the transcript"
+
 // runWakeTurn runs one queued mail turn on sess. Its reply is the agent
 // speaking to the user and posts ✉️-prefixed — ONE channel, so the agent can
 // never send the same answer twice through two exits. NO_REPLY (or an empty
@@ -743,6 +755,11 @@ func (b *Bot) runWakeTurn(ctx, turnCtx context.Context, sess *shell3.Session) {
 	// would make every flaky tick ring the chat. Errors ride along only when
 	// the agent was going to speak anyway.
 	if isNoReply(reply) {
+		return
+	}
+	// Corrupt output (raw tool-call markup) never posts as an update — the
+	// transcript keeps it for diagnosis; the chat is spared the garbage.
+	if containsToolMarkup(reply) {
 		return
 	}
 	if errText != "" {
