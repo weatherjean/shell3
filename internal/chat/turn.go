@@ -276,8 +276,16 @@ func assembleTurnContext(cfg TurnConfig, sess *Session, inboxSeeded bool) (allMs
 		toolSchemas[td.Name] = td.Parameters
 	}
 
-	injectAndEmit(sess, &allMsgs, sess.reminders.check(cfg.StatusLine, sess.lastPromptTokens), false)
 	steerTexts, noticeTexts, userParts := sess.drainInbox(false)
+	// A delivered report leaves a durable one-line trace in history BEFORE any
+	// reminder injects, so the reminders land on it and the agent's reply has a
+	// visible cause on every later turn. The full report stays ephemeral.
+	if trace := reportTrace(noticeTexts); trace != "" {
+		msg := llm.Message{Role: llm.RoleUser, Content: trace}
+		allMsgs = append(allMsgs, msg)
+		sess.append(msg)
+	}
+	injectAndEmit(sess, &allMsgs, sess.reminders.check(cfg.StatusLine, sess.lastPromptTokens), false)
 	steerReminder := reminderBlock(steerReminderHeader, steerTexts)
 	noticeReminder := reminderBlock(noticeReminderHeader, noticeTexts)
 	injectAndEmit(sess, &allMsgs, steerReminder, false)

@@ -675,6 +675,17 @@ arrive without a notification ping — an update is not a page; `/quiet on`
 extends that to ⏰/🔔 posts. Replies to your own messages and ⚠️ failures
 always ring.
 
+A report is delivered at the **end** of the agent's context, and leaves a
+one-line trace in the conversation: `[task report delivered to you — the user
+did NOT send this and has not seen it]` followed by the report's summary line.
+The report body itself is not stored. Both details matter for the agent's
+behaviour rather than yours. Delivering at the end keeps the report — and the
+instruction to stay silent when nothing is needed — from being filed above the
+agent's own previous reply, where it reads as already-answered history. The
+trace keeps the *cause* of an ✉️ update in the conversation: without it the
+update survives with nothing explaining it, and an agent asked later why it
+sent something has no way to answer except to guess.
+
 Report-handling turns are ordinary stored runs, so `/runs` shows exactly
 what the agent did with each report. A leftover `notifier.md` from an older install
 loads with a warning saying it is no longer used — delete the file.
