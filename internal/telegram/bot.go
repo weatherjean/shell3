@@ -711,9 +711,18 @@ func (b *Bot) takeSlotLocked(ctx context.Context) (context.Context, context.Canc
 const noReplySentinel = "NO_REPLY"
 
 // isNoReply reports whether reply is the silence sentinel (or empty).
+// Matching is deliberately loose beyond case/punctuation: a reasoning-split
+// provider can swallow the reply's first tokens into reasoning_content
+// (observed live: the model said NO_REPLY, the host received "_REPLY", and
+// the mangled sentinel posted as mail), so any tail fragment of the sentinel
+// of 4+ characters counts — no real wake reply is ever just "REPLY".
 func isNoReply(reply string) bool {
-	reply = strings.Trim(strings.TrimSpace(reply), ".!`\"' \n")
-	return reply == "" || strings.EqualFold(reply, noReplySentinel)
+	reply = strings.Trim(strings.TrimSpace(reply), ".!`\"'* \n")
+	if reply == "" {
+		return true
+	}
+	up := strings.ToUpper(reply)
+	return up == noReplySentinel || (len(up) >= 4 && strings.HasSuffix(noReplySentinel, up))
 }
 
 // runWakeTurn runs one queued mail turn on sess. Its reply is the agent

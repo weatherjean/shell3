@@ -86,3 +86,19 @@ func TestChunkCountsUTF16(t *testing.T) {
 		t.Fatalf("ASCII at exactly the cap must stay one chunk, got %d", len(got))
 	}
 }
+
+// The silence sentinel survives reasoning-split mangling: a provider that
+// swallows the reply's first tokens leaves a tail fragment ("_REPLY"), which
+// must still read as silence. Real text never does.
+func TestIsNoReplyMangledTails(t *testing.T) {
+	for _, s := range []string{"NO_REPLY", "no_reply.", "NO_REPLY!", "`NO_REPLY`", "_REPLY", "O_REPLY", "REPLY", ""} {
+		if !isNoReply(s) {
+			t.Errorf("isNoReply(%q) = false, want true", s)
+		}
+	}
+	for _, s := range []string{"PLY", "the reply is ready", "NO_REPLY needed here, sending anyway", "All done — see summary"} {
+		if isNoReply(s) {
+			t.Errorf("isNoReply(%q) = true, want false", s)
+		}
+	}
+}
