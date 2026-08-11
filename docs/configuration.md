@@ -52,7 +52,7 @@ models:
     compact_at: 100000             # auto-compact threshold; 0 = off
     # reasoning: medium            # if the model supports reasoning effort
     # temperature: 0.7             # omitted = leave the provider default
-    # max_tokens: 4096             # cap on a single reply; omitted = adapter default
+    # max_tokens: 4096             # cap on a single reply; omitted = adapter default (16000)
 ```
 
 Set `context_window` to the model's actual budget — a wrong number skews the
@@ -94,6 +94,16 @@ Keys in `extra` are injected verbatim into the top-level request JSON:
 ```
 
 Only set it when needed — strict endpoints reject unknown fields.
+
+Reasoning models count their thinking against `max_tokens`, so a reply can be
+cut mid-sentence well before its visible length looks near the cap. A cut reply
+ends with `⚠️ [output cut off — hit the model's max_tokens limit]`; raise
+`max_tokens` when you see it.
+
+Without `reasoning_split`, MiniMax repeats its reasoning inside the reply
+wrapped in `<think>…</think>`. shell3 strips a leading block of that shape, but
+setting the knob is better — it keeps the reasoning out of the reply at the
+source, instead of the provider billing you for the same text twice.
 
 ### Local proxies — `run_proxy`
 

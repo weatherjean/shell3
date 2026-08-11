@@ -50,6 +50,17 @@ func TestThinkLeakFilter(t *testing.T) {
 		{"clean content passes when armed", true, []string{"Hello there, this is a perfectly ordinary reply that keeps going past the scan window."}, "Hello there, this is a perfectly ordinary reply that keeps going past the scan window."},
 		{"short clean content flushes when armed", true, []string{"Sure."}, "Sure."},
 		{"late tag passes when armed", true, []string{strings.Repeat("a", 100) + "</think>tail"}, strings.Repeat("a", 100) + "</think>tail"},
+		// A WHOLE inline block: MiniMax-M3 on the OpenAI-compatible endpoint
+		// repeats its reasoning inside the content stream, wrapped in
+		// <think>…</think>, ahead of the real reply.
+		{"whole block dropped", false, []string{"<think>\nreasoning here\n</think>\n\nHello"}, "Hello"},
+		{"whole block dropped when armed", true, []string{"<think>\nreasoning\n</think>\n\nHello"}, "Hello"},
+		{"whole block split across deltas", false, []string{"<thi", "nk>rea", "soning</thi", "nk>", "\n\nHello"}, "Hello"},
+		{"block longer than the tail scan window", true, []string{"<think>" + strings.Repeat("r", 500) + "</think>\n\nHi"}, "Hi"},
+		{"block is the entire content (tool-call turn)", false, []string{"<think>reasoning</think>"}, ""},
+		{"open tag mid-message untouched", false, []string{"the <think> tag is fun"}, "the <think> tag is fun"},
+		{"unclosed block released at flush", false, []string{"<think>never closed"}, "<think>never closed"},
+		{"open-tag prefix that diverges", false, []string{"<thi", "s is fine"}, "<this is fine"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -86,6 +97,93 @@ func TestStreamStripsLeakedThinkTag(t *testing.T) {
 	}
 	if got := text.String(); got != "Hello world" {
 		t.Fatalf("content: got %q, want %q", got, "Hello world")
+	}
+}
+
+// MiniMax-M3 over the OpenAI-compatible endpoint streams its reasoning twice:
+// once in delta.reasoning and again inline in delta.content wrapped in
+// <think>…</think>. Only the real reply may reach the caller as text.
+func TestStreamStripsInlineThinkBlock(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, chunk := range []string{
+			`{"choices":[{"index":0,"delta":{"reasoning":"The user wants a greeting."}}]}`,
+			`{"choices":[{"index":0,"delta":{"content":"<think>\nThe user wants a greeting.\n"}}]}`,
+			`{"choices":[{"index":0,"delta":{"content":"</think>\n\n"}}]}`,
+			`{"choices":[{"index":0,"delta":{"content":"Hello there!"}}]}`,
+		} {
+			fmt.Fprintf(w, "data: %s\n\n", chunk)
+		}
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "test-key", "test-model")
+	var text, reasoning strings.Builder
+	err := c.Stream(context.Background(),
+		[]llm.Message{{Role: llm.RoleUser, Content: "hi"}}, nil,
+		func(ev llm.StreamEvent) {
+			text.WriteString(ev.TextDelta)
+			reasoning.WriteString(ev.ReasoningDelta)
+		})
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	if got := text.String(); got != "Hello there!" {
+		t.Fatalf("content: got %q, want %q", got, "Hello there!")
+	}
+	if got := reasoning.String(); got != "The user wants a greeting." {
+		t.Fatalf("reasoning: got %q", got)
+	}
+}
+
+// finish_reason "length" means the provider cut the response at the output
+// token cap. It must surface, not pass as a complete reply.
+func TestStreamReportsLengthTruncation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, "data: %s\n\n", `{"choices":[{"index":0,"delta":{"content":"1\n2\n3"}}]}`)
+		fmt.Fprintf(w, "data: %s\n\n", `{"choices":[{"index":0,"delta":{},"finish_reason":"length"}]}`)
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "test-key", "test-model")
+	var truncated bool
+	err := c.Stream(context.Background(),
+		[]llm.Message{{Role: llm.RoleUser, Content: "hi"}}, nil,
+		func(ev llm.StreamEvent) {
+			if ev.Truncated {
+				truncated = true
+			}
+		})
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	if !truncated {
+		t.Fatal("finish_reason=length did not surface as Truncated")
+	}
+}
+
+// A normal stop must NOT be reported as truncated.
+func TestStreamCleanStopNotTruncated(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, "data: %s\n\n", `{"choices":[{"index":0,"delta":{"content":"done"},"finish_reason":"stop"}]}`)
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "test-key", "test-model")
+	err := c.Stream(context.Background(),
+		[]llm.Message{{Role: llm.RoleUser, Content: "hi"}}, nil,
+		func(ev llm.StreamEvent) {
+			if ev.Truncated {
+				t.Error("clean stop reported as truncated")
+			}
+		})
+	if err != nil {
+		t.Fatalf("stream: %v", err)
 	}
 }
 
