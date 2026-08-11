@@ -1,7 +1,7 @@
 # `shell3 serve` — the bring-your-own front-end protocol
 
 `shell3 serve` runs the same agent as `shell3 telegram` — same fresh-turn
-threading, host commands, completion-mail delivery, and
+threading, host commands, task-report delivery, and
 cron — over newline-delimited JSON on stdin/stdout instead of the Telegram
 Bot API. Your front-end (a Discord bridge, a custom dashboard backend, a test
 harness) spawns the process and translates.

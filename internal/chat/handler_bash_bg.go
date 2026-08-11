@@ -9,7 +9,7 @@ import (
 // BashBgHandler starts a background shell command on the managed in-process
 // job runtime (via cfg.StartBashBg, wired to the internal/shell3 jobManager).
 // The job runs as a goroutine-supervised child of the session; its completion
-// arrives as mail (direct:true posts the raw result to the user instead) —
+// arrives as a task report (direct:true posts the raw result to the user instead) —
 // there is no detached pid or log path to poll.
 type BashBgHandler struct{}
 
@@ -55,7 +55,7 @@ func (BashBgHandler) Execute(ctx context.Context, id string, args json.RawMessag
 			"blocks the conversation without making the job faster.", jobID), nil
 	}
 	return fmt.Sprintf("started background job %s\n"+
-		"Its completion will arrive as mail when it lands (failures always surface). "+
+		"Its report will reach you in a later turn (failures always surface). "+
 		"Do not poll — finish your turn; if the user is waiting on this result, "+
 		"you should have set direct:true instead.", jobID), nil
 }

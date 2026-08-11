@@ -81,10 +81,13 @@ posts straight to the user, and the owning session gets the notice queued
 WITHOUT a wake — the next turn has it in context without spending one now.
 Default: the completion is **mail to the agent** — `WakeOwner` queues+wakes
 the owning session, or `StartFreshTurn` runs a fresh main-agent session
-when none is live (cron, orphans). A mail turn's reply posts to the user
-as ✉️ agent mail — one channel, no separate tool — unless the model
-replies NO_REPLY (matched leniently: `isNoReply`), which keeps the turn
-silent. The spawner can pass `note: "…"` as context carried into the mail.
+when none is live (cron, orphans). The completion reaches the model as a
+TASK REPORT (`mailText` — labeled system-generated, explicitly "the user
+has NOT seen this"); the report turn's reply posts to the user as an ✉️
+update — one channel, no separate tool — unless the model replies
+NO_REPLY (matched leniently: `isNoReply`, any 4+-char tail fragment, so a
+reasoning-split provider swallowing "NO" can't turn the sentinel into a
+post). The spawner can pass `note: "…"` as context carried into the report.
 Delivery lands through a front-end `CompletionHost`
 (`Runtime.SetCompletionHost`: `PostCompletion` (⏰ for cron origins, 🔔
 otherwise; threaded+anchored into the owning session's chat thread when one
@@ -98,7 +101,7 @@ Foreground `bash` is capped at 120s
 belongs in `bash_bg`. A subagent may run `bash_bg` jobs of
 its own; a job that outlives the subagent's main turn keeps the child session
 open ("lingering"), and each completion **resumes the subagent for a follow-up
-turn** whose summary routes like any completion mail (capped at 5 follow-up
+turn** whose summary routes like any task report (capped at 5 follow-up
 turns per subagent, after which — or after cancel/failure — the raw job
 event routes instead, so a completion is never lost). `task_cancel <sub>`
 cascades to the jobs the subagent started. `Runtime.Reload` no longer
@@ -233,7 +236,7 @@ injected at the next round boundary via `chat.Session.Interject`
 messages queue instead (preflight needs a turn goroutine). Inbound text
 rides a 400ms debounce (`burstWindow`, `b.debounce` in tests) merging
 Telegram's split-message fragments into one turn. `/inbox` renders the
-queued state — the user's pending mail plus waiting agent mail — with zero
+queued state — the user's pending messages plus waiting task reports — with zero
 tokens. During a user turn the bot renders tool activity as ONE
 self-editing **progress bubble** (`progress.go`: posted silently on the
 first ToolCall, edits throttled at 1.5s, last 6 lines shown, one-line
@@ -261,7 +264,7 @@ so a stale index errors instead of opening the wrong run),
 `/reload`, `/voice off|inbound|always`, `/quiet on|off` (persisted to
 `~/.shell3/quiet_mode.json` by `QuietStore`: ⏰ cron and 🔔 completion posts
 send with Telegram `disable_notification`, arriving without a ping; ✉️
-agent mail is ALWAYS silent regardless of the toggle (mail is not a page);
+updates are ALWAYS silent regardless of the toggle (an update is not a page);
 replies to the user's own messages and ⚠️ failures always ring; the flag
 rides a variadic
 `SendOpt{Silent}` on the tgClient send methods, rendered by the console
@@ -289,10 +292,11 @@ otherwise, threaded onto the conversation's anchor; `WakeOwner` queues+wakes
 iff the owner IS the current main conversation; `StartFreshTurn` is the
 catch-all that queues the note into the main conversation (creating it on
 demand) — cron results, orphans, and jobs outliving a `/new` all land there,
-so a completion is never lost. A wake turn's reply is the agent speaking:
-`runWakeTurn` posts it ✉️-prefixed (ALWAYS silent, a plain message — never
-a Telegram reply; strict final-segment — no narration fallback), and
-NO_REPLY/empty keeps the turn silent; there is no mail_user tool (removed:
+so a completion is never lost. A report turn's reply is the agent speaking
+to the user: `runWakeTurn` posts it ✉️-prefixed (ALWAYS silent, a plain
+message — never a Telegram reply; strict final-segment — no narration
+fallback; an exact repeat of the previous ✉️ is dropped, `lastAgentMail`),
+and NO_REPLY/empty posts nothing; there is no mail_user tool (removed:
 two exits meant the same answer could send twice). The wake is UPGRADED to
 a POSTED turn (`runPostedQueuedTurn`) when the inbox holds user steering
 (`HasQueuedSteer`), so a steer racing a turn's end still gets its answer;
@@ -325,10 +329,10 @@ files; each job dispatches its declared agent — a subagent from `agents/`, or
 a project's `manager.md`, which then runs in that project's workdir — from a
 hidden pinned "cron" parent session that is the dispatch parent + the jobs/runs
 source but runs NO turns of its own and is never woken; a run's result is
-completion mail carrying the job name (`DispatchOpts.CronJob`) and the job's
+a task report carrying the job name (`DispatchOpts.CronJob`) and the job's
 prompt as context (`DispatchOpts.Note` — the agent knows what the job is FOR):
-by default a fresh main-agent turn whose reply posts as ✉️ agent mail only
-when warranted (NO_REPLY stays silent), with `direct: true` a raw ⏰ post
+by default a fresh main-agent turn whose reply posts as an ✉️ update only
+when warranted (NO_REPLY posts nothing), with `direct: true` a raw ⏰ post
 costing no agent turn; a failed
 run always surfaces as `⚠️ <job> failed: <error>` and spends no turn).
 

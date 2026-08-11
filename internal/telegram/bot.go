@@ -19,9 +19,9 @@ import (
 // only way to start over, and the session id persists in the runs store so a
 // restart resumes the same conversation. Exactly one main-agent turn runs at
 // a time; sending always succeeds (mid-turn mail queues and drains as one
-// batch turn). Background-job completions queue into the SAME conversation as
-// mail turns whose reply posts to the user as ✉️ agent mail — one channel;
-// the model replies NO_REPLY to stay silent.
+// batch turn). Background-job completions queue into the SAME conversation
+// as task-report turns whose reply posts to the user as an ✉️ update — one
+// channel; the model replies NO_REPLY to post nothing.
 type Bot struct {
 	client tgClient
 	rt     *shell3.Runtime

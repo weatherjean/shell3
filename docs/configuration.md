@@ -220,10 +220,10 @@ goroutine, not a subprocess). Subagents run headless (their hook scripts see
 subagent never gets the `task` tool.
 
 `bash_bg` runs on the same job runtime but is gated separately by `bash_bg`
-in `tools`. **Completions arrive as mail** (see
-[Completion mail](#completion-mail)): each finished job — bash_bg, subagent,
-or cron run — wakes the spawning agent with the result, and its reply
-reaches you as ✉️ agent mail only when worth saying (failures always post; the
+in `tools`. **Completions arrive as task reports** (see
+[Task reports](#task-reports)): each finished job — bash_bg, subagent,
+or cron run — hands the spawning agent a report, and its reply
+reaches you as an ✉️ update only when worth saying (failures always post; the
 result is recorded in the runs store and the jobs list either way). Both
 `task` and `bash_bg` accept two extra args:
 
@@ -231,7 +231,7 @@ result is recorded in the runs store and the jobs list either way). Both
   no agent turn; the spawning session gets the notice queued for its next
   turn instead of a wake. The right choice when you asked for the work and
   just want the output;
-- `note: "…"` rides along in the completion mail as context ("the user is
+- `note: "…"` rides along in the report as context ("the user is
   waiting on this").
 
 A bash_bg job's full output is persisted to
@@ -240,7 +240,7 @@ its run) so the agent and `task_status` can read past the in-memory tail.
 
 A subagent's still-running `bash_bg` job keeps its session open past its
 main turn; each completion resumes the subagent for a follow-up turn whose
-summary arrives as completion mail like any other — or, for a `direct` job,
+summary arrives as a task report like any other — or, for a `direct` job,
 posts raw (capped at 5 follow-ups per subagent — past the
 cap, or after cancel, the raw job event is mailed instead, so no completion
 is lost). `task_cancel <sub-id>` cascades to the jobs that subagent started.
@@ -608,9 +608,9 @@ Summarize anything noteworthy from the last day.
 ```
 
 A cron run's result arrives as **mail to the main agent** (see
-[Completion mail](#completion-mail)): a turn of the main conversation reads it, with the
+[Task reports](#task-reports)): a turn of the main conversation reads it, with the
 job's prompt riding along as context so the agent knows what the job is
-*for*, and its reply reaches you as ✉️ agent mail only when the run carries
+*for*, and its reply reaches you as an ✉️ update only when the run carries
 something worth saying (NO_REPLY stays silent). A periodic checklist therefore only
 speaks up when something needs attention: write its prompt to report
 findings plainly, and the quiet runs stay quiet (no sentinel needed). A
@@ -630,39 +630,40 @@ travels the usual mail route, exactly as a scheduled firing would.
 The scaffold ships a checklist example as `cron/checklist.md.example` —
 rename it to `checklist.md` (drop the `.example`) and reload to activate it.
 
-## Completion mail
+## Task reports
 
 Every background completion — a `bash_bg` exit, a subagent's result, a
-lingering follow-up, a cron run — is **mail**, routed deterministically by
-the host. No triage persona, no judging turn; three rules:
+lingering follow-up, a cron run — is a **task report to the agent**, routed
+deterministically by the host. No triage persona, no judging turn; three
+rules:
 
 - **Failures always surface.** A failed job posts `⚠️ <label> failed: …` to
-  the chat, unconditionally. If the owning session is still live it is also
-  woken with the mail so the agent can react; an ownerless failure (a broken
+  the chat, unconditionally. If the owning session is still live it also
+  receives the report so the agent can react; an ownerless failure (a broken
   cron job, say) stops at the post — no agent turn is spent per broken tick.
 - **`direct: true`** (bash_bg arg, task arg, cron frontmatter) posts the
   **raw result** straight to the chat — ⏰-prefixed for cron, 🔔 otherwise —
-  costing no agent turn. The owning session gets the notice queued, without
-  a wake, so its next turn has it in context.
-- **Everything else is mail to the agent.** The completion queues into the
-  main conversation and wakes it (whichever session spawned the job — cron
-  results and orphans land there too), carrying the spawner's `note:` — for cron runs,
-  the job's own prompt, so the agent knows what the job is *for*. The mail
-  turn's reply posts to the chat as **✉️ agent mail** — one channel, no
-  separate tool — unless the agent replies `NO_REPLY`, which keeps the turn
-  silent. Silence is the expected answer for routine results, and for
-  anything the conversation shows you were already told.
+  costing no agent turn. The owning session gets the report queued, without
+  a turn, so its next turn has it in context.
+- **Everything else is a report to the agent.** The report queues into the
+  main conversation and runs a turn over it (whichever session spawned the
+  job — cron results and orphans land there too), carrying the spawner's
+  `note:` — for cron runs, the job's own prompt, so the agent knows what the
+  job is *for*. The report never reaches you raw; the agent's reply posts to
+  the chat as an **✉️ update** — one channel, no separate tool — unless it
+  replies `NO_REPLY`, which posts nothing. Silence is the expected answer
+  for routine results, and for anything the conversation shows you were
+  already told.
 
-The ✉️ prefix marks agent-initiated mail, so bare chat text always means a
-direct reply to something you sent. Agent mail threads into the session's
-conversation when a thread anchor exists, otherwise it posts a fresh
-message; either way it is part of the one conversation, and anything you
-type next continues it. ✉️ agent mail always arrives without a
-notification ping — mail is not a page; `/quiet on` extends that to ⏰/🔔
-posts. Replies to your own messages and ⚠️ failures always ring.
+The ✉️ prefix marks an agent-initiated update, so bare chat text always
+means a direct reply to something you sent. Updates are part of the one
+conversation, and anything you type next continues it. ✉️ updates always
+arrive without a notification ping — an update is not a page; `/quiet on`
+extends that to ⏰/🔔 posts. Replies to your own messages and ⚠️ failures
+always ring.
 
-Mail turns are ordinary stored runs, so `/runs` shows exactly what the agent
-did with each completion. A leftover `notifier.md` from an older install
+Report-handling turns are ordinary stored runs, so `/runs` shows exactly
+what the agent did with each report. A leftover `notifier.md` from an older install
 loads with a warning saying it is no longer used — delete the file.
 
 ## The runs store — `shell3.db`

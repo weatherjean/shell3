@@ -138,12 +138,12 @@ research, no special flag is needed.
 
 ### The direct parameter
 
-`bash_bg` completions come back to you as mail. Pass `direct: true` when the
+`bash_bg` reports come back to you automatically. Pass `direct: true` when the
 user is waiting on this particular run and wants the raw output:
 
 | `direct` | Clean exit | Nonzero exit |
 |---|---|---|
-| `false` (default) | Wakes you with the result — your reply posts as ✉️ agent mail, `NO_REPLY` stays silent | Always surfaces to the user, and wakes you |
+| `false` (default) | Hands you the report — your reply posts as an ✉️ update, `NO_REPLY` posts nothing | Always surfaces to the user, and wakes you |
 | `true` | Raw result posts to the user's chat; the notice is queued for your next turn | Always surfaces to the user, and wakes you if your session is live |
 
 ```json

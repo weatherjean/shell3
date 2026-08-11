@@ -49,14 +49,14 @@ it's running, updating in place — which deletes itself once the answer
 arrives (it stays behind only when the turn failed, as a breadcrumb).
 `/inbox` shows what's queued; `/stop` cancels the running turn.
 Background jobs (subagents, `bash_bg`, cron) run independently and come back
-as [completion mail](configuration.md#completion-mail): a failure or a
+as [task reports](configuration.md#task-reports): a failure or a
 `direct` result posts to the chat (🔔, or ⏰ for a cron origin); everything
-else wakes the agent, whose reply reaches you as ✉️ agent mail — only when
+else hands the agent a report, whose reply reaches you as an ✉️ update — only when
 the result warrants it (it stays silent otherwise). Every message you
 didn't directly cause carries a marker (⏰ cron, 🔔 completion, ⚠️ failure,
-✉️ agent mail); bare text is always a direct reply to something you sent.
-✉️ agent mail always arrives without a
-notification ping (mail is not a page); `/quiet on` extends that to ⏰/🔔
+✉️ update); bare text is always a direct reply to something you sent.
+✉️ updates always arrive without a
+notification ping (an update is not a page); `/quiet on` extends that to ⏰/🔔
 posts too. Replies to you and ⚠️ failures always ring.
 
 `--console` swaps the Telegram transport for stdin/stdout and drives the same
@@ -76,7 +76,7 @@ tappable commands, and Telegram only linkifies those in message text.
 |---------|------|
 | `/stop` | Cancel the running turn. Background jobs are **not** killed — they keep running and still report back. |
 | `/new` | Start a fresh conversation. The old one stays in `/runs` and the history index; running jobs keep going and report into the new conversation. Refused mid-turn (`/stop` first). |
-| `/inbox` | The queued state: your pending messages, and agent mail waiting in sessions. |
+| `/inbox` | The queued state: your pending messages, and task reports waiting in sessions. |
 | `/status` | Version, config dir, agent + model + params, context usage, whether the gate is armed, tools, subagents, skills, MCP health, cron jobs, projects, warnings, and the effective system prompt. Reports the live session (on an idle bot, the headless cron parent — `0` messages). |
 | `/jobs` | Running and finished background work: id, kind, label, status, elapsed, exit code. |
 | `/job <id>` | One job plus its output — a subagent's stored transcript, or a command's captured stdout. |
@@ -86,7 +86,7 @@ tappable commands, and Telegram only linkifies those in message text.
 | `/runs [page\|id]` | Stored sessions, newest first, 8 per page; each entry a tappable `/run_N` that replays that run in full (tool calls with arguments, results, and reasoning). `/runs 2` pages older; `/runs <id>` replays by id directly. |
 | `/reload` | Re-read the config and apply it live. Takes the turn slot, so it is refused rather than raced while a turn runs. |
 | `/voice off\|inbound\|always` | Whether replies come back spoken (needs `media.tts`). Bare `/voice` opens a three-button menu. The choice persists in `~/.shell3/voice_mode.json`. |
-| `/quiet on\|off` | Deliver ⏰/🔔 background posts silently — no notification ping (✉️ agent mail is always silent); replies to you and ⚠️ failures always ring. Bare `/quiet` reports the state, which persists in `~/.shell3/quiet_mode.json`. |
+| `/quiet on\|off` | Deliver ⏰/🔔 background posts silently — no notification ping (✉️ updates are always silent); replies to you and ⚠️ failures always ring. Bare `/quiet` reports the state, which persists in `~/.shell3/quiet_mode.json`. |
 
 ### Attachments and media
 
@@ -98,7 +98,7 @@ agent sends files back with `send_media_telegram` — see
 ## `shell3 serve` — the agent over stdio JSONL
 
 Runs the same bot loop as `shell3 telegram` — fresh-turn threading, host
-commands, completion mail, cron — but the transport is
+commands, task reports, cron — but the transport is
 newline-delimited JSON on stdin/stdout. This is the bring-your-own front-end
 seam: a Discord bridge or a custom dashboard backend spawns `shell3 serve`
 and translates its own surface to the wire events. No Telegram credentials

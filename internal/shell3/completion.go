@@ -372,7 +372,7 @@ func floorText(ev CompletionEvent) string {
 // a reminder envelope at the agent.
 func mailText(ev CompletionEvent) string {
 	var b strings.Builder
-	b.WriteString("Background mail: a task finished.\n")
+	b.WriteString("TASK REPORT (system-generated, for you only — the user has NOT seen any of this):\n")
 	fmt.Fprintf(&b, "kind: %s\n", ev.Kind)
 	fmt.Fprintf(&b, "job: %s — %s\n", ev.JobID, strutil.NeutralizeReminderTags(strutil.Truncate(ev.Title, 200)))
 	if ev.Agent != "" {
@@ -401,10 +401,10 @@ func mailText(ev CompletionEvent) string {
 	if ev.Detail != "" {
 		fmt.Fprintf(&b, "full output: %s\n", ev.Detail)
 	}
-	b.WriteString("\nEVERY word of this turn's reply is posted to the user's chat as ✉️ agent " +
-		"mail. To stay silent, reply with exactly NO_REPLY and nothing else — never " +
-		"narrate that you are staying silent (\"routine tick, no message needed\" would " +
-		"itself be sent). Stay silent for a routine result nobody is waiting on, and " +
-		"whenever the conversation above shows the user already has this information.")
+	b.WriteString("\nYou are now speaking TO THE USER: every word of your reply is posted to " +
+		"their chat as an ✉️ update. If they need nothing from this report — a routine " +
+		"result nobody is waiting on, or the conversation above shows they already have " +
+		"the information — reply with exactly NO_REPLY and nothing else. Never narrate " +
+		"staying silent (\"routine tick, no message needed\" would itself be posted).")
 	return b.String()
 }

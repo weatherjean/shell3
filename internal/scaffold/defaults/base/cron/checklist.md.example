@@ -8,7 +8,7 @@ Frontmatter:
   agent     a subagent from agents/ to run the checklist (here: assistant).
   direct    true posts the run's raw result straight to the chat, costing
             no agent turn. Leave it off for report-style jobs — the result
-            then arrives as mail to the main agent, which messages you only
+            then reaches the main agent as a report; it posts an ✉️ update only
             when this run carries something worth saying. Failures always
             surface either way.
 

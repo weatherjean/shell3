@@ -84,8 +84,8 @@ var bashBgTool = llm.ToolDefinition{
 	Name: "bash_bg",
 	Description: "Start a shell command in the background on the in-process runtime and return a job id immediately. " +
 		"Use this for long-running work or servers — anything that should not block the turn. " +
-		"The completion arrives as MAIL — mid-turn into this same reply if the job is quick, as a " +
-		"follow-up turn otherwise (whose reply reaches the user as ✉️ agent mail; NO_REPLY for silence) — so start it, say it's running, " +
+		"You will receive its report automatically — mid-turn into this same reply if the job is quick, in a " +
+		"later turn otherwise (your reply then posts to the user as an ✉️ update; NO_REPLY posts nothing) — so start it, say it's running, " +
 		"and end your turn. Set direct:true to have the raw result posted straight to the chat instead, " +
 		"with no follow-up turn. Never wait in-turn: no task_status loops, no sleep-and-recheck " +
 		"in bash. task_status <id> is for reading a finished job's output or answering a user's how's-it-going.",
@@ -95,7 +95,7 @@ var bashBgTool = llm.ToolDefinition{
 			"command": map[string]any{"type": "string", "description": "The shell command to run in the background"},
 			"workdir": map[string]any{"type": "string", "description": "Working directory; defaults to the project root"},
 			"direct":  map[string]any{"type": "boolean", "description": "Post the raw result straight to the chat when it finishes (no follow-up turn). Set it when the user asked for this work and is waiting on the output itself"},
-			"note":    map[string]any{"type": "string", "description": "Context carried into the completion mail (what this job is for, whether anyone is waiting). Ignored when direct is true"},
+			"note":    map[string]any{"type": "string", "description": "Context carried into the report (what this job is for, whether anyone is waiting). Ignored when direct is true"},
 		},
 		"required": []string{"command"},
 	},
@@ -126,8 +126,8 @@ func TaskToolFor(subs []SubagentRef) llm.ToolDefinition {
 	return llm.ToolDefinition{
 		Name: "task",
 		Description: "Spawn a subagent that runs in the background. Returns immediately — the completion " +
-			"arrives as MAIL: mid-turn into this same reply if it's quick, as a follow-up turn " +
-			"otherwise (whose reply reaches the user as ✉️ agent mail; NO_REPLY for silence). Set direct:true to have the raw result " +
+			"report reaches you automatically: mid-turn into this same reply if it's quick, in a later turn " +
+			"otherwise (your reply then posts to the user as an ✉️ update; NO_REPLY posts nothing). Set direct:true to have the raw result " +
 			"posted straight to the chat instead, with no follow-up turn. Dispatch, say it's running, and " +
 			"end your turn. Never wait in-turn: no task_status loops, no sleep-and-recheck. Use this to " +
 			"delegate work to a specialised subagent while you continue with other tasks. Brief it like a " +
@@ -154,7 +154,7 @@ func TaskToolFor(subs []SubagentRef) llm.ToolDefinition {
 				},
 				"note": map[string]any{
 					"type":        "string",
-					"description": "Context carried into the completion mail (what this task is for, whether anyone is waiting). Ignored when direct is true",
+					"description": "Context carried into the report (what this task is for, whether anyone is waiting). Ignored when direct is true",
 				},
 			},
 			"required": []string{"subagent_type", "prompt"},

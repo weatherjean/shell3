@@ -26,8 +26,8 @@ because its file exists.
     skills/<name>.md   one skill per file
     projects/<name>/   a project: project.md brief + its manager subagent
     cron/<name>.md     scheduled jobs (schedule + agent + prompt body);
-                       results arrive to you as mail — your reply posts
-                       as ✉️ agent mail, or NO_REPLY stays quiet
+                       results reach you as task reports — your reply
+                       posts as an ✉️ update, or NO_REPLY posts nothing
     lib/bin/           your reusable wrapper scripts (see the scripting
                        skill)
 
