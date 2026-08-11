@@ -32,7 +32,7 @@ func (c retryOnlyClient) Stream(_ context.Context, _ []llm.Message, _ []llm.Tool
 func TestStreamOnceRelaysRetry(t *testing.T) {
 	s, c := newCollectorSession(SessionOpts{})
 	client := retryOnlyClient{notice: llm.RetryNotice{Attempt: 1, Max: 5, Reason: "HTTP 429"}}
-	_, _, _, _, err := streamOnce(context.Background(), client, nil, nil, s)
+	_, _, _, _, _, err := streamOnce(context.Background(), client, nil, nil, s)
 	if err != nil {
 		t.Fatalf("streamOnce err: %v", err)
 	}

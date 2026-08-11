@@ -88,6 +88,20 @@ update — one channel, no separate tool — unless the model replies
 NO_REPLY (matched leniently: `isNoReply`, any 4+-char tail fragment, so a
 reasoning-split provider swallowing "NO" can't turn the sentinel into a
 post). The spawner can pass `note: "…"` as context carried into the report.
+A report is delivered at the **end** of the turn's context, never grafted
+onto an earlier user message (`injectReminder` attaches to the LAST message
+only when the user just spoke, otherwise it appends a fresh trailing user
+carrier that later reminders coalesce onto) — the old backward walk filed the
+newest mail above the assistant's own previous reply, burying the NO_REPLY
+instruction it carries under a finished exchange. The full report stays
+ephemeral (outbound copy only), but `chat.reportTrace` persists ONE line of
+it into history — the first line of each notice, which is why `mailText`'s
+opening line is a self-contained "TASK REPORT — <label> (clean|FAILED)"
+summary. Without that trace an ✉️ update outlives its cause: the model has no
+introspective access to a turn it can no longer see, so "why did you send
+that?" gets answered by confabulation. The trace also keeps the transcript
+alternating (a wake reply otherwise follows the previous assistant message
+with no turn between).
 Delivery lands through a front-end `CompletionHost`
 (`Runtime.SetCompletionHost`: `PostCompletion` (⏰ for cron origins, 🔔
 otherwise; threaded+anchored into the owning session's chat thread when one

@@ -258,6 +258,7 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 	toolCalls := map[int64]*llm.ToolCall{}
 	var toolCallOrder []int64
 	var leak thinkLeakFilter
+	var truncated bool
 
 	for stream.Next() {
 		chunk := stream.Current()
@@ -280,6 +281,9 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 
 		if len(chunk.Choices) == 0 {
 			continue
+		}
+		if chunk.Choices[0].FinishReason == "length" {
+			truncated = true
 		}
 		delta := chunk.Choices[0].Delta
 
@@ -340,7 +344,7 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 		onEvent(llm.StreamEvent{ToolCall: tc})
 	}
 
-	onEvent(llm.StreamEvent{Done: true})
+	onEvent(llm.StreamEvent{Done: true, Truncated: truncated})
 	return nil
 }
 

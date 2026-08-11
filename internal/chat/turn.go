@@ -112,7 +112,7 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 
 	var totalUsage llm.Usage
 	for {
-		text, reasoning, toolCalls, usage, err := streamOnce(ctx, cfg.LLM, allMsgs, toolList, sess)
+		text, reasoning, toolCalls, usage, truncated, err := streamOnce(ctx, cfg.LLM, allMsgs, toolList, sess)
 		if usage != (llm.Usage{}) {
 			totalUsage = addUsage(totalUsage, usage)
 			emitUsage(sess, totalUsage)
@@ -129,6 +129,16 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 			streamErr := err
 			terminalEmit = func() { emitError(sess, streamErr) }
 			return
+		}
+		// A capped response just stops mid-sentence — the provider reports it
+		// only as finish_reason "length", so without this the user sees a
+		// mangled reply and no reason for it. The notice rides the token
+		// stream (front-ends build the reply from tokens) AND stays in the
+		// recorded message, so the next round the model knows its own previous
+		// output was cut rather than treating it as something it chose to say.
+		if truncated {
+			emitAssistantToken(sess, truncationNotice)
+			text += truncationNotice
 		}
 		if text != "" {
 			emitAssistantMessage(sess, text)
@@ -266,8 +276,16 @@ func assembleTurnContext(cfg TurnConfig, sess *Session, inboxSeeded bool) (allMs
 		toolSchemas[td.Name] = td.Parameters
 	}
 
-	injectAndEmit(sess, &allMsgs, sess.reminders.check(cfg.StatusLine, sess.lastPromptTokens), false)
 	steerTexts, noticeTexts, userParts := sess.drainInbox(false)
+	// A delivered report leaves a durable one-line trace in history BEFORE any
+	// reminder injects, so the reminders land on it and the agent's reply has a
+	// visible cause on every later turn. The full report stays ephemeral.
+	if trace := reportTrace(noticeTexts); trace != "" {
+		msg := llm.Message{Role: llm.RoleUser, Content: trace}
+		allMsgs = append(allMsgs, msg)
+		sess.append(msg)
+	}
+	injectAndEmit(sess, &allMsgs, sess.reminders.check(cfg.StatusLine, sess.lastPromptTokens), false)
 	steerReminder := reminderBlock(steerReminderHeader, steerTexts)
 	noticeReminder := reminderBlock(noticeReminderHeader, noticeTexts)
 	injectAndEmit(sess, &allMsgs, steerReminder, false)
@@ -464,11 +482,15 @@ func validateCall(toolSchemas map[string]map[string]any, tc llm.ToolCall) (res t
 	return toolResult{}, false
 }
 
+// truncationNotice is appended to a reply the provider cut at the output token
+// cap. Raising the model's max_tokens is the fix, so the notice names it.
+const truncationNotice = "\n\n⚠️ [output cut off — hit the model's max_tokens limit]"
+
 // streamOnce calls the LLM once, collecting text/reasoning/tool-calls/usage
 // and emitting per-token chat.Events on the session sink.
-func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools []llm.ToolDefinition, sess *Session) (text, reasoning string, toolCalls []llm.ToolCall, usage llm.Usage, err error) {
+func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools []llm.ToolDefinition, sess *Session) (text, reasoning string, toolCalls []llm.ToolCall, usage llm.Usage, truncated bool, err error) {
 	if ctx.Err() != nil {
-		return "", "", nil, llm.Usage{}, ctx.Err()
+		return "", "", nil, llm.Usage{}, false, ctx.Err()
 	}
 	var sb, rb strings.Builder
 	streamErr := client.Stream(ctx, msgs, tools, func(ev llm.StreamEvent) {
@@ -489,11 +511,14 @@ func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools
 		if ev.Retry != nil {
 			emitRetry(sess, ev.Retry)
 		}
+		if ev.Truncated {
+			truncated = true
+		}
 	})
 	if ctx.Err() != nil {
-		return sb.String(), rb.String(), toolCalls, usage, ctx.Err()
+		return sb.String(), rb.String(), toolCalls, usage, truncated, ctx.Err()
 	}
-	return sb.String(), rb.String(), toolCalls, usage, streamErr
+	return sb.String(), rb.String(), toolCalls, usage, truncated, streamErr
 }
 
 // addUsage accumulates token usage across the multiple LLM requests that can

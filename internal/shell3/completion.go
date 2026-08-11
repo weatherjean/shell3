@@ -116,6 +116,16 @@ func (e CompletionEvent) label() string {
 	return fmt.Sprintf("%s (%s)", e.JobID, title)
 }
 
+// traceStatus is the one-word outcome carried in mailText's summary line (and
+// therefore in the persisted trace): enough for the agent to later recall
+// whether the report it answered was routine or a failure.
+func (e CompletionEvent) traceStatus() string {
+	if e.Failed() {
+		return "FAILED"
+	}
+	return "clean"
+}
+
 // CompletionPost is one user-facing completion post: the text plus where it
 // came from, so the front-end can offer a way INTO the work — the job, the
 // stored run — instead of a bare notice.
@@ -370,9 +380,14 @@ func floorText(ev CompletionEvent) string {
 // mailText renders the mail delivered to the (woken or fresh) main agent.
 // Untrusted fields (output, titles, notes) are defanged so a job cannot forge
 // a reminder envelope at the agent.
+//
+// The FIRST line is a self-contained summary naming the job and its outcome:
+// chat.reportTrace lifts exactly that line as the durable record of this
+// delivery, so it has to identify the report on its own.
 func mailText(ev CompletionEvent) string {
 	var b strings.Builder
-	b.WriteString("TASK REPORT (system-generated, for you only — the user has NOT seen any of this):\n")
+	fmt.Fprintf(&b, "TASK REPORT — %s (%s), system-generated, for you only; the user has NOT seen any of this:\n",
+		strutil.NeutralizeReminderTags(strutil.Truncate(ev.label(), 120)), ev.traceStatus())
 	fmt.Fprintf(&b, "kind: %s\n", ev.Kind)
 	fmt.Fprintf(&b, "job: %s — %s\n", ev.JobID, strutil.NeutralizeReminderTags(strutil.Truncate(ev.Title, 200)))
 	if ev.Agent != "" {

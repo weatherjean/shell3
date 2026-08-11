@@ -160,6 +160,33 @@ const (
 // output, subagent summaries, user interjections), and an embedded
 // </system-reminder> must not be able to close this envelope and forge system
 // or user text.
+// reportTraceCap bounds one report's persisted trace line.
+const reportTraceCap = 160
+
+// reportTrace renders the durable one-line record of the reports delivered on
+// this turn. The full report is ephemeral — injected into the outbound copy
+// only — so without this the agent's own reply to it survives in history with
+// its cause erased, and a later "why did you send that?" can only be answered
+// by invention: the model has no introspective access to a turn it can no
+// longer see. One line per report is enough to answer it by lookup instead.
+//
+// A notice's FIRST line is its summary by convention (see mailText); the rest
+// is body and is deliberately not persisted.
+func reportTrace(notices []string) string {
+	var lines []string
+	for _, n := range notices {
+		first, _, _ := strings.Cut(strings.TrimSpace(n), "\n")
+		if first = strings.TrimSpace(strutil.NeutralizeReminderTags(first)); first != "" {
+			lines = append(lines, "- "+strutil.Truncate(first, reportTraceCap))
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "[task report delivered to you — the user did NOT send this and has not seen it]\n" +
+		strings.Join(lines, "\n")
+}
+
 func reminderBlock(header string, items []string) string {
 	var b strings.Builder
 	wrote := false
@@ -444,41 +471,48 @@ func (r *reminderTracker) check(statusLine string, promptTokens int) string {
 	return "<system-reminder>\n" + strings.Join(lines, "\n") + "\n</system-reminder>"
 }
 
-// injectReminder appends a <system-reminder> block to the last user message
-// in msgs. Returns msgs unchanged if reminder is empty. If no user message
-// exists (e.g. a purely inbox-seeded wake turn whose empty carrier message was
-// not appended to history), the reminder is appended as a fresh user message so
-// the queued text still reaches the model. Operates on the allMsgs slice only —
-// never on sess.messages. When the user message is multimodal the reminder is
-// mirrored into its text part — the adapter sends ContentParts and ignores
-// Content — on a cloned parts slice so the message stored in sess.messages
-// stays reminder-free.
+// injectReminder appends a <system-reminder> block to the turn's user message
+// — the LAST message, when the user just spoke. Returns msgs unchanged if
+// reminder is empty.
+//
+// When the conversation does not end on a user message (a wake turn: a
+// background report arrived with nothing from the user), the reminder becomes
+// a fresh user message at the END instead. It must NOT be grafted onto an
+// earlier user message: that message has already been answered, so the graft
+// files the newest information above the assistant's own last reply, where
+// anything it instructs — "reply NO_REPLY if this needs nothing" — is
+// positionally weakest and competes with the pull of the finished exchange
+// below it. Later reminders in the same turn then find that carrier as the
+// last message and coalesce onto it.
+//
+// Operates on the allMsgs slice only — never on sess.messages. When the user
+// message is multimodal the reminder is mirrored into its text part — the
+// adapter sends ContentParts and ignores Content — on a cloned parts slice so
+// the message stored in sess.messages stays reminder-free.
 func injectReminder(msgs []llm.Message, reminder string) []llm.Message {
 	if reminder == "" {
 		return msgs
 	}
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == llm.RoleUser {
-			msgs[i].Content = msgs[i].Content + "\n\n" + reminder
-			if len(msgs[i].ContentParts) > 0 {
-				parts := slices.Clone(msgs[i].ContentParts)
-				appended := false
-				for j := range parts {
-					if parts[j].Type == llm.ContentPartTypeText {
-						parts[j].Text += "\n\n" + reminder
-						appended = true
-						break
-					}
+	if i := len(msgs) - 1; i >= 0 && msgs[i].Role == llm.RoleUser {
+		msgs[i].Content = msgs[i].Content + "\n\n" + reminder
+		if len(msgs[i].ContentParts) > 0 {
+			parts := slices.Clone(msgs[i].ContentParts)
+			appended := false
+			for j := range parts {
+				if parts[j].Type == llm.ContentPartTypeText {
+					parts[j].Text += "\n\n" + reminder
+					appended = true
+					break
 				}
-				if !appended {
-					parts = append(parts, llm.ContentPart{Type: llm.ContentPartTypeText, Text: reminder})
-				}
-				msgs[i].ContentParts = parts
 			}
-			return msgs
+			if !appended {
+				parts = append(parts, llm.ContentPart{Type: llm.ContentPartTypeText, Text: reminder})
+			}
+			msgs[i].ContentParts = parts
 		}
+		return msgs
 	}
-	// No trailing user message (inbox-seeded wake turn): carry the queued text
-	// to the model as a fresh user message rather than silently dropping it.
+	// The conversation does not end on a user message: carry the reminder as a
+	// fresh trailing user message rather than burying it upstream.
 	return append(msgs, llm.Message{Role: llm.RoleUser, Content: reminder})
 }

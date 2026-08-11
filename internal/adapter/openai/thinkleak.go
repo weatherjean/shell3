@@ -11,8 +11,16 @@ import "strings"
 // deltas. Everything else — including a literal "</think>" later in the
 // message — passes through untouched. Legitimate content that *starts* with
 // "</think>" is indistinguishable from the leak and is dropped; accepted.
+//
+// MiniMax-M3 on that endpoint leaks the WHOLE block instead of just the
+// closing tag: the reasoning arrives twice, once in the reasoning delta field
+// and again inline in content as "<think>…</think>" ahead of the real reply
+// (verified live against api.minimax.io/v1). A leading "<think>" therefore
+// opens a swallow-until-"</think>" state. Only at the very start of the
+// message — a "<think>" further in is ordinary text and passes through — and
+// an unclosed block is released at flush, so nothing is ever lost outright.
 type thinkLeakFilter struct {
-	state int // holding → trimming → passthrough
+	state int // holding → (block) → trimming → passthrough
 	buf   string
 	// reasoningSeen widens the net: when the stream also carried a split
 	// reasoning field, a "</think>" near the very start of content is the
@@ -29,11 +37,21 @@ const leakScanCap = 64
 
 const (
 	leakHolding  = iota // start of stream: buffer while a leading tag is still possible
+	leakBlock           // inside a leading "<think>…" block: swallow until it closes
 	leakTrimming        // tag consumed: swallow whitespace up to the first real rune
 	leakPassthrough
 )
 
-const leakedTag = "</think>"
+const (
+	leakedTag = "</think>"
+	openTag   = "<think>"
+)
+
+// blockCap bounds how much a leading "<think>" block may buffer before the
+// filter gives up and emits it verbatim. A block that never closes is not a
+// leak, and holding the whole reply hostage waiting for a tag that isn't
+// coming would be worse than showing it.
+const blockCap = 128 << 10
 
 // filter processes one content delta and returns the text to emit now
 // (possibly empty while the filter is still deciding).
@@ -41,6 +59,21 @@ func (f *thinkLeakFilter) filter(delta string) string {
 	switch f.state {
 	case leakPassthrough:
 		return delta
+	case leakBlock:
+		f.buf += delta
+		if i := strings.Index(f.buf, leakedTag); i >= 0 {
+			rest := f.buf[i+len(leakedTag):]
+			f.state = leakTrimming
+			f.buf = ""
+			return f.filter(rest)
+		}
+		if len(f.buf) > blockCap {
+			f.state = leakPassthrough
+			out := f.buf
+			f.buf = ""
+			return out
+		}
+		return ""
 	case leakTrimming:
 		s := strings.TrimLeft(delta, " \t\r\n")
 		if s == "" {
@@ -51,6 +84,16 @@ func (f *thinkLeakFilter) filter(delta string) string {
 	}
 	f.buf += delta
 	trimmed := strings.TrimLeft(f.buf, " \t\r\n")
+	// A whole leaked block wins over the closing-tag nets below: its own
+	// "</think>" can sit arbitrarily far in, past any scan window.
+	if strings.HasPrefix(trimmed, openTag) {
+		f.state = leakBlock
+		f.buf = ""
+		return f.filter(trimmed)
+	}
+	if strings.HasPrefix(openTag, trimmed) { // still a viable open tag (or all whitespace)
+		return ""
+	}
 	if f.reasoningSeen {
 		// Wider net: scan the opening window for the tag anywhere, not just
 		// at position zero.
@@ -83,10 +126,11 @@ func (f *thinkLeakFilter) filter(delta string) string {
 }
 
 // flush releases anything still held at end of stream (e.g. a message that was
-// only ever a partial prefix like "</thi").
+// only ever a partial prefix like "</thi", or a "<think>" block that never
+// closed — an unclosed block is ordinary text, not a leak).
 func (f *thinkLeakFilter) flush() string {
 	out := ""
-	if f.state == leakHolding {
+	if f.state == leakHolding || f.state == leakBlock {
 		out = f.buf
 	}
 	f.state = leakPassthrough
