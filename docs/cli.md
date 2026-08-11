@@ -54,7 +54,9 @@ as [task reports](configuration.md#task-reports): a failure or a
 else hands the agent a report, whose reply reaches you as an ✉️ update — only when
 the result warrants it (it stays silent otherwise). Every message you
 didn't directly cause carries a marker (⏰ cron, 🔔 completion, ⚠️ failure,
-✉️ update); bare text is always a direct reply to something you sent.
+✉️ update); bare text is always a direct reply to something you sent. A ⚠️
+also stands in for a reply the model mangled — see
+[malformed output](configuration.md#provider-specific-knobs--extra).
 ✉️ updates always arrive without a
 notification ping (an update is not a page); `/quiet on` extends that to ⏰/🔔
 posts too. Replies to you and ⚠️ failures always ring.

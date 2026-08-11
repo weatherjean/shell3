@@ -26,8 +26,9 @@ cover.out
 /.stress_scratch
 /tmp/
 
-# stray scratch dir — never commit
+# stray scratch dirs — never commit
 asfd/
+asdf/
 
 # subagent-driven-development scratch
 .superpowers/

@@ -105,6 +105,18 @@ wrapped in `<think>…</think>`. shell3 strips a leading block of that shape, bu
 setting the knob is better — it keeps the reasoning out of the reply at the
 source, instead of the provider billing you for the same text twice.
 
+A related provider failure is a tool call that arrives as **text**: the
+endpoint failed to parse its own chat template, so the reply carries raw
+`<tool_call>` markup instead of a real call (seen on MiniMax; the same wrapper
+is used by Qwen and GLM templates). No legitimate reply contains it, so shell3
+treats such a reply as corrupt rather than an answer — a reply to you is
+replaced by `⚠️ the model produced malformed output (raw tool-call markup) —
+reply suppressed; /runs has the transcript`, and a
+[task report](#task-reports) turn posts nothing at all. The transcript keeps
+the raw text either way, so `/runs` still shows what the model actually
+emitted. It is a symptom of the endpoint, not of your config: if it recurs,
+try the provider's other route for the model.
+
 ### Local proxies — `run_proxy`
 
 If a model needs a shim in front of its endpoint (a Codex subscription via
