@@ -577,8 +577,10 @@ and drop into `~/.shell3/lib/bin/`, documented with a full working
   OpenRouter/Gemini extension plain OpenAI endpoints reject; OpenRouter also
   wants at least $1.00 of balance on any request carrying video, whatever it
   actually costs).
-- **`send_media_telegram`** (a host tool, on every session) lets the agent
-  push a local file back to the chat as photo/voice/audio/video/document.
+- **`send_media_telegram`** (a host tool, on every non-headless session —
+  headless subagent children don't get it, since there's no live chat to
+  send to) lets the agent push a local file back to the chat as
+  photo/voice/audio/video/document.
 
 **Media storage.** Everything you send the bot (`tg-*`) and anything a
 wrapper script generates and saves there live in the media dir — stable

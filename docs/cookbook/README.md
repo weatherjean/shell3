@@ -75,4 +75,7 @@ scaffold's own `writing-code` skill for in-line TDD work.)
 - `service.md` — run the bot as a service: a systemd user unit, one paste.
 - `mcp.md` — MCP servers: stdio + HTTP recipes, allow-lists, gating.
 - `sandbox.md` — sandbox/route bash via hook argv verdicts.
-- `voice-images.md` — voice + images; Groq and OpenRouter quickstarts.
+- `voice-images.md` — voice + images as wrapper scripts: `stt.sh`
+  (whisper.cpp local, or Groq/OpenAI-compatible transcription), `say.sh`
+  (macOS `say`/`espeak-ng` to ogg/opus), `imagegen.sh` (OpenAI or
+  OpenRouter).

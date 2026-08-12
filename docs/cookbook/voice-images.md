@@ -30,9 +30,10 @@ set -euo pipefail
 audio="${1:?usage: stt.sh <audio-file>}"
 bin="${WHISPER_BIN:-$HOME/whisper.cpp/build/bin/whisper-cli}"
 model="${WHISPER_MODEL:-$HOME/whisper.cpp/models/ggml-base.en.bin}"
-"$bin" -m "$model" -f "$audio" -nt --output-txt --output-file /tmp/stt-out >/dev/null
-cat /tmp/stt-out.txt
-rm -f /tmp/stt-out.txt
+out="$(mktemp -t stt-XXXXXX)"
+trap 'rm -f "$out" "$out.txt"' EXIT
+"$bin" -m "$model" -f "$audio" -nt --output-txt --output-file "$out" >/dev/null
+cat "$out.txt"
 ```
 
 **Remote, via an OpenAI-compatible `/audio/transcriptions` endpoint** (Groq's
@@ -68,19 +69,21 @@ transcode step is not optional if you want the voice-bubble UI.
 #!/usr/bin/env bash
 # say.sh — text on stdin -> ogg/opus on stdout path (prints the path)
 set -euo pipefail
-out="$(mktemp -t say-XXXXXX).ogg"
+base="$(mktemp -t say-XXXXXX)"
+out="${base}.ogg"
+rm -f "$base" # mktemp's un-suffixed file is not the one we want; drop it
 text="$(cat)"
 
 if command -v say >/dev/null; then
   # macOS
   tmp="$(mktemp -t say-XXXXXX).aiff"
-  say -o "$tmp" "$text"
+  say -o "$tmp" -- "$text"
   ffmpeg -y -loglevel error -i "$tmp" -c:a libopus "$out"
   rm -f "$tmp"
 elif command -v espeak-ng >/dev/null; then
   # Linux: apt install espeak-ng ffmpeg
   tmp="$(mktemp -t say-XXXXXX).wav"
-  espeak-ng -w "$tmp" "$text"
+  espeak-ng -w "$tmp" -- "$text"
   ffmpeg -y -loglevel error -i "$tmp" -c:a libopus "$out"
   rm -f "$tmp"
 else
@@ -142,9 +145,11 @@ usage.
 ## `skills/media.md` — tell the agent when to use them
 
 A skill is what makes the agent actually reach for these scripts instead of
-ignoring an attachment. This one is yours to write — none of these scripts
-ship with shell3, so a skill referencing them only makes sense once you've
-installed the ones you want:
+ignoring an attachment. `shell3 boot` already installs one at
+`~/.shell3/skills/media.md` — it is generic (it checks whether a script is
+installed before pointing at it), so it works whether you've written none,
+one, or all three of the recipes above. You don't need to create it; it's
+there from first boot. For reference, this is what ships:
 
 ```markdown
 ---
@@ -154,21 +159,41 @@ description: Use when a chat message includes an audio attachment (transcribe it
 
 # Voice and images
 
-- An inbound `audio/*` attachment: run
-  `~/.shell3/lib/bin/stt.sh <path>` and treat the transcript as what the
-  user said. Do this before answering — the raw audio path alone is not
-  useful context. Skip it for very short clips only if the surrounding
-  message already makes the intent clear.
-- An inbound image: `read_media <path>` — no separate captioning step,
-  the main model looks at it directly.
-- A reply worth speaking (the user asked out loud, or asked for voice):
-  pipe the reply text through `~/.shell3/lib/bin/say.sh` and send the
-  resulting file with `send_media_telegram` (kind `voice`).
-- A reply that needs a generated image: `~/.shell3/lib/bin/imagegen.sh
-  "<prompt>"` and send the result with `send_media_telegram` (kind `photo`).
+shell3 has no built-in voice or image-generation service — these are wrapper
+scripts you (or the user) write once and drop into `~/.shell3/lib/bin/`, per
+the `scripting` skill. This skill only applies once such scripts exist; it
+does not ship any itself. See the cookbook
+(`docs/cookbook/voice-images.md` in the shell3 repo) for ready-made
+`stt.sh`/`say.sh`/`imagegen.sh` recipes to install.
+
+- An inbound `audio/*` attachment: if a transcription script is installed
+  (commonly `~/.shell3/lib/bin/stt.sh <path>`), run it and treat the
+  transcript as what the user said before answering — the raw audio path
+  alone is not useful context. Transcription here is your call to make each
+  time, not something that happens automatically before the turn starts.
+- An inbound image: use `read_media <path>` directly — no separate
+  captioning step is needed when the main model can see images itself.
+- A reply worth speaking (the user asked out loud, or asked for voice): if a
+  speech script is installed, pipe the reply text into it and send the
+  resulting file with `send_media_telegram` (kind `voice`, ogg/opus only —
+  anything else arrives as a plain audio file, not a voice bubble).
+- A reply that needs a generated image: if an image-generation script is
+  installed, run it with the prompt and send the result with
+  `send_media_telegram` (kind `photo`).
+
+If no such script exists yet and the user wants one of these capabilities,
+say so and offer to write it (the `scripting` skill covers the pattern —
+secrets read from `.env` at point of use, never in the conversation).
 ```
 
-Drop it in `~/.shell3/skills/media.md`, run `shell3 health`, `/reload`.
+Once you've installed the scripts above, the skill already tells the agent
+to use them — nothing to wire up. If you want to change the wording,
+hard-code a script path, or add project-specific instructions, edit
+`~/.shell3/skills/media.md` directly (that's customisation, not creation).
+Note that `shell3 boot --prompts` refreshes scaffold-shipped skills on
+upgrade, including this one — it backs up your edited copy to
+`.backup/prompts-<ts>/` first, but will overwrite the live file, so recheck
+your customisation after running it.
 
 ## Gating
 

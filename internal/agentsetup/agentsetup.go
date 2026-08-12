@@ -215,7 +215,7 @@ func (p *Parts) runtimeForAgent(a config.Agent) (chat.ActiveAgent, error) {
 
 	// Append the opted-in MCP servers' tool defs (the mcp: frontmatter) and route their
 	// names to the host-tool dispatcher. The map is fresh per call: session
-	// RegisterHostTool (image_generate etc.) mutates it later.
+	// RegisterHostTool (send_media_telegram etc.) mutates it later.
 	var hostNames map[string]bool
 	if p.mcp != nil && (a.MCPAll || len(a.MCP) > 0) {
 		mcpDefs := p.mcp.Tools(a.MCP, a.MCPAll)
@@ -390,8 +390,8 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 		// cfg.ApplyActiveAgent(rt) below.
 	}
 	// MCP dispatch: the base of the session's host-tool chain. Session-level
-	// RegisterHostTool calls (image_generate, the bot's send/status) compose on
-	// top of it, falling through here for names they don't own; unowned names
+	// RegisterHostTool calls (the bot's send_media_telegram/status/reload)
+	// compose on top of it, falling through here for names they don't own; unowned names
 	// end in the chat layer's unknown-tool handling via ErrHostToolNotFound.
 	if mgr := p.mcp; mgr != nil {
 		cfg.HostTool = func(ctx context.Context, name, argsJSON string) (string, error) {

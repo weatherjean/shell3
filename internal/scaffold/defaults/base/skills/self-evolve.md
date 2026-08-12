@@ -32,7 +32,7 @@ because its file exists.
                        skill)
 
 ## Not yours to edit
-- `shell3.yaml` (models, the `telegram:` block, mcp servers, media) and
+- `shell3.yaml` (models, the `telegram:` block, mcp servers) and
   `hooks/*.sh` (the tool-call gate) belong to the operator. The gate refuses
   your writes to both — you may read them to explain your own rules. When one
   of them needs to change, say exactly what and why, and let the user do it.

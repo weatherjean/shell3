@@ -10,7 +10,7 @@ import (
 )
 
 // HostTool is a Go-implemented tool the host registers on a Session so the
-// model can call it (e.g. media's image_generate).
+// model can call it (e.g. the Telegram front-end's send_media_telegram).
 type HostTool struct {
 	Name        string
 	Description string

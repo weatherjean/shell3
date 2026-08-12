@@ -210,8 +210,8 @@ and cron. There is **no listener** — the process long-polls the Bot API
 outbound, so there is no port, no login, no tunnel. The `telegram:` block in
 `shell3.yaml` is `token` (an `env:TELEGRAM_TOKEN` reference like every other
 secret), `chat_id` (the single chat the bot answers — updates from anywhere
-else are dropped before a turn starts, messages in `handleMsg` and
-inline-button callbacks in `handleCallback` alike), `allow_from` (the Telegram
+else are dropped before a turn starts, filtered in `handleMsg`),
+`allow_from` (the Telegram
 user ids allowed to DRIVE the agent — `internal/telegram/authz.go`: chat_id
 says WHERE the bot talks, allow_from says WHO it obeys, and in a group those
 differ. Unset = the chat_id owner alone, which is the historical single-DM

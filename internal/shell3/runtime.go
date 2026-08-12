@@ -139,7 +139,7 @@ type Runtime struct {
 	// runtime creates — main and subagent children alike — and again for every
 	// live session after a Reload (which rebuilds session configs, dropping
 	// previously registered host tools). Front-ends use it to register host
-	// tools (e.g. image_generate) uniformly instead of decorating only their
+	// tools (e.g. send_media_telegram) uniformly instead of decorating only their
 	// own main session. Always invoked OUTSIDE rt.mu: decorators call back
 	// into locked Runtime methods (rt.Parts()).
 	decorate func(*Session)
@@ -244,7 +244,7 @@ func (rt *Runtime) emitJob(ev JobProgress) {
 // already live (so boot order doesn't matter), and for every live session
 // after a Reload (which rebuilds session configs, dropping previously
 // registered host tools). Front-ends use it to register host tools —
-// image_generate in particular — uniformly across all sessions. fn runs
+// send_media_telegram in particular — uniformly across all sessions. fn runs
 // outside rt.mu, so it may call locked Runtime methods (rt.Parts()); it must
 // only be installed while sessions are idle (same contract as
 // RegisterHostTool). Installing a new decorator replaces the previous one.

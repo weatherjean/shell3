@@ -63,8 +63,7 @@ posts too. Replies to you and ⚠️ failures always ring.
 
 `--console` swaps the Telegram transport for stdin/stdout and drives the same
 bot loop with no credentials and no network: a plain line is a fresh message,
-`@<id> text` is a reply quoting that message, `/…` is a command, `&<data>`
-answers an inline menu by its callback data, EOF quits.
+`@<id> text` is a reply quoting that message, `/…` is a command, EOF quits.
 
 ### Commands
 

@@ -55,7 +55,7 @@ type reloadState struct {
 //     child sessions (ParentID set) are left untouched — they keep the old
 //     generation until they finish. Active agent + /set params are restored
 //     best-effort. Decorator-registered host tools (SetSessionDecorator, e.g.
-//     image_generate) ARE re-applied here.
+//     send_media_telegram) ARE re-applied here.
 //
 // NOTE: the kept s.sess was built with a ContextWindowFor closure over the OLD
 // cfg.ContextWindow, so a changed context_window for an already-live session is
@@ -97,7 +97,7 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 func (rt *Runtime) applyReload(st reloadState) (ReloadResult, error) {
 	// Registered before rt.mu.Lock so it runs AFTER the deferred unlock (LIFO):
 	// a successful reload rebuilt every idle session's cfg, dropping decorator-
-	// registered host tools (image_generate); re-apply the decorator outside
+	// registered host tools (send_media_telegram); re-apply the decorator outside
 	// rt.mu (it calls locked Runtime methods such as Parts()).
 	var redecorate []*Session
 	defer func() {

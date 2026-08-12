@@ -280,9 +280,10 @@ func (s *Session) HasQueuedInput() bool { return s.sess.HasInbox() }
 func (s *Session) HasQueuedSteer() bool { return s.sess.HasSteer() }
 
 // Headless reports whether this session runs without a human attached
-// (subagent children, cron jobs). Host-tool registrars use it to tailor tool
-// instructions — e.g. image_generate tells a headless session to report the
-// saved path, since only a live chat session can show the image to a user.
+// (subagent children, cron jobs). Host-tool registrars use it to skip
+// registering a tool entirely — e.g. send_media_telegram is registered only
+// on non-headless sessions, since only a live chat session has somewhere to
+// send a file.
 func (s *Session) Headless() bool { return s.opts.Headless }
 
 // Send runs one turn for prompt and returns a channel of that turn's events,
