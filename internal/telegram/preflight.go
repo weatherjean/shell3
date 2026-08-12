@@ -68,21 +68,21 @@ func (b *Bot) preflightText(ctx context.Context, saved []savedFile, sess *shell3
 	caps, _ := b.mediaCaps()
 	var lines []string
 	for _, s := range saved {
-		switch {
-		case strings.HasPrefix(s.MIME, "audio/"):
-			if caps == nil || caps.Transcribe == nil {
-				continue
-			}
-			transcript, err := caps.Transcribe(ctx, s.Path)
-			if err != nil {
-				lines = append(lines, "[voice note could not be transcribed]")
-				b.mediaNotice(ctx, "voice transcription failed", err)
-				continue
-			}
-			lines = append(lines, `"`+transcript+`"`)
-			if caps.STTEcho {
-				b.sendReply(ctx, `📝 "`+transcript+`"`)
-			}
+		if !strings.HasPrefix(s.MIME, "audio/") {
+			continue
+		}
+		if caps == nil || caps.Transcribe == nil {
+			continue
+		}
+		transcript, err := caps.Transcribe(ctx, s.Path)
+		if err != nil {
+			lines = append(lines, "[voice note could not be transcribed]")
+			b.mediaNotice(ctx, "voice transcription failed", err)
+			continue
+		}
+		lines = append(lines, `"`+transcript+`"`)
+		if caps.STTEcho {
+			b.sendReply(ctx, `📝 "`+transcript+`"`)
 		}
 	}
 	if note := attachmentNote(saved, b.hasTool(sess, "read_media")); note != "" {
