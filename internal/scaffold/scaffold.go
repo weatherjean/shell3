@@ -41,10 +41,10 @@ type Values struct {
 	// env:TELEGRAM_TOKEN and lives in .env, like every other secret.
 	ChatID string
 
-	// Vision reports whether the model can see images. True wires
-	// media.describe to the main model (uploaded images get captioned out of
-	// the box) and enables the agent's media tool; false leaves both as
-	// commented hints.
+	// Vision reports whether the model can see images. True adds the `media`
+	// tool (read_media) to the agent's frontmatter so it can open an image,
+	// audio, PDF, or video file directly. There is no captioning fallback for
+	// text-only models — use a multimodal model, or have the agent shell out.
 	Vision bool
 
 	// ContextWindow is the model's token budget; CompactAt is the prompt-token

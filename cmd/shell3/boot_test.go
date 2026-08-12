@@ -159,10 +159,7 @@ func TestBootEndToEnd(t *testing.T) {
 		t.Fatal("expected no-config error before boot, got nil")
 	}
 
-	// vision left false: the scaffold's Vision=true fork still renders a
-	// media.describe block (Task 6 removes it) which would now fail strict
-	// decode as an unknown key. Vision-boot coverage is suspended until then.
-	f := &bootFlags{url: "http://localhost:9999/v1", model: "test-model", name: "main", proxy: "echo proxy", vision: false}
+	f := &bootFlags{url: "http://localhost:9999/v1", model: "test-model", name: "main", proxy: "echo proxy", vision: true}
 	if err := runBoot(f); err != nil {
 		t.Fatalf("runBoot: %v", err)
 	}
@@ -215,6 +212,17 @@ func TestBootEndToEnd(t *testing.T) {
 	defer c.Close()
 	if c.FirstAgent().Name != "agent" {
 		t.Errorf("agent = %q, want %q", c.FirstAgent().Name, "agent")
+	}
+	// Vision=true wires only the media tool (read_media) — no media: block.
+	if !c.FirstAgent().Gates.Media {
+		t.Error("vision boot should gate the media tool on for the main agent")
+	}
+	yamlBody, err := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
+	if err != nil {
+		t.Fatalf("read shell3.yaml: %v", err)
+	}
+	if strings.Contains(string(yamlBody), "media:") {
+		t.Errorf("vision boot must not render a media: block; got:\n%s", yamlBody)
 	}
 
 	// No-clobber: a second boot without --force refuses.

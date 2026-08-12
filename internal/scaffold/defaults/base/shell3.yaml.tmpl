@@ -34,32 +34,6 @@ models:
 {{if .Proxy}}    run_proxy: {{.Proxy | yamlstr}}
 {{else}}    # run_proxy: "npx @some/codex-proxy --port 8787"
 {{end}}
-# Media (optional): dictation in, spoken replies out, image describe/generate — all
-# OpenAI-compatible. One free Groq key covers STT + TTS.
-#  groq-whisper:
-#    base_url: https://api.groq.com/openai/v1
-#    api_key: env:GROQ_API_KEY
-#    model: whisper-large-v3-turbo
-
-{{if .Vision}}media:
-  # Images are captioned by the main model (it has vision) instead of a
-  # separate one. Point this at a cheaper vision model later if you like.
-  # Either way, read_media lets the agent open an image file itself.
-  describe: { model: {{.Name | yamlkey}} }
-  # stt: { model: groq-whisper }              # dictation → text
-  # tts: { model: groq-tts, voice: Fritz-PlayAI }
-  # imagegen: { model: some-image-model, size: 1024x1024 }
-  #   (for OpenRouter image models add api: openrouter; every agent and
-  #    subagent gets the image_generate tool, files land in ~/.shell3/media/)
-{{else}}# media:
-#   describe: { model: some-vision-model }    # caption inbound images
-#   stt: { model: groq-whisper }              # dictation → text
-#   tts: { model: groq-tts, voice: Fritz-PlayAI }
-#   imagegen: { model: some-image-model, size: 1024x1024 }
-#     (for OpenRouter image models add api: openrouter; every agent and
-#      subagent gets the image_generate tool, files land in ~/.shell3/media/)
-{{end}}
-
 # MCP servers (optional): tools-only client, stdio + streamable HTTP. Declare
 # once here, then opt in per agent in its frontmatter: mcp: [github] (or
 # mcp: all); omitted = no MCP tools. Names surface as mcp_<server>_<tool> and
@@ -91,7 +65,6 @@ telegram:
 # (default 30). The history tool searches everything that is kept.
 # runs_keep_days: 30
 
-# media_keep_days: how long a file under ~/.shell3/media/ (uploads, generated
-# images, cached TTS audio) is kept before `shell3 telegram` sweeps it at
-# startup; 0 keeps everything forever (default 0).
+# media_keep_days: how long a file under ~/.shell3/media/ (chat uploads)
+# survives before the startup janitor deletes it. 0 = keep forever.
 # media_keep_days: 30

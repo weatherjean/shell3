@@ -116,15 +116,17 @@ func TestRenderBaseConfigContextWindow(t *testing.T) {
 }
 
 func TestRenderBaseConfigVision(t *testing.T) {
-	t.Run("vision wires describe to the main model and enables media", func(t *testing.T) {
+	t.Run("vision enables the media tool and renders no media: block", func(t *testing.T) {
 		dir := t.TempDir()
 		v := Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m", Vision: true}
 		if err := RenderBaseConfig(dir, v, false); err != nil {
 			t.Fatalf("RenderBaseConfig: %v", err)
 		}
 		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
-		if !strings.Contains(string(cfg), "describe: { model: main }") {
-			t.Error("vision config should wire media.describe to the main model")
+		for _, banned := range []string{"media:", "describe:"} {
+			if strings.Contains(string(cfg), banned) {
+				t.Errorf("vision config should not render %q; got:\n%s", banned, cfg)
+			}
 		}
 		agentMD, _ := os.ReadFile(filepath.Join(dir, "agent.md"))
 		if !strings.Contains(string(agentMD), "tools: [bash, bash_bg, edit, media, history]") {
@@ -132,15 +134,17 @@ func TestRenderBaseConfigVision(t *testing.T) {
 		}
 	})
 
-	t.Run("no vision disables media and keeps describe commented", func(t *testing.T) {
+	t.Run("no vision disables the media tool and renders no media: block", func(t *testing.T) {
 		dir := t.TempDir()
 		v := Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m", Vision: false}
 		if err := RenderBaseConfig(dir, v, false); err != nil {
 			t.Fatalf("RenderBaseConfig: %v", err)
 		}
 		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
-		if !strings.Contains(string(cfg), "#   describe: { model: some-vision-model }") {
-			t.Error("no-vision config should keep media.describe as a commented hint")
+		for _, banned := range []string{"media:", "describe:"} {
+			if strings.Contains(string(cfg), banned) {
+				t.Errorf("no-vision config should not render %q; got:\n%s", banned, cfg)
+			}
 		}
 		agentMD, _ := os.ReadFile(filepath.Join(dir, "agent.md"))
 		if !strings.Contains(string(agentMD), "tools: [bash, bash_bg, edit, history]") {
@@ -148,7 +152,7 @@ func TestRenderBaseConfigVision(t *testing.T) {
 		}
 	})
 
-	// A vision config must also load: describe references the main model.
+	// A vision config must also load cleanly, with the media tool gated on.
 	t.Run("vision config loads", func(t *testing.T) {
 		dir := t.TempDir()
 		v := Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m", Vision: true}
@@ -164,10 +168,36 @@ func TestRenderBaseConfigVision(t *testing.T) {
 		if len(c.Warnings()) != 0 {
 			t.Errorf("vision config loaded with warnings: %v", c.Warnings())
 		}
-		if c.Describe() == nil || c.Describe().ModelRef != "main" {
-			t.Errorf("describe = %+v, want model main", c.Describe())
+		if !c.FirstAgent().Gates.Media {
+			t.Error("vision config should gate the media tool on for the main agent")
 		}
 	})
+}
+
+// TestRenderedYAMLHasNoMediaBlock guards the removal of the media: block from
+// the yaml template for good: neither a vision nor a no-vision boot may ever
+// emit media:/stt:/tts:/describe:/imagegen: again, but media_keep_days (the
+// janitor knob) must survive either way.
+func TestRenderedYAMLHasNoMediaBlock(t *testing.T) {
+	for _, vision := range []bool{true, false} {
+		dir := t.TempDir()
+		v := Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m", Vision: vision}
+		if err := RenderBaseConfig(dir, v, false); err != nil {
+			t.Fatalf("RenderBaseConfig(vision=%v): %v", vision, err)
+		}
+		cfg, err := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
+		if err != nil {
+			t.Fatalf("read shell3.yaml (vision=%v): %v", vision, err)
+		}
+		for _, banned := range []string{"media:", "stt:", "tts:", "describe:", "imagegen:"} {
+			if strings.Contains(string(cfg), banned) {
+				t.Errorf("vision=%v: rendered shell3.yaml still contains %q", vision, banned)
+			}
+		}
+		if !strings.Contains(string(cfg), "media_keep_days") {
+			t.Errorf("vision=%v: rendered shell3.yaml dropped media_keep_days", vision)
+		}
+	}
 }
 
 func TestRenderBaseConfigWithProxy(t *testing.T) {

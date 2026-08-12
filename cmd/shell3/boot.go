@@ -66,7 +66,7 @@ func newBootCommand() *cobra.Command {
 	cmd.Flags().StringVar(&f.tgToken, "tg-token", "", "Telegram bot token (from @BotFather)")
 	cmd.Flags().StringVar(&f.tgChatID, "tg-chat-id", "", "Telegram chat id the bot answers")
 	cmd.Flags().StringVar(&f.workDir, "workdir", "", "Where the agent's shell runs (default: the config dir)")
-	cmd.Flags().BoolVar(&f.vision, "vision", true, "Model can see images (wires media.describe to it and enables the media tool)")
+	cmd.Flags().BoolVar(&f.vision, "vision", true, "Model can see images (adds the read_media tool)")
 	cmd.Flags().BoolVar(&f.force, "force", false, "Overwrite an existing ~/.shell3 config (shell3.yaml, agent.md, ...)")
 	cmd.Flags().BoolVar(&f.show, "show", false, "Print the post-boot summary for the existing config and exit (changes nothing)")
 	cmd.Flags().BoolVar(&f.prompts, "prompts", false,
@@ -245,8 +245,8 @@ func runBootForm(f *bootFlags, a *bootAnswers, ctxStr, compactStr *string) error
 	if !f.visionSet {
 		a.vision = true
 		groups = append(groups, huh.NewGroup(
-			huh.NewConfirm().Title("Can this model see images (vision)?").
-				Description("Yes: uploaded images are captioned by this model and the\nread_media tool is enabled. No: media tooling stays off until you\nadd a vision model.").
+			huh.NewConfirm().Title("Can your model see images?").
+				Description("Yes: adds the read_media tool, so the agent can open an image,\naudio, PDF, or video file directly. No: leave it off until you\nswitch to a multimodal model.").
 				Value(&a.vision),
 		).Title("Vision"))
 	}
