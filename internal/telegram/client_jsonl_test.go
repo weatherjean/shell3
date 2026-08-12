@@ -180,7 +180,7 @@ func TestJSONLHello(t *testing.T) {
 	c, out := newTestJSONL(t, "")
 	c.EmitHello([]Command{{Command: "status", Description: "show status"}})
 	evs := decodeLines(t, out)
-	if len(evs) != 1 || evs[0]["type"] != "hello" || evs[0]["protocol"] != float64(1) {
+	if len(evs) != 1 || evs[0]["type"] != "hello" || evs[0]["protocol"] != float64(2) {
 		t.Fatalf("hello = %v", evs)
 	}
 	cmds, _ := evs[0]["commands"].([]any)
