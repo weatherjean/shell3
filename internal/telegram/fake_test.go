@@ -152,17 +152,6 @@ func (f *fakeClient) AnswerCallback(ctx context.Context, callbackID string) erro
 	return nil
 }
 
-// editTexts returns every edit's text in order.
-func (f *fakeClient) editTexts() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	out := make([]string, len(f.edits))
-	for i, e := range f.edits {
-		out[i] = e.text
-	}
-	return out
-}
-
 // reset clears everything the fake has recorded, so a test can assert on just
 // the traffic after a setup step.
 func (f *fakeClient) reset() {

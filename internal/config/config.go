@@ -138,11 +138,6 @@ type STTConfig struct {
 	Echo               bool
 }
 
-// TTSConfig is the `media.tts:` block: text-to-speech for outbound replies.
-// Mode governs when synthesis runs ("off", "inbound", "always"); Format is
-// the output codec.
-type TTSConfig struct{ ModelRef, Voice, Mode, Format string }
-
 // MCPServer is one declared server from the shell3.yaml `mcp:` block.
 // Exactly one of Command (stdio) or URL (streamable HTTP) is set — enforced
 // at load.
@@ -172,8 +167,8 @@ type LoadedConfig struct {
 	RunsKeepDays int
 
 	// MediaKeepDays is `media_keep_days`: how long the janitor keeps a file
-	// under the media dir (attachments, generated images, TTS cache) before
-	// sweeping it at `shell3 telegram` startup. Always populated at load —
+	// under the media dir (attachments) before sweeping it at `shell3
+	// telegram` startup. Always populated at load —
 	// default 0 = keep forever: delivered files and attachments are user
 	// data, so deletion is opt-in rather than assumed.
 	MediaKeepDays int
@@ -187,7 +182,6 @@ type LoadedConfig struct {
 	cron       []CronJob
 
 	stt *STTConfig
-	tts *TTSConfig
 
 	// hooks maps each governed agent to its hook scripts (see hooks.go).
 	hooks hookSet
@@ -270,9 +264,6 @@ func (c *LoadedConfig) Cron() []CronJob { return c.cron }
 
 // STT returns the parsed media.stt block, nil when not declared.
 func (c *LoadedConfig) STT() *STTConfig { return c.stt }
-
-// TTS returns the parsed media.tts block, nil when not declared.
-func (c *LoadedConfig) TTS() *TTSConfig { return c.tts }
 
 // MCPServers returns the declared MCP servers sorted by name (YAML map order
 // is unspecified; sorting keeps connect order and status listings

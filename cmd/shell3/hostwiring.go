@@ -40,8 +40,8 @@ func runJanitors(runsRoot string, runsKeepDays, mediaKeepDays int, out io.Writer
 			len(removedRuns), removedThreads)
 	}
 	// The media dir, gated by media_keep_days (default 0 = keep forever, so
-	// this is opt-in). Attachments, generated images, and TTS cache are user
-	// data; deletion only happens if the operator asked for it.
+	// this is opt-in). Attachments are user data; deletion only happens if
+	// the operator asked for it.
 	if mediaKeepDays <= 0 {
 		return
 	}
@@ -84,17 +84,13 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 	b.SetVersion(version)
 	b.SetRunsRoot(rt.Parts().RunsRoot())
 
-	// Media (STT/TTS): built from the runtime's current
+	// Media (STT): built from the runtime's current
 	// config and re-built by the reload closure below. The session decorator
 	// registers, for main chat sessions (not the headless subagent
 	// children), the bot's host tools. Runtime.Reload re-applies the
 	// decorator, so it survives a reload with no separate resync.
-	voiceModeStore, err := newVoiceModeStore()
-	if err != nil {
-		return nil, err
-	}
-	b.SetMedia(buildMediaCaps(rt), voiceModeStore)
-	// The /quiet toggle: persisted beside voice_mode.json, read per send.
+	b.SetMedia(buildMediaCaps(rt))
+	// The /quiet toggle: persisted on its own store, read per send.
 	quietStore, err := newQuietStore()
 	if err != nil {
 		return nil, err
@@ -150,11 +146,11 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 	b.SetCronLastRuns(func() map[string]time.Time { return cronLastRuns(currentSched()) })
 
 	// /reload + the reload tool: rebuild config, swap the cron scheduler,
-	// re-wire media. The bot's host tools and image_generate need no
-	// re-registration — Runtime.Reload re-applies the session decorator.
+	// re-wire media. The bot's host tools need no re-registration —
+	// Runtime.Reload re-applies the session decorator.
 	b.SetReloader(func() (shell3.ReloadResult, error) {
 		ns, res, err := reloadAndRearm(rt, b, cronSess, currentSched(),
-			func() { b.SetMedia(buildMediaCaps(rt), voiceModeStore) })
+			func() { b.SetMedia(buildMediaCaps(rt)) })
 		schedMu.Lock()
 		sched = ns
 		schedMu.Unlock()

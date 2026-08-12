@@ -28,7 +28,6 @@ func BotCommands() []Command {
 		{"cron", "List scheduled cron jobs"},
 		{"runs", "List runs (tap /run_N to replay): /runs [page|id]"},
 		{"reload", "Reload the config without restarting"},
-		{"voice", "Voice replies: /voice off|inbound|always"},
 		{"quiet", "Hush background posts: /quiet on|off"},
 	}
 }
@@ -170,8 +169,6 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 		// runReload takes the turn slot (and Reload fail-fasts on a busy
 		// session), so a /reload during a live turn is refused, not raced.
 		b.runReload(ctx)
-	case "/voice":
-		b.handleVoiceCommand(ctx, arg)
 	case "/quiet":
 		b.handleQuietCommand(ctx, arg)
 	case "/new":

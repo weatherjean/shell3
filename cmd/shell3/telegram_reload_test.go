@@ -122,8 +122,8 @@ func TestReloadAndRearm_ReloadErrorKeepsOldSchedule(t *testing.T) {
 
 // TestReloadAndRearm_ResyncMediaRuns pins that resyncMedia (which rebuilds the
 // bot's media capabilities from the freshly reloaded config) is invoked on a
-// successful reload — and that a nil one is tolerated. The host tools and
-// image_generate are re-applied by the runtime session decorator instead.
+// successful reload — and that a nil one is tolerated. The host tools are
+// re-applied by the runtime session decorator instead.
 func TestReloadAndRearm_ResyncMediaRuns(t *testing.T) {
 	r := &fakeReloader{}
 	b := &fakeBot{}

@@ -41,11 +41,10 @@ type Bot struct {
 	// (the runs store's threads table, key "current-session").
 	current *ThreadIndex
 
-	mu           sync.Mutex         // guards the turn slot, the main session, and the queues
-	cancelTurn   context.CancelFunc // non-nil while a turn runs (main turn only — never a job)
-	turnActive   bool               // true from turn start until its goroutine ends
-	turnHadVoice bool               // true when the in-flight turn was initiated by an audio/ attachment
-	turnQuiet    bool               // true while a QUIET (wake/mail) turn holds the slot — steering must not target it
+	mu         sync.Mutex         // guards the turn slot, the main session, and the queues
+	cancelTurn context.CancelFunc // non-nil while a turn runs (main turn only — never a job)
+	turnActive bool               // true from turn start until its goroutine ends
+	turnQuiet  bool               // true while a QUIET (wake/mail) turn holds the slot — steering must not target it
 
 	// main is THE conversation: one long-lived session every message
 	// continues, resumed across restarts via the current marker and replaced
@@ -85,12 +84,8 @@ type Bot struct {
 	// cron is the adopted parent handle (jobs/runs source for /status views).
 	cron *shell3.Session
 
-	media     *MediaCaps  // STT/TTS capabilities; nil when unconfigured
-	voiceMode *ModeStore  // per-chat inbound-voice-reply mode; nil when unconfigured
+	media     *MediaCaps  // STT capabilities; nil when unconfigured
 	quietMode *QuietStore // the /quiet toggle's store; nil = never quiet
-
-	askMu          sync.Mutex // guards voiceMenuMsgID (historical name; the ask keyboard is gone)
-	voiceMenuMsgID string     // msgID of the most recent /voice menu, for its "vm|" callback edit
 
 	runJob        func(name string) error             // fires a cron job by name; nil if no scheduler
 	reload        func() (shell3.ReloadResult, error) // performs a full config reload; nil if unset
@@ -201,22 +196,17 @@ func (b *Bot) SetVersion(v string) { b.version = v }
 // renders as "never".
 func (b *Bot) SetCronLastRuns(fn func() map[string]time.Time) { b.cronLastRuns = fn }
 
-// SetMedia wires the bot's STT/TTS capabilities and the per-chat
-// inbound-voice-reply mode override. The host MUST call it at boot and again
-// after every Runtime.Reload so transcription/speech use the fresh
-// config. The image_generate host tool is NOT registered here — the host
-// installs it via Runtime.SetSessionDecorator, which covers every session and
-// post-reload re-application uniformly.
+// SetMedia wires the bot's STT capabilities. The host MUST call it at boot
+// and again after every Runtime.Reload so transcription uses the fresh
+// config.
 //
-// Both fields go through b.mu: a reload writes them from whichever goroutine
+// The field goes through b.mu: a reload writes it from whichever goroutine
 // called it (the agent's reload tool applies at end of turn, after the turn
-// slot is released), while the update loop reads them in /voice and a turn
-// goroutine reads them in preflight/deliverReply.
-func (b *Bot) SetMedia(c *MediaCaps, modeStore *ModeStore) {
+// slot is released), while a turn goroutine reads it in preflight.
+func (b *Bot) SetMedia(c *MediaCaps) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.media = c
-	b.voiceMode = modeStore
 }
 
 // SetQuiet installs the /quiet toggle's store. Nil (or an unset path) means
@@ -237,13 +227,11 @@ func (b *Bot) isQuiet() bool {
 	return s.Get() // nil-safe: a nil store reads as off
 }
 
-// mediaCaps returns the current media capabilities and voice-mode store as one
-// consistent pair — SetMedia publishes them together, so readers must take them
-// together.
-func (b *Bot) mediaCaps() (*MediaCaps, *ModeStore) {
+// mediaCaps returns the current media capabilities.
+func (b *Bot) mediaCaps() *MediaCaps {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.media, b.voiceMode
+	return b.media
 }
 
 // SetWorkDir sets the directory used to resolve relative paths passed to
@@ -295,10 +283,9 @@ func (b *Bot) Run(ctx context.Context) {
 // inMail is one received user message, attachments already saved, waiting for
 // (or entering) its turn.
 type inMail struct {
-	m        Msg
-	text     string
-	saved    []savedFile
-	hadVoice bool
+	m     Msg
+	text  string
+	saved []savedFile
 }
 
 // handleMsg routes one inbound message. It runs on the single update loop, so
@@ -321,13 +308,11 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 		b.handleCommand(ctx, m) // defined in commands.go
 		return
 	}
-	// Save attachments to the durable media dir — fast, local, no network — and
-	// compute hadVoice from their MIME types (also fast). The slow half
-	// (Transcribe, preflightText) runs inside the turn goroutine, never
-	// on this loop.
+	// Save attachments to the durable media dir — fast, local, no network.
+	// The slow half (Transcribe, preflightText) runs inside the turn
+	// goroutine, never on this loop.
 	text := strings.TrimSpace(m.Text)
 	saved := saveAttachments(m.Media)
-	hadVoice := preflightScan(saved)
 	if len(saved) == 0 {
 		if len(m.Media) > 0 && text == "" {
 			b.sendReply(ctx, "⚠️ couldn't save that attachment.")
@@ -338,7 +323,7 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 		}
 	}
 
-	mail := inMail{m: m, text: text, saved: saved, hadVoice: hadVoice}
+	mail := inMail{m: m, text: text, saved: saved}
 
 	// Text messages ride a short debounce window first: Telegram splits a
 	// long message into several updates arriving back to back, and the burst
@@ -388,10 +373,8 @@ func (b *Bot) dispatchMail(ctx context.Context, batch []inMail) {
 		return
 	}
 	hasMedia := false
-	hadVoice := false
 	for _, mail := range batch {
 		hasMedia = hasMedia || len(mail.saved) > 0
-		hadVoice = hadVoice || mail.hadVoice
 	}
 	b.mu.Lock()
 	if b.turnActive {
@@ -414,7 +397,6 @@ func (b *Bot) dispatchMail(ctx context.Context, batch []inMail) {
 	// Take the turn slot before resolving the session so a wake landing during
 	// session creation queues instead of racing onto the slot.
 	turnCtx, cancel := b.takeSlotLocked(ctx)
-	b.turnHadVoice = hadVoice
 	b.mu.Unlock()
 
 	go b.runUserTurn(ctx, turnCtx, cancel, batch)
@@ -435,16 +417,6 @@ func (b *Bot) runUserTurn(ctx, turnCtx context.Context, cancel context.CancelFun
 		return
 	}
 	b.setAnchor(last.m.ID) // the reply anchors at the newest message
-
-	hadVoice := false
-	for _, mail := range batch {
-		if mail.hadVoice {
-			hadVoice = true
-		}
-	}
-	b.mu.Lock()
-	b.turnHadVoice = hadVoice
-	b.mu.Unlock()
 
 	composeText := func(pctx context.Context) string {
 		parts := make([]string, 0, len(batch))
@@ -471,14 +443,22 @@ func (b *Bot) runUserTurn(ctx, turnCtx context.Context, cancel context.CancelFun
 	pcancel()
 	reply, _ := b.drainTurnProgress(ctx, sess.Send(turnCtx, finalText))
 	stopTyping()
-	b.mu.Lock()
-	turnVoice := b.turnHadVoice
-	b.mu.Unlock()
+	// The NO_REPLY sentinel belongs to wake turns; a model over-generalizing
+	// it into a user turn must not post the literal string as its answer.
+	if isNoReply(reply) {
+		reply = ""
+	}
+	// A corrupt reply (raw tool-call markup — the provider failed to parse
+	// its own template) is replaced by a short notice: the user learns the
+	// turn misfired instead of staring at protocol garbage.
+	if containsToolMarkup(reply) {
+		reply = malformedReplyNotice
+	}
 	// A user-initiated turn always answers ("" renders as "(no output)").
 	// The turn slot is held through delivery: while it is held no other
 	// goroutine can start a turn (a mid-delivery user message queues, a Wake
 	// queues, startNextWork waits).
-	b.deliverReply(ctx, reply, turnVoice, sess, last.m.ID)
+	b.postReply(ctx, sess, last.m.ID, reply)
 	b.releaseSlot(cancel)
 	b.applyPendingReload(ctx) // self-evolution: agent edited config + called reload this turn (needs a free slot)
 	b.startNextWork(ctx)
@@ -695,7 +675,13 @@ func (b *Bot) runPostedQueuedTurn(ctx, turnCtx context.Context, cancel context.C
 	stopTyping := b.keepTyping(ctx)
 	reply, _ := b.drainTurnProgress(ctx, sess.RunQueued(turnCtx))
 	stopTyping()
-	b.deliverReply(ctx, reply, false, sess, anchor)
+	if isNoReply(reply) {
+		reply = ""
+	}
+	if containsToolMarkup(reply) {
+		reply = malformedReplyNotice
+	}
+	b.postReply(ctx, sess, anchor, reply)
 	b.releaseSlot(cancel)
 	b.applyPendingReload(ctx)
 	b.startNextWork(ctx)
@@ -739,7 +725,6 @@ func (b *Bot) takeSlotLocked(ctx context.Context) (context.Context, context.Canc
 	b.cancelTurn = cancel
 	b.turnActive = true
 	b.turnQuiet = false
-	b.turnHadVoice = false
 	return turnCtx, cancel
 }
 

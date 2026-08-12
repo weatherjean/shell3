@@ -12,10 +12,9 @@ import (
 )
 
 // mediaNotice surfaces a media-capability failure to the chat as a compact
-// ⚠️ line: the user should see WHY a voice note went untranscribed, or a
-// voice reply fell back to text — not just watch the
-// capability silently degrade. Provider errors can embed whole JSON bodies,
-// so the text is capped.
+// ⚠️ line: the user should see WHY a voice note went untranscribed — not just
+// watch the capability silently degrade. Provider errors can embed whole
+// JSON bodies, so the text is capped.
 func (b *Bot) mediaNotice(ctx context.Context, what string, err error) {
 	b.sendReply(ctx, "⚠️ "+what+": "+strutil.Truncate(err.Error(), 300))
 }
@@ -25,18 +24,6 @@ func (b *Bot) mediaNotice(ctx context.Context, what string, err error) {
 // or an interject-path goroutine; it never blocks the update loop itself,
 // which never calls preflight directly (see handleMsg in bot.go).
 const preflightTimeout = 60 * time.Second
-
-// preflightScan is the fast, local half of preflight: it reports whether any
-// saved attachment is audio/ without making a network call. Safe to run
-// synchronously on the update loop.
-func preflightScan(saved []savedFile) (hadVoice bool) {
-	for _, s := range saved {
-		if strings.HasPrefix(s.MIME, "audio/") {
-			return true
-		}
-	}
-	return false
-}
 
 // preflightText is the slow, network-calling half of preflight: it turns
 // saved attachments into the text block injected into the user's turn. Per
@@ -65,7 +52,7 @@ func preflightScan(saved []savedFile) (hadVoice bool) {
 func (b *Bot) preflightText(ctx context.Context, saved []savedFile, sess *shell3.Session) string {
 	// One snapshot for the whole preflight: a reload landing mid-loop must not
 	// transcribe with a stale config.
-	caps, _ := b.mediaCaps()
+	caps := b.mediaCaps()
 	var lines []string
 	for _, s := range saved {
 		if !strings.HasPrefix(s.MIME, "audio/") {
@@ -89,11 +76,4 @@ func (b *Bot) preflightText(ctx context.Context, saved []savedFile, sess *shell3
 		lines = append(lines, note)
 	}
 	return strings.Join(lines, "\n")
-}
-
-// preflight combines preflightScan + preflightText, for callers that don't
-// need the two halves split across the update-loop boundary (currently the
-// tests). handleMsg calls the halves separately — see bot.go.
-func (b *Bot) preflight(ctx context.Context, saved []savedFile, sess *shell3.Session) (injected string, hadVoice bool) {
-	return b.preflightText(ctx, saved, sess), preflightScan(saved)
 }

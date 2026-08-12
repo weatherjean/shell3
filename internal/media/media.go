@@ -1,15 +1,12 @@
 //go:build unix
 
 // Package media implements shell3's OpenAI-compatible media capabilities
-// (transcribe, speak) as thin openai-go wrappers resolved
-// from shell3.yaml's media: blocks (stt/tts).
+// (transcribe) as a thin openai-go wrapper resolved
+// from shell3.yaml's media: block (stt).
 package media
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
 
 	"github.com/openai/openai-go"
@@ -25,24 +22,15 @@ import (
 // other's wider surface.
 type Config interface {
 	STT() *config.STTConfig
-	TTS() *config.TTSConfig
 	Model(name string) (config.Model, bool)
-}
-
-// Speech is a synthesized-audio result from Clients.Speak: the path to the
-// written audio file. The caller owns it (the telegram front-end sends it as
-// a voice note; cached files live under the media dir as tts-*).
-type Speech struct {
-	Path string
 }
 
 // Clients holds shell3's media capabilities, each wired to the model its
 // shell3.yaml block references. A nil function field means the capability was
-// not configured (no media stt/tts block); callers check
+// not configured (no media stt block); callers check
 // for nil before use rather than calling into a stub that errors.
 type Clients struct {
 	Transcribe func(ctx context.Context, path string) (string, error)
-	Speak      func(ctx context.Context, text string) (Speech, error)
 }
 
 // sdkFn resolves an openai-go client for a media block's model ref (the
@@ -85,34 +73,16 @@ func New(cfg Config, ensureProxy func(name, command string)) *Clients {
 			return sdkOnce(&once, ensureProxy, sdk, ref)
 		}, *s)
 	}
-	if t := cfg.TTS(); t != nil {
-		var once sync.Once
-		c.Speak = newSpeaker(func(ref string) (openai.Client, config.Model) {
-			return sdkOnce(&once, ensureProxy, sdk, ref)
-		}, *t)
-	}
 	return c
 }
 
-// Dir returns shell3's durable media directory — where attachments,
-// generated images, and cached speech are stored, so every media file the
-// agent has seen or made keeps a stable path that survives reboots and OS
-// temp cleaning (re-readable with read_media, re-sendable to the chat,
-// findable from history). Default <configDir>/media (which is
-// ~/.shell3/media for the default config dir, see mediadir.SetBaseDir);
-// $SHELL3_MEDIA_DIR overrides (tests point it at a TempDir). Created on
-// demand.
+// Dir returns shell3's durable media directory — where attachments are
+// stored, so every media file the agent has seen keeps a stable path that
+// survives reboots and OS temp cleaning (re-readable with read_media,
+// re-sendable to the chat, findable from history). Default <configDir>/media
+// (which is ~/.shell3/media for the default config dir, see
+// mediadir.SetBaseDir); $SHELL3_MEDIA_DIR overrides (tests point it at a
+// TempDir). Created on demand.
 func Dir() (string, error) {
 	return mediadir.Dir()
-}
-
-// outDir returns shell3's transient media scratch directory, used for
-// freshly synthesized TTS audio before the front-end caches it into Dir()
-// under a content hash. Generated images go straight to Dir().
-func outDir() (string, error) {
-	dir := filepath.Join(os.TempDir(), "shell3-media")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("media: cannot create %s: %w", dir, err)
-	}
-	return dir, nil
 }

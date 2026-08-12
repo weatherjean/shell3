@@ -42,14 +42,11 @@ func TestPreflight_VoiceTranscribeSuccessEchoes(t *testing.T) {
 		Transcribe: func(ctx context.Context, path string) (string, error) { return "hi there", nil },
 	},
 		STTEcho: true,
-	}, nil)
+	})
 
 	saved := []savedFile{saveVoice(t)}
-	injected, hadVoice := b.preflight(context.Background(), saved, sess)
+	injected := b.preflightText(context.Background(), saved, sess)
 
-	if !hadVoice {
-		t.Fatal("want hadVoice=true for an audio/ attachment")
-	}
 	if !strings.HasPrefix(injected, `"hi there"`) {
 		t.Fatalf("injected should start with the quoted transcript, got %q", injected)
 	}
@@ -69,14 +66,11 @@ func TestPreflight_TranscribeErrorNoticesChat(t *testing.T) {
 		Transcribe: func(ctx context.Context, path string) (string, error) { return "", errors.New("stt down") },
 	},
 		STTEcho: true,
-	}, nil)
+	})
 
 	saved := []savedFile{saveVoice(t)}
-	injected, hadVoice := b.preflight(context.Background(), saved, sess)
+	injected := b.preflightText(context.Background(), saved, sess)
 
-	if !hadVoice {
-		t.Fatal("want hadVoice=true even on transcribe failure")
-	}
 	if !strings.Contains(injected, "[voice note could not be transcribed]") {
 		t.Fatalf("want the failure marker, got %q", injected)
 	}
@@ -96,10 +90,10 @@ func TestPreflight_STTEchoFalseNoEcho(t *testing.T) {
 		Transcribe: func(ctx context.Context, path string) (string, error) { return "hi there", nil },
 	},
 		STTEcho: false,
-	}, nil)
+	})
 
 	saved := []savedFile{saveVoice(t)}
-	injected, _ := b.preflight(context.Background(), saved, sess)
+	injected := b.preflightText(context.Background(), saved, sess)
 
 	if !strings.Contains(injected, `"hi there"`) {
 		t.Fatalf("transcript should still be injected, got %q", injected)
@@ -117,14 +111,11 @@ func TestPreflight_ImageAttachmentNoteSurvives(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
-	b.SetMedia(&MediaCaps{Clients: media.Clients{}}, nil)
+	b.SetMedia(&MediaCaps{Clients: media.Clients{}})
 
 	saved := []savedFile{savePhoto(t)}
-	injected, hadVoice := b.preflight(context.Background(), saved, sess)
+	injected := b.preflightText(context.Background(), saved, sess)
 
-	if hadVoice {
-		t.Fatal("want hadVoice=false for an image attachment")
-	}
 	if !strings.Contains(injected, saved[0].Path) {
 		t.Fatalf("injected must still carry the path note, got %q", injected)
 	}
@@ -134,14 +125,11 @@ func TestPreflight_NoMediaConfiguredMatchesToday(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
-	b.SetMedia(&MediaCaps{Clients: media.Clients{}}, nil)
+	b.SetMedia(&MediaCaps{Clients: media.Clients{}})
 
 	saved := []savedFile{saveVoice(t), savePhoto(t)}
-	injected, hadVoice := b.preflight(context.Background(), saved, sess)
+	injected := b.preflightText(context.Background(), saved, sess)
 
-	if !hadVoice {
-		t.Fatal("want hadVoice=true: an audio/ attachment was present even though Transcribe is unconfigured")
-	}
 	want := attachmentNote(saved, b.hasTool(sess, "read_media"))
 	if injected != want {
 		t.Fatalf("with no capabilities configured, preflight must match plain attachmentNote:\ngot  %q\nwant %q", injected, want)
@@ -154,7 +142,7 @@ func TestPreflight_MediaNeverSetMatchesToday(t *testing.T) {
 	b := newBot(t, fc, rt) // SetMedia never called (b.media stays nil)
 
 	saved := []savedFile{savePhoto(t)}
-	injected, _ := b.preflight(context.Background(), saved, sess)
+	injected := b.preflightText(context.Background(), saved, sess)
 
 	want := attachmentNote(saved, b.hasTool(sess, "read_media"))
 	if injected != want {
@@ -173,13 +161,13 @@ func TestSetMedia_SecondCallWins(t *testing.T) {
 
 	b.SetMedia(&MediaCaps{Clients: media.Clients{
 		Transcribe: func(ctx context.Context, path string) (string, error) { return "first", nil },
-	}}, nil)
+	}})
 	b.SetMedia(&MediaCaps{Clients: media.Clients{
 		Transcribe: func(ctx context.Context, path string) (string, error) { return "second", nil },
-	}}, nil)
+	}})
 
 	saved := []savedFile{saveVoice(t)}
-	injected, _ := b.preflight(context.Background(), saved, sess)
+	injected := b.preflightText(context.Background(), saved, sess)
 
 	if strings.Contains(injected, "first") {
 		t.Fatalf("preflight used the first SetMedia call's Transcribe, want the second: %q", injected)
@@ -199,14 +187,11 @@ func TestPreflight_VoiceAndImage_LineOrdering(t *testing.T) {
 	b := newBot(t, fc, rt)
 	b.SetMedia(&MediaCaps{Clients: media.Clients{
 		Transcribe: func(ctx context.Context, path string) (string, error) { return "hi there", nil },
-	}}, nil)
+	}})
 
 	saved := []savedFile{saveVoice(t), savePhoto(t)}
-	injected, hadVoice := b.preflight(context.Background(), saved, sess)
+	injected := b.preflightText(context.Background(), saved, sess)
 
-	if !hadVoice {
-		t.Fatal("want hadVoice=true with a voice attachment present")
-	}
 	transcriptIdx := strings.Index(injected, `"hi there"`)
 	noteIdx := strings.Index(injected, "[The user sent")
 	if transcriptIdx == -1 || noteIdx == -1 {
@@ -214,22 +199,5 @@ func TestPreflight_VoiceAndImage_LineOrdering(t *testing.T) {
 	}
 	if transcriptIdx >= noteIdx {
 		t.Fatalf("want transcript < note ordering, got %q", injected)
-	}
-}
-
-func TestHandleMsg_VoiceSetsTurnHadVoice(t *testing.T) {
-	fc := newFakeClient()
-	rt, _ := newFakeRuntime(t, "ok")
-	b := newBot(t, fc, rt)
-
-	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Media: []Media{
-		{Bytes: []byte("OggS-fake"), MIME: "audio/ogg", Filename: "voice.ogg"},
-	}})
-
-	b.mu.Lock()
-	hadVoice := b.turnHadVoice
-	b.mu.Unlock()
-	if !hadVoice {
-		t.Fatal("want turnHadVoice=true after a voice-attachment turn")
 	}
 }

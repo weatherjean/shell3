@@ -328,8 +328,16 @@ func TestToolMarkupNeverReachesChat(t *testing.T) {
 		t.Fatalf("corrupt report reply must post nothing, got %v", texts)
 	}
 
-	// User turn: the notice posts, the markup does not.
-	b.deliverReply(context.Background(), corrupt, false, sess, "")
+	// User turn: the notice posts, the markup does not. This mirrors the
+	// guard runUserTurn/runPostedQueuedTurn apply inline before posting.
+	reply := corrupt
+	if isNoReply(reply) {
+		reply = ""
+	}
+	if containsToolMarkup(reply) {
+		reply = malformedReplyNotice
+	}
+	b.postReply(context.Background(), sess, "", reply)
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "malformed output")
 	})

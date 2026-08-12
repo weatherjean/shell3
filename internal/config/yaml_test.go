@@ -182,21 +182,23 @@ func TestParseYAMLMCPValidation(t *testing.T) {
 	}
 }
 
-func TestParseYAMLMediaNeedsModel(t *testing.T) {
-	y := "models:\n  m:\n    base_url: u\n    model: x\nmedia:\n  tts: { voice: v }\n"
+// TestParseYAMLMediaTTSIsUnknownKey pins the subtraction: media.tts is a
+// removed key, so declaring it is a strict-decode load error like any other
+// unknown field — never silently ignored, never a deprecation warning.
+func TestParseYAMLMediaTTSIsUnknownKey(t *testing.T) {
+	y := "models:\n  m:\n    base_url: u\n    model: x\nmedia:\n  tts: { model: m }\n"
 	if _, err := parseY(t, y, nil); err == nil {
-		t.Fatal("tts without model accepted")
+		t.Fatal("media.tts accepted, want unknown-key load error")
 	}
 }
 
-func TestParseYAMLTTSModeDefault(t *testing.T) {
-	y := "models:\n  m:\n    base_url: u\n    model: x\nmedia:\n  tts: { model: m }\n"
-	c, err := parseY(t, y, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.TTS().Mode != "inbound" {
-		t.Fatalf("mode = %q", c.TTS().Mode)
+// TestParseYAMLMediaSTTNeedsModel pins the surviving half of the pattern the
+// deleted media.tts-without-model test used to cover: a media.stt block
+// still requires a model.
+func TestParseYAMLMediaSTTNeedsModel(t *testing.T) {
+	y := "models:\n  m:\n    base_url: u\n    model: x\nmedia:\n  stt: { echo: true }\n"
+	if _, err := parseY(t, y, nil); err == nil || !strings.Contains(err.Error(), "media.stt needs a model") {
+		t.Fatalf("err = %v, want \"media.stt needs a model\"", err)
 	}
 }
 
@@ -243,29 +245,6 @@ func TestParseYAMLKeepRecentClamp(t *testing.T) {
 	c, _ = parseY(t, "models:\n  m:\n    base_url: u\n    model: x\n    compact_at: 800\n    keep_recent: 300\n", nil)
 	if m, _ := c.Model("m"); m.KeepRecent != 300 {
 		t.Fatalf("keep_recent below compact_at changed: %d", m.KeepRecent)
-	}
-}
-
-func TestParseYAMLTTSModeInvalid(t *testing.T) {
-	y := "models:\n  m:\n    base_url: u\n    model: x\nmedia:\n  tts: { model: m, mode: allways }\n"
-	if _, err := parseY(t, y, nil); err == nil || !strings.Contains(err.Error(), "must be off, inbound, or always") {
-		t.Fatalf("err = %v", err)
-	}
-}
-
-func TestParseYAMLTTSFormatDefault(t *testing.T) {
-	y := "models:\n  m:\n    base_url: u\n    model: x\nmedia:\n  tts: { model: m }\n"
-	c, err := parseY(t, y, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.TTS().Format != "opus" {
-		t.Fatalf("format = %q, want opus default", c.TTS().Format)
-	}
-	y = "models:\n  m:\n    base_url: u\n    model: x\nmedia:\n  tts: { model: m, format: mp3 }\n"
-	c, _ = parseY(t, y, nil)
-	if c.TTS().Format != "mp3" {
-		t.Fatalf("explicit format = %q", c.TTS().Format)
 	}
 }
 

@@ -179,14 +179,22 @@ func TestInboxCommand(t *testing.T) {
 
 // A model that over-generalizes the wake-turn NO_REPLY sentinel into a USER
 // turn must not post the literal string — it degrades to the empty-reply
-// placeholder instead.
+// placeholder instead. This mirrors the guard runUserTurn/runPostedQueuedTurn
+// apply inline before posting.
 func TestDeliverReplyNoReplySentinelNotPosted(t *testing.T) {
 	fc := newFakeClient()
 	rt := storeRuntime(t, "unused")
 	b := newBot(t, fc, rt)
 	sess := decoratedSession(t, b, rt)
 
-	b.deliverReply(context.Background(), "NO_REPLY.", false, sess, "")
+	reply := "NO_REPLY."
+	if isNoReply(reply) {
+		reply = ""
+	}
+	if containsToolMarkup(reply) {
+		reply = malformedReplyNotice
+	}
+	b.postReply(context.Background(), sess, "", reply)
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "(no output)")
 	})

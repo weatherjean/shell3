@@ -60,20 +60,12 @@ type yamlMCP struct {
 
 type yamlMedia struct {
 	STT *yamlSTT `yaml:"stt"`
-	TTS *yamlTTS `yaml:"tts"`
 }
 
 type yamlSTT struct {
 	Model    string `yaml:"model"`
 	Language string `yaml:"language"`
 	Echo     bool   `yaml:"echo"`
-}
-
-type yamlTTS struct {
-	Model  string `yaml:"model"`
-	Voice  string `yaml:"voice"`
-	Mode   string `yaml:"mode"`
-	Format string `yaml:"format"`
 }
 
 type yamlBackground struct {
@@ -91,7 +83,6 @@ var yamlTypeNames = map[string]string{
 	"yamlMCP":        "an mcp: server",
 	"yamlMedia":      "the media: block",
 	"yamlSTT":        "media.stt",
-	"yamlTTS":        "media.tts",
 	"yamlBackground": "the background: block",
 }
 
@@ -195,24 +186,6 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 				return fmt.Errorf("shell3.yaml: media.stt needs a model")
 			}
 			c.stt = &STTConfig{ModelRef: s.Model, Language: s.Language, Echo: s.Echo}
-		}
-		if tt := m.TTS; tt != nil {
-			if tt.Model == "" {
-				return fmt.Errorf("shell3.yaml: media.tts needs a model")
-			}
-			mode := tt.Mode
-			if mode == "" {
-				mode = "inbound"
-			}
-			if mode != "off" && mode != "inbound" && mode != "always" {
-				return fmt.Errorf("shell3.yaml: media.tts mode %q must be off, inbound, or always", tt.Mode)
-			}
-			// opus is small and lands as a native Telegram voice bubble; the default.
-			format := tt.Format
-			if format == "" {
-				format = "opus"
-			}
-			c.tts = &TTSConfig{ModelRef: tt.Model, Voice: tt.Voice, Mode: mode, Format: format}
 		}
 	}
 	if b := f.Background; b != nil {
