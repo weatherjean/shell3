@@ -12,15 +12,15 @@ import (
 )
 
 // mediaNotice surfaces a media-capability failure to the chat as a compact
-// ⚠️ line: the user should see WHY a voice note went untranscribed, a photo
-// undescribed, or a voice reply fell back to text — not just watch the
+// ⚠️ line: the user should see WHY a voice note went untranscribed, or a
+// voice reply fell back to text — not just watch the
 // capability silently degrade. Provider errors can embed whole JSON bodies,
 // so the text is capped.
 func (b *Bot) mediaNotice(ctx context.Context, what string, err error) {
 	b.sendReply(ctx, "⚠️ "+what+": "+strutil.Truncate(err.Error(), 300))
 }
 
-// preflightTimeout bounds each turn's media preflight (Transcribe/Describe
+// preflightTimeout bounds each turn's media preflight (Transcribe
 // network calls). It caps how long a hung media endpoint can hold up a turn
 // or an interject-path goroutine; it never blocks the update loop itself,
 // which never calls preflight directly (see handleMsg in bot.go).
@@ -47,10 +47,6 @@ func preflightScan(saved []savedFile) (hadVoice bool) {
 //     notice. On success, if b.media.STTEcho is set, the transcript is also
 //     echoed to the chat as a separate message (not part of the turn's
 //     eventual reply).
-//   - image/ + b.media.Describe configured: describe it. Success injects
-//     "[image: <description>]"; failure injects nothing extra (the path note
-//     below still tells the agent the file is there) but sends the error to
-//     the chat as a ⚠️ notice.
 //
 // The existing attachmentNote is always appended below any injected lines so
 // file paths survive for the agent's own tools (bash/read_media). When
@@ -59,8 +55,8 @@ func preflightScan(saved []savedFile) (hadVoice bool) {
 // behavior.
 //
 // ctx should carry a deadline (see preflightTimeout): a cancelled/expired ctx
-// flows into Transcribe/Describe naturally, degrading exactly like a
-// transcription/description failure — the path note is still always
+// flows into Transcribe naturally, degrading exactly like a
+// transcription failure — the path note is still always
 // appended.
 //
 // Callers must never run this on the update loop (internal/telegram/bot.go's
@@ -68,7 +64,7 @@ func preflightScan(saved []savedFile) (hadVoice bool) {
 // interject goroutine, both of which pass an already-timeout-wrapped ctx.
 func (b *Bot) preflightText(ctx context.Context, saved []savedFile, sess *shell3.Session) string {
 	// One snapshot for the whole preflight: a reload landing mid-loop must not
-	// transcribe with one config and describe with another.
+	// transcribe with a stale config.
 	caps, _ := b.mediaCaps()
 	var lines []string
 	for _, s := range saved {
@@ -87,16 +83,6 @@ func (b *Bot) preflightText(ctx context.Context, saved []savedFile, sess *shell3
 			if caps.STTEcho {
 				b.sendReply(ctx, `📝 "`+transcript+`"`)
 			}
-		case strings.HasPrefix(s.MIME, "image/"):
-			if caps == nil || caps.Describe == nil {
-				continue
-			}
-			desc, err := caps.Describe(ctx, s.Path)
-			if err != nil {
-				b.mediaNotice(ctx, "image description failed", err)
-				continue
-			}
-			lines = append(lines, "[image: "+desc+"]")
 		}
 	}
 	if note := attachmentNote(saved, b.hasTool(sess, "read_media")); note != "" {

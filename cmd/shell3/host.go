@@ -48,7 +48,7 @@ func armCron(disp cron.Dispatcher, jobs []shell3.CronJob) (*cron.Scheduler, erro
 	return sched, nil
 }
 
-// buildMediaClients resolves the three media capabilities (STT/TTS/describe)
+// buildMediaClients resolves the two media capabilities (STT/TTS)
 // from the runtime's current config, starting each model's run_proxy
 // (at most once, on first use) via the runtime's shared proxy Spawner. Called
 // at boot and again on every reload, since the config may have changed which

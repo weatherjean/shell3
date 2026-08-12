@@ -1,8 +1,8 @@
 //go:build unix
 
 // Package media implements shell3's OpenAI-compatible media capabilities
-// (transcribe, speak, describe) as thin openai-go wrappers resolved
-// from shell3.yaml's media: blocks (stt/tts/describe).
+// (transcribe, speak) as thin openai-go wrappers resolved
+// from shell3.yaml's media: blocks (stt/tts).
 package media
 
 import (
@@ -26,7 +26,6 @@ import (
 type Config interface {
 	STT() *config.STTConfig
 	TTS() *config.TTSConfig
-	Describe() *config.DescribeConfig
 	Model(name string) (config.Model, bool)
 }
 
@@ -39,12 +38,11 @@ type Speech struct {
 
 // Clients holds shell3's media capabilities, each wired to the model its
 // shell3.yaml block references. A nil function field means the capability was
-// not configured (no media stt/tts/describe block); callers check
+// not configured (no media stt/tts block); callers check
 // for nil before use rather than calling into a stub that errors.
 type Clients struct {
 	Transcribe func(ctx context.Context, path string) (string, error)
 	Speak      func(ctx context.Context, text string) (Speech, error)
-	Describe   func(ctx context.Context, path string) (string, error)
 }
 
 // sdkFn resolves an openai-go client for a media block's model ref (the
@@ -52,7 +50,7 @@ type Clients struct {
 // resolved config.Model alongside it. Model refs are validated at config load
 // time, so the lookup here cannot miss. It is plain client construction —
 // proxy-spawning is layered on top by sdkOnce, not baked in here, so it can
-// be shared across all four capabilities.
+// be shared across both capabilities.
 type sdkFn func(ref string) (openai.Client, config.Model)
 
 // sdkOnce runs ensureProxy for ref's model exactly once — guarded by once,
@@ -92,12 +90,6 @@ func New(cfg Config, ensureProxy func(name, command string)) *Clients {
 		c.Speak = newSpeaker(func(ref string) (openai.Client, config.Model) {
 			return sdkOnce(&once, ensureProxy, sdk, ref)
 		}, *t)
-	}
-	if d := cfg.Describe(); d != nil {
-		var once sync.Once
-		c.Describe = newDescriber(func(ref string) (openai.Client, config.Model) {
-			return sdkOnce(&once, ensureProxy, sdk, ref)
-		}, *d)
 	}
 	return c
 }

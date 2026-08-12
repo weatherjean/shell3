@@ -59,9 +59,8 @@ type yamlMCP struct {
 }
 
 type yamlMedia struct {
-	STT      *yamlSTT      `yaml:"stt"`
-	TTS      *yamlTTS      `yaml:"tts"`
-	Describe *yamlDescribe `yaml:"describe"`
+	STT *yamlSTT `yaml:"stt"`
+	TTS *yamlTTS `yaml:"tts"`
 }
 
 type yamlSTT struct {
@@ -75,11 +74,6 @@ type yamlTTS struct {
 	Voice  string `yaml:"voice"`
 	Mode   string `yaml:"mode"`
 	Format string `yaml:"format"`
-}
-
-type yamlDescribe struct {
-	Model  string `yaml:"model"`
-	Prompt string `yaml:"prompt"`
 }
 
 type yamlBackground struct {
@@ -98,7 +92,6 @@ var yamlTypeNames = map[string]string{
 	"yamlMedia":      "the media: block",
 	"yamlSTT":        "media.stt",
 	"yamlTTS":        "media.tts",
-	"yamlDescribe":   "media.describe",
 	"yamlBackground": "the background: block",
 }
 
@@ -220,16 +213,6 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 				format = "opus"
 			}
 			c.tts = &TTSConfig{ModelRef: tt.Model, Voice: tt.Voice, Mode: mode, Format: format}
-		}
-		if d := m.Describe; d != nil {
-			if d.Model == "" {
-				return fmt.Errorf("shell3.yaml: media.describe needs a model")
-			}
-			prompt := d.Prompt
-			if prompt == "" {
-				prompt = "Describe the image."
-			}
-			c.describe = &DescribeConfig{ModelRef: d.Model, Prompt: prompt}
 		}
 	}
 	if b := f.Background; b != nil {

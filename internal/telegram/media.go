@@ -14,7 +14,7 @@ import (
 )
 
 // MediaCaps is the bot's view of the media capabilities: the runtime's
-// media.Clients (Transcribe/Speak/Describe/Generate) plus the config defaults
+// media.Clients (Transcribe/Speak) plus the config defaults
 // governing when the bot echoes a transcript and when it speaks a reply.
 type MediaCaps struct {
 	media.Clients

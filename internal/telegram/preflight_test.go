@@ -109,13 +109,15 @@ func TestPreflight_STTEchoFalseNoEcho(t *testing.T) {
 	}
 }
 
-func TestPreflight_ImageDescribeSuccess(t *testing.T) {
+// TestPreflight_ImageAttachmentNoteSurvives pins that an image attachment
+// still carries its path note through preflight now that media.describe is
+// gone — the agent's own tools (bash/read_media) are the only way to look at
+// it.
+func TestPreflight_ImageAttachmentNoteSurvives(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
-	b.SetMedia(&MediaCaps{Clients: media.Clients{
-		Describe: func(ctx context.Context, path string) (string, error) { return "a red square", nil },
-	}}, nil)
+	b.SetMedia(&MediaCaps{Clients: media.Clients{}}, nil)
 
 	saved := []savedFile{savePhoto(t)}
 	injected, hadVoice := b.preflight(context.Background(), saved, sess)
@@ -123,35 +125,8 @@ func TestPreflight_ImageDescribeSuccess(t *testing.T) {
 	if hadVoice {
 		t.Fatal("want hadVoice=false for an image attachment")
 	}
-	if !strings.Contains(injected, "[image: a red square]") {
-		t.Fatalf("want the description injected, got %q", injected)
-	}
 	if !strings.Contains(injected, saved[0].Path) {
 		t.Fatalf("injected must still carry the path note, got %q", injected)
-	}
-}
-
-func TestPreflight_DescribeErrorNoticesChat(t *testing.T) {
-	fc := newFakeClient()
-	rt, sess := newFakeRuntime(t, "ok")
-	b := newBot(t, fc, rt)
-	b.SetMedia(&MediaCaps{Clients: media.Clients{
-		Describe: func(ctx context.Context, path string) (string, error) { return "", errors.New("describe down") },
-	}}, nil)
-
-	saved := []savedFile{savePhoto(t)}
-	injected, _ := b.preflight(context.Background(), saved, sess)
-
-	if strings.Contains(injected, "[image:") {
-		t.Fatalf("want no description on failure, got %q", injected)
-	}
-	want := attachmentNote(saved, b.hasTool(sess, "read_media"))
-	if injected != want {
-		t.Fatalf("want plain attachment note %q, got %q", want, injected)
-	}
-	texts := fc.sentTexts()
-	if len(texts) != 1 || !strings.Contains(texts[0], "⚠️") || !strings.Contains(texts[0], "describe down") {
-		t.Fatalf("want one ⚠️ notice carrying the error, got %v", texts)
 	}
 }
 
@@ -215,17 +190,15 @@ func TestSetMedia_SecondCallWins(t *testing.T) {
 }
 
 // TestPreflight_VoiceAndImage_LineOrdering pins the reviewer's Minor: a
-// message carrying both a voice note and a photo, with both Transcribe and
-// Describe configured and succeeding, must inject the quoted transcript
-// first, the [image: …] description second, and the path note last — the
-// iteration order of saved (voice.ogg saved before photo.jpg).
+// message carrying both a voice note and a photo, with Transcribe configured
+// and succeeding, must inject the quoted transcript first and the path note
+// last — the iteration order of saved (voice.ogg saved before photo.jpg).
 func TestPreflight_VoiceAndImage_LineOrdering(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
 	b.SetMedia(&MediaCaps{Clients: media.Clients{
 		Transcribe: func(ctx context.Context, path string) (string, error) { return "hi there", nil },
-		Describe:   func(ctx context.Context, path string) (string, error) { return "a red square", nil },
 	}}, nil)
 
 	saved := []savedFile{saveVoice(t), savePhoto(t)}
@@ -235,13 +208,12 @@ func TestPreflight_VoiceAndImage_LineOrdering(t *testing.T) {
 		t.Fatal("want hadVoice=true with a voice attachment present")
 	}
 	transcriptIdx := strings.Index(injected, `"hi there"`)
-	imageIdx := strings.Index(injected, "[image: a red square]")
 	noteIdx := strings.Index(injected, "[The user sent")
-	if transcriptIdx == -1 || imageIdx == -1 || noteIdx == -1 {
-		t.Fatalf("expected all three segments present, got %q", injected)
+	if transcriptIdx == -1 || noteIdx == -1 {
+		t.Fatalf("expected both segments present, got %q", injected)
 	}
-	if transcriptIdx >= imageIdx || imageIdx >= noteIdx {
-		t.Fatalf("want transcript < image < note ordering, got %q", injected)
+	if transcriptIdx >= noteIdx {
+		t.Fatalf("want transcript < note ordering, got %q", injected)
 	}
 }
 

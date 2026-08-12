@@ -40,7 +40,6 @@ mcp:
     env: { GITHUB_TOKEN: env:GH }
 media:
   stt: { model: aux }
-  describe: { model: main }
 background:
   max_concurrent: 4
 `
@@ -78,7 +77,7 @@ func TestParseYAMLFull(t *testing.T) {
 	if servers[0].Env["GITHUB_TOKEN"] != "gh" {
 		t.Fatalf("mcp env substitution failed: %+v", servers[0].Env)
 	}
-	if c.STT() == nil || c.STT().ModelRef != "aux" || c.Describe() == nil {
+	if c.STT() == nil || c.STT().ModelRef != "aux" {
 		t.Fatal("media blocks missing")
 	}
 	if c.BackgroundMaxConcurrent != 4 {
@@ -267,22 +266,6 @@ func TestParseYAMLTTSFormatDefault(t *testing.T) {
 	c, _ = parseY(t, y, nil)
 	if c.TTS().Format != "mp3" {
 		t.Fatalf("explicit format = %q", c.TTS().Format)
-	}
-}
-
-func TestParseYAMLDescribePromptDefault(t *testing.T) {
-	y := "models:\n  m:\n    base_url: u\n    model: x\nmedia:\n  describe: { model: m }\n"
-	c, err := parseY(t, y, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.Describe().Prompt == "" {
-		t.Fatal("describe prompt not defaulted")
-	}
-	y = "models:\n  m:\n    base_url: u\n    model: x\nmedia:\n  describe: { model: m, prompt: Caption it. }\n"
-	c, _ = parseY(t, y, nil)
-	if c.Describe().Prompt != "Caption it." {
-		t.Fatalf("explicit prompt = %q", c.Describe().Prompt)
 	}
 }
 

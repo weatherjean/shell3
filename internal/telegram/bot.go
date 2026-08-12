@@ -85,7 +85,7 @@ type Bot struct {
 	// cron is the adopted parent handle (jobs/runs source for /status views).
 	cron *shell3.Session
 
-	media     *MediaCaps  // STT/describe/TTS/imagegen capabilities; nil when unconfigured
+	media     *MediaCaps  // STT/TTS capabilities; nil when unconfigured
 	voiceMode *ModeStore  // per-chat inbound-voice-reply mode; nil when unconfigured
 	quietMode *QuietStore // the /quiet toggle's store; nil = never quiet
 
@@ -201,9 +201,9 @@ func (b *Bot) SetVersion(v string) { b.version = v }
 // renders as "never".
 func (b *Bot) SetCronLastRuns(fn func() map[string]time.Time) { b.cronLastRuns = fn }
 
-// SetMedia wires the bot's STT/describe/TTS capabilities and the per-chat
+// SetMedia wires the bot's STT/TTS capabilities and the per-chat
 // inbound-voice-reply mode override. The host MUST call it at boot and again
-// after every Runtime.Reload so transcription/description/speech use the fresh
+// after every Runtime.Reload so transcription/speech use the fresh
 // config. The image_generate host tool is NOT registered here — the host
 // installs it via Runtime.SetSessionDecorator, which covers every session and
 // post-reload re-application uniformly.
@@ -323,7 +323,7 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 	}
 	// Save attachments to the durable media dir — fast, local, no network — and
 	// compute hadVoice from their MIME types (also fast). The slow half
-	// (Transcribe/Describe, preflightText) runs inside the turn goroutine, never
+	// (Transcribe, preflightText) runs inside the turn goroutine, never
 	// on this loop.
 	text := strings.TrimSpace(m.Text)
 	saved := saveAttachments(m.Media)

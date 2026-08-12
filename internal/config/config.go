@@ -143,10 +143,6 @@ type STTConfig struct {
 // the output codec.
 type TTSConfig struct{ ModelRef, Voice, Mode, Format string }
 
-// DescribeConfig is the `media.describe:` block: captions an inbound image
-// before the model turn runs.
-type DescribeConfig struct{ ModelRef, Prompt string }
-
 // MCPServer is one declared server from the shell3.yaml `mcp:` block.
 // Exactly one of Command (stdio) or URL (streamable HTTP) is set — enforced
 // at load.
@@ -190,9 +186,8 @@ type LoadedConfig struct {
 	telegram   TelegramConfig
 	cron       []CronJob
 
-	stt      *STTConfig
-	tts      *TTSConfig
-	describe *DescribeConfig
+	stt *STTConfig
+	tts *TTSConfig
 
 	// hooks maps each governed agent to its hook scripts (see hooks.go).
 	hooks hookSet
@@ -278,9 +273,6 @@ func (c *LoadedConfig) STT() *STTConfig { return c.stt }
 
 // TTS returns the parsed media.tts block, nil when not declared.
 func (c *LoadedConfig) TTS() *TTSConfig { return c.tts }
-
-// Describe returns the parsed media.describe block, nil when not declared.
-func (c *LoadedConfig) Describe() *DescribeConfig { return c.describe }
 
 // MCPServers returns the declared MCP servers sorted by name (YAML map order
 // is unspecified; sorting keeps connect order and status listings

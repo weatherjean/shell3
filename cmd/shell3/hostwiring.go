@@ -84,7 +84,7 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 	b.SetVersion(version)
 	b.SetRunsRoot(rt.Parts().RunsRoot())
 
-	// Media (STT/describe/TTS): built from the runtime's current
+	// Media (STT/TTS): built from the runtime's current
 	// config and re-built by the reload closure below. The session decorator
 	// registers, for main chat sessions (not the headless subagent
 	// children), the bot's host tools. Runtime.Reload re-applies the

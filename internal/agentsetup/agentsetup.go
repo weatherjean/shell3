@@ -92,7 +92,7 @@ func (p *Parts) Log() applog.Logger { return p.log }
 func (p *Parts) ConfigDir() string { return p.configDir }
 
 // MediaConfig is the read-only slice of the config that internal/media needs
-// to resolve its three capabilities (STT/TTS/Describe) and their
+// to resolve its two capabilities (STT/TTS) and their
 // models. It mirrors media.Config's method set so *config.LoadedConfig
 // satisfies both structurally, without agentsetup importing media (media
 // cannot live under agentsetup itself, since it depends on internal/shell3,
@@ -100,7 +100,6 @@ func (p *Parts) ConfigDir() string { return p.configDir }
 type MediaConfig interface {
 	STT() *config.STTConfig
 	TTS() *config.TTSConfig
-	Describe() *config.DescribeConfig
 	Model(name string) (config.Model, bool)
 }
 

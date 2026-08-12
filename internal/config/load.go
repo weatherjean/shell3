@@ -126,9 +126,6 @@ func load(dir string) (*LoadedConfig, error) {
 	if c.tts != nil {
 		mediaRefs = append(mediaRefs, struct{ block, model string }{"media.tts", c.tts.ModelRef})
 	}
-	if c.describe != nil {
-		mediaRefs = append(mediaRefs, struct{ block, model string }{"media.describe", c.describe.ModelRef})
-	}
 	for _, ref := range mediaRefs {
 		if _, ok := c.Model(ref.model); !ok {
 			return nil, fmt.Errorf("%s references unknown model %q", ref.block, ref.model)
