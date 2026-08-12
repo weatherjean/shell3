@@ -520,8 +520,21 @@ runs.
 telegram:
   token: env:TELEGRAM_TOKEN         # TELEGRAM_TOKEN in .env, from @BotFather
   chat_id: "123456789"             # the single chat the bot answers
+  allow_from: ["123456789"]        # optional; user ids allowed to drive the agent
   workdir: /home/me/.shell3/workdir # optional; default = the config dir
 ```
+
+`chat_id` says WHERE the bot talks; `allow_from` says WHO it obeys. In a
+direct chat those are the same number, so leaving `allow_from` unset means
+"the owner of `chat_id`, and nobody else" — which is what a single-DM install
+has always done. Set it explicitly when the chat has more than one person in
+it: every member can see the chat, but membership must not confer a shell.
+Authorization is checked on the Telegram **sender id**, which Telegram's
+servers populate and the sender cannot choose, and it is checked before
+commands too — otherwise anyone in a group could `/stop` a running turn or
+`/new` the conversation away. A message shell3 cannot attribute to a user
+(a channel post) is never authorized, and a non-numeric entry fails at
+startup rather than silently narrowing access.
 
 `shell3 telegram` refuses to start without `token` and `chat_id`, and a
 non-numeric `chat_id` fails at startup. Loading a config without the block

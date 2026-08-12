@@ -115,7 +115,10 @@ func (c *ConsoleClient) readLoop(ctx context.Context) {
 // parseLine turns one stdin line into an inbound Msg, assigning it a fresh id.
 // "@<id> text" becomes a reply to <id>; anything else is a plain/command message.
 func (c *ConsoleClient) parseLine(line string) Msg {
-	m := Msg{ChatID: c.chatID, ID: strconv.Itoa(c.nextID())}
+	// The console has no Telegram identity. Treat input as coming from the
+	// configured chat's owner: the operator is already at the keyboard, and
+	// pretending otherwise would only lock them out of their own console.
+	m := Msg{ChatID: c.chatID, SenderID: c.chatID, ID: strconv.Itoa(c.nextID())}
 	if strings.HasPrefix(line, "@") {
 		rest := line[1:]
 		idStr, text, _ := strings.Cut(rest, " ")

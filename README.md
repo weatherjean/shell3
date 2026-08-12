@@ -65,7 +65,7 @@ walkthrough is in [docs/cli.md](docs/cli.md).
 | `shell3 boot`     | Scaffold the config + `.env` interactively. |
 | `shell3 project new` | Scaffold a `projects/<name>/` config dir (brief + manager). |
 | `shell3 health`   | Load the config strictly; fail on any warning. |
-| `shell3 ask "…"`  | Ask the agent locally with full verbose output; no message = interactive loop; `-p` for scripting; `--resume` continues the last session. |
+| `shell3 ask "…"`  | Ask the agent locally with full verbose output; no message = interactive loop; `-p` for scripting; `--resume` continues the last session; `--agent <name>` runs one subagent turn and prints only its reply, for batch scripts. |
 
 Every subcommand takes `--config/-c` to point at a different config directory.
 

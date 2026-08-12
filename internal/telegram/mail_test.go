@@ -82,14 +82,14 @@ func TestMailQueueDrainsAfterTurn(t *testing.T) {
 	rt := gatedRuntime(t, g)
 	b := newBot(t, fc, rt)
 
-	go b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "one"})
+	go b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "one"})
 	select {
 	case <-g.Started:
 	case <-time.After(2 * time.Second):
 		t.Fatal("first turn never started")
 	}
 	// Arrives mid-turn: queues silently.
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "2", Text: "two"})
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "2", Text: "two"})
 	close(g.Release)
 
 	waitFor(t, func() bool {
@@ -113,15 +113,15 @@ func TestMailQueueBatchesRepliesIntoOneTurn(t *testing.T) {
 	b := newBot(t, fc, rt)
 
 	// Start thread: msg 1 → session recorded under msg 1 and its reply id.
-	go b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "start"})
+	go b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "start"})
 	select {
 	case <-g.Started:
 	case <-time.After(2 * time.Second):
 		t.Fatal("first turn never started")
 	}
 	// Two replies to the thread anchor arrive mid-turn.
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "2", ReplyToID: "1", Text: "also this"})
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "3", ReplyToID: "1", Text: "and this"})
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "2", ReplyToID: "1", Text: "also this"})
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "3", ReplyToID: "1", Text: "and this"})
 	close(g.Release)
 
 	waitFor(t, func() bool {
@@ -152,7 +152,7 @@ func TestInboxCommand(t *testing.T) {
 	rt := storeRuntime(t, "unused")
 	b := newBot(t, fc, rt)
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/inbox"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/inbox"})
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "inbox empty")
 	})
@@ -160,13 +160,13 @@ func TestInboxCommand(t *testing.T) {
 	b.mu.Lock()
 	b.turnActive = true
 	b.mu.Unlock()
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "9", Text: "later please"})
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "9", Text: "later please"})
 	waitFor(t, func() bool {
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		return len(b.mailQueue) == 1
 	})
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/inbox"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/inbox"})
 	waitFor(t, func() bool {
 		all := strings.Join(fc.sentTexts(), "\n")
 		return strings.Contains(all, "later please") && strings.Contains(all, "from you")

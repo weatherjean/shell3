@@ -67,7 +67,7 @@ func TestContract1_FirstMessageStartsTheConversation(t *testing.T) {
 	rt := storeRuntime(t, "fresh reply")
 	b := newBot(t, fc, rt)
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "100", Text: "hi"})
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "100", Text: "hi"})
 
 	waitFor(t, func() bool {
 		r, ok := fc.lastReply()
@@ -94,13 +94,13 @@ func TestContract2_BareMessageContinuesTheConversation(t *testing.T) {
 	rt := storeRuntime(t, "r")
 	b := newBot(t, fc, rt)
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "100", Text: "first"})
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "100", Text: "first"})
 	if !waitForReply(t, fc, "r") {
 		t.Fatal("first turn produced no reply")
 	}
 	first := b.mainIfLive().ID()
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "101", Text: "yes please"})
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "101", Text: "yes please"})
 	waitFor(t, func() bool { return len(fc.sentReplies()) >= 2 })
 	if got := b.mainIfLive().ID(); got != first {
 		t.Fatalf("bare message forked the conversation: first=%s second=%s", first, got)
@@ -119,14 +119,14 @@ func TestContract3_ReplyAddsQuotedContext(t *testing.T) {
 	rt := storeRuntimeClient(t, rec)
 	b := newBot(t, fc, rt)
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "start"})
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "start"})
 	if !waitForReply(t, fc, "one") {
 		t.Fatal("first turn produced no reply")
 	}
 	first := b.mainIfLive().ID()
 
 	b.handleMsg(context.Background(), Msg{
-		ChatID: 42, ID: "2", ReplyToID: "999", ReplyTo: "QUOTED SNIPPET", Text: "pick up from here",
+		ChatID: 42, SenderID: 42, ID: "2", ReplyToID: "999", ReplyTo: "QUOTED SNIPPET", Text: "pick up from here",
 	})
 	if !waitForReply(t, fc, "two") {
 		t.Fatal("reply turn produced no reply")
@@ -150,14 +150,14 @@ func TestContract4_MidTurnTextSteers(t *testing.T) {
 	rt := shell3test.NewRuntimeForTestClient(t, blk)
 	b := newBot(t, fc, rt)
 
-	go b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "work"})
+	go b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "work"})
 	select {
 	case <-blk.Started:
 	case <-time.After(2 * time.Second):
 		t.Fatal("first turn never started")
 	}
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "2", Text: "stop — wrong file"})
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "2", Text: "stop — wrong file"})
 
 	sess := b.mainIfLive()
 	if sess == nil {
@@ -177,7 +177,7 @@ func TestContract4_MidTurnTextSteers(t *testing.T) {
 	if r, ok := fc.lastReply(); ok {
 		t.Fatalf("steering must be silent, got reply %q", r.text)
 	}
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/stop"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/stop"})
 }
 
 // Contract 4b: a mid-turn message CARRYING MEDIA queues (its preflight needs a
@@ -188,14 +188,14 @@ func TestContract4_MidTurnMediaQueues(t *testing.T) {
 	rt := shell3test.NewRuntimeForTestClient(t, blk)
 	b := newBot(t, fc, rt)
 
-	go b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "work"})
+	go b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "work"})
 	select {
 	case <-blk.Started:
 	case <-time.After(2 * time.Second):
 		t.Fatal("first turn never started")
 	}
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "2", Text: "look at this",
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "2", Text: "look at this",
 		Media: []Media{{Bytes: []byte("img"), MIME: "image/jpeg", Filename: "x.jpg"}}})
 
 	waitFor(t, func() bool {
@@ -206,7 +206,7 @@ func TestContract4_MidTurnMediaQueues(t *testing.T) {
 	b.mu.Lock()
 	b.mailQueue = nil
 	b.mu.Unlock()
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/stop"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/stop"})
 }
 
 // Contract 4c: a steer that lands AFTER the turn's final round boundary is
@@ -217,7 +217,7 @@ func TestContract4_SteerCatchupPostsReply(t *testing.T) {
 	rt := storeRuntime(t, "caught up")
 	b := newBot(t, fc, rt)
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "start"})
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "start"})
 	if !waitForReply(t, fc, "caught up") {
 		t.Fatal("first turn produced no reply")
 	}
@@ -243,14 +243,14 @@ func TestContract5_StopCancelsTurnKeepsJobs(t *testing.T) {
 	rt := shell3test.NewRuntimeForTestClient(t, blk)
 	b := newBot(t, fc, rt)
 
-	go b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "work"})
+	go b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "work"})
 	select {
 	case <-blk.Started:
 	case <-time.After(2 * time.Second):
 		t.Fatal("turn never started")
 	}
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/stop"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/stop"})
 
 	waitFor(t, func() bool { b.mu.Lock(); a := b.turnActive; b.mu.Unlock(); return !a })
 	all := strings.Join(fc.sentTexts(), "\n")
@@ -288,7 +288,7 @@ func TestContract5_StopKeepsBackgroundJobsRunning(t *testing.T) {
 	b.mu.Unlock()
 	defer cancel()
 
-	b.handleCommand(ctx, Msg{ChatID: 42, Text: "/stop"})
+	b.handleCommand(ctx, Msg{ChatID: 42, SenderID: 42, Text: "/stop"})
 
 	all := strings.Join(fc.sentTexts(), "\n")
 	if !strings.Contains(all, "stopped the turn") || !strings.Contains(all, "background jobs keep running") {
@@ -308,7 +308,7 @@ func TestContract6_WakeMidTurnPendsThenDrains(t *testing.T) {
 	rt, _ := newFakeRuntime(t, "queued reply")
 	b := newBot(t, fc, rt)
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "start"})
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "start"})
 	if !waitForReply(t, fc, "queued reply") {
 		t.Fatal("first turn produced no reply")
 	}
@@ -372,13 +372,13 @@ func TestContract8_NewStartsFreshConversation(t *testing.T) {
 	rt := storeRuntime(t, "r")
 	b := newBot(t, fc, rt)
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "first"})
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "first"})
 	if !waitForReply(t, fc, "r") {
 		t.Fatal("first turn produced no reply")
 	}
 	first := b.mainIfLive().ID()
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/new"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/new"})
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "fresh conversation")
 	})
@@ -386,7 +386,7 @@ func TestContract8_NewStartsFreshConversation(t *testing.T) {
 		t.Fatal("/new must detach the main session")
 	}
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "2", Text: "second"})
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "2", Text: "second"})
 	waitFor(t, func() bool { return b.mainIfLive() != nil })
 	second := b.mainIfLive().ID()
 	if second == first {
@@ -420,7 +420,7 @@ func TestContract9_RestartResumesTheConversation(t *testing.T) {
 	threads := NewThreadIndex(func() *runs.Store { return st }, "telegram")
 
 	b1 := NewBot(fc, rt, 42, threads)
-	b1.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "hello"})
+	b1.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "hello"})
 	if !waitForReply(t, fc, "one") {
 		t.Fatal("first bot produced no reply")
 	}
@@ -428,7 +428,7 @@ func TestContract9_RestartResumesTheConversation(t *testing.T) {
 
 	// "Restart": a fresh Bot over the same store and marker.
 	b2 := NewBot(fc, rt, 42, threads)
-	b2.handleMsg(context.Background(), Msg{ChatID: 42, ID: "2", Text: "still there?"})
+	b2.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "2", Text: "still there?"})
 	if !waitForReply(t, fc, "two") {
 		t.Fatal("second bot produced no reply")
 	}
@@ -446,8 +446,8 @@ func TestContract10_BurstMergesIntoOneTurn(t *testing.T) {
 	b := newBot(t, fc, rt)
 	b.debounce = 60 * time.Millisecond
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "part one"})
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "2", Text: "part two"})
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "part one"})
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "2", Text: "part two"})
 
 	if !waitForReply(t, fc, "merged") {
 		t.Fatal("burst never ran")
@@ -470,7 +470,7 @@ func TestContract11_TextDuringQuietTurnQueues(t *testing.T) {
 	rt := storeRuntime(t, "answered")
 	b := newBot(t, fc, rt)
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "start"})
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "start"})
 	if !waitForReply(t, fc, "answered") {
 		t.Fatal("first turn produced no reply")
 	}
@@ -480,7 +480,7 @@ func TestContract11_TextDuringQuietTurnQueues(t *testing.T) {
 	b.turnQuiet = true // simulate a wake turn holding the slot
 	b.mu.Unlock()
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "2", Text: "are you there?"})
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "2", Text: "are you there?"})
 	waitFor(t, func() bool {
 		b.mu.Lock()
 		defer b.mu.Unlock()
@@ -501,7 +501,7 @@ func TestContract12_WakeWithSteerPostsReply(t *testing.T) {
 	rt := storeRuntime(t, "steered answer")
 	b := newBot(t, fc, rt)
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, ID: "1", Text: "start"})
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "start"})
 	if !waitForReply(t, fc, "steered answer") {
 		t.Fatal("first turn produced no reply")
 	}

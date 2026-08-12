@@ -122,6 +122,27 @@ func (r *renderer) renderNode(n ast.Node) {
 		}
 	case *ast.String:
 		r.sb.WriteString(escape(string(n.Value)))
+	case *ast.RawHTML:
+		// Markdown reads any bare <tag> in prose as inline raw HTML. Telegram
+		// accepts only a fixed handful of tags, so this can never pass through
+		// as markup — but it must not vanish either: these nodes carry their
+		// text in Segments, not children, so the default branch below renders
+		// them to NOTHING and silently deletes what the agent wrote. An agent
+		// explaining a <think> tag, a generic, or an XML snippet had every such
+		// token cut out of its reply mid-sentence. Escape it back to literal
+		// text instead — what the model wrote is what the user reads.
+		for i := range n.Segments.Len() {
+			seg := n.Segments.At(i)
+			r.sb.WriteString(escape(string(seg.Value(r.source))))
+		}
+	case *ast.HTMLBlock:
+		// Same reasoning as RawHTML, for a block-level run of HTML. Its content
+		// is in Lines(), with the closing tag held separately in ClosureLine.
+		r.blockSep()
+		r.writeLines(n)
+		if n.HasClosure() {
+			r.sb.WriteString(escape(string(n.ClosureLine.Value(r.source))))
+		}
 	default:
 		r.renderChildren(n)
 	}

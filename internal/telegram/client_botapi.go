@@ -107,6 +107,11 @@ func (c *BotAPIClient) onUpdate(ctx context.Context, b *bot.Bot, u *models.Updat
 // sent with "translate this" has an empty Text; the caption is the message.
 func normalizeMessage(m *models.Message) Msg {
 	msg := Msg{ChatID: m.Chat.ID, ID: strconv.Itoa(m.ID), Text: cmp.Or(m.Text, m.Caption), ReplyTo: replyContext(m)}
+	if m.From != nil {
+		// From is set by Telegram, not the client. A channel post has no
+		// From at all, which leaves SenderID 0 and therefore unauthorized.
+		msg.SenderID = m.From.ID
+	}
 	if r := m.ReplyToMessage; r != nil {
 		msg.ReplyToID = strconv.Itoa(r.ID)
 	}

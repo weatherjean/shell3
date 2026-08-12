@@ -26,6 +26,9 @@ type Bot struct {
 	client tgClient
 	rt     *shell3.Runtime
 	chatID int64 // the single allowed chat
+	// allow decides WHO may drive the agent, independent of which chat this
+	// is. Never nil after NewBot: a nil allowlist denies everyone.
+	allow *senderAllowlist
 
 	workDir string // resolves relative paths for send_media_telegram
 	// configDir is the loaded config directory. send_media_telegram refuses to
@@ -118,12 +121,38 @@ type Bot struct {
 // which store session that is (constructed once by the host and kept across
 // /reload).
 func NewBot(client tgClient, rt *shell3.Runtime, chatID int64, current *ThreadIndex) *Bot {
+	// Default allowlist: the chat owner. SetAllowFrom narrows or widens it.
+	allow, _ := newSenderAllowlist(chatID, nil)
 	return &Bot{
 		client:  client,
 		rt:      rt,
 		chatID:  chatID,
 		current: current,
+		allow:   allow,
 	}
+}
+
+// SetAllowFrom replaces the sender allowlist from configured user ids. An
+// empty list keeps the default (the chat owner alone), so a config that never
+// mentions allow_from behaves exactly as it always did.
+func (b *Bot) SetAllowFrom(ids []string) error {
+	allow, err := newSenderAllowlist(b.chatID, ids)
+	if err != nil {
+		return err
+	}
+	b.mu.Lock()
+	b.allow = allow
+	b.mu.Unlock()
+	return nil
+}
+
+// allowlist returns the current sender allowlist. Read under b.mu because
+// /reload can replace it from a turn goroutine while the update loop is
+// authorizing an inbound message.
+func (b *Bot) allowlist() *senderAllowlist {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.allow
 }
 
 // SetJobRunner wires /run <job> to the scheduler's manual fire. Written from
@@ -277,7 +306,16 @@ type inMail struct {
 // goroutine.
 func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 	if m.ChatID != b.chatID {
-		return // unauthorized: drop silently
+		return // unauthorized chat: drop silently
+	}
+	// Sender check BEFORE the command branch below, not after. Telegram's
+	// privacy mode delivers /commands from every member of a group, not just
+	// the ones who mention the bot, so a gate placed only on the turn path
+	// would still let an unauthorized member /stop a running turn, /new away
+	// the conversation, or /cancel background jobs. Commands are control, and
+	// control needs the same authorization as conversation.
+	if !b.allowlist().allows(m.SenderID) {
+		return // unauthorized sender: drop silently
 	}
 	if strings.HasPrefix(m.Text, "/") {
 		b.handleCommand(ctx, m) // defined in commands.go

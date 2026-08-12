@@ -102,9 +102,19 @@ type TelegramConfig struct {
 	// declared block left it blank (Present is the absence signal): `shell3
 	// boot` writes exactly that when the user defers the token, so the load
 	// succeeds and the front-end refuses to start instead.
-	Token   string
-	ChatID  string
-	WorkDir string
+	Token  string
+	ChatID string
+	// AllowFrom lists the Telegram user ids permitted to drive the agent.
+	// Authorization is per SENDER, not per chat: chat_id says WHERE the bot
+	// talks, this says WHO it obeys, and in a group those are different
+	// questions — every member can see the chat, but membership must not
+	// confer an unrestricted shell.
+	//
+	// Empty means "the chat_id owner only", which is exactly the historical
+	// single-DM behaviour (in a DM the chat id IS the user id), so an existing
+	// config keeps working without naming anyone.
+	AllowFrom []string
+	WorkDir   string
 }
 
 // CronJob is one parsed cron/<name>.md job.

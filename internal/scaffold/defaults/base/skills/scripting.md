@@ -44,3 +44,8 @@ curl -fsS --max-time 15 \
 - `set -euo pipefail`; quote every expansion.
 - `--max-time` (or a timeout) on every network call.
 - Exit non-zero on failure so the caller can tell.
+
+## Scripts that need a model call
+
+Do not write an HTTP client against a model API — call `shell3 ask --agent`.
+See the `using-llms` skill for how and why.

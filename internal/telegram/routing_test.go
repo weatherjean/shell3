@@ -16,7 +16,7 @@ func TestHandleMsg_IdleSendsReply(t *testing.T) {
 	b := newBot(t, fc, rt)
 
 	ctx := context.Background()
-	b.handleMsg(ctx, Msg{ChatID: 42, ID: "1", Text: "hi"})
+	b.handleMsg(ctx, Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "hi"})
 
 	if !waitForReply(t, fc, "hello from agent") {
 		t.Fatalf("expected agent reply, got: %q", strings.Join(fc.sentTexts(), "\n"))
@@ -58,7 +58,7 @@ func TestHandleMsg_MediaRunsTurnWithNote(t *testing.T) {
 
 	// A media-only message (no text) must still run a turn — the attachment is
 	// transformed into a note, not dropped.
-	b.handleMsg(context.Background(), Msg{ChatID: 42, Media: []Media{
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, Media: []Media{
 		{Bytes: []byte("\xff\xd8\xff"), MIME: "image/jpeg", Filename: "photo.jpg"},
 	}})
 

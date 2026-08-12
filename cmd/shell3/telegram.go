@@ -85,6 +85,12 @@ func newTelegramCommand() *cobra.Command {
 				}
 				b = telegram.NewBot(apiClient, rt, chatID, threads)
 			}
+			// Authorization is per sender, not per chat (see senderAllowlist):
+			// a bad allow_from entry fails startup rather than silently
+			// widening or narrowing who can drive an unrestricted shell.
+			if err := b.SetAllowFrom(tg.AllowFrom); err != nil {
+				return err
+			}
 			// Transport-independent wiring (media, decorator, completion host,
 			// cron parent + scheduler, /reload) — shared with `shell3 serve`.
 			// LIFO: the scheduler-stop cleanup runs before the earlier

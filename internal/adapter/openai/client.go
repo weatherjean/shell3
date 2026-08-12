@@ -1,16 +1,13 @@
 package openai
 
 import (
-	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/openai/openai-go"
@@ -20,29 +17,30 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
-// bodyTap is an http.RoundTripper that records the last request/response and
-// extracts non-standard reasoning fields from SSE streams: OpenRouter's
-// "reasoning" and Moonshot/DeepSeek's "reasoning_content".
+// bodyTap is an http.RoundTripper that records the last request/response so a
+// failed turn can dump both to last_error.json.
+//
+// It used to do more: it tee'd the response body through an io.Pipe into a
+// second, independent SSE scanner running on its own goroutine, purely to
+// recover the non-standard "reasoning"/"reasoning_content" delta fields — with
+// a done-channel barrier and a mutex-guarded fragment queue to get those
+// fragments back onto the Stream goroutine. None of that was necessary:
+// openai-go parses unknown delta keys into Delta.JSON.ExtraFields, so the
+// fields are readable inline in the normal loop (see deltaReasoning). Parsing
+// the same stream twice also meant two sources of truth for one wire format,
+// which is how reasoning ended up interleaved into answers.
 type bodyTap struct {
 	mu      sync.Mutex
 	reqBody []byte
 	resBody []byte
-	done    chan struct{}
 	rt      http.RoundTripper
-	// reasoningQueue is the incremental feed of reasoning fragments, drained by
-	// the Stream goroutine so onEvent is only ever called from that single
-	// goroutine. All access is under mu.
-	reasoningQueue []string
 }
 
 func (b *bodyTap) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Reset the per-attempt state unconditionally — reasoning tap AND the
-	// buffered response body. A stale resBody left over from a previous non-2xx
-	// attempt would otherwise pair with this request in LastTraffic's snapshot
-	// and actively mislead last_error.json debugging.
+	// Reset the buffered response body unconditionally: a stale resBody left
+	// over from a previous non-2xx attempt would otherwise pair with this
+	// request in LastTraffic's snapshot and actively mislead debugging.
 	b.mu.Lock()
-	b.done = make(chan struct{})
-	b.reasoningQueue = nil
 	b.resBody = nil
 	if req.Body != nil {
 		buf, _ := io.ReadAll(req.Body)
@@ -60,102 +58,14 @@ func (b *bodyTap) RoundTrip(req *http.Request) (*http.Response, error) {
 		b.mu.Lock()
 		b.resBody = buf
 		b.mu.Unlock()
-		return res, err
 	}
-	pr, pw := io.Pipe()
-	teed := io.TeeReader(res.Body, pw)
-	res.Body = readCloser{Reader: teed, Closer: composedCloser{res.Body, pw}}
-	b.mu.Lock()
-	done := b.done
-	b.mu.Unlock()
-	go b.scanReasoning(pr, done)
 	return res, err
-}
-
-func (b *bodyTap) scanReasoning(r io.ReadCloser, done chan struct{}) {
-	defer func() { _ = r.Close() }()
-	defer close(done)
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
-		payload, ok := strings.CutPrefix(line, "data: ")
-		if !ok || payload == "[DONE]" {
-			continue
-		}
-		var chunk struct {
-			Choices []struct {
-				Delta struct {
-					Reasoning        string `json:"reasoning"`
-					ReasoningContent string `json:"reasoning_content"`
-				} `json:"delta"`
-			} `json:"choices"`
-		}
-		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			continue
-		}
-		for _, c := range chunk.Choices {
-			// Prefer "reasoning", fall back to "reasoning_content" (see bodyTap).
-			frag := c.Delta.Reasoning
-			if frag == "" {
-				frag = c.Delta.ReasoningContent
-			}
-			if frag != "" {
-				b.mu.Lock()
-				b.reasoningQueue = append(b.reasoningQueue, frag)
-				b.mu.Unlock()
-			}
-		}
-	}
 }
 
 func (b *bodyTap) snapshot() (req, res []byte) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return append([]byte(nil), b.reqBody...), append([]byte(nil), b.resBody...)
-}
-
-// WaitReasoning blocks until scanReasoning finishes or ctx is cancelled — a
-// synchronization barrier so the final drainReasoning sees every fragment.
-func (b *bodyTap) WaitReasoning(ctx context.Context) {
-	b.mu.Lock()
-	done := b.done
-	b.mu.Unlock()
-	if done == nil {
-		return
-	}
-	select {
-	case <-done:
-	case <-ctx.Done():
-	}
-}
-
-// drainReasoning returns and clears the reasoning fragments queued by the
-// scanReasoning goroutine since the last drain. The Stream goroutine calls
-// this and emits the fragments, keeping onEvent single-goroutine.
-func (b *bodyTap) drainReasoning() []string {
-	b.mu.Lock()
-	q := b.reasoningQueue
-	b.reasoningQueue = nil
-	b.mu.Unlock()
-	return q
-}
-
-type readCloser struct {
-	io.Reader
-	io.Closer
-}
-
-type composedCloser []io.Closer
-
-func (cc composedCloser) Close() error {
-	var firstErr error
-	for _, c := range cc {
-		if err := c.Close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	return firstErr
 }
 
 // Client is an OpenAI-compatible streaming LLM client using the official SDK.
@@ -257,18 +167,11 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 
 	toolCalls := map[int64]*llm.ToolCall{}
 	var toolCallOrder []int64
-	var leak thinkLeakFilter
+	var part tagPartitioner
 	var truncated bool
 
 	for stream.Next() {
 		chunk := stream.Current()
-
-		if c.tap != nil {
-			for _, frag := range c.tap.drainReasoning() {
-				leak.reasoningSeen = true // arms the glued-tail net (thinkleak.go)
-				onEvent(llm.StreamEvent{ReasoningDelta: frag})
-			}
-		}
 
 		if u := chunk.Usage; u.PromptTokens > 0 || u.CompletionTokens > 0 {
 			onEvent(llm.StreamEvent{Usage: &llm.Usage{
@@ -287,9 +190,20 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 		}
 		delta := chunk.Choices[0].Delta
 
-		if delta.Content != "" {
-			if out := leak.filter(delta.Content); out != "" {
-				onEvent(llm.StreamEvent{TextDelta: out})
+		// Reasoning rides the SAME delta as content on OpenAI-compatible
+		// providers, and on MiniMax the content is frequently a duplicate of
+		// it. The partitioner combines both signals (see pushDelta) and is the
+		// single place that decides what is answer and what is thought.
+		reasoning := deltaReasoning(delta)
+		if reasoning != "" {
+			onEvent(llm.StreamEvent{ReasoningDelta: reasoning})
+		}
+		if text, thought := part.pushDelta(delta.Content, reasoning); text != "" || thought != "" {
+			if text != "" {
+				onEvent(llm.StreamEvent{TextDelta: text})
+			}
+			if thought != "" {
+				onEvent(llm.StreamEvent{ReasoningDelta: thought})
 			}
 		}
 
@@ -308,26 +222,16 @@ func (c *Client) Stream(ctx context.Context, msgs []llm.Message, tools []llm.Too
 	}
 
 	if err := stream.Err(); err != nil {
-		// On error/ctx-cancel we return here without the final drain below, so
-		// any reasoning queued after the last in-loop drain is discarded.
-		// Reasoning is best-effort on a failed/cancelled turn, whose partial
-		// output the caller abandons anyway.
 		return wrapStreamErr(err)
 	}
 
-	// This early Close is load-bearing, not redundant with the deferred one:
-	// it unblocks scanReasoning's EOF so WaitReasoning below returns promptly
-	// instead of stalling until ctx cancellation.
 	_ = stream.Close()
-	if out := leak.flush(); out != "" {
-		onEvent(llm.StreamEvent{TextDelta: out})
-	}
-	if c.tap != nil {
-		// Wait for scanReasoning to finish, then drain any fragments queued
-		// after the last content chunk, before the Done event.
-		c.tap.WaitReasoning(ctx)
-		for _, frag := range c.tap.drainReasoning() {
-			onEvent(llm.StreamEvent{ReasoningDelta: frag})
+	if out, thought := part.flush(); out != "" || thought != "" {
+		if out != "" {
+			onEvent(llm.StreamEvent{TextDelta: out})
+		}
+		if thought != "" {
+			onEvent(llm.StreamEvent{ReasoningDelta: thought})
 		}
 	}
 

@@ -16,61 +16,6 @@ import (
 // run feeds deltas through a fresh filter and returns the concatenated output,
 // including the end-of-stream flush. reasoning arms the wider glued-tail net
 // (set when the stream also carried a split reasoning field).
-func runFilter(reasoning bool, deltas ...string) string {
-	f := thinkLeakFilter{reasoningSeen: reasoning}
-	var out strings.Builder
-	for _, d := range deltas {
-		out.WriteString(f.filter(d))
-	}
-	out.WriteString(f.flush())
-	return out.String()
-}
-
-func TestThinkLeakFilter(t *testing.T) {
-	cases := []struct {
-		name      string
-		reasoning bool
-		deltas    []string
-		want      string
-	}{
-		{"bare tag only (MiniMax tool-call turn)", false, []string{"</think>"}, ""},
-		{"tag then text in one delta", false, []string{"</think>\n\nHello"}, "Hello"},
-		{"tag split across deltas", false, []string{"</", "think>", "\n\n", "Hel", "lo"}, "Hello"},
-		{"whitespace before tag", false, []string{" \n", "</think>", "hi"}, "hi"},
-		{"normal text untouched", false, []string{"Hello", " world"}, "Hello world"},
-		{"tag mid-message untouched", false, []string{"see the </think> tag"}, "see the </think> tag"},
-		{"diverging prefix emitted verbatim", false, []string{"</thin", "gs to do"}, "</things to do"},
-		{"stream ends while holding partial", false, []string{"</thi"}, "</thi"},
-		{"empty stream", false, nil, ""},
-		// The wider net: a reasoning stream was present, so a tag near the
-		// start of content is the provider's reasoning tail bleeding over.
-		{"glued tail dropped (reasoning seen)", true, []string{"state.</think>", "\n\nHello"}, "Hello"},
-		{"glued tail split across deltas", true, []string{"state.</", "think>\nHello"}, "Hello"},
-		{"bare tag still dropped when armed", true, []string{"</think>", "hi"}, "hi"},
-		{"clean content passes when armed", true, []string{"Hello there, this is a perfectly ordinary reply that keeps going past the scan window."}, "Hello there, this is a perfectly ordinary reply that keeps going past the scan window."},
-		{"short clean content flushes when armed", true, []string{"Sure."}, "Sure."},
-		{"late tag passes when armed", true, []string{strings.Repeat("a", 100) + "</think>tail"}, strings.Repeat("a", 100) + "</think>tail"},
-		// A WHOLE inline block: MiniMax-M3 on the OpenAI-compatible endpoint
-		// repeats its reasoning inside the content stream, wrapped in
-		// <think>…</think>, ahead of the real reply.
-		{"whole block dropped", false, []string{"<think>\nreasoning here\n</think>\n\nHello"}, "Hello"},
-		{"whole block dropped when armed", true, []string{"<think>\nreasoning\n</think>\n\nHello"}, "Hello"},
-		{"whole block split across deltas", false, []string{"<thi", "nk>rea", "soning</thi", "nk>", "\n\nHello"}, "Hello"},
-		{"block longer than the tail scan window", true, []string{"<think>" + strings.Repeat("r", 500) + "</think>\n\nHi"}, "Hi"},
-		{"block is the entire content (tool-call turn)", false, []string{"<think>reasoning</think>"}, ""},
-		{"open tag mid-message untouched", false, []string{"the <think> tag is fun"}, "the <think> tag is fun"},
-		{"unclosed block released at flush", false, []string{"<think>never closed"}, "<think>never closed"},
-		{"open-tag prefix that diverges", false, []string{"<thi", "s is fine"}, "<this is fine"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := runFilter(tc.reasoning, tc.deltas...); got != tc.want {
-				t.Fatalf("got %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
 // ---- integration: Stream drops a leaked leading </think> ----
 
 func TestStreamStripsLeakedThinkTag(t *testing.T) {

@@ -53,6 +53,7 @@ func TestCaptionedPhoto_ReachesTurnPrompt(t *testing.T) {
 	m := &models.Message{
 		ID:      101,
 		Chat:    models.Chat{ID: 42},
+		From:    &models.User{ID: 42},
 		Caption: "translate this into English",
 	}
 	b.handleMsg(context.Background(), normalizeMessage(m))

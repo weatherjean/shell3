@@ -21,7 +21,7 @@ func TestCommand_Run(t *testing.T) {
 	b := newBot(t, fc, rt)
 	fired := ""
 	b.SetJobRunner(func(name string) error { fired = name; return nil })
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/run nightly"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/run nightly"})
 	if fired != "nightly" {
 		t.Fatalf("expected /run to fire job 'nightly', fired %q", fired)
 	}
@@ -34,7 +34,7 @@ func TestCommand_RunNoRunner(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/run x"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/run x"})
 	if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "no scheduled jobs") {
 		t.Fatalf("expected a no-jobs reply, got %v", fc.sentTexts())
 	}
@@ -50,7 +50,7 @@ func TestCommand_RunMissingArg(t *testing.T) {
 	called := false
 	b.SetJobRunner(func(name string) error { called = true; return nil })
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/run"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/run"})
 	if called {
 		t.Fatal("run must not be invoked with no job name")
 	}
@@ -69,7 +69,7 @@ func TestCommand_Reload(t *testing.T) {
 		called = true
 		return shell3.ReloadResult{Agents: 3, Jobs: 1}, nil
 	})
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/reload"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/reload"})
 	if !called {
 		t.Fatal("expected /reload to invoke the reloader")
 	}
@@ -82,7 +82,7 @@ func TestCommand_ReloadNoReloader(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/reload"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/reload"})
 	if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "reload not available") {
 		t.Fatalf("expected unavailable reply, got %v", fc.sentTexts())
 	}
@@ -94,7 +94,7 @@ func TestCommand_UnknownDropped(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/clear"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/clear"})
 	if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "unknown command") {
 		t.Fatalf("expected /clear to be an unknown command now, got %v", fc.sentTexts())
 	}
@@ -111,7 +111,7 @@ func TestJobsCommandListsRunning(t *testing.T) {
 		return []shell3.JobInfo{{ID: "sub1", Kind: shell3.JobSubagent, Agent: "explorer", Cmd: "do the thing"}}
 	}, nil)
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/jobs"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/jobs"})
 	all := strings.Join(fc.sentTexts(), "\n")
 	if !strings.Contains(all, "sub1") || !strings.Contains(all, "explorer") {
 		t.Fatalf("expected the listing to be relayed, got %v", fc.sentTexts())
@@ -125,7 +125,7 @@ func TestJobsCommandEmpty(t *testing.T) {
 	b := newBot(t, fc, rt)
 	b.SetJobsSource(func() []shell3.JobInfo { return nil }, nil)
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/jobs"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/jobs"})
 	all := strings.Join(fc.sentTexts(), "\n")
 	if !strings.Contains(all, "No background jobs") {
 		t.Fatalf("expected the empty-state reply, got %v", fc.sentTexts())
@@ -138,7 +138,7 @@ func TestJobsCommandNoSource(t *testing.T) {
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/jobs"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/jobs"})
 	all := strings.Join(fc.sentTexts(), "\n")
 	if !strings.Contains(all, "job control not available") {
 		t.Fatalf("expected unavailable reply, got %v", fc.sentTexts())
@@ -155,7 +155,7 @@ func TestJobDetailCommand(t *testing.T) {
 		return []shell3.JobInfo{{ID: "sub1", Kind: shell3.JobSubagent, Agent: "explorer", Cmd: "do the thing"}}
 	}, func(id string) string { return "transcript for " + id })
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/job sub1"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/job sub1"})
 	all := strings.Join(fc.sentTexts(), "\n")
 	if !strings.Contains(all, "sub1") || !strings.Contains(all, "transcript for sub1") {
 		t.Fatalf("expected job detail rendered, got %v", fc.sentTexts())
@@ -170,7 +170,7 @@ func TestJobDetailCommandUnknownID(t *testing.T) {
 	b := newBot(t, fc, rt)
 	b.SetJobsSource(func() []shell3.JobInfo { return nil }, nil)
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/job bogus"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/job bogus"})
 	all := strings.Join(fc.sentTexts(), "\n")
 	if !strings.Contains(all, `no such job "bogus"`) {
 		t.Fatalf("expected a no-such-job reply, got %v", fc.sentTexts())
@@ -185,7 +185,7 @@ func TestJobDetailCommandMissingArg(t *testing.T) {
 	called := false
 	b.SetJobsSource(func() []shell3.JobInfo { called = true; return nil }, nil)
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/job"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/job"})
 	if called {
 		t.Fatal("the jobs source must not be consulted with no id")
 	}
@@ -206,7 +206,7 @@ func TestCancelCommandOK(t *testing.T) {
 		return nil
 	})
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/cancel sub1"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/cancel sub1"})
 	if cancelled != "sub1" {
 		t.Fatalf("expected /cancel to invoke cancel('sub1'), got %q", cancelled)
 	}
@@ -226,7 +226,7 @@ func TestCancelCommandUnknownID(t *testing.T) {
 		return fmt.Errorf("no such task %q", id)
 	})
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/cancel bogus"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/cancel bogus"})
 	all := strings.Join(fc.sentTexts(), "\n")
 	if !strings.Contains(all, `no such task "bogus"`) {
 		t.Fatalf("expected the no-such-task error text, got %v", fc.sentTexts())
@@ -244,7 +244,7 @@ func TestCancelCommandMissingArg(t *testing.T) {
 		return nil
 	})
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/cancel"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/cancel"})
 	if called {
 		t.Fatal("cancel must not be invoked with no id")
 	}
@@ -262,7 +262,7 @@ func TestStatusCommand_InlineWhenSmall(t *testing.T) {
 	b := newBot(t, fc, rt)
 	b.SetVersion("v0.2.0-test")
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/status"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/status"})
 	all := strings.Join(fc.sentTexts(), "\n")
 	if !strings.Contains(all, "shell3 status") || !strings.Contains(all, "v0.2.0-test") {
 		t.Fatalf("expected status text inline, got %v", fc.sentTexts())
@@ -278,7 +278,7 @@ func TestCronCommand_Empty(t *testing.T) {
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/cron"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/cron"})
 	all := strings.Join(fc.sentTexts(), "\n")
 	if !strings.Contains(all, "No cron jobs") {
 		t.Fatalf("expected the empty-state cron reply, got %v", fc.sentTexts())
@@ -296,7 +296,7 @@ func TestCronCommand_RendersJobs(t *testing.T) {
 	when := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
 	b.SetCronLastRuns(func() map[string]time.Time { return map[string]time.Time{"nightly": when} })
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/cron"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/cron"})
 	all := strings.Join(fc.sentTexts(), "\n")
 	if !strings.Contains(all, "nightly") || !strings.Contains(all, "sweep the logs") || !strings.Contains(all, "2026-07-20") {
 		t.Fatalf("expected the cron job and last-run time rendered, got %v", fc.sentTexts())
@@ -309,7 +309,7 @@ func TestRunsCommand_NotConfigured(t *testing.T) {
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/runs"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/runs"})
 	all := strings.Join(fc.sentTexts(), "\n")
 	if !strings.Contains(all, "runs not available") {
 		t.Fatalf("expected unavailable reply, got %v", fc.sentTexts())
@@ -348,7 +348,7 @@ func TestRunsCommand_ListsPageOne(t *testing.T) {
 	b := newBot(t, fc, rt)
 	seedRuns(t, b, 10)
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/runs"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/runs"})
 	all := strings.Join(fc.sentTexts(), "\n")
 	for _, want := range []string{"/run_1", "/run_8", "prompt 9", "page 1/2", "/runs 2"} {
 		if !strings.Contains(all, want) {
@@ -370,7 +370,7 @@ func TestRunsCommand_PageTwo(t *testing.T) {
 	b := newBot(t, fc, rt)
 	seedRuns(t, b, 10)
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/runs 2"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/runs 2"})
 	all := strings.Join(fc.sentTexts(), "\n")
 	for _, want := range []string{"/run_9", "/run_10", "page 2/2"} {
 		if !strings.Contains(all, want) {
@@ -386,7 +386,7 @@ func TestRunsCommand_PagePastEnd(t *testing.T) {
 	b := newBot(t, fc, rt)
 	seedRuns(t, b, 3)
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/runs 7"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/runs 7"})
 	all := strings.Join(fc.sentTexts(), "\n")
 	if !strings.Contains(all, "page 7 of 1") || !strings.Contains(all, "/runs 1 is the last") {
 		t.Fatalf("expected the out-of-range reply, got %v", fc.sentTexts())
@@ -401,9 +401,9 @@ func TestRunTap_ReplaysIndexedRun(t *testing.T) {
 	b := newBot(t, fc, rt)
 	_, ids := seedRuns(t, b, 3)
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/runs"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/runs"})
 	fc.reset()
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/run_1@shellibot"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/run_1@shellibot"})
 	all := strings.Join(fc.sentTexts(), "\n")
 	newest := ids[len(ids)-1]
 	if !strings.Contains(all, newest) || !strings.Contains(all, "prompt 2") {
@@ -419,7 +419,7 @@ func TestRunTap_StaleIndex(t *testing.T) {
 	b := newBot(t, fc, rt)
 	seedRuns(t, b, 3)
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/run_2"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/run_2"})
 	all := strings.Join(fc.sentTexts(), "\n")
 	if !strings.Contains(all, "run /runs again") {
 		t.Fatalf("expected the stale-index reply, got %v", fc.sentTexts())
@@ -448,7 +448,7 @@ func TestRunsCommand_ReplaysOneAsDocumentWhenLarge(t *testing.T) {
 	}
 	b.SetRunsRoot(root)
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/runs " + id})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/runs " + id})
 	doc, ok := fc.lastDoc()
 	if !ok || doc.filename != "run-"+id+".md" {
 		t.Fatalf("expected a run-%s.md document, got %+v ok=%v", id, doc, ok)
@@ -471,7 +471,7 @@ func TestRunsCommand_UnknownID(t *testing.T) {
 	}
 	b.SetRunsRoot(root)
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/runs bogus"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/runs bogus"})
 	all := strings.Join(fc.sentTexts(), "\n")
 	if !strings.Contains(all, "no such run") {
 		t.Fatalf("expected the no-such-run error text, got %v", fc.sentTexts())
@@ -485,7 +485,7 @@ func TestCommand_BotnameSuffixIsStripped(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/reload@my_shell3_bot"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/reload@my_shell3_bot"})
 	joined := strings.Join(fc.sentTexts(), "\n")
 	if strings.Contains(joined, "unknown command") {
 		t.Fatalf("/reload@botname must route to /reload, got %v", fc.sentTexts())
@@ -503,12 +503,12 @@ func TestQuietCommand(t *testing.T) {
 	b.SetQuiet(qs)
 	ctx := context.Background()
 
-	b.handleCommand(ctx, Msg{ChatID: 42, Text: "/quiet"})
+	b.handleCommand(ctx, Msg{ChatID: 42, SenderID: 42, Text: "/quiet"})
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "quiet is off")
 	})
 
-	b.handleCommand(ctx, Msg{ChatID: 42, Text: "/quiet on"})
+	b.handleCommand(ctx, Msg{ChatID: 42, SenderID: 42, Text: "/quiet on"})
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "quiet is on")
 	})
@@ -516,7 +516,7 @@ func TestQuietCommand(t *testing.T) {
 		t.Error("/quiet on did not persist")
 	}
 
-	b.handleCommand(ctx, Msg{ChatID: 42, Text: "/quiet off"})
+	b.handleCommand(ctx, Msg{ChatID: 42, SenderID: 42, Text: "/quiet off"})
 	waitFor(t, func() bool {
 		return strings.Count(strings.Join(fc.sentTexts(), "\n"), "quiet is off") >= 2
 	})
@@ -524,7 +524,7 @@ func TestQuietCommand(t *testing.T) {
 		t.Error("/quiet off did not persist")
 	}
 
-	b.handleCommand(ctx, Msg{ChatID: 42, Text: "/quiet sideways"})
+	b.handleCommand(ctx, Msg{ChatID: 42, SenderID: 42, Text: "/quiet sideways"})
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "usage: /quiet on|off")
 	})

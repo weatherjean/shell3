@@ -9,7 +9,14 @@ import "context"
 // the API's int message_ids, the JSONL client passes the front-end's ids
 // through verbatim, the console client renders its own counter.
 type Msg struct {
-	ChatID    int64
+	ChatID int64
+	// SenderID is the Telegram user id of whoever sent this message, 0 when the
+	// transport cannot tell (a channel post has no author). It is the thing
+	// authorization is decided on: it comes from Telegram's servers and cannot
+	// be set by the sender, unlike anything in the message text. In a DM it
+	// equals ChatID; in a group it does not, which is the whole point — group
+	// membership must not be authorization.
+	SenderID  int64
 	ID        string // this message's id ("" if unknown)
 	ReplyToID string // id this replies to, for thread resolution ("" = not a reply)
 	Text      string

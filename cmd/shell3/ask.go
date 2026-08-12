@@ -37,6 +37,7 @@ func newAskCommand() *cobra.Command {
 		configDir  string
 		promptFlag string
 		resume     bool
+		agentFlag  string
 	)
 	cmd := &cobra.Command{
 		Use:   "ask [message]",
@@ -48,6 +49,18 @@ func newAskCommand() *cobra.Command {
 				prompt = promptFlag
 			} else if promptFlag != "" {
 				return fmt.Errorf("ask: give the message either as an argument or via -p, not both")
+			}
+			// --agent is a scripted single shot: its stdout is the agent's
+			// reply and nothing else, so there is no interactive form to fall
+			// back to and no conversation to resume (each run dispatches a
+			// fresh child session).
+			if agentFlag != "" {
+				if prompt == "" {
+					return fmt.Errorf(`ask: --agent needs a message, e.g. shell3 ask --agent %s -p "draft for acme.co.uk"`, agentFlag)
+				}
+				if resume {
+					return fmt.Errorf("ask: --agent runs a fresh subagent job, so it cannot --resume")
+				}
 			}
 			// interactive: no message given. The first prompt is read below;
 			// each completed turn then reads another.
@@ -82,7 +95,10 @@ func newAskCommand() *cobra.Command {
 			// default the hosts use. ask is host-agnostic: it reads nothing
 			// from the telegram block. Headless when scripted (-p) or without
 			// a TTY on both ends — the hook payload's headless flag says so.
-			headless := !interactiveTTY(promptFlag != "", term.IsTerminal(int(os.Stdin.Fd())), term.IsTerminal(int(os.Stderr.Fd())))
+			// --agent counts as scripted however the message arrived (-p or
+			// argv): there is no human in its turn, so the hook payload must
+			// say headless even when it was launched from a terminal.
+			headless := !interactiveTTY(promptFlag != "" || agentFlag != "", term.IsTerminal(int(os.Stdin.Fd())), term.IsTerminal(int(os.Stderr.Fd())))
 			sess, err := rt.Session(shell3.SessionOpts{
 				Name:         "ask",
 				WorkDir:      resolved,
@@ -101,6 +117,14 @@ func newAskCommand() *cobra.Command {
 			rt.SetSessionDecorator(func(s *shell3.Session) {
 				_ = media.RegisterImageTool(s, buildMediaClients(rt))
 			})
+
+			// --agent: dispatch the named subagent and print only its reply.
+			// This returns before the interactive loop below — a scripted run
+			// has no second turn to read.
+			if agentFlag != "" {
+				fmt.Fprintf(os.Stderr, "config=%s\n", resolved)
+				return runAskAgent(ctx, os.Stdout, os.Stderr, sess, agentFlag, prompt)
+			}
 
 			// The brand banner already printed from the root PersistentPreRun.
 			fmt.Printf("agent=%s  config=%s\n\n", sess.ActiveAgent(), resolved)
@@ -140,6 +164,7 @@ func newAskCommand() *cobra.Command {
 	addConfigFlag(cmd, &configDir)
 	cmd.Flags().StringVarP(&promptFlag, "prompt", "p", "", "Message for the agent (skips the interactive prompt)")
 	cmd.Flags().BoolVar(&resume, "resume", false, "Continue the latest session (multi-turn across invocations)")
+	cmd.Flags().StringVar(&agentFlag, "agent", "", "Run one headless turn of this subagent and print only its reply (for scripts)")
 	return cmd
 }
 

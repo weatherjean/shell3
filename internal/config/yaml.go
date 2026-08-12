@@ -42,9 +42,10 @@ type yamlModel struct {
 // where the agent's shell runs. Token is a secret resolved from .env via an
 // env:KEY reference.
 type yamlTelegram struct {
-	Token   string `yaml:"token"`
-	ChatID  string `yaml:"chat_id"`
-	WorkDir string `yaml:"workdir"`
+	Token     string   `yaml:"token"`
+	ChatID    string   `yaml:"chat_id"`
+	WorkDir   string   `yaml:"workdir"`
+	AllowFrom []string `yaml:"allow_from"`
 }
 
 type yamlMCP struct {
@@ -180,7 +181,7 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 		})
 	}
 	if tc := f.Telegram; tc != nil {
-		c.telegram = TelegramConfig{Present: true, Token: tc.Token, ChatID: tc.ChatID, WorkDir: tc.WorkDir}
+		c.telegram = TelegramConfig{Present: true, Token: tc.Token, ChatID: tc.ChatID, WorkDir: tc.WorkDir, AllowFrom: tc.AllowFrom}
 	}
 	mcpNames := make([]string, 0, len(f.MCP))
 	for name := range f.MCP {

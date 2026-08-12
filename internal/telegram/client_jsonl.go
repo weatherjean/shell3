@@ -91,6 +91,7 @@ type jsonlInEvent struct {
 	Type      string         `json:"type"`
 	ID        string         `json:"id"`
 	ReplyToID string         `json:"reply_to_id"`
+	SenderID  int64          `json:"sender_id"`
 	Text      string         `json:"text"`
 	ReplyTo   string         `json:"reply_to"`
 	Media     []jsonlInMedia `json:"media"`
@@ -175,7 +176,13 @@ func (c *JSONLClient) readLoop(ctx context.Context) {
 // media path into bytes. An unreadable or oversized file is skipped with a log
 // line — the turn still runs with the message text.
 func (c *JSONLClient) toMsg(ev jsonlInEvent) Msg {
-	m := Msg{ChatID: c.chatID, ID: ev.ID, ReplyToID: ev.ReplyToID, Text: ev.Text, ReplyTo: ev.ReplyTo}
+	m := Msg{ChatID: c.chatID, ID: ev.ID, ReplyToID: ev.ReplyToID, Text: ev.Text, ReplyTo: ev.ReplyTo, SenderID: ev.SenderID}
+	if m.SenderID == 0 {
+		// A front-end that does not model senders (the common case for a
+		// single-operator BYO front-end) is treated as the chat's owner
+		// rather than as an anonymous — and therefore blocked — caller.
+		m.SenderID = c.chatID
+	}
 	if m.ID == "" {
 		m.ID = c.nextID("c")
 	}

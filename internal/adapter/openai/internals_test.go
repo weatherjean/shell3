@@ -2,12 +2,10 @@ package openai
 
 import (
 	"bytes"
-	"context"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/weatherjean/shell3/internal/llm"
 )
@@ -33,21 +31,15 @@ func sseResponse(body string) *http.Response {
 // ---- bodyTap ----
 
 func TestBodyTapCapturesRequestBody(t *testing.T) {
-	tap := &bodyTap{
-		rt:   &mockTransport{resp: sseResponse("data: [DONE]\n\n")},
-		done: make(chan struct{}),
-	}
+	tap := &bodyTap{rt: &mockTransport{resp: sseResponse("data: [DONE]\n\n")}}
 	body := []byte(`{"test":true}`)
 	req, _ := http.NewRequest("POST", "http://x", bytes.NewReader(body))
 	resp, err := tap.RoundTrip(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Drain then close explicitly — Close shuts the pipe writer, which lets
-	// scanReasoning see EOF and close tap.done. Must happen before <-tap.done.
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
-	<-tap.done
 
 	req2, res2 := tap.snapshot()
 	if !bytes.Equal(req2, body) {
@@ -64,7 +56,6 @@ func TestBodyTapCapturesErrorResponseBody(t *testing.T) {
 			Body:       io.NopCloser(strings.NewReader(errBody)),
 			Header:     make(http.Header),
 		}},
-		done: make(chan struct{}),
 	}
 	req, _ := http.NewRequest("POST", "http://x", strings.NewReader("body"))
 	resp, err := tap.RoundTrip(req)
@@ -80,112 +71,14 @@ func TestBodyTapCapturesErrorResponseBody(t *testing.T) {
 }
 
 func TestBodyTapNilBody(t *testing.T) {
-	tap := &bodyTap{
-		rt:   &mockTransport{resp: sseResponse("data: [DONE]\n\n")},
-		done: make(chan struct{}),
-	}
+	tap := &bodyTap{rt: &mockTransport{resp: sseResponse("data: [DONE]\n\n")}}
 	req, _ := http.NewRequest("GET", "http://x", nil)
 	resp, err := tap.RoundTrip(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	io.Copy(io.Discard, resp.Body)
-	resp.Body.Close() // closes pipe writer so scanReasoning goroutine can exit
-}
-
-// ---- scanReasoning ----
-
-func TestScanReasoningExtractsReasoning(t *testing.T) {
-	tap := &bodyTap{}
-	done := make(chan struct{})
-	tap.done = done
-
-	sse := "data: {\"choices\":[{\"delta\":{\"reasoning\":\"step one\"}}]}\n" +
-		"data: {\"choices\":[{\"delta\":{\"reasoning\":\" step two\"}}]}\n" +
-		"data: [DONE]\n"
-
-	pr := io.NopCloser(strings.NewReader(sse))
-	go tap.scanReasoning(pr, done)
-	<-done
-
-	got := strings.Join(tap.drainReasoning(), "")
-	if got != "step one step two" {
-		t.Fatalf("reasoning: got %q", got)
-	}
-}
-
-func TestScanReasoningQueuesFragments(t *testing.T) {
-	tap := &bodyTap{}
-	done := make(chan struct{})
-	tap.done = done
-
-	sse := "data: {\"choices\":[{\"delta\":{\"reasoning\":\"alpha\"}}]}\n" +
-		"data: {\"choices\":[{\"delta\":{\"reasoning\":\"beta\"}}]}\n" +
-		"data: [DONE]\n"
-
-	go tap.scanReasoning(io.NopCloser(strings.NewReader(sse)), done)
-	<-done
-
-	got := tap.drainReasoning()
-	if len(got) != 2 || got[0] != "alpha" || got[1] != "beta" {
-		t.Fatalf("reasoningQueue: got %v", got)
-	}
-}
-
-func TestScanReasoningExtractsReasoningContent(t *testing.T) {
-	tap := &bodyTap{}
-	done := make(chan struct{})
-	tap.done = done
-
-	sse := "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"moonshot \"}}]}\n" +
-		"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thinks\"}}]}\n" +
-		"data: [DONE]\n"
-
-	pr := io.NopCloser(strings.NewReader(sse))
-	go tap.scanReasoning(pr, done)
-	<-done
-
-	got := strings.Join(tap.drainReasoning(), "")
-	if got != "moonshot thinks" {
-		t.Fatalf("reasoning_content: got %q", got)
-	}
-}
-
-func TestScanReasoningIgnoresBadJSON(t *testing.T) {
-	tap := &bodyTap{}
-	done := make(chan struct{})
-	tap.done = done
-
-	sse := "data: {bad json}\n" +
-		"data: {\"choices\":[{\"delta\":{\"reasoning\":\"ok\"}}]}\n" +
-		"data: [DONE]\n"
-
-	pr := io.NopCloser(strings.NewReader(sse))
-	go tap.scanReasoning(pr, done)
-	<-done
-
-	got := strings.Join(tap.drainReasoning(), "")
-	if got != "ok" {
-		t.Fatalf("reasoning: got %q", got)
-	}
-}
-
-func TestWaitReasoningRespectsContextCancel(t *testing.T) {
-	tap := &bodyTap{}
-	done := make(chan struct{}) // never closed
-	tap.mu.Lock()
-	tap.done = done
-	tap.mu.Unlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer cancel()
-
-	tap.WaitReasoning(ctx) // must return on ctx cancel, not hang
-}
-
-func TestWaitReasoningNilDone(t *testing.T) {
-	tap := &bodyTap{}                       // done is nil
-	tap.WaitReasoning(context.Background()) // must return immediately
+	resp.Body.Close()
 }
 
 // ---- toMessages ----

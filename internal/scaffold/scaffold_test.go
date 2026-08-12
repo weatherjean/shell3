@@ -220,8 +220,8 @@ func TestRenderedConfigLoads(t *testing.T) {
 			t.Errorf("scaffold skill %q missing from agent (got %v)", want, got)
 		}
 	}
-	if len(a.Skills) != 8 {
-		t.Errorf("expected 8 scaffold skills, got %d", len(a.Skills))
+	if len(a.Skills) != 9 {
+		t.Errorf("expected 9 scaffold skills, got %d", len(a.Skills))
 	}
 	if len(c.Warnings()) != 0 {
 		t.Errorf("scaffold config loaded with warnings: %v", c.Warnings())

@@ -486,6 +486,16 @@ func validateCall(toolSchemas map[string]map[string]any, tc llm.ToolCall) (res t
 // cap. Raising the model's max_tokens is the fix, so the notice names it.
 const truncationNotice = "\n\n⚠️ [output cut off — hit the model's max_tokens limit]"
 
+// IsTruncatedReply reports whether assistant text carries the truncation
+// notice. A front-end that renders the reply for a human can ignore this — the
+// notice speaks for itself — but one that consumes the text PROGRAMMATICALLY
+// must check: the notice rides the reply itself, not any error channel, so a
+// cut-off reply is otherwise indistinguishable from a complete one and the
+// marker ends up stored as if it were content.
+func IsTruncatedReply(text string) bool {
+	return strings.Contains(text, truncationNotice)
+}
+
 // streamOnce calls the LLM once, collecting text/reasoning/tool-calls/usage
 // and emitting per-token chat.Events on the session sink.
 func streamOnce(ctx context.Context, client LLMClient, msgs []llm.Message, tools []llm.ToolDefinition, sess *Session) (text, reasoning string, toolCalls []llm.ToolCall, usage llm.Usage, truncated bool, err error) {

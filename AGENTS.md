@@ -211,8 +211,17 @@ outbound, so there is no port, no login, no tunnel. The `telegram:` block in
 `shell3.yaml` is `token` (an `env:TELEGRAM_TOKEN` reference like every other
 secret), `chat_id` (the single chat the bot answers — updates from anywhere
 else are dropped before a turn starts, messages in `handleMsg` and
-inline-button callbacks in `handleCallback` alike, and that IS the access
-model), and `workdir` (the agent's shell; default = the config dir). Missing
+inline-button callbacks in `handleCallback` alike), `allow_from` (the Telegram
+user ids allowed to DRIVE the agent — `internal/telegram/authz.go`: chat_id
+says WHERE the bot talks, allow_from says WHO it obeys, and in a group those
+differ. Unset = the chat_id owner alone, which is the historical single-DM
+behaviour since a DM's chat id IS its user id. Decided on `Msg.SenderID`,
+populated by Telegram and unspoofable, and checked BEFORE the command branch —
+privacy mode delivers `/commands` from every group member, so a gate on the
+turn path alone would still let a stranger `/stop` a turn or `/new` the
+conversation away. A zero sender — channel post, or a transport that cannot
+attribute — is never allowed; a non-numeric entry fails startup), and
+`workdir` (the agent's shell; default = the config dir). Missing
 token or chat_id, or a non-numeric chat_id, refuses to start — naming the
 field at fault, and `shell3 health` fails on the same check (an absent
 `telegram:` block is reported, not failed: an `ask`-only config is legitimate). The transport is an
@@ -265,7 +274,13 @@ longer reply posts its first chunk plus the full text as a `reply.md` document
 — and records every sent message id so the anchor advances.
 `drainTurn` treats only the FINAL assistant segment as the reply — text before
 a tool call is progress narration — and errors always surface. Markdown is
-converted for Telegram by `mdhtml`. The console transport answers inline menus
+converted for Telegram by `mdhtml`, which renders only the tag set Telegram
+accepts and **escapes** everything else to literal text — raw HTML in the
+source (`ast.RawHTML`/`ast.HTMLBlock`, i.e. any bare `<tag>` in prose) is
+escaped, never dropped: those nodes carry their text in segments rather than
+children, so falling through to a children-walking default silently deletes
+them and cuts words out of the agent's reply mid-sentence. The console
+transport answers inline menus
 (the /voice keyboard) with an `&<data>` input line.
 
 **Commands are host-answered** (`commands.go`, no model call, zero tokens):
@@ -401,7 +416,16 @@ agent with full verbose output (every tool call/result, reasoning, token usage;
 no message = an interactive multi-turn loop; `-p` for headless; `--resume`
 continues the latest session; host-agnostic — reads nothing from the
 `telegram:` block, and installs no CompletionHost, so its verbose view sees
-every completion raw).
+every completion raw). `--agent <name>` is its scripting seam
+(`cmd/shell3/askagent.go`): one headless turn of a subagent from `agents/`
+via `Session.Dispatch`, printing ONLY the reply on stdout (diagnostics to
+stderr), waiting for Done && !ChildOpen so a lingering bash_bg can't truncate
+it, exiting nonzero on a failed or empty run. It exists so batch scripts stop
+hand-rolling HTTP clients against the model — a shell-out inherits the real
+adapter (reasoning split, thinkleak, truncation detection) and a tool-capable
+turn, instead of reimplementing the parsing half. It refuses `--resume` (each
+run is a fresh child session) and requires a message (there is no interactive
+form to fall back to).
 `telegram`, `serve`, `ask`, `boot`, `project`, and `health` are the whole
 command tree — there is no web interface, no dashboard command, and no
 command that exposes or supervises the process. `shell3 serve` is the BYO

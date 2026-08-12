@@ -292,7 +292,7 @@ func TestVoiceCommand_BareShowsMenu(t *testing.T) {
 		TTSMode: "inbound",
 	}, nil)
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/voice"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/voice"})
 
 	if len(fc.menus) != 1 {
 		t.Fatalf("want 1 menu sent, got %d", len(fc.menus))
@@ -331,7 +331,7 @@ func TestVoiceCommand_SetModePersistsAndConfirms(t *testing.T) {
 		TTSMode: "off",
 	}, store)
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/voice always"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/voice always"})
 
 	if got := store.Get("off"); got != "always" {
 		t.Fatalf("want persisted mode 'always', got %q", got)
@@ -355,7 +355,7 @@ func TestVoiceCallback_SetsModeAndEditsMenu(t *testing.T) {
 	}, store)
 
 	// Send the menu first so voiceMenuMsgID is recorded.
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/voice"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/voice"})
 	if len(fc.menus) != 1 {
 		t.Fatalf("setup: want 1 menu sent, got %d", len(fc.menus))
 	}
@@ -394,7 +394,7 @@ func TestVoiceCommand_NotConfigured(t *testing.T) {
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt) // SetMedia never called
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, Text: "/voice"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/voice"})
 
 	if !containsText(fc, "not configured") {
 		t.Fatalf("want a not-configured reply, got %v", fc.sentTexts())
@@ -419,7 +419,7 @@ func TestHandleMsg_EndToEndVoiceReply(t *testing.T) {
 		TTSMode: "inbound",
 	}, nil)
 
-	b.handleMsg(context.Background(), Msg{ChatID: 42, Media: []Media{
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, Media: []Media{
 		{Bytes: []byte("OggS-fake"), MIME: "audio/ogg", Filename: "voice.ogg"},
 	}})
 

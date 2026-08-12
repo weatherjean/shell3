@@ -229,6 +229,33 @@ complete, rendering each completion's mail turn, so a scripted `ask -p` run
 never exits at turn end and silently kills in-flight work. The wait has no
 timeout; press ctrl+c (SIGINT) to quit while jobs are still running.
 
+### `--agent <name>` — one subagent turn, for scripts
+
+`--agent` runs a single headless turn of a named subagent from `agents/` and
+prints **only its reply** on stdout; the config path, job id, and any error go
+to stderr. It is the seam for batch work — a script that has its own loop
+(a database to walk, a queue to drain) but needs a model call per item:
+
+```sh
+shell3 ask --agent drafter -p "$(build_one_prompt)" > draft.txt
+```
+
+The point is that the script does **not** hand-roll an HTTP client against the
+model. Shelling out here runs the real adapter, so the call inherits
+reasoning-channel separation (thinking never lands in the answer text),
+think-leak filtering, truncation detection, the tool-call hook, and a
+tool-capable turn. A hand-written client re-derives all of that, usually
+badly: the classic failure is sharing one `max_tokens` budget between thinking
+and answer, so the model spends it on reasoning, gets cut mid-thought, and the
+caller's regex — finding an unclosed think tag — deletes the answer along with
+it.
+
+The run is always headless (hooks see `headless: true`) however the message
+arrives. It exits nonzero if the agent errored or produced no output, printing
+whatever partial text it did produce first. `--agent` needs a message and
+cannot be combined with `--resume`: each run dispatches a fresh child session,
+so there is no conversation to continue.
+
 ## Reading your history
 
 Conversation history lives in one SQLite database,
