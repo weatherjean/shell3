@@ -15,7 +15,7 @@ main agent, `hooks/<name>.tool-call.sh` for subagent `<name>`. There is no
 fallback between them; each agent is governed by exactly one script or none.
 The script runs before **every** tool (`bash`, `bash_bg`, `edit_file`,
 `read_media`, MCP tools as `mcp_<server>_<tool>`, host tools like
-`image_generate`) with the call as JSON on stdin, and prints a verdict: pass,
+`send_media_telegram`) with the call as JSON on stdin, and prints a verdict: pass,
 rewrite, runner-swap, or block — there is no ask verdict and no approval flow.
 The full verdict contract and payload fields are in
 [configuration.md](configuration.md#the-command-gate--hookssh).
@@ -53,10 +53,11 @@ reasoning in its comments; read it and tune it to your deployment.
 ## Network surface
 
 shell3's outbound connections are Telegram's Bot API and the endpoints named
-in your config: model `base_url`s, `media:` models, and MCP servers. That is
-the whole list. There is no telemetry, no crash reporting, and no update
-check. (The agent's own shell commands can of course reach anything the gate
-lets them.)
+in your config: model `base_url`s and MCP servers. That is the whole list.
+There is no telemetry, no crash reporting, and no update check. (The agent's
+own shell commands can of course reach anything the gate lets them — that
+includes any wrapper script you write for transcription, speech, or image
+generation; see [cookbook/voice-images.md](cookbook/voice-images.md).)
 
 ## The Telegram boundary
 
@@ -160,10 +161,9 @@ YAML as `env:KEY`:
   of `*`). Wipe every transcript with `rm -rf ~/.shell3/.shell3_project`;
   back up by copying the directory while shell3 is stopped.
 - **The rest of `~/.shell3/`**: your config, `.env`, the app log, proxy logs,
-  the `/voice` and `/quiet` overrides (`voice_mode.json`, `quiet_mode.json`),
-  and `media/` (everything sent to
-  the bot, generated images, cached speech). Wipe everything with
-  `rm -rf ~/.shell3`.
+  the `/quiet` override (`quiet_mode.json`), and `media/` (chat uploads —
+  everything sent to the bot, plus anything your own wrapper scripts save
+  there). Wipe everything with `rm -rf ~/.shell3`.
 
 ## Reporting vulnerabilities
 

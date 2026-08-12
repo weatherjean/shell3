@@ -90,15 +90,16 @@ Every subcommand takes `--config/-c` to point at a different config directory.
 - **Any OpenAI-compatible provider**: OpenAI, Ollama, Groq, LM Studio,
   OpenRouter, DeepSeek, and friends. MCP servers too, opt-in per agent and
   gated like every other tool.
-- **Voice and images (optional)**: voice notes transcribed, replies spoken
-  (`/voice`), photos captioned, images generated and sent back
-  ([recipes](docs/cookbook/voice-images.md)).
+- **Media as wrapper scripts, not config**: no built-in transcription, TTS,
+  or image generation — the agent reads/sends files with `read_media` and
+  `send_media_telegram`, and voice/image capabilities are drop-in bash
+  scripts you install ([recipes](docs/cookbook/voice-images.md)).
 
 ## Documentation
 
 - **[Configuration](docs/configuration.md)**: the config directory — models,
-  agent, subagents, projects, telegram, cron, voice & images, secrets, MCP,
-  hooks, skills.
+  agent, subagents, projects, telegram, cron, attachments & media, secrets,
+  MCP, hooks, skills.
 - **[CLI](docs/cli.md)**: every subcommand and the stored-history views.
 - **[Serve protocol](docs/serve.md)**: the stdio JSONL wire format for
   bring-your-own front-ends.

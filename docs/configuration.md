@@ -399,7 +399,7 @@ of the two it is, in as many words: **command gate armed**, or **command
 gate off** when the main agent has no `hooks/tool-call.sh`.
 
 Every tool call — `bash`, `bash_bg`, `edit_file`, `read_media`, host tools
-like `image_generate`, and `mcp_*` — runs the governing script as
+like `send_media_telegram`, and `mcp_*` — runs the governing script as
 `bash hooks/….sh` with JSON on stdin:
 
 ```json
@@ -408,7 +408,7 @@ like `image_generate`, and `mcp_*` — runs the governing script as
 
 | Field | Description |
 |-------|-------------|
-| `name` | The real tool name: `"bash"`, `"bash_bg"`, `"edit_file"`, `"read_media"`, `"image_generate"`, `"mcp_…"`. |
+| `name` | The real tool name: `"bash"`, `"bash_bg"`, `"edit_file"`, `"read_media"`, `"send_media_telegram"`, `"mcp_…"`. |
 | `command` | The bash command string — the two bash tools only; **null** for every other tool. |
 | `args` | Raw arguments JSON (every tool). Gate non-bash tools by inspecting this. |
 | `headless` | `true` when no human is attached (subagents, cron jobs, scripted `shell3 ask -p`). |
@@ -550,76 +550,42 @@ machine. The threat model is in
 
 `/reload` (and the agent's own `reload` tool) re-reads the config directory
 and applies it live: prompts, models, subagents, projects, skills, cron jobs,
-MCP servers, and the `media:` blocks. It does **not** re-apply the
-front-end's own wiring — a changed `telegram.chat_id` or `telegram.workdir`
-takes effect at the next `shell3 telegram` start.
+and MCP servers. It does **not** re-apply the front-end's own wiring — a
+changed `telegram.chat_id` or `telegram.workdir` takes effect at the next
+`shell3 telegram` start.
 
-## Voice & images — `media:`
+## Attachments and media
 
-Four optional blocks under `media:`, each pointing at a model by name. All
-speak the same OpenAI-compatible surface: `audio/transcriptions`,
-`audio/speech`, chat completions with an image part, `images/generations`.
-Everything below lands in the media dir, `<configDir>/media` —
-`~/.shell3/media/` for the default config dir — overridable with
-`$SHELL3_MEDIA_DIR` (see [The media janitor](#the-media-janitor--media_keep_days)
-for that variable's precedence).
+There is no `media:` config block — voice transcription, speech, and image
+generation are not built-in services; they are wrapper scripts you write
+and drop into `~/.shell3/lib/bin/`, documented with a full working
+`stt.sh`/`say.sh`/`imagegen.sh` set in
+[cookbook/voice-images.md](cookbook/voice-images.md). What ships:
 
-```yaml
-media:
-  stt: { model: groq-whisper, echo: true }        # voice notes → text
-  tts: { model: groq-tts, voice: Fritz-PlayAI, mode: inbound }
-  describe: { model: some-vision-model }          # for text-only main models
-  imagegen: { model: some-image-model, size: 1024x1024 }
-```
+- **Attachments.** Every file sent to the bot is saved to the media dir
+  (`<configDir>/media` — `~/.shell3/media/` for the default config dir,
+  overridable with `$SHELL3_MEDIA_DIR`; see
+  [The media janitor](#the-media-janitor--media_keep_days) for that
+  variable's precedence) as `tg-*`, and its path goes into the prompt. There
+  is no automatic transcription or captioning step — the agent decides
+  whether and how to act on the attachment.
+- **`read_media`** (needs `media` in the agent's `tools`) lets the agent
+  open a file directly: images (`.jpg/.jpeg/.png/.gif/.webp`, vision
+  models), audio (`.wav/.mp3/.ogg/.opus/.oga`, audio models), PDFs (`.pdf` ≤
+  20 MB, an OpenAI-compatible `file` part — works on OpenAI and OpenRouter),
+  and video (`.mp4/.webm/.mov` ≤ 40 MB, a `video_url` part — an
+  OpenRouter/Gemini extension plain OpenAI endpoints reject; OpenRouter also
+  wants at least $1.00 of balance on any request carrying video, whatever it
+  actually costs).
+- **`send_media_telegram`** (a host tool, on every session) lets the agent
+  push a local file back to the chat as photo/voice/audio/video/document.
 
-- **`stt: { model, language?, echo? }`** transcribes an inbound voice note
-  before the turn and injects the transcript as the message. The recording is
-  stored in the media dir (as `tg-*`) and its path goes into the prompt too.
-  `echo: true` also posts the transcript back to the chat. A failure injects
-  a could-not-transcribe marker and posts a ⚠️ notice; the turn still runs.
-- **`tts: { model, voice?, format?, mode? }`** speaks the reply instead of
-  posting it as text. `mode` is the default: `off`, `inbound` (speak only
-  when the message came in as a voice note), or `always`; `/voice` overrides
-  it at runtime and the override persists in `~/.shell3/voice_mode.json`.
-  `voice` and `format` are passed to the model; an `opus`/`ogg` result is
-  sent as a Telegram voice bubble, anything else as an audio file.
-  Synthesized audio is cached in the media dir (as `tts-*`). Any failure
-  falls back to text, so a reply is never lost.
-- **`describe: { model, prompt? }`** captions an inbound photo before the
-  turn, injecting `[image: <description>]`. Point it at a vision model when
-  the main model is text-only, or at the main model itself (`shell3 boot`
-  wires this when you say your model has vision). Every file you send is
-  stored in the media dir and its path goes into the prompt, so the agent
-  can re-open it later with `read_media` either way.
-- **`imagegen: { model, size?, api? }`** adds an `image_generate{prompt,
-  size?}` tool to **every** agent (main and subagents). `api: openai`
-  (default) uses `images/generations`; `openrouter` POSTs a chat-completions
-  request with `modalities=["image","text"]` — OpenRouter's image-output
-  dialect — and reads the image off the reply (its dedicated `/api/v1/images`
-  endpoint pre-authorizes worst-case cost, ~$2, and 402s low balances; the
-  chat route charges actual usage, ~$0.03/image; `size` is ignored on this
-  shape). Generated files land in the media dir and the tool returns the
-  path; the main agent delivers it with `send_media_telegram` (kind
-  `photo`), while a subagent reports the path for the parent to send. Gate
-  it like any tool (`name == "image_generate"` in the hook payload).
-
-**Media storage.** Everything you send the bot (`tg-*`), generated images
-(`img-*`), and synthesized speech (`tts-*`) live in the media dir — stable
+**Media storage.** Everything you send the bot (`tg-*`) and anything a
+wrapper script generates and saves there live in the media dir — stable
 paths, re-readable with `read_media` and re-sendable with
 `send_media_telegram` long after the message has scrolled away. The folder
 grows until you prune it or set
 [`media_keep_days`](#the-media-janitor--media_keep_days).
-
-**`read_media` modalities** (needs `media` in the agent's `tools`): images
-(`.jpg/.jpeg/.png/.gif/.webp`, vision models), audio
-(`.wav/.mp3/.ogg/.opus/.oga`, audio models), PDFs (`.pdf` ≤ 20 MB, an
-OpenAI-compatible `file` part — works on OpenAI and OpenRouter), and video
-(`.mp4/.webm/.mov` ≤ 40 MB, a `video_url` part — an OpenRouter/Gemini
-extension plain OpenAI endpoints reject; OpenRouter also wants at least $1.00
-of balance on any request carrying video, whatever it actually costs).
-
-Provider recipes — a one-key Groq quickstart for STT+TTS, the OpenRouter
-variant — live in [cookbook/voice-images.md](cookbook/voice-images.md).
 
 ## Scheduled jobs — `cron/`
 
@@ -768,9 +734,10 @@ Start-time only — no daemon, no timers.
 
 ## The media janitor — `media_keep_days`
 
-The media dir (`~/.shell3/media/` by default) accumulates everything you
-send the bot, generated images, and cached TTS audio, and nothing
-removes them on its own. An optional top-level `shell3.yaml` key bounds it:
+The media dir (`~/.shell3/media/` by default) accumulates chat uploads —
+everything you send the bot, plus anything a wrapper script writes there —
+and nothing removes them on its own. An optional top-level `shell3.yaml` key
+bounds it:
 
 ```yaml
 media_keep_days: 0   # default 0 = keep forever
@@ -794,6 +761,9 @@ set, be deliberate about that variable: an errant `SHELL3_MEDIA_DIR` pointed
 at an unrelated directory (or a symlinked media dir, which the sweep follows)
 means `media_keep_days` deletes old files there instead of in your actual
 media store.
+
+**Orphaned state file.** `~/.shell3/voice_mode.json` (the old `/voice`
+command's persisted mode) is no longer read by anything — safe to delete.
 
 ## Skills — `skills/`
 

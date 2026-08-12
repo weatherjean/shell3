@@ -52,6 +52,6 @@ Hooks are per-agent: `hooks/tool-call.sh` governs the main agent and
 same wrapper into each agent's script if the sandbox should cover subagents
 too; a subagent without its own hook runs unsandboxed. The `name` guard keeps
 your sandboxing off `edit_file`, `read_media`, and host tools like
-`image_generate`; gate those separately by name + args. A malformed argv
+`send_media_telegram`; gate those separately by name + args. A malformed argv
 (empty, or any empty element) fails **closed** — blocked, never run
 unwrapped.

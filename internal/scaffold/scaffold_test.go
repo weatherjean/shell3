@@ -58,6 +58,7 @@ func TestRenderBaseConfig(t *testing.T) {
 		"skills/planning.md", "skills/history.md",
 		"skills/self-evolve.md", "skills/browser.md", "skills/scripting.md",
 		"skills/cookbook.md", "skills/find-skills.md", "skills/writing-code.md",
+		"skills/media.md",
 		"lib/bin/skill-search",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
@@ -245,13 +246,13 @@ func TestRenderedConfigLoads(t *testing.T) {
 	for _, s := range a.Skills {
 		got[s.Name] = true
 	}
-	for _, want := range []string{"planning", "browser", "find-skills", "writing-code", "cookbook", "history", "self-evolve", "scripting"} {
+	for _, want := range []string{"planning", "browser", "find-skills", "writing-code", "cookbook", "history", "self-evolve", "scripting", "media"} {
 		if !got[want] {
 			t.Errorf("scaffold skill %q missing from agent (got %v)", want, got)
 		}
 	}
-	if len(a.Skills) != 9 {
-		t.Errorf("expected 9 scaffold skills, got %d", len(a.Skills))
+	if len(a.Skills) != 10 {
+		t.Errorf("expected 10 scaffold skills, got %d", len(a.Skills))
 	}
 	if len(c.Warnings()) != 0 {
 		t.Errorf("scaffold config loaded with warnings: %v", c.Warnings())

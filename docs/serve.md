@@ -53,7 +53,7 @@ turn after the turn ends, anchored at the newest message.
 The first stdout line:
 
 ```json
-{"type":"hello","protocol":1,"commands":[{"command":"status","description":"agent, model and MCP health"}, …]}
+{"type":"hello","protocol":2,"commands":[{"command":"status","description":"agent, model and MCP health"}, …]}
 ```
 
 `protocol` bumps only on breaking changes. `commands` is the host-answered
@@ -61,13 +61,21 @@ The first stdout line:
 own command UI. Send a command as a normal `message` whose text starts with
 `/` — it is answered host-side with zero tokens.
 
+**Protocol 1 → 2 (breaking):** the inline-keyboard events —
+inbound `callback`, outbound `menu` (and its `options` field), outbound
+`ack` — are gone; they existed only for the `/voice` menu, which no longer
+exists. A front-end still sending `callback` is not rejected: it silently
+hits the "ignoring unknown event type" path with no response, since
+tolerating unknown types is meant for additive growth, not for detecting
+removals. If your front-end sends `callback` or renders `menu`/`ack`, check
+`protocol` on the hello line and drop that code path for `protocol >= 2`.
+
 A greeting `send` follows the hello.
 
 ## Client → agent events
 
 ```json
 {"type":"message","id":"m1","reply_to_id":"","text":"hi","reply_to":"","media":[{"path":"/abs/pic.jpg","mime":"image/jpeg","filename":"pic.jpg"}]}
-{"type":"callback","id":"cb1","data":"…"}
 ```
 
 `message` fields:
@@ -82,8 +90,10 @@ A greeting `send` follows the hello.
 
 Media files are read from disk by the agent (50 MiB cap per file); an
 unreadable entry is skipped with a stderr note and the turn still runs.
-Voice notes and photos go through the same STT/describe preflight as on
-Telegram when `media:` is configured.
+There is no automatic transcription or captioning step for voice notes or
+photos — the path goes into the prompt and the agent decides whether to act
+on it (via `read_media`, or a wrapper script — see
+[cookbook/voice-images.md](cookbook/voice-images.md)).
 
 **`media[].path` must never be user-influenced.** It is read directly at
 transport ingest — before the turn, so the tool-call hook never sees it —
@@ -93,18 +103,13 @@ the agent. But it means a bridge that lets a remote user choose the path
 reads on this machine. Copy inbound files into a directory you own and pass
 your own path.
 
-`callback` answers a `menu` event: `data` is the pressed option's data
-string, `id` is your id for the press (echoed in the `ack`).
-
 ## Agent → client events
 
 ```json
 {"type":"send","id":"a…-7","reply_to_id":"m1","text":"reply **markdown**"}
 {"type":"media","id":"a…-8","kind":"document","path":"…/serve_out/f…-reply.md","filename":"reply.md","caption":"full reply"}
-{"type":"menu","id":"a…-9","text":"🔊 voice replies: off","options":[{"label":"…","data":"…"}]}
-{"type":"edit","id":"a…-9","text":"🔊 voice replies: always"}
+{"type":"edit","id":"a…-9","text":"progress: reading file…"}
 {"type":"typing"}
-{"type":"ack","callback_id":"cb1"}
 ```
 
 - `send` — a chat bubble. `text` is markdown (plain text is valid markdown);
@@ -119,9 +124,6 @@ string, `id` is your id for the press (echoed in the `ack`).
   `.shell3_project/serve_out/`). `kind` is
   `photo|voice|audio|video|document`. Only `document` carries an `id`
   (documents advance the thread anchor).
-- `menu` — a button row (`/runs` paging, `/voice`): answer with a `callback`
-  whose `data` is the pressed option's data string. An `edit` may then
-  replace the menu message's text (e.g. `/voice` showing the chosen mode).
 - `edit` — replace the text of a previously sent message (safe to ignore if
   your surface can't edit). The turn progress bubble arrives as a silent
   `send` followed by `edit`s.
@@ -129,12 +131,11 @@ string, `id` is your id for the press (echoed in the `ack`).
   cleaning itself up after a finished turn; safe to ignore).
 - `typing` — the "typing…" action, refreshed every few seconds during a
   turn. Ignorable.
-- `ack` — acknowledges a `callback` (Telegram's spinner-stop). Ignorable.
 
 ## Minimal session
 
 ```
-◀ {"type":"hello","protocol":1,"commands":[…]}
+◀ {"type":"hello","protocol":2,"commands":[…]}
 ◀ {"type":"send","id":"a1722-1","text":"๑ï shell3 online — …"}
 ▶ {"type":"message","id":"m1","text":"what's in ~/notes?"}
 ◀ {"type":"typing"}

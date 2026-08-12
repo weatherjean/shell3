@@ -87,15 +87,16 @@ tappable commands, and Telegram only linkifies those in message text.
 | `/run <name>` | Fire a scheduled job now. |
 | `/runs [page\|id]` | Stored sessions, newest first, 8 per page; each entry a tappable `/run_N` that replays that run in full (tool calls with arguments, results, and reasoning). `/runs 2` pages older; `/runs <id>` replays by id directly. |
 | `/reload` | Re-read the config and apply it live. Takes the turn slot, so it is refused rather than raced while a turn runs. |
-| `/voice off\|inbound\|always` | Whether replies come back spoken (needs `media.tts`). Bare `/voice` opens a three-button menu. The choice persists in `~/.shell3/voice_mode.json`. |
 | `/quiet on\|off` | Deliver ⏰/🔔 background posts silently — no notification ping (✉️ updates are always silent); replies to you and ⚠️ failures always ring. Bare `/quiet` reports the state, which persists in `~/.shell3/quiet_mode.json`. |
 
 ### Attachments and media
 
-Files you send are saved under `~/.shell3/media/`; voice notes and photos are
-transcribed/captioned before the turn when `media:` is configured, and the
-agent sends files back with `send_media_telegram` — see
-[Voice & images](configuration.md#voice--images--media).
+Files you send are saved under `~/.shell3/media/` and their paths go into
+the prompt; the agent reads them back with `read_media` and sends files to
+you with `send_media_telegram`. There is no built-in transcription or
+captioning step — voice notes and images are handled at the agent's
+discretion, via wrapper scripts you install. See
+[Voice & images](cookbook/voice-images.md).
 
 ## `shell3 serve` — the agent over stdio JSONL
 
@@ -129,8 +130,9 @@ force-pushes refused; ordinary work untouched), and `.env` (secrets — never
 commit it). `--force` overwrites an existing config.
 
 The form asks for the model endpoint, tag, name and key; whether the model can
-see images (yes enables the `read_media` tool and wires `media.describe` to the
-main model; no leaves media tooling off until you add a vision model); the
+see images (yes adds the `media` tool — `read_media` — to the agent's
+frontmatter so it can open image/audio/PDF/video files directly; no leaves
+that tool out until you add a vision model); the
 context window and auto-compaction threshold; an optional proxy command; the
 **Telegram bot token** (from [@BotFather](https://t.me/BotFather)) and **chat
 id** (your numeric id — [@userinfobot](https://t.me/userinfobot) prints it);

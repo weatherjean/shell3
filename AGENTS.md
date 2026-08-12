@@ -11,7 +11,7 @@ Minimal Unix-composable personal agent written in Go.
 **Declarative config.** The config is a **directory** (default `~/.shell3/`),
 loaded by `internal/config` — four rules: YAML wires it, markdown prompts it,
 files enable it, one bash script gates it. `shell3.yaml` holds wiring only
-(`models:`, `telegram:`, `mcp:`, `media:`, `background:`, `runs_keep_days`,
+(`models:`, `telegram:`, `mcp:`, `background:`, `runs_keep_days`,
 `media_keep_days`;
 strict decode — unknown keys fail the load; secrets referenced as `env:KEY`,
 substring-substituted from the sibling `.env`, unknown key = load error).
@@ -256,7 +256,9 @@ injected at the next round boundary via `chat.Session.Interject`
 (`dispatchMail`); a steer landing after the final boundary is answered by
 `startSteerCatchup`'s own POSTED turn (`chat.Session.HasSteer` /
 `shell3.Session.HasQueuedSteer`), so it is never silently absorbed; media
-messages queue instead (preflight needs a turn goroutine). Inbound text
+messages queue instead — `Interject` only carries text, so an attachment
+arriving mid-turn waits for the next turn rather than injecting a path
+mid-flight. Inbound text
 rides a 400ms debounce (`burstWindow`, `b.debounce` in tests) merging
 Telegram's split-message fragments into one turn. `/inbox` renders the
 queued state — the user's pending messages plus waiting task reports — with zero
@@ -279,9 +281,7 @@ accepts and **escapes** everything else to literal text — raw HTML in the
 source (`ast.RawHTML`/`ast.HTMLBlock`, i.e. any bare `<tag>` in prose) is
 escaped, never dropped: those nodes carry their text in segments rather than
 children, so falling through to a children-walking default silently deletes
-them and cuts words out of the agent's reply mid-sentence. The console
-transport answers inline menus
-(the /voice keyboard) with an `&<data>` input line.
+them and cuts words out of the agent's reply mid-sentence.
 
 **Commands are host-answered** (`commands.go`, no model call, zero tokens):
 `/stop` (cancel the turn; background jobs keep running), `/new` (start a
@@ -290,7 +290,7 @@ fresh conversation; refused mid-turn), `/run <job>`,
 (paginated inline listing, 8 per page, each entry a tappable `/run_N` that
 replays that run — taps resolve only against the map the last render stored,
 so a stale index errors instead of opening the wrong run),
-`/reload`, `/voice off|inbound|always`, `/quiet on|off` (persisted to
+`/reload`, `/quiet on|off` (persisted to
 `~/.shell3/quiet_mode.json` by `QuietStore`: ⏰ cron and 🔔 completion posts
 send with Telegram `disable_notification`, arriving without a ping; ✉️
 updates are ALWAYS silent regardless of the toggle (an update is not a page);
@@ -311,8 +311,7 @@ children): `send_media_telegram` (push a local file to the chat as
 photo/voice/audio/video/document, validating extension and size per kind, and
 refusing `.env` and its dotenv siblings), `status`, and `reload` (records a pending reload and returns; the
 host applies it at end-of-turn, since a mid-turn reload would tear down the
-running turn). `image_generate` is registered on EVERY session, headless
-children included.
+running turn).
 
 **Completion delivery** is mail (see internal/shell3/completion.go above);
 the bot is the `CompletionHost` (`bot.go`): `PostCompletion` posts
@@ -330,28 +329,21 @@ two exits meant the same answer could send twice). The wake is UPGRADED to
 a POSTED turn (`runPostedQueuedTurn`) when the inbox holds user steering
 (`HasQueuedSteer`), so a steer racing a turn's end still gets its answer;
 text arriving DURING a wake turn queues rather than steering into it
-(`turnQuiet`). Callbacks (the `/voice` menu) drain
-on their own bot-lifetime goroutine (`callbacks.go`).
+(`turnQuiet`).
 
-**Media** (`internal/media`, four blocks under `media:` in `shell3.yaml`, each
-pointing at a model): a turn's attachments are saved to `~/.shell3/media/` as
-`tg-*` (`attachments.go`) and their paths always go into the prompt. Before the
-turn, `preflight.go` transcribes an inbound voice note via `stt` (injecting the
-transcript; `stt.echo` also posts it back to the chat) and captions an inbound
-photo via `describe` (injecting `[image: …]`) — the fast local scan runs on the
-update loop, the network half only on a turn goroutine under
-`preflightTimeout`, and any failure becomes a compact ⚠️ chat notice while the
-turn still runs with the file path. `deliverReply` (`voice.go`) is the single
-reply exit for a user turn: per the resolved voice mode (`tts.mode`, overridden
-by `/voice` and persisted to `~/.shell3/voice_mode.json` by `ModeStore`) it
-speaks the reply *instead of* posting text — as a voice bubble when the
-synthesized container is ogg/opus, an audio file otherwise — and falls back to
-text on any failure. `imagegen` adds `image_generate` (`api: openai` or
-`openrouter`, the latter a raw chat-completions POST with
-`modalities=["image","text"]` — its dedicated `/api/v1/images` endpoint is
-avoided because it pre-authorizes worst-case cost and 402s low balances); the
-agent delivers the result with `send_media_telegram`. Restriction policy is the
-hook script, not a tools list.
+**Media**: a turn's attachments are saved to `~/.shell3/media/` as `tg-*`
+(`attachments.go`) and their paths always go into the prompt
+(`attachmentNote`) — there is no built-in transcription, captioning, TTS, or
+image generation, and no `media:` config block. The agent perceives a file
+by calling `read_media` itself (gated by `tools: [media]` in agent
+frontmatter) and sends one back with `send_media_telegram`; anything more —
+transcribing a voice note before answering, speaking a reply, generating an
+image — is a bash wrapper script the operator installs, documented in
+[docs/cookbook/voice-images.md](docs/cookbook/voice-images.md). The media
+dir and its startup janitor (`media_keep_days`) now live in
+`internal/mediadir`, which owns `Dir()` and `Sweep()` independent of any
+Telegram-specific code. Restriction policy is the hook script, not a tools
+list.
 
 An in-process cron scheduler (`internal/cron`, jobs are `cron/<name>.md`
 files; each job dispatches its declared agent — a subagent from `agents/`, or
@@ -386,15 +378,17 @@ stale `status='live'` rows past the grace hour flip to `ended` (nothing
 from a previous process can still be live at startup; recent ones may be a
 concurrent `ask`). SQL in `runs.Sweep`, on its own connection (the runtime's store is
 already open by then — the sweep does not need it closed), before the bot
-starts polling. A sibling **media janitor** runs the same start-time-only
-shape, gated by `media_keep_days` (top-level `shell3.yaml` key, default 0 =
-keep forever, so this is opt-in): deletes regular files in the media dir past
-the cutoff — attachments, generated images, and TTS cache alike, since none
-are distinguished from each other by the sweep. A swept file's stored path in
-an old transcript no longer resolves.
+starts polling. A sibling **media janitor** (`internal/mediadir`) runs the
+same start-time-only shape, gated by `media_keep_days` (top-level
+`shell3.yaml` key, default 0 = keep forever, so this is opt-in): deletes
+regular files in the media dir past the cutoff — chat uploads and anything
+a wrapper script saved there, since none are distinguished from each other
+by the sweep. A swept file's stored path in an old transcript no longer
+resolves.
 
 `shell3 boot` scaffolds the config tree (an interactive form: model, vision —
-which wires `media.describe` + the media tool — context budget, an optional
+which wires only the `media` tool (`read_media`) into agent frontmatter, no
+config block — context budget, an optional
 proxy command, the Telegram bot token + chat id, and the agent's workdir) and
 writes secrets to `~/.shell3/.env` (the token as `TELEGRAM_TOKEN`, referenced
 from the rendered yaml as `env:TELEGRAM_TOKEN`; both Telegram fields may be
@@ -465,10 +459,9 @@ internal/paths/        global (~/.shell3/) + local (.shell3_project/) path resol
 internal/runs/         SQLite runs store (modernc.org/sqlite, pure Go): sessions/messages/reminders/threads + FTS5 index in .shell3_project/shell3.db; job logs stay files under runs/<id>/jobs/; sweep.go is the startup janitor
 internal/edittool/     edit_file tool implementation (Go port of opencode's str-replace) + its direct-disk file I/O
 internal/notify/       Notification type (bg_done / agent_done) shared by job runtime + chat
-internal/media/        media.stt/tts/describe/imagegen clients (transcribe, speak, describe, generate)
-internal/mediadir/     resolves the media dir (<configDir>/media, $SHELL3_MEDIA_DIR overrides); split out of internal/media to break an import cycle (agentsetup → media → shell3 → agentsetup) and to stay free of the unix build tag
+internal/mediadir/     resolves the media dir (<configDir>/media, $SHELL3_MEDIA_DIR overrides) and runs its startup janitor (media_keep_days); free of the unix build tag
 internal/mcp/          MCP client (official go-sdk): Manager connects mcp: servers, lists tools, dispatches mcp_* calls
-internal/telegram/     the chat front-end: bot loop + transports (Bot API, console, serve's stdio JSONL), turn slot, thread index, host commands + tools, approval keyboard, media preflight, completion delivery
+internal/telegram/     the chat front-end: bot loop + transports (Bot API, console, serve's stdio JSONL), turn slot, thread index, host commands + tools, completion delivery
 internal/render/       markdown renderers for the dash views (/status, /jobs, /job, /cron, /runs) shared by the bot
 internal/cron/         robfig/cron scheduler dispatching subagent jobs on Session.Dispatch
 internal/cli/          terminal front-end helpers: shell3 ask renderers, brand banner
