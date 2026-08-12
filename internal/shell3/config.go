@@ -41,9 +41,7 @@ func (rt *Runtime) Telegram() TelegramConfig {
 func (rt *Runtime) Cron() []CronJob { return rt.cron }
 
 // Parts returns the runtime's current shared config assembly, for host code
-// that needs config-derived resources Runtime doesn't otherwise expose (e.g.
-// building media.Clients from LoadedConfig + EnsureProxy — the media package
-// can't be a Runtime dependency since it depends on internal/shell3 itself).
+// that needs config-derived resources Runtime doesn't otherwise expose.
 // Locked: races Reload's mu-held swap of the field.
 func (rt *Runtime) Parts() *agentsetup.Parts {
 	rt.mu.Lock()

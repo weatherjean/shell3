@@ -114,7 +114,7 @@ type Runtime struct {
 	// parts is the shared config assembly this Runtime was (re)built from.
 	// Swapped alongside the other fields at Reload; read via Parts() by host
 	// code that needs config-derived resources Runtime doesn't otherwise
-	// expose (e.g. rebuilding media.Clients from LoadedConfig + EnsureProxy).
+	// expose.
 	parts *agentsetup.Parts
 
 	// parkedClosers holds old-generation Parts teardown funcs deferred past a

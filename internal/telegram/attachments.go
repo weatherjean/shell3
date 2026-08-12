@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/weatherjean/shell3/internal/media"
+	"github.com/weatherjean/shell3/internal/mediadir"
 )
 
 // savedFile is one attachment written to disk for the agent to inspect.
@@ -20,7 +20,7 @@ type savedFile struct {
 }
 
 // saveAttachments writes each downloaded attachment to shell3's durable
-// media directory (~/.shell3/media — see media.Dir) and returns the
+// media directory (~/.shell3/media — see mediadir.Dir) and returns the
 // saved-file metadata, so every file the user has sent keeps a stable path
 // the agent can re-read or re-send later. The tg-* prefix distinguishes
 // uploads from img-* generated files. Files that fail to write are skipped.
@@ -28,7 +28,7 @@ func saveAttachments(files []Media) []savedFile {
 	if len(files) == 0 {
 		return nil
 	}
-	dir, err := media.Dir()
+	dir, err := mediadir.Dir()
 	if err != nil {
 		// No durable media dir (home unresolvable): the files are dropped and
 		// handleMsg tells the user nothing could be saved.

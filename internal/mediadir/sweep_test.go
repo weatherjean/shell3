@@ -1,6 +1,6 @@
 //go:build unix
 
-package media
+package mediadir
 
 import (
 	"os"

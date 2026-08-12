@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/weatherjean/shell3/internal/media"
+	"github.com/weatherjean/shell3/internal/mediadir"
 )
 
 // safeOpen resolves path and opens it for sending, refusing everything that
@@ -70,10 +70,10 @@ func safeOpen(path, workDir, configDir string) (*os.File, os.FileInfo, error) {
 		return nil, nil, errors.New("refusing to send a credentials file")
 	}
 
-	// media.Dir() also creates the directory, so this both resolves it and
+	// mediadir.Dir() also creates the directory, so this both resolves it and
 	// guarantees EvalSymlinks below can succeed.
 	mediaResolved := ""
-	if mdir, merr := media.Dir(); merr == nil {
+	if mdir, merr := mediadir.Dir(); merr == nil {
 		if r, rerr := filepath.EvalSymlinks(mdir); rerr == nil {
 			mediaResolved = r
 		} else {

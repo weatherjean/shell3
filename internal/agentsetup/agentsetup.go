@@ -91,32 +91,6 @@ func (p *Parts) Log() applog.Logger { return p.log }
 // parts (recorded per session for resume).
 func (p *Parts) ConfigDir() string { return p.configDir }
 
-// MediaConfig is the read-only slice of the config that internal/media needs
-// to resolve its model. It mirrors media.Config's method set so
-// *config.LoadedConfig satisfies both structurally, without agentsetup
-// importing media (media cannot live under agentsetup itself, since it
-// depends on internal/shell3, which agentsetup is built from) or media
-// importing agentsetup.
-//
-// NOTE(task 4): STT() was the last capability accessor on this interface;
-// removing it leaves only Model(name), which makes MediaConfig itself
-// vestigial. Left in place for Task 5 (deleting internal/media wholesale) to
-// remove alongside its only remaining consumer.
-type MediaConfig interface {
-	Model(name string) (config.Model, bool)
-}
-
-// MediaConfig returns the narrow media-config view of the config this
-// Parts was built from, for host code building media.Clients (e.g.
-// media.New(p.MediaConfig(), p.EnsureProxy)).
-func (p *Parts) MediaConfig() MediaConfig { return p.lc }
-
-// EnsureProxy starts (or no-ops if already running) the run_proxy command for
-// a named model, mirroring AgentRuntime's own proxy-spawn call. Exposed as a
-// pass-through so host code can pass it directly as the ensureProxy func
-// media.New expects, without reaching into the unexported proxy field.
-func (p *Parts) EnsureProxy(name, command string) { p.proxy.Ensure(name, command) }
-
 // BackgroundMaxConcurrent returns the `background.max_concurrent`
 // setting (0 = unset; default applied at newJobManager).
 func (p *Parts) BackgroundMaxConcurrent() int { return p.lc.BackgroundMaxConcurrent }

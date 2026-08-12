@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/cron"
-	"github.com/weatherjean/shell3/internal/media"
+	"github.com/weatherjean/shell3/internal/mediadir"
 	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/telegram"
@@ -45,12 +45,12 @@ func runJanitors(runsRoot string, runsKeepDays, mediaKeepDays int, out io.Writer
 	if mediaKeepDays <= 0 {
 		return
 	}
-	mdir, err := media.Dir()
+	mdir, err := mediadir.Dir()
 	if err != nil {
 		fmt.Fprintf(out, "warning: media janitor: %v\n", err)
 		return
 	}
-	removedMedia, err := media.Sweep(mdir, time.Duration(mediaKeepDays)*24*time.Hour, time.Now())
+	removedMedia, err := mediadir.Sweep(mdir, time.Duration(mediaKeepDays)*24*time.Hour, time.Now())
 	if err != nil {
 		fmt.Fprintf(out, "warning: media janitor: %v\n", err)
 	}
