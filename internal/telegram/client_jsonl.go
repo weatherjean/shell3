@@ -119,8 +119,6 @@ type jsonlOutEvent struct {
 	Filename  string    `json:"filename,omitempty"`
 	Caption   string    `json:"caption,omitempty"`
 	Silent    bool      `json:"silent,omitempty"`
-	Yes       string    `json:"yes,omitempty"`
-	No        string    `json:"no,omitempty"`
 }
 
 // Updates starts the read loop (once) and returns the inbound channel. The

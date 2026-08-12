@@ -488,7 +488,9 @@ func TestStartSubagentEnforcesAllowlist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
-	tc := s.turnConfig()
+	s.mu.Lock()
+	tc := s.turnConfigLocked()
+	s.mu.Unlock()
 	if _, err := tc.StartSubagent("privileged", "p", "d", false, ""); err == nil ||
 		!strings.Contains(err.Error(), "not allowed") || !strings.Contains(err.Error(), "explorer") {
 		t.Fatalf("StartSubagent off-list = %v, want not-allowed error naming the allowlist", err)
@@ -506,7 +508,10 @@ func TestStartSubagentEmptyAllowlist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
-	if _, err := s.turnConfig().StartSubagent("anything", "p", "d", false, ""); err == nil ||
+	s.mu.Lock()
+	tc := s.turnConfigLocked()
+	s.mu.Unlock()
+	if _, err := tc.StartSubagent("anything", "p", "d", false, ""); err == nil ||
 		!strings.Contains(err.Error(), "no subagents") {
 		t.Fatalf("StartSubagent with empty allowlist = %v, want no-subagents error", err)
 	}

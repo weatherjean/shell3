@@ -522,14 +522,6 @@ func RecoveryHint(err error) string {
 	return ""
 }
 
-// turnConfig locks s.mu and derives the per-turn config; see turnConfigLocked.
-// Test-only convenience — SendParts snapshots inside its own critical section.
-func (s *Session) turnConfig() chat.TurnConfig {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.turnConfigLocked()
-}
-
 // turnConfigLocked derives the per-turn config from the current cfg. Built
 // fresh each turn so SwitchAgent's mutations to cfg take effect on the next
 // Send. Caller must hold s.mu: cfg and the session wiring fields it reads are
@@ -628,7 +620,7 @@ func (s *Session) Compact(ctx context.Context) (before, after int, err error) {
 // line, and context window while keeping conversation history. Returns an error
 // for an unknown agent or when the config declares no agents, and ErrBusy
 // while a turn is in flight: it mutates cfg in place, which the next Send's
-// turnConfig reads (see Send's contract).
+// turnConfigLocked reads (see Send's contract).
 func (s *Session) SwitchAgent(name string) error {
 	return s.withIdle(func() error {
 		if s.cfg.SwitchAgent == nil {

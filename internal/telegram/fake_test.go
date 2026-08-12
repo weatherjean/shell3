@@ -19,7 +19,6 @@ type fakeClient struct {
 	failHTML bool
 	next     int
 	docs     []sentDoc
-	confirms []sentConfirm
 	edits    []sentEdit
 	photos   []sentPhoto
 	voices   []sentVoice
@@ -65,12 +64,6 @@ type sentVideo struct {
 	caption  string
 }
 
-type sentConfirm struct {
-	msgID           string
-	text            string
-	yesData, noData string
-}
-
 type sentEdit struct {
 	msgID string
 	text  string
@@ -101,15 +94,6 @@ func newFakeClient() *fakeClient {
 }
 
 func (f *fakeClient) Updates(ctx context.Context) <-chan Msg { return f.in }
-
-func (f *fakeClient) SendConfirm(ctx context.Context, chatID int64, text, yesData, noData string) (string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.next++
-	id := strconv.Itoa(f.next)
-	f.confirms = append(f.confirms, sentConfirm{msgID: id, text: text, yesData: yesData, noData: noData})
-	return id, nil
-}
 
 func (f *fakeClient) EditPlain(ctx context.Context, chatID int64, msgID string, text string) error {
 	f.mu.Lock()

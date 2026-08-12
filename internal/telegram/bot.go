@@ -478,14 +478,6 @@ func (b *Bot) mainSession() (*shell3.Session, error) {
 	return sess, nil
 }
 
-// mainIfLive returns the main session iff it already exists (nil otherwise) —
-// for paths that must not create one as a side effect.
-func (b *Bot) mainIfLive() *shell3.Session {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.main
-}
-
 // setAnchor advances the conversation's latest chat message id.
 func (b *Bot) setAnchor(msgID string) {
 	if msgID == "" {

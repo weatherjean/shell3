@@ -231,7 +231,9 @@ func TestRunPostedQueuedTurn_NoReplySentinelNotPosted(t *testing.T) {
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "(no output)")
 	})
-	sess := b.mainIfLive()
+	b.mu.Lock()
+	sess := b.main
+	b.mu.Unlock()
 	before := len(fc.sentTexts())
 
 	sess.Interject("one more thing")
@@ -258,7 +260,9 @@ func TestRunPostedQueuedTurn_ToolMarkupReplacedWithNotice(t *testing.T) {
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), malformedReplyNotice)
 	})
-	sess := b.mainIfLive()
+	b.mu.Lock()
+	sess := b.main
+	b.mu.Unlock()
 	before := len(fc.sentTexts())
 
 	sess.Interject("one more thing")

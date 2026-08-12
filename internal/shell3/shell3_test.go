@@ -914,11 +914,17 @@ func TestSessionJobsFromManager(t *testing.T) {
 func TestTurnConfigHeadless(t *testing.T) {
 	s := newTestSession(t, fakellm.New(), chat.Config{})
 	defer s.Close()
-	if s.turnConfig().Headless {
+	s.mu.Lock()
+	tc := s.turnConfigLocked()
+	s.mu.Unlock()
+	if tc.Headless {
 		t.Fatal("default session: want Headless=false")
 	}
 	s.cfg.Headless = true
-	if !s.turnConfig().Headless {
+	s.mu.Lock()
+	tc = s.turnConfigLocked()
+	s.mu.Unlock()
+	if !tc.Headless {
 		t.Fatal("headless config: want Headless=true")
 	}
 }
