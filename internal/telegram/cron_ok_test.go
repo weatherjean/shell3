@@ -304,7 +304,16 @@ func TestWakeTurn_IdenticalMailDroppedOnce(t *testing.T) {
 }
 
 // Corrupt output — raw tool-call template markup — never posts as an update
-// (report turns) and is replaced by a notice in user turns.
+// (report/wake turns): runWakeTurn's mail routing drops it entirely rather
+// than posting a notice (a notice would itself be an unsolicited chat
+// message from a silent background tick).
+//
+// The USER-turn and posted-queued-turn side of this guard (the notice posts,
+// the raw markup never does) is covered end-to-end in mail_test.go by
+// TestRunUserTurn_ToolMarkupReplacedWithNotice and
+// TestRunPostedQueuedTurn_ToolMarkupReplacedWithNotice, which drive the real
+// runUserTurn/runPostedQueuedTurn call sites in bot.go instead of
+// re-implementing the guard in the test body.
 func TestToolMarkupNeverReachesChat(t *testing.T) {
 	corrupt := "]<]minimax[>[<tool_call>\nbash: git show 9cc4ffc\n</tool_call>"
 	fc := newFakeClient()
@@ -326,24 +335,5 @@ func TestToolMarkupNeverReachesChat(t *testing.T) {
 	})
 	if texts := fc.sentTexts(); len(texts) != 0 {
 		t.Fatalf("corrupt report reply must post nothing, got %v", texts)
-	}
-
-	// User turn: the notice posts, the markup does not. This mirrors the
-	// guard runUserTurn/runPostedQueuedTurn apply inline before posting.
-	reply := corrupt
-	if isNoReply(reply) {
-		reply = ""
-	}
-	if containsToolMarkup(reply) {
-		reply = malformedReplyNotice
-	}
-	b.postReply(context.Background(), sess, "", reply)
-	waitFor(t, func() bool {
-		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "malformed output")
-	})
-	for _, txt := range fc.sentTexts() {
-		if strings.Contains(txt, "<tool_call") {
-			t.Fatalf("raw markup leaked into the chat: %q", txt)
-		}
 	}
 }

@@ -179,28 +179,98 @@ func TestInboxCommand(t *testing.T) {
 
 // A model that over-generalizes the wake-turn NO_REPLY sentinel into a USER
 // turn must not post the literal string — it degrades to the empty-reply
-// placeholder instead. This mirrors the guard runUserTurn/runPostedQueuedTurn
-// apply inline before posting.
-func TestDeliverReplyNoReplySentinelNotPosted(t *testing.T) {
+// placeholder instead. This drives the REAL production path (handleMsg ->
+// dispatchMail -> runUserTurn), so it exercises the guard inlined at
+// bot.go's runUserTurn, not a copy of it.
+func TestRunUserTurn_NoReplySentinelNotPosted(t *testing.T) {
 	fc := newFakeClient()
-	rt := storeRuntime(t, "unused")
+	rt := storeRuntime(t, "NO_REPLY.")
 	b := newBot(t, fc, rt)
-	sess := decoratedSession(t, b, rt)
 
-	reply := "NO_REPLY."
-	if isNoReply(reply) {
-		reply = ""
-	}
-	if containsToolMarkup(reply) {
-		reply = malformedReplyNotice
-	}
-	b.postReply(context.Background(), sess, "", reply)
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "hello"})
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "(no output)")
 	})
 	for _, txt := range fc.sentTexts() {
 		if strings.Contains(txt, "NO_REPLY") {
 			t.Fatalf("the sentinel leaked into the chat: %q", txt)
+		}
+	}
+}
+
+// A corrupt reply (raw tool-call template markup) must never reach the chat
+// verbatim in a USER turn — it is replaced by malformedReplyNotice. Drives
+// the real production path through runUserTurn, same as above.
+func TestRunUserTurn_ToolMarkupReplacedWithNotice(t *testing.T) {
+	corrupt := "]<]minimax[>[<tool_call>\nbash: git show 9cc4ffc\n</tool_call>"
+	fc := newFakeClient()
+	rt := storeRuntime(t, corrupt)
+	b := newBot(t, fc, rt)
+
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "hello"})
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), malformedReplyNotice)
+	})
+	for _, txt := range fc.sentTexts() {
+		if strings.Contains(txt, "<tool_call") {
+			t.Fatalf("raw markup leaked into the chat: %q", txt)
+		}
+	}
+}
+
+// Same two guards, but through runPostedQueuedTurn: a Wake that finds queued
+// user steering (Contract 12) runs a POSTED turn whose reply passes through
+// the SAME inline guards as runUserTurn, at a different call site in bot.go.
+// This mirrors TestContract12_WakeWithSteerPostsReply's drive pattern.
+func TestRunPostedQueuedTurn_NoReplySentinelNotPosted(t *testing.T) {
+	fc := newFakeClient()
+	rt := storeRuntime(t, "NO_REPLY.")
+	b := newBot(t, fc, rt)
+
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "start"})
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "(no output)")
+	})
+	sess := b.mainIfLive()
+	before := len(fc.sentTexts())
+
+	sess.Interject("one more thing")
+	b.dispatchWake(context.Background(), sess.ID())
+
+	waitFor(t, func() bool { return len(fc.sentTexts()) > before })
+	if sess.HasQueuedSteer() {
+		t.Fatal("posted wake turn must drain the steer")
+	}
+	for _, txt := range fc.sentTexts() {
+		if strings.Contains(txt, "NO_REPLY") {
+			t.Fatalf("the sentinel leaked into the chat: %q", txt)
+		}
+	}
+}
+
+func TestRunPostedQueuedTurn_ToolMarkupReplacedWithNotice(t *testing.T) {
+	corrupt := "]<]minimax[>[<tool_call>\nbash: git show 9cc4ffc\n</tool_call>"
+	fc := newFakeClient()
+	rt := storeRuntime(t, corrupt)
+	b := newBot(t, fc, rt)
+
+	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "1", Text: "start"})
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), malformedReplyNotice)
+	})
+	sess := b.mainIfLive()
+	before := len(fc.sentTexts())
+
+	sess.Interject("one more thing")
+	b.dispatchWake(context.Background(), sess.ID())
+
+	waitFor(t, func() bool { return len(fc.sentTexts()) > before })
+	if sess.HasQueuedSteer() {
+		t.Fatal("posted wake turn must drain the steer")
+	}
+	for _, txt := range fc.sentTexts() {
+		if strings.Contains(txt, "<tool_call") {
+			t.Fatalf("raw markup leaked into the chat: %q", txt)
 		}
 	}
 }
