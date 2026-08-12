@@ -14,7 +14,6 @@ import (
 	"golang.org/x/term"
 
 	"github.com/weatherjean/shell3/internal/cli"
-	"github.com/weatherjean/shell3/internal/media"
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
@@ -108,15 +107,6 @@ func newAskCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-
-			// Register the image_generate host tool on this session and any
-			// subagent children it spawns (a no-op when no media.imagegen: is
-			// declared) so ask drives the same tool set the web
-			// hosts run. No SetMedia equivalent: ask is text-only (no inbound
-			// voice notes or photos to transcribe/describe).
-			rt.SetSessionDecorator(func(s *shell3.Session) {
-				_ = media.RegisterImageTool(s, buildMediaClients(rt))
-			})
 
 			// --agent: dispatch the named subagent and print only its reply.
 			// This returns before the interactive loop below — a scripted run

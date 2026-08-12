@@ -286,21 +286,6 @@ func TestParseYAMLDescribePromptDefault(t *testing.T) {
 	}
 }
 
-func TestParseYAMLImagegenDefaultsAndValidation(t *testing.T) {
-	y := "models:\n  m:\n    base_url: u\n    model: x\nmedia:\n  imagegen: { model: m }\n"
-	c, err := parseY(t, y, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ig := c.Imagegen(); ig.API != "openai" || ig.Size != "1024x1024" {
-		t.Fatalf("imagegen defaults = %+v", ig)
-	}
-	y = "models:\n  m:\n    base_url: u\n    model: x\nmedia:\n  imagegen: { model: m, api: openroutre }\n"
-	if _, err := parseY(t, y, nil); err == nil || !strings.Contains(err.Error(), "must be openai or openrouter") {
-		t.Fatalf("err = %v", err)
-	}
-}
-
 // A strict-decode failure is the first thing a 0.4.x upgrader with a `web:`
 // block meets, so it must name shell3.yaml's own blocks — not the Go types
 // behind them.

@@ -147,10 +147,6 @@ type TTSConfig struct{ ModelRef, Voice, Mode, Format string }
 // before the model turn runs.
 type DescribeConfig struct{ ModelRef, Prompt string }
 
-// ImagegenConfig is the `media.imagegen:` block: image generation. API
-// selects the wire shape ("openai" or "openrouter").
-type ImagegenConfig struct{ ModelRef, Size, API string }
-
 // MCPServer is one declared server from the shell3.yaml `mcp:` block.
 // Exactly one of Command (stdio) or URL (streamable HTTP) is set — enforced
 // at load.
@@ -197,7 +193,6 @@ type LoadedConfig struct {
 	stt      *STTConfig
 	tts      *TTSConfig
 	describe *DescribeConfig
-	imagegen *ImagegenConfig
 
 	// hooks maps each governed agent to its hook scripts (see hooks.go).
 	hooks hookSet
@@ -286,9 +281,6 @@ func (c *LoadedConfig) TTS() *TTSConfig { return c.tts }
 
 // Describe returns the parsed media.describe block, nil when not declared.
 func (c *LoadedConfig) Describe() *DescribeConfig { return c.describe }
-
-// Imagegen returns the parsed media.imagegen block, nil when not declared.
-func (c *LoadedConfig) Imagegen() *ImagegenConfig { return c.imagegen }
 
 // MCPServers returns the declared MCP servers sorted by name (YAML map order
 // is unspecified; sorting keeps connect order and status listings

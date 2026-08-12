@@ -1,8 +1,8 @@
 //go:build unix
 
 // Package media implements shell3's OpenAI-compatible media capabilities
-// (transcribe, speak, describe, generate) as thin openai-go wrappers resolved
-// from shell3.yaml's media: blocks (stt/tts/describe/imagegen).
+// (transcribe, speak, describe) as thin openai-go wrappers resolved
+// from shell3.yaml's media: blocks (stt/tts/describe).
 package media
 
 import (
@@ -27,7 +27,6 @@ type Config interface {
 	STT() *config.STTConfig
 	TTS() *config.TTSConfig
 	Describe() *config.DescribeConfig
-	Imagegen() *config.ImagegenConfig
 	Model(name string) (config.Model, bool)
 }
 
@@ -40,17 +39,12 @@ type Speech struct {
 
 // Clients holds shell3's media capabilities, each wired to the model its
 // shell3.yaml block references. A nil function field means the capability was
-// not configured (no media stt/tts/describe/imagegen block); callers check
+// not configured (no media stt/tts/describe block); callers check
 // for nil before use rather than calling into a stub that errors.
 type Clients struct {
 	Transcribe func(ctx context.Context, path string) (string, error)
 	Speak      func(ctx context.Context, text string) (Speech, error)
 	Describe   func(ctx context.Context, path string) (string, error)
-	Generate   func(ctx context.Context, prompt, size string) (string, error)
-
-	// GenSize mirrors media.imagegen size: the default requested dimensions
-	// for Generate when a caller doesn't override it.
-	GenSize string
 }
 
 // sdkFn resolves an openai-go client for a media block's model ref (the
@@ -104,13 +98,6 @@ func New(cfg Config, ensureProxy func(name, command string)) *Clients {
 		c.Describe = newDescriber(func(ref string) (openai.Client, config.Model) {
 			return sdkOnce(&once, ensureProxy, sdk, ref)
 		}, *d)
-	}
-	if ig := cfg.Imagegen(); ig != nil {
-		c.GenSize = ig.Size
-		var once sync.Once
-		c.Generate = newGenerator(func(ref string) (openai.Client, config.Model) {
-			return sdkOnce(&once, ensureProxy, sdk, ref)
-		}, *ig)
 	}
 	return c
 }

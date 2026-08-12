@@ -129,9 +129,6 @@ func load(dir string) (*LoadedConfig, error) {
 	if c.describe != nil {
 		mediaRefs = append(mediaRefs, struct{ block, model string }{"media.describe", c.describe.ModelRef})
 	}
-	if c.imagegen != nil {
-		mediaRefs = append(mediaRefs, struct{ block, model string }{"media.imagegen", c.imagegen.ModelRef})
-	}
 	for _, ref := range mediaRefs {
 		if _, ok := c.Model(ref.model); !ok {
 			return nil, fmt.Errorf("%s references unknown model %q", ref.block, ref.model)

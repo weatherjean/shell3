@@ -84,12 +84,11 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 	b.SetVersion(version)
 	b.SetRunsRoot(rt.Parts().RunsRoot())
 
-	// Media (STT/describe/TTS/imagegen): built from the runtime's current
+	// Media (STT/describe/TTS): built from the runtime's current
 	// config and re-built by the reload closure below. The session decorator
-	// registers image_generate on EVERY session and, for main chat sessions
-	// (not the headless subagent children), the bot's host tools.
-	// Runtime.Reload re-applies the decorator, so both survive a reload with
-	// no separate resync.
+	// registers, for main chat sessions (not the headless subagent
+	// children), the bot's host tools. Runtime.Reload re-applies the
+	// decorator, so it survives a reload with no separate resync.
 	voiceModeStore, err := newVoiceModeStore()
 	if err != nil {
 		return nil, err
@@ -102,7 +101,6 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 	}
 	b.SetQuiet(quietStore)
 	rt.SetSessionDecorator(func(s *shell3.Session) {
-		_ = media.RegisterImageTool(s, buildMediaClients(rt))
 		if !s.Headless() { // main chat sessions only, not subagent children
 			b.DecorateChatSession(s)
 		}

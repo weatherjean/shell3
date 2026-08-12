@@ -62,7 +62,6 @@ type yamlMedia struct {
 	STT      *yamlSTT      `yaml:"stt"`
 	TTS      *yamlTTS      `yaml:"tts"`
 	Describe *yamlDescribe `yaml:"describe"`
-	Imagegen *yamlImagegen `yaml:"imagegen"`
 }
 
 type yamlSTT struct {
@@ -83,12 +82,6 @@ type yamlDescribe struct {
 	Prompt string `yaml:"prompt"`
 }
 
-type yamlImagegen struct {
-	Model string `yaml:"model"`
-	Size  string `yaml:"size"`
-	API   string `yaml:"api"`
-}
-
 type yamlBackground struct {
 	MaxConcurrent int `yaml:"max_concurrent"`
 }
@@ -106,7 +99,6 @@ var yamlTypeNames = map[string]string{
 	"yamlSTT":        "media.stt",
 	"yamlTTS":        "media.tts",
 	"yamlDescribe":   "media.describe",
-	"yamlImagegen":   "media.imagegen",
 	"yamlBackground": "the background: block",
 }
 
@@ -238,23 +230,6 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 				prompt = "Describe the image."
 			}
 			c.describe = &DescribeConfig{ModelRef: d.Model, Prompt: prompt}
-		}
-		if ig := m.Imagegen; ig != nil {
-			if ig.Model == "" {
-				return fmt.Errorf("shell3.yaml: media.imagegen needs a model")
-			}
-			api := ig.API
-			if api == "" {
-				api = "openai"
-			}
-			if api != "openai" && api != "openrouter" {
-				return fmt.Errorf("shell3.yaml: media.imagegen api %q must be openai or openrouter", ig.API)
-			}
-			size := ig.Size
-			if size == "" {
-				size = "1024x1024"
-			}
-			c.imagegen = &ImagegenConfig{ModelRef: ig.Model, Size: size, API: api}
 		}
 	}
 	if b := f.Background; b != nil {
