@@ -34,17 +34,13 @@ const ConsoleChatID int64 = 1
 // Outbound (stdout, one line per message):
 //   - "[#<id>] text"            → a plain/HTML send (HTML is printed raw, unrendered)
 //   - "[#<id> ↩#<replyto>] text" → a threaded reply
-//   - "[#<id> menu] …" for menu sends
 //   - "[media …]" markers for document/photo/voice/audio/video uploads (no-ops)
 //
 // Message ids come from one monotonic counter shared by inbound and outbound
 // (mirroring Telegram's single message_id space), so a script can reply to any
-// printed "[#<id>]" to continue that thread. Inline menus (SendMenu) print
-// their option labels; presses are not readable from the single stdin loop,
-// so a menu is display-only in console mode.
+// printed "[#<id>]" to continue that thread.
 type ConsoleClient struct {
 	in     chan Msg
-	cb     chan Callback
 	chatID int64
 
 	mu  sync.Mutex // guards seq and serializes writes to out
@@ -65,7 +61,6 @@ type flusher interface{ Flush() error }
 func NewConsoleClient(r io.Reader, out io.Writer, chatID int64) *ConsoleClient {
 	return &ConsoleClient{
 		in:     make(chan Msg, 16),
-		cb:     make(chan Callback, 16),
 		chatID: chatID,
 		out:    out,
 		r:      r,
@@ -91,17 +86,6 @@ func (c *ConsoleClient) readLoop(ctx context.Context) {
 		line := strings.TrimRight(sc.Text(), "\r")
 		if strings.TrimSpace(line) == "" {
 			continue // blank line: nothing actionable
-		}
-		// "&<data>" answers an inline menu (a button tap): the console has no
-		// buttons, so the callback_data is typed — e.g. "&nt|new" for the
-		// thread-choice ask.
-		if data := strings.TrimPrefix(line, "&"); data != line && strings.TrimSpace(data) != "" {
-			select {
-			case c.cb <- Callback{ChatID: c.chatID, ID: "console", Data: strings.TrimSpace(data)}:
-			case <-ctx.Done():
-				return
-			}
-			continue
 		}
 		msg := c.parseLine(line)
 		select {
@@ -230,14 +214,6 @@ func (c *ConsoleClient) SendVideo(_ context.Context, _ int64, filename string, _
 	return nil
 }
 
-func (c *ConsoleClient) SendMenu(_ context.Context, _ int64, text string, options []MenuOption) (string, error) {
-	labels := make([]string, len(options))
-	for i, o := range options {
-		labels[i] = o.Label
-	}
-	return c.emit("", "menu", text+" {"+strings.Join(labels, " | ")+"}"), nil
-}
-
 func (c *ConsoleClient) EditPlain(_ context.Context, _ int64, msgID string, text string) error {
 	c.mark("[edit #%s] %s", msgID, text)
 	return nil
@@ -247,7 +223,3 @@ func (c *ConsoleClient) DeleteMessage(_ context.Context, _ int64, msgID string) 
 	c.mark("[delete #%s]", msgID)
 	return nil
 }
-
-func (c *ConsoleClient) AnswerCallback(_ context.Context, _ string) error { return nil }
-
-func (c *ConsoleClient) Callbacks(_ context.Context) <-chan Callback { return c.cb }

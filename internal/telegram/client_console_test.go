@@ -44,7 +44,7 @@ func TestConsoleOutboundFormatting(t *testing.T) {
 	}
 }
 
-func TestConsoleMediaAndMenuMarkers(t *testing.T) {
+func TestConsoleMediaMarkers(t *testing.T) {
 	var out bytes.Buffer
 	c := NewConsoleClient(strings.NewReader(""), &out, ConsoleChatID)
 	ctx := context.Background()
@@ -52,14 +52,12 @@ func TestConsoleMediaAndMenuMarkers(t *testing.T) {
 	_ = c.SendPhoto(ctx, ConsoleChatID, "cat.png", []byte("x"), "a cat")
 	_ = c.SendVoice(ctx, ConsoleChatID, []byte("x"), "spoken")
 	_ = c.EditPlain(ctx, ConsoleChatID, "7", "edited")
-	_, _ = c.SendMenu(ctx, ConsoleChatID, "pick voice", []MenuOption{{Label: "off"}, {Label: "always"}})
 
 	s := out.String()
 	for _, want := range []string{
 		"[media photo cat.png] a cat",
 		"[media voice] spoken",
 		"[edit #7] edited",
-		"menu] pick voice {off | always}",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("output missing %q:\n%s", want, s)
@@ -146,25 +144,5 @@ func TestConsole_SilentTag(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "🔕") {
 		t.Fatalf("plain send carries 🔕 tag: %s", out.String())
-	}
-}
-
-// "&<data>" lines are button taps: they land on the Callbacks channel, not as
-// messages — the console's way of answering an inline menu.
-func TestConsoleCallbackLine(t *testing.T) {
-	var out bytes.Buffer
-	c := NewConsoleClient(strings.NewReader("&nt|new\n"), &out, ConsoleChatID)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	msgs := c.Updates(ctx)
-	select {
-	case cb := <-c.Callbacks(ctx):
-		if cb.Data != "nt|new" || cb.ChatID != ConsoleChatID {
-			t.Fatalf("callback = %+v", cb)
-		}
-	case m := <-msgs:
-		t.Fatalf("tap line parsed as a message: %+v", m)
-	case <-ctx.Done():
-		t.Fatal("no callback arrived")
 	}
 }

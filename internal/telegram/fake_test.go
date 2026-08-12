@@ -13,7 +13,6 @@ var errFakeHTML = errors.New("fake: html rejected")
 
 type fakeClient struct {
 	in       chan Msg
-	cb       chan Callback
 	mu       sync.Mutex
 	sent     []sentMsg
 	html     []string
@@ -22,12 +21,10 @@ type fakeClient struct {
 	docs     []sentDoc
 	confirms []sentConfirm
 	edits    []sentEdit
-	answered []string
 	photos   []sentPhoto
 	voices   []sentVoice
 	audios   []sentAudio
 	videos   []sentVideo
-	menus    []sentMenu
 	replies  []sentReply
 	deleted  []string
 	silent   []bool // one entry per text/document send, true when SendOpt.Silent
@@ -39,7 +36,6 @@ type fakeClient struct {
 	failVoice error
 	failAudio error
 	failVideo error
-	failMenu  error
 }
 
 type sentPhoto struct {
@@ -67,13 +63,6 @@ type sentVideo struct {
 	filename string
 	data     []byte
 	caption  string
-}
-
-type sentMenu struct {
-	msgID   string
-	chatID  int64
-	text    string
-	options []MenuOption
 }
 
 type sentConfirm struct {
@@ -108,12 +97,10 @@ type sentReply struct {
 }
 
 func newFakeClient() *fakeClient {
-	return &fakeClient{in: make(chan Msg, 16), cb: make(chan Callback, 8)}
+	return &fakeClient{in: make(chan Msg, 16)}
 }
 
 func (f *fakeClient) Updates(ctx context.Context) <-chan Msg { return f.in }
-
-func (f *fakeClient) Callbacks(ctx context.Context) <-chan Callback { return f.cb }
 
 func (f *fakeClient) SendConfirm(ctx context.Context, chatID int64, text, yesData, noData string) (string, error) {
 	f.mu.Lock()
@@ -143,13 +130,6 @@ func (f *fakeClient) deletedSnapshot() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string{}, f.deleted...)
-}
-
-func (f *fakeClient) AnswerCallback(ctx context.Context, callbackID string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.answered = append(f.answered, callbackID)
-	return nil
 }
 
 // reset clears everything the fake has recorded, so a test can assert on just
@@ -210,18 +190,6 @@ func (f *fakeClient) SendVideo(ctx context.Context, chatID int64, filename strin
 	}
 	f.videos = append(f.videos, sentVideo{chatID: chatID, filename: filename, data: data, caption: caption})
 	return nil
-}
-
-func (f *fakeClient) SendMenu(ctx context.Context, chatID int64, text string, options []MenuOption) (string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.failMenu != nil {
-		return "", f.failMenu
-	}
-	f.next++
-	id := strconv.Itoa(f.next)
-	f.menus = append(f.menus, sentMenu{msgID: id, chatID: chatID, text: text, options: options})
-	return id, nil
 }
 
 func (f *fakeClient) lastDoc() (sentDoc, bool) {

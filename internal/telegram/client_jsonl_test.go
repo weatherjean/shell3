@@ -86,20 +86,6 @@ func TestJSONLInboundMediaUnreadableSkipped(t *testing.T) {
 	}
 }
 
-func TestJSONLCallback(t *testing.T) {
-	in := `{"type":"callback","id":"cb1","data":"allow-x"}` + "\n"
-	c, _ := newTestJSONL(t, in)
-	c.Updates(context.Background()) // starts the read loop
-	select {
-	case cb := <-c.Callbacks(context.Background()):
-		if cb.ID != "cb1" || cb.Data != "allow-x" || cb.ChatID != ConsoleChatID {
-			t.Fatalf("callback = %+v", cb)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("no callback delivered")
-	}
-}
-
 func TestJSONLSendEvents(t *testing.T) {
 	c, out := newTestJSONL(t, "")
 	ctx := context.Background()

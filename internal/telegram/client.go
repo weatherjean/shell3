@@ -37,26 +37,6 @@ type Command struct {
 	Description string `json:"description"`
 }
 
-// Callback is an inline-keyboard button press, normalized from a Telegram
-// callback query. ID acknowledges the press (stops the button spinner); Data is
-// the pressed button's callback_data, which routes it to a pending Ask. ChatID
-// is the chat the pressed message lives in, so the same chat_id authorization
-// that filters inbound messages applies to button presses (0 when the press
-// carries no message, which never authorizes).
-type Callback struct {
-	ChatID int64
-	ID     string
-	Data   string
-}
-
-// MenuOption is one inline-keyboard button in a SendMenu row: Label is the
-// button text, Data is the callback_data returned via the Callbacks channel
-// when the button is pressed.
-type MenuOption struct {
-	Label string `json:"label"`
-	Data  string `json:"data"`
-}
-
 // SendOpt carries per-send delivery options. Variadic on the send methods so
 // the many call sites that don't care stay unchanged.
 type SendOpt struct {
@@ -106,19 +86,10 @@ type tgClient interface {
 	SendAudio(ctx context.Context, chatID int64, filename string, data []byte, caption string) error
 	// SendVideo uploads a video file to the chat with an optional caption.
 	SendVideo(ctx context.Context, chatID int64, filename string, data []byte, caption string) error
-	// SendMenu posts text with one row of inline buttons; each option's Data is
-	// returned via the Callbacks channel when pressed. Returns the sent message id.
-	SendMenu(ctx context.Context, chatID int64, text string, options []MenuOption) (msgID string, err error)
 	// DeleteMessage removes a sent message (the progress bubble's cleanup).
 	// Best-effort: an already-deleted or too-old message is not an error the
 	// caller can act on.
 	DeleteMessage(ctx context.Context, chatID int64, msgID string) error
-	// EditPlain replaces a message's text and removes its inline keyboard. Used
-	// to clear an inline keyboard once a choice is made (the /voice menu).
+	// EditPlain replaces a message's text (the progress bubble's own edits).
 	EditPlain(ctx context.Context, chatID int64, msgID string, text string) error
-	// AnswerCallback acknowledges a callback query, stopping the button's spinner.
-	AnswerCallback(ctx context.Context, callbackID string) error
-	// Callbacks returns the inline-keyboard button-press channel, live for the
-	// client's lifetime. Consumers stop reading on their own ctx.
-	Callbacks(ctx context.Context) <-chan Callback
 }

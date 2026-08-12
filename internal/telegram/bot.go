@@ -245,7 +245,6 @@ func (b *Bot) AdoptSession(s *shell3.Session) {
 // Run consumes inbound messages and the wake bus until ctx is cancelled.
 func (b *Bot) Run(ctx context.Context) {
 	go b.consumeWakes(ctx)
-	go b.consumeCallbacks(ctx)
 	for {
 		select {
 		case <-ctx.Done():

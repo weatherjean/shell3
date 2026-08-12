@@ -28,7 +28,6 @@ var mediaHTTPClient = &http.Client{Timeout: 60 * time.Second}
 type BotAPIClient struct {
 	b      *bot.Bot
 	out    chan Msg
-	cb     chan Callback
 	log    applog.Logger
 	health *pollHealth
 }
@@ -42,7 +41,7 @@ func NewBotAPIClient(ctx context.Context, token string, lg applog.Logger) (*BotA
 		lg = applog.Noop{}
 	}
 	c := &BotAPIClient{
-		out: make(chan Msg, 32), cb: make(chan Callback, 64),
+		out: make(chan Msg, 32),
 		log: lg, health: newPollHealth(),
 	}
 	b, err := bot.New(token,
@@ -72,25 +71,6 @@ func (c *BotAPIClient) onUpdate(ctx context.Context, b *bot.Bot, u *models.Updat
 	// outage the errors handler recorded.
 	if recovered, outage, fails := c.health.ok(); recovered {
 		c.log.Warn("telegram transport recovered", "outage", outage.Round(time.Second).String(), "errors", fails)
-	}
-	// Inline-keyboard button presses (tool-call hook approval) arrive as callback
-	// queries, not messages. Route them to the callback channel and stop.
-	if u.CallbackQuery != nil {
-		// Carry the pressed message's chat so the Bot can apply the same chat_id
-		// filter it applies to inbound messages. An inaccessible/absent message
-		// leaves it 0, which authorizes nothing.
-		var cbChat int64
-		if msg := u.CallbackQuery.Message.Message; msg != nil {
-			cbChat = msg.Chat.ID
-		}
-		select {
-		case c.cb <- Callback{ChatID: cbChat, ID: u.CallbackQuery.ID, Data: u.CallbackQuery.Data}:
-		default:
-			// Buffer full (64 deep): drop the press. The waiting Ask then resolves
-			// via its tool-call hook ask-timeout → deny, which is the fail-safe
-			// direction. A human tap rate filling 64 is not realistic in practice.
-		}
-		return
 	}
 	if u.Message == nil {
 		return
@@ -347,14 +327,9 @@ func (c *BotAPIClient) DeleteMessage(ctx context.Context, chatID int64, msgID st
 	return err
 }
 
-// Callbacks returns the inline-keyboard button-press channel. The channel lives
-// for the client's lifetime (its source goroutine stops when the ctx passed to
-// NewBotAPIClient is cancelled); the ctx argument here is unused. Consumers stop
-// reading on their own ctx (see consumeCallbacks).
-func (c *BotAPIClient) Callbacks(_ context.Context) <-chan Callback { return c.cb }
-
-// EditPlain replaces a message's text and removes its inline keyboard (omitting
-// ReplyMarkup on editMessageText clears it), so stale inline buttons disappear.
+// EditPlain replaces a message's text (omitting ReplyMarkup on
+// editMessageText leaves any existing keyboard alone; nothing sends one
+// anymore).
 func (c *BotAPIClient) EditPlain(ctx context.Context, chatID int64, msgID string, text string) error {
 	mid, err := strconv.Atoi(msgID)
 	if err != nil {
@@ -365,13 +340,6 @@ func (c *BotAPIClient) EditPlain(ctx context.Context, chatID int64, msgID string
 		MessageID: mid,
 		Text:      text,
 	})
-	return err
-}
-
-// AnswerCallback acknowledges a callback query so the button stops showing a
-// loading spinner. Best-effort.
-func (c *BotAPIClient) AnswerCallback(ctx context.Context, callbackID string) error {
-	_, err := c.b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: callbackID})
 	return err
 }
 
@@ -476,25 +444,4 @@ func (c *BotAPIClient) SendVideo(ctx context.Context, chatID int64, filename str
 		Caption: caption,
 	})
 	return err
-}
-
-// SendMenu posts text with one row of inline buttons, one per option; a
-// press's Data is delivered via the Callbacks channel. Returns the sent
-// message id.
-func (c *BotAPIClient) SendMenu(ctx context.Context, chatID int64, text string, options []MenuOption) (string, error) {
-	row := make([]models.InlineKeyboardButton, len(options))
-	for i, o := range options {
-		row[i] = models.InlineKeyboardButton{Text: o.Label, CallbackData: o.Data}
-	}
-	m, err := c.b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID: chatID,
-		Text:   text,
-		ReplyMarkup: models.InlineKeyboardMarkup{
-			InlineKeyboard: [][]models.InlineKeyboardButton{row},
-		},
-	})
-	if err != nil {
-		return "", err
-	}
-	return strconv.Itoa(m.ID), nil
 }

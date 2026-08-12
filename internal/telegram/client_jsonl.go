@@ -40,19 +40,17 @@ var ErrNoHTML = errors.New("jsonl transport carries markdown, not HTML")
 // Inbound (one JSON object per line):
 //
 //	{"type":"message","id":"…","reply_to_id":"…","text":"…","reply_to":"…","media":[{"path","mime","filename"}]}
-//	{"type":"callback","id":"…","data":"…"}
 //
 // Malformed lines and unknown types are logged and ignored (forward compat);
 // EOF closes the inbound channel, which stops Bot.Run — clean shutdown.
 //
-// Outbound: hello, send, media, menu, edit, typing, ack — each one
-// line, mutex-serialized. Message ids are opaque strings: inbound ids are the
+// Outbound: hello, send, media, edit, typing — each one line,
+// mutex-serialized. Message ids are opaque strings: inbound ids are the
 // client's own (assigned "c<boot>-<n>" when omitted), outbound ids are
 // "a<boot>-<n>" where boot is the process start time, keeping agent ids unique
 // across restarts so the persistent thread index stays valid.
 type JSONLClient struct {
 	in     chan Msg
-	cb     chan Callback
 	chatID int64
 	spool  string // dir for outbound media files (created on first use)
 
@@ -76,7 +74,6 @@ type JSONLClient struct {
 func NewJSONLClient(r io.Reader, w io.Writer, chatID int64, spool string) *JSONLClient {
 	return &JSONLClient{
 		in:     make(chan Msg, 16),
-		cb:     make(chan Callback, 16),
 		chatID: chatID,
 		spool:  spool,
 		Logf:   func(string, ...any) {},
@@ -95,7 +92,6 @@ type jsonlInEvent struct {
 	Text      string         `json:"text"`
 	ReplyTo   string         `json:"reply_to"`
 	Media     []jsonlInMedia `json:"media"`
-	Data      string         `json:"data"`
 }
 
 type jsonlInMedia struct {
@@ -107,21 +103,19 @@ type jsonlInMedia struct {
 // jsonlOutEvent is the union of every outbound line's fields; omitempty keeps
 // each event to its own vocabulary.
 type jsonlOutEvent struct {
-	Type       string       `json:"type"`
-	Protocol   int          `json:"protocol,omitempty"`
-	Commands   []Command    `json:"commands,omitempty"`
-	ID         string       `json:"id,omitempty"`
-	ReplyToID  string       `json:"reply_to_id,omitempty"`
-	Text       string       `json:"text,omitempty"`
-	Kind       string       `json:"kind,omitempty"`
-	Path       string       `json:"path,omitempty"`
-	Filename   string       `json:"filename,omitempty"`
-	Caption    string       `json:"caption,omitempty"`
-	Options    []MenuOption `json:"options,omitempty"`
-	Silent     bool         `json:"silent,omitempty"`
-	Yes        string       `json:"yes,omitempty"`
-	No         string       `json:"no,omitempty"`
-	CallbackID string       `json:"callback_id,omitempty"`
+	Type      string    `json:"type"`
+	Protocol  int       `json:"protocol,omitempty"`
+	Commands  []Command `json:"commands,omitempty"`
+	ID        string    `json:"id,omitempty"`
+	ReplyToID string    `json:"reply_to_id,omitempty"`
+	Text      string    `json:"text,omitempty"`
+	Kind      string    `json:"kind,omitempty"`
+	Path      string    `json:"path,omitempty"`
+	Filename  string    `json:"filename,omitempty"`
+	Caption   string    `json:"caption,omitempty"`
+	Silent    bool      `json:"silent,omitempty"`
+	Yes       string    `json:"yes,omitempty"`
+	No        string    `json:"no,omitempty"`
 }
 
 // Updates starts the read loop (once) and returns the inbound channel. The
@@ -131,11 +125,7 @@ func (c *JSONLClient) Updates(ctx context.Context) <-chan Msg {
 	return c.in
 }
 
-// Callbacks returns the button-press channel, live for the client's lifetime.
-func (c *JSONLClient) Callbacks(_ context.Context) <-chan Callback { return c.cb }
-
-// readLoop parses input lines into inbound messages/callbacks until EOF or
-// ctx done.
+// readLoop parses input lines into inbound messages until EOF or ctx done.
 func (c *JSONLClient) readLoop(ctx context.Context) {
 	defer close(c.in)
 	sc := bufio.NewScanner(c.r)
@@ -157,12 +147,6 @@ func (c *JSONLClient) readLoop(ctx context.Context) {
 		case "message":
 			select {
 			case c.in <- c.toMsg(ev):
-			case <-ctx.Done():
-				return
-			}
-		case "callback":
-			select {
-			case c.cb <- Callback{ChatID: c.chatID, ID: ev.ID, Data: ev.Data}:
 			case <-ctx.Done():
 				return
 			}
@@ -321,18 +305,7 @@ func (c *JSONLClient) SendVideo(_ context.Context, _ int64, filename string, dat
 	return c.sendMedia("", "video", filename, data, caption, false)
 }
 
-func (c *JSONLClient) SendMenu(_ context.Context, _ int64, text string, options []MenuOption) (string, error) {
-	id := c.nextID("a")
-	c.emit(jsonlOutEvent{Type: "menu", ID: id, Text: text, Options: options})
-	return id, nil
-}
-
 func (c *JSONLClient) EditPlain(_ context.Context, _ int64, msgID string, text string) error {
 	c.emit(jsonlOutEvent{Type: "edit", ID: msgID, Text: text})
-	return nil
-}
-
-func (c *JSONLClient) AnswerCallback(_ context.Context, callbackID string) error {
-	c.emit(jsonlOutEvent{Type: "ack", CallbackID: callbackID})
 	return nil
 }
