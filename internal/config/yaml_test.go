@@ -38,8 +38,6 @@ mcp:
   github:
     command: [github-mcp-server, stdio]
     env: { GITHUB_TOKEN: env:GH }
-media:
-  stt: { model: aux }
 background:
   max_concurrent: 4
 `
@@ -76,9 +74,6 @@ func TestParseYAMLFull(t *testing.T) {
 	}
 	if servers[0].Env["GITHUB_TOKEN"] != "gh" {
 		t.Fatalf("mcp env substitution failed: %+v", servers[0].Env)
-	}
-	if c.STT() == nil || c.STT().ModelRef != "aux" {
-		t.Fatal("media blocks missing")
 	}
 	if c.BackgroundMaxConcurrent != 4 {
 		t.Fatalf("background = %d", c.BackgroundMaxConcurrent)
@@ -182,23 +177,18 @@ func TestParseYAMLMCPValidation(t *testing.T) {
 	}
 }
 
-// TestParseYAMLMediaTTSIsUnknownKey pins the subtraction: media.tts is a
-// removed key, so declaring it is a strict-decode load error like any other
-// unknown field — never silently ignored, never a deprecation warning.
-func TestParseYAMLMediaTTSIsUnknownKey(t *testing.T) {
-	y := "models:\n  m:\n    base_url: u\n    model: x\nmedia:\n  tts: { model: m }\n"
-	if _, err := parseY(t, y, nil); err == nil {
-		t.Fatal("media.tts accepted, want unknown-key load error")
-	}
-}
-
-// TestParseYAMLMediaSTTNeedsModel pins the surviving half of the pattern the
-// deleted media.tts-without-model test used to cover: a media.stt block
-// still requires a model.
-func TestParseYAMLMediaSTTNeedsModel(t *testing.T) {
-	y := "models:\n  m:\n    base_url: u\n    model: x\nmedia:\n  stt: { echo: true }\n"
-	if _, err := parseY(t, y, nil); err == nil || !strings.Contains(err.Error(), "media.stt needs a model") {
-		t.Fatalf("err = %v, want \"media.stt needs a model\"", err)
+// TestParseYAMLMediaBlockIsUnknownKey pins the subtraction: the media: block
+// (imagegen/describe/tts/stt, all now removed) is a removed key entirely, so
+// declaring any sub-block under it is a strict-decode load error like any
+// other unknown field — never silently ignored, never a deprecation warning.
+func TestParseYAMLMediaBlockIsUnknownKey(t *testing.T) {
+	for _, y := range []string{
+		"models:\n  m:\n    base_url: u\n    model: x\nmedia:\n  tts: { model: m }\n",
+		"models:\n  m:\n    base_url: u\n    model: x\nmedia:\n  stt: { model: m }\n",
+	} {
+		if _, err := parseY(t, y, nil); err == nil {
+			t.Fatalf("media: block accepted, want unknown-key load error: %q", y)
+		}
 	}
 }
 
@@ -259,7 +249,7 @@ func TestParseYAMLUnknownKeyNamesConfigNotGoTypes(t *testing.T) {
 	}{
 		{"top level", "web:\n  password: x\n", "shell3.yaml"},
 		{"telegram block", "models:\n  m:\n    base_url: u\n    model: x\ntelegram:\n  dashboard: {}\n", "telegram:"},
-		{"media sub-block", "models:\n  m:\n    base_url: u\n    model: x\nmedia:\n  stt:\n    bogus: 1\n", "media.stt"},
+		{"mcp sub-block", "models:\n  m:\n    base_url: u\n    model: x\nmcp:\n  srv:\n    bogus: 1\n", "an mcp: server"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := parseY(t, tc.yaml, nil)

@@ -74,22 +74,20 @@ func openThreads(rt *shell3.Runtime, surface string) *telegram.ThreadIndex {
 }
 
 // wireHost performs the transport-independent bot wiring shared by
-// `shell3 telegram` and `shell3 serve`: media capabilities + the session
-// decorator, the completion host, the hidden cron dispatch parent, job
-// sources, the cron scheduler, and the /reload coordinator. Returns a cleanup
-// that stops whichever scheduler is CURRENT at shutdown (reload swaps it).
+// `shell3 telegram` and `shell3 serve`: the session decorator, the
+// completion host, the hidden cron dispatch parent, job sources, the cron
+// scheduler, and the /reload coordinator. Returns a cleanup that stops
+// whichever scheduler is CURRENT at shutdown (reload swaps it).
 func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func(), err error) {
 	b.SetWorkDir(workDir) // resolves send_media_telegram relative paths
 	b.SetConfigDir(rt.Parts().ConfigDir())
 	b.SetVersion(version)
 	b.SetRunsRoot(rt.Parts().RunsRoot())
 
-	// Media (STT): built from the runtime's current
-	// config and re-built by the reload closure below. The session decorator
-	// registers, for main chat sessions (not the headless subagent
-	// children), the bot's host tools. Runtime.Reload re-applies the
-	// decorator, so it survives a reload with no separate resync.
-	b.SetMedia(buildMediaCaps(rt))
+	// The session decorator registers, for main chat sessions (not the
+	// headless subagent children), the bot's host tools. Runtime.Reload
+	// re-applies the decorator, so it survives a reload with no separate
+	// resync.
 	// The /quiet toggle: persisted on its own store, read per send.
 	quietStore, err := newQuietStore()
 	if err != nil {
@@ -145,12 +143,11 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 	// /cron's "last run" column reads the live scheduler's history.
 	b.SetCronLastRuns(func() map[string]time.Time { return cronLastRuns(currentSched()) })
 
-	// /reload + the reload tool: rebuild config, swap the cron scheduler,
-	// re-wire media. The bot's host tools need no re-registration —
-	// Runtime.Reload re-applies the session decorator.
+	// /reload + the reload tool: rebuild config, swap the cron scheduler.
+	// The bot's host tools need no re-registration — Runtime.Reload
+	// re-applies the session decorator.
 	b.SetReloader(func() (shell3.ReloadResult, error) {
-		ns, res, err := reloadAndRearm(rt, b, cronSess, currentSched(),
-			func() { b.SetMedia(buildMediaCaps(rt)) })
+		ns, res, err := reloadAndRearm(rt, b, cronSess, currentSched())
 		schedMu.Lock()
 		sched = ns
 		schedMu.Unlock()

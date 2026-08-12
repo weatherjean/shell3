@@ -204,18 +204,6 @@ func cronLastRuns(sched *cron.Scheduler) map[string]time.Time {
 	return out
 }
 
-// buildMediaCaps bundles the runtime's media clients with the one
-// shell3.yaml default the bot reads directly (media.stt.echo). Rebuilt on
-// every reload, since the config may have changed it.
-func buildMediaCaps(rt *shell3.Runtime) *telegram.MediaCaps {
-	caps := &telegram.MediaCaps{Clients: *buildMediaClients(rt)}
-	cfg := rt.Parts().MediaConfig()
-	if stt := cfg.STT(); stt != nil {
-		caps.STTEcho = stt.Echo
-	}
-	return caps
-}
-
 // newQuietStore opens the /quiet toggle's file at ~/.shell3/quiet_mode.json.
 func newQuietStore() (*telegram.QuietStore, error) {
 	home, err := os.UserHomeDir()
@@ -246,15 +234,10 @@ type rearmBot interface {
 // The bot's host tools (send_media_telegram, reload, status) need no
 // explicit re-registration: they are installed via the session decorator,
 // which Runtime.Reload re-applies to every live session.
-// resyncMedia, when non-nil, is called after a successful Reload to rebuild the
-// bot's media capabilities from the freshly reloaded config.
-func reloadAndRearm(r configReloader, b rearmBot, disp cron.Dispatcher, old *cron.Scheduler, resyncMedia func()) (*cron.Scheduler, shell3.ReloadResult, error) {
+func reloadAndRearm(r configReloader, b rearmBot, disp cron.Dispatcher, old *cron.Scheduler) (*cron.Scheduler, shell3.ReloadResult, error) {
 	res, err := r.Reload()
 	if err != nil {
 		return old, res, err
-	}
-	if resyncMedia != nil {
-		resyncMedia()
 	}
 	jobs := r.Cron()
 	if len(jobs) == 0 {

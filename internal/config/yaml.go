@@ -17,7 +17,6 @@ type yamlFile struct {
 	Models        map[string]yamlModel `yaml:"models"`
 	Telegram      *yamlTelegram        `yaml:"telegram"`
 	MCP           map[string]yamlMCP   `yaml:"mcp"`
-	Media         *yamlMedia           `yaml:"media"`
 	Background    *yamlBackground      `yaml:"background"`
 	RunsKeepDays  *int                 `yaml:"runs_keep_days"`  // nil = default 30; 0 = keep forever
 	MediaKeepDays *int                 `yaml:"media_keep_days"` // nil = default 0 = keep forever
@@ -58,16 +57,6 @@ type yamlMCP struct {
 	Deny    []string          `yaml:"deny"`
 }
 
-type yamlMedia struct {
-	STT *yamlSTT `yaml:"stt"`
-}
-
-type yamlSTT struct {
-	Model    string `yaml:"model"`
-	Language string `yaml:"language"`
-	Echo     bool   `yaml:"echo"`
-}
-
 type yamlBackground struct {
 	MaxConcurrent int `yaml:"max_concurrent"`
 }
@@ -81,8 +70,6 @@ var yamlTypeNames = map[string]string{
 	"yamlModel":      "a models: entry",
 	"yamlTelegram":   "the telegram: block",
 	"yamlMCP":        "an mcp: server",
-	"yamlMedia":      "the media: block",
-	"yamlSTT":        "media.stt",
 	"yamlBackground": "the background: block",
 }
 
@@ -179,14 +166,6 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 			Name: name, Command: s.Command, Env: s.Env, URL: s.URL,
 			Headers: s.Headers, TimeoutSecs: s.Timeout, Allow: s.Allow, Deny: s.Deny,
 		})
-	}
-	if m := f.Media; m != nil {
-		if s := m.STT; s != nil {
-			if s.Model == "" {
-				return fmt.Errorf("shell3.yaml: media.stt needs a model")
-			}
-			c.stt = &STTConfig{ModelRef: s.Model, Language: s.Language, Echo: s.Echo}
-		}
 	}
 	if b := f.Background; b != nil {
 		c.BackgroundMaxConcurrent = b.MaxConcurrent

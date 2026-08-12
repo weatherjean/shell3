@@ -53,7 +53,7 @@ func TestReloadAndRearm_ArmsNewScheduler(t *testing.T) {
 	r := &fakeReloader{jobs: []shell3.CronJob{{Name: "j", Schedule: "@every 1h", Agent: "explorer", Prompt: "p"}}}
 	b := &fakeBot{}
 
-	ns, _, err := reloadAndRearm(r, b, fakeDispatcher{}, nil, nil)
+	ns, _, err := reloadAndRearm(r, b, fakeDispatcher{}, nil)
 	if err != nil {
 		t.Fatalf("reloadAndRearm: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestReloadAndRearm_NoJobsClearsSchedule(t *testing.T) {
 	r := &fakeReloader{} // no jobs after reload
 	b := &fakeBot{}
 
-	ns, _, err := reloadAndRearm(r, b, fakeDispatcher{}, old, nil)
+	ns, _, err := reloadAndRearm(r, b, fakeDispatcher{}, old)
 	if err != nil {
 		t.Fatalf("reloadAndRearm: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestReloadAndRearm_ReloadErrorKeepsOldSchedule(t *testing.T) {
 	r := &fakeReloader{err: errors.New("bad config")}
 	b := &fakeBot{}
 
-	ns, _, err := reloadAndRearm(r, b, fakeDispatcher{}, old, nil)
+	ns, _, err := reloadAndRearm(r, b, fakeDispatcher{}, old)
 	if err == nil {
 		t.Fatal("expected reload error")
 	}
@@ -117,26 +117,6 @@ func TestReloadAndRearm_ReloadErrorKeepsOldSchedule(t *testing.T) {
 	}
 	if b.runnerSet != 0 {
 		t.Errorf("no rearm should happen on reload failure: runnerSet=%d", b.runnerSet)
-	}
-}
-
-// TestReloadAndRearm_ResyncMediaRuns pins that resyncMedia (which rebuilds the
-// bot's media capabilities from the freshly reloaded config) is invoked on a
-// successful reload — and that a nil one is tolerated. The host tools are
-// re-applied by the runtime session decorator instead.
-func TestReloadAndRearm_ResyncMediaRuns(t *testing.T) {
-	r := &fakeReloader{}
-	b := &fakeBot{}
-	ran := false
-
-	if _, _, err := reloadAndRearm(r, b, fakeDispatcher{}, nil, func() { ran = true }); err != nil {
-		t.Fatalf("reloadAndRearm: %v", err)
-	}
-	if !ran {
-		t.Error("resyncMedia must run on a successful reload")
-	}
-	if _, _, err := reloadAndRearm(r, b, fakeDispatcher{}, nil, nil); err != nil {
-		t.Fatalf("nil resyncMedia must be tolerated: %v", err)
 	}
 }
 
@@ -154,7 +134,7 @@ func TestReloadAndRearm_BadScheduleKeepsOldSchedule(t *testing.T) {
 	r := &fakeReloader{jobs: []shell3.CronJob{{Name: "bad", Schedule: "not a schedule", Agent: "explorer", Prompt: "p"}}}
 	b := &fakeBot{}
 
-	ns, _, err := reloadAndRearm(r, b, fakeDispatcher{}, old, nil)
+	ns, _, err := reloadAndRearm(r, b, fakeDispatcher{}, old)
 	if err == nil {
 		t.Fatal("expected cron.New parse error")
 	}

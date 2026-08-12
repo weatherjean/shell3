@@ -84,7 +84,6 @@ type Bot struct {
 	// cron is the adopted parent handle (jobs/runs source for /status views).
 	cron *shell3.Session
 
-	media     *MediaCaps  // STT capabilities; nil when unconfigured
 	quietMode *QuietStore // the /quiet toggle's store; nil = never quiet
 
 	runJob        func(name string) error             // fires a cron job by name; nil if no scheduler
@@ -196,19 +195,6 @@ func (b *Bot) SetVersion(v string) { b.version = v }
 // renders as "never".
 func (b *Bot) SetCronLastRuns(fn func() map[string]time.Time) { b.cronLastRuns = fn }
 
-// SetMedia wires the bot's STT capabilities. The host MUST call it at boot
-// and again after every Runtime.Reload so transcription uses the fresh
-// config.
-//
-// The field goes through b.mu: a reload writes it from whichever goroutine
-// called it (the agent's reload tool applies at end of turn, after the turn
-// slot is released), while a turn goroutine reads it in preflight.
-func (b *Bot) SetMedia(c *MediaCaps) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.media = c
-}
-
 // SetQuiet installs the /quiet toggle's store. Nil (or an unset path) means
 // quiet can never turn on — every post rings.
 func (b *Bot) SetQuiet(s *QuietStore) {
@@ -225,13 +211,6 @@ func (b *Bot) isQuiet() bool {
 	s := b.quietMode
 	b.mu.Unlock()
 	return s.Get() // nil-safe: a nil store reads as off
-}
-
-// mediaCaps returns the current media capabilities.
-func (b *Bot) mediaCaps() *MediaCaps {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.media
 }
 
 // SetWorkDir sets the directory used to resolve relative paths passed to
@@ -309,8 +288,8 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 		return
 	}
 	// Save attachments to the durable media dir — fast, local, no network.
-	// The slow half (Transcribe, preflightText) runs inside the turn
-	// goroutine, never on this loop.
+	// attachmentNote's path-injection runs inside the turn goroutine, never
+	// on this loop.
 	text := strings.TrimSpace(m.Text)
 	saved := saveAttachments(m.Media)
 	if len(saved) == 0 {
@@ -328,7 +307,8 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 	// Text messages ride a short debounce window first: Telegram splits a
 	// long message into several updates arriving back to back, and the burst
 	// merges them into ONE turn. Media messages flush the pending burst and
-	// dispatch immediately (their preflight belongs on a turn goroutine).
+	// dispatch immediately (their attachment note needs the resolved session
+	// from a turn goroutine, never the update loop).
 	if len(saved) == 0 {
 		b.mu.Lock()
 		b.burst = append(b.burst, mail)
@@ -418,11 +398,11 @@ func (b *Bot) runUserTurn(ctx, turnCtx context.Context, cancel context.CancelFun
 	}
 	b.setAnchor(last.m.ID) // the reply anchors at the newest message
 
-	composeText := func(pctx context.Context) string {
+	composeText := func() string {
 		parts := make([]string, 0, len(batch))
 		for _, mail := range batch {
 			out := mail.text
-			if injected := b.preflightText(pctx, mail.saved, sess); injected != "" {
+			if injected := attachmentNote(mail.saved, b.hasTool(sess, "read_media")); injected != "" {
 				if out != "" {
 					out += "\n\n" + injected
 				} else {
@@ -435,12 +415,7 @@ func (b *Bot) runUserTurn(ctx, turnCtx context.Context, cancel context.CancelFun
 	}
 
 	stopTyping := b.keepTyping(ctx)
-	// Preflight runs first, inside the turn goroutine, under turnCtx: /stop's
-	// cancelTurn aborts a hung transcription/description just like the model
-	// call, and the timeout bounds it independently of /stop.
-	pctx, pcancel := context.WithTimeout(turnCtx, preflightTimeout)
-	finalText := composeText(pctx)
-	pcancel()
+	finalText := composeText()
 	reply, _ := b.drainTurnProgress(ctx, sess.Send(turnCtx, finalText))
 	stopTyping()
 	// The NO_REPLY sentinel belongs to wake turns; a model over-generalizing

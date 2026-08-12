@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/weatherjean/shell3/internal/cron"
-	"github.com/weatherjean/shell3/internal/media"
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
@@ -46,14 +45,4 @@ func armCron(disp cron.Dispatcher, jobs []shell3.CronJob) (*cron.Scheduler, erro
 	sched.Start()
 	fmt.Printf("cron: %d job(s) scheduled\n", len(jobs))
 	return sched, nil
-}
-
-// buildMediaClients resolves the media capability (STT)
-// from the runtime's current config, starting the model's run_proxy
-// (at most once, on first use) via the runtime's shared proxy Spawner. Called
-// at boot and again on every reload, since the config may have changed which
-// media block is declared or which model it names.
-func buildMediaClients(rt *shell3.Runtime) *media.Clients {
-	p := rt.Parts()
-	return media.New(p.MediaConfig(), p.EnsureProxy)
 }

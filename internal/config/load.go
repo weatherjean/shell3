@@ -119,15 +119,6 @@ func load(dir string) (*LoadedConfig, error) {
 			}
 		}
 	}
-	var mediaRefs []struct{ block, model string }
-	if c.stt != nil {
-		mediaRefs = append(mediaRefs, struct{ block, model string }{"media.stt", c.stt.ModelRef})
-	}
-	for _, ref := range mediaRefs {
-		if _, ok := c.Model(ref.model); !ok {
-			return nil, fmt.Errorf("%s references unknown model %q", ref.block, ref.model)
-		}
-	}
 	for _, job := range c.cron {
 		if _, ok := c.SubagentByName(job.Agent); !ok {
 			return nil, fmt.Errorf("cron/%s.md: unknown agent %q (must be a subagent from agents/ or a project manager)", job.Name, job.Agent)

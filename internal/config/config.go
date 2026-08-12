@@ -130,14 +130,6 @@ type CronJob struct {
 	Direct bool
 }
 
-// STTConfig is the `media.stt:` block: speech-to-text for inbound voice
-// notes. Echo controls whether the transcript is echoed back to the user
-// before the model turn runs.
-type STTConfig struct {
-	ModelRef, Language string
-	Echo               bool
-}
-
 // MCPServer is one declared server from the shell3.yaml `mcp:` block.
 // Exactly one of Command (stdio) or URL (streamable HTTP) is set — enforced
 // at load.
@@ -180,8 +172,6 @@ type LoadedConfig struct {
 	mcpServers []MCPServer
 	telegram   TelegramConfig
 	cron       []CronJob
-
-	stt *STTConfig
 
 	// hooks maps each governed agent to its hook scripts (see hooks.go).
 	hooks hookSet
@@ -261,9 +251,6 @@ func (c *LoadedConfig) Telegram() TelegramConfig { return c.telegram }
 
 // Cron returns the parsed cron/ jobs in filename order.
 func (c *LoadedConfig) Cron() []CronJob { return c.cron }
-
-// STT returns the parsed media.stt block, nil when not declared.
-func (c *LoadedConfig) STT() *STTConfig { return c.stt }
 
 // MCPServers returns the declared MCP servers sorted by name (YAML map order
 // is unspecified; sorting keeps connect order and status listings
