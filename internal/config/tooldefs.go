@@ -72,6 +72,8 @@ var historyTool = llm.ToolDefinition{
 	Parameters: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
+			"runs":    map[string]any{"type": "boolean", "description": "List recent runs instead of searching. Combine with agent to audit one employee."},
+			"agent":   map[string]any{"type": "string", "description": "List only this agent's runs (implies runs)."},
 			"query":   map[string]any{"type": "string", "description": "FTS5 search: bare words AND together, \"quoted phrases\" match exactly, OR/NOT/prefix* work. Omit when reading a session."},
 			"session": map[string]any{"type": "string", "description": "Session id to read instead of searching"},
 			"around":  map[string]any{"type": "integer", "description": "With session: center the excerpt on this message seq (default: the start)"},

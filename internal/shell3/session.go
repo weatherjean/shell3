@@ -124,6 +124,7 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 				ConfigDir: cfg.ConfigDir,
 				Model:     metaModel,
 				ParentID:  opts.ParentID,
+				Agent:     opts.Agent,
 			}); err == nil {
 				storeID = id
 			} else {

@@ -66,7 +66,7 @@ func (s *Store) DBPath() string { return filepath.Join(s.root, DBFile) }
 //     tables already present.
 //  2. adds threads.title/preview/created_at/updated_at/deleted for webui's
 //     richer thread metadata (see internal/webui/threads.go).
-const schemaVersion = 2
+const schemaVersion = 3
 
 // openDB opens path, applying the schema fresh or recreating the file
 // outright when its stamped version doesn't match schemaVersion. Per the
@@ -286,6 +286,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	model              TEXT NOT NULL DEFAULT '',
 	status             TEXT NOT NULL DEFAULT 'live',
 	parent_id          TEXT NOT NULL DEFAULT '',
+	agent              TEXT NOT NULL DEFAULT '',
 	started_at         TEXT NOT NULL,
 	ended_at           TEXT NOT NULL DEFAULT '',
 	last_at            TEXT NOT NULL,

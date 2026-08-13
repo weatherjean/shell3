@@ -14,12 +14,16 @@ import (
 
 // Meta is the per-session metadata (one row in the sessions table).
 type Meta struct {
-	ID        string    `json:"id"`
-	Workdir   string    `json:"workdir"`
-	ConfigDir string    `json:"config_dir"`
-	Model     string    `json:"model"`
-	Status    string    `json:"status"` // "live" | "ended"
-	ParentID  string    `json:"parent_id,omitempty"`
+	ID        string `json:"id"`
+	Workdir   string `json:"workdir"`
+	ConfigDir string `json:"config_dir"`
+	Model     string `json:"model"`
+	Status    string `json:"status"` // "live" | "ended"
+	ParentID  string `json:"parent_id,omitempty"`
+	// Agent is the name of the agent that ran this session. It is what makes
+	// "show me what ampd-leads did" answerable — auditing an employee needs its
+	// runs findable by name, not just by id.
+	Agent     string    `json:"agent,omitempty"`
 	StartedAt time.Time `json:"started_at"`
 	EndedAt   time.Time `json:"ended_at,omitzero"`
 	LastAt    time.Time `json:"last_at"`
@@ -37,9 +41,9 @@ func (s *Store) NewSession(m Meta) (string, error) {
 	id := newID()
 	now := time.Now().UTC()
 	_, err := s.db.Exec(`INSERT INTO sessions
-		(id, workdir, config_dir, model, status, parent_id, started_at, last_at, last_prompt_tokens)
-		VALUES (?,?,?,?,?,?,?,?,?)`,
-		id, m.Workdir, m.ConfigDir, m.Model, "live", m.ParentID,
+		(id, workdir, config_dir, model, status, parent_id, agent, started_at, last_at, last_prompt_tokens)
+		VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		id, m.Workdir, m.ConfigDir, m.Model, "live", m.ParentID, m.Agent,
 		encTime(now), encTime(now), m.LastPromptTokens)
 	if err != nil {
 		return "", fmt.Errorf("runs: new session: %w", err)
@@ -185,7 +189,7 @@ func (s *Store) TouchSession(id string) error {
 
 // ListSessions returns metas newest-first (by ID, which sorts chronologically).
 func (s *Store) ListSessions(limit int) ([]Meta, error) {
-	q := `SELECT id, workdir, config_dir, model, status, parent_id,
+	q := `SELECT id, workdir, config_dir, model, status, parent_id, agent,
 		started_at, ended_at, last_at, last_prompt_tokens
 		FROM sessions ORDER BY id DESC`
 	var rows *sql.Rows
@@ -204,7 +208,7 @@ func (s *Store) ListSessions(limit int) ([]Meta, error) {
 		var m Meta
 		var started, ended, last string
 		if err := rows.Scan(&m.ID, &m.Workdir, &m.ConfigDir, &m.Model, &m.Status,
-			&m.ParentID, &started, &ended, &last, &m.LastPromptTokens); err != nil {
+			&m.ParentID, &m.Agent, &started, &ended, &last, &m.LastPromptTokens); err != nil {
 			return nil, fmt.Errorf("runs: list: %w", err)
 		}
 		m.StartedAt, m.EndedAt, m.LastAt = decTime(started), decTime(ended), decTime(last)

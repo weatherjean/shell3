@@ -1085,11 +1085,13 @@ func (m *jobManager) formatJobStatus(id string) string {
 		summary  string
 		errText  string
 		polls    int
+		childID  string
 	)
 	if j != nil {
 		jKind = j.kind
 		finished, exit = j.finished, j.exit
 		summary, errText = j.summary, j.errText
+		childID = j.childID
 		if !finished {
 			j.statusPolls++
 			polls = j.statusPolls
@@ -1106,6 +1108,13 @@ func (m *jobManager) formatJobStatus(id string) string {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "task %s: %s (%s)\n", id, jobStatusLabel(finished, exit, errText), kind)
+	// The child's runs id, so the caller can read what the subagent actually
+	// did (history {session: <id>}) rather than judging it by its summary.
+	// Reviewing an employee's transcript is how you find out it took a
+	// shortcut; without this the transcript is unreachable by name.
+	if childID != "" {
+		fmt.Fprintf(&b, "transcript: %s  (read it with the history tool: {\"session\": \"%s\"})\n", childID, childID)
+	}
 
 	if jKind == JobSubagent {
 		if errText != "" {
