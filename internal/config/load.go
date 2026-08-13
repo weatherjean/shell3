@@ -24,12 +24,11 @@ func Load(dir string) (*LoadedConfig, error) {
 }
 
 func load(dir string) (*LoadedConfig, error) {
-	yamlPath := filepath.Join(dir, "shell3.yaml")
-	data, err := os.ReadFile(yamlPath)
+	// A shell3.sh kit carries its own wiring in a `shell3:` block, so the
+	// directory needs no shell3.yaml. The kit's agents/tools/skills are loaded
+	// by agentsetup; here we only lift the wiring.
+	data, kitWiring, err := readWiring(dir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("no shell3.yaml — run 'shell3 boot' to create one")
-		}
 		return nil, err
 	}
 	secrets, err := loadDotEnv(filepath.Join(dir, ".env"))
@@ -41,6 +40,19 @@ func load(dir string) (*LoadedConfig, error) {
 		return nil, err
 	}
 	warn := func(w string) { c.warnings = append(c.warnings, w) }
+
+	// A kit supplies the agents, so the markdown tree below is skipped
+	// entirely: no agent.md, no agents/, no skills/, no projects/.
+	if kitWiring {
+		c.agent = Agent{AgentCommon: AgentCommon{Name: "agent"}}
+		if err := c.loadCron(dir); err != nil {
+			return nil, err
+		}
+		if c.hooks, err = discoverHooks(dir, nil, warn); err != nil {
+			return nil, fmt.Errorf("hooks: %w", err)
+		}
+		return c, nil
+	}
 
 	// agent.md — the main agent (required).
 	agentData, err := os.ReadFile(filepath.Join(dir, "agent.md"))

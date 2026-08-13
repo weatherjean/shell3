@@ -492,8 +492,20 @@ func BuildParts(opts Options) (*Parts, func(), error) {
 		configDir: b.configDir,
 		mcp:       b.mcp, mcpWarns: b.mcpWarns,
 	}
+	// A shell3.sh beside the config is THE config: its agents, tools, and
+	// skills take precedence over the markdown tree. Presence enables it —
+	// there is no toggle.
+	if kp := filepath.Join(b.configDir, KitFileName); fileExists(kp) {
+		if err := p.LoadKit(kp); err != nil {
+			b.closeAll()
+			return nil, noop, err
+		}
+	}
 	return p, b.closeAll, nil
 }
+
+// KitFileName is the kit a config directory is read from when present.
+const KitFileName = "shell3.sh"
 
 // builder accumulates the state and open resources used to assemble the shared
 // Parts across BuildParts' stages. closers is a LIFO teardown stack: stages
@@ -637,10 +649,12 @@ func ResolveConfigDir(flag, homeDir string) (string, error) {
 	if dir == "" {
 		dir = paths.NewGlobal(homeDir).Root
 	}
-	if fileExists(filepath.Join(dir, "shell3.yaml")) {
+	// A kit is a complete config on its own — it carries its wiring in a
+	// `shell3:` block — so either file makes the directory valid.
+	if fileExists(filepath.Join(dir, KitFileName)) || fileExists(filepath.Join(dir, "shell3.yaml")) {
 		return dir, nil
 	}
-	return "", fmt.Errorf("no shell3.yaml in %s — run 'shell3 boot' to create one (or pass --config <dir>)", dir)
+	return "", fmt.Errorf("no %s or shell3.yaml in %s — run 'shell3 boot' to create one (or pass --config <dir>)", KitFileName, dir)
 }
 
 func fileExists(p string) bool {
