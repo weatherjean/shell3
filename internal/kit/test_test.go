@@ -9,7 +9,10 @@ import (
 const testKit = `#---
 # agent: a
 #---
-a_prompt() { echo hi; }
+a_prompt() { cat <<'EOF'
+hi
+EOF
+}
 
 #---
 # tool: stack-check
@@ -64,7 +67,10 @@ func TestRunTestsPasses(t *testing.T) {
 const failingKit = `#---
 # agent: a
 #---
-a_prompt() { echo hi; }
+a_prompt() { cat <<'EOF'
+hi
+EOF
+}
 
 #---
 # tool: t
@@ -100,7 +106,10 @@ func TestToolDispatchEnforcesRequired(t *testing.T) {
 	src := `#---
 # agent: a
 #---
-a_prompt() { echo hi; }
+a_prompt() { cat <<'EOF'
+hi
+EOF
+}
 
 #---
 # tool: need
@@ -130,7 +139,10 @@ func TestToolDispatchAppliesDefaults(t *testing.T) {
 	src := `#---
 # agent: a
 #---
-a_prompt() { echo hi; }
+a_prompt() { cat <<'EOF'
+hi
+EOF
+}
 
 #---
 # tool: d
@@ -161,7 +173,10 @@ func TestToolDispatchIncludesSharedTools(t *testing.T) {
 # agent: a
 # use: [web]
 #---
-a_prompt() { echo hi; }
+a_prompt() { cat <<'EOF'
+hi
+EOF
+}
 
 #---
 # test: search — shared tool is callable

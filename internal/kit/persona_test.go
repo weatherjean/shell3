@@ -1,0 +1,164 @@
+package kit
+
+import (
+	"strings"
+	"testing"
+)
+
+const capKit = `#---
+# agent: main
+#---
+main_prompt() { cat <<'EOF'
+I am the main agent.
+EOF
+}
+
+#---
+# agent: worker
+# use: [bash, web, mcp:tavily]
+#---
+worker_prompt() { cat <<'EOF'
+I do one job.
+EOF
+}
+
+#---
+# tool: local
+# description: a local verb
+#---
+worker_local() { echo local; }
+
+#---
+# skill: house-rules
+#---
+worker_rules() { cat <<'EOF'
+Never invent a company detail.
+EOF
+}
+
+#---
+# shared: web
+#---
+#---
+# tool: search
+# description: search the web
+# params:
+#   q: {type: string, required: true}
+#---
+web_search() { echo "q=$q"; }
+`
+
+// The agent you talk to gets every built-in without declaring one.
+func TestResolveMainGetsAllBuiltins(t *testing.T) {
+	k := mustParse(t, capKit)
+	r, err := k.Resolve(k.Agents[0], true)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(r.Builtins) != len(Builtins) {
+		t.Fatalf("main builtins = %v, want all %v", r.Builtins, Builtins)
+	}
+}
+
+// An employee gets exactly what it names, and nothing else.
+func TestResolveEmployeeGetsOnlyDeclared(t *testing.T) {
+	k := mustParse(t, capKit)
+	r, err := k.Resolve(k.Agents[1], false)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(r.Builtins) != 1 || r.Builtins[0] != "bash" {
+		t.Fatalf("builtins = %v, want [bash]", r.Builtins)
+	}
+	if len(r.MCP) != 1 || r.MCP[0] != "tavily" {
+		t.Fatalf("mcp = %v, want [tavily]", r.MCP)
+	}
+	if len(r.Tools) != 2 {
+		t.Fatalf("tools = %+v, want local + search", r.Tools)
+	}
+	if _, ok := r.ToolByName("search"); !ok {
+		t.Fatal("shared group tool did not reach the agent")
+	}
+}
+
+// A typo in use: must fail loudly, not silently mean "no capability".
+func TestResolveUnknownUseEntryFails(t *testing.T) {
+	src := `#---
+# agent: a
+# use: [notathing]
+#---
+a_prompt() { cat <<'EOF'
+hi
+EOF
+}
+`
+	k := mustParse(t, src)
+	if _, err := k.Resolve(k.Agents[0], false); err == nil {
+		t.Fatal("want error for an unresolvable use: entry")
+	}
+}
+
+func TestResolveCollisionFails(t *testing.T) {
+	src := `#---
+# agent: a
+# use: [g]
+#---
+a_prompt() { cat <<'EOF'
+hi
+EOF
+}
+
+#---
+# tool: dup
+# description: local
+#---
+a_dup() { :; }
+
+#---
+# shared: g
+#---
+#---
+# tool: dup
+# description: shared
+#---
+g_dup() { :; }
+`
+	k := mustParse(t, src)
+	if _, err := k.Resolve(k.Agents[0], false); err == nil {
+		t.Fatal("want error when a shared tool collides with a local one")
+	}
+}
+
+func TestSystemPromptInlinesSkills(t *testing.T) {
+	k := mustParse(t, capKit)
+	r, err := k.Resolve(k.Agents[1], false)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	p := r.SystemPrompt()
+	if !strings.Contains(p, "I do one job.") {
+		t.Fatalf("prompt missing body: %q", p)
+	}
+	if !strings.Contains(p, "### house-rules") || !strings.Contains(p, "Never invent") {
+		t.Fatalf("prompt missing skill: %q", p)
+	}
+}
+
+func TestToolDefsSchema(t *testing.T) {
+	k := mustParse(t, capKit)
+	r, err := k.Resolve(k.Agents[1], false)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	defs := r.ToolDefs()
+	if len(defs) != 2 || defs[0].Name != "local" || defs[1].Name != "search" {
+		t.Fatalf("defs = %+v, want sorted local, search", defs)
+	}
+	if defs[1].Description != "search the web" {
+		t.Fatalf("search description = %q", defs[1].Description)
+	}
+	props, _ := defs[1].Parameters["properties"].(map[string]any)
+	if _, ok := props["q"]; !ok {
+		t.Fatalf("search params = %#v", defs[1].Parameters)
+	}
+}

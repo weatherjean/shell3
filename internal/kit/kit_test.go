@@ -104,8 +104,8 @@ func TestParseToolBeforeScopeFails(t *testing.T) {
 
 func TestParseDuplicateFuncNameFails(t *testing.T) {
 	src := []byte(
-		"#---\n# agent: a\n#---\ndup() { :; }\n" +
-			"#---\n# agent: b\n#---\ndup() { :; }\n")
+		"#---\n# agent: a\n#---\ndup() { cat <<'EOF'\nhi\nEOF\n}\n" +
+			"#---\n# agent: b\n#---\ndup() { cat <<'EOF'\nhi\nEOF\n}\n")
 	if _, err := Parse(src); err == nil {
 		t.Fatal("want error for a duplicate function name")
 	}
@@ -113,15 +113,15 @@ func TestParseDuplicateFuncNameFails(t *testing.T) {
 
 func TestParseDuplicateAgentNameFails(t *testing.T) {
 	src := []byte(
-		"#---\n# agent: a\n#---\nf1() { :; }\n" +
-			"#---\n# agent: a\n#---\nf2() { :; }\n")
+		"#---\n# agent: a\n#---\np() { cat <<'EOF'\nhi\nEOF\n}\n" +
+			"#---\n# agent: a\n#---\nf2() { cat <<'EOF'\nhi\nEOF\n}\n")
 	if _, err := Parse(src); err == nil {
 		t.Fatal("want error for a duplicate agent name")
 	}
 }
 
 func TestParseBlockWithNoFunctionFails(t *testing.T) {
-	src := []byte("#---\n# agent: a\n#---\nf() { :; }\n#---\n# tool: t\n# description: x\n#---\n")
+	src := []byte("#---\n# agent: a\n#---\np() { cat <<'EOF'\nhi\nEOF\n}\n#---\n# tool: t\n# description: x\n#---\n")
 	if _, err := Parse(src); err == nil {
 		t.Fatal("want error for a declaration with no function under it")
 	}
@@ -142,7 +142,7 @@ func TestParseMissingPromptFuncDoesNotStealNextFunc(t *testing.T) {
 
 func TestParseDuplicateToolNameInScopeFails(t *testing.T) {
 	src := []byte(
-		"#---\n# agent: a\n#---\np() { :; }\n" +
+		"#---\n# agent: a\n#---\np() { cat <<'EOF'\nhi\nEOF\n}\n" +
 			"#---\n# tool: t\n# description: x\n#---\nf1() { :; }\n" +
 			"#---\n# tool: t\n# description: y\n#---\nf2() { :; }\n")
 	if _, err := Parse(src); err == nil {
@@ -152,7 +152,7 @@ func TestParseDuplicateToolNameInScopeFails(t *testing.T) {
 
 func TestParseToolNeedsDescription(t *testing.T) {
 	src := []byte(
-		"#---\n# agent: a\n#---\np() { :; }\n" +
+		"#---\n# agent: a\n#---\np() { cat <<'EOF'\nhi\nEOF\n}\n" +
 			"#---\n# tool: t\n#---\nf() { :; }\n")
 	if _, err := Parse(src); err == nil {
 		t.Fatal("want error for a tool with no description")
@@ -160,7 +160,7 @@ func TestParseToolNeedsDescription(t *testing.T) {
 }
 
 func TestParseBadParamTypeFails(t *testing.T) {
-	src := []byte("#---\n# agent: a\n#---\nf() { :; }\n" +
+	src := []byte("#---\n# agent: a\n#---\np() { cat <<'EOF'\nhi\nEOF\n}\n" +
 		"#---\n# tool: t\n# description: x\n# params:\n#   n: {type: float}\n#---\ng() { :; }\n")
 	if _, err := Parse(src); err == nil {
 		t.Fatal("want error for an unsupported param type")
@@ -168,7 +168,7 @@ func TestParseBadParamTypeFails(t *testing.T) {
 }
 
 func TestParseBadParamNameFails(t *testing.T) {
-	src := []byte("#---\n# agent: a\n#---\np() { :; }\n" +
+	src := []byte("#---\n# agent: a\n#---\np() { cat <<'EOF'\nhi\nEOF\n}\n" +
 		"#---\n# tool: t\n# description: x\n# params:\n#   my-arg: {type: string}\n#---\nf() { :; }\n")
 	if _, err := Parse(src); err == nil {
 		t.Fatal("want error: a hyphenated param cannot be an environment variable")
@@ -176,9 +176,34 @@ func TestParseBadParamNameFails(t *testing.T) {
 }
 
 func TestParseParamShadowingPathFails(t *testing.T) {
-	src := []byte("#---\n# agent: a\n#---\np() { :; }\n" +
+	src := []byte("#---\n# agent: a\n#---\np() { cat <<'EOF'\nhi\nEOF\n}\n" +
 		"#---\n# tool: t\n# description: x\n# params:\n#   PATH: {type: string}\n#---\nf() { :; }\n")
 	if _, err := Parse(src); err == nil {
 		t.Fatal("want error: a param must not shadow PATH")
+	}
+}
+
+func TestParsePromptAndSkillBodies(t *testing.T) {
+	k, err := Parse([]byte(sample))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if k.Agents[0].Prompt != "hello" {
+		t.Fatalf("main prompt = %q, want %q", k.Agents[0].Prompt, "hello")
+	}
+	if k.Agents[1].Prompt != "find shops" {
+		t.Fatalf("ampd prompt = %q", k.Agents[1].Prompt)
+	}
+	if k.Agents[1].Skills[0].Body != "a real shop has a cart" {
+		t.Fatalf("skill body = %q", k.Agents[1].Skills[0].Body)
+	}
+}
+
+// A prompt that is not a heredoc cannot be read without running the kit, which
+// the parser must never do.
+func TestParsePromptWithoutHeredocFails(t *testing.T) {
+	src := []byte("#---\n# agent: a\n#---\np() { echo hi; }\n")
+	if _, err := Parse(src); err == nil {
+		t.Fatal("want error for a prompt with no heredoc")
 	}
 }

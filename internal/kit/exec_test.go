@@ -147,7 +147,10 @@ func TestRunnerSourcingHasNoSideEffects(t *testing.T) {
 	src := `#---
 # agent: a
 #---
-a_prompt() { echo hi; }
+a_prompt() { cat <<'EOF'
+hi
+EOF
+}
 
 #---
 # tool: t

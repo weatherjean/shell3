@@ -1,6 +1,9 @@
 package kit
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Tool is one declared verb: what the model sees, plus the shell function that
 // implements it. Params reach the function body as environment variables.
@@ -13,7 +16,10 @@ type Tool struct {
 // Skill is knowledge an agent reads; Func emits the body on stdout.
 type Skill struct {
 	Name, Func string
-	Line       int
+	// Body is the skill's prose, read statically from its heredoc at parse
+	// time — a kit is never executed to learn what it says.
+	Body string
+	Line int
 }
 
 // Test is one declared tool test; Func runs it under the test harness.
@@ -26,11 +32,14 @@ type Test struct {
 // under it.
 type Agent struct {
 	Name, Desc, Model, Workdir, PromptFunc string
-	Use                                    []string
-	Tools                                  []Tool
-	Skills                                 []Skill
-	Tests                                  []Test
-	Line                                   int
+	// Prompt is the system prompt, read statically from the prompt function's
+	// heredoc.
+	Prompt string
+	Use    []string
+	Tools  []Tool
+	Skills []Skill
+	Tests  []Test
+	Line   int
 }
 
 // Group is a shared bundle of tools and skills that agents import via `use:`.
@@ -50,6 +59,7 @@ type Kit struct {
 
 // Parse turns kit source into typed declarations. It never executes the file.
 func Parse(src []byte) (*Kit, error) {
+	srcLines := strings.Split(string(src), "\n")
 	blocks, err := scanBlocks(src)
 	if err != nil {
 		return nil, err
@@ -122,9 +132,13 @@ func Parse(src []byte) (*Kit, error) {
 				if !ok {
 					return nil, fmt.Errorf("line %d: agent %q has no prompt function under it", d.line, d.name)
 				}
+				prompt, perr := extractHeredoc(srcLines, f.line, "agent", d.name)
+				if perr != nil {
+					return nil, fmt.Errorf("line %d: %w", d.line, perr)
+				}
 				k.Agents = append(k.Agents, Agent{
 					Name: d.name, Desc: d.desc, Model: d.model, Workdir: d.workdir,
-					Use: d.use, PromptFunc: f.name, Line: d.line,
+					Use: d.use, PromptFunc: f.name, Prompt: prompt, Line: d.line,
 				})
 				curAgent, curGroup = &k.Agents[len(k.Agents)-1], nil
 			} else {
@@ -140,7 +154,7 @@ func Parse(src []byte) (*Kit, error) {
 			if !ok {
 				return nil, fmt.Errorf("line %d: %s %q has no function under it", d.line, d.kind, d.name)
 			}
-			if err := attach(curAgent, curGroup, d, f); err != nil {
+			if err := attach(curAgent, curGroup, d, f, srcLines); err != nil {
 				return nil, err
 			}
 		}
@@ -149,7 +163,7 @@ func Parse(src []byte) (*Kit, error) {
 }
 
 // attach files a tool/skill/test onto whichever scope is open.
-func attach(a *Agent, g *Group, d decl, f fnDef) error {
+func attach(a *Agent, g *Group, d decl, f fnDef, srcLines []string) error {
 	switch d.kind {
 	case declTool:
 		if d.desc == "" {
@@ -185,7 +199,11 @@ func attach(a *Agent, g *Group, d decl, f fnDef) error {
 		}
 
 	case declSkill:
-		s := Skill{Name: d.name, Func: f.name, Line: d.line}
+		body, err := extractHeredoc(srcLines, f.line, "skill", d.name)
+		if err != nil {
+			return fmt.Errorf("line %d: %w", d.line, err)
+		}
+		s := Skill{Name: d.name, Func: f.name, Body: body, Line: d.line}
 		if a != nil {
 			a.Skills = append(a.Skills, s)
 		} else {
