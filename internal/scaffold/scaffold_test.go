@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/config"
+	"github.com/weatherjean/shell3/internal/kit"
 )
 
 // writeEnv writes the .env the rendered config references (empty values are
@@ -26,9 +27,9 @@ func TestRenderBaseConfig(t *testing.T) {
 	if err := RenderBaseConfig(dir, v, false); err != nil {
 		t.Fatalf("RenderBaseConfig: %v", err)
 	}
-	cfg, err := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
+	cfg, err := os.ReadFile(filepath.Join(dir, "shell3.sh"))
 	if err != nil {
-		t.Fatalf("read shell3.yaml: %v", err)
+		t.Fatalf("read shell3.sh: %v", err)
 	}
 	for _, want := range []string{
 		"  main:",
@@ -39,21 +40,20 @@ func TestRenderBaseConfig(t *testing.T) {
 		"token: env:TELEGRAM_TOKEN",
 	} {
 		if !strings.Contains(string(cfg), want) {
-			t.Errorf("shell3.yaml missing %q", want)
+			t.Errorf("shell3.sh missing %q", want)
 		}
 	}
 	if strings.Contains(string(cfg), "{{") {
-		t.Errorf("shell3.yaml still contains an unrendered template delimiter")
+		t.Errorf("shell3.sh still contains an unrendered template delimiter")
 	}
-	agentMD, err := os.ReadFile(filepath.Join(dir, "agent.md"))
+	agentMD, err := os.ReadFile(filepath.Join(dir, "shell3.sh"))
 	if err != nil {
-		t.Fatalf("read agent.md: %v", err)
+		t.Fatalf("read shell3.sh: %v", err)
 	}
 	if !strings.Contains(string(agentMD), "model: main") {
-		t.Error("agent.md frontmatter should reference the model")
+		t.Error("shell3.sh should reference the model")
 	}
 	for _, p := range []string{
-		"agents/assistant.md",
 		"hooks/tool-call.sh",
 		"skills/planning.md", "skills/history.md",
 		"skills/self-evolve.md", "skills/browser.md", "skills/scripting.md",
@@ -76,12 +76,12 @@ func TestRenderBaseConfigChatID(t *testing.T) {
 	if err := RenderBaseConfig(dir, v, false); err != nil {
 		t.Fatalf("RenderBaseConfig: %v", err)
 	}
-	cfg, err := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
+	cfg, err := os.ReadFile(filepath.Join(dir, "shell3.sh"))
 	if err != nil {
-		t.Fatalf("read shell3.yaml: %v", err)
+		t.Fatalf("read shell3.sh: %v", err)
 	}
 	if !strings.Contains(string(cfg), `chat_id: "123456789"`) {
-		t.Errorf("shell3.yaml missing quoted chat_id; got:\n%s", cfg)
+		t.Errorf("shell3.sh missing quoted chat_id; got:\n%s", cfg)
 	}
 }
 
@@ -92,10 +92,10 @@ func TestRenderBaseConfigContextWindow(t *testing.T) {
 		if err := RenderBaseConfig(dir, v, false); err != nil {
 			t.Fatalf("RenderBaseConfig: %v", err)
 		}
-		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
+		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.sh"))
 		for _, want := range []string{"context_window: 200000", "compact_at: 150000"} {
 			if !strings.Contains(string(cfg), want) {
-				t.Errorf("shell3.yaml missing %q", want)
+				t.Errorf("shell3.sh missing %q", want)
 			}
 		}
 	})
@@ -106,11 +106,11 @@ func TestRenderBaseConfigContextWindow(t *testing.T) {
 		if err := RenderBaseConfig(dir, v, false); err != nil {
 			t.Fatalf("RenderBaseConfig: %v", err)
 		}
-		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
+		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.sh"))
 		// DefaultContextWindow (128000) and 80% of it (102400).
 		for _, want := range []string{"context_window: 128000", "compact_at: 102400"} {
 			if !strings.Contains(string(cfg), want) {
-				t.Errorf("shell3.yaml missing defaulted %q", want)
+				t.Errorf("shell3.sh missing defaulted %q", want)
 			}
 		}
 	})
@@ -123,15 +123,16 @@ func TestRenderBaseConfigVision(t *testing.T) {
 		if err := RenderBaseConfig(dir, v, false); err != nil {
 			t.Fatalf("RenderBaseConfig: %v", err)
 		}
-		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
+		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.sh"))
 		for _, banned := range []string{"media:", "describe:"} {
 			if strings.Contains(string(cfg), banned) {
 				t.Errorf("vision config should not render %q; got:\n%s", banned, cfg)
 			}
 		}
-		agentMD, _ := os.ReadFile(filepath.Join(dir, "agent.md"))
-		if !strings.Contains(string(agentMD), "tools: [bash, bash_bg, edit, media, history]") {
-			t.Error("vision agent.md should enable the media tool")
+		agentMD, _ := os.ReadFile(filepath.Join(dir, "shell3.sh"))
+		if !strings.Contains(string(agentMD), "# use: [media]") ||
+			strings.Contains(string(agentMD), "# # use: [media]") {
+			t.Errorf("vision kit should opt into media; got:\n%s", agentMD)
 		}
 	})
 
@@ -141,15 +142,15 @@ func TestRenderBaseConfigVision(t *testing.T) {
 		if err := RenderBaseConfig(dir, v, false); err != nil {
 			t.Fatalf("RenderBaseConfig: %v", err)
 		}
-		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
+		cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.sh"))
 		for _, banned := range []string{"media:", "describe:"} {
 			if strings.Contains(string(cfg), banned) {
 				t.Errorf("no-vision config should not render %q; got:\n%s", banned, cfg)
 			}
 		}
-		agentMD, _ := os.ReadFile(filepath.Join(dir, "agent.md"))
-		if !strings.Contains(string(agentMD), "tools: [bash, bash_bg, edit, history]") {
-			t.Error("no-vision agent.md should not enable the media tool")
+		agentMD, _ := os.ReadFile(filepath.Join(dir, "shell3.sh"))
+		if !strings.Contains(string(agentMD), "# # use: [media]") {
+			t.Errorf("no-vision kit should leave media commented out; got:\n%s", agentMD)
 		}
 	})
 
@@ -169,8 +170,26 @@ func TestRenderBaseConfigVision(t *testing.T) {
 		if len(c.Warnings()) != 0 {
 			t.Errorf("vision config loaded with warnings: %v", c.Warnings())
 		}
-		if !c.FirstAgent().Gates.Media {
-			t.Error("vision config should gate the media tool on for the main agent")
+		src, err := os.ReadFile(filepath.Join(dir, "shell3.sh"))
+		if err != nil {
+			t.Fatalf("read kit: %v", err)
+		}
+		k, err := kit.Parse(src)
+		if err != nil {
+			t.Fatalf("parse kit: %v", err)
+		}
+		r, err := k.Resolve(k.Agents[0], true)
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		var media bool
+		for _, b := range r.Builtins {
+			if b == "media" {
+				media = true
+			}
+		}
+		if !media {
+			t.Errorf("vision config should grant the media tool; builtins = %v", r.Builtins)
 		}
 	})
 }
@@ -186,17 +205,17 @@ func TestRenderedYAMLHasNoMediaBlock(t *testing.T) {
 		if err := RenderBaseConfig(dir, v, false); err != nil {
 			t.Fatalf("RenderBaseConfig(vision=%v): %v", vision, err)
 		}
-		cfg, err := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
+		cfg, err := os.ReadFile(filepath.Join(dir, "shell3.sh"))
 		if err != nil {
-			t.Fatalf("read shell3.yaml (vision=%v): %v", vision, err)
+			t.Fatalf("read shell3.sh (vision=%v): %v", vision, err)
 		}
 		for _, banned := range []string{"media:", "stt:", "tts:", "describe:", "imagegen:"} {
 			if strings.Contains(string(cfg), banned) {
-				t.Errorf("vision=%v: rendered shell3.yaml still contains %q", vision, banned)
+				t.Errorf("vision=%v: rendered shell3.sh still contains %q", vision, banned)
 			}
 		}
 		if !strings.Contains(string(cfg), "media_keep_days") {
-			t.Errorf("vision=%v: rendered shell3.yaml dropped media_keep_days", vision)
+			t.Errorf("vision=%v: rendered shell3.sh dropped media_keep_days", vision)
 		}
 	}
 }
@@ -207,9 +226,9 @@ func TestRenderBaseConfigWithProxy(t *testing.T) {
 	if err := RenderBaseConfig(dir, v, false); err != nil {
 		t.Fatalf("RenderBaseConfig: %v", err)
 	}
-	cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
+	cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.sh"))
 	if !strings.Contains(string(cfg), `run_proxy: "npx codex-proxy --port 8787"`) {
-		t.Errorf("proxy not wired into shell3.yaml:\n%s", cfg)
+		t.Errorf("proxy not wired into shell3.sh:\n%s", cfg)
 	}
 }
 
@@ -236,44 +255,35 @@ func TestRenderedConfigLoads(t *testing.T) {
 	if len(c.Models) < 1 {
 		t.Errorf("expected >= 1 model, got %d", len(c.Models))
 	}
-	a := c.FirstAgent()
-	if a.Name != "agent" {
-		t.Errorf("agent: want %q, got %q", "agent", a.Name)
+	// Under the kit model the agents come from shell3.sh and the skills from
+	// scanning skills/ — config.Load only lifts the wiring.
+	src, err := os.ReadFile(filepath.Join(dir, "shell3.sh"))
+	if err != nil {
+		t.Fatalf("read kit: %v", err)
 	}
-	// The agent's skills come from scanning skills/; the load must be
-	// warning-free — a skipped skill file in the shipped scaffold is a bug.
+	k, err := kit.Parse(src)
+	if err != nil {
+		t.Fatalf("parse kit: %v", err)
+	}
+	if len(k.Agents) != 2 || k.Agents[0].Name != "main" || k.Agents[1].Name != "assistant" {
+		t.Fatalf("scaffold kit agents = %+v, want main + assistant", k.Agents)
+	}
+	if k.Agents[1].Desc == "" {
+		t.Error("the assistant employee needs a description — it is how the main agent decides to dispatch it")
+	}
+
 	got := map[string]bool{}
-	for _, s := range a.Skills {
-		got[s.Name] = true
+	for _, sk := range config.ScanSkills(filepath.Join(dir, "skills")) {
+		got[sk.Name] = true
 	}
-	for _, want := range []string{"planning", "browser", "find-skills", "writing-code", "cookbook", "history", "self-evolve", "scripting", "media"} {
+	for _, want := range []string{"planning", "browser", "find-skills", "writing-code",
+		"cookbook", "history", "self-evolve", "scripting", "media", "building-agents"} {
 		if !got[want] {
-			t.Errorf("scaffold skill %q missing from agent (got %v)", want, got)
+			t.Errorf("scaffold skill %q missing (got %v)", want, got)
 		}
-	}
-	if len(a.Skills) != 10 {
-		t.Errorf("expected 10 scaffold skills, got %d", len(a.Skills))
 	}
 	if len(c.Warnings()) != 0 {
 		t.Errorf("scaffold config loaded with warnings: %v", c.Warnings())
-	}
-	// Subagents are a separate registry; the shipped tree registers assistant,
-	// and the main agent's allowlist is inferred from agents/.
-	subs := c.Subagents()
-	if len(subs) != 1 || subs[0].Name != "assistant" {
-		t.Fatalf("expected one registered subagent [assistant], got %v", subs)
-	}
-	if len(a.Subagents) != 1 || a.Subagents[0] != "assistant" {
-		t.Errorf("agent Subagents = %v, want [assistant]", a.Subagents)
-	}
-	for _, name := range a.Subagents {
-		sa, ok := c.SubagentByName(name)
-		if !ok {
-			t.Fatalf("unresolved subagent %q", name)
-		}
-		if sa.Description == "" {
-			t.Errorf("subagent %q has no description for the task tool schema", name)
-		}
 	}
 	// The shipped hooks are discovered (both scripts are no-op exit 0 gates).
 	if !c.HasToolCall() {
@@ -287,7 +297,7 @@ func TestRenderBaseConfigDoesNotClobber(t *testing.T) {
 	if err := RenderBaseConfig(dir, v, false); err != nil {
 		t.Fatalf("first render: %v", err)
 	}
-	cfgPath := filepath.Join(dir, "shell3.yaml")
+	cfgPath := filepath.Join(dir, "shell3.sh")
 	if err := os.WriteFile(cfgPath, []byte("# user edited\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +306,7 @@ func TestRenderBaseConfigDoesNotClobber(t *testing.T) {
 	}
 	got, _ := os.ReadFile(cfgPath)
 	if string(got) != "# user edited\n" {
-		t.Errorf("RenderBaseConfig clobbered an existing shell3.yaml")
+		t.Errorf("RenderBaseConfig clobbered an existing shell3.sh")
 	}
 }
 
@@ -306,7 +316,7 @@ func TestRenderBaseConfigForceOverwrites(t *testing.T) {
 	if err := RenderBaseConfig(dir, v, false); err != nil {
 		t.Fatalf("first render: %v", err)
 	}
-	cfgPath := filepath.Join(dir, "shell3.yaml")
+	cfgPath := filepath.Join(dir, "shell3.sh")
 	if err := os.WriteFile(cfgPath, []byte("# stale\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +325,7 @@ func TestRenderBaseConfigForceOverwrites(t *testing.T) {
 	}
 	got, _ := os.ReadFile(cfgPath)
 	if string(got) == "# stale\n" {
-		t.Error("force=true did not overwrite shell3.yaml")
+		t.Error("force=true did not overwrite shell3.sh")
 	}
 	if !strings.Contains(string(got), "base_url:") {
 		t.Errorf("force render did not regenerate config; got:\n%s", got)
@@ -367,11 +377,11 @@ func TestBaseConfigWiresTheBotToken(t *testing.T) {
 	}, false); err != nil {
 		t.Fatal(err)
 	}
-	body, err := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
+	body, err := os.ReadFile(filepath.Join(dir, "shell3.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(body), "token: env:TELEGRAM_TOKEN") {
-		t.Errorf("shell3.yaml does not wire the bot token:\n%s", body)
+		t.Errorf("shell3.sh does not wire the bot token:\n%s", body)
 	}
 }

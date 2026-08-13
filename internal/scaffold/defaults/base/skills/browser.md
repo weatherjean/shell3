@@ -8,7 +8,7 @@ It is a small Node helper you call with `bash`, so every action is one bounded
 command that can never hang the conversation.
 
 ## One-time setup (do this if it's missing)
-The helper lives in your config's `lib/browser/` dir (next to your `shell3.yaml` —
+The helper lives in your config's `lib/browser/` dir (next to your `shell3.sh` —
 its path is in the `## Environment` section of your system prompt). If
 `lib/browser/node_modules` does not exist, install the dependency once:
     (cd <config-dir>/lib/browser && npm i)

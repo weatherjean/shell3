@@ -37,7 +37,7 @@ your config directory (the `config:` line of your Environment reminder;
 ```bash
 base=https://raw.githubusercontent.com/weatherjean/shell3/main/docs/cookbook
 curl -fsS "$base/lib/skills/<name>.md"  -o ~/.shell3/skills/<name>.md
-curl -fsS "$base/lib/agents/<name>.md"  -o ~/.shell3/agents/<name>.md
+# an agent recipe is a block you paste into ~/.shell3/shell3.sh
 ```
 
 Some recipes ship extra assets under `lib/` (e.g. a docker compose bundle);

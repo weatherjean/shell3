@@ -48,15 +48,48 @@ EOF
 web_search() { echo "q=$q"; }
 `
 
-// The agent you talk to gets every built-in without declaring one.
-func TestResolveMainGetsAllBuiltins(t *testing.T) {
+// The agent you talk to gets every built-in without declaring one — except
+// media, which needs a multimodal model and so stays opt-in.
+func TestResolveMainGetsDefaultBuiltins(t *testing.T) {
 	k := mustParse(t, capKit)
 	r, err := k.Resolve(k.Agents[0], true)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if len(r.Builtins) != len(Builtins) {
-		t.Fatalf("main builtins = %v, want all %v", r.Builtins, Builtins)
+	if len(r.Builtins) != len(mainDefaults) {
+		t.Fatalf("main builtins = %v, want %v", r.Builtins, mainDefaults)
+	}
+	for _, b := range r.Builtins {
+		if b == "media" {
+			t.Fatal("media must not be granted implicitly — read_media needs a multimodal model")
+		}
+	}
+}
+
+// media reaches the main agent only when it is declared.
+func TestResolveMainMediaOptIn(t *testing.T) {
+	src := `#---
+# agent: main
+# use: [media]
+#---
+main_prompt() { cat <<'EOF2'
+hi
+EOF2
+}
+`
+	k := mustParse(t, src)
+	r, err := k.Resolve(k.Agents[0], true)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	var got bool
+	for _, b := range r.Builtins {
+		if b == "media" {
+			got = true
+		}
+	}
+	if !got {
+		t.Fatalf("media not granted despite use: [media]; builtins = %v", r.Builtins)
 	}
 }
 

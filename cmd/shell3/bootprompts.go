@@ -25,27 +25,32 @@ import (
 // runPromptRefresh implements boot --prompts against dir (the global config
 // root in production; injectable for tests). now stamps the backup dir.
 func runPromptRefresh(dir string, now time.Time) error {
-	agentPath := filepath.Join(dir, "agent.md")
-	oldAgent, err := os.ReadFile(agentPath)
+	kitPath := filepath.Join(dir, "shell3.sh")
+	kitSrc, err := os.ReadFile(kitPath)
 	if err != nil {
-		return fmt.Errorf("boot --prompts: no agent.md in %s — this refreshes an existing install; run a plain `shell3 boot` first", dir)
+		return fmt.Errorf("boot --prompts: no shell3.sh in %s — this refreshes an existing install; run a plain `shell3 boot` first", dir)
 	}
-
-	// Vision decides which agent-prompt variant renders (the media tool
-	// lines). The install's own frontmatter is the truth: boot wires vision
-	// by putting `media` in the tools list. Matched on the tools: line
-	// specifically — the NON-vision scaffold ships a `# media: …` comment
-	// inside the frontmatter, so a substring test would see "media" in
-	// exactly the installs that don't have the tool.
-	fm, _, ok := splitFrontmatter(oldAgent)
-	if !ok {
-		return fmt.Errorf("boot --prompts: %s has no frontmatter to preserve — refusing to guess; fix the file or re-boot", agentPath)
-	}
-	vision := toolsMediaRe.MatchString(fm)
+	vision := toolsMediaRe.Match(kitSrc)
 
 	files, err := scaffold.PromptFiles(scaffold.Values{Name: "main", Vision: vision})
 	if err != nil {
 		return err
+	}
+
+	// Only the shipped skills are refreshed. The kit holds the wiring, every
+	// agent and every tool in one file — all of it hand-edited — so there is
+	// no safe seam to splice a new prompt into. Refreshing skills gives an
+	// upgrade the new guidance without touching anything the operator wrote.
+	for rel := range files {
+		if !strings.HasPrefix(rel, "skills/") {
+			delete(files, rel)
+		}
+	}
+	// The media skill documents read_media. An install whose kit does not opt
+	// into media has no such tool, so shipping the skill would teach it a verb
+	// it cannot call.
+	if !vision {
+		delete(files, "skills/media.md")
 	}
 
 	backupDir := filepath.Join(dir, ".backup", "prompts-"+now.Format("20060102-150405"))
@@ -61,17 +66,6 @@ func runPromptRefresh(dir string, now time.Time) error {
 		target := filepath.Join(dir, rel)
 		old, readErr := os.ReadFile(target)
 		exists := readErr == nil
-
-		// agent.md carries the install's wiring in its
-		// frontmatter (model, tools, context files) — keep it verbatim and
-		// take only the scaffold's new body.
-		if exists && rel == "agent.md" {
-			oldFM, _, okOld := splitFrontmatter(old)
-			_, newBody, okNew := splitFrontmatter(content)
-			if okOld && okNew {
-				content = []byte(oldFM + newBody)
-			}
-		}
 
 		switch {
 		case exists && bytes.Equal(old, content):
@@ -102,27 +96,14 @@ func runPromptRefresh(dir string, now time.Time) error {
 	if updated > 0 {
 		fmt.Printf("previous versions: %s\n", backupDir)
 	}
+	fmt.Println("shell3.sh is yours and was not touched — compare it against the")
+	fmt.Println("scaffold if you want the newer agent prompts too.")
 	fmt.Println("apply with a reload (send /reload, or ask the agent to `reload`)")
 	return nil
 }
 
-// toolsMediaRe matches a frontmatter `tools:` list that includes the media
-// tool — an uncommented line only.
-var toolsMediaRe = regexp.MustCompile(`(?m)^tools:\s*\[[^\]]*\bmedia\b`)
-
-// splitFrontmatter separates a leading `---\n…\n---\n` block (returned WITH
-// its delimiters and trailing newline) from the body that follows. ok is
-// false when the file doesn't open with a frontmatter fence.
-func splitFrontmatter(b []byte) (frontmatter, body string, ok bool) {
-	s := string(b)
-	if !strings.HasPrefix(s, "---\n") {
-		return "", s, false
-	}
-	rest := s[len("---\n"):]
-	end := strings.Index(rest, "\n---\n")
-	if end < 0 {
-		return "", s, false
-	}
-	cut := len("---\n") + end + len("\n---\n")
-	return s[:cut], s[cut:], true
-}
+// toolsMediaRe matches a kit declaration line opting into the media tool.
+// A kit's declaration lines are themselves comments (`# use: [media]`), so the
+// non-vision scaffold renders the opt-in double-commented (`# # use: …`) —
+// hence the single-# anchor, which distinguishes the two.
+var toolsMediaRe = regexp.MustCompile(`(?m)^#\s?use:\s*\[[^\]]*\bmedia\b`)

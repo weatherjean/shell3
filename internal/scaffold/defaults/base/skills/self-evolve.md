@@ -1,80 +1,70 @@
 ---
 name: self-evolve
-description: Use when the user tells you to remember something, change how you behave, or add a capability — durable facts go in memory.md, new procedures in skills/, new helpers in agents/ or cron/. Also when you notice a recurring friction worth fixing. Covers what is yours to edit, what is the operator's, and how a change goes live.
+description: Use when the user tells you to remember something, change how you behave, or add a capability — durable facts go in memory.md, new agents and tools in shell3.sh, new procedures in skills/. Also when you notice a recurring friction worth fixing. Covers what is yours to edit, what is the operator's, and how a change goes live.
 ---
 
-You can modify your own configuration. Edits go live on a config reload or the
-next shell3 start — the running process keeps the config it was built with, so
-a bad edit never breaks the session you are in.
+# Changing yourself
 
-## Evolve proactively
-Improving yourself is part of the job, not a special request. When you hit a
-recurring friction, a wrong or stale instruction, or a capability you keep
-wishing you had — fix it the moment you notice, don't wait to be asked. A skill
-or instruction that drifts out of date is a liability; patch it in place.
+Your whole configuration is one file plus two directories:
 
-## The config directory
-Your config is a directory (the `config:` line of your Environment reminder):
-prose lives in markdown files, wiring lives in `shell3.yaml`, a feature is on
-because its file exists.
+    ~/.shell3/
+      shell3.sh                    wiring, every agent, every tool
+      skills/                      your skills — one .md per skill
+      projects/<agent>/skills/     an employee's skills
+      memory.md                    your durable facts
+      hooks/                       the gate scripts
+      .env                         secrets — never read, never print
 
-    agent.md           you: frontmatter (model, tools, context) + your prompt
-    memory.md          durable notes, read fresh into every session's prompt
-    projects.md        your standing portfolio brief (created by `shell3
-                       project new`, so it may not exist yet)
-    agents/<name>.md   one subagent per file (description + prompt)
-    skills/<name>.md   one skill per file
-    projects/<name>/   a project: project.md brief + its manager subagent
-    cron/<name>.md     scheduled jobs (schedule + agent + prompt body);
-                       results reach you as task reports — your reply
-                       posts as an ✉️ update, or NO_REPLY posts nothing
-    lib/bin/           your reusable wrapper scripts (see the scripting
-                       skill)
+## Which one
 
-## Not yours to edit
-- `shell3.yaml` (models, the `telegram:` block, mcp servers) and
-  `hooks/*.sh` (the tool-call gate) belong to the operator. The gate refuses
-  your writes to both — you may read them to explain your own rules. When one
-  of them needs to change, say exactly what and why, and let the user do it.
-- `.env` holds the secrets those files reference as `env:KEY` — never read it.
-  A script reads the one key it needs at point of use (scripting skill).
-- The bot token lives in `.env` (`TELEGRAM_TOKEN`); revoking or rotating it
-  is the user's move (@BotFather). Running shell3 as a service is the user's
-  setup too (`docs/deploying.md` in the shell3 repo) — shell3 exposes nothing
-  by itself.
-- The runs store (`.shell3_project/shell3.db`) is data, not config. Recall past
-  conversations with the `history` tool; never write to the database.
+**A fact to remember** → `memory.md`. The user's preferences, decisions,
+things they told you once and shouldn't have to repeat. It is re-read into
+every prompt, so keep it tight — it costs tokens on every turn. Absolute
+dates, not "last week".
 
-## Footprint ladder — pick the smallest change that works
-Choose the highest (least-footprint) rung that correctly solves the problem:
-1. Edit an existing skill `.md` or an agent prompt — sharpen what's already there.
-2. Add a new skill: write a `.md` into `skills/`. This is the default home for
-   a new procedure:
+**A procedure you'll repeat** → a new `skills/<name>.md` with frontmatter
+`description:`. The description is what you see in your prompt index; write it
+so future-you knows when to open the file. The body is the how.
 
-       skills/greet.md
-       ---
-       description: Greet the user warmly when a conversation starts.
-       ---
-       When greeting, use the user's name if you know it...
+**A capability** → a tool in `shell3.sh`. See the `building-agents` skill for
+the declaration shape. The rule: tools fetch, parse, query and persist; they
+never score, rank or decide. Judgment belongs in a turn.
 
-3. Add a wrapper script under `lib/bin/` (see the scripting skill) — when a
-   bash workflow or a secret-using API call is genuinely reusable.
-4. Add or adjust a subagent (`agents/<name>.md`) — when the work needs its own
-   prompt, toolset, or an isolated context to delegate to.
-5. A change to `shell3.yaml`, a hook, or Go core — not yours. Describe what's
-   needed and hand it to the user.
+**A recurring job** → an employee in `shell3.sh` plus a `cron/<name>.md`
+binding a schedule to (agent, prompt).
 
-## The loop
-1. Orient: your config directory is on the `config:` line of your Environment
-   reminder. Edit files inside that exact directory.
-2. Edit, copying the shape of an existing file.
-3. Validate without touching the live session:
-     shell3 health --config <that directory>
-   It fails on what the loader would only warn about — e.g. a skill `.md` it
-   skipped for missing/broken frontmatter, or a hook file naming no subagent.
-4. Fix what health reports and re-run until clean (a `skill file ... skipped`
-   warning means the `.md` needs a frontmatter `description` and a body).
-5. Call the `reload` tool. A reload cannot run inside the turn that asks for
-   it, so the tool queues one for the moment this turn ends; the result
-   is posted to the chat. Do not claim the change is live in the
-   current turn — it applies to the next one.
+## What is not yours
+
+- `.env` and `secrets/` — never read them, never print them. A tool reads the
+  one key it needs at point of use.
+- `hooks/*.sh` — the operator's gate. If it blocks you, that is the answer:
+  say which rule stopped you and why you needed it. Do not route around it.
+- The `shell3:` wiring block at the top of `shell3.sh` — models, telegram, mcp
+  servers. Ask before touching it.
+
+## How a change goes live
+
+    shell3 tool check ~/.shell3/shell3.sh     syntax, lint, every manifest
+    reload                                     apply it
+
+`check` catches an unterminated block, a duplicate name, a mistyped param, an
+unquoted description with a comma in it. Run it after every edit — it is fast
+and it is the difference between a broken config and a caught typo.
+
+For a tool, also probe it before you trust it:
+
+    shell3 tool run  ~/.shell3/shell3.sh <tool> '{"arg":"value"}'
+    shell3 tool test ~/.shell3/shell3.sh
+
+## Editing prose inside the kit
+
+Prompts and skill bodies live in `<<'SHELL3_EOF'` heredocs. The quoted
+delimiter means the text is literal — no escaping, no interpolation. The one
+thing you cannot put in the body is a line that is exactly the delimiter.
+
+## Before you change your own prompt
+
+A prompt change alters every future turn, including ones where you would have
+behaved correctly. Say what you are changing and why, then change it. If the
+user asked for a behaviour change, this is the right move — do not just try
+harder next turn and hope.

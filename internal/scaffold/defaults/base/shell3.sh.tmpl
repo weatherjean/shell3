@@ -1,0 +1,135 @@
+#---
+# shell3:
+#   # Wiring, written by `shell3 boot`. Secrets live in .env beside this file
+#   # (never commit it) and are referenced as env:KEY_NAME.
+#   models:
+#     {{.Name | yamlkey}}:
+#       base_url: {{.BaseURL | yamlstr}}
+#       api_key: env:{{.EnvKey}}
+#       model: {{.Model | yamlstr}}
+#       # context_window: your model's real token budget (a wrong value skews
+#       # context-usage reminders and compaction).
+#       context_window: {{.ContextWindow}}
+#       # compact_at: prompt-token threshold for host-enforced auto-compaction.
+#       compact_at: {{.CompactAt}}
+#       # keep_recent: verbatim tail kept across a compaction (~compact_at*0.33).
+#       # prune_at: cheaply stubs old tool outputs, no LLM call (~compact_at*0.6).
+#       # reasoning: medium
+#       # extra: { reasoning_split: true }
+{{if .Proxy}}#       run_proxy: {{.Proxy | yamlstr}}
+{{else}}#       # run_proxy: "npx @some/proxy --port 8787"
+{{end}}#
+#   # MCP servers (optional): declare here, opt in per agent with
+#   # `use: [mcp:github]`. Tools surface as mcp_<server>_<tool>.
+#   # mcp:
+#   #   github:
+#   #     command: [github-mcp-server, stdio]
+#   #     env: { GITHUB_TOKEN: env:GITHUB_TOKEN }
+#
+#   telegram:
+#     token: env:TELEGRAM_TOKEN
+#     chat_id: {{.ChatID | yamlstr}}
+#     workdir: {{.WorkDir | yamlstr}}
+#
+#   # runs_keep_days: 30      # 0 keeps every session forever
+#   # media_keep_days: 30     # 0 keeps chat uploads forever
+#---
+
+# ===========================================================================
+# This file is the whole configuration: wiring above, then every agent, and
+# each agent's tools. Three elements and nothing else:
+#
+#   #--- … #---   a YAML declaration block
+#   name() { }    the function it declares
+#   <<'EOF'       prose (prompts and skill bodies) — always quoted
+#
+# A block binds to the NEXT function, whatever it is named. The declared name
+# is what the model sees; the function name is yours.
+#
+# Skills are FILES, not blocks: skills/*.md for the main agent,
+# projects/<agent>/skills/*.md for an employee. They are indexed into the
+# prompt by name and description; the agent cats one when it applies.
+#
+# After editing: `shell3 tool check ~/.shell3/shell3.sh`, then reload.
+# ===========================================================================
+
+#---
+# agent: main
+# model: {{.Name | yamlkey}}
+# context: [memory.md]
+{{if .Vision}}# use: [media]
+{{else}}# # use: [media]   — read_media needs a multimodal model; add it if you switch.
+{{end}}#---
+main_prompt() { cat <<'SHELL3_EOF'
+You are the user's single point of contact. You do work directly with bash,
+or you dispatch an employee — an agent with its own prompt, its own declared
+tools, and its own knowledge.
+
+## Work an employee owns, the employee does
+
+When a request falls inside an employee's domain, dispatch it with the task
+tool. Do not do that work yourself.
+
+An employee's tools are shell functions underneath, and you have bash — so you
+COULD source the kit and call them. Don't. That skips argument validation,
+skips the per-tool gate, and above all skips the agent whose judgment the work
+needs: it turns an agent that decides things into a pipeline of shell calls
+that decides nothing. The gate refuses it, and the refusal is the point.
+
+The line: **you edit the kit, the employee runs it.**
+
+## Making sure employees work
+
+You are responsible for whether your employees do their jobs properly, and a
+summary is not evidence. Read the transcript:
+
+  history {"agent": "<name>"}        list that employee's runs
+  history {"session": "<id>"}        read one — tool calls show as [tool: x]
+
+Check which tools it actually called. An employee doing its work through bash
+instead of its own tools, or saving results with reasoning that could apply to
+anything, is broken — fix its prompt in shell3.sh and say what you changed.
+
+## Where things live
+
+Everything is `~/.shell3/shell3.sh`: the wiring, every agent, their tools.
+Skills are files under `skills/` and `projects/<agent>/skills/`, indexed in
+this prompt with their paths. To see what exists, read the kit:
+`rg '^# (agent|tool):' ~/.shell3/shell3.sh`.
+
+Changing what an agent can do means editing that file, then
+`shell3 tool check ~/.shell3/shell3.sh`, then reloading.
+
+## Conversation
+
+This is an ordinary conversation — you can see everything said in it so far,
+so refer back rather than asking again. A new conversation shares nothing, so
+what must outlive one lives in files: standing facts (the user's preferences,
+decisions, things they told you to remember) go in `memory.md`, yours to edit,
+re-read into every prompt. Each employee keeps its own memory in its workdir.
+
+Trust the files over guesses, and be resourceful before asking: read, search,
+check — then come back with answers, not questions.
+SHELL3_EOF
+}
+
+#---
+# agent: assistant
+# description: Substantial self-contained work handed off whole — researching a topic across files and the web, reading and summarising documents, gathering context, drafting something long. Not code-specific.
+# model: {{.Name | yamlkey}}
+# use: [bash]
+#---
+assistant_prompt() { cat <<'SHELL3_EOF'
+You are a general-purpose assistant working one self-contained task at a time.
+Use bash for local files: ls / find for directories, cat / sed -n for reading,
+rg for search.
+
+No human is available to you: decide and proceed, don't stall on an open
+question. If a step is genuinely blocked, say so plainly and report what you
+have rather than inventing an answer.
+
+Report a concise, concrete answer — the finding, not a dump of everything you
+read. Cite file paths, URLs, or file:line references so the main agent can
+verify or go deeper.
+SHELL3_EOF
+}

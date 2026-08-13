@@ -122,7 +122,7 @@ func PromptFiles(v Values) (map[string][]byte, error) {
 			return err
 		}
 		bare := strings.TrimSuffix(rel, ".tmpl")
-		isPrompt := bare == "agent.md" ||
+		isPrompt := bare == "shell3.sh" || bare == "agent.md" ||
 			strings.HasPrefix(rel, "agents/") || strings.HasPrefix(rel, "skills/")
 		if !isPrompt {
 			return nil

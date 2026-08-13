@@ -9,9 +9,14 @@ import (
 )
 
 // Builtins are the tool names an agent may name in `use:` to get a built-in
-// tool. The main agent gets all of them without declaring anything; an employee
-// gets exactly what it names.
+// tool.
 var Builtins = []string{"bash", "bash_bg", "edit", "media", "read", "list_files", "history"}
+
+// mainDefaults is what the main agent gets without declaring anything: every
+// built-in except `media`. read_media needs a multimodal model, so handing it
+// to an agent whose model cannot see images offers a tool that always fails —
+// `use: [media]` opts in when the model supports it.
+var mainDefaults = []string{"bash", "bash_bg", "edit", "read", "list_files", "history"}
 
 // Resolved is one agent's fully-resolved capability set: the built-ins it asked
 // for, the MCP servers it opted into, and every declared tool it can call
@@ -35,7 +40,7 @@ type Resolved struct {
 func (k *Kit) Resolve(a Agent, isMain bool) (Resolved, error) {
 	r := Resolved{Agent: a, Tools: append([]Tool{}, a.Tools...), Skills: append([]Skill{}, a.Skills...)}
 	if isMain {
-		r.Builtins = append(r.Builtins, Builtins...)
+		r.Builtins = append(r.Builtins, mainDefaults...)
 	}
 
 	for _, name := range a.Use {
@@ -44,7 +49,7 @@ func (k *Kit) Resolve(a Agent, isMain bool) (Resolved, error) {
 			r.MCP = append(r.MCP, strings.TrimPrefix(name, "mcp:"))
 			continue
 		case isBuiltin(name):
-			if !isMain {
+			if !isMain || name == "media" {
 				r.Builtins = append(r.Builtins, name)
 			}
 			continue

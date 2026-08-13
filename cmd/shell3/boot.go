@@ -67,7 +67,7 @@ func newBootCommand() *cobra.Command {
 	cmd.Flags().StringVar(&f.tgChatID, "tg-chat-id", "", "Telegram chat id the bot answers")
 	cmd.Flags().StringVar(&f.workDir, "workdir", "", "Where the agent's shell runs (default: the config dir)")
 	cmd.Flags().BoolVar(&f.vision, "vision", true, "Model can see images (adds the read_media tool)")
-	cmd.Flags().BoolVar(&f.force, "force", false, "Overwrite an existing ~/.shell3 config (shell3.yaml, agent.md, ...)")
+	cmd.Flags().BoolVar(&f.force, "force", false, "Overwrite an existing ~/.shell3 config (shell3.sh, skills/, ...)")
 	cmd.Flags().BoolVar(&f.show, "show", false, "Print the post-boot summary for the existing config and exit (changes nothing)")
 	cmd.Flags().BoolVar(&f.prompts, "prompts", false,
 		"Refresh the scaffold's prompt files (agent.md body, agents/, skills/) in an existing config, backing up replaced files to .backup/")
@@ -81,7 +81,7 @@ func runBoot(f *bootFlags) error {
 	}
 	g := paths.NewGlobal(home)
 	dir := g.Root
-	cfgPath := filepath.Join(dir, "shell3.yaml")
+	cfgPath := filepath.Join(dir, "shell3.sh")
 
 	if _, err := os.Stat(cfgPath); err == nil && !f.force {
 		return fmt.Errorf("boot: %s already exists — pass --force to overwrite", cfgPath)
@@ -134,7 +134,7 @@ func showBootSuccess() error {
 		return fmt.Errorf("boot: home dir: %w", err)
 	}
 	dir := paths.NewGlobal(home).Root
-	cfgPath := filepath.Join(dir, "shell3.yaml")
+	cfgPath := filepath.Join(dir, "shell3.sh")
 	yaml, err := os.ReadFile(cfgPath)
 	if err != nil {
 		return fmt.Errorf("boot --show: no config at %s — run `shell3 boot` first", cfgPath)

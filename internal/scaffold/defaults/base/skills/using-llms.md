@@ -11,7 +11,7 @@ description: Use when a script or pipeline needs a model call per item — draft
 shell3 ask --agent <subagent> -p "$prompt"   # stdout = the reply, nothing else
 ```
 
-Define the persona once as `agents/<name>.md`; the script owns only its loop —
+Define the persona once as an agent in `shell3.sh`; the script owns only its loop —
 the database walk, the queue, idempotency, retries. Diagnostics and errors go
 to stderr, so stdout is safe to consume directly. A failed or empty run exits
 non-zero.

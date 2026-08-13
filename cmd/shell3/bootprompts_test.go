@@ -10,14 +10,16 @@ import (
 	"time"
 )
 
-// boot --prompts refreshes scaffold prompts in place: the agent.md BODY is
-// replaced while its frontmatter (the install's wiring: model, tools,
-// context) survives verbatim, replaced files are backed up, and skills the
-// scaffold doesn't ship are never touched.
+// boot --prompts refreshes the SHIPPED SKILLS of an existing install. The kit
+// holds the wiring, every agent and every tool in one hand-edited file, so it
+// is never rewritten; replaced skills are backed up, and skills the scaffold
+// does not ship are never touched.
 func TestPromptRefreshPreservesWiringAndBacksUp(t *testing.T) {
 	dir := t.TempDir()
-	customFM := "---\nmodel: minmax\ntools: [bash, bash_bg, edit, media, history]\ncontext: [memory.md]\n---\n"
-	if err := os.WriteFile(filepath.Join(dir, "agent.md"), []byte(customFM+"OLD BODY\n"), 0o644); err != nil {
+
+	kit := "#---\n# shell3:\n#   models: {m1: {base_url: \"http://x\", api_key: k, model: mm}}\n#---\n" +
+		"#---\n# agent: main\n# use: [media]\n#---\nmain_prompt() { cat <<'EOF2'\nMINE\nEOF2\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, "shell3.sh"), []byte(kit), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "skills"), 0o755); err != nil {
@@ -36,36 +38,23 @@ func TestPromptRefreshPreservesWiringAndBacksUp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	agent, err := os.ReadFile(filepath.Join(dir, "agent.md"))
+	// The kit is hand-edited and must survive a prompt refresh untouched.
+	kitAfter, err := os.ReadFile(filepath.Join(dir, "shell3.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := string(agent)
-	if !strings.HasPrefix(got, customFM) {
-		t.Errorf("agent.md frontmatter must survive verbatim, got prefix:\n%s", got[:min(len(got), 200)])
-	}
-	if strings.Contains(got, "OLD BODY") {
-		t.Error("agent.md body should have been replaced")
-	}
-	// The install has `media` in tools, so the vision variant must render.
-	if !strings.Contains(got, "read_media") {
-		t.Error("a media-tooled install should get the vision prompt variant")
-	}
-	// The refreshed body carries the new self-awareness guidance.
-	if !strings.Contains(got, "`status` reports YOUR live condition") {
-		t.Error("the refreshed body should be the current scaffold prompt")
+	if string(kitAfter) != kit {
+		t.Errorf("shell3.sh must not be touched by --prompts; got:\n%s", kitAfter)
 	}
 
-	// Backups: old agent.md and old cookbook.md, under one stamped dir.
+	// Backups: the replaced scaffold skill, under one stamped dir.
 	backup := filepath.Join(dir, ".backup", "prompts-20260808-120000")
-	for _, rel := range []string{"agent.md", "skills/cookbook.md"} {
-		b, err := os.ReadFile(filepath.Join(backup, rel))
-		if err != nil {
-			t.Fatalf("expected a backup of %s: %v", rel, err)
-		}
-		if rel == "agent.md" && !strings.Contains(string(b), "OLD BODY") {
-			t.Error("the backup must hold the OLD content")
-		}
+	b, err := os.ReadFile(filepath.Join(backup, "skills/cookbook.md"))
+	if err != nil {
+		t.Fatalf("expected a backup of skills/cookbook.md: %v", err)
+	}
+	if !strings.Contains(string(b), "stale scaffold skill") {
+		t.Error("the backup must hold the OLD content")
 	}
 
 	// The user's own skill is untouched, the scaffold's is refreshed.
@@ -86,27 +75,27 @@ func TestPromptRefreshPreservesWiringAndBacksUp(t *testing.T) {
 	}
 }
 
-// A non-vision install's scaffold frontmatter contains a `# media: …`
-// COMMENT — the refresh must not read that as the media tool being wired and
-// hand a text-only model the vision prompt.
+// The media skill is only shipped to an install whose kit opts into media —
+// refreshing a text-only install must not hand it the vision guidance.
 func TestPromptRefreshNonVisionVariant(t *testing.T) {
 	dir := t.TempDir()
-	fm := "---\nmodel: main\n# media: read_media needs a multimodal model — add it if you switch.\ntools: [bash, bash_bg, edit, history]\n---\n"
-	if err := os.WriteFile(filepath.Join(dir, "agent.md"), []byte(fm+"OLD BODY\n"), 0o644); err != nil {
+	kit := "#---\n# shell3:\n#   models: {m1: {base_url: \"http://x\", api_key: k, model: mm}}\n#---\n" +
+		"#---\n# agent: main\n# # use: [media]\n#---\nmain_prompt() { cat <<'EOF2'\nMINE\nEOF2\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, "shell3.sh"), []byte(kit), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := runPromptRefresh(dir, time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
 	}
-	agent, err := os.ReadFile(filepath.Join(dir, "agent.md"))
+	if _, err := os.Stat(filepath.Join(dir, "skills", "media.md")); err == nil {
+		t.Error("a non-vision install must not receive the media skill")
+	}
+	after, err := os.ReadFile(filepath.Join(dir, "shell3.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(agent), "read_media` opens") {
-		t.Error("a non-vision install must not get the vision prompt variant")
-	}
-	if !strings.HasPrefix(string(agent), fm) {
-		t.Error("frontmatter must survive verbatim")
+	if string(after) != kit {
+		t.Error("the kit must survive verbatim")
 	}
 }
 

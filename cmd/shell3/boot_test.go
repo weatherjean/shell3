@@ -166,7 +166,7 @@ func TestBootEndToEnd(t *testing.T) {
 
 	dir := filepath.Join(home, ".shell3")
 	for _, p := range []string{
-		"shell3.yaml", "agent.md", "agents/assistant.md",
+		"shell3.sh",
 		"hooks/tool-call.sh",
 		"skills/planning.md", "skills/scripting.md", ".env",
 	} {
@@ -210,19 +210,17 @@ func TestBootEndToEnd(t *testing.T) {
 		t.Fatalf("generated config failed to load: %v", err)
 	}
 	defer c.Close()
-	if c.FirstAgent().Name != "agent" {
-		t.Errorf("agent = %q, want %q", c.FirstAgent().Name, "agent")
-	}
-	// Vision=true wires only the media tool (read_media) — no media: block.
-	if !c.FirstAgent().Gates.Media {
-		t.Error("vision boot should gate the media tool on for the main agent")
-	}
-	yamlBody, err := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
+	// Vision=true opts the main agent into the media tool (read_media).
+	kitBody, err := os.ReadFile(filepath.Join(dir, "shell3.sh"))
 	if err != nil {
-		t.Fatalf("read shell3.yaml: %v", err)
+		t.Fatalf("read shell3.sh: %v", err)
 	}
-	if strings.Contains(string(yamlBody), "media:") {
-		t.Errorf("vision boot must not render a media: block; got:\n%s", yamlBody)
+	if !strings.Contains(string(kitBody), "# use: [media]") ||
+		strings.Contains(string(kitBody), "# # use: [media]") {
+		t.Errorf("vision boot should opt into media; got:\n%s", kitBody)
+	}
+	if strings.Contains(string(kitBody), "\nmedia:") {
+		t.Errorf("vision boot must not render a media: block; got:\n%s", kitBody)
 	}
 
 	// No-clobber: a second boot without --force refuses.
@@ -236,7 +234,7 @@ func TestBootEndToEnd(t *testing.T) {
 	if err := runBoot(f); err != nil {
 		t.Fatalf("force runBoot: %v", err)
 	}
-	cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.yaml"))
+	cfg, _ := os.ReadFile(filepath.Join(dir, "shell3.sh"))
 	if !strings.Contains(string(cfg), `model: "changed-model"`) {
 		t.Errorf("--force did not regenerate the model; got:\n%s", cfg)
 	}
