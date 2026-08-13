@@ -37,6 +37,7 @@ func newAskCommand() *cobra.Command {
 		promptFlag string
 		resume     bool
 		agentFlag  string
+		kitFlag    string
 	)
 	cmd := &cobra.Command{
 		Use:   "ask [message]",
@@ -84,7 +85,7 @@ func newAskCommand() *cobra.Command {
 			}
 			// Anchor the runtime to the config dir, exactly like `shell3 serve`,
 			// so ask shares the bot's runs store + workdir and sees the same state.
-			rt, err := shell3.NewRuntime(ctx, shell3.RuntimeSpec{ConfigDir: resolved, WorkDir: resolved})
+			rt, err := shell3.NewRuntime(ctx, shell3.RuntimeSpec{ConfigDir: resolved, WorkDir: resolved, KitPath: kitFlag})
 			if err != nil {
 				return err
 			}
@@ -155,6 +156,7 @@ func newAskCommand() *cobra.Command {
 	cmd.Flags().StringVarP(&promptFlag, "prompt", "p", "", "Message for the agent (skips the interactive prompt)")
 	cmd.Flags().BoolVar(&resume, "resume", false, "Continue the latest session (multi-turn across invocations)")
 	cmd.Flags().StringVar(&agentFlag, "agent", "", "Run one headless turn of this subagent and print only its reply (for scripts)")
+	cmd.Flags().StringVar(&kitFlag, "kit", "", "Kit file whose declared agents and tools drive this run")
 	return cmd
 }
 

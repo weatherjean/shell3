@@ -7,6 +7,7 @@ package agentsetup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 	"github.com/weatherjean/shell3/internal/bootstrap"
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/config"
+	"github.com/weatherjean/shell3/internal/kit"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/mcp"
 	"github.com/weatherjean/shell3/internal/mediadir"
@@ -69,6 +71,10 @@ type Parts struct {
 	// surfaced beside the config warnings.
 	mcp      *mcp.Manager
 	mcpWarns []string
+	// kit is the parsed kit file when one was loaded (see LoadKit); nil
+	// otherwise. Agents declared in it resolve through KitAgentRuntime.
+	kit     *kit.Kit
+	kitPath string
 }
 
 // MCPStatus reports every declared MCP server's health (nil when no
@@ -146,6 +152,15 @@ func (p *Parts) Skills() []config.Skill { return p.lc.FirstAgent().Skills }
 // spawned by name — via the task tool or a cron job — resolves the headless
 // subagent config); a name in neither registry returns an error.
 func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
+	// A loaded kit owns every agent it declares: kit agents take precedence
+	// over the markdown config so a migrated install runs on the kit alone.
+	if p.kit != nil {
+		if rt, err := p.KitAgentRuntime(name); err == nil {
+			return rt, nil
+		} else if !errors.Is(err, errNoSuchKitAgent) {
+			return chat.ActiveAgent{}, err
+		}
+	}
 	if name == "" {
 		return p.runtimeForAgent(p.lc.FirstAgent())
 	}
@@ -389,6 +404,14 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 		// Agent-scoped knobs (Environment, Delegation, thresholds, …) arrive via
 		// cfg.ApplyActiveAgent(rt) below.
 	}
+	// Kit tools: declared verbs dispatch to their shell functions. Composed
+	// under MCP so a kit tool and an MCP tool never shadow each other silently.
+	var kitTool func(context.Context, string, string) (string, error)
+	if p.kit != nil {
+		if r, err := p.KitAgent(so.Agent); err == nil {
+			kitTool = p.KitHostTool(r, workdir)
+		}
+	}
 	// MCP dispatch: the base of the session's host-tool chain. Session-level
 	// RegisterHostTool calls (the bot's send_media_telegram/status/reload)
 	// compose on top of it, falling through here for names they don't own; unowned names
@@ -397,6 +420,9 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 		cfg.HostTool = func(ctx context.Context, name, argsJSON string) (string, error) {
 			if mgr.Owns(name) {
 				return mgr.Call(ctx, name, argsJSON)
+			}
+			if kitTool != nil {
+				return kitTool(ctx, name, argsJSON)
 			}
 			return "", fmt.Errorf("%w: %q", chat.ErrHostToolNotFound, name)
 		}
@@ -408,6 +434,9 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 			}
 			return out
 		}
+	}
+	if cfg.HostTool == nil && kitTool != nil {
+		cfg.HostTool = kitTool
 	}
 	// hooks/*.tool-call.sh: the per-agent gate script run before every tool.
 	// The closures capture activeName so a /agent switch re-targets the
