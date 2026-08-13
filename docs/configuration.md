@@ -1,3 +1,9 @@
+> **The markdown config below is the older model.** A `shell3.sh` kit is
+> now the primary way to configure shell3 — one file holding the wiring,
+> every agent, and their tools and skills. See [kits.md](kits.md) and
+> [tools.md](tools.md). This document describes the markdown tree, which
+> still loads when no kit is present.
+
 # Configuration
 
 Your config is a **directory** (default `~/.shell3/`), and it follows four
@@ -20,7 +26,6 @@ rules:
   agent.md               # THE agent: frontmatter (model, tools, context) + prompt body
   memory.md              # a context: file the scaffold wires in by default
   agents/<name>.md       # subagents; the file IS the registration
-  projects/<name>/       # a project: project.md brief + manager.md subagent (+ skills/)
   projects.md            # the agent's standing project index (brief)
   skills/<name>.md       # skills; drop a file in, reload
   hooks/tool-call.sh     # command gate for the main agent
@@ -273,50 +278,6 @@ background:
   max_concurrent: 8    # concurrent background jobs (default 8)
 ```
 
-## Projects — `projects/`
-
-A **project** groups long-running work under a dedicated manager. It's a
-`projects/<name>/` directory with two files (plus an optional `skills/`):
-
-```
-projects/site/
-  project.md         # the brief: frontmatter (description, workdir) + body
-  manager.md         # the manager: a subagent named after the project
-  skills/<name>.md   # optional; reach only this manager
-```
-
-`project.md`'s frontmatter is strict — `description` and `workdir` are both
-required, and `workdir` (a `~/` is expanded) must be an existing directory.
-`shell3 project new` fills it in for you: omitted `--workdir` defaults to
-`.workdirs/<name>/` under the config dir (created by the command), so project
-data gets one predictable home instead of ad-hoc folders around `~`.
-The body is the brief the manager reads when it opens the project:
-
-```markdown
----
-description: The marketing site
-workdir: ~/code/site
----
-# site
-State the goal, the current status, and what's next. Keep it short — deep
-memory goes in sibling files in this folder.
-```
-
-`manager.md` is a subagent, parsed exactly like an `agents/<name>.md` file but
-**named after the project** and run with its shell in the project's `workdir`
-(not the config dir). Managers join the same flat subagent namespace as
-`agents/`, so a project name that collides with a subagent — or the reserved
-name `agent` — is a load error. Per-project `skills/` reach only that manager;
-global `skills/` stay main-agent-only.
-
-Scaffold a project with [`shell3 project new`](cli.md#shell3-project-new--scaffold-a-project);
-it also appends an index line to `projects.md`. That file is the agent's
-standing project index — its body is injected into the main agent's system
-prompt (after the skills index, before any `## Context` section) so, in every
-new thread, the agent knows which projects exist
-and which manager owns each. Register a new manager for dispatch with `/reload`
-or a restart; `shell3 health` validates and lists every
-project.
 
 ## Scripts & secrets
 

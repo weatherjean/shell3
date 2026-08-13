@@ -153,31 +153,6 @@ defaults, except `--model`, which headless boot requires): `--url`, `--model`,
 without writing or asking anything.
 See [configuration.md](configuration.md).
 
-## `shell3 project new` — scaffold a project
-
-A **project** is a `projects/<name>/` config dir: a `project.md` brief plus a
-`manager.md` subagent that owns the work and whose shell runs in the project's
-workdir. `shell3 project new` scaffolds one, then appends an index line to
-`projects.md`.
-
-```sh
-shell3 project new site --description "marketing site"          # workdir: ~/.shell3/.workdirs/site/, created
-shell3 project new api  --workdir ~/code/api  --copy-skills site  # existing directory (a repo checkout)
-```
-
-- `--workdir` — the directory the manager's shell runs in. Omitted, it
-  defaults to **`.workdirs/<name>/` under the config dir, created for you** —
-  one predictable home for project data. Pass it only when the project must
-  live in a pre-existing directory (a repo checkout); an explicit path must
-  already exist.
-- `--description` — short project description (default `"<name> project"`).
-- `--copy-skills <name>` — seed `skills/` by copying an existing project's.
-
-It writes `projects/<name>/project.md`, `projects/<name>/manager.md`, and an
-empty `skills/`, and prints the created paths. A `/reload` or a restart
-registers the manager for dispatch. The command is designed for the agent to
-drive from a `bash` call — its `-h` output is the contract. See
-[configuration.md](configuration.md#projects--projects).
 
 ## `shell3 health` — check the config
 
@@ -191,7 +166,7 @@ the running bot only warns about — a skill `.md` skipped for broken
 frontmatter, a hook file naming no subagent. It also dry-runs every hook
 script with a probe payload (a script error fails health; a strict gate that
 blocks the probe passes), connects every MCP server, and validates every
-`projects/<name>/`. A `telegram:` block `shell3 telegram` would
+the config directory. A `telegram:` block `shell3 telegram` would
 refuse — blank `token` or `chat_id`, a non-numeric `chat_id` — fails here,
 naming the field; no `telegram:` block at all is reported but not failed,
 since an `ask`-only config is legitimate. Run it after editing the config

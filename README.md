@@ -3,12 +3,37 @@
 </p>
 
 A minimal, Unix-composable personal agent you run on your own box and reach
-over Telegram. One binary, one config directory of YAML + markdown, any
-OpenAI-compatible endpoint.
+over Telegram. One binary, one file of config, any OpenAI-compatible endpoint.
 
-You message one agent. It handles small things itself and delegates the rest
-to project managers and subagents. It runs `bash`, edits files, and schedules
-work, all from a single Telegram chat.
+shell3 does two things: **bash it out, or spin up a subagent that drives
+through the task with custom tools.** Everything else is configuration.
+
+You message one agent. It works directly, or dispatches an employee — an agent
+you defined with its own prompt, its own tools, and its own knowledge. All of
+it lives in one file:
+
+```sh
+#---
+# agent: leads
+# use: [bash, web]
+#---
+leads_prompt() { cat <<'EOF'
+One tick = one niche. Judge each candidate yourself.
+EOF
+}
+
+#---
+# tool: stack-check
+# description: Classify a site's stack — wp_wc, shopify, wp_only, none
+# params:
+#   url: {type: string, required: true}
+#---
+leads_stack_check() { curl -sL "$url" | rg -o 'wp-content|cdn\.shopify\.com'; }
+```
+
+That tool is a real tool: the model sees its description, calls it with
+structured arguments, and the gate sees it like any other. See
+[docs/kits.md](docs/kits.md).
 
 ```sh
 shell3 boot        # interactive form: model + endpoint + key, vision, bot token, workdir
@@ -63,7 +88,6 @@ walkthrough is in [docs/cli.md](docs/cli.md).
 | `shell3 telegram` | Run the bot front-end + cron (the service). |
 | `shell3 serve`   | Same agent over stdio JSONL, for a bring-your-own front-end ([protocol](docs/serve.md)). |
 | `shell3 boot`     | Scaffold the config + `.env` interactively. |
-| `shell3 project new` | Scaffold a `projects/<name>/` config dir (brief + manager). |
 | `shell3 health`   | Load the config strictly; fail on any warning. |
 | `shell3 ask "…"`  | Ask the agent locally with full verbose output; no message = interactive loop; `-p` for scripting; `--resume` continues the last session; `--agent <name>` runs one subagent turn and prints only its reply, for batch scripts. |
 
@@ -74,13 +98,13 @@ Every subcommand takes `--config/-c` to point at a different config directory.
 - **Bash-first, gated by a script you own.** The agent acts through `bash`
   and `edit_file`; a per-agent hook script allows, rewrites, runner-swaps, or
   blocks every tool call. Fail-closed, armed out of the box.
-- **Chain of command.** The agent delegates to project managers, subagents,
+- **Chain of command.** The agent delegates to employees you defined,
   `bash_bg` background jobs, and `cron/*.md` schedules; completions arrive as
   mail — the agent hears about finished background work and messages you only
   when it matters, and failures always surface.
-- **One config directory, four rules.** YAML wires it, markdown prompts it,
-  files enable it, one bash script gates it. Versionable, diffable, reloadable
-  live.
+- **One file.** `shell3.sh` holds the wiring, every agent, and their tools and
+  skills. Prose is prose, code is code, structured data is YAML in a comment
+  block. Versionable, diffable, reloadable live.
 - **Total recall**: every conversation is stored in one SQLite file, and the
   agent's `history` tool full-text-searches all of it — reference something
   from months ago and it finds it (`runs_keep_days: 0` keeps it forever).

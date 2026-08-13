@@ -7,7 +7,7 @@ HTTP, official Go SDK). Reference:
 ## GitHub over stdio, key from `.env`
 
 Install the server binary (`brew install github-mcp-server` or grab a
-release), put `GITHUB_TOKEN=ghp_…` in `~/.shell3/.env`, then in `shell3.yaml`:
+release), put `GITHUB_TOKEN=ghp_…` in `~/.shell3/.env`, then in your kit's `shell3:` wiring block:
 
 ```yaml
 mcp:
@@ -19,14 +19,14 @@ mcp:
     allow: [search_issues, get_issue, list_pull_requests, get_pull_request]
 ```
 
-and opt the agent in (`agent.md` frontmatter):
+and opt the agent in with `use:`:
 
-```markdown
----
-model: main
-tools: [bash, edit]
-mcp: [github]
----
+```sh
+#---
+# agent: main
+# model: main
+# use: [bash, edit, mcp:github]
+#---
 ```
 
 The secret goes into the server child's environment only — it never appears

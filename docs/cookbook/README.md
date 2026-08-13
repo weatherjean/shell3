@@ -4,15 +4,13 @@
 *doesn't* write — drop-in recipes you copy in when you want them. Each
 `lib/...` file mirrors the base config's layout.
 
-Two extension mechanisms:
+A recipe here is **a kit section you paste into `shell3.sh`** — a `tool:`
+block with its shell body, a `skill:` block, or a whole `agent:`. Paste it,
+run `shell3 tool check ~/.shell3/shell3.sh`, reload. See
+[kits.md](../kits.md) and [tools.md](../tools.md).
 
-- **Skills** — `.md` files with a frontmatter `description:` that the agent
-  reads with `cat`. Install: copy into `~/.shell3/skills/`, check
-  `shell3 health`, reload.
-- **Scripts** — reusable glue in `~/.shell3/lib/bin/`, run through `bash`; a
-  script that needs an API key reads it from `.env` itself at point of use.
-  The scaffold's `scripting` skill teaches the pattern
-  ([Scripts & secrets](../configuration.md#scripts--secrets)).
+A tool that needs an API key reads it from `.env` itself at point of use, so
+secrets never enter the conversation or the agent's environment.
 
 Every file here is fetchable raw, no checkout needed. The scaffold's
 `cookbook` skill teaches the agent this, so you can ask your agent for a
