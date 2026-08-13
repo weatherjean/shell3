@@ -27,7 +27,7 @@ func load(dir string) (*LoadedConfig, error) {
 	// A shell3.sh kit carries its own wiring in a `shell3:` block, so the
 	// directory needs no shell3.yaml. The kit's agents/tools/skills are loaded
 	// by agentsetup; here we only lift the wiring.
-	data, kitWiring, err := readWiring(dir)
+	data, kitAgents, err := readWiring(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -43,12 +43,16 @@ func load(dir string) (*LoadedConfig, error) {
 
 	// A kit supplies the agents, so the markdown tree below is skipped
 	// entirely: no agent.md, no agents/, no skills/, no projects/.
-	if kitWiring {
+	if kitAgents != nil {
 		c.agent = Agent{AgentCommon: AgentCommon{Name: "agent"}}
 		if err := c.loadCron(dir); err != nil {
 			return nil, err
 		}
-		if c.hooks, err = discoverHooks(dir, nil, warn); err != nil {
+		subs := make([]Subagent, 0, len(kitAgents))
+		for _, n := range kitAgents {
+			subs = append(subs, Subagent{AgentCommon: AgentCommon{Name: n}})
+		}
+		if c.hooks, err = discoverHooks(dir, subs, warn); err != nil {
 			return nil, fmt.Errorf("hooks: %w", err)
 		}
 		return c, nil
