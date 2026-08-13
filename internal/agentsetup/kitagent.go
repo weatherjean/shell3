@@ -138,15 +138,25 @@ func (p *Parts) KitAgentRuntime(name string) (chat.ActiveAgent, error) {
 	// with an unknown-tool error.
 	hostNames := p.KitHostToolNames(r)
 
-	skillNames := make([]string, 0, len(r.Skills))
-	for _, s := range r.Skills {
-		skillNames = append(skillNames, s.Name)
+	// Skills are FILES, indexed by name + description + path — never inlined.
+	// Inlining every skill body cost thousands of tokens on every turn and
+	// removed the agent's ability to choose which one to read.
+	//   main agent:  <config>/skills/
+	//   employee:    <config>/projects/<name>/skills/
+	skillDir := filepath.Join(p.configDir, "skills")
+	if !isMain(p.kit, r.Agent.Name) {
+		skillDir = filepath.Join(p.configDir, "projects", r.Agent.Name, "skills")
+	}
+	skills := config.ScanSkills(skillDir)
+	skillNames := make([]string, 0, len(skills))
+	for _, sk := range skills {
+		skillNames = append(skillNames, sk.Name)
 	}
 
 	return chat.ActiveAgent{
 		Personality: persona.Persona{
 			Name:         r.Agent.Name,
-			SystemPrompt: r.SystemPrompt() + config.RenderContext(ctxBase, ctxFiles),
+			SystemPrompt: r.Agent.Prompt + config.RenderSkills(skills) + config.RenderContext(ctxBase, ctxFiles),
 			Tools:        defs,
 		},
 		ModeLabel:    r.Agent.Name,

@@ -78,3 +78,29 @@ func parseSkillFile(data []byte, filename string) (Skill, error) {
 	}
 	return Skill{Name: fm.Name, Description: fm.Description}, nil
 }
+
+// ScanSkills reads a skills directory, returning the index entries. A missing
+// directory or an invalid file yields no entry rather than an error — a broken
+// skill must never fail a turn (shell3 health surfaces them instead).
+func ScanSkills(dir string) []Skill {
+	skills, err := scanSkillDir(dir, func(string) {})
+	if err != nil {
+		return nil
+	}
+	return skills
+}
+
+// RenderSkills is the `## Skills` prompt section: one line per skill giving its
+// name, absolute path, and description. The agent reads a body with `cat` when
+// it applies — bodies are never inlined, so N skills cost N lines, not N files.
+func RenderSkills(skills []Skill) string {
+	if len(skills) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n## Skills\nRead a skill's file with `cat` when it applies.\n")
+	for _, s := range skills {
+		fmt.Fprintf(&b, "- %s (%s): %s\n", s.Name, s.Path, s.Description)
+	}
+	return b.String()
+}

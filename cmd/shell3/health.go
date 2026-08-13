@@ -94,8 +94,13 @@ func runHealth(cmd *cobra.Command, path string) error {
 			if rrerr != nil {
 				return fmt.Errorf("health: %w", rrerr)
 			}
+			skillDir := filepath.Join(path, "skills")
+			if i > 0 {
+				skillDir = filepath.Join(path, "projects", ka.Name, "skills")
+			}
+			nSkills := len(config.ScanSkills(skillDir))
 			fmt.Fprintf(out, "agent: %s (%s, model %s, %d tools, %d skills, %d tests)\n",
-				ka.Name, role, ka.Model, len(r.Tools), len(r.Skills), len(ka.Tests))
+				ka.Name, role, ka.Model, len(r.Tools), nSkills, len(ka.Tests))
 		}
 	} else {
 		fmt.Fprintf(out, "agent: %s (model %s, %d skills, %d subagents)\n",
