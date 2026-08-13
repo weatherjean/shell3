@@ -96,6 +96,25 @@ func (p *Parts) KitAgentRuntime(name string) (chat.ActiveAgent, error) {
 	}
 
 	defs := append(config.ToolDefs(gates), r.ToolDefs()...)
+
+	// Delegation: the main agent gets the task tool with every other kit agent
+	// as an allowed target. Employees never get it — delegation is one level,
+	// structurally, not by convention.
+	var employees []string
+	if isMain(p.kit, r.Agent.Name) {
+		refs := make([]config.SubagentRef, 0, len(p.kit.Agents))
+		for i, ka := range p.kit.Agents {
+			if i == 0 {
+				continue
+			}
+			employees = append(employees, ka.Name)
+			refs = append(refs, config.SubagentRef{Name: ka.Name, Description: ka.Desc})
+		}
+		if len(refs) > 0 {
+			defs = append(defs, config.TaskToolFor(refs), config.TaskListTool, config.TaskStatusTool, config.TaskCancelTool)
+		}
+	}
+
 	names := make([]string, 0, len(defs))
 	for _, d := range defs {
 		names = append(names, d.Name)
@@ -129,6 +148,7 @@ func (p *Parts) KitAgentRuntime(name string) (chat.ActiveAgent, error) {
 		ModelID:      md.ModelID,
 		AgentKnobs: chat.AgentKnobs{
 			HostToolNames: hostNames,
+			Subagents:     employees,
 			Environment:   true,
 			ContextWindow: md.ContextWindow,
 			CompactAt:     md.CompactAt,
@@ -136,6 +156,11 @@ func (p *Parts) KitAgentRuntime(name string) (chat.ActiveAgent, error) {
 			PruneAt:       md.PruneAt,
 		},
 	}, nil
+}
+
+// isMain reports whether name is the kit's first-declared agent.
+func isMain(k *kit.Kit, name string) bool {
+	return len(k.Agents) > 0 && k.Agents[0].Name == name
 }
 
 // KitHostToolNames is the set of declared tool names that must route to the

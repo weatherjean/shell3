@@ -5,11 +5,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/weatherjean/shell3/internal/config"
+	"github.com/weatherjean/shell3/internal/kit"
 	"github.com/weatherjean/shell3/internal/mcp"
 )
 
@@ -59,8 +62,45 @@ func runHealth(cmd *cobra.Command, path string) error {
 		return fmt.Errorf("health: config loaded with %d warning(s)", len(warns))
 	}
 	a := lc.FirstAgent()
-	fmt.Fprintf(out, "agent: %s (model %s, %d skills, %d subagents)\n",
-		a.Name, a.ModelName, len(a.Skills), len(a.Subagents))
+
+	// A kit is the config when present: report its agents and validate every
+	// declared tool, so a broken manifest fails here rather than at 3am.
+	kitPath := filepath.Join(path, config.KitFileName)
+	if _, statErr := os.Stat(kitPath); statErr == nil {
+		res, cerr := kit.Check(ctx, kitPath)
+		if cerr != nil {
+			return fmt.Errorf("health: %w", cerr)
+		}
+		for _, prob := range res.Problems {
+			fmt.Fprintln(out, "kit: "+prob)
+		}
+		if !res.OK() {
+			return fmt.Errorf("health: %s has %d problem(s)", config.KitFileName, len(res.Problems))
+		}
+		src, rerr := os.ReadFile(kitPath)
+		if rerr != nil {
+			return fmt.Errorf("health: %w", rerr)
+		}
+		k, perr := kit.Parse(src)
+		if perr != nil {
+			return fmt.Errorf("health: %w", perr)
+		}
+		for i, ka := range k.Agents {
+			role := "employee"
+			if i == 0 {
+				role = "main"
+			}
+			r, rrerr := k.Resolve(ka, i == 0)
+			if rrerr != nil {
+				return fmt.Errorf("health: %w", rrerr)
+			}
+			fmt.Fprintf(out, "agent: %s (%s, model %s, %d tools, %d skills, %d tests)\n",
+				ka.Name, role, ka.Model, len(r.Tools), len(r.Skills), len(ka.Tests))
+		}
+	} else {
+		fmt.Fprintf(out, "agent: %s (model %s, %d skills, %d subagents)\n",
+			a.Name, a.ModelName, len(a.Skills), len(a.Subagents))
+	}
 	// Dry-run every discovered hook with a probe payload. A script failure
 	// (nonzero exit, bad verdict JSON, timeout) surfaces as a fail-closed
 	// verdict whose reason carries "hook error:"/"hook failed:" — that's a
