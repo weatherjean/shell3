@@ -318,7 +318,14 @@ func EnvironmentReminder(configDir, runsDir, model, sessionID string) string {
 		fmt.Fprintf(&b, "- session id: %s\n", sessionID)
 	}
 	if configDir != "" {
-		fmt.Fprintf(&b, "- config: `%s` (your config directory: shell3.yaml, agent.md, skills/, hooks/ — edit it via the self-evolve skill)\n", configDir)
+		// Name what is actually on disk. A reminder that lists files the
+		// install does not have teaches the model a layout it will then
+		// contradict itself about.
+		layout := "shell3.sh (agents + tools), skills/, projects/<agent>/skills/, hooks/"
+		if !fileExists(filepath.Join(configDir, KitFileName)) {
+			layout = "shell3.yaml, agent.md, skills/, hooks/"
+		}
+		fmt.Fprintf(&b, "- config: `%s` (your config directory: %s — edit it via the self-evolve skill)\n", configDir, layout)
 	}
 	// Derive the model-facing paths from paths.ProjectDirName (its single
 	// source): a renamed project dir must not leave the reminder teaching the
