@@ -95,3 +95,23 @@ func validateContextEntries(dir string, entries []string, warn func(string)) err
 	}
 	return nil
 }
+
+// RenderContext reads an agent's context: entries and renders them as the
+// prompt's `## Context` section, one `### <path>` per file. Returns "" when
+// there are no entries. A malformed glob (rejected at load) yields "" rather
+// than failing a turn — a brain file must never break the agent.
+func RenderContext(configDir string, entries []string) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	files, err := ResolveContextFiles(configDir, entries)
+	if err != nil || len(files) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n## Context\n")
+	for _, f := range files {
+		b.WriteString("\n### " + f.Path + "\n\n" + f.Body + "\n")
+	}
+	return b.String()
+}

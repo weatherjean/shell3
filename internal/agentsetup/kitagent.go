@@ -101,6 +101,10 @@ func (p *Parts) KitAgentRuntime(name string) (chat.ActiveAgent, error) {
 		names = append(names, d.Name)
 	}
 
+	// context: files are re-read at every turn start, so an agent's memory.md
+	// is current on every dispatch rather than a session-creation snapshot.
+	ctxFiles := r.Agent.Context
+
 	// Declared tools must route to the host-tool dispatcher, not the built-in
 	// tool handler — without this the model calls them and the turn answers
 	// with an unknown-tool error.
@@ -114,7 +118,7 @@ func (p *Parts) KitAgentRuntime(name string) (chat.ActiveAgent, error) {
 	return chat.ActiveAgent{
 		Personality: persona.Persona{
 			Name:         r.Agent.Name,
-			SystemPrompt: r.SystemPrompt(),
+			SystemPrompt: r.SystemPrompt() + config.RenderContext(p.configDir, ctxFiles),
 			Tools:        defs,
 		},
 		ModeLabel:    r.Agent.Name,

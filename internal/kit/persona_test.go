@@ -162,3 +162,20 @@ func TestToolDefsSchema(t *testing.T) {
 		t.Fatalf("search params = %#v", defs[1].Parameters)
 	}
 }
+
+func TestParseAgentContext(t *testing.T) {
+	src := `#---
+# agent: a
+# context: [memory.md, notes/*.md]
+#---
+a_prompt() { cat <<'EOF2'
+hi
+EOF2
+}
+`
+	k := mustParse(t, src)
+	got := k.Agents[0].Context
+	if len(got) != 2 || got[0] != "memory.md" || got[1] != "notes/*.md" {
+		t.Fatalf("context = %v", got)
+	}
+}

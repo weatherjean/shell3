@@ -58,6 +58,7 @@ type decl struct {
 	model   string
 	workdir string
 	use     []string
+	context []string
 	params  map[string]Param
 	wiring  map[string]any
 }
@@ -75,6 +76,7 @@ type blockYAML struct {
 	Model       string           `yaml:"model"`
 	Workdir     string           `yaml:"workdir"`
 	Use         []string         `yaml:"use"`
+	Context     []string         `yaml:"context"`
 	Params      map[string]Param `yaml:"params"`
 
 	Shell3 map[string]any `yaml:"shell3"`
@@ -91,7 +93,7 @@ func decodeBlock(b block) (decl, error) {
 
 	d := decl{
 		line: b.line, endLine: b.endLine, desc: y.Description, model: y.Model,
-		workdir: y.Workdir, use: y.Use, params: y.Params, wiring: y.Shell3,
+		workdir: y.Workdir, use: y.Use, context: y.Context, params: y.Params, wiring: y.Shell3,
 	}
 
 	kinds := []struct {
