@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/config"
@@ -122,6 +124,13 @@ func (p *Parts) KitAgentRuntime(name string) (chat.ActiveAgent, error) {
 
 	// context: files are re-read at every turn start, so an agent's memory.md
 	// is current on every dispatch rather than a session-creation snapshot.
+	// They resolve against the agent's OWN workdir when it declares one —
+	// otherwise every employee's `context: [memory.md]` would silently load
+	// the main agent's memory instead of its own.
+	ctxBase := p.configDir
+	if wd := r.Agent.Workdir; wd != "" {
+		ctxBase = expandHomePath(wd, p.home)
+	}
 	ctxFiles := r.Agent.Context
 
 	// Declared tools must route to the host-tool dispatcher, not the built-in
@@ -137,7 +146,7 @@ func (p *Parts) KitAgentRuntime(name string) (chat.ActiveAgent, error) {
 	return chat.ActiveAgent{
 		Personality: persona.Persona{
 			Name:         r.Agent.Name,
-			SystemPrompt: r.SystemPrompt() + config.RenderContext(p.configDir, ctxFiles),
+			SystemPrompt: r.SystemPrompt() + config.RenderContext(ctxBase, ctxFiles),
 			Tools:        defs,
 		},
 		ModeLabel:    r.Agent.Name,
@@ -156,6 +165,14 @@ func (p *Parts) KitAgentRuntime(name string) (chat.ActiveAgent, error) {
 			PruneAt:       md.PruneAt,
 		},
 	}, nil
+}
+
+// expandHomePath resolves a leading ~/ against home.
+func expandHomePath(p, home string) string {
+	if strings.HasPrefix(p, "~/") && home != "" {
+		return filepath.Join(home, p[2:])
+	}
+	return p
 }
 
 // isMain reports whether name is the kit's first-declared agent.

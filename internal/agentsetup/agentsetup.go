@@ -75,6 +75,8 @@ type Parts struct {
 	// otherwise. Agents declared in it resolve through KitAgentRuntime.
 	kit     *kit.Kit
 	kitPath string
+	// home is the user's home dir, for expanding ~/ in a kit agent's workdir.
+	home string
 }
 
 // MCPStatus reports every declared MCP server's health (nil when no
@@ -488,6 +490,7 @@ func BuildParts(opts Options) (*Parts, func(), error) {
 		log: b.log, root: b.opts.CWD, runsDir: b.l.Runs,
 		configDir: b.configDir,
 		mcp:       b.mcp, mcpWarns: b.mcpWarns,
+		home: opts.HomeDir,
 	}
 	// A shell3.sh beside the config is THE config: its agents, tools, and
 	// skills take precedence over the markdown tree. Presence enables it —
