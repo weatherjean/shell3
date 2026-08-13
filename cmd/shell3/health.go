@@ -61,14 +61,6 @@ func runHealth(cmd *cobra.Command, path string) error {
 	a := lc.FirstAgent()
 	fmt.Fprintf(out, "agent: %s (model %s, %d skills, %d subagents)\n",
 		a.Name, a.ModelName, len(a.Skills), len(a.Subagents))
-	// One line per Chain of Command project: name, the repo its manager works
-	// in, and the manager's model + skill count (the manager registers as a
-	// subagent under the project name).
-	for _, p := range lc.Projects() {
-		mgr, _ := lc.SubagentByName(p.Name)
-		fmt.Fprintf(out, "project: %s (workdir %s, model %s, %d skills)\n",
-			p.Name, p.Workdir, mgr.ModelName, len(mgr.Skills))
-	}
 	// Dry-run every discovered hook with a probe payload. A script failure
 	// (nonzero exit, bad verdict JSON, timeout) surfaces as a fail-closed
 	// verdict whose reason carries "hook error:"/"hook failed:" — that's a

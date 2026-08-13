@@ -40,7 +40,6 @@ func main() {
 	root.AddCommand(newServeCommand())
 	root.AddCommand(newAskCommand())
 	root.AddCommand(newBootCommand())
-	root.AddCommand(newProjectCommand())
 	root.AddCommand(newHealthCommand())
 	root.AddCommand(newToolCommand())
 

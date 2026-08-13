@@ -87,15 +87,6 @@ func Status(sess *shell3.Session, rt *shell3.Runtime, version string) string {
 			}
 			b.WriteString("\n")
 		}
-		if parts := rt.Parts(); parts != nil {
-			if projects := parts.Projects(); len(projects) > 0 {
-				b.WriteString("## Projects\n\n")
-				for _, p := range projects {
-					fmt.Fprintf(&b, "- `%s` — %s\n", p.Name, oneLine(p.Description, 120))
-				}
-				b.WriteString("\n")
-			}
-		}
 	}
 
 	writeList(&b, "Warnings", snap.Warnings)

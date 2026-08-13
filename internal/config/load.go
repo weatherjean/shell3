@@ -84,12 +84,6 @@ func load(dir string) (*LoadedConfig, error) {
 	if err := c.loadSubagents(dir); err != nil {
 		return nil, err
 	}
-	// projects/<name>/ — each registers its manager as a subagent under the
-	// project name (flat namespace with agents/), so it must land before the
-	// names collection and the later cron/hook cross-ref checks.
-	if err := c.loadProjects(dir, warn); err != nil {
-		return nil, err
-	}
 	// projects.md — the standing portfolio brief, appended verbatim to the end
 	// of the main agent's system prompt when present.
 	if pb, err := os.ReadFile(filepath.Join(dir, "projects.md")); err == nil {

@@ -167,7 +167,6 @@ type LoadedConfig struct {
 
 	agent     Agent
 	subagents []Subagent
-	projects  []Project
 
 	mcpServers []MCPServer
 	telegram   TelegramConfig
@@ -225,13 +224,6 @@ func (c *LoadedConfig) FirstAgent() Agent { return c.agent }
 func (c *LoadedConfig) Subagents() []Subagent {
 	out := make([]Subagent, len(c.subagents))
 	copy(out, c.subagents)
-	return out
-}
-
-// Projects returns the loaded Chain of Command projects in directory order.
-func (c *LoadedConfig) Projects() []Project {
-	out := make([]Project, len(c.projects))
-	copy(out, c.projects)
 	return out
 }
 

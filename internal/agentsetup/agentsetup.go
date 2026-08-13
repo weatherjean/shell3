@@ -140,9 +140,6 @@ func (p *Parts) AgentNames() []string {
 // filename order — what a front-end needs to show the delegation roster.
 func (p *Parts) Subagents() []config.Subagent { return p.lc.Subagents() }
 
-// Projects returns the loaded Chain of Command projects in directory order.
-func (p *Parts) Projects() []config.Project { return p.lc.Projects() }
-
 // Skills returns the main agent's skill index (subagents carry none).
 func (p *Parts) Skills() []config.Skill { return p.lc.FirstAgent().Skills }
 

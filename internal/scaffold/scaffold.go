@@ -21,11 +21,6 @@ var baseFS embed.FS
 
 const baseRoot = "defaults/base"
 
-//go:embed all:defaults/project
-var projectFS embed.FS
-
-const projectRoot = "defaults/project"
-
 // Values are the user-supplied substitutions for the templated files.
 type Values struct {
 	Name    string // model handle, e.g. "main"
@@ -184,81 +179,6 @@ func yamlKey(s string) string {
 		return yamlString(s)
 	}
 	return s
-}
-
-// ProjectValues are the substitutions for a scaffolded projects/<name>/ tree.
-type ProjectValues struct {
-	Name        string
-	Description string
-	Workdir     string
-}
-
-// RenderProject scaffolds a projects/<name>/ tree under configDir dir: both
-// embedded project templates rendered with v (project.md + manager.md), an
-// empty skills/ subdir, and — when copySkillsFrom is non-empty — a copy of
-// every *.md in projects/<copySkillsFrom>/skills/. Refuses when the target
-// project directory already exists (never clobbers a live project). Errors if
-// copySkillsFrom names a project with no skills dir.
-func RenderProject(dir string, v ProjectValues, copySkillsFrom string) error {
-	root := filepath.Join(dir, "projects", v.Name)
-	if _, err := os.Stat(root); err == nil {
-		return fmt.Errorf("scaffold: project %s already exists at %s", v.Name, root)
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("scaffold: stat %s: %w", root, err)
-	}
-
-	err := fs.WalkDir(projectFS, projectRoot, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		rel, err := filepath.Rel(projectRoot, p)
-		if err != nil {
-			return err
-		}
-		content, err := projectFS.ReadFile(p)
-		if err != nil {
-			return err
-		}
-		if strings.HasSuffix(rel, ".tmpl") {
-			rendered, err := renderTemplate(rel, content, v)
-			if err != nil {
-				return err
-			}
-			content, rel = rendered, strings.TrimSuffix(rel, ".tmpl")
-		}
-		return writeFile(filepath.Join(root, rel), content, 0644, true)
-	})
-	if err != nil {
-		return err
-	}
-
-	if err := os.MkdirAll(filepath.Join(root, "skills"), 0700); err != nil {
-		return fmt.Errorf("scaffold: mkdir skills: %w", err)
-	}
-
-	if copySkillsFrom != "" {
-		src := filepath.Join(dir, "projects", copySkillsFrom, "skills")
-		entries, err := os.ReadDir(src)
-		if err != nil {
-			return fmt.Errorf("scaffold: copy-skills from %s: %w", copySkillsFrom, err)
-		}
-		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-				continue
-			}
-			content, err := os.ReadFile(filepath.Join(src, e.Name()))
-			if err != nil {
-				return fmt.Errorf("scaffold: copy-skills read %s: %w", e.Name(), err)
-			}
-			if err := writeFile(filepath.Join(root, "skills", e.Name()), content, 0644, true); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 // writeFile writes content to path. When force is false it skips an existing

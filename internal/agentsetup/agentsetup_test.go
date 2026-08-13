@@ -550,37 +550,3 @@ func TestBuild_PruneFlag(t *testing.T) {
 		t.Errorf("inheriting: PruneAt = %d, want %d (model default)", inh.PruneAt, want)
 	}
 }
-
-// TestSubagentWorkdir asserts Parts.SubagentWorkdir returns a project manager's
-// declared workdir, and "" for ordinary subagents and unknown names — the seam
-// that lets startSubagent run a manager's shell in the project repo.
-func TestSubagentWorkdir(t *testing.T) {
-	tmp := t.TempDir()
-	work := t.TempDir()
-	writeTree(t, tmp, map[string]string{
-		"shell3.yaml":              minimalYAML,
-		"agent.md":                 "---\nmodel: main\ntools: [bash]\n---\nyou are a coder\n",
-		"agents/explorer.md":       "---\ndescription: explores things\ntools: [bash]\n---\nyou are an explorer\n",
-		"projects/site/project.md": "---\ndescription: my site\nworkdir: " + work + "\n---\nBrief.\n",
-		"projects/site/manager.md": "---\ndescription: manages site\n---\nYou are the site manager.\n",
-	})
-	parts, cleanup, err := agentsetup.BuildParts(agentsetup.Options{
-		ConfigDir: tmp,
-		CWD:       tmp,
-		HomeDir:   t.TempDir(),
-	})
-	if err != nil {
-		t.Fatalf("BuildParts: %v", err)
-	}
-	defer cleanup()
-
-	if got := parts.SubagentWorkdir("site"); got != work {
-		t.Errorf("SubagentWorkdir(\"site\") = %q, want %q (project workdir)", got, work)
-	}
-	if got := parts.SubagentWorkdir("explorer"); got != "" {
-		t.Errorf("SubagentWorkdir(\"explorer\") = %q, want \"\" (ordinary subagent inherits)", got)
-	}
-	if got := parts.SubagentWorkdir("nope"); got != "" {
-		t.Errorf("SubagentWorkdir(\"nope\") = %q, want \"\" (unknown name)", got)
-	}
-}
