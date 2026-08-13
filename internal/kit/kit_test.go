@@ -166,3 +166,19 @@ func TestParseBadParamTypeFails(t *testing.T) {
 		t.Fatal("want error for an unsupported param type")
 	}
 }
+
+func TestParseBadParamNameFails(t *testing.T) {
+	src := []byte("#---\n# agent: a\n#---\np() { :; }\n" +
+		"#---\n# tool: t\n# description: x\n# params:\n#   my-arg: {type: string}\n#---\nf() { :; }\n")
+	if _, err := Parse(src); err == nil {
+		t.Fatal("want error: a hyphenated param cannot be an environment variable")
+	}
+}
+
+func TestParseParamShadowingPathFails(t *testing.T) {
+	src := []byte("#---\n# agent: a\n#---\np() { :; }\n" +
+		"#---\n# tool: t\n# description: x\n# params:\n#   PATH: {type: string}\n#---\nf() { :; }\n")
+	if _, err := Parse(src); err == nil {
+		t.Fatal("want error: a param must not shadow PATH")
+	}
+}

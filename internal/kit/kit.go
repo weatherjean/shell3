@@ -159,6 +159,17 @@ func attach(a *Agent, g *Group, d decl, f fnDef) error {
 			if _, ok := jsonType[p.Type]; !ok {
 				return fmt.Errorf("line %d: tool %q param %q has type %q — want string, int, or bool", d.line, d.name, pname, p.Type)
 			}
+			// A param becomes an environment variable in the tool's shell, so it
+			// must be a valid identifier and must not shadow the environment the
+			// body relies on to find programs.
+			if !paramName.MatchString(pname) {
+				return fmt.Errorf("line %d: tool %q param %q is not a valid identifier — params become environment variables", d.line, d.name, pname)
+			}
+			for _, reserved := range passthroughEnv {
+				if pname == reserved {
+					return fmt.Errorf("line %d: tool %q param %q shadows the %s environment variable", d.line, d.name, pname, reserved)
+				}
+			}
 		}
 		t := Tool{Name: d.name, Desc: d.desc, Func: f.name, Params: d.params, Line: d.line}
 		existing := a.tools(g)
