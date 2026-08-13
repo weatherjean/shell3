@@ -42,6 +42,7 @@ func main() {
 	root.AddCommand(newBootCommand())
 	root.AddCommand(newProjectCommand())
 	root.AddCommand(newHealthCommand())
+	root.AddCommand(newToolCommand())
 
 	// Print the brand header (the ๑ï snail): the full two-line banner when a
 	// subcommand actually runs (PersistentPreRun), and the slim one-line logo

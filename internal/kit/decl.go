@@ -3,6 +3,8 @@ package kit
 import (
 	"bytes"
 	"fmt"
+	"regexp"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
@@ -84,7 +86,7 @@ func decodeBlock(b block) (decl, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(b.yaml))
 	dec.KnownFields(true)
 	if err := dec.Decode(&y); err != nil {
-		return decl{}, fmt.Errorf("line %d: %w", b.line, err)
+		return decl{}, fmt.Errorf("line %d: %s", b.line, absLines(err.Error(), b.line))
 	}
 
 	d := decl{
@@ -117,4 +119,22 @@ func decodeBlock(b block) (decl, error) {
 	default:
 		return decl{}, fmt.Errorf("line %d: declaration block names no agent/shared/tool/skill/test", b.line)
 	}
+}
+
+// yamlLineRef matches the "line N:" references yaml.v3 emits, which are
+// relative to the block's own text.
+var yamlLineRef = regexp.MustCompile(`line (\d+):`)
+
+// absLines rewrites a YAML error's block-relative line numbers into kit file
+// line numbers. The block's first content line sits one line below its opening
+// fence, so relative line 1 is start+1. Without this an author reading
+// "line 6: ... line 2: field not found" has to do the arithmetic themselves.
+func absLines(msg string, start int) string {
+	return yamlLineRef.ReplaceAllStringFunc(msg, func(m string) string {
+		n, err := strconv.Atoi(yamlLineRef.FindStringSubmatch(m)[1])
+		if err != nil {
+			return m
+		}
+		return fmt.Sprintf("line %d:", start+n)
+	})
 }
