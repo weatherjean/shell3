@@ -93,6 +93,18 @@ func TestScaffoldedGateAllowsOrdinaryWork(t *testing.T) {
 		"sed -i '' s/a/b/ ./notes.md",
 		"find . -name '*.tmp' -delete",
 		"curl -s https://api.example.com/thing | jq .",
+
+		// Cleanup is most of what an agent does between tasks, and every one of
+		// these was refused by the previous gate. Deleting a cache while
+		// repairing the tool that owns it, and reading the rules that constrain
+		// you, are not the failures this file exists to prevent.
+		"rm -rf ~/Library/Caches/some-browser",
+		"rm -rf ~/Library/Logs/some-app",
+		"cd ~/.shell3 && cat hooks/tool-call.sh",
+		"python3 -c 'print(1)' && cat ./hooks/tool-call.sh",
+		"less ./hooks/tool-call.sh",
+		"rm -rf ~/.cache/pip",
+		"docker system prune -f",
 	} {
 		if verdict, reason := runHook(t, dir, "tool-call.sh", "bash", command); verdict != "allow" {
 			t.Errorf("%q = %s (%s), want allow", command, verdict, reason)
