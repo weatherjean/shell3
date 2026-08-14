@@ -144,12 +144,12 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 			b.sendReply(ctx, md)
 			return
 		}
-		out, err := render.RunReplay(b.runsRoot, a)
+		page, err := render.RunReplayHTML(b.runsRoot, a)
 		if err != nil {
 			b.sendReply(ctx, "⚠️ "+err.Error())
 			return
 		}
-		b.sendMarkdownDoc(ctx, "run-"+a+".md", out)
+		b.sendRunDoc(ctx, a, page)
 	case "/cancel":
 		if b.cancelJob == nil {
 			b.sendReply(ctx, "job control not available")
@@ -278,12 +278,12 @@ func (b *Bot) handleRunTap(ctx context.Context, arg string) {
 		b.sendReply(ctx, "index not found — run /runs again")
 		return
 	}
-	out, err := render.RunReplay(b.runsRoot, id)
+	page, err := render.RunReplayHTML(b.runsRoot, id)
 	if err != nil {
 		b.sendReply(ctx, "⚠️ "+err.Error())
 		return
 	}
-	b.sendMarkdownDoc(ctx, "run-"+id+".md", out)
+	b.sendRunDoc(ctx, id, page)
 }
 
 // findJob returns the job matching id from jobs, if any.

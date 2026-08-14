@@ -47,6 +47,23 @@ func (b *Bot) sendMarkdownDoc(ctx context.Context, name, md string) {
 	}
 }
 
+// sendRunDoc delivers a run replay as a self-contained HTML page. Unlike the
+// markdown views there is no inline branch: a replay is 100–500 KB for a real
+// session, always a document, and HTML is what makes that readable — every
+// tool result and every reasoning block folded shut until you open it.
+//
+// The one-line text message beside it is what the chat list shows; a document
+// alone scrolls past unlabelled.
+func (b *Bot) sendRunDoc(ctx context.Context, id, page string) {
+	name := "run-" + id + ".html"
+	if _, err := b.client.SendDocument(ctx, b.chatID, name, []byte(page), ""); err != nil {
+		b.sendReply(ctx, "⚠️ failed to send "+name+": "+err.Error())
+		return
+	}
+	// A failed caption is cosmetic — the document already landed.
+	_, _ = b.client.Send(ctx, b.chatID, "run "+id+" — open the file; tool output and reasoning start folded")
+}
+
 // registerSendTool gives the agent a send_media_telegram tool to push a local
 // file back to the user's Telegram chat.
 func (b *Bot) registerSendTool(s *shell3.Session) {

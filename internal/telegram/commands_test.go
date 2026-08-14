@@ -404,10 +404,18 @@ func TestRunTap_ReplaysIndexedRun(t *testing.T) {
 	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/runs"})
 	fc.reset()
 	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/run_1@shellibot"})
-	all := strings.Join(fc.sentTexts(), "\n")
 	newest := ids[len(ids)-1]
-	if !strings.Contains(all, newest) || !strings.Contains(all, "prompt 2") {
-		t.Fatalf("expected /run_1 to replay newest run %s, got %v", newest, fc.sentTexts())
+	// The replay is an HTML document; the message beside it names the run, and
+	// the run's content lives in the file.
+	doc, ok := fc.lastDoc()
+	if !ok || doc.filename != "run-"+newest+".html" {
+		t.Fatalf("expected /run_1 to send run-%s.html, got %+v ok=%v", newest, doc.filename, ok)
+	}
+	if !strings.Contains(string(doc.data), "prompt 2") {
+		t.Fatalf("replayed page does not contain the run's prompt")
+	}
+	if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), newest) {
+		t.Fatalf("expected the caption to name run %s, got %v", newest, fc.sentTexts())
 	}
 }
 
@@ -450,12 +458,12 @@ func TestRunsCommand_ReplaysOneAsDocumentWhenLarge(t *testing.T) {
 
 	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/runs " + id})
 	doc, ok := fc.lastDoc()
-	if !ok || doc.filename != "run-"+id+".md" {
-		t.Fatalf("expected a run-%s.md document, got %+v ok=%v", id, doc, ok)
+	if !ok || doc.filename != "run-"+id+".html" {
+		t.Fatalf("expected a run-%s.html document, got %+v ok=%v", id, doc.filename, ok)
 	}
 	all := strings.Join(fc.sentTexts(), "\n")
 	if all == "" || len(all) > 400 {
-		t.Fatalf("expected a capped text summary alongside the document, got %d bytes", len(all))
+		t.Fatalf("expected a short caption alongside the document, got %d bytes", len(all))
 	}
 }
 
