@@ -39,3 +39,19 @@ func Cron(jobs []shell3.CronJob, lastRuns map[string]time.Time) string {
 	}
 	return b.String()
 }
+
+// CronBrief is the /status line-per-job form. The full Cron view prints each
+// job's prompt body, which is right when you asked about cron specifically and
+// wrong in a view you check at a glance.
+func CronBrief(jobs []shell3.CronJob, lastRuns map[string]time.Time) string {
+	var b strings.Builder
+	b.WriteString("## Cron\n\n")
+	for _, j := range jobs {
+		last := "never"
+		if t, ok := lastRuns[j.Name]; ok && !t.IsZero() {
+			last = stamp(t)
+		}
+		fmt.Fprintf(&b, "- `%s` %s → %s _(last: %s)_\n", j.Name, j.Schedule, j.Agent, last)
+	}
+	return b.String()
+}

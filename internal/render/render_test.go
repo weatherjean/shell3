@@ -283,7 +283,6 @@ func TestStatus(t *testing.T) {
 		"explorer",
 		"scripting",
 		"skill x skipped",
-		"You are shell3.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("Status missing %q\n---\n%s", want, out)
@@ -291,6 +290,13 @@ func TestStatus(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(out), "armed") {
 		t.Errorf("Status missing the gate line:\n%s", out)
+	}
+	// The system prompt is deliberately absent: it is thousands of tokens the
+	// operator already has in shell3.sh, and including it pushed every /status
+	// past Telegram's message cap into a document — where the tappable /job_N
+	// commands stop being tappable.
+	if strings.Contains(out, "You are shell3.") {
+		t.Errorf("Status dumps the system prompt:\n%s", out)
 	}
 }
 

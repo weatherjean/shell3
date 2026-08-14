@@ -25,6 +25,11 @@ type DispatchOpts struct {
 	// job's prompt, so the agent knows what the job is FOR, not just what
 	// it said.
 	Note string
+	// Detached posts the result to the user and tells the owning session
+	// NOTHING — no wake, no queued notice. It is for an aside the
+	// conversation must not absorb (/btw): the answer reaches the user and
+	// leaves no trace in the context the agent carries forward.
+	Detached bool
 }
 
 // Dispatch fires a fire-and-forget subagent job on the in-process job runtime —
@@ -45,9 +50,10 @@ func (s *Session) Dispatch(agent, prompt string, opts DispatchOpts) (string, err
 		desc = strutil.Truncate(prompt, 60)
 	}
 	return rt.jobs.startSubagent(s, agent, prompt, desc, subagentOpts{
-		workDir: opts.WorkDir,
-		direct:  opts.Direct,
-		cronJob: opts.CronJob,
-		note:    opts.Note,
+		workDir:  opts.WorkDir,
+		direct:   opts.Direct,
+		cronJob:  opts.CronJob,
+		note:     opts.Note,
+		detached: opts.Detached,
 	})
 }

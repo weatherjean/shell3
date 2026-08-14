@@ -106,7 +106,12 @@ type Bot struct {
 	// /runs render (guarded by b.mu). Taps resolve ONLY against this map —
 	// never a re-derived listing — so a stale tap errors instead of opening
 	// the wrong run. Empty until /runs is first rendered; lost on restart.
-	runIndex     map[int]string
+	runIndex map[int]string
+	// jobIndex maps a /job_N or /cancel_N tap index → job id, written whole by
+	// the last /status render. Same contract as runIndex: a tap resolves only
+	// against what the user is looking at, so a job finishing between render
+	// and tap errors instead of acting on its neighbour.
+	jobIndex     map[int]string
 	version      string                      // shell3 version string, reported by /status
 	cronLastRuns func() map[string]time.Time // cron job name -> last run time, for /cron; nil renders "never"
 }
@@ -827,6 +832,8 @@ func (b *Bot) PostCompletion(p shell3.CompletionPost) {
 	}
 	failure := strings.HasPrefix(text, "⚠️")
 	switch {
+	case p.Aside:
+		text = "💬 " + text
 	case p.CronJob != "":
 		text = fmt.Sprintf("⏰ %s: %s", p.CronJob, text)
 	case failure:

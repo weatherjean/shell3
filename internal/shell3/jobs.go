@@ -162,7 +162,8 @@ type bgJob struct {
 	// agent turn (the notice still queues on the owner, unwoken). Set from
 	// the bash_bg/task tool's direct:true arg or a cron job's direct:
 	// frontmatter.
-	direct bool
+	direct   bool
+	detached bool
 	// note is the spawner's optional intent hint, carried into the
 	// completion mail ("the user is waiting on this").
 	note string
@@ -597,10 +598,11 @@ func (m *jobManager) runningJobIDs() []string {
 
 // subagentOpts tunes a subagent job spawned via startSubagent.
 type subagentOpts struct {
-	workDir string // child workdir; "" → the parent session's workdir
-	direct  bool   // post the raw result straight to the user (no agent turn)
-	note    string // context carried into the completion mail ("" = none)
-	cronJob string // cron dispatches: the job name ("" for task-tool spawns)
+	workDir  string // child workdir; "" → the parent session's workdir
+	direct   bool   // post the raw result straight to the user (no agent turn)
+	note     string // context carried into the completion mail ("" = none)
+	cronJob  string // cron dispatches: the job name ("" for task-tool spawns)
+	detached bool   // deliver to the user only; the owning session is told nothing
 }
 
 // resolveChildWorkDir picks a subagent job's workdir: the override when set (a
@@ -656,7 +658,7 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 		id: id, kind: JobSubagent, title: desc, agent: agent, parent: parent,
 		parentID: pname, startedAt: time.Now(),
 		cancel: cancel, out: out,
-		direct: o.direct, note: o.note, cronJob: o.cronJob,
+		direct: o.direct, note: o.note, cronJob: o.cronJob, detached: o.detached,
 	}
 	m.jobs[id] = j
 	m.mu.Unlock()

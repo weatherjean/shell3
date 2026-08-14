@@ -116,3 +116,28 @@ func outcome(j shell3.JobInfo) string {
 		return "done"
 	}
 }
+
+// JobsTappable renders the jobs section of /status with tappable commands.
+//
+// Telegram only linkifies a /command in message TEXT, never inside a
+// document — which is why this section, and the view carrying it, stay inline.
+// Numbering mirrors /runs: the caller stores the same index the render used,
+// so a tap resolves against what you are actually looking at rather than a
+// re-derived guess that a finished job would have shifted.
+func JobsTappable(jobs []shell3.JobInfo) string {
+	var b strings.Builder
+	b.WriteString("## Jobs\n\n")
+	if len(jobs) == 0 {
+		b.WriteString("_None running._\n")
+		return b.String()
+	}
+	for i, j := range jobs {
+		n := i + 1
+		if j.Done {
+			fmt.Fprintf(&b, "%d. %s — %s _(%s)_ /job_%d\n", n, kindOf(j), jobLabel(j), outcome(j), n)
+			continue
+		}
+		fmt.Fprintf(&b, "%d. %s — %s _(%s)_ /job_%d /cancel_%d\n", n, kindOf(j), jobLabel(j), elapsed(j), n, n)
+	}
+	return b.String()
+}

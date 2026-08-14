@@ -100,9 +100,8 @@ func TestCommand_UnknownDropped(t *testing.T) {
 	}
 }
 
-// /jobs renders the render.Jobs view over whatever the jobs-source closure
-// returns — the bot does no formatting of its own beyond the shared
-// render/document delivery path.
+// /status carries the jobs listing: it renders whatever the jobs-source
+// closure returns, with tappable /job_N and /cancel_N beside each entry.
 func TestJobsCommandListsRunning(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
@@ -111,37 +110,44 @@ func TestJobsCommandListsRunning(t *testing.T) {
 		return []shell3.JobInfo{{ID: "sub1", Kind: shell3.JobSubagent, Agent: "explorer", Cmd: "do the thing"}}
 	}, nil)
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/jobs"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/status"})
 	all := strings.Join(fc.sentTexts(), "\n")
-	if !strings.Contains(all, "sub1") || !strings.Contains(all, "explorer") {
-		t.Fatalf("expected the listing to be relayed, got %v", fc.sentTexts())
+	if !strings.Contains(all, "explorer") || !strings.Contains(all, "/job_1") {
+		t.Fatalf("expected the tappable listing, got %v", fc.sentTexts())
+	}
+	if !strings.Contains(all, "/cancel_1") {
+		t.Fatalf("a running job must offer /cancel_N, got %v", fc.sentTexts())
 	}
 }
 
-// /jobs with nothing running relays render.Jobs' empty-state text.
+// /status with nothing running says so rather than showing a bare heading.
 func TestJobsCommandEmpty(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
 	b.SetJobsSource(func() []shell3.JobInfo { return nil }, nil)
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/jobs"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/status"})
 	all := strings.Join(fc.sentTexts(), "\n")
-	if !strings.Contains(all, "No background jobs") {
-		t.Fatalf("expected the empty-state reply, got %v", fc.sentTexts())
+	if !strings.Contains(all, "None running") {
+		t.Fatalf("expected the empty-state jobs section, got %v", fc.sentTexts())
 	}
 }
 
-// /jobs with no source wired says so rather than silently rendering nothing.
+// With no jobs source wired, /status still renders — the section is simply
+// absent rather than the whole view failing.
 func TestJobsCommandNoSource(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/jobs"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/status"})
 	all := strings.Join(fc.sentTexts(), "\n")
-	if !strings.Contains(all, "job control not available") {
-		t.Fatalf("expected unavailable reply, got %v", fc.sentTexts())
+	if all == "" {
+		t.Fatal("/status rendered nothing without a jobs source")
+	}
+	if strings.Contains(all, "## Jobs") {
+		t.Fatalf("expected no jobs section without a source, got %v", fc.sentTexts())
 	}
 }
 
@@ -278,10 +284,12 @@ func TestCronCommand_Empty(t *testing.T) {
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/cron"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/status"})
 	all := strings.Join(fc.sentTexts(), "\n")
-	if !strings.Contains(all, "No cron jobs") {
-		t.Fatalf("expected the empty-state cron reply, got %v", fc.sentTexts())
+	// With no cron jobs declared the section is omitted entirely: /status is
+	// one screen, and an empty heading is noise on every check.
+	if strings.Contains(all, "Cron") {
+		t.Fatalf("expected no cron section when none are declared, got %v", fc.sentTexts())
 	}
 }
 
@@ -296,10 +304,15 @@ func TestCronCommand_RendersJobs(t *testing.T) {
 	when := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
 	b.SetCronLastRuns(func() map[string]time.Time { return map[string]time.Time{"nightly": when} })
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/cron"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/status"})
 	all := strings.Join(fc.sentTexts(), "\n")
-	if !strings.Contains(all, "nightly") || !strings.Contains(all, "sweep the logs") || !strings.Contains(all, "2026-07-20") {
+	// /status carries the BRIEF cron form: name, schedule, agent, last run —
+	// not each job's prompt body, which is what /status is glanced at instead of.
+	if !strings.Contains(all, "nightly") || !strings.Contains(all, "explorer") || !strings.Contains(all, "2026-07-20") {
 		t.Fatalf("expected the cron job and last-run time rendered, got %v", fc.sentTexts())
+	}
+	if strings.Contains(all, "sweep the logs") {
+		t.Fatalf("/status should not print each cron job's prompt body, got %v", fc.sentTexts())
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/weatherjean/shell3/internal/render"
 	"github.com/weatherjean/shell3/internal/shell3"
+	"github.com/weatherjean/shell3/internal/strutil"
 )
 
 // BotCommands is the canonical command list, registered with Telegram for the
@@ -20,12 +21,10 @@ func BotCommands() []Command {
 		{"stop", "Stop the current turn"},
 		{"new", "Start a fresh conversation (the old one stays in /runs)"},
 		{"run", "Run a scheduled job now: /run <name>"},
-		{"status", "Show runtime status"},
-		{"inbox", "Show queued mail (yours and the agent's)"},
-		{"jobs", "List running background tasks"},
+		{"btw", "Ask something outside this conversation: /btw <question>"},
+		{"status", "Runtime, jobs, cron and queue (tap /job_N, /cancel_N)"},
 		{"job", "Show one job's detail: /job <id>"},
 		{"cancel", "Cancel a background task: /cancel <id>"},
-		{"cron", "List scheduled cron jobs"},
 		{"runs", "List runs (tap /run_N to replay): /runs [page|id]"},
 		{"reload", "Reload the config without restarting"},
 		{"quiet", "Hush background posts: /quiet on|off"},
@@ -45,6 +44,14 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 	// by prefix before the static switch.
 	if n, ok := strings.CutPrefix(cmd, "/run_"); ok {
 		b.handleRunTap(ctx, n)
+		return
+	}
+	if n, ok := strings.CutPrefix(cmd, "/job_"); ok {
+		b.handleJobTap(ctx, n, false)
+		return
+	}
+	if n, ok := strings.CutPrefix(cmd, "/cancel_"); ok {
+		b.handleJobTap(ctx, n, true)
 		return
 	}
 	switch cmd {
@@ -77,23 +84,60 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 			return
 		}
 		b.sendReply(ctx, "▶️ fired job "+name)
+	case "/btw":
+		// An aside: a one-off turn in its own child session, dispatched to the
+		// job runtime. It never touches the conversation — not the transcript,
+		// not the queue — so asking "what's the syntax for X" mid-project does
+		// not become something the agent carries forward forever.
+		//
+		// Because it is a background dispatch it also bypasses the turn slot,
+		// so it answers WHILE a long turn is still running.
+		q := strings.TrimSpace(arg)
+		if q == "" {
+			b.sendReply(ctx, "usage: /btw `<question>` — answered outside the conversation")
+			return
+		}
+		sess, err := b.mainSession()
+		if err != nil {
+			b.sendReply(ctx, "⚠️ "+err.Error())
+			return
+		}
+		if _, err := sess.Dispatch("", q, shell3.DispatchOpts{
+			Description: "btw: " + strutil.Truncate(q, 40),
+			Detached:    true,
+		}); err != nil {
+			b.sendReply(ctx, "⚠️ "+err.Error())
+			return
+		}
+		b.sendReply(ctx, "💬 asked on the side — the answer won't enter this conversation")
 	case "/status":
+		// One view answers "what is going on": runtime, then jobs, cron and
+		// the queue. They were four commands and four round trips for four
+		// short sections that fit on one screen together.
 		status := render.Status(b.anyLiveSession(), b.rt, b.version)
 		if b.isQuiet() {
 			status += "\n- quiet: on (background posts don't ping)"
 		}
-		b.sendMarkdownDoc(ctx, "status.md", status)
-	case "/inbox":
-		b.sendReply(ctx, b.renderInbox())
-	case "/jobs":
-		// Deterministic, zero-token job control from the phone: lists running
-		// subagents and bash_bg commands. Natural-language "what's running?"
-		// still works via the agent's task_list tool; this is the direct path.
-		if b.jobsList == nil {
-			b.sendReply(ctx, "job control not available")
-			return
+		if b.jobsList != nil {
+			jobs := b.jobsList()
+			b.mu.Lock()
+			b.jobIndex = indexJobs(jobs)
+			b.mu.Unlock()
+			status += "\n\n" + render.JobsTappable(jobs)
 		}
-		b.sendMarkdownDoc(ctx, "jobs.md", render.Jobs(b.jobsList()))
+		if cron := b.rt.Cron(); len(cron) > 0 {
+			var lastRuns map[string]time.Time
+			if b.cronLastRuns != nil {
+				lastRuns = b.cronLastRuns()
+			}
+			status += "\n\n" + render.CronBrief(cron, lastRuns)
+		}
+		if inbox := strings.TrimSpace(b.renderInbox()); inbox != "" && !strings.Contains(inbox, "nothing queued") {
+			status += "\n\n## Inbox\n\n" + inbox
+		}
+		// Always inline: the tappable /job_N and /cancel_N commands only
+		// linkify in message text, never inside a document.
+		b.sendReply(ctx, status)
 	case "/job":
 		if b.jobsList == nil {
 			b.sendReply(ctx, "job control not available")
@@ -104,22 +148,7 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 			b.sendReply(ctx, "usage: /job `<id>`")
 			return
 		}
-		info, ok := findJob(b.jobsList(), id)
-		if !ok {
-			b.sendReply(ctx, fmt.Sprintf("no such job %q", id))
-			return
-		}
-		var transcript string
-		if b.jobTranscript != nil {
-			transcript = b.jobTranscript(id)
-		}
-		b.sendMarkdownDoc(ctx, "job-"+id+".md", render.JobDetail(info, transcript))
-	case "/cron":
-		var lastRuns map[string]time.Time
-		if b.cronLastRuns != nil {
-			lastRuns = b.cronLastRuns()
-		}
-		b.sendMarkdownDoc(ctx, "cron.md", render.Cron(b.rt.Cron(), lastRuns))
+		b.showJob(ctx, id)
 	case "/runs":
 		if b.runsRoot == "" {
 			b.sendReply(ctx, "runs not available")
@@ -160,11 +189,7 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 			b.sendReply(ctx, "usage: /cancel `<id>`")
 			return
 		}
-		if err := b.cancelJob(id); err != nil {
-			b.sendReply(ctx, err.Error())
-			return
-		}
-		b.sendReply(ctx, "🛑 cancelled task "+id)
+		b.cancelJobByID(ctx, id)
 	case "/reload":
 		// runReload takes the turn slot (and Reload fail-fasts on a busy
 		// session), so a /reload during a live turn is refused, not raced.
@@ -294,4 +319,74 @@ func findJob(jobs []shell3.JobInfo, id string) (shell3.JobInfo, bool) {
 		}
 	}
 	return shell3.JobInfo{}, false
+}
+
+// indexJobs numbers the jobs exactly as JobsTappable renders them, so a tap
+// and the listing that produced it agree.
+func indexJobs(jobs []shell3.JobInfo) map[int]string {
+	idx := make(map[int]string, len(jobs))
+	for i, j := range jobs {
+		idx[i+1] = j.ID
+	}
+	return idx
+}
+
+// handleJobTap resolves a tapped /job_N or /cancel_N against the map the last
+// /status render stored. Same contract as /run_N: never re-derive the listing,
+// because a job finishing in between would shift every number and the tap
+// would act on its neighbour.
+func (b *Bot) handleJobTap(ctx context.Context, arg string, cancel bool) {
+	verb := "/job_"
+	if cancel {
+		verb = "/cancel_"
+	}
+	nStr, _, _ := strings.Cut(arg, "@")
+	n, err := strconv.Atoi(nStr)
+	if err != nil || n < 1 {
+		b.sendReply(ctx, "unknown command: "+verb+nStr)
+		return
+	}
+	b.mu.Lock()
+	id, ok := b.jobIndex[n]
+	b.mu.Unlock()
+	if !ok {
+		b.sendReply(ctx, "index not found — run /status again")
+		return
+	}
+	if cancel {
+		b.cancelJobByID(ctx, id)
+		return
+	}
+	b.showJob(ctx, id)
+}
+
+// showJob renders one job, whether reached by /job <id> or a /job_N tap.
+func (b *Bot) showJob(ctx context.Context, id string) {
+	if b.jobsList == nil {
+		b.sendReply(ctx, "job control not available")
+		return
+	}
+	info, ok := findJob(b.jobsList(), id)
+	if !ok {
+		b.sendReply(ctx, fmt.Sprintf("no such job %q", id))
+		return
+	}
+	var transcript string
+	if b.jobTranscript != nil {
+		transcript = b.jobTranscript(id)
+	}
+	b.sendMarkdownDoc(ctx, "job-"+id+".md", render.JobDetail(info, transcript))
+}
+
+// cancelJobByID cancels one job, whether reached by /cancel <id> or a tap.
+func (b *Bot) cancelJobByID(ctx context.Context, id string) {
+	if b.cancelJob == nil {
+		b.sendReply(ctx, "job control not available")
+		return
+	}
+	if err := b.cancelJob(id); err != nil {
+		b.sendReply(ctx, err.Error())
+		return
+	}
+	b.sendReply(ctx, "🛑 cancelled task "+id)
 }

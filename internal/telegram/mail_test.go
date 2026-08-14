@@ -152,9 +152,9 @@ func TestInboxCommand(t *testing.T) {
 	rt := storeRuntime(t, "unused")
 	b := newBot(t, fc, rt)
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/inbox"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/status"})
 	waitFor(t, func() bool {
-		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "inbox empty")
+		return !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "## Inbox")
 	})
 
 	b.mu.Lock()
@@ -166,7 +166,7 @@ func TestInboxCommand(t *testing.T) {
 		defer b.mu.Unlock()
 		return len(b.mailQueue) == 1
 	})
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/inbox"})
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/status"})
 	waitFor(t, func() bool {
 		all := strings.Join(fc.sentTexts(), "\n")
 		return strings.Contains(all, "later please") && strings.Contains(all, "from you")

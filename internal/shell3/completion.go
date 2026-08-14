@@ -77,6 +77,11 @@ type CompletionEvent struct {
 	// Direct marks a job spawned with direct:true (task/bash_bg arg, cron
 	// frontmatter): the raw result goes straight to the user, no agent turn.
 	Direct bool
+	// Detached marks an aside (/btw): deliver to the user and tell the owning
+	// session nothing at all. Direct still queues a notice so the agent's next
+	// turn knows what happened; a detached job must leave no trace, which is
+	// the whole reason to ask it outside the conversation.
+	Detached bool
 
 	// notice is the pre-built raw notification for the direct and host-nil
 	// delivery paths.
@@ -135,6 +140,10 @@ type CompletionPost struct {
 	JobID   string // background job id (bg3/sub2; "" when unknown)
 	RunID   string // stored child-session id ("" for bash_bg commands)
 	Text    string
+	// Aside marks a /btw answer: it is a reply to a question, not a report on
+	// a job, so the host renders it plainly (💬) rather than as "sub1 (…)
+	// finished:".
+	Aside bool
 }
 
 // CompletionHost is the front-end delivery surface a Runtime host plugs in via
@@ -190,9 +199,10 @@ func commandEvent(j *bgJob, n notify.Notification, exit int, owner *Session) Com
 	ev := CompletionEvent{
 		Kind: EvBashBg, JobID: j.id, Title: j.title, Exit: &e,
 		Tail: n.Preview, Note: j.note, Detail: j.logPath,
-		Elapsed: time.Since(j.startedAt),
-		Direct:  j.direct,
-		notice:  n,
+		Elapsed:  time.Since(j.startedAt),
+		Direct:   j.direct,
+		Detached: j.detached,
+		notice:   n,
 	}
 	if owner != nil {
 		ev.owner, ev.OwnerID = owner, owner.ID()
@@ -219,10 +229,11 @@ func subagentEvent(j *bgJob, summary, errText string) CompletionEvent {
 	ev := CompletionEvent{
 		Kind: EvSubagent, JobID: j.id, Title: j.title, Agent: j.agent,
 		CronJob: j.cronJob, ErrText: errText, Tail: tail, Note: j.note,
-		RunID:   j.childID,
-		Elapsed: time.Since(j.startedAt),
-		Direct:  j.direct,
-		notice:  notifyAgentDone(j.id, summary, errText),
+		RunID:    j.childID,
+		Elapsed:  time.Since(j.startedAt),
+		Direct:   j.direct,
+		Detached: j.detached,
+		notice:   notifyAgentDone(j.id, summary, errText),
 	}
 	if j.cronJob != "" {
 		ev.Kind = EvCron
@@ -239,10 +250,11 @@ func followUpEvent(sub *bgJob, n notify.Notification, summary, errText string) C
 	ev := CompletionEvent{
 		Kind: EvFollowUp, JobID: sub.id, Title: sub.title, Agent: sub.agent,
 		CronJob: sub.cronJob, ErrText: errText, Tail: tail, Note: sub.note,
-		RunID:   sub.childID,
-		Elapsed: time.Since(sub.startedAt),
-		Direct:  sub.direct,
-		notice:  n,
+		RunID:    sub.childID,
+		Elapsed:  time.Since(sub.startedAt),
+		Direct:   sub.direct,
+		Detached: sub.detached,
+		notice:   n,
 	}
 	if sub.cronJob == "" && sub.parent != nil {
 		ev.owner, ev.OwnerID = sub.parent, sub.parent.ID()
@@ -268,7 +280,7 @@ func (m *jobManager) dispatchCompletion(ev CompletionEvent) {
 	if m.rt == nil {
 		// Bare unit-test job manager: no host, no runtime. Keep the direct
 		// contract at least queueing on the owner so nothing is lost.
-		if ev.Direct && ev.owner != nil {
+		if ev.Direct && !ev.Detached && ev.owner != nil {
 			ev.owner.injectNoticeNoWake(ev.notice)
 		}
 		return
@@ -280,9 +292,24 @@ func (m *jobManager) dispatchCompletion(ev CompletionEvent) {
 	if host == nil {
 		// Library fallback (no front-end host — shell3 ask, tests): raw notice
 		// straight to the owner, waking it. ask's verbose view sees everything.
-		if ev.owner != nil {
+		// A detached job has no owner to tell by construction.
+		if ev.owner != nil && !ev.Detached {
 			ev.owner.injectNotification(m.rt, ev.notice)
 		}
+		return
+	}
+	if ev.Detached {
+		// The user asked outside the conversation, so the answer goes to the
+		// user and stops there. A failure still surfaces — silence would look
+		// like the question was swallowed — but it is never mailed to the
+		// agent, because there is no conversation waiting on it.
+		text := strings.TrimSpace(ev.Tail)
+		if ev.Failed() {
+			text = floorText(ev)
+		}
+		p := ev.post(text)
+		p.Aside = !ev.Failed()
+		host.PostCompletion(p)
 		return
 	}
 	if ev.Failed() {
