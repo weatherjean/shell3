@@ -1,15 +1,15 @@
 # CLI reference
 
 Six subcommands: `telegram` (the service — agent + bot + cron), `serve` (the
-same agent over stdio JSONL), `boot` (setup), `project` (scaffold a Chain of
-Command project), `health` (config check), and `ask` (a local driver for the
-agent). Bare `shell3` prints help.
+same agent over stdio JSONL), `boot` (setup), `tool` (check, run and test the
+tools a kit declares), `health` (config check), and `ask` (a local driver for
+the agent). Bare `shell3` prints help.
 
-Every subcommand except `boot` takes `-c`/`--config <dir>`: a path to a config
-directory (`shell3.yaml`, `agent.md`, …); the default is `~/.shell3`. The
-working directory is never consulted. (`boot` always scaffolds `~/.shell3`;
-for `project` the flag lives on `project new`.) `shell3 --version` prints the
-installed build.
+Every subcommand except `boot` and `tool` takes `-c`/`--config <dir>`: a path
+to a config directory (`shell3.sh`, or the older `shell3.yaml` + `agent.md`
+tree); the default is `~/.shell3`. The working directory is never consulted.
+(`boot` always scaffolds `~/.shell3`; `tool` takes a kit path as its
+argument.) `shell3 --version` prints the installed build.
 
 ## `shell3 telegram` — run the agent and its bot
 
@@ -122,8 +122,9 @@ shell3 boot     # interactive form: model endpoint + key, vision, bot token, wor
 ```
 
 An interactive form scaffolds the config tree under `~/.shell3/`:
-`shell3.yaml` (models + a `telegram:` block), `agent.md`, a general-purpose
-`agents/assistant.md` subagent, `skills/`, **armed** `hooks/*.tool-call.sh`
+`shell3.sh` — the kit, holding the wiring (models + a `telegram:` block), the
+main agent and a general-purpose `assistant` employee — plus
+`skills/`, **armed** `hooks/*.tool-call.sh`
 gate scripts (credentials, system paths, unread remote code, publishing and
 force-pushes refused; ordinary work untouched), and `.env` (secrets — never
 commit it). `--force` overwrites an existing config.
@@ -136,8 +137,8 @@ context window and auto-compaction threshold; an optional proxy command; the
 **Telegram bot token** (from [@BotFather](https://t.me/BotFather)) and **chat
 id** (your numeric id — [@userinfobot](https://t.me/userinfobot) prints it);
 and where the agent's shell should run (`telegram.workdir`; blank = the config
-dir). The token goes to `.env` as `TELEGRAM_TOKEN`, referenced from
-`shell3.yaml` as `env:TELEGRAM_TOKEN` like every other secret; both fields may
+dir). The token goes to `.env` as `TELEGRAM_TOKEN`, referenced from the kit's
+wiring block as `env:TELEGRAM_TOKEN` like every other secret; both fields may
 be left blank and filled in later. Secrets echo visibly, so you can see that a
 paste landed intact.
 
@@ -153,6 +154,24 @@ defaults, except `--model`, which headless boot requires): `--url`, `--model`,
 without writing or asking anything.
 See [configuration.md](configuration.md).
 
+
+## `shell3 tool` — check, run and test a kit's tools
+
+```sh
+shell3 tool check ~/.shell3/shell3.sh                       # syntax, lint, every manifest
+shell3 tool run   ~/.shell3/shell3.sh fetch-thing '{"url":"…"}'   # one call, no model
+shell3 tool test  ~/.shell3/shell3.sh [tool]                # the declared tests
+```
+
+The author's loop for the tools a kit declares. `check` catches an
+unterminated block, a duplicate name, a mistyped param, an unquoted
+description with a comma in it. `run` invokes one tool with JSON arguments —
+no session, no tokens — which is how you probe a tool against something real
+before trusting it. `test` runs the `test:` blocks, whose harness can stub any
+command so a tool's parsing is tested without its network calls.
+
+It takes a kit path rather than `--config`: the kit is the unit being checked.
+See [tools.md](tools.md).
 
 ## `shell3 health` — check the config
 

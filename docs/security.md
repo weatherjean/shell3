@@ -31,7 +31,8 @@ What `hooks/tool-call.sh` refuses, and why:
 - **Credentials** (`.env`, `~/.ssh`, `~/.aws`, `~/.config/gh`, …): blocked
   for read and write, by every tool. A `lib/bin` script reads the one key it
   needs at point of use.
-- **The gate itself** and `shell3.yaml`: readable, not writable. Otherwise
+- **The gate itself** and the wiring (`shell3.sh`, or `shell3.yaml` on a
+  markdown config): readable, not writable. Otherwise
   "ask the operator to lift this" has an obvious shortcut.
 - **System paths** (`/etc`, `/usr/bin`, `/System`, `~/Library`): writes
   blocked. `/usr/local` and `/opt` are allowed, since installing a tool is
@@ -135,8 +136,8 @@ Structural, always on, not configurable.
 
 ## Secrets
 
-Secrets live in a plain-text `.env` beside `shell3.yaml`, referenced from
-YAML as `env:KEY`:
+Secrets live in a plain-text `.env` beside the config (`shell3.sh`, or
+`shell3.yaml`), referenced from the wiring as `env:KEY`:
 
 - **Never commit `.env`.** The shipped `.gitignore` excludes it.
 - **Never read or display credential files.** This applies to you and to the
@@ -151,7 +152,7 @@ YAML as `env:KEY`:
 
 ## Where data lives, and how to remove it
 
-- **Runtime state**: `.shell3_project/`, kept beside `shell3.yaml` (default
+- **Runtime state**: `.shell3_project/`, kept beside the config (default
   install: `~/.shell3/.shell3_project/`) — one SQLite database
   (`shell3.db`: every conversation, the full-text index, the front-end
   thread indexes) plus background-job logs as plain files under
