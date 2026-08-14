@@ -35,6 +35,17 @@ func (p *Parts) LoadKit(path string) error {
 		return err
 	}
 	p.kit, p.kitPath = k, path
+	// The kit's `gate:` / `note:` blocks govern tool calls and tool results,
+	// standing in for the hooks/*.sh files a markdown config uses.
+	if len(k.Gates) > 0 || len(k.Notes) > 0 {
+		main := ""
+		if len(k.Agents) > 0 {
+			main = k.Agents[0].Name
+		}
+		if err := p.lc.SetKitHooks(path, main, k.Gates, k.Notes); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

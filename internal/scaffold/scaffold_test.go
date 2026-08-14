@@ -54,7 +54,6 @@ func TestRenderBaseConfig(t *testing.T) {
 		t.Error("shell3.sh should reference the model")
 	}
 	for _, p := range []string{
-		"hooks/tool-call.sh",
 		"skills/planning.md", "skills/history.md",
 		"skills/self-evolve.md", "skills/browser.md", "skills/scripting.md",
 		"skills/cookbook.md", "skills/find-skills.md", "skills/writing-code.md",
@@ -285,9 +284,12 @@ func TestRenderedConfigLoads(t *testing.T) {
 	if len(c.Warnings()) != 0 {
 		t.Errorf("scaffold config loaded with warnings: %v", c.Warnings())
 	}
-	// The shipped hooks are discovered (both scripts are no-op exit 0 gates).
-	if !c.HasToolCall() {
-		t.Error("scaffold hooks/tool-call.sh not discovered")
+	// The gate ships in the kit now, not as hooks/*.sh — a scaffolded config
+	// has no hooks dir at all, so LoadedConfig alone discovers nothing. The
+	// gate's own wiring is covered where the kit is loaded (kitagent) and its
+	// rules in hooks_test.go.
+	if c.HasToolCall() {
+		t.Error("a scaffolded config should have no hooks/*.sh — the gate is declared in the kit")
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -26,6 +27,8 @@ const (
 	declTool
 	declSkill
 	declTest
+	declGate
+	declNote
 	declWiring
 )
 
@@ -41,9 +44,33 @@ func (k declKind) String() string {
 		return "skill"
 	case declTest:
 		return "test"
+	case declGate:
+		return "gate"
+	case declNote:
+		return "note"
 	default:
 		return "wiring"
 	}
+}
+
+// nameList is a YAML value that may be written as one name or a list of them.
+// Gates and notes are NAMED rather than positional — one function typically
+// governs several agents — so `gate: main` and `gate: [main, assistant]` are
+// both natural and both accepted.
+type nameList []string
+
+func (n *nameList) UnmarshalYAML(value *yaml.Node) error {
+	var one string
+	if err := value.Decode(&one); err == nil {
+		*n = nameList{one}
+		return nil
+	}
+	var many []string
+	if err := value.Decode(&many); err != nil {
+		return fmt.Errorf("expected an agent name or a list of them")
+	}
+	*n = many
+	return nil
 }
 
 // decl is one decoded declaration block. line/endLine are the kit file lines of
@@ -61,16 +88,19 @@ type decl struct {
 	context []string
 	params  map[string]Param
 	wiring  map[string]any
+	agents  []string // declGate/declNote: the agents this block governs
 }
 
 // blockYAML is the strict shape every declaration block decodes into. Exactly
 // one kind key may be set (the `shell3:` header block sets none).
 type blockYAML struct {
-	Agent  string `yaml:"agent"`
-	Shared string `yaml:"shared"`
-	Tool   string `yaml:"tool"`
-	Skill  string `yaml:"skill"`
-	Test   string `yaml:"test"`
+	Agent  string   `yaml:"agent"`
+	Shared string   `yaml:"shared"`
+	Tool   string   `yaml:"tool"`
+	Skill  string   `yaml:"skill"`
+	Test   string   `yaml:"test"`
+	Gate   nameList `yaml:"gate"`
+	Note   nameList `yaml:"note"`
 
 	Description string           `yaml:"description"`
 	Model       string           `yaml:"model"`
@@ -110,16 +140,25 @@ func decodeBlock(b block) (decl, error) {
 			found++
 		}
 	}
+	for _, c := range []struct {
+		k declKind
+		l nameList
+	}{{declGate, y.Gate}, {declNote, y.Note}} {
+		if len(c.l) > 0 {
+			d.kind, d.agents, d.name = c.k, c.l, strings.Join(c.l, ", ")
+			found++
+		}
+	}
 	switch {
 	case found > 1:
-		return decl{}, fmt.Errorf("line %d: declaration block names more than one of agent/shared/tool/skill/test", b.line)
+		return decl{}, fmt.Errorf("line %d: declaration block names more than one of agent/shared/tool/skill/test/gate/note", b.line)
 	case found == 1:
 		return d, nil
 	case y.Shell3 != nil:
 		d.kind = declWiring
 		return d, nil
 	default:
-		return decl{}, fmt.Errorf("line %d: declaration block names no agent/shared/tool/skill/test", b.line)
+		return decl{}, fmt.Errorf("line %d: declaration block names no agent/shared/tool/skill/test/gate/note", b.line)
 	}
 }
 

@@ -8,6 +8,7 @@ package scaffold
 
 import (
 	"encoding/json"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -32,10 +33,14 @@ func runHookArgs(t *testing.T, dir, script, tool, command, argsJSON string) (ver
 		t.Fatal(err)
 	}
 
-	cmd := exec.Command("bash", filepath.Join(dir, "hooks", script))
+	// The gate is a function declared in the kit, so it is exercised the way
+	// shell3 runs it: source the kit, call the one function. Driving the file
+	// any other way would test a fiction.
+	cmd := exec.Command("bash", "-c",
+		"set -uo pipefail; source "+filepath.Join(dir, "shell3.sh")+"; "+script)
 	cmd.Stdin = strings.NewReader(string(payload))
 	// The gate anchors itself on its working directory, which shell3 sets to
-	// the config dir. Running it from anywhere else would test a fiction.
+	// the config dir.
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -106,7 +111,7 @@ func TestScaffoldedGateAllowsOrdinaryWork(t *testing.T) {
 		"rm -rf ~/.cache/pip",
 		"docker system prune -f",
 	} {
-		if verdict, reason := runHook(t, dir, "tool-call.sh", "bash", command); verdict != "allow" {
+		if verdict, reason := runHook(t, dir, "main_gate", "bash", command); verdict != "allow" {
 			t.Errorf("%q = %s (%s), want allow", command, verdict, reason)
 		}
 	}
@@ -127,7 +132,7 @@ func TestScaffoldedGateBlocksTheDangerousCases(t *testing.T) {
 		"echo x >> ./hooks/tool-call.sh": "editing the gate itself",
 	}
 	for command, what := range cases {
-		verdict, reason := runHook(t, dir, "tool-call.sh", "bash", command)
+		verdict, reason := runHook(t, dir, "main_gate", "bash", command)
 		if verdict != "block" {
 			t.Errorf("%q = %s, want block (%s)", command, verdict, what)
 			continue
@@ -164,7 +169,7 @@ func TestScaffoldedGateCredentialRuleJudgesTheRightField(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		verdict, reason := runHookArgs(t, dir, "tool-call.sh", "edit_file", "", string(argsJSON))
+		verdict, reason := runHookArgs(t, dir, "main_gate", "edit_file", "", string(argsJSON))
 		if verdict != "allow" {
 			t.Errorf("edit_file writing lib/bin body = %s (%s), want allow", verdict, reason)
 		}
@@ -172,7 +177,7 @@ func TestScaffoldedGateCredentialRuleJudgesTheRightField(t *testing.T) {
 
 	t.Run("bash heredoc writing a lib/bin script that greps .env is allowed", func(t *testing.T) {
 		command := "cat > /tmp/lib/bin/weather <<'SH'\n" + envGrep + "\nSH"
-		verdict, reason := runHook(t, dir, "tool-call.sh", "bash", command)
+		verdict, reason := runHook(t, dir, "main_gate", "bash", command)
 		if verdict != "allow" {
 			t.Errorf("bash heredoc writing lib/bin body = %s (%s), want allow", verdict, reason)
 		}
@@ -188,7 +193,7 @@ func TestScaffoldedGateCredentialRuleJudgesTheRightField(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		verdict, reason := runHookArgs(t, dir, "tool-call.sh", "edit_file", "", string(argsJSON))
+		verdict, reason := runHookArgs(t, dir, "main_gate", "edit_file", "", string(argsJSON))
 		if verdict != "block" {
 			t.Errorf("edit_file targeting .env = %s, want block (%s)", verdict, reason)
 		}
@@ -201,7 +206,7 @@ func TestScaffoldedGateCredentialRuleJudgesTheRightField(t *testing.T) {
 		"sort <<EOF > ~/.shell3/.env\nx\nEOF": "a redirect placed AFTER a heredoc operator, which the read-side prefix truncation alone would miss",
 	} {
 		t.Run(what, func(t *testing.T) {
-			verdict, _ := runHook(t, dir, "tool-call.sh", "bash", command)
+			verdict, _ := runHook(t, dir, "main_gate", "bash", command)
 			if verdict != "block" {
 				t.Errorf("%q = %s, want block (%s)", command, verdict, what)
 			}
@@ -219,26 +224,34 @@ func TestScaffoldedGateNeverAsks(t *testing.T) {
 		"rm -rf ./build", "git push origin main", "npm publish",
 		"cat ~/.ssh/id_rsa", "echo x > /etc/hosts", "systemctl restart nginx",
 	} {
-		if verdict, _ := runHook(t, dir, "tool-call.sh", "bash", command); verdict == "ask" {
+		if verdict, _ := runHook(t, dir, "main_gate", "bash", command); verdict == "ask" {
 			t.Errorf("%q asks; an autonomous deployment has nobody to answer", command)
 		}
 	}
 }
 
-// A subagent with no hook of its own runs ungated, and there is no fallback
-// to the main agent's gate — so shipping the assistant without one would make
+// A subagent with no gate of its own runs ungated, and there is no fallback
+// to the main agent's — so shipping the assistant without one would make
 // delegation a way around every rule the main agent has. The main agent may
 // not read .env; if the assistant could, the main agent need only dispatch it
-// and the secret lands in the job transcript. Its gate delegates to the main
-// script so the rules cannot drift apart.
+// and the secret lands in the job transcript. One `gate: [main, assistant]`
+// block governs both, so the rules cannot drift apart.
 func TestScaffoldedAssistantGateAppliesTheMainRules(t *testing.T) {
 	dir := scaffoldForHooks(t)
+
+	kit, err := os.ReadFile(filepath.Join(dir, "shell3.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(kit), "gate: [main, assistant]") {
+		t.Fatal("the scaffolded kit does not declare one gate governing both agents")
+	}
 
 	for _, command := range []string{
 		"cat ~/.shell3/.env",
 		"grep OPENWEATHER_KEY ~/.shell3/.env",
 	} {
-		if verdict, _ := runHook(t, dir, "assistant.tool-call.sh", "bash", command); verdict != "block" {
+		if verdict, _ := runHook(t, dir, "main_gate", "bash", command); verdict != "block" {
 			t.Errorf("%q = %s, want block: a subagent must not reach what the main agent may not", command, verdict)
 		}
 	}
@@ -247,7 +260,7 @@ func TestScaffoldedAssistantGateAppliesTheMainRules(t *testing.T) {
 		"curl -s https://example.com",
 		"cat notes.md",
 	} {
-		if verdict, reason := runHook(t, dir, "assistant.tool-call.sh", "bash", command); verdict != "allow" {
+		if verdict, reason := runHook(t, dir, "main_gate", "bash", command); verdict != "allow" {
 			t.Errorf("%q = %s (%s), want allow: this is the assistant's actual job", command, verdict, reason)
 		}
 	}
@@ -260,7 +273,8 @@ func TestScaffoldedGateFailsClosedWithoutJq(t *testing.T) {
 	dir := scaffoldForHooks(t)
 	noJq := t.TempDir() // a PATH containing nothing at all
 
-	cmd := exec.Command("bash", filepath.Join(dir, "hooks", "tool-call.sh"))
+	cmd := exec.Command("bash", "-c",
+		"set -uo pipefail; source "+filepath.Join(dir, "shell3.sh")+"; main_gate")
 	cmd.Stdin = strings.NewReader(`{"name":"bash","command":"echo hi","args":"{}","headless":true}`)
 	cmd.Dir = dir
 	cmd.Env = []string{"PATH=" + noJq, "HOME=" + dir}

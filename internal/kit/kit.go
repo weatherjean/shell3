@@ -58,6 +58,11 @@ type Kit struct {
 	Wiring map[string]any
 	Agents []Agent
 	Shared []Group
+	// Gates and Notes map an agent name to the shell function governing its
+	// tool calls (before) and tool results (after). Both are declared in the
+	// kit rather than as hooks/*.sh files, so an install is one file.
+	Gates map[string]string
+	Notes map[string]string
 }
 
 // Parse turns kit source into typed declarations. It never executes the file.
@@ -149,6 +154,29 @@ func Parse(src []byte) (*Kit, error) {
 				curGroup, curAgent = &k.Shared[len(k.Shared)-1], nil
 			}
 
+		case declGate, declNote:
+			// Gates and notes are NOT positional: they name the agents they
+			// govern, because one function usually governs several (a subagent
+			// with no gate of its own runs ungated, and copying the rules is
+			// how they drift apart). They may appear anywhere in the file.
+			f, ok := nextFunc(d.endLine)
+			if !ok {
+				return nil, fmt.Errorf("line %d: %s %q has no function under it", d.line, d.kind, d.name)
+			}
+			target := &k.Gates
+			if d.kind == declNote {
+				target = &k.Notes
+			}
+			if *target == nil {
+				*target = map[string]string{}
+			}
+			for _, agent := range d.agents {
+				if _, dup := (*target)[agent]; dup {
+					return nil, fmt.Errorf("line %d: a second %s for agent %q — one function governs an agent, name several agents on one block instead", d.line, d.kind, agent)
+				}
+				(*target)[agent] = f.name
+			}
+
 		case declTool, declSkill, declTest:
 			if curAgent == nil && curGroup == nil {
 				return nil, fmt.Errorf("line %d: %s %q appears before any agent or shared block", d.line, d.kind, d.name)
@@ -159,6 +187,20 @@ func Parse(src []byte) (*Kit, error) {
 			}
 			if err := attach(curAgent, curGroup, d, f, srcLines); err != nil {
 				return nil, err
+			}
+		}
+	}
+
+	// Checked after the loop, not inside it: a gate may be declared above the
+	// agent it governs, and a typo'd name must not silently mean "ungated".
+	known := map[string]bool{}
+	for _, a := range k.Agents {
+		known[a.Name] = true
+	}
+	for kind, m := range map[string]map[string]string{"gate": k.Gates, "note": k.Notes} {
+		for agent := range m {
+			if !known[agent] {
+				return nil, fmt.Errorf("%s names agent %q, which this kit does not declare", kind, agent)
 			}
 		}
 	}

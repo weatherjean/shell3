@@ -92,6 +92,11 @@ func (p *Parts) MCPStatus() []mcp.ServerStatus {
 // store-open itself failed, which is non-fatal and logged).
 func (p *Parts) Store() *runs.Store { return p.st }
 
+// LoadedConfig exposes the parsed config, including the hooks a kit's `gate:`
+// and `note:` blocks installed. Front-ends reach it through the higher-level
+// accessors below; this is for callers that need the hook surface itself.
+func (p *Parts) LoadedConfig() *config.LoadedConfig { return p.lc }
+
 // Log returns the application logger (never nil once BuildParts succeeded).
 func (p *Parts) Log() applog.Logger { return p.log }
 

@@ -168,6 +168,11 @@ type LoadedConfig struct {
 	agent     Agent
 	subagents []Subagent
 
+	// kitMainAgent is the kit's first agent when a kit installed its gates
+	// (SetKitHooks). It keys to "" in the hook maps, like the markdown config's
+	// main agent — see hookKey.
+	kitMainAgent string
+
 	mcpServers []MCPServer
 	telegram   TelegramConfig
 	cron       []CronJob

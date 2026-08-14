@@ -19,8 +19,32 @@ import (
 // no fallback or chaining between keys — each agent is governed by exactly
 // one script per kind, or none.
 type hookSet struct {
-	call   map[string]string
-	result map[string]string
+	call   map[string]hookRef
+	result map[string]hookRef
+}
+
+// hookRef is where one agent's hook lives: a standalone script (the markdown
+// config's hooks/*.sh) or a function declared in a kit (`gate:` / `note:`).
+// Exactly one of the two forms is set.
+type hookRef struct {
+	path string // hooks/<...>.sh
+	kit  string // kit file to source
+	fn   string // function to call after sourcing
+}
+
+func (h hookRef) empty() bool { return h.path == "" && h.fn == "" }
+
+// shellQuote single-quotes a path for safe interpolation into the source line.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// label names the hook for an error message: a path, or kit:function.
+func (h hookRef) label() string {
+	if h.path != "" {
+		return h.path
+	}
+	return filepath.Base(h.kit) + ":" + h.fn
 }
 
 // hookTimeout bounds one hook script run; a script still running after this
@@ -58,7 +82,7 @@ func (b *cappedBuffer) String() string { return b.buf.String() }
 // subagent — produces a warning (`shell3 health` fails on it). A missing
 // hooks/ dir means no hooks.
 func discoverHooks(dir string, subagents []Subagent, warn func(string)) (hookSet, error) {
-	hs := hookSet{call: map[string]string{}, result: map[string]string{}}
+	hs := hookSet{call: map[string]hookRef{}, result: map[string]hookRef{}}
 	hooksDir := filepath.Join(dir, "hooks")
 	entries, err := os.ReadDir(hooksDir)
 	if err != nil {
@@ -79,10 +103,10 @@ func discoverHooks(dir string, subagents []Subagent, warn func(string)) (hookSet
 		path := filepath.Join(hooksDir, name)
 		switch name {
 		case "tool-call.sh":
-			hs.call[""] = path
+			hs.call[""] = hookRef{path: path}
 			continue
 		case "tool-result.sh":
-			hs.result[""] = path
+			hs.result[""] = hookRef{path: path}
 			continue
 		}
 		if agent, ok := strings.CutSuffix(name, ".tool-call.sh"); ok {
@@ -90,7 +114,7 @@ func discoverHooks(dir string, subagents []Subagent, warn func(string)) (hookSet
 				warn(fmt.Sprintf("hook file %q names no subagent %q (agents/%s.md missing?)", path, agent, agent))
 				continue
 			}
-			hs.call[agent] = path
+			hs.call[agent] = hookRef{path: path}
 			continue
 		}
 		if agent, ok := strings.CutSuffix(name, ".tool-result.sh"); ok {
@@ -98,7 +122,7 @@ func discoverHooks(dir string, subagents []Subagent, warn func(string)) (hookSet
 				warn(fmt.Sprintf("hook file %q names no subagent %q (agents/%s.md missing?)", path, agent, agent))
 				continue
 			}
-			hs.result[agent] = path
+			hs.result[agent] = hookRef{path: path}
 			continue
 		}
 		warn(fmt.Sprintf("hook file %q ignored: expected tool-call.sh, tool-result.sh, <subagent>.tool-call.sh, or <subagent>.tool-result.sh", path))
@@ -106,10 +130,45 @@ func discoverHooks(dir string, subagents []Subagent, warn func(string)) (hookSet
 	return hs, nil
 }
 
+// SetKitHooks installs the gates and notes a kit declares, keyed by agent
+// name. A kit config keeps its gate in the kit; the hooks/*.sh files remain
+// the form a markdown config uses.
+//
+// Declaring both for one agent is an ERROR rather than a precedence rule.
+// Silently picking a winner would hide a half-finished migration — exactly
+// when someone believes a gate is running and it is not.
+// mainName is the kit's first agent — the one this config keys as "" — since
+// a kit's main agent need not share a name with the markdown config's.
+func (c *LoadedConfig) SetKitHooks(kitPath, mainName string, gates, notes map[string]string) error {
+	c.kitMainAgent = mainName
+	for _, m := range []struct {
+		kind  string
+		from  map[string]string
+		into  map[string]hookRef
+		files string
+	}{
+		{"gate", gates, c.hooks.call, "tool-call.sh"},
+		{"note", notes, c.hooks.result, "tool-result.sh"},
+	} {
+		for agent, fn := range m.from {
+			key := c.hookKey(agent)
+			if prev := m.into[key]; !prev.empty() {
+				return fmt.Errorf("agent %q has both a kit %s (%s) and a hook file (%s) — delete one; a config with two cannot say which governs",
+					agent, m.kind, fn, prev.label())
+			}
+			m.into[key] = hookRef{kit: kitPath, fn: fn}
+		}
+	}
+	return nil
+}
+
 // hookKey maps an agent name to its hookSet key: the main agent (or the
 // zero-value session default) is "", any other name is a subagent's.
 func (c *LoadedConfig) hookKey(agentName string) string {
-	if agentName == "" || agentName == c.agent.Name {
+	// kitMainAgent is set when a kit installed its gates: a kit's main agent
+	// need not share a name with the markdown config's, and both must key to
+	// "" or the gate is stored under one name and looked up under another.
+	if agentName == "" || agentName == c.agent.Name || (c.kitMainAgent != "" && agentName == c.kitMainAgent) {
 		return ""
 	}
 	return agentName
@@ -122,10 +181,15 @@ func (c *LoadedConfig) HasToolCall() bool { return len(c.hooks.call) > 0 }
 // HasToolResult reports whether any tool-result hook exists.
 func (c *LoadedConfig) HasToolResult() bool { return len(c.hooks.result) > 0 }
 
-// ToolCallHookFor returns the tool-call hook script path governing agentName
-// ("" if none). Exposed for `shell3 health` to dry-run each hook.
+// ToolCallHookFor names the tool-call hook governing agentName ("" if none):
+// a script path, or kit:function for a kit-declared gate. Exposed for
+// `shell3 health` to report and dry-run each hook.
 func (c *LoadedConfig) ToolCallHookFor(agentName string) string {
-	return c.hooks.call[c.hookKey(agentName)]
+	ref := c.hooks.call[c.hookKey(agentName)]
+	if ref.empty() {
+		return ""
+	}
+	return ref.label()
 }
 
 type ToolCallAction int
@@ -166,14 +230,24 @@ type hookVerdict struct {
 // returns its stdout. cwd is the config dir, so a hook reads sibling files
 // (.env, lib/) with relative paths. Any failure — start error, nonzero exit,
 // timeout — returns an error (callers fail closed).
-func runHook(ctx context.Context, cfgDir, path string, payload any) ([]byte, error) {
+func runHook(ctx context.Context, cfgDir string, ref hookRef, payload any) ([]byte, error) {
 	in, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
 	hctx, cancel := context.WithTimeout(ctx, hookTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(hctx, "bash", path)
+	var cmd *exec.Cmd
+	if ref.path != "" {
+		cmd = exec.CommandContext(hctx, "bash", ref.path)
+	} else {
+		// A kit-declared gate: source the kit, then call the one function.
+		// Sourcing is safe precisely because the kit parser rejects top-level
+		// statements — a kit defines functions and does nothing else, so this
+		// costs a parse and runs no side effects.
+		script := fmt.Sprintf("set -uo pipefail; source %s; %s", shellQuote(ref.kit), ref.fn)
+		cmd = exec.CommandContext(hctx, "bash", "-c", script)
+	}
 	cmd.Dir = cfgDir
 	// A killed hook may leave children holding the stdout pipe (e.g. a
 	// backgrounded sleep); don't let Wait block on them past the kill.
@@ -210,15 +284,15 @@ type toolCallPayload struct {
 // (subagents, cron); exposed to the script as .headless.
 func (c *LoadedConfig) RunToolCall(ctx context.Context, agentName, name, command, argsJSON string, headless bool) ToolCallVerdict {
 	passArgv := []string{"bash", "-c", command}
-	path := c.hooks.call[c.hookKey(agentName)]
-	if path == "" {
+	ref := c.hooks.call[c.hookKey(agentName)]
+	if ref.empty() {
 		return ToolCallVerdict{Action: ActionRun, Argv: passArgv, Passthrough: true}
 	}
 	payload := toolCallPayload{Name: name, Args: argsJSON, Headless: headless}
 	if command != "" {
 		payload.Command = &command
 	}
-	out, err := runHook(ctx, c.dir, path, payload)
+	out, err := runHook(ctx, c.dir, ref, payload)
 	if err != nil {
 		return ToolCallVerdict{Action: ActionBlock, Reason: "tool-call hook error: " + err.Error()}
 	}
@@ -266,11 +340,11 @@ type toolResultPayload struct {
 // FAILS CLOSED — on any script failure the output is replaced by an error
 // notice, never passed through unredacted.
 func (c *LoadedConfig) RunToolResult(ctx context.Context, agentName, name, argsJSON, output string) string {
-	path := c.hooks.result[c.hookKey(agentName)]
-	if path == "" {
+	ref := c.hooks.result[c.hookKey(agentName)]
+	if ref.empty() {
 		return output
 	}
-	out, err := runHook(ctx, c.dir, path, toolResultPayload{Name: name, Args: argsJSON, Output: output})
+	out, err := runHook(ctx, c.dir, ref, toolResultPayload{Name: name, Args: argsJSON, Output: output})
 	if err != nil {
 		return "[tool-result hook failed: " + err.Error() + "]"
 	}
