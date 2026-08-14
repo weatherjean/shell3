@@ -341,6 +341,11 @@ gate them by name.
 
 ## The command gate — `hooks/*.sh`
 
+> A **kit** config declares its gate in `shell3.sh` instead — `gate: <agents>`
+> and `note: <agents>`, documented in [kits.md](kits.md#the-gate). The
+> `hooks/*.sh` files below are the markdown config's form. Declaring both for
+> one agent is a load error, not a precedence rule.
+
 shell3 gives the model a real shell, so the hook script is what limits it. A
 scaffolded config **ships with the gate armed** (see below); an agent with no
 hook file of its own runs ungated.

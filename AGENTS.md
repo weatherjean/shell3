@@ -8,40 +8,64 @@ Minimal Unix-composable personal agent written in Go.
 > the kind of agent it is. Humans want [README.md](README.md) and
 > [docs/](docs/).
 
-**Declarative config.** The config is a **directory** (default `~/.shell3/`),
-loaded by `internal/config` — four rules: YAML wires it, markdown prompts it,
-files enable it, one bash script gates it. `shell3.yaml` holds wiring only
-(`models:`, `telegram:`, `mcp:`, `background:`, `runs_keep_days`,
-`media_keep_days`;
-strict decode — unknown keys fail the load; secrets referenced as `env:KEY`,
-substring-substituted from the sibling `.env`, unknown key = load error).
-Everything with a prompt is markdown-with-frontmatter: `agent.md` (THE agent —
-exactly one because there is exactly one file; frontmatter `model` (required),
-`tools: [bash, bash_bg, edit, media, read, list_files, history]`, `mcp`, `prune`,
-`context` (main-agent-only: a list of config-dir-relative paths, globs
-allowed, re-read at every turn start (`RefreshPrompt`, wired through
-`TurnConfig` into `assembleTurnContext`) — so even the long-lived Telegram
-conversation sees current file contents, never a session-creation
-snapshot — into a `## Context` prompt section,
-one `### <path>` sub-section per file; a missing literal entry is a load
-error, a zero-match glob is legal (`shell3 health` warns), a file that
-vanishes between load and session build gets a one-line
-`(context file missing: <path>)` stub instead of failing the turn); body =
-system prompt, name fixed to "agent"), `agents/<name>.md` (subagents —
-filename is the name, required `description` routes the task tool, model
-defaults to the main agent's), `projects/<name>/` (Chain of Command projects —
-`project.md` brief with frontmatter `description`/`workdir` + body, plus
-`manager.md`, a subagent named after the project run with its shell in
-`workdir`, plus an optional manager-only `skills/`; managers join the flat
-subagent namespace so a name collision or the reserved "agent" is a load
-error; `projects.md` beside `shell3.yaml` is the standing portfolio brief,
-appended verbatim to the main agent's system prompt),
-`skills/<name>.md` (skills — main agent only, subagents carry none),
-`cron/<name>.md` (frontmatter
-`schedule`/`agent`/`direct`/`workdir`; body = prompt; `agent` names either a
-subagent from `agents/` or a project's `manager.md`, which then runs in that
-project's workdir — an explicit `workdir` overrides even a manager's).
-There is no Lua anywhere, and no migration shims: an
+**Kit config.** The config is a **directory** (default `~/.shell3/`), and its
+centre is ONE file: `shell3.sh`, the **kit**, parsed by `internal/kit` and
+attached to `Parts` by `agentsetup.LoadKit`. A kit is three elements and
+nothing else — declaration blocks (YAML inside a `#---` … `#---` comment
+fence), function definitions (the implementation of the block above them), and
+heredocs (prose bodies, always `<<'EOF'`). A block binds to the NEXT function
+whatever its name, with a **binding ceiling**: it owns that function only if
+the function appears before the next declaration block. The file is
+definitions-only at the top level (`funcs.go` rejects anything else), which is
+what makes loading a kit never execute it and running one tool just
+`source <kit>; <fn>`.
+
+Declaration kinds: `agent:` (prompt function under it; `model`, `workdir`,
+`use:`, `context:`, and `description` which routes the task tool), `shared:`
+(a named group of tools an agent imports via `use:`), `tool:` (`description`,
+`params` — typed `string`/`int`/`bool`, reaching the shell function as
+ENVIRONMENT VARIABLES, never `$1`), `skill:`, `test:` (harness in
+`harness.go`: `tool`, `stub`, `assert_eq`, `assert_contains`, `fail`,
+`$KIT_TMP`), `gate:` and `note:`, plus the `shell3:` wiring block (models,
+telegram, mcp, `runs_keep_days`, `media_keep_days`; re-marshalled through the
+existing YAML parser by `config.readWiring`; secrets as `env:KEY` from the
+sibling `.env`). Scoping is POSITIONAL for `tool:`/`skill:`/`test:` — an
+`agent:` or `shared:` block opens a scope — but `gate:`/`note:` are NAMED
+(`gate: [main, assistant]`), because one function usually governs several
+agents and a copy per agent is how two rule sets drift apart.
+
+`gate:` runs before every tool call for the agents it names (stdin
+`{"name","command","args","headless"}`; stdout `{}` to run,
+`{"block":true,"reason":…}` to refuse, `{"command":…}`/`{"argv":[…]}` to
+rewrite — bash tools only; nonzero exit, bad JSON or a 10s timeout fails
+closed; there is NO ask verdict). `note:` rewrites a tool's result (stdin
+`{"name","args","output"}`, stdout `{"output":…}`) and is advice, never a
+refusal. An agent no `gate:` names runs UNGATED, with no fallback between
+agents. Execution rides the same path as the markdown config's hook files:
+`config.hookRef` is either a script path or a (kit, function) pair, and
+`SetKitHooks` installs the kit's — declaring BOTH forms for one agent is a
+load error, since a silent winner hides a half-finished migration. The
+scaffold's gate ships armed and refuses six things, all irreversible and none
+of them the work (machine destruction, credentials, stopping shell3,
+publishing, unread remote code, edits to the gate); everything else runs,
+including deletion. It is a speed bump by construction — the agent can rewrite
+it in two lines of Python — so real protection is filesystem-level (a
+dedicated user, `chflags uchg`/`chattr +i`, a container).
+
+`context:` is a list of paths re-read at every turn start (`RefreshPrompt`,
+wired through `TurnConfig` into `assembleTurnContext`) so a long-lived
+conversation sees current file contents, never a session-creation snapshot;
+they resolve against the AGENT'S OWN workdir when it declares one, or the
+config dir otherwise. Skills are FILES, not blocks — `skills/*.md` for the main
+agent, `projects/<agent>/skills/*.md` for an employee — indexed into the prompt
+by name, description and absolute path, and `cat`'d on demand. `cron/<name>.md`
+stays its own surface (frontmatter `schedule`/`agent`/`direct`/`workdir`, body
+= prompt), because a schedule binds an (agent, prompt) pair and one employee
+commonly has several. `shell3 tool check|run|test <kit>` is the author's loop.
+
+The older **markdown config** — `shell3.yaml` + `agent.md` + `agents/<name>.md`
++ `skills/` + `hooks/*.sh` — still loads when no `shell3.sh` is present, and
+`docs/configuration.md` documents it. There are no migration shims: an
 unknown key is simply an unknown-key load error. (`notifier.md`, the old
 triage persona, is gone with the mail model — a leftover file loads with a
 warning naming the removal.)
@@ -138,9 +162,10 @@ IS the registration, there is no toggle and no allowlist key.
 job-progress stream is `rt.JobEvents()` / `Session.JobEvents()`. Note `Session.Jobs()` reports the whole job runtime,
 not one session's share — filter by `JobInfo.ParentID` for per-session
 work. The shell is **unrestricted except by the hook**;
-the opt-in gate is a **per-agent bash hook script**: `hooks/tool-call.sh`
-governs the main agent, `hooks/<name>.tool-call.sh` governs subagent `<name>`
-— no fallback, no chaining; an agent with no script runs ungated (a `<name>`
+the opt-in gate is a **per-agent bash function or script**: a kit declares
+`gate: [names]` in `shell3.sh`, a markdown config uses `hooks/tool-call.sh`
+(main) and `hooks/<name>.tool-call.sh` (subagent `<name>`) — no fallback, no
+chaining, and both forms for one agent is a load error; an agent with no script runs ungated (a `<name>`
 matching no subagent is a warning; `shell3 health` fails on it). The script
 runs before **every** tool as `bash <path>` (cwd = config dir, 10s timeout)
 with JSON on stdin — `{"name", "command" (bash text for the two bash tools,
@@ -398,11 +423,12 @@ to run the bot and points at `docs/deploying.md` (or the agent) for service
 management — it only ever *prints*; running any of it is the operator's.
 `--show` reprints that finale, rendered to the terminal's own background.
 `--prompts` refreshes the scaffold's prompt files in an existing install
-(agent.md body, `agents/`, scaffold-shipped `skills/`) after an upgrade:
-frontmatter wiring, shell3.yaml, .env, hooks, cron, projects, memory, and
-user-authored skills are untouched; replaced files back up to
-`.backup/prompts-<ts>/`; the Vision prompt variant is inferred from whether
-the install's own agent.md tools include `media`; a reload applies it
+(scaffold-shipped `skills/`) after an upgrade — the kit itself is hand-edited,
+so there is no safe seam to splice a prompt into and it is left alone:
+`shell3.sh`, `.env`, cron, memory, and user-authored skills are untouched;
+replaced files back up to `.backup/prompts-<ts>/`; the Vision variant is
+inferred from whether the install's own agent declares `media`; a reload
+applies it
 (`runPromptRefresh` in cmd/shell3/bootprompts.go, rendered by
 `scaffold.PromptFiles`).
 `shell3 ask "…"` is the terminal front-end (`internal/cli`): it drives the same
@@ -452,7 +478,8 @@ cmd/shell3/            cobra command tree: root (prints help) + telegram/serve/a
 internal/agentsetup/   shared config assembly (BuildParts → chat.Config) used by every front-end
 internal/config/       config-directory loader (shell3.yaml + agent/subagent/project/skill/cron markdown + hooks/*.sh) + system-prompt assembly
 internal/bootstrap/    first-run global + project setup
-internal/scaffold/     embedded starter config tree (defaults/base + defaults/project for `shell3 project new`) + boot/project rendering
+internal/kit/          the kit parser/executor: scan, decl, funcs, exec, harness, persona (shell3.sh)
+internal/scaffold/     embedded starter config tree (defaults/base) + boot rendering
 internal/adapter/openai/  OpenAI-compatible LLM adapter
 internal/modelproxy/   run_proxy spawner (starts a model's proxy command on activation)
 internal/paths/        global (~/.shell3/) + local (.shell3_project/) path resolution

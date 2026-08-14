@@ -13,13 +13,15 @@ every employee it can dispatch, and the tools and knowledge each of them has.
 
 A directory holding only `shell3.sh` and `.env` is a complete, runnable config.
 
-## Six primitives
+## Primitives
 
 | | |
 |---|---|
 | **agent** | a prompt + a capability list + a workdir |
 | **tool** | a declared verb: name, description, typed params, shell body |
-| **skill** | knowledge inlined into the agent's prompt |
+| **skill** | knowledge the agent reads on demand |
+| **gate** | what an agent may not do — runs before every tool call |
+| **note** | a remark attached to a tool's result — advice, never a refusal |
 | **mcp** | an external tool server |
 | **memory** | a per-agent `memory.md` |
 | **cron** | a schedule bound to an (agent, prompt) pair |
@@ -39,6 +41,10 @@ detail. That is what lets a dozen agents share one flat bash namespace.
 Scoping is positional: an `agent:` or `shared:` block opens a scope, and every
 `tool:`, `skill:`, and `test:` block after it belongs to that scope until the
 next one opens.
+
+`gate:` and `note:` are the exception — they **name** the agents they govern
+and may sit anywhere in the file. One function usually governs several agents,
+and the alternative (a copy per agent) is how two sets of rules drift apart.
 
 The file is **definitions only** at the top level. That is what makes two things
 true at once: loading a kit never executes it, and running one tool is just
@@ -189,8 +195,63 @@ agent: leads
 Drain one niche from the queue. Report only what changed.
 ```
 
+## The gate
+
+`gate:` runs before every tool call for the agents it names. Its stdin is
+`{"name","command","args","headless"}`; printing `{}` runs the call and
+`{"block":true,"reason":"…"}` refuses it. A nonzero exit, malformed JSON, or a
+10-second timeout fails closed.
+
+```sh
+#---
+# gate: [main, assistant]
+#---
+main_gate() {
+  in=$(cat)
+  cmd=$(printf '%s' "$in" | jq -r '.command // empty')
+  case "$cmd" in
+    *"rm -rf /"|*mkfs*) printf '{"block":true,"reason":"that destroys the machine"}'; exit 0 ;;
+  esac
+  printf '{}'
+}
+```
+
+An agent no `gate:` names runs ungated, and there is no fallback between
+agents — a subagent left out is a way around every rule the main agent has.
+
+**What a gate is worth.** The agent can rewrite it in two lines of Python;
+matching shell text stops an honest mistake, not an agent that means to get
+around it. If you want the gate to hold, make the file unwritable by the agent:
+run shell3 as a user that does not own it, or set the immutable flag
+(`chflags uchg` on macOS, `chattr +i` on Linux). Isolation is a container, a
+VM, or a separate user — never a regex.
+
+Keep it short. A gate that refuses ordinary work does not teach an agent where
+the boundary is; it teaches it that the whole subject is forbidden.
+
+## Notes
+
+`note:` sees a tool's result and may rewrite it: stdin
+`{"name","args","output"}`, stdout `{"output": "…"}`. Use it to redact, or to
+attach advice the agent reads at the moment it decides what to do next —
+without refusing anything.
+
+```sh
+#---
+# note: main
+#---
+main_note() {
+  in=$(cat)
+  printf '%s' "$in" | jq -c '{output: ((.output // "") + "\n\n[note] …")}'
+}
+```
+
+A failure here fails closed too: the output is replaced by an error notice
+rather than passed through unfiltered. Pass the original output through on
+every path you did not mean to touch.
+
 ## See also
 
 - [tools.md](tools.md) — writing a tool, its manifest, and its tests
 - [cli.md](cli.md) — the command tree
-- [security.md](security.md) — the hook gate
+- [security.md](security.md) — what the gate refuses, and what it cannot

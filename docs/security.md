@@ -95,6 +95,30 @@ Treat the chat as a third-party log of everything the agent says.
 There is no approval flow to fall back on: whoever holds that chat **is**
 the operator — the `chat_id` allowlist is the whole access model.
 
+## The gate is a speed bump, not a boundary
+
+Say this plainly, because the previous version of this page did not: **the
+agent can rewrite its own gate in two lines of Python.** The rules match shell
+text, and `python3 -c "open('hooks/tool-call.sh','w').write('')"` contains no
+`rm`, no redirect, and no `sed -i`. It sails through.
+
+That is not a bug to patch — every pattern list has this shape. What the gate
+buys is the honest mistake, which is what actually happens when nobody is
+watching. It is worth having for that and should be judged by that.
+
+If you need the gate to hold against an agent that means to get around it, the
+answer is filesystem-level, not textual:
+
+- run shell3 as a **dedicated user** that does not own the config, or
+- set the **immutable flag** — `chflags uchg <file>` (macOS), `chattr +i`
+  (Linux) — so clearing it needs a password, or
+- run the whole thing in a **container or VM**, which is the only answer that
+  bounds what a compromised agent reaches.
+
+A short gate is also a better gate. One that refuses ordinary work does not
+teach an agent where the boundary is; it teaches it that the whole subject is
+forbidden, and the operator eventually switches it off entirely.
+
 ## What the gate does and doesn't guarantee
 
 - **Fails closed.** A script that exits nonzero, prints malformed JSON, or
