@@ -66,7 +66,24 @@ func (s *Store) DBPath() string { return filepath.Join(s.root, DBFile) }
 //     tables already present.
 //  2. adds threads.title/preview/created_at/updated_at/deleted for webui's
 //     richer thread metadata (see internal/webui/threads.go).
-const schemaVersion = 3
+//  3. adds sessions.agent so a session's runs are findable by the agent
+//     that ran them (see runs.Meta.Agent).
+//  4. adds sessions.cron_job so a session records which cron job started it
+//     (see runs.Meta.CronJob) — separating one job's runs from another no
+//     longer requires guessing from session duration.
+//  5. adds cron_status(name PRIMARY KEY, json) for cron's per-job run
+//     history (internal/cron/store.go). This is its OWN table, not a row in
+//     threads: threads.session_id is trusted elsewhere to be a real session
+//     id — runs.Sweep prunes any threads row whose session_id doesn't name a
+//     live session — so a job name or a JSON blob in that column would be
+//     deleted by the very next startup's janitor pass, before cron ever gets
+//     to read it back.
+//  6. adds sessions.total_prompt_tokens/total_completion_tokens, a cumulative
+//     ledger distinct from last_prompt_tokens (a point-in-time context-fullness
+//     gauge, overwritten each turn). The ledger only grows, via Store.AddUsage,
+//     which is what makes "what did this cron job cost this week" answerable
+//     (see Store.CronRollup, grouping by sessions.cron_job).
+const schemaVersion = 6
 
 // openDB opens path, applying the schema fresh or recreating the file
 // outright when its stamped version doesn't match schemaVersion. Per the
@@ -287,10 +304,13 @@ CREATE TABLE IF NOT EXISTS sessions (
 	status             TEXT NOT NULL DEFAULT 'live',
 	parent_id          TEXT NOT NULL DEFAULT '',
 	agent              TEXT NOT NULL DEFAULT '',
+	cron_job           TEXT NOT NULL DEFAULT '',
 	started_at         TEXT NOT NULL,
 	ended_at           TEXT NOT NULL DEFAULT '',
 	last_at            TEXT NOT NULL,
-	last_prompt_tokens INTEGER NOT NULL DEFAULT 0
+	last_prompt_tokens INTEGER NOT NULL DEFAULT 0,
+	total_prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+	total_completion_tokens INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS messages (
 	session_id TEXT    NOT NULL,
@@ -316,6 +336,10 @@ CREATE TABLE IF NOT EXISTS threads (
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
 	text, session_id UNINDEXED, seq UNINDEXED, role UNINDEXED
+);
+CREATE TABLE IF NOT EXISTS cron_status (
+	name TEXT PRIMARY KEY,
+	json TEXT NOT NULL
 );
 `
 

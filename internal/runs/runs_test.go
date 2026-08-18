@@ -57,6 +57,63 @@ func TestRemindersSidecar(t *testing.T) {
 	}
 }
 
+// TestNewSession_RecordsCronJob proves CronJob survives a round trip through
+// SQLite: NewSession persists it, SessionMeta reads it back.
+func TestNewSession_RecordsCronJob(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := st.NewSession(Meta{Agent: "ampd-leads", CronJob: "ampd-tick"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.SessionMeta(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CronJob != "ampd-tick" {
+		t.Fatalf("CronJob = %q, want ampd-tick", got.CronJob)
+	}
+}
+
+// TestSessionsForCronJob_NewestFirst proves the query is the supported way
+// to answer "what did this job do": only sessions started by the named job
+// come back, newest first, and a session from a different job (or none) is
+// excluded.
+func TestSessionsForCronJob_NewestFirst(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	older, err := st.NewSession(Meta{CronJob: "ampd-tick"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Millisecond) // ids are timestamp-ordered; force distinct order
+	newer, err := st.NewSession(Meta{CronJob: "ampd-tick"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.NewSession(Meta{CronJob: "other-job"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.NewSession(Meta{}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := st.SessionsForCronJob("ampd-tick")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d sessions, want 2: %+v", len(got), got)
+	}
+	if got[0].ID != newer || got[1].ID != older {
+		t.Fatalf("order = [%s, %s], want newest first [%s, %s]", got[0].ID, got[1].ID, newer, older)
+	}
+}
+
 func TestLatestSession(t *testing.T) {
 	s, _ := Open(t.TempDir() + "/.shell3_project")
 	_, _ = s.NewSession(Meta{Workdir: "/w", ConfigDir: "/c"})

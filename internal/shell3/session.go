@@ -125,6 +125,7 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 				Model:     metaModel,
 				ParentID:  opts.ParentID,
 				Agent:     opts.Agent,
+				CronJob:   opts.CronJob,
 			}); err == nil {
 				storeID = id
 			} else {
@@ -132,6 +133,13 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 			}
 		}
 	}
+	// Carry the dispatch identity into cfg so a later compaction rollover
+	// (chat.compactInto, run mid-turn from cfg alone) can stamp the same
+	// Agent/ParentID/CronJob onto the rolled session instead of losing
+	// attribution at the compaction boundary.
+	cfg.Agent = opts.Agent
+	cfg.ParentID = opts.ParentID
+	cfg.CronJob = opts.CronJob
 	s := &Session{
 		cfg:      cfg,
 		handlers: chat.NewHandlers(),

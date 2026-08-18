@@ -277,6 +277,103 @@ func TestDirectTextThroughCaptureKeepsLeadAndMarksCut(t *testing.T) {
 	}
 }
 
+// A clean completion whose whole tail is the NO_REPLY sentinel is queued
+// quietly on the owner, never mailed — mailing it would buy a main-agent
+// turn just to read "NO_REPLY" and reply "NO_REPLY".
+func TestRoute_CleanNoReplyIsNotMailed(t *testing.T) {
+	rt := newTestRuntime(t, fakeCfg("hi"))
+	host := &fakeHost{wakeOK: true}
+	rt.SetCompletionHost(host)
+	owner, err := rt.Session(SessionOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev := cleanEvent()
+	ev.Tail = "NO_REPLY"
+	ev.owner, ev.OwnerID = owner, owner.ID()
+	rt.jobs.dispatchCompletion(ev)
+	posts, wakes, fresh := host.snapshot()
+	if len(fresh) != 0 {
+		t.Fatalf("fresh = %v, want none for a NO_REPLY completion", fresh)
+	}
+	if len(posts) != 0 || len(wakes) != 0 {
+		t.Fatalf("posts=%v wakes=%v, want none — mailing would buy a wasted turn", posts, wakes)
+	}
+	if !owner.HasQueuedInput() {
+		t.Fatal("a dropped NO_REPLY completion must still queue on the owner — the run is not lost, only the turn is saved")
+	}
+}
+
+// The motivating case: an ownerless cron completion (OwnerID == "") whose
+// tail is NO_REPLY must not fall through to StartFreshTurn — that fresh turn
+// at full context, run every tick of an idempotent job, is the 62% cost this
+// change exists to cut. TestCronCompletionStartsFreshTurn (above) is this
+// test's exact inverse: same shape, non-sentinel tail, fresh turn expected.
+func TestRoute_OwnerlessCronNoReplyStartsNoFreshTurn(t *testing.T) {
+	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: fakellm.New()} })
+	host := &fakeHost{}
+	rt.SetCompletionHost(host)
+	ev := cleanEvent()
+	ev.Kind, ev.CronJob = EvCron, "sync-notion-recent"
+	ev.Tail = "NO_REPLY"
+	rt.jobs.dispatchCompletion(ev)
+	posts, _, fresh := host.snapshot()
+	if len(posts) != 0 || len(fresh) != 0 {
+		t.Fatalf("posts=%v fresh=%v, want none — StartFreshTurn is exactly the cost this drop must avoid", posts, fresh)
+	}
+}
+
+// A failed job's NO_REPLY-shaped tail still floor-posts: the drop only
+// applies to a clean run (Failed() is checked earlier and returns first).
+func TestRoute_FailedNoReplyStillSurfaces(t *testing.T) {
+	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: fakellm.New()} })
+	host := &fakeHost{wakeOK: true}
+	rt.SetCompletionHost(host)
+	ev := failedEvent()
+	ev.Tail = "NO_REPLY"
+	ev.OwnerID = "sess-1"
+	rt.jobs.dispatchCompletion(ev)
+	posts, _, _ := host.snapshot()
+	if len(posts) != 1 {
+		t.Fatalf("a FAILED job must still post its ⚠️ floor; posts=%v", posts)
+	}
+}
+
+// A direct completion's NO_REPLY-shaped tail still posts raw: the drop only
+// applies to the default mail path, checked after the Direct branch returns.
+func TestRoute_DirectNoReplyStillPosts(t *testing.T) {
+	rt := newTestRuntime(t, fakeCfg("hi"))
+	host := &fakeHost{}
+	rt.SetCompletionHost(host)
+	ev := cleanEvent()
+	ev.Direct = true
+	ev.Tail = "NO_REPLY"
+	rt.jobs.dispatchCompletion(ev)
+	posts, _, _ := host.snapshot()
+	if len(posts) != 1 {
+		t.Fatalf("direct means the user is waiting; posts=%v, want 1", posts)
+	}
+}
+
+// A silent success is not a NO_REPLY. Most builds print nothing on the happy
+// path; if an empty tail were treated as the sentinel, every one of them would
+// stop waking its owner — a regression in non-cron behaviour this change must
+// not cause.
+func TestRoute_CleanEmptyTailStillMailsOwner(t *testing.T) {
+	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: fakellm.New()} })
+	host := &fakeHost{wakeOK: true}
+	rt.SetCompletionHost(host)
+	ev := cleanEvent()
+	ev.Tail = ""
+	ev.notice = notifyBg("bg1", "echo hi", ev.Exit, "")
+	ev.OwnerID = "sess-1"
+	rt.jobs.dispatchCompletion(ev)
+	_, wakes, _ := host.snapshot()
+	if len(wakes) != 1 {
+		t.Fatalf("wakes = %v, want 1 — an empty tail means no output, not silence", wakes)
+	}
+}
+
 // A job label is one readable line: a multi-line heredoc command must never
 // dump its body into a chat post's label (observed live: a python <<'PYEOF'
 // script as the ⚠️/🔔 label).

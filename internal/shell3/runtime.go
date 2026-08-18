@@ -36,6 +36,11 @@ type SessionOpts struct {
 	// recorded in the child's meta so resume-latest skips it (a child must never
 	// become the session a front-end reattaches to on restart).
 	ParentID string
+	// CronJob names the cron job that started this session ("" for a
+	// front-end or task-tool session). Recorded in the session's meta so a
+	// job's runs are findable without guessing from session duration (see
+	// runs.Meta.CronJob).
+	CronJob string
 	// OutPath, when non-empty, streams this session's JSONL audit log there.
 	OutPath string
 	// ResumeID reloads a stored session's messages when non-empty.

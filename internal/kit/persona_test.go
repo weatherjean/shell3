@@ -196,6 +196,73 @@ func TestToolDefsSchema(t *testing.T) {
 	}
 }
 
+// Kit.ToolByName is the whole-kit search a cron tool: job uses (it names no
+// agent, so there is no Resolved capability set to search) — it must find a
+// tool declared under an employee's own scope AND one that only exists via a
+// shared group, and report false for a name nothing declares.
+func TestKitToolByName(t *testing.T) {
+	k := mustParse(t, capKit)
+	if tl, ok := k.ToolByName("local"); !ok || tl.Name != "local" {
+		t.Fatalf("ToolByName(local) = %+v, %v; want the worker-scoped tool", tl, ok)
+	}
+	if tl, ok := k.ToolByName("search"); !ok || tl.Name != "search" {
+		t.Fatalf("ToolByName(search) = %+v, %v; want the shared-group tool", tl, ok)
+	}
+	if _, ok := k.ToolByName("no-such-tool"); ok {
+		t.Fatal("ToolByName should report false for an undeclared name")
+	}
+}
+
+// The duplicate-tool-name check in Resolve/Check is per-scope only (see
+// TestSharedToolNameCollidesWithLocal): two agents may each legally declare a
+// tool called "sync". ToolByName resolves that ambiguity silently
+// (first-match-wins); ToolMatches must instead surface BOTH declaring scopes
+// so a caller like `shell3 health`'s cron block can refuse instead of
+// running whichever function happened to parse first.
+func TestKitToolMatchesAmbiguousAcrossAgents(t *testing.T) {
+	src := `#---
+# agent: alpha
+#---
+alpha_prompt() { cat <<'EOF'
+a
+EOF
+}
+
+#---
+# tool: sync
+# description: alpha's sync
+#---
+alpha_sync() { echo alpha; }
+
+#---
+# agent: beta
+#---
+beta_prompt() { cat <<'EOF'
+b
+EOF
+}
+
+#---
+# tool: sync
+# description: beta's sync
+#---
+beta_sync() { echo beta; }
+`
+	k := mustParse(t, src)
+	matches := k.ToolMatches("sync")
+	if len(matches) != 2 {
+		t.Fatalf("ToolMatches(sync) = %+v, want 2 matches (declared under both alpha and beta)", matches)
+	}
+	if matches[0].Scope == matches[1].Scope {
+		t.Fatalf("both matches report the same scope %q; want one per declaring agent", matches[0].Scope)
+	}
+	for _, m := range matches {
+		if !strings.Contains(m.Scope, "alpha") && !strings.Contains(m.Scope, "beta") {
+			t.Fatalf("match scope %q names neither declaring agent", m.Scope)
+		}
+	}
+}
+
 func TestParseAgentContext(t *testing.T) {
 	src := `#---
 # agent: a

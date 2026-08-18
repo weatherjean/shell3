@@ -83,6 +83,7 @@ func maybeCompact(ctx context.Context, cfg TurnConfig, sess *Session) {
 		return
 	}
 	if sess.lastPromptTokens >= cfg.CompactAt {
+		warnFixedOverhead(cfg, sess)
 		compactNow(ctx, cfg, sess)
 		return
 	}
@@ -94,6 +95,49 @@ func maybeCompact(ctx context.Context, cfg TurnConfig, sess *Session) {
 // ErrNothingToCompact is returned by CompactStandalone when there is no head
 // to summarise — the verbatim tail already covers the whole (short) history.
 var ErrNothingToCompact = errors.New("nothing to compact")
+
+// systemPromptShare is the fraction of compact_at (percent) the system prompt
+// may occupy before the operator is told. Half the budget is the point where
+// compaction is fighting for the smaller share of the window.
+const systemPromptShare = 50
+
+// warnFixedOverhead reports — once per session — that the system prompt itself
+// is eating the compaction budget.
+//
+// Compaction can only reclaim MESSAGE tokens. The system prompt is not part of
+// history: it is re-rendered from disk at every turn (RefreshPrompt), so its
+// `context:` files, skills index and persona come back in full immediately
+// after every compaction. Once that fixed overhead approaches compact_at, each
+// turn trips the threshold, compacts, and is still over — history shrinks
+// toward nothing while the real cause sits untouched in the prompt, and the
+// only symptom the operator ever sees is the provider eventually rejecting the
+// request for length.
+//
+// This does not change behaviour: compaction still runs, because reclaiming
+// the message half is better than nothing. It exists so the cause is named at
+// the moment it starts to bite, instead of being inferred later from a context
+// -length error. See config.MaxContextBytes for the cap that bounds the most
+// common source (a runaway `context:` brain file).
+func warnFixedOverhead(cfg TurnConfig, sess *Session) {
+	if sess.warnedFixedOverhead || cfg.Log == nil {
+		return
+	}
+	sysPrompt := cfg.Personality.SystemPrompt
+	if cfg.RefreshPrompt != nil {
+		if s := cfg.RefreshPrompt(); s != "" {
+			sysPrompt = s
+		}
+	}
+	fixed := estimatePromptTokens([]llm.Message{{Role: llm.RoleSystem, Content: sysPrompt}})
+	if fixed < cfg.CompactAt*systemPromptShare/100 {
+		return
+	}
+	sess.warnedFixedOverhead = true
+	cfg.Log.Warn("system prompt is consuming the compaction budget; compaction cannot reclaim it",
+		"system_prompt_tokens", fixed,
+		"compact_at", cfg.CompactAt,
+		"hint", "shrink the agent's context: files or skills index — shell3 health reports oversized context files")
+}
 
 // CompactStandalone runs one forced compaction outside a turn — the host-side
 // /compact command. Returns estimated prompt tokens before/after (same
@@ -194,7 +238,7 @@ func compactApply(ctx context.Context, cfg TurnConfig, sess *Session, forced boo
 	// Same Meta the front-ends write on a fresh session: the rolled session
 	// keeps the model recorded in its metadata.
 	_, metaModel := SplitStatus(cfg.StatusLine)
-	if !compactInto(summaryArgs, cfg.Store, sess, tail, cfg.Log, cfg.WorkDir, cfg.ConfigDir, metaModel) {
+	if !compactInto(summaryArgs, cfg.Store, sess, tail, cfg.Log, cfg.WorkDir, cfg.ConfigDir, metaModel, cfg.Agent, cfg.ParentID, cfg.CronJob) {
 		// The runs-session roll failed; history is untouched. Proceed on the
 		// un-compacted history without resetting the gauge or emitting a
 		// (misleading) compacted event.
@@ -352,7 +396,7 @@ func writeBulletSection(b *strings.Builder, tag string, items []string) {
 // record still holds the full history would let the next saveHistory duplicate
 // the tail into it. Aborting keeps the on-disk history coherent; the caller
 // proceeds on the un-compacted history (compaction is best-effort).
-func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.Message, lg applog.Logger, workDir, configDir, model string) bool {
+func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.Message, lg applog.Logger, workDir, configDir, model, agent, parentID, cronJob string) bool {
 	prevSessionID := sess.id
 	// newSessionID stays prevSessionID unless the runs-session roll below
 	// succeeds; it is published into sess.id atomically with sess.messages under
@@ -366,7 +410,7 @@ func compactInto(args CompactSummary, st *runs.Store, sess *Session, tail []llm.
 	// (not ended, still persistable) and we abort the compaction below, rather
 	// than ending a session we keep writing to and corrupting its stored history.
 	if st != nil {
-		newID, err := st.NewSession(runs.Meta{Workdir: workDir, ConfigDir: configDir, Model: model})
+		newID, err := st.NewSession(runs.Meta{Workdir: workDir, ConfigDir: configDir, Model: model, Agent: agent, ParentID: parentID, CronJob: cronJob})
 		if err != nil {
 			lg.Warn("start session failed during compact; skipping compaction", "error", err)
 			return false

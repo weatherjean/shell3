@@ -11,6 +11,7 @@ import (
 
 	"github.com/weatherjean/shell3/internal/cron"
 	"github.com/weatherjean/shell3/internal/mediadir"
+	"github.com/weatherjean/shell3/internal/render"
 	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/telegram"
@@ -81,6 +82,7 @@ func openThreads(rt *shell3.Runtime, surface string) *telegram.ThreadIndex {
 func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func(), err error) {
 	b.SetWorkDir(workDir) // resolves send_media_telegram relative paths
 	b.SetConfigDir(rt.Parts().ConfigDir())
+	b.SetLogger(rt.Parts().Log()) // host-side faults (e.g. a lost current-session marker write) land in the app log
 	b.SetVersion(version)
 	b.SetRunsRoot(rt.Parts().RunsRoot())
 
@@ -125,7 +127,15 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 	b.SetJobsSource(cronSess.Jobs, jobTranscriptOf(cronSess))
 	b.SetJobControl(cronSess.KillJob)
 
-	sched, err := armCron(cronSess, rt.Cron())
+	// tools adapts the loaded kit to cron.ToolRunner, resolving Parts fresh on
+	// every call so a /reload's new kit takes effect without re-wiring.
+	tools := kitTools{parts: rt.Parts}
+	// store persists run history across restarts (internal/cron/store.go);
+	// like tools, it resolves Parts fresh per call so a /reload's swapped
+	// database is what gets read/written.
+	store := storeRunStore{parts: rt.Parts}
+	log := partsLogger{parts: rt.Parts}
+	sched, err := armCron(cronSess, tools, store, log, b, rt.Cron())
 	if err != nil {
 		return nil, err
 	}
@@ -140,14 +150,43 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 	if sched != nil {
 		b.SetJobRunner(sched.Run) // /run <job>
 	}
-	// /cron's "last run" column reads the live scheduler's history.
-	b.SetCronLastRuns(func() map[string]time.Time { return cronLastRuns(currentSched()) })
+	// /status's Cron section reads the live scheduler's history (JobStatus
+	// carries the run counts, not just the last-run time).
+	b.SetCronStatus(func() []cron.JobStatus {
+		if s := currentSched(); s != nil {
+			return s.Jobs()
+		}
+		return nil
+	})
+	// /status's Cron section also shows each job's rolling spend. A rollup
+	// failure (closed store mid-reload, corrupt db) must not break /status —
+	// log and omit costs entirely rather than fail the whole command over a
+	// section that was already best-effort (render.cronCostSuffix treats a
+	// missing entry as "unknown", never "zero").
+	b.SetCronCost(func() map[string]runs.JobCost {
+		store := rt.Parts().Store()
+		if store == nil {
+			return nil
+		}
+		rows, err := store.CronRollup(time.Now().Add(-render.CronRollupWindow))
+		if err != nil {
+			rt.Parts().Log().Warn("cron cost rollup failed", "error", err)
+			return nil
+		}
+		out := make(map[string]runs.JobCost, len(rows))
+		for _, c := range rows {
+			out[c.CronJob] = c
+		}
+		return out
+	})
 
 	// /reload + the reload tool: rebuild config, swap the cron scheduler.
 	// The bot's host tools need no re-registration — Runtime.Reload
 	// re-applies the session decorator.
 	b.SetReloader(func() (shell3.ReloadResult, error) {
-		ns, res, err := reloadAndRearm(rt, b, cronSess, currentSched())
+		// reloadAndRearm wires the fresh scheduler's post callback itself,
+		// before starting it — see wireCronPost's ordering note.
+		ns, res, err := reloadAndRearm(rt, b, cronSess, tools, store, log, currentSched())
 		schedMu.Lock()
 		sched = ns
 		schedMu.Unlock()

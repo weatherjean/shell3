@@ -68,7 +68,7 @@ bot loop with no credentials and no network: a plain line is a fresh message,
 ### Commands
 
 Answered by the bot itself: no model call, no tokens. `/status`, `/jobs`,
-`/job`, `/cron` and a `/run_N` replay render markdown, sent inline when small
+`/job` and a `/run_N` replay render markdown, sent inline when small
 and as a `.md` document (plus a short summary) when it would blow past
 Telegram's message cap. The `/runs` listing is always inline; its entries are
 tappable commands, and Telegram only linkifies those in message text.
@@ -78,11 +78,10 @@ tappable commands, and Telegram only linkifies those in message text.
 | `/stop` | Cancel the running turn. Background jobs are **not** killed — they keep running and still report back. |
 | `/new` | Start a fresh conversation. The old one stays in `/runs` and the history index; running jobs keep going and report into the new conversation. Refused mid-turn (`/stop` first). |
 | `/inbox` | The queued state: your pending messages, and task reports waiting in sessions. |
-| `/status` | Version, config dir, agent + model + params, context usage, whether the gate is armed, tools, subagents, skills, MCP health, cron jobs, projects, warnings, and the effective system prompt. Reports the live session (on an idle bot, the headless cron parent — `0` messages). |
+| `/status` | Version, config dir, agent + model + params, context usage, whether the gate is armed, tools, subagents, skills, MCP health, warnings, and the effective system prompt — plus every cron job: schedule, agent/tool, last run, outcome, and its rolling 7-day dispatched-run token cost where known. This is the one dashboard; there is no separate `/cron` command. Reports the live session (on an idle bot, the headless cron parent — `0` messages). |
 | `/jobs` | Running and finished background work: id, kind, label, status, elapsed, exit code. |
 | `/job <id>` | One job plus its output — a subagent's stored transcript, or a command's captured stdout. |
 | `/cancel <id>` | Cancel a job; cancelling a subagent cascades to the jobs it started. |
-| `/cron` | Declared cron jobs: schedule, agent, workdir, `direct`, the full prompt, and the last run. |
 | `/run <name>` | Fire a scheduled job now. |
 | `/runs [page\|id]` | Stored sessions, newest first, 8 per page; each entry a tappable `/run_N` that replays that run in full (tool calls with arguments, results, and reasoning). `/runs 2` pages older; `/runs <id>` replays by id directly. |
 | `/reload` | Re-read the config and apply it live. Takes the turn slot, so it is refused rather than raced while a turn runs. |

@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/weatherjean/shell3/internal/render"
+	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/strutil"
 )
@@ -125,12 +125,14 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 			b.mu.Unlock()
 			status += "\n\n" + render.JobsTappable(jobs)
 		}
-		if cron := b.rt.Cron(); len(cron) > 0 {
-			var lastRuns map[string]time.Time
-			if b.cronLastRuns != nil {
-				lastRuns = b.cronLastRuns()
+		if b.cronStatus != nil {
+			if statuses := b.cronStatus(); len(statuses) > 0 {
+				var costs map[string]runs.JobCost
+				if b.cronCost != nil {
+					costs = b.cronCost()
+				}
+				status += "\n\n" + render.CronBrief(statuses, costs)
 			}
-			status += "\n\n" + render.CronBrief(cron, lastRuns)
 		}
 		if inbox := strings.TrimSpace(b.renderInbox()); inbox != "" && !strings.Contains(inbox, "nothing queued") {
 			status += "\n\n## Inbox\n\n" + inbox
@@ -219,7 +221,9 @@ func (b *Bot) handleNewCommand(ctx context.Context) {
 	// Clear the marker BEFORE detaching: a completion's StartFreshTurn racing
 	// this would otherwise see main==nil with the old marker still set and
 	// resurrect the conversation being detached.
-	b.current.SetCurrent("")
+	if err := b.current.SetCurrent(""); err != nil {
+		b.log.Warn("current-session marker clear (/new) not persisted", "err", err)
+	}
 	b.mu.Lock()
 	old := b.main
 	b.main = nil

@@ -56,12 +56,29 @@ dedicated user, `chflags uchg`/`chattr +i`, a container).
 wired through `TurnConfig` into `assembleTurnContext`) so a long-lived
 conversation sees current file contents, never a session-creation snapshot;
 they resolve against the AGENT'S OWN workdir when it declares one, or the
-config dir otherwise. Skills are FILES, not blocks — `skills/*.md` for the main
+config dir otherwise. Because the file is re-read every turn AND the agent is
+handed `edit_file` to maintain it, an unbounded brain file is a cost loop the
+agent itself drives and cannot see, so the body is CAPPED
+(`config.MaxContextBytes`, 64 KB): over that, `elideMiddle` keeps the head and
+the tail and replaces the middle with a marker naming the file and how to
+`cat` the rest — head AND tail, because these files reliably drift into a
+curated header plus an append-only tail, and a tail-only window would drop the
+standing instructions the header exists to carry.
+`config.ContextSizeWarnings` reports anything over 32 KB
+(`WarnContextBytes`); `shell3 health` prints those and FAILS only on an
+over-cap file, since elision is real content loss while mere size is advice —
+and it checks kit agents against their own workdir, the path that previously
+validated `context:` not at all. Compaction cannot help here (the system
+prompt is re-rendered fresh every turn, so nothing it discards comes back
+smaller): `chat.warnFixedOverhead` logs once per session when the system
+prompt alone exceeds half of `compact_at`, naming the cause instead of leaving
+a context-length rejection to be diagnosed later. Skills are FILES, not blocks — `skills/*.md` for the main
 agent, `projects/<agent>/skills/*.md` for an employee — indexed into the prompt
 by name, description and absolute path, and `cat`'d on demand. `cron/<name>.md`
-stays its own surface (frontmatter `schedule`/`agent`/`direct`/`workdir`, body
-= prompt), because a schedule binds an (agent, prompt) pair and one employee
-commonly has several. `shell3 tool check|run|test <kit>` is the author's loop.
+stays its own surface (frontmatter `schedule` + exactly one of `agent`/`tool`
++ optional `direct`/`workdir`, body = prompt for an `agent:` job), because a
+schedule binds an (agent, prompt) pair and one employee commonly has several.
+`shell3 tool check|run|test <kit>` is the author's loop.
 
 The older **markdown config** — `shell3.yaml` + `agent.md` + `agents/<name>.md`
 + `skills/` + `hooks/*.sh` — still loads when no `shell3.sh` is present, and
@@ -103,14 +120,28 @@ stops at the post, never burning a main-model turn per broken tick.
 `direct: true` (bash_bg arg, task arg, cron frontmatter): the raw result
 posts straight to the user, and the owning session gets the notice queued
 WITHOUT a wake — the next turn has it in context without spending one now.
+Before the default: a CLEAN completion whose whole tail is already the
+`NO_REPLY` sentinel is never mailed for judgment — `internal/shell3/
+completion.go`'s router drops it (`strings.TrimSpace(ev.Tail) != "" &&
+strutil.IsNoReply(tail)`, checked before the owner/no-owner branch, after
+Failed/Direct are already handled above it): a live owner gets the notice
+queued WITHOUT a wake (same shape as `direct`, so the next turn has it in
+context for free); an OWNERLESS one (cron, no live session) starts no fresh
+turn at all — the `StartFreshTurn` fallback below is never reached. This is
+what kills the cost a frequent idempotent cron tick used to buy just to read
+"NO_REPLY" and answer "NO_REPLY": mailing it would spend a main-agent turn
+at full conversation context for a report with nothing to judge. (An empty
+tail is NOT this case — `strutil.IsNoReply("")` is true, but an empty
+`ev.Tail` means "no output captured", the normal shape of a successful
+`bash_bg` that prints nothing, and that must still wake its owner.)
 Default: the completion is **mail to the agent** — `WakeOwner` queues+wakes
 the owning session, or `StartFreshTurn` runs a fresh main-agent session
 when none is live (cron, orphans). The completion reaches the model as a
 TASK REPORT (`mailText` — labeled system-generated, explicitly "the user
 has NOT seen this"); the report turn's reply posts to the user as an ✉️
 update — one channel, no separate tool — unless the model replies
-NO_REPLY (matched leniently: `isNoReply`, any 4+-char tail fragment, so a
-reasoning-split provider swallowing "NO" can't turn the sentinel into a
+NO_REPLY (matched leniently: `strutil.IsNoReply`, any 4+-char tail fragment,
+so a reasoning-split provider swallowing "NO" can't turn the sentinel into a
 post). The spawner can pass `note: "…"` as context carried into the report.
 A report is delivered at the **end** of the turn's context, never grafted
 onto an earlier user message (`injectReminder` attaches to the LAST message
@@ -311,7 +342,9 @@ them and cuts words out of the agent's reply mid-sentence.
 **Commands are host-answered** (`commands.go`, no model call, zero tokens):
 `/stop` (cancel the turn; background jobs keep running), `/new` (start a
 fresh conversation; refused mid-turn), `/run <job>`,
-`/status`, `/jobs`, `/job <id>`, `/cancel <id>`, `/cron`, `/runs [page|id]`
+`/status` (the one dashboard — cron jobs, run outcomes and per-job cost are
+in it; there is no separate `/cron` command), `/jobs`, `/job <id>`,
+`/cancel <id>`, `/runs [page|id]`
 (paginated inline listing, 8 per page, each entry a tappable `/run_N` that
 replays that run — taps resolve only against the map the last render stored,
 so a stale index errors instead of opening the wrong run),
@@ -380,7 +413,57 @@ prompt as context (`DispatchOpts.Note` — the agent knows what the job is FOR):
 by default a fresh main-agent turn whose reply posts as an ✉️ update only
 when warranted (NO_REPLY posts nothing), with `direct: true` a raw ⏰ post
 costing no agent turn; a failed
-run always surfaces as `⚠️ <job> failed: <error>` and spends no turn).
+run always surfaces as `⚠️ <job> failed: <error>` and spends no turn). A job
+can instead name `tool: <name>` — a kit tool, run directly with NO model turn
+at all: no dispatch, no subagent, just the tool's shell function. Frontmatter
+takes exactly one of `agent:` or `tool:` (a job is either a prompt or a tool
+call), enforced at load (`config.parseCronFile`) so a config that loads is a
+config that arms. Resolution is whole-kit
+(`kit.Kit.ToolByName`/`agentsetup.Parts.KitToolByName`), not per-agent — a
+tool job names no agent, so there is no `Resolved` capability set to search;
+the operator scheduling a tool they declared themselves is the trust
+boundary, not positional `use:` scoping (that still bounds what a MODEL may
+call). A tool job honours `workdir:` like a prompt job, and — since no model
+turn is around to judge or relay its result — posts its own outcome: silent
+on a NO_REPLY/empty result (the point of scheduling an idempotent sync every
+30 minutes), `⏰ <job>: <result>` otherwise, `⚠️ <job> failed: <error>` on
+error, capped at the foreground bash timeout (120s). `shell3 health` fails a
+`tool:` job naming an undeclared tool, one requiring a param (a tool job
+passes none), or one in a markdown config with no kit to resolve against
+(`config.Load` itself refuses that last case, since it can never be
+satisfied).
+
+Every session records `sessions.agent` (the agent that ran it) and
+`sessions.cron_job` (the cron job that started it, `''` for a front-end or
+task-tool session — see `runs.Meta.Agent`/`.CronJob`), which is what makes
+"what did this job do" and "what did this job cost" answerable without
+guessing from session duration. A session that trips host-managed
+auto-compaction mid-run rolls onto a NEW session row (`chat.compactInto`);
+that roll carries `Agent`/`ParentID`/`CronJob` forward onto the new row too
+— dropping them there would silently reattribute a tool-heavy, many-round
+job (exactly the kind likeliest to compact) to no job at all the moment it
+compacted. `internal/cron` persists each job's run history restart-durably
+in its OWN table, `cron_status(name PRIMARY KEY, json)` (`runs.CronStatusSave`/
+`CronStatusLoadAll`, `internal/cron/store.go`) — not a row in `threads`,
+because `runs.Sweep` prunes any `threads` row whose `session_id` doesn't
+name an existing session (live or ended), and a job name or JSON blob in
+that column would be
+deleted by the very next startup's janitor pass before cron read it back.
+`sessions.total_prompt_tokens`/`total_completion_tokens` is a cumulative
+ledger distinct from `last_prompt_tokens` (a point-in-time context-fullness
+gauge, overwritten each turn): it only grows, via `Store.AddUsage` after
+every turn, and `Store.CronRollup` sums it grouped by `cron_job` over a
+window to answer "what did this job cost this week" — the figure `/status`
+prints per job. That figure is the job's DISPATCHED-RUN spend only:
+`cron_job` is set on the dispatched child session but never on the
+main-agent session that later reads the task report and answers it (a wake
+turn can drain reports from several jobs plus user backlog at once, so
+there is no honest per-job split of that turn's cost), and that report turn
+is commonly the majority of a job's real cost — `render.cronCostSuffix`
+labels the number "run" for this reason, not "total". A `tool:` job never
+dispatches a session at all, so it can never have a `CronRollup` row; that
+absence is a KNOWN zero, not missing data, and renders as `0 tok/Nd run`
+rather than vanishing like a genuinely unknown agent-job figure would.
 
 Sessions, messages, reminders, and every surface's thread index live in **one
 SQLite database** (`internal/runs`, modernc.org/sqlite — pure Go, no cgo):
@@ -489,7 +572,7 @@ internal/notify/       Notification type (bg_done / agent_done) shared by job ru
 internal/mediadir/     resolves the media dir (<configDir>/media, $SHELL3_MEDIA_DIR overrides) and runs its startup janitor (media_keep_days); free of the unix build tag
 internal/mcp/          MCP client (official go-sdk): Manager connects mcp: servers, lists tools, dispatches mcp_* calls
 internal/telegram/     the chat front-end: bot loop + transports (Bot API, console, serve's stdio JSONL), turn slot, thread index, host commands + tools, completion delivery
-internal/render/       markdown renderers for the dash views (/status, /jobs, /job, /cron, /runs) shared by the bot
+internal/render/       markdown renderers for the dash views (/status, /jobs, /job, /runs) shared by the bot (Cron is one of them but has no production caller — /cron was folded into /status)
 internal/cron/         robfig/cron scheduler dispatching subagent jobs on Session.Dispatch
 internal/cli/          terminal front-end helpers: shell3 ask renderers, brand banner
 internal/chat/         conversation loop, tools, events, JSONL audit sink

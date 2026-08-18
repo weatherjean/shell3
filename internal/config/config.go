@@ -128,6 +128,11 @@ type CronJob struct {
 	// default agent-mail turn. The cost valve: a default cron tick wakes the
 	// main model to judge its result; a direct one costs no tokens at all.
 	Direct bool
+	// Tool names a kit tool this job runs directly — no agent, no model turn.
+	// Exactly one of Agent or Tool is set. A tool job is the valve for
+	// mechanical, idempotent work (a sync, a rotation): the turn a prompt job
+	// spends judging its own output is the whole cost of running it often.
+	Tool string
 }
 
 // MCPServer is one declared server from the shell3.yaml `mcp:` block.

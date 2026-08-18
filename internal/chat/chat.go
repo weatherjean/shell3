@@ -96,6 +96,16 @@ type Config struct {
 	// if unknown. Recorded per session so resume can reload the right
 	// config. Agent-independent: set once at assembly, survives agent switches.
 	ConfigDir string
+	// Agent, ParentID and CronJob identify this session in runs.Meta terms:
+	// the agent that is running it, its dispatch parent (if any), and the
+	// cron job that started it ('' for a front-end or task-tool session).
+	// Set once at assembly (mirrors ConfigDir) and carried into every runs
+	// session this conversation rolls onto — notably the compaction rollover
+	// (compactInto), so a session that compacts mid-run keeps its cron
+	// attribution instead of losing it to an unattributed continuation row.
+	Agent    string
+	ParentID string
+	CronJob  string
 	// ConfigWarnings are non-fatal config load issues (e.g. a skipped invalid
 	// skill file). Already logged + printed to stderr at load; also carried
 	// here so a front-end can surface them in-band, since a browser user
@@ -215,6 +225,9 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler) TurnConfig {
 		RefreshPrompt: cfg.RefreshPrompt,
 		StatusLine:    cfg.StatusLine,
 		ConfigDir:     cfg.ConfigDir,
+		Agent:         cfg.Agent,
+		ParentID:      cfg.ParentID,
+		CronJob:       cfg.CronJob,
 		Handlers:      handlers,
 		Log:           LogOrNoop(cfg.Log),
 		HostTool:      cfg.HostTool,

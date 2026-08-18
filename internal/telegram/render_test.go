@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/weatherjean/shell3/internal/shell3"
+	"github.com/weatherjean/shell3/internal/strutil"
 )
 
 // drainTurn must return only the FINAL assistant message of a turn: narration
@@ -92,13 +93,13 @@ func TestChunkCountsUTF16(t *testing.T) {
 // must still read as silence. Real text never does.
 func TestIsNoReplyMangledTails(t *testing.T) {
 	for _, s := range []string{"NO_REPLY", "no_reply.", "NO_REPLY!", "`NO_REPLY`", "_REPLY", "O_REPLY", "REPLY", ""} {
-		if !isNoReply(s) {
-			t.Errorf("isNoReply(%q) = false, want true", s)
+		if !strutil.IsNoReply(s) {
+			t.Errorf("IsNoReply(%q) = false, want true", s)
 		}
 	}
 	for _, s := range []string{"PLY", "the reply is ready", "NO_REPLY needed here, sending anyway", "All done — see summary"} {
-		if isNoReply(s) {
-			t.Errorf("isNoReply(%q) = true, want false", s)
+		if strutil.IsNoReply(s) {
+			t.Errorf("IsNoReply(%q) = true, want false", s)
 		}
 	}
 }

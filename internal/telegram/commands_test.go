@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/weatherjean/shell3/internal/cron"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/shell3"
@@ -302,7 +303,11 @@ func TestCronCommand_RendersJobs(t *testing.T) {
 	})
 	b := newBot(t, fc, rt)
 	when := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	b.SetCronLastRuns(func() map[string]time.Time { return map[string]time.Time{"nightly": when} })
+	b.SetCronStatus(func() []cron.JobStatus {
+		return []cron.JobStatus{
+			{Name: "nightly", Schedule: "0 3 * * *", Agent: "explorer", LastRun: when.Format(time.RFC3339), LastOK: true},
+		}
+	})
 
 	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/status"})
 	all := strings.Join(fc.sentTexts(), "\n")
@@ -313,6 +318,86 @@ func TestCronCommand_RendersJobs(t *testing.T) {
 	}
 	if strings.Contains(all, "sweep the logs") {
 		t.Fatalf("/status should not print each cron job's prompt body, got %v", fc.sentTexts())
+	}
+}
+
+// /status shows a job's rolling token spend when a cost source is wired —
+// the finding that started this task made visible on the one dashboard a
+// phone-only operator actually checks. Asserts the rendered text.
+func TestStatusCommand_ShowsCronCost(t *testing.T) {
+	fc := newFakeClient()
+	rt, _ := newFakeRuntime(t, "ok")
+	rt.SetCronForTest([]shell3.CronJob{
+		{Name: "sync", Schedule: "@every 30m", Tool: "sync-notion-recent"},
+	})
+	b := newBot(t, fc, rt)
+	when := time.Now().UTC()
+	b.SetCronStatus(func() []cron.JobStatus {
+		return []cron.JobStatus{
+			{Name: "sync", Schedule: "@every 30m", Tool: "sync-notion-recent",
+				LastRun: when.Format(time.RFC3339), LastOK: true, Runs: 812, Failures: 3},
+		}
+	})
+	b.SetCronCost(func() map[string]runs.JobCost {
+		return map[string]runs.JobCost{
+			"sync": {CronJob: "sync", Runs: 812, PromptTokens: 14_300_000, CompletionTokens: 400_000},
+		}
+	})
+
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/status"})
+	all := strings.Join(fc.sentTexts(), "\n")
+	// "run" qualifies the figure as the dispatched-run spend only, excluding
+	// the main-agent report turn (see render.cronCostSuffix's doc comment).
+	if !strings.Contains(all, "14.7M tok/7d run") {
+		t.Fatalf("expected the rendered, run-qualified cost column, got %v", fc.sentTexts())
+	}
+}
+
+// /status with no cost source wired must not print a bogus cost for an AGENT
+// job — the section is simply absent, same as an unwired cron status. (A
+// tool job is different: it never dispatches a session at all, so its
+// absence from the rollup is a KNOWN zero, not missing data — see
+// TestStatusCommand_ToolJobShowsKnownZeroCost.)
+func TestStatusCommand_NoCronCostSource(t *testing.T) {
+	fc := newFakeClient()
+	rt, _ := newFakeRuntime(t, "ok")
+	rt.SetCronForTest([]shell3.CronJob{
+		{Name: "flaky", Schedule: "@every 1h", Agent: "explorer"},
+	})
+	b := newBot(t, fc, rt)
+	b.SetCronStatus(func() []cron.JobStatus {
+		return []cron.JobStatus{
+			{Name: "flaky", Schedule: "@every 1h", Agent: "explorer", Runs: 812, Failures: 3},
+		}
+	})
+
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/status"})
+	all := strings.Join(fc.sentTexts(), "\n")
+	if strings.Contains(all, "tok/7d") {
+		t.Fatalf("expected no cost column with no cost source wired, got %v", fc.sentTexts())
+	}
+}
+
+// A tool job never dispatches a session, so it can NEVER have a CronRollup
+// row — its absence is a knowable zero, not missing data, and must render
+// as "0 tok/7d run" rather than vanish like a genuinely unknown figure.
+func TestStatusCommand_ToolJobShowsKnownZeroCost(t *testing.T) {
+	fc := newFakeClient()
+	rt, _ := newFakeRuntime(t, "ok")
+	rt.SetCronForTest([]shell3.CronJob{
+		{Name: "sync", Schedule: "@every 30m", Tool: "sync-notion-recent"},
+	})
+	b := newBot(t, fc, rt)
+	b.SetCronStatus(func() []cron.JobStatus {
+		return []cron.JobStatus{
+			{Name: "sync", Schedule: "@every 30m", Tool: "sync-notion-recent", Runs: 812, Failures: 3},
+		}
+	})
+
+	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/status"})
+	all := strings.Join(fc.sentTexts(), "\n")
+	if !strings.Contains(all, "0 tok/7d run") {
+		t.Fatalf("expected a tool job's known-zero cost to render, got %v", fc.sentTexts())
 	}
 }
 

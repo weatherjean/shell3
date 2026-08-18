@@ -201,3 +201,30 @@ func TestBuildPersonaFor(t *testing.T) {
 		t.Fatalf("persona = %q", p)
 	}
 }
+
+// A large-but-intact context file must NOT become a load warning: shell3
+// health hardens every load warning into a failure, so warning here would
+// fail health on a file that is working correctly — and an operator whose
+// health is red for a working config learns to ignore health.
+func TestLoad_ContextLargeButUnderCapDoesNotWarn(t *testing.T) {
+	c := mustLoad(t, map[string]string{
+		"agent.md":  "---\nmodel: m1\ncontext: [memory.md]\n---\nbody\n",
+		"memory.md": strings.Repeat("m\n", (WarnContextBytes+4096)/2),
+	})
+	if w := c.Warnings(); len(w) != 0 {
+		t.Fatalf("a %d KB context file warned at load: %v", (WarnContextBytes+4096)>>10, w)
+	}
+}
+
+// Over the cap the prompt is genuinely losing content, so it does warn — and
+// therefore fails health, which is the point.
+func TestLoad_ContextOverCapWarns(t *testing.T) {
+	c := mustLoad(t, map[string]string{
+		"agent.md":  "---\nmodel: m1\ncontext: [memory.md]\n---\nbody\n",
+		"memory.md": strings.Repeat("m\n", MaxContextBytes),
+	})
+	w := c.Warnings()
+	if len(w) != 1 || !strings.Contains(w[0], "memory.md") || !strings.Contains(w[0], "elided") {
+		t.Fatalf("over-cap context file warnings = %v, want one naming memory.md and elision", w)
+	}
+}

@@ -92,6 +92,31 @@ func TestDispatchCronRoutesToHost(t *testing.T) {
 	}
 }
 
+// TestDispatch_CronJobReachesTheSessionRow proves CronJob survives the full
+// path — Dispatch -> subagentOpts -> child SessionOpts -> runs.Meta -> SQLite
+// -- not just that a Go field got set somewhere along the way.
+func TestDispatch_CronJobReachesTheSessionRow(t *testing.T) {
+	rt := newTestRuntime(t, fakeCfg("worker done"))
+	defer rt.Close()
+	parent, err := rt.Session(SessionOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := parent.Dispatch("worker", "go", DispatchOpts{CronJob: "ampd-tick"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitDispatchDone(t, parent, id)
+
+	sessions, err := rt.store.SessionsForCronJob("ampd-tick")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("want 1 session attributed to ampd-tick, got %d", len(sessions))
+	}
+}
+
 // A relative dispatch workdir joins onto the parent's effective base (the old
 // Dispatch contract): parent workdir when set, else the runtime root — never
 // the process CWD.

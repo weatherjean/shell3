@@ -23,7 +23,11 @@ type Meta struct {
 	// Agent is the name of the agent that ran this session. It is what makes
 	// "show me what ampd-leads did" answerable — auditing an employee needs its
 	// runs findable by name, not just by id.
-	Agent     string    `json:"agent,omitempty"`
+	Agent string `json:"agent,omitempty"`
+	// CronJob is the name of the cron job that started this session ("" for
+	// a front-end or task-tool session). It is what makes "what did this job
+	// do" answerable without guessing from session duration.
+	CronJob   string    `json:"cron_job,omitempty"`
 	StartedAt time.Time `json:"started_at"`
 	EndedAt   time.Time `json:"ended_at,omitzero"`
 	LastAt    time.Time `json:"last_at"`
@@ -34,6 +38,13 @@ type Meta struct {
 	// ever tripping prune/compaction). Zero on old sessions written before this
 	// field existed; resume then falls back to the estimate.
 	LastPromptTokens int `json:"last_prompt_tokens,omitempty"`
+	// TotalPromptTokens and TotalCompletionTokens are a cumulative ledger of
+	// every turn's provider-reported usage for this session — distinct from
+	// LastPromptTokens, which is overwritten each turn and answers "how full is
+	// the context now". These only grow (see Store.AddUsage) and answer "what
+	// did this session cost", the question Store.CronRollup totals per cron job.
+	TotalPromptTokens     int64 `json:"total_prompt_tokens,omitempty"`
+	TotalCompletionTokens int64 `json:"total_completion_tokens,omitempty"`
 }
 
 // NewSession mints an ID, inserts the session row, and returns the ID.
@@ -41,9 +52,9 @@ func (s *Store) NewSession(m Meta) (string, error) {
 	id := newID()
 	now := time.Now().UTC()
 	_, err := s.db.Exec(`INSERT INTO sessions
-		(id, workdir, config_dir, model, status, parent_id, agent, started_at, last_at, last_prompt_tokens)
-		VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		id, m.Workdir, m.ConfigDir, m.Model, "live", m.ParentID, m.Agent,
+		(id, workdir, config_dir, model, status, parent_id, agent, cron_job, started_at, last_at, last_prompt_tokens)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		id, m.Workdir, m.ConfigDir, m.Model, "live", m.ParentID, m.Agent, m.CronJob,
 		encTime(now), encTime(now), m.LastPromptTokens)
 	if err != nil {
 		return "", fmt.Errorf("runs: new session: %w", err)
@@ -174,6 +185,27 @@ func (s *Store) LastPromptTokens(id string) int {
 	return n
 }
 
+// AddUsage accumulates one turn's provider-reported token usage onto the
+// session's cumulative ledger (see Meta.TotalPromptTokens). LastPromptTokens
+// answers "how full is the context now"; this answers "what did this session
+// cost", a different question an operator running unattended cron work needs
+// answered — see Store.CronRollup. Unknown session ids error (like
+// TouchSession) rather than silently no-op, since a cost that never lands
+// anywhere is worse than a loud failure naming the id at fault.
+func (s *Store) AddUsage(id string, prompt, completion int) error {
+	res, err := s.db.Exec(`UPDATE sessions
+		SET total_prompt_tokens = total_prompt_tokens + ?,
+		    total_completion_tokens = total_completion_tokens + ?
+		WHERE id = ?`, prompt, completion, id)
+	if err != nil {
+		return fmt.Errorf("runs: add usage: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("runs: add usage: unknown session %q", id)
+	}
+	return nil
+}
+
 // TouchSession bumps LastAt. Unknown session ids error.
 func (s *Store) TouchSession(id string) error {
 	res, err := s.db.Exec(
@@ -187,34 +219,71 @@ func (s *Store) TouchSession(id string) error {
 	return nil
 }
 
-// ListSessions returns metas newest-first (by ID, which sorts chronologically).
-func (s *Store) ListSessions(limit int) ([]Meta, error) {
-	q := `SELECT id, workdir, config_dir, model, status, parent_id, agent,
-		started_at, ended_at, last_at, last_prompt_tokens
-		FROM sessions ORDER BY id DESC`
-	var rows *sql.Rows
-	var err error
-	if limit > 0 {
-		rows, err = s.db.Query(q+` LIMIT ?`, limit)
-	} else {
-		rows, err = s.db.Query(q)
+// metaColumns is the column list shared by every query that scans a full
+// Meta row (ListSessions, SessionMeta, SessionsForCronJob) — kept in one
+// place so the SELECT list and the Scan call below can never drift apart.
+const metaColumns = `id, workdir, config_dir, model, status, parent_id, agent, cron_job,
+		started_at, ended_at, last_at, last_prompt_tokens,
+		total_prompt_tokens, total_completion_tokens`
+
+// scanMeta reads one metaColumns row into a Meta, decoding its timestamps.
+func scanMeta(row interface{ Scan(...any) error }) (Meta, error) {
+	var m Meta
+	var started, ended, last string
+	if err := row.Scan(&m.ID, &m.Workdir, &m.ConfigDir, &m.Model, &m.Status,
+		&m.ParentID, &m.Agent, &m.CronJob, &started, &ended, &last, &m.LastPromptTokens,
+		&m.TotalPromptTokens, &m.TotalCompletionTokens); err != nil {
+		return Meta{}, err
 	}
+	m.StartedAt, m.EndedAt, m.LastAt = decTime(started), decTime(ended), decTime(last)
+	return m, nil
+}
+
+// querySessions runs a metaColumns query and scans every row, for the
+// several list queries (ListSessions, SessionsForCronJob) that differ only
+// in their WHERE/ORDER BY/LIMIT clause.
+func (s *Store) querySessions(query string, args ...any) ([]Meta, error) {
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("runs: list: %w", err)
 	}
 	defer rows.Close()
 	var out []Meta
 	for rows.Next() {
-		var m Meta
-		var started, ended, last string
-		if err := rows.Scan(&m.ID, &m.Workdir, &m.ConfigDir, &m.Model, &m.Status,
-			&m.ParentID, &m.Agent, &started, &ended, &last, &m.LastPromptTokens); err != nil {
+		m, err := scanMeta(rows)
+		if err != nil {
 			return nil, fmt.Errorf("runs: list: %w", err)
 		}
-		m.StartedAt, m.EndedAt, m.LastAt = decTime(started), decTime(ended), decTime(last)
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// ListSessions returns metas newest-first (by ID, which sorts chronologically).
+func (s *Store) ListSessions(limit int) ([]Meta, error) {
+	q := `SELECT ` + metaColumns + ` FROM sessions ORDER BY id DESC`
+	if limit > 0 {
+		return s.querySessions(q+` LIMIT ?`, limit)
+	}
+	return s.querySessions(q)
+}
+
+// SessionMeta returns one session's metadata.
+func (s *Store) SessionMeta(id string) (Meta, error) {
+	row := s.db.QueryRow(`SELECT `+metaColumns+` FROM sessions WHERE id = ?`, id)
+	m, err := scanMeta(row)
+	if err != nil {
+		return Meta{}, fmt.Errorf("runs: session %s: %w", id, err)
+	}
+	return m, nil
+}
+
+// SessionsForCronJob returns every session started by the named cron job,
+// newest first (by ID, which sorts chronologically — see ListSessions).
+// Attribution is what makes a job's history answerable without guessing
+// from session duration.
+func (s *Store) SessionsForCronJob(job string) ([]Meta, error) {
+	return s.querySessions(`SELECT `+metaColumns+` FROM sessions WHERE cron_job = ? ORDER BY id DESC`, job)
 }
 
 // ReminderLine is one persisted system-reminder, anchored to the message index

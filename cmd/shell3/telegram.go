@@ -10,10 +10,10 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/config"
 	"github.com/weatherjean/shell3/internal/cron"
 	"github.com/weatherjean/shell3/internal/paths"
@@ -183,27 +183,6 @@ func jobTranscriptOf(sess *shell3.Session) func(id string) string {
 	}
 }
 
-// cronLastRuns projects the scheduler's per-job status onto the name → last-run
-// map /cron renders. A nil scheduler (no jobs) or an unparsable/never-run entry
-// simply contributes nothing, which renders as "never".
-func cronLastRuns(sched *cron.Scheduler) map[string]time.Time {
-	if sched == nil {
-		return nil
-	}
-	out := map[string]time.Time{}
-	for _, j := range sched.Jobs() {
-		if j.LastRun == "" {
-			continue
-		}
-		t, err := time.Parse(time.RFC3339, j.LastRun)
-		if err != nil {
-			continue
-		}
-		out[j.Name] = t
-	}
-	return out
-}
-
 // newQuietStore opens the /quiet toggle's file at ~/.shell3/quiet_mode.json.
 func newQuietStore() (*telegram.QuietStore, error) {
 	home, err := os.UserHomeDir()
@@ -223,6 +202,9 @@ type configReloader interface {
 
 type rearmBot interface {
 	SetJobRunner(func(name string) error)
+	// PostCompletion, alongside SetJobRunner, lets reloadAndRearm wire the
+	// new scheduler's tool-job post callback itself — see wireCronPost.
+	PostCompletion(p shell3.CompletionPost)
 }
 
 // reloadAndRearm performs a /reload: rebuild config, then stop the old cron
@@ -233,8 +215,11 @@ type rearmBot interface {
 //
 // The bot's host tools (send_media_telegram, reload, status) need no
 // explicit re-registration: they are installed via the session decorator,
-// which Runtime.Reload re-applies to every live session.
-func reloadAndRearm(r configReloader, b rearmBot, disp cron.Dispatcher, old *cron.Scheduler) (*cron.Scheduler, shell3.ReloadResult, error) {
+// which Runtime.Reload re-applies to every live session. store and log carry
+// through to the fresh scheduler exactly like the initial armCron call (see
+// internal/cron/store.go, cmd/shell3/host.go's partsLogger) — a reload's
+// scheduler restores run history from the same seam a fresh start does.
+func reloadAndRearm(r configReloader, b rearmBot, disp cron.Dispatcher, tools cron.ToolRunner, store cron.RunStore, log applog.Logger, old *cron.Scheduler) (*cron.Scheduler, shell3.ReloadResult, error) {
 	res, err := r.Reload()
 	if err != nil {
 		return old, res, err
@@ -250,10 +235,16 @@ func reloadAndRearm(r configReloader, b rearmBot, disp cron.Dispatcher, old *cro
 	// Build (and thereby parse) the new scheduler BEFORE stopping the old one:
 	// a malformed schedule surfaces only here, and must not tear down a working
 	// schedule.
-	ns, err := cron.New(disp, jobs)
+	ns, err := cron.NewWithStore(disp, tools, store, jobs)
 	if err != nil {
 		return old, res, err
 	}
+	ns.SetLogger(log)
+	// Wire post BEFORE Start(): a scheduled tick or /run landing in the gap
+	// between Start() and a later SetPost would find post nil and drop its
+	// tool job's result silently — AGENTS.md promises a completion is never
+	// lost.
+	wireCronPost(ns, b)
 	if old != nil {
 		old.Stop()
 	}

@@ -182,6 +182,19 @@ context: [memory.md, notes/*.md]
   stub in the prompt, never a turn failure.
 - List order is preserved; a glob's own matches are sorted lexically within
   its entry.
+- **There is a size cap.** A context file is re-read into the prompt on every
+  turn, so a file that grows without bound quietly multiplies the cost of
+  every run — and since the agent maintains the file itself, it is a loop the
+  agent drives without being able to see it. Over **64 KB** the middle of the
+  file is elided from the prompt, keeping the head and the tail, with a marker
+  saying so and naming the file to `cat` for the full text. Over **32 KB**
+  `shell3 health` reports the size; it only *fails* on an over-cap file, where
+  content is actually being dropped.
+
+  Keep a brain file curated rather than append-only. If the agent is logging
+  per-run detail, point it at a sibling file that is **not** in `context:` and
+  let it `rg` that on demand — the durable conclusions belong in the context
+  file, the raw log does not.
 - Main agent only — subagent frontmatter rejects `context` (like `skills`,
   subagents carry none). `projects.md` keeps its own separate mechanism (the
   standing portfolio brief, read at config load) — no unification with
@@ -557,17 +570,21 @@ grows until you prune it or set
 
 ## Scheduled jobs — `cron/`
 
-One file per job; the filename is the job name. Each fires a declared agent
-on `schedule` (cron expression or `@daily`/`@hourly`/…), with the body as its
-prompt. `agent` names either a subagent from `agents/` or a project's
-`manager.md` — a project's cron job runs its manager in that project's
-workdir, so a scheduled job can dispatch straight into a project's standing
-context. The scheduler runs inside `shell3 telegram`, dispatching each job
-from a hidden, pinned `cron` parent session. Interval schedules
-(`@every 30m`) count from when the scheduler arms, and a `/reload` or
-restart re-arms it — so the tick after one lands a full interval later,
-which can look like a skipped run. Cron *expressions* (`*/30 * * * *`)
-fire on wall-clock times and don't shift.
+One file per job; the filename is the job name. Frontmatter takes exactly one
+of `agent:` or `tool:` — a job is either a prompt or a tool call, never both,
+never neither. This markdown config only supports `agent:` (`tool:` resolves
+against a kit's declared tools, and a markdown config has no kit — a `tool:`
+job here fails to load; see [kits.md](kits.md#cron) if you want that valve).
+Each `agent:` job fires a declared agent on `schedule` (cron expression or
+`@daily`/`@hourly`/…), with the body as its prompt. `agent` names either a
+subagent from `agents/` or a project's `manager.md` — a project's cron job
+runs its manager in that project's workdir, so a scheduled job can dispatch
+straight into a project's standing context. The scheduler runs inside
+`shell3 telegram`, dispatching each job from a hidden, pinned `cron` parent
+session. Interval schedules (`@every 30m`) count from when the scheduler
+arms, and a `/reload` or restart re-arms it — so the tick after one lands a
+full interval later, which can look like a skipped run. Cron *expressions*
+(`*/30 * * * *`) fire on wall-clock times and don't shift.
 
 ```markdown
 ---
@@ -595,9 +612,11 @@ default is the dispatched agent's own — a project manager runs in its
 project's `workdir`, everything else in the config dir — and setting it
 overrides even a manager's. A reload arms changed files.
 
-`/cron` lists every job with its schedule, agent, workdir, `direct` flag,
-full prompt, and last run; `/run <name>` fires one by hand — the result
-travels the usual mail route, exactly as a scheduled firing would.
+`/status` lists every job with its schedule, agent, workdir, `direct` flag,
+last run and outcome, and its rolling 7-day dispatched-run token cost where
+known — it is the one dashboard, there is no separate `/cron` command.
+`/run <name>` fires one by hand — the result travels the usual mail route,
+exactly as a scheduled firing would.
 
 The scaffold ships a checklist example as `cron/checklist.md.example` —
 rename it to `checklist.md` (drop the `.example`) and reload to activate it.

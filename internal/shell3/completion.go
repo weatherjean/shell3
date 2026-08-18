@@ -334,6 +334,22 @@ func (m *jobManager) dispatchCompletion(ev CompletionEvent) {
 		}
 		return
 	}
+	// A clean run whose whole result is the no-post sentinel has nothing for
+	// the agent to judge. Mailing it anyway buys a main-agent turn at full
+	// conversation context to read "NO_REPLY" and reply "NO_REPLY" — the
+	// dominant cost of a frequent idempotent job. Failures and direct posts
+	// are handled above and never reach here.
+	//
+	// The empty check is load-bearing and NOT redundant: strutil.IsNoReply("")
+	// is true (an empty model reply is silence), but an empty ev.Tail means
+	// "no output captured", which is the normal shape of a successful
+	// bash_bg — a build that prints nothing must still wake its owner.
+	if t := strings.TrimSpace(ev.Tail); t != "" && strutil.IsNoReply(t) {
+		if ev.owner != nil {
+			ev.owner.injectNoticeNoWake(ev.notice)
+		}
+		return
+	}
 	// Default: mail the agent.
 	note := mailText(ev)
 	if ev.OwnerID == "" || !host.WakeOwner(ev.OwnerID, note) {

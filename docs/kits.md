@@ -24,7 +24,7 @@ A directory holding only `shell3.sh` and `.env` is a complete, runnable config.
 | **note** | a remark attached to a tool's result — advice, never a refusal |
 | **mcp** | an external tool server |
 | **memory** | a per-agent `memory.md` |
-| **cron** | a schedule bound to an (agent, prompt) pair |
+| **cron** | a schedule bound to an (agent, prompt) pair — or, for mechanical work, a schedule bound directly to a tool |
 
 ## Grammar
 
@@ -74,6 +74,7 @@ EOF
 # description: finds UK/IE shops that need SEO help
 # model: main
 # workdir: ~/leads
+# context: [memory.md]
 # use: [bash, web]
 #---
 leads_prompt() { cat <<'EOF'
@@ -118,6 +119,23 @@ EOF
 #---
 web_search() { searx_query "$q"; }
 ```
+
+## Memory — `context:`
+
+`context: [memory.md]` gives an agent a standing brain: the listed files are
+re-read into its system prompt **at the start of every turn**, resolved
+against the agent's own `workdir:` when it declares one. The agent maintains
+them with `edit_file`, so what it learned on one tick is there on the next.
+
+Mind the size. Re-read every turn means a context file's cost is paid many
+times per run, and the agent that writes it cannot see what it costs — an
+append-only brain file is a bill that grows on its own. Over **64 KB** the
+middle is elided from the prompt (head and tail kept, with a marker naming
+the file); over **32 KB** `shell3 health` says so.
+
+Keep the durable conclusions in the context file and put per-run logs in a
+sibling file that is *not* listed, which the agent can `rg` when it needs the
+detail.
 
 ## Capabilities
 
@@ -172,7 +190,8 @@ One path: run agent K with prompt P. Three dispatchers:
 |---|---|---|
 | Telegram | main | your message |
 | `task` | any employee | the main agent's ask |
-| cron | a bound employee | the standing task |
+| cron (`agent:`) | a bound employee | the standing task |
+| cron (`tool:`) | — no agent, no model turn | a declared tool's shell function, called directly |
 | `shell3 ask --kit <file>` | any kit file | argv or stdin |
 
 Delegation is one level. An employee that needs help runs `shell3 ask` from
@@ -194,6 +213,40 @@ agent: leads
 ---
 Drain one niche from the queue. Report only what changed.
 ```
+
+Frontmatter takes exactly one of `agent:` or `tool:` — a job is either a
+prompt or a tool call, never both, never neither. `tool:` names a declared
+tool and skips the agent entirely: no dispatch, no subagent, no model turn at
+all — just the tool's shell function, called directly on schedule. This is
+the valve for mechanical, idempotent work (a sync, a rotation) where a
+prompt job's whole cost is the turn spent judging its own output:
+
+```
+cron/sync.md
+---
+schedule: "@every 30m"
+tool: sync-notion-recent
+---
+```
+
+A tool job takes no body (there is no prompt) and no arguments (the tool
+runs with none, so a tool declaring a *required* param can never be used
+this way — `shell3 health` catches it). It honours `workdir:` like a prompt
+job does. With no model turn around to relay its result, it posts for
+itself: silent on an empty result or the `NO_REPLY` sentinel (the point of
+scheduling an idempotent sync often), `⏰ <job>: <result>` otherwise, and
+`⚠️ <job> failed: <error>` on error — capped at 120s, the same limit a
+foreground `bash` call gets. Resolution is whole-kit: `tool:` names no
+agent, so the lookup searches every agent's declared tools plus every shared
+group, not just one agent's capability list — the operator scheduling a
+tool they declared themselves is the trust boundary, not `use:` scoping.
+The duplicate-name check at `tool:` declaration time is per-scope only (two
+agents may each legally declare a tool called the same thing), so this
+whole-kit lookup resolves first-match-wins (agents in declaration order,
+then shared groups) when a name collides across scopes — `shell3 health`
+is what actually catches this: it counts every scope that declares the
+name a cron job requests and fails, naming all of them, rather than let
+the job silently run whichever function happened to parse first.
 
 ## The gate
 

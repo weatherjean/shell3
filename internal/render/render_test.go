@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/chat"
-	"github.com/weatherjean/shell3/internal/config"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
 	"github.com/weatherjean/shell3/internal/render"
@@ -346,31 +345,6 @@ func TestJobDetail(t *testing.T) {
 	}
 }
 
-func TestCron(t *testing.T) {
-	last := time.Date(2026, 7, 28, 9, 0, 0, 0, time.UTC)
-	jobs := []config.CronJob{
-		{
-			Name: "digest", Schedule: "0 8 * * *", Agent: "explorer",
-			Prompt: "summarise yesterday's commits", WorkDir: "/tmp/repo", Direct: true,
-		},
-		{Name: "backup", Schedule: "@daily", Agent: "ops", Prompt: "run the backup"},
-	}
-	out := render.Cron(jobs, map[string]time.Time{"digest": last})
-	for _, want := range []string{
-		"digest", "0 8 * * *", "explorer", "/tmp/repo",
-		"summarise yesterday's commits", "backup", "@daily", "2026-07-28",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("Cron missing %q\n---\n%s", want, out)
-		}
-	}
-	if !strings.Contains(strings.ToLower(out), "direct") {
-		t.Errorf("Cron missing the delivery mode:\n%s", out)
-	}
-}
-
-func TestCronEmpty(t *testing.T) {
-	if out := render.Cron(nil, nil); !strings.Contains(strings.ToLower(out), "no cron jobs") {
-		t.Errorf("expected an empty-state line:\n%s", out)
-	}
-}
+// Cron/CronBrief rendering (from []cron.JobStatus) is covered by
+// internal/render/cron_test.go, alongside the internal/cron package it
+// depends on (unix-only).

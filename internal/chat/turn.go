@@ -70,6 +70,10 @@ func logStreamError(cfg TurnConfig, msgs []llm.Message, streamErr error) {
 // so any read of sess.messages in beforeDone must complete before it fires, or
 // it races a concurrent SetMessages.
 func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Message, beforeDone func()) {
+	// Reset before anything else runs: a turn that returns via the early skip
+	// path below (inbox-seeded, no rounds) must not let saveHistory re-add a
+	// previous turn's leftover usage onto the store's cumulative ledger.
+	sess.turnUsage = llm.Usage{}
 	// terminalEmit holds the turn's single end event. It is emitted from the
 	// deferred closure below, after beforeDone, so persistence happens-before
 	// the done/error signal the front-end reacts to.
@@ -116,6 +120,14 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		if usage != (llm.Usage{}) {
 			totalUsage = addUsage(totalUsage, usage)
 			emitUsage(sess, totalUsage)
+			// totalUsage's PromptTokens is deliberately "latest round wins" (see
+			// addUsage's doc comment) — right for the context-fullness gauge, wrong
+			// for cost: a tool-heavy turn's later rounds re-send and pay for the
+			// whole growing prompt again, so the ledger sums every round's prompt
+			// count raw rather than reusing totalUsage's merged value. Understating
+			// this is exactly the shape of the incident that motivated this task.
+			sess.turnUsage.PromptTokens += usage.PromptTokens
+			sess.turnUsage.CompletionTokens += usage.CompletionTokens
 		}
 		if usage.PromptTokens > 0 {
 			sess.lastPromptTokens = usage.PromptTokens
@@ -578,6 +590,16 @@ func saveHistory(st *runs.Store, lg applog.Logger, sess *Session, sessionID stri
 	if sess.lastPromptTokens > 0 {
 		if err := st.SetLastPromptTokens(sessionID, sess.lastPromptTokens); err != nil {
 			lg.Warn("persist prompt tokens failed", "session_id", sessionID, "error", err)
+		}
+	}
+	// Accumulate this turn's total usage onto the store's cumulative ledger
+	// (the gauge above and the ledger here update from the same totalUsage
+	// source, so they can never drift apart). Guarded on non-zero like the
+	// gauge write: a turn that made no LLM call (pure inbox drain, an early
+	// error before any round) has nothing to add.
+	if sess.turnUsage.PromptTokens > 0 || sess.turnUsage.CompletionTokens > 0 {
+		if err := st.AddUsage(sessionID, sess.turnUsage.PromptTokens, sess.turnUsage.CompletionTokens); err != nil {
+			lg.Warn("persist cumulative usage failed", "session_id", sessionID, "error", err)
 		}
 	}
 }

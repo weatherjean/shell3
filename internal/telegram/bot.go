@@ -9,6 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/weatherjean/shell3/internal/applog"
+	"github.com/weatherjean/shell3/internal/cron"
+	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/strutil"
 )
@@ -111,9 +114,18 @@ type Bot struct {
 	// the last /status render. Same contract as runIndex: a tap resolves only
 	// against what the user is looking at, so a job finishing between render
 	// and tap errors instead of acting on its neighbour.
-	jobIndex     map[int]string
-	version      string                      // shell3 version string, reported by /status
-	cronLastRuns func() map[string]time.Time // cron job name -> last run time, for /cron; nil renders "never"
+	jobIndex   map[int]string
+	version    string                  // shell3 version string, reported by /status
+	cronStatus func() []cron.JobStatus // scheduler's per-job run history, for /status's Cron section; nil or empty omits it
+	// cronCost supplies the per-job token rollup for CronBrief's cost column.
+	// nil (no store wired, e.g. tests) simply omits every job's cost segment —
+	// see render.cronCostSuffix's "missing must never look like zero" rule.
+	cronCost func() map[string]runs.JobCost
+
+	// log records host-side faults that never reach the user (a failed
+	// current-session marker write, etc). Defaults to Noop so every existing
+	// caller of NewBot keeps working unchanged; SetLogger opts in.
+	log applog.Logger
 }
 
 // NewBot wires a Bot around ONE long-lived conversation. current persists
@@ -128,6 +140,15 @@ func NewBot(client tgClient, rt *shell3.Runtime, chatID int64, current *ThreadIn
 		chatID:  chatID,
 		current: current,
 		allow:   allow,
+		log:     applog.Noop{},
+	}
+}
+
+// SetLogger wires the app log for host-side faults that never reach the
+// user. Optional: a Bot with none logs nothing (NewBot defaults to Noop).
+func (b *Bot) SetLogger(log applog.Logger) {
+	if log != nil {
+		b.log = log
 	}
 }
 
@@ -195,10 +216,16 @@ func (b *Bot) SetRunsRoot(root string) { b.runsRoot = root }
 // SetVersion sets the shell3 version string /status reports via render.Status.
 func (b *Bot) SetVersion(v string) { b.version = v }
 
-// SetCronLastRuns wires /cron's "last run" column to the scheduler's run
-// history, keyed by job name. nil (or a job missing from the returned map)
-// renders as "never".
-func (b *Bot) SetCronLastRuns(fn func() map[string]time.Time) { b.cronLastRuns = fn }
+// SetCronStatus wires /status's Cron section to the scheduler's live
+// per-job history (JobStatus carries schedule/agent/tool AND run counts, so
+// this is the one seam render.CronBrief needs). nil means no scheduler is
+// wired (no jobs configured), which omits the section entirely.
+func (b *Bot) SetCronStatus(fn func() []cron.JobStatus) { b.cronStatus = fn }
+
+// SetCronCost wires /status's Cron section to the store's per-job token
+// rollup (keyed by cron job name). nil means no store is wired, which omits
+// every job's cost segment rather than showing a bogus zero.
+func (b *Bot) SetCronCost(fn func() map[string]runs.JobCost) { b.cronCost = fn }
 
 // SetQuiet installs the /quiet toggle's store. Nil (or an unset path) means
 // quiet can never turn on — every post rings.
@@ -424,7 +451,7 @@ func (b *Bot) runUserTurn(ctx, turnCtx context.Context, cancel context.CancelFun
 	stopTyping()
 	// The NO_REPLY sentinel belongs to wake turns; a model over-generalizing
 	// it into a user turn must not post the literal string as its answer.
-	if isNoReply(reply) {
+	if strutil.IsNoReply(reply) {
 		reply = ""
 	}
 	// A corrupt reply (raw tool-call markup — the provider failed to parse
@@ -438,6 +465,7 @@ func (b *Bot) runUserTurn(ctx, turnCtx context.Context, cancel context.CancelFun
 	// goroutine can start a turn (a mid-delivery user message queues, a Wake
 	// queues, startNextWork waits).
 	b.postReply(ctx, sess, last.m.ID, reply)
+	b.markCurrent(sess)
 	b.releaseSlot(cancel)
 	b.applyPendingReload(ctx) // self-evolution: agent edited config + called reload this turn (needs a free slot)
 	b.startNextWork(ctx)
@@ -479,7 +507,14 @@ func (b *Bot) mainSession() (*shell3.Session, error) {
 	}
 	b.main = sess
 	b.mu.Unlock()
-	b.current.SetCurrent(sess.ID())
+	if err := b.current.SetCurrent(sess.ID()); err != nil {
+		// A failed write here used to vanish silently: mainSession's own
+		// in-memory marker (b.current.m) still agreed with sess, but a restart
+		// re-reads the marker from the STORE, not from memory — so a lost
+		// write here would resume a stale conversation on the next boot,
+		// with no trace of why. Now it is at least visible.
+		b.log.Warn("current-session marker not persisted", "session", sess.ID(), "err", err)
+	}
 	return sess, nil
 }
 
@@ -493,10 +528,12 @@ func (b *Bot) setAnchor(msgID string) {
 	b.mu.Unlock()
 }
 
-// afterTurn runs the end-of-turn housekeeping for a wake turn: release the
-// slot, then start the next queued work (user mail first, then wakes). The
-// main session never retires — it IS the conversation.
-func (b *Bot) afterTurn(ctx context.Context, cancel context.CancelFunc) {
+// afterTurn runs the end-of-turn housekeeping for a wake turn: re-mark the
+// current-session marker (see markCurrent), release the slot, then start the
+// next queued work (user mail first, then wakes). The main session never
+// retires — it IS the conversation.
+func (b *Bot) afterTurn(ctx context.Context, sess *shell3.Session, cancel context.CancelFunc) {
+	b.markCurrent(sess)
 	b.releaseSlot(cancel)
 	b.startNextWork(ctx)
 }
@@ -571,6 +608,35 @@ func (b *Bot) releaseSlot(cancel context.CancelFunc) {
 	cancel()
 }
 
+// markCurrent re-persists the current-session marker for sess. Called at the
+// end of every turn, just before releaseSlot — covers the marker/session
+// divergence host-managed compaction causes: internal/chat's compactInto
+// rolls the live session onto a NEW runs-store row mid-conversation whenever
+// auto-compaction fires, and nothing on that side of the layering can update
+// telegram's marker directly (internal/chat and internal/shell3 must never
+// import internal/telegram). Re-marking here after every turn is idempotent
+// (SetCurrent is last-write-wins) and catches compaction's id roll — plus
+// resume, plus any future id-rolling change — with one mechanism instead of
+// a bespoke hook per cause.
+//
+// Must run while the turn slot is still held (turnActive true), i.e. BEFORE
+// releaseSlot: /new (commands.go's handleNewCommand) refuses outright while a
+// turn is active, so calling this first guarantees /new cannot clear the
+// marker until after this write has already landed — a write here can never
+// resurrect a marker /new just cleared.
+func (b *Bot) markCurrent(sess *shell3.Session) {
+	if sess == nil {
+		return
+	}
+	id := sess.ID()
+	if id == "" {
+		return
+	}
+	if err := b.current.SetCurrent(id); err != nil {
+		b.log.Warn("current-session marker not persisted", "session", id, "err", err)
+	}
+}
+
 // sessionHasRunningJob reports whether sess has a background job (bash_bg or
 // subagent) still running. Session.Jobs() lists ALL runtime jobs, so filter by
 // the parent registry name (JobInfo.ParentID == Session.Name()).
@@ -636,7 +702,7 @@ func (b *Bot) dispatchWake(ctx context.Context, id string) {
 	b.mu.Unlock()
 	go func() {
 		b.runWakeTurn(ctx, turnCtx, sess)
-		b.afterTurn(ctx, cancel)
+		b.afterTurn(ctx, sess, cancel)
 	}()
 }
 
@@ -646,13 +712,14 @@ func (b *Bot) runPostedQueuedTurn(ctx, turnCtx context.Context, cancel context.C
 	stopTyping := b.keepTyping(ctx)
 	reply, _ := b.drainTurnProgress(ctx, sess.RunQueued(turnCtx))
 	stopTyping()
-	if isNoReply(reply) {
+	if strutil.IsNoReply(reply) {
 		reply = ""
 	}
 	if containsToolMarkup(reply) {
 		reply = malformedReplyNotice
 	}
 	b.postReply(ctx, sess, anchor, reply)
+	b.markCurrent(sess)
 	b.releaseSlot(cancel)
 	b.applyPendingReload(ctx)
 	b.startNextWork(ctx)
@@ -685,7 +752,7 @@ func (b *Bot) startNextWake(ctx context.Context) {
 	b.mu.Unlock()
 	go func() {
 		b.runWakeTurn(ctx, turnCtx, sess)
-		b.afterTurn(ctx, cancel)
+		b.afterTurn(ctx, sess, cancel)
 	}()
 }
 
@@ -697,26 +764,6 @@ func (b *Bot) takeSlotLocked(ctx context.Context) (context.Context, context.Canc
 	b.turnActive = true
 	b.turnQuiet = false
 	return turnCtx, cancel
-}
-
-// noReplySentinel is what the model replies on a wake turn to stay silent.
-// Matched leniently (case-insensitive, surrounding punctuation stripped) —
-// a model that appends a period must not accidentally post "NO_REPLY.".
-const noReplySentinel = "NO_REPLY"
-
-// isNoReply reports whether reply is the silence sentinel (or empty).
-// Matching is deliberately loose beyond case/punctuation: a reasoning-split
-// provider can swallow the reply's first tokens into reasoning_content
-// (observed live: the model said NO_REPLY, the host received "_REPLY", and
-// the mangled sentinel posted as mail), so any tail fragment of the sentinel
-// of 4+ characters counts — no real wake reply is ever just "REPLY".
-func isNoReply(reply string) bool {
-	reply = strings.Trim(strings.TrimSpace(reply), ".!`\"'* \n")
-	if reply == "" {
-		return true
-	}
-	up := strings.ToUpper(reply)
-	return up == noReplySentinel || (len(up) >= 4 && strings.HasSuffix(noReplySentinel, up))
 }
 
 // containsToolMarkup reports whether text carries raw tool-call template
@@ -748,7 +795,7 @@ func (b *Bot) runWakeTurn(ctx, turnCtx context.Context, sess *shell3.Session) {
 	// hiccuped — the turn error is in the transcript (/runs), and posting it
 	// would make every flaky tick ring the chat. Errors ride along only when
 	// the agent was going to speak anyway.
-	if isNoReply(reply) {
+	if strutil.IsNoReply(reply) {
 		return
 	}
 	// Corrupt output (raw tool-call markup) never posts as an update — the

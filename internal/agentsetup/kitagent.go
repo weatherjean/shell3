@@ -52,6 +52,23 @@ func (p *Parts) LoadKit(path string) error {
 // Kit returns the loaded kit, or nil when none was loaded.
 func (p *Parts) Kit() *kit.Kit { return p.kit }
 
+// KitPath returns the path the loaded kit was read from ("" when no kit is
+// loaded) — a cron tool job's ToolRunner needs it to source the kit before
+// running a tool's shell function.
+func (p *Parts) KitPath() string { return p.kitPath }
+
+// KitToolByName finds a declared tool anywhere in the loaded kit, regardless
+// of which agent's scope declares it. A cron tool job names no agent — there
+// is no per-agent Resolved capability set to search — so this searches the
+// whole kit, the operator's own declaration being the trust boundary. false
+// when no kit is loaded.
+func (p *Parts) KitToolByName(name string) (kit.Tool, bool) {
+	if p.kit == nil {
+		return kit.Tool{}, false
+	}
+	return p.kit.ToolByName(name)
+}
+
 // KitAgent resolves one agent declared in the loaded kit into its full
 // capability set. The first declared agent is the main agent — it gets every
 // built-in; everyone else gets exactly what they declare.

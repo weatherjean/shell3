@@ -109,6 +109,12 @@ type TurnConfig struct {
 	// sessions (notably the compaction rollover, which starts a session deep in
 	// the turn loop). '' if unknown.
 	ConfigDir string
+	// Agent, ParentID and CronJob mirror Config's fields of the same name,
+	// threaded into the compaction rollover so a rolled session keeps its
+	// cron attribution (see Config.CronJob).
+	Agent    string
+	ParentID string
+	CronJob  string
 	// Handlers maps tool name to built-in implementation. Built once via
 	// NewHandlers and shared across turns.
 	Handlers map[string]ToolHandler

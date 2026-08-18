@@ -36,6 +36,90 @@ func TestPostCompletion_BellPrefix(t *testing.T) {
 	})
 }
 
+// The next three tests are the end-to-end regression coverage for the
+// double-marker defect (cron.Scheduler.fireTool's post reaching
+// PostCompletion): a struct-shape assertion on the CompletionPost alone
+// missed it twice in review, because the bug lives in how PostCompletion's
+// own branch order (CronJob != "" checked before "is this already a
+// failure") interacts with what fireTool puts in each field. Each test feeds
+// PostCompletion exactly the shape fireTool builds and asserts the FINAL
+// rendered string — one marker, one job name, no more.
+
+// TestPostCompletion_ToolJobSuccessSingleMarker: a tool job's SUCCESS post
+// (CronJob set, Text bare — see fireTool's success branch) must render with
+// exactly one ⏰ marker and the job name exactly once.
+func TestPostCompletion_ToolJobSuccessSingleMarker(t *testing.T) {
+	fc := newFakeClient()
+	b := newBot(t, fc, storeRuntime(t, "unused"))
+
+	b.PostCompletion(shell3.CompletionPost{CronJob: "sync", Text: "3 rows updated"})
+
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "3 rows updated")
+	})
+	got := strings.Join(fc.sentTexts(), "\n")
+	if want := "⏰ sync: 3 rows updated"; !strings.Contains(got, want) {
+		t.Fatalf("rendered = %q, want exactly %q", got, want)
+	}
+	if n := strings.Count(got, "⏰"); n != 1 {
+		t.Fatalf("rendered = %q, want exactly one ⏰ marker, got %d", got, n)
+	}
+	if n := strings.Count(got, "sync"); n != 1 {
+		t.Fatalf("rendered = %q, want the job name exactly once, got %d", got, n)
+	}
+}
+
+// TestPostCompletion_ToolJobFailureSingleMarker: a tool job's FAILURE post
+// (CronJob left EMPTY, Text self-describing — see fireTool's failure branch)
+// must render with exactly one ⚠️ marker and the job name exactly once — NOT
+// the "⏰ sync: ⚠️ sync failed: …" double-marker a set CronJob would produce
+// (the defect this test exists to catch: it shipped once, was "fixed" by
+// setting CronJob unconditionally, and that fix reintroduced it here).
+func TestPostCompletion_ToolJobFailureSingleMarker(t *testing.T) {
+	fc := newFakeClient()
+	b := newBot(t, fc, storeRuntime(t, "unused"))
+
+	b.PostCompletion(shell3.CompletionPost{Text: "⚠️ sync failed: notion 502"})
+
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "notion 502")
+	})
+	got := strings.Join(fc.sentTexts(), "\n")
+	if want := "⚠️ sync failed: notion 502"; !strings.Contains(got, want) {
+		t.Fatalf("rendered = %q, want exactly %q", got, want)
+	}
+	if n := strings.Count(got, "⏰"); n != 0 {
+		t.Fatalf("rendered = %q, want NO ⏰ marker on a failure post, got %d", got, n)
+	}
+	if n := strings.Count(got, "⚠️"); n != 1 {
+		t.Fatalf("rendered = %q, want exactly one ⚠️ marker, got %d", got, n)
+	}
+	if n := strings.Count(got, "sync"); n != 1 {
+		t.Fatalf("rendered = %q, want the job name exactly once, got %d", got, n)
+	}
+}
+
+// TestPostCompletion_AgentCronFailureUnchanged proves the tool-job fix left
+// agent-job cron failure rendering untouched. That path (CronJob set AND
+// Text already self-describing, built by shell3.floorText for a real cron
+// dispatch) is pre-existing, has its own coverage, and is explicitly out of
+// scope for this task — its double-marker shape ("⏰ job: ⚠️ job failed: …")
+// is intentional here, unlike the tool-job regression above.
+func TestPostCompletion_AgentCronFailureUnchanged(t *testing.T) {
+	fc := newFakeClient()
+	b := newBot(t, fc, storeRuntime(t, "unused"))
+
+	b.PostCompletion(shell3.CompletionPost{CronJob: "weekly", Text: "⚠️ weekly failed: exit 2"})
+
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "exit 2")
+	})
+	got := strings.Join(fc.sentTexts(), "\n")
+	if want := "⏰ weekly: ⚠️ weekly failed: exit 2"; !strings.Contains(got, want) {
+		t.Fatalf("rendered = %q, want the pre-existing (untouched) double-marker shape %q", got, want)
+	}
+}
+
 // TestPostCompletion_PlainPostAdvancesAnchor pins the background post shape:
 // 🔔 posts are plain messages (never Telegram replies — a quote header on
 // every completion is noise in the one conversation) and still advance the

@@ -27,7 +27,7 @@ func TestCompactInto_NewSessionKeepsModelMeta(t *testing.T) {
 	}
 
 	ok := compactInto(CompactSummary{Summary: "sum"}, st, sess,
-		sess.messages[1:], applog.Noop{}, t.TempDir(), "/cfg/shell3.lua", "test-model")
+		sess.messages[1:], applog.Noop{}, t.TempDir(), "/cfg/shell3.lua", "test-model", "", "", "")
 	if !ok {
 		t.Fatalf("compactInto failed")
 	}

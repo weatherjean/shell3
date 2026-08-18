@@ -85,6 +85,7 @@ func runHealth(cmd *cobra.Command, path string) error {
 		if perr != nil {
 			return fmt.Errorf("health: %w", perr)
 		}
+		fatCtx := 0
 		for i, ka := range k.Agents {
 			role := "employee"
 			if i == 0 {
@@ -101,10 +102,80 @@ func runHealth(cmd *cobra.Command, path string) error {
 			nSkills := len(config.ScanSkills(skillDir))
 			fmt.Fprintf(out, "agent: %s (%s, model %s, %d tools, %d skills, %d tests)\n",
 				ka.Name, role, ka.Model, len(r.Tools), nSkills, len(ka.Tests))
+			// The kit load path never validated `context:` at all, which is
+			// how a 90 KB brain file ran for weeks unnoticed. Resolve against
+			// the agent's OWN workdir, exactly as kitagent.go does.
+			//
+			// Only an OVER-CAP file fails: that one is losing content from the
+			// prompt, which is a defect. A merely large file is reported and
+			// tolerated — it is working, just expensive, and health going red
+			// on a legitimately big brain file would train the operator to
+			// ignore this whole check.
+			for _, w := range config.ContextSizeWarnings(agentContextBase(path, ka.Workdir), ka.Context) {
+				if w.OverCap {
+					fatCtx++
+				}
+				fmt.Fprintf(out, "agent %s: %s\n", ka.Name, w)
+			}
+		}
+		// A cron tool: job names no agent, so it is validated against the
+		// whole kit here rather than any agent's Resolved set — an unknown
+		// tool, or one that fireTool could never satisfy (a required param
+		// it never supplies), must fail now, not at 3am on the first tick.
+		badTools := 0
+		for _, j := range lc.Cron() {
+			if j.Tool == "" {
+				continue
+			}
+			matches := k.ToolMatches(j.Tool)
+			if len(matches) == 0 {
+				badTools++
+				fmt.Fprintf(out, "cron: cron/%s.md names tool %q, which the kit does not declare\n", j.Name, j.Tool)
+				continue
+			}
+			if len(matches) > 1 {
+				// Two scopes may each legally declare the same tool name (the
+				// duplicate check is per-scope, not kit-wide — see
+				// Kit.ToolMatches). A cron tool job names no agent to
+				// disambiguate, so ToolByName's first-match-wins pick would run
+				// whichever function happened to parse first, silently, at 3am.
+				badTools++
+				scopes := make([]string, len(matches))
+				for i, m := range matches {
+					scopes[i] = m.Scope
+				}
+				fmt.Fprintf(out, "cron: cron/%s.md names tool %q, which is declared in more than one scope (%s) — rename one so resolution is unambiguous\n", j.Name, j.Tool, strings.Join(scopes, ", "))
+				continue
+			}
+			t := matches[0].Tool
+			for pname, p := range t.Params {
+				if p.Required {
+					badTools++
+					fmt.Fprintf(out, "cron: cron/%s.md runs tool %q, which requires argument %q — a cron tool job passes no arguments\n", j.Name, j.Tool, pname)
+				}
+			}
+		}
+		if badTools > 0 {
+			return fmt.Errorf("health: %d cron tool job problem(s)", badTools)
+		}
+		if fatCtx > 0 {
+			return fmt.Errorf("health: %d oversized context file(s) — every turn re-reads them into the prompt", fatCtx)
 		}
 	} else {
 		fmt.Fprintf(out, "agent: %s (model %s, %d skills, %d subagents)\n",
 			a.Name, a.ModelName, len(a.Skills), len(a.Subagents))
+		// Large-but-intact context files are reported here rather than as load
+		// warnings, which health hardens into failures: same split as the kit
+		// branch above, so both config shapes behave identically. An over-cap
+		// file DID come through as a load warning and already failed above.
+		for _, w := range config.ContextSizeWarnings(path, a.Context) {
+			if !w.OverCap {
+				fmt.Fprintf(out, "agent %s: %s\n", a.Name, w)
+			}
+		}
+		// A tool: cron job under a markdown config (no kit at all) is
+		// already refused by config.Load itself (its cron cross-reference
+		// check), so there is nothing left to validate here.
 	}
 	// Dry-run every discovered hook with a probe payload. A script failure
 	// (nonzero exit, bad verdict JSON, timeout) surfaces as a fail-closed
@@ -170,4 +241,24 @@ func runHealth(cmd *cobra.Command, path string) error {
 
 	fmt.Fprintln(out, "OK")
 	return nil
+}
+
+// agentContextBase resolves the directory a kit agent's `context:` entries are
+// read against — its own workdir when it declares one, the config dir
+// otherwise. Mirrors agentsetup/kitagent.go's ctxBase so health inspects the
+// same files the running agent loads; a divergence here would make health
+// pass on a file the agent never reads.
+func agentContextBase(configDir, workdir string) string {
+	if workdir == "" {
+		return configDir
+	}
+	if strings.HasPrefix(workdir, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, workdir[2:])
+		}
+	}
+	if filepath.IsAbs(workdir) {
+		return workdir
+	}
+	return filepath.Join(configDir, workdir)
 }

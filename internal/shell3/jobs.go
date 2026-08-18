@@ -684,6 +684,7 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 		// subagent transcript on restart (it shares the parent's workdir+config
 		// and sorts newer).
 		ParentID: parent.sess.ID(),
+		CronJob:  o.cronJob,
 	})
 	if err != nil {
 		m.mu.Lock()

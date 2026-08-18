@@ -34,14 +34,18 @@ func NewThreadIndex(store func() *runs.Store, surface string) *ThreadIndex {
 	return &ThreadIndex{store: store, surface: surface, m: make(map[string]string)}
 }
 
-// Record maps msgID to sessionID.
-func (ti *ThreadIndex) Record(msgID, sessionID string) {
+// Record maps msgID to sessionID. The in-memory map always succeeds; a
+// failed store write is returned so a caller that cares (SetCurrent) can
+// surface it, but most callers can ignore it — losing one index entry loses
+// nothing but a reply-thread lookup, never the conversation.
+func (ti *ThreadIndex) Record(msgID, sessionID string) error {
 	ti.mu.Lock()
 	ti.m[msgID] = sessionID
 	ti.mu.Unlock()
 	if st := ti.store(); st != nil {
-		_ = st.ThreadRecord(ti.surface, msgID, sessionID)
+		return st.ThreadRecord(ti.surface, msgID, sessionID)
 	}
+	return nil
 }
 
 // currentSessionKey is the reserved msg_id under which the surface's ONE
@@ -50,7 +54,10 @@ func (ti *ThreadIndex) Record(msgID, sessionID string) {
 const currentSessionKey = "current-session"
 
 // SetCurrent records id as the surface's current conversation session.
-func (ti *ThreadIndex) SetCurrent(id string) { ti.Record(currentSessionKey, id) }
+// A failed write is returned, not swallowed: a stale marker silently forks
+// the conversation on the next restart — cron reports land in a session the
+// user never sees.
+func (ti *ThreadIndex) SetCurrent(id string) error { return ti.Record(currentSessionKey, id) }
 
 // Current returns the persisted current-conversation session id, if any —
 // an empty recorded id (a /new that cleared the marker) reads as absent.

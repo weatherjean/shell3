@@ -37,9 +37,22 @@ type Session struct {
 	// can interleave reminders into History() as system-role entries. Live-only
 	// (in-memory); not persisted. Guarded by msgMu.
 	reminderLog      []ReminderRecord
-	lastPromptTokens int         // accurate token count from most recent streamOnce response
-	id               string      // runs session id; "" if no store configured
-	store            *runs.Store // optional; nil → no sidecar persistence
+	lastPromptTokens int // accurate token count from most recent streamOnce response
+
+	// warnedFixedOverhead throttles warnFixedOverhead to one line per session:
+	// the condition it reports is true on EVERY turn once it starts, so an
+	// unthrottled warning would bury the log it is trying to make readable.
+	warnedFixedOverhead bool
+	// turnUsage is the sum of every LLM round's usage within the turn CURRENTLY
+	// running (or most recently finished) — distinct from lastPromptTokens,
+	// which holds only the LAST round's prompt-token count (a context-fullness
+	// gauge, not a sum). RunTurn resets it to zero before the round loop so a
+	// turn that runs zero rounds (the early skip path) never re-adds a stale
+	// value left over from a previous turn; saveHistory reads it once at turn
+	// end to accumulate onto the store's cumulative ledger (Store.AddUsage).
+	turnUsage llm.Usage
+	id        string      // runs session id; "" if no store configured
+	store     *runs.Store // optional; nil → no sidecar persistence
 	// persistedLen is the count of sess.messages already written to the runs
 	// store under the current sess.id. Updated by saveHistory after each flush and by
 	// compactInto after the session roll. Touched only on the turn goroutine

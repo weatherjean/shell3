@@ -75,6 +75,16 @@ func load(dir string) (*LoadedConfig, error) {
 	if err := validateContextEntries(dir, c.agent.Context, warn); err != nil {
 		return nil, err
 	}
+	// Only an OVER-CAP file becomes a load warning. Warnings are hardened into
+	// failures by `shell3 health`, so warning on merely-large would fail health
+	// on a file that is working fine — the same red-on-healthy outcome the kit
+	// branch deliberately avoids. Elision is content loss and earns the
+	// failure; size alone is advice, printed by health without failing.
+	for _, w := range ContextSizeWarnings(dir, c.agent.Context) {
+		if w.OverCap {
+			warn("agent.md: " + w.String())
+		}
+	}
 
 	// notifier.md — the old triage persona, removed with the mail redesign
 	// (completions route deterministically; see internal/shell3/completion.go).
@@ -130,6 +140,13 @@ func load(dir string) (*LoadedConfig, error) {
 		}
 	}
 	for _, job := range c.cron {
+		if job.Tool != "" {
+			// A tool: job resolves against a kit's declared tools (see
+			// agentsetup.Parts.KitToolByName) — a markdown-only config has
+			// no kit at all, so the job can never run. Caught here rather
+			// than left to fail silently on the first tick.
+			return nil, fmt.Errorf("cron/%s.md: names tool %q, but this config has no %s (tool: cron jobs need a kit)", job.Name, job.Tool, KitFileName)
+		}
 		if _, ok := c.SubagentByName(job.Agent); !ok {
 			return nil, fmt.Errorf("cron/%s.md: unknown agent %q (must be a subagent from agents/ or a project manager)", job.Name, job.Agent)
 		}
