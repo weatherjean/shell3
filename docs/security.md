@@ -62,9 +62,10 @@ generation; see [cookbook/voice-images.md](cookbook/voice-images.md).)
 
 ## The Telegram boundary
 
-shell3 has **no listening socket**: it long-polls Telegram outbound, so there
-is no port to expose, no login to defend, and no tunnel to run. The whole
-access model is two secrets:
+shell3's chat side has **no listening socket**: it long-polls Telegram
+outbound, so there is no login to defend and no tunnel to run. The one
+listener is the read-only web dash on `127.0.0.1` (below). The chat access
+model is two secrets:
 
 - **The bot token** *is* the bot. Anyone holding it can read the chat's
   pending updates and send as your bot. It lives in `.env` like every other
@@ -88,12 +89,35 @@ which the scaffold ships armed but is yours to tune.
 **What travels through Telegram.** Every message, reply, transcript,
 dash-view document, generated image and voice note goes through Telegram's
 servers; a bot chat is not end-to-end encrypted, and cannot be. That includes
-anything the agent quotes from your machine: file contents, command output, a
-`/status` dump of the system prompt, a `/runs` replay of a stored session.
-Treat the chat as a third-party log of everything the agent says.
+anything the agent quotes from your machine: file contents, command output,
+a stored run's transcript. Treat the chat as a third-party log of everything
+the agent says.
 
 There is no approval flow to fall back on: whoever holds that chat **is**
 the operator — the `chat_id` allowlist is the whole access model.
+
+## The web dash
+
+The dash (`dash_port`, default 7333) binds `127.0.0.1` only and is strictly
+read-only: status, the live conversation, jobs and their output logs, cron
+schedules and detail, stored run replays, and a browser for the config
+directory. Every request needs a `?t=` token minted by `/dash` — 32 random
+bytes, ~1h lifetime, memory-only (a restart invalidates all of them),
+compared in constant time; anything else is a bare 403. Everything model- or
+tool-derived is HTML-escaped before it reaches a page. Exposing the dash
+beyond loopback is a tunnel's job (`/dash help exposing` sets one up —
+tailscale, cloudflared, or ngrok); the listener itself never binds wider, and
+the token check stays in front either way.
+
+A token in a URL is a bearer secret, and it now grants more than transcripts:
+a live link lets its holder read your whole configuration tree through the
+files browser — the kit (`shell3.sh`), skills, cron prompts, and any wrapper
+scripts under `lib/`, plus the tail of every background job's output. The one
+thing it can never surface is a credential: `.env`, its dotenv siblings
+(`.env.*`), and any `ai-do-not-read*` file are listed but reported redacted,
+and their bytes are never read off disk to build the page. Binary and
+oversized files are flagged rather than dumped. Treat a `/dash` link the way
+you would treat read access to `~/.shell3` itself, and let it expire.
 
 ## The gate is a speed bump, not a boundary
 

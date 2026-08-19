@@ -190,6 +190,26 @@ type bgJob struct {
 	// and task_status point at it.
 	logPath string
 
+	// suppress (guarded by jobManager.mu) marks a job killed by superstop:
+	// its completion event is dropped by dispatchCompletion instead of
+	// routed — the superstop summary is the single record, not one ⚠️ post
+	// and one owner mail per killed job.
+	suppress bool
+
+	// shutdownCancel (guarded by jobManager.mu) marks a job cancelAll killed
+	// on runtime teardown: its completion is a "context canceled" failure the
+	// shutdown itself manufactured, so dispatchCompletion drops its outbox
+	// event row — the job's RUNNING marker survives instead, and the next
+	// boot's recovery reports it honestly as "was running when shell3
+	// stopped" (see completion.go's persist/recover pair).
+	shutdownCancel bool
+
+	// markerID is the job's outbox "running" row (0 = none): written at
+	// start, deleted when the job finishes — unless shutdownCancel is set, in
+	// which case it is left for boot-time recovery to report. Guarded by
+	// jobManager.mu.
+	markerID int64
+
 	// set on completion; read under jobManager.mu
 	finished bool
 	exit     *int      // command jobs: exit code (nil while running)
@@ -344,10 +364,20 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 	m.jobs[id] = j
 	m.mu.Unlock()
 
+	// Marker before Start: the finish goroutine (which clears it) cannot run
+	// before the process exists, so the write can never race the delete.
+	var ownerID string
+	if parent != nil {
+		ownerID = parent.ID()
+	}
+	m.putRunningMarker(j, "command", ownerID)
+
 	if err := cmd.Start(); err != nil {
 		m.mu.Lock()
 		delete(m.jobs, id)
+		mid := j.markerID
 		m.mu.Unlock()
+		m.deleteOutboxRow(mid)
 		cancel()
 		// finishCommand never runs for this job — release the log fd here.
 		if out.file != nil {
@@ -453,6 +483,7 @@ func (m *jobManager) finishCommand(j *bgJob, exit int) {
 	// order: session → jobs, never the reverse).
 	m.mu.Unlock()
 	deliver()
+	m.clearRunningMarker(j)
 	ex := exit
 	m.mu.Lock()
 	m.markDoneLocked(j, func(j *bgJob) { j.exit = &ex })
@@ -561,6 +592,10 @@ func (m *jobManager) cancelAll() {
 	jobs := make([]*bgJob, 0, len(m.jobs))
 	for _, j := range m.jobs {
 		if !j.finished {
+			// Mark before cancelling: the finish site must be able to tell a
+			// shutdown-manufactured "context canceled" failure from a real
+			// completion that raced SIGTERM (see bgJob.shutdownCancel).
+			j.shutdownCancel = true
 			jobs = append(jobs, j)
 		}
 	}
@@ -571,6 +606,64 @@ func (m *jobManager) cancelAll() {
 			j.cancel()
 		}
 	}
+}
+
+// killAllForStop kills every live job — commands, subagents, in-flight cron
+// dispatches alike (the job runtime is one pool) — with completion routing
+// suppressed, and reports what it killed. Follow-ups are poisoned like a
+// task_cancel cascade; unlike cancelAll it does NOT mark the manager closing,
+// so new work can start immediately after.
+func (m *jobManager) killAllForStop() []KilledJob {
+	m.mu.Lock()
+	var killed []KilledJob
+	var cancels []context.CancelFunc
+	for _, j := range m.jobs {
+		// A subagent whose main turn already ended but whose child session is
+		// still open ("lingering") is NOT `finished`-then-idle: its child keeps
+		// running follow-up turns for every bash_bg job it owns, and single-job
+		// cancel poisons exactly this case. Skipping it here would let a
+		// follow-up turn fire (and its completion route normally) minutes after
+		// the user was told everything stopped. So poison every live job AND
+		// every lingering subagent — mirroring runningJobIDs' own predicate.
+		lingering := j.kind == JobSubagent && j.child != nil && !j.childClosed
+		if j.finished && !lingering {
+			continue
+		}
+		// suppress drops any completion this job still emits (including a
+		// lingerer's in-flight follow-up event, which carries this id);
+		// noFollowUps stops a new driver from starting.
+		j.suppress = true
+		j.noFollowUps = true
+		if j.finished {
+			continue // lingerer: poisoned, but no live context to cancel or report
+		}
+		kind := "command"
+		if j.kind == JobSubagent {
+			kind = "subagent"
+		}
+		var ran time.Duration
+		if !j.startedAt.IsZero() {
+			ran = time.Since(j.startedAt).Round(time.Second)
+		}
+		killed = append(killed, KilledJob{ID: j.id, Title: j.title, Kind: kind, Runtime: ran})
+		if j.cancel != nil {
+			cancels = append(cancels, j.cancel)
+		}
+	}
+	m.mu.Unlock()
+	for _, c := range cancels {
+		c()
+	}
+	slices.SortFunc(killed, func(a, b KilledJob) int { return strings.Compare(a.ID, b.ID) })
+	return killed
+}
+
+// suppressed reports whether ev's job was killed by superstop (routing drop).
+func (m *jobManager) suppressed(jobID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	j := m.jobs[jobID]
+	return j != nil && j.suppress
 }
 
 // wait blocks until all active job goroutines have finished. Call after
@@ -697,6 +790,10 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 	j.childID = child.sess.ID()
 	j.child = child
 	m.mu.Unlock()
+
+	// Marker before the run goroutine starts, so the finish path (which
+	// clears it) can never race the write.
+	m.putRunningMarker(j, "subagent", parent.ID())
 
 	m.wg.Add(1)
 	go func() {
@@ -951,6 +1048,7 @@ func (m *jobManager) finishSubagent(j *bgJob, summary, errText string) {
 	m.mu.Lock()
 	m.markDoneLocked(j, func(j *bgJob) { j.summary, j.errText = summary, errText })
 	m.mu.Unlock()
+	m.clearRunningMarker(j)
 	j.cancel() // always set before the job is published; release the ctx
 	m.rt.emitJob(JobProgress{
 		JobID: j.id, Parent: j.parentID,

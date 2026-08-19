@@ -146,16 +146,15 @@ func TestMailQueueBatchesRepliesIntoOneTurn(t *testing.T) {
 	}
 }
 
-// /inbox renders the queued state.
-func TestInboxCommand(t *testing.T) {
+// Inbox() renders the queued state (surfaced on the dash index).
+func TestInboxView(t *testing.T) {
 	fc := newFakeClient()
 	rt := storeRuntime(t, "unused")
 	b := newBot(t, fc, rt)
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/status"})
-	waitFor(t, func() bool {
-		return !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "## Inbox")
-	})
+	if got := b.Inbox(); !strings.Contains(got, "inbox empty") {
+		t.Fatalf("idle inbox = %q, want empty", got)
+	}
 
 	b.mu.Lock()
 	b.turnActive = true
@@ -166,11 +165,9 @@ func TestInboxCommand(t *testing.T) {
 		defer b.mu.Unlock()
 		return len(b.mailQueue) == 1
 	})
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/status"})
-	waitFor(t, func() bool {
-		all := strings.Join(fc.sentTexts(), "\n")
-		return strings.Contains(all, "later please") && strings.Contains(all, "from you")
-	})
+	if got := b.Inbox(); !strings.Contains(got, "later please") || !strings.Contains(got, "from you") {
+		t.Fatalf("inbox = %q, want the queued mail listed", got)
+	}
 	b.mu.Lock()
 	b.turnActive = false
 	b.mailQueue = nil

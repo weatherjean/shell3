@@ -113,7 +113,27 @@ command on the same runtime; its full output also tees to
 `runs/<session>/jobs/<id>.log` (1 MiB cap, janitor-swept). **Completion
 delivery is mail** (`internal/shell3/completion.go`): every finished job —
 bash_bg, subagent, follow-up, cron — becomes a `CompletionEvent` and routes
-deterministically, no triage turn, no judge model. Failed: the ⚠️ floor
+deterministically, no triage turn, no judge model. Delivery is
+**restart-durable** (`internal/shell3/outbox.go`, the runs store's `outbox`
+table): dispatch persists the event as an opaque-JSON "event" row before
+routing and deletes it only after the front-end hand-off returns
+(at-least-once — a crash inside the window duplicates the report at the
+next boot, never loses it; do not "fix" the ordering), and every job writes
+a PID-stamped "running" marker row at start, cleared when it finishes.
+`Runtime.RecoverCompletions` — run once at startup by the long-lived
+front-ends (`wireHost`, after `SetCompletionHost`; never `ask`, matching the
+janitors) — redelivers leftover event rows (note-tagged "recovered after a
+shell3 restart") and reports dead-PID running markers as "was still running
+when shell3 stopped; its result was lost" failures; a live-PID marker is a
+concurrent process's job (an `ask` beside the bot) and is skipped, and an
+`ask` killed mid-job deliberately leaves rows the next bot start surfaces —
+a completion is never silently lost, whoever spawned it. Graceful shutdown
+threads the same needle: `cancelAll` marks the jobs it kills
+(`bgJob.shutdownCancel`), and the router's closing branch drops THOSE
+events (their "context canceled" failure is manufactured by the restart —
+the kept running marker is the honest boot-time report) while a real
+completion that raced SIGTERM keeps its event row for redelivery instead of
+being discarded as it used to be. Failed: the ⚠️ floor
 post always reaches the user, and a live owning session is additionally
 mailed (woken) so the agent can react — but an ownerless failure (cron)
 stops at the post, never burning a main-model turn per broken tick.
@@ -189,7 +209,11 @@ field anywhere. Delegation itself is **inferred**: the four task-family tools
 `sub1`/`bg1`) are advertised iff `agents/` is non-empty — a file in `agents/`
 IS the registration, there is no toggle and no allowlist key.
 
-`/jobs` lists running + finished jobs and `/cancel <id>` cancels one; the
+The dash's index lists running + finished jobs; `/superstop` kills them all
+(`Session.KillAllForStop`: snapshot, mark each job `suppress`, cancel — the
+suppressed flag makes `dispatchCompletion` DROP those jobs' events, so the
+one superstop summary replaces N ⚠️ posts and owner mails; a normal
+`KillJob` still routes). The
 job-progress stream is `rt.JobEvents()` / `Session.JobEvents()`. Note `Session.Jobs()` reports the whole job runtime,
 not one session's share — filter by `JobInfo.ParentID` for per-session
 work. The shell is **unrestricted except by the hook**;
@@ -247,7 +271,7 @@ get one reconnect retry, then the error returns as tool-result text (never
 fatal to a turn). The hook sees them like any tool (`name` prefixed,
 `command` null). `shell3 health` connects and fails on any down server, and
 dry-runs every hook script with a probe payload (script error = failure; a
-deliberate block is fine); `/status` lists per-server state.
+deliberate block is fine); the dash index lists per-server state.
 Context is host-managed via two token thresholds: `prune_at` cheaply stubs
 old tool outputs (no LLM call), and `compact_at` triggers tail-preserving
 compaction — summarizing the head while keeping recent turns verbatim. The
@@ -258,12 +282,13 @@ verbatim tail at the floor rather than the configured fraction — the automatic
 tail is a slice of a large window, so a forced compaction sized that way would
 refuse as "nothing to compact" across the whole range where anyone would ask
 for one. It is a runtime seam with no front-end command bound to it: the bot
-compacts automatically and `/status` reports usage.
+compacts automatically and the dash index reports usage.
 
 **Telegram-first.** shell3 is a personal agent you reach in one Telegram chat.
 `shell3 telegram` runs everything (`internal/telegram`): the agent, the bot,
-and cron. There is **no listener** — the process long-polls the Bot API
-outbound, so there is no port, no login, no tunnel. The `telegram:` block in
+and cron. The chat has **no listener** — the process long-polls the Bot API
+outbound, so there is no login and no tunnel; the ONE listener is the
+read-only web dash on `127.0.0.1:<dash_port>` (see the commands section). The `telegram:` block in
 `shell3.yaml` is `token` (an `env:TELEGRAM_TOKEN` reference like every other
 secret), `chat_id` (the single chat the bot answers — updates from anywhere
 else are dropped before a turn starts, filtered in `handleMsg`),
@@ -296,7 +321,8 @@ The turn model is **one conversation**: the bot holds ONE long-lived main
 session that every message — bare or reply — continues. A Telegram reply is a
 context hint (the quoted text is injected as a capped blockquote,
 `withReplyContext`), never a session switch; `/new` is the only way to start
-over (old conversation stays in `/runs` and the history index). The current
+over (old conversation stays in the dash's runs listing and the history
+index). The current
 session id persists in the runs store's `threads` table under the reserved
 key `current-session` (surface-namespaced "telegram"/"serve";
 `ThreadIndex.SetCurrent`/`Current` in `threads.go` — store resolved per call
@@ -316,9 +342,9 @@ messages queue instead — `Interject` only carries text, so an attachment
 arriving mid-turn waits for the next turn rather than injecting a path
 mid-flight. Inbound text
 rides a 400ms debounce (`burstWindow`, `b.debounce` in tests) merging
-Telegram's split-message fragments into one turn. `/inbox` renders the
-queued state — the user's pending messages plus waiting task reports — with zero
-tokens. During a user turn the bot renders tool activity as ONE
+Telegram's split-message fragments into one turn. `Bot.Inbox()` renders the
+queued state — the user's pending messages plus waiting task reports — with
+zero tokens, surfaced as the dash index's Inbox section. During a user turn the bot renders tool activity as ONE
 self-editing **progress bubble** (`progress.go`: posted silently on the
 first ToolCall, edits throttled at 1.5s, last 6 lines shown, one-line
 tool summaries) that is DELETED after a clean turn and kept as a
@@ -340,27 +366,49 @@ children, so falling through to a children-walking default silently deletes
 them and cuts words out of the agent's reply mid-sentence.
 
 **Commands are host-answered** (`commands.go`, no model call, zero tokens):
-`/stop` (cancel the turn; background jobs keep running), `/new` (start a
-fresh conversation; refused mid-turn), `/run <job>`,
-`/status` (the one dashboard — cron jobs, run outcomes and per-job cost are
-in it; there is no separate `/cron` command), `/jobs`, `/job <id>`,
-`/cancel <id>`, `/runs [page|id]`
-(paginated inline listing, 8 per page, each entry a tappable `/run_N` that
-replays that run — taps resolve only against the map the last render stored,
-so a stale index errors instead of opening the wrong run),
-`/reload`, `/quiet on|off` (persisted to
+`/dash` (the dashboard URL with a fresh token; `/dash <text>` instead becomes
+a normal agent turn pointed at the dash-exposing skill), `/stop` (cancel the
+turn; background jobs keep running), `/superstop` (cancel the turn AND
+`KillAllForStop` every job — one ⚠️ summary to the user, the same text
+queued into the conversation via `NotifyTextNoWake`, per-job completion
+posts suppressed; cron schedule stays armed), `/new` (start a fresh
+conversation; refused mid-turn), `/run <job>`, `/btw <question>`, `/reload`,
+`/quiet on|off` (persisted to
 `~/.shell3/quiet_mode.json` by `QuietStore`: ⏰ cron and 🔔 completion posts
 send with Telegram `disable_notification`, arriving without a ping; ✉️
 updates are ALWAYS silent regardless of the toggle (an update is not a page);
 replies to the user's own messages and ⚠️ failures always ring; the flag
 rides a variadic
 `SendOpt{Silent}` on the tgClient send methods, rendered by the console
-transport as a 🔕 tag and by the JSONL transport as `"silent":true`). The dash views are rendered as markdown
-by `internal/render` (`Status`, `Jobs`, `JobDetail`, `Cron`, `RunsPage`,
-`RunReplay`) and delivered by `sendMarkdownDoc`: inline when under
-`mdInlineThreshold`, otherwise as a `.md` document plus a capped text summary
-(the `/runs` listing is always inline — Telegram only linkifies commands in
-message text).
+transport as a 🔕 tag and by the JSONL transport as `"silent":true`).
+The view commands are GONE — `/status`, `/jobs`, `/job`, `/cancel`, `/runs`
+and the `/run_N`/`/job_N`/`/cancel_N` taps answer "unknown command"; their
+content moved to the **web dash** (`internal/dash`): a read-only HTTP server
+on `127.0.0.1:<dash_port>` (top-level wiring key, default 7333, 0 = no
+listener; started by `wireHost` for telegram, serve AND --console, never
+`ask`). Seven GET routes behind a `?t=` token gate, each threading the
+request's own token into the links it renders — `/` (index:
+`render.DashIndexHTML` over live closures + `Bot.Inbox()`, with the live
+session linked to its own replay, each bash_bg job's id linked to its output
+log, each cron row linked to its detail), `/runs`
+(`render.RunsPageHTML`, 20/page), `/runs/<id>` (`render.RunReplayHTML`),
+`/files` + `/file` (the read-only config-dir explorer,
+`render.FilesListHTML`/`FileViewHTML`, rooted at `Sources.ConfigDir`),
+`/joblog` (`render.JobLogHTML`, `?session=&id=`, the tail of a bash_bg job's
+tee'd log), and `/cron` (`render.CronDetailHTML`, `?name=`) — everything
+escaped, non-GET 405, bad token bare 403. The files explorer's security model
+is ported verbatim from the old Telegram Mini App dashboard and must not be
+"simplified": path traversal is clamped by a leading-slash `Clean` AND an
+`EvalSymlinks` + root-prefix check (a symlink cannot point out of the config
+dir), and credential files (`.env`, `.env.*`, `ai-do-not-read*`) are listed
+but reported REDACTED without their contents ever being read from disk; binary
+and oversized (>256 KB) files are flagged, not dumped. Tokens:
+`dash.TokenStore`, 32-byte hex, 1h TTL, several live at once, memory-only,
+constant-time compare. `/dash` composes the reply from
+`dash_url.txt` in the config dir (seeded `http://127.0.0.1:<port>` when
+absent; the dash-exposing skill overwrites it with a tunnel base URL; junk
+content falls back to localhost) + a fresh token (`dashMintURL`,
+cmd/shell3/dashwiring.go).
 `/reload` takes the turn slot, so it is refused rather than raced.
 
 Three **host tools** ride the session decorator (`Runtime.SetSessionDecorator`,
@@ -453,8 +501,8 @@ deleted by the very next startup's janitor pass before cron read it back.
 ledger distinct from `last_prompt_tokens` (a point-in-time context-fullness
 gauge, overwritten each turn): it only grows, via `Store.AddUsage` after
 every turn, and `Store.CronRollup` sums it grouped by `cron_job` over a
-window to answer "what did this job cost this week" — the figure `/status`
-prints per job. That figure is the job's DISPATCHED-RUN spend only:
+window to answer "what did this job cost this week" — the figure the dash's
+Cron table prints per job. That figure is the job's DISPATCHED-RUN spend only:
 `cron_job` is set on the dispatched child session but never on the
 main-agent session that later reads the task report and answers it (a wake
 turn can drain reports from several jobs plus user backlog at once, so
@@ -468,8 +516,10 @@ rather than vanishing like a genuinely unknown agent-job figure would.
 Sessions, messages, reminders, and every surface's thread index live in **one
 SQLite database** (`internal/runs`, modernc.org/sqlite — pure Go, no cgo):
 `.shell3_project/shell3.db`, with an FTS5 index over user+assistant message
-text backing the `history` tool. Job logs stay plain files under
-`runs/<session>/jobs/<id>.log`. The schema is stamped with `PRAGMA
+text backing the `history` tool, and the `outbox` table (schema v7) holding
+the restart-durable completion queue — like `cron_status` it is opaque JSON,
+names no session id, and `runs.Sweep` never touches it. Job logs stay plain
+files under `runs/<session>/jobs/<id>.log`. The schema is stamped with `PRAGMA
 user_version`; a database whose stamp doesn't match the running binary is
 **deleted and recreated empty**, with one loud stderr line — shell3 data is
 disposable by design, so there are no migrations.
@@ -530,8 +580,10 @@ turn, instead of reimplementing the parsing half. It refuses `--resume` (each
 run is a fresh child session) and requires a message (there is no interactive
 form to fall back to).
 `telegram`, `serve`, `ask`, `boot`, `project`, and `health` are the whole
-command tree — there is no web interface, no dashboard command, and no
-command that exposes or supervises the process. `shell3 serve` is the BYO
+command tree. The one bound listener is the read-only web dash on
+`127.0.0.1:<dash_port>` (see the commands section); there is no command that
+EXPOSES it beyond loopback (a tunnel is the dash-exposing skill's job) or
+that supervises the process. `shell3 serve` is the BYO
 front-end seam: the same bot loop over newline-delimited JSON on stdin/stdout
 (`internal/telegram/client_jsonl.go`, a third tgClient beside the Bot API and
 console transports; docs/serve.md is the wire reference). Message ids are
@@ -572,7 +624,8 @@ internal/notify/       Notification type (bg_done / agent_done) shared by job ru
 internal/mediadir/     resolves the media dir (<configDir>/media, $SHELL3_MEDIA_DIR overrides) and runs its startup janitor (media_keep_days); free of the unix build tag
 internal/mcp/          MCP client (official go-sdk): Manager connects mcp: servers, lists tools, dispatches mcp_* calls
 internal/telegram/     the chat front-end: bot loop + transports (Bot API, console, serve's stdio JSONL), turn slot, thread index, host commands + tools, completion delivery
-internal/render/       markdown renderers for the dash views (/status, /jobs, /job, /runs) shared by the bot (Cron is one of them but has no production caller — /cron was folded into /status)
+internal/render/       HTML renderers for the web dash (DashIndexHTML, RunsPageHTML, RunReplayHTML) + shared formatting helpers
+internal/dash/         the web dash: token store (1h TTL, constant-time) + read-only HTTP server on 127.0.0.1, wired by cmd/shell3/dashwiring.go
 internal/cron/         robfig/cron scheduler dispatching subagent jobs on Session.Dispatch
 internal/cli/          terminal front-end helpers: shell3 ask renderers, brand banner
 internal/chat/         conversation loop, tools, events, JSONL audit sink

@@ -192,6 +192,12 @@ func (s *Session) NotifyText(text string) {
 	}
 }
 
+// NotifyTextNoWake queues a host notice WITHOUT waking the session — the next
+// turn sees it in context without spending one now (/superstop's summary).
+func (s *Session) NotifyTextNoWake(text string) {
+	s.sess.InterjectNotice(text)
+}
+
 // commandEvent builds the completion event for a finished bash_bg job. owner
 // is the root session the event threads at (nil when gone).
 func commandEvent(j *bgJob, n notify.Notification, exit int, owner *Session) CompletionEvent {
@@ -277,6 +283,9 @@ func joinNote(a, b string) string {
 // see the package comment at the top of this file. Called from the finish
 // sites (outside jobManager.mu) for EVERY completed job, direct included.
 func (m *jobManager) dispatchCompletion(ev CompletionEvent) {
+	if m.suppressed(ev.JobID) {
+		return // killed by superstop: the summary already told everyone
+	}
 	if m.rt == nil {
 		// Bare unit-test job manager: no host, no runtime. Keep the direct
 		// contract at least queueing on the owner so nothing is lost.
@@ -285,9 +294,23 @@ func (m *jobManager) dispatchCompletion(ev CompletionEvent) {
 		}
 		return
 	}
+	// Persist before routing: a death between a job's finish and its delivery
+	// must not lose the completion. The row is deleted only after the hand-off
+	// below returns — at-least-once, so a crash inside the window duplicates
+	// the report at the next boot rather than losing it (see outbox.go).
+	rowID := m.persistEvent(ev)
 	if m.isClosing() {
-		return // shutdown: cancelled completions are noise
+		// Shutdown. A job cancelAll itself killed reports at the next boot via
+		// its running marker ("was still running when shell3 stopped") — its
+		// manufactured "context canceled" failure is noise, so its event row
+		// goes too. A real completion that raced SIGTERM keeps its row and is
+		// redelivered at boot instead of dropped.
+		if m.shutdownCancelled(ev.JobID) {
+			m.deleteOutboxRow(rowID)
+		}
+		return
 	}
+	defer m.deleteOutboxRow(rowID)
 	host := m.rt.completionHost()
 	if host == nil {
 		// Library fallback (no front-end host — shell3 ask, tests): raw notice

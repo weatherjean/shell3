@@ -75,8 +75,10 @@ pick it up. `shell3 --version` shows what you're on. Pin a release with
    `~/.shell3/`.
 3. Run `shell3 telegram`. The bot greets the chat and listens.
 
-Nothing is exposed: shell3 connects outbound to Telegram (no port, no tunnel)
-and answers exactly one `chat_id`. Keeping it running is yours to set up —
+Almost nothing is exposed: shell3 connects outbound to Telegram (no tunnel,
+no login) and answers exactly one `chat_id`; the only listener is the
+read-only web dashboard, bound to `127.0.0.1` and reached via `/dash`
+(token-gated, ~1h links). Keeping it running is yours to set up —
 [docs/deploying.md](docs/deploying.md) has the few lines it takes (a service
 is one paste, [cookbook/service.md](docs/cookbook/service.md)); the full
 walkthrough is in [docs/cli.md](docs/cli.md).
@@ -102,6 +104,12 @@ Every subcommand takes `--config/-c` to point at a different config directory.
   `bash_bg` background jobs, and `cron/*.md` schedules; completions arrive as
   mail — the agent hears about finished background work and messages you only
   when it matters, and failures always surface.
+- **A read-only dashboard.** `/dash` links a localhost web page — status, the
+  live conversation, jobs with their output logs, cron with per-job cost and
+  detail, full run replays, and a browser for your config files (`.env`
+  redacted) — behind a ~1h token; a built-in skill sets up a tunnel
+  (tailscale/cloudflared/ngrok) when you want it on your phone. `/superstop`
+  is the everything-off switch.
 - **One file.** `shell3.sh` holds the wiring, every agent, and their tools and
   skills. Prose is prose, code is code, structured data is YAML in a comment
   block. Versionable, diffable, reloadable live.

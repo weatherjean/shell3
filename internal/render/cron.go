@@ -4,85 +4,17 @@ package render
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/weatherjean/shell3/internal/cron"
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
-// CronRollupWindow is how far back CronBrief's cost column looks — the
-// window Store.CronRollup is called with at the render call site, and the
-// "7d" label CronBrief prints. Kept as one named constant, not two numbers in
-// two packages, so the call site and the label can never drift apart.
+// CronRollupWindow is how far back the dash Cron table's cost column looks —
+// the window Store.CronRollup is called with at the render call site, and the
+// "7d" label cronCostSuffix prints. Kept as one named constant, not two
+// numbers in two packages, so the call site and the label can never drift apart.
 const CronRollupWindow = 7 * 24 * time.Hour
-
-// Cron renders the declared cron jobs together with their run history.
-// statuses carries everything a row needs (schedule/agent/tool/prompt from
-// config, run counts and last outcome from the scheduler) — see
-// cron.JobStatus's own doc comment for why an agent job's outcome is labeled
-// "dispatched"/"rejected" rather than "ok"/"failed": Dispatch only reports
-// whether the subagent was ACCEPTED, never whether its actual run succeeded,
-// so claiming "ok" or a trustworthy failure count for an agent job would be a
-// dashboard that lies. A tool job's outcome IS the real result (ToolRunner
-// reports it directly), so it gets the honest ok/FAIL/runs/failed language.
-func Cron(statuses []cron.JobStatus) string {
-	var b strings.Builder
-	b.WriteString("# Cron\n\n")
-	if len(statuses) == 0 {
-		b.WriteString("_No cron jobs._\n")
-		return b.String()
-	}
-	for _, st := range statuses {
-		fmt.Fprintf(&b, "## %s\n\n", st.Name)
-		field(&b, "schedule", "`"+st.Schedule+"`")
-		if st.Tool != "" {
-			field(&b, "tool", st.Tool)
-		} else {
-			field(&b, "agent", st.Agent)
-		}
-		field(&b, "workdir", st.WorkDir)
-		delivery := "mail (quiet agent turn)"
-		switch {
-		case st.Tool != "":
-			// No agent, no dispatch — the job posts its own result (or
-			// stays silent), so neither "mail" nor "direct" describes it.
-			delivery = "tool call (posts its own result, no agent turn)"
-		case st.Direct:
-			delivery = "direct (raw post, no agent turn)"
-		}
-		field(&b, "delivery", delivery)
-		field(&b, "last run", cronLastRun(st))
-		field(&b, "outcome", cronOutcome(st))
-		b.WriteString("\n")
-		if strings.TrimSpace(st.Prompt) != "" {
-			fence(&b, "", st.Prompt)
-		}
-	}
-	return b.String()
-}
-
-// CronBrief is the /status line-per-job form. The full Cron view prints each
-// job's prompt body, which is right when you asked about cron specifically and
-// wrong in a view you check at a glance. costs is keyed by cron job name (nil
-// or a missing entry simply omits that job's cost segment — a store error or
-// a job that hasn't run in the window is not a reason to hide the rest of the
-// row); this is the surface that made a silently idempotent job's spend
-// findable, so a phone-glance dashboard shows it, not just the full /cron view
-// nothing links to in production.
-func CronBrief(statuses []cron.JobStatus, costs map[string]runs.JobCost) string {
-	var b strings.Builder
-	b.WriteString("## Cron\n\n")
-	for _, st := range statuses {
-		target := st.Agent
-		if st.Tool != "" {
-			target = "tool:" + st.Tool
-		}
-		fmt.Fprintf(&b, "- `%s` %s → %s _(last: %s — %s)_%s\n",
-			st.Name, st.Schedule, target, cronLastRun(st), cronOutcome(st), cronCostSuffix(st, costs))
-	}
-	return b.String()
-}
 
 // cronCostSuffix renders " · <tok> tok/<N>d run" for a job with cost data, or
 // "" when none is available and unknowable (no store wired, the rollup

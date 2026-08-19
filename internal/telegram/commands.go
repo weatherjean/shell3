@@ -5,27 +5,26 @@ package telegram
 import (
 	"context"
 	"fmt"
-	"strconv"
+	"net"
+	neturl "net/url"
 	"strings"
 
-	"github.com/weatherjean/shell3/internal/render"
-	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/strutil"
 )
 
 // BotCommands is the canonical command list, registered with Telegram for the
 // "/" autocomplete menu. Kept next to handleCommand so they stay in sync.
+// The views (/status, /jobs, /runs) live in the web dash — /dash opens it;
+// what remains here are actions.
 func BotCommands() []Command {
 	return []Command{
+		{"dash", "Open the web dashboard (link valid ~1h)"},
 		{"stop", "Stop the current turn"},
-		{"new", "Start a fresh conversation (the old one stays in /runs)"},
+		{"superstop", "Stop the turn AND every background job"},
+		{"new", "Start a fresh conversation (the old one stays in the dash)"},
 		{"run", "Run a scheduled job now: /run <name>"},
 		{"btw", "Ask something outside this conversation: /btw <question>"},
-		{"status", "Runtime, jobs, cron and queue (tap /job_N, /cancel_N)"},
-		{"job", "Show one job's detail: /job <id>"},
-		{"cancel", "Cancel a background task: /cancel <id>"},
-		{"runs", "List runs (tap /run_N to replay): /runs [page|id]"},
 		{"reload", "Reload the config without restarting"},
 		{"quiet", "Hush background posts: /quiet on|off"},
 	}
@@ -40,34 +39,24 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 	// Telegram appends "@yourbot" to a command typed in a group (and some
 	// clients do so after an autocomplete tap), so route on the bare verb.
 	cmd, _, _ := strings.Cut(fields[0], "@")
-	// /run_N taps (rendered by the /runs listing) are dynamic commands, routed
-	// by prefix before the static switch.
-	if n, ok := strings.CutPrefix(cmd, "/run_"); ok {
-		b.handleRunTap(ctx, n)
-		return
-	}
-	if n, ok := strings.CutPrefix(cmd, "/job_"); ok {
-		b.handleJobTap(ctx, n, false)
-		return
-	}
-	if n, ok := strings.CutPrefix(cmd, "/cancel_"); ok {
-		b.handleJobTap(ctx, n, true)
-		return
-	}
 	switch cmd {
 	case "/stop":
 		// Turn-only: cancel the active main turn. Background jobs are NEVER killed
 		// here — a subagent or bash_bg keeps running and will wake its session on
-		// completion. Cancel those with /jobs and /cancel <id>.
+		// completion. /superstop kills those too.
 		b.mu.Lock()
 		c := b.cancelTurn
 		b.mu.Unlock()
 		if c != nil {
 			c()
-			b.sendReply(ctx, "⏹ stopped the turn — background jobs keep running (list them with /jobs, cancel one with /cancel `<id>`)")
+			b.sendReply(ctx, "⏹ stopped the turn — background jobs keep running (/superstop kills those too)")
 		} else {
 			b.sendReply(ctx, "nothing is running")
 		}
+	case "/superstop":
+		b.handleSuperstop(ctx)
+	case "/dash":
+		b.handleDashCommand(ctx, m, arg)
 	case "/run":
 		run := b.jobRunner()
 		if run == nil {
@@ -110,88 +99,6 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 			return
 		}
 		b.sendReply(ctx, "💬 asked on the side — the answer won't enter this conversation")
-	case "/status":
-		// One view answers "what is going on": runtime, then jobs, cron and
-		// the queue. They were four commands and four round trips for four
-		// short sections that fit on one screen together.
-		status := render.Status(b.anyLiveSession(), b.rt, b.version)
-		if b.isQuiet() {
-			status += "\n- quiet: on (background posts don't ping)"
-		}
-		if b.jobsList != nil {
-			jobs := b.jobsList()
-			b.mu.Lock()
-			b.jobIndex = indexJobs(jobs)
-			b.mu.Unlock()
-			status += "\n\n" + render.JobsTappable(jobs)
-		}
-		if b.cronStatus != nil {
-			if statuses := b.cronStatus(); len(statuses) > 0 {
-				var costs map[string]runs.JobCost
-				if b.cronCost != nil {
-					costs = b.cronCost()
-				}
-				status += "\n\n" + render.CronBrief(statuses, costs)
-			}
-		}
-		if inbox := strings.TrimSpace(b.renderInbox()); inbox != "" && !strings.Contains(inbox, "nothing queued") {
-			status += "\n\n## Inbox\n\n" + inbox
-		}
-		// Always inline: the tappable /job_N and /cancel_N commands only
-		// linkify in message text, never inside a document.
-		b.sendReply(ctx, status)
-	case "/job":
-		if b.jobsList == nil {
-			b.sendReply(ctx, "job control not available")
-			return
-		}
-		id := strings.TrimSpace(arg)
-		if id == "" {
-			b.sendReply(ctx, "usage: /job `<id>`")
-			return
-		}
-		b.showJob(ctx, id)
-	case "/runs":
-		if b.runsRoot == "" {
-			b.sendReply(ctx, "runs not available")
-			return
-		}
-		a := strings.TrimSpace(arg)
-		if page, isPage := pageArg(a); isPage {
-			// The page goes out as an inline message, never a document:
-			// Telegram only linkifies /run_N commands in message text.
-			md, index, total, err := render.RunsPage(b.runsRoot, page, runsPageSize)
-			if err != nil {
-				b.sendReply(ctx, "⚠️ "+err.Error())
-				return
-			}
-			if md == "" {
-				b.sendReply(ctx, fmt.Sprintf("page %d of %d — /runs %d is the last", page, total, total))
-				return
-			}
-			b.mu.Lock()
-			b.runIndex = index
-			b.mu.Unlock()
-			b.sendReply(ctx, md)
-			return
-		}
-		page, err := render.RunReplayHTML(b.runsRoot, a)
-		if err != nil {
-			b.sendReply(ctx, "⚠️ "+err.Error())
-			return
-		}
-		b.sendRunDoc(ctx, a, page)
-	case "/cancel":
-		if b.cancelJob == nil {
-			b.sendReply(ctx, "job control not available")
-			return
-		}
-		id := strings.TrimSpace(arg)
-		if id == "" {
-			b.sendReply(ctx, "usage: /cancel `<id>`")
-			return
-		}
-		b.cancelJobByID(ctx, id)
 	case "/reload":
 		// runReload takes the turn slot (and Reload fail-fasts on a busy
 		// session), so a /reload during a live turn is refused, not raced.
@@ -203,6 +110,106 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 	default:
 		b.sendReply(ctx, "unknown command: "+cmd)
 	}
+}
+
+// handleSuperstop is the everything-off switch: cancel the running turn, then
+// kill every background job — subagents, bash_bg, in-flight cron dispatches —
+// with completion routing suppressed. One summary replaces the per-job posts:
+// a ⚠️ reply to the user, and the same text queued (unwoken) into the main
+// conversation so the agent's next turn knows what happened without spending
+// a turn now.
+func (b *Bot) handleSuperstop(ctx context.Context) {
+	b.mu.Lock()
+	c := b.cancelTurn
+	main := b.main
+	b.mu.Unlock()
+	turnStopped := c != nil
+	if turnStopped {
+		c()
+	}
+	var killed []shell3.KilledJob
+	if sess := b.anyLiveSession(); sess != nil {
+		killed = sess.KillAllForStop()
+	}
+	if !turnStopped && len(killed) == 0 {
+		b.sendReply(ctx, "nothing was running")
+		return
+	}
+	var sb strings.Builder
+	sb.WriteString("⚠️ superstop —")
+	if turnStopped {
+		sb.WriteString(" turn stopped;")
+	}
+	fmt.Fprintf(&sb, " killed %d job(s)", len(killed))
+	for _, k := range killed {
+		fmt.Fprintf(&sb, "\n- `%s` %s — %s (ran %s)", k.ID, k.Kind, strutil.Truncate(k.Title, 80), k.Runtime)
+	}
+	summary := sb.String()
+	b.sendReply(ctx, summary)
+	if main != nil {
+		main.NotifyTextNoWake("[superstop] the user stopped everything. " +
+			"Do not resume or retry the killed work unless asked.\n" + summary)
+	}
+}
+
+// handleDashCommand answers a bare /dash with a freshly tokened dashboard
+// URL (host-side, zero tokens spent). /dash with an argument is a request for
+// help — most commonly exposing the dash beyond localhost — and becomes a
+// normal agent turn pointed at the dash-exposing skill.
+func (b *Bot) handleDashCommand(ctx context.Context, m Msg, arg string) {
+	if arg != "" {
+		prompt := fmt.Sprintf("The user wants help with the web dash: %q. "+
+			"If this is about exposing/reaching the dash, read the dash-exposing skill "+
+			"(listed under ## Skills) and follow it.", arg)
+		b.dispatchMail(ctx, []inMail{{m: m, text: prompt}})
+		return
+	}
+	b.mu.Lock()
+	dash := b.dashURL
+	b.mu.Unlock()
+	if dash == nil {
+		b.sendReply(ctx, "the dash is not running (dash_port: 0 disables it, or the listener failed at startup — check the app log)")
+		return
+	}
+	link, err := dash()
+	if err != nil {
+		b.sendReply(ctx, "⚠️ "+err.Error())
+		return
+	}
+	reply := "🖥 " + link + "\n\nlink valid ~1h — /dash mints a fresh one"
+	// The base URL comes from dash_url.txt, which the exposure agent (and thus
+	// anything that can prompt-inject it) can rewrite. A fresh valid token is
+	// appended to whatever host that file names, so a planted host would be
+	// handed a live read-token. Never silently: when the destination is not
+	// loopback, name the host and warn, so the operator sees where the token
+	// is about to go before tapping.
+	if host := urlHost(link); host != "" && !isLoopbackHost(host) {
+		reply += "\n\n⚠️ this link points at `" + host + "` (not this machine) — " +
+			"the token grants read access to your transcripts and config. " +
+			"Only open it if you set up that address yourself."
+	}
+	b.sendReply(ctx, reply)
+}
+
+// urlHost returns the hostname of rawURL, or "" if it doesn't parse.
+func urlHost(rawURL string) string {
+	u, err := neturl.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
+}
+
+// isLoopbackHost reports whether host is the local machine — the only
+// destination a /dash link reaches without an operator-set tunnel.
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 // handleNewCommand starts a fresh conversation: the current main session is
@@ -234,11 +241,11 @@ func (b *Bot) handleNewCommand(ctx context.Context) {
 	b.mu.Unlock()
 	// Close only a fully-idle old session: running jobs keep it open (their
 	// completions re-route to the new conversation), and undrained agent mail
-	// stays inspectable in /runs instead of being torn down undelivered.
+	// stays inspectable in the dash instead of being torn down undelivered.
 	if old != nil && !b.sessionHasRunningJob(old) && !old.HasQueuedInput() {
 		_ = old.Close()
 	}
-	b.sendReply(ctx, "🧵 fresh conversation — the old one stays in /runs and history")
+	b.sendReply(ctx, "🧵 fresh conversation — the old one stays in the dash and history")
 }
 
 // handleQuietCommand reports or sets the /quiet toggle: quiet on sends
@@ -270,127 +277,4 @@ func (b *Bot) handleQuietCommand(ctx context.Context, arg string) {
 	default:
 		b.sendReply(ctx, "usage: /quiet on|off")
 	}
-}
-
-// runsPageSize is how many runs one /runs page lists — small enough that the
-// page always fits one inline message even with 60-rune prompt snippets.
-const runsPageSize = 8
-
-// pageArg reports whether a /runs argument selects a page: "" is page 1 and a
-// positive integer is that page. Anything else (run ids contain 'T', '.', '-')
-// is not a page and falls through to the replay path.
-func pageArg(s string) (int, bool) {
-	if s == "" {
-		return 1, true
-	}
-	n, err := strconv.Atoi(s)
-	if err != nil || n < 1 {
-		return 0, false
-	}
-	return n, true
-}
-
-// handleRunTap resolves a tapped /run_N against the map the last /runs render
-// stored — never against a re-derived listing, so a stale tap (bot restarted,
-// listing since re-rendered) errors instead of opening the wrong run.
-func (b *Bot) handleRunTap(ctx context.Context, arg string) {
-	nStr, _, _ := strings.Cut(arg, "@") // handleCommand cut fields[0] at "@" already; belt and braces
-	n, err := strconv.Atoi(nStr)
-	if err != nil || n < 1 {
-		b.sendReply(ctx, "unknown command: /run_"+nStr)
-		return
-	}
-	b.mu.Lock()
-	id, ok := b.runIndex[n]
-	b.mu.Unlock()
-	if !ok {
-		b.sendReply(ctx, "index not found — run /runs again")
-		return
-	}
-	page, err := render.RunReplayHTML(b.runsRoot, id)
-	if err != nil {
-		b.sendReply(ctx, "⚠️ "+err.Error())
-		return
-	}
-	b.sendRunDoc(ctx, id, page)
-}
-
-// findJob returns the job matching id from jobs, if any.
-func findJob(jobs []shell3.JobInfo, id string) (shell3.JobInfo, bool) {
-	for _, j := range jobs {
-		if j.ID == id {
-			return j, true
-		}
-	}
-	return shell3.JobInfo{}, false
-}
-
-// indexJobs numbers the jobs exactly as JobsTappable renders them, so a tap
-// and the listing that produced it agree.
-func indexJobs(jobs []shell3.JobInfo) map[int]string {
-	idx := make(map[int]string, len(jobs))
-	for i, j := range jobs {
-		idx[i+1] = j.ID
-	}
-	return idx
-}
-
-// handleJobTap resolves a tapped /job_N or /cancel_N against the map the last
-// /status render stored. Same contract as /run_N: never re-derive the listing,
-// because a job finishing in between would shift every number and the tap
-// would act on its neighbour.
-func (b *Bot) handleJobTap(ctx context.Context, arg string, cancel bool) {
-	verb := "/job_"
-	if cancel {
-		verb = "/cancel_"
-	}
-	nStr, _, _ := strings.Cut(arg, "@")
-	n, err := strconv.Atoi(nStr)
-	if err != nil || n < 1 {
-		b.sendReply(ctx, "unknown command: "+verb+nStr)
-		return
-	}
-	b.mu.Lock()
-	id, ok := b.jobIndex[n]
-	b.mu.Unlock()
-	if !ok {
-		b.sendReply(ctx, "index not found — run /status again")
-		return
-	}
-	if cancel {
-		b.cancelJobByID(ctx, id)
-		return
-	}
-	b.showJob(ctx, id)
-}
-
-// showJob renders one job, whether reached by /job <id> or a /job_N tap.
-func (b *Bot) showJob(ctx context.Context, id string) {
-	if b.jobsList == nil {
-		b.sendReply(ctx, "job control not available")
-		return
-	}
-	info, ok := findJob(b.jobsList(), id)
-	if !ok {
-		b.sendReply(ctx, fmt.Sprintf("no such job %q", id))
-		return
-	}
-	var transcript string
-	if b.jobTranscript != nil {
-		transcript = b.jobTranscript(id)
-	}
-	b.sendMarkdownDoc(ctx, "job-"+id+".md", render.JobDetail(info, transcript))
-}
-
-// cancelJobByID cancels one job, whether reached by /cancel <id> or a tap.
-func (b *Bot) cancelJobByID(ctx context.Context, id string) {
-	if b.cancelJob == nil {
-		b.sendReply(ctx, "job control not available")
-		return
-	}
-	if err := b.cancelJob(id); err != nil {
-		b.sendReply(ctx, err.Error())
-		return
-	}
-	b.sendReply(ctx, "🛑 cancelled task "+id)
 }

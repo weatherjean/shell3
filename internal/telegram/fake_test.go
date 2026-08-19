@@ -116,14 +116,6 @@ func (f *fakeClient) deletedSnapshot() []string {
 	return append([]string{}, f.deleted...)
 }
 
-// reset clears everything the fake has recorded, so a test can assert on just
-// the traffic after a setup step.
-func (f *fakeClient) reset() {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.sent, f.html, f.docs, f.replies = nil, nil, nil, nil
-}
-
 func (f *fakeClient) SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string, opts ...SendOpt) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

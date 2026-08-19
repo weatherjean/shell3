@@ -126,6 +126,10 @@ func (p *Parts) RunsKeepDays() int { return p.lc.RunsKeepDays }
 // startup.
 func (p *Parts) MediaKeepDays() int { return p.lc.MediaKeepDays }
 
+// DashPort returns `dash_port` (always populated at load — default 7333;
+// 0 = dash disabled). Read by the front-end hosts when wiring the web dash.
+func (p *Parts) DashPort() int { return p.lc.DashPort }
+
 // RunsRoot returns the .shell3_project directory the runs Store was opened
 // against (runs.Open's root param) — the same root the runs janitor's Sweep
 // expects. Derived from runsDir (.../.shell3_project/runs) rather than

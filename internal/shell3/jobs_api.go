@@ -117,3 +117,25 @@ func (s *Session) KillRunningJobs() (killed int) {
 	}
 	return killed
 }
+
+// KilledJob describes one job /superstop killed — enough for the summary the
+// user and the agent both read.
+type KilledJob struct {
+	ID      string
+	Title   string // command text or subagent description
+	Kind    string // "command" or "subagent"
+	Runtime time.Duration
+}
+
+// KillAllForStop kills every live background job in the runtime — commands,
+// subagents (cascading like task_cancel), and in-flight cron dispatches —
+// with their completion routing SUPPRESSED: no ⚠️ posts, no owner mail. The
+// returned list is the material for the one superstop summary that replaces
+// them. The front-ends' /superstop primitive.
+func (s *Session) KillAllForStop() []KilledJob {
+	rt := s.runtimeHandle()
+	if rt == nil || rt.jobs == nil {
+		return nil
+	}
+	return rt.jobs.killAllForStop()
+}

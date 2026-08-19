@@ -10,59 +10,10 @@ import (
 	"strings"
 
 	"github.com/weatherjean/shell3/internal/shell3"
-	"github.com/weatherjean/shell3/internal/strutil"
 )
 
 const maxSendBytes = 50 << 20 // Telegram bot upload limit (~50 MB)
 const maxPhotoBytes = 10 << 20
-
-// mdInlineThreshold is the byte size under which a rendered render.* view is
-// sent as a normal chat message (through sendReply's Markdown→HTML path)
-// rather than a document — comfortably under Telegram's 4096-char message cap
-// once HTML markup inflates it.
-const mdInlineThreshold = 3500
-
-// mdSummaryMax caps the text summary sent alongside a markdown document.
-const mdSummaryMax = 400
-
-// sendMarkdownDoc is the shared delivery path for every dash-view command
-// (/status /jobs /job /cron /runs): md inline when small, or as a `name`
-// document plus a capped text summary when it would blow past Telegram's
-// message size.
-func (b *Bot) sendMarkdownDoc(ctx context.Context, name, md string) {
-	if len(md) <= mdInlineThreshold {
-		b.sendReply(ctx, md)
-		return
-	}
-	if _, err := b.client.SendDocument(ctx, b.chatID, name, []byte(md), ""); err != nil {
-		b.sendReply(ctx, "⚠️ failed to send "+name+": "+err.Error())
-		return
-	}
-	// Plain Send, not sendReply's Markdown->HTML path: the summary is an
-	// arbitrary substring of the document, and running it through mdhtml could
-	// inflate it (e.g. "# heading" -> "<b>heading</b>") past the byte cap.
-	summary := strutil.Truncate(strings.TrimSpace(md), mdSummaryMax)
-	if _, err := b.client.Send(ctx, b.chatID, summary); err != nil {
-		b.sendReply(ctx, summary)
-	}
-}
-
-// sendRunDoc delivers a run replay as a self-contained HTML page. Unlike the
-// markdown views there is no inline branch: a replay is 100–500 KB for a real
-// session, always a document, and HTML is what makes that readable — every
-// tool result and every reasoning block folded shut until you open it.
-//
-// The one-line text message beside it is what the chat list shows; a document
-// alone scrolls past unlabelled.
-func (b *Bot) sendRunDoc(ctx context.Context, id, page string) {
-	name := "run-" + id + ".html"
-	if _, err := b.client.SendDocument(ctx, b.chatID, name, []byte(page), ""); err != nil {
-		b.sendReply(ctx, "⚠️ failed to send "+name+": "+err.Error())
-		return
-	}
-	// A failed caption is cosmetic — the document already landed.
-	_, _ = b.client.Send(ctx, b.chatID, "run "+id+" — open the file; tool output and reasoning start folded")
-}
 
 // registerSendTool gives the agent a send_media_telegram tool to push a local
 // file back to the user's Telegram chat.

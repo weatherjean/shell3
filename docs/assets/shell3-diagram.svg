@@ -32,7 +32,7 @@
   <rect x="88" y="452" width="262" height="44" rx="3" fill="#e8eced" stroke="#c9d1d6" stroke-width="1"/>
   <text x="104" y="481" font-family="NRi" font-size="19" font-style="italic" fill="#16222e">done — tests are green.</text>
   <text x="88" y="540" font-family="ITr" font-size="17" fill="#56667a" text-anchor="start">one Telegram chat — yours; replies</text>
-  <text x="88" y="564" font-family="ITr" font-size="17" fill="#56667a" text-anchor="start">thread; /status /jobs /runs come as files</text>
+  <text x="88" y="564" font-family="ITr" font-size="17" fill="#56667a" text-anchor="start">thread; the web dash shows jobs & runs</text>
   <line x1="404" y1="300" x2="560" y2="300" stroke="#a8790a" stroke-width="2" marker-end="url(#ay)"/>
   <text x="482" y="282" font-family="IT" font-size="17" font-weight="600" letter-spacing="2.55" fill="#56667a" text-anchor="middle">TEXT · VOICE</text>
   <line x1="560" y1="372" x2="404" y2="372" stroke="#4a5a6b" stroke-width="2" marker-end="url(#a)"/>

@@ -22,8 +22,9 @@ import (
 // docs/serve.md is the wire reference.
 //
 // No Telegram credentials are required — possessing the process's stdio IS
-// the access model, the exact parallel of chat_id. There is no port and no
-// listener.
+// the access model, the exact parallel of chat_id. The chat transport has no
+// port and no listener; the one bound socket is the read-only web dash on
+// 127.0.0.1 (wired by wireHost, dash_port: 0 disables it).
 func newServeCommand() *cobra.Command {
 	var configDir string
 	cmd := &cobra.Command{

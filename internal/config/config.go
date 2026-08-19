@@ -170,6 +170,11 @@ type LoadedConfig struct {
 	// data, so deletion is opt-in rather than assumed.
 	MediaKeepDays int
 
+	// DashPort is `dash_port`: where the read-only web dash listens on
+	// 127.0.0.1. Always populated at load — default 7333; an explicit 0
+	// disables the listener (and /dash says so).
+	DashPort int
+
 	agent     Agent
 	subagents []Subagent
 

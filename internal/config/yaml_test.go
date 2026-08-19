@@ -297,3 +297,33 @@ func TestYAMLTypeNamesCoverEveryWireStruct(t *testing.T) {
 		}
 	}
 }
+
+func TestParseYAMLDashPort(t *testing.T) {
+	c, err := parseY(t, fullYAML, fullSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.DashPort != DefaultDashPort {
+		t.Fatalf("DashPort default = %d, want %d", c.DashPort, DefaultDashPort)
+	}
+	c, err = parseY(t, fullYAML+"dash_port: 0\n", fullSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.DashPort != 0 {
+		t.Fatalf("DashPort = %d, want 0 (disabled)", c.DashPort)
+	}
+	c, err = parseY(t, fullYAML+"dash_port: 8080\n", fullSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.DashPort != 8080 {
+		t.Fatalf("DashPort = %d, want 8080", c.DashPort)
+	}
+	for _, bad := range []string{"dash_port: -1\n", "dash_port: 70000\n"} {
+		if _, err := parseY(t, fullYAML+bad, fullSecrets); err == nil ||
+			!strings.Contains(err.Error(), "dash_port") {
+			t.Fatalf("%q: want error naming dash_port, got %v", bad, err)
+		}
+	}
+}

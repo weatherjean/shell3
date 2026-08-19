@@ -119,8 +119,9 @@ func newTelegramCommand() *cobra.Command {
 				// live in the "/" menu instead). Best-effort.
 				banner := "๑ï shell3 online — your personal agent, at your pace\n\n" +
 					"Just type — every message continues our one conversation, and a restart picks it " +
-					"up where we left off. /new starts a fresh one, /status shows what's wired, " +
-					"/jobs what's running, /stop halts the current turn, /reload applies config changes."
+					"up where we left off. /new starts a fresh one, /dash opens the dashboard, " +
+					"/stop halts the current turn (/superstop also kills background jobs), " +
+					"/reload applies config changes."
 				if err := apiClient.SendRemovingKeyboard(ctx, chatID, banner); err != nil {
 					fmt.Printf("warning: could not send the greeting: %v\n", err)
 				}
@@ -163,24 +164,6 @@ func telegramChatID(tg config.TelegramConfig) (int64, error) {
 // telegramChatID above) call it, wrapping the error in their own wording.
 func parseChatID(s string) (int64, error) {
 	return strconv.ParseInt(strings.TrimSpace(s), 10, 64)
-}
-
-// jobTranscriptOf builds the per-job transcript lookup /job <id> renders: a
-// subagent job's transcript is its child session's, a bash_bg job's is its
-// captured output. Unknown ids render with no Output section.
-func jobTranscriptOf(sess *shell3.Session) func(id string) string {
-	return func(id string) string {
-		for _, j := range sess.Jobs() {
-			if j.ID != id {
-				continue
-			}
-			if j.Kind == shell3.JobSubagent {
-				return sess.JobTranscript(id)
-			}
-			return sess.JobOutput(id)
-		}
-		return ""
-	}
 }
 
 // newQuietStore opens the /quiet toggle's file at ~/.shell3/quiet_mode.json.

@@ -83,7 +83,13 @@ func (s *Store) DBPath() string { return filepath.Join(s.root, DBFile) }
 //     gauge, overwritten each turn). The ledger only grows, via Store.AddUsage,
 //     which is what makes "what did this cron job cost this week" answerable
 //     (see Store.CronRollup, grouping by sessions.cron_job).
-const schemaVersion = 6
+//  7. adds outbox(id, kind, json), the restart-durable completion queue
+//     (internal/shell3/completion.go): "event" rows are finished-job
+//     completions not yet handed to the front-end, "running" rows are
+//     started-jobs markers a boot-time recovery pass turns into "was running
+//     when shell3 stopped" notices. Like cron_status it holds opaque JSON,
+//     names no session id, and is never touched by runs.Sweep.
+const schemaVersion = 7
 
 // openDB opens path, applying the schema fresh or recreating the file
 // outright when its stamped version doesn't match schemaVersion. Per the
@@ -339,6 +345,11 @@ CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
 );
 CREATE TABLE IF NOT EXISTS cron_status (
 	name TEXT PRIMARY KEY,
+	json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS outbox (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	kind TEXT NOT NULL,
 	json TEXT NOT NULL
 );
 `

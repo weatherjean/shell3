@@ -426,12 +426,22 @@ func TestSubagentErrorSurfaced(t *testing.T) {
 		t.Fatalf("startSubagent: %v", err)
 	}
 	waitForWake(t, rt, parent)
-	// JobInfo carries the error.
+	// JobInfo carries the error. The wake is delivered BEFORE the job's done
+	// bookkeeping (finishSubagent's documented ordering — and the durable
+	// outbox delete now sits between the two), so poll briefly rather than
+	// assuming the wake implies markDone already ran.
 	var found JobInfo
-	for _, j := range rt.jobs.list() {
-		if j.ID == id {
-			found = j
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, j := range rt.jobs.list() {
+			if j.ID == id {
+				found = j
+			}
 		}
+		if found.Error != "" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 	if found.Error == "" || !strings.Contains(found.Error, "provider exploded") {
 		t.Errorf("JobInfo.Error = %q, want the turn error", found.Error)

@@ -10,8 +10,6 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/applog"
-	"github.com/weatherjean/shell3/internal/cron"
-	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/strutil"
 )
@@ -93,34 +91,9 @@ type Bot struct {
 	reload        func() (shell3.ReloadResult, error) // performs a full config reload; nil if unset
 	pendingReload bool                                // set by the reload tool mid-turn; applied at end-of-turn
 
-	cancelJob func(id string) error // cancels one task for /cancel <id>; nil if unwired
-
-	// jobsList and jobTranscript back /jobs and /job <id>: jobsList is the
-	// runtime-wide background-job snapshot render.Jobs/render.JobDetail need
-	// (shell3.Session.Jobs() reports the whole job runtime, not one session's
-	// share — the wiring closure supplies it via any convenient live session);
-	// jobTranscript looks up one job's captured output/transcript by id. Either
-	// may be nil.
-	jobsList      func() []shell3.JobInfo
-	jobTranscript func(id string) string
-
-	runsRoot string // project dir holding runs/ (Parts.RunsRoot()); "" disables /runs
-	// runIndex maps a /run_N tap index → run id, written whole by the last
-	// /runs render (guarded by b.mu). Taps resolve ONLY against this map —
-	// never a re-derived listing — so a stale tap errors instead of opening
-	// the wrong run. Empty until /runs is first rendered; lost on restart.
-	runIndex map[int]string
-	// jobIndex maps a /job_N or /cancel_N tap index → job id, written whole by
-	// the last /status render. Same contract as runIndex: a tap resolves only
-	// against what the user is looking at, so a job finishing between render
-	// and tap errors instead of acting on its neighbour.
-	jobIndex   map[int]string
-	version    string                  // shell3 version string, reported by /status
-	cronStatus func() []cron.JobStatus // scheduler's per-job run history, for /status's Cron section; nil or empty omits it
-	// cronCost supplies the per-job token rollup for CronBrief's cost column.
-	// nil (no store wired, e.g. tests) simply omits every job's cost segment —
-	// see render.cronCostSuffix's "missing must never look like zero" rule.
-	cronCost func() map[string]runs.JobCost
+	// dashURL mints a freshly tokened dashboard URL for /dash (guarded by
+	// b.mu). nil = the dash is disabled or failed to start.
+	dashURL func() (string, error)
 
 	// log records host-side faults that never reach the user (a failed
 	// current-session marker write, etc). Defaults to Noop so every existing
@@ -194,38 +167,19 @@ func (b *Bot) jobRunner() func(name string) error {
 // SetReloader wires /reload (and the reload tool) to the host's reload coordinator.
 func (b *Bot) SetReloader(fn func() (shell3.ReloadResult, error)) { b.reload = fn }
 
-// SetJobControl wires /cancel <id> to the runtime's background-job cancel —
-// tears one down (cascading to a subagent's own bash_bg children, same as the
-// agent's task_cancel tool). The zero-token path for a phone-only user to
-// kill a runaway job.
-func (b *Bot) SetJobControl(cancel func(id string) error) { b.cancelJob = cancel }
+// LiveSession returns the current main conversation's session, or any live
+// adopted session, or nil — the dash index's status source. Callers must
+// tolerate nil (render.DashIndexHTML does).
+func (b *Bot) LiveSession() *shell3.Session { return b.anyLiveSession() }
 
-// SetJobsSource wires /jobs and /job <id> to the runtime's background-job
-// list (render.Jobs) and per-job transcript/output lookup (render.JobDetail).
-// A nil list disables both commands ("job control not available"); a nil
-// transcript still renders /job <id> detail, just with no Output section.
-func (b *Bot) SetJobsSource(list func() []shell3.JobInfo, transcript func(id string) string) {
-	b.jobsList, b.jobTranscript = list, transcript
+// SetDash wires /dash to the host's URL minter: each call returns the dash
+// base URL with a fresh ~1h token appended. nil (never set) means the dash
+// is disabled and /dash says so.
+func (b *Bot) SetDash(mint func() (string, error)) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.dashURL = mint
 }
-
-// SetRunsRoot sets the project directory holding runs/ (Parts.RunsRoot()), so
-// /runs and /runs <id> can list/replay stored sessions via
-// render.RunsList/RunReplay. "" (the zero value) disables both.
-func (b *Bot) SetRunsRoot(root string) { b.runsRoot = root }
-
-// SetVersion sets the shell3 version string /status reports via render.Status.
-func (b *Bot) SetVersion(v string) { b.version = v }
-
-// SetCronStatus wires /status's Cron section to the scheduler's live
-// per-job history (JobStatus carries schedule/agent/tool AND run counts, so
-// this is the one seam render.CronBrief needs). nil means no scheduler is
-// wired (no jobs configured), which omits the section entirely.
-func (b *Bot) SetCronStatus(fn func() []cron.JobStatus) { b.cronStatus = fn }
-
-// SetCronCost wires /status's Cron section to the store's per-job token
-// rollup (keyed by cron job name). nil means no store is wired, which omits
-// every job's cost segment rather than showing a bogus zero.
-func (b *Bot) SetCronCost(fn func() map[string]runs.JobCost) { b.cronCost = fn }
 
 // SetQuiet installs the /quiet toggle's store. Nil (or an unset path) means
 // quiet can never turn on — every post rings.
@@ -943,9 +897,11 @@ func (b *Bot) StartFreshTurn(note string) {
 	sess.NotifyText(note)
 }
 
-// renderInbox reports what is queued while (or since) a turn runs: the user's
+// Inbox reports what is queued while (or since) a turn runs: the user's
 // pending mail, wake-queued sessions, and live sessions holding undrained
-// agent mail. Zero-token, deterministic — the /inbox command.
+// agent mail. Zero-token, deterministic — the dash index's Inbox section.
+func (b *Bot) Inbox() string { return b.renderInbox() }
+
 func (b *Bot) renderInbox() string {
 	b.mu.Lock()
 	mail := append([]inMail{}, b.mailQueue...)
@@ -976,7 +932,7 @@ func (b *Bot) renderInbox() string {
 
 // anyLiveSession returns a session for host code that wants one but doesn't
 // care which — the main conversation when it exists, else the adopted cron
-// parent. Callers must tolerate nil (render.Status does).
+// parent. Callers must tolerate nil (render.DashIndexHTML does).
 func (b *Bot) anyLiveSession() *shell3.Session {
 	b.mu.Lock()
 	defer b.mu.Unlock()

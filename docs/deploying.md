@@ -1,7 +1,8 @@
 # Deploying
 
-`shell3 telegram` connects outbound to Telegram and listens on nothing, so
-there is no port to expose and no URL to protect — deploying is only
+`shell3 telegram` connects outbound to Telegram; the only listener is the
+read-only dash on `127.0.0.1`, which needs no exposing (tunnel it later with
+`/dash help exposing` if you want it on your phone) — deploying is only
 **keeping the process running**. Ask an agent to walk you through any of
 this; it's a few lines.
 

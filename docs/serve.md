@@ -6,8 +6,10 @@ cron — over newline-delimited JSON on stdin/stdout instead of the Telegram
 Bot API. Your front-end (a Discord bridge, a custom dashboard backend, a test
 harness) spawns the process and translates.
 
-There is no port, no listener, and no auth: owning the subprocess's stdio is
-the access model, the parallel of Telegram's `chat_id`. A remote front-end
+The transport has no port and no auth: owning the subprocess's stdio is
+the access model, the parallel of Telegram's `chat_id`. (Serve does start
+the same read-only web dash `shell3 telegram` does — `127.0.0.1`,
+token-gated, `dash_port: 0` disables.) A remote front-end
 needs its own relay; that is deliberately out of scope.
 
 ```
@@ -53,12 +55,12 @@ turn after the turn ends, anchored at the newest message.
 The first stdout line:
 
 ```json
-{"type":"hello","protocol":2,"commands":[{"command":"status","description":"agent, model and MCP health"}, …]}
+{"type":"hello","protocol":2,"commands":[{"command":"dash","description":"Open the web dashboard (link valid ~1h)"}, …]}
 ```
 
 `protocol` bumps only on breaking changes. `commands` is the host-answered
-`/` menu (`/status`, `/jobs`, `/stop`, …) so your front-end can populate its
-own command UI. Send a command as a normal `message` whose text starts with
+`/` menu (`/dash`, `/stop`, `/superstop`, …) so your front-end can populate
+its own command UI. Send a command as a normal `message` whose text starts with
 `/` — it is answered host-side with zero tokens.
 
 **Protocol 1 → 2 (breaking):** the inline-keyboard events —
@@ -147,5 +149,5 @@ your own path.
 Drive it by hand:
 
 ```bash
-printf '%s\n' '{"type":"message","text":"/status"}' | shell3 serve
+printf '%s\n' '{"type":"message","text":"/dash"}' | shell3 serve
 ```

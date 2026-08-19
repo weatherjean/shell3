@@ -19,6 +19,7 @@ type yamlFile struct {
 	MCP           map[string]yamlMCP   `yaml:"mcp"`
 	Background    *yamlBackground      `yaml:"background"`
 	RunsKeepDays  *int                 `yaml:"runs_keep_days"`  // nil = default 30; 0 = keep forever
+	DashPort      *int                 `yaml:"dash_port"`       // nil = default 7333; 0 = dash disabled
 	MediaKeepDays *int                 `yaml:"media_keep_days"` // nil = default 0 = keep forever
 }
 
@@ -188,6 +189,16 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 	if err := validateKeepDays("media_keep_days", c.MediaKeepDays); err != nil {
 		return err
 	}
+	// dash_port defaults to 7333 (unset); an explicit 0 disables the dash
+	// listener entirely, so — like the keep-days keys — the default can't be
+	// a bare int zero value.
+	c.DashPort = DefaultDashPort
+	if f.DashPort != nil {
+		c.DashPort = *f.DashPort
+	}
+	if c.DashPort < 0 || c.DashPort > 65535 {
+		return fmt.Errorf("shell3.yaml: dash_port must be 0 (disabled) or a port 1-65535; got %d", c.DashPort)
+	}
 	return nil
 }
 
@@ -289,3 +300,7 @@ func walkStrings(v reflect.Value, fn func(string) (string, error)) error {
 	}
 	return nil
 }
+
+// DefaultDashPort is where the web dash listens when `dash_port` is unset.
+// High and unassigned; an explicit 0 disables the dash entirely.
+const DefaultDashPort = 7333

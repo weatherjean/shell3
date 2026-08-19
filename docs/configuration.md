@@ -21,7 +21,7 @@ rules:
 
 ```
 ~/.shell3/
-  shell3.yaml            # wiring: models, telegram, mcp, media, background, runs_keep_days
+  shell3.yaml            # wiring: models, telegram, mcp, background, runs_keep_days, dash_port
   .env                   # secrets — never commit this file
   agent.md               # THE agent: frontmatter (model, tools, context) + prompt body
   memory.md              # a context: file the scaffold wires in by default
@@ -84,7 +84,7 @@ omitted/`true` inherits).
 Compaction is host-managed and there are no model-driven prune/compact tools.
 The Telegram front-end runs ONE long-lived conversation, so its history
 grows steadily; when it crosses `compact_at` it compacts on its own, keeping
-the conversation viable indefinitely. It happens silently — `/status` shows the current
+the conversation viable indefinitely. It happens silently — the dash shows the current
 context usage, and `shell3 ask`'s verbose output narrates each compaction as
 it runs.
 
@@ -116,9 +116,9 @@ endpoint failed to parse its own chat template, so the reply carries raw
 is used by Qwen and GLM templates). No legitimate reply contains it, so shell3
 treats such a reply as corrupt rather than an answer — a reply to you is
 replaced by `⚠️ the model produced malformed output (raw tool-call markup) —
-reply suppressed; /runs has the transcript`, and a
+reply suppressed; the runs dash has the transcript`, and a
 [task report](#task-reports) turn posts nothing at all. The transcript keeps
-the raw text either way, so `/runs` still shows what the model actually
+the raw text either way, so the run replay still shows what the model actually
 emitted. It is a symptom of the endpoint, not of your config: if it recurs,
 try the provider's other route for the model.
 
@@ -343,7 +343,7 @@ own timeout; their tools join the opted-in agents' tool lists as
 `mcp_<server>_<tool>` (`mcp_github_search_issues`). A server that is down
 loads as a **warning** — shell3 still starts, that server's tools are just
 absent until the next reload — while `shell3 health` treats it as a failure
-and reports each server's state. `/status` lists every server (up/down,
+and reports each server's state. The dash index lists every server (up/down,
 tool count, last error). At call time a dead server gets one
 automatic reconnect; if that fails too the model sees the error as tool
 output and adapts — a broken server never kills a turn.
@@ -373,7 +373,7 @@ exactly one script per kind, or none:
 The split keeps each script trivial: a read-only subagent's gate can be a
 short allowlist instead of one shared script branching on agent identity.
 A hook file whose `<name>` matches no subagent is a warning
-(`shell3 health` fails on it — it's usually a typo). `/status` states which
+(`shell3 health` fails on it — it's usually a typo). The dash index states which
 of the two it is, in as many words: **command gate armed**, or **command
 gate off** when the main agent has no `hooks/tool-call.sh`.
 
@@ -519,8 +519,10 @@ startup rather than silently narrowing access.
 non-numeric `chat_id` fails at startup. Loading a config without the block
 still succeeds — `shell3 ask` and `shell3 health` don't need it.
 
-There is no listener, no login, no tunnel: shell3 long-polls Telegram
+The chat needs no listener, no login, no tunnel: shell3 long-polls Telegram
 outbound, and access control is the token plus the one `chat_id` it answers.
+(The read-only web dash is its own localhost listener — see
+[`dash_port`](#the-web-dash--dash_port).)
 Whoever controls that chat — or the token — controls a shell on this
 machine. The threat model is in
 [security.md](security.md#the-telegram-boundary).
@@ -531,7 +533,9 @@ machine. The threat model is in
 and applies it live: prompts, models, subagents, projects, skills, cron jobs,
 and MCP servers. It does **not** re-apply the front-end's own wiring — a
 changed `telegram.chat_id` or `telegram.workdir` takes effect at the next
-`shell3 telegram` start.
+`shell3 telegram` start. The same goes for `dash_port`: the dash binds once
+at startup, so a port change needs a restart — the *data* on its pages is
+always live (resolved per request), only the listener itself is fixed.
 
 ## Attachments and media
 
@@ -612,9 +616,9 @@ default is the dispatched agent's own — a project manager runs in its
 project's `workdir`, everything else in the config dir — and setting it
 overrides even a manager's. A reload arms changed files.
 
-`/status` lists every job with its schedule, agent, workdir, `direct` flag,
+The dash's Cron table lists every job with its schedule, agent, `direct` flag,
 last run and outcome, and its rolling 7-day dispatched-run token cost where
-known — it is the one dashboard, there is no separate `/cron` command.
+known — the dash is the one dashboard; there is no cron command.
 `/run <name>` fires one by hand — the result travels the usual mail route,
 exactly as a scheduled firing would.
 
@@ -664,7 +668,7 @@ trace keeps the *cause* of an ✉️ update in the conversation: without it the
 update survives with nothing explaining it, and an agent asked later why it
 sent something has no way to answer except to guess.
 
-Report-handling turns are ordinary stored runs, so `/runs` shows exactly
+Report-handling turns are ordinary stored runs, so the runs dash shows exactly
 what the agent did with each report. A leftover `notifier.md` from an older install
 loads with a warning saying it is no longer used — delete the file.
 
@@ -687,6 +691,27 @@ you actually care about outside the store. A corrupted version stamp that
 happens to land within the valid range (e.g. a genuine `2` misread as `1`) is
 indistinguishable from an actual older schema, so that database is recreated
 empty too — the data is not recoverable.
+
+## The web dash — `dash_port`
+
+```yaml
+dash_port: 7333   # default 7333; 0 = no dash listener at all
+```
+
+`shell3 telegram` and `shell3 serve` bind the read-only dashboard on
+`127.0.0.1:<dash_port>` at startup (never `shell3 ask`). `/dash` replies
+with its URL plus a fresh ~1h token; the base URL lives in `dash_url.txt`
+beside the config (seeded with localhost, overwritten by the dash-exposing
+skill when a tunnel is set up). The dashboard shows the live conversation
+(linked to its folding transcript), background jobs with their captured
+output logs, cron schedules and per-job detail, stored run replays, and a
+read-only browser of the config directory — the kit, skills, and cron
+prompts. Credential files (`.env`, `.env.*`, `ai-do-not-read*`) appear in the
+listing but their contents are always redacted, never read from disk. A port outside 0–65535 is a load error; a
+bind failure at startup is a warning, and `/dash` reports the dash as down.
+In a kit, `dash_port` goes in the `shell3:` wiring block like every other
+top-level key. Details and the token model: [cli.md](cli.md#the-web-dash)
+and [security.md](security.md#the-web-dash).
 
 ## The runs janitor — `runs_keep_days`
 

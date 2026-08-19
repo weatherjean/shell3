@@ -38,7 +38,7 @@ is the token and the `chat_id` — see
 long-lived conversation — just type; no replying, no threading rules. A
 Telegram reply adds the quoted text as context for the agent but never
 switches conversations. `/new` starts a fresh one (the old conversation
-stays in `/runs` and the agent's searchable history); a restart resumes
+stays in the dash's runs listing and the agent's searchable history); a restart resumes
 where you left off, and automatic compaction keeps the context bounded
 however long it runs. One main-agent turn runs at a time, but sending
 always succeeds — and a **text message sent mid-turn steers the running
@@ -47,7 +47,7 @@ work in flight (messages with attachments queue and run after). While the
 agent works you see a **progress bubble** — one message listing the tools
 it's running, updating in place — which deletes itself once the answer
 arrives (it stays behind only when the turn failed, as a breadcrumb).
-`/inbox` shows what's queued; `/stop` cancels the running turn.
+`/stop` cancels the running turn (the dash shows what's queued).
 Background jobs (subagents, `bash_bg`, cron) run independently and come back
 as [task reports](configuration.md#task-reports): a failure or a
 `direct` result posts to the chat (🔔, or ⏰ for a cron origin); everything
@@ -67,25 +67,46 @@ bot loop with no credentials and no network: a plain line is a fresh message,
 
 ### Commands
 
-Answered by the bot itself: no model call, no tokens. `/status`, `/jobs`,
-`/job` and a `/run_N` replay render markdown, sent inline when small
-and as a `.md` document (plus a short summary) when it would blow past
-Telegram's message cap. The `/runs` listing is always inline; its entries are
-tappable commands, and Telegram only linkifies those in message text.
+Answered by the bot itself: no model call, no tokens. What used to be the
+view commands (`/status`, `/jobs`, `/runs`) is now the **web dash** — a
+read-only page on `127.0.0.1` that `/dash` links you to (see
+[the dash](#the-web-dash) below).
 
 | Command | What |
 |---------|------|
+| `/dash` | The dashboard URL with a fresh access token (valid ~1h). `/dash <text>` instead asks the agent for dash help — most usefully `/dash help exposing`, which sets up a tunnel via the dash-exposing skill. |
 | `/stop` | Cancel the running turn. Background jobs are **not** killed — they keep running and still report back. |
-| `/new` | Start a fresh conversation. The old one stays in `/runs` and the history index; running jobs keep going and report into the new conversation. Refused mid-turn (`/stop` first). |
-| `/inbox` | The queued state: your pending messages, and task reports waiting in sessions. |
-| `/status` | Version, config dir, agent + model + params, context usage, whether the gate is armed, tools, subagents, skills, MCP health, warnings, and the effective system prompt — plus every cron job: schedule, agent/tool, last run, outcome, and its rolling 7-day dispatched-run token cost where known. This is the one dashboard; there is no separate `/cron` command. Reports the live session (on an idle bot, the headless cron parent — `0` messages). |
-| `/jobs` | Running and finished background work: id, kind, label, status, elapsed, exit code. |
-| `/job <id>` | One job plus its output — a subagent's stored transcript, or a command's captured stdout. |
-| `/cancel <id>` | Cancel a job; cancelling a subagent cascades to the jobs it started. |
+| `/superstop` | Cancel the turn AND kill every background job — subagents (cascading to their jobs), `bash_bg` commands, in-flight cron dispatches; the cron schedule stays armed. One ⚠️ summary lists what died (id, kind, runtime); the same summary is queued into the conversation so the agent knows next turn, and the killed jobs' own completion posts are suppressed. |
+| `/new` | Start a fresh conversation. The old one stays in the dash's runs listing and the history index; running jobs keep going and report into the new conversation. Refused mid-turn (`/stop` first). |
 | `/run <name>` | Fire a scheduled job now. |
-| `/runs [page\|id]` | Stored sessions, newest first, 8 per page; each entry a tappable `/run_N` that replays that run in full (tool calls with arguments, results, and reasoning). `/runs 2` pages older; `/runs <id>` replays by id directly. |
+| `/btw <question>` | Ask outside the conversation: answered in its own child session, never entering the main context. |
 | `/reload` | Re-read the config and apply it live. Takes the turn slot, so it is refused rather than raced while a turn runs. |
 | `/quiet on\|off` | Deliver ⏰/🔔 background posts silently — no notification ping (✉️ updates are always silent); replies to you and ⚠️ failures always ring. Bare `/quiet` reports the state, which persists in `~/.shell3/quiet_mode.json`. |
+
+### The web dash
+
+`shell3 telegram` and `shell3 serve` always bind a read-only HTTP dashboard
+on `127.0.0.1` (`dash_port` in the wiring, default 7333, `0` disables). It
+renders from live runtime state and the runs store: the index (version,
+agent, model, context usage, gate, tools, skills, MCP health, warnings, and
+a one-tap link to the live conversation's transcript; background jobs, each
+bash_bg job's id linking to its captured output log; every cron job with
+schedule/outcome/rolling 7-day dispatched-run cost, each linking to its
+detail; and the queued inbox), a paginated runs listing, a full run replay
+(tool calls with arguments, results, reasoning — folded, escaped,
+self-contained), and a read-only browser of the config directory (the kit,
+skills, cron prompts — syntax left as escaped text; credential files are
+listed but their contents redacted, binary and >256 KB files flagged not
+dumped). No polling, no scripts beyond the replay's fold-all buttons; a
+floating ↻ button bottom-right re-requests the page.
+
+Every request needs `?t=<token>`: `/dash` mints one (32 random bytes, ~1h,
+several may be live at once, all forgotten on restart). Anything else gets a
+bare 403. The base URL lives in `dash_url.txt` beside the config — seeded
+with the localhost address, overwritten by the dash-exposing skill when you
+ask `/dash help exposing` to set up a tunnel (tailscale, cloudflared, or
+ngrok, in that order of preference). HTTPS is the tunnel's business; the
+listener itself never binds beyond loopback.
 
 ### Attachments and media
 
@@ -103,15 +124,17 @@ commands, task reports, cron — but the transport is
 newline-delimited JSON on stdin/stdout. This is the bring-your-own front-end
 seam: a Discord bridge or a custom dashboard backend spawns `shell3 serve`
 and translates its own surface to the wire events. No Telegram credentials
-are needed (`telegram.workdir` is still honored when present); there is no
-port and no listener — owning the process's stdio is the access model.
+are needed (`telegram.workdir` is still honored when present); the chat
+transport has no port and no listener — owning the process's stdio is the
+access model (the read-only web dash is the one exception, and serve binds
+it like telegram does).
 
 Serve keeps its own thread namespace in the runs store, so its ids and
 Telegram's never cross-resolve. See **[the protocol reference](serve.md)**
 for the full event vocabulary.
 
 ```sh
-printf '%s\n' '{"type":"message","text":"/status"}' | shell3 serve
+printf '%s\n' '{"type":"message","text":"/dash"}' | shell3 serve
 ```
 
 ## `shell3 boot` — set up a config
@@ -150,7 +173,11 @@ defaults, except `--model`, which headless boot requires): `--url`, `--model`,
 `--name`, `--key`, `--vision`, `--workdir`, `--context-window`,
 `--compact-at`, `--proxy`, `--tg-token`, `--tg-chat-id`, `--force`.
 `shell3 boot --show` reprints the post-boot summary for the existing config
-without writing or asking anything.
+without writing or asking anything. `shell3 boot --prompts` refreshes the
+scaffold-shipped prompt files (`skills/`) in an existing install after you
+upgrade the binary — run it to pick up new built-in skills like
+`dash-exposing`; your kit, `.env`, cron and hand-written skills are left
+untouched (replaced files back up under `.backup/`).
 See [configuration.md](configuration.md).
 
 
@@ -268,8 +295,8 @@ sqlite3 -readonly ~/.shell3/.shell3_project/shell3.db \
 The agent searches its own past with the built-in `history` tool (see
 [configuration.md](configuration.md#recalling-past-conversations--the-history-tool)); a `bash_bg` job's
 full output is a plain file at
-`.shell3_project/runs/<session>/jobs/<job>.log`. The `/runs` pages and
-`/run_N` replays read the same store: every session, including subagent
+`.shell3_project/runs/<session>/jobs/<job>.log`. The dash's runs pages
+and replays read the same store: every session, including subagent
 children, cron runs and `shell3 ask` sessions, with tool calls, arguments,
 results and reasoning. Sessions older than 30 days are swept at startup —
 see [`runs_keep_days`](configuration.md#the-runs-janitor--runs_keep_days)

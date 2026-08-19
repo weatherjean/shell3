@@ -94,3 +94,14 @@ func TestRunHTMLEmptyRun(t *testing.T) {
 		t.Error("empty run did not render a whole document")
 	}
 }
+
+// The replay id is used to query the store; a traversal-shaped id must be
+// rejected before anything touches it. (filepath.Base leaves "." and ".."
+// unchanged, so the equality check alone would admit both — pinned here.)
+func TestRunHTMLRejectsTraversalIDs(t *testing.T) {
+	for _, id := range []string{"", ".", "..", "../other", "a/b", "runs/../../etc"} {
+		if _, err := RunReplayHTML(t.TempDir(), id); err == nil {
+			t.Errorf("RunReplayHTML accepted invalid id %q", id)
+		}
+	}
+}

@@ -83,8 +83,6 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 	b.SetWorkDir(workDir) // resolves send_media_telegram relative paths
 	b.SetConfigDir(rt.Parts().ConfigDir())
 	b.SetLogger(rt.Parts().Log()) // host-side faults (e.g. a lost current-session marker write) land in the app log
-	b.SetVersion(version)
-	b.SetRunsRoot(rt.Parts().RunsRoot())
 
 	// The session decorator registers, for main chat sessions (not the
 	// headless subagent children), the bot's host tools. Runtime.Reload
@@ -108,6 +106,13 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 	// turn — quietly (mail_user is the way back to the chat).
 	rt.SetCompletionHost(b)
 
+	// Redeliver what the previous process left undelivered (completions that
+	// raced a shutdown, jobs killed in flight) now that the host can carry
+	// them. Start-time-only, like the janitors — ask never runs this.
+	if n := rt.RecoverCompletions(); n > 0 {
+		rt.Parts().Log().Info("recovered undelivered completions from the previous run", "count", n)
+	}
+
 	// Cron dispatches subagents, which need SOME parent session. One hidden
 	// session is the dispatch parent; it runs no turns of its own (results
 	// route as completion mail). Adopted so it is never retired and its jobs
@@ -119,13 +124,6 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 		return nil, err
 	}
 	b.AdoptSession(cronSess)
-
-	// /jobs, /job <id> and /cancel <id>: Session.Jobs reports the WHOLE job
-	// runtime, not one session's share, so the pinned cron session is as good
-	// a window as any. Cancel reuses jobManager's cascade (task_cancel
-	// semantics).
-	b.SetJobsSource(cronSess.Jobs, jobTranscriptOf(cronSess))
-	b.SetJobControl(cronSess.KillJob)
 
 	// tools adapts the loaded kit to cron.ToolRunner, resolving Parts fresh on
 	// every call so a /reload's new kit takes effect without re-wiring.
@@ -150,20 +148,20 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 	if sched != nil {
 		b.SetJobRunner(sched.Run) // /run <job>
 	}
-	// /status's Cron section reads the live scheduler's history (JobStatus
+	// The dash's Cron section reads the live scheduler's history (JobStatus
 	// carries the run counts, not just the last-run time).
-	b.SetCronStatus(func() []cron.JobStatus {
+	cronStatusFn := func() []cron.JobStatus {
 		if s := currentSched(); s != nil {
 			return s.Jobs()
 		}
 		return nil
-	})
-	// /status's Cron section also shows each job's rolling spend. A rollup
-	// failure (closed store mid-reload, corrupt db) must not break /status —
-	// log and omit costs entirely rather than fail the whole command over a
+	}
+	// The dash's Cron section also shows each job's rolling spend. A rollup
+	// failure (closed store mid-reload, corrupt db) must not break the page —
+	// log and omit costs entirely rather than fail the whole view over a
 	// section that was already best-effort (render.cronCostSuffix treats a
 	// missing entry as "unknown", never "zero").
-	b.SetCronCost(func() map[string]runs.JobCost {
+	cronCostFn := func() map[string]runs.JobCost {
 		store := rt.Parts().Store()
 		if store == nil {
 			return nil
@@ -178,7 +176,12 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 			out[c.CronJob] = c
 		}
 		return out
-	})
+	}
+
+	// The web dash: an always-on 127.0.0.1 listener over the same live state
+	// the bot used to render inline (dash_port: 0 disables; a bind failure
+	// warns and the bot runs dashless).
+	closeDash := wireDash(b, rt, cronSess, cronStatusFn, cronCostFn)
 
 	// /reload + the reload tool: rebuild config, swap the cron scheduler.
 	// The bot's host tools need no re-registration — Runtime.Reload
@@ -194,6 +197,7 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 	})
 
 	return func() {
+		closeDash()
 		if s := currentSched(); s != nil {
 			s.Stop()
 		}
