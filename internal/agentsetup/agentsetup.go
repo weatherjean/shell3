@@ -7,7 +7,6 @@ package agentsetup
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,7 +25,6 @@ import (
 	"github.com/weatherjean/shell3/internal/mediadir"
 	"github.com/weatherjean/shell3/internal/modelproxy"
 	"github.com/weatherjean/shell3/internal/paths"
-	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/review"
 	"github.com/weatherjean/shell3/internal/runs"
 )
@@ -119,13 +117,13 @@ func (p *Parts) BackgroundMaxConcurrent() int { return p.lc.BackgroundMaxConcurr
 // ModelCount returns the number of declared models.
 func (p *Parts) ModelCount() int { return len(p.lc.Models) }
 
-// AgentCount returns the number of declared agents — the kit's agents (main
-// plus every employee) when a kit is loaded, otherwise the single main agent.
+// AgentCount returns the number of agents the kit declares (the main agent
+// plus every employee).
 func (p *Parts) AgentCount() int {
-	if p.kit != nil {
-		return len(p.kit.Agents)
+	if p.kit == nil {
+		return 0
 	}
-	return len(p.lc.Agents())
+	return len(p.kit.Agents)
 }
 
 // Telegram returns the parsed telegram: block (zero value if absent).
@@ -154,157 +152,26 @@ func (p *Parts) DashPort() int { return p.lc.DashPort }
 // relationship (see runs.Store.runsDir).
 func (p *Parts) RunsRoot() string { return filepath.Dir(p.runsDir) }
 
-// Subagents returns the registered subagents (name, description, model) in
-// filename order — what a front-end needs to show the delegation roster.
-func (p *Parts) Subagents() []config.Subagent { return p.lc.Subagents() }
-
-// Skills returns the main agent's skill index (subagents carry none).
-func (p *Parts) Skills() []config.Skill { return p.lc.FirstAgent().Skills }
-
 // AgentRuntime assembles the full chat runtime for the named agent: its model
-// client, persona, and tool defs. name "" uses the first declared agent. An
-// unknown non-empty name falls back to the subagent registry (so a subagent
-// spawned by name — via the task tool or a cron job — resolves the headless
-// subagent config); a name in neither registry returns an error.
+// client, persona, and tool defs. name "" uses the kit's first declared
+// agent; a name the kit does not declare returns an error.
 func (p *Parts) AgentRuntime(name string) (chat.ActiveAgent, error) {
-	// A loaded kit owns every agent it declares: kit agents take precedence
-	// over the markdown config so a migrated install runs on the kit alone.
-	if p.kit != nil {
-		if rt, err := p.KitAgentRuntime(name); err == nil {
-			return rt, nil
-		} else if !errors.Is(err, errNoSuchKitAgent) {
-			return chat.ActiveAgent{}, err
-		}
-	}
-	if name == "" {
-		return p.runtimeForAgent(p.lc.FirstAgent())
-	}
-	if a, ok := p.lc.AgentByName(name); ok {
-		return p.runtimeForAgent(a)
-	}
-	// A subagent name passed via --agent (the spawn command): resolve it from the
-	// subagent registry into a plain headless config. Whether a resolved agent
-	// gets the task tool is decided by whether it lists subagents, not by a
-	// spawn-time flag.
-	if sa, ok := p.lc.SubagentByName(name); ok {
-		return p.runtimeForAgent(subagentToAgent(sa))
-	}
-	return chat.ActiveAgent{}, fmt.Errorf("unknown agent %q", name)
+	return p.KitAgentRuntime(name)
 }
 
-// SubagentWorkdir returns the declared working directory for a subagent —
-// non-empty only for project managers, whose shell runs in the project's
-// workdir. "" means "inherit the spawner's workdir" (the default for
-// ordinary subagents).
+// SubagentWorkdir returns the declared working directory for an employee —
+// its kit `workdir:`, with a leading ~/ expanded. "" means "inherit the
+// spawner's workdir", the default for an agent that declares none.
 func (p *Parts) SubagentWorkdir(name string) string {
-	if sa, ok := p.lc.SubagentByName(name); ok {
-		return sa.Workdir
+	if p.kit == nil {
+		return ""
+	}
+	for _, a := range p.kit.Agents {
+		if a.Name == name && a.Workdir != "" {
+			return expandHomePath(a.Workdir, p.home)
+		}
 	}
 	return ""
-}
-
-// subagentToAgent adapts a registered subagent to the config.Agent shape that
-// runtimeForAgent/BuildPersonaFor consume. The shared core copies wholesale;
-// Subagents stays empty (delegation is single-level by construction) and the
-// model-facing Description is dropped (it matters to the parent, not here).
-func subagentToAgent(sa config.Subagent) config.Agent {
-	return config.Agent{AgentCommon: sa.AgentCommon}
-}
-
-// runtimeForAgent assembles the full chat runtime for the given agent value.
-// It is the common implementation shared by the agent and subagent resolution
-// paths in AgentRuntime.
-func (p *Parts) runtimeForAgent(a config.Agent) (chat.ActiveAgent, error) {
-	md, ok := p.lc.Model(a.ModelName)
-	if !ok {
-		return chat.ActiveAgent{}, fmt.Errorf("agent %q references unknown model %q", a.Name, a.ModelName)
-	}
-	p.proxy.Ensure(md.Name, md.RunProxy)
-	client, rp := buildClient(md)
-
-	toolDefs := config.ToolDefs(a.Gates)
-
-	// Inject the `task` tool when the agent has a non-empty Subagents list —
-	// delegation is inferred from agents/ being non-empty, there is no toggle.
-	// The allowlist (names + model-facing descriptions) is baked into the
-	// tool's schema — subagent_type carries an enum plus a per-subagent
-	// description — so the model needs no separate delegation reminder.
-	// a.Subagents is also surfaced via ActiveAgent.Subagents below so the
-	// Session can validate spawns.
-	if len(a.Subagents) > 0 {
-		refs := make([]config.SubagentRef, 0, len(a.Subagents))
-		for _, n := range a.Subagents {
-			desc := ""
-			if sa, ok := p.lc.SubagentByName(n); ok {
-				desc = sa.Description
-			}
-			refs = append(refs, config.SubagentRef{Name: n, Description: desc})
-		}
-		toolDefs = append(toolDefs, config.TaskToolFor(refs), config.TaskListTool, config.TaskStatusTool, config.TaskCancelTool)
-	}
-
-	// Append the opted-in MCP servers' tool defs (the mcp: frontmatter) and route their
-	// names to the host-tool dispatcher. The map is fresh per call: session
-	// RegisterHostTool (send_media_telegram etc.) mutates it later.
-	var hostNames map[string]bool
-	if p.mcp != nil && (a.MCPAll || len(a.MCP) > 0) {
-		mcpDefs := p.mcp.Tools(a.MCP, a.MCPAll)
-		if len(mcpDefs) > 0 {
-			toolDefs = append(toolDefs, mcpDefs...)
-			hostNames = make(map[string]bool, len(mcpDefs))
-			for _, d := range mcpDefs {
-				hostNames[d.Name] = true
-			}
-		}
-	}
-
-	prompt := p.lc.BuildPersonaFor(a)
-
-	// toolNames is exactly toolDefs' names — derived once at the end so the
-	// two can never skew.
-	toolNames := make([]string, 0, len(toolDefs))
-	for _, t := range toolDefs {
-		toolNames = append(toolNames, t.Name)
-	}
-
-	// ActiveSkills is the display list (the status tool, the dash): resolved
-	// skill names in index order.
-	skillNames := make([]string, 0, len(a.Skills))
-	for _, s := range a.Skills {
-		skillNames = append(skillNames, s.Name)
-	}
-
-	// prune=false zeroes the effective prune threshold for this agent/subagent;
-	// PruneAt=0 is already the disabled state downstream (chat.maybeCompact).
-	// nil/true inherit the model's prune_at — the flag can gate the stage but
-	// never invent a threshold the model doesn't declare.
-	pruneAt := md.PruneAt
-	if a.Prune != nil && !*a.Prune {
-		pruneAt = 0
-	}
-
-	return chat.ActiveAgent{
-		Personality: persona.Persona{
-			Name:         a.Name,
-			SystemPrompt: prompt,
-			Tools:        toolDefs,
-		},
-		ModeLabel:    a.Name,
-		ActiveSkills: skillNames,
-		ActiveTools:  toolNames,
-		LLM:          client,
-		Params:       rp,
-		ModelID:      md.ModelID,
-		AgentKnobs: chat.AgentKnobs{
-			HostToolNames: hostNames,
-			Subagents:     a.Subagents,
-			Environment:   true,
-			ContextWindow: md.ContextWindow,
-			CompactAt:     md.CompactAt,
-			KeepRecent:    md.KeepRecent,
-			PruneAt:       pruneAt,
-		},
-	}, nil
 }
 
 // EnvironmentReminder renders the host-injected Environment standing reminder
@@ -337,11 +204,7 @@ func EnvironmentReminder(configDir, runsDir, model, sessionID string) string {
 		// Name what is actually on disk. A reminder that lists files the
 		// install does not have teaches the model a layout it will then
 		// contradict itself about.
-		layout := "shell3.sh (agents + tools), skills/, projects/<agent>/skills/, hooks/"
-		if !fileExists(filepath.Join(configDir, KitFileName)) {
-			layout = "shell3.yaml, agent.md, skills/, hooks/"
-		}
-		fmt.Fprintf(&b, "- config: `%s` (your config directory: %s — edit it via the self-evolve skill)\n", configDir, layout)
+		fmt.Fprintf(&b, "- config: `%s` (your config directory: %s (wiring, agents, tools, the gate), skills/, projects/<agent>/skills/ — edit it via the self-evolve skill)\n", configDir, KitFileName)
 	}
 	// Derive the model-facing paths from paths.ProjectDirName (its single
 	// source): a renamed project dir must not leave the reminder teaching the
@@ -352,20 +215,17 @@ func EnvironmentReminder(configDir, runsDir, model, sessionID string) string {
 	return b.String()
 }
 
-// RefreshPromptFor re-renders the named agent's or subagent's system prompt.
-// name may be a declared agent name or a registered subagent
-// name; callers pass names already validated by a successful AgentRuntime call
-// (names come from ModeLabel, set to a.Name only on a successful lookup). The
-// FirstAgent fallback exists only so an impossible miss degrades to a sane
-// prompt rather than panicking; in correct use that branch is never reached.
+// RefreshPromptFor re-renders the named kit agent's system prompt, so a
+// `context:` file edited mid-conversation is current on the next turn.
+// Callers pass names already validated by a successful AgentRuntime call
+// (they come from ModeLabel). An impossible miss returns "" rather than
+// panicking; the turn then keeps the prompt it already has.
 func (p *Parts) RefreshPromptFor(name string) string {
-	if a, ok := p.lc.AgentByName(name); ok {
-		return p.lc.BuildPersonaFor(a)
+	r, err := p.KitAgent(name)
+	if err != nil {
+		return ""
 	}
-	if sa, ok := p.lc.SubagentByName(name); ok {
-		return p.lc.BuildPersonaFor(subagentToAgent(sa))
-	}
-	return p.lc.BuildPersonaFor(p.lc.FirstAgent())
+	return p.kitPrompt(r)
 }
 
 // SessionOptions parameterizes one session derived from shared Parts.
@@ -603,7 +463,6 @@ func (b *builder) loadConfig() error {
 		b.log.Warn("config warning", "detail", w)
 		fmt.Fprintln(os.Stderr, "shell3: config warning: "+w)
 	}
-	b.closers = append(b.closers, func() { lc.Close() })
 	return nil
 }
 
@@ -656,12 +515,7 @@ func (p *Parts) Reviewer() *review.Reviewer {
 	p.reviewOnce.Do(func() {
 		name := p.lc.ReviewModel
 		if name == "" {
-			if p.kit != nil && len(p.kit.Agents) > 0 {
-				name = p.kit.Agents[0].Model
-			}
-			if name == "" {
-				name = p.lc.FirstAgent().ModelName
-			}
+			name = p.defaultModelName()
 		}
 		md, ok := p.lc.Model(name)
 		if !ok {
@@ -702,7 +556,7 @@ func buildClient(md config.Model) (chat.LLMClient, llm.RequestParams) {
 
 // ResolveConfigDir returns the config directory to load: the explicit flag (a
 // literal directory path), else the default ~/.shell3. It does NOT look in
-// cwd. Returns an error when the resolved directory has no shell3.yaml —
+// cwd. Returns an error when the resolved directory has no kit —
 // catching a typo'd --config here, with a clear message, instead of surfacing
 // it later as a raw load error.
 func ResolveConfigDir(flag, homeDir string) (string, error) {
@@ -710,12 +564,12 @@ func ResolveConfigDir(flag, homeDir string) (string, error) {
 	if dir == "" {
 		dir = paths.NewGlobal(homeDir).Root
 	}
-	// A kit is a complete config on its own — it carries its wiring in a
-	// `shell3:` block — so either file makes the directory valid.
-	if fileExists(filepath.Join(dir, KitFileName)) || fileExists(filepath.Join(dir, "shell3.yaml")) {
+	// The kit is the config: it carries its wiring in a `shell3:` block, its
+	// agents, its tools and its gate.
+	if fileExists(filepath.Join(dir, KitFileName)) {
 		return dir, nil
 	}
-	return "", fmt.Errorf("no %s or shell3.yaml in %s — run 'shell3 boot' to create one (or pass --config <dir>)", KitFileName, dir)
+	return "", fmt.Errorf("no %s in %s — run 'shell3 boot' to create one (or pass --config <dir>)", KitFileName, dir)
 }
 
 func fileExists(p string) bool {

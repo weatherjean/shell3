@@ -83,11 +83,20 @@ func parseSkillFile(data []byte, filename string) (Skill, error) {
 // directory or an invalid file yields no entry rather than an error — a broken
 // skill must never fail a turn (shell3 health surfaces them instead).
 func ScanSkills(dir string) []Skill {
-	skills, err := scanSkillDir(dir, func(string) {})
-	if err != nil {
-		return nil
-	}
+	skills, _ := ScanSkillsChecked(dir)
 	return skills
+}
+
+// ScanSkillsChecked is ScanSkills plus the problems it silently skipped, one
+// line per file: `shell3 health` is where a stray .md must be visible, since
+// nothing else in the running system ever reports it.
+func ScanSkillsChecked(dir string) ([]Skill, []string) {
+	var warns []string
+	skills, err := scanSkillDir(dir, func(w string) { warns = append(warns, w) })
+	if err != nil {
+		return nil, append(warns, fmt.Sprintf("skills dir %q: %v", dir, err))
+	}
+	return skills, warns
 }
 
 // RenderSkills is the `## Skills` prompt section: one line per skill giving its

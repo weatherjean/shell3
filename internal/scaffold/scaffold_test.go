@@ -165,7 +165,6 @@ func TestRenderBaseConfigVision(t *testing.T) {
 		if err != nil {
 			t.Fatalf("vision config failed to load: %v", err)
 		}
-		defer c.Close()
 		if len(c.Warnings()) != 0 {
 			t.Errorf("vision config loaded with warnings: %v", c.Warnings())
 		}
@@ -249,7 +248,6 @@ func TestRenderedConfigLoads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rendered config failed to load with empty api_key: %v", err)
 	}
-	defer c.Close()
 
 	if len(c.Models) < 1 {
 		t.Errorf("expected >= 1 model, got %d", len(c.Models))
@@ -354,7 +352,6 @@ func TestRenderBaseConfigEscapesYAMLSpecials(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config with YAML-special inputs failed to load: %v", err)
 	}
-	defer c.Close()
 	// The raw (unescaped) values must round-trip into the loaded model.
 	m := c.Models[0]
 	if m.BaseURL != v.BaseURL {

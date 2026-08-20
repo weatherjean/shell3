@@ -5,10 +5,12 @@ every employee it can dispatch, and the tools and knowledge each of them has.
 
 ```
 ~/.shell3/
-  shell3.sh      wiring + main agent + every employee + their tools and skills
+  shell3.sh      wiring + main agent + every employee + their tools, skills and gate
   .env           secrets
+  skills/        main-agent skills
+  projects/<agent>/skills/   an employee's own skills
   cron/          schedules
-  hooks/         gates
+  lib/bin/       reusable glue the agent runs through bash
 ```
 
 A directory holding only `shell3.sh` and `.env` is a complete, runnable config.
@@ -215,7 +217,7 @@ Drain one niche from the queue. Report only what changed.
 
 Frontmatter takes exactly one of `agent:` or `tool:` — a job is either a
 prompt or a tool call, never both, never neither. `tool:` names a declared
-tool and skips the agent entirely: no dispatch, no subagent, no model turn at
+tool and skips the agent entirely: no dispatch, no employee, no model turn at
 all — just the tool's shell function, called directly on schedule. This is
 the valve for mechanical, idempotent work (a sync, a rotation) where a
 prompt job's whole cost is the turn spent judging its own output:
@@ -274,7 +276,7 @@ main_gate() {
 ```
 
 An agent no `gate:` names runs ungated, and there is no fallback between
-agents — a subagent left out is a way around every rule the main agent has.
+agents — an employee left out is a way around every rule the main agent has.
 
 **What a gate is worth.** The agent can rewrite it in two lines of Python;
 matching shell text stops an honest mistake, not an agent that means to get

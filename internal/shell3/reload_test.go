@@ -32,15 +32,16 @@ func TestReloadPicksUpConfigChange(t *testing.T) {
 	}
 
 	writeTreeFiles(t, dir, map[string]string{
-		"shell3.yaml":      baseYAML + "telegram:\n  chat_id: \"123456789\"\n",
-		"agents/second.md": "---\ndescription: d\n---\np2\n",
+		"shell3.sh": baseWiring[:len(baseWiring)-len("#---\n")] +
+			"#   telegram:\n#     chat_id: \"123456789\"\n#---\n" +
+			kitAgentDecl("main", "hi") + kitAgentDecl("second", "p2", "description: d"),
 	})
 	res, err := rt.Reload()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Agents != 1 {
-		t.Fatalf("expected 1 agent after reload, got %d (notes: %v)", res.Agents, res.Notes)
+	if res.Agents != 2 {
+		t.Fatalf("expected 2 agents after reload, got %d (notes: %v)", res.Agents, res.Notes)
 	}
 	if rt.Telegram().ChatID != "123456789" {
 		t.Fatalf("telegram config mirror not refreshed: %+v", rt.Telegram())
@@ -65,7 +66,7 @@ func TestReloadRejectsBrokenConfigAndKeepsRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writeReloadCfg(t, filepath.Join(dir, "shell3.yaml"), "models: [not, a, map")
+	writeReloadCfg(t, filepath.Join(dir, "shell3.sh"), "#---\n# shell3:\n#   models: [not, a, map\n#---\n")
 	if _, err := rt.Reload(); err == nil {
 		t.Fatal("Reload must fail on a broken config")
 	}

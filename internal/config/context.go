@@ -166,33 +166,6 @@ func relForPrompt(configDir, m string) string {
 	return filepath.ToSlash(rel)
 }
 
-// validateContextEntries enforces the load-time rules for the main agent's
-// `context:` list: a literal (non-glob) entry must exist (missing = load
-// error, strict tradition); a glob that matches nothing is legal but records a
-// warning (shell3 health hardens it into a failure). A malformed glob pattern
-// is a load error.
-func validateContextEntries(dir string, entries []string, warn func(string)) error {
-	for _, e := range entries {
-		if isContextGlob(e) {
-			matches, err := filepath.Glob(filepath.Join(dir, e))
-			if err != nil {
-				return fmt.Errorf("agent.md: context glob %q: %w", e, err)
-			}
-			if len(matches) == 0 {
-				warn(fmt.Sprintf("agent.md: context glob %q matched no files", e))
-			}
-			continue
-		}
-		if _, err := os.Stat(filepath.Join(dir, e)); err != nil {
-			if os.IsNotExist(err) {
-				return fmt.Errorf("agent.md: context file %q does not exist", e)
-			}
-			return fmt.Errorf("agent.md: context file %q: %w", e, err)
-		}
-	}
-	return nil
-}
-
 // RenderContext reads an agent's context: entries and renders them as the
 // prompt's `## Context` section, one `### <path>` per file. Returns "" when
 // there are no entries. A malformed glob (rejected at load) yields "" rather

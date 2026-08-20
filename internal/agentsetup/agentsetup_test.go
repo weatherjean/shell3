@@ -31,32 +31,49 @@ func writeTree(t *testing.T, dir string, files map[string]string) {
 	}
 }
 
-const minimalYAML = `models:
-  main:
-    base_url: https://example.test/v1
-    api_key: env:TEST_KEY
-    model: test-model
-    context_window: 1000
+// minimalWiring is the `shell3:` block of the fixtures below: one model
+// referencing an env-injected key.
+const minimalWiring = `#---
+# shell3:
+#   models:
+#     main:
+#       base_url: https://example.test/v1
+#       api_key: env:TEST_KEY
+#       model: test-model
+#       context_window: 1000
+#---
 `
 
-// writeMinimalConfig writes a tree Build can load: one model referencing an
-// env-injected key, and an agent.md selecting it.
-func writeMinimalConfig(t *testing.T, dir string) {
-	t.Helper()
-	writeTree(t, dir, map[string]string{
-		"shell3.yaml": minimalYAML,
-		"agent.md":    "---\nmodel: main\n---\nyou are a tester\n",
-	})
+// kitAgent renders one `agent:` declaration plus its prompt function. extra
+// holds additional frontmatter lines (already "# "-prefixed content, one per
+// entry) and body is the prompt text.
+func kitAgent(name, body string, extra ...string) string {
+	var b strings.Builder
+	b.WriteString("\n#---\n# agent: " + name + "\n# model: main\n")
+	for _, e := range extra {
+		b.WriteString("# " + e + "\n")
+	}
+	b.WriteString("#---\n" + name + "_prompt() { cat <<'SHELL3_EOF'\n" + body + "\nSHELL3_EOF\n}\n")
+	return b.String()
 }
 
-// writeSubagentConfig writes a tree with a registered subagent ("researcher")
-// beside the main agent.
+// minimalKit is the smallest kit BuildParts can load.
+var minimalKit = minimalWiring + kitAgent("main", "you are a tester")
+
+// writeMinimalConfig writes a tree Build can load.
+func writeMinimalConfig(t *testing.T, dir string) {
+	t.Helper()
+	writeTree(t, dir, map[string]string{"shell3.sh": minimalKit})
+}
+
+// writeSubagentConfig writes a kit with an employee ("researcher") beside the
+// main agent.
 func writeSubagentConfig(t *testing.T, dir string) {
 	t.Helper()
 	writeTree(t, dir, map[string]string{
-		"shell3.yaml":          minimalYAML,
-		"agent.md":             "---\nmodel: main\ntools: [bash]\n---\nyou are a coder\n",
-		"agents/researcher.md": "---\ndescription: investigate things\ntools: [bash]\n---\nyou are a researcher\n",
+		"shell3.sh": minimalWiring +
+			kitAgent("main", "you are a coder", "use: [bash]") +
+			kitAgent("researcher", "you are a researcher", "description: investigate things", "use: [bash]"),
 	})
 }
 
@@ -129,10 +146,10 @@ func TestBuild_Agent_DefaultsToTheAgent(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 	defer cleanup()
-	if cfg.ModeLabel != "agent" {
-		t.Errorf("default active agent = %q, want %q", cfg.ModeLabel, "agent")
+	if cfg.ModeLabel != "main" {
+		t.Errorf("default active agent = %q, want %q", cfg.ModeLabel, "main")
 	}
-	// The persona is the agent.md body verbatim; the host Environment facts
+	// The persona is the kit prompt function's body verbatim; the host Environment facts
 	// live in a standing reminder (set by internal/shell3), NOT the system prompt.
 	if !strings.HasPrefix(cfg.Personality.SystemPrompt, "you are a coder") {
 		t.Errorf("system prompt = %q, want a prefix of the agent's prompt", cfg.Personality.SystemPrompt)
@@ -163,14 +180,16 @@ func TestBuild_RunProxy_SpawnsOnActivation(t *testing.T) {
 	tmp := t.TempDir()
 	marker := filepath.Join(tmp, "proxy-started")
 	writeTree(t, tmp, map[string]string{
-		"shell3.yaml": `models:
-  main:
-    base_url: http://localhost:8787/v1
-    api_key: env:TEST_KEY
-    model: test-model
-    run_proxy: "touch ` + marker + `"
-`,
-		"agent.md": "---\nmodel: main\n---\nhi\n",
+		"shell3.sh": `#---
+# shell3:
+#   models:
+#     main:
+#       base_url: http://localhost:8787/v1
+#       api_key: env:TEST_KEY
+#       model: test-model
+#       run_proxy: "touch ` + marker + `"
+#---
+` + kitAgent("main", "hi"),
 	})
 
 	_, cleanup, err := buildConfig(agentsetup.Options{
@@ -225,7 +244,7 @@ func TestSessionConfigs_Independent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if a.ModeLabel != "agent" {
+	if a.ModeLabel != "main" {
 		t.Fatalf("config A's agent changed to %q when B re-resolved", a.ModeLabel)
 	}
 	if b.ModeLabel != "researcher" {
@@ -240,9 +259,8 @@ func TestSessionConfigs_Independent(t *testing.T) {
 func TestSessionConfig_ContextReadPerSession(t *testing.T) {
 	tmp := t.TempDir()
 	writeTree(t, tmp, map[string]string{
-		"shell3.yaml": minimalYAML,
-		"agent.md":    "---\nmodel: main\ncontext: [memory.md]\n---\nyou are a tester\n",
-		"memory.md":   "MEMORY-V1",
+		"shell3.sh": minimalWiring + kitAgent("main", "you are a tester", "context: [memory.md]"),
+		"memory.md": "MEMORY-V1",
 	})
 	parts, cleanup, err := agentsetup.BuildParts(agentsetup.Options{
 		ConfigDir: tmp,
@@ -285,14 +303,13 @@ func TestSessionConfig_ContextReadPerSession(t *testing.T) {
 }
 
 // TestBuild_MalformedConfig_Errors characterizes the post-log-open error path:
-// a present but invalid shell3.yaml resolves (so the log opens), then
-// config.Load fails — Build must surface the error.
+// a present but invalid kit resolves (so the log opens), then config.Load
+// fails — Build must surface the error.
 func TestBuild_MalformedConfig_Errors(t *testing.T) {
 	tmp := t.TempDir()
 	home := t.TempDir()
 	writeTree(t, tmp, map[string]string{
-		"shell3.yaml": "models: [not, a, map\n",
-		"agent.md":    "---\nmodel: main\n---\nhi\n",
+		"shell3.sh": "#---\n# shell3:\n#   models: [not, a, map\n#---\n",
 	})
 
 	_, _, err := buildConfig(agentsetup.Options{
@@ -404,8 +421,8 @@ func TestSessionConfig_ResolvesSubagentAsAgent(t *testing.T) {
 }
 
 // TestRefreshPromptFor_Subagent asserts that RefreshPromptFor returns the
-// subagent's own system prompt when called with a subagent name, covering the
-// /clear path for a session running a subagent config.
+// employee's own system prompt when called with an employee name — the
+// per-turn refresh path for a session running an employee's config.
 func TestRefreshPromptFor_Subagent(t *testing.T) {
 	p, cleanup := subagentParts(t)
 	defer cleanup()
@@ -421,18 +438,18 @@ func TestRefreshPromptFor_Subagent(t *testing.T) {
 }
 
 // TestAgentRuntime_TaskToolInSchema proves the invariant: the `task` tool
-// appears in the main agent's schema iff agents/ is non-empty (delegation is
-// inferred, there is no toggle) — and the allowlist (names + descriptions) is
+// appears in the main agent's schema iff the kit declares an employee
+// (delegation is inferred, there is no toggle) — and the allowlist (names + descriptions) is
 // baked into the tool's subagent_type parameter, which is the model's only
 // source for it.
 func TestAgentRuntime_TaskToolInSchema(t *testing.T) {
-	// --- Tree WITH agents/: task + management tools must be in schema ---
+	// --- Kit WITH an employee: task + management tools must be in schema ---
 	p, cleanup := subagentParts(t)
 	defer cleanup()
 
-	rt, err := p.AgentRuntime("agent")
+	rt, err := p.AgentRuntime("main")
 	if err != nil {
-		t.Fatalf("AgentRuntime(agent): %v", err)
+		t.Fatalf("AgentRuntime(main): %v", err)
 	}
 	toolSet := make(map[string]bool)
 	for _, td := range rt.Personality.Tools {
@@ -456,7 +473,7 @@ func TestAgentRuntime_TaskToolInSchema(t *testing.T) {
 		}
 	}
 
-	// --- Tree WITHOUT agents/: management tools must NOT be in schema ---
+	// --- Kit with only a main agent: management tools must NOT be in schema ---
 	tmp2 := t.TempDir()
 	writeMinimalConfig(t, tmp2)
 	parts2, cleanup2, err := agentsetup.BuildParts(agentsetup.Options{
@@ -469,9 +486,9 @@ func TestAgentRuntime_TaskToolInSchema(t *testing.T) {
 	}
 	defer cleanup2()
 
-	rt2, err := parts2.AgentRuntime("agent")
+	rt2, err := parts2.AgentRuntime("main")
 	if err != nil {
-		t.Fatalf("AgentRuntime2(agent): %v", err)
+		t.Fatalf("AgentRuntime2(main): %v", err)
 	}
 	for _, td := range rt2.Personality.Tools {
 		for _, mgmt := range []string{"task", "task_list", "task_status", "task_cancel"} {
@@ -482,8 +499,8 @@ func TestAgentRuntime_TaskToolInSchema(t *testing.T) {
 	}
 }
 
-// TestAgentRuntime_UnknownErrors asserts that AgentRuntime returns an error for
-// a name in neither the agent nor the subagent registry.
+// TestAgentRuntime_UnknownErrors asserts that AgentRuntime returns an error
+// for a name the kit does not declare.
 func TestAgentRuntime_UnknownErrors(t *testing.T) {
 	p, cleanup := subagentParts(t)
 	defer cleanup()
@@ -494,53 +511,5 @@ func TestAgentRuntime_UnknownErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ghost") {
 		t.Errorf("error should name the unknown agent, got: %v", err)
-	}
-}
-
-// TestBuild_PruneFlag pins the prune=false overlay: the model's derived
-// prune_at (compact_at*0.6) is zeroed for an agent that opts out, and kept for
-// a subagent that leaves the flag unset. Thresholds stay model-level; the flag
-// only gates the stage.
-func TestBuild_PruneFlag(t *testing.T) {
-	tmp := t.TempDir()
-	writeTree(t, tmp, map[string]string{
-		"shell3.yaml": `models:
-  main:
-    base_url: https://example.test/v1
-    api_key: env:TEST_KEY
-    model: test-model
-    compact_at: 100000
-`,
-		"agent.md":             "---\nmodel: main\nprune: false\n---\np\n",
-		"agents/inheriting.md": "---\ndescription: d\n---\np\n",
-	})
-
-	parts, cleanup, err := agentsetup.BuildParts(agentsetup.Options{
-		ConfigDir: tmp,
-		CWD:       tmp,
-		HomeDir:   t.TempDir(),
-	})
-	if err != nil {
-		t.Fatalf("BuildParts: %v", err)
-	}
-	defer cleanup()
-
-	out, err := parts.AgentRuntime("agent")
-	if err != nil {
-		t.Fatalf("AgentRuntime(agent): %v", err)
-	}
-	if out.PruneAt != 0 {
-		t.Errorf("agent: PruneAt = %d, want 0 (prune=false)", out.PruneAt)
-	}
-	if out.CompactAt != 100000 {
-		t.Errorf("agent: CompactAt = %d, want 100000 (thresholds stay model-level)", out.CompactAt)
-	}
-
-	inh, err := parts.AgentRuntime("inheriting")
-	if err != nil {
-		t.Fatalf("AgentRuntime(inheriting): %v", err)
-	}
-	if want := 100000 * 60 / 100; inh.PruneAt != want {
-		t.Errorf("inheriting: PruneAt = %d, want %d (model default)", inh.PruneAt, want)
 	}
 }

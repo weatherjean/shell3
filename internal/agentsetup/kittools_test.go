@@ -86,26 +86,3 @@ func TestKitPathReturnsTheLoadedKitFile(t *testing.T) {
 		t.Fatalf("KitPath = %q, want it to end in shell3.sh", got)
 	}
 }
-
-// A markdown-only config (no shell3.sh) loads no kit at all, so
-// KitToolByName must report false rather than panic on a nil kit.
-func TestKitToolByNameWithNoKitLoaded(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "shell3.yaml"), []byte("models:\n  m: { base_url: \"http://x\", api_key: k, model: id }\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "agent.md"), []byte("---\nmodel: m\n---\np\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	parts, cleanup, err := agentsetup.BuildParts(agentsetup.Options{
-		ConfigDir: dir, CWD: dir, HomeDir: t.TempDir(),
-	})
-	if err != nil {
-		t.Fatalf("BuildParts: %v", err)
-	}
-	defer cleanup()
-
-	if _, ok := parts.KitToolByName("anything"); ok {
-		t.Fatal("KitToolByName should report false when no kit is loaded")
-	}
-}

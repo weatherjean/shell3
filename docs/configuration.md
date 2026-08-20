@@ -1,45 +1,66 @@
-> **The markdown config below is the older model.** A `shell3.sh` kit is
-> now the primary way to configure shell3 — one file holding the wiring,
-> every agent, and their tools and skills. See [kits.md](kits.md) and
-> [tools.md](tools.md). This document describes the markdown tree, which
-> still loads when no kit is present.
-
 # Configuration
 
-Your config is a **directory** (default `~/.shell3/`), and it follows four
-rules:
+Your config is a **directory** (default `~/.shell3/`), and its centre is ONE
+file: `shell3.sh`, the **kit**. It holds the wiring, every agent, their tools
+and the gate. [kits.md](kits.md) is the kit's own reference — its block
+grammar, `agent:`/`shared:`/`tool:`/`skill:`/`test:` declarations, and the
+authoring loop; this page documents what you can put in the kit's `shell3:`
+wiring block and the directories beside it.
 
-1. **YAML wires it** — connections and knobs live in `shell3.yaml`.
-2. **Markdown prompts it** — anything with a prompt body is a `.md` file with
-   frontmatter.
+Four rules:
+
+1. **YAML wires it** — connections and knobs live in the kit's `shell3:`
+   block, a YAML document inside a `#---` comment fence.
+2. **Shell declares it** — an agent, a tool, a skill or a gate is a
+   declaration block bound to the shell function under it.
 3. **Files enable it** — a feature is on because its file exists, off because
    it doesn't. No enable flags.
-4. **One script gates it** — policy is a bash hook script, not a config
+4. **One function gates it** — policy is a bash function, not a config
    language.
 
 `shell3 boot` writes a working tree; this page is for going beyond it.
 
 ```
 ~/.shell3/
-  shell3.yaml            # wiring: models, telegram, mcp, background, runs_keep_days, dash_port
+  shell3.sh              # THE kit: wiring, agents, tools, skills, gate, tests
   .env                   # secrets — never commit this file
-  agent.md               # THE agent: frontmatter (model, tools, context) + prompt body
   memory.md              # a context: file the scaffold wires in by default
-  agents/<name>.md       # subagents; the file IS the registration
-  projects.md            # the agent's standing project index (brief)
-  skills/<name>.md       # skills; drop a file in, reload
-  hooks/tool-call.sh     # command gate for the main agent
-  hooks/<name>.tool-call.sh   # command gate for subagent <name>
-  hooks/*.tool-result.sh # output rewriters (same per-agent split)
+  skills/<name>.md       # main-agent skills; drop a file in, reload
+  projects/<agent>/skills/<name>.md   # an employee's own skills
   cron/<name>.md         # scheduled jobs (checklists included — see below)
+  lib/bin/<script>       # reusable glue the agent runs through bash
 ```
 
 `--config`/`-c` takes a path to a config directory; omitted, it's `~/.shell3`.
 The working directory is never consulted, so behavior doesn't depend on where
-you launch from.
+you launch from. A directory without a `shell3.sh` is not a config: the load
+fails naming the file to create.
 
-Secrets are referenced from YAML as `env:KEY` — resolved from the `.env`
-beside `shell3.yaml`, anywhere inside a string value (`"Bearer env:LINEAR_KEY"`
+Every YAML block on this page lives inside the kit's wiring fence. Where a
+snippet shows
+
+```yaml
+models:
+  main:
+    base_url: …
+```
+
+the kit carries it as
+
+```bash
+#---
+# shell3:
+#   models:
+#     main:
+#       base_url: …
+#---
+```
+
+— same YAML, one `#` and an indent deeper. Snippets below show the bare YAML
+for readability.
+
+Secrets are referenced from the wiring as `env:KEY` — resolved from the `.env`
+beside `shell3.sh`, anywhere inside a string value (`"Bearer env:LINEAR_KEY"`
 works). An `env:` reference naming a missing key fails the load.
 
 ## Models
@@ -77,7 +98,7 @@ no model-driven prune/compact tools. Two optional knobs:
                          #   setting it without compact_at is a load error
 ```
 
-The agent (and any subagent) can skip the prune tier individually with
+The agent can skip the prune tier with
 `prune: false` in its frontmatter (the thresholds stay on the model;
 omitted/`true` inherits).
 
@@ -138,24 +159,31 @@ models:
     # ...
 ```
 
-## The agent — `agent.md`
+## Agents — `agent:` blocks
 
-The agent is one markdown file: frontmatter for the wiring, body for the
-system prompt. There is exactly one agent because there is exactly one
-`agent.md` — specialists are [subagents](#subagents--delegation).
+An agent is a declaration block plus the prompt function under it. The first
+`agent:` the kit declares is the **main agent**; every later one is an
+employee the main agent can delegate to.
 
-```markdown
----
-model: main
-tools: [bash, bash_bg, edit, media, history]
-context: [memory.md]
----
+```bash
+#---
+# agent: main
+# model: main
+# use: [bash, bash_bg, edit, media, history]
+# context: [memory.md]
+#---
+main_prompt() { cat <<'SHELL3_EOF'
 You are a personal assistant running inside shell3…
+SHELL3_EOF
+}
 ```
 
-Frontmatter keys: `model` (required), `tools` (any of `bash`, `bash_bg`,
-`edit`, `media`, `read`, `list_files`, `history`), `mcp` (see [MCP](#mcp-servers)),
-`prune`, `context` (see below).
+Declaration keys: `model` (a name from the wiring's `models:`; omitted, the
+main agent's model), `use` (built-ins — any of `bash`, `bash_bg`, `edit`,
+`media`, `read`, `list_files`, `history` — plus the names of declared tools
+and `shared:` groups), `mcp` (see [MCP](#mcp-servers)), `workdir`,
+`description` (what the main model reads when deciding to delegate; employees
+only), and `context` (see below).
 
 ### Giving the agent a memory — `context:`
 
@@ -195,10 +223,10 @@ context: [memory.md, notes/*.md]
   per-run detail, point it at a sibling file that is **not** in `context:` and
   let it `rg` that on demand — the durable conclusions belong in the context
   file, the raw log does not.
-- Main agent only — subagent frontmatter rejects `context` (like `skills`,
-  subagents carry none). `projects.md` keeps its own separate mechanism (the
-  standing portfolio brief, read at config load) — no unification with
-  `context:` in this release.
+- Every agent may declare it. An employee's paths resolve against its own
+  `workdir` when it declares one, the config dir otherwise — so each
+  employee's `context: [memory.md]` is its own memory, not the main
+  agent's.
 
 `shell3 boot` scaffolds `context: [memory.md]` plus a starter `memory.md`;
 existing configs are untouched since the key is optional.
@@ -207,10 +235,10 @@ The main agent is **bash-first**: it reads with `cat`/`sed -n`, lists with
 `ls`/`find`, searches with `rg` — all through `bash` — and a hallucinated
 `read_file`/`grep` call gets an error redirecting it back to bash/edit_file.
 The `read` and `list_files` tools exist as an opt-in for agents that do better
-with structured file tools (typically a [subagent](#subagents--delegation) on
+with structured file tools (typically an [employee](#employees--delegation) on
 a smaller model) — list them in `tools` to turn them on; leave them out and
 the bash-first redirect stands. A read-only agent is a policy, not a tool set:
-gate `bash` in its [hook script](#the-command-gate--hookssh).
+gate `bash` in its [gate function](#the-command-gate--gate).
 
 ### Recalling past conversations — the `history` tool
 
@@ -230,38 +258,41 @@ The tool is read-only, and it is the whole interface: the agent never writes
 to the database. Leave `history` out of `tools` and the name hits the same
 unknown-tool redirect as `read_file`.
 
-## Subagents & delegation
+## Employees & delegation
 
-A subagent is a delegatable specialist: one file in `agents/`. The filename is
-its name; the file is the registration — the main agent can spawn every
-subagent in the directory, and the `task` tools appear automatically as soon
-as any subagent exists — a file in `agents/`, or a project's manager (no
-toggle). `description` is required: it's what the main model reads when
-deciding to delegate. `agent.md` is illegal here — the name is reserved.
+An employee is a delegatable specialist: any `agent:` block after the first.
+The declaration IS the registration — the main agent can spawn every employee
+the kit declares, and the `task` tools appear automatically as soon as one
+exists (no toggle). `description` is required on an employee: it's what the
+main model reads when deciding to delegate.
 
-```markdown
----
-description: Use for substantial, self-contained work you can hand off whole.
-tools: [bash]
----
+```bash
+#---
+# agent: assistant
+# description: Use for substantial, self-contained work you can hand off whole.
+# use: [bash]
+#---
+assistant_prompt() { cat <<'SHELL3_EOF'
 You are a general-purpose assistant…
+SHELL3_EOF
+}
 ```
 
 `model` is optional (defaults to the main agent's). With at least one
-subagent, the agent gets four tools: `task` (spawn: `{subagent_type, prompt,
+employee, the main agent gets four tools: `task` (spawn: `{subagent_type, prompt,
 description}`; returns immediately), `task_list`, `task_status <id>`,
-`task_cancel <id>`. The subagent names and descriptions are baked into the
+`task_cancel <id>`. The employee names and descriptions are baked into the
 `task` tool's schema (an enum on `subagent_type`), so no per-turn reminder is
 spent.
 
-A spawned subagent is an **in-process background job** (a child-session
-goroutine, not a subprocess). Subagents run headless (their hook scripts see
-`headless: true`), and delegation is single-level by construction — a
-subagent never gets the `task` tool.
+A spawned employee is an **in-process background job** (a child-session
+goroutine, not a subprocess). Employees run headless (their gate sees
+`headless: true`), and delegation is single-level by construction — an
+employee never gets the `task` tool.
 
 `bash_bg` runs on the same job runtime but is gated separately by `bash_bg`
-in `tools`. **Completions arrive as task reports** (see
-[Task reports](#task-reports)): each finished job — bash_bg, subagent,
+in `use`. **Completions arrive as task reports** (see
+[Task reports](#task-reports)): each finished job — bash_bg, employee,
 or cron run — hands the spawning agent a report, and its reply
 reaches you as an ✉️ update only when worth saying (failures always post; the
 result is recorded in the runs store and the jobs list either way). Both
@@ -278,12 +309,12 @@ A bash_bg job's full output is persisted to
 `.shell3_project/runs/<session>/jobs/<id>.log` (capped at 1 MiB, swept with
 its run) so the agent and `task_status` can read past the in-memory tail.
 
-A subagent's still-running `bash_bg` job keeps its session open past its
-main turn; each completion resumes the subagent for a follow-up turn whose
+An employee's still-running `bash_bg` job keeps its session open past its
+main turn; each completion resumes the employee for a follow-up turn whose
 summary arrives as a task report like any other — or, for a `direct` job,
-posts raw (capped at 5 follow-ups per subagent — past the
+posts raw (capped at 5 follow-ups per employee — past the
 cap, or after cancel, the raw job event is mailed instead, so no completion
-is lost). `task_cancel <sub-id>` cascades to the jobs that subagent started.
+is lost). `task_cancel <sub-id>` cascades to the jobs that employee started.
 One global knob caps it all:
 
 ```yaml
@@ -315,7 +346,7 @@ More in [security.md](security.md).
 For tools that live behind the [Model Context Protocol](https://modelcontextprotocol.io),
 shell3 ships a tools-only MCP client (official Go SDK): stdio and streamable
 HTTP transports, no OAuth/resources/prompts (a remote server that needs auth
-takes a bearer header from `.env`). Declare servers once in `shell3.yaml`;
+takes a bearer header from `.env`). Declare servers once in the wiring;
 each agent opts in via `mcp:` in its frontmatter:
 
 ```yaml
@@ -352,34 +383,39 @@ MCP calls flow through the same [tool-call hook](#the-command-gate--hookssh)
 as everything else: `name` is the prefixed tool name and `command` is null, so
 gate them by name.
 
-## The command gate — `hooks/*.sh`
+## The command gate — `gate:`
 
-> A **kit** config declares its gate in `shell3.sh` instead — `gate: <agents>`
-> and `note: <agents>`, documented in [kits.md](kits.md#the-gate). The
-> `hooks/*.sh` files below are the markdown config's form. Declaring both for
-> one agent is a load error, not a precedence rule.
+shell3 gives the model a real shell, so the gate is what limits it. A
+scaffolded kit **ships with the gate armed** (see below); an agent no `gate:`
+block names runs ungated.
 
-shell3 gives the model a real shell, so the hook script is what limits it. A
-scaffolded config **ships with the gate armed** (see below); an agent with no
-hook file of its own runs ungated.
-Hooks are per-agent, with no fallback or chaining — each agent is governed by
-exactly one script per kind, or none:
+A `gate:` block names the agents it governs and binds the function under it:
 
-- `hooks/tool-call.sh` — the main agent.
-- `hooks/<name>.tool-call.sh` — subagent `<name>` (including when cron
-  dispatches it). A subagent with no hook file runs **ungated**; the main
-  hook never applies to it.
+```bash
+#---
+# gate: [main, assistant]
+#---
+main_gate() {
+  in=$(cat)
+  case "$in" in
+    *'rm -rf /'*) printf '{"block":true,"reason":"refusing rm -rf /"}'; exit 0 ;;
+  esac
+  printf '{}'
+}
+```
 
-The split keeps each script trivial: a read-only subagent's gate can be a
-short allowlist instead of one shared script branching on agent identity.
-A hook file whose `<name>` matches no subagent is a warning
-(`shell3 health` fails on it — it's usually a typo). The dash index states which
-of the two it is, in as many words: **command gate armed**, or **command
-gate off** when the main agent has no `hooks/tool-call.sh`.
+Unlike `tool:`/`skill:`, `gate:` and `note:` are **named, not positional** —
+one function usually governs several agents, and a copy per agent is how two
+rule sets drift apart. An agent no block names runs **ungated**; there is no
+fallback or chaining, and each agent is governed by exactly one function per
+kind. A `gate:` naming an agent the kit does not declare is a load error.
+The dash index states which of the two it is, in as many words: **command
+gate armed**, or **command gate off** when the main agent has none.
 
 Every tool call — `bash`, `bash_bg`, `edit_file`, `read_media`, host tools
-like `send_media_telegram`, and `mcp_*` — runs the governing script as
-`bash hooks/….sh` with JSON on stdin:
+like `send_media_telegram`, and `mcp_*` — sources the kit and calls the
+governing function with JSON on stdin (sourcing is safe: a kit is
+definitions-only, so it runs nothing):
 
 ```json
 {"name": "bash", "command": "rm -rf /", "args": "{…}", "headless": false}
@@ -390,9 +426,9 @@ like `send_media_telegram`, and `mcp_*` — runs the governing script as
 | `name` | The real tool name: `"bash"`, `"bash_bg"`, `"edit_file"`, `"read_media"`, `"send_media_telegram"`, `"mcp_…"`. |
 | `command` | The bash command string — the two bash tools only; **null** for every other tool. |
 | `args` | Raw arguments JSON (every tool). Gate non-bash tools by inspecting this. |
-| `headless` | `true` when no human is attached (subagents, cron jobs, scripted `shell3 ask -p`). |
+| `headless` | `true` when no human is attached (employees, cron jobs, scripted `shell3 ask -p`). |
 
-The script prints a verdict to stdout:
+The function prints a verdict to stdout:
 
 | Output | Effect |
 |--------|--------|
@@ -402,12 +438,12 @@ The script prints a verdict to stdout:
 | `{"command": "…"}` | Rewrite the bash command. Bash tools only — fails closed elsewhere. |
 | `{"argv": ["…"]}` | Exec exactly this argv (runner swap). `bash`/`bash_bg` only. |
 
-When several keys are set, precedence is block > review > argv > command. A script
-that exits nonzero, prints malformed JSON, or runs past 10 s **fails
-closed** (blocks, with the failure as the reason). A legacy `{"ask": …}`
-verdict also fails closed, with a reason naming the removal — it never
-silently allows. The script's cwd is the config directory. Compose
-everything in the one script; there is no chain.
+When several keys are set, precedence is block > review > argv > command. A
+function that exits nonzero, prints malformed JSON, or runs past 10 s **fails
+closed** (blocks, with the failure as the reason). An `{"ask": …}` verdict
+also fails closed, with a reason naming the removal — there is no ask verdict,
+and it never silently allows. The function's cwd is the config directory.
+Compose everything in the one function; there is no chain.
 
 ### The `review` verdict — an LLM reviewer for judgment calls
 
@@ -438,13 +474,13 @@ closed, so it is never weaker than `block`. It is also **not a containment
 boundary** — it reduces false blocks; the OS is still the security boundary
 ([security](security.md)).
 
-The scaffold ships `hooks/tool-call.sh` armed. Its shape, and the reasoning
+The scaffold ships its `gate:` function armed. Its shape, and the reasoning
 behind it, in one line each:
 
 - **Credentials** (`.env`, `~/.ssh`, `~/.aws`, `~/.config/gh`, …) — blocked for
   read and write, by every tool. A `lib/bin` script reads the one key it needs
   at point of use, so secrets never enter the conversation.
-- **The gate itself** and `shell3.yaml` — readable, not writable. Otherwise
+- **The gate itself** and the wiring — both `shell3.sh` — readable, not writable. Otherwise
   "ask the operator to lift this" has an obvious shortcut.
 - **The machine's plumbing** (`/etc`, `/usr/bin`, `/System`, `~/Library`) —
   writes blocked. `/usr/local` and `/opt` are not on the list: installing a
@@ -501,22 +537,21 @@ fi
 A malformed argv (empty, or any empty element) fails **closed**. Recipes in
 [cookbook/sandbox.md](cookbook/sandbox.md).
 
-### Output rewriting — `tool-result.sh`
+### Output rewriting — `note:`
 
-The symmetric post-execution hook: `hooks/tool-result.sh` (main agent) /
-`hooks/<name>.tool-result.sh` (subagent) receives
-`{"name": …, "args": …, "output": …}` on stdin; print `{"output": "…"}` to
-replace what the model sees, `{}` or nothing to pass through. Primary use is
-secret redaction:
+The symmetric post-execution hook. A `note:` block names its agents exactly
+like `gate:`; the function receives `{"name": …, "args": …, "output": …}` on
+stdin; print `{"output": "…"}` to replace what the model sees, `{}` or nothing
+to pass through. Primary use is secret redaction:
 
 ```bash
 in=$(cat)
 printf '%s' "$in" | jq -c '{output: (.output | gsub("API_KEY=\\S+"; "API_KEY=[redacted]"))}'
 ```
 
-A failing script here also fails **closed**: the tool output is replaced by an
-error notice, never passed through unredacted. Background jobs (`bash_bg`)
-are out of scope: the hook sees only the "started job…" pointer, not the
+A failing function here also fails **closed**: the tool output is replaced by
+an error notice, never passed through unredacted. Background jobs (`bash_bg`)
+are out of scope: the note sees only the "started job…" pointer, not the
 process's streamed output — redact at the source if a background command can
 emit secrets.
 
@@ -560,7 +595,7 @@ machine. The threat model is in
 ### What `/reload` does and doesn't pick up
 
 `/reload` (and the agent's own `reload` tool) re-reads the config directory
-and applies it live: prompts, models, subagents, projects, skills, cron jobs,
+and applies it live: prompts, models, agents, skills, cron jobs,
 and MCP servers. It does **not** re-apply the front-end's own wiring — a
 changed `telegram.chat_id` or `telegram.workdir` takes effect at the next
 `shell3 telegram` start. The same goes for `dash_port`: the dash binds once
@@ -589,7 +624,7 @@ and drop into `~/.shell3/lib/bin/`, documented with a full working
   OpenRouter). Video is not supported as model input; `send_media_telegram`
   can still send a video file to the chat.
 - **`send_media_telegram`** (a host tool, on every non-headless session —
-  headless subagent children don't get it, since there's no live chat to
+  headless employee children don't get it, since there's no live chat to
   send to) lets the agent push a local file back to the chat as
   photo/voice/audio/video/document.
 
@@ -604,14 +639,13 @@ grows until you prune it or set
 
 One file per job; the filename is the job name. Frontmatter takes exactly one
 of `agent:` or `tool:` — a job is either a prompt or a tool call, never both,
-never neither. This markdown config only supports `agent:` (`tool:` resolves
-against a kit's declared tools, and a markdown config has no kit — a `tool:`
-job here fails to load; see [kits.md](kits.md#cron) if you want that valve).
-Each `agent:` job fires a declared agent on `schedule` (cron expression or
-`@daily`/`@hourly`/…), with the body as its prompt. `agent` names either a
-subagent from `agents/` or a project's `manager.md` — a project's cron job
-runs its manager in that project's workdir, so a scheduled job can dispatch
-straight into a project's standing context. The scheduler runs inside
+never neither. A `tool:` job runs a kit tool's shell function directly, with
+no agent and no model turn (see [kits.md](kits.md#cron)). An `agent:` job
+fires a kit-declared agent on `schedule` (cron expression or
+`@daily`/`@hourly`/…), with the body as its prompt. An employee that declares
+a `workdir` runs its job there, so a scheduled job can dispatch straight into
+a project's standing context. `shell3 health` fails a job naming an agent or
+a tool the kit does not declare. The scheduler runs inside
 `shell3 telegram`, dispatching each job from a hidden, pinned `cron` parent
 session. Interval schedules (`@every 30m`) count from when the scheduler
 arms, and a `/reload` or restart re-arms it — so the tick after one lands a
@@ -701,8 +735,8 @@ what the agent did with each report.
 
 ## The runs store — `shell3.db`
 
-Every session — chat threads, subagents, cron runs, `shell3 ask` — is
-stored in one SQLite database beside `shell3.yaml`:
+Every session — chat threads, employees, cron runs, `shell3 ask` — is
+stored in one SQLite database beside `shell3.sh`:
 `.shell3_project/shell3.db`. It holds the sessions and their messages, each
 front-end's current-conversation marker, and an FTS5 full-text index over user and
 assistant text (the index the [`history` tool](#recalling-past-conversations--the-history-tool) searches;
@@ -744,7 +778,7 @@ and [security.md](security.md#the-web-dash).
 
 Every thread — and every background job — is a stored session, so history
 multiplies quickly. An optional top-level
-`shell3.yaml` key bounds it:
+top-level wiring key bounds it:
 
 ```yaml
 runs_keep_days: 30   # default 30; 0 = keep forever
@@ -775,7 +809,7 @@ Start-time only — no daemon, no timers.
 
 The media dir (`~/.shell3/media/` by default) accumulates chat uploads —
 everything you send the bot, plus anything a wrapper script writes there —
-and nothing removes them on its own. An optional top-level `shell3.yaml` key
+and nothing removes them on its own. An optional top-level wiring key
 bounds it:
 
 ```yaml
@@ -794,7 +828,7 @@ The media dir this sweep points at is resolved by `internal/mediadir`:
 normally it's derived from `--config`/the active config dir, but the
 `SHELL3_MEDIA_DIR` environment variable, if set, overrides that unconditionally
 — it outranks `--config`. This exists for tests, is not itself a
-`shell3.yaml` key, and is undocumented anywhere else, but production code
+wiring key, and is undocumented anywhere else, but production code
 reads it too. Since this is a *deleting* operation once `media_keep_days` is
 set, be deliberate about that variable: an errant `SHELL3_MEDIA_DIR` pointed
 at an unrelated directory (or a symlinked media dir, which the sweep follows)
@@ -805,7 +839,9 @@ media store.
 
 A skill is a plain `.md` file the agent reads with `cat` when relevant — no
 `skill` tool, no declaration. Every `*.md` in `skills/` (non-recursive)
-becomes one skill for the main agent. Frontmatter needs a `description` (the
+becomes one skill for the main agent, and every `*.md` in
+`projects/<agent>/skills/` becomes one for that employee. Frontmatter needs a
+`description` (the
 one-liner the agent uses to decide whether to read the body); `name` defaults
 to the filename:
 
@@ -819,11 +855,11 @@ When asked for a non-trivial change, first...
 Adding a skill = drop a file in `skills/` + a reload. An unusable file (no
 frontmatter/description, empty body, duplicate name) is skipped with a
 warning — `shell3 health` hardens those into errors. Granted skills are
-indexed by absolute path in the system prompt under `## Skills`. Subagents
-carry no skills; put a subagent's standing instructions in its prompt body.
+indexed by absolute path in the system prompt under `## Skills`; bodies are
+never inlined, so N skills cost N lines.
 
 ## Putting it together
 
 Read the tree `boot` writes (`~/.shell3/`) for a full example; the
-[cookbook](cookbook/README.md) has drop-in extras — subagents, skills, MCP
+[cookbook](cookbook/README.md) has drop-in extras — employees, skills, MCP
 and sandbox setups. Validate any edit with `shell3 health` before reloading.

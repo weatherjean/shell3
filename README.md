@@ -142,7 +142,7 @@ Every subcommand takes `--config/-c` to point at a different config directory.
 
 ## Security
 
-The model gets a full shell, limited only by the `hooks/tool-call.sh` gate,
+The model gets a full shell, limited only by the kit's `gate:` function,
 which ships armed. Whoever controls the chat, or the bot token, controls that
 shell; use a container or VM for hard isolation. shell3 phones home to
 nothing: its only outbound connections are Telegram and the endpoints in your

@@ -86,6 +86,8 @@ type decl struct {
 	workdir string
 	use     []string
 	context []string
+	mcp     []string
+	mcpAll  bool
 	params  map[string]Param
 	wiring  map[string]any
 	agents  []string // declGate/declNote: the agents this block governs
@@ -107,6 +109,7 @@ type blockYAML struct {
 	Workdir     string           `yaml:"workdir"`
 	Use         []string         `yaml:"use"`
 	Context     []string         `yaml:"context"`
+	MCP         nameList         `yaml:"mcp"`
 	Params      map[string]Param `yaml:"params"`
 
 	Shell3 map[string]any `yaml:"shell3"`
@@ -124,6 +127,7 @@ func decodeBlock(b block) (decl, error) {
 	d := decl{
 		line: b.line, endLine: b.endLine, desc: y.Description, model: y.Model,
 		workdir: y.Workdir, use: y.Use, context: y.Context, params: y.Params, wiring: y.Shell3,
+		mcp: y.MCP, mcpAll: len(y.MCP) == 1 && y.MCP[0] == "all",
 	}
 
 	kinds := []struct {

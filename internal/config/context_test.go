@@ -45,12 +45,10 @@ func TestResolveContextFiles_MissingLiteralStub(t *testing.T) {
 	}
 }
 
-func TestBuildPersonaFor_ContextSection(t *testing.T) {
-	c := mustLoad(t, map[string]string{
-		"agent.md":  "---\nmodel: m1\ncontext: [memory.md]\n---\nBASE PROMPT\n",
-		"memory.md": "REMEMBER THIS",
-	})
-	prompt := c.BuildPersonaFor(c.FirstAgent())
+func TestRenderContext_Section(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "memory.md", "REMEMBER THIS")
+	prompt := "BASE PROMPT" + RenderContext(dir, []string{"memory.md"})
 	for _, want := range []string{"BASE PROMPT", "## Context", "### memory.md", "REMEMBER THIS"} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("prompt missing %q:\n%s", want, prompt)

@@ -62,7 +62,7 @@ scaffold's own `writing-code` skill for in-line TDD work.)
 - `camoufox/` — `Dockerfile` + `fetch.py` for the one-shot anti-bot fetcher
   image used by the `camoufox-fetch` skill (install lines in the skill).
 
-**Subagents** (`lib/agents/` here → your `~/.shell3/agents/`)
+**Employees** (`lib/agents/` here → `agent:` blocks in your `~/.shell3/shell3.sh`)
 
 - `review.md` — a review specialist instructed never to edit (a hook
   allowlist makes that enforced); copying the file in IS the registration

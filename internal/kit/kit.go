@@ -41,10 +41,15 @@ type Agent struct {
 	// Context lists config-dir-relative files re-read at every turn start and
 	// appended to the prompt — an agent's live memory.
 	Context []string
-	Tools   []Tool
-	Skills  []Skill
-	Tests   []Test
-	Line    int
+	// MCP is the `mcp:` opt-in: the wiring's mcp server names whose tools this
+	// agent gets. MCPAll is the `mcp: all` form. Both empty/false (the
+	// default) means no MCP tools.
+	MCP    []string
+	MCPAll bool
+	Tools  []Tool
+	Skills []Skill
+	Tests  []Test
+	Line   int
 }
 
 // Group is a shared bundle of tools and skills that agents import via `use:`.
@@ -148,7 +153,8 @@ func Parse(src []byte) (*Kit, error) {
 				}
 				k.Agents = append(k.Agents, Agent{
 					Name: d.name, Desc: d.desc, Model: d.model, Workdir: d.workdir,
-					Use: d.use, Context: d.context, PromptFunc: f.name, Prompt: prompt, Line: d.line,
+					Use: d.use, Context: d.context, MCP: d.mcp, MCPAll: d.mcpAll,
+					PromptFunc: f.name, Prompt: prompt, Line: d.line,
 				})
 				curAgent, curGroup = &k.Agents[len(k.Agents)-1], nil
 			} else {
