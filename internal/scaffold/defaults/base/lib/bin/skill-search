@@ -120,7 +120,7 @@ echo "Skill | Risk | Source | Description"
 # still the last three. A row that doesn't end in the expected empty
 # trailing field is one we can't confidently parse at all — say so rather
 # than print a confident wrong answer.
-printf '%s\n' "$matches" | head -n "$max_rows" | awk -F'|' -v w="$desc_width" '
+printf '%s\n' "$matches" | sed -n "1,${max_rows}p" | awk -F'|' -v w="$desc_width" '
   function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
   {
     skill = trim($2)
