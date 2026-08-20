@@ -5,7 +5,7 @@ Example "checklist" cron job. Rename this file to checklist.md to activate it
 Frontmatter:
   schedule  robfig/cron syntax: "@every 30m", "@daily", or a 5-field spec like
             "*/30 8-22 * * *" (every 30 min, 8am-10pm — active hours only).
-  agent     a subagent from agents/ to run the checklist (here: assistant).
+  agent     a kit-declared agent to run the checklist (here: assistant).
   direct    true posts the run's raw result straight to the chat, costing
             no agent turn. Leave it off for report-style jobs — the result
             then reaches the main agent as a report; it posts an ✉️ update only
