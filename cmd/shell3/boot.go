@@ -70,7 +70,7 @@ func newBootCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&f.force, "force", false, "Overwrite an existing ~/.shell3 config (shell3.sh, skills/, ...)")
 	cmd.Flags().BoolVar(&f.show, "show", false, "Print the post-boot summary for the existing config and exit (changes nothing)")
 	cmd.Flags().BoolVar(&f.prompts, "prompts", false,
-		"Refresh the scaffold's prompt files (agent.md body, agents/, skills/) in an existing config, backing up replaced files to .backup/")
+		"Refresh the scaffold's shipped skills/ in an existing config, backing up replaced files to .backup/")
 	return cmd
 }
 
@@ -195,7 +195,7 @@ func collectAnswers(f *bootFlags, tty bool) (bootAnswers, error) {
 		a.name = "main"
 	}
 	// A flag-supplied chat id skipped the form's validator; catch it here so a
-	// bad value never reaches shell3.yaml.
+	// bad value never reaches the kit.
 	a.tgChatID = strings.TrimSpace(a.tgChatID)
 	if err := validateChatID(a.tgChatID); err != nil {
 		return a, fmt.Errorf("boot: chat id %q: %w", a.tgChatID, err)
@@ -322,10 +322,10 @@ func runBootForm(f *bootFlags, a *bootAnswers, ctxStr, compactStr *string) error
 }
 
 // envTelegramToken is the .env key holding the bot token, referenced from
-// shell3.yaml as `telegram.token: env:TELEGRAM_TOKEN` like every other secret.
+// the kit as `telegram.token: env:TELEGRAM_TOKEN` like every other secret.
 const envTelegramToken = "TELEGRAM_TOKEN"
 
-// validateChatID keeps a mistyped chat id out of shell3.yaml: the front-end
+// validateChatID keeps a mistyped chat id out of the kit: the front-end
 // parses it (parseChatID, the shared definition) and refuses to start
 // otherwise, and that failure lands far from where the value was typed. Blank
 // is allowed — it's the "fill it in later" answer.

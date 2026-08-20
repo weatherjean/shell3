@@ -61,7 +61,7 @@ too tight on a cold cache.
 ## Gate MCP calls like any other tool
 
 MCP tools hit the tool-call hook with `name` = `mcp_<server>_<tool>` and
-`command` null — gate them by name in `hooks/tool-call.sh`. Here, reads run
+`command` null — gate them by name in your kit's `gate:` function. Here, reads run
 and writes are refused:
 
 ```bash

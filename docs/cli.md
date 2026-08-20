@@ -6,7 +6,7 @@ tools a kit declares), `health` (config check), and `ask` (a local driver for
 the agent). Bare `shell3` prints help.
 
 Every subcommand except `boot` and `tool` takes `-c`/`--config <dir>`: a path
-to a config directory (`shell3.sh`, or the older `shell3.yaml` + `agent.md`
+to a config directory (`shell3.sh`
 tree); the default is `~/.shell3`. The working directory is never consulted.
 (`boot` always scaffolds `~/.shell3`; `tool` takes a kit path as its
 argument.) `shell3 --version` prints the installed build.
@@ -146,10 +146,9 @@ shell3 boot     # interactive form: model endpoint + key, vision, bot token, wor
 An interactive form scaffolds the config tree under `~/.shell3/`:
 `shell3.sh` — the kit, holding the wiring (models + a `telegram:` block), the
 main agent and a general-purpose `assistant` employee — plus
-`skills/`, **armed** `hooks/*.tool-call.sh`
-gate scripts (credentials, system paths, unread remote code, publishing and
-force-pushes refused; ordinary work untouched), and `.env` (secrets — never
-commit it). `--force` overwrites an existing config.
+`skills/`, and `.env` (secrets — never commit it). The kit's `gate:` function
+ships **armed** (credentials, system paths, unread remote code, publishing and
+force-pushes refused; ordinary work untouched). `--force` overwrites an existing config.
 
 The form asks for the model endpoint, tag, name and key; whether the model can
 see images (yes adds the `media` tool — `read_media` — to the agent's
@@ -252,7 +251,7 @@ timeout; press ctrl+c (SIGINT) to quit while jobs are still running.
 
 ### `--agent <name>` — one subagent turn, for scripts
 
-`--agent` runs a single headless turn of a named subagent from `agents/` and
+`--agent` runs a single headless turn of a kit-declared employee and
 prints **only its reply** on stdout; the config path, job id, and any error go
 to stderr. It is the seam for batch work — a script that has its own loop
 (a database to walk, a queue to drain) but needs a model call per item:

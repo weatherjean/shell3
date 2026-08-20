@@ -8,15 +8,29 @@ import (
 
 // baseYAML + baseAgentMD are the minimal valid config tree every runtime test
 // starts from.
-const baseYAML = `models:
-  main:
-    base_url: https://api.x/v1
-    api_key: k
-    model: m-1
-    context_window: 1000
+const baseWiring = `#---
+# shell3:
+#   models:
+#     main:
+#       base_url: https://api.x/v1
+#       api_key: k
+#       model: m-1
+#       context_window: 1000
+#---
 `
 
-const baseAgentMD = "---\nmodel: main\n---\nhi\n"
+// kitAgentDecl renders one `agent:` block plus its prompt function. opts are
+// extra frontmatter lines (already unprefixed), body is the prompt text.
+func kitAgentDecl(name, body string, opts ...string) string {
+	out := "\n#---\n# agent: " + name + "\n# model: main\n"
+	for _, o := range opts {
+		out += "# " + o + "\n"
+	}
+	return out + "#---\n" + name + "_prompt() { cat <<'SHELL3_EOF'\n" + body + "\nSHELL3_EOF\n}\n"
+}
+
+// baseKit is the minimal valid config: wiring plus one agent.
+var baseKit = baseWiring + kitAgentDecl("main", "hi")
 
 // writeTreeFiles writes the given files (path → content, relative to dir,
 // subdirs created) into dir.
@@ -36,7 +50,7 @@ func writeTreeFiles(t *testing.T, dir string, files map[string]string) {
 // writeBaseTree writes the minimal valid config tree into dir plus extras.
 func writeBaseTree(t *testing.T, dir string, extra map[string]string) {
 	t.Helper()
-	files := map[string]string{"shell3.yaml": baseYAML, "agent.md": baseAgentMD}
+	files := map[string]string{"shell3.sh": baseKit}
 	for k, v := range extra {
 		files[k] = v
 	}

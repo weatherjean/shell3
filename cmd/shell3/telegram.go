@@ -138,11 +138,11 @@ func newTelegramCommand() *cobra.Command {
 func telegramChatID(tg config.TelegramConfig) (int64, error) {
 	switch {
 	case !tg.Present:
-		return 0, fmt.Errorf("no telegram: block in shell3.yaml — add one (token, chat_id), or run `shell3 boot` to write it")
+		return 0, fmt.Errorf("no telegram: block in the kit's shell3: wiring — add one (token, chat_id), or run `shell3 boot` to write it")
 	case tg.Token == "":
-		return 0, fmt.Errorf("telegram.token is empty — put your @BotFather token in the .env beside shell3.yaml")
+		return 0, fmt.Errorf("telegram.token is empty — put your @BotFather token in the .env beside shell3.sh")
 	case tg.ChatID == "":
-		return 0, fmt.Errorf("telegram.chat_id is empty — set it in shell3.yaml to the one chat the bot answers (@userinfobot prints yours)")
+		return 0, fmt.Errorf("telegram.chat_id is empty — set it in the kit's shell3: wiring to the one chat the bot answers (@userinfobot prints yours)")
 	}
 	id, err := parseChatID(tg.ChatID)
 	if err != nil {

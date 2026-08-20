@@ -11,7 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// yamlFile is the wire schema of shell3.yaml. Decoding is strict
+// yamlFile is the wire schema of the kit's `shell3:` block. Decoding is strict
 // (KnownFields): an unknown key anywhere is a load error.
 type yamlFile struct {
 	Models        map[string]yamlModel `yaml:"models"`
@@ -66,10 +66,15 @@ type yamlBackground struct {
 
 var mcpNameRE = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
-// yamlTypeNames maps the wire structs onto the shell3.yaml blocks they decode,
-// so a strict-decode failure reads as config rather than as Go.
+// wiringLabel prefixes every wiring error: the YAML being decoded is the kit's
+// `shell3:` declaration block, so naming a file the operator does not have
+// would send them looking for the wrong thing.
+const wiringLabel = KitFileName + " shell3: block"
+
+// yamlTypeNames maps the wire structs onto the wiring blocks they decode, so a
+// strict-decode failure reads as config rather than as Go.
 var yamlTypeNames = map[string]string{
-	"yamlFile":       "shell3.yaml",
+	"yamlFile":       "the shell3: block",
 	"yamlModel":      "a models: entry",
 	"yamlTelegram":   "the telegram: block",
 	"yamlMCP":        "an mcp: server",
@@ -86,24 +91,24 @@ func humanizeYAMLTypes(msg string) string {
 		if label, ok := yamlTypeNames[strings.TrimPrefix(m, "type config.")]; ok {
 			return label
 		}
-		return "shell3.yaml"
+		return "the shell3: block"
 	})
 }
 
-// parseYAML strict-decodes shell3.yaml, resolves env: references from
-// secrets, and fills the wiring fields of c.
+// parseYAML strict-decodes the kit's `shell3:` wiring block, resolves env:
+// references from secrets, and fills the wiring fields of c.
 func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 	var f yamlFile
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(&f); err != nil {
-		return fmt.Errorf("shell3.yaml: %s", humanizeYAMLTypes(err.Error()))
+		return fmt.Errorf(wiringLabel+": %s", humanizeYAMLTypes(err.Error()))
 	}
 	if err := resolveEnvRefs(&f, secrets); err != nil {
-		return fmt.Errorf("shell3.yaml: %w", err)
+		return fmt.Errorf(wiringLabel+": %w", err)
 	}
 	if len(f.Models) == 0 {
-		return fmt.Errorf("shell3.yaml: no models declared")
+		return fmt.Errorf(wiringLabel + ": no models declared")
 	}
 	names := make([]string, 0, len(f.Models))
 	for name := range f.Models {
@@ -113,7 +118,7 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 	for _, name := range names {
 		m := f.Models[name]
 		if m.BaseURL == "" || m.Model == "" {
-			return fmt.Errorf("shell3.yaml: model %q needs base_url and model", name)
+			return fmt.Errorf(wiringLabel+": model %q needs base_url and model", name)
 		}
 		// prune_at defaults to compact_at*0.6 so the cheap-prune tier is on by
 		// default wherever compaction is; an explicit value at or above
@@ -121,7 +126,7 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 		// Both tiers key off compact_at at runtime, so an explicit prune_at
 		// without compact_at would be silently dead — reject it instead.
 		if m.PruneAt != nil && *m.PruneAt > 0 && m.CompactAt <= 0 {
-			return fmt.Errorf("shell3.yaml: model %q sets prune_at without compact_at (pruning only runs while compaction is armed)", name)
+			return fmt.Errorf(wiringLabel+": model %q sets prune_at without compact_at (pruning only runs while compaction is armed)", name)
 		}
 		var pruneAt int
 		switch {
@@ -156,13 +161,13 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 	for _, name := range mcpNames {
 		s := f.MCP[name]
 		if !mcpNameRE.MatchString(name) {
-			return fmt.Errorf("shell3.yaml: mcp server name %q must match %s", name, mcpNameRE)
+			return fmt.Errorf(wiringLabel+": mcp server name %q must match %s", name, mcpNameRE)
 		}
 		if (len(s.Command) == 0) == (s.URL == "") {
-			return fmt.Errorf("shell3.yaml: mcp server %q needs exactly one of command or url", name)
+			return fmt.Errorf(wiringLabel+": mcp server %q needs exactly one of command or url", name)
 		}
 		if len(s.Allow) > 0 && len(s.Deny) > 0 {
-			return fmt.Errorf("shell3.yaml: mcp server %q: set at most one of allow/deny", name)
+			return fmt.Errorf(wiringLabel+": mcp server %q: set at most one of allow/deny", name)
 		}
 		c.mcpServers = append(c.mcpServers, MCPServer{
 			Name: name, Command: s.Command, Env: s.Env, URL: s.URL,
@@ -198,7 +203,7 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 		c.DashPort = *f.DashPort
 	}
 	if c.DashPort < 0 || c.DashPort > 65535 {
-		return fmt.Errorf("shell3.yaml: dash_port must be 0 (disabled) or a port 1-65535; got %d", c.DashPort)
+		return fmt.Errorf(wiringLabel+": dash_port must be 0 (disabled) or a port 1-65535; got %d", c.DashPort)
 	}
 	// review_model must name a declared model — a config that loads is a
 	// config whose {review} reviewer can actually run. "" = main model.
@@ -206,7 +211,7 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 	c.ReviewPolicy = strings.TrimSpace(f.ReviewPolicy)
 	if c.ReviewModel != "" {
 		if _, ok := c.Model(c.ReviewModel); !ok {
-			return fmt.Errorf("shell3.yaml: review_model %q names no declared model", c.ReviewModel)
+			return fmt.Errorf(wiringLabel+": review_model %q names no declared model", c.ReviewModel)
 		}
 	}
 	return nil
@@ -226,10 +231,10 @@ const maxKeepDays = 36500
 // means that) or large enough to risk the overflow above.
 func validateKeepDays(key string, days int) error {
 	if days < 0 {
-		return fmt.Errorf("shell3.yaml: %s must not be negative (use 0 to keep forever); got %d", key, days)
+		return fmt.Errorf(wiringLabel+": %s must not be negative (use 0 to keep forever); got %d", key, days)
 	}
 	if days > maxKeepDays {
-		return fmt.Errorf("shell3.yaml: %s is too large (max %d days); got %d", key, maxKeepDays, days)
+		return fmt.Errorf(wiringLabel+": %s is too large (max %d days); got %d", key, maxKeepDays, days)
 	}
 	return nil
 }

@@ -247,7 +247,7 @@ func TestParseYAMLUnknownKeyNamesConfigNotGoTypes(t *testing.T) {
 		yaml string
 		want string
 	}{
-		{"top level", "web:\n  password: x\n", "shell3.yaml"},
+		{"top level", "web:\n  password: x\n", "the shell3: block"},
 		{"telegram block", "models:\n  m:\n    base_url: u\n    model: x\ntelegram:\n  dashboard: {}\n", "telegram:"},
 		{"mcp sub-block", "models:\n  m:\n    base_url: u\n    model: x\nmcp:\n  srv:\n    bogus: 1\n", "an mcp: server"},
 	} {
@@ -268,7 +268,7 @@ func TestParseYAMLUnknownKeyNamesConfigNotGoTypes(t *testing.T) {
 
 // yamlTypeNames is a hand-maintained shadow of the yaml* wire structs; a new
 // block added without a map entry would degrade its strict-decode errors to
-// the generic "shell3.yaml" label silently. Walk yamlFile's type graph and
+// the generic "the shell3: block" label silently. Walk yamlFile's type graph and
 // assert coverage, so the drift is a test failure instead.
 func TestYAMLTypeNamesCoverEveryWireStruct(t *testing.T) {
 	seen := map[string]bool{}

@@ -34,6 +34,19 @@ func (p *Parts) LoadKit(path string) error {
 	if err != nil {
 		return err
 	}
+	// Cross-reference: an agent opting into an MCP server the wiring does not
+	// declare is a typo that would otherwise present as silently missing
+	// tools.
+	for _, a := range k.Agents {
+		if a.MCPAll {
+			continue
+		}
+		for _, name := range a.MCP {
+			if !p.lc.HasMCPServer(name) {
+				return fmt.Errorf("%s: agent %q opts into unknown mcp server %q", filepath.Base(path), a.Name, name)
+			}
+		}
+	}
 	p.kit, p.kitPath = k, path
 	// The kit's `gate:` / `note:` blocks govern tool calls and tool results,
 	// standing in for the hooks/*.sh files a markdown config uses.
@@ -42,9 +55,7 @@ func (p *Parts) LoadKit(path string) error {
 		if len(k.Agents) > 0 {
 			main = k.Agents[0].Name
 		}
-		if err := p.lc.SetKitHooks(path, main, k.Gates, k.Notes); err != nil {
-			return err
-		}
+		p.lc.SetKitHooks(path, main, k.Gates, k.Notes)
 	}
 	return nil
 }
@@ -96,7 +107,7 @@ func (p *Parts) KitAgentRuntime(name string) (chat.ActiveAgent, error) {
 
 	modelName := r.Agent.Model
 	if modelName == "" {
-		modelName = p.lc.FirstAgent().ModelName
+		modelName = p.defaultModelName()
 	}
 	md, ok := p.lc.Model(modelName)
 	if !ok {
@@ -145,37 +156,31 @@ func (p *Parts) KitAgentRuntime(name string) (chat.ActiveAgent, error) {
 		}
 	}
 
+	// Declared tools must route to the host-tool dispatcher, not the built-in
+	// tool handler. The `mcp:` opt-in adds its servers' tools to the same
+	// dispatch path.
+	hostNames := p.kitHostToolNames(r)
+	if p.mcp != nil && (r.Agent.MCPAll || len(r.Agent.MCP) > 0) {
+		mcpDefs := p.mcp.Tools(r.Agent.MCP, r.Agent.MCPAll)
+		if len(mcpDefs) > 0 {
+			defs = append(defs, mcpDefs...)
+			for _, d := range mcpDefs {
+				hostNames[d.Name] = true
+			}
+		}
+	}
+
 	names := make([]string, 0, len(defs))
 	for _, d := range defs {
 		names = append(names, d.Name)
 	}
 
-	// context: files are re-read at every turn start, so an agent's memory.md
-	// is current on every dispatch rather than a session-creation snapshot.
-	// They resolve against the agent's OWN workdir when it declares one —
-	// otherwise every employee's `context: [memory.md]` would silently load
-	// the main agent's memory instead of its own.
-	ctxBase := p.configDir
-	if wd := r.Agent.Workdir; wd != "" {
-		ctxBase = expandHomePath(wd, p.home)
-	}
-	ctxFiles := r.Agent.Context
-
-	// Declared tools must route to the host-tool dispatcher, not the built-in
-	// tool handler — without this the model calls them and the turn answers
-	// with an unknown-tool error.
-	hostNames := p.kitHostToolNames(r)
-
 	// Skills are FILES, indexed by name + description + path — never inlined.
 	// Inlining every skill body cost thousands of tokens on every turn and
-	// removed the agent's ability to choose which one to read.
-	//   main agent:  <config>/skills/
-	//   employee:    <config>/projects/<name>/skills/
-	skillDir := filepath.Join(p.configDir, "skills")
-	if !isMain(p.kit, r.Agent.Name) {
-		skillDir = filepath.Join(p.configDir, "projects", r.Agent.Name, "skills")
-	}
-	skills := config.ScanSkills(skillDir)
+	// removed the agent's ability to choose which one to read. The prompt
+	// itself (skills index + `context:` bodies, re-read at every turn start)
+	// comes from kitPrompt, shared with RefreshPromptFor.
+	skills := config.ScanSkills(p.kitAgentSkillDir(r.Agent.Name))
 	skillNames := make([]string, 0, len(skills))
 	for _, sk := range skills {
 		skillNames = append(skillNames, sk.Name)
@@ -184,7 +189,7 @@ func (p *Parts) KitAgentRuntime(name string) (chat.ActiveAgent, error) {
 	return chat.ActiveAgent{
 		Personality: persona.Persona{
 			Name:         r.Agent.Name,
-			SystemPrompt: r.Agent.Prompt + config.RenderSkills(skills) + config.RenderContext(ctxBase, ctxFiles),
+			SystemPrompt: p.kitPrompt(r),
 			Tools:        defs,
 		},
 		ModeLabel:    r.Agent.Name,
@@ -249,4 +254,47 @@ func (p *Parts) KitHostTool(r kit.Resolved, workDir string) func(context.Context
 		}
 		return kit.Runner{Path: path, Dir: workDir}.Run(ctx, t, args)
 	}
+}
+
+// defaultModelName is the model an agent that declares none runs on: the kit's
+// main agent's model, falling back to the first model the wiring declares (a
+// one-model config need name it nowhere).
+func (p *Parts) defaultModelName() string {
+	if p.kit != nil && len(p.kit.Agents) > 0 && p.kit.Agents[0].Model != "" {
+		return p.kit.Agents[0].Model
+	}
+	if len(p.lc.Models) > 0 {
+		return p.lc.Models[0].Name
+	}
+	return ""
+}
+
+// kitAgentSkillDir is where a kit agent's skills live: <config>/skills/ for
+// the main agent, <config>/projects/<name>/skills/ for an employee.
+func (p *Parts) kitAgentSkillDir(name string) string {
+	if isMain(p.kit, name) {
+		return filepath.Join(p.configDir, "skills")
+	}
+	return filepath.Join(p.configDir, "projects", name, "skills")
+}
+
+// kitContextBase is where an agent's `context:` paths resolve: its OWN
+// workdir when it declares one, the config dir otherwise. Without this every
+// employee's `context: [memory.md]` would silently load the main agent's
+// memory instead of its own.
+func (p *Parts) kitContextBase(a kit.Agent) string {
+	if a.Workdir != "" {
+		return expandHomePath(a.Workdir, p.home)
+	}
+	return p.configDir
+}
+
+// kitPrompt renders a kit agent's system prompt: its authored body, the
+// skills index, and the `context:` files read fresh. The single source shared
+// by KitAgentRuntime and RefreshPromptFor, so a refreshed prompt can never
+// drift from the one the session was built with.
+func (p *Parts) kitPrompt(r kit.Resolved) string {
+	skills := config.ScanSkills(p.kitAgentSkillDir(r.Agent.Name))
+	return r.Agent.Prompt + config.RenderSkills(skills) +
+		config.RenderContext(p.kitContextBase(r.Agent), r.Agent.Context)
 }

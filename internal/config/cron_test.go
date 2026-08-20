@@ -1,8 +1,6 @@
 package config
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -81,34 +79,5 @@ func TestParseCronFile_ToolAndDirectIsAnError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "direct") || !strings.Contains(err.Error(), "tool") {
 		t.Fatalf("error should name both offending fields: %v", err)
-	}
-}
-
-// TestLoadCronToolJobWithoutKitFails pins that a tool: cron job under a
-// markdown config (no shell3.sh) is refused at Load, not left to fail
-// silently on the scheduler's first tick — a markdown config has no kit for
-// a tool job to resolve against.
-func TestLoadCronToolJobWithoutKitFails(t *testing.T) {
-	dir := t.TempDir()
-	files := map[string]string{
-		"shell3.yaml":  "models:\n  m: { base_url: \"http://x\", api_key: k, model: id }\n",
-		"agent.md":     "---\nmodel: m\n---\np\n",
-		"cron/sync.md": "---\nschedule: \"@every 30m\"\ntool: sync-notion-recent\n---\n",
-	}
-	for name, body := range files {
-		p := filepath.Join(dir, name)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	_, err := Load(dir)
-	if err == nil {
-		t.Fatal("want an error: a tool: cron job needs a kit, and this config has none")
-	}
-	if !strings.Contains(err.Error(), "sync.md") {
-		t.Fatalf("error should name the offending job, got %v", err)
 	}
 }

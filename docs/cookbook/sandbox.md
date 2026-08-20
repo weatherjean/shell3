@@ -9,7 +9,7 @@ re-parses or re-quotes it. Full verdict contract:
 
 ## Run every command inside a container
 
-`hooks/tool-call.sh` (needs `jq`):
+Your kit's `gate:` function (needs `jq`):
 
 ```bash
 in=$(cat)
@@ -47,10 +47,10 @@ exit 0
 
 ## Scope
 
-Hooks are per-agent: `hooks/tool-call.sh` governs the main agent and
-`hooks/<name>.tool-call.sh` governs subagent `<name>` — copy (or `exec`) the
-same wrapper into each agent's script if the sandbox should cover subagents
-too; a subagent without its own hook runs unsandboxed. The `name` guard keeps
+Gates are per-agent, but one `gate:` block can name several
+(`gate: [main, assistant]`) — list every agent the sandbox should cover, or
+declare a second function for the ones that differ; an agent no `gate:` names
+runs unsandboxed. The `name` guard keeps
 your sandboxing off `edit_file`, `read_media`, and host tools like
 `send_media_telegram`; gate those separately by name + args. A malformed argv
 (empty, or any empty element) fails **closed** — blocked, never run

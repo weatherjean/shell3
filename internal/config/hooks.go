@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -13,37 +12,31 @@ import (
 	"time"
 )
 
-// hookSet maps each governed agent to its hook script paths, keyed by agent:
-// "" is the main agent (hooks/tool-call.sh); a subagent name maps its
-// hooks/<name>.tool-call.sh. Absent key = that agent runs ungated. There is
-// no fallback or chaining between keys — each agent is governed by exactly
-// one script per kind, or none.
+// hookSet maps each governed agent to its declared hook, keyed by agent: ""
+// is the kit's main agent, any other key is an employee. Absent key = that
+// agent runs ungated. There is no fallback or chaining between keys — each
+// agent is governed by exactly one function per kind, or none.
 type hookSet struct {
 	call   map[string]hookRef
 	result map[string]hookRef
 }
 
-// hookRef is where one agent's hook lives: a standalone script (the markdown
-// config's hooks/*.sh) or a function declared in a kit (`gate:` / `note:`).
-// Exactly one of the two forms is set.
+// hookRef is where one agent's hook lives: a function declared in the kit
+// (`gate:` / `note:`), reached by sourcing the kit and calling it.
 type hookRef struct {
-	path string // hooks/<...>.sh
-	kit  string // kit file to source
-	fn   string // function to call after sourcing
+	kit string // kit file to source
+	fn  string // function to call after sourcing
 }
 
-func (h hookRef) empty() bool { return h.path == "" && h.fn == "" }
+func (h hookRef) empty() bool { return h.fn == "" }
 
 // shellQuote single-quotes a path for safe interpolation into the source line.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// label names the hook for an error message: a path, or kit:function.
+// label names the hook for an error message: kit:function.
 func (h hookRef) label() string {
-	if h.path != "" {
-		return h.path
-	}
 	return filepath.Base(h.kit) + ":" + h.fn
 }
 
@@ -76,99 +69,32 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 func (b *cappedBuffer) Bytes() []byte  { return b.buf.Bytes() }
 func (b *cappedBuffer) String() string { return b.buf.String() }
 
-// discoverHooks scans <dir>/hooks for the fixed filenames: tool-call.sh /
-// tool-result.sh (main agent) and <name>.tool-call.sh / <name>.tool-result.sh
-// (subagent <name>). Any other *.sh — including a <name> matching no
-// subagent — produces a warning (`shell3 health` fails on it). A missing
-// hooks/ dir means no hooks.
-func discoverHooks(dir string, subagents []Subagent, warn func(string)) (hookSet, error) {
-	hs := hookSet{call: map[string]hookRef{}, result: map[string]hookRef{}}
-	hooksDir := filepath.Join(dir, "hooks")
-	entries, err := os.ReadDir(hooksDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return hs, nil
-		}
-		return hs, err
-	}
-	known := map[string]bool{}
-	for _, sa := range subagents {
-		known[sa.Name] = true
-	}
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".sh") {
-			continue
-		}
-		path := filepath.Join(hooksDir, name)
-		switch name {
-		case "tool-call.sh":
-			hs.call[""] = hookRef{path: path}
-			continue
-		case "tool-result.sh":
-			hs.result[""] = hookRef{path: path}
-			continue
-		}
-		if agent, ok := strings.CutSuffix(name, ".tool-call.sh"); ok {
-			if !known[agent] {
-				warn(fmt.Sprintf("hook file %q names no subagent %q (agents/%s.md missing?)", path, agent, agent))
-				continue
-			}
-			hs.call[agent] = hookRef{path: path}
-			continue
-		}
-		if agent, ok := strings.CutSuffix(name, ".tool-result.sh"); ok {
-			if !known[agent] {
-				warn(fmt.Sprintf("hook file %q names no subagent %q (agents/%s.md missing?)", path, agent, agent))
-				continue
-			}
-			hs.result[agent] = hookRef{path: path}
-			continue
-		}
-		warn(fmt.Sprintf("hook file %q ignored: expected tool-call.sh, tool-result.sh, <subagent>.tool-call.sh, or <subagent>.tool-result.sh", path))
-	}
-	return hs, nil
-}
-
 // SetKitHooks installs the gates and notes a kit declares, keyed by agent
-// name. A kit config keeps its gate in the kit; the hooks/*.sh files remain
-// the form a markdown config uses.
-//
-// Declaring both for one agent is an ERROR rather than a precedence rule.
-// Silently picking a winner would hide a half-finished migration — exactly
-// when someone believes a gate is running and it is not.
-// mainName is the kit's first agent — the one this config keys as "" — since
-// a kit's main agent need not share a name with the markdown config's.
-func (c *LoadedConfig) SetKitHooks(kitPath, mainName string, gates, notes map[string]string) error {
+// name. mainName is the kit's first agent — the one this config keys as "".
+func (c *LoadedConfig) SetKitHooks(kitPath, mainName string, gates, notes map[string]string) {
 	c.kitMainAgent = mainName
+	if c.hooks.call == nil {
+		c.hooks = hookSet{call: map[string]hookRef{}, result: map[string]hookRef{}}
+	}
 	for _, m := range []struct {
-		kind  string
-		from  map[string]string
-		into  map[string]hookRef
-		files string
+		from map[string]string
+		into map[string]hookRef
 	}{
-		{"gate", gates, c.hooks.call, "tool-call.sh"},
-		{"note", notes, c.hooks.result, "tool-result.sh"},
+		{gates, c.hooks.call},
+		{notes, c.hooks.result},
 	} {
 		for agent, fn := range m.from {
-			key := c.hookKey(agent)
-			if prev := m.into[key]; !prev.empty() {
-				return fmt.Errorf("agent %q has both a kit %s (%s) and a hook file (%s) — delete one; a config with two cannot say which governs",
-					agent, m.kind, fn, prev.label())
-			}
-			m.into[key] = hookRef{kit: kitPath, fn: fn}
+			m.into[c.hookKey(agent)] = hookRef{kit: kitPath, fn: fn}
 		}
 	}
-	return nil
 }
 
-// hookKey maps an agent name to its hookSet key: the main agent (or the
-// zero-value session default) is "", any other name is a subagent's.
+// hookKey maps an agent name to its hookSet key: the kit's main agent (and
+// the zero-value session default) is "", any employee is its own name. Both
+// spellings of the main agent must key to "" or a gate is stored under one
+// name and looked up under another.
 func (c *LoadedConfig) hookKey(agentName string) string {
-	// kitMainAgent is set when a kit installed its gates: a kit's main agent
-	// need not share a name with the markdown config's, and both must key to
-	// "" or the gate is stored under one name and looked up under another.
-	if agentName == "" || agentName == c.agent.Name || (c.kitMainAgent != "" && agentName == c.kitMainAgent) {
+	if agentName == "" || (c.kitMainAgent != "" && agentName == c.kitMainAgent) {
 		return ""
 	}
 	return agentName
@@ -244,17 +170,12 @@ func runHook(ctx context.Context, cfgDir string, ref hookRef, payload any) ([]by
 	}
 	hctx, cancel := context.WithTimeout(ctx, hookTimeout)
 	defer cancel()
-	var cmd *exec.Cmd
-	if ref.path != "" {
-		cmd = exec.CommandContext(hctx, "bash", ref.path)
-	} else {
-		// A kit-declared gate: source the kit, then call the one function.
-		// Sourcing is safe precisely because the kit parser rejects top-level
-		// statements — a kit defines functions and does nothing else, so this
-		// costs a parse and runs no side effects.
-		script := fmt.Sprintf("set -uo pipefail; source %s; %s", shellQuote(ref.kit), ref.fn)
-		cmd = exec.CommandContext(hctx, "bash", "-c", script)
-	}
+	// Source the kit, then call the one declared function. Sourcing is safe
+	// precisely because the kit parser rejects top-level statements — a kit
+	// defines functions and does nothing else, so this costs a parse and runs
+	// no side effects.
+	script := fmt.Sprintf("set -uo pipefail; source %s; %s", shellQuote(ref.kit), ref.fn)
+	cmd := exec.CommandContext(hctx, "bash", "-c", script)
 	cmd.Dir = cfgDir
 	// A killed hook may leave children holding the stdout pipe (e.g. a
 	// backgrounded sleep); don't let Wait block on them past the kill.

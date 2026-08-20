@@ -12,15 +12,32 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const healthYAML = "models:\n  m: { base_url: \"http://x\", api_key: k, model: id }\n"
-const healthAgent = "---\nmodel: m\n---\np\n"
+// healthWiring is the `shell3:` block of the minimal health fixture; extra
+// wiring lines (telegram, mcp) are appended by the callers that need them and
+// re-indented into the comment fence by kitWithWiring.
+const healthWiring = "models:\n  m: { base_url: \"http://x\", api_key: k, model: id }\n"
 
-// writeHealthTree writes a minimal loadable config tree (plus extra files)
-// and returns the directory.
+// kitWithWiring renders a kit whose `shell3:` block is the given YAML, plus
+// one main agent and, when gate is non-empty, a gate function for it.
+func kitWithWiring(wiring, gate string) string {
+	var b strings.Builder
+	b.WriteString("#---\n# shell3:\n")
+	for _, line := range strings.Split(strings.TrimRight(wiring, "\n"), "\n") {
+		b.WriteString("#   " + line + "\n")
+	}
+	b.WriteString("#---\n\n#---\n# agent: main\n# model: m\n#---\nmain_prompt() { cat <<'SHELL3_EOF'\np\nSHELL3_EOF\n}\n")
+	if gate != "" {
+		b.WriteString("\n#---\n# gate: [main]\n#---\nmain_gate() {\n" + gate + "\n}\n")
+	}
+	return b.String()
+}
+
+// writeHealthTree writes a minimal loadable kit config (plus extra files) and
+// returns the directory. An entry for shell3.sh in extra replaces the default.
 func writeHealthTree(t *testing.T, extra map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
-	files := map[string]string{"shell3.yaml": healthYAML, "agent.md": healthAgent}
+	files := map[string]string{"shell3.sh": kitWithWiring(healthWiring, "")}
 	for k, v := range extra {
 		files[k] = v
 	}
@@ -72,8 +89,7 @@ func TestHealthFailsOnSkippedSkill(t *testing.T) {
 
 func TestHealthFailsOnDownMCPServer(t *testing.T) {
 	cfg := writeHealthTree(t, map[string]string{
-		"shell3.yaml": healthYAML + "mcp:\n  dead: { command: [\"/nonexistent-mcp-server-xyz\"], timeout: 2 }\n",
-		"agent.md":    "---\nmodel: m\nmcp: all\n---\np\n",
+		"shell3.sh": kitWithWiring(healthWiring+"mcp:\n  dead: { command: [\"/nonexistent-mcp-server-xyz\"], timeout: 2 }\n", ""),
 	})
 	out, err := runHealthAt(t, cfg)
 	if err == nil {
@@ -88,14 +104,14 @@ func TestHealthFailsOnDownMCPServer(t *testing.T) {
 }
 
 func TestHealthFailsOnLoadError(t *testing.T) {
-	cfg := writeHealthTree(t, map[string]string{"shell3.yaml": "models: [broken\n"})
+	cfg := writeHealthTree(t, map[string]string{"shell3.sh": "#---\n# shell3:\n#   models: [broken\n#---\n"})
 	if _, err := runHealthAt(t, cfg); err == nil {
-		t.Fatal("broken yaml must fail health")
+		t.Fatal("broken wiring yaml must fail health")
 	}
 }
 
 func TestHealthFailsOnBrokenHook(t *testing.T) {
-	cfg := writeHealthTree(t, map[string]string{"hooks/tool-call.sh": "echo not-json\n"})
+	cfg := writeHealthTree(t, map[string]string{"shell3.sh": kitWithWiring(healthWiring, "echo not-json")})
 	out, err := runHealthAt(t, cfg)
 	if err == nil {
 		t.Fatalf("broken hook must fail health:\n%s", out)
@@ -106,9 +122,9 @@ func TestHealthFailsOnBrokenHook(t *testing.T) {
 }
 
 func TestHealthOKWithStrictHook(t *testing.T) {
-	// A hook that deliberately blocks everything is a valid (strict) gate.
+	// A gate that deliberately blocks everything is a valid (strict) gate.
 	cfg := writeHealthTree(t, map[string]string{
-		"hooks/tool-call.sh": `printf '{"block": true, "reason": "locked down"}'` + "\n",
+		"shell3.sh": kitWithWiring(healthWiring, `printf '{"block": true, "reason": "locked down"}'`),
 	})
 	out, err := runHealthAt(t, cfg)
 	if err != nil {
@@ -127,7 +143,7 @@ func TestHealthFailsOnIncompleteTelegramBlock(t *testing.T) {
 	}
 	for name, block := range cases {
 		t.Run(name, func(t *testing.T) {
-			cfg := writeHealthTree(t, map[string]string{"shell3.yaml": healthYAML + block})
+			cfg := writeHealthTree(t, map[string]string{"shell3.sh": kitWithWiring(healthWiring+block, "")})
 			out, err := runHealthAt(t, cfg)
 			if err == nil {
 				t.Fatalf("an unusable telegram block must fail health:\n%s", out)
@@ -144,7 +160,7 @@ func TestHealthFailsOnIncompleteTelegramBlock(t *testing.T) {
 
 func TestHealthOKWithCompleteTelegramBlock(t *testing.T) {
 	cfg := writeHealthTree(t, map[string]string{
-		"shell3.yaml": healthYAML + "telegram:\n  token: \"123:ABC\"\n  chat_id: \"123456789\"\n",
+		"shell3.sh": kitWithWiring(healthWiring+"telegram:\n  token: \"123:ABC\"\n  chat_id: \"123456789\"\n", ""),
 	})
 	out, err := runHealthAt(t, cfg)
 	if err != nil {
@@ -173,8 +189,7 @@ func TestHealthReportsAbsentTelegramWithoutFailing(t *testing.T) {
 // and MCP diagnostics — the expensive checks someone runs health FOR.
 func TestHealthBrokenTelegramDoesNotHideHookDiagnostics(t *testing.T) {
 	cfg := writeHealthTree(t, map[string]string{
-		"shell3.yaml":        healthYAML + "telegram:\n  token: \"123:ABC\"\n  chat_id: \"\"\n",
-		"hooks/tool-call.sh": "echo not-json\n",
+		"shell3.sh": kitWithWiring(healthWiring+"telegram:\n  token: \"123:ABC\"\n  chat_id: \"\"\n", "echo not-json"),
 	})
 	out, err := runHealthAt(t, cfg)
 	if err == nil {
@@ -340,20 +355,28 @@ func TestHealthFailsOnCronToolWithRequiredParam(t *testing.T) {
 	}
 }
 
-// A tool: cron job under a markdown config (no shell3.sh at all) has no kit
-// to resolve against — it must fail health with a clear message, not panic
-// or silently no-op at 3am. The refusal actually comes from config.Load
-// itself (see TestLoadCronToolJobWithoutKitFails in internal/config), so
-// health surfaces it as a load error rather than its own per-job check.
-func TestHealthFailsOnCronToolWithNoKit(t *testing.T) {
-	cfg := writeHealthTree(t, map[string]string{
-		"cron/sync.md": "---\nschedule: \"@every 30m\"\ntool: sync-notion-recent\n---\n",
+// A cron agent: job naming an agent the kit does not declare must fail here.
+// Nothing else checks it — the typo used to surface as a failed dispatch on
+// the first tick, hours later and only in the app log.
+func TestHealthFailsOnUnknownCronAgent(t *testing.T) {
+	cfg := writeKitHealthTree(t, map[string]string{
+		"rounds.md": "---\nschedule: \"@daily\"\nagent: nobody\n---\ndo the rounds\n",
 	})
 	out, err := runHealthAt(t, cfg)
 	if err == nil {
-		t.Fatalf("a tool: cron job with no kit must fail health:\n%s", out)
+		t.Fatalf("a cron job naming an undeclared agent must fail health:\n%s", out)
 	}
-	if !strings.Contains(err.Error(), "sync.md") {
-		t.Fatalf("error should name the offending job: %v", err)
+	if !strings.Contains(out, "rounds.md") || !strings.Contains(out, "nobody") {
+		t.Fatalf("output should name the job and the missing agent:\n%s", out)
+	}
+}
+
+// The main agent is a legitimate cron target.
+func TestHealthOKWithCronAgentJob(t *testing.T) {
+	cfg := writeKitHealthTree(t, map[string]string{
+		"rounds.md": "---\nschedule: \"@daily\"\nagent: main\n---\ndo the rounds\n",
+	})
+	if out, err := runHealthAt(t, cfg); err != nil {
+		t.Fatalf("a cron job naming the main agent should pass health: %v\n%s", err, out)
 	}
 }

@@ -2,15 +2,12 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
-	"strings"
 )
 
-// Load reads the config directory dir: shell3.yaml (required) + .env +
-// agent.md (required) + agents/*.md + skills/*.md + cron/*.md
-// + hooks/*.sh. Absent optional pieces disable their features. Every error
-// names the file that caused it.
+// Load reads the config directory dir: shell3.sh (required — the kit carries
+// the wiring, agents, tools and skills) + .env + cron/*.md. Absent optional
+// pieces disable their features. Every error names the file that caused it.
 func Load(dir string) (*LoadedConfig, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -24,10 +21,9 @@ func Load(dir string) (*LoadedConfig, error) {
 }
 
 func load(dir string) (*LoadedConfig, error) {
-	// A shell3.sh kit carries its own wiring in a `shell3:` block, so the
-	// directory needs no shell3.yaml. The kit's agents/tools/skills are loaded
-	// by agentsetup; here we only lift the wiring.
-	data, kitAgents, err := readWiring(dir)
+	// The kit carries its own wiring in a `shell3:` block; here we only lift
+	// that. Its agents, tools and skills are loaded by agentsetup.
+	data, err := readWiring(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -39,184 +35,20 @@ func load(dir string) (*LoadedConfig, error) {
 	if err := c.parseYAML(data, secrets); err != nil {
 		return nil, err
 	}
-	warn := func(w string) { c.warnings = append(c.warnings, w) }
-
-	// A kit supplies the agents, so the markdown tree below is skipped
-	// entirely: no agent.md, no agents/, no skills/, no projects/.
-	if kitAgents != nil {
-		c.agent = Agent{AgentCommon: AgentCommon{Name: "agent"}}
-		if err := c.loadCron(dir); err != nil {
-			return nil, err
-		}
-		subs := make([]Subagent, 0, len(kitAgents))
-		for _, n := range kitAgents {
-			subs = append(subs, Subagent{AgentCommon: AgentCommon{Name: n}})
-		}
-		if c.hooks, err = discoverHooks(dir, subs, warn); err != nil {
-			return nil, fmt.Errorf("hooks: %w", err)
-		}
-		return c, nil
-	}
-
-	// agent.md — the main agent (required).
-	agentData, err := os.ReadFile(filepath.Join(dir, "agent.md"))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("no agent.md — the main agent is a markdown file beside shell3.yaml")
-		}
-		return nil, err
-	}
-	c.agent, err = parseMainAgent(agentData)
-	if err != nil {
-		return nil, err
-	}
-	// context: literal entries must exist (strict); a zero-match glob is legal
-	// but warns. Contents are read late (per session), NOT here.
-	if err := validateContextEntries(dir, c.agent.Context, warn); err != nil {
-		return nil, err
-	}
-	// Only an OVER-CAP file becomes a load warning. Warnings are hardened into
-	// failures by `shell3 health`, so warning on merely-large would fail health
-	// on a file that is working fine — the same red-on-healthy outcome the kit
-	// branch deliberately avoids. Elision is content loss and earns the
-	// failure; size alone is advice, printed by health without failing.
-	for _, w := range ContextSizeWarnings(dir, c.agent.Context) {
-		if w.OverCap {
-			warn("agent.md: " + w.String())
-		}
-	}
-
-	// agents/*.md — subagents, filename order. Presence = registered;
-	// delegation is on iff at least one exists.
-	if err := c.loadSubagents(dir); err != nil {
-		return nil, err
-	}
-	// projects.md — the standing portfolio brief, appended verbatim to the end
-	// of the main agent's system prompt when present.
-	if pb, err := os.ReadFile(filepath.Join(dir, "projects.md")); err == nil {
-		c.agent.ProjectsBrief = strings.TrimSpace(string(pb))
-	} else if !os.IsNotExist(err) {
-		return nil, err
-	}
-	names := make([]string, 0, len(c.subagents))
-	for _, sa := range c.subagents {
-		names = append(names, sa.Name)
-	}
-	c.agent.Subagents = names
-
-	// skills/ — global, main agent only. Absent dir = no skills.
-	skills, err := scanSkillDir(filepath.Join(dir, "skills"), warn)
-	if err != nil {
-		return nil, fmt.Errorf("skills: %w", err)
-	}
-	c.agent.Skills = skills
-
-	// cron/*.md — scheduled prompts, one file per job.
 	if err := c.loadCron(dir); err != nil {
 		return nil, err
-	}
-
-	// hooks/*.sh.
-	if c.hooks, err = discoverHooks(dir, c.subagents, warn); err != nil {
-		return nil, fmt.Errorf("hooks: %w", err)
-	}
-
-	// Cross-reference validation.
-	for _, core := range c.cores() {
-		if _, ok := c.Model(core.ModelName); !ok {
-			return nil, fmt.Errorf("agent %q references unknown model %q", core.Name, core.ModelName)
-		}
-		for _, server := range core.MCP {
-			if !c.hasMCPServer(server) {
-				return nil, fmt.Errorf("agent %q opts into unknown mcp server %q", core.Name, server)
-			}
-		}
-	}
-	for _, job := range c.cron {
-		if job.Tool != "" {
-			// A tool: job resolves against a kit's declared tools (see
-			// agentsetup.Parts.KitToolByName) — a markdown-only config has
-			// no kit at all, so the job can never run. Caught here rather
-			// than left to fail silently on the first tick.
-			return nil, fmt.Errorf("cron/%s.md: names tool %q, but this config has no %s (tool: cron jobs need a kit)", job.Name, job.Tool, KitFileName)
-		}
-		if _, ok := c.SubagentByName(job.Agent); !ok {
-			return nil, fmt.Errorf("cron/%s.md: unknown agent %q (must be a subagent from agents/ or a project manager)", job.Name, job.Agent)
-		}
 	}
 	return c, nil
 }
 
-// cores returns the main agent plus every subagent as the shared core shape,
-// for validation loops.
-func (c *LoadedConfig) cores() []AgentCommon {
-	out := []AgentCommon{c.agent.AgentCommon}
-	for _, sa := range c.subagents {
-		out = append(out, sa.AgentCommon)
-	}
-	return out
-}
-
-func (c *LoadedConfig) hasMCPServer(name string) bool {
-	for _, s := range c.mcpServers {
-		if s.Name == name {
-			return true
-		}
-	}
-	return false
-}
-
-// loadSubagents reads agents/*.md in filename order. A non-.md file is
-// ignored; a subdirectory is ignored.
-func (c *LoadedConfig) loadSubagents(dir string) error {
-	entries, err := os.ReadDir(filepath.Join(dir, "agents"))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(dir, "agents", e.Name()))
-		if err != nil {
-			return err
-		}
-		name := strings.TrimSuffix(e.Name(), ".md")
-		// "agent" is the main agent's fixed name; a subagent shadowing it
-		// would silently win every name lookup (hooks, task dispatch).
-		if name == "agent" {
-			return fmt.Errorf("agents/agent.md: the name \"agent\" is reserved for the main agent (agent.md) — rename the file")
-		}
-		sa, err := parseSubagentFile(data, name, c.agent.ModelName, "agents/"+name+".md")
-		if err != nil {
-			return err
-		}
-		c.subagents = append(c.subagents, sa)
-	}
-	return nil
-}
-
 // loadCron reads cron/*.md in filename order.
 func (c *LoadedConfig) loadCron(dir string) error {
-	entries, err := os.ReadDir(filepath.Join(dir, "cron"))
+	files, err := readMDFiles(filepath.Join(dir, "cron"))
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
 		return err
 	}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(dir, "cron", e.Name()))
-		if err != nil {
-			return err
-		}
-		job, err := parseCronFile(data, strings.TrimSuffix(e.Name(), ".md"))
+	for _, f := range files {
+		job, err := parseCronFile(f.Data, f.Name)
 		if err != nil {
 			return err
 		}

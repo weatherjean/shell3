@@ -10,9 +10,9 @@ import (
 func TestRuntime_CronConfig(t *testing.T) {
 	dir := t.TempDir()
 	writeBaseTree(t, dir, map[string]string{
-		"shell3.yaml":        baseYAML,
-		"agents/explorer.md": "---\ndescription: d\n---\np\n",
-		"cron/n.md":          "---\nschedule: \"@daily\"\nagent: explorer\n---\ngo\n",
+		"shell3.sh": baseWiring + kitAgentDecl("main", "hi") +
+			kitAgentDecl("explorer", "p", "description: d"),
+		"cron/n.md": "---\nschedule: \"@daily\"\nagent: explorer\n---\ngo\n",
 	})
 	rt, err := shell3.NewRuntime(context.Background(), shell3.RuntimeSpec{ConfigDir: dir, WorkDir: dir})
 	if err != nil {

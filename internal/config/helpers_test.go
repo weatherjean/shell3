@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -17,31 +18,37 @@ func writeFile(t *testing.T, dir, name, body string) {
 	}
 }
 
-// minYAML is the smallest valid shell3.yaml (one model).
-const minYAML = `models:
-  m1:
-    base_url: https://api.example.com/v1
-    api_key: k
-    model: test-model
+// minWiring is the smallest valid `shell3:` block (one model), as it appears
+// inside a kit's comment fence.
+const minWiring = `#---
+# shell3:
+#   models:
+#     m1:
+#       base_url: https://api.example.com/v1
+#       api_key: k
+#       model: test-model
+#---
 `
 
-// minAgent is the smallest valid agent.md.
-const minAgent = `---
-model: m1
-tools: [bash]
----
+// minKit is the smallest valid shell3.sh: wiring plus one agent.
+const minKit = minWiring + `
+#---
+# agent: main
+# model: m1
+# use: [bash]
+#---
+main_prompt() { cat <<'EOF'
 You are a test agent.
+EOF
+}
 `
 
 // writeTree writes a minimal valid config tree plus the given extra files
 // (path → content, paths relative to dir, subdirs created).
 func writeTree(t *testing.T, dir string, extra map[string]string) {
 	t.Helper()
-	if _, ok := extra["shell3.yaml"]; !ok {
-		writeFile(t, dir, "shell3.yaml", minYAML)
-	}
-	if _, ok := extra["agent.md"]; !ok {
-		writeFile(t, dir, "agent.md", minAgent)
+	if _, ok := extra[KitFileName]; !ok {
+		writeFile(t, dir, KitFileName, minKit)
 	}
 	for name, body := range extra {
 		writeFile(t, dir, name, body)
@@ -60,15 +67,48 @@ func mustLoad(t *testing.T, extra map[string]string) *LoadedConfig {
 	return c
 }
 
-// loadErr writes a minimal tree (plus extras) and expects Load to fail,
-// returning the error message.
-func loadErr(t *testing.T, extra map[string]string) string {
-	t.Helper()
-	dir := t.TempDir()
-	writeTree(t, dir, extra)
-	_, err := Load(dir)
-	if err == nil {
-		t.Fatal("expected load error, got nil")
+// kitWith renders a kit declaring main + explorer, plus the given gate/note
+// functions. gates and notes map a shell function name to its body; each is
+// declared for the agents named in its `for` list.
+type hookDecl struct {
+	fn    string   // function name
+	body  string   // function body (shell statements)
+	forAg []string // agents the declaration governs
+}
+
+func kitWith(gates, notes []hookDecl) string {
+	var b strings.Builder
+	b.WriteString(minWiring)
+	b.WriteString(`
+#---
+# agent: main
+# model: m1
+# use: [bash]
+#---
+main_prompt() { cat <<'EOF'
+You are a test agent.
+EOF
+}
+
+#---
+# agent: explorer
+# description: explores
+# model: m1
+# use: [bash]
+#---
+explorer_prompt() { cat <<'EOF'
+Explore.
+EOF
+}
+`)
+	for _, set := range []struct {
+		kind  string
+		decls []hookDecl
+	}{{"gate", gates}, {"note", notes}} {
+		for _, d := range set.decls {
+			b.WriteString("\n#---\n# " + set.kind + ": [" + strings.Join(d.forAg, ", ") + "]\n#---\n")
+			b.WriteString(d.fn + "() {\n" + d.body + "\n}\n")
+		}
 	}
-	return err.Error()
+	return b.String()
 }

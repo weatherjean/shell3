@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -49,11 +50,13 @@ func runHealth(cmd *cobra.Command, path string) error {
 	}
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "config: %s\n", path)
+	// agentNames is every kit-declared agent, filled by the kit block below;
+	// the hook dry-run at the end walks it.
+	var agentNames []string
 	lc, err := config.Load(path)
 	if err != nil {
 		return fmt.Errorf("health: %w", err)
 	}
-	defer lc.Close()
 	warns := lc.Warnings()
 	for _, w := range warns {
 		fmt.Fprintln(out, "warning: "+w)
@@ -61,12 +64,10 @@ func runHealth(cmd *cobra.Command, path string) error {
 	if len(warns) > 0 {
 		return fmt.Errorf("health: config loaded with %d warning(s)", len(warns))
 	}
-	a := lc.FirstAgent()
-
-	// A kit is the config when present: report its agents and validate every
-	// declared tool, so a broken manifest fails here rather than at 3am.
+	// The kit IS the config: report its agents and validate every declared
+	// tool, so a broken manifest fails here rather than at 3am.
 	kitPath := filepath.Join(path, config.KitFileName)
-	if _, statErr := os.Stat(kitPath); statErr == nil {
+	{
 		res, cerr := kit.Check(ctx, kitPath)
 		if cerr != nil {
 			return fmt.Errorf("health: %w", cerr)
@@ -85,7 +86,21 @@ func runHealth(cmd *cobra.Command, path string) error {
 		if perr != nil {
 			return fmt.Errorf("health: %w", perr)
 		}
-		fatCtx := 0
+		agentNames = make([]string, 0, len(k.Agents))
+		for _, ka := range k.Agents {
+			agentNames = append(agentNames, ka.Name)
+		}
+		// Install the kit's gate/note exactly as agentsetup.LoadKit does, so
+		// the dry-run below actually exercises them. config.Load alone does
+		// not: it lifts the wiring and nothing else.
+		if len(k.Gates) > 0 || len(k.Notes) > 0 {
+			main := ""
+			if len(k.Agents) > 0 {
+				main = k.Agents[0].Name
+			}
+			lc.SetKitHooks(kitPath, main, k.Gates, k.Notes)
+		}
+		fatCtx, badSkills := 0, 0
 		for i, ka := range k.Agents {
 			role := "employee"
 			if i == 0 {
@@ -99,9 +114,13 @@ func runHealth(cmd *cobra.Command, path string) error {
 			if i > 0 {
 				skillDir = filepath.Join(path, "projects", ka.Name, "skills")
 			}
-			nSkills := len(config.ScanSkills(skillDir))
+			skills, skillWarns := config.ScanSkillsChecked(skillDir)
+			for _, w := range skillWarns {
+				badSkills++
+				fmt.Fprintln(out, "skills: "+w)
+			}
 			fmt.Fprintf(out, "agent: %s (%s, model %s, %d tools, %d skills, %d tests)\n",
-				ka.Name, role, ka.Model, len(r.Tools), nSkills, len(ka.Tests))
+				ka.Name, role, ka.Model, len(r.Tools), len(skills), len(ka.Tests))
 			// The kit load path never validated `context:` at all, which is
 			// how a 90 KB brain file ran for weeks unnoticed. Resolve against
 			// the agent's OWN workdir, exactly as kitagent.go does.
@@ -125,6 +144,13 @@ func runHealth(cmd *cobra.Command, path string) error {
 		badTools := 0
 		for _, j := range lc.Cron() {
 			if j.Tool == "" {
+				// An agent: job must name an agent the kit declares. Nothing
+				// else checks this — a typo used to surface as a failed
+				// dispatch on the first tick, hours later and in the app log.
+				if !slices.Contains(agentNames, j.Agent) {
+					badTools++
+					fmt.Fprintf(out, "cron: cron/%s.md names agent %q, which the kit does not declare\n", j.Name, j.Agent)
+				}
 				continue
 			}
 			matches := k.ToolMatches(j.Tool)
@@ -158,33 +184,20 @@ func runHealth(cmd *cobra.Command, path string) error {
 		if badTools > 0 {
 			return fmt.Errorf("health: %d cron tool job problem(s)", badTools)
 		}
+		if badSkills > 0 {
+			return fmt.Errorf("health: %d unusable skill file(s) — they are silently absent from the prompt", badSkills)
+		}
 		if fatCtx > 0 {
 			return fmt.Errorf("health: %d oversized context file(s) — every turn re-reads them into the prompt", fatCtx)
 		}
-	} else {
-		fmt.Fprintf(out, "agent: %s (model %s, %d skills, %d subagents)\n",
-			a.Name, a.ModelName, len(a.Skills), len(a.Subagents))
-		// Large-but-intact context files are reported here rather than as load
-		// warnings, which health hardens into failures: same split as the kit
-		// branch above, so both config shapes behave identically. An over-cap
-		// file DID come through as a load warning and already failed above.
-		for _, w := range config.ContextSizeWarnings(path, a.Context) {
-			if !w.OverCap {
-				fmt.Fprintf(out, "agent %s: %s\n", a.Name, w)
-			}
-		}
-		// A tool: cron job under a markdown config (no kit at all) is
-		// already refused by config.Load itself (its cron cross-reference
-		// check), so there is nothing left to validate here.
 	}
 	// Dry-run every discovered hook with a probe payload. A script failure
 	// (nonzero exit, bad verdict JSON, timeout) surfaces as a fail-closed
 	// verdict whose reason carries "hook error:"/"hook failed:" — that's a
-	// broken script and fails health. A deliberate block/ask on the probe is
+	// broken script and fails health. A deliberate block on the probe is
 	// fine: the gate is just strict.
-	agents := append([]string{a.Name}, a.Subagents...)
 	brokenHooks := 0
-	for _, name := range agents {
+	for _, name := range agentNames {
 		if lc.ToolCallHookFor(name) == "" {
 			continue
 		}
@@ -194,7 +207,7 @@ func runHealth(cmd *cobra.Command, path string) error {
 			fmt.Fprintf(out, "hook (%s tool-call): %s\n", name, v.Reason)
 		}
 	}
-	for _, name := range agents {
+	for _, name := range agentNames {
 		if outp := lc.RunToolResult(ctx, name, "health_probe", "{}", "probe"); strings.Contains(outp, "hook failed") {
 			brokenHooks++
 			fmt.Fprintf(out, "hook (%s tool-result): %s\n", name, outp)

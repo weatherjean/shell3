@@ -43,7 +43,7 @@ import (
 //     the media dir). A hardlink's resolved path lies outside the config dir
 //     by construction but is never a different inode, so this inode walk —
 //     not the path check in step 2 — is what actually closes the hardlink
-//     route to `.env`, shell3.yaml, or a hook script.
+//     route to `.env` or the kit itself.
 //
 // The caller bounds the read itself (readLimited): the size a pre-read Stat
 // reports can be stale, and is 0 for a character device like /dev/zero.
@@ -54,7 +54,7 @@ func safeOpen(path, workDir, configDir string) (*os.File, os.FileInfo, error) {
 		}
 		path = filepath.Join(workDir, path)
 	}
-	// Refuse the `.env` beside shell3.yaml and dotenv siblings (.env.local,
+	// Refuse the `.env` beside the kit and dotenv siblings (.env.local,
 	// …); mirrors the credential-file guard the config loader applies. This
 	// check on the unresolved name catches the obvious case, but a symlink
 	// can point anywhere — resolved below, and checked again there, before

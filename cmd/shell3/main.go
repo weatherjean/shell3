@@ -94,7 +94,7 @@ func wantsHelp(args []string) bool {
 // addConfigFlag registers the shared --config/-c flag with the one canonical
 // description; every subcommand resolves it through resolveConfig.
 func addConfigFlag(cmd *cobra.Command, configDir *string) {
-	cmd.Flags().StringVarP(configDir, "config", "c", "", "Path to the config directory containing shell3.yaml (default ~/.shell3)")
+	cmd.Flags().StringVarP(configDir, "config", "c", "", "Path to the config directory containing shell3.sh (default ~/.shell3)")
 }
 
 // resolveConfig turns the shared --config flag value (a directory path; "" for
