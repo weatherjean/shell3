@@ -158,6 +158,15 @@ forbidden, and the operator eventually switches it off entirely.
 - **Per-agent, no inheritance.** A subagent with no hook file runs ungated;
   the main agent's script never applies to it. Give every subagent its own
   script (even a strict three-line allowlist) if it must be constrained.
+- **`review` is a false-positive reducer, not a second boundary.** The
+  `{"review": true}` soft deny sends flagged commands to a one-word LLM
+  guardian (deny on anything but a clean APPROVE, comments stripped, fail
+  closed on error or timeout, a three-strike breaker on consecutive
+  denials). It lets the gate keep broad, lazy patterns without refusing
+  ordinary work — but a reviewer that sees only the command string can be
+  fooled by one crafted to look benign. Keep the irreversible rules
+  (credentials, gate edits, machine destruction) on `block`, where no model
+  gets a vote.
 - **It's a guardrail, not a boundary.** A determined model can phrase a
   destructive command your regexes don't catch. Pair with real isolation for
   anything that must not escape.

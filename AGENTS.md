@@ -27,7 +27,8 @@ Declaration kinds: `agent:` (prompt function under it; `model`, `workdir`,
 ENVIRONMENT VARIABLES, never `$1`), `skill:`, `test:` (harness in
 `harness.go`: `tool`, `stub`, `assert_eq`, `assert_contains`, `fail`,
 `$KIT_TMP`), `gate:` and `note:`, plus the `shell3:` wiring block (models,
-telegram, mcp, `runs_keep_days`, `media_keep_days`; re-marshalled through the
+telegram, mcp, `runs_keep_days`, `media_keep_days`, `review_model`,
+`review_policy`; re-marshalled through the
 existing YAML parser by `config.readWiring`; secrets as `env:KEY` from the
 sibling `.env`). Scoping is POSITIONAL for `tool:`/`skill:`/`test:` — an
 `agent:` or `shared:` block opens a scope — but `gate:`/`note:` are NAMED
@@ -36,7 +37,8 @@ agents and a copy per agent is how two rule sets drift apart.
 
 `gate:` runs before every tool call for the agents it names (stdin
 `{"name","command","args","headless"}`; stdout `{}` to run,
-`{"block":true,"reason":…}` to refuse, `{"command":…}`/`{"argv":[…]}` to
+`{"block":true,"reason":…}` to refuse, `{"review":true,"reason":…}` to
+soft-deny (below), `{"command":…}`/`{"argv":[…]}` to
 rewrite — bash tools only; nonzero exit, bad JSON or a 10s timeout fails
 closed; there is NO ask verdict). `note:` rewrites a tool's result (stdin
 `{"name","args","output"}`, stdout `{"output":…}`) and is advice, never a
@@ -45,12 +47,33 @@ agents. Execution rides the same path as the markdown config's hook files:
 `config.hookRef` is either a script path or a (kit, function) pair, and
 `SetKitHooks` installs the kit's — declaring BOTH forms for one agent is a
 load error, since a silent winner hides a half-finished migration. The
-scaffold's gate ships armed and refuses six things, all irreversible and none
-of them the work (machine destruction, credentials, stopping shell3,
-publishing, unread remote code, edits to the gate); everything else runs,
-including deletion. It is a speed bump by construction — the agent can rewrite
-it in two lines of Python — so real protection is filesystem-level (a
-dedicated user, `chflags uchg`/`chattr +i`, a container).
+scaffold's gate ships armed: four hard refusals, all irreversible and none
+of them the work (machine destruction, credentials, stopping shell3, edits
+to the gate), plus two judgment calls demoted to `review` (unread remote
+code, publishing); everything else runs, including deletion. It is a speed
+bump by construction — the agent can rewrite it in two lines of Python — so
+real protection is filesystem-level (a dedicated user, `chflags
+uchg`/`chattr +i`, a container).
+
+`{"review":true,"reason":…}` is the SOFT deny (mirrors Hermes' smart
+approvals, guardian half only): `config` parses it to `ActionReview`,
+`chat`'s gateBash resolves it through `ToolConfig.ReviewToolCall`, and
+`internal/review.Reviewer` makes one guardian LLM call — command +
+gate reason, unquoted `#` comments stripped, XML-delimited, operator
+`review_policy` text in the SYSTEM channel only, one word back at temp 0
+(`agentsetup.reviewMaxTokens` 1024, not 16, or reasoning models truncate and
+every review fails closed). APPROVE runs the ORIGINAL command; DENY,
+ESCALATE, garbage, transport error, or a 30s timeout all deny with a
+stop-and-tell-the-operator message; 3 CONSECUTIVE denies per agent
+(`review.breakerThreshold`, keyed by activeName, reset on approve) escalate
+the deny text to a hard stop — text only, prompt-cache-invariant. Bash tools
+only: a review verdict on a non-bash tool fails closed (gateNonBashTool),
+as does review with no reviewer wired. The reviewer is a DEDICATED client
+(`Parts.Reviewer()`, lazy sync.Once; `review_model` wiring key, default =
+the main agent's model) — never the agent's own client, whose SetParams
+state a reviewer override would corrupt. Verdict precedence: block > review
+> argv > command. The reviewer reduces false blocks; it is NOT a containment
+boundary — the OS is (docs/security.md).
 
 `context:` is a list of paths re-read at every turn start (`RefreshPrompt`,
 wired through `TurnConfig` into `assembleTurnContext`) so a long-lived
@@ -238,19 +261,22 @@ null otherwise), "args", "headless" (true when no human is attached —
 subagents, cron)}` — and prints a verdict: empty/`{}`
 (run) / `{"command": …}` (rewrite — bash tools only) / `{"argv": […]}`
 (runner-swap — bash tools only; fails closed for non-bash) /
+`{"review": true, "reason": …}` (soft deny → the LLM reviewer, see the kit
+section above; bash tools only, fails closed unwired) /
 `{"block": true, "reason": …}`. There is NO ask verdict: shell3 runs
 unattended, where an ask is a denial with a delay — a legacy hook printing
 `{"ask": …}` fails closed with a reason naming the removal, never silently
-allows. Precedence when several keys are set: block > argv > command.
+allows. Precedence when several keys are set: block > review > argv >
+command.
 Nonzero exit, malformed JSON, or timeout **fails closed**. `hooks/tool-result.sh` /
 `hooks/<name>.tool-result.sh` can rewrite a tool's output (e.g. redact
 secrets): stdin `{"name","args","output"}`, stdout `{"output": …}`; a failure
 here also fails closed (output replaced by an error notice, never passed
 through unredacted). **The scaffold's gates ship armed** (`internal/scaffold`,
 covered by `internal/scaffold/hooks_test.go`, which drives the shipped scripts
-with real payloads): credential paths, system-path writes, unread remote code,
-publishing, force-pushes, self-termination, and edits to the gate scripts are
-refused; everything else runs. They never ask — shell3 mostly runs unattended,
+with real payloads): credential paths, system-path writes, force-pushes,
+self-termination, and edits to the gate scripts are refused, and unread
+remote code and publishing soft-deny to the reviewer; everything else runs. They never ask — shell3 mostly runs unattended,
 where an ask parks the turn until it times out and denies anyway — and every
 refusal instructs the model not to work around it but to raise it with the
 operator (a subagent's refusal tells it to stop and hand up to the main agent

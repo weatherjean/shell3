@@ -175,6 +175,14 @@ type LoadedConfig struct {
 	// disables the listener (and /dash says so).
 	DashPort int
 
+	// ReviewModel is `review_model`: the declared model the gate's {review}
+	// reviewer runs on. "" = use the main agent's model. Validated at load
+	// against the models map.
+	ReviewModel string
+	// ReviewPolicy is `review_policy`: operator rule text appended to the
+	// reviewer's system prompt (the trusted channel). "" = none.
+	ReviewPolicy string
+
 	agent     Agent
 	subagents []Subagent
 

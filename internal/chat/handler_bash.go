@@ -67,6 +67,15 @@ func gateBash(ctx context.Context, cfg ToolConfig, name, command, argsJSON strin
 		return []string{"bash", "-c", command}, "", false // no hooks: unsafe default
 	}
 	v := cfg.RunToolCall(ctx, name, command, argsJSON, cfg.Headless)
+	if v.Action == ActionReview {
+		// Soft deny: the LLM reviewer decides. Approved runs the ORIGINAL
+		// command (a review carries no rewrite); denied blocks with the
+		// reviewer's message; no reviewer wired fails closed.
+		if msg, blocked := resolveReview(ctx, cfg, name, command, v.Reason); blocked {
+			return nil, msg, true
+		}
+		return []string{"bash", "-c", command}, "", false
+	}
 	allowed, msg := resolveGate(v)
 	if !allowed {
 		return nil, msg, true

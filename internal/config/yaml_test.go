@@ -298,6 +298,31 @@ func TestYAMLTypeNamesCoverEveryWireStruct(t *testing.T) {
 	}
 }
 
+func TestParseYAMLReviewKeys(t *testing.T) {
+	// Defaults: no review model name (callers fall back to the main agent's
+	// model), no policy.
+	c, err := parseY(t, fullYAML, fullSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.ReviewModel != "" || c.ReviewPolicy != "" {
+		t.Fatalf("defaults = %q/%q, want empty", c.ReviewModel, c.ReviewPolicy)
+	}
+	c, err = parseY(t, fullYAML+"review_model: aux\nreview_policy: always DENY /etc writes\n", fullSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.ReviewModel != "aux" || c.ReviewPolicy != "always DENY /etc writes" {
+		t.Fatalf("got %q/%q", c.ReviewModel, c.ReviewPolicy)
+	}
+	// A review_model naming no declared model is a load error — a config
+	// that loads is a config whose reviewer can actually run.
+	if _, err := parseY(t, fullYAML+"review_model: nope\n", fullSecrets); err == nil ||
+		!strings.Contains(err.Error(), "review_model") {
+		t.Fatalf("want error naming review_model, got %v", err)
+	}
+}
+
 func TestParseYAMLDashPort(t *testing.T) {
 	c, err := parseY(t, fullYAML, fullSecrets)
 	if err != nil {

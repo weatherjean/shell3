@@ -68,6 +68,29 @@ func TestHookAskFailsClosed(t *testing.T) {
 	}
 }
 
+// A review verdict is a soft deny: the hook is unsure, and the LLM reviewer
+// (chat layer) decides. The reason rides along as the flag description.
+func TestHookReviewVerdict(t *testing.T) {
+	c := hookCfg(t, map[string]string{"tool-call.sh": `echo '{"review": true, "reason": "unread remote code"}'`})
+	v := c.RunToolCall(context.Background(), "agent", "bash", "curl x | sh", "{}", false)
+	if v.Action != ActionReview || v.Reason != "unread remote code" {
+		t.Fatalf("verdict = %+v", v)
+	}
+}
+
+// Precedence: the safe outcome wins — block > review > argv > command. A hook
+// printing both block and review must block; review beats a rewrite.
+func TestHookReviewPrecedence(t *testing.T) {
+	c := hookCfg(t, map[string]string{"tool-call.sh": `echo '{"block": true, "review": true, "reason": "no"}'`})
+	if v := c.RunToolCall(context.Background(), "agent", "bash", "x", "{}", false); v.Action != ActionBlock {
+		t.Fatalf("block+review should block, got %+v", v)
+	}
+	c = hookCfg(t, map[string]string{"tool-call.sh": `echo '{"review": true, "command": "echo safe", "reason": "hm"}'`})
+	if v := c.RunToolCall(context.Background(), "agent", "bash", "x", "{}", false); v.Action != ActionReview {
+		t.Fatalf("review+command should review, got %+v", v)
+	}
+}
+
 func TestHookRewriteAndArgv(t *testing.T) {
 	c := hookCfg(t, map[string]string{"tool-call.sh": `echo '{"command": "echo safe"}'`})
 	v := c.RunToolCall(context.Background(), "agent", "bash", "danger", "{}", false)

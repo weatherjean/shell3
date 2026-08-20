@@ -20,6 +20,8 @@ type yamlFile struct {
 	Background    *yamlBackground      `yaml:"background"`
 	RunsKeepDays  *int                 `yaml:"runs_keep_days"`  // nil = default 30; 0 = keep forever
 	DashPort      *int                 `yaml:"dash_port"`       // nil = default 7333; 0 = dash disabled
+	ReviewModel   string               `yaml:"review_model"`    // "" = the main agent's model
+	ReviewPolicy  string               `yaml:"review_policy"`   // operator rules for the {review} guardian
 	MediaKeepDays *int                 `yaml:"media_keep_days"` // nil = default 0 = keep forever
 }
 
@@ -198,6 +200,15 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 	}
 	if c.DashPort < 0 || c.DashPort > 65535 {
 		return fmt.Errorf("shell3.yaml: dash_port must be 0 (disabled) or a port 1-65535; got %d", c.DashPort)
+	}
+	// review_model must name a declared model — a config that loads is a
+	// config whose {review} reviewer can actually run. "" = main model.
+	c.ReviewModel = strings.TrimSpace(f.ReviewModel)
+	c.ReviewPolicy = strings.TrimSpace(f.ReviewPolicy)
+	if c.ReviewModel != "" {
+		if _, ok := c.Model(c.ReviewModel); !ok {
+			return fmt.Errorf("shell3.yaml: review_model %q names no declared model", c.ReviewModel)
+		}
 	}
 	return nil
 }

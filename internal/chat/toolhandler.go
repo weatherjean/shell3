@@ -79,6 +79,11 @@ type ToolConfig struct {
 	// the unsafe default). Config-global. headless carries Headless to the
 	// chain as t.headless.
 	RunToolCall func(ctx context.Context, name, command, argsJSON string, headless bool) ToolCallVerdict
+	// ReviewToolCall resolves a hook's {review} soft deny: an LLM reviewer
+	// assesses command (bash tools only) and approves or denies, with a deny
+	// message for the model. reason is the hook's flag description. Nil =
+	// no reviewer wired → a review verdict fails closed. Config-global.
+	ReviewToolCall func(ctx context.Context, name, command, reason string) (approved bool, denyMsg string)
 }
 
 // TurnConfig holds all dependencies needed for one user→assistant turn. It

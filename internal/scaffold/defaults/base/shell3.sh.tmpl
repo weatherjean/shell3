@@ -33,6 +33,10 @@
 #
 #   # runs_keep_days: 30      # 0 keeps every session forever
 #   # media_keep_days: 30     # 0 keeps chat uploads forever
+#
+#   # The gate's {"review": true} soft denies go to a one-word LLM guardian.
+#   # review_model: minmax    # a declared model (default: the main agent's)
+#   # review_policy: always DENY anything writing under /etc
 #---
 
 # ===========================================================================
@@ -164,15 +168,22 @@ SHELL3_EOF
 #           command is the bash text for bash/bash_bg and null otherwise.
 #   stdout: {}                              run (empty output = run too)
 #           {"block": true, "reason": "…"}   refuse
+#           {"review": true, "reason": "…"}  soft deny — the LLM reviewer
+#                                            decides (bash tools only; no
+#                                            reviewer wired = refuse)
 #           {"command": "…"} / {"argv": […]} rewrite (bash tools only)
 # A nonzero exit, bad JSON, or a 10s timeout BLOCKS the call (fails closed).
 #
 # ---------------------------------------------------------------------------
 # THE DEFAULT IS RUN.
 #
-# This refuses six things, all irreversible and none of them the work:
-# destroying the machine, leaking credentials, stopping shell3, publishing,
-# running unread remote code, and editing this file. Everything else runs —
+# This hard-refuses four things, all irreversible and none of them the work:
+# destroying the machine, leaking credentials, stopping shell3, and editing
+# this file. Two more are judgment calls sent to the LLM reviewer instead of
+# refused outright ({"review": true}): running unread remote code and
+# publishing — right to stop most of the time, wrong when the operator asked
+# for exactly that; the reviewer weighs the actual command, and with no
+# reviewer wired the runtime fails them closed. Everything else runs —
 # including deleting things, which is most of what cleanup is.
 #
 # It is deliberately short, because a long one is worse. An earlier version
@@ -222,6 +233,14 @@ main_gate() {
   they will change the gate if they agree. Never lift the restriction yourself."
 
   block() { jq -cn --arg r "$1" --arg p "$POLICY" '{block: true, reason: ((($r | sub("[. ]+$";"")) + ". " + $p))}'; exit 0; }
+
+  # Soft deny: the LLM reviewer decides (review_model in the wiring block,
+  # default = the main model). Use it for judgment calls — a rule that is
+  # right most of the time but has real false positives. The reviewer sees
+  # the command plus this reason; a deny already tells the model to stop and
+  # raise it with the operator. With no reviewer wired it fails closed, so a
+  # review rule is never weaker than a block was.
+  review() { jq -cn --arg r "$1" '{review: true, reason: $r}'; exit 0; }
 
   # Does this command WRITE? The rules below that care about a location care
   # about writing to it, never about reading it. Reading anything is fine,
@@ -317,21 +336,27 @@ main_gate() {
   esac
 
   # --- 5. Unread remote code ------------------------------------------------
-  # Fetch it, read it, then run it. Unattended there is nobody to notice that
-  # the URL served something else today.
+  # A judgment call, so the reviewer decides: `curl … | sh` of an unread URL
+  # is the classic supply-chain hole, but the same shape is also the standard
+  # documented installer for tools the operator asked for. The pattern alone
+  # cannot tell them apart; a model can.
   case "$cmd" in
     *curl*\|*sh*|*wget*\|*sh*|*curl*\|*bash*|*wget*\|*bash*|\
     *base64*-d*\|*sh*|*base64*--decode*\|*sh*|*xxd*-r*\|*sh*|*openssl*-d*\|*bash*|\
     *'eval $(curl'*|*'eval $(wget'*|*'`curl'*|*'`wget'*)
-      block "never pipe unread remote or decoded content into a shell — download it, read it, then run it" ;;
+      review "pipes remote or decoded content into a shell without reading it first" ;;
   esac
 
   # --- 6. Public and permanent ----------------------------------------------
-  # An ordinary `git push` is normal work and is recoverable. These are not.
+  # An ordinary `git push` is normal work and is recoverable. Publishing is a
+  # judgment call — `npm publish` of the operator's own package mid-release
+  # is the work; the reviewer weighs it. Force-push stays hard: it rewrites
+  # history other people may already have, and no command text can prove
+  # they don't.
   case "$cmd" in
     *"npm publish"*|*"gh release create"*|*"gh release delete"*|*"pypi"*upload*|*"twine upload"*|\
     *"cargo publish"*|*"docker push"*)
-      block "publishing is permanent and public — leave this one for the operator" ;;
+      review "publishes an artifact publicly and permanently" ;;
     *"git push --force"*|*"git push -f"*|*"push --force-with-lease"*)
       block "force-pushing rewrites history others may already have — leave this one for the operator" ;;
   esac

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"strings"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/weatherjean/shell3/internal/modelproxy"
 	"github.com/weatherjean/shell3/internal/paths"
 	"github.com/weatherjean/shell3/internal/persona"
+	"github.com/weatherjean/shell3/internal/review"
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
@@ -75,6 +77,12 @@ type Parts struct {
 	// otherwise. Agents declared in it resolve through KitAgentRuntime.
 	kit     *kit.Kit
 	kitPath string
+	// reviewer resolves the gate's {review} verdicts (built lazily by
+	// Reviewer(); nil when its model cannot resolve — reviews then fail
+	// closed at the chat layer). One instance per Parts so the denial
+	// breaker's per-agent tallies span every session of this generation.
+	reviewer   *review.Reviewer
+	reviewOnce sync.Once
 	// home is the user's home dir, for expanding ~/ in a kit agent's workdir.
 	home string
 }
@@ -378,8 +386,11 @@ type SessionOptions struct {
 // production uses instead of hand-copying it.
 func BridgeVerdict(v config.ToolCallVerdict) chat.ToolCallVerdict {
 	action := chat.ActionBlock // fail closed on any unmapped action
-	if v.Action == config.ActionRun {
+	switch v.Action {
+	case config.ActionRun:
 		action = chat.ActionRun
+	case config.ActionReview:
+		action = chat.ActionReview
 	}
 	return chat.ToolCallVerdict{
 		Action:      action,
@@ -460,6 +471,15 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 	if p.lc.HasToolCall() {
 		cfg.RunToolCall = func(ctx context.Context, name, command, argsJSON string, headless bool) chat.ToolCallVerdict {
 			return BridgeVerdict(p.lc.RunToolCall(ctx, activeName, name, command, argsJSON, headless))
+		}
+		// The {review} soft deny resolves through the shared reviewer, keyed
+		// by the active agent so one runaway agent's denial-breaker tally
+		// never hard-stops another. Nil reviewer (model unresolvable) leaves
+		// cfg.ReviewToolCall nil and reviews fail closed downstream.
+		if rev := p.Reviewer(); rev != nil {
+			cfg.ReviewToolCall = func(ctx context.Context, name, command, reason string) (bool, string) {
+				return rev.Review(ctx, activeName, command, reason)
+			}
 		}
 	}
 	// hooks/*.tool-result.sh: the per-agent output-rewrite script.
@@ -637,6 +657,49 @@ func (b *builder) openStore() {
 		b.log.Warn("open store failed — history unavailable", "error", e)
 		fmt.Fprintln(os.Stderr, "shell3: warning: open store failed — conversations will not persist and history is unavailable: "+e.Error())
 	}
+}
+
+// reviewMaxTokens caps the reviewer's reply. The verdict is one word, but a
+// reasoning model spends thinking tokens first — 16 (Hermes' cap on plain
+// chat models) would truncate the thought and fail every review closed.
+const reviewMaxTokens = 1024
+
+// Reviewer returns the shared reviewer behind the gate's {review} verdict,
+// built on first use: `review_model` (default: the main agent's model) on a
+// DEDICATED client at temperature 0 — never the agent's own client, whose
+// params are client state a reviewer override would corrupt. Returns nil
+// when the model cannot resolve; the chat layer then fails review verdicts
+// closed with a named reason.
+func (p *Parts) Reviewer() *review.Reviewer {
+	p.reviewOnce.Do(func() {
+		name := p.lc.ReviewModel
+		if name == "" {
+			if p.kit != nil && len(p.kit.Agents) > 0 {
+				name = p.kit.Agents[0].Model
+			}
+			if name == "" {
+				name = p.lc.FirstAgent().ModelName
+			}
+		}
+		md, ok := p.lc.Model(name)
+		if !ok {
+			p.log.Warn("reviewer model not resolvable — {review} verdicts fail closed", "model", name)
+			return
+		}
+		p.proxy.Ensure(md.Name, md.RunProxy)
+		cl := openai.NewClient(md.BaseURL, md.APIKey, md.ModelID)
+		zero := 0.0
+		cl.SetParams(llm.RequestParams{
+			Temperature:     &zero,
+			MaxTokens:       reviewMaxTokens,
+			ReasoningEffort: md.Reasoning,
+		})
+		if md.Extra != nil {
+			cl.SetExtra(md.Extra)
+		}
+		p.reviewer = review.New(cl, p.lc.ReviewPolicy)
+	})
+	return p.reviewer
 }
 
 // buildClient constructs a streaming client plus its request params from a

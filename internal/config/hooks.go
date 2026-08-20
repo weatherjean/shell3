@@ -197,13 +197,17 @@ type ToolCallAction int
 const (
 	ActionRun ToolCallAction = iota
 	ActionBlock
+	// ActionReview is a soft deny: the hook is unsure and defers to the LLM
+	// reviewer (chat layer resolves it to run or block; no reviewer wired =
+	// block). Reason carries the hook's flag description into the review.
+	ActionReview
 )
 
 // ToolCallVerdict is the result of running an agent's tool-call hook.
 type ToolCallVerdict struct {
 	Action ToolCallAction
 	Argv   []string // ActionRun: exec exactly this
-	Reason string   // ActionBlock reason
+	Reason string   // ActionBlock / ActionReview reason
 	// Passthrough is true only on ActionRun when the hook expressed no
 	// command/argv opinion — no hook for this agent, or an empty/{} verdict.
 	// It lets the non-bash gate distinguish "hook didn't touch this" (allow)
@@ -213,13 +217,16 @@ type ToolCallVerdict struct {
 }
 
 // hookVerdict is the JSON a tool-call hook prints to stdout. Precedence when
-// several keys are set: block > argv > command (the safe outcome wins).
+// several keys are set: block > review > argv > command (the safe outcome
+// wins — an unsure hook that also printed a rewrite gets the review, and one
+// that also blocked gets the block).
 // Ask is parsed only to fail closed: the ask verdict was removed with the
 // mail-model redesign (shell3 runs unattended; an ask is a denial with a
 // delay), and a legacy hook still printing one must block loudly rather than
 // silently degrade to an allow.
 type hookVerdict struct {
 	Block   bool     `json:"block"`
+	Review  bool     `json:"review"`
 	Reason  string   `json:"reason"`
 	Argv    []string `json:"argv"`
 	Ask     string   `json:"ask"`
@@ -307,6 +314,8 @@ func (c *LoadedConfig) RunToolCall(ctx context.Context, agentName, name, command
 	switch {
 	case v.Block:
 		return ToolCallVerdict{Action: ActionBlock, Reason: v.Reason}
+	case v.Review:
+		return ToolCallVerdict{Action: ActionReview, Reason: v.Reason}
 	case v.Argv != nil:
 		// A present but malformed argv fails closed — never falls through to
 		// run the original command unwrapped (the documented safety promise).

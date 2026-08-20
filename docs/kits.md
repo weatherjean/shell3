@@ -251,9 +251,14 @@ the job silently run whichever function happened to parse first.
 ## The gate
 
 `gate:` runs before every tool call for the agents it names. Its stdin is
-`{"name","command","args","headless"}`; printing `{}` runs the call and
-`{"block":true,"reason":"…"}` refuses it. A nonzero exit, malformed JSON, or a
-10-second timeout fails closed.
+`{"name","command","args","headless"}`; printing `{}` runs the call,
+`{"block":true,"reason":"…"}` refuses it, and `{"review":true,"reason":"…"}`
+soft-denies: an LLM guardian (`review_model` in the wiring block, default =
+the main model) assesses the command and approves or blocks — bash tools
+only, and with no reviewer resolvable it fails closed. Use `review` for
+judgment-call rules with real false positives; keep `block` for the
+irreversible. A nonzero exit, malformed JSON, or a 10-second timeout fails
+closed.
 
 ```sh
 #---

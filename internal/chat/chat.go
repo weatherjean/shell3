@@ -141,6 +141,9 @@ type Config struct {
 	MCPStatus func() []MCPServerStatus
 	// RunToolCall runs the tool-call hook chain (config-global, nil = no hooks).
 	RunToolCall func(ctx context.Context, name, command, argsJSON string, headless bool) ToolCallVerdict
+	// ReviewToolCall resolves a {review} soft deny via the LLM reviewer
+	// (config-global, nil = review verdicts fail closed).
+	ReviewToolCall func(ctx context.Context, name, command, reason string) (approved bool, denyMsg string)
 	// RunToolResult runs the on_tool_result chain (config-global, nil = none).
 	RunToolResult func(ctx context.Context, name, argsJSON, output string) string
 	// AgentNames lists configured agents in declaration order, for /agent and
@@ -215,10 +218,11 @@ func NewHandlers() map[string]ToolHandler {
 func NewTurnConfig(cfg Config, handlers map[string]ToolHandler) TurnConfig {
 	return TurnConfig{
 		ToolConfig: ToolConfig{
-			Store:       cfg.Store,
-			WorkDir:     cfg.WorkDir,
-			Headless:    cfg.Headless,
-			RunToolCall: cfg.RunToolCall,
+			Store:          cfg.Store,
+			WorkDir:        cfg.WorkDir,
+			Headless:       cfg.Headless,
+			RunToolCall:    cfg.RunToolCall,
+			ReviewToolCall: cfg.ReviewToolCall,
 		},
 		LLM:           cfg.LLM,
 		Personality:   cfg.Personality,

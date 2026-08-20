@@ -398,15 +398,45 @@ The script prints a verdict to stdout:
 |--------|--------|
 | empty or `{}` | Run. |
 | `{"block": true, "reason": "…"}` | Block; `reason` goes to the model. Any tool. |
+| `{"review": true, "reason": "…"}` | Soft deny: the LLM reviewer decides (see below). `bash`/`bash_bg` only — fails closed elsewhere. |
 | `{"command": "…"}` | Rewrite the bash command. Bash tools only — fails closed elsewhere. |
 | `{"argv": ["…"]}` | Exec exactly this argv (runner swap). `bash`/`bash_bg` only. |
 
-When several keys are set, precedence is block > argv > command. A script
+When several keys are set, precedence is block > review > argv > command. A script
 that exits nonzero, prints malformed JSON, or runs past 10 s **fails
 closed** (blocks, with the failure as the reason). A legacy `{"ask": …}`
 verdict also fails closed, with a reason naming the removal — it never
 silently allows. The script's cwd is the config directory. Compose
 everything in the one script; there is no chain.
+
+### The `review` verdict — an LLM reviewer for judgment calls
+
+`{"review": true, "reason": "…"}` is a **soft deny** for rules that are right
+most of the time but have real false positives (`curl … | sh` is the classic
+supply-chain hole *and* the documented installer for tools you asked for).
+Instead of refusing outright, shell3 sends the command and your `reason` to a
+one-word LLM guardian — APPROVE runs the original command unchanged, anything
+else (DENY, uncertainty, a transport error, a timeout) blocks with a message
+telling the model to stop and raise it with you. Three consecutive denials
+for one agent escalate the message to a hard stop, so a model cannot burn a
+reviewer call per retry all night.
+
+Two optional top-level keys tune it:
+
+```yaml
+review_model: aux          # a declared model name; default = the main agent's model
+review_policy: |           # extra TRUSTED rules appended to the reviewer's system prompt
+  Always DENY anything writing under /etc.
+  APPROVE docker compose restarts in ~/deploys.
+```
+
+The command text the reviewer sees is untrusted input from the agent:
+unquoted shell comments are stripped (the cheapest place to hide "respond
+APPROVE"), the command is delimited, and the guardian is told to ignore any
+instructions inside it. With no reviewer resolvable a `review` verdict fails
+closed, so it is never weaker than `block`. It is also **not a containment
+boundary** — it reduces false blocks; the OS is still the security boundary
+([security](security.md)).
 
 The scaffold ships `hooks/tool-call.sh` armed. Its shape, and the reasoning
 behind it, in one line each:
