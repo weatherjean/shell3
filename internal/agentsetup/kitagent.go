@@ -164,7 +164,7 @@ func (p *Parts) KitAgentRuntime(name string) (chat.ActiveAgent, error) {
 	// Declared tools must route to the host-tool dispatcher, not the built-in
 	// tool handler — without this the model calls them and the turn answers
 	// with an unknown-tool error.
-	hostNames := p.KitHostToolNames(r)
+	hostNames := p.kitHostToolNames(r)
 
 	// Skills are FILES, indexed by name + description + path — never inlined.
 	// Inlining every skill body cost thousands of tokens on every turn and
@@ -218,9 +218,9 @@ func isMain(k *kit.Kit, name string) bool {
 	return len(k.Agents) > 0 && k.Agents[0].Name == name
 }
 
-// KitHostToolNames is the set of declared tool names that must route to the
+// kitHostToolNames is the set of declared tool names that must route to the
 // host-tool dispatcher for this agent.
-func (p *Parts) KitHostToolNames(r kit.Resolved) map[string]bool {
+func (p *Parts) kitHostToolNames(r kit.Resolved) map[string]bool {
 	out := map[string]bool{}
 	for _, t := range r.Tools {
 		out[t.Name] = true

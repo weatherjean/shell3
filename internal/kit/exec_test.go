@@ -60,9 +60,9 @@ func TestBindArgsDefaultsAndRequired(t *testing.T) {
 	k := mustParse(t, execKit)
 	tool := k.Agents[0].Tools[0]
 
-	env, err := tool.BindArgs(map[string]any{"who": "world"})
+	env, err := tool.bindArgs(map[string]any{"who": "world"})
 	if err != nil {
-		t.Fatalf("BindArgs: %v", err)
+		t.Fatalf("bindArgs: %v", err)
 	}
 	got := strings.Join(env, " ")
 	if !strings.Contains(got, "who=world") || !strings.Contains(got, "times=2") ||
@@ -70,10 +70,10 @@ func TestBindArgsDefaultsAndRequired(t *testing.T) {
 		t.Fatalf("env = %v", env)
 	}
 
-	if _, err := tool.BindArgs(map[string]any{}); err == nil {
+	if _, err := tool.bindArgs(map[string]any{}); err == nil {
 		t.Fatal("want error for a missing required argument")
 	}
-	if _, err := tool.BindArgs(map[string]any{"who": "x", "nope": 1}); err == nil {
+	if _, err := tool.bindArgs(map[string]any{"who": "x", "nope": 1}); err == nil {
 		t.Fatal("want error for an undeclared argument")
 	}
 }
@@ -84,15 +84,15 @@ func TestBindArgsIntCoercion(t *testing.T) {
 	k := mustParse(t, execKit)
 	tool := k.Agents[0].Tools[0]
 
-	env, err := tool.BindArgs(map[string]any{"who": "x", "times": float64(3)})
+	env, err := tool.bindArgs(map[string]any{"who": "x", "times": float64(3)})
 	if err != nil {
-		t.Fatalf("BindArgs: %v", err)
+		t.Fatalf("bindArgs: %v", err)
 	}
 	if !strings.Contains(strings.Join(env, " "), "times=3") {
 		t.Fatalf("env = %v, want times=3", env)
 	}
 
-	if _, err := tool.BindArgs(map[string]any{"who": "x", "times": 2.5}); err == nil {
+	if _, err := tool.bindArgs(map[string]any{"who": "x", "times": 2.5}); err == nil {
 		t.Fatal("want error for a fractional value on an int param")
 	}
 }

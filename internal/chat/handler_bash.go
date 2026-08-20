@@ -12,19 +12,19 @@ import (
 	"time"
 )
 
-// DefaultBashTimeoutSeconds caps bash tool runtime when caller does not set timeout_seconds.
-const DefaultBashTimeoutSeconds = 10
+// defaultBashTimeoutSeconds caps bash tool runtime when caller does not set timeout_seconds.
+const defaultBashTimeoutSeconds = 10
 
-// MaxBashTimeoutSeconds caps the upper bound the model can request. Kept
+// maxBashTimeoutSeconds caps the upper bound the model can request. Kept
 // deliberately low: a foreground bash call blocks the whole turn — the agent
 // cannot answer the user until it returns — so anything slower belongs in
 // bash_bg (which wakes the agent with the result on completion). The old
 // 600s cap let a single call wedge the bot for 10 minutes.
-const MaxBashTimeoutSeconds = 120
+const maxBashTimeoutSeconds = 120
 
-// MaxBashOutputBytes caps captured stdout+stderr. Beyond this the middle is
+// maxBashOutputBytes caps captured stdout+stderr. Beyond this the middle is
 // elided so the model sees the head and tail of long outputs.
-const MaxBashOutputBytes = 30 * 1024
+const maxBashOutputBytes = 30 * 1024
 
 // bashWaitDelay bounds how long c.Wait blocks on stdio pipes after the
 // process is killed. Grandchildren that inherit our fds would otherwise
@@ -130,7 +130,7 @@ func runBashCapture(ctx context.Context, argv []string, workdir string, extraEnv
 		switch {
 		case errors.Is(tctx.Err(), context.DeadlineExceeded):
 			exit = 124
-			fmt.Fprintf(&buf, "\nerror: command timed out after %s (set timeout_seconds to extend, max %ds; for anything slower use bash_bg — it wakes you with the result when it finishes)\n", timeout, MaxBashTimeoutSeconds)
+			fmt.Fprintf(&buf, "\nerror: command timed out after %s (set timeout_seconds to extend, max %ds; for anything slower use bash_bg — it wakes you with the result when it finishes)\n", timeout, maxBashTimeoutSeconds)
 		default:
 			if ee, ok := err.(*exec.ExitError); ok {
 				exit = ee.ExitCode()
@@ -145,7 +145,7 @@ func runBashCapture(ctx context.Context, argv []string, workdir string, extraEnv
 	if buf.Len() == 0 {
 		return "(no output)", exit
 	}
-	return elideMiddle(buf.Bytes(), MaxBashOutputBytes), exit
+	return elideMiddle(buf.Bytes(), maxBashOutputBytes), exit
 }
 
 // elideMiddle returns out unchanged if within max, otherwise keeps the
@@ -162,7 +162,7 @@ func elideMiddle(out []byte, max int) string {
 }
 
 // parseBashArgsFull extracts command and timeout. Timeout defaults to
-// DefaultBashTimeoutSeconds and is clamped to [1, MaxBashTimeoutSeconds].
+// defaultBashTimeoutSeconds and is clamped to [1, maxBashTimeoutSeconds].
 // Malformed args return an error — execution paths must never fall back to
 // running the raw JSON blob as a shell command.
 func parseBashArgsFull(raw string) (string, time.Duration, error) {
@@ -175,10 +175,10 @@ func parseBashArgsFull(raw string) (string, time.Duration, error) {
 	}
 	t := args.TimeoutSeconds
 	if t <= 0 {
-		t = DefaultBashTimeoutSeconds
+		t = defaultBashTimeoutSeconds
 	}
-	if t > MaxBashTimeoutSeconds {
-		t = MaxBashTimeoutSeconds
+	if t > maxBashTimeoutSeconds {
+		t = maxBashTimeoutSeconds
 	}
 	return args.Command, time.Duration(t) * time.Second, nil
 }
