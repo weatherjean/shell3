@@ -47,9 +47,12 @@ agents. `config.hookRef` is a (kit, function) pair installed by
 `SetKitHooks`; running one sources the kit and calls the function, which is
 safe precisely because a kit is definitions-only. The scaffold's gate ships
 armed: four hard refusals, all irreversible and none
-of them the work (machine destruction, credentials, stopping shell3, edits
-to the gate), plus two judgment calls demoted to `review` (unread remote
-code, publishing); everything else runs, including deletion. It is a speed
+of them the work (machine destruction, credentials, stopping shell3, writes
+to a leftover hooks/*.sh or shell3.yaml), plus two judgment calls demoted to
+`review` (unread remote code, publishing); everything else runs, including
+deletion. NOTE: the "do not edit the gate" refusal text is advice only on a
+kit install — the gate shares shell3.sh with every agent prompt, which the
+agent edits as ordinary work, so no write rule can cover it. It is a speed
 bump by construction — the agent can rewrite it in two lines of Python — so
 real protection is filesystem-level (a dedicated user, `chflags
 uchg`/`chattr +i`, a container).
@@ -278,7 +281,7 @@ closed (output replaced by an error notice, never passed through
 unredacted). **The scaffold's gate ships armed** (`internal/scaffold`,
 covered by `internal/scaffold/hooks_test.go`, which sources the shipped kit
 and drives its gate with real payloads): credential paths, system-path
-writes, force-pushes, self-termination, and edits to the kit are refused, and unread
+writes, force-pushes and self-termination are refused, and unread
 remote code and publishing soft-deny to the reviewer; everything else runs. It never asks — shell3 mostly runs unattended,
 where an ask parks the turn until it times out and denies anyway — and every
 refusal instructs the model not to work around it but to raise it with the

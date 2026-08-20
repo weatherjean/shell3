@@ -31,9 +31,12 @@ What the scaffold's `gate:` function refuses, and why:
 - **Credentials** (`.env`, `~/.ssh`, `~/.aws`, `~/.config/gh`, …): blocked
   for read and write, by every tool. A `lib/bin` script reads the one key it
   needs at point of use.
-- **The gate itself** and the wiring — both live in `shell3.sh`: readable,
-  not writable. Otherwise
-  "ask the operator to lift this" has an obvious shortcut.
+- **The gate itself**: the refusal text tells the agent not to edit it, but on
+  a kit install **no rule enforces that**. The gate, the wiring and every
+  agent's prompt live in the same `shell3.sh`, which the agent is expected to
+  edit (that is the whole self-evolve loop), so a write rule on that path
+  would block ordinary work. If you want the gate to hold, make the file
+  unwritable at the OS level — see below.
 - **System paths** (`/etc`, `/usr/bin`, `/System`, `~/Library`): writes
   blocked. `/usr/local` and `/opt` are allowed, since installing a tool is
   ordinary work.

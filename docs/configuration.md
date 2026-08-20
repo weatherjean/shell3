@@ -480,8 +480,10 @@ behind it, in one line each:
 - **Credentials** (`.env`, `~/.ssh`, `~/.aws`, `~/.config/gh`, …) — blocked for
   read and write, by every tool. A `lib/bin` script reads the one key it needs
   at point of use, so secrets never enter the conversation.
-- **The gate itself** and the wiring — both `shell3.sh` — readable, not writable. Otherwise
-  "ask the operator to lift this" has an obvious shortcut.
+- **The gate itself**: asked for, not enforced. The gate shares `shell3.sh`
+  with every agent prompt, which the agent edits as ordinary work, so a write
+  rule on that path would block the self-evolve loop. Make the file unwritable
+  at the OS level if you want it to hold.
 - **The machine's plumbing** (`/etc`, `/usr/bin`, `/System`, `~/Library`) —
   writes blocked. `/usr/local` and `/opt` are not on the list: installing a
   tool is ordinary work.
