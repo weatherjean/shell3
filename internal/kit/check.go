@@ -46,9 +46,14 @@ func Check(ctx context.Context, path string) (CheckResult, error) {
 
 	if _, err := exec.LookPath("shellcheck"); err == nil {
 		res.Shellcheck = true
+		// --shell=bash: a kit is a definitions-only file SOURCED by bash, so it
+		// carries no shebang and shellcheck cannot infer the dialect (SC2148).
 		// SC1090/SC1091: sourcing is the caller's job, not the kit's.
-		out, err := exec.CommandContext(ctx, "shellcheck",
-			"--severity=warning", "--exclude=SC1090,SC1091", "--format=gcc", path).CombinedOutput()
+		// SC2154 (referenced but not assigned): tool params reach the function
+		// as environment variables by contract, so every `tool:` with params
+		// would false-positive.
+		out, err := exec.CommandContext(ctx, "shellcheck", "--shell=bash",
+			"--severity=warning", "--exclude=SC1090,SC1091,SC2154", "--format=gcc", path).CombinedOutput()
 		if err != nil {
 			for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 				if line != "" {
