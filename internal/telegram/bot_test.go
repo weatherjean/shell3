@@ -398,6 +398,15 @@ func TestContract8_NewStartsFreshConversation(t *testing.T) {
 	first := b.main.ID()
 	b.mu.Unlock()
 
+	// The reply posts BEFORE the turn slot frees, and /new refuses mid-turn —
+	// on a slow runner the raw sequence races into that refusal. Wait for the
+	// slot the way a real user's next tap naturally would.
+	waitFor(t, func() bool {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return !b.turnActive
+	})
+
 	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/new"})
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "fresh conversation")
