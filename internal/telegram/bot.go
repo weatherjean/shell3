@@ -82,7 +82,7 @@ type Bot struct {
 	// cronID is the adopted cron dispatch parent's session id — the jobs/runs
 	// source that never runs turns and is never the main conversation.
 	cronID string
-	// cron is the adopted parent handle (jobs/runs source for /status views).
+	// cron is the adopted parent handle (the jobs/runs source the dash reads).
 	cron *shell3.Session
 
 	quietMode *QuietStore // the /quiet toggle's store; nil = never quiet
@@ -262,8 +262,8 @@ func (b *Bot) handleMsg(ctx context.Context, m Msg) {
 	// Sender check BEFORE the command branch below, not after. Telegram's
 	// privacy mode delivers /commands from every member of a group, not just
 	// the ones who mention the bot, so a gate placed only on the turn path
-	// would still let an unauthorized member /stop a running turn, /new away
-	// the conversation, or /cancel background jobs. Commands are control, and
+	// would still let an unauthorized member /stop a running turn or /new away
+	// the conversation. Commands are control, and
 	// control needs the same authorization as conversation.
 	if !b.allowlist().allows(m.SenderID) {
 		return // unauthorized sender: drop silently
@@ -730,7 +730,7 @@ func containsToolMarkup(text string) bool {
 }
 
 // malformedReplyNotice is what a user turn posts in place of a corrupt reply.
-const malformedReplyNotice = "⚠️ the model produced malformed output (raw tool-call markup) — reply suppressed; /runs has the transcript"
+const malformedReplyNotice = "⚠️ the model produced malformed output (raw tool-call markup) — reply suppressed; the dash has the transcript"
 
 // runWakeTurn runs one queued mail turn on sess. Its reply is the agent
 // speaking to the user and posts ✉️-prefixed — ONE channel, so the agent can
@@ -746,7 +746,7 @@ const malformedReplyNotice = "⚠️ the model produced malformed output (raw to
 func (b *Bot) runWakeTurn(ctx, turnCtx context.Context, sess *shell3.Session) {
 	reply, errText := b.drainTurn(sess.RunQueued(turnCtx), false)
 	// A wake turn with nothing to say stays silent even when its provider
-	// hiccuped — the turn error is in the transcript (/runs), and posting it
+	// hiccuped — the turn error is in the transcript (the dash), and posting it
 	// would make every flaky tick ring the chat. Errors ride along only when
 	// the agent was going to speak anyway.
 	if strutil.IsNoReply(reply) {

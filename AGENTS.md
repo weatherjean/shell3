@@ -111,10 +111,11 @@ triage persona, is gone with the mail model — a leftover file loads with a
 warning naming the removal.)
 
 **Bash-first.** The agent's verbs are `bash`, `bash_bg`, and `edit_file` (plus
-`read_media` — attach an image, audio, PDF, or video file so a multimodal
-model can perceive it (PDF via an OpenAI-compatible `file` part; video via a
-`video_url` part, an OpenRouter/Gemini extension plain OpenAI endpoints
-reject) — when `media` is in the agent's `tools`). The main agent is bash-first
+`read_media` — attach an image, audio, or PDF file so a multimodal
+model can perceive it (PDF via an OpenAI-compatible `file` part) — when
+`media` is in the agent's `tools`. Video is NOT a model input: it was
+deleted with the hand-rolled `rawContentParts` bypass it forced on the
+OpenAI adapter, and `shell3.Part` could never carry it anyway). The main agent is bash-first
 by default: reading, listing, and searching are bash commands (`cat`/`sed -n`,
 `ls`/`find`, `rg`), and a reflexive
 `read_file`/`grep`/`write_file` call gets an unknown-tool error carrying a
@@ -359,9 +360,10 @@ context hint (the quoted text is injected as a capped blockquote,
 `withReplyContext`), never a session switch; `/new` is the only way to start
 over (old conversation stays in the dash's runs listing and the history
 index). The current
-session id persists in the runs store's `threads` table under the reserved
-key `current-session` (surface-namespaced "telegram"/"serve";
-`ThreadIndex.SetCurrent`/`Current` in `threads.go` — store resolved per call
+session id persists in the runs store's `threads` table, one row per surface
+("telegram"/"serve") and nothing else in it
+(`runs.SetCurrentSession`/`CurrentSession`, reached through
+`telegram.ThreadIndex.SetCurrent`/`Current` — store resolved per call
 so a /reload generation swap never leaves the marker on a closed handle), so
 a restart resumes the same conversation (`mainSession`, falling back to a
 fresh session when the marker is absent or swept). The session never retires;
@@ -549,10 +551,11 @@ dispatches a session at all, so it can never have a `CronRollup` row; that
 absence is a KNOWN zero, not missing data, and renders as `0 tok/Nd run`
 rather than vanishing like a genuinely unknown agent-job figure would.
 
-Sessions, messages, reminders, and every surface's thread index live in **one
-SQLite database** (`internal/runs`, modernc.org/sqlite — pure Go, no cgo):
-`.shell3_project/shell3.db`, with an FTS5 index over user+assistant message
-text backing the `history` tool, and the `outbox` table (schema v7) holding
+Sessions, messages, reminders, and every surface's current-conversation
+marker live in **one SQLite database** (`internal/runs`, modernc.org/sqlite —
+pure Go, no cgo): `.shell3_project/shell3.db`, with an FTS5 index over
+user+assistant message text backing the `history` tool, and the `outbox`
+table (schema v8) holding
 the restart-durable completion queue — like `cron_status` it is opaque JSON,
 names no session id, and `runs.Sweep` never touches it. Job logs stay plain
 files under `runs/<session>/jobs/<id>.log`. The schema is stamped with `PRAGMA

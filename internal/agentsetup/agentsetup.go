@@ -88,7 +88,7 @@ type Parts struct {
 }
 
 // MCPStatus reports every declared MCP server's health (nil when no
-// mcp: block is declared) — for `shell3 health` and /status.
+// mcp: block is declared) — for `shell3 health` and the status tool.
 func (p *Parts) MCPStatus() []mcp.ServerStatus {
 	if p.mcp == nil {
 		return nil
@@ -267,7 +267,7 @@ func (p *Parts) runtimeForAgent(a config.Agent) (chat.ActiveAgent, error) {
 		toolNames = append(toolNames, t.Name)
 	}
 
-	// ActiveSkills is the display list (/status): resolved
+	// ActiveSkills is the display list (the status tool, the dash): resolved
 	// skill names in index order.
 	skillNames := make([]string, 0, len(a.Skills))
 	for _, s := range a.Skills {
@@ -352,8 +352,8 @@ func EnvironmentReminder(configDir, runsDir, model, sessionID string) string {
 	return b.String()
 }
 
-// RefreshPromptFor re-renders the named agent's or subagent's system prompt
-// (used by /clear). name may be a declared agent name or a registered subagent
+// RefreshPromptFor re-renders the named agent's or subagent's system prompt.
+// name may be a declared agent name or a registered subagent
 // name; callers pass names already validated by a successful AgentRuntime call
 // (names come from ModeLabel, set to a.Name only on a successful lookup). The
 // FirstAgent fallback exists only so an impossible miss degrades to a sane

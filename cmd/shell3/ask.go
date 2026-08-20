@@ -127,7 +127,7 @@ func newAskCommand() *cobra.Command {
 					return err
 				}
 				// Follow through on any subagent/bash_bg jobs the turn spawned, so
-				// ask shows their results the way the web host's wake loop would.
+				// ask shows their results the way the bot's wake loop would.
 				// This blocks until those in-process jobs complete (SIGINT to quit):
 				// a -p run must never exit at turn end and silently kill in-flight work.
 				if err := cli.FollowAskJobs(ctx, os.Stdout, rt, sess); err != nil {

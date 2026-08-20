@@ -257,8 +257,8 @@ func (s *Scheduler) fireTool(j shell3.CronJob) {
 }
 
 // record updates the outcome fields shared by both fire paths — LastRun plus
-// the latest result and running totals — under one lock, so /cron and
-// /status see a tool job's last-run time exactly like an agent job's. It then
+// the latest result and running totals — under one lock, so the dash's cron
+// views see a tool job's last-run time exactly like an agent job's. It then
 // persists the new status (see NewWithStore/RunStore): a run this doesn't
 // save is invisible after the next restart, which is the whole reason
 // RunStore exists.
@@ -304,7 +304,7 @@ func (s *Scheduler) Stop()  { s.c.Stop() }
 // command) is the one caller that runs on a single serialized loop (the
 // bot's update loop), and a tool job can block for up to toolJobTimeout.
 // Firing synchronously here would freeze that loop — not just the next
-// message, but /stop and /status too — for the exact duration a tool job's
+// message, but /stop too — for the exact duration a tool job's
 // whole reason for existing was to avoid spending on a model turn.
 func (s *Scheduler) Run(name string) error {
 	for _, j := range s.jobs {

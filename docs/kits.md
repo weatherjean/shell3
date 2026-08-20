@@ -192,7 +192,6 @@ One path: run agent K with prompt P. Three dispatchers:
 | `task` | any employee | the main agent's ask |
 | cron (`agent:`) | a bound employee | the standing task |
 | cron (`tool:`) | — no agent, no model turn | a declared tool's shell function, called directly |
-| `shell3 ask --kit <file>` | any kit file | argv or stdin |
 
 Delegation is one level. An employee that needs help runs `shell3 ask` from
 bash.

@@ -584,12 +584,10 @@ and drop into `~/.shell3/lib/bin/`, documented with a full working
   whether and how to act on the attachment.
 - **`read_media`** (needs `media` in the agent's `tools`) lets the agent
   open a file directly: images (`.jpg/.jpeg/.png/.gif/.webp`, vision
-  models), audio (`.wav/.mp3/.ogg/.opus/.oga`, audio models), PDFs (`.pdf` ≤
-  20 MB, an OpenAI-compatible `file` part — works on OpenAI and OpenRouter),
-  and video (`.mp4/.webm/.mov` ≤ 40 MB, a `video_url` part — an
-  OpenRouter/Gemini extension plain OpenAI endpoints reject; OpenRouter also
-  wants at least $1.00 of balance on any request carrying video, whatever it
-  actually costs).
+  models), audio (`.wav/.mp3/.ogg/.opus/.oga`, audio models), and PDFs
+  (`.pdf` ≤ 20 MB, an OpenAI-compatible `file` part — works on OpenAI and
+  OpenRouter). Video is not supported as model input; `send_media_telegram`
+  can still send a video file to the chat.
 - **`send_media_telegram`** (a host tool, on every non-headless session —
   headless subagent children don't get it, since there's no live chat to
   send to) lets the agent push a local file back to the chat as
@@ -699,15 +697,14 @@ update survives with nothing explaining it, and an agent asked later why it
 sent something has no way to answer except to guess.
 
 Report-handling turns are ordinary stored runs, so the runs dash shows exactly
-what the agent did with each report. A leftover `notifier.md` from an older install
-loads with a warning saying it is no longer used — delete the file.
+what the agent did with each report.
 
 ## The runs store — `shell3.db`
 
 Every session — chat threads, subagents, cron runs, `shell3 ask` — is
 stored in one SQLite database beside `shell3.yaml`:
 `.shell3_project/shell3.db`. It holds the sessions and their messages, each
-front-end's thread→session index, and an FTS5 full-text index over user and
+front-end's current-conversation marker, and an FTS5 full-text index over user and
 assistant text (the index the [`history` tool](#recalling-past-conversations--the-history-tool) searches;
 tool output is deliberately not indexed). It is pure Go — no cgo, no
 external SQLite. A background job's raw output stays a plain file under

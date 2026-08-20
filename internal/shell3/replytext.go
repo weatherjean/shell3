@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// Shared chat-reply rendering for the web front-end: the wording lives in one
+// Shared chat-reply rendering for the front-ends: the wording lives in one
 // place next to the APIs it describes.
 
 // ReloadReplyText renders a reload coordinator's result as the chat reply.

@@ -103,7 +103,7 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 	// Background completions (bash_bg, subagents, cron) route as mail via
 	// the bot's CompletionHost: floor/direct posts land as ⏰/🔔 messages,
 	// default mail resumes the owning thread — or starts a fresh main-agent
-	// turn — quietly (mail_user is the way back to the chat).
+	// turn — whose reply posts as an ✉️ update.
 	rt.SetCompletionHost(b)
 
 	// Redeliver what the previous process left undelivered (completions that

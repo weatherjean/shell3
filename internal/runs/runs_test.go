@@ -139,8 +139,8 @@ func TestSessionIDPathTraversalRejected(t *testing.T) {
 		if msgs, err := st.LoadMessages(id); err != nil || msgs != nil {
 			t.Errorf("LoadMessages(%q) = %v, %v; want nil, nil", id, msgs, err)
 		}
-		if err := st.TouchSession(id); err == nil {
-			t.Errorf("TouchSession(%q): want error, got nil", id)
+		if err := st.AddUsage(id, 1, 1); err == nil {
+			t.Errorf("AddUsage(%q): want error, got nil", id)
 		}
 		if p := st.JobLogPath(id, "bg1"); p != "" {
 			t.Errorf("JobLogPath(%q) = %q; want empty", id, p)

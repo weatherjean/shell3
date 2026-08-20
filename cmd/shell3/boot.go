@@ -141,10 +141,13 @@ func showBootSuccess() error {
 	}
 
 	// Re-derive the message variant from disk: an uncommented run_proxy line
-	// means a proxy is wired.
+	// means a proxy is wired. The kit's wiring block is YAML inside a comment
+	// fence, so every line starts with "#" — strip exactly one before matching,
+	// which leaves a commented-out "# run_proxy:" example still unmatched.
 	proxyWired := false
 	for _, line := range strings.Split(string(yaml), "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "run_proxy:") {
+		trimmed := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "#"))
+		if strings.HasPrefix(trimmed, "run_proxy:") {
 			proxyWired = true
 			break
 		}

@@ -404,20 +404,8 @@ func (s *Session) isBusy() bool {
 	return s.busy
 }
 
-// withIdle runs fn while holding s.mu, with the busy gate checked inside the
-// same critical section. Send sets busy under the same mutex, so a between-
-// turns mutator that uses this can never interleave with a turn starting —
-// the ErrBusy contract is enforced, not advisory. fn must not re-lock s.mu.
-func (s *Session) withIdle(fn func() error) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.busy {
-		return ErrBusy
-	}
-	return fn()
-}
-
-// ID returns the store session id (rolls on /clear; "" with no store).
+// ID returns the store session id (rolls when compaction starts a new one;
+// "" with no store).
 func (s *Session) ID() string {
 	return s.sess.ID()
 }
@@ -506,9 +494,9 @@ func (s *Session) doClose() error {
 // 5xx), where rewriting history would not help. Front-ends append it to the
 // error they show.
 //
-// The suggested remedies are the ones that actually exist: /compact rewrites
+// The suggested remedies are the ones that actually exist: compaction rewrites
 // the head of the conversation into a summary, and a new conversation starts
-// clean. (This used to name a /rollback command, which no front-end has.)
+// clean.
 func RecoveryHint(err error) string {
 	if err == nil {
 		return ""

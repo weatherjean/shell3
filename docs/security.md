@@ -211,8 +211,8 @@ Secrets live in a plain-text `.env` beside the config (`shell3.sh`, or
 
 - **Runtime state**: `.shell3_project/`, kept beside the config (default
   install: `~/.shell3/.shell3_project/`) — one SQLite database
-  (`shell3.db`: every conversation, the full-text index, the front-end
-  thread indexes) plus background-job logs as plain files under
+  (`shell3.db`: every conversation, the full-text index, each front-end's
+  current-conversation marker) plus background-job logs as plain files under
   `runs/<id>/jobs/`. Sessions older than 30 days are swept at startup
   ([`runs_keep_days`](configuration.md#the-runs-janitor--runs_keep_days)
   changes or disables that). The directory ignores itself (a self-contained `.gitignore`

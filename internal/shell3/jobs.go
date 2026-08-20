@@ -481,11 +481,11 @@ func (m *jobManager) finishCommand(j *bgJob, exit int) {
 		deliver = func() { m.dispatchCompletion(ev) }
 	}
 	// Deliver BEFORE markDone (mirroring finishSubagent's ordering): while the
-	// notice is in flight the job still counts as running, so /clear's
-	// running-tasks guard refuses; once the job leaves runningJobIDs the notice
-	// is guaranteed queued, and a subsequent /clear's DropInbox discards it.
-	// Delivering after markDone opens the reverse window — guard passes, then
-	// the stale notice lands in the freshly cleared session. deliver() runs
+	// notice is in flight the job still counts as running, so a caller gating on
+	// runningJobIDs still sees it; once the job leaves that set the notice is
+	// guaranteed queued, and a subsequent DropInbox discards it. Delivering
+	// after markDone opens the reverse window — the gate passes, then the stale
+	// notice lands in the freshly cleared session. deliver() runs
 	// outside m.mu because injectNotification takes the session mutex (lock
 	// order: session → jobs, never the reverse).
 	m.mu.Unlock()

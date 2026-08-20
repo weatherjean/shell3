@@ -23,8 +23,8 @@ var errNoSuchKitAgent = errors.New("agentsetup: no such kit agent")
 // declared in the kit then resolve through KitAgentRuntime, and their declared
 // tools dispatch through KitHostTool.
 //
-// Wiring (models, telegram) still comes from shell3.yaml; a kit's `shell3:`
-// block is parsed but not yet consumed here.
+// Wiring (models, telegram, dash_port, …) comes from the kit's `shell3:`
+// block, re-marshalled through the YAML parser by config.readWiring.
 func (p *Parts) LoadKit(path string) error {
 	src, err := os.ReadFile(path)
 	if err != nil {

@@ -180,9 +180,9 @@ func (s *Store) LastPromptTokens(id string) int {
 // session's cumulative ledger (see Meta.TotalPromptTokens). LastPromptTokens
 // answers "how full is the context now"; this answers "what did this session
 // cost", a different question an operator running unattended cron work needs
-// answered — see Store.CronRollup. Unknown session ids error (like
-// TouchSession) rather than silently no-op, since a cost that never lands
-// anywhere is worse than a loud failure naming the id at fault.
+// answered — see Store.CronRollup. Unknown session ids error rather than
+// silently no-op, since a cost that never lands anywhere is worse than a loud
+// failure naming the id at fault.
 func (s *Store) AddUsage(id string, prompt, completion int) error {
 	res, err := s.db.Exec(`UPDATE sessions
 		SET total_prompt_tokens = total_prompt_tokens + ?,
@@ -193,19 +193,6 @@ func (s *Store) AddUsage(id string, prompt, completion int) error {
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("runs: add usage: unknown session %q", id)
-	}
-	return nil
-}
-
-// TouchSession bumps LastAt. Unknown session ids error.
-func (s *Store) TouchSession(id string) error {
-	res, err := s.db.Exec(
-		`UPDATE sessions SET last_at=? WHERE id=?`, encTime(time.Now()), id)
-	if err != nil {
-		return fmt.Errorf("runs: touch session: %w", err)
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("runs: touch session: unknown session %q", id)
 	}
 	return nil
 }

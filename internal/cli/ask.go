@@ -47,7 +47,7 @@ func RunAskTurn(ctx context.Context, w io.Writer, sess *shell3.Session, prompt s
 	return renderAskEvents(w, sess.Send(ctx, prompt))
 }
 
-// FollowAskJobs mirrors the web host's wake loop for a one-shot `shell3 ask`
+// FollowAskJobs mirrors the bot's wake loop for a one-shot `shell3 ask`
 // run: after the turn ends, while the session has a running background
 // job (a spawned subagent or bash_bg) or a queued completion notice, it renders
 // the wake turn the host would run to narrate each result. It KEEPS THE PROCESS

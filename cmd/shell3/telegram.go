@@ -22,10 +22,10 @@ import (
 )
 
 // newTelegramCommand builds `shell3 telegram` — the personal bot front-end.
-// One chat, one agent: every inbound message runs its own session (a fresh
-// one, or the thread's session when the message is a Telegram reply), cron
-// fires from a hidden dispatch parent, and background completions come back
-// as mail.
+// One chat, one agent, ONE long-lived conversation: every inbound message
+// continues it (a Telegram reply is a context hint, not a session switch, and
+// /new is the only reset), cron fires from a hidden dispatch parent, and
+// background completions come back as mail.
 //
 // --console swaps the Telegram transport for stdin/stdout, driving the same
 // bot loop with no credentials and no network.
@@ -64,11 +64,10 @@ func newTelegramCommand() *cobra.Command {
 				workDir = resolved
 			}
 
-			// Fresh-turn model: the bot holds NO long-lived session. Each inbound
-			// message runs in its own session (fresh, or the thread's session on a
-			// Telegram reply); the thread index maps message ids → session ids and
-			// lives for the whole process (kept across /reload). openThreads runs
-			// the runs janitor first.
+			// One-conversation model: the bot holds ONE long-lived session and the
+			// thread index records which one it is, so a restart resumes it. The
+			// index lives for the whole process (kept across /reload); openThreads
+			// runs the runs janitor first.
 			threads := openThreads(rt, "telegram")
 
 			// Transport: the real Telegram bot API, or (--console) a stdin/stdout
@@ -109,20 +108,13 @@ func newTelegramCommand() *cobra.Command {
 				if err := apiClient.SetCommands(ctx, telegram.BotCommands()); err != nil {
 					fmt.Printf("warning: could not set commands: %v\n", err)
 				}
-				// The menu button persists on Telegram's side; one set by an older
-				// build would keep opening a dead web_app URL.
-				if err := apiClient.ClearMenuButton(ctx); err != nil {
-					fmt.Printf("warning: could not clear menu button: %v\n", err)
-				}
-				// Greet the chat; the ReplyKeyboardRemove markup also tears down any
-				// persistent reply-keyboard bar left by an older build (commands
-				// live in the "/" menu instead). Best-effort.
+				// Greet the chat (best-effort).
 				banner := "๑ï shell3 online — your personal agent, at your pace\n\n" +
 					"Just type — every message continues our one conversation, and a restart picks it " +
 					"up where we left off. /new starts a fresh one, /dash opens the dashboard, " +
 					"/stop halts the current turn (/superstop also kills background jobs), " +
 					"/reload applies config changes."
-				if err := apiClient.SendRemovingKeyboard(ctx, chatID, banner); err != nil {
+				if _, err := apiClient.Send(ctx, chatID, banner); err != nil {
 					fmt.Printf("warning: could not send the greeting: %v\n", err)
 				}
 				fmt.Printf("shell3 telegram: listening for chat %d\n  config: %s\n", chatID, resolved)

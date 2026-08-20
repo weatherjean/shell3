@@ -53,8 +53,8 @@ type reloadState struct {
 //   - In place: idle front-end (root) sessions keep their identity and history
 //     (s.sess); only s.cfg + s.handlers are rebuilt onto the new config. Subagent
 //     child sessions (ParentID set) are left untouched — they keep the old
-//     generation until they finish. Active agent + /set params are restored
-//     best-effort. Decorator-registered host tools (SetSessionDecorator, e.g.
+//     generation until they finish. Decorator-registered host tools
+//     (SetSessionDecorator, e.g.
 //     send_media_telegram) ARE re-applied here.
 //
 // NOTE: the kept s.sess was built with a ContextWindowFor closure over the OLD
