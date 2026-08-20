@@ -801,9 +801,6 @@ at an unrelated directory (or a symlinked media dir, which the sweep follows)
 means `media_keep_days` deletes old files there instead of in your actual
 media store.
 
-**Orphaned state file.** `~/.shell3/voice_mode.json` (the old `/voice`
-command's persisted mode) is no longer read by anything — safe to delete.
-
 ## Skills — `skills/`
 
 A skill is a plain `.md` file the agent reads with `cat` when relevant — no

@@ -63,14 +63,11 @@ The first stdout line:
 its own command UI. Send a command as a normal `message` whose text starts with
 `/` — it is answered host-side with zero tokens.
 
-**Protocol 1 → 2 (breaking):** the inline-keyboard events —
-inbound `callback`, outbound `menu` (and its `options` field), outbound
-`ack` — are gone; they existed only for the `/voice` menu, which no longer
-exists. A front-end still sending `callback` is not rejected: it silently
-hits the "ignoring unknown event type" path with no response, since
-tolerating unknown types is meant for additive growth, not for detecting
-removals. If your front-end sends `callback` or renders `menu`/`ack`, check
-`protocol` on the hello line and drop that code path for `protocol >= 2`.
+A removed event kind is not rejected on the wire: an inbound event the host
+no longer knows silently hits the "ignoring unknown event type" path with no
+response, since tolerating unknown types is meant for additive growth, not
+for detecting removals. Check `protocol` on the hello line — it is the only
+signal that the wire you were built against has changed.
 
 A greeting `send` follows the hello.
 
