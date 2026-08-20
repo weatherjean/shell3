@@ -52,7 +52,15 @@ outcome — an honest "here's what's needed" beats a broken guess.
 ## Step 3 — start the tunnel (only a usable tool)
 
 Start it as a `bash_bg` job so it lives with the shell3 process, shows up in
-the dash, and dies on /superstop:
+the dash, and dies on /superstop.
+
+**Finish everything in THIS turn.** A tunnel process never exits, so its
+completion mail never arrives — "I'll report back when it's up" is a promise
+nothing will ever wake you to keep. After starting the job, poll its output
+NOW (`task_status <id>`, or `sleep 3` then tail the job log) until the URL
+appears — a quick tunnel is up in seconds — and complete Step 4 before you
+end the turn. If the URL hasn't appeared after ~30s of polling, report that
+as the outcome instead of waiting.
 
 - Tailscale serve: `tailscale serve --bg <port>` (or just hand over the
   `tailscale ip -4` address — no job needed).
