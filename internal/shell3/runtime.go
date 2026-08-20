@@ -16,9 +16,6 @@ import (
 type RuntimeSpec struct {
 	ConfigDir string // "" → ~/.shell3/
 	WorkDir   string // runtime root; "" → os.Getwd(). Sessions default here.
-	// KitPath, when set, loads a kit file whose declared agents take
-	// precedence over the markdown config. "" disables kits.
-	KitPath string
 }
 
 // SessionOpts parameterizes one Session on a Runtime.
@@ -183,12 +180,6 @@ func NewRuntime(ctx context.Context, spec RuntimeSpec) (*Runtime, error) {
 	})
 	if err != nil {
 		return nil, err
-	}
-	if spec.KitPath != "" {
-		if err := parts.LoadKit(spec.KitPath); err != nil {
-			cleanup()
-			return nil, err
-		}
 	}
 	ctx, cancel := context.WithCancel(parent)
 	rt := &Runtime{

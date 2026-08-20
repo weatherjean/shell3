@@ -12,8 +12,7 @@ import (
 // LoadMediaPart resolves and loads a media file as a multimodal ContentPart,
 // routing by file extension: images (jpg, jpeg, png, gif, webp) become
 // image_url parts, audio (wav, mp3, ogg, oga, opus) becomes input_audio
-// parts, PDFs (pdf) become file parts, and video (mp4, webm, mov) becomes
-// video_url parts. It returns the part plus a short
+// parts, and PDFs (pdf) become file parts. It returns the part plus a short
 // human-readable description for the tool result. Consumed by the read_media
 // tool and by internal/shell3's Part{Path: …}.
 func LoadMediaPart(path, workDir string) (llm.ContentPart, string, error) {
@@ -25,10 +24,8 @@ func LoadMediaPart(path, workDir string) (llm.ContentPart, string, error) {
 		return loadAudioPart(path, workDir)
 	case supportedPDFExts[ext]:
 		return loadPDFPart(path, workDir)
-	case supportedVideoExts[ext]:
-		return loadVideoPart(path, workDir)
 	default:
-		return llm.ContentPart{}, "", fmt.Errorf("unsupported media type %q — use jpg, jpeg, png, gif, webp, wav, mp3, ogg, oga, opus, pdf, mp4, webm, or mov", ext)
+		return llm.ContentPart{}, "", fmt.Errorf("unsupported media type %q — use jpg, jpeg, png, gif, webp, wav, mp3, ogg, oga, opus, or pdf", ext)
 	}
 }
 
@@ -43,11 +40,9 @@ func LoadMediaPart(path, workDir string) (llm.ContentPart, string, error) {
 //	audio/mpeg, audio/mp3                        → input_audio, format "mp3"
 //	application/pdf                              → file (filename synthesized
 //	    as "file.pdf" — there is no path to derive one from)
-//	video/mp4, video/webm, video/quicktime       → video_url
 //
 // The path loaders' size caps apply (maxImageBytes / maxAudioBytes /
-// maxPDFBytes / maxVideoBytes). Returns the part plus a short human-readable
-// description.
+// maxPDFBytes). Returns the part plus a short human-readable description.
 func MediaPartFromBytes(data []byte, mime string) (llm.ContentPart, string, error) {
 	mt := strings.ToLower(strings.TrimSpace(mime))
 	if i := strings.IndexByte(mt, ';'); i >= 0 {
@@ -64,10 +59,8 @@ func MediaPartFromBytes(data []byte, mime string) (llm.ContentPart, string, erro
 		return audioPartFromBytes(data, "ogg")
 	case "application/pdf":
 		return pdfPartFromBytes(data, "")
-	case "video/mp4", "video/webm", "video/quicktime":
-		return videoPartFromBytes(data, mt)
 	default:
-		return llm.ContentPart{}, "", fmt.Errorf("unsupported MIME type %q — use image/jpeg, image/png, image/gif, image/webp, audio/wav, audio/mpeg, audio/ogg, application/pdf, video/mp4, video/webm, or video/quicktime", mime)
+		return llm.ContentPart{}, "", fmt.Errorf("unsupported MIME type %q — use image/jpeg, image/png, image/gif, image/webp, audio/wav, audio/mpeg, audio/ogg, or application/pdf", mime)
 	}
 }
 

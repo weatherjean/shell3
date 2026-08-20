@@ -306,7 +306,7 @@ func TestSession_Compact_CloseCancelsAndJoins(t *testing.T) {
 // a Wake when the gate clears, or an unattended host never delivers it.
 func TestSession_Compact_WakesStrandedNotice(t *testing.T) {
 	client := &blockingClient{entered: make(chan struct{}), returned: make(chan struct{})}
-	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: client, ModeLabel: "code", AgentNames: []string{"code"}} })
+	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: client, ModeLabel: "code"} })
 	s, err := rt.Session(SessionOpts{})
 	if err != nil {
 		t.Fatalf("session: %v", err)
@@ -375,44 +375,6 @@ func TestAuditSink_EndStatusReflectsError(t *testing.T) {
 	}
 	if endStatus != "error" {
 		t.Fatalf("audit end status = %q after an errored turn, want %q", endStatus, "error")
-	}
-}
-
-func TestSession_SwitchAgent_Unknown(t *testing.T) {
-	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "x"}}})
-	cfg := chat.Config{
-		SwitchAgent: func(name string) (chat.ActiveAgent, error) {
-			return chat.ActiveAgent{}, errors.New("unknown agent " + name)
-		},
-	}
-	s := newTestSession(t, client, cfg)
-	defer s.Close()
-
-	if err := s.SwitchAgent("nope"); err == nil {
-		t.Fatal("expected error for unknown agent")
-	}
-}
-
-func TestSession_SwitchAgent_Applies(t *testing.T) {
-	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "x"}}})
-	newClient := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "y"}}})
-	cfg := chat.Config{
-		AgentNames: []string{"base", "plan"},
-		SwitchAgent: func(name string) (chat.ActiveAgent, error) {
-			return chat.ActiveAgent{LLM: newClient, ModeLabel: name, ModelID: "m2", AgentKnobs: chat.AgentKnobs{ContextWindow: 1000}}, nil
-		},
-	}
-	s := newTestSession(t, client, cfg)
-	defer s.Close()
-
-	if err := s.SwitchAgent("plan"); err != nil {
-		t.Fatalf("SwitchAgent: %v", err)
-	}
-	if s.cfg.LLM != chat.LLMClient(newClient) {
-		t.Fatal("SwitchAgent did not swap the active client")
-	}
-	if s.ActiveAgent() != "plan" {
-		t.Fatalf("ActiveAgent() = %q, want plan", s.ActiveAgent())
 	}
 }
 
@@ -526,25 +488,6 @@ func TestSession_CloseCancelsAndJoinsInFlightTurn(t *testing.T) {
 	}
 }
 
-// describerClient is a fakellm wrapper that also satisfies llm.ParamDescriber
-// and llm.ParamSetter, so Snapshot's param population and SetParam's
-// validate/push path can be exercised without a real adapter.
-type describerClient struct {
-	*fakellm.Client
-	specs  []llm.ParamSpec
-	gotSet *llm.RequestParams // last params pushed via SetParams
-}
-
-func (d *describerClient) ParamSpecs() []llm.ParamSpec { return d.specs }
-func (d *describerClient) SetParams(p llm.RequestParams) {
-	cp := p
-	d.gotSet = &cp
-}
-
-func newDescriberClient(specs []llm.ParamSpec, scripts ...fakellm.Script) *describerClient {
-	return &describerClient{Client: fakellm.New(scripts...), specs: specs}
-}
-
 // TestRoute_SetsIsHostTool verifies route resolves IsHostTool against the
 // session's current HostToolNames (translate stays pure, so route does it).
 func TestRoute_SetsIsHostTool(t *testing.T) {
@@ -576,13 +519,9 @@ func TestRoute_SetsIsHostTool(t *testing.T) {
 	}
 }
 
-// TestSnapshot_PopulatesFromConfig verifies Snapshot mirrors cfg, including
-// params from a ParamDescriber provider with currentParamValue mapping.
+// TestSnapshot_PopulatesFromConfig verifies Snapshot mirrors cfg.
 func TestSnapshot_PopulatesFromConfig(t *testing.T) {
-	client := newDescriberClient([]llm.ParamSpec{
-		{Name: "reasoning_effort", Enum: []string{"low", "high"}, Default: "low"},
-		{Name: "max_tokens", Default: "0"},
-	})
+	client := fakellm.New()
 	cfg := chat.Config{
 		ModeLabel:    "code",
 		StatusLine:   "openai │ gpt-x │ high",
@@ -607,64 +546,6 @@ func TestSnapshot_PopulatesFromConfig(t *testing.T) {
 	}
 	if len(snap.Skills) != 2 || snap.Skills[0] != "a" {
 		t.Fatalf("Skills = %v", snap.Skills)
-	}
-	if len(snap.Params) != 2 {
-		t.Fatalf("Params count = %d, want 2", len(snap.Params))
-	}
-	re := snap.Params[0]
-	if re.Name != "reasoning_effort" || re.Value != "high" || re.Default != "low" || len(re.Enum) != 2 {
-		t.Fatalf("reasoning_effort param = %+v", re)
-	}
-	mt := snap.Params[1]
-	if mt.Name != "max_tokens" || mt.Value != "512" {
-		t.Fatalf("max_tokens param = %+v", mt)
-	}
-}
-
-// TestSnapshot_NoDescriberHasNoParams verifies a provider that doesn't
-// implement ParamDescriber yields an empty Params slice (no panic).
-func TestSnapshot_NoDescriberHasNoParams(t *testing.T) {
-	s := newTestSession(t, fakellm.New(), chat.Config{ModeLabel: "base"})
-	defer s.Close()
-	if got := s.Snapshot().Params; len(got) != 0 {
-		t.Fatalf("Params = %v, want empty", got)
-	}
-}
-
-// TestSetParam verifies the validate → SetByName → SetParams path, the
-// reasoning_effort status-line refresh, and error cases.
-func TestSetParam(t *testing.T) {
-	client := newDescriberClient([]llm.ParamSpec{
-		{Name: "reasoning_effort", Enum: []string{"low", "high"}, Default: "low"},
-	})
-	cfg := chat.Config{StatusLine: "openai │ gpt-x │ low"}
-	s := newTestSession(t, client, cfg)
-	defer s.Close()
-
-	if err := s.SetParam("reasoning_effort", "high"); err != nil {
-		t.Fatalf("SetParam: %v", err)
-	}
-	if s.cfg.Params.ReasoningEffort != "high" {
-		t.Fatalf("Params.ReasoningEffort = %q", s.cfg.Params.ReasoningEffort)
-	}
-	if client.gotSet == nil || client.gotSet.ReasoningEffort != "high" {
-		t.Fatalf("SetParams not pushed to provider: %+v", client.gotSet)
-	}
-	if s.cfg.StatusLine != "openai │ gpt-x │ high" {
-		t.Fatalf("status line not refreshed: %q", s.cfg.StatusLine)
-	}
-	// Snapshot must reflect the new value.
-	if got := s.Snapshot().Params[0].Value; got != "high" {
-		t.Fatalf("snapshot after SetParam = %q, want high", got)
-	}
-
-	// Validation failure (not in enum) must be reported and leave state unchanged.
-	if err := s.SetParam("reasoning_effort", "bogus"); err == nil {
-		t.Fatal("expected validation error for out-of-enum value")
-	}
-	// Unknown parameter for this provider.
-	if err := s.SetParam("does_not_exist", "1"); err == nil {
-		t.Fatal("expected error for unknown parameter")
 	}
 }
 
@@ -772,14 +653,8 @@ func TestSession_BusyEnforcement(t *testing.T) {
 		t.Fatalf("overlapping Send: want exactly one ErrBusy Error event, got %+v", rejected)
 	}
 
-	if err := s.SwitchAgent("any"); !errors.Is(err, ErrBusy) {
-		t.Fatalf("SwitchAgent while busy: want ErrBusy, got %v", err)
-	}
 	if _, _, err := s.Compact(context.Background()); !errors.Is(err, ErrBusy) {
 		t.Fatalf("Compact while busy: want ErrBusy, got %v", err)
-	}
-	if err := s.SetParam("reasoning_effort", "low"); !errors.Is(err, ErrBusy) {
-		t.Fatalf("SetParam while busy: want ErrBusy, got %v", err)
 	}
 
 	// Drain the in-flight turn; the gate must clear.

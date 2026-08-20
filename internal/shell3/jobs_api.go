@@ -70,28 +70,6 @@ func (s *Session) Jobs() []JobInfo {
 	return rt.jobs.list()
 }
 
-// JobOutput returns the in-memory output buffer of a background command job,
-// or "" when the job runtime is unavailable or the job is a subagent.
-func (s *Session) JobOutput(id string) string {
-	rt := s.runtimeHandle()
-	if rt == nil || rt.jobs == nil {
-		return ""
-	}
-	return rt.jobs.output(id)
-}
-
-// JobTranscript returns the stored transcript of a background SUBAGENT
-// job's child session, or "" when the job runtime is unavailable or the job is
-// a command (not a subagent). The Jobs view renders this instead
-// of the plain stdout log when present — see JobOutput for the fallback.
-func (s *Session) JobTranscript(id string) string {
-	rt := s.runtimeHandle()
-	if rt == nil || rt.jobs == nil {
-		return ""
-	}
-	return rt.jobs.transcript(id)
-}
-
 // KillJob cancels one background job (the Jobs view's cancel action). For
 // command jobs this sends a cancellation signal; for subagent jobs it cancels
 // the child session's context. It does not block; the job leaves the live list
@@ -102,20 +80,6 @@ func (s *Session) KillJob(id string) error {
 		return errors.New("shell3: no job runtime")
 	}
 	return rt.jobs.cancel(id)
-}
-
-// KillRunningJobs kills every live background job on the session — commands
-// and subagents alike — and reports how many were killed. The shared half of
-// the front-ends' /stop (see StopAll).
-func (s *Session) KillRunningJobs() (killed int) {
-	for _, j := range s.Jobs() {
-		if !j.Done {
-			if err := s.KillJob(j.ID); err == nil {
-				killed++
-			}
-		}
-	}
-	return killed
 }
 
 // KilledJob describes one job /superstop killed — enough for the summary the

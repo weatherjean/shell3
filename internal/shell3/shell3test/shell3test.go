@@ -21,7 +21,7 @@ func NewRuntimeForTest(t *testing.T, replyText string) *shell3.Runtime {
 		for i := range scripts {
 			scripts[i] = fakellm.Script{Events: []llm.StreamEvent{{TextDelta: replyText}}}
 		}
-		cfg := chat.Config{LLM: fakellm.New(scripts...), ModeLabel: "code", AgentNames: []string{"code"}}
+		cfg := chat.Config{LLM: fakellm.New(scripts...), ModeLabel: "code"}
 		cfg.Headless = o.Headless
 		return cfg, nil
 	})
@@ -31,7 +31,7 @@ func NewRuntimeForTest(t *testing.T, replyText string) *shell3.Runtime {
 func NewRuntimeForTestClient(t *testing.T, client chat.LLMClient) *shell3.Runtime {
 	t.Helper()
 	return newRuntime(t, func(o shell3.SessionOpts) (chat.Config, error) {
-		cfg := chat.Config{LLM: client, ModeLabel: "code", AgentNames: []string{"code"}}
+		cfg := chat.Config{LLM: client, ModeLabel: "code"}
 		cfg.Headless = o.Headless
 		return cfg, nil
 	})

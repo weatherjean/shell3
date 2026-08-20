@@ -65,7 +65,7 @@ func gatedRuntime(t *testing.T, g *gatedFirstClient) *shell3.Runtime {
 	t.Cleanup(func() { _ = st.Close() })
 	rt := shell3.RuntimeForTest(t.TempDir(), func(o shell3.SessionOpts) (chat.Config, error) {
 		return chat.Config{
-			LLM: g, ModeLabel: "code", AgentNames: []string{"code"},
+			LLM: g, ModeLabel: "code",
 			Headless: o.Headless, Store: st,
 			AgentKnobs: chat.AgentKnobs{ContextWindow: 4096},
 		}, nil

@@ -119,6 +119,15 @@ func (p *Parts) BackgroundMaxConcurrent() int { return p.lc.BackgroundMaxConcurr
 // ModelCount returns the number of declared models.
 func (p *Parts) ModelCount() int { return len(p.lc.Models) }
 
+// AgentCount returns the number of declared agents — the kit's agents (main
+// plus every employee) when a kit is loaded, otherwise the single main agent.
+func (p *Parts) AgentCount() int {
+	if p.kit != nil {
+		return len(p.kit.Agents)
+	}
+	return len(p.lc.Agents())
+}
+
 // Telegram returns the parsed telegram: block (zero value if absent).
 func (p *Parts) Telegram() config.TelegramConfig { return p.lc.Telegram() }
 
@@ -144,16 +153,6 @@ func (p *Parts) DashPort() int { return p.lc.DashPort }
 // storing it separately, since Store already keys off exactly this
 // relationship (see runs.Store.runsDir).
 func (p *Parts) RunsRoot() string { return filepath.Dir(p.runsDir) }
-
-// AgentNames returns declared agent names in declaration order.
-func (p *Parts) AgentNames() []string {
-	agents := p.lc.Agents()
-	names := make([]string, 0, len(agents))
-	for _, a := range agents {
-		names = append(names, a.Name)
-	}
-	return names
-}
 
 // Subagents returns the registered subagents (name, description, model) in
 // filename order — what a front-end needs to show the delegation roster.
@@ -401,8 +400,8 @@ func BridgeVerdict(v config.ToolCallVerdict) chat.ToolCallVerdict {
 }
 
 // SessionConfig derives a per-session chat.Config from the shared parts.
-// The returned config embeds per-session closures (RefreshPrompt, SwitchAgent)
-// that consult only declared config plus the session's own agent choice.
+// The returned config embeds per-session closures (RefreshPrompt, the hook
+// bridges) that consult only declared config plus the session's own agent.
 func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 	workdir := so.WorkDir
 	if workdir == "" {
@@ -412,9 +411,8 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 	if err != nil {
 		return chat.Config{}, err
 	}
-	// activeName is the session's agent pointer, shared by the two closures
-	// below; internal/shell3.Session.SwitchAgent is documented single-threaded
-	// (between turns), so a plain pointer is sufficient.
+	// activeName is the session's agent, captured by the hook closures below.
+	// A session's agent is fixed for its lifetime.
 	activeName := rt.ModeLabel
 	cfg := chat.Config{
 		Store:          p.st,
@@ -425,7 +423,6 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 		Log:            p.log,
 		OutPath:        so.OutPath,
 		Headless:       so.Headless,
-		AgentNames:     p.AgentNames(),
 		RefreshPrompt:  func() string { return p.RefreshPromptFor(activeName) },
 		// Agent-scoped knobs (Environment, Delegation, thresholds, …) arrive via
 		// cfg.ApplyActiveAgent(rt) below.
@@ -465,9 +462,7 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 		cfg.HostTool = kitTool
 	}
 	// hooks/*.tool-call.sh: the per-agent gate script run before every tool.
-	// The closures capture activeName so a /agent switch re-targets the
-	// session to the new agent's hook (each agent is governed by its own
-	// script or none — no fallback).
+	// Each agent is governed by its own script or none — no fallback.
 	if p.lc.HasToolCall() {
 		cfg.RunToolCall = func(ctx context.Context, name, command, argsJSON string, headless bool) chat.ToolCallVerdict {
 			return BridgeVerdict(p.lc.RunToolCall(ctx, activeName, name, command, argsJSON, headless))
@@ -487,19 +482,6 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 		cfg.RunToolResult = func(ctx context.Context, name, argsJSON, output string) string {
 			return p.lc.RunToolResult(ctx, activeName, name, argsJSON, output)
 		}
-	}
-	cfg.SwitchAgent = func(name string) (chat.ActiveAgent, error) {
-		// "" means "use the first agent" during initial session selection only
-		// (AgentRuntime's contract). Switching to "" is a caller bug.
-		if name == "" {
-			return chat.ActiveAgent{}, fmt.Errorf("unknown agent %q", name)
-		}
-		nrt, err := p.AgentRuntime(name)
-		if err != nil {
-			return chat.ActiveAgent{}, err
-		}
-		activeName = nrt.ModeLabel
-		return nrt, nil
 	}
 	cfg.ApplyActiveAgent(rt)
 	return cfg, nil

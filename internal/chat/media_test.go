@@ -86,13 +86,9 @@ func TestLoadMediaPart_RoutesByExt(t *testing.T) {
 		t.Fatalf("pdf route: type=%q err=%v", pp.Type, err)
 	}
 
-	vid := filepath.Join(tmp, "a.mp4")
-	writeBytes(t, vid, []byte("fake mp4 bytes"))
-	vp, _, err := LoadMediaPart(vid, "")
-	if err != nil || vp.Type != llm.ContentPartTypeVideoURL {
-		t.Fatalf("video route: type=%q err=%v", vp.Type, err)
+	if _, _, err := LoadMediaPart("/tmp/x.mp4", ""); err == nil {
+		t.Error("want error for video, which is no longer supported")
 	}
-
 	if _, _, err := LoadMediaPart("/tmp/x.bmp", ""); err == nil {
 		t.Error("want error for unsupported ext")
 	}

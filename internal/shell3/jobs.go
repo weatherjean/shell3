@@ -15,7 +15,6 @@ import (
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/notify"
-	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/strutil"
 )
 
@@ -1096,10 +1095,10 @@ func notifyAgentDone(id, summary, errText string) notify.Notification {
 	return n
 }
 
-// transcript returns the child session's stored transcript from the runs
-// store (JSONL, one llm.Message per line), or "" when unavailable. Works both while the job is active and after it
+// transcript returns the child session's stored messages from the runs store,
+// or nil when unavailable. Works both while the job is active and after it
 // finishes (the job is retained in m.jobs with its childID intact).
-func (m *jobManager) transcript(id string) string {
+func (m *jobManager) transcript(id string) []llm.Message {
 	m.mu.Lock()
 	var childID string
 	if j := m.jobs[id]; j != nil {
@@ -1107,9 +1106,13 @@ func (m *jobManager) transcript(id string) string {
 	}
 	m.mu.Unlock()
 	if childID == "" || m.rt == nil || m.rt.store == nil {
-		return ""
+		return nil
 	}
-	return m.rt.store.Transcript(childID)
+	msgs, err := m.rt.store.LoadMessages(childID)
+	if err != nil {
+		return nil
+	}
+	return msgs
 }
 
 // parentName returns the session's registry name, or "" for a nil parent.
@@ -1146,15 +1149,14 @@ func (m *jobManager) formatJobList() string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// renderTranscriptText converts a stored transcript blob (one llm.Message JSON
-// record per line, as Store.Transcript emits) into human-readable plain text for the task_status tool.
-// System and unparseable lines are skipped. Tool-call messages list the called
-// tool name; tool-result messages show a one-line label so the model knows a
-// result arrived without the full output; assistant and user text is emitted as
-// "role: content".
-func renderTranscriptText(raw string) string {
+// renderTranscriptText converts a child session's stored messages into
+// human-readable plain text for the task_status tool. System messages are
+// skipped. Tool-call messages list the called tool name; tool-result messages
+// show a one-line label so the model knows a result arrived without the full
+// output; assistant and user text is emitted as "role: content".
+func renderTranscriptText(msgs []llm.Message) string {
 	var b strings.Builder
-	for _, msg := range runs.ParseMessages(raw) {
+	for _, msg := range msgs {
 		switch msg.Role {
 		case llm.RoleSystem:
 			// skip — system prompts are not useful in a status summary
@@ -1236,9 +1238,9 @@ func (m *jobManager) formatJobStatus(id string) string {
 		// running that file doesn't exist yet, so fall back to the live in-memory
 		// buffer so the model sees progress (matching the Jobs view).
 		// Render the transcript as readable text; the live buffer is already readable.
-		rawTranscript := m.transcript(id)
-		body, label := renderTranscriptText(rawTranscript), "transcript"
-		if rawTranscript == "" {
+		msgs := m.transcript(id)
+		body, label := renderTranscriptText(msgs), "transcript"
+		if len(msgs) == 0 {
 			body, label = m.output(id), "progress"
 		}
 		appendCappedTail(&b, label, body)

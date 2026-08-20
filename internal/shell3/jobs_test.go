@@ -79,7 +79,7 @@ func TestSubagentCompletionWakesParent(t *testing.T) {
 	}
 
 	waitForWake(t, rt, parent)
-	if strings.TrimSpace(rt.jobs.transcript(id)) == "" {
+	if len(rt.jobs.transcript(id)) == 0 {
 		t.Fatalf("transcript for job %s is empty after subagent completion", id)
 	}
 }
@@ -120,7 +120,7 @@ func TestSubagentTranscriptAfterClose(t *testing.T) {
 	// Wait for the Wake (child is done; job is retained with Done=true).
 	waitForWake(t, rt, parent)
 	// Job is retained in m.jobs with Done=true; transcript must still work.
-	if strings.TrimSpace(rt.jobs.transcript(id)) == "" {
+	if len(rt.jobs.transcript(id)) == 0 {
 		t.Fatalf("transcript empty after job done for %s", id)
 	}
 }
@@ -193,7 +193,7 @@ func TestJobManagerRetainsDoneSubagentJob(t *testing.T) {
 		t.Fatalf("finished subagent job should have Done=true, got %+v", found)
 	}
 	// transcript() must resolve via the retained job's childID.
-	if strings.TrimSpace(rt.jobs.transcript(id)) == "" {
+	if len(rt.jobs.transcript(id)) == 0 {
 		t.Fatalf("transcript empty after subagent done for job %s", id)
 	}
 }

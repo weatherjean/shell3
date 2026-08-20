@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"sync"
 
 	"github.com/openai/openai-go/v3"
@@ -96,8 +95,7 @@ func NewClient(baseURL, apiKey, model string) *Client {
 	}
 }
 
-// Default request params, declared once so the live params and the ParamSpecs
-// documentation strings cannot drift.
+// Default request params.
 const (
 	defaultReasoningEffort = "medium"
 	defaultMaxTokens       = 16000
@@ -105,17 +103,6 @@ const (
 
 func (c *Client) SetParams(p llm.RequestParams) { c.params = c.params.Merge(p) }
 func (c *Client) SetExtra(m map[string]any)     { c.extra = m }
-
-func (c *Client) ParamSpecs() []llm.ParamSpec {
-	return []llm.ParamSpec{
-		{Name: "reasoning_effort", Enum: []string{"none", "minimal", "low", "medium", "high", "xhigh"}, Default: defaultReasoningEffort},
-		// Default "" — the adapter never sets ParallelToolCalls unless asked
-		// (nil leaves the provider's own default in effect).
-		{Name: "parallel_tool_calls", Enum: []string{"true", "false"}, Default: ""},
-		{Name: "temperature", Default: ""},
-		{Name: "max_tokens", Default: strconv.Itoa(defaultMaxTokens)},
-	}
-}
 
 func (c *Client) LastTraffic() (req, res []byte) {
 	if c.tap == nil {
@@ -272,77 +259,6 @@ func wrapStreamErr(err error) error {
 	return wrapped
 }
 
-// hasVideoPart reports whether any part is a video_url part — the one
-// ContentPart type with no openai-go SDK representation.
-func hasVideoPart(parts []llm.ContentPart) bool {
-	for _, p := range parts {
-		if p.Type == llm.ContentPartTypeVideoURL {
-			return true
-		}
-	}
-	return false
-}
-
-// Raw content-part shapes for rawContentParts. Plain structs (rather than
-// map[string]any) so encoding/json preserves field declaration order —
-// data field first, "type" last, matching the wire shape the openai-go SDK produces.
-type rawURLField struct {
-	URL string `json:"url"`
-}
-type rawTextPart struct {
-	Text string `json:"text"`
-	Type string `json:"type"`
-}
-type rawImageURLPart struct {
-	ImageURL rawURLField `json:"image_url"`
-	Type     string      `json:"type"`
-}
-type rawInputAudioField struct {
-	Data   string `json:"data"`
-	Format string `json:"format"`
-}
-type rawInputAudioPart struct {
-	InputAudio rawInputAudioField `json:"input_audio"`
-	Type       string             `json:"type"`
-}
-type rawFileField struct {
-	FileData string `json:"file_data"`
-	Filename string `json:"filename"`
-}
-type rawFilePart struct {
-	File rawFileField `json:"file"`
-	Type string       `json:"type"`
-}
-type rawVideoURLPart struct {
-	VideoURL rawURLField `json:"video_url"`
-	Type     string      `json:"type"`
-}
-
-// rawContentParts builds a message's "content" array by hand, matching
-// exactly the wire shape the openai-go SDK produces for
-// text/image_url/input_audio/file parts, plus the video_url extension the
-// SDK has no type for. Used only for messages containing a video_url part
-// (see toMessages), so every part in the message goes through this path
-// rather than mixing SDK-typed and raw JSON.
-func rawContentParts(parts []llm.ContentPart) []any {
-	out := make([]any, 0, len(parts))
-	for _, p := range parts {
-		switch p.Type {
-		case llm.ContentPartTypeText:
-			out = append(out, rawTextPart{Type: "text", Text: p.Text})
-		case llm.ContentPartTypeImageURL:
-			out = append(out, rawImageURLPart{Type: "image_url", ImageURL: rawURLField{URL: p.ImageURL}})
-		case llm.ContentPartTypeInputAudio:
-			out = append(out, rawInputAudioPart{Type: "input_audio", InputAudio: rawInputAudioField{Data: p.AudioData, Format: p.AudioFormat}})
-		case llm.ContentPartTypeFile:
-			out = append(out, rawFilePart{Type: "file", File: rawFileField{Filename: p.FileName, FileData: p.FileData}})
-		case llm.ContentPartTypeVideoURL:
-			out = append(out, rawVideoURLPart{Type: "video_url", VideoURL: rawURLField{URL: p.VideoURL}})
-		}
-	}
-	return out
-}
-
 func toMessages(msgs []llm.Message) []openai.ChatCompletionMessageParamUnion {
 	// Thinking mode is a conversation-level property: once any assistant
 	// message carries reasoning, thinking providers (DeepSeek) require the
@@ -365,40 +281,28 @@ func toMessages(msgs []llm.Message) []openai.ChatCompletionMessageParamUnion {
 			out = append(out, openai.SystemMessage(m.Content))
 		case llm.RoleUser:
 			if len(m.ContentParts) > 0 {
-				if hasVideoPart(m.ContentParts) {
-					// video_url is an OpenRouter/Gemini-style extension of the
-					// OpenAI dialect with no openai-go SDK representation
-					// (the union param type has no video variant), so once a
-					// message needs it we build its whole "content" array by
-					// hand and inject it via SetExtraFields rather than mix
-					// SDK-typed and raw parts.
-					user := openai.ChatCompletionUserMessageParam{}
-					user.SetExtraFields(map[string]any{"content": rawContentParts(m.ContentParts)})
-					out = append(out, openai.ChatCompletionMessageParamUnion{OfUser: &user})
-				} else {
-					parts := make([]openai.ChatCompletionContentPartUnionParam, 0, len(m.ContentParts))
-					for _, p := range m.ContentParts {
-						switch p.Type {
-						case llm.ContentPartTypeText:
-							parts = append(parts, openai.TextContentPart(p.Text))
-						case llm.ContentPartTypeImageURL:
-							parts = append(parts, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
-								URL: p.ImageURL,
-							}))
-						case llm.ContentPartTypeInputAudio:
-							parts = append(parts, openai.InputAudioContentPart(openai.ChatCompletionContentPartInputAudioInputAudioParam{
-								Data:   p.AudioData,
-								Format: p.AudioFormat,
-							}))
-						case llm.ContentPartTypeFile:
-							parts = append(parts, openai.FileContentPart(openai.ChatCompletionContentPartFileFileParam{
-								Filename: openai.String(p.FileName),
-								FileData: openai.String(p.FileData),
-							}))
-						}
+				parts := make([]openai.ChatCompletionContentPartUnionParam, 0, len(m.ContentParts))
+				for _, p := range m.ContentParts {
+					switch p.Type {
+					case llm.ContentPartTypeText:
+						parts = append(parts, openai.TextContentPart(p.Text))
+					case llm.ContentPartTypeImageURL:
+						parts = append(parts, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
+							URL: p.ImageURL,
+						}))
+					case llm.ContentPartTypeInputAudio:
+						parts = append(parts, openai.InputAudioContentPart(openai.ChatCompletionContentPartInputAudioInputAudioParam{
+							Data:   p.AudioData,
+							Format: p.AudioFormat,
+						}))
+					case llm.ContentPartTypeFile:
+						parts = append(parts, openai.FileContentPart(openai.ChatCompletionContentPartFileFileParam{
+							Filename: openai.String(p.FileName),
+							FileData: openai.String(p.FileData),
+						}))
 					}
-					out = append(out, openai.UserMessage(parts))
 				}
+				out = append(out, openai.UserMessage(parts))
 			} else {
 				out = append(out, openai.UserMessage(m.Content))
 			}

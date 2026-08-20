@@ -246,7 +246,7 @@ func runBootForm(f *bootFlags, a *bootAnswers, ctxStr, compactStr *string) error
 		a.vision = true
 		groups = append(groups, huh.NewGroup(
 			huh.NewConfirm().Title("Can your model see images?").
-				Description("Yes: adds the read_media tool, so the agent can open an image,\naudio, PDF, or video file directly. No: leave it off until you\nswitch to a multimodal model.").
+				Description("Yes: adds the read_media tool, so the agent can open an image,\naudio, or PDF file directly. No: leave it off until you\nswitch to a multimodal model.").
 				Value(&a.vision),
 		).Title("Vision"))
 	}

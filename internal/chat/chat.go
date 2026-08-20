@@ -146,12 +146,6 @@ type Config struct {
 	ReviewToolCall func(ctx context.Context, name, command, reason string) (approved bool, denyMsg string)
 	// RunToolResult runs the on_tool_result chain (config-global, nil = none).
 	RunToolResult func(ctx context.Context, name, argsJSON, output string) string
-	// AgentNames lists configured agents in declaration order, for /agent and
-	// Tab cycling. Empty or single-element disables switching.
-	AgentNames []string
-	// SwitchAgent activates the agent with the given name and returns its full
-	// runtime bundle. Nil disables agent switching.
-	SwitchAgent func(name string) (ActiveAgent, error)
 }
 
 // MCPServerStatus is one declared MCP server's health, mirrored from
@@ -164,22 +158,21 @@ type MCPServerStatus struct {
 	Err       string
 }
 
-// AgentStatusLine renders the status line for a switched-in agent: the agent
-// label and its model id, joined by a box-drawing separator. The single source
-// for this format, shared by initial config assembly and every agent switch.
+// AgentStatusLine renders an agent's status line: the agent label and its
+// model id, joined by a box-drawing separator. The single source for this
+// format.
 func AgentStatusLine(rt ActiveAgent) string {
 	return fmt.Sprintf("%s │ %s", rt.ModeLabel, rt.ModelID)
 }
 
-// ApplyActiveAgent copies a switched agent's runtime bundle into the config:
-// model client, persona, params, tool/skill sets, context window, and the
-// derived status line. Every front-end (via internal/shell3
-// SwitchAgent) and the initial assembly in agentsetup route through this method,
-// so the agent-derived field copy lives in exactly one place.
+// ApplyActiveAgent copies an agent's runtime bundle into the config: model
+// client, persona, params, tool/skill sets, context window, and the derived
+// status line. Config assembly in agentsetup routes through this method, so the
+// agent-derived field copy lives in exactly one place.
 //
 // It deliberately does NOT touch agent-independent fields (Store, WorkDir,
-// ConfigDir, AgentNames, SwitchAgent, OutPath, Headless, Log, RefreshPrompt,
-// RunToolCall): those are set once at assembly and survive switches.
+// ConfigDir, OutPath, Headless, Log, RefreshPrompt, RunToolCall): those are set
+// once at assembly.
 func (c *Config) ApplyActiveAgent(rt ActiveAgent) {
 	c.LLM = rt.LLM
 	c.Personality = rt.Personality

@@ -89,7 +89,10 @@ func (s *Store) DBPath() string { return filepath.Join(s.root, DBFile) }
 //     started-jobs markers a boot-time recovery pass turns into "was running
 //     when shell3 stopped" notices. Like cron_status it holds opaque JSON,
 //     names no session id, and is never touched by runs.Sweep.
-const schemaVersion = 7
+//  8. collapses threads to (surface PRIMARY KEY, session_id): the per-message
+//     thread map and the webui metadata columns are gone — a surface records
+//     exactly one current conversation (runs.SetCurrentSession).
+const schemaVersion = 8
 
 // openDB opens path, applying the schema fresh or recreating the file
 // outright when its stamped version doesn't match schemaVersion. Per the
@@ -330,15 +333,8 @@ CREATE TABLE IF NOT EXISTS reminders (
 	text       TEXT    NOT NULL
 );
 CREATE TABLE IF NOT EXISTS threads (
-	surface    TEXT NOT NULL,
-	msg_id     TEXT NOT NULL,
-	session_id TEXT NOT NULL,
-	title      TEXT NOT NULL DEFAULT '',
-	preview    TEXT NOT NULL DEFAULT '',
-	created_at TEXT NOT NULL DEFAULT '',
-	updated_at TEXT NOT NULL DEFAULT '',
-	deleted    INTEGER NOT NULL DEFAULT 0,
-	PRIMARY KEY (surface, msg_id)
+	surface    TEXT NOT NULL PRIMARY KEY,
+	session_id TEXT NOT NULL
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
 	text, session_id UNINDEXED, seq UNINDEXED, role UNINDEXED

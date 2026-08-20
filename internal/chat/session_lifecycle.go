@@ -6,13 +6,6 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
-// Start emits a session_start event with the given metadata. Call this once
-// per session, after the store session is created (runs.Store.NewSession) when
-// a store is used.
-func (s *Session) Start(meta map[string]string) {
-	emitSessionStart(s, meta)
-}
-
 // Status is a session's terminal state, written to the session_end event.
 type Status string
 

@@ -187,33 +187,6 @@ func TestToMessages_File(t *testing.T) {
 	}
 }
 
-func TestToMessages_VideoURL(t *testing.T) {
-	msgs := []llm.Message{{
-		Role: llm.RoleUser,
-		ContentParts: []llm.ContentPart{
-			{Type: llm.ContentPartTypeText, Text: "describe this clip"},
-			{Type: llm.ContentPartTypeVideoURL, VideoURL: "data:video/mp4;base64,QUJD"},
-		},
-	}}
-	out := toMessages(msgs)
-	if len(out) != 1 || out[0].OfUser == nil {
-		t.Fatalf("expected user message, got %+v", out)
-	}
-	raw, err := out[0].MarshalJSON()
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	s := string(raw)
-	wantText := `{"text":"describe this clip","type":"text"}`
-	wantVideo := `{"video_url":{"url":"data:video/mp4;base64,QUJD"},"type":"video_url"}`
-	if !strings.Contains(s, wantText) {
-		t.Fatalf("text part not pinned exactly.\ngot:  %s\nwant substring: %s", s, wantText)
-	}
-	if !strings.Contains(s, wantVideo) {
-		t.Fatalf("video_url part not pinned exactly.\ngot:  %s\nwant substring: %s", s, wantVideo)
-	}
-}
-
 func TestToMessages_MixedParts(t *testing.T) {
 	msgs := []llm.Message{{
 		Role: llm.RoleUser,
@@ -221,7 +194,6 @@ func TestToMessages_MixedParts(t *testing.T) {
 			{Type: llm.ContentPartTypeText, Text: "analyze all"},
 			{Type: llm.ContentPartTypeImageURL, ImageURL: "http://example.com/image.png"},
 			{Type: llm.ContentPartTypeInputAudio, AudioData: "QVVESk8=", AudioFormat: "wav"},
-			{Type: llm.ContentPartTypeVideoURL, VideoURL: "data:video/mp4;base64,VklERU8="},
 		},
 	}}
 	out := toMessages(msgs)
@@ -234,24 +206,22 @@ func TestToMessages_MixedParts(t *testing.T) {
 	}
 	s := string(raw)
 
-	// Verify part order is preserved: text, image_url, input_audio, video_url
+	// Verify part order is preserved: text, image_url, input_audio
 	textIdx := strings.Index(s, `"text":"analyze all"`)
 	imageIdx := strings.Index(s, `"image_url":{"url":"http://example.com/image.png"}`)
 	audioIdx := strings.Index(s, `"input_audio":{"data":"QVVESk8=","format":"wav"}`)
-	videoIdx := strings.Index(s, `"video_url":{"url":"data:video/mp4;base64,VklERU8="}`)
 
-	if textIdx == -1 || imageIdx == -1 || audioIdx == -1 || videoIdx == -1 {
+	if textIdx == -1 || imageIdx == -1 || audioIdx == -1 {
 		t.Fatalf("not all parts found in: %s", s)
 	}
-	if textIdx >= imageIdx || imageIdx >= audioIdx || audioIdx >= videoIdx {
-		t.Fatalf("part order not preserved. textIdx=%d imageIdx=%d audioIdx=%d videoIdx=%d", textIdx, imageIdx, audioIdx, videoIdx)
+	if textIdx >= imageIdx || imageIdx >= audioIdx {
+		t.Fatalf("part order not preserved. textIdx=%d imageIdx=%d audioIdx=%d", textIdx, imageIdx, audioIdx)
 	}
 
 	// Verify key order for each part: data/field first, type last
 	wantText := `{"text":"analyze all","type":"text"}`
 	wantImage := `{"image_url":{"url":"http://example.com/image.png"},"type":"image_url"}`
 	wantAudio := `{"input_audio":{"data":"QVVESk8=","format":"wav"},"type":"input_audio"}`
-	wantVideo := `{"video_url":{"url":"data:video/mp4;base64,VklERU8="},"type":"video_url"}`
 
 	if !strings.Contains(s, wantText) {
 		t.Fatalf("text part key order wrong.\ngot:  %s\nwant substring: %s", s, wantText)
@@ -261,9 +231,6 @@ func TestToMessages_MixedParts(t *testing.T) {
 	}
 	if !strings.Contains(s, wantAudio) {
 		t.Fatalf("input_audio part key order wrong.\ngot:  %s\nwant substring: %s", s, wantAudio)
-	}
-	if !strings.Contains(s, wantVideo) {
-		t.Fatalf("video_url part key order wrong.\ngot:  %s\nwant substring: %s", s, wantVideo)
 	}
 }
 
