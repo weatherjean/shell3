@@ -120,6 +120,16 @@ routing and deletes it only after the front-end hand-off returns
 (at-least-once — a crash inside the window duplicates the report at the
 next boot, never loses it; do not "fix" the ordering), and every job writes
 a PID-stamped "running" marker row at start, cleared when it finishes.
+Delivery is also **outage-durable**: `CompletionHost.PostCompletion` is
+synchronous and returns the send error, and a post the transport rejected
+(Telegram outage) keeps its event row — the row id lands in the job
+runtime's `undelivered` set, and `Runtime.RedeliverUndelivered` (a 5-minute
+`wireHost` ticker, `redeliverEvery`) re-dispatches it until the send lands,
+so a ⚠️/⏰/🔔 floor post survives an outage without waiting for a restart.
+Redelivery re-runs the whole event, so an owner mailed alongside a failed
+post can see the mail twice — at-least-once, same contract. Cron `tool:`
+job posts are the exception (no event row exists — nothing dispatched);
+their sends discard the error and the next idempotent tick re-posts.
 `Runtime.RecoverCompletions` — run once at startup by the long-lived
 front-ends (`wireHost`, after `SetCompletionHost`; never `ask`, matching the
 janitors) — redelivers leftover event rows (note-tagged "recovered after a

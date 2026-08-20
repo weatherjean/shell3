@@ -46,10 +46,11 @@ func (b *fakeBot) SetJobRunner(fn func(name string) error) {
 	b.runnerNil = fn == nil
 }
 
-func (b *fakeBot) PostCompletion(p shell3.CompletionPost) {
+func (b *fakeBot) PostCompletion(p shell3.CompletionPost) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.posts = append(b.posts, p)
+	return nil
 }
 
 func (b *fakeBot) postSnapshot() []shell3.CompletionPost {

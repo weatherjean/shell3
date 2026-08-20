@@ -137,7 +137,7 @@ func (b *Bot) postReply(ctx context.Context, sess *shell3.Session, replyTo strin
 	}
 	chunks := chunk(text)
 	if len(chunks) > replyMaxChunks {
-		b.postChunk(ctx, sess, replyTo, chunks[0], opts...)
+		_ = b.postChunk(ctx, sess, replyTo, chunks[0], opts...)
 		if id, err := b.client.SendDocument(ctx, b.chatID, "reply.md", []byte(text), "full reply", opts...); err == nil {
 			b.recordSent(sess, id)
 			return
@@ -145,26 +145,30 @@ func (b *Bot) postReply(ctx context.Context, sess *shell3.Session, replyTo strin
 		chunks = chunks[1:] // document failed: degrade to posting the rest
 	}
 	for _, c := range chunks {
-		b.postChunk(ctx, sess, replyTo, c, opts...)
+		_ = b.postChunk(ctx, sess, replyTo, c, opts...)
 	}
 }
 
 // postChunk posts one chunk through the HTML→plain fallback path and records
-// the sent id.
-func (b *Bot) postChunk(ctx context.Context, sess *shell3.Session, replyTo string, c string, opts ...SendOpt) {
+// the sent id. The returned error is the PLAIN fallback's — non-nil means
+// neither rendering reached the transport, i.e. the chunk was not delivered.
+// Most callers ignore it (a turn reply has no redelivery path); the
+// completion router uses it to keep an undelivered post's outbox row.
+func (b *Bot) postChunk(ctx context.Context, sess *shell3.Session, replyTo string, c string, opts ...SendOpt) error {
 	html := mdhtml.ToTelegramHTML(c)
 	var id string
 	var err error
 	if replyTo != "" {
 		if id, err = b.client.SendHTMLReply(ctx, b.chatID, html, replyTo, opts...); err != nil {
-			id, _ = b.client.SendReply(ctx, b.chatID, c, replyTo, opts...)
+			id, err = b.client.SendReply(ctx, b.chatID, c, replyTo, opts...)
 		}
 	} else {
 		if id, err = b.client.SendHTML(ctx, b.chatID, html, opts...); err != nil {
-			id, _ = b.client.Send(ctx, b.chatID, c, opts...)
+			id, err = b.client.Send(ctx, b.chatID, c, opts...)
 		}
 	}
 	b.recordSent(sess, id)
+	return err
 }
 
 // recordSent advances the conversation's anchor to a message the bot just

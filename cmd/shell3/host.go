@@ -39,7 +39,10 @@ func openRuntime(ctx context.Context, configDir string) (*shell3.Runtime, string
 // demanding a full CompletionHost (WakeOwner, StartFreshTurn) a cron post
 // never uses.
 type completionPoster interface {
-	PostCompletion(p shell3.CompletionPost)
+	// The error mirrors shell3.CompletionHost: non-nil = the post never
+	// reached the user. Cron tool-job posts currently discard it (they have
+	// no outbox row to keep) — see wireCronPost.
+	PostCompletion(p shell3.CompletionPost) error
 }
 
 // armCron builds and starts a scheduler for the declared jobs (nil when there
@@ -142,5 +145,8 @@ func wireCronPost(sched *cron.Scheduler, host completionPoster) {
 	if sched == nil {
 		return
 	}
-	sched.SetPost(host.PostCompletion)
+	// The scheduler's callback is void: a tool job's post has no outbox row
+	// behind it (nothing dispatched), so a failed send is logged upstream and
+	// the next tick re-posts anyway — idempotent by design.
+	sched.SetPost(func(p shell3.CompletionPost) { _ = host.PostCompletion(p) })
 }

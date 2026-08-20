@@ -187,7 +187,7 @@ type rearmBot interface {
 	SetJobRunner(func(name string) error)
 	// PostCompletion, alongside SetJobRunner, lets reloadAndRearm wire the
 	// new scheduler's tool-job post callback itself — see wireCronPost.
-	PostCompletion(p shell3.CompletionPost)
+	PostCompletion(p shell3.CompletionPost) error
 }
 
 // reloadAndRearm performs a /reload: rebuild config, then stop the old cron

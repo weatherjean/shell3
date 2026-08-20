@@ -22,10 +22,11 @@ type fakePoster struct {
 	posts []shell3.CompletionPost
 }
 
-func (f *fakePoster) PostCompletion(p shell3.CompletionPost) {
+func (f *fakePoster) PostCompletion(p shell3.CompletionPost) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.posts = append(f.posts, p)
+	return nil
 }
 
 func (f *fakePoster) snapshot() []shell3.CompletionPost {

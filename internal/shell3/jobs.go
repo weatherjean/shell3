@@ -233,6 +233,14 @@ type jobManager struct {
 	closing      bool
 	driverCtx    context.Context
 	driverCancel context.CancelFunc
+
+	// undelivered (guarded by mu) holds outbox row ids of completion events
+	// whose user-facing post failed to send (transport outage): the rows were
+	// kept instead of deleted, and Runtime.RedeliverUndelivered retries them.
+	// Boot-time RecoverCompletions covers the same rows if the process dies
+	// first — this set only exists so a LIVE process retries without a
+	// restart.
+	undelivered map[int64]struct{}
 }
 
 func newJobManager(rt *Runtime, maxConcurrent int) *jobManager {

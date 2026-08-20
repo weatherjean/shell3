@@ -170,6 +170,62 @@ func TestRecoverCompletionsSkipsLiveRunningMarker(t *testing.T) {
 	}
 }
 
+// A completion whose user-facing post fails to send (transport outage) keeps
+// its event row: the ⚠️ floor must survive until it can actually be posted.
+func TestFailedPostKeepsEventRow(t *testing.T) {
+	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: fakellm.New()} })
+	host := &fakeHost{postErr: fmt.Errorf("telegram is down")}
+	rt.SetCompletionHost(host)
+
+	rt.jobs.dispatchCompletion(failedEvent()) // failure path: post + (no owner)
+
+	rows := outboxRows(t, rt)
+	if len(rows) != 1 || rows[0].Kind != "event" {
+		t.Fatalf("outbox = %+v, want the undelivered event kept", rows)
+	}
+}
+
+// RedeliverUndelivered retries kept rows: once the transport heals, the post
+// lands and the row is removed. A retry that fails again keeps the row for
+// the next tick.
+func TestRedeliverUndelivered(t *testing.T) {
+	rt := newTestRuntime(t, func() chat.Config { return chat.Config{LLM: fakellm.New()} })
+	host := &fakeHost{postErr: fmt.Errorf("telegram is down")}
+	rt.SetCompletionHost(host)
+
+	rt.jobs.dispatchCompletion(failedEvent())
+	if rows := outboxRows(t, rt); len(rows) != 1 {
+		t.Fatalf("outbox = %+v, want one kept row", rows)
+	}
+
+	// Still down: the retry re-keeps the row (fresh id, same event).
+	if n := rt.RedeliverUndelivered(); n != 1 {
+		t.Fatalf("redelivered = %d, want 1 (attempted)", n)
+	}
+	if rows := outboxRows(t, rt); len(rows) != 1 {
+		t.Fatalf("outbox = %+v, want the row still kept while down", rows)
+	}
+
+	// Transport heals: the retry posts and drains the outbox.
+	host.mu.Lock()
+	host.postErr = nil
+	host.mu.Unlock()
+	if n := rt.RedeliverUndelivered(); n != 1 {
+		t.Fatalf("redelivered = %d, want 1", n)
+	}
+	posts, _, _ := host.snapshot()
+	if len(posts) < 2 {
+		t.Fatalf("posts = %v, want the retries to have posted", posts)
+	}
+	if rows := outboxRows(t, rt); len(rows) != 0 {
+		t.Fatalf("outbox = %+v, want empty after successful redelivery", rows)
+	}
+	// Nothing pending: the next tick is a no-op.
+	if n := rt.RedeliverUndelivered(); n != 0 {
+		t.Fatalf("redelivered = %d, want 0 when nothing is pending", n)
+	}
+}
+
 // waitOutboxEmpty polls until the runtime's outbox drains (job finished and
 // its rows cleaned up) or the deadline hits.
 func waitOutboxEmpty(t *testing.T, rt *Runtime) {

@@ -17,12 +17,16 @@ type fakeHost struct {
 	wakes  []string
 	fresh  []string
 	wakeOK bool
+	// postErr, when set, makes every PostCompletion report delivery failure
+	// (a transport outage) — the router must then keep the outbox row.
+	postErr error
 }
 
-func (h *fakeHost) PostCompletion(p CompletionPost) {
+func (h *fakeHost) PostCompletion(p CompletionPost) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.posts = append(h.posts, "cron="+p.CronJob+" owner="+p.OwnerID+" "+p.Text)
+	return h.postErr
 }
 
 func (h *fakeHost) WakeOwner(ownerID, note string) bool {

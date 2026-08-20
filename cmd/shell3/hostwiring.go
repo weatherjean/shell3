@@ -112,6 +112,25 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 	if n := rt.RecoverCompletions(); n > 0 {
 		rt.Parts().Log().Info("recovered undelivered completions from the previous run", "count", n)
 	}
+	// And keep redelivering while THIS process runs: a completion post that
+	// failed to send (Telegram outage) keeps its outbox row, and this ticker
+	// retries it until the transport is back — the ⚠️/⏰/🔔 floor survives an
+	// outage without waiting for a restart. No-op when nothing failed.
+	redeliverDone := make(chan struct{})
+	go func() {
+		t := time.NewTicker(redeliverEvery)
+		defer t.Stop()
+		for {
+			select {
+			case <-redeliverDone:
+				return
+			case <-t.C:
+				if n := rt.RedeliverUndelivered(); n > 0 {
+					rt.Parts().Log().Info("redelivered completion posts after a send failure", "count", n)
+				}
+			}
+		}
+	}()
 
 	// Cron dispatches subagents, which need SOME parent session. One hidden
 	// session is the dispatch parent; it runs no turns of its own (results
@@ -197,9 +216,15 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 	})
 
 	return func() {
+		close(redeliverDone)
 		closeDash()
 		if s := currentSched(); s != nil {
 			s.Stop()
 		}
 	}, nil
 }
+
+// redeliverEvery is how often the host retries completion posts whose send
+// failed. Long enough that a hard outage costs a handful of retry sends per
+// hour, short enough that the ⚠️ lands minutes after the network returns.
+const redeliverEvery = 5 * time.Minute

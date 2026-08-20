@@ -149,12 +149,19 @@ type CompletionPost struct {
 // CompletionHost is the front-end delivery surface a Runtime host plugs in via
 // SetCompletionHost. All methods may be called from job-runtime goroutines.
 type CompletionHost interface {
-	// PostCompletion posts p.Text to the user. p.CronJob != "" marks a cron
-	// origin (the host prefixes "⏰ <cronJob>:"), otherwise "🔔". p.OwnerID,
-	// when it names a live threaded session, lets the host thread+anchor the
-	// post; "" (or an unknown id) posts standalone. JobID/RunID, when set,
-	// let the host link the post to the job and its stored run.
-	PostCompletion(p CompletionPost)
+	// PostCompletion posts p.Text to the user and reports whether the send
+	// reached the transport: a non-nil error means the user did NOT see it
+	// (network outage, API rejection after retries), and the router keeps
+	// the completion's outbox row for redelivery instead of deleting it.
+	// The send runs synchronously on the calling job-runtime goroutine —
+	// milliseconds normally, a few seconds of retry during an outage — which
+	// is fine there and never stalls a conversation turn.
+	// p.CronJob != "" marks a cron origin (the host prefixes "⏰ <cronJob>:"),
+	// otherwise "🔔". p.OwnerID, when it names a live threaded session, lets
+	// the host thread+anchor the post; "" (or an unknown id) posts
+	// standalone. JobID/RunID, when set, let the host link the post to the
+	// job and its stored run.
+	PostCompletion(p CompletionPost) error
 	// WakeOwner delivers mail into the owning session (queue + wake) iff the
 	// host still considers ownerID live, returning false when it is gone —
 	// the caller then falls back to StartFreshTurn. Hosts implement the
@@ -310,7 +317,19 @@ func (m *jobManager) dispatchCompletion(ev CompletionEvent) {
 		}
 		return
 	}
-	defer m.deleteOutboxRow(rowID)
+	// A post the transport rejected keeps its row: the ⚠️/⏰/🔔 never reached
+	// the user, so the row stays for the redelivery pass (a periodic
+	// RedeliverUndelivered tick, or the next boot's RecoverCompletions).
+	// In-process delivery (WakeOwner, StartFreshTurn, notice queues) cannot
+	// fail this way, so those paths always delete.
+	undelivered := false
+	defer func() {
+		if undelivered {
+			m.rememberUndelivered(rowID)
+			return
+		}
+		m.deleteOutboxRow(rowID)
+	}()
 	host := m.rt.completionHost()
 	if host == nil {
 		// Library fallback (no front-end host — shell3 ask, tests): raw notice
@@ -332,14 +351,18 @@ func (m *jobManager) dispatchCompletion(ev CompletionEvent) {
 		}
 		p := ev.post(text)
 		p.Aside = !ev.Failed()
-		host.PostCompletion(p)
+		undelivered = host.PostCompletion(p) != nil
 		return
 	}
 	if ev.Failed() {
 		// Hard floor: a failure is never silent. The owner, if still live, is
 		// additionally mailed so the agent can react; an ownerless failure
 		// (cron) stops at the post — no fresh turn per broken tick.
-		host.PostCompletion(ev.post(floorText(ev)))
+		// A failed ⚠️ post keeps the row even when the owner mail landed:
+		// redelivery re-runs the whole event, so the owner may see the mail
+		// twice — at-least-once, and the floor post is the piece that must
+		// never be lost.
+		undelivered = host.PostCompletion(ev.post(floorText(ev))) != nil
 		if ev.OwnerID != "" {
 			host.WakeOwner(ev.OwnerID, mailText(ev))
 		}
@@ -351,7 +374,7 @@ func (m *jobManager) dispatchCompletion(ev CompletionEvent) {
 		// has it in context without spending one here. The post uses the
 		// user-facing rendering — the notice text is written FOR the agent
 		// ("relay this", "call task_status") and must not leak into the chat.
-		host.PostCompletion(ev.post(directText(ev)))
+		undelivered = host.PostCompletion(ev.post(directText(ev))) != nil
 		if ev.owner != nil {
 			ev.owner.injectNoticeNoWake(ev.notice)
 		}

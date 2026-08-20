@@ -825,8 +825,13 @@ var _ shell3.CompletionHost = (*Bot)(nil)
 
 // PostCompletion posts a completion message to the chat, threaded onto the
 // conversation. p.CronJob != "" posts "⏰ <cronJob>: <text>", otherwise
-// "🔔 <text>" (⚠️ failure floors carry their own marker).
-func (b *Bot) PostCompletion(p shell3.CompletionPost) {
+// "🔔 <text>" (⚠️ failure floors carry their own marker). The send is
+// SYNCHRONOUS and its failure is returned: the router keeps the completion's
+// outbox row on a non-nil error so the post is redelivered (periodic
+// RedeliverUndelivered tick, or the next boot) instead of vanishing into a
+// transport outage. Blocking is fine here — this runs on a job-runtime
+// goroutine, never a conversation turn.
+func (b *Bot) PostCompletion(p shell3.CompletionPost) error {
 	text := p.Text
 	if strings.TrimSpace(text) == "" {
 		text = "(no output)"
@@ -855,14 +860,17 @@ func (b *Bot) PostCompletion(p shell3.CompletionPost) {
 	b.mu.Lock()
 	sess := b.main
 	b.mu.Unlock()
-	go func() {
-		ctx := context.Background()
-		if sess != nil {
-			b.postReply(ctx, sess, "", text, opts...)
-			return
+	// Background posts are single chunks in practice (tails are capped), but
+	// chunk anyway; the first undelivered chunk fails the whole post so the
+	// router redelivers it complete.
+	ctx := context.Background()
+	var firstErr error
+	for _, c := range chunk(text) {
+		if err := b.postChunk(ctx, sess, "", c, opts...); err != nil && firstErr == nil {
+			firstErr = err
 		}
-		b.sendReply(ctx, text, opts...)
-	}()
+	}
+	return firstErr
 }
 
 // WakeOwner delivers note into the owning session iff it is the current main

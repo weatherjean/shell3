@@ -116,6 +116,70 @@ func (m *jobManager) clearRunningMarker(j *bgJob) {
 	m.deleteOutboxRow(id)
 }
 
+// rememberUndelivered records an event row whose user-facing post failed to
+// send, for RedeliverUndelivered to retry. rowID 0 (nothing persisted — no
+// store) has nothing to retry from and is skipped.
+func (m *jobManager) rememberUndelivered(rowID int64) {
+	if rowID == 0 {
+		return
+	}
+	m.mu.Lock()
+	if m.undelivered == nil {
+		m.undelivered = make(map[int64]struct{})
+	}
+	m.undelivered[rowID] = struct{}{}
+	m.mu.Unlock()
+}
+
+// takeUndelivered snapshots and clears the undelivered set. A row whose retry
+// fails again re-enters the set via dispatchCompletion's own bookkeeping.
+func (m *jobManager) takeUndelivered() map[int64]struct{} {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ids := m.undelivered
+	m.undelivered = nil
+	return ids
+}
+
+// RedeliverUndelivered retries completion events whose user-facing post
+// failed to send while this process was running (a Telegram outage riding out
+// a night, say). Same ordering contract as RecoverCompletions: re-dispatch
+// first — which persists a fresh row and, on another send failure, re-enters
+// the retry set — then delete the stale row. Call it periodically from the
+// front-end host (wireHost's ticker); it is a no-op when nothing failed.
+func (rt *Runtime) RedeliverUndelivered() int {
+	if rt.store == nil {
+		return 0
+	}
+	ids := rt.jobs.takeUndelivered()
+	if len(ids) == 0 {
+		return 0
+	}
+	rows, err := rt.store.OutboxLoadAll()
+	if err != nil {
+		// Store hiccup: put the ids back so a later tick retries.
+		for id := range ids {
+			rt.jobs.rememberUndelivered(id)
+		}
+		return 0
+	}
+	redelivered := 0
+	for _, r := range rows {
+		if _, ok := ids[r.ID]; !ok || r.Kind != "event" {
+			continue
+		}
+		var ev CompletionEvent
+		if err := json.Unmarshal([]byte(r.JSON), &ev); err != nil {
+			_ = rt.store.OutboxDelete(r.ID)
+			continue
+		}
+		rt.jobs.dispatchCompletion(ev)
+		_ = rt.store.OutboxDelete(r.ID)
+		redelivered++
+	}
+	return redelivered
+}
+
 // pidAlive reports whether pid names a live process (signal 0 probe). An
 // unsupported platform errs toward "dead", which at worst redelivers a row
 // its owner was about to delete.
