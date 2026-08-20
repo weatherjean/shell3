@@ -32,3 +32,6 @@ fmt:
 
 clean:
 	rm -f $(BIN) cover.out
+
+deepcheck:
+	./scripts/deepcheck.sh
