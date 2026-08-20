@@ -398,14 +398,8 @@ func TestContract8_NewStartsFreshConversation(t *testing.T) {
 	first := b.main.ID()
 	b.mu.Unlock()
 
-	// The reply posts BEFORE the turn slot frees, and /new refuses mid-turn —
-	// on a slow runner the raw sequence races into that refusal. Wait for the
-	// slot the way a real user's next tap naturally would.
-	waitFor(t, func() bool {
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		return !b.turnActive
-	})
+	// /new refuses mid-turn and the reply posts before the slot frees.
+	waitIdle(t, b)
 
 	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/new"})
 	waitFor(t, func() bool {
@@ -517,6 +511,9 @@ func TestContract11_TextDuringQuietTurnQueues(t *testing.T) {
 	if !waitForReply(t, fc, "answered") {
 		t.Fatal("first turn produced no reply")
 	}
+	// The real turn's teardown clears turnActive and drains the queue; let it
+	// finish before simulating a quiet turn, or it clobbers the flags below.
+	waitIdle(t, b)
 
 	b.mu.Lock()
 	b.turnActive = true

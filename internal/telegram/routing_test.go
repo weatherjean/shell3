@@ -39,6 +39,20 @@ func waitFor(t *testing.T, cond func() bool) {
 	t.Fatal("waitFor: condition not met within 5s")
 }
 
+// waitIdle waits for the bot's turn slot to free. A turn's reply posts
+// BEFORE turnActive clears, so a test that acts right after waitForReply
+// races the teardown (a /new refuses mid-turn, a manual flag set is
+// clobbered, a queued message is drained early). Wait like a user's next
+// tap naturally would.
+func waitIdle(t *testing.T, b *Bot) {
+	t.Helper()
+	waitFor(t, func() bool {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return !b.turnActive
+	})
+}
+
 // waitForReply polls fc.sentTexts() until one contains want or the deadline
 // passes. The turn runs on its own goroutine, so replies arrive asynchronously.
 func waitForReply(t *testing.T, fc *fakeClient, want string) bool {
