@@ -341,8 +341,8 @@ main_gate() {
   # documented installer for tools the operator asked for. The pattern alone
   # cannot tell them apart; a model can.
   case "$cmd" in
-    *curl*\|*sh*|*wget*\|*sh*|*curl*\|*bash*|*wget*\|*bash*|\
-    *base64*-d*\|*sh*|*base64*--decode*\|*sh*|*xxd*-r*\|*sh*|*openssl*-d*\|*bash*|\
+    *curl*\|*sh*|*wget*\|*sh*|\
+    *base64*-d*\|*sh*|*xxd*-r*\|*sh*|*openssl*-d*\|*sh*|\
     *'eval $(curl'*|*'eval $(wget'*|*'`curl'*|*'`wget'*)
       review "pipes remote or decoded content into a shell without reading it first" ;;
   esac
