@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openai/openai-go"
+	"github.com/openai/openai-go/v3"
 )
 
 // replayCorpus runs a captured MiniMax stream (one raw chunk JSON per line,

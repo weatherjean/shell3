@@ -114,7 +114,8 @@ func TestToMessagesToolCall(t *testing.T) {
 		t.Fatalf("expected 1 assistant, got %+v", out)
 	}
 	asst := out[0].OfAssistant
-	if len(asst.ToolCalls) != 1 || asst.ToolCalls[0].ID != "tc1" || asst.ToolCalls[0].Function.Name != "bash" {
+	if len(asst.ToolCalls) != 1 || asst.ToolCalls[0].OfFunction == nil ||
+		asst.ToolCalls[0].OfFunction.ID != "tc1" || asst.ToolCalls[0].OfFunction.Function.Name != "bash" {
 		t.Fatalf("tool call: %+v", asst.ToolCalls)
 	}
 }
@@ -361,7 +362,7 @@ func TestToTools(t *testing.T) {
 	if len(out) != 1 {
 		t.Fatalf("expected 1, got %d", len(out))
 	}
-	if out[0].Function.Name != "bash" {
-		t.Fatalf("tool: %+v", out[0].Function)
+	if out[0].OfFunction == nil || out[0].OfFunction.Function.Name != "bash" {
+		t.Fatalf("tool: %+v", out[0])
 	}
 }

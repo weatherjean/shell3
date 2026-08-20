@@ -1,9 +1,9 @@
 package cli
 
 import (
+	"charm.land/fang/v2"
 	huh "charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/fang"
 )
 
 // HuhTheme is the shell3 brand theme for huh forms (boot): the Charm base

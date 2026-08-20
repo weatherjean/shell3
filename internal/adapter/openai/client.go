@@ -10,9 +10,9 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/openai/openai-go"
-	"github.com/openai/openai-go/option"
-	"github.com/openai/openai-go/shared"
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/shared"
 
 	"github.com/weatherjean/shell3/internal/llm"
 )
@@ -410,13 +410,15 @@ func toMessages(msgs []llm.Message) []openai.ChatCompletionMessageParamUnion {
 				}
 			}
 			if len(m.ToolCalls) > 0 {
-				tcs := make([]openai.ChatCompletionMessageToolCallParam, len(m.ToolCalls))
+				tcs := make([]openai.ChatCompletionMessageToolCallUnionParam, len(m.ToolCalls))
 				for i, tc := range m.ToolCalls {
-					tcs[i] = openai.ChatCompletionMessageToolCallParam{
-						ID: tc.ID,
-						Function: openai.ChatCompletionMessageToolCallFunctionParam{
-							Name:      tc.Name,
-							Arguments: tc.RawArgs,
+					tcs[i] = openai.ChatCompletionMessageToolCallUnionParam{
+						OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
+							ID: tc.ID,
+							Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+								Name:      tc.Name,
+								Arguments: tc.RawArgs,
+							},
 						},
 					}
 				}
@@ -436,16 +438,14 @@ func toMessages(msgs []llm.Message) []openai.ChatCompletionMessageParamUnion {
 	return out
 }
 
-func toTools(tools []llm.ToolDefinition) []openai.ChatCompletionToolParam {
-	out := make([]openai.ChatCompletionToolParam, len(tools))
+func toTools(tools []llm.ToolDefinition) []openai.ChatCompletionToolUnionParam {
+	out := make([]openai.ChatCompletionToolUnionParam, len(tools))
 	for i, t := range tools {
-		out[i] = openai.ChatCompletionToolParam{
-			Function: shared.FunctionDefinitionParam{
-				Name:        t.Name,
-				Description: openai.String(t.Description),
-				Parameters:  shared.FunctionParameters(t.Parameters),
-			},
-		}
+		out[i] = openai.ChatCompletionFunctionTool(shared.FunctionDefinitionParam{
+			Name:        t.Name,
+			Description: openai.String(t.Description),
+			Parameters:  shared.FunctionParameters(t.Parameters),
+		})
 	}
 	return out
 }
