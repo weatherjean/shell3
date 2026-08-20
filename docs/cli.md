@@ -6,8 +6,8 @@ tools a kit declares), `health` (config check), and `ask` (a local driver for
 the agent). Bare `shell3` prints help.
 
 Every subcommand except `boot` and `tool` takes `-c`/`--config <dir>`: a path
-to a config directory (`shell3.sh`
-tree); the default is `~/.shell3`. The working directory is never consulted.
+to a config directory (one holding a `shell3.sh` kit); the default is
+`~/.shell3`. The working directory is never consulted.
 (`boot` always scaffolds `~/.shell3`; `tool` takes a kit path as its
 argument.) `shell3 --version` prints the installed build.
 

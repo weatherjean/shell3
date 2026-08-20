@@ -246,8 +246,8 @@ subagent is never given the `task` tool (subagent frontmatter has no way to
 express delegation), so subagents can't spawn subagents; there is no depth
 field anywhere. Delegation itself is **inferred**: the four task-family tools
 (`task`, `task_list`, `task_status <id>`, `task_cancel <id>`; ids like
-`sub1`/`bg1`) are advertised iff `agents/` is non-empty — a file in `agents/`
-IS the registration, there is no toggle and no allowlist key.
+`sub1`/`bg1`) are advertised iff the kit declares an employee — the `agent:`
+block IS the registration, there is no toggle and no allowlist key.
 
 The dash's index lists running + finished jobs; `/superstop` kills them all
 (`Session.KillAllForStop`: snapshot, mark each job `suppress`, cancel — the
@@ -496,8 +496,8 @@ Telegram-specific code. Restriction policy is the hook script, not a tools
 list.
 
 An in-process cron scheduler (`internal/cron`, jobs are `cron/<name>.md`
-files; each job dispatches its declared agent — a subagent from `agents/`, or
-a project's `manager.md`, which then runs in that project's workdir — from a
+files; each job dispatches its declared agent — any agent the kit declares,
+running in that agent's own `workdir:` when it has one — from a
 hidden pinned "cron" parent session that is the dispatch parent + the jobs/runs
 source but runs NO turns of its own and is never woken; a run's result is
 a task report carrying the job name (`DispatchOpts.CronJob`) and the job's
@@ -615,7 +615,7 @@ no message = an interactive multi-turn loop; `-p` for headless; `--resume`
 continues the latest session; host-agnostic — reads nothing from the
 `telegram:` block, and installs no CompletionHost, so its verbose view sees
 every completion raw). `--agent <name>` is its scripting seam
-(`cmd/shell3/askagent.go`): one headless turn of a subagent from `agents/`
+(`cmd/shell3/askagent.go`): one headless turn of a kit-declared employee
 via `Session.Dispatch`, printing ONLY the reply on stdout (diagnostics to
 stderr), waiting for Done && !ChildOpen so a lingering bash_bg can't truncate
 it, exiting nonzero on a failed or empty run. It exists so batch scripts stop
