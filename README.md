@@ -92,8 +92,11 @@ walkthrough is in [docs/cli.md](docs/cli.md).
 | `shell3 boot`     | Scaffold the config + `.env` interactively. |
 | `shell3 health`   | Load the config strictly; fail on any warning. |
 | `shell3 ask "…"`  | Ask the agent locally with full verbose output; no message = interactive loop; `-p` for scripting; `--resume` continues the last session; `--agent <name>` runs one subagent turn and prints only its reply, for batch scripts. |
+| `shell3 tool`     | `check`, `run`, and `test` the tools declared in a kit — the author's loop. Takes the kit path as an argument. |
 
-Every subcommand takes `--config/-c` to point at a different config directory.
+`telegram`, `serve`, `ask` and `health` take `--config/-c` to point at a
+different config directory. `boot` always targets `~/.shell3`, and `tool`
+takes the kit file itself as its argument.
 
 ## Features
 
@@ -122,10 +125,10 @@ Every subcommand takes `--config/-c` to point at a different config directory.
 - **Any OpenAI-compatible provider**: OpenAI, Ollama, Groq, LM Studio,
   OpenRouter, DeepSeek, and friends. MCP servers too, opt-in per agent and
   gated like every other tool.
-- **Media as wrapper scripts, not config**: no built-in transcription, TTS,
+- **Media as declared tools, not config**: no built-in transcription, TTS,
   or image generation — the agent reads/sends files with `read_media` and
-  `send_media_telegram`, and voice/image capabilities are drop-in bash
-  scripts you install ([recipes](docs/cookbook/voice-images.md)).
+  `send_media_telegram`, and voice/image capabilities are tools you paste
+  into your kit ([recipes](docs/cookbook/voice-images.md)).
 
 ## Documentation
 

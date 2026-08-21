@@ -130,9 +130,9 @@ by default: reading, listing, and searching are bash commands (`cat`/`sed -n`,
 `ls`/`find`, `rg`), and a reflexive
 `read_file`/`grep`/`write_file` call gets an unknown-tool error carrying a
 bash-first redirect back to bash/edit_file. Structured `read` and `list_files`
-tools exist as an opt-in (`tools: [read, list_files]`, typically for a
-subagent on a smaller model); left out of `tools`, those names hit the same
-redirect. `history` (opt-in via `tools`, on the scaffold's main agent by
+tools exist as an opt-in (`use: [read, list_files]`, typically for a
+subagent on a smaller model); left out of `use:`, those names hit the same
+redirect. `history` (opt-in via `use:`, on the scaffold's main agent by
 default) recalls past conversations from the runs store: `{query}` is
 ranked FTS5 search over user+assistant text across ALL sessions (tool
 output is not indexed; a syntax-invalid query is retried as one quoted
@@ -299,8 +299,10 @@ defaults to the filename) is one skill. An invalid file is skipped with a
 warning that `shell3 health` turns into a failure; an absent dir means no
 skills. The agent reads a skill's body with `cat` (skills are indexed by
 absolute path in the prompt under `## Skills` — there is no `skill` tool).
-There is **no custom-tool declaration**: reusable glue is a wrapper script
-(canonically `~/.shell3/lib/bin/`) run through bash, documented by the
+Custom tools ARE declarable — a `tool:` block plus the function under it (see
+the kit section above). What is NOT a tool is reusable glue with no model-facing
+surface: that stays a wrapper script (canonically `~/.shell3/lib/bin/`) run
+through bash, documented by the
 scaffold's `scripting` skill; a script that needs a secret reads the one key
 it needs from `.env` itself at point of use, so secrets never enter the
 conversation or the agent environment. External tool servers come in over
@@ -489,10 +491,10 @@ text arriving DURING a wake turn queues rather than steering into it
 (`attachments.go`) and their paths always go into the prompt
 (`attachmentNote`) — there is no built-in transcription, captioning, TTS, or
 image generation, and no `media:` config block. The agent perceives a file
-by calling `read_media` itself (gated by `tools: [media]` in agent
-frontmatter) and sends one back with `send_media_telegram`; anything more —
+by calling `read_media` itself (gated by `use: [media]` in the agent's
+`agent:` block) and sends one back with `send_media_telegram`; anything more —
 transcribing a voice note before answering, speaking a reply, generating an
-image — is a bash wrapper script the operator installs, documented in
+image — is a kit tool the operator declares, documented in
 [docs/cookbook/voice-images.md](docs/cookbook/voice-images.md). The media
 dir and its startup janitor (`media_keep_days`) now live in
 `internal/mediadir`, which owns `Dir()` and `Sweep()` independent of any
@@ -628,7 +630,7 @@ adapter (reasoning split, thinkleak, truncation detection) and a tool-capable
 turn, instead of reimplementing the parsing half. It refuses `--resume` (each
 run is a fresh child session) and requires a message (there is no interactive
 form to fall back to).
-`telegram`, `serve`, `ask`, `boot`, `project`, and `health` are the whole
+`telegram`, `serve`, `ask`, `boot`, `tool`, and `health` are the whole
 command tree. The one bound listener is the read-only web dash on
 `127.0.0.1:<dash_port>` (see the commands section); there is no command that
 EXPOSES it beyond loopback (a tunnel is the dash-exposing skill's job) or
@@ -658,7 +660,7 @@ assistants, and automated tools.
 ## Project Layout
 
 ```
-cmd/shell3/            cobra command tree: root (prints help) + telegram/serve/ask/boot/project/health subcommands
+cmd/shell3/            cobra command tree: root (prints help) + telegram/serve/ask/boot/tool/health subcommands
 internal/agentsetup/   shared config assembly (BuildParts → chat.Config) used by every front-end
 internal/config/       config-directory loader: lifts the kit's shell3: wiring through the strict YAML parser, reads .env + cron/*.md, owns tool schemas, the skill scan, the context: resolver, and gate/note execution
 internal/bootstrap/    first-run global + project setup
