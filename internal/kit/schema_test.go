@@ -7,7 +7,7 @@ import (
 
 func TestToolSchema(t *testing.T) {
 	tool := Tool{
-		Name: "stack-check",
+		Name: "page-kind",
 		Desc: "Classify a site's stack",
 		Params: map[string]Param{
 			"url":     {Type: "string", Required: true, Desc: "homepage URL"},

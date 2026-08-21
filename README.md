@@ -14,21 +14,21 @@ it lives in one file:
 
 ```sh
 #---
-# agent: leads
+# agent: bookmarks
 # use: [bash, web]
 #---
-leads_prompt() { cat <<'EOF'
-One tick = one niche. Judge each candidate yourself.
+bm_prompt() { cat <<'EOF'
+One tick = one batch of saved links. Judge each page yourself.
 EOF
 }
 
 #---
-# tool: stack-check
-# description: Classify a site's stack — wp_wc, shopify, wp_only, none
+# tool: page-kind
+# description: Classify a saved link — article, wiki, shop, dead
 # params:
 #   url: {type: string, required: true}
 #---
-leads_stack_check() { curl -sL "$url" | rg -o 'wp-content|cdn\.shopify\.com'; }
+bm_page_kind() { curl -sL "$url" | rg -o '<article|mw-content-text|add-to-cart'; }
 ```
 
 That tool is a real tool: the model sees its description, calls it with

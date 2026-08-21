@@ -64,7 +64,7 @@ func TestNewSession_RecordsCronJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := st.NewSession(Meta{Agent: "ampd-leads", CronJob: "ampd-tick"})
+	id, err := st.NewSession(Meta{Agent: "bookmarks", CronJob: "bookmarks-tick"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,8 +72,8 @@ func TestNewSession_RecordsCronJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.CronJob != "ampd-tick" {
-		t.Fatalf("CronJob = %q, want ampd-tick", got.CronJob)
+	if got.CronJob != "bookmarks-tick" {
+		t.Fatalf("CronJob = %q, want bookmarks-tick", got.CronJob)
 	}
 }
 

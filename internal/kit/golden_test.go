@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-func TestParseAmpdFixture(t *testing.T) {
-	src, err := os.ReadFile("testdata/ampd.sh")
+func TestParseBookmarksFixture(t *testing.T) {
+	src, err := os.ReadFile("testdata/bookmarks.sh")
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
@@ -16,31 +16,31 @@ func TestParseAmpdFixture(t *testing.T) {
 		t.Fatalf("Parse: %v", err)
 	}
 	if len(k.Agents) != 2 {
-		t.Fatalf("agents = %d, want 2 (main, ampd-leads)", len(k.Agents))
+		t.Fatalf("agents = %d, want 2 (main, bookmarks)", len(k.Agents))
 	}
 
-	ampd := k.Agents[1]
-	if ampd.Name != "ampd-leads" || ampd.Model != "sonnet" {
-		t.Fatalf("agent[1] = %+v", ampd)
+	bm := k.Agents[1]
+	if bm.Name != "bookmarks" || bm.Model != "sonnet" {
+		t.Fatalf("agent[1] = %+v", bm)
 	}
-	if len(ampd.Tools) != 1 || len(ampd.Tests) != 1 || len(ampd.Skills) != 1 {
-		t.Fatalf("ampd tools/tests/skills = %d/%d/%d, want 1/1/1",
-			len(ampd.Tools), len(ampd.Tests), len(ampd.Skills))
+	if len(bm.Tools) != 1 || len(bm.Tests) != 1 || len(bm.Skills) != 1 {
+		t.Fatalf("bm tools/tests/skills = %d/%d/%d, want 1/1/1",
+			len(bm.Tools), len(bm.Tests), len(bm.Skills))
 	}
-	if ampd.Tools[0].Func != "ampd_stack_check" {
-		t.Fatalf("stack-check binds %q", ampd.Tools[0].Func)
+	if bm.Tools[0].Func != "bm_page_kind" {
+		t.Fatalf("page-kind binds %q", bm.Tools[0].Func)
 	}
 
 	// The test block must bind its own function, not the tool's — this is the
 	// binding-ceiling behaviour on a realistic file.
-	if ampd.Tests[0].Func != "ampd_test_stack_check" {
-		t.Fatalf("test binds %q, want ampd_test_stack_check", ampd.Tests[0].Func)
+	if bm.Tests[0].Func != "bm_test_page_kind" {
+		t.Fatalf("test binds %q, want bm_test_page_kind", bm.Tests[0].Func)
 	}
 
-	schema := ampd.Tools[0].Schema()
+	schema := bm.Tools[0].Schema()
 	req, _ := schema["required"].([]string)
 	if len(req) != 1 || req[0] != "url" {
-		t.Fatalf("stack-check required = %v, want [url]", req)
+		t.Fatalf("page-kind required = %v, want [url]", req)
 	}
 	props, _ := schema["properties"].(map[string]any)
 	timeout, _ := props["timeout"].(map[string]any)
@@ -59,7 +59,7 @@ func TestFixtureIsValidBash(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
 	}
-	out, err := exec.Command("bash", "-n", "testdata/ampd.sh").CombinedOutput()
+	out, err := exec.Command("bash", "-n", "testdata/bookmarks.sh").CombinedOutput()
 	if err != nil {
 		t.Fatalf("bash -n failed: %v\n%s", err, out)
 	}

@@ -80,40 +80,40 @@ EOF
 
 #---
 # agent: leads
-# description: finds UK/IE shops that need SEO help
+# description: keeps my saved links tidy
 # model: main
-# workdir: ~/leads
+# workdir: ~/bookmarks
 # context: [memory.md]
 # use: [bash, web]
 #---
-leads_prompt() { cat <<'EOF'
-One tick = one niche. Judge each candidate yourself. Write what you
-learned to memory.md before you finish.
+bm_prompt() { cat <<'EOF'
+One tick = one batch of saved links. Judge each page yourself. Write what
+you learned to memory.md before you finish.
 EOF
 }
 
 #---
-# tool: stack-check
-# description: Classify a site's stack — wp_wc, shopify, wp_only, none
+# tool: page-kind
+# description: Classify a saved link — article, wiki, shop, dead
 # params:
 #   url:     {type: string, required: true, description: homepage URL}
 #   timeout: {type: int, default: 20}
 #---
-leads_stack_check() {
+bm_page_kind() {
   local html
   html=$(curl -sL --max-time "$timeout" "$url") || return 1
-  if   grep -q 'cdn\.shopify\.com'     <<<"$html"; then echo shopify
-  elif grep -q '/plugins/woocommerce/' <<<"$html"; then echo wp_wc
-  elif grep -q 'wp-content'            <<<"$html"; then echo wp_only
-  else echo none; fi
+  if   grep -q 'id="mw-content-text"' <<<"$html"; then echo wiki
+  elif grep -q 'add-to-cart'          <<<"$html"; then echo shop
+  elif grep -q '<article'             <<<"$html"; then echo article
+  else echo dead; fi
 }
 
 #---
 # skill: qualify
 #---
-leads_qualify() { cat <<'EOF'
-A real shop has products with prices, a cart, a company name in the footer.
-An agency has case studies and no cart. Reject agencies and marketplaces.
+bm_skill_qualify() { cat <<'EOF'
+Worth keeping: it says something specific, it names its author, it still
+loads. Drop parked domains, link farms, and signup walls.
 EOF
 }
 
@@ -176,10 +176,10 @@ Debugging by hand uses the same mechanism, with the assignment as a prefix:
 
 ```sh
 source shell3.sh
-url=https://example.com timeout=20 leads_stack_check
+url=https://example.com timeout=20 bm_page_kind
 ```
 
-`leads_stack_check url=…` would pass a positional argument and leave `$url`
+`bm_page_kind url=…` would pass a positional argument and leave `$url`
 unset.
 
 ## Skills

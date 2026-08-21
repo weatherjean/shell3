@@ -16,7 +16,7 @@ func TestCronRollup_SumsByJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 3; i++ {
-		id, err := st.NewSession(runs.Meta{Agent: "ampd-leads", CronJob: "sync"})
+		id, err := st.NewSession(runs.Meta{Agent: "bookmarks", CronJob: "sync"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -24,7 +24,7 @@ func TestCronRollup_SumsByJob(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	id, err := st.NewSession(runs.Meta{Agent: "ampd-leads", CronJob: "ampd-tick"})
+	id, err := st.NewSession(runs.Meta{Agent: "bookmarks", CronJob: "bookmarks-tick"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,8 +43,8 @@ func TestCronRollup_SumsByJob(t *testing.T) {
 	if byJob["sync"].PromptTokens != 51000 || byJob["sync"].Runs != 3 {
 		t.Fatalf("sync rollup = %+v", byJob["sync"])
 	}
-	if byJob["ampd-tick"].CompletionTokens != 3000 {
-		t.Fatalf("tick rollup = %+v", byJob["ampd-tick"])
+	if byJob["bookmarks-tick"].CompletionTokens != 3000 {
+		t.Fatalf("tick rollup = %+v", byJob["bookmarks-tick"])
 	}
 }
 

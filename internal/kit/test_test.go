@@ -15,33 +15,33 @@ EOF
 }
 
 #---
-# tool: stack-check
+# tool: page-kind
 # description: classify a stack
 # params:
 #   url:     {type: string, required: true}
 #   timeout: {type: int, default: 20}
 #---
-a_stack_check() {
+a_page_kind() {
   local html
   html=$(curl -sL --max-time "$timeout" "$url")
-  if   grep -q 'shopify'   <<<"$html"; then echo shopify
-  elif grep -q 'woocommerce' <<<"$html"; then echo wp_wc
-  else echo none; fi
+  if   grep -q 'mw-content-text' <<<"$html"; then echo wiki
+  elif grep -q '<article'        <<<"$html"; then echo article
+  else echo dead; fi
 }
 
 #---
-# test: stack-check — classifies each stack
+# test: page-kind — classifies each kind
 #---
-a_test_stack_check() {
+a_test_page_kind() {
   stub curl <<'STUB'
-<link href="/plugins/woocommerce/x.css">
+<article><h1>a post</h1></article>
 STUB
-  assert_eq "$(tool stack-check url=https://x.test)" wp_wc
+  assert_eq "$(tool page-kind url=https://x.test)" article
 
   stub curl <<'STUB'
-<html>a blog</html>
+<html>domain for sale</html>
 STUB
-  assert_eq "$(tool stack-check url=https://x.test)" none
+  assert_eq "$(tool page-kind url=https://x.test)" dead
 }
 `
 

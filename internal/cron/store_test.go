@@ -46,9 +46,9 @@ func (f *fakeRunStore) SaveStatus(st JobStatus) error {
 
 func TestScheduler_RestoresStatusOnStart(t *testing.T) {
 	rs := &fakeRunStore{status: map[string]JobStatus{
-		"ampd-tick": {Name: "ampd-tick", Runs: 12, Failures: 2, LastRun: "2026-08-16T21:29:55Z"},
+		"bookmarks-tick": {Name: "bookmarks-tick", Runs: 12, Failures: 2, LastRun: "2026-08-16T21:29:55Z"},
 	}}
-	jobs := []shell3.CronJob{{Name: "ampd-tick", Schedule: "@every 3h", Agent: "ampd-leads", Prompt: "go"}}
+	jobs := []shell3.CronJob{{Name: "bookmarks-tick", Schedule: "@every 3h", Agent: "bookmarks", Prompt: "go"}}
 	s, err := NewWithStore(&fakeDispatcher{}, &fakeToolRunner{}, rs, jobs)
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +60,7 @@ func TestScheduler_RestoresStatusOnStart(t *testing.T) {
 	// The restored status must not clobber config-derived fields — the
 	// schedule/agent the freshly loaded config declares, not whatever was
 	// serialized alongside the old counts.
-	if got.Schedule != "@every 3h" || got.Agent != "ampd-leads" {
+	if got.Schedule != "@every 3h" || got.Agent != "bookmarks" {
 		t.Fatalf("config fields overwritten by restored status: %+v", got)
 	}
 }
@@ -186,7 +186,7 @@ func TestCronStatus_SurvivesStartupJanitor(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := JobStatus{
-		Name: "ampd-tick", Schedule: "@every 3h", Agent: "ampd-leads",
+		Name: "bookmarks-tick", Schedule: "@every 3h", Agent: "bookmarks",
 		LastRun: "2026-08-16T21:29:55Z", LastOK: true, Runs: 12, Failures: 2,
 	}
 	if err := (StoreRunStore{Store: st}).SaveStatus(want); err != nil {
@@ -211,7 +211,7 @@ func TestCronStatus_SurvivesStartupJanitor(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st2.Close()
-	jobs := []shell3.CronJob{{Name: "ampd-tick", Schedule: "@every 3h", Agent: "ampd-leads", Prompt: "go"}}
+	jobs := []shell3.CronJob{{Name: "bookmarks-tick", Schedule: "@every 3h", Agent: "bookmarks", Prompt: "go"}}
 	s, err := NewWithStore(&fakeDispatcher{}, &fakeToolRunner{}, StoreRunStore{Store: st2}, jobs)
 	if err != nil {
 		t.Fatal(err)
