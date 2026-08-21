@@ -10,9 +10,9 @@ built-in allowlist**. That's the point of a bash-first agent, it composes
 with your whole system. Treat a session the way you'd treat running a script
 someone else wrote.
 
-The opt-in gate is a bash hook script per agent: `hooks/tool-call.sh` for the
-main agent, `hooks/<name>.tool-call.sh` for subagent `<name>`. There is no
-fallback between them; each agent is governed by exactly one script or none.
+The opt-in gate is a bash function the kit declares: a `gate:` block naming
+the agents it governs, bound to the function under it. There is no fallback
+between agents; each is governed by exactly one function or none.
 The script runs before **every** tool (`bash`, `bash_bg`, `edit_file`,
 `read_media`, MCP tools as `mcp_<server>_<tool>`, host tools like
 `send_media_telegram`) with the call as JSON on stdin, and prints a verdict: pass,
@@ -26,14 +26,17 @@ user account.** The hook is a policy gate, not a security boundary.
 ## The armed scaffold gate
 
 A fresh config ships with the gate armed, not as a commented-out example.
-What `hooks/tool-call.sh` refuses, and why:
+What the scaffold's `gate:` function refuses, and why:
 
 - **Credentials** (`.env`, `~/.ssh`, `~/.aws`, `~/.config/gh`, …): blocked
   for read and write, by every tool. A `lib/bin` script reads the one key it
   needs at point of use.
-- **The gate itself** and the wiring (`shell3.sh`, or `shell3.yaml` on a
-  markdown config): readable, not writable. Otherwise
-  "ask the operator to lift this" has an obvious shortcut.
+- **The gate itself**: the refusal text tells the agent not to edit it, but on
+  a kit install **no rule enforces that**. The gate, the wiring and every
+  agent's prompt live in the same `shell3.sh`, which the agent is expected to
+  edit (that is the whole self-evolve loop), so a write rule on that path
+  would block ordinary work. If you want the gate to hold, make the file
+  unwritable at the OS level — see below.
 - **System paths** (`/etc`, `/usr/bin`, `/System`, `~/Library`): writes
   blocked. `/usr/local` and `/opt` are allowed, since installing a tool is
   ordinary work.
@@ -123,8 +126,8 @@ you would treat read access to `~/.shell3` itself, and let it expire.
 
 Say this plainly, because the previous version of this page did not: **the
 agent can rewrite its own gate in two lines of Python.** The rules match shell
-text, and `python3 -c "open('hooks/tool-call.sh','w').write('')"` contains no
-`rm`, no redirect, and no `sed -i`. It sails through.
+text, and `python3 -c "open('shell3.sh','w').write('')"` contains no `rm`, no
+redirect, and no `sed -i`. It sails through.
 
 That is not a bug to patch — every pattern list has this shape. What the gate
 buys is the honest mistake, which is what actually happens when nobody is
@@ -171,11 +174,11 @@ forbidden, and the operator eventually switches it off entirely.
   destructive command your regexes don't catch. Pair with real isolation for
   anything that must not escape.
 
-## Output redaction — `tool-result.sh`
+## Output redaction — `note:`
 
-`hooks/tool-result.sh` (and `hooks/<name>.tool-result.sh`) runs after every
-tool; print `{"output": "…"}` to replace what the model sees, e.g. to redact
-secrets. A failing redactor fails **closed**: the output is replaced by an
+A kit's `note:` block binds a function that runs after every tool for the
+agents it names; print `{"output": "…"}` to replace what the model sees, e.g.
+to redact secrets. A failing redactor fails **closed**: the output is replaced by an
 error notice, never passed through unredacted. Background jobs are out of
 scope, since the hook sees only the "started job…" pointer and not the
 streamed output; redact at the source if a background command can emit
@@ -193,8 +196,8 @@ Structural, always on, not configurable.
 
 ## Secrets
 
-Secrets live in a plain-text `.env` beside the config (`shell3.sh`, or
-`shell3.yaml`), referenced from the wiring as `env:KEY`:
+Secrets live in a plain-text `.env` beside the kit (`shell3.sh`), referenced
+from the wiring as `env:KEY`:
 
 - **Never commit `.env`.** The shipped `.gitignore` excludes it.
 - **Never read or display credential files.** This applies to you and to the

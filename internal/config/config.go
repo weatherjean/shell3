@@ -1,11 +1,13 @@
-// Package config loads the shell3 config directory: shell3.yaml (wiring) +
-// agent.md / agents/*.md (prompts with frontmatter) + skills/ + cron/ +
-// per-agent hooks/*.sh. Prose lives in markdown files, wiring
-// lives in YAML, presence of a file enables its feature, and policy is a bash
-// hook script — there is no embedded config language.
+// Package config loads the shell3 config directory. Its centre is the kit,
+// shell3.sh (parsed by internal/kit): this package lifts the kit's `shell3:`
+// wiring block through the strict YAML parser, reads .env and cron/*.md, and
+// owns the tool schemas, the skill scan, the `context:` resolver, and the
+// gate/note execution the kit declares. Presence of a file enables its
+// feature, and policy is a bash function — there is no embedded config
+// language.
 package config
 
-// Model is one declared model under shell3.yaml `models:`.
+// Model is one declared model under the kit wiring's `models:`.
 type Model struct {
 	Name, BaseURL, APIKey, ModelID string
 	ContextWindow                  int
@@ -38,57 +40,6 @@ type ToolGates struct {
 // entry in the ## Skills index; the agent reads the body at Path (absolute)
 // with `cat` when the skill applies.
 type Skill struct{ Name, Description, Path string }
-
-// AgentCommon holds the fields agents and subagents share: the frontmatter of
-// an agent markdown file plus its body (the prompt).
-type AgentCommon struct {
-	Name, ModelName, Prompt string
-	Gates                   ToolGates
-	// Skills is the scan of the config dir's skills/ (main agent only;
-	// subagents carry none).
-	Skills []Skill
-	// Context is the main agent's `context:` frontmatter: config-dir-relative
-	// paths (globs allowed) whose contents are read AT SESSION CREATION and
-	// appended to the system prompt under `## Context`. Raw entries only —
-	// resolution is late-bound (see ResolveContextFiles / BuildPersonaFor) so a
-	// fresh turn always sees the current file. Main agent only; a subagent
-	// declaring it is a load error.
-	Context []string
-	// MCP is the `mcp:` frontmatter opt-in: the shell3.yaml mcp server names
-	// whose tools this agent gets. MCPAll is the `mcp: all` form. Both
-	// empty/false (the default) means no MCP tools.
-	MCP    []string
-	MCPAll bool
-	// Prune toggles the cheap tool-output-stubbing tier for this agent.
-	// nil (unset) inherits the model's prune_at; false skips pruning entirely.
-	Prune *bool
-}
-
-// Agent is the main agent (agent.md). Subagents lists every registered
-// subagent name (delegation is inferred: non-empty agents/ = task tool on).
-type Agent struct {
-	AgentCommon
-	Subagents []string
-	// ProjectsBrief is the contents of projects.md beside shell3.yaml (""
-	// when absent): the standing Chain of Command portfolio brief, appended
-	// verbatim to the end of the main agent's system prompt. Subagents never
-	// carry one.
-	ProjectsBrief string
-}
-
-// Subagent is a delegatable specialist (one agents/*.md): a non-interactive
-// agent the model can spawn as an in-process background job via the task
-// tool. Description is the model-facing "when to use". No Subagents field:
-// delegation is single-level by construction.
-type Subagent struct {
-	AgentCommon
-	Description string
-	// Workdir is where the manager's shell runs — set only for project
-	// managers (a projects/<name>/ manager.md, where it is the real repo the
-	// manager works in, elsewhere on disk). Empty for ordinary subagents,
-	// which inherit the host's working directory.
-	Workdir string
-}
 
 // TelegramConfig is the parsed `telegram:` block: the bot's credentials and
 // where the agent's shell runs.
@@ -135,7 +86,7 @@ type CronJob struct {
 	Tool string
 }
 
-// MCPServer is one declared server from the shell3.yaml `mcp:` block.
+// MCPServer is one declared server from the wiring's `mcp:` block.
 // Exactly one of Command (stdio) or URL (streamable HTTP) is set — enforced
 // at load.
 type MCPServer struct {
@@ -183,12 +134,8 @@ type LoadedConfig struct {
 	// reviewer's system prompt (the trusted channel). "" = none.
 	ReviewPolicy string
 
-	agent     Agent
-	subagents []Subagent
-
 	// kitMainAgent is the kit's first agent when a kit installed its gates
-	// (SetKitHooks). It keys to "" in the hook maps, like the markdown config's
-	// main agent — see hookKey.
+	// (SetKitHooks). It keys to "" in the hook maps — see hookKey.
 	kitMainAgent string
 
 	mcpServers []MCPServer
@@ -211,10 +158,6 @@ type LoadedConfig struct {
 // Empty on a clean load.
 func (c *LoadedConfig) Warnings() []string { return c.warnings }
 
-// Close releases config resources. The declarative config holds none; the
-// method exists so the loader's lifecycle matches what front-ends expect.
-func (c *LoadedConfig) Close() {}
-
 // Dir returns the absolute config directory this config was loaded from.
 func (c *LoadedConfig) Dir() string { return c.dir }
 
@@ -227,38 +170,14 @@ func (c *LoadedConfig) Model(name string) (Model, bool) {
 	return Model{}, false
 }
 
-// Agents returns the main agent as a one-element slice (there is exactly one
-// agent.md; the slice shape keeps list-style call sites simple).
-func (c *LoadedConfig) Agents() []Agent { return []Agent{c.agent} }
-
-// AgentByName returns the main agent when name matches it.
-func (c *LoadedConfig) AgentByName(name string) (Agent, bool) {
-	if c.agent.Name == name {
-		return c.agent, true
-	}
-	return Agent{}, false
-}
-
-// FirstAgent returns the main agent (the default when a caller doesn't name
-// one). Load guarantees it exists.
-func (c *LoadedConfig) FirstAgent() Agent { return c.agent }
-
-// Subagents returns a copy of the registered subagents in filename order.
-func (c *LoadedConfig) Subagents() []Subagent {
-	out := make([]Subagent, len(c.subagents))
-	copy(out, c.subagents)
-	return out
-}
-
-// SubagentByName returns the subagent for name — declared by agents/<name>.md
-// or a project manager (projects/<name>/manager.md).
-func (c *LoadedConfig) SubagentByName(name string) (Subagent, bool) {
-	for _, s := range c.subagents {
+// HasMCPServer reports whether the wiring declares an mcp server by that name.
+func (c *LoadedConfig) HasMCPServer(name string) bool {
+	for _, s := range c.mcpServers {
 		if s.Name == name {
-			return s, true
+			return true
 		}
 	}
-	return Subagent{}, false
+	return false
 }
 
 // Telegram returns the parsed `telegram:` block (zero value if absent).

@@ -119,35 +119,3 @@ func TestKitNoteRewritesToolResults(t *testing.T) {
 		t.Errorf("tool result = %q, want the note's rewrite", got)
 	}
 }
-
-// Both forms for one agent is a load error, not a silent precedence rule: a
-// config with both is a half-finished migration, and picking a winner hides
-// exactly the case where someone believes a gate runs and it does not.
-func TestKitGateAndHookFileCollide(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "shell3.sh"), []byte(gateKit), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("K=x\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(dir, "hooks"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "hooks", "tool-call.sh"), []byte("printf '{}'\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	_, cleanup, err := agentsetup.BuildParts(agentsetup.Options{
-		ConfigDir: dir, CWD: dir, HomeDir: t.TempDir(),
-	})
-	if cleanup != nil {
-		cleanup()
-	}
-	if err == nil {
-		t.Fatal("a kit gate plus a hooks/tool-call.sh loaded without complaint")
-	}
-	if !strings.Contains(err.Error(), "both") {
-		t.Errorf("error does not name the collision: %v", err)
-	}
-}

@@ -15,7 +15,7 @@ const emptyKeep = time.Hour
 // Sweep deletes sessions whose recency (last_at) is older than
 // now.Add(-keep), plus empty trash sessions past their grace window, and
 // drops thread entries pointing at sessions that no longer exist. keep<=0 is
-// a deliberate "keep forever" (the shell3.yaml runs_keep_days: 0 case): no
+// a deliberate "keep forever" (the runs_keep_days: 0 case): no
 // session with stored content is ever removed then.
 //
 // Returns the removed session ids and the number of stale thread entries

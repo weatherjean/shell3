@@ -2,6 +2,7 @@ package agentsetup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,13 +12,15 @@ import (
 	"testing"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/weatherjean/shell3/internal/chat"
 )
 
-// writeMCPTree writes a config tree into ~/.shell3 under a temp home:
-// wiringYAML (the model + the given mcp/agent frontmatter pieces) as
-// shell3.yaml, agent.md with the given frontmatter mcp opt-in, and optionally
-// a subagent.
-func writeMCPTree(t *testing.T, yamlText, agentMD string, extra map[string]string) (configDir, cwd, home string) {
+// writeMCPTree writes a kit into ~/.shell3 under a temp home: wiringYAML
+// becomes the kit's `shell3:` block, mainOpts are extra frontmatter lines on
+// the main agent (the mcp: opt-in), and employee, when non-empty, adds a
+// second agent by that name with no opt-in.
+func writeMCPTree(t *testing.T, wiring string, mainOpts []string, employee string) (configDir, cwd, home string) {
 	t.Helper()
 	home = t.TempDir()
 	cwd = t.TempDir()
@@ -25,18 +28,22 @@ func writeMCPTree(t *testing.T, yamlText, agentMD string, extra map[string]strin
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	files := map[string]string{"shell3.yaml": yamlText, "agent.md": agentMD}
-	for k, v := range extra {
-		files[k] = v
+	var b strings.Builder
+	b.WriteString("#---\n# shell3:\n")
+	for _, line := range strings.Split(strings.TrimRight(wiring, "\n"), "\n") {
+		b.WriteString("#   " + line + "\n")
 	}
-	for name, body := range files {
-		fp := filepath.Join(configDir, name)
-		if err := os.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(fp, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
+	b.WriteString("#---\n\n#---\n# agent: main\n# model: m\n")
+	for _, o := range mainOpts {
+		b.WriteString("# " + o + "\n")
+	}
+	b.WriteString("#---\nmain_prompt() { cat <<'SHELL3_EOF'\np\nSHELL3_EOF\n}\n")
+	if employee != "" {
+		b.WriteString("\n#---\n# agent: " + employee + "\n# description: d\n# model: m\n#---\n" +
+			employee + "_prompt() { cat <<'SHELL3_EOF'\np\nSHELL3_EOF\n}\n")
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "shell3.sh"), []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
 	}
 	return configDir, cwd, home
 }
@@ -56,9 +63,7 @@ func TestMCPWiringLiveServer(t *testing.T) {
 	t.Cleanup(hs.Close)
 
 	yamlText := wiringBase + fmt.Sprintf("mcp:\n  fake: { url: %q }\n", hs.URL)
-	configDir, cwd, home := writeMCPTree(t, yamlText,
-		"---\nmodel: m\ntools: [bash]\nmcp: all\n---\np\n",
-		map[string]string{"agents/s.md": "---\ndescription: d\n---\np\n"})
+	configDir, cwd, home := writeMCPTree(t, yamlText, []string{"use: [bash]", "mcp: all"}, "s")
 	p, cleanup, err := BuildParts(Options{ConfigDir: configDir, CWD: cwd, HomeDir: home})
 	if err != nil {
 		t.Fatal(err)
@@ -86,18 +91,18 @@ func TestMCPWiringLiveServer(t *testing.T) {
 		t.Error("mcp_fake_echo not routed to host-tool dispatch")
 	}
 
-	// Subagent did NOT opt in: no MCP tools, no host routing.
+	// The employee did NOT opt in: no MCP tools, no host routing.
 	srt, err := p.AgentRuntime("s")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, d := range srt.Personality.Tools {
 		if strings.HasPrefix(d.Name, "mcp_") {
-			t.Errorf("subagent must not get MCP tools, has %q", d.Name)
+			t.Errorf("employee must not get MCP tools, has %q", d.Name)
 		}
 	}
 	if srt.HostToolNames["mcp_fake_echo"] {
-		t.Error("subagent must not host-route MCP tools")
+		t.Error("employee must not host-route MCP tools")
 	}
 
 	// Dispatch through the session config's HostTool round-trips the call.
@@ -132,7 +137,7 @@ func TestMCPWiringLiveServer(t *testing.T) {
 
 func TestMCPWiringDownServer(t *testing.T) {
 	yamlText := wiringBase + "mcp:\n  dead: { command: [\"/nonexistent-mcp-server-xyz\"], timeout: 2 }\n"
-	configDir, cwd, home := writeMCPTree(t, yamlText, "---\nmodel: m\nmcp: all\n---\np\n", nil)
+	configDir, cwd, home := writeMCPTree(t, yamlText, []string{"mcp: all"}, "")
 	p, cleanup, err := BuildParts(Options{ConfigDir: configDir, CWD: cwd, HomeDir: home})
 	if err != nil {
 		t.Fatalf("down server must not fail the build: %v", err)
@@ -165,7 +170,7 @@ func TestMCPWiringDownServer(t *testing.T) {
 }
 
 func TestMCPWiringAbsent(t *testing.T) {
-	configDir, cwd, home := writeMCPTree(t, wiringBase, "---\nmodel: m\n---\np\n", nil)
+	configDir, cwd, home := writeMCPTree(t, wiringBase, nil, "")
 	p, cleanup, err := BuildParts(Options{ConfigDir: configDir, CWD: cwd, HomeDir: home})
 	if err != nil {
 		t.Fatal(err)
@@ -178,7 +183,12 @@ func TestMCPWiringAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.HostTool != nil {
-		t.Error("no MCP block must leave cfg.HostTool nil (RegisterHostTool owns it)")
+	// The kit's own tool dispatcher always owns HostTool; with no MCP block
+	// and no declared tools, every name falls through to ErrHostToolNotFound.
+	if cfg.HostTool == nil {
+		t.Fatal("cfg.HostTool should be the kit dispatcher")
+	}
+	if _, err := cfg.HostTool(context.Background(), "mcp_fake_echo", `{}`); !errors.Is(err, chat.ErrHostToolNotFound) {
+		t.Errorf("unowned name err = %v, want ErrHostToolNotFound", err)
 	}
 }

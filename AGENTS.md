@@ -43,14 +43,16 @@ rewrite — bash tools only; nonzero exit, bad JSON or a 10s timeout fails
 closed; there is NO ask verdict). `note:` rewrites a tool's result (stdin
 `{"name","args","output"}`, stdout `{"output":…}`) and is advice, never a
 refusal. An agent no `gate:` names runs UNGATED, with no fallback between
-agents. Execution rides the same path as the markdown config's hook files:
-`config.hookRef` is either a script path or a (kit, function) pair, and
-`SetKitHooks` installs the kit's — declaring BOTH forms for one agent is a
-load error, since a silent winner hides a half-finished migration. The
-scaffold's gate ships armed: four hard refusals, all irreversible and none
-of them the work (machine destruction, credentials, stopping shell3, edits
-to the gate), plus two judgment calls demoted to `review` (unread remote
-code, publishing); everything else runs, including deletion. It is a speed
+agents. `config.hookRef` is a (kit, function) pair installed by
+`SetKitHooks`; running one sources the kit and calls the function, which is
+safe precisely because a kit is definitions-only. The scaffold's gate ships
+armed: four hard refusals, all irreversible and none
+of them the work (machine destruction, credentials, stopping shell3, writes
+to a leftover hooks/*.sh or shell3.yaml), plus two judgment calls demoted to
+`review` (unread remote code, publishing); everything else runs, including
+deletion. NOTE: the "do not edit the gate" refusal text is advice only on a
+kit install — the gate shares shell3.sh with every agent prompt, which the
+agent edits as ordinary work, so no write rule can cover it. It is a speed
 bump by construction — the agent can rewrite it in two lines of Python — so
 real protection is filesystem-level (a dedicated user, `chflags
 uchg`/`chattr +i`, a container).
@@ -103,12 +105,16 @@ stays its own surface (frontmatter `schedule` + exactly one of `agent`/`tool`
 schedule binds an (agent, prompt) pair and one employee commonly has several.
 `shell3 tool check|run|test <kit>` is the author's loop.
 
-The older **markdown config** — `shell3.yaml` + `agent.md` + `agents/<name>.md`
-+ `skills/` + `hooks/*.sh` — still loads when no `shell3.sh` is present, and
-`docs/configuration.md` documents it. There are no migration shims: an
-unknown key is simply an unknown-key load error. (`notifier.md`, the old
-triage persona, is gone with the mail model — a leftover file loads with a
-warning naming the removal.)
+The kit is the ONLY config format. The older markdown config (`shell3.yaml` +
+`agent.md` + `agents/<name>.md` + `hooks/*.sh`) was deleted 2026-08-20: a
+directory with no `shell3.sh` fails to load, naming the file to create, and a
+leftover `shell3.yaml` is not consulted. There are no migration shims and no
+fallback — `config.Load` lifts the kit's `shell3:` block through the strict
+YAML parser (`config.readWiring`) and reads `.env` + `cron/*.md`; everything
+else about an agent comes from `internal/kit` via `agentsetup`. Dropped with
+it: per-agent `prune:` (the model-level `prune_at` remains), `projects.md`
+and the Chain-of-Command brief, and load-time validation of `context:` paths
+(`shell3 health` does it, against each agent's own workdir).
 
 **Bash-first.** The agent's verbs are `bash`, `bash_bg`, and `edit_file` (plus
 `read_media` — attach an image, audio, or PDF file so a multimodal
@@ -240,8 +246,8 @@ subagent is never given the `task` tool (subagent frontmatter has no way to
 express delegation), so subagents can't spawn subagents; there is no depth
 field anywhere. Delegation itself is **inferred**: the four task-family tools
 (`task`, `task_list`, `task_status <id>`, `task_cancel <id>`; ids like
-`sub1`/`bg1`) are advertised iff `agents/` is non-empty — a file in `agents/`
-IS the registration, there is no toggle and no allowlist key.
+`sub1`/`bg1`) are advertised iff the kit declares an employee — the `agent:`
+block IS the registration, there is no toggle and no allowlist key.
 
 The dash's index lists running + finished jobs; `/superstop` kills them all
 (`Session.KillAllForStop`: snapshot, mark each job `suppress`, cancel — the
@@ -250,13 +256,12 @@ one superstop summary replaces N ⚠️ posts and owner mails; a normal
 `KillJob` still routes). The
 job-progress stream is `rt.JobEvents()` / `Session.JobEvents()`. Note `Session.Jobs()` reports the whole job runtime,
 not one session's share — filter by `JobInfo.ParentID` for per-session
-work. The shell is **unrestricted except by the hook**;
-the opt-in gate is a **per-agent bash function or script**: a kit declares
-`gate: [names]` in `shell3.sh`, a markdown config uses `hooks/tool-call.sh`
-(main) and `hooks/<name>.tool-call.sh` (subagent `<name>`) — no fallback, no
-chaining, and both forms for one agent is a load error; an agent with no script runs ungated (a `<name>`
-matching no subagent is a warning; `shell3 health` fails on it). The script
-runs before **every** tool as `bash <path>` (cwd = config dir, 10s timeout)
+work. The shell is **unrestricted except by the gate**;
+the opt-in gate is a **per-agent bash function**: the kit declares
+`gate: [names]` and binds the function under it — no fallback, no chaining;
+an agent no block names runs ungated, and a `gate:`/`note:` naming an agent
+the kit does not declare is a load error. The function
+runs before **every** tool (cwd = config dir, 10s timeout)
 with JSON on stdin — `{"name", "command" (bash text for the two bash tools,
 null otherwise), "args", "headless" (true when no human is attached —
 subagents, cron)}` — and prints a verdict: empty/`{}`
@@ -269,19 +274,19 @@ unattended, where an ask is a denial with a delay — a legacy hook printing
 `{"ask": …}` fails closed with a reason naming the removal, never silently
 allows. Precedence when several keys are set: block > review > argv >
 command.
-Nonzero exit, malformed JSON, or timeout **fails closed**. `hooks/tool-result.sh` /
-`hooks/<name>.tool-result.sh` can rewrite a tool's output (e.g. redact
-secrets): stdin `{"name","args","output"}`, stdout `{"output": …}`; a failure
-here also fails closed (output replaced by an error notice, never passed
-through unredacted). **The scaffold's gates ship armed** (`internal/scaffold`,
-covered by `internal/scaffold/hooks_test.go`, which drives the shipped scripts
-with real payloads): credential paths, system-path writes, force-pushes,
-self-termination, and edits to the gate scripts are refused, and unread
-remote code and publishing soft-deny to the reviewer; everything else runs. They never ask — shell3 mostly runs unattended,
+Nonzero exit, malformed JSON, or timeout **fails closed**. A `note:` function
+can rewrite a tool's output (e.g. redact secrets): stdin
+`{"name","args","output"}`, stdout `{"output": …}`; a failure here also fails
+closed (output replaced by an error notice, never passed through
+unredacted). **The scaffold's gate ships armed** (`internal/scaffold`,
+covered by `internal/scaffold/hooks_test.go`, which sources the shipped kit
+and drives its gate with real payloads): credential paths, system-path
+writes, force-pushes and self-termination are refused, and unread
+remote code and publishing soft-deny to the reviewer; everything else runs. It never asks — shell3 mostly runs unattended,
 where an ask parks the turn until it times out and denies anyway — and every
 refusal instructs the model not to work around it but to raise it with the
-operator (a subagent's refusal tells it to stop and hand up to the main agent
-instead).
+operator (an employee's refusal tells it to stop and hand up to the main
+agent instead).
 
 `edit_file`'s file I/O lives in `internal/edittool` (plain direct-disk
 functions); `bash` always hits disk directly. Skills are **dir-based**: every
@@ -296,10 +301,11 @@ scaffold's `scripting` skill; a script that needs a secret reads the one key
 it needs from `.env` itself at point of use, so secrets never enter the
 conversation or the agent environment. External tool servers come in over
 **MCP** (`internal/mcp`, official go-sdk, tools only — stdio + streamable
-HTTP, no OAuth/resources/prompts/SSE): the `mcp:` block in `shell3.yaml`
+HTTP, no OAuth/resources/prompts/SSE): the `mcp:` block in the kit wiring
 (`command:` argv or `url:` + `headers:`; per-server `timeout`, `allow`/`deny`
-tool filters), opted into per agent via frontmatter `mcp: [name, …]` or
-`mcp: all` (omitted = none). Servers connect synchronously in BuildParts
+tool filters), opted into per agent via the `agent:` block's `mcp: [name, …]`
+or `mcp: all` (omitted = none; an opt-in naming an undeclared server is a
+load error). Servers connect synchronously in BuildParts
 (parallel, per-server timeout; down server = warning + tools absent, never a
 build failure; the Manager's Close rides the Parts closer stack so /reload
 reconnects fresh). Tools surface as `mcp_<server>_<tool>` in the opted
@@ -326,7 +332,7 @@ compacts automatically and the dash index reports usage.
 and cron. The chat has **no listener** — the process long-polls the Bot API
 outbound, so there is no login and no tunnel; the ONE listener is the
 read-only web dash on `127.0.0.1:<dash_port>` (see the commands section). The `telegram:` block in
-`shell3.yaml` is `token` (an `env:TELEGRAM_TOKEN` reference like every other
+the kit wiring is `token` (an `env:TELEGRAM_TOKEN` reference like every other
 secret), `chat_id` (the single chat the bot answers — updates from anywhere
 else are dropped before a turn starts, filtered in `handleMsg`),
 `allow_from` (the Telegram
@@ -490,8 +496,8 @@ Telegram-specific code. Restriction policy is the hook script, not a tools
 list.
 
 An in-process cron scheduler (`internal/cron`, jobs are `cron/<name>.md`
-files; each job dispatches its declared agent — a subagent from `agents/`, or
-a project's `manager.md`, which then runs in that project's workdir — from a
+files; each job dispatches its declared agent — any agent the kit declares,
+running in that agent's own `workdir:` when it has one — from a
 hidden pinned "cron" parent session that is the dispatch parent + the jobs/runs
 source but runs NO turns of its own and is never woken; a run's result is
 a task report carrying the job name (`DispatchOpts.CronJob`) and the job's
@@ -514,10 +520,10 @@ turn is around to judge or relay its result — posts its own outcome: silent
 on a NO_REPLY/empty result (the point of scheduling an idempotent sync every
 30 minutes), `⏰ <job>: <result>` otherwise, `⚠️ <job> failed: <error>` on
 error, capped at the foreground bash timeout (120s). `shell3 health` fails a
-`tool:` job naming an undeclared tool, one requiring a param (a tool job
-passes none), or one in a markdown config with no kit to resolve against
-(`config.Load` itself refuses that last case, since it can never be
-satisfied).
+`tool:` job naming an undeclared tool or one requiring a param (a tool job
+passes none), and an `agent:` job naming an agent the kit does not declare —
+nothing else checks that, so a typo would otherwise surface as a failed
+dispatch on the first tick.
 
 Every session records `sessions.agent` (the agent that ran it) and
 `sessions.cron_job` (the cron job that started it, `''` for a front-end or
@@ -564,7 +570,7 @@ user_version`; a database whose stamp doesn't match the running binary is
 disposable by design, so there are no migrations.
 
 A **runs janitor** runs once at `shell3 telegram`/`shell3 serve` startup
-(never on `ask`): `runs_keep_days` (top-level `shell3.yaml` key, default 30,
+(never on `ask`): `runs_keep_days` (top-level wiring key, default 30,
 `0` = keep forever) deletes sessions whose `last_at` is past the cutoff —
 rows, FTS entries, thread entries, and job-log dirs together — plus empty
 crash leftovers and orphaned `runs/<id>/` dirs (pre-database leftovers),
@@ -576,8 +582,8 @@ from a previous process can still be live at startup; recent ones may be a
 concurrent `ask`). SQL in `runs.Sweep`, on its own connection (the runtime's store is
 already open by then — the sweep does not need it closed), before the bot
 starts polling. A sibling **media janitor** (`internal/mediadir`) runs the
-same start-time-only shape, gated by `media_keep_days` (top-level
-`shell3.yaml` key, default 0 = keep forever, so this is opt-in): deletes
+same start-time-only shape, gated by `media_keep_days` (top-level wiring
+key, default 0 = keep forever, so this is opt-in): deletes
 regular files in the media dir past the cutoff — chat uploads and anything
 a wrapper script saved there, since none are distinguished from each other
 by the sweep. A swept file's stored path in an old transcript no longer
@@ -609,7 +615,7 @@ no message = an interactive multi-turn loop; `-p` for headless; `--resume`
 continues the latest session; host-agnostic — reads nothing from the
 `telegram:` block, and installs no CompletionHost, so its verbose view sees
 every completion raw). `--agent <name>` is its scripting seam
-(`cmd/shell3/askagent.go`): one headless turn of a subagent from `agents/`
+(`cmd/shell3/askagent.go`): one headless turn of a kit-declared employee
 via `Session.Dispatch`, printing ONLY the reply on stdout (diagnostics to
 stderr), waiting for Done && !ChildOpen so a lingering bash_bg can't truncate
 it, exiting nonzero on a failed or empty run. It exists so batch scripts stop
@@ -637,12 +643,12 @@ with two config dirs instead.
 ## IMPORTANT: Do Not Read Credential Files
 
 Secrets and credentials (provider API keys, tool tokens) live in a plain
-`.env` file beside the active `shell3.yaml` (e.g. `~/.shell3/.env`),
-referenced from YAML as `env:KEY`. Never read, display, or include the
+`.env` file beside the active `shell3.sh` (e.g. `~/.shell3/.env`),
+referenced from the wiring as `env:KEY`. Never read, display, or include the
 contents of any credential file in a response. This applies to all agents,
 assistants, and automated tools.
 
-- `.env` beside `shell3.yaml` (e.g. `~/.shell3/.env`) — provider API keys,
+- `.env` beside `shell3.sh` (e.g. `~/.shell3/.env`) — provider API keys,
   base URLs, tool secrets
 
 ## Project Layout
@@ -650,10 +656,10 @@ assistants, and automated tools.
 ```
 cmd/shell3/            cobra command tree: root (prints help) + telegram/serve/ask/boot/project/health subcommands
 internal/agentsetup/   shared config assembly (BuildParts → chat.Config) used by every front-end
-internal/config/       config-directory loader (shell3.yaml + agent/subagent/project/skill/cron markdown + hooks/*.sh) + system-prompt assembly
+internal/config/       config-directory loader: lifts the kit's shell3: wiring through the strict YAML parser, reads .env + cron/*.md, owns tool schemas, the skill scan, the context: resolver, and gate/note execution
 internal/bootstrap/    first-run global + project setup
 internal/kit/          the kit parser/executor: scan, decl, funcs, exec, harness, persona (shell3.sh)
-internal/scaffold/     embedded starter config tree (defaults/base) + boot rendering
+internal/scaffold/     embedded starter config tree (defaults/base: the kit template, skills/, cron/, lib/) + boot rendering
 internal/adapter/openai/  OpenAI-compatible LLM adapter
 internal/modelproxy/   run_proxy spawner (starts a model's proxy command on activation)
 internal/paths/        global (~/.shell3/) + local (.shell3_project/) path resolution

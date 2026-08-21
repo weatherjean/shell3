@@ -32,12 +32,42 @@ func writeConfigTree(t *testing.T, dir string, files map[string]string) {
 	}
 }
 
-const integYAML = `models:
-  m:
-    base_url: https://api.example.com/v1
-    api_key: sk-test
-    model: x
+// integWiring is the `shell3:` block every kit below opens with.
+const integWiring = `#---
+# shell3:
+#   models:
+#     m:
+#       base_url: https://api.example.com/v1
+#       api_key: sk-test
+#       model: x
+#---
 `
+
+// integAgent declares one agent named main.
+const integAgent = `
+#---
+# agent: main
+# model: m
+# use: [bash, read]
+#---
+main_prompt() { cat <<'SHELL3_EOF'
+you are a test agent
+SHELL3_EOF
+}
+`
+
+// loadKitConfig writes body as the config dir's kit, loads it, and installs
+// the kit's gate/note the way agentsetup.LoadKit does on the real path.
+func loadKitConfig(t *testing.T, dir, body string, gates, notes map[string]string) *config.LoadedConfig {
+	t.Helper()
+	writeConfigTree(t, dir, map[string]string{config.KitFileName: body})
+	lc, err := config.Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	lc.SetKitHooks(filepath.Join(dir, config.KitFileName), "main", gates, notes)
+	return lc
+}
 
 // TestConfigIntegration_ToolCallHooks loads a config tree with a tool-call +
 // tool-result hook and drives full chat turns through the turn loop using
@@ -45,34 +75,31 @@ const integYAML = `models:
 // redact, non-bash gating).
 func TestConfigIntegration_ToolCallHooks(t *testing.T) {
 	dir := t.TempDir()
-	writeConfigTree(t, dir, map[string]string{
-		"shell3.yaml": integYAML,
-		"agent.md":    "---\nmodel: m\ntools: [bash]\n---\nyou are a test agent\n",
-		// The gate: block rm -rf /, block reads of .env by args, else pass.
-		"hooks/tool-call.sh": `
-in=$(cat)
-case "$in" in
-  *'rm -rf /'*) printf '{"block": true, "reason": "dangerous"}'; exit 0 ;;
-esac
-case "$in" in
-  *'"name":"read"'*.env*) printf '{"block": true, "reason": "no reading .env"}'; exit 0 ;;
-esac
-exit 0
-`,
-		// The redactor: strip SECRET-TOKEN from every tool's output.
-		"hooks/tool-result.sh": `
-in=$(cat)
-if printf '%s' "$in" | grep -q 'SECRET-TOKEN'; then
-  printf '{"output": "[redacted]"}'
-fi
-`,
-	})
+	lc := loadKitConfig(t, dir, integWiring+integAgent+`
+#---
+# gate: [main]
+#---
+main_gate() {
+  in=$(cat)
+  case "$in" in
+    *'rm -rf /'*) printf '{"block": true, "reason": "dangerous"}'; exit 0 ;;
+  esac
+  case "$in" in
+    *'"name":"read"'*.env*) printf '{"block": true, "reason": "no reading .env"}'; exit 0 ;;
+  esac
+  exit 0
+}
 
-	lc, err := config.Load(dir)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	defer lc.Close()
+#---
+# note: [main]
+#---
+main_note() {
+  in=$(cat)
+  if printf '%s' "$in" | grep -q 'SECRET-TOKEN'; then
+    printf '{"output": "[redacted]"}'
+  fi
+}
+`, map[string]string{"main": "main_gate"}, map[string]string{"main": "main_note"})
 
 	ctx := context.Background()
 
@@ -80,14 +107,14 @@ fi
 	if !lc.HasToolCall() {
 		t.Fatal("expected a tool-call hook to be discovered")
 	}
-	v := lc.RunToolCall(ctx, "agent", "bash", "rm -rf /", "{}", false)
+	v := lc.RunToolCall(ctx, "main", "bash", "rm -rf /", "{}", false)
 	if v.Action != config.ActionBlock {
 		t.Error("tool-call hook should block rm -rf /")
 	}
 	if !strings.Contains(v.Reason, "dangerous") {
 		t.Errorf("reason should mention 'dangerous', got: %q", v.Reason)
 	}
-	if v2 := lc.RunToolCall(ctx, "agent", "bash", "echo hello", "{}", false); v2.Action != config.ActionRun {
+	if v2 := lc.RunToolCall(ctx, "main", "bash", "echo hello", "{}", false); v2.Action != config.ActionRun {
 		t.Errorf("tool-call hook should allow 'echo hello', got action=%v", v2.Action)
 	}
 
@@ -104,7 +131,7 @@ fi
 			llm.ToolCall{ID: "1", Name: "bash", RawArgs: `{"command":"echo SECRET-TOKEN"}`},
 			func(tc *chat.TurnConfig) {
 				tc.RunToolResult = func(ctx context.Context, name, argsJSON, output string) string {
-					return lc.RunToolResult(ctx, "agent", name, argsJSON, output)
+					return lc.RunToolResult(ctx, "main", name, argsJSON, output)
 				}
 			})
 
@@ -149,8 +176,7 @@ func runToolCallTurn(t *testing.T, lc *config.LoadedConfig, dir, prompt string, 
 			{Usage: &llm.Usage{PromptTokens: 5, CompletionTokens: 1, TotalTokens: 6}},
 		}},
 	)
-	a := lc.FirstAgent()
-	toolDefs := config.ToolDefs(a.Gates)
+	toolDefs := config.ToolDefs(config.ToolGates{Bash: true, Read: true})
 
 	var events []chat.Event
 	sess := chat.NewSession(chat.SessionOpts{Sink: func(ev chat.Event) { events = append(events, ev) }})
@@ -162,7 +188,7 @@ func runToolCallTurn(t *testing.T, lc *config.LoadedConfig, dir, prompt string, 
 		ToolConfig: chat.ToolConfig{
 			WorkDir: dir,
 			RunToolCall: func(ctx context.Context, name, command, argsJSON string, headless bool) chat.ToolCallVerdict {
-				return agentsetup.BridgeVerdict(lc.RunToolCall(ctx, "agent", name, command, argsJSON, headless))
+				return agentsetup.BridgeVerdict(lc.RunToolCall(ctx, "main", name, command, argsJSON, headless))
 			},
 		},
 		Handlers: chat.NewHandlers(),
@@ -203,23 +229,18 @@ func assertToolResultContains(t *testing.T, events []chat.Event, want string) {
 // invariant end-to-end through the real dispatch loop.
 func TestConfigIntegration_EmptyRewriteOnNonBashFailsClosed(t *testing.T) {
 	dir := t.TempDir()
-	writeConfigTree(t, dir, map[string]string{
-		"shell3.yaml": integYAML,
-		"agent.md":    "---\nmodel: m\ntools: [bash]\n---\np\n",
-		// No name guard on purpose: always emit a command rewrite, even for a
-		// non-bash tool whose payload command is null.
-		"hooks/tool-call.sh": `
-in=$(cat)
-cmd=$(printf '%s' "$in" | sed -n 's/.*"command":"\([^"]*\)".*/\1/p')
-printf '{"command": "%s"}' "$(printf '%s' "$cmd" | sed 's/rm/echo/g')"
-`,
-	})
-
-	lc, err := config.Load(dir)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	defer lc.Close()
+	// No name guard on purpose: always emit a command rewrite, even for a
+	// non-bash tool whose payload command is null.
+	lc := loadKitConfig(t, dir, integWiring+integAgent+`
+#---
+# gate: [main]
+#---
+main_gate() {
+  in=$(cat)
+  cmd=$(printf '%s' "$in" | sed -n 's/.*"command":"\([^"]*\)".*/\1/p')
+  printf '{"command": "%s"}' "$(printf '%s' "$cmd" | sed 's/rm/echo/g')"
+}
+`, map[string]string{"main": "main_gate"}, nil)
 
 	events := runToolCallTurn(t, lc, dir, "read the readme",
 		llm.ToolCall{ID: "1", Name: "read", RawArgs: `{"path":"README.md"}`}, nil)
@@ -244,30 +265,50 @@ printf '{"command": "%s"}' "$(printf '%s' "$cmd" | sed 's/rm/echo/g')"
 // hook file runs ungated even when the main hook would block.
 func TestConfigIntegration_PerAgentHooks(t *testing.T) {
 	dir := t.TempDir()
-	writeConfigTree(t, dir, map[string]string{
-		"shell3.yaml":        integYAML,
-		"agent.md":           "---\nmodel: m\ntools: [bash]\n---\np\n",
-		"agents/explorer.md": "---\ndescription: read-only\ntools: [bash]\n---\nexplore\n",
-		"agents/free.md":     "---\ndescription: ungated\ntools: [bash]\n---\ngo\n",
-		"hooks/tool-call.sh": `printf '{"block": true, "reason": "main-gate"}'`,
-		"hooks/explorer.tool-call.sh": `
-in=$(cat)
-case "$in" in
-  *'"command":"rg'*|*'"command":"cat'*|*'"command":"ls'*) exit 0 ;;
-esac
-printf '{"block": true, "reason": "explorer is read-only"}'
-`,
-	})
+	lc := loadKitConfig(t, dir, integWiring+integAgent+`
+#---
+# agent: explorer
+# description: read-only
+# model: m
+# use: [bash]
+#---
+explorer_prompt() { cat <<'SHELL3_EOF'
+explore
+SHELL3_EOF
+}
 
-	lc, err := config.Load(dir)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	defer lc.Close()
+#---
+# agent: free
+# description: ungated
+# model: m
+# use: [bash]
+#---
+free_prompt() { cat <<'SHELL3_EOF'
+go
+SHELL3_EOF
+}
+
+#---
+# gate: [main]
+#---
+main_gate() { printf '{"block": true, "reason": "main-gate"}'; }
+
+#---
+# gate: [explorer]
+#---
+explorer_gate() {
+  in=$(cat)
+  case "$in" in
+    *'"command":"rg'*|*'"command":"cat'*|*'"command":"ls'*) exit 0 ;;
+  esac
+  printf '{"block": true, "reason": "explorer is read-only"}'
+}
+`, map[string]string{"main": "main_gate", "explorer": "explorer_gate"}, nil)
+
 	ctx := context.Background()
 
 	// Main agent: blocked by its own gate.
-	if v := lc.RunToolCall(ctx, "agent", "bash", "ls", "{}", false); v.Action != config.ActionBlock || v.Reason != "main-gate" {
+	if v := lc.RunToolCall(ctx, "main", "bash", "ls", "{}", false); v.Action != config.ActionBlock || v.Reason != "main-gate" {
 		t.Errorf("main agent verdict = %+v", v)
 	}
 	// Explorer: its own allowlist governs — rg passes, git push blocked.
@@ -277,7 +318,7 @@ printf '{"block": true, "reason": "explorer is read-only"}'
 	if v := lc.RunToolCall(ctx, "explorer", "bash", "git push", "{}", true); v.Action != config.ActionBlock {
 		t.Errorf("explorer git push verdict = %+v", v)
 	}
-	// free has no hook file: ungated, even though the main hook blocks all.
+	// free is named by no gate: ungated, even though the main gate blocks all.
 	if v := lc.RunToolCall(ctx, "free", "bash", "git push", "{}", true); v.Action != config.ActionRun || !v.Passthrough {
 		t.Errorf("free verdict = %+v", v)
 	}

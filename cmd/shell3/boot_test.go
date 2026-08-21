@@ -204,11 +204,9 @@ func TestBootEndToEnd(t *testing.T) {
 	}
 
 	// The end-to-end payoff: the generated config loads with an empty api_key.
-	c, err := config.Load(resolved)
-	if err != nil {
+	if _, err := config.Load(resolved); err != nil {
 		t.Fatalf("generated config failed to load: %v", err)
 	}
-	defer c.Close()
 	// Vision=true opts the main agent into the media tool (read_media).
 	kitBody, err := os.ReadFile(filepath.Join(dir, "shell3.sh"))
 	if err != nil {

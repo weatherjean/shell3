@@ -9,18 +9,16 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/weatherjean/shell3/internal/scaffold"
 )
 
-// `shell3 boot --prompts` refreshes the scaffold-owned prompt files of an
-// EXISTING install — agent.md's body, agents/*, skills/*
-// — without a re-boot: wiring stays untouched (shell3.yaml, .env, hooks,
-// cron, projects, memory.md, and both files' frontmatter), and every file
-// that changes is backed up first under <configDir>/.backup/prompts-<ts>/.
-// Skills the scaffold doesn't ship (user-authored ones) are never touched.
+// `shell3 boot --prompts` refreshes the scaffold-owned skills of an EXISTING
+// install without a re-boot: the kit, .env, cron and memory stay untouched,
+// and every file that changes is backed up first under
+// <configDir>/.backup/prompts-<ts>/. Skills the scaffold doesn't ship
+// (user-authored ones) are never touched.
 
 // runPromptRefresh implements boot --prompts against dir (the global config
 // root in production; injectable for tests). now stamps the backup dir.
@@ -37,15 +35,10 @@ func runPromptRefresh(dir string, now time.Time) error {
 		return err
 	}
 
-	// Only the shipped skills are refreshed. The kit holds the wiring, every
-	// agent and every tool in one file — all of it hand-edited — so there is
-	// no safe seam to splice a new prompt into. Refreshing skills gives an
-	// upgrade the new guidance without touching anything the operator wrote.
-	for rel := range files {
-		if !strings.HasPrefix(rel, "skills/") {
-			delete(files, rel)
-		}
-	}
+	// PromptFiles ships only skills/ — the kit holds the wiring, every agent
+	// and every tool in one hand-edited file, so there is no safe seam to
+	// splice a new prompt into. Refreshing skills gives an upgrade the new
+	// guidance without touching anything the operator wrote.
 	// The media skill documents read_media. An install whose kit does not opt
 	// into media has no such tool, so shipping the skill would teach it a verb
 	// it cannot call.

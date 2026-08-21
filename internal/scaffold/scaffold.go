@@ -1,7 +1,7 @@
 // Package scaffold renders the base shell3 config directory that
-// `shell3 boot` writes for a new install: shell3.yaml + agent.md rendered
-// from embedded templates, plus the verbatim agents/, skills/, hooks/, and
-// lib/ files.
+// `shell3 boot` writes for a new install: shell3.sh (the kit — wiring, agents,
+// tools and the gate) rendered from an embedded template, plus the verbatim
+// skills/, cron/, and lib/ files.
 package scaffold
 
 import (
@@ -105,11 +105,10 @@ func RenderBaseConfig(dir string, v Values, force bool) error {
 	})
 }
 
-// PromptFiles renders just the prompt-bearing files of the base scaffold —
-// agent.md, agents/*, skills/* — keyed by config-dir-relative
+// PromptFiles renders the scaffold's skills/, keyed by config-dir-relative
 // path. `shell3 boot --prompts` uses it to refresh an existing install's
-// prompts without touching wiring (shell3.yaml, .env, hooks, cron, lib,
-// memory, projects).
+// shipped skills without touching anything the operator wrote — the kit
+// itself is hand-edited, so there is no safe seam to splice a prompt into.
 func PromptFiles(v Values) (map[string][]byte, error) {
 	v = v.withDefaults()
 	out := map[string][]byte{}
@@ -122,9 +121,7 @@ func PromptFiles(v Values) (map[string][]byte, error) {
 			return err
 		}
 		bare := strings.TrimSuffix(rel, ".tmpl")
-		isPrompt := bare == "shell3.sh" || bare == "agent.md" ||
-			strings.HasPrefix(rel, "agents/") || strings.HasPrefix(rel, "skills/")
-		if !isPrompt {
+		if !strings.HasPrefix(rel, "skills/") {
 			return nil
 		}
 		content, err := baseFS.ReadFile(p)
