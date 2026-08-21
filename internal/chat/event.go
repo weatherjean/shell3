@@ -58,6 +58,12 @@ const (
 	// Usage carries the estimated post-compaction prompt-token size so a UI can
 	// reflect the freed context immediately.
 	EventCompacted
+
+	// numEventKinds is the count sentinel. It must stay LAST: it bounds the
+	// iteration in kit_events_test.go, which pins these kinds against
+	// kit.EventNames. A hardcoded upper bound there would leave a kind added
+	// below it invisible to the very check that exists to catch drift.
+	numEventKinds
 )
 
 func (k EventKind) String() string {
@@ -251,8 +257,20 @@ func emitTurnDone(s *Session, u llm.Usage) {
 // inline on the turn goroutine, so events are never dropped and ordering is
 // exactly the emit order.
 func emit(s *Session, ev Event) {
-	if s == nil || s.sink == nil {
+	if s == nil {
 		return
 	}
-	s.sink(ev)
+	if s.sink != nil {
+		s.sink(ev)
+	}
+	// The kit subscriber observes the same event, and does so even when no
+	// Sink is installed: a headless session still has observable events. Read
+	// under msgMu because a reload swaps the observer (SetOnEvent) while a
+	// turn is emitting.
+	s.msgMu.RLock()
+	onEvent := s.onEvent
+	s.msgMu.RUnlock()
+	if onEvent != nil {
+		onEvent(ev)
+	}
 }

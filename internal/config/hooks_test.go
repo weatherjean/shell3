@@ -35,7 +35,7 @@ func hookCfg(t *testing.T, gates, notes map[string]string) *LoadedConfig {
 	for agent := range notes {
 		n[agent] = agent + "_note"
 	}
-	c.SetKitHooks(filepath.Join(dir, KitFileName), "main", g, n)
+	c.SetKitHooks(filepath.Join(dir, KitFileName), "main", KitHooks{Gates: g, Notes: n})
 	return c
 }
 

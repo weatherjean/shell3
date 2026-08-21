@@ -30,6 +30,60 @@ type Skill struct {
 	Line int
 }
 
+// Command is one declared host command: a verb the front-end answers by
+// running Func, with no model turn and no tokens spent. Commands are
+// install-wide rather than scoped to an agent.
+type Command struct {
+	Name, Desc, Func string
+	Line             int
+}
+
+// EventHook is one declared event subscriber: Func receives the JSON for each
+// event whose kind is named in On. It observes only — its stdout is ignored,
+// and it can neither refuse nor rewrite anything.
+type EventHook struct {
+	Func string
+	On   []string
+	Line int
+}
+
+// EventNames are the event kinds an `event:` block may subscribe to. They
+// mirror chat.EventKind.String(); internal/chat's kit_events_test.go pins the
+// two lists together, which is why this one can live here without kit
+// importing the runtime.
+var EventNames = []string{
+	"session_end",
+	"user_message",
+	"assistant_message",
+	"assistant_token",
+	"assistant_reasoning",
+	"tool_call",
+	"tool_result",
+	"error",
+	"usage",
+	"turn_done",
+	"system_reminder",
+	"retry",
+	"compacted",
+}
+
+// ReservedCommands are the verbs a front-end answers itself. A `command:`
+// block may not declare one: the built-in is matched first at dispatch, so
+// the declaration would never fire and its author would have no way to see
+// why. Mirrors telegram.BotCommands(); internal/telegram's
+// kitcommands_test.go pins the two lists together, which is why this one can
+// live here without kit importing a front-end.
+var ReservedCommands = []string{
+	"dash",
+	"stop",
+	"superstop",
+	"new",
+	"run",
+	"btw",
+	"reload",
+	"quiet",
+}
+
 // Test is one declared tool test; Func runs it under the test harness.
 type Test struct {
 	Name, Func string
@@ -76,6 +130,11 @@ type Kit struct {
 	// kit rather than as hooks/*.sh files, so an install is one file.
 	Gates map[string]string
 	Notes map[string]string
+	// Events maps an agent name to the subscriber observing its event stream.
+	Events map[string]EventHook
+	// Commands maps a command name to its declaration. Keyed by command
+	// rather than by agent: a host command belongs to the install.
+	Commands map[string]Command
 }
 
 // Parse turns kit source into typed declarations. It never executes the file.
@@ -168,7 +227,30 @@ func Parse(src []byte) (*Kit, error) {
 				curGroup, curAgent = &k.Shared[len(k.Shared)-1], nil
 			}
 
-		case declGate, declNote:
+		case declCommand:
+			// Positional like tool:, because a command names itself. It is
+			// deliberately NOT scoped to the open agent — a host command is
+			// answered by the front-end, not by a model, so there is no agent
+			// for it to belong to.
+			if d.desc == "" {
+				return nil, fmt.Errorf("line %d: command %q needs a description — it is registered in the front-end's command menu", d.line, d.name)
+			}
+			if slices.Contains(ReservedCommands, d.name) {
+				return nil, fmt.Errorf("line %d: command %q is a built-in — pick another name (built-ins are matched first, so this one would never fire)", d.line, d.name)
+			}
+			if prev, dup := k.Commands[d.name]; dup {
+				return nil, fmt.Errorf("line %d: command %q is already declared at line %d", d.line, d.name, prev.Line)
+			}
+			f, ok := nextFunc(d.endLine)
+			if !ok {
+				return nil, fmt.Errorf("line %d: command %q has no function under it", d.line, d.name)
+			}
+			if k.Commands == nil {
+				k.Commands = map[string]Command{}
+			}
+			k.Commands[d.name] = Command{Name: d.name, Desc: d.desc, Func: f.name, Line: d.line}
+
+		case declGate, declNote, declEvent:
 			// Gates and notes are NOT positional: they name the agents they
 			// govern, because one function usually governs several (a subagent
 			// with no gate of its own runs ungated, and copying the rules is
@@ -176,6 +258,30 @@ func Parse(src []byte) (*Kit, error) {
 			f, ok := nextFunc(d.endLine)
 			if !ok {
 				return nil, fmt.Errorf("line %d: %s %q has no function under it", d.line, d.kind, d.name)
+			}
+			if d.kind == declEvent {
+				// on: is mandatory. assistant_token fires once per streamed
+				// token, so an unfiltered subscriber would fork a shell
+				// thousands of times per turn — the filter is what makes this
+				// hook affordable, not a convenience.
+				if len(d.on) == 0 {
+					return nil, fmt.Errorf("line %d: event %q needs an on: list naming the event kinds it receives (one of %s)", d.line, d.name, strings.Join(EventNames, ", "))
+				}
+				for _, name := range d.on {
+					if !slices.Contains(EventNames, name) {
+						return nil, fmt.Errorf("line %d: event %q subscribes to unknown kind %q — want one of %s", d.line, d.name, name, strings.Join(EventNames, ", "))
+					}
+				}
+				if k.Events == nil {
+					k.Events = map[string]EventHook{}
+				}
+				for _, agent := range d.agents {
+					if _, dup := k.Events[agent]; dup {
+						return nil, fmt.Errorf("line %d: a second event for agent %q — one function observes an agent, name several agents on one block instead", d.line, agent)
+					}
+					k.Events[agent] = EventHook{Func: f.name, On: d.on, Line: d.line}
+				}
+				break
 			}
 			target := &k.Gates
 			if d.kind == declNote {
@@ -221,6 +327,11 @@ func Parse(src []byte) (*Kit, error) {
 			if !known[agent] {
 				return nil, fmt.Errorf("%s names agent %q, which this kit does not declare", decl.kind, agent)
 			}
+		}
+	}
+	for _, agent := range slices.Sorted(maps.Keys(k.Events)) {
+		if !known[agent] {
+			return nil, fmt.Errorf("event names agent %q, which this kit does not declare", agent)
 		}
 	}
 	return k, nil

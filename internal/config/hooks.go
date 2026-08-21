@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -14,14 +17,59 @@ import (
 	"github.com/weatherjean/shell3/internal/kit"
 )
 
-// hookSet maps each governed agent to its declared hook, keyed by agent: ""
-// is the kit's main agent, any other key is an employee. Absent key = that
-// agent runs ungated. There is no fallback or chaining between keys — each
-// agent is governed by exactly one function per kind, or none.
-type hookSet struct {
-	call   map[string]hookRef
-	result map[string]hookRef
+// hookKind discriminates the kit hook kinds. Each is a separate table, so an
+// agent governed by one kind is unaffected by the others.
+type hookKind int
+
+const (
+	// hookToolCall is `gate:` — runs before every tool call, can refuse.
+	hookToolCall hookKind = iota
+	// hookToolResult is `note:` — rewrites a tool's output.
+	hookToolResult
+	// hookCommand is `command:` — a host command answered by a shell
+	// function, with no model turn.
+	hookCommand
+	// hookEvent is `event:` — a subscriber on the session event stream.
+	hookEvent
+)
+
+func (k hookKind) String() string {
+	switch k {
+	case hookToolCall:
+		return "tool-call"
+	case hookToolResult:
+		return "tool-result"
+	case hookCommand:
+		return "command"
+	default:
+		return "event"
+	}
 }
+
+// hookSet maps each kind to its table of hooks.
+//
+// For the per-agent kinds (gate/note/event) the inner key is the governed
+// agent: "" is the kit's main agent, any other key is an employee, and an
+// absent key means that agent runs without that hook. There is no fallback or
+// chaining between keys — each agent is governed by exactly one function per
+// kind, or none.
+//
+// For hookCommand the inner key is the COMMAND NAME instead, because a host
+// command belongs to the install rather than to an agent. Same shape, same
+// runner; only the meaning of the key differs.
+type hookSet map[hookKind]map[string]hookRef
+
+// set records one hook, allocating the kind's table on first use.
+func (h hookSet) set(kind hookKind, key string, ref hookRef) {
+	if h[kind] == nil {
+		h[kind] = map[string]hookRef{}
+	}
+	h[kind][key] = ref
+}
+
+// get returns the hook for one kind and key; the zero hookRef (empty()) when
+// there is none.
+func (h hookSet) get(kind hookKind, key string) hookRef { return h[kind][key] }
 
 // hookRef is where one agent's hook lives: a function declared in the kit
 // (`gate:` / `note:`), reached by sourcing the kit and calling it.
@@ -66,23 +114,58 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 func (b *cappedBuffer) Bytes() []byte  { return b.buf.Bytes() }
 func (b *cappedBuffer) String() string { return b.buf.String() }
 
-// SetKitHooks installs the gates and notes a kit declares, keyed by agent
-// name. mainName is the kit's first agent — the one this config keys as "".
-func (c *LoadedConfig) SetKitHooks(kitPath, mainName string, gates, notes map[string]string) {
+// KitHooks is what a parsed kit contributes to this config: the per-agent
+// tables keyed by agent name, plus the install-wide command table keyed by
+// command name. Every field is optional.
+type KitHooks struct {
+	Gates    map[string]string
+	Notes    map[string]string
+	Events   map[string]EventSub
+	Commands map[string]string
+}
+
+// EventSub is one agent's event subscriber: the function to run and the event
+// kinds it receives. On is mandatory at parse time — see kit.EventNames.
+type EventSub struct {
+	Func string
+	On   []string
+}
+
+// Empty reports whether the kit declared no hooks at all, so callers can skip
+// SetKitHooks entirely.
+func (k KitHooks) Empty() bool {
+	return len(k.Gates) == 0 && len(k.Notes) == 0 && len(k.Events) == 0 && len(k.Commands) == 0
+}
+
+// SetKitHooks installs the hooks a kit declares. mainName is the kit's first
+// agent — the one the per-agent tables key as "". Command names are NOT
+// normalised through hookKey: they are command names, not agent names.
+func (c *LoadedConfig) SetKitHooks(kitPath, mainName string, h KitHooks) {
 	c.kitMainAgent = mainName
-	if c.hooks.call == nil {
-		c.hooks = hookSet{call: map[string]hookRef{}, result: map[string]hookRef{}}
+	if c.hooks == nil {
+		c.hooks = hookSet{}
 	}
 	for _, m := range []struct {
+		kind hookKind
 		from map[string]string
-		into map[string]hookRef
 	}{
-		{gates, c.hooks.call},
-		{notes, c.hooks.result},
+		{hookToolCall, h.Gates},
+		{hookToolResult, h.Notes},
 	} {
 		for agent, fn := range m.from {
-			m.into[c.hookKey(agent)] = hookRef{kit: kitPath, fn: fn}
+			c.hooks.set(m.kind, c.hookKey(agent), hookRef{kit: kitPath, fn: fn})
 		}
+	}
+	for agent, sub := range h.Events {
+		key := c.hookKey(agent)
+		c.hooks.set(hookEvent, key, hookRef{kit: kitPath, fn: sub.Func})
+		if c.eventOn == nil {
+			c.eventOn = map[string][]string{}
+		}
+		c.eventOn[key] = sub.On
+	}
+	for name, fn := range h.Commands {
+		c.hooks.set(hookCommand, name, hookRef{kit: kitPath, fn: fn})
 	}
 }
 
@@ -99,16 +182,19 @@ func (c *LoadedConfig) hookKey(agentName string) string {
 
 // HasToolCall reports whether any tool-call hook exists (used to decide
 // whether to install the gate closure at all).
-func (c *LoadedConfig) HasToolCall() bool { return len(c.hooks.call) > 0 }
+func (c *LoadedConfig) HasToolCall() bool { return len(c.hooks[hookToolCall]) > 0 }
 
 // HasToolResult reports whether any tool-result hook exists.
-func (c *LoadedConfig) HasToolResult() bool { return len(c.hooks.result) > 0 }
+func (c *LoadedConfig) HasToolResult() bool { return len(c.hooks[hookToolResult]) > 0 }
+
+// HasEvent reports whether any event subscriber exists.
+func (c *LoadedConfig) HasEvent() bool { return len(c.hooks[hookEvent]) > 0 }
 
 // ToolCallHookFor names the tool-call hook governing agentName ("" if none):
 // a script path, or kit:function for a kit-declared gate. Exposed for
 // `shell3 health` to report and dry-run each hook.
 func (c *LoadedConfig) ToolCallHookFor(agentName string) string {
-	ref := c.hooks.call[c.hookKey(agentName)]
+	ref := c.hooks.get(hookToolCall, c.hookKey(agentName))
 	if ref.empty() {
 		return ""
 	}
@@ -160,7 +246,7 @@ type hookVerdict struct {
 // returns its stdout. cwd is the config dir, so a hook reads sibling files
 // (.env, lib/) with relative paths. Any failure — start error, nonzero exit,
 // timeout — returns an error (callers fail closed).
-func runHook(ctx context.Context, cfgDir string, ref hookRef, payload any) ([]byte, error) {
+func runHook(ctx context.Context, cfgDir string, ref hookRef, payload any, env ...string) ([]byte, error) {
 	in, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -174,6 +260,9 @@ func runHook(ctx context.Context, cfgDir string, ref hookRef, payload any) ([]by
 	script := fmt.Sprintf("set -uo pipefail; source %s; %s", kit.ShellQuote(ref.kit), ref.fn)
 	cmd := exec.CommandContext(hctx, "bash", "-c", script)
 	cmd.Dir = cfgDir
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	// A killed hook may leave children holding the stdout pipe (e.g. a
 	// backgrounded sleep); don't let Wait block on them past the kill.
 	cmd.WaitDelay = time.Second
@@ -209,7 +298,7 @@ type toolCallPayload struct {
 // (subagents, cron); exposed to the script as .headless.
 func (c *LoadedConfig) RunToolCall(ctx context.Context, agentName, name, command, argsJSON string, headless bool) ToolCallVerdict {
 	passArgv := []string{"bash", "-c", command}
-	ref := c.hooks.call[c.hookKey(agentName)]
+	ref := c.hooks.get(hookToolCall, c.hookKey(agentName))
 	if ref.empty() {
 		return ToolCallVerdict{Action: ActionRun, Argv: passArgv, Passthrough: true}
 	}
@@ -267,7 +356,7 @@ type toolResultPayload struct {
 // FAILS CLOSED — on any script failure the output is replaced by an error
 // notice, never passed through unredacted.
 func (c *LoadedConfig) RunToolResult(ctx context.Context, agentName, name, argsJSON, output string) string {
-	ref := c.hooks.result[c.hookKey(agentName)]
+	ref := c.hooks.get(hookToolResult, c.hookKey(agentName))
 	if ref.empty() {
 		return output
 	}
@@ -289,4 +378,124 @@ func (c *LoadedConfig) RunToolResult(ctx context.Context, agentName, name, argsJ
 		return output
 	}
 	return *v.Output
+}
+
+// ErrNoSuchCommand reports that this config declares no command by that name,
+// so the caller's own unknown-command handling applies. Distinct from a
+// command that ran and failed.
+var ErrNoSuchCommand = errors.New("no such kit command")
+
+// HasCommand reports whether the kit declares a command by this name. A
+// front-end asks before routing a verb none of its built-ins claim.
+func (c *LoadedConfig) HasCommand(name string) bool {
+	return !c.hooks.get(hookCommand, name).empty()
+}
+
+// CommandNames lists the declared command names in sorted order, for a
+// front-end registering them in its command menu.
+func (c *LoadedConfig) CommandNames() []string {
+	return slices.Sorted(maps.Keys(c.hooks[hookCommand]))
+}
+
+// RunCommand runs a kit-declared host command and returns its stdout, trimmed.
+// Everything the user typed after the verb reaches the function as $ARG.
+//
+// Unlike gate:/note: there is no fail-closed question here: a command grants
+// nothing and blocks nothing, so a failure is simply reported to whoever asked
+// for it. A nonzero exit returns the error with the script's stderr attached.
+func (c *LoadedConfig) RunCommand(ctx context.Context, name, arg string) (string, error) {
+	ref := c.hooks.get(hookCommand, name)
+	if ref.empty() {
+		return "", ErrNoSuchCommand
+	}
+	payload := struct {
+		Command string `json:"command"`
+		Arg     string `json:"arg"`
+	}{Command: name, Arg: arg}
+	out, err := runHook(ctx, c.dir, ref, payload, "ARG="+arg)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// SubscribesTo reports whether agentName's event subscriber receives this
+// kind. Callers ask BEFORE rendering an event to JSON, so an unsubscribed
+// kind costs nothing beyond this lookup — which is what makes a per-token
+// event stream affordable to hang a shell hook off.
+func (c *LoadedConfig) SubscribesTo(agentName, kind string) bool {
+	key := c.hookKey(agentName)
+	if c.hooks.get(hookEvent, key).empty() {
+		return false
+	}
+	return slices.Contains(c.eventOn[key], kind)
+}
+
+// RunEvent delivers one event to agentName's subscriber. payload is the
+// already-rendered event JSON, handed to the function on stdin.
+//
+// An observer cannot refuse, rewrite, or delay anything, so unlike gate:/note:
+// there is nothing here to fail closed on: its stdout is ignored and a failure
+// is returned for the caller to log. Kinds the subscriber did not name are
+// dropped without running it.
+func (c *LoadedConfig) RunEvent(ctx context.Context, agentName, kind string, payload []byte) error {
+	if !c.SubscribesTo(agentName, kind) {
+		return nil
+	}
+	ref := c.hooks.get(hookEvent, c.hookKey(agentName))
+	_, err := runHook(ctx, c.dir, ref, json.RawMessage(payload))
+	return err
+}
+
+// VerifyHooks checks that every ACTION hook the kit declares — commands and
+// event subscribers — is a function the shell can actually find, and returns
+// one problem string per failure.
+//
+// It deliberately does NOT run them. A gate or a note is a decision function
+// whose entire contract is to return a verdict, so dry-running one with a probe
+// payload is free. A command or an event subscriber is an ACTION: running one
+// to check it would post the message, push the commit, or send the mail every
+// time someone typed `shell3 health`. Checking that the function is defined
+// catches the failure that actually happens (a syntax error in the kit, a
+// renamed function) without doing the work.
+func (c *LoadedConfig) VerifyHooks(ctx context.Context) []string {
+	type check struct{ label, fn, kit string }
+	var checks []check
+	for _, name := range slices.Sorted(maps.Keys(c.hooks[hookCommand])) {
+		ref := c.hooks[hookCommand][name]
+		checks = append(checks, check{"command /" + name, ref.fn, ref.kit})
+	}
+	for _, agent := range slices.Sorted(maps.Keys(c.hooks[hookEvent])) {
+		ref := c.hooks[hookEvent][agent]
+		label := "event subscriber for agent " + agent
+		if agent == "" {
+			label = "event subscriber for the main agent"
+		}
+		checks = append(checks, check{label, ref.fn, ref.kit})
+	}
+
+	var problems []string
+	for _, ck := range checks {
+		hctx, cancel := context.WithTimeout(ctx, hookTimeout)
+		// `declare -F` prints the name and exits nonzero when the function is
+		// not defined. Sourcing is safe for the same reason runHook's is: a
+		// kit is definitions-only, so this costs a parse and runs nothing.
+		script := fmt.Sprintf("set -uo pipefail; source %s; declare -F %s >/dev/null",
+			kit.ShellQuote(ck.kit), kit.ShellQuote(ck.fn))
+		cmd := exec.CommandContext(hctx, "bash", "-c", script)
+		cmd.Dir = c.dir
+		cmd.WaitDelay = time.Second
+		stderr := &cappedBuffer{max: hookOutputCap}
+		cmd.Stderr = stderr
+		err := cmd.Run()
+		cancel()
+		if err != nil {
+			msg := strings.TrimSpace(stderr.String())
+			if msg == "" {
+				msg = "function " + ck.fn + " is not defined after sourcing the kit"
+			}
+			problems = append(problems, ck.label+": "+msg)
+		}
+	}
+	return problems
 }

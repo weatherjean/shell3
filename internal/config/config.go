@@ -141,6 +141,11 @@ type LoadedConfig struct {
 	// hooks maps each governed agent to its hook scripts (see hooks.go).
 	hooks hookSet
 
+	// eventOn holds each event subscriber's `on:` kind filter, keyed the same
+	// way hooks[hookEvent] is. Kept beside rather than inside hookRef because
+	// only this one kind has a filter.
+	eventOn map[string][]string
+
 	// dir is the absolute config directory this config was loaded from.
 	dir string
 
