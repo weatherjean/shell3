@@ -39,7 +39,7 @@ func handleListFilesTool(argsJSON, workDir string) string {
 	if depth <= 0 {
 		depth = defaultListDepth
 	}
-	root := resolveReadPath(strings.TrimSpace(a.Path), workDir) // reuse read's ~ + relative resolution
+	root := resolvePath(strings.TrimSpace(a.Path), workDir) // reuse read's ~ + relative resolution
 
 	info, err := os.Stat(root)
 	if err != nil {

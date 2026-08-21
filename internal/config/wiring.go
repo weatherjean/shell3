@@ -12,7 +12,9 @@ import (
 
 // KitFileName is the kit a config directory is read from. Its presence is
 // what makes a directory a shell3 config — there is no second format.
-const KitFileName = "shell3.sh"
+// Defined in internal/kit, which owns the format; re-exported here because
+// this package's callers phrase the "no config here" error.
+const KitFileName = kit.FileName
 
 // readWiring returns the YAML wiring for a config directory. A shell3.sh
 // carries its wiring in a `shell3:` declaration block, which is re-marshalled

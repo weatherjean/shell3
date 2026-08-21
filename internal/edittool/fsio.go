@@ -7,19 +7,21 @@ import (
 	"path/filepath"
 )
 
-// errIsDir is returned by readTextFile when the path is a directory. Callers
-// detect it with errors.Is(err, errIsDir).
-var errIsDir = errors.New("is a directory")
+// ErrIsDir is returned by ReadTextFile when the path is a directory. Callers
+// detect it with errors.Is(err, ErrIsDir). Exported along with ReadTextFile
+// because chat's read tool needs the same two, and this package owns the
+// agent's file I/O.
+var ErrIsDir = errors.New("is a directory")
 
-// readTextFile reads absPath's full contents. Returns os.ErrNotExist if the
-// file is missing and errIsDir if it is a directory.
-func readTextFile(absPath string) (string, error) {
+// ReadTextFile reads absPath's full contents. Returns os.ErrNotExist if the
+// file is missing and ErrIsDir if it is a directory.
+func ReadTextFile(absPath string) (string, error) {
 	info, err := os.Stat(absPath)
 	if err != nil {
 		return "", err // includes os.ErrNotExist
 	}
 	if info.IsDir() {
-		return "", fmt.Errorf("%s: %w", absPath, errIsDir)
+		return "", fmt.Errorf("%s: %w", absPath, ErrIsDir)
 	}
 	data, err := os.ReadFile(absPath)
 	if err != nil {
@@ -35,7 +37,7 @@ func writeTextFile(absPath, content string) error {
 	mode := os.FileMode(0o644)
 	if info, err := os.Stat(absPath); err == nil {
 		if info.IsDir() {
-			return fmt.Errorf("%s: %w", absPath, errIsDir)
+			return fmt.Errorf("%s: %w", absPath, ErrIsDir)
 		}
 		mode = info.Mode().Perm()
 	}

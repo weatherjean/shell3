@@ -2,12 +2,15 @@ package chat
 
 import (
 	"bytes"
-	"context"
+
 	"encoding/json"
+
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
+
+	"github.com/weatherjean/shell3/internal/edittool"
+
 	"strings"
 )
 
@@ -17,25 +20,6 @@ const (
 	maxReadFileBytes = 10 * 1024 * 1024 // 10 MB ceiling on the file read into memory
 	readSampleBytes  = 4096             // bytes sniffed for binary detection
 )
-
-// errIsDir marks a read of a directory path.
-var errIsDir = errors.New("is a directory")
-
-// readTextFile reads path fully. Directories return errIsDir.
-func readTextFile(_ context.Context, path string) (string, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return "", err
-	}
-	if info.IsDir() {
-		return "", errIsDir
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
-}
 
 type readArgs struct {
 	Path   string `json:"path"`
@@ -47,7 +31,7 @@ type readArgs struct {
 // line/byte cap, returning the raw file text (no line-number gutter, so the
 // model can copy substrings straight into edit_file) plus a continuation footer
 // when truncated. Binary files are refused with a redirect to read_media.
-func handleReadTool(ctx context.Context, argsJSON, workDir string) string {
+func handleReadTool(argsJSON, workDir string) string {
 	var a readArgs
 	if err := json.Unmarshal([]byte(argsJSON), &a); err != nil {
 		return "error: invalid read arguments: " + err.Error()
@@ -62,13 +46,13 @@ func handleReadTool(ctx context.Context, argsJSON, workDir string) string {
 		a.Limit = defaultReadLimit
 	}
 
-	path := resolveReadPath(a.Path, workDir)
-	content, err := readTextFile(ctx, path)
+	path := resolvePath(a.Path, workDir)
+	content, err := edittool.ReadTextFile(path)
 	if err != nil {
 		switch {
 		case errors.Is(err, os.ErrNotExist):
 			return "error: file not found: " + a.Path
-		case errors.Is(err, errIsDir):
+		case errors.Is(err, edittool.ErrIsDir):
 			return "error: " + a.Path + " is a directory; use list_files or bash ls"
 		}
 		return "error: " + err.Error()
@@ -84,19 +68,6 @@ func handleReadTool(ctx context.Context, argsJSON, workDir string) string {
 	}
 
 	return renderRead(content, a.Offset, a.Limit)
-}
-
-// resolveReadPath expands ~ and resolves a relative path against workDir.
-func resolveReadPath(p, workDir string) string {
-	if strings.HasPrefix(p, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			p = filepath.Join(home, p[2:])
-		}
-	}
-	if filepath.IsAbs(p) {
-		return p
-	}
-	return filepath.Join(workDir, p)
 }
 
 // isBinary sniffs up to readSampleBytes: any NUL byte, or >30% non-printable

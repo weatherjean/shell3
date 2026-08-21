@@ -11,6 +11,7 @@ package review
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -71,7 +72,7 @@ func (r *Reviewer) Review(ctx context.Context, agentKey, command, reason string)
 	}
 	msg += ". Do not retry variants or work around this; if the command matters, tell the operator what you wanted to run and why."
 	if count >= breakerThreshold {
-		msg += " Stop: this is consecutive denial #" + itoa(count) +
+		msg += " Stop: this is consecutive denial #" + strconv.Itoa(count) +
 			" — abandon this approach entirely and report the situation instead."
 	}
 	return false, msg
@@ -177,19 +178,4 @@ func isWordBreak(c byte) bool {
 		return true
 	}
 	return false
-}
-
-// itoa avoids strconv for one tiny positive int.
-func itoa(n int) string {
-	if n <= 0 {
-		return "0"
-	}
-	var b [8]byte
-	i := len(b)
-	for n > 0 && i > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(b[i:])
 }

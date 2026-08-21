@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"os"
 	"os/exec"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -28,11 +29,7 @@ func (t Tool) bindArgs(args map[string]any) ([]string, error) {
 		}
 	}
 
-	names := make([]string, 0, len(t.Params))
-	for name := range t.Params {
-		names = append(names, name)
-	}
-	sort.Strings(names) // deterministic env order
+	names := slices.Sorted(maps.Keys(t.Params)) // deterministic env order
 
 	env := make([]string, 0, len(names))
 	for _, name := range names {
@@ -146,7 +143,7 @@ func (r Runner) Run(ctx context.Context, t Tool, args map[string]any) (string, e
 		sh = "bash"
 	}
 
-	script := fmt.Sprintf("set -uo pipefail; source %s; %s", shellQuote(r.Path), t.Func)
+	script := fmt.Sprintf("set -uo pipefail; source %s; %s", ShellQuote(r.Path), t.Func)
 	cmd := exec.CommandContext(ctx, sh, "-c", script)
 	cmd.Dir = r.Dir
 	cmd.Env = append(r.baseEnv(os.LookupEnv), env...)
@@ -163,7 +160,10 @@ func (r Runner) Run(ctx context.Context, t Tool, args map[string]any) (string, e
 	return stdout.String(), nil
 }
 
-// shellQuote single-quotes a path for safe interpolation into the source line.
-func shellQuote(s string) string {
+// ShellQuote single-quotes a path for safe interpolation into the source line.
+// Exported because config runs the gate the same way this package runs a tool
+// — `source <kit>; <fn>` — and a second copy of the quoting rule is a second
+// place for it to be wrong.
+func ShellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

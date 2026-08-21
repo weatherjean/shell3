@@ -7,6 +7,12 @@ import (
 	"strings"
 )
 
+// FileName is the kit a config directory is read from. Its presence is what
+// makes a directory a shell3 config — there is no second format. It lives
+// here because this package defines the format; config and agentsetup used to
+// carry a copy each.
+const FileName = "shell3.sh"
+
 // Tool is one declared verb: what the model sees, plus the shell function that
 // implements it. Params reach the function body as environment variables.
 type Tool struct {

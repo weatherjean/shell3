@@ -2,6 +2,7 @@ package kit
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -72,14 +73,7 @@ func (k *Kit) Resolve(a Agent, isMain bool) (Resolved, error) {
 	return r, nil
 }
 
-func isBuiltin(name string) bool {
-	for _, b := range Builtins {
-		if b == name {
-			return true
-		}
-	}
-	return false
-}
+func isBuiltin(name string) bool { return slices.Contains(Builtins, name) }
 
 func (k *Kit) group(name string) (Group, bool) {
 	for _, g := range k.Shared {

@@ -55,7 +55,7 @@ func toolDispatch(tools []Tool) string {
 	b.WriteString("    case \"$_name\" in\n")
 
 	for _, t := range tools {
-		fmt.Fprintf(&b, "      %s)\n", shellQuote(t.Name))
+		fmt.Fprintf(&b, "      %s)\n", ShellQuote(t.Name))
 
 		names := make([]string, 0, len(t.Params))
 		for n := range t.Params {
@@ -100,7 +100,7 @@ func (k *Kit) TestScript(a Agent, only string) (string, int) {
 			continue
 		}
 		n++
-		fmt.Fprintf(&b, "\nprintf '%%s ... ' %s\n", shellQuote(t.Name))
+		fmt.Fprintf(&b, "\nprintf '%%s ... ' %s\n", ShellQuote(t.Name))
 		fmt.Fprintf(&b, "if ( %s ); then printf 'ok\\n'; else _kit_fail_count=$((_kit_fail_count+1)); fi\n", t.Func)
 	}
 	b.WriteString("\nexit $((_kit_fail_count > 0))\n")

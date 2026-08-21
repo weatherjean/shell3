@@ -3,9 +3,10 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"maps"
 	"reflect"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -110,12 +111,7 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 	if len(f.Models) == 0 {
 		return fmt.Errorf(wiringLabel + ": no models declared")
 	}
-	names := make([]string, 0, len(f.Models))
-	for name := range f.Models {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
+	for _, name := range slices.Sorted(maps.Keys(f.Models)) {
 		m := f.Models[name]
 		if m.BaseURL == "" || m.Model == "" {
 			return fmt.Errorf(wiringLabel+": model %q needs base_url and model", name)
@@ -153,12 +149,7 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 	if tc := f.Telegram; tc != nil {
 		c.telegram = TelegramConfig{Present: true, Token: tc.Token, ChatID: tc.ChatID, WorkDir: tc.WorkDir, AllowFrom: tc.AllowFrom}
 	}
-	mcpNames := make([]string, 0, len(f.MCP))
-	for name := range f.MCP {
-		mcpNames = append(mcpNames, name)
-	}
-	sort.Strings(mcpNames)
-	for _, name := range mcpNames {
+	for _, name := range slices.Sorted(maps.Keys(f.MCP)) {
 		s := f.MCP[name]
 		if !mcpNameRE.MatchString(name) {
 			return fmt.Errorf(wiringLabel+": mcp server name %q must match %s", name, mcpNameRE)
