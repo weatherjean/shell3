@@ -108,9 +108,12 @@ func TestScaffoldedGateAllowsOrdinaryWork(t *testing.T) {
 		// you, are not the failures this file exists to prevent.
 		"rm -rf ~/Library/Caches/some-browser",
 		"rm -rf ~/Library/Logs/some-app",
-		"cd ~/.shell3 && cat hooks/tool-call.sh",
-		"python3 -c 'print(1)' && cat ./hooks/tool-call.sh",
-		"less ./hooks/tool-call.sh",
+		"cd ~/.shell3 && cat shell3.sh",
+		"python3 -c 'print(1)' && cat ./shell3.sh",
+		"less ./shell3.sh",
+		// The gate does not protect itself: shell3.sh is also every agent
+		// prompt and tool, and editing it is the self-evolve loop.
+		"echo x >> ./shell3.sh",
 		"rm -rf ~/.cache/pip",
 		"docker system prune -f",
 	} {
@@ -124,13 +127,12 @@ func TestScaffoldedGateBlocksTheDangerousCases(t *testing.T) {
 	dir := scaffoldForHooks(t)
 
 	cases := map[string]string{
-		"cat ~/.ssh/id_rsa":              "credentials",
-		"cat ./.env":                     "the secrets file",
-		"rm -rf /":                       "the whole filesystem",
-		"echo x > /etc/hosts":            "system paths",
-		"git push --force origin main":   "force push",
-		"pkill -f shell3":                "killing the harness",
-		"echo x >> ./hooks/tool-call.sh": "editing the gate itself",
+		"cat ~/.ssh/id_rsa":            "credentials",
+		"cat ./.env":                   "the secrets file",
+		"rm -rf /":                     "the whole filesystem",
+		"echo x > /etc/hosts":          "system paths",
+		"git push --force origin main": "force push",
+		"pkill -f shell3":              "killing the harness",
 	}
 	for command, what := range cases {
 		verdict, reason := runHook(t, dir, "main_gate", "bash", command)

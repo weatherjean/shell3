@@ -5,7 +5,7 @@ The tool-call hook fires before every tool; for sandboxing you care about
 verdict is what makes it a real wrapper: you choose the program that runs the
 agent's command, and the command arrives as a single argv element — nothing
 re-parses or re-quotes it. Full verdict contract:
-[configuration.md](../configuration.md#the-command-gate--hookssh).
+[configuration.md](../configuration.md#the-command-gate--gate).
 
 ## Run every command inside a container
 

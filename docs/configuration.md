@@ -98,9 +98,7 @@ no model-driven prune/compact tools. Two optional knobs:
                          #   setting it without compact_at is a load error
 ```
 
-The agent can skip the prune tier with
-`prune: false` in its frontmatter (the thresholds stay on the model;
-omitted/`true` inherits).
+Both thresholds live on the model; there is no per-agent override.
 
 Compaction is host-managed and there are no model-driven prune/compact tools.
 The Telegram front-end runs ONE long-lived conversation, so its history
@@ -379,7 +377,7 @@ tool count, last error). At call time a dead server gets one
 automatic reconnect; if that fails too the model sees the error as tool
 output and adapts — a broken server never kills a turn.
 
-MCP calls flow through the same [tool-call hook](#the-command-gate--hookssh)
+MCP calls flow through the same [tool-call hook](#the-command-gate--gate)
 as everything else: `name` is the prefixed tool name and `command` is null, so
 gate them by name.
 
