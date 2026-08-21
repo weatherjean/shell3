@@ -12,7 +12,6 @@ Your whole configuration is one file plus two directories:
       skills/                      your skills — one .md per skill
       projects/<agent>/skills/     an employee's skills
       memory.md                    your durable facts
-      hooks/                       the gate scripts
       .env                         secrets — never read, never print
 
 ## Which one
@@ -37,8 +36,11 @@ binding a schedule to (agent, prompt).
 
 - `.env` and `secrets/` — never read them, never print them. A tool reads the
   one key it needs at point of use.
-- `hooks/*.sh` — the operator's gate. If it blocks you, that is the answer:
-  say which rule stopped you and why you needed it. Do not route around it.
+- The `gate:` block and its function in `shell3.sh` — the operator's rules.
+  If the gate blocks you, that is the answer: say which rule stopped you and
+  why you needed it. Do not route around it, and do not edit it. Nothing
+  stops you editing it — it sits in the same file as your own prompt — which
+  is exactly why leaving it alone is on you.
 - The `shell3:` wiring block at the top of `shell3.sh` — models, telegram, mcp
   servers. Ask before touching it.
 

@@ -18,7 +18,7 @@ The script runs before **every** tool (`bash`, `bash_bg`, `edit_file`,
 `send_media_telegram`) with the call as JSON on stdin, and prints a verdict: pass,
 rewrite, runner-swap, or block — there is no ask verdict and no approval flow.
 The full verdict contract and payload fields are in
-[configuration.md](configuration.md#the-command-gate--hookssh).
+[configuration.md](configuration.md#the-command-gate--gate).
 
 **If you need hard isolation, run shell3 in a container, VM, or throwaway
 user account.** The hook is a policy gate, not a security boundary.
@@ -31,12 +31,14 @@ What the scaffold's `gate:` function refuses, and why:
 - **Credentials** (`.env`, `~/.ssh`, `~/.aws`, `~/.config/gh`, …): blocked
   for read and write, by every tool. A `lib/bin` script reads the one key it
   needs at point of use.
-- **The gate itself**: the refusal text tells the agent not to edit it, but on
-  a kit install **no rule enforces that**. The gate, the wiring and every
-  agent's prompt live in the same `shell3.sh`, which the agent is expected to
-  edit (that is the whole self-evolve loop), so a write rule on that path
-  would block ordinary work. If you want the gate to hold, make the file
-  unwritable at the OS level — see below.
+- **The gate itself: not protected, deliberately.** The gate, the wiring and
+  every agent's prompt live in the same `shell3.sh`, which the agent is
+  expected to edit — that is the whole self-evolve loop — so a write rule on
+  that path would block ordinary work, and a narrower one is theatre the
+  agent can step over in two lines of Python. The refusal text still tells
+  the agent not to edit the gate; that is advice, not enforcement. If you
+  want the gate to hold, make the file unwritable at the OS level — see
+  below.
 - **System paths** (`/etc`, `/usr/bin`, `/System`, `~/Library`): writes
   blocked. `/usr/local` and `/opt` are allowed, since installing a tool is
   ordinary work.

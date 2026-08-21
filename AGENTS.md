@@ -46,13 +46,17 @@ refusal. An agent no `gate:` names runs UNGATED, with no fallback between
 agents. `config.hookRef` is a (kit, function) pair installed by
 `SetKitHooks`; running one sources the kit and calls the function, which is
 safe precisely because a kit is definitions-only. The scaffold's gate ships
-armed: four hard refusals, all irreversible and none
-of them the work (machine destruction, credentials, stopping shell3, writes
-to a leftover hooks/*.sh or shell3.yaml), plus two judgment calls demoted to
+armed: three hard refusals, all irreversible and none
+of them the work (machine destruction, credentials, stopping shell3), plus
+two judgment calls demoted to
 `review` (unread remote code, publishing); everything else runs, including
-deletion. NOTE: the "do not edit the gate" refusal text is advice only on a
-kit install — the gate shares shell3.sh with every agent prompt, which the
-agent edits as ordinary work, so no write rule can cover it. It is a speed
+deletion. The gate does NOT protect itself, deliberately: it shares
+shell3.sh with every agent prompt, which the agent edits as ordinary work, so
+a write rule on that path would block the self-evolve loop and a narrower one
+is theatre. The old rule matching `hooks/*.sh`/`shell3.yaml` was deleted
+2026-08-21 — it matched nothing on a kit install. The "do not edit the gate"
+refusal text is advice only, and `hooks_test.go` PINS this by asserting
+`echo x >> ./shell3.sh` is ALLOWED. It is a speed
 bump by construction — the agent can rewrite it in two lines of Python — so
 real protection is filesystem-level (a dedicated user, `chflags
 uchg`/`chattr +i`, a container).

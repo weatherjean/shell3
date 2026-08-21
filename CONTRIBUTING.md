@@ -63,5 +63,5 @@ built on `internal/shell3`'s session/runtime core.
 
 Never read or commit credential files (`.env` beside `shell3.sh`). shell3 is
 unsafe by default — model-chosen commands run with full shell access, gated only
-by the optional per-agent hook scripts (`hooks/*.sh`). Report vulnerabilities via GitHub
+by the optional per-agent `gate:` function in the kit. Report vulnerabilities via GitHub
 Security Advisories.

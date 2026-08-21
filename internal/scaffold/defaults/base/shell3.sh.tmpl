@@ -177,9 +177,10 @@ SHELL3_EOF
 # ---------------------------------------------------------------------------
 # THE DEFAULT IS RUN.
 #
-# This hard-refuses four things, all irreversible and none of them the work:
-# destroying the machine, leaking credentials, stopping shell3, and editing
-# this file. Two more are judgment calls sent to the LLM reviewer instead of
+# This hard-refuses three things, all irreversible and none of them the work:
+# destroying the machine, leaking credentials, and stopping shell3. It does
+# NOT protect itself — see below.
+# Two more are judgment calls sent to the LLM reviewer instead of
 # refused outright ({"review": true}): running unread remote code and
 # publishing — right to stop most of the time, wrong when the operator asked
 # for exactly that; the reviewer weighs the actual command, and with no
@@ -189,7 +190,7 @@ SHELL3_EOF
 # It is deliberately short, because a long one is worse. An earlier version
 # had sixteen rules across 284 lines; across every recorded session it blocked
 # nothing, while refusing `rm -rf ~/Library/Caches/<browser>` (the agent was
-# repairing a browser that would not launch), `cd ~/.shell3 && cat hooks/…`
+# repairing a browser that would not launch), `cd ~/.shell3 && cat shell3.sh`
 # (the same read that passed without the `cd`), and any command that merely
 # mentioned a project's function names. An agent refused for ordinary work
 # does not learn where the boundary is; it learns the whole subject is
@@ -228,7 +229,7 @@ main_gate() {
   # obstacle and goes looking for the way around it — and unattended it has all
   # night to find one. The rule is the operator's decision, so the only correct
   # response is to stop and say so.
-  POLICY="Do NOT work around this: no alternative command, path, or tool, and do not edit the gate scripts. \
+  POLICY="Do NOT work around this: no alternative command, path, or tool, and do not edit the gate. \
   If the task genuinely requires it, stop and tell the operator which rule blocked you and why you need it — \
   they will change the gate if they agree. Never lift the restriction yourself."
 
@@ -286,13 +287,11 @@ main_gate() {
       block "that path holds credentials and is off limits to the agent" ;;
   esac
 
-  # --- 2. This gate ---------------------------------------------------------
-  # Readable — the agent should be able to explain its own rules — but not
-  # writable, or "ask the operator to lift this" has an obvious shortcut.
-  case "$cmd$args" in
-    *"hooks/"*.sh*|*"/hooks/"*|*shell3.yaml*)
-      writes "$cmd$args" && block "the tool-call gate and the wiring are the operator's, not the agent's — you may read them but not change them" ;;
-  esac
+  # There is deliberately NO rule protecting this gate. It lives in shell3.sh
+  # beside every agent prompt, tool and skill — the file the agent edits as
+  # ordinary work — so a write rule on that path would block the self-evolve
+  # loop, and a narrower one is theatre the agent can step over in two lines
+  # of Python. Protection is filesystem-level; see the header.
 
   # Only the two bash tools carry a command; everything else is done.
   case "$name" in
