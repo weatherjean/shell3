@@ -10,13 +10,13 @@ prose.
 
 ```sh
 #---
-# tool: stack-check
-# description: Classify a site's stack — wp_wc, shopify, wp_only, none
+# tool: page-kind
+# description: Classify a saved link — article, wiki, shop, dead
 # params:
 #   url:     {type: string, required: true, description: homepage URL}
 #   timeout: {type: int, default: 20}
 #---
-leads_stack_check() {
+bm_page_kind() {
   local html
   html=$(curl -sL --max-time "$timeout" "$url") || return 1
   ...
@@ -57,8 +57,8 @@ cover the whole thing in one command — no extraction step, no line remapping.
 **run** invokes a single tool with a JSON payload outside any session:
 
 ```
-$ shell3 tool run shell3.sh stack-check '{"url":"https://woocommerce.com"}'
-wp_wc
+$ shell3 tool run shell3.sh page-kind '{"url":"https://example.com/post"}'
+article
 ```
 
 ## Tests
@@ -67,18 +67,18 @@ A `test:` block sits under the tool it exercises. The body is bash.
 
 ```sh
 #---
-# test: stack-check — classifies each stack
+# test: page-kind — classifies each kind
 #---
-leads_test_stack_check() {
+bm_test_page_kind() {
   stub curl <<'STUB'
-<link href="/plugins/woocommerce/x.css">
+<article><h1>a post</h1></article>
 STUB
-  assert_eq "$(tool stack-check url=https://x.test)" wp_wc
+  assert_eq "$(tool page-kind url=https://x.test)" article
 
   stub curl <<'STUB'
-<html>just a blog</html>
+<html>domain for sale</html>
 STUB
-  assert_eq "$(tool stack-check url=https://x.test)" none
+  assert_eq "$(tool page-kind url=https://x.test)" dead
 }
 ```
 
@@ -98,7 +98,7 @@ not testing that `curl` works; you are testing what your tool does with its
 output. Same trick for a database tool: build a schema in `$KIT_TMP` and point
 the tool at it.
 
-A test may also call the shell function directly (`url=… leads_stack_check`),
+A test may also call the shell function directly (`url=… bm_page_kind`),
 which bypasses param validation and the gate. Use that for unit-testing the body
 and for debugging after `source shell3.sh`; use `tool` for everything else,
 because it exercises what a real call exercises.
@@ -133,5 +133,5 @@ is a load error, not a silent shadow.
 ## What is out of scope
 
 These tests pin the deterministic half. Nothing here asserts "given this prompt
-the agent should have called `stack-check` before `lead-db`" — the tools are the
+the agent should have called `page-kind` before `lead-db`" — the tools are the
 part worth pinning, and the judgment is the part deliberately left to the model.

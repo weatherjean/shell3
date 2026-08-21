@@ -20,7 +20,7 @@ type Meta struct {
 	Status    string `json:"status"` // "live" | "ended"
 	ParentID  string `json:"parent_id,omitempty"`
 	// Agent is the name of the agent that ran this session. It is what makes
-	// "show me what ampd-leads did" answerable — auditing an employee needs its
+	// "show me what bookmarks did" answerable — auditing an employee needs its
 	// runs findable by name, not just by id.
 	Agent string `json:"agent,omitempty"`
 	// CronJob is the name of the cron job that started this session ("" for

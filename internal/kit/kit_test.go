@@ -17,31 +17,31 @@ EOF
 }
 
 #---
-# agent: ampd-leads
+# agent: bookmarks
 # description: lead-gen
 # model: sonnet
-# workdir: ~/ampd-leads
+# workdir: ~/bookmarks
 # use: [bash, web]
 #---
-ampd_prompt() { cat <<'EOF'
+bm_prompt() { cat <<'EOF'
 find shops
 EOF
 }
 
 #---
-# tool: stack-check
+# tool: page-kind
 # description: Classify a stack
 # params:
 #   url: {type: string, required: true}
 #---
-ampd_stack_check() {
+bm_page_kind() {
   curl -sL "$url"
 }
 
 #---
 # skill: qualify
 #---
-ampd_skill_qualify() { cat <<'EOF'
+bm_skill_qualify() { cat <<'EOF'
 a real shop has a cart
 EOF
 }
@@ -75,16 +75,16 @@ func TestParseAssembles(t *testing.T) {
 		t.Fatalf("main = %+v", main)
 	}
 
-	ampd := k.Agents[1]
-	if ampd.Workdir != "~/ampd-leads" || len(ampd.Use) != 2 {
-		t.Fatalf("ampd = %+v", ampd)
+	bm := k.Agents[1]
+	if bm.Workdir != "~/bookmarks" || len(bm.Use) != 2 {
+		t.Fatalf("bm = %+v", bm)
 	}
-	if len(ampd.Tools) != 1 || ampd.Tools[0].Name != "stack-check" ||
-		ampd.Tools[0].Func != "ampd_stack_check" {
-		t.Fatalf("ampd tools = %+v", ampd.Tools)
+	if len(bm.Tools) != 1 || bm.Tools[0].Name != "page-kind" ||
+		bm.Tools[0].Func != "bm_page_kind" {
+		t.Fatalf("bm tools = %+v", bm.Tools)
 	}
-	if len(ampd.Skills) != 1 || ampd.Skills[0].Func != "ampd_skill_qualify" {
-		t.Fatalf("ampd skills = %+v", ampd.Skills)
+	if len(bm.Skills) != 1 || bm.Skills[0].Func != "bm_skill_qualify" {
+		t.Fatalf("bm skills = %+v", bm.Skills)
 	}
 
 	if len(k.Shared) != 1 || k.Shared[0].Name != "web" {
@@ -192,7 +192,7 @@ func TestParsePromptAndSkillBodies(t *testing.T) {
 		t.Fatalf("main prompt = %q, want %q", k.Agents[0].Prompt, "hello")
 	}
 	if k.Agents[1].Prompt != "find shops" {
-		t.Fatalf("ampd prompt = %q", k.Agents[1].Prompt)
+		t.Fatalf("bm prompt = %q", k.Agents[1].Prompt)
 	}
 	if k.Agents[1].Skills[0].Body != "a real shop has a cart" {
 		t.Fatalf("skill body = %q", k.Agents[1].Skills[0].Body)

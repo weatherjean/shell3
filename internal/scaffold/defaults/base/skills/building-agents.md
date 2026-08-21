@@ -27,14 +27,14 @@ have weighed context, noticed a contradiction, and explained itself.
 
 ```sh
 #---
-# agent: leads
+# agent: bookmarks
 # description: what this employee is for — the main agent reads this to decide when to dispatch it
 # model: main
-# workdir: ~/work/leads
+# workdir: ~/work/bookmarks
 # context: [memory.md]
 # use: [bash, web]
 #---
-leads_prompt() { cat <<'SHELL3_EOF'
+bm_prompt() { cat <<'SHELL3_EOF'
 What you do, and how you decide.
 
 Tell it where it lives — its workdir, what files are there, what is already
@@ -60,7 +60,7 @@ resolve. Skills go in `projects/<agent>/skills/*.md` with a frontmatter
 #   url:     {type: string, required: true, description: page to fetch}
 #   timeout: {type: int, default: 20}
 #---
-leads_fetch_thing() {
+bm_fetch_thing() {
   curl -sL --max-time "$timeout" "$url"
 }
 ```
@@ -79,7 +79,7 @@ the right move when parsing HTML or doing real arithmetic.
 #---
 # test: fetch-thing — parses the marker
 #---
-leads_test_fetch_thing() {
+bm_test_fetch_thing() {
   stub curl <<'STUB'
 <meta name="generator" content="WordPress">
 STUB
@@ -104,7 +104,7 @@ first step needs a model.
 
 Dispatch the agent and read what it actually did:
 
-    history {"agent": "leads"}       its runs
+    history {"agent": "bookmarks"}       its runs
     history {"session": "<id>"}      the transcript; tool calls show as [tool: x]
 
 If it did the work through bash instead of its tools, or saved results whose

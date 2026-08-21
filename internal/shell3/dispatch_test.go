@@ -102,7 +102,7 @@ func TestDispatch_CronJobReachesTheSessionRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := parent.Dispatch("worker", "go", DispatchOpts{CronJob: "ampd-tick"})
+	id, err := parent.Dispatch("worker", "go", DispatchOpts{CronJob: "bookmarks-tick"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,12 +114,12 @@ func TestDispatch_CronJobReachesTheSessionRow(t *testing.T) {
 	}
 	n := 0
 	for _, m := range sessions {
-		if m.CronJob == "ampd-tick" {
+		if m.CronJob == "bookmarks-tick" {
 			n++
 		}
 	}
 	if n != 1 {
-		t.Fatalf("want 1 session attributed to ampd-tick, got %d", n)
+		t.Fatalf("want 1 session attributed to bookmarks-tick, got %d", n)
 	}
 }
 

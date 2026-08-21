@@ -7,7 +7,7 @@ import (
 
 func TestDecodeToolBlock(t *testing.T) {
 	b := block{line: 10, endLine: 16, yaml: []byte(
-		"tool: stack-check\n" +
+		"tool: page-kind\n" +
 			"description: Classify a site's stack\n" +
 			"params:\n" +
 			"  url:     {type: string, required: true}\n" +
@@ -17,7 +17,7 @@ func TestDecodeToolBlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodeBlock: %v", err)
 	}
-	if d.kind != declTool || d.name != "stack-check" {
+	if d.kind != declTool || d.name != "page-kind" {
 		t.Fatalf("decl = %+v", d)
 	}
 	if d.line != 10 || d.endLine != 16 {
@@ -33,17 +33,17 @@ func TestDecodeToolBlock(t *testing.T) {
 
 func TestDecodeAgentBlock(t *testing.T) {
 	b := block{line: 3, endLine: 9, yaml: []byte(
-		"agent: ampd-leads\n" +
+		"agent: bookmarks\n" +
 			"description: lead-gen\n" +
 			"model: sonnet\n" +
-			"workdir: ~/ampd-leads\n" +
+			"workdir: ~/bookmarks\n" +
 			"use: [bash, web]\n")}
 
 	d, err := decodeBlock(b)
 	if err != nil {
 		t.Fatalf("decodeBlock: %v", err)
 	}
-	if d.kind != declAgent || d.name != "ampd-leads" || d.model != "sonnet" {
+	if d.kind != declAgent || d.name != "bookmarks" || d.model != "sonnet" {
 		t.Fatalf("decl = %+v", d)
 	}
 	if len(d.use) != 2 || d.use[0] != "bash" || d.use[1] != "web" {
