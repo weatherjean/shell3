@@ -87,9 +87,14 @@ type Bot struct {
 
 	quietMode *QuietStore // the /quiet toggle's store; nil = never quiet
 
-	runJob        func(name string) error             // fires a cron job by name; nil if no scheduler
-	reload        func() (shell3.ReloadResult, error) // performs a full config reload; nil if unset
-	pendingReload bool                                // set by the reload tool mid-turn; applied at end-of-turn
+	runJob func(name string) error             // fires a cron job by name; nil if no scheduler
+	reload func() (shell3.ReloadResult, error) // performs a full config reload; nil if unset
+
+	// kitCommands are the kit's declared host commands and the runner that
+	// answers one. Guarded by mu because /reload swaps them mid-life.
+	kitCommands   []KitCommand
+	kitCommandRun func(ctx context.Context, name, arg string) (string, error)
+	pendingReload bool // set by the reload tool mid-turn; applied at end-of-turn
 
 	// dashURL mints a freshly tokened dashboard URL for /dash (guarded by
 	// b.mu). nil = the dash is disabled or failed to start.

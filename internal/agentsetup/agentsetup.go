@@ -55,6 +55,11 @@ type Options struct {
 // and the log; run_proxy processes are detached (never reaped here).
 // Any method call after cleanup has undefined behaviour.
 type Parts struct {
+	// events is the shared `event:` delivery worker, started lazily by
+	// eventDispatcher() and torn down with these Parts.
+	eventOnce sync.Once
+	events    *eventDispatcher
+
 	lc      *config.LoadedConfig
 	st      *runs.Store
 	proxy   *modelproxy.Spawner
@@ -343,8 +348,45 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 			return p.lc.RunToolResult(ctx, activeName, name, argsJSON, output)
 		}
 	}
+	// `event:` — the per-agent observer of this session's event stream. The
+	// subscription check comes FIRST, before the event is rendered to JSON:
+	// assistant_token fires per streamed token, so an unsubscribed kind must
+	// cost a map lookup and nothing else. Delivery is then handed to the
+	// shared dispatcher, off this goroutine — a turn never waits on an
+	// observer.
+	if p.lc.HasEvent() {
+		if d := p.eventDispatcher(); d != nil {
+			cfg.OnEvent = func(ev chat.Event) {
+				kind := ev.Kind.String()
+				if !p.lc.SubscribesTo(activeName, kind) {
+					return
+				}
+				d.Post(activeName, kind, eventPayload(activeName, ev))
+			}
+		}
+	}
 	cfg.ApplyActiveAgent(rt)
 	return cfg, nil
+}
+
+// eventDispatcher returns the shared `event:` delivery worker, starting it on
+// first use. One per Parts: subscribers run serially across the whole install,
+// so a shell function appending to a log never races itself, and a reload
+// tears the old one down with the Parts that owned it.
+func (p *Parts) eventDispatcher() *eventDispatcher {
+	p.eventOnce.Do(func() {
+		p.events = newEventDispatcher(eventQueueDepth, p.lc.RunEvent, p.log)
+	})
+	return p.events
+}
+
+// CloseEvents stops the event dispatcher. Called from the Parts teardown
+// stack; safe when no dispatcher was ever started.
+func (p *Parts) CloseEvents() {
+	p.eventOnce.Do(func() {}) // claim the once so a late caller cannot start one
+	if p.events != nil {
+		p.events.Close()
+	}
 }
 
 // BuildParts assembles the shared runtime parts. The returned cleanup closes
@@ -379,6 +421,10 @@ func BuildParts(opts Options) (*Parts, func(), error) {
 			return nil, noop, err
 		}
 	}
+	// The event dispatcher is started lazily by the first session that needs
+	// it, so its closer is registered here rather than at start: a reload's
+	// teardown must stop the worker whether or not one was ever spun up.
+	b.closers = append(b.closers, p.CloseEvents)
 	return p, b.closeAll, nil
 }
 

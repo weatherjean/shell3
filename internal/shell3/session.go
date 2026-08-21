@@ -153,6 +153,7 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 		InitialPromptTokens: seedTokens,
 		ContextWindowFor:    func(string) int { return cfg.ContextWindow },
 		Sink:                s.route,
+		OnEvent:             cfg.OnEvent,
 		Store:               cfg.Store,
 	})
 	if resumedFrom != "" {

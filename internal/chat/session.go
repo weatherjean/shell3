@@ -65,6 +65,11 @@ type Session struct {
 	// installs a no-op when SessionOpts.Sink is unset).
 	sink func(Event)
 
+	// onEvent is the kit event-subscriber observer; nil when none is wired.
+	// Separate from sink so a session with no front-end still observes.
+	// Guarded by msgMu: a reload swaps it (SetOnEvent) while turns emit.
+	onEvent func(Event)
+
 	// inbox is the cross-goroutine message queue for a session: Interject pushes
 	// items (steering text plus optional media parts) from any goroutine; the
 	// turn loop drains on the turn goroutine at round boundaries. Guarded by
@@ -233,6 +238,12 @@ type SessionOpts struct {
 	StoreID          string
 	ContextWindowFor func(string) int
 	Sink             func(Event)
+	// OnEvent is a second observer of the same stream, independent of Sink:
+	// Sink is the front-end's render/audit path, OnEvent is the kit `event:`
+	// subscriber seam. It runs inline like Sink, so an implementation that
+	// does real work must hand off to its own worker (see
+	// agentsetup.eventDispatcher). Nil is the normal case.
+	OnEvent func(Event)
 	// InitialMessages seeds the conversation when resuming a stored session.
 	// Applied verbatim as the starting in-memory history before the first turn.
 	InitialMessages []llm.Message
@@ -253,7 +264,7 @@ type SessionOpts struct {
 // NewSession constructs a Session that delivers events to opts.Sink. A nil Sink
 // installs a no-op so emits are always safe. Other fields are optional.
 func NewSession(opts SessionOpts) *Session {
-	s := &Session{id: opts.StoreID, store: opts.Store, sink: opts.Sink}
+	s := &Session{id: opts.StoreID, store: opts.Store, sink: opts.Sink, onEvent: opts.OnEvent}
 	s.reminders.contextWindowFor = opts.ContextWindowFor
 	if s.sink == nil {
 		s.sink = func(Event) {}
@@ -345,6 +356,19 @@ func (s *Session) recordReminder(text string) {
 func (s *Session) SetStore(store *runs.Store) {
 	s.msgMu.Lock()
 	s.store = store
+	s.msgMu.Unlock()
+}
+
+// SetOnEvent repoints the kit event observer on a LIVE session. The chat
+// session outlives a config reload — it IS the conversation history — while
+// the observer it was created with is bound to the generation that built it,
+// whose event dispatcher the reload's teardown closes. Without this swap the
+// subscriber would go silent on the first /reload and stay silent, with
+// nothing in the log to say why. Nil clears it (the reloaded kit may declare
+// no event: block).
+func (s *Session) SetOnEvent(fn func(Event)) {
+	s.msgMu.Lock()
+	s.onEvent = fn
 	s.msgMu.Unlock()
 }
 

@@ -68,7 +68,7 @@ func newServeCommand() *cobra.Command {
 
 			// Handshake first (protocol version + the host-answered command
 			// menu), then the greeting as an ordinary send event.
-			jc.EmitHello(telegram.BotCommands())
+			jc.EmitHello(b.BotCommands())
 			if _, err := jc.Send(ctx, telegram.ConsoleChatID,
 				"๑ï shell3 online — send a message event to start a thread; reply_to_id continues one."); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: could not send the greeting: %v\n", err)

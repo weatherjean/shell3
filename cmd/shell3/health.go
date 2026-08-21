@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/config"
 	"github.com/weatherjean/shell3/internal/kit"
 	"github.com/weatherjean/shell3/internal/mcp"
@@ -93,12 +94,12 @@ func runHealth(cmd *cobra.Command, path string) error {
 		// Install the kit's gate/note exactly as agentsetup.LoadKit does, so
 		// the dry-run below actually exercises them. config.Load alone does
 		// not: it lifts the wiring and nothing else.
-		if len(k.Gates) > 0 || len(k.Notes) > 0 {
+		if h := agentsetup.KitHooksOf(k); !h.Empty() {
 			main := ""
 			if len(k.Agents) > 0 {
 				main = k.Agents[0].Name
 			}
-			lc.SetKitHooks(kitPath, main, k.Gates, k.Notes)
+			lc.SetKitHooks(kitPath, main, h)
 		}
 		fatCtx, badSkills := 0, 0
 		for i, ka := range k.Agents {
@@ -212,6 +213,14 @@ func runHealth(cmd *cobra.Command, path string) error {
 			brokenHooks++
 			fmt.Fprintf(out, "hook (%s tool-result): %s\n", name, outp)
 		}
+	}
+	// Commands and event subscribers are ACTION hooks, so health checks that
+	// their functions are defined rather than running them: dry-running a
+	// command would post the message it exists to post, every time someone
+	// typed `shell3 health`.
+	for _, p := range lc.VerifyHooks(ctx) {
+		brokenHooks++
+		fmt.Fprintf(out, "hook (%s)\n", p)
 	}
 	if brokenHooks > 0 {
 		return fmt.Errorf("health: %d broken hook script(s)", brokenHooks)

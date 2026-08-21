@@ -48,16 +48,37 @@ func (p *Parts) LoadKit(path string) error {
 		}
 	}
 	p.kit, p.kitPath = k, path
-	// The kit's `gate:` / `note:` blocks govern tool calls and tool results,
-	// standing in for the hooks/*.sh files a markdown config uses.
-	if len(k.Gates) > 0 || len(k.Notes) > 0 {
+	// The kit's hook blocks: `gate:` / `note:` govern tool calls and tool
+	// results, `event:` observes the session event stream, and `command:`
+	// answers a host command with no model turn.
+	if h := KitHooksOf(k); !h.Empty() {
 		main := ""
 		if len(k.Agents) > 0 {
 			main = k.Agents[0].Name
 		}
-		p.lc.SetKitHooks(path, main, k.Gates, k.Notes)
+		p.lc.SetKitHooks(path, main, h)
 	}
 	return nil
+}
+
+// KitHooksOf projects a parsed kit's hook declarations into the shape
+// config installs. It lives here rather than in internal/kit so the kit
+// package keeps knowing nothing about how hooks are run.
+func KitHooksOf(k *kit.Kit) config.KitHooks {
+	h := config.KitHooks{Gates: k.Gates, Notes: k.Notes}
+	if len(k.Events) > 0 {
+		h.Events = map[string]config.EventSub{}
+		for agent, e := range k.Events {
+			h.Events[agent] = config.EventSub{Func: e.Func, On: e.On}
+		}
+	}
+	if len(k.Commands) > 0 {
+		h.Commands = map[string]string{}
+		for name, c := range k.Commands {
+			h.Commands[name] = c.Func
+		}
+	}
+	return h
 }
 
 // Kit returns the loaded kit, or nil when none was loaded.

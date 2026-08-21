@@ -128,6 +128,10 @@ type Config struct {
 	// OutPath, when non-empty, opens a JSONL audit log at this path and
 	// streams every turn event into it. Independent of stdout/front-end rendering.
 	OutPath string
+	// OnEvent, when set, observes every event this session emits — the kit
+	// `event:` subscriber seam. It runs inline on the emitting goroutine, so
+	// an implementation doing real work must hand off to its own worker.
+	OnEvent func(Event)
 	// Headless flips on subprocess-friendly behaviors: injects a
 	// system-reminder explaining the constraints (no human to answer
 	// questions) and signals hooks via SHELL3_HEADLESS=1.

@@ -26,14 +26,59 @@ Declaration kinds: `agent:` (prompt function under it; `model`, `workdir`,
 `params` — typed `string`/`int`/`bool`, reaching the shell function as
 ENVIRONMENT VARIABLES, never `$1`), `skill:`, `test:` (harness in
 `harness.go`: `tool`, `stub`, `assert_eq`, `assert_contains`, `fail`,
-`$KIT_TMP`), `gate:` and `note:`, plus the `shell3:` wiring block (models,
+`$KIT_TMP`), `gate:`, `note:`, `command:` and `event:`, plus the `shell3:` wiring block (models,
 telegram, mcp, `runs_keep_days`, `media_keep_days`, `review_model`,
 `review_policy`; re-marshalled through the
 existing YAML parser by `config.readWiring`; secrets as `env:KEY` from the
 sibling `.env`). Scoping is POSITIONAL for `tool:`/`skill:`/`test:` — an
-`agent:` or `shared:` block opens a scope — but `gate:`/`note:` are NAMED
-(`gate: [main, assistant]`), because one function usually governs several
-agents and a copy per agent is how two rule sets drift apart.
+`agent:` or `shared:` block opens a scope — but `gate:`/`note:`/`event:` are
+NAMED (`gate: [main, assistant]`), because one function usually governs several
+agents and a copy per agent is how two rule sets drift apart. `command:` is
+positional in form but scoped to NOTHING: a command is answered by the
+front-end, not by a model, so there is no agent for it to belong to.
+
+`command:` declares a `/verb` the front-end answers itself — no model turn, no
+tokens. The function's stdout is the reply (empty posts nothing, so an
+idempotent command with nothing to say stays silent; nonzero exit posts the
+failure), and everything typed after the verb arrives as `$ARG`. Declared
+commands append to `Bot.BotCommands()` — the built-ins plus the kit's, which is
+what `shell3 telegram` registers as the `/` menu and what `serve` sends in its
+hello — and `installKitCommands` (cmd/shell3/hostwiring.go) re-installs both the
+bot's list and the runner on `/reload`, resolving `Parts` per call so a reload
+cannot leave a runner sourcing the previous kit — DISPATCH follows a reload, but
+Telegram's own `/` autocomplete menu is pushed once at startup
+(`apiClient.SetCommands`), so a command added by a reload works when typed and
+appears in the menu after a restart. A command named after a built-in is a
+LOAD ERROR, not a silent shadow (`kit.ReservedCommands`, pinned against
+`telegram.BotCommands()` by `internal/telegram/kitcommands_test.go`): built-ins
+are matched first in `handleCommand`'s switch, so the declaration would never
+fire.
+
+`event:` subscribes a function to the session event stream and is the only hook
+that OBSERVES — stdout ignored, cannot refuse, cannot rewrite, nothing to fail
+closed on. `on:` is MANDATORY and names the kinds it receives (`kit.EventNames`,
+pinned against `chat.EventKind.String()` by `internal/chat/kit_events_test.go`);
+an unfiltered subscriber would fork a shell per streamed token, so the filter is
+what makes the hook affordable rather than a convenience, and an unknown kind is
+a load error. The seam is `chat.SessionOpts.OnEvent` (a second observer beside
+`Sink`, called from `emit` and firing even with no sink installed), wired by
+`agentsetup.SessionConfig`, which checks `lc.SubscribesTo` BEFORE rendering the
+event to JSON — an unsubscribed kind must cost a map lookup and nothing else.
+Delivery then hands off to `agentsetup.eventDispatcher`, one per `Parts` (lazy,
+closed from the BuildParts closer stack): a bounded queue (`eventQueueDepth`
+256) drained by ONE worker so a subscriber never races itself, and Post NEVER
+blocks — a full queue drops the OLDEST pending event and counts it, because
+gaps in an observer's view are recoverable and a stalled turn is not. Payload is
+`agentsetup.eventPayload`: `event`/`agent`/`session`/`time` plus the kind's own
+fields, with text and tool output capped at `eventTextCap` (4 KB) since the full
+content is already in the runs store.
+
+`shell3 health` treats the two families differently ON PURPOSE. `gate:`/`note:`
+are DECISION functions whose whole contract is returning a verdict, so health
+dry-runs them with a probe payload. `command:`/`event:` are ACTION functions, so
+health only checks that each is DEFINED (`config.VerifyHooks` sources the kit
+and runs `declare -F`): dry-running a command would post the message it exists
+to post, every time someone typed `shell3 health`.
 
 `gate:` runs before every tool call for the agents it names (stdin
 `{"name","command","args","headless"}`; stdout `{}` to run,
@@ -431,6 +476,8 @@ replies to the user's own messages and ⚠️ failures always ring; the flag
 rides a variadic
 `SendOpt{Silent}` on the tgClient send methods, rendered by the console
 transport as a 🔕 tag and by the JSONL transport as `"silent":true`).
+Beyond the built-ins, the kit's `command:` blocks are answered here too — the
+`default:` branch of `handleCommand` consults them, so a built-in always wins.
 The view commands are GONE — `/status`, `/jobs`, `/job`, `/cancel`, `/runs`
 and the `/run_N`/`/job_N`/`/cancel_N` taps answer "unknown command"; their
 content moved to the **web dash** (`internal/dash`): a read-only HTTP server

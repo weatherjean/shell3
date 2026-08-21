@@ -13,10 +13,37 @@ import (
 	"github.com/weatherjean/shell3/internal/strutil"
 )
 
-// BotCommands is the canonical command list, registered with Telegram for the
-// "/" autocomplete menu. Kept next to handleCommand so they stay in sync.
-// The views (/status, /jobs, /runs) live in the web dash — /dash opens it;
-// what remains here are actions.
+// KitCommand is one command the kit declares: a verb the bot answers by
+// running a shell function, with no model turn and no tokens spent.
+type KitCommand struct {
+	Name, Desc string
+}
+
+// SetKitCommands installs the kit's declared commands. run executes one and
+// returns its output; nil run means the commands are advertised but not
+// answerable (health checks, tests that only inspect the menu).
+func (b *Bot) SetKitCommands(cmds []KitCommand, run func(ctx context.Context, name, arg string) (string, error)) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.kitCommands, b.kitCommandRun = cmds, run
+}
+
+// BotCommands is this bot's full command menu: the built-ins plus whatever the
+// kit declares, in that order. Registered with Telegram for the "/"
+// autocomplete menu.
+func (b *Bot) BotCommands() []Command {
+	out := BotCommands()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, c := range b.kitCommands {
+		out = append(out, Command{c.Name, c.Desc})
+	}
+	return out
+}
+
+// BotCommands is the canonical BUILT-IN command list. Kept next to
+// handleCommand so they stay in sync. The views (/status, /jobs, /runs) live
+// in the web dash — /dash opens it; what remains here are actions.
 func BotCommands() []Command {
 	return []Command{
 		{"dash", "Open the web dashboard (link valid ~1h)"},
@@ -108,6 +135,11 @@ func (b *Bot) handleCommand(ctx context.Context, m Msg) {
 	case "/new":
 		b.handleNewCommand(ctx)
 	default:
+		// Built-ins are matched above, so they always win; a kit command
+		// named after one is rejected at load rather than shadowing here.
+		if b.runKitCommand(ctx, strings.TrimPrefix(cmd, "/"), arg) {
+			return
+		}
 		b.sendReply(ctx, "unknown command: "+cmd)
 	}
 }
@@ -277,4 +309,33 @@ func (b *Bot) handleQuietCommand(ctx context.Context, arg string) {
 	default:
 		b.sendReply(ctx, "usage: /quiet on|off")
 	}
+}
+
+// runKitCommand answers one kit-declared command, reporting whether it claimed
+// the verb. The function's stdout is the reply; empty output posts nothing, so
+// an idempotent command with nothing to say stays silent. A failure is
+// reported rather than swallowed — a command grants nothing and blocks
+// nothing, so there is no fail-closed question, only an answer.
+func (b *Bot) runKitCommand(ctx context.Context, name, arg string) bool {
+	b.mu.Lock()
+	run := b.kitCommandRun
+	declared := false
+	for _, c := range b.kitCommands {
+		if c.Name == name {
+			declared = true
+			break
+		}
+	}
+	b.mu.Unlock()
+	if !declared || run == nil {
+		return false
+	}
+	out, err := run(ctx, name, arg)
+	switch {
+	case err != nil:
+		b.sendReply(ctx, "/"+name+" failed: "+err.Error())
+	case strings.TrimSpace(out) != "":
+		b.sendReply(ctx, out)
+	}
+	return true
 }

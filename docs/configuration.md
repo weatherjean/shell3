@@ -3,8 +3,8 @@
 Your config is a **directory** (default `~/.shell3/`), and its centre is ONE
 file: `shell3.sh`, the **kit**. It holds the wiring, every agent, their tools
 and the gate. [kits.md](kits.md) is the kit's own reference — its block
-grammar, `agent:`/`shared:`/`tool:`/`skill:`/`test:` declarations, and the
-authoring loop; this page documents what you can put in the kit's `shell3:`
+grammar, its `agent:`/`shared:`/`tool:`/`skill:`/`test:`/`command:`/`event:`
+declarations, and the authoring loop; this page documents what you can put in the kit's `shell3:`
 wiring block and the directories beside it.
 
 Four rules:
@@ -403,7 +403,8 @@ main_gate() {
 }
 ```
 
-Unlike `tool:`/`skill:`, `gate:` and `note:` are **named, not positional** —
+Unlike `tool:`/`skill:`, `gate:`, `note:` and `event:` are **named, not
+positional** —
 one function usually governs several agents, and a copy per agent is how two
 rule sets drift apart. An agent no block names runs **ungated**; there is no
 fallback or chaining, and each agent is governed by exactly one function per
@@ -555,6 +556,30 @@ an error notice, never passed through unredacted. Background jobs (`bash_bg`)
 are out of scope: the note sees only the "started job…" pointer, not the
 process's streamed output — redact at the source if a background command can
 emit secrets.
+
+## Commands and events — `command:`, `event:`
+
+Two more hooks the kit declares, both documented in full in
+[kits.md](kits.md#commands).
+
+`command:` is a `/verb` the front-end answers by running a shell function —
+no model turn, no tokens. stdout is the reply, the text after the verb arrives
+as `$ARG`, empty output posts nothing, and the command joins the client's `/`
+menu. It may not be named after a built-in (`/dash`, `/stop`, `/superstop`,
+`/new`, `/run`, `/btw`, `/reload`, `/quiet`); that is a load error, because a
+built-in is matched first and the declaration would never fire.
+
+`event:` subscribes a function to the session event stream. It is the one hook
+that only **observes** — stdout ignored, nothing to refuse, nothing to rewrite.
+`on:` is mandatory and names the kinds it receives, because `assistant_token`
+fires once per streamed token. Delivery is off the turn's critical path, so a
+slow subscriber costs you events (the oldest are dropped and counted in the app
+log), never a stalled turn.
+
+Because a failed observer refuses nothing, it is silent at runtime.
+`shell3 health` is where a broken one surfaces: it checks that each declared
+command and subscriber function is defined, without running it — dry-running a
+command would post the message it exists to post.
 
 ## Telegram — `telegram:`
 

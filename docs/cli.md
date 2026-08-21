@@ -83,6 +83,10 @@ read-only page on `127.0.0.1` that `/dash` links you to (see
 | `/reload` | Re-read the config and apply it live. Takes the turn slot, so it is refused rather than raced while a turn runs. |
 | `/quiet on\|off` | Deliver ⏰/🔔 background posts silently — no notification ping (✉️ updates are always silent); replies to you and ⚠️ failures always ring. Bare `/quiet` reports the state, which persists in `~/.shell3/quiet_mode.json`. |
 
+Anything the kit declares with a `command:` block joins this list — its shell
+function answers the verb, the text after it arrives as `$ARG`, and stdout is
+the reply. See [kits.md](kits.md#commands).
+
 ### The web dash
 
 `shell3 telegram` and `shell3 serve` always bind a read-only HTTP dashboard

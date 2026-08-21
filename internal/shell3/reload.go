@@ -183,6 +183,11 @@ func (rt *Runtime) applyReload(st reloadState) (ReloadResult, error) {
 		// store handle is the old generation's, which closes when the parked
 		// cleanup drains — repoint reminders at the new generation's store.
 		s.sess.SetStore(st.store)
+		// Same reason as the store: the chat session survives the swap, but
+		// its kit event observer is bound to the OLD generation — whose event
+		// dispatcher oldCleanup closes. Repoint it, or an `event:` subscriber
+		// goes silent on the first reload and stays silent.
+		s.sess.SetOnEvent(cfg.OnEvent)
 		s.handlers = chat.NewHandlers()
 		// Re-apply the per-session host standing reminders: rt.sessionConfig
 		// rebuilt the cfg (including the Environment toggle) from the

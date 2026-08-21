@@ -24,6 +24,8 @@ A directory holding only `shell3.sh` and `.env` is a complete, runnable config.
 | **skill** | knowledge the agent reads on demand |
 | **gate** | what an agent may not do — runs before every tool call |
 | **note** | a remark attached to a tool's result — advice, never a refusal |
+| **command** | a `/verb` the front-end answers by running a shell function — no model turn, no tokens |
+| **event** | a subscriber on the session event stream — observes, never refuses |
 | **mcp** | an external tool server |
 | **memory** | a per-agent `memory.md` |
 | **cron** | a schedule bound to an (agent, prompt) pair — or, for mechanical work, a schedule bound directly to a tool |
@@ -44,9 +46,14 @@ Scoping is positional: an `agent:` or `shared:` block opens a scope, and every
 `tool:`, `skill:`, and `test:` block after it belongs to that scope until the
 next one opens.
 
-`gate:` and `note:` are the exception — they **name** the agents they govern
-and may sit anywhere in the file. One function usually governs several agents,
-and the alternative (a copy per agent) is how two sets of rules drift apart.
+`gate:`, `note:` and `event:` are the exception — they **name** the agents they
+govern and may sit anywhere in the file. One function usually governs several
+agents, and the alternative (a copy per agent) is how two sets of rules drift
+apart.
+
+`command:` is positional like `tool:` but belongs to no agent: a command is
+answered by the front-end, not by a model, so there is nothing for it to be
+scoped to.
 
 The file is **definitions only** at the top level. That is what makes two things
 true at once: loading a kit never executes it, and running one tool is just
@@ -308,6 +315,74 @@ main_note() {
 A failure here fails closed too: the output is replaced by an error notice
 rather than passed through unfiltered. Pass the original output through on
 every path you did not mean to touch.
+
+## Commands
+
+`command:` declares a `/verb` the front-end answers itself. There is no model
+turn and no tokens are spent — the shell function's stdout is the reply.
+
+```sh
+#---
+# command: standup
+# description: Yesterday's commits across my repos
+#---
+cmd_standup() {
+  cd ~/code || exit 1
+  for d in */; do
+    git -C "$d" log --since=yesterday --oneline 2>/dev/null | sed "s|^|${d%/}: |"
+  done
+}
+```
+
+Everything typed after the verb arrives as `$ARG` (`/standup week` →
+`ARG=week`). Empty output posts nothing, so an idempotent command with nothing
+to say stays silent; a nonzero exit posts the failure. Declared commands join
+the client's `/` autocomplete menu.
+
+A command may not be named after a built-in (`/dash`, `/stop`, `/superstop`,
+`/new`, `/run`, `/btw`, `/reload`, `/quiet`) — built-ins are matched first, so
+the declaration would never fire. That is a load error rather than a silent
+shadow.
+
+## Events
+
+`event:` subscribes a function to the session event stream. It **observes**:
+its stdout is ignored, and it can neither refuse nor rewrite anything. That is
+the whole difference from `gate:` and `note:`.
+
+```sh
+#---
+# event: [main]
+# on: [turn_done, error]
+#---
+ev_log() {
+  cat >> ~/.shell3/events.jsonl
+}
+```
+
+`on:` is **mandatory** and names the kinds this subscriber receives:
+`session_end`, `user_message`, `assistant_message`, `assistant_token`,
+`assistant_reasoning`, `tool_call`, `tool_result`, `error`, `usage`,
+`turn_done`, `system_reminder`, `retry`, `compacted`. It is not a convenience —
+`assistant_token` fires once per streamed token, so an unfiltered subscriber
+would fork a shell thousands of times per turn. An unknown kind is a load
+error.
+
+The event arrives as one JSON object on stdin: `event`, `agent`, `session`,
+`time`, plus whatever that kind carries (`text`, `role`, `tool`, `tool_input`,
+`output`, `tool_error`, `tool_call_id`, `usage`, `meta`). Text and tool output
+are capped at 4 KB — the full content is in the runs store, which is where a
+hook that needs it should look.
+
+Delivery is off the turn's critical path: events queue and a single worker runs
+the subscriber one at a time, so a slow hook never stalls a turn. If the queue
+fills, the **oldest** pending events are dropped and counted in the app log —
+gaps in an observer's view are recoverable, a stalled turn is not.
+
+Since a failed observer refuses nothing, it is silent at runtime (a warning in
+the app log). `shell3 health` is where a broken one surfaces: it checks that
+each declared command and subscriber function is defined, without running it —
+dry-running a command would post the message it exists to post.
 
 ## See also
 

@@ -29,6 +29,8 @@ const (
 	declTest
 	declGate
 	declNote
+	declCommand
+	declEvent
 	declWiring
 )
 
@@ -48,15 +50,19 @@ func (k declKind) String() string {
 		return "gate"
 	case declNote:
 		return "note"
+	case declCommand:
+		return "command"
+	case declEvent:
+		return "event"
 	default:
 		return "wiring"
 	}
 }
 
 // nameList is a YAML value that may be written as one name or a list of them.
-// Gates and notes are NAMED rather than positional — one function typically
-// governs several agents — so `gate: main` and `gate: [main, assistant]` are
-// both natural and both accepted.
+// Gates, notes and events are NAMED rather than positional — one function
+// typically governs several agents — so `gate: main` and
+// `gate: [main, assistant]` are both natural and both accepted.
 type nameList []string
 
 func (n *nameList) UnmarshalYAML(value *yaml.Node) error {
@@ -90,7 +96,8 @@ type decl struct {
 	mcpAll  bool
 	params  map[string]Param
 	wiring  map[string]any
-	agents  []string // declGate/declNote: the agents this block governs
+	agents  []string // declGate/declNote/declEvent: the agents this block governs
+	on      []string // declEvent: the event kinds this subscriber receives
 }
 
 // blockYAML is the strict shape every declaration block decodes into. Exactly
@@ -103,6 +110,11 @@ type blockYAML struct {
 	Test   string   `yaml:"test"`
 	Gate   nameList `yaml:"gate"`
 	Note   nameList `yaml:"note"`
+	Event  nameList `yaml:"event"`
+
+	// Command is install-wide rather than per-agent, so it names ITSELF the
+	// way tool:/skill: do, not the agents it governs the way gate: does.
+	Command string `yaml:"command"`
 
 	Description string           `yaml:"description"`
 	Model       string           `yaml:"model"`
@@ -111,6 +123,7 @@ type blockYAML struct {
 	Context     []string         `yaml:"context"`
 	MCP         nameList         `yaml:"mcp"`
 	Params      map[string]Param `yaml:"params"`
+	On          []string         `yaml:"on"`
 
 	Shell3 map[string]any `yaml:"shell3"`
 }
@@ -127,7 +140,7 @@ func decodeBlock(b block) (decl, error) {
 	d := decl{
 		line: b.line, endLine: b.endLine, desc: y.Description, model: y.Model,
 		workdir: y.Workdir, use: y.Use, context: y.Context, params: y.Params, wiring: y.Shell3,
-		mcp: y.MCP, mcpAll: len(y.MCP) == 1 && y.MCP[0] == "all",
+		mcp: y.MCP, mcpAll: len(y.MCP) == 1 && y.MCP[0] == "all", on: y.On,
 	}
 
 	kinds := []struct {
@@ -136,6 +149,7 @@ func decodeBlock(b block) (decl, error) {
 	}{
 		{declAgent, y.Agent}, {declShared, y.Shared},
 		{declTool, y.Tool}, {declSkill, y.Skill}, {declTest, y.Test},
+		{declCommand, y.Command},
 	}
 	found := 0
 	for _, c := range kinds {
@@ -147,7 +161,7 @@ func decodeBlock(b block) (decl, error) {
 	for _, c := range []struct {
 		k declKind
 		l nameList
-	}{{declGate, y.Gate}, {declNote, y.Note}} {
+	}{{declGate, y.Gate}, {declNote, y.Note}, {declEvent, y.Event}} {
 		if len(c.l) > 0 {
 			d.kind, d.agents, d.name = c.k, c.l, strings.Join(c.l, ", ")
 			found++
@@ -155,14 +169,14 @@ func decodeBlock(b block) (decl, error) {
 	}
 	switch {
 	case found > 1:
-		return decl{}, fmt.Errorf("line %d: declaration block names more than one of agent/shared/tool/skill/test/gate/note", b.line)
+		return decl{}, fmt.Errorf("line %d: declaration block names more than one of agent/shared/tool/skill/test/command/gate/note/event", b.line)
 	case found == 1:
 		return d, nil
 	case y.Shell3 != nil:
 		d.kind = declWiring
 		return d, nil
 	default:
-		return decl{}, fmt.Errorf("line %d: declaration block names no agent/shared/tool/skill/test/gate/note", b.line)
+		return decl{}, fmt.Errorf("line %d: declaration block names no agent/shared/tool/skill/test/command/gate/note/event", b.line)
 	}
 }
 

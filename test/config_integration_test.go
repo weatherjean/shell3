@@ -65,7 +65,7 @@ func loadKitConfig(t *testing.T, dir, body string, gates, notes map[string]strin
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	lc.SetKitHooks(filepath.Join(dir, config.KitFileName), "main", gates, notes)
+	lc.SetKitHooks(filepath.Join(dir, config.KitFileName), "main", config.KitHooks{Gates: gates, Notes: notes})
 	return lc
 }
 

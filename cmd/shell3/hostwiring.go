@@ -3,9 +3,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"maps"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
@@ -105,6 +108,11 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 	// default mail resumes the owning thread — or starts a fresh main-agent
 	// turn — whose reply posts as an ✉️ update.
 	rt.SetCompletionHost(b)
+
+	// Kit-declared commands (`command:`) join the built-in menu. Answered by
+	// a shell function with no model turn, so they cost nothing to run.
+	// Re-installed on reload, since a kit may add or drop one.
+	installKitCommands(b, rt)
 
 	// Redeliver what the previous process left undelivered (completions that
 	// raced a shutdown, jobs killed in flight) now that the host can carry
@@ -209,6 +217,9 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 		// reloadAndRearm wires the fresh scheduler's post callback itself,
 		// before starting it — see wireCronPost's ordering note.
 		ns, res, err := reloadAndRearm(rt, b, cronSess, tools, store, log, currentSched())
+		// A reload may add, rename, or drop a command; refresh the menu so
+		// the "/" list matches the kit that is actually loaded.
+		installKitCommands(b, rt)
 		schedMu.Lock()
 		sched = ns
 		schedMu.Unlock()
@@ -228,3 +239,25 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 // failed. Long enough that a hard outage costs a handful of retry sends per
 // hour, short enough that the ⚠️ lands minutes after the network returns.
 const redeliverEvery = 5 * time.Minute
+
+// installKitCommands points the bot at whatever commands the currently loaded
+// kit declares. Both the list (for the "/" menu) and the runner come from the
+// live Parts, so a reload that changes the kit changes both together.
+func installKitCommands(b *telegram.Bot, rt *shell3.Runtime) {
+	p := rt.Parts()
+	k := p.Kit()
+	if k == nil || len(k.Commands) == 0 {
+		b.SetKitCommands(nil, nil)
+		return
+	}
+	cmds := make([]telegram.KitCommand, 0, len(k.Commands))
+	for _, name := range slices.Sorted(maps.Keys(k.Commands)) {
+		cmds = append(cmds, telegram.KitCommand{Name: name, Desc: k.Commands[name].Desc})
+	}
+	// The config is resolved per call, not captured: a reload swaps Parts,
+	// and a runner holding the old LoadedConfig would keep sourcing the
+	// previous kit.
+	b.SetKitCommands(cmds, func(ctx context.Context, name, arg string) (string, error) {
+		return rt.Parts().LoadedConfig().RunCommand(ctx, name, arg)
+	})
+}

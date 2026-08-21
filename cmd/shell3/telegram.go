@@ -105,7 +105,7 @@ func newTelegramCommand() *cobra.Command {
 					"(a line continues the conversation, \"@<id> text\" quotes a message, \"/…\" = command, EOF quits)")
 			} else {
 				// Register the "/" command hints (best-effort).
-				if err := apiClient.SetCommands(ctx, telegram.BotCommands()); err != nil {
+				if err := apiClient.SetCommands(ctx, b.BotCommands()); err != nil {
 					fmt.Printf("warning: could not set commands: %v\n", err)
 				}
 				// Greet the chat (best-effort).
