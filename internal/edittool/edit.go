@@ -34,14 +34,14 @@ func EditFile(ctx context.Context, workDir, filePath, oldString, newString strin
 	abs := resolvePath(workDir, filePath)
 
 	if oldString == "" {
-		oldContent, rerr := readTextFile(abs)
+		oldContent, rerr := ReadTextFile(abs)
 		created := false
 		switch {
 		case rerr == nil:
 			created = false
 		case errors.Is(rerr, os.ErrNotExist):
 			oldContent, created = "", true
-		case errors.Is(rerr, errIsDir):
+		case errors.Is(rerr, ErrIsDir):
 			return Result{}, fmt.Errorf("path is a directory, not a file: %s", abs)
 		default:
 			return Result{}, rerr
@@ -53,12 +53,12 @@ func EditFile(ctx context.Context, workDir, filePath, oldString, newString strin
 		return Result{Path: abs, OldContent: oldContent, NewContent: newString, Created: created, Additions: add, Deletions: del}, nil
 	}
 
-	original, err := readTextFile(abs)
+	original, err := ReadTextFile(abs)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Result{}, fmt.Errorf("file %s not found", abs)
 		}
-		if errors.Is(err, errIsDir) {
+		if errors.Is(err, ErrIsDir) {
 			return Result{}, fmt.Errorf("path is a directory, not a file: %s", abs)
 		}
 		return Result{}, err

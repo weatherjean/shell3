@@ -204,7 +204,7 @@ func EnvironmentReminder(configDir, runsDir, model, sessionID string) string {
 		// Name what is actually on disk. A reminder that lists files the
 		// install does not have teaches the model a layout it will then
 		// contradict itself about.
-		fmt.Fprintf(&b, "- config: `%s` (your config directory: %s (wiring, agents, tools, the gate), skills/, projects/<agent>/skills/ — edit it via the self-evolve skill)\n", configDir, KitFileName)
+		fmt.Fprintf(&b, "- config: `%s` (your config directory: %s (wiring, agents, tools, the gate), skills/, projects/<agent>/skills/ — edit it via the self-evolve skill)\n", configDir, kit.FileName)
 	}
 	// Derive the model-facing paths from paths.ProjectDirName (its single
 	// source): a renamed project dir must not leave the reminder teaching the
@@ -373,7 +373,7 @@ func BuildParts(opts Options) (*Parts, func(), error) {
 	// A shell3.sh beside the config is THE config: its agents, tools, and
 	// skills take precedence over the markdown tree. Presence enables it —
 	// there is no toggle.
-	if kp := filepath.Join(b.configDir, KitFileName); fileExists(kp) {
+	if kp := filepath.Join(b.configDir, kit.FileName); fileExists(kp) {
 		if err := p.LoadKit(kp); err != nil {
 			b.closeAll()
 			return nil, noop, err
@@ -381,9 +381,6 @@ func BuildParts(opts Options) (*Parts, func(), error) {
 	}
 	return p, b.closeAll, nil
 }
-
-// KitFileName is the kit a config directory is read from when present.
-const KitFileName = "shell3.sh"
 
 // builder accumulates the state and open resources used to assemble the shared
 // Parts across BuildParts' stages. closers is a LIFO teardown stack: stages
@@ -566,10 +563,10 @@ func ResolveConfigDir(flag, homeDir string) (string, error) {
 	}
 	// The kit is the config: it carries its wiring in a `shell3:` block, its
 	// agents, its tools and its gate.
-	if fileExists(filepath.Join(dir, KitFileName)) {
+	if fileExists(filepath.Join(dir, kit.FileName)) {
 		return dir, nil
 	}
-	return "", fmt.Errorf("no %s in %s — run 'shell3 boot' to create one (or pass --config <dir>)", KitFileName, dir)
+	return "", fmt.Errorf("no %s in %s — run 'shell3 boot' to create one (or pass --config <dir>)", kit.FileName, dir)
 }
 
 func fileExists(p string) bool {

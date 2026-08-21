@@ -32,10 +32,6 @@ type Model struct {
 	RunProxy string
 }
 
-type ToolGates struct {
-	Bash, BashBg, Edit, Media, Read, List, History bool
-}
-
 // Skill is one resolved *.md from the skills/ dir, surfaced as a one-line
 // entry in the ## Skills index; the agent reads the body at Path (absolute)
 // with `cat` when the skill applies.

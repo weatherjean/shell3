@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/weatherjean/shell3/internal/kit"
 )
 
 // hookSet maps each governed agent to its declared hook, keyed by agent: ""
@@ -29,11 +31,6 @@ type hookRef struct {
 }
 
 func (h hookRef) empty() bool { return h.fn == "" }
-
-// shellQuote single-quotes a path for safe interpolation into the source line.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
 
 // label names the hook for an error message: kit:function.
 func (h hookRef) label() string {
@@ -174,7 +171,7 @@ func runHook(ctx context.Context, cfgDir string, ref hookRef, payload any) ([]by
 	// precisely because the kit parser rejects top-level statements — a kit
 	// defines functions and does nothing else, so this costs a parse and runs
 	// no side effects.
-	script := fmt.Sprintf("set -uo pipefail; source %s; %s", shellQuote(ref.kit), ref.fn)
+	script := fmt.Sprintf("set -uo pipefail; source %s; %s", kit.ShellQuote(ref.kit), ref.fn)
 	cmd := exec.CommandContext(hctx, "bash", "-c", script)
 	cmd.Dir = cfgDir
 	// A killed hook may leave children holding the stdout pipe (e.g. a

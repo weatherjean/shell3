@@ -142,19 +142,9 @@ func findTool(path, name string) (*kit.Kit, kit.Tool, error) {
 	if err != nil {
 		return nil, kit.Tool{}, err
 	}
-	for _, a := range k.Agents {
-		for _, t := range a.Tools {
-			if t.Name == name {
-				return k, t, nil
-			}
-		}
+	t, ok := k.ToolByName(name)
+	if !ok {
+		return nil, kit.Tool{}, fmt.Errorf("kit %s declares no tool %q", path, name)
 	}
-	for _, g := range k.Shared {
-		for _, t := range g.Tools {
-			if t.Name == name {
-				return k, t, nil
-			}
-		}
-	}
-	return nil, kit.Tool{}, fmt.Errorf("kit %s declares no tool %q", path, name)
+	return k, t, nil
 }

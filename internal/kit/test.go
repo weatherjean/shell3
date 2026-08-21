@@ -44,7 +44,7 @@ func (k *Kit) RunTests(ctx context.Context, path string, a Agent, only string) (
 		return TestResult{}, fmt.Errorf("test stub dir: %w", err)
 	}
 
-	full := fmt.Sprintf("source %s\n%s", shellQuote(abs), script)
+	full := fmt.Sprintf("source %s\n%s", ShellQuote(abs), script)
 	cmd := exec.CommandContext(ctx, "bash", "-c", full)
 	cmd.Dir = filepath.Dir(abs)
 	cmd.Env = append(os.Environ(),

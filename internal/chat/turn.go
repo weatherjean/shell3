@@ -344,18 +344,15 @@ func attachmentsMessage(readMedia, userSent []llm.ContentPart) (llm.Message, boo
 	}, true
 }
 
-// toolLoopOutcome reports how a turn's tool-execution loop ended.
-type toolLoopOutcome struct {
+// toolLoopState is the mutable state one tool-execution loop threads through
+// its handlers, and — dereferenced — the outcome it reports: the working
+// message slice and the media parts read_media collects for post-loop
+// injection. These were two identical structs (toolLoopOutcome and
+// toolLoopState) in this same file, converted into each other field by field
+// at every return.
+type toolLoopState struct {
 	allMsgs      []llm.Message     // updated slice
 	pendingMedia []llm.ContentPart // media loaded by read_media, injected as a user message after the loop
-}
-
-// toolLoopState is the mutable state one tool-execution loop threads through
-// its handlers: the working message slice and the media parts read_media
-// collects for post-loop injection.
-type toolLoopState struct {
-	allMsgs      []llm.Message
-	pendingMedia []llm.ContentPart
 }
 
 // turnScopedHandlers builds the ToolHandlers that exist per tool loop rather
@@ -382,7 +379,7 @@ func turnScopedHandlers(cfg TurnConfig, st *toolLoopState) map[string]ToolHandle
 //     emits an error terminal event and ends the turn.
 //   - otherwise the loop completed normally; outcome.allMsgs carries the
 //     updated message slice for the next round.
-func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCalls []llm.ToolCall, toolSchemas map[string]map[string]any, allMsgs []llm.Message) (toolLoopOutcome, error) {
+func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCalls []llm.ToolCall, toolSchemas map[string]map[string]any, allMsgs []llm.Message) (toolLoopState, error) {
 	st := &toolLoopState{allMsgs: allMsgs}
 	turnScoped := turnScopedHandlers(cfg, st)
 	for i, tc := range toolCalls {
@@ -396,7 +393,7 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 			for _, rem := range toolCalls[i:] {
 				appendToolResult(sess, st, rem, errResult("error: tool call cancelled"))
 			}
-			return toolLoopOutcome{allMsgs: st.allMsgs, pendingMedia: st.pendingMedia}, ctx.Err()
+			return *st, ctx.Err()
 		}
 
 		emitToolCall(sess, tc.ID, tc.Name, tc.RawArgs)
@@ -454,9 +451,9 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 	}
 
 	if ctx.Err() != nil {
-		return toolLoopOutcome{allMsgs: st.allMsgs, pendingMedia: st.pendingMedia}, ctx.Err()
+		return *st, ctx.Err()
 	}
-	return toolLoopOutcome{allMsgs: st.allMsgs, pendingMedia: st.pendingMedia}, nil
+	return *st, nil
 }
 
 // appendToolResult emits the tool_result event and appends the tool message to

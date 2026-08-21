@@ -13,7 +13,7 @@ func TestReadWriteRoundTrip(t *testing.T) {
 	if err := writeTextFile(p, "hello\n"); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	got, err := readTextFile(p)
+	got, err := ReadTextFile(p)
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
@@ -23,16 +23,16 @@ func TestReadWriteRoundTrip(t *testing.T) {
 }
 
 func TestReadMissingIsErrNotExist(t *testing.T) {
-	_, err := readTextFile(filepath.Join(t.TempDir(), "nope.txt"))
+	_, err := ReadTextFile(filepath.Join(t.TempDir(), "nope.txt"))
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("want os.ErrNotExist, got %v", err)
 	}
 }
 
 func TestReadDirIsErrIsDir(t *testing.T) {
-	_, err := readTextFile(t.TempDir())
-	if !errors.Is(err, errIsDir) {
-		t.Fatalf("want errIsDir, got %v", err)
+	_, err := ReadTextFile(t.TempDir())
+	if !errors.Is(err, ErrIsDir) {
+		t.Fatalf("want ErrIsDir, got %v", err)
 	}
 }
 
