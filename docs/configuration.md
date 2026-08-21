@@ -345,7 +345,7 @@ For tools that live behind the [Model Context Protocol](https://modelcontextprot
 shell3 ships a tools-only MCP client (official Go SDK): stdio and streamable
 HTTP transports, no OAuth/resources/prompts (a remote server that needs auth
 takes a bearer header from `.env`). Declare servers once in the wiring;
-each agent opts in via `mcp:` in its frontmatter:
+each agent opts in via `mcp:` in its `agent:` block:
 
 ```yaml
 mcp:
@@ -359,12 +359,13 @@ mcp:
     allow: [search_issues, get_issue]   # or deny: [...] (not both)
 ```
 
-```markdown
----
-model: main
-tools: [bash]
-mcp: [github, linear]     # or mcp: all; omitted = NO MCP tools
----
+```bash
+#---
+# agent: main
+# model: main
+# use: [bash]
+# mcp: [github, linear]     # or mcp: all; omitted = NO MCP tools
+#---
 ```
 
 Servers connect at startup (and on reload), in parallel, each under its
@@ -605,9 +606,9 @@ always live (resolved per request), only the listener itself is fixed.
 ## Attachments and media
 
 There is no `media:` config block — voice transcription, speech, and image
-generation are not built-in services; they are wrapper scripts you write
-and drop into `~/.shell3/lib/bin/`, documented with a full working
-`stt.sh`/`say.sh`/`imagegen.sh` set in
+generation are not built-in services; they are tools you declare in your
+kit, with a full working `transcribe`/`say`/`image` set (each reading its
+own key from `.env` at point of use) in
 [cookbook/voice-images.md](cookbook/voice-images.md). What ships:
 
 - **Attachments.** Every file sent to the bot is saved to the media dir

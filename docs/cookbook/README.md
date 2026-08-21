@@ -64,16 +64,16 @@ scaffold's own `writing-code` skill for in-line TDD work.)
 
 **Employees** (`lib/agents/` here → `agent:` blocks in your `~/.shell3/shell3.sh`)
 
-- `review.md` — a review specialist instructed never to edit (a hook
-  allowlist makes that enforced); copying the file in IS the registration
-  (the task tool picks it up on the next reload).
+- `review.md` — a review specialist instructed never to edit (name it in a
+  `gate:` block to enforce that); pasting its `agent:` block into your
+  `shell3.sh` IS the registration (the task tool picks it up on the next
+  reload).
 
 **Provider and host recipes**
 
 - `service.md` — run the bot as a service: a systemd user unit, one paste.
 - `mcp.md` — MCP servers: stdio + HTTP recipes, allow-lists, gating.
-- `sandbox.md` — sandbox/route bash via hook argv verdicts.
-- `voice-images.md` — voice + images as wrapper scripts: `stt.sh`
-  (whisper.cpp local, or Groq/OpenAI-compatible transcription), `say.sh`
-  (macOS `say`/`espeak-ng` to ogg/opus), `imagegen.sh` (OpenAI or
-  OpenRouter).
+- `sandbox.md` — sandbox/route bash via `gate:` argv verdicts.
+- `voice-images.md` — voice + images as declared kit tools: `transcribe`
+  (Groq/OpenAI-compatible transcription), `say` (OpenAI-compatible speech to
+  ogg/opus), and an image generator. Paste each into your `shell3.sh`.

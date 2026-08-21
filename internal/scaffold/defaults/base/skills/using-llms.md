@@ -51,6 +51,6 @@ disappears.
 ## Choosing the persona
 
 One subagent per job, not one for everything. Give it the narrowest tools it
-needs — usually `tools: []`, since drafting or classifying from a prompt needs
+needs — usually `use: []`, since drafting or classifying from a prompt needs
 none, and an empty tool list is both faster and safer when the prompt is built
 from text you scraped rather than wrote.

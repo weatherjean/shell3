@@ -5,12 +5,13 @@ description: Use when the user tells you to remember something, change how you b
 
 # Changing yourself
 
-Your whole configuration is one file plus two directories:
+Your whole configuration is one directory:
 
     ~/.shell3/
-      shell3.sh                    wiring, every agent, every tool
+      shell3.sh                    wiring, every agent, every tool, the gate
       skills/                      your skills — one .md per skill
       projects/<agent>/skills/     an employee's skills
+      cron/<name>.md               scheduled jobs
       memory.md                    your durable facts
       .env                         secrets — never read, never print
 
