@@ -116,27 +116,7 @@ func (p *Parts) KitAgentRuntime(name string) (chat.ActiveAgent, error) {
 	p.proxy.Ensure(md.Name, md.RunProxy)
 	client, rp := buildClient(md)
 
-	gates := config.ToolGates{}
-	for _, b := range r.Builtins {
-		switch b {
-		case "bash":
-			gates.Bash = true
-		case "bash_bg":
-			gates.BashBg = true
-		case "edit":
-			gates.Edit = true
-		case "media":
-			gates.Media = true
-		case "read":
-			gates.Read = true
-		case "list_files":
-			gates.List = true
-		case "history":
-			gates.History = true
-		}
-	}
-
-	defs := append(config.ToolDefs(gates), r.ToolDefs()...)
+	defs := append(config.ToolDefs(r.Builtins), r.ToolDefs()...)
 
 	// Delegation: the main agent gets the task tool with every other kit agent
 	// as an allowed target. Employees never get it — delegation is one level,

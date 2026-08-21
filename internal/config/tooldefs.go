@@ -1,35 +1,44 @@
 package config
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
-// ToolDefs returns the llm.ToolDefinition schema list for an agent: each
-// built-in tool whose gate is enabled (bash, edit, …).
-func ToolDefs(g ToolGates) []llm.ToolDefinition {
+// builtins is the one table mapping a built-in's kit name (what an agent
+// writes in `use:`) to the schema the model receives. It is ordered, so
+// ToolDefs emits a stable list regardless of the order the names arrive in —
+// a tool list that reshuffles per turn would invalidate the prompt cache.
+//
+// This used to be spelled four times: kit.Builtins, a ToolGates struct of
+// seven bools, an if-chain here, and a name→bool switch in agentsetup. Adding
+// a built-in meant editing all four and silently getting a tool the model
+// could see but not call if you missed one.
+var builtins = []struct {
+	Name string
+	Def  llm.ToolDefinition
+}{
+	{"bash", bashTool},
+	{"bash_bg", bashBgTool},
+	{"edit", editFileTool},
+	{"media", readMediaTool},
+	{"read", readTool},
+	{"list_files", listFilesTool},
+	{"history", historyTool},
+}
+
+// ToolDefs returns the llm.ToolDefinition schema list for the built-in tool
+// names an agent resolved to (kit.Resolved.Builtins). Unknown names are
+// ignored here — kit.Resolve has already rejected them, and this is the
+// rendering half.
+func ToolDefs(names []string) []llm.ToolDefinition {
 	defs := []llm.ToolDefinition{}
-	if g.Bash {
-		defs = append(defs, bashTool)
-	}
-	if g.BashBg {
-		defs = append(defs, bashBgTool)
-	}
-	if g.Edit {
-		defs = append(defs, editFileTool)
-	}
-	if g.Media {
-		defs = append(defs, readMediaTool)
-	}
-	if g.Read {
-		defs = append(defs, readTool)
-	}
-	if g.List {
-		defs = append(defs, listFilesTool)
-	}
-	if g.History {
-		defs = append(defs, historyTool)
+	for _, b := range builtins {
+		if slices.Contains(names, b.Name) {
+			defs = append(defs, b.Def)
+		}
 	}
 	return defs
 }

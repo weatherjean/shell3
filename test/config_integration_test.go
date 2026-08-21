@@ -176,7 +176,7 @@ func runToolCallTurn(t *testing.T, lc *config.LoadedConfig, dir, prompt string, 
 			{Usage: &llm.Usage{PromptTokens: 5, CompletionTokens: 1, TotalTokens: 6}},
 		}},
 	)
-	toolDefs := config.ToolDefs(config.ToolGates{Bash: true, Read: true})
+	toolDefs := config.ToolDefs([]string{"bash", "read"})
 
 	var events []chat.Event
 	sess := chat.NewSession(chat.SessionOpts{Sink: func(ev chat.Event) { events = append(events, ev) }})
