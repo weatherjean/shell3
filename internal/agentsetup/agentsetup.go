@@ -134,8 +134,13 @@ func (p *Parts) AgentCount() int {
 // Telegram returns the parsed telegram: block (zero value if absent).
 func (p *Parts) Telegram() config.TelegramConfig { return p.lc.Telegram() }
 
-// Cron returns the jobs declared as cron/<name>.md files.
-func (p *Parts) Cron() []config.CronJob { return p.lc.Cron() }
+// Cron returns the kit's `cron:` jobs, in declaration order.
+func (p *Parts) Cron() []kit.CronJob {
+	if p.kit == nil {
+		return nil
+	}
+	return p.kit.Crons
+}
 
 // RunsKeepDays returns `runs_keep_days` (always populated at load — default
 // 30; 0 = keep forever). Read by the runs janitor at `shell3 telegram` startup.

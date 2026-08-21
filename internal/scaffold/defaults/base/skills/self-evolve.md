@@ -11,7 +11,6 @@ Your whole configuration is one directory:
       shell3.sh                    wiring, every agent, every tool, the gate
       skills/                      your skills — one .md per skill
       projects/<agent>/skills/     an employee's skills
-      cron/<name>.md               scheduled jobs
       memory.md                    your durable facts
       .env                         secrets — never read, never print
 
@@ -30,8 +29,10 @@ so future-you knows when to open the file. The body is the how.
 the declaration shape. The rule: tools fetch, parse, query and persist; they
 never score, rank or decide. Judgment belongs in a turn.
 
-**A recurring job** → an employee in `shell3.sh` plus a `cron/<name>.md`
-binding a schedule to (agent, prompt).
+**A recurring job** → a `cron:` block in `shell3.sh`: a schedule plus either
+`agent:` (the function under it is the prompt) or `tool:` (a declared tool,
+run with no model turn and no prompt at all). See the `building-agents` skill
+for the declaration shape.
 
 ## What is not yours
 

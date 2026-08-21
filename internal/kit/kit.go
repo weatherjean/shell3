@@ -5,6 +5,8 @@ import (
 	"maps"
 	"slices"
 	"strings"
+
+	robcron "github.com/robfig/cron/v3"
 )
 
 // FileName is the kit a config directory is read from. Its presence is what
@@ -84,6 +86,30 @@ var ReservedCommands = []string{
 	"quiet",
 }
 
+// CronJob is one declared scheduled job. Exactly one of Agent (dispatch that
+// agent with Prompt) or Tool (run that kit tool directly, with no model turn)
+// is set; the tool form binds no function at all, so Func and Prompt are
+// empty. Jobs are declaration-ordered — nothing depends on the order, but it
+// is stable, where the cron/<name>.md format it replaced was filename-sorted.
+type CronJob struct {
+	Name, Schedule, Agent, Tool string
+	// Prompt is the agent job's prompt, read statically from the heredoc in
+	// the function under the block — the same way an agent's own prompt is.
+	Prompt string
+	// Func is the function the prompt was read out of. Kept for the same
+	// reason Agent.PromptFunc is: it names the definition an author's error
+	// points at.
+	Func string
+	// WorkDir overrides the shell the job runs in.
+	WorkDir string
+	// Direct posts the run's raw result straight to the user, skipping the
+	// default agent-mail turn. The cost valve: a default tick wakes the main
+	// model to judge its result; a direct one costs no tokens at all. Only an
+	// agent job may set it — a tool job already posts its own result.
+	Direct bool
+	Line   int
+}
+
 // Test is one declared tool test; Func runs it under the test harness.
 type Test struct {
 	Name, Func string
@@ -135,6 +161,8 @@ type Kit struct {
 	// Commands maps a command name to its declaration. Keyed by command
 	// rather than by agent: a host command belongs to the install.
 	Commands map[string]Command
+	// Crons are the scheduled jobs, in declaration order.
+	Crons []CronJob
 }
 
 // Parse turns kit source into typed declarations. It never executes the file.
@@ -250,6 +278,21 @@ func Parse(src []byte) (*Kit, error) {
 			}
 			k.Commands[d.name] = Command{Name: d.name, Desc: d.desc, Func: f.name, Line: d.line}
 
+		case declCron:
+			// Positional in form like tool:/command:, but scoped to NOTHING:
+			// a job names its own target agent, so it must not open, close,
+			// or disturb the scope tool:/skill: blocks file into.
+			job, jerr := cronFromDecl(d, srcLines, nextFunc)
+			if jerr != nil {
+				return nil, jerr
+			}
+			for _, prev := range k.Crons {
+				if prev.Name == job.Name {
+					return nil, fmt.Errorf("line %d: cron %q is already declared at line %d", d.line, job.Name, prev.Line)
+				}
+			}
+			k.Crons = append(k.Crons, job)
+
 		case declGate, declNote, declEvent:
 			// Gates and notes are NOT positional: they name the agents they
 			// govern, because one function usually governs several (a subagent
@@ -334,7 +377,96 @@ func Parse(src []byte) (*Kit, error) {
 			return nil, fmt.Errorf("event names agent %q, which this kit does not declare", agent)
 		}
 	}
+	// Cron targets resolve here for the same reason gate targets do: a job
+	// that cannot fire must fail at load, not at 3am on its first tick, in
+	// the app log, hours after anyone looked.
+	if err := checkCronTargets(k, known); err != nil {
+		return nil, err
+	}
 	return k, nil
+}
+
+// cronFromDecl validates one cron: block and reads an agent job's prompt.
+func cronFromDecl(d decl, srcLines []string, nextFunc func(int) (fnDef, bool)) (CronJob, error) {
+	if d.schedule == "" {
+		return CronJob{}, fmt.Errorf("line %d: cron %q needs a schedule", d.line, d.name)
+	}
+	// The same parser cron.New uses at arm time, so a schedule that loads is
+	// a schedule that boots.
+	if _, err := robcron.ParseStandard(d.schedule); err != nil {
+		return CronJob{}, fmt.Errorf("line %d: cron %q has invalid schedule %q: %v", d.line, d.name, d.schedule, err)
+	}
+	// A job is either a prompt (agent:) or a tool call (tool:), never both
+	// and never neither — a job with no move at all is a config mistake, not
+	// a no-op.
+	switch {
+	case d.cronAgnt != "" && d.cronTool != "":
+		return CronJob{}, fmt.Errorf("line %d: cron %q sets both agent: and tool: — exactly one of agent: or tool: (a job is either a prompt or a tool call)", d.line, d.name)
+	case d.cronAgnt == "" && d.cronTool == "":
+		return CronJob{}, fmt.Errorf("line %d: cron %q needs exactly one of agent: or tool: (a job is either a prompt or a tool call)", d.line, d.name)
+	case d.cronTool != "" && d.direct:
+		// direct: true only means something for an agent job (raw post, no
+		// report turn) — a tool job already posts its own result with no
+		// agent turn around it at all, so direct: true on one is a no-op
+		// that silently does nothing.
+		return CronJob{}, fmt.Errorf("line %d: cron %q sets both tool: and direct: — direct only applies to an agent: job (a tool job already posts its own result with no agent turn)", d.line, d.name)
+	}
+	job := CronJob{
+		Name: d.name, Schedule: d.schedule, Agent: d.cronAgnt, Tool: d.cronTool,
+		WorkDir: d.workdir, Direct: d.direct, Line: d.line,
+	}
+	if job.Tool != "" {
+		// A tool job has no prompt, so it binds NO function: the next
+		// definition in the file is somebody else's implementation.
+		return job, nil
+	}
+	f, ok := nextFunc(d.endLine)
+	if !ok {
+		return CronJob{}, fmt.Errorf("line %d: cron %q has no prompt function under it", d.line, d.name)
+	}
+	prompt, perr := extractHeredoc(srcLines, f.line, "cron", d.name)
+	if perr != nil {
+		return CronJob{}, fmt.Errorf("line %d: %w", d.line, perr)
+	}
+	job.Func, job.Prompt = f.name, prompt
+	return job, nil
+}
+
+// checkCronTargets resolves every job's agent or tool against the whole kit.
+// A tool job names no agent, so there is no Resolved capability set to search
+// — the operator scheduling a tool they declared themselves is the trust
+// boundary, and positional use: scoping still bounds what a MODEL may call.
+func checkCronTargets(k *Kit, known map[string]bool) error {
+	for _, j := range k.Crons {
+		if j.Tool == "" {
+			if !known[j.Agent] {
+				return fmt.Errorf("line %d: cron %q names agent %q, which this kit does not declare", j.Line, j.Name, j.Agent)
+			}
+			continue
+		}
+		matches := k.ToolMatches(j.Tool)
+		switch len(matches) {
+		case 0:
+			return fmt.Errorf("line %d: cron %q names tool %q, which this kit does not declare", j.Line, j.Name, j.Tool)
+		case 1:
+		default:
+			// Two scopes may each legally declare the same tool name (the
+			// duplicate check is per-scope, not kit-wide). A cron tool job
+			// names no agent to disambiguate, so first-match-wins would run
+			// whichever function happened to parse first, silently.
+			scopes := make([]string, len(matches))
+			for i, m := range matches {
+				scopes[i] = m.Scope
+			}
+			return fmt.Errorf("line %d: cron %q names tool %q, which is declared in more than one scope (%s) — rename one so resolution is unambiguous", j.Line, j.Name, j.Tool, strings.Join(scopes, ", "))
+		}
+		for pname, p := range matches[0].Tool.Params {
+			if p.Required {
+				return fmt.Errorf("line %d: cron %q runs tool %q, which requires argument %q — a cron tool job passes no arguments", j.Line, j.Name, j.Tool, pname)
+			}
+		}
+	}
+	return nil
 }
 
 // attach files a tool/skill/test onto whichever scope is open.

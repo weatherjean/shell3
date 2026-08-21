@@ -362,3 +362,40 @@ main_gate() {
 
   allow
 }
+
+# =============================================================================
+# Scheduled jobs
+# =============================================================================
+# A cron: block binds a schedule to one job. Two forms:
+#
+#   an AGENT job — the function under the block is the prompt, and the run's
+#   result reaches the main agent as a task report, which posts an ✉️ update
+#   only when the run carries something worth saying. `direct: true` skips
+#   that judgment turn and posts the raw result instead, costing no tokens.
+#
+#   a TOOL job — `tool: <name>` runs a declared tool with no model turn at
+#   all. It binds no function and takes no prompt. Silent on an empty result,
+#   so an idempotent sync can tick often and cost nothing.
+#
+# schedule is robfig/cron syntax: "@every 30m", "@daily", or a 5-field spec
+# like "*/30 8-22 * * *" (every 30 min, 8am-10pm — active hours only).
+#
+# The example below is inert: its fences are written ##--- so the parser skips
+# them. Delete one # from each fence line to arm it.
+#
+# ##---
+# # cron: checklist
+# # schedule: "@every 30m"
+# # agent: assistant
+# ##---
+# cron_checklist() { cat <<'EOF'
+# Periodic check-in. Work through the checklist with your tools. Each run is a
+# fresh conversation — if a check must not repeat, track its state in a file.
+#
+# Checklist:
+# - Anything urgent on disk or in the running jobs that needs my human?
+#
+# If something needs attention, reply with a concise alert and nothing else.
+# If nothing does, say briefly that all is quiet.
+# EOF
+# }

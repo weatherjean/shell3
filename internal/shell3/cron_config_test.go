@@ -11,8 +11,17 @@ func TestRuntime_CronConfig(t *testing.T) {
 	dir := t.TempDir()
 	writeBaseTree(t, dir, map[string]string{
 		"shell3.sh": baseWiring + kitAgentDecl("main", "hi") +
-			kitAgentDecl("explorer", "p", "description: d"),
-		"cron/n.md": "---\nschedule: \"@daily\"\nagent: explorer\n---\ngo\n",
+			kitAgentDecl("explorer", "p", "description: d") + `
+#---
+# cron: n
+# schedule: "@daily"
+# agent: explorer
+#---
+cron_n() { cat <<'EOF2'
+go
+EOF2
+}
+`,
 	})
 	rt, err := shell3.NewRuntime(context.Background(), shell3.RuntimeSpec{ConfigDir: dir, WorkDir: dir})
 	if err != nil {

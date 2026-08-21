@@ -27,7 +27,6 @@ Four rules:
   memory.md              # a context: file the scaffold wires in by default
   skills/<name>.md       # main-agent skills; drop a file in, reload
   projects/<agent>/skills/<name>.md   # an employee's own skills
-  cron/<name>.md         # scheduled jobs (checklists included — see below)
   lib/bin/<script>       # reusable glue the agent runs through bash
 ```
 
@@ -661,31 +660,37 @@ paths, re-readable with `read_media` and re-sendable with
 grows until you prune it or set
 [`media_keep_days`](#the-media-janitor--media_keep_days).
 
-## Scheduled jobs — `cron/`
+## Scheduled jobs — `cron:`
 
-One file per job; the filename is the job name. Frontmatter takes exactly one
-of `agent:` or `tool:` — a job is either a prompt or a tool call, never both,
-never neither. A `tool:` job runs a kit tool's shell function directly, with
-no agent and no model turn (see [kits.md](kits.md#cron)). An `agent:` job
-fires a kit-declared agent on `schedule` (cron expression or
-`@daily`/`@hourly`/…), with the body as its prompt. An employee that declares
-a `workdir` runs its job there, so a scheduled job can dispatch straight into
-a project's standing context. `shell3 health` fails a job naming an agent or
-a tool the kit does not declare. The scheduler runs inside
+One `cron:` block per job in the kit; the block names the job. It takes
+exactly one of `agent:` or `tool:` — a job is either a prompt or a tool call,
+never both, never neither. A `tool:` job runs a kit tool's shell function
+directly, with no agent and no model turn (see [kits.md](kits.md#cron)). An
+`agent:` job fires a kit-declared agent on `schedule` (cron expression or
+`@daily`/`@hourly`/…), with the heredoc in the function under the block as
+its prompt. An employee that declares a `workdir` runs its job there, so a
+scheduled job can dispatch straight into a project's standing context. A job
+naming an agent or a tool the kit does not declare is a **load error** — the
+config does not start, rather than failing on the first tick. The scheduler
+runs inside
 `shell3 telegram`, dispatching each job from a hidden, pinned `cron` parent
 session. Interval schedules (`@every 30m`) count from when the scheduler
 arms, and a `/reload` or restart re-arms it — so the tick after one lands a
 full interval later, which can look like a skipped run. Cron *expressions*
 (`*/30 * * * *`) fire on wall-clock times and don't shift.
 
-```markdown
----
-schedule: "@daily"
-agent: assistant
+```sh
+#---
+# cron: daily-summary
+# schedule: "@daily"
+# agent: assistant
 # direct: true          # optional; post the raw result (see below)
 # workdir: /some/path   # optional; defaults to the config dir
----
+#---
+cron_daily_summary() { cat <<'EOF'
 Summarize anything noteworthy from the last day.
+EOF
+}
 ```
 
 A cron run's result arrives as **mail to the main agent** (see
@@ -702,7 +707,9 @@ a ⏰ message, costing no agent turn — for jobs whose output should be
 reported verbatim, not judged. `workdir` sets the job's working directory; the
 default is the dispatched agent's own — a project manager runs in its
 project's `workdir`, everything else in the config dir — and setting it
-overrides even a manager's. A reload arms changed files.
+overrides even a manager's. `direct:` applies only to an `agent:` job; a tool
+job already posts its own result, so setting both is a load error. A reload
+arms changed jobs.
 
 The dash's Cron table lists every job with its schedule, agent, `direct` flag,
 last run and outcome, and its rolling 7-day dispatched-run token cost where
@@ -710,8 +717,10 @@ known — the dash is the one dashboard; there is no cron command.
 `/run <name>` fires one by hand — the result travels the usual mail route,
 exactly as a scheduled firing would.
 
-The scaffold ships a checklist example as `cron/checklist.md.example` —
-rename it to `checklist.md` (drop the `.example`) and reload to activate it.
+The scaffold ships a checklist example commented out at the foot of the kit —
+its fences are written `##---` so the parser skips them (a declaration block
+*is* a comment fence, so a genuinely commented example would otherwise be an
+armed job). Drop one `#` from each fence line and reload to activate it.
 
 ## Task reports
 
@@ -724,7 +733,7 @@ rules:
   the chat, unconditionally. If the owning session is still live it also
   receives the report so the agent can react; an ownerless failure (a broken
   cron job, say) stops at the post — no agent turn is spent per broken tick.
-- **`direct: true`** (bash_bg arg, task arg, cron frontmatter) posts the
+- **`direct: true`** (bash_bg arg, task arg, cron block) posts the
   **raw result** straight to the chat — ⏰-prefixed for cron, 🔔 otherwise —
   costing no agent turn. The owning session gets the report queued, without
   a turn, so its next turn has it in context.

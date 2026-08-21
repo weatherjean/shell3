@@ -9,7 +9,6 @@ every employee it can dispatch, and the tools and knowledge each of them has.
   .env           secrets
   skills/        main-agent skills
   projects/<agent>/skills/   an employee's own skills
-  cron/          schedules
   lib/bin/       reusable glue the agent runs through bash
 ```
 
@@ -28,7 +27,7 @@ A directory holding only `shell3.sh` and `.env` is a complete, runnable config.
 | **event** | a subscriber on the session event stream — observes, never refuses |
 | **mcp** | an external tool server |
 | **memory** | a per-agent `memory.md` |
-| **cron** | a schedule bound to an (agent, prompt) pair — or, for mechanical work, a schedule bound directly to a tool |
+| **cron** | a schedule bound to an agent + prompt — or, for mechanical work, bound directly to a tool |
 
 ## Grammar
 
@@ -51,9 +50,12 @@ govern and may sit anywhere in the file. One function usually governs several
 agents, and the alternative (a copy per agent) is how two sets of rules drift
 apart.
 
-`command:` is positional like `tool:` but belongs to no agent: a command is
-answered by the front-end, not by a model, so there is nothing for it to be
-scoped to.
+`command:` and `cron:` are positional like `tool:` but belong to no agent: a
+command is answered by the front-end, not by a model, and a cron job names
+its own target agent, so there is nothing for either to be scoped to.
+
+`cron:` is also the one block where `agent:` and `tool:` are payload rather
+than a declaration kind — they name what the job runs.
 
 The file is **definitions only** at the top level. That is what makes two things
 true at once: loading a kit never executes it, and running one tool is just
@@ -210,51 +212,68 @@ the agent keeps current, plus the `history` built-in when declared.
 
 ## Cron
 
-Schedules stay their own surface, because a schedule binds an (agent, prompt)
-pair — one employee commonly has several standing tasks.
+A `cron:` block binds a schedule to one job. Like `command:`, it is
+positional in form but scoped to nothing — it names its own target agent, so
+it neither opens nor closes a scope, and it may sit anywhere in the file.
 
-```
-cron/discovery.md
----
-schedule: "@every 30m"
-agent: leads
----
+```sh
+#---
+# cron: discovery
+# schedule: "@every 30m"
+# agent: leads
+#---
+cron_discovery() { cat <<'EOF'
 Drain one niche from the queue. Report only what changed.
+EOF
+}
 ```
 
-Frontmatter takes exactly one of `agent:` or `tool:` — a job is either a
-prompt or a tool call, never both, never neither. `tool:` names a declared
-tool and skips the agent entirely: no dispatch, no employee, no model turn at
-all — just the tool's shell function, called directly on schedule. This is
-the valve for mechanical, idempotent work (a sync, a rotation) where a
-prompt job's whole cost is the turn spent judging its own output:
+`schedule` is robfig/cron syntax and is parsed at load with the same parser
+the scheduler arms with, so a schedule that loads is a schedule that boots.
+The function under the block holds the prompt in a heredoc, exactly as an
+agent's own prompt does.
 
-```
-cron/sync.md
----
-schedule: "@every 30m"
-tool: sync-notion-recent
----
+A block takes exactly one of `agent:` or `tool:` — a job is either a prompt
+or a tool call, never both, never neither. On a cron block those two keys are
+the job's *target*, not a nested declaration. `tool:` skips the agent
+entirely: no dispatch, no employee, no model turn at all — just the tool's
+shell function, called directly on schedule. This is the valve for
+mechanical, idempotent work (a sync, a rotation) where a prompt job's whole
+cost is the turn spent judging its own output:
+
+```sh
+#---
+# cron: sync
+# schedule: "@every 30m"
+# tool: sync-notion-recent
+#---
 ```
 
-A tool job takes no body (there is no prompt) and no arguments (the tool
-runs with none, so a tool declaring a *required* param can never be used
-this way — `shell3 health` catches it). It honours `workdir:` like a prompt
-job does. With no model turn around to relay its result, it posts for
-itself: silent on an empty result or the `NO_REPLY` sentinel (the point of
-scheduling an idempotent sync often), `⏰ <job>: <result>` otherwise, and
-`⚠️ <job> failed: <error>` on error — capped at 120s, the same limit a
-foreground `bash` call gets. Resolution is whole-kit: `tool:` names no
-agent, so the lookup searches every agent's declared tools plus every shared
-group, not just one agent's capability list — the operator scheduling a
-tool they declared themselves is the trust boundary, not `use:` scoping.
-The duplicate-name check at `tool:` declaration time is per-scope only (two
-agents may each legally declare a tool called the same thing), so this
-whole-kit lookup resolves first-match-wins (agents in declaration order,
-then shared groups) when a name collides across scopes — `shell3 health`
-is what actually catches this: it counts every scope that declares the
-name a cron job requests and fails, naming all of them, rather than let
-the job silently run whichever function happened to parse first.
+A tool job binds **no function at all** (there is no prompt, so the next
+definition in the file belongs to somebody else) and passes no arguments — a
+tool declaring a *required* param can never be used this way, and the kit
+refuses to load if one tries. It honours `workdir:` like a prompt job does.
+With no model turn around to relay its result, it posts for itself: silent on
+an empty result or the `NO_REPLY` sentinel (the point of scheduling an
+idempotent sync often), `⏰ <job>: <result>` otherwise, and `⚠️ <job> failed:
+<error>` on error — capped at 120s, the same limit a foreground `bash` call
+gets.
+
+`direct: true` applies only to an `agent:` job: it posts the run's raw result
+straight to the chat instead of spending a main-agent turn to judge it. A
+tool job already posts its own result, so setting both is a load error rather
+than a silent no-op.
+
+Every target resolves at load, next to the check that a `gate:` names a real
+agent — an unknown agent, an unknown tool, a tool needing an argument, a
+duplicate job name. Tool resolution is whole-kit: `tool:` names no agent, so
+the lookup searches every agent's declared tools plus every shared group, not
+just one agent's capability list — the operator scheduling a tool they
+declared themselves is the trust boundary, not `use:` scoping. The
+duplicate-name check at `tool:` declaration time is per-scope only (two
+agents may each legally declare a tool called the same thing), so a name that
+collides across scopes is refused by name here rather than silently running
+whichever function happened to parse first.
 
 ## The gate
 

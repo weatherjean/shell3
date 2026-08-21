@@ -99,7 +99,7 @@ schedule/outcome/rolling 7-day dispatched-run cost, each linking to its
 detail; and the queued inbox), a paginated runs listing, a full run replay
 (tool calls with arguments, results, reasoning — folded, escaped,
 self-contained), and a read-only browser of the config directory (the kit,
-skills, cron prompts — syntax left as escaped text; credential files are
+skills — syntax left as escaped text; credential files are
 listed but their contents redacted, binary and >256 KB files flagged not
 dumped). No polling, no scripts beyond the replay's fold-all buttons; a
 floating ↻ button bottom-right re-requests the page.
@@ -179,8 +179,8 @@ defaults, except `--model`, which headless boot requires): `--url`, `--model`,
 without writing or asking anything. `shell3 boot --prompts` refreshes the
 scaffold-shipped prompt files (`skills/`) in an existing install after you
 upgrade the binary — run it to pick up new built-in skills like
-`dash-exposing`; your kit, `.env`, cron and hand-written skills are left
-untouched (replaced files back up under `.backup/`).
+`dash-exposing`; your kit (cron jobs included), `.env` and hand-written
+skills are left untouched (replaced files back up under `.backup/`).
 See [configuration.md](configuration.md).
 
 

@@ -31,6 +31,7 @@ const (
 	declNote
 	declCommand
 	declEvent
+	declCron
 	declWiring
 )
 
@@ -54,6 +55,8 @@ func (k declKind) String() string {
 		return "command"
 	case declEvent:
 		return "event"
+	case declCron:
+		return "cron"
 	default:
 		return "wiring"
 	}
@@ -98,6 +101,13 @@ type decl struct {
 	wiring  map[string]any
 	agents  []string // declGate/declNote/declEvent: the agents this block governs
 	on      []string // declEvent: the event kinds this subscriber receives
+
+	// declCron only: agent/tool are the job's PAYLOAD here, not a second
+	// declaration kind (see decodeBlock).
+	schedule string
+	cronAgnt string
+	cronTool string
+	direct   bool
 }
 
 // blockYAML is the strict shape every declaration block decodes into. Exactly
@@ -115,6 +125,15 @@ type blockYAML struct {
 	// Command is install-wide rather than per-agent, so it names ITSELF the
 	// way tool:/skill: do, not the agents it governs the way gate: does.
 	Command string `yaml:"command"`
+
+	// Cron names a scheduled job. It is the one block where agent: and tool:
+	// are payload rather than a kind key — a job dispatches an agent or runs
+	// a tool, and writing that as `cron: nightly` + `agent: assistant` is the
+	// shape the old cron/<name>.md frontmatter already had.
+	Cron string `yaml:"cron"`
+
+	Schedule string `yaml:"schedule"`
+	Direct   bool   `yaml:"direct"`
 
 	Description string           `yaml:"description"`
 	Model       string           `yaml:"model"`
@@ -141,6 +160,7 @@ func decodeBlock(b block) (decl, error) {
 		line: b.line, endLine: b.endLine, desc: y.Description, model: y.Model,
 		workdir: y.Workdir, use: y.Use, context: y.Context, params: y.Params, wiring: y.Shell3,
 		mcp: y.MCP, mcpAll: len(y.MCP) == 1 && y.MCP[0] == "all", on: y.On,
+		schedule: y.Schedule, direct: y.Direct,
 	}
 
 	kinds := []struct {
@@ -149,10 +169,21 @@ func decodeBlock(b block) (decl, error) {
 	}{
 		{declAgent, y.Agent}, {declShared, y.Shared},
 		{declTool, y.Tool}, {declSkill, y.Skill}, {declTest, y.Test},
-		{declCommand, y.Command},
+		{declCommand, y.Command}, {declCron, y.Cron},
+	}
+	// On a cron block, agent: and tool: name the job's target rather than
+	// opening an agent scope or declaring a verb, so they are skipped in the
+	// kind scan below. Only those two — a cron block that also names
+	// skill:/command:/gate: is genuinely ambiguous and must still be refused.
+	isCron := y.Cron != ""
+	if isCron {
+		d.cronAgnt, d.cronTool = y.Agent, y.Tool
 	}
 	found := 0
 	for _, c := range kinds {
+		if isCron && (c.k == declAgent || c.k == declTool) {
+			continue
+		}
 		if c.n != "" {
 			d.kind, d.name = c.k, c.n
 			found++
@@ -167,16 +198,22 @@ func decodeBlock(b block) (decl, error) {
 			found++
 		}
 	}
+	// schedule:/direct: only mean something on a cron block. Accepting them
+	// silently elsewhere is how a job written into an agent: block by mistake
+	// would load, parse, and never fire.
+	if !isCron && (y.Schedule != "" || y.Direct) {
+		return decl{}, fmt.Errorf("line %d: schedule:/direct: belong to a cron: block", b.line)
+	}
 	switch {
 	case found > 1:
-		return decl{}, fmt.Errorf("line %d: declaration block names more than one of agent/shared/tool/skill/test/command/gate/note/event", b.line)
+		return decl{}, fmt.Errorf("line %d: declaration block names more than one of agent/shared/tool/skill/test/command/cron/gate/note/event", b.line)
 	case found == 1:
 		return d, nil
 	case y.Shell3 != nil:
 		d.kind = declWiring
 		return d, nil
 	default:
-		return decl{}, fmt.Errorf("line %d: declaration block names no agent/shared/tool/skill/test/command/gate/note/event", b.line)
+		return decl{}, fmt.Errorf("line %d: declaration block names no agent/shared/tool/skill/test/command/cron/gate/note/event", b.line)
 	}
 }
 

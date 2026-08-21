@@ -26,16 +26,23 @@ Declaration kinds: `agent:` (prompt function under it; `model`, `workdir`,
 `params` — typed `string`/`int`/`bool`, reaching the shell function as
 ENVIRONMENT VARIABLES, never `$1`), `skill:`, `test:` (harness in
 `harness.go`: `tool`, `stub`, `assert_eq`, `assert_contains`, `fail`,
-`$KIT_TMP`), `gate:`, `note:`, `command:` and `event:`, plus the `shell3:` wiring block (models,
+`$KIT_TMP`), `gate:`, `note:`, `command:`, `event:` and `cron:` (`schedule` +
+exactly one of `agent:`/`tool:`, `direct`/`workdir`), plus the `shell3:` wiring block (models,
 telegram, mcp, `runs_keep_days`, `media_keep_days`, `review_model`,
 `review_policy`; re-marshalled through the
 existing YAML parser by `config.readWiring`; secrets as `env:KEY` from the
 sibling `.env`). Scoping is POSITIONAL for `tool:`/`skill:`/`test:` — an
 `agent:` or `shared:` block opens a scope — but `gate:`/`note:`/`event:` are
 NAMED (`gate: [main, assistant]`), because one function usually governs several
-agents and a copy per agent is how two rule sets drift apart. `command:` is
-positional in form but scoped to NOTHING: a command is answered by the
-front-end, not by a model, so there is no agent for it to belong to.
+agents and a copy per agent is how two rule sets drift apart. `command:` and
+`cron:` are positional in form but scoped to NOTHING: a command is answered by
+the front-end, not by a model, and a cron job names its own target agent, so
+there is no agent for either to belong to. `cron:` is also the ONE block where
+`agent:`/`tool:` are payload rather than a kind key (`decodeBlock` lifts those
+two out of the kind scan when `cron:` is set — only those two, so a cron block
+also naming `skill:`/`command:`/`gate:` is still refused as ambiguous), and
+`schedule:`/`direct:` outside a `cron:` block are a load error rather than a
+silently ignored key.
 
 `command:` declares a `/verb` the front-end answers itself — no model turn, no
 tokens. The function's stdout is the reply (empty posts nothing, so an
@@ -148,19 +155,19 @@ smaller): `chat.warnFixedOverhead` logs once per session when the system
 prompt alone exceeds half of `compact_at`, naming the cause instead of leaving
 a context-length rejection to be diagnosed later. Skills are FILES, not blocks — `skills/*.md` for the main
 agent, `projects/<agent>/skills/*.md` for an employee — indexed into the prompt
-by name, description and absolute path, and `cat`'d on demand. `cron/<name>.md`
-stays its own surface (frontmatter `schedule` + exactly one of `agent`/`tool`
-+ optional `direct`/`workdir`, body = prompt for an `agent:` job), because a
-schedule binds an (agent, prompt) pair and one employee commonly has several.
-`shell3 tool check|run|test <kit>` is the author's loop.
+by name, description and absolute path, and `cat`'d on demand. Cron jobs are
+BLOCKS, not files — the `cron/<name>.md` format was deleted 2026-08-21 and a
+leftover dir is inert (`shell3 health` warns about one). `shell3 tool
+check|run|test <kit>` is the author's loop.
 
 The kit is the ONLY config format. The older markdown config (`shell3.yaml` +
 `agent.md` + `agents/<name>.md` + `hooks/*.sh`) was deleted 2026-08-20: a
 directory with no `shell3.sh` fails to load, naming the file to create, and a
 leftover `shell3.yaml` is not consulted. There are no migration shims and no
 fallback — `config.Load` lifts the kit's `shell3:` block through the strict
-YAML parser (`config.readWiring`) and reads `.env` + `cron/*.md`; everything
-else about an agent comes from `internal/kit` via `agentsetup`. Dropped with
+YAML parser (`config.readWiring`) and reads `.env`; everything
+else — agents, tools, skills, cron — comes from `internal/kit` via
+`agentsetup`. Dropped with
 it: per-agent `prune:` (the model-level `prune_at` remains), `projects.md`
 and the Chain-of-Command brief, and load-time validation of `context:` paths
 (`shell3 health` does it, against each agent's own workdir).
@@ -226,7 +233,7 @@ being discarded as it used to be. Failed: the ⚠️ floor
 post always reaches the user, and a live owning session is additionally
 mailed (woken) so the agent can react — but an ownerless failure (cron)
 stops at the post, never burning a main-model turn per broken tick.
-`direct: true` (bash_bg arg, task arg, cron frontmatter): the raw result
+`direct: true` (bash_bg arg, task arg, cron block): the raw result
 posts straight to the user, and the owning session gets the notice queued
 WITHOUT a wake — the next turn has it in context without spending one now.
 Before the default: a CLEAN completion whose whole tail is already the
@@ -548,8 +555,9 @@ dir and its startup janitor (`media_keep_days`) now live in
 Telegram-specific code. Restriction policy is the hook script, not a tools
 list.
 
-An in-process cron scheduler (`internal/cron`, jobs are `cron/<name>.md`
-files; each job dispatches its declared agent — any agent the kit declares,
+An in-process cron scheduler (`internal/cron`, jobs are the kit's `cron:`
+blocks — `kit.CronJob`, aliased as `shell3.CronJob`, reached through
+`Parts.Cron()`; each job dispatches its declared agent — any agent the kit declares,
 running in that agent's own `workdir:` when it has one — from a
 hidden pinned "cron" parent session that is the dispatch parent + the jobs/runs
 source but runs NO turns of its own and is never woken; a run's result is
@@ -562,9 +570,9 @@ run always surfaces as `⚠️ <job> failed: <error>` and spends no turn). A job
 can instead name `tool: <name>` — a kit tool, run directly with NO model turn
 at all: no dispatch, no subagent, just the tool's shell function. Frontmatter
 takes exactly one of `agent:` or `tool:` (a job is either a prompt or a tool
-call), enforced at load (`config.parseCronFile`) so a config that loads is a
-config that arms. Resolution is whole-kit
-(`kit.Kit.ToolByName`/`agentsetup.Parts.KitToolByName`), not per-agent — a
+call), enforced at load (`kit.cronFromDecl`) so a config that loads is a
+config that arms. Resolution is whole-kit (`kit.Kit.ToolMatches`, via
+`kit.checkCronTargets`), not per-agent — a
 tool job names no agent, so there is no `Resolved` capability set to search;
 the operator scheduling a tool they declared themselves is the trust
 boundary, not positional `use:` scoping (that still bounds what a MODEL may
@@ -572,11 +580,14 @@ call). A tool job honours `workdir:` like a prompt job, and — since no model
 turn is around to judge or relay its result — posts its own outcome: silent
 on a NO_REPLY/empty result (the point of scheduling an idempotent sync every
 30 minutes), `⏰ <job>: <result>` otherwise, `⚠️ <job> failed: <error>` on
-error, capped at the foreground bash timeout (120s). `shell3 health` fails a
-`tool:` job naming an undeclared tool or one requiring a param (a tool job
-passes none), and an `agent:` job naming an agent the kit does not declare —
-nothing else checks that, so a typo would otherwise surface as a failed
-dispatch on the first tick.
+error, capped at the foreground bash timeout (120s). Every target resolves in
+`kit.Parse` alongside the `gate:` unknown-agent check — an undeclared tool, a
+tool requiring a param (a tool job passes none), a tool name declared in two
+scopes, an undeclared agent, a duplicate job name (filenames used to give
+uniqueness for free; `cron_status` keys on the name) — so all of them are
+LOAD errors rather than a failed dispatch on the first tick. `shell3 health`
+inherits every one of them by parsing the kit, and adds the one thing Parse
+cannot see: a warning that leftover `cron/*.md` files no longer fire.
 
 Every session records `sessions.agent` (the agent that ran it) and
 `sessions.cron_job` (the cron job that started it, `''` for a front-end or
@@ -656,7 +667,7 @@ management — it only ever *prints*; running any of it is the operator's.
 `--prompts` refreshes the scaffold's prompt files in an existing install
 (scaffold-shipped `skills/`) after an upgrade — the kit itself is hand-edited,
 so there is no safe seam to splice a prompt into and it is left alone:
-`shell3.sh`, `.env`, cron, memory, and user-authored skills are untouched;
+`shell3.sh` (cron jobs included), `.env`, memory, and user-authored skills are untouched;
 replaced files back up to `.backup/prompts-<ts>/`; the Vision variant is
 inferred from whether the install's own agent declares `media`; a reload
 applies it
@@ -709,10 +720,10 @@ assistants, and automated tools.
 ```
 cmd/shell3/            cobra command tree: root (prints help) + telegram/serve/ask/boot/tool/health subcommands
 internal/agentsetup/   shared config assembly (BuildParts → chat.Config) used by every front-end
-internal/config/       config-directory loader: lifts the kit's shell3: wiring through the strict YAML parser, reads .env + cron/*.md, owns tool schemas, the skill scan, the context: resolver, and gate/note execution
+internal/config/       config-directory loader: lifts the kit's shell3: wiring through the strict YAML parser, reads .env, owns tool schemas, the skill scan, the context: resolver, and gate/note execution
 internal/bootstrap/    first-run global + project setup
-internal/kit/          the kit parser/executor: scan, decl, funcs, exec, harness, persona (shell3.sh)
-internal/scaffold/     embedded starter config tree (defaults/base: the kit template, skills/, cron/, lib/) + boot rendering
+internal/kit/          the kit parser/executor: scan, decl, funcs, exec, harness, persona, cron (shell3.sh)
+internal/scaffold/     embedded starter config tree (defaults/base: the kit template, skills/, lib/) + boot rendering
 internal/adapter/openai/  OpenAI-compatible LLM adapter
 internal/modelproxy/   run_proxy spawner (starts a model's proxy command on activation)
 internal/paths/        global (~/.shell3/) + local (.shell3_project/) path resolution

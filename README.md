@@ -104,7 +104,7 @@ takes the kit file itself as its argument.
   and `edit_file`; a per-agent hook script allows, rewrites, runner-swaps, or
   blocks every tool call. Fail-closed, armed out of the box.
 - **Chain of command.** The agent delegates to employees you defined,
-  `bash_bg` background jobs, and `cron/*.md` schedules; completions arrive as
+  `bash_bg` background jobs, and `cron:` schedules; completions arrive as
   mail — the agent hears about finished background work and messages you only
   when it matters, and failures always surface.
 - **A read-only dashboard.** `/dash` links a localhost web page — status, the

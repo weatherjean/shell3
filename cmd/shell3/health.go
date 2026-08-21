@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -138,52 +137,31 @@ func runHealth(cmd *cobra.Command, path string) error {
 				fmt.Fprintf(out, "agent %s: %s\n", ka.Name, w)
 			}
 		}
-		// A cron tool: job names no agent, so it is validated against the
-		// whole kit here rather than any agent's Resolved set — an unknown
-		// tool, or one that fireTool could never satisfy (a required param
-		// it never supplies), must fail now, not at 3am on the first tick.
-		badTools := 0
-		for _, j := range lc.Cron() {
-			if j.Tool == "" {
-				// An agent: job must name an agent the kit declares. Nothing
-				// else checks this — a typo used to surface as a failed
-				// dispatch on the first tick, hours later and in the app log.
-				if !slices.Contains(agentNames, j.Agent) {
-					badTools++
-					fmt.Fprintf(out, "cron: cron/%s.md names agent %q, which the kit does not declare\n", j.Name, j.Agent)
-				}
-				continue
+		// Cron jobs are `cron:` blocks in the kit, so every check health used
+		// to run here — unknown agent, unknown tool, ambiguous tool scope, a
+		// tool needing an argument no job can pass — is now a kit.Parse load
+		// error, and the Parse above already returned it. What is left is
+		// reporting, plus one thing Parse cannot see: a leftover cron/ dir.
+		for _, j := range k.Crons {
+			target := "agent " + j.Agent
+			if j.Tool != "" {
+				target = "tool " + j.Tool
 			}
-			matches := k.ToolMatches(j.Tool)
-			if len(matches) == 0 {
-				badTools++
-				fmt.Fprintf(out, "cron: cron/%s.md names tool %q, which the kit does not declare\n", j.Name, j.Tool)
-				continue
-			}
-			if len(matches) > 1 {
-				// Two scopes may each legally declare the same tool name (the
-				// duplicate check is per-scope, not kit-wide — see
-				// Kit.ToolMatches). A cron tool job names no agent to
-				// disambiguate, so ToolByName's first-match-wins pick would run
-				// whichever function happened to parse first, silently, at 3am.
-				badTools++
-				scopes := make([]string, len(matches))
-				for i, m := range matches {
-					scopes[i] = m.Scope
-				}
-				fmt.Fprintf(out, "cron: cron/%s.md names tool %q, which is declared in more than one scope (%s) — rename one so resolution is unambiguous\n", j.Name, j.Tool, strings.Join(scopes, ", "))
-				continue
-			}
-			t := matches[0].Tool
-			for pname, p := range t.Params {
-				if p.Required {
-					badTools++
-					fmt.Fprintf(out, "cron: cron/%s.md runs tool %q, which requires argument %q — a cron tool job passes no arguments\n", j.Name, j.Tool, pname)
-				}
-			}
+			fmt.Fprintf(out, "cron: %s (%s, %s)\n", j.Name, j.Schedule, target)
 		}
-		if badTools > 0 {
-			return fmt.Errorf("health: %d cron tool job problem(s)", badTools)
+		// cron/<name>.md was removed in favour of `cron:` blocks. A leftover
+		// dir is now inert, which means jobs that used to fire silently do
+		// not — worth one warning, without reading a byte of it.
+		if ents, derr := os.ReadDir(filepath.Join(path, "cron")); derr == nil {
+			stale := 0
+			for _, e := range ents {
+				if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+					stale++
+				}
+			}
+			if stale > 0 {
+				fmt.Fprintf(out, "cron: %d leftover cron/*.md file(s) — that format was removed; jobs are `cron:` blocks in %s and these no longer fire\n", stale, kit.FileName)
+			}
 		}
 		if badSkills > 0 {
 			return fmt.Errorf("health: %d unusable skill file(s) — they are silently absent from the prompt", badSkills)

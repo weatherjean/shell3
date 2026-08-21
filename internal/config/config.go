@@ -1,6 +1,6 @@
 // Package config loads the shell3 config directory. Its centre is the kit,
 // shell3.sh (parsed by internal/kit): this package lifts the kit's `shell3:`
-// wiring block through the strict YAML parser, reads .env and cron/*.md, and
+// wiring block through the strict YAML parser, reads .env, and
 // owns the tool schemas, the skill scan, the `context:` resolver, and the
 // gate/note execution the kit declares. Presence of a file enables its
 // feature, and policy is a bash function — there is no embedded config
@@ -64,24 +64,6 @@ type TelegramConfig struct {
 	WorkDir   string
 }
 
-// CronJob is one parsed cron/<name>.md job.
-type CronJob struct {
-	Name     string
-	Schedule string
-	Agent    string
-	Prompt   string
-	WorkDir  string
-	// Direct posts the run's raw result straight to the user, skipping the
-	// default agent-mail turn. The cost valve: a default cron tick wakes the
-	// main model to judge its result; a direct one costs no tokens at all.
-	Direct bool
-	// Tool names a kit tool this job runs directly — no agent, no model turn.
-	// Exactly one of Agent or Tool is set. A tool job is the valve for
-	// mechanical, idempotent work (a sync, a rotation): the turn a prompt job
-	// spends judging its own output is the whole cost of running it often.
-	Tool string
-}
-
 // MCPServer is one declared server from the wiring's `mcp:` block.
 // Exactly one of Command (stdio) or URL (streamable HTTP) is set — enforced
 // at load.
@@ -136,7 +118,6 @@ type LoadedConfig struct {
 
 	mcpServers []MCPServer
 	telegram   TelegramConfig
-	cron       []CronJob
 
 	// hooks maps each governed agent to its hook scripts (see hooks.go).
 	hooks hookSet
@@ -183,9 +164,6 @@ func (c *LoadedConfig) HasMCPServer(name string) bool {
 
 // Telegram returns the parsed `telegram:` block (zero value if absent).
 func (c *LoadedConfig) Telegram() TelegramConfig { return c.telegram }
-
-// Cron returns the parsed cron/ jobs in filename order.
-func (c *LoadedConfig) Cron() []CronJob { return c.cron }
 
 // MCPServers returns the declared MCP servers sorted by name (YAML map order
 // is unspecified; sorting keeps connect order and status listings

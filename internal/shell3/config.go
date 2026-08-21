@@ -4,15 +4,17 @@ import (
 	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/config"
+	"github.com/weatherjean/shell3/internal/kit"
 )
 
-// TelegramConfig and CronJob are the parsed config blocks as
-// internal/config produces them. Aliases (not mirrors): the Runtime hands the parsed
-// values straight through, so a field added in internal/config is immediately visible
-// here — no hand-written copier to forget.
+// TelegramConfig and CronJob are the parsed config as its owning package
+// produces it: the telegram: wiring block from internal/config, and the kit's
+// `cron:` declarations from internal/kit. Aliases (not mirrors): the Runtime
+// hands the parsed values straight through, so a field added upstream is
+// immediately visible here — no hand-written copier to forget.
 type (
 	TelegramConfig = config.TelegramConfig
-	CronJob        = config.CronJob
+	CronJob        = kit.CronJob
 )
 
 // sessionConfigFrom adapts Parts.SessionConfig to the Runtime's per-session

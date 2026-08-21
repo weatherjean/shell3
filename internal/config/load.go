@@ -6,7 +6,7 @@ import (
 )
 
 // Load reads the config directory dir: shell3.sh (required — the kit carries
-// the wiring, agents, tools and skills) + .env + cron/*.md. Absent optional
+// the wiring, agents, tools, skills and cron jobs) + .env. Absent optional
 // pieces disable their features. Every error names the file that caused it.
 func Load(dir string) (*LoadedConfig, error) {
 	abs, err := filepath.Abs(dir)
@@ -35,24 +35,5 @@ func load(dir string) (*LoadedConfig, error) {
 	if err := c.parseYAML(data, secrets); err != nil {
 		return nil, err
 	}
-	if err := c.loadCron(dir); err != nil {
-		return nil, err
-	}
 	return c, nil
-}
-
-// loadCron reads cron/*.md in filename order.
-func (c *LoadedConfig) loadCron(dir string) error {
-	files, err := readMDFiles(filepath.Join(dir, "cron"))
-	if err != nil {
-		return err
-	}
-	for _, f := range files {
-		job, err := parseCronFile(f.Data, f.Name)
-		if err != nil {
-			return err
-		}
-		c.cron = append(c.cron, job)
-	}
-	return nil
 }

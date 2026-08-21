@@ -1,7 +1,7 @@
 // Package scaffold renders the base shell3 config directory that
 // `shell3 boot` writes for a new install: shell3.sh (the kit — wiring, agents,
 // tools and the gate) rendered from an embedded template, plus the verbatim
-// skills/, cron/, and lib/ files.
+// skills/ and lib/ files.
 package scaffold
 
 import (

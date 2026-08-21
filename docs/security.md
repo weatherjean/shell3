@@ -116,7 +116,7 @@ the token check stays in front either way.
 
 A token in a URL is a bearer secret, and it now grants more than transcripts:
 a live link lets its holder read your whole configuration tree through the
-files browser — the kit (`shell3.sh`), skills, cron prompts, and any wrapper
+files browser — the kit (`shell3.sh`), skills, and any wrapper
 scripts under `lib/`, plus the tail of every background job's output. The one
 thing it can never surface is a credential: `.env`, its dotenv siblings
 (`.env.*`), and any `ai-do-not-read*` file are listed but reported redacted,

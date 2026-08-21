@@ -10,7 +10,7 @@ import (
 const ProjectDirName = ".shell3_project"
 
 // Global holds all paths under ~/.shell3/ (user-scoped, never in repo).
-// The root itself is the default config directory (shell3.sh, skills/, cron/, …).
+// The root itself is the default config directory (shell3.sh, skills/, …).
 type Global struct {
 	Root    string // ~/.shell3/
 	LogFile string // ~/.shell3/shell3.log

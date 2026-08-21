@@ -384,3 +384,29 @@ func TestBaseConfigWiresTheBotToken(t *testing.T) {
 		t.Errorf("shell3.sh does not wire the bot token:\n%s", body)
 	}
 }
+
+// The kit template ships a commented cron: example. A declaration block is
+// itself a comment fence, so an example written with real #--- fences would
+// not be an example — it would be an armed job on every fresh boot. The
+// example's fences are ##---, and this pins that they stay inert.
+func TestScaffoldCronExampleIsInert(t *testing.T) {
+	dir := t.TempDir()
+	v := Values{Name: "main", BaseURL: "http://localhost:8787/v1", EnvKey: "MAIN_API_KEY", Model: "test"}
+	if err := RenderBaseConfig(dir, v, false); err != nil {
+		t.Fatalf("RenderBaseConfig: %v", err)
+	}
+	src, err := os.ReadFile(filepath.Join(dir, "shell3.sh"))
+	if err != nil {
+		t.Fatalf("read kit: %v", err)
+	}
+	if !strings.Contains(string(src), "cron: checklist") {
+		t.Fatal("the kit template should carry a commented cron: example")
+	}
+	k, err := kit.Parse(src)
+	if err != nil {
+		t.Fatalf("parse kit: %v", err)
+	}
+	if len(k.Crons) != 0 {
+		t.Fatalf("the commented example armed %d job(s): %+v", len(k.Crons), k.Crons)
+	}
+}

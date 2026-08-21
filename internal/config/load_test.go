@@ -6,19 +6,12 @@ import (
 )
 
 func TestLoadFullTree(t *testing.T) {
-	c := mustLoad(t, map[string]string{
-		".env":          "KEY=val\n",
-		"cron/daily.md": "---\nschedule: \"@daily\"\nagent: explorer\n---\nDo the rounds.\n",
-	})
+	c := mustLoad(t, map[string]string{".env": "KEY=val\n"})
 	if m, ok := c.Model("m1"); !ok || m.ModelID != "test-model" {
 		t.Fatalf("model = %+v ok=%v", m, ok)
 	}
 	if c.Secrets["KEY"] != "val" {
 		t.Fatalf("secrets = %v", c.Secrets)
-	}
-	jobs := c.Cron()
-	if len(jobs) != 1 || jobs[0].Name != "daily" || jobs[0].Agent != "explorer" {
-		t.Fatalf("cron = %+v", jobs)
 	}
 	if len(c.Warnings()) != 0 {
 		t.Fatalf("warnings = %v", c.Warnings())

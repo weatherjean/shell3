@@ -91,6 +91,44 @@ STUB
 not testing that curl works, you are testing your parsing. Also available:
 `tool`, `assert_eq`, `assert_contains`, `fail`, `$KIT_TMP`.
 
+## A scheduled job
+
+```sh
+#---
+# cron: morning-rounds
+# schedule: "@daily"
+# agent: bookmarks
+#---
+cron_morning_rounds() { cat <<'EOF'
+Check the queue and report anything that needs a decision.
+EOF
+}
+```
+
+`schedule` is robfig/cron syntax: `"@every 30m"`, `"@daily"`, or a 5-field
+spec like `"*/30 8-22 * * *"` (every 30 min, 8am-10pm). The function under
+the block is the prompt, exactly like an agent's own.
+
+The run's result reaches the main agent as a task report, which posts an ✉️
+update only when there is something worth saying. `direct: true` skips that
+judgment turn and posts the raw result instead — no tokens. Failures always
+surface either way.
+
+For mechanical work — a sync, a rotation — name a tool instead:
+
+```sh
+#---
+# cron: sync-inbox
+# schedule: "@every 30m"
+# tool: sync-inbox
+#---
+```
+
+A tool job binds no function and takes no prompt: it runs the tool with no
+model turn at all, and stays silent unless the tool prints something. That is
+what makes an idempotent tick affordable to run often. It passes no
+arguments, so the tool must not require any.
+
 ## The loop
 
     shell3 tool check <kit>                 syntax, lint, manifests

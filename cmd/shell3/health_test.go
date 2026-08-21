@@ -235,28 +235,31 @@ needs_arg() { echo "$url"; }
 
 // writeKitHealthTree writes a kit-only config (no shell3.yaml, no agent.md —
 // a shell3.sh alone is a complete config) plus the given cron/*.md files.
-func writeKitHealthTree(t *testing.T, cronFiles map[string]string) string {
+// writeKitHealthTree writes a config dir whose kit is healthKit plus the
+// given `cron:` declarations. Cron jobs are kit blocks, so a bad one is a
+// kit.Parse error — health surfaces it because health parses the kit.
+func writeKitHealthTree(t *testing.T, cronDecls string) string {
+	t.Helper()
+	return writeKitTree(t, healthKit+cronDecls)
+}
+
+func writeKitTree(t *testing.T, src string) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "shell3.sh"), []byte(healthKit), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "shell3.sh"), []byte(src), 0o600); err != nil {
 		t.Fatal(err)
-	}
-	for name, body := range cronFiles {
-		p := filepath.Join(dir, "cron", name)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
 	}
 	return dir
 }
 
 func TestHealthOKWithValidCronToolJob(t *testing.T) {
-	cfg := writeKitHealthTree(t, map[string]string{
-		"sync.md": "---\nschedule: \"@every 30m\"\ntool: sync-notion-recent\n---\n",
-	})
+	cfg := writeKitHealthTree(t, `
+#---
+# cron: sync
+# schedule: "@every 30m"
+# tool: sync-notion-recent
+#---
+`)
 	out, err := runHealthAt(t, cfg)
 	if err != nil {
 		t.Fatalf("a valid cron tool job should pass health: %v\n%s", err, out)
@@ -306,52 +309,59 @@ helper_sync() { echo helper; }
 `
 
 func TestHealthFailsOnAmbiguousCronTool(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "shell3.sh"), []byte(healthKitDupTool), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cronDir := filepath.Join(dir, "cron")
-	if err := os.MkdirAll(cronDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(cronDir, "sync.md"), []byte("---\nschedule: \"@every 30m\"\ntool: sync\n---\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	dir := writeKitTree(t, healthKitDupTool+`
+#---
+# cron: nightly
+# schedule: "@every 30m"
+# tool: sync
+#---
+`)
 	out, err := runHealthAt(t, dir)
 	if err == nil {
 		t.Fatalf("a cron job naming an ambiguously-declared tool must fail health:\n%s", out)
 	}
-	if !strings.Contains(out, "sync.md") || !strings.Contains(out, `"sync"`) {
-		t.Fatalf("output should name the job and the ambiguous tool:\n%s", out)
+	got := out + err.Error()
+	if !strings.Contains(got, `"nightly"`) || !strings.Contains(got, `"sync"`) {
+		t.Fatalf("output should name the job and the ambiguous tool:\n%s", got)
 	}
-	if !strings.Contains(out, "main") || !strings.Contains(out, "helper") {
-		t.Fatalf("output should name BOTH declaring scopes so the operator can disambiguate:\n%s", out)
+	if !strings.Contains(got, "main") || !strings.Contains(got, "helper") {
+		t.Fatalf("output should name BOTH declaring scopes so the operator can disambiguate:\n%s", got)
 	}
 }
 
 func TestHealthFailsOnUnknownCronTool(t *testing.T) {
-	cfg := writeKitHealthTree(t, map[string]string{
-		"sync.md": "---\nschedule: \"@every 30m\"\ntool: no-such-tool\n---\n",
-	})
+	cfg := writeKitHealthTree(t, `
+#---
+# cron: sync
+# schedule: "@every 30m"
+# tool: no-such-tool
+#---
+`)
 	out, err := runHealthAt(t, cfg)
 	if err == nil {
 		t.Fatalf("a cron job naming an undeclared tool must fail health:\n%s", out)
 	}
-	if !strings.Contains(out, "sync.md") || !strings.Contains(out, "no-such-tool") {
-		t.Fatalf("output should name the job and the missing tool:\n%s", out)
+	got := out + err.Error()
+	if !strings.Contains(got, `"sync"`) || !strings.Contains(got, "no-such-tool") {
+		t.Fatalf("output should name the job and the missing tool:\n%s", got)
 	}
 }
 
 func TestHealthFailsOnCronToolWithRequiredParam(t *testing.T) {
-	cfg := writeKitHealthTree(t, map[string]string{
-		"sync.md": "---\nschedule: \"@every 30m\"\ntool: needs-arg\n---\n",
-	})
+	cfg := writeKitHealthTree(t, `
+#---
+# cron: sync
+# schedule: "@every 30m"
+# tool: needs-arg
+#---
+`)
 	out, err := runHealthAt(t, cfg)
 	if err == nil {
 		t.Fatalf("a cron job whose tool requires an argument must fail health (fireTool passes none):\n%s", out)
 	}
-	if !strings.Contains(out, "needs-arg") || !strings.Contains(out, "url") {
-		t.Fatalf("output should name the tool and the required argument:\n%s", out)
+	got := out + err.Error()
+	if !strings.Contains(got, "needs-arg") || !strings.Contains(got, "url") {
+		t.Fatalf("output should name the tool and the required argument:\n%s", got)
 	}
 }
 
@@ -359,23 +369,40 @@ func TestHealthFailsOnCronToolWithRequiredParam(t *testing.T) {
 // Nothing else checks it — the typo used to surface as a failed dispatch on
 // the first tick, hours later and only in the app log.
 func TestHealthFailsOnUnknownCronAgent(t *testing.T) {
-	cfg := writeKitHealthTree(t, map[string]string{
-		"rounds.md": "---\nschedule: \"@daily\"\nagent: nobody\n---\ndo the rounds\n",
-	})
+	cfg := writeKitHealthTree(t, `
+#---
+# cron: rounds
+# schedule: "@every 30m"
+# agent: nobody
+#---
+cron_rounds() { cat <<'EOF2'
+do the rounds
+EOF2
+}
+`)
 	out, err := runHealthAt(t, cfg)
 	if err == nil {
 		t.Fatalf("a cron job naming an undeclared agent must fail health:\n%s", out)
 	}
-	if !strings.Contains(out, "rounds.md") || !strings.Contains(out, "nobody") {
-		t.Fatalf("output should name the job and the missing agent:\n%s", out)
+	got := out + err.Error()
+	if !strings.Contains(got, `"rounds"`) || !strings.Contains(got, "nobody") {
+		t.Fatalf("output should name the job and the missing agent:\n%s", got)
 	}
 }
 
 // The main agent is a legitimate cron target.
 func TestHealthOKWithCronAgentJob(t *testing.T) {
-	cfg := writeKitHealthTree(t, map[string]string{
-		"rounds.md": "---\nschedule: \"@daily\"\nagent: main\n---\ndo the rounds\n",
-	})
+	cfg := writeKitHealthTree(t, `
+#---
+# cron: rounds
+# schedule: "@every 30m"
+# agent: main
+#---
+cron_rounds() { cat <<'EOF2'
+do the rounds
+EOF2
+}
+`)
 	if out, err := runHealthAt(t, cfg); err != nil {
 		t.Fatalf("a cron job naming the main agent should pass health: %v\n%s", err, out)
 	}
