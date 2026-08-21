@@ -27,7 +27,7 @@ func storeRuntimeClient(t *testing.T, client chat.LLMClient) *shell3.Runtime {
 	}
 	rt := shell3.RuntimeForTest(t.TempDir(), func(o shell3.SessionOpts) (chat.Config, error) {
 		return chat.Config{
-			LLM: client, ModeLabel: "code", AgentNames: []string{"code"},
+			LLM: client, ModeLabel: "code",
 			Headless: o.Headless, Store: st,
 			AgentKnobs: chat.AgentKnobs{ContextWindow: 4096},
 		}, nil
@@ -50,10 +50,10 @@ func splitRuntime(t *testing.T, reply string) (*shell3.Runtime, *fakellm.Blockin
 	blk := fakellm.NewBlocking()
 	rt := shell3.RuntimeForTest(t.TempDir(), func(o shell3.SessionOpts) (chat.Config, error) {
 		if o.Headless {
-			return chat.Config{LLM: blk, ModeLabel: "code", AgentNames: []string{"code"}, Headless: true}, nil
+			return chat.Config{LLM: blk, ModeLabel: "code", Headless: true}, nil
 		}
 		scripts := []fakellm.Script{{Events: []llm.StreamEvent{{TextDelta: reply}}}}
-		return chat.Config{LLM: fakellm.New(scripts...), ModeLabel: "code", AgentNames: []string{"code"}}, nil
+		return chat.Config{LLM: fakellm.New(scripts...), ModeLabel: "code"}, nil
 	})
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt, blk
@@ -443,7 +443,7 @@ func TestContract9_RestartResumesTheConversation(t *testing.T) {
 	)
 	rt := shell3.RuntimeForTest(t.TempDir(), func(o shell3.SessionOpts) (chat.Config, error) {
 		return chat.Config{
-			LLM: client, ModeLabel: "code", AgentNames: []string{"code"},
+			LLM: client, ModeLabel: "code",
 			Headless: o.Headless, Store: st,
 			AgentKnobs: chat.AgentKnobs{ContextWindow: 4096},
 		}, nil

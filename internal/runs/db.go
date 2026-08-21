@@ -49,47 +49,26 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-// DBPath returns the on-disk path of the store's database, for read-only
-// inspection by external tools. The schema is not an API: it changes without
-// ceremony (see schemaVersion), so nothing in shell3 should read it this way.
-func (s *Store) DBPath() string { return filepath.Join(s.root, DBFile) }
-
 // schemaVersion is stamped into the database via `PRAGMA user_version` once
 // the schema in this file has been applied. Bump it whenever schema.go's
 // table shapes change in a way older code wrote data incompatible with (a
 // new NOT NULL DEFAULT column is fine either way, but this repo bumps on any
 // shape change rather than trying to judge compatibility case by case).
 //
-//  1. the original shape shipped (sessions/messages/reminders/
-//     threads(surface,msg_id,session_id)/messages_fts) — never stamped a
-//     version itself, so a v1 database reads back as user_version 0 with
-//     tables already present.
-//  2. adds threads.title/preview/created_at/updated_at/deleted for webui's
-//     richer thread metadata (see internal/webui/threads.go).
-//  3. adds sessions.agent so a session's runs are findable by the agent
-//     that ran them (see runs.Meta.Agent).
-//  4. adds sessions.cron_job so a session records which cron job started it
-//     (see runs.Meta.CronJob) — separating one job's runs from another no
-//     longer requires guessing from session duration.
-//  5. adds cron_status(name PRIMARY KEY, json) for cron's per-job run
-//     history (internal/cron/store.go). This is its OWN table, not a row in
-//     threads: threads.session_id is trusted elsewhere to be a real session
-//     id — runs.Sweep prunes any threads row whose session_id doesn't name a
-//     live session — so a job name or a JSON blob in that column would be
-//     deleted by the very next startup's janitor pass, before cron ever gets
-//     to read it back.
-//  6. adds sessions.total_prompt_tokens/total_completion_tokens, a cumulative
-//     ledger distinct from last_prompt_tokens (a point-in-time context-fullness
-//     gauge, overwritten each turn). The ledger only grows, via Store.AddUsage,
-//     which is what makes "what did this cron job cost this week" answerable
-//     (see Store.CronRollup, grouping by sessions.cron_job).
-//  7. adds outbox(id, kind, json), the restart-durable completion queue
-//     (internal/shell3/completion.go): "event" rows are finished-job
-//     completions not yet handed to the front-end, "running" rows are
-//     started-jobs markers a boot-time recovery pass turns into "was running
-//     when shell3 stopped" notices. Like cron_status it holds opaque JSON,
-//     names no session id, and is never touched by runs.Sweep.
-const schemaVersion = 7
+// The history of past versions is not kept here: a mismatched database is
+// deleted and recreated (see openDB), so no code ever reads an older shape.
+// The current tables live in schema.go; when one changes, bump this.
+//
+// Version 8 is the current shape: sessions/messages/reminders/messages_fts,
+// threads(surface PRIMARY KEY, session_id) for each front-end's current
+// conversation, cron_status(name, json) for cron's per-job run history, and
+// outbox(id, kind, json) for the restart-durable completion queue.
+// cron_status and outbox are their OWN tables rather than rows in threads:
+// threads.session_id is trusted elsewhere to be a real session id — runs.Sweep
+// prunes any threads row whose session_id doesn't name a live session — so a
+// job name or a JSON blob in that column would be deleted by the very next
+// startup's janitor pass, before it could be read back.
+const schemaVersion = 8
 
 // openDB opens path, applying the schema fresh or recreating the file
 // outright when its stamped version doesn't match schemaVersion. Per the
@@ -98,9 +77,8 @@ const schemaVersion = 7
 // empty, loudly, rather than silently limping along on a schema the running
 // binary doesn't fully understand (the failure mode this guards against:
 // CREATE TABLE IF NOT EXISTS is a no-op against an existing table, so an
-// older database's threads table would otherwise keep missing the new
-// columns forever, and writes to them would silently degrade to
-// memory-only).
+// older database would otherwise keep missing every column added since,
+// and writes to them would fail row by row).
 func openDB(path string) (*sql.DB, error) {
 	db, err := openRaw(path)
 	if err != nil {
@@ -130,12 +108,10 @@ func openDB(path string) (*sql.DB, error) {
 		return nil, err
 	}
 	// user_version is a bare, unchecksummed 4-byte field in the sqlite
-	// header: a single corrupted byte can make it read back as an
-	// implausible value (e.g. 257) while every table and row underneath is
-	// completely intact. Two successful reads (isFreshDB, userVersion) is
-	// not the same as two trustworthy reads, so a version outside the range
-	// this binary could plausibly have written is treated as "we can't tell
-	// what this is" — an error, never grounds to delete someone's data.
+	// header, so a corrupted byte can read back as an implausible version
+	// over completely intact tables. A version this binary could not have
+	// written means "we can't tell what this is" — an error, never grounds
+	// to delete someone's data.
 	if version < 0 || version > schemaVersion {
 		_ = db.Close()
 		return nil, fmt.Errorf(
@@ -330,15 +306,8 @@ CREATE TABLE IF NOT EXISTS reminders (
 	text       TEXT    NOT NULL
 );
 CREATE TABLE IF NOT EXISTS threads (
-	surface    TEXT NOT NULL,
-	msg_id     TEXT NOT NULL,
-	session_id TEXT NOT NULL,
-	title      TEXT NOT NULL DEFAULT '',
-	preview    TEXT NOT NULL DEFAULT '',
-	created_at TEXT NOT NULL DEFAULT '',
-	updated_at TEXT NOT NULL DEFAULT '',
-	deleted    INTEGER NOT NULL DEFAULT 0,
-	PRIMARY KEY (surface, msg_id)
+	surface    TEXT NOT NULL PRIMARY KEY,
+	session_id TEXT NOT NULL
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
 	text, session_id UNINDEXED, seq UNINDEXED, role UNINDEXED

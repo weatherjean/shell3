@@ -253,10 +253,10 @@ var editFileTool = llm.ToolDefinition{
 
 var readMediaTool = llm.ToolDefinition{
 	Name: "read_media",
-	Description: "Load a media file from disk so a vision/audio-capable model can perceive it — images (jpg, png, gif, webp), audio (wav, mp3, ogg/opus), PDFs (pdf), or video (mp4, webm, mov). " +
+	Description: "Load a media file from disk so a vision/audio-capable model can perceive it — images (jpg, png, gif, webp), audio (wav, mp3, ogg/opus), or PDFs (pdf). " +
 		"The file is decoded and attached as a user message immediately after the tool results, so it appears in your view on the next step. " +
-		"Requires a model with the matching modality; PDF and video parts additionally require a model/provider that accepts file/video content parts. " +
-		"This tool is for images/audio/PDF/video only — to read text files use `bash` with cat/sed/head.",
+		"Requires a model with the matching modality; PDF parts additionally require a model/provider that accepts file content parts. " +
+		"This tool is for images/audio/PDF only — to read text files use `bash` with cat/sed/head.",
 	Parameters: map[string]any{
 		"type": "object",
 		"properties": map[string]any{

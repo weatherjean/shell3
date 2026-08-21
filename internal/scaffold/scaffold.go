@@ -38,7 +38,7 @@ type Values struct {
 
 	// Vision reports whether the model can see images. True adds the `media`
 	// tool (read_media) to the agent's frontmatter so it can open an image,
-	// audio, PDF, or video file directly. There is no captioning fallback for
+	// audio, or PDF file directly. There is no captioning fallback for
 	// text-only models — use a multimodal model, or have the agent shell out.
 	Vision bool
 

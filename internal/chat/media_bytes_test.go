@@ -104,25 +104,6 @@ func TestMediaPartFromBytes_PDF(t *testing.T) {
 	}
 }
 
-// TestMediaPartFromBytes_Video: every accepted video MIME maps to a video_url
-// data-URI part carrying the base64 of the input, untranscoded.
-func TestMediaPartFromBytes_Video(t *testing.T) {
-	raw := []byte("fake video payload")
-	for _, mime := range []string{"video/mp4", "video/webm", "video/quicktime"} {
-		part, desc, err := MediaPartFromBytes(raw, mime)
-		if err != nil {
-			t.Fatalf("%s: %v", mime, err)
-		}
-		want := "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(raw)
-		if part.Type != llm.ContentPartTypeVideoURL || part.VideoURL != want {
-			t.Fatalf("%s: part = %+v, want VideoURL %q", mime, part, want)
-		}
-		if !strings.Contains(desc, mime) {
-			t.Fatalf("%s: desc = %q", mime, desc)
-		}
-	}
-}
-
 // TestMediaPartFromBytes_EmptyAudio: zero-length audio bytes must error rather
 // than pass the size cap (len 0 is not > max) and yield a bogus "valid"
 // input_audio part with empty base64 and a "0.0 MB" description. Mirrors the

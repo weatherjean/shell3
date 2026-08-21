@@ -153,7 +153,7 @@ commit it). `--force` overwrites an existing config.
 
 The form asks for the model endpoint, tag, name and key; whether the model can
 see images (yes adds the `media` tool — `read_media` — to the agent's
-frontmatter so it can open image/audio/PDF/video files directly; no leaves
+frontmatter so it can open image/audio/PDF files directly; no leaves
 that tool out until you add a vision model); the
 context window and auto-compaction threshold; an optional proxy command; the
 **Telegram bot token** (from [@BotFather](https://t.me/BotFather)) and **chat

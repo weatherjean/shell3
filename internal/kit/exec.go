@@ -17,11 +17,11 @@ import (
 // environment variable, so it cannot carry hyphens or start with a digit.
 var paramName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// BindArgs validates a tool call's arguments against the declared params and
+// bindArgs validates a tool call's arguments against the declared params and
 // returns the environment the shell function runs with. Required params must be
 // present; declared defaults fill the rest; undeclared arguments are an error
 // (a tool's surface is exactly what it declares).
-func (t Tool) BindArgs(args map[string]any) ([]string, error) {
+func (t Tool) bindArgs(args map[string]any) ([]string, error) {
 	for name := range args {
 		if _, declared := t.Params[name]; !declared {
 			return nil, fmt.Errorf("tool %q: unknown argument %q", t.Name, name)
@@ -137,7 +137,7 @@ func (r Runner) baseEnv(lookup func(string) (string, bool)) []string {
 // Stdout is the tool's result. Stderr is folded into the error when the call
 // fails, so a failing tool reports why rather than returning silence.
 func (r Runner) Run(ctx context.Context, t Tool, args map[string]any) (string, error) {
-	env, err := t.BindArgs(args)
+	env, err := t.bindArgs(args)
 	if err != nil {
 		return "", err
 	}

@@ -78,10 +78,9 @@ var yamlTypeNames = map[string]string{
 
 var yamlTypeRE = regexp.MustCompile(`type config\.(\w+)`)
 
-// humanizeYAMLTypes rewrites go-yaml's "field web not found in type
-// config.yamlFile" into the block name the user actually wrote. The strict
-// unknown-key failure is the most likely error a 0.4.x upgrader sees (their
-// `web:` block), and "config.yamlFile" means nothing to them.
+// humanizeYAMLTypes rewrites go-yaml's "field foo not found in type
+// config.yamlFile" into the block name the user actually wrote:
+// "config.yamlFile" means nothing to whoever typed the key.
 func humanizeYAMLTypes(msg string) string {
 	return yamlTypeRE.ReplaceAllStringFunc(msg, func(m string) string {
 		if label, ok := yamlTypeNames[strings.TrimPrefix(m, "type config.")]; ok {

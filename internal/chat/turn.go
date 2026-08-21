@@ -159,7 +159,7 @@ func RunTurn(ctx context.Context, cfg TurnConfig, sess *Session, userMsg llm.Mes
 		// Replace provider-emitted tool-call ids with sequential session-scoped
 		// decimal ids ("1", "2", ...). Provider-native ids like "web_fetch:0"
 		// get truncated by models when echoed back, breaking id-based tool-result
-		// addressing (e.g. the /prune slash command); a bare integer has no
+		// addressing; a bare integer has no
 		// separator to chop at. The provider pairs ids by string match between
 		// assistant.tool_calls[i].id and tool.tool_call_id, so the rewrite is
 		// transparent on the wire.
@@ -465,8 +465,8 @@ func executeToolCalls(ctx context.Context, cfg TurnConfig, sess *Session, toolCa
 // so it is the single append site for both the normal and cancelled paths.
 func appendToolResult(sess *Session, st *toolLoopState, tc llm.ToolCall, res toolResult) {
 	emitToolResult(sess, tc.ID, tc.Name, res.output, res.isError)
-	// Prepend the tool_call_id so there is a stable handle the user can pass to
-	// the /prune slash command. Without this the id only lives in structured
+	// Prepend the tool_call_id so there is a stable handle for the result in the
+	// rendered transcript. Without this the id only lives in structured
 	// metadata, which is not visible in the rendered result.
 	content := fmt.Sprintf("[tool_call_id=%s]\n%s", tc.ID, res.output)
 	toolMsg := llm.Message{

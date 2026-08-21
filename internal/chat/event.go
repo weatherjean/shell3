@@ -11,8 +11,8 @@ import (
 type EventKind int
 
 const (
-	// EventSessionStart fires once per session, before any turn. Meta
-	// carries startup metadata (persona, model, headless flag, etc.).
+	// EventSessionStart is the zero value of EventKind. Nothing emits it any
+	// more; it stays so a zero Event is never mistaken for a real one.
 	EventSessionStart EventKind = iota
 	// EventSessionEnd fires once at session teardown. Meta["status"] is
 	// "ok" or an error label.
@@ -146,15 +146,6 @@ type EventUsageData struct {
 	// CachedTokens is the cache-hit share of PromptTokens, when the provider
 	// reports one (0 otherwise).
 	CachedTokens int
-}
-
-func emitSessionStart(s *Session, meta map[string]string) {
-	emit(s, Event{
-		Kind:      EventSessionStart,
-		Time:      time.Now(),
-		SessionID: s.id,
-		Meta:      meta,
-	})
 }
 
 func emitSessionEnd(s *Session, status string) {

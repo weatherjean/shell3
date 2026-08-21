@@ -34,23 +34,3 @@ func RuntimeForTest(workDir string, sessionConfig func(SessionOpts) (chat.Config
 	rt.jobs = newJobManager(rt, 0)
 	return rt
 }
-
-// SetTelegramForTest replaces the runtime's `telegram:` block. The front-end
-// reads its token/chat id from here — deliberately, so a /reload picks up a
-// changed one — and a test exercising the bot wiring needs some way to supply
-// it. Like RuntimeForTest, this is for test harnesses in other packages, not
-// public API.
-func (rt *Runtime) SetTelegramForTest(tc TelegramConfig) {
-	rt.mu.Lock()
-	defer rt.mu.Unlock()
-	rt.telegram = tc
-}
-
-// SetCronForTest replaces the runtime's declared cron jobs, so front-end
-// tests can exercise the declared-but-not-armed reporting without a config
-// tree. Test harness only, like SetTelegramForTest.
-func (rt *Runtime) SetCronForTest(jobs []CronJob) {
-	rt.mu.Lock()
-	defer rt.mu.Unlock()
-	rt.cron = jobs
-}

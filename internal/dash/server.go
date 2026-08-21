@@ -38,7 +38,7 @@ type Sources struct {
 	CronCosts  func() map[string]runs.JobCost
 }
 
-// Server is the read-only dashboard: three GET routes behind a token gate.
+// Server is the read-only dashboard: seven GET routes behind a token gate.
 // It binds 127.0.0.1 only — reaching it from anywhere else is the exposure
 // agent's business (a tunnel), never a wider bind.
 type Server struct {

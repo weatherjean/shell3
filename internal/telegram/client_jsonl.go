@@ -17,12 +17,9 @@ import (
 
 // jsonlProtocol is the wire protocol version EmitHello reports. Bumped only on
 // breaking changes; additive event kinds don't count (clients ignore unknown
-// types). Bumped 1 -> 2 when the inbound `callback` event and the outbound
-// `menu`/`ack` events were removed along with the /voice inline-keyboard
-// subsystem: a front-end still sending `callback` now silently hits the
-// "ignoring unknown event type" path instead of getting a response, so the
-// version number is a front-end's only signal that the wire it was built
-// against no longer exists.
+// types). It is a front-end's only signal that the wire it was built against
+// no longer exists — a removed event kind silently hits the "ignoring unknown
+// event type" path instead of erroring.
 const jsonlProtocol = 2
 
 // jsonlMaxMediaBytes caps how much of an inbound media file the transport

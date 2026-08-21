@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/weatherjean/shell3/internal/llm"
@@ -146,14 +145,6 @@ func (s *Store) EndSession(id string) error {
 
 // HasMessages reports whether the session has stored at least one message —
 // the cheap "worth listing/replaying" probe.
-// SessionExists reports whether a session row with this id is stored.
-func (s *Store) SessionExists(id string) bool {
-	var one int
-	err := s.db.QueryRow(
-		`SELECT 1 FROM sessions WHERE id=? LIMIT 1`, id).Scan(&one)
-	return err == nil
-}
-
 func (s *Store) HasMessages(id string) bool {
 	var one int
 	err := s.db.QueryRow(
@@ -189,9 +180,9 @@ func (s *Store) LastPromptTokens(id string) int {
 // session's cumulative ledger (see Meta.TotalPromptTokens). LastPromptTokens
 // answers "how full is the context now"; this answers "what did this session
 // cost", a different question an operator running unattended cron work needs
-// answered — see Store.CronRollup. Unknown session ids error (like
-// TouchSession) rather than silently no-op, since a cost that never lands
-// anywhere is worse than a loud failure naming the id at fault.
+// answered — see Store.CronRollup. Unknown session ids error rather than
+// silently no-op, since a cost that never lands anywhere is worse than a loud
+// failure naming the id at fault.
 func (s *Store) AddUsage(id string, prompt, completion int) error {
 	res, err := s.db.Exec(`UPDATE sessions
 		SET total_prompt_tokens = total_prompt_tokens + ?,
@@ -206,21 +197,8 @@ func (s *Store) AddUsage(id string, prompt, completion int) error {
 	return nil
 }
 
-// TouchSession bumps LastAt. Unknown session ids error.
-func (s *Store) TouchSession(id string) error {
-	res, err := s.db.Exec(
-		`UPDATE sessions SET last_at=? WHERE id=?`, encTime(time.Now()), id)
-	if err != nil {
-		return fmt.Errorf("runs: touch session: %w", err)
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("runs: touch session: unknown session %q", id)
-	}
-	return nil
-}
-
 // metaColumns is the column list shared by every query that scans a full
-// Meta row (ListSessions, SessionMeta, SessionsForCronJob) — kept in one
+// Meta row (ListSessions, SessionMeta) — kept in one
 // place so the SELECT list and the Scan call below can never drift apart.
 const metaColumns = `id, workdir, config_dir, model, status, parent_id, agent, cron_job,
 		started_at, ended_at, last_at, last_prompt_tokens,
@@ -240,7 +218,7 @@ func scanMeta(row interface{ Scan(...any) error }) (Meta, error) {
 }
 
 // querySessions runs a metaColumns query and scans every row, for the
-// several list queries (ListSessions, SessionsForCronJob) that differ only
+// several list queries that differ only
 // in their WHERE/ORDER BY/LIMIT clause.
 func (s *Store) querySessions(query string, args ...any) ([]Meta, error) {
 	rows, err := s.db.Query(query, args...)
@@ -276,14 +254,6 @@ func (s *Store) SessionMeta(id string) (Meta, error) {
 		return Meta{}, fmt.Errorf("runs: session %s: %w", id, err)
 	}
 	return m, nil
-}
-
-// SessionsForCronJob returns every session started by the named cron job,
-// newest first (by ID, which sorts chronologically — see ListSessions).
-// Attribution is what makes a job's history answerable without guessing
-// from session duration.
-func (s *Store) SessionsForCronJob(job string) ([]Meta, error) {
-	return s.querySessions(`SELECT `+metaColumns+` FROM sessions WHERE cron_job = ? ORDER BY id DESC`, job)
 }
 
 // ReminderLine is one persisted system-reminder, anchored to the message index
@@ -328,29 +298,6 @@ func (s *Store) TruncateReminders(id string) error {
 		return fmt.Errorf("runs: truncate reminders: %w", err)
 	}
 	return nil
-}
-
-// Transcript returns the session's messages as a JSONL blob (one message per
-// line — the wire format ParseMessages reads), or "" when the session is
-// unknown or empty. Used by jobManager.transcript to surface a child
-// session's message log after completion.
-func (s *Store) Transcript(id string) string {
-	rows, err := s.db.Query(
-		`SELECT json FROM messages WHERE session_id=? ORDER BY seq`, id)
-	if err != nil {
-		return ""
-	}
-	defer rows.Close()
-	var b strings.Builder
-	for rows.Next() {
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
-			return ""
-		}
-		b.WriteString(raw)
-		b.WriteByte('\n')
-	}
-	return b.String()
 }
 
 // LatestSession returns the newest top-level session ID matching

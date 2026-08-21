@@ -210,8 +210,8 @@ func subagentParts(t *testing.T) (*agentsetup.Parts, func()) {
 }
 
 // TestSessionConfigs_Independent pins the invariant: two configs derived from
-// one Parts hold independent agent state — re-resolving one never changes the
-// other (there is no process-global active-agent state).
+// one Parts hold independent agent state — deriving one for a different agent
+// never changes the other (there is no process-global active-agent state).
 func TestSessionConfigs_Independent(t *testing.T) {
 	parts, cleanup := subagentParts(t)
 	defer cleanup()
@@ -220,16 +220,10 @@ func TestSessionConfigs_Independent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := parts.SessionConfig(agentsetup.SessionOptions{})
+	b, err := parts.SessionConfig(agentsetup.SessionOptions{Agent: "researcher"})
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	rt, err := b.SwitchAgent("researcher")
-	if err != nil {
-		t.Fatal(err)
-	}
-	b.ApplyActiveAgent(rt)
 
 	if a.ModeLabel != "agent" {
 		t.Fatalf("config A's agent changed to %q when B re-resolved", a.ModeLabel)

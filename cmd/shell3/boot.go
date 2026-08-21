@@ -141,10 +141,13 @@ func showBootSuccess() error {
 	}
 
 	// Re-derive the message variant from disk: an uncommented run_proxy line
-	// means a proxy is wired.
+	// means a proxy is wired. The kit's wiring block is YAML inside a comment
+	// fence, so every line starts with "#" — strip exactly one before matching,
+	// which leaves a commented-out "# run_proxy:" example still unmatched.
 	proxyWired := false
 	for _, line := range strings.Split(string(yaml), "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "run_proxy:") {
+		trimmed := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "#"))
+		if strings.HasPrefix(trimmed, "run_proxy:") {
 			proxyWired = true
 			break
 		}
@@ -246,7 +249,7 @@ func runBootForm(f *bootFlags, a *bootAnswers, ctxStr, compactStr *string) error
 		a.vision = true
 		groups = append(groups, huh.NewGroup(
 			huh.NewConfirm().Title("Can your model see images?").
-				Description("Yes: adds the read_media tool, so the agent can open an image,\naudio, PDF, or video file directly. No: leave it off until you\nswitch to a multimodal model.").
+				Description("Yes: adds the read_media tool, so the agent can open an image,\naudio, or PDF file directly. No: leave it off until you\nswitch to a multimodal model.").
 				Value(&a.vision),
 		).Title("Vision"))
 	}

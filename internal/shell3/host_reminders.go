@@ -9,8 +9,7 @@ import (
 // Environment context, gated by the active agent's toggle (cfg.Environment,
 // default off). Standing reminders are injected into every turn's context and
 // visible via Snapshot, but are NOT persisted — they are re-assembled fresh at
-// every prompt-assembly event (session create, agent switch, config reload,
-// /clear).
+// every prompt-assembly event (session create, config reload).
 //
 // These are host-injected facts that depend on SESSION-level values the system
 // prompt can't carry — the resolved config path, this session's id, and the

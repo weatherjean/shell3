@@ -88,7 +88,7 @@ func TestOpen_ImplausibleUserVersionErrorsAndPreservesFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.ThreadUpsertMeta("web", ThreadMeta{ID: "precious", SessionID: "s1"}); err != nil {
+	if err := st.SetCurrentSession("web", "precious"); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Close(); err != nil {
@@ -163,7 +163,7 @@ func TestOpen_GenuineMismatchStillRecreates(t *testing.T) {
 	if v != schemaVersion {
 		t.Errorf("user_version after recreate = %d, want %d", v, schemaVersion)
 	}
-	if _, ok := st.ThreadLookup("web", "old-thread"); ok {
+	if _, ok := st.CurrentSession("web"); ok {
 		t.Error("a recreated store should not carry over the old database's rows")
 	}
 }

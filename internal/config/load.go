@@ -86,13 +86,6 @@ func load(dir string) (*LoadedConfig, error) {
 		}
 	}
 
-	// notifier.md — the old triage persona, removed with the mail redesign
-	// (completions route deterministically; see internal/shell3/completion.go).
-	// A leftover file is dead config worth surfacing, not an error.
-	if _, err := os.Stat(filepath.Join(dir, "notifier.md")); err == nil {
-		warn("notifier.md is no longer used — completions are delivered as task reports; delete the file")
-	}
-
 	// agents/*.md — subagents, filename order. Presence = registered;
 	// delegation is on iff at least one exists.
 	if err := c.loadSubagents(dir); err != nil {

@@ -34,7 +34,6 @@ func TestLibE2E_SingleTurn(t *testing.T) {
 	sess := chat.NewSession(chat.SessionOpts{Sink: func(ev chat.Event) {
 		collected = append(collected, evRec{Kind: ev.Kind, Text: ev.Text})
 	}})
-	sess.Start(map[string]string{"mode": "test"})
 
 	cfg := chat.TurnConfig{
 		LLM:         fake,
@@ -57,7 +56,6 @@ func TestLibE2E_SingleTurn(t *testing.T) {
 	}
 
 	want := map[chat.EventKind]int{
-		chat.EventSessionStart:     1,
 		chat.EventUserMessage:      1,
 		chat.EventAssistantToken:   2, // "hi", " there"
 		chat.EventAssistantMessage: 1,

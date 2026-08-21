@@ -154,8 +154,6 @@ func runToolCallTurn(t *testing.T, lc *config.LoadedConfig, dir, prompt string, 
 
 	var events []chat.Event
 	sess := chat.NewSession(chat.SessionOpts{Sink: func(ev chat.Event) { events = append(events, ev) }})
-	sess.Start(map[string]string{"mode": "test"})
-
 	turnCfg := chat.TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{Name: "base", SystemPrompt: "you are a test", Tools: toolDefs},

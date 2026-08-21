@@ -16,9 +16,6 @@ import (
 type RuntimeSpec struct {
 	ConfigDir string // "" → ~/.shell3/
 	WorkDir   string // runtime root; "" → os.Getwd(). Sessions default here.
-	// KitPath, when set, loads a kit file whose declared agents take
-	// precedence over the markdown config. "" disables kits.
-	KitPath string
 }
 
 // SessionOpts parameterizes one Session on a Runtime.
@@ -184,12 +181,6 @@ func NewRuntime(ctx context.Context, spec RuntimeSpec) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	if spec.KitPath != "" {
-		if err := parts.LoadKit(spec.KitPath); err != nil {
-			cleanup()
-			return nil, err
-		}
-	}
 	ctx, cancel := context.WithCancel(parent)
 	rt := &Runtime{
 		sessionConfig: sessionConfigFrom(parts),
@@ -300,7 +291,7 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 		return nil, ErrRuntimeClosed
 	}
 	// A named session is keyed on the runtime: requesting an existing live name
-	// (e.g. the web host's "web-<thread>") returns that same session so its
+	// (e.g. the cron dispatch parent's "cron") returns that same session so its
 	// history persists across reattach. An empty name gets a unique generated
 	// label ("sN"), skipping any already taken by a live session.
 	if opts.Name == "" {

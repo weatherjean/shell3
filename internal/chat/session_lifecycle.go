@@ -6,13 +6,6 @@ import (
 	"github.com/weatherjean/shell3/internal/llm"
 )
 
-// Start emits a session_start event with the given metadata. Call this once
-// per session, after the store session is created (runs.Store.NewSession) when
-// a store is used.
-func (s *Session) Start(meta map[string]string) {
-	emitSessionStart(s, meta)
-}
-
 // Status is a session's terminal state, written to the session_end event.
 type Status string
 
@@ -69,7 +62,7 @@ func (s *Session) SetMessages(msgs []llm.Message) {
 // the user_message event, runs the turn loop, and (if cfg.Store is non-nil)
 // persists newly appended messages to the store. Persistence happens inside the
 // turn, before the terminal turn_done/error event fires, so a consumer reacting
-// to that event (e.g. /clear, /rollback) can't mutate history concurrently with
+// to that event can't mutate history concurrently with
 // the save. Blocks until the turn completes.
 func (s *Session) RunParts(ctx context.Context, cfg TurnConfig, input string, parts []llm.ContentPart) {
 	emitUserMessage(s, input)

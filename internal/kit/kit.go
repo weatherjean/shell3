@@ -2,6 +2,8 @@ package kit
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -197,10 +199,15 @@ func Parse(src []byte) (*Kit, error) {
 	for _, a := range k.Agents {
 		known[a.Name] = true
 	}
-	for kind, m := range map[string]map[string]string{"gate": k.Gates, "note": k.Notes} {
-		for agent := range m {
+	// Ordered, not a map range: when both a gate and a note name an unknown
+	// agent, the error text must be the same on every run.
+	for _, decl := range []struct {
+		kind string
+		m    map[string]string
+	}{{"gate", k.Gates}, {"note", k.Notes}} {
+		for _, agent := range slices.Sorted(maps.Keys(decl.m)) {
 			if !known[agent] {
-				return nil, fmt.Errorf("%s names agent %q, which this kit does not declare", kind, agent)
+				return nil, fmt.Errorf("%s names agent %q, which this kit does not declare", decl.kind, agent)
 			}
 		}
 	}

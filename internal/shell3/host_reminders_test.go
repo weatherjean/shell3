@@ -41,7 +41,6 @@ func hostRemindersCfg(env bool) func() chat.Config {
 			ConfigDir:  "/cfg",
 			RunsDir:    "/root/.shell3_project/runs",
 			AgentKnobs: chat.AgentKnobs{Environment: env},
-			AgentNames: []string{"code"},
 		}
 	}
 }

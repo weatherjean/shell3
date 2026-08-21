@@ -18,8 +18,8 @@ import (
 const ConsoleChatID int64 = 1
 
 // ConsoleClient is a tgClient that speaks stdin/stdout instead of Telegram, for
-// driving the REAL bot loop (commands, cron ⏰ posts, threading, courtesy
-// rejection, /jobs, hook asks) in a headless script without a phone. It is a
+// driving the REAL bot loop (commands, cron ⏰ posts, threading, completion
+// delivery) in a headless script without a phone. It is a
 // dev/debug transport, not a chat front-end.
 //
 // Inbound (stdin, one line per message):

@@ -78,14 +78,14 @@ func TestBashHandler_Execute_timeout(t *testing.T) {
 }
 
 // A foreground bash call blocks the whole turn, so the requested timeout must
-// clamp to MaxBashTimeoutSeconds — the model cannot buy back the old 10-minute
+// clamp to maxBashTimeoutSeconds — the model cannot buy back the old 10-minute
 // wedge by passing a huge timeout_seconds.
 func TestParseBashArgsClampsTimeout(t *testing.T) {
 	_, timeout, err := parseBashArgsFull(`{"command":"sleep 1","timeout_seconds":600}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := time.Duration(MaxBashTimeoutSeconds) * time.Second; timeout != want {
+	if want := time.Duration(maxBashTimeoutSeconds) * time.Second; timeout != want {
 		t.Fatalf("timeout not clamped: got %s, want %s", timeout, want)
 	}
 }
@@ -116,14 +116,14 @@ func TestBashHandler_Execute_timeoutWithGrandchild(t *testing.T) {
 func TestBashHandler_Execute_outputTruncation(t *testing.T) {
 	h := BashHandler{}
 	// Emit ~60KB; cap is 30KB. Use yes piped to head for speed.
-	cmd := fmt.Sprintf(`yes a | head -c %d`, MaxBashOutputBytes*2)
+	cmd := fmt.Sprintf(`yes a | head -c %d`, maxBashOutputBytes*2)
 	args := json.RawMessage(fmt.Sprintf(`{"command":%q,"timeout_seconds":5}`, cmd))
 	out, err := h.Execute(context.Background(), "1", args, ToolConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out) > MaxBashOutputBytes+200 {
-		t.Fatalf("output not truncated: len=%d cap=%d", len(out), MaxBashOutputBytes)
+	if len(out) > maxBashOutputBytes+200 {
+		t.Fatalf("output not truncated: len=%d cap=%d", len(out), maxBashOutputBytes)
 	}
 	if !strings.Contains(out, "bytes elided") {
 		t.Fatalf("expected elided marker, got len=%d", len(out))

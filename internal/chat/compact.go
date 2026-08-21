@@ -2,8 +2,8 @@ package chat
 
 // Host-managed context compaction and pruning: the two-tier token-threshold
 // system (prune_at stubs old tool outputs cheaply; compact_at summarizes the
-// head while keeping recent turns verbatim), the manual /prune and forced
-// /compact paths, and the token-estimate helpers they share. RunTurn calls
+// head while keeping recent turns verbatim), the forced-compaction path
+// (CompactStandalone), and the token-estimate helpers they share. RunTurn calls
 // maybeCompact at turn start; everything here is best-effort and never fails
 // the user's turn.
 
@@ -262,8 +262,8 @@ func compactApply(ctx context.Context, cfg TurnConfig, sess *Session, forced boo
 
 // pruneOldToolOutputs stubs large tool results that sit before the protected
 // recent tail, with no LLM call. It is the cheap first tier of context relief;
-// only the manual /prune and full compaction persist — this mutates the
-// in-memory slice only (the append-only store keeps originals). Idempotent: a
+// only full compaction persists — this mutates the in-memory slice only (the
+// append-only store keeps originals). Idempotent: a
 // stub is far below pruneMinBytes, so re-running skips it.
 func pruneOldToolOutputs(cfg TurnConfig, sess *Session) {
 	cut := compactionCut(sess.messages, resolveKeepRecent(cfg))

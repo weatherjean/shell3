@@ -65,24 +65,24 @@ func TestSearchIndexesTextParts(t *testing.T) {
 	}
 }
 
-// Threads: record, overwrite, lookup, and surface isolation.
-func TestThreadRecordLookup(t *testing.T) {
+// Current session: record, overwrite, read back, and surface isolation.
+func TestCurrentSessionRecordLookup(t *testing.T) {
 	st, _ := Open(t.TempDir())
-	if err := st.ThreadRecord("web", "42", "sess-a"); err != nil {
+	if err := st.SetCurrentSession("web", "sess-a"); err != nil {
 		t.Fatal(err)
 	}
-	if got, ok := st.ThreadLookup("web", "42"); !ok || got != "sess-a" {
-		t.Fatalf("Lookup = %q, %v", got, ok)
+	if got, ok := st.CurrentSession("web"); !ok || got != "sess-a" {
+		t.Fatalf("CurrentSession = %q, %v", got, ok)
 	}
-	// Same msg id on another surface stays invisible.
-	if _, ok := st.ThreadLookup("serve", "42"); ok {
+	// Another surface has its own marker.
+	if _, ok := st.CurrentSession("serve"); ok {
 		t.Fatal("surface isolation broken")
 	}
-	// Re-record overwrites (the anchor advances as a thread continues).
-	if err := st.ThreadRecord("web", "42", "sess-b"); err != nil {
+	// Re-record overwrites (a /new moves the marker).
+	if err := st.SetCurrentSession("web", "sess-b"); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := st.ThreadLookup("web", "42"); got != "sess-b" {
+	if got, _ := st.CurrentSession("web"); got != "sess-b" {
 		t.Fatalf("overwrite failed: %q", got)
 	}
 }
@@ -95,7 +95,7 @@ func TestReopenPersists(t *testing.T) {
 	if err := st.AppendMessage(id, llm.Message{Role: llm.RoleUser, Content: "hello there"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.ThreadRecord("web", "7", id); err != nil {
+	if err := st.SetCurrentSession("web", id); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Close(); err != nil {
@@ -110,26 +110,28 @@ func TestReopenPersists(t *testing.T) {
 	if err != nil || len(msgs) != 1 || msgs[0].Content != "hello there" {
 		t.Fatalf("messages lost across reopen: %v %v", msgs, err)
 	}
-	if got, ok := st2.ThreadLookup("web", "7"); !ok || got != id {
-		t.Fatalf("thread lost across reopen: %q %v", got, ok)
+	if got, ok := st2.CurrentSession("web"); !ok || got != id {
+		t.Fatalf("current-session marker lost across reopen: %q %v", got, ok)
 	}
 	if hits, _ := st2.Search("hello", 5); len(hits) != 1 {
 		t.Fatalf("fts lost across reopen: %d hits", len(hits))
 	}
 }
 
-// Sweep: expired sessions go (with their FTS entries and thread entries),
+// Sweep: expired sessions go (with their FTS entries and current-session markers),
 // recent ones stay, and keep<=0 preserves everything except trash.
 func TestSweep(t *testing.T) {
 	root := t.TempDir()
 	st, _ := Open(root)
 	oldID, _ := st.NewSession(Meta{Workdir: "/w"})
 	newID_, _ := st.NewSession(Meta{Workdir: "/w"})
-	for _, id := range []string{oldID, newID_} {
+	// One marker per surface: the expired session owns "web", the recent one
+	// owns "serve", so the sweep's drop and its keep are both observable.
+	for surface, id := range map[string]string{"web": oldID, "serve": newID_} {
 		if err := st.AppendMessage(id, llm.Message{Role: llm.RoleUser, Content: "searchable words"}); err != nil {
 			t.Fatal(err)
 		}
-		if err := st.ThreadRecord("web", "m-"+id, id); err != nil {
+		if err := st.SetCurrentSession(surface, id); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -159,11 +161,11 @@ func TestSweep(t *testing.T) {
 	if _, ok := findMeta(t, st2, newID_); !ok {
 		t.Fatal("recent session was swept")
 	}
-	if _, ok := st2.ThreadLookup("web", "m-"+oldID); ok {
-		t.Fatal("stale thread entry survived")
+	if _, ok := st2.CurrentSession("web"); ok {
+		t.Fatal("stale current-session marker survived")
 	}
-	if _, ok := st2.ThreadLookup("web", "m-"+newID_); !ok {
-		t.Fatal("live thread entry was dropped")
+	if _, ok := st2.CurrentSession("serve"); !ok {
+		t.Fatal("live current-session marker was dropped")
 	}
 	// The swept session's text must be gone from the index too.
 	hits, _ := st2.Search("searchable", 10)

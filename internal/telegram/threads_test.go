@@ -29,58 +29,79 @@ func testStore(t *testing.T) func() *runs.Store {
 
 func TestThreadIndexRoundtrip(t *testing.T) {
 	idx := NewThreadIndex(testStore(t), "telegram")
-	idx.Record("123", "sess-abc")
-	got, ok := idx.Lookup("123")
+	if err := idx.SetCurrent("sess-abc"); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := idx.Current()
 	if !ok || got != "sess-abc" {
-		t.Fatalf("Lookup(123) = %q, %v; want sess-abc, true", got, ok)
+		t.Fatalf("Current() = %q, %v; want sess-abc, true", got, ok)
 	}
 }
 
 func TestThreadIndexPersistence(t *testing.T) {
 	st := testStore(t)
 	idx := NewThreadIndex(st, "telegram")
-	idx.Record("1", "s1")
-	idx.Record("2", "s2")
+	if err := idx.SetCurrent("s1"); err != nil {
+		t.Fatal(err)
+	}
 
-	// A second index over the same store (as after a restart) sees the map.
+	// A second index over the same store (as after a restart) sees the marker.
 	idx2 := NewThreadIndex(st, "telegram")
-	for _, tc := range []struct {
-		id   string
-		want string
-	}{{"1", "s1"}, {"2", "s2"}} {
-		got, ok := idx2.Lookup(tc.id)
-		if !ok || got != tc.want {
-			t.Fatalf("Lookup(%s) = %q, %v; want %s, true", tc.id, got, ok, tc.want)
-		}
+	got, ok := idx2.Current()
+	if !ok || got != "s1" {
+		t.Fatalf("Current() after restart = %q, %v; want s1, true", got, ok)
 	}
 }
 
 func TestThreadIndexUnknown(t *testing.T) {
 	idx := NewThreadIndex(testStore(t), "telegram")
-	if got, ok := idx.Lookup("999"); ok {
-		t.Fatalf("Lookup(999) = %q, true; want _, false", got)
+	if got, ok := idx.Current(); ok {
+		t.Fatalf("Current() = %q, true; want _, false", got)
 	}
 }
 
-// Two front-end surfaces over one store never cross-resolve each other's ids.
+// An empty recorded id (the /new that cleared the marker) reads as absent.
+func TestThreadIndexClearedMarkerReadsAbsent(t *testing.T) {
+	st := testStore(t)
+	idx := NewThreadIndex(st, "telegram")
+	if err := idx.SetCurrent("s1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := idx.SetCurrent(""); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := idx.Current(); ok {
+		t.Fatalf("Current() after clear = %q, true; want _, false", got)
+	}
+	// And across a restart, from the store.
+	if got, ok := NewThreadIndex(st, "telegram").Current(); ok {
+		t.Fatalf("Current() after clear + restart = %q, true; want _, false", got)
+	}
+}
+
+// Two front-end surfaces over one store never cross-resolve each other's markers.
 func TestThreadIndexSurfaceIsolation(t *testing.T) {
 	st := testStore(t)
 	tg := NewThreadIndex(st, "telegram")
 	sv := NewThreadIndex(st, "serve")
-	tg.Record("7", "tg-sess")
-	sv.Record("7", "serve-sess")
-	if got, _ := tg.Lookup("7"); got != "tg-sess" {
-		t.Fatalf("telegram Lookup(7) = %q", got)
+	if err := tg.SetCurrent("tg-sess"); err != nil {
+		t.Fatal(err)
 	}
-	if got, _ := sv.Lookup("7"); got != "serve-sess" {
-		t.Fatalf("serve Lookup(7) = %q", got)
+	if err := sv.SetCurrent("serve-sess"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := NewThreadIndex(st, "telegram").Current(); got != "tg-sess" {
+		t.Fatalf("telegram Current() = %q", got)
+	}
+	if got, _ := NewThreadIndex(st, "serve").Current(); got != "serve-sess" {
+		t.Fatalf("serve Current() = %q", got)
 	}
 }
 
 // newResumeTestBot builds a Bot whose session store and current-marker store
 // are the SAME runs.Store — unlike newBot/mkThreads, which give the bot's
 // ThreadIndex its own throwaway store disconnected from the runtime's. That
-// separation is fine for the thread-mapping tests above, but a marker/session
+// separation is fine for the marker tests above, but a marker/session
 // divergence test needs EndSession (on the store sessions actually live in)
 // and Current() (on the store the marker actually lives in) to agree on which
 // store that is, the way production wiring does (openThreads in
@@ -99,7 +120,7 @@ func newResumeTestBot(t *testing.T) (*Bot, *runs.Store) {
 			scripts[i] = fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}}
 		}
 		return chat.Config{
-			LLM: fakellm.New(scripts...), ModeLabel: "code", AgentNames: []string{"code"},
+			LLM: fakellm.New(scripts...), ModeLabel: "code",
 			Store: st, Headless: o.Headless,
 		}, nil
 	})
@@ -262,7 +283,7 @@ func TestMainSession_MarkerSurvivesCompaction(t *testing.T) {
 
 	rt := shell3.RuntimeForTest(t.TempDir(), func(o shell3.SessionOpts) (chat.Config, error) {
 		return chat.Config{
-			LLM: fakellm.New(scripts...), ModeLabel: "code", AgentNames: []string{"code"},
+			LLM: fakellm.New(scripts...), ModeLabel: "code",
 			Store: st, Headless: o.Headless,
 			AgentKnobs: chat.AgentKnobs{CompactAt: 100, KeepRecent: 50},
 		}, nil
@@ -303,21 +324,21 @@ func TestMainSession_MarkerSurvivesCompaction(t *testing.T) {
 	}
 }
 
-func TestThreadIndexConcurrentRecord(t *testing.T) {
+// Concurrent SetCurrent calls are race-free and leave one of the written ids
+// as the marker (last write wins).
+func TestThreadIndexConcurrentSetCurrent(t *testing.T) {
 	idx := NewThreadIndex(testStore(t), "telegram")
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			idx.Record(strconv.Itoa(n), "s"+strconv.Itoa(n))
+			_ = idx.SetCurrent("s" + strconv.Itoa(n))
 		}(i)
 	}
 	wg.Wait()
-	for i := 0; i < 10; i++ {
-		got, ok := idx.Lookup(strconv.Itoa(i))
-		if !ok || got != "s"+strconv.Itoa(i) {
-			t.Fatalf("Lookup(%d) = %q, %v", i, got, ok)
-		}
+	got, ok := idx.Current()
+	if !ok || !strings.HasPrefix(got, "s") {
+		t.Fatalf("Current() = %q, %v; want one of the written ids", got, ok)
 	}
 }

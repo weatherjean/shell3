@@ -286,9 +286,9 @@ func (s *Session) ID() string {
 	return s.id
 }
 
-// SetID swaps the runs session id. Used by Session.Clear to rotate onto a fresh
-// session so subsequent turns persist under the new conversation. Guarded by
-// msgMu because History() reader pairs id with the message slice.
+// SetID swaps the runs session id, so subsequent turns persist under a
+// different conversation. Guarded by msgMu because a reader pairs id with the
+// message slice.
 func (s *Session) SetID(id string) {
 	s.msgMu.Lock()
 	defer s.msgMu.Unlock()
@@ -322,7 +322,7 @@ type ReminderRecord struct {
 // the next message to be appended. Called from emitSystemReminder (turn
 // goroutine only). The in-memory append is done under msgMu; the sidecar write
 // is done AFTER releasing the lock so a slow disk (fsync stall, NFS) can't block
-// concurrent readers (History/Messages/Reminders/ID) behind the
+// concurrent readers (Messages/Reminders/ID) behind the
 // held write lock. Single-writer (turn goroutine), so the persisted order still
 // matches the in-memory order.
 func (s *Session) recordReminder(text string) {
@@ -368,7 +368,7 @@ func (s *Session) RestoreReminders() error {
 
 // Reminders returns a snapshot of all system-reminders, safe to retain.
 // Standing reminders (anchored at Seq 0) are prepended ahead of the logged
-// ones so History() interleaves them at the top of the conversation.
+// ones, so a replay shows them at the top of the conversation.
 // Safe to call concurrently with a running turn (mirrors Messages()).
 func (s *Session) Reminders() []ReminderRecord {
 	s.msgMu.RLock()

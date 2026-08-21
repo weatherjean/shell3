@@ -53,8 +53,8 @@ type reloadState struct {
 //   - In place: idle front-end (root) sessions keep their identity and history
 //     (s.sess); only s.cfg + s.handlers are rebuilt onto the new config. Subagent
 //     child sessions (ParentID set) are left untouched — they keep the old
-//     generation until they finish. Active agent + /set params are restored
-//     best-effort. Decorator-registered host tools (SetSessionDecorator, e.g.
+//     generation until they finish. Decorator-registered host tools
+//     (SetSessionDecorator, e.g.
 //     send_media_telegram) ARE re-applied here.
 //
 // NOTE: the kept s.sess was built with a ContextWindowFor closure over the OLD
@@ -84,7 +84,7 @@ func (rt *Runtime) Reload() (ReloadResult, error) {
 		cron:          newParts.Cron(),
 		telegram:      newParts.Telegram(),
 		maxConcurrent: newParts.BackgroundMaxConcurrent(),
-		agents:        len(newParts.AgentNames()),
+		agents:        newParts.AgentCount(),
 		models:        newParts.ModelCount(),
 	})
 }
@@ -117,15 +117,10 @@ func (rt *Runtime) applyReload(st reloadState) (ReloadResult, error) {
 		return ReloadResult{}, fmt.Errorf("reload: runtime is closed")
 	}
 
-	// 1. Capture per-session overrides to restore after the swap. Subagent child
-	// sessions are skipped: they are an already-running job's context and keep
-	// the Parts they were built with (the old generation lingers for them).
-	type override struct {
-		s      *Session
-		agent  string
-		params map[string]string
-	}
-	var ovs []override
+	// 1. Collect the sessions to re-derive. Subagent child sessions are skipped:
+	// they are an already-running job's context and keep the Parts they were
+	// built with (the old generation lingers for them).
+	var idle []*Session
 	for _, s := range rt.sessions {
 		if s.opts.ParentID != "" {
 			continue // subagent child: leave it on its original generation
@@ -138,13 +133,7 @@ func (rt *Runtime) applyReload(st reloadState) (ReloadResult, error) {
 			st.cleanup()
 			return ReloadResult{}, fmt.Errorf("reload: session %q has a turn in flight", s.name)
 		}
-		ov := override{s: s, agent: s.ActiveAgent(), params: map[string]string{}}
-		for _, p := range s.Snapshot().Params {
-			if p.Value != "" { // only explicit /set overrides
-				ov.params[p.Name] = p.Value
-			}
-		}
-		ovs = append(ovs, ov)
+		idle = append(idle, s)
 	}
 
 	// 2. Swap shared state, then close OR park the OLD generation's teardown.
@@ -164,7 +153,7 @@ func (rt *Runtime) applyReload(st reloadState) (ReloadResult, error) {
 		oldCleanup()
 	}
 
-	// 3. Re-derive each idle session in place (keep history s.sess), restore overrides.
+	// 3. Re-derive each idle session in place (keep history s.sess).
 	var notes []string
 	// The job manager's concurrency cap is armed at NewRuntime and not rebuilt
 	// here (live jobs hold slots on it); surface a changed knob instead of
@@ -178,8 +167,7 @@ func (rt *Runtime) applyReload(st reloadState) (ReloadResult, error) {
 			notes = append(notes, "background.max_concurrent change takes effect on restart")
 		}
 	}
-	for _, ov := range ovs {
-		s := ov.s
+	for _, s := range idle {
 		cfg, err := rt.sessionConfig(s.opts)
 		if err != nil {
 			notes = append(notes, fmt.Sprintf("session %q: re-derive failed: %v", s.name, err))
@@ -198,20 +186,9 @@ func (rt *Runtime) applyReload(st reloadState) (ReloadResult, error) {
 		s.handlers = chat.NewHandlers()
 		// Re-apply the per-session host standing reminders: rt.sessionConfig
 		// rebuilt the cfg (including the Environment toggle) from the
-		// reloaded config. SetStandingReminders replaces the set wholesale, so a
-		// following SwitchAgent re-applying it is harmless.
+		// reloaded config. SetStandingReminders replaces the set wholesale.
 		s.applyHostReminders()
 		s.mu.Unlock()
-		// Restore active agent if it still exists, else fall back + note it.
-		if ov.agent != "" && ov.agent != s.ActiveAgent() {
-			if err := s.SwitchAgent(ov.agent); err != nil {
-				notes = append(notes, fmt.Sprintf("agent %q no longer exists; using %q", ov.agent, s.ActiveAgent()))
-			}
-		}
-		// Replay /set params best-effort.
-		for name, val := range ov.params {
-			_ = s.SetParam(name, val) // silently skip params the new model lacks
-		}
 		redecorate = append(redecorate, s)
 	}
 

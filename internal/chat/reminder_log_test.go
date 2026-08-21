@@ -29,8 +29,8 @@ func TestReminderLog_AnchorsToMessageIndex(t *testing.T) {
 	}
 }
 
-// TestReminderLog_ClearedOnSetMessages confirms /clear and /rollback (which call
-// SetMessages) drop stale reminder anchors.
+// TestReminderLog_ClearedOnSetMessages confirms replacing history wholesale
+// (SetMessages) drops stale reminder anchors.
 func TestReminderLog_ClearedOnSetMessages(t *testing.T) {
 	s := NewSession(SessionOpts{})
 	s.append(llm.Message{Role: llm.RoleUser, Content: "hi"})

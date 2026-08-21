@@ -33,8 +33,8 @@ func mediaTooLarge(kind string, size, maxBytes int64) error {
 
 // readMediaFile is the shared front half of the media loaders: it resolves
 // path against workDir (~ expands), enforces the per-kind size cap, and reads
-// the raw bytes. kind labels the too-large error ("image", "audio", "pdf",
-// "video"). Returns the bytes and the resolved path.
+// the raw bytes. kind labels the too-large error ("image", "audio", "pdf").
+// Returns the bytes and the resolved path.
 func readMediaFile(path, workDir, kind string, maxBytes int64) ([]byte, string, error) {
 	path = resolvePath(path, workDir)
 	f, err := os.Open(path)

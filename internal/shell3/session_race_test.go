@@ -23,9 +23,9 @@ func TestSession_ConcurrentReadsRaceTurn(t *testing.T) {
 	block := fakellm.NewBlocking()
 	rt := newTestRuntime(t, func() chat.Config {
 		return chat.Config{
-			LLM:        block,
-			ModeLabel:  "code",
-			AgentNames: []string{"code"},
+			LLM:       block,
+			ModeLabel: "code",
+
 			Personality: persona.Persona{
 				SystemPrompt: "you are a test agent",
 				Tools:        []llm.ToolDefinition{{Name: "bash"}},

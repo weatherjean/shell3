@@ -59,7 +59,7 @@ type Session struct {
 	turnDone   chan struct{}      // closed when the turn goroutine returns (nil before the first Send)
 	sawError   bool               // any turn emitted an error event; drives the audit "end" status
 	// busy is true from Send until its turn goroutine finishes. It turns a
-	// contract violation (overlapping Send/Clear/Rollback/SwitchAgent/Prune,
+	// contract violation (overlapping Send/Clear/Rollback/Compact,
 	// which would race on unsynchronized session state) into ErrBusy instead
 	// of a data race.
 	busy bool
@@ -351,7 +351,7 @@ func (s *Session) SendParts(ctx context.Context, prompt string, parts []Part) <-
 	// nil it concurrently once `done` closes (see the big defer's wake below).
 	rt := s.runtime
 	// Snapshot the turn config while still holding s.mu: the cfg-mutating
-	// methods (SwitchAgent, SetParam, Clear, RegisterHostTool) hold s.mu, so
+	// methods (Clear, RegisterHostTool) hold s.mu, so
 	// taking the copy inside the busy-gated critical section makes "busy set"
 	// and "cfg read" atomic with respect to them — a mutator that slipped past
 	// its isBusy check either lands wholly before this copy or is serialized
@@ -404,20 +404,8 @@ func (s *Session) isBusy() bool {
 	return s.busy
 }
 
-// withIdle runs fn while holding s.mu, with the busy gate checked inside the
-// same critical section. Send sets busy under the same mutex, so a between-
-// turns mutator that uses this can never interleave with a turn starting —
-// the ErrBusy contract is enforced, not advisory. fn must not re-lock s.mu.
-func (s *Session) withIdle(fn func() error) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.busy {
-		return ErrBusy
-	}
-	return fn()
-}
-
-// ID returns the store session id (rolls on /clear; "" with no store).
+// ID returns the store session id (rolls when compaction starts a new one;
+// "" with no store).
 func (s *Session) ID() string {
 	return s.sess.ID()
 }
@@ -506,9 +494,9 @@ func (s *Session) doClose() error {
 // 5xx), where rewriting history would not help. Front-ends append it to the
 // error they show.
 //
-// The suggested remedies are the ones that actually exist: /compact rewrites
+// The suggested remedies are the ones that actually exist: compaction rewrites
 // the head of the conversation into a summary, and a new conversation starts
-// clean. (This used to name a /rollback command, which no front-end has.)
+// clean.
 func RecoveryHint(err error) string {
 	if err == nil {
 		return ""
@@ -532,7 +520,7 @@ func RecoveryHint(err error) string {
 }
 
 // turnConfigLocked derives the per-turn config from the current cfg. Built
-// fresh each turn so SwitchAgent's mutations to cfg take effect on the next
+// fresh each turn so a between-turns cfg mutation takes effect on the next
 // Send. Caller must hold s.mu: cfg and the session wiring fields it reads are
 // mutated by the mu-holding between-turns methods.
 func (s *Session) turnConfigLocked() chat.TurnConfig {
@@ -602,8 +590,8 @@ func (s *Session) Compact(ctx context.Context) (before, after int, err error) {
 	s.turnDone = done
 	// Capture the runtime under the busy gate (doClose nils it concurrently once
 	// done closes) and snapshot the turn config inside the same critical section,
-	// same as SendParts: cfg mutators (SwitchAgent, SetParam, Clear) hold s.mu,
-	// so they serialize wholly before or after this compaction.
+	// same as SendParts: cfg mutators (Clear, RegisterHostTool) hold s.mu, so
+	// they serialize wholly before or after this compaction.
 	rt := s.runtime
 	tc := s.turnConfigLocked()
 	s.mu.Unlock()
@@ -621,33 +609,6 @@ func (s *Session) Compact(ctx context.Context) (before, after int, err error) {
 		cancel() // release the child ctx
 	}()
 	return chat.CompactStandalone(cctx, tc, s.sess)
-}
-
-// SwitchAgent activates the configured agent named name for subsequent Sends
-// (a front-end's agent-switch action). Switching swaps the agent's model client,
-// system prompt, tool set, host-tool routing, skills, status
-// line, and context window while keeping conversation history. Returns an error
-// for an unknown agent or when the config declares no agents, and ErrBusy
-// while a turn is in flight: it mutates cfg in place, which the next Send's
-// turnConfigLocked reads (see Send's contract).
-func (s *Session) SwitchAgent(name string) error {
-	return s.withIdle(func() error {
-		if s.cfg.SwitchAgent == nil {
-			return errors.New("shell3: no agents configured")
-		}
-		rt, err := s.cfg.SwitchAgent(name)
-		if err != nil {
-			return err
-		}
-		// ApplyActiveAgent swaps in the new agent's prompt + toggles; re-assemble
-		// the host standing reminders for the new active agent (whose Environment
-		// toggle may differ).
-		// s.mu is held throughout (withIdle) — guards a concurrent Snapshot
-		// read and a concurrent Close's nil of s.runtime.
-		s.cfg.ApplyActiveAgent(rt)
-		s.applyHostReminders()
-		return nil
-	})
 }
 
 // ActiveAgent returns the name of the currently active agent.

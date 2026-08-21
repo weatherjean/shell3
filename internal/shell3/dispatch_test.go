@@ -108,12 +108,18 @@ func TestDispatch_CronJobReachesTheSessionRow(t *testing.T) {
 	}
 	waitDispatchDone(t, parent, id)
 
-	sessions, err := rt.store.SessionsForCronJob("ampd-tick")
+	sessions, err := rt.store.ListSessions(100)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sessions) != 1 {
-		t.Fatalf("want 1 session attributed to ampd-tick, got %d", len(sessions))
+	n := 0
+	for _, m := range sessions {
+		if m.CronJob == "ampd-tick" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("want 1 session attributed to ampd-tick, got %d", n)
 	}
 }
 

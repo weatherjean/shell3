@@ -75,9 +75,9 @@ func fixtureRuns(t *testing.T, n int) (string, []string) {
 func TestDashIndexHTMLLiveSession(t *testing.T) {
 	rt := shell3.RuntimeForTest(t.TempDir(), func(o shell3.SessionOpts) (chat.Config, error) {
 		cfg := chat.Config{
-			LLM:            fakellm.New(),
-			ModeLabel:      "agent",
-			AgentNames:     []string{"agent"},
+			LLM:       fakellm.New(),
+			ModeLabel: "agent",
+
 			StatusLine:     chat.FormatStatus("moonshot", "kimi-k2-0905-preview", "high"),
 			ActiveSkills:   []string{"scripting"},
 			ConfigWarnings: []string{"skill x skipped"},

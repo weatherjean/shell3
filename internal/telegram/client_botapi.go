@@ -352,31 +352,6 @@ func (c *BotAPIClient) Typing(ctx context.Context, chatID int64) error {
 	return err
 }
 
-// ClearMenuButton resets the bot's in-chat menu button to Telegram's default.
-// The menu button persists server-side, so a web_app button set by an older
-// build keeps pointing taps at a dead URL until explicitly cleared.
-// Best-effort; safe to ignore the error on startup.
-func (c *BotAPIClient) ClearMenuButton(ctx context.Context) error {
-	_, err := c.b.SetChatMenuButton(ctx, &bot.SetChatMenuButtonParams{
-		MenuButton: models.MenuButtonDefault{Type: models.MenuButtonTypeDefault},
-	})
-	return err
-}
-
-// SendRemovingKeyboard sends text with a ReplyKeyboardRemove markup: the
-// message delivers normally and tears down any persistent reply-keyboard bar
-// a previous build installed (the bar sticks client-side until explicitly
-// removed — commands live in the "/" menu instead).
-// Best-effort, mirroring SetCommands/ClearMenuButton.
-func (c *BotAPIClient) SendRemovingKeyboard(ctx context.Context, chatID int64, text string) error {
-	_, err := c.b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:      chatID,
-		Text:        text,
-		ReplyMarkup: models.ReplyKeyboardRemove{RemoveKeyboard: true},
-	})
-	return err
-}
-
 // SetCommands registers the bot's command list, shown in Telegram's "/"
 // autocomplete menu. Best-effort.
 func (c *BotAPIClient) SetCommands(ctx context.Context, cmds []Command) error {
