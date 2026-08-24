@@ -82,7 +82,7 @@ func newAskCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// Anchor the runtime to the config dir, exactly like `shell3 serve`,
+			// Anchor the runtime to the config dir, exactly like `shell3 telegram`,
 			// so ask shares the bot's runs store + workdir and sees the same state.
 			rt, err := shell3.NewRuntime(ctx, shell3.RuntimeSpec{ConfigDir: resolved, WorkDir: resolved})
 			if err != nil {

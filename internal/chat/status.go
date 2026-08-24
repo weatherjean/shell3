@@ -12,13 +12,3 @@ func SplitStatus(statusLine string) (string, string) {
 	}
 	return parts[0], parts[1]
 }
-
-// FormatStatus builds a status line "<provider> │ <model>" with " │ <effort>"
-// appended when effort is non-empty.
-func FormatStatus(provider, model, effort string) string {
-	out := provider + " │ " + model
-	if effort != "" {
-		out += " │ " + effort
-	}
-	return out
-}

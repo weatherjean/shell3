@@ -49,8 +49,8 @@ tokens. The function's stdout is the reply (empty posts nothing, so an
 idempotent command with nothing to say stays silent; nonzero exit posts the
 failure), and everything typed after the verb arrives as `$ARG`. Declared
 commands append to `Bot.BotCommands()` — the built-ins plus the kit's, which is
-what `shell3 telegram` registers as the `/` menu and what `serve` sends in its
-hello — and `installKitCommands` (cmd/shell3/hostwiring.go) re-installs both the
+what `shell3 telegram` registers as the `/` menu and what the console
+transport sends in its hello — and `installKitCommands` (cmd/shell3/hostwiring.go) re-installs both the
 bot's list and the runner on `/reload`, resolving `Parts` per call so a reload
 cannot leave a runner sourcing the previous kit — DISPATCH follows a reload, but
 Telegram's own `/` autocomplete menu is pushed once at startup
@@ -185,10 +185,12 @@ OpenAI adapter, and `shell3.Part` could never carry it anyway). The main agent i
 by default: reading, listing, and searching are bash commands (`cat`/`sed -n`,
 `ls`/`find`, `rg`), and a reflexive
 `read_file`/`grep`/`write_file` call gets an unknown-tool error carrying a
-bash-first redirect back to bash/edit_file. Structured `read` and `list_files`
-tools exist as an opt-in (`use: [read, list_files]`, typically for a
-subagent on a smaller model); left out of `use:`, those names hit the same
-redirect. `history` (opt-in via `use:`, on the scaffold's main agent by
+bash-first redirect back to bash/edit_file. The structured `read` and
+`list_files` tools were deleted 2026-08-24: they were in `mainDefaults`,
+so the doctrine and the tool list disagreed, and nothing in the scaffold
+or any live kit ever opted into them. Those names now hit the same
+redirect as `read_file`, and `use: [read]` is a load error like any other
+unknown built-in. `history` (opt-in via `use:`, on the scaffold's main agent by
 default) recalls past conversations from the runs store: `{query}` is
 ranked FTS5 search over user+assistant text across ALL sessions (tool
 output is not indexed; a syntax-invalid query is retried as one quoted
@@ -421,7 +423,7 @@ or a REPLY to one of the bot's own messages; everything else in a group is
 dropped before `saveAttachments`. A reply is decided from TELEGRAM's author
 field (`Msg.ReplyToBot`, set from `ReplyToMessage.From.ID` against the cached
 getMe id), not from what this process remembers sending: the in-memory ring
-(`sentIDsCap` 200, kept as the fallback for the console and JSONL transports,
+(`sentIDsCap` 200, kept as the fallback for the console transport,
 which cannot attribute a replied-to message) is EMPTY after a restart, so a
 group whose only live trigger was "reply to me" went deaf on every reboot
 until someone @mentioned it again. `/ask` exists because privacy mode never
@@ -493,7 +495,7 @@ switch; `/new` resets only the room it was typed in (old conversation stays in
 the dash's runs listing and the history index). Each room's current session id
 persists in the runs store's `threads` table under its OWN surface,
 `"<host>:<chatid>"` (`TelegramSurface`, `roomSurface` — the host prefix comes
-from the front-end's own index, so telegram and serve never cross-resolve),
+from the front-end's own index, so two front-ends could never cross-resolve),
 which is what makes a restart resume every room instead of merging them. The
 bare `"telegram"` key an older build wrote is not read: an upgrade costs one
 conversation reset, per the no-backwards-compat rule. Sessions never retire;
@@ -576,8 +578,7 @@ self-editing **progress bubble** (`progress.go`: posted silently on the
 first ToolCall, edits throttled at 1.5s, last 6 lines shown, one-line
 tool summaries) that is DELETED after a clean turn and kept as a
 breadcrumb after an error; wake turns show no bubble. `DeleteMessage`
-joins the tgClient surface (console renders `[delete #id]`, serve emits a
-`delete` event). `postReply`
+joins the tgClient surface (console renders `[delete #id]`). `postReply`
 chunks the reply at 4000 **UTF-16 code units** (Telegram's real accounting —
 emoji count double; `utf16Len`/`chunk` in render.go) on rune boundaries and
 replies each chunk to the conversation's anchor, capped at `replyMaxChunks` (2) bubbles — a
@@ -607,14 +608,14 @@ updates are ALWAYS silent regardless of the toggle (an update is not a page);
 replies to the user's own messages and ⚠️ failures always ring; the flag
 rides a variadic
 `SendOpt{Silent}` on the tgClient send methods, rendered by the console
-transport as a 🔕 tag and by the JSONL transport as `"silent":true`).
+transport as a 🔕 tag).
 Beyond the built-ins, the kit's `command:` blocks are answered here too — the
 `default:` branch of `handleCommand` consults them, so a built-in always wins.
 The view commands are GONE — `/status`, `/jobs`, `/job`, `/cancel`, `/runs`
 and the `/run_N`/`/job_N`/`/cancel_N` taps answer "unknown command"; their
 content moved to the **web dash** (`internal/dash`): a read-only HTTP server
 on `127.0.0.1:<dash_port>` (top-level wiring key, default 7333, 0 = no
-listener; started by `wireHost` for telegram, serve AND --console, never
+listener; started by `wireHost` for telegram, Bot API AND --console, never
 `ask`). Seven GET routes behind a `?t=` token gate, each threading the
 request's own token into the links it renders — `/` (index:
 `render.DashIndexHTML` over live closures + `Bot.Inbox()`, with the live
@@ -785,7 +786,7 @@ user_version`; a database whose stamp doesn't match the running binary is
 **deleted and recreated empty**, with one loud stderr line — shell3 data is
 disposable by design, so there are no migrations.
 
-A **runs janitor** runs once at `shell3 telegram`/`shell3 serve` startup
+A **runs janitor** runs once at `shell3 telegram` startup
 (never on `ask`): `runs_keep_days` (top-level wiring key, default 30,
 `0` = keep forever) deletes sessions whose `last_at` is past the cutoff —
 rows, FTS entries, thread entries, and job-log dirs together — plus empty
@@ -856,21 +857,18 @@ adapter (reasoning split, thinkleak, truncation detection) and a tool-capable
 turn, instead of reimplementing the parsing half. It refuses `--resume` (each
 run is a fresh child session) and requires a message (there is no interactive
 form to fall back to).
-`telegram`, `serve`, `ask`, `boot`, `tool`, and `health` are the whole
+`telegram`, `ask`, `boot`, `tool`, and `health` are the whole
 command tree. The one bound listener is the read-only web dash on
 `127.0.0.1:<dash_port>` (see the commands section); there is no command that
 EXPOSES it beyond loopback (a tunnel is the dash-exposing skill's job) or
-that supervises the process. `shell3 serve` is the BYO
-front-end seam: the same bot loop over newline-delimited JSON on stdin/stdout
-(`internal/telegram/client_jsonl.go`, a third tgClient beside the Bot API and
-console transports; docs/serve.md is the wire reference). Message ids are
-opaque strings end to end (the Telegram client stringifies the API's ints),
-so a front-end's own ids thread natively; serve keeps its own thread surface
-in the runs store; markdown goes on the wire (the JSONL client's SendHTML
-returns ErrNoHTML, steering the bot's fallback to the plain path); media
-crosses as file paths, outbound spooled under `.shell3_project/serve_out/`.
-Running serve ALONGSIDE telegram is unsupported by design — run two processes
-with two config dirs instead.
+that supervises the process. There is NO bring-your-own front-end seam:
+`shell3 serve` and its stdio-JSONL transport were deleted 2026-08-24 —
+shell3 is Telegram-first and nothing else, and a second wire format was a
+second front-end contract to keep in lockstep for no user. The transports
+that remain are the Bot API and `--console` (`client_console.go`, the
+credential-free way to drive the same bot loop over stdin/stdout by hand).
+Message ids stay opaque strings end to end (the Telegram client stringifies
+the API's ints) because the console transport numbers its own.
 
 ## IMPORTANT: Do Not Read Credential Files
 
@@ -886,7 +884,7 @@ assistants, and automated tools.
 ## Project Layout
 
 ```
-cmd/shell3/            cobra command tree: root (prints help) + telegram/serve/ask/boot/tool/health subcommands
+cmd/shell3/            cobra command tree: root (prints help) + telegram/ask/boot/tool/health subcommands
 internal/agentsetup/   shared config assembly (BuildParts → chat.Config) used by every front-end
 internal/config/       config-directory loader: lifts the kit's shell3: wiring through the strict YAML parser, reads .env, owns tool schemas, the skill scan, the context: resolver, and gate/note execution
 internal/bootstrap/    first-run global + project setup
@@ -900,12 +898,12 @@ internal/edittool/     edit_file tool implementation (Go port of opencode's str-
 internal/notify/       Notification type (bg_done / agent_done) shared by job runtime + chat
 internal/mediadir/     resolves the media dir (<configDir>/media, $SHELL3_MEDIA_DIR overrides) and runs its startup janitor (media_keep_days); free of the unix build tag
 internal/mcp/          MCP client (official go-sdk): Manager connects mcp: servers, lists tools, dispatches mcp_* calls
-internal/telegram/     the chat front-end: bot loop + transports (Bot API, console, serve's stdio JSONL), turn slot, thread index, host commands + tools, completion delivery
+internal/telegram/     the chat front-end: bot loop + transports (Bot API, console), turn slot, thread index, host commands + tools, completion delivery
 internal/render/       HTML renderers for the web dash (DashIndexHTML, RunsPageHTML, RunReplayHTML) + shared formatting helpers
 internal/dash/         the web dash: token store (1h TTL, constant-time) + read-only HTTP server on 127.0.0.1, wired by cmd/shell3/dashwiring.go
 internal/cron/         robfig/cron scheduler dispatching subagent jobs on Session.Dispatch
 internal/cli/          terminal front-end helpers: shell3 ask renderers, brand banner
-internal/chat/         conversation loop, tools, events, JSONL audit sink
+internal/chat/         conversation loop, tools, events
 internal/llm/          Provider/Streamer interfaces, request params, types (+ fakellm)
 internal/persona/      runtime carrier for an agent's prompt/tools/params (data only)
 internal/strutil/      rune-safe string truncation helpers (byte-cap + rune-count) shared by runtime and front-ends

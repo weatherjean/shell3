@@ -20,7 +20,7 @@ import (
 //     job whose result was lost in flight; recovery reports it as such.
 //
 // RecoverCompletions is the boot-time pass, run by the long-lived front-ends
-// (telegram, serve) after their CompletionHost is installed — never by ask,
+// (telegram) after their CompletionHost is installed — never by ask,
 // which matches the janitors' start-time-only shape. Rows written by a
 // CONCURRENT process (an ask running alongside the bot) are protected by the
 // marker's PID: a live PID is skipped, and ask deletes its own rows as its

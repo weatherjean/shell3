@@ -238,8 +238,8 @@ func recreateErr(asided []string, cause error) error {
 // openRaw opens the database file with the store's connection pragmas, doing
 // no schema work of its own.
 func openRaw(path string) (*sql.DB, error) {
-	// WAL for multi-process readers (shell3 serve and shell3 ask can run
-	// concurrently over one store), busy_timeout so a brief writer overlap
+	// WAL for multi-process readers (shell3 ask can run alongside shell3
+	// telegram over one store), busy_timeout so a brief writer overlap
 	// waits instead of erroring.
 	dsn := "file:" + url.PathEscape(path) +
 		"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)"

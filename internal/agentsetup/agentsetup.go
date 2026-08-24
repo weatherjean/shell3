@@ -1,5 +1,5 @@
 // Package agentsetup is the shared config assembly used by every shell3
-// front-end (`shell3 telegram`, `shell3 serve`, `shell3 ask`, and the internal/shell3 event
+// front-end (`shell3 telegram`, `shell3 ask`, and the internal/shell3 event
 // stream). It resolves paths, ensures project dirs, opens the store and log,
 // loads the config directory, and returns a fully-populated chat.Config — the single
 // source of truth for "what the agent is", independent of how it's driven.
@@ -243,7 +243,6 @@ type SessionOptions struct {
 	Agent    string // "" → first declared (falls back to a subagent name)
 	WorkDir  string // "" → runtime root
 	Headless bool
-	OutPath  string
 	// PromptSuffix appends per-session text to the system prompt, re-rendered
 	// every turn (see chat.Config.PromptSuffix). Nil appends nothing.
 	PromptSuffix func() string
@@ -294,7 +293,6 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 		ConfigDir:      p.ConfigDir(),
 		ConfigWarnings: append(append([]string{}, p.lc.Warnings()...), p.mcpWarns...),
 		Log:            p.log,
-		OutPath:        so.OutPath,
 		Headless:       so.Headless,
 		RefreshPrompt:  func() string { return p.RefreshPromptFor(activeName) },
 		PromptSuffix:   so.PromptSuffix,

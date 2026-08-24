@@ -13,7 +13,7 @@ import (
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
-// Shared wiring for the hosted front-ends (telegram, serve, ask). Each helper is small
+// Shared wiring for the hosted front-ends (telegram, ask). Each helper is small
 // on purpose: the commands stay readable top-to-bottom while the invariants
 // (config-dir anchoring, cron fail-fast) live in exactly one place.
 

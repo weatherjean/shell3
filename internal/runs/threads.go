@@ -2,7 +2,8 @@ package runs
 
 // Each front-end surface's ONE long-lived conversation records its session id
 // in the same database as the sessions it points at. surface namespaces the
-// front-ends ("telegram", "serve") so two transports never cross-resolve.
+// surface by transport ("telegram" is the only one today) so a future
+// front-end could never cross-resolve another's conversation.
 
 // SetCurrentSession records id as surface's current conversation session.
 // Last write wins.

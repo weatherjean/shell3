@@ -18,7 +18,7 @@ import (
 // Makefile derives it from the latest git tag); "dev" for a plain go build.
 var version = "dev"
 
-// main wires the cobra command tree (telegram, serve, ask, boot, health, tool;
+// main wires the cobra command tree (telegram, ask, boot, health, tool;
 // the bare root prints help) and executes it through fang, which owns help,
 // usage, error, and --version styling.
 func main() {
@@ -36,7 +36,6 @@ func main() {
 		return cmd.Help()
 	}
 	root.AddCommand(newTelegramCommand())
-	root.AddCommand(newServeCommand())
 	root.AddCommand(newAskCommand())
 	root.AddCommand(newBootCommand())
 	root.AddCommand(newHealthCommand())

@@ -83,18 +83,18 @@ func TestThreadIndexClearedMarkerReadsAbsent(t *testing.T) {
 func TestThreadIndexSurfaceIsolation(t *testing.T) {
 	st := testStore(t)
 	tg := NewThreadIndex(st, "telegram")
-	sv := NewThreadIndex(st, "serve")
+	sv := NewThreadIndex(st, "other")
 	if err := tg.SetCurrent("tg-sess"); err != nil {
 		t.Fatal(err)
 	}
-	if err := sv.SetCurrent("serve-sess"); err != nil {
+	if err := sv.SetCurrent("other-sess"); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := NewThreadIndex(st, "telegram").Current(); got != "tg-sess" {
 		t.Fatalf("telegram Current() = %q", got)
 	}
-	if got, _ := NewThreadIndex(st, "serve").Current(); got != "serve-sess" {
-		t.Fatalf("serve Current() = %q", got)
+	if got, _ := NewThreadIndex(st, "other").Current(); got != "other-sess" {
+		t.Fatalf("other Current() = %q", got)
 	}
 }
 

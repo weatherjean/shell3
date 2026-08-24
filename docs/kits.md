@@ -159,8 +159,7 @@ well-scoped employee often needs no shell at all.
 
 One `use:` list, resolved in order:
 
-- a built-in name — `bash`, `bash_bg`, `edit`, `read`, `list_files`, `media`,
-  `history`
+- a built-in name — `bash`, `bash_bg`, `edit`, `media`, `history`
 - `mcp:<server>` — that server's tools
 - anything else — a shared group declared in the kit
 

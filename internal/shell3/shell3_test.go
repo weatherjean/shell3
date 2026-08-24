@@ -2,10 +2,7 @@ package shell3
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -339,45 +336,6 @@ func TestSession_Compact_WakesStrandedNotice(t *testing.T) {
 	waitForWake(t, rt, s)
 }
 
-func TestAuditSink_EndStatusReflectsError(t *testing.T) {
-	dir := t.TempDir()
-	out := filepath.Join(dir, "audit.jsonl")
-
-	client := fakellm.New(fakellm.Script{Err: errors.New("boom")})
-	s := newTestSession(t, client, chat.Config{})
-	sink, cleanup, err := chat.OpenSink(out, nil)
-	if err != nil {
-		t.Fatalf("OpenSink: %v", err)
-	}
-	s.sink = sink
-	s.sinkCleanup = cleanup
-	sink.WriteStart("the prompt", "", "", out, false)
-
-	for range s.Send(context.Background(), "hi") {
-	}
-	if err := s.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-
-	data, err := os.ReadFile(out)
-	if err != nil {
-		t.Fatalf("read audit log: %v", err)
-	}
-	var endStatus string
-	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-		var rec map[string]any
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			t.Fatalf("bad JSONL line %q: %v", line, err)
-		}
-		if rec["kind"] == "end" {
-			endStatus, _ = rec["status"].(string)
-		}
-	}
-	if endStatus != "error" {
-		t.Fatalf("audit end status = %q after an errored turn, want %q", endStatus, "error")
-	}
-}
-
 func TestSession_CloseDoesNotDeadlockWhenSendChannelAbandoned(t *testing.T) {
 	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{
 		{TextDelta: "a"}, {TextDelta: "b"}, {TextDelta: "c"},
@@ -574,62 +532,6 @@ func TestSend_TextPath(t *testing.T) {
 	}
 }
 
-// TestAuditSink_WritesStartEventsEnd verifies that when Spec.OutPath is set the
-// Session opens a JSONL sink and writes a start line, every internal event
-// (losslessly), and an end line on Close.
-func TestAuditSink_WritesStartEventsEnd(t *testing.T) {
-	dir := t.TempDir()
-	out := filepath.Join(dir, "audit.jsonl")
-
-	client := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "hi"}}})
-	cfg := chat.Config{StatusLine: "openai │ gpt-x", ModeLabel: "code"}
-	s := newTestSession(t, client, cfg)
-	// Wire the sink the way Start does (newTestSession bypasses Start).
-	sink, cleanup, err := chat.OpenSink(out, nil)
-	if err != nil {
-		t.Fatalf("OpenSink: %v", err)
-	}
-	s.sink = sink
-	s.sinkCleanup = cleanup
-	_, model := chat.SplitStatus(cfg.StatusLine)
-	sink.WriteStart("the prompt", cfg.ModeLabel, model, out, cfg.Headless)
-
-	for range s.Send(context.Background(), "hi") {
-	}
-	if err := s.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-
-	data, err := os.ReadFile(out)
-	if err != nil {
-		t.Fatalf("read audit log: %v", err)
-	}
-	var starts, ends, tokens int
-	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-		var rec map[string]any
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			t.Fatalf("bad JSONL line %q: %v", line, err)
-		}
-		switch rec["kind"] {
-		case "start":
-			starts++
-			if rec["input"] != "the prompt" || rec["model"] != "gpt-x" {
-				t.Fatalf("start line wrong: %v", rec)
-			}
-		case "end":
-			ends++
-		case "assistant_token":
-			tokens++
-		}
-	}
-	if starts != 1 || ends != 1 {
-		t.Fatalf("start=%d end=%d, want 1/1", starts, ends)
-	}
-	if tokens == 0 {
-		t.Fatal("expected at least one assistant_token line in the audit log")
-	}
-}
-
 // TestSession_BusyEnforcement pins the runtime enforcement of the
 // single-turn-at-a-time contract: while a turn is in flight, Send yields an
 // immediate ErrBusy Error event (without starting a turn), and the
@@ -714,57 +616,6 @@ func TestSession_InterjectWhileIdle(t *testing.T) {
 	}
 	if !sawReminder {
 		t.Fatal("idle Interject should be injected at the start of the next turn")
-	}
-}
-
-// TestSession_SinkStartLabel pins the "(session <label>)" line written by
-// Runtime.Session into the JSONL audit log and exercises the writeStartLine +
-// cfg.OutPath plumbing for real. It creates a runtime-hosted session with an
-// OutPath, runs one trivial fakellm turn, closes, then reads the file and
-// asserts: first line is the start event with a "(session ...)" input, last
-// line is the end event.
-func TestSession_SinkStartLabel(t *testing.T) {
-	outFile := filepath.Join(t.TempDir(), "audit.jsonl")
-	rt := newTestRuntime(t, fakeCfg("hello"))
-	s, err := rt.Session(SessionOpts{OutPath: outFile})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Run one turn so the sink has events in between start and end.
-	for range s.Send(context.Background(), "ping") {
-	}
-	if err := s.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	data, err := os.ReadFile(outFile)
-	if err != nil {
-		t.Fatalf("reading audit log: %v", err)
-	}
-	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-	if len(lines) < 2 {
-		t.Fatalf("expected at least 2 lines in audit log, got %d: %q", len(lines), string(data))
-	}
-
-	// First line: start event with a "(session ...)" label.
-	var first map[string]any
-	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
-		t.Fatalf("parsing first line: %v (line=%q)", err, lines[0])
-	}
-	if got := first["kind"]; got != "start" {
-		t.Fatalf("first line kind=%q, want %q", got, "start")
-	}
-	if got, _ := first["input"].(string); !strings.HasPrefix(got, "(session ") {
-		t.Fatalf("first line input=%q, want a \"(session ...)\" label", got)
-	}
-
-	// Last line: end event.
-	var last map[string]any
-	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &last); err != nil {
-		t.Fatalf("parsing last line: %v (line=%q)", err, lines[len(lines)-1])
-	}
-	if got := last["kind"]; got != "end" {
-		t.Fatalf("last line kind=%q, want %q", got, "end")
 	}
 }
 

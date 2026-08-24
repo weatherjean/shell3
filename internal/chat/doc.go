@@ -2,8 +2,8 @@
 // drives the user→assistant turn loop, dispatches tool calls, and emits a
 // stream of structured Events that observers consume.
 //
-// The package does no rendering. Presentation (front-end views, stdout printers,
-// JSONL audit sinks) lives elsewhere and receives each Event via the
+// The package does no rendering. Presentation (front-end views, stdout
+// printers) lives elsewhere and receives each Event via the
 // SessionOpts.Sink callback.
 //
 // Typical usage flow:

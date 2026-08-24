@@ -85,7 +85,7 @@ func TestCurrentSession_PerSurface(t *testing.T) {
 	if err := st.SetCurrentSession("telegram", "sess-1"); err != nil {
 		t.Fatalf("SetCurrentSession: %v", err)
 	}
-	if err := st.SetCurrentSession("serve", "sess-2"); err != nil {
+	if err := st.SetCurrentSession("other", "sess-2"); err != nil {
 		t.Fatalf("SetCurrentSession: %v", err)
 	}
 	if err := st.SetCurrentSession("telegram", "sess-3"); err != nil {
@@ -94,7 +94,7 @@ func TestCurrentSession_PerSurface(t *testing.T) {
 	if got, ok := st.CurrentSession("telegram"); !ok || got != "sess-3" {
 		t.Errorf("CurrentSession(telegram) = %q, %v; want sess-3, true", got, ok)
 	}
-	if got, ok := st.CurrentSession("serve"); !ok || got != "sess-2" {
+	if got, ok := st.CurrentSession("other"); !ok || got != "sess-2" {
 		t.Errorf("CurrentSession(serve) = %q, %v; want sess-2, true", got, ok)
 	}
 	if _, ok := st.CurrentSession("nope"); ok {

@@ -6,8 +6,7 @@ import "context"
 
 // Msg is an inbound message, normalized from a transport update. Message ids
 // are opaque strings owned by the transport: the Telegram client stringifies
-// the API's int message_ids, the JSONL client passes the front-end's ids
-// through verbatim, the console client renders its own counter.
+// the API's int message_ids, the console client renders its own counter.
 type Msg struct {
 	ChatID int64
 	// SenderID is the Telegram user id of whoever sent this message, 0 when the

@@ -15,8 +15,9 @@ import (
 // threads table carries it across restarts. The store is resolved per call
 // (a /reload swaps generations, closing the old database handle). A nil store
 // degrades to memory-only, so a runtime without persistence still tracks the
-// conversation within its own lifetime. surface namespaces the front-ends
-// ("telegram", "serve") so two transports never cross-resolve.
+// conversation within its own lifetime. surface namespaces the front-end
+// ("telegram" is the only one today) so a future transport could never
+// cross-resolve another's conversation.
 type ThreadIndex struct {
 	store   func() *runs.Store
 	surface string
@@ -76,9 +77,9 @@ func TelegramSurface(chatID int64) string {
 }
 
 // roomSurface keys one room under its FRONT-END's surface namespace. The
-// prefix is the host's own surface ("telegram", "serve"), so two transports
-// sharing a runs store never cross-resolve each other's rooms — the property
-// the single-surface keys had, kept now that each surface has many rooms.
+// prefix is the host's own surface ("telegram"), so two front-ends sharing a
+// runs store could never cross-resolve each other's rooms — the property the
+// single-surface keys had, kept now that each surface has many rooms.
 func roomSurface(host string, chatID int64) string {
 	return host + ":" + strconv.FormatInt(chatID, 10)
 }
@@ -120,8 +121,8 @@ func chatIDFromSurface(host, surface string) (int64, bool) {
 	return id, true
 }
 
-// hostSurface is the front-end namespace this index belongs to ("telegram",
-// "serve") — the prefix every room key of that host is built from. A nil
+// hostSurface is the front-end namespace this index belongs to ("telegram")
+// — the prefix every room key of that host is built from. A nil
 // index (a Bot built without persistence) reports the Telegram default so a
 // test-built bot keys its rooms the way the real one does.
 func (ti *ThreadIndex) hostSurface() string {

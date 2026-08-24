@@ -41,7 +41,7 @@ func (c *conversation) addressed(m Msg, botUser string) bool {
 	}
 	// Telegram's own answer first: it survives a restart. The remembered
 	// sent-ids are a fallback for transports that cannot attribute a
-	// replied-to message (the console and JSONL dev transports).
+	// replied-to message (the console dev transport).
 	if m.ReplyToBot || c.wasSent(m.ReplyToID) {
 		return true
 	}

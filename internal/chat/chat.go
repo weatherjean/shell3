@@ -3,9 +3,6 @@ package chat
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
-	"time"
 
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/llm"
@@ -131,9 +128,6 @@ type Config struct {
 	Params llm.RequestParams
 	// Log is the application logger. Nil is allowed; LogOrNoop wraps it.
 	Log applog.Logger
-	// OutPath, when non-empty, opens a JSONL audit log at this path and
-	// streams every turn event into it. Independent of stdout/front-end rendering.
-	OutPath string
 	// OnEvent, when set, observes every event this session emits — the kit
 	// `event:` subscriber seam. It runs inline on the emitting goroutine, so
 	// an implementation doing real work must hand off to its own worker.
@@ -205,8 +199,6 @@ func NewHandlers() map[string]ToolHandler {
 		TaskStatusHandler(),
 		TaskCancelHandler(),
 		EditHandler{},
-		ReadHandler{},
-		ListFilesHandler{},
 		HistoryHandler{},
 	}
 	m := make(map[string]ToolHandler, len(handlers))
@@ -242,33 +234,6 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler) TurnConfig {
 		AgentKnobs:    cfg.AgentKnobs,
 		RunToolResult: cfg.RunToolResult,
 	}
-}
-
-// OpenSink opens path for write+truncate (each run starts fresh) and returns
-// the sink and a cleanup closure. Returns (nil, no-op, nil) when path is empty.
-// lg (nil-safe) receives a one-time warning if the sink ever drops a line —
-// this is an audit log, so a silent drop would hide real faults.
-func OpenSink(path string, lg applog.Logger) (*OutSink, func(), error) {
-	if path == "" {
-		return nil, func() {}, nil
-	}
-	// Create the parent directory: a subagent invocation passes
-	// --out .shell3_project/agents/<id>.jsonl, whose directory may not exist yet.
-	// Best-effort — a failure here surfaces as the open error below with the
-	// same path context.
-	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		_ = os.MkdirAll(dir, 0o755)
-	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-	if err != nil {
-		return nil, func() {}, fmt.Errorf("open --out %s: %w", path, err)
-	}
-	sink := newOutSink(f, time.Time{})
-	log := LogOrNoop(lg)
-	sink.onErr = func(err error) {
-		log.Warn("audit sink write failed; further drops are silent", "path", path, "error", err)
-	}
-	return sink, func() { _ = f.Close() }, nil
 }
 
 // LogOrNoop returns l if non-nil, otherwise an applog.Noop logger. Callers

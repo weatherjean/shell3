@@ -177,7 +177,7 @@ SHELL3_EOF
 
 Declaration keys: `model` (a name from the wiring's `models:`; omitted, the
 main agent's model), `use` (built-ins — any of `bash`, `bash_bg`, `edit`,
-`media`, `read`, `list_files`, `history` — plus the names of declared tools
+`media`, `history` — plus the names of declared tools
 and `shared:` groups), `mcp` (see [MCP](#mcp-servers)), `workdir`,
 `description` (what the main model reads when deciding to delegate; employees
 only), and `context` (see below).
@@ -228,14 +228,12 @@ context: [memory.md, notes/*.md]
 `shell3 boot` scaffolds `context: [memory.md]` plus a starter `memory.md`;
 existing configs are untouched since the key is optional.
 
-The main agent is **bash-first**: it reads with `cat`/`sed -n`, lists with
-`ls`/`find`, searches with `rg` — all through `bash` — and a hallucinated
-`read_file`/`grep` call gets an error redirecting it back to bash/edit_file.
-The `read` and `list_files` tools exist as an opt-in for agents that do better
-with structured file tools (typically an [employee](#employees--delegation) on
-a smaller model) — list them in `tools` to turn them on; leave them out and
-the bash-first redirect stands. A read-only agent is a policy, not a tool set:
-gate `bash` in its [gate function](#the-command-gate--gate).
+Every agent is **bash-first**: it reads with `cat`/`sed -n`, lists with
+`ls`/`find`, searches with `rg` — all through `bash` — and a `read_file`,
+`grep`, `read` or `list_files` call gets an error redirecting it back to
+bash/edit_file. There are no structured file tools to opt into; the shell is
+the file interface. A read-only agent is a policy, not a tool set: gate
+`bash` in its [gate function](#the-command-gate--gate).
 
 ### Recalling past conversations — the `history` tool
 
@@ -889,7 +887,7 @@ empty too — the data is not recoverable.
 dash_port: 7333   # default 7333; 0 = no dash listener at all
 ```
 
-`shell3 telegram` and `shell3 serve` bind the read-only dashboard on
+`shell3 telegram` binds the read-only dashboard on
 `127.0.0.1:<dash_port>` at startup (never `shell3 ask`). `/dash` replies
 with its URL plus a fresh ~1h token; the base URL lives in `dash_url.txt`
 beside the config (seeded with localhost, overwritten by the dash-exposing

@@ -23,7 +23,7 @@ type (
 func sessionConfigFrom(parts *agentsetup.Parts) func(SessionOpts) (chat.Config, error) {
 	return func(o SessionOpts) (chat.Config, error) {
 		return parts.SessionConfig(agentsetup.SessionOptions{
-			Agent: o.Agent, WorkDir: o.WorkDir, Headless: o.Headless, OutPath: o.OutPath,
+			Agent: o.Agent, WorkDir: o.WorkDir, Headless: o.Headless,
 			PromptSuffix: o.PromptSuffix,
 		})
 	}

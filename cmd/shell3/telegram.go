@@ -92,7 +92,8 @@ func newTelegramCommand() *cobra.Command {
 			}
 			b.SetMaxConcurrentTurns(tg.MaxConcurrentTurns)
 			// Transport-independent wiring (media, decorator, completion host,
-			// cron parent + scheduler, /reload) — shared with `shell3 serve`.
+			// cron parent + scheduler, /reload) — shared by the Bot API and
+			// --console transports.
 			// LIFO: the scheduler-stop cleanup runs before the earlier
 			// `defer rt.Close()`.
 			stopSched, err := wireHost(b, rt, workDir)

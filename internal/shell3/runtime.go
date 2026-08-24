@@ -38,8 +38,6 @@ type SessionOpts struct {
 	// job's runs are findable without guessing from session duration (see
 	// runs.Meta.CronJob).
 	CronJob string
-	// OutPath, when non-empty, streams this session's JSONL audit log there.
-	OutPath string
 	// PromptSuffix appends per-session text to the system prompt, re-rendered
 	// every turn (see chat.Config.PromptSuffix). A Telegram front-end uses it
 	// to give each chat its own standing brief; nil appends nothing.
@@ -315,21 +313,13 @@ func (rt *Runtime) Session(opts SessionOpts) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Open the sink before constructing anything stateful: a failure here must
-	// not leak a partially-initialised session or a store row.
-	sink, sinkCleanup, err := chat.OpenSink(opts.OutPath, cfg.Log)
-	if err != nil {
-		return nil, err
-	}
 	s := newSession(cfg, opts) // shared parts are the runtime's to clean
 	s.opts = opts
 	s.runtime, s.name = rt, name
-	s.sink, s.sinkCleanup = sink, sinkCleanup
 	// Set the per-session host standing reminders now that runtime+name are set:
 	// the Environment context (gated by the active agent's toggle). No-op when
 	// the toggle is off.
 	s.applyHostReminders()
-	s.writeStartLine("(session " + name + ")")
 	rt.sessions[name] = s
 	created = s // decorated by the deferred hook, after rt.mu releases
 	// Subagent completions are injected in-process by the runtime's jobManager

@@ -4,19 +4,13 @@ shell3 is a small Go codebase. A few conventions keep it consistent.
 
 ## Development setup
 
-Go (version pinned in `go.mod`) is the only requirement for the binary; Node
-is needed only to rebuild the web interface.
+Go (version pinned in `go.mod`) is the only requirement.
 
 ```sh
 make build     # build ./shell3
 make test      # go test -race ./...
 make lint      # gofmt drift check + go vet + golangci-lint (what CI enforces)
-make webui     # build webui/ and stage it into internal/webui/dist
 ```
-
-`internal/webui/dist` is **committed**: `go install` cannot run npm, so the
-binary embeds a pre-built app. Re-run `make webui` and commit the result
-whenever `webui/src` changes.
 
 The test suite is hermetic: temp `HOME`, a fake LLM provider
 (`internal/llm/fakellm`), no network or API keys.
@@ -54,10 +48,9 @@ better are more welcome than ones that grow the footprint.
 `AGENTS.md` has the package map. The short version: `cmd/shell3` is the CLI,
 `internal/agentsetup` assembles a `chat.Config` from the config directory
 (`internal/config`), `internal/chat` runs turns against an OpenAI-compatible
-provider (`internal/adapter/openai`), and the front-ends (`internal/webui` for
-`shell3 serve` — the React app in `webui/`, staged into `internal/webui/dist`
-by `make webui`, plus its HTTP API — and `internal/cli` for `shell3 ask`) are
-built on `internal/shell3`'s session/runtime core.
+provider (`internal/adapter/openai`), and the front-ends (`internal/telegram`
+for `shell3 telegram` and `internal/cli` for `shell3 ask`) are built on
+`internal/shell3`'s session/runtime core.
 
 ## Security
 

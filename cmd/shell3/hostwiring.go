@@ -80,7 +80,7 @@ func openThreads(rt *shell3.Runtime, surface string) *telegram.ThreadIndex {
 }
 
 // wireHost performs the transport-independent bot wiring shared by
-// `shell3 telegram` and `shell3 serve`: the session decorator, the
+// `shell3 telegram` (Bot API and --console): the session decorator, the
 // completion host, the hidden cron dispatch parent, job sources, the cron
 // scheduler, and the /reload coordinator. Returns a cleanup that stops
 // whichever scheduler is CURRENT at shutdown (reload swaps it).

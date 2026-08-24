@@ -64,7 +64,7 @@ func RunAskTurn(ctx context.Context, w io.Writer, sess *shell3.Session, prompt s
 // runtime's library fallback delivers every completion's raw notice straight
 // to the owning session, so this loop sees and narrates everything — the
 // verbose debugging view. Mail routing is exercised on the
-// real serve loop (`shell3 serve`), not here.
+// real bot loop (`shell3 telegram`), not here.
 func FollowAskJobs(ctx context.Context, w io.Writer, rt *shell3.Runtime, sess *shell3.Session) error {
 	announced := 0 // running count last printed, so the waiting note isn't repeated per progress event
 	for {

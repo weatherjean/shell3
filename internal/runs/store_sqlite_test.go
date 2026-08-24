@@ -75,7 +75,7 @@ func TestCurrentSessionRecordLookup(t *testing.T) {
 		t.Fatalf("CurrentSession = %q, %v", got, ok)
 	}
 	// Another surface has its own marker.
-	if _, ok := st.CurrentSession("serve"); ok {
+	if _, ok := st.CurrentSession("other"); ok {
 		t.Fatal("surface isolation broken")
 	}
 	// Re-record overwrites (a /new moves the marker).
@@ -126,8 +126,8 @@ func TestSweep(t *testing.T) {
 	oldID, _ := st.NewSession(Meta{Workdir: "/w"})
 	newID_, _ := st.NewSession(Meta{Workdir: "/w"})
 	// One marker per surface: the expired session owns "web", the recent one
-	// owns "serve", so the sweep's drop and its keep are both observable.
-	for surface, id := range map[string]string{"web": oldID, "serve": newID_} {
+	// owns "other", so the sweep's drop and its keep are both observable.
+	for surface, id := range map[string]string{"web": oldID, "other": newID_} {
 		if err := st.AppendMessage(id, llm.Message{Role: llm.RoleUser, Content: "searchable words"}); err != nil {
 			t.Fatal(err)
 		}
@@ -164,7 +164,7 @@ func TestSweep(t *testing.T) {
 	if _, ok := st2.CurrentSession("web"); ok {
 		t.Fatal("stale current-session marker survived")
 	}
-	if _, ok := st2.CurrentSession("serve"); !ok {
+	if _, ok := st2.CurrentSession("other"); !ok {
 		t.Fatal("live current-session marker was dropped")
 	}
 	// The swept session's text must be gone from the index too.

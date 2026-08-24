@@ -90,13 +90,12 @@ walkthrough is in [docs/cli.md](docs/cli.md).
 | Command | What |
 |---------|------|
 | `shell3 telegram` | Run the bot front-end + cron (the service). |
-| `shell3 serve`   | Same agent over stdio JSONL, for a bring-your-own front-end ([protocol](docs/serve.md)). |
 | `shell3 boot`     | Scaffold the config + `.env` interactively. |
 | `shell3 health`   | Load the config strictly; fail on any warning. |
 | `shell3 ask "…"`  | Ask the agent locally with full verbose output; no message = interactive loop; `-p` for scripting; `--resume` continues the last session; `--agent <name>` runs one subagent turn and prints only its reply, for batch scripts. |
 | `shell3 tool`     | `check`, `run`, and `test` the tools declared in a kit — the author's loop. Takes the kit path as an argument. |
 
-`telegram`, `serve`, `ask` and `health` take `--config/-c` to point at a
+`telegram`, `ask` and `health` take `--config/-c` to point at a
 different config directory. `boot` always targets `~/.shell3`, and `tool`
 takes the kit file itself as its argument.
 
@@ -138,8 +137,6 @@ takes the kit file itself as its argument.
   agent, subagents, projects, telegram, cron, attachments & media, secrets,
   MCP, hooks, skills.
 - **[CLI](docs/cli.md)**: every subcommand and the stored-history views.
-- **[Serve protocol](docs/serve.md)**: the stdio JSONL wire format for
-  bring-your-own front-ends.
 - **[Deploying](docs/deploying.md)**: keeping the bot running as a service.
 - **[Security & data](docs/security.md)**: threat model, secrets, wiping data.
 - **[Cookbook](docs/cookbook/README.md)**: drop-in recipes — subagents,

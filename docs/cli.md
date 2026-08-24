@@ -1,9 +1,9 @@
 # CLI reference
 
-Six subcommands: `telegram` (the service — agent + bot + cron), `serve` (the
-same agent over stdio JSONL), `boot` (setup), `tool` (check, run and test the
-tools a kit declares), `health` (config check), and `ask` (a local driver for
-the agent). Bare `shell3` prints help.
+Five subcommands: `telegram` (the service — agent + bot + cron), `boot`
+(setup), `tool` (check, run and test the tools a kit declares), `health`
+(config check), and `ask` (a local driver for the agent). Bare `shell3`
+prints help.
 
 Every subcommand except `boot` and `tool` takes `-c`/`--config <dir>`: a path
 to a config directory (one holding a `shell3.sh` kit); the default is
@@ -89,7 +89,7 @@ the reply. See [kits.md](kits.md#commands).
 
 ### The web dash
 
-`shell3 telegram` and `shell3 serve` always bind a read-only HTTP dashboard
+`shell3 telegram` always binds a read-only HTTP dashboard
 on `127.0.0.1` (`dash_port` in the wiring, default 7333, `0` disables). It
 renders from live runtime state and the runs store: the index (version,
 agent, model, context usage, gate, tools, skills, MCP health, warnings, and
@@ -120,26 +120,6 @@ you with `send_media_telegram`. There is no built-in transcription or
 captioning step — voice notes and images are handled at the agent's
 discretion, via wrapper scripts you install. See
 [Voice & images](cookbook/voice-images.md).
-
-## `shell3 serve` — the agent over stdio JSONL
-
-Runs the same bot loop as `shell3 telegram` — fresh-turn threading, host
-commands, task reports, cron — but the transport is
-newline-delimited JSON on stdin/stdout. This is the bring-your-own front-end
-seam: a Discord bridge or a custom dashboard backend spawns `shell3 serve`
-and translates its own surface to the wire events. No Telegram credentials
-are needed (`telegram.workdir` is still honored when present); the chat
-transport has no port and no listener — owning the process's stdio is the
-access model (the read-only web dash is the one exception, and serve binds
-it like telegram does).
-
-Serve keeps its own thread namespace in the runs store, so its ids and
-Telegram's never cross-resolve. See **[the protocol reference](serve.md)**
-for the full event vocabulary.
-
-```sh
-printf '%s\n' '{"type":"message","text":"/dash"}' | shell3 serve
-```
 
 ## `shell3 boot` — set up a config
 

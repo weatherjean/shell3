@@ -78,7 +78,9 @@ func TestDashIndexHTMLLiveSession(t *testing.T) {
 			LLM:       fakellm.New(),
 			ModeLabel: "agent",
 
-			StatusLine:     chat.FormatStatus("moonshot", "kimi-k2-0905-preview", "high"),
+			// The live builder is chat.AgentStatusLine; a literal in the shape it
+			// produces keeps this render test independent of that wiring.
+			StatusLine:     "moonshot │ kimi-k2-0905-preview │ high",
 			ActiveSkills:   []string{"scripting"},
 			ConfigWarnings: []string{"skill x skipped"},
 			RunToolCall: func(context.Context, string, string, string, bool) chat.ToolCallVerdict {

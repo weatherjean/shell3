@@ -48,9 +48,9 @@ func wireDash(b *telegram.Bot, rt *shell3.Runtime, cronSess *shell3.Session,
 		CronCosts:  cronCostFn,
 	}, rt.Parts().Log())
 	if err := srv.Start(); err != nil {
-		// Never stdout: `shell3 serve` speaks JSONL there and the first line
-		// must be the hello. The app log is also where /dash's down-reply
-		// points the user ("check the app log").
+		// Never stdout: `shell3 telegram --console` speaks the chat there, so
+		// a bind warning would land in the transcript. The app log is also
+		// where /dash's down-reply points the user ("check the app log").
 		rt.Parts().Log().Warn("dash disabled: could not bind", "port", port, "err", err)
 		return func() {}
 	}
@@ -61,7 +61,7 @@ func wireDash(b *telegram.Bot, rt *shell3.Runtime, cronSess *shell3.Session,
 	b.SetDash(func() (string, error) {
 		return dashMintURL(urlFile, srv), nil
 	})
-	// Info, not stdout: serve's stdout is the JSONL wire.
+	// Info, not stdout: the console transport owns stdout.
 	rt.Parts().Log().Info("dash listening", "addr", srv.Addr())
 	return func() { _ = srv.Close() }
 }

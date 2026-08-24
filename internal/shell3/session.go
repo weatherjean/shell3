@@ -27,14 +27,6 @@ type Session struct {
 	sess     *chat.Session
 	handlers map[string]chat.ToolHandler
 
-	// sink is the JSONL audit log, opened by Runtime.Session
-	// (SessionOpts.OutPath) when the path is non-empty.
-	// route writes every internal chat.Event to it (lossless) before
-	// translating to a public Event; Close writes the "end" line. nil when no
-	// OutPath was configured. sinkCleanup closes the underlying file.
-	sink        *chat.OutSink
-	sinkCleanup func()
-
 	// runtime and name link a runtime-hosted session back to its registry so
 	// Close deregisters it. name is an internal auto-generated bookkeeping
 	// label (registry key + job-parent tracking), not a public identifier.
@@ -67,17 +59,6 @@ type Session struct {
 	// racing session teardown) is rejected with ErrClosed instead of running a
 	// turn against the ended store record.
 	closed bool
-}
-
-// writeStartLine writes the audit log's opening line for this session.
-// Safe to call regardless of whether a sink was opened: returns immediately
-// when s.sink is nil so callers need not guard the call.
-func (s *Session) writeStartLine(label string) {
-	if s.sink == nil {
-		return
-	}
-	_, model := chat.SplitStatus(s.cfg.StatusLine)
-	s.sink.WriteStart(label, s.cfg.ModeLabel, model, s.cfg.OutPath, s.cfg.Headless)
 }
 
 // newSession wires a Session around an already-built chat.Config. The
@@ -143,9 +124,6 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 	s := &Session{
 		cfg:      cfg,
 		handlers: chat.NewHandlers(),
-		// Default to a no-op so Close is safe even when Start didn't open a
-		// sink (and for tests that build a Session via newSession directly).
-		sinkCleanup: func() {},
 	}
 	s.sess = chat.NewSession(chat.SessionOpts{
 		StoreID:             storeID,
@@ -177,12 +155,6 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 // treat channel close (see Send) as the authoritative end-of-turn
 // signal; the terminal event is best-effort and can be absent on a cancel.
 func (s *Session) route(ev chat.Event) {
-	// Audit first, losslessly: the internal chat.Event keeps ToolCallID, system
-	// reminders, and full untruncated content even though the public Event below
-	// is a lossy projection. Independent of whether the event has a public form.
-	if s.sink != nil {
-		s.sink.WriteChatEvent(ev)
-	}
 	if ev.Kind == chat.EventError {
 		s.mu.Lock()
 		s.sawError = true
@@ -461,18 +433,6 @@ func (s *Session) doClose() error {
 	if s.cfg.Store != nil {
 		endErr = s.cfg.Store.EndSession(s.sess.ID())
 	}
-	// Flush the audit log: by here the turn goroutine has joined, so no route
-	// call can still be writing to the sink. Then release the file and config.
-	if s.sink != nil {
-		status := "ok"
-		s.mu.Lock()
-		if s.sawError {
-			status = "error"
-		}
-		s.mu.Unlock()
-		s.sink.WriteEnd(status)
-	}
-	s.sinkCleanup()
 	// Capture and nil s.runtime under s.mu so a concurrent WakeEvents() reader
 	// (a public accessor bot binaries call) never races this write. Only the
 	// field access is locked: rt.forget/rt.cleanup run after the unlock, since

@@ -24,8 +24,6 @@ var builtins = []struct {
 	{"bash_bg", bashBgTool},
 	{"edit", editFileTool},
 	{"media", readMediaTool},
-	{"read", readTool},
-	{"list_files", listFilesTool},
 	{"history", historyTool},
 }
 
@@ -41,36 +39,6 @@ func ToolDefs(names []string) []llm.ToolDefinition {
 		}
 	}
 	return defs
-}
-
-var readTool = llm.ToolDefinition{
-	Name: "read",
-	Description: "Read a text file with optional offset/limit paging. Returns the raw file text " +
-		"(no line numbers) so substrings can be pasted straight into edit_file. Binary files are " +
-		"refused (use read_media for images/audio). Large output is truncated with a continuation footer.",
-	Parameters: map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"path":   map[string]any{"type": "string", "description": "File path (absolute, ~/, or relative to the working directory)"},
-			"offset": map[string]any{"type": "integer", "description": "1-indexed first line to return (default 1)"},
-			"limit":  map[string]any{"type": "integer", "description": "Max lines to return (default 2000)"},
-		},
-		"required": []string{"path"},
-	},
-}
-
-var listFilesTool = llm.ToolDefinition{
-	Name: "list_files",
-	Description: "List a directory as an indented tree (directories first, suffixed /). No automatic " +
-		"filtering — use ignore globs to exclude entries, depth to widen or narrow (default 2).",
-	Parameters: map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"path":   map[string]any{"type": "string", "description": "Directory path (default: the working directory)"},
-			"depth":  map[string]any{"type": "integer", "description": "Recursion depth (default 2)"},
-			"ignore": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Glob patterns to exclude (base name, or root-relative when the pattern contains /)"},
-		},
-	},
 }
 
 var historyTool = llm.ToolDefinition{
