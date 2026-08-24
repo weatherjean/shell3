@@ -85,6 +85,7 @@ func (b *Bot) roomsStatus() string {
 	type row struct {
 		chatID int64
 		title  string
+		brief  string
 		busy   bool
 		jobs   int
 		sessID string
@@ -96,7 +97,9 @@ func (b *Bot) roomsStatus() string {
 			continue // enrolled but no live conversation: nothing to collide with
 		}
 		r := row{chatID: c.chatID, busy: c.busy(), sessID: sess.ID()}
-		r.title = b.chatMetaFor(c.chatID).title
+		meta := b.chatMetaFor(c.chatID)
+		r.title = meta.title
+		r.brief = briefState(meta, c.isGroupRoom(), b.settingsFor(c.chatID).useDescription())
 		for _, j := range sess.Jobs() {
 			if j.ParentID == sess.Name() && !j.Done {
 				r.jobs++
@@ -126,6 +129,34 @@ func (b *Bot) roomsStatus() string {
 			fmt.Fprintf(&sb, ", %d background job(s)", r.jobs)
 		}
 		fmt.Fprintf(&sb, ", session %s\n", r.sessID)
+		if r.brief != "" {
+			fmt.Fprintf(&sb, "      description: %s\n", r.brief)
+		}
 	}
 	return sb.String()
+}
+
+// briefState says, in one line, what this room's description contributes to
+// the prompt and why — the three cases look identical from inside the prompt
+// and have completely different fixes.
+//
+// "not visible" is the one worth naming: Telegram serves a group's
+// description only to a bot that can see group info, so a restricted bot gets
+// an empty string with no error, indistinguishable from a chat that never set
+// one. Without this line the only way to tell them apart is reading the app
+// log, which is not where anyone looks.
+func briefState(meta chatMeta, group, useDescription bool) string {
+	switch {
+	case !group:
+		return "" // a direct chat has no group description; say nothing
+	case !useDescription:
+		return "off for this room (use_description: false)"
+	case !meta.known:
+		return "not looked up yet"
+	case meta.description != "":
+		return fmt.Sprintf("in your prompt (%d bytes)", len(meta.description))
+	default:
+		return "not visible — either this chat has none, or Telegram is withholding it " +
+			"because I cannot see group info here (promoting me to admin fixes that)"
+	}
 }

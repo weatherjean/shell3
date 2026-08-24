@@ -73,7 +73,11 @@ a load error. The seam is `chat.SessionOpts.OnEvent` (a second observer beside
 event to JSON — an unsubscribed kind must cost a map lookup and nothing else.
 Delivery then hands off to `agentsetup.eventDispatcher`, one per `Parts` (lazy,
 closed from the BuildParts closer stack): a bounded queue (`eventQueueDepth`
-256) drained by ONE worker so a subscriber never races itself, and Post NEVER
+256) drained by ONE worker so a subscriber never races itself (the worker
+checks `closed` on its OWN select before the two-way one: with both ready Go
+picks randomly, so a backlog of slow events could keep winning the draw and
+pay the full per-event timeout each time, stretching Close far past the drain
+budget meant to bound it — measured at 25-45s against a 15s ceiling), and Post NEVER
 blocks — a full queue drops the OLDEST pending event and counts it, because
 gaps in an observer's view are recoverable and a stalled turn is not. Payload is
 `agentsetup.eventPayload`: `event`/`agent`/`session`/`time` plus the kind's own
@@ -531,7 +535,11 @@ row says only "Description, for groups, supergroups and channel chats" and
 mentions no rights requirement, so treat the log line as the diagnostic:
 `refreshChatMeta` records title and description length exactly so a
 silently-absent brief is distinguishable from a chat that has none — the two
-have different fixes and neither is guessable from the prompt.
+have different fixes and neither is guessable from the prompt. The `status`
+tool says the same thing where the agent will actually see it
+(`briefState`): in your prompt (N bytes) / not visible — either none is set
+or Telegram is withholding it from a bot that cannot see group info / off for
+this room / not looked up yet.
 
 Converting a group to a supergroup — a legitimate thing an operator may do
 for unrelated reasons, and IRREVERSIBLE — CHANGES its chat id, which

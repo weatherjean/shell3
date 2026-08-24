@@ -602,6 +602,14 @@ func (c *conversation) session() *shell3.Session {
 	return c.main
 }
 
+// isGroupRoom reports whether this room is a group (where a description and
+// the trigger gate apply) rather than a direct chat.
+func (c *conversation) isGroupRoom() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.isGroup
+}
+
 // busy reports whether this room is mid-turn.
 func (c *conversation) busy() bool {
 	c.mu.Lock()
