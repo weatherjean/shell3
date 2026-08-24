@@ -47,9 +47,9 @@ func waitFor(t *testing.T, cond func() bool) {
 func waitIdle(t *testing.T, b *Bot) {
 	t.Helper()
 	waitFor(t, func() bool {
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		return !b.turnActive
+		tconv(b).mu.Lock()
+		defer tconv(b).mu.Unlock()
+		return !tconv(b).turnActive
 	})
 }
 

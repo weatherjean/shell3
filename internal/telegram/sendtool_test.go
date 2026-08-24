@@ -25,7 +25,7 @@ func TestSendMediaTool_RegisteredAndSends(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "report.txt"), []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, _ := b.sendMediaHandler(context.Background(), `{"path":"report.txt","caption":"here"}`)
+	out, _ := b.sendMediaHandler(context.Background(), sess, `{"path":"report.txt","caption":"here"}`)
 	if !strings.Contains(out, "sent report.txt") {
 		t.Fatalf("unexpected result: %q", out)
 	}
@@ -39,12 +39,13 @@ func TestSendMediaTool_KindOmittedSendsDocument(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
+	sess := decoratedSession(t, b, rt)
 	dir := t.TempDir()
 	b.SetWorkDir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "report.txt"), []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, _ := b.sendMediaHandler(context.Background(), `{"path":"report.txt"}`)
+	out, _ := b.sendMediaHandler(context.Background(), sess, `{"path":"report.txt"}`)
 	if !strings.Contains(out, "sent report.txt") {
 		t.Fatalf("unexpected result: %q", out)
 	}
@@ -57,12 +58,13 @@ func TestSendMediaTool_KindPhotoSendsPhoto(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
+	sess := decoratedSession(t, b, rt)
 	dir := t.TempDir()
 	b.SetWorkDir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "chart.png"), []byte("pngdata"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, _ := b.sendMediaHandler(context.Background(), `{"path":"chart.png","kind":"photo"}`)
+	out, _ := b.sendMediaHandler(context.Background(), sess, `{"path":"chart.png","kind":"photo"}`)
 	if !strings.Contains(out, "sent chart.png") {
 		t.Fatalf("unexpected result: %q", out)
 	}
@@ -75,12 +77,13 @@ func TestSendMediaTool_KindPhotoRejectsNonImage(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
+	sess := decoratedSession(t, b, rt)
 	dir := t.TempDir()
 	b.SetWorkDir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("hi"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, _ := b.sendMediaHandler(context.Background(), `{"path":"notes.txt","kind":"photo"}`)
+	out, _ := b.sendMediaHandler(context.Background(), sess, `{"path":"notes.txt","kind":"photo"}`)
 	want := "error: kind=photo requires an image file (jpg, jpeg, png, gif, webp)"
 	if out != want {
 		t.Fatalf("got %q, want %q", out, want)
@@ -94,12 +97,13 @@ func TestSendMediaTool_KindVoiceSendsVoice(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
+	sess := decoratedSession(t, b, rt)
 	dir := t.TempDir()
 	b.SetWorkDir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reply.ogg"), []byte("oggdata"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, _ := b.sendMediaHandler(context.Background(), `{"path":"reply.ogg","kind":"voice"}`)
+	out, _ := b.sendMediaHandler(context.Background(), sess, `{"path":"reply.ogg","kind":"voice"}`)
 	if !strings.Contains(out, "sent reply.ogg") {
 		t.Fatalf("unexpected result: %q", out)
 	}
@@ -112,12 +116,13 @@ func TestSendMediaTool_KindVoiceRejectsMp3(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
+	sess := decoratedSession(t, b, rt)
 	dir := t.TempDir()
 	b.SetWorkDir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "song.mp3"), []byte("mp3data"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, _ := b.sendMediaHandler(context.Background(), `{"path":"song.mp3","kind":"voice"}`)
+	out, _ := b.sendMediaHandler(context.Background(), sess, `{"path":"song.mp3","kind":"voice"}`)
 	want := "error: kind=voice requires an .ogg/.opus file — use kind=audio for mp3"
 	if out != want {
 		t.Fatalf("got %q, want %q", out, want)
@@ -131,12 +136,13 @@ func TestSendMediaTool_KindAudioSendsAudio(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
+	sess := decoratedSession(t, b, rt)
 	dir := t.TempDir()
 	b.SetWorkDir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "song.mp3"), []byte("mp3data"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, _ := b.sendMediaHandler(context.Background(), `{"path":"song.mp3","kind":"audio"}`)
+	out, _ := b.sendMediaHandler(context.Background(), sess, `{"path":"song.mp3","kind":"audio"}`)
 	if !strings.Contains(out, "sent song.mp3") {
 		t.Fatalf("unexpected result: %q", out)
 	}
@@ -149,12 +155,13 @@ func TestSendMediaTool_KindVideoSendsVideo(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
+	sess := decoratedSession(t, b, rt)
 	dir := t.TempDir()
 	b.SetWorkDir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "clip.mp4"), []byte("mp4data"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, _ := b.sendMediaHandler(context.Background(), `{"path":"clip.mp4","kind":"video"}`)
+	out, _ := b.sendMediaHandler(context.Background(), sess, `{"path":"clip.mp4","kind":"video"}`)
 	if !strings.Contains(out, "sent clip.mp4") {
 		t.Fatalf("unexpected result: %q", out)
 	}
@@ -167,12 +174,13 @@ func TestSendMediaTool_KindVideoRejectsNonVideo(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
+	sess := decoratedSession(t, b, rt)
 	dir := t.TempDir()
 	b.SetWorkDir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("hi"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, _ := b.sendMediaHandler(context.Background(), `{"path":"notes.txt","kind":"video"}`)
+	out, _ := b.sendMediaHandler(context.Background(), sess, `{"path":"notes.txt","kind":"video"}`)
 	want := "error: kind=video requires an .mp4/.webm/.mov file"
 	if out != want {
 		t.Fatalf("got %q, want %q", out, want)
@@ -186,12 +194,13 @@ func TestSendMediaTool_KindUnknownReturnsEnumError(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
+	sess := decoratedSession(t, b, rt)
 	dir := t.TempDir()
 	b.SetWorkDir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "report.txt"), []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, _ := b.sendMediaHandler(context.Background(), `{"path":"report.txt","kind":"banana"}`)
+	out, _ := b.sendMediaHandler(context.Background(), sess, `{"path":"report.txt","kind":"banana"}`)
 	want := "error: kind must be photo, voice, audio, video, or document"
 	if out != want {
 		t.Fatalf("got %q, want %q", out, want)
@@ -244,6 +253,7 @@ func TestSendMediaTool_RefusesEnv(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
+	sess := decoratedSession(t, b, rt)
 	dir := t.TempDir()
 	b.SetWorkDir(dir)
 	// Both the plain `.env` and dotenv siblings (.env.production, …) must be
@@ -252,7 +262,7 @@ func TestSendMediaTool_RefusesEnv(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("SECRET=x"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		out, _ := b.sendMediaHandler(context.Background(), `{"path":"`+name+`"}`)
+		out, _ := b.sendMediaHandler(context.Background(), sess, `{"path":"`+name+`"}`)
 		if !strings.Contains(out, "refusing") {
 			t.Fatalf("expected refusal for %s, got %q", name, out)
 		}

@@ -244,6 +244,9 @@ type SessionOptions struct {
 	WorkDir  string // "" → runtime root
 	Headless bool
 	OutPath  string
+	// PromptSuffix appends per-session text to the system prompt, re-rendered
+	// every turn (see chat.Config.PromptSuffix). Nil appends nothing.
+	PromptSuffix func() string
 }
 
 // BridgeVerdict maps a config tool-call hook verdict to the chat package's
@@ -294,6 +297,7 @@ func (p *Parts) SessionConfig(so SessionOptions) (chat.Config, error) {
 		OutPath:        so.OutPath,
 		Headless:       so.Headless,
 		RefreshPrompt:  func() string { return p.RefreshPromptFor(activeName) },
+		PromptSuffix:   so.PromptSuffix,
 		// Agent-scoped knobs (Environment, Delegation, thresholds, …) arrive via
 		// cfg.ApplyActiveAgent(rt) below.
 	}

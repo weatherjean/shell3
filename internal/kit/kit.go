@@ -76,6 +76,8 @@ var EventNames = []string{
 // kitcommands_test.go pins the two lists together, which is why this one can
 // live here without kit importing a front-end.
 var ReservedCommands = []string{
+	"ask",
+	"help",
 	"dash",
 	"stop",
 	"superstop",

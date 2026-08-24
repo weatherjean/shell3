@@ -5,6 +5,7 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/weatherjean/shell3/internal/shell3"
@@ -18,8 +19,11 @@ func (b *Bot) registerStatusTool(s *shell3.Session) {
 		Name: "status",
 		Description: "Report your runtime status: the absolute path of the config directory " +
 			"config file you can edit, your active agent and the agents available, the " +
-			"model, the working directory, and any scheduled cron jobs. Call this to find " +
-			"your config file before editing it (see the self-evolve skill).",
+			"model, the working directory, any scheduled cron jobs, and the OTHER Telegram " +
+			"rooms you are live in (each with its own conversation, sharing this working " +
+			"directory). Call this to find your config file before editing it (see the " +
+			"self-evolve skill), and before touching shared files — another room may be " +
+			"mid-turn in the same directory.",
 		Parameters: map[string]any{"type": "object", "properties": map[string]any{}},
 		Handler: func(ctx context.Context, argsJSON string) (string, error) {
 			return b.statusToolHandler(ctx, s, argsJSON)
@@ -50,6 +54,9 @@ func (b *Bot) statusToolHandler(_ context.Context, s *shell3.Session, _ string) 
 	fmt.Fprintf(&sb, "workdir: %s\n", wd)
 
 	jobs := b.rt.Cron()
+	if rooms := b.roomsStatus(); rooms != "" {
+		sb.WriteString(rooms)
+	}
 	if len(jobs) == 0 {
 		sb.WriteString("cron: none")
 	} else {
@@ -60,4 +67,65 @@ func (b *Bot) statusToolHandler(_ context.Context, s *shell3.Session, _ string) 
 		fmt.Fprintf(&sb, "cron: %d job(s) — %s", len(jobs), strings.Join(names, ", "))
 	}
 	return sb.String(), nil
+}
+
+// roomsStatus lists the live rooms: which chats have a conversation, which
+// are mid-turn, and how many background jobs each is running.
+//
+// It exists because every room shares ONE working directory, so two rooms can
+// run bash in the same tree at the same time — room A checking out a branch
+// while room B edits files. This is the agent's only way to see that coming.
+// It is ADVISORY, not a lock: the answer can go stale a second later, and
+// nothing here prevents the collision it warns about.
+func (b *Bot) roomsStatus() string {
+	rooms := b.allConvs()
+	if len(rooms) == 0 {
+		return ""
+	}
+	type row struct {
+		chatID int64
+		title  string
+		busy   bool
+		jobs   int
+		sessID string
+	}
+	var rows []row
+	for _, c := range rooms {
+		sess := c.session()
+		if sess == nil {
+			continue // enrolled but no live conversation: nothing to collide with
+		}
+		r := row{chatID: c.chatID, busy: c.busy(), sessID: sess.ID()}
+		r.title = b.chatMetaFor(c.chatID).title
+		for _, j := range sess.Jobs() {
+			if j.ParentID == sess.Name() && !j.Done {
+				r.jobs++
+			}
+		}
+		rows = append(rows, r)
+	}
+	if len(rows) == 0 {
+		return ""
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].chatID < rows[j].chatID })
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "rooms: %d live (each has its OWN conversation; all share the working directory above —\n", len(rows))
+	sb.WriteString("  check here before touching shared files, and note this is advice, not a lock)\n")
+	for _, r := range rows {
+		name := r.title
+		if name == "" {
+			name = "(untitled)"
+		}
+		state := "idle"
+		if r.busy {
+			state = "BUSY (mid-turn)"
+		}
+		fmt.Fprintf(&sb, "  · %s [%d] — %s", name, r.chatID, state)
+		if r.jobs > 0 {
+			fmt.Fprintf(&sb, ", %d background job(s)", r.jobs)
+		}
+		fmt.Fprintf(&sb, ", session %s\n", r.sessID)
+	}
+	return sb.String()
 }

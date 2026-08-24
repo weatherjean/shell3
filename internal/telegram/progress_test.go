@@ -17,7 +17,7 @@ func feed(b *Bot, evs ...shell3.Event) (string, bool) {
 		ch <- ev
 	}
 	close(ch)
-	return b.drainTurnProgress(context.Background(), ch)
+	return tconv(b).drainTurnProgress(context.Background(), ch)
 }
 
 // A clean tool-using turn posts one silent bubble, edits it, and deletes it

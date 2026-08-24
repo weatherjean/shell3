@@ -1,0 +1,247 @@
+//go:build unix
+
+package telegram
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/weatherjean/shell3/internal/runs"
+	"github.com/weatherjean/shell3/internal/shell3"
+)
+
+// A room is one conversation, and two chats are two rooms.
+func TestConvIsPerChat(t *testing.T) {
+	b := newBot(t, newFakeClient(), mustRuntime(t))
+	a := b.conv(111)
+	if b.conv(111) != a {
+		t.Fatal("the same chat must resolve to the same conversation")
+	}
+	if b.conv(222) == a {
+		t.Fatal("a different chat must get its own conversation")
+	}
+	if got := b.conv(222).chatID; got != 222 {
+		t.Fatalf("chatID = %d, want 222", got)
+	}
+	if b.conv(111).index == b.conv(222).index {
+		t.Fatal("each room needs its own thread index, or a restart resumes the wrong session")
+	}
+}
+
+// The two gates, end to end on the update loop: a stranger enrols nothing,
+// and group chatter that is not aimed at the bot starts no turn.
+func TestGroupGatesOnSenderAndTrigger(t *testing.T) {
+	fc := newFakeClient()
+	b := newBot(t, fc, mustRuntime(t))
+	if err := b.SetAllowFrom([]string{"7"}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	// A non-allowlisted sender, even @mentioning the bot, is nothing.
+	b.handleMsg(ctx, Msg{ChatID: -100, ChatType: "supergroup", SenderID: 9, ID: "1", Text: "@mybot deploy"})
+	if len(b.allConvs()) != 0 {
+		t.Fatal("an unauthorized sender must not enrol a room")
+	}
+
+	// An allowlisted sender talking to the ROOM is not talking to the bot.
+	b.handleMsg(ctx, Msg{ChatID: -100, ChatType: "supergroup", SenderID: 7, ID: "2", Text: "lunch?"})
+	time.Sleep(20 * time.Millisecond)
+	if got := len(fc.sentReplies()) + len(fc.htmlTexts()); got != 0 {
+		t.Fatalf("unaddressed group chatter started a turn (%d posts)", got)
+	}
+
+	// Addressed: this one runs.
+	b.handleMsg(ctx, Msg{ChatID: -100, ChatType: "supergroup", SenderID: 7, ID: "3", Text: "@mybot deploy"})
+	waitFor(t, func() bool { return len(fc.sentReplies()) >= 1 })
+	if b.conv(-100).session() == nil {
+		t.Fatal("an addressed group message must open that room's conversation")
+	}
+}
+
+// Two rooms hold two conversations: different sessions, and a reply lands in
+// the room it was asked in.
+func TestTwoRoomsHoldSeparateSessions(t *testing.T) {
+	fc := newFakeClient()
+	b := newBot(t, fc, mustRuntime(t))
+	if err := b.SetAllowFrom([]string{"7"}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	b.handleMsg(ctx, Msg{ChatID: -100, ChatType: "supergroup", SenderID: 7, ID: "1", Text: "@mybot one"})
+	waitFor(t, func() bool { return len(fc.sentReplies()) >= 1 })
+	b.handleMsg(ctx, Msg{ChatID: -200, ChatType: "supergroup", SenderID: 7, ID: "2", Text: "@mybot two"})
+	waitFor(t, func() bool { return len(fc.sentReplies()) >= 2 })
+
+	a, bb := b.conv(-100).session(), b.conv(-200).session()
+	if a == nil || bb == nil {
+		t.Fatal("both rooms must have a session")
+	}
+	if a.ID() == bb.ID() {
+		t.Fatal("two rooms sharing one session is the context bloat this feature exists to remove")
+	}
+	var chats []int64
+	for _, r := range fc.sentReplies() {
+		chats = append(chats, r.chatID)
+	}
+	if len(chats) < 2 || chats[0] != -100 || chats[1] != -200 {
+		t.Fatalf("replies landed in %v, want each room answered in itself", chats)
+	}
+}
+
+// Each room's current session is persisted under its own surface, so a
+// restart resumes every room rather than merging them.
+func TestRoomSessionsPersistPerSurface(t *testing.T) {
+	fc := newFakeClient()
+	b := newBot(t, fc, mustRuntime(t))
+	if err := b.SetAllowFrom([]string{"7"}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	b.handleMsg(ctx, Msg{ChatID: -100, ChatType: "supergroup", SenderID: 7, ID: "1", Text: "@mybot one"})
+	waitFor(t, func() bool { return len(fc.sentReplies()) >= 1 })
+
+	want := b.conv(-100).session().ID()
+	got, ok := b.conv(-100).index.Current()
+	if !ok || got != want {
+		t.Fatalf("room marker = %q,%v; want %q", got, ok, want)
+	}
+	if surface := b.conv(-100).index.surface; surface != "telegram:-100" {
+		t.Fatalf("surface = %q, want telegram:-100", surface)
+	}
+}
+
+// A completion whose owning room is not live yet — every completion recovered
+// at boot — still finds its room through the runs store.
+func TestRoomForOwnerResolvesFromStoreAfterRestart(t *testing.T) {
+	st, err := runs.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := st.SetCurrentSession(TelegramSurface(-200), "sess-b"); err != nil {
+		t.Fatal(err)
+	}
+	idx := NewThreadIndex(func() *runs.Store { return st }, "telegram")
+	b := NewBot(newFakeClient(), mustRuntime(t), 42, idx)
+
+	c := b.roomForOwner("sess-b")
+	if c == nil {
+		t.Fatal("a recovered completion must resolve its room from the store, not fall back to the home chat")
+	}
+	if c.chatID != -200 {
+		t.Fatalf("resolved chat %d, want -200", c.chatID)
+	}
+	if b.roomForOwner("nobody") != nil {
+		t.Fatal("an unknown owner names no room")
+	}
+}
+
+// The inbox is a whole-bot view now: it must name the room a message is
+// waiting in, or a queued message in a quiet room is invisible.
+func TestInboxNamesRooms(t *testing.T) {
+	b := newBot(t, newFakeClient(), mustRuntime(t))
+	c := b.conv(-100)
+	c.mu.Lock()
+	c.mailQueue = append(c.mailQueue, inMail{text: "waiting here"})
+	c.mu.Unlock()
+
+	out := b.Inbox()
+	if !strings.Contains(out, "-100") || !strings.Contains(out, "waiting here") {
+		t.Fatalf("inbox = %q, want the room and its queued message", out)
+	}
+}
+
+// The DEFAULT mail route is WakeOwner, so it must resolve a room the same way
+// PostCompletion does. After a restart no room is live yet, and a
+// live-registry-only check would send every recovered job's report to the
+// home chat — the routing this feature exists to avoid.
+func TestWakeOwnerResumesTheSpawningRoomAfterRestart(t *testing.T) {
+	st, err := runs.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	idx := NewThreadIndex(func() *runs.Store { return st }, "telegram")
+	rt := mustRuntime(t)
+
+	// A room whose conversation exists in the store but not in memory: what
+	// every room looks like at boot.
+	seed, err := rt.Session(shell3.SessionOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetCurrentSession(TelegramSurface(-200), seed.ID()); err != nil {
+		t.Fatal(err)
+	}
+
+	b := NewBot(newFakeClient(), rt, 42, idx)
+	if !b.WakeOwner(seed.ID(), "your job finished") {
+		t.Fatal("a completion for an enrolled room must wake that room, not fall through to the home chat")
+	}
+	if c := b.peekConv(-200); c == nil || c.session() == nil {
+		t.Fatal("waking the owner must resume its room's conversation")
+	}
+}
+
+// An owner whose room has moved on (a /new since the job started) is an
+// orphan: it belongs in the home chat, not grafted onto the new conversation.
+func TestWakeOwnerRejectsAStaleOwner(t *testing.T) {
+	b := newBot(t, newFakeClient(), mustRuntime(t))
+	if b.WakeOwner("a-session-nobody-owns", "note") {
+		t.Fatal("an owner naming no room must fall through to StartFreshTurn")
+	}
+}
+
+// Converting a group to a supergroup changes its chat id. The conversation
+// must follow, or it is stranded under an id nobody can post to again.
+func TestRoomSurvivesSupergroupMigration(t *testing.T) {
+	fc := newFakeClient()
+	b := newBot(t, fc, mustRuntime(t))
+	if err := b.SetAllowFrom([]string{"7"}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	b.handleMsg(ctx, Msg{ChatID: -100, ChatType: "group", SenderID: 7, ID: "1", Text: "@mybot hi"})
+	waitFor(t, func() bool { return len(fc.sentReplies()) >= 1 })
+	sessID := b.conv(-100).session().ID()
+
+	// Telegram's announcement: a service message, no sender.
+	b.handleMsg(ctx, Msg{ChatID: -100, ChatType: "group", MigratedTo: -1009999})
+
+	if b.peekConv(-100) != nil {
+		t.Fatal("the old chat id must no longer name a room")
+	}
+	moved := b.peekConv(-1009999)
+	if moved == nil || moved.session() == nil {
+		t.Fatal("the conversation must move to the new chat id")
+	}
+	if moved.session().ID() != sessID {
+		t.Fatal("migration must carry the SAME session — a rename is not a new conversation")
+	}
+	if !moved.isGroup {
+		t.Fatal("a supergroup is still a group: the trigger gate must stay armed")
+	}
+	got, ok := moved.index.Current()
+	if !ok || got != sessID {
+		t.Fatalf("marker under the new surface = %q,%v; want %q", got, ok, sessID)
+	}
+	if st := b.threads.currentStore(); st != nil {
+		if id, ok := st.CurrentSession(TelegramSurface(-100)); ok && id != "" {
+			t.Fatalf("old surface still marks session %q", id)
+		}
+	}
+}
+
+// A migration announcement has no sender, so it must not be mistaken for an
+// unauthorized message — and it must not enrol a room that never existed.
+func TestMigrationOfAnUnknownRoomIsANoop(t *testing.T) {
+	b := newBot(t, newFakeClient(), mustRuntime(t))
+	b.handleMsg(context.Background(), Msg{ChatID: -100, ChatType: "group", MigratedTo: -1009999})
+	if len(b.allConvs()) != 0 {
+		t.Fatal("migrating a room nobody has used must create nothing")
+	}
+}

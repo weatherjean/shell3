@@ -36,7 +36,13 @@ func (b *Bot) registerSendTool(s *shell3.Session) {
 			},
 			"required": []string{"path"},
 		},
-		Handler: b.sendMediaHandler,
+		// The room is resolved per CALL, not at registration: a session's
+		// room is what makes "send this to the user" mean one chat rather
+		// than another, and a session can be registered before its room's
+		// conversation is the live one (restart, /new).
+		Handler: func(ctx context.Context, argsJSON string) (string, error) {
+			return b.sendMediaHandler(ctx, s, argsJSON)
+		},
 	})
 }
 
@@ -84,7 +90,8 @@ func validateKind(kind, ext string, size int64) error {
 
 // sendMediaHandler implements send_media_telegram. Failures are returned as
 // "error: …" tool-result strings (not Go errors), matching the engine's tools.
-func (b *Bot) sendMediaHandler(ctx context.Context, argsJSON string) (string, error) {
+func (b *Bot) sendMediaHandler(ctx context.Context, sess *shell3.Session, argsJSON string) (string, error) {
+	c := b.roomOrHome(sess.ID())
 	var args struct {
 		Path    string `json:"path"`
 		Caption string `json:"caption"`
@@ -124,15 +131,15 @@ func (b *Bot) sendMediaHandler(ctx context.Context, argsJSON string) (string, er
 	}
 	switch kind {
 	case "photo":
-		err = b.client.SendPhoto(ctx, b.chatID, base, data, args.Caption)
+		err = b.client.SendPhoto(ctx, c.chatID, base, data, args.Caption)
 	case "voice":
-		err = b.client.SendVoice(ctx, b.chatID, data, args.Caption)
+		err = b.client.SendVoice(ctx, c.chatID, data, args.Caption)
 	case "audio":
-		err = b.client.SendAudio(ctx, b.chatID, base, data, args.Caption)
+		err = b.client.SendAudio(ctx, c.chatID, base, data, args.Caption)
 	case "video":
-		err = b.client.SendVideo(ctx, b.chatID, base, data, args.Caption)
+		err = b.client.SendVideo(ctx, c.chatID, base, data, args.Caption)
 	default:
-		_, err = b.client.SendDocument(ctx, b.chatID, base, data, args.Caption)
+		_, err = b.client.SendDocument(ctx, c.chatID, base, data, args.Caption)
 	}
 	if err != nil {
 		return "error: failed to send: " + err.Error(), nil

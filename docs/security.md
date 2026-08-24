@@ -83,17 +83,57 @@ model is two secrets:
   pending updates and send as your bot. It lives in `.env` like every other
   secret; revoke it with `/revoke` in [@BotFather](https://t.me/BotFather) if
   it leaks, and restart with the new one.
-- **`telegram.chat_id`** is the only chat the bot answers. Updates from any
-  other chat, inline-button presses included, are dropped before a turn
-  starts, so a stranger who finds your bot gets nothing back. Point it at
-  your own private chat: it accepts a group id, and then every member of
-  that group holds the shell described below.
+- **`telegram.allow_from`** is who the bot obeys — the whole access model.
+  It lists Telegram user ids, and only those people can drive the agent,
+  in any chat. A message from anyone else is dropped on the update loop:
+  before a room is created, before an attachment is saved, before a token is
+  spent. A stranger who finds your bot, or who adds it to a group, gets
+  nothing back. Unset, it falls back to the owner of `telegram.chat_id`,
+  which is the single-DM case (a DM's chat id is its user id).
 
-**Whoever controls that chat controls a shell** on the machine running
-shell3. That includes anyone with access to your Telegram account, and any
-device where it is still signed in: put a passcode on the app, keep two-step
-verification on, and audit active sessions in Telegram's settings. There is
-no privilege tier below "shell".
+  `telegram.chat_id` is NOT an access rule. It names the HOME chat — where
+  cron results and ownerless completions land — and nothing else. A group
+  chat id there with an empty `allow_from` is refused at startup: the owner
+  fallback would resolve to nobody.
+
+**Everyone you list holds a shell** on the machine running shell3 — the same
+shell you have, bounded only by the command gate. There is no privilege tier
+below "shell" and no read-only role. Listing a coworker so they can ask the
+agent for a deploy also lets them ask it for your SSH keys. That includes
+anyone with access to those people's Telegram accounts, and any device where
+one is still signed in: put a passcode on the app, keep two-step verification
+on, and audit active sessions in Telegram's settings.
+
+**Groups.** In a group the bot answers only what is addressed to it — an
+`@mention` or a reply to one of its own messages — and only from an
+allowlisted sender. Everything else is discarded without entering any
+conversation. Two consequences worth knowing:
+
+- With privacy mode ON (the default), `/ask <message>` and replies to the
+  bot's own messages are the way in, and Telegram itself filters everything
+  else — the bot is never sent the rest of the room. This is the smaller
+  surface, and the recommended setup.
+- Turning **privacy mode off** in @BotFather (or promoting the bot to admin)
+  additionally enables plain @mentions, at a price: the group's messages then
+  reach the shell3 process, which drops the ones that are not for it. They
+  are not stored, not logged, and never enter a prompt — but the enforcement
+  becomes shell3's rather than Telegram's, and a bug in that gate is a bug in
+  your access control. Attachments are fetched only after a message clears
+  both gates, so a stranger's photo is never downloaded.
+- A group **admin** can edit the group description, and by default that
+  description is injected into that room's prompt as standing context (it is
+  delimited and labelled as member-written, not as an instruction from you).
+  An admin need not be on `allow_from`. Set `use_description: false` for that
+  chat under `telegram.chats:` if the room's admins are not people you would
+  hand a prompt to.
+- Reading that description requires the bot to see group info, which in
+  practice means promoting it to admin in the group. Weigh that as its own
+  decision: an admin bot also receives every message in the room (the
+  privacy-mode filter no longer applies to it), so shell3's own gate becomes
+  the filter, exactly as with privacy mode off. The `context:` files under
+  `telegram.chats:` give a room standing context with no rights at all, and
+  are the safer choice when the brief does not need to be editable from
+  Telegram.
 
 The remaining line of defence is the [command gate](#unsafe-by-default),
 which the scaffold ships armed but is yours to tune.
@@ -105,8 +145,8 @@ anything the agent quotes from your machine: file contents, command output,
 a stored run's transcript. Treat the chat as a third-party log of everything
 the agent says.
 
-There is no approval flow to fall back on: whoever holds that chat **is**
-the operator — the `chat_id` allowlist is the whole access model.
+There is no approval flow to fall back on: whoever is on `allow_from` **is**
+an operator.
 
 ## The web dash
 

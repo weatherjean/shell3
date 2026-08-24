@@ -158,12 +158,12 @@ func newResumeTestBot(t *testing.T) (*Bot, *runs.Store) {
 func TestMainSession_MarkerConsistentAfterRestartResume(t *testing.T) {
 	b, st := newResumeTestBot(t)
 
-	first, err := b.mainSession()
+	first, err := tconv(b).mainSession()
 	if err != nil {
 		t.Fatal(err)
 	}
 	firstID := first.ID()
-	if got, _ := b.current.Current(); got != firstID {
+	if got, _ := tconv(b).index.Current(); got != firstID {
 		t.Fatalf("marker after first session = %q, want %q", got, firstID)
 	}
 
@@ -178,22 +178,23 @@ func TestMainSession_MarkerConsistentAfterRestartResume(t *testing.T) {
 	if err := st.EndSession(firstID); err != nil {
 		t.Fatal(err)
 	}
-	b.mu.Lock()
-	b.main = nil
-	b.mu.Unlock()
+	c := tconv(b)
+	c.mu.Lock()
+	c.main = nil
+	c.mu.Unlock()
 
-	second, err := b.mainSession()
+	second, err := tconv(b).mainSession()
 	if err != nil {
 		t.Fatal(err)
 	}
 	// mainSession resumes the SAME store id (shell3.Session.ID() returns
 	// StoreID unchanged — resuming does not mint a new row); the marker must
-	// therefore still agree with it. b.current's in-memory map already agrees
+	// therefore still agree with it. tconv(b).index's in-memory map already agrees
 	// by construction (mainSession just wrote it in this process) — that alone
 	// wouldn't catch a lost STORE write, which is the failure this task's fix
 	// targets. Re-read through a fresh ThreadIndex over the same store, the
 	// way a restarting process actually would.
-	reread := NewThreadIndex(func() *runs.Store { return st }, "telegram")
+	reread := NewThreadIndex(func() *runs.Store { return st }, TelegramSurface(b.homeChat))
 	got, ok := reread.Current()
 	if !ok || got != second.ID() {
 		t.Fatalf("persisted marker = %q, want the resumed session %q (stale marker forks the conversation)", got, second.ID())
@@ -211,23 +212,24 @@ func TestMainSession_MarkerConsistentAfterRestartResume(t *testing.T) {
 // store-handle swap (cmd/shell3/hostwiring.go's openThreads re-resolves via
 // rt.Parts().Store() on every call), despite the name this test used to
 // carry. What it actually verifies is narrower: clearing the in-memory
-// b.main handle and calling mainSession() again still leaves the persisted
+// tconv(b).main handle and calling mainSession() again still leaves the persisted
 // marker naming the (re-resumed) live session under this fixture.
 func TestMainSession_MarkerConsistentAfterMainHandleCleared(t *testing.T) {
 	b, st := newResumeTestBot(t)
-	first, err := b.mainSession()
+	first, err := tconv(b).mainSession()
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, _ = b.rt.Reload() // swap Parts generation (a no-op on this Parts-less test runtime)
-	b.mu.Lock()
-	b.main = nil
-	b.mu.Unlock()
-	second, err := b.mainSession()
+	c := tconv(b)
+	c.mu.Lock()
+	c.main = nil
+	c.mu.Unlock()
+	second, err := tconv(b).mainSession()
 	if err != nil {
 		t.Fatal(err)
 	}
-	reread := NewThreadIndex(func() *runs.Store { return st }, "telegram")
+	reread := NewThreadIndex(func() *runs.Store { return st }, TelegramSurface(b.homeChat))
 	got, ok := reread.Current()
 	if !ok || got != second.ID() {
 		t.Fatalf("marker %q != live session %q after reload", got, second.ID())
@@ -304,20 +306,22 @@ func TestMainSession_MarkerSurvivesCompaction(t *testing.T) {
 		b.handleMsg(ctx, Msg{ChatID: 42, SenderID: 42, ID: id, Text: big})
 		waitFor(t, func() bool { return len(fc.sentReplies()) >= want })
 		if i == 0 {
-			b.mu.Lock()
-			before = b.main.ID()
-			b.mu.Unlock()
+			c := tconv(b)
+			c.mu.Lock()
+			before = c.main.ID()
+			c.mu.Unlock()
 		}
 	}
 
-	b.mu.Lock()
-	after := b.main.ID()
-	b.mu.Unlock()
+	c := tconv(b)
+	c.mu.Lock()
+	after := c.main.ID()
+	c.mu.Unlock()
 	if after == before {
 		t.Fatal("compaction did not roll the store id; this test proves nothing — fix the setup")
 	}
 
-	reread := NewThreadIndex(func() *runs.Store { return st }, "telegram")
+	reread := NewThreadIndex(func() *runs.Store { return st }, TelegramSurface(b.homeChat))
 	got, ok := reread.Current()
 	if !ok || got != after {
 		t.Fatalf("marker = %q, want the post-compaction session %q — a restart would resume the stale one and orphan the conversation", got, after)

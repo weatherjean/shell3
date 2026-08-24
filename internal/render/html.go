@@ -43,7 +43,7 @@ func RunReplayHTML(root, id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return renderRunHTML(id, msgs), nil
+	return renderRunHTML(id, msgs, st.PromptsForSession(id)), nil
 }
 
 // esc escapes text for HTML and drops invalid UTF-8. A tool that emitted raw
@@ -53,7 +53,7 @@ func esc(s string) string {
 	return html.EscapeString(strings.ToValidUTF8(s, "�"))
 }
 
-func renderRunHTML(id string, msgs []llm.Message) string {
+func renderRunHTML(id string, msgs []llm.Message, prompts []runs.PromptRecord) string {
 	var b strings.Builder
 	b.WriteString("<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">\n")
 	b.WriteString("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n")
@@ -69,8 +69,20 @@ func renderRunHTML(id string, msgs []llm.Message) string {
 	if len(msgs) == 0 {
 		b.WriteString("<p class=\"meta\">This run has no messages.</p>\n")
 	}
+	// The system prompt is folded in at the message position it took effect,
+	// so a replay shows what the model was TOLD alongside what it said. Only
+	// CHANGES are stored, so a conversation nobody edited shows exactly one
+	// block, at the top.
+	next := 0
 	for i, m := range msgs {
+		for next < len(prompts) && prompts[next].Seq <= i {
+			writePrompt(&b, prompts[next])
+			next++
+		}
 		writeMessage(&b, i+1, m)
+	}
+	for ; next < len(prompts); next++ {
+		writePrompt(&b, prompts[next])
 	}
 
 	b.WriteString("</main>\n<script>\nfunction a(open){for(const d of document.querySelectorAll('details'))d.open=!!open}\n</script>\n</body></html>\n")
@@ -159,3 +171,16 @@ white-space:pre-wrap;overflow-wrap:anywhere;font-size:.85rem;margin:.3rem 0}
 .reason,.call{margin:.3rem 0}
 .reason>summary,.call>summary{color:var(--dim);font-size:.85rem}
 `
+
+// writePrompt renders one system-prompt version as a collapsed block. It is
+// collapsed by default because it is long and usually unchanged; it is present
+// because "what was in the prompt when it did that" is otherwise unanswerable
+// once the turn has ended.
+func writePrompt(b *strings.Builder, p runs.PromptRecord) {
+	b.WriteString("<details class=\"msg system\">\n<summary>system prompt")
+	if !p.TS.IsZero() {
+		fmt.Fprintf(b, " <span class=\"meta\">from message %d · %s · %s</span>",
+			p.Seq+1, p.TS.Format("15:04:05"), esc(p.Hash[:8]))
+	}
+	fmt.Fprintf(b, "</summary>\n<pre>%s</pre>\n</details>\n", esc(p.Text))
+}

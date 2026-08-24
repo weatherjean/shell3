@@ -203,6 +203,52 @@ func TextSectionHTML(title, text string) string {
 	return "<section>\n<h2>" + esc(title) + "</h2>\n<pre>" + esc(text) + "</pre>\n</section>\n"
 }
 
+// RoomInfo is one live Telegram room on the dash index. The front-end owns
+// the data; render only lays it out, which is why this is a plain struct
+// rather than an import of internal/telegram.
+type RoomInfo struct {
+	ChatID    int64
+	Title     string
+	Busy      bool
+	Jobs      int
+	Queued    int
+	SessionID string
+}
+
+// RoomsSectionHTML renders the live rooms: one conversation per chat, which
+// is busy, what is queued behind it, and a link to each room's transcript.
+// Empty when the bot holds no conversation yet — an empty table would suggest
+// something is broken when nothing is.
+func RoomsSectionHTML(rooms []RoomInfo, tok string) string {
+	if len(rooms) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("<section>\n<h2>Rooms</h2>\n")
+	b.WriteString("<p class=\"meta\">One conversation per chat. All rooms share one working directory.</p>\n")
+	b.WriteString("<table>\n<tr><th>chat</th><th>state</th><th>queued</th><th>jobs</th><th>transcript</th></tr>\n")
+	for _, r := range rooms {
+		name := r.Title
+		if name == "" {
+			name = "(untitled)"
+		}
+		state := "idle"
+		if r.Busy {
+			state = "busy"
+		}
+		fmt.Fprintf(&b, "<tr><td>%s <span class=\"meta\">%d</span></td><td>%s</td><td>%d</td><td>%d</td>",
+			esc(name), r.ChatID, esc(state), r.Queued, r.Jobs)
+		if r.SessionID != "" {
+			fmt.Fprintf(&b, "<td><a href=\"/runs/%s?t=%s\">%s</a></td>", esc(r.SessionID), esc(tok), esc(r.SessionID))
+		} else {
+			b.WriteString("<td>—</td>")
+		}
+		b.WriteString("</tr>\n")
+	}
+	b.WriteString("</table>\n</section>\n")
+	return b.String()
+}
+
 // kv writes one definition-list row, skipping empty values.
 func kv(b *strings.Builder, name, value string) {
 	if value == "" {

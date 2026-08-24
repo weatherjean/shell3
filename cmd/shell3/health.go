@@ -232,11 +232,19 @@ func runHealth(cmd *cobra.Command, path string) error {
 	// must never hide the hook and MCP diagnostics above.
 	if tg := lc.Telegram(); !tg.Present {
 		fmt.Fprintln(out, "telegram: absent — the bot front-end is unwired (add a telegram: block to run `shell3 telegram`)")
-	} else if chatID, err := telegramChatID(tg); err != nil {
+	} else if chatID, err := telegramHomeChat(tg); err != nil {
 		fmt.Fprintf(out, "telegram: %v\n", err)
 		return fmt.Errorf("health: %w", err)
 	} else {
-		fmt.Fprintf(out, "telegram: chat %d\n", chatID)
+		fmt.Fprintf(out, "telegram: home chat %d\n", chatID)
+		if tg.ChatID == "" {
+			// The home chat fell back to a user id. Telegram forbids a bot
+			// from opening a DM, so this only delivers once that person has
+			// written to the bot — a warning, not a failure, because it is
+			// true today and false tomorrow with no config change.
+			fmt.Fprintf(out, "telegram: no chat_id set — cron results will DM user %d, "+
+				"which only works once they have messaged the bot\n", chatID)
+		}
 	}
 
 	fmt.Fprintln(out, "OK")

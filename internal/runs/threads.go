@@ -23,3 +23,42 @@ func (s *Store) CurrentSession(surface string) (string, bool) {
 	}
 	return id, true
 }
+
+// SurfaceForSession is CurrentSession backwards: which surface, if any, has
+// this session as its current conversation. The Telegram front-end uses it to
+// find the ROOM a completion belongs to after a restart, before any room has
+// been used again — the live registry is empty then, and without this the
+// answer would degrade to "the home chat" for every recovered job.
+//
+// A session can only be one surface's current conversation (surface is the
+// primary key and a session id is written to one row), so the first match is
+// the answer.
+func (s *Store) SurfaceForSession(sessionID string) (string, bool) {
+	var surface string
+	err := s.db.QueryRow(`SELECT surface FROM threads WHERE session_id=? LIMIT 1`, sessionID).Scan(&surface)
+	if err != nil {
+		return "", false
+	}
+	return surface, true
+}
+
+// SurfacesWithPrefix lists surface → session id for every surface starting
+// with prefix — the enrolled-rooms listing ("telegram:"). An unreadable row
+// is skipped rather than failing the listing: this feeds a view, never a
+// decision.
+func (s *Store) SurfacesWithPrefix(prefix string) map[string]string {
+	out := map[string]string{}
+	rows, err := s.db.Query(`SELECT surface, session_id FROM threads WHERE surface LIKE ? || '%'`, prefix)
+	if err != nil {
+		return out
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var surface, id string
+		if err := rows.Scan(&surface, &id); err != nil {
+			continue
+		}
+		out[surface] = id
+	}
+	return out
+}

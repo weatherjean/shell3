@@ -97,17 +97,50 @@ func (c *ConsoleClient) readLoop(ctx context.Context) {
 }
 
 // parseLine turns one stdin line into an inbound Msg, assigning it a fresh id.
-// "@<id> text" becomes a reply to <id>; anything else is a plain/command message.
+// "#<chatid> text" sends into another room (the way to drive several
+// conversations by hand); "@<id> text" becomes a reply to <id>; anything else
+// is a plain/command message in the default chat.
 func (c *ConsoleClient) parseLine(line string) Msg {
 	// The console has no Telegram identity. Treat input as coming from the
 	// configured chat's owner: the operator is already at the keyboard, and
 	// pretending otherwise would only lock them out of their own console.
-	m := Msg{ChatID: c.chatID, SenderID: c.chatID, ID: strconv.Itoa(c.nextID())}
+	m := Msg{ChatID: c.chatID, SenderID: c.chatID, ID: strconv.Itoa(c.nextID()), ChatType: "private"}
+	// A "#<chatid> " prefix routes the line into another room, so the whole
+	// multi-room loop — separate conversations, concurrent turns, per-room
+	// /new — is drivable with no credentials and no network. The room is
+	// treated as a GROUP (any chat that is not the console's own default is
+	// one), which means the line must also address the bot to count: exactly
+	// what a live group demands.
+	if rest, ok := strings.CutPrefix(line, "#"); ok {
+		idStr, text, found := strings.Cut(rest, " ")
+		if id, err := strconv.ParseInt(idStr, 10, 64); err == nil && found {
+			m.ChatID = id
+			if id != c.chatID {
+				m.ChatType = "supergroup"
+			}
+			line = strings.TrimSpace(text)
+			m.Text = line
+			if line == "" {
+				return m
+			}
+			// fall through so "@<id>" reply syntax still works after the room
+			// prefix
+			if strings.HasPrefix(line, "@") {
+				idStr, text, _ := strings.Cut(line[1:], " ")
+				if _, err := strconv.Atoi(idStr); err == nil {
+					m.ReplyToID, m.ReplyToBot = idStr, true
+					m.Text = strings.TrimSpace(text)
+				}
+			}
+			return m
+		}
+	}
 	if strings.HasPrefix(line, "@") {
 		rest := line[1:]
 		idStr, text, _ := strings.Cut(rest, " ")
 		if idStr != "" {
-			m.ReplyToID = idStr
+			// One bot on this transport, so a reply is a reply to us.
+			m.ReplyToID, m.ReplyToBot = idStr, true
 			m.Text = strings.TrimSpace(text)
 			return m
 		}
@@ -222,4 +255,14 @@ func (c *ConsoleClient) EditPlain(_ context.Context, _ int64, msgID string, text
 func (c *ConsoleClient) DeleteMessage(_ context.Context, _ int64, msgID string) error {
 	c.mark("[delete #%s]", msgID)
 	return nil
+}
+
+// Username is the console transport's fixed identity: the bot loop needs a
+// name to spot @mentions, and a dev transport has no Bot API to ask.
+func (c *ConsoleClient) Username(context.Context) (string, error) { return "shell3console", nil }
+
+// ChatInfo gives the console transport's rooms a stable title so a room brief
+// renders in --console exactly as it does live.
+func (c *ConsoleClient) ChatInfo(_ context.Context, chatID int64) (string, string, error) {
+	return "console", "", nil
 }

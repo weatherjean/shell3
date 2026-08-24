@@ -122,12 +122,7 @@ func warnFixedOverhead(cfg TurnConfig, sess *Session) {
 	if sess.warnedFixedOverhead || cfg.Log == nil {
 		return
 	}
-	sysPrompt := cfg.Personality.SystemPrompt
-	if cfg.RefreshPrompt != nil {
-		if s := cfg.RefreshPrompt(); s != "" {
-			sysPrompt = s
-		}
-	}
+	sysPrompt := renderSystemPrompt(cfg)
 	fixed := estimatePromptTokens([]llm.Message{{Role: llm.RoleSystem, Content: sysPrompt}})
 	if fixed < cfg.CompactAt*systemPromptShare/100 {
 		return

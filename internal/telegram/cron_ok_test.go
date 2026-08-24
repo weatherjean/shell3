@@ -132,10 +132,11 @@ func TestPostCompletion_PlainPostAdvancesAnchor(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := newBot(t, fc, rt)
-	b.mu.Lock()
-	b.main = sess
-	b.mu.Unlock()
-	b.setAnchor("41")
+	c := tconv(b)
+	c.mu.Lock()
+	c.main = sess
+	c.mu.Unlock()
+	tconv(b).setAnchor("41")
 
 	b.PostCompletion(shell3.CompletionPost{OwnerID: sess.ID(), Text: "build done"})
 
@@ -148,9 +149,9 @@ func TestPostCompletion_PlainPostAdvancesAnchor(t *testing.T) {
 		}
 	}
 	// The sent message still advanced the conversation anchor.
-	b.mu.Lock()
-	anchor := b.mainAnchor
-	b.mu.Unlock()
+	c.mu.Lock()
+	anchor := c.mainAnchor
+	c.mu.Unlock()
 	if anchor != fc.lastSentID() {
 		t.Fatalf("anchor = %q, want the sent post id %q", anchor, fc.lastSentID())
 	}
@@ -163,9 +164,10 @@ func TestWakeOwner_MainAndForeign(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "unused")
 	b := newBot(t, fc, rt)
-	b.mu.Lock()
-	b.main = sess
-	b.mu.Unlock()
+	c := tconv(b)
+	c.mu.Lock()
+	c.main = sess
+	c.mu.Unlock()
 
 	if !b.WakeOwner(sess.ID(), "note for the agent") {
 		t.Fatal("the main conversation must accept the wake")
@@ -202,9 +204,9 @@ func TestStartFreshTurn_PostsReplyAsMail(t *testing.T) {
 	b.StartFreshTurn("cron job \"nightly\" finished. result: all clear")
 
 	waitFor(t, func() bool {
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		return b.main != nil && !b.turnActive && !b.main.HasQueuedInput()
+		tconv(b).mu.Lock()
+		defer tconv(b).mu.Unlock()
+		return tconv(b).main != nil && !tconv(b).turnActive && !tconv(b).main.HasQueuedInput()
 	})
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "✉️ fresh turn reply")
@@ -217,9 +219,10 @@ func TestWakeTurn_MainSessionPostsMail(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "CRON_OK")
 	b := newBot(t, fc, rt)
-	b.mu.Lock()
-	b.main = sess
-	b.mu.Unlock()
+	c := tconv(b)
+	c.mu.Lock()
+	c.main = sess
+	c.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -227,9 +230,9 @@ func TestWakeTurn_MainSessionPostsMail(t *testing.T) {
 
 	sess.NotifyText("anything")
 	waitFor(t, func() bool {
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		return !b.turnActive && !sess.HasQueuedInput()
+		tconv(b).mu.Lock()
+		defer tconv(b).mu.Unlock()
+		return !tconv(b).turnActive && !sess.HasQueuedInput()
 	})
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "✉️ CRON_OK")
@@ -242,9 +245,10 @@ func TestWakeTurn_NoReplySentinelStaysSilent(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "NO_REPLY.")
 	b := newBot(t, fc, rt)
-	b.mu.Lock()
-	b.main = sess
-	b.mu.Unlock()
+	c := tconv(b)
+	c.mu.Lock()
+	c.main = sess
+	c.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -252,9 +256,9 @@ func TestWakeTurn_NoReplySentinelStaysSilent(t *testing.T) {
 
 	sess.NotifyText("routine tick, nothing to say")
 	waitFor(t, func() bool {
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		return !b.turnActive && !sess.HasQueuedInput()
+		tconv(b).mu.Lock()
+		defer tconv(b).mu.Unlock()
+		return !tconv(b).turnActive && !sess.HasQueuedInput()
 	})
 	if texts := fc.sentTexts(); len(texts) != 0 {
 		t.Fatalf("NO_REPLY wake turn must post nothing, got %v", texts)
@@ -267,9 +271,10 @@ func TestWakeTurn_MailAlwaysSilentAndPlain(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "hushed news")
 	b := newBot(t, fc, rt)
-	b.mu.Lock()
-	b.main = sess
-	b.mu.Unlock()
+	c := tconv(b)
+	c.mu.Lock()
+	c.main = sess
+	c.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -362,9 +367,10 @@ func TestWakeTurn_IdenticalMailDroppedOnce(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "same old news")
 	b := newBot(t, fc, rt)
-	b.mu.Lock()
-	b.main = sess
-	b.mu.Unlock()
+	c := tconv(b)
+	c.mu.Lock()
+	c.main = sess
+	c.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -378,9 +384,9 @@ func TestWakeTurn_IdenticalMailDroppedOnce(t *testing.T) {
 
 	sess.NotifyText("tick two") // fake replies the identical text again
 	waitFor(t, func() bool {
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		return !b.turnActive && !sess.HasQueuedInput()
+		tconv(b).mu.Lock()
+		defer tconv(b).mu.Unlock()
+		return !tconv(b).turnActive && !sess.HasQueuedInput()
 	})
 	if got := len(fc.sentTexts()); got != before {
 		t.Fatalf("identical repeat mail must be dropped, extra posts: %v", fc.sentTexts()[before:])
@@ -403,9 +409,10 @@ func TestToolMarkupNeverReachesChat(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, corrupt)
 	b := newBot(t, fc, rt)
-	b.mu.Lock()
-	b.main = sess
-	b.mu.Unlock()
+	c := tconv(b)
+	c.mu.Lock()
+	c.main = sess
+	c.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -413,9 +420,9 @@ func TestToolMarkupNeverReachesChat(t *testing.T) {
 
 	sess.NotifyText("tick")
 	waitFor(t, func() bool {
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		return !b.turnActive && !sess.HasQueuedInput()
+		tconv(b).mu.Lock()
+		defer tconv(b).mu.Unlock()
+		return !tconv(b).turnActive && !sess.HasQueuedInput()
 	})
 	if texts := fc.sentTexts(); len(texts) != 0 {
 		t.Fatalf("corrupt report reply must post nothing, got %v", texts)

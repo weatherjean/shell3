@@ -396,28 +396,68 @@ refuse as "nothing to compact" across the whole range where anyone would ask
 for one. It is a runtime seam with no front-end command bound to it: the bot
 compacts automatically and the dash index reports usage.
 
-**Telegram-first.** shell3 is a personal agent you reach in one Telegram chat.
-`shell3 telegram` runs everything (`internal/telegram`): the agent, the bot,
-and cron. The chat has **no listener** — the process long-polls the Bot API
-outbound, so there is no login and no tunnel; the ONE listener is the
-read-only web dash on `127.0.0.1:<dash_port>` (see the commands section). The `telegram:` block in
-the kit wiring is `token` (an `env:TELEGRAM_TOKEN` reference like every other
-secret), `chat_id` (the single chat the bot answers — updates from anywhere
-else are dropped before a turn starts, filtered in `handleMsg`),
-`allow_from` (the Telegram
-user ids allowed to DRIVE the agent — `internal/telegram/authz.go`: chat_id
-says WHERE the bot talks, allow_from says WHO it obeys, and in a group those
-differ. Unset = the chat_id owner alone, which is the historical single-DM
-behaviour since a DM's chat id IS its user id. Decided on `Msg.SenderID`,
-populated by Telegram and unspoofable, and checked BEFORE the command branch —
-privacy mode delivers `/commands` from every group member, so a gate on the
-turn path alone would still let a stranger `/stop` a turn or `/new` the
-conversation away. A zero sender — channel post, or a transport that cannot
-attribute — is never allowed; a non-numeric entry fails startup), and
-`workdir` (the agent's shell; default = the config dir). Missing
-token or chat_id, or a non-numeric chat_id, refuses to start — naming the
-field at fault, and `shell3 health` fails on the same check (an absent
-`telegram:` block is reported, not failed: an `ask`-only config is legitimate). The transport is an
+**Telegram-first.** shell3 is a personal agent you reach in Telegram — one
+chat or several, each holding its OWN conversation. `shell3 telegram` runs
+everything (`internal/telegram`): the agent, the bot, and cron. The chat has
+**no listener** — the process long-polls the Bot API outbound, so there is no
+login and no tunnel; the ONE listener is the read-only web dash on
+`127.0.0.1:<dash_port>` (see the commands section).
+
+Authorization is per PERSON, never per room. Two gates run on the update loop
+before anything happens (`handleMsg`), in this order: the SENDER must be
+allowlisted, and in a GROUP the message must be ADDRESSED to the bot. The
+sender check comes first — before the room is even resolved — so a stranger
+never enrols a chat, never saves an attachment, and never costs a token,
+whichever chat they are in; it also comes before the command branch, since
+Telegram delivers `/commands` from every group member and a gate on the turn
+path alone would let a stranger `/stop` a turn or `/new` a conversation away.
+The trigger gate (`trigger.go`) accepts `/ask <message>`, an `@mention` of
+this bot (case-insensitive, boundary-checked, so `@mybottom` is not `@mybot`)
+or a REPLY to one of the bot's own messages; everything else in a group is
+dropped before `saveAttachments`. A reply is decided from TELEGRAM's author
+field (`Msg.ReplyToBot`, set from `ReplyToMessage.From.ID` against the cached
+getMe id), not from what this process remembers sending: the in-memory ring
+(`sentIDsCap` 200, kept as the fallback for the console and JSONL transports,
+which cannot attribute a replied-to message) is EMPTY after a restart, so a
+group whose only live trigger was "reply to me" went deaf on every reboot
+until someone @mentioned it again. `/ask` exists because privacy mode never
+delivers a plain @mention: it opens a thread with no BotFather toggle and no
+admin rights, and the bot's own answer is then a message to reply to. `/help`
+explains all of this in-chat, adapting to whether it was typed in a group or
+a DM. A DM needs no trigger. **This requires privacy mode OFF in
+BotFather** (or the bot promoted admin): a privacy-mode bot is never delivered
+a plain `@bot do X` text message at all — only `/cmd@thisbot`, replies to
+itself, and inline — so supporting @mention triggers moves enforcement from
+Telegram's servers into shell3's own gate, and the room's traffic reaches this
+process to be discarded here. A command carrying ANOTHER bot's suffix
+(`/stop@otherbot`) is ignored rather than obeyed, and an unknown verb in a
+group is answered with silence (someone is talking to a different bot), not
+with "unknown command".
+
+Rooms are not declared and not listed: a chat becomes known the first time an
+allowlisted person addresses the bot there (`Bot.conv`, created only after
+both gates pass — `peekConv` is what routing uses before that, so chatter that
+never reaches a turn leaves no phantom room in the registry, the inbox, or the
+dash).
+
+The `telegram:` block in the kit wiring is `token` (an `env:TELEGRAM_TOKEN`
+reference like every other secret), `chat_id` (the **home chat**: where cron
+results and ownerless completions land — NOT an access rule; absent, it falls
+back to the DM of the first `allow_from` id, which only delivers once that
+person has written to the bot, so `shell3 health` warns), `allow_from` (the
+Telegram user ids allowed to DRIVE the agent — `internal/telegram/authz.go`;
+decided on `Msg.SenderID`, populated by Telegram and unspoofable. A zero
+sender — channel post, or a transport that cannot attribute — is never
+allowed; a non-numeric entry fails startup), `max_concurrent_turns` (the
+global turn cap, default 4), `workdir` (the agent's shell; default = the
+config dir), and `chats:` (per-room settings — `id`, `use_description`,
+`context:` — tuning only: declaring a chat neither authorizes nor enrols it).
+Missing token, a non-numeric chat_id, or a GROUP chat_id with an empty
+`allow_from` (the allowlist's owner fallback would then resolve to nobody, and
+the bot would start healthy and ignore every human) refuses to start — naming
+the field at fault, and `shell3 health` fails on the same checks (an absent
+`telegram:` block is reported, not failed: an `ask`-only config is
+legitimate). The transport is an
 interface (`client.go`): `client_botapi.go` wraps go-telegram/bot,
 `client_console.go` drives the same bot loop over stdin/stdout for
 `shell3 telegram --console` (headless event testing, no credentials, no
@@ -437,24 +477,80 @@ rejections. At startup the host registers the `/` command menu
 (`BotCommands`), clears any menu button an older build left behind, and greets
 the chat.
 
-The turn model is **one conversation**: the bot holds ONE long-lived main
-session that every message — bare or reply — continues. A Telegram reply is a
-context hint (the quoted text is injected as a capped blockquote,
-`withReplyContext`), never a session switch; `/new` is the only way to start
-over (old conversation stays in the dash's runs listing and the history
-index). The current
-session id persists in the runs store's `threads` table, one row per surface
-("telegram"/"serve") and nothing else in it
-(`runs.SetCurrentSession`/`CurrentSession`, reached through
-`telegram.ThreadIndex.SetCurrent`/`Current` — store resolved per call
-so a /reload generation swap never leaves the marker on a closed handle), so
-a restart resumes the same conversation (`mainSession`, falling back to a
-fresh session when the marker is absent or swept). The session never retires;
-host-managed compaction keeps its context bounded. Exactly one main-agent
-turn runs at a time (a turn slot in `bot.go`); sending always succeeds — a
-message arriving mid-turn queues silently (`mailQueue`) and the WHOLE backlog
-drains as one batch turn (it is all the same conversation), anchored at the
-newest message. A TEXT message arriving mid-turn STEERS the running turn —
+The turn model is **one conversation per chat**: each room holds ONE
+long-lived session that every message in that room — bare or reply —
+continues. All of a room's turn state lives on `conversation`
+(`conversation.go`: session, anchors, queues, burst, turn slot), and `Bot`
+keeps the registry plus the process-wide wiring; `b.mu` guards the registry,
+`c.mu` the room, and the lock order is c.mu then b.mu, never the reverse. A
+Telegram reply is a context hint (the quoted text is injected as a capped
+blockquote, `withReplyContext`) and, in a group, a trigger — never a session
+switch; `/new` resets only the room it was typed in (old conversation stays in
+the dash's runs listing and the history index). Each room's current session id
+persists in the runs store's `threads` table under its OWN surface,
+`"<host>:<chatid>"` (`TelegramSurface`, `roomSurface` — the host prefix comes
+from the front-end's own index, so telegram and serve never cross-resolve),
+which is what makes a restart resume every room instead of merging them. The
+bare `"telegram"` key an older build wrote is not read: an upgrade costs one
+conversation reset, per the no-backwards-compat rule. Sessions never retire;
+host-managed compaction keeps each room's context bounded.
+
+Turns run CONCURRENTLY, one slot per room, under a global cap
+(`telegram.max_concurrent_turns`, default 4; `claimTurn`/`freeTurn`). Sending
+always succeeds — a message arriving while its room is busy, or while the cap
+is full, queues (`mailQueue`) and the WHOLE backlog drains as one batch turn.
+The cap is why every turn end runs `startNextWorkAll`, a sweep over EVERY
+room rather than just the finishing one: a message queued because the cap was
+full has no event of its own coming, and freeing a slot is the only signal it
+will ever get. `/reload` swaps the Parts all rooms share, so it takes a global
+latch (`beginReload`) and is refused while ANY room is mid-turn. All rooms
+also share ONE working directory, so two rooms can run bash in the same tree
+at once; the mitigation is the `status` tool's `rooms:` section plus a line in
+the scaffold prompt, and it is ADVISORY — a check-then-act race remains, and
+real isolation would be a per-room `workdir:` or a lock in the gate.
+
+Each room gets its own **prompt brief** (`roombrief.go`), injected into that
+room's system prompt through `SessionOpts.PromptSuffix` →
+`chat.Config.PromptSuffix` → `renderSystemPrompt`. It is a CLOSURE, not a
+string, for the same reason `RefreshPrompt` is: the prompt is re-rendered
+every turn, so a group description edited mid-conversation lands on the next
+turn instead of the next restart. Three layers by trust: the chat TITLE
+(orientation); the group DESCRIPTION, delimited in `<group-description>` and
+labelled as member-written context rather than instruction (a group ADMIN can
+edit it and need not be allowlisted — accepted risk, the operator's call when
+they hand out admin; `use_description: false` per room opts out; capped at
+`briefDescriptionCap` 4 KB since it is fixed overhead on every turn there);
+and operator-declared `context:` files read through the ordinary
+`config.ResolveContextFiles` (64 KB cap, middle elision). NOTE, undocumented in the Bot API and
+established live: Telegram serves a group's `description` only to a bot that
+can see group info. A default-restricted bot ("has no access to messages")
+gets the TITLE and an empty description; promoting the same bot to admin in
+the same basic group returns it immediately (observed `description_bytes=0`
+then `66` across a promotion, same chat, same code). The Bot API's own field
+row says only "Description, for groups, supergroups and channel chats" and
+mentions no rights requirement, so treat the log line as the diagnostic:
+`refreshChatMeta` records title and description length exactly so a
+silently-absent brief is distinguishable from a chat that has none — the two
+have different fixes and neither is guessable from the prompt.
+
+Converting a group to a supergroup — a legitimate thing an operator may do
+for unrelated reasons, and IRREVERSIBLE — CHANGES its chat id, which
+`Bot.migrateRoom` handles: Telegram's `migrate_to_chat_id` service message
+(no sender, so it is checked BEFORE the sender gate) carries the room's
+session to the new id, re-persists its marker under the new surface, clears
+the old one, and drops the cached metadata. Chat metadata is
+cached (`briefRefresh` 15 min) and refreshed WITHOUT blocking the turn:
+`brief()` runs inside prompt rendering, so a stale entry is served as-is
+while one background `getChat` per room (`metaInflight`) refreshes it, and
+only a room whose metadata is unknown ENTIRELY fetches synchronously — there
+is nothing to serve then, and a room's first turn should know its own name.
+Every lookup is bounded (`chatMetaLookupTimeout` 5s) and a failure keeps the
+last known values without re-stamping the cache, so the next call retries
+rather than serving a failure for the whole interval. `/reload` refreshes
+every room synchronously (`refreshAllChatMeta`): it is off the turn path, and
+an operator who just renamed a room expects the next turn to know it.
+
+A TEXT message arriving mid-turn STEERS the running turnA TEXT message arriving mid-turn STEERS the running turn —
 injected at the next round boundary via `chat.Session.Interject`
 (`dispatchMail`); a steer landing after the final boundary is answered by
 `startSteerCatchup`'s own POSTED turn (`chat.Session.HasSteer` /
@@ -464,8 +560,10 @@ arriving mid-turn waits for the next turn rather than injecting a path
 mid-flight. Inbound text
 rides a 400ms debounce (`burstWindow`, `b.debounce` in tests) merging
 Telegram's split-message fragments into one turn. `Bot.Inbox()` renders the
-queued state — the user's pending messages plus waiting task reports — with
-zero tokens, surfaced as the dash index's Inbox section. During a user turn the bot renders tool activity as ONE
+queued state of EVERY room — each room's pending messages plus waiting task
+reports — with zero tokens, surfaced as the dash index's Inbox section beside
+a Rooms table (`render.RoomsSectionHTML`, one row per live room linked to its
+own transcript). During a user turn the bot renders tool activity as ONE
 self-editing **progress bubble** (`progress.go`: posted silently on the
 first ToolCall, edits throttled at 1.5s, last 6 lines shown, one-line
 tool summaries) that is DELETED after a clean turn and kept as a
@@ -640,6 +738,29 @@ dispatches a session at all, so it can never have a `CronRollup` row; that
 absence is a KNOWN zero, not missing data, and renders as `0 tok/Nd run`
 rather than vanishing like a genuinely unknown agent-job figure would.
 
+Every turn's SYSTEM PROMPT is recorded too (`internal/runs/prompts.go`,
+schema v10: `prompts(hash, text)` + `turn_prompts(session_id, seq, hash,
+ts)`). Without it a stored conversation held what the model SAID and never
+what it was TOLD, which makes the commonest question — "why did it think
+that?" — unanswerable once the turn ended; shell3's prompt is assembled from
+files that change under a live conversation (memory, `context:` files, the
+skills index, a Telegram room's description), so "what was in the prompt at
+10:33" is a real question. Storage is content-addressed and CHANGE-only: the
+prompt is re-rendered every turn but changes rarely, so an untouched
+conversation stores ONE body plus one tiny reference, and an identical prompt
+in two sessions is stored once. `chat.recordTurnPrompt` writes it from
+`assembleTurnContext`, best-effort (a failed write is logged, never fatal —
+a debugging record must not cost the user an answer). It is deliberately NOT
+in the FTS index (a 20 KB prompt would swamp every history query with matches
+from the machinery), and `deleteSessions` drops a session's references then
+collects bodies nothing points at any more. The dash's run replay folds each
+version in at the message it took effect from. This is a WRITE-side record
+only: it changes not one byte of what is sent, so it cannot affect prompt
+caching — and nothing in the prompt varies per turn (`kitPrompt` is authored
+body + skills index + `context:` files; the Environment block with the
+session id is a standing reminder, not part of it), so the steady state is
+byte-identical every turn and the provider's cache holds.
+
 Sessions, messages, reminders, and every surface's current-conversation
 marker live in **one SQLite database** (`internal/runs`, modernc.org/sqlite —
 pure Go, no cgo): `.shell3_project/shell3.db`, with an FTS5 index over
@@ -675,6 +796,22 @@ regular files in the media dir past the cutoff — chat uploads and anything
 a wrapper script saved there, since none are distinguished from each other
 by the sweep. A swept file's stored path in an old transcript no longer
 resolves.
+
+The scaffold ships a `self-knowledge` skill (`internal/scaffold/defaults/
+base/skills/self-knowledge.md`, pinned by `internal/scaffold`'s test): the
+agent runs inside a Go binary whose source is not on the machine, so every
+question about its own runtime is either answerable from live state or not
+answerable at all, and the failure mode without the skill is a confident
+invention the user cannot check. It is introspection-first by design — a
+table mapping questions to the command that answers them (`status`, `rg` over
+the kit, the `history` tool, the `turn_prompts` table) — and states only the
+invariants that cannot be introspected: one conversation per chat, the group
+trigger rules, that unaddressed group messages never reach the model at all,
+mail/completion routing, compaction, the gate. Observed live before it
+existed: asked whether an @mention gives it the room's recent history, the
+agent answered "I'd have to check the wiring", and a message sent 60 seconds
+earlier in the same room was invisible to it — the right answer, reached by
+hedging rather than by knowing.
 
 `shell3 boot` scaffolds the config tree (an interactive form: model, vision —
 which wires only the `media` tool (`read_media`) into agent frontmatter, no

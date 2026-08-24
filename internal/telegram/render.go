@@ -26,7 +26,7 @@ const tgMaxMessage = 4000
 // that has nothing to say stays silent even when its provider hiccuped —
 // otherwise every flaky cron wake posts ✉️ ⚠️ noise). Channel close is the
 // authoritative end-of-turn signal.
-func (b *Bot) drainTurn(ch <-chan shell3.Event, narrationFallback bool) (reply, errText string) {
+func (c *conversation) drainTurn(ch <-chan shell3.Event, narrationFallback bool) (reply, errText string) {
 	var seg strings.Builder // current assistant segment
 	var last string         // last non-empty completed segment
 	var errs strings.Builder
@@ -107,17 +107,21 @@ func chunk(s string) []string {
 
 // sendReply posts text to the chat, chunked and unthreaded. Used for notices
 // (errors, acks, media captions) that are not a thread's turn reply.
-func (b *Bot) sendReply(ctx context.Context, text string, opts ...SendOpt) {
+func (c *conversation) sendReply(ctx context.Context, text string, opts ...SendOpt) {
 	if text == "" {
 		text = "(no output)"
 	}
-	for _, c := range chunk(text) {
+	for _, part := range chunk(text) {
 		// Render the agent's Markdown to Telegram-safe HTML so bold/italics/code
 		// show up. If Telegram still rejects it, fall back to the raw text.
-		html := mdhtml.ToTelegramHTML(c)
-		if _, err := b.client.SendHTML(ctx, b.chatID, html, opts...); err != nil {
-			_, _ = b.client.Send(ctx, b.chatID, c, opts...)
+		html := mdhtml.ToTelegramHTML(part)
+		id, err := c.b.client.SendHTML(ctx, c.chatID, html, opts...)
+		if err != nil {
+			id, _ = c.b.client.Send(ctx, c.chatID, part, opts...)
 		}
+		// A notice is still a message from the bot: remembering its id lets a
+		// user reply to it in a group instead of retyping an @mention.
+		c.rememberSent(id)
 	}
 }
 
@@ -131,21 +135,21 @@ func (b *Bot) sendReply(ctx context.Context, text string, opts ...SendOpt) {
 // chat stays readable and the phone gets one ping, not twenty-five.
 const replyMaxChunks = 2
 
-func (b *Bot) postReply(ctx context.Context, sess *shell3.Session, replyTo string, text string, opts ...SendOpt) {
+func (c *conversation) postReply(ctx context.Context, sess *shell3.Session, replyTo string, text string, opts ...SendOpt) {
 	if text == "" {
 		text = "(no output)"
 	}
 	chunks := chunk(text)
 	if len(chunks) > replyMaxChunks {
-		_ = b.postChunk(ctx, sess, replyTo, chunks[0], opts...)
-		if id, err := b.client.SendDocument(ctx, b.chatID, "reply.md", []byte(text), "full reply", opts...); err == nil {
-			b.recordSent(sess, id)
+		_ = c.postChunk(ctx, sess, replyTo, chunks[0], opts...)
+		if id, err := c.b.client.SendDocument(ctx, c.chatID, "reply.md", []byte(text), "full reply", opts...); err == nil {
+			c.recordSent(sess, id)
 			return
 		}
 		chunks = chunks[1:] // document failed: degrade to posting the rest
 	}
-	for _, c := range chunks {
-		_ = b.postChunk(ctx, sess, replyTo, c, opts...)
+	for _, part := range chunks {
+		_ = c.postChunk(ctx, sess, replyTo, part, opts...)
 	}
 }
 
@@ -154,29 +158,36 @@ func (b *Bot) postReply(ctx context.Context, sess *shell3.Session, replyTo strin
 // neither rendering reached the transport, i.e. the chunk was not delivered.
 // Most callers ignore it (a turn reply has no redelivery path); the
 // completion router uses it to keep an undelivered post's outbox row.
-func (b *Bot) postChunk(ctx context.Context, sess *shell3.Session, replyTo string, c string, opts ...SendOpt) error {
-	html := mdhtml.ToTelegramHTML(c)
+func (c *conversation) postChunk(ctx context.Context, sess *shell3.Session, replyTo string, part string, opts ...SendOpt) error {
+	html := mdhtml.ToTelegramHTML(part)
 	var id string
 	var err error
 	if replyTo != "" {
-		if id, err = b.client.SendHTMLReply(ctx, b.chatID, html, replyTo, opts...); err != nil {
-			id, err = b.client.SendReply(ctx, b.chatID, c, replyTo, opts...)
+		if id, err = c.b.client.SendHTMLReply(ctx, c.chatID, html, replyTo, opts...); err != nil {
+			id, err = c.b.client.SendReply(ctx, c.chatID, part, replyTo, opts...)
 		}
 	} else {
-		if id, err = b.client.SendHTML(ctx, b.chatID, html, opts...); err != nil {
-			id, err = b.client.Send(ctx, b.chatID, c, opts...)
+		if id, err = c.b.client.SendHTML(ctx, c.chatID, html, opts...); err != nil {
+			id, err = c.b.client.Send(ctx, c.chatID, part, opts...)
 		}
 	}
-	b.recordSent(sess, id)
+	c.recordSent(sess, id)
 	return err
 }
 
 // recordSent advances the conversation's anchor to a message the bot just
 // sent, so agent mail and completion posts thread onto the latest message.
 // No-op for a failed send.
-func (b *Bot) recordSent(sess *shell3.Session, msgID string) {
-	if sess == nil || msgID == "" {
+func (c *conversation) recordSent(sess *shell3.Session, msgID string) {
+	if msgID == "" {
 		return
 	}
-	b.setAnchor(msgID)
+	// Remember the id whatever the session: in a group, a REPLY to one of the
+	// bot's own messages is how a user says "this is for you" without typing
+	// an @mention, and trigger.go answers that question from this ring.
+	c.rememberSent(msgID)
+	if sess == nil {
+		return
+	}
+	c.setAnchor(msgID)
 }

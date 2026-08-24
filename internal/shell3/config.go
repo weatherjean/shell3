@@ -24,6 +24,7 @@ func sessionConfigFrom(parts *agentsetup.Parts) func(SessionOpts) (chat.Config, 
 	return func(o SessionOpts) (chat.Config, error) {
 		return parts.SessionConfig(agentsetup.SessionOptions{
 			Agent: o.Agent, WorkDir: o.WorkDir, Headless: o.Headless, OutPath: o.OutPath,
+			PromptSuffix: o.PromptSuffix,
 		})
 	}
 }

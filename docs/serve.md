@@ -39,14 +39,18 @@ Ids are opaque strings. Your inbound messages carry your own ids (Discord
 snowflakes work as-is); if you omit one, the agent assigns it. Outbound
 events carry agent-assigned ids (`a<boot>-<n>`, unique across restarts).
 
-Conversation follows the Telegram model: there is ONE long-lived
-conversation that every `message` continues, whether or not it carries
+Conversation follows the Telegram model: one long-lived conversation per
+CHAT, which every `message` continues whether or not it carries
 `reply_to_id` — a reply's quoted `reply_to` text is injected as context for
-the agent, never a conversation switch. The `/new` command starts a fresh
-conversation; the current session id persists on disk, so a restart resumes
-where it left off.
+the agent, never a conversation switch. A serve front-end that sends
+everything under one chat id therefore behaves exactly as it always did; one
+that stamps distinct chat ids gets one conversation each, isolated the way
+two Telegram groups are. The `/new` command starts a fresh conversation in the
+chat it was sent from; each chat's session id persists on disk, so a restart
+resumes where it left off.
 
-Exactly one turn runs at a time, but sending always succeeds: a `message`
+One turn runs at a time PER CHAT (bounded across chats by
+`telegram.max_concurrent_turns`), but sending always succeeds: a `message`
 arriving mid-turn queues silently and the backlog drains as one batched
 turn after the turn ends, anchored at the newest message.
 

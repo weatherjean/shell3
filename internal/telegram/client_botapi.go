@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-telegram/bot"
@@ -30,6 +31,53 @@ type BotAPIClient struct {
 	out    chan Msg
 	log    applog.Logger
 	health *pollHealth
+
+	// identity caches getMe's answer: the bot's own @username, needed on
+	// every group message to spot an @mention. One lookup per process.
+	identityMu   sync.Mutex
+	username     string
+	selfID       int64
+	usernameSeen bool
+}
+
+// selfIdentity returns this bot's user id, resolving it once. Zero when the
+// lookup has not succeeded yet, which only costs a reply-trigger miss.
+func (c *BotAPIClient) selfIdentity() int64 {
+	c.identityMu.Lock()
+	defer c.identityMu.Unlock()
+	return c.selfID
+}
+
+// Username reports the bot's own @name without the "@", cached after the
+// first successful lookup.
+func (c *BotAPIClient) Username(ctx context.Context) (string, error) {
+	c.identityMu.Lock()
+	if c.usernameSeen {
+		defer c.identityMu.Unlock()
+		return c.username, nil
+	}
+	c.identityMu.Unlock()
+
+	me, err := c.b.GetMe(ctx)
+	if err != nil {
+		return "", err
+	}
+	c.identityMu.Lock()
+	c.username, c.selfID, c.usernameSeen = me.Username, me.ID, true
+	c.identityMu.Unlock()
+	return me.Username, nil
+}
+
+// ChatInfo reports a chat's title and description — the raw material of a
+// room's prompt brief. A private chat has neither in the sense meant here:
+// its "title" is the other party's name and it has no description, so the
+// caller gets what Telegram returns and decides what to use.
+func (c *BotAPIClient) ChatInfo(ctx context.Context, chatID int64) (string, string, error) {
+	ch, err := c.b.GetChat(ctx, &bot.GetChatParams{ChatID: chatID})
+	if err != nil {
+		return "", "", err
+	}
+	return ch.Title, ch.Description, nil
 }
 
 // NewBotAPIClient builds the real Telegram transport. token comes from config
@@ -98,7 +146,22 @@ func (c *BotAPIClient) onUpdate(ctx context.Context, b *bot.Bot, u *models.Updat
 	}
 	m := u.Message
 	msg := normalizeMessage(m)
-	msg.Media = resolveMedia(ctx, c, m)
+	// Whether the replied-to message is ours is decided from Telegram's own
+	// author field, not from what this process remembers sending — the
+	// remembered set is empty after a restart.
+	if r := m.ReplyToMessage; r != nil && r.From != nil {
+		if self := c.selfIdentity(); self != 0 && r.From.ID == self {
+			msg.ReplyToBot = true
+		}
+	}
+	// Attachments are NOT downloaded here: the bot fetches them once the
+	// message has cleared authorization (see Msg.FetchMedia). Under privacy
+	// mode off this is the difference between fetching what was sent to the
+	// agent and fetching every photo in every group it can see.
+	msg.HasMedia = hasAttachment(m)
+	if msg.HasMedia {
+		msg.FetchMedia = func(fctx context.Context) []Media { return resolveMedia(fctx, c, m) }
+	}
 	c.out <- msg
 }
 
@@ -107,7 +170,8 @@ func (c *BotAPIClient) onUpdate(ctx context.Context, b *bot.Bot, u *models.Updat
 // Telegram puts the words of a MEDIA message in Caption, not Text, so a photo
 // sent with "translate this" has an empty Text; the caption is the message.
 func normalizeMessage(m *models.Message) Msg {
-	msg := Msg{ChatID: m.Chat.ID, ID: strconv.Itoa(m.ID), Text: cmp.Or(m.Text, m.Caption), ReplyTo: replyContext(m)}
+	msg := Msg{ChatID: m.Chat.ID, ChatType: string(m.Chat.Type), ID: strconv.Itoa(m.ID),
+		Text: cmp.Or(m.Text, m.Caption), ReplyTo: replyContext(m)}
 	if m.From != nil {
 		// From is set by Telegram, not the client. A channel post has no
 		// From at all, which leaves SenderID 0 and therefore unauthorized.
@@ -116,6 +180,7 @@ func normalizeMessage(m *models.Message) Msg {
 	if r := m.ReplyToMessage; r != nil {
 		msg.ReplyToID = strconv.Itoa(r.ID)
 	}
+	msg.MigratedTo = m.MigrateToChatID
 	return msg
 }
 
@@ -130,6 +195,14 @@ func replyContext(m *models.Message) string {
 		return cmp.Or(r.Text, r.Caption)
 	}
 	return ""
+}
+
+// hasAttachment reports whether m carries any attachment kind resolveMedia
+// knows how to fetch. It is what the routing gates test before the bytes
+// exist.
+func hasAttachment(m *models.Message) bool {
+	return len(m.Photo) > 0 || m.Voice != nil || m.Audio != nil ||
+		m.Video != nil || m.Animation != nil || m.Document != nil
 }
 
 // resolveMedia downloads every attachment on m (photo/voice/audio/video/

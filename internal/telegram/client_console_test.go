@@ -5,6 +5,7 @@ package telegram
 import (
 	"bytes"
 	"context"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -144,5 +145,34 @@ func TestConsole_SilentTag(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "🔕") {
 		t.Fatalf("plain send carries 🔕 tag: %s", out.String())
+	}
+}
+
+// "#<chatid> text" drives another room, so the whole multi-room loop is
+// exercisable by hand with no credentials. The room counts as a group, which
+// means the line must address the bot — same rule as a live group.
+func TestConsoleParseLineRoomPrefix(t *testing.T) {
+	c := NewConsoleClient(strings.NewReader(""), io.Discard, ConsoleChatID)
+	m := c.parseLine("#-100 @shell3console deploy")
+	if m.ChatID != -100 {
+		t.Fatalf("ChatID = %d, want -100", m.ChatID)
+	}
+	if m.ChatType != "supergroup" {
+		t.Fatalf("ChatType = %q, want a group (the trigger gate must apply)", m.ChatType)
+	}
+	if m.Text != "@shell3console deploy" {
+		t.Fatalf("Text = %q", m.Text)
+	}
+
+	// The default chat stays private: no @mention needed at the console.
+	plain := c.parseLine("hello")
+	if plain.ChatID != ConsoleChatID || plain.ChatType != "private" {
+		t.Fatalf("plain line = chat %d type %q, want the default private chat", plain.ChatID, plain.ChatType)
+	}
+
+	// A "#" line that is not "#<id> text" is ordinary text, not a route.
+	notARoom := c.parseLine("#nope still text")
+	if notARoom.ChatID != ConsoleChatID || notARoom.Text != "#nope still text" {
+		t.Fatalf("unparseable room prefix = chat %d text %q, want it left alone", notARoom.ChatID, notARoom.Text)
 	}
 }

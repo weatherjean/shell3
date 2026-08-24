@@ -167,6 +167,23 @@ wiring block as `env:TELEGRAM_TOKEN` like every other secret; both fields may
 be left blank and filled in later. Secrets echo visibly, so you can see that a
 paste landed intact.
 
+**To use the bot in groups**, turn privacy mode OFF in @BotFather
+(`/setprivacy` → your bot → Disable) or promote the bot to admin in each
+group. Telegram does not deliver a plain `@yourbot do X` message to a
+privacy-mode bot at all, so the @mention trigger cannot work without it. With
+privacy off the group's messages reach shell3, which answers only the ones
+addressed to it by someone on `allow_from` and discards the rest. List the
+user ids that may drive the agent in `telegram.allow_from` — in a group the
+chat id is not a user id, so without it nobody is allowed and shell3 refuses
+to start.
+
+Without any BotFather change, `/ask <message>` opens a thread in a group and
+plain replies to the bot continue it; that is the zero-setup path. Promoting
+the bot to admin in a group buys two things: plain @mentions work, and the
+bot can read that group's description, which becomes standing context for the
+room. Both are optional — see
+[configuration.md](configuration.md#telegram--telegram).
+
 boot installs nothing and exposes nothing: it configures shell3 and stops
 there. Its closing note says as much, and points at
 [deploying.md](deploying.md) for running the bot as a service.

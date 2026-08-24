@@ -72,7 +72,7 @@ func (s *Store) Close() error {
 // prunes any threads row whose session_id doesn't name a live session — so a
 // job name or a JSON blob in that column would be deleted by the very next
 // startup's janitor pass, before it could be read back.
-const schemaVersion = 9
+const schemaVersion = 10
 
 // openDB opens path, applying the schema fresh or recreating the file
 // outright when its stamped version doesn't match schemaVersion. Per the
@@ -320,6 +320,17 @@ CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
 CREATE TABLE IF NOT EXISTS cron_status (
 	name TEXT PRIMARY KEY,
 	json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS prompts (
+	hash TEXT PRIMARY KEY,
+	text TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS turn_prompts (
+	session_id TEXT    NOT NULL,
+	seq        INTEGER NOT NULL,
+	hash       TEXT    NOT NULL,
+	ts         TEXT    NOT NULL,
+	PRIMARY KEY (session_id, seq)
 );
 CREATE TABLE IF NOT EXISTS outbox (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,

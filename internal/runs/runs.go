@@ -335,6 +335,7 @@ func (s *Store) deleteSessions(ids []string) error {
 			`DELETE FROM messages WHERE session_id=?`,
 			`DELETE FROM messages_fts WHERE session_id=?`,
 			`DELETE FROM reminders WHERE session_id=?`,
+			`DELETE FROM turn_prompts WHERE session_id=?`,
 			`DELETE FROM threads WHERE session_id=?`,
 			`DELETE FROM sessions WHERE id=?`,
 		} {
@@ -342,6 +343,13 @@ func (s *Store) deleteSessions(ids []string) error {
 				return fmt.Errorf("runs: delete session %s: %w", id, err)
 			}
 		}
+	}
+	// Prompt bodies are shared between sessions (an unchanged prompt is one
+	// row however many conversations used it), so they are collected once the
+	// last reference is gone rather than deleted per session.
+	if _, err := tx.Exec(
+		`DELETE FROM prompts WHERE hash NOT IN (SELECT hash FROM turn_prompts)`); err != nil {
+		return fmt.Errorf("runs: collect prompts: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("runs: delete sessions: %w", err)

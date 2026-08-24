@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -49,6 +50,27 @@ type yamlTelegram struct {
 	ChatID    string   `yaml:"chat_id"`
 	WorkDir   string   `yaml:"workdir"`
 	AllowFrom []string `yaml:"allow_from"`
+	// MaxConcurrentTurns bounds how many chats may run a turn at once. Rooms
+	// are independent conversations, so without a cap N rooms speaking at
+	// once fan out N concurrent agents against one provider account.
+	MaxConcurrentTurns int `yaml:"max_concurrent_turns"`
+	// Chats is per-ROOM configuration. Declaring a chat here does not
+	// authorize it and is not required to use it — rooms are enrolled by an
+	// allowlisted person speaking in them. This block only tunes rooms that
+	// need something other than the defaults.
+	Chats []yamlChat `yaml:"chats"`
+}
+
+// yamlChat is one entry of the `chats:` block: per-room configuration for a
+// Telegram chat. A room with no entry takes the defaults, which is the normal
+// case — rooms are enrolled by being used, never by being declared here.
+type yamlChat struct {
+	ID string `yaml:"id"`
+	// UseDescription is a pointer so "unset" is distinguishable from
+	// "false": unset means the default (ON), and only an explicit false
+	// suppresses the group-description brief.
+	UseDescription *bool    `yaml:"use_description"`
+	Context        []string `yaml:"context"`
 }
 
 type yamlMCP struct {
@@ -78,6 +100,7 @@ var yamlTypeNames = map[string]string{
 	"yamlFile":       "the shell3: block",
 	"yamlModel":      "a models: entry",
 	"yamlTelegram":   "the telegram: block",
+	"yamlChat":       "a telegram.chats: entry",
 	"yamlMCP":        "an mcp: server",
 	"yamlBackground": "the background: block",
 }
@@ -147,7 +170,21 @@ func (c *LoadedConfig) parseYAML(data []byte, secrets map[string]string) error {
 		})
 	}
 	if tc := f.Telegram; tc != nil {
-		c.telegram = TelegramConfig{Present: true, Token: tc.Token, ChatID: tc.ChatID, WorkDir: tc.WorkDir, AllowFrom: tc.AllowFrom}
+		chats := make([]ChatConfig, 0, len(tc.Chats))
+		for _, ch := range tc.Chats {
+			id := strings.TrimSpace(ch.ID)
+			if id == "" {
+				return fmt.Errorf(wiringLabel + ": telegram.chats entry has no id")
+			}
+			if _, err := strconv.ParseInt(id, 10, 64); err != nil {
+				// A chats: entry keyed on something that is not a chat id can
+				// never match a room, so it would silently do nothing.
+				return fmt.Errorf(wiringLabel+": telegram.chats id %q is not a number", id)
+			}
+			chats = append(chats, ChatConfig{ID: id, UseDescription: ch.UseDescription, Context: ch.Context})
+		}
+		c.telegram = TelegramConfig{Present: true, Token: tc.Token, ChatID: tc.ChatID, WorkDir: tc.WorkDir,
+			AllowFrom: tc.AllowFrom, MaxConcurrentTurns: tc.MaxConcurrentTurns, Chats: chats}
 	}
 	for _, name := range slices.Sorted(maps.Keys(f.MCP)) {
 		s := f.MCP[name]

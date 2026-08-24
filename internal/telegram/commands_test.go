@@ -18,7 +18,7 @@ func TestCommand_Run(t *testing.T) {
 	b := newBot(t, fc, rt)
 	fired := ""
 	b.SetJobRunner(func(name string) error { fired = name; return nil })
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/run nightly"})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/run nightly"})
 	if fired != "nightly" {
 		t.Fatalf("expected /run to fire job 'nightly', fired %q", fired)
 	}
@@ -31,7 +31,7 @@ func TestCommand_RunNoRunner(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/run x"})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/run x"})
 	if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "no scheduled jobs") {
 		t.Fatalf("expected a no-jobs reply, got %v", fc.sentTexts())
 	}
@@ -47,7 +47,7 @@ func TestCommand_RunMissingArg(t *testing.T) {
 	called := false
 	b.SetJobRunner(func(name string) error { called = true; return nil })
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/run"})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/run"})
 	if called {
 		t.Fatal("run must not be invoked with no job name")
 	}
@@ -66,7 +66,7 @@ func TestCommand_Reload(t *testing.T) {
 		called = true
 		return shell3.ReloadResult{Agents: 3, Jobs: 1}, nil
 	})
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/reload"})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/reload"})
 	if !called {
 		t.Fatal("expected /reload to invoke the reloader")
 	}
@@ -79,7 +79,7 @@ func TestCommand_ReloadNoReloader(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/reload"})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/reload"})
 	if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "reload not available") {
 		t.Fatalf("expected unavailable reply, got %v", fc.sentTexts())
 	}
@@ -91,7 +91,7 @@ func TestCommand_UnknownDropped(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/clear"})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/clear"})
 	if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "unknown command") {
 		t.Fatalf("expected /clear to be an unknown command now, got %v", fc.sentTexts())
 	}
@@ -103,7 +103,7 @@ func TestViewCommandsRemoved(t *testing.T) {
 		fc := newFakeClient()
 		rt, _ := newFakeRuntime(t, "ok")
 		b := newBot(t, fc, rt)
-		b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: cmd})
+		tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: cmd})
 		if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "unknown command") {
 			t.Errorf("%s: expected unknown command, got %v", cmd, fc.sentTexts())
 		}
@@ -137,7 +137,7 @@ func TestDashCommand_Disabled(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/dash"})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/dash"})
 	if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "not running") {
 		t.Fatalf("expected the disabled explanation, got %v", fc.sentTexts())
 	}
@@ -149,7 +149,7 @@ func TestDashCommand_MintsURL(t *testing.T) {
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
 	b.SetDash(func() (string, error) { return "http://127.0.0.1:7333/?t=abc123", nil })
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/dash"})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/dash"})
 	all := strings.Join(fc.sentTexts(), "\n")
 	if !strings.Contains(all, "http://127.0.0.1:7333/?t=abc123") || !strings.Contains(all, "~1h") {
 		t.Fatalf("expected the tokened URL + TTL hint, got %v", fc.sentTexts())
@@ -162,7 +162,7 @@ func TestDashCommand_ArgBecomesAgentTurn(t *testing.T) {
 	fc := newFakeClient()
 	rt := storeRuntime(t, "tunnel is up")
 	b := newBot(t, fc, rt)
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/dash help exposing"})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/dash help exposing"})
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "tunnel is up")
 	})
@@ -173,7 +173,7 @@ func TestSuperstop_NothingRunning(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/superstop"})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/superstop"})
 	if !strings.Contains(strings.Join(fc.sentTexts(), "\n"), "nothing was running") {
 		t.Fatalf("expected the idle reply, got %v", fc.sentTexts())
 	}
@@ -186,7 +186,7 @@ func TestSuperstop_KillsJobsAndSummarizes(t *testing.T) {
 	blocking := fakellm.NewBlocking()
 	rt := storeRuntimeClient(t, blocking)
 	b := newBot(t, fc, rt)
-	sess, err := b.mainSession()
+	sess, err := tconv(b).mainSession()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestSuperstop_KillsJobsAndSummarizes(t *testing.T) {
 		}
 		return false
 	})
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/superstop"})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/superstop"})
 	all := strings.Join(fc.sentTexts(), "\n")
 	if !strings.Contains(all, "superstop") || !strings.Contains(all, id) {
 		t.Fatalf("expected one summary naming %s, got %v", id, fc.sentTexts())
@@ -224,7 +224,7 @@ func TestCommand_BotnameSuffixIsStripped(t *testing.T) {
 	fc := newFakeClient()
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/reload@my_shell3_bot"})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/reload@my_shell3_bot"})
 	joined := strings.Join(fc.sentTexts(), "\n")
 	if strings.Contains(joined, "unknown command") {
 		t.Fatalf("/reload@botname must route to /reload, got %v", fc.sentTexts())
@@ -242,12 +242,12 @@ func TestQuietCommand(t *testing.T) {
 	b.SetQuiet(qs)
 	ctx := context.Background()
 
-	b.handleCommand(ctx, Msg{ChatID: 42, SenderID: 42, Text: "/quiet"})
+	tconv(b).handleCommand(ctx, Msg{ChatID: 42, SenderID: 42, Text: "/quiet"})
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "quiet is off")
 	})
 
-	b.handleCommand(ctx, Msg{ChatID: 42, SenderID: 42, Text: "/quiet on"})
+	tconv(b).handleCommand(ctx, Msg{ChatID: 42, SenderID: 42, Text: "/quiet on"})
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "quiet is on")
 	})
@@ -255,7 +255,7 @@ func TestQuietCommand(t *testing.T) {
 		t.Error("/quiet on did not persist")
 	}
 
-	b.handleCommand(ctx, Msg{ChatID: 42, SenderID: 42, Text: "/quiet off"})
+	tconv(b).handleCommand(ctx, Msg{ChatID: 42, SenderID: 42, Text: "/quiet off"})
 	waitFor(t, func() bool {
 		return strings.Count(strings.Join(fc.sentTexts(), "\n"), "quiet is off") >= 2
 	})
@@ -263,7 +263,7 @@ func TestQuietCommand(t *testing.T) {
 		t.Error("/quiet off did not persist")
 	}
 
-	b.handleCommand(ctx, Msg{ChatID: 42, SenderID: 42, Text: "/quiet sideways"})
+	tconv(b).handleCommand(ctx, Msg{ChatID: 42, SenderID: 42, Text: "/quiet sideways"})
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "usage: /quiet on|off")
 	})
@@ -280,7 +280,7 @@ func TestDashCommand_WarnsOnNonLoopbackHost(t *testing.T) {
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
 	b.SetDash(func() (string, error) { return "http://evil.example.com/?t=abc", nil })
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/dash"})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/dash"})
 	all := strings.Join(fc.sentTexts(), "\n")
 	if !strings.Contains(all, "evil.example.com") || !strings.Contains(all, "not this machine") {
 		t.Fatalf("expected an off-machine warning, got %v", fc.sentTexts())
@@ -293,7 +293,7 @@ func TestDashCommand_LoopbackNoWarning(t *testing.T) {
 	rt, _ := newFakeRuntime(t, "ok")
 	b := newBot(t, fc, rt)
 	b.SetDash(func() (string, error) { return "http://127.0.0.1:7333/?t=abc", nil })
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/dash"})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/dash"})
 	if strings.Contains(strings.Join(fc.sentTexts(), "\n"), "not this machine") {
 		t.Fatalf("loopback link should not warn, got %v", fc.sentTexts())
 	}

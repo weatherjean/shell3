@@ -32,22 +32,23 @@ func TestStopCancelsInFlightTurn(t *testing.T) {
 
 	// The turn is in flight: turnActive must be true (the loop stayed responsive
 	// because handleMsg ran the turn on its own goroutine).
-	b.mu.Lock()
-	inflight := b.turnActive
-	b.mu.Unlock()
+	c := tconv(b)
+	c.mu.Lock()
+	inflight := c.turnActive
+	c.mu.Unlock()
 	if !inflight {
 		t.Fatal("turnActive is false while a turn is in flight: handleMsg did not mark the turn active on its own goroutine")
 	}
 
 	// /stop runs synchronously on the test goroutine and must return promptly.
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/stop"})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/stop"})
 
 	// The turn must unwind: turnActive clears.
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		b.mu.Lock()
-		active := b.turnActive
-		b.mu.Unlock()
+		c.mu.Lock()
+		active := c.turnActive
+		c.mu.Unlock()
 		if !active {
 			break
 		}

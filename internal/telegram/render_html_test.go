@@ -9,9 +9,9 @@ import (
 
 func TestSendReplyConvertsMarkdownToHTML(t *testing.T) {
 	f := newFakeClient()
-	b := &Bot{client: f, chatID: 1}
+	b := &Bot{client: f, homeChat: 1, convs: map[int64]*conversation{}}
 
-	b.sendReply(context.Background(), "**hi** and `code`")
+	tconv(b).sendReply(context.Background(), "**hi** and `code`")
 
 	got := f.htmlTexts()
 	if len(got) != 1 || got[0] != "<b>hi</b> and <code>code</code>" {
@@ -25,9 +25,9 @@ func TestSendReplyConvertsMarkdownToHTML(t *testing.T) {
 func TestSendReplyFallsBackToPlainOnHTMLError(t *testing.T) {
 	f := newFakeClient()
 	f.failHTML = true
-	b := &Bot{client: f, chatID: 1}
+	b := &Bot{client: f, homeChat: 1, convs: map[int64]*conversation{}}
 
-	b.sendReply(context.Background(), "**hi**")
+	tconv(b).sendReply(context.Background(), "**hi**")
 
 	if plain := f.plainTexts(); len(plain) != 1 || plain[0] != "**hi**" {
 		t.Fatalf("plain fallback = %q, want original markdown", plain)

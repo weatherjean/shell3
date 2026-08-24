@@ -85,6 +85,12 @@ type Config struct {
 	// current file contents instead of a session-creation snapshot. Nil
 	// leaves the prompt frozen at construction.
 	RefreshPrompt func() string
+	// PromptSuffix appends per-SESSION text to the system prompt — a Telegram
+	// room's brief, say. It is a closure, not a string, for the same reason
+	// RefreshPrompt is: the prompt is re-rendered every turn, and a cached
+	// string would freeze the suffix at session creation, so an edit made
+	// mid-conversation would never take effect. Nil appends nothing.
+	PromptSuffix func() string
 	// WorkDir is the working directory for tool execution and error dumps.
 	WorkDir string
 	// StatusLine is the human-readable provider/model/effort line shown by
@@ -225,6 +231,7 @@ func NewTurnConfig(cfg Config, handlers map[string]ToolHandler) TurnConfig {
 		LLM:           cfg.LLM,
 		Personality:   cfg.Personality,
 		RefreshPrompt: cfg.RefreshPrompt,
+		PromptSuffix:  cfg.PromptSuffix,
 		StatusLine:    cfg.StatusLine,
 		ConfigDir:     cfg.ConfigDir,
 		Agent:         cfg.Agent,

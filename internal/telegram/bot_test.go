@@ -77,13 +77,14 @@ func TestContract1_FirstMessageStartsTheConversation(t *testing.T) {
 	if r.replyTo != "100" {
 		t.Fatalf("reply must thread to inbound message 100, got replyTo=%s", r.replyTo)
 	}
-	b.mu.Lock()
-	main := b.main
-	b.mu.Unlock()
+	c := tconv(b)
+	c.mu.Lock()
+	main := c.main
+	c.mu.Unlock()
 	if main == nil {
 		t.Fatal("no main session after the first turn")
 	}
-	if id, ok := b.current.Current(); !ok || id != main.ID() {
+	if id, ok := tconv(b).index.Current(); !ok || id != main.ID() {
 		t.Fatalf("current marker = %q,%v want %q", id, ok, main.ID())
 	}
 }
@@ -100,15 +101,16 @@ func TestContract2_BareMessageContinuesTheConversation(t *testing.T) {
 	if !waitForReply(t, fc, "r") {
 		t.Fatal("first turn produced no reply")
 	}
-	b.mu.Lock()
-	first := b.main.ID()
-	b.mu.Unlock()
+	c := tconv(b)
+	c.mu.Lock()
+	first := c.main.ID()
+	c.mu.Unlock()
 
 	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "101", Text: "yes please"})
 	waitFor(t, func() bool { return len(fc.sentReplies()) >= 2 })
-	b.mu.Lock()
-	got := b.main.ID()
-	b.mu.Unlock()
+	c.mu.Lock()
+	got := c.main.ID()
+	c.mu.Unlock()
 	if got != first {
 		t.Fatalf("bare message forked the conversation: first=%s second=%s", first, got)
 	}
@@ -130,9 +132,10 @@ func TestContract3_ReplyAddsQuotedContext(t *testing.T) {
 	if !waitForReply(t, fc, "one") {
 		t.Fatal("first turn produced no reply")
 	}
-	b.mu.Lock()
-	first := b.main.ID()
-	b.mu.Unlock()
+	c := tconv(b)
+	c.mu.Lock()
+	first := c.main.ID()
+	c.mu.Unlock()
 
 	b.handleMsg(context.Background(), Msg{
 		ChatID: 42, SenderID: 42, ID: "2", ReplyToID: "999", ReplyTo: "QUOTED SNIPPET", Text: "pick up from here",
@@ -140,9 +143,9 @@ func TestContract3_ReplyAddsQuotedContext(t *testing.T) {
 	if !waitForReply(t, fc, "two") {
 		t.Fatal("reply turn produced no reply")
 	}
-	b.mu.Lock()
-	got := b.main.ID()
-	b.mu.Unlock()
+	c.mu.Lock()
+	got := c.main.ID()
+	c.mu.Unlock()
 	if got != first {
 		t.Fatalf("a reply forked the conversation: first=%s second=%s", first, got)
 	}
@@ -171,17 +174,18 @@ func TestContract4_MidTurnTextSteers(t *testing.T) {
 
 	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "2", Text: "stop — wrong file"})
 
-	b.mu.Lock()
-	sess := b.main
-	b.mu.Unlock()
+	c := tconv(b)
+	c.mu.Lock()
+	sess := c.main
+	c.mu.Unlock()
 	if sess == nil {
 		t.Fatal("no main session mid-turn")
 	}
 	waitFor(t, func() bool { return sess.HasQueuedSteer() })
-	b.mu.Lock()
-	queued := len(b.mailQueue)
-	anchor := b.mainAnchor
-	b.mu.Unlock()
+	tconv(b).mu.Lock()
+	queued := len(tconv(b).mailQueue)
+	anchor := tconv(b).mainAnchor
+	tconv(b).mu.Unlock()
 	if queued != 0 {
 		t.Fatalf("steered text must not also queue (mailQueue=%d)", queued)
 	}
@@ -191,7 +195,7 @@ func TestContract4_MidTurnTextSteers(t *testing.T) {
 	if r, ok := fc.lastReply(); ok {
 		t.Fatalf("steering must be silent, got reply %q", r.text)
 	}
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/stop"})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/stop"})
 }
 
 // Contract 4b: a mid-turn message CARRYING MEDIA queues (its preflight needs a
@@ -213,14 +217,15 @@ func TestContract4_MidTurnMediaQueues(t *testing.T) {
 		Media: []Media{{Bytes: []byte("img"), MIME: "image/jpeg", Filename: "x.jpg"}}})
 
 	waitFor(t, func() bool {
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		return len(b.mailQueue) == 1
+		tconv(b).mu.Lock()
+		defer tconv(b).mu.Unlock()
+		return len(tconv(b).mailQueue) == 1
 	})
-	b.mu.Lock()
-	b.mailQueue = nil
-	b.mu.Unlock()
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/stop"})
+	c := tconv(b)
+	c.mu.Lock()
+	c.mailQueue = nil
+	c.mu.Unlock()
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/stop"})
 }
 
 // Contract 4c: a steer that lands AFTER the turn's final round boundary is
@@ -235,15 +240,16 @@ func TestContract4_SteerCatchupPostsReply(t *testing.T) {
 	if !waitForReply(t, fc, "caught up") {
 		t.Fatal("first turn produced no reply")
 	}
-	b.mu.Lock()
-	sess := b.main
-	b.mu.Unlock()
+	c := tconv(b)
+	c.mu.Lock()
+	sess := c.main
+	c.mu.Unlock()
 
 	// Simulate the missed-boundary steer: it sits in the inbox with no turn
 	// running.
 	sess.Interject("also do this")
 	before := len(fc.sentReplies())
-	b.startNextWork(context.Background())
+	tconv(b).startNextWork(context.Background())
 
 	waitFor(t, func() bool { return len(fc.sentReplies()) > before })
 	if sess.HasQueuedSteer() {
@@ -266,9 +272,9 @@ func TestContract5_StopCancelsTurnKeepsJobs(t *testing.T) {
 		t.Fatal("turn never started")
 	}
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/stop"})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/stop"})
 
-	waitFor(t, func() bool { b.mu.Lock(); a := b.turnActive; b.mu.Unlock(); return !a })
+	waitFor(t, func() bool { tconv(b).mu.Lock(); a := tconv(b).turnActive; tconv(b).mu.Unlock(); return !a })
 	all := strings.Join(fc.sentTexts(), "\n")
 	if !strings.Contains(all, "stopped the turn") || !strings.Contains(all, "background jobs keep running") {
 		t.Fatalf("stop reply must state background jobs keep running, got %v", fc.sentTexts())
@@ -299,12 +305,13 @@ func TestContract5_StopKeepsBackgroundJobsRunning(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	b.mu.Lock()
-	_, cancel := b.takeSlotLocked(ctx)
-	b.mu.Unlock()
+	c := tconv(b)
+	c.mu.Lock()
+	_, cancel, _ := c.takeSlotLocked(ctx)
+	c.mu.Unlock()
 	defer cancel()
 
-	b.handleCommand(ctx, Msg{ChatID: 42, SenderID: 42, Text: "/stop"})
+	tconv(b).handleCommand(ctx, Msg{ChatID: 42, SenderID: 42, Text: "/stop"})
 
 	all := strings.Join(fc.sentTexts(), "\n")
 	if !strings.Contains(all, "stopped the turn") || !strings.Contains(all, "background jobs keep running") {
@@ -328,32 +335,33 @@ func TestContract6_WakeMidTurnPendsThenDrains(t *testing.T) {
 	if !waitForReply(t, fc, "queued reply") {
 		t.Fatal("first turn produced no reply")
 	}
-	b.mu.Lock()
-	sess := b.main
-	b.mu.Unlock()
+	c := tconv(b)
+	c.mu.Lock()
+	sess := c.main
+	c.mu.Unlock()
 
-	b.mu.Lock()
-	b.turnActive = true // simulate a turn holding the slot
-	b.mu.Unlock()
+	c.mu.Lock()
+	c.turnActive = true // simulate a turn holding the slot
+	c.mu.Unlock()
 
 	sess.NotifyText("bg result") // agent mail (a notice), NOT user steering
 	b.dispatchWake(context.Background(), sess.ID())
-	b.mu.Lock()
-	pending := b.wakePending
-	b.mu.Unlock()
+	c.mu.Lock()
+	pending := c.wakePending
+	c.mu.Unlock()
 	if !pending {
 		t.Fatal("a Wake arriving mid-turn must mark wakePending")
 	}
 
-	b.mu.Lock()
-	b.turnActive = false
-	b.mu.Unlock()
-	b.startNextWork(context.Background())
+	c.mu.Lock()
+	c.turnActive = false
+	c.mu.Unlock()
+	tconv(b).startNextWork(context.Background())
 
 	waitFor(t, func() bool {
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		return !b.turnActive && !b.wakePending && !sess.HasQueuedInput()
+		tconv(b).mu.Lock()
+		defer tconv(b).mu.Unlock()
+		return !tconv(b).turnActive && !tconv(b).wakePending && !sess.HasQueuedInput()
 	})
 	// The wake turn's reply reaches the user as ✉️ agent mail — one channel.
 	waitFor(t, func() bool {
@@ -375,9 +383,10 @@ func TestContract7_ForeignWakeDropped(t *testing.T) {
 	b.AdoptSession(cron)
 
 	b.dispatchWake(context.Background(), cron.ID())
-	b.mu.Lock()
-	active, pending := b.turnActive, b.wakePending
-	b.mu.Unlock()
+	c := tconv(b)
+	c.mu.Lock()
+	active, pending := c.turnActive, tconv(b).wakePending
+	c.mu.Unlock()
 	if active || pending {
 		t.Fatal("a wake for the cron parent must be dropped, not run or pended")
 	}
@@ -394,37 +403,38 @@ func TestContract8_NewStartsFreshConversation(t *testing.T) {
 	if !waitForReply(t, fc, "r") {
 		t.Fatal("first turn produced no reply")
 	}
-	b.mu.Lock()
-	first := b.main.ID()
-	b.mu.Unlock()
+	c := tconv(b)
+	c.mu.Lock()
+	first := c.main.ID()
+	c.mu.Unlock()
 
 	// /new refuses mid-turn and the reply posts before the slot frees.
 	waitIdle(t, b)
 
-	b.handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/new"})
+	tconv(b).handleCommand(context.Background(), Msg{ChatID: 42, SenderID: 42, Text: "/new"})
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "fresh conversation")
 	})
-	b.mu.Lock()
-	live := b.main
-	b.mu.Unlock()
+	c.mu.Lock()
+	live := c.main
+	c.mu.Unlock()
 	if live != nil {
 		t.Fatal("/new must detach the main session")
 	}
 
 	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "2", Text: "second"})
 	waitFor(t, func() bool {
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		return b.main != nil
+		tconv(b).mu.Lock()
+		defer tconv(b).mu.Unlock()
+		return tconv(b).main != nil
 	})
-	b.mu.Lock()
-	second := b.main.ID()
-	b.mu.Unlock()
+	c.mu.Lock()
+	second := c.main.ID()
+	c.mu.Unlock()
 	if second == first {
 		t.Fatal("/new must start a fresh session")
 	}
-	if id, _ := b.current.Current(); id != second {
+	if id, _ := tconv(b).index.Current(); id != second {
 		t.Fatalf("current marker = %q, want the new session %q", id, second)
 	}
 }
@@ -456,9 +466,10 @@ func TestContract9_RestartResumesTheConversation(t *testing.T) {
 	if !waitForReply(t, fc, "one") {
 		t.Fatal("first bot produced no reply")
 	}
-	b1.mu.Lock()
-	first := b1.main.ID()
-	b1.mu.Unlock()
+	c := tconv(b1)
+	c.mu.Lock()
+	first := c.main.ID()
+	c.mu.Unlock()
 
 	// "Restart": a fresh Bot over the same store and marker.
 	b2 := NewBot(fc, rt, 42, threads)
@@ -466,9 +477,9 @@ func TestContract9_RestartResumesTheConversation(t *testing.T) {
 	if !waitForReply(t, fc, "two") {
 		t.Fatal("second bot produced no reply")
 	}
-	b2.mu.Lock()
-	got := b2.main.ID()
-	b2.mu.Unlock()
+	c.mu.Lock()
+	got := c.main.ID()
+	c.mu.Unlock()
 	if got != first {
 		t.Fatalf("restart must resume the conversation: first=%s resumed=%s", first, got)
 	}
@@ -515,26 +526,27 @@ func TestContract11_TextDuringQuietTurnQueues(t *testing.T) {
 	// finish before simulating a quiet turn, or it clobbers the flags below.
 	waitIdle(t, b)
 
-	b.mu.Lock()
-	b.turnActive = true
-	b.turnQuiet = true // simulate a wake turn holding the slot
-	b.mu.Unlock()
+	tconv(b).mu.Lock()
+	tconv(b).turnActive = true
+	tconv(b).turnQuiet = true // simulate a wake turn holding the slot
+	tconv(b).mu.Unlock()
 
 	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "2", Text: "are you there?"})
 	waitFor(t, func() bool {
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		return len(b.mailQueue) == 1
+		tconv(b).mu.Lock()
+		defer tconv(b).mu.Unlock()
+		return len(tconv(b).mailQueue) == 1
 	})
-	b.mu.Lock()
-	live := b.main
-	b.mu.Unlock()
+	c := tconv(b)
+	c.mu.Lock()
+	live := c.main
+	c.mu.Unlock()
 	if live.HasQueuedSteer() {
 		t.Fatal("text must not steer a quiet turn")
 	}
-	b.mu.Lock()
-	b.turnActive, b.turnQuiet, b.mailQueue = false, false, nil
-	b.mu.Unlock()
+	c.mu.Lock()
+	c.turnActive, tconv(b).turnQuiet, tconv(b).mailQueue = false, false, nil
+	c.mu.Unlock()
 }
 
 // Contract 12: a Wake that finds queued USER steering runs a POSTED turn —
@@ -548,9 +560,10 @@ func TestContract12_WakeWithSteerPostsReply(t *testing.T) {
 	if !waitForReply(t, fc, "steered answer") {
 		t.Fatal("first turn produced no reply")
 	}
-	b.mu.Lock()
-	sess := b.main
-	b.mu.Unlock()
+	c := tconv(b)
+	c.mu.Lock()
+	sess := c.main
+	c.mu.Unlock()
 	before := len(fc.sentReplies())
 
 	sess.Interject("and one more thing") // user steering, landed post-turn

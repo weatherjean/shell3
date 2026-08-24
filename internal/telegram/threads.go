@@ -3,6 +3,8 @@
 package telegram
 
 import (
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/weatherjean/shell3/internal/runs"
@@ -64,4 +66,70 @@ func (ti *ThreadIndex) Current() (string, bool) {
 		return "", false
 	}
 	return id, true
+}
+
+// TelegramSurface is the thread-index surface key for one Telegram chat.
+// Rooms are namespaced per chat so every room's current conversation survives
+// a restart independently; the old single "telegram" key is not read.
+func TelegramSurface(chatID int64) string {
+	return roomSurface("telegram", chatID)
+}
+
+// roomSurface keys one room under its FRONT-END's surface namespace. The
+// prefix is the host's own surface ("telegram", "serve"), so two transports
+// sharing a runs store never cross-resolve each other's rooms — the property
+// the single-surface keys had, kept now that each surface has many rooms.
+func roomSurface(host string, chatID int64) string {
+	return host + ":" + strconv.FormatInt(chatID, 10)
+}
+
+// forSurface derives a sibling index over the same store, keyed on another
+// surface. The store closure is shared, so a /reload generation swap is
+// picked up by every derived index at once.
+func (ti *ThreadIndex) forSurface(surface string) *ThreadIndex {
+	if ti == nil {
+		// A Bot built without persistence (library use, tests): rooms still
+		// need an index, they just have nothing to survive a restart with.
+		return NewThreadIndex(nil, surface)
+	}
+	return &ThreadIndex{store: ti.store, surface: surface}
+}
+
+// currentStore resolves the runs store this index writes to, or nil. The
+// closure is re-evaluated per call so a /reload generation swap is picked up
+// rather than pinned.
+func (ti *ThreadIndex) currentStore() *runs.Store {
+	if ti == nil {
+		return nil
+	}
+	return ti.store()
+}
+
+// chatIDFromSurface parses a "<host>:<chatid>" surface key back into its chat
+// id. It is how a completion whose room is not live yet — every completion
+// recovered at boot — finds the room it belongs to.
+func chatIDFromSurface(host, surface string) (int64, bool) {
+	rest, ok := strings.CutPrefix(surface, host+":")
+	if !ok {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(rest, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return id, true
+}
+
+// hostSurface is the front-end namespace this index belongs to ("telegram",
+// "serve") — the prefix every room key of that host is built from. A nil
+// index (a Bot built without persistence) reports the Telegram default so a
+// test-built bot keys its rooms the way the real one does.
+func (ti *ThreadIndex) hostSurface() string {
+	if ti == nil || ti.surface == "" {
+		return "telegram"
+	}
+	// The host constructs its index with a bare surface; a room index derived
+	// from it carries "<host>:<chatid>", so strip anything after the colon.
+	host, _, _ := strings.Cut(ti.surface, ":")
+	return host
 }

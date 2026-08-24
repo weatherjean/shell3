@@ -76,7 +76,9 @@ pick it up. `shell3 --version` shows what you're on. Pin a release with
 3. Run `shell3 telegram`. The bot greets the chat and listens.
 
 Almost nothing is exposed: shell3 connects outbound to Telegram (no tunnel,
-no login) and answers exactly one `chat_id`; the only listener is the
+no login) and obeys only the Telegram user ids you list in `allow_from` —
+in a group it answers only when @mentioned or replied to, and each chat keeps
+its own conversation. The only listener is the
 read-only web dashboard, bound to `127.0.0.1` and reached via `/dash`
 (token-gated, ~1h links). Keeping it running is yours to set up —
 [docs/deploying.md](docs/deploying.md) has the few lines it takes (a service

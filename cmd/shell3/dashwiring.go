@@ -41,6 +41,7 @@ func wireDash(b *telegram.Bot, rt *shell3.Runtime, cronSess *shell3.Session,
 		IndexHTML: func(tok string) string {
 			return render.DashIndexHTML(b.LiveSession(), rt, version,
 				cronSess.Jobs(), cronStatusFn(), cronCostFn(), tok) +
+				render.RoomsSectionHTML(dashRooms(b), tok) +
 				render.TextSectionHTML("Inbox", b.Inbox())
 		},
 		CronStatus: cronStatusFn,
@@ -102,4 +103,19 @@ func dashMintURL(urlFile string, srv *dash.Server) string {
 func isHTTPURL(s string) bool {
 	u, err := url.Parse(s)
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}
+
+// dashRooms projects the bot's live rooms onto the render package's row type.
+// The two structs are deliberately separate: internal/render lays out HTML
+// for every front-end and must not import a transport.
+func dashRooms(b *telegram.Bot) []render.RoomInfo {
+	rooms := b.Rooms()
+	out := make([]render.RoomInfo, 0, len(rooms))
+	for _, r := range rooms {
+		out = append(out, render.RoomInfo{
+			ChatID: r.ChatID, Title: r.Title, Busy: r.Busy,
+			Jobs: r.Jobs, Queued: r.Queued, SessionID: r.SessionID,
+		})
+	}
+	return out
 }

@@ -24,7 +24,7 @@ func TestDrainTurnKeepsOnlyFinalSegment(t *testing.T) {
 	close(ch)
 
 	b := &Bot{}
-	got, _ := b.drainTurn(ch, true)
+	got, _ := tconv(b).drainTurn(ch, true)
 	if got != "That notice means a job finished." {
 		t.Fatalf("want only the final segment, got %q", got)
 	}
@@ -40,7 +40,7 @@ func TestDrainTurnFallsBackToLastNonEmpty(t *testing.T) {
 	close(ch)
 
 	b := &Bot{}
-	if got, _ := b.drainTurn(ch, true); got != "Done — files updated." {
+	if got, _ := tconv(b).drainTurn(ch, true); got != "Done — files updated." {
 		t.Fatalf("want fallback to last non-empty segment, got %q", got)
 	}
 }
@@ -53,7 +53,7 @@ func TestDrainTurnAppendsErrors(t *testing.T) {
 	close(ch)
 
 	b := &Bot{}
-	got, errText := b.drainTurn(ch, true)
+	got, errText := tconv(b).drainTurn(ch, true)
 	if !strings.Contains(got, "Trying.") || !strings.Contains(errText, "boom") {
 		t.Fatalf("want text and error, got %q / %q", got, errText)
 	}

@@ -40,6 +40,10 @@ type SessionOpts struct {
 	CronJob string
 	// OutPath, when non-empty, streams this session's JSONL audit log there.
 	OutPath string
+	// PromptSuffix appends per-session text to the system prompt, re-rendered
+	// every turn (see chat.Config.PromptSuffix). A Telegram front-end uses it
+	// to give each chat its own standing brief; nil appends nothing.
+	PromptSuffix func() string
 	// ResumeID reloads a stored session's messages when non-empty.
 	ResumeID string
 	// ResumeLatest reattaches to the newest stored session matching this

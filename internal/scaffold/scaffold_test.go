@@ -410,3 +410,28 @@ func TestScaffoldCronExampleIsInert(t *testing.T) {
 		t.Fatalf("the commented example armed %d job(s): %+v", len(k.Crons), k.Crons)
 	}
 }
+
+// The self-knowledge skill is what stops the agent inventing answers about its
+// own runtime — it cannot read the binary it runs inside, so the alternative
+// to this file is confabulation the user cannot check.
+func TestScaffoldShipsSelfKnowledgeSkill(t *testing.T) {
+	files, err := PromptFiles(Values{Name: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, ok := files["skills/self-knowledge.md"]
+	if !ok {
+		t.Fatal("skills/self-knowledge.md is not shipped — new installs would have no self-knowledge skill")
+	}
+	for _, want := range []string{
+		"cannot see your own internals", // the premise
+		"status",                        // the primary introspection tool
+		"turn_prompts",                  // how to answer "what was I told"
+		"you did not see it",            // the group-visibility rule that caused a wrong answer live
+		"absence claim needs a command", // claiming X does not exist without listing X
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("self-knowledge skill missing %q", want)
+		}
+	}
+}

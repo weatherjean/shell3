@@ -156,22 +156,23 @@ func TestInboxView(t *testing.T) {
 		t.Fatalf("idle inbox = %q, want empty", got)
 	}
 
-	b.mu.Lock()
-	b.turnActive = true
-	b.mu.Unlock()
+	c := tconv(b)
+	c.mu.Lock()
+	c.turnActive = true
+	c.mu.Unlock()
 	b.handleMsg(context.Background(), Msg{ChatID: 42, SenderID: 42, ID: "9", Text: "later please"})
 	waitFor(t, func() bool {
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		return len(b.mailQueue) == 1
+		tconv(b).mu.Lock()
+		defer tconv(b).mu.Unlock()
+		return len(tconv(b).mailQueue) == 1
 	})
 	if got := b.Inbox(); !strings.Contains(got, "later please") || !strings.Contains(got, "from you") {
 		t.Fatalf("inbox = %q, want the queued mail listed", got)
 	}
-	b.mu.Lock()
-	b.turnActive = false
-	b.mailQueue = nil
-	b.mu.Unlock()
+	tconv(b).mu.Lock()
+	tconv(b).turnActive = false
+	tconv(b).mailQueue = nil
+	tconv(b).mu.Unlock()
 }
 
 // A model that over-generalizes the wake-turn NO_REPLY sentinel into a USER
@@ -228,9 +229,10 @@ func TestRunPostedQueuedTurn_NoReplySentinelNotPosted(t *testing.T) {
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "(no output)")
 	})
-	b.mu.Lock()
-	sess := b.main
-	b.mu.Unlock()
+	c := tconv(b)
+	c.mu.Lock()
+	sess := c.main
+	c.mu.Unlock()
 	before := len(fc.sentTexts())
 
 	sess.Interject("one more thing")
@@ -257,9 +259,10 @@ func TestRunPostedQueuedTurn_ToolMarkupReplacedWithNotice(t *testing.T) {
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), malformedReplyNotice)
 	})
-	b.mu.Lock()
-	sess := b.main
-	b.mu.Unlock()
+	c := tconv(b)
+	c.mu.Lock()
+	sess := c.main
+	c.mu.Unlock()
 	before := len(fc.sentTexts())
 
 	sess.Interject("one more thing")

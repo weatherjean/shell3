@@ -166,7 +166,7 @@ func TestHealthOKWithCompleteTelegramBlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a complete telegram block should pass: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "telegram: chat 123456789") {
+	if !strings.Contains(out, "telegram: home chat 123456789") {
 		t.Fatalf("output should report the wired chat:\n%s", out)
 	}
 }

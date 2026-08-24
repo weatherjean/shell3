@@ -9,9 +9,11 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/weatherjean/shell3/internal/config"
 	"github.com/weatherjean/shell3/internal/cron"
 	"github.com/weatherjean/shell3/internal/mediadir"
 	"github.com/weatherjean/shell3/internal/render"
@@ -113,6 +115,7 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 	// a shell function with no model turn, so they cost nothing to run.
 	// Re-installed on reload, since a kit may add or drop one.
 	installKitCommands(b, rt)
+	installRoomConfig(b, rt)
 
 	// Redeliver what the previous process left undelivered (completions that
 	// raced a shutdown, jobs killed in flight) now that the host can carry
@@ -220,6 +223,7 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 		// A reload may add, rename, or drop a command; refresh the menu so
 		// the "/" list matches the kit that is actually loaded.
 		installKitCommands(b, rt)
+		installRoomConfig(b, rt)
 		schedMu.Lock()
 		sched = ns
 		schedMu.Unlock()
@@ -259,5 +263,40 @@ func installKitCommands(b *telegram.Bot, rt *shell3.Runtime) {
 	// previous kit.
 	b.SetKitCommands(cmds, func(ctx context.Context, name, arg string) (string, error) {
 		return rt.Parts().LoadedConfig().RunCommand(ctx, name, arg)
+	})
+}
+
+// installRoomConfig hands the bot the operator's per-room configuration and
+// the reader its room briefs use for declared context files. Called at
+// startup AND after every /reload — the telegram: block is resolved per call
+// so a reload's new rooms take effect without a restart.
+func installRoomConfig(b *telegram.Bot, rt *shell3.Runtime) {
+	tg := rt.Telegram()
+	settings := make([]telegram.ChatSetting, 0, len(tg.Chats))
+	for _, ch := range tg.Chats {
+		id, err := parseChatID(ch.ID)
+		if err != nil {
+			continue // rejected at load; a survivor here can only be ignored
+		}
+		settings = append(settings, telegram.ChatSetting{
+			ChatID: id, UseDescription: ch.UseDescription, Context: ch.Context,
+		})
+	}
+	b.SetChatSettings(settings)
+
+	// Room context files go through the SAME reader the agent's own
+	// `context:` uses — the 64 KB cap and middle elision are what keep a
+	// runaway brief from crowding out the conversation it informs.
+	configDir := rt.Parts().ConfigDir()
+	b.SetContextReader(func(paths []string) string {
+		files, err := config.ResolveContextFiles(configDir, paths)
+		if err != nil {
+			return ""
+		}
+		var sb strings.Builder
+		for _, f := range files {
+			fmt.Fprintf(&sb, "### %s\n\n%s\n\n", f.Path, f.Body)
+		}
+		return sb.String()
 	})
 }

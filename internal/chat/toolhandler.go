@@ -114,6 +114,10 @@ type TurnConfig struct {
 	// session-creation snapshot. Nil (tests, bare configs) keeps
 	// Personality.SystemPrompt.
 	RefreshPrompt func() string
+
+	// PromptSuffix appends per-session text to the system prompt (see
+	// Config.PromptSuffix). Nil appends nothing.
+	PromptSuffix func() string
 	// StatusLine is the current provider/model/effort string; used for
 	// reminder tracking.
 	StatusLine string

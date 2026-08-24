@@ -100,9 +100,9 @@ no model-driven prune/compact tools. Two optional knobs:
 Both thresholds live on the model; there is no per-agent override.
 
 Compaction is host-managed and there are no model-driven prune/compact tools.
-The Telegram front-end runs ONE long-lived conversation, so its history
-grows steadily; when it crosses `compact_at` it compacts on its own, keeping
-the conversation viable indefinitely. It happens silently — the dash shows the current
+The Telegram front-end runs one long-lived conversation PER CHAT, so each
+room's history grows steadily; when a room crosses `compact_at` it compacts on
+its own, keeping that conversation viable indefinitely. It happens silently — the dash shows the current
 context usage, and `shell3 ask`'s verbose output narrates each compaction as
 it runs.
 
@@ -591,50 +591,127 @@ command would post the message it exists to post.
 
 ## Telegram — `telegram:`
 
-The bot's credentials, the one chat it answers, and where the agent's shell
-runs.
+The bot's credentials, who may drive it, where the agent's shell runs, and
+per-room tuning.
 
 ```yaml
 telegram:
   token: env:TELEGRAM_TOKEN         # TELEGRAM_TOKEN in .env, from @BotFather
-  chat_id: "123456789"             # the single chat the bot answers
-  allow_from: ["123456789"]        # optional; user ids allowed to drive the agent
+  chat_id: "123456789"              # the HOME chat: cron results and orphans land here
+  allow_from: ["123456789", "987654321"]  # who may drive the agent, anywhere
   workdir: /home/me/.shell3/workdir # optional; default = the config dir
+  max_concurrent_turns: 4           # optional; global cap on simultaneous turns
+  chats:                            # optional; per-room tuning, not an allowlist
+    - id: "-1001234567890"
+      use_description: false        # don't inject this group's description
+      context: [projects/pay.md]    # files appended to this room's brief
 ```
 
-`chat_id` says WHERE the bot talks; `allow_from` says WHO it obeys. In a
-direct chat those are the same number, so leaving `allow_from` unset means
-"the owner of `chat_id`, and nobody else" — which is what a single-DM install
-has always done. Set it explicitly when the chat has more than one person in
-it: every member can see the chat, but membership must not confer a shell.
-Authorization is checked on the Telegram **sender id**, which Telegram's
-servers populate and the sender cannot choose, and it is checked before
-commands too — otherwise anyone in a group could `/stop` a running turn or
-`/new` the conversation away. A message shell3 cannot attribute to a user
-(a channel post) is never authorized, and a non-numeric entry fails at
-startup rather than silently narrowing access.
+**One conversation per chat.** Every Telegram chat the bot is used in keeps
+its own session, its own context and its own `/new`. A chat becomes known the
+first time someone on `allow_from` addresses the bot there — there is no list
+of chats to maintain.
 
-`shell3 telegram` refuses to start without `token` and `chat_id`, and a
-non-numeric `chat_id` fails at startup. Loading a config without the block
-still succeeds — `shell3 ask` and `shell3 health` don't need it.
+**`allow_from` is the access model.** It lists Telegram user ids, and only
+those people can drive the agent, in any chat. Authorization is checked on the
+sender id, which Telegram's servers populate and the sender cannot choose, and
+it is checked before commands too — otherwise anyone in a group could `/stop`
+a running turn or `/new` the conversation away. A message shell3 cannot
+attribute to a user (a channel post) is never authorized, and a non-numeric
+entry fails at startup rather than silently narrowing access. Unset, it falls
+back to the owner of `chat_id` — the single-DM case, where the chat id IS the
+user id.
+
+**`chat_id` is the home chat, not an access rule.** Cron results and
+completions whose room is gone land there. Leave it out and the home chat
+becomes the DM of the first `allow_from` id (which only delivers once that
+person has messaged the bot — `shell3 health` says so). A GROUP chat id with
+an empty `allow_from` is refused at startup: the owner fallback would resolve
+to nobody, and the bot would run looking healthy while ignoring everyone.
+
+**In a group the bot answers only what is addressed to it**: `/ask <message>`,
+an `@mention` of the bot, or a reply to one of its own messages. Everything
+else is dropped before it enters any conversation.
+
+`/ask` exists because Telegram's privacy mode never delivers a plain
+`@yourbot do X` to a bot — only `/cmd@thisbot` and replies to the bot's own
+messages arrive. So `/ask` opens a thread and ordinary replies continue it,
+with no BotFather toggle and no admin rights. To use plain @mentions instead,
+either promote the bot to admin in that group, or turn **Group Privacy off**
+in @BotFather and re-add the bot; the group's traffic then reaches shell3,
+which discards what is not for it (see
+[security.md](security.md#the-telegram-boundary) for what that moves).
+`/help` explains all of this in the chat, so nobody has to remember it.
+
+**Rooms run in parallel**, one turn each, bounded by `max_concurrent_turns`
+(default 4). They share ONE working directory, so two rooms can run bash in
+the same tree at once; the agent's `status` tool lists every live room and
+whether it is mid-turn, and the scaffold prompt tells it to look before
+touching shared files. That is advice, not a lock.
+
+**Each room gets a brief** in its prompt: the chat title, the group
+description, and any files you point at. The description is the zero-config
+half — edit it in Telegram and that room's standing context changes on the
+next turn, no config edit and no restart.
+
+> **The bot must be able to see group info to read the description.** Telegram
+> serves the field only to a bot with that access; a default-restricted bot
+> ("has no access to messages") receives the title and an empty description,
+> with no error. Promote the bot to admin in that group and it arrives. This
+> is not in the Bot API docs — the `description` field row mentions no rights
+> requirement — but it is reproducible: the same basic group returned
+> `description_bytes=0` before a promotion and `66` after, same code, same
+> chat. `shell3.log` records `chat metadata … description_bytes=N` on every
+> lookup, which is how you tell "the bot cannot see it" from "the chat has
+> none".
+
+**`chats:`** tunes rooms that need something other than the defaults.
+Declaring a chat neither authorizes nor enrols it. Each entry takes `id`,
+`use_description` (default true; set false where the room's admins are not
+people you would hand a prompt to), and `context:` (files appended to that
+room's brief, read like the agent's own `context:` — 64 KB cap, middle
+elided). The `context:` route needs no rights and no Telegram feature, so it
+is the answer when a room's brief must not depend on chat settings.
+
+`shell3 telegram` refuses to start without `token`, or with a non-numeric
+`chat_id`. Loading a config without the block still succeeds — `shell3 ask`
+and `shell3 health` don't need it.
 
 The chat needs no listener, no login, no tunnel: shell3 long-polls Telegram
-outbound, and access control is the token plus the one `chat_id` it answers.
-(The read-only web dash is its own localhost listener — see
-[`dash_port`](#the-web-dash--dash_port).)
-Whoever controls that chat — or the token — controls a shell on this
-machine. The threat model is in
-[security.md](security.md#the-telegram-boundary).
+outbound. (The read-only web dash is its own localhost listener — see
+[`dash_port`](#the-web-dash--dash_port).) Everyone on `allow_from` — and
+whoever holds the token — controls a shell on this machine. The threat model
+is in [security.md](security.md#the-telegram-boundary).
 
 ### What `/reload` does and doesn't pick up
 
 `/reload` (and the agent's own `reload` tool) re-reads the config directory
 and applies it live: prompts, models, agents, skills, cron jobs,
 and MCP servers. It does **not** re-apply the front-end's own wiring — a
-changed `telegram.chat_id` or `telegram.workdir` takes effect at the next
-`shell3 telegram` start. The same goes for `dash_port`: the dash binds once
+changed `telegram.chat_id`, `telegram.allow_from` or `telegram.workdir` takes
+effect at the next `shell3 telegram` start. `telegram.chats:` IS re-applied by
+a reload (room briefs re-read their description and context files on the next
+turn). The same goes for `dash_port`: the dash binds once
 at startup, so a port change needs a restart — the *data* on its pages is
 always live (resolved per request), only the listener itself is fixed.
+
+### What a stored run contains
+
+Every conversation is stored in `.shell3_project/shell3.db`: messages, tool
+calls and results, the model's reasoning, and — since schema v10 — the
+**system prompt each turn ran with**. The prompt is what makes a run
+reproducible after the fact: it carries your `memory.md`, the agent's
+`context:` files, the skills index and (in Telegram) the room's brief, all of
+which can change under a live conversation.
+
+Only CHANGES are recorded, content-addressed, so an untouched conversation
+costs one stored body however many turns it runs. Prompts are excluded from
+history search on purpose — the `history` tool searches what was said, and a
+20 KB prompt in that index would bury every query. The dash's run replay
+shows each version, collapsed, at the message it took effect from.
+
+Deleting a session (the `runs_keep_days` janitor) drops its prompt references
+and collects any body nothing points at any more.
 
 ## Attachments and media
 

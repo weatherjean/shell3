@@ -30,6 +30,12 @@ type fakeClient struct {
 
 	failReply error // when set, reply sends behave as a deleted target (fall back to plain)
 
+	chatTitle     string
+	chatDesc      string
+	failChatInfo  error
+	blockChatInfo chan struct{} // when set, ChatInfo waits on it
+	chatInfoN     int
+
 	failDoc   error
 	failPhoto error
 	failVoice error
@@ -299,4 +305,28 @@ func (f *fakeClient) plainTexts() []string {
 		out[i] = m.text
 	}
 	return out
+}
+
+func (f *fakeClient) Username(context.Context) (string, error) { return "mybot", nil }
+
+func (f *fakeClient) ChatInfo(_ context.Context, chatID int64) (string, string, error) {
+	f.mu.Lock()
+	f.chatInfoN++
+	block, fail := f.blockChatInfo, f.failChatInfo
+	title, desc := f.chatTitle, f.chatDesc
+	f.mu.Unlock()
+	if block != nil {
+		<-block // simulates a hanging getChat
+	}
+	if fail != nil {
+		return "", "", fail
+	}
+	return title, desc, nil
+}
+
+// chatInfoCalls reports how many lookups have been started.
+func (f *fakeClient) chatInfoCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.chatInfoN
 }

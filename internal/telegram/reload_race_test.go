@@ -32,8 +32,8 @@ func TestReloadRacesCommandHandling(t *testing.T) {
 	go func() { // the update loop handling commands
 		defer wg.Done()
 		for range 200 {
-			b.handleCommand(ctx, Msg{ChatID: 42, SenderID: 42, Text: "/status"})
-			b.handleCommand(ctx, Msg{ChatID: 42, SenderID: 42, Text: "/run nightly"})
+			tconv(b).handleCommand(ctx, Msg{ChatID: 42, SenderID: 42, Text: "/status"})
+			tconv(b).handleCommand(ctx, Msg{ChatID: 42, SenderID: 42, Text: "/run nightly"})
 		}
 	}()
 	wg.Wait()

@@ -20,8 +20,37 @@ type Msg struct {
 	ID        string // this message's id ("" if unknown)
 	ReplyToID string // id this replies to, for thread resolution ("" = not a reply)
 	Text      string
-	ReplyTo   string  // text of the message this replies to (Telegram reply/quote), for model context
-	Media     []Media // photos/voice/documents already resolved to bytes
+	ReplyTo   string // text of the message this replies to (Telegram reply/quote), for model context
+	// ReplyToBot reports that the message this one replies to was sent by
+	// THIS bot. It comes from Telegram (the replied-to message carries its
+	// author), which is what makes it survive a restart: the in-process
+	// record of what the bot has sent is empty after a reboot, and a group
+	// whose only trigger was "reply to me" would go deaf until someone
+	// @mentioned it again.
+	ReplyToBot bool
+	// MigratedTo is the new chat id when this message announces that the
+	// group became a supergroup (Telegram's migrate_to_chat_id service
+	// message). The chat id changes at that moment, and every id-keyed thing
+	// — the room's conversation, its thread marker — has to follow or the
+	// conversation is stranded under an id that will never speak again.
+	MigratedTo int64
+	// ChatType is Telegram's chat type ("private", "group", "supergroup",
+	// "channel"). Anything but "private" is a room with other people in it,
+	// where a message must be addressed to the bot to count (see trigger.go).
+	ChatType string
+	Media    []Media // photos/voice/documents already resolved to bytes
+	// HasMedia reports that the message CARRIES an attachment, whether or not
+	// its bytes have been fetched yet.
+	HasMedia bool
+	// FetchMedia downloads this message's attachments, or nil when there are
+	// none (or a transport already filled Media in).
+	//
+	// Downloading is deferred so it happens AFTER authorization, never
+	// before: with Telegram privacy mode off the bot is delivered every
+	// message in a group, and resolving eagerly in the transport meant
+	// fetching every stranger's photo into memory only to discard it a
+	// moment later at the gate.
+	FetchMedia func(ctx context.Context) []Media
 }
 
 // Media is a downloaded attachment.
@@ -75,6 +104,14 @@ type tgClient interface {
 	SendHTMLReply(ctx context.Context, chatID int64, html string, replyTo string, opts ...SendOpt) (msgID string, err error)
 	// Typing shows the "typing…" chat action.
 	Typing(ctx context.Context, chatID int64) error
+
+	// Username is the bot's own @name without the "@", used to spot an
+	// @mention in a group.
+	Username(ctx context.Context) (string, error)
+
+	// ChatInfo reports a chat's title and description — the raw material of
+	// a room's prompt brief. A private chat has no description.
+	ChatInfo(ctx context.Context, chatID int64) (title, description string, err error)
 	// SendDocument uploads a file to the chat with an optional caption,
 	// returning the sent message id so thread anchors can advance onto it.
 	SendDocument(ctx context.Context, chatID int64, filename string, data []byte, caption string, opts ...SendOpt) (msgID string, err error)

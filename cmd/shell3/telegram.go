@@ -53,7 +53,7 @@ func newTelegramCommand() *cobra.Command {
 			var chatID int64
 			if console {
 				chatID = telegram.ConsoleChatID
-			} else if chatID, err = telegramChatID(tg); err != nil {
+			} else if chatID, err = telegramHomeChat(tg); err != nil {
 				return err
 			}
 
@@ -90,6 +90,7 @@ func newTelegramCommand() *cobra.Command {
 			if err := b.SetAllowFrom(tg.AllowFrom); err != nil {
 				return err
 			}
+			b.SetMaxConcurrentTurns(tg.MaxConcurrentTurns)
 			// Transport-independent wiring (media, decorator, completion host,
 			// cron parent + scheduler, /reload) — shared with `shell3 serve`.
 			// LIFO: the scheduler-stop cleanup runs before the earlier
@@ -110,14 +111,15 @@ func newTelegramCommand() *cobra.Command {
 				}
 				// Greet the chat (best-effort).
 				banner := "๑ï shell3 online — your personal agent, at your pace\n\n" +
-					"Just type — every message continues our one conversation, and a restart picks it " +
-					"up where we left off. /new starts a fresh one, /dash opens the dashboard, " +
-					"/stop halts the current turn (/superstop also kills background jobs), " +
-					"/reload applies config changes."
+					"Here, just type — every message continues this chat's conversation, and a restart " +
+					"picks it up where we left off. In a group, @mention me or reply to one of my " +
+					"messages; each chat keeps its own conversation. /new starts a fresh one here, " +
+					"/dash opens the dashboard, /stop halts the current turn (/superstop also kills " +
+					"background jobs), /reload applies config changes."
 				if _, err := apiClient.Send(ctx, chatID, banner); err != nil {
 					fmt.Printf("warning: could not send the greeting: %v\n", err)
 				}
-				fmt.Printf("shell3 telegram: listening for chat %d\n  config: %s\n", chatID, resolved)
+				fmt.Printf("shell3 telegram: listening (home chat %d)\n  config: %s\n", chatID, resolved)
 			}
 			b.Run(ctx)
 			return nil
@@ -129,24 +131,49 @@ func newTelegramCommand() *cobra.Command {
 	return cmd
 }
 
-// telegramChatID validates the `telegram:` block the way the front-end needs it
-// and returns the parsed chat id. Every failure names the field at fault: the
-// block is almost always PRESENT (shell3 boot always writes one, blank fields
-// included) and the user's actual problem is one empty field — telling them to
-// add a block they are looking at is the wrong diagnosis. Shared with
-// `shell3 health`, so the check and the message are the same in both places.
-func telegramChatID(tg config.TelegramConfig) (int64, error) {
+// telegramHomeChat validates the `telegram:` block the way the front-end needs
+// it and returns the HOME chat: where cron results and ownerless completions
+// land. It is not an access rule — rooms are authorized by who speaks in them
+// (allow_from), never by being listed here.
+//
+// Every failure names the field at fault: the block is almost always PRESENT
+// (shell3 boot always writes one, blank fields included) and the user's actual
+// problem is one empty field — telling them to add a block they are looking at
+// is the wrong diagnosis. Shared with `shell3 health`, so the check and the
+// message are the same in both places.
+func telegramHomeChat(tg config.TelegramConfig) (int64, error) {
 	switch {
 	case !tg.Present:
 		return 0, fmt.Errorf("no telegram: block in the kit's shell3: wiring — add one (token, chat_id), or run `shell3 boot` to write it")
 	case tg.Token == "":
 		return 0, fmt.Errorf("telegram.token is empty — put your @BotFather token in the .env beside shell3.sh")
-	case tg.ChatID == "":
-		return 0, fmt.Errorf("telegram.chat_id is empty — set it in the kit's shell3: wiring to the one chat the bot answers (@userinfobot prints yours)")
+	}
+	if tg.ChatID == "" {
+		// No home chat named: fall back to the first allowlisted person's DM.
+		// A bot cannot open a DM the user has never written to, so this only
+		// works once they have — `shell3 health` says so.
+		if len(tg.AllowFrom) == 0 {
+			return 0, fmt.Errorf("telegram.chat_id is empty and telegram.allow_from names nobody — " +
+				"set chat_id to the chat cron results should land in (@userinfobot prints yours), " +
+				"or list at least one allow_from user id")
+		}
+		id, err := parseChatID(tg.AllowFrom[0])
+		if err != nil {
+			return 0, fmt.Errorf("telegram.allow_from[0] %q is not a number", tg.AllowFrom[0])
+		}
+		return id, nil
 	}
 	id, err := parseChatID(tg.ChatID)
 	if err != nil {
 		return 0, fmt.Errorf("telegram.chat_id %q is not a number", tg.ChatID)
+	}
+	// A GROUP chat id is negative and can never equal a user id, so the
+	// allowlist's "the chat owner" fallback resolves to nobody: the bot would
+	// start, look healthy, and ignore every human being. Refuse instead of
+	// letting that be discovered by silence.
+	if id < 0 && len(tg.AllowFrom) == 0 {
+		return 0, fmt.Errorf("telegram.chat_id %d is a group and telegram.allow_from is empty — "+
+			"nobody would be allowed to drive the agent; list the user ids that may (@userinfobot prints yours)", id)
 	}
 	return id, nil
 }

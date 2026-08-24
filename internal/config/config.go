@@ -62,6 +62,26 @@ type TelegramConfig struct {
 	// config keeps working without naming anyone.
 	AllowFrom []string
 	WorkDir   string
+	// MaxConcurrentTurns bounds concurrent turns across all chats. 0 leaves
+	// the front-end's default.
+	MaxConcurrentTurns int
+	// Chats is per-room configuration for chats that need something other
+	// than the defaults. It is not an allowlist and not an enrolment list:
+	// a room becomes known by an allowlisted person speaking in it.
+	Chats []ChatConfig
+}
+
+// ChatConfig is one room's declared configuration from `telegram.chats`.
+type ChatConfig struct {
+	ID string
+	// UseDescription controls whether the group description feeds that room's
+	// prompt brief. nil = the default (on); false suppresses it — the escape
+	// hatch for a room whose admins are not the people the operator trusts to
+	// write standing context.
+	UseDescription *bool
+	// Context lists files (resolved like the agent's own `context:`) appended
+	// to that room's brief — the trusted channel for a real project brief.
+	Context []string
 }
 
 // MCPServer is one declared server from the wiring's `mcp:` block.

@@ -3,7 +3,10 @@ package render
 import (
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
+
+	"github.com/weatherjean/shell3/internal/runs"
 
 	"github.com/weatherjean/shell3/internal/llm"
 )
@@ -19,7 +22,7 @@ func TestRunHTMLEscapesHostileToolOutput(t *testing.T) {
 		{Role: llm.RoleUser, Content: "look at <this>"},
 		{Role: llm.RoleTool, Name: "bash", Content: nasty},
 		{Role: llm.RoleAssistant, Content: "after the nasty one"},
-	})
+	}, nil)
 
 	for _, forbidden := range []string{"</details></main>", "<b>bold</b>"} {
 		if strings.Contains(page, forbidden) {
@@ -56,7 +59,7 @@ func TestRunHTMLEscapesHostileToolOutput(t *testing.T) {
 func TestRunHTMLDropsInvalidUTF8(t *testing.T) {
 	page := renderRunHTML("run-2", []llm.Message{
 		{Role: llm.RoleTool, Name: "cat", Content: "before \xc3\x28 after"},
-	})
+	}, nil)
 	if !strings.Contains(page, "before") || !strings.Contains(page, "after") {
 		t.Error("valid text around an invalid sequence was lost")
 	}
@@ -72,7 +75,7 @@ func TestRunHTMLFoldsTheBulkShut(t *testing.T) {
 	page := renderRunHTML("run-3", []llm.Message{
 		{Role: llm.RoleAssistant, Content: "the answer", ReasoningContent: "long private thinking"},
 		{Role: llm.RoleTool, Name: "bash", Content: "10000 lines of output"},
-	})
+	}, nil)
 	if !strings.Contains(page, `<details class="m assistant" open>`) {
 		t.Error("assistant message is not open by default")
 	}
@@ -86,7 +89,7 @@ func TestRunHTMLFoldsTheBulkShut(t *testing.T) {
 
 // A run with no messages still renders a valid page rather than a fragment.
 func TestRunHTMLEmptyRun(t *testing.T) {
-	page := renderRunHTML("run-4", nil)
+	page := renderRunHTML("run-4", nil, nil)
 	if !strings.Contains(page, "no messages") {
 		t.Error("empty run does not say so")
 	}
@@ -103,5 +106,40 @@ func TestRunHTMLRejectsTraversalIDs(t *testing.T) {
 		if _, err := RunReplayHTML(t.TempDir(), id); err == nil {
 			t.Errorf("RunReplayHTML accepted invalid id %q", id)
 		}
+	}
+}
+
+// A replay must show what the model was TOLD, folded in where it took effect.
+func TestRunReplayShowsSystemPrompts(t *testing.T) {
+	page := renderRunHTML("run-p", []llm.Message{
+		{Role: llm.RoleUser, Content: "first"},
+		{Role: llm.RoleAssistant, Content: "answer"},
+		{Role: llm.RoleUser, Content: "second"},
+	}, []runs.PromptRecord{
+		{Seq: 0, Hash: "aaaaaaaabbbb", Text: "original prompt", TS: time.Now()},
+		{Seq: 2, Hash: "ccccccccdddd", Text: "edited prompt", TS: time.Now()},
+	})
+	for _, want := range []string{"system prompt", "original prompt", "edited prompt", "aaaaaaaa"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("replay missing %q", want)
+		}
+	}
+	// Order matters: the second version must appear after the first message,
+	// or the page claims the model was told something it was not.
+	if strings.Index(page, "original prompt") > strings.Index(page, "edited prompt") {
+		t.Error("prompt versions rendered out of order")
+	}
+	if strings.Index(page, "edited prompt") < strings.Index(page, "answer") {
+		t.Error("the edited prompt must be folded in at the message it took effect from")
+	}
+}
+
+// Prompt text is escaped like everything else on the dash.
+func TestRunReplayEscapesPromptText(t *testing.T) {
+	page := renderRunHTML("run-e", nil, []runs.PromptRecord{
+		{Seq: 0, Hash: "aaaaaaaabbbb", Text: "<script>x</script>"},
+	})
+	if strings.Contains(page, "<script>x") {
+		t.Fatal("prompt text was not escaped")
 	}
 }

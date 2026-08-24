@@ -29,7 +29,7 @@ const progressMaxLines = 6
 // progressBubble tracks one turn's tool-activity message. Not goroutine-safe:
 // owned by the turn goroutine draining the event channel.
 type progressBubble struct {
-	b        *Bot
+	c        *conversation
 	msgID    string // "" until first post
 	lines    []string
 	total    int
@@ -69,12 +69,12 @@ func (p *progressBubble) flush(ctx context.Context, force bool) {
 	text := p.render()
 	if p.msgID == "" {
 		// Silent: a progress bubble must never ring the phone.
-		id, err := p.b.client.Send(ctx, p.b.chatID, text, SendOpt{Silent: true})
+		id, err := p.c.b.client.Send(ctx, p.c.chatID, text, SendOpt{Silent: true})
 		if err != nil {
 			return // no bubble this turn; adds keep trying is pointless — stay quiet
 		}
 		p.msgID = id
-	} else if err := p.b.client.EditPlain(ctx, p.b.chatID, p.msgID, text); err != nil {
+	} else if err := p.c.b.client.EditPlain(ctx, p.c.chatID, p.msgID, text); err != nil {
 		return
 	}
 	p.lastEdit = time.Now()
@@ -105,7 +105,7 @@ func (p *progressBubble) finish(ctx context.Context, keep bool) {
 		p.flush(ctx, true)
 		return
 	}
-	_ = p.b.client.DeleteMessage(ctx, p.b.chatID, p.msgID)
+	_ = p.c.b.client.DeleteMessage(ctx, p.c.chatID, p.msgID)
 }
 
 // toolLine renders one tool call as a compact single line.
@@ -130,8 +130,8 @@ func toolLine(name, rawArgs string) string {
 // drainTurnProgress consumes a turn's event stream like drainTurn while
 // driving the progress bubble. Returns the reply text and whether the turn
 // surfaced an error (the bubble is kept as a breadcrumb then).
-func (b *Bot) drainTurnProgress(ctx context.Context, ch <-chan shell3.Event) (reply string, sawError bool) {
-	p := &progressBubble{b: b}
+func (c *conversation) drainTurnProgress(ctx context.Context, ch <-chan shell3.Event) (reply string, sawError bool) {
+	p := &progressBubble{c: c}
 	var seg strings.Builder
 	var last string
 	var errs strings.Builder

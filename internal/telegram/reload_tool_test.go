@@ -32,7 +32,7 @@ func TestReloadTool_DefersToEndOfTurn(t *testing.T) {
 	if !strings.Contains(out, "scheduled") {
 		t.Fatalf("tool should ack scheduling, got %q", out)
 	}
-	b.applyPendingReload(context.Background())
+	tconv(b).applyPendingReload(context.Background())
 	if reloads != 1 || b.pendingReload {
 		t.Fatalf("end-of-turn should apply once and clear: reloads=%d pending=%v", reloads, b.pendingReload)
 	}

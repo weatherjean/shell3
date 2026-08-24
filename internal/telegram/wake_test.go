@@ -12,9 +12,10 @@ func TestConsumeWakes_PostsReplyAsMail(t *testing.T) {
 	fc := newFakeClient()
 	rt, sess := newFakeRuntime(t, "woke up and ran")
 	b := newBot(t, fc, rt)
-	b.mu.Lock()
-	b.main = sess // a wake is honored only for the main conversation
-	b.mu.Unlock()
+	c := tconv(b)
+	c.mu.Lock()
+	c.main = sess // a wake is honored only for the main conversation
+	c.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -25,9 +26,9 @@ func TestConsumeWakes_PostsReplyAsMail(t *testing.T) {
 	sess.NotifyText("scheduled job result")
 
 	waitFor(t, func() bool {
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		return !b.turnActive && !sess.HasQueuedInput()
+		tconv(b).mu.Lock()
+		defer tconv(b).mu.Unlock()
+		return !tconv(b).turnActive && !sess.HasQueuedInput()
 	})
 	waitFor(t, func() bool {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "✉️ woke up and ran")

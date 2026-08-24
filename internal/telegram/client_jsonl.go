@@ -160,7 +160,9 @@ func (c *JSONLClient) readLoop(ctx context.Context) {
 // media path into bytes. An unreadable or oversized file is skipped with a log
 // line — the turn still runs with the message text.
 func (c *JSONLClient) toMsg(ev jsonlInEvent) Msg {
-	m := Msg{ChatID: c.chatID, ID: ev.ID, ReplyToID: ev.ReplyToID, Text: ev.Text, ReplyTo: ev.ReplyTo, SenderID: ev.SenderID}
+	// One bot on this transport, so a reply is a reply to us.
+	m := Msg{ChatID: c.chatID, ID: ev.ID, ReplyToID: ev.ReplyToID, ReplyToBot: ev.ReplyToID != "",
+		Text: ev.Text, ReplyTo: ev.ReplyTo, SenderID: ev.SenderID}
 	if m.SenderID == 0 {
 		// A front-end that does not model senders (the common case for a
 		// single-operator BYO front-end) is treated as the chat's owner
@@ -308,4 +310,15 @@ func (c *JSONLClient) SendVideo(_ context.Context, _ int64, filename string, dat
 func (c *JSONLClient) EditPlain(_ context.Context, _ int64, msgID string, text string) error {
 	c.emit(jsonlOutEvent{Type: "edit", ID: msgID, Text: text})
 	return nil
+}
+
+// Username is the JSONL transport's fixed identity — a serve front-end
+// addresses the agent by sending it a message, not by @mentioning it, but the
+// bot loop still asks.
+func (c *JSONLClient) Username(context.Context) (string, error) { return "shell3serve", nil }
+
+// ChatInfo reports a stable title for a serve room; the wire protocol carries
+// no chat metadata.
+func (c *JSONLClient) ChatInfo(_ context.Context, chatID int64) (string, string, error) {
+	return "serve", "", nil
 }

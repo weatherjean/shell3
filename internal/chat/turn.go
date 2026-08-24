@@ -259,12 +259,8 @@ func assembleTurnContext(cfg TurnConfig, sess *Session, inboxSeeded bool) (allMs
 	// prompt's timestamp track the disk NOW, not the session-creation
 	// snapshot — a long-lived conversation would otherwise serve stale
 	// context until /new or a restart.
-	sysPrompt := cfg.Personality.SystemPrompt
-	if cfg.RefreshPrompt != nil {
-		if s := cfg.RefreshPrompt(); s != "" {
-			sysPrompt = s
-		}
-	}
+	sysPrompt := renderSystemPrompt(cfg)
+	recordTurnPrompt(cfg, sess, sysPrompt, len(msgs))
 	allMsgs = make([]llm.Message, 0, len(msgs)+1)
 	allMsgs = append(allMsgs, llm.Message{Role: llm.RoleSystem, Content: sysPrompt})
 	allMsgs = append(allMsgs, msgs...)
@@ -617,4 +613,42 @@ func flushMessages(st *runs.Store, lg applog.Logger, sessionID string, msgs []ll
 		}
 	}
 	return len(msgs)
+}
+
+// recordTurnPrompt persists the system prompt this turn is about to run with,
+// so a stored conversation records what the model was TOLD and not only what
+// it said. Content-addressed and skipped when unchanged, so the steady state
+// (nothing edited between turns) costs one hash lookup; see
+// internal/runs/prompts.go.
+//
+// Best-effort by design: a failure here is logged and the turn proceeds. The
+// prompt is a debugging record, and losing it must never cost the user an
+// answer.
+func recordTurnPrompt(cfg TurnConfig, sess *Session, sysPrompt string, seq int) {
+	if cfg.Store == nil || sess == nil || sess.id == "" {
+		return
+	}
+	if err := cfg.Store.SavePrompt(sess.id, seq, sysPrompt, time.Now()); err != nil && cfg.Log != nil {
+		cfg.Log.Warn("persist system prompt failed", "session_id", sess.id, "error", err)
+	}
+}
+
+// renderSystemPrompt is the ONE place a turn's system prompt is assembled:
+// the persona's prompt, replaced by the refresher when one is wired (context
+// files re-read from disk, a fresh timestamp), then the session's own suffix.
+// Both are closures called per turn, so an edit to either source lands on the
+// next turn rather than at the next restart.
+func renderSystemPrompt(cfg TurnConfig) string {
+	sysPrompt := cfg.Personality.SystemPrompt
+	if cfg.RefreshPrompt != nil {
+		if s := cfg.RefreshPrompt(); s != "" {
+			sysPrompt = s
+		}
+	}
+	if cfg.PromptSuffix != nil {
+		if suffix := strings.TrimSpace(cfg.PromptSuffix()); suffix != "" {
+			sysPrompt = strings.TrimRight(sysPrompt, "\n") + "\n\n" + suffix
+		}
+	}
+	return sysPrompt
 }
