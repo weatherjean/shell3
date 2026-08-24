@@ -20,13 +20,14 @@ const maxJobLogBytes = 512 * 1024
 // JobLogHTML renders a background job's captured output — the tee'd
 // runs/<session>/jobs/<id>.log — as a dash fragment. session and id are
 // validated to be single path segments (no traversal), then joined under the
-// runs root. ok is false when the ids are malformed or the log is absent, so
-// the caller answers 404.
+// runs root's own runs/ dir — the layout runs.Store.JobLogPath writes, which
+// this must not re-derive by hand. ok is false when the ids are malformed or
+// the log is absent, so the caller answers 404.
 func JobLogHTML(runsRoot, session, id, tok string) (frag string, ok bool) {
 	if !isSegment(session) || !isSegment(id) {
 		return "", false
 	}
-	path := filepath.Join(runsRoot, session, "jobs", id+".log")
+	path := filepath.Join(runsRoot, "runs", session, "jobs", id+".log")
 	info, err := os.Stat(path)
 	if err != nil || info.IsDir() {
 		return "", false

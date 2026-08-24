@@ -147,16 +147,21 @@ func (s *jobSink) Write(p []byte) (int, error) {
 func (s *jobSink) String() string { return s.ring.String() }
 
 type bgJob struct {
-	id        string
-	kind      JobKind
-	title     string // command text or subagent description
-	agent     string // subagent jobs: the spawned agent's name ("" for commands)
-	parent    *Session
-	parentID  string
-	startedAt time.Time
-	cancel    context.CancelFunc
-	out       *jobSink // live output: command stdout/stderr, or subagent event stream
-	childID   string   // subagent: child runs id (transcript source)
+	id       string
+	kind     JobKind
+	title    string // command text or subagent description
+	agent    string // subagent jobs: the spawned agent's name ("" for commands)
+	parent   *Session
+	parentID string
+	// parentSession is the parent's RUNS session id — the directory a job log
+	// is written under. Distinct from parentID, which is the in-process session
+	// HANDLE ("s1"): a front-end linking to the log needs the runs id, and the
+	// two are not interchangeable.
+	parentSession string
+	startedAt     time.Time
+	cancel        context.CancelFunc
+	out           *jobSink // live output: command stdout/stderr, or subagent event stream
+	childID       string   // subagent: child runs id (transcript source)
 	// direct posts the raw result straight to the user on completion — no
 	// agent turn (the notice still queues on the owner, unwoken). Set from
 	// the bash_bg/task tool's direct:true arg or a cron job's direct:
@@ -364,8 +369,9 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 	chat.ConfigureGroupKill(cmd, bgWaitDelay)
 	j := &bgJob{
 		id: id, kind: JobCommand, title: command, parent: parent,
-		parentID:  parentName(parent),
-		startedAt: time.Now(), cancel: cancel, out: out,
+		parentID:      parentName(parent),
+		parentSession: parentSessionID(parent),
+		startedAt:     time.Now(), cancel: cancel, out: out,
 		direct: direct, note: note, logPath: logPath,
 	}
 	m.jobs[id] = j
@@ -520,7 +526,7 @@ func (m *jobManager) list() []JobInfo {
 	for _, j := range m.jobs {
 		out = append(out, JobInfo{
 			ID: j.id, Cmd: j.title, Agent: j.agent, StartedAt: j.startedAt,
-			Kind: j.kind, ParentID: j.parentID,
+			Kind: j.kind, ParentID: j.parentID, ParentSession: j.parentSession,
 			Done: j.finished, Exit: j.exit, Summary: j.summary,
 			Error: j.errText, EndedAt: j.endedAt,
 			ChildOpen: j.kind == JobSubagent && j.child != nil && !j.childClosed,
@@ -756,7 +762,7 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 	}
 	j := &bgJob{
 		id: id, kind: JobSubagent, title: desc, agent: agent, parent: parent,
-		parentID: pname, startedAt: time.Now(),
+		parentID: pname, parentSession: parentSessionID(parent), startedAt: time.Now(),
 		cancel: cancel, out: out,
 		direct: o.direct, note: o.note, cronJob: o.cronJob, detached: o.detached,
 	}
@@ -1121,6 +1127,15 @@ func parentName(s *Session) string {
 		return ""
 	}
 	return s.name
+}
+
+// parentSessionID is the parent's runs session id ("" with no parent or no
+// store), the directory name its jobs' logs live under.
+func parentSessionID(s *Session) string {
+	if s == nil {
+		return ""
+	}
+	return s.sess.ID()
 }
 
 // formatJobList renders all jobs as a compact listing for the task_list tool.

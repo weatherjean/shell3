@@ -12,6 +12,7 @@ import (
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/cron"
 	"github.com/weatherjean/shell3/internal/dash"
+	"github.com/weatherjean/shell3/internal/runs"
 )
 
 // startFullServer wires the files explorer and cron sources so the new routes
@@ -92,11 +93,19 @@ func TestCronDetailRoute(t *testing.T) {
 
 func TestJobLogRoute(t *testing.T) {
 	root := t.TempDir()
-	logDir := filepath.Join(root, "sess1", "jobs")
-	if err := os.MkdirAll(logDir, 0o755); err != nil {
+	// Derive the path from the store that WRITES it rather than hand-building
+	// a layout: an invented fixture is what let the dash link 404 against
+	// every real install while this test stayed green.
+	st, err := runs.Open(root)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(logDir, "bg1.log"), []byte("job ran ok"), 0o644); err != nil {
+	defer st.Close()
+	logPath := st.JobLogPath("sess1", "bg1")
+	if logPath == "" {
+		t.Fatal("JobLogPath returned empty")
+	}
+	if err := os.WriteFile(logPath, []byte("job ran ok"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	s := startFullServer(t, root, t.TempDir(), nil)

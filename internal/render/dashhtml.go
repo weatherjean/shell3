@@ -106,10 +106,13 @@ func DashIndexHTML(sess *shell3.Session, rt *shell3.Runtime, version string,
 			// A command (bash_bg) job tees its output to a log under its parent
 			// session; link the id to that log. Subagent jobs have no such file
 			// (their result is a task report), so their id stays plain text.
+			// ParentSession, never ParentID: the log is under the parent's RUNS
+			// id, while ParentID is the in-process handle ("s1") and names no
+			// directory — linking with it 404s every job log.
 			idCell := fmt.Sprintf("<code>%s</code>", esc(j.ID))
-			if j.Kind == shell3.JobCommand && j.ParentID != "" {
+			if j.Kind == shell3.JobCommand && j.ParentSession != "" {
 				idCell = fmt.Sprintf("<a href=\"/joblog?session=%s&amp;id=%s&amp;t=%s\"><code>%s</code></a>",
-					urlq(j.ParentID), urlq(j.ID), esc(tok), esc(j.ID))
+					urlq(j.ParentSession), urlq(j.ID), esc(tok), esc(j.ID))
 			}
 			fmt.Fprintf(&b, "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n",
 				idCell, esc(kindOf(j)), esc(jobLabel(j)), esc(state))

@@ -33,11 +33,15 @@ type JobInfo struct {
 	StartedAt time.Time
 	Kind      JobKind
 	ParentID  string
-	Done      bool      // true once the job has finished
-	Exit      *int      // command jobs: exit code (nil while running or for subagents)
-	Summary   string    // subagent jobs: final assistant text (empty for command jobs)
-	Error     string    // subagent jobs: last turn error ("" = clean run)
-	EndedAt   time.Time // zero while running
+	// ParentSession is the parent's runs session id — the directory this job's
+	// tee'd log lives under (runs/<ParentSession>/jobs/<ID>.log). ParentID is
+	// the in-process handle and does NOT name a directory.
+	ParentSession string
+	Done          bool      // true once the job has finished
+	Exit          *int      // command jobs: exit code (nil while running or for subagents)
+	Summary       string    // subagent jobs: final assistant text (empty for command jobs)
+	Error         string    // subagent jobs: last turn error ("" = clean run)
+	EndedAt       time.Time // zero while running
 	// ChildOpen is true for a subagent job whose child session is still open —
 	// either still running its main turn, or lingering after Done=true to run
 	// follow-up turns for a bash_bg that outlived the turn (see bgJob.lingering /
