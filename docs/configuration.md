@@ -699,8 +699,17 @@ job's prompt riding along as context so the agent knows what the job is
 *for*, and its reply reaches you as an ✉️ update only when the run carries
 something worth saying (NO_REPLY stays silent). A periodic checklist therefore only
 speaks up when something needs attention: write its prompt to report
-findings plainly, and the quiet runs stay quiet (no sentinel needed). A
-failed run always surfaces as a ⚠️ alert and never spends an agent turn.
+findings plainly.
+
+Quiet runs stay quiet either way, but they are not free either way. Reading
+the report is a full main-agent turn at live conversation context, and on a
+frequent job that turn is routinely the larger half of what the job costs.
+The turn is skipped only when the JOB'S OWN reply is the `NO_REPLY`
+sentinel — the completion router drops that result before any turn starts —
+so tell the job to end an unremarkable run with exactly `NO_REPLY`. The main
+agent answering `NO_REPLY` after reading the report saves nothing; the turn
+is already spent. A failed run always surfaces as a ⚠️ alert and never
+spends an agent turn.
 
 `direct: true` skips the agent: the raw result posts straight to the chat as
 a ⏰ message, costing no agent turn — for jobs whose output should be

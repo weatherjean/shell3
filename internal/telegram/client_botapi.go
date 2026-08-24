@@ -63,7 +63,28 @@ func NewBotAPIClient(ctx context.Context, token string, lg applog.Logger) (*BotA
 	}
 	c.b = b
 	go b.Start(ctx) // long-polls until ctx cancelled
+	go c.watchHealth(ctx)
 	return c, nil
+}
+
+// watchHealth closes out an outage the chat itself never proves is over. The
+// library only calls onUpdate when someone SENDS something, so in a quiet
+// chat a recovered transport looks identical to a dead one; this ticker
+// notices the errors stopped. It is observability only — nothing here retries
+// or reconnects.
+func (c *BotAPIClient) watchHealth(ctx context.Context) {
+	t := time.NewTicker(pollQuietRecovery / 5)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if recovered, outage, fails := c.health.sweep(); recovered {
+				c.log.Warn("telegram transport recovered", "outage", outage.Round(time.Second).String(), "errors", fails)
+			}
+		}
+	}
 }
 
 func (c *BotAPIClient) onUpdate(ctx context.Context, b *bot.Bot, u *models.Update) {

@@ -412,7 +412,15 @@ interface (`client.go`): `client_botapi.go` wraps go-telegram/bot,
 `shell3 telegram --console` (headless event testing, no credentials, no
 network). `pollhealth.go` records getUpdates/send failures into the app log
 with throttled repeats and a recovery line, so a transport outage is visible
-after the fact; outbound sends retry transient network failures on a short
+after the fact. An outage closes on either of two signals, because the
+library only offers one and it is not enough: an inbound UPDATE (`ok`, from
+`onUpdate`) or `pollQuietRecovery` (5 min) with no further error, swept by a
+ticker (`watchHealth`). Without the sweep a quiet chat left an outage open in
+the log indefinitely and dated its end at the next human message — a
+recovered transport and a dead one read identically. The reported duration
+ends at the LAST error, never at detection, and an intermittent fault
+therefore logs as several short outage/recovery pairs rather than one long
+one: noisier, and true. Outbound sends retry transient network failures on a short
 backoff (`withSendRetry`, ~4.5s of patience) and never retry API
 rejections. At startup the host registers the `/` command menu
 (`BotCommands`), clears any menu button an older build left behind, and greets
@@ -624,8 +632,12 @@ rather than vanishing like a genuinely unknown agent-job figure would.
 Sessions, messages, reminders, and every surface's current-conversation
 marker live in **one SQLite database** (`internal/runs`, modernc.org/sqlite —
 pure Go, no cgo): `.shell3_project/shell3.db`, with an FTS5 index over
-user+assistant message text backing the `history` tool, and the `outbox`
-table (schema v8) holding
+user+assistant message text backing the `history` tool, a `ts` on every
+message row (RFC3339Nano, the same `encTime` shape `sessions` uses, stamped
+from the same clock reading as the session's `last_at` so a message can never
+look newer than its session) so a question about a WINDOW is answerable
+without inferring time from a session's own start and end, and the `outbox`
+table (schema v9) holding
 the restart-durable completion queue — like `cron_status` it is opaque JSON,
 names no session id, and `runs.Sweep` never touches it. Job logs stay plain
 files under `runs/<session>/jobs/<id>.log`. The schema is stamped with `PRAGMA

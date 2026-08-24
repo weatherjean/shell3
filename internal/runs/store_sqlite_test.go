@@ -272,3 +272,40 @@ func TestSweepEndsStaleLiveSessions(t *testing.T) {
 		t.Errorf("recent live session status = %q, want live (may be another process's)", status)
 	}
 }
+
+// Every appended message carries a timestamp in the same shape sessions use,
+// so a question about a window ("how many task reports arrived overnight, how
+// many were answered NO_REPLY") is answerable by a plain string compare —
+// the gap that made the harness review's wasted-report count session-lifetime
+// rather than windowed.
+func TestAppendMessageStampsTime(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _ := st.NewSession(Meta{Workdir: "/w", ConfigDir: "/c"})
+	before := time.Now().UTC().Add(-time.Second)
+	if err := st.AppendMessage(id, llm.Message{Role: llm.RoleUser, Content: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var ts, lastAt string
+	if err := st.db.QueryRow(`SELECT ts FROM messages WHERE session_id=? AND seq=0`, id).Scan(&ts); err != nil {
+		t.Fatal(err)
+	}
+	got := decTime(ts)
+	if got.IsZero() {
+		t.Fatalf("ts %q does not parse as %s", ts, time.RFC3339Nano)
+	}
+	if got.Before(before) || got.After(time.Now().UTC().Add(time.Second)) {
+		t.Fatalf("ts %s is not around now", got)
+	}
+	// The row and the session's recency come from ONE clock reading, so a
+	// message can never look newer than the session holding it.
+	if err := st.db.QueryRow(`SELECT last_at FROM sessions WHERE id=?`, id).Scan(&lastAt); err != nil {
+		t.Fatal(err)
+	}
+	if lastAt != ts {
+		t.Fatalf("session last_at %q != message ts %q", lastAt, ts)
+	}
+}

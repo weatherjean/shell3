@@ -233,6 +233,17 @@ the scheduler arms with, so a schedule that loads is a schedule that boots.
 The function under the block holds the prompt in a heredoc, exactly as an
 agent's own prompt does.
 
+An `agent:` job's result comes back as a task report the main agent has to
+read and judge, and that judgment is a full turn at live conversation
+context — routinely the majority of what a frequent job costs. The judgment
+is skipped entirely when the job's OWN reply ends with the `NO_REPLY`
+sentinel: the completion router drops that result before any turn starts. So
+say so in the prompt — *"if the run found nothing, reply with exactly
+NO_REPLY"* — and keep the summary for runs that carry something. A prompt
+that ends with a summary unconditionally buys a main-agent turn on every
+tick, and the sentinel has to come from the JOB: the main agent answering
+`NO_REPLY` after reading the report has already spent the turn.
+
 A block takes exactly one of `agent:` or `tool:` — a job is either a prompt
 or a tool call, never both, never neither. On a cron block those two keys are
 the job's *target*, not a nested declaration. `tool:` skips the agent

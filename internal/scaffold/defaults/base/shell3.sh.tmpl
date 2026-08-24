@@ -372,6 +372,10 @@ main_gate() {
 #   result reaches the main agent as a task report, which posts an ✉️ update
 #   only when the run carries something worth saying. `direct: true` skips
 #   that judgment turn and posts the raw result instead, costing no tokens.
+#   Judging costs a full main-agent turn at live conversation context, so
+#   tell the job to end an unremarkable run with exactly NO_REPLY: that
+#   result is dropped before any turn is spent. A prompt that always ends
+#   with a summary (however short) buys a turn on every single tick.
 #
 #   a TOOL job — `tool: <name>` runs a declared tool with no model turn at
 #   all. It binds no function and takes no prompt. Silent on an empty result,
@@ -396,6 +400,6 @@ main_gate() {
 # - Anything urgent on disk or in the running jobs that needs my human?
 #
 # If something needs attention, reply with a concise alert and nothing else.
-# If nothing does, say briefly that all is quiet.
+# If nothing does, reply with exactly NO_REPLY — that costs no main-agent turn.
 # EOF
 # }

@@ -79,8 +79,12 @@ func (s *Store) AppendMessage(id string, m llm.Message) error {
 	).Scan(&seq); err != nil {
 		return fmt.Errorf("runs: append message: %w", err)
 	}
+	// One clock reading for both the row and the session's recency, so a
+	// message can never look newer than the session that holds it.
+	now := time.Now()
 	if _, err := tx.Exec(
-		`INSERT INTO messages (session_id, seq, json) VALUES (?,?,?)`, id, seq, string(b),
+		`INSERT INTO messages (session_id, seq, json, ts) VALUES (?,?,?,?)`,
+		id, seq, string(b), encTime(now),
 	); err != nil {
 		return fmt.Errorf("runs: append message: %w", err)
 	}
@@ -93,7 +97,7 @@ func (s *Store) AppendMessage(id string, m llm.Message) error {
 		}
 	}
 	if _, err := tx.Exec(
-		`UPDATE sessions SET last_at=? WHERE id=?`, encTime(time.Now()), id,
+		`UPDATE sessions SET last_at=? WHERE id=?`, encTime(now), id,
 	); err != nil {
 		return fmt.Errorf("runs: append message: %w", err)
 	}

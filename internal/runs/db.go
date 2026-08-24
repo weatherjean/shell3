@@ -59,16 +59,20 @@ func (s *Store) Close() error {
 // deleted and recreated (see openDB), so no code ever reads an older shape.
 // The current tables live in schema.go; when one changes, bump this.
 //
-// Version 8 is the current shape: sessions/messages/reminders/messages_fts,
+// Version 9 is the current shape: sessions/messages/reminders/messages_fts,
 // threads(surface PRIMARY KEY, session_id) for each front-end's current
 // conversation, cron_status(name, json) for cron's per-job run history, and
-// outbox(id, kind, json) for the restart-durable completion queue.
+// outbox(id, kind, json) for the restart-durable completion queue. Since v9
+// messages carries ts (RFC3339Nano, the same encTime shape sessions uses), so
+// a question about a window — how many task reports arrived last night, how
+// many were answered NO_REPLY — can be answered without inferring time from
+// the session's own start and end.
 // cron_status and outbox are their OWN tables rather than rows in threads:
 // threads.session_id is trusted elsewhere to be a real session id — runs.Sweep
 // prunes any threads row whose session_id doesn't name a live session — so a
 // job name or a JSON blob in that column would be deleted by the very next
 // startup's janitor pass, before it could be read back.
-const schemaVersion = 8
+const schemaVersion = 9
 
 // openDB opens path, applying the schema fresh or recreating the file
 // outright when its stamped version doesn't match schemaVersion. Per the
@@ -298,6 +302,7 @@ CREATE TABLE IF NOT EXISTS messages (
 	session_id TEXT    NOT NULL,
 	seq        INTEGER NOT NULL,
 	json       TEXT    NOT NULL,
+	ts         TEXT    NOT NULL DEFAULT '',
 	PRIMARY KEY (session_id, seq)
 );
 CREATE TABLE IF NOT EXISTS reminders (
