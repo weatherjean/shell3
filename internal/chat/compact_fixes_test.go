@@ -109,9 +109,9 @@ func TestRunTurn_QueuedCompact_FewLargeMessages(t *testing.T) {
 	cfg := TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
-		Log:         LogOrNoop(nil),
 		// auto-compaction would not trigger; tiny tail.
 		AgentKnobs: AgentKnobs{CompactAt: 100000, KeepRecent: 20},
+		ToolConfig: ToolConfig{Log: LogOrNoop(nil)},
 	}
 	sess, c := newCollectorSession(SessionOpts{})
 	big := strings.Repeat("x", 8000) // ~2000 tokens each
@@ -146,8 +146,8 @@ func TestCompactNow_ResetsContextGauge(t *testing.T) {
 	cfg := TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
-		Log:         LogOrNoop(nil),
 		AgentKnobs:  AgentKnobs{CompactAt: 100, KeepRecent: 25},
+		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
 	}
 	sess, _ := newCollectorSession(SessionOpts{})
 	seedHistory(sess, "MARKER", 500)

@@ -437,7 +437,16 @@ The function prints a verdict to stdout:
 | `{"command": "…"}` | Rewrite the bash command. Bash tools only — fails closed elsewhere. |
 | `{"argv": ["…"]}` | Exec exactly this argv (runner swap). `bash`/`bash_bg` only. |
 
-When several keys are set, precedence is block > review > argv > command. A
+When several keys are set, precedence is block > review > argv > command.
+
+Every verdict that changes what runs — block, rewrite, and both halves of a
+review — writes one WARN line to the app log (`~/.shell3/shell3.log`) naming
+the tool, the command and the reason, each truncated to 300 bytes. A pass logs
+nothing: the gate runs before every tool call, so logging allows would bury
+the refusals. `grep gate ~/.shell3/shell3.log` answers "has the gate refused
+anything?".
+
+A
 function that exits nonzero, prints malformed JSON, or runs past 10 s **fails
 closed** (blocks, with the failure as the reason). An `{"ask": …}` verdict
 also fails closed, with a reason naming the removal — there is no ask verdict,

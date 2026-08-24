@@ -23,8 +23,8 @@ func TestRefreshPromptRerendersPerTurn(t *testing.T) {
 		LLM:           fake,
 		Personality:   persona.Persona{SystemPrompt: "stale snapshot"},
 		RefreshPrompt: func() string { return current },
-		Log:           LogOrNoop(nil),
 		AgentKnobs:    AgentKnobs{ContextWindow: 4096},
+		ToolConfig:    ToolConfig{Log: LogOrNoop(nil)},
 	}
 	sess, _ := newCollectorSession(SessionOpts{})
 
@@ -56,8 +56,8 @@ func TestRefreshPromptNilOrEmptyKeepsSnapshot(t *testing.T) {
 			LLM:           fake,
 			Personality:   persona.Persona{SystemPrompt: "construction prompt"},
 			RefreshPrompt: refresh,
-			Log:           LogOrNoop(nil),
 			AgentKnobs:    AgentKnobs{ContextWindow: 4096},
+			ToolConfig:    ToolConfig{Log: LogOrNoop(nil)},
 		}
 		sess, _ := newCollectorSession(SessionOpts{})
 		RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "q"}, nil)

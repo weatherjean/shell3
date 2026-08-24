@@ -21,7 +21,7 @@ func newReportSession(t *testing.T, scripts ...fakellm.Script) (*Session, *fakel
 		{Events: []llm.StreamEvent{{TextDelta: "Done — moved."}, {Done: true}}},
 	}, scripts...)...)
 	sess, _ := newCollectorSession(SessionOpts{})
-	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "sys"}, Log: LogOrNoop(nil)}
+	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "sys"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "move the files"}, nil)
 	return sess, fake, cfg
 }
@@ -120,7 +120,7 @@ func TestFollowUpTurnCanSeeWhyItSpoke(t *testing.T) {
 func TestReminderStillRidesCurrentUserMessage(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}, {Done: true}}})
 	sess, _ := newCollectorSession(SessionOpts{})
-	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "sys"}, Log: LogOrNoop(nil)}
+	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "sys"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	sess.Interject("also check the logs")
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "deploy it"}, nil)
 

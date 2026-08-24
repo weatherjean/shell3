@@ -184,8 +184,8 @@ func runToolCallTurn(t *testing.T, lc *config.LoadedConfig, dir, prompt string, 
 		LLM:         fake,
 		Personality: persona.Persona{Name: "base", SystemPrompt: "you are a test", Tools: toolDefs},
 		StatusLine:  "test │ x",
-		Log:         applog.Noop{},
 		ToolConfig: chat.ToolConfig{
+			Log:     applog.Noop{},
 			WorkDir: dir,
 			RunToolCall: func(ctx context.Context, name, command, argsJSON string, headless bool) chat.ToolCallVerdict {
 				return agentsetup.BridgeVerdict(lc.RunToolCall(ctx, "main", name, command, argsJSON, headless))

@@ -20,7 +20,7 @@ func TestEmptyInboxSeededTurn_DoesNotPersistEmptyUserMessage(t *testing.T) {
 	sess, _ := newCollectorSession(SessionOpts{})
 	sess.Interject("do the queued thing")
 
-	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, Log: LogOrNoop(nil)}
+	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	// Mirror RunQueued: an empty initiating user message; the inbox supplies input.
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: ""}, nil)
 
@@ -40,7 +40,7 @@ func TestEmptyInboxSeededTurn_QueuedTextReachesWire(t *testing.T) {
 	sess, _ := newCollectorSession(SessionOpts{})
 	sess.Interject("do the queued thing")
 
-	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, Log: LogOrNoop(nil)}
+	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: ""}, nil)
 
 	calls := fake.CallsSnapshot()
@@ -74,7 +74,7 @@ func TestWhitespaceOnlyInboxSeededTurn_NoProviderCall(t *testing.T) {
 	sess, _ := newCollectorSession(SessionOpts{})
 	sess.Interject("   \n\t  ") // whitespace-only steering text, no parts
 
-	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, Log: LogOrNoop(nil)}
+	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	// Mirror RunQueued: an empty initiating user message; the inbox supplies input.
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: ""}, nil)
 
@@ -94,7 +94,7 @@ func TestNormalTurn_PersistsUserMessage(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
 	sess, _ := newCollectorSession(SessionOpts{})
 
-	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, Log: LogOrNoop(nil)}
+	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "hello"}, nil)
 
 	var found bool

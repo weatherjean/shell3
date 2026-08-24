@@ -330,7 +330,18 @@ unattended, where an ask is a denial with a delay — a legacy hook printing
 `{"ask": …}` fails closed with a reason naming the removal, never silently
 allows. Precedence when several keys are set: block > review > argv >
 command.
-Nonzero exit, malformed JSON, or timeout **fails closed**. A `note:` function
+Nonzero exit, malformed JSON, or timeout **fails closed**. Every verdict that
+CHANGES what runs — block, rewrite, and both halves of a review — logs one
+WARN line to the app log (`chat.logGateVerdict`, tool + command + reason,
+each capped at `gateLogFieldCap` 300 bytes because a command line can carry a
+secret the app log is not the place for); an ALLOW logs NOTHING, since the
+gate runs before every tool call and logging passes would bury the refusals in
+the noise they exist to stand out from. Without this the only record of a
+refusal was the block text inside one transcript, so "has the gate ever fired?"
+was unanswerable without reading every run. `applog.Logger` therefore lives on
+`ToolConfig`, not `TurnConfig` (it is promoted through the embed, so every
+`cfg.Log` caller is unchanged): the bash family self-gates inside its handler,
+which only ever sees a ToolConfig. A `note:` function
 can rewrite a tool's output (e.g. redact secrets): stdin
 `{"name","args","output"}`, stdout `{"output": …}`; a failure here also fails
 closed (output replaced by an error notice, never passed through

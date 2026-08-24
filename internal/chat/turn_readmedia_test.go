@@ -54,7 +54,7 @@ func TestRunTurn_ReadMedia_InjectsMediaUserMessage(t *testing.T) {
 	cfg := TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
-		Log:         LogOrNoop(nil),
+		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	_, sess := collectTurn(t, context.Background(), cfg, "what is this")
@@ -108,7 +108,7 @@ func TestRunTurn_ReadMedia_InjectsAudioUserMessage(t *testing.T) {
 	cfg := TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
-		Log:         LogOrNoop(nil),
+		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	_, sess := collectTurn(t, context.Background(), cfg, "listen to this")
@@ -169,7 +169,7 @@ func TestRunTurn_ReadMedia_ErrorQueuesNoMedia(t *testing.T) {
 	cfg := TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
-		Log:         LogOrNoop(nil),
+		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	_, sess := collectTurn(t, context.Background(), cfg, "look")
@@ -209,7 +209,7 @@ func TestRunTurn_ReadMedia_MultipleInOneRound(t *testing.T) {
 	cfg := TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
-		Log:         LogOrNoop(nil),
+		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	_, sess := collectTurn(t, context.Background(), cfg, "look at both")

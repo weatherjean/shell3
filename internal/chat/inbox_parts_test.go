@@ -21,7 +21,7 @@ func TestRunParts_UserMessageCarriesParts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, Log: LogOrNoop(nil)}
+	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	sess.RunParts(context.Background(), cfg, "what is this", []llm.ContentPart{img})
 
 	msgs := fake.Calls[0].Msgs
@@ -46,7 +46,7 @@ func TestRunParts_EmptyText_NoEmptyTextPart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, Log: LogOrNoop(nil)}
+	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	sess.RunParts(context.Background(), cfg, "", []llm.ContentPart{img})
 
 	msgs := fake.Calls[0].Msgs
@@ -61,7 +61,7 @@ func TestRunParts_EmptyText_NoEmptyTextPart(t *testing.T) {
 func TestRunParts_NoParts_PlainMessage(t *testing.T) {
 	fake := fakellm.New(fakellm.Script{Events: []llm.StreamEvent{{TextDelta: "ok"}}})
 	sess, _ := newCollectorSession(SessionOpts{})
-	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, Log: LogOrNoop(nil)}
+	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	sess.RunParts(context.Background(), cfg, "hi", nil)
 	msgs := fake.Calls[0].Msgs
 	if last := msgs[len(msgs)-1]; last.Content != "hi" || last.ContentParts != nil {
@@ -112,7 +112,7 @@ func TestInterject_PartsMidTurn_DeliveredAfterRound(t *testing.T) {
 				sess.Interject("look at this", img)
 				return "echoed", nil
 			}}},
-		Log: LogOrNoop(nil),
+		ToolConfig: ToolConfig{Log: LogOrNoop(nil)},
 	}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "go"}, nil)
 
@@ -151,7 +151,7 @@ func TestInterject_PartsIdle_DeliveredNextTurn(t *testing.T) {
 	}
 	sess.Interject("voice note", aud)
 
-	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, Log: LogOrNoop(nil)}
+	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "hi"}, nil)
 
 	msgs := fake.Calls[0].Msgs

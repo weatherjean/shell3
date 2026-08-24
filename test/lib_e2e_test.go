@@ -39,7 +39,7 @@ func TestLibE2E_SingleTurn(t *testing.T) {
 		LLM:         fake,
 		Personality: persona.Persona{Name: "base", SystemPrompt: "you are a test", Tools: nil},
 		StatusLine:  "test │ model",
-		Log:         applog.Noop{},
+		ToolConfig:  chat.ToolConfig{Log: applog.Noop{}},
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

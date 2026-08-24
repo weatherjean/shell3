@@ -47,8 +47,8 @@ func TestWarnFixedOverhead_FiresWhenSystemPromptDominates(t *testing.T) {
 	cfg := TurnConfig{
 		// ~4 chars/token: 40k chars of prompt against a 1000-token threshold.
 		Personality: persona.Persona{SystemPrompt: strings.Repeat("brain ", 8000)},
-		Log:         log,
 		AgentKnobs:  AgentKnobs{CompactAt: 1000},
+		ToolConfig:  ToolConfig{Log: log},
 	}
 	sess := &Session{}
 
@@ -73,8 +73,8 @@ func TestWarnFixedOverhead_SilentWhenSystemPromptIsSmall(t *testing.T) {
 	log := &capturingLog{}
 	cfg := TurnConfig{
 		Personality: persona.Persona{SystemPrompt: "you are a helpful agent"},
-		Log:         log,
 		AgentKnobs:  AgentKnobs{CompactAt: 1000},
+		ToolConfig:  ToolConfig{Log: log},
 	}
 	warnFixedOverhead(cfg, &Session{})
 	if got := log.matching(overheadWarnSub); got != 0 {
@@ -90,8 +90,8 @@ func TestWarnFixedOverhead_MeasuresRefreshedPrompt(t *testing.T) {
 	cfg := TurnConfig{
 		Personality:   persona.Persona{SystemPrompt: "small at build time"},
 		RefreshPrompt: func() string { return strings.Repeat("grown ", 8000) },
-		Log:           log,
 		AgentKnobs:    AgentKnobs{CompactAt: 1000},
+		ToolConfig:    ToolConfig{Log: log},
 	}
 	warnFixedOverhead(cfg, &Session{})
 	if got := log.matching(overheadWarnSub); got != 1 {

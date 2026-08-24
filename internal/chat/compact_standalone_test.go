@@ -17,8 +17,8 @@ func standaloneCfg(fake *fakellm.Client) TurnConfig {
 	return TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
-		Log:         LogOrNoop(nil),
 		AgentKnobs:  AgentKnobs{CompactAt: 100000, KeepRecent: 20},
+		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
 	}
 }
 

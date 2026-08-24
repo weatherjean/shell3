@@ -19,7 +19,7 @@ func TestInterject_IdleQueuesForNextTurn(t *testing.T) {
 	sess, c := newCollectorSession(SessionOpts{})
 	sess.Interject("actually use repo B")
 
-	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, Log: LogOrNoop(nil)}
+	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "hi"}, nil)
 
 	events := c.all()
@@ -59,7 +59,7 @@ func TestInterject_MidTurnInjectsNextRound(t *testing.T) {
 				sess.Interject("stop, wrong file")
 				return "echoed", nil
 			}}},
-		Log: LogOrNoop(nil),
+		ToolConfig: ToolConfig{Log: LogOrNoop(nil)},
 	}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "go"}, nil)
 
@@ -88,7 +88,7 @@ func TestInterject_MultipleInterjectionsDrainIntoOneReminder(t *testing.T) {
 	sess.Interject("first note")
 	sess.Interject("second note")
 
-	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, Log: LogOrNoop(nil)}
+	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "hi"}, nil)
 
 	events := c.all()
@@ -135,7 +135,7 @@ func TestInterject_CrossGoroutine(t *testing.T) {
 				<-done
 				return "worked", nil
 			}}},
-		Log: LogOrNoop(nil),
+		ToolConfig: ToolConfig{Log: LogOrNoop(nil)},
 	}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "go"}, nil)
 
@@ -158,7 +158,7 @@ func TestInterjectNotice_DeliveredWithNoticeHeader(t *testing.T) {
 	sess, c := newCollectorSession(SessionOpts{})
 	sess.InterjectNotice("subagent x finished (done). Result: built the thing")
 
-	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, Log: LogOrNoop(nil)}
+	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "hi"}, nil)
 
 	var rem string
@@ -198,7 +198,7 @@ func TestInterjectNotice_NotDeliveredMidTurn(t *testing.T) {
 				sess.InterjectNotice("subagent bg1 finished (done).")
 				return "echoed", nil
 			}}},
-		Log: LogOrNoop(nil),
+		ToolConfig: ToolConfig{Log: LogOrNoop(nil)},
 	}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "go"}, nil)
 
@@ -221,7 +221,7 @@ func TestInterject_WhitespaceOnly_NoSystemReminder(t *testing.T) {
 	sess, c := newCollectorSession(SessionOpts{})
 	sess.Interject("   ") // whitespace only
 
-	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, Log: LogOrNoop(nil)}
+	cfg := TurnConfig{LLM: fake, Personality: persona.Persona{SystemPrompt: "t"}, ToolConfig: ToolConfig{Log: LogOrNoop(nil)}}
 	RunTurn(context.Background(), cfg, sess, llm.Message{Role: llm.RoleUser, Content: "hi"}, nil)
 
 	events := c.all()

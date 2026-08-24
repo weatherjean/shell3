@@ -50,9 +50,9 @@ func TestRunTurn_AutoCompact_TailWireValid_SecondTurn(t *testing.T) {
 	cfg := TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
-		Log:         LogOrNoop(nil),
 		// KeepRecent keeps roughly the last three messages as the tail.
 		AgentKnobs: AgentKnobs{CompactAt: 100, KeepRecent: 25},
+		ToolConfig: ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	sess, c := newCollectorSession(SessionOpts{})

@@ -20,10 +20,10 @@ func TestCompactStandalone_ForcesBelowThreshold(t *testing.T) {
 	cfg := TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
-		Log:         LogOrNoop(nil),
 		// high CompactAt: auto-compaction would NOT trigger on its own; small
 		// KeepRecent tail so the seeded history has a head to summarize.
 		AgentKnobs: AgentKnobs{CompactAt: 100000, KeepRecent: 20},
+		ToolConfig: ToolConfig{Log: LogOrNoop(nil)},
 	}
 	sess, c := newCollectorSession(SessionOpts{})
 	seedHistory(sess, "PRE_COMPACT_MARKER", 500) // 500 << 100000
@@ -54,8 +54,8 @@ func TestCompactStandalone_ZeroCompactAtKeepsTail(t *testing.T) {
 	cfg := TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
-		Log:         LogOrNoop(nil),
 		AgentKnobs:  AgentKnobs{CompactAt: 0}, // auto-compaction off; only the forced path can compact
+		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
 	}
 	sess, c := newCollectorSession(SessionOpts{})
 	// History long enough that the floor yields a real head/tail split: big

@@ -80,8 +80,8 @@ func TestResume_RestoresPersistedPromptTokens_CompactsFirstTurn(t *testing.T) {
 	cfg := TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
-		Log:         LogOrNoop(nil),
 		AgentKnobs:  AgentKnobs{CompactAt: 100, KeepRecent: 10},
+		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	// Swap the collector sink in so we can assert the compacted event.

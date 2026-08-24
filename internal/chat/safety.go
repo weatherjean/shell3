@@ -2,6 +2,8 @@ package chat
 
 import (
 	"context"
+
+	"github.com/weatherjean/shell3/internal/strutil"
 )
 
 // ToolCallAction is the disposition of a tool-call hook chain run.
@@ -27,6 +29,31 @@ type ToolCallVerdict struct {
 	// for a non-bash tool and must fail closed — including a {command=""} rewrite,
 	// whose argv is byte-identical to a pass and so cannot be told apart by shape.
 	Passthrough bool
+}
+
+// gateLogFieldCap bounds how much of a command or reason reaches the app log.
+// The gate sees every command the model runs, and a command line can carry a
+// secret the operator deliberately keeps in .env — the app log is a plain file
+// with none of that file's care around it, so it gets a summary, never a
+// transcript. The full command is already in the run replay.
+const gateLogFieldCap = 300
+
+// logGateVerdict records a gate decision the operator would otherwise never
+// see. An ALLOW is silent on purpose: the gate runs before EVERY tool call, so
+// logging passes would bury the refusals in the noise they exist to stand out
+// from. Everything else — a block, a rewrite, either half of a review — is a
+// rule firing, which is what "has the gate ever done anything?" actually asks.
+// Warn for all of them: a rewrite is not an error, but it changed what ran,
+// and Info is not enabled on a normal install.
+func logGateVerdict(cfg ToolConfig, verdict, name, command, reason string) {
+	fields := []any{"tool", name}
+	if command != "" {
+		fields = append(fields, "command", strutil.Truncate(command, gateLogFieldCap))
+	}
+	if reason != "" {
+		fields = append(fields, "reason", strutil.Truncate(reason, gateLogFieldCap))
+	}
+	LogOrNoop(cfg.Log).Warn("gate "+verdict, fields...)
 }
 
 // resolveGate maps a verdict's disposition to allow/deny, the part every tool
@@ -89,11 +116,13 @@ func gateNonBashTool(ctx context.Context, cfg ToolConfig, name, argsJSON string)
 		// Review is bash-only in v1: the reviewer assesses a shell command
 		// string; there is no equivalent rendering for a structured tool
 		// call, so this fails closed like command/argv verdicts do.
+		logGateVerdict(cfg, "blocked", name, "", "review verdict on a non-bash tool fails closed: "+v.Reason)
 		return "error: blocked by tool-call hook: a {review} verdict applies only to bash tools, not " +
 			name + " — soft deny fails closed.", true
 	}
 	allowed, msg := resolveGate(v)
 	if !allowed {
+		logGateVerdict(cfg, "blocked", name, "", v.Reason)
 		return msg, true
 	}
 	// A pure pass (no handler produced a command/argv verdict) is the only Run
@@ -102,6 +131,7 @@ func gateNonBashTool(ctx context.Context, cfg ToolConfig, name, argsJSON string)
 	// shape — is bash-only and fails closed here. (An ask-approved call is
 	// exempt: the human explicitly approved this exact invocation.)
 	if v.Action == ActionRun && !v.Passthrough {
+		logGateVerdict(cfg, "blocked", name, "", "a command/argv rewrite verdict applies only to bash tools")
 		return "error: blocked by tool-call hook: a {command=...} or {argv=...} verdict " +
 			"applies only to bash tools, not " + name + ".", true
 	}

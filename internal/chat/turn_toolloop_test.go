@@ -70,7 +70,7 @@ func TestRunTurn_ToolRoundTrip(t *testing.T) {
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
 		Handlers:    map[string]ToolHandler{"echo": stubHandler{name: "echo", out: "echoed"}},
-		Log:         LogOrNoop(nil),
+		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	events, sess := collectTurn(t, context.Background(), cfg, "hi")
@@ -115,7 +115,7 @@ func TestRunTurn_UnknownTool(t *testing.T) {
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
 		Handlers:    map[string]ToolHandler{},
-		Log:         LogOrNoop(nil),
+		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	events, sess := collectTurn(t, context.Background(), cfg, "hi")
@@ -163,8 +163,8 @@ func TestRunTurn_MidLoopCtxCancel_EmitsError(t *testing.T) {
 		Personality: persona.Persona{SystemPrompt: "test"},
 		// The handler cancels during the first call; the next iteration's ctx
 		// check trips and ends the turn with error.
-		Handlers: map[string]ToolHandler{"echo": stubHandler{name: "echo", out: "echoed", onExec: cancel}},
-		Log:      LogOrNoop(nil),
+		Handlers:   map[string]ToolHandler{"echo": stubHandler{name: "echo", out: "echoed", onExec: cancel}},
+		ToolConfig: ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	events, _ := collectTurn(t, ctx, cfg, "hi")
@@ -197,7 +197,7 @@ func TestRunTurn_MidLoopCtxCancel_PairsAllToolCalls(t *testing.T) {
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
 		Handlers:    map[string]ToolHandler{"echo": stubHandler{name: "echo", out: "echoed", onExec: cancel}},
-		Log:         LogOrNoop(nil),
+		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	_, sess := collectTurn(t, ctx, cfg, "hi")
@@ -275,8 +275,8 @@ func TestRunTurn_AutoCompact_Triggers(t *testing.T) {
 	cfg := TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
-		Log:         LogOrNoop(nil),
 		AgentKnobs:  AgentKnobs{CompactAt: 100},
+		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	sess, c := newCollectorSession(SessionOpts{})
@@ -319,8 +319,8 @@ func TestRunTurn_AutoCompact_Disabled(t *testing.T) {
 	cfg := TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
-		Log:         LogOrNoop(nil),
 		AgentKnobs:  AgentKnobs{CompactAt: 0},
+		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	sess, _ := newCollectorSession(SessionOpts{})
@@ -346,8 +346,8 @@ func TestRunTurn_AutoCompact_FirstTurnNeverCompacts(t *testing.T) {
 	cfg := TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
-		Log:         LogOrNoop(nil),
 		AgentKnobs:  AgentKnobs{CompactAt: 1},
+		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	sess, _ := newCollectorSession(SessionOpts{})
@@ -377,8 +377,8 @@ func TestRunTurn_AutoCompact_FailSafe(t *testing.T) {
 	cfg := TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
-		Log:         LogOrNoop(nil),
 		AgentKnobs:  AgentKnobs{CompactAt: 100},
+		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	sess, c := newCollectorSession(SessionOpts{})
@@ -417,7 +417,7 @@ func TestRunTurn_CtxCancel_PreservesTypedError(t *testing.T) {
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
 		Handlers:    map[string]ToolHandler{"echo": stubHandler{name: "echo", out: "echoed", onExec: cancel}},
-		Log:         LogOrNoop(nil),
+		ToolConfig:  ToolConfig{Log: LogOrNoop(nil)},
 	}
 
 	events, _ := collectTurn(t, ctx, cfg, "hi")

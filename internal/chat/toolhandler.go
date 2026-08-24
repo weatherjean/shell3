@@ -84,6 +84,13 @@ type ToolConfig struct {
 	// message for the model. reason is the hook's flag description. Nil =
 	// no reviewer wired → a review verdict fails closed. Config-global.
 	ReviewToolCall func(ctx context.Context, name, command, reason string) (approved bool, denyMsg string)
+	// Log is the turn-scoped logger, promoted onto TurnConfig by the embed so
+	// every existing cfg.Log caller reads unchanged. It lives HERE rather than
+	// on TurnConfig because the bash family self-gates inside its handler,
+	// which only ever sees a ToolConfig — and a gate verdict the operator never
+	// hears about is the whole reason this field moved down. Nil is safe via
+	// LogOrNoop.
+	Log applog.Logger
 }
 
 // TurnConfig holds all dependencies needed for one user→assistant turn. It
@@ -123,8 +130,6 @@ type TurnConfig struct {
 	// Handlers maps tool name to built-in implementation. Built once via
 	// NewHandlers and shared across turns.
 	Handlers map[string]ToolHandler
-	// Log is the turn-scoped logger. Nil is safe via LogOrNoop.
-	Log applog.Logger
 	// HostTool dispatches a host-registered Go tool (internal/shell3.RegisterHostTool)
 	// by name, returning its result string. Names in HostToolNames route here.
 	// Nil = none registered.

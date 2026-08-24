@@ -70,8 +70,7 @@ func TestRun_PersistsHistoryBeforeTurnDone(t *testing.T) {
 	cfg := TurnConfig{
 		LLM:         llmClient,
 		Personality: persona.Persona{SystemPrompt: "test"},
-		ToolConfig:  ToolConfig{Store: st},
-		Log:         LogOrNoop(nil),
+		ToolConfig:  ToolConfig{Store: st, Log: LogOrNoop(nil)},
 	}
 
 	sess.Run(context.Background(), cfg, "hi there")

@@ -72,15 +72,19 @@ func gateBash(ctx context.Context, cfg ToolConfig, name, command, argsJSON strin
 		// command (a review carries no rewrite); denied blocks with the
 		// reviewer's message; no reviewer wired fails closed.
 		if msg, blocked := resolveReview(ctx, cfg, name, command, v.Reason); blocked {
+			logGateVerdict(cfg, "review denied", name, command, v.Reason)
 			return nil, msg, true
 		}
+		logGateVerdict(cfg, "review approved", name, command, v.Reason)
 		return []string{"bash", "-c", command}, "", false
 	}
 	allowed, msg := resolveGate(v)
 	if !allowed {
+		logGateVerdict(cfg, "blocked", name, command, v.Reason)
 		return nil, msg, true
 	}
 	if len(v.Argv) > 0 {
+		logGateVerdict(cfg, "rewrote command", name, command, v.Reason)
 		return v.Argv, "", false
 	}
 	return []string{"bash", "-c", command}, "", false

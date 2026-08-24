@@ -51,6 +51,13 @@ What the scaffold's `gate:` function refuses, and why:
   every new project a refusal until someone edits the file, which is how
   gates get turned off.
 
+Every gate decision that blocks, rewrites, or goes to the reviewer writes a
+`gate …` WARN line to the app log (`~/.shell3/shell3.log`), with the tool,
+the command and the reason truncated to 300 bytes each. Allowed calls are not
+logged — the gate runs before every tool call, so passes would drown the
+refusals. `grep gate ~/.shell3/shell3.log` is the answer to "has anything been
+refused?".
+
 Every rule decides immediately — there is no ask verdict or approval prompt
 to park a turn on — and each refusal tells the model to raise the block with
 the operator rather than route around it. The script is short bash with the

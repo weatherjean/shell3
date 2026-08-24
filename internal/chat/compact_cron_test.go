@@ -50,12 +50,11 @@ func TestRunTurn_AutoCompact_CronJobSurvivesRoll(t *testing.T) {
 	cfg := TurnConfig{
 		LLM:         fake,
 		Personality: persona.Persona{SystemPrompt: "test"},
-		Log:         LogOrNoop(nil),
 		ConfigDir:   "/cfg",
 		Agent:       "syncer",
 		CronJob:     "nightly-sync",
 		AgentKnobs:  AgentKnobs{CompactAt: 100, KeepRecent: 25},
-		ToolConfig:  ToolConfig{Store: st},
+		ToolConfig:  ToolConfig{Store: st, Log: LogOrNoop(nil)},
 	}
 
 	sess := NewSession(SessionOpts{StoreID: origID, Store: st})
