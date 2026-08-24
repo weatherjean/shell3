@@ -92,7 +92,8 @@ walkthrough is in [docs/cli.md](docs/cli.md).
 | `shell3 telegram` | Run the bot front-end + cron (the service). |
 | `shell3 boot`     | Scaffold the config + `.env` interactively. |
 | `shell3 health`   | Load the config strictly; fail on any warning. |
-| `shell3 ask "…"`  | Ask the agent locally with full verbose output; no message = interactive loop; `-p` for scripting; `--resume` continues the last session; `--agent <name>` runs one subagent turn and prints only its reply, for batch scripts. |
+| `shell3 ask "…"`  | Ask the agent locally with full verbose output; `-p` for scripting; `--agent <name>` runs one subagent turn and prints only its reply, for batch scripts. |
+| `shell3 ask`      | No message: opens the full-screen terminal chat — the local alternative to Telegram, on its own conversation. `--resume` continues it. |
 | `shell3 tool`     | `check`, `run`, and `test` the tools declared in a kit — the author's loop. Takes the kit path as an argument. |
 
 `telegram`, `ask` and `health` take `--config/-c` to point at a

@@ -71,17 +71,12 @@ func newSession(cfg chat.Config, opts SessionOpts) *Session {
 	var seedTokens int     // persisted provider-reported prompt tokens for a resumed session
 	var resumedFrom string // non-empty when this session reattached to an existing run
 	if cfg.Store != nil {
-		// Reattach to the newest matching session when asked (and no explicit
-		// ResumeID is given) so a front-end restart rejoins its conversation
-		// instead of spawning a fresh run each boot.
+		// A front-end that wants to rejoin its conversation resolves the id
+		// itself, from its OWN thread marker in the runs store (see
+		// Store.CurrentSession): "newest session matching this workdir" is not
+		// a conversation identity — with two front-ends live it reattaches to
+		// whichever one spoke last.
 		resumeID := opts.ResumeID
-		if resumeID == "" && opts.ResumeLatest {
-			if id, found, err := cfg.Store.LatestSession(cfg.WorkDir, cfg.ConfigDir); err != nil {
-				chat.LogOrNoop(cfg.Log).Warn("resume-latest lookup failed", "error", err)
-			} else if found {
-				resumeID = id
-			}
-		}
 		switch {
 		case resumeID != "":
 			storeID = resumeID

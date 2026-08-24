@@ -29,9 +29,10 @@ type SessionOpts struct {
 	WorkDir string
 	// Headless injects the headless reminder (no human to answer questions).
 	Headless bool
-	// ParentID marks this as a subagent child of the given runs session. It is
-	// recorded in the child's meta so resume-latest skips it (a child must never
-	// become the session a front-end reattaches to on restart).
+	// ParentID marks this as a subagent child of the given runs session,
+	// recorded in the child's meta (see runs.Meta.ParentID): the dash groups a
+	// job's transcript under the conversation that spawned it, and the runs
+	// janitor never deletes a message-less session other rows name as parent.
 	ParentID string
 	// CronJob names the cron job that started this session ("" for a
 	// front-end or task-tool session). Recorded in the session's meta so a
@@ -42,13 +43,12 @@ type SessionOpts struct {
 	// every turn (see chat.Config.PromptSuffix). A Telegram front-end uses it
 	// to give each chat its own standing brief; nil appends nothing.
 	PromptSuffix func() string
-	// ResumeID reloads a stored session's messages when non-empty.
+	// ResumeID reloads a stored session's messages when non-empty. A front-end
+	// that wants to rejoin its own conversation across restarts records the id
+	// under its own surface in the runs store's threads table and passes it
+	// back here — there is deliberately no "resume the newest session" option,
+	// because with two front-ends live that reattaches to whichever spoke last.
 	ResumeID string
-	// ResumeLatest reattaches to the newest stored session matching this
-	// session's workdir+config (instead of starting fresh) when ResumeID is empty.
-	// Falls back to a new session when none exists. A front-end sets this to
-	// rejoin the live conversation rather than spawning empty sessions on restart.
-	ResumeLatest bool
 }
 
 // HostEventKind discriminates out-of-turn runtime events.

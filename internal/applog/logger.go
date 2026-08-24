@@ -38,6 +38,24 @@ type Logger interface {
 	Error(msg string, err error, fields ...any)
 }
 
+// MirrorSetter is implemented by a Logger whose Warn/Error stderr mirror can
+// be redirected. A full-screen front-end asserts for it and mirrors to
+// io.Discard while it owns the terminal: it does not own stderr, so a WARN
+// written mid-frame paints raw text over the rendered screen and stays there
+// until the next full redraw. The line still reaches the log file either way —
+// only the mirror is silenced, and only for as long as the screen is held.
+type MirrorSetter interface {
+	SetMirror(w io.Writer)
+}
+
+// SetMirror redirects the Warn/Error stderr mirror. Pass io.Discard to
+// silence it; pass os.Stderr to restore the default.
+func (l *fileLogger) SetMirror(w io.Writer) {
+	l.mu.Lock()
+	l.stderr = w
+	l.mu.Unlock()
+}
+
 // Noop discards all log output. Use in tests.
 type Noop struct{}
 

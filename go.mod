@@ -3,12 +3,18 @@ module github.com/weatherjean/shell3
 go 1.26.6
 
 require (
+	charm.land/bubbles/v2 v2.1.1
+	charm.land/bubbletea/v2 v2.0.9
 	charm.land/fang/v2 v2.0.1
 	charm.land/glamour/v2 v2.0.1
 	charm.land/huh/v2 v2.0.3
 	charm.land/lipgloss/v2 v2.0.6
+	github.com/atotto/clipboard v0.1.4
 	github.com/aymanbagabas/go-udiff v0.4.1
+	github.com/charmbracelet/ultraviolet v0.0.0-20260812204455-68fa937c71be
+	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/go-telegram/bot v1.23.0
+	github.com/lucasb-eyer/go-colorful v1.4.1
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/openai/openai-go/v3 v3.52.0
 	github.com/robfig/cron/v3 v3.0.1
@@ -21,15 +27,10 @@ require (
 )
 
 require (
-	charm.land/bubbles/v2 v2.1.1 // indirect
-	charm.land/bubbletea/v2 v2.0.9 // indirect
 	github.com/alecthomas/chroma/v2 v2.27.0 // indirect
-	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/catppuccin/go v0.3.0 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
-	github.com/charmbracelet/ultraviolet v0.0.0-20260812204455-68fa937c71be // indirect
-	github.com/charmbracelet/x/ansi v0.11.8 // indirect
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20260816001655-68d539dca504 // indirect
 	github.com/charmbracelet/x/exp/ordered v0.1.0 // indirect
 	github.com/charmbracelet/x/exp/slice v0.0.0-20260816001655-68d539dca504 // indirect
@@ -45,7 +46,6 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mattn/go-runewidth v0.0.28 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect

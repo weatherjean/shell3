@@ -1,7 +1,6 @@
 package runs
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -302,24 +301,6 @@ func (s *Store) TruncateReminders(id string) error {
 		return fmt.Errorf("runs: truncate reminders: %w", err)
 	}
 	return nil
-}
-
-// LatestSession returns the newest top-level session ID matching
-// workdir+configDir. Subagent child sessions are skipped: they share the
-// parent's workdir+config and sort newer, and resume-latest must only ever
-// rejoin a top-level conversation.
-func (s *Store) LatestSession(workdir, configDir string) (string, bool, error) {
-	var id string
-	err := s.db.QueryRow(`SELECT id FROM sessions
-		WHERE parent_id='' AND workdir=? AND config_dir=?
-		ORDER BY id DESC LIMIT 1`, workdir, configDir).Scan(&id)
-	if err == sql.ErrNoRows {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", false, fmt.Errorf("runs: latest session: %w", err)
-	}
-	return id, true, nil
 }
 
 // deleteSessions removes the given sessions' rows (messages, reminders,

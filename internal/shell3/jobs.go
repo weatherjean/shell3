@@ -786,9 +786,10 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 		Agent:    agent,
 		WorkDir:  resolveChildWorkDir(parent.opts.WorkDir, o.workDir, m.rt.workDir),
 		Headless: true,
-		// Mark the child so resume-latest never reattaches a front-end to this
-		// subagent transcript on restart (it shares the parent's workdir+config
-		// and sorts newer).
+		// Record the parent so the child's runs row is attributable as a
+		// subagent transcript rather than a conversation of its own — the dash
+		// groups by it, and the janitor's empty-trash rule spares a
+		// message-less session that other rows still name as their parent.
 		ParentID: parent.sess.ID(),
 		CronJob:  o.cronJob,
 	})

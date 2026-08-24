@@ -842,12 +842,66 @@ inferred from whether the install's own agent declares `media`; a reload
 applies it
 (`runPromptRefresh` in cmd/shell3/bootprompts.go, rendered by
 `scaffold.PromptFiles`).
-`shell3 ask "…"` is the terminal front-end (`internal/cli`): it drives the same
-agent with full verbose output (every tool call/result, reasoning, token usage;
-no message = an interactive multi-turn loop; `-p` for headless; `--resume`
-continues the latest session; host-agnostic — reads nothing from the
-`telegram:` block, and installs no CompletionHost, so its verbose view sees
-every completion raw). `--agent <name>` is its scripting seam
+`shell3 ask` is the terminal front-end, and it has TWO faces. WITH a message
+(argv, `-p`, `--agent`) it is the one-shot scriptable renderer
+(`internal/cli`): full verbose output — every tool call/result, reasoning,
+token usage — on stdout, `-p` for headless. WITHOUT one it opens the
+full-screen chat UI (`internal/askui`), the terminal alternative to Telegram:
+bubbletea + bubbles + lipgloss, always-live input (no modes), collapsible
+tool/thinking blocks, glamour-rendered markdown replies, a light/dark palette
+sensed from the terminal (`tea.RequestBackgroundColor`), and a footer carrying
+model + `ctx: N%` + `bg: N` + the agent badge. Enter sends; enter DURING a
+turn steers it (`Session.Interject`) rather than queueing a second turn;
+ctrl+c stops the turn and only then arms the quit. The KEYBOARD's fold key is
+all-or-nothing (`ctrl+o`: collapse what is open, else expand everything) and
+has no per-block form, because the always-live input rules out plain keys and
+a keyboard block cursor costs more than it returns — the MOUSE is how you
+point at one block. The mouse is captured (`MouseModeCellMotion`: button,
+wheel, and drag motion, not a report per pixel) and `mouse.go` drives every
+gesture at once — wheel scrolls, drag selects with edge-scrolling past the
+page, release copies, click folds ONE block (a click in the blank area under
+a short transcript folds nothing: `eventLine` clamps a y past the last
+content line so a DRAG still selects to the end, and reports that it clamped
+so a CLICK there is ignored). Capturing it takes the
+terminal's own click-drag selection away, which is precisely why the old
+TUI's line-selection machinery IS ported back (`reverseContent` over an
+ultraviolet cell grid, so the highlight survives the SGR resets glamour bakes
+into colored content; a plain background style would be switched off
+mid-line). Copy is WYSIWYG through the `excluded` mask that `renderBlocks`
+returns: a line that is never highlighted — system reminders, the thinking
+indicator, block separators — is never copied, and `selectedText` consults
+the same mask. `copyToClipboard` writes BOTH transports (OSC 52 via
+`tea.SetClipboard` for SSH, and atotto/clipboard for terminals without it,
+e.g. Apple Terminal) because either alone leaves a common setup with nothing
+in the clipboard. `ask` installs no
+CompletionHost, so a finished background job's notice lands straight in the
+session's inbox with a Wake: the plain path drains it in
+`cli.FollowAskJobs`, and the UI drains it in `handleWake` — the two are the
+same contract, and dropping either loses a subagent's result. The UI does not
+own stderr, so it silences applog's WARN/ERROR mirror for as long as it holds
+the alternate screen (`applog.MirrorSetter`, restored on a deferred call):
+a gate refusal logged mid-frame otherwise paints raw text across the render
+and stays until the next full redraw. The chat UI is also NEVER headless
+(`askHeadless`) — it opens only once `requireTerminal` proves a terminal on
+stdin AND stdout with a human typing, so `shell3 ask 2>log` must not mark a
+live session headless the way an stderr-only test did. `ask` is
+host-agnostic: it reads nothing from the `telegram:` block.
+
+`ask` keeps its OWN conversation, and this is load-bearing now that both
+front-ends run at once: `--resume` follows ask's thread marker (the `ask`
+surface in the runs `threads` table, `askSurface` in cmd/shell3/ask.go). The
+older `SessionOpts.ResumeLatest` — reattach to the newest session matching
+workdir+configDir — was DELETED with this change rather than left unused:
+"newest session here" is not a conversation identity, and with two front-ends
+live it reattaches to whichever spoke last, which is exactly the bug. Every
+front-end now resolves its own id from its own surface and passes `ResumeID`. A missing marker (first
+run) or one pointing at a session the janitor swept resolves to a fresh
+conversation rather than an error. The marker is written for a FRESH session
+too — otherwise the first `--resume` after a fresh run has nothing to follow —
+but NOT by `--agent`, which refuses `--resume` because it holds no
+conversation and so must not leave a batch script's empty parent session as
+the next `--resume` target.
+`--agent <name>` is its scripting seam
 (`cmd/shell3/askagent.go`): one headless turn of a kit-declared employee
 via `Session.Dispatch`, printing ONLY the reply on stdout (diagnostics to
 stderr), waiting for Done && !ChildOpen so a lingering bash_bg can't truncate
@@ -855,8 +909,8 @@ it, exiting nonzero on a failed or empty run. It exists so batch scripts stop
 hand-rolling HTTP clients against the model — a shell-out inherits the real
 adapter (reasoning split, thinkleak, truncation detection) and a tool-capable
 turn, instead of reimplementing the parsing half. It refuses `--resume` (each
-run is a fresh child session) and requires a message (there is no interactive
-form to fall back to).
+run is a fresh child session) and requires a message (it never opens the
+chat UI).
 `telegram`, `ask`, `boot`, `tool`, and `health` are the whole
 command tree. The one bound listener is the read-only web dash on
 `127.0.0.1:<dash_port>` (see the commands section); there is no command that
@@ -902,7 +956,8 @@ internal/telegram/     the chat front-end: bot loop + transports (Bot API, conso
 internal/render/       HTML renderers for the web dash (DashIndexHTML, RunsPageHTML, RunReplayHTML) + shared formatting helpers
 internal/dash/         the web dash: token store (1h TTL, constant-time) + read-only HTTP server on 127.0.0.1, wired by cmd/shell3/dashwiring.go
 internal/cron/         robfig/cron scheduler dispatching subagent jobs on Session.Dispatch
-internal/cli/          terminal front-end helpers: shell3 ask renderers, brand banner
+internal/askui/        the shell3 ask chat UI: bubbletea model/view/keys/mouse, transcript blocks + selection, palette, markdown cache
+internal/cli/          terminal front-end helpers: shell3 ask one-shot renderers, brand banner
 internal/chat/         conversation loop, tools, events
 internal/llm/          Provider/Streamer interfaces, request params, types (+ fakellm)
 internal/persona/      runtime carrier for an agent's prompt/tools/params (data only)

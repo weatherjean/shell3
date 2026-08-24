@@ -3,34 +3,34 @@
 package main
 
 import (
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 
-	huh "charm.land/huh/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/weatherjean/shell3/internal/askui"
 	"github.com/weatherjean/shell3/internal/cli"
+	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/shell3"
 )
-
-// errAskAborted is returned by askPrompt when the user hits ctrl+c at the huh
-// input. The loop matches on it to exit cleanly (vs. a real error).
-var errAskAborted = errors.New("ask: aborted")
 
 // askResumeHint tells the user how to pick the conversation back up.
 func askResumeHint() string { return "↩ continue this conversation: shell3 ask --resume" }
 
 // newAskCommand builds `shell3 ask` — a local driver for the same config +
-// agent the bot runs, printing full verbose output (reply, every tool
-// call + args, untruncated tool results, reasoning, token usage). It exists to
-// drive and polish the agent without a Telegram chat; it is also handy
-// for quick local queries and troubleshooting. With no message it opens an
-// interactive multi-turn chat in this terminal; --resume continues the latest
-// session so successive invocations form one conversation.
+// agent the bot runs. It exists to drive and polish the agent without a
+// Telegram chat; it is also handy for quick local queries and troubleshooting.
+//
+// It has two faces. With NO message it opens the full-screen chat UI
+// (internal/askui) — a real terminal alternative to the Telegram front-end.
+// With a message (argv, -p, or --agent) it stays a one-shot scriptable
+// command, printing full verbose output (reply, every tool call + args,
+// untruncated tool results, reasoning, token usage) to stdout.
+//
+// Either way the conversation is ask's OWN, never a Telegram room's:
+// --resume follows ask's thread marker, so both front-ends can run at once.
 func newAskCommand() *cobra.Command {
 	var (
 		configDir  string
@@ -61,20 +61,14 @@ func newAskCommand() *cobra.Command {
 					return fmt.Errorf("ask: --agent runs a fresh subagent job, so it cannot --resume")
 				}
 			}
-			// interactive: no message given. The first prompt is read below;
-			// each completed turn then reads another.
+			// interactive: no message given → the full-screen chat UI, which
+			// reads every message itself. A run with no terminal to draw on
+			// must pass its message instead.
 			interactive := prompt == ""
 			if interactive {
-				// No message given: ask for one interactively (headless runs
-				// must pass it, e.g. shell3 ask -p "list the files here").
-				var err error
-				if prompt, err = askPrompt(); err != nil {
-					if errors.Is(err, errAskAborted) {
-						return nil // ctrl+c before anything ran: no hint
-					}
+				if err := requireTerminal(); err != nil {
 					return err
 				}
-				echoPrompt(os.Stdout, prompt)
 			}
 			ctx := cmd.Context()
 
@@ -92,117 +86,147 @@ func newAskCommand() *cobra.Command {
 
 			// Sessions run in the config dir (the runtime root), the same
 			// default the hosts use. ask is host-agnostic: it reads nothing
-			// from the telegram block. Headless when scripted (-p) or without
-			// a TTY on both ends — the hook payload's headless flag says so.
-			// --agent counts as scripted however the message arrived (-p or
-			// argv): there is no human in its turn, so the hook payload must
-			// say headless even when it was launched from a terminal.
-			headless := !interactiveTTY(promptFlag != "" || agentFlag != "", term.IsTerminal(int(os.Stdin.Fd())), term.IsTerminal(int(os.Stderr.Fd())))
+			// from the telegram block.
+			headless := askHeadless(interactive, promptFlag != "" || agentFlag != "",
+				term.IsTerminal(int(os.Stdin.Fd())), term.IsTerminal(int(os.Stderr.Fd())))
+			// ask keeps its OWN conversation, separate from every Telegram
+			// room's: --resume follows ask's own thread marker rather than
+			// "the newest session in this workdir", which would reattach to
+			// whatever the bot was last talking in. Both front-ends can run at
+			// once without either one inheriting the other's context.
+			resumeID := ""
+			if resume {
+				resumeID = askResumeID(rt.Parts().Store())
+			}
 			sess, err := rt.Session(shell3.SessionOpts{
-				Name:         "ask",
-				WorkDir:      resolved,
-				ResumeLatest: resume,
-				Headless:     headless,
+				Name:     "ask",
+				WorkDir:  resolved,
+				ResumeID: resumeID,
+				Headless: headless,
 			})
 			if err != nil {
 				return err
 			}
-
 			// --agent: dispatch the named subagent and print only its reply.
-			// This returns before the interactive loop below — a scripted run
-			// has no second turn to read.
+			// This returns before the chat below — a scripted run has no second
+			// turn to read. It claims no resume marker either: it refuses
+			// --resume because it holds no conversation, so a batch script
+			// looping over it must not leave the user's next --resume pointing
+			// at its empty parent session.
 			if agentFlag != "" {
 				fmt.Fprintf(os.Stderr, "config=%s\n", resolved)
 				return runAskAgent(ctx, os.Stdout, os.Stderr, sess, agentFlag, prompt)
 			}
 
+			// Record this session as ask's current conversation so the NEXT
+			// --resume finds it. Written for a fresh session too — otherwise the
+			// first --resume after a fresh run has no marker to follow.
+			rememberAskSession(rt.Parts().Store(), sess.ID())
+
+			// Interactive: hand the terminal to the chat UI, which owns input,
+			// rendering, and the background-job wake loop for the rest of the
+			// run. It draws on the alternate screen, so the banner above is
+			// hidden while it runs and restored on exit.
+			if interactive {
+				if err := askui.Run(ctx, rt, sess, resumeID != ""); err != nil {
+					return err
+				}
+				fmt.Println(askResumeHint())
+				return nil
+			}
+
 			// The brand banner already printed from the root PersistentPreRun.
 			fmt.Printf("agent=%s  config=%s\n\n", sess.ActiveAgent(), resolved)
 
-			// One turn per iteration, all on the SAME session. In interactive
-			// mode each completed turn reads another message, so the process
-			// becomes a real multi-turn local chat until ctrl+c.
-			for {
-				if err := cli.RunAskTurn(ctx, os.Stdout, sess, prompt); err != nil {
-					return err
-				}
-				// Follow through on any subagent/bash_bg jobs the turn spawned, so
-				// ask shows their results the way the bot's wake loop would.
-				// This blocks until those in-process jobs complete (SIGINT to quit):
-				// a -p run must never exit at turn end and silently kill in-flight work.
-				if err := cli.FollowAskJobs(ctx, os.Stdout, rt, sess); err != nil {
-					return err
-				}
-				if !interactive {
-					break
-				}
-				next, err := askPrompt()
-				if err != nil {
-					if errors.Is(err, errAskAborted) {
-						break // ctrl+c: clean exit, resume hint below
-					}
-					return err
-				}
-				prompt = next
-				fmt.Println()
-				echoPrompt(os.Stdout, prompt)
+			if err := cli.RunAskTurn(ctx, os.Stdout, sess, prompt); err != nil {
+				return err
+			}
+			// Follow through on any subagent/bash_bg jobs the turn spawned, so
+			// ask shows their results the way the bot's wake loop would.
+			// This blocks until those in-process jobs complete (SIGINT to quit):
+			// a -p run must never exit at turn end and silently kill in-flight work.
+			if err := cli.FollowAskJobs(ctx, os.Stdout, rt, sess); err != nil {
+				return err
 			}
 			fmt.Println("\n" + askResumeHint())
 			return nil
 		},
 	}
 	addConfigFlag(cmd, &configDir)
-	cmd.Flags().StringVarP(&promptFlag, "prompt", "p", "", "Message for the agent (skips the interactive prompt)")
-	cmd.Flags().BoolVar(&resume, "resume", false, "Continue the latest session (multi-turn across invocations)")
+	cmd.Flags().StringVarP(&promptFlag, "prompt", "p", "", "Message for the agent (skips the chat UI — for scripts and headless runs)")
+	cmd.Flags().BoolVar(&resume, "resume", false, "Continue ask's own last conversation (separate from the Telegram chat)")
 	cmd.Flags().StringVar(&agentFlag, "agent", "", "Run one headless turn of this subagent and print only its reply (for scripts)")
 	return cmd
 }
 
-// interactiveTTY reports whether `ask` has a human plausibly at the terminal:
-// not scripted (-p) and a TTY on both stdin and stderr. Its inverse is the
-// session's Headless flag, which the tool-call hook payload sees as
-// .headless. Pure so the wiring is unit-testable without a real terminal.
-func interactiveTTY(scripted, stdinTTY, stderrTTY bool) bool {
-	return !scripted && stdinTTY && stderrTTY
+// askHeadless decides the session's Headless flag — what a gate script reads
+// as .headless, i.e. "is there a human who could be asked about this". Pure so
+// the wiring is unit-testable without a real terminal.
+//
+// The chat UI is never headless: it only starts once requireTerminal has
+// proved a real terminal on stdin AND stdout, and a human is typing into it.
+// Where stderr points is irrelevant there — `shell3 ask 2>log` still has
+// someone at the keyboard, and judging the UI by stderr marked a live session
+// headless.
+//
+// Otherwise a human is plausibly present only when the run is not scripted
+// and both stdin and stderr are terminals. --agent counts as scripted however
+// its message arrived (-p or argv): no human is in its turn, so its payload
+// must say headless even when it was launched from a terminal.
+func askHeadless(interactive, scripted, stdinTTY, stderrTTY bool) bool {
+	if interactive {
+		return false
+	}
+	return scripted || !stdinTTY || !stderrTTY
 }
 
-// echoPrompt writes back the message the interactive huh form just collected.
-// The form clears its own input line on submit, so without this the user's
-// own message never appears anywhere in the terminal transcript — only the
-// interactive TTY path needs it (askPrompt's caller): argv/-p mode is
-// unchanged because the shell already echoed the command line.
-func echoPrompt(w io.Writer, msg string) {
-	fmt.Fprintln(w, cli.Meta("you › ")+msg)
-}
-
-// askPrompt asks for the message with a brand-themed huh input when no argument
-// or -p was given. It returns errAskAborted when the user hits ctrl+c so the
-// caller can exit cleanly. Headless invocations (no TTY) get an error pointing
-// at -p instead.
-func askPrompt() (string, error) {
-	// Both ends must be a terminal: the form reads keys from stdin and renders
-	// its TUI to stdout (a piped stdout would capture control codes). A
-	// zero-size terminal (degenerate PTYs: CI, expect without stty) counts as
-	// no terminal — bubbletea's layout panics at width 0.
+// requireTerminal refuses the interactive chat UI when there is nothing to
+// draw on. Both ends must be a terminal: the UI reads keys from stdin and
+// renders to stdout (a piped stdout would capture control codes). A zero-size
+// terminal (degenerate PTYs: CI, expect without stty) counts as no terminal —
+// bubbletea's layout panics at width 0.
+func requireTerminal() error {
 	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
-		return "", fmt.Errorf(`ask: no message and no terminal — pass one, e.g. shell3 ask -p "list the files here"`)
+		return fmt.Errorf(`ask: no message and no terminal — pass one, e.g. shell3 ask -p "list the files here"`)
 	}
 	if w, h, err := term.GetSize(int(os.Stdout.Fd())); err != nil || w <= 0 || h <= 0 {
-		return "", fmt.Errorf(`ask: terminal reports no size — pass the message instead, e.g. shell3 ask -p "list the files here"`)
+		return fmt.Errorf(`ask: terminal reports no size — pass the message instead, e.g. shell3 ask -p "list the files here"`)
 	}
-	var prompt string
-	form := huh.NewForm(huh.NewGroup(
-		huh.NewInput().Title("Message").
-			Placeholder("what should the agent do?").
-			Description("enter to send · ctrl+c to exit").
-			Validate(huh.ValidateNotEmpty()).
-			Value(&prompt),
-	)).WithTheme(cli.HuhTheme())
-	if err := form.Run(); err != nil {
-		if errors.Is(err, huh.ErrUserAborted) {
-			return "", errAskAborted
-		}
-		return "", fmt.Errorf("ask: %w", err)
+	return nil
+}
+
+// askSurface is the thread-index key for `shell3 ask`'s own conversation. It
+// is namespaced away from the Telegram front-end's "telegram:<chat>" keys, so
+// --resume rejoins the terminal conversation and never a chat room's — the two
+// front-ends share one runs store and can run at the same time.
+const askSurface = "ask"
+
+// askResumeID returns the session --resume should reattach to: ask's own
+// recorded conversation, if it still exists. A missing marker (first run) or a
+// swept session (the runs janitor) resolves to "", which starts a fresh
+// conversation rather than failing.
+func askResumeID(st *runs.Store) string {
+	if st == nil {
+		return ""
 	}
-	return prompt, nil
+	id, ok := st.CurrentSession(askSurface)
+	if !ok || id == "" {
+		return ""
+	}
+	if _, err := st.SessionMeta(id); err != nil {
+		return ""
+	}
+	return id
+}
+
+// rememberAskSession records sess as ask's current conversation for the next
+// --resume. Best-effort: a failed write costs the next run its resume, never
+// this run its turn.
+func rememberAskSession(st *runs.Store, id string) {
+	if st == nil || id == "" {
+		return
+	}
+	if err := st.SetCurrentSession(askSurface, id); err != nil {
+		fmt.Fprintf(os.Stderr, "ask: could not record the conversation for --resume: %v\n", err)
+	}
 }

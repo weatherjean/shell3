@@ -226,23 +226,73 @@ completions. `ask` is host-agnostic: it reads nothing from the `telegram:`
 block (its session runs in the config dir) and shares the same runs store, so
 the bot and `ask` see each other's history.
 
-**Headless runs.** With `-p` (scripted) or no TTY there is no human attached,
-so the run is **headless**: hook scripts see `headless: true` in their
-payload and can gate accordingly. There is no approval prompt in either mode
-— a hook allows, rewrites, runner-swaps, or blocks, and that's the whole
-vocabulary.
+**Headless runs.** With `-p` (scripted), with `--agent`, or with no TTY there
+is no human attached, so the run is **headless**: gate scripts see
+`headless: true` in their payload and can refuse accordingly. The chat UI is
+never headless — it only opens with a real terminal on both ends and someone
+typing into it, whatever `stderr` is redirected to. There is no approval
+prompt in either mode: a gate allows, rewrites, runner-swaps, soft-denies to
+the reviewer, or blocks, and that's the whole vocabulary.
 
 ```sh
-shell3 ask                        # no message: opens an interactive multi-turn chat
+shell3 ask                        # no message: opens the full-screen chat UI
 shell3 ask "list the files here and summarize this project"
 shell3 ask -p "same, as a flag"   # -p/--prompt, for scripts and headless runs
-shell3 ask --resume               # continue the latest session (multi-turn across invocations)
+shell3 ask --resume               # continue ask's own last conversation
 ```
 
-With no message and a terminal attached, `ask` opens an interactive loop:
-each completed turn (and any jobs it spawned) reads another message, until
-ctrl+c. A headless invocation (no TTY) must pass a message via an argument or
-`-p`.
+### The chat UI
+
+With **no message** and a terminal attached, `ask` opens a full-screen chat
+(`internal/askui`) — the terminal alternative to the Telegram front-end. The
+input is always live, so there are no modes: type and press enter. Assistant
+replies render as markdown; each tool call and thinking block is a collapsible
+one-line summary you expand when you want the detail; the footer carries the
+model, its context fill, the running background-job count, and the active
+agent. It adapts to a light or dark terminal.
+
+| key | does |
+| --- | --- |
+| `enter` | send |
+| `shift+↵` | newline (`alt+↵` / `ctrl+j` also work) |
+| `enter` **during a turn** | steer the running turn (delivered at the next round boundary) |
+| `ctrl+o` | fold every tool and thinking block · again unfolds them all |
+| `pgup` / `pgdn` | scroll a page (scrolling up unsticks the view from the bottom) |
+| `ctrl+c` | stop the running turn · with nothing running, again to quit |
+
+The mouse does three things at once, and none of them takes a mode:
+
+| mouse | does |
+| --- | --- |
+| wheel | scroll the transcript |
+| drag | select lines — the selection highlights as you go, and dragging past the top or bottom edge scrolls to extend it |
+| release | copy the selection (OSC 52 **and** the native clipboard, so it works over SSH and in terminals without OSC 52) |
+| click | fold or unfold the one block you clicked |
+
+Copy is WYSIWYG: host chrome that is never highlighted — system reminders, the
+thinking indicator line, the gaps between blocks — is never copied either.
+Reasoning *content* is ordinary selectable text; only its indicator line is
+excluded.
+
+The keyboard's `ctrl+o` is deliberately all-or-nothing rather than a per-block
+toggle: the input is always live, so a plain key can't be a binding, and
+click-to-fold already covers "that one block". Your terminal's own click-drag
+selection is unavailable while the app runs (a full-screen app that captures
+the mouse always takes it); the app's own selection replaces it, and holding
+Shift still falls through to the terminal's if you prefer it.
+
+A headless invocation (no TTY, or a terminal reporting no size) must pass a
+message via an argument or `-p` — there is nothing to draw on.
+
+### One conversation per front-end
+
+`ask` keeps its **own** conversation, separate from every Telegram room's. A
+plain `ask` starts a fresh session; `--resume` follows ask's own thread marker
+(the `ask` surface in the runs store's `threads` table), never "the newest
+session in this workdir" — which, with the bot running, would be whatever chat
+it last answered in. Run the bot and `ask` at the same time and neither
+inherits the other's context; both still share the runs store, so each sees
+the other's history through the `history` tool and the dash.
 
 **Background jobs and `-p`.** When a turn spawns a subagent or `bash_bg` job,
 `ask` stays alive after the turn ends and waits for those in-process jobs to

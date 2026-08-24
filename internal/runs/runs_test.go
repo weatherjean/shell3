@@ -3,7 +3,6 @@ package runs
 import (
 	"os"
 	"testing"
-	"time"
 
 	"github.com/weatherjean/shell3/internal/llm"
 )
@@ -74,40 +73,6 @@ func TestNewSession_RecordsCronJob(t *testing.T) {
 	}
 	if got.CronJob != "bookmarks-tick" {
 		t.Fatalf("CronJob = %q, want bookmarks-tick", got.CronJob)
-	}
-}
-
-func TestLatestSession(t *testing.T) {
-	s, _ := Open(t.TempDir() + "/.shell3_project")
-	_, _ = s.NewSession(Meta{Workdir: "/w", ConfigDir: "/c"})
-	id2, _ := s.NewSession(Meta{Workdir: "/w", ConfigDir: "/c"})
-	got, found, err := s.LatestSession("/w", "/c")
-	if err != nil || !found || got != id2 {
-		t.Fatalf("LatestSession got=%q found=%v err=%v want=%q", got, found, err, id2)
-	}
-	if _, found, _ := s.LatestSession("/other", "/c"); found {
-		t.Fatal("expected no match for /other")
-	}
-}
-
-// A subagent's child session (ParentID set) is a newer run than the main
-// session but shares its workdir+config. resume-latest must skip it — otherwise
-// a front-end restart reattaches to the subagent's transcript and silently
-// replaces the user's conversation.
-func TestLatestSessionSkipsChildSessions(t *testing.T) {
-	s, _ := Open(t.TempDir() + "/.shell3_project")
-	mainID, _ := s.NewSession(Meta{Workdir: "/w", ConfigDir: "/c"})
-	time.Sleep(2 * time.Millisecond) // guarantee the child sorts newer by id
-	childID, _ := s.NewSession(Meta{Workdir: "/w", ConfigDir: "/c", ParentID: mainID})
-	got, found, err := s.LatestSession("/w", "/c")
-	if err != nil || !found {
-		t.Fatalf("LatestSession found=%v err=%v", found, err)
-	}
-	if got == childID {
-		t.Fatal("resume-latest returned the subagent child session — it must be skipped")
-	}
-	if got != mainID {
-		t.Fatalf("LatestSession got=%q, want main %q", got, mainID)
 	}
 }
 

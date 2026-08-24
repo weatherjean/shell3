@@ -21,13 +21,6 @@ var (
 	askLabel  = lipgloss.NewStyle().Foreground(bannerPrimary).Bold(true) // brand yellow
 )
 
-// Meta renders s in the dim meta-line style used throughout `shell3 ask`'s
-// verbose output (roundtrip token counts, retries, compaction notices). It is
-// exported so other ask-adjacent callers outside this package (e.g. cmd/shell3's
-// interactive-prompt echo) can match the same brand color without hardcoding
-// it a second time.
-func Meta(s string) string { return askMeta.Render(s) }
-
 // errAskTurnFailed is returned when any turn event carried an error.
 var errAskTurnFailed = errors.New("turn ended with error")
 
