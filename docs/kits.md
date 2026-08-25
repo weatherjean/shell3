@@ -262,10 +262,13 @@ idempotent sync often), `⏰ <job>: <result>` otherwise, and `⚠️ <job> faile
 <error>` on error — capped at 120s, the same limit a foreground `bash` call
 gets.
 
-`direct: true` applies only to an `agent:` job: it posts the run's raw result
-straight to the chat instead of spending a main-agent turn to judge it. A
-tool job already posts its own result, so setting both is a load error rather
-than a silent no-op.
+`report:` applies only to an `agent:` job and is the one axis for what the
+tick's finish does to the chat: `auto` (the default) spends a main-agent turn
+to judge the result, `raw` posts it straight to the chat instead and spends
+no turn, `always` spends the turn and requires it to answer. A tool job runs
+no model turn, so setting both is a load error rather than a silent no-op —
+as is the pre-`report:` spelling `direct: true`, which fails naming its
+replacement.
 
 Every target resolves at load, next to the check that a `gate:` names a real
 agent — an unknown agent, an unknown tool, a tool needing an argument, a

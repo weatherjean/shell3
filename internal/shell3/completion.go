@@ -23,11 +23,15 @@ func (m *jobManager) isClosing() bool {
 //     additionally mailed so the agent can react. An ownerless failure (cron)
 //     starts NO fresh turn — a broken schedule must not burn a main-model
 //     turn per tick, and the floor post IS the delivery.
-//   - direct: the raw result posts straight to the user, and the owner gets
-//     the notice queued WITHOUT a wake, so the next turn has it for free.
-//   - default: mail TO THE AGENT — the owning session is woken with it, or a
-//     fresh main-agent session runs it when no owner is live. That turn's
-//     reply posts as ✉️ mail; NO_REPLY keeps it silent.
+//   - report:"raw": the raw result posts straight to the user, and the owner
+//     gets the notice queued WITHOUT a wake, so the next turn has it for free.
+//   - default (report:"auto"): mail TO THE AGENT — the owning session is woken
+//     with it, or a fresh main-agent session runs it when no owner is live.
+//     That turn's reply posts as ✉️ mail; NO_REPLY keeps it silent.
+//   - report:"always": the same mail, but the report turn is BOUND to answer.
+//     The mail carries the raw result as Mail.Fallback, and a front-end that
+//     ends the turn with nothing posted posts that instead — the spawner said
+//     the user is waiting, so silence is not an outcome the model may pick.
 
 // CompletionKind discriminates what finished.
 type CompletionKind int
@@ -70,10 +74,10 @@ type CompletionEvent struct {
 	Elapsed time.Duration
 	OwnerID string // owning root session's store id ("" when gone/cron)
 	RunID   string // subagent/cron: the child session's store id ("" for commands)
-	// Direct sends the raw result straight to the user, with no agent turn.
-	Direct bool
+	// Report is the single axis for what this finish does to the chat.
+	Report notify.ReportMode
 	// Detached is an aside (/btw): deliver to the user and tell the owning
-	// session nothing. Direct still queues a notice; a detached job must
+	// session nothing. ReportRaw still queues a notice; a detached job must
 	// leave no trace, which is the point of asking outside the conversation.
 	Detached bool
 
@@ -149,14 +153,45 @@ type CompletionHost interface {
 	// host link into the job and its stored run.
 	PostCompletion(p CompletionPost) error
 	// WakeOwner queues and wakes the owning session iff the host still
-	// considers ownerID live, false when it is gone and the caller falls back
+	// considers m.OwnerID live, false when it is gone and the caller falls back
 	// to StartFreshTurn. Hosts do the liveness check and delivery under their
 	// own lock. That turn's reply posts as ✉️ mail unless it is NO_REPLY.
-	WakeOwner(ownerID, note string) bool
-	// StartFreshTurn runs a fresh main-agent turn over note, for a completion
-	// with no live owner. Implementations serialize on their single-turn gate
-	// and never drop the note. Quiet, like WakeOwner.
-	StartFreshTurn(note string)
+	WakeOwner(m Mail) bool
+	// StartFreshTurn runs a fresh main-agent turn over the mail, for a
+	// completion with no live owner. Implementations serialize on their
+	// single-turn gate and never drop it. Quiet, like WakeOwner.
+	StartFreshTurn(m Mail)
+}
+
+// Mail is one task report on its way to an agent turn. It carries more than
+// the note because a report:"always" job binds that turn to answer, and the
+// front-end enforcing the bind needs the text to post when the model does not:
+// asking the model a second time would spend another turn to re-run the
+// judgement that just failed.
+type Mail struct {
+	// OwnerID is the owning root session's store id ("" for cron/orphans).
+	OwnerID string
+	// Note is the agent-facing report (mailText).
+	Note string
+	// Required binds the turn to answer the user (report:"always").
+	Required bool
+	// Fallback is what the front-end posts when a Required turn says nothing
+	// — the same text report:"raw" would have posted. Empty unless Required.
+	Fallback string
+	// Post carries the event's provenance for that fallback post, so it
+	// threads and links like any other completion post.
+	Post CompletionPost
+}
+
+// mail builds the Mail for this event: the agent-facing report plus, when the
+// spawner bound the turn to answer, the raw text to post if it does not.
+func (e CompletionEvent) mail() Mail {
+	m := Mail{OwnerID: e.OwnerID, Note: mailText(e), Required: e.Report == notify.ReportAlways}
+	if m.Required {
+		m.Fallback = directText(e)
+		m.Post = e.post(m.Fallback)
+	}
+	return m
 }
 
 // SetCompletionHost installs the front-end delivery surface. nil keeps the
@@ -196,7 +231,7 @@ func commandEvent(j *bgJob, n notify.Notification, exit int, owner *Session) Com
 		Kind: EvBashBg, JobID: j.id, Title: j.title, Exit: &e,
 		Tail: n.Preview, Note: j.note, Detail: j.logPath,
 		Elapsed:  time.Since(j.startedAt),
-		Direct:   j.direct,
+		Report:   j.report,
 		Detached: j.detached,
 		notice:   n,
 	}
@@ -221,7 +256,7 @@ func subagentEvent(j *bgJob, summary, errText string) CompletionEvent {
 		CronJob: j.cronJob, ErrText: errText, Tail: tail, Note: j.note,
 		RunID:    j.childID,
 		Elapsed:  time.Since(j.startedAt),
-		Direct:   j.direct,
+		Report:   j.report,
 		Detached: j.detached,
 		notice:   notifyAgentDone(j.id, summary, errText),
 	}
@@ -241,7 +276,7 @@ func followUpEvent(sub *bgJob, n notify.Notification, summary, errText string) C
 		CronJob: sub.cronJob, ErrText: errText, Tail: tail, Note: sub.note,
 		RunID:    sub.childID,
 		Elapsed:  time.Since(sub.startedAt),
-		Direct:   sub.direct,
+		Report:   sub.report,
 		Detached: sub.detached,
 		notice:   n,
 	}
@@ -271,7 +306,7 @@ func (m *jobManager) dispatchCompletion(ev CompletionEvent) {
 	if m.rt == nil {
 		// Bare unit-test manager: no host, no runtime. Keep the direct
 		// contract queueing on the owner so nothing is lost.
-		if ev.Direct && !ev.Detached && ev.owner != nil {
+		if ev.Report == notify.ReportRaw && !ev.Detached && ev.owner != nil {
 			ev.owner.injectNoticeNoWake(ev.notice)
 		}
 		return
@@ -328,13 +363,18 @@ func (m *jobManager) dispatchCompletion(ev CompletionEvent) {
 		// A failed ⚠️ post keeps its row even when the mail landed, so
 		// redelivery may show the owner the mail twice — at-least-once, and
 		// the floor post is what must never be lost.
+		// The floor post already told the user, so the mail is never Required
+		// here whatever the spawner asked for: binding this turn to speak
+		// would only duplicate the ⚠️ they can already see.
 		undelivered = host.PostCompletion(ev.post(floorText(ev))) != nil
 		if ev.OwnerID != "" {
-			host.WakeOwner(ev.OwnerID, mailText(ev))
+			ml := ev.mail()
+			ml.Required, ml.Fallback, ml.Post = false, "", CompletionPost{}
+			host.WakeOwner(ml)
 		}
 		return
 	}
-	if ev.Direct {
+	if ev.Report == notify.ReportRaw {
 		// The user is waiting: post the raw result now and queue it unwoken,
 		// so the next turn has it for free. The post uses the user-facing
 		// rendering — the notice is written FOR the agent ("call
@@ -352,16 +392,19 @@ func (m *jobManager) dispatchCompletion(ev CompletionEvent) {
 	// The empty check is load-bearing: IsNoReply("") is true, but an empty
 	// ev.Tail means "no output captured", the normal shape of a successful
 	// bash_bg, and a build that prints nothing must still wake its owner.
-	if t := strings.TrimSpace(ev.Tail); t != "" && strutil.IsNoReply(t) {
+	// report:"always" is exempt: the spawner said the user is waiting, and a
+	// job whose own output happens to be the sentinel must not be the thing
+	// that decides they are not.
+	if t := strings.TrimSpace(ev.Tail); t != "" && strutil.IsNoReply(t) && ev.Report != notify.ReportAlways {
 		if ev.owner != nil {
 			ev.owner.injectNoticeNoWake(ev.notice)
 		}
 		return
 	}
 	// Default: mail the agent.
-	note := mailText(ev)
-	if ev.OwnerID == "" || !host.WakeOwner(ev.OwnerID, note) {
-		host.StartFreshTurn(note)
+	ml := ev.mail()
+	if ev.OwnerID == "" || !host.WakeOwner(ml) {
+		host.StartFreshTurn(ml)
 	}
 }
 
@@ -460,10 +503,23 @@ func mailText(ev CompletionEvent) string {
 	if ev.Detail != "" {
 		fmt.Fprintf(&b, "full output: %s\n", ev.Detail)
 	}
-	b.WriteString("\nYou are now speaking TO THE USER: every word of your reply is posted to " +
-		"their chat as an ✉️ update. If they need nothing from this report — a routine " +
-		"result nobody is waiting on, or the conversation above shows they already have " +
-		"the information — reply with exactly NO_REPLY and nothing else. Never narrate " +
-		"staying silent (\"routine tick, no message needed\" would itself be posted).")
+	b.WriteString("\nThis is your work continuing, not an interruption: you have your tools " +
+		"and this turn. If the job was a step in something unfinished — a check you were " +
+		"going to run on its output, a file you were going to update, the next step of a " +
+		"plan — DO IT NOW rather than waiting to be asked again.\n")
+	if ev.Report == notify.ReportAlways {
+		b.WriteString("Then answer the user: this job was started with report:\"always\", " +
+			"so a reply is REQUIRED. NO_REPLY is not available here — if you send it, the " +
+			"raw output above is posted to them in your place, unexplained. Tell them what " +
+			"happened yourself.")
+		return b.String()
+	}
+	b.WriteString("Whatever else you do this turn, your final message is posted to the user's " +
+		"chat as an ✉️ update. Reply with exactly NO_REPLY, and nothing else, ONLY if there " +
+		"is genuinely nothing for them here — a routine tick nobody is waiting on. " +
+		"Telling them earlier that a job had STARTED is not the same as telling them how it " +
+		"ENDED, and does not make this report redundant: if they asked for this result, or " +
+		"you said you would report back, you owe them the answer now. Never narrate staying " +
+		"silent (\"routine tick, no message needed\" would itself be posted).")
 	return b.String()
 }

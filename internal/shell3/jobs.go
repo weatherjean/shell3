@@ -158,9 +158,9 @@ type bgJob struct {
 	cancel        context.CancelFunc
 	out           *jobSink // live output: command stdout/stderr, or subagent event stream
 	childID       string   // subagent: child runs id (transcript source)
-	// direct posts the raw result to the user with no agent turn; the notice
-	// still queues on the owner, unwoken.
-	direct   bool
+	// report is the single axis for what this job's finish does to the chat:
+	// raw output, a report turn the agent may answer, or one it must.
+	report   notify.ReportMode
 	detached bool
 	// note is the spawner's intent hint, carried into the completion mail.
 	note string
@@ -295,9 +295,9 @@ func (m *jobManager) evictOldestDoneIfNeeded() {
 }
 
 // startCommand launches argv as a managed background job. env appends "K=V"
-// entries to the inherited environment; nil inherits it unchanged. direct
-// posts the raw result to the user; note is carried into the completion mail.
-func (m *jobManager) startCommand(parent *Session, command, workdir string, argv, env []string, direct bool, note string) (string, error) {
+// entries to the inherited environment; nil inherits it unchanged. report is
+// what the finish does to the chat; note is carried into the completion mail.
+func (m *jobManager) startCommand(parent *Session, command, workdir string, argv, env []string, report notify.ReportMode, note string) (string, error) {
 	if len(argv) == 0 {
 		return "", errors.New("empty command argv")
 	}
@@ -347,7 +347,7 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 		parentID:      parentName(parent),
 		parentSession: parentSessionID(parent),
 		startedAt:     time.Now(), cancel: cancel, out: out,
-		direct: direct, note: note, logPath: logPath,
+		report: report, note: note, logPath: logPath,
 	}
 	m.jobs[id] = j
 	m.mu.Unlock()
@@ -432,7 +432,7 @@ func (m *jobManager) finishCommand(j *bgJob, exit int) {
 		deliver = func() {}
 	case owner == nil:
 		// Root-session job: one deterministic router for direct and default
-		// alike (commandEvent carries j.direct).
+		// alike (commandEvent carries j.report).
 		ev := commandEvent(j, n, exit, j.parent)
 		deliver = func() { m.dispatchCompletion(ev) }
 	case m.canFollowUpLocked(owner):
@@ -660,11 +660,11 @@ func (m *jobManager) runningJobIDs() []string {
 
 // subagentOpts tunes a subagent job spawned via startSubagent.
 type subagentOpts struct {
-	workDir  string // child workdir; "" → the parent session's workdir
-	direct   bool   // post the raw result straight to the user (no agent turn)
-	note     string // context carried into the completion mail ("" = none)
-	cronJob  string // cron dispatches: the job name ("" for task-tool spawns)
-	detached bool   // deliver to the user only; the owning session is told nothing
+	workDir  string            // child workdir; "" → the parent session's workdir
+	report   notify.ReportMode // what the finish does to the chat
+	note     string            // context carried into the completion mail ("" = none)
+	cronJob  string            // cron dispatches: the job name ("" for task-tool spawns)
+	detached bool              // deliver to the user only; the owning session is told nothing
 }
 
 // resolveChildWorkDir picks a subagent's workdir: the override when set (a
@@ -716,7 +716,7 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 		id: id, kind: JobSubagent, title: desc, agent: agent, parent: parent,
 		parentID: pname, parentSession: parentSessionID(parent), startedAt: time.Now(),
 		cancel: cancel, out: out,
-		direct: o.direct, note: o.note, cronJob: o.cronJob, detached: o.detached,
+		report: o.report, note: o.note, cronJob: o.cronJob, detached: o.detached,
 	}
 	m.jobs[id] = j
 	m.mu.Unlock()
@@ -985,8 +985,8 @@ func (m *jobManager) maybeCloseChild(sub *bgJob) {
 // the job as failed: the event, task_list, and task_status all report "error"
 // instead of a clean "done".
 //
-// Routing: direct jobs wake the parent with a KindAgentDone notice (cron
-// direct jobs, whose pinned parent never runs turns, hand the result to a
+// Routing: raw-report jobs wake the parent with a KindAgentDone notice (cron
+// raw jobs, whose pinned parent never runs turns, hand the result to a
 // fresh main-agent turn via the CompletionHost instead); everything else is a
 // completion event through the mail router.
 func (m *jobManager) finishSubagent(j *bgJob, summary, errText string) {

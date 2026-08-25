@@ -7,6 +7,7 @@ import (
 
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
+	"github.com/weatherjean/shell3/internal/notify"
 )
 
 // subagentCfg returns a config whose active agent may spawn the "explorer"
@@ -96,7 +97,7 @@ func TestSubagentCancelMidRun(t *testing.T) {
 // return — no hang, no write-after-close on the store. Run under -race.
 func TestRuntimeClose_JoinsLiveCommandJob(t *testing.T) {
 	rt := newTestRuntime(t, fakeCfg("x"))
-	if _, err := rt.jobs.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "30"}, nil, false, ""); err != nil {
+	if _, err := rt.jobs.startCommand(nil, "sleep", t.TempDir(), []string{"sleep", "30"}, nil, notify.ReportAuto, ""); err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
 

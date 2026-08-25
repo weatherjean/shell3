@@ -37,7 +37,7 @@ type JobStatus struct {
 	Tool      string `json:"tool,omitempty"`
 	Prompt    string `json:"prompt,omitempty"`
 	WorkDir   string `json:"work_dir,omitempty"`
-	Direct    bool   `json:"direct"`
+	Report    string `json:"report"`
 	LastRun   string `json:"last_run,omitempty"` // RFC3339, "" if never
 	LastSubID string `json:"last_sub_id,omitempty"`
 	// These mean DIFFERENT things per job kind, because the two fire paths
@@ -108,7 +108,7 @@ func NewWithStore(disp Dispatcher, tools ToolRunner, store RunStore, jobs []shel
 	}
 	for _, j := range jobs {
 		job := j // capture
-		st := JobStatus{Name: job.Name, Schedule: job.Schedule, Agent: job.Agent, Tool: job.Tool, Prompt: job.Prompt, WorkDir: job.WorkDir, Direct: job.Direct}
+		st := JobStatus{Name: job.Name, Schedule: job.Schedule, Agent: job.Agent, Tool: job.Tool, Prompt: job.Prompt, WorkDir: job.WorkDir, Report: job.Report.String()}
 		if r, ok := restored[job.Name]; ok {
 			st.LastRun = r.LastRun
 			st.LastSubID = r.LastSubID
@@ -170,7 +170,7 @@ func (s *Scheduler) fireAgent(j shell3.CronJob) {
 	start := s.now()
 	opts := shell3.DispatchOpts{
 		WorkDir: j.WorkDir, Description: "cron:" + j.Name,
-		CronJob: j.Name, Direct: j.Direct,
+		CronJob: j.Name, Report: j.Report,
 		// The prompt rides along as context: the agent judges a result far
 		// better knowing what the job was created to do.
 		Note: "this is the cron job's standing prompt: " + j.Prompt,

@@ -3,6 +3,7 @@ package shell3
 import (
 	"errors"
 
+	"github.com/weatherjean/shell3/internal/notify"
 	"github.com/weatherjean/shell3/internal/strutil"
 )
 
@@ -14,10 +15,10 @@ type DispatchOpts struct {
 	// workdir; a relative path joins onto it (or onto the runtime root when
 	// this session runs there).
 	WorkDir string
-	// Direct posts the raw result straight to the user — no agent turn is
-	// spent on it. Default (false): the completion arrives as mail to the
-	// main agent (for a cron dispatch: a fresh quiet turn).
-	Direct bool
+	// Report is what the finish does to the chat: the default ReportAuto
+	// mails the main agent (for a cron dispatch: a fresh quiet turn) and lets
+	// it judge; ReportRaw posts the result itself and spends no agent turn.
+	Report notify.ReportMode
 	// CronJob names the cron job this dispatch runs ("" for non-cron
 	// dispatches). It routes the ⏰ post prefix and the ownerless wake path.
 	CronJob string
@@ -51,7 +52,7 @@ func (s *Session) Dispatch(agent, prompt string, opts DispatchOpts) (string, err
 	}
 	return rt.jobs.startSubagent(s, agent, prompt, desc, subagentOpts{
 		workDir:  opts.WorkDir,
-		direct:   opts.Direct,
+		report:   opts.Report,
 		cronJob:  opts.CronJob,
 		note:     opts.Note,
 		detached: opts.Detached,

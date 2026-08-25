@@ -110,9 +110,10 @@ spec like `"*/30 8-22 * * *"` (every 30 min, 8am-10pm). The function under
 the block is the prompt, exactly like an agent's own.
 
 The run's result reaches the main agent as a task report, which posts an ✉️
-update only when there is something worth saying. `direct: true` skips that
-judgment turn and posts the raw result instead — no tokens. Failures always
-surface either way.
+update only when there is something worth saying. `report: raw` skips that
+judgment turn and posts the raw result instead — no tokens; `report: always`
+keeps the turn and requires it to answer, for a job that must be heard from
+every tick. Failures always surface whichever you pick.
 
 For mechanical work — a sync, a rotation — name a tool instead:
 

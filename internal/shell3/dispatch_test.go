@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/weatherjean/shell3/internal/notify"
 )
 
 // waitDispatchDone drains the session's JobEvents until the given job reports
@@ -33,7 +35,7 @@ func TestDispatchDirectWakesSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := sess.Dispatch("", "do the thing", DispatchOpts{Description: "direct:test", Direct: true})
+	id, err := sess.Dispatch("", "do the thing", DispatchOpts{Description: "direct:test", Report: notify.ReportRaw})
 	if err != nil {
 		t.Fatal(err)
 	}

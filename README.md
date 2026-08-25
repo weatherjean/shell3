@@ -43,7 +43,7 @@ shell3 telegram    # connects the bot and listens; message it
 ## How it works
 
 <p align="center">
-  <img src="docs/assets/shell3-diagram.svg" alt="Diagram: you message shell3 on Telegram; every tool call passes your hook gate before the agent acts through bash and edit on your shell; the agent delegates to project managers, subagents and cron jobs; every background completion arrives as mail — failures and direct results post to the chat, the rest wakes the agent, which messages you only when it matters" width="100%">
+  <img src="docs/assets/shell3-diagram.svg" alt="Diagram: you message shell3 on Telegram; every tool call passes your hook gate before the agent acts through bash and edit on your shell; the agent delegates to project managers, subagents and cron jobs; every background completion arrives as mail — failures and raw-report results post to the chat, the rest wakes the agent, which messages you only when it matters" width="100%">
 </p>
 
 ## Install

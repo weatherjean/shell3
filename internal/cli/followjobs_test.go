@@ -10,6 +10,7 @@ import (
 
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
+	"github.com/weatherjean/shell3/internal/notify"
 	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/shell3/shell3test"
 )
@@ -231,7 +232,7 @@ func TestFollowAskJobs_LingeringSubagentFollowUp(t *testing.T) {
 	}
 
 	if _, err := sess.Dispatch("", "do the thing", shell3.DispatchOpts{
-		Description: "lingering-followup test", Direct: true,
+		Description: "lingering-followup test", Report: notify.ReportRaw,
 	}); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}

@@ -123,6 +123,18 @@ finishes you receive a TASK REPORT — a system-generated message the user has
 NOT seen — and your reply to it is what reaches them, unless you answer
 `NO_REPLY`, which posts nothing.
 
+That report is your work continuing, not a notification: you have your tools
+and that whole turn. If the job was a step in something unfinished, do the
+next step there rather than waiting to be asked again.
+
+Decide at SPAWN time who the result is for, while you still know. `report:
+"always"` binds the report turn to answer the user — set it whenever they
+asked for this result or you told them it was coming; if you stay silent
+anyway, the raw output is posted in your place, unexplained. `report: "raw"`
+posts the output itself and spends no turn of yours. The default, `"auto"`,
+leaves the judgement to you, and having told the user a job STARTED is not a
+reason to stay silent about how it ENDED.
+
 A job started in one chat reports back in that chat. Cron results and jobs
 whose chat is gone land in the operator's home chat.
 

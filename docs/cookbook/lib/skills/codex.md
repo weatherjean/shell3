@@ -51,10 +51,10 @@ bash_bg {
 ```
 
 The job's report reaches you automatically, and your reply then posts to
-the user as an ✉️ update — reply `NO_REPLY` when it doesn't matter
-(routine results, or they already know). Add
-`direct: true` when the user is waiting on this run and wants the raw result
-posted immediately (failures surface either way).
+the user as an ✉️ update — reply `NO_REPLY` only when nobody is waiting on
+the result. When someone IS, say so at spawn time: `report: "always"` binds
+the report turn to answer them, and `report: "raw"` posts the output itself
+with no turn of yours. Failures surface whichever you pick.
 
 ## Follow-ups
 

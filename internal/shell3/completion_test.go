@@ -8,6 +8,7 @@ import (
 
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
+	"github.com/weatherjean/shell3/internal/notify"
 )
 
 // fakeHost records CompletionHost calls.
@@ -17,6 +18,9 @@ type fakeHost struct {
 	wakes  []string
 	fresh  []string
 	wakeOK bool
+	// mails records the full Mail every WakeOwner/StartFreshTurn saw, so a
+	// test can assert the report:"always" bind and its fallback text.
+	mails []Mail
 	// postErr, when set, makes every PostCompletion report delivery failure
 	// (a transport outage) — the router must then keep the outbox row.
 	postErr error
@@ -29,20 +33,22 @@ func (h *fakeHost) PostCompletion(p CompletionPost) error {
 	return h.postErr
 }
 
-func (h *fakeHost) WakeOwner(ownerID, note string) bool {
+func (h *fakeHost) WakeOwner(m Mail) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if !h.wakeOK {
 		return false
 	}
-	h.wakes = append(h.wakes, ownerID+" "+note)
+	h.mails = append(h.mails, m)
+	h.wakes = append(h.wakes, m.OwnerID+" "+m.Note)
 	return true
 }
 
-func (h *fakeHost) StartFreshTurn(note string) {
+func (h *fakeHost) StartFreshTurn(m Mail) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.fresh = append(h.fresh, note)
+	h.mails = append(h.mails, m)
+	h.fresh = append(h.fresh, m.Note)
 }
 
 func (h *fakeHost) snapshot() (posts, wakes, fresh []string) {
@@ -174,7 +180,7 @@ func TestDirectPostsRawAndQueuesQuietly(t *testing.T) {
 		t.Fatal(err)
 	}
 	ev := cleanEvent()
-	ev.Direct = true
+	ev.Report = notify.ReportRaw
 	ev.owner, ev.OwnerID = owner, owner.ID()
 	rt.jobs.dispatchCompletion(ev)
 	posts, wakes, fresh := host.snapshot()
@@ -227,7 +233,7 @@ func TestDirectTextIsUserFacing(t *testing.T) {
 	host := &fakeHost{}
 	rt.SetCompletionHost(host)
 	ev := cleanEvent()
-	ev.Direct = true
+	ev.Report = notify.ReportRaw
 	rt.jobs.dispatchCompletion(ev)
 	posts, _, _ := host.snapshot()
 	if len(posts) != 1 {
@@ -270,7 +276,7 @@ func TestDirectTextTruncationDirection(t *testing.T) {
 // never the mid-word middle window observed live.
 func TestDirectTextThroughCaptureKeepsLeadAndMarksCut(t *testing.T) {
 	long := "LEAD sentence first." + strings.Repeat(" filler", 600)
-	j := &bgJob{id: "sub1", title: "research", agent: "assistant", direct: true, startedAt: time.Now()}
+	j := &bgJob{id: "sub1", title: "research", agent: "assistant", report: notify.ReportRaw, startedAt: time.Now()}
 	ev := subagentEvent(j, long, "")
 	out := directText(ev)
 	if !strings.Contains(out, "LEAD sentence first.") {
@@ -350,7 +356,7 @@ func TestRoute_DirectNoReplyStillPosts(t *testing.T) {
 	host := &fakeHost{}
 	rt.SetCompletionHost(host)
 	ev := cleanEvent()
-	ev.Direct = true
+	ev.Report = notify.ReportRaw
 	ev.Tail = "NO_REPLY"
 	rt.jobs.dispatchCompletion(ev)
 	posts, _, _ := host.snapshot()

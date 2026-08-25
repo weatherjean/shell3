@@ -9,6 +9,7 @@ import (
 
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/notify"
 )
 
 // gatedLLM is an llm.Streamer whose FIRST call signals Started and blocks
@@ -109,7 +110,7 @@ func TestSubagentLingersAndRunsFollowUp(t *testing.T) {
 	if child == nil {
 		t.Fatal("child session not recorded on the job")
 	}
-	if _, err := rt.jobs.startCommand(child, "sleep", t.TempDir(), []string{"sleep", "0.3"}, nil, false, ""); err != nil {
+	if _, err := rt.jobs.startCommand(child, "sleep", t.TempDir(), []string{"sleep", "0.3"}, nil, notify.ReportAuto, ""); err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
 
@@ -167,7 +168,7 @@ func TestCancelSubagentCascades(t *testing.T) {
 	rt.jobs.mu.Lock()
 	child := rt.jobs.jobs[id].child
 	rt.jobs.mu.Unlock()
-	jobID, err := rt.jobs.startCommand(child, "sleep", t.TempDir(), []string{"sleep", "30"}, nil, false, "")
+	jobID, err := rt.jobs.startCommand(child, "sleep", t.TempDir(), []string{"sleep", "30"}, nil, notify.ReportAuto, "")
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -211,7 +212,7 @@ func TestOrphanJobDegradesToRoot(t *testing.T) {
 	child := rt.jobs.jobs[id].child
 	rt.jobs.jobs[id].noFollowUps = true // poison: no follow-up turns
 	rt.jobs.mu.Unlock()
-	if _, err := rt.jobs.startCommand(child, "sleep", t.TempDir(), []string{"sleep", "0.3"}, nil, false, ""); err != nil {
+	if _, err := rt.jobs.startCommand(child, "sleep", t.TempDir(), []string{"sleep", "0.3"}, nil, notify.ReportAuto, ""); err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
 	close(g.Release)

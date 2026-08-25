@@ -575,15 +575,18 @@ func (b *Bot) PostCompletion(p shell3.CompletionPost) error {
 	return firstErr
 }
 
-// WakeOwner delivers note into the owning session, in whatever room it
+// WakeOwner delivers the mail into the owning session, in whatever room it
 // belongs to — including one this process has not opened yet, which is why
 // roomForOwner consults the store: after a restart this is the default route
 // for every recovered completion.
 //
+// A Required mail also arms the room's fallback, so the turn that reads it
+// answers the user or the job's own result posts in its place.
+//
 // False means there is no room: the cron parent, or a session /new left
 // behind. StartFreshTurn then lands it in the home chat, so nothing is lost.
-func (b *Bot) WakeOwner(ownerID, note string) bool {
-	c := b.roomForOwner(ownerID)
+func (b *Bot) WakeOwner(m shell3.Mail) bool {
+	c := b.roomForOwner(m.OwnerID)
 	if c == nil {
 		return false
 	}
@@ -591,29 +594,46 @@ func (b *Bot) WakeOwner(ownerID, note string) bool {
 	if err != nil || sess == nil {
 		return false
 	}
-	if sess.ID() != ownerID {
+	if sess.ID() != m.OwnerID {
 		// A /new since this job started: the completion is an orphan.
 		return false
 	}
-	sess.NotifyText(note) // queue + Wake; consumeWakes runs the quiet turn
+	// Arm before queueing: the wake can be answered on another goroutine the
+	// moment NotifyText returns, and a bind armed after that turn settled
+	// would sit unanswered until the next one.
+	if m.Required {
+		c.requireReport(m.Post)
+	}
+	sess.NotifyText(m.Note) // queue + Wake; consumeWakes runs the quiet turn
 	return true
 }
 
-// StartFreshTurn queues note into the home chat, creating it on first use —
-// the catch-all for completions with no live owning room.
-func (b *Bot) StartFreshTurn(note string) {
+// StartFreshTurn queues the mail into the home chat, creating it on first use
+// — the catch-all for completions with no live owning room.
+func (b *Bot) StartFreshTurn(m shell3.Mail) {
 	c := b.homeConv()
 	sess, err := c.mainSession()
 	if err != nil {
-		// Degrade to a raw post rather than dropping the completion.
+		// Degrade to a raw post rather than dropping the completion. That
+		// post IS the delivery, so a Required mail needs no second one — and
+		// it posts the FALLBACK, since m.Note is written for the agent and
+		// carries instructions ("NO_REPLY is not available here") that mean
+		// nothing to a reader.
+		text := m.Note
+		if m.Required && m.Fallback != "" {
+			text = m.Fallback
+		}
 		var opts []SendOpt
 		if b.isQuiet() {
 			opts = append(opts, SendOpt{Silent: true})
 		}
-		go c.sendReply(context.Background(), "🔔 "+note, opts...)
+		go c.sendReply(context.Background(), "🔔 "+text, opts...)
 		return
 	}
-	sess.NotifyText(note)
+	if m.Required {
+		c.requireReport(m.Post)
+	}
+	sess.NotifyText(m.Note)
 }
 
 // Inbox is every room's pending user mail and undrained agent mail:

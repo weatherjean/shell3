@@ -3,6 +3,8 @@ package shell3
 import (
 	"testing"
 	"time"
+
+	"github.com/weatherjean/shell3/internal/notify"
 )
 
 // TestJobSink verifies that jobSink tees written bytes to both the ring buffer
@@ -73,7 +75,7 @@ func TestJobProgressIntegration(t *testing.T) {
 		t.Fatalf("Session: %v", err)
 	}
 
-	id, err := rt.jobs.startCommand(sess, "echo hello", t.TempDir(), []string{"echo", "hello"}, nil, false, "")
+	id, err := rt.jobs.startCommand(sess, "echo hello", t.TempDir(), []string{"echo", "hello"}, nil, notify.ReportAuto, "")
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}

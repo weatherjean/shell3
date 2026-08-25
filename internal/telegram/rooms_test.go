@@ -179,7 +179,7 @@ func TestWakeOwnerResumesTheSpawningRoomAfterRestart(t *testing.T) {
 	}
 
 	b := NewBot(newFakeClient(), rt, 42, idx)
-	if !b.WakeOwner(seed.ID(), "your job finished") {
+	if !b.WakeOwner(shell3.Mail{OwnerID: seed.ID(), Note: "your job finished"}) {
 		t.Fatal("a completion for an enrolled room must wake that room, not fall through to the home chat")
 	}
 	if c := b.peekConv(-200); c == nil || c.session() == nil {
@@ -191,7 +191,7 @@ func TestWakeOwnerResumesTheSpawningRoomAfterRestart(t *testing.T) {
 // orphan: it belongs in the home chat, not grafted onto the new conversation.
 func TestWakeOwnerRejectsAStaleOwner(t *testing.T) {
 	b := newBot(t, newFakeClient(), mustRuntime(t))
-	if b.WakeOwner("a-session-nobody-owns", "note") {
+	if b.WakeOwner(shell3.Mail{OwnerID: "a-session-nobody-owns", Note: "note"}) {
 		t.Fatal("an owner naming no room must fall through to StartFreshTurn")
 	}
 }

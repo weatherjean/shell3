@@ -379,8 +379,9 @@ main_gate() {
 #
 #   an AGENT job — the function under the block is the prompt, and the run's
 #   result reaches the main agent as a task report, which posts an ✉️ update
-#   only when the run carries something worth saying. `direct: true` skips
-#   that judgment turn and posts the raw result instead, costing no tokens.
+#   only when the run carries something worth saying. `report: raw` skips
+#   that judgment turn and posts the raw result instead, costing no tokens;
+#   `report: always` keeps the turn but forbids it to stay silent.
 #   Judging costs a full main-agent turn at live conversation context, so
 #   tell the job to end an unremarkable run with exactly NO_REPLY: that
 #   result is dropped before any turn is spent. A prompt that always ends

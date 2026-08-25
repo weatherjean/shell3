@@ -9,6 +9,7 @@ import (
 
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
+	"github.com/weatherjean/shell3/internal/notify"
 )
 
 // outboxRows is a test helper returning the outbox rows of a runtime's store.
@@ -251,7 +252,7 @@ func TestCommandJobMarkerLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := rt.jobs.startCommand(parent, "sleep", t.TempDir(), []string{"sleep", "30"}, nil, false, ""); err != nil {
+	if _, err := rt.jobs.startCommand(parent, "sleep", t.TempDir(), []string{"sleep", "30"}, nil, notify.ReportAuto, ""); err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
 	rows := outboxRows(t, rt)
@@ -278,7 +279,7 @@ func TestShutdownLeavesRunningMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := rt.jobs.startCommand(parent, "sleep", t.TempDir(), []string{"sleep", "30"}, nil, false, ""); err != nil {
+	if _, err := rt.jobs.startCommand(parent, "sleep", t.TempDir(), []string{"sleep", "30"}, nil, notify.ReportAuto, ""); err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
 	rt.jobs.cancelAll()

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/weatherjean/shell3/internal/notify"
 )
 
 func TestBashBgHandler_Name(t *testing.T) {
@@ -19,7 +21,7 @@ func TestBashBgHandler_Execute_happyPath(t *testing.T) {
 	var gotCmd string
 	cfg := ToolConfig{
 		WorkDir: wd,
-		StartBashBg: func(command, workdir string, argv, env []string, direct bool, note string) (string, error) {
+		StartBashBg: func(command, workdir string, argv, env []string, report notify.ReportMode, note string) (string, error) {
 			gotCmd = command
 			return "bg_1", nil
 		},
@@ -65,7 +67,7 @@ func TestBashBgHandler_Execute_workdirOverride(t *testing.T) {
 	var gotWorkdir string
 	cfg := ToolConfig{
 		WorkDir: primary,
-		StartBashBg: func(command, workdir string, argv, env []string, direct bool, note string) (string, error) {
+		StartBashBg: func(command, workdir string, argv, env []string, report notify.ReportMode, note string) (string, error) {
 			gotWorkdir = workdir
 			return "bg_2", nil
 		},
@@ -84,26 +86,26 @@ func TestBashBgHandler_Execute_workdirOverride(t *testing.T) {
 }
 
 func TestBashBgHandler_Execute_directAndNote(t *testing.T) {
-	var gotDirect bool
+	var gotReport notify.ReportMode
 	var gotNote string
 	cfg := ToolConfig{
 		WorkDir: t.TempDir(),
-		StartBashBg: func(command, workdir string, argv, env []string, direct bool, note string) (string, error) {
-			gotDirect, gotNote = direct, note
+		StartBashBg: func(command, workdir string, argv, env []string, report notify.ReportMode, note string) (string, error) {
+			gotReport, gotNote = report, note
 			return "bg_3", nil
 		},
 	}
-	if _, err := (BashBgHandler{}).Execute(context.Background(), "1", json.RawMessage(`{"command":"true","direct":true,"note":"user waiting"}`), cfg); err != nil {
+	if _, err := (BashBgHandler{}).Execute(context.Background(), "1", json.RawMessage(`{"command":"true","report":"raw","note":"user waiting"}`), cfg); err != nil {
 		t.Fatal(err)
 	}
-	if !gotDirect || gotNote != "user waiting" {
-		t.Fatalf("direct/note did not reach the start callback: %v %q", gotDirect, gotNote)
+	if gotReport != notify.ReportRaw || gotNote != "user waiting" {
+		t.Fatalf("report/note did not reach the start callback: %v %q", gotReport, gotNote)
 	}
 	if _, err := (BashBgHandler{}).Execute(context.Background(), "1", json.RawMessage(`{"command":"true"}`), cfg); err != nil {
 		t.Fatal(err)
 	}
-	if gotDirect {
-		t.Fatal("direct should default to false when omitted")
+	if gotReport != notify.ReportAuto {
+		t.Fatal("report should default to auto when omitted")
 	}
 }
 
@@ -111,7 +113,7 @@ func TestBashBgUsesStartCallback(t *testing.T) {
 	var gotCmd string
 	cfg := ToolConfig{
 		WorkDir: t.TempDir(),
-		StartBashBg: func(command, workdir string, argv, env []string, direct bool, note string) (string, error) {
+		StartBashBg: func(command, workdir string, argv, env []string, report notify.ReportMode, note string) (string, error) {
 			gotCmd = command
 			return "bg1", nil
 		},
@@ -126,5 +128,35 @@ func TestBashBgUsesStartCallback(t *testing.T) {
 	}
 	if !strings.Contains(out, "bg1") {
 		t.Fatalf("output %q missing job id", out)
+	}
+}
+
+// The removed `direct` arg is REFUSED, not ignored. json.Unmarshal drops
+// unknown fields, so without an explicit decode a model still writing
+// direct:true — from a stale kit prompt, a skill, or its own history in a
+// long-lived conversation — would silently get auto mode, which is the
+// "nobody told the user" failure report: exists to remove.
+func TestBashBgRefusesRemovedDirectArg(t *testing.T) {
+	started := false
+	cfg := ToolConfig{
+		StartBashBg: func(command, workdir string, argv, env []string, report notify.ReportMode, note string) (string, error) {
+			started = true
+			return "bg1", nil
+		},
+	}
+	for _, args := range []string{
+		`{"command":"true","direct":true}`,
+		`{"command":"true","direct":false}`, // just as stale as true
+	} {
+		out, err := (BashBgHandler{}).Execute(context.Background(), "1", json.RawMessage(args), cfg)
+		if err != nil {
+			t.Fatalf("%s: %v", args, err)
+		}
+		if !strings.Contains(out, "report") || !strings.Contains(out, "NOT started") {
+			t.Fatalf("%s: refusal must name the replacement: %q", args, out)
+		}
+		if started {
+			t.Fatalf("%s: the job must not run on a stale arg", args)
+		}
 	}
 }

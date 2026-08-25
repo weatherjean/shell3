@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/chat"
+	"github.com/weatherjean/shell3/internal/notify"
 )
 
 // assertNoWakeFor drains the runtime bus for d and fails if any Wake for
@@ -56,7 +57,7 @@ func TestCronSubagentFollowUpMailsAgent(t *testing.T) {
 		t.Fatal("child session not recorded on the job")
 	}
 	// A bash_bg job owned by the child, still running when the main turn ends.
-	if _, err := rt.jobs.startCommand(child, "sleep", t.TempDir(), []string{"sleep", "0.3"}, nil, false, ""); err != nil {
+	if _, err := rt.jobs.startCommand(child, "sleep", t.TempDir(), []string{"sleep", "0.3"}, nil, notify.ReportAuto, ""); err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
 
@@ -116,7 +117,7 @@ func TestCronSubagentOrphanFloors(t *testing.T) {
 	child := rt.jobs.jobs[id].child
 	rt.jobs.jobs[id].noFollowUps = true // poison: no follow-up turns
 	rt.jobs.mu.Unlock()
-	if _, err := rt.jobs.startCommand(child, "sleep", t.TempDir(), []string{"sleep", "0.3"}, nil, false, ""); err != nil {
+	if _, err := rt.jobs.startCommand(child, "sleep", t.TempDir(), []string{"sleep", "0.3"}, nil, notify.ReportAuto, ""); err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
 	close(g.Release)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
+	"github.com/weatherjean/shell3/internal/notify"
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
@@ -386,11 +387,11 @@ func (s *Session) turnConfigLocked() chat.TurnConfig {
 	if s.runtime != nil && s.runtime.jobs != nil {
 		rt := s.runtime
 		parent := s
-		tc.StartBashBg = func(command, workdir string, argv, env []string, direct bool, note string) (string, error) {
-			return rt.jobs.startCommand(parent, command, workdir, argv, env, direct, note)
+		tc.StartBashBg = func(command, workdir string, argv, env []string, report notify.ReportMode, note string) (string, error) {
+			return rt.jobs.startCommand(parent, command, workdir, argv, env, report, note)
 		}
 		allowed := cfg.Subagents // the active agent's registered-subagent allowlist
-		tc.StartSubagent = func(agent, prompt, desc string, direct bool, note string) (string, error) {
+		tc.StartSubagent = func(agent, prompt, desc string, report notify.ReportMode, note string) (string, error) {
 			// Only the registered subagent names the task tool's schema
 			// advertises; an empty allowlist means no delegation at all.
 			if !slices.Contains(allowed, agent) {
@@ -401,7 +402,7 @@ func (s *Session) turnConfigLocked() chat.TurnConfig {
 			}
 			// Single-level by construction: subagents never get the task tool,
 			// so this closure only runs on top-level sessions.
-			return rt.jobs.startSubagent(parent, agent, prompt, desc, subagentOpts{direct: direct, note: note})
+			return rt.jobs.startSubagent(parent, agent, prompt, desc, subagentOpts{report: report, note: note})
 		}
 		tc.ListJobs = func() string {
 			return rt.jobs.formatJobList()

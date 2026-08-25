@@ -27,7 +27,7 @@ Declaration kinds: `agent:` (prompt function under it; `model`, `workdir`,
 ENVIRONMENT VARIABLES, never `$1`), `test:` (harness in
 `harness.go`: `tool`, `stub`, `assert_eq`, `assert_contains`, `fail`,
 `$KIT_TMP`), `gate:`, `note:`, `command:`, `event:` and `cron:` (`schedule` +
-exactly one of `agent:`/`tool:`, `direct`/`workdir`), plus the `shell3:` wiring block (models,
+exactly one of `agent:`/`tool:`, `report`/`workdir`), plus the `shell3:` wiring block (models,
 telegram, mcp, `runs_keep_days`, `media_keep_days`, `review_model`,
 `review_policy`; re-marshalled through the
 existing YAML parser by `config.readWiring`; secrets as `env:KEY` from the
@@ -41,8 +41,9 @@ there is no agent for either to belong to. `cron:` is also the ONE block where
 `agent:`/`tool:` are payload rather than a kind key (`decodeBlock` lifts those
 two out of the kind scan when `cron:` is set — only those two, so a cron block
 also naming `command:`/`gate:` is still refused as ambiguous), and
-`schedule:`/`direct:` outside a `cron:` block are a load error rather than a
-silently ignored key.
+`schedule:`/`report:` outside a `cron:` block are a load error rather than a
+silently ignored key, and the pre-`report:` spelling `direct:` is a load error
+anywhere, naming its replacement rather than failing as an unknown field.
 
 `command:` declares a `/verb` the front-end answers itself — no model turn, no
 tokens. The function's stdout is the reply (empty posts nothing, so an
@@ -228,15 +229,33 @@ completion that raced SIGTERM keeps its event row for redelivery. Failed: the �
 post always reaches the user, and a live owning session is additionally
 mailed (woken) so the agent can react — but an ownerless failure (cron)
 stops at the post, never burning a main-model turn per broken tick.
-`direct: true` (bash_bg arg, task arg, cron block): the raw result
+`report:` (`notify.ReportMode`; bash_bg arg, task arg, cron block) is the ONE
+axis for what a finish does to the chat, and there is deliberately no second
+flag beside it — "post it raw" and "you must answer" are two answers to one
+question, and a pair of booleans could state both at once. `raw` (the old
+`direct: true`, renamed with no shim — and `direct` is REFUSED at both layers,
+not ignored: a load error in a kit, and a "the job was NOT started" tool error
+from `handler_task.go`'s `directRemovedMsg`, because `json.Unmarshal` drops
+unknown fields and a model still writing `direct: true` from a stale prompt or
+its own conversation history would otherwise silently get `auto` — the very
+failure this replaced): the raw result
 posts straight to the user, and the owning session gets the notice queued
 WITHOUT a wake — the next turn has it in context without spending one now.
+`always` BINDS the report turn to answer the user: `CompletionEvent.mail()`
+sets `Mail.Required` and carries `directText(ev)` as `Mail.Fallback`, and a
+front-end whose turn posts nothing posts that instead (below). It never
+re-asks the model — a second turn would re-run the judgement that just failed,
+at full conversation context, to reach the same answer. A FAILED job drops the
+bind whatever the spawner asked (the ⚠️ floor post already told the user, so
+binding the turn would only duplicate it).
 Before the default: a CLEAN completion whose whole tail is already the
 `NO_REPLY` sentinel is never mailed for judgment — `internal/shell3/
 completion.go`'s router drops it (`strings.TrimSpace(ev.Tail) != "" &&
 strutil.IsNoReply(tail)`, checked before the owner/no-owner branch, after
-Failed/Direct are already handled above it): a live owner gets the notice
-queued WITHOUT a wake (same shape as `direct`, so the next turn has it in
+Failed/raw are already handled above it, and skipped entirely under `always`:
+the spawner said the user is waiting, so the job's own output does not get to
+overrule that): a live owner gets the notice
+queued WITHOUT a wake (same shape as `raw`, so the next turn has it in
 context for free); an OWNERLESS one (cron, no live session) starts no fresh
 turn at all — the `StartFreshTurn` fallback below is never reached. This is
 what kills the cost a frequent idempotent cron tick used to buy just to read
@@ -640,17 +659,32 @@ running turn).
 
 **Completion delivery** is mail (see internal/shell3/completion.go above);
 the bot is the `CompletionHost` (`bot.go`): `PostCompletion` posts
-`⏰ <job>: …` for a cron origin (direct cron, ⚠️ floors) and `🔔 …`
+`⏰ <job>: …` for a cron origin (`report: raw` cron, ⚠️ floors) and `🔔 …`
 otherwise, threaded onto the conversation's anchor; `WakeOwner` queues+wakes
 iff the owner IS the current main conversation; `StartFreshTurn` is the
-catch-all that queues the note into the main conversation (creating it on
+catch-all that queues the mail into the main conversation (creating it on
 demand) — cron results, orphans, and jobs outliving a `/new` all land there,
-so a completion is never lost. A report turn's reply is the agent speaking
-to the user: `runWakeTurn` posts it ✉️-prefixed (ALWAYS silent, a plain
-message — never a Telegram reply; strict final-segment — no narration
-fallback; an exact repeat of the previous ✉️ is dropped, `lastAgentMail`),
-and NO_REPLY/empty posts nothing; there is no mail_user tool (removed:
-two exits meant the same answer could send twice). The wake is UPGRADED to
+so a completion is never lost. Both take a `shell3.Mail`, not a bare note,
+because a `report: always` job binds the turn they start and the enforcement
+needs the fallback text: a Required mail arms `conversation.pendingRequired`
+BEFORE the queue+wake (the wake can be answered on another goroutine the
+instant `NotifyText` returns, and a bind armed after that turn settled would
+sit unanswered until the next one). A report turn's reply is the agent speaking
+to the user: `runWakeTurn` posts it ✉️-prefixed via `postWakeReply` (ALWAYS
+silent, a plain message — never a Telegram reply; strict final-segment — no
+narration fallback; an exact repeat of the previous ✉️ is dropped,
+`lastAgentMail`), and NO_REPLY/empty posts nothing; there is no mail_user tool
+(removed: two exits meant the same answer could send twice). `postWakeReply`
+returns whether ANYTHING reached the user, and that one bit is what
+`settleRequired` acts on: silence posts each bound job's own result instead,
+so a report the spawner marked as awaited can never end as nothing at all.
+`finishPostedTurn` settles the same way (a user turn drains notices too), and
+`/new` calls `flushRequired` — the session whose turn would have answered is
+being detached. The two fields (`pendingRequired`, `turnRequired`) are split
+because a notice never drains mid-turn: `takeSlotLocked` moves pending onto
+the starting turn, so a report landing DURING a turn belongs to the next one
+and cannot have its fallback posted over an answer nobody had a chance to
+give. The wake is UPGRADED to
 a POSTED turn (`runPostedQueuedTurn`) when the inbox holds user steering
 (`HasQueuedSteer`), so a steer racing a turn's end still gets its answer;
 text arriving DURING a wake turn queues rather than steering into it
@@ -679,8 +713,8 @@ source but runs NO turns of its own and is never woken; a run's result is
 a task report carrying the job name (`DispatchOpts.CronJob`) and the job's
 prompt as context (`DispatchOpts.Note` — the agent knows what the job is FOR):
 by default a fresh main-agent turn whose reply posts as an ✉️ update only
-when warranted (NO_REPLY posts nothing), with `direct: true` a raw ⏰ post
-costing no agent turn; a failed
+when warranted (NO_REPLY posts nothing), with `report: raw` a raw ⏰ post
+costing no agent turn and `report: always` a turn bound to answer; a failed
 run always surfaces as `⚠️ <job> failed: <error>` and spends no turn). A job
 can instead name `tool: <name>` — a kit tool, run directly with NO model turn
 at all: no dispatch, no subagent, just the tool's shell function. Frontmatter

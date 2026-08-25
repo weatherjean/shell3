@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/weatherjean/shell3/internal/notify"
 )
 
 // NotifyTextNoWake queues a notice for the next turn without waking the
@@ -36,7 +38,7 @@ func TestKillAllForStopSuppressesCompletions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
-	id, err := rt.jobs.startCommand(parent, "sleep 30", t.TempDir(), []string{"sleep", "30"}, nil, false, "")
+	id, err := rt.jobs.startCommand(parent, "sleep 30", t.TempDir(), []string{"sleep", "30"}, nil, notify.ReportAuto, "")
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -72,7 +74,7 @@ func TestNormalKillStillRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
-	id, err := rt.jobs.startCommand(parent, "sleep 30", t.TempDir(), []string{"sleep", "30"}, nil, false, "")
+	id, err := rt.jobs.startCommand(parent, "sleep 30", t.TempDir(), []string{"sleep", "30"}, nil, notify.ReportAuto, "")
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}

@@ -3,6 +3,8 @@ package kit
 import (
 	"strings"
 	"testing"
+
+	"github.com/weatherjean/shell3/internal/notify"
 )
 
 // cronKit wraps declaration text in a minimal kit that declares the agents
@@ -40,7 +42,7 @@ func TestParseCron_AgentJob(t *testing.T) {
 # cron: daily
 # schedule: "@daily"
 # agent: main
-# direct: true
+# report: raw
 #---
 cron_daily() { cat <<'EOF'
 Summarize the day.
@@ -54,7 +56,7 @@ EOF
 		t.Fatalf("crons = %d, want 1", len(k.Crons))
 	}
 	j := k.Crons[0]
-	if j.Name != "daily" || j.Schedule != "@daily" || j.Agent != "main" || !j.Direct {
+	if j.Name != "daily" || j.Schedule != "@daily" || j.Agent != "main" || j.Report != notify.ReportRaw {
 		t.Fatalf("job = %+v", j)
 	}
 	if j.Prompt != "Summarize the day." {
@@ -136,13 +138,37 @@ body
 EOF
 }
 `, "exactly one of agent: or tool:"},
-		"tool and direct": {`#---
+		"tool and report": {`#---
 # cron: x
 # schedule: "@daily"
 # tool: sync
+# report: raw
+#---
+`, "report only applies to an agent: job"},
+		// direct: was the pre-report spelling. It must fail with a message
+		// naming the replacement, not with yaml's "field not found".
+		"the removed direct: key": {`#---
+# cron: x
+# schedule: "@daily"
+# agent: main
 # direct: true
 #---
-`, "direct"},
+p() { cat <<'EOF'
+body
+EOF
+}
+`, "direct: was replaced by report:"},
+		"an unknown report mode": {`#---
+# cron: x
+# schedule: "@daily"
+# agent: main
+# report: alwyas
+#---
+p() { cat <<'EOF'
+body
+EOF
+}
+`, "unknown report mode"},
 		"agent job with no function": {`#---
 # cron: x
 # schedule: "@daily"

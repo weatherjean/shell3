@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/weatherjean/shell3/internal/notify"
 )
 
 // Param is one declared tool parameter. Type is "string", "int", or "bool".
@@ -104,7 +106,7 @@ type decl struct {
 	schedule string
 	cronAgnt string
 	cronTool string
-	direct   bool
+	report   notify.ReportMode
 }
 
 // blockYAML is the strict shape every declaration block decodes into. Exactly
@@ -128,7 +130,13 @@ type blockYAML struct {
 	Cron string `yaml:"cron"`
 
 	Schedule string `yaml:"schedule"`
-	Direct   bool   `yaml:"direct"`
+	Report   string `yaml:"report"`
+	// Direct is the REMOVED spelling of Report, declared only so it gets a
+	// load error naming the replacement. KnownFields(true) would otherwise
+	// reject it with "field direct not found in type kit.blockYAML", which
+	// says nothing about what to write instead. A pointer, so `direct: false`
+	// is caught too — it is just as stale as `direct: true`.
+	Direct *bool `yaml:"direct"`
 
 	Description string           `yaml:"description"`
 	Model       string           `yaml:"model"`
@@ -151,11 +159,19 @@ func decodeBlock(b block) (decl, error) {
 		return decl{}, fmt.Errorf("line %d: %s", b.line, absLines(err.Error(), b.line))
 	}
 
+	if y.Direct != nil {
+		return decl{}, fmt.Errorf("line %d: direct: was replaced by report: — write report: raw for the old direct: true, and drop the key for direct: false", b.line)
+	}
+	mode, err := notify.ParseReportMode(y.Report)
+	if err != nil {
+		return decl{}, fmt.Errorf("line %d: %w", b.line, err)
+	}
+
 	d := decl{
 		line: b.line, endLine: b.endLine, desc: y.Description, model: y.Model,
 		workdir: y.Workdir, use: y.Use, context: y.Context, params: y.Params, wiring: y.Shell3,
 		mcp: y.MCP, mcpAll: len(y.MCP) == 1 && y.MCP[0] == "all", on: y.On,
-		schedule: y.Schedule, direct: y.Direct,
+		schedule: y.Schedule, report: mode,
 	}
 
 	kinds := []struct {
@@ -193,11 +209,11 @@ func decodeBlock(b block) (decl, error) {
 			found++
 		}
 	}
-	// schedule:/direct: only mean something on a cron block. Accepting them
+	// schedule:/report: only mean something on a cron block. Accepting them
 	// silently elsewhere is how a job written into an agent: block by mistake
 	// would load, parse, and never fire.
-	if !isCron && (y.Schedule != "" || y.Direct) {
-		return decl{}, fmt.Errorf("line %d: schedule:/direct: belong to a cron: block", b.line)
+	if !isCron && (y.Schedule != "" || y.Report != "") {
+		return decl{}, fmt.Errorf("line %d: schedule:/report: belong to a cron: block", b.line)
 	}
 	switch {
 	case found > 1:

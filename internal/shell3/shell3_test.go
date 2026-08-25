@@ -10,6 +10,7 @@ import (
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
+	"github.com/weatherjean/shell3/internal/notify"
 	"github.com/weatherjean/shell3/internal/runs"
 )
 
@@ -627,7 +628,7 @@ func TestSessionJobsFromManager(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = rt.jobs.startCommand(s, "sleep 1", t.TempDir(), []string{"sleep", "1"}, nil, false, "")
+	_, _ = rt.jobs.startCommand(s, "sleep 1", t.TempDir(), []string{"sleep", "1"}, nil, notify.ReportAuto, "")
 	jobs := s.Jobs()
 	if len(jobs) != 1 || jobs[0].Kind != JobCommand {
 		t.Fatalf("Session.Jobs = %+v, want one JobCommand", jobs)

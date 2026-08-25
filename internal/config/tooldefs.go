@@ -59,17 +59,17 @@ var bashBgTool = llm.ToolDefinition{
 	Description: "Start a shell command in the background on the in-process runtime and return a job id immediately. " +
 		"Use this for long-running work or servers — anything that should not block the turn. " +
 		"You will receive its report automatically — mid-turn into this same reply if the job is quick, in a " +
-		"later turn otherwise (your reply then posts to the user as an ✉️ update; NO_REPLY posts nothing) — so start it, say it's running, " +
-		"and end your turn. Set direct:true to have the raw result posted straight to the chat instead, " +
-		"with no follow-up turn. Never wait in-turn: no task_status loops, no sleep-and-recheck " +
+		"later turn otherwise — so start it, say it's running, and end your turn. " +
+		reportParamBrief +
+		"Never wait in-turn: no task_status loops, no sleep-and-recheck " +
 		"in bash. task_status <id> is for reading a finished job's output or answering a user's how's-it-going.",
 	Parameters: map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"command": map[string]any{"type": "string", "description": "The shell command to run in the background"},
 			"workdir": map[string]any{"type": "string", "description": "Working directory; defaults to the project root"},
-			"direct":  map[string]any{"type": "boolean", "description": "Post the raw result straight to the chat when it finishes (no follow-up turn). Set it when the user asked for this work and is waiting on the output itself"},
-			"note":    map[string]any{"type": "string", "description": "Context carried into the report (what this job is for, whether anyone is waiting). Ignored when direct is true"},
+			"report":  reportParamSchema(),
+			"note":    map[string]any{"type": "string", "description": "Context carried into the report (what this job is for, whether anyone is waiting). Ignored when report is \"raw\""},
 		},
 		"required": []string{"command"},
 	},
@@ -101,9 +101,9 @@ func TaskToolFor(subs []SubagentRef) llm.ToolDefinition {
 		Name: "task",
 		Description: "Spawn a subagent that runs in the background. Returns immediately — the completion " +
 			"report reaches you automatically: mid-turn into this same reply if it's quick, in a later turn " +
-			"otherwise (your reply then posts to the user as an ✉️ update; NO_REPLY posts nothing). Set direct:true to have the raw result " +
-			"posted straight to the chat instead, with no follow-up turn. Dispatch, say it's running, and " +
-			"end your turn. Never wait in-turn: no task_status loops, no sleep-and-recheck. Use this to " +
+			"otherwise. Dispatch, say it's running, and end your turn. " +
+			reportParamBrief +
+			"Never wait in-turn: no task_status loops, no sleep-and-recheck. Use this to " +
 			"delegate work to a specialised subagent while you continue with other tasks. Brief it like a " +
 			"contract — vague prompts produce misaimed work.",
 		Parameters: map[string]any{
@@ -122,13 +122,10 @@ func TaskToolFor(subs []SubagentRef) llm.ToolDefinition {
 					"type":        "string",
 					"description": "A short 3-5 word label describing the task (used in completion notices)",
 				},
-				"direct": map[string]any{
-					"type":        "boolean",
-					"description": "Post the raw result straight to the chat when it finishes (no follow-up turn). Set it when the user asked for this work and is waiting on the output itself",
-				},
+				"report": reportParamSchema(),
 				"note": map[string]any{
 					"type":        "string",
-					"description": "Context carried into the report (what this task is for, whether anyone is waiting). Ignored when direct is true",
+					"description": "Context carried into the report (what this task is for, whether anyone is waiting). Ignored when report is \"raw\"",
 				},
 			},
 			"required": []string{"subagent_type", "prompt"},
@@ -230,4 +227,30 @@ var readMediaTool = llm.ToolDefinition{
 		},
 		"required": []string{"path"},
 	},
+}
+
+// reportParamBrief is the sentence both background-spawn tool descriptions
+// carry about the report param. It is one string so the two tools can never
+// describe the same mechanism differently — the mismatch a model resolves by
+// guessing.
+const reportParamBrief = "Use report: to say what the finish does to the chat — " +
+	"\"auto\" (default) lets you judge whether the user needs to hear it, " +
+	"\"always\" binds you to answer them when it lands, " +
+	"\"raw\" posts the output itself and spends no turn of yours. "
+
+// reportParamSchema is the shared `report` property for bash_bg and task: the
+// single axis for what a finished job does to the chat. There is deliberately
+// no second boolean beside it — "post it raw" and "you must speak" are two
+// answers to one question, and a config able to state both is a config able to
+// contradict itself.
+func reportParamSchema() map[string]any {
+	return map[string]any{
+		"type": "string",
+		"enum": []string{"auto", "always", "raw"},
+		"description": "What this job's finish does to the chat. " +
+			"\"auto\" (default): its report reaches you in a later turn and you decide whether to tell the user (NO_REPLY posts nothing). " +
+			"\"always\": same report, but you MUST answer the user — set it whenever they asked for this result or you told them it was coming, " +
+			"because if you stay silent the raw output is posted in your place. " +
+			"\"raw\": no turn of yours at all — the job's own output posts straight to the chat.",
+	}
 }

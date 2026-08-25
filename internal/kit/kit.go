@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	robcron "github.com/robfig/cron/v3"
+
+	"github.com/weatherjean/shell3/internal/notify"
 )
 
 // FileName is the kit a config directory is read from; its presence is what
@@ -87,10 +89,11 @@ type CronJob struct {
 	Func string
 	// WorkDir overrides the shell the job runs in.
 	WorkDir string
-	// Direct posts the raw result to the user, skipping the agent-mail turn —
-	// the cost valve, since a default tick wakes the main model to judge it.
-	// Agent jobs only; a tool job already posts its own result.
-	Direct bool
+	// Report is what the tick's finish does to the chat (see
+	// notify.ReportMode). ReportRaw is the cost valve, since the default
+	// wakes the main model to judge every tick. Agent jobs only; a tool job
+	// already posts its own result with no agent turn.
+	Report notify.ReportMode
 	Line   int
 }
 
@@ -376,14 +379,14 @@ func cronFromDecl(d decl, srcLines []string, nextFunc func(int) (fnDef, bool)) (
 		return CronJob{}, fmt.Errorf("line %d: cron %q sets both agent: and tool: — exactly one of agent: or tool: (a job is either a prompt or a tool call)", d.line, d.name)
 	case d.cronAgnt == "" && d.cronTool == "":
 		return CronJob{}, fmt.Errorf("line %d: cron %q needs exactly one of agent: or tool: (a job is either a prompt or a tool call)", d.line, d.name)
-	case d.cronTool != "" && d.direct:
-		// direct: means something only for an agent job. A tool job already
-		// posts its own result with no agent turn, so it would do nothing.
-		return CronJob{}, fmt.Errorf("line %d: cron %q sets both tool: and direct: — direct only applies to an agent: job (a tool job already posts its own result with no agent turn)", d.line, d.name)
+	case d.cronTool != "" && d.report != notify.ReportAuto:
+		// report: means something only for an agent job. A tool job runs no
+		// model turn at all, so there is no report to route.
+		return CronJob{}, fmt.Errorf("line %d: cron %q sets both tool: and report: — report only applies to an agent: job (a tool job already posts its own result with no agent turn)", d.line, d.name)
 	}
 	job := CronJob{
 		Name: d.name, Schedule: d.schedule, Agent: d.cronAgnt, Tool: d.cronTool,
-		WorkDir: d.workdir, Direct: d.direct, Line: d.line,
+		WorkDir: d.workdir, Report: d.report, Line: d.line,
 	}
 	if job.Tool != "" {
 		// A tool job has no prompt and binds NO function: the next definition

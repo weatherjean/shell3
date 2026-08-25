@@ -95,8 +95,11 @@ func CronDetailHTML(statuses []cron.JobStatus, costs map[string]runs.JobCost, na
 	kv(&b, "schedule", st.Schedule)
 	kv(&b, "target", target)
 	kv(&b, "workdir", st.WorkDir)
-	if st.Direct {
-		kv(&b, "delivery", "direct (raw post, no agent turn)")
+	switch st.Report {
+	case "raw":
+		kv(&b, "delivery", "report: raw (the job's own output posts, no agent turn)")
+	case "always":
+		kv(&b, "delivery", "report: always (the agent must answer the user)")
 	}
 	kv(&b, "last run", cronLastRun(st))
 	kv(&b, "outcome", cronOutcome(st))

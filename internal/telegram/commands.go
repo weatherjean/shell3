@@ -278,6 +278,10 @@ func (c *conversation) handleNewCommand(ctx context.Context) {
 	if old != nil && !c.b.sessionHasRunningJob(old) && !old.HasQueuedInput() {
 		_ = old.Close()
 	}
+	// The turn that would have answered the room's report:"always" binds has
+	// just been detached with the session, so post their results now: a
+	// completion the spawner marked as awaited must not be what /new discards.
+	c.flushRequired()
 	c.sendReply(ctx, "🧵 fresh conversation — the old one stays in the dash and history")
 }
 

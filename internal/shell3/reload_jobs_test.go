@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/weatherjean/shell3/internal/chat"
+	"github.com/weatherjean/shell3/internal/notify"
 )
 
 // fakeReloadState builds a reloadState that drives applyReload with the same
@@ -62,7 +63,7 @@ func TestReloadProceedsWhileJobRunning(t *testing.T) {
 		t.Fatalf("session: %v", err)
 	}
 	// A slow job so it is definitely still running across the reload.
-	id, err := rt.jobs.startCommand(parent, "sleep", t.TempDir(), []string{"sleep", "30"}, nil, false, "")
+	id, err := rt.jobs.startCommand(parent, "sleep", t.TempDir(), []string{"sleep", "30"}, nil, notify.ReportAuto, "")
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -95,7 +96,7 @@ func TestOldPartsCloseAfterDrain(t *testing.T) {
 	oldClosed := make(chan struct{})
 	rt.cleanup = func() { close(oldClosed) }
 
-	id, err := rt.jobs.startCommand(parent, "sleep", t.TempDir(), []string{"sleep", "30"}, nil, false, "")
+	id, err := rt.jobs.startCommand(parent, "sleep", t.TempDir(), []string{"sleep", "30"}, nil, notify.ReportAuto, "")
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
@@ -130,7 +131,7 @@ func TestDoubleReloadWhileLingering(t *testing.T) {
 	gen0 := make(chan struct{})
 	rt.cleanup = func() { close(gen0) }
 
-	id, err := rt.jobs.startCommand(parent, "sleep", t.TempDir(), []string{"sleep", "30"}, nil, false, "")
+	id, err := rt.jobs.startCommand(parent, "sleep", t.TempDir(), []string{"sleep", "30"}, nil, notify.ReportAuto, "")
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}

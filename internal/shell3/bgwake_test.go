@@ -3,6 +3,8 @@ package shell3
 import (
 	"strings"
 	"testing"
+
+	"github.com/weatherjean/shell3/internal/notify"
 )
 
 // TestFailedCommandJobWakesParent verifies that a bash_bg job exiting nonzero
@@ -14,7 +16,7 @@ func TestFailedCommandJobWakesParent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
-	if _, err := rt.jobs.startCommand(parent, "false", t.TempDir(), []string{"false"}, nil, false, ""); err != nil {
+	if _, err := rt.jobs.startCommand(parent, "false", t.TempDir(), []string{"false"}, nil, notify.ReportAuto, ""); err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
 	waitForWake(t, rt, parent)
@@ -32,7 +34,7 @@ func TestCleanCommandJobWakesParent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
-	if _, err := rt.jobs.startCommand(parent, "true", t.TempDir(), []string{"true"}, nil, false, ""); err != nil {
+	if _, err := rt.jobs.startCommand(parent, "true", t.TempDir(), []string{"true"}, nil, notify.ReportAuto, ""); err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
 	waitForWake(t, rt, parent)
@@ -52,7 +54,7 @@ func TestDirectCommandJobPostsRaw(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
-	if _, err := rt.jobs.startCommand(parent, "true", t.TempDir(), []string{"true"}, nil, true, ""); err != nil {
+	if _, err := rt.jobs.startCommand(parent, "true", t.TempDir(), []string{"true"}, nil, notify.ReportRaw, ""); err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
 	rt.jobs.wait()
@@ -76,7 +78,7 @@ func TestDefaultCommandJobMailsOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
-	if _, err := rt.jobs.startCommand(parent, "true", t.TempDir(), []string{"true"}, nil, false, ""); err != nil {
+	if _, err := rt.jobs.startCommand(parent, "true", t.TempDir(), []string{"true"}, nil, notify.ReportAuto, ""); err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
 	rt.jobs.wait()

@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/weatherjean/shell3/internal/notify"
 )
 
 // TestCommandJobWritesLogFile verifies a bash_bg command job tees its output
@@ -15,7 +17,7 @@ func TestCommandJobWritesLogFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := rt.jobs.startCommand(parent, "echo logged", t.TempDir(), []string{"echo", "logged"}, nil, false, "")
+	id, err := rt.jobs.startCommand(parent, "echo logged", t.TempDir(), []string{"echo", "logged"}, nil, notify.ReportAuto, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +51,7 @@ func TestCommandJobLogCapped(t *testing.T) {
 	}
 	// ~2 MiB of output against a 1 MiB cap.
 	id, err := rt.jobs.startCommand(parent, "yes", t.TempDir(),
-		[]string{"sh", "-c", "head -c 2097152 /dev/zero | tr '\\0' 'x'"}, nil, false, "")
+		[]string{"sh", "-c", "head -c 2097152 /dev/zero | tr '\\0' 'x'"}, nil, notify.ReportAuto, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +72,7 @@ func TestCommandJobLogCapped(t *testing.T) {
 // log path and does not crash.
 func TestCommandJobNoParentNoLog(t *testing.T) {
 	m := newJobManager(nil, 8)
-	id, err := m.startCommand(nil, "echo hi", t.TempDir(), []string{"echo", "hi"}, nil, false, "")
+	id, err := m.startCommand(nil, "echo hi", t.TempDir(), []string{"echo", "hi"}, nil, notify.ReportAuto, "")
 	if err != nil {
 		t.Fatal(err)
 	}

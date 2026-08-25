@@ -136,15 +136,17 @@ plausible but is incomplete.
 background tasks that might need elevated permissions. For read-only
 research, no special flag is needed.
 
-### The direct parameter
+### The report parameter
 
-`bash_bg` reports come back to you automatically. Pass `direct: true` when the
-user is waiting on this particular run and wants the raw output:
+`bash_bg` reports come back to you automatically. `report:` says what the
+finish does to the chat — set it at spawn time, while you still know whether
+anyone is waiting:
 
-| `direct` | Clean exit | Nonzero exit |
+| `report` | Clean exit | Nonzero exit |
 |---|---|---|
-| `false` (default) | Hands you the report — your reply posts as an ✉️ update, `NO_REPLY` posts nothing | Always surfaces to the user, and wakes you |
-| `true` | Raw result posts to the user's chat; the notice is queued for your next turn | Always surfaces to the user, and wakes you if your session is live |
+| `"auto"` (default) | Hands you the report — your reply posts as an ✉️ update, `NO_REPLY` posts nothing | Always surfaces to the user, and wakes you |
+| `"always"` | Hands you the report and REQUIRES an answer; stay silent and the raw output posts in your place | Always surfaces to the user, and wakes you |
+| `"raw"` | Raw result posts to the user's chat; the notice is queued for your next turn | Always surfaces to the user, and wakes you if your session is live |
 
 ```json
 bash_bg {
@@ -152,8 +154,8 @@ bash_bg {
 }
 ```
 
-Leave `direct` off for runs whose completion needs no immediate reaction;
-failures still surface either way.
+Leave `report` at its default for runs whose completion needs no immediate
+reaction; failures still surface whichever you pick.
 
 ---
 

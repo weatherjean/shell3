@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/weatherjean/shell3/internal/applog"
+	"github.com/weatherjean/shell3/internal/notify"
 	"github.com/weatherjean/shell3/internal/persona"
 	"github.com/weatherjean/shell3/internal/runs"
 )
@@ -45,13 +46,14 @@ type ToolConfig struct {
 	// as .headless; turn.go injects a system reminder when set.
 	Headless bool
 	// StartBashBg runs a command on the job runtime, returning its id. env is
-	// extra "K=V" entries (bash_bg passes nil); direct posts the raw result to
-	// the user with no follow-up turn; note is context carried into the
-	// completion mail. Nil ⇒ background jobs disabled.
-	StartBashBg func(command, workdir string, argv, env []string, direct bool, note string) (string, error)
+	// extra "K=V" entries (bash_bg passes nil); report is the single axis for
+	// what the finish does to the chat (see notify.ReportMode); note is
+	// context carried into the completion mail. Nil ⇒ background jobs
+	// disabled.
+	StartBashBg func(command, workdir string, argv, env []string, report notify.ReportMode, note string) (string, error)
 	// StartSubagent launches a child session under the concurrency cap and
-	// returns its id; direct/note as on StartBashBg. Nil ⇒ unavailable.
-	StartSubagent func(agent, prompt, desc string, direct bool, note string) (string, error)
+	// returns its id; report/note as on StartBashBg. Nil ⇒ unavailable.
+	StartSubagent func(agent, prompt, desc string, report notify.ReportMode, note string) (string, error)
 	// ListJobs formats every job, running and done, for task_list.
 	// Nil ⇒ task management unavailable.
 	ListJobs func() string

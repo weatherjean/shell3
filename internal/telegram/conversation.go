@@ -39,6 +39,15 @@ type conversation struct {
 	// lastAgentMail is the previous ✉️ post, so an identical repeat is
 	// dropped host-side. Cleared by /new.
 	lastAgentMail string
+	// pendingRequired holds the fallback post for every report:"always" job
+	// whose mail is queued here but whose turn has not run yet, and
+	// turnRequired the ones the RUNNING turn is answering for. They are two
+	// fields, not one, because a notice never drains mid-turn: a report
+	// landing while a turn runs belongs to the NEXT turn, and settling it
+	// against this one would post its fallback over an answer nobody had a
+	// chance to give.
+	pendingRequired []shell3.CompletionPost
+	turnRequired    []shell3.CompletionPost
 
 	cancelTurn  context.CancelFunc // non-nil while a turn runs in this room
 	turnActive  bool
@@ -152,6 +161,8 @@ func (c *conversation) runUserTurn(ctx, turnCtx context.Context, cancel context.
 	sess, err := c.mainSession()
 	if err != nil {
 		c.releaseSlot(cancel)
+		// No turn ran, so nothing answered the binds it inherited.
+		c.settleRequired(false)
 		c.sendReply(ctx, "⚠️ could not start a session: "+err.Error())
 		// Work queued against the held slot during the failed creation would
 		// otherwise wait for the next event.
@@ -200,6 +211,7 @@ func (c *conversation) finishPostedTurn(ctx context.Context, sess *shell3.Sessio
 		reply = malformedReplyNotice
 	}
 	c.postReply(ctx, sess, anchor, reply)
+	c.settleRequired(reply != "")
 	c.markCurrent(sess)
 	c.releaseSlot(cancel)
 	c.applyPendingReload(ctx) // self-evolution: agent edited config + called reload this turn (needs a free slot)
@@ -260,6 +272,52 @@ func (c *conversation) setAnchor(msgID string) {
 	c.mu.Lock()
 	c.mainAnchor = msgID
 	c.mu.Unlock()
+}
+
+// requireReport records the post to fall back to if the turn that reads this
+// report:"always" mail says nothing to the user.
+func (c *conversation) requireReport(p shell3.CompletionPost) {
+	c.mu.Lock()
+	c.pendingRequired = append(c.pendingRequired, p)
+	c.mu.Unlock()
+}
+
+// settleRequired closes out the binds this turn inherited. spoke means the
+// turn actually posted something to the user, which discharges them; silence
+// posts each job's own result instead, so a report the spawner said the user
+// was waiting on can never end as nothing at all.
+//
+// It never asks the model again: a second turn would re-run the judgement
+// that just failed, at full conversation context, to reach the same answer.
+func (c *conversation) settleRequired(spoke bool) {
+	c.mu.Lock()
+	pending := c.turnRequired
+	c.turnRequired = nil
+	c.mu.Unlock()
+	if spoke {
+		return
+	}
+	for _, p := range pending {
+		if err := c.b.PostCompletion(p); err != nil {
+			c.b.log.Warn("required completion fallback post failed", "job", p.JobID, "error", err)
+		}
+	}
+}
+
+// flushRequired posts every outstanding bind, run or queued: /new is about to
+// detach the session whose turn would otherwise have answered them.
+func (c *conversation) flushRequired() {
+	c.mu.Lock()
+	pending := make([]shell3.CompletionPost, 0, len(c.turnRequired)+len(c.pendingRequired))
+	pending = append(pending, c.turnRequired...)
+	pending = append(pending, c.pendingRequired...)
+	c.turnRequired, c.pendingRequired = nil, nil
+	c.mu.Unlock()
+	for _, p := range pending {
+		if err := c.b.PostCompletion(p); err != nil {
+			c.b.log.Warn("required completion fallback post failed", "job", p.JobID, "error", err)
+		}
+	}
 }
 
 // afterTurn is a wake turn's housekeeping: re-mark the current session,
@@ -435,6 +493,13 @@ func (c *conversation) takeSlotLocked(ctx context.Context) (context.Context, con
 	if !c.b.claimTurn() {
 		return nil, nil, false
 	}
+	// This turn drains the inbox as it starts, so it inherits the bind of
+	// every required report queued up to now — and only those. Append rather
+	// than assign: if some path ever takes a slot and returns without
+	// settling, the stranded binds are answered late by the next turn instead
+	// of being overwritten and lost.
+	c.turnRequired = append(c.turnRequired, c.pendingRequired...)
+	c.pendingRequired = nil
 	turnCtx, cancel := context.WithCancel(ctx)
 	c.cancelTurn = cancel
 	c.turnActive = true
@@ -450,15 +515,24 @@ func (c *conversation) takeSlotLocked(ctx context.Context) (context.Context, con
 // through it. The pinned cron session is never woken.
 func (c *conversation) runWakeTurn(ctx, turnCtx context.Context, sess *shell3.Session) {
 	reply, errText, _ := c.drainTurn(ctx, sess.RunQueued(turnCtx), nil, false)
-	// Silent even on a provider hiccup: the error is in the transcript, and
-	// posting it would make every flaky tick ring the chat. Errors ride along
-	// only when the agent was going to speak anyway.
+	// settleRequired takes the ONE decision that matters to a report:"always"
+	// bind: did anything reach the user? Every return below that posts
+	// nothing — sentinel, corrupt output, a duplicate — is a silent turn, and
+	// each job's own result posts in its place.
+	c.settleRequired(c.postWakeReply(ctx, sess, reply, errText))
+}
+
+// postWakeReply delivers a wake turn's reply and reports whether the user saw
+// anything. Silent even on a provider hiccup: the error is in the transcript,
+// and posting it would make every flaky tick ring the chat — errors ride along
+// only when the agent was going to speak anyway.
+func (c *conversation) postWakeReply(ctx context.Context, sess *shell3.Session, reply, errText string) bool {
 	if strutil.IsNoReply(reply) {
-		return
+		return false
 	}
 	// Corrupt output never posts: the transcript keeps it for diagnosis.
 	if containsToolMarkup(reply) {
-		return
+		return false
 	}
 	if errText != "" {
 		reply += "\n" + errText
@@ -468,13 +542,14 @@ func (c *conversation) runWakeTurn(ctx, turnCtx context.Context, sess *shell3.Se
 	c.mu.Lock()
 	if reply == c.lastAgentMail {
 		c.mu.Unlock()
-		return
+		return false
 	}
 	c.lastAgentMail = reply
 	c.mu.Unlock()
 	// Mail, not a page: always silent (⚠️ failures are what ring) and never a
 	// reply, since a quote header on every ✉️ is noise.
 	c.postReply(ctx, sess, "", "✉️ "+reply, SendOpt{Silent: true})
+	return true
 }
 
 // keepTyping refreshes the "typing…" action every 4s — it expires after

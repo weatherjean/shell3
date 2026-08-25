@@ -169,13 +169,13 @@ func TestWakeOwner_MainAndForeign(t *testing.T) {
 	c.main = sess
 	c.mu.Unlock()
 
-	if !b.WakeOwner(sess.ID(), "note for the agent") {
+	if !b.WakeOwner(shell3.Mail{OwnerID: sess.ID(), Note: "note for the agent"}) {
 		t.Fatal("the main conversation must accept the wake")
 	}
 	if !sess.HasQueuedInput() {
 		t.Fatal("wake note not queued on the session")
 	}
-	if b.WakeOwner("no-such-session", "n") {
+	if b.WakeOwner(shell3.Mail{OwnerID: "no-such-session", Note: "n"}) {
 		t.Fatal("unknown owner must return false")
 	}
 	// The cron parent never takes wakes even when adopted.
@@ -184,7 +184,7 @@ func TestWakeOwner_MainAndForeign(t *testing.T) {
 		t.Fatal(err)
 	}
 	b.AdoptSession(cron)
-	if b.WakeOwner(cron.ID(), "n") {
+	if b.WakeOwner(shell3.Mail{OwnerID: cron.ID(), Note: "n"}) {
 		t.Fatal("cron parent must return false")
 	}
 }
@@ -201,7 +201,7 @@ func TestStartFreshTurn_PostsReplyAsMail(t *testing.T) {
 	defer cancel()
 	go b.consumeWakes(ctx)
 
-	b.StartFreshTurn("cron job \"nightly\" finished. result: all clear")
+	b.StartFreshTurn(shell3.Mail{Note: "cron job \"nightly\" finished. result: all clear"})
 
 	waitFor(t, func() bool {
 		tconv(b).mu.Lock()

@@ -293,12 +293,20 @@ reaches you as an ✉️ update only when worth saying (failures always post; th
 result is recorded in the runs store and the jobs list either way). Both
 `task` and `bash_bg` accept two extra args:
 
-- `direct: true` — the raw result posts straight to the chat (🔔), costing
-  no agent turn; the spawning session gets the notice queued for its next
-  turn instead of a wake. The right choice when you asked for the work and
-  just want the output;
+- `report:` — the one axis for what the finish does to the chat. `"auto"`
+  (the default) mails the agent and lets it judge whether to speak;
+  `"always"` mails it and REQUIRES an answer — if the turn says nothing, the
+  job's own result posts in its place, so a result you are waiting on cannot
+  end as silence; `"raw"` posts the output itself (🔔) and costs no agent
+  turn, the right choice when you asked for the work and just want the
+  output. Under `"raw"` the spawning session gets the notice queued for its
+  next turn instead of a wake;
 - `note: "…"` rides along in the report as context ("the user is
-  waiting on this").
+  waiting on this"). Ignored under `report: "raw"`.
+
+There is deliberately no second flag beside `report:` — "post it raw" and
+"you must answer" are two answers to one question, and a pair of booleans
+could state both at once.
 
 A bash_bg job's full output is persisted to
 `.shell3_project/runs/<session>/jobs/<id>.log` (capped at 1 MiB, swept with
@@ -306,7 +314,7 @@ its run) so the agent and `task_status` can read past the in-memory tail.
 
 An employee's still-running `bash_bg` job keeps its session open past its
 main turn; each completion resumes the employee for a follow-up turn whose
-summary arrives as a task report like any other — or, for a `direct` job,
+summary arrives as a task report like any other — or, for a `report: "raw"` job,
 posts raw (capped at 5 follow-ups per employee — past the
 cap, or after cancel, the raw job event is mailed instead, so no completion
 is lost). `task_cancel <sub-id>` cascades to the jobs that employee started.
@@ -768,7 +776,7 @@ full interval later, which can look like a skipped run. Cron *expressions*
 # cron: daily-summary
 # schedule: "@daily"
 # agent: assistant
-# direct: true          # optional; post the raw result (see below)
+# report: raw           # optional; auto (default) | always | raw (see below)
 # workdir: /some/path   # optional; defaults to the config dir
 #---
 cron_daily_summary() { cat <<'EOF'
@@ -795,16 +803,19 @@ agent answering `NO_REPLY` after reading the report saves nothing; the turn
 is already spent. A failed run always surfaces as a ⚠️ alert and never
 spends an agent turn.
 
-`direct: true` skips the agent: the raw result posts straight to the chat as
+`report: raw` skips the agent: the raw result posts straight to the chat as
 a ⏰ message, costing no agent turn — for jobs whose output should be
-reported verbatim, not judged. `workdir` sets the job's working directory; the
+reported verbatim, not judged. `report: always` goes the other way and binds
+the agent's turn to answer, for a job that must be heard from every tick.
+`workdir` sets the job's working directory; the
 default is the dispatched agent's own — a project manager runs in its
 project's `workdir`, everything else in the config dir — and setting it
-overrides even a manager's. `direct:` applies only to an `agent:` job; a tool
-job already posts its own result, so setting both is a load error. A reload
+overrides even a manager's. `report:` applies only to an `agent:` job; a tool
+job runs no model turn, so setting both is a load error. The pre-`report:`
+spelling `direct: true` is a load error naming its replacement. A reload
 arms changed jobs.
 
-The dash's Cron table lists every job with its schedule, agent, `direct` flag,
+The dash's Cron table lists every job with its schedule, agent, `report` mode,
 last run and outcome, and its rolling 7-day dispatched-run token cost where
 known — the dash is the one dashboard; there is no cron command.
 `/run <name>` fires one by hand — the result travels the usual mail route,
@@ -826,10 +837,14 @@ rules:
   the chat, unconditionally. If the owning session is still live it also
   receives the report so the agent can react; an ownerless failure (a broken
   cron job, say) stops at the post — no agent turn is spent per broken tick.
-- **`direct: true`** (bash_bg arg, task arg, cron block) posts the
+- **`report: "raw"`** (bash_bg arg, task arg, cron block) posts the
   **raw result** straight to the chat — ⏰-prefixed for cron, 🔔 otherwise —
   costing no agent turn. The owning session gets the report queued, without
   a turn, so its next turn has it in context.
+- **`report: "always"`** runs the report turn but forbids silence: the agent
+  must answer you, and if it replies `NO_REPLY` anyway the job's own result
+  posts in its place. Set it whenever someone is waiting on the result. A
+  FAILED job drops the bind — the ⚠️ post above already told you.
 - **Everything else is a report to the agent.** The report queues into the
   main conversation and runs a turn over it (whichever session spawned the
   job — cron results and orphans land there too), carrying the spawner's
@@ -837,8 +852,9 @@ rules:
   job is *for*. The report never reaches you raw; the agent's reply posts to
   the chat as an **✉️ update** — one channel, no separate tool — unless it
   replies `NO_REPLY`, which posts nothing. Silence is the expected answer
-  for routine results, and for anything the conversation shows you were
-  already told.
+  for a routine result nobody is waiting on. Having told you a job STARTED
+  is not a reason for silence about how it ENDED — if that judgement matters,
+  spawn it with `report: "always"` and take it out of the model's hands.
 
 The ✉️ prefix marks an agent-initiated update, so bare chat text always
 means a direct reply to something you sent. Updates are part of the one

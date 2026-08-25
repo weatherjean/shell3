@@ -11,6 +11,7 @@ import (
 	"github.com/weatherjean/shell3/internal/chat"
 	"github.com/weatherjean/shell3/internal/llm"
 	"github.com/weatherjean/shell3/internal/llm/fakellm"
+	"github.com/weatherjean/shell3/internal/notify"
 	"github.com/weatherjean/shell3/internal/runs"
 	"github.com/weatherjean/shell3/internal/shell3"
 	"github.com/weatherjean/shell3/internal/shell3/shell3test"
@@ -295,7 +296,7 @@ func TestContract5_StopKeepsBackgroundJobsRunning(t *testing.T) {
 	b.AdoptSession(sess)
 
 	// Start a background subagent job that stays running (headless → blocking).
-	if _, err := sess.Dispatch("", "bg work", shell3.DispatchOpts{Direct: true}); err != nil {
+	if _, err := sess.Dispatch("", "bg work", shell3.DispatchOpts{Report: notify.ReportRaw}); err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
 	select {
