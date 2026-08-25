@@ -9,6 +9,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 // sendFailClient is a transport whose plain sends are rejected — a Telegram
@@ -135,5 +136,39 @@ func TestConvoLog_DescribesMediaWithoutEmbeddingIt(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), "0123456789") {
 		t.Fatal("attachment bytes leaked into the log")
+	}
+}
+
+// Updates must be idempotent: the same channel, every call. Bot.Run calls it
+// once per loop iteration, so a wrapper that builds a fresh forwarder per call
+// leaves orphaned goroutines competing for the upstream — and the ones whose
+// channel nobody reads any more swallow the messages they win. Shipped for an
+// hour on 2026-08-25; roughly every other message reached the log and then
+// vanished before it could become a turn, with no error anywhere.
+func TestConvoLog_UpdatesIsIdempotent(t *testing.T) {
+	var buf bytes.Buffer
+	fc := newFakeClient()
+	c := newConvoLogClient(fc, &buf)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	first := c.Updates(ctx)
+	if second := c.Updates(ctx); first != second {
+		t.Fatal("Updates returned a second stream; abandoned forwarders eat messages")
+	}
+
+	// And behaviourally: every message survives repeated subscription.
+	const n = 6
+	go func() {
+		for i := 0; i < n; i++ {
+			fc.in <- Msg{ChatID: 42, SenderID: 42, ID: "m", Text: "hello", ChatType: "private"}
+		}
+	}()
+	for i := 0; i < n; i++ {
+		select {
+		case <-c.Updates(ctx): // re-subscribing each read, exactly as Run did
+		case <-time.After(3 * time.Second):
+			t.Fatalf("message %d of %d never arrived — a forwarder swallowed it", i+1, n)
+		}
 	}
 }

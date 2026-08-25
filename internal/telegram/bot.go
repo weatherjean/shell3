@@ -258,11 +258,17 @@ func (b *Bot) AdoptSession(s *shell3.Session) {
 // Run consumes inbound messages and the wake bus until ctx is cancelled.
 func (b *Bot) Run(ctx context.Context) {
 	go b.consumeWakes(ctx)
+	// Subscribe ONCE. Calling Updates per iteration only worked because the
+	// clients happened to hand back a stored field; a client that builds its
+	// stream on demand (the --convo-log wrapper did) then gets a fresh
+	// subscriber every loop, each competing for the same upstream, and the
+	// abandoned ones silently eat messages.
+	updates := b.client.Updates(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case m, ok := <-b.client.Updates(ctx):
+		case m, ok := <-updates:
 			if !ok {
 				return
 			}

@@ -113,6 +113,16 @@ func errText(err error) string {
 type convoLogClient struct {
 	tgClient
 	log *convoLog
+	// once guards the wrapped update stream: Updates must return the SAME
+	// channel every call. Bot.Run calls it once per loop iteration — harmless
+	// for a client that hands back a field, fatal for one that spawns a
+	// forwarder, because each extra goroutine competes for the upstream and
+	// the ones whose channel nobody reads any more swallow whatever they win.
+	// Shipped that way for one hour on 2026-08-25: messages were logged (the
+	// forwarder logs before it forwards) and then never reached a turn, so the
+	// user watched roughly every other message vanish with no error anywhere.
+	once sync.Once
+	out  chan Msg
 }
 
 // newConvoLogClient wraps c so every message in and out is recorded to w.
@@ -125,20 +135,22 @@ func newConvoLogClient(c tgClient, w io.Writer) tgClient {
 // deliberately dropped still appears in the log with the context needed to
 // see why it was dropped (sender, chat type, whether it was a reply).
 func (c *convoLogClient) Updates(ctx context.Context) <-chan Msg {
-	in := c.tgClient.Updates(ctx)
-	out := make(chan Msg)
-	go func() {
-		defer close(out)
-		for m := range in {
-			c.log.write(inboundEvent(m))
-			select {
-			case out <- m:
-			case <-ctx.Done():
-				return
+	c.once.Do(func() {
+		in := c.tgClient.Updates(ctx)
+		c.out = make(chan Msg)
+		go func() {
+			defer close(c.out)
+			for m := range in {
+				c.log.write(inboundEvent(m))
+				select {
+				case c.out <- m:
+				case <-ctx.Done():
+					return
+				}
 			}
-		}
-	}()
-	return out
+		}()
+	})
+	return c.out
 }
 
 // inboundEvent renders a received message. Attachments are described, never
