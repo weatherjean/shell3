@@ -113,22 +113,24 @@ func (p *Parts) KitAgentRuntime(name string) (chat.ActiveAgent, error) {
 
 	defs := append(config.ToolDefs(r.Builtins), r.ToolDefs()...)
 
-	// The main agent gets the task tool with every other agent as a target.
-	// Employees never get it: delegation is one level structurally, not by
-	// convention.
+	// EVERY agent that has someone to dispatch gets the task tool, employees
+	// included: delegation is two levels, and the bound is enforced at
+	// DISPATCH time by the handler, never by hiding the schema. An absent
+	// tool is an invitation to improvise — the failure this replaced was an
+	// employee hand-rolling an HTTP client against a model API instead of
+	// saying "this needs delegating". Main is never a target (it is the
+	// conversation, not a worker) and neither is the caller itself.
 	var employees []string
-	if isMain(p.kit, r.Agent.Name) {
-		refs := make([]config.SubagentRef, 0, len(p.kit.Agents))
-		for i, ka := range p.kit.Agents {
-			if i == 0 {
-				continue
-			}
-			employees = append(employees, ka.Name)
-			refs = append(refs, config.SubagentRef{Name: ka.Name, Description: ka.Desc})
+	refs := make([]config.SubagentRef, 0, len(p.kit.Agents))
+	for i, ka := range p.kit.Agents {
+		if i == 0 || ka.Name == r.Agent.Name {
+			continue
 		}
-		if len(refs) > 0 {
-			defs = append(defs, config.TaskToolFor(refs), config.TaskListTool, config.TaskStatusTool, config.TaskCancelTool)
-		}
+		employees = append(employees, ka.Name)
+		refs = append(refs, config.SubagentRef{Name: ka.Name, Description: ka.Desc})
+	}
+	if len(refs) > 0 {
+		defs = append(defs, config.TaskToolFor(refs), config.TaskListTool, config.TaskStatusTool, config.TaskCancelTool)
 	}
 
 	// Declared tools route to the host-tool dispatcher, not the built-in

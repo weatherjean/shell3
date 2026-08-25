@@ -194,9 +194,12 @@ One path: run agent K with prompt P. Three dispatchers:
 | Telegram | main | your message |
 | `task` | any employee | the main agent's ask |
 | cron (`agent:`) | a bound employee | the standing task |
-| cron (`tool:`) | — no agent, no model turn | a declared tool's shell function, called directly |
+| `task` from an employee | a peer employee | that employee's ask |
 
-Delegation is one level. An employee that needs help runs `shell3 ask` from
+Delegation is two levels. An employee may dispatch a peer; that peer may not
+dispatch again — its `task` call is refused with an error telling it to do the
+work itself or report up. An employee with no peer, or one at the second
+level, that genuinely needs another model call runs `shell3 ask --agent` from
 bash.
 
 Every dispatch is a fresh session. Continuity is written state: a `memory.md`

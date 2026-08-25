@@ -175,6 +175,7 @@ type bgJob struct {
 	child       *Session // subagent: the child session handle (nil for commands)
 	childClosed bool     // child.Close() has run; follow-ups degrade to raw notices
 	statusPolls int      // task_status checks while running — repeats get told to stop polling
+	depth       int      // dispatch depth: 1 from a root session, 2 from a depth-1 subagent
 	lingering   bool     // main turn ended, child kept open for live bg jobs
 	driver      bool     // a follow-up driver goroutine is active for this job
 	followUps   int      // follow-up turns run so far (capped at maxFollowUps)
@@ -263,11 +264,15 @@ func (m *jobManager) capError() error {
 	return fmt.Errorf("background-job cap %d reached; wait for a job to finish", m.max)
 }
 
-// runningCount counts non-finished jobs. Under m.mu.
-func (m *jobManager) runningCount() int {
+// runningCountAtDepth counts non-finished jobs at one dispatch depth. The cap
+// applies PER DEPTH because a lingering parent is still unfinished: counted
+// globally, a full rank of depth-1 agents would hold every slot and refuse
+// every child they tried to spawn, and a "cap reached" dead end is exactly
+// what sends an agent back to improvising a model call of its own. Under m.mu.
+func (m *jobManager) runningCountAtDepth(depth int) int {
 	n := 0
 	for _, j := range m.jobs {
-		if !j.finished {
+		if !j.finished && j.depth == depth {
 			n++
 		}
 	}
@@ -309,7 +314,10 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 		return "", errors.New("empty command argv")
 	}
 	m.mu.Lock()
-	if m.runningCount() >= m.max {
+	// A bash_bg job shares its spawner's rank: it is that agent's own work,
+	// so it competes with the agent's siblings, not with its children.
+	depth := m.spawnerDepthLocked(parent)
+	if m.runningCountAtDepth(depth) >= m.max {
 		m.mu.Unlock()
 		return "", m.capError()
 	}
@@ -354,7 +362,7 @@ func (m *jobManager) startCommand(parent *Session, command, workdir string, argv
 		parentID:      parentName(parent),
 		parentSession: parentSessionID(parent),
 		startedAt:     time.Now(), cancel: cancel, out: out,
-		report: report, note: note, logPath: logPath,
+		report: report, note: note, logPath: logPath, depth: depth,
 	}
 	m.jobs[id] = j
 	m.mu.Unlock()
@@ -711,6 +719,41 @@ func resolveChildWorkDir(parentWD, override, root string) string {
 	return filepath.Join(base, override)
 }
 
+// maxDispatchDepth bounds delegation at TWO levels: a root session (the
+// conversation, a cron parent, ask) dispatches at depth 1, and that subagent
+// may dispatch once more. Depth 3 is refused with a message the model reads —
+// see depthRefusal. The bound is enforced here rather than by hiding the task
+// tool, because an absent tool is an invitation to improvise: the failure
+// this replaced was an employee hand-rolling an HTTP client against a model
+// API instead of reporting that the work needed delegating.
+const maxDispatchDepth = 2
+
+// dispatchDepthLocked is the depth a job spawned from sess would run at. A
+// root session owns no subagent job, so its dispatches are depth 1. Under
+// m.mu.
+func (m *jobManager) dispatchDepthLocked(sess *Session) int {
+	return m.spawnerDepthLocked(sess) + 1
+}
+
+// spawnerDepthLocked is the depth of the agent running in sess: 0 for a root
+// session, otherwise the owning subagent's own depth. Under m.mu.
+func (m *jobManager) spawnerDepthLocked(sess *Session) int {
+	if owner := m.owningSubagentLocked(sess); owner != nil {
+		return owner.depth
+	}
+	return 0
+}
+
+// depthRefusal is what a depth-2 agent reads when it calls task. It names the
+// bound, the way out, and forbids the workaround — the same shape as the
+// bash-first redirect and the gate's own refusals, because a refusal that
+// only says "no" is how a model ends up writing its own model client.
+func depthRefusal(agent string) error {
+	return fmt.Errorf("delegation stops at two levels and this job was NOT started: you are already a second-level subagent, "+
+		"so %q cannot be dispatched from here. Do this work in your own turn, or finish and report to your parent exactly what "+
+		"needs delegating and why — it can dispatch. Do NOT work around this by calling a model API yourself", agent)
+}
+
 // startSubagent runs prompt in a new in-process child session,
 // asynchronously; finishSubagent then routes the result as completion mail.
 func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, o subagentOpts) (string, error) {
@@ -718,7 +761,12 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 		return "", fmt.Errorf("subagents require a runtime")
 	}
 	m.mu.Lock()
-	if m.runningCount() >= m.max {
+	depth := m.dispatchDepthLocked(parent)
+	if depth > maxDispatchDepth {
+		m.mu.Unlock()
+		return "", depthRefusal(agent)
+	}
+	if m.runningCountAtDepth(depth) >= m.max {
 		m.mu.Unlock()
 		return "", m.capError()
 	}
@@ -744,6 +792,7 @@ func (m *jobManager) startSubagent(parent *Session, agent, prompt, desc string, 
 		parentID: pname, parentSession: parentSessionID(parent), startedAt: time.Now(),
 		cancel: cancel, out: out,
 		report: o.report, note: o.note, cronJob: o.cronJob, detached: o.detached,
+		depth: depth,
 	}
 	m.jobs[id] = j
 	m.mu.Unlock()
@@ -1017,9 +1066,42 @@ func (m *jobManager) maybeCloseChild(sub *bgJob) {
 // fresh main-agent turn via the CompletionHost instead); everything else is a
 // completion event through the mail router.
 func (m *jobManager) finishSubagent(j *bgJob, summary, errText string) {
-	if j.parent != nil {
-		m.dispatchCompletion(subagentEvent(j, summary, errText))
+	// Routing mirrors finishCommand: a job owned by ANOTHER subagent's session
+	// climbs to that parent (injected + a follow-up driver resumes it) rather
+	// than going to the root. Without this branch a depth-2 result would reach
+	// the host as a completion whose owner is not the main conversation, fall
+	// through WakeOwner to StartFreshTurn, and surface in the user's chat
+	// while the level-1 agent that asked for it never learned the answer.
+	m.mu.Lock()
+	owner := m.owningSubagentLocked(j.parent)
+	var deliver func()
+	switch {
+	case j.parent == nil:
+		deliver = func() {}
+	case owner == nil:
+		ev := subagentEvent(j, summary, errText)
+		deliver = func() { m.dispatchCompletion(ev) }
+	case m.canFollowUpLocked(owner):
+		owner.child.injectNoticeNoWake(notifyAgentDone(j.id, summary, errText))
+		if owner.lingering && !owner.driver {
+			owner.driver = true
+			m.wg.Add(1)
+			go m.runFollowUps(owner)
+		}
+		deliver = func() {}
+	default:
+		// Follow-ups exhausted, poisoned, or the parent's child is closed:
+		// the result must still reach someone, so it routes at the parent's
+		// own root, labeled with where it came from.
+		ev := subagentEvent(j, summary, errText)
+		ev.owner, ev.OwnerID = owner.parent, owner.parent.ID()
+		ev.CronJob = owner.cronJob
+		ev.Note = joinNote(ev.Note, "started by subagent "+owner.id)
+		deliver = func() { m.dispatchCompletion(ev) }
 	}
+	m.mu.Unlock()
+	deliver()
+
 	m.mu.Lock()
 	m.markDoneLocked(j, func(j *bgJob) { j.summary, j.errText = summary, errText })
 	m.mu.Unlock()

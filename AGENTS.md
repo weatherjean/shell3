@@ -311,13 +311,44 @@ job keeps the Parts (store/MCP handles) it was built with; the old
 generation's teardown is deferred ("parked") and runs once every such job
 drains, or immediately if nothing is running. Only a busy front-end *turn*
 still blocks a reload (`s.isBusy()`). Delegation is
-**single-level by construction** — a
-subagent is never given the `task` tool (subagent frontmatter has no way to
-express delegation), so subagents can't spawn subagents; there is no depth
-field anywhere. Delegation itself is **inferred**: the four task-family tools
-(`task`, `task_list`, `task_status <id>`, `task_cancel <id>`; ids like
-`sub1`/`bg1`) are advertised iff the kit declares an employee — the `agent:`
-block IS the registration, there is no toggle and no allowlist key.
+**two levels deep, bounded at DISPATCH and never by hiding the tool**
+(`shell3.maxDispatchDepth`): a root session — the conversation, a cron
+parent, `ask` — dispatches at depth 1, that subagent may dispatch once more,
+and a depth-2 agent's `task` call is refused with `depthRefusal`, an error the
+model READS ("delegation stops at two levels and this job was NOT started …
+report to your parent exactly what needs delegating and why … do NOT work
+around this by calling a model API yourself"). The refusal is the point: an
+ABSENT tool is an invitation to improvise, and the failure this replaced was
+an employee hand-rolling a `urllib` client against a model API rather than
+saying the work needed delegating. So EVERY agent with a peer to dispatch
+carries the task family; main is never a target (it is the conversation, not
+a worker) and neither is the caller itself, so a kit with exactly one employee
+advertises nothing to it — an empty enum, not a hidden tool.
+`bgJob.depth` is the field; `dispatchDepthLocked` derives it by walking
+`owningSubagentLocked` from the spawning session, so the SAME agent runs at
+depth 1 under main and depth 2 under a peer. The concurrency cap
+(`background.max_concurrent`) is applied PER DEPTH (`runningCountAtDepth`),
+because a lingering parent is still unfinished: counted globally, a full rank
+of depth-1 agents would hold every slot and refuse every child they tried to
+spawn — and a "cap reached" dead end is exactly what sends an agent back to
+improvising. A `bash_bg` job shares its spawner's rank
+(`spawnerDepthLocked`): it is that agent's own work, competing with its
+siblings, not with its children. Delegation itself is **inferred**: the four
+task-family tools (`task`, `task_list`, `task_status <id>`,
+`task_cancel <id>`; ids like `sub1`/`bg1`) are advertised iff the kit declares
+a peer — the `agent:` block IS the registration, there is no toggle and no
+allowlist key.
+
+Results climb the same ladder they went down. `finishSubagent` mirrors
+`finishCommand`: a subagent whose parent session belongs to ANOTHER subagent
+is injected into that parent (`injectNoticeNoWake`) and a follow-up driver
+resumes it, rather than routed at the root. Without that branch a depth-2
+result would reach the host as a completion whose owner is not the main
+conversation, fall through `WakeOwner` to `StartFreshTurn`, and surface in the
+user's chat while the depth-1 agent that asked for it never learned the
+answer. When follow-ups are exhausted, poisoned, or the parent's child has
+closed, the result still routes — at the PARENT'S own root, labeled "started
+by subagent <id>", the same orphan shape `finishCommand` uses.
 
 The dash's index lists running + finished jobs; `/superstop` kills them all
 (`Session.KillAllForStop`: snapshot, mark each job `suppress`, cancel — the

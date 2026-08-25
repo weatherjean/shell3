@@ -282,8 +282,13 @@ spent.
 
 A spawned employee is an **in-process background job** (a child-session
 goroutine, not a subprocess). Employees run headless (their gate sees
-`headless: true`), and delegation is single-level by construction — an
-employee never gets the `task` tool.
+`headless: true`). Delegation goes **two levels**: you dispatch an employee,
+and that employee may dispatch one more. A third level is refused at dispatch
+with an error the agent reads, telling it to do the work itself or report up —
+never by hiding the tool, because an employee that finds delegation silently
+missing improvises instead. An employee with no peer to dispatch (a kit with
+exactly one) is advertised nothing: main is never a target and neither is the
+caller itself.
 
 `bash_bg` runs on the same job runtime but is gated separately by `bash_bg`
 in `use`. **Completions arrive as task reports** (see
@@ -322,7 +327,7 @@ One global knob caps it all:
 
 ```yaml
 background:
-  max_concurrent: 8    # concurrent background jobs (default 8)
+  max_concurrent: 8    # concurrent background jobs PER DEPTH (default 8)
 ```
 
 

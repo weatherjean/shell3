@@ -9,6 +9,7 @@ import (
 
 	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/chat"
+	"github.com/weatherjean/shell3/internal/llm"
 )
 
 // writeTree writes a config tree into dir: the given files plus a default
@@ -378,8 +379,10 @@ func TestEnvironmentReminder(t *testing.T) {
 
 // TestAgentRuntime_SubagentResolvesAsAgent asserts that a registered subagent
 // name passed to AgentRuntime (the task-tool spawn path) resolves the
-// subagent's own config — correct name, and an empty Subagents bundle
-// (delegation is single-level by construction).
+// subagent's own config — correct name, and (in THIS kit) an empty Subagents
+// bundle: main is never a dispatch target and an agent is never its own, so
+// the kit's only employee has nobody to dispatch. An employee with a PEER
+// does get the task tool — see TestAgentRuntime_EmployeesGetTaskToo.
 func TestAgentRuntime_SubagentResolvesAsAgent(t *testing.T) {
 	p, cleanup := subagentParts(t)
 	defer cleanup()
@@ -395,12 +398,12 @@ func TestAgentRuntime_SubagentResolvesAsAgent(t *testing.T) {
 		t.Errorf("Personality.Name = %q, want %q", srt.Personality.Name, "researcher")
 	}
 	if len(srt.Subagents) != 0 {
-		t.Errorf("AgentRuntime(\"researcher\").Subagents = %v, want empty (single-level)", srt.Subagents)
+		t.Errorf("AgentRuntime(\"researcher\").Subagents = %v, want empty — no peer to dispatch", srt.Subagents)
 	}
-	// A subagent never gets the task family.
+	// With no peer there is no target, so no task tool to advertise.
 	for _, td := range srt.Personality.Tools {
 		if td.Name == "task" {
-			t.Error("subagent runtime must not carry the task tool")
+			t.Error("an employee with no peer must not carry the task tool — its enum would be empty")
 		}
 	}
 }
@@ -512,4 +515,52 @@ func TestAgentRuntime_UnknownErrors(t *testing.T) {
 	if !strings.Contains(err.Error(), "ghost") {
 		t.Errorf("error should name the unknown agent, got: %v", err)
 	}
+}
+
+// Delegation is TWO levels, not one. Every agent that has someone to dispatch
+// is advertised the task tool — an employee included — because an ABSENT tool
+// is an invitation to improvise (the failure this exists to stop was an
+// employee hand-rolling an HTTP client against a model API rather than saying
+// "this needs delegating"). The depth bound is enforced at dispatch time by
+// the handler, not by hiding the schema. An agent is never its own target.
+func TestAgentRuntime_EmployeesGetTaskToo(t *testing.T) {
+	tmp := t.TempDir()
+	writeTree(t, tmp, map[string]string{
+		"shell3.sh": minimalWiring +
+			kitAgent("main", "you are a coder", "use: [bash]") +
+			kitAgent("researcher", "you are a researcher", "description: investigate things", "use: [bash]") +
+			kitAgent("writer", "you are a writer", "description: draft things", "use: [bash]"),
+	})
+	p, cleanup, err := agentsetup.BuildParts(agentsetup.Options{ConfigDir: tmp, CWD: tmp, HomeDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("BuildParts: %v", err)
+	}
+	defer cleanup()
+
+	rt, err := p.AgentRuntime("researcher")
+	if err != nil {
+		t.Fatalf("AgentRuntime(researcher): %v", err)
+	}
+	var task *llm.ToolDefinition
+	for i, td := range rt.Personality.Tools {
+		if td.Name == "task" {
+			task = &rt.Personality.Tools[i]
+		}
+	}
+	if task == nil {
+		t.Fatalf("an employee with another employee to dispatch must have task; tools = %v", toolNames(rt))
+	}
+	st := task.Parameters["properties"].(map[string]any)["subagent_type"].(map[string]any)
+	enum, _ := st["enum"].([]string)
+	if len(enum) != 1 || enum[0] != "writer" {
+		t.Fatalf("researcher's task targets = %v, want [writer] — never main, never itself", enum)
+	}
+}
+
+func toolNames(rt chat.ActiveAgent) []string {
+	out := make([]string, 0, len(rt.Personality.Tools))
+	for _, td := range rt.Personality.Tools {
+		out = append(out, td.Name)
+	}
+	return out
 }

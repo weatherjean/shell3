@@ -23,6 +23,23 @@ Leave every weighing to the agent.
 The second one decided. That decision belonged to the agent, where it could
 have weighed context, noticed a contradiction, and explained itself.
 
+## Delegation is two levels
+
+Every agent with a peer to dispatch gets the `task` tool — employees
+included. You dispatch an employee (level 1); that employee may dispatch a
+peer (level 2); a level-2 agent's `task` call is refused with an error telling
+it to do the work itself or report up.
+
+The refusal matters more than the bound. An agent that finds delegation
+silently missing does not stop — it improvises, and the worst version of that
+is a hand-rolled HTTP client against a model API inside a tool. If you are at
+the bottom of the ladder and need work you cannot do, **finish and say so**:
+name what needs delegating and why, and let your parent dispatch it.
+
+An agent is never its own target, and the main agent is never anyone's target.
+A kit with exactly one employee therefore advertises no `task` tool to it —
+there is nobody to dispatch.
+
 ## A new project
 
 ```sh
