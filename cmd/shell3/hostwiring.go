@@ -102,12 +102,7 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 	installKitCommands(b, rt)
 	installRoomConfig(b, rt)
 
-	// Redeliver what the previous process left behind, now that a host can
-	// carry it. Start-time-only, like the janitors.
-	if n := rt.RecoverCompletions(); n > 0 {
-		rt.Parts().Log().Info("recovered undelivered completions from the previous run", "count", n)
-	}
-	// And keep redelivering while THIS process runs: a post that failed to
+	// Keep redelivering while THIS process runs: a post that failed to
 	// send keeps its outbox row, and this ticker retries until the transport
 	// is back, so the floor survives an outage without a restart.
 	redeliverDone := make(chan struct{})
@@ -137,12 +132,11 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 	}
 	b.AdoptSession(cronSess)
 
-	// All three resolve Parts per call, so a /reload's new kit, database and
-	// log take effect without re-wiring.
-	tools := kitTools{partsRef{rt.Parts}}
+	// Both resolve Parts per call, so a /reload's new kit, database and log
+	// take effect without re-wiring.
 	store := storeRunStore{partsRef{rt.Parts}}
 	log := partsLogger{partsRef{rt.Parts}}
-	sched, err := armCron(cronSess, tools, store, log, b, rt.Cron())
+	sched, err := armCron(cronSess, store, log, rt.Cron())
 	if err != nil {
 		return nil, err
 	}
@@ -156,6 +150,24 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 	}
 	if sched != nil {
 		b.SetJobRunner(sched.Run) // /run <job>
+	}
+	// The scheduler only ever learns that a dispatch was ACCEPTED. The
+	// completion router is where a cron run's real result is known, so point
+	// it back here — through currentSched, so a /reload's new scheduler is the
+	// one that records.
+	rt.SetCronOutcomeHook(func(o shell3.CronOutcome) {
+		if s := currentSched(); s != nil {
+			s.RecordOutcome(o)
+		}
+	})
+
+	// Redeliver what the previous process left behind, now that a host can
+	// carry it. Start-time-only, like the janitors. ORDER IS LOAD-BEARING:
+	// after the cron outcome hook, because a dead-PID marker recovered here
+	// is a cron run that was lost mid-flight — an outcome its job's history
+	// must count, and reportCronOutcome silently drops with no hook wired.
+	if n := rt.RecoverCompletions(); n > 0 {
+		rt.Parts().Log().Info("recovered undelivered completions from the previous run", "count", n)
 	}
 	// The dash's Cron section reads the live scheduler's history.
 	cronStatusFn := func() []cron.JobStatus {
@@ -192,9 +204,7 @@ func wireHost(b *telegram.Bot, rt *shell3.Runtime, workDir string) (cleanup func
 	// host tools need no re-registration: Runtime.Reload re-applies the
 	// decorator.
 	b.SetReloader(func() (shell3.ReloadResult, error) {
-		// reloadAndRearm wires the fresh scheduler's post callback itself,
-		// before starting it — see wireCronPost's ordering note.
-		ns, res, err := reloadAndRearm(rt, b, cronSess, tools, store, log, currentSched())
+		ns, res, err := reloadAndRearm(rt, b, cronSess, store, log, currentSched())
 		// A reload may add, rename or drop a command.
 		installKitCommands(b, rt)
 		installRoomConfig(b, rt)

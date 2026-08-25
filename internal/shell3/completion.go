@@ -194,6 +194,72 @@ func (e CompletionEvent) mail() Mail {
 	return m
 }
 
+// CronOutcome is one cron run's REAL result, on its way back to the
+// scheduler. The scheduler only ever sees Dispatch's return, which reports
+// that the subagent was ACCEPTED — so without this its counters describe the
+// dispatch and not the run, and a job that dispatches cleanly every night and
+// fails its work every night reads as runs=N fail=0 forever.
+type CronOutcome struct {
+	Job     string        // cron job name (JobStatus key)
+	SubID   string        // the dispatched job id, matching JobStatus.LastSubID
+	OK      bool          // the run itself succeeded
+	ErrText string        // failure reason ("" when OK)
+	Elapsed time.Duration // how long the run actually took
+}
+
+// SetCronOutcomeHook installs where finished cron runs report their outcome;
+// wireHost points it at Scheduler.RecordOutcome. nil disables reporting (the
+// library default, and every front-end without a scheduler). Survives Reload,
+// like the completion host — Reload swaps parts, not wiring.
+func (rt *Runtime) SetCronOutcomeHook(fn func(CronOutcome)) {
+	rt.mu.Lock()
+	rt.cronOutcome = fn
+	rt.mu.Unlock()
+}
+
+func (rt *Runtime) cronOutcomeHook() func(CronOutcome) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return rt.cronOutcome
+}
+
+// reportCronOutcome hands a finished cron run's outcome to the scheduler,
+// from the one place that sees every terminal state — clean, failed, killed
+// by /superstop, or a dead-PID marker recovered at boot.
+//
+// Called FIRST in dispatchCompletion, before the suppressed and closing
+// returns, because bookkeeping is not a chat post: /superstop replaces N
+// floor posts with one summary, and that is no reason for the run to vanish
+// from its job's history. Delivery is at-least-once, so the same run arrives
+// here repeatedly; RecordOutcome dedupes on SubID rather than the router
+// trying to guess which pass is the first.
+func (m *jobManager) reportCronOutcome(ev CompletionEvent) {
+	// Follow-up turns of a lingering cron subagent are the SAME run
+	// continuing, not a new one: the run's outcome is its main turn's.
+	if ev.CronJob == "" || ev.Kind != EvCron || m.rt == nil {
+		return
+	}
+	// A job cancelAll killed reports at the next boot from its running
+	// marker; the "context canceled" failure it carries now is manufactured
+	// by the restart and must not count against the job, exactly as its
+	// outbox row is dropped rather than redelivered.
+	if m.isClosing() && m.shutdownCancelled(ev.JobID) {
+		return
+	}
+	fn := m.rt.cronOutcomeHook()
+	if fn == nil {
+		return
+	}
+	o := CronOutcome{Job: ev.CronJob, SubID: ev.JobID, OK: !ev.Failed(), Elapsed: ev.Elapsed}
+	if !o.OK {
+		o.ErrText = ev.ErrText
+		if o.ErrText == "" && ev.Exit != nil {
+			o.ErrText = fmt.Sprintf("exit %d", *ev.Exit)
+		}
+	}
+	fn(o)
+}
+
 // SetCompletionHost installs the front-end delivery surface. nil keeps the
 // library fallback: raw notices straight to the owning session.
 func (rt *Runtime) SetCompletionHost(h CompletionHost) {
@@ -300,6 +366,9 @@ func joinNote(a, b string) string {
 // dispatchCompletion routes one finished task as the file comment describes.
 // Called from the finish sites, outside jobManager.mu, for EVERY job.
 func (m *jobManager) dispatchCompletion(ev CompletionEvent) {
+	// Before every early return below: a cron run's history is bookkeeping,
+	// not delivery, and must not depend on whether the post was wanted.
+	m.reportCronOutcome(ev)
 	if m.suppressed(ev.JobID) {
 		return // killed by superstop: the summary already told everyone
 	}

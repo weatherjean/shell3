@@ -9,7 +9,6 @@ import (
 	"github.com/weatherjean/shell3/internal/agentsetup"
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/cron"
-	"github.com/weatherjean/shell3/internal/kit"
 	"github.com/weatherjean/shell3/internal/shell3"
 )
 
@@ -33,37 +32,23 @@ func openRuntime(ctx context.Context, configDir string) (*shell3.Runtime, string
 	return rt, resolved, nil
 }
 
-// completionPoster is the narrow slice of shell3.CompletionHost wireCronPost
-// needs — just enough to keep it callable with a fake in tests, rather than
-// demanding a full CompletionHost (WakeOwner, StartFreshTurn) a cron post
-// never uses.
-type completionPoster interface {
-	// The error mirrors shell3.CompletionHost: non-nil = the post never
-	// reached the user. Cron tool-job posts currently discard it (they have
-	// no outbox row to keep) — see wireCronPost.
-	PostCompletion(p shell3.CompletionPost) error
-}
-
 // armCron builds and starts a scheduler for the declared jobs (nil when there
 // are none). Fail-fast: a malformed schedule is a startup error. The caller
-// owns Stop. post is wired BEFORE Start(): a fire landing between Start()
-// and a later SetPost call would find s.post nil and drop its result
-// silently — see wireCronPost. store restores each job's run history
+// owns Stop. store restores each job's run history
 // (Runs/Failures/LastRun/...) so a restart doesn't erase it; log is where a
 // failed SaveStatus is reported (never fatal to a run). Both are wired before
-// Start() for the same reason post is: a tick landing before SetLogger would
-// just log nowhere until then, which is cosmetic, but wiring everything
-// before Start keeps one invariant instead of two.
-func armCron(disp cron.Dispatcher, tools cron.ToolRunner, store cron.RunStore, log applog.Logger, host completionPoster, jobs []shell3.CronJob) (*cron.Scheduler, error) {
+// Start(): a tick landing before SetLogger would just log nowhere until then,
+// which is cosmetic, but wiring everything before Start keeps one invariant
+// instead of two.
+func armCron(disp cron.Dispatcher, store cron.RunStore, log applog.Logger, jobs []shell3.CronJob) (*cron.Scheduler, error) {
 	if len(jobs) == 0 {
 		return nil, nil
 	}
-	sched, err := cron.NewWithStore(disp, tools, store, jobs)
+	sched, err := cron.NewWithStore(disp, store, jobs)
 	if err != nil {
 		return nil, err
 	}
 	sched.SetLogger(log)
-	wireCronPost(sched, host)
 	sched.Start()
 	fmt.Printf("cron: %d job(s) scheduled\n", len(jobs))
 	return sched, nil
@@ -76,25 +61,6 @@ func armCron(disp cron.Dispatcher, tools cron.ToolRunner, store cron.RunStore, l
 // The cron adapters below all embed it.
 type partsRef struct {
 	parts func() *agentsetup.Parts
-}
-
-// kitTools adapts the loaded kit to cron.ToolRunner. A cron tool job runs in
-// the config dir by default — it belongs to the install, not to any agent's
-// workdir — but honours workdir: like a prompt job does.
-type kitTools struct {
-	partsRef
-}
-
-func (k kitTools) RunTool(ctx context.Context, name, workDir string, args map[string]any) (string, error) {
-	p := k.parts()
-	t, ok := p.KitToolByName(name)
-	if !ok {
-		return "", fmt.Errorf("cron: no kit tool named %q", name)
-	}
-	if workDir == "" {
-		workDir = p.ConfigDir()
-	}
-	return kit.Runner{Path: p.KitPath(), Dir: workDir}.Run(ctx, t, args)
 }
 
 // storeRunStore adapts the runs store to cron.RunStore.
@@ -128,23 +94,4 @@ func (l partsLogger) Info(msg string, fields ...any)  { l.parts().Log().Info(msg
 func (l partsLogger) Warn(msg string, fields ...any)  { l.parts().Log().Warn(msg, fields...) }
 func (l partsLogger) Error(msg string, err error, fields ...any) {
 	l.parts().Log().Error(msg, err, fields...)
-}
-
-// wireCronPost installs sched's post callback, the surface a tool job uses to
-// deliver its own result or failure (no model turn dispatches on its
-// behalf). It rides the same CompletionHost.PostCompletion every other
-// background completion uses, so a tool job's post obeys /quiet identically
-// — a straight passthrough, since fireTool already builds the
-// shell3.CompletionPost (CronJob + Text) that PostCompletion expects. A nil
-// scheduler (no cron jobs) is a no-op. MUST be called before sched.Start()
-// (see armCron / reloadAndRearm) — a fire landing before this runs finds
-// post nil and drops its result silently.
-func wireCronPost(sched *cron.Scheduler, host completionPoster) {
-	if sched == nil {
-		return
-	}
-	// The scheduler's callback is void: a tool job's post has no outbox row
-	// behind it (nothing dispatched), so a failed send is logged upstream and
-	// the next tick re-posts anyway — idempotent by design.
-	sched.SetPost(func(p shell3.CompletionPost) { _ = host.PostCompletion(p) })
 }

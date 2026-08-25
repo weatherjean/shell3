@@ -3,7 +3,6 @@
 package cron
 
 import (
-	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -11,7 +10,6 @@ import (
 	robcron "github.com/robfig/cron/v3"
 	"github.com/weatherjean/shell3/internal/applog"
 	"github.com/weatherjean/shell3/internal/shell3"
-	"github.com/weatherjean/shell3/internal/strutil"
 )
 
 // Dispatcher is the subset of *shell3.Session the scheduler needs (faked in tests).
@@ -19,45 +17,35 @@ type Dispatcher interface {
 	Dispatch(agent, prompt string, opts shell3.DispatchOpts) (string, error)
 }
 
-// ToolRunner runs one kit tool by name. The scheduler holds this rather than
-// a kit.Runner so a tool job is testable without a shell.
-type ToolRunner interface {
-	RunTool(ctx context.Context, name, workDir string, args map[string]any) (string, error)
-}
-
-// toolJobTimeout matches the foreground bash cap: a tool job blocks its
-// scheduler slot the way a foreground call blocks a turn.
-const toolJobTimeout = 120 * time.Second
-
 // JobStatus is a job plus its most recent run, for the Cron view.
 type JobStatus struct {
 	Name      string `json:"name"`
 	Schedule  string `json:"schedule"`
 	Agent     string `json:"agent"`
-	Tool      string `json:"tool,omitempty"`
 	Prompt    string `json:"prompt,omitempty"`
 	WorkDir   string `json:"work_dir,omitempty"`
 	Report    string `json:"report"`
 	LastRun   string `json:"last_run,omitempty"` // RFC3339, "" if never
 	LastSubID string `json:"last_sub_id,omitempty"`
-	// These mean DIFFERENT things per job kind, because the two fire paths
-	// learn different things. For a TOOL job they describe the actual run:
-	// err comes from ToolRunner.RunTool. For an AGENT job err comes from
-	// Dispatch, which reports only that the subagent was ACCEPTED — so a job
-	// that dispatches cleanly every night and fails its work every night
-	// shows LastOK=true, Failures=0 forever, and the real outcome appears
-	// only in the mail or ⚠️ floor post the job runtime sends separately.
+	// LastOK/LastErr/LastMillis describe the RUN, not its dispatch: the fire
+	// path only knows the subagent was accepted, so the outcome arrives later
+	// from the completion router (RecordOutcome). Between a fire and its
+	// outcome these still hold the PREVIOUS run's — deliberately, since the
+	// alternative is inventing a verdict for work still in flight.
 	LastOK     bool   `json:"last_ok"`
 	LastErr    string `json:"last_err,omitempty"`
 	LastMillis int64  `json:"last_millis,omitempty"`
 	Runs       int    `json:"runs,omitempty"`
 	Failures   int    `json:"failures,omitempty"`
+	// OutcomeRecorded marks that LastSubID's run has already reported. Cleared
+	// at each fire; see RecordOutcome for why at-least-once delivery makes it
+	// load-bearing rather than bookkeeping about bookkeeping.
+	OutcomeRecorded bool `json:"outcome_recorded,omitempty"`
 }
 
 // Scheduler arms one robfig/cron entry per job and dispatches on tick.
 type Scheduler struct {
 	disp  Dispatcher
-	tools ToolRunner
 	store RunStore // nil = in-memory only (tests, library use); see NewWithStore
 	log   applog.Logger
 	c     *robcron.Cron
@@ -65,32 +53,24 @@ type Scheduler struct {
 	jobs  []shell3.CronJob
 	last  map[string]JobStatus // by job name
 	now   func() time.Time     // injectable clock for tests
-	// post delivers a tool job's own result to the user — it spends no model
-	// turn, so nothing else speaks for it. It takes a CompletionPost so the
-	// host renders exactly one prefix: fireTool sets CronJob on SUCCESS
-	// (bare Text, so PostCompletion supplies "⏰ job: ") and leaves it unset
-	// on FAILURE, where Text already carries "⚠️ job failed: …" and setting
-	// it would double-wrap. nil-safe.
-	post func(shell3.CompletionPost)
 }
 
 // New validates every schedule and arms an entry per job, failing fast on a
-// malformed one. An agent job's completion is entirely the job runtime's:
-// each fire is a Dispatch whose result routes as mail. A tool job has no
-// dispatch and no model turn, so it posts for itself via SetPost.
+// malformed one. Every job is an agent dispatch whose result routes as mail
+// through the job runtime, which is also what reports the run's outcome back
+// here (RecordOutcome).
 //
 // New is NewWithStore with a nil store: in-memory only, no run history.
-func New(disp Dispatcher, tools ToolRunner, jobs []shell3.CronJob) (*Scheduler, error) {
-	return NewWithStore(disp, tools, nil, jobs)
+func New(disp Dispatcher, jobs []shell3.CronJob) (*Scheduler, error) {
+	return NewWithStore(disp, nil, jobs)
 }
 
 // NewWithStore is New plus a RunStore, restoring each job's counters and last
 // run from it. A job the store has never seen — or a nil store — starts from a
 // zero JobStatus, so a test never needs a runs store to build a scheduler.
-func NewWithStore(disp Dispatcher, tools ToolRunner, store RunStore, jobs []shell3.CronJob) (*Scheduler, error) {
+func NewWithStore(disp Dispatcher, store RunStore, jobs []shell3.CronJob) (*Scheduler, error) {
 	s := &Scheduler{
 		disp:  disp,
-		tools: tools,
 		store: store,
 		log:   applog.Noop{},
 		c:     robcron.New(),
@@ -108,7 +88,7 @@ func NewWithStore(disp Dispatcher, tools ToolRunner, store RunStore, jobs []shel
 	}
 	for _, j := range jobs {
 		job := j // capture
-		st := JobStatus{Name: job.Name, Schedule: job.Schedule, Agent: job.Agent, Tool: job.Tool, Prompt: job.Prompt, WorkDir: job.WorkDir, Report: job.Report.String()}
+		st := JobStatus{Name: job.Name, Schedule: job.Schedule, Agent: job.Agent, Prompt: job.Prompt, WorkDir: job.WorkDir, Report: job.Report.String()}
 		if r, ok := restored[job.Name]; ok {
 			st.LastRun = r.LastRun
 			st.LastSubID = r.LastSubID
@@ -117,6 +97,7 @@ func NewWithStore(disp Dispatcher, tools ToolRunner, store RunStore, jobs []shel
 			st.LastMillis = r.LastMillis
 			st.Runs = r.Runs
 			st.Failures = r.Failures
+			st.OutcomeRecorded = r.OutcomeRecorded
 		}
 		s.last[job.Name] = st
 		// Overlapping fires are allowed: each tick is a fresh subagent.
@@ -129,7 +110,7 @@ func NewWithStore(disp Dispatcher, tools ToolRunner, store RunStore, jobs []shel
 
 // SetLogger installs where a failed SaveStatus is reported — never fatal, but
 // silent bookkeeping loss must still land somewhere findable. Guarded by s.mu
-// like SetPost: a /reload rewires it while robcron may be ticking.
+// a /reload rewires it while robcron may be ticking.
 func (s *Scheduler) SetLogger(l applog.Logger) {
 	if l == nil {
 		l = applog.Noop{}
@@ -139,35 +120,9 @@ func (s *Scheduler) SetLogger(l applog.Logger) {
 	s.mu.Unlock()
 }
 
-// SetPost installs the callback a tool job posts its result through. nil means
-// no delivery surface, and fireTool records the outcome silently. Guarded by
-// s.mu: a /reload rewires it while robcron may be ticking.
-func (s *Scheduler) SetPost(fn func(shell3.CompletionPost)) {
-	s.mu.Lock()
-	s.post = fn
-	s.mu.Unlock()
-}
-
-// postFn reads the current post callback under lock — see SetPost.
-func (s *Scheduler) postFn() func(shell3.CompletionPost) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.post
-}
-
-// fire runs one job — a tool call with no model, or an agent dispatch — and
-// records its outcome.
+// fire dispatches one job to its agent and records that the run started. The
+// run's real result arrives later, at RecordOutcome.
 func (s *Scheduler) fire(j shell3.CronJob) {
-	if j.Tool != "" {
-		s.fireTool(j)
-		return
-	}
-	s.fireAgent(j)
-}
-
-// fireAgent dispatches one job to an agent and records its run status.
-func (s *Scheduler) fireAgent(j shell3.CronJob) {
-	start := s.now()
 	opts := shell3.DispatchOpts{
 		WorkDir: j.WorkDir, Description: "cron:" + j.Name,
 		CronJob: j.Name, Report: j.Report,
@@ -176,78 +131,86 @@ func (s *Scheduler) fireAgent(j shell3.CronJob) {
 		Note: "this is the cron job's standing prompt: " + j.Prompt,
 	}
 	id, err := s.disp.Dispatch(j.Agent, j.Prompt, opts)
-	if err == nil {
-		s.mu.Lock()
-		st := s.last[j.Name]
-		st.LastSubID = id
-		s.last[j.Name] = st
-		s.mu.Unlock()
-	}
-	s.record(j, err, s.now().Sub(start))
+	s.recordDispatch(j, id, err)
 }
 
-// fireTool runs a tool job with no model in the loop. The result reaches the
-// user only when it says something: a tool printing nothing, or NO_REPLY, on
-// an idempotent no-op stays silent — the point of scheduling it every 30
-// minutes.
-func (s *Scheduler) fireTool(j shell3.CronJob) {
-	start := s.now()
-	if s.tools == nil {
-		// A misconfigured host must fail closed with a reason, not panic.
-		s.record(j, fmt.Errorf("cron: job %q names tool %q but no tool runner is wired", j.Name, j.Tool), s.now().Sub(start))
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), toolJobTimeout)
-	defer cancel()
-	out, err := s.tools.RunTool(ctx, j.Tool, j.WorkDir, nil)
-	s.record(j, err, s.now().Sub(start))
-	switch {
-	case err != nil:
-		if post := s.postFn(); post != nil {
-			// CronJob is deliberately UNSET: PostCompletion tests it before
-			// it tests "already a failure", so setting it would wrap this
-			// self-describing "⚠️ job failed: …" in a second "⏰ job: ".
-			// Empty routes through the failure branch, which adds no prefix.
-			post(shell3.CompletionPost{
-				Text: fmt.Sprintf("⚠️ %s failed: %s", j.Name, strutil.Truncate(err.Error(), 500))})
-		}
-	case !strutil.IsNoReply(out):
-		if post := s.postFn(); post != nil {
-			// CronJob IS set: a success has no marker of its own, so
-			// PostCompletion supplies the single "⏰ job: " over bare Text.
-			post(shell3.CompletionPost{CronJob: j.Name, Text: strutil.Truncate(out, 2000)})
-		}
-	}
-}
-
-// record updates both fire paths' shared outcome fields under one lock, so the
-// dash sees a tool job's last run exactly like an agent job's, then persists
-// the status — a run this does not save is invisible after the next restart.
-func (s *Scheduler) record(j shell3.CronJob, err error, elapsed time.Duration) {
+// recordDispatch records that a run STARTED, and persists it: the outcome
+// arrives later and matches on LastSubID, so a fire whose write did not
+// survive a crash would have nothing to match against.
+//
+// A dispatch REJECTION is the one failure counted here — no completion will
+// ever arrive for it — and it marks the outcome recorded so a stale report
+// from an earlier run cannot overwrite it.
+func (s *Scheduler) recordDispatch(j shell3.CronJob, subID string, err error) {
 	s.mu.Lock()
 	st := s.last[j.Name]
 	st.LastRun = s.now().UTC().Format(time.RFC3339)
-	st.LastMillis = elapsed.Milliseconds()
 	st.Runs++
 	if err != nil {
+		st.LastSubID = ""
+		st.OutcomeRecorded = true
 		st.LastOK = false
 		st.LastErr = err.Error()
+		st.LastMillis = 0
 		st.Failures++
 	} else {
-		st.LastOK = true
-		st.LastErr = ""
+		st.LastSubID = subID
+		st.OutcomeRecorded = false
 	}
 	s.last[j.Name] = st
+	s.persist(j.Name, st)
+}
+
+// RecordOutcome records what a dispatched run actually DID, reported by the
+// completion router (shell3.Runtime's cron-outcome hook) once the subagent's
+// turn ends — clean, failed, killed, or lost to a restart.
+//
+// Two guards, both load-bearing. Completion delivery is at-least-once: a post
+// the transport rejected is re-dispatched every redeliverEvery until it lands,
+// and a leftover outbox row replays at the next boot, so the SAME run reaches
+// here repeatedly — counting each pass would inflate exactly the number this
+// exists to make honest. And an outcome whose sub id is not the current run's
+// is a straggler from a fire a later one has superseded; the table keeps the
+// latest run only, so it is dropped rather than backdating the row.
+//
+// A job this scheduler does not declare is dropped too: never invent a row for
+// a name a /reload removed.
+//
+// Accepted race: a run that finished before its own fire took s.mu records
+// against the previous LastSubID and is then re-armed by recordDispatch, so a
+// later redelivery could count it twice. The window is one mutex write against
+// a whole LLM turn; restructuring for it costs more than it saves.
+func (s *Scheduler) RecordOutcome(o shell3.CronOutcome) {
+	s.mu.Lock()
+	st, known := s.last[o.Job]
+	if !known || st.OutcomeRecorded || (o.SubID != "" && st.LastSubID != "" && o.SubID != st.LastSubID) {
+		s.mu.Unlock()
+		return
+	}
+	st.OutcomeRecorded = true
+	st.LastOK = o.OK
+	st.LastErr = o.ErrText
+	st.LastMillis = o.Elapsed.Milliseconds()
+	if !o.OK {
+		st.Failures++
+	}
+	s.last[o.Job] = st
+	s.persist(o.Job, st)
+}
+
+// persist writes one job's status through the store, releasing s.mu first: a
+// stuck store write must not block the next tick. Call with s.mu HELD; it
+// unlocks. A run this does not save is invisible after the next restart, but
+// the failure is only ever logged — bookkeeping must not break a schedule.
+func (s *Scheduler) persist(name string, st JobStatus) {
 	store, log := s.store, s.log
 	s.mu.Unlock()
-
 	if store == nil {
 		return
 	}
-	// Outside the lock: a stuck store write must not block the next tick.
 	if err := store.SaveStatus(st); err != nil {
 		if log != nil {
-			log.Warn("cron: save run status failed", "job", j.Name, "error", err)
+			log.Warn("cron: save run status failed", "job", name, "error", err)
 		}
 	}
 }
@@ -259,9 +222,9 @@ func (s *Scheduler) Stop()  { s.c.Stop() }
 
 // Run fires a job by name, erroring immediately on an unknown one and
 // returning before a known one completes. A scheduled tick already has its own
-// goroutine, but /run is called from the bot's single update loop, and a tool
-// job can block for toolJobTimeout — firing synchronously would freeze that
-// loop, /stop included, for the whole duration.
+// goroutine, but /run is called from the bot's single update loop, and even a
+// dispatch can block on session setup — firing synchronously would freeze that
+// loop, /stop included, for the duration.
 func (s *Scheduler) Run(name string) error {
 	for _, j := range s.jobs {
 		if j.Name == name {

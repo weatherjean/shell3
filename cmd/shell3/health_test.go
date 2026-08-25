@@ -250,119 +250,6 @@ func writeKitTree(t *testing.T, src string) string {
 	return dir
 }
 
-func TestHealthOKWithValidCronToolJob(t *testing.T) {
-	cfg := writeKitHealthTree(t, `
-#---
-# cron: sync
-# schedule: "@every 30m"
-# tool: sync-notion-recent
-#---
-`)
-	out, err := runHealthAt(t, cfg)
-	if err != nil {
-		t.Fatalf("a valid cron tool job should pass health: %v\n%s", err, out)
-	}
-}
-
-// Two agents may each legally declare a tool with the same name — the
-// duplicate check in kit.Check is per-scope, not kit-wide. A cron `tool:`
-// job names no agent, so Kit.ToolByName's first-match-wins pick would run
-// whichever function happened to parse first, silently, at 3am. health must
-// count matches and fail, naming both declaring scopes.
-const healthKitDupTool = `#---
-# shell3:
-#   models:
-#     m1: {base_url: "http://x", api_key: k, model: mm}
-#---
-
-#---
-# agent: main
-# model: m1
-#---
-main_prompt() { cat <<'EOF2'
-hi
-EOF2
-}
-
-#---
-# tool: sync
-# description: main's sync
-#---
-main_sync() { echo main; }
-
-#---
-# agent: helper
-# model: m1
-#---
-helper_prompt() { cat <<'EOF2'
-hi
-EOF2
-}
-
-#---
-# tool: sync
-# description: helper's sync
-#---
-helper_sync() { echo helper; }
-`
-
-func TestHealthFailsOnAmbiguousCronTool(t *testing.T) {
-	dir := writeKitTree(t, healthKitDupTool+`
-#---
-# cron: nightly
-# schedule: "@every 30m"
-# tool: sync
-#---
-`)
-	out, err := runHealthAt(t, dir)
-	if err == nil {
-		t.Fatalf("a cron job naming an ambiguously-declared tool must fail health:\n%s", out)
-	}
-	got := out + err.Error()
-	if !strings.Contains(got, `"nightly"`) || !strings.Contains(got, `"sync"`) {
-		t.Fatalf("output should name the job and the ambiguous tool:\n%s", got)
-	}
-	if !strings.Contains(got, "main") || !strings.Contains(got, "helper") {
-		t.Fatalf("output should name BOTH declaring scopes so the operator can disambiguate:\n%s", got)
-	}
-}
-
-func TestHealthFailsOnUnknownCronTool(t *testing.T) {
-	cfg := writeKitHealthTree(t, `
-#---
-# cron: sync
-# schedule: "@every 30m"
-# tool: no-such-tool
-#---
-`)
-	out, err := runHealthAt(t, cfg)
-	if err == nil {
-		t.Fatalf("a cron job naming an undeclared tool must fail health:\n%s", out)
-	}
-	got := out + err.Error()
-	if !strings.Contains(got, `"sync"`) || !strings.Contains(got, "no-such-tool") {
-		t.Fatalf("output should name the job and the missing tool:\n%s", got)
-	}
-}
-
-func TestHealthFailsOnCronToolWithRequiredParam(t *testing.T) {
-	cfg := writeKitHealthTree(t, `
-#---
-# cron: sync
-# schedule: "@every 30m"
-# tool: needs-arg
-#---
-`)
-	out, err := runHealthAt(t, cfg)
-	if err == nil {
-		t.Fatalf("a cron job whose tool requires an argument must fail health (fireTool passes none):\n%s", out)
-	}
-	got := out + err.Error()
-	if !strings.Contains(got, "needs-arg") || !strings.Contains(got, "url") {
-		t.Fatalf("output should name the tool and the required argument:\n%s", got)
-	}
-}
-
 // A cron agent: job naming an agent the kit does not declare must fail here.
 // Nothing else checks it — the typo used to surface as a failed dispatch on
 // the first tick, hours later and only in the app log.
@@ -403,5 +290,26 @@ EOF2
 `)
 	if out, err := runHealthAt(t, cfg); err != nil {
 		t.Fatalf("a cron job naming the main agent should pass health: %v\n%s", err, out)
+	}
+}
+
+// Cron runs agent turns only. A kit still carrying the removed tool: kind
+// must FAIL health naming the replacement, not load and arm nothing — the
+// same contract kit.Parse enforces, surfaced where an operator looks first.
+func TestHealthFailsOnCronToolJob(t *testing.T) {
+	cfg := writeKitHealthTree(t, `
+#---
+# cron: sync
+# schedule: "@every 30m"
+# tool: sync-notion-recent
+#---
+`)
+	out, err := runHealthAt(t, cfg)
+	if err == nil {
+		t.Fatalf("a cron tool: job must fail health:\n%s", out)
+	}
+	got := out + err.Error()
+	if !strings.Contains(got, "agent turns only") {
+		t.Fatalf("output should name the replacement:\n%s", got)
 	}
 }

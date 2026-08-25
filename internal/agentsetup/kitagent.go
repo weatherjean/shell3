@@ -74,19 +74,9 @@ func KitHooksOf(k *kit.Kit) config.KitHooks {
 // Kit returns the loaded kit, or nil when none was loaded.
 func (p *Parts) Kit() *kit.Kit { return p.kit }
 
-// KitPath is where the loaded kit was read from, "" when none is; a cron tool
-// job's ToolRunner sources it before running a tool's function.
+// KitPath is where the loaded kit was read from, "" when none is; kit.Runner
+// sources it before running a tool's function.
 func (p *Parts) KitPath() string { return p.kitPath }
-
-// KitToolByName finds a tool anywhere in the kit, whatever scope declares it.
-// A cron tool job names no agent, so there is no Resolved set to search and
-// the operator's own declaration is the trust boundary.
-func (p *Parts) KitToolByName(name string) (kit.Tool, bool) {
-	if p.kit == nil {
-		return kit.Tool{}, false
-	}
-	return p.kit.ToolByName(name)
-}
 
 // KitAgent resolves one declared agent into its capability set. The first
 // declared agent gets every built-in; everyone else gets what they declare.

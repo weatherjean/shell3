@@ -754,15 +754,16 @@ grows until you prune it or set
 
 ## Scheduled jobs — `cron:`
 
-One `cron:` block per job in the kit; the block names the job. It takes
-exactly one of `agent:` or `tool:` — a job is either a prompt or a tool call,
-never both, never neither. A `tool:` job runs a kit tool's shell function
-directly, with no agent and no model turn (see [kits.md](kits.md#cron)). An
-`agent:` job fires a kit-declared agent on `schedule` (cron expression or
+One `cron:` block per job in the kit; the block names the job. `agent:` is
+mandatory and is the only form: cron runs agent turns only. A block naming
+the removed `tool:` kind is a **load error** whose text names the
+replacement — a scheduled shell call has no model in the loop to judge its
+result, and a job that mostly runs a tool declares an agent that calls it.
+An `agent:` job fires a kit-declared agent on `schedule` (cron expression or
 `@daily`/`@hourly`/…), with the heredoc in the function under the block as
 its prompt. An employee that declares a `workdir` runs its job there, so a
 scheduled job can dispatch straight into a project's standing context. A job
-naming an agent or a tool the kit does not declare is a **load error** — the
+naming an agent the kit does not declare is a **load error** — the
 config does not start, rather than failing on the first tick. The scheduler
 runs inside
 `shell3 telegram`, dispatching each job from a hidden, pinned `cron` parent
@@ -810,14 +811,18 @@ the agent's turn to answer, for a job that must be heard from every tick.
 `workdir` sets the job's working directory; the
 default is the dispatched agent's own — a project manager runs in its
 project's `workdir`, everything else in the config dir — and setting it
-overrides even a manager's. `report:` applies only to an `agent:` job; a tool
-job runs no model turn, so setting both is a load error. The pre-`report:`
+overrides even a manager's. The pre-`report:`
 spelling `direct: true` is a load error naming its replacement. A reload
 arms changed jobs.
 
 The dash's Cron table lists every job with its schedule, agent, `report` mode,
 last run and outcome, and its rolling 7-day dispatched-run token cost where
-known — the dash is the one dashboard; there is no cron command.
+known — the dash is the one dashboard; there is no cron command. The outcome
+describes the **run**, not its dispatch: a job whose agent is accepted and
+then fails its work counts as a failure, reported back to the scheduler when
+the run actually ends. It arrives late by construction, so between a firing
+and its result the row still shows the previous run's verdict beside the new
+`last run` time.
 `/run <name>` fires one by hand — the result travels the usual mail route,
 exactly as a scheduled firing would.
 

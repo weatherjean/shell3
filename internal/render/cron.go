@@ -42,10 +42,7 @@ func cronCost(st cron.JobStatus, costs map[string]runs.JobCost) string {
 	days := int(CronRollupWindow.Hours() / 24)
 	c, ok := costs[st.Name]
 	if !ok || c.Runs == 0 {
-		if st.Tool == "" {
-			return "" // agent job: absence is genuinely unknown, not zero
-		}
-		return fmt.Sprintf("0 tok/%dd run", days) // tool job: knowably zero
+		return "" // absence is genuinely unknown, not zero
 	}
 	return fmt.Sprintf("%s tok/%dd run", formatTokCount(c.PromptTokens+c.CompletionTokens), days)
 }
@@ -85,17 +82,6 @@ func cronLastRun(st cron.JobStatus) string {
 func cronOutcome(st cron.JobStatus) string {
 	if st.LastRun == "" {
 		return "never run"
-	}
-	if st.Tool != "" {
-		word := "ok"
-		if !st.LastOK {
-			word = "FAIL"
-		}
-		out := fmt.Sprintf("%s — %d runs, %d failed", word, st.Runs, st.Failures)
-		if !st.LastOK && st.LastErr != "" {
-			out += ": " + st.LastErr
-		}
-		return out
 	}
 	word := "dispatched"
 	if !st.LastOK {

@@ -182,6 +182,30 @@ SHELL3_EOF
 }
 
 #---
+# agent: auditor
+# description: Harness audit — finds model calls, secrets and judgment that escaped the turn layer into scripts and tools. Runs daily on its own; dispatch it by hand after building a tool or an employee.
+# model: {{.Name | yamlkey}}
+# use: [bash]
+#---
+auditor_prompt() { cat <<'SHELL3_EOF'
+You audit this shell3 install for work that escaped the turn layer.
+
+The rule you are enforcing: TOOLS GATHER FACTS, THE AGENT DECIDES. A tool that
+fetches, parses, queries or persists is correct. A tool that returns a score, a
+tier, a ranking, a draft or a summary has taken a decision out of a turn, and
+whatever made that decision is now a script nobody reviews.
+
+You run bash and you judge what it prints. You never write a script that judges
+for you — a grep that reports "3 violations, severity high" is the exact
+inversion you exist to catch.
+
+Report what you found, where, and which rule it breaks. Fix nothing: the main
+agent decides what to do about it, and a false positive that edits a working
+tool costs more than the finding was worth.
+SHELL3_EOF
+}
+
+#---
 # agent: assistant
 # description: Substantial self-contained work handed off whole — researching a topic across files and the web, reading and summarising documents, gathering context, drafting something long. Not code-specific.
 # model: {{.Name | yamlkey}}
@@ -442,25 +466,70 @@ SEGEOF
 # =============================================================================
 # Scheduled jobs
 # =============================================================================
-# A cron: block binds a schedule to one job. Two forms:
+# A cron: block binds a schedule to one AGENT. There is one form and no
+# other: `agent: <name>` plus the prompt function under the block. Cron runs
+# agent turns only — a scheduled shell call has no model in the loop to judge
+# its result, which is exactly where judgment leaks out of the turn layer and
+# into a script. A job that mostly runs a tool still declares an agent; the
+# agent calls the tool and decides what the result means.
 #
-#   an AGENT job — the function under the block is the prompt, and the run's
-#   result reaches the main agent as a task report, which posts an ✉️ update
-#   only when the run carries something worth saying. `report: raw` skips
-#   that judgment turn and posts the raw result instead, costing no tokens;
-#   `report: always` keeps the turn but forbids it to stay silent.
-#   Judging costs a full main-agent turn at live conversation context, so
-#   tell the job to end an unremarkable run with exactly NO_REPLY: that
-#   result is dropped before any turn is spent. A prompt that always ends
-#   with a summary (however short) buys a turn on every single tick.
-#
-#   a TOOL job — `tool: <name>` runs a declared tool with no model turn at
-#   all. It binds no function and takes no prompt. Silent on an empty result,
-#   so an idempotent sync can tick often and cost nothing.
+# The run's result reaches the main agent as a task report, which posts an
+# ✉️ update only when the run carries something worth saying. `report: raw`
+# skips that judgment turn and posts the raw result instead, costing no
+# tokens; `report: always` keeps the turn but forbids it to stay silent.
+# Judging costs a full main-agent turn at live conversation context, so tell
+# the job to end an unremarkable run with exactly NO_REPLY: that result is
+# dropped before any turn is spent. A prompt that always ends with a summary
+# (however short) buys a turn on every single tick.
 #
 # schedule is robfig/cron syntax: "@every 30m", "@daily", or a 5-field spec
 # like "*/30 8-22 * * *" (every 30 min, 8am-10pm — active hours only).
 #
+# The harness audit below ships ARMED. It is the one job whose absence is
+# invisible: everything else you schedule tells you when it breaks, while an
+# install slowly filling with hand-rolled model calls looks fine from the
+# chat. A clean run ends in NO_REPLY and costs no main-agent turn.
+#---
+# cron: harness-audit
+# schedule: "0 9 * * *"
+# agent: auditor
+#---
+cron_harness_audit() { cat <<'SHELL3_EOF'
+Run today's harness audit from the config dir. Four checks, then report or
+NO_REPLY.
+
+1. Model calls outside shell3. A script must never speak to a model API
+   directly — it calls `shell3 ask --agent <name> -p "..."` instead, which
+   inherits the real adapter and keeps the key out of the script.
+
+     rg -l 'chat/completions|api\.(openai|anthropic|minimax)' work lib 2>/dev/null
+
+   Do NOT scan shell3.sh: its shell3: wiring block legitimately carries model
+   base_urls, and that is the one known-good location.
+
+2. Secrets read outside .env. Every secret lives in .env beside this kit and
+   is read by the one script that needs it, at point of use.
+
+     rg -n 'secrets/|api[_-]?key\s*=' work lib 2>/dev/null
+
+3. Tools that decide. Read the tool: descriptions in shell3.sh and shortlist
+   any promising a score, tier, rank, draft, summary or classification. Then
+   judge each one: a tool that PERSISTS a verdict the agent reached is
+   correct; a tool that PRODUCES one is not.
+
+4. Tools that grew a brain. A long script under a tool is where judgment
+   hides.
+
+     find work -path '*/scripts/*' \( -name '*.py' -o -name '*.sh' \) -exec wc -l {} + 2>/dev/null | sort -rn | head
+
+   Read anything over 200 lines before judging it.
+
+If every check is clean, reply with exactly NO_REPLY and nothing else.
+Otherwise report each finding as: the file, the rule it breaks, and the one
+change that would fix it.
+SHELL3_EOF
+}
+
 # The example below is inert: its fences are written ##--- so the parser skips
 # them. Delete one # from each fence line to arm it.
 #

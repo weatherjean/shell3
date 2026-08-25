@@ -128,9 +128,6 @@ func DashIndexHTML(sess *shell3.Session, rt *shell3.Runtime, version string,
 		b.WriteString("<table>\n<tr><th>job</th><th>schedule</th><th>target</th><th>last</th><th>outcome</th><th>cost</th></tr>\n")
 		for _, st := range statuses {
 			target := st.Agent
-			if st.Tool != "" {
-				target = "tool:" + st.Tool
-			}
 			cost := cronCost(st, costs)
 			fmt.Fprintf(&b, "<tr><td><a href=\"/cron?name=%s&amp;t=%s\"><code>%s</code></a></td><td><code>%s</code></td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n",
 				urlq(st.Name), esc(tok), esc(st.Name), esc(st.Schedule), esc(target), esc(cronLastRun(st)), esc(cronOutcome(st)), esc(cost))

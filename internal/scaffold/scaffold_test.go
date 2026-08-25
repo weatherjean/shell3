@@ -262,11 +262,15 @@ func TestRenderedConfigLoads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse kit: %v", err)
 	}
-	if len(k.Agents) != 2 || k.Agents[0].Name != "main" || k.Agents[1].Name != "assistant" {
-		t.Fatalf("scaffold kit agents = %+v, want main + assistant", k.Agents)
+	names := make([]string, len(k.Agents))
+	for i, a := range k.Agents {
+		names[i] = a.Name
+		if i > 0 && a.Desc == "" {
+			t.Errorf("employee %q needs a description — it is how the main agent decides to dispatch it", a.Name)
+		}
 	}
-	if k.Agents[1].Desc == "" {
-		t.Error("the assistant employee needs a description — it is how the main agent decides to dispatch it")
+	if len(names) != 3 || names[0] != "main" || names[1] != "auditor" || names[2] != "assistant" {
+		t.Fatalf("scaffold kit agents = %v, want main + auditor + assistant", names)
 	}
 
 	got := map[string]bool{}
@@ -406,8 +410,13 @@ func TestScaffoldCronExampleIsInert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse kit: %v", err)
 	}
-	if len(k.Crons) != 0 {
-		t.Fatalf("the commented example armed %d job(s): %+v", len(k.Crons), k.Crons)
+	// harness-audit is the ONE job that ships armed. The checklist example
+	// must stay inert, or every install starts paying for a job nobody asked
+	// for.
+	for _, j := range k.Crons {
+		if j.Name == "checklist" {
+			t.Fatalf("the commented example armed itself: %+v", j)
+		}
 	}
 }
 
@@ -433,5 +442,78 @@ func TestScaffoldShipsSelfKnowledgeSkill(t *testing.T) {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("self-knowledge skill missing %q", want)
 		}
+	}
+}
+
+// The auditor is the harness's own heartbeat: a daily agent cron that looks
+// for judgment which escaped the turn layer — a model call hand-rolled into a
+// script, a secret read outside .env, a tool that returns a verdict. It ships
+// armed, because the failure it catches was found by a human reading a
+// transcript, four days after the guidance meant to prevent it had shipped.
+func TestScaffoldShipsTheAuditor(t *testing.T) {
+	dir := t.TempDir()
+	if err := RenderBaseConfig(dir, Values{Name: "main", BaseURL: "http://x/v1", EnvKey: "MAIN_API_KEY", Model: "m"}, false); err != nil {
+		t.Fatal(err)
+	}
+	src, err := os.ReadFile(filepath.Join(dir, "shell3.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	k, err := kit.Parse(src)
+	if err != nil {
+		t.Fatalf("parse kit: %v", err)
+	}
+	var auditor *kit.Agent
+	for i := range k.Agents {
+		if k.Agents[i].Name == "auditor" {
+			auditor = &k.Agents[i]
+		}
+	}
+	if auditor == nil {
+		t.Fatalf("scaffold kit declares no auditor agent; agents = %+v", k.Agents)
+	}
+	if auditor.Desc == "" {
+		t.Error("the auditor needs a description — it is how the main agent decides to dispatch it")
+	}
+
+	var job *kit.CronJob
+	for i := range k.Crons {
+		if k.Crons[i].Name == "harness-audit" {
+			job = &k.Crons[i]
+		}
+	}
+	if job == nil {
+		t.Fatalf("scaffold kit declares no harness-audit cron; crons = %+v", k.Crons)
+	}
+	if job.Agent != "auditor" {
+		t.Errorf("harness-audit targets %q, want the auditor", job.Agent)
+	}
+	// The four checks live in the cron heredoc, which is the text the turn
+	// actually receives. A prompt that forgets NO_REPLY spends a main-agent
+	// turn every single day on a clean audit.
+	if !strings.Contains(job.Prompt, "NO_REPLY") {
+		t.Errorf("harness-audit prompt must end a clean run with NO_REPLY, or the audit costs a turn a day:\n%s", job.Prompt)
+	}
+	for _, want := range []string{"chat/completions", "secrets/", "200 lines"} {
+		if !strings.Contains(job.Prompt, want) {
+			t.Errorf("harness-audit prompt is missing the %q check:\n%s", want, job.Prompt)
+		}
+	}
+}
+
+// shell3 tool run/test prove a tool's plumbing and can never see a
+// wrong-layer bug. The skill that says so ships to every install, and reaches
+// existing ones through `shell3 boot --prompts`.
+func TestScaffoldShipsTestingWorkflowsSkill(t *testing.T) {
+	files, err := PromptFiles(Values{Name: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, ok := files["skills/testing-workflows.md"]
+	if !ok {
+		t.Fatal("skills/testing-workflows.md is not shipped — installs would keep testing tools in isolation")
+	}
+	if !strings.Contains(string(body), "shell3 ask --agent") {
+		t.Error("the skill must name the command that runs a real turn test")
 	}
 }

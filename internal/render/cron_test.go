@@ -44,25 +44,10 @@ func TestCronAgentJobDispatchRejected(t *testing.T) {
 	}
 }
 
-// A tool job's outcome IS the real run result, so it gets honest ok/FAIL.
-func TestCronToolJobOutcome(t *testing.T) {
-	out := cronRow([]cron.JobStatus{{
-		Name: "sync", Schedule: "*/30 * * * *", Tool: "pull",
-		LastRun: "2026-08-01T08:00:00Z", LastOK: false, LastErr: "exit 3", Runs: 9, Failures: 1,
-	}}, nil)
-	for _, want := range []string{"tool:pull", "FAIL", "9 runs", "1 failed", "exit 3"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("tool job missing %q:\n%s", want, out)
-		}
-	}
-}
-
-// Cost column: a known figure renders; an agent job with no rollup row shows
-// NOTHING (missing must never look like zero); a tool job's absence is a
-// knowable zero and renders as one.
+// Cost column: a known figure renders; a job with no rollup row shows NOTHING,
+// because missing must never look like zero.
 func TestCronCostColumn(t *testing.T) {
 	agent := cron.JobStatus{Name: "digest", Schedule: "@daily", Agent: "a", LastRun: "2026-08-01T08:00:00Z", LastOK: true, Runs: 1}
-	tool := cron.JobStatus{Name: "sync", Schedule: "@hourly", Tool: "pull", LastRun: "2026-08-01T08:00:00Z", LastOK: true, Runs: 1}
 
 	out := cronRow([]cron.JobStatus{agent}, map[string]runs.JobCost{
 		"digest": {CronJob: "digest", Runs: 3, PromptTokens: 2_000_000, CompletionTokens: 100_000},
@@ -74,10 +59,5 @@ func TestCronCostColumn(t *testing.T) {
 	out = cronRow([]cron.JobStatus{agent}, nil)
 	if strings.Contains(out, "0 tok") {
 		t.Errorf("unknown agent cost rendered as zero:\n%s", out)
-	}
-
-	out = cronRow([]cron.JobStatus{tool}, nil)
-	if !strings.Contains(out, "0 tok/7d run") {
-		t.Errorf("tool job's knowable zero missing:\n%s", out)
 	}
 }

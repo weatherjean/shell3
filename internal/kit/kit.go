@@ -80,7 +80,7 @@ var ReservedCommands = []string{
 // is set; the tool form binds no function at all, so Func and Prompt are
 // empty. Jobs are declaration-ordered; nothing depends on the order.
 type CronJob struct {
-	Name, Schedule, Agent, Tool string
+	Name, Schedule, Agent string
 	// Prompt is the agent job's prompt, read statically from the heredoc in
 	// the function under the block — the same way an agent's own prompt is.
 	Prompt string
@@ -372,26 +372,19 @@ func cronFromDecl(d decl, srcLines []string, nextFunc func(int) (fnDef, bool)) (
 	if _, err := robcron.ParseStandard(d.schedule); err != nil {
 		return CronJob{}, fmt.Errorf("line %d: cron %q has invalid schedule %q: %v", d.line, d.name, d.schedule, err)
 	}
-	// A job is either a prompt or a tool call, never both and never neither:
-	// one with no move at all is a mistake, not a no-op.
-	switch {
-	case d.cronAgnt != "" && d.cronTool != "":
-		return CronJob{}, fmt.Errorf("line %d: cron %q sets both agent: and tool: — exactly one of agent: or tool: (a job is either a prompt or a tool call)", d.line, d.name)
-	case d.cronAgnt == "" && d.cronTool == "":
-		return CronJob{}, fmt.Errorf("line %d: cron %q needs exactly one of agent: or tool: (a job is either a prompt or a tool call)", d.line, d.name)
-	case d.cronTool != "" && d.report != notify.ReportAuto:
-		// report: means something only for an agent job. A tool job runs no
-		// model turn at all, so there is no report to route.
-		return CronJob{}, fmt.Errorf("line %d: cron %q sets both tool: and report: — report only applies to an agent: job (a tool job already posts its own result with no agent turn)", d.line, d.name)
+	// Cron runs agent turns only. tool: was a second job kind, removed because
+	// a scheduled shell call has no model in the loop to judge its result —
+	// which is exactly where judgment leaks out of the turn layer. A kit still
+	// carrying the old spelling fails loudly rather than arming nothing.
+	if d.cronTool != "" {
+		return CronJob{}, fmt.Errorf("line %d: cron %q sets tool: — cron jobs run agent turns only; declare an agent that calls the tool, or run the tool from a shell script", d.line, d.name)
+	}
+	if d.cronAgnt == "" {
+		return CronJob{}, fmt.Errorf("line %d: cron %q needs an agent: (cron jobs run agent turns only)", d.line, d.name)
 	}
 	job := CronJob{
-		Name: d.name, Schedule: d.schedule, Agent: d.cronAgnt, Tool: d.cronTool,
+		Name: d.name, Schedule: d.schedule, Agent: d.cronAgnt,
 		WorkDir: d.workdir, Report: d.report, Line: d.line,
-	}
-	if job.Tool != "" {
-		// A tool job has no prompt and binds NO function: the next definition
-		// is somebody else's implementation.
-		return job, nil
 	}
 	f, ok := nextFunc(d.endLine)
 	if !ok {
@@ -411,32 +404,8 @@ func cronFromDecl(d decl, srcLines []string, nextFunc func(int) (fnDef, bool)) (
 // bounds what a MODEL may call.
 func checkCronTargets(k *Kit, known map[string]bool) error {
 	for _, j := range k.Crons {
-		if j.Tool == "" {
-			if !known[j.Agent] {
-				return fmt.Errorf("line %d: cron %q names agent %q, which this kit does not declare", j.Line, j.Name, j.Agent)
-			}
-			continue
-		}
-		matches := k.ToolMatches(j.Tool)
-		switch len(matches) {
-		case 0:
-			return fmt.Errorf("line %d: cron %q names tool %q, which this kit does not declare", j.Line, j.Name, j.Tool)
-		case 1:
-		default:
-			// Two scopes may each legally declare the same tool name (the
-			// duplicate check is per-scope, not kit-wide). A cron tool job
-			// names no agent to disambiguate, so first-match-wins would run
-			// whichever function happened to parse first, silently.
-			scopes := make([]string, len(matches))
-			for i, m := range matches {
-				scopes[i] = m.Scope
-			}
-			return fmt.Errorf("line %d: cron %q names tool %q, which is declared in more than one scope (%s) — rename one so resolution is unambiguous", j.Line, j.Name, j.Tool, strings.Join(scopes, ", "))
-		}
-		for pname, p := range matches[0].Tool.Params {
-			if p.Required {
-				return fmt.Errorf("line %d: cron %q runs tool %q, which requires argument %q — a cron tool job passes no arguments", j.Line, j.Name, j.Tool, pname)
-			}
+		if !known[j.Agent] {
+			return fmt.Errorf("line %d: cron %q names agent %q, which this kit does not declare", j.Line, j.Name, j.Agent)
 		}
 	}
 	return nil

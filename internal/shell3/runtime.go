@@ -123,6 +123,10 @@ type Runtime struct {
 	// fallback, a raw notice to the owning session.
 	completionH CompletionHost
 
+	// cronOutcome is where a finished cron run's real result goes (the
+	// scheduler); nil = nobody is keeping cron history. See CronOutcome.
+	cronOutcome func(CronOutcome)
+
 	// decorate runs for every session this runtime creates, and again for
 	// every live one after a Reload, which rebuilds configs and drops
 	// registered host tools. Front-ends register their tools here rather than

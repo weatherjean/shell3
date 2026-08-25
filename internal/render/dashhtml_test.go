@@ -35,9 +35,9 @@ func TestDashIndexHTMLEscapesJobs(t *testing.T) {
 }
 
 func TestDashIndexHTMLCron(t *testing.T) {
-	st := []cron.JobStatus{{Name: "sync", Schedule: "*/30 * * * *", Tool: "pull"}}
+	st := []cron.JobStatus{{Name: "sync", Schedule: "*/30 * * * *", Agent: "puller"}}
 	out := render.DashIndexHTML(nil, nil, "", nil, st, nil, "")
-	for _, want := range []string{"sync", "*/30 * * * *", "tool:pull", "never run", "0 tok/7d run"} {
+	for _, want := range []string{"sync", "*/30 * * * *", "puller", "never run"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("cron section missing %q", want)
 		}

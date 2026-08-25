@@ -3,9 +3,7 @@
 package main
 
 import (
-	"context"
 	"errors"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -53,12 +51,6 @@ func (b *fakeBot) PostCompletion(p shell3.CompletionPost) error {
 	return nil
 }
 
-func (b *fakeBot) postSnapshot() []shell3.CompletionPost {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return append([]shell3.CompletionPost(nil), b.posts...)
-}
-
 // fakeDispatcher satisfies cron.Dispatcher so cron.New can build a real
 // scheduler without a live session.
 type fakeDispatcher struct{}
@@ -74,7 +66,7 @@ func TestReloadAndRearm_ArmsNewScheduler(t *testing.T) {
 	r := &fakeReloader{jobs: []shell3.CronJob{{Name: "j", Schedule: "@every 1h", Agent: "explorer", Prompt: "p"}}}
 	b := &fakeBot{}
 
-	ns, _, err := reloadAndRearm(r, b, fakeDispatcher{}, nil, nil, nil, nil)
+	ns, _, err := reloadAndRearm(r, b, fakeDispatcher{}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("reloadAndRearm: %v", err)
 	}
@@ -91,47 +83,10 @@ func TestReloadAndRearm_ArmsNewScheduler(t *testing.T) {
 	}
 }
 
-// fakeReloadToolRunner is a minimal cron.ToolRunner for the reload-ordering
-// test below.
-type fakeReloadToolRunner struct{ result string }
-
-func (f fakeReloadToolRunner) RunTool(_ context.Context, name, workDir string, args map[string]any) (string, error) {
-	return f.result, nil
-}
-
-// TestReloadAndRearm_WiresPostBeforeStarting is the regression test for the
-// reviewed defect: the old code called ns.Start() (inside reloadAndRearm)
-// and wired post only afterwards (in the caller, hostwiring.go). A fire
-// landing in that gap found post nil and silently dropped its result —
-// AGENTS.md promises a completion is never lost. reloadAndRearm now wires
-// post itself, before Start(), so nothing external needs to do it — this
-// fires the new scheduler's job immediately on return and expects the post
-// to land with no further wiring from the caller.
-func TestReloadAndRearm_WiresPostBeforeStarting(t *testing.T) {
-	r := &fakeReloader{jobs: []shell3.CronJob{{Name: "sync", Schedule: "@every 1h", Tool: "sync-notion-recent"}}}
-	b := &fakeBot{}
-
-	ns, _, err := reloadAndRearm(r, b, fakeDispatcher{}, fakeReloadToolRunner{result: "3 rows updated"}, nil, nil, nil)
-	if err != nil {
-		t.Fatalf("reloadAndRearm: %v", err)
-	}
-	t.Cleanup(ns.Stop)
-
-	// No call to wireCronPost here — reloadAndRearm must have already done it.
-	if err := ns.Run("sync"); err != nil {
-		t.Fatal(err)
-	}
-	waitForCondition(t, func() bool { return len(b.postSnapshot()) == 1 })
-	posts := b.postSnapshot()
-	if !strings.Contains(posts[0].Text, "3 rows updated") {
-		t.Fatalf("posts = %+v, want the tool result — post must not be nil this early", posts)
-	}
-}
-
 // TestReloadAndRearm_NoJobsClearsSchedule pins that reloading into a jobless
 // config stops the prior scheduler, returns nil, and clears the /run handler.
 func TestReloadAndRearm_NoJobsClearsSchedule(t *testing.T) {
-	old, err := cron.New(fakeDispatcher{}, nil, []shell3.CronJob{{Name: "j", Schedule: "@every 1h", Agent: "explorer", Prompt: "p"}})
+	old, err := cron.New(fakeDispatcher{}, []shell3.CronJob{{Name: "j", Schedule: "@every 1h", Agent: "explorer", Prompt: "p"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +95,7 @@ func TestReloadAndRearm_NoJobsClearsSchedule(t *testing.T) {
 	r := &fakeReloader{} // no jobs after reload
 	b := &fakeBot{}
 
-	ns, _, err := reloadAndRearm(r, b, fakeDispatcher{}, nil, nil, nil, old)
+	ns, _, err := reloadAndRearm(r, b, fakeDispatcher{}, nil, nil, old)
 	if err != nil {
 		t.Fatalf("reloadAndRearm: %v", err)
 	}
@@ -156,7 +111,7 @@ func TestReloadAndRearm_NoJobsClearsSchedule(t *testing.T) {
 // TestReloadAndRearm_ReloadErrorKeepsOldSchedule pins the fail-safe: a reload
 // error leaves the running scheduler untouched (returned unchanged).
 func TestReloadAndRearm_ReloadErrorKeepsOldSchedule(t *testing.T) {
-	old, err := cron.New(fakeDispatcher{}, nil, []shell3.CronJob{{Name: "j", Schedule: "@every 1h", Agent: "explorer", Prompt: "p"}})
+	old, err := cron.New(fakeDispatcher{}, []shell3.CronJob{{Name: "j", Schedule: "@every 1h", Agent: "explorer", Prompt: "p"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +121,7 @@ func TestReloadAndRearm_ReloadErrorKeepsOldSchedule(t *testing.T) {
 	r := &fakeReloader{err: errors.New("bad config")}
 	b := &fakeBot{}
 
-	ns, _, err := reloadAndRearm(r, b, fakeDispatcher{}, nil, nil, nil, old)
+	ns, _, err := reloadAndRearm(r, b, fakeDispatcher{}, nil, nil, old)
 	if err == nil {
 		t.Fatal("expected reload error")
 	}
@@ -182,7 +137,7 @@ func TestReloadAndRearm_ReloadErrorKeepsOldSchedule(t *testing.T) {
 // doesn't parse expressions) and fails only at cron.New. The old scheduler
 // must survive that failure — build-new-before-stop-old.
 func TestReloadAndRearm_BadScheduleKeepsOldSchedule(t *testing.T) {
-	old, err := cron.New(fakeDispatcher{}, nil, []shell3.CronJob{{Name: "j", Schedule: "@every 1h", Agent: "explorer", Prompt: "p"}})
+	old, err := cron.New(fakeDispatcher{}, []shell3.CronJob{{Name: "j", Schedule: "@every 1h", Agent: "explorer", Prompt: "p"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +147,7 @@ func TestReloadAndRearm_BadScheduleKeepsOldSchedule(t *testing.T) {
 	r := &fakeReloader{jobs: []shell3.CronJob{{Name: "bad", Schedule: "not a schedule", Agent: "explorer", Prompt: "p"}}}
 	b := &fakeBot{}
 
-	ns, _, err := reloadAndRearm(r, b, fakeDispatcher{}, nil, nil, nil, old)
+	ns, _, err := reloadAndRearm(r, b, fakeDispatcher{}, nil, nil, old)
 	if err == nil {
 		t.Fatal("expected cron.New parse error")
 	}
@@ -211,7 +166,7 @@ func TestReloadAndRearm_BadScheduleKeepsOldSchedule(t *testing.T) {
 // effect lands asynchronously — a caller reading Jobs() right after Run must
 // not assume it's already reflected.
 func TestSchedulerJobsReflectsRunAsync(t *testing.T) {
-	sched, err := cron.New(fakeDispatcher{}, nil, []shell3.CronJob{
+	sched, err := cron.New(fakeDispatcher{}, []shell3.CronJob{
 		{Name: "fired", Schedule: "@every 1h", Agent: "explorer", Prompt: "p"},
 		{Name: "never", Schedule: "@every 1h", Agent: "explorer", Prompt: "p"},
 	})

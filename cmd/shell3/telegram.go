@@ -235,7 +235,7 @@ type rearmBot interface {
 // The host tools need no re-registration: they install through the session
 // decorator, which Runtime.Reload re-applies to every live
 // session.
-func reloadAndRearm(r configReloader, b rearmBot, disp cron.Dispatcher, tools cron.ToolRunner, store cron.RunStore, log applog.Logger, old *cron.Scheduler) (*cron.Scheduler, shell3.ReloadResult, error) {
+func reloadAndRearm(r configReloader, b rearmBot, disp cron.Dispatcher, store cron.RunStore, log applog.Logger, old *cron.Scheduler) (*cron.Scheduler, shell3.ReloadResult, error) {
 	res, err := r.Reload()
 	if err != nil {
 		return old, res, err
@@ -251,16 +251,11 @@ func reloadAndRearm(r configReloader, b rearmBot, disp cron.Dispatcher, tools cr
 	// Build (and thereby parse) the new scheduler BEFORE stopping the old one:
 	// a malformed schedule surfaces only here, and must not tear down a working
 	// schedule.
-	ns, err := cron.NewWithStore(disp, tools, store, jobs)
+	ns, err := cron.NewWithStore(disp, store, jobs)
 	if err != nil {
 		return old, res, err
 	}
 	ns.SetLogger(log)
-	// Wire post BEFORE Start(): a scheduled tick or /run landing in the gap
-	// between Start() and a later SetPost would find post nil and drop its
-	// tool job's result silently — AGENTS.md promises a completion is never
-	// lost.
-	wireCronPost(ns, b)
 	if old != nil {
 		old.Stop()
 	}

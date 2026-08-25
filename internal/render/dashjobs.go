@@ -85,9 +85,6 @@ func CronDetailHTML(statuses []cron.JobStatus, costs map[string]runs.JobCost, na
 		return "", false
 	}
 	target := st.Agent
-	if st.Tool != "" {
-		target = "tool:" + st.Tool
-	}
 	var b strings.Builder
 	b.WriteString("<section>\n")
 	fmt.Fprintf(&b, "<p class=\"meta\"><a href=\"/?t=%s\">← dashboard</a></p>\n", esc(tok))

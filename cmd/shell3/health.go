@@ -221,15 +221,11 @@ func checkKit(ctx context.Context, out io.Writer, path string, lc *config.Loaded
 		}
 	}
 	// Cron jobs are `cron:` blocks in the kit, so every check health used
-	// to run here — unknown agent, unknown tool, ambiguous tool scope, a
-	// tool needing an argument no job can pass — is a kit.Parse load error,
-	// which the Parse above already returned. All that is left is reporting.
+	// to run here — an unknown agent, a job naming the removed tool: kind —
+	// is a kit.Parse load error, which the Parse above already returned. All
+	// that is left is reporting.
 	for _, j := range k.Crons {
-		target := "agent " + j.Agent
-		if j.Tool != "" {
-			target = "tool " + j.Tool
-		}
-		fmt.Fprintf(out, "cron: %s (%s, %s)\n", j.Name, j.Schedule, target)
+		fmt.Fprintf(out, "cron: %s (%s, agent %s)\n", j.Name, j.Schedule, j.Agent)
 	}
 	if badSkills > 0 {
 		return nil, fmt.Errorf("health: %d unusable skill file(s) — they are silently absent from the prompt", badSkills)

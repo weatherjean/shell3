@@ -49,7 +49,7 @@ func TestScheduler_RestoresStatusOnStart(t *testing.T) {
 		"bookmarks-tick": {Name: "bookmarks-tick", Runs: 12, Failures: 2, LastRun: "2026-08-16T21:29:55Z"},
 	}}
 	jobs := []shell3.CronJob{{Name: "bookmarks-tick", Schedule: "@every 3h", Agent: "bookmarks", Prompt: "go"}}
-	s, err := NewWithStore(&fakeDispatcher{}, &fakeToolRunner{}, rs, jobs)
+	s, err := NewWithStore(&fakeDispatcher{}, rs, jobs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,8 +67,8 @@ func TestScheduler_RestoresStatusOnStart(t *testing.T) {
 
 func TestScheduler_PersistsEveryRun(t *testing.T) {
 	rs := &fakeRunStore{status: map[string]JobStatus{}}
-	jobs := []shell3.CronJob{{Name: "sync", Schedule: "@every 1s", Tool: "t"}}
-	s, err := NewWithStore(&fakeDispatcher{}, &fakeToolRunner{}, rs, jobs)
+	jobs := []shell3.CronJob{{Name: "sync", Schedule: "@every 1s", Agent: "worker"}}
+	s, err := NewWithStore(&fakeDispatcher{}, rs, jobs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,8 +83,8 @@ func TestScheduler_PersistsEveryRun(t *testing.T) {
 // panic.
 func TestScheduler_NewJobNoRestoredHistory(t *testing.T) {
 	rs := &fakeRunStore{status: map[string]JobStatus{}}
-	jobs := []shell3.CronJob{{Name: "brand-new", Schedule: "@every 1h", Tool: "t"}}
-	s, err := NewWithStore(&fakeDispatcher{}, &fakeToolRunner{}, rs, jobs)
+	jobs := []shell3.CronJob{{Name: "brand-new", Schedule: "@every 1h", Agent: "worker"}}
+	s, err := NewWithStore(&fakeDispatcher{}, rs, jobs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,8 +97,8 @@ func TestScheduler_NewJobNoRestoredHistory(t *testing.T) {
 // New (the Task-3 signature) must still work with no store at all — the
 // nil-store path callers other than the host use (tests, library use).
 func TestNew_NilStoreNoPanic(t *testing.T) {
-	jobs := []shell3.CronJob{{Name: "j", Schedule: "@every 1h", Tool: "t"}}
-	s, err := New(&fakeDispatcher{}, &fakeToolRunner{}, jobs)
+	jobs := []shell3.CronJob{{Name: "j", Schedule: "@every 1h", Agent: "worker"}}
+	s, err := New(&fakeDispatcher{}, jobs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,8 +112,8 @@ func TestNew_NilStoreNoPanic(t *testing.T) {
 // bookkeeping fault must never look like a job fault.
 func TestScheduler_SaveFailureIsNotFatal(t *testing.T) {
 	rs := &fakeRunStore{status: map[string]JobStatus{}, saveErr: errPersist}
-	jobs := []shell3.CronJob{{Name: "sync", Schedule: "@every 1s", Tool: "t"}}
-	s, err := NewWithStore(&fakeDispatcher{}, &fakeToolRunner{}, rs, jobs)
+	jobs := []shell3.CronJob{{Name: "sync", Schedule: "@every 1s", Agent: "worker"}}
+	s, err := NewWithStore(&fakeDispatcher{}, rs, jobs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestCronStatus_SurvivesStartupJanitor(t *testing.T) {
 	}
 	defer st2.Close()
 	jobs := []shell3.CronJob{{Name: "bookmarks-tick", Schedule: "@every 3h", Agent: "bookmarks", Prompt: "go"}}
-	s, err := NewWithStore(&fakeDispatcher{}, &fakeToolRunner{}, StoreRunStore{Store: st2}, jobs)
+	s, err := NewWithStore(&fakeDispatcher{}, StoreRunStore{Store: st2}, jobs)
 	if err != nil {
 		t.Fatal(err)
 	}

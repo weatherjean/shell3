@@ -67,31 +67,17 @@ EOF
 	}
 }
 
-// A tool job binds NO function: it has no prompt, so the next function in the
-// file is somebody else's implementation and must not be swallowed.
-func TestParseCron_ToolJobBindsNoFunction(t *testing.T) {
-	k, err := Parse(cronKit(`#---
-# cron: sync-notion
-# schedule: "@every 30m"
-# tool: sync
-#---
-`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	j := k.Crons[0]
-	if j.Tool != "sync" || j.Agent != "" || j.Func != "" || j.Prompt != "" {
-		t.Fatalf("job = %+v", j)
-	}
-}
-
 func TestParseCron_WorkdirAndSchedule(t *testing.T) {
 	k, err := Parse(cronKit(`#---
 # cron: tick
 # schedule: "*/5 * * * *"
-# tool: sync
+# agent: main
 # workdir: ~/work
 #---
+p() { cat <<'EOF'
+tick
+EOF
+}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -122,12 +108,12 @@ body
 EOF
 }
 `, "invalid schedule"},
-		"neither agent nor tool": {`#---
+		"no agent": {`#---
 # cron: x
 # schedule: "@daily"
 #---
-`, "exactly one of agent: or tool:"},
-		"both agent and tool": {`#---
+`, "needs an agent:"},
+		"agent and tool together": {`#---
 # cron: x
 # schedule: "@daily"
 # agent: main
@@ -137,14 +123,7 @@ p() { cat <<'EOF'
 body
 EOF
 }
-`, "exactly one of agent: or tool:"},
-		"tool and report": {`#---
-# cron: x
-# schedule: "@daily"
-# tool: sync
-# report: raw
-#---
-`, "report only applies to an agent: job"},
+`, "cron jobs run agent turns only"},
 		// direct: was the pre-report spelling. It must fail with a message
 		// naming the replacement, not with yaml's "field not found".
 		"the removed direct: key": {`#---
@@ -192,28 +171,24 @@ body
 EOF
 }
 `, "does not declare"},
-		"unknown tool": {`#---
-# cron: x
-# schedule: "@daily"
-# tool: ghost
-#---
-`, "does not declare"},
-		"tool needs an argument": {`#---
-# cron: x
-# schedule: "@daily"
-# tool: needs_arg
-#---
-`, "passes no arguments"},
 		"duplicate name": {`#---
 # cron: x
 # schedule: "@daily"
-# tool: sync
+# agent: main
 #---
+a() { cat <<'EOF'
+body
+EOF
+}
 #---
 # cron: x
 # schedule: "@hourly"
-# tool: sync
+# agent: main
 #---
+b() { cat <<'EOF'
+body
+EOF
+}
 `, "already declared"},
 	} {
 		_, err := Parse(cronKit(tc.src))
@@ -234,8 +209,12 @@ func TestParseCron_DoesNotDisturbScope(t *testing.T) {
 	k, err := Parse(cronKit(`#---
 # cron: mid
 # schedule: "@daily"
-# tool: sync
+# agent: main
 #---
+mid_cron() { cat <<'EOF'
+mid
+EOF
+}
 
 #---
 # tool: after
@@ -263,7 +242,7 @@ func TestParseCron_SecondKindIsAnError(t *testing.T) {
 	_, err := Parse(cronKit(`#---
 # cron: x
 # schedule: "@daily"
-# tool: sync
+# agent: main
 # command: greet
 # description: hi
 #---
@@ -274,48 +253,22 @@ greet_impl() { echo hi; }
 	}
 }
 
-// A cron tool job resolves against the WHOLE kit, so a name two scopes each
-// declare is ambiguous and must fail at load rather than run whichever
-// function happened to parse first.
-func TestParseCron_AmbiguousToolScope(t *testing.T) {
-	src := []byte(`#---
-# agent: main
-# description: main
+// Cron runs agent turns only. A cron: block naming a tool: is refused at load
+// with a message naming the replacement — the same shape as the direct:
+// removal, and for the same reason: json/yaml silently drops what it cannot
+// place, so a kit still carrying the old spelling must fail loudly rather than
+// arm a job that never runs.
+func TestParseCron_ToolJobIsRefused(t *testing.T) {
+	_, err := Parse(cronKit(`#---
+# cron: sync-job
+# schedule: "@every 30m"
+# tool: sync
 #---
-main_prompt() { cat <<'EOF'
-main
-EOF
-}
-
-#---
-# tool: dup
-# description: one
-#---
-dup_a() { echo a; }
-
-#---
-# agent: other
-# description: other
-#---
-other_prompt() { cat <<'EOF'
-other
-EOF
-}
-
-#---
-# tool: dup
-# description: two
-#---
-dup_b() { echo b; }
-
-#---
-# cron: x
-# schedule: "@daily"
-# tool: dup
-#---
-`)
-	_, err := Parse(src)
-	if err == nil || !strings.Contains(err.Error(), "more than one scope") {
-		t.Fatalf("want the ambiguous-scope error, got %v", err)
+`))
+	if err == nil {
+		t.Fatal("Parse accepted a cron tool: job; want a load error")
+	}
+	if !strings.Contains(err.Error(), "cron jobs run agent turns only") {
+		t.Fatalf("Parse error = %v; want it to name the replacement", err)
 	}
 }

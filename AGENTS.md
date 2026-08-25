@@ -747,27 +747,41 @@ prompt as context (`DispatchOpts.Note` — the agent knows what the job is FOR):
 by default a fresh main-agent turn whose reply posts as an ✉️ update only
 when warranted (NO_REPLY posts nothing), with `report: raw` a raw ⏰ post
 costing no agent turn and `report: always` a turn bound to answer; a failed
-run always surfaces as `⚠️ <job> failed: <error>` and spends no turn). A job
-can instead name `tool: <name>` — a kit tool, run directly with NO model turn
-at all: no dispatch, no subagent, just the tool's shell function. Frontmatter
-takes exactly one of `agent:` or `tool:` (a job is either a prompt or a tool
-call), enforced at load (`kit.cronFromDecl`) so a config that loads is a
-config that arms. Resolution is whole-kit (`kit.Kit.ToolMatches`, via
-`kit.checkCronTargets`), not per-agent — a
-tool job names no agent, so there is no `Resolved` capability set to search;
-the operator scheduling a tool they declared themselves is the trust
-boundary, not positional `use:` scoping (that still bounds what a MODEL may
-call). A tool job honours `workdir:` like a prompt job, and — since no model
-turn is around to judge or relay its result — posts its own outcome: silent
-on a NO_REPLY/empty result (the point of scheduling an idempotent sync every
-30 minutes), `⏰ <job>: <result>` otherwise, `⚠️ <job> failed: <error>` on
-error, capped at the foreground bash timeout (120s). Every target resolves in
-`kit.Parse` alongside the `gate:` unknown-agent check — an undeclared tool, a
-tool requiring a param (a tool job passes none), a tool name declared in two
-scopes, an undeclared agent, a duplicate job name (`cron_status` keys on the
-name) — so all of them are
+run always surfaces as `⚠️ <job> failed: <error>` and spends no turn). Cron
+runs AGENT TURNS ONLY: `agent:` is mandatory and a block naming the removed
+`tool:` kind is a LOAD ERROR whose text names the replacement, the same shape
+as the `direct:` removal and for the same reason — a stale kit must fail
+loudly rather than arm nothing. The kind was deleted because a scheduled
+shell call has no model in the loop to judge its result, which is exactly
+where judgment leaks out of the turn layer and into a script nobody reviews;
+it also bypassed `jobManager` entirely, so tool jobs were the one scheduled
+work with NO concurrency cap. A job that mostly runs a tool still declares an
+agent, and the agent calls the tool and decides what its result means. With
+the kind gone the scheduler needs no `ToolRunner` and no post callback of its
+own (`SetPost`/`wireCronPost` went with it — every completion now routes
+through the job runtime), and `report:` is universally valid on a `cron:`
+block. Targets resolve in `kit.Parse` alongside the `gate:` unknown-agent
+check — an undeclared agent, a duplicate job name (`cron_status` keys on the
+name), a malformed schedule — so all of them are
 LOAD errors rather than a failed dispatch on the first tick. `shell3 health`
 inherits every one of them by parsing the kit.
+
+The scaffold ships ONE armed cron job, `harness-audit` (daily, `internal/
+scaffold/defaults/base/shell3.sh.tmpl`), dispatching an `auditor` employee
+whose whole job is finding work that escaped the turn layer: a model endpoint
+hand-rolled into a script, a secret read outside `.env`, a `tool:` whose
+description promises a verdict, a script over 200 lines under a tool. Its four
+checks live in the CRON HEREDOC rather than in the agent prompt or a skill —
+an agent cron job must bind a prompt function anyway, and that heredoc is
+literally the text the turn receives. The auditor is an agent with
+`use: [bash]` and NOT a `tool:` that greps and returns a verdict, which would
+be the exact inversion it exists to catch; it reports and fixes nothing. A
+clean run replies `NO_REPLY`, which the completion router drops before the
+owner branch, so an ownerless daily audit starts no fresh main-agent turn and
+costs one employee turn a day. It ships armed because the failure it catches
+(a `urllib` client drafting prose inside a tool, 2026-08-20) was found by a
+human reading a transcript four days after the skill warning against it had
+already shipped — advice that is not checked is advice that does not hold.
 
 Every session records `sessions.agent` (the agent that ran it) and
 `sessions.cron_job` (the cron job that started it, `''` for a front-end or
@@ -785,6 +799,40 @@ because `runs.Sweep` prunes any `threads` row whose `session_id` doesn't
 name an existing session (live or ended), and a job name or JSON blob in
 that column would be
 deleted by the very next startup's janitor pass before cron read it back.
+A job's row describes the RUN, not its dispatch. `Dispatch` returns as soon
+as the subagent is ACCEPTED, so the fire path writes only `LastRun`,
+`Runs++` and `LastSubID` (persisted immediately — a late outcome matches on
+that id across a restart), and counts a failure only for a dispatch
+REJECTION, the one failure no completion will ever arrive for. The real
+outcome comes back from the completion router: `Runtime.SetCronOutcomeHook`
+(wired by `wireHost` through the same `currentSched()` closure a reload
+swaps) delivers a `shell3.CronOutcome` to `Scheduler.RecordOutcome`, which
+writes `LastOK`/`LastErr`/`LastMillis` and `Failures++`. Without it a job
+that dispatched cleanly every night and failed its work every night read as
+`runs=22 fail=0` with an 8 ms "ok" fronting a 7-minute run, and the honest
+count existed only inside the report traces. `reportCronOutcome` runs FIRST
+in `dispatchCompletion`, before the suppressed and closing returns, because
+bookkeeping is not a chat post: `/superstop` collapsing N floor posts into
+one summary, and the NO_REPLY drop that saves an idempotent tick a main-agent
+turn, are both decisions about DELIVERY, and neither is a reason for the run
+to vanish from its history. Three things it does NOT count: a follow-up turn
+of a lingering cron subagent (the same run continuing — the outcome is its
+main turn's), a `shutdownCancel`led job (its "context canceled" is
+manufactured by the restart, which is also why its outbox row is dropped —
+the kept running marker is the honest boot-time report), and a redelivery.
+That last one is why `JobStatus.OutcomeRecorded` exists: delivery is
+at-least-once, so an outage re-dispatches the same event every
+`redeliverEvery` until the post lands and a leftover row replays at the next
+boot — counting each pass would inflate exactly the number this exists to
+make honest. `RecordOutcome` drops anything already recorded, anything whose
+sub id is not the current run's (a straggler a later fire superseded; the
+table keeps the latest run only), and any job name the kit no longer
+declares. Between a fire and its outcome the verdict fields still hold the
+PREVIOUS run's, deliberately: inventing one for work still in flight is the
+defect, not the fix. In `wireHost` the hook is installed BEFORE
+`RecoverCompletions` — a dead-PID marker recovered at boot is a cron run lost
+mid-flight, an outcome its history must count, and an unwired hook drops it
+silently.
 `sessions.total_prompt_tokens`/`total_completion_tokens` is a cumulative
 ledger distinct from `last_prompt_tokens` (a point-in-time context-fullness
 gauge, overwritten each turn): it only grows, via `Store.AddUsage` after
@@ -796,10 +844,8 @@ main-agent session that later reads the task report and answers it (a wake
 turn can drain reports from several jobs plus user backlog at once, so
 there is no honest per-job split of that turn's cost), and that report turn
 is commonly the majority of a job's real cost — `render.cronCostSuffix`
-labels the number "run" for this reason, not "total". A `tool:` job never
-dispatches a session at all, so it can never have a `CronRollup` row; that
-absence is a KNOWN zero, not missing data, and renders as `0 tok/Nd run`
-rather than vanishing like a genuinely unknown agent-job figure would.
+labels the number "run" for this reason, not "total". A job with no rollup row
+renders as NOTHING rather than as a zero — missing must never look like free.
 
 Every turn's SYSTEM PROMPT is recorded too (`internal/runs/prompts.go`,
 schema v10: `prompts(hash, text)` + `turn_prompts(session_id, seq, hash,
