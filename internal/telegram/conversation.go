@@ -206,6 +206,8 @@ func (c *conversation) runUserTurn(ctx, turnCtx context.Context, cancel context.
 func (c *conversation) finishPostedTurn(ctx context.Context, sess *shell3.Session, anchor, reply string, cancel context.CancelFunc) {
 	if strutil.IsNoReply(reply) {
 		reply = ""
+	} else if stripped, had := strutil.StripNoReply(reply); had {
+		reply = strings.TrimSpace(stripped) // sentinel signs off; it never posts
 	}
 	if containsToolMarkup(reply) {
 		reply = malformedReplyNotice
@@ -529,6 +531,15 @@ func (c *conversation) runWakeTurn(ctx, turnCtx context.Context, sess *shell3.Se
 func (c *conversation) postWakeReply(ctx context.Context, sess *shell3.Session, reply, errText string) bool {
 	if strutil.IsNoReply(reply) {
 		return false
+	}
+	// A reply that says its piece AND signs off with the sentinel posts the
+	// piece, never the sentinel: leaving it on put the literal word NO_REPLY
+	// in the user's chat, mid-message, on 2026-08-25.
+	if stripped, had := strutil.StripNoReply(reply); had {
+		if strings.TrimSpace(stripped) == "" {
+			return false
+		}
+		reply = stripped
 	}
 	// Corrupt output never posts: the transcript keeps it for diagnosis.
 	if containsToolMarkup(reply) {

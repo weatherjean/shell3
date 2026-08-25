@@ -363,7 +363,17 @@ unredacted). **The scaffold's gate ships armed** (`internal/scaffold`,
 covered by `internal/scaffold/hooks_test.go`, which sources the shipped kit
 and drives its gate with real payloads): credential paths, system-path
 writes, force-pushes and self-termination are refused, and unread
-remote code and publishing soft-deny to the reviewer; everything else runs. It never asks — shell3 mostly runs unattended,
+remote code and publishing soft-deny to the reviewer; everything else runs.
+The system-path rule judges the WRITE TARGET, per command SEGMENT
+(`os_write`), because a command line is several commands. The previous rule
+ANDed "a write verb appears somewhere" with "an OS path appears somewhere" and
+so refused `mkdir -p ~/w && /usr/bin/python3 -m venv ~/w/v` for MODIFYING
+/usr/bin when it only RUNS it — and counted a bare `>` as a write, making
+`2>&1` enough to condemn any command that named a system path. That cost two
+whole task attempts on 2026-08-25, each ending in a refusal that also says "do
+not work around this", so the agent correctly stopped. Quotes are stripped
+before matching: `rm -rf '/usr/bin'` and `> "/etc/hosts"` were both ALLOWED
+before, one quote from a bypass. It never asks — shell3 mostly runs unattended,
 where an ask parks the turn until it times out and denies anyway — and every
 refusal instructs the model not to work around it but to raise it with the
 operator (an employee's refusal tells it to stop and hand up to the main

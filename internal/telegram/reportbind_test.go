@@ -128,3 +128,28 @@ func TestUserTurn_NoReplyFlushesTheBind(t *testing.T) {
 		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "camoufox import OK")
 	})
 }
+
+// A reply that says its piece and then signs off with the sentinel posts the
+// piece and NOT the sentinel. Observed live 2026-08-25: the literal word
+// NO_REPLY was delivered to the user as part of an ✉️ update, because the
+// whole-reply match let anything with content through untouched.
+func TestWakeTurn_TrailingSentinelIsStrippedNotPosted(t *testing.T) {
+	fc := newFakeClient()
+	rt, _ := newFakeRuntime(t, "Background dry-run dispatched. Will land next turn.\n\nNO_REPLY")
+	b := newBot(t, fc, rt)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go b.consumeWakes(ctx)
+
+	m := requiredMail("TASK REPORT — sub4 (clean)")
+	m.Required, m.Fallback, m.Post = false, "", shell3.CompletionPost{}
+	b.StartFreshTurn(m)
+
+	waitFor(t, func() bool {
+		return strings.Contains(strings.Join(fc.sentTexts(), "\n"), "Background dry-run dispatched")
+	})
+	if got := strings.Join(fc.sentTexts(), "\n"); strings.Contains(got, "NO_REPLY") {
+		t.Fatalf("the sentinel reached the chat: %q", got)
+	}
+}

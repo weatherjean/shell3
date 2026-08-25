@@ -255,9 +255,44 @@ main_gate() {
   # Does this command WRITE? The rules below that care about a location care
   # about writing to it, never about reading it. Reading anything is fine,
   # including these rules.
-  writes() {
-    printf '%s\n' "$1" | grep -Eq \
-      '(^|[|;&[:space:]])(rm|mv|cp|tee|chmod|chown|truncate|ln|install|dd|mkdir|touch)[[:space:]]|>|sed[[:space:]]+-i|perl[[:space:]]+-i|awk[[:space:]]+-i[[:space:]]+inplace'
+  # os_write reports whether the command WRITES to a system path. It judges
+  # per command segment, because a command line is several commands: the old
+  # rule ANDed "a write verb appears somewhere" with "an OS path appears
+  # somewhere" and refused `mkdir -p ~/w && /usr/bin/python3 -m venv ~/w/v`
+  # for MODIFYING /usr/bin when it only RUNS it. A bare ">" counted as a
+  # write too, so adding `2>&1` to any command mentioning a system path was
+  # enough to have it refused. Both cost real work on 2026-08-25.
+  #
+  # A segment is a write to a system path when EITHER a redirect targets one,
+  # OR the segment's own command is a write verb and a system path appears in
+  # it. Running a system binary is not writing to it.
+  os_write() {
+    # Leading boundary keeps ~/Library (caches, logs) out of /Library.
+    local osp='(/etc|/boot|/bin|/sbin|/usr/bin|/usr/sbin|/usr/lib|/System|/Library|/var/db)(/|[[:space:]]|$)'
+    # "=" so `dd of=/etc/x` is a write target like any other.
+    local osre="(^|[|;&[:space:]>=])$osp"
+    # 2>&1 is not a redirect to a file: the target must start a path.
+    local redir=">>?[[:space:]]*($osp|(~|\$HOME)/Library/Launch(Agents|Daemons))"
+    local la='(~|\$HOME)/Library/Launch(Agents|Daemons)'
+    local verb='^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*(sudo[[:space:]]+)?(rm|mv|cp|tee|chmod|chown|truncate|ln|install|dd|mkdir|touch)([[:space:]]|$)'
+    local inplace='^[[:space:]]*(sed[[:space:]]+-i|perl[[:space:]]+-i|awk[[:space:]]+-i[[:space:]]+inplace)'
+    local seg
+    while IFS= read -r seg; do
+      [ -n "$seg" ] || continue
+      # Quotes are stripped before matching: `rm -rf '/usr/bin'` and
+      # `> "/etc/hosts"` are the same writes as the unquoted spellings, and a
+      # boundary class that does not know that is one quote away from being
+      # bypassed. Erring toward MORE matches is the safe direction here.
+      seg=$(printf '%s' "$seg" | tr -d "\"'")
+      printf '%s\n' "$seg" | grep -Eq "$redir" && return 0
+      if printf '%s\n' "$seg" | grep -Eq "$verb" || printf '%s\n' "$seg" | grep -Eq "$inplace"; then
+        printf '%s\n' "$seg" | grep -Eq "$osre" && return 0
+        printf '%s\n' "$seg" | grep -Eq "$la" && return 0
+      fi
+    done <<SEGEOF
+$(printf '%s\n' "$1" | tr ';|&' '\n\n\n')
+SEGEOF
+    return 1
   }
 
   # --- 1. Credentials -------------------------------------------------------
@@ -321,15 +356,13 @@ main_gate() {
       block "fork bomb" ;;
   esac
 
-  # System plumbing, writes only. Reading /etc is ordinary. On macOS the
-  # persistence mechanism is ~/Library/LaunchAgents specifically; the rest of
-  # ~/Library is caches, logs and app support, where clearing a cache is the
-  # most ordinary cleanup there is.
-  if writes "$cmd"; then
-    if printf '%s\n' "$cmd" | grep -Eq '(^|[|;&[:space:]>])(/etc|/boot|/bin|/sbin|/usr/bin|/usr/sbin|/usr/lib|/System|/Library|/var/db)(/|[[:space:]]|$)' ||
-       printf '%s\n' "$cmd" | grep -Eq '(~|\$HOME)/Library/Launch(Agents|Daemons)'; then
-      block "that path is part of the operating system, not the work — the agent does not modify it"
-    fi
+  # System plumbing, writes only. Reading /etc is ordinary, and so is RUNNING
+  # /usr/bin/python3. On macOS the persistence mechanism is
+  # ~/Library/LaunchAgents specifically; the rest of ~/Library is caches, logs
+  # and app support, where clearing a cache is the most ordinary cleanup there
+  # is. See os_write for why this is judged per segment.
+  if os_write "$cmd"; then
+    block "that path is part of the operating system, not the work — the agent does not modify it"
   fi
 
   # --- 4. Stopping shell3, or the machine -----------------------------------

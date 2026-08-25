@@ -132,3 +132,58 @@ func TestReportRawPostsAndDoesNotMail(t *testing.T) {
 		t.Fatalf("report:raw must spend no agent turn: wakes=%v fresh=%v", wakes, fresh)
 	}
 }
+
+// A deliberate task_cancel is not a failure. Before this, cancelling a
+// subagent posted `⚠️ sub2 (…) failed: context canceled` to the user — reading
+// like a breakage — and mailed the agent a FAILED report about work it had
+// itself just called off. Observed live 2026-08-25.
+func TestCancelledJobRoutesNoCompletion(t *testing.T) {
+	rt := newTestRuntime(t, fakeCfg("x"))
+	host := &fakeHost{wakeOK: true}
+	rt.SetCompletionHost(host)
+	parent, err := rt.Session(SessionOpts{})
+	if err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	id, err := rt.jobs.startCommand(parent, "sleep 30", t.TempDir(),
+		[]string{"sleep", "30"}, nil, notify.ReportAuto, "")
+	if err != nil {
+		t.Fatalf("startCommand: %v", err)
+	}
+	// true = the model's own task_cancel, which already read "cancelled task
+	// sub2" as its tool result.
+	if err := rt.jobs.cancel(id, true); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	rt.jobs.wait()
+
+	posts, wakes, fresh := host.snapshot()
+	if len(posts) != 0 || len(wakes) != 0 || len(fresh) != 0 {
+		t.Fatalf("a cancelled job must route nothing: posts=%v wakes=%v fresh=%v", posts, wakes, fresh)
+	}
+}
+
+// Cancelling something ALREADY finished still routes its completion: the work
+// happened, and its result is not the caller's to discard by being late.
+func TestCancelAfterFinishStillRoutes(t *testing.T) {
+	rt := newTestRuntime(t, fakeCfg("x"))
+	host := &fakeHost{wakeOK: true}
+	rt.SetCompletionHost(host)
+	parent, err := rt.Session(SessionOpts{})
+	if err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	id, err := rt.jobs.startCommand(parent, "true", t.TempDir(),
+		[]string{"true"}, nil, notify.ReportRaw, "")
+	if err != nil {
+		t.Fatalf("startCommand: %v", err)
+	}
+	rt.jobs.wait()
+	waitFor(t, "raw post", func() bool { posts, _, _ := host.snapshot(); return len(posts) == 1 })
+	if err := rt.jobs.cancel(id, true); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if posts, _, _ := host.snapshot(); len(posts) != 1 {
+		t.Fatalf("a finished job's result survives a late cancel: posts=%v", posts)
+	}
+}

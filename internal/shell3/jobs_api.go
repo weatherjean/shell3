@@ -83,7 +83,9 @@ func (s *Session) KillJob(id string) error {
 	if rt == nil || rt.jobs == nil {
 		return errors.New("shell3: no job runtime")
 	}
-	return rt.jobs.cancel(id)
+	// Cancelled from outside the conversation, so the completion still
+	// routes: it is how the agent learns the job ended.
+	return rt.jobs.cancel(id, false)
 }
 
 // KilledJob describes one job /superstop killed — enough for the summary the

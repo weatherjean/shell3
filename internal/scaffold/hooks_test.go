@@ -116,6 +116,25 @@ func TestScaffoldedGateAllowsOrdinaryWork(t *testing.T) {
 		"echo x >> ./shell3.sh",
 		"rm -rf ~/.cache/pip",
 		"docker system prune -f",
+
+		// Observed live 2026-08-25: the OS-path rule ANDed "a write verb
+		// appears somewhere" with "an OS path appears somewhere" — two
+		// unrelated halves of one command line. So RUNNING the system
+		// interpreter was refused as MODIFYING it, and the trigger was
+		// whatever else the line happened to contain: `2>&1` counted as a
+		// write, and an earlier `mkdir` in an && chain counted as a write on
+		// the later /usr/bin path. It cost two whole task attempts in a day —
+		// once creating a venv, once verifying a script — each ending in a
+		// refusal that also says "do not work around this", so the agent
+		// correctly stopped.
+		`/usr/bin/python3 -c "import py_compile" 2>&1`,
+		"mkdir -p ~/w/venvs && /usr/bin/python3 -m venv ~/w/venvs/x",
+		"/usr/bin/python3 script.py > /tmp/out.txt",
+		"/bin/ls -la ./work 2>/dev/null",
+		"cat ./notes.md 2>&1 | /usr/bin/grep -c TODO",
+		// A system path MENTIONED is not a system path WRITTEN.
+		`git commit -m "fix /etc handling"`,
+		"rg /etc/hosts ./notes",
 	} {
 		if verdict, reason := runHook(t, dir, "main_gate", "bash", command); verdict != "allow" {
 			t.Errorf("%q = %s (%s), want allow", command, verdict, reason)
@@ -127,10 +146,25 @@ func TestScaffoldedGateBlocksTheDangerousCases(t *testing.T) {
 	dir := scaffoldForHooks(t)
 
 	cases := map[string]string{
-		"cat ~/.ssh/id_rsa":            "credentials",
-		"cat ./.env":                   "the secrets file",
-		"rm -rf /":                     "the whole filesystem",
-		"echo x > /etc/hosts":          "system paths",
+		"cat ~/.ssh/id_rsa":   "credentials",
+		"cat ./.env":          "the secrets file",
+		"rm -rf /":            "the whole filesystem",
+		"echo x > /etc/hosts": "system paths",
+		// The narrowing above must not cost the rule its teeth: an OS path in
+		// a genuine WRITE position is still refused, whether that position is
+		// a redirect target or a write verb's argument.
+		"rm -rf /usr/bin":                      "deleting a system path",
+		"cp ./evil /System/Library/thing":      "writing into /System",
+		"echo boot > /boot/loader.conf":        "writing a system path",
+		"mkdir -p /usr/lib/mine":               "creating under /usr/lib",
+		"touch ~/Library/LaunchAgents/x.plist": "macOS persistence",
+		// Quoting is not a bypass. Both of these were ALLOWED before the
+		// per-segment rewrite, because the boundary class the path had to
+		// follow did not include a quote character.
+		`echo x > "/etc/hosts"`:        "a quoted redirect target",
+		"rm -rf '/usr/bin'":            "a quoted write target",
+		"dd of=/etc/hosts if=/dev/z":   "an = write target",
+		"cd /tmp && rm -rf /usr/bin":   "a write in a later segment",
 		"git push --force origin main": "force push",
 		"pkill -f shell3":              "killing the harness",
 	}

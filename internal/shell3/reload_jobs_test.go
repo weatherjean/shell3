@@ -77,7 +77,7 @@ func TestReloadProceedsWhileJobRunning(t *testing.T) {
 	}
 
 	// End the job; its completion notice must still wake the parent.
-	if err := rt.jobs.cancel(id); err != nil {
+	if err := rt.jobs.cancel(id, false); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 	waitForWake(t, rt, parent)
@@ -110,7 +110,7 @@ func TestOldPartsCloseAfterDrain(t *testing.T) {
 	}
 
 	// Drain the job; the parked closer must now run.
-	if err := rt.jobs.cancel(id); err != nil {
+	if err := rt.jobs.cancel(id, false); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 	rt.jobs.wait()
@@ -156,7 +156,7 @@ func TestDoubleReloadWhileLingering(t *testing.T) {
 	}
 
 	// Drain the lingering job; both parked generations must close.
-	if err := rt.jobs.cancel(id); err != nil {
+	if err := rt.jobs.cancel(id, false); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 	rt.jobs.wait()

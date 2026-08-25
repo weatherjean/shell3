@@ -58,7 +58,7 @@ func TestJobManagerConcurrencyCap(t *testing.T) {
 		t.Fatal("expected cap error on second start, got nil")
 	}
 	// Don't leak the sleeping job's goroutine past the test.
-	if err := m.cancel(id); err != nil {
+	if err := m.cancel(id, false); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 	m.wg.Wait()
@@ -236,7 +236,7 @@ func TestJobManagerCancelDoneJobIsNoOp(t *testing.T) {
 		t.Fatalf("startCommand: %v", err)
 	}
 	m.wg.Wait() // wait for the job goroutine to finish
-	if err := m.cancel(id); err != nil {
+	if err := m.cancel(id, false); err != nil {
 		t.Fatalf("cancel on done job should return nil, got %v", err)
 	}
 }
@@ -258,7 +258,7 @@ func TestFormatJobList_ShowsRunning(t *testing.T) {
 		t.Fatalf("startCommand: %v", err)
 	}
 	defer func() {
-		_ = m.cancel(id)
+		_ = m.cancel(id, false)
 		m.wg.Wait() // join the job goroutine so it doesn't outlive the test
 	}()
 	got := m.formatJobList()
@@ -290,7 +290,7 @@ func TestFormatJobStatus_RepeatPollsGetToldToStop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("startCommand: %v", err)
 	}
-	defer func() { _ = m.cancel(id) }()
+	defer func() { _ = m.cancel(id, false) }()
 
 	first := m.formatJobStatus(id)
 	if strings.Contains(first, "end your turn") {
@@ -323,7 +323,7 @@ func TestFormatJobStatus_Truncates(t *testing.T) {
 	if !strings.Contains(got, "truncated") {
 		t.Errorf("formatJobStatus %q missing truncation marker", got)
 	}
-	_ = m.cancel(id)
+	_ = m.cancel(id, false)
 }
 
 // TestAppendCappedTail_NearCapNoPanic is a regression test for the tail-budget
@@ -391,7 +391,7 @@ func TestCommandCancelWithLingeringGrandchild(t *testing.T) {
 	for time.Now().Before(deadline) && !strings.Contains(m.output(id), "started") {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if err := m.cancel(id); err != nil {
+	if err := m.cancel(id, false); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 	done := make(chan struct{})

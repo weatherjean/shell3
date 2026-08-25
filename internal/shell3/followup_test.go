@@ -173,7 +173,7 @@ func TestCancelSubagentCascades(t *testing.T) {
 		t.Fatalf("startCommand: %v", err)
 	}
 
-	if err := rt.jobs.cancel(id); err != nil {
+	if err := rt.jobs.cancel(id, false); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 	waitFor(t, "cascaded job finished", func() bool {

@@ -43,7 +43,7 @@ func TestStartSubagent_ConcurrencyCap(t *testing.T) {
 		!strings.Contains(err.Error(), "cap 1 reached") {
 		t.Fatalf("second spawn at cap: want cap error, got %v", err)
 	}
-	_ = rt.jobs.cancel(id)
+	_ = rt.jobs.cancel(id, false)
 }
 
 // TestSubagentCancelMidRun pins that cancelling a running subagent unwinds
@@ -62,7 +62,7 @@ func TestSubagentCancelMidRun(t *testing.T) {
 	}
 	<-block.Started
 
-	if err := rt.jobs.cancel(id); err != nil {
+	if err := rt.jobs.cancel(id, false); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 	// finishSubagent wakes the parent when the job goroutine unwinds.

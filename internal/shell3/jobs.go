@@ -184,8 +184,15 @@ type bgJob struct {
 	// parent existed at start. The completion mail and task_status point here.
 	logPath string
 
-	// suppress marks a job killed by superstop: dispatchCompletion drops its
-	// event, so the one summary is the record rather than N ⚠️ posts.
+	// suppress marks a job whose completion must NOT be routed: killed by
+	// superstop, where the one summary is the record rather than N ⚠️ posts,
+	// or cancelled on purpose through task_cancel / KillJob.
+	//
+	// A deliberate cancel is not a failure. Without this the cancelled job's
+	// manufactured "context canceled" reached the user as
+	// `⚠️ sub2 (…) failed: context canceled` — reading like a breakage —
+	// and reached the agent as a FAILED task report about work it had itself
+	// just called off. Observed live 2026-08-25.
 	suppress bool
 
 	// shutdownCancel marks a job cancelAll killed on teardown: its "context
@@ -527,7 +534,16 @@ func (m *jobManager) output(id string) string {
 	return ""
 }
 
-func (m *jobManager) cancel(id string) error {
+// cancel ends one job. suppressCompletion drops the completion it would
+// otherwise route, and is for a cancel the CALLER already knows about: the
+// model's own task_cancel, which reads "cancelled task sub2" as the tool
+// result and does not also need a FAILED report about work it just called
+// off — nor does the user need the ⚠️ floor post that came with it.
+//
+// A host-initiated KillJob passes false and still routes: there the cancel
+// came from outside the conversation, so the completion is the only way the
+// agent learns the job ended.
+func (m *jobManager) cancel(id string, suppressCompletion bool) error {
 	// Copy under the lock: finishers write j.finished under m.mu.
 	m.mu.Lock()
 	j := m.jobs[id]
@@ -536,6 +552,14 @@ func (m *jobManager) cancel(id string) error {
 	var cascades []context.CancelFunc
 	if j != nil {
 		finished, cancelFn = j.finished, j.cancel
+		// Suppress BEFORE cancelling: the finish site can run the moment the
+		// context is cancelled, and a flag set after that races the very
+		// event it exists to drop. A job that ALREADY finished keeps its
+		// completion — the work happened, and a late cancel does not unmake
+		// its result.
+		if suppressCompletion && !finished {
+			j.suppress = true
+		}
 		// Cancelling a subagent cascades: poison follow-ups and cancel the
 		// bash_bg jobs its child started, so task_cancel tears the whole
 		// delegation down instead of orphaning jobs. The child closes through
@@ -544,6 +568,9 @@ func (m *jobManager) cancel(id string) error {
 			j.noFollowUps = true
 			for _, cj := range m.jobs {
 				if cj.kind == JobCommand && cj.parent == j.child && !cj.finished {
+					// A cascaded kill is part of the same cancel, so it
+					// inherits the caller's answer about reporting it.
+					cj.suppress = cj.suppress || suppressCompletion
 					cascades = append(cascades, cj.cancel)
 				}
 			}
@@ -1235,7 +1262,8 @@ func appendCappedTail(b *strings.Builder, label, body string) {
 
 // formatJobCancel cancels a job and returns a short confirmation or error string.
 func (m *jobManager) formatJobCancel(id string) string {
-	err := m.cancel(id)
+	// The model asked, and reads the confirmation below: no completion.
+	err := m.cancel(id, true)
 	if err != nil {
 		return err.Error()
 	}
