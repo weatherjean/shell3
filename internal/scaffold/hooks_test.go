@@ -353,3 +353,66 @@ func TestScaffoldedGateFailsClosedWithoutJq(t *testing.T) {
 		t.Fatalf("without jq the gate must block and name jq, got: %s", out)
 	}
 }
+
+// A script that speaks to a model API directly is judgment that escaped the
+// turn layer — the failure this whole rule exists for (2026-08-20: a urllib
+// client inside a tool, drafting prose from a stale copy of a skill the
+// calling agent already held; found four days later). That URL is visible
+// exactly once, at the moment the file is written, so the gate judges the
+// BODY BEING WRITTEN rather than the target path.
+//
+// It BLOCKS rather than review()s on purpose: a {review} verdict on a
+// non-bash tool fails closed in the runtime (internal/chat/safety.go), so
+// edit_file could never reach the reviewer.
+func TestScaffoldedGateBlocksModelClientsInScripts(t *testing.T) {
+	dir := scaffoldForHooks(t)
+
+	t.Run("refused", func(t *testing.T) {
+		for what, args := range map[string]string{
+			"a urllib client written into a .py": `{"path":"work/x/scripts/draft.py","new_string":"import urllib.request\nAPI=\"https://api.minimax.io/v1/chat/completions\"\n"}`,
+			"an anthropic client in a .sh":       `{"path":"lib/bin/gen.sh","new_string":"curl https://api.anthropic.com/v1/messages -d @body.json"}`,
+			"an openrouter client in a .js":      `{"path":"work/x/gen.js","new_string":"fetch('https://openrouter.ai/api/v1/chat/completions')"}`,
+		} {
+			verdict, reason := runHookArgs(t, dir, "main_gate", "edit_file", "", args)
+			if verdict != "block" {
+				t.Errorf("%s = %s, want block", what, verdict)
+				continue
+			}
+			if !strings.Contains(strings.ToLower(reason), "do not work around") {
+				t.Errorf("%s refused without the no-workaround instruction: %s", what, reason)
+			}
+		}
+	})
+
+	// Scoped to SCRIPT targets, and to model endpoints only. Prose may name an
+	// endpoint (this kit's own auditor prompt does, as do docs and memory
+	// files), and blocking that would break the self-evolve loop over
+	// shell3.sh for no safety gain.
+	t.Run("allowed", func(t *testing.T) {
+		for what, args := range map[string]string{
+			"the same URL in prose":        `{"path":"work/x/notes.md","new_string":"we used to call https://api.minimax.io/v1/chat/completions here"}`,
+			"editing the kit itself":       `{"path":"shell3.sh","new_string":"rg -l chat/completions work lib"}`,
+			"a script with no model call":  `{"path":"work/x/scripts/sync.py","new_string":"import sqlite3\nprint(1)\n"}`,
+			"a non-model Google API":       `{"path":"work/x/scripts/psi.py","new_string":"u=\"https://www.googleapis.com/pagespeedonline/v5/runPagespeed\"\n"}`,
+			"a script shelling to the CLI": `{"path":"work/x/scripts/batch.py","new_string":"subprocess.run([\"shell3\",\"ask\",\"--agent\",\"w\",\"-p\",p])\n"}`,
+		} {
+			if verdict, reason := runHookArgs(t, dir, "main_gate", "edit_file", "", args); verdict != "allow" {
+				t.Errorf("%s = %s (%s), want allow", what, verdict, reason)
+			}
+		}
+	})
+
+	// A shell command's target is not its text: a heredoc into x.py ends at
+	// the terminator, not at .py. The write has to be found, not assumed —
+	// and a plain grep for the pattern (what the auditor runs) must stay
+	// allowed.
+	t.Run("bash writes", func(t *testing.T) {
+		if v, _ := runHook(t, dir, "main_gate", "bash",
+			"printf '%s' 'u=\"https://api.openai.com/v1/chat/completions\"' > /tmp/c.py"); v != "block" {
+			t.Errorf("a redirect writing a model client into a .py = %s, want block", v)
+		}
+		if v, r := runHook(t, dir, "main_gate", "bash", "rg -l chat/completions work lib"); v != "allow" {
+			t.Errorf("the auditor's own grep = %s (%s), want allow", v, r)
+		}
+	})
+}

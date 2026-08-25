@@ -47,5 +47,7 @@ curl -fsS --max-time 15 \
 
 ## Scripts that need a model call
 
-Do not write an HTTP client against a model API — call `shell3 ask --agent`.
+A `tool:` never calls a model at all — not curl, not `shell3 ask --agent`.
+It takes the result as a param and the agent writes it in its own turn. Only a
+standalone operator script may call `shell3 ask --agent`.
 See the `using-llms` skill for how and why.

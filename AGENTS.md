@@ -393,8 +393,17 @@ closed (output replaced by an error notice, never passed through
 unredacted). **The scaffold's gate ships armed** (`internal/scaffold`,
 covered by `internal/scaffold/hooks_test.go`, which sources the shipped kit
 and drives its gate with real payloads): credential paths, system-path
-writes, force-pushes and self-termination are refused, and unread
+writes, force-pushes, self-termination, and a model API client written into a
+SCRIPT are refused, and unread
 remote code and publishing soft-deny to the reviewer; everything else runs.
+The model-client rule judges the BODY BEING WRITTEN, not the target path,
+because that URL is visible exactly once — at the moment the file is written —
+and it is scoped to script extensions so prose naming an endpoint (the
+auditor's own cron heredoc, docs, memory files) still writes freely. A bash
+write is found by its REDIRECT, since a heredoc into `x.py` ends at the
+terminator rather than at `.py`. It BLOCKS rather than soft-denying because a
+`review` verdict on a non-bash tool fails closed anyway (`gateNonBashTool`),
+so `edit_file` could never reach the reviewer.
 The system-path rule judges the WRITE TARGET, per command SEGMENT
 (`os_write`), because a command line is several commands. The previous rule
 ANDed "a write verb appears somewhere" with "an OS path appears somewhere" and
@@ -418,7 +427,13 @@ warning that `shell3 health` turns into a failure; an absent dir means no
 skills. The agent reads a skill's body with `cat` (skills are indexed by
 absolute path in the prompt under `## Skills` — there is no `skill` tool).
 Custom tools ARE declarable — a `tool:` block plus the function under it (see
-the kit section above). What is NOT a tool is reusable glue with no model-facing
+the kit section above). A tool NEVER calls a model — not `curl`, not `urllib`,
+and not `shell3 ask --agent` either: it takes the result as a PARAMETER and the
+agent writes it in its own turn (the `lead-save`/`draft-save` shape). Swapping a
+hand-rolled client for `shell3 ask --agent` inside a tool stops the key leaking
+and leaves the judgment exactly where it did not belong. Only a standalone
+operator script, wired to no tool, shells out to `shell3 ask --agent`.
+What is NOT a tool is reusable glue with no model-facing
 surface: that stays a wrapper script (canonically `~/.shell3/lib/bin/`) run
 through bash, documented by the
 scaffold's `scripting` skill; a script that needs a secret reads the one key
