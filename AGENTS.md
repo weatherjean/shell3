@@ -475,7 +475,29 @@ legitimate). The transport is an
 interface (`client.go`): `client_botapi.go` wraps go-telegram/bot,
 `client_console.go` drives the same bot loop over stdin/stdout for
 `shell3 telegram --console` (headless event testing, no credentials, no
-network). `pollhealth.go` records getUpdates/send failures into the app log
+network). `shell3 telegram --convo-log` writes the WIRE record — every message in and
+out, JSONL, to `<config>/convo.jsonl` (rotated by `applog.OpenFile`, 2 MB × 3).
+It exists because no other record is complete: the runs store holds what the
+MODEL saw, so a HOST-answered reply (`❌ reload failed: …`, `✅ reloaded`, a
+/dash link) and every ⚠️/⏰/🔔 completion post write no message row and no app
+log line — a failed reload left NO trace on disk, and both of 2026-08-25's were
+found only because the operator quoted them back to the bot. `Bot.SetConvoLog`
+wraps `b.client` in `convoLogClient` (`convolog.go`), which EMBEDS `tgClient`
+rather than listing its methods: a method added later still compiles, silently
+unlogged, instead of breaking the build — accepted deliberately, with every
+current method an explicit override and a test pinning the set. Inbound is
+logged in `Updates`, BELOW both authorization gates, so a message dropped for a
+stranger's sender id or for being unaddressed in a group still appears with the
+sender and chat type that explain the drop — the one failure that otherwise
+leaves no evidence anywhere. Sends log AFTER the call so a rejected post
+carries its `err` and is distinguishable from one the user saw. Attachments are
+described (file/bytes/mime), never embedded; `Typing` is not logged at all
+(no content, fires on a timer); the progress bubble's `EditPlain` IS, and
+dominates by line count on purpose — a bubble left behind after an error has no
+other evidence. Off by default: it records every room the bot can see. The
+startup banner and `SetCommands` go through the concrete API client before the
+Bot exists and are NOT in it.
+`pollhealth.go` records getUpdates/send failures into the app log
 with throttled repeats and a recovery line, so a transport outage is visible
 after the fact. An outage closes on either of two signals, because the
 library only offers one and it is not enough: an inbound UPDATE (`ok`, from

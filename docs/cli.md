@@ -17,6 +17,7 @@ argument.) `shell3 --version` prints the installed build.
 shell3 telegram                    # ~/.shell3
 shell3 telegram -c ~/work-agent
 shell3 telegram --console          # dev transport: the same bot loop over stdin/stdout
+shell3 telegram --convo-log        # also record every message in and out to <config>/convo.jsonl
 ```
 
 Loads the config, connects to the Telegram Bot API, arms cron jobs, and runs
@@ -64,6 +65,32 @@ posts too. Replies to you and ⚠️ failures always ring.
 `--console` swaps the Telegram transport for stdin/stdout and drives the same
 bot loop with no credentials and no network: a plain line is a fresh message,
 `@<id> text` is a reply quoting that message, `/…` is a command, EOF quits.
+
+`--convo-log` records the **wire**: every message received and every message
+sent, as JSONL, to `<config>/convo.jsonl` (rotated at 2 MB, 3 archives kept).
+
+It is not a duplicate of the runs store. That store holds what the *model*
+saw — your text, the agent's replies, tool calls. Commands the bot answers
+itself (`/reload`, `/new`, `/stop`, `/dash`, `/quiet`) run no model turn, so
+their replies are recorded nowhere; nor are the ⚠️/⏰/🔔 completion posts. A
+failed reload therefore leaves no trace on disk at all. The conversation log is
+where those live.
+
+Inbound is recorded *below* the authorization gates, so a message the bot
+deliberately ignored — a stranger's, or one not addressed to it in a group —
+is in the log too, with the sender id and chat type that explain why. That is
+the only record of it.
+
+Off by default: it logs every room the bot can see. Attachments are described
+by name and size, never written into the log. Read it with `jq`:
+
+```bash
+jq -r 'select(.kind!="edit") | "\(.ts) \(.dir) \(.kind) \(.text // .file // "")"' \
+  ~/.shell3/convo.jsonl | tail -40
+```
+
+The `kind!="edit"` filter drops the progress bubble's own updates, which fire
+every 1.5s during a turn and otherwise dominate.
 
 ### Commands
 

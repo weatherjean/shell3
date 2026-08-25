@@ -5,6 +5,7 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"sync"
@@ -131,6 +132,24 @@ func NewBot(client tgClient, rt *shell3.Runtime, homeChat int64, threads *Thread
 
 // SetMaxConcurrentTurns bounds rooms holding a slot; non-positive keeps the
 // default.
+// SetConvoLog records every message in and out to w, as JSONL. Call it before
+// Run: it swaps the transport for a logging wrapper, so anything sent through
+// the client this Bot was built with is covered — host command replies and
+// completion posts included, which is the traffic no other record holds.
+//
+// The startup banner and the "/" command registration are sent through the
+// concrete API client by the caller, before the Bot exists, and so are NOT in
+// the log. They are constant text sent once per boot; the log's own first line
+// records the start instead.
+func (b *Bot) SetConvoLog(w io.Writer) {
+	if w == nil {
+		return
+	}
+	b.mu.Lock()
+	b.client = newConvoLogClient(b.client, w)
+	b.mu.Unlock()
+}
+
 func (b *Bot) SetMaxConcurrentTurns(n int) {
 	if n <= 0 {
 		return

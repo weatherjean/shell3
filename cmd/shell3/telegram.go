@@ -31,6 +31,7 @@ import (
 func newTelegramCommand() *cobra.Command {
 	var configDir string
 	var console bool
+	var convoLog bool
 	cmd := &cobra.Command{
 		Use:   "telegram",
 		Short: "Run the personal Telegram bot front-end",
@@ -89,6 +90,17 @@ func newTelegramCommand() *cobra.Command {
 				return err
 			}
 			b.SetMaxConcurrentTurns(tg.MaxConcurrentTurns)
+			// The wire record, opt-in. Wrap the transport BEFORE Run so the
+			// first update is already covered.
+			if convoLog {
+				f, err := openConvoLog(resolved)
+				if err != nil {
+					return err
+				}
+				defer f.Close()
+				b.SetConvoLog(f)
+				fmt.Printf("conversation log: %s\n", f.Name())
+			}
 			// Transport-independent wiring, shared by both transports. LIFO:
 			// the scheduler-stop cleanup runs before the earlier rt.Close().
 			stopSched, err := wireHost(b, rt, workDir)
@@ -124,7 +136,24 @@ func newTelegramCommand() *cobra.Command {
 	addConfigFlag(cmd, &configDir)
 	cmd.Flags().BoolVar(&console, "console", false,
 		"dev transport: run the bot loop over stdin/stdout instead of Telegram (headless event testing)")
+	cmd.Flags().BoolVar(&convoLog, "convo-log", false,
+		"record every message in and out to <config>/"+convoLogName+" as JSONL (off by default: it logs every room the bot can see)")
 	return cmd
+}
+
+// convoLogName is the wire record's filename inside the config dir.
+const convoLogName = "convo.jsonl"
+
+// openConvoLog opens the conversation log, rotating it the way the app log is
+// rotated — the same two knobs, because a record kept for debugging must not
+// be the thing that fills the disk.
+func openConvoLog(configDir string) (*os.File, error) {
+	f, err := applog.OpenFile(filepath.Join(configDir, convoLogName),
+		applog.DefaultMaxBytes, applog.DefaultMaxArchives)
+	if err != nil {
+		return nil, fmt.Errorf("conversation log: %w", err)
+	}
+	return f, nil
 }
 
 // telegramHomeChat validates the telegram: block and returns the HOME chat,
